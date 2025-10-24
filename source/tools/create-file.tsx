@@ -22,7 +22,7 @@ const handler: ToolHandler = async (args: {
 const CreateFileFormatter = React.memo(({args}: {args: any}) => {
 	const {colors} = React.useContext(ThemeContext)!;
 	const path = args.path || args.file_path || 'unknown';
-	const newContent = args.content || '';
+	const newContent = typeof args.content === 'string' ? args.content : '';
 	const lineCount = newContent.split('\n').length;
 	const charCount = newContent.length;
 
