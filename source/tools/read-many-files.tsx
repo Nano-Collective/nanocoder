@@ -6,6 +6,7 @@ import {Text, Box} from 'ink';
 import type {ToolHandler, ToolDefinition} from '@/types/index';
 import {ThemeContext} from '@/hooks/useTheme';
 import ToolMessage from '@/components/tool-message';
+import {fileReadTracker} from '@/utils/file-read-tracker';
 
 const handler: ToolHandler = async (args: {
 	paths: string[];
@@ -38,6 +39,9 @@ const handler: ToolHandler = async (args: {
 			const estimatedTokens = Math.ceil(fileSize / 4);
 			totalSize += fileSize;
 			totalEstimatedTokens += estimatedTokens;
+
+			// Mark this file as read (track it for edit validation)
+			fileReadTracker.markAsRead(p);
 
 			results.push({
 				path: p,

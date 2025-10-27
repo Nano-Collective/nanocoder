@@ -11,6 +11,7 @@ import InfoMessage from '@/components/info-message';
 import ErrorMessage from '@/components/error-message';
 import ToolMessage from '@/components/tool-message';
 import React from 'react';
+import {fileReadTracker} from '@/utils/file-read-tracker';
 
 interface UseToolHandlerProps {
 	pendingToolCalls: ToolCall[];
@@ -276,6 +277,14 @@ export function useToolHandler({
 
 						// Move to next tool or complete the process
 						if (currentToolIndex + 1 < pendingToolCalls.length) {
+							// Clear the file read tracker if this tool was not a read tool
+							const isReadTool =
+								currentTool.function.name === 'read_file' ||
+								currentTool.function.name === 'read_many_files';
+							if (!isReadTool) {
+								fileReadTracker.clearLastToolCall();
+							}
+
 							setCurrentToolIndex(currentToolIndex + 1);
 							// Return to confirmation mode for next tool
 							setIsToolExecuting(false);
@@ -313,6 +322,14 @@ export function useToolHandler({
 
 					// Move to next tool or complete the process
 					if (currentToolIndex + 1 < pendingToolCalls.length) {
+						// Clear the file read tracker if this tool was not a read tool
+						const isReadTool =
+							currentTool.function.name === 'read_file' ||
+							currentTool.function.name === 'read_many_files';
+						if (!isReadTool) {
+							fileReadTracker.clearLastToolCall();
+						}
+
 						setCurrentToolIndex(currentToolIndex + 1);
 						setIsToolExecuting(false);
 						setIsToolConfirmationMode(true);
@@ -359,14 +376,31 @@ export function useToolHandler({
 			// Display the tool result
 			await displayToolResult(currentTool, result);
 
+			// Clear the file read tracker after ANY tool that is NOT a read tool
+			// This ensures only files read in the immediately previous tool call are tracked
+			const isReadTool =
+				currentTool.function.name === 'read_file' ||
+				currentTool.function.name === 'read_many_files';
+
 			// Move to next tool or complete the process
 			if (currentToolIndex + 1 < pendingToolCalls.length) {
+				// After executing a tool, clear tracker unless it was a read tool
+				// This means: read_file leaves files marked, but any other tool clears them
+				if (!isReadTool) {
+					fileReadTracker.clearLastToolCall();
+				}
+
 				setCurrentToolIndex(currentToolIndex + 1);
 				// Return to confirmation mode for next tool
 				setIsToolExecuting(false);
 				setIsToolConfirmationMode(true);
 			} else {
-				// All tools executed, continue conversation loop with the updated results
+				// All tools in this batch executed
+				// Clear tracker unless the last tool was a read (for next batch)
+				if (!isReadTool) {
+					fileReadTracker.clearLastToolCall();
+				}
+
 				setIsToolExecuting(false);
 				await continueConversationWithToolResults(newResults);
 			}

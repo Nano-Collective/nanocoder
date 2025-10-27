@@ -7,6 +7,7 @@ import ToolMessage from '@/components/tool-message';
 import ErrorMessage from '@/components/error-message';
 import type {MessageSubmissionOptions, Message} from '@/types/index';
 import type {LLMClient} from '@/types/core';
+import {fileReadTracker} from '@/utils/file-read-tracker';
 
 export async function handleMessageSubmission(
 	message: string,
@@ -208,5 +209,7 @@ export function createClearMessagesHandler(
 		if (client) {
 			await client.clearContext();
 		}
+		// Clear the file read tracker to reset the read-before-edit enforcement
+		fileReadTracker.clear();
 	};
 }

@@ -8,6 +8,7 @@ import type {ToolHandler, ToolDefinition} from '@/types/index';
 import {getColors} from '@/config/index';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
 import ToolMessage from '@/components/tool-message';
+import {fileReadTracker} from '@/utils/file-read-tracker';
 
 interface ReplaceLinesArgs {
 	path: string;
@@ -382,6 +383,14 @@ const validator = async (
 	args: ReplaceLinesArgs,
 ): Promise<{valid: true} | {valid: false; error: string}> => {
 	const {path, line_number, end_line} = args;
+
+	// Check if file was read in the immediately previous tool call
+	if (!fileReadTracker.wasReadInLastToolCall(path)) {
+		return {
+			valid: false,
+			error: `⚒ You must read the file "${path}" using read_file immediately before editing it.`,
+		};
+	}
 
 	// Check if file exists
 	const absPath = resolve(path);

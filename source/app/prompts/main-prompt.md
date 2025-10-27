@@ -196,7 +196,7 @@ You have access to different tools for working with files. Understanding their r
 
 ## Line-Based Editing Tools
 
-Nanocoder uses line-based editing tools that work with the line numbers from read_file. These are more precise than pattern-based replacements.
+Nanocoder uses line-based editing tools that work with the line numbers from read_file. These are more precise than pattern-based replacements. ALWAYS read the file you're editing before you edit it.
 
 ### insert_lines
 

@@ -6,6 +6,7 @@ import {Text, Box} from 'ink';
 import type {ToolHandler, ToolDefinition} from '@/types/index';
 import {ThemeContext} from '@/hooks/useTheme';
 import ToolMessage from '@/components/tool-message';
+import {fileReadTracker} from '@/utils/file-read-tracker';
 
 const handler: ToolHandler = async (args: {path: string}): Promise<string> => {
 	const absPath = resolve(args.path);
@@ -26,6 +27,9 @@ const handler: ToolHandler = async (args: {path: string}): Promise<string> => {
 			const lineNum = String(i + 1).padStart(4, ' ');
 			result += `${lineNum}: ${lines[i]}\n`;
 		}
+
+		// Mark this file as read (track it for edit validation)
+		fileReadTracker.markAsRead(args.path);
 
 		return result.slice(0, -1); // Remove trailing newline
 	} catch (error: unknown) {
