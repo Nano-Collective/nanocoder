@@ -46,17 +46,9 @@ const handler: ToolHandler = async (args: InsertLinesArgs): Promise<string> => {
 	const newContent = newLines.join('\n');
 	await writeFile(absPath, newContent, 'utf-8');
 
-	// Generate full file contents to show the model the current file state
-	let fileContext = '\n\nUpdated file contents:\n';
-	for (let i = 0; i < newLines.length; i++) {
-		const lineNumStr = String(i + 1).padStart(4, ' ');
-		const line = newLines[i] || '';
-		fileContext += `${lineNumStr}: ${line}\n`;
-	}
-
 	return `Successfully inserted ${insertLines.length} line${
 		insertLines.length > 1 ? 's' : ''
-	} at line ${line_number}.${fileContext}`;
+	} at line ${line_number}.`;
 };
 
 const InsertLinesFormatter = React.memo(
@@ -321,7 +313,7 @@ const validator = async (
 	if (!fileReadTracker.wasReadInLastToolCall(path)) {
 		return {
 			valid: false,
-			error: `⚒ You must read the file "${path}" using read_file immediately before editing it.`,
+			error: `⚒ You must read the file "${path}" using \`read_file\` immediately before editing it.`,
 		};
 	}
 
@@ -388,7 +380,8 @@ export const insertLinesTool: ToolDefinition = {
 		type: 'function',
 		function: {
 			name: 'insert_lines',
-			description: 'Insert new lines at a specific line number in a file',
+			description:
+				'Insert new lines at a specific line number in a file. Use the `read_file` tool before using this.',
 			parameters: {
 				type: 'object',
 				properties: {

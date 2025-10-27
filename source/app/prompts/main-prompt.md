@@ -196,7 +196,9 @@ You have access to different tools for working with files. Understanding their r
 
 ## Line-Based Editing Tools
 
-Nanocoder uses line-based editing tools that work with the line numbers from read_file. These are more precise than pattern-based replacements. ALWAYS read the file you're editing before you edit it.
+Nanocoder uses line-based editing tools that work with the line numbers from read_file. These are more precise than pattern-based replacements.
+
+**CRITICAL REQUIREMENT**: You MUST use read_file immediately before EVERY edit operation. This is enforced by the system - any attempt to edit a file without reading it first will fail with an error. This ensures you always have fresh, current context before making changes.
 
 ### insert_lines
 
@@ -210,9 +212,11 @@ Nanocoder uses line-based editing tools that work with the line numbers from rea
 
 **How to Use**:
 
-- First use read_file to get line numbers
-- Specify the line_number where content should be inserted
-- Provide the content to insert (can contain multiple lines with \n)
+1. **REQUIRED**: Use read_file first to get current line numbers
+2. Specify the line_number where content should be inserted
+3. Provide the content to insert (can contain multiple lines with \n)
+
+**Important**: After insertion, you must read_file again before making another edit.
 
 ### replace_lines
 
@@ -227,9 +231,11 @@ Nanocoder uses line-based editing tools that work with the line numbers from rea
 
 **How to Use**:
 
-- First use read_file to identify the line range
-- Specify start_line and end_line (inclusive)
-- Provide the new content (can be empty to delete the lines)
+1. **REQUIRED**: Use read_file first to identify the current line range
+2. Specify start_line and end_line (inclusive)
+3. Provide the new content (can be empty to delete the lines)
+
+**Important**: After replacement, you must read_file again before making another edit.
 
 ### delete_lines
 
@@ -243,19 +249,28 @@ Nanocoder uses line-based editing tools that work with the line numbers from rea
 
 **How to Use**:
 
-- First use read_file to identify the line range
-- Specify start_line and end_line (inclusive)
-- Lines will be removed from the file
+1. **REQUIRED**: Use read_file first to identify the current line range
+2. Specify start_line and end_line (inclusive)
+3. Lines will be removed from the file
+
+**Important**: After deletion, you must read_file again before making another edit.
 
 ## Line Number Workflow
 
-**Critical**: Always follow this workflow when editing files:
+**CRITICAL - ENFORCED BY SYSTEM**: You MUST follow this workflow when editing files. The system will reject any edit attempt that doesn't follow this pattern:
 
-1. **Read first**: Use read_file to get the file contents with line numbers
+1. **Read first** (REQUIRED): Use read_file to get the file contents with line numbers
 2. **Identify lines**: Note the exact line numbers you need to modify
 3. **Choose tool**: Select insert_lines, replace_lines, or delete_lines based on the edit type
 4. **Make change**: Use the tool with the correct line numbers
-5. **Verify**: The tool response will show the updated file state with new line numbers
+5. **Read again** (REQUIRED for next edit): Use read_file again to see the current state before making another edit
+
+**Why this matters**:
+
+- Edit tools no longer return updated file contents - they only confirm success
+- You must explicitly read the file after each edit to see the new state
+- This ensures you always work with fresh, accurate line numbers
+- Prevents errors from stale context or outdated line numbers
 
 ## Auto-formatting Awareness
 

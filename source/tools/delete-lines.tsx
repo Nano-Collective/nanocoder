@@ -58,26 +58,11 @@ const handler: ToolHandler = async (args: DeleteLinesArgs): Promise<string> => {
 	const newContent = newLines.join('\n');
 	await writeFile(absPath, newContent, 'utf-8');
 
-	// Generate full file contents to show the model the current file state
-	let fileContext = '\n\nUpdated file contents:\n';
-	for (let i = 0; i < newLines.length; i++) {
-		const lineNumStr = String(i + 1).padStart(4, ' ');
-		const line = newLines[i] || '';
-		fileContext += `${lineNumStr}: ${line}\n`;
-	}
-
-	// Add a note about the deletion
-	fileContext += `\n(Deleted ${linesToRemove} line${
-		linesToRemove > 1 ? 's' : ''
-	} that were previously at line${linesToRemove > 1 ? 's' : ''} ${line_number}${
-		endLine !== line_number ? `-${endLine}` : ''
-	})\n`;
-
 	const rangeDesc =
 		line_number === endLine
 			? `line ${line_number}`
 			: `lines ${line_number}-${endLine}`;
-	return `Successfully deleted ${rangeDesc}.${fileContext}`;
+	return `Successfully deleted ${rangeDesc}.`;
 };
 
 const DeleteLinesFormatter = React.memo(
@@ -370,7 +355,7 @@ const validator = async (
 	if (!fileReadTracker.wasReadInLastToolCall(path)) {
 		return {
 			valid: false,
-			error: `⚒ You must read the file "${path}" using read_file immediately before editing it.`,
+			error: `⚒ You must read the file "${path}" using \`read_file\` immediately before editing it.`,
 		};
 	}
 
@@ -447,7 +432,8 @@ export const deleteLinesTool: ToolDefinition = {
 		type: 'function',
 		function: {
 			name: 'delete_lines',
-			description: 'Delete a range of lines from a file',
+			description:
+				'Delete a range of lines from a file. Use the `read_file` tool before using this.',
 			parameters: {
 				type: 'object',
 				properties: {

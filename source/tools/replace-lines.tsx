@@ -62,21 +62,13 @@ const handler: ToolHandler = async (
 	const newContent = newLines.join('\n');
 	await writeFile(absPath, newContent, 'utf-8');
 
-	// Generate full file contents to show the model the current file state
-	let fileContext = '\n\nUpdated file contents:\n';
-	for (let i = 0; i < newLines.length; i++) {
-		const lineNumStr = String(i + 1).padStart(4, ' ');
-		const line = newLines[i] || '';
-		fileContext += `${lineNumStr}: ${line}\n`;
-	}
-
 	const rangeDesc =
 		line_number === endLine
 			? `line ${line_number}`
 			: `lines ${line_number}-${endLine}`;
 	return `Successfully replaced ${rangeDesc} with ${replaceLines.length} line${
 		replaceLines.length > 1 ? 's' : ''
-	}.${fileContext}`;
+	}.`;
 };
 
 const ReplaceLinesFormatter = React.memo(
@@ -388,7 +380,7 @@ const validator = async (
 	if (!fileReadTracker.wasReadInLastToolCall(path)) {
 		return {
 			valid: false,
-			error: `⚒ You must read the file "${path}" using read_file immediately before editing it.`,
+			error: `⚒ You must read the file "${path}" using \`read_file\` immediately before editing it.`,
 		};
 	}
 
@@ -465,7 +457,8 @@ export const replaceLinesTool: ToolDefinition = {
 		type: 'function',
 		function: {
 			name: 'replace_lines',
-			description: 'Replace a range of lines in a file with new content',
+			description:
+				'Replace a range of lines in a file with new content. Use the `read_file` tool before using this.',
 			parameters: {
 				type: 'object',
 				properties: {

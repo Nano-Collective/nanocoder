@@ -126,6 +126,7 @@ function loadProviderConfigs(): LangChainProviderConfig[] {
 				models: provider.models || [],
 				requestTimeout: provider.requestTimeout,
 				socketTimeout: provider.socketTimeout,
+				disableThinking: true,
 				connectionPool: provider.connectionPool,
 				config: {
 					baseURL: provider.baseUrl,

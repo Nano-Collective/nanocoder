@@ -1,3 +1,7 @@
+# 1.14.1
+
+- Enforce reading files before editing them
+
 # 1.14.0
 
 - Added `/setup-config` command - an interactive wizard for configuring LLM providers and MCP servers with built-in templates for popular services. Includes real-time validation, manual editing support (Ctrl+E), and automatic configuration reload.
