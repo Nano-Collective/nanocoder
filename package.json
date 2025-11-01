@@ -50,11 +50,11 @@
 		"source/app/prompts/main-prompt.md"
 	],
 	"dependencies": {
-		"@langchain/core": "^0.3.72",
-		"@langchain/openai": "^0.6.15",
+		"@ai-sdk/openai-compatible": "^1.0.24",
 		"@mishieck/ink-titled-box": "^0.3.0",
 		"@modelcontextprotocol/sdk": "^1.17.3",
 		"@nanocollective/get-md": "^1.0.0",
+		"ai": "^5.0.82",
 		"cheerio": "^1.1.2",
 		"cli-highlight": "^2.1.11",
 		"dotenv": "^17.2.3",

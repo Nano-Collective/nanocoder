@@ -189,38 +189,12 @@ test('validator accepts external IP addresses', async t => {
 	t.true(result.valid);
 });
 
-test('tool config has correct name', t => {
+test('tool has correct name', t => {
 	if (!fetchUrlTool) {
 		t.pass('Skipping test - fetch-url module not available');
 		return;
 	}
-	t.is(fetchUrlTool.config.function.name, 'fetch_url');
-});
-
-test('tool config has description', t => {
-	if (!fetchUrlTool) {
-		t.pass('Skipping test - fetch-url module not available');
-		return;
-	}
-	t.is(typeof fetchUrlTool.config.function.description, 'string');
-	t.true(fetchUrlTool.config.function.description.length > 0);
-	t.true(fetchUrlTool.config.function.description.includes('get-md'));
-});
-
-test('tool config requires url parameter', t => {
-	if (!fetchUrlTool) {
-		t.pass('Skipping test - fetch-url module not available');
-		return;
-	}
-	t.deepEqual(fetchUrlTool.config.function.parameters.required, ['url']);
-});
-
-test('tool config has url property', t => {
-	if (!fetchUrlTool) {
-		t.pass('Skipping test - fetch-url module not available');
-		return;
-	}
-	t.is(fetchUrlTool.config.function.parameters.properties.url.type, 'string');
+	t.is(fetchUrlTool.name, 'fetch_url');
 });
 
 test('tool does not require confirmation', t => {

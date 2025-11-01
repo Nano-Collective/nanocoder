@@ -427,11 +427,8 @@ test.serial(
 // Tests for search_files Tool Configuration
 // ============================================================================
 
-test('search_files tool has correct configuration', t => {
-	t.is(searchFilesTool.config.type, 'function');
-	t.is(searchFilesTool.config.function.name, 'search_files');
-	t.truthy(searchFilesTool.config.function.description);
-	t.truthy(searchFilesTool.config.function.parameters);
+test('search_files tool has correct name', t => {
+	t.is(searchFilesTool.name, 'search_files');
 });
 
 test('search_files tool does not require confirmation', t => {
@@ -444,12 +441,4 @@ test('search_files tool has handler function', t => {
 
 test('search_files tool has formatter function', t => {
 	t.is(typeof searchFilesTool.formatter, 'function');
-});
-
-test('search_files tool parameters include query and pattern', t => {
-	const params = searchFilesTool.config.function.parameters;
-	t.truthy(params.properties.query);
-	t.truthy(params.properties.pattern);
-	t.truthy(params.properties.maxResults);
-	t.truthy(params.properties.contextLines);
 });

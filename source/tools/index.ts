@@ -9,7 +9,7 @@ import {webSearchTool} from '@/tools/web-search';
 import {fetchUrlTool} from '@/tools/fetch-url';
 import {searchFilesTool} from '@/tools/search-files';
 import React from 'react';
-import type {ToolHandler, Tool, ToolDefinition} from '@/types/index';
+import type {ToolHandler, ToolDefinition, AISDKCoreTool} from '@/types/index';
 
 export const toolDefinitions: ToolDefinition[] = [
 	readFileTool,
@@ -24,11 +24,14 @@ export const toolDefinitions: ToolDefinition[] = [
 	searchFilesTool,
 ];
 
+// Export handlers for manual execution (human-in-the-loop)
 export const toolRegistry: Record<string, ToolHandler> = Object.fromEntries(
-	toolDefinitions.map(def => [def.config.function.name, def.handler]),
+	toolDefinitions.map(def => [def.name, def.handler]),
 );
 
-export const tools: Tool[] = toolDefinitions.map(def => def.config);
+// Native AI SDK tools registry (for passing directly to AI SDK)
+export const nativeToolsRegistry: Record<string, AISDKCoreTool> =
+	Object.fromEntries(toolDefinitions.map(def => [def.name, def.tool]));
 
 // Export formatter registry for the UI
 export const toolFormatters: Record<
@@ -47,11 +50,9 @@ export const toolFormatters: Record<
 		.map(def => {
 			const formatter = def.formatter;
 			if (!formatter) {
-				throw new Error(
-					`Formatter is undefined for tool ${def.config.function.name}`,
-				);
+				throw new Error(`Formatter is undefined for tool ${def.name}`);
 			}
-			return [def.config.function.name, formatter];
+			return [def.name, formatter];
 		}),
 );
 
@@ -66,10 +67,8 @@ export const toolValidators: Record<
 		.map(def => {
 			const validator = def.validator;
 			if (!validator) {
-				throw new Error(
-					`Validator is undefined for tool ${def.config.function.name}`,
-				);
+				throw new Error(`Validator is undefined for tool ${def.name}`);
 			}
-			return [def.config.function.name, validator];
+			return [def.name, validator];
 		}),
 );

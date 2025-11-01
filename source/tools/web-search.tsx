@@ -2,7 +2,8 @@ import {fetch} from 'undici';
 import * as cheerio from 'cheerio';
 import React from 'react';
 import {Text, Box} from 'ink';
-import type {ToolHandler, ToolDefinition} from '@/types/index';
+import type {ToolDefinition} from '@/types/index';
+import {tool, jsonSchema} from '@/types/core';
 import {ThemeContext} from '@/hooks/useTheme';
 import ToolMessage from '@/components/tool-message';
 
@@ -17,7 +18,7 @@ interface SearchResult {
 	snippet: string;
 }
 
-const handler: ToolHandler = async (args: SearchArgs): Promise<string> => {
+const executeWebSearch = async (args: SearchArgs): Promise<string> => {
 	const maxResults = args.max_results ?? 10;
 	const encodedQuery = encodeURIComponent(args.query);
 
@@ -94,6 +95,28 @@ const handler: ToolHandler = async (args: SearchArgs): Promise<string> => {
 		throw new Error(`Web search failed: ${errorMessage}`);
 	}
 };
+
+// AI SDK tool definition
+const webSearchCoreTool = tool({
+	description:
+		'Search the web for information (scrapes Brave Search, returns markdown)',
+	inputSchema: jsonSchema<SearchArgs>({
+		type: 'object',
+		properties: {
+			query: {
+				type: 'string',
+				description: 'The search query.',
+			},
+			max_results: {
+				type: 'number',
+				description:
+					'Maximum number of search results to return (default: 10).',
+			},
+		},
+		required: ['query'],
+	}),
+	// NO execute function - prevents AI SDK auto-execution
+});
 
 // Create a component that will re-render when theme changes
 const WebSearchFormatter = React.memo(
@@ -179,32 +202,15 @@ const validator = (
 	return Promise.resolve({valid: true});
 };
 
+// Nanocoder tool definition with AI SDK core tool + custom extensions
 export const webSearchTool: ToolDefinition = {
-	handler,
+	name: 'web_search',
+	tool: webSearchCoreTool, // Native AI SDK tool (no execute)
+	handler: executeWebSearch,
 	formatter,
 	validator,
 	requiresConfirmation: false,
-	config: {
-		type: 'function',
-		function: {
-			name: 'web_search',
-			description:
-				'Search the web using Brave Search and return relevant results with URLs, titles, and descriptions. Use this to find up-to-date information, documentation, or answers to questions that require. Use in conjuction with the `fetch_url` tool to get page information on search results.',
-			parameters: {
-				type: 'object',
-				properties: {
-					query: {
-						type: 'string',
-						description: 'The search query to look up on the web.',
-					},
-					max_results: {
-						type: 'number',
-						description:
-							'Maximum number of results to return (default: 10, max: 20).',
-					},
-				},
-				required: ['query'],
-			},
-		},
-	},
 };
+
+// Export the AI SDK core tool for Phase 3-4 migration
+export {webSearchCoreTool};

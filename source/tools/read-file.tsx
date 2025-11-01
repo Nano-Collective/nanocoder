@@ -3,11 +3,13 @@ import {readFile, access} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import React from 'react';
 import {Text, Box} from 'ink';
-import type {ToolHandler, ToolDefinition} from '@/types/index';
+import type {ToolDefinition} from '@/types/index';
+import {tool, jsonSchema} from '@/types/core';
 import {ThemeContext} from '@/hooks/useTheme';
 import ToolMessage from '@/components/tool-message';
 
-const handler: ToolHandler = async (args: {path: string}): Promise<string> => {
+// Handler function - will be used both by Nanocoder and AI SDK tool
+const executeReadFile = async (args: {path: string}): Promise<string> => {
 	const absPath = resolve(args.path);
 
 	try {
@@ -43,6 +45,24 @@ const handler: ToolHandler = async (args: {path: string}): Promise<string> => {
 		throw error;
 	}
 };
+
+// AI SDK tool definition (WITHOUT execute to prevent auto-execution)
+// Execute will be called manually after user confirmation
+const readFileCoreTool = tool({
+	description:
+		'Read the contents of a file with line numbers (use line numbers with edit_file tool for precise editing)',
+	inputSchema: jsonSchema<{path: string}>({
+		type: 'object',
+		properties: {
+			path: {
+				type: 'string',
+				description: 'The path to the file to read.',
+			},
+		},
+		required: ['path'],
+	}),
+	// NO execute function - prevents AI SDK auto-execution
+});
 
 // Create a component that will re-render when theme changes
 const ReadFileFormatter = React.memo(
@@ -148,27 +168,17 @@ const validator = async (args: {
 	}
 };
 
+// Nanocoder tool definition with native AI SDK tool + custom extensions
 export const readFileTool: ToolDefinition = {
-	handler,
+	name: 'read_file',
+	tool: readFileCoreTool, // Native AI SDK tool (no execute)
+	handler: executeReadFile, // Manual execution after confirmation
 	formatter,
 	validator,
 	requiresConfirmation: false,
-	config: {
-		type: 'function',
-		function: {
-			name: 'read_file',
-			description:
-				'Read the contents of a file with line numbers (use line numbers with edit_file tool for precise editing)',
-			parameters: {
-				type: 'object',
-				properties: {
-					path: {
-						type: 'string',
-						description: 'The path to the file to read.',
-					},
-				},
-				required: ['path'],
-			},
-		},
-	},
 };
+
+// Export the AI SDK core tool for Phase 3-4 migration
+// Will be used when we migrate to use AI SDK tools directly
+// NOTE: knip reports this as unused - this is intentional (reserved for Phase 3)
+export {readFileCoreTool};

@@ -4,7 +4,8 @@ import {readFile, writeFile, access} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import {highlight} from 'cli-highlight';
 import {Text, Box} from 'ink';
-import type {ToolHandler, ToolDefinition} from '@/types/index';
+import type {ToolDefinition} from '@/types/index';
+import {tool, jsonSchema} from '@/types/core';
 import {getColors} from '@/config/index';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
 import ToolMessage from '@/components/tool-message';
@@ -16,9 +17,7 @@ interface ReplaceLinesArgs {
 	content: string;
 }
 
-const handler: ToolHandler = async (
-	args: ReplaceLinesArgs,
-): Promise<string> => {
+const executeReplaceLines = async (args: ReplaceLinesArgs): Promise<string> => {
 	const {path, line_number, end_line, content} = args;
 
 	// Validate line numbers
@@ -77,6 +76,37 @@ const handler: ToolHandler = async (
 		replaceLines.length > 1 ? 's' : ''
 	}.${fileContext}`;
 };
+
+// AI SDK tool definition
+const replaceLinesCoreTool = tool({
+	description:
+		'Replace lines in a file (single line or range) with new content',
+	inputSchema: jsonSchema<ReplaceLinesArgs>({
+		type: 'object',
+		properties: {
+			path: {
+				type: 'string',
+				description: 'The path to the file to edit.',
+			},
+			line_number: {
+				type: 'number',
+				description: 'The starting line number (1-based) to replace.',
+			},
+			end_line: {
+				type: 'number',
+				description:
+					'The ending line number (1-based) to replace. If omitted, only line_number is replaced.',
+			},
+			content: {
+				type: 'string',
+				description:
+					'The replacement content. Can contain multiple lines separated by \\n.',
+			},
+		},
+		required: ['path', 'line_number', 'content'],
+	}),
+	// NO execute function - prevents AI SDK auto-execution
+});
 
 const ReplaceLinesFormatter = React.memo(
 	({preview}: {preview: React.ReactElement}) => {
@@ -448,39 +478,14 @@ const validator = async (
 	return {valid: true};
 };
 
+// Nanocoder tool definition with AI SDK core tool + custom extensions
 export const replaceLinesTool: ToolDefinition = {
-	handler,
+	name: 'replace_lines',
+	tool: replaceLinesCoreTool, // Native AI SDK tool (no execute)
+	handler: executeReplaceLines,
 	formatter,
 	validator,
-	config: {
-		type: 'function',
-		function: {
-			name: 'replace_lines',
-			description: 'Replace a range of lines in a file with new content',
-			parameters: {
-				type: 'object',
-				properties: {
-					path: {
-						type: 'string',
-						description: 'The path to the file to edit.',
-					},
-					line_number: {
-						type: 'number',
-						description: 'The starting line number (1-based) to replace.',
-					},
-					end_line: {
-						type: 'number',
-						description:
-							'The ending line number for range replacement. If not specified, only replaces line_number.',
-					},
-					content: {
-						type: 'string',
-						description:
-							'The replacement content. Can contain multiple lines separated by \\n.',
-					},
-				},
-				required: ['path', 'line_number', 'content'],
-			},
-		},
-	},
 };
+
+// Export the AI SDK core tool for Phase 3-4 migration
+export {replaceLinesCoreTool};

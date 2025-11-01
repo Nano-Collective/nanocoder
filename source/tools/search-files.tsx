@@ -7,7 +7,8 @@ import ignore from 'ignore';
 
 const execAsync = promisify(exec);
 import {Text, Box} from 'ink';
-import type {ToolHandler, ToolDefinition} from '@/types/index';
+import type {ToolDefinition} from '@/types/index';
+import {tool, jsonSchema} from '@/types/core';
 import {ThemeContext} from '@/hooks/useTheme';
 import ToolMessage from '@/components/tool-message';
 
@@ -191,12 +192,14 @@ async function listFiles(
 	}
 }
 
-const handler: ToolHandler = async (args: {
+interface SearchFilesArgs {
 	query?: string;
 	pattern?: string;
 	maxResults?: number;
 	contextLines?: number;
-}): Promise<string> => {
+}
+
+const executeSearchFiles = async (args: SearchFilesArgs): Promise<string> => {
 	const cwd = process.cwd();
 	const maxResults = args.maxResults || 50;
 	const contextLines = args.contextLines || 2;
@@ -255,6 +258,37 @@ const handler: ToolHandler = async (args: {
 		throw new Error(`Search failed: ${errorMessage}`);
 	}
 };
+
+// AI SDK tool definition
+const searchFilesCoreTool = tool({
+	description:
+		'Search for files by pattern or search file contents (ripgrep-based code search)',
+	inputSchema: jsonSchema<SearchFilesArgs>({
+		type: 'object',
+		properties: {
+			query: {
+				type: 'string',
+				description: 'Text to search for in file contents (case-insensitive).',
+			},
+			pattern: {
+				type: 'string',
+				description:
+					'File path pattern to search for (e.g., "*.tsx", "components/**").',
+			},
+			maxResults: {
+				type: 'number',
+				description: 'Maximum number of results to return (default: 50).',
+			},
+			contextLines: {
+				type: 'number',
+				description:
+					'Number of context lines to show around matches (default: 2).',
+			},
+		},
+		required: [],
+	}),
+	// NO execute function - prevents AI SDK auto-execution
+});
 
 interface SearchFilesFormatterProps {
 	args: {
@@ -322,41 +356,14 @@ const formatter = (
 	return <SearchFilesFormatter args={args} result={result} />;
 };
 
+// Nanocoder tool definition with AI SDK core tool + custom extensions
 export const searchFilesTool: ToolDefinition = {
-	handler,
+	name: 'search_files',
+	tool: searchFilesCoreTool, // Native AI SDK tool (no execute)
+	handler: executeSearchFiles,
 	formatter,
 	requiresConfirmation: false,
-	config: {
-		type: 'function',
-		function: {
-			name: 'search_files',
-			description:
-				'Search for files by pattern (glob) or search file contents for a query string. Returns file paths and optionally content matches with context. Uses ripgrep if available for fast content search.',
-			parameters: {
-				type: 'object',
-				properties: {
-					query: {
-						type: 'string',
-						description:
-							'Search query to find in file contents (case-insensitive). Either query or pattern must be provided.',
-					},
-					pattern: {
-						type: 'string',
-						description:
-							'Glob pattern to match file names (e.g., "**/*.ts", "src/**/*.tsx"). Either query or pattern must be provided.',
-					},
-					maxResults: {
-						type: 'number',
-						description: 'Maximum number of results to return (default: 50)',
-					},
-					contextLines: {
-						type: 'number',
-						description:
-							'Number of context lines to include around matches (default: 2)',
-					},
-				},
-				required: [],
-			},
-		},
-	},
 };
+
+// Export the AI SDK core tool for Phase 3-4 migration
+export {searchFilesCoreTool};

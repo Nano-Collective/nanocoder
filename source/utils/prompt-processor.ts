@@ -2,7 +2,7 @@ import {readFileSync, existsSync} from 'fs';
 import {join} from 'path';
 import {platform, homedir, release} from 'os';
 import {promptPath} from '../config/index';
-import type {Tool} from '../types/index';
+import type {AISDKCoreTool} from '../types/index';
 import type {InputState} from '../types/hooks';
 import {PlaceholderType} from '../types/hooks';
 
@@ -75,7 +75,9 @@ function injectSystemInfo(prompt: string): string {
 /**
  * Process the main prompt template by injecting dynamic tool documentation and system info
  */
-export function processPromptTemplate(tools: Tool[]): string {
+export function processPromptTemplate(
+	tools: Record<string, AISDKCoreTool>,
+): string {
 	let systemPrompt = 'You are a helpful AI assistant.'; // fallback
 
 	// Load base prompt
@@ -118,8 +120,11 @@ export function processPromptTemplate(tools: Tool[]): string {
 /**
  * Inject dynamic tool documentation into the prompt template
  */
-function injectToolDocumentation(prompt: string, tools: Tool[]): string {
-	if (tools.length === 0) {
+function injectToolDocumentation(
+	prompt: string,
+	tools: Record<string, AISDKCoreTool>,
+): string {
+	if (Object.keys(tools).length === 0) {
 		return prompt.replace(
 			/<!-- DYNAMIC_TOOLS_SECTION_START -->[\s\S]*?<!-- DYNAMIC_TOOLS_SECTION_END -->/,
 			'No additional tools are currently available.',
@@ -139,46 +144,34 @@ function injectToolDocumentation(prompt: string, tools: Tool[]): string {
 /**
  * Generate formatted documentation for all available tools
  */
-function generateToolDocumentation(tools: Tool[]): string {
+function generateToolDocumentation(
+	tools: Record<string, AISDKCoreTool>,
+): string {
 	const sections = ['Available Tools\n'];
 
+	// Convert tools record to array of [name, tool] entries
+	const toolEntries = Object.entries(tools);
+
 	// Group tools by category (built-in vs MCP)
-	const builtInTools = tools.filter(tool => !tool.function.name.includes('__'));
-	const mcpTools = tools.filter(tool => tool.function.name.includes('__'));
+	const builtInTools = toolEntries.filter(([name]) => !name.includes('__'));
+	const mcpTools = toolEntries.filter(([name]) => name.includes('__'));
 
 	if (builtInTools.length > 0) {
 		sections.push('Built-in Tools:\n');
-		builtInTools.forEach(tool => {
-			sections.push(formatToolDocumentation(tool));
+		builtInTools.forEach(([name, tool]) => {
+			sections.push(formatToolDocumentation(name, tool));
 		});
 	}
 
 	if (mcpTools.length > 0) {
 		sections.push('\nMCP Tools:\n');
-		mcpTools.forEach(tool => {
-			sections.push(formatToolDocumentation(tool));
+		mcpTools.forEach(([name, tool]) => {
+			sections.push(formatToolDocumentation(name, tool));
 		});
 	}
 
-	// Add XML format examples for all models
-	if (tools.length > 0) {
-		sections.push('\nXML Format Examples:\n');
-
-		// Show tool examples in XML format
-		tools.forEach(tool => {
-			const params = tool.function.parameters?.properties || {};
-			const paramNames = Object.keys(params).slice(0, 2); // Show max 2 params per example
-
-			sections.push(`${tool.function.name}:`);
-			sections.push('```xml');
-			sections.push(`<${tool.function.name}>`);
-			paramNames.forEach(paramName => {
-				sections.push(`<${paramName}>value</${paramName}>`);
-			});
-			sections.push(`</${tool.function.name}>`);
-			sections.push('```\n');
-		});
-	}
+	// Note: XML format examples omitted since AI SDK tools don't expose parameter schemas
+	// The model will learn tool usage from function calling or from the system prompt
 
 	return sections.join('\n');
 }
@@ -186,33 +179,10 @@ function generateToolDocumentation(tools: Tool[]): string {
 /**
  * Format documentation for a single tool
  */
-interface ParameterSchema {
-	description?: string;
-	type?: string;
-	[key: string]: unknown;
-}
-
-function formatToolDocumentation(tool: Tool): string {
-	const {name, description, parameters} = tool.function;
-
-	let doc = `${name}: ${description}\n`;
-
-	if (parameters.properties && Object.keys(parameters.properties).length > 0) {
-		doc += 'Parameters:\n';
-		Object.entries(parameters.properties).forEach(
-			([paramName, schema]: [string, ParameterSchema]) => {
-				const required = parameters.required?.includes(paramName)
-					? ' (required)'
-					: ' (optional)';
-				const paramDescription =
-					schema.description || schema.type || 'No description';
-				doc += `- ${paramName}${required}: ${paramDescription}\n`;
-			},
-		);
-		doc += '\n';
-	}
-
-	return doc;
+function formatToolDocumentation(name: string, _tool: AISDKCoreTool): string {
+	// AI SDK's Tool type doesn't expose description or parameters directly
+	// We just list the tool name - the model will learn from usage
+	return `${name}\n`;
 }
 
 /**

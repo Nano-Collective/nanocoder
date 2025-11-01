@@ -1,6 +1,7 @@
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
-import type {Tool, ToolParameterSchema} from '@/types/index';
+import type {Tool, ToolParameterSchema, AISDKCoreTool} from '@/types/index';
+import {tool, jsonSchema} from '@/types/index';
 import {logInfo, logError} from '@/utils/message-queue';
 
 import type {MCPServer, MCPTool, MCPInitResult} from '@/types/index';
@@ -131,6 +132,31 @@ export class MCPClient {
 		return tools;
 	}
 
+	/**
+	 * Get all MCP tools as AI SDK native CoreTool format
+	 * Converts MCP tool schemas to AI SDK's tool() format
+	 */
+	getNativeToolsRegistry(): Record<string, AISDKCoreTool> {
+		const nativeTools: Record<string, AISDKCoreTool> = {};
+
+		for (const [serverName, serverTools] of this.serverTools.entries()) {
+			for (const mcpTool of serverTools) {
+				// Convert MCP tool to AI SDK's CoreTool format
+				// Use the input schema directly - it should already be JSON Schema compatible
+				const coreTool = tool({
+					description: mcpTool.description
+						? `[MCP:${serverName}] ${mcpTool.description}`
+						: `MCP tool from ${serverName}`,
+					inputSchema: jsonSchema(mcpTool.inputSchema || {type: 'object'}),
+					// No execute function - human-in-the-loop pattern
+				});
+
+				nativeTools[mcpTool.name] = coreTool;
+			}
+		}
+
+		return nativeTools;
+	}
 	getToolMapping(): Map<string, {serverName: string; originalName: string}> {
 		const mapping = new Map<
 			string,
@@ -147,6 +173,55 @@ export class MCPClient {
 		}
 
 		return mapping;
+	}
+
+	/**
+	 * Get all MCP tools as entries with handlers for easy registration
+	 * Each entry contains the native AI SDK tool and its handler function
+	 *
+	 * Phase 3 Enhancement: Provides structured access to MCP tools with both
+	 * the AI SDK tool definition and the corresponding handler function.
+	 * This enables cleaner integration with ToolManager.
+	 *
+	 * @returns Array of tool entries with name, AI SDK tool, and handler function
+	 */
+	getToolEntries(): Array<{
+		name: string;
+		tool: AISDKCoreTool;
+		handler: (args: Record<string, unknown>) => Promise<string>;
+	}> {
+		const entries: Array<{
+			name: string;
+			tool: AISDKCoreTool;
+			handler: (args: Record<string, unknown>) => Promise<string>;
+		}> = [];
+
+		// Get native tools once to avoid redundant calls
+		const nativeTools = this.getNativeToolsRegistry();
+
+		for (const [, serverTools] of this.serverTools.entries()) {
+			for (const mcpTool of serverTools) {
+				const toolName = mcpTool.name;
+
+				// Get the AI SDK native tool
+				const coreTool = nativeTools[toolName];
+
+				if (coreTool) {
+					// Create handler that calls this tool
+					const handler = async (args: Record<string, unknown>) => {
+						return this.callTool(toolName, args);
+					};
+
+					entries.push({
+						name: toolName,
+						tool: coreTool,
+						handler,
+					});
+				}
+			}
+		}
+
+		return entries;
 	}
 
 	async callTool(

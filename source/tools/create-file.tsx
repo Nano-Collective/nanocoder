@@ -4,12 +4,14 @@ import {constants} from 'node:fs';
 import {highlight} from 'cli-highlight';
 import React from 'react';
 import {Text, Box} from 'ink';
-import type {ToolHandler, ToolDefinition} from '@/types/index';
+import type {ToolDefinition} from '@/types/index';
+import {tool, jsonSchema} from '@/types/core';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
 import ToolMessage from '@/components/tool-message';
 
-const handler: ToolHandler = async (args: {
+// Handler function - used by both Nanocoder and AI SDK tool
+const executeCreateFile = async (args: {
 	path: string;
 	content: string;
 }): Promise<string> => {
@@ -17,6 +19,27 @@ const handler: ToolHandler = async (args: {
 	await writeFile(absPath, args.content, 'utf-8');
 	return 'File written successfully';
 };
+
+// AI SDK tool definition
+const createFileCoreTool = tool({
+	description:
+		'Create a new file with the specified content (overwrites if file exists)',
+	inputSchema: jsonSchema<{path: string; content: string}>({
+		type: 'object',
+		properties: {
+			path: {
+				type: 'string',
+				description: 'The path to the file to write.',
+			},
+			content: {
+				type: 'string',
+				description: 'The content to write to the file.',
+			},
+		},
+		required: ['path', 'content'],
+	}),
+	// NO execute function - prevents AI SDK auto-execution
+});
 
 interface CreateFileArgs {
 	path?: string;
@@ -166,30 +189,14 @@ const validator = async (args: {
 	return {valid: true};
 };
 
+// Nanocoder tool definition with AI SDK core tool + custom extensions
 export const createFileTool: ToolDefinition = {
-	handler,
+	name: 'create_file',
+	tool: createFileCoreTool, // Native AI SDK tool (no execute)
+	handler: executeCreateFile, // Manual execution after confirmation
 	formatter,
 	validator,
-	config: {
-		type: 'function',
-		function: {
-			name: 'create_file',
-			description:
-				'Create a new file with the specified content (overwrites if file exists)',
-			parameters: {
-				type: 'object',
-				properties: {
-					path: {
-						type: 'string',
-						description: 'The path to the file to write.',
-					},
-					content: {
-						type: 'string',
-						description: 'The content to write to the file.',
-					},
-				},
-				required: ['path', 'content'],
-			},
-		},
-	},
 };
+
+// Export the AI SDK core tool for Phase 3-4 migration
+export {createFileCoreTool};

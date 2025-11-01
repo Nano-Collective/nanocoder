@@ -1,5 +1,10 @@
 {
 	"$schema": "https://unpkg.com/knip@5/schema.json",
 	"ignoreDependencies": [],
-	"ignore": ["nanocoder-dummy-file.ts"]
+	"ignore": ["nanocoder-dummy-file.ts", ".phase-3-tools.ts"],
+	"ignoreExportsUsedInFile": {
+		"type": true,
+		"function": true,
+		"variable": true
+	}
 }

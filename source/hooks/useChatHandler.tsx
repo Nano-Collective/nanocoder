@@ -178,7 +178,7 @@ export function useChatHandler({
 
 			const result = await client.chat(
 				[systemMessage, ...messages],
-				toolManager?.getAllTools() || [],
+				toolManager?.getAllTools() || {},
 				controller.signal,
 			);
 
@@ -290,7 +290,7 @@ export function useChatHandler({
 
 				for (const toolCall of validToolCalls) {
 					const toolDef = toolDefinitions.find(
-						def => def.config.function.name === toolCall.function.name,
+						def => def.name === toolCall.function.name,
 					);
 
 					// Check if tool has a validator
@@ -533,8 +533,10 @@ export function useChatHandler({
 
 		try {
 			// Load and process system prompt with dynamic tool documentation
-			const availableTools = toolManager ? toolManager.getAllTools() : [];
-			const systemPrompt = processPromptTemplate(availableTools);
+			// Note: We still need tool definitions (not just native tools) for documentation
+			const systemPrompt = processPromptTemplate(
+				toolManager ? toolManager.getAllTools() : {},
+			);
 
 			// Create stream request
 			const systemMessage: Message = {
