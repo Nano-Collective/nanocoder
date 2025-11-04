@@ -13,24 +13,25 @@ export async function handleMessageSubmission(
 	options: MessageSubmissionOptions,
 ): Promise<void> {
 	const {
-		customCommandCache,
-		customCommandLoader,
-		customCommandExecutor,
-		onClearMessages,
-		onEnterModelSelectionMode,
-		onEnterProviderSelectionMode,
-		onEnterThemeSelectionMode,
-		onEnterRecommendationsMode,
-		onEnterConfigWizardMode,
-		onShowStatus,
-		onHandleChatMessage,
-		onAddToChatQueue,
-		componentKeyCounter,
-		setMessages,
-		messages,
-		setIsBashExecuting,
-		setCurrentBashCommand,
-	} = options;
+			customCommandCache,
+			customCommandLoader,
+			customCommandExecutor,
+			onClearMessages,
+			onEnterModelSelectionMode,
+			onEnterProviderSelectionMode,
+			onEnterThemeSelectionMode,
+			onEnterRecommendationsMode,
+			onEnterConfigWizardMode,
+		onEnterSessionSelectionMode,
+			onShowStatus,
+			onHandleChatMessage,
+			onAddToChatQueue,
+			componentKeyCounter,
+			setMessages,
+			messages,
+			setIsBashExecuting,
+			setCurrentBashCommand,
+		} = options;
 
 	// Parse the input to determine its type
 	const parsedInput = parseInput(message);
@@ -141,28 +142,234 @@ ${result.fullOutput || '(No output)'}`;
 			}
 		} else {
 			// Handle special commands that need app state access
-			if (commandName === 'clear') {
-				await onClearMessages();
-				// Still show the clear command result
-			} else if (commandName === 'model') {
-				onEnterModelSelectionMode();
-				return;
-			} else if (commandName === 'provider') {
-				onEnterProviderSelectionMode();
-				return;
-			} else if (commandName === 'theme') {
-				onEnterThemeSelectionMode();
-				return;
-			} else if (commandName === 'recommendations') {
-				onEnterRecommendationsMode();
-				return;
-			} else if (commandName === 'setup-config') {
-				onEnterConfigWizardMode();
-				return;
-			} else if (commandName === 'status') {
-				onShowStatus();
-				return;
-			}
+				if (commandName === 'clear') {
+					await onClearMessages();
+					// Still show the clear command result
+				} else if (commandName === 'model') {
+					onEnterModelSelectionMode();
+					return;
+				} else if (commandName === 'provider') {
+					onEnterProviderSelectionMode();
+					return;
+				} else if (commandName === 'theme') {
+					onEnterThemeSelectionMode();
+					return;
+				} else if (commandName === 'recommendations') {
+					onEnterRecommendationsMode();
+					return;
+				} else if (commandName === 'setup-config') {
+					onEnterConfigWizardMode();
+					return;
+				} else if (commandName === 'resume') {
+					// Handle resume command with arguments
+					const args = message
+						.slice(commandName.length + 1)
+						.trim()
+						.split(/\s+/)
+						.filter(arg => arg);
+					
+					if (args.length === 0) {
+						// No arguments - enter session selection mode
+							onEnterSessionSelectionMode();
+							return;
+						} else if (args.length === 1) {
+							const arg = args[0].toLowerCase();
+							
+							if (arg === 'last') {
+								// Resume most recent session
+								if (options.sessionManager) {
+								  try {
+								    const sessions = await options.sessionManager.listSessions();
+								    if (sessions.length > 0) {
+								      // Find the most recently updated session
+								      const mostRecentSession = sessions.reduce((latest: any, session: any) =>
+								        session.updatedAt > latest.updatedAt ? session : latest,
+								        sessions[0]
+								      );
+								      
+								      const session = await options.sessionManager.loadSession(mostRecentSession.id);
+											if (session) {
+												// Convert session messages to app format
+												const appMessages = session.messages.map(options.convertSessionMessageToAppFormat);
+											
+												// Restore provider/model from session metadata if available
+												if (session.metadata?.provider) {
+													options.setCurrentProvider(session.metadata.provider);
+												}
+												if (session.metadata?.model) {
+													options.setCurrentModel(session.metadata.model);
+												}
+											
+												// Update messages with the session's messages
+												options.setMessages(appMessages);
+											
+												// Set current session
+												options.setCurrentSession(session);
+											
+												onAddToChatQueue(
+													React.createElement(InfoMessage, {
+														key: `session-resumed-${componentKeyCounter}`,
+														message: `Session "${session.title}" resumed.`,
+														hideBox: true,
+													}),
+												);
+											} else {
+												onAddToChatQueue(
+													React.createElement(InfoMessage, {
+														key: `session-not-found-${componentKeyCounter}`,
+														message: 'Most recent session not found.',
+														hideBox: true,
+													}),
+												);
+											}
+										} else {
+											onAddToChatQueue(
+												React.createElement(InfoMessage, {
+													key: `no-sessions-${componentKeyCounter}`,
+													message: 'No sessions found.',
+													hideBox: true,
+												}),
+											);
+										}
+									} catch (error) {
+										onAddToChatQueue(
+											React.createElement(ErrorMessage, {
+												key: `session-error-${componentKeyCounter}`,
+												message: `Error loading session: ${String(error)}`,
+											}),
+										);
+									}
+								}
+								return;
+							} else {
+								// Check if argument is a number (for list index)
+								const sessionIndex = parseInt(arg, 10);
+								if (!isNaN(sessionIndex)) {
+									// Resume by list index
+									if (options.sessionManager) {
+									  try {
+									    const sessions = await options.sessionManager.listSessions();
+									    if (sessionIndex < 1 || sessionIndex > sessions.length) {
+									      onAddToChatQueue(
+									        React.createElement(InfoMessage, {
+									          key: `invalid-index-${componentKeyCounter}`,
+									          message: `Invalid session index. Please choose between 1 and ${sessions.length}.`,
+									          hideBox: true,
+									        }),
+									      );
+									    } else {
+									      const sessionInfo = sessions[sessionIndex - 1]; // Convert to 0-based index
+									      const session = await options.sessionManager.loadSession(sessionInfo.id);
+												if (session) {
+													// Convert session messages to app format
+													const appMessages = session.messages.map(options.convertSessionMessageToAppFormat);
+												
+													// Restore provider/model from session metadata if available
+													if (session.metadata?.provider) {
+														options.setCurrentProvider(session.metadata.provider);
+													}
+													if (session.metadata?.model) {
+														options.setCurrentModel(session.metadata.model);
+													}
+												
+													// Update messages with the session's messages
+													options.setMessages(appMessages);
+												
+													// Set current session
+													options.setCurrentSession(session);
+												
+													onAddToChatQueue(
+														React.createElement(InfoMessage, {
+															key: `session-resumed-${componentKeyCounter}`,
+															message: `Session "${session.title}" resumed.`,
+															hideBox: true,
+														}),
+													);
+												} else {
+													onAddToChatQueue(
+														React.createElement(InfoMessage, {
+															key: `session-not-found-${componentKeyCounter}`,
+															message: 'Session not found.',
+															hideBox: true,
+														}),
+													);
+												}
+											}
+										} catch (error) {
+											onAddToChatQueue(
+												React.createElement(ErrorMessage, {
+													key: `session-error-${componentKeyCounter}`,
+													message: `Error loading session: ${String(error)}`,
+												}),
+											);
+										}
+									}
+									return;
+								} else {
+									// Resume by session ID
+									if (options.sessionManager) {
+									  try {
+									    const session = await options.sessionManager.loadSession(arg);
+											if (session) {
+												// Convert session messages to app format
+												const appMessages = session.messages.map(options.convertSessionMessageToAppFormat);
+											
+												// Restore provider/model from session metadata if available
+												if (session.metadata?.provider) {
+													options.setCurrentProvider(session.metadata.provider);
+												}
+												if (session.metadata?.model) {
+													options.setCurrentModel(session.metadata.model);
+												}
+											
+												// Update messages with the session's messages
+												options.setMessages(appMessages);
+											
+												// Set current session
+												options.setCurrentSession(session);
+											
+												onAddToChatQueue(
+													React.createElement(InfoMessage, {
+														key: `session-resumed-${componentKeyCounter}`,
+														message: `Session "${session.title}" resumed.`,
+														hideBox: true,
+													}),
+												);
+											} else {
+												onAddToChatQueue(
+													React.createElement(InfoMessage, {
+														key: `session-not-found-${componentKeyCounter}`,
+														message: 'Session not found.',
+														hideBox: true,
+													}),
+												);
+											}
+										} catch (error) {
+											onAddToChatQueue(
+												React.createElement(ErrorMessage, {
+													key: `session-error-${componentKeyCounter}`,
+													message: `Error loading session: ${String(error)}`,
+												}),
+											);
+										}
+									}
+									return;
+								}
+							}
+						} else {
+							onAddToChatQueue(
+								React.createElement(InfoMessage, {
+									key: `invalid-args-${componentKeyCounter}`,
+									message: 'Invalid arguments. Usage: /resume, /resume {id}, /resume {number}, or /resume last',
+									hideBox: true,
+								}),
+							);
+							return;
+						}
+				} else if (commandName === 'status') {
+					onShowStatus();
+					return;
+				}
 
 			// Execute built-in command
 			const totalTokens = messages.reduce(

@@ -13,6 +13,7 @@ import AssistantMessage from '@/components/assistant-message';
 import ErrorMessage from '@/components/error-message';
 import ToolMessage from '@/components/tool-message';
 import React from 'react';
+import {SessionManager, Session} from '@/session/session-manager';
 
 // Helper function to filter out invalid tool calls and deduplicate by ID and function
 const filterValidToolCalls = (toolCalls: ToolCall[]): ToolCall[] => {
@@ -71,6 +72,24 @@ interface UseChatHandlerProps {
 		assistantMsg: Message,
 		systemMessage: Message,
 	) => void;
+	// Session management
+	currentSession: Session | null;
+	sessionManager: SessionManager | null;
+	saveSessionDebounced: (session: Session) => void;
+	convertMessageToSessionFormat: (message: Message) => {
+	  role: 'user' | 'assistant' | 'system' | 'tool';
+	  content: string;
+	  timestamp: number;
+	  tool_calls?: Array<{
+	    id: string;
+	    function: {
+	      name: string;
+	      arguments: Record<string, unknown>;
+	    };
+	  }>;
+	  tool_call_id?: string;
+	  name?: string;
+	};
 }
 
 export function useChatHandler({
@@ -87,6 +106,10 @@ export function useChatHandler({
 	setAbortController,
 	developmentMode = 'normal',
 	onStartToolConfirmationFlow,
+	currentSession,
+	sessionManager,
+	saveSessionDebounced,
+	convertMessageToSessionFormat,
 }: UseChatHandlerProps) {
 	// Conversation state manager for enhanced context
 	const conversationStateManager = React.useRef(new ConversationStateManager());
@@ -218,10 +241,26 @@ export function useChatHandler({
 				content: cleanedContent,
 				tool_calls: validToolCalls.length > 0 ? validToolCalls : undefined,
 			};
-			setMessages([...messages, assistantMsg]);
+			const updatedMessages = [...messages, assistantMsg];
+			setMessages(updatedMessages);
 
 			// Update conversation state with assistant message
 			conversationStateManager.current.updateAssistantMessage(assistantMsg);
+
+			// Save session after assistant response if session management is available
+			if (currentSession && sessionManager) {
+				const sessionMessages = updatedMessages.map(convertMessageToSessionFormat);
+				const sessionToSave = {
+					...currentSession,
+					messages: sessionMessages,
+					metadata: {
+						...(currentSession.metadata || {}),
+						lastAccessedAt: Date.now(),
+						messageCount: updatedMessages.length,
+					},
+				};
+				saveSessionDebounced(sessionToSave);
+			}
 
 			// Handle tool calls if present - this continues the loop
 			if (validToolCalls && validToolCalls.length > 0) {
@@ -445,6 +484,35 @@ export function useChatHandler({
 							...toolMessages,
 						];
 						setMessages(updatedMessagesWithTools);
+
+						// Update conversation state with tool results
+						for (const toolMessage of toolMessages) {
+							conversationStateManager.current.updateAfterToolExecution(
+								{
+									id: toolMessage.tool_call_id || '',
+									function: {
+										name: toolMessage.name || '',
+										arguments: {},
+									},
+								},
+								toolMessage.content,
+							);
+						}
+
+						// Save session after tool execution if session management is available
+						if (currentSession && sessionManager) {
+							const sessionMessages = updatedMessagesWithTools.map(convertMessageToSessionFormat);
+							const sessionToSave = {
+								...currentSession,
+								messages: sessionMessages,
+								metadata: {
+									...(currentSession.metadata || {}),
+									lastAccessedAt: Date.now(),
+									messageCount: updatedMessagesWithTools.length,
+								},
+							};
+							saveSessionDebounced(sessionToSave);
+						}
 
 						// Continue the main conversation loop with tool results as context
 						await processAssistantResponse(

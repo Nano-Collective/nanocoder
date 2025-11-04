@@ -25,8 +25,7 @@
 	"exclude": [
 		"dist",
 		"node_modules",
-		"source/**/__tests__/**/*",
-		"source/**/*.spec.tsx"
+		"source/**/__tests__/**/*"
 	],
 	"ts-node": {
 		"esm": true,
