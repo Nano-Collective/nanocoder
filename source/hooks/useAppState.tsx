@@ -73,6 +73,17 @@ export function useAppState() {
 	const [sessionManager, setSessionManager] = useState<SessionManager | null>(null);
 	const [currentSession, setCurrentSession] = useState<Session | null>(null);
 	const [sessionSaveTimeout, setSessionSaveTimeout] = useState<NodeJS.Timeout | null>(null);
+	const sessionManagerRef = React.useRef<SessionManager | null>(null);
+	const currentSessionRef = React.useRef<Session | null>(null);
+	
+	// Update refs when state changes
+	React.useEffect(() => {
+		sessionManagerRef.current = sessionManager;
+	}, [sessionManager]);
+	
+	React.useEffect(() => {
+		currentSessionRef.current = currentSession;
+	}, [currentSession]);
 
 	// Development mode state
 	const [developmentMode, setDevelopmentMode] =
@@ -197,8 +208,26 @@ export function useAppState() {
 				},
 			};
 			setCurrentSession(updatedSession);
+			
+			// Save the updated session using the debounced save function
+			// Use refs to avoid circular dependency
+			const currentSessionManager = sessionManagerRef.current;
+			if (currentSessionManager) {
+				// Create a debounced save function here
+				if (sessionSaveTimeout) {
+					clearTimeout(sessionSaveTimeout);
+				}
+				
+				const timeout = setTimeout(() => {
+					currentSessionManager.saveSession(updatedSession).catch(error => {
+						console.error('Failed to save session:', error);
+					});
+				}, 1000); // 1 second debounce, same as the original saveSessionDebounced function
+
+				setSessionSaveTimeout(timeout);
+			}
 		}
-	}, [currentSession, sessionManager]);
+	}, [currentSession, sessionManager, convertMessageToSessionFormat, sessionSaveTimeout]);
 
 	// Function to save session with debouncing
 	const saveSessionDebounced = useCallback((sessionToSave: Session) => {
@@ -206,14 +235,14 @@ export function useAppState() {
 		if (sessionSaveTimeout) {
 			clearTimeout(sessionSaveTimeout);
 		}
-
+		
 		// Set a new timeout to save the session after 1 second of inactivity
 		const timeout = setTimeout(() => {
 			sessionManager?.saveSession(sessionToSave).catch(error => {
 				console.error('Failed to save session:', error);
 			});
 		}, 1000); // 1 second debounce
-
+		
 		setSessionSaveTimeout(timeout);
 	}, [sessionManager, sessionSaveTimeout]);
 
@@ -281,11 +310,6 @@ export function useAppState() {
 	      sessionManager.saveSession(sessionToSave).catch(error => {
 	        console.error('Failed to save session on exit:', error);
 	      });
-	    }
-	    
-	    // Clear any pending save timeouts
-	    if (sessionSaveTimeout) {
-	      clearTimeout(sessionSaveTimeout);
 	    }
 	    
 	    // Stop auto-save and cleanup resources

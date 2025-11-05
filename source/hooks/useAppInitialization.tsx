@@ -25,6 +25,7 @@ import {
 	modelCommand,
 	providerCommand,
 	recommendationsCommand,
+	resumeCommand,
 	setupConfigCommand,
 	statusCommand,
 	themeCommand,
@@ -270,6 +271,7 @@ export function useAppInitialization({
 				exportCommand,
 				updateCommand,
 				recommendationsCommand,
+				resumeCommand,
 				statusCommand,
 				setupConfigCommand,
 			]);
