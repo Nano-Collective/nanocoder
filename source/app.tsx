@@ -20,6 +20,7 @@ import SecurityDisclaimer from '@/components/security-disclaimer';
 import {RecommendationsDisplay} from '@/commands/recommendations';
 import {ConfigWizard} from '@/wizard/config-wizard';
 import SessionSelector from '@/components/session-selector';
+import SessionSavingIndicator from '@/components/session-saving-indicator';
 
 // Import extracted hooks and utilities
 import {useAppState} from '@/hooks/useAppState';
@@ -311,6 +312,12 @@ export default function App() {
 		<ThemeContext.Provider value={themeContextValue}>
 			<UIStateProvider>
 				<Box flexDirection="column" padding={1} width="100%">
+					<SessionSavingIndicator
+						status={appState.sessionSaveStatus}
+						sessionTitle={appState.lastSavedSessionTitle || undefined}
+						saveTime={appState.lastSaveTime || undefined}
+						error={appState.saveError || undefined}
+					/>
 					{/* Use natural flexGrow layout - Static components prevent re-renders */}
 					<Box flexGrow={1} flexDirection="column" minHeight={0}>
 						{appState.startChat && (
@@ -385,6 +392,9 @@ export default function App() {
 													
 													// Set current session
 													appState.setCurrentSession(session);
+													
+													// Update session state to indicate existing session
+													appState.setSessionState('existing');
 													
 													appState.addToChatQueue(
 														<Text key={`session-resumed-${Date.now()}`}>
