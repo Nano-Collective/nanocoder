@@ -76,6 +76,7 @@ storybook-static
 .tmp/
 tmp/
 temp/
+.nanocoder-sessions
 
 # IDE and editor files
 .vscode/

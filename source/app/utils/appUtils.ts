@@ -5,8 +5,60 @@ import {toolRegistry} from '@/tools/index';
 import InfoMessage from '@/components/info-message';
 import ToolMessage from '@/components/tool-message';
 import ErrorMessage from '@/components/error-message';
+import UserMessage from '@/components/user-message';
+import AssistantMessage from '@/components/assistant-message';
 import type {MessageSubmissionOptions, Message} from '@/types/index';
 import type {LLMClient} from '@/types/core';
+
+// Helper function to render historical messages when a session is restored
+function renderHistoricalMessages(
+	messages: Message[],
+	addToChatQueue: (component: React.ReactNode) => void,
+	currentModel: string,
+): void {
+	messages.forEach((message, index) => {
+		let component: React.ReactNode = null;
+		
+		switch (message.role) {
+			case 'user':
+				component = React.createElement(UserMessage, {
+					key: `historical-user-${index}-${Date.now()}`,
+					message: message.content,
+				});
+				break;
+			case 'assistant':
+				component = React.createElement(AssistantMessage, {
+					key: `historical-assistant-${index}-${Date.now()}`,
+					message: message.content,
+					model: currentModel,
+				});
+				break;
+			case 'tool':
+				// For tool messages, we need to check if it's a tool result or tool call
+				if (message.tool_call_id && message.content) {
+					component = React.createElement(ToolMessage, {
+						key: `historical-tool-${index}-${Date.now()}`,
+						title: `⚒ ${message.name || 'Tool Result'}`,
+						message: message.content,
+						hideBox: true,
+					});
+				}
+				break;
+			default:
+				// For system messages or unknown roles, render as assistant message
+				component = React.createElement(AssistantMessage, {
+					key: `historical-system-${index}-${Date.now()}`,
+					message: message.content,
+					model: currentModel,
+				});
+				break;
+		}
+		
+		if (component) {
+			addToChatQueue(component);
+		}
+	});
+}
 
 export async function handleMessageSubmission(
 	message: string,
@@ -202,6 +254,9 @@ ${result.fullOutput || '(No output)'}`;
 											
 												// Update messages with the session's messages
 												options.setMessages(appMessages);
+												
+												// Render historical messages in the chat queue
+												renderHistoricalMessages(appMessages, onAddToChatQueue, options.model);
 											
 												// Set current session
 												options.setCurrentSession(session);
@@ -274,6 +329,9 @@ ${result.fullOutput || '(No output)'}`;
 												
 													// Update messages with the session's messages
 													options.setMessages(appMessages);
+													
+													// Render historical messages in the chat queue
+													renderHistoricalMessages(appMessages, onAddToChatQueue, options.model);
 												
 													// Set current session
 													options.setCurrentSession(session);
@@ -324,6 +382,9 @@ ${result.fullOutput || '(No output)'}`;
 											
 												// Update messages with the session's messages
 												options.setMessages(appMessages);
+												
+												// Render historical messages in the chat queue
+												renderHistoricalMessages(appMessages, onAddToChatQueue, options.model);
 											
 												// Set current session
 												options.setCurrentSession(session);

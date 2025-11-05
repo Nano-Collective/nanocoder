@@ -43,10 +43,13 @@ export default function SessionSelector({
 		// Handle number input to select sessions directly
 		if (input && /^\d$/.test(input)) {
 			const sessionNumber = parseInt(input, 10);
-			if (sessionNumber >= 1 && sessionNumber <= filteredSessions.length) {
-				const sessionIndex = sessionNumber - 1;
-				onSessionSelect(filteredSessions[sessionIndex].id);
-				return;
+			// Check if the number corresponds to a session on the current page
+			if (sessionNumber >= 1 && sessionNumber <= currentSessions.length) {
+				const sessionIndex = startIndex + sessionNumber - 1;
+				if (sessionIndex < filteredSessions.length) {
+					onSessionSelect(filteredSessions[sessionIndex].id);
+					return;
+				}
 			}
 		}
 		
@@ -195,6 +198,15 @@ export default function SessionSelector({
 			const sessionIndex = sessionNumber - 1;
 			onSessionSelect(filteredSessions[sessionIndex].id);
 			return;
+		}
+		
+		// Additional check for number input that might be for current page
+		if (!isNaN(sessionNumber) && sessionNumber >= 1 && sessionNumber <= currentSessions.length) {
+			const sessionIndex = startIndex + sessionNumber - 1;
+			if (sessionIndex < filteredSessions.length) {
+				onSessionSelect(filteredSessions[sessionIndex].id);
+				return;
+			}
 		}
 		
 		// Otherwise treat as search query

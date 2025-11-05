@@ -21,6 +21,9 @@ import {RecommendationsDisplay} from '@/commands/recommendations';
 import {ConfigWizard} from '@/wizard/config-wizard';
 import SessionSelector from '@/components/session-selector';
 import SessionSavingIndicator from '@/components/session-saving-indicator';
+import UserMessage from '@/components/user-message';
+import AssistantMessage from '@/components/assistant-message';
+import ToolMessage from '@/components/tool-message';
 
 // Import extracted hooks and utilities
 import {useAppState} from '@/hooks/useAppState';
@@ -36,6 +39,7 @@ import {
 
 // Provide shared UI state to components
 import {UIStateProvider} from '@/hooks/useUIState';
+import { Message } from '@/types/core';
 
 export default function App() {
 	// Use extracted hooks
@@ -195,6 +199,63 @@ export default function App() {
 			/>,
 		);
 	}, [appState]);
+
+	// Helper function to render historical messages when a session is restored
+	const renderHistoricalMessages = React.useCallback((messages: Message[]) => {
+		// Clear any existing historical messages first to avoid duplicates
+		// (This assumes we want to show only the current session's history)
+		
+		messages.forEach((message, index) => {
+			let component: React.ReactNode = null;
+			
+			switch (message.role) {
+				case 'user':
+					component = (
+						<UserMessage
+							key={`historical-user-${index}-${Date.now()}`}
+							message={message.content}
+						/>
+					);
+					break;
+				case 'assistant':
+					component = (
+						<AssistantMessage
+							key={`historical-assistant-${index}-${Date.now()}`}
+							message={message.content}
+							model={appState.currentModel}
+						/>
+					);
+					break;
+				case 'tool':
+					// For tool messages, we need to check if it's a tool result or tool call
+					if (message.tool_call_id && message.content) {
+						component = (
+							<ToolMessage
+								key={`historical-tool-${index}-${Date.now()}`}
+								title={`⚒ ${message.name || 'Tool Result'}`}
+								message={message.content}
+								hideBox={true}
+							/>
+						);
+					}
+					break;
+				default:
+					// For system messages or unknown roles, render as assistant message
+					component = (
+						<AssistantMessage
+							key={`historical-system-${index}-${Date.now()}`}
+							message={message.content}
+							model={appState.currentModel}
+						/>
+					);
+					break;
+			}
+			
+			if (component) {
+				appState.addToChatQueue(component);
+			}
+		});
+	}, [appState.addToChatQueue, appState.currentModel]);
 
 	const handleMessageSubmit = React.useCallback(
 		async (message: string) => {
@@ -389,6 +450,10 @@ export default function App() {
 													
 													// Update messages with the session's messages
 													appState.updateMessages(appMessages);
+													console.log(`Restored ${appMessages.length} messages`);
+													
+													// Render historical messages in the chat queue
+													renderHistoricalMessages(appMessages);
 													
 													// Set current session
 													appState.setCurrentSession(session);

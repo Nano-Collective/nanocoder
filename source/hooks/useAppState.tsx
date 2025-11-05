@@ -68,13 +68,24 @@ export function useAppState() {
 		const [isBashExecuting, setIsBashExecuting] = useState<boolean>(false);
 		const [currentBashCommand, setCurrentBashCommand] = useState<string>('');
 		const [isSessionSelectionMode, setIsSessionSelectionMode] = useState<boolean>(false);
-
+	
 	// Session management states
 	const [sessionManager, setSessionManager] = useState<SessionManager | null>(null);
 	const [currentSession, setCurrentSession] = useState<Session | null>(null);
 	const [sessionSaveTimeout, setSessionSaveTimeout] = useState<NodeJS.Timeout | null>(null);
+	
+	// Session save status states
+	const [sessionSaveStatus, setSessionSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+	const [lastSavedSessionTitle, setLastSavedSessionTitle] = useState<string | null>(null);
+	const [lastSaveTime, setLastSaveTime] = useState<Date | null>(null);
+	const [saveError, setSaveError] = useState<string | null>(null);
+	
+	// Session state tracking
+	const [sessionState, setSessionState] = useState<'new' | 'existing' | 'none'>('none');
+	
 	const sessionManagerRef = React.useRef<SessionManager | null>(null);
 	const currentSessionRef = React.useRef<Session | null>(null);
+	const saveStatusTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 	
 	// Update refs when state changes
 	React.useEffect(() => {
@@ -185,7 +196,7 @@ export function useAppState() {
 
 	// Optimized message updater that separates display from context
 	const updateMessages = useCallback((newMessages: Message[]) => {
-		setMessages(newMessages); // Full context always preserved for model
+	setMessages(newMessages); // Full context always preserved for model
 
 		// Limit display messages for UI performance only
 		const displayLimit = 30;
@@ -198,6 +209,82 @@ export function useAppState() {
 		// Update the current session if one exists
 		if (currentSession && sessionManager) {
 			const sessionMessages = newMessages.map(convertMessageToSessionFormat);
+			
+			// Update title if it's still untitled and we have messages to generate a title from
+			let title = currentSession.title;
+			if (!title || title === 'Untitled Session' || title.includes('Untitled')) {
+				// Generate the title asynchronously without blocking the UI update
+				sessionManager.generateImprovedSessionTitle(sessionMessages).then(newTitle => {
+					if (newTitle && newTitle !== 'Untitled Session' && !newTitle.includes('Untitled')) {
+						const updatedSessionWithNewTitle = {
+							...currentSession,
+							title: newTitle,
+							messages: sessionMessages,
+							metadata: {
+								...(currentSession.metadata || {}),
+								lastAccessedAt: Date.now(),
+								messageCount: newMessages.length,
+							},
+						};
+						setCurrentSession(updatedSessionWithNewTitle);
+						
+						// Also update the debounced save with the new title
+						const currentSessionManager = sessionManagerRef.current;
+						if (currentSessionManager) {
+							// Clear any existing timeout
+							if (sessionSaveTimeout) {
+								clearTimeout(sessionSaveTimeout);
+							}
+							
+							// Clear any existing status timeout
+							if (saveStatusTimeoutRef.current) {
+								clearTimeout(saveStatusTimeoutRef.current);
+							}
+							
+							// Set status to saving
+							setSessionSaveStatus('saving');
+							setSaveError(null);
+							
+							const timeout = setTimeout(() => {
+								currentSessionManager.saveSession(updatedSessionWithNewTitle)
+									.then(() => {
+										// Update status to saved on success
+										setSessionSaveStatus('saved');
+										setLastSavedSessionTitle(updatedSessionWithNewTitle.title);
+										setLastSaveTime(new Date());
+										
+										// Auto-reset status after 3 seconds
+										if (saveStatusTimeoutRef.current) {
+											clearTimeout(saveStatusTimeoutRef.current);
+										}
+										saveStatusTimeoutRef.current = setTimeout(() => {
+											setSessionSaveStatus('idle');
+										}, 3000);
+									})
+									.catch(error => {
+										console.error('Failed to save session:', error);
+										// Update status to error
+										setSessionSaveStatus('error');
+										setSaveError(error instanceof Error ? error.message : String(error));
+										
+										// Auto-reset error status after 5 seconds
+										if (saveStatusTimeoutRef.current) {
+											clearTimeout(saveStatusTimeoutRef.current);
+										}
+										saveStatusTimeoutRef.current = setTimeout(() => {
+											setSessionSaveStatus('idle');
+											setSaveError(null);
+										}, 5000);
+									});
+							}, 100); // 1 second debounce
+
+							setSessionSaveTimeout(timeout);
+						}
+					}
+				});
+			}
+			
+			// Update session with current messages (and potentially new title if it was already updated)
 			const updatedSession = {
 				...currentSession,
 				messages: sessionMessages,
@@ -213,16 +300,52 @@ export function useAppState() {
 			// Use refs to avoid circular dependency
 			const currentSessionManager = sessionManagerRef.current;
 			if (currentSessionManager) {
-				// Create a debounced save function here
+				// Clear any existing timeout
 				if (sessionSaveTimeout) {
 					clearTimeout(sessionSaveTimeout);
 				}
 				
+				// Clear any existing status timeout
+				if (saveStatusTimeoutRef.current) {
+					clearTimeout(saveStatusTimeoutRef.current);
+				}
+				
+				// Set status to saving
+				setSessionSaveStatus('saving');
+				setSaveError(null);
+				
 				const timeout = setTimeout(() => {
-					currentSessionManager.saveSession(updatedSession).catch(error => {
-						console.error('Failed to save session:', error);
-					});
-				}, 1000); // 1 second debounce, same as the original saveSessionDebounced function
+					currentSessionManager.saveSession(updatedSession)
+						.then(() => {
+							// Update status to saved on success
+							setSessionSaveStatus('saved');
+							setLastSavedSessionTitle(updatedSession.title);
+							setLastSaveTime(new Date());
+							
+							// Auto-reset status after 3 seconds
+							if (saveStatusTimeoutRef.current) {
+								clearTimeout(saveStatusTimeoutRef.current);
+							}
+							saveStatusTimeoutRef.current = setTimeout(() => {
+								setSessionSaveStatus('idle');
+							}, 3000);
+						})
+						.catch(error => {
+							console.error('Failed to save session:', error);
+							// Update status to error
+							setSessionSaveStatus('error');
+							setSaveError(error instanceof Error ? error.message : String(error));
+							
+							// Auto-reset error status after 5 seconds
+							if (saveStatusTimeoutRef.current) {
+								clearTimeout(saveStatusTimeoutRef.current);
+							}
+							saveStatusTimeoutRef.current = setTimeout(() => {
+								setSessionSaveStatus('idle');
+								setSaveError(null);
+							}, 5000);
+						});
+				}, 100); // 1 second debounce
 
 				setSessionSaveTimeout(timeout);
 			}
@@ -236,11 +359,47 @@ export function useAppState() {
 			clearTimeout(sessionSaveTimeout);
 		}
 		
+		// Clear any existing status timeout
+		if (saveStatusTimeoutRef.current) {
+			clearTimeout(saveStatusTimeoutRef.current);
+		}
+		
+		// Set status to saving
+		setSessionSaveStatus('saving');
+		setSaveError(null);
+		
 		// Set a new timeout to save the session after 1 second of inactivity
 		const timeout = setTimeout(() => {
-			sessionManager?.saveSession(sessionToSave).catch(error => {
-				console.error('Failed to save session:', error);
-			});
+			sessionManager?.saveSession(sessionToSave)
+				.then(() => {
+					// Update status to saved on success
+					setSessionSaveStatus('saved');
+					setLastSavedSessionTitle(sessionToSave.title);
+					setLastSaveTime(new Date());
+					
+					// Auto-reset status after 3 seconds
+					if (saveStatusTimeoutRef.current) {
+						clearTimeout(saveStatusTimeoutRef.current);
+					}
+					saveStatusTimeoutRef.current = setTimeout(() => {
+						setSessionSaveStatus('idle');
+					}, 3000);
+				})
+				.catch(error => {
+					console.error('Failed to save session:', error);
+					// Update status to error
+					setSessionSaveStatus('error');
+					setSaveError(error instanceof Error ? error.message : String(error));
+					
+					// Auto-reset error status after 5 seconds
+					if (saveStatusTimeoutRef.current) {
+						clearTimeout(saveStatusTimeoutRef.current);
+					}
+					saveStatusTimeoutRef.current = setTimeout(() => {
+						setSessionSaveStatus('idle');
+						setSaveError(null);
+					}, 5000);
+				});
 		}, 1000); // 1 second debounce
 		
 		setSessionSaveTimeout(timeout);
@@ -253,37 +412,22 @@ export function useAppState() {
 	    await manager.initialize();
 	    setSessionManager(manager);
 
-	    // Try to load the most recent session or create a new one
+	    // Always create a new session by default (unless user uses /resume)
 	    try {
-	      const sessions = await manager.listSessions();
-	      if (sessions.length > 0) {
-	        // Load the most recently updated session
-	        const mostRecentSession = sessions.reduce((latest, session) =>
-	          session.updatedAt > latest.updatedAt ? session : latest,
-	          sessions[0]
-	        );
-	        
-	        const loadedSession = await manager.loadSession(mostRecentSession.id);
-	        if (loadedSession) {
-	          setCurrentSession(loadedSession);
-	          const appMessages = loadedSession.messages.map(convertSessionMessageToAppFormat);
-	          setMessages(appMessages);
-	        }
-	      } else {
-	        // Create a new session if no existing sessions
-	        const newSession = await manager.createSession();
-	        setCurrentSession(newSession);
-	      }
+	      const newSession = await manager.createSession();
+	      setCurrentSession(newSession);
+	      setSessionState('new'); // Set state to new session
 	      
 	      // Run cleanup of old sessions in the background
 	      manager.cleanupOldSessions().catch(error => {
 	        console.error('Failed to cleanup old sessions:', error);
 	      });
 	    } catch (error) {
-	      console.error('Failed to load session:', error);
+	      console.error('Failed to create new session:', error);
 	      // Create a new session if loading fails
 	      const newSession = await manager.createSession();
 	      setCurrentSession(newSession);
+	      setSessionState('new'); // Set state to new session
 	    }
 	    
 	    // Start auto-save functionality
@@ -310,6 +454,11 @@ export function useAppState() {
 	      sessionManager.saveSession(sessionToSave).catch(error => {
 	        console.error('Failed to save session on exit:', error);
 	      });
+	    }
+	    
+	    // Clear save status timeout on cleanup
+	    if (saveStatusTimeoutRef.current) {
+	      clearTimeout(saveStatusTimeoutRef.current);
 	    }
 	    
 	    // Stop auto-save and cleanup resources
@@ -365,7 +514,12 @@ export function useAppState() {
 		currentConversationContext,
 		chatComponents,
 		componentKeyCounter,
-	isSessionSelectionMode,
+		isSessionSelectionMode,
+		// Session save status
+		sessionSaveStatus,
+		lastSavedSessionTitle,
+		lastSaveTime,
+		saveError,
 
 		// Setters
 			setClient,
@@ -402,18 +556,25 @@ export function useAppState() {
 			setChatComponents,
 			setComponentKeyCounter,
 			setIsSessionSelectionMode,
+			// Session save status setters
+			setSessionSaveStatus,
+			setLastSavedSessionTitle,
+			setLastSaveTime,
+			setSaveError,
 
 		// Utilities
-	addToChatQueue,
+		addToChatQueue,
 		getMessageTokens,
 		updateMessages,
 		resetToolConfirmationState,
-		// Session management
+	// Session management
 		sessionManager,
 		currentSession,
 		setCurrentSession,
+		setSessionState,
+		sessionState,
 		saveSessionDebounced,
 		convertMessageToSessionFormat,
-	convertSessionMessageToAppFormat,
+		convertSessionMessageToAppFormat,
 	};
 }

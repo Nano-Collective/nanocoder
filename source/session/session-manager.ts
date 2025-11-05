@@ -77,7 +77,7 @@ export class SessionManager {
     this.diskSpaceThreshold = sessionConfig.diskSpaceThreshold ?? 0.9; // Use 90% of available disk space
     
     // Use configured directory or default
-    const sessionDir = sessionConfig.directory ?? path.join(os.homedir(), '.nanocoder-sessions');
+    const sessionDir = sessionConfig.directory ?? path.join(process.cwd(), '.nanocoder-sessions');
     // Replace ~ with home directory if needed
     this.sessionsDir = sessionDir.startsWith('~')
       ? path.join(os.homedir(), sessionDir.substring(2))
@@ -245,7 +245,56 @@ export class SessionManager {
         // Ensure all required properties exist
         if (!msg.timestamp) msg.timestamp = Date.now();
         if (!msg.role) msg.role = 'user';
-        if (!msg.content) msg.content = '';
+        if (typeof msg.content === 'undefined') msg.content = '';
+        
+        // Handle legacy tool_call format that might have been used in older sessions
+        if (msg.tool_call) {
+          if (!msg.tool_calls) {
+            // Convert old single tool_call to new tool_calls array format
+            msg.tool_calls = [{
+              id: `tool_call_${Date.now()}`,
+              function: {
+                name: msg.tool_call,
+                arguments: msg.tool_call_args || {}
+              }
+            }];
+          }
+          // Remove the old field
+          delete msg.tool_call;
+        }
+        
+        // Ensure tool_calls is an array if it exists
+        if (msg.tool_calls && !Array.isArray(msg.tool_calls)) {
+          // Convert single tool call to array format
+          const singleToolCall = msg.tool_calls;
+          msg.tool_calls = [singleToolCall];
+        }
+        
+        // For legacy tool calls, ensure they have proper structure
+        if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
+          msg.tool_calls = msg.tool_calls.map((toolCall: any) => {
+            // Ensure each tool call has required fields
+            if (!toolCall.id) {
+              toolCall.id = `tool_call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            }
+            
+            if (!toolCall.function) {
+              toolCall.function = {
+                name: 'unknown_function',
+                arguments: {}
+              };
+            } else {
+              if (!toolCall.function.name) {
+                toolCall.function.name = 'unknown_function';
+              }
+              if (!toolCall.function.arguments) {
+                toolCall.function.arguments = {};
+              }
+            }
+            
+            return toolCall;
+          });
+        }
         
         // If it's an old format without tool properties, add them
         if (typeof msg.tool_calls === 'undefined') msg.tool_calls = undefined;
@@ -269,40 +318,50 @@ export class SessionManager {
 
   /**
    * Validate loaded messages match current tool schema
+   * This method is now more permissive to allow for legacy session formats
    */
    private validateMessages(messages: Session['messages']): boolean {
      try {
        for (const message of messages) {
-         // Check if role is valid
-         if (!['user', 'assistant', 'system', 'tool'].includes(message.role)) {
-           console.warn(`Invalid message role: ${message.role}`);
+         // Allow any string role (not just the predefined ones) for backward compatibility
+         if (typeof message.role !== 'string') {
+           console.warn(`Invalid message role type: ${typeof message.role}`);
            return false;
          }
          
-         // Check if content exists
-         if (typeof message.content !== 'string') {
-           console.warn(`Invalid message content: ${typeof message.content}`);
+         // Allow any content type (not just string) but check it exists
+         if (typeof message.content === 'undefined') {
+           console.warn(`Missing message content`);
            return false;
          }
          
-         // Validate tool_calls if present
-         if (message.tool_calls && Array.isArray(message.tool_calls)) {
+         // For tool_calls, be more forgiving to handle legacy formats
+         if (message.tool_calls) {
+           if (!Array.isArray(message.tool_calls)) {
+             console.warn(`Invalid tool_calls format, not an array`);
+             return false;
+           }
+           
            for (const toolCall of message.tool_calls) {
-             if (!toolCall.id || typeof toolCall.id !== 'string') {
-               console.warn(`Invalid tool call id: ${toolCall.id}`);
+             if (!toolCall.id) {
+               console.warn(`Missing tool_call id`);
                return false;
              }
-             if (!toolCall.function || typeof toolCall.function !== 'object') {
-               console.warn(`Invalid tool call function: ${toolCall.function}`);
+             
+             if (!toolCall.function) {
+               console.warn(`Missing tool_call function`);
                return false;
              }
-             if (!toolCall.function.name || typeof toolCall.function.name !== 'string') {
-               console.warn(`Invalid tool call function name: ${toolCall.function.name}`);
+             
+             if (!toolCall.function.name) {
+               console.warn(`Missing tool_call function name`);
                return false;
              }
-             if (typeof toolCall.function.arguments !== 'object') {
-               console.warn(`Invalid tool call arguments: ${toolCall.function.arguments}`);
-               return false;
+             
+             // Don't strictly validate arguments structure for legacy compatibility
+             if (typeof toolCall.function.arguments === 'undefined') {
+               console.warn(`Tool call missing arguments, setting to empty object`);
+               toolCall.function.arguments = {};
              }
            }
          }
@@ -404,7 +463,7 @@ export class SessionManager {
    */
   public async createSession(initialMessages: Session['messages'] = []): Promise<Session> {
     const id = this.generateSessionId();
-    const title = this.generateSessionTitle(initialMessages);
+    const title = await this.generateImprovedSessionTitle(initialMessages);
     
     const session: Session = {
       id,
@@ -430,6 +489,14 @@ export class SessionManager {
  public async saveSession(session: Session): Promise<void> {
    try {
      session.updatedAt = Date.now();
+     
+     // Update the title if it's still untitled but now has meaningful content
+     if (!session.title || session.title === 'Untitled Session' || session.title.includes('Untitled')) {
+       const newTitle = await this.generateImprovedSessionTitle(session.messages);
+       if (newTitle && newTitle !== 'Untitled Session' && !newTitle.includes('Untitled')) {
+         session.title = newTitle;
+       }
+     }
      
      // Check if session size exceeds limit
      if (!this.isSessionSizeValid(session)) {
@@ -630,6 +697,39 @@ export class SessionManager {
     }
 
     return 'Untitled Session';
+  }
+
+  /**
+   * Generate a more descriptive session title using the first few messages
+   * This can be enhanced to use an LLM for better titles
+   */
+  public async generateImprovedSessionTitle(messages: Session['messages']): Promise<string> {
+    if (messages.length === 0) {
+      return 'Untitled Session';
+    }
+
+    // Get the first few user messages to create a more descriptive title
+    const userMessages = messages.filter(msg => msg.role === 'user').slice(0, 3);
+    
+    if (userMessages.length === 0) {
+      return 'Untitled Session';
+    }
+
+    // Create a title based on the first user message
+    const firstUserMessage = userMessages[0];
+    let title = firstUserMessage.content.trim();
+    
+    // If the first message is too long, truncate it
+    if (title.length > 50) {
+      title = title.substring(0, 47) + '...';
+    }
+    
+    // If we have multiple messages, add a note about the number
+    if (userMessages.length > 1) {
+      title += ` +${userMessages.length - 1}`;
+    }
+
+    return title;
   }
 
   /**
