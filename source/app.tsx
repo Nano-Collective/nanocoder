@@ -19,6 +19,11 @@ import Spinner from 'ink-spinner';
 import SecurityDisclaimer from '@/components/security-disclaimer';
 import {RecommendationsDisplay} from '@/commands/recommendations';
 import {ConfigWizard} from '@/wizard/config-wizard';
+import SessionSelector from '@/components/session-selector';
+import SessionSavingIndicator from '@/components/session-saving-indicator';
+import UserMessage from '@/components/user-message';
+import AssistantMessage from '@/components/assistant-message';
+import ToolMessage from '@/components/tool-message';
 
 // Import extracted hooks and utilities
 import {useAppState} from '@/hooks/useAppState';
@@ -34,6 +39,7 @@ import {
 
 // Provide shared UI state to components
 import {UIStateProvider} from '@/hooks/useUIState';
+import { Message } from '@/types/core';
 
 export default function App() {
 	// Use extracted hooks
@@ -62,7 +68,7 @@ export default function App() {
 	const chatHandler = useChatHandler({
 		client: appState.client,
 		toolManager: appState.toolManager,
-		messages: appState.messages,
+	messages: appState.messages,
 		setMessages: appState.updateMessages,
 		currentModel: appState.currentModel,
 		setIsThinking: appState.setIsThinking,
@@ -72,7 +78,7 @@ export default function App() {
 		abortController: appState.abortController,
 		setAbortController: appState.setAbortController,
 		developmentMode: appState.developmentMode,
-		onStartToolConfirmationFlow: (
+	onStartToolConfirmationFlow: (
 			toolCalls,
 			updatedMessages,
 			assistantMsg,
@@ -88,6 +94,11 @@ export default function App() {
 			});
 			appState.setIsToolConfirmationMode(true);
 		},
+		// Session management
+		currentSession: appState.currentSession,
+		sessionManager: appState.sessionManager,
+		saveSessionDebounced: appState.saveSessionDebounced,
+		convertMessageToSessionFormat: appState.convertMessageToSessionFormat,
 	});
 
 	// Setup tool handler
@@ -113,24 +124,25 @@ export default function App() {
 	});
 
 	// Setup mode handlers
-	const modeHandlers = useModeHandlers({
-		client: appState.client,
-		currentModel: appState.currentModel,
-		currentProvider: appState.currentProvider,
-		currentTheme: appState.currentTheme,
-		setClient: appState.setClient,
-		setCurrentModel: appState.setCurrentModel,
-		setCurrentProvider: appState.setCurrentProvider,
-		setCurrentTheme: appState.setCurrentTheme,
-		setMessages: appState.updateMessages,
-		setIsModelSelectionMode: appState.setIsModelSelectionMode,
-		setIsProviderSelectionMode: appState.setIsProviderSelectionMode,
-		setIsThemeSelectionMode: appState.setIsThemeSelectionMode,
-		setIsRecommendationsMode: appState.setIsRecommendationsMode,
-		setIsConfigWizardMode: appState.setIsConfigWizardMode,
-		addToChatQueue: appState.addToChatQueue,
-		componentKeyCounter: appState.componentKeyCounter,
-	});
+		const modeHandlers = useModeHandlers({
+			client: appState.client,
+			currentModel: appState.currentModel,
+			currentProvider: appState.currentProvider,
+			currentTheme: appState.currentTheme,
+			setClient: appState.setClient,
+			setCurrentModel: appState.setCurrentModel,
+			setCurrentProvider: appState.setCurrentProvider,
+			setCurrentTheme: appState.setCurrentTheme,
+			setMessages: appState.updateMessages,
+			setIsModelSelectionMode: appState.setIsModelSelectionMode,
+			setIsProviderSelectionMode: appState.setIsProviderSelectionMode,
+			setIsThemeSelectionMode: appState.setIsThemeSelectionMode,
+			setIsRecommendationsMode: appState.setIsRecommendationsMode,
+			setIsConfigWizardMode: appState.setIsConfigWizardMode,
+			setIsSessionSelectionMode: appState.setIsSessionSelectionMode,
+			addToChatQueue: appState.addToChatQueue,
+			componentKeyCounter: appState.componentKeyCounter,
+		});
 
 	// Setup initialization
 	useAppInitialization({
@@ -188,31 +200,95 @@ export default function App() {
 		);
 	}, [appState]);
 
+	// Helper function to render historical messages when a session is restored
+	const renderHistoricalMessages = React.useCallback((messages: Message[]) => {
+		// Clear any existing historical messages first to avoid duplicates
+		// (This assumes we want to show only the current session's history)
+		
+		messages.forEach((message, index) => {
+			let component: React.ReactNode = null;
+			
+			switch (message.role) {
+				case 'user':
+					component = (
+						<UserMessage
+							key={`historical-user-${index}-${Date.now()}`}
+							message={message.content}
+						/>
+					);
+					break;
+				case 'assistant':
+					component = (
+						<AssistantMessage
+							key={`historical-assistant-${index}-${Date.now()}`}
+							message={message.content}
+							model={appState.currentModel}
+						/>
+					);
+					break;
+				case 'tool':
+					// For tool messages, we need to check if it's a tool result or tool call
+					if (message.tool_call_id && message.content) {
+						component = (
+							<ToolMessage
+								key={`historical-tool-${index}-${Date.now()}`}
+								title={`⚒ ${message.name || 'Tool Result'}`}
+								message={message.content}
+								hideBox={true}
+							/>
+						);
+					}
+					break;
+				default:
+					// For system messages or unknown roles, render as assistant message
+					component = (
+						<AssistantMessage
+							key={`historical-system-${index}-${Date.now()}`}
+							message={message.content}
+							model={appState.currentModel}
+						/>
+					);
+					break;
+			}
+			
+			if (component) {
+				appState.addToChatQueue(component);
+			}
+		});
+	}, [appState.addToChatQueue, appState.currentModel]);
+
 	const handleMessageSubmit = React.useCallback(
 		async (message: string) => {
 			await handleMessageSubmission(message, {
-				customCommandCache: appState.customCommandCache,
-				customCommandLoader: appState.customCommandLoader,
-				customCommandExecutor: appState.customCommandExecutor,
-				onClearMessages: clearMessages,
-				onEnterModelSelectionMode: modeHandlers.enterModelSelectionMode,
-				onEnterProviderSelectionMode: modeHandlers.enterProviderSelectionMode,
-				onEnterThemeSelectionMode: modeHandlers.enterThemeSelectionMode,
-				onEnterRecommendationsMode: modeHandlers.enterRecommendationsMode,
-				onEnterConfigWizardMode: modeHandlers.enterConfigWizardMode,
-				onShowStatus: handleShowStatus,
-				onHandleChatMessage: chatHandler.handleChatMessage,
-				onAddToChatQueue: appState.addToChatQueue,
-				componentKeyCounter: appState.componentKeyCounter,
-				setMessages: appState.updateMessages,
-				messages: appState.messages,
-				setIsBashExecuting: appState.setIsBashExecuting,
-				setCurrentBashCommand: appState.setCurrentBashCommand,
-				provider: appState.currentProvider,
-				model: appState.currentModel,
-				theme: appState.currentTheme,
-				updateInfo: appState.updateInfo,
-				getMessageTokens: appState.getMessageTokens,
+					customCommandCache: appState.customCommandCache,
+					customCommandLoader: appState.customCommandLoader,
+					customCommandExecutor: appState.customCommandExecutor,
+					onClearMessages: clearMessages,
+					onEnterModelSelectionMode: modeHandlers.enterModelSelectionMode,
+					onEnterProviderSelectionMode: modeHandlers.enterProviderSelectionMode,
+					onEnterThemeSelectionMode: modeHandlers.enterThemeSelectionMode,
+					onEnterRecommendationsMode: modeHandlers.enterRecommendationsMode,
+					onEnterConfigWizardMode: modeHandlers.enterConfigWizardMode,
+				onEnterSessionSelectionMode: modeHandlers.enterSessionSelectionMode,
+					onShowStatus: handleShowStatus,
+					onHandleChatMessage: chatHandler.handleChatMessage,
+					onAddToChatQueue: appState.addToChatQueue,
+					componentKeyCounter: appState.componentKeyCounter,
+					setMessages: appState.updateMessages,
+					messages: appState.messages,
+					setIsBashExecuting: appState.setIsBashExecuting,
+					setCurrentBashCommand: appState.setCurrentBashCommand,
+					provider: appState.currentProvider,
+					model: appState.currentModel,
+					theme: appState.currentTheme,
+					updateInfo: appState.updateInfo,
+					getMessageTokens: appState.getMessageTokens,
+				sessionManager: appState.sessionManager,
+				convertSessionMessageToAppFormat: appState.convertSessionMessageToAppFormat,
+				convertMessageToSessionFormat: appState.convertMessageToSessionFormat,
+				setCurrentProvider: appState.setCurrentProvider,
+				setCurrentModel: appState.setCurrentModel,
+				setCurrentSession: appState.setCurrentSession,
 			});
 		},
 		[
@@ -297,6 +373,12 @@ export default function App() {
 		<ThemeContext.Provider value={themeContextValue}>
 			<UIStateProvider>
 				<Box flexDirection="column" padding={1} width="100%">
+					<SessionSavingIndicator
+						status={appState.sessionSaveStatus}
+						sessionTitle={appState.lastSavedSessionTitle || undefined}
+						saveTime={appState.lastSaveTime || undefined}
+						error={appState.saveError || undefined}
+					/>
 					{/* Use natural flexGrow layout - Static components prevent re-renders */}
 					<Box flexGrow={1} flexDirection="column" minHeight={0}>
 						{appState.startChat && (
@@ -346,6 +428,77 @@ export default function App() {
 										void modeHandlers.handleConfigWizardComplete(configPath)
 									}
 									onCancel={modeHandlers.handleConfigWizardCancel}
+								/>
+							) : appState.isSessionSelectionMode ? (
+								<SessionSelector
+									sessionManager={appState.sessionManager!}
+									onSessionSelect={async (sessionId: string | null) => {
+										if (sessionId) {
+											try {
+												const session = await appState.sessionManager!.loadSession(sessionId);
+												if (session) {
+													// Convert session messages to app format
+													const appMessages = session.messages.map(appState.convertSessionMessageToAppFormat);
+													
+													// Restore provider/model from session metadata if available
+													if (session.metadata?.provider) {
+														appState.setCurrentProvider(session.metadata.provider);
+													}
+													if (session.metadata?.model) {
+														appState.setCurrentModel(session.metadata.model);
+													}
+													
+													// Update messages with the session's messages
+													appState.updateMessages(appMessages);
+													console.log(`Restored ${appMessages.length} messages`);
+													
+													// Render historical messages in the chat queue
+													renderHistoricalMessages(appMessages);
+													
+													// Set current session
+													appState.setCurrentSession(session);
+													
+													// Update session state to indicate existing session
+													appState.setSessionState('existing');
+													
+													appState.addToChatQueue(
+														<Text key={`session-resumed-${Date.now()}`}>
+															Session "{session.title}" resumed.
+														</Text>
+													);
+												} else {
+													appState.addToChatQueue(
+														<Text key={`session-not-found-${Date.now()}`}>
+															Session not found.
+														</Text>
+													);
+												}
+											} catch (error) {
+												appState.addToChatQueue(
+													<Text key={`session-error-${Date.now()}`}>
+														Error loading session: {String(error)}
+													</Text>
+												);
+											}
+										} else {
+											appState.addToChatQueue(
+												<Text key={`session-cancelled-${Date.now()}`}>
+													Session selection cancelled.
+												</Text>
+											);
+										}
+										
+										// Exit session selection mode
+										appState.setIsSessionSelectionMode(false);
+									}}
+									onCancel={() => {
+										appState.setIsSessionSelectionMode(false);
+										appState.addToChatQueue(
+											<Text key={`session-cancelled-${Date.now()}`}>
+												Session selection cancelled.
+											</Text>
+										);
+									}}
 								/>
 							) : appState.isToolConfirmationMode &&
 							  appState.pendingToolCalls[appState.currentToolIndex] ? (

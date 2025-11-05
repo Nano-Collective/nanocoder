@@ -63,9 +63,18 @@ export interface UserPreferences {
 	lastProvider?: string;
 	lastModel?: string;
 	providerModels?: {
-		[key in string]?: string;
+	[key in string]?: string;
 	};
 	lastUpdateCheck?: number;
 	selectedTheme?: ThemePreset;
 	trustedDirectories?: string[];
+	sessions?: {
+	autoSave?: boolean;
+		saveInterval?: number;
+		maxSessions?: number;
+		retentionDays?: number;
+		directory?: string;
+		maxSizeMB?: number;
+		diskSpaceThreshold?: number;
+	};
 }

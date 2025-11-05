@@ -12,3 +12,4 @@ export * from '@/commands/update';
 export * from '@/commands/recommendations';
 export * from '@/commands/status';
 export * from '@/commands/setup-config';
+export * from '@/commands/resume';

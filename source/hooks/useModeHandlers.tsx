@@ -26,6 +26,7 @@ interface UseModeHandlersProps {
 	setIsThemeSelectionMode: (mode: boolean) => void;
 	setIsRecommendationsMode: (mode: boolean) => void;
 	setIsConfigWizardMode: (mode: boolean) => void;
+	setIsSessionSelectionMode: (mode: boolean) => void;
 	addToChatQueue: (component: React.ReactNode) => void;
 	componentKeyCounter: number;
 }
@@ -45,6 +46,7 @@ export function useModeHandlers({
 	setIsThemeSelectionMode,
 	setIsRecommendationsMode,
 	setIsConfigWizardMode,
+	setIsSessionSelectionMode,
 	addToChatQueue,
 	componentKeyCounter,
 }: UseModeHandlersProps) {
@@ -195,8 +197,13 @@ export function useModeHandlers({
 	};
 
 	// Helper function to enter config wizard mode
-	const enterConfigWizardMode = () => {
-		setIsConfigWizardMode(true);
+		const enterConfigWizardMode = () => {
+			setIsConfigWizardMode(true);
+		};
+	
+	// Helper function to enter session selection mode
+	const enterSessionSelectionMode = () => {
+		setIsSessionSelectionMode(true);
 	};
 
 	// Handle config wizard cancel/complete
@@ -261,6 +268,7 @@ export function useModeHandlers({
 		enterThemeSelectionMode,
 		enterRecommendationsMode,
 		enterConfigWizardMode,
+	enterSessionSelectionMode,
 		handleModelSelect,
 		handleModelSelectionCancel,
 		handleProviderSelect,

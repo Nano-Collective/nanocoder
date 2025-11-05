@@ -15,6 +15,7 @@ export interface MessageSubmissionOptions {
 	onEnterThemeSelectionMode: () => void;
 	onEnterRecommendationsMode: () => void;
 	onEnterConfigWizardMode: () => void;
+	onEnterSessionSelectionMode: () => void;
 	onShowStatus: () => void;
 	onHandleChatMessage: (message: string) => Promise<void>;
 	onAddToChatQueue: (component: React.ReactNode) => void;
@@ -28,4 +29,36 @@ export interface MessageSubmissionOptions {
 	theme: string;
 	updateInfo: UpdateInfo | null;
 	getMessageTokens: (message: Message) => number;
+	sessionManager: any; // SessionManager from useAppState
+	convertSessionMessageToAppFormat: (sessionMessage: {
+	  role: 'user' | 'assistant' | 'system' | 'tool';
+	  content: string;
+	  timestamp: number;
+	  tool_calls?: Array<{
+	    id: string;
+	    function: {
+	      name: string;
+	      arguments: Record<string, unknown>;
+	    };
+	  }>;
+	  tool_call_id?: string;
+	  name?: string;
+	}) => Message; // Function from useAppState
+convertMessageToSessionFormat: (message: Message) => {
+	  role: 'user' | 'assistant' | 'system' | 'tool';
+	  content: string;
+	  timestamp: number;
+	  tool_calls?: Array<{
+	    id: string;
+	    function: {
+	      name: string;
+	      arguments: Record<string, unknown>;
+	    };
+	  }>;
+	  tool_call_id?: string;
+	  name?: string;
+	}; // Function from useAppState
+setCurrentProvider: (provider: string) => void;
+setCurrentModel: (model: string) => void;
+setCurrentSession: (session: any) => void; // Session type from useAppState
 }

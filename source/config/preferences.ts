@@ -45,6 +45,27 @@ export function updateLastUsed(provider: string, model: string): void {
 	savePreferences(preferences);
 }
 
+export function getSessionConfig(): UserPreferences['sessions'] {
+	const preferences = loadPreferences();
+	return preferences.sessions || {};
+}
+
+export function updateSessionConfig(config: UserPreferences['sessions']): void {
+	const preferences = loadPreferences();
+	
+	if (!preferences.sessions) {
+		preferences.sessions = {};
+	}
+	
+	// Merge the new config with existing session config
+	preferences.sessions = {
+		...preferences.sessions,
+		...config
+	};
+
+	savePreferences(preferences);
+}
+
 export function getLastUsedModel(provider: string): string | undefined {
 	const preferences = loadPreferences();
 	return preferences.providerModels?.[provider];
