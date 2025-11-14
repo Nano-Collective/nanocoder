@@ -1,4 +1,4 @@
-import {Box, Text, useApp} from 'ink';
+import {Box, Text, useApp, Static} from 'ink';
 import WelcomeMessage from '@/components/welcome-message';
 import React from 'react';
 import {getThemeColors} from '@/config/themes';
@@ -313,17 +313,33 @@ export default function App() {
 							) : appState.isThinking && !chatHandler.isStreaming ? (
 								<ThinkingIndicator />
 							) : null}
-							{/* Show streaming content while it's being streamed */}
-							{chatHandler.isStreaming && chatHandler.streamingContent && (
-								<Box flexDirection="column" marginBottom={1}>
-									<Box marginBottom={1}>
-										<Text color={themeContextValue.colors.primary} bold>
-											{appState.currentModel}:
-										</Text>
+							{/* Show streaming content with Static to prevent flickering */}
+							{chatHandler.isStreaming && chatHandler.streamingContent && (() => {
+								// Split content into completed lines and current line
+								const lines = chatHandler.streamingContent.split('\n');
+								const completedLines = lines.slice(0, -1);
+								const currentLine = lines[lines.length - 1];
+
+								return (
+									<Box flexDirection="column" marginBottom={1}>
+										<Box marginBottom={1}>
+											<Text color={themeContextValue.colors.primary} bold>
+												{appState.currentModel}:
+											</Text>
+										</Box>
+										{/* Use Static for completed lines to prevent re-renders */}
+										{completedLines.length > 0 && (
+											<Static items={completedLines}>
+												{(line, index) => (
+													<Text key={`streaming-line-${index}`}>{line}</Text>
+												)}
+											</Static>
+										)}
+										{/* Only the current line being streamed is dynamic */}
+										{currentLine && <Text>{currentLine}</Text>}
 									</Box>
-									<Text>{chatHandler.streamingContent}</Text>
-								</Box>
-							)}
+								);
+							})()}
 							{appState.isModelSelectionMode ? (
 								<ModelSelector
 									client={appState.client}
