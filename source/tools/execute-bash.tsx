@@ -2,16 +2,34 @@ import {spawn} from 'node:child_process';
 import {highlight} from 'cli-highlight';
 import React from 'react';
 import {Text, Box} from 'ink';
-import type {ToolDefinition} from '@/types/index';
+import type {ToolDefinition, ToolExecutionOptions} from '@/types/index';
 import {tool, jsonSchema} from '@/types/core';
 import {ThemeContext} from '@/hooks/useTheme';
 import ToolMessage from '@/components/tool-message';
 
-const executeExecuteBash = async (args: {command: string}): Promise<string> => {
+// Phase 1.4: Accept execution options for abort support
+const executeExecuteBash = async (
+	args: {command: string},
+	options?: ToolExecutionOptions,
+): Promise<string> => {
 	return new Promise((resolve, reject) => {
+		// Phase 1.4: Check if already aborted
+		if (options?.abortSignal?.aborted) {
+			reject(new Error('Operation was cancelled'));
+			return;
+		}
+
 		const proc = spawn('sh', ['-c', args.command]);
 		let stdout = '';
 		let stderr = '';
+
+		// Phase 1.4: Listen for abort signal to kill process
+		const abortHandler = () => {
+			proc.kill('SIGTERM');
+			reject(new Error('Operation was cancelled'));
+		};
+
+		options?.abortSignal?.addEventListener('abort', abortHandler);
 
 		proc.stdout.on('data', (data: Buffer) => {
 			stdout += data.toString();
@@ -22,6 +40,8 @@ const executeExecuteBash = async (args: {command: string}): Promise<string> => {
 		});
 
 		proc.on('close', (code: number | null) => {
+			// Clean up abort listener
+			options?.abortSignal?.removeEventListener('abort', abortHandler);
 			let fullOutput = '';
 
 			// Include exit code information

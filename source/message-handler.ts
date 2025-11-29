@@ -1,4 +1,10 @@
-import type {ToolCall, ToolResult, ToolHandler} from '@/types/index';
+import type {
+	ToolCall,
+	ToolResult,
+	ToolHandler,
+	ToolExecutionOptions,
+	ModelMessage,
+} from '@/types/index';
 import type {ToolManager} from '@/tools/tool-manager';
 import {formatError} from '@/utils/error-formatter';
 import {parseToolArguments} from '@/utils/tool-args-parser';
@@ -23,7 +29,18 @@ export function getToolManager(): ToolManager | null {
 	return toolManagerGetter ? toolManagerGetter() : null;
 }
 
-export async function processToolUse(toolCall: ToolCall): Promise<ToolResult> {
+/**
+ * Process a single tool call with execution options
+ * Phase 1.4: Pass toolCallId, messages, and abortSignal to tool handlers
+ */
+export async function processToolUse(
+	toolCall: ToolCall,
+	options?: {
+		messages?: ModelMessage[];
+		abortSignal?: AbortSignal;
+		experimental_context?: unknown;
+	},
+): Promise<ToolResult> {
 	// Handle XML validation errors by throwing (will be caught and returned as error ToolResult)
 	if (toolCall.function.name === '__xml_validation_error__') {
 		const args = toolCall.function.arguments as {error: string};
@@ -47,7 +64,18 @@ export async function processToolUse(toolCall: ToolCall): Promise<ToolResult> {
 			toolCall.function.arguments,
 			{strict: true},
 		);
-		const result = await handler(parsedArgs);
+
+		// Phase 1.4: Prepare tool execution options
+		const executionOptions: ToolExecutionOptions = {
+			toolCallId: toolCall.id,
+			messages: options?.messages,
+			abortSignal: options?.abortSignal,
+			experimental_context: options?.experimental_context,
+		};
+
+		// Execute tool with options
+		const result = await handler(parsedArgs, executionOptions);
+
 		return {
 			tool_call_id: toolCall.id,
 			role: 'tool',

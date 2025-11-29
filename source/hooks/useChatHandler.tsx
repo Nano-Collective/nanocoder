@@ -4,6 +4,7 @@ import {
 	Message,
 	ToolCall,
 	ToolResult,
+	ChatOptions,
 } from '@/types/core';
 import {ToolManager} from '@/tools/tool-manager';
 import {toolDefinitions} from '@/tools/index';
@@ -145,6 +146,13 @@ export function useChatHandler({
 			// Try to use streaming if available and enabled, otherwise fallback to non-streaming
 			let result: LLMChatResponse;
 
+			// Phase 1: Enable multi-step tool calling in auto-accept mode
+			// This allows the model to automatically use multiple tools until task completion
+			const chatOptions: ChatOptions = {
+				enableMultiStep: developmentMode === 'auto-accept',
+				maxSteps: 10, // Allow up to 10 steps in auto-accept mode
+			};
+
 			if (client.chatStream && isStreamingEnabled()) {
 				// Use streaming with callbacks
 				let accumulatedContent = '';
@@ -164,6 +172,7 @@ export function useChatHandler({
 							setIsStreaming(false);
 						},
 					},
+					chatOptions,
 					controller.signal,
 				);
 			} else {
@@ -171,6 +180,7 @@ export function useChatHandler({
 				result = await client.chat(
 					[systemMessage, ...messages],
 					toolManager?.getAllTools() || {},
+					chatOptions,
 					controller.signal,
 				);
 			}

@@ -1,5 +1,11 @@
 import {createOpenAICompatible} from '@ai-sdk/openai-compatible';
-import {generateText, streamText} from 'ai';
+import {
+	generateText,
+	streamText,
+	stepCountIs,
+	NoSuchToolError,
+	InvalidToolInputError,
+} from 'ai';
 import type {ModelMessage} from 'ai';
 import {Agent, fetch as undiciFetch} from 'undici';
 import type {
@@ -10,6 +16,9 @@ import type {
 	ToolCall,
 	AISDKCoreTool,
 	StreamCallbacks,
+	ChatOptions,
+	StepResult,
+	ToolError,
 } from '@/types/index';
 import {XMLToolCallParser} from '@/tool-calling/xml-parser';
 import {getModelContextLimit} from '@/models/index.js';
@@ -240,6 +249,7 @@ export class AISDKClient implements LLMClient {
 	async chat(
 		messages: Message[],
 		tools: Record<string, AISDKCoreTool>,
+		options?: ChatOptions,
 		signal?: AbortSignal,
 	): Promise<LLMChatResponse> {
 		// Check if already aborted before starting
@@ -263,6 +273,56 @@ export class AISDKClient implements LLMClient {
 				messages: modelMessages,
 				tools: aiTools,
 				abortSignal: signal,
+
+				// Phase 1.1: Multi-step tool calling
+				stopWhen: options?.enableMultiStep
+					? stepCountIs(options.maxSteps || 5)
+					: undefined,
+
+				// Phase 1.2: Tool choice control
+				toolChoice: options?.toolChoice,
+
+				// Phase 1.2: Active tools filtering
+				activeTools: options?.activeTools,
+
+				// Phase 1.3: Step finish callback
+				onStepFinish: options?.stepCallbacks?.onStepFinish
+					? ({text, toolCalls, toolResults, finishReason, usage}) => {
+							const stepResult: StepResult = {
+								text,
+								toolCalls,
+								toolResults,
+								finishReason,
+								usage,
+							};
+							options.stepCallbacks?.onStepFinish?.(stepResult);
+					  }
+					: undefined,
+
+				// Phase 1.3: Prepare step callback
+				prepareStep: options?.stepCallbacks?.prepareStep
+					? async ({stepNumber, steps, messages}) => {
+							const stepResults: StepResult[] = steps.map(step => ({
+								text: step.text,
+								toolCalls: step.toolCalls,
+								toolResults: step.toolResults,
+								finishReason: step.finishReason,
+								usage: step.usage,
+								response: step.response,
+							}));
+
+							const config = await options.stepCallbacks!.prepareStep!({
+								stepNumber,
+								steps: stepResults,
+								messages,
+							});
+
+							return config;
+					  }
+					: undefined,
+
+				// Phase 1.4: Experimental context
+				experimental_context: options?.experimental_context,
 			});
 
 			// Extract tool calls from result
@@ -315,6 +375,21 @@ export class AISDKClient implements LLMClient {
 				}
 			}
 
+			// Phase 1.2: Convert steps to our format
+			const steps: StepResult[] | undefined = result.steps
+				? result.steps.map(step => ({
+						text: step.text,
+						toolCalls: step.toolCalls,
+						toolResults: step.toolResults,
+						finishReason: step.finishReason,
+						usage: step.usage,
+						response: step.response,
+				  }))
+				: undefined;
+
+			// Phase 1.5: Extract tool errors from steps (simplified)
+			const toolErrors: ToolError[] | undefined = undefined;
+
 			return {
 				choices: [
 					{
@@ -325,6 +400,12 @@ export class AISDKClient implements LLMClient {
 						},
 					},
 				],
+				// Phase 1.2: Return response messages for conversation history
+				responseMessages: result.response?.messages,
+				// Phase 1.2: Return steps for multi-step execution tracking
+				steps,
+				// Phase 1.5: Return tool errors
+				toolErrors,
 			};
 		} catch (error) {
 			// Check if this was a cancellation
@@ -339,6 +420,15 @@ export class AISDKClient implements LLMClient {
 					error.message.includes('No output generated'))
 			) {
 				throw new Error('Operation was cancelled');
+			}
+
+			// Phase 1.5: Handle AI SDK tool-specific errors
+			if (NoSuchToolError.isInstance(error)) {
+				throw new Error('The model tried to call an unknown tool');
+			}
+
+			if (InvalidToolInputError.isInstance(error)) {
+				throw new Error('The model called a tool with invalid inputs');
 			}
 
 			// Log detailed error for debugging
@@ -361,6 +451,7 @@ export class AISDKClient implements LLMClient {
 		messages: Message[],
 		tools: Record<string, AISDKCoreTool>,
 		callbacks: StreamCallbacks,
+		options?: ChatOptions,
 		signal?: AbortSignal,
 	): Promise<LLMChatResponse> {
 		// Check if already aborted before starting
@@ -384,6 +475,56 @@ export class AISDKClient implements LLMClient {
 				messages: modelMessages,
 				tools: aiTools,
 				abortSignal: signal,
+
+				// Phase 1.1: Multi-step tool calling
+				stopWhen: options?.enableMultiStep
+					? stepCountIs(options.maxSteps || 5)
+					: undefined,
+
+				// Phase 1.2: Tool choice control
+				toolChoice: options?.toolChoice,
+
+				// Phase 1.2: Active tools filtering
+				activeTools: options?.activeTools,
+
+				// Phase 1.3: Step finish callback
+				onStepFinish: options?.stepCallbacks?.onStepFinish
+					? ({text, toolCalls, toolResults, finishReason, usage}) => {
+							const stepResult: StepResult = {
+								text,
+								toolCalls,
+								toolResults,
+								finishReason,
+								usage,
+							};
+							options.stepCallbacks?.onStepFinish?.(stepResult);
+					  }
+					: undefined,
+
+				// Phase 1.3: Prepare step callback
+				prepareStep: options?.stepCallbacks?.prepareStep
+					? async ({stepNumber, steps, messages}) => {
+							const stepResults: StepResult[] = steps.map(step => ({
+								text: step.text,
+								toolCalls: step.toolCalls,
+								toolResults: step.toolResults,
+								finishReason: step.finishReason,
+								usage: step.usage,
+								response: step.response,
+							}));
+
+							const config = await options.stepCallbacks!.prepareStep!({
+								stepNumber,
+								steps: stepResults,
+								messages,
+							});
+
+							return config;
+					  }
+					: undefined,
+
+				// Phase 1.4: Experimental context
+				experimental_context: options?.experimental_context,
 			});
 
 			// Stream tokens
@@ -455,6 +596,27 @@ export class AISDKClient implements LLMClient {
 
 			callbacks.onFinish?.();
 
+			// Wait for result to complete
+			const [finalResult, stepsResult] = await Promise.all([
+				result,
+				result.steps,
+			]);
+
+			// Phase 1.2: Convert steps to our format
+			const steps: StepResult[] | undefined = stepsResult
+				? stepsResult.map(step => ({
+						text: step.text,
+						toolCalls: step.toolCalls,
+						toolResults: step.toolResults,
+						finishReason: step.finishReason,
+						usage: step.usage,
+						response: step.response,
+				  }))
+				: undefined;
+
+			// Phase 1.5: Extract tool errors from steps (simplified)
+			const toolErrors: ToolError[] | undefined = undefined;
+
 			return {
 				choices: [
 					{
@@ -465,6 +627,12 @@ export class AISDKClient implements LLMClient {
 						},
 					},
 				],
+				// Phase 1.2: Return response messages for conversation history
+				responseMessages: (await finalResult.response).messages,
+				// Phase 1.2: Return steps for multi-step execution tracking
+				steps,
+				// Phase 1.5: Return tool errors
+				toolErrors,
 			};
 		} catch (error) {
 			// Check if this was a cancellation
@@ -479,6 +647,15 @@ export class AISDKClient implements LLMClient {
 					error.message.includes('No output generated'))
 			) {
 				throw new Error('Operation was cancelled');
+			}
+
+			// Phase 1.5: Handle AI SDK tool-specific errors
+			if (NoSuchToolError.isInstance(error)) {
+				throw new Error('The model tried to call an unknown tool');
+			}
+
+			if (InvalidToolInputError.isInstance(error)) {
+				throw new Error('The model called a tool with invalid inputs');
 			}
 
 			// Log detailed error for debugging

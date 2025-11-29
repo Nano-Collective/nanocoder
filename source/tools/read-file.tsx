@@ -3,17 +3,26 @@ import {readFile, access} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import React from 'react';
 import {Text, Box} from 'ink';
-import type {ToolDefinition} from '@/types/index';
+import type {ToolDefinition, ToolExecutionOptions} from '@/types/index';
 import {tool, jsonSchema} from '@/types/core';
 import {ThemeContext} from '@/hooks/useTheme';
 import ToolMessage from '@/components/tool-message';
 
 // Handler function - will be used both by Nanocoder and AI SDK tool
-const executeReadFile = async (args: {
-	path: string;
-	start_line?: number;
-	end_line?: number;
-}): Promise<string> => {
+// Phase 1.4: Accept execution options (toolCallId, messages, abortSignal)
+const executeReadFile = async (
+	args: {
+		path: string;
+		start_line?: number;
+		end_line?: number;
+	},
+	options?: ToolExecutionOptions,
+): Promise<string> => {
+	// Phase 1.4: Check for abort signal before starting
+	if (options?.abortSignal?.aborted) {
+		throw new Error('Operation was cancelled');
+	}
+
 	const absPath = resolve(args.path);
 
 	try {

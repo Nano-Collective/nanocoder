@@ -1,8 +1,15 @@
 import React from 'react';
 
-import {tool, jsonSchema, type Tool as AISDKTool} from 'ai';
+import {
+	tool,
+	jsonSchema,
+	type Tool as AISDKTool,
+	type ModelMessage,
+	type FinishReason,
+	type LanguageModelUsage,
+} from 'ai';
 
-export {tool, jsonSchema};
+export {tool, jsonSchema, type ModelMessage};
 
 // Type for AI SDK tools (return type of tool() function)
 // Tool<PARAMETERS, RESULT> is AI SDK's actual tool type
@@ -54,9 +61,27 @@ export interface Tool {
 	};
 }
 
+/**
+ * Tool execution options passed to tool handlers
+ * These options provide context and control for tool execution
+ */
+export interface ToolExecutionOptions {
+	/** Unique identifier for this tool call */
+	toolCallId?: string;
+	/** Message history that led to this tool call */
+	messages?: ModelMessage[];
+	/** Abort signal for cancelling long-running operations */
+	abortSignal?: AbortSignal;
+	/** Experimental context from generateText/streamText */
+	experimental_context?: unknown;
+}
+
 // Tool handlers accept dynamic args from LLM, so any is appropriate here
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool arguments are dynamically typed
-export type ToolHandler = (input: any) => Promise<string>;
+export type ToolHandler = (
+	input: any,
+	options?: ToolExecutionOptions,
+) => Promise<string>;
 
 /**
  * Tool formatter type for Ink UI
@@ -143,9 +168,66 @@ interface LLMMessage {
 	tool_calls?: ToolCall[];
 }
 
+/**
+ * Information about a single step in a multi-step generation
+ */
+export interface StepResult {
+	/** The text generated in this step */
+	text: string;
+	/** Tool calls made in this step */
+	toolCalls: unknown[];
+	/** Tool results from this step */
+	toolResults: unknown[];
+	/** Reason why the step finished */
+	finishReason: FinishReason;
+	/** Token usage for this step */
+	usage: LanguageModelUsage;
+	/** Original step response for additional data */
+	response?: {
+		messages: ModelMessage[];
+	};
+}
+
+/**
+ * Tool error information extracted from steps
+ */
+export interface ToolError {
+	toolCallId: string;
+	toolName: string;
+	error: unknown;
+	input?: unknown;
+}
+
 export interface LLMChatResponse {
 	choices: Array<{
 		message: LLMMessage;
+	}>;
+	/** Steps from multi-step execution (if enabled) */
+	steps?: StepResult[];
+	/** Response messages from AI SDK for conversation history */
+	responseMessages?: ModelMessage[];
+	/** Tool errors that occurred during execution */
+	toolErrors?: ToolError[];
+}
+
+/**
+ * Callbacks for step-level events
+ */
+export interface StepCallbacks {
+	/** Called when a step finishes */
+	onStepFinish?: (step: StepResult) => void;
+	/** Called before a step starts - can modify step configuration */
+	prepareStep?: (params: {
+		stepNumber: number;
+		steps: StepResult[];
+		messages: ModelMessage[];
+	}) => Promise<{
+		/** Override messages for this step */
+		messages?: ModelMessage[];
+		/** Limit active tools for this step */
+		activeTools?: string[];
+		/** Override tool choice for this step */
+		toolChoice?: ToolChoice;
 	}>;
 }
 
@@ -153,6 +235,33 @@ export interface StreamCallbacks {
 	onToken?: (token: string) => void;
 	onToolCall?: (toolCall: ToolCall) => void;
 	onFinish?: () => void;
+}
+
+/**
+ * Tool choice control
+ */
+export type ToolChoice =
+	| 'auto' // Model decides (default)
+	| 'required' // Must call a tool
+	| 'none' // Must NOT call tools
+	| {type: 'tool'; toolName: string}; // Must call specific tool
+
+/**
+ * Options for LLM chat requests
+ */
+export interface ChatOptions {
+	/** Enable multi-step tool calling */
+	enableMultiStep?: boolean;
+	/** Maximum number of steps (default: 5) */
+	maxSteps?: number;
+	/** Tool choice control */
+	toolChoice?: ToolChoice;
+	/** Limit active tools */
+	activeTools?: string[];
+	/** Step-level callbacks */
+	stepCallbacks?: StepCallbacks;
+	/** Experimental context passed to tools */
+	experimental_context?: unknown;
 }
 
 export interface LLMClient {
@@ -163,12 +272,14 @@ export interface LLMClient {
 	chat(
 		messages: Message[],
 		tools: Record<string, AISDKCoreTool>,
+		options?: ChatOptions,
 		signal?: AbortSignal,
 	): Promise<LLMChatResponse>;
 	chatStream?(
 		messages: Message[],
 		tools: Record<string, AISDKCoreTool>,
 		callbacks: StreamCallbacks,
+		options?: ChatOptions,
 		signal?: AbortSignal,
 	): Promise<LLMChatResponse>;
 	clearContext(): Promise<void>;
