@@ -153,11 +153,18 @@ export function useAppInitialization({
 			setMcpConnectionStatus(initialStatus);
 
 			// Track current server states dynamically
-			const serverStates = new Map<string, { connected: boolean; toolCount: number; error?: string }>();
+			const serverStates = new Map<
+				string,
+				{connected: boolean; toolCount: number; error?: string}
+			>();
 
 			// Initialize all server states
 			for (const server of appConfig.mcpServers) {
-				serverStates.set(server.name, { connected: false, toolCount: 0, error: undefined });
+				serverStates.set(server.name, {
+					connected: false,
+					toolCount: 0,
+					error: undefined,
+				});
 			}
 
 			// Define progress callback to update status in real-time
@@ -170,15 +177,19 @@ export function useAppInitialization({
 				});
 
 				// Calculate current status from all servers
-				const currentServers = Array.from(serverStates.entries()).map(([name, state]) => ({
-					name,
-					connected: state.connected,
-					toolCount: state.toolCount,
-					error: state.error,
-				}));
+				const currentServers = Array.from(serverStates.entries()).map(
+					([name, state]) => ({
+						name,
+						connected: state.connected,
+						toolCount: state.toolCount,
+						error: state.error,
+					}),
+				);
 
 				const connectedCount = currentServers.filter(s => s.connected).length;
-				const errorCount = currentServers.filter(s => !s.connected && s.error).length;
+				const errorCount = currentServers.filter(
+					s => !s.connected && s.error,
+				).length;
 
 				// Update status immediately
 				setMcpConnectionStatus({
@@ -201,12 +212,14 @@ export function useAppInitialization({
 					});
 				}
 
-				const errorServers = Array.from(serverStates.entries()).map(([name, state]) => ({
-					name,
-					connected: state.connected,
-					toolCount: state.toolCount,
-					error: state.error,
-				}));
+				const errorServers = Array.from(serverStates.entries()).map(
+					([name, state]) => ({
+						name,
+						connected: state.connected,
+						toolCount: state.toolCount,
+						error: state.error,
+					}),
+				);
 
 				setMcpConnectionStatus({
 					totalCount: errorServers.length,
@@ -253,7 +266,10 @@ export function useAppInitialization({
 		});
 
 		// Track current server states dynamically
-		const serverStates = new Map<string, { connected: boolean; languages?: string[]; error?: string }>();
+		const serverStates = new Map<
+			string,
+			{connected: boolean; languages?: string[]; error?: string}
+		>();
 
 		// Define progress callback to update status in real-time
 		const onProgress = (result: LSPInitResult) => {
@@ -265,15 +281,19 @@ export function useAppInitialization({
 			});
 
 			// Calculate current status from all servers
-			const currentServers = Array.from(serverStates.entries()).map(([name, state]) => ({
-				name,
-				connected: state.connected,
-				languages: state.languages,
-				error: state.error,
-			}));
+			const currentServers = Array.from(serverStates.entries()).map(
+				([name, state]) => ({
+					name,
+					connected: state.connected,
+					languages: state.languages,
+					error: state.error,
+				}),
+			);
 
 			const connectedCount = currentServers.filter(s => s.connected).length;
-			const errorCount = currentServers.filter(s => !s.connected && s.error).length;
+			const errorCount = currentServers.filter(
+				s => !s.connected && s.error,
+			).length;
 
 			// Update status immediately
 			setLspConnectionStatus({
@@ -298,15 +318,19 @@ export function useAppInitialization({
 			});
 
 			// Ensure final LSP status is set after initialization completes
-			const finalServers = Array.from(serverStates.entries()).map(([name, state]) => ({
-				name,
-				connected: state.connected,
-				languages: state.languages,
-				error: state.error,
-			}));
+			const finalServers = Array.from(serverStates.entries()).map(
+				([name, state]) => ({
+					name,
+					connected: state.connected,
+					languages: state.languages,
+					error: state.error,
+				}),
+			);
 
 			const connectedCount = finalServers.filter(s => s.connected).length;
-			const errorCount = finalServers.filter(s => !s.connected && s.error).length;
+			const errorCount = finalServers.filter(
+				s => !s.connected && s.error,
+			).length;
 
 			setLspConnectionStatus({
 				totalCount: finalServers.length,
@@ -324,12 +348,14 @@ export function useAppInitialization({
 				});
 			}
 
-			const errorServers = Array.from(serverStates.entries()).map(([name, state]) => ({
-				name,
-				connected: state.connected,
-				languages: state.languages,
-				error: state.error,
-			}));
+			const errorServers = Array.from(serverStates.entries()).map(
+				([name, state]) => ({
+					name,
+					connected: state.connected,
+					languages: state.languages,
+					error: state.error,
+				}),
+			);
 
 			setLspConnectionStatus({
 				totalCount: errorServers.length,

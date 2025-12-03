@@ -48,18 +48,20 @@ export function useAppState() {
 	const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
 
 	// Connection status state
-	const [mcpConnectionStatus, setMcpConnectionStatus] = useState<MCPConnectionStatus>({
-		totalCount: 0,
-		connectedCount: 0,
-		errorCount: 0,
-		servers: [],
-	});
-	const [lspConnectionStatus, setLspConnectionStatus] = useState<LSPConnectionStatus>({
-		totalCount: 0,
-		connectedCount: 0,
-		errorCount: 0,
-		servers: [],
-	});
+	const [mcpConnectionStatus, setMcpConnectionStatus] =
+		useState<MCPConnectionStatus>({
+			totalCount: 0,
+			connectedCount: 0,
+			errorCount: 0,
+			servers: [],
+		});
+	const [lspConnectionStatus, setLspConnectionStatus] =
+		useState<LSPConnectionStatus>({
+			totalCount: 0,
+			connectedCount: 0,
+			errorCount: 0,
+			servers: [],
+		});
 
 	// Thinking indicator state
 	const [isThinking, setIsThinking] = useState<boolean>(false);

@@ -242,16 +242,7 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 				lspConnectionStatus={appState.lspConnectionStatus}
 			/>,
 		);
-	}, [
-		appState.currentProvider,
-		appState.currentModel,
-		appState.currentTheme,
-		appState.updateInfo,
-		appState.mcpConnectionStatus,
-		appState.lspConnectionStatus,
-		appState.addToChatQueue,
-		appState.componentKeyCounter,
-	]);
+	}, [appState]);
 
 	const handleMessageSubmit = React.useCallback(
 		async (message: string) => {
@@ -309,9 +300,7 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 	// Memoize static components to prevent unnecessary re-renders
 	// Note: Status component is NOT included here as it needs to be dynamic
 	const staticComponents = React.useMemo(
-		() => [
-			<WelcomeMessage key="welcome" />,
-		],
+		() => [<WelcomeMessage key="welcome" />],
 		[],
 	);
 
