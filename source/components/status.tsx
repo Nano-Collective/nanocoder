@@ -8,6 +8,8 @@ import {confDirMap} from '@/config/index';
 import {themes, getThemeColors} from '@/config/themes';
 import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
+import type {MCPConnectionStatus} from '@/types/mcp';
+import type {LSPConnectionStatus} from '@/lsp/lsp-manager';
 
 // Get CWD once at module load time
 const cwd = process.cwd();
@@ -20,12 +22,16 @@ export default memo(function Status({
 	theme,
 	updateInfo,
 	agentsMdLoaded,
+	mcpConnectionStatus,
+	lspConnectionStatus,
 }: {
 	provider: string;
 	model: string;
 	theme: ThemePreset;
 	updateInfo?: UpdateInfo | null;
 	agentsMdLoaded?: boolean;
+	mcpConnectionStatus?: MCPConnectionStatus;
+	lspConnectionStatus?: LSPConnectionStatus;
 }) {
 	const {boxWidth, isNarrow, truncatePath} = useResponsiveTerminal();
 	const colors = getThemeColors(theme);
@@ -35,6 +41,30 @@ export default memo(function Status({
 
 	// Calculate max path length based on terminal size
 	const maxPathLength = isNarrow ? 30 : 60;
+
+	// Helper function to format MCP status
+	const formatMCPStatus = (status: MCPConnectionStatus | undefined) => {
+		if (!status) return '';
+		if (status.totalCount === 0) return 'No servers configured';
+		if (status.errorCount > 0) {
+			return `${status.connectedCount} connected, ${status.errorCount} errors`;
+		}
+		return `${status.connectedCount} servers connected`;
+	};
+
+	// Helper function to format LSP status
+	const formatLSPStatus = (status: LSPConnectionStatus | undefined) => {
+		if (!status) return '';
+		if (status.totalCount === 0 && status.connectedCount === 0) return 'No servers configured';
+		if (status.errorCount > 0) {
+			return `${status.connectedCount} ready, ${status.errorCount} errors`;
+		}
+		// During auto-discovery, show connected count even if total count is still being determined
+		if (status.totalCount === 0 && status.connectedCount > 0) {
+			return `${status.connectedCount} servers ready...`;
+		}
+		return `${status.connectedCount} servers ready`;
+	};
 
 	return (
 		<>
@@ -60,6 +90,18 @@ export default memo(function Status({
 						<Text bold={true}>Theme: </Text>
 						{themes[theme].displayName}
 					</Text>
+					{mcpConnectionStatus && (
+						<Text color={mcpConnectionStatus.errorCount > 0 ? colors.warning : colors.success}>
+							<Text bold={true}>MCP: </Text>
+							{formatMCPStatus(mcpConnectionStatus)}
+						</Text>
+					)}
+					{lspConnectionStatus && (
+						<Text color={lspConnectionStatus.errorCount > 0 ? colors.warning : colors.success}>
+							<Text bold={true}>LSP: </Text>
+							{formatLSPStatus(lspConnectionStatus)}
+						</Text>
+					)}
 					{hasAgentsMd ? (
 						<Text color={colors.secondary} italic>
 							✓ AGENTS.md
@@ -115,6 +157,18 @@ export default memo(function Status({
 						<Text bold={true}>Theme: </Text>
 						{themes[theme].displayName}
 					</Text>
+					{mcpConnectionStatus && (
+						<Text color={mcpConnectionStatus.errorCount > 0 ? colors.warning : colors.success}>
+							<Text bold={true}>MCP: </Text>
+							{formatMCPStatus(mcpConnectionStatus)}
+						</Text>
+					)}
+					{lspConnectionStatus && (
+						<Text color={lspConnectionStatus.errorCount > 0 ? colors.warning : colors.success}>
+							<Text bold={true}>LSP: </Text>
+							{formatLSPStatus(lspConnectionStatus)}
+						</Text>
+					)}
 					{hasAgentsMd ? (
 						<Text color={colors.secondary} italic>
 							<Text>↳ Using AGENTS.md. Project initialized</Text>
@@ -143,5 +197,19 @@ export default memo(function Status({
 				</TitledBox>
 			)}
 		</>
+	);
+}, (prevProps, nextProps) => {
+	// Custom comparison function to ensure re-renders when connection status changes
+	return (
+		prevProps.provider === nextProps.provider &&
+		prevProps.model === nextProps.model &&
+		prevProps.theme === nextProps.theme &&
+		prevProps.agentsMdLoaded === nextProps.agentsMdLoaded &&
+		prevProps.updateInfo?.hasUpdate === nextProps.updateInfo?.hasUpdate &&
+		prevProps.updateInfo?.currentVersion === nextProps.updateInfo?.currentVersion &&
+		prevProps.updateInfo?.latestVersion === nextProps.updateInfo?.latestVersion &&
+		// Deep comparison for connection status objects
+		JSON.stringify(prevProps.mcpConnectionStatus) === JSON.stringify(nextProps.mcpConnectionStatus) &&
+		JSON.stringify(prevProps.lspConnectionStatus) === JSON.stringify(nextProps.lspConnectionStatus)
 	);
 });

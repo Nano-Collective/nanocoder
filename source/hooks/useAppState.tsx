@@ -10,6 +10,8 @@ import type {UpdateInfo, ToolResult} from '@/types/index';
 import type {CustomCommand} from '@/types/commands';
 import {createTokenizer} from '@/tokenization/index.js';
 import type {Tokenizer} from '@/types/tokenization.js';
+import type {MCPConnectionStatus} from '@/types/mcp';
+import type {LSPConnectionStatus} from '@/lsp/lsp-manager';
 import React from 'react';
 
 export interface ConversationContext {
@@ -44,6 +46,20 @@ export function useAppState() {
 	const [startChat, setStartChat] = useState<boolean>(false);
 	const [mcpInitialized, setMcpInitialized] = useState<boolean>(false);
 	const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+
+	// Connection status state
+	const [mcpConnectionStatus, setMcpConnectionStatus] = useState<MCPConnectionStatus>({
+		totalCount: 0,
+		connectedCount: 0,
+		errorCount: 0,
+		servers: [],
+	});
+	const [lspConnectionStatus, setLspConnectionStatus] = useState<LSPConnectionStatus>({
+		totalCount: 0,
+		connectedCount: 0,
+		errorCount: 0,
+		servers: [],
+	});
 
 	// Thinking indicator state
 	const [isThinking, setIsThinking] = useState<boolean>(false);
@@ -179,6 +195,8 @@ export function useAppState() {
 		startChat,
 		mcpInitialized,
 		updateInfo,
+		mcpConnectionStatus,
+		lspConnectionStatus,
 		isThinking,
 		isCancelling,
 		abortController,
@@ -215,6 +233,8 @@ export function useAppState() {
 		setStartChat,
 		setMcpInitialized,
 		setUpdateInfo,
+		setMcpConnectionStatus,
+		setLspConnectionStatus,
 		setIsThinking,
 		setIsCancelling,
 		setAbortController,
