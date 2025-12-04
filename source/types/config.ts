@@ -102,4 +102,6 @@ export interface UserPreferences {
 	trustedDirectories?: string[];
 	streamingEnabled?: boolean;
 	debuggingEnabled?: boolean;
+	/** Auto-continuation mode: 'always' | 'smart' | 'never'. Default: 'smart' */
+	autoContinuationMode?: 'always' | 'smart' | 'never';
 }

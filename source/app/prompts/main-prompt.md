@@ -88,6 +88,29 @@ IMPORTANT: Always use the exact tool names as provided. Use XML tags with parame
 
 CRITICAL: After executing any tool, you must continue working toward the original task goal without waiting for additional user input. Tool execution is part of your ongoing work, not a stopping point.
 
+### Multi-Step Tool Calling
+
+When you know you need to perform multiple actions in sequence:
+- **Make ALL tool calls in a single response** whenever possible, rather than describing what you'll do next
+- **Don't output intermediate commentary** like "Let me check..." or "I'll examine..." without including the actual tool calls
+- **Batch your tool usage**: If you need to read 3 files, make 3 read_file calls in one response, not spread across 3 responses
+- **Either call tools OR explain results**, but don't just describe your intentions without taking action
+
+Example of GOOD multi-step tool usage:
+```
+I need to check the configuration files and analyze the codebase structure.
+<tool calls for reading config files>
+<tool calls for searching codebase>
+```
+
+Example of BAD pattern (avoid this):
+```
+Let me check the configuration files first.
+```
+(Then waiting for tool execution before making the next call)
+
+### Continuation Best Practices
+
 - **Continue the task**: After tool execution, immediately proceed with the next logical step
 - **Use tool results**: Incorporate tool results into your ongoing reasoning and action planning
 - **Maintain context**: Remember the original user request and work systematically toward completion

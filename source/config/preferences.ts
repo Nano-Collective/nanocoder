@@ -73,3 +73,17 @@ export function setDebuggingEnabled(enabled: boolean): void {
 	preferences.debuggingEnabled = enabled;
 	savePreferences(preferences);
 }
+
+export function getAutoContinuationMode(): 'always' | 'smart' | 'never' {
+	const preferences = loadPreferences();
+	// Default to 'smart' if not set
+	return preferences.autoContinuationMode ?? 'smart';
+}
+
+export function setAutoContinuationMode(
+	mode: 'always' | 'smart' | 'never',
+): void {
+	const preferences = loadPreferences();
+	preferences.autoContinuationMode = mode;
+	savePreferences(preferences);
+}

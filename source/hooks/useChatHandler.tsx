@@ -10,10 +10,19 @@ import {processPromptTemplate} from '@/utils/prompt-processor';
 import {parseToolCalls} from '@/tool-calling/index';
 import {ConversationStateManager} from '@/app/utils/conversationState';
 import {promptHistory} from '@/prompt-history';
-import {isStreamingEnabled} from '@/config/preferences';
+import {
+	isStreamingEnabled,
+	getAutoContinuationMode,
+	isDebuggingEnabled,
+} from '@/config/preferences';
 import {displayToolResult} from '@/utils/tool-result-display';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {formatError} from '@/utils/error-formatter';
+import {
+	detectContinuationIntent,
+	shouldAutoContinue,
+} from '@/utils/continuation-detector';
+import {logInfo} from '@/utils/message-queue';
 import UserMessage from '@/components/user-message';
 import AssistantMessage from '@/components/assistant-message';
 import ErrorMessage from '@/components/error-message';
@@ -117,6 +126,10 @@ export function useChatHandler({
 	// State for streaming message content
 	const [streamingContent, setStreamingContent] = React.useState<string>('');
 	const [isStreaming, setIsStreaming] = React.useState<boolean>(false);
+
+	// Track auto-continuation attempts to prevent infinite loops
+	const continuationAttempts = React.useRef<number>(0);
+	const MAX_CONTINUATION_ATTEMPTS = 3;
 
 	// Reset conversation state when messages are cleared
 	React.useEffect(() => {
@@ -610,6 +623,68 @@ export function useChatHandler({
 					);
 				}
 			}
+			// If no tool calls but there IS content, check if it indicates continuation intent
+			else if (validToolCalls.length === 0 && cleanedContent.trim()) {
+				// Check if we just executed tools (messages should have tool results)
+				const lastMessage = messages[messages.length - 1];
+				const hasRecentToolResults = lastMessage?.role === 'tool';
+
+				// Get auto-continuation mode setting
+				const autoContinuationMode = getAutoContinuationMode();
+
+				// Detect if the response indicates continuation intent
+				const detectionResult = detectContinuationIntent(
+					cleanedContent,
+					hasRecentToolResults,
+				);
+
+				// Check if we should auto-continue and haven't exceeded max attempts
+				const shouldContinue =
+					shouldAutoContinue(autoContinuationMode, detectionResult) &&
+					continuationAttempts.current < MAX_CONTINUATION_ATTEMPTS;
+
+				if (isDebuggingEnabled() && detectionResult.detectedPatterns.length > 0) {
+					logInfo(
+						`[DEBUG] Continuation detection: ${detectionResult.reason} (confidence: ${detectionResult.confidence.toFixed(2)}, mode: ${autoContinuationMode}, attempt: ${continuationAttempts.current + 1}/${MAX_CONTINUATION_ATTEMPTS})`,
+					);
+					logInfo(
+						`[DEBUG] Detected patterns: ${detectionResult.detectedPatterns.join(', ')}`,
+					);
+				}
+
+				if (shouldContinue) {
+					continuationAttempts.current += 1;
+
+					if (isDebuggingEnabled()) {
+						logInfo(
+							`[DEBUG] Auto-continuing conversation (attempt ${continuationAttempts.current}/${MAX_CONTINUATION_ATTEMPTS})`,
+						);
+					}
+
+					// Add a continuation prompt to help the model continue
+					const continuationMessage: Message = {
+						role: 'user',
+						content: 'continue',
+					};
+
+					const updatedMessagesWithContinuation = [
+						...messages,
+						assistantMsg,
+						continuationMessage,
+					];
+					setMessages(updatedMessagesWithContinuation);
+
+					// Continue the conversation loop
+					await processAssistantResponse(
+						systemMessage,
+						updatedMessagesWithContinuation,
+					);
+					return;
+				} else {
+					// Reset continuation attempts counter for next user message
+					continuationAttempts.current = 0;
+				}
+			}
 		} catch (error) {
 			if (
 				error instanceof Error &&
@@ -645,6 +720,9 @@ export function useChatHandler({
 	// Handle chat message processing
 	const handleChatMessage = async (message: string) => {
 		if (!client || !toolManager) return;
+
+		// Reset continuation attempts counter for new user message
+		continuationAttempts.current = 0;
 
 		// For display purposes, try to get the placeholder version from history
 		// This preserves the nice placeholder display in chat history
