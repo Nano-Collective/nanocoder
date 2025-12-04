@@ -25,6 +25,7 @@ import {
 	lspCommand,
 	mcpCommand,
 	modelCommand,
+	planningCommand,
 	providerCommand,
 	recommendationsCommand,
 	setupConfigCommand,
@@ -340,6 +341,7 @@ export function useAppInitialization({
 				setupConfigCommand,
 				streamingCommand,
 				usageCommand,
+				planningCommand,
 			]);
 
 			// Now start with the properly initialized objects (excluding MCP)

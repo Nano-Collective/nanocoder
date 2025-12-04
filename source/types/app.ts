@@ -17,6 +17,8 @@ export interface MessageSubmissionOptions {
 	onEnterConfigWizardMode: () => void;
 	onShowStatus: () => void;
 	onHandleChatMessage: (message: string) => Promise<void>;
+	onHandlePlanningMessage?: (message: string) => Promise<void>;
+	planningEnabled?: boolean;
 	onAddToChatQueue: (component: React.ReactNode) => void;
 	componentKeyCounter: number;
 	setMessages: (messages: Message[]) => void;

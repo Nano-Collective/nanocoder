@@ -101,4 +101,10 @@ export interface UserPreferences {
 	selectedTheme?: ThemePreset;
 	trustedDirectories?: string[];
 	streamingEnabled?: boolean;
+
+	// Structured task planning settings
+	planning?: {
+		enabled?: boolean;
+		maxTasksPerPlan?: number;
+	};
 }

@@ -199,7 +199,12 @@ ${result.fullOutput || '(No output)'}`;
 	}
 
 	// Regular chat message - process with AI
-	await onHandleChatMessage(message);
+	// Use planning handler if enabled, otherwise use regular chat handler
+	if (options.planningEnabled && options.onHandlePlanningMessage) {
+		await options.onHandlePlanningMessage(message);
+	} else {
+		await onHandleChatMessage(message);
+	}
 }
 
 export function createClearMessagesHandler(

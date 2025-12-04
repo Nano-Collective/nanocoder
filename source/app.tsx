@@ -32,10 +32,12 @@ import {useModeHandlers} from '@/hooks/useModeHandlers';
 import {useAppInitialization} from '@/hooks/useAppInitialization';
 import {useDirectoryTrust} from '@/hooks/useDirectoryTrust';
 import {useVSCodeServer} from '@/hooks/useVSCodeServer';
+import {usePlanningHandler} from '@/hooks/usePlanningHandler';
 import {
 	createClearMessagesHandler,
 	handleMessageSubmission,
 } from '@/app/utils/appUtils';
+import {getPlanningPreferences} from '@/config/preferences';
 
 // Provide shared UI state to components
 import {UIStateProvider} from '@/hooks/useUIState';
@@ -163,6 +165,26 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 		setDevelopmentMode: appState.setDevelopmentMode,
 	});
 
+	// Setup planning handler for structured task decomposition
+	const planningPrefs = getPlanningPreferences();
+	const planningHandler = usePlanningHandler({
+		client: appState.client,
+		toolManager: appState.toolManager,
+		messages: appState.messages,
+		setMessages: appState.updateMessages,
+		currentModel: appState.currentModel,
+		setIsThinking: appState.setIsThinking,
+		setIsCancelling: appState.setIsCancelling,
+		addToChatQueue: appState.addToChatQueue,
+		componentKeyCounter: appState.componentKeyCounter,
+		abortController: appState.abortController,
+		setAbortController: appState.setAbortController,
+		config: {
+			enabled: planningPrefs.enabled,
+			maxTasksPerPlan: planningPrefs.maxTasksPerPlan,
+		},
+	});
+
 	// Setup initialization
 	const appInitialization = useAppInitialization({
 		setClient: appState.setClient,
@@ -254,6 +276,8 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 				onEnterConfigWizardMode: modeHandlers.enterConfigWizardMode,
 				onShowStatus: handleShowStatus,
 				onHandleChatMessage: chatHandler.handleChatMessage,
+				onHandlePlanningMessage: planningHandler.handlePlanningMessage,
+				planningEnabled: planningPrefs.enabled,
 				onAddToChatQueue: appState.addToChatQueue,
 				componentKeyCounter: appState.componentKeyCounter,
 				setMessages: appState.updateMessages,
@@ -279,6 +303,8 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 			modeHandlers.enterConfigWizardMode,
 			handleShowStatus,
 			chatHandler.handleChatMessage,
+			planningHandler.handlePlanningMessage,
+			planningPrefs.enabled,
 			appState.addToChatQueue,
 			appState.componentKeyCounter,
 			appState.updateMessages,

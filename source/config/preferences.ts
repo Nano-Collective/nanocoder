@@ -61,3 +61,39 @@ export function setStreamingEnabled(enabled: boolean): void {
 	preferences.streamingEnabled = enabled;
 	savePreferences(preferences);
 }
+
+// ============================================================================
+// Planning Preferences
+// ============================================================================
+
+export interface PlanningPreferences {
+	enabled: boolean;
+	maxTasksPerPlan: number;
+}
+
+const DEFAULT_PLANNING_PREFERENCES: PlanningPreferences = {
+	enabled: false, // Disabled by default until feature is stable
+	maxTasksPerPlan: 20,
+};
+
+export function getPlanningPreferences(): PlanningPreferences {
+	const preferences = loadPreferences();
+	return {
+		enabled:
+			preferences.planning?.enabled ?? DEFAULT_PLANNING_PREFERENCES.enabled,
+		maxTasksPerPlan:
+			preferences.planning?.maxTasksPerPlan ??
+			DEFAULT_PLANNING_PREFERENCES.maxTasksPerPlan,
+	};
+}
+
+export function setPlanningPreferences(
+	planningPrefs: Partial<PlanningPreferences>,
+): void {
+	const preferences = loadPreferences();
+	preferences.planning = {
+		...preferences.planning,
+		...planningPrefs,
+	};
+	savePreferences(preferences);
+}
