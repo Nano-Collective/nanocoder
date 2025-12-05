@@ -43,9 +43,14 @@ import {UIStateProvider} from '@/hooks/useUIState';
 interface AppProps {
 	vscodeMode?: boolean;
 	vscodePort?: number;
+	nonInteractivePrompt?: string;
 }
 
-export default function App({vscodeMode = false, vscodePort}: AppProps) {
+export default function App({
+	vscodeMode = false,
+	vscodePort,
+	nonInteractivePrompt,
+}: AppProps) {
 	// Use extracted hooks
 	const appState = useAppState();
 	const {exit} = useApp();
@@ -293,6 +298,62 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 		],
 	);
 
+	// Handle non-interactive mode - automatically submit prompt and exit when done
+	const [nonInteractiveSubmitted, setNonInteractiveSubmitted] =
+		React.useState(false);
+	React.useEffect(() => {
+		if (
+			nonInteractivePrompt &&
+			appState.mcpInitialized &&
+			appState.client &&
+			!nonInteractiveSubmitted
+		) {
+			setNonInteractiveSubmitted(true);
+			// Set auto-accept mode for non-interactive execution
+			appState.setDevelopmentMode('auto-accept');
+			// Submit the prompt
+			void handleMessageSubmit(nonInteractivePrompt);
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [
+		nonInteractivePrompt,
+		appState.mcpInitialized,
+		appState.client,
+		nonInteractiveSubmitted,
+		handleMessageSubmit,
+		appState.setDevelopmentMode,
+	]);
+
+	// Exit in non-interactive mode when all processing is complete
+	const OUTPUT_FLUSH_DELAY_MS = 1000;
+	React.useEffect(() => {
+		if (
+			nonInteractivePrompt &&
+			nonInteractiveSubmitted &&
+			!appState.isThinking &&
+			!appState.isToolExecuting &&
+			!appState.isBashExecuting &&
+			!appState.isToolConfirmationMode &&
+			appState.messages.length > 0
+		) {
+			// Wait a bit to ensure all output is flushed
+			const timer = setTimeout(() => {
+				exit();
+			}, OUTPUT_FLUSH_DELAY_MS);
+
+			return () => clearTimeout(timer);
+		}
+	}, [
+		nonInteractivePrompt,
+		nonInteractiveSubmitted,
+		appState.isThinking,
+		appState.isToolExecuting,
+		appState.isBashExecuting,
+		appState.isToolConfirmationMode,
+		appState.messages.length,
+		exit,
+	]);
+
 	// Memoize static components to prevent unnecessary re-renders
 	const staticComponents = React.useMemo(
 		() => [
@@ -452,7 +513,9 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 								/>
 							) : appState.isBashExecuting ? (
 								<BashExecutionIndicator command={appState.currentBashCommand} />
-							) : appState.mcpInitialized && appState.client ? (
+							) : appState.mcpInitialized &&
+							  appState.client &&
+							  !nonInteractivePrompt ? (
 								<UserInput
 									customCommands={Array.from(
 										appState.customCommandCache.keys(),

@@ -16,4 +16,18 @@ if (portArgIndex !== -1 && args[portArgIndex + 1]) {
 	}
 }
 
-render(<App vscodeMode={vscodeMode} vscodePort={vscodePort} />);
+// Check for non-interactive mode (run command)
+let nonInteractivePrompt: string | undefined;
+const runCommandIndex = args.findIndex(arg => arg === 'run');
+if (runCommandIndex !== -1 && args[runCommandIndex + 1]) {
+	// Join all remaining args after 'run' as the prompt
+	nonInteractivePrompt = args.slice(runCommandIndex + 1).join(' ');
+}
+
+render(
+	<App
+		vscodeMode={vscodeMode}
+		vscodePort={vscodePort}
+		nonInteractivePrompt={nonInteractivePrompt}
+	/>,
+);
