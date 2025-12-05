@@ -217,6 +217,11 @@ nanocoder run "refactor the database connection to use a connection pool"
 - Displays all output and tool execution results
 - Exits automatically when the task is complete
 
+**Note:** When using non-interactive mode with VS Code integration, place any flags (like `--vscode` or `--vscode-port`) before the `run` command:
+```bash
+nanocoder --vscode run "your prompt"
+```
+
 ## Configuration
 
 ### AI Provider Setup
