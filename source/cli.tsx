@@ -20,8 +20,22 @@ if (portArgIndex !== -1 && args[portArgIndex + 1]) {
 let nonInteractivePrompt: string | undefined;
 const runCommandIndex = args.findIndex(arg => arg === 'run');
 if (runCommandIndex !== -1 && args[runCommandIndex + 1]) {
-	// Join all remaining args after 'run' as the prompt
-	nonInteractivePrompt = args.slice(runCommandIndex + 1).join(' ');
+	// Filter out known flags after 'run' when constructing the prompt
+	const promptArgs: string[] = [];
+	const knownFlags = new Set(['--vscode', '--vscode-port']);
+	const afterRunArgs = args.slice(runCommandIndex + 1);
+	for (let i = 0; i < afterRunArgs.length; i++) {
+		const arg = afterRunArgs[i];
+		if (arg === '--vscode') {
+			continue; // skip this flag
+		} else if (arg === '--vscode-port') {
+			i++; // skip this flag and its value
+			continue;
+		} else {
+			promptArgs.push(arg);
+		}
+	}
+	nonInteractivePrompt = promptArgs.join(' ');
 }
 
 render(
