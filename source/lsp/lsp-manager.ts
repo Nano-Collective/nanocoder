@@ -35,6 +35,18 @@ export interface LSPInitResult {
 	error?: string;
 }
 
+export interface LSPConnectionStatus {
+	totalCount: number;
+	connectedCount: number;
+	errorCount: number;
+	servers: {
+		name: string;
+		connected: boolean;
+		languages?: string[];
+		error?: string;
+	}[];
+}
+
 export interface DiagnosticsResult {
 	uri: string;
 	diagnostics: Diagnostic[];

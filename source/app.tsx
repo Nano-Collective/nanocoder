@@ -175,6 +175,8 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 		setStartChat: appState.setStartChat,
 		setMcpInitialized: appState.setMcpInitialized,
 		setUpdateInfo: appState.setUpdateInfo,
+		setMcpConnectionStatus: appState.setMcpConnectionStatus,
+		setLspConnectionStatus: appState.setLspConnectionStatus,
 		addToChatQueue: appState.addToChatQueue,
 		componentKeyCounter: appState.componentKeyCounter,
 		customCommandCache: appState.customCommandCache,
@@ -236,6 +238,8 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 				model={appState.currentModel}
 				theme={appState.currentTheme}
 				updateInfo={appState.updateInfo}
+				mcpConnectionStatus={appState.mcpConnectionStatus}
+				lspConnectionStatus={appState.lspConnectionStatus}
 			/>,
 		);
 	}, [appState]);
@@ -294,23 +298,10 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 	);
 
 	// Memoize static components to prevent unnecessary re-renders
+	// Note: Status component is NOT included here as it needs to be dynamic
 	const staticComponents = React.useMemo(
-		() => [
-			<WelcomeMessage key="welcome" />,
-			<Status
-				key="status"
-				provider={appState.currentProvider}
-				model={appState.currentModel}
-				theme={appState.currentTheme}
-				updateInfo={appState.updateInfo}
-			/>,
-		],
-		[
-			appState.currentProvider,
-			appState.currentModel,
-			appState.currentTheme,
-			appState.updateInfo,
-		],
+		() => [<WelcomeMessage key="welcome" />],
+		[],
 	);
 
 	// Handle loading state for directory trust check
@@ -376,6 +367,18 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 							<ChatQueue
 								staticComponents={staticComponents}
 								queuedComponents={appState.chatComponents}
+							/>
+						)}
+
+						{/* Dynamic Status component for real-time connection updates */}
+						{appState.startChat && (
+							<Status
+								provider={appState.currentProvider}
+								model={appState.currentModel}
+								theme={appState.currentTheme}
+								updateInfo={appState.updateInfo}
+								mcpConnectionStatus={appState.mcpConnectionStatus}
+								lspConnectionStatus={appState.lspConnectionStatus}
 							/>
 						)}
 					</Box>

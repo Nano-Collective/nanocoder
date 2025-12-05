@@ -50,3 +50,15 @@ export interface MCPInitResult {
 	toolCount?: number;
 	error?: string;
 }
+
+export interface MCPConnectionStatus {
+	totalCount: number;
+	connectedCount: number;
+	errorCount: number;
+	servers: {
+		name: string;
+		connected: boolean;
+		toolCount?: number;
+		error?: string;
+	}[];
+}
