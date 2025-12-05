@@ -328,20 +328,25 @@ export default function App({
 	const OUTPUT_FLUSH_DELAY_MS = 1000;
 	const MAX_EXECUTION_TIME_MS = 300000; // 5 minutes
 	const [startTime] = React.useState(Date.now());
-	
+
 	React.useEffect(() => {
 		if (nonInteractivePrompt && nonInteractiveSubmitted) {
-			const isComplete = !appState.isThinking && !appState.isToolExecuting && 
-							 !appState.isBashExecuting && !appState.isToolConfirmationMode;
+			const isComplete =
+				!appState.isThinking &&
+				!appState.isToolExecuting &&
+				!appState.isBashExecuting &&
+				!appState.isToolConfirmationMode;
 			const hasMessages = appState.messages.length > 0;
 			const hasTimedOut = Date.now() - startTime > MAX_EXECUTION_TIME_MS;
-			
+
 			// Check for error messages in the messages array
 			const hasErrorMessages = appState.messages.some(
-				(message: {role: string; content: string}) => message.role === 'error' || 
-						  (typeof message.content === 'string' && message.content.toLowerCase().includes('error'))
+				(message: {role: string; content: string}) =>
+					message.role === 'error' ||
+					(typeof message.content === 'string' &&
+						message.content.toLowerCase().includes('error')),
 			);
-			
+
 			// Exit if processing is complete with messages, timed out, or encountered errors
 			if ((isComplete && hasMessages) || hasTimedOut || hasErrorMessages) {
 				// Wait a bit to ensure all output is flushed
