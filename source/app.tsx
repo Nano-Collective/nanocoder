@@ -43,9 +43,14 @@ import {UIStateProvider} from '@/hooks/useUIState';
 interface AppProps {
 	vscodeMode?: boolean;
 	vscodePort?: number;
+	nonInteractivePrompt?: string;
 }
 
-export default function App({vscodeMode = false, vscodePort}: AppProps) {
+export default function App({
+	vscodeMode = false,
+	vscodePort,
+	nonInteractivePrompt,
+}: AppProps) {
 	// Use extracted hooks
 	const appState = useAppState();
 	const {exit} = useApp();
@@ -293,6 +298,77 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 		],
 	);
 
+	// Handle non-interactive mode - automatically submit prompt and exit when done
+	const [nonInteractiveSubmitted, setNonInteractiveSubmitted] =
+		React.useState(false);
+	React.useEffect(() => {
+		if (
+			nonInteractivePrompt &&
+			appState.mcpInitialized &&
+			appState.client &&
+			!nonInteractiveSubmitted
+		) {
+			setNonInteractiveSubmitted(true);
+			// Set auto-accept mode for non-interactive execution
+			appState.setDevelopmentMode('auto-accept');
+			// Submit the prompt
+			void handleMessageSubmit(nonInteractivePrompt);
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [
+		nonInteractivePrompt,
+		appState.mcpInitialized,
+		appState.client,
+		nonInteractiveSubmitted,
+		handleMessageSubmit,
+		appState.setDevelopmentMode,
+	]);
+
+	// Exit in non-interactive mode when all processing is complete
+	const OUTPUT_FLUSH_DELAY_MS = 1000;
+	const MAX_EXECUTION_TIME_MS = 300000; // 5 minutes
+	const [startTime] = React.useState(Date.now());
+
+	React.useEffect(() => {
+		if (nonInteractivePrompt && nonInteractiveSubmitted) {
+			const isComplete =
+				!appState.isThinking &&
+				!appState.isToolExecuting &&
+				!appState.isBashExecuting &&
+				!appState.isToolConfirmationMode;
+			const hasMessages = appState.messages.length > 0;
+			const hasTimedOut = Date.now() - startTime > MAX_EXECUTION_TIME_MS;
+
+			// Check for error messages in the messages array
+			const hasErrorMessages = appState.messages.some(
+				(message: {role: string; content: string}) =>
+					message.role === 'error' ||
+					(typeof message.content === 'string' &&
+						message.content.toLowerCase().includes('error')),
+			);
+
+			// Exit if processing is complete with messages, timed out, or encountered errors
+			if ((isComplete && hasMessages) || hasTimedOut || hasErrorMessages) {
+				// Wait a bit to ensure all output is flushed
+				const timer = setTimeout(() => {
+					exit();
+				}, OUTPUT_FLUSH_DELAY_MS);
+
+				return () => clearTimeout(timer);
+			}
+		}
+	}, [
+		nonInteractivePrompt,
+		nonInteractiveSubmitted,
+		appState.isThinking,
+		appState.isToolExecuting,
+		appState.isBashExecuting,
+		appState.isToolConfirmationMode,
+		appState.messages,
+		startTime,
+		exit,
+	]);
+
 	// Memoize static components to prevent unnecessary re-renders
 	const staticComponents = React.useMemo(
 		() => [
@@ -452,7 +528,9 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 								/>
 							) : appState.isBashExecuting ? (
 								<BashExecutionIndicator command={appState.currentBashCommand} />
-							) : appState.mcpInitialized && appState.client ? (
+							) : appState.mcpInitialized &&
+							  appState.client &&
+							  !nonInteractivePrompt ? (
 								<UserInput
 									customCommands={Array.from(
 										appState.customCommandCache.keys(),

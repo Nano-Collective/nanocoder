@@ -10,6 +10,9 @@ A local-first CLI coding agent that brings the power of agentic coding tools lik
 - [Installation](#installation)
   - [For Users](#for-users)
   - [For Development](#for-development)
+- [Usage](#usage)
+  - [Interactive Mode](#interactive-mode)
+  - [Non-Interactive Mode](#non-interactive-mode)
 - [Configuration](#configuration)
   - [AI Provider Setup](#ai-provider-setup)
   - [MCP (Model Context Protocol) Servers](#mcp-model-context-protocol-servers)
@@ -163,6 +166,60 @@ Or build and run in one command:
 
 ```bash
 pnpm run dev
+```
+
+## Usage
+
+### Interactive Mode
+
+To start Nanocoder in interactive mode (the default), simply run:
+
+```bash
+nanocoder
+```
+
+This will open an interactive chat session where you can:
+
+- Chat with the AI about your code
+- Use slash commands (e.g., `/help`, `/model`, `/status`)
+- Execute bash commands with `!`
+- Review and approve tool executions
+- Switch between different models and providers
+
+### Non-Interactive Mode
+
+For automated tasks, scripting, or CI/CD pipelines, use the `run` command:
+
+```bash
+nanocoder run "your prompt here"
+```
+
+**Examples:**
+
+```bash
+# Simple task
+nanocoder run "analyze the code in src/app.ts"
+
+# Code generation
+nanocoder run "create a new React component for user login"
+
+# Testing
+nanocoder run "write unit tests for all functions in utils.js"
+
+# Refactoring
+nanocoder run "refactor the database connection to use a connection pool"
+```
+
+**Non-interactive mode behavior:**
+
+- Automatically executes the given prompt
+- Runs in auto-accept mode (tools execute without confirmation)
+- Displays all output and tool execution results
+- Exits automatically when the task is complete
+
+**Note:** When using non-interactive mode with VS Code integration, place any flags (like `--vscode` or `--vscode-port`) before the `run` command:
+```bash
+nanocoder --vscode run "your prompt"
 ```
 
 ## Configuration
