@@ -121,7 +121,9 @@
 		"workerThreads": false,
 		"serial": true,
 		"environmentVariables": {
-			"NODE_ENV": "test"
+			"NODE_ENV": "test",
+			"LC_ALL": "en-US.UTF-8",
+			"LANG": "en-US.UTF-8"
 		}
 	},
 	"prettier": "@vdemedes/prettier-config"
