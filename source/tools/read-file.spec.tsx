@@ -157,9 +157,12 @@ test.serial(
 			const content = 'line\n'.repeat(100);
 			writeFileSync(join(testDir, 'small.ts'), content);
 
-			const result = await readFileTool.tool.execute!({ 
-				path: join(testDir, 'small.ts'),
-			}, { toolCallId: "test", messages: [] });
+			const result = await readFileTool.tool.execute!(
+				{
+					path: join(testDir, 'small.ts'),
+				},
+				{toolCallId: 'test', messages: []},
+			);
 
 			// Should return content with line numbers, not metadata
 			t.regex(result, /^\s*1:/);
@@ -182,9 +185,12 @@ test.serial(
 			const content = 'line\n'.repeat(400);
 			writeFileSync(join(testDir, 'large.ts'), content);
 
-			const result = await readFileTool.tool.execute!({ 
-				path: join(testDir, 'large.ts'),
-			}, { toolCallId: "test", messages: [] });
+			const result = await readFileTool.tool.execute!(
+				{
+					path: join(testDir, 'large.ts'),
+				},
+				{toolCallId: 'test', messages: []},
+			);
 
 			// Should return metadata, not content
 			t.regex(result, /File:/);
@@ -209,11 +215,14 @@ test.serial(
 			const content = 'line\n'.repeat(400);
 			writeFileSync(join(testDir, 'large.ts'), content);
 
-			const result = await readFileTool.tool.execute!({ 
-				path: join(testDir, 'large.ts'),
-				start_line: 1,
-				end_line: 50,
-			}, { toolCallId: "test", messages: [] });
+			const result = await readFileTool.tool.execute!(
+				{
+					path: join(testDir, 'large.ts'),
+					start_line: 1,
+					end_line: 50,
+				},
+				{toolCallId: 'test', messages: []},
+			);
 
 			// Should return content with line numbers
 			t.regex(result, /^\s*1:/);
@@ -236,9 +245,12 @@ test.serial(
 			const content = 'line\n'.repeat(350);
 			writeFileSync(join(testDir, 'medium.ts'), content);
 
-			const result = await readFileTool.tool.execute!({ 
-				path: join(testDir, 'medium.ts'),
-			}, { toolCallId: "test", messages: [] });
+			const result = await readFileTool.tool.execute!(
+				{
+					path: join(testDir, 'medium.ts'),
+				},
+				{toolCallId: 'test', messages: []},
+			);
 
 			// Should suggest progressive reading
 			t.regex(result, /Medium file/);
@@ -259,9 +271,12 @@ test.serial('read_file provides chunk suggestions for large files', async t => {
 		const content = 'line\n'.repeat(1000);
 		writeFileSync(join(testDir, 'large.ts'), content);
 
-		const result = await readFileTool.tool.execute!({ 
-			path: join(testDir, 'large.ts'),
-		}, { toolCallId: "test", messages: [] });
+		const result = await readFileTool.tool.execute!(
+			{
+				path: join(testDir, 'large.ts'),
+			},
+			{toolCallId: 'test', messages: []},
+		);
 
 		// Should suggest chunked reading
 		t.regex(result, /Large file/);
@@ -288,11 +303,14 @@ test.serial('read_file reads specific line range', async t => {
 			'line1\nline2\nline3\nline4\nline5',
 		);
 
-		const result = await readFileTool.tool.execute!({ 
-			path: join(testDir, 'test.ts'),
-			start_line: 2,
-			end_line: 4,
-		}, { toolCallId: "test", messages: [] });
+		const result = await readFileTool.tool.execute!(
+			{
+				path: join(testDir, 'test.ts'),
+				start_line: 2,
+				end_line: 4,
+			},
+			{toolCallId: 'test', messages: []},
+		);
 
 		// Should only contain lines 2-4
 		t.regex(result, /^\s*2: line2/m);
@@ -316,10 +334,13 @@ test.serial('read_file handles start_line only', async t => {
 			'line1\nline2\nline3\nline4\nline5',
 		);
 
-		const result = await readFileTool.tool.execute!({ 
-			path: join(testDir, 'test.ts'),
-			start_line: 3,
-		}, { toolCallId: "test", messages: [] });
+		const result = await readFileTool.tool.execute!(
+			{
+				path: join(testDir, 'test.ts'),
+				start_line: 3,
+			},
+			{toolCallId: 'test', messages: []},
+		);
 
 		// Should read from line 3 to end
 		t.false(result.includes('line1'));
@@ -342,10 +363,13 @@ test.serial('read_file handles end_line only', async t => {
 			'line1\nline2\nline3\nline4\nline5',
 		);
 
-		const result = await readFileTool.tool.execute!({ 
-			path: join(testDir, 'test.ts'),
-			end_line: 3,
-		}, { toolCallId: "test", messages: [] });
+		const result = await readFileTool.tool.execute!(
+			{
+				path: join(testDir, 'test.ts'),
+				end_line: 3,
+			},
+			{toolCallId: 'test', messages: []},
+		);
 
 		// Should read from start to line 3
 		t.regex(result, /^\s*1: line1/m);
@@ -365,11 +389,14 @@ test.serial('read_file clamps line ranges to file bounds', async t => {
 		mkdirSync(testDir, {recursive: true});
 		writeFileSync(join(testDir, 'test.ts'), 'line1\nline2\nline3');
 
-		const result = await readFileTool.tool.execute!({ 
-			path: join(testDir, 'test.ts'),
-			start_line: 0, // Should clamp to 1
-			end_line: 100, // Should clamp to 3
-		}, { toolCallId: "test", messages: [] });
+		const result = await readFileTool.tool.execute!(
+			{
+				path: join(testDir, 'test.ts'),
+				start_line: 0, // Should clamp to 1
+				end_line: 100, // Should clamp to 3
+			},
+			{toolCallId: 'test', messages: []},
+		);
 
 		// Should read entire file
 		t.regex(result, /^\s*1: line1/m);
@@ -404,9 +431,12 @@ test.serial('read_file detects common file types', async t => {
 			const content = 'line\n'.repeat(400);
 			writeFileSync(join(testDir, filename), content);
 
-			const result = await readFileTool.tool.execute!({ 
-				path: join(testDir, filename),
-			}, { toolCallId: "test", messages: [] });
+			const result = await readFileTool.tool.execute!(
+				{
+					path: join(testDir, filename),
+				},
+				{toolCallId: 'test', messages: []},
+			);
 
 			t.regex(
 				result,
@@ -530,9 +560,12 @@ test.serial('read_file throws error for nonexistent file', async t => {
 
 	await t.throwsAsync(
 		async () => {
-			await readFileTool.tool.execute!({ 
-				path: '/nonexistent/file.ts',
-			}, { toolCallId: "test", messages: [] });
+			await readFileTool.tool.execute!(
+				{
+					path: '/nonexistent/file.ts',
+				},
+				{toolCallId: 'test', messages: []},
+			);
 		},
 		{message: /does not exist/},
 	);
@@ -548,9 +581,12 @@ test.serial('read_file throws error for empty files', async t => {
 
 		await t.throwsAsync(
 			async () => {
-				await readFileTool.tool.execute!({ 
-					path: join(testDir, 'empty.ts'),
-				}, { toolCallId: "test", messages: [] });
+				await readFileTool.tool.execute!(
+					{
+						path: join(testDir, 'empty.ts'),
+					},
+					{toolCallId: 'test', messages: []},
+				);
 			},
 			{message: /exists but is empty/},
 		);
@@ -575,9 +611,12 @@ test.serial('read_file handles files with unicode characters', async t => {
 			'utf-8',
 		);
 
-		const result = await readFileTool.tool.execute!({ 
-			path: join(testDir, 'unicode.ts'),
-		}, { toolCallId: "test", messages: [] });
+		const result = await readFileTool.tool.execute!(
+			{
+				path: join(testDir, 'unicode.ts'),
+			},
+			{toolCallId: 'test', messages: []},
+		);
 
 		t.true(result.includes('世界'));
 		t.true(result.includes('🌍'));
@@ -596,9 +635,12 @@ test.serial('read_file handles files with very long lines', async t => {
 		const longLine = 'a'.repeat(10000);
 		writeFileSync(join(testDir, 'long.ts'), `${longLine}\nshort line`);
 
-		const result = await readFileTool.tool.execute!({ 
-			path: join(testDir, 'long.ts'),
-		}, { toolCallId: "test", messages: [] });
+		const result = await readFileTool.tool.execute!(
+			{
+				path: join(testDir, 'long.ts'),
+			},
+			{toolCallId: 'test', messages: []},
+		);
 
 		t.true(result.includes('a'.repeat(100))); // Should include long content
 		t.true(result.includes('short line'));
@@ -615,9 +657,12 @@ test.serial('read_file handles files with Windows line endings', async t => {
 		mkdirSync(testDir, {recursive: true});
 		writeFileSync(join(testDir, 'windows.ts'), 'line1\r\nline2\r\nline3');
 
-		const result = await readFileTool.tool.execute!({ 
-			path: join(testDir, 'windows.ts'),
-		}, { toolCallId: "test", messages: [] });
+		const result = await readFileTool.tool.execute!(
+			{
+				path: join(testDir, 'windows.ts'),
+			},
+			{toolCallId: 'test', messages: []},
+		);
 
 		// Should handle CRLF properly
 		t.regex(result, /^\s*1:/m);
@@ -636,9 +681,12 @@ test.serial('read_file handles files with mixed line endings', async t => {
 		mkdirSync(testDir, {recursive: true});
 		writeFileSync(join(testDir, 'mixed.ts'), 'line1\nline2\r\nline3\n');
 
-		const result = await readFileTool.tool.execute!({ 
-			path: join(testDir, 'mixed.ts'),
-		}, { toolCallId: "test", messages: [] });
+		const result = await readFileTool.tool.execute!(
+			{
+				path: join(testDir, 'mixed.ts'),
+			},
+			{toolCallId: 'test', messages: []},
+		);
 
 		// Should handle mixed line endings
 		t.truthy(result);
@@ -662,9 +710,12 @@ test.serial(
 				'content',
 			);
 
-			const result = await readFileTool.tool.execute!({ 
-				path: join(testDir, 'dir-with-dash', 'file_with_underscore.ts'),
-			}, { toolCallId: "test", messages: [] });
+			const result = await readFileTool.tool.execute!(
+				{
+					path: join(testDir, 'dir-with-dash', 'file_with_underscore.ts'),
+				},
+				{toolCallId: 'test', messages: []},
+			);
 
 			t.truthy(result);
 			t.true(result.includes('content'));
@@ -683,9 +734,12 @@ test.serial('read_file handles files without extension', async t => {
 		const content = 'line\n'.repeat(400);
 		writeFileSync(join(testDir, 'Makefile'), content);
 
-		const result = await readFileTool.tool.execute!({ 
-			path: join(testDir, 'Makefile'),
-		}, { toolCallId: "test", messages: [] });
+		const result = await readFileTool.tool.execute!(
+			{
+				path: join(testDir, 'Makefile'),
+			},
+			{toolCallId: 'test', messages: []},
+		);
 
 		// Should still provide metadata
 		t.regex(result, /File: .*Makefile/);
@@ -705,9 +759,12 @@ test.serial(
 			mkdirSync(testDir, {recursive: true});
 			writeFileSync(join(testDir, 'test.ts'), 'line1\nline2\nline3');
 
-			const result = await readFileTool.tool.execute!({ 
-				path: join(testDir, 'test.ts'),
-			}, { toolCallId: "test", messages: [] });
+			const result = await readFileTool.tool.execute!(
+				{
+					path: join(testDir, 'test.ts'),
+				},
+				{toolCallId: 'test', messages: []},
+			);
 
 			// Line numbers should be padded with spaces
 			t.regex(result, /^\s+1: line1/m);

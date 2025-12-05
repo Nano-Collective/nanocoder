@@ -9,7 +9,9 @@ function DebuggingToggle({enabled}: {enabled: boolean}) {
 		<Box marginTop={1} marginBottom={1}>
 			<InfoMessage
 				hideBox={true}
-				message={`Tool execution debugging ${enabled ? 'enabled' : 'disabled'}.`}
+				message={`Tool execution debugging ${
+					enabled ? 'enabled' : 'disabled'
+				}.`}
 			/>
 		</Box>
 	);

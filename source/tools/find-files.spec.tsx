@@ -162,10 +162,13 @@ test.serial('find_files respects .gitignore patterns', async t => {
 			process.chdir(testDir);
 
 			// Test pattern search - should exclude ignored files
-			const result = await findFilesTool.tool.execute!({
-				pattern: '**/*.tsx',
-				maxResults: 50,
-			}, { toolCallId: "test", messages: [] });
+			const result = await findFilesTool.tool.execute!(
+				{
+					pattern: '**/*.tsx',
+					maxResults: 50,
+				},
+				{toolCallId: 'test', messages: []},
+			);
 
 			t.false(
 				result.includes('build/'),
@@ -209,10 +212,13 @@ test.serial(
 				process.chdir(testDir);
 
 				// Test pattern search - should exclude node_modules even without .gitignore
-				const result = await findFilesTool.tool.execute!({
-					pattern: '**/*.js',
-					maxResults: 50,
-				}, { toolCallId: "test", messages: [] });
+				const result = await findFilesTool.tool.execute!(
+					{
+						pattern: '**/*.js',
+						maxResults: 50,
+					},
+					{toolCallId: 'test', messages: []},
+				);
 
 				t.false(
 					result.includes('node_modules'),
@@ -257,10 +263,13 @@ test.serial('find_files handles directory patterns (dir/**)', async t => {
 		try {
 			process.chdir(testDir);
 
-			const result = await findFilesTool.tool.execute!({
-				pattern: 'scripts/**',
-				maxResults: 50,
-			}, { toolCallId: "test", messages: [] });
+			const result = await findFilesTool.tool.execute!(
+				{
+					pattern: 'scripts/**',
+					maxResults: 50,
+				},
+				{toolCallId: 'test', messages: []},
+			);
 
 			t.true(
 				result.includes('scripts/build.sh'),
@@ -297,10 +306,13 @@ test.serial('find_files handles wildcard patterns (**/*.ext)', async t => {
 		try {
 			process.chdir(testDir);
 
-			const result = await findFilesTool.tool.execute!({
-				pattern: '**/*.ts',
-				maxResults: 50,
-			}, { toolCallId: "test", messages: [] });
+			const result = await findFilesTool.tool.execute!(
+				{
+					pattern: '**/*.ts',
+					maxResults: 50,
+				},
+				{toolCallId: 'test', messages: []},
+			);
 
 			t.true(result.includes('src/index.ts'), 'Should find .ts in src');
 			t.true(result.includes('lib/utils.ts'), 'Should find .ts in lib');
@@ -330,10 +342,13 @@ test.serial('find_files handles brace expansion patterns', async t => {
 		try {
 			process.chdir(testDir);
 
-			const result = await findFilesTool.tool.execute!({
-				pattern: '*.{ts,tsx}',
-				maxResults: 50,
-			}, { toolCallId: "test", messages: [] });
+			const result = await findFilesTool.tool.execute!(
+				{
+					pattern: '*.{ts,tsx}',
+					maxResults: 50,
+				},
+				{toolCallId: 'test', messages: []},
+			);
 
 			t.true(
 				result.includes('comp.tsx') || result.includes('util.ts'),
@@ -364,10 +379,13 @@ test.serial('find_files handles simple patterns (*.ext)', async t => {
 		try {
 			process.chdir(testDir);
 
-			const result = await findFilesTool.tool.execute!({
-				pattern: '*.json',
-				maxResults: 50,
-			}, { toolCallId: "test", messages: [] });
+			const result = await findFilesTool.tool.execute!(
+				{
+					pattern: '*.json',
+					maxResults: 50,
+				},
+				{toolCallId: 'test', messages: []},
+			);
 
 			t.true(result.includes('file1.json'), 'Should find .json files');
 			t.true(result.includes('file2.json'), 'Should find all .json files');
@@ -398,10 +416,13 @@ test.serial(
 			try {
 				process.chdir(testDir);
 
-				const result = await findFilesTool.tool.execute!({
-					pattern: 'components',
-					maxResults: 50,
-				}, { toolCallId: "test", messages: [] });
+				const result = await findFilesTool.tool.execute!(
+					{
+						pattern: 'components',
+						maxResults: 50,
+					},
+					{toolCallId: 'test', messages: []},
+				);
 
 				// Should find the directory itself
 				t.true(result.includes('components'), 'Should find directory by name');
@@ -422,10 +443,13 @@ test.serial(
 	'find_files returns no files message for nonexistent pattern',
 	async t => {
 		t.timeout(10000);
-		const result = await findFilesTool.tool.execute!({
-			pattern: '**/*.veryuniqueextension',
-			maxResults: 50,
-		}, { toolCallId: "test", messages: [] });
+		const result = await findFilesTool.tool.execute!(
+			{
+				pattern: '**/*.veryuniqueextension',
+				maxResults: 50,
+			},
+			{toolCallId: 'test', messages: []},
+		);
 
 		t.regex(result, /No files or directories found/);
 	},
@@ -458,10 +482,13 @@ test('find_files tool has formatter function', t => {
 test.serial('find_files enforces max cap of 100 results', async t => {
 	t.timeout(10000);
 	// Request more than 100 results but should be capped at 100
-	const result = await findFilesTool.tool.execute!({
-		pattern: '**/*.ts',
-		maxResults: 500, // Request 500, but should cap at 100
-	}, { toolCallId: "test", messages: [] });
+	const result = await findFilesTool.tool.execute!(
+		{
+			pattern: '**/*.ts',
+			maxResults: 500, // Request 500, but should cap at 100
+		},
+		{toolCallId: 'test', messages: []},
+	);
 
 	// Check that the result doesn't exceed 100 matches
 	const firstLine = result.split('\n')[0];
@@ -475,10 +502,13 @@ test.serial('find_files enforces max cap of 100 results', async t => {
 
 test.serial('find_files respects maxResults when less than cap', async t => {
 	t.timeout(10000);
-	const result = await findFilesTool.tool.execute!({
-		pattern: '**/*.ts',
-		maxResults: 10, // Request only 10
-	}, { toolCallId: "test", messages: [] });
+	const result = await findFilesTool.tool.execute!(
+		{
+			pattern: '**/*.ts',
+			maxResults: 10, // Request only 10
+		},
+		{toolCallId: 'test', messages: []},
+	);
 
 	// Should respect the lower limit
 	t.truthy(result);
@@ -504,10 +534,13 @@ test.serial('find_files handles special characters in patterns', async t => {
 		try {
 			process.chdir(testDir);
 
-			const result = await findFilesTool.tool.execute!({
-				pattern: '*.ts',
-				maxResults: 50,
-			}, { toolCallId: "test", messages: [] });
+			const result = await findFilesTool.tool.execute!(
+				{
+					pattern: '*.ts',
+					maxResults: 50,
+				},
+				{toolCallId: 'test', messages: []},
+			);
 
 			t.true(result.includes('file-with-dash.ts'), 'Should handle dashes');
 			t.true(
@@ -540,10 +573,13 @@ test.serial('find_files handles deeply nested directories', async t => {
 		try {
 			process.chdir(testDir);
 
-			const result = await findFilesTool.tool.execute!({
-				pattern: '**/*.ts',
-				maxResults: 50,
-			}, { toolCallId: "test", messages: [] });
+			const result = await findFilesTool.tool.execute!(
+				{
+					pattern: '**/*.ts',
+					maxResults: 50,
+				},
+				{toolCallId: 'test', messages: []},
+			);
 
 			t.true(
 				result.includes('deep.ts'),
@@ -570,10 +606,13 @@ test.serial('find_files handles empty directories gracefully', async t => {
 		try {
 			process.chdir(testDir);
 
-			const result = await findFilesTool.tool.execute!({
-				pattern: '*.ts',
-				maxResults: 50,
-			}, { toolCallId: "test", messages: [] });
+			const result = await findFilesTool.tool.execute!(
+				{
+					pattern: '*.ts',
+					maxResults: 50,
+				},
+				{toolCallId: 'test', messages: []},
+			);
 
 			t.regex(
 				result,
@@ -602,10 +641,13 @@ test.serial('find_files handles pattern with no wildcards', async t => {
 		try {
 			process.chdir(testDir);
 
-			const result = await findFilesTool.tool.execute!({
-				pattern: 'exact-file.ts',
-				maxResults: 50,
-			}, { toolCallId: "test", messages: [] });
+			const result = await findFilesTool.tool.execute!(
+				{
+					pattern: 'exact-file.ts',
+					maxResults: 50,
+				},
+				{toolCallId: 'test', messages: []},
+			);
 
 			t.true(result.includes('exact-file.ts'), 'Should find exact filename');
 			t.false(result.includes('other-file.ts'), 'Should not find other files');
@@ -633,10 +675,13 @@ test.serial('find_files handles patterns with subdirectory prefix', async t => {
 		try {
 			process.chdir(testDir);
 
-			const result = await findFilesTool.tool.execute!({
-				pattern: 'src/components/**/*.tsx',
-				maxResults: 50,
-			}, { toolCallId: "test", messages: [] });
+			const result = await findFilesTool.tool.execute!(
+				{
+					pattern: 'src/components/**/*.tsx',
+					maxResults: 50,
+				},
+				{toolCallId: 'test', messages: []},
+			);
 
 			t.true(
 				result.includes('Button.tsx'),
@@ -669,10 +714,13 @@ test.serial('find_files handles symlinks gracefully', async t => {
 			process.chdir(testDir);
 
 			// Just verify it doesn't crash with symlinks present
-			const result = await findFilesTool.tool.execute!({
-				pattern: '**/*.ts',
-				maxResults: 50,
-			}, { toolCallId: "test", messages: [] });
+			const result = await findFilesTool.tool.execute!(
+				{
+					pattern: '**/*.ts',
+					maxResults: 50,
+				},
+				{toolCallId: 'test', messages: []},
+			);
 
 			t.truthy(result);
 			t.false(result.includes('Error'));
@@ -702,10 +750,13 @@ test.serial(
 			try {
 				process.chdir(testDir);
 
-				const result = await findFilesTool.tool.execute!({
-					pattern: '*.{ts,tsx,js,jsx}',
-					maxResults: 50,
-				}, { toolCallId: "test", messages: [] });
+				const result = await findFilesTool.tool.execute!(
+					{
+						pattern: '*.{ts,tsx,js,jsx}',
+						maxResults: 50,
+					},
+					{toolCallId: 'test', messages: []},
+				);
 
 				t.true(result.includes('file.ts'), 'Should find .ts');
 				t.true(result.includes('file.tsx'), 'Should find .tsx');
@@ -735,10 +786,13 @@ test.serial('find_files handles files with no extension', async t => {
 		try {
 			process.chdir(testDir);
 
-			const result = await findFilesTool.tool.execute!({
-				pattern: 'Makefile',
-				maxResults: 50,
-			}, { toolCallId: "test", messages: [] });
+			const result = await findFilesTool.tool.execute!(
+				{
+					pattern: 'Makefile',
+					maxResults: 50,
+				},
+				{toolCallId: 'test', messages: []},
+			);
 
 			t.true(
 				result.includes('Makefile'),
@@ -785,10 +839,13 @@ test.serial(
 			try {
 				process.chdir(testDir);
 
-				const result = await findFilesTool.tool.execute!({
-					pattern: '**/*.ts',
-					maxResults: 50,
-				}, { toolCallId: "test", messages: [] });
+				const result = await findFilesTool.tool.execute!(
+					{
+						pattern: '**/*.ts',
+						maxResults: 50,
+					},
+					{toolCallId: 'test', messages: []},
+				);
 
 				for (const dir of ignoreDirs) {
 					t.false(result.includes(`${dir}/`), `Should exclude ${dir}`);

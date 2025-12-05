@@ -17,6 +17,7 @@ import {formatError} from '@/utils/error-formatter';
 import UserMessage from '@/components/user-message';
 import AssistantMessage from '@/components/assistant-message';
 import ErrorMessage from '@/components/error-message';
+import ToolMessage from '@/components/tool-message';
 import React from 'react';
 
 // Helper function to filter out invalid tool calls and deduplicate by ID and function
@@ -158,6 +159,46 @@ export function useChatHandler({
 						onToken: (token: string) => {
 							accumulatedContent += token;
 							setStreamingContent(accumulatedContent);
+						},
+						onToolCall: (toolCall: ToolCall) => {
+							// Display tool formatter immediately when tool call is detected
+							if (toolManager) {
+								const formatter = toolManager.getToolFormatter(
+									toolCall.function.name,
+								);
+								if (formatter) {
+									// Execute async formatter without blocking
+									void (async () => {
+										try {
+											const parsedArgs = parseToolArguments(
+												toolCall.function.arguments,
+											);
+											const preview = await formatter(parsedArgs);
+
+											// Add to chat queue with the tool formatter preview
+											if (React.isValidElement(preview)) {
+												addToChatQueue(
+													React.cloneElement(preview, {
+														key: `tool-preview-${toolCall.id}-${componentKeyCounter}`,
+													}),
+												);
+											} else {
+												addToChatQueue(
+													<ToolMessage
+														key={`tool-preview-${toolCall.id}-${componentKeyCounter}`}
+														title={`⚒ ${toolCall.function.name}`}
+														message={String(preview)}
+														hideBox={true}
+													/>,
+												);
+											}
+										} catch (error) {
+											// Silently fail - formatter is optional
+											console.error('Error displaying tool formatter:', error);
+										}
+									})();
+								}
+							}
 						},
 						onFinish: () => {
 							setIsStreaming(false);
@@ -414,6 +455,41 @@ export function useChatHandler({
 								}
 							}
 
+							// Display tool formatter before execution (for auto-accepted tools)
+							if (toolManager) {
+								const formatter = toolManager.getToolFormatter(
+									toolCall.function.name,
+								);
+								if (formatter) {
+									try {
+										const parsedArgs = parseToolArguments(
+											toolCall.function.arguments,
+										);
+										const preview = await formatter(parsedArgs);
+
+										// Display the formatter preview
+										if (React.isValidElement(preview)) {
+											addToChatQueue(
+												React.cloneElement(preview, {
+													key: `tool-preview-${toolCall.id}-${componentKeyCounter}`,
+												}),
+											);
+										} else {
+											addToChatQueue(
+												<ToolMessage
+													key={`tool-preview-${toolCall.id}-${componentKeyCounter}`}
+													title={`⚒ ${toolCall.function.name}`}
+													message={String(preview)}
+													hideBox={true}
+												/>,
+											);
+										}
+									} catch (error) {
+										// Silently fail - formatter is optional
+										console.error('Error displaying tool formatter:', error);
+									}
+								}
+							}
 							const result = await processToolUse(toolCall);
 							directResults.push(result);
 

@@ -304,13 +304,17 @@ export class AISDKClient implements LLMClient {
 					if (!isDebuggingEnabled()) return;
 
 					logInfo(
-						`[DEBUG] Step finished | Tool calls: ${step.toolCalls?.length || 0} | Tool results: ${step.toolResults?.length || 0}`,
+						`[DEBUG] Step finished | Tool calls: ${
+							step.toolCalls?.length || 0
+						} | Tool results: ${step.toolResults?.length || 0}`,
 					);
 
 					if (step.toolCalls && step.toolCalls.length > 0) {
 						step.toolCalls.forEach((toolCall, idx) => {
 							const inputStr = JSON.stringify(toolCall.input).substring(0, 100);
-							logInfo(`[DEBUG] Tool ${idx + 1}: ${toolCall.toolName}(${inputStr})`);
+							logInfo(
+								`[DEBUG] Tool ${idx + 1}: ${toolCall.toolName}(${inputStr})`,
+							);
 						});
 					}
 
@@ -470,16 +474,41 @@ export class AISDKClient implements LLMClient {
 				stopWhen: stepCountIs(10), // Allow up to 10 tool execution steps
 				// Can be used to add custom logging, metrics, or step tracking
 				onStepFinish(step) {
+					// Call onToolCall callback for each tool call in this step
+					// This allows UI to display tool formatters for auto-executed tools
+					if (step.toolCalls && step.toolCalls.length > 0) {
+						step.toolCalls.forEach(toolCall => {
+							const tc: ToolCall = {
+								// Some providers (like Ollama) don't provide toolCallId, so generate one
+								id:
+									toolCall.toolCallId ||
+									`tool_${Date.now()}_${Math.random()
+										.toString(36)
+										.substring(7)}`,
+								function: {
+									name: toolCall.toolName,
+									// AI SDK v6 uses 'input' for tool arguments
+									arguments: toolCall.input as Record<string, unknown>,
+								},
+							};
+							callbacks.onToolCall?.(tc);
+						});
+					}
+
 					if (!isDebuggingEnabled()) return;
 
 					logInfo(
-						`[DEBUG] Step finished | Tool calls: ${step.toolCalls?.length || 0} | Tool results: ${step.toolResults?.length || 0}`,
+						`[DEBUG] Step finished | Tool calls: ${
+							step.toolCalls?.length || 0
+						} | Tool results: ${step.toolResults?.length || 0}`,
 					);
 
 					if (step.toolCalls && step.toolCalls.length > 0) {
 						step.toolCalls.forEach((toolCall, idx) => {
 							const inputStr = JSON.stringify(toolCall.input).substring(0, 100);
-							logInfo(`[DEBUG] Tool ${idx + 1}: ${toolCall.toolName}(${inputStr})`);
+							logInfo(
+								`[DEBUG] Tool ${idx + 1}: ${toolCall.toolName}(${inputStr})`,
+							);
 						});
 					}
 

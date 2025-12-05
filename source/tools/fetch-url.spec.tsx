@@ -57,7 +57,10 @@ test('handler validates URL format', async t => {
 
 	await t.throwsAsync(
 		async () => {
-			await fetchUrlTool.tool.execute!({url: 'not-a-valid-url'}, { toolCallId: "test", messages: [] });
+			await fetchUrlTool.tool.execute!(
+				{url: 'not-a-valid-url'},
+				{toolCallId: 'test', messages: []},
+			);
 		},
 		{message: /Invalid URL/},
 	);
