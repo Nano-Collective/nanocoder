@@ -1,7 +1,7 @@
 import {convertToMarkdown} from '@nanocollective/get-md';
 import React from 'react';
 import {Text, Box} from 'ink';
-import type {ToolDefinition} from '@/types/index';
+
 import {tool, jsonSchema} from '@/types/core';
 import {ThemeContext} from '@/hooks/useTheme';
 import ToolMessage from '@/components/tool-message';
@@ -42,7 +42,6 @@ const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
 	}
 };
 
-// AI SDK tool definition
 const fetchUrlCoreTool = tool({
 	description: 'Fetch and parse markdown content from a URL',
 	inputSchema: jsonSchema<FetchArgs>({
@@ -55,7 +54,11 @@ const fetchUrlCoreTool = tool({
 		},
 		required: ['url'],
 	}),
-	// NO execute function - prevents AI SDK auto-execution
+	// Low risk: read-only operation, never requires approval
+	needsApproval: false,
+	execute: async (args, _options) => {
+		return await executeFetchUrl(args);
+	},
 });
 
 // Create a component that will re-render when theme changes
@@ -114,14 +117,14 @@ const FetchUrlFormatter = React.memo(
 	},
 );
 
-const formatter = (
+const fetchUrlFormatter = (
 	args: FetchArgs,
 	result?: string,
 ): Promise<React.ReactElement> => {
 	return Promise.resolve(<FetchUrlFormatter args={args} result={result} />);
 };
 
-const validator = (
+const fetchUrlValidator = (
 	args: FetchArgs,
 ): Promise<{valid: true} | {valid: false; error: string}> => {
 	// Validate URL format
@@ -161,12 +164,9 @@ const validator = (
 	}
 };
 
-// Nanocoder tool definition with AI SDK core tool + custom extensions
-export const fetchUrlTool: ToolDefinition = {
-	name: 'fetch_url',
-	tool: fetchUrlCoreTool, // Native AI SDK tool (no execute)
-	handler: executeFetchUrl,
-	formatter,
-	validator,
-	requiresConfirmation: false,
+export const fetchUrlTool = {
+	name: 'fetch_url' as const,
+	tool: fetchUrlCoreTool,
+	formatter: fetchUrlFormatter,
+	validator: fetchUrlValidator,
 };

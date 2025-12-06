@@ -11,12 +11,13 @@ export default memo(function AssistantMessage({
 	const {colors} = useTheme();
 
 	// Render markdown to terminal-formatted text with theme colors
+	// Add trailing newline to ensure consistent spacing after message
 	const renderedMessage = useMemo(() => {
 		try {
-			return parseMarkdown(message, colors);
+			return parseMarkdown(message, colors).trimEnd() + '\n';
 		} catch {
 			// Fallback to plain text if markdown parsing fails
-			return message;
+			return message.trimEnd() + '\n';
 		}
 	}, [message, colors]);
 

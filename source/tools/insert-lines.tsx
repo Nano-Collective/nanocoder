@@ -4,7 +4,7 @@ import {readFile, writeFile, access} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import {highlight} from 'cli-highlight';
 import {Text, Box} from 'ink';
-import type {ToolDefinition} from '@/types/index';
+
 import {tool, jsonSchema} from '@/types/core';
 import {getColors} from '@/config/index';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
@@ -14,6 +14,7 @@ import {
 	sendFileChangeToVSCode,
 	closeDiffInVSCode,
 } from '@/vscode/index';
+import {getCurrentMode} from '@/context/mode-context';
 
 interface InsertLinesArgs {
 	path: string;
@@ -66,7 +67,6 @@ const executeInsertLines = async (args: InsertLinesArgs): Promise<string> => {
 	} at line ${line_number}.${fileContext}`;
 };
 
-// AI SDK tool definition
 const insertLinesCoreTool = tool({
 	description: 'Insert new lines at a specific line number in a file',
 	inputSchema: jsonSchema<InsertLinesArgs>({
@@ -89,7 +89,14 @@ const insertLinesCoreTool = tool({
 		},
 		required: ['path', 'line_number', 'content'],
 	}),
-	// NO execute function - prevents AI SDK auto-execution
+	// Medium risk: file write operation, requires approval except in auto-accept mode
+	needsApproval: () => {
+		const mode = getCurrentMode();
+		return mode !== 'auto-accept'; // true in normal/plan, false in auto-accept
+	},
+	execute: async (args, _options) => {
+		return await executeInsertLines(args);
+	},
 });
 
 const InsertLinesFormatter = React.memo(
@@ -339,7 +346,7 @@ async function formatInsertLinesPreview(
 // Track VS Code change IDs for cleanup
 const vscodeChangeIds = new Map<string, string>();
 
-const formatter = async (
+const insertLinesFormatter = async (
 	args: InsertLinesArgs,
 	result?: string,
 ): Promise<React.ReactElement> => {
@@ -391,7 +398,7 @@ const formatter = async (
 	return <InsertLinesFormatter preview={preview} />;
 };
 
-const validator = async (
+const insertLinesValidator = async (
 	args: InsertLinesArgs,
 ): Promise<{valid: true} | {valid: false; error: string}> => {
 	const {path, line_number} = args;
@@ -451,11 +458,9 @@ const validator = async (
 	return {valid: true};
 };
 
-// Nanocoder tool definition with AI SDK core tool + custom extensions
-export const insertLinesTool: ToolDefinition = {
-	name: 'insert_lines',
-	tool: insertLinesCoreTool, // Native AI SDK tool (no execute)
-	handler: executeInsertLines,
-	formatter,
-	validator,
+export const insertLinesTool = {
+	name: 'insert_lines' as const,
+	tool: insertLinesCoreTool,
+	formatter: insertLinesFormatter,
+	validator: insertLinesValidator,
 };

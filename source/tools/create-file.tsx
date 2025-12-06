@@ -4,7 +4,7 @@ import {constants, existsSync} from 'node:fs';
 import {highlight} from 'cli-highlight';
 import React from 'react';
 import {Text, Box} from 'ink';
-import type {ToolDefinition} from '@/types/index';
+
 import {tool, jsonSchema} from '@/types/core';
 import {ThemeContext} from '@/hooks/useTheme';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
@@ -14,8 +14,8 @@ import {
 	sendFileChangeToVSCode,
 	closeDiffInVSCode,
 } from '@/vscode/index';
+import {getCurrentMode} from '@/context/mode-context';
 
-// Handler function - used by both Nanocoder and AI SDK tool
 const executeCreateFile = async (args: {
 	path: string;
 	content: string;
@@ -25,7 +25,6 @@ const executeCreateFile = async (args: {
 	return 'File written successfully';
 };
 
-// AI SDK tool definition
 const createFileCoreTool = tool({
 	description:
 		'Create a new file with the specified content (overwrites if file exists)',
@@ -43,7 +42,14 @@ const createFileCoreTool = tool({
 		},
 		required: ['path', 'content'],
 	}),
-	// NO execute function - prevents AI SDK auto-execution
+	// Medium risk: file write operation, requires approval except in auto-accept mode
+	needsApproval: () => {
+		const mode = getCurrentMode();
+		return mode !== 'auto-accept'; // true in normal/plan, false in auto-accept
+	},
+	execute: async (args, _options) => {
+		return await executeCreateFile(args);
+	},
 });
 
 interface CreateFileArgs {
@@ -122,7 +128,7 @@ const CreateFileFormatter = React.memo(({args}: {args: CreateFileArgs}) => {
 // Track VS Code change IDs for cleanup
 const vscodeChangeIds = new Map<string, string>();
 
-const formatter = async (
+const createFileFormatter = async (
 	args: CreateFileArgs,
 	result?: string,
 ): Promise<React.ReactElement> => {
@@ -168,7 +174,7 @@ const formatter = async (
 	return <CreateFileFormatter args={args} />;
 };
 
-const validator = async (args: {
+const createFileValidator = async (args: {
 	path: string;
 	content: string;
 }): Promise<{valid: true} | {valid: false; error: string}> => {
@@ -239,11 +245,9 @@ const validator = async (args: {
 	return {valid: true};
 };
 
-// Nanocoder tool definition with AI SDK core tool + custom extensions
-export const createFileTool: ToolDefinition = {
-	name: 'create_file',
-	tool: createFileCoreTool, // Native AI SDK tool (no execute)
-	handler: executeCreateFile, // Manual execution after confirmation
-	formatter,
-	validator,
+export const createFileTool = {
+	name: 'create_file' as const,
+	tool: createFileCoreTool,
+	formatter: createFileFormatter,
+	validator: createFileValidator,
 };

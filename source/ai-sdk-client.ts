@@ -1,5 +1,5 @@
 import {createOpenAICompatible} from '@ai-sdk/openai-compatible';
-import {generateText, streamText} from 'ai';
+import {streamText, stepCountIs, RetryError, APICallError} from 'ai';
 import type {ModelMessage} from 'ai';
 import {Agent, fetch as undiciFetch} from 'undici';
 import type {
@@ -15,15 +15,123 @@ import {XMLToolCallParser} from '@/tool-calling/xml-parser';
 import {getModelContextLimit} from '@/models/index.js';
 
 /**
+ * Message type used for testing the empty assistant message filter.
+ * This is a simplified version of the AI SDK's internal message format.
+ */
+export interface TestableMessage {
+	role: 'system' | 'user' | 'assistant' | 'tool';
+	content: string | unknown[];
+	toolCalls?: unknown[];
+}
+
+/**
+ * Checks if an assistant message is empty (no content and no tool calls).
+ * Empty assistant messages cause API errors:
+ * "400 Bad Request: Assistant message must have either content or tool_calls, but not none."
+ *
+ * Exported for testing purposes.
+ */
+export function isEmptyAssistantMessage(message: TestableMessage): boolean {
+	if (message.role !== 'assistant') {
+		return false;
+	}
+	// Check for content - handle both string and array content formats
+	const hasContent = Array.isArray(message.content)
+		? message.content.length > 0
+		: typeof message.content === 'string' && message.content.trim().length > 0;
+	// Tool calls are in a separate property for AI SDK messages
+	const hasToolCalls =
+		'toolCalls' in message &&
+		Array.isArray(message.toolCalls) &&
+		message.toolCalls.length > 0;
+	return !hasContent && !hasToolCalls;
+}
+
+/**
+ * Extracts the root cause error from AI SDK error wrappers.
+ * AI SDK wraps errors in RetryError which contains lastError.
+ */
+function extractRootError(error: unknown): unknown {
+	// Handle AI SDK RetryError - extract the last error
+	if (RetryError.isInstance(error)) {
+		if (error.lastError) {
+			return extractRootError(error.lastError);
+		}
+	}
+	return error;
+}
+
+/**
  * Parses API errors into user-friendly messages.
  * Exported for testing purposes.
  */
 export function parseAPIError(error: unknown): string {
-	if (!(error instanceof Error)) {
+	// First extract the root error from any wrappers
+	const rootError = extractRootError(error);
+
+	if (!(rootError instanceof Error)) {
 		return 'An unknown error occurred while communicating with the model';
 	}
 
-	const errorMessage = error.message;
+	// Handle AI SDK APICallError - it has statusCode and responseBody
+	if (APICallError.isInstance(rootError)) {
+		const statusCode = rootError.statusCode;
+		// Try to extract a clean message from responseBody or use the error message
+		let cleanMessage = rootError.message;
+
+		// Parse the response body if available for more details
+		if (rootError.responseBody) {
+			try {
+				const body = JSON.parse(rootError.responseBody) as {
+					error?: {message?: string};
+					message?: string;
+				};
+				if (body.error?.message) {
+					cleanMessage = body.error.message;
+				} else if (body.message) {
+					cleanMessage = body.message;
+				}
+			} catch {
+				// If not JSON, try to extract message from the raw response
+				const msgMatch = rootError.responseBody.match(
+					/["']?message["']?\s*[:=]\s*["']([^"']+)["']/i,
+				);
+				if (msgMatch) {
+					cleanMessage = msgMatch[1];
+				}
+			}
+		}
+
+		// Format based on status code
+		if (statusCode) {
+			switch (statusCode) {
+				case 400:
+					return `Bad request: ${cleanMessage}`;
+				case 401:
+					return 'Authentication failed: Invalid API key or credentials';
+				case 403:
+					return 'Access forbidden: Check your API permissions';
+				case 404:
+					return 'Model not found: The requested model may not exist or is unavailable';
+				case 429:
+					if (
+						cleanMessage.includes('usage limit') ||
+						cleanMessage.includes('quota')
+					) {
+						return `Rate limit: ${cleanMessage}`;
+					}
+					return 'Rate limit exceeded: Too many requests. Please wait and try again';
+				case 500:
+				case 502:
+				case 503:
+					return `Server error: ${cleanMessage}`;
+				default:
+					return `Request failed (${statusCode}): ${cleanMessage}`;
+			}
+		}
+	}
+
+	const errorMessage = rootError.message;
 
 	// Extract status code and clean message from common error patterns FIRST
 	// This ensures HTTP status codes are properly parsed before falling through
@@ -45,6 +153,13 @@ export function parseAPIError(error: unknown): string {
 			case '404':
 				return 'Model not found: The requested model may not exist or is unavailable';
 			case '429':
+				// Include the original message if it has useful details
+				if (
+					cleanMessage.includes('usage limit') ||
+					cleanMessage.includes('quota')
+				) {
+					return `Rate limit: ${cleanMessage}`;
+				}
 				return 'Rate limit exceeded: Too many requests. Please wait and try again';
 			case '500':
 			case '502':
@@ -267,128 +382,10 @@ export class AISDKClient implements LLMClient {
 		return Promise.resolve(this.availableModels);
 	}
 
-	async chat(
-		messages: Message[],
-		tools: Record<string, AISDKCoreTool>,
-		signal?: AbortSignal,
-	): Promise<LLMChatResponse> {
-		// Check if already aborted before starting
-		if (signal?.aborted) {
-			throw new Error('Operation was cancelled');
-		}
-
-		try {
-			// Get the language model instance from the provider
-			const model = this.provider(this.currentModel);
-
-			// Tools are already in AI SDK format - use directly
-			const aiTools = Object.keys(tools).length > 0 ? tools : undefined;
-
-			// Convert messages to AI SDK v5 ModelMessage format
-			const modelMessages = convertToModelMessages(messages);
-
-			// Use generateText for non-streaming
-			const result = await generateText({
-				model,
-				messages: modelMessages,
-				tools: aiTools,
-				abortSignal: signal,
-				maxRetries: this.maxRetries,
-			});
-
-			// Extract tool calls from result
-			const toolCalls: ToolCall[] = [];
-			if (result.toolCalls && result.toolCalls.length > 0) {
-				for (const toolCall of result.toolCalls) {
-					toolCalls.push({
-						// Some providers (like Ollama) don't provide toolCallId, so generate one
-						id:
-							toolCall.toolCallId ||
-							`tool_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-						function: {
-							name: toolCall.toolName,
-							// AI SDK v5 uses 'input' for tool arguments
-							arguments: toolCall.input as Record<string, unknown>,
-						},
-					});
-				}
-			}
-
-			// If no native tool calls but tools are available, try XML parsing
-			let content = result.text;
-			if (Object.keys(tools).length > 0 && toolCalls.length === 0 && content) {
-				// First check for malformed XML tool calls
-				const malformedError =
-					XMLToolCallParser.detectMalformedToolCall(content);
-				if (malformedError) {
-					// Return malformed tool call with validation error
-					// This mimics how validators work - returns tool call that will show error
-					toolCalls.push({
-						id: 'malformed_xml_validation',
-						function: {
-							name: '__xml_validation_error__',
-							arguments: {
-								error: malformedError.error,
-							},
-						},
-					});
-					content = ''; // Clear content since it was malformed
-				} else if (XMLToolCallParser.hasToolCalls(content)) {
-					// Try to parse well-formed XML tool calls
-					const parsedToolCalls = XMLToolCallParser.parseToolCalls(content);
-					const xmlToolCalls =
-						XMLToolCallParser.convertToToolCalls(parsedToolCalls);
-					const cleanedContent =
-						XMLToolCallParser.removeToolCallsFromContent(content);
-
-					content = cleanedContent;
-					toolCalls.push(...xmlToolCalls);
-				}
-			}
-
-			return {
-				choices: [
-					{
-						message: {
-							role: 'assistant',
-							content,
-							tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
-						},
-					},
-				],
-			};
-		} catch (error) {
-			// Check if this was a cancellation
-			if (error instanceof Error && error.name === 'AbortError') {
-				throw new Error('Operation was cancelled');
-			}
-
-			// Check for AI SDK's NoOutputGeneratedError (thrown when stream is aborted)
-			if (
-				error instanceof Error &&
-				(error.name === 'AI_NoOutputGeneratedError' ||
-					error.message.includes('No output generated'))
-			) {
-				throw new Error('Operation was cancelled');
-			}
-
-			// Log detailed error for debugging
-			console.error('AI SDK Error:', error);
-			if (error instanceof Error) {
-				console.error('Error message:', error.message);
-				console.error('Error stack:', error.stack);
-			}
-
-			// Parse and throw a user-friendly error
-			const userMessage = parseAPIError(error);
-			throw new Error(userMessage);
-		}
-	}
-
 	/**
 	 * Stream chat with real-time token updates
 	 */
-	async chatStream(
+	async chat(
 		messages: Message[],
 		tools: Record<string, AISDKCoreTool>,
 		callbacks: StreamCallbacks,
@@ -399,6 +396,9 @@ export class AISDKClient implements LLMClient {
 			throw new Error('Operation was cancelled');
 		}
 
+		// Capture errors from the stream for clean error handling
+		let streamError: unknown = null;
+
 		try {
 			// Get the language model instance from the provider
 			const model = this.provider(this.currentModel);
@@ -409,13 +409,62 @@ export class AISDKClient implements LLMClient {
 			// Convert messages to AI SDK v5 ModelMessage format
 			const modelMessages = convertToModelMessages(messages);
 
-			// Use streamText for streaming
+			// Tools with needsApproval: false auto-execute in the loop
+			// Tools with needsApproval: true cause interruptions for manual approval
+			// stopWhen controls when the tool loop stops (max 10 steps)
 			const result = streamText({
 				model,
 				messages: modelMessages,
 				tools: aiTools,
 				abortSignal: signal,
 				maxRetries: this.maxRetries,
+				stopWhen: stepCountIs(10), // Allow up to 10 tool execution steps
+				// Capture errors instead of logging to console - we handle them in our catch block
+				onError: ({error}) => {
+					streamError = error;
+				},
+				// Can be used to add custom logging, metrics, or step tracking
+				onStepFinish(step) {
+					// Display formatters for auto-executed tools (after execution with results)
+					if (
+						step.toolCalls &&
+						step.toolResults &&
+						step.toolCalls.length === step.toolResults.length
+					) {
+						step.toolCalls.forEach((toolCall, idx) => {
+							const toolResult = step.toolResults[idx];
+							const tc: ToolCall = {
+								id:
+									toolCall.toolCallId ||
+									`tool_${Date.now()}_${Math.random()
+										.toString(36)
+										.substring(7)}`,
+								function: {
+									name: toolCall.toolName,
+									arguments: toolCall.input as Record<string, unknown>,
+								},
+							};
+							const resultStr =
+								typeof toolResult.output === 'string'
+									? toolResult.output
+									: JSON.stringify(toolResult.output);
+							callbacks.onToolExecuted?.(tc, resultStr);
+						});
+					}
+				},
+				prepareStep: ({messages}) => {
+					// Filter out empty assistant messages that would cause API errors
+					// "Assistant message must have either content or tool_calls"
+					const filteredMessages = messages.filter(
+						m => !isEmptyAssistantMessage(m as unknown as TestableMessage),
+					);
+
+					// Return filtered messages if any were removed, otherwise no changes
+					if (filteredMessages.length !== messages.length) {
+						return {messages: filteredMessages};
+					}
+					return {}; // No modifications needed
+				},
 			});
 
 			// Stream tokens
@@ -427,6 +476,9 @@ export class AISDKClient implements LLMClient {
 
 			// Wait for completion to get tool calls
 			const toolCallsResult = await result.toolCalls;
+
+			// Can inspect result.steps to see auto-executed tool calls and results
+			// const steps = await result.steps;
 
 			// Extract tool calls
 			const toolCalls: ToolCall[] = [];
@@ -444,7 +496,7 @@ export class AISDKClient implements LLMClient {
 						},
 					};
 					toolCalls.push(tc);
-					callbacks.onToolCall?.(tc);
+					// Note: onToolCall already fired in onStepFinish - no need to call again
 				}
 			}
 
@@ -499,29 +551,34 @@ export class AISDKClient implements LLMClient {
 				],
 			};
 		} catch (error) {
-			// Check if this was a cancellation
+			// Check if this was a user-initiated cancellation
 			if (error instanceof Error && error.name === 'AbortError') {
 				throw new Error('Operation was cancelled');
 			}
 
-			// Check for AI SDK's NoOutputGeneratedError (thrown when stream is aborted)
+			// Use the captured stream error if available - it has the real error info
+			const errorToHandle = streamError || error;
+
+			// AI SDK wraps errors in NoOutputGeneratedError with no useful cause
+			// Check if it's a cancellation without an underlying API error
 			if (
-				error instanceof Error &&
-				(error.name === 'AI_NoOutputGeneratedError' ||
-					error.message.includes('No output generated'))
+				errorToHandle instanceof Error &&
+				(errorToHandle.name === 'AI_NoOutputGeneratedError' ||
+					errorToHandle.message.includes('No output generated'))
 			) {
-				throw new Error('Operation was cancelled');
+				// Check if there's an underlying RetryError with the real cause
+				const rootError = extractRootError(errorToHandle);
+				if (rootError === errorToHandle) {
+					// No underlying error - this is just a cancellation
+					throw new Error('Operation was cancelled');
+				}
+				// There's a real error underneath, parse it
+				const userMessage = parseAPIError(rootError);
+				throw new Error(userMessage);
 			}
 
-			// Log detailed error for debugging
-			console.error('AI SDK Error:', error);
-			if (error instanceof Error) {
-				console.error('Error message:', error.message);
-				console.error('Error stack:', error.stack);
-			}
-
-			// Parse and throw a user-friendly error
-			const userMessage = parseAPIError(error);
+			// Parse any other error (including RetryError and APICallError)
+			const userMessage = parseAPIError(errorToHandle);
 			throw new Error(userMessage);
 		}
 	}

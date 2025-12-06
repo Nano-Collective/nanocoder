@@ -39,9 +39,13 @@ const OLLAMA_MODEL_CONTEXT_LIMITS: Record<string, number> = {
 	// Mistral models
 	mistral: 32000,
 	'mistral:7b': 32000,
+	'mistral-large': 256000,
 	mixtral: 32000,
 	'mixtral:8x7b': 32000,
 	'mixtral:8x22b': 64000,
+	ministral: 128000,
+	'ministral:3b': 128000,
+	'ministral:8b': 128000,
 
 	// Qwen models
 	qwen: 32000,
@@ -113,6 +117,8 @@ function extractOllamaModelBase(modelName: string): string | null {
 	if (lower.includes('llama2')) return 'llama2';
 	if (lower.includes('mixtral:8x22b')) return 'mixtral:8x22b';
 	if (lower.includes('mixtral')) return 'mixtral';
+	if (lower.includes('ministral')) return 'ministral';
+	if (lower.includes('mistral-large')) return 'mistral-large';
 	if (lower.includes('mistral')) return 'mistral';
 	if (lower.includes('qwen2.5')) return 'qwen2.5';
 	if (lower.includes('qwen2')) return 'qwen2';

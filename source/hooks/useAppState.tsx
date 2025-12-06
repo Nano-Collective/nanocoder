@@ -45,8 +45,7 @@ export function useAppState() {
 	const [mcpInitialized, setMcpInitialized] = useState<boolean>(false);
 	const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
 
-	// Thinking indicator state
-	const [isThinking, setIsThinking] = useState<boolean>(false);
+	// Cancelling indicator state
 	const [isCancelling, setIsCancelling] = useState<boolean>(false);
 
 	// Cancellation state
@@ -179,7 +178,6 @@ export function useAppState() {
 		startChat,
 		mcpInitialized,
 		updateInfo,
-		isThinking,
 		isCancelling,
 		abortController,
 		isModelSelectionMode,
@@ -215,7 +213,6 @@ export function useAppState() {
 		setStartChat,
 		setMcpInitialized,
 		setUpdateInfo,
-		setIsThinking,
 		setIsCancelling,
 		setAbortController,
 		setIsModelSelectionMode,

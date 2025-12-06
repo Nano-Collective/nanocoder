@@ -1,7 +1,7 @@
 import React from 'react';
 import {Text, Box} from 'ink';
 import {resolve as resolvePath} from 'node:path';
-import type {ToolDefinition} from '@/types/index';
+
 import {tool, jsonSchema} from '@/types/core';
 import {ThemeContext} from '@/hooks/useTheme';
 import ToolMessage from '@/components/tool-message';
@@ -195,7 +195,6 @@ const executeGetDiagnostics = async (
 	return lines.join('\n');
 };
 
-// AI SDK tool definition
 const getDiagnosticsCoreTool = tool({
 	description:
 		'Get errors and warnings for a file or project from the language server. Returns type errors, linting issues, and other diagnostics. Use this to check for problems before or after making code changes.',
@@ -210,6 +209,11 @@ const getDiagnosticsCoreTool = tool({
 		},
 		required: [],
 	}),
+	// Low risk: read-only operation, never requires approval
+	needsApproval: false,
+	execute: async (args, _options) => {
+		return await executeGetDiagnostics(args);
+	},
 });
 
 // Formatter component
@@ -262,17 +266,15 @@ const GetDiagnosticsFormatter = React.memo(
 	},
 );
 
-const formatter = (
+const getDiagnosticsFormatter = (
 	args: GetDiagnosticsArgs,
 	result?: string,
 ): React.ReactElement => {
 	return <GetDiagnosticsFormatter args={args} result={result} />;
 };
 
-export const getDiagnosticsTool: ToolDefinition = {
-	name: 'get_diagnostics',
+export const getDiagnosticsTool = {
+	name: 'lsp_get_diagnostics' as const,
 	tool: getDiagnosticsCoreTool,
-	handler: executeGetDiagnostics,
-	formatter,
-	requiresConfirmation: false,
+	formatter: getDiagnosticsFormatter,
 };

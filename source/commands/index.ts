@@ -13,5 +13,5 @@ export * from '@/commands/update';
 export * from '@/commands/recommendations';
 export * from '@/commands/status';
 export * from '@/commands/setup-config';
-export * from '@/commands/streaming';
+export * from '@/commands/debugging';
 export * from '@/commands/usage';

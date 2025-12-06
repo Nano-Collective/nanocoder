@@ -2,8 +2,9 @@ import {spawn} from 'node:child_process';
 import {highlight} from 'cli-highlight';
 import React from 'react';
 import {Text, Box} from 'ink';
-import type {ToolDefinition} from '@/types/index';
+
 import {tool, jsonSchema} from '@/types/core';
+import type {NanocoderToolExport} from '@/types/core';
 import {ThemeContext} from '@/hooks/useTheme';
 import ToolMessage from '@/components/tool-message';
 
@@ -54,7 +55,6 @@ ${stdout}`;
 	});
 };
 
-// AI SDK tool definition
 const executeBashCoreTool = tool({
 	description:
 		'Execute a bash command and return the output (use for running commands)',
@@ -68,7 +68,11 @@ const executeBashCoreTool = tool({
 		},
 		required: ['command'],
 	}),
-	// NO execute function - prevents AI SDK auto-execution
+	// High risk: bash commands always require approval in all modes
+	needsApproval: true,
+	execute: async (args, _options) => {
+		return await executeExecuteBash(args);
+	},
 });
 
 // Create a component that will re-render when theme changes
@@ -122,14 +126,14 @@ const ExecuteBashFormatter = React.memo(
 	},
 );
 
-const formatter = (
+const executeBashFormatter = (
 	args: {command: string},
 	result?: string,
 ): React.ReactElement => {
 	return <ExecuteBashFormatter args={args} result={result} />;
 };
 
-const validator = (args: {
+const executeBashValidator = (args: {
 	command: string;
 }): Promise<{valid: true} | {valid: false; error: string}> => {
 	const command = args.command?.trim();
@@ -164,11 +168,9 @@ const validator = (args: {
 	return Promise.resolve({valid: true});
 };
 
-// Nanocoder tool definition with AI SDK core tool + custom extensions
-export const executeBashTool: ToolDefinition = {
-	name: 'execute_bash',
-	tool: executeBashCoreTool, // Native AI SDK tool (no execute)
-	handler: executeExecuteBash,
-	formatter,
-	validator,
+export const executeBashTool: NanocoderToolExport = {
+	name: 'execute_bash' as const,
+	tool: executeBashCoreTool,
+	formatter: executeBashFormatter,
+	validator: executeBashValidator,
 };

@@ -4,7 +4,7 @@ import {readFile, writeFile, access} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import {highlight} from 'cli-highlight';
 import {Text, Box} from 'ink';
-import type {ToolDefinition, Colors} from '@/types/index';
+import type {Colors} from '@/types/index';
 import {tool, jsonSchema} from '@/types/core';
 import {getColors} from '@/config/index';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
@@ -14,6 +14,7 @@ import {
 	sendFileChangeToVSCode,
 	closeDiffInVSCode,
 } from '@/vscode/index';
+import {getCurrentMode} from '@/context/mode-context';
 
 interface DeleteLinesArgs {
 	path: string;
@@ -87,7 +88,6 @@ const executeDeleteLines = async (args: DeleteLinesArgs): Promise<string> => {
 	return `Successfully deleted ${rangeDesc}.${fileContext}`;
 };
 
-// AI SDK tool definition
 const deleteLinesCoreTool = tool({
 	description: 'Delete a line or range of lines from a file',
 	inputSchema: jsonSchema<DeleteLinesArgs>({
@@ -109,7 +109,14 @@ const deleteLinesCoreTool = tool({
 		},
 		required: ['path', 'line_number'],
 	}),
-	// NO execute function - prevents AI SDK auto-execution
+	// Medium risk: file write operation, requires approval except in auto-accept mode
+	needsApproval: () => {
+		const mode = getCurrentMode();
+		return mode !== 'auto-accept'; // true in normal/plan, false in auto-accept
+	},
+	execute: async (args, _options) => {
+		return await executeDeleteLines(args);
+	},
 });
 
 const DeleteLinesFormatter = React.memo(
@@ -387,7 +394,7 @@ async function formatDeleteLinesPreview(
 // Track VS Code change IDs for cleanup
 const vscodeChangeIds = new Map<string, string>();
 
-const formatter = async (
+const deleteLinesFormatter = async (
 	args: DeleteLinesArgs,
 	result?: string,
 ): Promise<React.ReactElement> => {
@@ -440,7 +447,7 @@ const formatter = async (
 	return <DeleteLinesFormatter preview={preview} />;
 };
 
-const validator = async (
+const deleteLinesValidator = async (
 	args: DeleteLinesArgs,
 ): Promise<{valid: true} | {valid: false; error: string}> => {
 	const {path, line_number, end_line} = args;
@@ -510,11 +517,9 @@ const validator = async (
 	return {valid: true};
 };
 
-// Nanocoder tool definition with AI SDK core tool + custom extensions
-export const deleteLinesTool: ToolDefinition = {
-	name: 'delete_lines',
-	tool: deleteLinesCoreTool, // Native AI SDK tool (no execute)
-	handler: executeDeleteLines,
-	formatter,
-	validator,
+export const deleteLinesTool = {
+	name: 'delete_lines' as const,
+	tool: deleteLinesCoreTool,
+	formatter: deleteLinesFormatter,
+	validator: deleteLinesValidator,
 };

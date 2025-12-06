@@ -57,7 +57,10 @@ test('handler validates URL format', async t => {
 
 	await t.throwsAsync(
 		async () => {
-			await fetchUrlTool.handler({url: 'not-a-valid-url'});
+			await fetchUrlTool.tool.execute!(
+				{url: 'not-a-valid-url'},
+				{toolCallId: 'test', messages: []},
+			);
 		},
 		{message: /Invalid URL/},
 	);
@@ -202,7 +205,7 @@ test('tool does not require confirmation', t => {
 		t.pass('Skipping test - fetch-url module not available');
 		return;
 	}
-	t.false(fetchUrlTool.requiresConfirmation);
+	t.false(fetchUrlTool.tool.needsApproval);
 });
 
 test('formatter is a function', t => {
