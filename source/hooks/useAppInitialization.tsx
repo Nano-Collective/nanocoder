@@ -1,5 +1,9 @@
 import React, {useEffect} from 'react';
-import {LLMClient} from '@/types/core';
+import {
+	LLMClient,
+	MCPConnectionStatus,
+	LSPConnectionStatus,
+} from '@/types/core';
 import {ToolManager} from '@/tools/tool-manager';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
@@ -27,10 +31,10 @@ import {
 	modelCommand,
 	planningCommand,
 	providerCommand,
-	recommendationsCommand,
+	modelDatabaseCommand,
 	setupConfigCommand,
 	statusCommand,
-	streamingCommand,
+	debuggingCommand,
 	themeCommand,
 	updateCommand,
 	usageCommand,
@@ -52,6 +56,8 @@ interface UseAppInitializationProps {
 	setStartChat: (start: boolean) => void;
 	setMcpInitialized: (initialized: boolean) => void;
 	setUpdateInfo: (info: UpdateInfo | null) => void;
+	setMcpServersStatus: (status: MCPConnectionStatus[]) => void;
+	setLspServersStatus: (status: LSPConnectionStatus[]) => void;
 	addToChatQueue: (component: React.ReactNode) => void;
 	componentKeyCounter: number;
 	customCommandCache: Map<string, CustomCommand>;
@@ -69,6 +75,8 @@ export function useAppInitialization({
 	setStartChat,
 	setMcpInitialized,
 	setUpdateInfo,
+	setMcpServersStatus,
+	setLspServersStatus,
 	addToChatQueue,
 	componentKeyCounter,
 	customCommandCache,
@@ -133,53 +141,57 @@ export function useAppInitialization({
 	// Initialize MCP servers if configured
 	const initializeMCPServers = async (toolManager: ToolManager) => {
 		if (appConfig.mcpServers && appConfig.mcpServers.length > 0) {
-			// Add connecting message to chat queue
-			addToChatQueue(
-				<InfoMessage
-					key={`mcp-connecting-${componentKeyCounter}`}
-					message={`Connecting to ${appConfig.mcpServers.length} MCP server${
-						appConfig.mcpServers.length > 1 ? 's' : ''
-					}...`}
-					hideBox={true}
-				/>,
+			// Initialize status array
+			const mcpStatus: MCPConnectionStatus[] = appConfig.mcpServers.map(
+				server => ({
+					name: server.name,
+					status: 'pending' as const,
+				}),
 			);
 
-			// Define progress callback to show live updates
+			// Define progress callback to update status silently
 			const onProgress = (result: MCPInitResult) => {
-				if (result.success) {
-					addToChatQueue(
-						<SuccessMessage
-							key={`mcp-success-${result.serverName}-${componentKeyCounter}`}
-							message={`Connected to MCP server "${result.serverName}" with ${result.toolCount} tools`}
-							hideBox={true}
-						/>,
-					);
-				} else {
-					addToChatQueue(
-						<ErrorMessage
-							key={`mcp-error-${result.serverName}-${componentKeyCounter}`}
-							message={`Failed to connect to MCP server "${result.serverName}": ${result.error}`}
-							hideBox={true}
-						/>,
-					);
+				const statusIndex = mcpStatus.findIndex(
+					s => s.name === result.serverName,
+				);
+				if (statusIndex !== -1) {
+					if (result.success) {
+						mcpStatus[statusIndex] = {
+							name: result.serverName,
+							status: 'connected',
+						};
+					} else {
+						mcpStatus[statusIndex] = {
+							name: result.serverName,
+							status: 'failed',
+							errorMessage: result.error,
+						};
+					}
+					// Update the state with current status
+					setMcpServersStatus([...mcpStatus]);
 				}
 			};
 
 			try {
 				await toolManager.initializeMCP(appConfig.mcpServers, onProgress);
 			} catch (error) {
-				addToChatQueue(
-					<ErrorMessage
-						key={`mcp-fatal-error-${componentKeyCounter}`}
-						message={`Failed to initialize MCP servers: ${String(error)}`}
-						hideBox={true}
-					/>,
-				);
+				// Mark all pending servers as failed
+				mcpStatus.forEach((status, index) => {
+					if (status.status === 'pending') {
+						mcpStatus[index] = {
+							...status,
+							status: 'failed',
+							errorMessage: String(error),
+						};
+					}
+				});
+				setMcpServersStatus([...mcpStatus]);
 			}
 			// Mark MCP as initialized whether successful or not
 			setMcpInitialized(true);
 		} else {
-			// No MCP servers configured, mark as initialized immediately
+			// No MCP servers configured, set empty status
+			setMcpServersStatus([]);
 			setMcpInitialized(true);
 		}
 	};
@@ -199,22 +211,53 @@ export function useAppInitialization({
 			})),
 		});
 
-		// Define progress callback to show live updates
-		const onProgress = (result: LSPInitResult) => {
-			if (result.success) {
-				addToChatQueue(
-					<SuccessMessage
-						key={`lsp-success-${result.serverName}-${componentKeyCounter}`}
-						message={`LSP: Connected to "${result.serverName}"`}
-						hideBox={true}
-					/>,
-				);
+		// Initialize status array for configured servers
+		const lspStatus: LSPConnectionStatus[] = [];
+
+		// Add configured servers to status
+		if (appConfig.lspServers) {
+			for (const server of appConfig.lspServers) {
+				lspStatus.push({
+					name: server.name,
+					status: 'pending',
+				});
 			}
-			// Don't show errors for auto-discovery failures - servers might not be installed
+		}
+
+		// Define progress callback to update status silently
+		const onProgress = (result: LSPInitResult) => {
+			const statusIndex = lspStatus.findIndex(
+				s => s.name === result.serverName,
+			);
+			if (statusIndex !== -1) {
+				if (result.success) {
+					lspStatus[statusIndex] = {
+						name: result.serverName,
+						status: 'connected',
+					};
+				} else {
+					// Don't mark auto-discovery failures as errors
+					lspStatus[statusIndex] = {
+						name: result.serverName,
+						status: 'failed',
+						errorMessage: result.error,
+					};
+				}
+				// Update the state with current status
+				setLspServersStatus([...lspStatus]);
+			}
+			// For auto-discovered servers, add them if successful
+			else if (result.success) {
+				lspStatus.push({
+					name: result.serverName,
+					status: 'connected',
+				});
+				setLspServersStatus([...lspStatus]);
+			}
 		};
 
 		try {
-			const results = await lspManager.initialize({
+			await lspManager.initialize({
 				autoDiscover: true,
 				servers: appConfig.lspServers?.map(server => ({
 					name: server.name,
@@ -226,22 +269,29 @@ export function useAppInitialization({
 				onProgress,
 			});
 
-			// Only show summary if we connected to at least one server
-			const successCount = results.filter(r => r.success).length;
-			if (successCount > 0) {
-				addToChatQueue(
-					<InfoMessage
-						key={`lsp-summary-${componentKeyCounter}`}
-						message={`LSP: ${successCount} language server${
-							successCount > 1 ? 's' : ''
-						} ready`}
-						hideBox={true}
-					/>,
-				);
-			}
+			// Mark any remaining pending servers as failed
+			lspStatus.forEach((status, index) => {
+				if (status.status === 'pending') {
+					lspStatus[index] = {
+						...status,
+						status: 'failed',
+						errorMessage: 'Connection timeout',
+					};
+				}
+			});
+			setLspServersStatus([...lspStatus]);
 		} catch (error) {
-			// Silent failure for LSP - it's optional
-			console.error('LSP initialization error:', error);
+			// Mark all pending servers as failed
+			lspStatus.forEach((status, index) => {
+				if (status.status === 'pending') {
+					lspStatus[index] = {
+						...status,
+						status: 'failed',
+						errorMessage: String(error),
+					};
+				}
+			});
+			setLspServersStatus([...lspStatus]);
 		}
 	};
 
@@ -336,10 +386,10 @@ export function useAppInitialization({
 				themeCommand,
 				exportCommand,
 				updateCommand,
-				recommendationsCommand,
+				modelDatabaseCommand,
 				statusCommand,
 				setupConfigCommand,
-				streamingCommand,
+				debuggingCommand,
 				usageCommand,
 				planningCommand,
 			]);

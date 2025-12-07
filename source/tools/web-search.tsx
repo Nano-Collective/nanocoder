@@ -2,8 +2,9 @@ import {fetch} from 'undici';
 import * as cheerio from 'cheerio';
 import React from 'react';
 import {Text, Box} from 'ink';
-import type {ToolDefinition} from '@/types/index';
+
 import {tool, jsonSchema} from '@/types/core';
+import type {NanocoderToolExport} from '@/types/core';
 import {ThemeContext} from '@/hooks/useTheme';
 import ToolMessage from '@/components/tool-message';
 
@@ -96,7 +97,6 @@ const executeWebSearch = async (args: SearchArgs): Promise<string> => {
 	}
 };
 
-// AI SDK tool definition
 const webSearchCoreTool = tool({
 	description:
 		'Search the web for information (scrapes Brave Search, returns markdown)',
@@ -115,7 +115,11 @@ const webSearchCoreTool = tool({
 		},
 		required: ['query'],
 	}),
-	// NO execute function - prevents AI SDK auto-execution
+	// Low risk: read-only operation, never requires approval
+	needsApproval: false,
+	execute: async (args, _options) => {
+		return await executeWebSearch(args);
+	},
 });
 
 // Create a component that will re-render when theme changes
@@ -174,11 +178,14 @@ const WebSearchFormatter = React.memo(
 	},
 );
 
-const formatter = (args: SearchArgs, result?: string): React.ReactElement => {
+const webSearchFormatter = (
+	args: SearchArgs,
+	result?: string,
+): React.ReactElement => {
 	return <WebSearchFormatter args={args} result={result} />;
 };
 
-const validator = (
+const webSearchValidator = (
 	args: SearchArgs,
 ): Promise<{valid: true} | {valid: false; error: string}> => {
 	const query = args.query?.trim();
@@ -202,12 +209,9 @@ const validator = (
 	return Promise.resolve({valid: true});
 };
 
-// Nanocoder tool definition with AI SDK core tool + custom extensions
-export const webSearchTool: ToolDefinition = {
-	name: 'web_search',
-	tool: webSearchCoreTool, // Native AI SDK tool (no execute)
-	handler: executeWebSearch,
-	formatter,
-	validator,
-	requiresConfirmation: false,
+export const webSearchTool: NanocoderToolExport = {
+	name: 'web_search' as const,
+	tool: webSearchCoreTool,
+	formatter: webSearchFormatter,
+	validator: webSearchValidator,
 };

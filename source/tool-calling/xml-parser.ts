@@ -199,13 +199,22 @@ export class XMLToolCallParser {
 
 		// Remove XML tool calls that aren't in code blocks
 		this.TOOL_CALL_REGEX.lastIndex = 0;
-		cleanedContent = cleanedContent.replace(this.TOOL_CALL_REGEX, '').trim();
+		cleanedContent = cleanedContent.replace(this.TOOL_CALL_REGEX, '');
 
 		// Remove any <tool_call> wrapper tags that may be left behind
-		cleanedContent = cleanedContent.replace(/<\/?tool_call>/g, '').trim();
+		cleanedContent = cleanedContent.replace(/<\/?tool_call>/g, '');
 
-		// Clean up extra whitespace and empty lines
-		cleanedContent = cleanedContent.replace(/\n\s*\n\s*\n/g, '\n\n').trim();
+		// Clean up whitespace artifacts left by removed tool calls
+		cleanedContent = cleanedContent
+			// Remove trailing whitespace from each line
+			.replace(/[ \t]+$/gm, '')
+			// Collapse multiple spaces (but not at start of line for indentation)
+			.replace(/([^ \t\n]) {2,}/g, '$1 ')
+			// Remove lines that are only whitespace
+			.replace(/^[ \t]+$/gm, '')
+			// Collapse 2+ consecutive blank lines to a single blank line
+			.replace(/\n{3,}/g, '\n\n')
+			.trim();
 
 		return cleanedContent;
 	}
@@ -228,6 +237,16 @@ export class XMLToolCallParser {
 	): {error: string; examples: string} | null {
 		// Common malformed patterns
 		const patterns = [
+			{
+				// [tool_use: name] or [Tool: name] syntax (common with some models like GLM)
+				regex: /\[(?:tool_use|Tool):\s*(\w+)\]/i,
+				error:
+					'Invalid syntax: [tool_use: name] or [Tool: name] format is not supported',
+				hint: (match: string) => {
+					const toolName = match.match(/\[(?:tool_use|Tool):\s*(\w+)\]/i)?.[1];
+					return `Use XML tags: <${toolName}><param>value</param></${toolName}> instead of [Tool: ${toolName}]`;
+				},
+			},
 			{
 				// <function=name> syntax
 				regex: /<function=(\w+)>/,

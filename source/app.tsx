@@ -9,7 +9,6 @@ import ChatQueue from '@/components/chat-queue';
 import ModelSelector from '@/components/model-selector';
 import ProviderSelector from '@/components/provider-selector';
 import ThemeSelector from '@/components/theme-selector';
-import ThinkingIndicator from '@/components/thinking-indicator';
 import CancellingIndicator from '@/components/cancelling-indicator';
 import ToolConfirmation from '@/components/tool-confirmation';
 import ToolExecutionIndicator from '@/components/tool-execution-indicator';
@@ -17,12 +16,13 @@ import BashExecutionIndicator from '@/components/bash-execution-indicator';
 import {setGlobalMessageQueue} from '@/utils/message-queue';
 import Spinner from 'ink-spinner';
 import SecurityDisclaimer from '@/components/security-disclaimer';
-import {RecommendationsDisplay} from '@/commands/recommendations';
+import {ModelDatabaseDisplay} from '@/commands/model-database';
 import {ConfigWizard} from '@/wizard/config-wizard';
 import {
 	VSCodeExtensionPrompt,
 	shouldPromptExtensionInstall,
 } from '@/components/vscode-extension-prompt';
+import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
 
 // Import extracted hooks and utilities
 import {useAppState} from '@/hooks/useAppState';
@@ -53,6 +53,11 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 	const {exit} = useApp();
 	const {isTrusted, handleConfirmTrust, isTrustLoading, isTrustedError} =
 		useDirectoryTrust();
+
+	// Sync global mode context whenever development mode changes
+	React.useEffect(() => {
+		setCurrentModeContext(appState.developmentMode);
+	}, [appState.developmentMode]);
 
 	// VS Code extension installation prompt state
 	const [showExtensionPrompt, setShowExtensionPrompt] = React.useState(
@@ -117,8 +122,8 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 		toolManager: appState.toolManager,
 		messages: appState.messages,
 		setMessages: appState.updateMessages,
+		currentProvider: appState.currentProvider,
 		currentModel: appState.currentModel,
-		setIsThinking: appState.setIsThinking,
 		setIsCancelling: appState.setIsCancelling,
 		addToChatQueue: appState.addToChatQueue,
 		componentKeyCounter: appState.componentKeyCounter,
@@ -197,6 +202,8 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 		setStartChat: appState.setStartChat,
 		setMcpInitialized: appState.setMcpInitialized,
 		setUpdateInfo: appState.setUpdateInfo,
+		setMcpServersStatus: appState.setMcpServersStatus,
+		setLspServersStatus: appState.setLspServersStatus,
 		addToChatQueue: appState.addToChatQueue,
 		componentKeyCounter: appState.componentKeyCounter,
 		customCommandCache: appState.customCommandCache,
@@ -217,7 +224,7 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 		setIsModelSelectionMode: appState.setIsModelSelectionMode,
 		setIsProviderSelectionMode: appState.setIsProviderSelectionMode,
 		setIsThemeSelectionMode: appState.setIsThemeSelectionMode,
-		setIsRecommendationsMode: appState.setIsRecommendationsMode,
+		setIsModelDatabaseMode: appState.setIsModelDatabaseMode,
 		setIsConfigWizardMode: appState.setIsConfigWizardMode,
 		addToChatQueue: appState.addToChatQueue,
 		componentKeyCounter: appState.componentKeyCounter,
@@ -246,7 +253,12 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 			];
 			const currentIndex = modes.indexOf(currentMode);
 			const nextIndex = (currentIndex + 1) % modes.length;
-			return modes[nextIndex];
+			const nextMode = modes[nextIndex];
+
+			// Sync global mode context for tool needsApproval logic
+			setCurrentModeContext(nextMode);
+
+			return nextMode;
 		});
 	}, [appState]);
 
@@ -258,6 +270,8 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 				model={appState.currentModel}
 				theme={appState.currentTheme}
 				updateInfo={appState.updateInfo}
+				mcpServersStatus={appState.mcpServersStatus}
+				lspServersStatus={appState.lspServersStatus}
 			/>,
 		);
 	}, [appState]);
@@ -272,7 +286,7 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 				onEnterModelSelectionMode: modeHandlers.enterModelSelectionMode,
 				onEnterProviderSelectionMode: modeHandlers.enterProviderSelectionMode,
 				onEnterThemeSelectionMode: modeHandlers.enterThemeSelectionMode,
-				onEnterRecommendationsMode: modeHandlers.enterRecommendationsMode,
+				onEnterModelDatabaseMode: modeHandlers.enterModelDatabaseMode,
 				onEnterConfigWizardMode: modeHandlers.enterConfigWizardMode,
 				onShowStatus: handleShowStatus,
 				onHandleChatMessage: chatHandler.handleChatMessage,
@@ -299,7 +313,7 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 			modeHandlers.enterModelSelectionMode,
 			modeHandlers.enterProviderSelectionMode,
 			modeHandlers.enterThemeSelectionMode,
-			modeHandlers.enterRecommendationsMode,
+			modeHandlers.enterModelDatabaseMode,
 			modeHandlers.enterConfigWizardMode,
 			handleShowStatus,
 			chatHandler.handleChatMessage,
@@ -329,6 +343,8 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 				model={appState.currentModel}
 				theme={appState.currentTheme}
 				updateInfo={appState.updateInfo}
+				mcpServersStatus={appState.mcpServersStatus}
+				lspServersStatus={appState.lspServersStatus}
 			/>,
 		],
 		[
@@ -336,6 +352,8 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 			appState.currentModel,
 			appState.currentTheme,
 			appState.updateInfo,
+			appState.mcpServersStatus,
+			appState.lspServersStatus,
 		],
 	);
 
@@ -407,11 +425,7 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 					</Box>
 					{appState.startChat && (
 						<Box flexDirection="column" marginLeft={-1}>
-							{appState.isCancelling ? (
-								<CancellingIndicator />
-							) : appState.isThinking && !chatHandler.isStreaming ? (
-								<ThinkingIndicator />
-							) : null}
+							{appState.isCancelling && <CancellingIndicator />}
 							{/* Show streaming content while it's being streamed */}
 							{chatHandler.isStreaming && chatHandler.streamingContent && (
 								<Box flexDirection="column" marginBottom={1}>
@@ -445,9 +459,9 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 									onThemeSelect={modeHandlers.handleThemeSelect}
 									onCancel={modeHandlers.handleThemeSelectionCancel}
 								/>
-							) : appState.isRecommendationsMode ? (
-								<RecommendationsDisplay
-									onCancel={modeHandlers.handleRecommendationsCancel}
+							) : appState.isModelDatabaseMode ? (
+								<ModelDatabaseDisplay
+									onCancel={modeHandlers.handleModelDatabaseCancel}
 								/>
 							) : appState.isConfigWizardMode ? (
 								<ConfigWizard
@@ -485,7 +499,7 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 									)}
 									onSubmit={msg => void handleMessageSubmit(msg)}
 									disabled={
-										appState.isThinking ||
+										chatHandler.isStreaming ||
 										appState.isToolExecuting ||
 										appState.isBashExecuting
 									}

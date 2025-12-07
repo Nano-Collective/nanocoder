@@ -15,6 +15,7 @@ import {
 	getFileCompletions,
 } from '@/utils/file-autocomplete';
 import {handleFileMention} from '@/utils/file-mention-handler';
+import Spinner from 'ink-spinner';
 
 interface ChatProps {
 	onSubmit?: (message: string) => void;
@@ -453,7 +454,9 @@ export default function UserInput({
 				<Box>
 					<Text color={textColor}>{'>'} </Text>
 					{disabled ? (
-						<Text color={colors.secondary}>...</Text>
+						<Text color={colors.secondary}>
+							<Spinner type="dots" />
+						</Text>
 					) : (
 						<TextInput
 							key={textInputKey}

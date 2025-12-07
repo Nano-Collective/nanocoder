@@ -423,7 +423,6 @@ Preferences follow the same location hierarchy as configuration files:
 - **Last model per provider**: Your preferred model for each provider
 - **Session continuity**: Automatically switches back to your preferred provider/model when restarting
 - **Last theme used**: The theme you last selected
-- **Streaming preference**: Whether response streaming is enabled (toggle with `/streaming` command)
 
 **Manual management:**
 
@@ -451,8 +450,7 @@ You can override this directory using `NANOCODER_DATA_DIR`.
 - `/model` - Switch between available models
 - `/provider` - Switch between configured AI providers
 - `/status` - Display current status (CWD, provider, model, theme, available updates, AGENTS setup)
-- `/streaming` - Toggle response streaming on/off (streams tokens in real-time when enabled)
-- `/recommendations` - Get AI model recommendations based on your system capabilities (RAM, GPU, network)
+- `/model-database` - Browse coding models from OpenRouter (searchable, filterable by open/proprietary)
 - `/mcp` - Show connected MCP servers and their tools
 - `/custom-commands` - List all custom commands
 - `/exit` - Exit the application
@@ -536,7 +534,7 @@ Generate comprehensive unit tests for {{component}}. Include:
 - **Smart autocomplete**: Tab completion for commands with real-time suggestions
 - **Colorized output**: Syntax highlighting and structured display
 - **Session persistence**: Maintains context and preferences across sessions
-- **Real-time streaming**: Live token-by-token streaming of AI responses (toggle with `/streaming`)
+- **Real-time streaming**: Live token-by-token streaming of AI responses
 - **Real-time indicators**: Shows token usage, timing, and processing status
 - **First-time directory security disclaimer**: Prompts on first run and stores a per-project trust decision to prevent accidental exposure of local code or secrets.
 - **Development modes**: Three modes to control tool execution behavior (toggle with Shift+Tab)
@@ -588,6 +586,5 @@ Nanocoder could benefit from help all across the board. Such as:
 - Reporting bugs or suggesting features
 - Marketing and getting the word out
 - Design and building more great software
-- Model cards for our recommendations database
 
 All contributions and community participation are welcome!

@@ -7,6 +7,24 @@ import {
 } from '@/tool-calling/json-parser';
 
 /**
+ * Normalize whitespace in content to remove excessive blank lines and spacing
+ */
+function normalizeWhitespace(content: string): string {
+	return (
+		content
+			// Remove trailing whitespace from each line
+			.replace(/[ \t]+$/gm, '')
+			// Collapse multiple spaces (but not at start of line for indentation)
+			.replace(/([^ \t\n]) {2,}/g, '$1 ')
+			// Remove lines that are only whitespace
+			.replace(/^[ \t]+$/gm, '')
+			// Collapse 3+ consecutive newlines to exactly 2 (one blank line)
+			.replace(/\n{3,}/g, '\n\n')
+			.trim()
+	);
+}
+
+/**
  * Result of parsing tool calls from content
  */
 type ParseResult =
@@ -75,10 +93,10 @@ export function parseToolCalls(content: string): ParseResult {
 		};
 	}
 
-	// 4. No tool calls found - return original content
+	// 4. No tool calls found - still normalize whitespace in content
 	return {
 		success: true,
 		toolCalls: [],
-		cleanedContent: content,
+		cleanedContent: normalizeWhitespace(content),
 	};
 }

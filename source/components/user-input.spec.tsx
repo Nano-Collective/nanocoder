@@ -67,7 +67,7 @@ test('UserInput renders prompt symbol', t => {
 });
 
 test('UserInput renders with disabled state', t => {
-	const {lastFrame} = render(
+	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput disabled={true} />
 		</TestWrapper>,
@@ -75,7 +75,9 @@ test('UserInput renders with disabled state', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /\.\.\./); // Shows "..." when disabled
+	// Shows a spinner when disabled (dots spinner uses braille characters like ⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏)
+	t.regex(output!, /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
+	unmount();
 });
 
 test('UserInput renders development mode indicator', t => {
@@ -149,7 +151,7 @@ test('UserInput calls onCancel when provided', t => {
 		cancelCalled = true;
 	};
 
-	const {lastFrame} = render(
+	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput onCancel={handleCancel} disabled={true} />
 		</TestWrapper>,
@@ -157,6 +159,7 @@ test('UserInput calls onCancel when provided', t => {
 
 	t.truthy(lastFrame());
 	// Note: Actual cancel invocation requires ESC key simulation
+	unmount();
 });
 
 test('UserInput calls onToggleMode when provided', t => {
@@ -200,7 +203,7 @@ test('UserInput renders help text when not disabled', t => {
 });
 
 test('UserInput hides help text when disabled', t => {
-	const {lastFrame} = render(
+	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput disabled={true} />
 		</TestWrapper>,
@@ -209,6 +212,7 @@ test('UserInput hides help text when disabled', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.notRegex(output!, /What would you like me to help with\?/);
+	unmount();
 });
 
 test('UserInput renders with all props provided', t => {

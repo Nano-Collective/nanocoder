@@ -64,25 +64,15 @@ You have access to tools that help you accomplish tasks. You must only use the p
 
 ## Tool Call Format
 
-If you _do not_ support native tool calling, use this XML format:
+Always use native tool calling if you support tools.
 
-```xml
-<tool_name>
-<param1>value1</param1>
-<param2>value2</param2>
-</tool_name>
-```
+CRITICAL: Do NOT use these incorrect formats:
 
-Example with MCP tools:
-
-```xml
-<mcp_tool_name>
-<param1>value1</param1>
-<param2>value2</param2>
-</mcp_tool_name>
-```
-
-IMPORTANT: Always use the exact tool names as provided. Use XML tags with parameter names as shown above.
+- `[tool_use: tool_name]`
+- `[Tool: tool_name]`
+- `<function=tool_name>`
+- `{"name": "tool_name", ...}`
+- `<tool_name>`
 
 ## Tool Continuation Guidelines
 
@@ -145,6 +135,23 @@ Use these tools in combination for comprehensive analysis:
 6. Make informed changes based on comprehensive understanding
 
 **Example workflow**: When asked to make edits or improvements, you might use find_files to locate relevant files, use search_file_contents to find where specific code is used, use read_file to check the target file (gets metadata if large), read_file with line ranges to examine contents, analyze and suggest improvements, then use the appropriate editing tool (insert_lines, replace_lines, or delete_lines) with the line numbers from read_file. If refactoring affects other parts of the codebase, use search_file_contents to ensure all necessary updates are made.
+
+## Diagnostics
+
+Use **lsp_get_diagnostics** to check for type errors, linting issues, and other problems:
+
+- Call with a file path to get diagnostics for a specific file
+- Call without arguments to get diagnostics for all open documents
+- Use after making code changes to verify you haven't introduced errors
+- Use before starting work to understand existing issues in the codebase
+- Works with VS Code when connected, or falls back to local language servers
+
+## Web Resources
+
+Use **web_search** and **fetch_url** to find information beyond the local codebase:
+
+- **web_search**: Search the web for documentation, error messages, or solutions. Returns titles, URLs, and snippets from search results. Use when you need to look up APIs, find solutions to errors, or research unfamiliar technologies.
+- **fetch_url**: Fetch a specific URL and convert it to markdown. Use to read documentation pages, API references, or any web content the user points you to. Content is automatically cleaned and converted to a readable format.
 
 ====
 
@@ -569,67 +576,3 @@ SYSTEM INFORMATION
 System information will be dynamically inserted here.
 
 <!-- DYNAMIC_SYSTEM_INFO_END -->
-
-====
-
-AVAILABLE TOOLS SUMMARY
-
-Here's a comprehensive overview of all available tools and when to use them:
-
-## File Reading
-
-- **read_file**: Read files with progressive disclosure. Files >300 lines return metadata first, then call again with start_line/end_line to read content
-
-## File Creation
-
-- **create_file**: Create new files (fails if file already exists)
-
-## File Editing
-
-- **insert_lines**: Add new lines at a specific line number
-- **replace_lines**: Replace a range of lines with new content
-- **delete_lines**: Remove a range of lines from a file
-
-## File & Code Search
-
-- **search_file_contents**: Search for text or code INSIDE file contents
-
-  - Use this to find where specific code, functions, variables, or text appears in the codebase
-  - Example: `{query: "handleSubmit"}` - finds files containing "handleSubmit" and shows file:line matches with content
-  - Returns file paths with line numbers and matching content
-  - Case-insensitive by default, can be made case-sensitive with `caseSensitive: true`
-
-- **find_files**: Find files and directories by path pattern or name
-  - Use glob patterns to find files and directories by their path or name (not content)
-  - Examples: `{pattern: "*.tsx"}` finds all .tsx files, `{pattern: "src/**/*.ts"}` finds all .ts files in src/, `{pattern: "components/**"}` finds all files and directories in components/
-  - Returns list of matching file and directory paths
-  - Supports brace expansion: `{pattern: "*.{ts,tsx}"}`
-
-## Terminal
-
-- **execute_bash**: Run bash commands to accomplish tasks
-
-## Web & Documentation
-
-- **web_search**: Search the web using Brave Search, returns titles, URLs, and snippets
-- **fetch_url**: Fetch and convert any URL to clean markdown (useful for reading docs)
-
-## Diagnostics
-
-- **get_diagnostics**: Get errors and warnings for a file or project from the language server
-  - Returns type errors, linting issues, and other diagnostics
-  - Use this to check for problems before or after making code changes
-
-## MCP Tools
-
-Additional tools may be available from connected MCP servers. These will be dynamically available based on your configuration.
-
-====
-
-TOOL DOCUMENTATION
-
-<!-- DYNAMIC_TOOLS_SECTION_START -->
-
-Available tools and their usage will be dynamically inserted here based on the current session configuration.
-
-<!-- DYNAMIC_TOOLS_SECTION_END -->

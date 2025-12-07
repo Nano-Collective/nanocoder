@@ -50,15 +50,15 @@ export function getLastUsedModel(provider: string): string | undefined {
 	return preferences.providerModels?.[provider];
 }
 
-export function isStreamingEnabled(): boolean {
+export function isDebuggingEnabled(): boolean {
 	const preferences = loadPreferences();
-	// Default to true if not set
-	return preferences.streamingEnabled ?? true;
+	// Default to false if not set
+	return preferences.debuggingEnabled ?? false;
 }
 
-export function setStreamingEnabled(enabled: boolean): void {
+export function setDebuggingEnabled(enabled: boolean): void {
 	const preferences = loadPreferences();
-	preferences.streamingEnabled = enabled;
+	preferences.debuggingEnabled = enabled;
 	savePreferences(preferences);
 }
 

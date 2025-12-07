@@ -20,7 +20,7 @@ export async function handleMessageSubmission(
 		onEnterModelSelectionMode,
 		onEnterProviderSelectionMode,
 		onEnterThemeSelectionMode,
-		onEnterRecommendationsMode,
+		onEnterModelDatabaseMode,
 		onEnterConfigWizardMode,
 		onShowStatus,
 		onHandleChatMessage,
@@ -153,8 +153,8 @@ ${result.fullOutput || '(No output)'}`;
 			} else if (commandName === 'theme') {
 				onEnterThemeSelectionMode();
 				return;
-			} else if (commandName === 'recommendations') {
-				onEnterRecommendationsMode();
+			} else if (commandName === 'model-database') {
+				onEnterModelDatabaseMode();
 				return;
 			} else if (commandName === 'setup-config') {
 				onEnterConfigWizardMode();

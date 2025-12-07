@@ -3,12 +3,11 @@ import {readFile, access} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import React from 'react';
 import {Text, Box} from 'ink';
-import type {ToolDefinition} from '@/types/index';
 import {tool, jsonSchema} from '@/types/core';
+import type {NanocoderToolExport} from '@/types/core';
 import {ThemeContext} from '@/hooks/useTheme';
 import ToolMessage from '@/components/tool-message';
 
-// Handler function - will be used both by Nanocoder and AI SDK tool
 const executeReadFile = async (args: {
 	path: string;
 	start_line?: number;
@@ -126,8 +125,6 @@ const executeReadFile = async (args: {
 	}
 };
 
-// AI SDK tool definition (WITHOUT execute to prevent auto-execution)
-// Execute will be called manually after user confirmation
 const readFileCoreTool = tool({
 	description:
 		'Read file contents with line numbers. PROGRESSIVE DISCLOSURE: First call without line ranges returns metadata (size, lines, tokens). For files >300 lines, you MUST call again with start_line/end_line to read content. Small files (<300 lines) return content directly.',
@@ -155,7 +152,11 @@ const readFileCoreTool = tool({
 		},
 		required: ['path'],
 	}),
-	// NO execute function - prevents AI SDK auto-execution
+	// Low risk: read-only operation, never requires approval
+	needsApproval: false,
+	execute: async (args, _options) => {
+		return await executeReadFile(args);
+	},
 });
 
 // Create a component that will re-render when theme changes
@@ -232,7 +233,7 @@ const ReadFileFormatter = React.memo(
 	},
 );
 
-const formatter = async (
+const readFileFormatter = async (
 	args: {
 		path?: string;
 		file_path?: string;
@@ -301,7 +302,7 @@ const formatter = async (
 	return <ReadFileFormatter args={args} fileInfo={fileInfo} />;
 };
 
-const validator = async (args: {
+const readFileValidator = async (args: {
 	path: string;
 	start_line?: number;
 	end_line?: number;
@@ -365,12 +366,9 @@ const validator = async (args: {
 	}
 };
 
-// Nanocoder tool definition with native AI SDK tool + custom extensions
-export const readFileTool: ToolDefinition = {
-	name: 'read_file',
-	tool: readFileCoreTool, // Native AI SDK tool (no execute)
-	handler: executeReadFile, // Manual execution after confirmation
-	formatter,
-	validator,
-	requiresConfirmation: false,
+export const readFileTool: NanocoderToolExport = {
+	name: 'read_file' as const,
+	tool: readFileCoreTool,
+	formatter: readFileFormatter,
+	validator: readFileValidator,
 };

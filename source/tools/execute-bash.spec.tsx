@@ -100,23 +100,32 @@ test('ExecuteBashFormatter handles complex commands', t => {
 // ============================================================================
 
 test('execute_bash runs simple echo command', async t => {
-	const result = await executeBashTool.handler({command: 'echo "test output"'});
+	const result = await executeBashTool.tool.execute!(
+		{command: 'echo "test output"'},
+		{toolCallId: 'test', messages: []},
+	);
 
 	t.truthy(result);
 	t.true(result.includes('test output'));
 });
 
 test('execute_bash returns output from ls command', async t => {
-	const result = await executeBashTool.handler({command: 'ls'});
+	const result = await executeBashTool.tool.execute!(
+		{command: 'ls'},
+		{toolCallId: 'test', messages: []},
+	);
 
 	t.truthy(result);
 	t.is(typeof result, 'string');
 });
 
 test('execute_bash handles command with pipes', async t => {
-	const result = await executeBashTool.handler({
-		command: 'echo "line1\nline2\nline3" | grep line2',
-	});
+	const result = await executeBashTool.tool.execute!(
+		{
+			command: 'echo "line1\nline2\nline3" | grep line2',
+		},
+		{toolCallId: 'test', messages: []},
+	);
 
 	t.truthy(result);
 	t.true(result.includes('line2'));
@@ -124,18 +133,24 @@ test('execute_bash handles command with pipes', async t => {
 });
 
 test('execute_bash handles command with redirects', async t => {
-	const result = await executeBashTool.handler({
-		command: 'echo "test" 2>&1',
-	});
+	const result = await executeBashTool.tool.execute!(
+		{
+			command: 'echo "test" 2>&1',
+		},
+		{toolCallId: 'test', messages: []},
+	);
 
 	t.truthy(result);
 	t.true(result.includes('test'));
 });
 
 test('execute_bash preserves multiline output', async t => {
-	const result = await executeBashTool.handler({
-		command: 'echo "line1"; echo "line2"; echo "line3"',
-	});
+	const result = await executeBashTool.tool.execute!(
+		{
+			command: 'echo "line1"; echo "line2"; echo "line3"',
+		},
+		{toolCallId: 'test', messages: []},
+	);
 
 	t.truthy(result);
 	t.true(result.includes('line1'));
@@ -148,9 +163,12 @@ test('execute_bash preserves multiline output', async t => {
 // ============================================================================
 
 test('execute_bash captures stderr output', async t => {
-	const result = await executeBashTool.handler({
-		command: 'echo "error message" >&2',
-	});
+	const result = await executeBashTool.tool.execute!(
+		{
+			command: 'echo "error message" >&2',
+		},
+		{toolCallId: 'test', messages: []},
+	);
 
 	t.truthy(result);
 	// Should include STDERR label when stderr is present
@@ -158,9 +176,12 @@ test('execute_bash captures stderr output', async t => {
 });
 
 test('execute_bash handles command not found', async t => {
-	const result = await executeBashTool.handler({
-		command: 'nonexistentcommand12345',
-	});
+	const result = await executeBashTool.tool.execute!(
+		{
+			command: 'nonexistentcommand12345',
+		},
+		{toolCallId: 'test', messages: []},
+	);
 
 	t.truthy(result);
 	// Should capture the error output
@@ -172,9 +193,12 @@ test('execute_bash handles command not found', async t => {
 });
 
 test('execute_bash handles syntax errors', async t => {
-	const result = await executeBashTool.handler({
-		command: 'echo "unclosed quote',
-	});
+	const result = await executeBashTool.tool.execute!(
+		{
+			command: 'echo "unclosed quote',
+		},
+		{toolCallId: 'test', messages: []},
+	);
 
 	t.truthy(result);
 	// Should capture the syntax error
@@ -190,7 +214,10 @@ test('execute_bash truncates long output to 2000 characters', async t => {
 	// Use POSIX-compatible syntax (seq instead of bash brace expansion)
 	const longCommand =
 		'seq 1 100 | while read i; do echo "This is a long line of text that repeats many times"; done';
-	const result = await executeBashTool.handler({command: longCommand});
+	const result = await executeBashTool.tool.execute!(
+		{command: longCommand},
+		{toolCallId: 'test', messages: []},
+	);
 
 	t.truthy(result);
 	// Should be truncated to around 2000 characters
@@ -203,9 +230,12 @@ test('execute_bash truncates long output to 2000 characters', async t => {
 });
 
 test('execute_bash does not truncate short output', async t => {
-	const result = await executeBashTool.handler({
-		command: 'echo "short output"',
-	});
+	const result = await executeBashTool.tool.execute!(
+		{
+			command: 'echo "short output"',
+		},
+		{toolCallId: 'test', messages: []},
+	);
 
 	t.truthy(result);
 	t.false(result.includes('[Output truncated'));
@@ -213,7 +243,10 @@ test('execute_bash does not truncate short output', async t => {
 });
 
 test('execute_bash returns plain string not JSON', async t => {
-	const result = await executeBashTool.handler({command: 'echo "test"'});
+	const result = await executeBashTool.tool.execute!(
+		{command: 'echo "test"'},
+		{toolCallId: 'test', messages: []},
+	);
 
 	t.truthy(result);
 	t.is(typeof result, 'string');
@@ -227,27 +260,36 @@ test('execute_bash returns plain string not JSON', async t => {
 // ============================================================================
 
 test('execute_bash handles special characters in output', async t => {
-	const result = await executeBashTool.handler({
-		command: 'echo "special: $@#%^&*()"',
-	});
+	const result = await executeBashTool.tool.execute!(
+		{
+			command: 'echo "special: $@#%^&*()"',
+		},
+		{toolCallId: 'test', messages: []},
+	);
 
 	t.truthy(result);
 	t.true(result.includes('special'));
 });
 
 test('execute_bash handles quotes in commands', async t => {
-	const result = await executeBashTool.handler({
-		command: 'echo "He said \\"hello\\""',
-	});
+	const result = await executeBashTool.tool.execute!(
+		{
+			command: 'echo "He said \\"hello\\""',
+		},
+		{toolCallId: 'test', messages: []},
+	);
 
 	t.truthy(result);
 	t.true(result.includes('said'));
 });
 
 test('execute_bash handles newlines in command', async t => {
-	const result = await executeBashTool.handler({
-		command: 'echo "line1\nline2"',
-	});
+	const result = await executeBashTool.tool.execute!(
+		{
+			command: 'echo "line1\nline2"',
+		},
+		{toolCallId: 'test', messages: []},
+	);
 
 	t.truthy(result);
 	t.is(typeof result, 'string');
@@ -263,11 +305,11 @@ test('execute_bash tool has correct name', t => {
 
 test('execute_bash tool requires confirmation', t => {
 	// Execute bash should require confirmation for security
-	t.not(executeBashTool.requiresConfirmation, false);
+	t.not(executeBashTool.tool.needsApproval, false);
 });
 
 test('execute_bash tool has handler function', t => {
-	t.is(typeof executeBashTool.handler, 'function');
+	t.is(typeof executeBashTool.tool.execute, 'function');
 });
 
 test('execute_bash tool has formatter function', t => {
@@ -279,7 +321,10 @@ test('execute_bash tool has formatter function', t => {
 // ============================================================================
 
 test('execute_bash handles empty command output', async t => {
-	const result = await executeBashTool.handler({command: 'true'});
+	const result = await executeBashTool.tool.execute!(
+		{command: 'true'},
+		{toolCallId: 'test', messages: []},
+	);
 
 	// Empty output returns empty string, which is falsy but valid
 	t.is(typeof result, 'string');
@@ -288,14 +333,20 @@ test('execute_bash handles empty command output', async t => {
 });
 
 test('execute_bash handles commands with no output', async t => {
-	const result = await executeBashTool.handler({command: ':'});
+	const result = await executeBashTool.tool.execute!(
+		{command: ':'},
+		{toolCallId: 'test', messages: []},
+	);
 
 	// Empty output returns empty string, which is falsy but valid
 	t.is(typeof result, 'string');
 });
 
 test('execute_bash handles whitespace-only output', async t => {
-	const result = await executeBashTool.handler({command: 'echo "   "'});
+	const result = await executeBashTool.tool.execute!(
+		{command: 'echo "   "'},
+		{toolCallId: 'test', messages: []},
+	);
 
 	t.truthy(result);
 	t.is(typeof result, 'string');

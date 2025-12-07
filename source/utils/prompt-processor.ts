@@ -2,7 +2,6 @@ import {readFileSync, existsSync} from 'fs';
 import {join} from 'path';
 import {platform, homedir, release} from 'os';
 import {promptPath} from '../config/index';
-import type {AISDKCoreTool} from '../types/index';
 import type {InputState} from '../types/hooks';
 import {PlaceholderType} from '../types/hooks';
 
@@ -72,11 +71,9 @@ function injectSystemInfo(prompt: string): string {
 }
 
 /**
- * Process the main prompt template by injecting dynamic tool documentation and system info
+ * Process the main prompt template by injecting system info
  */
-export function processPromptTemplate(
-	tools: Record<string, AISDKCoreTool>,
-): string {
+export function processPromptTemplate(): string {
 	let systemPrompt = 'You are a helpful AI assistant.'; // fallback
 
 	// Load base prompt
@@ -95,9 +92,6 @@ export function processPromptTemplate(
 	// Inject system information
 	systemPrompt = injectSystemInfo(systemPrompt);
 
-	// Inject dynamic tool documentation
-	systemPrompt = injectToolDocumentation(systemPrompt, tools);
-
 	// Check for AGENTS.md in current working directory and append it
 	const agentsPath = join(process.cwd(), 'AGENTS.md');
 	if (existsSync(agentsPath)) {
@@ -114,74 +108,6 @@ export function processPromptTemplate(
 	}
 
 	return systemPrompt;
-}
-
-/**
- * Inject dynamic tool documentation into the prompt template
- */
-function injectToolDocumentation(
-	prompt: string,
-	tools: Record<string, AISDKCoreTool>,
-): string {
-	if (Object.keys(tools).length === 0) {
-		return prompt.replace(
-			/<!-- DYNAMIC_TOOLS_SECTION_START -->[\s\S]*?<!-- DYNAMIC_TOOLS_SECTION_END -->/,
-			'No additional tools are currently available.',
-		);
-	}
-
-	// Generate tool documentation
-	const toolDocs = generateToolDocumentation(tools);
-
-	// Replace the dynamic section
-	return prompt.replace(
-		/<!-- DYNAMIC_TOOLS_SECTION_START -->[\s\S]*?<!-- DYNAMIC_TOOLS_SECTION_END -->/,
-		toolDocs,
-	);
-}
-
-/**
- * Generate formatted documentation for all available tools
- */
-function generateToolDocumentation(
-	tools: Record<string, AISDKCoreTool>,
-): string {
-	const sections = ['Available Tools\n'];
-
-	// Convert tools record to array of [name, tool] entries
-	const toolEntries = Object.entries(tools);
-
-	// Group tools by category (built-in vs MCP)
-	const builtInTools = toolEntries.filter(([name]) => !name.includes('__'));
-	const mcpTools = toolEntries.filter(([name]) => name.includes('__'));
-
-	if (builtInTools.length > 0) {
-		sections.push('Built-in Tools:\n');
-		builtInTools.forEach(([name, tool]) => {
-			sections.push(formatToolDocumentation(name, tool));
-		});
-	}
-
-	if (mcpTools.length > 0) {
-		sections.push('\nMCP Tools:\n');
-		mcpTools.forEach(([name, tool]) => {
-			sections.push(formatToolDocumentation(name, tool));
-		});
-	}
-
-	// Note: XML format examples omitted since AI SDK tools don't expose parameter schemas
-	// The model will learn tool usage from function calling or from the system prompt
-
-	return sections.join('\n');
-}
-
-/**
- * Format documentation for a single tool
- */
-function formatToolDocumentation(name: string, _tool: AISDKCoreTool): string {
-	// AI SDK's Tool type doesn't expose description or parameters directly
-	// We just list the tool name - the model will learn from usage
-	return `${name}\n`;
 }
 
 /**

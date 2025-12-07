@@ -100,11 +100,10 @@ export interface UserPreferences {
 	lastUpdateCheck?: number;
 	selectedTheme?: ThemePreset;
 	trustedDirectories?: string[];
-	streamingEnabled?: boolean;
-
 	// Structured task planning settings
 	planning?: {
 		enabled?: boolean;
 		maxTasksPerPlan?: number;
 	};
+	debuggingEnabled?: boolean;
 }

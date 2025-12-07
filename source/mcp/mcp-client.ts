@@ -9,8 +9,10 @@ type ClientTransport =
 	| WebSocketClientTransport
 	| StreamableHTTPClientTransport;
 import type {Tool, ToolParameterSchema, AISDKCoreTool} from '@/types/index';
-import {tool, jsonSchema} from '@/types/index';
+import {jsonSchema} from '@/types/index';
+import {dynamicTool} from 'ai';
 import {logInfo, logError} from '@/utils/message-queue';
+import {getCurrentMode} from '@/context/mode-context';
 import {TransportFactory} from './transport-factory.js';
 
 import type {MCPServer, MCPTool, MCPInitResult} from '@/types/index';
@@ -173,17 +175,28 @@ export class MCPClient {
 
 		for (const [serverName, serverTools] of this.serverTools.entries()) {
 			for (const mcpTool of serverTools) {
-				// Convert MCP tool to AI SDK's CoreTool format
-				// Use the input schema directly - it should already be JSON Schema compatible
-				// MCP schemas are already in JSON Schema format, cast to unknown first for type safety
-				const coreTool = tool({
+				// dynamicTool is more explicit about unknown types compared to tool()
+				// MCP schemas come from external servers and are not known at compile time
+				const toolName = mcpTool.name;
+				const coreTool = dynamicTool({
 					description: mcpTool.description
 						? `[MCP:${serverName}] ${mcpTool.description}`
 						: `MCP tool from ${serverName}`,
-					inputSchema: jsonSchema(
+					inputSchema: jsonSchema<Record<string, unknown>>(
 						(mcpTool.inputSchema as unknown) || {type: 'object'},
 					),
-					// No execute function - human-in-the-loop pattern
+					// Medium risk: MCP tools require approval except in auto-accept mode
+					needsApproval: () => {
+						const mode = getCurrentMode();
+						return mode !== 'auto-accept'; // true in normal/plan, false in auto-accept
+					},
+					execute: async (input, _options) => {
+						// dynamicTool passes 'input' as unknown, validate at runtime
+						return await this.callTool(
+							toolName,
+							input as Record<string, unknown>,
+						);
+					},
 				});
 
 				nativeTools[mcpTool.name] = coreTool;

@@ -1,24 +1,42 @@
-import {
-	LLMClient,
-	LLMChatResponse,
-	Message,
-	ToolCall,
-	ToolResult,
-} from '@/types/core';
+import {LLMClient, Message, ToolCall, ToolResult} from '@/types/core';
 import {ToolManager} from '@/tools/tool-manager';
-import {toolDefinitions} from '@/tools/index';
 import {processPromptTemplate} from '@/utils/prompt-processor';
 import {parseToolCalls} from '@/tool-calling/index';
 import {ConversationStateManager} from '@/app/utils/conversationState';
 import {promptHistory} from '@/prompt-history';
-import {isStreamingEnabled} from '@/config/preferences';
 import {displayToolResult} from '@/utils/tool-result-display';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {formatError} from '@/utils/error-formatter';
 import UserMessage from '@/components/user-message';
 import AssistantMessage from '@/components/assistant-message';
 import ErrorMessage from '@/components/error-message';
+import WarningMessage from '@/components/warning-message';
 import React from 'react';
+import {createTokenizer} from '@/tokenization/index';
+import {calculateTokenBreakdown} from '@/usage/calculator';
+import {getModelContextLimit} from '@/models/index';
+
+// Normalize streaming content to prevent excessive blank lines during output
+const normalizeStreamingContent = (content: string): string =>
+	content
+		// Strip <think>...</think> tags (some models output thinking that shouldn't be shown)
+		.replace(/<think>[\s\S]*?<\/think>/gi, '')
+		// Strip orphaned/incomplete think tags (during streaming)
+		.replace(/<think>[\s\S]*$/gi, '')
+		.replace(/<\/think>/gi, '')
+		// Collapse 3+ consecutive newlines to 2 (one blank line max)
+		.replace(/\n{3,}/g, '\n\n')
+		// Remove leading whitespace (clean start)
+		.replace(/^\s+/, '');
+
+// Helper function to convert tool results to message format
+const toolResultsToMessages = (results: ToolResult[]): Message[] =>
+	results.map(result => ({
+		role: 'tool' as const,
+		content: result.content || '',
+		tool_call_id: result.tool_call_id,
+		name: result.name,
+	}));
 
 // Helper function to filter out invalid tool calls and deduplicate by ID and function
 // Returns valid tool calls and error results for invalid ones
@@ -79,8 +97,8 @@ interface UseChatHandlerProps {
 	toolManager: ToolManager | null;
 	messages: Message[];
 	setMessages: (messages: Message[]) => void;
+	currentProvider: string;
 	currentModel: string;
-	setIsThinking: (thinking: boolean) => void;
 	setIsCancelling: (cancelling: boolean) => void;
 
 	addToChatQueue: (component: React.ReactNode) => void;
@@ -101,8 +119,8 @@ export function useChatHandler({
 	toolManager,
 	messages,
 	setMessages,
+	currentProvider,
 	currentModel,
-	setIsThinking,
 	setIsCancelling,
 	addToChatQueue,
 	componentKeyCounter,
@@ -118,12 +136,96 @@ export function useChatHandler({
 	const [streamingContent, setStreamingContent] = React.useState<string>('');
 	const [isStreaming, setIsStreaming] = React.useState<boolean>(false);
 
+	// Helper to reset all streaming state
+	const resetStreamingState = React.useCallback(() => {
+		setIsCancelling(false);
+		setAbortController(null);
+		setIsStreaming(false);
+		setStreamingContent('');
+	}, [setIsCancelling, setAbortController]);
+
+	// Helper to display errors in chat queue
+	const displayError = React.useCallback(
+		(error: unknown, keyPrefix: string) => {
+			if (
+				error instanceof Error &&
+				error.message === 'Operation was cancelled'
+			) {
+				addToChatQueue(
+					<ErrorMessage
+						key={`${keyPrefix}-${componentKeyCounter}`}
+						message="Interrupted by user."
+						hideBox={true}
+					/>,
+				);
+			} else {
+				addToChatQueue(
+					<ErrorMessage
+						key={`${keyPrefix}-${componentKeyCounter}`}
+						message={formatError(error)}
+						hideBox={true}
+					/>,
+				);
+			}
+		},
+		[addToChatQueue, componentKeyCounter],
+	);
+
 	// Reset conversation state when messages are cleared
 	React.useEffect(() => {
 		if (messages.length === 0) {
 			conversationStateManager.current.reset();
 		}
 	}, [messages.length]);
+
+	// Helper to check context usage and display warning if needed
+	const checkContextUsage = React.useCallback(
+		async (allMessages: Message[], systemMessage: Message) => {
+			try {
+				const contextLimit = await getModelContextLimit(currentModel);
+				if (!contextLimit) return; // Unknown limit, skip check
+
+				const tokenizer = createTokenizer(currentProvider, currentModel);
+				const breakdown = calculateTokenBreakdown(
+					[systemMessage, ...allMessages],
+					tokenizer,
+				);
+
+				// Clean up tokenizer if needed
+				if (tokenizer.free) {
+					tokenizer.free();
+				}
+
+				const percentUsed = (breakdown.total / contextLimit) * 100;
+
+				// Show warning on every message once past 80%
+				if (percentUsed >= 95) {
+					addToChatQueue(
+						<WarningMessage
+							key={`context-warning-${componentKeyCounter}`}
+							message={`Context ${Math.round(
+								percentUsed,
+							)}% full (${breakdown.total.toLocaleString()}/${contextLimit.toLocaleString()} tokens). Consider using /clear to start fresh.`}
+							hideBox={true}
+						/>,
+					);
+				} else if (percentUsed >= 80) {
+					addToChatQueue(
+						<WarningMessage
+							key={`context-warning-${componentKeyCounter}`}
+							message={`Context ${Math.round(
+								percentUsed,
+							)}% full (${breakdown.total.toLocaleString()}/${contextLimit.toLocaleString()} tokens).`}
+							hideBox={true}
+						/>,
+					);
+				}
+			} catch {
+				// Silently ignore errors in context checking - it's not critical
+			}
+		},
+		[currentProvider, currentModel, addToChatQueue, componentKeyCounter],
+	);
 
 	// Process assistant response - handles the conversation loop with potential tool calls (for follow-ups)
 	const processAssistantResponse = async (
@@ -140,40 +242,44 @@ export function useChatHandler({
 		}
 
 		try {
-			setIsThinking(true);
+			// Use streaming with callbacks
+			let accumulatedContent = '';
 
-			// Try to use streaming if available and enabled, otherwise fallback to non-streaming
-			let result: LLMChatResponse;
+			setIsStreaming(true);
+			setStreamingContent('');
 
-			if (client.chatStream && isStreamingEnabled()) {
-				// Use streaming with callbacks
-				let accumulatedContent = '';
-
-				setIsStreaming(true);
-				setStreamingContent('');
-
-				result = await client.chatStream(
-					[systemMessage, ...messages],
-					toolManager?.getAllTools() || {},
-					{
-						onToken: (token: string) => {
-							accumulatedContent += token;
-							setStreamingContent(accumulatedContent);
-						},
-						onFinish: () => {
-							setIsStreaming(false);
-						},
+			const result = await client.chat(
+				[systemMessage, ...messages],
+				toolManager?.getAllTools() || {},
+				{
+					onToken: (token: string) => {
+						accumulatedContent += token;
+						setStreamingContent(normalizeStreamingContent(accumulatedContent));
 					},
-					controller.signal,
-				);
-			} else {
-				// Fallback to non-streaming (either client doesn't support it or user disabled it)
-				result = await client.chat(
-					[systemMessage, ...messages],
-					toolManager?.getAllTools() || {},
-					controller.signal,
-				);
-			}
+					onToolExecuted: (toolCall: ToolCall, result: string) => {
+						// Display formatter for auto-executed tools (after execution with results)
+						void (async () => {
+							const toolResult: ToolResult = {
+								tool_call_id: toolCall.id,
+								role: 'tool' as const,
+								name: toolCall.function.name,
+								content: result,
+							};
+							await displayToolResult(
+								toolCall,
+								toolResult,
+								toolManager,
+								addToChatQueue,
+								componentKeyCounter,
+							);
+						})();
+					},
+					onFinish: () => {
+						setIsStreaming(false);
+					},
+				},
+				controller.signal,
+			);
 
 			if (!result || !result.choices || result.choices.length === 0) {
 				throw new Error('No response received from model');
@@ -213,16 +319,23 @@ export function useChatHandler({
 				toolManager,
 			);
 
-			// Add assistant message to conversation history
+			// Add assistant message to conversation history only if it has content or tool_calls
+			// Empty assistant messages cause API errors: "Assistant message must have either content or tool_calls"
 			const assistantMsg: Message = {
 				role: 'assistant',
 				content: cleanedContent,
 				tool_calls: validToolCalls.length > 0 ? validToolCalls : undefined,
 			};
-			setMessages([...messages, assistantMsg]);
 
-			// Update conversation state with assistant message
-			conversationStateManager.current.updateAssistantMessage(assistantMsg);
+			const hasValidAssistantMessage =
+				cleanedContent.trim() || validToolCalls.length > 0;
+
+			if (hasValidAssistantMessage) {
+				setMessages([...messages, assistantMsg]);
+
+				// Update conversation state with assistant message
+				conversationStateManager.current.updateAssistantMessage(assistantMsg);
+			}
 
 			// Clear streaming state after response is complete
 			setIsStreaming(false);
@@ -242,17 +355,10 @@ export function useChatHandler({
 				}
 
 				// Send error results back to model for self-correction
-				const toolMessages = errorResults.map(result => ({
-					role: 'tool' as const,
-					content: result.content || '',
-					tool_call_id: result.tool_call_id,
-					name: result.name,
-				}));
-
 				const updatedMessagesWithError = [
 					...messages,
 					assistantMsg,
-					...toolMessages,
+					...toolResultsToMessages(errorResults),
 				];
 				setMessages(updatedMessagesWithError);
 
@@ -298,17 +404,10 @@ export function useChatHandler({
 						}
 
 						// Continue conversation with error messages
-						const toolMessages = blockedToolErrors.map(result => ({
-							role: 'tool' as const,
-							content: result.content || '',
-							tool_call_id: result.tool_call_id,
-							name: result.name,
-						}));
-
 						const updatedMessagesWithError = [
 							...messages,
 							assistantMsg,
-							...toolMessages,
+							...toolResultsToMessages(blockedToolErrors),
 						];
 						setMessages(updatedMessagesWithError);
 
@@ -322,15 +421,11 @@ export function useChatHandler({
 				}
 
 				// Separate tools that need confirmation vs those that don't
-				// BUT: if a tool fails validation, execute directly (skip confirmation)
+				// Check tool's needsApproval property to determine if confirmation is needed
 				const toolsNeedingConfirmation: ToolCall[] = [];
 				const toolsToExecuteDirectly: ToolCall[] = [];
 
 				for (const toolCall of validToolCalls) {
-					const toolDef = toolDefinitions.find(
-						def => def.name === toolCall.function.name,
-					);
-
 					// Check if tool has a validator
 					let validationFailed = false;
 
@@ -358,12 +453,50 @@ export function useChatHandler({
 						}
 					}
 
-					// If validation failed OR tool doesn't require confirmation OR in auto-accept mode, execute directly
-					// EXCEPT: execute_bash always requires confirmation for security
+					// Check tool's needsApproval property from the tool definition
+					let toolNeedsApproval = true; // Default to requiring approval for safety
+					if (toolManager) {
+						const toolEntry = toolManager.getToolEntry(toolCall.function.name);
+						if (toolEntry?.tool) {
+							const needsApprovalProp = (
+								toolEntry.tool as unknown as {
+									needsApproval?:
+										| boolean
+										| ((args: unknown) => boolean | Promise<boolean>);
+								}
+							).needsApproval;
+							if (typeof needsApprovalProp === 'boolean') {
+								toolNeedsApproval = needsApprovalProp;
+							} else if (typeof needsApprovalProp === 'function') {
+								// Evaluate function - our tools use getCurrentMode() internally
+								// and don't actually need the args parameter
+								try {
+									const parsedArgs = parseToolArguments(
+										toolCall.function.arguments,
+									);
+									// Cast to any to handle AI SDK type signature mismatch
+									// Our tool implementations don't use the second parameter
+									toolNeedsApproval = await (
+										needsApprovalProp as (
+											args: unknown,
+										) => boolean | Promise<boolean>
+									)(parsedArgs);
+								} catch {
+									// If evaluation fails, require approval for safety
+									toolNeedsApproval = true;
+								}
+							}
+						}
+					}
+
+					// Execute directly if:
+					// 1. Validation failed (need to send error back to model)
+					// 2. Tool has needsApproval: false
+					// 3. In auto-accept mode (except bash which always needs approval)
 					const isBashTool = toolCall.function.name === 'execute_bash';
 					if (
 						validationFailed ||
-						(toolDef && toolDef.requiresConfirmation === false) ||
+						!toolNeedsApproval ||
 						(developmentMode === 'auto-accept' && !isBashTool)
 					) {
 						toolsToExecuteDirectly.push(toolCall);
@@ -465,18 +598,10 @@ export function useChatHandler({
 
 					// If we have results, continue the conversation with them
 					if (directResults.length > 0) {
-						// Format tool results as standard tool messages
-						const toolMessages = directResults.map(result => ({
-							role: 'tool' as const,
-							content: result.content || '',
-							tool_call_id: result.tool_call_id,
-							name: result.name,
-						}));
-
 						const updatedMessagesWithTools = [
 							...messages,
 							assistantMsg,
-							...toolMessages,
+							...toolResultsToMessages(directResults),
 						];
 						setMessages(updatedMessagesWithTools);
 
@@ -508,66 +633,38 @@ export function useChatHandler({
 				const lastMessage = messages[messages.length - 1];
 				const hasRecentToolResults = lastMessage?.role === 'tool';
 
-				if (hasRecentToolResults) {
-					// Add a system-like nudge message to help model continue
-					const nudgeMessage: Message = {
-						role: 'user',
-						content:
-							'Please provide a summary or response based on the tool results above.',
-					};
+				// Add a continuation message to help the model respond
+				// For recent tool results, ask for a summary; otherwise, ask to continue
+				const nudgeContent = hasRecentToolResults
+					? 'Please provide a summary or response based on the tool results above.'
+					: 'Please continue with the task.';
 
-					const updatedMessagesWithNudge = [
-						...messages,
-						assistantMsg,
-						nudgeMessage,
-					];
-					setMessages(updatedMessagesWithNudge);
+				const nudgeMessage: Message = {
+					role: 'user',
+					content: nudgeContent,
+				};
 
-					// Continue the conversation loop with the nudge
-					await processAssistantResponse(
-						systemMessage,
-						updatedMessagesWithNudge,
-					);
-					return;
-				} else {
-					addToChatQueue(
-						<ErrorMessage
-							key={`empty-response-${componentKeyCounter}`}
-							message="The model returned an empty response. This may happen if the model is having issues or has finished processing. Try asking a follow-up question or saying 'continue' if you expected more output."
-							hideBox={true}
-						/>,
-					);
-				}
+				// Display a "continue" message in chat so user knows what happened
+				addToChatQueue(
+					<UserMessage
+						key={`auto-continue-${componentKeyCounter}`}
+						message="continue"
+					/>,
+				);
+
+				// Don't include the empty assistantMsg - it would cause API error
+				// "Assistant message must have either content or tool_calls"
+				const updatedMessagesWithNudge = [...messages, nudgeMessage];
+				setMessages(updatedMessagesWithNudge);
+
+				// Continue the conversation loop with the nudge
+				await processAssistantResponse(systemMessage, updatedMessagesWithNudge);
+				return;
 			}
 		} catch (error) {
-			if (
-				error instanceof Error &&
-				error.message === 'Operation was cancelled'
-			) {
-				addToChatQueue(
-					<ErrorMessage
-						key={`cancelled-${componentKeyCounter}`}
-						message="Interrupted by user."
-						hideBox={true}
-					/>,
-				);
-			} else {
-				// Extract clean error message
-				const errorMsg = formatError(error);
-				addToChatQueue(
-					<ErrorMessage
-						hideBox={true}
-						key={`error-${componentKeyCounter}`}
-						message={errorMsg}
-					/>,
-				);
-			}
+			displayError(error, 'chat-error');
 		} finally {
-			setIsThinking(false);
-			setIsCancelling(false);
-			setAbortController(null);
-			setIsStreaming(false);
-			setStreamingContent('');
+			resetStreamingState();
 		}
 	};
 
@@ -603,15 +700,9 @@ export function useChatHandler({
 		const controller = new AbortController();
 		setAbortController(controller);
 
-		// Start thinking indicator and streaming
-		setIsThinking(true);
-
 		try {
-			// Load and process system prompt with dynamic tool documentation
-			// Note: We still need tool definitions (not just native tools) for documentation
-			const systemPrompt = processPromptTemplate(
-				toolManager ? toolManager.getAllTools() : {},
-			);
+			// Load and process system prompt
+			const systemPrompt = processPromptTemplate();
 
 			// Create stream request
 			const systemMessage: Message = {
@@ -619,36 +710,15 @@ export function useChatHandler({
 				content: systemPrompt,
 			};
 
+			// Check context usage and warn if approaching limit
+			await checkContextUsage(updatedMessages, systemMessage);
+
 			// Use the new conversation loop
 			await processAssistantResponse(systemMessage, updatedMessages);
 		} catch (error) {
-			if (
-				error instanceof Error &&
-				error.message === 'Operation was cancelled'
-			) {
-				addToChatQueue(
-					<ErrorMessage
-						key={`cancelled-${componentKeyCounter}`}
-						message="Operation was cancelled by user"
-						hideBox={true}
-					/>,
-				);
-			} else {
-				// Extract clean error message
-				const errorMsg = formatError(error);
-				addToChatQueue(
-					<ErrorMessage
-						key={`error-${componentKeyCounter}`}
-						message={errorMsg}
-					/>,
-				);
-			}
+			displayError(error, 'chat-error');
 		} finally {
-			setIsThinking(false);
-			setIsCancelling(false);
-			setAbortController(null);
-			setIsStreaming(false);
-			setStreamingContent('');
+			resetStreamingState();
 		}
 	};
 

@@ -249,7 +249,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'glm-4.6',
+				default: 'glm-4.6, glm-4.5-air',
 				required: true,
 			},
 		],
@@ -282,7 +282,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'glm-4.6',
+				default: 'glm-4.6, glm-4.5-air',
 				required: true,
 			},
 		],

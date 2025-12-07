@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import React from 'react';
 import ignore from 'ignore';
 import {Text, Box} from 'ink';
-import type {ToolDefinition} from '@/types/index';
+
 import {tool, jsonSchema} from '@/types/core';
 import {ThemeContext} from '@/hooks/useTheme';
 import ToolMessage from '@/components/tool-message';
@@ -158,7 +158,6 @@ const executeSearchFileContents = async (
 	}
 };
 
-// AI SDK tool definition
 const searchFileContentsCoreTool = tool({
 	description:
 		'Search for text or code INSIDE file contents. Returns file paths with line numbers and matching content. Use this to find where specific code, functions, variables, or text appears in the codebase.',
@@ -183,6 +182,11 @@ const searchFileContentsCoreTool = tool({
 		},
 		required: ['query'],
 	}),
+	// Low risk: read-only operation, never requires approval
+	needsApproval: false,
+	execute: async (args, _options) => {
+		return await executeSearchFileContents(args);
+	},
 });
 
 interface SearchFileContentsFormatterProps {
@@ -239,7 +243,7 @@ const SearchFileContentsFormatter = React.memo(
 	},
 );
 
-const formatter = (
+const searchFileContentsFormatter = (
 	args: SearchFileContentsFormatterProps['args'],
 	result?: string,
 ): React.ReactElement => {
@@ -249,10 +253,8 @@ const formatter = (
 	return <SearchFileContentsFormatter args={args} result={result} />;
 };
 
-export const searchFileContentsTool: ToolDefinition = {
-	name: 'search_file_contents',
+export const searchFileContentsTool = {
+	name: 'search_file_contents' as const,
 	tool: searchFileContentsCoreTool,
-	handler: executeSearchFileContents,
-	formatter,
-	requiresConfirmation: false,
+	formatter: searchFileContentsFormatter,
 };

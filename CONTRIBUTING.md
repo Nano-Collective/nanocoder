@@ -70,7 +70,6 @@ Before contributing, please:
 3. **Improvements**: Enhance existing features or performance
 4. **Documentation**: Improve README, comments, or guides
 5. **Testing**: Add or improve tests
-6. **Model Cards**: For our recommendations database
 
 ### Development Workflow
 

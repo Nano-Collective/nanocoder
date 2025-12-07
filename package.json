@@ -54,12 +54,12 @@
 		"assets/nanocoder-vscode.vsix"
 	],
 	"dependencies": {
-		"@ai-sdk/openai-compatible": "^1.0.24",
+		"@ai-sdk/openai-compatible": "2.0.0-beta.42",
 		"@anthropic-ai/tokenizer": "^0.0.4",
 		"@mishieck/ink-titled-box": "^0.3.0",
 		"@modelcontextprotocol/sdk": "^1.17.3",
 		"@nanocollective/get-md": "^1.0.1",
-		"ai": "^5.0.82",
+		"ai": "6.0.0-beta.130",
 		"cheerio": "^1.1.2",
 		"cli-highlight": "^2.1.11",
 		"cli-table3": "^0.6.5",
@@ -74,7 +74,6 @@
 		"ink-text-input": "^6.0.0",
 		"llama-tokenizer-js": "^1.2.2",
 		"react": "^19.0.0",
-		"systeminformation": "^5.27.10",
 		"tiktoken": "^1.0.22",
 		"undici": "^7.16.0",
 		"ws": "^8.18.0",
@@ -121,7 +120,9 @@
 		"workerThreads": false,
 		"serial": true,
 		"environmentVariables": {
-			"NODE_ENV": "test"
+			"NODE_ENV": "test",
+			"LC_ALL": "en-US.UTF-8",
+			"LANG": "en-US.UTF-8"
 		}
 	},
 	"prettier": "@vdemedes/prettier-config"

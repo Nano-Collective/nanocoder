@@ -1,45 +1,16 @@
-export interface SystemCapabilities {
-	cpu: {
-		cores: number;
-		architecture: string;
-	};
-	memory: {
-		total: number; // GB
-		available: number; // GB
-	};
-	gpu: {
-		available: boolean;
-		type: 'nvidia' | 'amd' | 'apple' | 'intel' | 'none';
-		memory?: number; // GB
-	};
-	platform: NodeJS.Platform;
-	network: {
-		connected: boolean;
-		speed?: 'slow' | 'medium' | 'fast';
-	};
-}
-
 export interface ModelEntry {
-	name: string;
+	id: string; // OpenRouter model ID (e.g., "openai/gpt-4")
+	name: string; // Display name
 	author: string; // Model creator/organization (e.g., "Meta", "Anthropic", "Qwen")
-	size: string; // "7B", "13B", "70B", "Unknown" for API models
-	local: boolean; // Can be run locally (Ollama, etc.)
+	size: string; // Context length formatted (e.g., "128K", "1M")
+	local: boolean; // Open weights - can be run locally
 	api: boolean; // Available via hosted API (OpenRouter, etc.)
-	minMemoryGB?: number; // Minimum RAM needed (only for local models, GPU always recommended)
-	// Quality ratings (0-10 scale, 0 = not supported)
+	contextLength: number; // Raw context length in tokens
+	created: number; // Unix timestamp of model creation
 	quality: {
-		agentic: number; // Tool use, instruction following, multi-file reasoning for coding tasks
-		local: number; // Feasibility to run locally (0 = proprietary/impossible, 10 = easy to run locally)
-		cost: number; // Cost-effectiveness (10 = free/cheap, 0 = very expensive)
+		cost: number; // Cost-effectiveness (10 = free/cheap, 1 = very expensive)
 	};
-	// Cost info
 	costType: 'free' | 'paid';
-	costDetails?: string; // e.g., "$0.15/1M tokens" or "Free via Ollama"
-}
-
-export interface ModelRecommendation {
-	model: ModelEntry;
-	compatibility: 'perfect' | 'good' | 'marginal' | 'incompatible';
-	warnings: string[]; // ["May be slow on your system", "Limited agentic capabilities"]
-	recommendation: string; // "Excellent for complex coding tasks"
+	costDetails: string; // e.g., "$1.25/M in, $5.00/M out"
+	hasToolSupport: boolean; // Whether model supports tool/function calling
 }

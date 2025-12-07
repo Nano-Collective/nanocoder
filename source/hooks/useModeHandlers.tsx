@@ -25,7 +25,7 @@ interface UseModeHandlersProps {
 	setIsModelSelectionMode: (mode: boolean) => void;
 	setIsProviderSelectionMode: (mode: boolean) => void;
 	setIsThemeSelectionMode: (mode: boolean) => void;
-	setIsRecommendationsMode: (mode: boolean) => void;
+	setIsModelDatabaseMode: (mode: boolean) => void;
 	setIsConfigWizardMode: (mode: boolean) => void;
 	addToChatQueue: (component: React.ReactNode) => void;
 	componentKeyCounter: number;
@@ -47,7 +47,7 @@ export function useModeHandlers({
 	setIsModelSelectionMode,
 	setIsProviderSelectionMode,
 	setIsThemeSelectionMode,
-	setIsRecommendationsMode,
+	setIsModelDatabaseMode,
 	setIsConfigWizardMode,
 	addToChatQueue,
 	componentKeyCounter,
@@ -189,14 +189,14 @@ export function useModeHandlers({
 		setIsThemeSelectionMode(false);
 	};
 
-	// Helper function to enter recommendations mode
-	const enterRecommendationsMode = () => {
-		setIsRecommendationsMode(true);
+	// Helper function to enter model database mode
+	const enterModelDatabaseMode = () => {
+		setIsModelDatabaseMode(true);
 	};
 
-	// Handle recommendations cancel
-	const handleRecommendationsCancel = () => {
-		setIsRecommendationsMode(false);
+	// Handle model database cancel
+	const handleModelDatabaseCancel = () => {
+		setIsModelDatabaseMode(false);
 	};
 
 	// Helper function to enter config wizard mode
@@ -289,7 +289,7 @@ export function useModeHandlers({
 		enterModelSelectionMode,
 		enterProviderSelectionMode,
 		enterThemeSelectionMode,
-		enterRecommendationsMode,
+		enterModelDatabaseMode,
 		enterConfigWizardMode,
 		handleModelSelect,
 		handleModelSelectionCancel,
@@ -297,7 +297,7 @@ export function useModeHandlers({
 		handleProviderSelectionCancel,
 		handleThemeSelect,
 		handleThemeSelectionCancel,
-		handleRecommendationsCancel,
+		handleModelDatabaseCancel,
 		handleConfigWizardComplete,
 		handleConfigWizardCancel,
 	};

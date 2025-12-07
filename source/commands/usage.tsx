@@ -36,9 +36,7 @@ export const usageCommand: Command = {
 
 		// Generate the system prompt to include in token calculation
 		const toolManager = getToolManager();
-		const systemPrompt = processPromptTemplate(
-			toolManager ? toolManager.getAllTools() : {},
-		);
+		const systemPrompt = processPromptTemplate();
 
 		// Create system message to include in token calculation
 		const systemMessage: Message = {
