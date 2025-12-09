@@ -13,6 +13,16 @@ import type {
 } from '@/types/index';
 import {XMLToolCallParser} from '@/tool-calling/xml-parser';
 import {getModelContextLimit} from '@/models/index.js';
+import {
+	getLogger,
+	withNewCorrelationContext,
+	startMetrics,
+	endMetrics,
+	calculateMemoryDelta,
+	formatMemoryUsage,
+	getCorrelationId,
+	generateCorrelationId
+} from '@/utils/logging';
 
 /**
  * Message type used for testing the empty assistant message filter.
@@ -279,6 +289,8 @@ export class AISDKClient implements LLMClient {
 	private maxRetries: number;
 
 	constructor(providerConfig: AIProviderConfig) {
+		const logger = getLogger();
+
 		this.providerConfig = providerConfig;
 		this.availableModels = providerConfig.models;
 		this.currentModel = providerConfig.models[0] || '';
@@ -286,13 +298,22 @@ export class AISDKClient implements LLMClient {
 		// Default to 2 retries (same as AI SDK default), or use configured value
 		this.maxRetries = providerConfig.maxRetries ?? 2;
 
-		const {requestTimeout, socketTimeout, connectionPool} = this.providerConfig;
+		logger.info('AI SDK client initializing', {
+			models: this.availableModels,
+			defaultModel: this.currentModel,
+			provider: providerConfig.name || 'unknown',
+			baseUrl: providerConfig.config.baseURL ? '[REDACTED]' : undefined,
+			maxRetries: this.maxRetries
+		});
+
+		const {connectionPool} = this.providerConfig;
+		const {requestTimeout = 120000, socketTimeout = 120000} = this.providerConfig;
 		const resolvedSocketTimeout =
 			socketTimeout === -1
 				? 0
-				: socketTimeout || requestTimeout === -1
+				: (socketTimeout ?? requestTimeout) === -1
 				? 0
-				: requestTimeout || 120000;
+				: (socketTimeout ?? requestTimeout) || 120000;
 
 		this.undiciAgent = new Agent({
 			connect: {
@@ -361,7 +382,17 @@ export class AISDKClient implements LLMClient {
 	}
 
 	setModel(model: string): void {
+		const logger = getLogger();
+		const previousModel = this.currentModel;
+
 		this.currentModel = model;
+
+		logger.info('Model changed', {
+			previousModel,
+			newModel: model,
+			provider: this.providerConfig.name
+		});
+
 		// Update context size when model changes
 		void this.updateContextSize();
 	}
@@ -391,20 +422,42 @@ export class AISDKClient implements LLMClient {
 		callbacks: StreamCallbacks,
 		signal?: AbortSignal,
 	): Promise<LLMChatResponse> {
+		const logger = getLogger();
+
 		// Check if already aborted before starting
 		if (signal?.aborted) {
+			logger.debug('Chat request already aborted');
 			throw new Error('Operation was cancelled');
 		}
 
-		try {
-			// Get the language model instance from the provider
-			const model = this.provider(this.currentModel);
+		// Start performance tracking
+		const metrics = startMetrics();
+		const correlationId = getCorrelationId() || generateCorrelationId();
 
-			// Tools are already in AI SDK format - use directly
-			const aiTools = Object.keys(tools).length > 0 ? tools : undefined;
+		logger.info('Chat request starting', {
+			model: this.currentModel,
+			messageCount: messages.length,
+			toolCount: Object.keys(tools).length,
+			correlationId,
+			provider: this.providerConfig.name
+		});
 
-			// Convert messages to AI SDK v5 ModelMessage format
-			const modelMessages = convertToModelMessages(messages);
+		return await withNewCorrelationContext(async (context) => {
+			try {
+				// Get the language model instance from the provider
+				const model = this.provider(this.currentModel);
+
+				// Tools are already in AI SDK format - use directly
+				const aiTools = Object.keys(tools).length > 0 ? tools : undefined;
+
+				// Convert messages to AI SDK v5 ModelMessage format
+				const modelMessages = convertToModelMessages(messages);
+
+				logger.debug('AI SDK request prepared', {
+					messageCount: modelMessages.length,
+					hasTools: !!aiTools,
+					toolCount: aiTools ? Object.keys(aiTools).length : 0
+				});
 
 			// Tools with needsApproval: false auto-execute in the loop
 			// Tools with needsApproval: true cause interruptions for manual approval
@@ -419,6 +472,15 @@ export class AISDKClient implements LLMClient {
 				stopWhen: stepCountIs(10), // Allow up to 10 tool execution steps
 				// Can be used to add custom logging, metrics, or step tracking
 				onStepFinish(step) {
+					// Log tool execution steps
+					if (step.toolCalls && step.toolCalls.length > 0) {
+						logger.debug('AI SDK tool step', {
+							stepType: 'tool_execution',
+							toolCount: step.toolCalls.length,
+							hasResults: !!step.toolResults
+						});
+					}
+
 					// Display formatters for auto-executed tools (after execution with results)
 					if (
 						step.toolCalls &&
@@ -442,6 +504,12 @@ export class AISDKClient implements LLMClient {
 								typeof toolResult.output === 'string'
 									? toolResult.output
 									: JSON.stringify(toolResult.output);
+
+							logger.debug('Tool executed', {
+								toolName: tc.function.name,
+								resultLength: resultStr.length
+							});
+
 							callbacks.onToolExecuted?.(tc, resultStr);
 						});
 					}
@@ -453,6 +521,15 @@ export class AISDKClient implements LLMClient {
 						m => !isEmptyAssistantMessage(m as unknown as TestableMessage),
 					);
 
+					// Log message filtering
+					if (filteredMessages.length !== messages.length) {
+						logger.debug('Filtered empty assistant messages', {
+							originalCount: messages.length,
+							filteredCount: filteredMessages.length,
+							removedCount: messages.length - filteredMessages.length
+						});
+					}
+
 					// Return filtered messages if any were removed, otherwise no changes
 					if (filteredMessages.length !== messages.length) {
 						return {messages: filteredMessages};
@@ -463,6 +540,12 @@ export class AISDKClient implements LLMClient {
 
 			// Get the full text from the result
 			const fullText = result.text;
+
+			logger.debug('AI SDK response received', {
+				responseLength: fullText.length,
+				hasToolCalls: !!(result.toolCalls && result.toolCalls.length > 0),
+				toolCallCount: result.toolCalls?.length || 0
+			});
 
 			// Send the complete text to the callback
 			if (fullText) {
@@ -478,6 +561,10 @@ export class AISDKClient implements LLMClient {
 			// Extract tool calls
 			const toolCalls: ToolCall[] = [];
 			if (toolCallsResult && toolCallsResult.length > 0) {
+				logger.debug('Processing tool calls from response', {
+					toolCallCount: toolCallsResult.length
+				});
+
 				for (const toolCall of toolCallsResult) {
 					const tc: ToolCall = {
 						// Some providers (like Ollama) don't provide toolCallId, so generate one
@@ -491,6 +578,12 @@ export class AISDKClient implements LLMClient {
 						},
 					};
 					toolCalls.push(tc);
+
+					logger.debug('Tool call processed', {
+						toolName: tc.function.name,
+						hasArguments: !!tc.function.arguments
+					});
+
 					// Note: onToolCall already fired in onStepFinish - no need to call again
 				}
 			}
@@ -498,10 +591,16 @@ export class AISDKClient implements LLMClient {
 			// Check for XML tool calls if no native ones
 			let content = fullText;
 			if (Object.keys(tools).length > 0 && toolCalls.length === 0 && content) {
+				logger.debug('Checking for XML tool calls in response content');
+
 				// First check for malformed XML tool calls
 				const malformedError =
 					XMLToolCallParser.detectMalformedToolCall(content);
 				if (malformedError) {
+					logger.warn('Malformed XML tool call detected', {
+						error: malformedError.error
+					});
+
 					// Return malformed tool call with validation error
 					// This mimics how validators work - returns tool call that will show error
 					const malformedCall: ToolCall = {
@@ -517,12 +616,19 @@ export class AISDKClient implements LLMClient {
 					callbacks.onToolCall?.(malformedCall);
 					content = ''; // Clear content since it was malformed
 				} else if (XMLToolCallParser.hasToolCalls(content)) {
+					logger.debug('Parsing XML tool calls from content');
+
 					// Try to parse well-formed XML tool calls
 					const parsedToolCalls = XMLToolCallParser.parseToolCalls(content);
 					const xmlToolCalls =
 						XMLToolCallParser.convertToToolCalls(parsedToolCalls);
 					const cleanedContent =
 						XMLToolCallParser.removeToolCallsFromContent(content);
+
+					logger.debug('XML tool calls parsed', {
+						toolCallCount: xmlToolCalls.length,
+						contentLength: cleanedContent.length
+					});
 
 					content = cleanedContent;
 					for (const tc of xmlToolCalls) {
@@ -531,6 +637,20 @@ export class AISDKClient implements LLMClient {
 					}
 				}
 			}
+
+			// Calculate performance metrics
+			const finalMetrics = endMetrics(metrics);
+			const memoryDelta = calculateMemoryDelta(metrics.memoryUsage!, finalMetrics.memoryUsage!);
+
+			logger.info('Chat request completed successfully', {
+				model: this.currentModel,
+				duration: `${finalMetrics.duration.toFixed(2)}ms`,
+				responseLength: content.length,
+				toolCallsFound: toolCalls.length,
+				memoryDelta: formatMemoryUsage(finalMetrics.memoryUsage!),
+				correlationId,
+				provider: this.providerConfig.name
+			});
 
 			callbacks.onFinish?.();
 
@@ -546,10 +666,31 @@ export class AISDKClient implements LLMClient {
 				],
 			};
 		} catch (error) {
+			// Calculate performance metrics even for errors
+			const finalMetrics = endMetrics(metrics);
+			const memoryDelta = calculateMemoryDelta(metrics.memoryUsage!, finalMetrics.memoryUsage!);
+
 			// Check if this was a user-initiated cancellation
 			if (error instanceof Error && error.name === 'AbortError') {
+				logger.info('Chat request cancelled by user', {
+					model: this.currentModel,
+					duration: `${finalMetrics.duration.toFixed(2)}ms`,
+					correlationId,
+					provider: this.providerConfig.name
+				});
 				throw new Error('Operation was cancelled');
 			}
+
+			// Log the error with performance metrics
+			logger.error('Chat request failed', {
+				model: this.currentModel,
+				duration: `${finalMetrics.duration.toFixed(2)}ms`,
+				error: error instanceof Error ? error.message : error,
+				errorName: error instanceof Error ? error.name : 'Unknown',
+				correlationId,
+				provider: this.providerConfig.name,
+				memoryDelta: formatMemoryUsage(finalMetrics.memoryUsage!)
+			});
 
 			// AI SDK wraps errors in NoOutputGeneratedError with no useful cause
 			// Check if it's a cancellation without an underlying API error
@@ -573,9 +714,17 @@ export class AISDKClient implements LLMClient {
 			const userMessage = parseAPIError(error);
 			throw new Error(userMessage);
 		}
+		}, correlationId); // End of withNewCorrelationContext
 	}
 
 	async clearContext(): Promise<void> {
+		const logger = getLogger();
+
+		logger.debug('AI SDK client context cleared', {
+			model: this.currentModel,
+			provider: this.providerConfig.name,
+		});
+
 		// No internal state to clear
 	}
 }

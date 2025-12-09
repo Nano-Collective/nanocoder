@@ -14,6 +14,16 @@ import {dynamicTool} from 'ai';
 import {logInfo, logError} from '@/utils/message-queue';
 import {getCurrentMode} from '@/context/mode-context';
 import {TransportFactory} from './transport-factory.js';
+import {
+	getLogger,
+	withNewCorrelationContext,
+	generateCorrelationId,
+	startMetrics,
+	endMetrics,
+	calculateMemoryDelta,
+	formatMemoryUsage,
+	getCorrelationId,
+} from '@/utils/logging';
 
 import type {MCPServer, MCPTool, MCPInitResult} from '@/types/index';
 
@@ -23,8 +33,11 @@ export class MCPClient {
 	private serverTools: Map<string, MCPTool[]> = new Map();
 	private serverConfigs: Map<string, MCPServer> = new Map();
 	private isConnected: boolean = false;
+	private logger = getLogger();
 
-	constructor() {}
+	constructor() {
+		this.logger.debug('MCP client initialized');
+	}
 
 	/**
 	 * Ensures backward compatibility for old MCP server configurations
@@ -42,47 +55,114 @@ export class MCPClient {
 	}
 
 	async connectToServer(server: MCPServer): Promise<void> {
-		// Normalize server configuration for backward compatibility
-		const normalizedServer = this.normalizeServerConfig(server);
+		const correlationId = generateCorrelationId();
+		const metrics = startMetrics();
 
-		// Validate server configuration
-		const validation = TransportFactory.validateServerConfig(normalizedServer);
-		if (!validation.valid) {
-			throw new Error(
-				`Invalid MCP server configuration for "${
-					normalizedServer.name
-				}": ${validation.errors.join(', ')}`,
-			);
-		}
+		return await withNewCorrelationContext(async (context) => {
+			// Normalize server configuration for backward compatibility
+			const normalizedServer = this.normalizeServerConfig(server);
 
-		// Create transport using the factory
-		const transport = TransportFactory.createTransport(normalizedServer);
+			this.logger.info('Connecting to MCP server', {
+				serverName: normalizedServer.name,
+				transport: normalizedServer.transport,
+				hasUrl: !!normalizedServer.url,
+				hasCommand: !!normalizedServer.command,
+				correlationId,
+			});
 
-		// Create and connect client
-		const client = new Client({
-			name: 'nanocoder-mcp-client',
-			version: '1.0.0',
-		});
+			// Validate server configuration
+			const validation =
+				TransportFactory.validateServerConfig(normalizedServer);
+			if (!validation.valid) {
+				const finalMetrics = endMetrics(metrics);
+				this.logger.error('MCP server configuration validation failed', {
+					serverName: normalizedServer.name,
+					errors: validation.errors,
+					duration: `${finalMetrics.duration.toFixed(2)}ms`,
+					correlationId,
+				});
+				throw new Error(
+					`Invalid MCP server configuration for "${
+						normalizedServer.name
+					}": ${validation.errors.join(', ')}`,
+				);
+			}
 
-		await client.connect(transport);
+			try {
+				// Create transport using the factory
+				const transport = TransportFactory.createTransport(normalizedServer);
 
-		// Store client, transport, and server config
-		this.clients.set(normalizedServer.name, client);
-		this.transports.set(normalizedServer.name, transport);
-		this.serverConfigs.set(normalizedServer.name, normalizedServer);
+				this.logger.debug('MCP transport created', {
+					serverName: normalizedServer.name,
+					transportType: normalizedServer.transport,
+				});
 
-		// List available tools from this server
-		const toolsResult = await client.listTools();
-		const tools: MCPTool[] = toolsResult.tools.map(tool => ({
-			name: tool.name,
-			description: tool.description || undefined,
-			inputSchema: tool.inputSchema,
-			serverName: normalizedServer.name,
-		}));
+				// Create and connect client
+				const client = new Client({
+					name: 'nanocoder-mcp-client',
+					version: '1.0.0',
+				});
 
-		this.serverTools.set(normalizedServer.name, tools);
+				this.logger.debug('MCP client created, attempting connection', {
+					serverName: normalizedServer.name,
+				});
 
-		// Success - no console logging here, will be handled by app
+				await client.connect(transport);
+
+				this.logger.info('MCP server connected successfully', {
+					serverName: normalizedServer.name,
+					transport: normalizedServer.transport,
+				});
+
+				// Store client, transport, and server config
+				this.clients.set(normalizedServer.name, client);
+				this.transports.set(normalizedServer.name, transport);
+				this.serverConfigs.set(normalizedServer.name, normalizedServer);
+
+				// List available tools from this server
+				const toolsResult = await client.listTools();
+				const tools: MCPTool[] = toolsResult.tools.map(tool => ({
+					name: tool.name,
+					description: tool.description || undefined,
+					inputSchema: tool.inputSchema,
+					serverName: normalizedServer.name,
+				}));
+
+				this.serverTools.set(normalizedServer.name, tools);
+
+				const finalMetrics = endMetrics(metrics);
+				const memoryDelta = calculateMemoryDelta(
+					metrics.memoryUsage!,
+					finalMetrics.memoryUsage!,
+				);
+
+				this.logger.info('MCP server connection completed', {
+					serverName: normalizedServer.name,
+					toolCount: tools.length,
+					duration: `${finalMetrics.duration.toFixed(2)}ms`,
+					memoryDelta: formatMemoryUsage(finalMetrics.memoryUsage!),
+					correlationId,
+				});
+			} catch (error) {
+				const finalMetrics = endMetrics(metrics);
+				const memoryDelta = calculateMemoryDelta(
+					metrics.memoryUsage!,
+					finalMetrics.memoryUsage!,
+				);
+
+				this.logger.error('Failed to connect to MCP server', {
+					serverName: normalizedServer.name,
+					transport: normalizedServer.transport,
+					error: error instanceof Error ? error.message : error,
+					errorName: error instanceof Error ? error.name : 'Unknown',
+					duration: `${finalMetrics.duration.toFixed(2)}ms`,
+					memoryDelta: formatMemoryUsage(finalMetrics.memoryUsage!),
+					correlationId,
+				});
+
+				throw error;
+			}
+		}, correlationId);
 	}
 
 	async connectToServers(
@@ -90,47 +170,97 @@ export class MCPClient {
 		onProgress?: (result: MCPInitResult) => void,
 	): Promise<MCPInitResult[]> {
 		const results: MCPInitResult[] = [];
+		const correlationId = generateCorrelationId();
+		const metrics = startMetrics();
 
-		// Connect to servers in parallel for better performance
-		const connectionPromises = servers.map(async server => {
-			try {
-				// Normalize server configuration for backward compatibility
-				const normalizedServer = this.normalizeServerConfig(server);
-
-				await this.connectToServer(normalizedServer);
-				const tools = this.serverTools.get(normalizedServer.name) || [];
-				const result: MCPInitResult = {
-					serverName: normalizedServer.name,
-					success: true,
-					toolCount: tools.length,
-				};
-				results.push(result);
-				onProgress?.(result);
-				return result;
-			} catch (error) {
-				const normalizedServer = this.normalizeServerConfig(server);
-				const result: MCPInitResult = {
-					serverName: normalizedServer.name,
-					success: false,
-					error: error instanceof Error ? error.message : String(error),
-				};
-				results.push(result);
-				onProgress?.(result);
-				return result;
-			}
+		this.logger.info('Starting batch MCP server connections', {
+			serverCount: servers.length,
+			serverNames: servers.map(s => this.normalizeServerConfig(s).name),
+			correlationId,
 		});
 
-		// Wait for all connections to complete
-		await Promise.all(connectionPromises);
+		return await withNewCorrelationContext(async (context) => {
+			// Connect to servers in parallel for better performance
+			const connectionPromises = servers.map(async server => {
+				try {
+					// Normalize server configuration for backward compatibility
+					const normalizedServer = this.normalizeServerConfig(server);
 
-		this.isConnected = true;
-		return results;
+					await this.connectToServer(normalizedServer);
+					const tools = this.serverTools.get(normalizedServer.name) || [];
+					const result: MCPInitResult = {
+						serverName: normalizedServer.name,
+						success: true,
+						toolCount: tools.length,
+					};
+					results.push(result);
+
+					this.logger.debug('MCP server connection successful in batch', {
+						serverName: normalizedServer.name,
+						toolCount: tools.length,
+						correlationId,
+					});
+
+					onProgress?.(result);
+					return result;
+				} catch (error) {
+					const normalizedServer = this.normalizeServerConfig(server);
+					const result: MCPInitResult = {
+						serverName: normalizedServer.name,
+						success: false,
+						error: error instanceof Error ? error.message : String(error),
+					};
+
+					this.logger.error('MCP server connection failed in batch', {
+						serverName: normalizedServer.name,
+						error: result.error,
+						errorName: error instanceof Error ? error.name : 'Unknown',
+						correlationId,
+					});
+
+					results.push(result);
+					onProgress?.(result);
+					return result;
+				}
+			});
+
+			// Wait for all connections to complete
+			await Promise.all(connectionPromises);
+
+			const finalMetrics = endMetrics(metrics);
+			const successfulConnections = results.filter(r => r.success).length;
+			const failedConnections = results.length - successfulConnections;
+
+			this.logger.info('Batch MCP server connections completed', {
+				totalServers: servers.length,
+				successfulConnections,
+				failedConnections,
+				duration: `${finalMetrics.duration.toFixed(2)}ms`,
+				correlationId,
+			});
+
+			this.isConnected = true;
+			return results;
+		}, correlationId);
 	}
 
 	getAllTools(): Tool[] {
 		const tools: Tool[] = [];
 
+		this.logger.debug('Building all tools registry from MCP servers', {
+			serverCount: this.serverTools.size,
+			totalToolsAvailable: Array.from(this.serverTools.values()).reduce(
+				(sum, tools) => sum + tools.length,
+				0,
+			),
+		});
+
 		for (const [serverName, serverTools] of this.serverTools.entries()) {
+			this.logger.debug('Processing tools from MCP server', {
+				serverName,
+				toolCount: serverTools.length,
+			});
+
 			for (const mcpTool of serverTools) {
 				// Convert MCP tool to nanocoder Tool format
 				// Use the original tool name for better model compatibility
@@ -308,53 +438,152 @@ export class MCPClient {
 		toolName: string,
 		args: Record<string, unknown>,
 	): Promise<string> {
-		try {
-			const result = await client.callTool({
-				name: toolName,
-				arguments: args,
+		const correlationId = generateCorrelationId();
+		const metrics = startMetrics();
+
+		return await withNewCorrelationContext(async (context) => {
+			this.logger.info('Executing MCP tool', {
+				toolName,
+				argumentCount: Object.keys(args).length,
+				hasArguments: Object.keys(args).length > 0,
+				correlationId,
 			});
 
-			// Convert result content to string
-			if (
-				result.content &&
-				Array.isArray(result.content) &&
-				result.content.length > 0
-			) {
-				const content = result.content[0] as
-					| {type: 'text'; text?: string}
-					| Record<string, unknown>;
-				if ('type' in content && content.type === 'text') {
-					const textContent = content as {type: 'text'; text?: string};
-					return textContent.text || '';
-				}
-				return JSON.stringify(content);
-			}
-
-			return 'Tool executed successfully (no output)';
-		} catch (error) {
-			const errorMessage =
-				error instanceof Error ? error.message : 'Unknown error';
-			throw new Error(`MCP tool execution failed: ${errorMessage}`);
-		}
-	}
-
-	async disconnect(): Promise<void> {
-		for (const [serverName, client] of this.clients.entries()) {
 			try {
-				await client.close();
-				logInfo(`Disconnected from MCP server: ${serverName}`);
+				const result = await client.callTool({
+					name: toolName,
+					arguments: args,
+				});
+
+				this.logger.debug('MCP tool executed successfully', {
+					toolName,
+					hasContent: !!result.content,
+					contentLength: Array.isArray(result.content)
+						? result.content.length
+						: 0,
+					correlationId,
+				});
+
+				// Convert result content to string
+				if (
+					result.content &&
+					Array.isArray(result.content) &&
+					result.content.length > 0
+				) {
+					const content = result.content[0] as
+						| {type: 'text'; text?: string}
+						| Record<string, unknown>;
+					if ('type' in content && content.type === 'text') {
+						const textContent = content as {type: 'text'; text?: string};
+						const responseText = textContent.text || '';
+
+						const finalMetrics = endMetrics(metrics);
+						this.logger.info('MCP tool execution completed', {
+							toolName,
+							responseLength: responseText.length,
+							duration: `${finalMetrics.duration.toFixed(2)}ms`,
+							correlationId,
+						});
+
+						return responseText;
+					}
+					const jsonResponse = JSON.stringify(content);
+
+					const finalMetrics = endMetrics(metrics);
+					this.logger.info('MCP tool execution completed (JSON)', {
+						toolName,
+						responseLength: jsonResponse.length,
+						duration: `${finalMetrics.duration.toFixed(2)}ms`,
+						correlationId,
+					});
+
+					return jsonResponse;
+				}
+
+				const finalMetrics = endMetrics(metrics);
+				this.logger.info('MCP tool execution completed (no output)', {
+					toolName,
+					duration: `${finalMetrics.duration.toFixed(2)}ms`,
+					correlationId,
+				});
+
+				return 'Tool executed successfully (no output)';
 			} catch (error) {
 				const errorMessage =
 					error instanceof Error ? error.message : 'Unknown error';
-				logError(`Error disconnecting from ${serverName}: ${errorMessage}`);
+				const errorName = error instanceof Error ? error.name : 'Unknown';
+
+				const finalMetrics = endMetrics(metrics);
+
+				this.logger.error('MCP tool execution failed', {
+					toolName,
+					error: errorMessage,
+					errorName,
+					duration: `${finalMetrics.duration.toFixed(2)}ms`,
+					correlationId,
+				});
+
+				throw new Error(`MCP tool execution failed: ${errorMessage}`);
 			}
+		}, correlationId);
+	}
+
+	async disconnect(): Promise<void> {
+		const correlationId = generateCorrelationId();
+		const serverNames = Array.from(this.clients.keys());
+
+		if (serverNames.length === 0) {
+			this.logger.debug('No MCP servers to disconnect from');
+			return;
 		}
 
-		this.clients.clear();
-		this.transports.clear();
-		this.serverTools.clear();
-		this.serverConfigs.clear();
-		this.isConnected = false;
+		this.logger.info('Disconnecting from MCP servers', {
+			serverCount: serverNames.length,
+			serverNames,
+			correlationId,
+		});
+
+		return await withNewCorrelationContext(async (context) => {
+			let successfulDisconnections = 0;
+			let failedDisconnections = 0;
+
+			for (const [serverName, client] of this.clients.entries()) {
+				try {
+					await client.close();
+					successfulDisconnections++;
+
+					this.logger.info('Disconnected from MCP server successfully', {
+						serverName,
+						correlationId,
+					});
+				} catch (error) {
+					failedDisconnections++;
+					const errorMessage =
+						error instanceof Error ? error.message : 'Unknown error';
+					const errorName = error instanceof Error ? error.name : 'Unknown';
+
+					this.logger.error('Error disconnecting from MCP server', {
+						serverName,
+						error: errorMessage,
+						errorName,
+						correlationId,
+					});
+				}
+			}
+
+			this.clients.clear();
+			this.transports.clear();
+			this.serverTools.clear();
+			this.serverConfigs.clear();
+			this.isConnected = false;
+
+			this.logger.info('MCP client disconnection completed', {
+				totalServers: serverNames.length,
+				successfulDisconnections,
+				failedDisconnections,
+				correlationId,
+			});
+		}, correlationId);
 	}
 
 	getConnectedServers(): string[] {

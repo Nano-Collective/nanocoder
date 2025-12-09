@@ -1,6 +1,6 @@
 import {Box, Text, useApp} from 'ink';
 import WelcomeMessage from '@/components/welcome-message';
-import React from 'react';
+import React, {useEffect} from 'react';
 import {getThemeColors} from '@/config/themes';
 import {ThemeContext} from '@/hooks/useTheme';
 import UserInput from '@/components/user-input';
@@ -28,6 +28,15 @@ import {
 	shouldPromptExtensionInstall,
 } from '@/components/vscode-extension-prompt';
 import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
+import {
+	getLogger,
+	withNewCorrelationContext,
+	generateCorrelationId,
+	startMetrics,
+	endMetrics,
+	calculateMemoryDelta,
+	formatMemoryUsage,
+} from '@/utils/logging';
 
 // Import extracted hooks and utilities
 import {useAppState} from '@/hooks/useAppState';
@@ -123,6 +132,19 @@ export default function App({
 	nonInteractivePrompt,
 	nonInteractiveMode = false,
 }: AppProps) {
+	const logger = getLogger();
+
+	// Log application startup with key configuration
+	React.useEffect(() => {
+		logger.info('Nanocoder application starting', {
+			vscodeMode,
+			vscodePort,
+			nodeEnv: process.env.NODE_ENV || 'development',
+			platform: process.platform,
+			pid: process.pid,
+		});
+	}, [logger, vscodeMode, vscodePort]);
+
 	// Use extracted hooks
 	const appState = useAppState();
 	const {exit} = useApp();
@@ -132,7 +154,12 @@ export default function App({
 	// Sync global mode context whenever development mode changes
 	React.useEffect(() => {
 		setCurrentModeContext(appState.developmentMode);
-	}, [appState.developmentMode]);
+
+		logger.info('Development mode changed', {
+			newMode: appState.developmentMode,
+			previousMode: undefined, // Could track previous state if needed
+		});
+	}, [appState.developmentMode, logger]);
 
 	// VS Code extension installation prompt state
 	const [showExtensionPrompt, setShowExtensionPrompt] = React.useState(
@@ -155,6 +182,17 @@ export default function App({
 				cursorPosition?: {line: number; character: number};
 			},
 		) => {
+			const correlationId = generateCorrelationId();
+
+			logger.info('VS Code prompt received', {
+				promptLength: prompt.length,
+				hasContext: !!context,
+				filePath: context?.filePath,
+				hasSelection: !!context?.selection,
+				cursorPosition: context?.cursorPosition,
+				correlationId,
+			});
+
 			// Build enhanced prompt with context if available
 			let enhancedPrompt = prompt;
 			if (context?.filePath) {
@@ -164,9 +202,12 @@ export default function App({
 			}
 			// This will be connected to chat handler after initialization
 			// For now, store it for processing
-			console.log('VS Code prompt received:', enhancedPrompt);
+			logger.debug('VS Code enhanced prompt prepared', {
+				enhancedPromptLength: enhancedPrompt.length,
+				correlationId,
+			});
 		},
-		[],
+		[logger],
 	);
 
 	// Setup VS Code server (returns connection status and methods)
@@ -189,7 +230,47 @@ export default function App({
 	// Initialize global message queue on component mount
 	React.useEffect(() => {
 		setGlobalMessageQueue(appState.addToChatQueue);
-	}, [appState.addToChatQueue]);
+
+		logger.debug('Global message queue initialized', {
+			chatQueueFunction: 'addToChatQueue',
+		});
+	}, [appState.addToChatQueue, logger]);
+
+	// Log important application state changes
+	React.useEffect(() => {
+		if (appState.client) {
+			logger.info('AI client initialized', {
+				provider: appState.currentProvider,
+				model: appState.currentModel,
+				hasToolManager: !!appState.toolManager,
+			});
+		}
+	}, [
+		appState.client,
+		appState.currentProvider,
+		appState.currentModel,
+		appState.toolManager,
+		logger,
+	]);
+
+	React.useEffect(() => {
+		if (appState.mcpInitialized) {
+			logger.info('MCP servers initialized', {
+				serverCount: appState.mcpServersStatus?.length || 0,
+				status: 'connected',
+			});
+		}
+	}, [appState.mcpInitialized, appState.mcpServersStatus, logger]);
+
+	React.useEffect(() => {
+		if (appState.updateInfo) {
+			logger.info('Update information available', {
+				hasUpdate: appState.updateInfo.hasUpdate,
+				currentVersion: appState.updateInfo.currentVersion,
+				latestVersion: appState.updateInfo.latestVersion,
+			});
+		}
+	}, [appState.updateInfo, logger]);
 
 	// Setup chat handler
 	const chatHandler = useChatHandler({
@@ -301,10 +382,17 @@ export default function App({
 
 	const handleCancel = React.useCallback(() => {
 		if (appState.abortController) {
+			logger.info('Cancelling current operation', {
+				operation: 'user_cancellation',
+				hasAbortController: !!appState.abortController,
+			});
+
 			appState.setIsCancelling(true);
 			appState.abortController.abort();
+		} else {
+			logger.debug('Cancel requested but no active operation to cancel');
 		}
-	}, [appState]);
+	}, [appState, logger]);
 
 	const handleToggleDevelopmentMode = React.useCallback(() => {
 		appState.setDevelopmentMode(currentMode => {
@@ -317,14 +405,28 @@ export default function App({
 			const nextIndex = (currentIndex + 1) % modes.length;
 			const nextMode = modes[nextIndex];
 
+			logger.info('Development mode toggled', {
+				previousMode: currentMode,
+				nextMode,
+				modeIndex: nextIndex,
+				totalModes: modes.length,
+			});
+
 			// Sync global mode context for tool needsApproval logic
 			setCurrentModeContext(nextMode);
 
 			return nextMode;
 		});
-	}, [appState]);
+	}, [appState, logger]);
 
 	const handleShowStatus = React.useCallback(() => {
+		logger.debug('Status display requested', {
+			currentProvider: appState.currentProvider,
+			currentModel: appState.currentModel,
+			currentTheme: appState.currentTheme,
+			componentKeyCounter: appState.componentKeyCounter,
+		});
+
 		appState.addToChatQueue(
 			<Status
 				key={`status-${appState.componentKeyCounter}`}
@@ -605,6 +707,8 @@ export default function App({
 
 	// Handle loading state for directory trust check
 	if (isTrustLoading) {
+		logger.debug('Directory trust check in progress');
+
 		return (
 			<Box flexDirection="column" padding={1}>
 				<Text color={themeContextValue.colors.secondary}>
@@ -616,6 +720,11 @@ export default function App({
 
 	// Handle error state for directory trust
 	if (isTrustedError) {
+		logger.error('Directory trust check failed', {
+			error: isTrustedError,
+			suggestion: 'restart_application_or_check_permissions',
+		});
+
 		return (
 			<Box flexDirection="column" padding={1}>
 				<Text color={themeContextValue.colors.error}>
@@ -630,23 +739,35 @@ export default function App({
 
 	// Show security disclaimer if directory is not trusted
 	if (!isTrusted) {
+		logger.info('Directory not trusted, showing security disclaimer');
+
 		return (
 			<SecurityDisclaimer onConfirm={handleConfirmTrust} onExit={handleExit} />
 		);
 	}
 
+	// Directory is trusted - application can proceed
+	logger.debug('Directory trusted, proceeding with application initialization');
+
 	// Show VS Code extension installation prompt if needed
 	if (showExtensionPrompt && !extensionPromptComplete) {
+		logger.info('Showing VS Code extension installation prompt', {
+			vscodeMode,
+			extensionPromptComplete,
+		});
+
 		return (
 			<ThemeContext.Provider value={themeContextValue}>
 				<Box flexDirection="column" padding={1}>
 					<WelcomeMessage />
 					<VSCodeExtensionPrompt
 						onComplete={() => {
+							logger.info('VS Code extension prompt completed');
 							setShowExtensionPrompt(false);
 							setExtensionPromptComplete(true);
 						}}
 						onSkip={() => {
+							logger.info('VS Code extension prompt skipped');
 							setShowExtensionPrompt(false);
 							setExtensionPromptComplete(true);
 						}}
@@ -785,4 +906,45 @@ export default function App({
 			</UIStateProvider>
 		</ThemeContext.Provider>
 	);
+
+	// Log when application is fully ready and interface is active
+	useEffect(() => {
+		// Only log when we have a fully initialized application ready for user interaction
+		if (
+			appState.mcpInitialized &&
+			appState.client &&
+			!appState.isToolExecuting &&
+			!appState.isToolConfirmationMode &&
+			!appState.isConfigWizardMode &&
+			appState.pendingToolCalls.length === 0
+		) {
+			const correlationId = generateCorrelationId();
+
+			withNewCorrelationContext(() => {
+				logger.info('Application interface ready for user interaction', {
+					correlationId,
+					interfaceState: {
+						developmentMode: appState.developmentMode,
+						hasPendingToolCalls: appState.pendingToolCalls.length > 0,
+						clientInitialized: !!appState.client,
+						mcpServersConnected: appState.mcpInitialized,
+						inputDisabled:
+							chatHandler.isStreaming ||
+							appState.isToolExecuting ||
+							appState.isBashExecuting,
+					},
+				});
+			}, correlationId);
+		}
+	}, [
+		appState.mcpInitialized,
+		appState.client,
+		appState.isToolExecuting,
+		appState.isToolConfirmationMode,
+		appState.isConfigWizardMode,
+		appState.pendingToolCalls.length,
+		appState.developmentMode,
+		chatHandler.isStreaming,
+		appState.isBashExecuting,
+	]);
 }
