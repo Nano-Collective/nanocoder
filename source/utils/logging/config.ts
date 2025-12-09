@@ -56,32 +56,51 @@ export function createDevelopmentConfig(): any {
 export function createProductionConfig(): any {
 	const logDir = getDefaultLogDirectory();
 
-	return {
+	// Check if file logging is explicitly disabled
+	const disableFileLogging = process.env.LOG_DISABLE_FILE === 'true';
+
+	const baseConfig = {
 		level: (process.env.LOG_LEVEL as any) || 'info',
-		destination: join(logDir, 'nanocoder.log'),
 		pretty: false,
 		redact: ['apiKey', 'token', 'password', 'email', 'userId', 'secret'],
 		correlation: true,
 		serialize: true,
-		target: 'pino-roll',
-		options: {
-			destination: join(logDir, 'nanocoder-%Y-%m-%d.log'),
-			frequency: 'daily',
-			size: '100m',
-			dateFormat: 'yyyy-MM-dd',
-			extension: '.log',
-			symlink: true,
-			mkdir: true,
-			compress: true,
-			sync: false,
-			limit: {
-				count: 30,
-				removeOtherLogFiles: true,
+	};
+
+	// If file logging is disabled, only use stdout (for UI)
+	if (disableFileLogging) {
+		return {
+			...baseConfig,
+			destination: process.stdout.fd,
+			target: 'pino-pretty',
+			options: {
+				colorize: false, // No colors in production
+				translateTime: 'HH:MM:ss Z',
+				ignore: 'pid,hostname',
+				levelFirst: true,
+				messageFormat: '{level} - {msg}',
+				singleLine: true, // Compact for UI
 			},
-			minLength: 4096,
-			maxLength: 1048576, // 1MB
-			periodicFlush: 1000,
+		};
+	}
+
+	// Otherwise use stdout for UI with optional file logging
+	// This ensures UI works while still allowing file persistence when needed
+	return {
+		...baseConfig,
+		// Always output to stdout for UI compatibility
+		destination: process.stdout.fd,
+		target: 'pino-pretty',
+		options: {
+			colorize: false, // No colors in production
+			translateTime: 'HH:MM:ss Z',
+			ignore: 'pid,hostname', // Reduce UI clutter
+			levelFirst: false,
+			messageFormat: '{msg}',
+			singleLine: true, // Compact for UI
 		},
+		// Note: File logging will be handled by the multi-transport system in transports.ts
+		// when LOG_TO_FILE=true is set
 	};
 }
 

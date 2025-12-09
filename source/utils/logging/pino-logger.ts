@@ -5,8 +5,8 @@
 import pino, {type Logger as PinoLogger, type DestinationStream} from 'pino';
 import {hostname} from 'os';
 import {readFileSync, mkdirSync, existsSync, createWriteStream} from 'fs';
-import {dirname} from 'path';
-import {createConfig} from './config.js';
+import {dirname, join} from 'path';
+import {createConfig, getDefaultLogDirectory} from './config.js';
 import {createFormatters} from './formatters.js';
 import {redactLogEntry, createRedactionRules} from './redaction.js';
 import {
@@ -17,12 +17,16 @@ import {
 import type {Logger, LoggerConfig} from './types.js';
 
 /**
- * Create a Pino logger with full configuration
+ * Create a dual-output Pino logger with UI and file support
  */
 export function createPinoLogger(config?: Partial<LoggerConfig>): Logger {
 	const finalConfig = createConfig(config);
 	const isProduction = process.env.NODE_ENV === 'production';
 	const isTest = process.env.NODE_ENV === 'test';
+	// In production, default to file logging unless explicitly disabled
+	const logToFile = isProduction
+		? process.env.LOG_TO_FILE !== 'false'  // Default to true in production unless explicitly false
+		: process.env.LOG_TO_FILE === 'true';   // Default to false in development unless explicitly true
 
 	// Skip logging entirely in test mode unless explicitly enabled
 	if (isTest && finalConfig.level !== 'debug') {
@@ -36,7 +40,7 @@ export function createPinoLogger(config?: Partial<LoggerConfig>): Logger {
 		true, // Enable user ID redaction
 	);
 
-	// Base Pino configuration
+	// Base Pino configuration for UI (always stdout)
 	const pinoConfig: pino.LoggerOptions = {
 		level: finalConfig.level,
 		redact: {
@@ -61,33 +65,35 @@ export function createPinoLogger(config?: Partial<LoggerConfig>): Logger {
 		},
 	};
 
-	// Create destination stream
-	let destination: DestinationStream | undefined;
+	// Create destination stream - always use stdout for UI compatibility
+	let destination: DestinationStream = process.stdout;
 
-	if (finalConfig.destination) {
-		if (typeof finalConfig.destination === 'string') {
-			// File destination
+	// Create the primary Pino logger for UI
+	const pinoLogger = pino(pinoConfig, destination);
 
-			// Ensure directory exists
-			const dir = dirname(finalConfig.destination);
-			if (!existsSync(dir)) {
-				mkdirSync(dir, {recursive: true});
-			}
+	// Create secondary file logger if file logging is enabled
+	let fileLogger: PinoLogger | undefined;
+	if (logToFile) {
+		const logDir = getDefaultLogDirectory();
+		const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+		const logFile = join(logDir, `nanocoder-${today}.log`);
 
-			destination = createWriteStream(finalConfig.destination, {flags: 'a'});
-		} else if (typeof finalConfig.destination === 'number') {
-			// File descriptor
-			destination = finalConfig.destination;
+		// Ensure directory exists
+		if (!existsSync(logDir)) {
+			mkdirSync(logDir, {recursive: true});
 		}
-	}
 
-	// Create the Pino logger instance
-	let pinoLogger: PinoLogger;
+		const fileConfig: pino.LoggerOptions = {
+			...pinoConfig,
+			level: 'debug', // Log everything to file
+			formatters: {
+				level: (label: string, number: number) => ({ level: label.toUpperCase() }),
+			},
+			// Use ISO timestamps for files
+			timestamp: pino.stdTimeFunctions.isoTime,
+		};
 
-	if (destination) {
-		pinoLogger = pino(pinoConfig, destination);
-	} else {
-		pinoLogger = pino(pinoConfig);
+		fileLogger = pino(fileConfig, createWriteStream(logFile, {flags: 'a'}));
 	}
 
 	// Create enhanced logger with correlation and redaction
@@ -99,12 +105,12 @@ export function createPinoLogger(config?: Partial<LoggerConfig>): Logger {
 				// Called as fatal(object, ?message)
 				const obj = args[0];
 				const msg = args[1];
-				logWithContext(pinoLogger, 'fatal', msg || '', [obj], redactionRules);
+				logWithContext(pinoLogger, fileLogger, 'fatal', msg || '', [obj], redactionRules);
 			} else {
 				// Called as fatal(msg, ...args)
 				const msg = args[0];
 				const restArgs = args.slice(1);
-				logWithContext(pinoLogger, 'fatal', msg, restArgs, redactionRules);
+				logWithContext(pinoLogger, fileLogger, 'fatal', msg, restArgs, redactionRules);
 			}
 		}) as any,
 		error: ((...args: any[]) => {
@@ -113,12 +119,12 @@ export function createPinoLogger(config?: Partial<LoggerConfig>): Logger {
 				// Called as error(object, ?message)
 				const obj = args[0];
 				const msg = args[1];
-				logWithContext(pinoLogger, 'error', msg || '', [obj], redactionRules);
+				logWithContext(pinoLogger, fileLogger, 'error', msg || '', [obj], redactionRules);
 			} else {
 				// Called as error(msg, ...args)
 				const msg = args[0];
 				const restArgs = args.slice(1);
-				logWithContext(pinoLogger, 'error', msg, restArgs, redactionRules);
+				logWithContext(pinoLogger, fileLogger, 'error', msg, restArgs, redactionRules);
 			}
 		}) as any,
 		warn: ((...args: any[]) => {
@@ -127,12 +133,12 @@ export function createPinoLogger(config?: Partial<LoggerConfig>): Logger {
 				// Called as warn(object, ?message)
 				const obj = args[0];
 				const msg = args[1];
-				logWithContext(pinoLogger, 'warn', msg || '', [obj], redactionRules);
+				logWithContext(pinoLogger, fileLogger, 'warn', msg || '', [obj], redactionRules);
 			} else {
 				// Called as warn(msg, ...args)
 				const msg = args[0];
 				const restArgs = args.slice(1);
-				logWithContext(pinoLogger, 'warn', msg, restArgs, redactionRules);
+				logWithContext(pinoLogger, fileLogger, 'warn', msg, restArgs, redactionRules);
 			}
 		}) as any,
 		info: ((...args: any[]) => {
@@ -141,12 +147,12 @@ export function createPinoLogger(config?: Partial<LoggerConfig>): Logger {
 				// Called as info(object, ?message)
 				const obj = args[0];
 				const msg = args[1];
-				logWithContext(pinoLogger, 'info', msg || '', [obj], redactionRules);
+				logWithContext(pinoLogger, fileLogger, 'info', msg || '', [obj], redactionRules);
 			} else {
 				// Called as info(msg, ...args)
 				const msg = args[0];
 				const restArgs = args.slice(1);
-				logWithContext(pinoLogger, 'info', msg, restArgs, redactionRules);
+				logWithContext(pinoLogger, fileLogger, 'info', msg, restArgs, redactionRules);
 			}
 		}) as any,
 		http: ((...args: any[]) => {
@@ -155,12 +161,12 @@ export function createPinoLogger(config?: Partial<LoggerConfig>): Logger {
 				// Called as http(object, ?message)
 				const obj = args[0];
 				const msg = args[1];
-				logWithContext(pinoLogger, 'http', msg || '', [obj], redactionRules);
+				logWithContext(pinoLogger, fileLogger, 'http', msg || '', [obj], redactionRules);
 			} else {
 				// Called as http(msg, ...args)
 				const msg = args[0];
 				const restArgs = args.slice(1);
-				logWithContext(pinoLogger, 'http', msg, restArgs, redactionRules);
+				logWithContext(pinoLogger, fileLogger, 'http', msg, restArgs, redactionRules);
 			}
 		}) as any,
 		debug: ((...args: any[]) => {
@@ -169,12 +175,12 @@ export function createPinoLogger(config?: Partial<LoggerConfig>): Logger {
 				// Called as debug(object, ?message)
 				const obj = args[0];
 				const msg = args[1];
-				logWithContext(pinoLogger, 'debug', msg || '', [obj], redactionRules);
+				logWithContext(pinoLogger, fileLogger, 'debug', msg || '', [obj], redactionRules);
 			} else {
 				// Called as debug(msg, ...args)
 				const msg = args[0];
 				const restArgs = args.slice(1);
-				logWithContext(pinoLogger, 'debug', msg, restArgs, redactionRules);
+				logWithContext(pinoLogger, fileLogger, 'debug', msg, restArgs, redactionRules);
 			}
 		}) as any,
 		trace: ((...args: any[]) => {
@@ -183,18 +189,18 @@ export function createPinoLogger(config?: Partial<LoggerConfig>): Logger {
 				// Called as trace(object, ?message)
 				const obj = args[0];
 				const msg = args[1];
-				logWithContext(pinoLogger, 'trace', msg || '', [obj], redactionRules);
+				logWithContext(pinoLogger, fileLogger, 'trace', msg || '', [obj], redactionRules);
 			} else {
 				// Called as trace(msg, ...args)
 				const msg = args[0];
 				const restArgs = args.slice(1);
-				logWithContext(pinoLogger, 'trace', msg, restArgs, redactionRules);
+				logWithContext(pinoLogger, fileLogger, 'trace', msg, restArgs, redactionRules);
 			}
 		}) as any,
 
 		// Child logger creation
 		child: (bindings: Record<string, any>) => {
-			return createEnhancedChild(pinoLogger, bindings, redactionRules);
+			return createEnhancedChild(pinoLogger, fileLogger, bindings, redactionRules);
 		},
 
 		// Utility methods
@@ -203,14 +209,24 @@ export function createPinoLogger(config?: Partial<LoggerConfig>): Logger {
 		},
 
 		flush: async () => {
+			// Flush primary logger
 			if ('flush' in pinoLogger) {
 				await (pinoLogger as any).flush();
+			}
+			// Flush file logger if available
+			if (fileLogger && 'flush' in fileLogger) {
+				await (fileLogger as any).flush();
 			}
 		},
 
 		end: async () => {
+			// End primary logger
 			if ('end' in pinoLogger) {
 				await (pinoLogger as any).end();
+			}
+			// End file logger if available
+			if (fileLogger && 'end' in fileLogger) {
+				await (fileLogger as any).end();
 			}
 		},
 	};
@@ -223,6 +239,7 @@ export function createPinoLogger(config?: Partial<LoggerConfig>): Logger {
  */
 function createEnhancedChild(
 	parent: PinoLogger,
+	fileLogger: PinoLogger | undefined,
 	bindings: Record<string, any>,
 	redactionRules: any,
 ): Logger {
@@ -235,12 +252,12 @@ function createEnhancedChild(
 				// Called as fatal(object, ?message)
 				const obj = args[0];
 				const msg = args[1];
-				logWithContext(child, 'fatal', msg || '', [obj], redactionRules);
+				logWithContext(child, fileLogger, 'fatal', msg || '', [obj], redactionRules);
 			} else {
 				// Called as fatal(msg, ...args)
 				const msg = args[0];
 				const restArgs = args.slice(1);
-				logWithContext(child, 'fatal', msg, restArgs, redactionRules);
+				logWithContext(child, fileLogger, 'fatal', msg, restArgs, redactionRules);
 			}
 		}) as any,
 		error: ((...args: any[]) => {
@@ -249,12 +266,12 @@ function createEnhancedChild(
 				// Called as error(object, ?message)
 				const obj = args[0];
 				const msg = args[1];
-				logWithContext(child, 'error', msg || '', [obj], redactionRules);
+				logWithContext(child, fileLogger, 'error', msg || '', [obj], redactionRules);
 			} else {
 				// Called as error(msg, ...args)
 				const msg = args[0];
 				const restArgs = args.slice(1);
-				logWithContext(child, 'error', msg, restArgs, redactionRules);
+				logWithContext(child, fileLogger, 'error', msg, restArgs, redactionRules);
 			}
 		}) as any,
 		warn: ((...args: any[]) => {
@@ -263,12 +280,12 @@ function createEnhancedChild(
 				// Called as warn(object, ?message)
 				const obj = args[0];
 				const msg = args[1];
-				logWithContext(child, 'warn', msg || '', [obj], redactionRules);
+				logWithContext(child, fileLogger, 'warn', msg || '', [obj], redactionRules);
 			} else {
 				// Called as warn(msg, ...args)
 				const msg = args[0];
 				const restArgs = args.slice(1);
-				logWithContext(child, 'warn', msg, restArgs, redactionRules);
+				logWithContext(child, fileLogger, 'warn', msg, restArgs, redactionRules);
 			}
 		}) as any,
 		info: ((...args: any[]) => {
@@ -277,12 +294,12 @@ function createEnhancedChild(
 				// Called as info(object, ?message)
 				const obj = args[0];
 				const msg = args[1];
-				logWithContext(child, 'info', msg || '', [obj], redactionRules);
+				logWithContext(child, fileLogger, 'info', msg || '', [obj], redactionRules);
 			} else {
 				// Called as info(msg, ...args)
 				const msg = args[0];
 				const restArgs = args.slice(1);
-				logWithContext(child, 'info', msg, restArgs, redactionRules);
+				logWithContext(child, fileLogger, 'info', msg, restArgs, redactionRules);
 			}
 		}) as any,
 		http: ((...args: any[]) => {
@@ -291,12 +308,12 @@ function createEnhancedChild(
 				// Called as http(object, ?message)
 				const obj = args[0];
 				const msg = args[1];
-				logWithContext(child, 'http', msg || '', [obj], redactionRules);
+				logWithContext(child, fileLogger, 'http', msg || '', [obj], redactionRules);
 			} else {
 				// Called as http(msg, ...args)
 				const msg = args[0];
 				const restArgs = args.slice(1);
-				logWithContext(child, 'http', msg, restArgs, redactionRules);
+				logWithContext(child, fileLogger, 'http', msg, restArgs, redactionRules);
 			}
 		}) as any,
 		debug: ((...args: any[]) => {
@@ -305,12 +322,12 @@ function createEnhancedChild(
 				// Called as debug(object, ?message)
 				const obj = args[0];
 				const msg = args[1];
-				logWithContext(child, 'debug', msg || '', [obj], redactionRules);
+				logWithContext(child, fileLogger, 'debug', msg || '', [obj], redactionRules);
 			} else {
 				// Called as debug(msg, ...args)
 				const msg = args[0];
 				const restArgs = args.slice(1);
-				logWithContext(child, 'debug', msg, restArgs, redactionRules);
+				logWithContext(child, fileLogger, 'debug', msg, restArgs, redactionRules);
 			}
 		}) as any,
 		trace: ((...args: any[]) => {
@@ -319,17 +336,17 @@ function createEnhancedChild(
 				// Called as trace(object, ?message)
 				const obj = args[0];
 				const msg = args[1];
-				logWithContext(child, 'trace', msg || '', [obj], redactionRules);
+				logWithContext(child, fileLogger, 'trace', msg || '', [obj], redactionRules);
 			} else {
 				// Called as trace(msg, ...args)
 				const msg = args[0];
 				const restArgs = args.slice(1);
-				logWithContext(child, 'trace', msg, restArgs, redactionRules);
+				logWithContext(child, fileLogger, 'trace', msg, restArgs, redactionRules);
 			}
 		}) as any,
 
 		child: (moreBindings: Record<string, any>) => {
-			return createEnhancedChild(child, moreBindings, redactionRules);
+			return createEnhancedChild(child, fileLogger, moreBindings, redactionRules);
 		},
 
 		isLevelEnabled: (level: string) => {
@@ -337,14 +354,24 @@ function createEnhancedChild(
 		},
 
 		flush: async () => {
+			// Flush primary child logger
 			if ('flush' in child) {
 				await (child as any).flush();
+			}
+			// Flush file logger if available (use parent fileLogger reference)
+			if (fileLogger && 'flush' in fileLogger) {
+				await (fileLogger as any).flush();
 			}
 		},
 
 		end: async () => {
+			// End primary child logger
 			if ('end' in child) {
 				await (child as any).end();
+			}
+			// End file logger if available (use parent fileLogger reference)
+			if (fileLogger && 'end' in fileLogger) {
+				await (fileLogger as any).end();
 			}
 		},
 	};
@@ -355,6 +382,7 @@ function createEnhancedChild(
  */
 function logWithContext(
 	logger: PinoLogger,
+	fileLogger: PinoLogger | undefined,
 	level: string,
 	msg: string,
 	args: any[],
@@ -394,8 +422,13 @@ function logWithContext(
 	// Apply redaction
 	logData = redactLogEntry(logData, redactionRules);
 
-	// Log with Pino
+	// Log to primary logger (always stdout for UI)
 	(logger as any)[level](logData);
+
+	// Log to file logger if available
+	if (fileLogger) {
+		(fileLogger as any)[level](logData);
+	}
 }
 
 /**
@@ -434,7 +467,7 @@ export function createLoggerWithTransport(
 		true, // Enable user ID redaction
 	);
 
-	return createEnhancedChild(pinoLogger, {}, redactionRules);
+	return createEnhancedChild(pinoLogger, undefined, {}, redactionRules);
 }
 
 /**
