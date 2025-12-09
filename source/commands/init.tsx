@@ -195,10 +195,11 @@ Make it reusable and well-documented.`;
 export const initCommand: Command = {
 	name: 'init',
 	description:
-		'Initialize nanocoder configuration and analyze project structure',
-	handler: (_args: string[], _messages, _metadata) => {
+		'Initialize nanocoder configuration and analyze project structure. Use --force to regenerate AGENTS.md.',
+	handler: (args: string[], _messages, _metadata) => {
 		const cwd = process.cwd();
 		const created: string[] = [];
+		const forceRegenerate = args.includes('--force') || args.includes('-f');
 
 		try {
 			// Check if already initialized
@@ -209,12 +210,12 @@ export const initCommand: Command = {
 			const hasAgents = existsSync(agentsPath);
 			const hasNanocoder = existsSync(nanocoderDir);
 
-			if (hasAgents && hasNanocoder) {
+			if (hasAgents && hasNanocoder && !forceRegenerate) {
 				return Promise.resolve(
 					React.createElement(InitError, {
 						key: `init-error-${Date.now()}`,
 						message:
-							'Project already initialized. Found AGENTS.md and .nanocoder/ directory.',
+							'Project already initialized. Found AGENTS.md and .nanocoder/ directory. Use /init --force to regenerate.',
 					}),
 				);
 			}
@@ -232,13 +233,13 @@ export const initCommand: Command = {
 			const existingRules = rulesExtractor.extractExistingRules();
 
 			// Create AGENTS.md based on analysis and existing rules
-			if (!hasAgents) {
+			if (!hasAgents || forceRegenerate) {
 				const agentsContent = AgentsTemplateGenerator.generateAgentsMd(
 					analysis,
 					existingRules,
 				);
 				writeFileSync(agentsPath, agentsContent);
-				created.push('AGENTS.md');
+				created.push(hasAgents ? 'AGENTS.md (regenerated)' : 'AGENTS.md');
 
 				// Report found existing rules
 				if (existingRules.length > 0) {

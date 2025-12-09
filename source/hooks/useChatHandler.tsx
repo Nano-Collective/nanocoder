@@ -66,7 +66,7 @@ const filterValidToolCalls = (
 				tool_call_id: toolCall.id,
 				role: 'tool' as const,
 				name: toolCall.function.name,
-				content: `Error: Unknown tool: ${toolCall.function.name}. This tool does not exist. Please use only the tools that are available in the system.`,
+				content: `This tool does not exist. Please use only the tools that are available in the system.`,
 			});
 			continue;
 		}
@@ -106,12 +106,14 @@ interface UseChatHandlerProps {
 	abortController: AbortController | null;
 	setAbortController: (controller: AbortController | null) => void;
 	developmentMode?: 'normal' | 'auto-accept' | 'plan';
+	nonInteractiveMode?: boolean;
 	onStartToolConfirmationFlow: (
 		toolCalls: ToolCall[],
 		updatedMessages: Message[],
 		assistantMsg: Message,
 		systemMessage: Message,
 	) => void;
+	onConversationComplete?: () => void;
 }
 
 export function useChatHandler({
@@ -127,7 +129,9 @@ export function useChatHandler({
 	abortController,
 	setAbortController,
 	developmentMode = 'normal',
+	nonInteractiveMode = false,
 	onStartToolConfirmationFlow,
+	onConversationComplete,
 }: UseChatHandlerProps) {
 	// Conversation state manager for enhanced context
 	const conversationStateManager = React.useRef(new ConversationStateManager());
@@ -292,9 +296,46 @@ export function useChatHandler({
 			// Parse any tool calls from content for non-tool-calling models
 			const parseResult = parseToolCalls(fullContent);
 
-			// Check for malformed tool calls and throw error to let model retry
+			// Check for malformed tool calls and send error back to model for self-correction
 			if (!parseResult.success) {
-				throw new Error(`${parseResult.error}\n\n${parseResult.examples}`);
+				const errorContent = `${parseResult.error}\n\n${parseResult.examples}`;
+
+				// Display error to user
+				addToChatQueue(
+					<ErrorMessage
+						key={`malformed-tool-${Date.now()}`}
+						message={errorContent}
+						hideBox={true}
+					/>,
+				);
+
+				// Create assistant message with the malformed content (so model knows what it said)
+				const assistantMsgWithError: Message = {
+					role: 'assistant',
+					content: fullContent,
+				};
+
+				// Create a user message with the error feedback for the model
+				const errorFeedbackMessage: Message = {
+					role: 'user',
+					content: `Your previous response contained a malformed tool call. ${errorContent}\n\nPlease try again using the correct format.`,
+				};
+
+				// Update messages and continue conversation loop for self-correction
+				const updatedMessagesWithError = [
+					...messages,
+					assistantMsgWithError,
+					errorFeedbackMessage,
+				];
+				setMessages(updatedMessagesWithError);
+
+				// Clear streaming state before recursing
+				setIsStreaming(false);
+				setStreamingContent('');
+
+				// Continue the main conversation loop with error message as context
+				await processAssistantResponse(systemMessage, updatedMessagesWithError);
+				return;
 			}
 
 			const parsedToolCalls = parseResult.toolCalls;
@@ -616,6 +657,36 @@ export function useChatHandler({
 
 				// Start confirmation flow only for tools that need it
 				if (toolsNeedingConfirmation.length > 0) {
+					// In non-interactive mode, exit when tool approval is required
+					if (nonInteractiveMode) {
+						const toolNames = toolsNeedingConfirmation
+							.map(tc => tc.function.name)
+							.join(', ');
+						const errorMsg = `Tool approval required for: ${toolNames}. Exiting non-interactive mode`;
+
+						// Add error message to UI
+						addToChatQueue(
+							<ErrorMessage
+								key={`tool-approval-required-${Date.now()}`}
+								message={errorMsg}
+								hideBox={true}
+							/>,
+						);
+
+						// Add error to messages array so exit detection can find it
+						const errorMessage: Message = {
+							role: 'assistant',
+							content: errorMsg,
+						};
+						setMessages([...messages, assistantMsg, errorMessage]);
+
+						// Signal completion to trigger exit
+						if (onConversationComplete) {
+							onConversationComplete();
+						}
+						return;
+					}
+
 					onStartToolConfirmationFlow(
 						toolsNeedingConfirmation,
 						messages,
@@ -661,8 +732,14 @@ export function useChatHandler({
 				await processAssistantResponse(systemMessage, updatedMessagesWithNudge);
 				return;
 			}
+
+			if (validToolCalls.length === 0 && cleanedContent.trim()) {
+				onConversationComplete?.();
+			}
 		} catch (error) {
 			displayError(error, 'chat-error');
+			// Signal completion on error to avoid hanging in non-interactive mode
+			onConversationComplete?.();
 		} finally {
 			resetStreamingState();
 		}

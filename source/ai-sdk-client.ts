@@ -1,5 +1,5 @@
 import {createOpenAICompatible} from '@ai-sdk/openai-compatible';
-import {streamText, stepCountIs, RetryError, APICallError} from 'ai';
+import {generateText, stepCountIs, RetryError, APICallError} from 'ai';
 import type {ModelMessage} from 'ai';
 import {Agent, fetch as undiciFetch} from 'undici';
 import type {
@@ -396,9 +396,6 @@ export class AISDKClient implements LLMClient {
 			throw new Error('Operation was cancelled');
 		}
 
-		// Capture errors from the stream for clean error handling
-		let streamError: unknown = null;
-
 		try {
 			// Get the language model instance from the provider
 			const model = this.provider(this.currentModel);
@@ -412,17 +409,14 @@ export class AISDKClient implements LLMClient {
 			// Tools with needsApproval: false auto-execute in the loop
 			// Tools with needsApproval: true cause interruptions for manual approval
 			// stopWhen controls when the tool loop stops (max 10 steps)
-			const result = streamText({
+			const result = await generateText({
 				model,
 				messages: modelMessages,
 				tools: aiTools,
 				abortSignal: signal,
 				maxRetries: this.maxRetries,
+				temperature: 0.6,
 				stopWhen: stepCountIs(10), // Allow up to 10 tool execution steps
-				// Capture errors instead of logging to console - we handle them in our catch block
-				onError: ({error}) => {
-					streamError = error;
-				},
 				// Can be used to add custom logging, metrics, or step tracking
 				onStepFinish(step) {
 					// Display formatters for auto-executed tools (after execution with results)
@@ -467,15 +461,16 @@ export class AISDKClient implements LLMClient {
 				},
 			});
 
-			// Stream tokens
-			let fullText = '';
-			for await (const chunk of result.textStream) {
-				fullText += chunk;
-				callbacks.onToken?.(chunk);
+			// Get the full text from the result
+			const fullText = result.text;
+
+			// Send the complete text to the callback
+			if (fullText) {
+				callbacks.onToken?.(fullText);
 			}
 
-			// Wait for completion to get tool calls
-			const toolCallsResult = await result.toolCalls;
+			// Get tool calls from result
+			const toolCallsResult = result.toolCalls;
 
 			// Can inspect result.steps to see auto-executed tool calls and results
 			// const steps = await result.steps;
@@ -556,19 +551,16 @@ export class AISDKClient implements LLMClient {
 				throw new Error('Operation was cancelled');
 			}
 
-			// Use the captured stream error if available - it has the real error info
-			const errorToHandle = streamError || error;
-
 			// AI SDK wraps errors in NoOutputGeneratedError with no useful cause
 			// Check if it's a cancellation without an underlying API error
 			if (
-				errorToHandle instanceof Error &&
-				(errorToHandle.name === 'AI_NoOutputGeneratedError' ||
-					errorToHandle.message.includes('No output generated'))
+				error instanceof Error &&
+				(error.name === 'AI_NoOutputGeneratedError' ||
+					error.message.includes('No output generated'))
 			) {
 				// Check if there's an underlying RetryError with the real cause
-				const rootError = extractRootError(errorToHandle);
-				if (rootError === errorToHandle) {
+				const rootError = extractRootError(error);
+				if (rootError === error) {
 					// No underlying error - this is just a cancellation
 					throw new Error('Operation was cancelled');
 				}
@@ -578,7 +570,7 @@ export class AISDKClient implements LLMClient {
 			}
 
 			// Parse any other error (including RetryError and APICallError)
-			const userMessage = parseAPIError(errorToHandle);
+			const userMessage = parseAPIError(error);
 			throw new Error(userMessage);
 		}
 	}

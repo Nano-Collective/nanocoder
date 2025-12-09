@@ -1,43 +1,43 @@
-import {Box, Text, useApp} from 'ink';
-import WelcomeMessage from '@/components/welcome-message';
-import React from 'react';
-import {getThemeColors} from '@/config/themes';
-import {ThemeContext} from '@/hooks/useTheme';
-import UserInput from '@/components/user-input';
-import Status from '@/components/status';
+import {ModelDatabaseDisplay} from '@/commands/model-database';
+import BashExecutionIndicator from '@/components/bash-execution-indicator';
+import CancellingIndicator from '@/components/cancelling-indicator';
 import ChatQueue from '@/components/chat-queue';
 import ModelSelector from '@/components/model-selector';
 import ProviderSelector from '@/components/provider-selector';
+import SecurityDisclaimer from '@/components/security-disclaimer';
+import Status from '@/components/status';
 import ThemeSelector from '@/components/theme-selector';
-import CancellingIndicator from '@/components/cancelling-indicator';
 import ToolConfirmation from '@/components/tool-confirmation';
 import ToolExecutionIndicator from '@/components/tool-execution-indicator';
-import BashExecutionIndicator from '@/components/bash-execution-indicator';
-import {setGlobalMessageQueue} from '@/utils/message-queue';
-import Spinner from 'ink-spinner';
-import SecurityDisclaimer from '@/components/security-disclaimer';
-import {ModelDatabaseDisplay} from '@/commands/model-database';
-import {ConfigWizard} from '@/wizard/config-wizard';
+import UserInput from '@/components/user-input';
 import {
 	VSCodeExtensionPrompt,
 	shouldPromptExtensionInstall,
 } from '@/components/vscode-extension-prompt';
+import WelcomeMessage from '@/components/welcome-message';
+import {getThemeColors} from '@/config/themes';
 import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
+import {ThemeContext} from '@/hooks/useTheme';
+import {setGlobalMessageQueue} from '@/utils/message-queue';
+import {ConfigWizard} from '@/wizard/config-wizard';
+import {Box, Text, useApp} from 'ink';
+import Spinner from 'ink-spinner';
+import React from 'react';
 
 // Import extracted hooks and utilities
-import {useAppState} from '@/hooks/useAppState';
-import {useChatHandler} from '@/hooks/useChatHandler';
-import {useToolHandler} from '@/hooks/useToolHandler';
-import {useModeHandlers} from '@/hooks/useModeHandlers';
-import {useAppInitialization} from '@/hooks/useAppInitialization';
-import {useDirectoryTrust} from '@/hooks/useDirectoryTrust';
-import {useVSCodeServer} from '@/hooks/useVSCodeServer';
-import {usePlanningHandler} from '@/hooks/usePlanningHandler';
 import {
 	createClearMessagesHandler,
 	handleMessageSubmission,
 } from '@/app/utils/appUtils';
 import {getPlanningPreferences} from '@/config/preferences';
+import {useAppInitialization} from '@/hooks/useAppInitialization';
+import {useAppState} from '@/hooks/useAppState';
+import {useChatHandler} from '@/hooks/useChatHandler';
+import {useDirectoryTrust} from '@/hooks/useDirectoryTrust';
+import {useModeHandlers} from '@/hooks/useModeHandlers';
+import {usePlanningHandler} from '@/hooks/usePlanningHandler';
+import {useToolHandler} from '@/hooks/useToolHandler';
+import {useVSCodeServer} from '@/hooks/useVSCodeServer';
 
 // Provide shared UI state to components
 import {UIStateProvider} from '@/hooks/useUIState';
@@ -45,9 +45,81 @@ import {UIStateProvider} from '@/hooks/useUIState';
 interface AppProps {
 	vscodeMode?: boolean;
 	vscodePort?: number;
+	nonInteractivePrompt?: string;
+	nonInteractiveMode?: boolean;
 }
 
-export default function App({vscodeMode = false, vscodePort}: AppProps) {
+export function shouldRenderWelcome(nonInteractiveMode?: boolean) {
+	return !nonInteractiveMode;
+}
+
+/**
+ * Helper function to determine if non-interactive mode processing is complete
+ */
+export function isNonInteractiveModeComplete(
+	appState: {
+		isToolExecuting: boolean;
+		isBashExecuting: boolean;
+		isToolConfirmationMode: boolean;
+		isConversationComplete: boolean;
+		messages: Array<{role: string; content: string}>;
+	},
+	startTime: number,
+	maxExecutionTimeMs: number,
+): {
+	shouldExit: boolean;
+	reason: 'complete' | 'timeout' | 'error' | 'tool-approval' | null;
+} {
+	const isComplete =
+		!appState.isToolExecuting &&
+		!appState.isBashExecuting &&
+		!appState.isToolConfirmationMode;
+	const _hasMessages = appState.messages.length > 0;
+	const hasTimedOut = Date.now() - startTime > maxExecutionTimeMs;
+
+	// Check for error messages in the messages array
+	const hasErrorMessages = appState.messages.some(
+		(message: {role: string; content: string}) =>
+			message.role === 'error' ||
+			(typeof message.content === 'string' &&
+				message.content.toLowerCase().includes('error')),
+	);
+
+	// Check for tool approval required messages
+	const hasToolApprovalRequired = appState.messages.some(
+		(message: {role: string; content: string}) =>
+			typeof message.content === 'string' &&
+			message.content.includes('Tool approval required'),
+	);
+
+	if (hasTimedOut) {
+		return {shouldExit: true, reason: 'timeout'};
+	}
+
+	if (hasToolApprovalRequired) {
+		return {shouldExit: true, reason: 'tool-approval'};
+	}
+
+	if (hasErrorMessages) {
+		return {shouldExit: true, reason: 'error'};
+	}
+
+	// Exit when conversation is complete and either:
+	// - We have messages in history (for chat/bash commands), OR
+	// - Conversation is marked complete (for display-only commands like /mcp)
+	if (isComplete && appState.isConversationComplete) {
+		return {shouldExit: true, reason: 'complete'};
+	}
+
+	return {shouldExit: false, reason: null};
+}
+
+export default function App({
+	vscodeMode = false,
+	vscodePort,
+	nonInteractivePrompt,
+	nonInteractiveMode = false,
+}: AppProps) {
 	// Use extracted hooks
 	const appState = useAppState();
 	const {exit} = useApp();
@@ -130,6 +202,7 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 		abortController: appState.abortController,
 		setAbortController: appState.setAbortController,
 		developmentMode: appState.developmentMode,
+		nonInteractiveMode,
 		onStartToolConfirmationFlow: (
 			toolCalls,
 			updatedMessages,
@@ -145,6 +218,10 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 				systemMessage,
 			});
 			appState.setIsToolConfirmationMode(true);
+		},
+		onConversationComplete: () => {
+			// Signal that the conversation has completed
+			appState.setIsConversationComplete(true);
 		},
 	});
 
@@ -204,6 +281,8 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 		setUpdateInfo: appState.setUpdateInfo,
 		setMcpServersStatus: appState.setMcpServersStatus,
 		setLspServersStatus: appState.setLspServersStatus,
+		setPreferencesLoaded: appState.setPreferencesLoaded,
+		setCustomCommandsCount: appState.setCustomCommandsCount,
 		addToChatQueue: appState.addToChatQueue,
 		componentKeyCounter: appState.componentKeyCounter,
 		customCommandCache: appState.customCommandCache,
@@ -272,12 +351,17 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 				updateInfo={appState.updateInfo}
 				mcpServersStatus={appState.mcpServersStatus}
 				lspServersStatus={appState.lspServersStatus}
+				preferencesLoaded={appState.preferencesLoaded}
+				customCommandsCount={appState.customCommandsCount}
 			/>,
 		);
 	}, [appState]);
 
 	const handleMessageSubmit = React.useCallback(
 		async (message: string) => {
+			// Reset conversation completion flag when starting a new message
+			appState.setIsConversationComplete(false);
+
 			await handleMessageSubmission(message, {
 				customCommandCache: appState.customCommandCache,
 				customCommandLoader: appState.customCommandLoader,
@@ -293,6 +377,7 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 				onHandlePlanningMessage: planningHandler.handlePlanningMessage,
 				planningEnabled: planningPrefs.enabled,
 				onAddToChatQueue: appState.addToChatQueue,
+				onCommandComplete: () => appState.setIsConversationComplete(true),
 				componentKeyCounter: appState.componentKeyCounter,
 				setMessages: appState.updateMessages,
 				messages: appState.messages,
@@ -306,9 +391,7 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 			});
 		},
 		[
-			appState.customCommandCache,
-			appState.customCommandLoader,
-			appState.customCommandExecutor,
+			appState,
 			clearMessages,
 			modeHandlers.enterModelSelectionMode,
 			modeHandlers.enterProviderSelectionMode,
@@ -333,10 +416,124 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 		],
 	);
 
+	// Handle non-interactive mode - automatically submit prompt and exit when done
+	const [nonInteractiveSubmitted, setNonInteractiveSubmitted] =
+		React.useState(false);
+	React.useEffect(() => {
+		if (
+			nonInteractivePrompt &&
+			appState.mcpInitialized &&
+			appState.client &&
+			!nonInteractiveSubmitted
+		) {
+			setNonInteractiveSubmitted(true);
+			// Set auto-accept mode for non-interactive execution
+			appState.setDevelopmentMode('auto-accept');
+			// Submit the prompt
+			void handleMessageSubmit(nonInteractivePrompt);
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [
+		nonInteractivePrompt,
+		appState.mcpInitialized,
+		appState.client,
+		nonInteractiveSubmitted,
+		handleMessageSubmit,
+		appState.setDevelopmentMode,
+	]);
+
+	// Exit in non-interactive mode when all processing is complete
+	const OUTPUT_FLUSH_DELAY_MS = 1000;
+	const MAX_EXECUTION_TIME_MS = 300000; // 5 minutes
+	const [startTime] = React.useState(Date.now());
+
+	React.useEffect(() => {
+		if (nonInteractivePrompt && nonInteractiveSubmitted) {
+			const {shouldExit, reason} = isNonInteractiveModeComplete(
+				appState,
+				startTime,
+				MAX_EXECUTION_TIME_MS,
+			);
+
+			if (shouldExit) {
+				if (reason === 'timeout') {
+					console.error('Non-interactive mode timed out');
+				} else if (reason === 'error') {
+					console.error('Non-interactive mode encountered errors');
+				} else if (reason === 'tool-approval') {
+					// Exit with error code when tool approval is required
+					// Error message already printed by useChatHandler
+				}
+				// Wait a bit to ensure all output is flushed
+				const timer = setTimeout(() => {
+					process.exit(
+						reason === 'error' || reason === 'tool-approval' ? 1 : 0,
+					);
+				}, OUTPUT_FLUSH_DELAY_MS);
+
+				return () => clearTimeout(timer);
+			}
+		}
+	}, [
+		nonInteractivePrompt,
+		nonInteractiveSubmitted,
+		appState,
+		startTime,
+		exit,
+	]);
+
+	const shouldShowWelcome = shouldRenderWelcome(nonInteractiveMode);
+	const pendingToolCallCount = appState.pendingToolCalls.length;
+
+	const nonInteractiveLoadingMessage = React.useMemo(() => {
+		if (!nonInteractivePrompt) {
+			return null;
+		}
+
+		// Don't show loading message when conversation is complete (about to exit)
+		if (appState.isConversationComplete) {
+			return null;
+		}
+
+		if (!appState.mcpInitialized || !appState.client) {
+			return 'Waiting for MCP servers...';
+		}
+
+		if (
+			appState.isToolExecuting ||
+			appState.isToolConfirmationMode ||
+			pendingToolCallCount > 0
+		) {
+			return 'Waiting for tooling...';
+		}
+
+		if (appState.isBashExecuting) {
+			return 'Waiting for bash execution...';
+		}
+
+		return 'Waiting for chat to complete...';
+	}, [
+		nonInteractivePrompt,
+		appState.isConversationComplete,
+		appState.mcpInitialized,
+		appState.client,
+		appState.isToolExecuting,
+		appState.isToolConfirmationMode,
+		pendingToolCallCount,
+		appState.isBashExecuting,
+	]);
+
+	const loadingLabel = nonInteractivePrompt
+		? nonInteractiveLoadingMessage ?? 'Loading...'
+		: 'Loading...';
+
 	// Memoize static components to prevent unnecessary re-renders
-	const staticComponents = React.useMemo(
-		() => [
-			<WelcomeMessage key="welcome" />,
+	const staticComponents = React.useMemo(() => {
+		const components: React.ReactNode[] = [];
+		if (shouldShowWelcome) {
+			components.push(<WelcomeMessage key="welcome" />);
+		}
+		components.push(
 			<Status
 				key="status"
 				provider={appState.currentProvider}
@@ -345,24 +542,29 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 				updateInfo={appState.updateInfo}
 				mcpServersStatus={appState.mcpServersStatus}
 				lspServersStatus={appState.lspServersStatus}
+				preferencesLoaded={appState.preferencesLoaded}
+				customCommandsCount={appState.customCommandsCount}
 			/>,
-		],
-		[
-			appState.currentProvider,
-			appState.currentModel,
-			appState.currentTheme,
-			appState.updateInfo,
-			appState.mcpServersStatus,
-			appState.lspServersStatus,
-		],
-	);
+		);
+		return components;
+	}, [
+		shouldShowWelcome,
+		appState.currentProvider,
+		appState.currentModel,
+		appState.currentTheme,
+		appState.updateInfo,
+		appState.mcpServersStatus,
+		appState.lspServersStatus,
+		appState.preferencesLoaded,
+		appState.customCommandsCount,
+	]);
 
 	// Handle loading state for directory trust check
 	if (isTrustLoading) {
 		return (
 			<Box flexDirection="column" padding={1}>
 				<Text color={themeContextValue.colors.secondary}>
-					<Spinner type="dots2" /> Checking directory trust...
+					<Spinner type="dots" /> Checking directory trust...
 				</Text>
 			</Box>
 		);
@@ -492,7 +694,9 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 								/>
 							) : appState.isBashExecuting ? (
 								<BashExecutionIndicator command={appState.currentBashCommand} />
-							) : appState.mcpInitialized && appState.client ? (
+							) : appState.mcpInitialized &&
+							  appState.client &&
+							  !nonInteractivePrompt ? (
 								<UserInput
 									customCommands={Array.from(
 										appState.customCommandCache.keys(),
@@ -509,9 +713,14 @@ export default function App({vscodeMode = false, vscodePort}: AppProps) {
 								/>
 							) : appState.mcpInitialized && !appState.client ? (
 								<></>
+							) : nonInteractivePrompt && !nonInteractiveLoadingMessage ? (
+								// Show completion message when non-interactive mode is done
+								<Text color={themeContextValue.colors.secondary}>
+									Completed. Exiting.
+								</Text>
 							) : (
 								<Text color={themeContextValue.colors.secondary}>
-									<Spinner type="dots2" /> Loading...
+									<Spinner type="dots" /> {loadingLabel}
 								</Text>
 							)}
 						</Box>

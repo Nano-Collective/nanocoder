@@ -39,7 +39,6 @@ import {
 	updateCommand,
 	usageCommand,
 } from '@/commands/index';
-import SuccessMessage from '@/components/success-message';
 import ErrorMessage from '@/components/error-message';
 import InfoMessage from '@/components/info-message';
 import {checkForUpdates} from '@/utils/update-checker';
@@ -58,6 +57,8 @@ interface UseAppInitializationProps {
 	setUpdateInfo: (info: UpdateInfo | null) => void;
 	setMcpServersStatus: (status: MCPConnectionStatus[]) => void;
 	setLspServersStatus: (status: LSPConnectionStatus[]) => void;
+	setPreferencesLoaded: (loaded: boolean) => void;
+	setCustomCommandsCount: (count: number) => void;
 	addToChatQueue: (component: React.ReactNode) => void;
 	componentKeyCounter: number;
 	customCommandCache: Map<string, CustomCommand>;
@@ -77,6 +78,8 @@ export function useAppInitialization({
 	setUpdateInfo,
 	setMcpServersStatus,
 	setLspServersStatus,
+	setPreferencesLoaded,
+	setCustomCommandsCount,
 	addToChatQueue,
 	componentKeyCounter,
 	customCommandCache,
@@ -127,15 +130,8 @@ export function useAppInitialization({
 			}
 		}
 
-		if (customCommands.length > 0) {
-			addToChatQueue(
-				<SuccessMessage
-					key={`custom-commands-loaded-${componentKeyCounter}`}
-					message={`Loaded ${customCommands.length} custom commands from .nanocoder/commands...`}
-					hideBox={true}
-				/>,
-			);
-		}
+		// Set the count for display in Status component
+		setCustomCommandsCount(customCommands.length);
 	};
 
 	// Initialize MCP servers if configured
@@ -358,14 +354,8 @@ export function useAppInitialization({
 			// Load preferences - we'll pass them directly to avoid state timing issues
 			const preferences = loadPreferences();
 
-			// Add info message to chat queue when preferences are loaded
-			addToChatQueue(
-				<SuccessMessage
-					key="preferences-loaded"
-					message="User preferences loaded..."
-					hideBox={true}
-				/>,
-			);
+			// Mark preferences as loaded for display in Status component
+			setPreferencesLoaded(true);
 
 			// Set up the tool registry getter for the message handler
 			setToolRegistryGetter(() => newToolManager.getToolRegistry());
@@ -406,13 +396,14 @@ export function useAppInitialization({
 				setUpdateInfo(null);
 			}
 
-			setStartChat(true);
-
-			// Initialize MCP servers after UI is shown
+			// Initialize MCP servers before showing UI
 			await initializeMCPServers(newToolManager);
 
 			// Initialize LSP servers with auto-discovery
 			await initializeLSPServers();
+
+			// Show chat UI after all servers are initialized
+			setStartChat(true);
 		};
 
 		void initializeApp();

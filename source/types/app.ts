@@ -20,6 +20,7 @@ export interface MessageSubmissionOptions {
 	onHandlePlanningMessage?: (message: string) => Promise<void>;
 	planningEnabled?: boolean;
 	onAddToChatQueue: (component: React.ReactNode) => void;
+	onCommandComplete?: () => void;
 	componentKeyCounter: number;
 	setMessages: (messages: Message[]) => void;
 	messages: Message[];

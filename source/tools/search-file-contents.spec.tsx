@@ -973,6 +973,269 @@ test.serial(
 	},
 );
 
+// ============================================================================
+// Tests for Extended Regex Support
+// ============================================================================
+
+test.serial(
+	'search_file_contents supports alternation pattern (foo|bar)',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-search-alternation-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(
+				join(testDir, 'test.ts'),
+				'const tools = "value";\nconst Tools = "other";\nconst unrelated = true;',
+			);
+
+			const originalCwd = process.cwd();
+
+			try {
+				process.chdir(testDir);
+
+				const result = await searchFileContentsTool.tool.execute!(
+					{
+						query: 'tools|Tools',
+						caseSensitive: true,
+						maxResults: 30,
+					},
+					{toolCallId: 'test', messages: []},
+				);
+
+				t.true(result.includes('const tools'), 'Should match lowercase tools');
+				t.true(
+					result.includes('const Tools'),
+					'Should match capitalized Tools',
+				);
+				t.false(
+					result.includes('unrelated'),
+					'Should not match unrelated content',
+				);
+
+				// Verify we got exactly 2 matches
+				const matchLine = result.split('\n')[0];
+				t.regex(matchLine, /Found 2 match/, 'Should find exactly 2 matches');
+			} finally {
+				process.chdir(originalCwd);
+			}
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'search_file_contents supports optional group pattern (func(tion)?)',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-search-optional-group-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(
+				join(testDir, 'test.ts'),
+				'func myFunc() {}\nfunction myFunction() {}\nconst other = true;',
+			);
+
+			const originalCwd = process.cwd();
+
+			try {
+				process.chdir(testDir);
+
+				const result = await searchFileContentsTool.tool.execute!(
+					{
+						query: 'func(tion)?',
+						maxResults: 30,
+					},
+					{toolCallId: 'test', messages: []},
+				);
+
+				t.true(result.includes('func myFunc'), 'Should match "func"');
+				t.true(
+					result.includes('function myFunction'),
+					'Should match "function"',
+				);
+			} finally {
+				process.chdir(originalCwd);
+			}
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'search_file_contents supports one-or-more pattern (lo+ng)',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-search-one-or-more-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(
+				join(testDir, 'test.ts'),
+				'const long = 1;\nconst loong = 2;\nconst loooong = 3;\nconst lng = 4;',
+			);
+
+			const originalCwd = process.cwd();
+
+			try {
+				process.chdir(testDir);
+
+				const result = await searchFileContentsTool.tool.execute!(
+					{
+						query: 'lo+ng',
+						maxResults: 30,
+					},
+					{toolCallId: 'test', messages: []},
+				);
+
+				t.true(result.includes('const long'), 'Should match "long"');
+				t.true(result.includes('const loong'), 'Should match "loong"');
+				t.true(result.includes('const loooong'), 'Should match "loooong"');
+				t.false(result.includes('const lng'), 'Should not match "lng" (no o)');
+			} finally {
+				process.chdir(originalCwd);
+			}
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'search_file_contents supports word boundary patterns (\\bword\\b)',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-search-word-boundary-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(
+				join(testDir, 'test.ts'),
+				'const test = 1;\nconst testing = 2;\nconst mytest = 3;',
+			);
+
+			const originalCwd = process.cwd();
+
+			try {
+				process.chdir(testDir);
+
+				const result = await searchFileContentsTool.tool.execute!(
+					{
+						query: '\\btest\\b',
+						maxResults: 30,
+					},
+					{toolCallId: 'test', messages: []},
+				);
+
+				t.true(
+					result.includes('const test ='),
+					'Should match whole word "test"',
+				);
+				// Note: grep \b behavior may still match within lines containing "test"
+				// The key test is that the regex syntax is accepted
+				t.truthy(result, 'Should execute without error');
+			} finally {
+				process.chdir(originalCwd);
+			}
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'search_file_contents supports character class patterns (class\\s+\\w+)',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-search-char-class-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(
+				join(testDir, 'test.ts'),
+				'class MyClass {}\nclass  AnotherClass {}\nconst className = "test";',
+			);
+
+			const originalCwd = process.cwd();
+
+			try {
+				process.chdir(testDir);
+
+				const result = await searchFileContentsTool.tool.execute!(
+					{
+						query: 'class\\s+\\w+',
+						maxResults: 30,
+					},
+					{toolCallId: 'test', messages: []},
+				);
+
+				t.true(
+					result.includes('class MyClass'),
+					'Should match "class MyClass"',
+				);
+				t.true(
+					result.includes('class  AnotherClass'),
+					'Should match "class  AnotherClass" with multiple spaces',
+				);
+			} finally {
+				process.chdir(originalCwd);
+			}
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'search_file_contents supports multiple alternation (TODO|FIXME|HACK)',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-search-multi-alternation-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(
+				join(testDir, 'test.ts'),
+				'// TODO: fix this\n// FIXME: broken\n// HACK: temporary\n// NOTE: info',
+			);
+
+			const originalCwd = process.cwd();
+
+			try {
+				process.chdir(testDir);
+
+				const result = await searchFileContentsTool.tool.execute!(
+					{
+						query: 'TODO|FIXME|HACK',
+						maxResults: 30,
+					},
+					{toolCallId: 'test', messages: []},
+				);
+
+				t.true(result.includes('TODO'), 'Should match TODO');
+				t.true(result.includes('FIXME'), 'Should match FIXME');
+				t.true(result.includes('HACK'), 'Should match HACK');
+				t.false(result.includes('NOTE'), 'Should not match NOTE');
+
+				const matchLine = result.split('\n')[0];
+				t.regex(matchLine, /Found 3 match/, 'Should find exactly 3 matches');
+			} finally {
+				process.chdir(originalCwd);
+			}
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+// ============================================================================
+// Tests for Whitespace in Query
+// ============================================================================
+
 test.serial('search_file_contents handles whitespace in query', async t => {
 	t.timeout(10000);
 	const testDir = join(process.cwd(), 'test-search-whitespace-query-temp');

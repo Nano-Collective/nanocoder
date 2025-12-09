@@ -10,6 +10,9 @@ A local-first CLI coding agent that brings the power of agentic coding tools lik
 - [Installation](#installation)
   - [For Users](#for-users)
   - [For Development](#for-development)
+- [Usage](#usage)
+  - [Interactive Mode](#interactive-mode)
+  - [Non-Interactive Mode](#non-interactive-mode)
 - [Configuration](#configuration)
   - [AI Provider Setup](#ai-provider-setup)
   - [MCP (Model Context Protocol) Servers](#mcp-model-context-protocol-servers)
@@ -165,6 +168,62 @@ Or build and run in one command:
 pnpm run dev
 ```
 
+## Usage
+
+### Interactive Mode
+
+To start Nanocoder in interactive mode (the default), simply run:
+
+```bash
+nanocoder
+```
+
+This will open an interactive chat session where you can:
+
+- Chat with the AI about your code
+- Use slash commands (e.g., `/help`, `/model`, `/status`)
+- Execute bash commands with `!`
+- Tag files with `@`
+- Review and approve tool executions
+- Switch between different models and providers
+
+### Non-Interactive Mode
+
+For automated tasks, scripting, or CI/CD pipelines, use the `run` command:
+
+```bash
+nanocoder run "your prompt here"
+```
+
+**Examples:**
+
+```bash
+# Simple task
+nanocoder run "analyze the code in src/app.ts"
+
+# Code generation
+nanocoder run "create a new React component for user login"
+
+# Testing
+nanocoder run "write unit tests for all functions in utils.js"
+
+# Refactoring
+nanocoder run "refactor the database connection to use a connection pool"
+```
+
+**Non-interactive mode behavior:**
+
+- Automatically executes the given prompt
+- Runs in auto-accept mode (tools execute without confirmation)
+- Displays all output and tool execution results
+- Exits automatically when the task is complete
+
+**Note:** When using non-interactive mode with VS Code integration, place any flags (like `--vscode` or `--vscode-port`) before the `run` command:
+
+```bash
+nanocoder --vscode run "your prompt"
+```
+
 ## Configuration
 
 ### AI Provider Setup
@@ -237,6 +296,18 @@ Nanocoder looks for configuration in the following order (first found wins):
 				"baseUrl": "https://api.z.ai/api/coding/paas/v4/",
 				"apiKey": "your-z.ai-coding-api-key",
 				"models": ["glm-4.6", "glm-4.5", "glm-4.5-air"]
+			},
+			{
+				"name": "GitHub Models",
+				"baseUrl": "https://models.github.ai/inference",
+				"apiKey": "your-github-pat",
+				"models": ["openai/gpt-4o-mini", "meta/llama-3.1-70b-instruct"]
+			},
+			{
+				"name": "Poe",
+				"baseUrl": "https://api.poe.com/v1",
+				"apiKey": "your-poe-api-key",
+				"models": ["Claude-Sonnet-4", "GPT-4o", "Gemini-2.5-Pro"]
 			}
 		]
 	}
@@ -253,6 +324,8 @@ Nanocoder looks for configuration in the following order (first found wins):
 - **vLLM**: `"baseUrl": "http://localhost:8000/v1"`
 - **LocalAI**: `"baseUrl": "http://localhost:8080/v1"`
 - **OpenAI**: `"baseUrl": "https://api.openai.com/v1"`
+- **Poe**: `"baseUrl": "https://api.poe.com/v1"` (get API key from [poe.com/api_key](https://poe.com/api_key))
+- **GitHub Models**: `"baseUrl": "https://models.github.ai/inference"` (requires PAT with `models:read` scope)
 - **Z.ai**: `"baseUrl": "https://api.z.ai/api/paas/v4/"`
 - **Z.ai Coding**: `"baseUrl": "https://api.z.ai/api/coding/paas/v4/"`
 
@@ -444,7 +517,7 @@ You can override this directory using `NANOCODER_DATA_DIR`.
 #### Built-in Commands
 
 - `/help` - Show available commands
-- `/init` - Initialize project with intelligent analysis, create AGENTS.md and configuration files
+- `/init` - Initialize project with intelligent analysis, create AGENTS.md and configuration files. Use `/init --force` to regenerate AGENTS.md if it already exists.
 - `/setup-config` - Interactive wizard for configuring AI providers and MCP servers with templates
 - `/clear` - Clear chat history
 - `/model` - Switch between available models

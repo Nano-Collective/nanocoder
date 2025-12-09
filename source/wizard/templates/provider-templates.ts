@@ -329,6 +329,38 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		}),
 	},
 	{
+		id: 'poe',
+		name: 'Poe',
+		fields: [
+			{
+				name: 'apiKey',
+				prompt: 'API Key (from poe.com/api_key)',
+				required: true,
+				sensitive: true,
+			},
+			{
+				name: 'model',
+				prompt: 'Model name(s) (comma-separated)',
+				default: 'Claude-Sonnet-4, GPT-4o, Gemini-2.5-Pro',
+				required: true,
+			},
+			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: 'Poe',
+			},
+		],
+		buildConfig: answers => ({
+			name: answers.providerName || 'Poe',
+			baseUrl: 'https://api.poe.com/v1',
+			apiKey: answers.apiKey,
+			models: answers.model
+				.split(',')
+				.map(m => m.trim())
+				.filter(Boolean),
+		}),
+	},
+	{
 		id: 'custom',
 		name: 'Custom Provider',
 		fields: [

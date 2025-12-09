@@ -8,7 +8,7 @@ export default memo(function CancellingIndicator() {
 	return (
 		<Box flexDirection="column" marginBottom={1}>
 			<Box>
-				<Spinner type="dots2" />
+				<Spinner type="dots" />
 				<Text color={colors.secondary}> Cancelling...</Text>
 			</Box>
 		</Box>

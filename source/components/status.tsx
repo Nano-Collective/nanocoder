@@ -23,6 +23,8 @@ export default memo(function Status({
 	agentsMdLoaded,
 	mcpServersStatus,
 	lspServersStatus,
+	customCommandsCount,
+	preferencesLoaded,
 }: {
 	provider: string;
 	model: string;
@@ -31,6 +33,8 @@ export default memo(function Status({
 	agentsMdLoaded?: boolean;
 	mcpServersStatus?: MCPConnectionStatus[];
 	lspServersStatus?: LSPConnectionStatus[];
+	customCommandsCount?: number;
+	preferencesLoaded?: boolean;
 }) {
 	const {boxWidth, isNarrow, truncatePath} = useResponsiveTerminal();
 	const colors = getThemeColors(theme);
@@ -90,16 +94,36 @@ export default memo(function Status({
 							✗ No AGENTS.md
 						</Text>
 					)}
+					{preferencesLoaded && (
+						<Text color={colors.secondary}>✓ Preferences loaded</Text>
+					)}
+					{customCommandsCount !== undefined && customCommandsCount > 0 && (
+						<Text color={colors.secondary}>
+							✓ {customCommandsCount} custom commands
+						</Text>
+					)}
 					{mcpTotal > 0 && (
-						<Text color={getStatusColor(mcpConnected, mcpTotal)}>
-							<Text bold={true}>MCP: </Text>
-							{mcpConnected}/{mcpTotal} connected
+						<Text
+							color={
+								mcpConnected === mcpTotal
+									? colors.secondary
+									: getStatusColor(mcpConnected, mcpTotal)
+							}
+						>
+							{mcpConnected === mcpTotal ? '✓ ' : ''}MCP: {mcpConnected}/
+							{mcpTotal} connected
 						</Text>
 					)}
 					{lspTotal > 0 && (
-						<Text color={getStatusColor(lspConnected, lspTotal)}>
-							<Text bold={true}>LSP: </Text>
-							{lspConnected}/{lspTotal} connected
+						<Text
+							color={
+								lspConnected === lspTotal
+									? colors.secondary
+									: getStatusColor(lspConnected, lspTotal)
+							}
+						>
+							{lspConnected === lspTotal ? '✓ ' : ''}LSP: {lspConnected}/
+							{lspTotal} connected
 						</Text>
 					)}
 					{updateInfo?.hasUpdate && (
@@ -148,11 +172,35 @@ export default memo(function Status({
 						<Text bold={true}>Theme: </Text>
 						{themes[theme].displayName}
 					</Text>
+					{hasAgentsMd ? (
+						<Text color={colors.secondary} italic>
+							<Text>↳ Using AGENTS.md. Project initialized</Text>
+						</Text>
+					) : (
+						<Text color={colors.secondary} italic>
+							↳ No AGENTS.md file found, run `/init` to initialize this
+							directory
+						</Text>
+					)}
+					{preferencesLoaded && (
+						<Text color={colors.secondary}>✓ Preferences loaded</Text>
+					)}
+					{customCommandsCount !== undefined && customCommandsCount > 0 && (
+						<Text color={colors.secondary}>
+							✓ {customCommandsCount} custom commands loaded
+						</Text>
+					)}
 					{mcpTotal > 0 && (
 						<Box flexDirection="column">
-							<Text color={getStatusColor(mcpConnected, mcpTotal)}>
-								<Text bold={true}>MCP: </Text>
-								{mcpConnected}/{mcpTotal} connected
+							<Text
+								color={
+									mcpConnected === mcpTotal
+										? colors.secondary
+										: getStatusColor(mcpConnected, mcpTotal)
+								}
+							>
+								{mcpConnected === mcpTotal ? '✓ ' : ''}MCP: {mcpConnected}/
+								{mcpTotal} connected
 							</Text>
 							{mcpConnected < mcpTotal && (
 								<Box flexDirection="column" marginLeft={2}>
@@ -170,9 +218,15 @@ export default memo(function Status({
 					)}
 					{lspTotal > 0 && (
 						<Box flexDirection="column">
-							<Text color={getStatusColor(lspConnected, lspTotal)}>
-								<Text bold={true}>LSP: </Text>
-								{lspConnected}/{lspTotal} connected
+							<Text
+								color={
+									lspConnected === lspTotal
+										? colors.secondary
+										: getStatusColor(lspConnected, lspTotal)
+								}
+							>
+								{lspConnected === lspTotal ? '✓ ' : ''}LSP: {lspConnected}/
+								{lspTotal} connected
 							</Text>
 							{lspConnected < lspTotal && (
 								<Box flexDirection="column" marginLeft={2}>
@@ -187,16 +241,6 @@ export default memo(function Status({
 								</Box>
 							)}
 						</Box>
-					)}
-					{hasAgentsMd ? (
-						<Text color={colors.secondary} italic>
-							<Text>↳ Using AGENTS.md. Project initialized</Text>
-						</Text>
-					) : (
-						<Text color={colors.secondary} italic>
-							↳ No AGENTS.md file found, run `/init` to initialize this
-							directory
-						</Text>
 					)}
 					{updateInfo?.hasUpdate && (
 						<>

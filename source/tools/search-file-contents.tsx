@@ -68,9 +68,10 @@ async function searchFileContents(
 		const escapedQuery = query.replace(/"/g, '\\"');
 
 		// Use grep with basic exclusions for performance
+		// -E enables extended regex for patterns like "foo|bar", "func(tion)?", etc.
 		const caseFlag = caseSensitive ? '' : '-i';
 		const {stdout} = await execAsync(
-			`grep -rn ${caseFlag} --include="*" --exclude-dir={node_modules,.git,dist,build,coverage,.next,.nuxt,out,.cache} "${escapedQuery}" . | head -n ${
+			`grep -rn -E ${caseFlag} --include="*" --exclude-dir={node_modules,.git,dist,build,coverage,.next,.nuxt,out,.cache} "${escapedQuery}" . | head -n ${
 				maxResults * 3
 			}`,
 			{cwd, maxBuffer: 1024 * 1024},
@@ -160,14 +161,14 @@ const executeSearchFileContents = async (
 
 const searchFileContentsCoreTool = tool({
 	description:
-		'Search for text or code INSIDE file contents. Returns file paths with line numbers and matching content. Use this to find where specific code, functions, variables, or text appears in the codebase.',
+		'Search for text or code INSIDE file contents. Returns file paths with line numbers and matching content. Use this to find where specific code, functions, variables, or text appears in the codebase. Supports extended regex patterns.',
 	inputSchema: jsonSchema<SearchFileContentsArgs>({
 		type: 'object',
 		properties: {
 			query: {
 				type: 'string',
 				description:
-					'Text or code to search for inside files. Examples: "handleSubmit", "import React", "TODO", "function calculateTotal". Search is case-insensitive by default.',
+					'Text or code to search for inside files. Supports extended regex (e.g., "foo|bar" for alternation, "func(tion)?" for optional groups). Examples: "handleSubmit", "import React", "TODO|FIXME", "class\\s+\\w+". Search is case-insensitive by default.',
 			},
 			maxResults: {
 				type: 'number',

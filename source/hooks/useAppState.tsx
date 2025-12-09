@@ -60,8 +60,14 @@ export function useAppState() {
 		LSPConnectionStatus[]
 	>([]);
 
+	// Initialization status states
+	const [preferencesLoaded, setPreferencesLoaded] = useState<boolean>(false);
+	const [customCommandsCount, setCustomCommandsCount] = useState<number>(0);
+
 	// Cancelling indicator state
 	const [isCancelling, setIsCancelling] = useState<boolean>(false);
+	const [isConversationComplete, setIsConversationComplete] =
+		useState<boolean>(false);
 
 	// Cancellation state
 	const [abortController, setAbortController] =
@@ -195,7 +201,10 @@ export function useAppState() {
 		updateInfo,
 		mcpServersStatus,
 		lspServersStatus,
+		preferencesLoaded,
+		customCommandsCount,
 		isCancelling,
+		isConversationComplete,
 		abortController,
 		isModelSelectionMode,
 		isProviderSelectionMode,
@@ -232,7 +241,10 @@ export function useAppState() {
 		setUpdateInfo,
 		setMcpServersStatus,
 		setLspServersStatus,
+		setPreferencesLoaded,
+		setCustomCommandsCount,
 		setIsCancelling,
+		setIsConversationComplete,
 		setAbortController,
 		setIsModelSelectionMode,
 		setIsProviderSelectionMode,

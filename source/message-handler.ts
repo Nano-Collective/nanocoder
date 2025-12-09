@@ -37,7 +37,7 @@ export async function processToolUse(toolCall: ToolCall): Promise<ToolResult> {
 	const toolRegistry = toolRegistryGetter();
 	const handler = toolRegistry[toolCall.function.name];
 	if (!handler) {
-		throw new Error(`Error: Unknown tool: ${toolCall.function.name}`);
+		throw new Error(`Unknown tool: ${toolCall.function.name}`);
 	}
 
 	try {

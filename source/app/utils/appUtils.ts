@@ -25,14 +25,13 @@ export async function handleMessageSubmission(
 		onShowStatus,
 		onHandleChatMessage,
 		onAddToChatQueue,
+		onCommandComplete,
 		componentKeyCounter,
 		setMessages,
 		messages,
 		setIsBashExecuting,
 		setCurrentBashCommand,
-	} = options;
-
-	// Parse the input to determine its type
+	} = options; // Parse the input to determine its type
 	const parsedInput = parseInput(message);
 
 	// Handle bash commands (prefixed with !)
@@ -93,6 +92,9 @@ ${result.fullOutput || '(No output)'}`;
 			// Clear bash execution state
 			setIsBashExecuting(false);
 			setCurrentBashCommand('');
+
+			// Signal completion for non-interactive mode
+			onCommandComplete?.();
 			return;
 		} catch (error: unknown) {
 			// Show error message if command fails
@@ -108,6 +110,9 @@ ${result.fullOutput || '(No output)'}`;
 			// Clear bash execution state
 			setIsBashExecuting(false);
 			setCurrentBashCommand('');
+
+			// Signal completion for non-interactive mode
+			onCommandComplete?.();
 
 			// Don't send to LLM - just return here
 			return;
@@ -138,29 +143,41 @@ ${result.fullOutput || '(No output)'}`;
 			// Send the processed prompt to the AI
 			if (processedPrompt) {
 				await onHandleChatMessage(processedPrompt);
+			} else {
+				// Custom command didn't generate a prompt, signal completion
+				onCommandComplete?.();
 			}
+			return;
 		} else {
 			// Handle special commands that need app state access
 			if (commandName === 'clear') {
 				await onClearMessages();
+				onCommandComplete?.();
 				// Still show the clear command result
 			} else if (commandName === 'model') {
 				onEnterModelSelectionMode();
+				onCommandComplete?.();
 				return;
 			} else if (commandName === 'provider') {
 				onEnterProviderSelectionMode();
+				onCommandComplete?.();
 				return;
 			} else if (commandName === 'theme') {
 				onEnterThemeSelectionMode();
+				onCommandComplete?.();
 				return;
 			} else if (commandName === 'model-database') {
 				onEnterModelDatabaseMode();
+				onCommandComplete?.();
 				return;
 			} else if (commandName === 'setup-config') {
 				onEnterConfigWizardMode();
+				onCommandComplete?.();
 				return;
 			} else if (commandName === 'status') {
 				onShowStatus();
+				// Status adds to queue synchronously, give React time to render
+				setTimeout(() => onCommandComplete?.(), 100);
 				return;
 			}
 
@@ -179,18 +196,34 @@ ${result.fullOutput || '(No output)'}`;
 				// Check if result is JSX (React element)
 				// Defer adding to chat queue to avoid "Cannot update a component while rendering" error
 				if (React.isValidElement(result)) {
-					queueMicrotask(() => onAddToChatQueue(result));
+					queueMicrotask(() => {
+						onAddToChatQueue(result);
+					});
+					// Give React time to render before signaling completion
+					setTimeout(() => {
+						onCommandComplete?.();
+					}, 100);
 				} else if (typeof result === 'string' && result.trim()) {
-					queueMicrotask(() =>
+					queueMicrotask(() => {
 						onAddToChatQueue(
 							React.createElement(InfoMessage, {
 								key: `command-result-${componentKeyCounter}`,
 								message: result,
 								hideBox: true,
 							}),
-						),
-					);
+						);
+					});
+					// Give React time to render before signaling completion
+					setTimeout(() => {
+						onCommandComplete?.();
+					}, 100);
+				} else {
+					// No output to display, signal completion immediately
+					onCommandComplete?.();
 				}
+			} else {
+				// No result, signal completion immediately
+				onCommandComplete?.();
 			}
 		}
 
