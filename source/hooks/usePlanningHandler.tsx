@@ -36,13 +36,15 @@ interface UsePlanningHandlerProps {
 	messages: Message[];
 	setMessages: (messages: Message[]) => void;
 	currentModel: string;
-	setIsThinking: (thinking: boolean) => void;
 	setIsCancelling: (cancelling: boolean) => void;
 	addToChatQueue: (component: React.ReactNode) => void;
 	componentKeyCounter: number;
 	abortController: AbortController | null;
 	setAbortController: (controller: AbortController | null) => void;
 	config?: PlanningConfig;
+	onToolApprovalRequired?: (
+		toolCall: ToolCall,
+	) => Promise<{approved: boolean; result?: string}>;
 }
 
 interface UsePlanningHandlerReturn {
@@ -61,13 +63,13 @@ export function usePlanningHandler({
 	messages,
 	setMessages,
 	currentModel,
-	setIsThinking,
 	setIsCancelling,
 	addToChatQueue,
 	componentKeyCounter,
 	abortController: _abortController,
 	setAbortController,
 	config = DEFAULT_PLANNING_CONFIG,
+	onToolApprovalRequired,
 }: UsePlanningHandlerProps): UsePlanningHandlerReturn {
 	// Task store instance
 	const taskStoreRef = React.useRef<TaskStore>(new TaskStore());
@@ -146,6 +148,7 @@ export function usePlanningHandler({
 			handleToolUse,
 			signal,
 			onToolResult,
+			onToolApprovalRequired,
 		);
 	};
 
@@ -246,7 +249,6 @@ export function usePlanningHandler({
 		const controller = new AbortController();
 		setAbortController(controller);
 
-		setIsThinking(true);
 		setIsPlanningActive(true);
 
 		try {
@@ -319,7 +321,6 @@ export function usePlanningHandler({
 				);
 			}
 		} finally {
-			setIsThinking(false);
 			setIsCancelling(false);
 			setAbortController(null);
 			setIsPlanningActive(false);

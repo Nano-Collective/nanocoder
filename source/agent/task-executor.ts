@@ -248,6 +248,9 @@ export async function executeTask(
 		toolCall: ToolCall,
 		result: {tool_call_id: string; role: 'tool'; name: string; content: string},
 	) => Promise<void>,
+	onToolApprovalRequired?: (
+		toolCall: ToolCall,
+	) => Promise<{approved: boolean; result?: string}>,
 ): Promise<TaskResult> {
 	// Mark task as started
 	taskStore.startTask(task.id);
@@ -276,6 +279,7 @@ export async function executeTask(
 			const response = await client.chat(
 				messages,
 				toolManager.getAllTools(),
+				{}, // No streaming callbacks needed
 				signal,
 			);
 
@@ -303,8 +307,60 @@ export async function executeTask(
 			for (const toolCall of assistantMessage.tool_calls) {
 				const startTime = Date.now();
 
+				// Check if tool needs approval based on its needsApproval property
+				let toolNeedsApproval = true; // Default to requiring approval for safety
+				const toolEntry = toolManager.getToolEntry(toolCall.function.name);
+				if (toolEntry?.tool) {
+					const needsApprovalProp = (
+						toolEntry.tool as unknown as {
+							needsApproval?:
+								| boolean
+								| ((args: unknown) => boolean | Promise<boolean>);
+						}
+					).needsApproval;
+					if (typeof needsApprovalProp === 'boolean') {
+						toolNeedsApproval = needsApprovalProp;
+					} else if (typeof needsApprovalProp === 'function') {
+						try {
+							toolNeedsApproval = await needsApprovalProp(
+								toolCall.function.arguments,
+							);
+						} catch {
+							// If evaluation fails, require approval for safety
+							toolNeedsApproval = true;
+						}
+					}
+				}
+
 				try {
-					const result = await processToolUse(toolCall);
+					let result: {
+						tool_call_id: string;
+						role: 'tool';
+						name: string;
+						content: string;
+					};
+
+					// Tools that need approval go through the approval flow
+					if (toolNeedsApproval && onToolApprovalRequired) {
+						const approval = await onToolApprovalRequired(toolCall);
+						if (!approval.approved) {
+							// User declined - add rejection message
+							result = {
+								tool_call_id: toolCall.id,
+								role: 'tool',
+								name: toolCall.function.name,
+								content:
+									approval.result ||
+									'Tool execution was declined by user.',
+							};
+						} else {
+							// User approved - execute the tool
+							result = await processToolUse(toolCall);
+						}
+					} else {
+						// Tools that don't need approval execute directly
+						result = await processToolUse(toolCall);
+					}
 
 					trackedToolCalls.push({
 						toolCall,

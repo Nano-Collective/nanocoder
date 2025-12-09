@@ -136,16 +136,16 @@ export function useChatHandler({
 	// Conversation state manager for enhanced context
 	const conversationStateManager = React.useRef(new ConversationStateManager());
 
-	// State for streaming message content
-	const [streamingContent, setStreamingContent] = React.useState<string>('');
-	const [isStreaming, setIsStreaming] = React.useState<boolean>(false);
+	// State for tracking LLM processing
+	const [pendingResponse, setPendingResponse] = React.useState<string>('');
+	const [isProcessing, setIsProcessing] = React.useState<boolean>(false);
 
-	// Helper to reset all streaming state
-	const resetStreamingState = React.useCallback(() => {
+	// Helper to reset all processing state
+	const resetProcessingState = React.useCallback(() => {
 		setIsCancelling(false);
 		setAbortController(null);
-		setIsStreaming(false);
-		setStreamingContent('');
+		setIsProcessing(false);
+		setPendingResponse('');
 	}, [setIsCancelling, setAbortController]);
 
 	// Helper to display errors in chat queue
@@ -249,8 +249,8 @@ export function useChatHandler({
 			// Use streaming with callbacks
 			let accumulatedContent = '';
 
-			setIsStreaming(true);
-			setStreamingContent('');
+			setIsProcessing(true);
+			setPendingResponse('');
 
 			const result = await client.chat(
 				[systemMessage, ...messages],
@@ -258,7 +258,7 @@ export function useChatHandler({
 				{
 					onToken: (token: string) => {
 						accumulatedContent += token;
-						setStreamingContent(normalizeStreamingContent(accumulatedContent));
+						setPendingResponse(normalizeStreamingContent(accumulatedContent));
 					},
 					onToolExecuted: (toolCall: ToolCall, result: string) => {
 						// Display formatter for auto-executed tools (after execution with results)
@@ -279,7 +279,7 @@ export function useChatHandler({
 						})();
 					},
 					onFinish: () => {
-						setIsStreaming(false);
+						setIsProcessing(false);
 					},
 				},
 				controller.signal,
@@ -330,8 +330,8 @@ export function useChatHandler({
 				setMessages(updatedMessagesWithError);
 
 				// Clear streaming state before recursing
-				setIsStreaming(false);
-				setStreamingContent('');
+				setIsProcessing(false);
+				setPendingResponse('');
 
 				// Continue the main conversation loop with error message as context
 				await processAssistantResponse(systemMessage, updatedMessagesWithError);
@@ -379,8 +379,8 @@ export function useChatHandler({
 			}
 
 			// Clear streaming state after response is complete
-			setIsStreaming(false);
-			setStreamingContent('');
+			setIsProcessing(false);
+			setPendingResponse('');
 
 			// Handle error results for non-existent tools
 			if (errorResults.length > 0) {
@@ -741,7 +741,7 @@ export function useChatHandler({
 			// Signal completion on error to avoid hanging in non-interactive mode
 			onConversationComplete?.();
 		} finally {
-			resetStreamingState();
+			resetProcessingState();
 		}
 	};
 
@@ -795,14 +795,14 @@ export function useChatHandler({
 		} catch (error) {
 			displayError(error, 'chat-error');
 		} finally {
-			resetStreamingState();
+			resetProcessingState();
 		}
 	};
 
 	return {
 		handleChatMessage,
 		processAssistantResponse,
-		isStreaming,
-		streamingContent,
+		isProcessing,
+		pendingResponse,
 	};
 }

@@ -49,6 +49,7 @@ function TaskRow({
 	colors: ReturnType<typeof useTheme>['colors'];
 }) {
 	const {symbol, color} = getStatusIndicator(task.status);
+	const isCompleted = task.status === 'completed';
 
 	return (
 		<Box>
@@ -56,7 +57,12 @@ function TaskRow({
 			<Text
 				color={task.status === 'in_progress' ? colors.primary : undefined}
 				bold={task.status === 'in_progress'}
-				dimColor={task.status === 'skipped' || task.status === 'blocked'}
+				dimColor={
+					task.status === 'skipped' ||
+					task.status === 'blocked' ||
+					isCompleted
+				}
+				strikethrough={isCompleted}
 			>
 				{task.title}
 			</Text>

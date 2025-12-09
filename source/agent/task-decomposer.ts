@@ -110,83 +110,122 @@ Now break down the user's request into tasks:`;
 }
 
 /**
+ * Attempt to repair common JSON issues from LLM output
+ */
+function repairJson(jsonStr: string): string {
+	let repaired = jsonStr;
+
+	// Remove trailing commas before ] or }
+	repaired = repaired.replace(/,(\s*[}\]])/g, '$1');
+
+	// Remove JavaScript-style comments
+	repaired = repaired.replace(/\/\/[^\n]*/g, '');
+	repaired = repaired.replace(/\/\*[\s\S]*?\*\//g, '');
+
+	// Fix unquoted property names (simple cases)
+	repaired = repaired.replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3');
+
+	// Fix single quotes to double quotes (but not within strings)
+	// This is a simple approach - may not handle all edge cases
+	repaired = repaired.replace(/'/g, '"');
+
+	return repaired;
+}
+
+/**
  * Parse the LLM response into task definitions
  */
 function parseDecompositionResponse(response: string): TaskDefinition[] | null {
 	// Try to extract JSON from the response
 	const jsonMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/);
-	const jsonStr = jsonMatch ? jsonMatch[1].trim() : response.trim();
+	let jsonStr = jsonMatch ? jsonMatch[1].trim() : response.trim();
 
+	// If no code block found, try to find array in the response
+	if (!jsonMatch) {
+		const arrayMatch = response.match(/\[[\s\S]*\]/);
+		if (arrayMatch) {
+			jsonStr = arrayMatch[0];
+		}
+	}
+
+	// Try parsing as-is first
+	let parsed: unknown;
 	try {
-		const parsed = JSON.parse(jsonStr);
-
-		if (!Array.isArray(parsed)) {
-			console.error('Decomposition response is not an array');
+		parsed = JSON.parse(jsonStr);
+	} catch {
+		// Try repairing the JSON
+		try {
+			const repairedJson = repairJson(jsonStr);
+			parsed = JSON.parse(repairedJson);
+		} catch (repairError) {
+			console.error('Failed to parse decomposition response:', repairError);
 			return null;
 		}
+	}
 
-		// Validate and transform each task
-		const tasks: TaskDefinition[] = [];
-
-		for (let i = 0; i < parsed.length; i++) {
-			const item = parsed[i];
-
-			// Validate required fields
-			if (!item.title || typeof item.title !== 'string') {
-				console.error(`Task ${i} missing title`);
-				continue;
-			}
-			if (!item.description || typeof item.description !== 'string') {
-				console.error(`Task ${i} missing description`);
-				continue;
-			}
-
-			// Build task definition with defaults
-			const task: TaskDefinition = {
-				id: generateTaskId(i),
-				title: item.title,
-				description: item.description,
-				acceptanceCriteria: Array.isArray(item.acceptanceCriteria)
-					? item.acceptanceCriteria
-					: [],
-				dependencies: [], // Will be resolved after all tasks are created
-				requiredTools: Array.isArray(item.requiredTools)
-					? item.requiredTools.filter((t: string) =>
-							AVAILABLE_TOOLS.includes(t),
-					  )
-					: [],
-			};
-
-			tasks.push(task);
-		}
-
-		// Resolve dependencies (convert indices to task IDs)
-		for (let i = 0; i < parsed.length; i++) {
-			const item = parsed[i];
-			if (Array.isArray(item.dependencies)) {
-				const resolvedDeps: string[] = [];
-				for (const dep of item.dependencies) {
-					const depIndex = typeof dep === 'number' ? dep : parseInt(dep, 10);
-					if (
-						!isNaN(depIndex) &&
-						depIndex >= 0 &&
-						depIndex < tasks.length &&
-						depIndex !== i
-					) {
-						resolvedDeps.push(tasks[depIndex].id);
-					}
-				}
-				if (tasks[i]) {
-					tasks[i].dependencies = resolvedDeps;
-				}
-			}
-		}
-
-		return tasks.length > 0 ? tasks : null;
-	} catch (error) {
-		console.error('Failed to parse decomposition response:', error);
+	if (!Array.isArray(parsed)) {
+		console.error('Decomposition response is not an array');
 		return null;
 	}
+
+	// Validate and transform each task
+	const tasks: TaskDefinition[] = [];
+
+	for (let i = 0; i < parsed.length; i++) {
+		const item = parsed[i] as Record<string, unknown>;
+
+		// Validate required fields
+		if (!item.title || typeof item.title !== 'string') {
+			console.error(`Task ${i} missing title`);
+			continue;
+		}
+		if (!item.description || typeof item.description !== 'string') {
+			console.error(`Task ${i} missing description`);
+			continue;
+		}
+
+		// Build task definition with defaults
+		const task: TaskDefinition = {
+			id: generateTaskId(i),
+			title: item.title,
+			description: item.description,
+			acceptanceCriteria: Array.isArray(item.acceptanceCriteria)
+				? (item.acceptanceCriteria as string[])
+				: [],
+			dependencies: [], // Will be resolved after all tasks are created
+			requiredTools: Array.isArray(item.requiredTools)
+				? (item.requiredTools as string[]).filter((t: string) =>
+						AVAILABLE_TOOLS.includes(t),
+					)
+				: [],
+		};
+
+		tasks.push(task);
+	}
+
+	// Resolve dependencies (convert indices to task IDs)
+	for (let i = 0; i < parsed.length; i++) {
+		const item = parsed[i] as Record<string, unknown>;
+		if (Array.isArray(item.dependencies)) {
+			const resolvedDeps: string[] = [];
+			for (const dep of item.dependencies) {
+				const depIndex = typeof dep === 'number' ? dep : parseInt(dep as string, 10);
+				if (
+					!isNaN(depIndex) &&
+					depIndex >= 0 &&
+					depIndex < tasks.length &&
+					depIndex !== i
+				) {
+					resolvedDeps.push(tasks[depIndex].id);
+				}
+			}
+			if (tasks[i]) {
+				tasks[i].dependencies = resolvedDeps;
+			}
+		}
+	}
+
+	return tasks.length > 0 ? tasks : null;
 }
 
 /**
@@ -229,6 +268,7 @@ async function decomposeQuery(
 				{role: 'user', content: prompt},
 			],
 			{}, // No tools needed for planning
+			{}, // No streaming callbacks needed
 			signal,
 		);
 
