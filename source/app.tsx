@@ -53,12 +53,15 @@ import {
 
 // Provide shared UI state to components
 import {UIStateProvider} from '@/hooks/useUIState';
+import {createPinoLogger} from '@/utils/logging/pino-logger';
+import type {LoggingCliConfig} from '@/utils/logging/types';
 
 interface AppProps {
 	vscodeMode?: boolean;
 	vscodePort?: number;
 	nonInteractivePrompt?: string;
 	nonInteractiveMode?: boolean;
+	loggingConfig?: LoggingCliConfig;
 }
 
 export function shouldRenderWelcome(nonInteractiveMode?: boolean) {
@@ -131,8 +134,8 @@ export default function App({
 	vscodePort,
 	nonInteractivePrompt,
 	nonInteractiveMode = false,
-}: AppProps) {
-	const logger = getLogger();
+, loggingConfig = {}}: AppProps) {
+	const logger = createPinoLogger(undefined, loggingConfig);
 
 	// Log application startup with key configuration
 	React.useEffect(() => {

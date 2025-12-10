@@ -60,7 +60,7 @@ export function createProductionConfig(): any {
 	const disableFileLogging = process.env.LOG_DISABLE_FILE === 'true';
 
 	const baseConfig = {
-		level: (process.env.LOG_LEVEL as any) || 'info',
+		level: (process.env.LOG_LEVEL as any) || 'debug', // Changed from 'info' to 'debug'
 		pretty: false,
 		redact: ['apiKey', 'token', 'password', 'email', 'userId', 'secret'],
 		correlation: true,
@@ -105,11 +105,11 @@ export function createProductionConfig(): any {
 }
 
 /**
- * Create test configuration (minimal output)
+ * Create test configuration
  */
 export function createTestConfig(): any {
 	return {
-		level: 'silent',
+		level: (process.env.LOG_LEVEL as any) || 'debug', // Changed from 'silent' to 'debug'
 		pretty: false,
 		redact: ['apiKey', 'token', 'password'],
 		correlation: false,

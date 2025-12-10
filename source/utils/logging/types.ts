@@ -101,3 +101,22 @@ export interface TransportConfig {
 		periodicFlush?: number;
 	};
 }
+
+/**
+ * CLI configuration for logging control
+ */
+export interface LoggingCliConfig {
+	logToFile?: boolean;
+	logToConsole?: boolean;
+	noLogFile?: boolean;
+	noLogConsole?: boolean;
+}
+
+/**
+ * Environment-specific transport configuration
+ */
+export interface EnvironmentTransportConfig {
+	enableFile: boolean;
+	enableConsole: boolean;
+	logFileName: string;
+}
