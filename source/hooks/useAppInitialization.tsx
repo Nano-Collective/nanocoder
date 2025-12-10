@@ -12,7 +12,9 @@ import {
 	getLastUsedModel,
 	loadPreferences,
 	updateLastUsed,
+	getPlanningPreferences,
 } from '@/config/preferences';
+import {getPlanningTools} from '@/tools/planning';
 import type {MCPInitResult, UserPreferences} from '@/types/index';
 import type {CustomCommand} from '@/types/commands';
 import {setToolManagerGetter, setToolRegistryGetter} from '@/message-handler';
@@ -346,6 +348,12 @@ export function useAppInitialization({
 			const newToolManager = new ToolManager();
 			const newCustomCommandLoader = new CustomCommandLoader();
 			const newCustomCommandExecutor = new CustomCommandExecutor();
+
+			// Register planning tools if planning is enabled
+			const planningPrefs = getPlanningPreferences();
+			if (planningPrefs.enabled) {
+				newToolManager.registerTools(getPlanningTools());
+			}
 
 			setToolManager(newToolManager);
 			setCustomCommandLoader(newCustomCommandLoader);

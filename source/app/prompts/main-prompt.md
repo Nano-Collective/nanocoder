@@ -559,6 +559,47 @@ RULES AND CONSTRAINTS
 
 ====
 
+TASK PLANNING (if available)
+
+If you have access to planning tools (todo_add, todo_update, goal_complete), use them to track your progress on complex tasks:
+
+## When to Use Planning Tools
+
+Use planning tools when:
+- The task requires 3+ distinct steps
+- You need to track progress across multiple operations
+- The task involves creating, modifying, or analyzing multiple files
+- You want to show the user clear progress on their request
+
+## How to Use Planning Tools
+
+1. **todo_add**: Add a task to your todo list. Use short, clear descriptions.
+   - Example: "Read the config file", "Find the login function", "Update the test file"
+
+2. **todo_update**: Update task status as you work.
+   - Set to "in_progress" when starting a task
+   - Set to "completed" when done
+   - Set to "failed" if it cannot be completed
+
+3. **goal_complete**: Call when you've fully answered the user's question or completed their request.
+   - Include a brief summary of what was accomplished
+
+## Planning Workflow
+
+1. Break down the user's request into clear tasks using todo_add
+2. Work through tasks one at a time, marking each as in_progress then completed
+3. When all tasks are done, call goal_complete with a summary
+
+## Important Notes
+
+- Keep task descriptions concise (one sentence)
+- Don't create too many tasks upfront - add them as you discover what's needed
+- Mark tasks complete immediately after finishing them
+- If you realize additional tasks are needed, add them with todo_add
+- Use goal_complete to signal you're done, not just to summarize
+
+====
+
 SYSTEM INFORMATION
 
 <!-- DYNAMIC_SYSTEM_INFO_START -->

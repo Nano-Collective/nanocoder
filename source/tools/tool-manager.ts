@@ -7,6 +7,7 @@ import type {
 	MCPServer,
 	MCPTool,
 	AISDKCoreTool,
+	NanocoderToolExport,
 } from '@/types/index';
 import {
 	toolRegistry as staticToolRegistry,
@@ -214,5 +215,29 @@ export class ToolManager {
 	 */
 	getMCPClient() {
 		return this.mcpClient;
+	}
+
+	/**
+	 * Register additional tools dynamically
+	 * Used for planning tools that are conditionally enabled
+	 */
+	registerTools(tools: NanocoderToolExport[]): void {
+		const entries: ToolEntry[] = tools.map(t => ({
+			name: t.name,
+			tool: t.tool,
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+			handler: async (args: any) => (t.tool as any).execute(args, {toolCallId: 'manual', messages: []}),
+			formatter: t.formatter,
+			validator: t.validator,
+		}));
+		this.registry.registerMany(entries);
+	}
+
+	/**
+	 * Unregister tools by name
+	 * Used for removing planning tools when planning mode is disabled
+	 */
+	unregisterTools(toolNames: string[]): void {
+		this.registry.unregisterMany(toolNames);
 	}
 }

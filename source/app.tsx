@@ -18,7 +18,6 @@ import WelcomeMessage from '@/components/welcome-message';
 import {getThemeColors} from '@/config/themes';
 import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
 import {ThemeContext} from '@/hooks/useTheme';
-import type {ToolCall} from '@/types/core';
 import {setGlobalMessageQueue} from '@/utils/message-queue';
 import {ConfigWizard} from '@/wizard/config-wizard';
 import {Box, Text, useApp} from 'ink';
@@ -30,13 +29,11 @@ import {
 	createClearMessagesHandler,
 	handleMessageSubmission,
 } from '@/app/utils/appUtils';
-import {getPlanningPreferences} from '@/config/preferences';
 import {useAppInitialization} from '@/hooks/useAppInitialization';
 import {useAppState} from '@/hooks/useAppState';
 import {useChatHandler} from '@/hooks/useChatHandler';
 import {useDirectoryTrust} from '@/hooks/useDirectoryTrust';
 import {useModeHandlers} from '@/hooks/useModeHandlers';
-import {usePlanningHandler} from '@/hooks/usePlanningHandler';
 import {useToolHandler} from '@/hooks/useToolHandler';
 import {useVSCodeServer} from '@/hooks/useVSCodeServer';
 
@@ -184,14 +181,6 @@ export default function App({
 		setCurrentTheme: appState.setCurrentTheme,
 	};
 
-	// Promise-based tool approval for planning mode
-	// Stores the resolve function to complete the approval Promise
-	const planningToolApprovalResolveRef = React.useRef<
-		((result: {approved: boolean; result?: string}) => void) | null
-	>(null);
-	const [planningPendingToolCall, setPlanningPendingToolCall] =
-		React.useState<ToolCall | null>(null);
-
 	// Initialize global message queue on component mount
 	React.useEffect(() => {
 		setGlobalMessageQueue(appState.addToChatQueue);
@@ -254,41 +243,6 @@ export default function App({
 		client: appState.client,
 		currentProvider: appState.currentProvider,
 		setDevelopmentMode: appState.setDevelopmentMode,
-	});
-
-	// Setup planning handler for structured task decomposition
-	const planningPrefs = getPlanningPreferences();
-
-	// Callback for bash tool approval in planning mode
-	// Creates a Promise that resolves when user confirms/cancels
-	const handlePlanningToolApproval = React.useCallback(
-		async (
-			toolCall: ToolCall,
-		): Promise<{approved: boolean; result?: string}> => {
-			return new Promise(resolve => {
-				planningToolApprovalResolveRef.current = resolve;
-				setPlanningPendingToolCall(toolCall);
-			});
-		},
-		[],
-	);
-
-	const planningHandler = usePlanningHandler({
-		client: appState.client,
-		toolManager: appState.toolManager,
-		messages: appState.messages,
-		setMessages: appState.updateMessages,
-		currentModel: appState.currentModel,
-		setIsCancelling: appState.setIsCancelling,
-		addToChatQueue: appState.addToChatQueue,
-		componentKeyCounter: appState.componentKeyCounter,
-		abortController: appState.abortController,
-		setAbortController: appState.setAbortController,
-		config: {
-			enabled: planningPrefs.enabled,
-			maxTasksPerPlan: planningPrefs.maxTasksPerPlan,
-		},
-		onToolApprovalRequired: handlePlanningToolApproval,
 	});
 
 	// Setup initialization
@@ -398,8 +352,6 @@ export default function App({
 				onEnterConfigWizardMode: modeHandlers.enterConfigWizardMode,
 				onShowStatus: handleShowStatus,
 				onHandleChatMessage: chatHandler.handleChatMessage,
-				onHandlePlanningMessage: planningHandler.handlePlanningMessage,
-				planningEnabled: planningPrefs.enabled,
 				onAddToChatQueue: appState.addToChatQueue,
 				onCommandComplete: () => appState.setIsConversationComplete(true),
 				componentKeyCounter: appState.componentKeyCounter,
@@ -424,8 +376,6 @@ export default function App({
 			modeHandlers.enterConfigWizardMode,
 			handleShowStatus,
 			chatHandler.handleChatMessage,
-			planningHandler.handlePlanningMessage,
-			planningPrefs.enabled,
 			appState.addToChatQueue,
 			appState.componentKeyCounter,
 			appState.updateMessages,
@@ -706,27 +656,6 @@ export default function App({
 									onConfirm={toolHandler.handleToolConfirmation}
 									onCancel={toolHandler.handleToolConfirmationCancel}
 								/>
-							) : planningPendingToolCall ? (
-								<ToolConfirmation
-									toolCall={planningPendingToolCall}
-									onConfirm={() => {
-										if (planningToolApprovalResolveRef.current) {
-											planningToolApprovalResolveRef.current({approved: true});
-											planningToolApprovalResolveRef.current = null;
-										}
-										setPlanningPendingToolCall(null);
-									}}
-									onCancel={() => {
-										if (planningToolApprovalResolveRef.current) {
-											planningToolApprovalResolveRef.current({
-												approved: false,
-												result: 'Tool execution was cancelled by user.',
-											});
-											planningToolApprovalResolveRef.current = null;
-										}
-										setPlanningPendingToolCall(null);
-									}}
-								/>
 							) : appState.isToolExecuting &&
 							  appState.pendingToolCalls[appState.currentToolIndex] ? (
 								<ToolExecutionIndicator
@@ -749,7 +678,6 @@ export default function App({
 									onSubmit={msg => void handleMessageSubmit(msg)}
 									disabled={
 										chatHandler.isProcessing ||
-										planningHandler.isPlanningActive ||
 										appState.isToolExecuting ||
 										appState.isBashExecuting
 									}
