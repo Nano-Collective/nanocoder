@@ -335,6 +335,47 @@ export default function App({
 		setDevelopmentMode: appState.setDevelopmentMode,
 	});
 
+	// Log when application is fully ready and interface is active
+	useEffect(() => {
+		// Only log when we have a fully initialized application ready for user interaction
+		if (
+			appState.mcpInitialized &&
+			appState.client &&
+			!appState.isToolExecuting &&
+			!appState.isToolConfirmationMode &&
+			!appState.isConfigWizardMode &&
+			appState.pendingToolCalls.length === 0
+		) {
+			const correlationId = generateCorrelationId();
+
+			withNewCorrelationContext(() => {
+				logger.info('Application interface ready for user interaction', {
+					correlationId,
+					interfaceState: {
+						developmentMode: appState.developmentMode,
+						hasPendingToolCalls: appState.pendingToolCalls.length > 0,
+						clientInitialized: !!appState.client,
+						mcpServersConnected: appState.mcpInitialized,
+						inputDisabled:
+							chatHandler.isStreaming ||
+							appState.isToolExecuting ||
+							appState.isBashExecuting,
+					},
+				});
+			}, correlationId);
+		}
+	}, [
+		appState.mcpInitialized,
+		appState.client,
+		appState.isToolExecuting,
+		appState.isToolConfirmationMode,
+		appState.isConfigWizardMode,
+		appState.pendingToolCalls.length,
+		appState.developmentMode,
+		chatHandler.isStreaming,
+		appState.isBashExecuting,
+	]);
+
 	// Setup initialization
 	const appInitialization = useAppInitialization({
 		setClient: appState.setClient,
@@ -910,45 +951,4 @@ export default function App({
 			</UIStateProvider>
 		</ThemeContext.Provider>
 	);
-
-	// Log when application is fully ready and interface is active
-	useEffect(() => {
-		// Only log when we have a fully initialized application ready for user interaction
-		if (
-			appState.mcpInitialized &&
-			appState.client &&
-			!appState.isToolExecuting &&
-			!appState.isToolConfirmationMode &&
-			!appState.isConfigWizardMode &&
-			appState.pendingToolCalls.length === 0
-		) {
-			const correlationId = generateCorrelationId();
-
-			withNewCorrelationContext(() => {
-				logger.info('Application interface ready for user interaction', {
-					correlationId,
-					interfaceState: {
-						developmentMode: appState.developmentMode,
-						hasPendingToolCalls: appState.pendingToolCalls.length > 0,
-						clientInitialized: !!appState.client,
-						mcpServersConnected: appState.mcpInitialized,
-						inputDisabled:
-							chatHandler.isStreaming ||
-							appState.isToolExecuting ||
-							appState.isBashExecuting,
-					},
-				});
-			}, correlationId);
-		}
-	}, [
-		appState.mcpInitialized,
-		appState.client,
-		appState.isToolExecuting,
-		appState.isToolConfirmationMode,
-		appState.isConfigWizardMode,
-		appState.pendingToolCalls.length,
-		appState.developmentMode,
-		chatHandler.isStreaming,
-		appState.isBashExecuting,
-	]);
 }
