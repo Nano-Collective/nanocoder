@@ -237,15 +237,6 @@ export {
 import LogStorage from './log-query.js';
 export { LogStorage };
 
-// Export configuration reloader
-export {
-	ConfigReloader,
-	globalConfigReloader,
-	initializeHotReloading,
-	createConfigChangeListener,
-	type ConfigChangeEvent,
-	type ConfigReloadResult,
-} from './config-reloader.js';
 
 // Export health monitoring
 export {

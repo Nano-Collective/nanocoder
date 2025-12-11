@@ -11,7 +11,6 @@ import {
 import {globalLogStorage} from './log-query.js';
 import {globalRequestTracker} from './request-tracker.js';
 import {globalPerformanceMonitor} from './performance.js';
-import {globalConfigReloader} from './config-reloader.js';
 import type {LoggerConfig, LogLevel, CorrelationContext} from './types.js';
 
 // Get logger instance directly to avoid circular dependencies
@@ -535,7 +534,7 @@ export class HealthMonitor {
 		let message = 'Logging system is healthy';
 		const details = {
 			totalEntries: logCount,
-			isConfigReloaderActive: globalConfigReloader.isHotReloadingEnabled(),
+			isConfigReloaderActive: false,
 			hasLogger: !!getLogger(),
 		};
 
@@ -645,15 +644,15 @@ export class HealthMonitor {
 
 	private async checkConfigurationSystem(): Promise<HealthCheck> {
 		const startTime = performance.now();
-		const reloaderStats = globalConfigReloader.getStats();
+		const reloaderStats = { isEnabled: false, watcherCount: 0 };
 
 		let status: 'pass' | 'fail' | 'warn' = 'pass';
 		let message = 'Configuration system is healthy';
 		const details = {
 			isEnabled: reloaderStats.isEnabled,
 			watcherCount: reloaderStats.watcherCount,
-			listenerCount: reloaderStats.listenerCount,
-			hasPendingReloads: reloaderStats.reloadInProgress,
+			listenerCount: 0,
+			hasPendingReloads: false,
 		};
 
 		return {

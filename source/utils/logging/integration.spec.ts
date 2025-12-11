@@ -199,44 +199,6 @@ test('multiple concurrent logging contexts', async t => {
   await end();
 });
 
-test('logging configuration hot-reload', async t => {
-  // Create temporary config file
-  const configFile = join(testDir, 'test-config.json');
-  const initialConfig = {
-    level: 'info',
-    pretty: false,
-    correlation: true
-  };
-
-  writeFileSync(configFile, JSON.stringify(initialConfig, null, 2));
-
-  // Initialize with config
-  const logger = initializeLogger(initialConfig as any);
-
-  logger.info('Message with initial config');
-
-  // Update config
-  const updatedConfig = {
-    ...initialConfig,
-    level: 'debug',
-    pretty: true
-  };
-
-  writeFileSync(configFile, JSON.stringify(updatedConfig, null, 2));
-
-  // Reload configuration (this would normally be automatic)
-  try {
-    // Configuration reload would be handled by the config reloader
-    // await reloadConfiguration(); // Not available in current API
-    logger.info('Message with updated config');
-    t.pass('Configuration test completed');
-  } catch (error) {
-    // Config reload might not be available in test environment
-    t.pass('Config reload skipped in test environment');
-  }
-
-  await end();
-});
 
 test('error handling and recovery', async t => {
   const logger = initializeLogger({ level: 'info' });
