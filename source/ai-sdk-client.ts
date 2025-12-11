@@ -307,7 +307,10 @@ export class AISDKClient implements LLMClient {
 		});
 
 		const {connectionPool} = this.providerConfig;
-		const {requestTimeout = 120000, socketTimeout = 120000} = this.providerConfig;
+const {requestTimeout, socketTimeout} = this.providerConfig;
+  const effectiveSocketTimeout = socketTimeout ?? requestTimeout;
+  const resolvedSocketTimeout =
+        effectiveSocketTimeout === -1 ? 0 : effectiveSocketTimeout ?? 120000;
 		const resolvedSocketTimeout =
 			socketTimeout === -1
 				? 0
