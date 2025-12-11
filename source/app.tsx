@@ -134,7 +134,7 @@ export default function App({
 	vscodePort,
 	nonInteractivePrompt,
 	nonInteractiveMode = false,
-, loggingConfig = {}}: AppProps) {
+	loggingConfig = {}}: AppProps) {
 	const logger = createPinoLogger(undefined, loggingConfig);
 
 	// Log application startup with key configuration
