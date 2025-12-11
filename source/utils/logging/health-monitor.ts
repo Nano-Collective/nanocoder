@@ -644,10 +644,10 @@ export class HealthMonitor {
 
 	private async checkConfigurationSystem(): Promise<HealthCheck> {
 		const startTime = performance.now();
-		const reloaderStats = { isEnabled: false, watcherCount: 0 };
+		const reloaderStats = {isEnabled: false, watcherCount: 0};
 
-		let status: 'pass' | 'fail' | 'warn' = 'pass';
-		let message = 'Configuration system is healthy';
+		const status: 'pass' | 'fail' | 'warn' = 'pass';
+		const message = 'Configuration system is healthy';
 		const details = {
 			isEnabled: reloaderStats.isEnabled,
 			watcherCount: reloaderStats.watcherCount,

@@ -88,7 +88,11 @@ test('correlation context management works', t => {
 	t.truthy(current, 'Should return context');
 	t.is(current!.id, context.id, 'Should match ID');
 	t.is(current!.parentId, context.parentId, 'Should match parent ID');
-	t.is(current!.metadata?.source, context.metadata?.source, 'Should match metadata');
+	t.is(
+		current!.metadata?.source,
+		context.metadata?.source,
+		'Should match metadata',
+	);
 
 	// Clear context
 	clearCorrelationContext();
@@ -123,7 +127,11 @@ test('withCorrelationContext executes function with context', t => {
 
 	t.truthy(executedContext, 'Should have context during execution');
 	t.is(executedContext!.id, context.id, 'Should have correct ID');
-	t.is(executedContext!.parentId, context.parentId, 'Should have correct parent ID');
+	t.is(
+		executedContext!.parentId,
+		context.parentId,
+		'Should have correct parent ID',
+	);
 
 	// Context should be cleared after execution
 	const afterContext = getCurrentCorrelationContext();
@@ -133,12 +141,16 @@ test('withCorrelationContext executes function with context', t => {
 test('withNewCorrelationContext creates new context', t => {
 	let correlationId: string | undefined = undefined;
 
-	withNewCorrelationContext(() => {
-		const context = getCurrentCorrelationContext();
-		if (context) {
-			correlationId = context.id;
-		}
-	}, 'parent-123', {source: 'test'});
+	withNewCorrelationContext(
+		() => {
+			const context = getCurrentCorrelationContext();
+			if (context) {
+				correlationId = context.id;
+			}
+		},
+		'parent-123',
+		{source: 'test'},
+	);
 
 	t.truthy(correlationId, 'Should generate correlation ID');
 	t.is(typeof correlationId!, 'string', 'Should be string');
@@ -305,17 +317,25 @@ test('withCorrelation decorator works with async functions', async t => {
 test('context isolation between concurrent operations', async t => {
 	const results: string[] = [];
 
-	const operation1 = withNewCorrelationContext(async () => {
-		await new Promise(resolve => setTimeout(resolve, 10));
-		const context = getCurrentCorrelationContext();
-		results.push(`op1-${context?.metadata?.userId}`);
-	}, 'parent-1', {userId: 'user-1'});
+	const operation1 = withNewCorrelationContext(
+		async () => {
+			await new Promise(resolve => setTimeout(resolve, 10));
+			const context = getCurrentCorrelationContext();
+			results.push(`op1-${context?.metadata?.userId}`);
+		},
+		'parent-1',
+		{userId: 'user-1'},
+	);
 
-	const operation2 = withNewCorrelationContext(async () => {
-		await new Promise(resolve => setTimeout(resolve, 5));
-		const context = getCurrentCorrelationContext();
-		results.push(`op2-${context?.metadata?.userId}`);
-	}, 'parent-2', {userId: 'user-2'});
+	const operation2 = withNewCorrelationContext(
+		async () => {
+			await new Promise(resolve => setTimeout(resolve, 5));
+			const context = getCurrentCorrelationContext();
+			results.push(`op2-${context?.metadata?.userId}`);
+		},
+		'parent-2',
+		{userId: 'user-2'},
+	);
 
 	await Promise.all([operation1, operation2]);
 

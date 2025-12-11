@@ -3,10 +3,7 @@
  * Provides powerful filtering, searching, and analytics capabilities
  */
 
-import {
-	generateCorrelationId,
-	getLogger,
-} from './index.js';
+import {generateCorrelationId, getLogger} from './index.js';
 
 // Get logger instance directly to avoid circular dependencies
 const logger = getLogger();
@@ -205,7 +202,7 @@ class LogStorage {
 	query(query: LogQuery): QueryResult {
 		const startTime = performance.now();
 
-		let filteredEntries = this.entries.filter(entry =>
+		const filteredEntries = this.entries.filter(entry =>
 			this.matchesQuery(entry, query),
 		);
 

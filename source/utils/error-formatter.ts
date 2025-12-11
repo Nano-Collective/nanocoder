@@ -189,7 +189,7 @@ export function logError(
 		}
 
 		return errorInfo.message;
-	}, errorInfo.correlationId!);
+	}, errorInfo.correlationId);
 }
 
 /**
@@ -407,4 +407,3 @@ export function getErrorRecoverySuggestions(error: unknown): string[] {
 
 // Export the original formatError function for backward compatibility
 export {formatError as formatErrorLegacy};
-

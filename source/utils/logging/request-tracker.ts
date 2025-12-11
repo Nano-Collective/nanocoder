@@ -394,7 +394,7 @@ export class RequestTracker {
 		let totalDuration = 0;
 		let minDuration = Infinity;
 		let maxDuration = 0;
-		let memoryDeltaSum = {heapUsed: 0, heapTotal: 0, external: 0, rss: 0};
+		const memoryDeltaSum = {heapUsed: 0, heapTotal: 0, external: 0, rss: 0};
 		let memoryDeltaCount = 0;
 
 		for (const request of this.completedRequests) {

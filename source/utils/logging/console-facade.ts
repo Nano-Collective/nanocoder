@@ -8,7 +8,6 @@
 
 import {
 	generateCorrelationId,
-	getCorrelationId,
 	withNewCorrelationContext,
 	getLogger,
 } from '@/utils/logging';
@@ -29,7 +28,7 @@ export const StructuredConsole = {
 	log: (...args: any[]) => {
 		const correlationId = generateCorrelationId();
 
-		withNewCorrelationContext((context) => {
+		withNewCorrelationContext(context => {
 			if (args.length === 0) {
 				logger.info('Empty console.log call', {
 					correlationId: context.id,
@@ -41,7 +40,10 @@ export const StructuredConsole = {
 			if (args.length === 1) {
 				const arg = args[0];
 				if (typeof arg === 'string') {
-					logger.info(arg, {correlationId: context.id, source: 'console-facade'});
+					logger.info(arg, {
+						correlationId: context.id,
+						source: 'console-facade',
+					});
 				} else if (typeof arg === 'object' && arg !== null) {
 					logger.info('Object logged via console.log', {
 						object: arg,
@@ -49,7 +51,10 @@ export const StructuredConsole = {
 						source: 'console-facade',
 					});
 				} else {
-					logger.info(String(arg), {correlationId: context.id, source: 'console-facade'});
+					logger.info(String(arg), {
+						correlationId: context.id,
+						source: 'console-facade',
+					});
 				}
 				return;
 			}
@@ -91,7 +96,7 @@ export const StructuredConsole = {
 	error: (...args: any[]) => {
 		const correlationId = generateCorrelationId();
 
-		withNewCorrelationContext((context) => {
+		withNewCorrelationContext(context => {
 			if (args.length === 0) {
 				logger.error('Empty console.error call', {
 					correlationId: context.id,
@@ -160,7 +165,7 @@ export const StructuredConsole = {
 	warn: (...args: any[]) => {
 		const correlationId = generateCorrelationId();
 
-		withNewCorrelationContext((context) => {
+		withNewCorrelationContext(context => {
 			if (args.length === 0) {
 				logger.warn('Empty console.warn call', {
 					correlationId: context.id,
@@ -172,7 +177,10 @@ export const StructuredConsole = {
 			if (args.length === 1) {
 				const arg = args[0];
 				if (typeof arg === 'string') {
-					logger.warn(arg, {correlationId: context.id, source: 'console-facade'});
+					logger.warn(arg, {
+						correlationId: context.id,
+						source: 'console-facade',
+					});
 				} else if (typeof arg === 'object' && arg !== null) {
 					logger.warn('Object logged via console.warn', {
 						object: arg,
@@ -180,7 +188,10 @@ export const StructuredConsole = {
 						source: 'console-facade',
 					});
 				} else {
-					logger.warn(String(arg), {correlationId: context.id, source: 'console-facade'});
+					logger.warn(String(arg), {
+						correlationId: context.id,
+						source: 'console-facade',
+					});
 				}
 				return;
 			}
@@ -221,7 +232,7 @@ export const StructuredConsole = {
 	info: (...args: any[]) => {
 		const correlationId = generateCorrelationId();
 
-		withNewCorrelationContext((context) => {
+		withNewCorrelationContext(context => {
 			if (args.length === 0) {
 				logger.info('Empty console.info call', {
 					correlationId: context.id,
@@ -233,7 +244,10 @@ export const StructuredConsole = {
 			if (args.length === 1) {
 				const arg = args[0];
 				if (typeof arg === 'string') {
-					logger.info(arg, {correlationId: context.id, source: 'console-facade'});
+					logger.info(arg, {
+						correlationId: context.id,
+						source: 'console-facade',
+					});
 				} else if (typeof arg === 'object' && arg !== null) {
 					logger.info('Object logged via console.info', {
 						object: arg,
@@ -241,7 +255,10 @@ export const StructuredConsole = {
 						source: 'console-facade',
 					});
 				} else {
-					logger.info(String(arg), {correlationId: context.id, source: 'console-facade'});
+					logger.info(String(arg), {
+						correlationId: context.id,
+						source: 'console-facade',
+					});
 				}
 				return;
 			}
@@ -282,7 +299,7 @@ export const StructuredConsole = {
 	debug: (...args: any[]) => {
 		const correlationId = generateCorrelationId();
 
-		withNewCorrelationContext((context) => {
+		withNewCorrelationContext(context => {
 			if (args.length === 0) {
 				logger.debug('Empty console.debug call', {
 					correlationId: context.id,
@@ -294,7 +311,10 @@ export const StructuredConsole = {
 			if (args.length === 1) {
 				const arg = args[0];
 				if (typeof arg === 'string') {
-					logger.debug(arg, {correlationId: context.id, source: 'console-facade'});
+					logger.debug(arg, {
+						correlationId: context.id,
+						source: 'console-facade',
+					});
 				} else if (typeof arg === 'object' && arg !== null) {
 					logger.debug('Object logged via console.debug', {
 						object: arg,
@@ -302,7 +322,10 @@ export const StructuredConsole = {
 						source: 'console-facade',
 					});
 				} else {
-					logger.debug(String(arg), {correlationId: context.id, source: 'console-facade'});
+					logger.debug(String(arg), {
+						correlationId: context.id,
+						source: 'console-facade',
+					});
 				}
 				return;
 			}

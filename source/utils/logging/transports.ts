@@ -2,7 +2,6 @@
  * Transport configuration for different output destinations
  */
 
-import pino from 'pino';
 import {join} from 'path';
 import {getDefaultLogDirectory} from './config.js';
 import type {TransportConfig} from './types.js';
@@ -10,7 +9,7 @@ import type {TransportConfig} from './types.js';
 // Type definition for Pino transport target
 type TransportTarget = {
 	target: string;
-	options?: Record<string, any>;
+	options?: Record<string, unknown>;
 	level?: string;
 };
 
@@ -91,7 +90,7 @@ export function createCustomTransport(
 ): TransportTarget {
 	return {
 		target: config.target,
-		level: (config.options as any)?.level || 'info',
+		level: (config.options as {level?: string})?.level || 'info',
 		options: {
 			...config.options,
 			// Ensure minimum buffer size for performance
@@ -236,8 +235,10 @@ export function getTransportFromEnvironment():
 			case 'default':
 			default:
 				// Use default behavior
-				const defaultTransports = createMultiTransport();
-				transports.push(...defaultTransports);
+				{
+					const defaultTransports = createMultiTransport();
+					transports.push(...defaultTransports);
+				}
 				break;
 		}
 	}

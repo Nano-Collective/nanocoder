@@ -49,7 +49,10 @@ test('createRedactionRules creates valid rules', t => {
 
 	t.is(typeof rules, 'object', 'Should return object');
 	t.true(Array.isArray(rules.customPaths), 'Should have customPaths array');
-	t.true(rules.emailRedaction === true, 'Should enable email redaction by default');
+	t.true(
+		rules.emailRedaction === true,
+		'Should enable email redaction by default',
+	);
 	customPaths.forEach(path => {
 		t.true(rules.customPaths.includes(path), `Should include ${path}`);
 	});
@@ -179,7 +182,10 @@ test('redactLogEntry applies smart PII detection', t => {
 		regularField: 'not sensitive',
 	};
 
-	const redacted = redactLogEntry(data, createRedactionRules([], true, true)) as any;
+	const redacted = redactLogEntry(
+		data,
+		createRedactionRules([], true, true),
+	) as any;
 
 	t.is(typeof redacted.email, 'string', 'Should return string for email');
 	t.true(redacted.email.includes('***'), 'Should mask email partially');
@@ -236,7 +242,10 @@ test('validateRedactionRules validates rule format', t => {
 		emailRedaction: true,
 		userIdRedaction: true,
 	};
-	t.false(validateRedactionRules(invalidRules), 'Should reject invalid patterns');
+	t.false(
+		validateRedactionRules(invalidRules),
+		'Should reject invalid patterns',
+	);
 });
 
 test('createRedactionRules combines rules correctly', t => {
@@ -416,7 +425,10 @@ test('redactLogEntry recognizes various PII patterns', t => {
 		regularField: 'not sensitive data',
 	};
 
-	const redacted = redactLogEntry(testData, createRedactionRules([], true, true));
+	const redacted = redactLogEntry(
+		testData,
+		createRedactionRules([], true, true),
+	);
 
 	// All PII should be redacted or masked
 	t.true(redacted.email1 !== 'user@domain.com', 'Should redact email1');

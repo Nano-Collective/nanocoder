@@ -12,8 +12,12 @@ export class LoggerProvider {
 	private _dependenciesLoaded = false;
 
 	// Lazy-loaded dependencies
-	private _createPinoLogger: ((config?: Partial<LoggerConfig>) => Logger) | null = null;
-	private _createConfig: ((config?: Partial<LoggerConfig>) => LoggerConfig) | null = null;
+	private _createPinoLogger:
+		| ((config?: Partial<LoggerConfig>) => Logger)
+		| null = null;
+	private _createConfig:
+		| ((config?: Partial<LoggerConfig>) => LoggerConfig)
+		| null = null;
 
 	private constructor() {
 		// Private constructor for singleton pattern
@@ -46,13 +50,16 @@ export class LoggerProvider {
 			redact: [],
 			correlation: false,
 			serialize: false,
-			...config
+			...config,
 		});
 		this._dependenciesLoaded = true;
 
 		// Asynchronously load the real dependencies and replace the fallback
 		this.loadRealDependencies().catch(error => {
-			console.error('[LOGGER_PROVIDER] Failed to load real dependencies, using fallback:', error);
+			console.error(
+				'[LOGGER_PROVIDER] Failed to load real dependencies, using fallback:',
+				error,
+			);
 		});
 	}
 
@@ -73,7 +80,10 @@ export class LoggerProvider {
 				this._logger = this._createPinoLogger(this._config);
 			}
 		} catch (error) {
-			console.error('[LOGGER_PROVIDER] Failed to load real dependencies:', error);
+			console.error(
+				'[LOGGER_PROVIDER] Failed to load real dependencies:',
+				error,
+			);
 			// Keep the fallback logger
 		}
 	}
@@ -179,7 +189,9 @@ export class LoggerProvider {
 	/**
 	 * Create default configuration based on environment
 	 */
-	private createDefaultConfig(override: Partial<LoggerConfig> = {}): LoggerConfig {
+	private createDefaultConfig(
+		override: Partial<LoggerConfig> = {},
+	): LoggerConfig {
 		const isDev = process.env.NODE_ENV === 'development';
 		const isTest = process.env.NODE_ENV === 'test';
 

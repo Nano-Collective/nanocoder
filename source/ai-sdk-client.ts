@@ -21,7 +21,7 @@ import {
 	calculateMemoryDelta,
 	formatMemoryUsage,
 	getCorrelationId,
-	generateCorrelationId
+	generateCorrelationId,
 } from '@/utils/logging';
 
 /**
@@ -303,14 +303,14 @@ export class AISDKClient implements LLMClient {
 			defaultModel: this.currentModel,
 			provider: providerConfig.name || 'unknown',
 			baseUrl: providerConfig.config.baseURL ? '[REDACTED]' : undefined,
-			maxRetries: this.maxRetries
+			maxRetries: this.maxRetries,
 		});
 
 		const {connectionPool} = this.providerConfig;
-const {requestTimeout, socketTimeout} = this.providerConfig;
-  const effectiveSocketTimeout = socketTimeout ?? requestTimeout;
-  const resolvedSocketTimeout =
-        effectiveSocketTimeout === -1 ? 0 : effectiveSocketTimeout ?? 120000;
+		const {requestTimeout, socketTimeout} = this.providerConfig;
+		const effectiveSocketTimeout = socketTimeout ?? requestTimeout;
+		const resolvedSocketTimeout =
+			effectiveSocketTimeout === -1 ? 0 : effectiveSocketTimeout ?? 120000;
 
 		this.undiciAgent = new Agent({
 			connect: {
@@ -387,7 +387,7 @@ const {requestTimeout, socketTimeout} = this.providerConfig;
 		logger.info('Model changed', {
 			previousModel,
 			newModel: model,
-			provider: this.providerConfig.name
+			provider: this.providerConfig.name,
 		});
 
 		// Update context size when model changes
@@ -436,10 +436,10 @@ const {requestTimeout, socketTimeout} = this.providerConfig;
 			messageCount: messages.length,
 			toolCount: Object.keys(tools).length,
 			correlationId,
-			provider: this.providerConfig.name
+			provider: this.providerConfig.name,
 		});
 
-		return await withNewCorrelationContext(async (context) => {
+		return await withNewCorrelationContext(async context => {
 			try {
 				// Get the language model instance from the provider
 				const model = this.provider(this.currentModel);
@@ -453,264 +453,274 @@ const {requestTimeout, socketTimeout} = this.providerConfig;
 				logger.debug('AI SDK request prepared', {
 					messageCount: modelMessages.length,
 					hasTools: !!aiTools,
-					toolCount: aiTools ? Object.keys(aiTools).length : 0
+					toolCount: aiTools ? Object.keys(aiTools).length : 0,
 				});
 
-			// Tools with needsApproval: false auto-execute in the loop
-			// Tools with needsApproval: true cause interruptions for manual approval
-			// stopWhen controls when the tool loop stops (max 10 steps)
-			const result = await generateText({
-				model,
-				messages: modelMessages,
-				tools: aiTools,
-				abortSignal: signal,
-				maxRetries: this.maxRetries,
-				temperature: 0.6,
-				stopWhen: stepCountIs(10), // Allow up to 10 tool execution steps
-				// Can be used to add custom logging, metrics, or step tracking
-				onStepFinish(step) {
-					// Log tool execution steps
-					if (step.toolCalls && step.toolCalls.length > 0) {
-						logger.debug('AI SDK tool step', {
-							stepType: 'tool_execution',
-							toolCount: step.toolCalls.length,
-							hasResults: !!step.toolResults
-						});
-					}
-
-					// Display formatters for auto-executed tools (after execution with results)
-					if (
-						step.toolCalls &&
-						step.toolResults &&
-						step.toolCalls.length === step.toolResults.length
-					) {
-						step.toolCalls.forEach((toolCall, idx) => {
-							const toolResult = step.toolResults[idx];
-							const tc: ToolCall = {
-								id:
-									toolCall.toolCallId ||
-									`tool_${Date.now()}_${Math.random()
-										.toString(36)
-										.substring(7)}`,
-								function: {
-									name: toolCall.toolName,
-									arguments: toolCall.input as Record<string, unknown>,
-								},
-							};
-							const resultStr =
-								typeof toolResult.output === 'string'
-									? toolResult.output
-									: JSON.stringify(toolResult.output);
-
-							logger.debug('Tool executed', {
-								toolName: tc.function.name,
-								resultLength: resultStr.length
+				// Tools with needsApproval: false auto-execute in the loop
+				// Tools with needsApproval: true cause interruptions for manual approval
+				// stopWhen controls when the tool loop stops (max 10 steps)
+				const result = await generateText({
+					model,
+					messages: modelMessages,
+					tools: aiTools,
+					abortSignal: signal,
+					maxRetries: this.maxRetries,
+					temperature: 0.6,
+					stopWhen: stepCountIs(10), // Allow up to 10 tool execution steps
+					// Can be used to add custom logging, metrics, or step tracking
+					onStepFinish(step) {
+						// Log tool execution steps
+						if (step.toolCalls && step.toolCalls.length > 0) {
+							logger.debug('AI SDK tool step', {
+								stepType: 'tool_execution',
+								toolCount: step.toolCalls.length,
+								hasResults: !!step.toolResults,
 							});
+						}
 
-							callbacks.onToolExecuted?.(tc, resultStr);
-						});
-					}
-				},
-				prepareStep: ({messages}) => {
-					// Filter out empty assistant messages that would cause API errors
-					// "Assistant message must have either content or tool_calls"
-					const filteredMessages = messages.filter(
-						m => !isEmptyAssistantMessage(m as unknown as TestableMessage),
-					);
+						// Display formatters for auto-executed tools (after execution with results)
+						if (
+							step.toolCalls &&
+							step.toolResults &&
+							step.toolCalls.length === step.toolResults.length
+						) {
+							step.toolCalls.forEach((toolCall, idx) => {
+								const toolResult = step.toolResults[idx];
+								const tc: ToolCall = {
+									id:
+										toolCall.toolCallId ||
+										`tool_${Date.now()}_${Math.random()
+											.toString(36)
+											.substring(7)}`,
+									function: {
+										name: toolCall.toolName,
+										arguments: toolCall.input as Record<string, unknown>,
+									},
+								};
+								const resultStr =
+									typeof toolResult.output === 'string'
+										? toolResult.output
+										: JSON.stringify(toolResult.output);
 
-					// Log message filtering
-					if (filteredMessages.length !== messages.length) {
-						logger.debug('Filtered empty assistant messages', {
-							originalCount: messages.length,
-							filteredCount: filteredMessages.length,
-							removedCount: messages.length - filteredMessages.length
-						});
-					}
+								logger.debug('Tool executed', {
+									toolName: tc.function.name,
+									resultLength: resultStr.length,
+								});
 
-					// Return filtered messages if any were removed, otherwise no changes
-					if (filteredMessages.length !== messages.length) {
-						return {messages: filteredMessages};
-					}
-					return {}; // No modifications needed
-				},
-			});
+								callbacks.onToolExecuted?.(tc, resultStr);
+							});
+						}
+					},
+					prepareStep: ({messages}) => {
+						// Filter out empty assistant messages that would cause API errors
+						// "Assistant message must have either content or tool_calls"
+						const filteredMessages = messages.filter(
+							m => !isEmptyAssistantMessage(m as unknown as TestableMessage),
+						);
 
-			// Get the full text from the result
-			const fullText = result.text;
+						// Log message filtering
+						if (filteredMessages.length !== messages.length) {
+							logger.debug('Filtered empty assistant messages', {
+								originalCount: messages.length,
+								filteredCount: filteredMessages.length,
+								removedCount: messages.length - filteredMessages.length,
+							});
+						}
 
-			logger.debug('AI SDK response received', {
-				responseLength: fullText.length,
-				hasToolCalls: !!(result.toolCalls && result.toolCalls.length > 0),
-				toolCallCount: result.toolCalls?.length || 0
-			});
-
-			// Send the complete text to the callback
-			if (fullText) {
-				callbacks.onToken?.(fullText);
-			}
-
-			// Get tool calls from result
-			const toolCallsResult = result.toolCalls;
-
-			// Can inspect result.steps to see auto-executed tool calls and results
-			// const steps = await result.steps;
-
-			// Extract tool calls
-			const toolCalls: ToolCall[] = [];
-			if (toolCallsResult && toolCallsResult.length > 0) {
-				logger.debug('Processing tool calls from response', {
-					toolCallCount: toolCallsResult.length
+						// Return filtered messages if any were removed, otherwise no changes
+						if (filteredMessages.length !== messages.length) {
+							return {messages: filteredMessages};
+						}
+						return {}; // No modifications needed
+					},
 				});
 
-				for (const toolCall of toolCallsResult) {
-					const tc: ToolCall = {
-						// Some providers (like Ollama) don't provide toolCallId, so generate one
-						id:
-							toolCall.toolCallId ||
-							`tool_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-						function: {
-							name: toolCall.toolName,
-							// AI SDK v5 uses 'input' for tool arguments
-							arguments: toolCall.input as Record<string, unknown>,
-						},
-					};
-					toolCalls.push(tc);
+				// Get the full text from the result
+				const fullText = result.text;
 
-					logger.debug('Tool call processed', {
-						toolName: tc.function.name,
-						hasArguments: !!tc.function.arguments
-					});
+				logger.debug('AI SDK response received', {
+					responseLength: fullText.length,
+					hasToolCalls: !!(result.toolCalls && result.toolCalls.length > 0),
+					toolCallCount: result.toolCalls?.length || 0,
+				});
 
-					// Note: onToolCall already fired in onStepFinish - no need to call again
+				// Send the complete text to the callback
+				if (fullText) {
+					callbacks.onToken?.(fullText);
 				}
-			}
 
-			// Check for XML tool calls if no native ones
-			let content = fullText;
-			if (Object.keys(tools).length > 0 && toolCalls.length === 0 && content) {
-				logger.debug('Checking for XML tool calls in response content');
+				// Get tool calls from result
+				const toolCallsResult = result.toolCalls;
 
-				// First check for malformed XML tool calls
-				const malformedError =
-					XMLToolCallParser.detectMalformedToolCall(content);
-				if (malformedError) {
-					logger.warn('Malformed XML tool call detected', {
-						error: malformedError.error
+				// Can inspect result.steps to see auto-executed tool calls and results
+				// const steps = await result.steps;
+
+				// Extract tool calls
+				const toolCalls: ToolCall[] = [];
+				if (toolCallsResult && toolCallsResult.length > 0) {
+					logger.debug('Processing tool calls from response', {
+						toolCallCount: toolCallsResult.length,
 					});
 
-					// Return malformed tool call with validation error
-					// This mimics how validators work - returns tool call that will show error
-					const malformedCall: ToolCall = {
-						id: 'malformed_xml_validation',
-						function: {
-							name: '__xml_validation_error__',
-							arguments: {
-								error: malformedError.error,
+					for (const toolCall of toolCallsResult) {
+						const tc: ToolCall = {
+							// Some providers (like Ollama) don't provide toolCallId, so generate one
+							id:
+								toolCall.toolCallId ||
+								`tool_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+							function: {
+								name: toolCall.toolName,
+								// AI SDK v5 uses 'input' for tool arguments
+								arguments: toolCall.input as Record<string, unknown>,
 							},
-						},
-					};
-					toolCalls.push(malformedCall);
-					callbacks.onToolCall?.(malformedCall);
-					content = ''; // Clear content since it was malformed
-				} else if (XMLToolCallParser.hasToolCalls(content)) {
-					logger.debug('Parsing XML tool calls from content');
-
-					// Try to parse well-formed XML tool calls
-					const parsedToolCalls = XMLToolCallParser.parseToolCalls(content);
-					const xmlToolCalls =
-						XMLToolCallParser.convertToToolCalls(parsedToolCalls);
-					const cleanedContent =
-						XMLToolCallParser.removeToolCallsFromContent(content);
-
-					logger.debug('XML tool calls parsed', {
-						toolCallCount: xmlToolCalls.length,
-						contentLength: cleanedContent.length
-					});
-
-					content = cleanedContent;
-					for (const tc of xmlToolCalls) {
+						};
 						toolCalls.push(tc);
-						callbacks.onToolCall?.(tc);
+
+						logger.debug('Tool call processed', {
+							toolName: tc.function.name,
+							hasArguments: !!tc.function.arguments,
+						});
+
+						// Note: onToolCall already fired in onStepFinish - no need to call again
 					}
 				}
-			}
 
-			// Calculate performance metrics
-			const finalMetrics = endMetrics(metrics);
-			const memoryDelta = calculateMemoryDelta(metrics.memoryUsage!, finalMetrics.memoryUsage!);
+				// Check for XML tool calls if no native ones
+				let content = fullText;
+				if (
+					Object.keys(tools).length > 0 &&
+					toolCalls.length === 0 &&
+					content
+				) {
+					logger.debug('Checking for XML tool calls in response content');
 
-			logger.info('Chat request completed successfully', {
-				model: this.currentModel,
-				duration: `${finalMetrics.duration.toFixed(2)}ms`,
-				responseLength: content.length,
-				toolCallsFound: toolCalls.length,
-				memoryDelta: formatMemoryUsage(finalMetrics.memoryUsage!),
-				correlationId,
-				provider: this.providerConfig.name
-			});
+					// First check for malformed XML tool calls
+					const malformedError =
+						XMLToolCallParser.detectMalformedToolCall(content);
+					if (malformedError) {
+						logger.warn('Malformed XML tool call detected', {
+							error: malformedError.error,
+						});
 
-			callbacks.onFinish?.();
+						// Return malformed tool call with validation error
+						// This mimics how validators work - returns tool call that will show error
+						const malformedCall: ToolCall = {
+							id: 'malformed_xml_validation',
+							function: {
+								name: '__xml_validation_error__',
+								arguments: {
+									error: malformedError.error,
+								},
+							},
+						};
+						toolCalls.push(malformedCall);
+						callbacks.onToolCall?.(malformedCall);
+						content = ''; // Clear content since it was malformed
+					} else if (XMLToolCallParser.hasToolCalls(content)) {
+						logger.debug('Parsing XML tool calls from content');
 
-			return {
-				choices: [
-					{
-						message: {
-							role: 'assistant',
-							content,
-							tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
-						},
-					},
-				],
-			};
-		} catch (error) {
-			// Calculate performance metrics even for errors
-			const finalMetrics = endMetrics(metrics);
-			const memoryDelta = calculateMemoryDelta(metrics.memoryUsage!, finalMetrics.memoryUsage!);
+						// Try to parse well-formed XML tool calls
+						const parsedToolCalls = XMLToolCallParser.parseToolCalls(content);
+						const xmlToolCalls =
+							XMLToolCallParser.convertToToolCalls(parsedToolCalls);
+						const cleanedContent =
+							XMLToolCallParser.removeToolCallsFromContent(content);
 
-			// Check if this was a user-initiated cancellation
-			if (error instanceof Error && error.name === 'AbortError') {
-				logger.info('Chat request cancelled by user', {
+						logger.debug('XML tool calls parsed', {
+							toolCallCount: xmlToolCalls.length,
+							contentLength: cleanedContent.length,
+						});
+
+						content = cleanedContent;
+						for (const tc of xmlToolCalls) {
+							toolCalls.push(tc);
+							callbacks.onToolCall?.(tc);
+						}
+					}
+				}
+
+				// Calculate performance metrics
+				const finalMetrics = endMetrics(metrics);
+				const memoryDelta = calculateMemoryDelta(
+					metrics.memoryUsage!,
+					finalMetrics.memoryUsage!,
+				);
+
+				logger.info('Chat request completed successfully', {
 					model: this.currentModel,
 					duration: `${finalMetrics.duration.toFixed(2)}ms`,
+					responseLength: content.length,
+					toolCallsFound: toolCalls.length,
+					memoryDelta: formatMemoryUsage(finalMetrics.memoryUsage!),
 					correlationId,
-					provider: this.providerConfig.name
+					provider: this.providerConfig.name,
 				});
-				throw new Error('Operation was cancelled');
-			}
 
-			// Log the error with performance metrics
-			logger.error('Chat request failed', {
-				model: this.currentModel,
-				duration: `${finalMetrics.duration.toFixed(2)}ms`,
-				error: error instanceof Error ? error.message : error,
-				errorName: error instanceof Error ? error.name : 'Unknown',
-				correlationId,
-				provider: this.providerConfig.name,
-				memoryDelta: formatMemoryUsage(finalMetrics.memoryUsage!)
-			});
+				callbacks.onFinish?.();
 
-			// AI SDK wraps errors in NoOutputGeneratedError with no useful cause
-			// Check if it's a cancellation without an underlying API error
-			if (
-				error instanceof Error &&
-				(error.name === 'AI_NoOutputGeneratedError' ||
-					error.message.includes('No output generated'))
-			) {
-				// Check if there's an underlying RetryError with the real cause
-				const rootError = extractRootError(error);
-				if (rootError === error) {
-					// No underlying error - this is just a cancellation
+				return {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content,
+								tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+							},
+						},
+					],
+				};
+			} catch (error) {
+				// Calculate performance metrics even for errors
+				const finalMetrics = endMetrics(metrics);
+				const memoryDelta = calculateMemoryDelta(
+					metrics.memoryUsage!,
+					finalMetrics.memoryUsage!,
+				);
+
+				// Check if this was a user-initiated cancellation
+				if (error instanceof Error && error.name === 'AbortError') {
+					logger.info('Chat request cancelled by user', {
+						model: this.currentModel,
+						duration: `${finalMetrics.duration.toFixed(2)}ms`,
+						correlationId,
+						provider: this.providerConfig.name,
+					});
 					throw new Error('Operation was cancelled');
 				}
-				// There's a real error underneath, parse it
-				const userMessage = parseAPIError(rootError);
+
+				// Log the error with performance metrics
+				logger.error('Chat request failed', {
+					model: this.currentModel,
+					duration: `${finalMetrics.duration.toFixed(2)}ms`,
+					error: error instanceof Error ? error.message : error,
+					errorName: error instanceof Error ? error.name : 'Unknown',
+					correlationId,
+					provider: this.providerConfig.name,
+					memoryDelta: formatMemoryUsage(finalMetrics.memoryUsage!),
+				});
+
+				// AI SDK wraps errors in NoOutputGeneratedError with no useful cause
+				// Check if it's a cancellation without an underlying API error
+				if (
+					error instanceof Error &&
+					(error.name === 'AI_NoOutputGeneratedError' ||
+						error.message.includes('No output generated'))
+				) {
+					// Check if there's an underlying RetryError with the real cause
+					const rootError = extractRootError(error);
+					if (rootError === error) {
+						// No underlying error - this is just a cancellation
+						throw new Error('Operation was cancelled');
+					}
+					// There's a real error underneath, parse it
+					const userMessage = parseAPIError(rootError);
+					throw new Error(userMessage);
+				}
+
+				// Parse any other error (including RetryError and APICallError)
+				const userMessage = parseAPIError(error);
 				throw new Error(userMessage);
 			}
-
-			// Parse any other error (including RetryError and APICallError)
-			const userMessage = parseAPIError(error);
-			throw new Error(userMessage);
-		}
 		}, correlationId); // End of withNewCorrelationContext
 	}
 

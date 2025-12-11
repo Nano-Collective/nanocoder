@@ -8,7 +8,6 @@ import type {MessageType} from '@/types/index';
 import {
 	withNewCorrelationContext,
 	generateCorrelationId,
-	getCorrelationId,
 	startMetrics,
 	endMetrics,
 	calculateMemoryDelta,
@@ -176,39 +175,23 @@ function addTypedMessage(
 		switch (type) {
 			case 'error':
 				component = (
-					<ErrorMessage
-						key={key}
-						message={message}
-						hideBox={hideBox}
-											/>
+					<ErrorMessage key={key} message={message} hideBox={hideBox} />
 				);
 				break;
 			case 'success':
 				component = (
-					<SuccessMessage
-						key={key}
-						message={message}
-						hideBox={hideBox}
-											/>
+					<SuccessMessage key={key} message={message} hideBox={hideBox} />
 				);
 				break;
 			case 'warning':
 				component = (
-					<WarningMessage
-						key={key}
-						message={message}
-						hideBox={hideBox}
-											/>
+					<WarningMessage key={key} message={message} hideBox={hideBox} />
 				);
 				break;
 			case 'info':
 			default:
 				component = (
-					<InfoMessage
-						key={key}
-						message={message}
-						hideBox={hideBox}
-					/>
+					<InfoMessage key={key} message={message} hideBox={hideBox} />
 				);
 				break;
 		}
@@ -224,7 +207,9 @@ function addTypedMessage(
 			messageType: type,
 			componentKey: key,
 			renderTime: `${finalMetrics.duration.toFixed(2)}ms`,
-			memoryDelta: formatMemoryUsage(memoryDelta as unknown as NodeJS.MemoryUsage),
+			memoryDelta: formatMemoryUsage(
+				memoryDelta as unknown as NodeJS.MemoryUsage,
+			),
 			correlationId,
 		});
 
@@ -401,7 +386,6 @@ export function logUserAction(
 	});
 }
 
-
 // Get current message queue statistics
 export function getMessageQueueStats(): MessageQueueStats {
 	return {...messageStats};
@@ -426,7 +410,6 @@ export function resetMessageQueueStats() {
 		correlationId: generateCorrelationId(),
 	});
 }
-
 
 // Log current message queue statistics
 export function logMessageQueueStats() {

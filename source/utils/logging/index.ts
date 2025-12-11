@@ -84,7 +84,6 @@ export const console = {
 	},
 };
 
-
 /**
  * Flush any pending logs
  */
@@ -235,8 +234,7 @@ export {
 
 // Import default export separately
 import LogStorage from './log-query.js';
-export { LogStorage };
-
+export {LogStorage};
 
 // Export health monitoring
 export {

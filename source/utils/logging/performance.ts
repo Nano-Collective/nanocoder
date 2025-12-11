@@ -14,7 +14,7 @@ import {
 let _logger: any = null;
 function getLogger() {
 	if (!_logger) {
-		const { getLogger: _getLogger } = require('./index.js');
+		const {getLogger: _getLogger} = require('./index.js');
 		_logger = _getLogger();
 	}
 	return _logger;
@@ -25,7 +25,7 @@ const logger = new Proxy({} as any, {
 	get(target, prop) {
 		const loggerInstance = getLogger();
 		return loggerInstance[prop];
-	}
+	},
 });
 
 /**
@@ -694,7 +694,8 @@ export function calculatePerformanceStats(
  * Performance monitor class for ongoing tracking
  */
 export class PerformanceMonitor {
-	private measurements: Map<string, (PerformanceMetrics & {id?: string})[]> = new Map();
+	private measurements: Map<string, (PerformanceMetrics & {id?: string})[]> =
+		new Map();
 	private readonly maxMeasurements: number;
 
 	constructor(maxMeasurements: number = 100) {

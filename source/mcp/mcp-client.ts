@@ -58,7 +58,7 @@ export class MCPClient {
 		const correlationId = generateCorrelationId();
 		const metrics = startMetrics();
 
-		return await withNewCorrelationContext(async (context) => {
+		return await withNewCorrelationContext(async context => {
 			// Normalize server configuration for backward compatibility
 			const normalizedServer = this.normalizeServerConfig(server);
 
@@ -179,7 +179,7 @@ export class MCPClient {
 			correlationId,
 		});
 
-		return await withNewCorrelationContext(async (context) => {
+		return await withNewCorrelationContext(async context => {
 			// Connect to servers in parallel for better performance
 			const connectionPromises = servers.map(async server => {
 				try {
@@ -441,7 +441,7 @@ export class MCPClient {
 		const correlationId = generateCorrelationId();
 		const metrics = startMetrics();
 
-		return await withNewCorrelationContext(async (context) => {
+		return await withNewCorrelationContext(async context => {
 			this.logger.info('Executing MCP tool', {
 				toolName,
 				argumentCount: Object.keys(args).length,
@@ -543,7 +543,7 @@ export class MCPClient {
 			correlationId,
 		});
 
-		return await withNewCorrelationContext(async (context) => {
+		return await withNewCorrelationContext(async context => {
 			let successfulDisconnections = 0;
 			let failedDisconnections = 0;
 

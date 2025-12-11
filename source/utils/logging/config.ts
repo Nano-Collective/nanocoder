@@ -5,13 +5,13 @@
 import {join} from 'path';
 import {platform} from 'os';
 import {homedir} from 'os';
-import type {LoggerConfig, TransportConfig} from './types.js';
+import type {LoggerConfig} from './types.js';
 
 /**
  * Get the default log directory based on platform
  */
 export function getDefaultLogDirectory(): string {
-	const env = process.env.NODE_ENV || 'development';
+	const _env = process.env.NODE_ENV || 'development';
 
 	if (process.env.LOG_DIR) {
 		return process.env.LOG_DIR;
@@ -54,7 +54,7 @@ export function createDevelopmentConfig(): any {
  * Create production configuration
  */
 export function createProductionConfig(): any {
-	const logDir = getDefaultLogDirectory();
+	const _logDir = getDefaultLogDirectory();
 
 	// Check if file logging is explicitly disabled
 	const disableFileLogging = process.env.LOG_DISABLE_FILE === 'true';
@@ -174,9 +174,7 @@ export function normalizeLogLevel(level: string): string {
 /**
  * Create configuration with overrides
  */
-export function createConfig(
-	overrides: Partial<LoggerConfig> = {},
-): any {
+export function createConfig(overrides: Partial<LoggerConfig> = {}): any {
 	const baseConfig = getEnvironmentConfig();
 
 	// Apply overrides with validation

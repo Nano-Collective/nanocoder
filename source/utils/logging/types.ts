@@ -36,13 +36,20 @@ export interface LogEntry {
 }
 
 export interface Logger {
-	fatal: ((msg: string, ...args: any[]) => void) & ((obj: object, msg?: string) => void);
-	error: ((msg: string, ...args: any[]) => void) & ((obj: object, msg?: string) => void);
-	warn: ((msg: string, ...args: any[]) => void) & ((obj: object, msg?: string) => void);
-	info: ((msg: string, ...args: any[]) => void) & ((obj: object, msg?: string) => void);
-	http: ((msg: string, ...args: any[]) => void) & ((obj: object, msg?: string) => void);
-	debug: ((msg: string, ...args: any[]) => void) & ((obj: object, msg?: string) => void);
-	trace: ((msg: string, ...args: any[]) => void) & ((obj: object, msg?: string) => void);
+	fatal: ((msg: string, ...args: any[]) => void) &
+		((obj: object, msg?: string) => void);
+	error: ((msg: string, ...args: any[]) => void) &
+		((obj: object, msg?: string) => void);
+	warn: ((msg: string, ...args: any[]) => void) &
+		((obj: object, msg?: string) => void);
+	info: ((msg: string, ...args: any[]) => void) &
+		((obj: object, msg?: string) => void);
+	http: ((msg: string, ...args: any[]) => void) &
+		((obj: object, msg?: string) => void);
+	debug: ((msg: string, ...args: any[]) => void) &
+		((obj: object, msg?: string) => void);
+	trace: ((msg: string, ...args: any[]) => void) &
+		((obj: object, msg?: string) => void);
 
 	child(bindings: Record<string, any>): Logger;
 	isLevelEnabled(level: LogLevel): boolean;
