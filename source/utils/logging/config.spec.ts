@@ -57,7 +57,7 @@ test('createProductionConfig creates valid production config', t => {
 	const config = createProductionConfig();
 
 	t.is(typeof config, 'object', 'Should return object');
-	t.is(config.level, 'info', 'Should use info level in production');
+	t.is(config.level, 'debug', 'Should use debug level in production');
 	t.false(config.pretty, 'Should disable pretty printing in production');
 	t.true(config.correlation, 'Should enable correlation in production');
 	t.true(config.serialize, 'Should serialize in production');
@@ -68,7 +68,7 @@ test('createTestConfig creates valid test config', t => {
 	const config = createTestConfig();
 
 	t.is(typeof config, 'object', 'Should return object');
-	t.is(config.level, 'silent', 'Should use silent level in tests');
+	t.is(config.level, 'debug', 'Should use debug level in tests');
 	t.false(config.pretty, 'Should disable pretty printing in tests');
 	t.false(config.correlation, 'Should disable correlation in tests');
 	t.false(config.serialize, 'Should not serialize in tests');

@@ -791,7 +791,7 @@ export class HealthMonitor {
 				case 'webhook':
 					if (this.config.alerts.webhookUrl) {
 						try {
-							// Would implement webhook call here
+							// TODO: implement webhook call here
 							logger.info('Webhook alert would be sent', {
 								url: this.config.alerts.webhookUrl,
 								correlationId: this.correlationId,
