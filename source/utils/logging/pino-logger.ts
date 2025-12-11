@@ -31,38 +31,15 @@ function determineTransportConfig(
 	const envLogFile = process.env.LOG_TO_FILE === 'true';
 	const envLogConsole = process.env.LOG_TO_CONSOLE === 'true';
 
-	// Production: file only, no console (critical for UI cleanliness)
-	if (isProduction) {
-		return {
-			enableFile: true, // Always true in production
-			enableConsole: false, // Always false - critical for clean UI
-			logFileName: 'nanocoder', // No prefix for production
-		};
-	}
-
-	// Development: both enabled by default, respect CLI flags
-	if (isDevelopment) {
-		return {
-			enableFile: cliConfig?.noLogFile
-				? false
-				: (cliConfig?.logToFile || envLogFile || true),
-			enableConsole: cliConfig?.noLogConsole
-				? false
-				: (cliConfig?.logToConsole || envLogConsole || true),
-			logFileName: 'nanocoder-dev', // Development prefix
-		};
-	}
-
-	// Test: file only if explicitly enabled
+	// All environments: file only, no console - simplified approach
 	return {
-		enableFile: envLogFile,
-		enableConsole: false,
-		logFileName: 'nanocoder-test', // Test prefix
+		enableFile: true, // Always enable file logging
+		enableConsole: false, // Never use console transport
 	};
 }
 
 /**
- * Create environment-specific logger using Pino transports
+ * Create unified logger using file transport for all environments
  */
 function createEnvironmentLogger(
 	baseConfig: pino.LoggerOptions,
@@ -70,7 +47,7 @@ function createEnvironmentLogger(
 ): Logger {
 	const logDir = getDefaultLogDirectory();
 
-	// Production: Create single file transport logger
+	// Create single file transport logger for all environments
 	if (transportConfig.enableFile && !transportConfig.enableConsole) {
 		// Ensure directory exists
 		if (!existsSync(logDir)) {
@@ -79,7 +56,7 @@ function createEnvironmentLogger(
 
 		const logFilePath = join(
 			logDir,
-			`${transportConfig.logFileName}-${new Date().toISOString().split('T')[0]}.log`,
+			`nanocoder-${new Date().toISOString().split('T')[0]}.log`,
 		);
 
 		const transport = pino.transport({
@@ -100,79 +77,7 @@ function createEnvironmentLogger(
 		return createEnhancedLogger(pinoLogger, undefined, redactionRules);
 	}
 
-	// Development: Create dual transport logger
-	if (transportConfig.enableFile && transportConfig.enableConsole) {
-		// Ensure directory exists
-		if (!existsSync(logDir)) {
-			mkdirSync(logDir, {recursive: true});
-		}
-
-		const logFilePath = join(
-			logDir,
-			`${transportConfig.logFileName}-${new Date().toISOString().split('T')[0]}.log`,
-		);
-
-		const transport = pino.transport({
-			targets: [
-				{
-					target: 'pino-pretty',
-					level: 'debug',
-					options: {
-						colorize: true,
-						translateTime: 'HH:MM:ss Z',
-						ignore: 'pid,platform,arch,service,version',
-						levelFirst: false,
-						messageFormat: '{msg}',
-						singleLine: true,
-					},
-				},
-				{
-					target: 'pino/file',
-					level: 'debug',
-					options: {
-						destination: logFilePath,
-						mkdir: true,
-					},
-				},
-			],
-			dedupe: true,
-		});
-
-		const pinoLogger = pino(baseConfig, transport);
-		const redactionRules = createRedactionRules(
-			Array.isArray(baseConfig.redact) ? baseConfig.redact : [],
-			false, // Disable email redaction in dev for visibility
-			false, // Disable user ID redaction in dev for visibility
-		);
-
-		return createEnhancedLogger(pinoLogger, undefined, redactionRules);
-	}
-
-	// Console only (development fallback or other scenarios)
-	if (transportConfig.enableConsole) {
-		const transport = pino.transport({
-			target: 'pino-pretty',
-			options: {
-				colorize: true,
-				translateTime: 'HH:MM:ss Z',
-				ignore: 'pid,platform,arch,service,version',
-				levelFirst: false,
-				messageFormat: '{msg}',
-				singleLine: true,
-			},
-		});
-
-		const pinoLogger = pino(baseConfig, transport);
-		const redactionRules = createRedactionRules(
-			Array.isArray(baseConfig.redact) ? baseConfig.redact : [],
-			false, // Disable email redaction in dev
-			false, // Disable user ID redaction in dev
-		);
-
-		return createEnhancedLogger(pinoLogger, undefined, redactionRules);
-	}
-
-	// Silent fallback
+	// Silent fallback (should not reach here with new config)
 	return createSilentLogger();
 }
 
@@ -533,6 +438,7 @@ export function createPinoLogger(
 			arch: process.arch, // NEW: architecture field
 			service: 'nanocoder',
 			version: process.env.npm_package_version || '1.18.0',
+			environment: process.env.NODE_ENV || 'development', // NEW: environment field
 		},
 	};
 
@@ -562,6 +468,7 @@ export function createLoggerWithTransport(
 			arch: process.arch,
 			service: 'nanocoder',
 			version: process.env.npm_package_version || '1.18.0',
+			environment: process.env.NODE_ENV || 'development',
 		},
 	};
 

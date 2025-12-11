@@ -311,12 +311,6 @@ const {requestTimeout, socketTimeout} = this.providerConfig;
   const effectiveSocketTimeout = socketTimeout ?? requestTimeout;
   const resolvedSocketTimeout =
         effectiveSocketTimeout === -1 ? 0 : effectiveSocketTimeout ?? 120000;
-		const resolvedSocketTimeout =
-			socketTimeout === -1
-				? 0
-				: (socketTimeout ?? requestTimeout) === -1
-				? 0
-				: (socketTimeout ?? requestTimeout) || 120000;
 
 		this.undiciAgent = new Agent({
 			connect: {

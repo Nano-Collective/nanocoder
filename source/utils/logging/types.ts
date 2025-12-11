@@ -118,5 +118,4 @@ export interface LoggingCliConfig {
 export interface EnvironmentTransportConfig {
 	enableFile: boolean;
 	enableConsole: boolean;
-	logFileName: string;
 }

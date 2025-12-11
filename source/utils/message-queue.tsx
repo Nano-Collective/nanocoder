@@ -243,7 +243,7 @@ export function logInfo(
 		correlationId?: string;
 	},
 ) {
-	addMessageToQueue('info', message, hideBox, {
+	addTypedMessage('info', message, hideBox, {
 		...options,
 		source: options?.source || 'logInfo',
 	});
@@ -259,7 +259,7 @@ export function logError(
 		error?: unknown;
 	},
 ) {
-	addMessageToQueue('error', message, hideBox, {
+	addTypedMessage('error', message, hideBox, {
 		...options,
 		source: options?.source || 'logError',
 	});
@@ -274,7 +274,7 @@ export function logSuccess(
 		correlationId?: string;
 	},
 ) {
-	addMessageToQueue('success', message, hideBox, {
+	addTypedMessage('success', message, hideBox, {
 		...options,
 		source: options?.source || 'logSuccess',
 	});
@@ -289,7 +289,7 @@ export function logWarning(
 		correlationId?: string;
 	},
 ) {
-	addMessageToQueue('warning', message, hideBox, {
+	addTypedMessage('warning', message, hideBox, {
 		...options,
 		source: options?.source || 'logWarning',
 	});
@@ -401,9 +401,7 @@ export function logUserAction(
 	});
 }
 
-// Convenience functions for each message type
-export function logInfo(message: string, hideBox: boolean = true) {
-	addTypedMessage('info', message, hideBox);
+
 // Get current message queue statistics
 export function getMessageQueueStats(): MessageQueueStats {
 	return {...messageStats};
@@ -429,17 +427,7 @@ export function resetMessageQueueStats() {
 	});
 }
 
-export function logError(message: string, hideBox: boolean = true) {
-	addTypedMessage('error', message, hideBox);
-}
 
-// Temporarily ingored in `knip.json`. We do want this. We just haven't used it yet.
-export function logSuccess(message: string, hideBox: boolean = true) {
-	addTypedMessage('success', message, hideBox);
-}
-
-export function logWarning(message: string, hideBox: boolean = true) {
-	addTypedMessage('warning', message, hideBox);
 // Log current message queue statistics
 export function logMessageQueueStats() {
 	logger.info('Message queue statistics', {
