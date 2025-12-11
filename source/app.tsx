@@ -1,6 +1,6 @@
 import {Box, Text, useApp} from 'ink';
 import WelcomeMessage from '@/components/welcome-message';
-import React, {useEffect} from 'react';
+import React, {useEffect, useMemo} from 'react';
 import {getThemeColors} from '@/config/themes';
 import {ThemeContext} from '@/hooks/useTheme';
 import UserInput from '@/components/user-input';
@@ -135,7 +135,8 @@ export default function App({
 	nonInteractivePrompt,
 	nonInteractiveMode = false,
 	loggingConfig = {}}: AppProps) {
-	const logger = createPinoLogger(undefined, loggingConfig);
+	// Memoize the logger to prevent recreation on every render
+	const logger = useMemo(() => createPinoLogger(undefined, loggingConfig), [loggingConfig]);
 
 	// Log application startup with key configuration
 	React.useEffect(() => {
