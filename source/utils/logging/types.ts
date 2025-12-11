@@ -30,6 +30,7 @@ export interface LogEntry {
 	pid: number;
 	hostname: string;
 	correlationId?: string;
+	nodeVersion?: string; // NEW: Node.js version field
 	msg: string;
 	[key: string]: any;
 }

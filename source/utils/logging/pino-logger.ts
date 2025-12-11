@@ -439,6 +439,7 @@ export function createPinoLogger(
 			service: 'nanocoder',
 			version: process.env.npm_package_version || '1.18.0',
 			environment: process.env.NODE_ENV || 'development', // NEW: environment field
+			nodeVersion: process.version, // NEW: Node.js version field
 		},
 	};
 
@@ -469,6 +470,7 @@ export function createLoggerWithTransport(
 			service: 'nanocoder',
 			version: process.env.npm_package_version || '1.18.0',
 			environment: process.env.NODE_ENV || 'development',
+			nodeVersion: process.version, // NEW: Node.js version field
 		},
 	};
 
