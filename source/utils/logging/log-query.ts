@@ -3,10 +3,10 @@
  * Provides powerful filtering, searching, and analytics capabilities
  */
 
-import {generateCorrelationId, getLogger} from './index.js';
+import {getLogger} from './index.js';
 
 // Get logger instance directly to avoid circular dependencies
-const logger = getLogger();
+const _logger = getLogger();
 
 /**
  * Log entry structure for querying
@@ -217,7 +217,7 @@ class LogStorage {
 		}
 
 		// Apply pagination
-		const totalCount = filteredEntries.length;
+		const _totalCount = filteredEntries.length;
 		const offset = query.offset || 0;
 		const limit = query.limit || 100;
 		const paginatedEntries = filteredEntries.slice(offset, offset + limit);

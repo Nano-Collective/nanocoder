@@ -179,8 +179,8 @@ export class LoggerProvider {
 					console.log('[TRACE]', msg, ...restArgs);
 				}
 			}) as any,
-			child: (bindings: Record<string, any>) => this.createFallbackLogger(),
-			isLevelEnabled: (level: string) => true,
+			child: (_bindings: Record<string, any>) => this.createFallbackLogger(),
+			isLevelEnabled: (_level: string) => true,
 			flush: async () => Promise.resolve(),
 			end: async () => Promise.resolve(),
 		};

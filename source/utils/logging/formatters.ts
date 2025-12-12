@@ -7,7 +7,7 @@ import type {LogEntry} from './types.js';
 /**
  * Format log level as uppercase string
  */
-export function formatLevel(label: string, number: number): {level: string} {
+export function formatLevel(label: string, _number: number): {level: string} {
 	return {
 		level: label.toUpperCase(),
 	};
@@ -97,7 +97,7 @@ export function formatProductionLog(log: LogEntry): LogEntry {
 				// Quick check for circular references
 				JSON.stringify(value);
 				formatted[key] = value;
-			} catch (circularError) {
+			} catch {
 				formatted[key] = '[Circular Reference]';
 			}
 		} else {

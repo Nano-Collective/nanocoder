@@ -5,14 +5,9 @@
 
 import {
 	generateCorrelationId,
-	withNewCorrelationContext,
-	startMetrics,
-	endMetrics,
-	calculateMemoryDelta,
-	formatMemoryUsage,
 	getLogger,
 } from './index.js';
-import {trackPerformance} from './performance.js';
+import {trackPerformance, calculateMemoryDelta, formatBytes} from './performance.js';
 
 // Get logger instance directly to avoid circular dependencies
 const logger = getLogger();
@@ -47,7 +42,7 @@ export interface RequestMetadata {
 	userId?: string;
 	sessionId?: string;
 	tags?: string[];
-	customData?: Record<string, any>;
+	customData?: Record<string, unknown>;
 }
 
 /**
@@ -128,7 +123,7 @@ export class RequestTracker {
 		responseMetadata?: {
 			statusCode?: number;
 			responseSize?: number;
-			customData?: Record<string, any>;
+			customData?: Record<string, unknown>;
 		},
 	): RequestMetadata | null {
 		const request = this.activeRequests.get(requestId);
@@ -143,9 +138,15 @@ export class RequestTracker {
 		const endTime = Date.now();
 		const memoryEnd = process.memoryUsage();
 		const duration = endTime - request.startTime;
-		const memoryDelta = request.memoryStart
-			? calculateMemoryDelta(request.memoryStart, memoryEnd)
-			: undefined;
+		let memoryDelta: Record<string, number> | undefined;
+		if (request.memoryStart) {
+			try {
+				memoryDelta = calculateMemoryDelta(request.memoryStart, memoryEnd);
+			} catch {
+				// Ignore memory calculation errors
+				memoryDelta = undefined;
+			}
+		}
 
 		const completedRequest: RequestMetadata = {
 			...request,
@@ -169,12 +170,12 @@ export class RequestTracker {
 			duration: `${duration}ms`,
 			statusCode: completedRequest.statusCode,
 			memoryDelta: memoryDelta
-				? formatMemoryUsage({
-						heapUsed: memoryDelta.heapUsedDelta || 0,
-						heapTotal: memoryDelta.heapTotalDelta || 0,
-						external: memoryDelta.externalDelta || 0,
-						rss: memoryDelta.rssDelta || 0,
-				  } as NodeJS.MemoryUsage)
+				? {
+						heapUsed: formatBytes(memoryDelta.heapUsedDelta || 0),
+						heapTotal: formatBytes(memoryDelta.heapTotalDelta || 0),
+						external: formatBytes(memoryDelta.externalDelta || 0),
+						rss: formatBytes(memoryDelta.rssDelta || 0),
+				  }
 				: undefined,
 			correlationId: completedRequest.correlationId,
 			source: 'request-tracker',
@@ -192,7 +193,7 @@ export class RequestTracker {
 		errorMetadata?: {
 			errorType?: string;
 			statusCode?: number;
-			customData?: Record<string, any>;
+			customData?: Record<string, unknown>;
 		},
 	): RequestMetadata | null {
 		const request = this.activeRequests.get(requestId);
@@ -207,9 +208,15 @@ export class RequestTracker {
 		const endTime = Date.now();
 		const memoryEnd = process.memoryUsage();
 		const duration = endTime - request.startTime;
-		const memoryDelta = request.memoryStart
-			? calculateMemoryDelta(request.memoryStart, memoryEnd)
-			: undefined;
+		let memoryDelta: Record<string, number> | undefined;
+		if (request.memoryStart) {
+			try {
+				memoryDelta = calculateMemoryDelta(request.memoryStart, memoryEnd);
+			} catch {
+				// Ignore memory calculation errors
+				memoryDelta = undefined;
+			}
+		}
 
 		const errorMessage = error instanceof Error ? error.message : error;
 		const errorType =
@@ -243,12 +250,12 @@ export class RequestTracker {
 			errorMessage,
 			statusCode: completedRequest.statusCode,
 			memoryDelta: memoryDelta
-				? formatMemoryUsage({
-						heapUsed: memoryDelta.heapUsedDelta || 0,
-						heapTotal: memoryDelta.heapTotalDelta || 0,
-						external: memoryDelta.externalDelta || 0,
-						rss: memoryDelta.rssDelta || 0,
-				  } as NodeJS.MemoryUsage)
+				? {
+						heapUsed: formatBytes(memoryDelta.heapUsedDelta || 0),
+						heapTotal: formatBytes(memoryDelta.heapTotalDelta || 0),
+						external: formatBytes(memoryDelta.externalDelta || 0),
+						rss: formatBytes(memoryDelta.rssDelta || 0),
+				  }
 				: undefined,
 			correlationId: completedRequest.correlationId,
 			source: 'request-tracker',
@@ -273,9 +280,15 @@ export class RequestTracker {
 		const endTime = Date.now();
 		const memoryEnd = process.memoryUsage();
 		const duration = endTime - request.startTime;
-		const memoryDelta = request.memoryStart
-			? calculateMemoryDelta(request.memoryStart, memoryEnd)
-			: undefined;
+		let memoryDelta: Record<string, number> | undefined;
+		if (request.memoryStart) {
+			try {
+				memoryDelta = calculateMemoryDelta(request.memoryStart, memoryEnd);
+			} catch {
+				// Ignore memory calculation errors
+				memoryDelta = undefined;
+			}
+		}
 
 		const completedRequest: RequestMetadata = {
 			...request,
@@ -299,12 +312,12 @@ export class RequestTracker {
 			duration: `${duration}ms`,
 			timeoutMs: `${timeoutMs}ms`,
 			memoryDelta: memoryDelta
-				? formatMemoryUsage({
-						heapUsed: memoryDelta.heapUsedDelta || 0,
-						heapTotal: memoryDelta.heapTotalDelta || 0,
-						external: memoryDelta.externalDelta || 0,
-						rss: memoryDelta.rssDelta || 0,
-				  } as NodeJS.MemoryUsage)
+				? {
+						heapUsed: formatBytes(memoryDelta.heapUsedDelta || 0),
+						heapTotal: formatBytes(memoryDelta.heapTotalDelta || 0),
+						external: formatBytes(memoryDelta.externalDelta || 0),
+						rss: formatBytes(memoryDelta.rssDelta || 0),
+				  }
 				: undefined,
 			correlationId: completedRequest.correlationId,
 			source: 'request-tracker',
@@ -329,9 +342,15 @@ export class RequestTracker {
 		const endTime = Date.now();
 		const memoryEnd = process.memoryUsage();
 		const duration = endTime - request.startTime;
-		const memoryDelta = request.memoryStart
-			? calculateMemoryDelta(request.memoryStart, memoryEnd)
-			: undefined;
+		let memoryDelta: Record<string, number> | undefined;
+		if (request.memoryStart) {
+			try {
+				memoryDelta = calculateMemoryDelta(request.memoryStart, memoryEnd);
+			} catch {
+				// Ignore memory calculation errors
+				memoryDelta = undefined;
+			}
+		}
 
 		const completedRequest: RequestMetadata = {
 			...request,
@@ -355,12 +374,12 @@ export class RequestTracker {
 			duration: `${duration}ms`,
 			reason,
 			memoryDelta: memoryDelta
-				? formatMemoryUsage({
-						heapUsed: memoryDelta.heapUsedDelta || 0,
-						heapTotal: memoryDelta.heapTotalDelta || 0,
-						external: memoryDelta.externalDelta || 0,
-						rss: memoryDelta.rssDelta || 0,
-				  } as NodeJS.MemoryUsage)
+				? {
+						heapUsed: formatBytes(memoryDelta.heapUsedDelta || 0),
+						heapTotal: formatBytes(memoryDelta.heapTotalDelta || 0),
+						external: formatBytes(memoryDelta.externalDelta || 0),
+						rss: formatBytes(memoryDelta.rssDelta || 0),
+				  }
 				: undefined,
 			correlationId: completedRequest.correlationId,
 			source: 'request-tracker',
@@ -378,10 +397,10 @@ export class RequestTracker {
 		const oneDayAgo = now - 24 * 60 * 60 * 1000;
 
 		const requestsInLastHour = this.completedRequests.filter(
-			r => r.endTime! > oneHourAgo,
+			r => r.endTime !== undefined && r.endTime > oneHourAgo,
 		).length;
 		const requestsInLastDay = this.completedRequests.filter(
-			r => r.endTime! > oneDayAgo,
+			r => r.endTime !== undefined && r.endTime > oneDayAgo,
 		).length;
 
 		const requestsByType: Record<string, number> = {};
@@ -557,7 +576,7 @@ export const globalRequestTracker = new RequestTracker();
 /**
  * Decorator to automatically track function calls as requests
  */
-export function trackRequest<T extends (...args: any[]) => any>(
+export function trackRequest<T extends (...args: unknown[]) => unknown>(
 	fn: T,
 	options: {
 		type: RequestMetadata['type'];

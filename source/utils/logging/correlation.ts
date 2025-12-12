@@ -3,7 +3,7 @@
  */
 
 import {randomBytes} from 'crypto';
-import type {CorrelationContext} from './types.js';
+import type {CorrelationContext, CorrelationHttpRequest, CorrelationHttpResponse} from './types.js';
 
 /**
  * Async local storage for correlation context (simple implementation)
@@ -32,7 +32,7 @@ export function generateShortCorrelationId(): string {
  */
 export function createCorrelationContext(
 	id?: string,
-	metadata?: Record<string, any>,
+	metadata?: Record<string, unknown>,
 ): CorrelationContext {
 	return {
 		id: id || generateCorrelationId(),
@@ -84,7 +84,7 @@ export function withCorrelationContext<T>(
 export function withNewCorrelationContext<T>(
 	fn: (context: CorrelationContext) => T,
 	correlationId?: string,
-	metadata?: Record<string, any>,
+	metadata?: Record<string, unknown>,
 ): T {
 	const context = createCorrelationContext(correlationId, metadata);
 	return withCorrelationContext(context, () => fn(context));
@@ -149,7 +149,7 @@ export function extractCorrelationId(
  */
 export function createCorrelationFromHeaders(
 	headers: Record<string, string>,
-	metadata?: Record<string, any>,
+	metadata?: Record<string, unknown>,
 ): CorrelationContext | null {
 	if (!isCorrelationEnabled()) {
 		return null;
@@ -162,7 +162,7 @@ export function createCorrelationFromHeaders(
 /**
  * Add correlation metadata
  */
-export function addCorrelationMetadata(key: string, value: any): void {
+export function addCorrelationMetadata(key: string, value: unknown): void {
 	if (currentContext) {
 		currentContext.metadata = {
 			...currentContext.metadata,
@@ -174,7 +174,7 @@ export function addCorrelationMetadata(key: string, value: any): void {
 /**
  * Get correlation metadata
  */
-export function getCorrelationMetadata(key?: string): any {
+export function getCorrelationMetadata(key?: string): unknown {
 	if (!currentContext || !currentContext.metadata) {
 		return key ? undefined : {};
 	}
@@ -205,9 +205,9 @@ export function formatCorrelationForLog(): Record<string, string> {
  * Correlation middleware for Express-like frameworks
  */
 export function correlationMiddleware() {
-	return (req: any, res: any, next: any) => {
+	return (req: CorrelationHttpRequest, res: CorrelationHttpResponse, next: () => void) => {
 		// Extract or create correlation ID
-		let correlationId = extractCorrelationId(req.headers);
+		let correlationId = extractCorrelationId(req.headers || {});
 
 		if (!correlationId) {
 			correlationId = generateCorrelationId();
@@ -217,13 +217,15 @@ export function correlationMiddleware() {
 		const context = createCorrelationContext(undefined, {
 			method: req.method,
 			url: req.url,
-			userAgent: req.headers['user-agent'],
+			userAgent: req.headers?.['user-agent'],
 		});
 
 		setCorrelationContext(context);
 
 		// Add correlation ID to response headers
-		res.setHeader('X-Correlation-ID', correlationId);
+		if (res.setHeader) {
+			res.setHeader('X-Correlation-ID', correlationId);
+		}
 
 		next();
 	};
@@ -232,7 +234,7 @@ export function correlationMiddleware() {
 /**
  * Wrap an async function with correlation tracking
  */
-export function withCorrelation<T extends (...args: any[]) => Promise<any>>(
+export function withCorrelation<T extends (...args: unknown[]) => Promise<unknown>>(
 	fn: T,
 	getCorrelationIdFromArgs?: (...args: Parameters<T>) => string,
 ): T {

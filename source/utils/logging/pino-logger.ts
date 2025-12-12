@@ -17,19 +17,32 @@ import type {
 	LoggerConfig,
 	LoggingCliConfig,
 	EnvironmentTransportConfig,
+	ConsoleArguments,
+	PinoTransportOptions,
 } from './types.js';
+
+/**
+ * Type for redaction rules
+ */
+type RedactionRules = {
+	patterns: RegExp[];
+	customPaths: string[];
+	emailRedaction: boolean;
+	userIdRedaction: boolean;
+	[key: string]: unknown;
+};
 
 /**
  * Determine transport configuration based on environment and CLI settings
  */
 function determineTransportConfig(
-	isProduction: boolean,
-	isDevelopment: boolean,
-	isTest: boolean,
-	cliConfig?: LoggingCliConfig,
+	_isProduction: boolean,
+	_isDevelopment: boolean,
+	_isTest: boolean,
+	_cliConfig?: LoggingCliConfig,
 ): EnvironmentTransportConfig {
-	const envLogFile = process.env.LOG_TO_FILE === 'true';
-	const envLogConsole = process.env.LOG_TO_CONSOLE === 'true';
+	const _envLogFile = process.env.LOG_TO_FILE === 'true';
+	const _envLogConsole = process.env.LOG_TO_CONSOLE === 'true';
 
 	// All environments: file only, no console - simplified approach
 	return {
@@ -59,14 +72,15 @@ function createEnvironmentLogger(
 			`nanocoder-${new Date().toISOString().split('T')[0]}.log`,
 		);
 
-		const transport = pino.transport({
+		const transportOptions: PinoTransportOptions = {
 			target: 'pino/file',
 			options: {
 				destination: logFilePath,
 				mkdir: true,
 			},
-		});
+		};
 
+		const transport = pino.transport(transportOptions) as pino.DestinationStream;
 		const pinoLogger = pino(baseConfig, transport);
 		const redactionRules = createRedactionRules(
 			Array.isArray(baseConfig.redact) ? baseConfig.redact : [],
@@ -87,101 +101,101 @@ function createEnvironmentLogger(
 function createEnhancedLogger(
 	pinoLogger: PinoLogger,
 	_fileLogger?: PinoLogger,
-	redactionRules?: any,
+	redactionRules?: RedactionRules,
 ): Logger {
 	return {
-		fatal: ((...args: any[]) => {
+		fatal: ((...args: ConsoleArguments) => {
 			if (args.length === 0) return;
 			if (typeof args[0] === 'object' && args[0] !== null) {
-				const obj = args[0];
-				const msg = args[1];
+				const obj = args[0] as Record<string, unknown>;
+				const msg = args[1] as string | undefined;
 				logWithContext(pinoLogger, 'fatal', msg || '', [obj], redactionRules);
 			} else {
-				const msg = args[0];
-				const restArgs = args.slice(1);
+				const msg = args[0] as string;
+				const restArgs = args.slice(1) as ConsoleArguments;
 				logWithContext(pinoLogger, 'fatal', msg, restArgs, redactionRules);
 			}
-		}) as any,
+		}),
 
-		error: ((...args: any[]) => {
+		error: ((...args: ConsoleArguments) => {
 			if (args.length === 0) return;
 			if (typeof args[0] === 'object' && args[0] !== null) {
-				const obj = args[0];
-				const msg = args[1];
+				const obj = args[0] as Record<string, unknown>;
+				const msg = args[1] as string | undefined;
 				logWithContext(pinoLogger, 'error', msg || '', [obj], redactionRules);
 			} else {
-				const msg = args[0];
-				const restArgs = args.slice(1);
+				const msg = args[0] as string;
+				const restArgs = args.slice(1) as ConsoleArguments;
 				logWithContext(pinoLogger, 'error', msg, restArgs, redactionRules);
 			}
-		}) as any,
+		}),
 
-		warn: ((...args: any[]) => {
+		warn: ((...args: ConsoleArguments) => {
 			if (args.length === 0) return;
 			if (typeof args[0] === 'object' && args[0] !== null) {
-				const obj = args[0];
-				const msg = args[1];
+				const obj = args[0] as Record<string, unknown>;
+				const msg = args[1] as string | undefined;
 				logWithContext(pinoLogger, 'warn', msg || '', [obj], redactionRules);
 			} else {
-				const msg = args[0];
-				const restArgs = args.slice(1);
+				const msg = args[0] as string;
+				const restArgs = args.slice(1) as ConsoleArguments;
 				logWithContext(pinoLogger, 'warn', msg, restArgs, redactionRules);
 			}
-		}) as any,
+		}),
 
-		info: ((...args: any[]) => {
+		info: ((...args: ConsoleArguments) => {
 			if (args.length === 0) return;
 			if (typeof args[0] === 'object' && args[0] !== null) {
-				const obj = args[0];
-				const msg = args[1];
+				const obj = args[0] as Record<string, unknown>;
+				const msg = args[1] as string | undefined;
 				logWithContext(pinoLogger, 'info', msg || '', [obj], redactionRules);
 			} else {
-				const msg = args[0];
-				const restArgs = args.slice(1);
+				const msg = args[0] as string;
+				const restArgs = args.slice(1) as ConsoleArguments;
 				logWithContext(pinoLogger, 'info', msg, restArgs, redactionRules);
 			}
-		}) as any,
+		}),
 
-		http: ((...args: any[]) => {
+		http: ((...args: ConsoleArguments) => {
 			if (args.length === 0) return;
 			if (typeof args[0] === 'object' && args[0] !== null) {
-				const obj = args[0];
-				const msg = args[1];
+				const obj = args[0] as Record<string, unknown>;
+				const msg = args[1] as string | undefined;
 				logWithContext(pinoLogger, 'http', msg || '', [obj], redactionRules);
 			} else {
-				const msg = args[0];
-				const restArgs = args.slice(1);
+				const msg = args[0] as string;
+				const restArgs = args.slice(1) as ConsoleArguments;
 				logWithContext(pinoLogger, 'http', msg, restArgs, redactionRules);
 			}
-		}) as any,
+		}),
 
-		debug: ((...args: any[]) => {
+		debug: ((...args: ConsoleArguments) => {
 			if (args.length === 0) return;
 			if (typeof args[0] === 'object' && args[0] !== null) {
-				const obj = args[0];
-				const msg = args[1];
+				const obj = args[0] as Record<string, unknown>;
+				const msg = args[1] as string | undefined;
 				logWithContext(pinoLogger, 'debug', msg || '', [obj], redactionRules);
 			} else {
-				const msg = args[0];
-				const restArgs = args.slice(1);
+				const msg = args[0] as string;
+				const restArgs = args.slice(1) as ConsoleArguments;
 				logWithContext(pinoLogger, 'debug', msg, restArgs, redactionRules);
 			}
-		}) as any,
+		}),
 
-		trace: ((...args: any[]) => {
+		trace: ((...args: ConsoleArguments) => {
 			if (args.length === 0) return;
 			if (typeof args[0] === 'object' && args[0] !== null) {
-				const obj = args[0];
-				const msg = args[1];
+				const obj = args[0] as Record<string, unknown>;
+				const msg = args[1] as string | undefined;
 				logWithContext(pinoLogger, 'trace', msg || '', [obj], redactionRules);
 			} else {
-				const msg = args[0];
-				const restArgs = args.slice(1);
+				const msg = args[0] as string;
+				const restArgs = args.slice(1) as ConsoleArguments;
 				logWithContext(pinoLogger, 'trace', msg, restArgs, redactionRules);
 			}
-		}) as any,
+		}),
 
-		child: (bindings: Record<string, any>) => {
+		child: (bindings: Record<string, unknown>) => {
 			return createEnhancedChild(pinoLogger, bindings, redactionRules);
 		},
 
@@ -189,15 +203,27 @@ function createEnhancedLogger(
 			return pinoLogger.isLevelEnabled(level);
 		},
 
-		flush: async () => {
+		flush: async (): Promise<void> => {
 			if ('flush' in pinoLogger) {
-				await (pinoLogger as any).flush();
+				const flushMethod = (pinoLogger as PinoLogger & { flush?: (() => void) | (() => Promise<void>) }).flush;
+				if (flushMethod) {
+					const result = flushMethod();
+					if (result instanceof Promise) {
+						await result;
+					}
+				}
 			}
 		},
 
-		end: async () => {
+		end: async (): Promise<void> => {
 			if ('end' in pinoLogger) {
-				await (pinoLogger as any).end();
+				const endMethod = (pinoLogger as PinoLogger & { end?: (() => void) | (() => Promise<void>) }).end;
+				if (endMethod) {
+					const result = endMethod();
+					if (result instanceof Promise) {
+						await result;
+					}
+				}
 			}
 		},
 	};
@@ -208,104 +234,104 @@ function createEnhancedLogger(
  */
 function createEnhancedChild(
 	parent: PinoLogger,
-	bindings: Record<string, any>,
-	redactionRules?: any,
+	bindings: Record<string, unknown>,
+	redactionRules?: RedactionRules,
 ): Logger {
 	const child = parent.child(bindings);
 
 	return {
-		fatal: ((...args: any[]) => {
+		fatal: ((...args: ConsoleArguments) => {
 			if (args.length === 0) return;
 			if (typeof args[0] === 'object' && args[0] !== null) {
-				const obj = args[0];
-				const msg = args[1];
+				const obj = args[0] as Record<string, unknown>;
+				const msg = args[1] as string | undefined;
 				logWithContext(child, 'fatal', msg || '', [obj], redactionRules);
 			} else {
-				const msg = args[0];
-				const restArgs = args.slice(1);
+				const msg = args[0] as string;
+				const restArgs = args.slice(1) as ConsoleArguments;
 				logWithContext(child, 'fatal', msg, restArgs, redactionRules);
 			}
-		}) as any,
+		}),
 
-		error: ((...args: any[]) => {
+		error: ((...args: ConsoleArguments) => {
 			if (args.length === 0) return;
 			if (typeof args[0] === 'object' && args[0] !== null) {
-				const obj = args[0];
-				const msg = args[1];
+				const obj = args[0] as Record<string, unknown>;
+				const msg = args[1] as string | undefined;
 				logWithContext(child, 'error', msg || '', [obj], redactionRules);
 			} else {
-				const msg = args[0];
-				const restArgs = args.slice(1);
+				const msg = args[0] as string;
+				const restArgs = args.slice(1) as ConsoleArguments;
 				logWithContext(child, 'error', msg, restArgs, redactionRules);
 			}
-		}) as any,
+		}),
 
-		warn: ((...args: any[]) => {
+		warn: ((...args: ConsoleArguments) => {
 			if (args.length === 0) return;
 			if (typeof args[0] === 'object' && args[0] !== null) {
-				const obj = args[0];
-				const msg = args[1];
+				const obj = args[0] as Record<string, unknown>;
+				const msg = args[1] as string | undefined;
 				logWithContext(child, 'warn', msg || '', [obj], redactionRules);
 			} else {
-				const msg = args[0];
-				const restArgs = args.slice(1);
+				const msg = args[0] as string;
+				const restArgs = args.slice(1) as ConsoleArguments;
 				logWithContext(child, 'warn', msg, restArgs, redactionRules);
 			}
-		}) as any,
+		}),
 
-		info: ((...args: any[]) => {
+		info: ((...args: ConsoleArguments) => {
 			if (args.length === 0) return;
 			if (typeof args[0] === 'object' && args[0] !== null) {
-				const obj = args[0];
-				const msg = args[1];
+				const obj = args[0] as Record<string, unknown>;
+				const msg = args[1] as string | undefined;
 				logWithContext(child, 'info', msg || '', [obj], redactionRules);
 			} else {
-				const msg = args[0];
-				const restArgs = args.slice(1);
+				const msg = args[0] as string;
+				const restArgs = args.slice(1) as ConsoleArguments;
 				logWithContext(child, 'info', msg, restArgs, redactionRules);
 			}
-		}) as any,
+		}),
 
-		http: ((...args: any[]) => {
+		http: ((...args: ConsoleArguments) => {
 			if (args.length === 0) return;
 			if (typeof args[0] === 'object' && args[0] !== null) {
-				const obj = args[0];
-				const msg = args[1];
+				const obj = args[0] as Record<string, unknown>;
+				const msg = args[1] as string | undefined;
 				logWithContext(child, 'http', msg || '', [obj], redactionRules);
 			} else {
-				const msg = args[0];
-				const restArgs = args.slice(1);
+				const msg = args[0] as string;
+				const restArgs = args.slice(1) as ConsoleArguments;
 				logWithContext(child, 'http', msg, restArgs, redactionRules);
 			}
-		}) as any,
+		}),
 
-		debug: ((...args: any[]) => {
+		debug: ((...args: ConsoleArguments) => {
 			if (args.length === 0) return;
 			if (typeof args[0] === 'object' && args[0] !== null) {
-				const obj = args[0];
-				const msg = args[1];
+				const obj = args[0] as Record<string, unknown>;
+				const msg = args[1] as string | undefined;
 				logWithContext(child, 'debug', msg || '', [obj], redactionRules);
 			} else {
-				const msg = args[0];
-				const restArgs = args.slice(1);
+				const msg = args[0] as string;
+				const restArgs = args.slice(1) as ConsoleArguments;
 				logWithContext(child, 'debug', msg, restArgs, redactionRules);
 			}
-		}) as any,
+		}),
 
-		trace: ((...args: any[]) => {
+		trace: ((...args: ConsoleArguments) => {
 			if (args.length === 0) return;
 			if (typeof args[0] === 'object' && args[0] !== null) {
-				const obj = args[0];
-				const msg = args[1];
+				const obj = args[0] as Record<string, unknown>;
+				const msg = args[1] as string | undefined;
 				logWithContext(child, 'trace', msg || '', [obj], redactionRules);
 			} else {
-				const msg = args[0];
-				const restArgs = args.slice(1);
+				const msg = args[0] as string;
+				const restArgs = args.slice(1) as ConsoleArguments;
 				logWithContext(child, 'trace', msg, restArgs, redactionRules);
 			}
-		}) as any,
+		}),
 
-		child: (moreBindings: Record<string, any>) => {
+		child: (moreBindings: Record<string, unknown>) => {
 			return createEnhancedChild(child, moreBindings, redactionRules);
 		},
 
@@ -313,15 +339,27 @@ function createEnhancedChild(
 			return child.isLevelEnabled(level);
 		},
 
-		flush: async () => {
+		flush: async (): Promise<void> => {
 			if ('flush' in child) {
-				await (child as any).flush();
+				const flushMethod = (child as PinoLogger & { flush?: (() => void) | (() => Promise<void>) }).flush;
+				if (flushMethod) {
+					const result = flushMethod();
+					if (result instanceof Promise) {
+						await result;
+					}
+				}
 			}
 		},
 
-		end: async () => {
+		end: async (): Promise<void> => {
 			if ('end' in child) {
-				await (child as any).end();
+				const endMethod = (child as PinoLogger & { end?: (() => void) | (() => Promise<void>) }).end;
+				if (endMethod) {
+					const result = endMethod();
+					if (result instanceof Promise) {
+						await result;
+					}
+				}
 			}
 		},
 	};
@@ -353,11 +391,11 @@ function logWithContext(
 	logger: PinoLogger,
 	level: string,
 	msg: string,
-	args: any[],
-	redactionRules?: any,
+	args: ConsoleArguments,
+	redactionRules?: RedactionRules,
 ): void {
 	// Prepare log data
-	let logData: Record<string, any> = {msg};
+	let logData: Record<string, unknown> = {msg};
 
 	// Add correlation context if enabled
 	if (isCorrelationEnabled()) {
@@ -393,7 +431,34 @@ function logWithContext(
 	}
 
 	// Log to the transport
-	(logger as any)[level](logData);
+	switch (level) {
+		case 'fatal':
+			logger.fatal(logData);
+			break;
+		case 'error':
+			logger.error(logData);
+			break;
+		case 'warn':
+			logger.warn(logData);
+			break;
+		case 'info':
+			logger.info(logData);
+			break;
+		case 'http':
+			if ('http' in logger) {
+				(logger as { http?: (data: Record<string, unknown>) => void }).http?.(logData);
+			}
+			break;
+		case 'debug':
+			logger.debug(logData);
+			break;
+		case 'trace':
+			logger.trace(logData);
+			break;
+		default:
+			logger.info(logData);
+			break;
+	}
 }
 
 /**
@@ -417,7 +482,7 @@ export function createPinoLogger(
 	);
 
 	// Create redaction rules
-	const redactionRules = createRedactionRules(
+	const _redactionRules = createRedactionRules(
 		finalConfig.redact,
 		isProduction, // Enable email redaction in production
 		isProduction, // Enable user ID redaction in production
@@ -428,7 +493,7 @@ export function createPinoLogger(
 		level: finalConfig.level,
 		redact: finalConfig.redact,
 		formatters: {
-			level: (label: string, number: number) => ({level: label.toUpperCase()}),
+			level: (label: string, _number: number) => ({level: label.toUpperCase()}),
 		},
 		timestamp: pino.stdTimeFunctions.isoTime,
 		base: {
@@ -453,16 +518,27 @@ export function createPinoLogger(
  */
 export function createLoggerWithTransport(
 	config?: Partial<LoggerConfig>,
-	transport?: any,
+	transport?: pino.DestinationStream | PinoTransportOptions,
 ): Logger {
 	const finalConfig = createConfig(config);
-	const pinoConfig = {
+
+	// Handle transport parameter
+	let actualTransport: pino.DestinationStream | undefined;
+	if (transport) {
+		if (typeof transport === 'object' && 'target' in transport) {
+			actualTransport = pino.transport(transport) as pino.DestinationStream;
+		} else {
+			actualTransport = transport;
+		}
+	}
+
+	const pinoConfig: pino.LoggerOptions = {
 		level: finalConfig.level,
 		redact: finalConfig.redact,
 		formatters: {
-			level: (label: string, number: number) => ({level: label.toUpperCase()}),
+			level: (label: string, _number: number) => ({level: label.toUpperCase()}),
 		},
-		transport,
+		transport: actualTransport,
 		base: {
 			pid: process.pid,
 			platform: process.platform,

@@ -5,7 +5,7 @@
 import {join} from 'path';
 import {platform} from 'os';
 import {homedir} from 'os';
-import type {LoggerConfig} from './types.js';
+import type {LoggerConfig, EnhancedLoggerConfig, LogLevel} from './types.js';
 
 /**
  * Get the default log directory based on platform
@@ -30,9 +30,9 @@ export function getDefaultLogDirectory(): string {
 /**
  * Create development configuration
  */
-export function createDevelopmentConfig(): any {
+export function createDevelopmentConfig(): EnhancedLoggerConfig {
 	return {
-		level: (process.env.LOG_LEVEL as any) || 'debug',
+		level: (process.env.LOG_LEVEL as LogLevel) || 'debug',
 		destination: String(process.stdout.fd),
 		pretty: true,
 		redact: ['apiKey', 'token', 'password', 'secret'],
@@ -53,14 +53,14 @@ export function createDevelopmentConfig(): any {
 /**
  * Create production configuration
  */
-export function createProductionConfig(): any {
+export function createProductionConfig(): EnhancedLoggerConfig {
 	const _logDir = getDefaultLogDirectory();
 
 	// Check if file logging is explicitly disabled
 	const disableFileLogging = process.env.LOG_DISABLE_FILE === 'true';
 
 	const baseConfig = {
-		level: (process.env.LOG_LEVEL as any) || 'debug', // Changed from 'info' to 'debug'
+		level: (process.env.LOG_LEVEL as LogLevel) || 'debug', // Changed from 'info' to 'debug'
 		pretty: false,
 		redact: ['apiKey', 'token', 'password', 'email', 'userId', 'secret'],
 		correlation: true,
@@ -107,9 +107,9 @@ export function createProductionConfig(): any {
 /**
  * Create test configuration
  */
-export function createTestConfig(): any {
+export function createTestConfig(): EnhancedLoggerConfig {
 	return {
-		level: (process.env.LOG_LEVEL as any) || 'debug', // Changed from 'silent' to 'debug'
+		level: (process.env.LOG_LEVEL as LogLevel) || 'debug', // Changed from 'silent' to 'debug'
 		pretty: false,
 		redact: ['apiKey', 'token', 'password'],
 		correlation: false,
@@ -124,7 +124,7 @@ export function createTestConfig(): any {
 /**
  * Get configuration based on current environment
  */
-export function getEnvironmentConfig(): any {
+export function getEnvironmentConfig(): EnhancedLoggerConfig {
 	const env = process.env.NODE_ENV || 'development';
 
 	switch (env) {
@@ -174,7 +174,9 @@ export function normalizeLogLevel(level: string): string {
 /**
  * Create configuration with overrides
  */
-export function createConfig(overrides: Partial<LoggerConfig> = {}): any {
+export function createConfig(
+	overrides: Partial<LoggerConfig> = {},
+): EnhancedLoggerConfig {
 	const baseConfig = getEnvironmentConfig();
 
 	// Apply overrides with validation
@@ -185,7 +187,7 @@ export function createConfig(overrides: Partial<LoggerConfig> = {}): any {
 				`[WARNING] Invalid log level "${overrides.level}", using default`,
 			);
 		} else {
-			baseConfig.level = normalizedLevel as any;
+			baseConfig.level = normalizedLevel as LogLevel;
 		}
 	}
 
@@ -201,7 +203,7 @@ export function createConfig(overrides: Partial<LoggerConfig> = {}): any {
 		...overrides,
 		options: {
 			...baseConfig.options,
-			...(overrides as any)?.options,
+			...(overrides as EnhancedLoggerConfig)?.options,
 		},
 	};
 }

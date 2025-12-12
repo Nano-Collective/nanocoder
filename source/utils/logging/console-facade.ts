@@ -12,6 +12,7 @@ import {
 	getLogger,
 } from '@/utils/logging';
 import {createErrorInfo} from '@/utils/error-formatter';
+import type {ConsoleArguments, ConsoleLogData} from './types.js';
 
 // Get logger instance directly to avoid circular dependencies
 const logger = getLogger();
@@ -25,8 +26,8 @@ export const StructuredConsole = {
 	 * Replacement for console.log - routes to logger.info
 	 * Accepts any number of arguments and formats them appropriately
 	 */
-	log: (...args: any[]) => {
-		const correlationId = generateCorrelationId();
+	log: (...args: ConsoleArguments) => {
+		const _correlationId = generateCorrelationId();
 
 		withNewCorrelationContext(context => {
 			if (args.length === 0) {
@@ -73,7 +74,7 @@ export const StructuredConsole = {
 				message += ' ' + primitives.map(String).join(' ');
 			}
 
-			const logData: Record<string, any> = {
+			const logData: ConsoleLogData = {
 				correlationId: context.id,
 				source: 'console-facade',
 				argumentCount: args.length,
@@ -93,8 +94,8 @@ export const StructuredConsole = {
 	/**
 	 * Replacement for console.error - routes to logger.error with error analysis
 	 */
-	error: (...args: any[]) => {
-		const correlationId = generateCorrelationId();
+	error: (...args: ConsoleArguments) => {
+		const _correlationId = generateCorrelationId();
 
 		withNewCorrelationContext(context => {
 			if (args.length === 0) {
@@ -107,7 +108,7 @@ export const StructuredConsole = {
 
 			// Special handling for Error objects
 			if (args.length === 1 && args[0] instanceof Error) {
-				const errorInfo = createErrorInfo(args[0], undefined, correlationId);
+				const errorInfo = createErrorInfo(args[0], undefined, _correlationId);
 				logger.error('Error logged via console.error', {
 					errorInfo,
 					correlationId: context.id,
@@ -130,7 +131,7 @@ export const StructuredConsole = {
 				message += ' ' + primitives.map(String).join(' ');
 			}
 
-			const logData: Record<string, any> = {
+			const logData: ConsoleLogData = {
 				correlationId: context.id,
 				source: 'console-facade',
 				argumentCount: args.length,
@@ -162,8 +163,8 @@ export const StructuredConsole = {
 	/**
 	 * Replacement for console.warn - routes to logger.warn
 	 */
-	warn: (...args: any[]) => {
-		const correlationId = generateCorrelationId();
+	warn: (...args: ConsoleArguments) => {
+		const _correlationId = generateCorrelationId();
 
 		withNewCorrelationContext(context => {
 			if (args.length === 0) {
@@ -209,7 +210,7 @@ export const StructuredConsole = {
 				message += ' ' + primitives.map(String).join(' ');
 			}
 
-			const logData: Record<string, any> = {
+			const logData: ConsoleLogData = {
 				correlationId: context.id,
 				source: 'console-facade',
 				argumentCount: args.length,
@@ -229,8 +230,8 @@ export const StructuredConsole = {
 	/**
 	 * Replacement for console.info - routes to logger.info
 	 */
-	info: (...args: any[]) => {
-		const correlationId = generateCorrelationId();
+	info: (...args: ConsoleArguments) => {
+		const _correlationId = generateCorrelationId();
 
 		withNewCorrelationContext(context => {
 			if (args.length === 0) {
@@ -276,7 +277,7 @@ export const StructuredConsole = {
 				message += ' ' + primitives.map(String).join(' ');
 			}
 
-			const logData: Record<string, any> = {
+			const logData: ConsoleLogData = {
 				correlationId: context.id,
 				source: 'console-facade',
 				argumentCount: args.length,
@@ -296,8 +297,8 @@ export const StructuredConsole = {
 	/**
 	 * Replacement for console.debug - routes to logger.debug
 	 */
-	debug: (...args: any[]) => {
-		const correlationId = generateCorrelationId();
+	debug: (...args: ConsoleArguments) => {
+		const _correlationId = generateCorrelationId();
 
 		withNewCorrelationContext(context => {
 			if (args.length === 0) {
@@ -343,7 +344,7 @@ export const StructuredConsole = {
 				message += ' ' + primitives.map(String).join(' ');
 			}
 
-			const logData: Record<string, any> = {
+			const logData: ConsoleLogData = {
 				correlationId: context.id,
 				source: 'console-facade',
 				argumentCount: args.length,
@@ -393,19 +394,25 @@ export class ConsoleInterceptor {
 	/**
 	 * Restore original global console
 	 */
-	deactivate(): void {
+
+	deactivate = (): void => {
 		if (!this.isActive) {
 			return;
 		}
 
+		// eslint-disable-next-line @typescript-eslint/unbound-method
 		console.log = this.originalConsole.log;
+		// eslint-disable-next-line @typescript-eslint/unbound-method
 		console.error = this.originalConsole.error;
+		// eslint-disable-next-line @typescript-eslint/unbound-method
 		console.warn = this.originalConsole.warn;
+		// eslint-disable-next-line @typescript-eslint/unbound-method
 		console.info = this.originalConsole.info;
+		// eslint-disable-next-line @typescript-eslint/unbound-method
 		console.debug = this.originalConsole.debug;
 
 		this.isActive = false;
-	}
+	};
 
 	/**
 	 * Check if interceptor is active
@@ -436,17 +443,19 @@ export const globalConsoleInterceptor = new ConsoleInterceptor();
  * Decorator to automatically route console calls in a function to structured logging
  */
 export function useStructuredConsole(
-	target: any,
+	target: unknown,
 	propertyName: string,
 	descriptor: PropertyDescriptor,
-) {
-	const originalMethod = descriptor.value;
+): PropertyDescriptor | void {
+	const originalMethod = descriptor.value as ((this: unknown, ...args: ConsoleArguments) => unknown) | undefined;
 
-	descriptor.value = function (...args: any[]) {
-		return globalConsoleInterceptor.withStructuredConsole(() => {
-			return originalMethod.apply(this, args);
-		});
-	};
+	if (typeof originalMethod === 'function') {
+		descriptor.value = function (this: unknown, ...args: ConsoleArguments): unknown {
+			return globalConsoleInterceptor.withStructuredConsole(() => {
+				return Reflect.apply(originalMethod, this, args);
+			});
+		};
+	}
 
 	return descriptor;
 }
@@ -457,7 +466,7 @@ export function useStructuredConsole(
  */
 export function createModuleConsole(moduleName: string) {
 	return {
-		log: (...args: any[]) => {
+		log: (...args: ConsoleArguments) => {
 			logger.info(
 				`[${moduleName}] ${args.filter(a => typeof a === 'string').join(' ')}`,
 				{
@@ -465,10 +474,10 @@ export function createModuleConsole(moduleName: string) {
 					allArgs: args,
 					correlationId: generateCorrelationId(),
 					source: 'module-console',
-				},
+				} as ConsoleLogData,
 			);
 		},
-		error: (...args: any[]) => {
+		error: (...args: ConsoleArguments) => {
 			logger.error(
 				`[${moduleName}] ${args.filter(a => typeof a === 'string').join(' ')}`,
 				{
@@ -476,10 +485,10 @@ export function createModuleConsole(moduleName: string) {
 					allArgs: args,
 					correlationId: generateCorrelationId(),
 					source: 'module-console',
-				},
+				} as ConsoleLogData,
 			);
 		},
-		warn: (...args: any[]) => {
+		warn: (...args: ConsoleArguments) => {
 			logger.warn(
 				`[${moduleName}] ${args.filter(a => typeof a === 'string').join(' ')}`,
 				{
@@ -487,10 +496,10 @@ export function createModuleConsole(moduleName: string) {
 					allArgs: args,
 					correlationId: generateCorrelationId(),
 					source: 'module-console',
-				},
+				} as ConsoleLogData,
 			);
 		},
-		info: (...args: any[]) => {
+		info: (...args: ConsoleArguments) => {
 			logger.info(
 				`[${moduleName}] ${args.filter(a => typeof a === 'string').join(' ')}`,
 				{
@@ -498,10 +507,10 @@ export function createModuleConsole(moduleName: string) {
 					allArgs: args,
 					correlationId: generateCorrelationId(),
 					source: 'module-console',
-				},
+				} as ConsoleLogData,
 			);
 		},
-		debug: (...args: any[]) => {
+		debug: (...args: ConsoleArguments) => {
 			logger.debug(
 				`[${moduleName}] ${args.filter(a => typeof a === 'string').join(' ')}`,
 				{
@@ -509,7 +518,7 @@ export function createModuleConsole(moduleName: string) {
 					allArgs: args,
 					correlationId: generateCorrelationId(),
 					source: 'module-console',
-				},
+				} as ConsoleLogData,
 			);
 		},
 	};
@@ -530,7 +539,7 @@ export class ConsoleUsageTracker {
 			const original = console[method];
 			this.usage.set(method, 0);
 
-			console[method] = (...args: any[]) => {
+			console[method] = (...args: ConsoleArguments) => {
 				this.usage.set(method, (this.usage.get(method) || 0) + 1);
 				return original.apply(console, args);
 			};

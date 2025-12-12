@@ -8,10 +8,11 @@ import {
 	withNewCorrelationContext,
 	getLogger,
 } from './index.js';
+import {loadavg} from 'os';
 import {globalLogStorage} from './log-query.js';
 import {globalRequestTracker} from './request-tracker.js';
 import {globalPerformanceMonitor} from './performance.js';
-import type {LoggerConfig, LogLevel, CorrelationContext} from './types.js';
+import type {CorrelationContext} from './types.js';
 
 // Get logger instance directly to avoid circular dependencies
 const logger = getLogger();
@@ -44,7 +45,7 @@ export interface HealthCheck {
 	score: number; // 0-100
 	duration: number;
 	message?: string;
-	details?: Record<string, any>;
+	details?: Record<string, unknown>;
 	error?: string;
 	threshold?: {
 		warning: number;
@@ -206,11 +207,11 @@ export class HealthMonitor {
 		this.isRunning = true;
 
 		// Run initial check
-		this.runHealthCheck();
+		void this.runHealthCheck();
 
 		// Schedule regular checks
 		this.intervalId = setInterval(() => {
-			this.runHealthCheck();
+			void this.runHealthCheck();
 		}, this.config.interval);
 
 		logger.info('Health monitoring started', {
@@ -250,7 +251,7 @@ export class HealthMonitor {
 	 * Run a comprehensive health check
 	 */
 	async runHealthCheck(): Promise<HealthCheckResult> {
-		return withNewCorrelationContext(async (context: CorrelationContext) => {
+		return withNewCorrelationContext(async (_context: CorrelationContext) => {
 			const startTime = performance.now();
 
 			try {
@@ -373,7 +374,7 @@ export class HealthMonitor {
 	 * Get current system metrics
 	 */
 	getSystemMetrics(): SystemMetrics {
-		const now = Date.now();
+		const _now = Date.now();
 		const memory = process.memoryUsage();
 		const cpuUsage = process.cpuUsage();
 		const requestStats = globalRequestTracker.getStats();
@@ -406,7 +407,7 @@ export class HealthMonitor {
 			},
 			cpu: {
 				usage: (cpuUsage.user + cpuUsage.system) / 1000000, // Convert to milliseconds
-				loadAverage: require('os').loadavg(),
+				loadAverage: loadavg(),
 			},
 			process: {
 				uptime: process.uptime(),
@@ -474,7 +475,7 @@ export class HealthMonitor {
 		}
 	}
 
-	private async checkMemory(): Promise<HealthCheck> {
+	private checkMemory(): Promise<HealthCheck> {
 		const startTime = performance.now();
 		const memory = process.memoryUsage();
 		const heapUsagePercent = memory.heapUsed / memory.heapTotal;
@@ -524,7 +525,7 @@ export class HealthMonitor {
 		};
 	}
 
-	private async checkLoggingSystem(): Promise<HealthCheck> {
+	private checkLoggingSystem(): Promise<HealthCheck> {
 		const startTime = performance.now();
 		const logCount = globalLogStorage.getEntryCount();
 		const thresholds = this.config.thresholds.logging;
@@ -560,7 +561,7 @@ export class HealthMonitor {
 		};
 	}
 
-	private async checkRequestTracking(): Promise<HealthCheck> {
+	private checkRequestTracking(): Promise<HealthCheck> {
 		const startTime = performance.now();
 		const stats = globalRequestTracker.getStats();
 		const thresholds = this.config.thresholds.requests;
@@ -607,7 +608,7 @@ export class HealthMonitor {
 		};
 	}
 
-	private async checkPerformanceMonitoring(): Promise<HealthCheck> {
+	private checkPerformanceMonitoring(): Promise<HealthCheck> {
 		const startTime = performance.now();
 		const stats = globalPerformanceMonitor.getAllStats();
 		const thresholds = this.config.thresholds.performance;
@@ -642,7 +643,7 @@ export class HealthMonitor {
 		};
 	}
 
-	private async checkConfigurationSystem(): Promise<HealthCheck> {
+	private checkConfigurationSystem(): Promise<HealthCheck> {
 		const startTime = performance.now();
 		const reloaderStats = {isEnabled: false, watcherCount: 0};
 
@@ -745,7 +746,7 @@ export class HealthMonitor {
 		return recommendations;
 	}
 
-	private async sendAlert(result: HealthCheckResult): Promise<void> {
+	private sendAlert(result: HealthCheckResult): Promise<void> {
 		if (!this.config.alerts.enabled) return;
 
 		// Check cooldown
@@ -880,7 +881,12 @@ export function initializeHealthMonitoring(
  * Health check middleware for HTTP servers
  */
 export function healthCheckMiddleware() {
-	return async (req: any, res: any, next: any) => {
+	return async (req: {path: string}, res: {
+		status: (code: number) => {
+			json: (data: unknown) => void;
+		};
+		json: (data: unknown) => void;
+	}, next: () => void) => {
 		if (req.path === '/health') {
 			try {
 				const health = await healthChecks.full();

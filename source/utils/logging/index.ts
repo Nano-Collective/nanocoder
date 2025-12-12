@@ -99,33 +99,41 @@ export async function end(): Promise<void> {
 }
 
 // Setup graceful shutdown handlers
-process.on('SIGTERM', async () => {
-	log.info('\n[LOGGER] Received SIGTERM, flushing logs...');
-	await flush();
-	await end();
-	log.info('[LOGGER] Graceful shutdown completed');
+process.on('SIGTERM', () => {
+	void (async () => {
+		log.info('\n[LOGGER] Received SIGTERM, flushing logs...');
+		await flush();
+		await end();
+		log.info('[LOGGER] Graceful shutdown completed');
+	})();
 });
 
-process.on('SIGINT', async () => {
-	log.info('\n[LOGGER] Received SIGINT, flushing logs...');
-	await flush();
-	await end();
-	log.info('[LOGGER] Graceful shutdown completed');
+process.on('SIGINT', () => {
+	void (async () => {
+		log.info('\n[LOGGER] Received SIGINT, flushing logs...');
+		await flush();
+		await end();
+		log.info('[LOGGER] Graceful shutdown completed');
+	})();
 });
 
 // Handle uncaught exceptions and unhandled rejections
-process.on('uncaughtException', async err => {
-	const logger = getLogger();
-	logger.fatal({err}, 'Uncaught exception');
-	await flush();
-	process.exit(1);
+process.on('uncaughtException', err => {
+	void (async () => {
+		const logger = getLogger();
+		logger.fatal({err}, 'Uncaught exception');
+		await flush();
+		process.exit(1);
+	})();
 });
 
-process.on('unhandledRejection', async (reason, promise) => {
-	const logger = getLogger();
-	logger.fatal({reason, promise}, 'Unhandled promise rejection');
-	await flush();
-	process.exit(1);
+process.on('unhandledRejection', (reason, promise) => {
+	void (async () => {
+		const logger = getLogger();
+		logger.fatal({reason, promise}, 'Unhandled promise rejection');
+		await flush();
+		process.exit(1);
+	})();
 });
 
 // Re-export all modules for external use
