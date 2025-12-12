@@ -2,14 +2,21 @@
  * Correlation ID management for tracking requests across components
  */
 
+import {AsyncLocalStorage} from 'async_hooks';
 import {randomBytes} from 'crypto';
 import type {CorrelationContext, CorrelationHttpRequest, CorrelationHttpResponse} from './types.js';
 
 /**
- * Async local storage for correlation context (simple implementation)
- * In a real implementation, you might use AsyncLocalStorage from Node.js
+ * Async local storage for correlation context
+ * Provides thread-safe context storage across async operations
  */
-let currentContext: CorrelationContext | null = null;
+const correlationStorage = new AsyncLocalStorage<CorrelationContext>();
+
+/**
+ * Legacy global context for backward compatibility with deprecated functions
+ * Note: This approach has race conditions in concurrent operations
+ */
+let legacyContext: CorrelationContext | null = null;
 
 /**
  * Generate a new correlation ID
@@ -28,14 +35,28 @@ export function generateShortCorrelationId(): string {
 }
 
 /**
- * Create a new correlation context
+ * Create a new correlation context with specific ID
  */
-export function createCorrelationContext(
-	id?: string,
+export function createCorrelationContextWithId(
+	id: string,
 	metadata?: Record<string, unknown>,
 ): CorrelationContext {
 	return {
-		id: id || generateCorrelationId(),
+		id,
+		metadata,
+	};
+}
+
+/**
+ * Create a new correlation context with optional parent ID
+ */
+export function createCorrelationContext(
+	parentId?: string,
+	metadata?: Record<string, unknown>,
+): CorrelationContext {
+	return {
+		id: generateCorrelationId(),
+		parentId,
 		metadata,
 	};
 }
@@ -44,21 +65,30 @@ export function createCorrelationContext(
  * Get the current correlation context
  */
 export function getCurrentCorrelationContext(): CorrelationContext | null {
-	return currentContext;
+	return correlationStorage.getStore() || legacyContext || null;
 }
 
 /**
- * Set the current correlation context
+ * Set the current correlation context (runs function with context)
+ * Note: AsyncLocalStorage doesn't support direct setting, use withCorrelationContext instead
+ * @deprecated Use withCorrelationContext or withNewCorrelationContext
  */
 export function setCorrelationContext(context: CorrelationContext): void {
-	currentContext = context;
+	// This is kept for backward compatibility but should not be used
+	// AsyncLocalStorage requires running within a context, not direct assignment
+	console.warn('setCorrelationContext is deprecated. Use withCorrelationContext instead.');
+	legacyContext = context;
 }
 
 /**
  * Clear the current correlation context
+ * Note: AsyncLocalStorage handles cleanup automatically
+ * @deprecated Context is automatically cleared when async operation completes
  */
 export function clearCorrelationContext(): void {
-	currentContext = null;
+	// This is kept for backward compatibility but does nothing with AsyncLocalStorage
+	// Context cleanup is handled automatically by AsyncLocalStorage
+	legacyContext = null;
 }
 
 /**
@@ -68,14 +98,7 @@ export function withCorrelationContext<T>(
 	context: CorrelationContext,
 	fn: () => T,
 ): T {
-	const previousContext = currentContext;
-	currentContext = context;
-
-	try {
-		return fn();
-	} finally {
-		currentContext = previousContext;
-	}
+	return correlationStorage.run(context, fn);
 }
 
 /**
@@ -83,17 +106,18 @@ export function withCorrelationContext<T>(
  */
 export function withNewCorrelationContext<T>(
 	fn: (context: CorrelationContext) => T,
-	correlationId?: string,
+	parentId?: string,
 	metadata?: Record<string, unknown>,
 ): T {
-	const context = createCorrelationContext(correlationId, metadata);
-	return withCorrelationContext(context, () => fn(context));
+	const context = createCorrelationContext(parentId, metadata);
+	return correlationStorage.run(context, () => fn(context));
 }
 
 /**
  * Get the correlation ID for the current context
  */
 export function getCorrelationId(): string | null {
+	const currentContext = correlationStorage.getStore() || legacyContext;
 	return currentContext?.id || null;
 }
 
@@ -130,8 +154,12 @@ export function extractCorrelationId(
 	const possibleHeaders = [
 		'x-correlation-id',
 		'x-request-id',
+		'x-trace-id',
+		'x-span-id',
 		'correlation-id',
 		'request-id',
+		'trace-id',
+		'span-id',
 	];
 
 	for (const header of possibleHeaders) {
@@ -155,18 +183,35 @@ export function createCorrelationFromHeaders(
 		return null;
 	}
 
-	const parentId = extractCorrelationId(headers);
-	return createCorrelationContext(parentId || undefined, metadata);
+	const correlationId = extractCorrelationId(headers);
+	if (correlationId) {
+		return createCorrelationContextWithId(correlationId, metadata);
+	}
+
+	return createCorrelationContext(undefined, metadata);
 }
 
 /**
  * Add correlation metadata
+ * Note: Creates a new context with updated metadata since AsyncLocalStorage is immutable
  */
 export function addCorrelationMetadata(key: string, value: unknown): void {
+	const currentContext = correlationStorage.getStore();
 	if (currentContext) {
-		currentContext.metadata = {
-			...currentContext.metadata,
-			[key]: value,
+		// Note: We cannot directly update AsyncLocalStorage
+		// This function is deprecated - use withNewCorrelationContext with metadata instead
+		console.warn('addCorrelationMetadata is deprecated. Use withNewCorrelationContext with metadata parameter.');
+		return;
+	}
+
+	// For backward compatibility with legacy context
+	if (legacyContext) {
+		legacyContext = {
+			...legacyContext,
+			metadata: {
+				...legacyContext.metadata,
+				[key]: value,
+			},
 		};
 	}
 }
@@ -175,6 +220,7 @@ export function addCorrelationMetadata(key: string, value: unknown): void {
  * Get correlation metadata
  */
 export function getCorrelationMetadata(key?: string): unknown {
+	const currentContext = correlationStorage.getStore() || legacyContext;
 	if (!currentContext || !currentContext.metadata) {
 		return key ? undefined : {};
 	}
@@ -186,6 +232,7 @@ export function getCorrelationMetadata(key?: string): unknown {
  * Format correlation context for logging
  */
 export function formatCorrelationForLog(): Record<string, string> {
+	const currentContext = correlationStorage.getStore() || legacyContext;
 	if (!currentContext || !isCorrelationEnabled()) {
 		return {};
 	}
@@ -213,21 +260,22 @@ export function correlationMiddleware() {
 			correlationId = generateCorrelationId();
 		}
 
-		// Set correlation context
-		const context = createCorrelationContext(undefined, {
+		// Create correlation context with the extracted or generated ID
+		const context = createCorrelationContextWithId(correlationId, {
 			method: req.method,
 			url: req.url,
 			userAgent: req.headers?.['user-agent'],
 		});
 
-		setCorrelationContext(context);
+		// Run the request handler within the correlation context
+		return correlationStorage.run(context, () => {
+			// Add correlation ID to response headers
+			if (res.setHeader) {
+				res.setHeader('X-Correlation-ID', correlationId);
+			}
 
-		// Add correlation ID to response headers
-		if (res.setHeader) {
-			res.setHeader('X-Correlation-ID', correlationId);
-		}
-
-		next();
+			next();
+		});
 	};
 }
 
@@ -245,7 +293,7 @@ export function withCorrelation<T extends (...args: unknown[]) => Promise<unknow
 		if (getCorrelationIdFromArgs) {
 			const correlationId = getCorrelationIdFromArgs(...args);
 			if (correlationId) {
-				context = createCorrelationContext(correlationId);
+				context = createCorrelationContextWithId(correlationId);
 			}
 		}
 
@@ -259,9 +307,9 @@ export function withCorrelation<T extends (...args: unknown[]) => Promise<unknow
 			}
 		}
 
-		// Set context and run function
+		// Run function within correlation context
 		if (context) {
-			return withCorrelationContext(context, async () => {
+			return correlationStorage.run(context, async () => {
 				return await fn(...args);
 			});
 		} else {

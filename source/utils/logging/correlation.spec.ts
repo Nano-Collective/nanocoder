@@ -9,6 +9,7 @@ console.log(`\nlogging/correlation.spec.ts`);
 import {
 	generateCorrelationId,
 	generateShortCorrelationId,
+	createCorrelationContextWithId,
 	createCorrelationContext,
 	getCurrentCorrelationContext,
 	setCorrelationContext,
@@ -197,11 +198,12 @@ test('getCorrelationHeader returns header value', t => {
 
 	const header = getCorrelationHeader();
 	t.truthy(header, 'Should return header');
-	t.is(typeof header, 'string', 'Should be string');
+	t.is(typeof header, 'object', 'Should be object');
+	t.deepEqual(header, {'X-Correlation-ID': 'test-123'}, 'Should return correct header');
 
 	clearCorrelationContext();
 	const noHeader = getCorrelationHeader();
-	t.falsy(noHeader, 'Should return undefined when no context');
+	t.deepEqual(noHeader, {}, 'Should return empty object when no context');
 });
 
 test('extractCorrelationId extracts from various sources', t => {
@@ -249,6 +251,9 @@ test('createCorrelationFromHeaders creates context from headers', t => {
 });
 
 test('correlation metadata management', t => {
+	// Set an initial context first
+	setCorrelationContext(createCorrelationContextWithId('test-456'));
+
 	const metadata: CorrelationMetadata = {
 		source: 'api-server',
 		version: '2.1.0',
@@ -266,6 +271,8 @@ test('correlation metadata management', t => {
 	t.is(retrieved.source, metadata.source, 'Should match source');
 	t.is(retrieved.version, metadata.version, 'Should match version');
 	t.is(retrieved.environment, metadata.environment, 'Should match environment');
+
+	clearCorrelationContext();
 });
 
 test('formatCorrelationForLog formats for logging', t => {
@@ -275,10 +282,13 @@ test('formatCorrelationForLog formats for logging', t => {
 		metadata: {source: 'test'},
 	};
 
+	setCorrelationContext(context);
 	const formatted = formatCorrelationForLog();
 
 	t.is(typeof formatted, 'object', 'Should return object');
 	t.is(formatted.correlationId, 'test-123', 'Should include correlation ID');
+
+	clearCorrelationContext();
 });
 
 test('correlationMiddleware creates middleware function', t => {
@@ -378,6 +388,9 @@ test('correlation ID format validation', t => {
 });
 
 test('metadata merging works correctly', t => {
+	// Set an initial context first
+	setCorrelationContext(createCorrelationContextWithId('test-123'));
+
 	const initialMetadata = {
 		source: 'api',
 		version: '1.0.0',
@@ -400,4 +413,6 @@ test('metadata merging works correctly', t => {
 	t.is(merged.version, '1.0.0', 'Should preserve initial version');
 	t.is(merged.environment, 'production', 'Should include additional metadata');
 	t.is(merged.requestId, 'req-123', 'Should include additional request ID');
+
+	clearCorrelationContext();
 });
