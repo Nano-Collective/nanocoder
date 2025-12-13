@@ -70,9 +70,18 @@ function createEnvironmentLogger(
 			mkdirSync(logDir, {recursive: true});
 		}
 
+		// Use Intl.DateTimeFormat for local timezone-aware date formatting
+		const now = new Date();
+		const localDate = new Intl.DateTimeFormat('en-CA', {
+			year: 'numeric',
+			month: '2-digit',
+			day: '2-digit',
+			timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+		}).format(now).replace(/\//g, '-');
+
 		const logFilePath = join(
 			logDir,
-			`nanocoder-${new Date().toISOString().split('T')[0]}.log`,
+			`nanocoder-${localDate}.log`,
 		);
 
 		const transportOptions: PinoTransportOptions = {
