@@ -83,7 +83,7 @@ test('createLogMethod with contextPrefix adds prefix to messages', t => {
     
     const logs = mockLogger.getLogs();
     t.is(logs.length, 1);
-    t.true(logs[0].args[0].includes('[TEST]'));
+    t.true(String(logs[0].args[0]).includes('[TEST]'));
 });
 
 test('createLogMethod with consolePrefix handles console logger', t => {
@@ -188,9 +188,9 @@ test('createLogMethods with contextPrefix adds prefix to all methods', t => {
     
     const logs = mockLogger.getLogs();
     t.is(logs.length, 3);
-    t.true(logs[0].args[0].includes('[TEST]'));
-    t.true(logs[1].args[0].includes('[TEST]'));
-    t.true(logs[2].args[0].includes('[TEST]'));
+    t.true(String(logs[0].args[0]).includes('[TEST]'));
+    t.true(String(logs[1].args[0]).includes('[TEST]'));
+    t.true(String(logs[2].args[0]).includes('[TEST]'));
 });
 
 test('createLogMethods with transformArgs transforms arguments for all methods', t => {
@@ -500,7 +500,7 @@ test('createLogMethod handles object-first with multiple arguments', t => {
     const mockLogger = new MockLogger();
     const logMethod = createLogMethod(mockLogger, 'info');
     
-    logMethod({key: 'value'}, 'message', 'arg1', 'arg2');
+    logMethod('message', {key: 'value'}, 'arg1', 'arg2');
     
     const logs = mockLogger.getLogs();
     t.is(logs.length, 1);

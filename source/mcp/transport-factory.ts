@@ -83,9 +83,11 @@ export class TransportFactory {
 		// Authentication would need to be handled at the protocol level or via URL parameters
 		if (server.auth) {
 			logWarning('WebSocket transport has unsupported auth config', true, {
-				serverName: server.name,
-				transportType: 'websocket',
-				reason: 'Current SDK does not support headers for WebSocket transport',
+				context: {
+					serverName: server.name,
+					transportType: 'websocket',
+					reason: 'Current SDK does not support headers for WebSocket transport',
+				},
 			});
 		}
 
@@ -121,9 +123,11 @@ export class TransportFactory {
 
 		if (server.auth) {
 			logWarning('HTTP transport has unsupported auth config', true, {
-				serverName: server.name,
-				transportType: 'http',
-				reason: 'Current SDK does not support custom headers for HTTP transport',
+				context: {
+					serverName: server.name,
+					transportType: 'http',
+					reason: 'Current SDK does not support custom headers for HTTP transport',
+				},
 			});
 		}
 

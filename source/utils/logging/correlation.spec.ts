@@ -538,7 +538,7 @@ test('Correlation context preserved in error scenarios', async t => {
 		t.fail('Should have thrown error');
 	} catch (error) {
 		// Error should be thrown, but we can't access context here
-		t.is(error.message, 'Test error', 'Should throw correct error');
+		t.is((error as Error).message, 'Test error', 'Should throw correct error');
 	}
 	
 	// Context should not leak after error

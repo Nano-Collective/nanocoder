@@ -208,9 +208,11 @@ export class CheckpointManager {
 					const content = await fs.readFile(filePath, 'utf-8');
 					fileSnapshots.set(relativePath, content);
 				} catch (error) {
-					logWarning('Could not load file snapshot', {
-						relativePath,
-						error: error instanceof Error ? error.message : 'Unknown error',
+					logWarning('Could not load file snapshot', true, {
+						context: {
+							relativePath,
+							error: error instanceof Error ? error.message : 'Unknown error',
+						},
 					});
 				}
 			}
@@ -259,9 +261,11 @@ export class CheckpointManager {
 						}
 					}
 				} catch (error) {
-					logWarning('Could not read checkpoint', {
-						checkpointName: entry,
-						error: error instanceof Error ? error.message : 'Unknown error',
+					logWarning('Could not read checkpoint', true, {
+						context: {
+							checkpointName: entry,
+							error: error instanceof Error ? error.message : 'Unknown error',
+						},
 					});
 				}
 			}
@@ -419,9 +423,11 @@ export class CheckpointManager {
 			}
 		} catch (error) {
 			// If we can't read the directory, just return 0
-			logWarning('Could not calculate directory size', {
-				dirPath,
-				error: error instanceof Error ? error.message : 'Unknown error',
+			logWarning('Could not calculate directory size', true, {
+				context: {
+					dirPath,
+					error: error instanceof Error ? error.message : 'Unknown error',
+				},
 			});
 		}
 

@@ -269,7 +269,24 @@ test('HealthMonitor handles memory check with high usage', async t => {
                 externalWarning: 1,
                 externalCritical: 2,
             },
-            ...new HealthMonitor().config.thresholds,
+            performance: {
+                averageDurationWarning: 1000,
+                averageDurationCritical: 5000,
+                errorRateWarning: 0.05,
+                errorRateCritical: 0.1,
+            },
+            logging: {
+                logRateWarning: 100,
+                logRateCritical: 500,
+                errorRateWarning: 0.02,
+                errorRateCritical: 0.05,
+            },
+            requests: {
+                durationWarning: 1000,
+                durationCritical: 5000,
+                errorRateWarning: 0.05,
+                errorRateCritical: 0.1,
+            },
         },
     });
     
@@ -280,13 +297,30 @@ test('HealthMonitor handles memory check with high usage', async t => {
 test('HealthMonitor handles request tracking with high error rate', async t => {
     const monitor = new HealthMonitor({
         thresholds: {
+            memory: {
+                heapUsageWarning: 0.8,
+                heapUsageCritical: 0.95,
+                externalWarning: 256,
+                externalCritical: 512,
+            },
+            performance: {
+                averageDurationWarning: 1000,
+                averageDurationCritical: 5000,
+                errorRateWarning: 0.05,
+                errorRateCritical: 0.1,
+            },
+            logging: {
+                logRateWarning: 100,
+                logRateCritical: 500,
+                errorRateWarning: 0.02,
+                errorRateCritical: 0.05,
+            },
             requests: {
                 durationWarning: 1,
                 durationCritical: 2,
                 errorRateWarning: 0.01,
                 errorRateCritical: 0.02,
             },
-            ...new HealthMonitor().config.thresholds,
         },
     });
     

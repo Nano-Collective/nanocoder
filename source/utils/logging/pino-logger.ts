@@ -426,7 +426,6 @@ export function createLoggerWithTransport(
 		formatters: {
 			level: (label: string, _number: number) => ({level: label.toUpperCase()}),
 		},
-		transport: actualTransport,
 		base: {
 			pid: process.pid,
 			platform: process.platform,
@@ -438,7 +437,7 @@ export function createLoggerWithTransport(
 		},
 	};
 
-	const pinoLogger = pino(pinoConfig);
+	const pinoLogger = actualTransport ? pino(pinoConfig, actualTransport) : pino(pinoConfig);
 	const redactionRules = createRedactionRules(
 		finalConfig.redact,
 		true, // Enable email redaction
