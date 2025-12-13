@@ -5,7 +5,8 @@
 
 import {loadavg} from 'os';
 import type {PerformanceMetrics, CorrelationContext} from './types.js';
-import {generateCorrelationId, withNewCorrelationContext, correlationStorage, createCorrelationContext, type Logger} from './index.js';
+import {generateCorrelationId, withNewCorrelationContext, createCorrelationContext, type Logger} from './index.js';
+import {correlationStorage} from './correlation.js';
 
 // Lazy logger initialization to avoid circular dependency
 let _logger: Logger | null = null;

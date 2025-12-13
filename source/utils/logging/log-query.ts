@@ -169,31 +169,54 @@ export interface AggregationResult {
  * In-memory log storage for querying (in production, this would connect to a log database)
  */
 class LogStorage {
-	private entries: LogEntry[] = [];
+	private entries: (LogEntry | undefined)[];
+	private head: number = 0;      // Index of oldest entry
+	private tail: number = 0;      // Index where next entry goes
+	private count: number = 0;     // Current number of entries
 	private maxEntries: number;
 	private indexes: Map<string, Set<string>> = new Map();
 
 	constructor(maxEntries: number = 10000) {
 		this.maxEntries = maxEntries;
+		this.entries = new Array(maxEntries);  // Pre-allocate array
 	}
 
 	/**
-	 * Add a log entry
+	 * Add a log entry - O(1) instead of O(n)
 	 */
 	addEntry(entry: LogEntry): void {
-		// Add to main storage
-		this.entries.push(entry);
-
-		// Maintain max size limit
-		if (this.entries.length > this.maxEntries) {
-			const removed = this.entries.shift();
+		// If buffer is full, remove oldest entry from indexes
+		if (this.count === this.maxEntries) {
+			const removed = this.entries[this.head];
 			if (removed) {
-				this.updateIndexes(removed, false); // Remove from indexes
+				this.updateIndexes(removed, false);
 			}
+			// Advance head (oldest entry pointer)
+			this.head = (this.head + 1) % this.maxEntries;
+		} else {
+			this.count++;
 		}
+
+		// Write new entry at tail position - O(1)
+		this.entries[this.tail] = entry;
+		this.tail = (this.tail + 1) % this.maxEntries;
 
 		// Update indexes
 		this.updateIndexes(entry, true);
+	}
+
+	/**
+	 * Get all entries as array (oldest to newest)
+	 */
+	private getEntriesArray(): LogEntry[] {
+		const result: LogEntry[] = [];
+		for (let i = 0; i < this.count; i++) {
+			const entry = this.entries[(this.head + i) % this.maxEntries];
+			if (entry) {
+				result.push(entry);
+			}
+		}
+		return result;
 	}
 
 	/**
@@ -202,7 +225,8 @@ class LogStorage {
 	query(query: LogQuery): QueryResult {
 		const startTime = performance.now();
 
-		const filteredEntries = this.entries.filter(entry =>
+		// Use getEntriesArray() instead of this.entries directly
+		const filteredEntries = this.getEntriesArray().filter(entry =>
 			this.matchesQuery(entry, query),
 		);
 
@@ -244,8 +268,8 @@ class LogStorage {
 	aggregate(options: AggregationOptions): AggregationResult {
 		const startTime = performance.now();
 
-		// Filter by time range if specified
-		let entries = this.entries;
+		// Use getEntriesArray() instead of this.entries
+		let entries = this.getEntriesArray();
 		if (options.timeRange?.startTime && options.timeRange?.endTime) {
 			entries = entries.filter(entry => {
 				const entryTime = new Date(entry.timestamp);
@@ -365,14 +389,17 @@ class LogStorage {
 	 * Get entry count
 	 */
 	getEntryCount(): number {
-		return this.entries.length;
+		return this.count;  // Use count instead of entries.length
 	}
 
 	/**
 	 * Clear all entries
 	 */
 	clear(): void {
-		this.entries = [];
+		this.entries = new Array(this.maxEntries);
+		this.head = 0;
+		this.tail = 0;
+		this.count = 0;
 		this.indexes.clear();
 	}
 
@@ -383,8 +410,11 @@ class LogStorage {
 		if (query.endTime && new Date(entry.timestamp) > query.endTime)
 			return false;
 
-		// Level filtering
-		if (query.levels && !query.levels.includes(entry.level)) return false;
+		// Level filtering - use index for quick lookup
+		if (query.levels) {
+			const levelIndex = this.indexes.get('level');
+			if (!levelIndex || !levelIndex.has(entry.level)) return false;
+		}
 		if (query.excludeLevels && query.excludeLevels.includes(entry.level))
 			return false;
 
@@ -401,14 +431,12 @@ class LogStorage {
 		if (query.messageEndsWith && !entry.message.endsWith(query.messageEndsWith))
 			return false;
 
-		// Correlation and request filtering
-		if (query.correlationIds && !entry.correlationId) return false;
-		if (
-			query.correlationIds &&
-			entry.correlationId &&
-			!query.correlationIds.includes(entry.correlationId)
-		)
-			return false;
+		// Correlation and request filtering - use index
+		if (query.correlationIds) {
+			if (!entry.correlationId) return false;
+			const correlationIndex = this.indexes.get('correlationId');
+			if (!correlationIndex || !correlationIndex.has(entry.correlationId)) return false;
+		}
 		if (
 			query.requestIds &&
 			entry.requestId &&
@@ -424,9 +452,12 @@ class LogStorage {
 		)
 			return false;
 
-		// Source filtering
-		if (query.sources && entry.source && !query.sources.includes(entry.source))
-			return false;
+		// Source filtering - use index
+		if (query.sources) {
+			if (!entry.source) return false;
+			const sourceIndex = this.indexes.get('source');
+			if (!sourceIndex || !sourceIndex.has(entry.source)) return false;
+		}
 		if (
 			query.excludeSources &&
 			entry.source &&
