@@ -4,6 +4,7 @@
  */
 
 import type {Logger, LoggerConfig, LogLevel} from './types.js';
+import {createLogMethod} from './log-method-factory.js';
 
 export class LoggerProvider {
 	private static instance: LoggerProvider | null = null;
@@ -92,92 +93,36 @@ export class LoggerProvider {
 	 * Create fallback logger when dependencies fail to load
 	 */
 	private createFallbackLogger(): Logger {
+		const fallbackConsole = console; // Use console as the logger
+
 		return {
-			fatal: ((...args: any[]) => {
-				if (args.length === 0) return;
-				if (typeof args[0] === 'object' && args[0] !== null) {
-					// Called as fatal(object, ?message)
-					const obj = args[0];
-					const msg = args[1];
-					console.error('[FATAL]', msg || '', obj);
-				} else {
-					// Called as fatal(msg, ...args)
-					const msg = args[0];
-					const restArgs = args.slice(1);
-					console.error('[FATAL]', msg, ...restArgs);
-				}
+			fatal: createLogMethod(fallbackConsole, 'fatal', {
+				consolePrefix: 'FATAL',
+				consoleMethod: 'error',
 			}) as any,
-			error: ((...args: any[]) => {
-				if (args.length === 0) return;
-				if (typeof args[0] === 'object' && args[0] !== null) {
-					const obj = args[0];
-					const msg = args[1];
-					console.error('[ERROR]', msg || '', obj);
-				} else {
-					const msg = args[0];
-					const restArgs = args.slice(1);
-					console.error('[ERROR]', msg, ...restArgs);
-				}
+			error: createLogMethod(fallbackConsole, 'error', {
+				consolePrefix: 'ERROR',
+				consoleMethod: 'error',
 			}) as any,
-			warn: ((...args: any[]) => {
-				if (args.length === 0) return;
-				if (typeof args[0] === 'object' && args[0] !== null) {
-					const obj = args[0];
-					const msg = args[1];
-					console.warn('[WARN]', msg || '', obj);
-				} else {
-					const msg = args[0];
-					const restArgs = args.slice(1);
-					console.warn('[WARN]', msg, ...restArgs);
-				}
+			warn: createLogMethod(fallbackConsole, 'warn', {
+				consolePrefix: 'WARN',
+				consoleMethod: 'warn',
 			}) as any,
-			info: ((...args: any[]) => {
-				if (args.length === 0) return;
-				if (typeof args[0] === 'object' && args[0] !== null) {
-					const obj = args[0];
-					const msg = args[1];
-					console.log('[INFO]', msg || '', obj);
-				} else {
-					const msg = args[0];
-					const restArgs = args.slice(1);
-					console.log('[INFO]', msg, ...restArgs);
-				}
+			info: createLogMethod(fallbackConsole, 'info', {
+				consolePrefix: 'INFO',
+				consoleMethod: 'log',
 			}) as any,
-			http: ((...args: any[]) => {
-				if (args.length === 0) return;
-				if (typeof args[0] === 'object' && args[0] !== null) {
-					const obj = args[0];
-					const msg = args[1];
-					console.log('[HTTP]', msg || '', obj);
-				} else {
-					const msg = args[0];
-					const restArgs = args.slice(1);
-					console.log('[HTTP]', msg, ...restArgs);
-				}
+			http: createLogMethod(fallbackConsole, 'http', {
+				consolePrefix: 'HTTP',
+				consoleMethod: 'log',
 			}) as any,
-			debug: ((...args: any[]) => {
-				if (args.length === 0) return;
-				if (typeof args[0] === 'object' && args[0] !== null) {
-					const obj = args[0];
-					const msg = args[1];
-					console.log('[DEBUG]', msg || '', obj);
-				} else {
-					const msg = args[0];
-					const restArgs = args.slice(1);
-					console.log('[DEBUG]', msg, ...restArgs);
-				}
+			debug: createLogMethod(fallbackConsole, 'debug', {
+				consolePrefix: 'DEBUG',
+				consoleMethod: 'log',
 			}) as any,
-			trace: ((...args: any[]) => {
-				if (args.length === 0) return;
-				if (typeof args[0] === 'object' && args[0] !== null) {
-					const obj = args[0];
-					const msg = args[1];
-					console.log('[TRACE]', msg || '', obj);
-				} else {
-					const msg = args[0];
-					const restArgs = args.slice(1);
-					console.log('[TRACE]', msg, ...restArgs);
-				}
+			trace: createLogMethod(fallbackConsole, 'trace', {
+				consolePrefix: 'TRACE',
+				consoleMethod: 'log',
 			}) as any,
 			child: (_bindings: Record<string, any>) => this.createFallbackLogger(),
 			isLevelEnabled: (_level: string) => true,

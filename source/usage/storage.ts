@@ -104,7 +104,7 @@ export function readUsageData(): UsageData {
 
 		return data;
 	} catch (error) {
-		console.warn('Failed to read usage data:', error);
+		logWarning('Failed to read usage data:', {error});
 		return createEmptyUsageData();
 	}
 }
@@ -118,7 +118,7 @@ export function writeUsageData(data: UsageData): void {
 		const filePath = getUsageFilePath();
 		fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
 	} catch (error) {
-		console.warn('Failed to write usage data:', error);
+		logWarning('Failed to write usage data:', {error});
 	}
 }
 
@@ -228,6 +228,6 @@ export function clearUsageData(): void {
 			fs.unlinkSync(filePath);
 		}
 	} catch (error) {
-		console.warn('Failed to clear usage data:', error);
+		logWarning('Failed to clear usage data:', {error});
 	}
 }

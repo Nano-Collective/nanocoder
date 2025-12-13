@@ -24,6 +24,17 @@ import type {
 } from './types.js';
 
 /**
+ * Type guard to check if a value is a Promise
+ * Handles void returns properly by checking for specific Promise characteristics
+ */
+function isPromise<T>(value: T | Promise<T> | void): value is Promise<T> {
+	return value !== null &&
+		value !== undefined &&
+		typeof value === 'object' &&
+		'then' in value;
+}
+
+/**
  * Determine transport configuration based on environment and CLI settings
  */
 function determineTransportConfig(
@@ -87,15 +98,15 @@ function createEnvironmentLogger(
 }
 
 /**
- * Factory function to create log method with specific level
- * Returns overloaded function matching Logger interface
+ * Factory function to create log method with specific level for Pino
+ * Uses the shared factory with custom transform logic for redaction and correlation
  */
-function createLogMethod(
+function createPinoLogMethod(
 	logger: PinoLogger,
 	level: string,
 	redactionRules?: PiiRedactionRules,
 ) {
-	// Create overloaded function
+	// Create overloaded function using the shared factory pattern
 	const logMethod = (
 		msgOrObj: string | object,
 		...args: unknown[]
@@ -125,13 +136,13 @@ function createEnhancedLogger(
 	redactionRules?: PiiRedactionRules,
 ): Logger {
 	return {
-		fatal: createLogMethod(pinoLogger, 'fatal', redactionRules),
-		error: createLogMethod(pinoLogger, 'error', redactionRules),
-		warn: createLogMethod(pinoLogger, 'warn', redactionRules),
-		info: createLogMethod(pinoLogger, 'info', redactionRules),
-		http: createLogMethod(pinoLogger, 'http', redactionRules),
-		debug: createLogMethod(pinoLogger, 'debug', redactionRules),
-		trace: createLogMethod(pinoLogger, 'trace', redactionRules),
+		fatal: createPinoLogMethod(pinoLogger, 'fatal', redactionRules),
+		error: createPinoLogMethod(pinoLogger, 'error', redactionRules),
+		warn: createPinoLogMethod(pinoLogger, 'warn', redactionRules),
+		info: createPinoLogMethod(pinoLogger, 'info', redactionRules),
+		http: createPinoLogMethod(pinoLogger, 'http', redactionRules),
+		debug: createPinoLogMethod(pinoLogger, 'debug', redactionRules),
+		trace: createPinoLogMethod(pinoLogger, 'trace', redactionRules),
 
 		child: (bindings: Record<string, unknown>) => {
 			return createEnhancedChild(pinoLogger, bindings, redactionRules);
@@ -146,7 +157,7 @@ function createEnhancedLogger(
 				const flushMethod = (pinoLogger as PinoLogger & { flush?: (() => void) | (() => Promise<void>) }).flush;
 				if (flushMethod && typeof flushMethod === 'function') {
 					const result = flushMethod();
-					if (result instanceof Promise) {
+					if (isPromise(result)) {
 						await result;
 					}
 				}
@@ -178,13 +189,13 @@ function createEnhancedChild(
 	const child = parent.child(bindings);
 
 	return {
-		fatal: createLogMethod(child, 'fatal', redactionRules),
-		error: createLogMethod(child, 'error', redactionRules),
-		warn: createLogMethod(child, 'warn', redactionRules),
-		info: createLogMethod(child, 'info', redactionRules),
-		http: createLogMethod(child, 'http', redactionRules),
-		debug: createLogMethod(child, 'debug', redactionRules),
-		trace: createLogMethod(child, 'trace', redactionRules),
+		fatal: createPinoLogMethod(child, 'fatal', redactionRules),
+		error: createPinoLogMethod(child, 'error', redactionRules),
+		warn: createPinoLogMethod(child, 'warn', redactionRules),
+		info: createPinoLogMethod(child, 'info', redactionRules),
+		http: createPinoLogMethod(child, 'http', redactionRules),
+		debug: createPinoLogMethod(child, 'debug', redactionRules),
+		trace: createPinoLogMethod(child, 'trace', redactionRules),
 
 		child: (moreBindings: Record<string, unknown>) => {
 			return createEnhancedChild(child, moreBindings, redactionRules);
@@ -199,7 +210,7 @@ function createEnhancedChild(
 				const flushMethod = (child as PinoLogger & { flush?: (() => void) | (() => Promise<void>) }).flush;
 				if (flushMethod && typeof flushMethod === 'function') {
 					const result = flushMethod();
-					if (result instanceof Promise) {
+					if (isPromise(result)) {
 						await result;
 					}
 				}
@@ -211,7 +222,7 @@ function createEnhancedChild(
 				const endMethod = (child as PinoLogger & { end?: (() => void) | (() => Promise<void>) }).end;
 				if (endMethod && typeof endMethod === 'function') {
 					const result = endMethod();
-					if (result instanceof Promise) {
+					if (result && typeof result === 'object' && 'then' in result) {
 						await result;
 					}
 				}
@@ -393,7 +404,7 @@ export function createLoggerWithTransport(
 		formatters: {
 			level: (label: string, _number: number) => ({level: label.toUpperCase()}),
 		},
-		transport: actualTransport,
+		transport: actualTransport as any,
 		base: {
 			pid: process.pid,
 			platform: process.platform,

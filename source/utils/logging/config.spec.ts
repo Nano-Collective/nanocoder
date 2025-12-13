@@ -279,7 +279,7 @@ test('createDevelopmentConfig includes sensible defaults', t => {
 	// Check transport configuration
 	t.truthy(config.transport, 'Should have transport configuration');
 	t.is(
-		config.transport?.target,
+		(config.transport as any)?.target,
 		'pino-pretty',
 		'Should use pretty transport in development',
 	);
@@ -302,7 +302,7 @@ test('createProductionConfig includes production optimizations', t => {
 	// Check transport configuration
 	t.truthy(config.transport, 'Should have transport configuration');
 	t.is(
-		config.transport?.target,
+		(config.transport as any)?.target,
 		'pino-roll',
 		'Should use roll transport in production',
 	);

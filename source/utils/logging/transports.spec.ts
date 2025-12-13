@@ -53,8 +53,8 @@ test('createDevelopmentTransport creates valid transport', t => {
 		t.true(transport.options.levelFirst);
 		t.is(transport.options.messageFormat, '{levelLabel} - {msg}');
 		t.false(transport.options.singleLine);
-		t.truthy(transport.options.customPrettifiers);
-		t.is(typeof transport.options.customPrettifiers.time, 'function');
+		t.truthy((transport.options as any).customPrettifiers);
+		t.is(typeof (transport.options as any).customPrettifiers.time, 'function');
 	}
 });
 
@@ -65,7 +65,7 @@ test('createProductionTransport creates valid transport with default directory',
 	t.is(transport.level, 'info');
 	t.truthy(transport.options);
 	if (transport.options) {
-		t.true(transport.options.file.includes('nanocoder-%Y-%m-%d.log'));
+		t.true((transport.options as any).file.includes('nanocoder-%Y-%m-%d.log'));
 		t.is(transport.options.frequency, 'daily');
 		t.is(transport.options.size, '100m');
 		t.is(transport.options.dateFormat, 'yyyy-MM-dd');
@@ -76,8 +76,8 @@ test('createProductionTransport creates valid transport with default directory',
 		t.false(transport.options.sync);
 		t.truthy(transport.options.limit);
 		if (transport.options.limit) {
-			t.is(transport.options.limit.count, 30);
-			t.true(transport.options.limit.removeOtherLogFiles);
+			t.is((transport.options.limit as any).count, 30);
+			t.true((transport.options.limit as any).removeOtherLogFiles);
 		}
 		t.is(transport.options.minLength, 4096);
 		t.is(transport.options.maxLength, 1048576);
@@ -227,7 +227,7 @@ test('createErrorTransport creates error-specific transport', t => {
 		t.true(transport.options.compress);
 		t.true(transport.options.sync); // Sync for errors
 		if (transport.options.limit) {
-			t.is(transport.options.limit.count, 90); // Keep more error logs
+			t.is((transport.options.limit as any).count, 90); // Keep more error logs
 		}
 		t.is(transport.options.minLength, 1024);
 	}
@@ -249,8 +249,8 @@ test('createAuditTransport creates audit-specific transport', t => {
 		t.true(transport.options.compress);
 		t.true(transport.options.sync); // Sync for audit
 		if (transport.options.limit) {
-			t.is(transport.options.limit.count, 365); // Keep 1 year of logs
-			t.false(transport.options.limit.removeOtherLogFiles);
+			t.is((transport.options.limit as any).count, 365); // Keep 1 year of logs
+			t.false((transport.options.limit as any).removeOtherLogFiles);
 		}
 		t.is(transport.options.maxLength, 10485760); // 10MB for audit logs
 	}
@@ -451,7 +451,7 @@ test('transport configurations have expected structure', t => {
 	// Production transport should have file path
 	if (prodTransport.options) {
 		t.truthy(prodTransport.options.file);
-		t.true(prodTransport.options.file.includes(testLogDir));
+		t.true((prodTransport.options as any).file.includes(testLogDir));
 	}
 
 	// Test transport should output to /dev/null

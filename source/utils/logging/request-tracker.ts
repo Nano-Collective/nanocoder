@@ -596,7 +596,7 @@ export function trackRequest<T extends (...args: unknown[]) => unknown>(
 	},
 ): T {
 	return trackPerformance(
-		async (...args: Parameters<T>) => {
+		async (...args: unknown[]) => {
 			const requestId = globalRequestTracker.startRequest({
 				type: options.type,
 				method: options.method,
@@ -607,7 +607,7 @@ export function trackRequest<T extends (...args: unknown[]) => unknown>(
 			});
 
 			try {
-				const result = await fn(...args);
+				const result = await fn(...args as Parameters<T>);
 
 				globalRequestTracker.completeRequest(requestId, {
 					customData: {

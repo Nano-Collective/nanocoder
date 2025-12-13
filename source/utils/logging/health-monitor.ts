@@ -506,7 +506,7 @@ export class HealthMonitor {
 			message = 'Memory usage is elevated';
 		}
 
-		return {
+		return Promise.resolve({
 			name: 'memory-usage',
 			status,
 			score: this.calculateScore(
@@ -522,7 +522,7 @@ export class HealthMonitor {
 				warning: thresholds.heapUsageWarning,
 				critical: thresholds.heapUsageCritical,
 			},
-		};
+		});
 	}
 
 	private checkLoggingSystem(): Promise<HealthCheck> {
@@ -547,7 +547,7 @@ export class HealthMonitor {
 			message = 'No log entries detected';
 		}
 
-		return {
+		return Promise.resolve({
 			name: 'logging-system',
 			status,
 			score: this.calculateScore(status, 0, 0, 0),
@@ -558,7 +558,7 @@ export class HealthMonitor {
 				warning: thresholds.logRateWarning,
 				critical: thresholds.logRateCritical,
 			},
-		};
+		});
 	}
 
 	private checkRequestTracking(): Promise<HealthCheck> {
@@ -589,7 +589,7 @@ export class HealthMonitor {
 			message = 'Request duration is elevated';
 		}
 
-		return {
+		return Promise.resolve({
 			name: 'request-tracking',
 			status,
 			score: this.calculateScore(
@@ -605,7 +605,7 @@ export class HealthMonitor {
 				warning: thresholds.errorRateWarning,
 				critical: thresholds.errorRateCritical,
 			},
-		};
+		});
 	}
 
 	private checkPerformanceMonitoring(): Promise<HealthCheck> {
@@ -629,7 +629,7 @@ export class HealthMonitor {
 			message = 'No performance measurements detected';
 		}
 
-		return {
+		return Promise.resolve({
 			name: 'performance-monitoring',
 			status,
 			score: this.calculateScore(status, 0, 0, 0),
@@ -640,7 +640,7 @@ export class HealthMonitor {
 				warning: thresholds.averageDurationWarning,
 				critical: thresholds.averageDurationCritical,
 			},
-		};
+		});
 	}
 
 	private checkConfigurationSystem(): Promise<HealthCheck> {
@@ -656,14 +656,14 @@ export class HealthMonitor {
 			hasPendingReloads: false,
 		};
 
-		return {
+		return Promise.resolve({
 			name: 'configuration-system',
 			status,
 			score: this.calculateScore(status, 0, 0, 0),
 			duration: performance.now() - startTime,
 			message,
 			details,
-		};
+		});
 	}
 
 	private calculateScore(
@@ -747,14 +747,14 @@ export class HealthMonitor {
 	}
 
 	private sendAlert(result: HealthCheckResult): Promise<void> {
-		if (!this.config.alerts.enabled) return;
+		if (!this.config.alerts.enabled) return Promise.resolve();
 
 		// Check cooldown
 		if (
 			this.lastAlert &&
 			Date.now() - this.lastAlert < this.config.alerts.cooldown
 		) {
-			return;
+			return Promise.resolve();
 		}
 
 		this.lastAlert = Date.now();
@@ -810,6 +810,8 @@ export class HealthMonitor {
 					break;
 			}
 		}
+
+		return Promise.resolve();
 	}
 }
 

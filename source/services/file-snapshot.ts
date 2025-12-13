@@ -2,6 +2,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import {existsSync} from 'fs';
 import {execSync} from 'child_process';
+import {logWarning} from '@/utils/message-queue';
 
 /**
  * Maximum number of files to capture in a checkpoint.
@@ -32,11 +33,10 @@ export class FileSnapshotService {
 				const relativePath = path.relative(this.workspaceRoot, absolutePath);
 				snapshots.set(relativePath, content);
 			} catch (error) {
-				console.warn(
-					`Warning: Could not capture file ${filePath}: ${
-						error instanceof Error ? error.message : 'Unknown error'
-					}`,
-				);
+				logWarning('Could not capture file', {
+					filePath,
+					error: error instanceof Error ? error.message : 'Unknown error',
+				});
 			}
 		}
 
@@ -123,17 +123,18 @@ export class FileSnapshotService {
 			});
 
 			if (filtered.length > MAX_CHECKPOINT_FILES) {
-				console.warn(
-					`Warning: ${filtered.length} modified files detected. Limiting to first ${MAX_CHECKPOINT_FILES} files.`,
-				);
+				logWarning('Too many modified files detected, limiting to maximum', {
+					fileCount: filtered.length,
+					maxFiles: MAX_CHECKPOINT_FILES,
+				});
 				return filtered.slice(0, MAX_CHECKPOINT_FILES);
 			}
 
 			return filtered;
 		} catch {
-			console.warn(
-				'Git not available for file tracking. No files will be captured.',
-			);
+			logWarning('Git not available for file tracking', {
+				workspaceRoot: this.workspaceRoot,
+			});
 			return [];
 		}
 	}

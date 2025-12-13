@@ -266,7 +266,7 @@ test('correlation metadata management', t => {
 	addCorrelationMetadata('environment', metadata.environment);
 
 	// Get metadata
-	const retrieved = getCorrelationMetadata();
+	const retrieved = getCorrelationMetadata() as CorrelationMetadata;
 	t.truthy(retrieved, 'Should return metadata');
 	t.is(retrieved.source, metadata.source, 'Should match source');
 	t.is(retrieved.version, metadata.version, 'Should match version');
@@ -312,7 +312,8 @@ test('correlationMiddleware creates middleware function', t => {
 });
 
 test('withCorrelation decorator works with async functions', async t => {
-	const mockFunction = async (input: string) => {
+	const mockFunction = async (...args: unknown[]) => {
+		const input = args[0] as string;
 		const context = getCurrentCorrelationContext();
 		return `${input}-${context?.id || 'no-context'}`;
 	};
@@ -321,7 +322,7 @@ test('withCorrelation decorator works with async functions', async t => {
 
 	const result = await decoratedFunction('test');
 	t.is(typeof result, 'string', 'Should return string');
-	t.true(result.includes('test-'), 'Should include input');
+	t.true((result as string).includes('test-'), 'Should include input');
 });
 
 test('context isolation between concurrent operations', async t => {
@@ -407,7 +408,7 @@ test('metadata merging works correctly', t => {
 	addCorrelationMetadata('environment', additionalMetadata.environment);
 	addCorrelationMetadata('requestId', additionalMetadata.requestId);
 
-	const merged = getCorrelationMetadata();
+	const merged = getCorrelationMetadata() as CorrelationMetadata;
 
 	t.is(merged.source, 'api', 'Should preserve initial metadata');
 	t.is(merged.version, '1.0.0', 'Should preserve initial version');

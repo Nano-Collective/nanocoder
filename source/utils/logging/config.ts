@@ -71,7 +71,7 @@ export function createProductionConfig(): EnhancedLoggerConfig {
 	if (disableFileLogging) {
 		return {
 			...baseConfig,
-			destination: process.stdout.fd,
+			destination: String(process.stdout.fd),
 			target: 'pino-pretty',
 			options: {
 				colorize: false, // No colors in production
@@ -89,7 +89,7 @@ export function createProductionConfig(): EnhancedLoggerConfig {
 	return {
 		...baseConfig,
 		// Always output to stdout for UI compatibility
-		destination: process.stdout.fd,
+		destination: String(process.stdout.fd),
 		target: 'pino-pretty',
 		options: {
 			colorize: false, // No colors in production

@@ -39,7 +39,7 @@ const logger: Logger = new Proxy({} as Logger, {
 	get(_target, prop): unknown {
 		const loggerInstance = getLogger();
 		if (loggerInstance && typeof loggerInstance === 'object' && prop in loggerInstance) {
-			const value = (loggerInstance as Record<string, unknown>)[prop];
+			const value = (loggerInstance as any)[prop];
 			return typeof value === 'function' ? value.bind(loggerInstance) : value;
 		}
 		// Return fallback methods that match Logger interface
@@ -189,8 +189,8 @@ export function trackPerformance<T extends (...args: unknown[]) => unknown>(
 				const end = endMetrics(metrics);
 				const cpuEnd = getCpuUsage();
 				const memoryDelta = calculateMemoryDelta(
-					metrics.memoryUsage,
-					end.memoryUsage,
+					metrics.memoryUsage || process.memoryUsage(),
+					end.memoryUsage || process.memoryUsage(),
 				);
 				const cpuPercent = calculateCpuUsage(cpuStart, cpuEnd, end.duration);
 
@@ -211,7 +211,7 @@ export function trackPerformance<T extends (...args: unknown[]) => unknown>(
 						external: formatBytes(memoryDelta.externalDelta),
 						rss: formatBytes(memoryDelta.rssDelta),
 					};
-					perfData.currentMemory = formatMemoryUsage(end.memoryUsage);
+					perfData.currentMemory = formatMemoryUsage(end.memoryUsage || process.memoryUsage());
 				}
 
 				if (trackCpu) {
@@ -269,8 +269,8 @@ export function trackPerformance<T extends (...args: unknown[]) => unknown>(
 			} catch (error) {
 				const end = endMetrics(metrics);
 				const memoryDelta = calculateMemoryDelta(
-					metrics.memoryUsage,
-					end.memoryUsage,
+					metrics.memoryUsage || process.memoryUsage(),
+					end.memoryUsage || process.memoryUsage(),
 				);
 				const cpuEnd = getCpuUsage();
 				const cpuPercent = calculateCpuUsage(cpuStart, cpuEnd, end.duration);
