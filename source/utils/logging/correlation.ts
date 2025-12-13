@@ -230,7 +230,7 @@ export function withCorrelationContext<T>(
 	fn: () => T,
 ): T {
 	try {
-		if (process.env.CORRELATION_DEBUG === 'true') {
+		if (process.env.NANOCODER_CORRELATION_DEBUG === 'true') {
 			console.debug(`[Correlation] Context started: ${context.id}`);
 		}
 		
@@ -238,7 +238,7 @@ export function withCorrelationContext<T>(
 		const result = correlationStorage.run(context, fn);
 		correlationMonitoring.activeContexts--;
 		
-		if (process.env.CORRELATION_DEBUG === 'true') {
+		if (process.env.NANOCODER_CORRELATION_DEBUG === 'true') {
 			console.debug(`[Correlation] Context completed: ${context.id}`);
 		}
 		
@@ -249,7 +249,7 @@ export function withCorrelationContext<T>(
 		correlationMonitoring.lastErrorTime = Date.now();
 		correlationMonitoring.activeContexts--;
 		
-		if (process.env.CORRELATION_DEBUG === 'true') {
+		if (process.env.NANOCODER_CORRELATION_DEBUG === 'true') {
 			console.error(`[Correlation] Context error: ${context.id}`, error);
 		}
 		
@@ -271,7 +271,7 @@ export function withNewCorrelationContext<T>(
 	
 	correlationMonitoring.contextsCreated++;
 	
-	if (process.env.CORRELATION_DEBUG === 'true') {
+	if (process.env.NANOCODER_CORRELATION_DEBUG === 'true') {
 		console.debug(`[Correlation] New context created: ${context.id}`);
 	}
 	
@@ -280,7 +280,7 @@ export function withNewCorrelationContext<T>(
 		const result = correlationStorage.run(context, () => fn(context));
 		correlationMonitoring.activeContexts--;
 		
-		if (process.env.CORRELATION_DEBUG === 'true') {
+		if (process.env.NANOCODER_CORRELATION_DEBUG === 'true') {
 			console.debug(`[Correlation] New context completed: ${context.id}`);
 		}
 		
@@ -291,7 +291,7 @@ export function withNewCorrelationContext<T>(
 		correlationMonitoring.lastErrorTime = Date.now();
 		correlationMonitoring.activeContexts--;
 		
-		if (process.env.CORRELATION_DEBUG === 'true') {
+		if (process.env.NANOCODER_CORRELATION_DEBUG === 'true') {
 			console.error(`[Correlation] New context error: ${context.id}`, error);
 		}
 		
@@ -311,7 +311,7 @@ export function getCorrelationId(): string | null {
  * Check if correlation is enabled
  */
 export function isCorrelationEnabled(): boolean {
-	return process.env.CORRELATION_ENABLED !== 'false';
+	return process.env.NANOCODER_CORRELATION_ENABLED !== 'false';
 }
 
 /**

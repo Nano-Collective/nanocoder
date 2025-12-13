@@ -238,11 +238,11 @@ test('createConfig overrides redact arrays correctly', t => {
 });
 
 test('configuration respects environment variables', t => {
-	const originalLogLevel = process.env.LOG_LEVEL;
+	const originalLogLevel = process.env.NANOCODER_LOG_LEVEL;
 	const originalNodeEnv = process.env.NODE_ENV;
 
 	// Set environment variables
-	process.env.LOG_LEVEL = 'error';
+	process.env.NANOCODER_LOG_LEVEL = 'error';
 	process.env.NODE_ENV = 'production';
 
 	try {

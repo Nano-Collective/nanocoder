@@ -44,8 +44,8 @@ function determineTransportConfig(
 	_isTest: boolean,
 	_cliConfig?: LoggingCliConfig,
 ): EnvironmentTransportConfig {
-	const _envLogFile = process.env.LOG_TO_FILE === 'true';
-	const _envLogConsole = process.env.LOG_TO_CONSOLE === 'true';
+	const _envLogFile = process.env.NANOCODER_LOG_TO_FILE === 'true';
+	const _envLogConsole = process.env.NANOCODER_LOG_TO_CONSOLE === 'true';
 
 	// All environments: file only, no console - simplified approach
 	return {

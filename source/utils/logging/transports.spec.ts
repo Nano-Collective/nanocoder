@@ -36,8 +36,8 @@ test.after.always(() => {
 test.beforeEach(() => {
 	// Reset environment variables
 	delete process.env.NODE_ENV;
-	delete process.env.LOG_TRANSPORTS;
-	delete process.env.LOG_TO_FILE;
+	delete process.env.NANOCODER_LOG_TRANSPORTS;
+	delete process.env.NANOCODER_LOG_TO_FILE;
 });
 
 test('createDevelopmentTransport creates valid transport', t => {
@@ -163,9 +163,9 @@ test('createMultiTransport returns production transport in production', t => {
 	t.is(transports[0].target, 'pino-roll');
 });
 
-test('createMultiTransport returns both transports when LOG_TO_FILE is true', t => {
+test('createMultiTransport returns both transports when NANOCODER_LOG_TO_FILE is true', t => {
 	process.env.NODE_ENV = 'development';
-	process.env.LOG_TO_FILE = 'true';
+	process.env.NANOCODER_LOG_TO_FILE = 'true';
 
 	const transports = createMultiTransport();
 
@@ -268,7 +268,7 @@ test('getTransportFromEnvironment handles default transport', t => {
 });
 
 test('getTransportFromEnvironment handles single transport type', t => {
-	process.env.LOG_TRANSPORTS = 'production';
+	process.env.NANOCODER_LOG_TRANSPORTS = 'production';
 
 	const transport = getTransportFromEnvironment();
 
@@ -280,7 +280,7 @@ test('getTransportFromEnvironment handles single transport type', t => {
 });
 
 test('getTransportFromEnvironment handles multiple transport types', t => {
-	process.env.LOG_TRANSPORTS = 'development, production';
+	process.env.NANOCODER_LOG_TRANSPORTS = 'development, production';
 
 	const transports = getTransportFromEnvironment();
 
@@ -304,7 +304,7 @@ test('getTransportFromEnvironment handles transport aliases', t => {
 	];
 
 	testCases.forEach(([alias, expectedTarget]) => {
-		process.env.LOG_TRANSPORTS = alias;
+		process.env.NANOCODER_LOG_TRANSPORTS = alias;
 		const transport = getTransportFromEnvironment();
 
 		if (Array.isArray(transport)) {
@@ -324,7 +324,7 @@ test('getTransportFromEnvironment handles transport aliases', t => {
 });
 
 test('getTransportFromEnvironment handles whitespace and commas', t => {
-	process.env.LOG_TRANSPORTS = ' development , production , error ';
+	process.env.NANOCODER_LOG_TRANSPORTS = ' development , production , error ';
 
 	const transports = getTransportFromEnvironment();
 
@@ -497,8 +497,8 @@ test('multi-transport handles environment changes', t => {
 	const devTransports = createMultiTransport();
 	t.true(Array.isArray(devTransports));
 
-	// Test with LOG_TO_FILE enabled
-	process.env.LOG_TO_FILE = 'true';
+	// Test with NANOCODER_LOG_TO_FILE enabled
+	process.env.NANOCODER_LOG_TO_FILE = 'true';
 	const fileTransports = createMultiTransport();
 	t.true(Array.isArray(fileTransports));
 	t.true(fileTransports.length >= devTransports.length);

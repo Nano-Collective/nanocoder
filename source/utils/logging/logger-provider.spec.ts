@@ -10,7 +10,7 @@ test.beforeEach(() => {
 	provider.reset();
 	// Reset environment variables
 	delete process.env.NODE_ENV;
-	delete process.env.LOG_LEVEL;
+	delete process.env.NANOCODER_LOG_LEVEL;
 });
 
 test('LoggerProvider is a singleton', t => {
@@ -215,7 +215,7 @@ test('createDefaultConfig handles environments correctly', t => {
 test('createDefaultConfig respects LOG_LEVEL environment variable', t => {
 	const provider = LoggerProvider.getInstance();
 
-	process.env.LOG_LEVEL = 'warn';
+	process.env.NANOCODER_LOG_LEVEL = 'warn';
 	process.env.NODE_ENV = 'production';
 
 	provider.initializeLogger();

@@ -13,8 +13,8 @@ import type {LoggerConfig, EnhancedLoggerConfig, LogLevel} from './types.js';
 export function getDefaultLogDirectory(): string {
 	const _env = process.env.NODE_ENV || 'development';
 
-	if (process.env.LOG_DIR) {
-		return process.env.LOG_DIR;
+	if (process.env.NANOCODER_LOG_DIR) {
+		return process.env.NANOCODER_LOG_DIR;
 	}
 
 	switch (platform()) {
@@ -32,7 +32,7 @@ export function getDefaultLogDirectory(): string {
  */
 export function createDevelopmentConfig(): EnhancedLoggerConfig {
 	return {
-		level: (process.env.LOG_LEVEL as LogLevel) || 'debug',
+		level: (process.env.NANOCODER_LOG_LEVEL as LogLevel) || 'debug',
 		destination: String(process.stdout.fd),
 		pretty: true,
 		redact: ['apiKey', 'token', 'password', 'secret'],
@@ -57,10 +57,10 @@ export function createProductionConfig(): EnhancedLoggerConfig {
 	const _logDir = getDefaultLogDirectory();
 
 	// Check if file logging is explicitly disabled
-	const disableFileLogging = process.env.LOG_DISABLE_FILE === 'true';
+	const disableFileLogging = process.env.NANOCODER_LOG_DISABLE_FILE === 'true';
 
 	const baseConfig = {
-		level: (process.env.LOG_LEVEL as LogLevel) || 'debug', // Changed from 'info' to 'debug'
+		level: (process.env.NANOCODER_LOG_LEVEL as LogLevel) || 'debug', // Changed from 'info' to 'debug'
 		pretty: false,
 		redact: ['apiKey', 'token', 'password', 'email', 'userId', 'secret'],
 		correlation: true,
@@ -100,7 +100,7 @@ export function createProductionConfig(): EnhancedLoggerConfig {
 			singleLine: true, // Compact for UI
 		},
 		// Note: File logging will be handled by the multi-transport system in transports.ts
-		// when LOG_TO_FILE=true is set
+		// when NANOCODER_LOG_TO_FILE=true is set
 	};
 }
 

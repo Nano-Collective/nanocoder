@@ -193,7 +193,7 @@ export class LoggerProvider {
 				? 'silent'
 				: isDev
 				? 'debug'
-				: (process.env.LOG_LEVEL as LogLevel) || 'info',
+				: (process.env.NANOCODER_LOG_LEVEL as LogLevel) || 'info',
 			pretty: isDev,
 			redact: ['apiKey', 'token', 'password', 'secret'],
 			correlation: true,

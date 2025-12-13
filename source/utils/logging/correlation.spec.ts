@@ -395,11 +395,11 @@ test('correlation ID format validation', t => {
  */
 test('AsyncLocalStorage-only mode works without legacy context', t => {
 	// Save original environment variable
-	const originalEnv = process.env.CORRELATION_LEGACY_FALLBACK;
+	const originalEnv = process.env.NANOCODER_CORRELATION_LEGACY_FALLBACK;
 	
 	try {
 		// Disable legacy context
-		process.env.CORRELATION_LEGACY_FALLBACK = 'false';
+		process.env.NANOCODER_CORRELATION_LEGACY_FALLBACK = 'false';
 		
 		// Test that AsyncLocalStorage still works
 		const testId = generateCorrelationId();
@@ -448,9 +448,9 @@ test('AsyncLocalStorage-only mode works without legacy context', t => {
 	} finally {
 		// Restore original environment variable
 		if (originalEnv === undefined) {
-			delete process.env.CORRELATION_LEGACY_FALLBACK;
+			delete process.env.NANOCODER_CORRELATION_LEGACY_FALLBACK;
 		} else {
-			process.env.CORRELATION_LEGACY_FALLBACK = originalEnv;
+			process.env.NANOCODER_CORRELATION_LEGACY_FALLBACK = originalEnv;
 		}
 	}
 });

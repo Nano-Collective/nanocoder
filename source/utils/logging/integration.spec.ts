@@ -32,7 +32,7 @@ const testDir = join(tmpdir(), `nanocoder-logging-integration-${Date.now()}`);
 test.before(() => {
 	mkdirSync(testDir, {recursive: true});
 	process.env.NODE_ENV = 'test';
-	process.env.LOG_LEVEL = 'debug';
+	process.env.NANOCODER_LOG_LEVEL = 'debug';
 });
 
 test.after.always(async () => {

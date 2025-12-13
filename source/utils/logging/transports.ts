@@ -114,7 +114,7 @@ export function createMultiTransport(): TransportTarget[] {
 	}
 
 	// Add file output for production or when explicitly enabled
-	if (env === 'production' || process.env.LOG_TO_FILE === 'true') {
+	if (env === 'production' || process.env.NANOCODER_LOG_TO_FILE === 'true') {
 		transports.push(createProductionTransport());
 	}
 
@@ -203,7 +203,7 @@ export function getTransportFromEnvironment():
 	| TransportTarget
 	| TransportTarget[] {
 	// Support multiple transports via comma separation
-	const transportTypes = (process.env.LOG_TRANSPORTS || 'default')
+	const transportTypes = (process.env.NANOCODER_LOG_TRANSPORTS || 'default')
 		.split(',')
 		.map(t => t.trim());
 	const transports: TransportTarget[] = [];
