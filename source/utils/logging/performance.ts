@@ -5,7 +5,7 @@
 
 import {loadavg} from 'os';
 import type {PerformanceMetrics, CorrelationContext} from './types.js';
-import {generateCorrelationId, withNewCorrelationContext, type Logger} from './index.js';
+import {generateCorrelationId, withNewCorrelationContext, correlationStorage, createCorrelationContext, type Logger} from './index.js';
 
 // Lazy logger initialization to avoid circular dependency
 let _logger: Logger | null = null;
@@ -181,7 +181,11 @@ export function trackPerformance<T extends (...args: unknown[]) => unknown>(
 		const metrics = startMetrics();
 		const cpuStart = getCpuUsage();
 
-		return withNewCorrelationContext(async (context: CorrelationContext) => {
+		// Create new correlation context for this performance tracking
+		const context = createCorrelationContext();
+		
+		// Use AsyncLocalStorage.run() directly for proper async context handling
+		return correlationStorage.run(context, async () => {
 			try {
 				const result = await fn(...args);
 
@@ -327,7 +331,11 @@ export async function measureTime<T>(
 	const memoryStart = process.memoryUsage();
 	const cpuStart = trackCpu ? getCpuUsage() : undefined;
 
-	return withNewCorrelationContext(async (context: CorrelationContext) => {
+	// Create new correlation context for this measurement
+	const context = createCorrelationContext();
+	
+	// Use AsyncLocalStorage.run() directly for proper async context handling
+	return correlationStorage.run(context, async () => {
 		try {
 			const result = await fn();
 			const duration = performance.now() - start;

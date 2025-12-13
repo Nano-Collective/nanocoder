@@ -10,7 +10,7 @@ import type {CorrelationContext, CorrelationHttpRequest, CorrelationHttpResponse
  * Async local storage for correlation context
  * Provides thread-safe context storage across async operations
  */
-const correlationStorage = new AsyncLocalStorage<CorrelationContext>();
+export const correlationStorage = new AsyncLocalStorage<CorrelationContext>();
 
 /**
  * Correlation Context Monitoring Metrics
@@ -20,7 +20,7 @@ const correlationMonitoring = {
 	contextsCreated: 0,
 	activeContexts: 0,
 	errors: 0,
-	lastError: null,
+	lastError: null as string | null,
 	lastErrorTime: 0,
 	startTime: Date.now(),
 };
