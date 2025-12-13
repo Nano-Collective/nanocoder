@@ -125,12 +125,16 @@ export class FileSnapshotService {
 			});
 
 			if (filtered.length > MAX_CHECKPOINT_FILES) {
-				logWarning('Too many modified files detected, limiting to maximum', true, {
-					context: {
-						fileCount: filtered.length,
-						maxFiles: MAX_CHECKPOINT_FILES,
+				logWarning(
+					'Too many modified files detected, limiting to maximum',
+					true,
+					{
+						context: {
+							fileCount: filtered.length,
+							maxFiles: MAX_CHECKPOINT_FILES,
+						},
 					},
-				});
+				);
 				return filtered.slice(0, MAX_CHECKPOINT_FILES);
 			}
 

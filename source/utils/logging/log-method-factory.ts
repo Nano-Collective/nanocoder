@@ -30,13 +30,16 @@ export function createLogMethod<T = any>(
 		transformResult?: (result: any) => void;
 	},
 ) {
-	const {contextPrefix, consolePrefix, consoleMethod, transformArgs, transformResult} = options || {};
+	const {
+		contextPrefix,
+		consolePrefix,
+		consoleMethod,
+		transformArgs,
+		transformResult,
+	} = options || {};
 
 	// Create overloaded function
-	const logMethod = (
-		msgOrObj: string | object,
-		...args: unknown[]
-	) => {
+	const logMethod = (msgOrObj: string | object, ...args: unknown[]) => {
 		try {
 			// Handle console prefix fallback case
 			if (consolePrefix && consoleMethod && logger === console) {
@@ -50,13 +53,22 @@ export function createLogMethod<T = any>(
 					// String first: (msg: string, ...args: unknown[]) => void
 					const msg = msgOrObj as string;
 					const restArgs = args.slice(1);
-					(console as any)[consoleMethod](`[${consolePrefix}]`, msg, ...restArgs);
+					(console as any)[consoleMethod](
+						`[${consolePrefix}]`,
+						msg,
+						...restArgs,
+					);
 				}
 				return;
 			}
 
 			// Transform arguments if needed
-			const transformedArgs = transformArgs ? transformArgs(args, typeof msgOrObj === 'string' ? msgOrObj : undefined) : args;
+			const transformedArgs = transformArgs
+				? transformArgs(
+						args,
+						typeof msgOrObj === 'string' ? msgOrObj : undefined,
+				  )
+				: args;
 
 			if (typeof msgOrObj === 'object' && msgOrObj !== null) {
 				// Object first: (obj: object, msg?: string) => void
@@ -88,7 +100,9 @@ export function createLogMethod<T = any>(
 		} catch (error) {
 			// Fallback to console if logger method fails
 			const fallbackLevel = level === 'trace' ? 'log' : level;
-			const consoleMethod = console[fallbackLevel as keyof Console] as (...args: any[]) => void;
+			const consoleMethod = console[fallbackLevel as keyof Console] as (
+				...args: any[]
+			) => void;
 			if (typeof consoleMethod === 'function') {
 				consoleMethod('Logger method failed:', {
 					level,
@@ -116,13 +130,23 @@ export function createLogMethods<T = any>(
 	logger: T,
 	options?: {
 		contextPrefix?: string;
-		transformArgs?: (args: unknown[], level?: string, msg?: string) => unknown[];
+		transformArgs?: (
+			args: unknown[],
+			level?: string,
+			msg?: string,
+		) => unknown[];
 		transformResult?: (result: any, level?: string) => void;
 		consolePrefix?: string;
 		consoleMethod?: keyof Console;
 	},
 ) {
-	const {contextPrefix, transformArgs, transformResult, consolePrefix, consoleMethod} = options || {};
+	const {
+		contextPrefix,
+		transformArgs,
+		transformResult,
+		consolePrefix,
+		consoleMethod,
+	} = options || {};
 
 	// Level-specific argument transformers if needed
 	const createTransformer = (level: string) => {

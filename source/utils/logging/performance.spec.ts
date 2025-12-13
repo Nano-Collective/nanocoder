@@ -1,6 +1,14 @@
 import test from 'ava';
-import {trackPerformance, measureTime, checkMemoryThresholds, takePerformanceSnapshot} from './performance.js';
-import {correlationStorage, getCurrentCorrelationContext} from './correlation.js';
+import {
+	trackPerformance,
+	measureTime,
+	checkMemoryThresholds,
+	takePerformanceSnapshot,
+} from './performance.js';
+import {
+	correlationStorage,
+	getCurrentCorrelationContext,
+} from './correlation.js';
 
 // Test the trackPerformance decorator with async context handling
 test('trackPerformance decorator maintains correlation context throughout async operation', async t => {
@@ -17,7 +25,7 @@ test('trackPerformance decorator maintains correlation context throughout async 
 	});
 
 	const result = await decoratedFn('test-input');
-	
+
 	t.is(result, 'processed-test-input', 'Function should return correct result');
 });
 
@@ -35,7 +43,7 @@ test('trackPerformance decorator handles errors correctly', async t => {
 	const error = await t.throwsAsync(async () => {
 		await decoratedFn();
 	});
-	
+
 	t.is(error.message, 'Test error', 'Error should be propagated correctly');
 });
 
@@ -50,9 +58,9 @@ test('measureTime function maintains correlation context', async t => {
 			logPerformance: false,
 			trackMemory: false,
 			trackCpu: false,
-		}
+		},
 	);
-	
+
 	t.is(result.result, 'test-result', 'Should return correct result');
 	t.truthy(result.duration >= 0, 'Should have valid duration');
 });
@@ -61,8 +69,8 @@ test('checkMemoryThresholds function works correctly', t => {
 	const memory = {
 		heapUsed: 100 * 1024 * 1024, // 100MB
 		heapTotal: 200 * 1024 * 1024, // 200MB
-		external: 50 * 1024 * 1024,   // 50MB
-		rss: 150 * 1024 * 1024,       // 150MB
+		external: 50 * 1024 * 1024, // 50MB
+		rss: 150 * 1024 * 1024, // 150MB
 		arrayBuffers: 10 * 1024 * 1024, // 10MB
 	};
 
@@ -70,14 +78,14 @@ test('checkMemoryThresholds function works correctly', t => {
 		heapUsagePercentThreshold: 0.9,
 		heapUsageAbsoluteThreshold: 512,
 	});
-	
+
 	t.true(result.isHealthy, 'Should be healthy with these thresholds');
 	t.is(result.warnings.length, 0, 'Should have no warnings');
 });
 
 test('takePerformanceSnapshot function works correctly', t => {
 	const snapshot = takePerformanceSnapshot();
-	
+
 	t.truthy(snapshot.timestamp, 'Should have timestamp');
 	t.truthy(snapshot.memory, 'Should have memory data');
 	t.truthy(snapshot.uptime >= 0, 'Should have uptime');
@@ -87,10 +95,16 @@ test('takePerformanceSnapshot function works correctly', t => {
 test('trackPerformance with complex async chains maintains context', async t => {
 	const testFn = async () => {
 		// Complex async chain
-		const step1 = await new Promise(resolve => setTimeout(() => resolve('step1'), 10));
-		const step2 = await new Promise(resolve => setTimeout(() => resolve('step2'), 10));
-		const step3 = await new Promise(resolve => setTimeout(() => resolve('step3'), 10));
-		
+		const step1 = await new Promise(resolve =>
+			setTimeout(() => resolve('step1'), 10),
+		);
+		const step2 = await new Promise(resolve =>
+			setTimeout(() => resolve('step2'), 10),
+		);
+		const step3 = await new Promise(resolve =>
+			setTimeout(() => resolve('step3'), 10),
+		);
+
 		return {step1, step2, step3};
 	};
 
@@ -101,8 +115,12 @@ test('trackPerformance with complex async chains maintains context', async t => 
 	});
 
 	const result = await decoratedFn();
-	
-	t.deepEqual(result, {step1: 'step1', step2: 'step2', step3: 'step3'}, 'Should handle complex async chains');
+
+	t.deepEqual(
+		result,
+		{step1: 'step1', step2: 'step2', step3: 'step3'},
+		'Should handle complex async chains',
+	);
 });
 
 test('trackPerformance with nested async operations', async t => {
@@ -113,9 +131,9 @@ test('trackPerformance with nested async operations', async t => {
 				return 'inner-result';
 			},
 			'nested-operation',
-			{logLevel: 'debug', trackMemory: false, trackCpu: false}
+			{logLevel: 'debug', trackMemory: false, trackCpu: false},
 		)();
-		
+
 		return `outer-${innerResult}`;
 	};
 
@@ -126,7 +144,7 @@ test('trackPerformance with nested async operations', async t => {
 	});
 
 	const result = await decoratedFn();
-	
+
 	t.is(result, 'outer-inner-result', 'Should handle nested async operations');
 });
 
@@ -144,32 +162,36 @@ test('measureTime with thresholds', async t => {
 			thresholds: {
 				duration: 10, // Set threshold below actual duration
 			},
-		}
+		},
 	);
-	
-	t.is(result.result, 'slow-result', 'Should return correct result even with threshold exceeded');
+
+	t.is(
+		result.result,
+		'slow-result',
+		'Should return correct result even with threshold exceeded',
+	);
 	t.true(result.duration >= 20, 'Should have duration >= 20ms');
 });
 
 test('trackPerformance maintains context across Promise boundaries', async t => {
 	let contextId: string | null = null;
-	
+
 	const testFn = async () => {
 		// Get context at start
 		const startContext = correlationStorage.getStore();
-		
+
 		// Simulate async boundary
 		await new Promise(resolve => setTimeout(resolve, 10));
-		
+
 		// Get context after async boundary
 		const endContext = correlationStorage.getStore();
-		
+
 		// Both should be the same context
 		if (startContext && endContext) {
 			contextId = startContext.id;
 			return startContext.id === endContext.id;
 		}
-		
+
 		return false;
 	};
 
@@ -180,7 +202,7 @@ test('trackPerformance maintains context across Promise boundaries', async t => 
 	});
 
 	const result = await decoratedFn();
-	
+
 	t.true(result, 'Context should persist across async boundaries');
 	t.truthy(contextId, 'Should have a valid context ID');
 });

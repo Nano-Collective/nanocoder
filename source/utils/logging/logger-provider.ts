@@ -59,16 +59,23 @@ export class LoggerProvider {
 		this.loadRealDependencies().catch(error => {
 			try {
 				const fallbackLogger = this.createFallbackLogger();
-				fallbackLogger.error('[LOGGER_PROVIDER] Failed to load real dependencies', {
-					error: this.formatErrorForLogging(error),
-					fallback: true,
-					source: 'logger-provider',
-					timestamp: new Date().toISOString()
-				});
+				fallbackLogger.error(
+					'[LOGGER_PROVIDER] Failed to load real dependencies',
+					{
+						error: this.formatErrorForLogging(error),
+						fallback: true,
+						source: 'logger-provider',
+						timestamp: new Date().toISOString(),
+					},
+				);
 			} catch (fallbackError) {
 				// Absolute fallback to console if everything else fails
-				console.error('[LOGGER_PROVIDER] Critical failure - fallback logger failed:', 
-							fallbackError, 'Original error:', error);
+				console.error(
+					'[LOGGER_PROVIDER] Critical failure - fallback logger failed:',
+					fallbackError,
+					'Original error:',
+					error,
+				);
 			}
 		});
 	}
@@ -82,7 +89,7 @@ export class LoggerProvider {
 		if (this._dependenciesLoaded) {
 			this.createFallbackLogger().debug('Real dependencies already loaded', {
 				source: 'logger-provider',
-				status: 'already-loaded'
+				status: 'already-loaded',
 			});
 			return;
 		}
@@ -91,7 +98,7 @@ export class LoggerProvider {
 		this.createFallbackLogger().info('Loading real Pino dependencies', {
 			source: 'logger-provider',
 			method: 'dynamic-import',
-			status: 'starting'
+			status: 'starting',
 		});
 
 		try {
@@ -99,7 +106,7 @@ export class LoggerProvider {
 			// Using Promise.all for parallel loading to improve performance
 			const [pinoLogger, configModule] = await Promise.all([
 				import('./pino-logger.js'),
-				import('./config.js')
+				import('./config.js'),
 			]);
 
 			// Verify imports were successful
@@ -115,41 +122,56 @@ export class LoggerProvider {
 			if (this._logger && this._config) {
 				try {
 					this._logger = this._createPinoLogger(this._config);
-					this.createFallbackLogger().info('Logger reinitialized with real Pino instance', {
-						source: 'logger-provider',
-						status: 'reinitialized',
-						duration: Date.now() - startTime
-					});
+					this.createFallbackLogger().info(
+						'Logger reinitialized with real Pino instance',
+						{
+							source: 'logger-provider',
+							status: 'reinitialized',
+							duration: Date.now() - startTime,
+						},
+					);
 				} catch (reinitError) {
-					this.createFallbackLogger().warn('Failed to reinitialize logger, keeping fallback', {
-						error: this.formatErrorForLogging(reinitError),
-						source: 'logger-provider',
-						status: 'reinit-failed'
-					});
+					this.createFallbackLogger().warn(
+						'Failed to reinitialize logger, keeping fallback',
+						{
+							error: this.formatErrorForLogging(reinitError),
+							source: 'logger-provider',
+							status: 'reinit-failed',
+						},
+					);
 				}
 			}
 
-			this.createFallbackLogger().info('Real dependencies loaded successfully', {
-				source: 'logger-provider',
-				status: 'success',
-				duration: Date.now() - startTime,
-				modules: ['pino-logger', 'config']
-			});
-
+			this.createFallbackLogger().info(
+				'Real dependencies loaded successfully',
+				{
+					source: 'logger-provider',
+					status: 'success',
+					duration: Date.now() - startTime,
+					modules: ['pino-logger', 'config'],
+				},
+			);
 		} catch (error) {
 			try {
 				const fallbackLogger = this.createFallbackLogger();
-				fallbackLogger.error('[LOGGER_PROVIDER] Failed to load real dependencies', {
-					error: this.formatErrorForLogging(error),
-					fallback: true,
-					source: 'logger-provider',
-					status: 'load-failed',
-					duration: Date.now() - startTime
-				});
+				fallbackLogger.error(
+					'[LOGGER_PROVIDER] Failed to load real dependencies',
+					{
+						error: this.formatErrorForLogging(error),
+						fallback: true,
+						source: 'logger-provider',
+						status: 'load-failed',
+						duration: Date.now() - startTime,
+					},
+				);
 			} catch (fallbackError) {
 				// Absolute fallback to console if everything else fails
-				console.error('[LOGGER_PROVIDER] Critical failure - fallback logger failed:', 
-							fallbackError, 'Original error:', error);
+				console.error(
+					'[LOGGER_PROVIDER] Critical failure - fallback logger failed:',
+					fallbackError,
+					'Original error:',
+					error,
+				);
 			}
 			// Keep the fallback logger
 		}
@@ -172,7 +194,8 @@ export class LoggerProvider {
 
 		return {
 			...logMethods,
-			child: (_bindings: Record<string, unknown>) => this.createFallbackLogger(),
+			child: (_bindings: Record<string, unknown>) =>
+				this.createFallbackLogger(),
 			isLevelEnabled: (_level: string) => true,
 			flush: async () => Promise.resolve(),
 			end: async () => Promise.resolve(),
@@ -213,7 +236,8 @@ export class LoggerProvider {
 
 		this.ensureDependenciesLoaded();
 		this._config = this.createDefaultConfig(config);
-		this._logger = this._createPinoLogger?.(this._config) ?? this.createFallbackLogger();
+		this._logger =
+			this._createPinoLogger?.(this._config) ?? this.createFallbackLogger();
 
 		return this._logger;
 	}
@@ -253,10 +277,10 @@ export class LoggerProvider {
 				message: error.message,
 				stack: error.stack,
 				name: error.name,
-				cause: error.cause
+				cause: error.cause,
 			};
 		}
-		return { value: error };
+		return {value: error};
 	}
 
 	/**

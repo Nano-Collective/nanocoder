@@ -86,7 +86,8 @@ export class TransportFactory {
 				context: {
 					serverName: server.name,
 					transportType: 'websocket',
-					reason: 'Current SDK does not support headers for WebSocket transport',
+					reason:
+						'Current SDK does not support headers for WebSocket transport',
 				},
 			});
 		}
@@ -126,7 +127,8 @@ export class TransportFactory {
 				context: {
 					serverName: server.name,
 					transportType: 'http',
-					reason: 'Current SDK does not support custom headers for HTTP transport',
+					reason:
+						'Current SDK does not support custom headers for HTTP transport',
 				},
 			});
 		}

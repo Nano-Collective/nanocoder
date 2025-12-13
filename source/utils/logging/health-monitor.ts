@@ -305,11 +305,17 @@ export class HealthMonitor {
 					this.intervalId = undefined;
 				} catch (cleanupError) {
 					// Final fallback - log but don't rethrow
-					logger.error('Failed to cleanup health monitoring interval during error recovery', {
-						error: cleanupError instanceof Error ? cleanupError.message : cleanupError,
-						correlationId: this.correlationId,
-						source: 'health-monitor',
-					});
+					logger.error(
+						'Failed to cleanup health monitoring interval during error recovery',
+						{
+							error:
+								cleanupError instanceof Error
+									? cleanupError.message
+									: cleanupError,
+							correlationId: this.correlationId,
+							source: 'health-monitor',
+						},
+					);
 				}
 			}
 		}
@@ -951,12 +957,16 @@ export function initializeHealthMonitoring(
  * Health check middleware for HTTP servers
  */
 export function healthCheckMiddleware() {
-	return async (req: {path: string}, res: {
-		status: (code: number) => {
+	return async (
+		req: {path: string},
+		res: {
+			status: (code: number) => {
+				json: (data: unknown) => void;
+			};
 			json: (data: unknown) => void;
-		};
-		json: (data: unknown) => void;
-	}, next: () => void) => {
+		},
+		next: () => void,
+	) => {
 		if (req.path === '/health') {
 			try {
 				const health = await healthChecks.full();

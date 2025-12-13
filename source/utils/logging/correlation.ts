@@ -4,7 +4,11 @@
 
 import {AsyncLocalStorage} from 'async_hooks';
 import {randomBytes} from 'crypto';
-import type {CorrelationContext, CorrelationHttpRequest, CorrelationHttpResponse} from './types.js';
+import type {
+	CorrelationContext,
+	CorrelationHttpRequest,
+	CorrelationHttpResponse,
+} from './types.js';
 
 /**
  * Async local storage for correlation context
@@ -43,15 +47,18 @@ export function getCorrelationMonitoring(): typeof correlationMonitoring {
  * Log correlation context monitoring metrics
  * Useful for periodic logging of system health
  */
-export function logCorrelationMonitoring(level: 'debug' | 'info' | 'warn' | 'error' = 'info'): void {
+export function logCorrelationMonitoring(
+	level: 'debug' | 'info' | 'warn' | 'error' = 'info',
+): void {
 	const metrics = getCorrelationMonitoring();
 	const uptime = Date.now() - metrics.startTime;
 	const uptimeMinutes = Math.floor(uptime / (1000 * 60));
-	
-	const errorRate = metrics.contextsCreated > 0 
-		? (metrics.errors / metrics.contextsCreated * 100).toFixed(2) + '%' 
-		: '0%';
-	
+
+	const errorRate =
+		metrics.contextsCreated > 0
+			? ((metrics.errors / metrics.contextsCreated) * 100).toFixed(2) + '%'
+			: '0%';
+
 	const message = `
 [Correlation Monitoring] 
 - Uptime: ${uptimeMinutes} minutes
@@ -60,7 +67,7 @@ export function logCorrelationMonitoring(level: 'debug' | 'info' | 'warn' | 'err
 - Errors: ${metrics.errors}
 - Error Rate: ${errorRate}
 - Last Error: ${metrics.lastError || 'None'}`;
-	
+
 	switch (level) {
 		case 'debug':
 			console.debug(message);
@@ -94,20 +101,24 @@ export function resetCorrelationMonitoring(): void {
  * Perform health check on correlation context system
  * Verifies that the AsyncLocalStorage context system is functioning properly
  */
-export function checkCorrelationHealth(): {healthy: boolean, message: string, metrics: typeof correlationMonitoring} {
+export function checkCorrelationHealth(): {
+	healthy: boolean;
+	message: string;
+	metrics: typeof correlationMonitoring;
+} {
 	try {
 		// Test basic context creation and retrieval
 		const testContext: CorrelationContext = {
 			id: 'health-check-' + generateShortCorrelationId(),
 			metadata: {healthCheck: true, timestamp: Date.now()},
 		};
-		
+
 		let contextWorking = false;
 		withCorrelationContext(testContext, () => {
 			const current = getCurrentCorrelationContext();
 			contextWorking = current?.id === testContext.id;
 		});
-		
+
 		if (!contextWorking) {
 			return {
 				healthy: false,
@@ -115,20 +126,22 @@ export function checkCorrelationHealth(): {healthy: boolean, message: string, me
 				metrics: getCorrelationMonitoring(),
 			};
 		}
-		
+
 		// Check for excessive errors
-		const errorRate = correlationMonitoring.contextsCreated > 0 
-			? correlationMonitoring.errors / correlationMonitoring.contextsCreated 
-			: 0;
-		
-		if (errorRate > 0.1) { // More than 10% error rate
+		const errorRate =
+			correlationMonitoring.contextsCreated > 0
+				? correlationMonitoring.errors / correlationMonitoring.contextsCreated
+				: 0;
+
+		if (errorRate > 0.1) {
+			// More than 10% error rate
 			return {
 				healthy: false,
 				message: `High error rate detected: ${(errorRate * 100).toFixed(1)}%`,
 				metrics: getCorrelationMonitoring(),
 			};
 		}
-		
+
 		return {
 			healthy: true,
 			message: 'Correlation context system is healthy',
@@ -137,7 +150,9 @@ export function checkCorrelationHealth(): {healthy: boolean, message: string, me
 	} catch (error) {
 		return {
 			healthy: false,
-			message: `Health check failed: ${error instanceof Error ? error.message : String(error)}`,
+			message: `Health check failed: ${
+				error instanceof Error ? error.message : String(error)
+			}`,
 			metrics: getCorrelationMonitoring(),
 		};
 	}
@@ -204,8 +219,8 @@ export function setCorrelationContext(context: CorrelationContext): void {
 	// This function is deprecated - AsyncLocalStorage requires running within a context
 	console.warn(
 		'⚠️  setCorrelationContext is DEPRECATED and will be removed in future versions.' +
-		'\nUse withCorrelationContext() or withNewCorrelationContext() instead.' +
-		'\nExample: withNewCorrelationContext(async (context) => { ... })'
+			'\nUse withCorrelationContext() or withNewCorrelationContext() instead.' +
+			'\nExample: withNewCorrelationContext(async (context) => { ... })',
 	);
 }
 
@@ -218,7 +233,7 @@ export function clearCorrelationContext(): void {
 	// This function is deprecated - Context cleanup is automatic with AsyncLocalStorage
 	console.warn(
 		'⚠️  clearCorrelationContext is DEPRECATED. ' +
-		'Context cleanup is automatic with AsyncLocalStorage.'
+			'Context cleanup is automatic with AsyncLocalStorage.',
 	);
 }
 
@@ -233,26 +248,27 @@ export function withCorrelationContext<T>(
 		if (process.env.NANOCODER_CORRELATION_DEBUG === 'true') {
 			console.debug(`[Correlation] Context started: ${context.id}`);
 		}
-		
+
 		correlationMonitoring.activeContexts++;
 		const result = correlationStorage.run(context, fn);
 		correlationMonitoring.activeContexts--;
-		
+
 		if (process.env.NANOCODER_CORRELATION_DEBUG === 'true') {
 			console.debug(`[Correlation] Context completed: ${context.id}`);
 		}
-		
+
 		return result;
 	} catch (error) {
 		correlationMonitoring.errors++;
-		correlationMonitoring.lastError = error instanceof Error ? error.message : String(error);
+		correlationMonitoring.lastError =
+			error instanceof Error ? error.message : String(error);
 		correlationMonitoring.lastErrorTime = Date.now();
 		correlationMonitoring.activeContexts--;
-		
+
 		if (process.env.NANOCODER_CORRELATION_DEBUG === 'true') {
 			console.error(`[Correlation] Context error: ${context.id}`, error);
 		}
-		
+
 		throw error;
 	}
 }
@@ -265,36 +281,37 @@ export function withNewCorrelationContext<T>(
 	correlationId?: string,
 	metadata?: Record<string, unknown>,
 ): T {
-	const context = correlationId 
+	const context = correlationId
 		? createCorrelationContextWithId(correlationId, metadata)
 		: createCorrelationContext(undefined, metadata);
-	
+
 	correlationMonitoring.contextsCreated++;
-	
+
 	if (process.env.NANOCODER_CORRELATION_DEBUG === 'true') {
 		console.debug(`[Correlation] New context created: ${context.id}`);
 	}
-	
+
 	try {
 		correlationMonitoring.activeContexts++;
 		const result = correlationStorage.run(context, () => fn(context));
 		correlationMonitoring.activeContexts--;
-		
+
 		if (process.env.NANOCODER_CORRELATION_DEBUG === 'true') {
 			console.debug(`[Correlation] New context completed: ${context.id}`);
 		}
-		
+
 		return result;
 	} catch (error) {
 		correlationMonitoring.errors++;
-		correlationMonitoring.lastError = error instanceof Error ? error.message : String(error);
+		correlationMonitoring.lastError =
+			error instanceof Error ? error.message : String(error);
 		correlationMonitoring.lastErrorTime = Date.now();
 		correlationMonitoring.activeContexts--;
-		
+
 		if (process.env.NANOCODER_CORRELATION_DEBUG === 'true') {
 			console.error(`[Correlation] New context error: ${context.id}`, error);
 		}
-		
+
 		throw error;
 	}
 }
@@ -386,7 +403,7 @@ export function addCorrelationMetadata(key: string, value: unknown): void {
 	// This function is deprecated - use withNewCorrelationContext with metadata instead
 	console.warn(
 		'⚠️  addCorrelationMetadata is DEPRECATED. ' +
-		'Use withNewCorrelationContext with metadata parameter instead.'
+			'Use withNewCorrelationContext with metadata parameter instead.',
 	);
 }
 
@@ -406,7 +423,7 @@ export function getCorrelationMetadata(key?: string): unknown {
  */
 export function formatCorrelationForLog(): Record<string, string> {
 	const asyncContext = correlationStorage.getStore();
-	
+
 	if (asyncContext && isCorrelationEnabled()) {
 		const result: Record<string, string> = {
 			correlationId: asyncContext.id,
@@ -418,7 +435,7 @@ export function formatCorrelationForLog(): Record<string, string> {
 
 		return result;
 	}
-	
+
 	return {};
 }
 
@@ -426,7 +443,11 @@ export function formatCorrelationForLog(): Record<string, string> {
  * Correlation middleware for Express-like frameworks
  */
 export function correlationMiddleware() {
-	return (req: CorrelationHttpRequest, res: CorrelationHttpResponse, next: () => void) => {
+	return (
+		req: CorrelationHttpRequest,
+		res: CorrelationHttpResponse,
+		next: () => void,
+	) => {
 		// Extract or create correlation ID
 		let correlationId = extractCorrelationId(req.headers || {});
 
@@ -456,10 +477,9 @@ export function correlationMiddleware() {
 /**
  * Wrap an async function with correlation tracking
  */
-export function withCorrelation<T extends (...args: unknown[]) => Promise<unknown>>(
-	fn: T,
-	getCorrelationIdFromArgs?: (...args: Parameters<T>) => string,
-): T {
+export function withCorrelation<
+	T extends (...args: unknown[]) => Promise<unknown>,
+>(fn: T, getCorrelationIdFromArgs?: (...args: Parameters<T>) => string): T {
 	return (async (...args: Parameters<T>) => {
 		let context: CorrelationContext | null = null;
 

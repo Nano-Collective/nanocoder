@@ -3,11 +3,12 @@
  * Provides comprehensive monitoring for HTTP requests, AI calls, and MCP operations
  */
 
+import {generateCorrelationId, getLogger} from './index.js';
 import {
-	generateCorrelationId,
-	getLogger,
-} from './index.js';
-import {trackPerformance, calculateMemoryDelta, formatBytes} from './performance.js';
+	trackPerformance,
+	calculateMemoryDelta,
+	formatBytes,
+} from './performance.js';
 
 // Get logger instance directly to avoid circular dependencies
 const logger = getLogger();
@@ -607,7 +608,7 @@ export function trackRequest<T extends (...args: unknown[]) => unknown>(
 			});
 
 			try {
-				const result = await fn(...args as Parameters<T>);
+				const result = await fn(...(args as Parameters<T>));
 
 				globalRequestTracker.completeRequest(requestId, {
 					customData: {

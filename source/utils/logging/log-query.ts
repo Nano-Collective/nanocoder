@@ -170,15 +170,15 @@ export interface AggregationResult {
  */
 class LogStorage {
 	private entries: (LogEntry | undefined)[];
-	private head: number = 0;      // Index of oldest entry
-	private tail: number = 0;      // Index where next entry goes
-	private count: number = 0;     // Current number of entries
+	private head: number = 0; // Index of oldest entry
+	private tail: number = 0; // Index where next entry goes
+	private count: number = 0; // Current number of entries
 	private maxEntries: number;
 	private indexes: Map<string, Set<string>> = new Map();
 
 	constructor(maxEntries: number = 10000) {
 		this.maxEntries = maxEntries;
-		this.entries = new Array(maxEntries);  // Pre-allocate array
+		this.entries = new Array(maxEntries); // Pre-allocate array
 	}
 
 	/**
@@ -389,7 +389,7 @@ class LogStorage {
 	 * Get entry count
 	 */
 	getEntryCount(): number {
-		return this.count;  // Use count instead of entries.length
+		return this.count; // Use count instead of entries.length
 	}
 
 	/**
@@ -435,7 +435,8 @@ class LogStorage {
 		if (query.correlationIds) {
 			if (!entry.correlationId) return false;
 			const correlationIndex = this.indexes.get('correlationId');
-			if (!correlationIndex || !correlationIndex.has(entry.correlationId)) return false;
+			if (!correlationIndex || !correlationIndex.has(entry.correlationId))
+				return false;
 		}
 		if (
 			query.requestIds &&

@@ -153,7 +153,7 @@ export function redactEmail(email: string): string {
 		throw new Error('Invalid email');
 	}
 	const [localPart, domain] = parts;
-	
+
 	if (localPart.length <= 3) {
 		return `${localPart[0]}***@${domain}`;
 	}

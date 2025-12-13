@@ -26,7 +26,7 @@ function createConsoleMethod(
 	options?: {
 		specialErrorHandling?: boolean; // For error method with Error objects
 		isInfoMethod?: boolean; // For info method that routes to logger.info
-	}
+	},
 ) {
 	const {specialErrorHandling = false, isInfoMethod = false} = options || {};
 
@@ -43,7 +43,11 @@ function createConsoleMethod(
 			}
 
 			// Special handling for Error objects in console.error
-			if (specialErrorHandling && args.length === 1 && args[0] instanceof Error) {
+			if (
+				specialErrorHandling &&
+				args.length === 1 &&
+				args[0] instanceof Error
+			) {
 				const errorInfo = createErrorInfo(args[0], undefined, _correlationId);
 				logger.error('Error logged via console.error', {
 					errorInfo,
@@ -62,7 +66,9 @@ function createConsoleMethod(
 						source: 'console-facade',
 					});
 				} else if (typeof arg === 'object' && arg !== null) {
-					const message = `${level === 'error' ? 'Error' : 'Object'} logged via console.${level}`;
+					const message = `${
+						level === 'error' ? 'Error' : 'Object'
+					} logged via console.${level}`;
 					logger[level](message, {
 						object: arg,
 						correlationId: context.id,
@@ -242,10 +248,15 @@ export function useStructuredConsole(
 	propertyName: string,
 	descriptor: PropertyDescriptor,
 ): PropertyDescriptor | void {
-	const originalMethod = descriptor.value as ((this: unknown, ...args: ConsoleArguments) => unknown) | undefined;
+	const originalMethod = descriptor.value as
+		| ((this: unknown, ...args: ConsoleArguments) => unknown)
+		| undefined;
 
 	if (typeof originalMethod === 'function') {
-		descriptor.value = function (this: unknown, ...args: ConsoleArguments): unknown {
+		descriptor.value = function (
+			this: unknown,
+			...args: ConsoleArguments
+		): unknown {
 			return globalConsoleInterceptor.withStructuredConsole(() => {
 				return Reflect.apply(originalMethod, this, args);
 			});

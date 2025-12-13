@@ -72,7 +72,7 @@ export function ConfigWizard({
 				setMcpServers(newMcpServers);
 			} catch (err) {
 				logError('Failed to load existing configuration', true, {
-					context: { configPath },
+					context: {configPath},
 					error: err instanceof Error ? err.message : String(err),
 				});
 			}

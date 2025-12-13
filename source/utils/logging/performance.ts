@@ -5,7 +5,12 @@
 
 import {loadavg} from 'os';
 import type {PerformanceMetrics, CorrelationContext} from './types.js';
-import {generateCorrelationId, withNewCorrelationContext, createCorrelationContext, type Logger} from './index.js';
+import {
+	generateCorrelationId,
+	withNewCorrelationContext,
+	createCorrelationContext,
+	type Logger,
+} from './index.js';
 import {correlationStorage} from './correlation.js';
 
 // Lazy logger initialization to avoid circular dependency
@@ -39,7 +44,11 @@ function getLogger(): Logger {
 const logger: Logger = new Proxy({} as Logger, {
 	get(_target, prop): unknown {
 		const loggerInstance = getLogger();
-		if (loggerInstance && typeof loggerInstance === 'object' && prop in loggerInstance) {
+		if (
+			loggerInstance &&
+			typeof loggerInstance === 'object' &&
+			prop in loggerInstance
+		) {
 			const value = (loggerInstance as any)[prop];
 			return typeof value === 'function' ? value.bind(loggerInstance) : value;
 		}
@@ -184,7 +193,7 @@ export function trackPerformance<T extends (...args: unknown[]) => unknown>(
 
 		// Create new correlation context for this performance tracking
 		const context = createCorrelationContext();
-		
+
 		// Use AsyncLocalStorage.run() directly for proper async context handling
 		return correlationStorage.run(context, async () => {
 			try {
@@ -215,7 +224,9 @@ export function trackPerformance<T extends (...args: unknown[]) => unknown>(
 						external: formatBytes(memoryDelta.externalDelta),
 						rss: formatBytes(memoryDelta.rssDelta),
 					};
-					perfData.currentMemory = formatMemoryUsage(end.memoryUsage || process.memoryUsage());
+					perfData.currentMemory = formatMemoryUsage(
+						end.memoryUsage || process.memoryUsage(),
+					);
 				}
 
 				if (trackCpu) {
@@ -334,7 +345,7 @@ export async function measureTime<T>(
 
 	// Create new correlation context for this measurement
 	const context = createCorrelationContext();
-	
+
 	// Use AsyncLocalStorage.run() directly for proper async context handling
 	return correlationStorage.run(context, async () => {
 		try {
@@ -662,10 +673,16 @@ export function calculatePerformanceStats(
 	const durations = measurements.map(m => m.duration);
 	const errorCount = measurements.filter(m => m.error).length;
 	const memoryDeltas = measurements
-		.filter((m): m is typeof m & {memoryDelta: Record<string, number>} => m.memoryDelta !== undefined)
+		.filter(
+			(m): m is typeof m & {memoryDelta: Record<string, number>} =>
+				m.memoryDelta !== undefined,
+		)
 		.map(m => m.memoryDelta);
 	const memoryUsages = measurements
-		.filter((m): m is typeof m & {memoryUsage: NodeJS.MemoryUsage} => m.memoryUsage !== undefined)
+		.filter(
+			(m): m is typeof m & {memoryUsage: NodeJS.MemoryUsage} =>
+				m.memoryUsage !== undefined,
+		)
 		.map(m => m.memoryUsage);
 
 	const totalDuration = durations.reduce((sum, d) => sum + d, 0);
@@ -777,7 +794,9 @@ export class PerformanceMonitor {
 		const operationMeasurements = this.measurements.get(operation);
 		if (!operationMeasurements) return null;
 
-		const index = operationMeasurements.findIndex(m => 'id' in m && (m as {id?: string}).id === id);
+		const index = operationMeasurements.findIndex(
+			m => 'id' in m && (m as {id?: string}).id === id,
+		);
 		if (index === -1) return null;
 
 		const metrics = operationMeasurements[index];
@@ -805,7 +824,9 @@ export class PerformanceMonitor {
 		}
 
 		const durations = operationMeasurements
-			.filter((m): m is PerformanceMetrics & {duration: number} => 'duration' in m)
+			.filter(
+				(m): m is PerformanceMetrics & {duration: number} => 'duration' in m,
+			)
 			.map(m => m.duration);
 
 		if (durations.length === 0) return null;
