@@ -13,10 +13,135 @@ import type {CorrelationContext, CorrelationHttpRequest, CorrelationHttpResponse
 const correlationStorage = new AsyncLocalStorage<CorrelationContext>();
 
 /**
- * Legacy global context for backward compatibility with deprecated functions
- * Note: This approach has race conditions in concurrent operations
+ * Correlation Context Monitoring Metrics
+ * Tracks usage, performance, and potential issues for production monitoring
  */
-let legacyContext: CorrelationContext | null = null;
+const correlationMonitoring = {
+	contextsCreated: 0,
+	activeContexts: 0,
+	errors: 0,
+	lastError: null,
+	lastErrorTime: 0,
+	startTime: Date.now(),
+};
+
+/**
+ * Legacy context has been removed in favor of AsyncLocalStorage-only approach
+ * This eliminates race conditions in concurrent operations
+ * All code should now use withCorrelationContext() or withNewCorrelationContext()
+ */
+
+/**
+ * Get correlation context monitoring metrics
+ * Provides insights into context usage, performance, and health
+ */
+export function getCorrelationMonitoring(): typeof correlationMonitoring {
+	return {...correlationMonitoring};
+}
+
+/**
+ * Log correlation context monitoring metrics
+ * Useful for periodic logging of system health
+ */
+export function logCorrelationMonitoring(level: 'debug' | 'info' | 'warn' | 'error' = 'info'): void {
+	const metrics = getCorrelationMonitoring();
+	const uptime = Date.now() - metrics.startTime;
+	const uptimeMinutes = Math.floor(uptime / (1000 * 60));
+	
+	const errorRate = metrics.contextsCreated > 0 
+		? (metrics.errors / metrics.contextsCreated * 100).toFixed(2) + '%' 
+		: '0%';
+	
+	const message = `
+[Correlation Monitoring] 
+- Uptime: ${uptimeMinutes} minutes
+- Contexts Created: ${metrics.contextsCreated}
+- Active Contexts: ${metrics.activeContexts}
+- Errors: ${metrics.errors}
+- Error Rate: ${errorRate}
+- Last Error: ${metrics.lastError || 'None'}`;
+	
+	switch (level) {
+		case 'debug':
+			console.debug(message);
+			break;
+		case 'info':
+			console.info(message);
+			break;
+		case 'warn':
+			console.warn(message);
+			break;
+		case 'error':
+			console.error(message);
+			break;
+	}
+}
+
+/**
+ * Reset correlation context monitoring metrics
+ * Useful for testing or periodic reporting
+ */
+export function resetCorrelationMonitoring(): void {
+	correlationMonitoring.contextsCreated = 0;
+	correlationMonitoring.activeContexts = 0;
+	correlationMonitoring.errors = 0;
+	correlationMonitoring.lastError = null;
+	correlationMonitoring.lastErrorTime = 0;
+	correlationMonitoring.startTime = Date.now();
+}
+
+/**
+ * Perform health check on correlation context system
+ * Verifies that the AsyncLocalStorage context system is functioning properly
+ */
+export function checkCorrelationHealth(): {healthy: boolean, message: string, metrics: typeof correlationMonitoring} {
+	try {
+		// Test basic context creation and retrieval
+		const testContext: CorrelationContext = {
+			id: 'health-check-' + generateShortCorrelationId(),
+			metadata: {healthCheck: true, timestamp: Date.now()},
+		};
+		
+		let contextWorking = false;
+		withCorrelationContext(testContext, () => {
+			const current = getCurrentCorrelationContext();
+			contextWorking = current?.id === testContext.id;
+		});
+		
+		if (!contextWorking) {
+			return {
+				healthy: false,
+				message: 'Correlation context system failed basic functionality test',
+				metrics: getCorrelationMonitoring(),
+			};
+		}
+		
+		// Check for excessive errors
+		const errorRate = correlationMonitoring.contextsCreated > 0 
+			? correlationMonitoring.errors / correlationMonitoring.contextsCreated 
+			: 0;
+		
+		if (errorRate > 0.1) { // More than 10% error rate
+			return {
+				healthy: false,
+				message: `High error rate detected: ${(errorRate * 100).toFixed(1)}%`,
+				metrics: getCorrelationMonitoring(),
+			};
+		}
+		
+		return {
+			healthy: true,
+			message: 'Correlation context system is healthy',
+			metrics: getCorrelationMonitoring(),
+		};
+	} catch (error) {
+		return {
+			healthy: false,
+			message: `Health check failed: ${error instanceof Error ? error.message : String(error)}`,
+			metrics: getCorrelationMonitoring(),
+		};
+	}
+}
 
 /**
  * Generate a new correlation ID
@@ -63,9 +188,11 @@ export function createCorrelationContext(
 
 /**
  * Get the current correlation context
+ * Now uses AsyncLocalStorage exclusively - no legacy fallback
  */
 export function getCurrentCorrelationContext(): CorrelationContext | null {
-	return correlationStorage.getStore() || legacyContext || null;
+	const asyncContext = correlationStorage.getStore();
+	return asyncContext || null;
 }
 
 /**
@@ -74,10 +201,12 @@ export function getCurrentCorrelationContext(): CorrelationContext | null {
  * @deprecated Use withCorrelationContext or withNewCorrelationContext
  */
 export function setCorrelationContext(context: CorrelationContext): void {
-	// This is kept for backward compatibility but should not be used
-	// AsyncLocalStorage requires running within a context, not direct assignment
-	console.warn('setCorrelationContext is deprecated. Use withCorrelationContext instead.');
-	legacyContext = context;
+	// This function is deprecated - AsyncLocalStorage requires running within a context
+	console.warn(
+		'⚠️  setCorrelationContext is DEPRECATED and will be removed in future versions.' +
+		'\nUse withCorrelationContext() or withNewCorrelationContext() instead.' +
+		'\nExample: withNewCorrelationContext(async (context) => { ... })'
+	);
 }
 
 /**
@@ -86,9 +215,11 @@ export function setCorrelationContext(context: CorrelationContext): void {
  * @deprecated Context is automatically cleared when async operation completes
  */
 export function clearCorrelationContext(): void {
-	// This is kept for backward compatibility but does nothing with AsyncLocalStorage
-	// Context cleanup is handled automatically by AsyncLocalStorage
-	legacyContext = null;
+	// This function is deprecated - Context cleanup is automatic with AsyncLocalStorage
+	console.warn(
+		'⚠️  clearCorrelationContext is DEPRECATED. ' +
+		'Context cleanup is automatic with AsyncLocalStorage.'
+	);
 }
 
 /**
@@ -98,7 +229,32 @@ export function withCorrelationContext<T>(
 	context: CorrelationContext,
 	fn: () => T,
 ): T {
-	return correlationStorage.run(context, fn);
+	try {
+		if (process.env.CORRELATION_DEBUG === 'true') {
+			console.debug(`[Correlation] Context started: ${context.id}`);
+		}
+		
+		correlationMonitoring.activeContexts++;
+		const result = correlationStorage.run(context, fn);
+		correlationMonitoring.activeContexts--;
+		
+		if (process.env.CORRELATION_DEBUG === 'true') {
+			console.debug(`[Correlation] Context completed: ${context.id}`);
+		}
+		
+		return result;
+	} catch (error) {
+		correlationMonitoring.errors++;
+		correlationMonitoring.lastError = error instanceof Error ? error.message : String(error);
+		correlationMonitoring.lastErrorTime = Date.now();
+		correlationMonitoring.activeContexts--;
+		
+		if (process.env.CORRELATION_DEBUG === 'true') {
+			console.error(`[Correlation] Context error: ${context.id}`, error);
+		}
+		
+		throw error;
+	}
 }
 
 /**
@@ -106,19 +262,49 @@ export function withCorrelationContext<T>(
  */
 export function withNewCorrelationContext<T>(
 	fn: (context: CorrelationContext) => T,
-	parentId?: string,
+	correlationId?: string,
 	metadata?: Record<string, unknown>,
 ): T {
-	const context = createCorrelationContext(parentId, metadata);
-	return correlationStorage.run(context, () => fn(context));
+	const context = correlationId 
+		? createCorrelationContextWithId(correlationId, metadata)
+		: createCorrelationContext(undefined, metadata);
+	
+	correlationMonitoring.contextsCreated++;
+	
+	if (process.env.CORRELATION_DEBUG === 'true') {
+		console.debug(`[Correlation] New context created: ${context.id}`);
+	}
+	
+	try {
+		correlationMonitoring.activeContexts++;
+		const result = correlationStorage.run(context, () => fn(context));
+		correlationMonitoring.activeContexts--;
+		
+		if (process.env.CORRELATION_DEBUG === 'true') {
+			console.debug(`[Correlation] New context completed: ${context.id}`);
+		}
+		
+		return result;
+	} catch (error) {
+		correlationMonitoring.errors++;
+		correlationMonitoring.lastError = error instanceof Error ? error.message : String(error);
+		correlationMonitoring.lastErrorTime = Date.now();
+		correlationMonitoring.activeContexts--;
+		
+		if (process.env.CORRELATION_DEBUG === 'true') {
+			console.error(`[Correlation] New context error: ${context.id}`, error);
+		}
+		
+		throw error;
+	}
 }
 
 /**
  * Get the correlation ID for the current context
  */
 export function getCorrelationId(): string | null {
-	const currentContext = correlationStorage.getStore() || legacyContext;
-	return currentContext?.id || null;
+	const asyncContext = correlationStorage.getStore();
+	return asyncContext?.id || null;
 }
 
 /**
@@ -194,58 +380,46 @@ export function createCorrelationFromHeaders(
 /**
  * Add correlation metadata
  * Note: Creates a new context with updated metadata since AsyncLocalStorage is immutable
+ * @deprecated Use withNewCorrelationContext with metadata parameter
  */
 export function addCorrelationMetadata(key: string, value: unknown): void {
-	const currentContext = correlationStorage.getStore();
-	if (currentContext) {
-		// Note: We cannot directly update AsyncLocalStorage
-		// This function is deprecated - use withNewCorrelationContext with metadata instead
-		console.warn('addCorrelationMetadata is deprecated. Use withNewCorrelationContext with metadata parameter.');
-		return;
-	}
-
-	// For backward compatibility with legacy context
-	if (legacyContext) {
-		legacyContext = {
-			...legacyContext,
-			metadata: {
-				...legacyContext.metadata,
-				[key]: value,
-			},
-		};
-	}
+	// This function is deprecated - use withNewCorrelationContext with metadata instead
+	console.warn(
+		'⚠️  addCorrelationMetadata is DEPRECATED. ' +
+		'Use withNewCorrelationContext with metadata parameter instead.'
+	);
 }
 
 /**
  * Get correlation metadata
  */
 export function getCorrelationMetadata(key?: string): unknown {
-	const currentContext = correlationStorage.getStore() || legacyContext;
-	if (!currentContext || !currentContext.metadata) {
-		return key ? undefined : {};
+	const asyncContext = correlationStorage.getStore();
+	if (asyncContext?.metadata) {
+		return key ? asyncContext.metadata[key] : asyncContext.metadata;
 	}
-
-	return key ? currentContext.metadata[key] : currentContext.metadata;
+	return key ? undefined : {};
 }
 
 /**
  * Format correlation context for logging
  */
 export function formatCorrelationForLog(): Record<string, string> {
-	const currentContext = correlationStorage.getStore() || legacyContext;
-	if (!currentContext || !isCorrelationEnabled()) {
-		return {};
+	const asyncContext = correlationStorage.getStore();
+	
+	if (asyncContext && isCorrelationEnabled()) {
+		const result: Record<string, string> = {
+			correlationId: asyncContext.id,
+		};
+
+		if (asyncContext.parentId) {
+			result.parentCorrelationId = asyncContext.parentId;
+		}
+
+		return result;
 	}
-
-	const result: Record<string, string> = {
-		correlationId: currentContext.id,
-	};
-
-	if (currentContext.parentId) {
-		result.parentCorrelationId = currentContext.parentId;
-	}
-
-	return result;
+	
+	return {};
 }
 
 /**
