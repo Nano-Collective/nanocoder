@@ -471,7 +471,7 @@ export class AISDKClient implements LLMClient {
 					onStepFinish(step) {
 						// Log tool execution steps
 						if (step.toolCalls && step.toolCalls.length > 0) {
-							logger.debug('AI SDK tool step', {
+							logger.trace('AI SDK tool step', {
 								stepType: 'tool_execution',
 								toolCount: step.toolCalls.length,
 								hasResults: !!step.toolResults,

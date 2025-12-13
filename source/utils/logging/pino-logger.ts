@@ -22,6 +22,7 @@ import type {
 	PinoTransportOptions,
 	PiiRedactionRules,
 } from './types.js';
+import {createLogMethods} from './log-method-factory.js';
 
 /**
  * Type guard to check if a value is a Promise
@@ -100,8 +101,9 @@ function createEnvironmentLogger(
 /**
  * Factory function to create log method with specific level for Pino
  * Uses the shared factory with custom transform logic for redaction and correlation
+ * @deprecated Use createLogMethods factory instead
  */
-function createPinoLogMethod(
+function _createPinoLogMethod(
 	logger: PinoLogger,
 	level: string,
 	redactionRules?: PiiRedactionRules,
@@ -135,14 +137,24 @@ function createEnhancedLogger(
 	_fileLogger?: PinoLogger,
 	redactionRules?: PiiRedactionRules,
 ): Logger {
+	// Create a transformer for Pino logger with redaction rules
+	const createPinoTransformer = (_level: string) => {
+		return (args: unknown[], _msg?: string) => {
+			// Apply redaction to object arguments
+			if (args.length > 0 && typeof args[0] === 'object' && args[0] !== null && redactionRules) {
+				args[0] = redactLogEntry(args[0] as Record<string, unknown>, redactionRules);
+			}
+			return args;
+		};
+	};
+
+	// Use the factory to create all log methods
+	const logMethods = createLogMethods(pinoLogger, {
+		transformArgs: createPinoTransformer(''),
+	});
+
 	return {
-		fatal: createPinoLogMethod(pinoLogger, 'fatal', redactionRules),
-		error: createPinoLogMethod(pinoLogger, 'error', redactionRules),
-		warn: createPinoLogMethod(pinoLogger, 'warn', redactionRules),
-		info: createPinoLogMethod(pinoLogger, 'info', redactionRules),
-		http: createPinoLogMethod(pinoLogger, 'http', redactionRules),
-		debug: createPinoLogMethod(pinoLogger, 'debug', redactionRules),
-		trace: createPinoLogMethod(pinoLogger, 'trace', redactionRules),
+		...logMethods,
 
 		child: (bindings: Record<string, unknown>) => {
 			return createEnhancedChild(pinoLogger, bindings, redactionRules);
@@ -188,14 +200,24 @@ function createEnhancedChild(
 ): Logger {
 	const child = parent.child(bindings);
 
+	// Create a transformer for Pino logger with redaction rules
+	const createPinoTransformer = (_level: string) => {
+		return (args: unknown[], _msg?: string) => {
+			// Apply redaction to object arguments
+			if (args.length > 0 && typeof args[0] === 'object' && args[0] !== null && redactionRules) {
+				args[0] = redactLogEntry(args[0] as Record<string, unknown>, redactionRules);
+			}
+			return args;
+		};
+	};
+
+	// Use the factory to create all log methods
+	const logMethods = createLogMethods(child, {
+		transformArgs: createPinoTransformer(''),
+	});
+
 	return {
-		fatal: createPinoLogMethod(child, 'fatal', redactionRules),
-		error: createPinoLogMethod(child, 'error', redactionRules),
-		warn: createPinoLogMethod(child, 'warn', redactionRules),
-		info: createPinoLogMethod(child, 'info', redactionRules),
-		http: createPinoLogMethod(child, 'http', redactionRules),
-		debug: createPinoLogMethod(child, 'debug', redactionRules),
-		trace: createPinoLogMethod(child, 'trace', redactionRules),
+		...logMethods,
 
 		child: (moreBindings: Record<string, unknown>) => {
 			return createEnhancedChild(child, moreBindings, redactionRules);
@@ -404,7 +426,7 @@ export function createLoggerWithTransport(
 		formatters: {
 			level: (label: string, _number: number) => ({level: label.toUpperCase()}),
 		},
-		transport: actualTransport as any,
+		transport: actualTransport,
 		base: {
 			pid: process.pid,
 			platform: process.platform,

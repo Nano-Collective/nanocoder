@@ -178,11 +178,10 @@ export function trackPerformance<T extends (...args: unknown[]) => unknown>(
 	} = options || {};
 
 	return (async (...args: Parameters<T>) => {
-		const correlationId = generateCorrelationId();
 		const metrics = startMetrics();
 		const cpuStart = getCpuUsage();
 
-		return withNewCorrelationContext(async (_context: CorrelationContext) => {
+		return withNewCorrelationContext(async (context: CorrelationContext) => {
 			try {
 				const result = await fn(...args);
 
@@ -199,7 +198,7 @@ export function trackPerformance<T extends (...args: unknown[]) => unknown>(
 					functionName: name,
 					duration: `${end.duration.toFixed(2)}ms`,
 					durationMs: end.duration,
-					correlationId,
+					correlationId: context.id,
 					source: 'performance-tracker',
 				};
 
@@ -286,7 +285,7 @@ export function trackPerformance<T extends (...args: unknown[]) => unknown>(
 					memoryDelta: trackMemory ? memoryDelta : undefined,
 					cpuPercent: trackCpu ? `${cpuPercent.toFixed(2)}%` : undefined,
 					argCount: trackArgs ? args.length : undefined,
-					correlationId,
+					correlationId: context.id,
 					source: 'performance-tracker-error',
 				});
 
@@ -324,12 +323,11 @@ export async function measureTime<T>(
 		thresholds = {},
 	} = options || {};
 
-	const correlationId = generateCorrelationId();
 	const start = performance.now();
 	const memoryStart = process.memoryUsage();
 	const cpuStart = trackCpu ? getCpuUsage() : undefined;
 
-	return withNewCorrelationContext(async (_context: CorrelationContext) => {
+	return withNewCorrelationContext(async (context: CorrelationContext) => {
 		try {
 			const result = await fn();
 			const duration = performance.now() - start;
@@ -352,7 +350,7 @@ export async function measureTime<T>(
 					label: label || 'Anonymous function',
 					duration: `${duration.toFixed(2)}ms`,
 					durationMs: duration,
-					correlationId,
+					correlationId: context.id,
 					source: 'measure-time',
 				};
 
@@ -415,7 +413,7 @@ export async function measureTime<T>(
 				error: error instanceof Error ? error.message : error,
 				errorType:
 					error instanceof Error ? error.constructor.name : typeof error,
-				correlationId,
+				correlationId: context.id,
 				source: 'measure-time-error',
 			});
 

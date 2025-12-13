@@ -18,41 +18,58 @@ import type {ConsoleArguments, ConsoleLogData} from './types.js';
 const logger = getLogger();
 
 /**
- * Console replacement that routes to structured logging
- * Maintains the same API as global console but adds structured logging benefits
+ * Create a console method with specific logging level and special handling
+ * This factory reduces code duplication across different console methods
  */
-export const StructuredConsole = {
-	/**
-	 * Replacement for console.log - routes to logger.info
-	 * Accepts any number of arguments and formats them appropriately
-	 */
-	log: (...args: ConsoleArguments) => {
+function createConsoleMethod(
+	level: 'info' | 'error' | 'warn' | 'debug',
+	options?: {
+		specialErrorHandling?: boolean; // For error method with Error objects
+		isInfoMethod?: boolean; // For info method that routes to logger.info
+	}
+) {
+	const {specialErrorHandling = false, isInfoMethod = false} = options || {};
+
+	return (...args: ConsoleArguments) => {
 		const _correlationId = generateCorrelationId();
 
 		withNewCorrelationContext(context => {
 			if (args.length === 0) {
-				logger.info('Empty console.log call', {
+				logger[level](`Empty console.${level} call`, {
 					correlationId: context.id,
 					source: 'console-facade',
 				});
 				return;
 			}
 
+			// Special handling for Error objects in console.error
+			if (specialErrorHandling && args.length === 1 && args[0] instanceof Error) {
+				const errorInfo = createErrorInfo(args[0], undefined, _correlationId);
+				logger.error('Error logged via console.error', {
+					errorInfo,
+					correlationId: context.id,
+					source: 'console-facade',
+				});
+				return;
+			}
+
+			// Handle single argument case
 			if (args.length === 1) {
 				const arg = args[0];
 				if (typeof arg === 'string') {
-					logger.info(arg, {
+					logger[level](arg, {
 						correlationId: context.id,
 						source: 'console-facade',
 					});
 				} else if (typeof arg === 'object' && arg !== null) {
-					logger.info('Object logged via console.log', {
+					const message = `${level === 'error' ? 'Error' : 'Object'} logged via console.${level}`;
+					logger[level](message, {
 						object: arg,
 						correlationId: context.id,
 						source: 'console-facade',
 					});
 				} else {
-					logger.info(String(arg), {
+					logger[level](String(arg), {
 						correlationId: context.id,
 						source: 'console-facade',
 					});
@@ -87,279 +104,57 @@ export const StructuredConsole = {
 				logData.objects = objects;
 			}
 
-			logger.info(message || 'console.log called', logData);
+			// Check for error-like objects that aren't Error instances (only for error level)
+			if (level === 'error') {
+				const errorLikeObjects = objects.filter(
+					obj =>
+						obj &&
+						typeof obj === 'object' &&
+						('message' in obj || 'error' in obj || 'err' in obj),
+				);
+
+				if (errorLikeObjects.length > 0) {
+					logData.errorLikeObjects = errorLikeObjects;
+				}
+			}
+
+			// Use appropriate logger level (info for both log and info methods)
+			const loggerLevel = isInfoMethod ? 'info' : level;
+			logger[loggerLevel](message || `console.${level} called`, logData);
 		});
-	},
+	};
+}
+
+/**
+ * Console replacement that routes to structured logging
+ * Maintains the same API as global console but adds structured logging benefits
+ */
+export const StructuredConsole = {
+	/**
+	 * Replacement for console.log - routes to logger.info
+	 * Accepts any number of arguments and formats them appropriately
+	 */
+	log: createConsoleMethod('info', {isInfoMethod: true}),
 
 	/**
 	 * Replacement for console.error - routes to logger.error with error analysis
 	 */
-	error: (...args: ConsoleArguments) => {
-		const _correlationId = generateCorrelationId();
-
-		withNewCorrelationContext(context => {
-			if (args.length === 0) {
-				logger.error('Empty console.error call', {
-					correlationId: context.id,
-					source: 'console-facade',
-				});
-				return;
-			}
-
-			// Special handling for Error objects
-			if (args.length === 1 && args[0] instanceof Error) {
-				const errorInfo = createErrorInfo(args[0], undefined, _correlationId);
-				logger.error('Error logged via console.error', {
-					errorInfo,
-					correlationId: context.id,
-					source: 'console-facade',
-				});
-				return;
-			}
-
-			// Multiple arguments or non-Error objects
-			const strings = args.filter(arg => typeof arg === 'string');
-			const objects = args.filter(
-				arg => typeof arg === 'object' && arg !== null,
-			);
-			const primitives = args.filter(
-				arg => typeof arg !== 'string' && typeof arg !== 'object',
-			);
-
-			let message = strings.join(' ');
-			if (primitives.length > 0) {
-				message += ' ' + primitives.map(String).join(' ');
-			}
-
-			const logData: ConsoleLogData = {
-				correlationId: context.id,
-				source: 'console-facade',
-				argumentCount: args.length,
-				stringArgs: strings.length,
-				objectArgs: objects.length,
-				primitiveArgs: primitives.length,
-			};
-
-			if (objects.length > 0) {
-				logData.objects = objects;
-			}
-
-			// Check for error-like objects that aren't Error instances
-			const errorLikeObjects = objects.filter(
-				obj =>
-					obj &&
-					typeof obj === 'object' &&
-					('message' in obj || 'error' in obj || 'err' in obj),
-			);
-
-			if (errorLikeObjects.length > 0) {
-				logData.errorLikeObjects = errorLikeObjects;
-			}
-
-			logger.error(message || 'console.error called', logData);
-		});
-	},
+	error: createConsoleMethod('error', {specialErrorHandling: true}),
 
 	/**
 	 * Replacement for console.warn - routes to logger.warn
 	 */
-	warn: (...args: ConsoleArguments) => {
-		const _correlationId = generateCorrelationId();
-
-		withNewCorrelationContext(context => {
-			if (args.length === 0) {
-				logger.warn('Empty console.warn call', {
-					correlationId: context.id,
-					source: 'console-facade',
-				});
-				return;
-			}
-
-			if (args.length === 1) {
-				const arg = args[0];
-				if (typeof arg === 'string') {
-					logger.warn(arg, {
-						correlationId: context.id,
-						source: 'console-facade',
-					});
-				} else if (typeof arg === 'object' && arg !== null) {
-					logger.warn('Object logged via console.warn', {
-						object: arg,
-						correlationId: context.id,
-						source: 'console-facade',
-					});
-				} else {
-					logger.warn(String(arg), {
-						correlationId: context.id,
-						source: 'console-facade',
-					});
-				}
-				return;
-			}
-
-			const strings = args.filter(arg => typeof arg === 'string');
-			const objects = args.filter(
-				arg => typeof arg === 'object' && arg !== null,
-			);
-			const primitives = args.filter(
-				arg => typeof arg !== 'string' && typeof arg !== 'object',
-			);
-
-			let message = strings.join(' ');
-			if (primitives.length > 0) {
-				message += ' ' + primitives.map(String).join(' ');
-			}
-
-			const logData: ConsoleLogData = {
-				correlationId: context.id,
-				source: 'console-facade',
-				argumentCount: args.length,
-				stringArgs: strings.length,
-				objectArgs: objects.length,
-				primitiveArgs: primitives.length,
-			};
-
-			if (objects.length > 0) {
-				logData.objects = objects;
-			}
-
-			logger.warn(message || 'console.warn called', logData);
-		});
-	},
+	warn: createConsoleMethod('warn'),
 
 	/**
 	 * Replacement for console.info - routes to logger.info
 	 */
-	info: (...args: ConsoleArguments) => {
-		const _correlationId = generateCorrelationId();
-
-		withNewCorrelationContext(context => {
-			if (args.length === 0) {
-				logger.info('Empty console.info call', {
-					correlationId: context.id,
-					source: 'console-facade',
-				});
-				return;
-			}
-
-			if (args.length === 1) {
-				const arg = args[0];
-				if (typeof arg === 'string') {
-					logger.info(arg, {
-						correlationId: context.id,
-						source: 'console-facade',
-					});
-				} else if (typeof arg === 'object' && arg !== null) {
-					logger.info('Object logged via console.info', {
-						object: arg,
-						correlationId: context.id,
-						source: 'console-facade',
-					});
-				} else {
-					logger.info(String(arg), {
-						correlationId: context.id,
-						source: 'console-facade',
-					});
-				}
-				return;
-			}
-
-			const strings = args.filter(arg => typeof arg === 'string');
-			const objects = args.filter(
-				arg => typeof arg === 'object' && arg !== null,
-			);
-			const primitives = args.filter(
-				arg => typeof arg !== 'string' && typeof arg !== 'object',
-			);
-
-			let message = strings.join(' ');
-			if (primitives.length > 0) {
-				message += ' ' + primitives.map(String).join(' ');
-			}
-
-			const logData: ConsoleLogData = {
-				correlationId: context.id,
-				source: 'console-facade',
-				argumentCount: args.length,
-				stringArgs: strings.length,
-				objectArgs: objects.length,
-				primitiveArgs: primitives.length,
-			};
-
-			if (objects.length > 0) {
-				logData.objects = objects;
-			}
-
-			logger.info(message || 'console.info called', logData);
-		});
-	},
+	info: createConsoleMethod('info', {isInfoMethod: true}),
 
 	/**
 	 * Replacement for console.debug - routes to logger.debug
 	 */
-	debug: (...args: ConsoleArguments) => {
-		const _correlationId = generateCorrelationId();
-
-		withNewCorrelationContext(context => {
-			if (args.length === 0) {
-				logger.debug('Empty console.debug call', {
-					correlationId: context.id,
-					source: 'console-facade',
-				});
-				return;
-			}
-
-			if (args.length === 1) {
-				const arg = args[0];
-				if (typeof arg === 'string') {
-					logger.debug(arg, {
-						correlationId: context.id,
-						source: 'console-facade',
-					});
-				} else if (typeof arg === 'object' && arg !== null) {
-					logger.debug('Object logged via console.debug', {
-						object: arg,
-						correlationId: context.id,
-						source: 'console-facade',
-					});
-				} else {
-					logger.debug(String(arg), {
-						correlationId: context.id,
-						source: 'console-facade',
-					});
-				}
-				return;
-			}
-
-			const strings = args.filter(arg => typeof arg === 'string');
-			const objects = args.filter(
-				arg => typeof arg === 'object' && arg !== null,
-			);
-			const primitives = args.filter(
-				arg => typeof arg !== 'string' && typeof arg !== 'object',
-			);
-
-			let message = strings.join(' ');
-			if (primitives.length > 0) {
-				message += ' ' + primitives.map(String).join(' ');
-			}
-
-			const logData: ConsoleLogData = {
-				correlationId: context.id,
-				source: 'console-facade',
-				argumentCount: args.length,
-				stringArgs: strings.length,
-				objectArgs: objects.length,
-				primitiveArgs: primitives.length,
-			};
-
-			if (objects.length > 0) {
-				logData.objects = objects;
-			}
-
-			logger.debug(message || 'console.debug called', logData);
-		});
-	},
+	debug: createConsoleMethod('debug'),
 };
 
 /**

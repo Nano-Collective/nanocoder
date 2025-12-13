@@ -4,7 +4,7 @@
  */
 
 import type {Logger, LoggerConfig, LogLevel} from './types.js';
-import {createLogMethod} from './log-method-factory.js';
+import {createLogMethods} from './log-method-factory.js';
 
 export class LoggerProvider {
 	private static instance: LoggerProvider | null = null;
@@ -95,36 +95,18 @@ export class LoggerProvider {
 	private createFallbackLogger(): Logger {
 		const fallbackConsole = console; // Use console as the logger
 
+		// Create all log methods using the factory
+		const logMethods = createLogMethods(fallbackConsole, {
+			consolePrefix: '',
+			transformArgs: (args, _level, _msg) => {
+				// Note: Level prefix is handled by consolePrefix option in createLogMethod
+				return args;
+			},
+		});
+
 		return {
-			fatal: createLogMethod(fallbackConsole, 'fatal', {
-				consolePrefix: 'FATAL',
-				consoleMethod: 'error',
-			}) as any,
-			error: createLogMethod(fallbackConsole, 'error', {
-				consolePrefix: 'ERROR',
-				consoleMethod: 'error',
-			}) as any,
-			warn: createLogMethod(fallbackConsole, 'warn', {
-				consolePrefix: 'WARN',
-				consoleMethod: 'warn',
-			}) as any,
-			info: createLogMethod(fallbackConsole, 'info', {
-				consolePrefix: 'INFO',
-				consoleMethod: 'log',
-			}) as any,
-			http: createLogMethod(fallbackConsole, 'http', {
-				consolePrefix: 'HTTP',
-				consoleMethod: 'log',
-			}) as any,
-			debug: createLogMethod(fallbackConsole, 'debug', {
-				consolePrefix: 'DEBUG',
-				consoleMethod: 'log',
-			}) as any,
-			trace: createLogMethod(fallbackConsole, 'trace', {
-				consolePrefix: 'TRACE',
-				consoleMethod: 'log',
-			}) as any,
-			child: (_bindings: Record<string, any>) => this.createFallbackLogger(),
+			...logMethods,
+			child: (_bindings: Record<string, unknown>) => this.createFallbackLogger(),
 			isLevelEnabled: (_level: string) => true,
 			flush: async () => Promise.resolve(),
 			end: async () => Promise.resolve(),
@@ -165,7 +147,7 @@ export class LoggerProvider {
 
 		this.ensureDependenciesLoaded();
 		this._config = this.createDefaultConfig(config);
-		this._logger = this._createPinoLogger!(this._config);
+		this._logger = this._createPinoLogger?.(this._config) ?? this.createFallbackLogger();
 
 		return this._logger;
 	}
@@ -191,7 +173,7 @@ export class LoggerProvider {
 	/**
 	 * Create a child logger with additional context
 	 */
-	public createChildLogger(bindings: Record<string, any>): Logger {
+	public createChildLogger(bindings: Record<string, unknown>): Logger {
 		const parent = this.getLogger();
 		return parent.child(bindings);
 	}
