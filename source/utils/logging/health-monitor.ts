@@ -196,55 +196,123 @@ export class HealthMonitor {
 	 * Start health monitoring
 	 */
 	start(): void {
-		if (this.isRunning) {
-			logger.warn('Health monitoring already running', {
+		try {
+			if (this.isRunning) {
+				logger.warn('Health monitoring already running', {
+					correlationId: this.correlationId,
+					source: 'health-monitor',
+				});
+				return;
+			}
+
+			this.isRunning = true;
+
+			// Run initial check
+			try {
+				void this.runHealthCheck();
+			} catch (error) {
+				logger.error('Failed to run initial health check', {
+					error: error instanceof Error ? error.message : error,
+					correlationId: this.correlationId,
+					source: 'health-monitor',
+				});
+				// Continue starting monitoring even if initial check fails
+			}
+
+			// Schedule regular checks
+			try {
+				this.intervalId = setInterval(() => {
+					try {
+						void this.runHealthCheck();
+					} catch (error) {
+						logger.error('Failed to run scheduled health check', {
+							error: error instanceof Error ? error.message : error,
+							correlationId: this.correlationId,
+							source: 'health-monitor',
+						});
+					}
+				}, this.config.interval);
+			} catch (error) {
+				logger.error('Failed to schedule health monitoring', {
+					error: error instanceof Error ? error.message : error,
+					correlationId: this.correlationId,
+					source: 'health-monitor',
+				});
+				this.isRunning = false;
+				return;
+			}
+
+			logger.info('Health monitoring started', {
+				interval: `${this.config.interval}ms`,
+				timeout: `${this.config.timeout}ms`,
 				correlationId: this.correlationId,
 				source: 'health-monitor',
 			});
-			return;
+		} catch (error) {
+			logger.error('Critical error starting health monitoring', {
+				error: error instanceof Error ? error.message : error,
+				correlationId: this.correlationId,
+				source: 'health-monitor',
+			});
+			this.isRunning = false;
 		}
-
-		this.isRunning = true;
-
-		// Run initial check
-		void this.runHealthCheck();
-
-		// Schedule regular checks
-		this.intervalId = setInterval(() => {
-			void this.runHealthCheck();
-		}, this.config.interval);
-
-		logger.info('Health monitoring started', {
-			interval: `${this.config.interval}ms`,
-			timeout: `${this.config.timeout}ms`,
-			correlationId: this.correlationId,
-			source: 'health-monitor',
-		});
 	}
 
 	/**
 	 * Stop health monitoring
 	 */
 	stop(): void {
-		if (!this.isRunning) {
-			logger.debug('Health monitoring not running', {
+		try {
+			if (!this.isRunning) {
+				logger.debug('Health monitoring not running', {
+					correlationId: this.correlationId,
+					source: 'health-monitor',
+				});
+				return;
+			}
+
+			this.isRunning = false;
+
+			try {
+				if (this.intervalId) {
+					clearInterval(this.intervalId);
+					this.intervalId = undefined;
+				}
+			} catch (error) {
+				logger.error('Failed to clear health monitoring interval', {
+					error: error instanceof Error ? error.message : error,
+					correlationId: this.correlationId,
+					source: 'health-monitor',
+				});
+				// Continue with cleanup even if interval clearing fails
+			}
+
+			logger.info('Health monitoring stopped', {
 				correlationId: this.correlationId,
 				source: 'health-monitor',
 			});
-			return;
+		} catch (error) {
+			logger.error('Critical error stopping health monitoring', {
+				error: error instanceof Error ? error.message : error,
+				correlationId: this.correlationId,
+				source: 'health-monitor',
+			});
+			// Ensure we don't leave the system in a bad state
+			this.isRunning = false;
+			if (this.intervalId) {
+				try {
+					clearInterval(this.intervalId);
+					this.intervalId = undefined;
+				} catch (cleanupError) {
+					// Final fallback - log but don't rethrow
+					logger.error('Failed to cleanup health monitoring interval during error recovery', {
+						error: cleanupError instanceof Error ? cleanupError.message : cleanupError,
+						correlationId: this.correlationId,
+						source: 'health-monitor',
+					});
+				}
+			}
 		}
-
-		this.isRunning = false;
-
-		if (this.intervalId) {
-			clearInterval(this.intervalId);
-			this.intervalId = undefined;
-		}
-
-		logger.info('Health monitoring stopped', {
-			correlationId: this.correlationId,
-			source: 'health-monitor',
-		});
 	}
 
 	/**
