@@ -153,15 +153,7 @@ Must be manually updated during release:
 
 ---
 
-### 3.3 Unused Workflow File
-
-**File:** `.github/workflows/generate-release-content.yml`
-
-Defined but never called (removed from pipeline in commit dfae51c). Either restore or delete.
-
----
-
-### 3.4 No Dependabot Configuration
+### 3.3 No Dependabot Configuration
 
 Missing `.github/dependabot.yml` for automated dependency updates.
 
@@ -495,7 +487,6 @@ Returns empty string instead of failing or warning effectively.
 
 | File | Action |
 |------|--------|
-| `.github/workflows/generate-release-content.yml` | Delete if unused |
 | `.github/dependabot.yml` | Create for dependency updates |
 | Public APIs | Add JSDoc documentation |
 | Magic numbers | Extract to named constants |
