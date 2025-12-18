@@ -1,102 +1,39 @@
 # Nanocoder Winter Cleanup Review 2025
 
 > Comprehensive code review prepared for the 2026 readiness initiative
-> **Updated: December 18, 2025** - Re-reviewed after file tool consolidation
+> **Updated: December 18, 2025**
 
 ## Executive Summary
 
-The nanocoder codebase is well-architected with clear separation of concerns, comprehensive testing (~50% test-to-source ratio), and a solid foundation. Recent changes have addressed one of the major cleanup items (file tool consolidation), but several areas still need attention before 2026.
+The nanocoder codebase is well-architected with clear separation of concerns, comprehensive testing (~50% test-to-source ratio), and a solid foundation. Several areas would benefit from cleanup before 2026.
 
-**Overall Health Score: B+** (improved from B+, trending positive)
+**Overall Health Score: B+**
 
-| Category | Score | Change | Notes |
-|----------|-------|--------|-------|
-| Architecture | A | — | Clean modular design, React/Ink CLI well-structured |
-| Code Quality | B+ | ↑ | File tools consolidated, some duplication remains |
-| Type Safety | B | ↑ | 43 `any` types (down from 40+), most now documented |
-| Testing | B+ | ↑ | New test utility added (`render-with-theme.tsx`) |
-| Dependencies | B | — | Beta AI SDK dependency, some outdated packages |
-| Error Handling | B- | — | Inconsistent patterns, console bypasses logger |
-| Documentation | B | — | Good inline docs, missing deprecation warnings |
-
----
-
-## Progress Summary
-
-### ✅ Resolved Since Last Review
-
-| Item | Status | Impact |
-|------|--------|--------|
-| File tool consolidation | **COMPLETE** | 1,036 lines removed |
-| Test utility infrastructure | **STARTED** | `render-with-theme.tsx` added |
-
-### ❌ Still Open
-
-| Item | Priority | Status |
-|------|----------|--------|
-| Silent config failure | Critical | Not fixed |
-| Async error handling bug | Critical | Not fixed |
-| Message component duplication | High | Not fixed |
-| Console bypassing logger | High | Not fixed (7 instances) |
-| Large files (>800 lines) | Medium | Not fixed (4 files) |
-| Deprecated code | Medium | Not fixed |
-| Webhook TODO | Low | Not implemented |
+| Category | Score | Notes |
+|----------|-------|-------|
+| Architecture | A | Clean modular design, React/Ink CLI well-structured |
+| Code Quality | B+ | Some duplication remains in components |
+| Type Safety | B | 43 `any` types, most documented with biome-ignore |
+| Testing | B+ | Good coverage, needs more shared utilities |
+| Dependencies | B | Beta AI SDK dependency |
+| Error Handling | B- | Inconsistent patterns, console bypasses logger |
 
 ---
 
 ## Table of Contents
 
-1. [Recently Resolved](#1-recently-resolved)
-2. [Critical Issues (Fix First)](#2-critical-issues-fix-first)
-3. [High Priority Cleanup](#3-high-priority-cleanup)
-4. [Medium Priority Improvements](#4-medium-priority-improvements)
-5. [Low Priority Nice-to-Haves](#5-low-priority-nice-to-haves)
-6. [Codebase Statistics](#6-codebase-statistics)
-7. [File-by-File Action Items](#7-file-by-file-action-items)
+1. [Critical Issues (Fix First)](#1-critical-issues-fix-first)
+2. [High Priority Cleanup](#2-high-priority-cleanup)
+3. [Medium Priority Improvements](#3-medium-priority-improvements)
+4. [Low Priority Nice-to-Haves](#4-low-priority-nice-to-haves)
+5. [Codebase Statistics](#5-codebase-statistics)
+6. [File-by-File Action Items](#6-file-by-file-action-items)
 
 ---
 
-## 1. Recently Resolved
+## 1. Critical Issues (Fix First)
 
-### 1.1 ✅ File Tool Consolidation (COMPLETE)
-
-**What changed:** Three separate line-based editing tools have been consolidated into a unified approach.
-
-**Files Removed:**
-- `replace-lines.tsx` (550 lines) ❌ Deleted
-- `delete-lines.tsx` (525 lines) ❌ Deleted
-- `insert-lines.tsx` (467 lines) ❌ Deleted
-
-**Files Added:**
-- `string-replace.tsx` (503 lines) ✅ New unified tool
-
-**Net Impact:** **1,036 lines removed** 🎉
-
-The new `string-replace` tool uses a pattern matching approach with context, providing a cleaner API for the LLM.
-
----
-
-### 1.2 ✅ Test Utility Infrastructure (STARTED)
-
-**New file:** `source/test-utils/render-with-theme.tsx`
-
-```typescript
-export function renderWithTheme(
-  element: React.ReactElement,
-): ReturnType<typeof render> {
-  return render(<TestThemeProvider>{element}</TestThemeProvider>);
-}
-```
-
-This is a good start toward centralizing test utilities. More mock factories are still needed.
-
----
-
-## 2. Critical Issues (Fix First)
-
-### 2.1 Silent Configuration Failure
-
-**Status:** ❌ NOT FIXED
+### 1.1 Silent Configuration Failure
 
 **File:** `source/config/index.ts:104-106`
 
@@ -113,9 +50,7 @@ This is a good start toward centralizing test utilities. More mock factories are
 
 ---
 
-### 2.2 Beta Dependency Risk
-
-**Status:** ⚠️ MONITORING REQUIRED
+### 1.2 Beta Dependency Risk
 
 **File:** `package.json:59,63`
 
@@ -133,9 +68,7 @@ This is a good start toward centralizing test utilities. More mock factories are
 
 ---
 
-### 2.3 Async Error Handling Bug
-
-**Status:** ❌ NOT FIXED
+### 1.3 Async Error Handling Bug
 
 **File:** `source/services/file-snapshot.ts:176-178`
 
@@ -157,9 +90,7 @@ try {
 
 ---
 
-### 2.4 Unimplemented Webhook Functionality
-
-**Status:** ❌ NOT IMPLEMENTED
+### 1.4 Unimplemented Webhook Functionality
 
 **File:** `source/utils/logging/health-monitor.ts:869`
 
@@ -175,11 +106,9 @@ case 'webhook':
 
 ---
 
-## 3. High Priority Cleanup
+## 2. High Priority Cleanup
 
-### 3.1 Message Component Duplication
-
-**Status:** ❌ NOT FIXED
+### 2.1 Message Component Duplication
 
 **Files (all 50 lines each):**
 - `source/components/error-message.tsx`
@@ -227,11 +156,9 @@ export const MessageBox = memo(function MessageBox({type, title, children}: Mess
 
 ---
 
-### 3.2 Console Bypassing Logger
+### 2.2 Console Bypassing Logger
 
-**Status:** ❌ NOT FIXED (7 instances remain)
-
-**Affected Files:**
+**Problem:** 7 instances use `console.warn/error` instead of the structured logger.
 
 | File | Lines | Issue |
 |------|-------|-------|
@@ -246,29 +173,7 @@ export const MessageBox = memo(function MessageBox({type, title, children}: Mess
 
 ---
 
-### 3.3 Remaining File Tool Duplication
-
-**Status:** ⚠️ MINOR - Could be improved further
-
-While the major consolidation is complete, there's still some duplication across the remaining tools:
-
-**Files:**
-- `string-replace.tsx` (503 lines)
-- `write-file.tsx` (251 lines)
-- `read-file.tsx` (377 lines)
-
-**Duplicated patterns:**
-- File existence validation (~10 lines each)
-- Line formatting with numbers (~15 lines each)
-- Error type checking pattern
-
-**Note:** This is lower priority since the major consolidation is done. Consider extracting shared utilities if touching these files for other reasons.
-
----
-
-### 3.4 Deprecated Code Still in Use
-
-**Status:** ❌ NOT FIXED
+### 2.3 Deprecated Code Still in Use
 
 **File:** `source/utils/logging/correlation.ts`
 
@@ -285,9 +190,7 @@ Three deprecated functions still exist with console warnings:
 
 ---
 
-### 3.5 Large Files Needing Refactoring
-
-**Status:** ❌ NOT FIXED
+### 2.4 Large Files Needing Refactoring
 
 | File | Lines | Recommendation |
 |------|-------|----------------|
@@ -298,11 +201,9 @@ Three deprecated functions still exist with console warnings:
 
 ---
 
-## 4. Medium Priority Improvements
+## 3. Medium Priority Improvements
 
-### 4.1 TypeScript Type Safety
-
-**Status:** ⚠️ IMPROVED but still needs work
+### 3.1 TypeScript Type Safety
 
 **Current counts (excluding spec files):**
 - `: any` occurrences: 29 instances
@@ -320,12 +221,7 @@ Three deprecated functions still exist with console warnings:
 
 ---
 
-### 4.2 Test Infrastructure
-
-**Status:** ⚠️ STARTED
-
-**Progress:**
-- ✅ `render-with-theme.tsx` added for component testing
+### 3.2 Test Infrastructure
 
 **Still needed:**
 - Mock factories for ToolManager, Logger, MCPClient
@@ -335,7 +231,7 @@ Three deprecated functions still exist with console warnings:
 
 ---
 
-### 4.3 Configuration Improvements
+### 3.3 Configuration Improvements
 
 #### Biome Linting Rules
 
@@ -359,7 +255,7 @@ Three deprecated functions still exist with console warnings:
 
 ---
 
-### 4.4 Selector Component Consolidation
+### 3.4 Selector Component Consolidation
 
 **Files:**
 - `source/components/model-selector.tsx` (133 lines)
@@ -372,53 +268,52 @@ Three deprecated functions still exist with console warnings:
 
 ---
 
-## 5. Low Priority Nice-to-Haves
+## 4. Low Priority Nice-to-Haves
 
-### 5.1 Update Dependencies
+### 4.1 Update Dependencies
 
 | Package | Current | Latest | Type |
 |---------|---------|--------|------|
 | pino-pretty | 11.3.0 | 13.1.3 | devDependency |
 
-### 5.2 Documentation TODOs
+### 4.2 Documentation TODOs
 
 - Document error handling policy
 - Add JSDoc to public exports
 
-### 5.3 GitHub Actions Update
+### 4.3 GitHub Actions Update
 
 Replace deprecated `actions/create-release@v1` with `softprops/action-gh-release@v1`
 
-### 5.4 VS Code Extension Improvements
+### 4.4 VS Code Extension Improvements
 
 - Add sourcemaps for debugging
 - Apply same biome/eslint standards as main project
 
 ---
 
-## 6. Codebase Statistics
+## 5. Codebase Statistics
 
-### Size Metrics (Updated)
+### Size Metrics
 
-| Metric | Previous | Current | Change |
-|--------|----------|---------|--------|
-| Total Lines of Code | ~50,210 | ~49,174 | -1,036 ↓ |
-| File Tool Lines | 1,541 | 503 | -1,038 ↓ |
+| Metric | Value |
+|--------|-------|
+| Total Lines of Code | ~49,174 |
+| Test-to-Source Ratio | ~50% |
 
 ### Code Quality Metrics
 
 | Metric | Count | Notes |
 |--------|-------|-------|
-| `any` types | 43 | Down from 40+, most documented |
+| `any` types | 43 | Most documented |
 | Console.* calls | 7 | Should use logger |
 | Files >800 lines | 4 | Should split |
-| Files >500 lines | ~10 | Consider splitting |
 
 ---
 
-## 7. File-by-File Action Items
+## 6. File-by-File Action Items
 
-### Critical (Do First)
+### Critical
 
 | File | Line(s) | Action |
 |------|---------|--------|
@@ -447,25 +342,16 @@ Replace deprecated `actions/create-release@v1` with `softprops/action-gh-release
 |------|--------|
 | `biome.json` | Enable recommended rules |
 | `tsconfig.json` | Remove redundant flags |
-| Test files | Create more shared mock utilities |
-
-### ~~Completed~~ (Removed from list)
-
-| File | Action | Status |
-|------|--------|--------|
-| ~~`source/tools/replace-lines.tsx`~~ | ~~Extract shared file operations~~ | ✅ Deleted |
-| ~~`source/tools/delete-lines.tsx`~~ | ~~Use shared file operations~~ | ✅ Deleted |
-| ~~`source/tools/insert-lines.tsx`~~ | ~~Use shared file operations~~ | ✅ Deleted |
+| Test files | Create shared mock utilities |
 
 ---
 
-## Recommended Cleanup Order (Updated)
+## Recommended Cleanup Order
 
 ### Week 1: Critical Fixes
-1. ~~Fix file tool duplication~~ ✅ DONE
-2. Fix silent config failure (`config/index.ts`)
-3. Fix async catch bug (`file-snapshot.ts`)
-4. Replace console.* with logger calls (7 instances)
+1. Fix silent config failure (`config/index.ts`)
+2. Fix async catch bug (`file-snapshot.ts`)
+3. Replace console.* with logger calls (7 instances)
 
 ### Week 2: Component Consolidation
 1. Create MessageBox component (consolidate 4 message components)
@@ -478,7 +364,7 @@ Replace deprecated `actions/create-release@v1` with `softprops/action-gh-release
 3. Update biome configuration
 
 ### Week 4: Polish
-1. Create more shared test utilities
+1. Create shared test utilities
 2. Reduce remaining `any` types where practical
 3. Update dependencies
 
@@ -486,18 +372,17 @@ Replace deprecated `actions/create-release@v1` with `softprops/action-gh-release
 
 ## Conclusion
 
-Good progress has been made with the file tool consolidation, removing over 1,000 lines of duplicate code. The main remaining cleanup items are:
+The main areas for winter cleanup are:
 
-1. **Fix critical bugs** - Silent config failure and async error handling (unchanged)
-2. **Reduce duplication** - Message components still need consolidation
+1. **Fix critical bugs** - Silent config failure and async error handling
+2. **Reduce duplication** - Message components need consolidation
 3. **Improve consistency** - Console→logger migration, memoization
 4. **Split large files** - 4 files still over 800 lines
 5. **Remove deprecated code** - Several deprecated functions remain
 
-The codebase is in better shape than the initial review, with a clear path to 2026 readiness.
+Following this cleanup plan will make the codebase more maintainable and ready for 2026 development.
 
 ---
 
-*Initial review: December 2025*
-*Updated: December 18, 2025*
+*Review generated: December 2025*
 *Branch: claude/winter-cleanup-review-Lkl60*
