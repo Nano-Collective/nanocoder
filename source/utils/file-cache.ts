@@ -8,7 +8,10 @@ import {readFile, stat} from 'node:fs/promises';
  */
 
 const TTL_MS = 5000; // 5 seconds
-const MAX_CACHE_SIZE = 50; // Maximum number of files to cache
+const MAX_READ_RETRIES = 3; // Maximum retries if file changes during read
+
+/** Maximum number of files to cache (exported for testing) */
+export const MAX_CACHE_SIZE = 50;
 
 export interface CachedFile {
 	content: string;
@@ -26,9 +29,13 @@ interface CacheEntry {
 const cache = new Map<string, CacheEntry>();
 let accessCounter = 0;
 
+// Track pending reads to deduplicate concurrent requests for the same file
+const pendingReads = new Map<string, Promise<CachedFile>>();
+
 /**
  * Get file content from cache or read from disk.
  * Automatically checks mtime to ensure freshness.
+ * Deduplicates concurrent requests for the same file.
  *
  * @param absPath - Absolute path to the file
  * @returns Cached file data with content, lines array, and mtime
@@ -67,18 +74,33 @@ export async function getCachedFileContent(
 		}
 	}
 
-	// Cache miss - read from disk
-	return readAndCacheFile(absPath, now);
+	// Check if there's already a pending read for this file
+	const pending = pendingReads.get(absPath);
+	if (pending) {
+		return pending;
+	}
+
+	// Cache miss - read from disk with deduplication
+	const readPromise = readAndCacheFile(absPath, now);
+	pendingReads.set(absPath, readPromise);
+
+	try {
+		return await readPromise;
+	} finally {
+		pendingReads.delete(absPath);
+	}
 }
 
 /**
  * Read file from disk and cache it.
  * Verifies mtime didn't change during read to prevent race conditions.
+ * Retries up to MAX_READ_RETRIES times if file changes during read.
  */
 async function readAndCacheFile(
 	absPath: string,
 	now: number,
 	knownMtime?: number,
+	retryCount = 0,
 ): Promise<CachedFile> {
 	// Get mtime before reading (or use known mtime from caller)
 	const mtimeBefore = knownMtime ?? (await stat(absPath)).mtimeMs;
@@ -88,8 +110,13 @@ async function readAndCacheFile(
 	// Verify mtime didn't change during read
 	const mtimeAfter = (await stat(absPath)).mtimeMs;
 	if (mtimeAfter !== mtimeBefore) {
+		if (retryCount >= MAX_READ_RETRIES) {
+			throw new Error(
+				`File ${absPath} is being modified too frequently, giving up after ${MAX_READ_RETRIES} retries`,
+			);
+		}
 		// File changed during read, retry
-		return readAndCacheFile(absPath, now);
+		return readAndCacheFile(absPath, now, undefined, retryCount + 1);
 	}
 
 	const cachedFile: CachedFile = {
@@ -127,6 +154,7 @@ export function invalidateCache(absPath: string): void {
  */
 export function clearCache(): void {
 	cache.clear();
+	pendingReads.clear();
 	accessCounter = 0;
 }
 

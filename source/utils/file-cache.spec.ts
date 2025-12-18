@@ -7,9 +7,8 @@ import {
 	invalidateCache,
 	clearCache,
 	getCacheSize,
+	MAX_CACHE_SIZE,
 } from './file-cache';
-
-console.log('\nfile-cache.spec.ts');
 
 // Helper to create a temp directory for tests
 async function createTempDir(): Promise<string> {
@@ -142,15 +141,13 @@ test('clearCache - removes all entries', async t => {
 	}
 });
 
-test('getCachedFileContent - concurrent access returns consistent content', async t => {
+test('getCachedFileContent - concurrent access is deduplicated', async t => {
 	const tempDir = await createTempDir();
 	try {
 		const filePath = join(tempDir, 'concurrent.txt');
 		await writeFile(filePath, 'concurrent content', 'utf-8');
 
-		// Launch multiple concurrent reads
-		// Note: First concurrent call may each read from disk before any caches,
-		// but all should return the same content
+		// Launch multiple concurrent reads - they should be deduplicated
 		const [result1, result2, result3] = await Promise.all([
 			getCachedFileContent(filePath),
 			getCachedFileContent(filePath),
@@ -161,6 +158,10 @@ test('getCachedFileContent - concurrent access returns consistent content', asyn
 		t.is(result1.content, 'concurrent content');
 		t.is(result2.content, 'concurrent content');
 		t.is(result3.content, 'concurrent content');
+
+		// All should return the exact same object (deduplicated read)
+		t.is(result1, result2);
+		t.is(result2, result3);
 	} finally {
 		await cleanupTempDir(tempDir);
 	}
@@ -173,7 +174,7 @@ test('getCachedFileContent - throws on non-existent file', async t => {
 	);
 });
 
-test('getCachedFileContent - TTL expiration triggers re-read', async t => {
+test('getCachedFileContent - cache hit within TTL window returns same object', async t => {
 	const tempDir = await createTempDir();
 	try {
 		const filePath = join(tempDir, 'ttl-test.txt');
@@ -182,12 +183,10 @@ test('getCachedFileContent - TTL expiration triggers re-read', async t => {
 		const result1 = await getCachedFileContent(filePath);
 		t.is(result1.content, 'original');
 
-		// Modify cachedAt to simulate TTL expiration (5+ seconds ago)
-		// This is a bit of a hack but avoids waiting 5 seconds in tests
-		const entry = (await import('./file-cache')).getCacheSize();
-		t.is(entry, 1); // Verify entry exists
+		// Verify entry exists in cache
+		t.is(getCacheSize(), 1);
 
-		// For now, just verify the cache works - full TTL test would require waiting
+		// Second read within TTL window should return same object
 		const result2 = await getCachedFileContent(filePath);
 		t.is(result1, result2); // Same object reference = cache hit
 	} finally {
@@ -205,6 +204,44 @@ test('getCachedFileContent - handles empty file', async t => {
 
 		t.is(result.content, '');
 		t.deepEqual(result.lines, ['']);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test('getCachedFileContent - LRU eviction when cache exceeds MAX_CACHE_SIZE', async t => {
+	const tempDir = await createTempDir();
+	try {
+		// Create MAX_CACHE_SIZE + 1 files to trigger eviction
+		const filePaths: string[] = [];
+		for (let i = 0; i <= MAX_CACHE_SIZE; i++) {
+			const filePath = join(tempDir, `file-${i}.txt`);
+			await writeFile(filePath, `content-${i}`, 'utf-8');
+			filePaths.push(filePath);
+		}
+
+		// Cache the first MAX_CACHE_SIZE files
+		for (let i = 0; i < MAX_CACHE_SIZE; i++) {
+			await getCachedFileContent(filePaths[i]!);
+		}
+		t.is(getCacheSize(), MAX_CACHE_SIZE);
+
+		// Access file-0 again to make it recently used
+		await getCachedFileContent(filePaths[0]!);
+
+		// Add one more file - this should evict the LRU entry (file-1, not file-0)
+		await getCachedFileContent(filePaths[MAX_CACHE_SIZE]!);
+
+		// Cache size should still be MAX_CACHE_SIZE (one was evicted)
+		t.is(getCacheSize(), MAX_CACHE_SIZE);
+
+		// file-0 should still be cached (was recently accessed)
+		const result0 = await getCachedFileContent(filePaths[0]!);
+		t.is(result0.content, 'content-0');
+
+		// The newest file should be cached
+		const resultNew = await getCachedFileContent(filePaths[MAX_CACHE_SIZE]!);
+		t.is(resultNew.content, `content-${MAX_CACHE_SIZE}`);
 	} finally {
 		await cleanupTempDir(tempDir);
 	}
