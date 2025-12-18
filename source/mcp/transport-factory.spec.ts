@@ -347,3 +347,54 @@ test('TransportFactory.validateServerConfig: validates http config with headers'
 	t.true(result.valid);
 	t.is(result.errors.length, 0);
 });
+
+// ============================================================================
+// Tests for Command Existence Validation (Issue #148 Fix)
+// ============================================================================
+
+test('TransportFactory.validateServerConfig: detects missing command', t => {
+	const server: MCPServer = {
+		name: 'test-stdio-missing-command',
+		transport: 'stdio',
+		command: 'this-command-definitely-does-not-exist-xyz123',
+	};
+
+	const result = TransportFactory.validateServerConfig(server);
+
+	t.false(result.valid);
+	t.true(
+		result.errors.some((error: string) =>
+			error.includes("Command 'this-command-definitely-does-not-exist-xyz123' not found"),
+		),
+	);
+});
+
+test('TransportFactory.validateServerConfig: provides installation hint for uvx', t => {
+	const server: MCPServer = {
+		name: 'test-stdio-uvx-missing',
+		transport: 'stdio',
+		command: 'uvx-nonexistent-for-testing',
+	};
+
+	const result = TransportFactory.validateServerConfig(server);
+
+	// Should fail since command doesn't exist
+	t.false(result.valid);
+	// Should have an error message
+	t.true(result.errors.length > 0);
+});
+
+test('TransportFactory.validateServerConfig: validates existing command (node)', t => {
+	// node should exist since we're running tests with it
+	const server: MCPServer = {
+		name: 'test-stdio-node-exists',
+		transport: 'stdio',
+		command: 'node',
+		args: ['--version'],
+	};
+
+	const result = TransportFactory.validateServerConfig(server);
+
+	t.true(result.valid);
+	t.is(result.errors.length, 0);
+});

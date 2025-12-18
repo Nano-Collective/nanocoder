@@ -1,8 +1,64 @@
+import {execSync} from 'child_process';
 import {logWarning} from '@/utils/message-queue';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {WebSocketClientTransport} from '@modelcontextprotocol/sdk/client/websocket.js';
 import type {MCPServer, MCPTransportType} from '../types/mcp.js';
+
+/**
+ * Installation instructions for common MCP server dependencies
+ */
+const COMMAND_INSTALL_HINTS: Record<string, string> = {
+	uvx: `'uvx' is part of the 'uv' Python package manager.
+
+Install uv:
+  • macOS/Linux: curl -LsSf https://astral.sh/uv/install.sh | sh
+  • Windows: powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+  • pip: pip install uv
+  • Homebrew: brew install uv
+
+After installation, restart your terminal and try again.`,
+	npx: `'npx' is part of Node.js.
+
+Install Node.js from: https://nodejs.org/
+Or use a version manager like nvm, fnm, or volta.`,
+	node: `'node' is not installed.
+
+Install Node.js from: https://nodejs.org/
+Or use a version manager like nvm, fnm, or volta.`,
+	python: `'python' is not installed.
+
+Install Python from: https://python.org/downloads/
+Or use a version manager like pyenv.`,
+	python3: `'python3' is not installed.
+
+Install Python from: https://python.org/downloads/
+Or use a version manager like pyenv.`,
+};
+
+/**
+ * Checks if a command exists in the system PATH
+ */
+function commandExists(command: string): boolean {
+	try {
+		const checkCommand =
+			process.platform === 'win32' ? `where ${command}` : `which ${command}`;
+		execSync(checkCommand, {stdio: 'ignore'});
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Gets installation hint for a missing command
+ */
+function getInstallHint(command: string): string {
+	return (
+		COMMAND_INSTALL_HINTS[command] ||
+		`'${command}' is not installed or not in your PATH.`
+	);
+}
 
 // Union type for all supported client transports
 type ClientTransport =
@@ -158,6 +214,9 @@ export class TransportFactory {
 			case 'stdio':
 				if (!server.command) {
 					errors.push('stdio transport requires a command');
+				} else if (!commandExists(server.command)) {
+					const hint = getInstallHint(server.command);
+					errors.push(`Command '${server.command}' not found.\n\n${hint}`);
 				}
 				break;
 
