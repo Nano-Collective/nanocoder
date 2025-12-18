@@ -1,5 +1,5 @@
 import {constants} from 'node:fs';
-import {access, readFile, writeFile} from 'node:fs/promises';
+import {access, writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {highlight} from 'cli-highlight';
 import {Box, Text} from 'ink';
@@ -9,6 +9,7 @@ import ToolMessage from '@/components/tool-message';
 import {getColors} from '@/config/index';
 import {getCurrentMode} from '@/context/mode-context';
 import {jsonSchema, tool} from '@/types/core';
+import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
 import {
 	closeDiffInVSCode,
@@ -41,8 +42,8 @@ const executeReplaceLines = async (args: ReplaceLinesArgs): Promise<string> => {
 	}
 
 	const absPath = resolve(path);
-	const fileContent = await readFile(absPath, 'utf-8');
-	const lines = fileContent.split('\n');
+	const cached = await getCachedFileContent(absPath);
+	const lines = cached.lines;
 
 	// Validate line range is within file bounds
 	if (line_number > lines.length) {
@@ -67,6 +68,9 @@ const executeReplaceLines = async (args: ReplaceLinesArgs): Promise<string> => {
 
 	// Write updated content
 	await writeFile(absPath, newContent, 'utf-8');
+
+	// Invalidate cache after write
+	invalidateCache(absPath);
 
 	// Generate full file contents to show the model the current file state
 	let fileContext = '\n\nUpdated file contents:\n';
@@ -167,8 +171,9 @@ async function formatReplaceLinesPreview(
 	const displayTitle = isResult ? '✓' : '⚒';
 
 	try {
-		const fileContent = await readFile(resolve(path), 'utf-8');
-		const lines = fileContent.split('\n');
+		const absPath = resolve(path);
+		const cached = await getCachedFileContent(absPath);
+		const lines = cached.lines;
 		const ext = String(path).split('.').pop()?.toLowerCase();
 		const language = getLanguageFromExtension(ext ?? '');
 
@@ -429,8 +434,9 @@ const replaceLinesFormatter = async (
 	if (result === undefined && isVSCodeConnected()) {
 		const {line_number, end_line, content} = args;
 		try {
-			const fileContent = await readFile(absPath, 'utf-8');
-			const lines = fileContent.split('\n');
+			const cached = await getCachedFileContent(absPath);
+			const fileContent = cached.content;
+			const lines = cached.lines;
 			const lineNumber = Number(line_number);
 			const endLine = Number(end_line) || lineNumber;
 
@@ -515,8 +521,8 @@ const replaceLinesValidator = async (
 
 	// Check line numbers are within file bounds
 	try {
-		const fileContent = await readFile(absPath, 'utf-8');
-		const lines = fileContent.split('\n');
+		const cached = await getCachedFileContent(absPath);
+		const lines = cached.lines;
 
 		if (line_number > lines.length) {
 			return {

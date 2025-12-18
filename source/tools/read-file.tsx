@@ -1,10 +1,11 @@
 import {constants} from 'node:fs';
-import {access, readFile} from 'node:fs/promises';
+import {access} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import ToolMessage from '@/components/tool-message';
 import {ThemeContext} from '@/hooks/useTheme';
 import {jsonSchema, tool} from '@/types/core';
 import type {NanocoderToolExport} from '@/types/core';
+import {getCachedFileContent} from '@/utils/file-cache';
 import {Box, Text} from 'ink';
 import React from 'react';
 
@@ -16,14 +17,15 @@ const executeReadFile = async (args: {
 	const absPath = resolve(args.path);
 
 	try {
-		const content = await readFile(absPath, 'utf-8');
+		const cached = await getCachedFileContent(absPath);
+		const content = cached.content;
 
 		// Check if file is empty (0 tokens)
 		if (content.length === 0) {
 			throw new Error(`File "${args.path}" exists but is empty (0 tokens)`);
 		}
 
-		const lines = content.split('\n');
+		const lines = cached.lines;
 		const totalLines = lines.length;
 		const fileSize = content.length;
 		const estimatedTokens = Math.ceil(fileSize / 4);
@@ -259,9 +261,10 @@ const readFileFormatter = async (
 	try {
 		const path = args.path || args.file_path;
 		if (path && typeof path === 'string') {
-			await access(resolve(path), constants.F_OK);
-			const content = await readFile(resolve(path), 'utf-8');
-			const lines = content.split('\n');
+			const absPath = resolve(path);
+			const cached = await getCachedFileContent(absPath);
+			const content = cached.content;
+			const lines = cached.lines;
 			const totalLines = lines.length;
 
 			// Detect if this was a metadata-only response
@@ -333,8 +336,8 @@ const readFileValidator = async (args: {
 
 		// Check if end_line exceeds file length
 		if (args.end_line !== undefined) {
-			const content = await readFile(absPath, 'utf-8');
-			const totalLines = content.split('\n').length;
+			const cached = await getCachedFileContent(absPath);
+			const totalLines = cached.lines.length;
 
 			if (args.end_line > totalLines) {
 				return {

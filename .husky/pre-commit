@@ -1,14 +1,24 @@
 #!/usr/bin/env sh
-. "$(dirname -- "$0")/_/husky.sh"
 
-# Ensure pnpm is available for GUI tools (GitHub Desktop, etc.)
-# This handles different installation methods: nvm, homebrew, standalone, etc.
+# If pnpm is already available (e.g., from nix develop), just use it
+if command -v pnpm >/dev/null 2>&1; then
+  pnpm lint-staged
+  exit $?
+fi
+
+# Otherwise, try to set up PATH for GUI tools (GitHub Desktop, etc.)
 
 # Try to load nvm if it exists
 export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 
-# Add common pnpm installation paths
-export PATH="$HOME/.local/share/pnpm:$HOME/.nvm/versions/node/$(node -v)/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
+# Add common pnpm/node installation paths
+export PATH="$HOME/.local/share/pnpm:$HOME/Library/pnpm:/usr/local/bin:/opt/homebrew/bin:$PATH"
+
+# If node is available, add its bin directory
+if command -v node >/dev/null 2>&1; then
+  NODE_BIN_DIR="$(dirname "$(command -v node)")"
+  export PATH="$NODE_BIN_DIR:$PATH"
+fi
 
 pnpm lint-staged
