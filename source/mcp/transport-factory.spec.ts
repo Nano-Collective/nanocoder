@@ -369,19 +369,20 @@ test('TransportFactory.validateServerConfig: detects missing command', t => {
 	);
 });
 
-test('TransportFactory.validateServerConfig: provides installation hint for uvx', t => {
+test('TransportFactory.validateServerConfig: returns error for missing command', t => {
 	const server: MCPServer = {
-		name: 'test-stdio-uvx-missing',
+		name: 'test-stdio-missing-command',
 		transport: 'stdio',
-		command: 'uvx-nonexistent-for-testing',
+		command: 'nonexistent-command-for-testing',
 	};
 
 	const result = TransportFactory.validateServerConfig(server);
 
 	// Should fail since command doesn't exist
 	t.false(result.valid);
-	// Should have an error message
+	// Should have an error message with generic hint
 	t.true(result.errors.length > 0);
+	t.true(result.errors[0]!.includes("not found"));
 });
 
 test('TransportFactory.validateServerConfig: validates existing command (node)', t => {

@@ -1,4 +1,4 @@
-import {execSync} from 'child_process';
+import {execFileSync} from 'child_process';
 import {logWarning} from '@/utils/message-queue';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -37,13 +37,13 @@ Or use a version manager like pyenv.`,
 };
 
 /**
- * Checks if a command exists in the system PATH
+ * Checks if a command exists in the system PATH.
+ * Uses execFileSync with separate arguments to prevent shell injection.
  */
 function commandExists(command: string): boolean {
 	try {
-		const checkCommand =
-			process.platform === 'win32' ? `where ${command}` : `which ${command}`;
-		execSync(checkCommand, {stdio: 'ignore'});
+		const checkCmd = process.platform === 'win32' ? 'where' : 'which';
+		execFileSync(checkCmd, [command], {stdio: 'ignore'});
 		return true;
 	} catch {
 		return false;
