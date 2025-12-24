@@ -106,9 +106,10 @@ test('createPrepareStepHandler filters empty assistant messages', t => {
 	const result = handler({messages: messages as any});
 
 	t.truthy(result.messages);
-	t.is(result.messages?.length, 2);
-	t.is((result.messages?.[0] as any).content, 'Hello');
-	t.is((result.messages?.[1] as any).content, 'World');
+	// After filtering empty assistant and merging consecutive user messages, expect 1 message
+	t.is(result.messages?.length, 1);
+	t.is((result.messages?.[0] as any).role, 'user');
+	t.is((result.messages?.[0] as any).content, 'Hello\n\nWorld');
 });
 
 test('createPrepareStepHandler filters orphaned tool messages', t => {
@@ -123,9 +124,10 @@ test('createPrepareStepHandler filters orphaned tool messages', t => {
 	const result = handler({messages: messages as any});
 
 	t.truthy(result.messages);
-	t.is(result.messages?.length, 2);
-	t.is((result.messages?.[0] as any).content, 'Hello');
-	t.is((result.messages?.[1] as any).content, 'World');
+	// After filtering empty assistant, orphaned tool, and merging consecutive user messages, expect 1 message
+	t.is(result.messages?.length, 1);
+	t.is((result.messages?.[0] as any).role, 'user');
+	t.is((result.messages?.[0] as any).content, 'Hello\n\nWorld');
 });
 
 test('createPrepareStepHandler returns empty object when no filtering needed', t => {
@@ -153,10 +155,10 @@ test('createPrepareStepHandler filters multiple empty assistant messages', t => 
 	const result = handler({messages: messages as any});
 
 	t.truthy(result.messages);
-	t.is(result.messages?.length, 3);
+	// After filtering empty assistants and merging consecutive user messages, expect 1 merged user message
+	t.is(result.messages?.length, 1);
 	t.is(result.messages?.[0].role, 'user');
-	t.is(result.messages?.[1].role, 'user');
-	t.is(result.messages?.[2].role, 'user');
+	t.is((result.messages?.[0] as any).content, 'Hello\n\nWorld\n\nTest');
 });
 
 test('createPrepareStepHandler keeps non-empty assistant messages', t => {
