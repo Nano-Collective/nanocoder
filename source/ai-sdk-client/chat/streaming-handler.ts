@@ -56,7 +56,8 @@ export function createOnStepFinishHandler(
 
 /**
  * Creates the prepareStep callback for AI SDK generateText
- * This filters out empty assistant messages and orphaned tool results
+ * This filters out empty assistant messages and orphaned tool results,
+ * and enforces role alternation for strict chat templates (e.g., Mistral models)
  */
 export function createPrepareStepHandler(): (params: {
 	messages: ModelMessage[];
@@ -103,9 +104,74 @@ export function createPrepareStepHandler(): (params: {
 			);
 		}
 
-		// Return filtered messages if any were removed, otherwise no changes
-		if (filteredMessages.length !== messages.length) {
-			return {messages: filteredMessages};
+		// Third pass: Merge consecutive messages of the same role
+		// Some models (e.g., Mistral) require strict user/assistant alternation
+		// Instead of removing messages, merge consecutive ones to preserve information
+		const mergedMessages: ModelMessage[] = [];
+
+		for (let i = 0; i < filteredMessages.length; i++) {
+			const msg = filteredMessages[i];
+
+			// System and tool messages don't need merging
+			if (msg.role === 'system' || msg.role === 'tool') {
+				mergedMessages.push(msg);
+				continue;
+			}
+
+			// Check if we need to merge with the previous message
+			const lastMsg = mergedMessages[mergedMessages.length - 1];
+			if (
+				lastMsg &&
+				lastMsg.role === msg.role &&
+				(msg.role === 'user' || msg.role === 'assistant')
+			) {
+				// Merge consecutive messages of the same role
+				// Combine content strings with newline separator
+				const lastContent =
+					typeof lastMsg.content === 'string'
+						? lastMsg.content
+						: Array.isArray(lastMsg.content)
+							? lastMsg.content.map(c => ('text' in c ? c.text : '')).join('')
+							: '';
+
+				const currentContent =
+					typeof msg.content === 'string'
+						? msg.content
+						: Array.isArray(msg.content)
+							? msg.content.map(c => ('text' in c ? c.text : '')).join('')
+							: '';
+
+				// Update the last message with merged content
+				if (typeof lastMsg.content === 'string') {
+					lastMsg.content = lastContent + '\n\n' + currentContent;
+				}
+
+				logger.debug('Merged consecutive messages for role alternation', {
+					role: msg.role,
+					messageIndex: i,
+				});
+			} else {
+				// No merge needed, add the message
+				mergedMessages.push(msg);
+			}
+		}
+
+		// Log if merging was applied
+		if (mergedMessages.length !== filteredMessages.length) {
+			logger.debug('Merged consecutive messages for strict chat template', {
+				originalCount: filteredMessages.length,
+				mergedCount: mergedMessages.length,
+				reducedBy: filteredMessages.length - mergedMessages.length,
+			});
+		}
+
+		// Return modified messages if any changes were made
+		const totalChanges =
+			mergedMessages.length !== messages.length ||
+			filteredMessages.length !== messages.length;
+
+		if (totalChanges) {
+			return {messages: mergedMessages};
 		}
 		return {}; // No modifications needed
 	};
