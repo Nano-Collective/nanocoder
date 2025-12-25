@@ -4,6 +4,7 @@ import {Box, Text} from 'ink';
 import React from 'react';
 
 import ToolMessage from '@/components/tool-message';
+import {isNanocoderToolAlwaysAllowed} from '@/config/nanocoder-tools-config';
 import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import {jsonSchema, tool} from '@/types/core';
@@ -70,7 +71,15 @@ const executeBashCoreTool = tool({
 		required: ['command'],
 	}),
 	// High risk: bash commands always require approval in all modes
-	needsApproval: true,
+	needsApproval: () => {
+		// Check if this tool is configured to always be allowed
+		if (isNanocoderToolAlwaysAllowed('execute_bash')) {
+			return false;
+		}
+
+		// Even in auto-accept mode, bash commands should require approval for security
+		return true;
+	},
 	execute: async (args, _options) => {
 		return await executeExecuteBash(args);
 	},

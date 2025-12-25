@@ -26,6 +26,7 @@ export interface McpServerConfig {
 	timeout?: number;
 
 	// Common
+	alwaysAllow?: string[];
 	description?: string;
 	tags?: string[];
 	enabled?: boolean;

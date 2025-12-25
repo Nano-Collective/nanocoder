@@ -63,6 +63,7 @@ export function MCP({toolManager}: MCPProps) {
         "transport": "stdio",
         "command": "node",
         "args": ["path/to/server.js"],
+        "alwaysAllow": ["safe_read", "status"],
         "env": {
           "API_KEY": "your-key"
         }
@@ -127,7 +128,12 @@ export function MCP({toolManager}: MCPProps) {
 											Tags: {serverInfo.tags.map(tag => `#${tag}`).join(' ')}
 										</Text>
 									)}
-
+									{!!serverInfo?.autoApprovedCommands?.length && (
+										<Text color={colors.secondary}>
+											Auto-approved tools:{' '}
+											{serverInfo.autoApprovedCommands.join(', ')}
+										</Text>
+									)}
 									{serverTools.length > 0 && (
 										<Text color={colors.secondary}>
 											Tools:{' '}

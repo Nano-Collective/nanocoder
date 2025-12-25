@@ -107,6 +107,8 @@ function loadAppConfig(): AppConfig {
 			return {
 				providers: processedData.nanocoder.providers ?? [],
 				mcpServers: processedData.nanocoder.mcpServers ?? [],
+				alwaysAllow: processedData.nanocoder.alwaysAllow ?? [],
+				nanocoderTools: processedData.nanocoder.nanocoderTools ?? {},
 			};
 		}
 	} catch (error) {
