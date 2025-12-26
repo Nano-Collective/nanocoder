@@ -36,7 +36,8 @@ Nanocoder supports three transport types for MCP servers:
 	"transport": "stdio",
 	"command": "npx",
 	"args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/project"],
-	"env": {}
+	"env": {},
+	"alwaysAllow": ["list_directory", "file_info"]
 }
 ```
 
@@ -112,6 +113,7 @@ Nanocoder supports three transport types for MCP servers:
 
 - `name` (required): Display name for the server
 - `transport` (required): Transport type (`stdio`, `http`, `websocket`)
+- `alwaysAllow` (optional): Array of MCP tool names that can run without user confirmation
 
 ### stdio Transport Fields
 

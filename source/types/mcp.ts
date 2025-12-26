@@ -28,6 +28,8 @@ export interface MCPServer {
 		maxAttempts: number;
 		backoffMs: number;
 	};
+	// Tools that can be executed without asking for approval
+	alwaysAllow?: string[];
 
 	// Common fields
 	description?: string;

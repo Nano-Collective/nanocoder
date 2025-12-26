@@ -44,7 +44,8 @@
 				"args": [
 					"@modelcontextprotocol/server-filesystem",
 					"/path/to/allowed/directory"
-				]
+				],
+				"alwaysAllow": ["list_directory", "file_info"]
 			},
 			{
 				"name": "github",
@@ -52,8 +53,12 @@
 				"args": ["@modelcontextprotocol/server-github"],
 				"env": {
 					"GITHUB_TOKEN": "your-github-token"
-				}
+				},
+				"alwaysAllow": ["list_repositories"]
 			}
-		]
+		],
+		"nanocoderTools": {
+			"alwaysAllow": ["execute_bash"]
+		}
 	}
 }

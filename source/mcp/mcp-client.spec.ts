@@ -1,4 +1,5 @@
 import test from 'ava';
+import {setCurrentMode} from '../context/mode-context';
 import {MCPClient} from './mcp-client';
 
 console.log(`\nmcp-client.spec.ts`);
@@ -78,4 +79,68 @@ test('MCPClient: isServerConnected returns false for non-existent servers', t =>
 	t.false(client.isServerConnected('non-existent-server'));
 	t.false(client.isServerConnected('another-server'));
 	t.false(client.isServerConnected(''));
+});
+
+test('MCPClient: alwaysAllow disables approval prompts', async t => {
+	const client = new MCPClient();
+	const serverName = 'auto-server';
+
+	(client as any).serverTools.set(serverName, [
+		{
+			name: 'safe_tool',
+			description: 'Safe MCP tool',
+			inputSchema: {type: 'object'},
+			serverName,
+		},
+	]);
+
+	(client as any).serverConfigs.set(serverName, {
+		name: serverName,
+		transport: 'stdio',
+		alwaysAllow: ['safe_tool'],
+	});
+
+	setCurrentMode('normal');
+
+	const registry = client.getNativeToolsRegistry();
+	const tool = registry['safe_tool'];
+
+	t.truthy(tool);
+	const needsApproval =
+		typeof tool?.needsApproval === 'function'
+			? await tool.needsApproval({}, {toolCallId: 'test', messages: []})
+			: tool?.needsApproval ?? true;
+	t.false(needsApproval);
+});
+
+test('MCPClient: non-whitelisted tools still require approval', async t => {
+	const client = new MCPClient();
+	const serverName = 'restricted-server';
+
+	(client as any).serverTools.set(serverName, [
+		{
+			name: 'restricted_tool',
+			description: 'Requires approval',
+			inputSchema: {type: 'object'},
+			serverName,
+		},
+	]);
+
+	(client as any).serverConfigs.set(serverName, {
+		name: serverName,
+		transport: 'stdio',
+		alwaysAllow: [],
+	});
+
+	setCurrentMode('normal');
+
+	const registry = client.getNativeToolsRegistry();
+	const tool = registry['restricted_tool'];
+
+	t.truthy(tool);
+	const needsApproval =
+		typeof tool?.needsApproval === 'function'
+			? await tool.needsApproval({}, {toolCallId: 'test', messages: []})
+			: tool?.needsApproval ?? false;
+	t.true(needsApproval);
 });
