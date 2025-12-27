@@ -211,7 +211,7 @@ test('executeToolsDirectly - returns empty array for no tools', async t => {
 		null,
 		conversationStateManager as any,
 		addToChatQueue,
-		1,
+		() => 1,
 	);
 
 	t.deepEqual(results, []);

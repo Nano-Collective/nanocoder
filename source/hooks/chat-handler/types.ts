@@ -12,7 +12,7 @@ export interface UseChatHandlerProps {
 	setIsCancelling: (cancelling: boolean) => void;
 
 	addToChatQueue: (component: React.ReactNode) => void;
-	componentKeyCounter: number;
+	getNextComponentKey: () => number;
 	abortController: AbortController | null;
 	setAbortController: (controller: AbortController | null) => void;
 	developmentMode?: 'normal' | 'auto-accept' | 'plan';

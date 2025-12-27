@@ -9,7 +9,7 @@ test('displayError - handles cancellation errors specially', t => {
 	};
 
 	const error = new Error('Operation was cancelled');
-	displayError(error, 'test', addToChatQueue, 1);
+	displayError(error, 'test', addToChatQueue, () => 1);
 
 	t.truthy(capturedComponent);
 	// Check that component was created (we can't easily inspect JSX in tests)
@@ -23,7 +23,7 @@ test('displayError - handles generic errors', t => {
 	};
 
 	const error = new Error('Test error');
-	displayError(error, 'test', addToChatQueue, 1);
+	displayError(error, 'test', addToChatQueue, () => 1);
 
 	t.truthy(capturedComponent);
 	t.pass();
@@ -35,7 +35,7 @@ test('displayError - handles non-Error objects', t => {
 		capturedComponent = component;
 	};
 
-	displayError('string error', 'test', addToChatQueue, 1);
+	displayError('string error', 'test', addToChatQueue, () => 1);
 
 	t.truthy(capturedComponent);
 	t.pass();

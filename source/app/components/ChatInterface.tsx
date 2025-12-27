@@ -39,6 +39,7 @@ export interface ChatInterfaceProps {
 	customCommands: string[];
 	inputDisabled: boolean;
 	developmentMode: DevelopmentMode;
+	hideInput?: boolean;
 
 	// Handlers
 	onToolConfirm: (confirmed: boolean) => void;
@@ -69,6 +70,7 @@ export function ChatInterface({
 	customCommands,
 	inputDisabled,
 	developmentMode,
+	hideInput,
 	onToolConfirm,
 	onToolCancel,
 	onSubmit,
@@ -93,8 +95,8 @@ export function ChatInterface({
 				)}
 			</Box>
 
-			{/* Input Area */}
-			{startChat && (
+			{/* Input Area - hidden when in modal mode to prevent re-renders */}
+			{startChat && !hideInput && (
 				<Box flexDirection="column" marginLeft={-1}>
 					{isCancelling && <CancellingIndicator />}
 

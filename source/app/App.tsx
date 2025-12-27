@@ -30,7 +30,7 @@ import {createPinoLogger} from '@/utils/logging/pino-logger';
 import {setGlobalMessageQueue} from '@/utils/message-queue';
 import {Box, Text, useApp} from 'ink';
 import Spinner from 'ink-spinner';
-import React, {useEffect, useMemo} from 'react';
+import React, {useEffect, useMemo, useRef} from 'react';
 
 export default function App({
 	vscodeMode = false,
@@ -40,6 +40,14 @@ export default function App({
 }: AppProps) {
 	// Memoize the logger to prevent recreation on every render
 	const logger = useMemo(() => createPinoLogger(), []);
+
+	// Debug: Track render count
+	const renderCountRef = useRef(0);
+	renderCountRef.current += 1;
+	logger.debug('App component render', {
+		renderCount: renderCountRef.current,
+		timestamp: Date.now(),
+	});
 
 	// Log application startup with key configuration
 	React.useEffect(() => {
@@ -184,7 +192,7 @@ export default function App({
 		currentModel: appState.currentModel,
 		setIsCancelling: appState.setIsCancelling,
 		addToChatQueue: appState.addToChatQueue,
-		componentKeyCounter: appState.componentKeyCounter,
+		getNextComponentKey: appState.getNextComponentKey,
 		abortController: appState.abortController,
 		setAbortController: appState.setAbortController,
 		developmentMode: appState.developmentMode,
@@ -224,7 +232,7 @@ export default function App({
 		setIsToolExecuting: appState.setIsToolExecuting,
 		setMessages: appState.updateMessages,
 		addToChatQueue: appState.addToChatQueue,
-		componentKeyCounter: appState.componentKeyCounter,
+		getNextComponentKey: appState.getNextComponentKey,
 		resetToolConfirmationState: appState.resetToolConfirmationState,
 		onProcessAssistantResponse: chatHandler.processAssistantResponse,
 		client: appState.client,
@@ -290,7 +298,7 @@ export default function App({
 		setPreferencesLoaded: appState.setPreferencesLoaded,
 		setCustomCommandsCount: appState.setCustomCommandsCount,
 		addToChatQueue: appState.addToChatQueue,
-		componentKeyCounter: appState.componentKeyCounter,
+		getNextComponentKey: appState.getNextComponentKey,
 		customCommandCache: appState.customCommandCache,
 		setIsConfigWizardMode: appState.setIsConfigWizardMode,
 	});
@@ -312,7 +320,7 @@ export default function App({
 		setIsModelDatabaseMode: appState.setIsModelDatabaseMode,
 		setIsConfigWizardMode: appState.setIsConfigWizardMode,
 		addToChatQueue: appState.addToChatQueue,
-		componentKeyCounter: appState.componentKeyCounter,
+		getNextComponentKey: appState.getNextComponentKey,
 		reinitializeMCPServers: appInitialization.reinitializeMCPServers,
 	});
 
@@ -328,7 +336,7 @@ export default function App({
 		lspServersStatus: appState.lspServersStatus,
 		preferencesLoaded: appState.preferencesLoaded,
 		customCommandsCount: appState.customCommandsCount,
-		componentKeyCounter: appState.componentKeyCounter,
+		getNextComponentKey: appState.getNextComponentKey,
 		customCommandCache: appState.customCommandCache,
 		customCommandLoader: appState.customCommandLoader,
 		customCommandExecutor: appState.customCommandExecutor,
@@ -369,6 +377,49 @@ export default function App({
 	});
 
 	const shouldShowWelcome = shouldRenderWelcome(nonInteractiveMode);
+
+	// Debug: Track which dependencies changed for staticComponents
+	const prevStaticDepsRef = useRef<{
+		shouldShowWelcome: boolean;
+		currentProvider: string;
+		currentModel: string;
+		currentTheme: string;
+		updateInfo: unknown;
+		mcpServersStatus: unknown;
+		lspServersStatus: unknown;
+		preferencesLoaded: boolean;
+		customCommandsCount: number;
+	} | null>(null);
+
+	const currentStaticDeps = {
+		shouldShowWelcome,
+		currentProvider: appState.currentProvider,
+		currentModel: appState.currentModel,
+		currentTheme: appState.currentTheme,
+		updateInfo: appState.updateInfo,
+		mcpServersStatus: appState.mcpServersStatus,
+		lspServersStatus: appState.lspServersStatus,
+		preferencesLoaded: appState.preferencesLoaded,
+		customCommandsCount: appState.customCommandsCount,
+	};
+
+	if (prevStaticDepsRef.current) {
+		const changedDeps: string[] = [];
+		for (const key of Object.keys(currentStaticDeps) as Array<
+			keyof typeof currentStaticDeps
+		>) {
+			if (prevStaticDepsRef.current[key] !== currentStaticDeps[key]) {
+				changedDeps.push(key);
+			}
+		}
+		if (changedDeps.length > 0) {
+			logger.debug('staticComponents deps changed', {
+				changedDeps,
+				renderCount: renderCountRef.current,
+			});
+		}
+	}
+	prevStaticDepsRef.current = currentStaticDeps;
 
 	// Memoize static components
 	const staticComponents = React.useMemo(
@@ -469,18 +520,57 @@ export default function App({
 		);
 	}
 
+	// Determine if any modal mode is active
+	const isAnyModalMode =
+		appState.isModelSelectionMode ||
+		appState.isProviderSelectionMode ||
+		appState.isThemeSelectionMode ||
+		appState.isModelDatabaseMode ||
+		appState.isConfigWizardMode ||
+		appState.isCheckpointLoadMode;
+
 	// Main application render
+	// IMPORTANT: ChatInterface is ALWAYS rendered to prevent Static component remounting
+	// which causes the entire terminal to re-render and memory growth.
+	// Modal selectors are rendered as an overlay/replacement for the input area only.
 	return (
 		<ThemeContext.Provider value={themeContextValue}>
 			<UIStateProvider>
 				<Box flexDirection="column" padding={1} width="100%">
-					{/* Modal Selectors */}
-					{(appState.isModelSelectionMode ||
-						appState.isProviderSelectionMode ||
-						appState.isThemeSelectionMode ||
-						appState.isModelDatabaseMode ||
-						appState.isConfigWizardMode ||
-						appState.isCheckpointLoadMode) && (
+					{/* Chat Interface - ALWAYS rendered to keep Static content stable */}
+					<ChatInterface
+						startChat={appState.startChat}
+						staticComponents={staticComponents}
+						queuedComponents={appState.chatComponents}
+						isCancelling={appState.isCancelling}
+						isToolExecuting={appState.isToolExecuting}
+						isToolConfirmationMode={appState.isToolConfirmationMode}
+						isBashExecuting={appState.isBashExecuting}
+						currentBashCommand={appState.currentBashCommand}
+						pendingToolCalls={appState.pendingToolCalls}
+						currentToolIndex={appState.currentToolIndex}
+						mcpInitialized={appState.mcpInitialized}
+						client={appState.client}
+						nonInteractivePrompt={nonInteractivePrompt}
+						nonInteractiveLoadingMessage={nonInteractiveLoadingMessage}
+						customCommands={Array.from(appState.customCommandCache.keys())}
+						inputDisabled={
+							chatHandler.isGenerating ||
+							appState.isToolExecuting ||
+							appState.isBashExecuting ||
+							isAnyModalMode // Disable input when in modal mode
+						}
+						developmentMode={appState.developmentMode}
+						onToolConfirm={toolHandler.handleToolConfirmation}
+						onToolCancel={toolHandler.handleToolConfirmationCancel}
+						onSubmit={appHandlers.handleMessageSubmit}
+						onCancel={appHandlers.handleCancel}
+						onToggleMode={appHandlers.handleToggleDevelopmentMode}
+						hideInput={isAnyModalMode} // Hide input area when in modal mode
+					/>
+
+					{/* Modal Selectors - rendered after ChatInterface */}
+					{isAnyModalMode && (
 						<ModalSelectors
 							isModelSelectionMode={appState.isModelSelectionMode}
 							isProviderSelectionMode={appState.isProviderSelectionMode}
@@ -505,45 +595,6 @@ export default function App({
 							onConfigWizardCancel={modeHandlers.handleConfigWizardCancel}
 							onCheckpointSelect={appHandlers.handleCheckpointSelect}
 							onCheckpointCancel={appHandlers.handleCheckpointCancel}
-						/>
-					)}
-
-					{/* Chat Interface */}
-					{!(
-						appState.isModelSelectionMode ||
-						appState.isProviderSelectionMode ||
-						appState.isThemeSelectionMode ||
-						appState.isModelDatabaseMode ||
-						appState.isConfigWizardMode ||
-						appState.isCheckpointLoadMode
-					) && (
-						<ChatInterface
-							startChat={appState.startChat}
-							staticComponents={staticComponents}
-							queuedComponents={appState.chatComponents}
-							isCancelling={appState.isCancelling}
-							isToolExecuting={appState.isToolExecuting}
-							isToolConfirmationMode={appState.isToolConfirmationMode}
-							isBashExecuting={appState.isBashExecuting}
-							currentBashCommand={appState.currentBashCommand}
-							pendingToolCalls={appState.pendingToolCalls}
-							currentToolIndex={appState.currentToolIndex}
-							mcpInitialized={appState.mcpInitialized}
-							client={appState.client}
-							nonInteractivePrompt={nonInteractivePrompt}
-							nonInteractiveLoadingMessage={nonInteractiveLoadingMessage}
-							customCommands={Array.from(appState.customCommandCache.keys())}
-							inputDisabled={
-								chatHandler.isGenerating ||
-								appState.isToolExecuting ||
-								appState.isBashExecuting
-							}
-							developmentMode={appState.developmentMode}
-							onToolConfirm={toolHandler.handleToolConfirmation}
-							onToolCancel={toolHandler.handleToolConfirmationCancel}
-							onSubmit={appHandlers.handleMessageSubmit}
-							onCancel={appHandlers.handleCancel}
-							onToggleMode={appHandlers.handleToggleDevelopmentMode}
 						/>
 					)}
 				</Box>

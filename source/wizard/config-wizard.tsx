@@ -4,10 +4,11 @@ import {dirname} from 'node:path';
 import {TitledBox} from '@/components/ui/titled-box';
 import {colors} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
+import {getLogger} from '@/utils/logging';
 import {logError} from '@/utils/message-queue';
 import {Box, Text, useFocus, useInput} from 'ink';
 import Spinner from 'ink-spinner';
-import {useEffect, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import type {ProviderConfig} from '../types/config';
 import {type ConfigLocation, LocationStep} from './steps/location-step';
 import {McpStep} from './steps/mcp-step';
@@ -36,6 +37,15 @@ export function ConfigWizard({
 	onComplete,
 	onCancel,
 }: ConfigWizardProps) {
+	const logger = getLogger();
+	const renderCountRef = useRef(0);
+	renderCountRef.current += 1;
+
+	logger.debug('ConfigWizard render', {
+		renderCount: renderCountRef.current,
+		projectDir,
+	});
+
 	const [step, setStep] = useState<WizardStep>('location');
 	const [configPath, setConfigPath] = useState('');
 	const [providers, setProviders] = useState<ProviderConfig[]>([]);
@@ -44,6 +54,11 @@ export function ConfigWizard({
 	);
 	const [error, setError] = useState<string | null>(null);
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
+
+	// Log step changes
+	useEffect(() => {
+		logger.debug('ConfigWizard step changed', {step});
+	}, [step, logger]);
 
 	// Capture focus to ensure keyboard handling works properly
 	useFocus({autoFocus: true, id: 'config-wizard'});

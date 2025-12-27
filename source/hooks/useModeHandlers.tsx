@@ -27,7 +27,7 @@ interface UseModeHandlersProps {
 	setIsModelDatabaseMode: (mode: boolean) => void;
 	setIsConfigWizardMode: (mode: boolean) => void;
 	addToChatQueue: (component: React.ReactNode) => void;
-	componentKeyCounter: number;
+	getNextComponentKey: () => number;
 	reinitializeMCPServers: (
 		toolManager: import('@/tools/tool-manager').ToolManager,
 	) => Promise<void>;
@@ -49,7 +49,7 @@ export function useModeHandlers({
 	setIsModelDatabaseMode,
 	setIsConfigWizardMode,
 	addToChatQueue,
-	componentKeyCounter,
+	getNextComponentKey,
 	reinitializeMCPServers,
 }: UseModeHandlersProps) {
 	// Helper function to enter model selection mode
@@ -78,7 +78,7 @@ export function useModeHandlers({
 			// Add success message to chat queue
 			addToChatQueue(
 				<SuccessMessage
-					key={`model-changed-${componentKeyCounter}`}
+					key={`model-changed-${getNextComponentKey()}`}
 					message={`Model changed to: ${selectedModel}. Chat history cleared.`}
 					hideBox={true}
 				/>,
@@ -105,7 +105,7 @@ export function useModeHandlers({
 					// Provider was forced to a different one (likely due to missing config)
 					addToChatQueue(
 						<ErrorMessage
-							key={`provider-forced-${componentKeyCounter}`}
+							key={`provider-forced-${getNextComponentKey()}`}
 							message={`${selectedProvider} is not available. Please ensure it's properly configured in agents.config.json.`}
 							hideBox={true}
 						/>,
@@ -130,7 +130,7 @@ export function useModeHandlers({
 				// Add success message to chat queue
 				addToChatQueue(
 					<SuccessMessage
-						key={`provider-changed-${componentKeyCounter}`}
+						key={`provider-changed-${getNextComponentKey()}`}
 						message={`Provider changed to: ${actualProvider}, model: ${newModel}. Chat history cleared.`}
 						hideBox={true}
 					/>,
@@ -139,7 +139,7 @@ export function useModeHandlers({
 				// Add error message if provider change fails
 				addToChatQueue(
 					<ErrorMessage
-						key={`provider-error-${componentKeyCounter}`}
+						key={`provider-error-${getNextComponentKey()}`}
 						message={`Failed to change provider to ${selectedProvider}: ${String(
 							error,
 						)}`}
@@ -173,7 +173,7 @@ export function useModeHandlers({
 		// Add success message to chat queue
 		addToChatQueue(
 			<SuccessMessage
-				key={`theme-changed-${componentKeyCounter}`}
+				key={`theme-changed-${getNextComponentKey()}`}
 				message={`Theme changed to: ${selectedTheme}.`}
 				hideBox={true}
 			/>,
@@ -208,7 +208,7 @@ export function useModeHandlers({
 		if (configPath) {
 			addToChatQueue(
 				<SuccessMessage
-					key={`config-wizard-complete-${componentKeyCounter}`}
+					key={`config-wizard-complete-${getNextComponentKey()}`}
 					message={`Configuration saved to: ${configPath}.`}
 					hideBox={true}
 				/>,
@@ -240,7 +240,7 @@ export function useModeHandlers({
 						await reinitializeMCPServers(toolManager);
 						addToChatQueue(
 							<SuccessMessage
-								key={`mcp-reinit-${componentKeyCounter}`}
+								key={`mcp-reinit-${getNextComponentKey()}`}
 								message="MCP servers reinitialized with new configuration."
 								hideBox={true}
 							/>,
@@ -248,7 +248,7 @@ export function useModeHandlers({
 					} catch (mcpError) {
 						addToChatQueue(
 							<ErrorMessage
-								key={`mcp-reinit-error-${componentKeyCounter}`}
+								key={`mcp-reinit-error-${getNextComponentKey()}`}
 								message={`Failed to reinitialize MCP servers: ${String(
 									mcpError,
 								)}`}
@@ -260,7 +260,7 @@ export function useModeHandlers({
 
 				addToChatQueue(
 					<SuccessMessage
-						key={`config-init-${componentKeyCounter}`}
+						key={`config-init-${getNextComponentKey()}`}
 						message={`Ready! Using provider: ${actualProvider}, model: ${newModel}`}
 						hideBox={true}
 					/>,
@@ -268,7 +268,7 @@ export function useModeHandlers({
 			} catch (error) {
 				addToChatQueue(
 					<ErrorMessage
-						key={`config-init-error-${componentKeyCounter}`}
+						key={`config-init-error-${getNextComponentKey()}`}
 						message={`Failed to initialize with new configuration: ${String(
 							error,
 						)}`}

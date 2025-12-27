@@ -3,9 +3,10 @@ import {join} from 'node:path';
 import {colors} from '@/config';
 import {getConfigPath} from '@/config/paths';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
+import {getLogger} from '@/utils/logging';
 import {Box, Text, useInput} from 'ink';
 import SelectInput from 'ink-select-input';
-import {useState} from 'react';
+import {useRef, useState} from 'react';
 
 export type ConfigLocation = 'project' | 'global';
 
@@ -25,6 +26,15 @@ export function LocationStep({
 	onBack,
 	projectDir,
 }: LocationStepProps) {
+	const logger = getLogger();
+	const renderCountRef = useRef(0);
+	renderCountRef.current += 1;
+
+	logger.debug('LocationStep render', {
+		renderCount: renderCountRef.current,
+		projectDir,
+	});
+
 	const {isNarrow, truncatePath} = useResponsiveTerminal();
 	const projectPath = join(projectDir, 'agents.config.json');
 	const globalPath = join(getConfigPath(), 'agents.config.json');
@@ -63,11 +73,15 @@ export function LocationStep({
 	];
 
 	const handleLocationSelect = (item: LocationOption) => {
+		logger.debug('LocationStep handleLocationSelect', {value: item.value});
 		const path = item.value === 'project' ? projectPath : globalPath;
 		onComplete(item.value, path);
 	};
 
 	const handleExistingConfigSelect = (item: {value: string}) => {
+		logger.debug('LocationStep handleExistingConfigSelect', {
+			value: item.value,
+		});
 		if (item.value === 'edit') {
 			const location: ConfigLocation = projectExists ? 'project' : 'global';
 			onComplete(location, existingPath);

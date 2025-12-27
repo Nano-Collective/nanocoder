@@ -24,7 +24,7 @@ export interface MessageSubmissionOptions {
 	onHandleChatMessage: (message: string) => Promise<void>;
 	onAddToChatQueue: (component: React.ReactNode) => void;
 	onCommandComplete?: () => void;
-	componentKeyCounter: number;
+	getNextComponentKey: () => number;
 	setMessages: (messages: Message[]) => void;
 	messages: Message[];
 	setIsBashExecuting: (executing: boolean) => void;

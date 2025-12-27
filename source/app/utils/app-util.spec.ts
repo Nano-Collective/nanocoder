@@ -35,7 +35,10 @@ const createMockOptions = (overrides = {}) => {
 		onHandleChatMessage: async () => {},
 		onAddToChatQueue: () => {},
 		onCommandComplete: () => {},
-		componentKeyCounter: 0,
+		getNextComponentKey: (() => {
+			let counter = 0;
+			return () => ++counter;
+		})(),
 		setMessages: () => {},
 		messages: [] as Message[],
 		setIsBashExecuting: () => {},

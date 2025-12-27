@@ -39,6 +39,7 @@ import {
 } from '@/types/core';
 import type {MCPInitResult, UserPreferences} from '@/types/index';
 import type {UpdateInfo} from '@/types/index';
+import {getLogger} from '@/utils/logging';
 import {checkForUpdates} from '@/utils/update-checker';
 import React, {useEffect} from 'react';
 
@@ -58,7 +59,7 @@ interface UseAppInitializationProps {
 	setPreferencesLoaded: (loaded: boolean) => void;
 	setCustomCommandsCount: (count: number) => void;
 	addToChatQueue: (component: React.ReactNode) => void;
-	componentKeyCounter: number;
+	getNextComponentKey: () => number;
 	customCommandCache: Map<string, CustomCommand>;
 	setIsConfigWizardMode: (mode: boolean) => void;
 }
@@ -79,7 +80,7 @@ export function useAppInitialization({
 	setPreferencesLoaded,
 	setCustomCommandsCount,
 	addToChatQueue,
-	componentKeyCounter,
+	getNextComponentKey,
 	customCommandCache,
 	setIsConfigWizardMode,
 }: UseAppInitializationProps) {
@@ -301,7 +302,7 @@ export function useAppInitialization({
 			if (error instanceof ConfigurationError) {
 				addToChatQueue(
 					<InfoMessage
-						key={`config-error-${componentKeyCounter}`}
+						key={`config-error-${getNextComponentKey()}`}
 						message="Configuration needed. Let's set up your providers..."
 						hideBox={true}
 					/>,
@@ -314,7 +315,7 @@ export function useAppInitialization({
 				// Regular error - show simple error message
 				addToChatQueue(
 					<ErrorMessage
-						key={`init-error-${componentKeyCounter}`}
+						key={`init-error-${getNextComponentKey()}`}
 						message={`No providers available: ${String(error)}`}
 						hideBox={true}
 					/>,
@@ -328,7 +329,7 @@ export function useAppInitialization({
 		} catch (error) {
 			addToChatQueue(
 				<ErrorMessage
-					key={`commands-error-${componentKeyCounter}`}
+					key={`commands-error-${getNextComponentKey()}`}
 					message={`Failed to load custom commands: ${String(error)}`}
 					hideBox={true}
 				/>,
@@ -338,7 +339,9 @@ export function useAppInitialization({
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: Initialization effect should only run once on mount
 	useEffect(() => {
+		const logger = getLogger();
 		const initializeApp = async () => {
+			logger.debug('App initialization: starting');
 			setClient(null);
 			setCurrentModel('');
 
@@ -346,6 +349,7 @@ export function useAppInitialization({
 			const newCustomCommandLoader = new CustomCommandLoader();
 			const newCustomCommandExecutor = new CustomCommandExecutor();
 
+			logger.debug('App initialization: setting tool manager');
 			setToolManager(newToolManager);
 			setCustomCommandLoader(newCustomCommandLoader);
 			setCustomCommandExecutor(newCustomCommandExecutor);
@@ -354,6 +358,7 @@ export function useAppInitialization({
 			const preferences = loadPreferences();
 
 			// Mark preferences as loaded for display in Status component
+			logger.debug('App initialization: preferences loaded');
 			setPreferencesLoaded(true);
 
 			// Set up the tool registry getter for the message handler
@@ -383,9 +388,11 @@ export function useAppInitialization({
 			]);
 
 			// Now start with the properly initialized objects (excluding MCP)
+			logger.debug('App initialization: calling start()');
 			await start(newToolManager, newCustomCommandLoader, preferences);
 
 			// Check for updates before showing UI
+			logger.debug('App initialization: checking for updates');
 			try {
 				const info = await checkForUpdates();
 				setUpdateInfo(info);
@@ -395,12 +402,15 @@ export function useAppInitialization({
 			}
 
 			// Initialize MCP servers before showing UI
+			logger.debug('App initialization: initializing MCP servers');
 			await initializeMCPServers(newToolManager);
 
 			// Initialize LSP servers with auto-discovery
+			logger.debug('App initialization: initializing LSP servers');
 			await initializeLSPServers();
 
 			// Show chat UI after all servers are initialized
+			logger.debug('App initialization: complete, showing chat');
 			setStartChat(true);
 		};
 

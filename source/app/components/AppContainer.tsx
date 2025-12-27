@@ -3,6 +3,7 @@ import WelcomeMessage from '@/components/welcome-message';
 import type {LSPConnectionStatus, MCPConnectionStatus} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
+import {getLogger} from '@/utils/logging';
 import React from 'react';
 
 export interface AppContainerProps {
@@ -32,10 +33,15 @@ export function createStaticComponents({
 	preferencesLoaded,
 	customCommandsCount,
 }: AppContainerProps): React.ReactNode[] {
+	const logger = getLogger();
 	const components: React.ReactNode[] = [];
 
 	if (shouldShowWelcome) {
 		components.push(<WelcomeMessage key="welcome" />);
+		logger.debug('Static component created', {
+			componentType: 'WelcomeMessage',
+			key: 'welcome',
+		});
 	}
 
 	components.push(
@@ -51,6 +57,17 @@ export function createStaticComponents({
 			customCommandsCount={customCommandsCount}
 		/>,
 	);
+	logger.debug('Static component created', {
+		componentType: 'Status',
+		key: 'status',
+	});
+
+	logger.debug('createStaticComponents complete', {
+		totalComponents: components.length,
+		keys: components.map(c =>
+			React.isValidElement(c) ? c.key : 'non-element',
+		),
+	});
 
 	return components;
 }

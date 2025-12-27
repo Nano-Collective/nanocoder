@@ -17,7 +17,7 @@ test('checkContextUsage - does not throw on empty messages', async t => {
 			'test-provider',
 			'test-model',
 			addToChatQueue,
-			1,
+			() => 1,
 		);
 	});
 });
@@ -34,7 +34,7 @@ test('checkContextUsage - handles unknown model gracefully', async t => {
 			'unknown-provider',
 			'unknown-model',
 			addToChatQueue,
-			1,
+			() => 1,
 		);
 	});
 });
@@ -54,7 +54,7 @@ test('checkContextUsage - handles errors silently', async t => {
 			'test-provider',
 			'test-model',
 			addToChatQueue,
-			1,
+			() => 1,
 		);
 	});
 });

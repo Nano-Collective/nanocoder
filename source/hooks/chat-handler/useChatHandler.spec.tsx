@@ -27,7 +27,7 @@ const createMockProps = (overrides?: Partial<UseChatHandlerProps>): UseChatHandl
 	currentModel: 'test-model',
 	setIsCancelling: () => {},
 	addToChatQueue: () => {},
-	componentKeyCounter: 1,
+	getNextComponentKey: () => 1,
 	abortController: null,
 	setAbortController: () => {},
 	onStartToolConfirmationFlow: () => {},

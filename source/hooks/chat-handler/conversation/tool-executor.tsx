@@ -18,7 +18,7 @@ export const executeToolsDirectly = async (
 	toolManager: ToolManager | null,
 	conversationStateManager: React.MutableRefObject<ConversationStateManager>,
 	addToChatQueue: (component: React.ReactNode) => void,
-	componentKeyCounter: number,
+	getNextComponentKey: () => number,
 ): Promise<ToolResult[]> => {
 	// Import processToolUse here to avoid circular dependencies
 	const {processToolUse} = await import('@/message-handler');
@@ -76,7 +76,7 @@ export const executeToolsDirectly = async (
 				result,
 				toolManager,
 				addToChatQueue,
-				componentKeyCounter,
+				getNextComponentKey,
 			);
 		} catch (error) {
 			// Handle tool execution errors
@@ -100,7 +100,7 @@ export const executeToolsDirectly = async (
 				errorResult,
 				toolManager,
 				addToChatQueue,
-				componentKeyCounter,
+				getNextComponentKey,
 			);
 		}
 	}

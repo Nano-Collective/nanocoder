@@ -31,7 +31,7 @@ export async function handleMessageSubmission(
 		onHandleChatMessage,
 		onAddToChatQueue,
 		onCommandComplete,
-		componentKeyCounter,
+		getNextComponentKey,
 		setMessages,
 		messages,
 		setIsBashExecuting,
@@ -78,7 +78,7 @@ ${result.fullOutput || '(No output)'}`;
 			// Add the command and its output to the chat queue
 			onAddToChatQueue(
 				React.createElement(ToolMessage, {
-					key: `bash-result-${componentKeyCounter}`,
+					key: `bash-result-${getNextComponentKey()}`,
 					message: commandOutput,
 					hideBox: true,
 					isBashMode: true,
@@ -107,7 +107,7 @@ ${result.fullOutput || '(No output)'}`;
 				error instanceof Error ? error.message : String(error);
 			onAddToChatQueue(
 				React.createElement(ErrorMessage, {
-					key: `bash-error-${componentKeyCounter}`,
+					key: `bash-error-${getNextComponentKey()}`,
 					message: `Error executing command: ${errorMessage}`,
 				}),
 			);
@@ -201,7 +201,7 @@ ${result.fullOutput || '(No output)'}`;
 					if (checkpoints.length === 0) {
 						onAddToChatQueue(
 							React.createElement(InfoMessage, {
-								key: `checkpoint-info-${componentKeyCounter}`,
+								key: `checkpoint-info-${getNextComponentKey()}`,
 								message:
 									'No checkpoints available. Create one with /checkpoint create [name]',
 								hideBox: true,
@@ -215,7 +215,7 @@ ${result.fullOutput || '(No output)'}`;
 				} catch (error) {
 					onAddToChatQueue(
 						React.createElement(ErrorMessage, {
-							key: `checkpoint-error-${componentKeyCounter}`,
+							key: `checkpoint-error-${getNextComponentKey()}`,
 							message: `Failed to list checkpoints: ${
 								error instanceof Error ? error.message : 'Unknown error'
 							}`,
@@ -252,7 +252,7 @@ ${result.fullOutput || '(No output)'}`;
 					queueMicrotask(() => {
 						onAddToChatQueue(
 							React.createElement(InfoMessage, {
-								key: `command-result-${componentKeyCounter}`,
+								key: `command-result-${getNextComponentKey()}`,
 								message: result,
 								hideBox: true,
 							}),
