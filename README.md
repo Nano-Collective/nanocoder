@@ -437,7 +437,7 @@ When `NANOCODER_LOG_TO_FILE=true` is set, logs are stored in platform-specific l
 
 You can override the default location using `NANOCODER_LOG_DIR` environment variable.
 
-For complete documentation, see [Pino Logging Guide](docs/pino-logging-comprehensive.md).
+For complete documentation, see [Pino Logging Guide](docs/pino-logging.md).
 
 ### MCP (Model Context Protocol) Servers
 
