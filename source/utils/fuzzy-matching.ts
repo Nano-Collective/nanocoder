@@ -17,13 +17,13 @@ export function fuzzyScore(text: string, query: string): number {
 		return 1000;
 	}
 
-	// Text ends with query
-	if (lowerText.endsWith(lowerQuery)) {
+	// Text starts with query (prefix match - prioritized for command completion)
+	if (lowerText.startsWith(lowerQuery)) {
 		return 850;
 	}
 
-	// Text starts with query
-	if (lowerText.startsWith(lowerQuery)) {
+	// Text ends with query (suffix match)
+	if (lowerText.endsWith(lowerQuery)) {
 		return 800;
 	}
 

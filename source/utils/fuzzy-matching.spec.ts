@@ -122,6 +122,18 @@ test('command matching - fuzzy matching for /pvd matches provider', t => {
 	t.true(score > 0);
 });
 
+test('command matching - /l should prioritize /lsp over /model', t => {
+	const lspScore = fuzzyScore('lsp', 'l');
+	const modelScore = fuzzyScore('model', 'l');
+
+	// /lsp starts with 'l' (prefix match: 850)
+	// /model ends with 'l' (suffix match: 800)
+	// Therefore, /lsp should score higher
+	t.true(lspScore > modelScore);
+	t.is(lspScore, 850); // prefix match
+	t.is(modelScore, 800); // suffix match
+});
+
 test('command matching - /init matches init higher than initialization', t => {
 	const initScore = fuzzyScore('init', 'init');
 	const initializationScore = fuzzyScore('initialization', 'init');
