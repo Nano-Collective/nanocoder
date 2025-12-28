@@ -4,15 +4,43 @@
 
 Add a toggle command to enable/disable rolling context management. **Default: OFF**.
 
-## 1. Add Preference Type
+This phase establishes the foundation for context management by:
+- Adding configuration types
+- Creating the toggle command
+- Setting up the preference system
+
+## 1. Add Configuration Types
 
 **File:** `source/types/config.ts`
 
 ```typescript
+// Context management configuration
+export interface ContextManagementConfig {
+  enabled: boolean;                 // Default: false (off)
+  maxContextTokens?: number;        // Model's context limit (auto-detected if not set)
+  reservedOutputTokens?: number;    // Tokens reserved for response (default: 4096)
+  trimStrategy?: 'age-based' | 'priority-based';  // Default: 'priority-based'
+  preserveRecentTurns?: number;     // Turns to always preserve (default: 5)
+  summarizeOnTruncate?: boolean;    // Generate summaries (default: false)
+  tokenEstimator?: 'auto' | 'conservative' | 'exact';  // Default: 'auto'
+}
+
 export interface UserPreferences {
   // ... existing fields
-  rollingContextEnabled?: boolean;  // Default: false (off)
+  rollingContextEnabled?: boolean;  // Quick toggle (default: false)
+  contextManagement?: ContextManagementConfig;  // Full config
 }
+
+// Default configuration values
+export const DEFAULT_CONTEXT_CONFIG: Required<ContextManagementConfig> = {
+  enabled: false,
+  maxContextTokens: 128000,
+  reservedOutputTokens: 4096,
+  trimStrategy: 'priority-based',
+  preserveRecentTurns: 5,
+  summarizeOnTruncate: false,
+  tokenEstimator: 'auto',
+};
 ```
 
 ## 2. Add Preference Helpers
@@ -20,15 +48,51 @@ export interface UserPreferences {
 **File:** `source/config/preferences.ts`
 
 ```typescript
+import {
+  DEFAULT_CONTEXT_CONFIG,
+  type ContextManagementConfig
+} from '@/types/config';
+
+// Simple toggle for quick enable/disable
 export function getRollingContextEnabled(): boolean {
   const preferences = loadPreferences();
-  return preferences.rollingContextEnabled ?? false;  // Default OFF
+  return preferences.rollingContextEnabled ?? false;
 }
 
 export function setRollingContextEnabled(enabled: boolean): void {
   const preferences = loadPreferences();
   preferences.rollingContextEnabled = enabled;
   savePreferences(preferences);
+}
+
+// Full configuration access
+export function getContextManagementConfig(): Required<ContextManagementConfig> {
+  const preferences = loadPreferences();
+  const userConfig = preferences.contextManagement ?? {};
+
+  return {
+    ...DEFAULT_CONTEXT_CONFIG,
+    ...userConfig,
+    // Sync enabled state with quick toggle
+    enabled: preferences.rollingContextEnabled ?? userConfig.enabled ?? false,
+  };
+}
+
+export function setContextManagementConfig(
+  config: Partial<ContextManagementConfig>
+): void {
+  const preferences = loadPreferences();
+  preferences.contextManagement = {
+    ...preferences.contextManagement,
+    ...config,
+  };
+  savePreferences(preferences);
+}
+
+// Compute effective limits
+export function getMaxInputTokens(): number {
+  const config = getContextManagementConfig();
+  return config.maxContextTokens - config.reservedOutputTokens;
 }
 ```
 
@@ -41,28 +105,48 @@ import {SuccessMessage} from '@/components/message-box';
 import {
   getRollingContextEnabled,
   setRollingContextEnabled,
+  getContextManagementConfig,
 } from '@/config/preferences';
 import type {Command} from '@/types/index';
 import React from 'react';
+import {Box, Text} from 'ink';
 
-function RollingContextToggle({enabled}: {enabled: boolean}) {
+interface ToggleProps {
+  enabled: boolean;
+  config: ReturnType<typeof getContextManagementConfig>;
+}
+
+function RollingContextToggle({enabled, config}: ToggleProps) {
   return (
-    <SuccessMessage
-      hideBox={true}
-      message={`Rolling context ${enabled ? 'enabled' : 'disabled'}.${
-        enabled
-          ? ' Tool outputs older than 5 steps will be truncated.'
-          : ''
-      }`}
-    />
+    <Box flexDirection="column">
+      <SuccessMessage
+        hideBox={true}
+        message={`Rolling context ${enabled ? 'enabled' : 'disabled'}.`}
+      />
+      {enabled && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text dimColor>
+            Max context: {config.maxContextTokens.toLocaleString()} tokens
+          </Text>
+          <Text dimColor>
+            Reserved for output: {config.reservedOutputTokens.toLocaleString()} tokens
+          </Text>
+          <Text dimColor>
+            Max input: {(config.maxContextTokens - config.reservedOutputTokens).toLocaleString()} tokens
+          </Text>
+          <Text dimColor>
+            Strategy: {config.trimStrategy}
+          </Text>
+        </Box>
+      )}
+    </Box>
   );
 }
 
 export const rollingContextCommand: Command = {
   name: 'rolling-context',
-  description: 'Toggle rolling context management (truncates old tool outputs)',
+  description: 'Toggle rolling context management (prevents context overflow)',
   handler: async (args: string[]) => {
-    // Check for explicit on/off argument
     const arg = args[0]?.toLowerCase();
     let newState: boolean;
 
@@ -70,16 +154,27 @@ export const rollingContextCommand: Command = {
       newState = true;
     } else if (arg === 'off' || arg === 'disable') {
       newState = false;
+    } else if (arg === 'status') {
+      // Show current status without changing
+      const enabled = getRollingContextEnabled();
+      const config = getContextManagementConfig();
+      return React.createElement(RollingContextToggle, {
+        key: `rolling-context-status-${Date.now()}`,
+        enabled,
+        config,
+      });
     } else {
       // Toggle current state
       newState = !getRollingContextEnabled();
     }
 
     setRollingContextEnabled(newState);
+    const config = getContextManagementConfig();
 
     return React.createElement(RollingContextToggle, {
       key: `rolling-context-${Date.now()}`,
       enabled: newState,
+      config,
     });
   },
 };
@@ -115,61 +210,122 @@ commandRegistry.register([
 **File:** `source/hooks/useAppState.tsx`
 
 ```typescript
-// Add to state
-const [rollingContextEnabled, setRollingContextEnabled] = useState<boolean>(false);
+import {
+  getRollingContextEnabled,
+  getContextManagementConfig,
+  type ContextManagementConfig,
+} from '@/config/preferences';
 
-// Load from preferences on init
-useEffect(() => {
-  const enabled = getRollingContextEnabled();
-  setRollingContextEnabled(enabled);
+// Add to state
+const [contextConfig, setContextConfig] = useState<Required<ContextManagementConfig>>(
+  () => getContextManagementConfig()
+);
+
+// Reload config when preference changes
+const reloadContextConfig = useCallback(() => {
+  setContextConfig(getContextManagementConfig());
 }, []);
 
 // Export in return
 return {
   // ... existing
-  rollingContextEnabled,
-  setRollingContextEnabled,
+  contextConfig,
+  reloadContextConfig,
 };
 ```
 
 ## Usage
 
 ```bash
-/rolling-context        # Toggle on/off
-/rolling-context on     # Enable
-/rolling-context off    # Disable
+/rolling-context          # Toggle on/off
+/rolling-context on       # Enable
+/rolling-context off      # Disable
+/rolling-context status   # Show current configuration
 ```
 
-## Status Integration (Optional)
+## Status Integration
 
 Add to `/status` output:
 
+**File:** `source/commands/status.tsx`
+
 ```typescript
-// In Status component
-{rollingContextEnabled && (
-  <Text color="green">Rolling Context: enabled</Text>
+import {getRollingContextEnabled, getContextManagementConfig} from '@/config/preferences';
+
+// In Status component render
+const contextEnabled = getRollingContextEnabled();
+const contextConfig = getContextManagementConfig();
+
+// Add to status display
+{contextEnabled && (
+  <Box flexDirection="column">
+    <Text color="green">Context Management: enabled</Text>
+    <Text dimColor>
+      Budget: {(contextConfig.maxContextTokens - contextConfig.reservedOutputTokens).toLocaleString()} input tokens
+    </Text>
+  </Box>
 )}
+```
+
+## Config File Support
+
+Users can configure defaults in `agents.config.json`:
+
+```json
+{
+  "contextManagement": {
+    "maxContextTokens": 128000,
+    "reservedOutputTokens": 4096,
+    "trimStrategy": "priority-based",
+    "preserveRecentTurns": 5,
+    "summarizeOnTruncate": false
+  }
+}
 ```
 
 ## Testing
 
-```typescript
-// source/commands/rolling-context.spec.tsx
+**File:** `source/commands/rolling-context.spec.tsx`
 
+```typescript
 import test from 'ava';
 import {rollingContextCommand} from './rolling-context';
+import {getRollingContextEnabled, setRollingContextEnabled} from '@/config/preferences';
+
+test.beforeEach(() => {
+  // Reset to default state
+  setRollingContextEnabled(false);
+});
 
 test('toggles rolling context on', async t => {
-  const result = await rollingContextCommand.handler(['on'], [], {...});
-  // Verify preference was set
+  await rollingContextCommand.handler(['on'], [], {} as any);
+  t.true(getRollingContextEnabled());
 });
 
 test('toggles rolling context off', async t => {
-  const result = await rollingContextCommand.handler(['off'], [], {...});
-  // Verify preference was cleared
+  setRollingContextEnabled(true);
+  await rollingContextCommand.handler(['off'], [], {} as any);
+  t.false(getRollingContextEnabled());
 });
 
 test('toggles state when no argument', async t => {
-  // Start with off, should become on
+  t.false(getRollingContextEnabled());
+  await rollingContextCommand.handler([], [], {} as any);
+  t.true(getRollingContextEnabled());
+  await rollingContextCommand.handler([], [], {} as any);
+  t.false(getRollingContextEnabled());
+});
+
+test('status shows current config without changing state', async t => {
+  setRollingContextEnabled(true);
+  await rollingContextCommand.handler(['status'], [], {} as any);
+  t.true(getRollingContextEnabled()); // Should remain unchanged
 });
 ```
+
+## Next Steps
+
+After completing Phase 0:
+1. Verify command works: `/rolling-context on`, `/rolling-context status`
+2. Check preference persistence across sessions
+3. Proceed to Phase 1 (Token Budget Enforcement)
