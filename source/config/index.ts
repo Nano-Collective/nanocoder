@@ -7,7 +7,7 @@ import {substituteEnvVars} from '@/config/env-substitution';
 import {getConfigPath} from '@/config/paths';
 import {loadPreferences} from '@/config/preferences';
 import {defaultTheme, getThemeColors} from '@/config/themes';
-import type {AppConfig, Colors} from '@/types/index';
+import type {AppConfig, Colors, ContextManagementConfig} from '@/types/index';
 import {logError, logWarning} from '@/utils/message-queue';
 
 // Load .env file from working directory (shell environment takes precedence)
@@ -104,7 +104,11 @@ function loadAppConfig(): AppConfig {
 
 	try {
 		const rawData = readFileSync(agentsJsonPath, 'utf-8');
-		const agentsData = JSON.parse(rawData) as {nanocoder?: AppConfig};
+		const agentsData = JSON.parse(rawData) as {
+			nanocoder?: AppConfig & {
+				contextManagement?: Partial<ContextManagementConfig>;
+			};
+		};
 
 		// Apply environment variable substitution
 		const processedData = substituteEnvVars(agentsData);
@@ -113,6 +117,7 @@ function loadAppConfig(): AppConfig {
 			return {
 				providers: processedData.nanocoder.providers ?? [],
 				mcpServers: processedData.nanocoder.mcpServers ?? [],
+				contextManagement: processedData.nanocoder.contextManagement,
 			};
 		}
 	} catch (error) {

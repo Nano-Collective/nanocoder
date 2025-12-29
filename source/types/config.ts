@@ -89,6 +89,9 @@ export interface AppConfig {
 		languages: string[]; // File extensions this server handles
 		env?: Record<string, string>;
 	}[];
+
+	// Context management configuration
+	contextManagement?: Partial<ContextManagementConfig>;
 }
 
 // Context management configuration

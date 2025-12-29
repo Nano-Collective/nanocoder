@@ -1,5 +1,5 @@
 import {readFileSync, writeFileSync} from 'fs';
-import {getClosestConfigFile} from '@/config/index';
+import {appConfig, getClosestConfigFile} from '@/config/index';
 import type {ContextManagementConfig, UserPreferences} from '@/types/index';
 import {DEFAULT_CONTEXT_CONFIG} from '@/types/index';
 import {logError} from '@/utils/message-queue';
@@ -77,11 +77,19 @@ export function getContextManagementConfig(): Required<ContextManagementConfig> 
 	const preferences = loadPreferences();
 	const userConfig = preferences.contextManagement ?? {};
 
+	// Merge with app config context management settings if available
+	const appConfigContext = appConfig.contextManagement ?? {};
+
 	return {
 		...DEFAULT_CONTEXT_CONFIG,
+		...appConfigContext,
 		...userConfig,
 		// Sync enabled state with quick toggle
-		enabled: preferences.rollingContextEnabled ?? userConfig.enabled ?? false,
+		enabled:
+			preferences.rollingContextEnabled ??
+			userConfig.enabled ??
+			appConfigContext.enabled ??
+			false,
 	};
 }
 
