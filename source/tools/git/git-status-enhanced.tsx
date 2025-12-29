@@ -5,12 +5,12 @@
  * categorized changes, stash information, and action suggestions.
  */
 
+import {Box, Text} from 'ink';
+import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
-import {Box, Text} from 'ink';
-import React from 'react';
 import type {EnhancedStatusInput} from './types';
 import {execGit, getEnhancedStatus, isGitRepository} from './utils';
 

@@ -9,6 +9,72 @@ import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 
+/**
+ * Map of bash exploration commands to their native tool alternatives
+ * These are commands that could be replaced with auto-accepted native tools
+ */
+const TOOL_ALTERNATIVES: Record<string, string> = {
+	find: 'Consider using find_files tool instead (auto-accepted, no approval needed)',
+	locate:
+		'Consider using find_files tool instead (auto-accepted, no approval needed)',
+	grep: 'Consider using search_file_contents tool instead (auto-accepted, no approval needed)',
+	'grep -r':
+		'Consider using search_file_contents tool instead (auto-accepted, no approval needed)',
+	rg: 'Consider using search_file_contents tool instead (auto-accepted, no approval needed)',
+	cat: 'Consider using read_file tool instead (auto-accepted, no approval needed)',
+	head: 'Consider using read_file tool with start_line/end_line instead (auto-accepted, no approval needed)',
+	tail: 'Consider using read_file tool with start_line/end_line instead (auto-accepted, no approval needed)',
+	less: 'Consider using read_file tool instead (auto-accepted, no approval needed)',
+	ls: 'Consider using list_directory tool instead (auto-accepted, no approval needed)',
+	'ls -R':
+		'Consider using list_directory tool with recursive=true instead (auto-accepted, no approval needed)',
+};
+
+/**
+ * Detects if a command could use a native tool instead and returns the suggestion.
+ * Handles both standalone commands and commands in pipelines.
+ */
+function detectToolAlternative(command: string): string | null {
+	const trimmedCommand = command.trim();
+
+	for (const [bashCmd, suggestion] of Object.entries(TOOL_ALTERNATIVES)) {
+		// For multi-word patterns like "grep -r" or "ls -R", check if command starts with it
+		if (bashCmd.includes(' ')) {
+			if (
+				trimmedCommand.startsWith(bashCmd + ' ') ||
+				trimmedCommand === bashCmd
+			) {
+				return suggestion;
+			}
+			continue;
+		}
+
+		// For single-word commands, check various positions:
+		// 1. Command at start: "grep foo" or "grep\tfoo"
+		// 2. Command is the entire string: "ls"
+		// 3. Command after pipe: "echo foo | grep bar"
+		// 4. Command at end of pipe: "echo foo | grep"
+
+		// Check if it's at the start or is the whole command
+		if (
+			trimmedCommand === bashCmd ||
+			trimmedCommand.startsWith(`${bashCmd} `) ||
+			trimmedCommand.startsWith(`${bashCmd}\t`)
+		) {
+			return suggestion;
+		}
+
+		// Check if it's in a pipeline using regex for proper word boundary
+		// Match: | cmd or | cmd (args) at end or in middle of pipeline
+		const pipePattern = new RegExp(`\\|\\s*${bashCmd}(?:\\s|$)`);
+		if (pipePattern.test(trimmedCommand)) {
+			return suggestion;
+		}
+	}
+
+	return null;
+}
+
 const executeExecuteBash = async (args: {command: string}): Promise<string> => {
 	return new Promise((resolve, reject) => {
 		const proc = spawn('sh', ['-c', args.command]);
@@ -103,6 +169,9 @@ const ExecuteBashFormatter = React.memo(
 			estimatedTokens = Math.ceil(outputSize / 4); // ~4 characters per token
 		}
 
+		// Detect if there's a tool alternative for this command
+		const toolAlternative = detectToolAlternative(command);
+
 		const messageContent = (
 			<Box flexDirection="column">
 				<Text color={colors.tool}>⚒ execute_bash</Text>
@@ -111,6 +180,12 @@ const ExecuteBashFormatter = React.memo(
 					<Text color={colors.secondary}>Command: </Text>
 					<Text color={colors.primary}>{command}</Text>
 				</Box>
+
+				{toolAlternative && (
+					<Box>
+						<Text color={colors.info}>{toolAlternative}</Text>
+					</Box>
+				)}
 
 				{result && (
 					<Box>
@@ -164,6 +239,16 @@ const executeBashValidator = (args: {
 				error: `⚒ Command contains potentially destructive operation: "${command}". This command is blocked for safety.`,
 			});
 		}
+	}
+
+	// Detect if this could be an exploration command with a native tool alternative
+	const toolAlternative = detectToolAlternative(command);
+	if (toolAlternative) {
+		// For exploration commands, we still allow them but provide a helpful hint
+		// This warning will be displayed to the user before they approve the command
+		return Promise.resolve({
+			valid: true, // Still valid, but we've detected a better alternative
+		});
 	}
 
 	return Promise.resolve({valid: true});

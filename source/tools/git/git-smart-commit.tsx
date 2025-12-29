@@ -5,13 +5,13 @@
  * following the Conventional Commits specification.
  */
 
+import {Box, Text} from 'ink';
+import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {getCurrentMode} from '@/context/mode-context';
 import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
-import {Box, Text} from 'ink';
-import React from 'react';
 import type {CommitType, GeneratedCommit, SmartCommitInput} from './types';
 import {analyzeStagedChanges, execGit, isGitRepository} from './utils';
 

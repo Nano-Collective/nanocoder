@@ -1,8 +1,5 @@
 import {execFile} from 'node:child_process';
-import {existsSync, readFileSync} from 'node:fs';
-import {join} from 'node:path';
 import {promisify} from 'node:util';
-import ignore from 'ignore';
 import {Box, Text} from 'ink';
 import React from 'react';
 
@@ -14,42 +11,9 @@ import {
 } from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import {jsonSchema, tool} from '@/types/core';
+import {loadGitignore} from '@/utils/gitignore-loader';
 
 const execFileAsync = promisify(execFile);
-
-/**
- * Load and parse .gitignore file, returns an ignore instance
- */
-function loadGitignore(cwd: string): ReturnType<typeof ignore> {
-	const ig = ignore();
-	const gitignorePath = join(cwd, '.gitignore');
-
-	// Always ignore common directories
-	ig.add([
-		'node_modules',
-		'.git',
-		'dist',
-		'build',
-		'coverage',
-		'.next',
-		'.nuxt',
-		'out',
-		'.cache',
-	]);
-
-	// Load .gitignore if it exists
-	if (existsSync(gitignorePath)) {
-		try {
-			const gitignoreContent = readFileSync(gitignorePath, 'utf-8');
-			ig.add(gitignoreContent);
-		} catch {
-			// Silently fail if we can't read .gitignore
-			// The hardcoded ignores above will still apply
-		}
-	}
-
-	return ig;
-}
 
 /**
  * Find files matching a glob pattern using find command
@@ -207,7 +171,7 @@ const executeFindFiles = async (args: FindFilesArgs): Promise<string> => {
 
 const findFilesCoreTool = tool({
 	description:
-		'Find files and directories by path pattern or name. Use glob patterns like "*.tsx", "**/*.ts", "src/**/*.js", or "*.{ts,tsx}". Returns a list of matching file and directory paths. Does NOT search file contents - use search_file_contents for that.',
+		'Find files and directories by path pattern. AUTO-ACCEPTED (no user approval needed). Use this INSTEAD OF bash find/locate commands. Examples: "*.tsx" (all .tsx files), "src/**/*.ts" (recursive), "config*" (partial match). Returns a list of matching file and directory paths. Does NOT search file contents - use search_file_contents for that.',
 	inputSchema: jsonSchema<FindFilesArgs>({
 		type: 'object',
 		properties: {

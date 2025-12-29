@@ -8,6 +8,7 @@ import {
 	gitSmartCommitTool,
 	gitStatusEnhancedTool,
 } from '@/tools/git';
+import {listDirectoryTool} from '@/tools/list-directory';
 import {getDiagnosticsTool} from '@/tools/lsp-get-diagnostics';
 import {readFileTool} from '@/tools/read-file';
 import {searchFileContentsTool} from '@/tools/search-file-contents';
@@ -32,6 +33,7 @@ const allTools: NanocoderToolExport[] = [
 	findFilesTool,
 	searchFileContentsTool,
 	getDiagnosticsTool,
+	listDirectoryTool,
 	// Git workflow tools
 	gitSmartCommitTool,
 	gitCreatePRTool,
