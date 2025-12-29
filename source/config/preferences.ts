@@ -1,6 +1,7 @@
 import {readFileSync, writeFileSync} from 'fs';
 import {getClosestConfigFile} from '@/config/index';
-import type {UserPreferences} from '@/types/index';
+import type {ContextManagementConfig, UserPreferences} from '@/types/index';
+import {DEFAULT_CONTEXT_CONFIG} from '@/types/index';
 import {logError} from '@/utils/message-queue';
 
 let PREFERENCES_PATH: string | null = null;
@@ -57,4 +58,45 @@ export function updateLastUsed(provider: string, model: string): void {
 export function getLastUsedModel(provider: string): string | undefined {
 	const preferences = loadPreferences();
 	return preferences.providerModels?.[provider];
+}
+
+// Rolling context preference helpers
+
+export function getRollingContextEnabled(): boolean {
+	const preferences = loadPreferences();
+	return preferences.rollingContextEnabled ?? false;
+}
+
+export function setRollingContextEnabled(enabled: boolean): void {
+	const preferences = loadPreferences();
+	preferences.rollingContextEnabled = enabled;
+	savePreferences(preferences);
+}
+
+export function getContextManagementConfig(): Required<ContextManagementConfig> {
+	const preferences = loadPreferences();
+	const userConfig = preferences.contextManagement ?? {};
+
+	return {
+		...DEFAULT_CONTEXT_CONFIG,
+		...userConfig,
+		// Sync enabled state with quick toggle
+		enabled: preferences.rollingContextEnabled ?? userConfig.enabled ?? false,
+	};
+}
+
+export function setContextManagementConfig(
+	config: Partial<ContextManagementConfig>,
+): void {
+	const preferences = loadPreferences();
+	preferences.contextManagement = {
+		...preferences.contextManagement,
+		...config,
+	};
+	savePreferences(preferences);
+}
+
+export function getMaxInputTokens(): number {
+	const config = getContextManagementConfig();
+	return config.maxContextTokens - config.reservedOutputTokens;
 }

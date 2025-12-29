@@ -4,6 +4,10 @@ import {memo} from 'react';
 
 import {TitledBox} from '@/components/ui/titled-box';
 import {confDirMap} from '@/config/index';
+import {
+	getContextManagementConfig,
+	getRollingContextEnabled,
+} from '@/config/preferences';
 import {getThemeColors, themes} from '@/config/themes';
 import {
 	PATH_LENGTH_NARROW_TERMINAL,
@@ -175,6 +179,22 @@ export default memo(function Status({
 						<Text bold={true}>Theme: </Text>
 						{themes[theme].displayName}
 					</Text>
+					{getRollingContextEnabled() && (
+						<Box flexDirection="column">
+							<Text color={colors.success}>✓ Context Management: enabled</Text>
+							{(() => {
+								const contextConfig = getContextManagementConfig();
+								const maxInputTokens =
+									contextConfig.maxContextTokens -
+									contextConfig.reservedOutputTokens;
+								return (
+									<Text dimColor>
+										↳ Budget: {maxInputTokens.toLocaleString()} input tokens
+									</Text>
+								);
+							})()}
+						</Box>
+					)}
 					{hasAgentsMd ? (
 						<Text color={colors.secondary} italic>
 							<Text>↳ Using AGENTS.md. Project initialized</Text>

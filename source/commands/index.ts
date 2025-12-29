@@ -10,6 +10,7 @@ export * from '@/commands/mcp';
 export * from '@/commands/model';
 export * from '@/commands/model-database';
 export * from '@/commands/provider';
+export * from '@/commands/rolling-context';
 export * from '@/commands/setup-config';
 export * from '@/commands/status';
 export * from '@/commands/theme';

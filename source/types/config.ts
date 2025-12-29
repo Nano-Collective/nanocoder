@@ -91,6 +91,33 @@ export interface AppConfig {
 	}[];
 }
 
+// Context management configuration
+export interface ContextManagementConfig {
+	enabled?: boolean; // Default: false (off)
+	maxContextTokens?: number; // Model's context limit (auto-detected if not set)
+	reservedOutputTokens?: number; // Tokens reserved for response (default: 4096)
+	trimStrategy?: 'age-based' | 'priority-based'; // Default: 'priority-based'
+	preserveRecentTurns?: number; // Turns to always preserve (default: 5)
+	summarizeOnTruncate?: boolean; // Generate summaries for dropped messages (default: false)
+	summarizationMode?: 'rule-based' | 'llm-based'; // How to summarize (default: 'rule-based')
+	maxSummaryTokens?: number; // Max tokens for each summary (default: 500)
+	preserveErrorDetails?: boolean; // Keep full error messages in summaries (default: true)
+	tokenEstimator?: 'auto' | 'conservative' | 'exact'; // Default: 'auto'
+}
+
+export const DEFAULT_CONTEXT_CONFIG: Required<ContextManagementConfig> = {
+	enabled: false,
+	maxContextTokens: 128000,
+	reservedOutputTokens: 4096,
+	trimStrategy: 'priority-based',
+	preserveRecentTurns: 5,
+	summarizeOnTruncate: false,
+	summarizationMode: 'rule-based',
+	maxSummaryTokens: 500,
+	preserveErrorDetails: true,
+	tokenEstimator: 'auto',
+};
+
 export interface UserPreferences {
 	lastProvider?: string;
 	lastModel?: string;
@@ -100,4 +127,6 @@ export interface UserPreferences {
 	lastUpdateCheck?: number;
 	selectedTheme?: ThemePreset;
 	trustedDirectories?: string[];
+	rollingContextEnabled?: boolean; // Quick toggle (default: false)
+	contextManagement?: ContextManagementConfig; // Full config
 }

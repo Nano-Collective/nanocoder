@@ -1,5 +1,8 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {loadPreferences} from '@/config/preferences';
+import {
+	getContextManagementConfig,
+	loadPreferences,
+} from '@/config/preferences';
 import {defaultTheme} from '@/config/themes';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
@@ -7,6 +10,7 @@ import {createTokenizer} from '@/tokenization/index.js';
 import {ToolManager} from '@/tools/tool-manager';
 import type {CheckpointListItem} from '@/types/checkpoint';
 import type {CustomCommand} from '@/types/commands';
+import type {ContextManagementConfig} from '@/types/config';
 import {
 	DevelopmentMode,
 	LLMClient,
@@ -177,6 +181,16 @@ export function useAppState() {
 		};
 	}, [tokenizer]);
 
+	// Initialize context config from preferences
+	const [contextConfig, setContextConfig] = useState<
+		Required<ContextManagementConfig>
+	>(() => getContextManagementConfig());
+
+	// Reload config when preference changes
+	const reloadContextConfig = useCallback(() => {
+		setContextConfig(getContextManagementConfig());
+	}, []);
+
 	// Helper function for token calculation with caching
 	const getMessageTokens = useCallback(
 		(message: Message) => {
@@ -267,6 +281,7 @@ export function useAppState() {
 		chatComponents,
 		getNextComponentKey,
 		tokenizer,
+		contextConfig,
 
 		// Setters
 		setClient,
@@ -313,5 +328,6 @@ export function useAppState() {
 		getMessageTokens,
 		updateMessages,
 		resetToolConfirmationState,
+		reloadContextConfig,
 	};
 }

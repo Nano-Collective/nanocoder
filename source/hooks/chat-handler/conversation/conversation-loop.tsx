@@ -3,11 +3,20 @@ import type {ConversationStateManager} from '@/app/utils/conversation-state';
 import AssistantMessage from '@/components/assistant-message';
 import {ErrorMessage} from '@/components/message-box';
 import UserMessage from '@/components/user-message';
+import {
+	getContextManagementConfig,
+	getRollingContextEnabled,
+} from '@/config/preferences';
+import {RuleBasedSummarizer, SummaryStore} from '@/context/index';
+import {buildFinalPrompt, ContextOverflowError} from '@/context/prompt-builder';
+import type {Summarizer} from '@/context/summarizer';
+import {LLMBasedSummarizer} from '@/context/summarizers/llm-based';
 import {parseToolCalls} from '@/tool-calling/index';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {LLMClient, Message, ToolCall, ToolResult} from '@/types/core';
 import {getLogger} from '@/utils/logging';
 import {MessageBuilder} from '@/utils/message-builder';
+import {logError, logWarning} from '@/utils/message-queue';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {displayToolResult} from '@/utils/tool-result-display';
 import {filterValidToolCalls} from '../utils/tool-filters';
@@ -30,6 +39,7 @@ interface ProcessAssistantResponseParams {
 	developmentMode: 'normal' | 'auto-accept' | 'plan';
 	nonInteractiveMode: boolean;
 	conversationStateManager: React.MutableRefObject<ConversationStateManager>;
+	summaryStore?: React.MutableRefObject<SummaryStore>;
 	onStartToolConfirmationFlow: (
 		toolCalls: ToolCall[],
 		updatedMessages: Message[],
@@ -68,6 +78,7 @@ export const processAssistantResponse = async (
 		developmentMode,
 		nonInteractiveMode,
 		conversationStateManager,
+		summaryStore,
 		onStartToolConfirmationFlow,
 		onConversationComplete,
 	} = params;
@@ -84,8 +95,59 @@ export const processAssistantResponse = async (
 	setStreamingContent('');
 	setTokenCount(0);
 
+	// Apply rolling context management if enabled
+	let messagesToSend = [systemMessage, ...messages];
+	if (getRollingContextEnabled()) {
+		try {
+			const config = getContextManagementConfig();
+
+			// Create summarizer if summarization is enabled
+			let summarizer: Summarizer | undefined;
+			if (config.summarizeOnTruncate) {
+				if (config.summarizationMode === 'llm-based') {
+					summarizer = new LLMBasedSummarizer(client, currentModel);
+				} else {
+					summarizer = new RuleBasedSummarizer();
+				}
+			}
+
+			const promptResult = await buildFinalPrompt(
+				messagesToSend,
+				config,
+				'', // Provider detection happens in tokenizer
+				currentModel,
+				summarizer,
+				summaryStore?.current,
+			);
+
+			messagesToSend = promptResult.messages;
+
+			// Log trimming info if it happened
+			if (promptResult.wasTrimmed) {
+				logWarning(
+					`Context trimmed: ${promptResult.droppedCount} messages removed ` +
+						`(${promptResult.tokenCount.toLocaleString()} tokens)`,
+				);
+
+				if (promptResult.summarized) {
+					logWarning(
+						`Generated summary for ${promptResult.droppedCount} dropped messages`,
+					);
+				}
+			}
+		} catch (error) {
+			if (error instanceof ContextOverflowError) {
+				logError(error.message);
+				// Re-throw to be handled by outer error handler
+				throw error;
+			}
+			// Log unexpected errors but continue
+			getLogger().error('Rolling context error', {error});
+		}
+	}
+
 	const result = await client.chat(
-		[systemMessage, ...messages],
+		messagesToSend,
 		toolManager?.getAllTools() || {},
 		{
 			onToolExecuted: (toolCall: ToolCall, result: string) => {
