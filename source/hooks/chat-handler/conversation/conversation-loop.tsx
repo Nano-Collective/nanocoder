@@ -8,6 +8,7 @@ import {
 	getRollingContextEnabled,
 } from '@/config/preferences';
 import {RuleBasedSummarizer, SummaryStore} from '@/context/index';
+import {sanitizeMessageList} from '@/context/message-sanitizer';
 import {buildFinalPrompt, ContextOverflowError} from '@/context/prompt-builder';
 import type {Summarizer} from '@/context/summarizer';
 import {LLMBasedSummarizer} from '@/context/summarizers/llm-based';
@@ -144,6 +145,16 @@ export const processAssistantResponse = async (
 			// Log unexpected errors but continue
 			getLogger().error('Rolling context error', {error});
 		}
+	}
+
+	// Sanitize message list to prevent API errors on multiple trailing assistant messages
+	// This can occur after context trimming when the trimmer removes messages from the middle
+	const sanitizationResult = sanitizeMessageList(messagesToSend);
+	if (sanitizationResult.sanitized) {
+		messagesToSend = sanitizationResult.messages;
+		logWarning(
+			`Message list sanitized: combined ${sanitizationResult.combinedAssistantMessages} assistant messages`,
+		);
 	}
 
 	const result = await client.chat(

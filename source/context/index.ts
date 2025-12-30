@@ -7,6 +7,8 @@ export type {BudgetResult} from './context-budget';
 export {checkBudget, computeMaxInputTokens} from './context-budget';
 export type {TrimOptions} from './context-trimmer';
 export {enforceContextLimit, trimConversation} from './context-trimmer';
+export type {SanitizationResult} from './message-sanitizer';
+export {sanitizeMessageList, validateMessageList} from './message-sanitizer';
 export type {PromptResult} from './prompt-builder';
 export {buildFinalPrompt, ContextOverflowError} from './prompt-builder';
 export type {SummarizerOptions, SummaryResult} from './summarizer';
