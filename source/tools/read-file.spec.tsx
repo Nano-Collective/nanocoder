@@ -56,7 +56,8 @@ test('ReadFileFormatter renders with path', async t => {
 		const output = lastFrame();
 		t.truthy(output);
 		t.regex(output!, /read_file/);
-		t.regex(output!, /test\.ts/);
+		// Handle path wrapping: test may be on one line and ts on the next
+		t.regex(output!, /test\s*\.?\s*ts/);
 	} finally {
 		rmSync(testDir, {recursive: true, force: true});
 	}

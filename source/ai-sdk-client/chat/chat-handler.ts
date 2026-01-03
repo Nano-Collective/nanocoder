@@ -26,6 +26,7 @@ import {
 } from '../converters/tool-converter.js';
 import {extractRootError} from '../error-handling/error-extractor.js';
 import {parseAPIError} from '../error-handling/error-parser.js';
+import {isToolSupportError} from '../error-handling/tool-error-detector.js';
 import {
 	createOnStepFinishHandler,
 	createPrepareStepHandler,
@@ -41,6 +42,7 @@ export interface ChatHandlerParams {
 	callbacks: StreamCallbacks;
 	signal?: AbortSignal;
 	maxRetries: number;
+	skipTools?: boolean; // Track if we're retrying without tools
 }
 
 /**
@@ -58,6 +60,7 @@ export async function handleChat(
 		callbacks,
 		signal,
 		maxRetries,
+		skipTools = false,
 	} = params;
 	const logger = getLogger();
 
@@ -67,14 +70,33 @@ export async function handleChat(
 		throw new Error('Operation was cancelled');
 	}
 
+	// Check if tools should be disabled
+	const shouldDisableTools =
+		skipTools ||
+		providerConfig.disableTools ||
+		(providerConfig.disableToolModels &&
+			providerConfig.disableToolModels.includes(currentModel));
+
 	// Start performance tracking
 	const metrics = startMetrics();
 	const correlationId = getCorrelationId() || generateCorrelationId();
 
+	if (shouldDisableTools) {
+		logger.info('Tools disabled for request', {
+			model: currentModel,
+			reason: skipTools
+				? 'retry without tools'
+				: providerConfig.disableTools
+					? 'provider configuration'
+					: 'model configuration',
+			correlationId,
+		});
+	}
+
 	logger.info('Chat request starting', {
 		model: currentModel,
 		messageCount: messages.length,
-		toolCount: Object.keys(tools).length,
+		toolCount: shouldDisableTools ? 0 : Object.keys(tools).length,
 		correlationId,
 		provider: providerConfig.name,
 	});
@@ -82,7 +104,11 @@ export async function handleChat(
 	return await withNewCorrelationContext(async _context => {
 		try {
 			// Tools are already in AI SDK format - use directly
-			const aiTools = Object.keys(tools).length > 0 ? tools : undefined;
+			const aiTools = shouldDisableTools
+				? undefined
+				: Object.keys(tools).length > 0
+					? tools
+					: undefined;
 
 			// Convert messages to AI SDK v5 ModelMessage format
 			const modelMessages = convertToModelMessages(messages);
@@ -234,6 +260,22 @@ export async function handleChat(
 					provider: providerConfig.name,
 				});
 				throw new Error('Operation was cancelled');
+			}
+
+			// Check if error indicates tool support issue and we haven't retried
+			if (!skipTools && isToolSupportError(error)) {
+				logger.warn('Tool support error detected, retrying without tools', {
+					model: currentModel,
+					error: error instanceof Error ? error.message : error,
+					correlationId,
+					provider: providerConfig.name,
+				});
+
+				// Retry without tools
+				return await handleChat({
+					...params,
+					skipTools: true, // Mark that we're retrying
+				});
 			}
 
 			// Log the error with performance metrics

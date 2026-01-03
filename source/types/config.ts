@@ -12,6 +12,9 @@ export interface AIProviderConfig {
 		idleTimeout?: number;
 		cumulativeMaxIdleTimeout?: number;
 	};
+	// Tool configuration
+	disableTools?: boolean; // Disable tools for entire provider
+	disableToolModels?: string[]; // List of model names to disable tools for
 	config: {
 		baseURL?: string;
 		apiKey?: string;
@@ -34,6 +37,9 @@ export interface ProviderConfig {
 		idleTimeout?: number;
 		cumulativeMaxIdleTimeout?: number;
 	};
+	// Tool configuration
+	disableTools?: boolean; // Disable tools for entire provider
+	disableToolModels?: string[]; // List of model names to disable tools for
 	[key: string]: unknown; // Allow additional provider-specific config
 }
 
@@ -51,6 +57,9 @@ export interface AppConfig {
 			idleTimeout?: number;
 			cumulativeMaxIdleTimeout?: number;
 		};
+		// Tool configuration
+		disableTools?: boolean; // Disable tools for entire provider
+		disableToolModels?: string[]; // List of model names to disable tools for
 		[key: string]: unknown; // Allow additional provider-specific config
 	}[];
 

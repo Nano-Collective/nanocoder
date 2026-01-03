@@ -16,7 +16,8 @@
 			{
 				"name": "Local Ollama",
 				"baseUrl": "http://localhost:11434/v1",
-				"models": ["llama3.2", "qwen2.5-coder"]
+				"models": ["llama3.2", "qwen2.5-coder"],
+				"disableToolModels": ["deepseek-r1:latest"]
 			},
 			{
 				"name": "OpenAI Compatible",

@@ -128,6 +128,9 @@ function loadProviderConfigs(): AIProviderConfig[] {
 				requestTimeout: provider.requestTimeout,
 				socketTimeout: provider.socketTimeout,
 				connectionPool: provider.connectionPool,
+				// Tool configuration
+				disableTools: provider.disableTools,
+				disableToolModels: provider.disableToolModels,
 				config: {
 					baseURL: provider.baseUrl,
 					apiKey: provider.apiKey || 'dummy-key',
