@@ -767,3 +767,4 @@ Nanocoder could benefit from help all across the board. Such as:
 - Design and building more great software
 
 All contributions and community participation are welcome!
+- [Jason](https://github.com/Jason-chiu123456)
