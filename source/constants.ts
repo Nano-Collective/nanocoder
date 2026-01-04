@@ -55,6 +55,7 @@ export const FILE_READ_METADATA_THRESHOLD_LINES = 300;
 export const FILE_READ_CHUNKING_HINT_THRESHOLD_LINES = 500;
 export const FILE_READ_CHUNK_SIZE_LINES = 250;
 export const CHARS_PER_TOKEN_ESTIMATE = 4;
+export const FILE_WRITE_PREVIEW_LINES = 50;
 export const MAX_LINE_LENGTH_CHARS = 10_000; // Lines longer than this are likely minified/binary
 
 // === TERMINAL AND UI ===

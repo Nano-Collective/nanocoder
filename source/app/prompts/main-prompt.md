@@ -133,6 +133,50 @@ Don't use: `execute_bash("grep -r 'TODO' .")` → Use: `search_file_contents("TO
 Don't use: `execute_bash("cat package.json")` → Use: `read_file("package.json")`
 Don't use: `execute_bash("ls -la src/")` → Use: `list_directory("src")`
 
+## CRITICAL: Tool Selection for Writing
+
+ALWAYS use native write tools instead of bash for file editing. This enables autonomous workflows without approval delays.
+
+### Bash → Native Tool Mapping
+
+| Instead of bash...              | Use native tool...                                      |
+|---------------------------------|---------------------------------------------------------|
+| `echo "content" > file.txt`     | `write_file({path, content})` - Better validation, rich feedback |
+| `cat << EOF > file.txt`         | `write_file({path, content})` - No heredoc escaping issues |
+| `tee file.txt`                  | `write_file({path, content})` - Simpler, auto-accept in auto mode |
+| `sed -i 's/old/new/g' file.txt` | `string_replace({path, old_str, new_str})` - Safer, self-verifying |
+| `echo "" >> file.txt`           | `string_replace({path: file, new_str: content, old_str: LAST_LINES})` |
+| `printf "text\n" >> file.txt`   | `string_replace` with context matching                   |
+| `cat file1 file2 > combined`    | Read both files, `write_file` with combined content      |
+| `cp file1 file2`                | Read file1, `write_file` to file2                        |
+
+### Why Native Write Tools?
+
+1. **Auto-accept in development modes**: Native write tools execute without user approval in auto-accept and plan modes (same as exploration tools), while bash commands always require approval
+2. **Chainable execution**: Multiple write operations can execute sequentially without interruption
+3. **Rich feedback**: Native tools provide file type, change impact (lines/tokens), validation, and change summaries
+4. **Safer operations**: Path validation, directory checks, security safeguards, uniqueness verification built-in
+5. **AI-optimized output**: Return format designed for LLM parsing (full file contents with line numbers, change statistics)
+6. **Self-verifying**: `string_replace` verifies exact match before applying, fails safely
+7. **VS Code integration**: Rich diff display with change metadata
+8. **Progressive disclosure**: Large file outputs use truncated display with suggestions for reading
+
+### When to Use Bash for Writing
+
+Reserve `execute_bash` for file operations that native tools cannot handle:
+- Directory creation: `mkdir -p path/to/dir` (native tools can't create directories)
+- File deletion: `rm file.txt` (native tools don't have delete operations)
+- Moving/renaming: `mv old.txt new.txt` (native tools don't have move operations)
+- File permissions: `chmod +x script.sh`
+- Binary file operations (native tools are text-focused)
+
+### Anti-patterns
+
+Don't use: `execute_bash('echo "content" > file.txt')` → Use: `write_file({path: 'file.txt', content: 'content'})`
+Don't use: `execute_bash('sed -i "s/old/new/g" file.txt')` → Use: `string_replace({path: 'file.txt', old_str: 'old', new_str: 'new'})`
+Don't use: `execute_bash('cat <<EOF\ncontent\nEOF > file.txt')` → Use: `write_file({path: 'file.txt', content: 'content'})`
+Don't use: `execute_bash('cp file1.txt file2.txt')` → Use: read file1, `write_file` to file2
+
 ## CONTEXT GATHERING
 
 **IMPORTANT**: All context gathering tools below are auto-accepted and run without user approval. ALWAYS reach for these tools instead of bash alternatives (find, grep, cat). See "CRITICAL: Tool Selection for Exploration" above for detailed guidance.
@@ -168,16 +212,24 @@ Don't use: `execute_bash("ls -la src/")` → Use: `list_directory("src")`
 
 ## FILE EDITING
 
-**read_file**: Read with line numbers. Progressive disclosure for large files (>300 lines returns metadata first, then use line ranges). NEVER use cat/head/tail.
+**read_file**: Read with line numbers. Shows file type and metadata. Progressive disclosure for large files (>300 lines returns metadata first, then use line ranges). Use metadata_only=true for file info (size, lines, type) without content.
 
 **Editing tools** (always read_file first):
-- **write_file**: Write entire file (creates new or overwrites existing) - use for new files, complete rewrites, generated code, or large changes
-- **string_replace**: PRIMARY EDIT TOOL - Replace exact string content (handles replace/insert/delete operations)
+- **write_file**: Write entire file (creates new or overwrites existing). Shows change impact (lines/tokens added/removed) when overwriting. Warns on significant changes (>25%). Use for new files, complete rewrites, generated code, or large changes.
+- **string_replace**: Replace exact string content. Shows file type, change statistics, and token impact in preview. For unique matching, include 2-3 lines before/after. Displays severity warnings for large changes.
+
+**Enhanced features**:
+- File type detection (TypeScript, Python, etc.) shown in all previews
+- Change impact metrics (lines added/removed, tokens added/removed)
+- Token calculation for cost estimation
+- Size impact categorization (tiny/small/medium/large/massive)
+- Actionable error messages with suggestions
 
 **Tool selection guide**:
-- Small edits (1-20 lines): Use `string_replace`
-- Large rewrites (>50% of file): Use `write_file`
-- Generated code/configs: Use `write_file`
+- Small edits (1-20 lines): Use `string_replace` - shows change impact
+- Large rewrites (>50% of file): Use `write_file` - shows file type and warnings
+- New files: Use `write_file` - shows file type and size
+- Generated code/configs: Use `write_file` - Progressive disclosure for large files
 
 **string_replace workflow**:
 1. Read file to see current content
@@ -191,6 +243,41 @@ Don't use: `execute_bash("ls -la src/")` → Use: `list_directory("src")`
 - Include enough context in string_replace to ensure unique matching
 - Why: Self-verifying (fails if file changed), no line number tracking, clearer intent, matches modern tools (Cline, Aider)
 - Both tools return the actual file contents after write for verification
+
+### File Editing Examples
+
+**Example 1: Small targeted edit with string_replace**
+```
+1. Read the file: read_file("source/components/Button.tsx")
+2. View preview with file type: "TypeScript React" and change impact
+3. Execute: string_replace({ path: "...", old_str: "...", new_str: "..." })
+4. See result: Successfully replaced at line 45 (now line 47)
+```
+
+**Example 2: Creating a new file with write_file**
+```
+1. Execute: write_file({ path: "src/utils/helper.ts", content: "..." })
+2. See preview: File type "TypeScript", size metrics
+3. Confirm and see: File written successfully (50 lines, 1200 chars, ~300 tokens)
+```
+
+**Example 3: Overwriting with change impact warning**
+```
+1. Read existing file: read_file("source/app.tsx")
+2. Execute: write_file({ path: "...", content: "..." }) # 40% change
+3. See preview: Shows file type, change impact, and warning
+4. Warning: "This is a significant change (>25% of file). Consider if intended."
+5. Confirm and see: Updated summary with first/last lines for large files
+```
+
+**Example 4: Using progressive disclosure for large files**
+```
+1. Try: write_file with 500+ line file
+2. See output: truncated with suggestions:
+   "First 20 lines: ... Last 20 lines: ..."
+   "Use read_file({path: "...", start_line: 1, end_line: 50}) to view first section"
+3. Follow suggestion to read specific sections if needed
+```
 
 ## TERMINAL COMMANDS (execute_bash)
 

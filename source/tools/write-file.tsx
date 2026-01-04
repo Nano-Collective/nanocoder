@@ -6,11 +6,17 @@ import {Box, Text} from 'ink';
 import React from 'react';
 
 import ToolMessage from '@/components/tool-message';
+import {
+	FILE_READ_METADATA_THRESHOLD_LINES,
+	FILE_WRITE_PREVIEW_LINES,
+} from '@/constants';
 import {getCurrentMode} from '@/context/mode-context';
 import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {calculateChangeStatistics} from '@/utils/change-calculator';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
+import {getFileType} from '@/utils/file-type-detector';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
 import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
@@ -27,29 +33,82 @@ const executeWriteFile = async (args: {
 }): Promise<string> => {
 	const absPath = resolve(args.path);
 	const fileExists = existsSync(absPath);
+	const fileType = getFileType(absPath);
+
+	// Calculate change statistics for overwrites
+	let changeStats = null;
+	let oldContent = '';
+	if (fileExists) {
+		try {
+			const cached = await getCachedFileContent(absPath);
+			oldContent = cached.content;
+			changeStats = calculateChangeStatistics(oldContent, args.content);
+		} catch {
+			// File exists but couldn't read - proceed with write
+		}
+	}
 
 	await writeFile(absPath, args.content, 'utf-8');
 
 	// Invalidate cache after write
 	invalidateCache(absPath);
 
-	// Read back to verify and show actual content
+	// Read back to verify
 	const actualContent = await readFile(absPath, 'utf-8');
 	const lines = actualContent.split('\n');
-	const lineCount = lines.length;
-	const charCount = actualContent.length;
+	const lineCount = actualContent.length === 0 ? 0 : lines.length;
+	const fileSize = actualContent.length;
 	const estimatedTokens = calculateTokens(actualContent);
 
-	// Generate full file contents to show the model the current file state
-	let fileContext = '\n\nFile contents after write:\n';
-	for (let i = 0; i < lines.length; i++) {
-		const lineNumStr = String(i + 1).padStart(4, ' ');
-		const line = lines[i] || '';
-		fileContext += `${lineNumStr}: ${line}\n`;
+	// Determine if file is large and needs progressive disclosure
+	const isLargeFile = lineCount > FILE_READ_METADATA_THRESHOLD_LINES;
+
+	// Build response with file type and change statistics
+	let output = '';
+	output += `File: ${args.path}\n`;
+	output += `Type: ${fileType}\n`;
+	output += `Lines: ${lineCount.toLocaleString()}\n`;
+	output += `Size: ${fileSize.toLocaleString()} bytes\n`;
+	output += `Estimated tokens: ~${estimatedTokens.toLocaleString()}\n`;
+
+	if (fileExists && changeStats) {
+		const action =
+			changeStats.changeType === 'replace'
+				? 'replaced'
+				: changeStats.changeType === 'insert'
+					? 'appended to'
+					: 'overwritten';
+		output += `Action: File ${action} (`;
+		if (changeStats.changeType === 'replace') {
+			output += `-${changeStats.linesRemoved} lines, +${changeStats.linesAdded} lines, `;
+		}
+		output += `~${changeStats.netTokenChange >= 0 ? '+' : ''}${changeStats.netTokenChange.toLocaleString()} tokens)\n`;
+	} else {
+		output += `Action: New file created\n`;
 	}
 
-	const action = fileExists ? 'overwritten' : 'written';
-	return `File ${action} successfully (${lineCount} lines, ${charCount} characters, ~${estimatedTokens} tokens).${fileContext}`;
+	// Progressive disclosure for large files
+	if (isLargeFile) {
+		output += `\n[Large file (${lineCount} lines) - Showing preview of first ${FILE_WRITE_PREVIEW_LINES} lines]\n`;
+		const previewLines = lines.slice(0, FILE_WRITE_PREVIEW_LINES);
+		for (let i = 0; i < previewLines.length; i++) {
+			const lineNumStr = String(i + 1).padStart(4, ' ');
+			output += `${lineNumStr}: ${previewLines[i] || ''}\n`;
+		}
+		if (lineCount > FILE_WRITE_PREVIEW_LINES) {
+			output += `... and ${lineCount - FILE_WRITE_PREVIEW_LINES} more lines\n`;
+		}
+	} else {
+		// Show full content for small files
+		output += `\nFile contents:\n`;
+		for (let i = 0; i < lines.length; i++) {
+			const lineNumStr = String(i + 1).padStart(4, ' ');
+			const line = lines[i] || '';
+			output += `${lineNumStr}: ${line}\n`;
+		}
+	}
+
+	return output.trimEnd();
 };
 
 const writeFileCoreTool = tool({
@@ -94,15 +153,18 @@ const WriteFileFormatter = React.memo(({args}: {args: WriteFileArgs}) => {
 	const {colors} = themeContext;
 	const path = args.path || args.file_path || 'unknown';
 	const newContent = args.content || '';
+	const fileType = getFileType(path);
 	const lineCount = newContent.split('\n').length;
 	const charCount = newContent.length;
-
-	// Estimate tokens (rough approximation: ~4 characters per token)
 	const estimatedTokens = calculateTokens(newContent);
 
 	// Normalize indentation for display
 	const lines = newContent.split('\n');
 	const normalizedLines = normalizeIndentation(lines);
+
+	// Progressive disclosure for large files
+	const isLargeFile = lineCount > FILE_READ_METADATA_THRESHOLD_LINES;
+	const previewLines = normalizedLines.slice(0, FILE_WRITE_PREVIEW_LINES);
 
 	const messageContent = (
 		<Box flexDirection="column">
@@ -113,6 +175,10 @@ const WriteFileFormatter = React.memo(({args}: {args: WriteFileArgs}) => {
 				<Text color={colors.text}>{path}</Text>
 			</Box>
 			<Box>
+				<Text color={colors.secondary}>Type: </Text>
+				<Text color={colors.text}>{fileType}</Text>
+			</Box>
+			<Box>
 				<Text color={colors.secondary}>Size: </Text>
 				<Text color={colors.text}>
 					{lineCount} lines, {charCount} characters (~{estimatedTokens} tokens)
@@ -121,8 +187,13 @@ const WriteFileFormatter = React.memo(({args}: {args: WriteFileArgs}) => {
 
 			{newContent.length > 0 ? (
 				<Box flexDirection="column" marginTop={1}>
-					<Text color={colors.text}>File content:</Text>
-					{normalizedLines.map((line: string, i: number) => {
+					<Text color={colors.text}>
+						File content:
+						{isLargeFile
+							? ` (preview - ${FILE_WRITE_PREVIEW_LINES}/${lineCount} lines)`
+							: ''}
+					</Text>
+					{previewLines.map((line: string, i: number) => {
 						const lineNumStr = String(i + 1).padStart(4, ' ');
 						const ext = path.split('.').pop()?.toLowerCase() ?? '';
 						const language = getLanguageFromExtension(ext);
@@ -144,6 +215,13 @@ const WriteFileFormatter = React.memo(({args}: {args: WriteFileArgs}) => {
 							);
 						}
 					})}
+					{isLargeFile && lineCount > FILE_WRITE_PREVIEW_LINES && (
+						<Box>
+							<Text color={colors.secondary}>
+								... and {lineCount - FILE_WRITE_PREVIEW_LINES} more lines
+							</Text>
+						</Box>
+					)}
 				</Box>
 			) : (
 				<Box marginTop={1}>
@@ -169,6 +247,7 @@ const writeFileFormatter = async (
 	// Send diff to VS Code during preview phase (before execution)
 	if (result === undefined && isVSCodeConnected()) {
 		const content = args.content || '';
+		const fileType = getFileType(absPath);
 
 		// Get original content if file exists (use cache if available)
 		let originalContent = '';
@@ -181,6 +260,17 @@ const writeFileFormatter = async (
 			}
 		}
 
+		// Calculate change statistics for overwrites
+		let changeStats = null;
+		if (originalContent) {
+			try {
+				changeStats = calculateChangeStatistics(originalContent, content);
+			} catch {
+				// Ignore calculation errors
+			}
+		}
+
+		// Send enhanced metadata to VS Code
 		const changeId = sendFileChangeToVSCode(
 			absPath,
 			originalContent,
@@ -189,6 +279,10 @@ const writeFileFormatter = async (
 			{
 				path,
 				content,
+				fileType,
+				newFile: !originalContent,
+				lineCount: content.split('\n').length,
+				changeStats,
 			},
 		);
 		if (changeId) {
@@ -214,7 +308,7 @@ const writeFileValidator = async (args: {
 	if (!isValidFilePath(args.path)) {
 		return {
 			valid: false,
-			error: `⚒ Invalid file path: "${args.path}". Path must be relative and within the project directory.`,
+			error: `Invalid file path: "${args.path}". Path must be relative and within the project directory.`,
 		};
 	}
 
@@ -227,7 +321,7 @@ const writeFileValidator = async (args: {
 			error instanceof Error ? error.message : 'Unknown error';
 		return {
 			valid: false,
-			error: `⚒ Path validation failed: ${errorMessage}`,
+			error: `Path validation failed: ${errorMessage}`,
 		};
 	}
 
@@ -242,7 +336,7 @@ const writeFileValidator = async (args: {
 			if (error.code === 'ENOENT') {
 				return {
 					valid: false,
-					error: `⚒ Parent directory does not exist: "${parentDir}"`,
+					error: `Parent directory does not exist: "${parentDir}"`,
 				};
 			}
 		}
@@ -250,7 +344,7 @@ const writeFileValidator = async (args: {
 			error instanceof Error ? error.message : 'Unknown error';
 		return {
 			valid: false,
-			error: `⚒ Cannot access parent directory "${parentDir}": ${errorMessage}`,
+			error: `Cannot access parent directory "${parentDir}": ${errorMessage}`,
 		};
 	}
 
@@ -269,7 +363,7 @@ const writeFileValidator = async (args: {
 		if (pattern.test(absPath)) {
 			return {
 				valid: false,
-				error: `⚒ Cannot write files to system directory: "${args.path}"`,
+				error: `Cannot write files to system directory: "${args.path}"`,
 			};
 		}
 	}
@@ -283,3 +377,5 @@ export const writeFileTool: NanocoderToolExport = {
 	formatter: writeFileFormatter,
 	validator: writeFileValidator,
 };
+
+export {executeWriteFile, WriteFileFormatter, writeFileValidator};

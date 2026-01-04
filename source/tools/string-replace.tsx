@@ -1,21 +1,21 @@
 import {constants} from 'node:fs';
 import {access, writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
-import {highlight} from 'cli-highlight';
 import {Box, Text} from 'ink';
 import React from 'react';
-
+import {DiffDisplay} from '@/components/diff-display';
 import ToolMessage from '@/components/tool-message';
 import {getColors} from '@/config/index';
 import {getCurrentMode} from '@/context/mode-context';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import type {Colors} from '@/types/index';
+import {estimateEditImpact} from '@/utils/edit-impact';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
+import {getFileType} from '@/utils/file-type-detector';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
-import {areLinesSimlar, computeInlineDiff} from '@/utils/inline-diff';
-import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
+import {calculateTokens} from '@/utils/token-calculator';
 import {
 	closeDiffInVSCode,
 	isVSCodeConnected,
@@ -68,7 +68,10 @@ const executeStringReplace = async (
 	// Invalidate cache after write
 	invalidateCache(absPath);
 
-	// Calculate line numbers where change occurred
+	// Calculate change statistics
+	const _tokens = calculateTokens(newContent);
+	const _fileType = getFileType(path);
+
 	const beforeLines = fileContent.split('\n');
 	const oldStrLines = old_str.split('\n');
 	const newStrLines = new_str.split('\n');
@@ -89,15 +92,6 @@ const executeStringReplace = async (
 	const endLine = startLine + oldStrLines.length - 1;
 	const newEndLine = startLine + newStrLines.length - 1;
 
-	// Generate full file contents to show the model the current file state
-	const newLines = newContent.split('\n');
-	let fileContext = '\n\nUpdated file contents:\n';
-	for (let i = 0; i < newLines.length; i++) {
-		const lineNumStr = String(i + 1).padStart(4, ' ');
-		const line = newLines[i] || '';
-		fileContext += `${lineNumStr}: ${line}\n`;
-	}
-
 	const rangeDesc =
 		startLine === endLine
 			? `line ${startLine}`
@@ -107,7 +101,7 @@ const executeStringReplace = async (
 			? `line ${startLine}`
 			: `lines ${startLine}-${newEndLine}`;
 
-	return `Successfully replaced content at ${rangeDesc} (now ${newRangeDesc}).${fileContext}`;
+	return `Successfully replaced content at ${rangeDesc} (now ${newRangeDesc}).`;
 };
 
 const stringReplaceCoreTool = tool({
@@ -156,7 +150,6 @@ async function formatStringReplacePreview(
 ): Promise<React.ReactElement> {
 	const themeColors = colors || getColors();
 	const {path, old_str, new_str} = args;
-
 	const isResult = result !== undefined;
 
 	try {
@@ -165,21 +158,51 @@ async function formatStringReplacePreview(
 		const fileContent = cached.content;
 		const ext = path.split('.').pop()?.toLowerCase() ?? '';
 		const language = getLanguageFromExtension(ext);
+		const fileType = getFileType(path);
 
 		// In result mode, skip validation since file has already been modified
+		if (isResult) {
+			const messageContent = (
+				<Box flexDirection="column">
+					<Text color={themeColors.tool}>⚒ string_replace</Text>
+
+					<Box>
+						<Text color={themeColors.secondary}>File: </Text>
+						<Text color={themeColors.text}>{path}</Text>
+					</Box>
+					<Box>
+						<Text color={themeColors.secondary}>Type: </Text>
+						<Text color={themeColors.text}>{fileType}</Text>
+					</Box>
+
+					<Box flexDirection="column" marginTop={1}>
+						<Text color={themeColors.success}>
+							✓ String replacement completed successfully
+						</Text>
+					</Box>
+				</Box>
+			);
+
+			return <ToolMessage message={messageContent} hideBox={true} />;
+		}
+
 		// Preview mode - validate old_str exists and is unique
 		if (!isResult) {
 			const occurrences = fileContent.split(old_str).length - 1;
 
-			if (occurrences === 0) {
-				const errorContent = (
-					<Box flexDirection="column" marginBottom={1}>
-						<Text color={themeColors.tool}>⚒ string_replace</Text>
+					<Box>
+						<Text color={themeColors.secondary}>File: </Text>
+						<Text color={themeColors.text}>{path}</Text>
+					</Box>
 
-						<Box>
-							<Text color={themeColors.secondary}>Path: </Text>
-							<Text color={themeColors.primary}>{path}</Text>
-						</Box>
+					<Box flexDirection="column" marginTop={1}>
+						<Text color={themeColors.error}>
+							✗ Error: Content not found in file.
+						</Text>
+						<Text color={themeColors.secondary}>
+							The file may have changed since you last read it.
+						</Text>
+					</Box>
 
 						<Box flexDirection="column" marginTop={1}>
 							<Text color={themeColors.error}>
@@ -197,14 +220,26 @@ async function formatStringReplacePreview(
 							))}
 						</Box>
 					</Box>
-				);
-				return <ToolMessage message={errorContent} hideBox={true} />;
-			}
 
-			if (occurrences > 1) {
-				const errorContent = (
-					<Box flexDirection="column">
-						<Text color={themeColors.tool}>⚒ string_replace</Text>
+					<Box flexDirection="column" marginTop={1}>
+						<Text color={themeColors.secondary}>
+							Suggestion: Read the file again to see current contents.
+						</Text>
+					</Box>
+				</Box>
+			);
+			return <ToolMessage message={errorContent} hideBox={true} />;
+		}
+
+		if (occurrences > 1) {
+			const errorContent = (
+				<Box flexDirection="column">
+					<Text color={themeColors.tool}>⚒ string_replace</Text>
+
+					<Box>
+						<Text color={themeColors.secondary}>File: </Text>
+						<Text color={themeColors.text}>{path}</Text>
+					</Box>
 
 						<Box>
 							<Text color={themeColors.secondary}>Path: </Text>
@@ -229,9 +264,16 @@ async function formatStringReplacePreview(
 							))}
 						</Box>
 					</Box>
-				);
-				return <ToolMessage message={errorContent} hideBox={true} />;
-			}
+
+					<Box flexDirection="column" marginTop={1}>
+						<Text color={themeColors.secondary}>
+							Suggestion: Include 2-3 lines of surrounding context before and
+							after the change.
+						</Text>
+					</Box>
+				</Box>
+			);
+			return <ToolMessage message={errorContent} hideBox={true} />;
 		}
 
 		// Find location of the match in the file
@@ -311,174 +353,41 @@ async function formatStringReplacePreview(
 
 		const normalizedContextAfter = normalizedLines.slice(lineIndex);
 
-		const contextBefore: React.ReactElement[] = [];
-		const diffLines: React.ReactElement[] = [];
-		const contextAfter: React.ReactElement[] = [];
+		// Calculate change statistics and file info
+		const oldContent = fileContent;
+		const _newContent = oldContent.replace(old_str, new_str);
+		const fileLines = fileContent.split('\n');
+		const fileTokens = calculateTokens(fileContent);
 
-		// Show context before
-		for (let i = 0; i < normalizedContextBefore.length; i++) {
-			const actualLineNum = showStart + i;
-			const lineNumStr = String(actualLineNum + 1).padStart(4, ' ');
-			const line = normalizedContextBefore[i] || '';
-			let displayLine: string;
-			try {
-				displayLine = highlight(line, {language, theme: 'default'});
-			} catch {
-				displayLine = line;
-			}
+		const changeStats = {
+			linesAdded: newStrLines.length,
+			linesRemoved: oldStrLines.length,
+			netLineChange: newStrLines.length - oldStrLines.length,
+			tokensAdded: calculateTokens(new_str),
+			tokensRemoved: calculateTokens(old_str),
+			netTokenChange: 0, // Will be calculated
+			changeType: 'replace' as const,
+			sizeImpact: 'tiny' as const,
+		};
+		changeStats.netTokenChange =
+			changeStats.tokensAdded - changeStats.tokensRemoved;
 
-			contextBefore.push(
-				<Text key={`before-${i}`} color={themeColors.secondary}>
-					{lineNumStr} {displayLine}
-				</Text>,
-			);
-		}
+		// Calculate edit impact
+		const impact = estimateEditImpact(changeStats, {
+			lines: fileLines.length,
+			tokens: fileTokens,
+		});
 
-		// Build unified diff - only show lines that actually changed
-		let oldIdx = 0;
-		let newIdx = 0;
-		let diffKey = 0;
+		// Build context line objects
+		const contextBeforeLines = normalizedContextBefore.map((line, i) => ({
+			lineNum: showStart + i,
+			content: line,
+		}));
 
-		while (
-			oldIdx < normalizedOldLines.length ||
-			newIdx < normalizedNewLines.length
-		) {
-			const oldLine =
-				oldIdx < normalizedOldLines.length ? normalizedOldLines[oldIdx] : null;
-			const newLine =
-				newIdx < normalizedNewLines.length ? normalizedNewLines[newIdx] : null;
-
-			// Check if lines are identical - show as unchanged context
-			if (oldLine !== null && newLine !== null && oldLine === newLine) {
-				const lineNumStr = String(startLine + oldIdx).padStart(4, ' ');
-				diffLines.push(
-					<Text
-						key={`diff-${diffKey++}`}
-						color={themeColors.secondary}
-						wrap="wrap"
-					>
-						{lineNumStr} {oldLine}
-					</Text>,
-				);
-				oldIdx++;
-				newIdx++;
-			} else if (
-				oldLine !== null &&
-				newLine !== null &&
-				areLinesSimlar(oldLine, newLine)
-			) {
-				// Lines are similar but different - show inline diff with word-level highlighting
-				const segments = computeInlineDiff(oldLine, newLine);
-				const lineNumStr = String(startLine + oldIdx).padStart(4, ' ');
-
-				// Render removed line with inline highlights
-				const oldParts: React.ReactElement[] = [];
-				for (let s = 0; s < segments.length; s++) {
-					const seg = segments[s];
-					if (seg.type === 'unchanged' || seg.type === 'removed') {
-						oldParts.push(
-							<Text
-								key={`old-seg-${s}`}
-								bold={seg.type === 'removed'}
-								underline={seg.type === 'removed'}
-							>
-								{seg.text}
-							</Text>,
-						);
-					}
-				}
-
-				diffLines.push(
-					<Text
-						key={`diff-${diffKey++}`}
-						backgroundColor={themeColors.diffRemoved}
-						color={themeColors.diffRemovedText}
-						wrap="wrap"
-					>
-						{lineNumStr} - {oldParts}
-					</Text>,
-				);
-
-				// Render added line with inline highlights
-				const newParts: React.ReactElement[] = [];
-				for (let s = 0; s < segments.length; s++) {
-					const seg = segments[s];
-					if (seg.type === 'unchanged' || seg.type === 'added') {
-						newParts.push(
-							<Text
-								key={`new-seg-${s}`}
-								bold={seg.type === 'added'}
-								underline={seg.type === 'added'}
-							>
-								{seg.text}
-							</Text>,
-						);
-					}
-				}
-
-				diffLines.push(
-					<Text
-						key={`diff-${diffKey++}`}
-						backgroundColor={themeColors.diffAdded}
-						color={themeColors.diffAddedText}
-						wrap="wrap"
-					>
-						{lineNumStr} + {newParts}
-					</Text>,
-				);
-
-				oldIdx++;
-				newIdx++;
-			} else if (oldLine !== null) {
-				// Show removed line
-				const lineNumStr = String(startLine + oldIdx).padStart(4, ' ');
-				diffLines.push(
-					<Text
-						key={`diff-${diffKey++}`}
-						backgroundColor={themeColors.diffRemoved}
-						color={themeColors.diffRemovedText}
-						wrap="wrap"
-					>
-						{lineNumStr} - {oldLine}
-					</Text>,
-				);
-				oldIdx++;
-			} else if (newLine !== null) {
-				// Show added line
-				const lineNumStr = String(startLine + newIdx).padStart(4, ' ');
-				diffLines.push(
-					<Text
-						key={`diff-${diffKey++}`}
-						backgroundColor={themeColors.diffAdded}
-						color={themeColors.diffAddedText}
-						wrap="wrap"
-					>
-						{lineNumStr} + {newLine}
-					</Text>,
-				);
-				newIdx++;
-			}
-		}
-
-		// Show context after
-		const lineDelta = newStrLines.length - oldStrLines.length;
-		for (let i = 0; i < normalizedContextAfter.length; i++) {
-			const actualLineNum = endLine + i;
-			const lineNumStr = String(actualLineNum + lineDelta + 1).padStart(4, ' ');
-			const line = normalizedContextAfter[i] || '';
-			let displayLine: string;
-			try {
-				displayLine = highlight(line, {language, theme: 'default'});
-			} catch {
-				displayLine = line;
-			}
-
-			contextAfter.push(
-				<Text key={`after-${i}`} color={themeColors.secondary}>
-					{lineNumStr} {displayLine}
-				</Text>,
-			);
-		}
+		const contextAfterLines = normalizedContextAfter.map((line, i) => ({
+			lineNum: endLine + i,
+			content: line,
+		}));
 
 		const rangeDesc =
 			startLine === endLine
@@ -490,14 +399,35 @@ async function formatStringReplacePreview(
 				<Text color={themeColors.tool}>⚒ string_replace</Text>
 
 				<Box>
-					<Text color={themeColors.secondary}>Path: </Text>
-					<Text color={themeColors.primary}>{path}</Text>
+					<Text color={themeColors.secondary}>File: </Text>
+					<Text color={themeColors.text}>{path}</Text>
+				</Box>
+
+				<Box>
+					<Text color={themeColors.secondary}>Type: </Text>
+					<Text color={themeColors.text}>{fileType}</Text>
 				</Box>
 
 				<Box>
 					<Text color={themeColors.secondary}>Location: </Text>
 					<Text color={themeColors.text}>{rangeDesc}</Text>
 				</Box>
+
+				<Box>
+					<Text color={themeColors.secondary}>Impact: </Text>
+					<Text color={themeColors.text}>{impact.description}</Text>
+				</Box>
+
+				{impact.shouldWarn && impact.recommendations.length > 0 && (
+					<Box flexDirection="column" marginTop={1}>
+						<Text color={themeColors.warning}>⚠ Warning: Large change</Text>
+						{impact.recommendations.slice(0, 2).map((rec, i) => (
+							<Text key={i} color={themeColors.secondary}>
+								• {rec}
+							</Text>
+						))}
+					</Box>
+				)}
 
 				<Box flexDirection="column" marginTop={1}>
 					<Text color={themeColors.success}>
@@ -506,11 +436,15 @@ async function formatStringReplacePreview(
 						{newStrLines.length} line
 						{newStrLines.length > 1 ? 's' : ''}
 					</Text>
-					<Box flexDirection="column">
-						{contextBefore}
-						{diffLines}
-						{contextAfter}
-					</Box>
+					<DiffDisplay
+						oldLines={normalizedOldLines}
+						newLines={normalizedNewLines}
+						startLine={startLine}
+						contextBeforeLines={contextBeforeLines}
+						contextAfterLines={contextAfterLines}
+						themeColors={themeColors}
+						language={language}
+					/>
 				</Box>
 			</Box>
 		);
@@ -522,8 +456,8 @@ async function formatStringReplacePreview(
 				<Text color={themeColors.tool}>⚒ string_replace</Text>
 
 				<Box>
-					<Text color={themeColors.secondary}>Path: </Text>
-					<Text color={themeColors.primary}>{path}</Text>
+					<Text color={themeColors.secondary}>File: </Text>
+					<Text color={themeColors.text}>{path}</Text>
 				</Box>
 
 				<Box>
@@ -597,24 +531,25 @@ const stringReplaceValidator = async (
 ): Promise<{valid: true} | {valid: false; error: string}> => {
 	const {path, old_str} = args;
 
-	// Validate path boundary first to prevent directory traversal
-	if (!isValidFilePath(path)) {
+	// Validate old_str first (cheapest check)
+	if (!old_str || old_str.length === 0 || old_str.trim() === '') {
 		return {
 			valid: false,
-			error: `⚒ Invalid file path: "${path}". Path must be relative and within the project directory.`,
+			error:
+				'⚒ old_str cannot be empty. Provide the exact content to find and replace.',
 		};
 	}
 
-	// Verify the resolved path stays within project boundaries
-	try {
-		const cwd = process.cwd();
-		resolveFilePath(path, cwd);
-	} catch (error) {
-		const errorMessage =
-			error instanceof Error ? error.message : 'Unknown error';
+	// Basic path validation - reject absolute paths, directory traversal, and null bytes
+	if (
+		path.startsWith('/') ||
+		/^[A-Za-z]:/.test(path) ||
+		path.includes('..') ||
+		path.includes('\0')
+	) {
 		return {
 			valid: false,
-			error: `⚒ Path validation failed: ${errorMessage}`,
+			error: `Invalid file path: "${path}". Absolute paths, path traversal, and null bytes not allowed.`,
 		};
 	}
 
@@ -627,23 +562,14 @@ const stringReplaceValidator = async (
 			if (error.code === 'ENOENT') {
 				return {
 					valid: false,
-					error: `⚒ File "${path}" does not exist`,
+					error: `File "${path}" does not exist\n\nSuggestion: Use find_files to locate the correct file path.`,
 				};
 			}
 		}
 		const errorMessage = error instanceof Error ? error.message : String(error);
 		return {
 			valid: false,
-			error: `⚒ Cannot access file "${path}": ${errorMessage}`,
-		};
-	}
-
-	// Validate old_str is not empty
-	if (!old_str || old_str.length === 0) {
-		return {
-			valid: false,
-			error:
-				'⚒ old_str cannot be empty. Provide the exact content to find and replace.',
+			error: `Cannot access file "${path}": ${errorMessage}`,
 		};
 	}
 
@@ -656,21 +582,21 @@ const stringReplaceValidator = async (
 		if (occurrences === 0) {
 			return {
 				valid: false,
-				error: `⚒ Content not found in file. The file may have changed since you last read it.\n\nSearching for:\n${old_str}\n\nSuggestion: Read the file again to see current contents.`,
+				error: `Content not found in file. The file may have changed since you last read it.\n\nSearching for:\n${old_str}\n\nSuggestion: Read the file again to see current contents.`,
 			};
 		}
 
 		if (occurrences > 1) {
 			return {
 				valid: false,
-				error: `⚒ Found ${occurrences} matches for the search string. Please provide more surrounding context to make the match unique.\n\nSearching for:\n${old_str}`,
+				error: `Found ${occurrences} matches for the search string. Please provide more surrounding context to make the match unique.\n\nSearching for:\n${old_str}`,
 			};
 		}
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);
 		return {
 			valid: false,
-			error: `⚒ Error reading file "${path}": ${errorMessage}`,
+			error: `Error reading file "${path}": ${errorMessage}`,
 		};
 	}
 
