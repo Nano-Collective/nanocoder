@@ -14,19 +14,25 @@ import {
 	CompletionTriggerKind,
 	Diagnostic,
 	DocumentFormattingParams,
+	DocumentSymbol,
+	DocumentSymbolParams,
 	FormattingOptions,
 	InitializeParams,
 	InitializeResult,
 	JsonRpcNotification,
 	JsonRpcRequest,
 	JsonRpcResponse,
+	Location,
 	LSPMethods,
 	Position,
 	PublishDiagnosticsParams,
+	RenameParams,
 	ServerCapabilities,
+	SymbolInformation,
 	TextDocumentIdentifier,
 	TextDocumentItem,
 	TextEdit,
+	WorkspaceEdit,
 } from './protocol';
 
 export interface LSPServerConfig {
@@ -306,6 +312,58 @@ export class LSPClient extends EventEmitter {
 		return [];
 	}
 
+	/**
+	 * Request document symbols
+	 */
+	async requestDocumentSymbols(
+		params: DocumentSymbolParams,
+	): Promise<DocumentSymbol[] | SymbolInformation[]> {
+		this.ensureReady();
+		const result = await this.sendRequest(LSPMethods.DocumentSymbol, params);
+		return result as DocumentSymbol[] | SymbolInformation[];
+	}
+
+	/**
+	 * Request references
+	 */
+	async requestReferences(params: {
+		textDocument: TextDocumentIdentifier;
+		position: Position;
+		context: {includeDeclaration: boolean};
+	}): Promise<Location[]> {
+		this.ensureReady();
+		const result = await this.sendRequest(LSPMethods.References, params);
+		return result as Location[];
+	}
+
+	/**
+	 * Request definition
+	 */
+	async requestDefinition(params: {
+		textDocument: TextDocumentIdentifier;
+		position: Position;
+	}): Promise<Location | Location[] | null> {
+		this.ensureReady();
+		const result = await this.sendRequest(LSPMethods.Definition, params);
+		return result as Location | Location[] | null;
+	}
+
+	/**
+	 * Request rename
+	 */
+	async requestRename(params: RenameParams): Promise<WorkspaceEdit> {
+		this.ensureReady();
+		const result = await this.sendRequest(LSPMethods.Rename, params);
+		return result as WorkspaceEdit;
+	}
+
+	/**
+	 * Check if document is open
+	 */
+	isDocumentOpen(uri: string): boolean {
+		return this.openDocuments.has(uri);
+	}
+
 	// Private methods
 
 	private async initialize(): Promise<InitializeResult> {
@@ -382,6 +440,15 @@ export class LSPClient extends EventEmitter {
 		this.sendNotification(LSPMethods.Initialized, {});
 
 		return result;
+	}
+
+	/**
+	 * Ensure server is ready, throw if not
+	 */
+	private ensureReady(): void {
+		if (!this.isReady()) {
+			throw new Error(`LSP server '${this.config.name}' is not ready`);
+		}
 	}
 
 	private sendRequest(method: string, params: unknown): Promise<unknown> {

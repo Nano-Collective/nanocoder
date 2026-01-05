@@ -269,6 +269,85 @@ export interface Command {
 	arguments?: unknown[];
 }
 
+/**
+ * Symbol Kind Enumeration
+ */
+export enum SymbolKind {
+	File = 1,
+	Module = 2,
+	Namespace = 3,
+	Package = 4,
+	Class = 5,
+	Method = 6,
+	Property = 7,
+	Field = 8,
+	Constructor = 9,
+	Enum = 10,
+	Interface = 11,
+	Function = 12,
+	Variable = 13,
+	Constant = 14,
+	String = 15,
+	Number = 16,
+	Boolean = 17,
+	Array = 18,
+	Object = 19,
+	Key = 20,
+	Null = 21,
+	EnumMember = 22,
+	Struct = 23,
+	Event = 24,
+	Operator = 25,
+	TypeParameter = 26,
+}
+
+/**
+ * Document Symbol
+ */
+export interface DocumentSymbol {
+	name: string;
+	detail?: string;
+	kind: SymbolKind;
+	range: Range;
+	selectionRange: Range;
+	children?: DocumentSymbol[];
+	deprecated?: boolean;
+}
+
+/**
+ * Symbol Information
+ */
+export interface SymbolInformation {
+	name: string;
+	kind: SymbolKind;
+	location: Location;
+	containerName?: string;
+	deprecated?: boolean;
+}
+
+/**
+ * Document Symbol Params
+ */
+export interface DocumentSymbolParams {
+	textDocument: TextDocumentIdentifier;
+}
+
+/**
+ * Rename Params
+ */
+export interface RenameParams {
+	textDocument: TextDocumentIdentifier;
+	position: Position;
+	newName: string;
+}
+
+/**
+ * Rename Options
+ */
+export interface RenameOptions {
+	prepareProvider?: boolean;
+}
+
 export interface WorkspaceEdit {
 	changes?: {[uri: string]: TextEdit[]};
 	documentChanges?: (TextDocumentEdit | CreateFile | RenameFile | DeleteFile)[];
@@ -343,6 +422,8 @@ export const LSPMethods = {
 	Hover: 'textDocument/hover',
 	Definition: 'textDocument/definition',
 	References: 'textDocument/references',
+	DocumentSymbol: 'textDocument/documentSymbol',
+	Rename: 'textDocument/rename',
 	CodeAction: 'textDocument/codeAction',
 	Formatting: 'textDocument/formatting',
 

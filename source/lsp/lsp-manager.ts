@@ -5,16 +5,21 @@
 
 import {EventEmitter} from 'events';
 import {readFile} from 'fs/promises';
-import {extname} from 'path';
+import {extname, resolve} from 'path';
 import {fileURLToPath} from 'url';
+import {getCachedFileContent} from '@/utils/file-cache';
 import {LSPClient, LSPServerConfig} from './lsp-client';
 import {
 	CodeAction,
 	CompletionItem,
 	Diagnostic,
+	DocumentSymbol,
 	FormattingOptions,
+	Location,
 	PublishDiagnosticsParams,
+	SymbolInformation,
 	TextEdit,
+	WorkspaceEdit,
 } from './protocol';
 import {discoverLanguageServers, getLanguageId} from './server-discovery';
 
@@ -179,7 +184,7 @@ export class LSPManager extends EventEmitter {
 	}
 
 	/**
-	 * Get the client for a file based on its extension
+	 * Get the client for a file based on its extension (sync, for backward compatibility)
 	 */
 	private getClientForFile(filePath: string): LSPClient | undefined {
 		const ext = extname(filePath).slice(1); // Remove leading dot
@@ -189,7 +194,59 @@ export class LSPManager extends EventEmitter {
 	}
 
 	/**
-	 * Convert file path to URI
+	 * Get the client for a file based on its extension (async, with error throwing)
+	 */
+	private async getClientForFileOrThrow(filePath: string): Promise<LSPClient> {
+		const ext = extname(filePath).replace('.', '');
+		const serverName = this.languageToServer.get(ext);
+
+		if (!serverName) {
+			throw new Error(
+				`No LSP server configured for .${ext} files. ` +
+					`Configure a language server in agents.config.json or start with --vscode.`,
+			);
+		}
+
+		const client = this.clients.get(serverName);
+		if (!client) {
+			throw new Error(`LSP server '${serverName}' not found`);
+		}
+
+		if (!client.isReady()) {
+			throw new Error(
+				`LSP server '${serverName}' is not ready. ` +
+					`Wait a moment for it to finish starting up.`,
+			);
+		}
+
+		return client;
+	}
+
+	/**
+	 * Ensure document is open in LSP server
+	 */
+	private async ensureDocumentOpen(
+		client: LSPClient,
+		uri: string,
+		filePath: string,
+	): Promise<void> {
+		if (!client.isDocumentOpen(uri)) {
+			const content = await getCachedFileContent(filePath);
+			const languageId = getLanguageId(extname(filePath).replace('.', ''));
+			client.openDocument(uri, languageId, content.content);
+		}
+	}
+
+	/**
+	 * Convert file path to LSP URI
+	 */
+	private filePathToUri(filePath: string): string {
+		const resolved = resolve(filePath);
+		return `file://${resolved}`;
+	}
+
+	/**
+	 * Convert file path to URI (deprecated, use filePathToUri)
 	 */
 	private fileToUri(filePath: string): string {
 		if (filePath.startsWith('file://')) return filePath;
@@ -338,6 +395,83 @@ export class LSPManager extends EventEmitter {
 
 		const uri = this.fileToUri(filePath);
 		return client.formatDocument(uri, options);
+	}
+
+	/**
+	 * Find all references to a symbol
+	 */
+	async findReferences(
+		filePath: string,
+		line: number,
+		character: number,
+		includeDeclaration: boolean = true,
+	): Promise<Location[]> {
+		const client = await this.getClientForFileOrThrow(filePath);
+		const uri = this.filePathToUri(filePath);
+
+		await this.ensureDocumentOpen(client, uri, filePath);
+
+		return await client.requestReferences({
+			textDocument: {uri},
+			position: {line: line - 1, character: character - 1},
+			context: {includeDeclaration},
+		});
+	}
+
+	/**
+	 * Go to definition for a symbol
+	 */
+	async goToDefinition(
+		filePath: string,
+		line: number,
+		character: number,
+	): Promise<Location | Location[] | null> {
+		const client = await this.getClientForFileOrThrow(filePath);
+		const uri = this.filePathToUri(filePath);
+
+		await this.ensureDocumentOpen(client, uri, filePath);
+
+		return await client.requestDefinition({
+			textDocument: {uri},
+			position: {line: line - 1, character: character - 1},
+		});
+	}
+
+	/**
+	 * Get document symbols
+	 */
+	async getDocumentSymbols(
+		filePath: string,
+	): Promise<DocumentSymbol[] | SymbolInformation[]> {
+		const client = await this.getClientForFileOrThrow(filePath);
+		const uri = this.filePathToUri(filePath);
+
+		await this.ensureDocumentOpen(client, uri, filePath);
+
+		return await client.requestDocumentSymbols({
+			textDocument: {uri},
+		});
+	}
+
+	/**
+	 * Rename symbol across workspace
+	 */
+	async renameSymbol(
+		filePath: string,
+		line: number,
+		character: number,
+		newName: string,
+	): Promise<WorkspaceEdit> {
+		const client = await this.getClientForFileOrThrow(filePath);
+		const uri = this.filePathToUri(filePath);
+
+		await this.ensureDocumentOpen(client, uri, filePath);
+
+		return await client.requestRename({
+			textDocument: {uri},
+			position: {line: line - 1, character: character - 1},
+			newName,
+		});
 	}
 
 	/**

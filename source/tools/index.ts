@@ -1,16 +1,25 @@
 import React from 'react';
+import {documentSymbolsTool} from '@/tools/document-symbols';
 import {executeBashTool} from '@/tools/execute-bash';
+import {extractFunctionTool} from '@/tools/extract-function';
 import {fetchUrlTool} from '@/tools/fetch-url';
 import {findFilesTool} from '@/tools/find-files';
+import {findReferencesTool} from '@/tools/find-references';
 import {
 	gitBranchSuggestTool,
 	gitCreatePRTool,
 	gitSmartCommitTool,
 	gitStatusEnhancedTool,
 } from '@/tools/git';
+import {goToDefinitionTool} from '@/tools/go-to-definition';
 import {listDirectoryTool} from '@/tools/list-directory';
 import {getDiagnosticsTool} from '@/tools/lsp-get-diagnostics';
+import {mkdirTool} from '@/tools/mkdir';
+import {mvTool} from '@/tools/mv';
 import {readFileTool} from '@/tools/read-file';
+import {renameSymbolTool} from '@/tools/rename-symbol';
+import {rmTool} from '@/tools/rm';
+import {rmdirTool} from '@/tools/rmdir';
 import {searchFileContentsTool} from '@/tools/search-file-contents';
 import {stringReplaceTool} from '@/tools/string-replace';
 import {webSearchTool} from '@/tools/web-search';
@@ -25,17 +34,36 @@ import type {
 // Array of all tool exports from individual tool files
 // Each tool exports: { name, tool, formatter?, validator? }
 const allTools: NanocoderToolExport[] = [
+	// File operations
 	readFileTool,
 	writeFileTool,
 	stringReplaceTool,
-	executeBashTool,
-	webSearchTool,
-	fetchUrlTool,
+	listDirectoryTool,
+	mkdirTool,
+	rmTool,
+	rmdirTool,
+	mvTool,
+
+	// Search and discovery
 	findFilesTool,
 	searchFileContentsTool,
+
+	// Command execution
+	executeBashTool,
+
+	// Web tools
+	webSearchTool,
+	fetchUrlTool,
+
+	// LSP code intelligence
 	getDiagnosticsTool,
-	listDirectoryTool,
-	// Git workflow tools
+	findReferencesTool,
+	goToDefinitionTool,
+	documentSymbolsTool,
+	renameSymbolTool,
+	extractFunctionTool,
+
+	// Git workflow
 	gitSmartCommitTool,
 	gitCreatePRTool,
 	gitBranchSuggestTool,

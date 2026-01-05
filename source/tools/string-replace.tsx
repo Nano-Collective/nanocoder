@@ -190,24 +190,22 @@ async function formatStringReplacePreview(
 		if (!isResult) {
 			const occurrences = fileContent.split(old_str).length - 1;
 
-					<Box>
-						<Text color={themeColors.secondary}>File: </Text>
-						<Text color={themeColors.text}>{path}</Text>
-					</Box>
+			if (occurrences === 0) {
+				const errorContent = (
+					<Box flexDirection="column">
+						<Text color={themeColors.tool}>⚒ string_replace</Text>
 
-					<Box flexDirection="column" marginTop={1}>
-						<Text color={themeColors.error}>
-							✗ Error: Content not found in file.
-						</Text>
-						<Text color={themeColors.secondary}>
-							The file may have changed since you last read it.
-						</Text>
-					</Box>
+						<Box>
+							<Text color={themeColors.secondary}>File: </Text>
+							<Text color={themeColors.text}>{path}</Text>
+						</Box>
 
 						<Box flexDirection="column" marginTop={1}>
 							<Text color={themeColors.error}>
-								✗ Error: Content not found in file. The file may have changed
-								since you last read it.
+								✗ Error: Content not found in file.
+							</Text>
+							<Text color={themeColors.secondary}>
+								The file may have changed since you last read it.
 							</Text>
 						</Box>
 
@@ -219,31 +217,25 @@ async function formatStringReplacePreview(
 								</Text>
 							))}
 						</Box>
-					</Box>
 
-					<Box flexDirection="column" marginTop={1}>
-						<Text color={themeColors.secondary}>
-							Suggestion: Read the file again to see current contents.
-						</Text>
+						<Box flexDirection="column" marginTop={1}>
+							<Text color={themeColors.secondary}>
+								Suggestion: Read the file again to see current contents.
+							</Text>
+						</Box>
 					</Box>
-				</Box>
-			);
-			return <ToolMessage message={errorContent} hideBox={true} />;
-		}
+				);
+				return <ToolMessage message={errorContent} hideBox={true} />;
+			}
 
-		if (occurrences > 1) {
-			const errorContent = (
-				<Box flexDirection="column">
-					<Text color={themeColors.tool}>⚒ string_replace</Text>
-
-					<Box>
-						<Text color={themeColors.secondary}>File: </Text>
-						<Text color={themeColors.text}>{path}</Text>
-					</Box>
+			if (occurrences > 1) {
+				const errorContent = (
+					<Box flexDirection="column">
+						<Text color={themeColors.tool}>⚒ string_replace</Text>
 
 						<Box>
-							<Text color={themeColors.secondary}>Path: </Text>
-							<Text color={themeColors.primary}>{path}</Text>
+							<Text color={themeColors.secondary}>File: </Text>
+							<Text color={themeColors.text}>{path}</Text>
 						</Box>
 
 						<Box flexDirection="column" marginTop={1}>
@@ -263,17 +255,17 @@ async function formatStringReplacePreview(
 								</Text>
 							))}
 						</Box>
-					</Box>
 
-					<Box flexDirection="column" marginTop={1}>
-						<Text color={themeColors.secondary}>
-							Suggestion: Include 2-3 lines of surrounding context before and
-							after the change.
-						</Text>
+						<Box flexDirection="column" marginTop={1}>
+							<Text color={themeColors.secondary}>
+								Suggestion: Include 2-3 lines of surrounding context before and
+								after the change.
+							</Text>
+						</Box>
 					</Box>
-				</Box>
-			);
-			return <ToolMessage message={errorContent} hideBox={true} />;
+				);
+				return <ToolMessage message={errorContent} hideBox={true} />;
+			}
 		}
 
 		// Find location of the match in the file

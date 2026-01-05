@@ -145,10 +145,13 @@ ALWAYS use native write tools instead of bash for file editing. This enables aut
 | `cat << EOF > file.txt`         | `write_file({path, content})` - No heredoc escaping issues |
 | `tee file.txt`                  | `write_file({path, content})` - Simpler, auto-accept in auto mode |
 | `sed -i 's/old/new/g' file.txt` | `string_replace({path, old_str, new_str})` - Safer, self-verifying |
-| `echo "" >> file.txt`           | `string_replace({path: file, new_str: content, old_str: LAST_LINES})` |
-| `printf "text\n" >> file.txt`   | `string_replace` with context matching                   |
-| `cat file1 file2 > combined`    | Read both files, `write_file` with combined content      |
-| `cp file1 file2`                | Read file1, `write_file` to file2                        |
+| `mkdir -p path/to/dir`          | `mkdir({path, recursive: true})` - Better validation, parent creation |
+| `rm file.txt`                   | `rm({path})` - Safer with validation, preview |
+| `rm -rf path/to/dir`            | `rm({path, recursive: true})` - Confirms before delete |
+| `rmdir empty-dir`               | `rmdir({path})` - Only accepts empty directories |
+| `mv old.txt new.txt`            | `mv({source, destination})` - Preview, validation |
+| `mv file.txt path/`             | `mv({source, destination})` - Atomic move into directory |
+| `mv dir/ path/to/`              | `mv({source, destination})` - Directory move with contents |
 
 ### Why Native Write Tools?
 
@@ -164,18 +167,23 @@ ALWAYS use native write tools instead of bash for file editing. This enables aut
 ### When to Use Bash for Writing
 
 Reserve `execute_bash` for file operations that native tools cannot handle:
-- Directory creation: `mkdir -p path/to/dir` (native tools can't create directories)
-- File deletion: `rm file.txt` (native tools don't have delete operations)
-- Moving/renaming: `mv old.txt new.txt` (native tools don't have move operations)
 - File permissions: `chmod +x script.sh`
 - Binary file operations (native tools are text-focused)
+- Git operations when workflow tools are insufficient
+- Package manager operations (`npm install`, `pip install`)
+- Build/test commands (`make`, `cargo build`, test runners)
+- Complex shell-specific operations
 
 ### Anti-patterns
 
 Don't use: `execute_bash('echo "content" > file.txt')` → Use: `write_file({path: 'file.txt', content: 'content'})`
 Don't use: `execute_bash('sed -i "s/old/new/g" file.txt')` → Use: `string_replace({path: 'file.txt', old_str: 'old', new_str: 'new'})`
 Don't use: `execute_bash('cat <<EOF\ncontent\nEOF > file.txt')` → Use: `write_file({path: 'file.txt', content: 'content'})`
-Don't use: `execute_bash('cp file1.txt file2.txt')` → Use: read file1, `write_file` to file2
+Don't use: `execute_bash('mkdir -p path/to/dir')` → Use: `mkdir({path: 'path/to/dir', recursive: true})`
+Don't use: `execute_bash('rm file.txt')` → Use: `rm({path: 'file.txt'})`
+Don't use: `execute_bash('rm -rf path/to/dir')` → Use: `rm({path: 'path/to/dir', recursive: true})`
+Don't use: `execute_bash('rmdir empty-dir')` → Use: `rmdir({path: 'empty-dir'})`
+Don't use: `execute_bash('mv old.txt new.txt')` → Use: `mv({source: 'old.txt', destination: 'new.txt'})`
 
 ## CONTEXT GATHERING
 
