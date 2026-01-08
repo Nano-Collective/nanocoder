@@ -23,25 +23,11 @@ const urlValidator = (value: string): string | undefined => {
 	try {
 		const url = new URL(value);
 
-		// Check protocol
+		// Check protocol - allow both HTTP and HTTPS
+		// Users may have legitimate reasons for HTTP (VPNs, internal networks,
+		// Ollama which doesn't use API keys, etc.)
 		if (!['http:', 'https:'].includes(url.protocol)) {
 			return 'URL must use http or https protocol';
-		}
-
-		// HTTP is fine for local/private networks - no warning needed
-		// Only warn for truly remote (public) servers
-		const hostname = url.hostname;
-		const isLocal =
-			hostname === 'localhost' ||
-			hostname === '127.0.0.1' ||
-			hostname === '::1' ||
-			hostname.endsWith('.local') ||
-			hostname.startsWith('10.') || // Private class A
-			hostname.startsWith('192.168.') || // Private class C
-			/^172\.(1[6-9]|2\d|3[01])\./.test(hostname); // Private class B (172.16-31.x.x)
-
-		if (url.protocol === 'http:' && !isLocal) {
-			return 'Warning: HTTP on public server - API keys will be sent unencrypted. Use HTTPS for security.';
 		}
 
 		return undefined;

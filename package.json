@@ -1,7 +1,7 @@
 {
 	"name": "@nanocollective/nanocoder",
 	"main": "dist/cli.js",
-	"version": "1.20.3",
+	"version": "1.20.4",
 	"description": "A local-first CLI coding agent that brings the power of agentic coding tools like Claude Code and Gemini CLI to local models or controlled APIs like OpenRouter",
 	"keywords": [
 		"cli",
@@ -44,7 +44,7 @@
 		"test:lint": "biome lint .",
 		"test:lint:fix": "biome check --write --unsafe .",
 		"test:knip": "knip",
-		"test:audit": "pnpm audit --audit-level=high --ignore GHSA-8r9q-7v3j-jr4g",
+		"test:audit": "pnpm audit --audit-level=high",
 		"test:security": "semgrep scan --config auto --error",
 		"format": "biome check --write .",
 		"format:check": "biome check .",
@@ -60,7 +60,7 @@
 	"dependencies": {
 		"@ai-sdk/openai-compatible": "2.0.2",
 		"@anthropic-ai/tokenizer": "^0.0.4",
-		"@modelcontextprotocol/sdk": "^1.25.1",
+		"@modelcontextprotocol/sdk": "^1.25.2",
 		"@nanocollective/get-md": "^1.0.2",
 		"ai": "6.0.6",
 		"cheerio": "^1.1.2",

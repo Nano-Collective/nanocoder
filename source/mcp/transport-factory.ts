@@ -117,9 +117,16 @@ export class TransportFactory {
 			);
 		}
 
+		// For uvx commands, prepend --native-tls to use system certificates
+		// This fixes TLS issues in corporate proxy environments (issue #272)
+		let args = server.args || [];
+		if (server.command === 'uvx' && !args.includes('--native-tls')) {
+			args = ['--native-tls', ...args];
+		}
+
 		return new StdioClientTransport({
 			command: server.command,
-			args: server.args || [],
+			args,
 			env: server.env
 				? ({...process.env, ...server.env} as Record<string, string>)
 				: undefined,

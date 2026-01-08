@@ -25,7 +25,7 @@ Before contributing, please:
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 20+
 - npm or pnpm
 - Git
 

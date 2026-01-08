@@ -1,3 +1,13 @@
+# 1.20.4
+
+- Fixed configuration wizard blocking users from entering HTTP URLs for remote Ollama servers. The wizard now allows any valid HTTP/HTTPS URL without requiring local network addresses.
+
+- Fixed `@modelcontextprotocol/sdk` dependency version to resolve npm audit security issue.
+
+- Fixed TLS certificate errors when using `uvx` MCP servers behind corporate proxies. Nanocoder now automatically adds `--native-tls` to uvx commands to use system certificates instead of rustls.
+
+If there are any problems, feedback or thoughts please drop an issue or message us through Discord! Thank you for using Nanocoder. 🙌
+
 # 1.20.3
 
 - Fixed `search_file_contents` returning excessive tokens by truncating long matching lines to 300 characters. Previously, searching in files with long lines (minified JS, base64 data, etc.) could return ~100k tokens for just 30 matches.

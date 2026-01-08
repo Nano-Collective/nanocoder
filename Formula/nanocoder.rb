@@ -1,8 +1,8 @@
 class Nanocoder < Formula
   desc "Local-first CLI coding agent with multi-provider support"
   homepage "https://github.com/Nano-Collective/nanocoder"
-  url "https://registry.npmjs.org/@nanocollective/nanocoder/-/nanocoder-1.20.3.tgz"
-  sha256 "afbc0f69282d3a99c6543b852e82fb3333053044e1c82c3e9d92f5bcc51d67a3"
+  url "https://registry.npmjs.org/@nanocollective/nanocoder/-/nanocoder-1.20.4.tgz"
+  sha256 "f3681d621afe9a6584158d9b8626cafe188412ea706f48692dfab43b1d06aa13"
   license "MIT"
 
   depends_on "node@20"
