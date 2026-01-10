@@ -27,6 +27,7 @@ A local-first CLI coding agent that brings the power of agentic coding tools lik
 - [Configuration](#configuration)
   - [AI Provider Setup](#ai-provider-setup)
   - [MCP (Model Context Protocol) Servers](#mcp-model-context-protocol-servers)
+  - [Tool Auto-Approval Configuration](#tool-auto-approval-configuration)
   - [User Preferences](#user-preferences)
   - [Application Data Directory](#application-data-directory)
   - [Commands](#commands)
@@ -519,6 +520,93 @@ Popular MCP servers:
 - [View more MCP servers](https://github.com/modelcontextprotocol/servers)
 
 > **Note**: MCP server configuration follows the same location hierarchy as AI provider setup above. Use `/setup-config` for an interactive configuration wizard with templates for both local and remote MCP servers, or manually edit `agents.config.json` at the project level (current directory) or user level (platform-specific paths listed above).
+
+### Tool Auto-Approval Configuration
+
+Nanocoder allows you to configure which tools can run automatically without requiring user confirmation. This is useful for trusted workflows, automated environments, or tools you frequently use.
+
+**Configuration Options:**
+
+There are two types of auto-approval configurations:
+
+1. **`nanocoderTools.alwaysAllow`** - Works in all modes (normal, auto-accept, plan)
+2. **`alwaysAllow`** - Works only in non-interactive mode (`--run` flag)
+
+**Configuration in `agents.config.json`:**
+
+```json
+{
+	"nanocoder": {
+		"providers": [...],
+		"mcpServers": [
+			{
+				"name": "filesystem",
+				"transport": "stdio",
+				"command": "npx",
+				"args": ["@modelcontextprotocol/server-filesystem", "/path"],
+				"alwaysAllow": ["list_directory", "file_info"]
+			}
+		],
+		"alwaysAllow": ["write_file"],
+		"nanocoderTools": {
+			"alwaysAllow": ["write_file", "string_replace"]
+		}
+	}
+}
+```
+
+**Available Nanocoder Tools:**
+
+- `write_file` - Create or overwrite files
+- `string_replace` - Edit files by replacing text
+- `execute_bash` - Run shell commands
+- `read_file` - Read file contents
+- `find_files` - Search for files by name/path
+- `search_file_contents` - Search file contents with regex
+- `fetch_url` - Fetch web content
+- `web_search` - Search the web
+
+**Security Considerations:**
+
+> ⚠️ **WARNING**: Auto-approving powerful tools (especially `execute_bash`) can be dangerous. Only add tools to `alwaysAllow` that you fully trust. Consider the security implications:
+>
+> - **execute_bash**: Can run any shell command - use with extreme caution
+> - **write_file**: Can overwrite important files
+> - **string_replace**: Can modify file contents unexpectedly
+>
+> Start with read-only tools like `read_file`, `find_files`, or `search_file_contents` if you're unsure.
+
+**When to Use Each Configuration:**
+
+- **`nanocoderTools.alwaysAllow`**: For tools you trust in all interactive sessions (e.g., `write_file`, `string_replace`)
+- **`alwaysAllow`**: For fully automated CI/CD workflows using `--run` flag
+- **MCP `alwaysAllow`**: For specific MCP server tools you trust (e.g., read-only filesystem operations)
+
+**Example Use Cases:**
+
+```json
+// Safe read-only setup
+{
+	"nanocoderTools": {
+		"alwaysAllow": ["read_file", "find_files", "search_file_contents"]
+	}
+}
+
+// Developer workflow (careful!)
+{
+	"nanocoderTools": {
+		"alwaysAllow": ["write_file", "string_replace"]
+	}
+}
+
+// CI/CD automation (very careful!)
+{
+	"alwaysAllow": ["write_file", "string_replace", "execute_bash"],
+	"nanocoderTools": {
+		"alwaysAllow": ["write_file"]
+	}
+}
+```
 
 ### User Preferences
 

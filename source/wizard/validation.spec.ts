@@ -188,6 +188,57 @@ test('validateConfig: errors when alwaysAllow contains non-strings', t => {
 	t.regex(result.errors[0], /non-string/);
 });
 
+test('validateConfig: validates nanocoderTools.alwaysAllow is an array', t => {
+	const providers: ProviderConfig[] = [
+		{
+			name: 'ollama',
+			baseUrl: 'http://localhost:11434',
+			models: ['llama2'],
+		},
+	];
+
+	const result = validateConfig(providers, {}, {
+		alwaysAllow: 'not-an-array' as any,
+	});
+
+	t.false(result.valid);
+	t.regex(result.errors[0], /must be an array/);
+});
+
+test('validateConfig: validates nanocoderTools.alwaysAllow entries are strings', t => {
+	const providers: ProviderConfig[] = [
+		{
+			name: 'ollama',
+			baseUrl: 'http://localhost:11434',
+			models: ['llama2'],
+		},
+	];
+
+	const result = validateConfig(providers, {}, {
+		alwaysAllow: ['write_file', 123, true] as any,
+	});
+
+	t.false(result.valid);
+	t.regex(result.errors[0], /non-string entries/);
+});
+
+test('validateConfig: accepts valid nanocoderTools.alwaysAllow', t => {
+	const providers: ProviderConfig[] = [
+		{
+			name: 'ollama',
+			baseUrl: 'http://localhost:11434',
+			models: ['llama2'],
+		},
+	];
+
+	const result = validateConfig(providers, {}, {
+		alwaysAllow: ['write_file', 'string_replace'],
+	});
+
+	t.true(result.valid);
+	t.is(result.errors.length, 0);
+});
+
 test('validateConfig: accumulates multiple errors', t => {
 	const providers: ProviderConfig[] = [
 		{

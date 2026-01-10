@@ -57,8 +57,11 @@
 				"alwaysAllow": ["list_repositories"]
 			}
 		],
+		"_comment_alwaysAllow": "Tools that can run automatically in non-interactive mode (--run flag). This is specifically for automated workflows. For interactive mode auto-approval, use nanocoderTools.alwaysAllow instead.",
+		"alwaysAllow": [],
+		"_comment_nanocoderTools": "WARNING: Auto-approving powerful tools (especially shell execution like 'execute_bash') can be dangerous. Carefully review which tools, if any, you add to alwaysAllow in your configuration. This example uses 'write_file' as a safer demonstration.",
 		"nanocoderTools": {
-			"alwaysAllow": ["execute_bash"]
+			"alwaysAllow": ["write_file"]
 		}
 	}
 }

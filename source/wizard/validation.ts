@@ -20,6 +20,7 @@ interface ProviderTestResult {
 export function validateConfig(
 	providers: ProviderConfig[],
 	mcpServers: Record<string, McpServerConfig>,
+	nanocoderTools?: {alwaysAllow?: string[]},
 ): ValidationResult {
 	const errors: string[] = [];
 	const warnings: string[] = [];
@@ -76,6 +77,22 @@ export function validateConfig(
 				errors.push(
 					`MCP server "${name}" has non-string entries in alwaysAllow`,
 				);
+			}
+		}
+	}
+
+	// Validate nanocoderTools configuration
+	if (nanocoderTools) {
+		if (nanocoderTools.alwaysAllow) {
+			if (!Array.isArray(nanocoderTools.alwaysAllow)) {
+				errors.push('nanocoderTools.alwaysAllow must be an array of strings');
+			} else {
+				const invalidItems = nanocoderTools.alwaysAllow.filter(
+					item => typeof item !== 'string',
+				);
+				if (invalidItems.length > 0) {
+					errors.push('nanocoderTools.alwaysAllow has non-string entries');
+				}
 			}
 		}
 	}
