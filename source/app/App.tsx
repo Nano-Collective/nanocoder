@@ -386,6 +386,10 @@ export default function App({
 		setIsToolExecuting: appState.setIsToolExecuting,
 		setIsCheckpointLoadMode: appState.setIsCheckpointLoadMode,
 		setCheckpointLoadData: appState.setCheckpointLoadData,
+		setPlanModeActive: appState.setPlanModeActive,
+		setPlanId: appState.setPlanId,
+		setPlanPhase: appState.setPlanPhase,
+		setPlanFilePath: appState.setPlanFilePath,
 		addToChatQueue: appState.addToChatQueue,
 		setLiveComponent: appState.setLiveComponent,
 		client: appState.client,
@@ -438,6 +442,9 @@ export default function App({
 				vscodeMode,
 				vscodePort: vscodeServer.actualPort,
 				vscodeRequestedPort: vscodeServer.requestedPort,
+				planModeActive: appState.planModeActive,
+				planPhase: appState.planPhase,
+				planId: appState.planId,
 			}),
 		[
 			shouldShowWelcome,
@@ -452,6 +459,9 @@ export default function App({
 			vscodeMode,
 			vscodeServer.actualPort,
 			vscodeServer.requestedPort,
+			appState.planModeActive,
+			appState.planPhase,
+			appState.planId,
 		],
 	);
 
@@ -622,6 +632,12 @@ export default function App({
 										chatHandler.isGenerating || appState.isToolExecuting
 									}
 									developmentMode={appState.developmentMode}
+									planModeState={{
+										active: appState.planModeActive,
+										planId: appState.planId,
+										phase: appState.planPhase,
+										planFilePath: appState.planFilePath,
+									}}
 									onToolConfirm={toolHandler.handleToolConfirmation}
 									onToolCancel={toolHandler.handleToolConfirmationCancel}
 									onSubmit={appHandlers.handleMessageSubmit}

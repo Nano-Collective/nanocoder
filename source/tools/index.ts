@@ -1,4 +1,6 @@
 import React from 'react';
+import {enterPlanModeTool} from '@/tools/plan/enter-plan-mode';
+import {exitPlanModeTool} from '@/tools/plan/exit-plan-mode';
 import {executeBashTool} from '@/tools/execute-bash';
 import {fetchUrlTool} from '@/tools/fetch-url';
 import {findFilesTool} from '@/tools/find-files';
@@ -35,6 +37,9 @@ const allTools: NanocoderToolExport[] = [
 	searchFileContentsTool,
 	getDiagnosticsTool,
 	listDirectoryTool,
+	// Plan mode tools
+	enterPlanModeTool,
+	exitPlanModeTool,
 	// Git workflow tools
 	gitSmartCommitTool,
 	gitCreatePRTool,

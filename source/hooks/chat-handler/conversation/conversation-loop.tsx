@@ -263,13 +263,8 @@ export const processAssistantResponse = async (
 
 	// Handle tool calls if present - this continues the loop
 	if (validToolCalls && validToolCalls.length > 0) {
-		// Note: Plan mode tool blocking was removed - the referenced tools
-		// (create_file, delete_lines, insert_lines, replace_lines) no longer exist.
-		// Plan mode restrictions are handled via needsApproval in tool definitions.
-		// TODO: Implement registry-based blocking for plan mode (track as separate issue).
-
 		// Separate tools that need confirmation vs those that don't
-		// Check tool's needsApproval property to determine if confirmation is needed
+		// Use centralized ToolManager approval logic for consistent behavior
 		const toolsNeedingConfirmation: ToolCall[] = [];
 		const toolsToExecuteDirectly: ToolCall[] = [];
 
@@ -301,58 +296,21 @@ export const processAssistantResponse = async (
 				}
 			}
 
-			// Check tool's needsApproval property from the tool definition
-			let toolNeedsApproval = true; // Default to requiring approval for safety
-			if (toolManager) {
-				const toolEntry = toolManager.getToolEntry(toolCall.function.name);
-				if (toolEntry?.tool) {
-					const needsApprovalProp = (
-						toolEntry.tool as unknown as {
-							needsApproval?:
-								| boolean
-								| ((args: unknown) => boolean | Promise<boolean>);
-						}
-					).needsApproval;
-					if (typeof needsApprovalProp === 'boolean') {
-						toolNeedsApproval = needsApprovalProp;
-					} else if (typeof needsApprovalProp === 'function') {
-						// Evaluate function - our tools use getCurrentMode() internally
-						// and don't actually need the args parameter
-						try {
-							const parsedArgs = parseToolArguments(
-								toolCall.function.arguments,
-							);
-							// Cast to any to handle AI SDK type signature mismatch
-							// Our tool implementations don't use the second parameter
-							toolNeedsApproval = await (
-								needsApprovalProp as (
-									args: unknown,
-								) => boolean | Promise<boolean>
-							)(parsedArgs);
-						} catch (error) {
-							const logger = getLogger();
-							logger.debug(
-								'needsApproval evaluation failed, requiring approval',
-								{
-									toolName: toolCall.function.name,
-									error,
-								},
-							);
-							toolNeedsApproval = true;
-						}
-					}
-				}
-			}
+			// Use centralized ToolManager approval logic
+			// This provides consistent plan mode filtering across all tools
+			const canExecuteWithoutConfirmation = toolManager
+				? toolManager.shouldExecuteWithoutConfirmation(
+						toolCall.function.name,
+						validationFailed,
+				  )
+				: false;
 
 			// Execute directly if:
 			// 1. Validation failed (need to send error back to model)
-			// 2. Tool has needsApproval: false
-			// 3. In auto-accept mode (except bash which always needs approval)
-			const isBashTool = toolCall.function.name === 'execute_bash';
+			// 2. Tool is allowed to execute without confirmation (per ToolManager)
 			if (
 				validationFailed ||
-				!toolNeedsApproval ||
-				(developmentMode === 'auto-accept' && !isBashTool)
+				canExecuteWithoutConfirmation
 			) {
 				toolsToExecuteDirectly.push(toolCall);
 			} else {

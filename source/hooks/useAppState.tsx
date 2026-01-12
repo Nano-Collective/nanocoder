@@ -14,6 +14,8 @@ import {
 	LSPConnectionStatus,
 	MCPConnectionStatus,
 	Message,
+	PlanModeState,
+	PlanPhase,
 	ToolCall,
 } from '@/types/core';
 import type {ToolResult, UpdateInfo} from '@/types/index';
@@ -119,6 +121,12 @@ export function useAppState() {
 	// Development mode state
 	const [developmentMode, setDevelopmentMode] =
 		useState<DevelopmentMode>('normal');
+
+	// Plan mode state
+	const [planModeActive, setPlanModeActive] = useState<boolean>(false);
+	const [planId, setPlanId] = useState<string | null>(null);
+	const [planPhase, setPlanPhase] = useState<PlanPhase>('understanding');
+	const [planFilePath, setPlanFilePath] = useState<string>('');
 
 	// Tool confirmation state
 	const [pendingToolCalls, setPendingToolCalls] = useState<ToolCall[]>([]);
@@ -266,6 +274,10 @@ export function useAppState() {
 		isToolConfirmationMode,
 		isToolExecuting,
 		developmentMode,
+		planModeActive,
+		planId,
+		planPhase,
+		planFilePath,
 		pendingToolCalls,
 		currentToolIndex,
 		completedToolResults,
@@ -308,6 +320,10 @@ export function useAppState() {
 		setIsToolConfirmationMode,
 		setIsToolExecuting,
 		setDevelopmentMode,
+		setPlanModeActive,
+		setPlanId,
+		setPlanPhase,
+		setPlanFilePath,
 		setPendingToolCalls,
 		setCurrentToolIndex,
 		setCompletedToolResults,

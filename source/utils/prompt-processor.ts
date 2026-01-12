@@ -5,6 +5,8 @@ import {promptPath} from '../config/index';
 import type {InputState} from '../types/hooks';
 import {PlaceholderType} from '../types/hooks';
 import {getLogger} from './logging';
+import {getCurrentMode, getPlanId, getPlanPhase} from '../context/mode-context';
+import {getPlanModePrompt} from './plan/plan-prompt';
 
 /**
  * Get the default shell for the current platform
@@ -72,7 +74,7 @@ function injectSystemInfo(prompt: string): string {
 }
 
 /**
- * Process the main prompt template by injecting system info
+ * Process the main prompt template by injecting system info and plan mode instructions
  */
 export function processPromptTemplate(): string {
 	let systemPrompt = 'You are a helpful AI assistant.'; // fallback
@@ -107,6 +109,19 @@ export function processPromptTemplate(): string {
 			logger.warn(
 				`Failed to load AGENTS.md from ${agentsPath}: ${errorMessage}`,
 			);
+		}
+	}
+
+	// Inject plan mode instructions if plan mode is active
+	const currentMode = getCurrentMode();
+	if (currentMode === 'plan') {
+		const planId = getPlanId();
+		const planPhase = getPlanPhase();
+
+		if (planId) {
+			// Get plan mode specific instructions and inject them
+			const planPrompt = getPlanModePrompt(planPhase, planId);
+			systemPrompt += `\n\n${planPrompt}`;
 		}
 	}
 

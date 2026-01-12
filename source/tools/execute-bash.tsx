@@ -76,6 +76,7 @@ const executeBashCoreTool = tool({
 		required: ['command'],
 	}),
 	// High risk: bash commands always require approval in all modes
+	// In plan mode, bash is completely disabled (blocked by approval requirement)
 	needsApproval: true,
 	execute: async (args, _options) => {
 		return await executeExecuteBash(args);

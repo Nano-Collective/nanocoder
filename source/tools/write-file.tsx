@@ -6,7 +6,8 @@ import {Box, Text} from 'ink';
 import React from 'react';
 
 import ToolMessage from '@/components/tool-message';
-import {getCurrentMode} from '@/context/mode-context';
+import {getPlanId, getCurrentMode} from '@/context/mode-context';
+import {createPlanManager} from '@/services/plan-manager';
 import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
@@ -70,9 +71,27 @@ const writeFileCoreTool = tool({
 		required: ['path', 'content'],
 	}),
 	// Medium risk: file write operation, requires approval except in auto-accept mode
-	needsApproval: () => {
+	// In plan mode, only allow writes to plan files without approval
+	needsApproval: async (args: {path: string; content: string}) => {
 		const mode = getCurrentMode();
-		return mode !== 'auto-accept'; // true in normal/plan, false in auto-accept
+		if (mode === 'auto-accept') {
+			return false; // No approval in auto-accept
+		}
+		if (mode === 'plan') {
+			// In plan mode, only allow writes to plan files without approval
+			const planId = getPlanId();
+			if (!planId) {
+				return true; // Plan mode not properly initialized
+			}
+			const cwd = process.cwd();
+			const planManager = createPlanManager(cwd);
+			const targetPath = args.path;
+			if (targetPath && planManager.isPlanFilePath(targetPath)) {
+				return false; // Allow writing to plan file
+			}
+			return true; // Block non-plan file writes in plan mode
+		}
+		return true; // Normal mode requires approval
 	},
 	execute: async (args, _options) => {
 		return await executeWriteFile(args);

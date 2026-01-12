@@ -4,12 +4,13 @@ import TextInput from 'ink-text-input';
 import {useCallback, useEffect, useMemo, useState} from 'react';
 import {commandRegistry} from '@/commands';
 import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
+import {PlanModeIndicator} from '@/components/plan-mode-indicator';
 import {useInputState} from '@/hooks/useInputState';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
 import {promptHistory} from '@/prompt-history';
-import type {DevelopmentMode} from '@/types/core';
+import type {DevelopmentMode, PlanModeState} from '@/types/core';
 import {Completion} from '@/types/index';
 import {
 	getCurrentFileMention,
@@ -26,6 +27,7 @@ interface ChatProps {
 	onCancel?: () => void; // Callback when user presses escape while thinking
 	onToggleMode?: () => void; // Callback when user presses shift+tab to toggle development mode
 	developmentMode?: DevelopmentMode; // Current development mode
+	planModeState?: PlanModeState; // Current plan mode state
 }
 
 export default function UserInput({
@@ -36,6 +38,7 @@ export default function UserInput({
 	onCancel,
 	onToggleMode,
 	developmentMode = 'normal',
+	planModeState,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
 	const {colors} = useTheme();
@@ -439,6 +442,16 @@ export default function UserInput({
 					developmentMode={developmentMode}
 					colors={colors}
 				/>
+				{planModeState && (
+					<PlanModeIndicator
+						active={planModeState.active}
+						phase={planModeState.phase}
+						planId={planModeState.planId}
+						successColor={colors.success}
+						secondaryColor={colors.secondary}
+						primaryColor={colors.primary}
+					/>
+				)}
 			</Box>
 		);
 	}
@@ -522,6 +535,17 @@ export default function UserInput({
 				developmentMode={developmentMode}
 				colors={colors}
 			/>
+			{/* Plan mode indicator - only shown when plan mode is active */}
+			{planModeState && (
+				<PlanModeIndicator
+					active={planModeState.active}
+					phase={planModeState.phase}
+					planId={planModeState.planId}
+					successColor={colors.success}
+					secondaryColor={colors.secondary}
+					primaryColor={colors.primary}
+				/>
+			)}
 		</Box>
 	);
 }

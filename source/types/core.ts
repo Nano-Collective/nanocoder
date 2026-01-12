@@ -183,6 +183,46 @@ export const DEVELOPMENT_MODE_LABELS: Record<DevelopmentMode, string> = {
 	plan: '⏸ plan mode on',
 };
 
+/**
+ * Plan workflow phases for structured planning
+ *
+ * 5-phase workflow: Understanding → Design → Review → Final Plan → Exit
+ */
+export type PlanPhase =
+	| 'understanding'
+	| 'design'
+	| 'review'
+	| 'final'
+	| 'exit';
+
+/**
+ * Labels for plan phases displayed in UI
+ */
+export const PLAN_PHASE_LABELS: Record<PlanPhase, string> = {
+	understanding: 'Understanding',
+	design: 'Design',
+	review: 'Review',
+	final: 'Final Plan',
+	exit: 'Exit',
+};
+
+/**
+ * Plan mode state tracking
+ *
+ * Maintains the state of the active plan during plan mode.
+ * When plan mode is not active, `active` is false and `planId` is null.
+ */
+export interface PlanModeState {
+	/** Whether plan mode is currently active */
+	active: boolean;
+	/** Unique plan identifier (slug format: adjective-verb-noun) */
+	planId: string | null;
+	/** Current workflow phase */
+	phase: PlanPhase;
+	/** Full path to the plan file */
+	planFilePath: string;
+}
+
 // Connection status types for MCP and LSP servers
 export type ConnectionStatus = 'connected' | 'failed' | 'pending';
 

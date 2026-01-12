@@ -134,9 +134,14 @@ const stringReplaceCoreTool = tool({
 		required: ['path', 'old_str', 'new_str'],
 	}),
 	// Medium risk: file write operation, requires approval except in auto-accept mode
+	// In plan mode, direct editing is disabled (use write_file for plan updates)
 	needsApproval: () => {
 		const mode = getCurrentMode();
-		return mode !== 'auto-accept'; // true in normal/plan, false in auto-accept
+		// In plan mode, always require approval (blocks direct editing)
+		if (mode === 'plan') {
+			return true;
+		}
+		return mode !== 'auto-accept'; // true in normal, false in auto-accept
 	},
 	execute: async (args, _options) => {
 		return await executeStringReplace(args);

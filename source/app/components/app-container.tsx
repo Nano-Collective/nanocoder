@@ -1,7 +1,7 @@
 import React from 'react';
 import Status from '@/components/status';
 import WelcomeMessage from '@/components/welcome-message';
-import type {LSPConnectionStatus, MCPConnectionStatus} from '@/types/core';
+import type {LSPConnectionStatus, MCPConnectionStatus, PlanPhase} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
 
@@ -18,6 +18,9 @@ export interface AppContainerProps {
 	vscodeMode?: boolean;
 	vscodePort?: number | null;
 	vscodeRequestedPort?: number;
+	planModeActive?: boolean;
+	planPhase?: PlanPhase;
+	planId?: string | null;
 }
 
 /**
@@ -37,6 +40,9 @@ export function createStaticComponents({
 	vscodeMode,
 	vscodePort,
 	vscodeRequestedPort,
+	planModeActive,
+	planPhase,
+	planId,
 }: AppContainerProps): React.ReactNode[] {
 	const components: React.ReactNode[] = [];
 
@@ -58,6 +64,9 @@ export function createStaticComponents({
 			vscodeMode={vscodeMode}
 			vscodePort={vscodePort}
 			vscodeRequestedPort={vscodeRequestedPort}
+			planModeActive={planModeActive}
+			planPhase={planPhase}
+			planId={planId}
 		/>,
 	);
 
