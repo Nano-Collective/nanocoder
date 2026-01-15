@@ -6,14 +6,15 @@ import {Box, Text} from 'ink';
 import React from 'react';
 
 import ToolMessage from '@/components/tool-message';
-import {getPlanId, getCurrentMode} from '@/context/mode-context';
-import {createPlanManager} from '@/services/plan-manager';
+import {getCurrentMode, getPlanId, getPlanPhase} from '@/context/mode-context';
 import {ThemeContext} from '@/hooks/useTheme';
+import {createPlanManager} from '@/services/plan-manager';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
 import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
+import {triggerPlanReview} from '@/utils/plan-review-registry';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
 import {calculateTokens} from '@/utils/token-calculator';
 import {
@@ -26,8 +27,49 @@ const executeWriteFile = async (args: {
 	path: string;
 	content: string;
 }): Promise<string> => {
+	const mode = getCurrentMode();
 	const absPath = resolve(args.path);
 	const fileExists = existsSync(absPath);
+
+	// In plan mode, trigger review for plan files before writing
+	if (mode === 'plan') {
+		const planId = getPlanId();
+		if (planId) {
+			const cwd = process.cwd();
+			const planManager = createPlanManager(cwd);
+			if (planManager.isPlanFilePath(args.path)) {
+				// Trigger plan review for plan file writes
+				const currentPhase = getPlanPhase();
+				const reviewTriggered = await new Promise<boolean>(resolve => {
+					const triggered = triggerPlanReview(
+						{
+							planId,
+							planFilePath: args.path,
+							content: args.content,
+							currentPhase,
+						},
+						// onApprove
+						() => {
+							resolve(true);
+						},
+						// onReject
+						() => {
+							resolve(false);
+						},
+					);
+					// If no callback registered, proceed with write
+					if (!triggered) {
+						resolve(true);
+					}
+				});
+
+				// If review was rejected, return early
+				if (!reviewTriggered) {
+					return 'Plan file write cancelled by user review.';
+				}
+			}
+		}
+	}
 
 	await writeFile(absPath, args.content, 'utf-8');
 

@@ -2,10 +2,10 @@ import {existsSync, readFileSync} from 'fs';
 import {homedir, platform, release} from 'os';
 import {join} from 'path';
 import {promptPath} from '../config/index';
+import {getCurrentMode, getPlanId, getPlanPhase} from '../context/mode-context';
 import type {InputState} from '../types/hooks';
 import {PlaceholderType} from '../types/hooks';
 import {getLogger} from './logging';
-import {getCurrentMode, getPlanId, getPlanPhase} from '../context/mode-context';
 import {getPlanModePrompt} from './plan/plan-prompt';
 
 /**

@@ -11,7 +11,11 @@ import {
 	PATH_LENGTH_NORMAL_TERMINAL,
 } from '@/constants';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
-import type {LSPConnectionStatus, MCPConnectionStatus, PlanPhase} from '@/types/core';
+import type {
+	LSPConnectionStatus,
+	MCPConnectionStatus,
+	PlanPhase,
+} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
 

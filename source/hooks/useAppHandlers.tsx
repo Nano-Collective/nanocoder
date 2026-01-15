@@ -196,9 +196,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 						);
 						// Revert to previous mode
 						const previousMode =
-							MODES[
-								(MODES.indexOf(newMode) - 1 + MODES.length) % MODES.length
-							];
+							MODES[(MODES.indexOf(newMode) - 1 + MODES.length) % MODES.length];
 						setCurrentModeContext(previousMode);
 						props.setDevelopmentMode(previousMode);
 						return;
@@ -219,13 +217,13 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					props.setPlanFilePath(planPath);
 
 					// Show success message
-					props.addToChatQueue(
-						<SuccessMessage
-							key={`plan-mode-enter-${Date.now()}`}
-							message={`⏸ Entered Plan Mode\n\nPlan ID: ${planId}\nPlan File: ${planPath}\nPhase: Understanding\n\nUse read-only tools to explore the codebase and write findings to the plan file.`}
-							hideBox={true}
-						/>,
-					);
+					// props.addToChatQueue(
+					// 	<SuccessMessage
+					// 		key={`plan-mode-enter-${Date.now()}`}
+					// 		message={`⏸ Entered Plan Mode\n\nPlan ID: ${planId}\nPlan File: ${planPath}\nPhase: Understanding\n\nUse read-only tools to explore the codebase and write findings to the plan file.`}
+					// 		hideBox={true}
+					// 	/>,
+					// );
 
 					logger.info(`Entered plan mode with plan ID: ${planId}`);
 				} catch (error) {

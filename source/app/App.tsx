@@ -7,6 +7,8 @@ import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
 import {shouldRenderWelcome} from '@/app/helpers';
 import type {AppProps} from '@/app/types';
+import ModeSelectionPrompt from '@/components/mode-selection-prompt';
+import PlanReviewPrompt from '@/components/plan-review-prompt';
 import SecurityDisclaimer from '@/components/security-disclaimer';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {
@@ -34,6 +36,8 @@ import {
 } from '@/utils/logging';
 import {createPinoLogger} from '@/utils/logging/pino-logger';
 import {setGlobalMessageQueue} from '@/utils/message-queue';
+import {registerModeSelectionCallback} from '@/utils/mode-selection-registry';
+import {registerPlanReviewCallback} from '@/utils/plan-review-registry';
 
 export default function App({
 	vscodeMode = false,
@@ -257,6 +261,7 @@ export default function App({
 		onConversationComplete: () => {
 			appState.setIsConversationComplete(true);
 		},
+		setPlanPhase: appState.setPlanPhase,
 	});
 
 	// Setup tool handler
@@ -407,6 +412,65 @@ export default function App({
 	React.useEffect(() => {
 		handleMessageSubmitRef.current = appHandlers.handleMessageSubmit;
 	}, [appHandlers.handleMessageSubmit]);
+
+	// Register mode selection callback when in plan mode
+	React.useEffect(() => {
+		if (appState.developmentMode === 'plan') {
+			// Register callback for mode selection
+			registerModeSelectionCallback(
+				(
+					onSelect: (mode: import('@/types/core').DevelopmentMode) => void,
+					onCancel: () => void,
+				) => {
+					// Trigger mode selection UI
+					appState.setIsModeSelectionMode(true);
+
+					// Store the onSelect/onCancel handlers for use by the UI component
+					// We'll pass these through the app state
+					appState.setPendingModeSelection({
+						onSelect,
+						onCancel,
+					});
+				},
+			);
+
+			// Cleanup on unmount or when leaving plan mode
+			return () => {
+				registerModeSelectionCallback(null);
+				appState.setIsModeSelectionMode(false);
+			};
+		}
+	}, [appState.developmentMode, appState]);
+
+	// Register plan review callback when in plan mode
+	React.useEffect(() => {
+		if (appState.developmentMode === 'plan') {
+			// Register callback for plan review
+			registerPlanReviewCallback(
+				(
+					data: import('@/utils/plan-review-registry').PlanReviewData,
+					onApprove: () => void,
+					onCancel: () => void,
+				) => {
+					// Trigger plan review UI
+					appState.setIsPlanReviewMode(true);
+
+					// Store the data and callbacks for use by the UI component
+					appState.setPendingPlanReview({
+						data,
+						onApprove,
+						onReject: onCancel,
+					});
+				},
+			);
+
+			// Cleanup on unmount or when leaving plan mode
+			return () => {
+				registerPlanReviewCallback(null);
+				appState.setIsPlanReviewMode(false);
+			};
+		}
+	}, [appState.developmentMode, appState]);
 
 	// Setup non-interactive mode
 	const {nonInteractiveLoadingMessage} = useNonInteractiveMode({
@@ -604,6 +668,39 @@ export default function App({
 							/>
 						)}
 
+						{/* Mode Selection Prompt - shown after plan completion */}
+						{appState.isModeSelectionMode && appState.pendingModeSelection && (
+							<ModeSelectionPrompt
+								onSelect={mode => {
+									appState.pendingModeSelection?.onSelect(mode);
+									appState.setIsModeSelectionMode(false);
+									appState.setPendingModeSelection(null);
+								}}
+								onCancel={() => {
+									appState.pendingModeSelection?.onCancel();
+									appState.setIsModeSelectionMode(false);
+									appState.setPendingModeSelection(null);
+								}}
+							/>
+						)}
+
+						{/* Plan Review Prompt - shown before plan file is saved */}
+						{appState.isPlanReviewMode && appState.pendingPlanReview && (
+							<PlanReviewPrompt
+								data={appState.pendingPlanReview.data}
+								onApprove={() => {
+									appState.pendingPlanReview?.onApprove();
+									appState.setIsPlanReviewMode(false);
+									appState.setPendingPlanReview(null);
+								}}
+								onReject={() => {
+									appState.pendingPlanReview?.onReject();
+									appState.setIsPlanReviewMode(false);
+									appState.setPendingPlanReview(null);
+								}}
+							/>
+						)}
+
 						{/* Chat Input - only rendered when not in modal mode */}
 						{appState.startChat &&
 							!(
@@ -613,7 +710,9 @@ export default function App({
 								appState.isModelDatabaseMode ||
 								appState.isConfigWizardMode ||
 								appState.isTitleShapeSelectionMode ||
-								appState.isCheckpointLoadMode
+								appState.isCheckpointLoadMode ||
+								appState.isModeSelectionMode ||
+								appState.isPlanReviewMode
 							) && (
 								<ChatInput
 									isCancelling={appState.isCancelling}

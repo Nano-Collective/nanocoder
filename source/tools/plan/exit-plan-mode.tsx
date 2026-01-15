@@ -2,6 +2,7 @@
  * Exit Plan Mode Tool
  *
  * Exits plan mode and presents the plan for user approval.
+ * Can trigger an interactive mode selection prompt when no next_mode is provided.
  */
 
 import {Box, Text} from 'ink';
@@ -17,8 +18,13 @@ import {
 } from '@/context/mode-context';
 import {createPlanManager} from '@/services/plan-manager';
 import type {DevelopmentMode, NanocoderToolExport} from '@/types/core';
-import {DEVELOPMENT_MODE_LABELS, PLAN_PHASE_LABELS} from '@/types/core';
-import {jsonSchema, tool} from '@/types/core';
+import {
+	DEVELOPMENT_MODE_LABELS,
+	jsonSchema,
+	PLAN_PHASE_LABELS,
+	tool,
+} from '@/types/core';
+import {triggerModeSelection} from '@/utils/mode-selection-registry';
 
 /**
  * Validate the next mode value
@@ -34,8 +40,13 @@ const executeExitPlanMode = async (args: {
 
 	// Check if we're actually in plan mode
 	if (currentMode !== 'plan') {
-		const currentLabel = DEVELOPMENT_MODE_LABELS[currentMode as keyof typeof DEVELOPMENT_MODE_LABELS];
-		throw new Error(`Cannot exit plan mode from ${currentLabel}. Plan mode is not currently active.`);
+		const currentLabel =
+			DEVELOPMENT_MODE_LABELS[
+				currentMode as keyof typeof DEVELOPMENT_MODE_LABELS
+			];
+		throw new Error(
+			`Cannot exit plan mode from ${currentLabel}. Plan mode is not currently active.`,
+		);
 	}
 
 	const planId = getPlanId();
@@ -56,10 +67,57 @@ const executeExitPlanMode = async (args: {
 			throw new Error(`Plan file not found: ${planFilePath}`);
 		}
 
-		// Determine next mode
+		// Check if next_mode was explicitly provided
+		const nextModeExplicitlyProvided = args.next_mode !== undefined;
+
+		// If next_mode was not provided, trigger mode selection prompt
+		if (!nextModeExplicitlyProvided) {
+			// Try to trigger interactive mode selection
+			const modeSelectionTriggered = await new Promise<boolean>(resolve => {
+				const triggered = triggerModeSelection(
+					(selectedMode: DevelopmentMode) => {
+						// User selected a mode - switch to it
+						setCurrentMode(selectedMode);
+						resetPlanModeState();
+						resolve(true);
+					},
+					() => {
+						// User cancelled - default to normal mode
+						setCurrentMode('normal');
+						resetPlanModeState();
+						resolve(true);
+					},
+				);
+
+				// If no callback registered, resolve immediately
+				if (!triggered) {
+					resolve(false);
+				}
+			});
+
+			// If mode selection was triggered, return immediately
+			// The mode has already been switched by the callback
+			if (modeSelectionTriggered) {
+				const phaseLabel = PLAN_PHASE_LABELS[planPhase];
+
+				let output = `✓ Plan Complete\n\n`;
+				output += `Plan ID: ${planId}\n`;
+				output += `Final Phase: ${phaseLabel}\n`;
+				output += `Plan File: ${planFilePath}\n\n`;
+				output += `The plan has been saved to: ${planFilePath}\n`;
+
+				return output;
+			}
+
+			// No callback registered - fall through to default behavior
+		}
+
+		// Determine next mode (either explicitly provided or default)
 		const nextMode: DevelopmentMode = args.next_mode || 'normal';
 		if (!isValidNextMode(nextMode)) {
-			throw new Error(`Invalid next_mode: "${args.next_mode}". Must be "normal" or "auto-accept".`);
+			throw new Error(
+				`Invalid next_mode: "${args.next_mode}". Must be "normal" or "auto-accept".`,
+			);
 		}
 
 		// Update mode context
@@ -83,8 +141,7 @@ const executeExitPlanMode = async (args: {
 
 		return output;
 	} catch (error) {
-		const errorMessage =
-			error instanceof Error ? error.message : String(error);
+		const errorMessage = error instanceof Error ? error.message : String(error);
 		throw new Error(`Failed to exit plan mode: ${errorMessage}`);
 	}
 };
@@ -127,9 +184,7 @@ const ExitPlanModeFormatter = ({
 	const messageContent = (
 		<Box flexDirection="column">
 			<Text color="#00ff00">▶ Exiting Plan Mode...</Text>
-			<Text dimColor>
-				(Transitioning to {nextModeLabel})
-			</Text>
+			<Text dimColor>(Transitioning to {nextModeLabel})</Text>
 			{result && (
 				<Box marginTop={1} flexDirection="column">
 					<Text>{result}</Text>
@@ -148,7 +203,10 @@ const exitPlanModeValidator = async (args: {
 
 	// Check if we're in plan mode
 	if (currentMode !== 'plan') {
-		const currentLabel = DEVELOPMENT_MODE_LABELS[currentMode as keyof typeof DEVELOPMENT_MODE_LABELS];
+		const currentLabel =
+			DEVELOPMENT_MODE_LABELS[
+				currentMode as keyof typeof DEVELOPMENT_MODE_LABELS
+			];
 		return {
 			valid: false,
 			error: `▶ Cannot exit plan mode from ${currentLabel}. Plan mode is not currently active.`,

@@ -1,3 +1,4 @@
+import {getCurrentMode} from '@/context/mode-context';
 import {MCPClient} from '@/mcp/mcp-client';
 import {
 	nativeToolsRegistry as staticNativeToolsRegistry,
@@ -7,11 +8,6 @@ import {
 	toolValidators as staticToolValidators,
 } from '@/tools/index';
 import {ToolRegistry} from '@/tools/tool-registry';
-import {
-	getCurrentMode,
-	getPlanId,
-	getPlanModeState,
-} from '@/context/mode-context';
 import type {
 	AISDKCoreTool,
 	MCPInitResult,
@@ -320,9 +316,15 @@ export class ToolManager {
 
 		// Default: require approval for safety
 		if (currentMode === 'plan') {
-			return {needsApproval: true, reason: 'Plan mode: tool not explicitly allowed'};
+			return {
+				needsApproval: true,
+				reason: 'Plan mode: tool not explicitly allowed',
+			};
 		}
-		return {needsApproval: true, reason: 'Tool requires confirmation (default)'};
+		return {
+			needsApproval: true,
+			reason: 'Tool requires confirmation (default)',
+		};
 	}
 
 	/**

@@ -8,6 +8,7 @@ import type {ToolManager} from '@/tools/tool-manager';
 import type {LLMClient, Message, ToolCall, ToolResult} from '@/types/core';
 import {getLogger} from '@/utils/logging';
 import {MessageBuilder} from '@/utils/message-builder';
+import {processPhaseTransition} from '@/utils/plan/phase-transition-detector';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {displayToolResult} from '@/utils/tool-result-display';
 import {filterValidToolCalls} from '../utils/tool-filters';
@@ -37,6 +38,7 @@ interface ProcessAssistantResponseParams {
 		systemMessage: Message,
 	) => void;
 	onConversationComplete?: () => void;
+	setPlanPhase?: (phase: import('@/types/core').PlanPhase) => void;
 }
 
 /**
@@ -70,6 +72,7 @@ export const processAssistantResponse = async (
 		conversationStateManager,
 		onStartToolConfirmationFlow,
 		onConversationComplete,
+		setPlanPhase,
 	} = params;
 
 	// Ensure we have an abort controller for this request
@@ -171,6 +174,18 @@ export const processAssistantResponse = async (
 
 	const parsedToolCalls = parseResult.toolCalls;
 	const cleanedContent = parseResult.cleanedContent;
+
+	// Detect plan mode phase transitions in AI response
+	// This updates both global context and React state when phase changes
+	if (developmentMode === 'plan' && cleanedContent.trim()) {
+		const phaseChanged = processPhaseTransition(cleanedContent);
+		if (phaseChanged && setPlanPhase) {
+			// Import here to avoid circular dependency
+			// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+			const {getPlanPhase} = await import('@/context/mode-context');
+			setPlanPhase(getPlanPhase());
+		}
+	}
 
 	// Display the assistant response (cleaned of any tool calls)
 	if (cleanedContent.trim()) {
@@ -302,16 +317,13 @@ export const processAssistantResponse = async (
 				? toolManager.shouldExecuteWithoutConfirmation(
 						toolCall.function.name,
 						validationFailed,
-				  )
+					)
 				: false;
 
 			// Execute directly if:
 			// 1. Validation failed (need to send error back to model)
 			// 2. Tool is allowed to execute without confirmation (per ToolManager)
-			if (
-				validationFailed ||
-				canExecuteWithoutConfirmation
-			) {
+			if (validationFailed || canExecuteWithoutConfirmation) {
 				toolsToExecuteDirectly.push(toolCall);
 			} else {
 				toolsNeedingConfirmation.push(toolCall);

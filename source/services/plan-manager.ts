@@ -8,10 +8,9 @@
  * Example: focused-creating-feature
  */
 
-import { promises as fs } from 'node:fs';
+import {existsSync, promises as fs} from 'node:fs';
 import * as path from 'node:path';
-import { existsSync } from 'node:fs';
-import { generateUniqueSlug, isValidSlug } from '@/utils/plan/slug-generator.js';
+import {generateUniqueSlug, isValidSlug} from '@/utils/plan/slug-generator.js';
 
 /**
  * Result type for directory validation
@@ -68,7 +67,7 @@ export class PlanManager {
 		const plansDir = this.getPlansDir();
 
 		if (!existsSync(plansDir)) {
-			await fs.mkdir(plansDir, { recursive: true });
+			await fs.mkdir(plansDir, {recursive: true});
 		}
 
 		return plansDir;
@@ -110,7 +109,7 @@ export class PlanManager {
 
 		// Get existing plan IDs to ensure uniqueness
 		const existingPlans = await this.listPlans();
-		const existingSlugs = new Set(existingPlans.map((p) => p.planId));
+		const existingSlugs = new Set(existingPlans.map(p => p.planId));
 
 		// Generate unique slug
 		const planId = generateUniqueSlug(existingSlugs);
@@ -121,7 +120,7 @@ export class PlanManager {
 
 		await fs.writeFile(planPath, initialContent, 'utf8');
 
-		return { planId, planPath };
+		return {planId, planPath};
 	}
 
 	/**
@@ -155,11 +154,11 @@ phase: understanding
 		const planPath = this.getPlanPath(planId);
 
 		if (!existsSync(planPath)) {
-			return { content: '', exists: false, planPath };
+			return {content: '', exists: false, planPath};
 		}
 
 		const content = await fs.readFile(planPath, 'utf8');
-		return { content, exists: true, planPath };
+		return {content, exists: true, planPath};
 	}
 
 	/**
@@ -224,7 +223,7 @@ phase: understanding
 						// Verify the file actually exists and is a file
 						const stat = await fs.stat(planPath);
 						if (stat.isFile()) {
-							plans.push({ planId, planPath });
+							plans.push({planId, planPath});
 						}
 					}
 				}
@@ -280,7 +279,10 @@ phase: understanding
 
 		// Try to access the directory
 		try {
-			await fs.access(this.workspaceRoot, fs.constants.R_OK | fs.constants.W_OK);
+			await fs.access(
+				this.workspaceRoot,
+				fs.constants.R_OK | fs.constants.W_OK,
+			);
 		} catch {
 			return {
 				valid: false,
@@ -303,7 +305,7 @@ phase: understanding
 			};
 		}
 
-		return { valid: true };
+		return {valid: true};
 	}
 }
 

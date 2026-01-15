@@ -54,7 +54,9 @@ export const PlanModeIndicator = React.memo(
 		return (
 			<Box marginTop={1}>
 				<Text color={successColor}>
-					<Text bold>Plan Mode: {phaseIndicator} {phaseLabel}</Text>
+					<Text bold>
+						Plan Mode: {phaseIndicator} {phaseLabel}
+					</Text>
 				</Text>
 				<Text color={secondaryColor}> | </Text>
 				<Text color={primaryColor}>{planId}</Text>

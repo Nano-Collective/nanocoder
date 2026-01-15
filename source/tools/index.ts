@@ -1,6 +1,4 @@
 import React from 'react';
-import {enterPlanModeTool} from '@/tools/plan/enter-plan-mode';
-import {exitPlanModeTool} from '@/tools/plan/exit-plan-mode';
 import {executeBashTool} from '@/tools/execute-bash';
 import {fetchUrlTool} from '@/tools/fetch-url';
 import {findFilesTool} from '@/tools/find-files';
@@ -12,6 +10,8 @@ import {
 } from '@/tools/git';
 import {listDirectoryTool} from '@/tools/list-directory';
 import {getDiagnosticsTool} from '@/tools/lsp-get-diagnostics';
+import {enterPlanModeTool} from '@/tools/plan/enter-plan-mode';
+import {exitPlanModeTool} from '@/tools/plan/exit-plan-mode';
 import {readFileTool} from '@/tools/read-file';
 import {searchFileContentsTool} from '@/tools/search-file-contents';
 import {stringReplaceTool} from '@/tools/string-replace';

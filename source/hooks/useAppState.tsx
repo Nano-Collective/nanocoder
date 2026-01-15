@@ -14,7 +14,6 @@ import {
 	LSPConnectionStatus,
 	MCPConnectionStatus,
 	Message,
-	PlanModeState,
 	PlanPhase,
 	ToolCall,
 } from '@/types/core';
@@ -116,6 +115,18 @@ export function useAppState() {
 	} | null>(null);
 	const [isToolConfirmationMode, setIsToolConfirmationMode] =
 		useState<boolean>(false);
+	const [isModeSelectionMode, setIsModeSelectionMode] =
+		useState<boolean>(false);
+	const [pendingModeSelection, setPendingModeSelection] = useState<{
+		onSelect: (mode: DevelopmentMode) => void;
+		onCancel: () => void;
+	} | null>(null);
+	const [isPlanReviewMode, setIsPlanReviewMode] = useState<boolean>(false);
+	const [pendingPlanReview, setPendingPlanReview] = useState<{
+		data: import('@/utils/plan-review-registry').PlanReviewData;
+		onApprove: () => void;
+		onReject: () => void;
+	} | null>(null);
 	const [isToolExecuting, setIsToolExecuting] = useState<boolean>(false);
 
 	// Development mode state
@@ -272,6 +283,10 @@ export function useAppState() {
 		isCheckpointLoadMode,
 		checkpointLoadData,
 		isToolConfirmationMode,
+		isModeSelectionMode,
+		pendingModeSelection,
+		isPlanReviewMode,
+		pendingPlanReview,
 		isToolExecuting,
 		developmentMode,
 		planModeActive,
@@ -318,6 +333,10 @@ export function useAppState() {
 		setIsCheckpointLoadMode,
 		setCheckpointLoadData,
 		setIsToolConfirmationMode,
+		setIsModeSelectionMode,
+		setPendingModeSelection,
+		setIsPlanReviewMode,
+		setPendingPlanReview,
 		setIsToolExecuting,
 		setDevelopmentMode,
 		setPlanModeActive,

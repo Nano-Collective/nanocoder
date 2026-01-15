@@ -1,6 +1,6 @@
 import type React from 'react';
 import type {ToolManager} from '@/tools/tool-manager';
-import type {LLMClient, Message, ToolCall} from '@/types/core';
+import type {LLMClient, Message, PlanPhase, ToolCall} from '@/types/core';
 
 export interface UseChatHandlerProps {
 	client: LLMClient | null;
@@ -24,6 +24,7 @@ export interface UseChatHandlerProps {
 		systemMessage: Message,
 	) => void;
 	onConversationComplete?: () => void;
+	setPlanPhase?: (phase: PlanPhase) => void;
 }
 
 export interface ChatHandlerReturn {

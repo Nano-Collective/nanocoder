@@ -16,8 +16,7 @@ import {
 } from '@/context/mode-context';
 import {createPlanManager} from '@/services/plan-manager';
 import type {NanocoderToolExport} from '@/types/core';
-import {DEVELOPMENT_MODE_LABELS} from '@/types/core';
-import {jsonSchema, tool} from '@/types/core';
+import {DEVELOPMENT_MODE_LABELS, jsonSchema, tool} from '@/types/core';
 import {getLogger} from '@/utils/logging';
 
 /**
@@ -35,7 +34,10 @@ const executeEnterPlanMode = async (args: {
 
 	// Check if we can enter plan mode from current state
 	if (!canEnterPlanMode(currentMode)) {
-		const currentLabel = DEVELOPMENT_MODE_LABELS[currentMode as keyof typeof DEVELOPMENT_MODE_LABELS];
+		const currentLabel =
+			DEVELOPMENT_MODE_LABELS[
+				currentMode as keyof typeof DEVELOPMENT_MODE_LABELS
+			];
 		throw new Error(
 			`Cannot enter plan mode from ${currentLabel}. Plan mode can only be entered from normal or auto-accept mode.`,
 		);
@@ -81,8 +83,7 @@ const executeEnterPlanMode = async (args: {
 
 		return output;
 	} catch (error) {
-		const errorMessage =
-			error instanceof Error ? error.message : String(error);
+		const errorMessage = error instanceof Error ? error.message : String(error);
 		throw new Error(`Failed to enter plan mode: ${errorMessage}`);
 	}
 };
@@ -122,9 +123,7 @@ const EnterPlanModeFormatter = ({
 		<Box flexDirection="column">
 			<Text color="#00ff00">⏸ Entering Plan Mode...</Text>
 			{args.skip_directory_validation && (
-				<Text dimColor>
-					(Skipping directory validation)
-				</Text>
+				<Text dimColor>(Skipping directory validation)</Text>
 			)}
 			{result && (
 				<Box marginTop={1} flexDirection="column">
@@ -144,7 +143,10 @@ const enterPlanModeValidator = async (_args: {
 
 	// Check if we can enter plan mode from current state
 	if (!canEnterPlanMode(currentMode)) {
-		const currentLabel = DEVELOPMENT_MODE_LABELS[currentMode as keyof typeof DEVELOPMENT_MODE_LABELS];
+		const currentLabel =
+			DEVELOPMENT_MODE_LABELS[
+				currentMode as keyof typeof DEVELOPMENT_MODE_LABELS
+			];
 		return {
 			valid: false,
 			error: `⏸ Cannot enter plan mode from ${currentLabel}. Plan mode can only be entered from normal or auto-accept mode.`,

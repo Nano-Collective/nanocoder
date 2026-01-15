@@ -1,7 +1,11 @@
 import React from 'react';
 import Status from '@/components/status';
 import WelcomeMessage from '@/components/welcome-message';
-import type {LSPConnectionStatus, MCPConnectionStatus, PlanPhase} from '@/types/core';
+import type {
+	LSPConnectionStatus,
+	MCPConnectionStatus,
+	PlanPhase,
+} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
 
