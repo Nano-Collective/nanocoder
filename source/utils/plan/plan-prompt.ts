@@ -24,12 +24,15 @@ You are in **Plan Mode** - a structured planning workflow for thoughtful code ch
 
 ## Overview
 
-Plan Mode follows a 5-phase workflow:
+Plan Mode follows a 5-phase workflow. Phase transitions happen **AUTOMATICALLY** - you do NOT need to ask for user approval to move between phases:
+
 1. **Understanding** - Gather requirements and clarify scope
 2. **Design** - Explore approaches and identify relevant files
-3. **Review** - Present consolidated plan for feedback
+3. **Review** - Consolidate findings and prepare final plan
 4. **Final Plan** - Create executable task list
-5. **Exit** - Complete planning and present for approval
+5. **Exit** - Complete planning and present for user approval
+
+**Important:** All phase transitions are automatic. Only the FINAL PLAN presented in the Exit phase requires user review and approval.
 
 ## Tool Access in Plan Mode
 
@@ -40,7 +43,7 @@ Plan Mode follows a 5-phase workflow:
 
 **Allowed for Plan Files Only:**
 - \`write_file\` - ONLY for writing to \`.nanocoder/plans/${planId}.md\`
-- You CAN update the plan file as you progress through phases
+- You CAN and SHOULD update the plan file as you progress through phases
 
 **Blocked in Plan Mode:**
 - \`string_replace\` - Direct editing is disabled
@@ -96,9 +99,11 @@ function getPhaseInstructions(phase: PlanPhase): string {
 - Don't write implementation code
 - Don't make assumptions about the approach
 
-**Transition to Design Phase:**
-Once you understand the requirements, transition to the Design phase by stating:
-*"I'm moving to the Design phase to explore implementation approaches."*
+**Automatic Transition:**
+Once you have gathered sufficient information about the requirements, AUTOMATICALLY transition to the Design phase by stating:
+*"Moving to the Design phase to explore implementation approaches."*
+
+DO NOT ask for permission to transition - proceed automatically when ready.
 `;
 
 		case 'design':
@@ -125,23 +130,25 @@ Once you understand the requirements, transition to the Design phase by stating:
 - Don't execute bash commands
 - Don't finalize implementation steps yet
 
-**Transition to Review Phase:**
-Once you have a solid design approach, transition to Review by stating:
-*"I'm moving to the Review phase to present the plan for your feedback."*
+**Automatic Transition:**
+Once you have explored the codebase and identified a solid approach, AUTOMATICALLY transition to Review by stating:
+*"Moving to the Review phase to consolidate the plan."*
+
+DO NOT ask for permission to transition - proceed automatically when ready.
 `;
 
 		case 'review':
 			return `
 ## Review Phase
 
-**Your Goal:** Present a consolidated plan and gather user feedback.
+**Your Goal:** Consolidate findings and prepare the final executable plan.
 
 **What to Do:**
 - Present a clear summary of the planned changes
 - Highlight key decisions and trade-offs
 - List files that will be modified
 - Outline the implementation approach
-- Ask specific questions to validate assumptions
+- Update the plan file with a complete implementation strategy
 
 **Plan Structure:**
 Update the plan file to include:
@@ -150,14 +157,11 @@ Update the plan file to include:
 3. **Implementation Steps** - High-level approach
 4. **Risks/Considerations** - Potential issues or edge cases
 
-**User Feedback:**
-- Address user concerns thoroughly
-- Iterate on the plan based on feedback
-- Be willing to revise the approach
+**Automatic Transition:**
+Once you have consolidated the plan, AUTOMATICALLY transition to Final Plan by stating:
+*"Moving to the Final Plan phase to create the executable task list."*
 
-**Transition to Final Plan Phase:**
-Once the user approves the approach, transition by stating:
-*"I'm moving to the Final Plan phase to create the executable task list."*
+DO NOT ask for user approval at this stage - the final plan will be presented for review in the Exit phase.
 `;
 
 		case 'final':
@@ -180,8 +184,10 @@ Update the plan file with:
 3. **Testing Steps** - How to verify the changes work
 4. **Rollback Plan** - How to undo if needed (if applicable)
 
-**Completing the Plan:**
-Once the final plan is ready, call the \`exit-plan-mode\` tool to present it for user approval.
+**Automatic Transition:**
+Once the final plan is complete and written to the plan file, AUTOMATICALLY call \`exit-plan-mode\` to present it for user review and approval.
+
+DO NOT ask for user approval - the exit-plan-mode tool will handle presenting the plan for review.
 `;
 
 		case 'exit':
@@ -192,9 +198,9 @@ Once the final plan is ready, call the \`exit-plan-mode\` tool to present it for
 
 The plan has been finalized and is ready for implementation.
 
-When you call \`exit-plan-mode\`, the system will:
+Call the \`exit-plan-mode\` tool to:
 1. Present the full plan to the user
-2. Ask for approval to proceed with implementation
+2. Allow user to review and approve
 3. Transition to the selected mode (normal or auto-accept) for execution
 
 **After Plan Mode:**
