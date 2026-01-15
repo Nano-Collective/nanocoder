@@ -31,41 +31,47 @@ const executeWriteFile = async (args: {
 	const absPath = resolve(args.path);
 	const fileExists = existsSync(absPath);
 
-	// In plan mode, trigger review for plan files before writing
+	// In plan mode, trigger review for plan files before writing (only in final phase)
 	if (mode === 'plan') {
 		const planId = getPlanId();
 		if (planId) {
-			const cwd = process.cwd();
-			const planManager = createPlanManager(cwd);
-			if (planManager.isPlanFilePath(args.path)) {
-				// Trigger plan review for plan file writes
-				const currentPhase = getPlanPhase();
-				const reviewTriggered = await new Promise<boolean>(resolve => {
-					const triggered = triggerPlanReview(
-						{
-							planId,
-							planFilePath: args.path,
-							content: args.content,
-							currentPhase,
-						},
-						// onApprove
-						() => {
-							resolve(true);
-						},
-						// onReject
-						() => {
-							resolve(false);
-						},
-					);
-					// If no callback registered, proceed with write
-					if (!triggered) {
-						resolve(true);
-					}
-				});
+			const currentPhase = getPlanPhase();
+			// Only trigger review for final plan files, not intermediate drafts
+			if (currentPhase === 'final' || currentPhase === 'exit') {
+				const cwd = process.cwd();
+				const planManager = createPlanManager(cwd);
+				if (planManager.isPlanFilePath(args.path)) {
+					// Trigger plan review for plan file writes
+					const reviewTriggered = await new Promise<boolean>(resolve => {
+						// Use setImmediate to allow React to render before blocking
+						setImmediate(() => {
+							const triggered = triggerPlanReview(
+								{
+									planId,
+									planFilePath: args.path,
+									content: args.content,
+									currentPhase,
+								},
+								// onApprove
+								() => {
+									resolve(true);
+								},
+								// onReject
+								() => {
+									resolve(false);
+								},
+							);
+							// If no callback registered, proceed with write
+							if (!triggered) {
+								resolve(true);
+							}
+						});
+					});
 
-				// If review was rejected, return early
-				if (!reviewTriggered) {
-					return 'Plan file write cancelled by user review.';
+					// If review was rejected, return early
+					if (!reviewTriggered) {
+						return 'Plan file write cancelled by user review.';
+					}
 				}
 			}
 		}

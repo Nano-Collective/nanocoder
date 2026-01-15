@@ -5,7 +5,7 @@
  * plan files before they are saved.
  */
 
-import {Box, Static, Text, useInput} from 'ink';
+import {Box, Text, useInput} from 'ink';
 import {useCallback, useMemo, useState} from 'react';
 import type {PlanPhase} from '@/types/core';
 import {PLAN_PHASE_LABELS} from '@/types/core';
@@ -106,17 +106,15 @@ export function PlanReviewPrompt({
 			{/* Content Preview */}
 			<Box marginTop={1} flexDirection="column">
 				<Text color="#00ffff">Plan Content Preview:</Text>
-				<Box paddingLeft={1}>
-					<Static items={displayLines}>
-						{(line, index) => (
-							<Box key={index}>
-								<Text dimColor color="#666666">
-									{String(index + 1).padStart(4, ' ')}{' '}
-								</Text>
-								<Text wrap="wrap">{line || ' '}</Text>
-							</Box>
-						)}
-					</Static>
+				<Box paddingLeft={1} flexDirection="column">
+					{displayLines.map((line, index) => (
+						<Box key={index}>
+							<Text dimColor color="#666666">
+								{String(index + 1).padStart(4, ' ')}{' '}
+							</Text>
+							<Text wrap="wrap">{line || ' '}</Text>
+						</Box>
+					))}
 				</Box>
 				{hasMoreContent && !showFullContent && (
 					<Box>
