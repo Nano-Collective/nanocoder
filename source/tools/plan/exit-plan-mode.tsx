@@ -72,31 +72,32 @@ const executeExitPlanMode = async (args: {
 
 		// If next_mode was not provided, trigger mode selection prompt
 		if (!nextModeExplicitlyProvided) {
-			// Try to trigger interactive mode selection
-			const modeSelectionTriggered = await new Promise<boolean>(resolve => {
-				const triggered = triggerModeSelection(
-					(selectedMode: DevelopmentMode) => {
-						// User selected a mode - switch to it
-						setCurrentMode(selectedMode);
-						resetPlanModeState();
-						resolve(true);
+			// Trigger interactive mode selection - this will show the prompt
+			// The prompt is rendered by App.tsx based on isModeSelectionMode state
+			// Note: We don't reset plan mode state here because the prompt needs
+			// the plan ID to render. The UI component will handle the state reset.
+			const modeSelectionTriggered = triggerModeSelection(
+				(selectedMode: DevelopmentMode) => {
+					// User selected a mode - switch to it
+					// Don't reset plan state here - let the UI component handle it
+					setCurrentMode(selectedMode);
+				},
+				() => {
+					// User cancelled - default to normal mode
+					setCurrentMode('normal');
+				},
+				// Pass plan content for preview and onModify handler
+				{
+					planContent: content,
+					onModify: () => {
+						// User selected "Modify Plan" - stay in plan mode
+						// Don't change mode, just let them continue editing
 					},
-					() => {
-						// User cancelled - default to normal mode
-						setCurrentMode('normal');
-						resetPlanModeState();
-						resolve(true);
-					},
-				);
+				},
+			);
 
-				// If no callback registered, resolve immediately
-				if (!triggered) {
-					resolve(false);
-				}
-			});
-
-			// If mode selection was triggered, return immediately
-			// The mode has already been switched by the callback
+			// If mode selection was triggered, return a brief message
+			// The actual mode selection will happen via the UI prompt
 			if (modeSelectionTriggered) {
 				const phaseLabel = PLAN_PHASE_LABELS[planPhase];
 
@@ -104,7 +105,7 @@ const executeExitPlanMode = async (args: {
 				output += `Plan ID: ${planId}\n`;
 				output += `Final Phase: ${phaseLabel}\n`;
 				output += `Plan File: ${planFilePath}\n\n`;
-				output += `The plan has been saved to: ${planFilePath}\n`;
+				output += `Plan saved. Please use the mode selection prompt to choose how to proceed.\n`;
 
 				return output;
 			}

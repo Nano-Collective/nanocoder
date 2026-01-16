@@ -7,9 +7,17 @@
 
 import type {DevelopmentMode} from '@/types/core';
 
+export interface ModeSelectionOptions {
+	/** Plan content to display in the preview */
+	planContent?: string;
+	/** Callback for when user selects "Modify Plan" */
+	onModify?: () => void;
+}
+
 type ModeSelectionCallback = (
 	onSelect: (mode: DevelopmentMode) => void,
 	onCancel: () => void,
+	options?: ModeSelectionOptions,
 ) => void;
 
 let modeSelectionCallback: ModeSelectionCallback | null = null;
@@ -29,9 +37,10 @@ export function registerModeSelectionCallback(
 export function triggerModeSelection(
 	onSelect: (mode: DevelopmentMode) => void,
 	onCancel: () => void,
+	options?: ModeSelectionOptions,
 ): boolean {
 	if (modeSelectionCallback) {
-		modeSelectionCallback(onSelect, onCancel);
+		modeSelectionCallback(onSelect, onCancel, options);
 		return true;
 	}
 	return false;

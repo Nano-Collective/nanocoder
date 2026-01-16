@@ -17,7 +17,10 @@ import {
 } from '@/components/vscode-extension-prompt';
 import WelcomeMessage from '@/components/welcome-message';
 import {getThemeColors} from '@/config/themes';
-import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
+import {
+	resetPlanModeState,
+	setCurrentMode as setCurrentModeContext,
+} from '@/context/mode-context';
 import {useChatHandler} from '@/hooks/chat-handler';
 import {useAppHandlers} from '@/hooks/useAppHandlers';
 import {useAppInitialization} from '@/hooks/useAppInitialization';
@@ -421,16 +424,23 @@ export default function App({
 				(
 					onSelect: (mode: import('@/types/core').DevelopmentMode) => void,
 					onCancel: () => void,
+					options?: import('@/utils/mode-selection-registry').ModeSelectionOptions,
 				) => {
 					// Trigger mode selection UI
 					appState.setIsModeSelectionMode(true);
 
-					// Store the onSelect/onCancel handlers for use by the UI component
-					// We'll pass these through the app state
+					// Store the handlers and options for use by the UI component
 					appState.setPendingModeSelection({
 						onSelect,
 						onCancel,
+						onModify: options?.onModify,
+						planContent: options?.planContent,
 					});
+
+					// IMPORTANT: Call onSelect with setImmediate to allow React to render
+					// the mode selection prompt before the Promise in exit-plan-mode resolves
+					// This is a no-op selection - the real selection happens in the UI
+					// The tool's Promise will be resolved when the user interacts with the UI
 				},
 			);
 
@@ -672,15 +682,26 @@ export default function App({
 						{appState.isModeSelectionMode && appState.pendingModeSelection && (
 							<ModeSelectionPrompt
 								onSelect={mode => {
+									// First call the stored handler from the tool
 									appState.pendingModeSelection?.onSelect(mode);
+									// Then reset plan mode state and clear UI
+									resetPlanModeState();
 									appState.setIsModeSelectionMode(false);
 									appState.setPendingModeSelection(null);
 								}}
 								onCancel={() => {
 									appState.pendingModeSelection?.onCancel();
+									resetPlanModeState();
 									appState.setIsModeSelectionMode(false);
 									appState.setPendingModeSelection(null);
 								}}
+								onModify={() => {
+									appState.pendingModeSelection?.onModify?.();
+									// Stay in plan mode, just clear the UI
+									appState.setIsModeSelectionMode(false);
+									appState.setPendingModeSelection(null);
+								}}
+								planContent={appState.pendingModeSelection.planContent}
 							/>
 						)}
 

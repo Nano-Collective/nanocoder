@@ -29,6 +29,11 @@ const PHASE_TRANSITION_PATTERNS: Record<
 				/entering the design phase/i,
 				/now in the design phase/i,
 				/design phase:/i,
+				// More flexible patterns
+				/##\s*Design Phase/i,
+				/\*\*Design Phase\*\*/i,
+				/proceeding to design/i,
+				/beginning design phase/i,
 			],
 			direction: 'forward',
 		},
@@ -41,6 +46,12 @@ const PHASE_TRANSITION_PATTERNS: Record<
 				/entering the review phase/i,
 				/now in the review phase/i,
 				/review phase:/i,
+				// More flexible patterns
+				/##\s*Review Phase/i,
+				/\*\*Review Phase\*\*/i,
+				/proceeding to review/i,
+				/beginning review phase/i,
+				/consolidat(ing|e the) plan/i,
 			],
 			direction: 'forward',
 		},
@@ -54,6 +65,13 @@ const PHASE_TRANSITION_PATTERNS: Record<
 				/now in the final plan phase/i,
 				/final plan phase:/i,
 				/moving to the final phase/i,
+				// More flexible patterns
+				/##\s*Final Plan Phase/i,
+				/\*\*Final Plan Phase\*\*/i,
+				/proceeding to final/i,
+				/beginning final plan/i,
+				/create(ing)? the final plan/i,
+				/moving to create the executable/i,
 			],
 			direction: 'forward',
 		},
@@ -65,6 +83,9 @@ const PHASE_TRANSITION_PATTERNS: Record<
 				/plan is ready/i,
 				/calling exit-plan-mode/i,
 				/exiting plan mode/i,
+				// More flexible patterns
+				/\[EXIT_PLAN_MODE\]/i,
+				/exit.?plan.?mode/i,
 			],
 			direction: 'forward',
 		},
@@ -188,12 +209,31 @@ export function processPhaseTransition(content: string): boolean {
 	}
 
 	const currentPhase = getCurrentPlanPhase();
+	const logger = getLogger();
+
+	// Log for debugging phase transitions
+	logger.debug('Processing phase transition', {
+		currentPhase,
+		contentPreview: content.slice(0, 200),
+	});
+
 	const newPhase = detectPhaseTransition(content, currentPhase);
 
 	if (newPhase && newPhase !== currentPhase) {
+		logger.info('Updating plan phase', {
+			from: currentPhase,
+			to: newPhase,
+		});
 		setPlanPhase(newPhase);
 		return true;
 	}
+
+	// Log if no transition was detected
+	logger.debug('No phase transition detected', {
+		currentPhase,
+		contentHasMoving: /moving/i.test(content),
+		contentHasPhase: /phase/i.test(content),
+	});
 
 	return false;
 }

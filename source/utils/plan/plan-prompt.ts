@@ -184,10 +184,26 @@ Update the plan file with:
 3. **Testing Steps** - How to verify the changes work
 4. **Rollback Plan** - How to undo if needed (if applicable)
 
-**Automatic Transition:**
-Once the final plan is complete and written to the plan file, AUTOMATICALLY call \`exit-plan-mode\` to present it for user review and approval.
+**CRITICAL - Required Action:**
+Once the final plan is complete and written to the plan file, you MUST immediately call the \`exit-plan-mode\` tool.
 
-DO NOT ask for user approval - the exit-plan-mode tool will handle presenting the plan for review.
+**Do NOT:**
+- Ask "Would you like me to proceed?" or similar text questions
+- Ask for textual approval before calling the tool
+- Present options as text - the tool will handle presenting options
+
+**Do:**
+- Call \`exit-plan-mode\` immediately after writing the final plan
+- Let the tool handle the user interaction and mode selection
+
+**Example completion sequence:**
+1. Write the final plan to .nanocoder/plans/\${planId}.md
+2. Call \`exit-plan-mode\` (no additional arguments needed - user will select mode)
+
+The exit-plan-mode tool will present the plan to the user with options:
+- Accept plan (Normal Mode) - confirm each tool during implementation
+- Accept plan (Auto-Accept Mode) - automatic tool execution
+- Modify Plan - return to plan mode for refinements
 `;
 
 		case 'exit':
@@ -198,10 +214,25 @@ DO NOT ask for user approval - the exit-plan-mode tool will handle presenting th
 
 The plan has been finalized and is ready for implementation.
 
-Call the \`exit-plan-mode\` tool to:
-1. Present the full plan to the user
-2. Allow user to review and approve
-3. Transition to the selected mode (normal or auto-accept) for execution
+**IMPORTANT:** You are now in the Exit phase. Your ONLY action here is to call the \`exit-plan-mode\` tool.
+
+The \`exit-plan-mode\` tool will:
+1. Present the full plan to the user for review
+2. Show interactive approval options with keyboard navigation
+3. Allow the user to select their preferred implementation mode
+4. Handle the mode transition automatically
+
+**Do NOT:**
+- Present the plan content as text in your response
+- Ask "Would you like me to proceed?" or similar questions
+- Present approval options as text - the tool handles this
+
+**Do:**
+- Call \`exit-plan-mode\` immediately
+- Let the tool handle everything else
+
+**Tool Usage:**
+Call \`exit-plan-mode\` with no arguments (the user will select their mode interactively).
 
 **After Plan Mode:**
 - If approved in normal mode: Each tool will require confirmation

@@ -120,6 +120,8 @@ export function useAppState() {
 	const [pendingModeSelection, setPendingModeSelection] = useState<{
 		onSelect: (mode: DevelopmentMode) => void;
 		onCancel: () => void;
+		onModify?: () => void;
+		planContent?: string;
 	} | null>(null);
 	const [isPlanReviewMode, setIsPlanReviewMode] = useState<boolean>(false);
 	const [pendingPlanReview, setPendingPlanReview] = useState<{
