@@ -530,7 +530,11 @@ export default function App({
 			registerQuestionPromptCallback(null);
 			appState.setIsQuestionPromptMode(false);
 		};
-	}, [logger, appState.setIsQuestionPromptMode, appState.setPendingQuestionPrompt]);
+	}, [
+		logger,
+		appState.setIsQuestionPromptMode,
+		appState.setPendingQuestionPrompt,
+	]);
 
 	// Setup non-interactive mode
 	const {nonInteractiveLoadingMessage} = useNonInteractiveMode({
@@ -734,10 +738,17 @@ export default function App({
 								onSelect={mode => {
 									// Notify the tool handler (for logging/debugging)
 									appState.pendingModeSelection?.onSelect(mode);
-									// Actually switch the mode
+									// Update the global mode context
 									setCurrentModeContext(mode);
-									// Then reset plan mode state and clear UI
+									// Update React app state
+									appState.setDevelopmentMode(mode);
+									// Then reset plan mode state (both global and React)
 									resetPlanModeState();
+									appState.setPlanModeActive(false);
+									appState.setPlanId(null);
+									appState.setPlanPhase('understanding');
+									appState.setPlanFilePath('');
+									// Clear the UI
 									appState.setIsModeSelectionMode(false);
 									appState.setPendingModeSelection(null);
 								}}
@@ -746,7 +757,14 @@ export default function App({
 									appState.pendingModeSelection?.onCancel();
 									// Switch to normal mode as default
 									setCurrentModeContext('normal');
+									appState.setDevelopmentMode('normal');
+									// Reset plan mode state
 									resetPlanModeState();
+									appState.setPlanModeActive(false);
+									appState.setPlanId(null);
+									appState.setPlanPhase('understanding');
+									appState.setPlanFilePath('');
+									// Clear the UI
 									appState.setIsModeSelectionMode(false);
 									appState.setPendingModeSelection(null);
 								}}
@@ -778,21 +796,22 @@ export default function App({
 						)}
 
 						{/* Interactive Question Prompt - shown when AI needs to ask questions */}
-						{appState.isQuestionPromptMode && appState.pendingQuestionPrompt && (
-							<InteractiveQuestionPrompt
-								questions={appState.pendingQuestionPrompt.questions}
-								onSubmit={answers => {
-									appState.pendingQuestionPrompt?.onSubmit(answers);
-									appState.setIsQuestionPromptMode(false);
-									appState.setPendingQuestionPrompt(null);
-								}}
-								onCancel={() => {
-									appState.pendingQuestionPrompt?.onCancel();
-									appState.setIsQuestionPromptMode(false);
-									appState.setPendingQuestionPrompt(null);
-								}}
-							/>
-						)}
+						{appState.isQuestionPromptMode &&
+							appState.pendingQuestionPrompt && (
+								<InteractiveQuestionPrompt
+									questions={appState.pendingQuestionPrompt.questions}
+									onSubmit={answers => {
+										appState.pendingQuestionPrompt?.onSubmit(answers);
+										appState.setIsQuestionPromptMode(false);
+										appState.setPendingQuestionPrompt(null);
+									}}
+									onCancel={() => {
+										appState.pendingQuestionPrompt?.onCancel();
+										appState.setIsQuestionPromptMode(false);
+										appState.setPendingQuestionPrompt(null);
+									}}
+								/>
+							)}
 
 						{/* Chat Input - only rendered when not in modal mode */}
 						{appState.startChat &&
