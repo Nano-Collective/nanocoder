@@ -6,6 +6,7 @@
  */
 
 import type {DevelopmentMode} from '@/types/core';
+import {getLogger} from '@/utils/logging';
 
 export interface ModeSelectionOptions {
 	/** Plan content to display in the preview */
@@ -28,6 +29,12 @@ let modeSelectionCallback: ModeSelectionCallback | null = null;
 export function registerModeSelectionCallback(
 	callback: ModeSelectionCallback | null,
 ): void {
+	const logger = getLogger();
+	if (callback) {
+		logger.debug('[MODE_SELECTION_REGISTRY] Callback registered');
+	} else {
+		logger.debug('[MODE_SELECTION_REGISTRY] Callback unregistered');
+	}
 	modeSelectionCallback = callback;
 }
 
@@ -39,10 +46,21 @@ export function triggerModeSelection(
 	onCancel: () => void,
 	options?: ModeSelectionOptions,
 ): boolean {
+	const logger = getLogger();
+	logger.info('[MODE_SELECTION_REGISTRY] triggerModeSelection called', {
+		hasCallback: !!modeSelectionCallback,
+		hasOptions: !!options,
+	});
+
 	if (modeSelectionCallback) {
+		logger.info('[MODE_SELECTION_REGISTRY] Calling registered callback');
 		modeSelectionCallback(onSelect, onCancel, options);
 		return true;
 	}
+
+	logger.warn(
+		'[MODE_SELECTION_REGISTRY] No callback registered - mode selection not triggered',
+	);
 	return false;
 }
 

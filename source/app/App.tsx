@@ -417,8 +417,11 @@ export default function App({
 	}, [appHandlers.handleMessageSubmit]);
 
 	// Register mode selection callback when in plan mode
+	// biome-ignore lint/correctness/useExhaustiveDependencies: Setter functions are stable references
 	React.useEffect(() => {
 		if (appState.developmentMode === 'plan') {
+			logger.debug('[MODE_SELECTION] Registering mode selection callback');
+
 			// Register callback for mode selection
 			registerModeSelectionCallback(
 				(
@@ -426,8 +429,14 @@ export default function App({
 					onCancel: () => void,
 					options?: import('@/utils/mode-selection-registry').ModeSelectionOptions,
 				) => {
+					logger.info('[MODE_SELECTION] Mode selection callback triggered', {
+						hasPlanContent: !!options?.planContent,
+						hasOnModify: !!options?.onModify,
+					});
+
 					// Trigger mode selection UI
 					appState.setIsModeSelectionMode(true);
+					logger.info('[MODE_SELECTION] Set isModeSelectionMode to true');
 
 					// Store the handlers and options for use by the UI component
 					appState.setPendingModeSelection({
@@ -436,21 +445,25 @@ export default function App({
 						onModify: options?.onModify,
 						planContent: options?.planContent,
 					});
-
-					// IMPORTANT: Call onSelect with setImmediate to allow React to render
-					// the mode selection prompt before the Promise in exit-plan-mode resolves
-					// This is a no-op selection - the real selection happens in the UI
-					// The tool's Promise will be resolved when the user interacts with the UI
+					logger.info(
+						'[MODE_SELECTION] Stored pending mode selection handlers',
+					);
 				},
 			);
 
 			// Cleanup on unmount or when leaving plan mode
 			return () => {
+				logger.debug('[MODE_SELECTION] Cleanup - unregistering callback');
 				registerModeSelectionCallback(null);
 				appState.setIsModeSelectionMode(false);
 			};
 		}
-	}, [appState.developmentMode, appState]);
+	}, [
+		appState.developmentMode,
+		logger,
+		appState.setIsModeSelectionMode,
+		appState.setPendingModeSelection,
+	]);
 
 	// Register plan review callback when in plan mode
 	React.useEffect(() => {
@@ -682,15 +695,20 @@ export default function App({
 						{appState.isModeSelectionMode && appState.pendingModeSelection && (
 							<ModeSelectionPrompt
 								onSelect={mode => {
-									// First call the stored handler from the tool
+									// Notify the tool handler (for logging/debugging)
 									appState.pendingModeSelection?.onSelect(mode);
+									// Actually switch the mode
+									setCurrentModeContext(mode);
 									// Then reset plan mode state and clear UI
 									resetPlanModeState();
 									appState.setIsModeSelectionMode(false);
 									appState.setPendingModeSelection(null);
 								}}
 								onCancel={() => {
+									// Notify the tool handler (for logging/debugging)
 									appState.pendingModeSelection?.onCancel();
+									// Switch to normal mode as default
+									setCurrentModeContext('normal');
 									resetPlanModeState();
 									appState.setIsModeSelectionMode(false);
 									appState.setPendingModeSelection(null);

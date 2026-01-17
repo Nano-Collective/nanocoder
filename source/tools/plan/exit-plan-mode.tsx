@@ -24,6 +24,7 @@ import {
 	PLAN_PHASE_LABELS,
 	tool,
 } from '@/types/core';
+import {getLogger} from '@/utils/logging';
 import {triggerModeSelection} from '@/utils/mode-selection-registry';
 
 /**
@@ -36,7 +37,13 @@ function isValidNextMode(mode: string): mode is DevelopmentMode {
 const executeExitPlanMode = async (args: {
 	next_mode?: 'normal' | 'auto-accept';
 }): Promise<string> => {
+	const logger = getLogger();
 	const currentMode = getCurrentMode();
+
+	logger.info('[EXIT_PLAN_MODE] Tool called', {
+		currentMode,
+		next_mode: args.next_mode,
+	});
 
 	// Check if we're actually in plan mode
 	if (currentMode !== 'plan') {
@@ -53,6 +60,12 @@ const executeExitPlanMode = async (args: {
 	const planPhase = getPlanPhase();
 	const planFilePath = getPlanFilePath();
 
+	logger.info('[EXIT_PLAN_MODE] Plan state loaded', {
+		planId,
+		planPhase,
+		planFilePath,
+	});
+
 	if (!planId || !planFilePath) {
 		throw new Error('Plan mode state is corrupted. No active plan found.');
 	}
@@ -67,34 +80,67 @@ const executeExitPlanMode = async (args: {
 			throw new Error(`Plan file not found: ${planFilePath}`);
 		}
 
+		logger.info('[EXIT_PLAN_MODE] Plan file read successfully', {
+			contentLength: content.length,
+		});
+
 		// Check if next_mode was explicitly provided
 		const nextModeExplicitlyProvided = args.next_mode !== undefined;
 
+		logger.info('[EXIT_PLAN_MODE] Next mode check', {
+			nextModeExplicitlyProvided,
+			explicitNextMode: args.next_mode,
+			argsKeys: Object.keys(args),
+			argsJson: JSON.stringify(args),
+		});
+
+		if (nextModeExplicitlyProvided) {
+			logger.warn(
+				'[EXIT_PLAN_MODE] next_mode was explicitly provided - skipping interactive mode selection',
+				{
+					providedMode: args.next_mode,
+				},
+			);
+		}
+
 		// If next_mode was not provided, trigger mode selection prompt
 		if (!nextModeExplicitlyProvided) {
+			logger.info(
+				'[EXIT_PLAN_MODE] No next_mode provided - triggering mode selection...',
+			);
+
 			// Trigger interactive mode selection - this will show the prompt
 			// The prompt is rendered by App.tsx based on isModeSelectionMode state
-			// Note: We don't reset plan mode state here because the prompt needs
-			// the plan ID to render. The UI component will handle the state reset.
+			// IMPORTANT: Do NOT call setCurrentMode() here! That would trigger
+			// the useEffect cleanup and immediately hide the prompt.
+			// The UI component will handle the mode switch when user selects.
 			const modeSelectionTriggered = triggerModeSelection(
 				(selectedMode: DevelopmentMode) => {
-					// User selected a mode - switch to it
-					// Don't reset plan state here - let the UI component handle it
-					setCurrentMode(selectedMode);
+					// User selected a mode - UI will call setCurrentMode
+					// We just log it here for debugging
+					logger.info('[EXIT_PLAN_MODE] Mode selected via UI', {
+						selectedMode,
+					});
 				},
 				() => {
-					// User cancelled - default to normal mode
-					setCurrentMode('normal');
+					// User cancelled - UI will handle this
+					logger.info('[EXIT_PLAN_MODE] Mode selection cancelled by user');
 				},
 				// Pass plan content for preview and onModify handler
 				{
 					planContent: content,
 					onModify: () => {
 						// User selected "Modify Plan" - stay in plan mode
-						// Don't change mode, just let them continue editing
+						logger.info(
+							'[EXIT_PLAN_MODE] User selected Modify Plan - staying in plan mode',
+						);
 					},
 				},
 			);
+
+			logger.info('[EXIT_PLAN_MODE] Mode selection trigger result', {
+				modeSelectionTriggered,
+			});
 
 			// If mode selection was triggered, return a brief message
 			// The actual mode selection will happen via the UI prompt
@@ -107,9 +153,13 @@ const executeExitPlanMode = async (args: {
 				output += `Plan File: ${planFilePath}\n\n`;
 				output += `Plan saved. Please use the mode selection prompt to choose how to proceed.\n`;
 
+				logger.info('[EXIT_PLAN_MODE] Returning plan complete message');
 				return output;
 			}
 
+			logger.warn(
+				'[EXIT_PLAN_MODE] No mode selection callback registered - falling through to default behavior',
+			);
 			// No callback registered - fall through to default behavior
 		}
 
@@ -149,7 +199,7 @@ const executeExitPlanMode = async (args: {
 
 const exitPlanModeCoreTool = tool({
 	description:
-		'Exit Plan Mode and present the completed plan for user approval. Displays the full plan content and transitions to the selected mode (normal or auto-accept) for implementation. The plan file is preserved for reference during implementation.',
+		'Exit Plan Mode and present the completed plan for user approval. When called WITHOUT next_mode parameter, displays an interactive mode selection prompt with keyboard navigation options (Normal Mode, Auto-Accept Mode, Modify Plan). When called WITH next_mode parameter, directly transitions to that mode. IMPORTANT: Call WITHOUT arguments to let the user choose their preferred mode interactively.',
 	inputSchema: jsonSchema<{
 		next_mode?: 'normal' | 'auto-accept';
 	}>({
@@ -159,7 +209,7 @@ const exitPlanModeCoreTool = tool({
 				type: 'string',
 				enum: ['normal', 'auto-accept'],
 				description:
-					'Optional: The mode to enter after exiting plan mode. Defaults to "normal". Use "auto-accept" to proceed directly to implementation without tool confirmations.',
+					'OPTIONAL - DO NOT PROVIDE to trigger interactive mode selection prompt. Only provide this parameter if you want to skip the interactive prompt and directly transition to a specific mode.',
 			},
 		},
 	}),

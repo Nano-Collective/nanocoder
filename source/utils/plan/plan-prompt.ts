@@ -130,11 +130,16 @@ DO NOT ask for permission to transition - proceed automatically when ready.
 - Don't execute bash commands
 - Don't finalize implementation steps yet
 
+**CRITICAL - Keep Going:**
+After updating the plan file with the design phase content, you MUST immediately continue to the next phase.
+DO NOT stop and wait for user input.
+DO NOT ask if the user wants you to proceed.
+
 **Automatic Transition:**
 Once you have explored the codebase and identified a solid approach, AUTOMATICALLY transition to Review by stating:
 *"Moving to the Review phase to consolidate the plan."*
 
-DO NOT ask for permission to transition - proceed automatically when ready.
+Then continue with consolidating your findings in the Review phase.
 `;
 
 		case 'review':
@@ -157,11 +162,17 @@ Update the plan file to include:
 3. **Implementation Steps** - High-level approach
 4. **Risks/Considerations** - Potential issues or edge cases
 
+**CRITICAL - Keep Going:**
+After updating the plan file with the review phase content, you MUST immediately continue to the next phase.
+DO NOT stop and wait for user input.
+DO NOT ask if the user wants you to proceed.
+DO NOT say "Let me know if you'd like me to continue."
+
 **Automatic Transition:**
-Once you have consolidated the plan, AUTOMATICALLY transition to Final Plan by stating:
+Immediately after writing the review phase to the plan file, transition to Final Plan by stating:
 *"Moving to the Final Plan phase to create the executable task list."*
 
-DO NOT ask for user approval at this stage - the final plan will be presented for review in the Exit phase.
+Then continue with creating the detailed executable task list in the Final Plan phase.
 `;
 
 		case 'final':
@@ -191,19 +202,22 @@ Once the final plan is complete and written to the plan file, you MUST immediate
 - Ask "Would you like me to proceed?" or similar text questions
 - Ask for textual approval before calling the tool
 - Present options as text - the tool will handle presenting options
+- Pass any arguments to exit-plan-mode - call it WITHOUT parameters
 
 **Do:**
 - Call \`exit-plan-mode\` immediately after writing the final plan
+- Call it WITHOUT any arguments or parameters
 - Let the tool handle the user interaction and mode selection
 
 **Example completion sequence:**
 1. Write the final plan to .nanocoder/plans/\${planId}.md
-2. Call \`exit-plan-mode\` (no additional arguments needed - user will select mode)
+2. Call \`exit-plan-mode\` with NO arguments - just the tool name
+3. STOP - do not add any text after calling the tool
 
-The exit-plan-mode tool will present the plan to the user with options:
-- Accept plan (Normal Mode) - confirm each tool during implementation
-- Accept plan (Auto-Accept Mode) - automatic tool execution
-- Modify Plan - return to plan mode for refinements
+The exit-plan-mode tool will automatically:
+- Present an interactive mode selection prompt with keyboard navigation
+- Show options: "Accept plan (Normal Mode)", "Accept plan (Auto-Accept Mode)", "Modify Plan"
+- Handle the mode transition when user makes their selection
 `;
 
 		case 'exit':
@@ -217,8 +231,8 @@ The plan has been finalized and is ready for implementation.
 **IMPORTANT:** You are now in the Exit phase. Your ONLY action here is to call the \`exit-plan-mode\` tool.
 
 The \`exit-plan-mode\` tool will:
-1. Present the full plan to the user for review
-2. Show interactive approval options with keyboard navigation
+1. Present an interactive mode selection prompt with keyboard navigation
+2. Show options: "Accept plan (Normal Mode)", "Accept plan (Auto-Accept Mode)", "Modify Plan"
 3. Allow the user to select their preferred implementation mode
 4. Handle the mode transition automatically
 
@@ -226,13 +240,15 @@ The \`exit-plan-mode\` tool will:
 - Present the plan content as text in your response
 - Ask "Would you like me to proceed?" or similar questions
 - Present approval options as text - the tool handles this
+- Pass any arguments to exit-plan-mode - call it WITHOUT parameters
 
 **Do:**
-- Call \`exit-plan-mode\` immediately
+- Call \`exit-plan-mode\` with NO arguments immediately
+- STOP - do not add any text after calling the tool
 - Let the tool handle everything else
 
 **Tool Usage:**
-Call \`exit-plan-mode\` with no arguments (the user will select their mode interactively).
+Call \`exit-plan-mode\` with NO arguments (just the tool name, no parameters).
 
 **After Plan Mode:**
 - If approved in normal mode: Each tool will require confirmation
