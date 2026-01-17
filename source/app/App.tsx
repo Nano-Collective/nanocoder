@@ -426,7 +426,6 @@ export default function App({
 	}, [appHandlers.handleMessageSubmit]);
 
 	// Register mode selection callback when in plan mode
-	// biome-ignore lint/correctness/useExhaustiveDependencies: Setter functions are stable references
 	React.useEffect(() => {
 		if (appState.developmentMode === 'plan') {
 			logger.debug('[MODE_SELECTION] Registering mode selection callback');
@@ -846,8 +845,6 @@ export default function App({
 								appState.isModeSelectionMode ||
 								appState.isPlanReviewMode ||
 								appState.isQuestionPromptMode
-								appState.isNanocoderShapeSelectionMode ||
-								appState.isCheckpointLoadMode
 							) && (
 								<ChatInput
 									isCancelling={appState.isCancelling}

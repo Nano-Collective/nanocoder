@@ -41,7 +41,9 @@ interface AskUserQuestionArgs {
 /**
  * Validate the questions array
  */
-function validateQuestions(questions: Question[]): {valid: true} | {valid: false; error: string} {
+function validateQuestions(
+	questions: Question[],
+): {valid: true} | {valid: false; error: string} {
 	if (!Array.isArray(questions)) {
 		return {valid: false, error: 'Questions must be an array'};
 	}
@@ -55,37 +57,65 @@ function validateQuestions(questions: Question[]): {valid: true} | {valid: false
 		const questionNum = i + 1;
 
 		if (!q.question || typeof q.question !== 'string') {
-			return {valid: false, error: `Question ${questionNum}: must have a "question" string`};
+			return {
+				valid: false,
+				error: `Question ${questionNum}: must have a "question" string`,
+			};
 		}
 
 		if (!q.question.endsWith('?')) {
-			return {valid: false, error: `Question ${questionNum}: question must end with "?"`};
+			return {
+				valid: false,
+				error: `Question ${questionNum}: question must end with "?"`,
+			};
 		}
 
 		if (!q.header || typeof q.header !== 'string') {
-			return {valid: false, error: `Question ${questionNum}: must have a "header" string`};
+			return {
+				valid: false,
+				error: `Question ${questionNum}: must have a "header" string`,
+			};
 		}
 
 		if (q.header.length > 12) {
-			return {valid: false, error: `Question ${questionNum}: header must be 12 chars or less`};
+			return {
+				valid: false,
+				error: `Question ${questionNum}: header must be 12 chars or less`,
+			};
 		}
 
 		if (q.multiSelect === undefined) {
-			return {valid: false, error: `Question ${questionNum}: must specify "multiSelect"`};
+			return {
+				valid: false,
+				error: `Question ${questionNum}: must specify "multiSelect"`,
+			};
 		}
 
-		if (!Array.isArray(q.options) || q.options.length < 2 || q.options.length > 4) {
-			return {valid: false, error: `Question ${questionNum}: must have 2-4 options`};
+		if (
+			!Array.isArray(q.options) ||
+			q.options.length < 2 ||
+			q.options.length > 4
+		) {
+			return {
+				valid: false,
+				error: `Question ${questionNum}: must have 2-4 options`,
+			};
 		}
 
 		for (let j = 0; j < q.options.length; j++) {
 			const opt = q.options[j];
 			if (!opt.label || typeof opt.label !== 'string') {
-				return {valid: false, error: `Question ${questionNum}, Option ${j + 1}: must have a "label" string`};
+				return {
+					valid: false,
+					error: `Question ${questionNum}, Option ${j + 1}: must have a "label" string`,
+				};
 			}
 
 			if (!opt.description || typeof opt.description !== 'string') {
-				return {valid: false, error: `Question ${questionNum}, Option ${j + 1}: must have a "description" string`};
+				return {
+					valid: false,
+					error: `Question ${questionNum}, Option ${j + 1}: must have a "description" string`,
+				};
 			}
 		}
 	}
@@ -96,20 +126,24 @@ function validateQuestions(questions: Question[]): {valid: true} | {valid: false
 /**
  * Execute the ask_user_question tool
  */
-const executeAskUserQuestion = async (args: AskUserQuestionArgs): Promise<string> => {
+const executeAskUserQuestion = async (
+	args: AskUserQuestionArgs,
+): Promise<string> => {
 	const logger = getLogger();
 	const {questions} = args;
 
 	logger.info('[ASK_USER_QUESTION] Tool called', {
 		questionCount: questions.length,
-		questions: questions.map((q) => ({question: q.question, header: q.header})),
+		questions: questions.map(q => ({question: q.question, header: q.header})),
 	});
 
 	// Validate questions
 	const validation = validateQuestions(questions);
 	if (!validation.valid) {
 		const errorMsg = `Invalid questions: ${validation.error}`;
-		logger.error('[ASK_USER_QUESTION] Validation failed', {error: validation.error});
+		logger.error('[ASK_USER_QUESTION] Validation failed', {
+			error: validation.error,
+		});
 		throw new Error(errorMsg);
 	}
 
@@ -129,13 +163,15 @@ const executeAskUserQuestion = async (args: AskUserQuestionArgs): Promise<string
 	if (questionTriggered) {
 		// Return a brief message while waiting for user input
 		const questionPreview = questions
-			.map((q) => `  [${q.header}] ${q.question}`)
+			.map(q => `  [${q.header}] ${q.question}`)
 			.join('\n');
 
 		return `I need to ask you ${questions.length} question${questions.length > 1 ? 's' : ''}:\n\n${questionPreview}\n\nPlease answer the question${questions.length > 1 ? 's' : ''} in the interactive prompt above.`;
 	}
 
-	logger.warn('[ASK_USER_QUESTION] No question callback registered - falling back to text mode');
+	logger.warn(
+		'[ASK_USER_QUESTION] No question callback registered - falling back to text mode',
+	);
 	// No callback registered - provide fallback text interface
 	const fallbackQuestions = questions
 		.map((q, i) => {
@@ -155,60 +191,64 @@ const askUserQuestionCoreTool = tool({
 	inputSchema: jsonSchema<AskUserQuestionArgs>({
 		type: 'object',
 		properties: {
-		questions: {
-			type: 'array',
-			description: 'Questions to ask the user (1-4 questions)',
-			minItems: 1,
-			maxItems: 4,
-			items: {
-				type: 'object',
-				properties: {
-					question: {
-						type: 'string',
-						description:
-							'The complete question to ask the user. Should be clear, specific, and end with a question mark.',
-					},
-					header: {
-						type: 'string',
-						description: 'Very short label displayed as a chip/tag (max 12 chars).',
-					},
-					options: {
-						type: 'array',
-						description:
-							'The available choices for this question. Must have 2-4 options. Each option should be a distinct, mutually exclusive choice (unless multiSelect is enabled).',
-						minItems: 2,
-						maxItems: 4,
-						items: {
-							type: 'object',
-							properties: {
-								label: {
-									type: 'string',
-									description:
-										'The display text for this option. Should be concise (1-5 words) and clearly describe the choice.',
+			questions: {
+				type: 'array',
+				description: 'Questions to ask the user (1-4 questions)',
+				minItems: 1,
+				maxItems: 4,
+				items: {
+					type: 'object',
+					properties: {
+						question: {
+							type: 'string',
+							description:
+								'The complete question to ask the user. Should be clear, specific, and end with a question mark.',
+						},
+						header: {
+							type: 'string',
+							description:
+								'Very short label displayed as a chip/tag (max 12 chars).',
+						},
+						options: {
+							type: 'array',
+							description:
+								'The available choices for this question. Must have 2-4 options. Each option should be a distinct, mutually exclusive choice (unless multiSelect is enabled).',
+							minItems: 2,
+							maxItems: 4,
+							items: {
+								type: 'object',
+								properties: {
+									label: {
+										type: 'string',
+										description:
+											'The display text for this option. Should be concise (1-5 words) and clearly describe the choice.',
+									},
+									description: {
+										type: 'string',
+										description:
+											'Explanation of what this option means or what will happen if chosen.',
+									},
 								},
-								description: {
-									type: 'string',
-									description:
-										'Explanation of what this option means or what will happen if chosen.',
-								},
+								required: ['label', 'description'],
 							},
-							required: ['label', 'description'],
+						},
+						multiSelect: {
+							type: 'boolean',
+							description:
+								'Set to true to allow the user to select multiple options instead of just one.',
 						},
 					},
-					multiSelect: {
-						type: 'boolean',
-						description:
-							'Set to true to allow the user to select multiple options instead of just one.',
-					},
+					required: ['question', 'header', 'options', 'multiSelect'],
 				},
-				required: ['question', 'header', 'options', 'multiSelect'],
 			},
 		},
-	},
-	required: ['questions'],
-}),
+		required: ['questions'],
+	}),
 	needsApproval: false, // User interaction is the approval
-	execute: async (args: AskUserQuestionArgs, _options: {toolCallId: string; messages: unknown[]}) => {
+	execute: async (
+		args: AskUserQuestionArgs,
+		_options: {toolCallId: string; messages: unknown[]},
+	) => {
 		return await executeAskUserQuestion(args);
 	},
 });

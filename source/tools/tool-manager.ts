@@ -290,7 +290,6 @@ export class ToolManager {
 		if (typeof needsApprovalProp === 'function') {
 			// The tool's callback handles mode-specific logic
 			// We evaluate it here to get the current approval requirement
-			// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
 			const result = needsApprovalProp(args || {});
 			const needsApproval = typeof result === 'boolean' ? result : true;
 

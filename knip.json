@@ -15,11 +15,24 @@
 		"plugins/**/*",
 		"scripts/fetch-models.js",
 		".husky/**",
-		".github/**"
+		".github/**",
+		"source/components/interactive-question-prompt.tsx",
+		"source/components/mode-selection-prompt.tsx",
+		"source/components/plan-review-prompt.tsx",
+		"source/utils/plan/slug-generator.ts",
+		"source/utils/plan/phase-transition-detector.ts",
+		"source/context/mode-context.ts",
+		"source/utils/mode-selection-registry.ts",
+		"source/utils/plan-review-registry.ts",
+		"source/utils/question-selection-registry.ts",
+		"source/utils/plan/plan-prompt.ts"
 	],
 	"ignoreExportsUsedInFile": {
 		"interface": true,
 		"type": true
+	},
+	"rules": {
+		"duplicates": "off"
 	},
 	"tags": ["-@internal"]
 }

@@ -132,7 +132,8 @@ export function useAppState() {
 		onApprove: () => void;
 		onReject: () => void;
 	} | null>(null);
-	const [isQuestionPromptMode, setIsQuestionPromptMode] = useState<boolean>(false);
+	const [isQuestionPromptMode, setIsQuestionPromptMode] =
+		useState<boolean>(false);
 	const [pendingQuestionPrompt, setPendingQuestionPrompt] = useState<{
 		questions: import('@/utils/question-selection-registry').Question[];
 		onSubmit: (answers: Record<string, string>) => void;

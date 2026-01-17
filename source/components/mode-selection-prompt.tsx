@@ -36,7 +36,7 @@ const MODE_OPTIONS: Array<{
 	},
 ];
 
-export function ModeSelectionPrompt({
+function ModeSelectionPrompt({
 	onSelect,
 	onModify,
 	onCancel,

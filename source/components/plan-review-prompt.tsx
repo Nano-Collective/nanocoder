@@ -25,11 +25,7 @@ interface PlanReviewPromptProps {
 
 const CONTENT_PREVIEW_LINES = 15; // Number of lines to show in preview
 
-export function PlanReviewPrompt({
-	data,
-	onApprove,
-	onReject,
-}: PlanReviewPromptProps) {
+function PlanReviewPrompt({data, onApprove, onReject}: PlanReviewPromptProps) {
 	const [selectedIndex, setSelectedIndex] = useState(0); // 0 = approve, 1 = reject
 	const [showFullContent, setShowFullContent] = useState(false);
 

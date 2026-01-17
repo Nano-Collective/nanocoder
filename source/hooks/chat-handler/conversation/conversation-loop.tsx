@@ -323,180 +323,181 @@ export const processAssistantResponse = async (
 			// 1. Validation failed (need to send error back to model)
 			// 2. Tool is allowed to execute without confirmation (per ToolManager)
 			if (validationFailed || canExecuteWithoutConfirmation) {
-			// Check tool's needsApproval property from the tool definition
-			let toolNeedsApproval = true; // Default to requiring approval for safety
-			if (toolManager) {
-				const toolEntry = toolManager.getToolEntry(toolCall.function.name);
-				if (toolEntry?.tool) {
-					const needsApprovalProp = (
-						toolEntry.tool as unknown as {
-							needsApproval?:
-								| boolean
-								| ((args: unknown) => boolean | Promise<boolean>);
-						}
-					).needsApproval;
-					if (typeof needsApprovalProp === 'boolean') {
-						toolNeedsApproval = needsApprovalProp;
-					} else if (typeof needsApprovalProp === 'function') {
-						// Evaluate function - our tools use getCurrentMode() internally
-						// and don't actually need the args parameter
-						try {
-							const parsedArgs = parseToolArguments(
-								toolCall.function.arguments,
-							);
-							// Cast to any to handle AI SDK type signature mismatch
-							// Our tool implementations don't use the second parameter
-							toolNeedsApproval = await (
-								needsApprovalProp as (
-									args: unknown,
-								) => boolean | Promise<boolean>
-							)(parsedArgs);
-						} catch {
-							// If evaluation fails, require approval for safety
-							toolNeedsApproval = true;
+				// Check tool's needsApproval property from the tool definition
+				let toolNeedsApproval = true; // Default to requiring approval for safety
+				if (toolManager) {
+					const toolEntry = toolManager.getToolEntry(toolCall.function.name);
+					if (toolEntry?.tool) {
+						const needsApprovalProp = (
+							toolEntry.tool as unknown as {
+								needsApproval?:
+									| boolean
+									| ((args: unknown) => boolean | Promise<boolean>);
+							}
+						).needsApproval;
+						if (typeof needsApprovalProp === 'boolean') {
+							toolNeedsApproval = needsApprovalProp;
+						} else if (typeof needsApprovalProp === 'function') {
+							// Evaluate function - our tools use getCurrentMode() internally
+							// and don't actually need the args parameter
+							try {
+								const parsedArgs = parseToolArguments(
+									toolCall.function.arguments,
+								);
+								// Cast to any to handle AI SDK type signature mismatch
+								// Our tool implementations don't use the second parameter
+								toolNeedsApproval = await (
+									needsApprovalProp as (
+										args: unknown,
+									) => boolean | Promise<boolean>
+								)(parsedArgs);
+							} catch {
+								// If evaluation fails, require approval for safety
+								toolNeedsApproval = true;
+							}
 						}
 					}
 				}
+
+				// Execute directly if:
+				// 1. Validation failed (need to send error back to model)
+				// 2. Tool has needsApproval: false
+				// 3. Explicitly allowed in non-interactive mode
+				// 4. In auto-accept mode (except bash which always needs approval)
+				const isBashTool = toolCall.function.name === 'execute_bash';
+				const isNonInteractiveAllowed =
+					nonInteractiveMode &&
+					nonInteractiveAllowList.has(toolCall.function.name);
+				const shouldExecuteDirectly =
+					validationFailed ||
+					!toolNeedsApproval ||
+					isNonInteractiveAllowed ||
+					(developmentMode === 'auto-accept' && !isBashTool);
+
+				if (shouldExecuteDirectly) {
+					toolsToExecuteDirectly.push(toolCall);
+				} else {
+					toolsNeedingConfirmation.push(toolCall);
+				}
 			}
 
-			// Execute directly if:
-			// 1. Validation failed (need to send error back to model)
-			// 2. Tool has needsApproval: false
-			// 3. Explicitly allowed in non-interactive mode
-			// 4. In auto-accept mode (except bash which always needs approval)
-			const isBashTool = toolCall.function.name === 'execute_bash';
-			const isNonInteractiveAllowed =
-				nonInteractiveMode &&
-				nonInteractiveAllowList.has(toolCall.function.name);
-			const shouldExecuteDirectly =
-				validationFailed ||
-				!toolNeedsApproval ||
-				isNonInteractiveAllowed ||
-				(developmentMode === 'auto-accept' && !isBashTool);
-
-			if (shouldExecuteDirectly) {
-				toolsToExecuteDirectly.push(toolCall);
-			} else {
-				toolsNeedingConfirmation.push(toolCall);
-			}
-		}
-
-		// Execute non-confirmation tools directly
-		if (toolsToExecuteDirectly.length > 0) {
-			const directResults = await executeToolsDirectly(
-				toolsToExecuteDirectly,
-				toolManager,
-				conversationStateManager,
-				addToChatQueue,
-				getNextComponentKey,
-			);
-
-			// If we have results, continue the conversation with them
-			if (directResults.length > 0) {
-				// Add tool results to messages
-				const directBuilder = new MessageBuilder(updatedMessages);
-				directBuilder.addToolResults(directResults);
-				const updatedMessagesWithTools = directBuilder.build();
-				setMessages(updatedMessagesWithTools);
-
-				// Continue the main conversation loop with tool results as context
-				await processAssistantResponse({
-					...params,
-					messages: updatedMessagesWithTools,
-				});
-				return;
-			}
-		}
-
-		// Start confirmation flow only for tools that need it
-		if (toolsNeedingConfirmation.length > 0) {
-			// In non-interactive mode, exit when tool approval is required
-			if (nonInteractiveMode) {
-				const toolNames = toolsNeedingConfirmation
-					.map(tc => tc.function.name)
-					.join(', ');
-				const errorMsg = `Tool approval required for: ${toolNames}. Exiting non-interactive mode`;
-
-				// Add error message to UI
-				addToChatQueue(
-					<ErrorMessage
-						key={`tool-approval-required-${Date.now()}`}
-						message={errorMsg}
-						hideBox={true}
-					/>,
+			// Execute non-confirmation tools directly
+			if (toolsToExecuteDirectly.length > 0) {
+				const directResults = await executeToolsDirectly(
+					toolsToExecuteDirectly,
+					toolManager,
+					conversationStateManager,
+					addToChatQueue,
+					getNextComponentKey,
 				);
 
-				// Add error to messages array so exit detection can find it
-				const errorMessage: Message = {
-					role: 'assistant',
-					content: errorMsg,
-				};
-				// Use updatedMessages which already includes auto-executed tool results
-				const errorBuilder = new MessageBuilder(updatedMessages);
-				errorBuilder.addMessage(errorMessage);
-				setMessages(errorBuilder.build());
+				// If we have results, continue the conversation with them
+				if (directResults.length > 0) {
+					// Add tool results to messages
+					const directBuilder = new MessageBuilder(updatedMessages);
+					directBuilder.addToolResults(directResults);
+					const updatedMessagesWithTools = directBuilder.build();
+					setMessages(updatedMessagesWithTools);
 
-				// Signal completion to trigger exit
-				if (onConversationComplete) {
-					onConversationComplete();
+					// Continue the main conversation loop with tool results as context
+					await processAssistantResponse({
+						...params,
+						messages: updatedMessagesWithTools,
+					});
+					return;
 				}
-				return;
 			}
 
-			// Pass complete messages including assistant msg
-			// useToolHandler will add tool results
-			onStartToolConfirmationFlow(
-				toolsNeedingConfirmation,
-				updatedMessages, // Includes assistant message
-				assistantMsg,
-				systemMessage,
-			);
+			// Start confirmation flow only for tools that need it
+			if (toolsNeedingConfirmation.length > 0) {
+				// In non-interactive mode, exit when tool approval is required
+				if (nonInteractiveMode) {
+					const toolNames = toolsNeedingConfirmation
+						.map(tc => tc.function.name)
+						.join(', ');
+					const errorMsg = `Tool approval required for: ${toolNames}. Exiting non-interactive mode`;
+
+					// Add error message to UI
+					addToChatQueue(
+						<ErrorMessage
+							key={`tool-approval-required-${Date.now()}`}
+							message={errorMsg}
+							hideBox={true}
+						/>,
+					);
+
+					// Add error to messages array so exit detection can find it
+					const errorMessage: Message = {
+						role: 'assistant',
+						content: errorMsg,
+					};
+					// Use updatedMessages which already includes auto-executed tool results
+					const errorBuilder = new MessageBuilder(updatedMessages);
+					errorBuilder.addMessage(errorMessage);
+					setMessages(errorBuilder.build());
+
+					// Signal completion to trigger exit
+					if (onConversationComplete) {
+						onConversationComplete();
+					}
+					return;
+				}
+
+				// Pass complete messages including assistant msg
+				// useToolHandler will add tool results
+				onStartToolConfirmationFlow(
+					toolsNeedingConfirmation,
+					updatedMessages, // Includes assistant message
+					assistantMsg,
+					systemMessage,
+				);
+			}
 		}
-	}
 
-	// If no tool calls, the conversation naturally ends here
-	// BUT: if there's ALSO no content, that's likely an error - the model should have said something
-	// Auto-reprompt to help the model continue
-	if (validToolCalls.length === 0 && !cleanedContent.trim()) {
-		// Check if we just executed tools (updatedMessages should have tool results)
-		const lastMessage = updatedMessages[updatedMessages.length - 1];
-		const hasRecentToolResults = lastMessage?.role === 'tool';
+		// If no tool calls, the conversation naturally ends here
+		// BUT: if there's ALSO no content, that's likely an error - the model should have said something
+		// Auto-reprompt to help the model continue
+		if (validToolCalls.length === 0 && !cleanedContent.trim()) {
+			// Check if we just executed tools (updatedMessages should have tool results)
+			const lastMessage = updatedMessages[updatedMessages.length - 1];
+			const hasRecentToolResults = lastMessage?.role === 'tool';
 
-		// Add a continuation message to help the model respond
-		// For recent tool results, ask for a summary; otherwise, ask to continue
-		const nudgeContent = hasRecentToolResults
-			? 'Please provide a summary or response based on the tool results above.'
-			: 'Please continue with the task.';
+			// Add a continuation message to help the model respond
+			// For recent tool results, ask for a summary; otherwise, ask to continue
+			const nudgeContent = hasRecentToolResults
+				? 'Please provide a summary or response based on the tool results above.'
+				: 'Please continue with the task.';
 
-		const nudgeMessage: Message = {
-			role: 'user',
-			content: nudgeContent,
-		};
+			const nudgeMessage: Message = {
+				role: 'user',
+				content: nudgeContent,
+			};
 
-		// Display a "continue" message in chat so user knows what happened
-		addToChatQueue(
-			<UserMessage
-				key={`auto-continue-${getNextComponentKey()}`}
-				message="continue"
-			/>,
-		);
+			// Display a "continue" message in chat so user knows what happened
+			addToChatQueue(
+				<UserMessage
+					key={`auto-continue-${getNextComponentKey()}`}
+					message="continue"
+				/>,
+			);
 
-		// Don't include the empty assistantMsg - it would cause API error
-		// "Assistant message must have either content or tool_calls"
-		const nudgeBuilder = new MessageBuilder(updatedMessages);
-		nudgeBuilder.addMessage(nudgeMessage);
-		const updatedMessagesWithNudge = nudgeBuilder.build();
-		setMessages(updatedMessagesWithNudge);
+			// Don't include the empty assistantMsg - it would cause API error
+			// "Assistant message must have either content or tool_calls"
+			const nudgeBuilder = new MessageBuilder(updatedMessages);
+			nudgeBuilder.addMessage(nudgeMessage);
+			const updatedMessagesWithNudge = nudgeBuilder.build();
+			setMessages(updatedMessagesWithNudge);
 
-		// Continue the conversation loop with the nudge
-		await processAssistantResponse({
-			...params,
-			messages: updatedMessagesWithNudge,
-		});
-		return;
-	}
+			// Continue the conversation loop with the nudge
+			await processAssistantResponse({
+				...params,
+				messages: updatedMessagesWithNudge,
+			});
+			return;
+		}
 
-	if (validToolCalls.length === 0 && cleanedContent.trim()) {
-		onConversationComplete?.();
+		if (validToolCalls.length === 0 && cleanedContent.trim()) {
+			onConversationComplete?.();
+		}
 	}
 };

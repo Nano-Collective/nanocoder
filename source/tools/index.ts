@@ -1,5 +1,4 @@
 import React from 'react';
-import {askUserQuestionTool} from '@/tools/interactive/ask-user-question';
 import {executeBashTool} from '@/tools/execute-bash';
 import {fetchUrlTool} from '@/tools/fetch-url';
 import {findFilesTool} from '@/tools/find-files';
@@ -9,6 +8,7 @@ import {
 	gitSmartCommitTool,
 	gitStatusEnhancedTool,
 } from '@/tools/git';
+import {askUserQuestionTool} from '@/tools/interactive/ask-user-question';
 import {listDirectoryTool} from '@/tools/list-directory';
 import {getDiagnosticsTool} from '@/tools/lsp-get-diagnostics';
 import {enterPlanModeTool} from '@/tools/plan/enter-plan-mode';

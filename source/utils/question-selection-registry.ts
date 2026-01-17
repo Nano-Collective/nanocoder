@@ -5,7 +5,6 @@
  * Used by ask_user_question tool to trigger interactive question prompts.
  */
 
-import type {DevelopmentMode} from '@/types/core';
 import {getLogger} from '@/utils/logging';
 
 /**
@@ -47,7 +46,9 @@ let questionPromptCallback: QuestionPromptCallback | null = null;
 /**
  * Register a callback to be called when questions need to be asked
  */
-export function registerQuestionPromptCallback(callback: QuestionPromptCallback | null): void {
+export function registerQuestionPromptCallback(
+	callback: QuestionPromptCallback | null,
+): void {
 	const logger = getLogger();
 	if (callback) {
 		logger.debug('[QUESTION_PROMPT] Callback registered');
@@ -77,7 +78,9 @@ export function triggerQuestionPrompt(
 		return true;
 	}
 
-	logger.warn('[QUESTION_PROMPT] No callback registered - question prompt not triggered');
+	logger.warn(
+		'[QUESTION_PROMPT] No callback registered - question prompt not triggered',
+	);
 	return false;
 }
 

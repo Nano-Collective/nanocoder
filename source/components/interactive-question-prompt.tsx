@@ -6,9 +6,9 @@
  * Compatible with Claude Code's AskUserQuestion schema.
  */
 
-import {Box, Text, useInput, useStdin} from 'ink';
+import {Box, Text, useInput} from 'ink';
 import {useCallback, useEffect, useState} from 'react';
-import type {Question, QuestionOption} from '@/utils/question-selection-registry';
+import type {Question} from '@/utils/question-selection-registry';
 
 interface InteractiveQuestionPromptProps {
 	questions: Question[];
@@ -72,12 +72,18 @@ function SingleQuestion({
 		} else {
 			// Handle option selection navigation
 			if (key.upArrow) {
-				const maxIndex = question.multiSelect ? question.options.length : question.options.length - 1;
-				const newSelectedIndex = selectedIndices[0] > 0 ? selectedIndices[0] - 1 : maxIndex;
+				const maxIndex = question.multiSelect
+					? question.options.length
+					: question.options.length - 1;
+				const newSelectedIndex =
+					selectedIndices[0] > 0 ? selectedIndices[0] - 1 : maxIndex;
 				onSelect(newSelectedIndex);
 			} else if (key.downArrow) {
-				const maxIndex = question.multiSelect ? question.options.length : question.options.length - 1;
-				const newSelectedIndex = selectedIndices[0] < maxIndex ? selectedIndices[0] + 1 : 0;
+				const maxIndex = question.multiSelect
+					? question.options.length
+					: question.options.length - 1;
+				const newSelectedIndex =
+					selectedIndices[0] < maxIndex ? selectedIndices[0] + 1 : 0;
 				onSelect(newSelectedIndex);
 			} else if (key.return) {
 				if (selectedIndices[0] === question.options.length) {
@@ -113,11 +119,22 @@ function SingleQuestion({
 						<Box key={optionIndex}>
 							<Text
 								bold={isFocused && isActive}
-								color={isActive && isFocused ? '#00ff00' : isSelected ? 'yellow' : 'white'}
+								color={
+									isActive && isFocused
+										? '#00ff00'
+										: isSelected
+											? 'yellow'
+											: 'white'
+								}
 							>
 								{isFocused && isActive ? '▸ ' : '  '}
-								{question.multiSelect ? (isSelected ? '☒' : '☐') : (isSelected ? '●' : '○')}
-								{' '}
+								{question.multiSelect
+									? isSelected
+										? '☒'
+										: '☐'
+									: isSelected
+										? '●'
+										: '○'}{' '}
 								{option.label}
 							</Text>
 							{(isSelected || isFocused) && (
@@ -140,7 +157,9 @@ function SingleQuestion({
 								: 'white'
 						}
 					>
-						{selectedIndices[0] === question.options.length && isActive ? '▸ ' : '  '}
+						{selectedIndices[0] === question.options.length && isActive
+							? '▸ '
+							: '  '}
 						{question.multiSelect ? '☐' : '○'}
 						{' Other (type custom response)'}
 					</Text>
@@ -151,7 +170,9 @@ function SingleQuestion({
 			{isCustomInputMode && (
 				<Box marginTop={1} paddingLeft={2}>
 					<Text color="#00ff00">{'Your response: '}</Text>
-					<Text bold color="#00ff00">{localCustomInput}</Text>
+					<Text bold color="#00ff00">
+						{localCustomInput}
+					</Text>
 					<Text color="#666666">█</Text>
 					<Text dimColor> (Enter to submit, Esc to cancel)</Text>
 				</Box>
@@ -176,7 +197,7 @@ function SingleQuestion({
 	);
 }
 
-export function InteractiveQuestionPrompt({
+function InteractiveQuestionPrompt({
 	questions,
 	onSubmit,
 	onCancel,
@@ -222,7 +243,11 @@ export function InteractiveQuestionPrompt({
 			setAnswers(prev =>
 				prev.map((answer, idx) => {
 					if (idx !== currentQuestionIndex) return answer;
-					return {...answer, customInput: value, selectedOptions: [questions[currentQuestionIndex].options.length]}; // Select "Other" option
+					return {
+						...answer,
+						customInput: value,
+						selectedOptions: [questions[currentQuestionIndex].options.length],
+					}; // Select "Other" option
 				}),
 			);
 		},
@@ -256,7 +281,7 @@ export function InteractiveQuestionPrompt({
 		}
 	}, [currentQuestionIndex, questions, answers, onSubmit]);
 
-	const handlePreviousQuestion = useCallback(() => {
+	const _handlePreviousQuestion = useCallback(() => {
 		if (currentQuestionIndex > 0) {
 			setCurrentQuestionIndex(prev => prev - 1);
 		}
@@ -273,7 +298,10 @@ export function InteractiveQuestionPrompt({
 			const answer = answers[currentQuestionIndex];
 			const question = questions[currentQuestionIndex];
 			// Don't auto-advance if user is on "Other" option without input
-			if (answer.selectedOptions[0] !== question.options.length || answer.customInput) {
+			if (
+				answer.selectedOptions[0] !== question.options.length ||
+				answer.customInput
+			) {
 				handleNextQuestion();
 			}
 		}
@@ -283,7 +311,9 @@ export function InteractiveQuestionPrompt({
 		<Box flexDirection="column" marginTop={1} paddingX={1}>
 			{/* Header */}
 			<Box>
-				<Text bold color="#00ff00">{'▶'}</Text>
+				<Text bold color="#00ff00">
+					{'▶'}
+				</Text>
 				<Text color="#00ff00">{' Question'}</Text>
 				{questions.length > 1 && (
 					<Text color="#00ff00">{` (${currentQuestionIndex + 1}/${questions.length})`}</Text>
@@ -297,10 +327,20 @@ export function InteractiveQuestionPrompt({
 						<Box key={idx}>
 							<Text
 								bold
-								backgroundColor={idx === currentQuestionIndex ? '#00ff00' : idx < currentQuestionIndex ? '#666666' : 'black'}
+								backgroundColor={
+									idx === currentQuestionIndex
+										? '#00ff00'
+										: idx < currentQuestionIndex
+											? '#666666'
+											: 'black'
+								}
 								color={idx <= currentQuestionIndex ? 'black' : '#666666'}
 							>
-								{idx === currentQuestionIndex ? '►' : idx < currentQuestionIndex ? '✓' : '○'}
+								{idx === currentQuestionIndex
+									? '►'
+									: idx < currentQuestionIndex
+										? '✓'
+										: '○'}
 							</Text>
 							{idx < questions.length - 1 && <Text color="#666666">{'─'}</Text>}
 						</Box>
@@ -324,14 +364,18 @@ export function InteractiveQuestionPrompt({
 				<Box marginTop={1}>
 					<Text dimColor>
 						Press Enter to{' '}
-						{currentQuestionIndex < questions.length - 1 ? 'continue to next question' : 'submit answers'}
+						{currentQuestionIndex < questions.length - 1
+							? 'continue to next question'
+							: 'submit answers'}
 					</Text>
 				</Box>
 			)}
 
 			{/* Cancel hint */}
 			<Box marginTop={1}>
-				<Text dimColor color="#888888">Esc to cancel</Text>
+				<Text dimColor color="#888888">
+					Esc to cancel
+				</Text>
 			</Box>
 		</Box>
 	);
