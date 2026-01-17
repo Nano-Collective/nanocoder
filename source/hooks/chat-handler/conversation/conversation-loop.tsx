@@ -1,12 +1,13 @@
-import type React from 'react';
+import React from 'react';
 import type {ConversationStateManager} from '@/app/utils/conversation-state';
 import AssistantMessage from '@/components/assistant-message';
-import {ErrorMessage} from '@/components/message-box';
+import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import UserMessage from '@/components/user-message';
-import {appConfig} from '@/config/index';
+import {appConfig, getAppConfig} from '@/config/index';
 import {parseToolCalls} from '@/tool-calling/index';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {LLMClient, Message, ToolCall, ToolResult} from '@/types/core';
+import {performAutoCompact} from '@/utils/auto-compact';
 import {MessageBuilder} from '@/utils/message-builder';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {displayToolResult} from '@/utils/tool-result-display';
@@ -26,6 +27,7 @@ interface ProcessAssistantResponseParams {
 	setMessages: (messages: Message[]) => void;
 	addToChatQueue: (component: React.ReactNode) => void;
 	getNextComponentKey: () => number;
+	currentProvider: string;
 	currentModel: string;
 	developmentMode: 'normal' | 'auto-accept' | 'plan';
 	nonInteractiveMode: boolean;
@@ -64,6 +66,7 @@ export const processAssistantResponse = async (
 		setMessages,
 		addToChatQueue,
 		getNextComponentKey,
+		currentProvider,
 		currentModel,
 		developmentMode,
 		nonInteractiveMode,
@@ -229,6 +232,43 @@ export const processAssistantResponse = async (
 	) {
 		setMessages(updatedMessages);
 	}
+
+	// Check for auto-compact after messages are updated
+	void (async () => {
+		try {
+			const config = getAppConfig();
+			const autoCompactConfig = config.autoCompact;
+
+			if (!autoCompactConfig) {
+				return;
+			}
+
+			const compressed = await performAutoCompact(
+				updatedMessages,
+				systemMessage,
+				currentProvider,
+				currentModel,
+				autoCompactConfig,
+				notification => {
+					// Show notification
+					addToChatQueue(
+						React.createElement(InfoMessage, {
+							key: `auto-compact-notification-${getNextComponentKey()}`,
+							message: notification,
+							hideBox: true,
+						}),
+					);
+				},
+			);
+
+			if (compressed) {
+				// Compression was performed, update messages
+				setMessages(compressed);
+			}
+		} catch (_error) {
+			// Silently fail auto-compact, don't interrupt the conversation
+		}
+	})();
 
 	// Clear streaming state after response is complete
 	setIsGenerating(false);

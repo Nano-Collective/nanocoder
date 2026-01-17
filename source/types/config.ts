@@ -44,6 +44,16 @@ export interface ProviderConfig {
 	[key: string]: unknown; // Allow additional provider-specific config
 }
 
+// Auto-compact configuration
+export type CompressionMode = 'default' | 'aggressive' | 'conservative';
+
+export interface AutoCompactConfig {
+	enabled: boolean;
+	threshold: number;
+	mode: CompressionMode;
+	notifyUser: boolean;
+}
+
 export interface AppConfig {
 	// Providers array structure - all OpenAI compatible
 	providers?: {
@@ -82,6 +92,9 @@ export interface AppConfig {
 	nanocoderTools?: {
 		alwaysAllow?: string[];
 	};
+
+	// Auto-compact configuration
+	autoCompact?: AutoCompactConfig;
 }
 
 // MCP Server configuration with source tracking

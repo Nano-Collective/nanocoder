@@ -9,10 +9,13 @@ import {
 	WarningMessage,
 } from '@/components/message-box';
 import Status from '@/components/status';
+import {getAppConfig} from '@/config/index';
 import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
+import {getModelContextLimit} from '@/models/index';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {createTokenizer} from '@/tokenization/index';
 import type {
 	CheckpointListItem,
 	DevelopmentMode,
@@ -24,8 +27,11 @@ import type {
 import type {CustomCommand} from '@/types/commands';
 import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
+import {calculateTokenBreakdown} from '@/usage/calculator';
+import {autoCompactSessionOverrides} from '@/utils/auto-compact';
 import {getLogger} from '@/utils/logging';
 import {addToMessageQueue} from '@/utils/message-queue';
+import {processPromptTemplate} from '@/utils/prompt-processor';
 
 interface UseAppHandlersProps {
 	// State
@@ -151,12 +157,94 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	}, [props.setDevelopmentMode, logger]);
 
 	// Show status handler
-	const handleShowStatus = React.useCallback(() => {
+	const handleShowStatus = React.useCallback(async () => {
 		logger.debug('Status display requested', {
 			currentProvider: props.currentProvider,
 			currentModel: props.currentModel,
 			currentTheme: props.currentTheme,
 		});
+
+		// Calculate context usage and auto-compact info
+		let contextUsage:
+			| {
+					currentTokens: number;
+					contextLimit: number | null;
+					percentUsed: number;
+			  }
+			| undefined;
+		let autoCompactInfo:
+			| {
+					enabled: boolean;
+					threshold: number;
+					mode: string;
+					hasOverrides: boolean;
+			  }
+			| undefined;
+
+		try {
+			// Calculate context usage
+			const contextLimit = await getModelContextLimit(props.currentModel);
+			if (contextLimit && props.messages.length > 0) {
+				const tokenizer = createTokenizer(
+					props.currentProvider,
+					props.currentModel,
+				);
+				try {
+					const systemPrompt = processPromptTemplate();
+					const systemMessage: Message = {
+						role: 'system',
+						content: systemPrompt,
+					};
+					const breakdown = calculateTokenBreakdown(
+						[systemMessage, ...props.messages],
+						tokenizer,
+						props.getMessageTokens,
+					);
+					const percentUsed = (breakdown.total / contextLimit) * 100;
+					contextUsage = {
+						currentTokens: breakdown.total,
+						contextLimit,
+						percentUsed,
+					};
+				} finally {
+					if (tokenizer.free) {
+						tokenizer.free();
+					}
+				}
+			}
+
+			// Get auto-compact info
+			const config = getAppConfig();
+			const autoCompactConfig = config.autoCompact;
+			if (autoCompactConfig) {
+				const enabled =
+					autoCompactSessionOverrides.enabled !== null
+						? autoCompactSessionOverrides.enabled
+						: autoCompactConfig.enabled;
+				const threshold =
+					autoCompactSessionOverrides.threshold !== null
+						? autoCompactSessionOverrides.threshold
+						: autoCompactConfig.threshold;
+				const mode =
+					autoCompactSessionOverrides.mode !== null
+						? autoCompactSessionOverrides.mode
+						: autoCompactConfig.mode;
+				const hasOverrides =
+					autoCompactSessionOverrides.enabled !== null ||
+					autoCompactSessionOverrides.threshold !== null ||
+					autoCompactSessionOverrides.mode !== null;
+
+				autoCompactInfo = {
+					enabled,
+					threshold,
+					mode,
+					hasOverrides,
+				};
+			}
+		} catch (error) {
+			logger.debug('Failed to calculate status info', {error});
+			// Continue without context usage/auto-compact info
+		}
 
 		props.addToChatQueue(
 			<Status
@@ -169,6 +257,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				lspServersStatus={props.lspServersStatus}
 				preferencesLoaded={props.preferencesLoaded}
 				customCommandsCount={props.customCommandsCount}
+				contextUsage={contextUsage}
+				autoCompactInfo={autoCompactInfo}
 			/>,
 		);
 	}, [props, logger]);

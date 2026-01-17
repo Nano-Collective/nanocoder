@@ -1,0 +1,131 @@
+import {getModelContextLimit} from '@/models/index';
+import {createTokenizer} from '@/tokenization/index';
+import type {CompressionMode} from '@/types/config';
+import type {Message} from '@/types/core';
+import type {Tokenizer} from '@/types/tokenization';
+import {compressionBackup} from './compression-backup';
+import {compressMessages} from './message-compression';
+
+export interface AutoCompactSessionOverrides {
+	enabled: boolean | null;
+	threshold: number | null;
+	mode: CompressionMode | null;
+}
+
+export const autoCompactSessionOverrides: AutoCompactSessionOverrides = {
+	enabled: null,
+	threshold: null,
+	mode: null,
+};
+
+/**
+ * Perform auto-compact on messages (async)
+ * Returns compressed messages if compression was performed, null otherwise
+ */
+export async function performAutoCompact(
+	messages: Message[],
+	systemMessage: Message,
+	provider: string,
+	model: string,
+	config: {
+		enabled: boolean;
+		threshold: number;
+		mode: CompressionMode;
+		notifyUser: boolean;
+	},
+	onNotify?: (message: string) => void,
+): Promise<Message[] | null> {
+	// Check if auto compact is enabled
+	const enabled =
+		autoCompactSessionOverrides.enabled !== null
+			? autoCompactSessionOverrides.enabled
+			: config.enabled;
+
+	if (!enabled) {
+		return null;
+	}
+
+	// Get threshold
+	const threshold =
+		autoCompactSessionOverrides.threshold !== null
+			? autoCompactSessionOverrides.threshold
+			: config.threshold;
+
+	// Get mode
+	const mode =
+		autoCompactSessionOverrides.mode !== null
+			? autoCompactSessionOverrides.mode
+			: config.mode;
+
+	// Get context limit
+	let contextLimit: number | null;
+	try {
+		contextLimit = await getModelContextLimit(model);
+	} catch {
+		return null;
+	}
+
+	if (!contextLimit) {
+		return null;
+	}
+
+	// Create tokenizer
+	let tokenizer: Tokenizer | undefined;
+	try {
+		tokenizer = createTokenizer(provider, model);
+	} catch {
+		return null;
+	}
+
+	try {
+		// Calculate current token count
+		const allMessages = [systemMessage, ...messages];
+		let totalTokens = 0;
+		for (const msg of allMessages) {
+			totalTokens += tokenizer.countTokens(msg);
+		}
+
+		// Check if threshold is reached
+		const usagePercentage = (totalTokens / contextLimit) * 100;
+		if (usagePercentage < threshold) {
+			return null;
+		}
+
+		compressionBackup.storeBackup(messages);
+
+		const result = compressMessages(messages, tokenizer, {mode});
+
+		// Show notification if enabled
+		if (config.notifyUser && onNotify) {
+			const reduction = Math.round(result.reductionPercentage);
+			onNotify(
+				`Context at ${Math.round(usagePercentage)}% capacity - auto-compacting...\nContext Compacted: ${result.originalTokenCount.toLocaleString()} tokens → ${result.compressedTokenCount.toLocaleString()} tokens (${reduction}% reduction)`,
+			);
+		}
+
+		// Return compressed messages
+		return result.compressedMessages;
+	} finally {
+		// Clean up tokenizer
+		if (tokenizer?.free) {
+			tokenizer.free();
+		}
+	}
+}
+
+// Set session override for auto-compact enabled state
+export function setAutoCompactEnabled(enabled: boolean | null): void {
+	autoCompactSessionOverrides.enabled = enabled;
+}
+
+// Set session override for auto-compact threshold
+export function setAutoCompactThreshold(threshold: number | null): void {
+	if (threshold !== null) {
+		autoCompactSessionOverrides.threshold = Math.max(
+			50,
+			Math.min(95, threshold),
+		);
+	} else {
+		autoCompactSessionOverrides.threshold = null;
+	}
+}
