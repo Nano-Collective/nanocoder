@@ -7,6 +7,7 @@ import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
 import {shouldRenderWelcome} from '@/app/helpers';
 import type {AppProps} from '@/app/types';
+import InteractiveQuestionPrompt from '@/components/interactive-question-prompt';
 import ModeSelectionPrompt from '@/components/mode-selection-prompt';
 import PlanReviewPrompt from '@/components/plan-review-prompt';
 import SecurityDisclaimer from '@/components/security-disclaimer';
@@ -41,6 +42,7 @@ import {createPinoLogger} from '@/utils/logging/pino-logger';
 import {setGlobalMessageQueue} from '@/utils/message-queue';
 import {registerModeSelectionCallback} from '@/utils/mode-selection-registry';
 import {registerPlanReviewCallback} from '@/utils/plan-review-registry';
+import {registerQuestionPromptCallback} from '@/utils/question-selection-registry';
 
 export default function App({
 	vscodeMode = false,
@@ -495,6 +497,41 @@ export default function App({
 		}
 	}, [appState.developmentMode, appState]);
 
+	// Register question prompt callback (available in all modes)
+	React.useEffect(() => {
+		logger.debug('[QUESTION_PROMPT] Registering question prompt callback');
+
+		// Register callback for question prompts
+		registerQuestionPromptCallback(
+			(
+				questions: import('@/utils/question-selection-registry').Question[],
+				onSubmit: (answers: Record<string, string>) => void,
+				onCancel: () => void,
+			) => {
+				logger.info('[QUESTION_PROMPT] Question prompt callback triggered', {
+					questionCount: questions.length,
+				});
+
+				// Trigger question prompt UI
+				appState.setIsQuestionPromptMode(true);
+
+				// Store the questions and callbacks for use by the UI component
+				appState.setPendingQuestionPrompt({
+					questions,
+					onSubmit,
+					onCancel,
+				});
+			},
+		);
+
+		// Cleanup on unmount
+		return () => {
+			logger.debug('[QUESTION_PROMPT] Cleanup - unregistering callback');
+			registerQuestionPromptCallback(null);
+			appState.setIsQuestionPromptMode(false);
+		};
+	}, [logger, appState.setIsQuestionPromptMode, appState.setPendingQuestionPrompt]);
+
 	// Setup non-interactive mode
 	const {nonInteractiveLoadingMessage} = useNonInteractiveMode({
 		nonInteractivePrompt,
@@ -740,6 +777,23 @@ export default function App({
 							/>
 						)}
 
+						{/* Interactive Question Prompt - shown when AI needs to ask questions */}
+						{appState.isQuestionPromptMode && appState.pendingQuestionPrompt && (
+							<InteractiveQuestionPrompt
+								questions={appState.pendingQuestionPrompt.questions}
+								onSubmit={answers => {
+									appState.pendingQuestionPrompt?.onSubmit(answers);
+									appState.setIsQuestionPromptMode(false);
+									appState.setPendingQuestionPrompt(null);
+								}}
+								onCancel={() => {
+									appState.pendingQuestionPrompt?.onCancel();
+									appState.setIsQuestionPromptMode(false);
+									appState.setPendingQuestionPrompt(null);
+								}}
+							/>
+						)}
+
 						{/* Chat Input - only rendered when not in modal mode */}
 						{appState.startChat &&
 							!(
@@ -751,7 +805,8 @@ export default function App({
 								appState.isTitleShapeSelectionMode ||
 								appState.isCheckpointLoadMode ||
 								appState.isModeSelectionMode ||
-								appState.isPlanReviewMode
+								appState.isPlanReviewMode ||
+								appState.isQuestionPromptMode
 							) && (
 								<ChatInput
 									isCancelling={appState.isCancelling}

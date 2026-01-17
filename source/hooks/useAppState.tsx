@@ -129,6 +129,12 @@ export function useAppState() {
 		onApprove: () => void;
 		onReject: () => void;
 	} | null>(null);
+	const [isQuestionPromptMode, setIsQuestionPromptMode] = useState<boolean>(false);
+	const [pendingQuestionPrompt, setPendingQuestionPrompt] = useState<{
+		questions: import('@/utils/question-selection-registry').Question[];
+		onSubmit: (answers: Record<string, string>) => void;
+		onCancel: () => void;
+	} | null>(null);
 	const [isToolExecuting, setIsToolExecuting] = useState<boolean>(false);
 
 	// Development mode state
@@ -289,6 +295,8 @@ export function useAppState() {
 		pendingModeSelection,
 		isPlanReviewMode,
 		pendingPlanReview,
+		isQuestionPromptMode,
+		pendingQuestionPrompt,
 		isToolExecuting,
 		developmentMode,
 		planModeActive,
@@ -339,6 +347,8 @@ export function useAppState() {
 		setPendingModeSelection,
 		setIsPlanReviewMode,
 		setPendingPlanReview,
+		setIsQuestionPromptMode,
+		setPendingQuestionPrompt,
 		setIsToolExecuting,
 		setDevelopmentMode,
 		setPlanModeActive,

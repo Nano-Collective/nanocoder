@@ -1,4 +1,5 @@
 import React from 'react';
+import {askUserQuestionTool} from '@/tools/interactive/ask-user-question';
 import {executeBashTool} from '@/tools/execute-bash';
 import {fetchUrlTool} from '@/tools/fetch-url';
 import {findFilesTool} from '@/tools/find-files';
@@ -40,6 +41,8 @@ const allTools: NanocoderToolExport[] = [
 	// Plan mode tools
 	enterPlanModeTool,
 	exitPlanModeTool,
+	// Interactive tools
+	askUserQuestionTool,
 	// Git workflow tools
 	gitSmartCommitTool,
 	gitCreatePRTool,

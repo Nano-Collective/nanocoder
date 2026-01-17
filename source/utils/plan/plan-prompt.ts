@@ -40,6 +40,7 @@ Plan Mode follows a 5-phase workflow. Phase transitions happen **AUTOMATICALLY**
 - Read operations: \`read_file\`, \`find_files\`, \`search_file_contents\`, \`list_directory\`
 - Web research: \`web_search\`, \`fetch_url\`
 - LSP diagnostics: \`lsp_get_diagnostics\`
+- Interactive questions: \`ask_user_question\` - Use this to gather user preferences or clarify requirements
 
 **Allowed for Plan Files Only:**
 - \`write_file\` - ONLY for writing to \`.nanocoder/plans/${planId}.md\`
@@ -89,15 +90,22 @@ function getPhaseInstructions(phase: PlanPhase): string {
 **Your Goal:** Understand the user's requirements before proposing solutions.
 
 **What to Do:**
-- Ask clarifying questions about goals and constraints
+- Use \`ask_user_question\` to gather user preferences and clarify requirements
 - Identify what success looks like
 - Explore the problem space without jumping to solutions
 - Gather context about the existing codebase if relevant
+
+**Using \`ask_user_question\`:**
+- Call this tool to ask clarifying questions interactively
+- The tool supports 1-4 questions with 2-4 options each
+- Users can select options or provide custom input
+- Use this instead of asking text questions in your responses
 
 **What NOT to Do:**
 - Don't propose specific solutions yet
 - Don't write implementation code
 - Don't make assumptions about the approach
+- Don't ask text questions - use the \`ask_user_question\` tool instead
 
 **Automatic Transition:**
 Once you have gathered sufficient information about the requirements, AUTOMATICALLY transition to the Design phase by stating:
@@ -118,17 +126,20 @@ DO NOT ask for permission to transition - proceed automatically when ready.
 - Propose solution architecture and alternatives
 - Consider trade-offs between different approaches
 - Identify potential risks or edge cases
+- Use \`ask_user_question\` if you need clarification on implementation preferences or architectural choices
 
-**What to Do:**
+**Tools to Use:**
 - Use \`read_file\` to understand existing code
 - Use \`find_files\` to locate relevant modules
 - Use \`search_file_contents\` to find patterns or dependencies
+- Use \`ask_user_question\` to clarify technical decisions with the user
 - Document your findings in the plan file
 
 **What NOT to Do:**
 - Don't modify any code (only read operations)
 - Don't execute bash commands
 - Don't finalize implementation steps yet
+- Don't ask text questions - use \`ask_user_question\` instead
 
 **CRITICAL - Keep Going:**
 After updating the plan file with the design phase content, you MUST immediately continue to the next phase.
@@ -154,6 +165,7 @@ Then continue with consolidating your findings in the Review phase.
 - List files that will be modified
 - Outline the implementation approach
 - Update the plan file with a complete implementation strategy
+- Use \`ask_user_question\` if you need clarification on any aspect of the plan before finalizing
 
 **Plan Structure:**
 Update the plan file to include:
@@ -167,6 +179,7 @@ After updating the plan file with the review phase content, you MUST immediately
 DO NOT stop and wait for user input.
 DO NOT ask if the user wants you to proceed.
 DO NOT say "Let me know if you'd like me to continue."
+DO NOT ask text questions - use \`ask_user_question\` if you need clarification.
 
 **Automatic Transition:**
 Immediately after writing the review phase to the plan file, transition to Final Plan by stating:
@@ -194,6 +207,10 @@ Update the plan file with:
 2. **File Changes** - Exact modifications for each file
 3. **Testing Steps** - How to verify the changes work
 4. **Rollback Plan** - How to undo if needed (if applicable)
+
+**Before calling exit-plan-mode:**
+- If you need any clarification on the plan (e.g., implementation preferences, testing approach), use \`ask_user_question\` first
+- Once you have all the information needed, call \`exit-plan-mode\` immediately
 
 **CRITICAL - Required Action:**
 Once the final plan is complete and written to the plan file, you MUST immediately call the \`exit-plan-mode\` tool.
@@ -276,6 +293,7 @@ ALLOWED WITHOUT APPROVAL:
 - web_search - Search the web
 - fetch_url - Fetch URL content
 - lsp_get_diagnostics - Get LSP diagnostics
+- ask_user_question - Interactive questions for user clarification
 - write_file - ONLY for .nanocoder/plans/{planId}.md
 
 BLOCKED IN PLAN MODE:
