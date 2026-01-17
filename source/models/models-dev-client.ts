@@ -252,6 +252,11 @@ async function findModelById(modelId: string): Promise<ModelInfo | null> {
  * Useful for local models where exact ID might not match
  */
 async function findModelByName(modelName: string): Promise<ModelInfo | null> {
+	// Empty string matches everything with .includes(), so return null early
+	if (!modelName) {
+		return null;
+	}
+
 	const data = await getModelsData();
 	if (!data) {
 		return null;

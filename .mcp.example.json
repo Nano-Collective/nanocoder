@@ -1,0 +1,72 @@
+{
+	"mcpServers": {
+		"filesystem": {
+			"transport": "stdio",
+			"command": "npx",
+			"args": [
+				"-y",
+				"@modelcontextprotocol/server-filesystem",
+				"./src",
+				"./docs"
+			],
+			"description": "Read/write files and directories",
+			"alwaysAllow": ["list_directory", "read_file"]
+		},
+		"github": {
+			"transport": "stdio",
+			"command": "npx",
+			"args": ["-y", "@modelcontextprotocol/server-github"],
+			"env": {
+				"GITHUB_PERSONAL_ACCESS_TOKEN": "$GITHUB_TOKEN"
+			},
+			"description": "GitHub repository management"
+		},
+		"postgres": {
+			"transport": "stdio",
+			"command": "npx",
+			"args": ["-y", "@modelcontextprotocol/server-postgres"],
+			"env": {
+				"POSTGRES_CONNECTION_STRING": "${DATABASE_URL:-postgresql://localhost:5432/mydb}"
+			},
+			"description": "Database queries and management"
+		},
+		"brave-search": {
+			"transport": "stdio",
+			"command": "npx",
+			"args": ["-y", "@modelcontextprotocol/server-brave-search"],
+			"env": {
+				"BRAVE_API_KEY": "$BRAVE_API_KEY"
+			},
+			"description": "Web search capabilities"
+		},
+		"context7": {
+			"transport": "http",
+			"url": "https://mcp.context7.com/mcp",
+			"timeout": 45000,
+			"description": "Up-to-date code documentation for LLMs"
+		},
+		"deepwiki": {
+			"transport": "http",
+			"url": "https://mcp.deepwiki.com/mcp",
+			"timeout": 45000,
+			"description": "Documentation lookup for any repository"
+		},
+		"sequential-thinking": {
+			"transport": "http",
+			"url": "https://remote.mcpservers.org/sequentialthinking/mcp",
+			"timeout": 60000,
+			"description": "Dynamic problem-solving through thought sequences"
+		},
+		"custom-server": {
+			"transport": "stdio",
+			"command": "python",
+			"args": ["./scripts/my-mcp-server.py"],
+			"env": {
+				"API_KEY": "${MY_API_KEY:-default-key}",
+				"DEBUG": "false"
+			},
+			"description": "Custom MCP server example",
+			"enabled": false
+		}
+	}
+}

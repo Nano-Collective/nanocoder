@@ -115,6 +115,12 @@ export class BashExecutor extends EventEmitter {
 		if (!execution) return false;
 
 		clearInterval(execution.intervalId);
+
+		// Destroy stdio streams to prevent them from keeping the event loop alive
+		execution.process.stdout?.destroy();
+		execution.process.stderr?.destroy();
+		execution.process.stdin?.destroy();
+
 		execution.process.kill('SIGTERM');
 		execution.state.isComplete = true;
 		execution.state.error = 'Cancelled by user';

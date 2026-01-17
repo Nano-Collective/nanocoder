@@ -61,6 +61,23 @@ export function validateConfig(
 		if (!server.args) {
 			errors.push(`MCP server "${name}" missing args array`);
 		}
+
+		if (server.alwaysAllow && !Array.isArray(server.alwaysAllow)) {
+			errors.push(
+				`MCP server "${name}" has invalid alwaysAllow (must be an array of strings)`,
+			);
+		}
+
+		if (Array.isArray(server.alwaysAllow)) {
+			const invalidItems = server.alwaysAllow.filter(
+				item => typeof item !== 'string',
+			);
+			if (invalidItems.length > 0) {
+				errors.push(
+					`MCP server "${name}" has non-string entries in alwaysAllow`,
+				);
+			}
+		}
 	}
 
 	return {
@@ -128,7 +145,10 @@ export async function testProviderConnection(
 	}
 }
 
-interface ConfigObject {
+/**
+ * Provider configuration object format (for agents.config.json)
+ */
+interface ProviderConfigObject {
 	nanocoder: {
 		providers: Array<{
 			name: string;
@@ -138,43 +158,116 @@ interface ConfigObject {
 			organizationId?: string;
 			timeout?: number;
 		}>;
-		mcpServers?: Array<{
-			name: string;
-			transport: 'stdio' | 'websocket' | 'http';
-			command?: string;
-			args?: string[];
-			env?: Record<string, string>;
-			url?: string;
-			headers?: Record<string, string>;
-			auth?: {
-				type: 'bearer' | 'basic' | 'api-key' | 'custom';
-				token?: string;
-				username?: string;
-				password?: string;
-				apiKey?: string;
-				customHeaders?: Record<string, string>;
-			};
-			timeout?: number;
-			reconnect?: {
-				enabled: boolean;
-				maxAttempts: number;
-				backoffMs: number;
-			};
-			description?: string;
-			tags?: string[];
-			enabled?: boolean;
-		}>;
 	};
 }
 
 /**
- * Builds the final configuration object
+ * MCP configuration object format (for .mcp.json)
+ * Uses Claude Code object format
+ */
+interface McpConfigObject {
+	mcpServers: Record<string, McpServerConfig>;
+}
+
+/**
+ * Builds the provider configuration object for agents.config.json
+ */
+export function buildProviderConfigObject(
+	providers: ProviderConfig[],
+): ProviderConfigObject {
+	const config: ProviderConfigObject = {
+		nanocoder: {
+			providers: providers.map(p => {
+				const providerConfig: {
+					name: string;
+					models: string[];
+					baseUrl?: string;
+					apiKey?: string;
+					organizationId?: string;
+					timeout?: number;
+				} = {
+					name: p.name,
+					models: p.models,
+				};
+
+				if (p.baseUrl) {
+					providerConfig.baseUrl = p.baseUrl;
+				}
+
+				if (p.apiKey) {
+					providerConfig.apiKey = p.apiKey;
+				}
+
+				if (p.organizationId) {
+					providerConfig.organizationId = p.organizationId;
+				}
+
+				if (p.timeout) {
+					providerConfig.timeout = p.timeout;
+				}
+
+				return providerConfig;
+			}),
+		},
+	};
+
+	return config;
+}
+
+/**
+ * Builds the MCP configuration object for .mcp.json
+ * Uses Claude Code object format (servers as object keys)
+ */
+export function buildMcpConfigObject(
+	mcpServers: Record<string, McpServerConfig>,
+): McpConfigObject {
+	// Add enabled flag to all servers configured via wizard
+	const serversWithEnabled: Record<string, McpServerConfig> = {};
+	for (const [key, server] of Object.entries(mcpServers)) {
+		serversWithEnabled[key] = {
+			...server,
+			enabled: true, // Default to enabled for wizard configurations
+		};
+	}
+
+	return {
+		mcpServers: serversWithEnabled,
+	};
+}
+
+/**
+ * @deprecated Use buildProviderConfigObject and buildMcpConfigObject instead
+ * This function is kept for backward compatibility during migration
  */
 export function buildConfigObject(
 	providers: ProviderConfig[],
 	mcpServers: Record<string, McpServerConfig>,
-): ConfigObject {
-	const config: ConfigObject = {
+): ProviderConfigObject & {
+	nanocoder: {
+		providers: Array<{
+			name: string;
+			models: string[];
+			baseUrl?: string;
+			apiKey?: string;
+			organizationId?: string;
+			timeout?: number;
+		}>;
+		mcpServers?: McpServerConfig[];
+	};
+} {
+	const config: ProviderConfigObject & {
+		nanocoder: {
+			providers: Array<{
+				name: string;
+				models: string[];
+				baseUrl?: string;
+				apiKey?: string;
+				organizationId?: string;
+				timeout?: number;
+			}>;
+			mcpServers?: McpServerConfig[];
+		};
+	} = {
 		nanocoder: {
 			providers: providers.map(p => {
 				const providerConfig: {
@@ -222,6 +315,7 @@ export function buildConfigObject(
 			headers: server.headers,
 			auth: server.auth,
 			timeout: server.timeout,
+			alwaysAllow: server.alwaysAllow,
 			description: server.description,
 			tags: server.tags,
 			enabled: true, // Default to enabled for wizard configurations

@@ -20,10 +20,12 @@ const SPECIAL_COMMANDS = {
 	PROVIDER: 'provider',
 	THEME: 'theme',
 	MODEL_DATABASE: 'model-database',
-	SETUP_CONFIG: 'setup-config',
+	SETUP_PROVIDERS: 'setup-providers',
+	SETUP_MCP: 'setup-mcp',
 	STATUS: 'status',
 	CHECKPOINT: 'checkpoint',
 	TITLE_SHAPE: 'title-shape',
+	NANOCODER_SHAPE: 'nanocoder-shape',
 } as const;
 
 /** Checkpoint subcommands */
@@ -177,8 +179,10 @@ async function handleSpecialCommand(
 		onEnterProviderSelectionMode,
 		onEnterThemeSelectionMode,
 		onEnterTitleShapeSelectionMode,
+		onEnterNanocoderShapeSelectionMode,
 		onEnterModelDatabaseMode,
 		onEnterConfigWizardMode,
+		onEnterMcpWizardMode,
 		onShowStatus,
 		onCommandComplete,
 		onAddToChatQueue,
@@ -220,13 +224,23 @@ async function handleSpecialCommand(
 			onCommandComplete?.();
 			return true;
 
+		case SPECIAL_COMMANDS.NANOCODER_SHAPE:
+			onEnterNanocoderShapeSelectionMode();
+			onCommandComplete?.();
+			return true;
+
 		case SPECIAL_COMMANDS.MODEL_DATABASE:
 			onEnterModelDatabaseMode();
 			onCommandComplete?.();
 			return true;
 
-		case SPECIAL_COMMANDS.SETUP_CONFIG:
+		case SPECIAL_COMMANDS.SETUP_PROVIDERS:
 			onEnterConfigWizardMode();
+			onCommandComplete?.();
+			return true;
+
+		case SPECIAL_COMMANDS.SETUP_MCP:
+			onEnterMcpWizardMode();
 			onCommandComplete?.();
 			return true;
 

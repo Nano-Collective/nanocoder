@@ -115,3 +115,16 @@ test('checkpoint load detection - other checkpoint subcommand', t => {
 		commandParts.length === 2;
 	t.false(isCheckpointLoad);
 });
+
+// Test setup-mcp command parsing
+test('setup-mcp command parsing - extracts command name correctly', t => {
+	const message = '/setup-mcp';
+	const commandName = message.slice(1).split(/\s+/)[0];
+	t.is(commandName, 'setup-mcp');
+});
+
+test('setup-mcp command parsing - handles command with extra whitespace', t => {
+	const message = '/setup-mcp   ';
+	const commandName = message.slice(1).split(/\s+/)[0];
+	t.is(commandName, 'setup-mcp');
+});

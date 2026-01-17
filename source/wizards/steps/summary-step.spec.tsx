@@ -2,6 +2,7 @@ import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {SummaryStep} from './summary-step.js';
+import type {McpTransportType} from '../templates/mcp-templates.js';
 
 // ============================================================================
 // Tests for SummaryStep Component Rendering
@@ -12,7 +13,8 @@ console.log(`\nsummary-step.spec.tsx – ${React.version}`);
 test('SummaryStep renders configuration summary', t => {
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={{}}
 			onSave={() => {}}
@@ -28,10 +30,10 @@ test('SummaryStep renders configuration summary', t => {
 });
 
 test('SummaryStep shows config location', t => {
-	const configPath = '/test/project/agents.config.json';
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath={configPath}
+			providerConfigPath="/test/project/agents.config.json"
+			mcpConfigPath="/test/project/.mcp.json"
 			providers={[]}
 			mcpServers={{}}
 			onSave={() => {}}
@@ -42,8 +44,9 @@ test('SummaryStep shows config location', t => {
 	);
 
 	const output = lastFrame();
-	t.regex(output!, /Location:/);
+	t.regex(output!, /Configuration files:/);
 	t.regex(output!, /agents\.config\.json/);
+	t.regex(output!, /\.mcp\.json/);
 });
 
 test('SummaryStep shows provider count', t => {
@@ -63,7 +66,8 @@ test('SummaryStep shows provider count', t => {
 
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={providers}
 			mcpServers={{}}
 			onSave={() => {}}
@@ -81,14 +85,14 @@ test('SummaryStep shows MCP server count', t => {
 	const mcpServers = {
 		filesystem: {
 			name: 'filesystem',
-			transport: 'stdio',
+			transport: 'stdio' as const,
 			command: 'npx',
 			args: ['-y', '@modelcontextprotocol/server-filesystem'],
 			env: {},
 		},
 		github: {
 			name: 'github',
-			transport: 'stdio',
+			transport: 'stdio' as const,
 			command: 'npx',
 			args: ['-y', '@modelcontextprotocol/server-github'],
 			env: {GITHUB_TOKEN: 'test'},
@@ -97,7 +101,8 @@ test('SummaryStep shows MCP server count', t => {
 
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={mcpServers}
 			onSave={() => {}}
@@ -122,7 +127,8 @@ test('SummaryStep displays provider names', t => {
 
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={providers}
 			mcpServers={{}}
 			onSave={() => {}}
@@ -140,7 +146,7 @@ test('SummaryStep displays MCP server names', t => {
 	const mcpServers = {
 		filesystem: {
 			name: 'filesystem',
-			transport: 'stdio',
+			transport: 'stdio' as const,
 			command: 'npx',
 			args: ['-y', '@modelcontextprotocol/server-filesystem'],
 			env: {},
@@ -149,7 +155,8 @@ test('SummaryStep displays MCP server names', t => {
 
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={mcpServers}
 			onSave={() => {}}
@@ -166,7 +173,8 @@ test('SummaryStep displays MCP server names', t => {
 test('SummaryStep shows warning when no providers configured', t => {
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={{}}
 			onSave={() => {}}
@@ -183,7 +191,8 @@ test('SummaryStep shows warning when no providers configured', t => {
 test('SummaryStep shows None when no providers exist', t => {
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={{}}
 			onSave={() => {}}
@@ -201,7 +210,8 @@ test('SummaryStep shows None when no providers exist', t => {
 test('SummaryStep shows None when no MCP servers exist', t => {
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={{}}
 			onSave={() => {}}
@@ -223,7 +233,8 @@ test('SummaryStep shows None when no MCP servers exist', t => {
 test('SummaryStep shows save configuration option', t => {
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={{}}
 			onSave={() => {}}
@@ -240,7 +251,8 @@ test('SummaryStep shows save configuration option', t => {
 test('SummaryStep shows add more providers option', t => {
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={{}}
 			onSave={() => {}}
@@ -257,7 +269,8 @@ test('SummaryStep shows add more providers option', t => {
 test('SummaryStep shows add more MCP servers option', t => {
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={{}}
 			onSave={() => {}}
@@ -274,7 +287,8 @@ test('SummaryStep shows add more MCP servers option', t => {
 test('SummaryStep shows cancel option', t => {
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={{}}
 			onSave={() => {}}
@@ -297,7 +311,8 @@ test('SummaryStep calls onSave when provided', t => {
 
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={{}}
 			onSave={() => {
@@ -318,7 +333,8 @@ test('SummaryStep calls onAddProviders when provided', t => {
 
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={{}}
 			onSave={() => {}}
@@ -339,7 +355,8 @@ test('SummaryStep calls onAddMcpServers when provided', t => {
 
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={{}}
 			onSave={() => {}}
@@ -360,7 +377,8 @@ test('SummaryStep calls onCancel when provided', t => {
 
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={{}}
 			onSave={() => {}}
@@ -381,7 +399,8 @@ test('SummaryStep calls onBack when provided', t => {
 
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={{}}
 			onSave={() => {}}
@@ -405,7 +424,8 @@ test('SummaryStep calls onBack when provided', t => {
 test('SummaryStep requires all callback props', t => {
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={{}}
 			onSave={() => {}}
@@ -421,7 +441,8 @@ test('SummaryStep requires all callback props', t => {
 test('SummaryStep handles optional onBack prop', t => {
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={{}}
 			onSave={() => {}}
@@ -441,7 +462,8 @@ test('SummaryStep handles optional onBack prop', t => {
 test('SummaryStep renders SelectInput component', t => {
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={{}}
 			onSave={() => {}}
@@ -459,7 +481,8 @@ test('SummaryStep renders SelectInput component', t => {
 test('SummaryStep renders with correct initial state', t => {
 	const {frames} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={{}}
 			onSave={() => {}}
@@ -486,7 +509,8 @@ test('SummaryStep displays provider details', t => {
 
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={providers}
 			mcpServers={{}}
 			onSave={() => {}}
@@ -504,7 +528,7 @@ test('SummaryStep displays MCP server details', t => {
 	const mcpServers = {
 		filesystem: {
 			name: 'filesystem',
-			transport: 'stdio',
+			transport: 'stdio' as const,
 			command: 'npx',
 			args: ['-y', '@modelcontextprotocol/server-filesystem'],
 			env: {},
@@ -513,7 +537,8 @@ test('SummaryStep displays MCP server details', t => {
 
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={mcpServers}
 			onSave={() => {}}
@@ -531,7 +556,7 @@ test('SummaryStep displays stdio MCP server with transport icon and command', t 
 	const mcpServers = {
 		filesystem: {
 			name: 'filesystem',
-			transport: 'stdio',
+			transport: 'stdio' as const,
 			command: 'npx',
 			args: ['-y', '@modelcontextprotocol/server-filesystem'],
 			env: {},
@@ -540,7 +565,8 @@ test('SummaryStep displays stdio MCP server with transport icon and command', t 
 
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={mcpServers}
 			onSave={() => {}}
@@ -566,7 +592,7 @@ test('SummaryStep displays HTTP MCP server with transport icon and URL', t => {
 	const mcpServers = {
 		remoteServer: {
 			name: 'remoteServer',
-			transport: 'http',
+			transport: 'http' as const,
 			url: 'https://api.example.com/mcp',
 			timeout: 30000,
 		},
@@ -574,7 +600,8 @@ test('SummaryStep displays HTTP MCP server with transport icon and URL', t => {
 
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={mcpServers}
 			onSave={() => {}}
@@ -599,7 +626,7 @@ test('SummaryStep displays WebSocket MCP server with transport icon and URL', t 
 	const mcpServers = {
 		wsServer: {
 			name: 'wsServer',
-			transport: 'websocket',
+			transport: 'websocket' as const,
 			url: 'wss://ws.example.com/mcp',
 			timeout: 60000,
 		},
@@ -607,7 +634,8 @@ test('SummaryStep displays WebSocket MCP server with transport icon and URL', t 
 
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={mcpServers}
 			onSave={() => {}}
@@ -632,13 +660,14 @@ test('SummaryStep displays unknown transport with question mark icon', t => {
 	const mcpServers = {
 		unknownServer: {
 			name: 'unknownServer',
-			transport: 'unknown' as any,
+			transport: 'unknown' as const as McpTransportType,
 		},
 	};
 
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={mcpServers}
 			onSave={() => {}}
@@ -659,7 +688,7 @@ test('SummaryStep displays environment variables when present', t => {
 	const mcpServers = {
 		github: {
 			name: 'github',
-			transport: 'stdio',
+			transport: 'stdio' as const,
 			command: 'npx',
 			args: ['-y', '@modelcontextprotocol/server-github'],
 			env: {GITHUB_TOKEN: 'test-token', GITHUB_USER: 'testuser'},
@@ -668,7 +697,8 @@ test('SummaryStep displays environment variables when present', t => {
 
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={mcpServers}
 			onSave={() => {}}
@@ -686,7 +716,8 @@ test('SummaryStep displays environment variables when present', t => {
 test('SummaryStep renders without crashing', t => {
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={[]}
 			mcpServers={{}}
 			onSave={() => {}}
@@ -717,14 +748,14 @@ test('SummaryStep handles multiple providers and servers', t => {
 	const mcpServers = {
 		filesystem: {
 			name: 'filesystem',
-			transport: 'stdio',
+			transport: 'stdio' as const,
 			command: 'npx',
 			args: ['-y', '@modelcontextprotocol/server-filesystem'],
 			env: {},
 		},
 		github: {
 			name: 'github',
-			transport: 'stdio',
+			transport: 'stdio' as const,
 			command: 'npx',
 			args: ['-y', '@modelcontextprotocol/server-github'],
 			env: {GITHUB_TOKEN: 'test'},
@@ -733,7 +764,8 @@ test('SummaryStep handles multiple providers and servers', t => {
 
 	const {lastFrame} = render(
 		<SummaryStep
-			configPath="/test/agents.config.json"
+			providerConfigPath="/test/agents.config.json"
+			mcpConfigPath="/test/.mcp.json"
 			providers={providers}
 			mcpServers={mcpServers}
 			onSave={() => {}}

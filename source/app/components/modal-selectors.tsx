@@ -2,11 +2,13 @@ import React from 'react';
 import {ModelDatabaseDisplay} from '@/commands/model-database';
 import CheckpointSelector from '@/components/checkpoint-selector';
 import ModelSelector from '@/components/model-selector';
+import NanocoderShapeSelector from '@/components/nanocoder-shape-selector';
 import ProviderSelector from '@/components/provider-selector';
 import ThemeSelector from '@/components/theme-selector';
 import TitleShapeSelector from '@/components/title-shape-selector';
 import type {CheckpointListItem, LLMClient} from '@/types';
-import {ConfigWizard} from '@/wizard/config-wizard';
+import {McpWizard} from '@/wizards/mcp-wizard';
+import {ProviderWizard} from '@/wizards/provider-wizard';
 
 export interface ModalSelectorsProps {
 	// State flags
@@ -15,8 +17,10 @@ export interface ModalSelectorsProps {
 	isThemeSelectionMode: boolean;
 	isModelDatabaseMode: boolean;
 	isConfigWizardMode: boolean;
+	isMcpWizardMode: boolean;
 	isCheckpointLoadMode: boolean;
 	isTitleShapeSelectionMode: boolean;
+	isNanocoderShapeSelectionMode: boolean;
 
 	// Current values
 	client: LLMClient | null;
@@ -43,12 +47,20 @@ export interface ModalSelectorsProps {
 	onTitleShapeSelect: (shape: import('@/types/ui').TitleShape) => void;
 	onTitleShapeSelectionCancel: () => void;
 
+	// Handlers - Nanocoder Shape Selection
+	onNanocoderShapeSelect: (shape: import('@/types/ui').NanocoderShape) => void;
+	onNanocoderShapeSelectionCancel: () => void;
+
 	// Handlers - Model Database
 	onModelDatabaseCancel: () => void;
 
 	// Handlers - Config Wizard
 	onConfigWizardComplete: (configPath: string) => Promise<void>;
 	onConfigWizardCancel: () => void;
+
+	// Handlers - MCP Wizard
+	onMcpWizardComplete: (configPath: string) => Promise<void>;
+	onMcpWizardCancel: () => void;
 
 	// Handlers - Checkpoint
 	onCheckpointSelect: (name: string, backup: boolean) => Promise<void>;
@@ -65,8 +77,10 @@ export function ModalSelectors({
 	isThemeSelectionMode,
 	isModelDatabaseMode,
 	isConfigWizardMode,
+	isMcpWizardMode,
 	isCheckpointLoadMode,
 	isTitleShapeSelectionMode,
+	isNanocoderShapeSelectionMode,
 	client,
 	currentModel,
 	currentProvider,
@@ -80,10 +94,14 @@ export function ModalSelectors({
 	onModelDatabaseCancel,
 	onConfigWizardComplete,
 	onConfigWizardCancel,
+	onMcpWizardComplete,
+	onMcpWizardCancel,
 	onCheckpointSelect,
 	onCheckpointCancel,
 	onTitleShapeSelect,
 	onTitleShapeSelectionCancel,
+	onNanocoderShapeSelect,
+	onNanocoderShapeSelectionCancel,
 }: ModalSelectorsProps): React.ReactElement | null {
 	if (isModelSelectionMode) {
 		return (
@@ -124,16 +142,35 @@ export function ModalSelectors({
 		);
 	}
 
+	if (isNanocoderShapeSelectionMode) {
+		return (
+			<NanocoderShapeSelector
+				onComplete={onNanocoderShapeSelect}
+				onCancel={onNanocoderShapeSelectionCancel}
+			/>
+		);
+	}
+
 	if (isModelDatabaseMode) {
 		return <ModelDatabaseDisplay onCancel={onModelDatabaseCancel} />;
 	}
 
 	if (isConfigWizardMode) {
 		return (
-			<ConfigWizard
+			<ProviderWizard
 				projectDir={process.cwd()}
 				onComplete={configPath => void onConfigWizardComplete(configPath)}
 				onCancel={onConfigWizardCancel}
+			/>
+		);
+	}
+
+	if (isMcpWizardMode) {
+		return (
+			<McpWizard
+				projectDir={process.cwd()}
+				onComplete={configPath => void onMcpWizardComplete(configPath)}
+				onCancel={onMcpWizardCancel}
 			/>
 		);
 	}

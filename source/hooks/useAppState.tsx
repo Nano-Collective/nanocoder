@@ -104,9 +104,12 @@ export function useAppState() {
 		useState<boolean>(false);
 	const [isTitleShapeSelectionMode, setIsTitleShapeSelectionMode] =
 		useState<boolean>(false);
+	const [isNanocoderShapeSelectionMode, setIsNanocoderShapeSelectionMode] =
+		useState<boolean>(false);
 	const [isModelDatabaseMode, setIsModelDatabaseMode] =
 		useState<boolean>(false);
 	const [isConfigWizardMode, setIsConfigWizardMode] = useState<boolean>(false);
+	const [isMcpWizardMode, setIsMcpWizardMode] = useState<boolean>(false);
 	const [isCheckpointLoadMode, setIsCheckpointLoadMode] =
 		useState<boolean>(false);
 	const [checkpointLoadData, setCheckpointLoadData] = useState<{
@@ -286,8 +289,10 @@ export function useAppState() {
 		isProviderSelectionMode,
 		isThemeSelectionMode,
 		isTitleShapeSelectionMode,
+		isNanocoderShapeSelectionMode,
 		isModelDatabaseMode,
 		isConfigWizardMode,
+		isMcpWizardMode,
 		isCheckpointLoadMode,
 		checkpointLoadData,
 		isToolConfirmationMode,
@@ -338,8 +343,10 @@ export function useAppState() {
 		setIsProviderSelectionMode,
 		setIsThemeSelectionMode,
 		setIsTitleShapeSelectionMode,
+		setIsNanocoderShapeSelectionMode,
 		setIsModelDatabaseMode,
 		setIsConfigWizardMode,
+		setIsMcpWizardMode,
 		setIsCheckpointLoadMode,
 		setCheckpointLoadData,
 		setIsToolConfirmationMode,

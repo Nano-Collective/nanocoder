@@ -8,6 +8,10 @@ import type {EnhancedLoggerConfig, LoggerConfig, LogLevel} from './types.js';
 
 /**
  * Get the default log directory based on platform
+ * Follows OS conventions:
+ * - macOS: ~/Library/Logs/nanocoder
+ * - Linux: ~/.local/state/nanocoder/logs (XDG_STATE_HOME)
+ * - Windows: %LOCALAPPDATA%/nanocoder/logs
  */
 export function getDefaultLogDirectory(): string {
 	if (process.env.NANOCODER_LOG_DIR) {
@@ -16,11 +20,19 @@ export function getDefaultLogDirectory(): string {
 
 	switch (platform()) {
 		case 'win32':
-			return join(process.env.APPDATA || homedir(), 'nanocoder', 'logs');
+			return join(
+				process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'),
+				'nanocoder',
+				'logs',
+			);
 		case 'darwin':
-			return join(homedir(), 'Library', 'Preferences', 'nanocoder', 'logs');
+			return join(homedir(), 'Library', 'Logs', 'nanocoder');
 		default: // linux
-			return join(homedir(), '.config', 'nanocoder', 'logs');
+			return join(
+				process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'),
+				'nanocoder',
+				'logs',
+			);
 	}
 }
 
@@ -49,13 +61,26 @@ export function createDevelopmentConfig(): EnhancedLoggerConfig {
 
 /**
  * Create production configuration
+ *
+ * In production, we want:
+ * - File logging enabled at 'info' level by default (for diagnostics)
+ * - Console/UI output silent (to avoid polluting the user interface)
+ *
+ * The log level here controls what gets written to files.
+ * Console output is suppressed by using file-only transport.
  */
 export function createProductionConfig(): EnhancedLoggerConfig {
 	// Check if file logging is explicitly disabled
 	const disableFileLogging = process.env.NANOCODER_LOG_DISABLE_FILE === 'true';
 
+	// File log level defaults to 'info' for useful diagnostics
+	// Can be overridden with NANOCODER_LOG_LEVEL env var
+	const fileLogLevel =
+		(process.env.NANOCODER_LOG_LEVEL as LogLevel) ||
+		(disableFileLogging ? 'silent' : 'info');
+
 	const baseConfig = {
-		level: (process.env.NANOCODER_LOG_LEVEL as LogLevel) || 'silent', // Production users shouldn't see internal logs
+		level: fileLogLevel,
 		pretty: false,
 		redact: ['apiKey', 'token', 'password', 'email', 'userId', 'secret'],
 		correlation: true,

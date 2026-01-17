@@ -44,7 +44,9 @@ const isLocalEndpoint = (
 interface ProviderStepProps {
 	onComplete: (providers: ProviderConfig[]) => void;
 	onBack?: () => void;
+	onDelete?: () => void;
 	existingProviders?: ProviderConfig[];
+	configExists?: boolean;
 }
 
 type Mode =
@@ -66,7 +68,9 @@ interface TemplateOption {
 export function ProviderStep({
 	onComplete,
 	onBack,
+	onDelete,
 	existingProviders = [],
+	configExists = false,
 }: ProviderStepProps) {
 	const {isNarrow} = useResponsiveTerminal();
 	const [providers, setProviders] =
@@ -138,18 +142,18 @@ export function ProviderStep({
 		...(providers.length > 0
 			? [{label: 'Edit existing providers', value: 'edit'}]
 			: []),
-		{label: 'Skip providers', value: 'skip'},
+		...(providers.length > 0 ? [{label: 'Done & Save', value: 'done'}] : []),
+		...(configExists && onDelete
+			? [{label: 'Delete config file', value: 'delete'}]
+			: []),
 	];
 
-	const templateOptions: TemplateOption[] = [
+	const getTemplateOptions = (): TemplateOption[] => [
 		...PROVIDER_TEMPLATES.map(template => ({
 			label: template.name,
 			value: template.id,
 		})),
-		{
-			label: `Done adding providers`,
-			value: 'done',
-		},
+		...(providers.length > 0 ? [{label: 'Done & Save', value: 'done'}] : []),
 	];
 
 	const editOptions: TemplateOption[] = [
@@ -176,9 +180,10 @@ export function ProviderStep({
 			}
 		} else if (item.value === 'edit') {
 			setMode('edit-selection');
-		} else {
-			// Skip
+		} else if (item.value === 'done') {
 			onComplete(providers);
+		} else if (item.value === 'delete' && onDelete) {
+			onDelete();
 		}
 	};
 
@@ -711,7 +716,7 @@ export function ProviderStep({
 					</Box>
 				)}
 				<SelectInput
-					items={templateOptions}
+					items={getTemplateOptions()}
 					onSelect={(item: TemplateOption) => handleTemplateSelect(item)}
 				/>
 			</Box>

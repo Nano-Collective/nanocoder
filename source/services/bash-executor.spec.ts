@@ -3,13 +3,31 @@ import {BashExecutor} from './bash-executor';
 
 console.log(`\nbash-executor.spec.ts`);
 
+// Track executors for cleanup
+const executorsToCleanup: BashExecutor[] = [];
+
 // Helper to create a fresh executor for each test
 function createExecutor(): BashExecutor {
-	return new BashExecutor();
+	const executor = new BashExecutor();
+	executorsToCleanup.push(executor);
+	return executor;
 }
 
+// Clean up after each test to prevent event listeners from keeping Node alive
+test.afterEach(() => {
+	for (const executor of executorsToCleanup) {
+		// Cancel any active executions
+		for (const id of executor.getActiveExecutionIds()) {
+			executor.cancel(id);
+		}
+		// Remove all event listeners to allow Node to exit
+		executor.removeAllListeners();
+	}
+	executorsToCleanup.length = 0;
+});
+
 // Basic execution tests
-test('execute - returns executionId and promise', t => {
+test('execute - returns executionId and promise', async t => {
 	const executor = createExecutor();
 	const {executionId, promise} = executor.execute('echo hello');
 
@@ -17,20 +35,22 @@ test('execute - returns executionId and promise', t => {
 	t.true(executionId.length > 0);
 	t.true(promise instanceof Promise);
 
-	// Clean up
+	// Clean up - wait for process to terminate
 	executor.cancel(executionId);
+	await promise;
 });
 
-test('execute - generates unique execution IDs', t => {
+test('execute - generates unique execution IDs', async t => {
 	const executor = createExecutor();
 	const result1 = executor.execute('echo 1');
 	const result2 = executor.execute('echo 2');
 
 	t.not(result1.executionId, result2.executionId);
 
-	// Clean up
+	// Clean up - wait for processes to terminate
 	executor.cancel(result1.executionId);
 	executor.cancel(result2.executionId);
+	await Promise.all([result1.promise, result2.promise]);
 });
 
 test('execute - captures stdout output', async t => {
@@ -133,13 +153,16 @@ test('execute - emits complete event when done', async t => {
 });
 
 // Cancel tests
-test('cancel - returns true for active execution', t => {
+test('cancel - returns true for active execution', async t => {
 	const executor = createExecutor();
-	const {executionId} = executor.execute('sleep 10');
+	const {executionId, promise} = executor.execute('sleep 10');
 
 	const cancelled = executor.cancel(executionId);
 
 	t.true(cancelled);
+
+	// Wait for the process to fully terminate
+	await promise;
 });
 
 test('cancel - returns false for unknown execution ID', t => {
@@ -177,19 +200,22 @@ test('cancel - emits complete event with error', async t => {
 	t.is((completeState as {error: string}).error, 'Cancelled by user');
 });
 
-test('cancel - removes execution from active list', t => {
+test('cancel - removes execution from active list', async t => {
 	const executor = createExecutor();
-	const {executionId} = executor.execute('sleep 10');
+	const {executionId, promise} = executor.execute('sleep 10');
 
 	t.true(executor.hasActiveExecutions());
 	executor.cancel(executionId);
 	t.false(executor.hasActiveExecutions());
+
+	// Wait for the process to fully terminate
+	await promise;
 });
 
 // getState tests
-test('getState - returns state for active execution', t => {
+test('getState - returns state for active execution', async t => {
 	const executor = createExecutor();
-	const {executionId} = executor.execute('sleep 10');
+	const {executionId, promise} = executor.execute('sleep 10');
 
 	const state = executor.getState(executionId);
 
@@ -197,8 +223,9 @@ test('getState - returns state for active execution', t => {
 	t.is(state?.executionId, executionId);
 	t.false(state?.isComplete);
 
-	// Clean up
+	// Clean up - wait for process to terminate
 	executor.cancel(executionId);
+	await promise;
 });
 
 test('getState - returns undefined for unknown execution ID', t => {
@@ -209,9 +236,9 @@ test('getState - returns undefined for unknown execution ID', t => {
 	t.is(state, undefined);
 });
 
-test('getState - returns copy of state (immutable)', t => {
+test('getState - returns copy of state (immutable)', async t => {
 	const executor = createExecutor();
-	const {executionId} = executor.execute('sleep 10');
+	const {executionId, promise} = executor.execute('sleep 10');
 
 	const state1 = executor.getState(executionId);
 	const state2 = executor.getState(executionId);
@@ -219,8 +246,9 @@ test('getState - returns copy of state (immutable)', t => {
 	t.not(state1, state2); // Different object references
 	t.deepEqual(state1, state2); // Same content
 
-	// Clean up
+	// Clean up - wait for process to terminate
 	executor.cancel(executionId);
+	await promise;
 });
 
 // hasActiveExecutions tests
@@ -230,14 +258,15 @@ test('hasActiveExecutions - returns false when no executions', t => {
 	t.false(executor.hasActiveExecutions());
 });
 
-test('hasActiveExecutions - returns true when executions active', t => {
+test('hasActiveExecutions - returns true when executions active', async t => {
 	const executor = createExecutor();
-	const {executionId} = executor.execute('sleep 10');
+	const {executionId, promise} = executor.execute('sleep 10');
 
 	t.true(executor.hasActiveExecutions());
 
-	// Clean up
+	// Clean up - wait for process to terminate
 	executor.cancel(executionId);
+	await promise;
 });
 
 test('hasActiveExecutions - returns false after execution completes', async t => {
@@ -258,7 +287,7 @@ test('getActiveExecutionIds - returns empty array when no executions', t => {
 	t.deepEqual(ids, []);
 });
 
-test('getActiveExecutionIds - returns all active execution IDs', t => {
+test('getActiveExecutionIds - returns all active execution IDs', async t => {
 	const executor = createExecutor();
 	const exec1 = executor.execute('sleep 10');
 	const exec2 = executor.execute('sleep 10');
@@ -269,9 +298,10 @@ test('getActiveExecutionIds - returns all active execution IDs', t => {
 	t.true(ids.includes(exec1.executionId));
 	t.true(ids.includes(exec2.executionId));
 
-	// Clean up
+	// Clean up - wait for processes to terminate
 	executor.cancel(exec1.executionId);
 	executor.cancel(exec2.executionId);
+	await Promise.all([exec1.promise, exec2.promise]);
 });
 
 test('getActiveExecutionIds - excludes completed executions', async t => {
@@ -287,8 +317,9 @@ test('getActiveExecutionIds - excludes completed executions', async t => {
 	t.false(ids.includes(exec1.executionId));
 	t.true(ids.includes(exec2.executionId));
 
-	// Clean up
+	// Clean up - wait for process to terminate
 	executor.cancel(exec2.executionId);
+	await exec2.promise;
 });
 
 // Multiple executions

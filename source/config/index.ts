@@ -1,14 +1,17 @@
 import {config as loadEnv} from 'dotenv';
-import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'fs';
+import {existsSync, mkdirSync, writeFileSync} from 'fs';
 import {homedir} from 'os';
 import {dirname, join} from 'path';
 import {fileURLToPath} from 'url';
-import {substituteEnvVars} from '@/config/env-substitution';
+import {
+	loadAllMCPConfigs,
+	loadAllProviderConfigs,
+} from '@/config/mcp-config-loader';
 import {getConfigPath} from '@/config/paths';
 import {loadPreferences} from '@/config/preferences';
 import {defaultTheme, getThemeColors} from '@/config/themes';
 import type {AppConfig, Colors} from '@/types/index';
-import {logError, logWarning} from '@/utils/message-queue';
+import {logError} from '@/utils/message-queue';
 
 // Load .env file from working directory (shell environment takes precedence)
 // Suppress dotenv console output by temporarily redirecting stdout
@@ -100,35 +103,47 @@ function createDefaultConfFile(filePath: string, fileName: string): void {
 
 // Function to load app configuration from agents.config.json if it exists
 function loadAppConfig(): AppConfig {
-	const agentsJsonPath = getClosestConfigFile('agents.config.json');
+	// Load providers from the new hierarchical configuration system
+	const providers = loadAllProviderConfigs();
 
-	try {
-		const rawData = readFileSync(agentsJsonPath, 'utf-8');
-		const agentsData = JSON.parse(rawData) as {nanocoder?: AppConfig};
+	// Load MCP servers from the new hierarchical configuration system
+	const mcpServersWithSource = loadAllMCPConfigs();
+	const mcpServers = mcpServersWithSource.map(item => item.server);
 
-		// Apply environment variable substitution
-		const processedData = substituteEnvVars(agentsData);
-
-		if (processedData.nanocoder) {
-			return {
-				providers: processedData.nanocoder.providers ?? [],
-				mcpServers: processedData.nanocoder.mcpServers ?? [],
-			};
-		}
-	} catch (error) {
-		logWarning(
-			`Failed to load agents.config.json: ${error instanceof Error ? error.message : String(error)}`,
-		);
-	}
-
-	return {};
+	return {
+		providers,
+		mcpServers,
+	};
 }
 
-export let appConfig = loadAppConfig();
+let _appConfig: AppConfig | null = null;
+
+/**
+ * Lazy-loaded app config to avoid circular dependencies during module initialization
+ * @public
+ */
+export function getAppConfig(): AppConfig {
+	if (!_appConfig) {
+		_appConfig = loadAppConfig();
+	}
+	return _appConfig;
+}
+
+// Legacy export for backward compatibility - use a getter
+export const appConfig = new Proxy({} as AppConfig, {
+	get(_target, prop) {
+		return getAppConfig()[prop as keyof AppConfig];
+	},
+});
 
 // Function to reload the app configuration (useful after config file changes)
 export function reloadAppConfig(): void {
-	appConfig = loadAppConfig();
+	_appConfig = loadAppConfig();
+}
+
+// Function to clear the cached app configuration (useful for testing)
+export function clearAppConfig(): void {
+	_appConfig = null;
 }
 
 let cachedColors: Colors | null = null;

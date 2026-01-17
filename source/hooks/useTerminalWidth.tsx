@@ -63,8 +63,11 @@ export const useResponsiveTerminal = () => {
 	};
 
 	// Utility to truncate path intelligently (keep end of path)
-	const truncatePath = (pathStr: string, maxLength: number): string => {
-		if (pathStr.length <= maxLength) return pathStr;
+	const truncatePath = (
+		pathStr: string | undefined,
+		maxLength: number,
+	): string => {
+		if (!pathStr || pathStr.length <= maxLength) return pathStr || '';
 		return '...' + pathStr.slice(-(maxLength - 3));
 	};
 

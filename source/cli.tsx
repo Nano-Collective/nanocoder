@@ -1,9 +1,35 @@
 #!/usr/bin/env node
 import {render} from 'ink';
+import {createRequire} from 'module';
 import App from '@/app';
+
+const require = createRequire(import.meta.url);
+const {version} = require('../package.json');
 
 // Parse CLI arguments
 const args = process.argv.slice(2);
+
+// Handle --version/-v flag
+if (args.includes('--version') || args.includes('-v')) {
+	console.log(version);
+	process.exit(0);
+}
+
+// Handle --help/-h flag
+if (args.includes('--help') || args.includes('-h')) {
+	console.log(`
+Usage: nanocoder [options]
+
+Options:
+  -v, --version    Show version number
+  -h, --help       Show help
+  --vscode         Run in VS Code mode
+  --vscode-port    Specify VS Code port
+  run              Run in non-interactive mode
+  `);
+	process.exit(0);
+}
+
 const vscodeMode = args.includes('--vscode');
 
 // Extract VS Code port if specified

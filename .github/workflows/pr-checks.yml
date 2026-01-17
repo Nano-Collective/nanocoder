@@ -123,6 +123,11 @@ jobs:
   test-coverage:
     name: Unit Tests & Coverage Analysis
     runs-on: ubuntu-latest
+    env:
+      CI: true
+      NODE_ENV: test
+      FORCE_COLOR: '1'
+      TERM: xterm-256color
     outputs:
       coverage: ${{ steps.coverage.outputs.coverage }}
     steps:
@@ -131,6 +136,8 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+          # Ensure proper git state for file-snapshot.ts tests
+          set-safe-directory: false
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -157,8 +164,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build project (required for CLI integration tests)
+        run: pnpm build
+
       - name: Run unit tests with coverage
-        run: pnpm test:ava:coverage
+        run: npx c8 ava #pnpm test:ava:coverage
 
       - name: Generate coverage summary
         run: |

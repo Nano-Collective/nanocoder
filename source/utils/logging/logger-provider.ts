@@ -54,14 +54,8 @@ export class LoggerProvider {
 		// For now, use fallback logger synchronously to avoid circular dependencies
 		// The real Pino logger will be loaded asynchronously when needed
 		this._createPinoLogger = () => this.createFallbackLogger();
-		this._createConfig = (config?: Partial<LoggerConfig>) => ({
-			level: 'silent', // Default to silent for production CLI usage
-			pretty: false,
-			redact: [],
-			correlation: false,
-			serialize: false,
-			...config,
-		});
+		this._createConfig = (config?: Partial<LoggerConfig>) =>
+			this.createFallbackConfig(config);
 		this._fallbackInitialized = true;
 
 		// Skip loading real Pino dependencies if running under Bun
@@ -189,11 +183,53 @@ export class LoggerProvider {
 	}
 
 	/**
+	 * Get the default log level based on environment
+	 * Single source of truth for log level defaults (used before config.ts loads)
+	 *
+	 * IMPORTANT: The fallback logger outputs to console, so in production we use
+	 * 'silent' to avoid polluting the UI. Once the real pino logger loads
+	 * (which writes to files), it will use 'info' level from config.ts.
+	 */
+	private getDefaultLogLevel(): LogLevel {
+		const envLevel = process.env.NANOCODER_LOG_LEVEL as LogLevel;
+		if (envLevel) return envLevel;
+
+		const isTest = process.env.NODE_ENV === 'test';
+		const isDev = process.env.NODE_ENV === 'development';
+
+		if (isTest) return 'silent';
+		if (isDev) return 'debug';
+		// Production fallback logger: silent (outputs to console, not file)
+		// The real pino logger will use 'info' once loaded
+		return 'silent';
+	}
+
+	/**
+	 * Create fallback config when config.ts hasn't loaded yet
+	 * Uses getDefaultLogLevel() for consistent defaults
+	 */
+	private createFallbackConfig(
+		override: Partial<LoggerConfig> = {},
+	): LoggerConfig {
+		const isDev = process.env.NODE_ENV === 'development';
+		const isTest = process.env.NODE_ENV === 'test';
+
+		return {
+			level: this.getDefaultLogLevel(),
+			pretty: isDev,
+			redact: ['apiKey', 'token', 'password', 'secret'],
+			correlation: !isTest,
+			serialize: !isDev,
+			...override,
+		};
+	}
+
+	/**
 	 * Create fallback logger when dependencies fail to load
 	 */
 	private createFallbackLogger(): Logger {
-		// Check current config level - default to silent for production
-		const configLevel = this._config?.level || 'silent';
+		// Use config level if available, otherwise compute default
+		const configLevel = this._config?.level || this.getDefaultLogLevel();
 		const isSilent = configLevel === 'silent';
 
 		// If silent, return a no-op logger
@@ -240,26 +276,18 @@ export class LoggerProvider {
 
 	/**
 	 * Create default configuration based on environment
+	 * Delegates to config.ts when loaded, otherwise uses createFallbackConfig
 	 */
 	private createDefaultConfig(
 		override: Partial<LoggerConfig> = {},
 	): LoggerConfig {
-		const isDev = process.env.NODE_ENV === 'development';
-		const isTest = process.env.NODE_ENV === 'test';
+		// Use the loaded createConfig from config.ts if available
+		if (this._createConfig) {
+			return this._createConfig(override);
+		}
 
-		const defaultConfig: LoggerConfig = {
-			level: isTest
-				? 'silent'
-				: isDev
-					? 'debug'
-					: (process.env.NANOCODER_LOG_LEVEL as LogLevel) || 'silent', // Default to silent for production/CLI usage
-			pretty: isDev,
-			redact: ['apiKey', 'token', 'password', 'secret'],
-			correlation: true,
-			serialize: !isDev,
-		};
-
-		return {...defaultConfig, ...override};
+		// Fallback to local config creation (same logic as createFallbackConfig)
+		return this.createFallbackConfig(override);
 	}
 
 	/**

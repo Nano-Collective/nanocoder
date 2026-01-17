@@ -14,7 +14,9 @@ import {
 interface McpStepProps {
 	onComplete: (mcpServers: Record<string, McpServerConfig>) => void;
 	onBack?: () => void;
+	onDelete?: () => void;
 	existingServers?: Record<string, McpServerConfig>;
+	configExists?: boolean;
 }
 
 type Mode =
@@ -33,7 +35,9 @@ interface TemplateOption {
 export function McpStep({
 	onComplete,
 	onBack,
+	onDelete,
 	existingServers = {},
+	configExists = false,
 }: McpStepProps) {
 	const {isNarrow} = useResponsiveTerminal();
 	const [servers, setServers] =
@@ -75,7 +79,10 @@ export function McpStep({
 		...(serverCount > 0
 			? [{label: 'Edit existing servers', value: 'edit'}]
 			: []),
-		{label: 'Skip MCP servers', value: 'skip'},
+		{label: 'Done & Save', value: 'done'},
+		...(configExists && onDelete
+			? [{label: 'Delete config file', value: 'delete'}]
+			: []),
 	];
 
 	// Create template options for current tab
@@ -98,7 +105,7 @@ export function McpStep({
 
 			// Add done option at the end
 			options.push({
-				label: 'Done adding MCP servers',
+				label: 'Done & Save',
 				value: 'done',
 			});
 
@@ -113,9 +120,10 @@ export function McpStep({
 			setMode('tabs');
 		} else if (item.value === 'edit') {
 			setMode('edit-selection');
-		} else {
-			// Skip
+		} else if (item.value === 'done') {
 			onComplete(servers);
+		} else if (item.value === 'delete' && onDelete) {
+			onDelete();
 		}
 	};
 
@@ -477,7 +485,7 @@ export function McpStep({
 				<SelectInput items={templateOptions} onSelect={handleTemplateSelect} />
 				<Box marginTop={1}>
 					<Text color={colors.secondary}>
-						Arrow keys: Navigate | Tab: Switch tabs | Shift+Tab: Go back
+						Arrow keys: Navigate | Tab: Switch tabs
 					</Text>
 				</Box>
 			</Box>
@@ -496,9 +504,6 @@ export function McpStep({
 					items={editOptions}
 					onSelect={(item: TemplateOption) => handleEditSelect(item)}
 				/>
-				<Box marginTop={1}>
-					<Text color={colors.secondary}>Shift+Tab: Go back</Text>
-				</Box>
 			</Box>
 		);
 	}
@@ -522,9 +527,6 @@ export function McpStep({
 					items={editOrDeleteOptions}
 					onSelect={(item: {value: string}) => handleEditOrDeleteChoice(item)}
 				/>
-				<Box marginTop={1}>
-					<Text color={colors.secondary}>Shift+Tab: Go back</Text>
-				</Box>
 			</Box>
 		);
 	}
@@ -608,22 +610,11 @@ export function McpStep({
 					</Box>
 				)}
 
-				{isNarrow ? (
-					<Box flexDirection="column">
-						<Text color={colors.secondary}>
-							{isMultiline ? 'Esc: submit' : 'Enter: continue'}
-						</Text>
-						<Text color={colors.secondary}>Shift+Tab: go back</Text>
-					</Box>
-				) : (
-					<Box>
-						<Text color={colors.secondary}>
-							{isMultiline
-								? 'Press Esc to submit | Shift+Tab to go back'
-								: 'Press Enter to continue | Shift+Tab to go back'}
-						</Text>
-					</Box>
-				)}
+				<Box>
+					<Text color={colors.secondary}>
+						{isMultiline ? 'Press Esc to submit' : 'Press Enter to continue'}
+					</Text>
+				</Box>
 			</Box>
 		);
 	}

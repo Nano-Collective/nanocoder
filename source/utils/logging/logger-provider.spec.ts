@@ -189,6 +189,9 @@ test('createDefaultConfig handles environments correctly', t => {
 	}
 
 	// Test production environment
+	// Note: The fallback logger uses 'silent' to avoid console spam.
+	// Once the real pino logger loads asynchronously, it will use 'info' from config.ts.
+	// This test runs synchronously, so it sees the fallback config.
 	process.env.NODE_ENV = 'production';
 	provider.reset();
 	const prodLogger = provider.initializeLogger();

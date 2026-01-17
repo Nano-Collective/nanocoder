@@ -120,3 +120,60 @@ test('CLI parsing: filters out flags mixed with prompt words', t => {
 
 	t.is(prompt, 'create a file');
 });
+
+// New tests for version and help flags
+test('CLI parsing: detects --version flag', t => {
+	const args = ['--version'];
+	const hasVersionFlag = args.includes('--version') || args.includes('-v');
+
+	t.true(hasVersionFlag);
+});
+
+test('CLI parsing: detects -v flag', t => {
+	const args = ['-v'];
+	const hasVersionFlag = args.includes('--version') || args.includes('-v');
+
+	t.true(hasVersionFlag);
+});
+
+test('CLI parsing: detects --help flag', t => {
+	const args = ['--help'];
+	const hasHelpFlag = args.includes('--help') || args.includes('-h');
+
+	t.true(hasHelpFlag);
+});
+
+test('CLI parsing: detects -h flag', t => {
+	const args = ['-h'];
+	const hasHelpFlag = args.includes('--help') || args.includes('-h');
+
+	t.true(hasHelpFlag);
+});
+
+test('CLI parsing: version flag takes precedence over other arguments', t => {
+	const args = ['--version', '--vscode', 'run', 'some', 'command'];
+	const hasVersionFlag = args.includes('--version') || args.includes('-v');
+
+	t.true(hasVersionFlag);
+});
+
+test('CLI parsing: help flag takes precedence over other arguments', t => {
+	const args = ['--help', '--vscode', 'run', 'some', 'command'];
+	const hasHelpFlag = args.includes('--help') || args.includes('-h');
+
+	t.true(hasHelpFlag);
+});
+
+test('CLI parsing: detects version flag with other arguments', t => {
+	const args = ['--vscode', '-v', '--vscode-port', '3000'];
+	const hasVersionFlag = args.includes('--version') || args.includes('-v');
+
+	t.true(hasVersionFlag);
+});
+
+test('CLI parsing: detects help flag with other arguments', t => {
+	const args = ['--vscode', '-h', '--vscode-port', '3000'];
+	const hasHelpFlag = args.includes('--help') || args.includes('-h');
+
+	t.true(hasHelpFlag);
+});

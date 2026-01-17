@@ -300,6 +300,7 @@ export default function App({
 			!appState.isToolExecuting &&
 			!appState.isToolConfirmationMode &&
 			!appState.isConfigWizardMode &&
+			!appState.isMcpWizardMode &&
 			appState.pendingToolCalls.length === 0
 		) {
 			const correlationId = generateCorrelationId();
@@ -323,6 +324,7 @@ export default function App({
 		appState.isToolExecuting,
 		appState.isToolConfirmationMode,
 		appState.isConfigWizardMode,
+		appState.isMcpWizardMode,
 		appState.pendingToolCalls.length,
 		logger,
 		appState.developmentMode,
@@ -366,8 +368,10 @@ export default function App({
 		setIsProviderSelectionMode: appState.setIsProviderSelectionMode,
 		setIsThemeSelectionMode: appState.setIsThemeSelectionMode,
 		setIsTitleShapeSelectionMode: appState.setIsTitleShapeSelectionMode,
+		setIsNanocoderShapeSelectionMode: appState.setIsNanocoderShapeSelectionMode,
 		setIsModelDatabaseMode: appState.setIsModelDatabaseMode,
 		setIsConfigWizardMode: appState.setIsConfigWizardMode,
+		setIsMcpWizardMode: appState.setIsMcpWizardMode,
 		addToChatQueue: appState.addToChatQueue,
 		getNextComponentKey: appState.getNextComponentKey,
 		reinitializeMCPServers: appInitialization.reinitializeMCPServers,
@@ -408,8 +412,11 @@ export default function App({
 		enterProviderSelectionMode: modeHandlers.enterProviderSelectionMode,
 		enterThemeSelectionMode: modeHandlers.enterThemeSelectionMode,
 		enterTitleShapeSelectionMode: modeHandlers.enterTitleShapeSelectionMode,
+		enterNanocoderShapeSelectionMode:
+			modeHandlers.enterNanocoderShapeSelectionMode,
 		enterModelDatabaseMode: modeHandlers.enterModelDatabaseMode,
 		enterConfigWizardMode: modeHandlers.enterConfigWizardMode,
+		enterMcpWizardMode: modeHandlers.enterMcpWizardMode,
 		handleChatMessage: chatHandler.handleChatMessage,
 	});
 
@@ -698,7 +705,9 @@ export default function App({
 							appState.isThemeSelectionMode ||
 							appState.isModelDatabaseMode ||
 							appState.isConfigWizardMode ||
+							appState.isMcpWizardMode ||
 							appState.isTitleShapeSelectionMode ||
+							appState.isNanocoderShapeSelectionMode ||
 							appState.isCheckpointLoadMode) && (
 							<ModalSelectors
 								isModelSelectionMode={appState.isModelSelectionMode}
@@ -706,8 +715,12 @@ export default function App({
 								isThemeSelectionMode={appState.isThemeSelectionMode}
 								isModelDatabaseMode={appState.isModelDatabaseMode}
 								isConfigWizardMode={appState.isConfigWizardMode}
+								isMcpWizardMode={appState.isMcpWizardMode}
 								isCheckpointLoadMode={appState.isCheckpointLoadMode}
 								isTitleShapeSelectionMode={appState.isTitleShapeSelectionMode}
+								isNanocoderShapeSelectionMode={
+									appState.isNanocoderShapeSelectionMode
+								}
 								client={appState.client}
 								currentModel={appState.currentModel}
 								currentProvider={appState.currentProvider}
@@ -723,10 +736,16 @@ export default function App({
 								onTitleShapeSelectionCancel={
 									modeHandlers.handleTitleShapeSelectionCancel
 								}
+								onNanocoderShapeSelect={modeHandlers.handleNanocoderShapeSelect}
+								onNanocoderShapeSelectionCancel={
+									modeHandlers.handleNanocoderShapeSelectionCancel
+								}
 								onThemeSelectionCancel={modeHandlers.handleThemeSelectionCancel}
 								onModelDatabaseCancel={modeHandlers.handleModelDatabaseCancel}
 								onConfigWizardComplete={modeHandlers.handleConfigWizardComplete}
 								onConfigWizardCancel={modeHandlers.handleConfigWizardCancel}
+								onMcpWizardComplete={modeHandlers.handleMcpWizardComplete}
+								onMcpWizardCancel={modeHandlers.handleMcpWizardCancel}
 								onCheckpointSelect={appHandlers.handleCheckpointSelect}
 								onCheckpointCancel={appHandlers.handleCheckpointCancel}
 							/>
@@ -821,11 +840,14 @@ export default function App({
 								appState.isThemeSelectionMode ||
 								appState.isModelDatabaseMode ||
 								appState.isConfigWizardMode ||
+								appState.isMcpWizardMode ||
 								appState.isTitleShapeSelectionMode ||
 								appState.isCheckpointLoadMode ||
 								appState.isModeSelectionMode ||
 								appState.isPlanReviewMode ||
 								appState.isQuestionPromptMode
+								appState.isNanocoderShapeSelectionMode ||
+								appState.isCheckpointLoadMode
 							) && (
 								<ChatInput
 									isCancelling={appState.isCancelling}

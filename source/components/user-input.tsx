@@ -67,9 +67,6 @@ export default function UserInput({
 		setHistoryIndex,
 		updateInput,
 		resetInput,
-		// New paste handling functions
-		undo,
-		redo,
 		deletePlaceholder: _deletePlaceholder,
 		currentState,
 		setInputState,
@@ -317,20 +314,6 @@ export default function UserInput({
 		// Handle special keys
 		if (key.escape) {
 			handleEscape();
-			return;
-		}
-
-		// Ctrl+B removed - no longer needed with new paste system
-
-		// Undo: Ctrl+_ (Ctrl+Shift+-)
-		if (key.ctrl && inputChar === '_') {
-			undo();
-			return;
-		}
-
-		// Redo: Ctrl+Y
-		if (key.ctrl && inputChar === 'y') {
-			redo();
 			return;
 		}
 

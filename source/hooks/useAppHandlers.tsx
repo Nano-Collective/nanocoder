@@ -91,8 +91,10 @@ interface UseAppHandlersProps {
 	enterProviderSelectionMode: () => void;
 	enterThemeSelectionMode: () => void;
 	enterTitleShapeSelectionMode: () => void;
+	enterNanocoderShapeSelectionMode: () => void;
 	enterModelDatabaseMode: () => void;
 	enterConfigWizardMode: () => void;
+	enterMcpWizardMode: () => void;
 
 	// Chat handler
 	handleChatMessage: (message: string) => Promise<void>;
@@ -364,8 +366,11 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				onEnterThemeSelectionMode: props.enterThemeSelectionMode,
 				onEnterModelDatabaseMode: props.enterModelDatabaseMode,
 				onEnterConfigWizardMode: props.enterConfigWizardMode,
+				onEnterMcpWizardMode: props.enterMcpWizardMode,
 				onEnterCheckpointLoadMode: enterCheckpointLoadMode,
 				onEnterTitleShapeSelectionMode: props.enterTitleShapeSelectionMode,
+				onEnterNanocoderShapeSelectionMode:
+					props.enterNanocoderShapeSelectionMode,
 				onShowStatus: handleShowStatus,
 				onHandleChatMessage: props.handleChatMessage,
 				onAddToChatQueue: props.addToChatQueue,

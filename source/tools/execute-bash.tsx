@@ -2,6 +2,7 @@ import {Box, Text} from 'ink';
 import React from 'react';
 
 import BashProgress from '@/components/bash-progress';
+import {isNanocoderToolAlwaysAllowed} from '@/config/nanocoder-tools-config';
 import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {useTheme} from '@/hooks/useTheme';
 import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
@@ -75,9 +76,16 @@ const executeBashCoreTool = tool({
 		},
 		required: ['command'],
 	}),
-	// High risk: bash commands always require approval in all modes
-	// In plan mode, bash is completely disabled (blocked by approval requirement)
-	needsApproval: true,
+	// High risk: bash commands require approval unless explicitly configured in nanocoderTools.alwaysAllow
+	needsApproval: () => {
+		// Check if this tool is configured to always be allowed
+		if (isNanocoderToolAlwaysAllowed('execute_bash')) {
+			return false;
+		}
+
+		// Even in auto-accept mode, bash commands should require approval for security
+		return true;
+	},
 	execute: async (args, _options) => {
 		return await executeExecuteBash(args);
 	},

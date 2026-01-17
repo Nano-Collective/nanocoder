@@ -138,6 +138,56 @@ test('validateConfig: errors when MCP server missing args', t => {
 	t.regex(result.errors[0], /missing args array/);
 });
 
+test('validateConfig: errors when alwaysAllow is not an array', t => {
+	const providers: ProviderConfig[] = [
+		{
+			name: 'ollama',
+			baseUrl: 'http://localhost:11434',
+			models: ['llama2'],
+		},
+	];
+
+	const mcpServers = {
+		filesystem: {
+			name: 'filesystem',
+			transport: 'stdio',
+			command: 'npx',
+			args: ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'],
+			alwaysAllow: 'not-an-array',
+		},
+	} as unknown as Record<string, McpServerConfig>;
+
+	const result = validateConfig(providers, mcpServers);
+
+	t.false(result.valid);
+	t.regex(result.errors[0], /alwaysAllow/);
+});
+
+test('validateConfig: errors when alwaysAllow contains non-strings', t => {
+	const providers: ProviderConfig[] = [
+		{
+			name: 'ollama',
+			baseUrl: 'http://localhost:11434',
+			models: ['llama2'],
+		},
+	];
+
+	const mcpServers = {
+		filesystem: {
+			name: 'filesystem',
+			transport: 'stdio',
+			command: 'npx',
+			args: ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'],
+			alwaysAllow: ['ok', 123],
+		},
+	} as unknown as Record<string, McpServerConfig>;
+
+	const result = validateConfig(providers, mcpServers);
+
+	t.false(result.valid);
+	t.regex(result.errors[0], /non-string/);
+});
+
 test('validateConfig: accumulates multiple errors', t => {
 	const providers: ProviderConfig[] = [
 		{

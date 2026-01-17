@@ -323,7 +323,7 @@ test('getModelContextLimit - returns null for completely unknown model', async t
 
 test('getModelContextLimit - handles empty string', async t => {
 	const limit = await getModelContextLimit('');
-	t.is(limit, 262144);
+	t.is(limit, null);
 });
 
 test('getModelContextLimit - handles model names with uppercase', async t => {

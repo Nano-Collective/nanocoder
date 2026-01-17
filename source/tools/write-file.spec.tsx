@@ -2,6 +2,7 @@ import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import stripAnsi from 'strip-ansi';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes.js';
@@ -748,10 +749,12 @@ test('write_file formatter: shows line numbers with content', async t => {
 	const output = lastFrame();
 
 	t.truthy(output);
+	// Strip ANSI codes before regex matching (CI mode adds color codes)
+	const plainOutput = stripAnsi(output!);
 	// Line numbers should be padded to 4 spaces
-	t.regex(output!, /1\s+line1/);
-	t.regex(output!, /2\s+line2/);
-	t.regex(output!, /3\s+line3/);
+	t.regex(plainOutput, /1\s+line1/);
+	t.regex(plainOutput, /2\s+line2/);
+	t.regex(plainOutput, /3\s+line3/);
 });
 
 test('write_file formatter: normalizes tabs to 2 spaces', async t => {

@@ -58,11 +58,11 @@
 		"assets/nanocoder-vscode.vsix"
 	],
 	"dependencies": {
-		"@ai-sdk/openai-compatible": "2.0.2",
+		"@ai-sdk/openai-compatible": "2.0.13",
 		"@anthropic-ai/tokenizer": "^0.0.4",
 		"@modelcontextprotocol/sdk": "^1.25.2",
 		"@nanocollective/get-md": "^1.0.2",
-		"ai": "6.0.25",
+		"ai": "6.0.39",
 		"cheerio": "^1.1.2",
 		"cli-highlight": "^2.1.11",
 		"cli-table3": "^0.6.5",
@@ -101,6 +101,7 @@
 		"ink-testing-library": "^4.0.0",
 		"knip": "^5.66.2",
 		"lint-staged": "^16.2.7",
+		"strip-ansi": "^7.1.2",
 		"tsc-alias": "^1.8.16",
 		"tsx": "^4.20.6",
 		"typescript": "^5.0.3"
@@ -139,13 +140,18 @@
 		],
 		"reporter": [
 			"text",
-			"lcov",
-			"json-summary"
-		]
+			"json-summary",
+			"lcov"
+		],
+		"lines": 80,
+		"functions": 0,
+		"branches": 0,
+		"statements": 0
 	},
 	"pnpm": {
 		"overrides": {
 			"glob@>=10.2.0 <10.5.0": ">=10.5.0",
+			"hono": ">=4.11.4",
 			"js-yaml@<3.14.2": ">=3.14.2",
 			"js-yaml@>=4.0.0 <4.1.1": ">=4.1.1",
 			"jws@<3.2.3": ">=3.2.3",

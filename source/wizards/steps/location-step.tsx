@@ -10,9 +10,10 @@ import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 export type ConfigLocation = 'project' | 'global';
 
 interface LocationStepProps {
-	onComplete: (location: ConfigLocation, path: string) => void;
+	onComplete: (location: ConfigLocation) => void;
 	onBack?: () => void;
 	projectDir: string;
+	configFileName?: string; // Name of the config file (default: 'agents.config.json')
 }
 
 interface LocationOption {
@@ -24,10 +25,11 @@ export function LocationStep({
 	onComplete,
 	onBack,
 	projectDir,
+	configFileName = 'agents.config.json',
 }: LocationStepProps) {
 	const {isNarrow, truncatePath} = useResponsiveTerminal();
-	const projectPath = join(projectDir, 'agents.config.json');
-	const globalPath = join(getConfigPath(), 'agents.config.json');
+	const projectPath = join(projectDir, configFileName);
+	const globalPath = join(getConfigPath(), configFileName);
 
 	const projectExists = existsSync(projectPath);
 	const globalExists = existsSync(globalPath);
@@ -63,14 +65,13 @@ export function LocationStep({
 	];
 
 	const handleLocationSelect = (item: LocationOption) => {
-		const path = item.value === 'project' ? projectPath : globalPath;
-		onComplete(item.value, path);
+		onComplete(item.value);
 	};
 
 	const handleExistingConfigSelect = (item: {value: string}) => {
 		if (item.value === 'edit') {
 			const location: ConfigLocation = projectExists ? 'project' : 'global';
-			onComplete(location, existingPath);
+			onComplete(location);
 		} else if (item.value === 'new') {
 			setMode('select-location');
 		} else {
@@ -85,10 +86,9 @@ export function LocationStep({
 			// If we're in select-location mode and came from existing-config, go back
 			if (mode === 'select-location' && (projectExists || globalExists)) {
 				setMode('existing-config');
-			} else {
-				// Otherwise, let the parent wizard handle it
-				onBack?.();
 			}
+			// Otherwise, do nothing - this is the first screen of the wizard
+			// The user should use Esc to exit the wizard completely
 		}
 	});
 

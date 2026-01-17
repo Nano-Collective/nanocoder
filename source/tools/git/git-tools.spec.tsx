@@ -10,6 +10,7 @@
 
 import React from 'react';
 import test from 'ava';
+import stripAnsi from 'strip-ansi';
 import {render} from 'ink-testing-library';
 import {ThemeContext} from '../../hooks/useTheme';
 import {themes} from '../../config/themes';
@@ -301,9 +302,11 @@ test('GitSmartCommitFormatter shows commit type and message', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Type: feat/);
-	t.regex(output!, /Message:/);
-	t.regex(output!, /add user authentication/);
+	// Strip ANSI codes before regex matching (CI mode adds color codes)
+	const plainOutput = stripAnsi(output!);
+	t.regex(plainOutput, /Type: feat/);
+	t.regex(plainOutput, /Message:/);
+	t.regex(plainOutput, /add user authentication/);
 });
 
 test('GitSmartCommitFormatter handles breaking changes', t => {

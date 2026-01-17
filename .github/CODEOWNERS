@@ -6,7 +6,7 @@ source/cli/ @will-lamerton @Avtrkrb
 source/commands/* @will-lamerton @Avtrkrb
 
 # AI SDK client
-source/ai-sdk-client/* @will-lamerton @Avtrkrb @DenizOkcu
+source/ai-sdk-client/* @will-lamerton @Avtrkrb
 
 # App and UI components
 source/app/* @will-lamerton @Avtrkrb
@@ -17,8 +17,8 @@ source/config/* @will-lamerton @Avtrkrb
 source/init/* @will-lamerton @Avtrkrb
 
 # Model and AI related
-source/models/* @will-lamerton @Avtrkrb @DenizOkcu
-source/client-factory* @will-lamerton @Avtrkrb @DenizOkcu
+source/models/* @will-lamerton @Avtrkrb
+source/client-factory* @will-lamerton @Avtrkrb
 
 # VSCode plugin
 plugins/vscode/**/* @will-lamerton @Avtrkrb

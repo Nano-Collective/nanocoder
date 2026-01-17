@@ -67,3 +67,17 @@ export type TitleShape =
 	| 'powerline-ribbon'
 	| 'powerline-segment'
 	| 'powerline-segment-thin';
+
+export type NanocoderShape =
+	| 'block'
+	| 'slick'
+	| 'tiny'
+	| 'grid'
+	| 'pallet'
+	| 'shade'
+	| 'simple'
+	| 'simpleBlock'
+	| '3d'
+	| 'simple3d'
+	| 'chrome'
+	| 'huge';

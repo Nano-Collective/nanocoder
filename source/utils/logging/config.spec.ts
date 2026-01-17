@@ -39,7 +39,23 @@ test('getDefaultLogDirectory returns valid directory path', t => {
 
 	t.is(typeof directory, 'string', 'Should return string');
 	t.true(directory.length > 0, 'Should not be empty');
-	t.true(directory.includes('logs'), 'Should include logs in path');
+	t.true(directory.includes('nanocoder'), 'Should include nanocoder in path');
+});
+
+test('getDefaultLogDirectory respects NANOCODER_LOG_DIR env var', t => {
+	const originalLogDir = process.env.NANOCODER_LOG_DIR;
+
+	try {
+		process.env.NANOCODER_LOG_DIR = '/custom/log/path';
+		const directory = getDefaultLogDirectory();
+		t.is(directory, '/custom/log/path', 'Should use custom log directory');
+	} finally {
+		if (originalLogDir) {
+			process.env.NANOCODER_LOG_DIR = originalLogDir;
+		} else {
+			delete process.env.NANOCODER_LOG_DIR;
+		}
+	}
 });
 
 test('createDevelopmentConfig creates valid development config', t => {
@@ -57,7 +73,7 @@ test('createProductionConfig creates valid production config', t => {
 	const config = createProductionConfig();
 
 	t.is(typeof config, 'object', 'Should return object');
-	t.is(config.level, 'silent', 'Should use silent level in production (silent-by-default for CLI)');
+	t.is(config.level, 'info', 'Should use info level in production for file logging');
 	t.false(config.pretty, 'Should disable pretty printing in production');
 	t.true(config.correlation, 'Should enable correlation in production');
 	t.true(config.serialize, 'Should serialize in production');
@@ -86,7 +102,7 @@ test('getEnvironmentConfig detects environment correctly', t => {
 	// Test production environment
 	process.env.NODE_ENV = 'production';
 	const prodConfig = getEnvironmentConfig();
-	t.is(prodConfig.level, 'silent', 'Should detect production (silent-by-default)');
+	t.is(prodConfig.level, 'info', 'Should detect production (info level for file logging)');
 	t.false(prodConfig.pretty, 'Should disable pretty in production');
 
 	// Test test environment
@@ -95,10 +111,10 @@ test('getEnvironmentConfig detects environment correctly', t => {
 	t.is(testConfig.level, 'debug', 'Should detect test');
 	t.is(testConfig.level, 'debug', 'Should use debug in test');
 
-	// Test unknown environment (should default to production/silent for CLI tools)
+	// Test unknown environment (should default to production config for CLI tools)
 	process.env.NODE_ENV = 'unknown';
 	const unknownConfig = getEnvironmentConfig();
-	t.is(unknownConfig.level, 'silent', 'Should default to silent for unknown (production default)');
+	t.is(unknownConfig.level, 'info', 'Should default to info for unknown (production default with file logging)');
 
 	// Restore original environment
 	process.env.NODE_ENV = originalEnv;
@@ -247,9 +263,9 @@ test('configuration respects environment variables', t => {
 	} finally {
 		// Restore environment variables
 		if (originalLogLevel) {
-			process.env.LOG_LEVEL = originalLogLevel;
+			process.env.NANOCODER_LOG_LEVEL = originalLogLevel;
 		} else {
-			delete process.env.LOG_LEVEL;
+			delete process.env.NANOCODER_LOG_LEVEL;
 		}
 		process.env.NODE_ENV = originalNodeEnv;
 	}
@@ -283,7 +299,7 @@ test('createProductionConfig includes production optimizations', t => {
 
 	// Check production-specific settings
 	t.true(config.serialize, 'Should serialize in production');
-	t.is(config.level, 'error', 'Should default to error in production');
+	t.is(config.level, 'info', 'Should default to info in production for file logging');
 
 	// Check redaction patterns for production
 	t.true(config.redact.includes('email'), 'Should redact emails in production');
@@ -291,14 +307,22 @@ test('createProductionConfig includes production optimizations', t => {
 		config.redact.includes('userId'),
 		'Should redact user IDs in production',
 	);
+});
 
-	// Note: Current implementation doesn't include transport configuration
-	// t.truthy(config.transport, 'Should have transport configuration');
-	// t.is(
-	//   (config.transport as any)?.target,
-	//   'pino-roll',
-	//   'Should use roll transport in production',
-	// );
+test('createProductionConfig respects NANOCODER_LOG_DISABLE_FILE', t => {
+	const originalDisableFile = process.env.NANOCODER_LOG_DISABLE_FILE;
+
+	try {
+		process.env.NANOCODER_LOG_DISABLE_FILE = 'true';
+		const config = createProductionConfig();
+		t.is(config.level, 'silent', 'Should use silent level when file logging is disabled');
+	} finally {
+		if (originalDisableFile) {
+			process.env.NANOCODER_LOG_DISABLE_FILE = originalDisableFile;
+		} else {
+			delete process.env.NANOCODER_LOG_DISABLE_FILE;
+		}
+	}
 });
 
 test('createTestConfig minimizes output', t => {

@@ -1,7 +1,8 @@
 import {existsSync} from 'fs';
 import {join} from 'path';
 import {AISDKClient} from '@/ai-sdk-client';
-import {appConfig, getClosestConfigFile} from '@/config/index';
+import {getClosestConfigFile} from '@/config/index';
+import {loadAllProviderConfigs} from '@/config/mcp-config-loader';
 import {loadPreferences} from '@/config/preferences';
 import {TIMEOUT_PROVIDER_CONNECTION_MS} from '@/constants';
 import type {AIProviderConfig, LLMClient} from '@/types/index';
@@ -116,27 +117,24 @@ async function createAISDKClient(
 }
 
 function loadProviderConfigs(): AIProviderConfig[] {
-	const providers: AIProviderConfig[] = [];
+	// Use the new hierarchical provider loading system to get providers from all levels
+	const allProviderConfigs = loadAllProviderConfigs();
 
-	// Load providers from the new providers array structure
-	if (appConfig.providers) {
-		for (const provider of appConfig.providers) {
-			providers.push({
-				name: provider.name,
-				type: 'openai',
-				models: provider.models || [],
-				requestTimeout: provider.requestTimeout,
-				socketTimeout: provider.socketTimeout,
-				connectionPool: provider.connectionPool,
-				config: {
-					baseURL: provider.baseUrl,
-					apiKey: provider.apiKey || 'dummy-key',
-				},
-			});
-		}
-	}
-
-	return providers;
+	return allProviderConfigs.map(provider => ({
+		name: provider.name,
+		type: 'openai' as const,
+		models: provider.models || [],
+		requestTimeout: provider.requestTimeout,
+		socketTimeout: provider.socketTimeout,
+		connectionPool: provider.connectionPool,
+		// Tool configuration
+		disableTools: provider.disableTools,
+		disableToolModels: provider.disableToolModels,
+		config: {
+			baseURL: provider.baseUrl,
+			apiKey: provider.apiKey || 'dummy-key',
+		},
+	}));
 }
 
 async function testProviderConnection(

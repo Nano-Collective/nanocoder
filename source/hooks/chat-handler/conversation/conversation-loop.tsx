@@ -3,10 +3,10 @@ import type {ConversationStateManager} from '@/app/utils/conversation-state';
 import AssistantMessage from '@/components/assistant-message';
 import {ErrorMessage} from '@/components/message-box';
 import UserMessage from '@/components/user-message';
+import {appConfig} from '@/config/index';
 import {parseToolCalls} from '@/tool-calling/index';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {LLMClient, Message, ToolCall, ToolResult} from '@/types/core';
-import {getLogger} from '@/utils/logging';
 import {MessageBuilder} from '@/utils/message-builder';
 import {processPhaseTransition} from '@/utils/plan/phase-transition-detector';
 import {parseToolArguments} from '@/utils/tool-args-parser';
@@ -283,6 +283,9 @@ export const processAssistantResponse = async (
 		const toolsNeedingConfirmation: ToolCall[] = [];
 		const toolsToExecuteDirectly: ToolCall[] = [];
 
+		// Tools that are permitted to auto-run in non-interactive mode
+		const nonInteractiveAllowList = new Set(appConfig.alwaysAllow ?? []);
+
 		for (const toolCall of validToolCalls) {
 			// Check if tool has a validator
 			let validationFailed = false;
@@ -300,12 +303,8 @@ export const processAssistantResponse = async (
 						if (!validationResult.valid) {
 							validationFailed = true;
 						}
-					} catch (error) {
-						const logger = getLogger();
-						logger.debug('Tool validation threw error', {
-							toolName: toolCall.function.name,
-							error,
-						});
+					} catch {
+						// Validation threw an error - treat as validation failure
 						validationFailed = true;
 					}
 				}
@@ -324,6 +323,58 @@ export const processAssistantResponse = async (
 			// 1. Validation failed (need to send error back to model)
 			// 2. Tool is allowed to execute without confirmation (per ToolManager)
 			if (validationFailed || canExecuteWithoutConfirmation) {
+			// Check tool's needsApproval property from the tool definition
+			let toolNeedsApproval = true; // Default to requiring approval for safety
+			if (toolManager) {
+				const toolEntry = toolManager.getToolEntry(toolCall.function.name);
+				if (toolEntry?.tool) {
+					const needsApprovalProp = (
+						toolEntry.tool as unknown as {
+							needsApproval?:
+								| boolean
+								| ((args: unknown) => boolean | Promise<boolean>);
+						}
+					).needsApproval;
+					if (typeof needsApprovalProp === 'boolean') {
+						toolNeedsApproval = needsApprovalProp;
+					} else if (typeof needsApprovalProp === 'function') {
+						// Evaluate function - our tools use getCurrentMode() internally
+						// and don't actually need the args parameter
+						try {
+							const parsedArgs = parseToolArguments(
+								toolCall.function.arguments,
+							);
+							// Cast to any to handle AI SDK type signature mismatch
+							// Our tool implementations don't use the second parameter
+							toolNeedsApproval = await (
+								needsApprovalProp as (
+									args: unknown,
+								) => boolean | Promise<boolean>
+							)(parsedArgs);
+						} catch {
+							// If evaluation fails, require approval for safety
+							toolNeedsApproval = true;
+						}
+					}
+				}
+			}
+
+			// Execute directly if:
+			// 1. Validation failed (need to send error back to model)
+			// 2. Tool has needsApproval: false
+			// 3. Explicitly allowed in non-interactive mode
+			// 4. In auto-accept mode (except bash which always needs approval)
+			const isBashTool = toolCall.function.name === 'execute_bash';
+			const isNonInteractiveAllowed =
+				nonInteractiveMode &&
+				nonInteractiveAllowList.has(toolCall.function.name);
+			const shouldExecuteDirectly =
+				validationFailed ||
+				!toolNeedsApproval ||
+				isNonInteractiveAllowed ||
+				(developmentMode === 'auto-accept' && !isBashTool);
+
+			if (shouldExecuteDirectly) {
 				toolsToExecuteDirectly.push(toolCall);
 			} else {
 				toolsNeedingConfirmation.push(toolCall);

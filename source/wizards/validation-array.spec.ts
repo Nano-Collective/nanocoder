@@ -64,6 +64,7 @@ test('buildConfigObject: preserves all server fields in array format', t => {
 			args: ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'],
 			description: 'File system access',
 			tags: ['files', 'local'],
+			alwaysAllow: ['list_directory'],
 		},
 		'remote-server': {
 			name: 'remote-server',
@@ -72,6 +73,7 @@ test('buildConfigObject: preserves all server fields in array format', t => {
 			timeout: 30000,
 			description: 'Remote MCP server',
 			tags: ['remote', 'http'],
+			alwaysAllow: ['health_check'],
 		},
 	};
 
@@ -96,6 +98,7 @@ test('buildConfigObject: preserves all server fields in array format', t => {
 	]);
 	t.is(filesystemServer!.description, 'File system access');
 	t.deepEqual(filesystemServer!.tags, ['files', 'local']);
+	t.deepEqual(filesystemServer!.alwaysAllow, ['list_directory']);
 
 	// Test remote server fields
 	t.truthy(remoteServer);
@@ -105,6 +108,7 @@ test('buildConfigObject: preserves all server fields in array format', t => {
 	t.is(remoteServer!.timeout, 30000);
 	t.is(remoteServer!.description, 'Remote MCP server');
 	t.deepEqual(remoteServer!.tags, ['remote', 'http']);
+	t.deepEqual(remoteServer!.alwaysAllow, ['health_check']);
 });
 
 test('buildConfigObject: sets enabled flag for wizard-generated configs', t => {

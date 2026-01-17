@@ -6,8 +6,10 @@ import path from 'path';
 import {memo} from 'react';
 import {fileURLToPath} from 'url';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
+import {getNanocoderShape} from '@/config/preferences';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
+import type {NanocoderShape} from '@/types/ui';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,9 +19,14 @@ const packageJson = JSON.parse(
 	fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8'),
 ) as {version: string};
 
+const DEFAULT_SHAPE: NanocoderShape = 'tiny';
+
 export default memo(function WelcomeMessage() {
 	const {boxWidth, isNarrow, isNormal} = useResponsiveTerminal();
 	const {colors} = useTheme();
+
+	// Get the user's preferred nanocoder shape or use default
+	const nanocoderShape = getNanocoderShape() ?? DEFAULT_SHAPE;
 
 	return (
 		<>
@@ -27,7 +34,7 @@ export default memo(function WelcomeMessage() {
 			{isNarrow ? (
 				<>
 					<Gradient colors={[colors.primary, colors.tool]}>
-						<BigText text="NC" font="tiny" />
+						<BigText text="NC" font={nanocoderShape} />
 					</Gradient>
 					<Box
 						flexDirection="column"
@@ -53,7 +60,7 @@ export default memo(function WelcomeMessage() {
 				/* Normal/Wide terminal: full version with TitledBoxWithPreferences */
 				<>
 					<Gradient colors={[colors.primary, colors.tool]}>
-						<BigText text="Nanocoder" font="tiny" />
+						<BigText text="Nanocoder" font={nanocoderShape} />
 					</Gradient>
 
 					<TitledBoxWithPreferences

@@ -2,7 +2,7 @@
 
 MIT License with Attribution
 
-Copyright (c) 2025 Nano Collective
+Copyright (c) 2026 Nano Collective
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

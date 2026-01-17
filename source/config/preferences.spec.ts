@@ -4,10 +4,12 @@ import {join} from 'node:path';
 import test from 'ava';
 import {
 	getLastUsedModel,
+	getNanocoderShape,
 	loadPreferences,
 	resetPreferencesCache,
 	savePreferences,
 	updateLastUsed,
+	updateNanocoderShape,
 } from './preferences';
 import type {UserPreferences} from '@/types/index';
 
@@ -590,6 +592,142 @@ test.serial('loadPreferences handles file with only whitespace', t => {
 		const result = loadPreferences();
 
 		t.deepEqual(result, {});
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// ============================================================================
+// updateNanocoderShape Tests
+// ============================================================================
+
+test.serial('updateNanocoderShape saves nanocoder shape', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateNanocoderShape('block');
+
+		t.true(existsSync(preferencesPath));
+
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as UserPreferences;
+
+		t.is(parsed.nanocoderShape, 'block');
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateNanocoderShape preserves existing preferences', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const existingPreferences: UserPreferences = {
+		lastProvider: 'openrouter',
+		lastModel: 'claude-3-opus',
+		selectedTheme: 'tokyo-night',
+	};
+	writeFileSync(preferencesPath, JSON.stringify(existingPreferences, null, 2), 'utf-8');
+
+	try {
+		updateNanocoderShape('chrome');
+
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as UserPreferences;
+
+		t.is(parsed.nanocoderShape, 'chrome');
+		t.is(parsed.lastProvider, 'openrouter');
+		t.is(parsed.lastModel, 'claude-3-opus');
+		t.is(parsed.selectedTheme, 'tokyo-night');
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateNanocoderShape overwrites existing nanocoder shape', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const existingPreferences: UserPreferences = {
+		nanocoderShape: 'tiny',
+	};
+	writeFileSync(preferencesPath, JSON.stringify(existingPreferences, null, 2), 'utf-8');
+
+	try {
+		updateNanocoderShape('huge');
+
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as UserPreferences;
+
+		t.is(parsed.nanocoderShape, 'huge');
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// ============================================================================
+// getNanocoderShape Tests
+// ============================================================================
+
+test.serial('getNanocoderShape returns saved nanocoder shape', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const preferences: UserPreferences = {
+		nanocoderShape: 'slick',
+	};
+	writeFileSync(preferencesPath, JSON.stringify(preferences, null, 2), 'utf-8');
+
+	try {
+		const result = getNanocoderShape();
+		t.is(result, 'slick');
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getNanocoderShape returns undefined when not set', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const preferences: UserPreferences = {};
+	writeFileSync(preferencesPath, JSON.stringify(preferences, null, 2), 'utf-8');
+
+	try {
+		const result = getNanocoderShape();
+		t.is(result, undefined);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getNanocoderShape returns undefined when file does not exist', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	const result = getNanocoderShape();
+	t.is(result, undefined);
+});
+
+test.serial('full workflow: update and retrieve nanocoder shape', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateNanocoderShape('grid');
+		const retrieved = getNanocoderShape();
+		t.is(retrieved, 'grid');
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});

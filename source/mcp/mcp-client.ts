@@ -38,6 +38,15 @@ export class MCPClient {
 	private isConnected: boolean = false;
 	private logger = getLogger();
 
+	private isToolAutoApproved(toolName: string, serverName: string): boolean {
+		const serverConfig = this.serverConfigs.get(serverName);
+		if (!serverConfig?.alwaysAllow) {
+			return false;
+		}
+
+		return serverConfig.alwaysAllow.includes(toolName);
+	}
+
 	constructor() {
 		this.logger.debug('MCP client initialized');
 	}
@@ -306,6 +315,7 @@ export class MCPClient {
 				// dynamicTool is more explicit about unknown types compared to tool()
 				// MCP schemas come from external servers and are not known at compile time
 				const toolName = mcpTool.name;
+				const isAutoApproved = this.isToolAutoApproved(toolName, serverName);
 				const coreTool = dynamicTool({
 					description: mcpTool.description
 						? `[MCP:${serverName}] ${mcpTool.description}`
@@ -313,8 +323,12 @@ export class MCPClient {
 					inputSchema: jsonSchema<Record<string, unknown>>(
 						(mcpTool.inputSchema as unknown) || {type: 'object'},
 					),
-					// Medium risk: MCP tools require approval except in auto-accept mode
+					// Medium risk: MCP tools require approval unless explicitly configured in the server's alwaysAllow list or in auto-accept mode
 					needsApproval: () => {
+						if (isAutoApproved) {
+							return false;
+						}
+
 						const mode = getCurrentMode();
 						return mode !== 'auto-accept'; // true in normal/plan, false in auto-accept
 					},
@@ -608,6 +622,7 @@ export class MCPClient {
 				connected: boolean;
 				description?: string;
 				tags?: string[];
+				autoApprovedCommands?: string[];
 		  }
 		| undefined {
 		const client = this.clients.get(serverName);
@@ -626,6 +641,7 @@ export class MCPClient {
 			connected: true,
 			description: serverConfig.description,
 			tags: serverConfig.tags,
+			autoApprovedCommands: serverConfig.alwaysAllow,
 		};
 	}
 }

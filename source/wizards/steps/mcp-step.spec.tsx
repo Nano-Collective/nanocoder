@@ -16,7 +16,6 @@ test('McpStep renders with initial menu', t => {
 	t.truthy(output);
 	t.regex(output!, /Configure MCP Servers/);
 	t.regex(output!, /Add MCP servers/);
-	t.regex(output!, /Skip MCP servers/);
 });
 
 test('McpStep shows initial menu options', t => {
@@ -25,7 +24,13 @@ test('McpStep shows initial menu options', t => {
 	const output = lastFrame();
 	t.regex(output!, /Configure MCP Servers/);
 	t.regex(output!, /Add MCP servers/);
-	t.regex(output!, /Skip MCP servers/);
+});
+
+test('McpStep does not show skip option', t => {
+	const {lastFrame} = render(<McpStep onComplete={() => {}} />);
+
+	const output = lastFrame();
+	t.notRegex(output!, /Skip MCP servers/);
 });
 
 test('McpStep shows edit option when servers exist', t => {
@@ -465,7 +470,14 @@ test('McpStep shows available options in initial menu', t => {
 	t.truthy(output);
 	t.regex(output!, /Configure MCP Servers/);
 	t.regex(output!, /Add MCP servers/);
-	t.regex(output!, /Skip MCP servers/);
+	t.regex(output!, /Done/);
+});
+
+test('McpStep shows Done & Save option', t => {
+	const {lastFrame} = render(<McpStep onComplete={() => {}} />);
+
+	const output = lastFrame();
+	t.regex(output!, /Done & Save/);
 });
 
 // ============================================================================
@@ -604,4 +616,320 @@ test('McpStep handles servers with multiple env variables', t => {
 
 	const output = lastFrame();
 	t.regex(output!, /envtest/);
+});
+
+// ============================================================================
+// Tests for McpStep Delete Config Feature
+// ============================================================================
+
+test('McpStep shows delete option when config exists and onDelete provided', t => {
+	const {lastFrame} = render(
+		<McpStep
+			onComplete={() => {}}
+			onDelete={() => {}}
+			configExists={true}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.regex(output!, /Delete config file/);
+});
+
+test('McpStep does not show delete option when config does not exist', t => {
+	const {lastFrame} = render(
+		<McpStep
+			onComplete={() => {}}
+			onDelete={() => {}}
+			configExists={false}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.notRegex(output!, /Delete config file/);
+});
+
+test('McpStep does not show delete option when onDelete not provided', t => {
+	const {lastFrame} = render(
+		<McpStep onComplete={() => {}} configExists={true} />,
+	);
+
+	const output = lastFrame();
+	t.notRegex(output!, /Delete config file/);
+});
+
+test('McpStep accepts onDelete prop', t => {
+	let deleteCalled = false;
+
+	const {lastFrame} = render(
+		<McpStep
+			onComplete={() => {}}
+			onDelete={() => {
+				deleteCalled = true;
+			}}
+			configExists={true}
+		/>,
+	);
+
+	t.truthy(lastFrame());
+	t.false(deleteCalled); // Should not be called on render
+});
+
+test('McpStep accepts configExists prop', t => {
+	const {lastFrame} = render(
+		<McpStep onComplete={() => {}} configExists={true} />,
+	);
+
+	// Component should render without errors
+	t.truthy(lastFrame());
+});
+
+// ============================================================================
+// Tests for McpStep Initial Menu Options
+// ============================================================================
+
+test('McpStep shows Add MCP servers option', t => {
+	const {lastFrame} = render(<McpStep onComplete={() => {}} />);
+
+	const output = lastFrame();
+	t.regex(output!, /Add MCP servers/);
+});
+
+test('McpStep shows all initial options without servers', t => {
+	const {lastFrame} = render(<McpStep onComplete={() => {}} />);
+
+	const output = lastFrame();
+	t.regex(output!, /Add MCP servers/);
+	t.regex(output!, /Done & Save/);
+	// Should not show edit when no servers
+	t.notRegex(output!, /Edit existing servers/);
+});
+
+test('McpStep shows all initial options with servers', t => {
+	const existingServers = {
+		test: {
+			name: 'test',
+			transport: 'stdio',
+			command: 'node',
+			args: ['test.js'],
+		},
+	};
+
+	const {lastFrame} = render(
+		<McpStep onComplete={() => {}} existingServers={existingServers} />,
+	);
+
+	const output = lastFrame();
+	t.regex(output!, /Add MCP servers/);
+	t.regex(output!, /Edit existing servers/);
+	t.regex(output!, /Done & Save/);
+});
+
+test('McpStep shows transport type for configured servers', t => {
+	const existingServers = {
+		test: {
+			name: 'test',
+			transport: 'stdio',
+			command: 'node',
+			args: ['test.js'],
+		},
+	};
+
+	const {lastFrame} = render(
+		<McpStep onComplete={() => {}} existingServers={existingServers} />,
+	);
+
+	const output = lastFrame();
+	t.regex(output!, /\(stdio\)/);
+});
+
+test('McpStep handles server with sse transport', t => {
+	const existingServers = {
+		remote: {
+			name: 'remote',
+			transport: 'sse',
+			url: 'http://localhost:3000/sse',
+		},
+	};
+
+	const {lastFrame} = render(
+		<McpStep onComplete={() => {}} existingServers={existingServers} />,
+	);
+
+	const output = lastFrame();
+	t.regex(output!, /remote/);
+	t.regex(output!, /\(sse\)/);
+});
+
+test('McpStep handles server with websocket transport', t => {
+	const existingServers = {
+		ws: {
+			name: 'ws',
+			transport: 'websocket',
+			url: 'ws://localhost:3000',
+		},
+	};
+
+	const {lastFrame} = render(
+		<McpStep onComplete={() => {}} existingServers={existingServers} />,
+	);
+
+	const output = lastFrame();
+	t.regex(output!, /ws/);
+	t.regex(output!, /\(websocket\)/);
+});
+
+// ============================================================================
+// Tests for McpStep with Combined Props
+// ============================================================================
+
+test('McpStep renders with all props combined', t => {
+	const existingServers = {
+		test: {
+			name: 'test',
+			transport: 'stdio',
+			command: 'node',
+			args: ['test.js'],
+		},
+	};
+
+	const {lastFrame} = render(
+		<McpStep
+			onComplete={() => {}}
+			onBack={() => {}}
+			onDelete={() => {}}
+			existingServers={existingServers}
+			configExists={true}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	// Should show all relevant options
+	t.regex(output!, /Add MCP servers/);
+	t.regex(output!, /Edit existing servers/);
+	t.regex(output!, /Done & Save/);
+	t.regex(output!, /Delete config file/);
+});
+
+test('McpStep shows server count in header', t => {
+	const existingServers = {
+		server1: {
+			name: 'server1',
+			transport: 'stdio',
+			command: 'node',
+			args: ['server1.js'],
+		},
+		server2: {
+			name: 'server2',
+			transport: 'stdio',
+			command: 'node',
+			args: ['server2.js'],
+		},
+		server3: {
+			name: 'server3',
+			transport: 'stdio',
+			command: 'node',
+			args: ['server3.js'],
+		},
+	};
+
+	const {lastFrame} = render(
+		<McpStep onComplete={() => {}} existingServers={existingServers} />,
+	);
+
+	const output = lastFrame();
+	t.regex(output!, /3 MCP server\(s\) configured:/);
+});
+
+test('McpStep displays bullet points for each server', t => {
+	const existingServers = {
+		alpha: {
+			name: 'alpha',
+			transport: 'stdio',
+			command: 'node',
+			args: ['alpha.js'],
+		},
+		beta: {
+			name: 'beta',
+			transport: 'stdio',
+			command: 'node',
+			args: ['beta.js'],
+		},
+	};
+
+	const {lastFrame} = render(
+		<McpStep onComplete={() => {}} existingServers={existingServers} />,
+	);
+
+	const output = lastFrame();
+	// Should show bullet points for each server
+	t.regex(output!, /• alpha/);
+	t.regex(output!, /• beta/);
+});
+
+// ============================================================================
+// Tests for McpStep Edge Cases
+// ============================================================================
+
+test('McpStep handles undefined existingServers', t => {
+	const {lastFrame} = render(
+		<McpStep onComplete={() => {}} existingServers={undefined} />,
+	);
+
+	t.truthy(lastFrame());
+});
+
+test('McpStep handles server with empty args array', t => {
+	const existingServers = {
+		test: {
+			name: 'test',
+			transport: 'stdio',
+			command: 'node',
+			args: [],
+		},
+	};
+
+	const {lastFrame} = render(
+		<McpStep onComplete={() => {}} existingServers={existingServers} />,
+	);
+
+	const output = lastFrame();
+	t.regex(output!, /test/);
+});
+
+test('McpStep handles server with no env', t => {
+	const existingServers = {
+		test: {
+			name: 'test',
+			transport: 'stdio',
+			command: 'node',
+			args: ['test.js'],
+		},
+	};
+
+	const {lastFrame} = render(
+		<McpStep onComplete={() => {}} existingServers={existingServers} />,
+	);
+
+	const output = lastFrame();
+	t.regex(output!, /test/);
+});
+
+test('McpStep handles server with empty env object', t => {
+	const existingServers = {
+		test: {
+			name: 'test',
+			transport: 'stdio',
+			command: 'node',
+			args: ['test.js'],
+			env: {},
+		},
+	};
+
+	const {lastFrame} = render(
+		<McpStep onComplete={() => {}} existingServers={existingServers} />,
+	);
+
+	const output = lastFrame();
+	t.regex(output!, /test/);
 });
