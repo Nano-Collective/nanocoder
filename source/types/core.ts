@@ -183,6 +183,88 @@ export const DEVELOPMENT_MODE_LABELS: Record<DevelopmentMode, string> = {
 	plan: '⏸ plan mode on',
 };
 
+/**
+ * Plan workflow phases for structured planning
+ *
+ * 5-phase workflow: Understanding → Design → Review → Final Plan → Exit
+ */
+export type PlanPhase =
+	| 'understanding'
+	| 'design'
+	| 'review'
+	| 'final'
+	| 'exit';
+
+/**
+ * Labels for plan phases displayed in UI
+ */
+export const PLAN_PHASE_LABELS: Record<PlanPhase, string> = {
+	understanding: 'Understanding',
+	design: 'Design',
+	review: 'Review',
+	final: 'Final Plan',
+	exit: 'Exit',
+};
+
+/**
+ * Plan mode state tracking
+ *
+ * Maintains the state of the active plan during plan mode.
+ * When plan mode is not active, `active` is false and `planSummary` is empty.
+ */
+export interface PlanModeState {
+	/** Whether plan mode is currently active */
+	active: boolean;
+	/** Brief summary of the plan (kebab-case, e.g., "add-api-authentication") */
+	planSummary: string;
+	/** Current workflow phase */
+	phase: PlanPhase;
+	/** Directory path containing all plan documents */
+	planDirectoryPath: string;
+	/** Path to proposal.md */
+	proposalPath: string | null;
+	/** Path to design.md */
+	designPath: string | null;
+	/** Path to spec.md */
+	specPath: string | null;
+	/** Path to tasks.md */
+	tasksPath: string | null;
+	/** Path to plan.md (consolidated view) */
+	planFilePath: string;
+	/** Which document AI is currently working on */
+	currentDocument: DocumentType | null;
+	/** Set of completed documents */
+	completedDocuments: Set<DocumentType>;
+	/** Results from last validation */
+	validationResults: ValidationResult | null;
+}
+
+/**
+ * Plan document types
+ */
+export type DocumentType = 'proposal' | 'design' | 'spec' | 'tasks' | 'plan';
+
+/**
+ * Validation result interface
+ */
+export interface ValidationResult {
+	valid: boolean;
+	errors: ValidationIssue[];
+	warnings: ValidationIssue[];
+	info: ValidationIssue[];
+	timestamp: Date;
+}
+
+/**
+ * Validation issue interface
+ */
+export interface ValidationIssue {
+	level: 'error' | 'warning' | 'info';
+	message: string;
+	document?: DocumentType;
+	line?: number;
+}
+
 // Connection status types for MCP and LSP servers
 export type ConnectionStatus = 'connected' | 'failed' | 'pending';
 

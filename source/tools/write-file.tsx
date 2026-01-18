@@ -7,13 +7,21 @@ import React from 'react';
 
 import ToolMessage from '@/components/tool-message';
 import {isNanocoderToolAlwaysAllowed} from '@/config/nanocoder-tools-config';
-import {getCurrentMode} from '@/context/mode-context';
+import {
+	getCurrentMode,
+	getPlanPhase,
+	getPlanSummary,
+} from '@/context/mode-context';
 import {ThemeContext} from '@/hooks/useTheme';
+import {createPlanManager} from '@/services/plan-manager';
+import {validateDocument} from '@/services/plan-validator';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import type {DocumentType} from '@/types/templates';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
 import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
+import {triggerPlanReview} from '@/utils/plan-review-registry';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
 import {calculateTokens} from '@/utils/token-calculator';
 import {
@@ -26,32 +34,185 @@ const executeWriteFile = async (args: {
 	path: string;
 	content: string;
 }): Promise<string> => {
+	const mode = getCurrentMode();
 	const absPath = resolve(args.path);
 	const fileExists = existsSync(absPath);
 
+	// In plan mode, validate plan documents after writing
+	if (mode === 'plan') {
+		const planSummary = getPlanSummary();
+		if (planSummary) {
+			const cwd = process.cwd();
+			const planManager = createPlanManager(cwd);
+
+			// Check if this is a plan document
+			if (planManager.isPlanFilePath(args.path)) {
+				// Trigger plan review in final phase (before writing)
+				const currentPhase = getPlanPhase();
+				if (currentPhase === 'final' || currentPhase === 'exit') {
+					const reviewTriggered = await new Promise<boolean>(resolve => {
+						// Use setImmediate to allow React to render before blocking
+						setImmediate(() => {
+							const triggered = triggerPlanReview(
+								{
+									planSummary,
+									planFilePath: args.path,
+									content: args.content,
+									currentPhase,
+								},
+								// onApprove
+								() => {
+									resolve(true);
+								},
+								// onReject
+								() => {
+									resolve(false);
+								},
+							);
+							// If no callback registered, proceed with write
+							if (!triggered) {
+								resolve(true);
+							}
+						});
+					});
+
+					// If review was rejected, return early
+					if (!reviewTriggered) {
+						return 'Plan file write cancelled by user review.';
+					}
+				}
+			}
+		}
+	}
+
 	await writeFile(absPath, args.content, 'utf-8');
+
+	// Inline validation for plan documents
+	if (mode === 'plan') {
+		const planSummary = getPlanSummary();
+		if (planSummary) {
+			const cwd = process.cwd();
+			const _planManager = createPlanManager(cwd);
+
+			// Get document type from path
+			const docType = getDocumentTypeFromPath(args.path, planSummary);
+			if (docType) {
+				// Validate the document
+				const validationResult = validateDocument(docType, args.content);
+
+				// Build validation message
+				let validationMsg = `\n\n=== Document Validation (${getDocumentLabel(docType)}) ===\n`;
+
+				if (validationResult.valid) {
+					validationMsg += `✓ Validation passed\n`;
+				} else {
+					validationMsg += `✗ Validation failed\n`;
+				}
+
+				if (validationResult.errors.length > 0) {
+					validationMsg += `\nErrors:\n`;
+					for (const error of validationResult.errors) {
+						validationMsg += `  - ${error.message}\n`;
+					}
+				}
+
+				if (validationResult.warnings.length > 0) {
+					validationMsg += `\nWarnings:\n`;
+					for (const warning of validationResult.warnings) {
+						validationMsg += `  - ${warning.message}\n`;
+					}
+				}
+
+				if (validationResult.info.length > 0) {
+					validationMsg += `\nInfo:\n`;
+					for (const info of validationResult.info) {
+						validationMsg += `  - ${info.message}\n`;
+					}
+				}
+
+				validationMsg += `=== End Validation ===\n`;
+
+				// Add validation message to the result
+				return `${getStandardWriteResult(absPath, fileExists, args.content)}${validationMsg}`;
+			}
+		}
+	}
 
 	// Invalidate cache after write
 	invalidateCache(absPath);
 
-	// Read back to verify and show actual content
-	const actualContent = await readFile(absPath, 'utf-8');
-	const lines = actualContent.split('\n');
-	const lineCount = lines.length;
-	const charCount = actualContent.length;
-	const estimatedTokens = calculateTokens(actualContent);
+	// Return standard result
+	return getStandardWriteResult(absPath, fileExists, args.content);
+};
 
-	// Generate full file contents to show the model the current file state
-	let fileContext = '\n\nFile contents after write:\n';
-	for (let i = 0; i < lines.length; i++) {
-		const lineNumStr = String(i + 1).padStart(4, ' ');
-		const line = lines[i] || '';
-		fileContext += `${lineNumStr}: ${line}\n`;
+/**
+ * Get document type from file path
+ */
+function getDocumentTypeFromPath(
+	filePath: string,
+	planSummary: string,
+): DocumentType | null {
+	const planPath = `.nanocoder/plans/${planSummary}/`;
+
+	if (!filePath.includes(planPath)) {
+		return null;
 	}
 
-	const action = fileExists ? 'overwritten' : 'written';
-	return `File ${action} successfully (${lineCount} lines, ${charCount} characters, ~${estimatedTokens} tokens).${fileContext}`;
-};
+	const fileName = filePath.split('/').pop() || '';
+	if (fileName === 'proposal.md') return 'proposal';
+	if (fileName === 'design.md') return 'design';
+	if (fileName === 'spec.md') return 'spec';
+	if (fileName === 'tasks.md') return 'tasks';
+	if (fileName === 'plan.md') return 'plan';
+
+	return null;
+}
+
+/**
+ * Get document label
+ */
+function getDocumentLabel(docType: DocumentType): string {
+	switch (docType) {
+		case 'proposal':
+			return 'proposal.md';
+		case 'design':
+			return 'design.md';
+		case 'spec':
+			return 'spec.md';
+		case 'tasks':
+			return 'tasks.md';
+		case 'plan':
+			return 'plan.md';
+	}
+}
+
+/**
+ * Get standard write result
+ */
+function getStandardWriteResult(
+	absPath: string,
+	fileExisted: boolean,
+	content: string,
+): Promise<string> {
+	// Read back to verify and show actual content
+	return readFile(absPath, 'utf-8').then(actualContent => {
+		const lines = actualContent.split('\n');
+		const lineCount = lines.length;
+		const charCount = actualContent.length;
+		const estimatedTokens = calculateTokens(actualContent);
+
+		// Generate full file contents to show the model the current file state
+		let fileContext = '\n\nFile contents after write:\n';
+		for (let i = 0; i < lines.length; i++) {
+			const lineNumStr = String(i + 1).padStart(4, ' ');
+			const line = lines[i] || '';
+			fileContext += `${lineNumStr}: ${line}\n`;
+		}
+
+		const action = fileExisted ? 'overwritten' : 'written';
+		return `File ${action} successfully (${lineCount} lines, ${charCount} characters, ~${estimatedTokens} tokens).${fileContext}`;
+	}) as Promise<string>;
+}
 
 const writeFileCoreTool = tool({
 	description:
@@ -70,15 +231,35 @@ const writeFileCoreTool = tool({
 		},
 		required: ['path', 'content'],
 	}),
+
 	// Medium risk: file write operation, requires approval except in auto-accept mode or if configured in nanocoderTools.alwaysAllow
-	needsApproval: () => {
+	// In plan mode, only allow writes to plan files without approval
+
+	needsApproval: args => {
 		// Check if this tool is configured to always be allowed
 		if (isNanocoderToolAlwaysAllowed('write_file')) {
 			return false;
 		}
 
 		const mode = getCurrentMode();
-		return mode !== 'auto-accept'; // true in normal/plan, false in auto-accept
+		if (mode === 'auto-accept') {
+			return false; // No approval in auto-accept
+		}
+		if (mode === 'plan') {
+			// In plan mode, only allow writes to plan files without approval
+			const planSummary = getPlanSummary();
+			if (!planSummary) {
+				return true; // Plan mode not properly initialized
+			}
+			const cwd = process.cwd();
+			const planManager = createPlanManager(cwd);
+			const targetPath = args.path;
+			if (targetPath && planManager.isPlanFilePath(targetPath)) {
+				return false; // Allow writing to plan file
+			}
+			return true; // Block non-plan file writes in plan mode
+		}
+		return true; // Normal mode requires approval
 	},
 	execute: async (args, _options) => {
 		return await executeWriteFile(args);

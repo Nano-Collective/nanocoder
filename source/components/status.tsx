@@ -2,6 +2,7 @@ import {existsSync} from 'fs';
 import {Box, Text} from 'ink';
 import {memo} from 'react';
 
+import {PlanModeIndicator} from '@/components/plan-mode-indicator';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {confDirMap} from '@/config/index';
 import {getThemeColors, themes} from '@/config/themes';
@@ -10,7 +11,11 @@ import {
 	PATH_LENGTH_NORMAL_TERMINAL,
 } from '@/constants';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
-import type {LSPConnectionStatus, MCPConnectionStatus} from '@/types/core';
+import type {
+	LSPConnectionStatus,
+	MCPConnectionStatus,
+	PlanPhase,
+} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
 
@@ -32,6 +37,9 @@ export default memo(function Status({
 	vscodeMode,
 	vscodePort,
 	vscodeRequestedPort,
+	planModeActive,
+	planPhase,
+	planSummary,
 }: {
 	provider: string;
 	model: string;
@@ -45,6 +53,9 @@ export default memo(function Status({
 	vscodeMode?: boolean;
 	vscodePort?: number | null;
 	vscodeRequestedPort?: number;
+	planModeActive?: boolean;
+	planPhase?: PlanPhase;
+	planSummary?: string;
 }) {
 	const {boxWidth, isNarrow, truncatePath} = useResponsiveTerminal();
 	const colors = getThemeColors(theme);
@@ -165,6 +176,17 @@ export default memo(function Status({
 								<Text color={colors.secondary}>{updateInfo.updateMessage}</Text>
 							) : null}
 						</>
+					)}
+					{/* Plan Mode Indicator */}
+					{planModeActive && planSummary && planPhase && (
+						<PlanModeIndicator
+							active={planModeActive}
+							phase={planPhase}
+							planSummary={planSummary}
+							successColor={colors.success}
+							secondaryColor={colors.secondary}
+							primaryColor={colors.primary}
+						/>
 					)}
 				</Box>
 			) : (
@@ -287,6 +309,17 @@ export default memo(function Status({
 								<Text color={colors.secondary}>{updateInfo.updateMessage}</Text>
 							) : null}
 						</>
+					)}
+					{/* Plan Mode Indicator */}
+					{planModeActive && planSummary && planPhase && (
+						<PlanModeIndicator
+							active={planModeActive}
+							phase={planPhase}
+							planSummary={planSummary}
+							successColor={colors.success}
+							secondaryColor={colors.secondary}
+							primaryColor={colors.primary}
+						/>
 					)}
 				</TitledBoxWithPreferences>
 			)}

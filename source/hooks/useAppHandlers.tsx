@@ -1,3 +1,4 @@
+import {Text} from 'ink';
 import React from 'react';
 import {
 	createClearMessagesHandler,
@@ -9,10 +10,20 @@ import {
 	WarningMessage,
 } from '@/components/message-box';
 import Status from '@/components/status';
-import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
+import {
+	getCurrentMode,
+	getPlanSummary,
+	resetPlanModeState,
+	setCurrentMode as setCurrentModeContext,
+	setPlanDirectoryPath as setPlanDirectoryPathContext,
+	setPlanPhase as setPlanPhaseContext,
+	setPlanSummary as setPlanSummaryContext,
+	setProposalPath as setProposalPathContext,
+} from '@/context/mode-context';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {createPlanManager} from '@/services/plan-manager';
 import type {
 	CheckpointListItem,
 	DevelopmentMode,
@@ -26,6 +37,13 @@ import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
 import {getLogger} from '@/utils/logging';
 import {addToMessageQueue} from '@/utils/message-queue';
+
+// Define modes array outside the callback for use in both places
+const MODES: Array<'normal' | 'auto-accept' | 'plan'> = [
+	'normal',
+	'auto-accept',
+	'plan',
+];
 
 interface UseAppHandlersProps {
 	// State
@@ -58,6 +76,23 @@ interface UseAppHandlersProps {
 			checkpoints: CheckpointListItem[];
 			currentMessageCount: number;
 		} | null,
+	) => void;
+	// Plan mode state setters
+	setPlanModeActive: (value: boolean) => void;
+	setPlanSummary: (summary: string) => void;
+	setPlanPhase: (phase: import('@/types/core').PlanPhase) => void;
+	setPlanDirectoryPath: (path: string) => void;
+	setProposalPath: (path: string | null) => void;
+	setDesignPath: (path: string | null) => void;
+	setSpecPath: (path: string | null) => void;
+	setTasksPath: (path: string | null) => void;
+	setPlanFilePath: (filePath: string) => void;
+	setCurrentDocument: (doc: import('@/types/core').DocumentType | null) => void;
+	setCompletedDocuments: (
+		docs: Set<import('@/types/core').DocumentType>,
+	) => void;
+	setValidationResults: (
+		results: import('@/types/core').ValidationResult | null,
 	) => void;
 
 	// Callbacks
@@ -125,30 +160,101 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	}, [props.abortController, props.setIsCancelling, logger]);
 
 	// Toggle development mode handler
-	const handleToggleDevelopmentMode = React.useCallback(() => {
+	const handleToggleDevelopmentMode = React.useCallback(async () => {
 		props.setDevelopmentMode(currentMode => {
-			const modes: Array<'normal' | 'auto-accept' | 'plan'> = [
-				'normal',
-				'auto-accept',
-				'plan',
-			];
-			const currentIndex = modes.indexOf(currentMode);
-			const nextIndex = (currentIndex + 1) % modes.length;
-			const nextMode = modes[nextIndex];
+			const currentIndex = MODES.indexOf(currentMode);
+			const nextIndex = (currentIndex + 1) % MODES.length;
+			const nextMode = MODES[nextIndex];
 
 			logger.info('Development mode toggled', {
 				previousMode: currentMode,
 				nextMode,
 				modeIndex: nextIndex,
-				totalModes: modes.length,
+				totalModes: MODES.length,
 			});
+
+			// Reset plan mode state when toggling away from plan mode
+			if (currentMode === 'plan' && nextMode !== 'plan') {
+				resetPlanModeState();
+				props.setPlanModeActive(false);
+				props.setPlanSummary('');
+			}
 
 			// Sync global mode context for tool needsApproval logic
 			setCurrentModeContext(nextMode);
 
 			return nextMode;
 		});
-	}, [props.setDevelopmentMode, logger]);
+
+		// After mode is set, check if we need to trigger structured Plan Mode workflow
+		// We need to read the new state after setState completes
+		// For simplicity, we'll trigger the async workflow after a brief delay
+		setTimeout(async () => {
+			// Read the updated mode from context
+			const newMode = getCurrentMode();
+
+			// When entering plan mode, just validate directory but don't create plan yet
+			// Plan will be created when user submits their first query
+			if (newMode === 'plan') {
+				try {
+					// Create plan manager for current working directory
+					const cwd = process.cwd();
+					const planManager = createPlanManager(cwd);
+
+					// Validate directory
+					const validationResult = await planManager.validateDirectory();
+					if (!validationResult.valid) {
+						// Show error and don't enter plan mode
+						props.addToChatQueue(
+							<ErrorMessage
+								key={`plan-mode-error-${Date.now()}`}
+								message={`Cannot enter plan mode: ${validationResult.reason}`}
+								hideBox={true}
+							/>,
+						);
+						// Revert to previous mode
+						const previousMode =
+							MODES[(MODES.indexOf(newMode) - 1 + MODES.length) % MODES.length];
+						setCurrentModeContext(previousMode);
+						props.setDevelopmentMode(previousMode);
+						return;
+					}
+
+					// Set plan mode as active but don't create plan yet
+					// Plan will be created when user submits their first query
+					setPlanPhaseContext('understanding');
+
+					// Update React state
+					props.setPlanModeActive(true);
+					props.setPlanPhase('understanding');
+
+					logger.info(
+						'Entered plan mode (waiting for first query to create plan)',
+					);
+				} catch (error) {
+					const errorMessage =
+						error instanceof Error ? error.message : String(error);
+					props.addToChatQueue(
+						<ErrorMessage
+							key={`plan-mode-error-${Date.now()}`}
+							message={`Failed to enter plan mode: ${errorMessage}`}
+							hideBox={true}
+						/>,
+					);
+					// Revert to previous mode
+					props.setDevelopmentMode('normal');
+					setCurrentModeContext('normal');
+				}
+			}
+		}, 0);
+	}, [
+		props.setDevelopmentMode,
+		props.setPlanModeActive,
+		props.setPlanSummary,
+		props.setPlanPhase,
+		props.addToChatQueue,
+		logger,
+	]);
 
 	// Show status handler
 	const handleShowStatus = React.useCallback(() => {
@@ -252,6 +358,59 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			// Reset conversation completion flag when starting a new message
 			props.setIsConversationComplete(false);
 
+			// Check if we need to create a plan (first query in plan mode with no plan yet)
+			const currentMode = getCurrentMode();
+			const currentPlanSummary = getPlanSummary();
+			if (currentMode === 'plan' && !currentPlanSummary) {
+				// Show immediate visual feedback
+				props.addToChatQueue(
+					<Text color="#666666" key={`plan-formulating-${Date.now()}`}>
+						⏳ Formulating plan...
+					</Text>,
+				);
+
+				try {
+					// Create plan manager for current working directory
+					const cwd = process.cwd();
+					const planManager = createPlanManager(cwd);
+
+					// Create new plan using user's message for summary generation
+					// Uses LLM intent classification with semantic extraction fallback
+					const {planSummary, planDirectoryPath, proposalPath} =
+						await planManager.createPlan(message, props.client || undefined);
+
+					// Update global mode context
+					setPlanSummaryContext(planSummary);
+					setPlanPhaseContext('understanding');
+					setPlanDirectoryPathContext(planDirectoryPath);
+					setProposalPathContext(proposalPath);
+
+					// Update React state
+					props.setPlanSummary(planSummary);
+					props.setPlanPhase('understanding');
+					props.setPlanDirectoryPath(planDirectoryPath);
+					props.setProposalPath(proposalPath);
+					props.setPlanFilePath(planDirectoryPath + '/plan.md');
+
+					logger.info(`Created plan "${planSummary}" from user query`);
+				} catch (error) {
+					const errorMessage =
+						error instanceof Error ? error.message : String(error);
+					props.addToChatQueue(
+						<ErrorMessage
+							key={`plan-creation-error-${Date.now()}`}
+							message={`Failed to create plan: ${errorMessage}`}
+							hideBox={true}
+						/>,
+					);
+					// Revert to normal mode on plan creation failure
+					props.setDevelopmentMode('normal');
+					setCurrentModeContext('normal');
+					props.setPlanModeActive(false);
+					return;
+				}
+			}
+
 			await handleMessageSubmission(message, {
 				customCommandCache: props.customCommandCache,
 				customCommandLoader: props.customCommandLoader,
@@ -283,7 +442,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				getMessageTokens: props.getMessageTokens,
 			});
 		},
-		[props, clearMessages, enterCheckpointLoadMode, handleShowStatus],
+		[props, clearMessages, enterCheckpointLoadMode, handleShowStatus, logger],
 	);
 
 	return {
