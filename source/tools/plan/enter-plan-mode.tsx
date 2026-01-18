@@ -10,9 +10,11 @@ import ToolMessage from '@/components/tool-message';
 import {
 	getCurrentMode,
 	setCurrentMode,
+	setPlanDirectoryPath,
 	setPlanFilePath,
-	setPlanId,
 	setPlanPhase,
+	setPlanSummary,
+	setProposalPath,
 } from '@/context/mode-context';
 import {createPlanManager} from '@/services/plan-manager';
 import type {NanocoderToolExport} from '@/types/core';
@@ -59,22 +61,25 @@ const executeEnterPlanMode = async (args: {
 		}
 
 		// Create new plan
-		const {planId, planPath} = await planManager.createPlan();
+		const {planSummary, planDirectoryPath, proposalPath, planFilePath} =
+			await planManager.createPlan();
 
 		// Update mode context
 		setCurrentMode('plan');
-		setPlanId(planId);
+		setPlanSummary(planSummary);
 		setPlanPhase('understanding');
-		setPlanFilePath(planPath);
+		setPlanDirectoryPath(planDirectoryPath);
+		setProposalPath(proposalPath);
+		setPlanFilePath(planFilePath);
 
-		logger.info(`Entered plan mode with plan ID: ${planId}`);
+		logger.info(`Entered plan mode with plan: ${planSummary}`);
 
 		let output = `✓ Entered Plan Mode\n\n`;
-		output += `Plan ID: ${planId}\n`;
-		output += `Plan File: ${planPath}\n`;
+		output += `Plan: ${planSummary}\n`;
+		output += `Directory: ${planDirectoryPath}\n`;
 		output += `Phase: Understanding\n\n`;
 		output += `You are now in Plan Mode. Use read-only tools to explore the codebase `;
-		output += `and write your findings to the plan file. Follow the 5-phase workflow:\n`;
+		output += `and write your findings to the plan documents. Follow the 5-phase workflow:\n`;
 		output += `1. Understanding - Gather requirements\n`;
 		output += `2. Design - Explore approaches\n`;
 		output += `3. Review - Present plan for feedback\n`;

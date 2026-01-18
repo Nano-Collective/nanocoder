@@ -8,8 +8,10 @@ import {createTokenizer} from '@/tokenization/index.js';
 import {ToolManager} from '@/tools/tool-manager';
 import type {CheckpointListItem} from '@/types/checkpoint';
 import type {CustomCommand} from '@/types/commands';
+import type {ValidationResult} from '@/types/core';
 import {
 	DevelopmentMode,
+	DocumentType,
 	LLMClient,
 	LSPConnectionStatus,
 	MCPConnectionStatus,
@@ -147,9 +149,22 @@ export function useAppState() {
 
 	// Plan mode state
 	const [planModeActive, setPlanModeActive] = useState<boolean>(false);
-	const [planId, setPlanId] = useState<string | null>(null);
+	const [planSummary, setPlanSummary] = useState<string>('');
 	const [planPhase, setPlanPhase] = useState<PlanPhase>('understanding');
+	const [planDirectoryPath, setPlanDirectoryPath] = useState<string>('');
+	const [proposalPath, setProposalPath] = useState<string | null>(null);
+	const [designPath, setDesignPath] = useState<string | null>(null);
+	const [specPath, setSpecPath] = useState<string | null>(null);
+	const [tasksPath, setTasksPath] = useState<string | null>(null);
 	const [planFilePath, setPlanFilePath] = useState<string>('');
+	const [currentDocument, setCurrentDocument] = useState<DocumentType | null>(
+		null,
+	);
+	const [completedDocuments, setCompletedDocuments] = useState<
+		Set<DocumentType>
+	>(new Set());
+	const [validationResults, setValidationResults] =
+		useState<ValidationResult | null>(null);
 
 	// Tool confirmation state
 	const [pendingToolCalls, setPendingToolCalls] = useState<ToolCall[]>([]);
@@ -306,9 +321,17 @@ export function useAppState() {
 		isToolExecuting,
 		developmentMode,
 		planModeActive,
-		planId,
+		planSummary,
 		planPhase,
+		planDirectoryPath,
+		proposalPath,
+		designPath,
+		specPath,
+		tasksPath,
 		planFilePath,
+		currentDocument,
+		completedDocuments,
+		validationResults,
 		pendingToolCalls,
 		currentToolIndex,
 		completedToolResults,
@@ -360,9 +383,17 @@ export function useAppState() {
 		setIsToolExecuting,
 		setDevelopmentMode,
 		setPlanModeActive,
-		setPlanId,
+		setPlanSummary,
 		setPlanPhase,
+		setPlanDirectoryPath,
+		setProposalPath,
+		setDesignPath,
+		setSpecPath,
+		setTasksPath,
 		setPlanFilePath,
+		setCurrentDocument,
+		setCompletedDocuments,
+		setValidationResults,
 		setPendingToolCalls,
 		setCurrentToolIndex,
 		setCompletedToolResults,

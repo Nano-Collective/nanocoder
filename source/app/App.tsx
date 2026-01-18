@@ -401,9 +401,17 @@ export default function App({
 		setIsCheckpointLoadMode: appState.setIsCheckpointLoadMode,
 		setCheckpointLoadData: appState.setCheckpointLoadData,
 		setPlanModeActive: appState.setPlanModeActive,
-		setPlanId: appState.setPlanId,
+		setPlanSummary: appState.setPlanSummary,
 		setPlanPhase: appState.setPlanPhase,
+		setPlanDirectoryPath: appState.setPlanDirectoryPath,
+		setProposalPath: appState.setProposalPath,
+		setDesignPath: appState.setDesignPath,
+		setSpecPath: appState.setSpecPath,
+		setTasksPath: appState.setTasksPath,
 		setPlanFilePath: appState.setPlanFilePath,
+		setCurrentDocument: appState.setCurrentDocument,
+		setCompletedDocuments: appState.setCompletedDocuments,
+		setValidationResults: appState.setValidationResults,
 		addToChatQueue: appState.addToChatQueue,
 		setLiveComponent: appState.setLiveComponent,
 		client: appState.client,
@@ -578,7 +586,7 @@ export default function App({
 				vscodeRequestedPort: vscodeServer.requestedPort,
 				planModeActive: appState.planModeActive,
 				planPhase: appState.planPhase,
-				planId: appState.planId,
+				planSummary: appState.planSummary,
 			}),
 		[
 			shouldShowWelcome,
@@ -595,7 +603,7 @@ export default function App({
 			vscodeServer.requestedPort,
 			appState.planModeActive,
 			appState.planPhase,
-			appState.planId,
+			appState.planSummary,
 		],
 	);
 
@@ -763,7 +771,7 @@ export default function App({
 									// Then reset plan mode state (both global and React)
 									resetPlanModeState();
 									appState.setPlanModeActive(false);
-									appState.setPlanId(null);
+									appState.setPlanSummary('');
 									appState.setPlanPhase('understanding');
 									appState.setPlanFilePath('');
 									// Clear the UI
@@ -779,7 +787,7 @@ export default function App({
 									// Reset plan mode state
 									resetPlanModeState();
 									appState.setPlanModeActive(false);
-									appState.setPlanId(null);
+									appState.setPlanSummary('');
 									appState.setPlanPhase('understanding');
 									appState.setPlanFilePath('');
 									// Clear the UI
@@ -818,10 +826,50 @@ export default function App({
 							appState.pendingQuestionPrompt && (
 								<InteractiveQuestionPrompt
 									questions={appState.pendingQuestionPrompt.questions}
-									onSubmit={answers => {
-										appState.pendingQuestionPrompt?.onSubmit(answers);
+									onSubmit={async answers => {
+										// Store questions and callbacks before clearing state
+										const questions =
+											appState.pendingQuestionPrompt?.questions || [];
+										const onSubmitCallback =
+											appState.pendingQuestionPrompt?.onSubmit;
+
+										// Clear the question prompt state
 										appState.setIsQuestionPromptMode(false);
 										appState.setPendingQuestionPrompt(null);
+
+										// Call the original callback (for logging)
+										onSubmitCallback?.(answers);
+
+										// Format the answers as a user message to continue the conversation
+										const answerLines = Object.entries(answers)
+											.filter(([key]) => key.startsWith('question_'))
+											.sort(([a], [b]) => {
+												const aIndex = parseInt(a.replace('question_', ''), 10);
+												const bIndex = parseInt(b.replace('question_', ''), 10);
+												return aIndex - bIndex;
+											})
+											.map(([_, value], index) => {
+												const question = questions[index];
+												return `Q: ${question?.question || ''}\nA: ${value}`;
+											});
+
+										const answerMessage = `My answers to your questions:\n\n${answerLines.join('\n\n')}`;
+
+										// Continue the conversation with the user's answers
+										// This ensures the LLM receives the answers and can proceed
+										try {
+											await chatHandler.handleChatMessage(answerMessage);
+										} catch (error) {
+											logger.error(
+												'[QUESTION_PROMPT] Failed to continue conversation after answers',
+												{
+													error:
+														error instanceof Error
+															? error.message
+															: String(error),
+												},
+											);
+										}
 									}}
 									onCancel={() => {
 										appState.pendingQuestionPrompt?.onCancel();
@@ -865,9 +913,17 @@ export default function App({
 									developmentMode={appState.developmentMode}
 									planModeState={{
 										active: appState.planModeActive,
-										planId: appState.planId,
+										planSummary: appState.planSummary,
 										phase: appState.planPhase,
+										planDirectoryPath: appState.planDirectoryPath,
+										proposalPath: appState.proposalPath,
+										designPath: appState.designPath,
+										specPath: appState.specPath,
+										tasksPath: appState.tasksPath,
 										planFilePath: appState.planFilePath,
+										currentDocument: appState.currentDocument,
+										completedDocuments: appState.completedDocuments,
+										validationResults: appState.validationResults,
 									}}
 									onToolConfirm={toolHandler.handleToolConfirmation}
 									onToolCancel={toolHandler.handleToolConfirmationCancel}

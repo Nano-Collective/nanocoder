@@ -8,7 +8,7 @@
 import type {PlanPhase} from '@/types/core';
 
 export interface PlanReviewData {
-	planId: string;
+	planSummary: string;
 	planFilePath: string;
 	content: string;
 	currentPhase: PlanPhase;

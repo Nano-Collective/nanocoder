@@ -6,7 +6,11 @@
  * and this module detects those phrases to update the plan phase state.
  */
 
-import {getCurrentMode, getPlanId, setPlanPhase} from '@/context/mode-context';
+import {
+	getCurrentMode,
+	getPlanSummary,
+	setPlanPhase,
+} from '@/context/mode-context';
 import type {PlanPhase} from '@/types/core';
 import {getLogger} from '@/utils/logging';
 
@@ -152,8 +156,8 @@ export function detectPhaseTransition(
 	}
 
 	// Only detect transitions if we have an active plan
-	const planId = getPlanId();
-	if (!planId) {
+	const planSummary = getPlanSummary();
+	if (!planSummary) {
 		return null;
 	}
 
@@ -203,8 +207,8 @@ export function processPhaseTransition(content: string): boolean {
 		return false;
 	}
 
-	const planId = getPlanId();
-	if (!planId) {
+	const planSummary = getPlanSummary();
+	if (!planSummary) {
 		return false;
 	}
 

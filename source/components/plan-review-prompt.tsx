@@ -11,7 +11,7 @@ import type {PlanPhase} from '@/types/core';
 import {PLAN_PHASE_LABELS} from '@/types/core';
 
 interface PlanReviewData {
-	planId: string;
+	planSummary: string;
 	planFilePath: string;
 	content: string;
 	currentPhase: PlanPhase;
@@ -86,8 +86,8 @@ function PlanReviewPrompt({data, onApprove, onReject}: PlanReviewPromptProps) {
 			{/* Plan Info */}
 			<Box marginTop={1} flexDirection="column">
 				<Box>
-					<Text color="#00ffff">Plan ID: </Text>
-					<Text>{data.planId}</Text>
+					<Text color="#00ffff">Plan: </Text>
+					<Text>{data.planSummary}</Text>
 				</Box>
 				<Box>
 					<Text color="#00ffff">Phase: </Text>

@@ -39,7 +39,7 @@ export default memo(function Status({
 	vscodeRequestedPort,
 	planModeActive,
 	planPhase,
-	planId,
+	planSummary,
 }: {
 	provider: string;
 	model: string;
@@ -55,7 +55,7 @@ export default memo(function Status({
 	vscodeRequestedPort?: number;
 	planModeActive?: boolean;
 	planPhase?: PlanPhase;
-	planId?: string | null;
+	planSummary?: string;
 }) {
 	const {boxWidth, isNarrow, truncatePath} = useResponsiveTerminal();
 	const colors = getThemeColors(theme);
@@ -178,11 +178,11 @@ export default memo(function Status({
 						</>
 					)}
 					{/* Plan Mode Indicator */}
-					{planModeActive && planId && planPhase && (
+					{planModeActive && planSummary && planPhase && (
 						<PlanModeIndicator
 							active={planModeActive}
 							phase={planPhase}
-							planId={planId}
+							planSummary={planSummary}
 							successColor={colors.success}
 							secondaryColor={colors.secondary}
 							primaryColor={colors.primary}
@@ -311,11 +311,11 @@ export default memo(function Status({
 						</>
 					)}
 					{/* Plan Mode Indicator */}
-					{planModeActive && planId && planPhase && (
+					{planModeActive && planSummary && planPhase && (
 						<PlanModeIndicator
 							active={planModeActive}
 							phase={planPhase}
-							planId={planId}
+							planSummary={planSummary}
 							successColor={colors.success}
 							secondaryColor={colors.secondary}
 							primaryColor={colors.primary}

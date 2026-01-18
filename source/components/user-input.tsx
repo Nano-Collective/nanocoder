@@ -428,8 +428,6 @@ export default function UserInput({
 				{planModeState && (
 					<PlanModeIndicator
 						active={planModeState.active}
-						phase={planModeState.phase}
-						planId={planModeState.planId}
 						successColor={colors.success}
 						secondaryColor={colors.secondary}
 						primaryColor={colors.primary}
@@ -522,8 +520,6 @@ export default function UserInput({
 			{planModeState && (
 				<PlanModeIndicator
 					active={planModeState.active}
-					phase={planModeState.phase}
-					planId={planModeState.planId}
 					successColor={colors.success}
 					secondaryColor={colors.secondary}
 					primaryColor={colors.primary}

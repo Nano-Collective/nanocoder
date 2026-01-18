@@ -6,33 +6,73 @@
  */
 
 import type {PlanPhase} from '@/types/core';
+import type {DocumentType} from '@/types/templates';
 
 /**
  * Get the plan mode instructions for the given phase
  *
  * @param phase - Current workflow phase
- * @param planId - Active plan identifier
+ * @param planSummary - Active plan summary (directory name)
+ * @param currentDocument - The document currently being worked on
  * @returns Plan mode instructions string
  */
-export function getPlanModePrompt(phase: PlanPhase, planId: string): string {
+export function getPlanModePrompt(
+	phase: PlanPhase,
+	planSummary: string,
+	currentDocument: DocumentType | null = null,
+): string {
 	const baseInstructions = `# Plan Mode Active
 
 You are in **Plan Mode** - a structured planning workflow for thoughtful code changes.
 
-**Current Plan:** \`${planId}\`
+**Current Plan:** \`${planSummary}\`
 **Current Phase:** ${getPhaseLabel(phase)}
+${currentDocument ? `**Current Document:** ${getDocumentLabel(currentDocument)}` : ''}
 
 ## Overview
 
 Plan Mode follows a 5-phase workflow. Phase transitions happen **AUTOMATICALLY** - you do NOT need to ask for user approval to move between phases:
 
-1. **Understanding** - Gather requirements and clarify scope
-2. **Design** - Explore approaches and identify relevant files
-3. **Review** - Consolidate findings and prepare final plan
-4. **Final Plan** - Create executable task list
-5. **Exit** - Complete planning and present for user approval
+1. **Understanding** → Creates \`proposal.md\` (Why, what changes, impact)
+2. **Design** → Creates \`design.md\` (Technical decisions with interactive Q&A)
+3. **Review** → Creates \`spec.md\` (Requirements with Gherkin scenarios)
+4. **Final Plan** → Creates \`tasks.md\` + \`plan.md\` (Task list + consolidated view)
+5. **Exit** → Final validation + user approval
 
 **Important:** All phase transitions are automatic. Only the FINAL PLAN presented in the Exit phase requires user review and approval.
+
+## Continuous Workflow
+
+**CRITICAL:** This is a **continuous autonomous workflow**. After each phase:
+1. Complete the required document for that phase
+2. State the transition phrase to move to the next phase
+3. **DO NOT STOP** - continue immediately to the next phase
+4. The conversation will continue automatically until you call \`exit-plan-mode\`
+
+**Do NOT:**
+- Stop and wait for user input between phases (except when using \`ask_user_question\` tool)
+- Ask "Should I continue?" or similar questions
+- Present intermediate results for approval
+- Add filler text like "Let me know if you want me to proceed"
+
+**DO:**
+- Move through all 5 phases continuously
+- Only use \`ask_user_question\` when you need user input for decisions
+- Create all required documents (proposal.md, design.md, spec.md, tasks.md, plan.md)
+- Call \`exit-plan-mode\` when all documents are complete
+
+## Multi-Document Structure
+
+Plans are stored as directories in \`.nanocoder/plans/${planSummary}/\`:
+
+\`\`\`
+.nanocoder/plans/${planSummary}/
+├── proposal.md      # Created in Understanding phase
+├── design.md        # Created in Design phase (includes interactive Q&A)
+├── spec.md          # Created in Review phase
+├── tasks.md         # Created in Final Plan phase
+└── plan.md          # Created in Final Plan phase (consolidated view)
+\`\`\`
 
 ## Tool Access in Plan Mode
 
@@ -43,8 +83,12 @@ Plan Mode follows a 5-phase workflow. Phase transitions happen **AUTOMATICALLY**
 - Interactive questions: \`ask_user_question\` - Use this to gather user preferences or clarify requirements
 
 **Allowed for Plan Files Only:**
-- \`write_file\` - ONLY for writing to \`.nanocoder/plans/${planId}.md\`
-- You CAN and SHOULD update the plan file as you progress through phases
+- \`write_file\` - ONLY for writing to plan documents:
+  - \`.nanocoder/plans/${planSummary}/proposal.md\`
+  - \`.nanocoder/plans/${planSummary}/design.md\`
+  - \`.nanocoder/plans/${planSummary}/spec.md\`
+  - \`.nanocoder/plans/${planSummary}/tasks.md\`
+  - \`.nanocoder/plans/${planSummary}/plan.md\`
 
 **Blocked in Plan Mode:**
 - \`string_replace\` - Direct editing is disabled
@@ -53,11 +97,11 @@ Plan Mode follows a 5-phase workflow. Phase transitions happen **AUTOMATICALLY**
 
 **When a tool is blocked:**
 - Review the error message carefully
-- Use alternative approaches (read-only tools, plan file updates)
-- Plan bash commands for later execution (add them to the plan file)
+- Use alternative approaches (read-only tools, plan document updates)
+- Plan bash commands for later execution (add them to tasks.md)
 `;
 
-	return baseInstructions + getPhaseInstructions(phase);
+	return baseInstructions + getPhaseInstructions(phase, planSummary);
 }
 
 /**
@@ -79,9 +123,29 @@ function getPhaseLabel(phase: PlanPhase): string {
 }
 
 /**
+ * Get the display label for a document type
+ */
+function getDocumentLabel(docType: DocumentType): string {
+	switch (docType) {
+		case 'proposal':
+			return 'proposal.md';
+		case 'design':
+			return 'design.md';
+		case 'spec':
+			return 'spec.md';
+		case 'tasks':
+			return 'tasks.md';
+		case 'plan':
+			return 'plan.md';
+	}
+}
+
+/**
  * Get phase-specific instructions
  */
-function getPhaseInstructions(phase: PlanPhase): string {
+function getPhaseInstructions(phase: PlanPhase, planSummary: string): string {
+	const planPath = `.nanocoder/plans/${planSummary}`;
+
 	switch (phase) {
 		case 'understanding':
 			return `
@@ -107,8 +171,42 @@ function getPhaseInstructions(phase: PlanPhase): string {
 - Don't make assumptions about the approach
 - Don't ask text questions - use the \`ask_user_question\` tool instead
 
+**Document to Create: \`proposal.md\`**
+
+When you have gathered sufficient information, create \`proposal.md\` with this structure:
+
+\`\`\`markdown
+---
+summary: ${planSummary}
+created: YYYY-MM-DDTHH:MM:SSZ
+phase: understanding
+---
+
+# ${planSummary}
+
+## Why
+
+*Describe why this change is needed (50-1000 characters)...*
+
+## What Changes
+
+- *List the changes being made...*
+
+## Impact
+
+### Affected Specs
+
+- (None or list of affected specs)
+
+### Affected Code
+
+- (None or list of affected files/modules)
+\`\`\`
+
+**Validation:** After writing proposal.md, it will be validated automatically. If there are errors, fix them before proceeding.
+
 **Automatic Transition:**
-Once you have gathered sufficient information about the requirements, AUTOMATICALLY transition to the Design phase by stating:
+Once \`proposal.md\` is created and validated, AUTOMATICALLY transition to Design by stating:
 *"Moving to the Design phase to explore implementation approaches."*
 
 DO NOT ask for permission to transition - proceed automatically when ready.
@@ -120,20 +218,27 @@ DO NOT ask for permission to transition - proceed automatically when ready.
 
 **Your Goal:** Explore potential implementation approaches and architecture.
 
+**Interactive Q&A BEFORE Writing \`design.md\`:**
+Before writing the design document, use \`ask_user_question\` to clarify:
+- Architectural preferences (e.g., "Should this use async/await or callbacks?")
+- Technology choices (e.g., "Use TypeScript or JavaScript for this module?")
+- Error handling approach (e.g., "Throw exceptions or return Result types?")
+- Performance considerations (e.g., "Prioritize memory usage or speed?")
+- Any ambiguous requirements from the proposal
+
 **What to Do:**
 - Identify relevant files and dependencies
 - Explore the codebase structure using read-only tools
 - Propose solution architecture and alternatives
 - Consider trade-offs between different approaches
 - Identify potential risks or edge cases
-- Use \`ask_user_question\` if you need clarification on implementation preferences or architectural choices
+- Use \`ask_user_question\` for clarification on technical decisions
 
 **Tools to Use:**
-- Use \`read_file\` to understand existing code
-- Use \`find_files\` to locate relevant modules
-- Use \`search_file_contents\` to find patterns or dependencies
-- Use \`ask_user_question\` to clarify technical decisions with the user
-- Document your findings in the plan file
+- \`read_file\` - Understand existing code
+- \`find_files\` - Locate relevant modules
+- \`search_file_contents\` - Find patterns or dependencies
+- \`ask_user_question\` - Clarify technical decisions with the user
 
 **What NOT to Do:**
 - Don't modify any code (only read operations)
@@ -141,79 +246,244 @@ DO NOT ask for permission to transition - proceed automatically when ready.
 - Don't finalize implementation steps yet
 - Don't ask text questions - use \`ask_user_question\` instead
 
-**CRITICAL - Keep Going:**
-After updating the plan file with the design phase content, you MUST immediately continue to the next phase.
-DO NOT stop and wait for user input.
-DO NOT ask if the user wants you to proceed.
+**Document to Create: \`design.md\`**
+
+After exploring the codebase and gathering clarifications, create \`design.md\` with this structure:
+
+\`\`\`markdown
+---
+summary: ${planSummary}
+created: YYYY-MM-DDTHH:MM:SSZ
+phase: design
+---
+
+# Design
+
+## Context
+
+*Background context about the current system and why this change is needed...*
+
+## Goals
+
+*List specific goals this design aims to achieve...*
+
+## Non-Goals
+
+*Explicitly list what is OUT OF SCOPE for this change...*
+
+## Decisions
+
+### Decision 1: [Title]
+
+**What:** [Decision description]
+**Why:** [Rationale]
+**Alternatives Considered:** [List of alternatives with trade-offs]
+
+*(Repeat for each key decision)*
+
+## Risks & Trade-offs
+
+| Risk | Mitigation |
+|------|------------|
+| [Risk description] | [How to address it] |
+
+## Migration Plan
+
+*Steps to migrate from current state to new state...*
+
+## Rollback Plan
+
+*How to undo the change if needed...*
+
+## Open Questions
+
+*Any unresolved questions or areas needing further exploration...*
+\`\`\`
+
+**Validation:** After writing design.md, it will be validated automatically. Fix any errors before proceeding.
 
 **Automatic Transition:**
-Once you have explored the codebase and identified a solid approach, AUTOMATICALLY transition to Review by stating:
-*"Moving to the Review phase to consolidate the plan."*
+Once \`design.md\` is created and validated, AUTOMATICALLY transition to Review by stating:
+*"Moving to the Review phase to create specification documents."*
 
-Then continue with consolidating your findings in the Review phase.
+DO NOT stop and wait for user input. DO NOT ask if the user wants you to proceed.
 `;
 
 		case 'review':
 			return `
 ## Review Phase
 
-**Your Goal:** Consolidate findings and prepare the final executable plan.
+**Your Goal:** Create specification documents with requirements and Gherkin scenarios.
 
 **What to Do:**
-- Present a clear summary of the planned changes
-- Highlight key decisions and trade-offs
-- List files that will be modified
-- Outline the implementation approach
-- Update the plan file with a complete implementation strategy
-- Use \`ask_user_question\` if you need clarification on any aspect of the plan before finalizing
+- Review proposal.md and design.md
+- Define requirements in delta format (ADDED/MODIFIED/REMOVED/RENAMED)
+- Add Gherkin scenarios for each requirement
+- Use \`ask_user_question\` if you need clarification on requirements
 
-**Plan Structure:**
-Update the plan file to include:
-1. **Summary** - What will be done and why
-2. **Files to Modify** - List of files with intended changes
-3. **Implementation Steps** - High-level approach
-4. **Risks/Considerations** - Potential issues or edge cases
+**Gherkin Scenario Format:**
+\`\`\`markdown
+### Requirement Name
 
-**CRITICAL - Keep Going:**
-After updating the plan file with the review phase content, you MUST immediately continue to the next phase.
-DO NOT stop and wait for user input.
-DO NOT ask if the user wants you to proceed.
-DO NOT say "Let me know if you'd like me to continue."
-DO NOT ask text questions - use \`ask_user_question\` if you need clarification.
+**Scenario:** [Scenario description]
+
+**GIVEN** [Initial context]
+**WHEN** [Action taken]
+**THEN** [Expected outcome]
+\`\`\`
+
+**Document to Create: \`spec.md\`**
+
+Create \`spec.md\` with this structure:
+
+\`\`\`markdown
+---
+summary: ${planSummary}
+created: YYYY-MM-DDTHH:MM:SSZ
+phase: review
+---
+
+# Specification
+
+## ADDED Requirements
+
+### [Requirement Name]
+
+[Requirement description...]
+
+#### Scenarios
+
+**Scenario:** [Scenario name]
+
+**GIVEN** [when condition]
+**WHEN** [when condition]
+**THEN** [then condition]
+
+*(Repeat for each ADDED requirement)*
+
+## MODIFIED Requirements
+
+### [Requirement Name]
+
+[Full updated requirement description...]
+
+#### Scenarios
+
+**Scenario:** [Scenario name]
+
+**GIVEN** [when condition]
+**WHEN** [when condition]
+**THEN** [then condition]
+
+*(Repeat for each MODIFIED requirement)*
+
+## REMOVED Requirements
+
+### [Requirement Name]
+
+**Reason:** [Why it's being removed]
+**Migration:** [How to migrate away from this requirement]
+
+*(Repeat for each REMOVED requirement)*
+
+## RENAMED Requirements
+
+- \`[Old name]\` → \`[New name]\`
+\`\`\`
+
+**Validation:** After writing spec.md, it will be validated automatically. Fix any errors before proceeding.
 
 **Automatic Transition:**
-Immediately after writing the review phase to the plan file, transition to Final Plan by stating:
+Once \`spec.md\` is created and validated, AUTOMATICALLY transition to Final Plan by stating:
 *"Moving to the Final Plan phase to create the executable task list."*
 
-Then continue with creating the detailed executable task list in the Final Plan phase.
+DO NOT stop and wait for user input.
 `;
 
 		case 'final':
 			return `
 ## Final Plan Phase
 
-**Your Goal:** Create a detailed, executable task list.
+**Your Goal:** Create implementation task list and consolidated plan document.
 
 **What to Do:**
 - Break down the work into specific, actionable steps
 - Order steps logically (dependencies first)
-- Specify exact file changes needed
-- Include any necessary configuration changes
-- Add testing and verification steps
+- Organize tasks by category (Implementation, Testing, Documentation, Deployment)
+- Create consolidated plan.md overview
 
-**Final Plan Structure:**
-Update the plan file with:
-1. **Implementation Steps** - Ordered list of specific actions
-2. **File Changes** - Exact modifications for each file
-3. **Testing Steps** - How to verify the changes work
-4. **Rollback Plan** - How to undo if needed (if applicable)
+**Documents to Create:**
+
+### 1. \`tasks.md\`
+
+\`\`\`markdown
+---
+summary: ${planSummary}
+created: YYYY-MM-DDTHH:MM:SSZ
+phase: final
+---
+
+# Implementation Tasks
+
+## 1. Implementation
+
+- [ ] 1.1 [First implementation task]
+- [ ] 1.2 [Second implementation task]
+...
+
+## 2. Testing
+
+- [ ] 2.1 [First testing task]
+- [ ] 2.2 [Second testing task]
+...
+
+## 3. Documentation
+
+- [ ] 3.1 [Documentation task]
+...
+
+## 4. Deployment
+
+- [ ] 4.1 [Deployment task]
+...
+\`\`\`
+
+### 2. \`plan.md\` (Consolidated View)
+
+\`\`\`markdown
+---
+summary: ${planSummary}
+created: YYYY-MM-DDTHH:MM:SSZ
+phase: final
+---
+
+# ${planSummary}
+
+## Overview
+
+[Summary from proposal.md...]
+
+## Design Summary
+
+[Key decisions from design.md...]
+
+## Spec Summary
+
+[Summary of requirements from spec.md...]
+
+## Tasks
+
+[Summary from tasks.md...]
+\`\`\`
+
+**Validation:** After writing both documents, they will be validated automatically. Fix any errors before proceeding.
 
 **Before calling exit-plan-mode:**
-- If you need any clarification on the plan (e.g., implementation preferences, testing approach), use \`ask_user_question\` first
+- Use \`ask_user_question\` if you need any clarification on the plan
 - Once you have all the information needed, call \`exit-plan-mode\` immediately
 
 **CRITICAL - Required Action:**
-Once the final plan is complete and written to the plan file, you MUST immediately call the \`exit-plan-mode\` tool.
+Once both \`tasks.md\` and \`plan.md\` are complete and validated, you MUST immediately call the \`exit-plan-mode\` tool.
 
 **Do NOT:**
 - Ask "Would you like me to proceed?" or similar text questions
@@ -222,14 +492,16 @@ Once the final plan is complete and written to the plan file, you MUST immediate
 - Pass any arguments to exit-plan-mode - call it WITHOUT parameters
 
 **Do:**
-- Call \`exit-plan-mode\` immediately after writing the final plan
+- Call \`exit-plan-mode\` immediately after writing and validating the final documents
 - Call it WITHOUT any arguments or parameters
 - Let the tool handle the user interaction and mode selection
 
 **Example completion sequence:**
-1. Write the final plan to .nanocoder/plans/\${planId}.md
-2. Call \`exit-plan-mode\` with NO arguments - just the tool name
-3. STOP - do not add any text after calling the tool
+1. Write \`tasks.md\` to ${planPath}/tasks.md
+2. Write \`plan.md\` to ${planPath}/plan.md
+3. Wait for validation to complete (automatic)
+4. Call \`exit-plan-mode\` with NO arguments
+5. STOP - do not add any text after calling the tool
 
 The exit-plan-mode tool will automatically:
 - Present an interactive mode selection prompt with keyboard navigation
@@ -243,9 +515,7 @@ The exit-plan-mode tool will automatically:
 
 **Plan Complete!**
 
-The plan has been finalized and is ready for implementation.
-
-**IMPORTANT:** You are now in the Exit phase. Your ONLY action here is to call the \`exit-plan-mode\` tool.
+All documents have been created and validated. Your ONLY action here is to call the \`exit-plan-mode\` tool.
 
 The \`exit-plan-mode\` tool will:
 1. Present an interactive mode selection prompt with keyboard navigation
@@ -270,7 +540,7 @@ Call \`exit-plan-mode\` with NO arguments (just the tool name, no parameters).
 **After Plan Mode:**
 - If approved in normal mode: Each tool will require confirmation
 - If approved in auto-accept mode: Tools will execute automatically
-- The plan file remains for reference during implementation
+- The plan documents remain for reference during implementation
 `;
 	}
 }
@@ -280,12 +550,12 @@ Call \`exit-plan-mode\` with NO arguments (just the tool name, no parameters).
  *
  * This is used to inform tools about plan mode restrictions
  */
-export function getPlanModeToolInstructions(): string {
+export function getPlanModeToolInstructions(planSummary: string): string {
 	return `**Plan Mode Tool Restrictions:**
 
 You are in Plan Mode. The following tool restrictions apply:
 
-ALLOWED WITHOUT APPROVAL:
+**ALLOWED WITHOUT APPROVAL:**
 - read_file - Read file contents
 - find_files - Search for files by pattern
 - search_file_contents - Search within files
@@ -294,12 +564,19 @@ ALLOWED WITHOUT APPROVAL:
 - fetch_url - Fetch URL content
 - lsp_get_diagnostics - Get LSP diagnostics
 - ask_user_question - Interactive questions for user clarification
-- write_file - ONLY for .nanocoder/plans/{planId}.md
+- write_file - ONLY for plan documents in .nanocoder/plans/${planSummary}/
 
-BLOCKED IN PLAN MODE:
+**PLAN DOCUMENT PATHS:**
+- .nanocoder/plans/${planSummary}/proposal.md
+- .nanocoder/plans/${planSummary}/design.md
+- .nanocoder/plans/${planSummary}/spec.md
+- .nanocoder/plans/${planSummary}/tasks.md
+- .nanocoder/plans/${planSummary}/plan.md
+
+**BLOCKED IN PLAN MODE:**
 - string_replace - Direct editing disabled
 - execute_bash - Command execution disabled
 - write_file to non-plan paths - Blocked
 
-If a tool is blocked, use read-only alternatives and document your findings in the plan file.`;
+If a tool is blocked, use read-only alternatives and document your findings in the plan documents.`;
 }

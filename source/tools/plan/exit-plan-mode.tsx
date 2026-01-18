@@ -11,8 +11,8 @@ import ToolMessage from '@/components/tool-message';
 import {
 	getCurrentMode,
 	getPlanFilePath,
-	getPlanId,
 	getPlanPhase,
+	getPlanSummary,
 	resetPlanModeState,
 	setCurrentMode,
 } from '@/context/mode-context';
@@ -56,17 +56,17 @@ const executeExitPlanMode = async (args: {
 		);
 	}
 
-	const planId = getPlanId();
+	const planSummary = getPlanSummary();
 	const planPhase = getPlanPhase();
 	const planFilePath = getPlanFilePath();
 
 	logger.info('[EXIT_PLAN_MODE] Plan state loaded', {
-		planId,
+		planSummary,
 		planPhase,
 		planFilePath,
 	});
 
-	if (!planId || !planFilePath) {
+	if (!planSummary || !planFilePath) {
 		throw new Error('Plan mode state is corrupted. No active plan found.');
 	}
 
@@ -74,7 +74,10 @@ const executeExitPlanMode = async (args: {
 		// Read the plan file to display to user
 		const cwd = process.cwd();
 		const planManager = createPlanManager(cwd);
-		const {content, exists} = await planManager.readPlan(planId);
+		const {content, exists} = await planManager.readDocument(
+			planSummary,
+			'plan',
+		);
 
 		if (!exists) {
 			throw new Error(`Plan file not found: ${planFilePath}`);
@@ -148,7 +151,7 @@ const executeExitPlanMode = async (args: {
 				const phaseLabel = PLAN_PHASE_LABELS[planPhase];
 
 				let output = `✓ Plan Complete\n\n`;
-				output += `Plan ID: ${planId}\n`;
+				output += `Plan ID: ${planSummary}\n`;
 				output += `Final Phase: ${phaseLabel}\n`;
 				output += `Plan File: ${planFilePath}\n\n`;
 				output += `Plan saved. Please use the mode selection prompt to choose how to proceed.\n`;
@@ -180,7 +183,7 @@ const executeExitPlanMode = async (args: {
 		const nextModeLabel = DEVELOPMENT_MODE_LABELS[nextMode];
 
 		let output = `✓ Exited Plan Mode\n\n`;
-		output += `Plan ID: ${planId}\n`;
+		output += `Plan ID: ${planSummary}\n`;
 		output += `Final Phase: ${phaseLabel}\n`;
 		output += `Plan File: ${planFilePath}\n`;
 		output += `Next Mode: ${nextModeLabel}\n\n`;

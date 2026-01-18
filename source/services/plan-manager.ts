@@ -1,16 +1,24 @@
 /**
  * Plan Manager Service
  *
- * Manages plan file CRUD operations for Plan Mode.
- * Plans are stored as markdown files in `.nanocoder/plans/` directory.
+ * Manages plan directory CRUD operations for Plan Mode.
+ * Plans are stored as directories with markdown documents in `.nanocoder/plans/` directory.
  *
- * Plan IDs follow the format: {adjective}-{verb}-{noun}
- * Example: focused-creating-feature
+ * Plan summaries follow kebab-case format (e.g., "add-api-authentication")
+ * The directory contains: proposal.md, design.md, spec.md, tasks.md, plan.md
  */
 
-import {existsSync, promises as fs} from 'node:fs';
+import {existsSync, promises as fs, statSync} from 'node:fs';
 import * as path from 'node:path';
-import {generateUniqueSlug, isValidSlug} from '@/utils/plan/slug-generator.js';
+import {
+	getDocumentFileName,
+	isPlanDocument,
+} from '@/services/template-service.js';
+import type {DocumentType} from '@/types/templates';
+import {
+	generateBriefSummary,
+	isValidSummary,
+} from '@/utils/plan/summary-generator.js';
 
 /**
  * Result type for directory validation
@@ -22,33 +30,59 @@ interface DirectoryValidationResult {
 
 /**
  * Result type for plan read operations
+ * Returns all document paths and whether the plan directory exists
  */
 interface PlanReadResult {
-	content: string;
 	exists: boolean;
-	planPath: string;
+	planSummary: string;
+	planDirectoryPath: string;
+	proposalPath: string | null;
+	designPath: string | null;
+	specPath: string | null;
+	tasksPath: string | null;
+	planFilePath: string | null;
 }
 
 /**
  * Result type for plan creation
+ * Returns the plan summary and all document paths
  */
 interface PlanCreateResult {
-	planId: string;
-	planPath: string;
+	planSummary: string;
+	planDirectoryPath: string;
+	proposalPath: string;
+	planFilePath: string;
+}
+
+/**
+ * Result type for document creation
+ */
+interface DocumentCreateResult {
+	documentPath: string;
+}
+
+/**
+ * Result type for document read
+ */
+interface DocumentReadResult {
+	content: string;
+	exists: boolean;
+	documentPath: string;
 }
 
 /**
  * Result type for plan listing
  */
 interface PlanListEntry {
-	planId: string;
-	planPath: string;
+	planSummary: string;
+	planDirectoryPath: string;
+	isLegacy: boolean; // true = old single-file format, false = new directory format
 }
 
 /**
  * Plan Manager Service
  *
- * Provides centralized CRUD operations for plan files.
+ * Provides centralized CRUD operations for plan directories.
  * Follows the pattern of CheckpointManager for consistency.
  */
 export class PlanManager {
@@ -81,124 +115,335 @@ export class PlanManager {
 	}
 
 	/**
-	 * Get the full path for a plan file
+	 * Get the plan directory path for a given summary
 	 */
-	private getPlanPath(planId: string): string {
-		return path.join(this.getPlansDir(), `${planId}.md`);
+	getPlanDirectoryPath(planSummary: string): string {
+		return path.join(this.getPlansDir(), planSummary);
 	}
 
 	/**
-	 * Validate that a plan ID is in correct slug format
+	 * Get the path for a specific document
 	 */
-	private validatePlanId(planId: string): void {
-		if (!isValidSlug(planId)) {
+	getDocumentPath(planSummary: string, documentType: DocumentType): string {
+		const planDir = this.getPlanDirectoryPath(planSummary);
+		const fileName = getDocumentFileName(documentType);
+		return path.join(planDir, fileName);
+	}
+
+	/**
+	 * Get all document paths for a plan
+	 */
+	getAllDocumentPaths(planSummary: string): {
+		proposalPath: string;
+		designPath: string;
+		specPath: string;
+		tasksPath: string;
+		planFilePath: string;
+	} {
+		return {
+			proposalPath: this.getDocumentPath(planSummary, 'proposal'),
+			designPath: this.getDocumentPath(planSummary, 'design'),
+			specPath: this.getDocumentPath(planSummary, 'spec'),
+			tasksPath: this.getDocumentPath(planSummary, 'tasks'),
+			planFilePath: this.getDocumentPath(planSummary, 'plan'),
+		};
+	}
+
+	/**
+	 * Validate that a plan summary is in correct kebab-case format
+	 */
+	private validatePlanSummary(planSummary: string): void {
+		if (!isValidSummary(planSummary)) {
 			throw new Error(
-				`Invalid plan ID format: "${planId}". Plan IDs must follow the format {adjective}-{verb}-{noun}`,
+				`Invalid plan summary format: "${planSummary}". Plan summaries must be kebab-case (e.g., "add-api-authentication")`,
 			);
 		}
 	}
 
 	/**
-	 * Create a new plan file with a unique slug identifier
+	 * Create a new plan directory with initial proposal.md
 	 *
-	 * @returns Object containing the generated plan ID and file path
+	 * @param userRequest - Optional user's request/query to generate meaningful summary
+	 * @param llmClient - Optional LLM client for intent-based summary generation
+	 * @returns Object containing the plan summary and document paths
 	 */
-	async createPlan(): Promise<PlanCreateResult> {
+	async createPlan(
+		userRequest?: string,
+		llmClient?: Parameters<typeof generateBriefSummary>[1],
+	): Promise<PlanCreateResult> {
 		// Ensure plans directory exists
 		await this.ensurePlansDir();
 
-		// Get existing plan IDs to ensure uniqueness
+		// Get existing plan summaries to ensure uniqueness
 		const existingPlans = await this.listPlans();
-		const existingSlugs = new Set(existingPlans.map(p => p.planId));
+		const existingSummaries = new Set(
+			existingPlans
+				.map(p => p.planSummary)
+				.filter(s => !s.includes('/')), // Filter out legacy file paths
+		);
 
-		// Generate unique slug
-		const planId = generateUniqueSlug(existingSlugs);
+		// Generate unique summary from user request using LLM intent classification or semantic extraction
+		const planSummary = await generateBriefSummary(
+			userRequest || 'new-plan',
+			llmClient,
+		);
+		const uniqueSummary = await this.ensureUniqueSummary(
+			planSummary,
+			existingSummaries,
+		);
 
-		// Create empty plan file with YAML frontmatter
-		const planPath = this.getPlanPath(planId);
-		const initialContent = this.generateInitialPlanContent(planId);
+		// Create plan directory
+		const planDirectoryPath = this.getPlanDirectoryPath(uniqueSummary);
+		await fs.mkdir(planDirectoryPath, {recursive: true});
 
-		await fs.writeFile(planPath, initialContent, 'utf8');
+		// Get all document paths
+		const paths = this.getAllDocumentPaths(uniqueSummary);
 
-		return {planId, planPath};
+		// Create initial proposal.md with template
+		const initialProposalContent =
+			this.generateInitialProposalContent(uniqueSummary);
+		await fs.writeFile(paths.proposalPath, initialProposalContent, 'utf8');
+
+		// Create initial plan.md with template
+		const initialPlanContent = this.generateInitialPlanContent(uniqueSummary);
+		await fs.writeFile(paths.planFilePath, initialPlanContent, 'utf8');
+
+		return {
+			planSummary: uniqueSummary,
+			planDirectoryPath,
+			proposalPath: paths.proposalPath,
+			planFilePath: paths.planFilePath,
+		};
 	}
 
 	/**
-	 * Generate initial plan file content with YAML frontmatter
+	 * Ensure summary is unique by adding numeric suffix if needed
 	 */
-	private generateInitialPlanContent(planId: string): string {
+	private async ensureUniqueSummary(
+		baseSummary: string,
+		existingSummaries: Set<string>,
+	): Promise<string> {
+		let summary = baseSummary;
+		let counter = 2;
+
+		while (existingSummaries.has(summary) && counter < 100) {
+			summary = `${baseSummary}-${counter}`;
+			counter++;
+		}
+
+		return summary;
+	}
+
+	/**
+	 * Generate initial proposal.md content with template
+	 */
+	private generateInitialProposalContent(planSummary: string): string {
 		const timestamp = new Date().toISOString();
 		return `---
-planId: ${planId}
+summary: ${planSummary}
 created: ${timestamp}
 phase: understanding
 ---
 
-# Plan: ${planId}
+# ${planSummary}
 
-## Understanding Phase
+## Why
 
-*Add your understanding phase notes here...*
+*Describe why this change is needed (50-1000 characters)...*
+
+## What Changes
+
+- *List the changes being made...*
+
+## Impact
+
+### Affected Specs
+
+- (None)
+
+### Affected Code
+
+- (None)
 `;
 	}
 
 	/**
-	 * Read a plan file's content
-	 *
-	 * @param planId - The plan identifier
-	 * @returns Object containing content, existence flag, and path
+	 * Generate initial plan.md content with template
 	 */
-	async readPlan(planId: string): Promise<PlanReadResult> {
-		this.validatePlanId(planId);
+	private generateInitialPlanContent(planSummary: string): string {
+		const timestamp = new Date().toISOString();
+		return `---
+summary: ${planSummary}
+created: ${timestamp}
+phase: understanding
+---
 
-		const planPath = this.getPlanPath(planId);
+# ${planSummary}
 
-		if (!existsSync(planPath)) {
-			return {content: '', exists: false, planPath};
-		}
+## Overview
 
-		const content = await fs.readFile(planPath, 'utf8');
-		return {content, exists: true, planPath};
+*Overview will be populated after proposal is created...*
+
+## Tasks
+
+*Tasks will be populated during Final Plan phase...*
+`;
 	}
 
 	/**
-	 * Write content to a plan file
+	 * Read plan information (directory exists and all document paths)
 	 *
-	 * @param planId - The plan identifier
-	 * @param content - The markdown content to write
+	 * @param planSummary - The plan summary identifier
+	 * @returns Object with existence flag and all document paths
 	 */
-	async writePlan(planId: string, content: string): Promise<void> {
-		this.validatePlanId(planId);
+	async readPlan(planSummary: string): Promise<PlanReadResult> {
+		this.validatePlanSummary(planSummary);
 
-		const planPath = this.getPlanPath(planId);
+		const planDirectoryPath = this.getPlanDirectoryPath(planSummary);
+		const paths = this.getAllDocumentPaths(planSummary);
+
+		const exists = existsSync(planDirectoryPath);
+
+		return {
+			exists,
+			planSummary,
+			planDirectoryPath,
+			proposalPath:
+				exists && existsSync(paths.proposalPath) ? paths.proposalPath : null,
+			designPath:
+				exists && existsSync(paths.designPath) ? paths.designPath : null,
+			specPath: exists && existsSync(paths.specPath) ? paths.specPath : null,
+			tasksPath: exists && existsSync(paths.tasksPath) ? paths.tasksPath : null,
+			planFilePath:
+				exists && existsSync(paths.planFilePath) ? paths.planFilePath : null,
+		};
+	}
+
+	/**
+	 * Create or update a document in the plan directory
+	 *
+	 * @param planSummary - The plan summary identifier
+	 * @param documentType - The type of document to create
+	 * @param content - The markdown content to write
+	 * @returns Object with the document path
+	 */
+	async createDocument(
+		planSummary: string,
+		documentType: DocumentType,
+		content: string,
+	): Promise<DocumentCreateResult> {
+		this.validatePlanSummary(planSummary);
+
+		const documentPath = this.getDocumentPath(planSummary, documentType);
+
+		// Ensure plan directory exists
+		const planDirectoryPath = this.getPlanDirectoryPath(planSummary);
+		if (!existsSync(planDirectoryPath)) {
+			throw new Error(`Plan directory does not exist: "${planSummary}"`);
+		}
 
 		// Atomic write: write to temp file, then rename
-		const tempPath = `${planPath}.tmp`;
+		const tempPath = `${documentPath}.tmp`;
 		await fs.writeFile(tempPath, content, 'utf8');
-		await fs.rename(tempPath, planPath);
+		await fs.rename(tempPath, documentPath);
+
+		return {documentPath};
 	}
 
 	/**
-	 * Delete a plan file
+	 * Read a specific document from the plan directory
 	 *
-	 * @param planId - The plan identifier
+	 * @param planSummary - The plan summary identifier
+	 * @param documentType - The type of document to read
+	 * @returns Object with content, existence flag, and path
 	 */
-	async deletePlan(planId: string): Promise<void> {
-		this.validatePlanId(planId);
+	async readDocument(
+		planSummary: string,
+		documentType: DocumentType,
+	): Promise<DocumentReadResult> {
+		this.validatePlanSummary(planSummary);
 
-		const planPath = this.getPlanPath(planId);
+		const documentPath = this.getDocumentPath(planSummary, documentType);
 
-		if (!existsSync(planPath)) {
-			throw new Error(`Plan not found: "${planId}"`);
+		if (!existsSync(documentPath)) {
+			return {content: '', exists: false, documentPath};
 		}
 
-		await fs.unlink(planPath);
+		const content = await fs.readFile(documentPath, 'utf8');
+		return {content, exists: true, documentPath};
+	}
+
+	/**
+	 * List all documents in a plan directory
+	 *
+	 * @param planSummary - The plan summary identifier
+	 * @returns Array of document types that exist
+	 */
+	async listDocuments(planSummary: string): Promise<DocumentType[]> {
+		this.validatePlanSummary(planSummary);
+
+		const planDirectoryPath = this.getPlanDirectoryPath(planSummary);
+
+		if (!existsSync(planDirectoryPath)) {
+			return [];
+		}
+
+		try {
+			const entries = await fs.readdir(planDirectoryPath);
+			const documents: DocumentType[] = [];
+
+			for (const entry of entries) {
+				if (entry.endsWith('.md')) {
+					const docType = getDocumentTypeFromFileName(entry);
+					if (docType) {
+						documents.push(docType);
+					}
+				}
+			}
+
+			return documents;
+		} catch {
+			return [];
+		}
+	}
+
+	/**
+	 * Delete a plan directory and all its contents
+	 *
+	 * @param planSummary - The plan summary identifier
+	 */
+	async deletePlan(planSummary: string): Promise<void> {
+		this.validatePlanSummary(planSummary);
+
+		const planDirectoryPath = this.getPlanDirectoryPath(planSummary);
+
+		if (!existsSync(planDirectoryPath)) {
+			throw new Error(`Plan not found: "${planSummary}"`);
+		}
+
+		await fs.rm(planDirectoryPath, {recursive: true, force: true});
+	}
+
+	/**
+	 * Write content to a document (alias for createDocument for consistency)
+	 *
+	 * @param planSummary - The plan summary identifier
+	 * @param documentType - The type of document to write
+	 * @param content - The markdown content to write
+	 */
+	async writeDocument(
+		planSummary: string,
+		documentType: DocumentType,
+		content: string,
+	): Promise<void> {
+		await this.createDocument(planSummary, documentType, content);
 	}
 
 	/**
 	 * List all available plans in the workspace
+	 * Includes both new directory format and legacy single-file format
 	 *
-	 * @returns Array of plan entries with planId and path
+	 * @returns Array of plan entries with summary and path
 	 */
 	async listPlans(): Promise<PlanListEntry[]> {
 		const plansDir = this.getPlansDir();
@@ -209,23 +454,34 @@ phase: understanding
 		}
 
 		try {
-			const entries = await fs.readdir(plansDir);
-
-			// Filter for .md files and extract plan IDs
+			const entries = await fs.readdir(plansDir, {withFileTypes: true});
 			const plans: PlanListEntry[] = [];
-			for (const entry of entries) {
-				if (entry.endsWith('.md')) {
-					const planId = entry.slice(0, -3); // Remove .md extension
-					const planPath = path.join(plansDir, entry);
 
-					// Verify it's a valid plan ID format
-					if (isValidSlug(planId)) {
-						// Verify the file actually exists and is a file
-						const stat = await fs.stat(planPath);
-						if (stat.isFile()) {
-							plans.push({planId, planPath});
-						}
+			for (const entry of entries) {
+				if (entry.isDirectory()) {
+					// New format: directory with documents
+					const planSummary = entry.name;
+					const planDirectoryPath = path.join(plansDir, planSummary);
+
+					// Verify it's a valid plan summary format
+					if (isValidSummary(planSummary)) {
+						plans.push({
+							planSummary,
+							planDirectoryPath,
+							isLegacy: false,
+						});
 					}
+				} else if (entry.isFile() && entry.name.endsWith('.md')) {
+					// Legacy format: single .md file
+					const planSummary = entry.name.slice(0, -3); // Remove .md extension
+					const planDirectoryPath = path.join(plansDir, entry.name);
+
+					// Include legacy plans for backward compatibility
+					plans.push({
+						planSummary,
+						planDirectoryPath,
+						isLegacy: true,
+					});
 				}
 			}
 
@@ -237,10 +493,10 @@ phase: understanding
 	}
 
 	/**
-	 * Check if a given path is a plan file path
+	 * Check if a given path is within a plan directory or is a plan document
 	 *
 	 * @param targetPath - The path to check
-	 * @returns true if the path is within the plans directory and has .md extension
+	 * @returns true if the path is within a plan directory or is a plan document
 	 */
 	isPlanFilePath(targetPath: string): boolean {
 		// Resolve the target path to an absolute path
@@ -255,12 +511,24 @@ phase: understanding
 			return false;
 		}
 
-		// Check if it has .md extension
-		if (!absoluteTarget.endsWith('.md')) {
-			return false;
+		// Check if it's a plan document file
+		if (isPlanDocument(targetPath)) {
+			return true;
 		}
 
-		return true;
+		// Check if the path is a plan directory itself
+		try {
+			const stat = statSync(absoluteTarget);
+			if (stat.isDirectory()) {
+				// Check if it's a valid plan summary (kebab-case)
+				const dirName = path.basename(absoluteTarget);
+				return isValidSummary(dirName);
+			}
+		} catch {
+			// If stat fails, return false
+		}
+
+		return false;
 	}
 
 	/**
@@ -306,6 +574,27 @@ phase: understanding
 		}
 
 		return {valid: true};
+	}
+}
+
+/**
+ * Helper to get document type from filename
+ */
+function getDocumentTypeFromFileName(fileName: string): DocumentType | null {
+	const baseName = fileName.replace(/\.md$/, '');
+	switch (baseName) {
+		case 'proposal':
+			return 'proposal';
+		case 'design':
+			return 'design';
+		case 'spec':
+			return 'spec';
+		case 'tasks':
+			return 'tasks';
+		case 'plan':
+			return 'plan';
+		default:
+			return null;
 	}
 }
 

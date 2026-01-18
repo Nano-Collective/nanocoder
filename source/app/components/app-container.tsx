@@ -24,7 +24,7 @@ export interface AppContainerProps {
 	vscodeRequestedPort?: number;
 	planModeActive?: boolean;
 	planPhase?: PlanPhase;
-	planId?: string | null;
+	planSummary?: string;
 }
 
 /**
@@ -46,7 +46,7 @@ export function createStaticComponents({
 	vscodeRequestedPort,
 	planModeActive,
 	planPhase,
-	planId,
+	planSummary,
 }: AppContainerProps): React.ReactNode[] {
 	const components: React.ReactNode[] = [];
 
@@ -70,7 +70,7 @@ export function createStaticComponents({
 			vscodeRequestedPort={vscodeRequestedPort}
 			planModeActive={planModeActive}
 			planPhase={planPhase}
-			planId={planId}
+			planSummary={planSummary}
 		/>,
 	);
 

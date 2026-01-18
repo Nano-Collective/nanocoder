@@ -4,6 +4,7 @@ import AssistantMessage from '@/components/assistant-message';
 import {ErrorMessage} from '@/components/message-box';
 import UserMessage from '@/components/user-message';
 import {appConfig} from '@/config/index';
+import {getCurrentMode} from '@/context/mode-context';
 import {parseToolCalls} from '@/tool-calling/index';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {LLMClient, Message, ToolCall, ToolResult} from '@/types/core';
@@ -183,7 +184,15 @@ export const processAssistantResponse = async (
 			// Import here to avoid circular dependency
 			// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 			const {getPlanPhase} = await import('@/context/mode-context');
-			setPlanPhase(getPlanPhase());
+			const newPhase = getPlanPhase();
+			setPlanPhase(newPhase);
+
+			// When reaching exit phase, complete the conversation
+			// The exit_plan_mode tool will handle the final user interaction
+			if (newPhase === 'exit') {
+				onConversationComplete?.();
+				return;
+			}
 		}
 	}
 
@@ -400,12 +409,33 @@ export const processAssistantResponse = async (
 					setMessages(updatedMessagesWithTools);
 
 					// Continue the main conversation loop with tool results as context
+					// In plan mode, this ensures the LLM continues its analysis
 					await processAssistantResponse({
 						...params,
 						messages: updatedMessagesWithTools,
 					});
 					return;
 				}
+
+				// Edge case: Tools were executed but returned no results
+				// This shouldn't happen normally, but if it does, continue anyway
+				// Add a continuation prompt to keep the conversation going
+				const continuationPrompt: Message = {
+					role: 'user',
+					content:
+						'Please continue with your analysis based on the tools you just executed.',
+				};
+
+				const continuationBuilder = new MessageBuilder(updatedMessages);
+				continuationBuilder.addMessage(continuationPrompt);
+				const updatedMessagesWithContinuation = continuationBuilder.build();
+				setMessages(updatedMessagesWithContinuation);
+
+				await processAssistantResponse({
+					...params,
+					messages: updatedMessagesWithContinuation,
+				});
+				return;
 			}
 
 			// Start confirmation flow only for tools that need it
@@ -497,7 +527,13 @@ export const processAssistantResponse = async (
 		}
 
 		if (validToolCalls.length === 0 && cleanedContent.trim()) {
-			onConversationComplete?.();
+			// In plan mode, don't auto-complete - wait for explicit exit signal
+			// Plan mode is a multi-phase autonomous workflow that should continue
+			// until the LLM explicitly calls exit_plan_mode or reaches exit phase
+			const currentMode = getCurrentMode();
+			if (currentMode !== 'plan') {
+				onConversationComplete?.();
+			}
 		}
 	}
 };

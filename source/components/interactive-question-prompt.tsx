@@ -213,7 +213,27 @@ function InteractiveQuestionPrompt({
 		})),
 	);
 
+	// Sync answers when questions change (e.g., loaded asynchronously)
+	useEffect(() => {
+		setAnswers(
+			questions.map((q, i) => ({
+				questionIndex: i,
+				selectedOptions: q.multiSelect ? [] : [0],
+			})),
+		);
+		setCurrentQuestionIndex(0);
+	}, [questions]);
+
 	const currentAnswer = answers[currentQuestionIndex];
+
+	// Guard: if currentAnswer is undefined (empty questions or index out of bounds), don't render
+	if (!currentAnswer || !questions[currentQuestionIndex]) {
+		return (
+			<Box flexDirection="column" marginTop={1} paddingX={1}>
+				<Text color="yellow">⚠ No questions to display</Text>
+			</Box>
+		);
+	}
 
 	const handleSelectOption = useCallback(
 		(optionIndex: number) => {
