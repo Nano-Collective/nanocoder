@@ -12,10 +12,12 @@
  * - "Refactor state management to use hooks" → "refactor-state-management-hooks"
  */
 
+import type {LLMClient} from '@/types/core';
+
 /**
  * Common verbs in software development requests
  */
-const ACTION_VERBS = [
+const ACTION_VERBS = new Set([
 	'add',
 	'update',
 	'remove',
@@ -50,7 +52,7 @@ const ACTION_VERBS = [
 	'audit',
 	'check',
 	'inspect',
-] as const;
+]);
 
 /**
  * Words to filter out (stop words)
@@ -121,7 +123,7 @@ const generatedSummaries = new Set<string>();
  */
 export async function generateBriefSummary(
 	userRequest: string,
-	llmClient?: any | null,
+	llmClient?: LLMClient | null,
 ): Promise<string> {
 	let summary: string;
 
@@ -154,7 +156,7 @@ export async function generateBriefSummary(
  */
 async function generateLLMIntentSummary(
 	userRequest: string,
-	llmClient: any,
+	llmClient: LLMClient,
 ): Promise<string> {
 	const prompt = `You are a plan naming assistant. Generate a meaningful kebab-case directory name (max 4 parts) that captures the core intent of the user's request.
 
@@ -228,7 +230,7 @@ function generateSemanticExtraction(userRequest: string): string {
 		.filter(w => w.length > 0 && !STOP_WORDS.has(w));
 
 	// Find action verb
-	let verb = words.find(w => ACTION_VERBS.includes(w as any));
+	let verb = words.find(w => ACTION_VERBS.has(w));
 	if (!verb) {
 		// Try to find any verb that looks like an action
 		verb = words.find(w => w.endsWith('e') || w.endsWith('ing')) || 'update';
@@ -358,7 +360,7 @@ export function clearSummaryCache(): void {
 export function extractVerb(summary: string): string | null {
 	const parts = summary.split('-');
 	if (parts.length > 0) {
-		return ACTION_VERBS.includes(parts[0] as any) ? parts[0] : null;
+		return ACTION_VERBS.has(parts[0]) ? parts[0] : null;
 	}
 	return null;
 }

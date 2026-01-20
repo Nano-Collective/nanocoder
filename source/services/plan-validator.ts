@@ -147,6 +147,7 @@ export class PlanValidator {
 		// Check each required section
 		for (const section of requiredSections) {
 			// Look for section header (## Section Name)
+			// nosemgrep: section is from controlled getRequiredSections() return values, not user input
 			const sectionPattern = new RegExp(`^##\\s+${section}\\s*$`, 'm');
 			if (!sectionPattern.test(content)) {
 				issues.push({

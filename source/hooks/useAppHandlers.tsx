@@ -10,6 +10,7 @@ import {
 	WarningMessage,
 } from '@/components/message-box';
 import Status from '@/components/status';
+import {getAppConfig} from '@/config/index';
 import {
 	getCurrentMode,
 	getPlanSummary,
@@ -20,7 +21,6 @@ import {
 	setPlanSummary as setPlanSummaryContext,
 	setProposalPath as setProposalPathContext,
 } from '@/context/mode-context';
-import {getAppConfig} from '@/config/index';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getModelContextLimit} from '@/models/index';
