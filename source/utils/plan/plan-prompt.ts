@@ -483,24 +483,31 @@ phase: final
 - Once you have all the information needed, call \`exit-plan-mode\` immediately
 
 **CRITICAL - Required Action:**
-Once both \`tasks.md\` and \`plan.md\` are complete and validated, you MUST immediately call the \`exit-plan-mode\` tool.
+Once both \`tasks.md\` and \`plan.md\` are complete and validated, you MUST immediately call the \`exit-plan-mode\` **TOOL**.
+
+**IMPORTANT - You MUST make a TOOL CALL:**
+- Do NOT just say "I'm calling exit-plan-mode" or similar text
+- You MUST invoke the actual \`exit-plan-mode\` tool in your tool_calls section
+- The tool call format is: \`{"name": "exit-plan-mode", "arguments": {}}\`
+- This will trigger an interactive mode selection prompt for the user
 
 **Do NOT:**
 - Ask "Would you like me to proceed?" or similar text questions
 - Ask for textual approval before calling the tool
 - Present options as text - the tool will handle presenting options
-- Pass any arguments to exit-plan-mode - call it WITHOUT parameters
+- Pass any arguments to exit-plan-mode - call it with empty object \`{}\`
+- Just SAY you're calling the tool - actually CALL it as a tool
 
 **Do:**
-- Call \`exit-plan-mode\` immediately after writing and validating the final documents
-- Call it WITHOUT any arguments or parameters
-- Let the tool handle the user interaction and mode selection
+- Call the \`exit-plan-mode\` TOOL immediately after writing and validating the final documents
+- Call it with empty object \`{}\` as arguments
+- STOP - do not add any text after calling the tool
 
 **Example completion sequence:**
 1. Write \`tasks.md\` to ${planPath}/tasks.md
 2. Write \`plan.md\` to ${planPath}/plan.md
 3. Wait for validation to complete (automatic)
-4. Call \`exit-plan-mode\` with NO arguments
+4. Make a TOOL CALL: \`exit-plan-mode\` with arguments \`{}\`
 5. STOP - do not add any text after calling the tool
 
 The exit-plan-mode tool will automatically:
@@ -515,7 +522,12 @@ The exit-plan-mode tool will automatically:
 
 **Plan Complete!**
 
-All documents have been created and validated. Your ONLY action here is to call the \`exit-plan-mode\` tool.
+All documents have been created and validated. Your ONLY action here is to call the \`exit-plan-mode\` **TOOL**.
+
+**You MUST make an actual TOOL CALL:**
+- Call the tool: \`{"name": "exit-plan-mode", "arguments": {}}\`
+- Do NOT just write text saying you're calling it
+- Do NOT add any other text or explanation
 
 The \`exit-plan-mode\` tool will:
 1. Present an interactive mode selection prompt with keyboard navigation
@@ -527,20 +539,12 @@ The \`exit-plan-mode\` tool will:
 - Present the plan content as text in your response
 - Ask "Would you like me to proceed?" or similar questions
 - Present approval options as text - the tool handles this
-- Pass any arguments to exit-plan-mode - call it WITHOUT parameters
+- Just SAY you're calling the tool - actually CALL it
 
 **Do:**
-- Call \`exit-plan-mode\` with NO arguments immediately
+- Call \`exit-plan-mode\` as a TOOL with empty object \`{}\` immediately
 - STOP - do not add any text after calling the tool
 - Let the tool handle everything else
-
-**Tool Usage:**
-Call \`exit-plan-mode\` with NO arguments (just the tool name, no parameters).
-
-**After Plan Mode:**
-- If approved in normal mode: Each tool will require confirmation
-- If approved in auto-accept mode: Tools will execute automatically
-- The plan documents remain for reference during implementation
 `;
 	}
 }

@@ -186,13 +186,6 @@ export const processAssistantResponse = async (
 			const {getPlanPhase} = await import('@/context/mode-context');
 			const newPhase = getPlanPhase();
 			setPlanPhase(newPhase);
-
-			// When reaching exit phase, complete the conversation
-			// The exit_plan_mode tool will handle the final user interaction
-			if (newPhase === 'exit') {
-				onConversationComplete?.();
-				return;
-			}
 		}
 	}
 
@@ -527,13 +520,59 @@ export const processAssistantResponse = async (
 		}
 
 		if (validToolCalls.length === 0 && cleanedContent.trim()) {
-			// In plan mode, don't auto-complete - wait for explicit exit signal
-			// Plan mode is a multi-phase autonomous workflow that should continue
-			// until the LLM explicitly calls exit_plan_mode or reaches exit phase
 			const currentMode = getCurrentMode();
-			if (currentMode !== 'plan') {
-				onConversationComplete?.();
+			// In plan mode, don't auto-complete - continue the workflow
+			// Plan mode is a multi-phase autonomous workflow that should continue
+			// through all phases until exit_plan_mode is called
+			if (currentMode === 'plan') {
+				// Import here to avoid circular dependency
+				// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+				const {getPlanPhase} = await import('@/context/mode-context');
+				const currentPhase = getPlanPhase();
+
+				// Create phase-aware continuation prompt
+				let phasePrompt = '';
+				switch (currentPhase) {
+					case 'understanding':
+						phasePrompt =
+							'Please continue by creating the proposal.md document with your findings, then move to the Design phase.';
+						break;
+					case 'design':
+						phasePrompt =
+							'Please continue by creating the design.md document with your technical decisions, then move to the Review phase.';
+						break;
+					case 'review':
+						phasePrompt =
+							'Please continue by creating the spec.md document with requirements and Gherkin scenarios, then move to the Final Plan phase.';
+						break;
+					case 'final':
+						phasePrompt =
+							'Please continue by creating the tasks.md and plan.md documents, then call the exit-plan-mode tool.';
+						break;
+					default:
+						phasePrompt =
+							'Please continue with the next phase of the plan workflow. Create the required documents and move forward.';
+				}
+
+				// Add a continuation prompt to move to the next phase
+				const phaseBuilder = new MessageBuilder(updatedMessages);
+				phaseBuilder.addMessage({
+					role: 'user',
+					content: phasePrompt,
+				});
+				const updatedMessagesWithPhasePrompt = phaseBuilder.build();
+				setMessages(updatedMessagesWithPhasePrompt);
+
+				// Continue the conversation loop
+				await processAssistantResponse({
+					...params,
+					messages: updatedMessagesWithPhasePrompt,
+				});
+				return;
 			}
+
+			// In other modes, complete the conversation
+			onConversationComplete?.();
 		}
 	}
 };
