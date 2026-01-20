@@ -107,9 +107,160 @@ While the `..` check exists, the `path.resolve()` call could normalize paths lik
 
 ---
 
+### 6. Bug: Tool Calls Continue During Question Mode (Blocking Issue)
+
+**Severity: High**
+**Reported by:** Maintainer
+**File:** `source/tools/interactive/ask-user-question.tsx`
+
+When the `ask_user_question` tool is called, tool calls continue executing in the background. The user cannot see the questions because planning stages progress without waiting for answers.
+
+**Expected behavior:** When questions are displayed, the LLM should BLOCK and wait for the user to answer before continuing.
+
+**Actual behavior:** The tool returns immediately with a message, and the LLM continues executing other tool calls. Planning proceeds without user input.
+
+**Root cause:** The `executeAskUserQuestion` function calls `triggerQuestionPrompt()` but returns immediately without waiting for the callbacks:
+
+```typescript
+const questionTriggered = triggerQuestionPrompt(
+  questions,
+  (answers) => { /* callback */ },
+  () => { /* cancel callback */ },
+);
+// Returns immediately without waiting!
+return `I need to ask you ${questions.length} question(s)...`;
+```
+
+**Recommendation:** The tool must return a Promise that only resolves when the user submits their answers or cancels. This requires architectural changes to make the tool execution await user input.
+
+---
+
+### 7. Bug: Multi-Select Questions Are Broken (Blocking Issue)
+
+**Severity: High**
+**Reported by:** Maintainer
+**File:** `source/components/interactive-question-prompt.tsx`
+
+Multi-select questions don't allow progressing past the first option. Pressing Enter doesn't advance to the next question. User got stuck at question 3/4.
+
+**Root cause:** In the parent component's `useInput` handler:
+
+```typescript
+} else if (key.return && !questions[currentQuestionIndex].multiSelect) {
+  // Enter ONLY works for single-select!
+  handleNextQuestion();
+}
+```
+
+Enter key handling is explicitly disabled for multi-select questions. There's a hint that says "Press Enter to continue" but the code doesn't handle it.
+
+**Recommendation:** Add Enter key handling for multi-select questions to call `handleNextQuestion()`.
+
+---
+
+### 8. Bug: "Other" Option Cannot Be Selected or Typed
+
+**Severity: Medium-High**
+**Reported by:** Maintainer
+**File:** `source/components/interactive-question-prompt.tsx`
+
+Users cannot select and type in the "Other" option in question responses.
+
+**Likely cause:** The "Other" option rendering code appears incomplete (comment shows `{/* "Other" option for custom input */}` but the implementation seems partial). The custom input mode toggle (`setIsCustomInputMode(true)`) happens in `SingleQuestion` but interaction between the nested `useInput` handlers may be conflicting.
+
+**Recommendation:** Review the "Other" option implementation and ensure the custom input mode works correctly with text input.
+
+---
+
+### 9. Bug: "Formulating Plan" Has No Bottom Margin
+
+**Severity: Low**
+**Reported by:** Maintainer
+**File:** `source/components/plan-mode-indicator.tsx`
+
+The "⏳ Formulating plan..." message has no margin on the bottom, so the user's message appears right up against it.
+
+**Root cause:** `PlanModeIndicator` has `marginTop={1}` but no `marginBottom`:
+
+```typescript
+return (
+  <Box marginTop={1}>  {/* No marginBottom */}
+    <Text color={successColor}>
+```
+
+**Recommendation:** Add `marginBottom={1}` to the Box in PlanModeIndicator.
+
+---
+
+### 10. Bug: User Message Appears After "Formulating Plan" Delay
+
+**Severity: Medium**
+**Reported by:** Maintainer
+
+There's a noticeable delay between "Formulating Plan" appearing and the user's message appearing. The user's message should appear first, then the status indicator.
+
+**Expected behavior:** User submits message → message appears immediately → then "Formulating Plan" status shows.
+
+**Actual behavior:** User submits message → delay → "Formulating Plan" appears → delay → user message appears.
+
+**Recommendation:** Review message rendering order in App.tsx/conversation-loop.tsx to ensure user messages render before status updates.
+
+---
+
+### 11. Bug: Escape Cancels Plan and Creates New Cycle
+
+**Severity: Medium**
+**Reported by:** Maintainer
+
+When pressing Escape to cancel the plan, it resets everything and creates a whole new plan cycle for the same message, even when the user wanted to continue with the existing plan.
+
+**Expected behavior:** Escape should either:
+- Cancel and return to normal mode (keeping context), OR
+- Ask user what they want to do
+
+**Actual behavior:** Escape cancels and restarts planning from scratch with a new plan.
+
+**Recommendation:** Add confirmation before canceling, or provide option to resume existing plan.
+
+---
+
+### 12. Question: Does Question UI Follow Theme?
+
+**Severity: Low (UX Question)**
+**Reported by:** Maintainer
+**File:** `source/components/interactive-question-prompt.tsx`
+
+Does the question UI follow the user's theme setup, or is it always the same green color regardless of theme chosen?
+
+**Finding:** The interactive question prompt has **hardcoded colors**:
+
+```typescript
+color="#00ff00"  // Hardcoded green throughout
+```
+
+Unlike `PlanModeIndicator` which accepts theme colors as props, the question prompt does not use theme colors.
+
+**Recommendation:** Pass theme colors to `InteractiveQuestionPrompt` and use them instead of hardcoded values.
+
+---
+
+### 13. UX: "Plan Mode" Label Should Say "Plan Stage"
+
+**Severity: Low (UX)**
+**Reported by:** Maintainer
+**File:** `source/components/plan-mode-indicator.tsx`
+
+The UI shows: `Plan Mode: 🔍 Understanding | continue-implementation`
+
+Suggestion: Should it say "Plan Stage" instead of "Plan Mode" to better describe what it's showing?
+
+**Recommendation:** Consider renaming to "Plan Stage" or "Planning Phase" for clarity.
+
+---
+
 ## 🟡 Moderate Issues
 
-### 5. Callback Leak in Interactive Question Prompt
+### 14. Callback Leak in Interactive Question Prompt
 
 **Severity: Low-Medium**
 **File:** `source/components/interactive-question-prompt.tsx`
@@ -127,7 +278,7 @@ useInput((input, key) => {
 
 ---
 
-### 6. Duplicate Entries in Word Lists
+### 15. Duplicate Entries in Word Lists
 
 **Severity: Low**
 **File:** `source/utils/plan/slug-generator.ts`
@@ -141,7 +292,7 @@ There are duplicate entries in the word lists:
 
 ---
 
-### 7. Potential Non-Unique Summary After Loop
+### 16. Potential Non-Unique Summary After Loop
 
 **Severity: Low-Medium**
 **File:** `source/services/plan-manager.ts:200-209`
@@ -168,7 +319,7 @@ If there are 99+ plans with the same base name, this returns a non-unique summar
 
 ---
 
-### 8. Missing Timeout in Exit Plan Mode
+### 17. Missing Timeout in Exit Plan Mode
 
 **Severity: Low-Medium**
 **File:** `source/tools/plan/exit-plan-mode.tsx:75-100`
@@ -205,16 +356,16 @@ If `triggerModeSelection` returns `true` but the user never interacts with the p
 
 ## 🟠 Suggestions for Improvement
 
-### 9. Type Safety for Tool Arguments
+### 18. Type Safety for Tool Arguments
 Several places use type assertions or `any` for tool arguments. Consider using discriminated unions or zod schemas for runtime validation.
 
-### 10. Consider Debouncing `useInput` Handlers
+### 19. Consider Debouncing `useInput` Handlers
 The keyboard navigation could benefit from debouncing to prevent rapid key presses from causing issues.
 
-### 11. Atomic File Writes Consistency
+### 20. Atomic File Writes Consistency
 `plan-manager.ts` implements atomic writes for documents via temp file + rename, but `generateInitialProposalContent` writes directly. Consider using atomic writes consistently.
 
-### 12. Consider Splitting the PR
+### 21. Consider Splitting the PR
 Given the size (~7k lines), consider splitting into:
 - Core plan mode infrastructure (services, types)
 - Interactive questioning system
@@ -237,22 +388,52 @@ Given the size (~7k lines), consider splitting into:
 
 ---
 
+## Test Prompt Used
+
+The following prompt was used to test the plan mode feature:
+
+> Can you come up with a plan for implementing a file tree and file viewer. Essentially, you can run /explorer and it opens it in project mode. You can traverse the project, search for files, open and view files, attach as context. All of it.
+
+**Testing Status:** ⚠️ **Incomplete** - Could not complete full plan flow testing due to the multi-select question bug (Issue #7). Got stuck at question 3/4 and could not proceed.
+
+---
+
 ## Checklist Before Merge
 
-- [ ] Fix command execution bug in plan mode
-- [ ] Fix status indicator not updating when switching modes mid-request
+### Critical (Blocking)
+- [ ] Fix `ask_user_question` tool to block until user answers (Issue #6)
+- [ ] Fix multi-select questions - Enter key doesn't progress (Issue #7)
+- [ ] Fix "Other" option selection and text input (Issue #8)
+- [ ] Fix command execution bug in plan mode (Issue #1)
+
+### High Priority
+- [ ] Fix status indicator not updating when switching modes mid-request (Issue #2)
 - [ ] Add unit tests for `PlanManager`
 - [ ] Add unit tests for `PlanValidator`
 - [ ] Add tests for `isToolAllowedInPlanMode()`
-- [ ] Add path traversal test cases
-- [ ] Deduplicate slug generator word lists
-- [ ] Review race condition risks in mode context
-- [ ] Add timeout/cleanup for exit-plan-mode prompts
+- [ ] Add path traversal test cases (Issue #5)
+
+### Medium Priority
+- [ ] Review race condition risks in mode context (Issue #4)
+- [ ] Fix "Formulating Plan" bottom margin (Issue #9)
+- [ ] Fix message rendering order delay (Issue #10)
+- [ ] Fix Escape cancel behavior (Issue #11)
+- [ ] Add timeout/cleanup for exit-plan-mode prompts (Issue #17)
+
+### Low Priority (UX Polish)
+- [ ] Add theme support to question prompt UI (Issue #12)
+- [ ] Consider "Plan Stage" vs "Plan Mode" label (Issue #13)
+- [ ] Deduplicate slug generator word lists (Issue #15)
 
 ---
 
 ## Conclusion
 
-The feature is well-designed with thoughtful architecture and good security considerations. However, the critical bug with command handling in plan mode, combined with the lack of test coverage for security-critical code paths, means this PR should not be merged in its current state.
+The feature is well-designed with thoughtful architecture and good security considerations. However, **the interactive question system is fundamentally broken** - questions don't block execution, multi-select doesn't work, and "Other" input is non-functional. Combined with the command handling bug and lack of test coverage, this PR cannot be merged in its current state.
 
-**Recommended action:** Address the command handling bug and add minimum test coverage before re-review.
+**Key blockers:**
+1. `ask_user_question` tool returns immediately without waiting for answers
+2. Multi-select questions cannot be advanced (stuck at 3/4)
+3. Commands in plan mode trigger planning instead of executing
+
+**Recommended action:** Fix the interactive question system architecture first, then address the other bugs before re-review. The question tool needs to return a Promise that awaits user input.
