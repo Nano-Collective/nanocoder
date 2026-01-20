@@ -30,7 +30,24 @@ Running commands while in plan mode causes the system to begin planning instead 
 
 ---
 
-### 2. No Test Coverage
+### 2. Bug: Status Not Updating When Switching to Plan Mode Mid-Request
+
+**Severity: Medium-High**
+**Reported by:** Maintainer
+
+If you send a prompt (hit Enter) and then switch to plan mode while the request is in flight, the status indicator does not update to show "Formulating Plan" - it continues showing the normal status.
+
+**Expected behavior:** When switching to plan mode during an active request, the status should update to reflect the new mode (e.g., "Formulating Plan").
+
+**Actual behavior:** Status indicator remains unchanged, showing normal mode status.
+
+**Likely cause:** The status component reads mode at render time but doesn't re-render when mode changes mid-stream. This is another symptom of the race condition issues with module-level state in `mode-context.ts`.
+
+**Recommendation:** Check `source/components/status.tsx` and ensure it subscribes to mode changes reactively, or prevent mode switching while a request is in progress.
+
+---
+
+### 3. No Test Coverage
 
 **Severity: High**
 
@@ -48,7 +65,7 @@ This is problematic because:
 
 ---
 
-### 3. Race Condition Risk in Mode Context
+### 4. Race Condition Risk in Mode Context
 
 **Severity: Medium**
 
@@ -66,7 +83,7 @@ This global state pattern can lead to race conditions if multiple operations acc
 
 ---
 
-### 4. Potential Path Traversal in `isPlanFilePath`
+### 5. Potential Path Traversal in `isPlanFilePath`
 
 **Severity: Medium**
 **File:** `source/services/plan-manager.ts:410-434`
@@ -223,6 +240,7 @@ Given the size (~7k lines), consider splitting into:
 ## Checklist Before Merge
 
 - [ ] Fix command execution bug in plan mode
+- [ ] Fix status indicator not updating when switching modes mid-request
 - [ ] Add unit tests for `PlanManager`
 - [ ] Add unit tests for `PlanValidator`
 - [ ] Add tests for `isToolAllowedInPlanMode()`
