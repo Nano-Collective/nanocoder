@@ -11,6 +11,7 @@ overrides:
   js-yaml@>=4.0.0 <4.1.1: '>=4.1.1'
   jws@<3.2.3: '>=3.2.3'
   qs@<6.14.1: '>=6.14.1'
+  tar@<=7.5.2: '>=7.5.3'
 
 importers:
 
@@ -75,7 +76,7 @@ importers:
         version: 1.2.2
       pino:
         specifier: ^10.1.0
-        version: 10.2.0
+        version: 10.1.1
       pino-pretty:
         specifier: ^13.1.3
         version: 13.1.3
@@ -112,7 +113,7 @@ importers:
         version: 2.0.5
       '@types/node':
         specifier: ^25.0.3
-        version: 25.0.9
+        version: 25.0.8
       '@types/react':
         specifier: ^19.0.0
         version: 19.2.8
@@ -136,7 +137,7 @@ importers:
         version: 4.0.0(@types/react@19.2.8)
       knip:
         specifier: ^5.66.2
-        version: 5.81.0(@types/node@25.0.9)(typescript@5.9.3)
+        version: 5.81.0(@types/node@25.0.8)(typescript@5.9.3)
       lint-staged:
         specifier: ^16.2.7
         version: 16.2.7
@@ -161,7 +162,7 @@ importers:
     devDependencies:
       '@types/node':
         specifier: ^25.0.3
-        version: 25.0.9
+        version: 25.0.8
       '@types/vscode':
         specifier: ^1.85.0
         version: 1.108.1
@@ -846,8 +847,8 @@ packages:
   '@types/node@18.19.130':
     resolution: {integrity: sha512-GRaXQx6jGfL8sKfaIDD6OupbIHBr9jv7Jnaml9tB7l4v068PAOXqfcujMMo5PhbIs6ggR1XODELqahT2R8v0fg==}
 
-  '@types/node@25.0.9':
-    resolution: {integrity: sha512-/rpCXHlCWeqClNBwUhDcusJxXYDjZTyE8v5oTO7WbL8eij2nKhUeU89/6xgjU7N4/Vh3He0BtyhJdQbDyhiXAw==}
+  '@types/node@25.0.8':
+    resolution: {integrity: sha512-powIePYMmC3ibL0UJ2i2s0WIbq6cg6UyVFQxSCpaPxxzAaziRfimGivjdF943sSGV6RADVbk0Nvlm5P/FB44Zg==}
 
   '@types/normalize-package-data@2.4.4':
     resolution: {integrity: sha512-37i+OaWTh9qeK4LSHPsyRC7NahnGotNuZvjLSgcPzblpHB3rrCJxAOgI5gCdKm7coonsaX1Of0ILiTcnZjbfxA==}
@@ -2539,8 +2540,8 @@ packages:
   pino-std-serializers@7.1.0:
     resolution: {integrity: sha512-BndPH67/JxGExRgiX1dX0w1FvZck5Wa4aal9198SrRhZjH3GxKQUKIBnYJTdj2HDN3UQAS06HlfcSbQj2OHmaw==}
 
-  pino@10.2.0:
-    resolution: {integrity: sha512-NFnZqUliT+OHkRXVSf8vdOr13N1wv31hRryVjqbreVh/SDCNaI6mnRDDq89HVRCbem1SAl7yj04OANeqP0nT6A==}
+  pino@10.1.1:
+    resolution: {integrity: sha512-3qqVfpJtRQUCAOs4rTOEwLH6mwJJ/CSAlbis8fKOiMzTtXh0HN/VLsn3UWVTJ7U8DsWmxeNon2IpGb+wORXH4g==}
     hasBin: true
 
   pkce-challenge@5.0.1:
@@ -2921,8 +2922,8 @@ packages:
     resolution: {integrity: sha512-ujeqbceABgwMZxEJnk2HDY2DlnUZ+9oEcb1KzTVfYHio0UE6dG71n60d8D2I4qNvleWrrXpmjpt7vZeF1LnMZQ==}
     engines: {node: '>=6'}
 
-  tar@7.5.3:
-    resolution: {integrity: sha512-ENg5JUHUm2rDD7IvKNFGzyElLXNjachNLp6RaGf4+JOgxXHkqA+gq81ZAMCUmtMtqBsoU62lcp6S27g1LCYGGQ==}
+  tar@7.5.4:
+    resolution: {integrity: sha512-AN04xbWGrSTDmVwlI4/GTlIIwMFk/XEv7uL8aa57zuvRy6s4hdBed+lVq2fAZ89XDa7Us3ANXcE3Tvqvja1kTA==}
     engines: {node: '>=18'}
 
   temp-dir@3.0.0:
@@ -3629,7 +3630,7 @@ snapshots:
       node-fetch: 2.7.0
       nopt: 8.1.0
       semver: 7.7.3
-      tar: 7.5.3
+      tar: 7.5.4
     transitivePeerDependencies:
       - encoding
       - supports-color
@@ -3889,7 +3890,7 @@ snapshots:
 
   '@types/ink@0.5.2':
     dependencies:
-      '@types/node': 25.0.9
+      '@types/node': 25.0.8
       '@types/prop-types': 15.7.15
 
   '@types/istanbul-lib-coverage@2.0.6': {}
@@ -3900,7 +3901,7 @@ snapshots:
     dependencies:
       undici-types: 5.26.5
 
-  '@types/node@25.0.9':
+  '@types/node@25.0.8':
     dependencies:
       undici-types: 7.16.0
 
@@ -3920,7 +3921,7 @@ snapshots:
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 25.0.9
+      '@types/node': 25.0.8
 
   '@typespec/ts-http-runtime@0.3.2':
     dependencies:
@@ -5298,10 +5299,10 @@ snapshots:
     dependencies:
       is-buffer: 1.1.6
 
-  knip@5.81.0(@types/node@25.0.9)(typescript@5.9.3):
+  knip@5.81.0(@types/node@25.0.8)(typescript@5.9.3):
     dependencies:
       '@nodelib/fs.walk': 1.2.8
-      '@types/node': 25.0.9
+      '@types/node': 25.0.8
       fast-glob: 3.3.3
       formatly: 0.3.0
       jiti: 2.6.1
@@ -5713,7 +5714,7 @@ snapshots:
 
   pino-std-serializers@7.1.0: {}
 
-  pino@10.2.0:
+  pino@10.1.1:
     dependencies:
       '@pinojs/redact': 0.4.0
       atomic-sleep: 1.0.0
@@ -6150,7 +6151,7 @@ snapshots:
       readable-stream: 3.6.2
     optional: true
 
-  tar@7.5.3:
+  tar@7.5.4:
     dependencies:
       '@isaacs/fs-minipass': 4.0.1
       chownr: 3.0.0

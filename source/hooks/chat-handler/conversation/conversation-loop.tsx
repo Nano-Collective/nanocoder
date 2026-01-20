@@ -251,15 +251,13 @@ export const processAssistantResponse = async (
 	}
 
 	// Check for auto-compact after messages are updated
-	void (async () => {
-		try {
-			const config = getAppConfig();
-			const autoCompactConfig = config.autoCompact;
+	// Note: This is awaited to prevent race conditions where setMessages(compressed)
+	// could overwrite newer state updates that happen while compression is in progress
+	try {
+		const config = getAppConfig();
+		const autoCompactConfig = config.autoCompact;
 
-			if (!autoCompactConfig) {
-				return;
-			}
-
+		if (autoCompactConfig) {
 			const compressed = await performAutoCompact(
 				updatedMessages,
 				systemMessage,
@@ -282,10 +280,10 @@ export const processAssistantResponse = async (
 				// Compression was performed, update messages
 				setMessages(compressed);
 			}
-		} catch (_error) {
-			// Silently fail auto-compact, don't interrupt the conversation
 		}
-	})();
+	} catch (_error) {
+		// Silently fail auto-compact, don't interrupt the conversation
+	}
 
 	// Clear streaming state after response is complete
 	setIsGenerating(false);

@@ -1,3 +1,45 @@
+# 1.21.0
+
+- Added `/compact` command for context compression with `--restore` flag support to restore messages from backup. The command now includes auto-compact functionality, consistent token counting, and improved compression for very long messages. Thanks to @Pahari47.
+
+- Added hierarchical configuration loading for both provider configs and MCP servers. Local project configurations now properly override global settings, and Claude Code's object-style MCP configuration format is now supported. Thanks to @Avtrkrb.
+
+- Added `alwaysAllow` configuration option for MCP servers to auto-approve trusted tools without confirmation prompts. Thanks to @namar0x0309.
+
+- Added automatic tool support error detection and retry mechanism. Models that don't support function calling are now detected and requests automatically retry without tools. Thanks to @ThomasBrugman.
+
+- Added `--version` and `--help` CLI command options for quick reference. Thanks to @Avtrkrb.
+
+- Added `/quit` command as an alternative way to exit Nanocoder. Thanks to @Avtrkrb.
+
+- Added `/nanocoder-shape` command for selecting branding font styles.
+
+- Added keyboard shortcuts documentation to README.
+
+- Renamed `/setup-config` to `/setup-providers` for clearer naming.
+
+- Improved `/mcp` command modal with better colors and title formatting. Thanks to @Avtrkrb.
+
+- Improved `/help` command title heading styling. Thanks to @Avtrkrb.
+
+- Added CLI test harness for non-interactive mode testing. Thanks to @akramcodez.
+
+- Added comprehensive test suite for tool error detection. Thanks to @ThomasBrugman.
+
+- Added `DisableToolModels` documentation to README. Thanks to @ThomasBrugman.
+
+- Fix: Resolved bash tool keeping processes alive after command completion.
+
+- Fix: Corrected log directory paths and enabled file logging in production.
+
+- Fix: Improved deprecation message for MCP config to display correct config directory instead of hardcoded Linux path. Thanks to @Avtrkrb.
+
+- Fix: Resolved shell command security scanning alerts built from environment values. Thanks to @Avtrkrb.
+
+- Fix: Security audit dependencies updated.
+
+If there are any problems, feedback or thoughts please drop an issue or message us through Discord! Thank you for using Nanocoder. 🙌
+
 # 1.20.4
 
 - Fixed configuration wizard blocking users from entering HTTP URLs for remote Ollama servers. The wizard now allows any valid HTTP/HTTPS URL without requiring local network addresses.

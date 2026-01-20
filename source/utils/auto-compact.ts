@@ -12,11 +12,69 @@ export interface AutoCompactSessionOverrides {
 	mode: CompressionMode | null;
 }
 
-export const autoCompactSessionOverrides: AutoCompactSessionOverrides = {
-	enabled: null,
-	threshold: null,
-	mode: null,
-};
+/**
+ * Singleton class for managing auto-compact session overrides.
+ * Provides encapsulated state management instead of global mutable object.
+ */
+class AutoCompactSessionManager {
+	private _enabled: boolean | null = null;
+	private _threshold: number | null = null;
+	private _mode: CompressionMode | null = null;
+
+	get enabled(): boolean | null {
+		return this._enabled;
+	}
+
+	get threshold(): number | null {
+		return this._threshold;
+	}
+
+	get mode(): CompressionMode | null {
+		return this._mode;
+	}
+
+	setEnabled(enabled: boolean | null): void {
+		this._enabled = enabled;
+	}
+
+	setThreshold(threshold: number | null): void {
+		if (threshold !== null) {
+			this._threshold = Math.max(50, Math.min(95, threshold));
+		} else {
+			this._threshold = null;
+		}
+	}
+
+	setMode(mode: CompressionMode | null): void {
+		this._mode = mode;
+	}
+
+	reset(): void {
+		this._enabled = null;
+		this._threshold = null;
+		this._mode = null;
+	}
+}
+
+// Singleton instance
+const autoCompactSession = new AutoCompactSessionManager();
+
+// Legacy export for backward compatibility
+export const autoCompactSessionOverrides: AutoCompactSessionOverrides =
+	new Proxy({} as AutoCompactSessionOverrides, {
+		get(_target, prop) {
+			if (prop === 'enabled') return autoCompactSession.enabled;
+			if (prop === 'threshold') return autoCompactSession.threshold;
+			if (prop === 'mode') return autoCompactSession.mode;
+			return undefined;
+		},
+		set(_target, prop, value) {
+			if (prop === 'enabled') autoCompactSession.setEnabled(value);
+			else if (prop === 'threshold') autoCompactSession.setThreshold(value);
+			else if (prop === 'mode') autoCompactSession.setMode(value);
+			return true;
+		},
+	});
 
 /**
  * Perform auto-compact on messages (async)
@@ -115,17 +173,20 @@ export async function performAutoCompact(
 
 // Set session override for auto-compact enabled state
 export function setAutoCompactEnabled(enabled: boolean | null): void {
-	autoCompactSessionOverrides.enabled = enabled;
+	autoCompactSession.setEnabled(enabled);
 }
 
 // Set session override for auto-compact threshold
 export function setAutoCompactThreshold(threshold: number | null): void {
-	if (threshold !== null) {
-		autoCompactSessionOverrides.threshold = Math.max(
-			50,
-			Math.min(95, threshold),
-		);
-	} else {
-		autoCompactSessionOverrides.threshold = null;
-	}
+	autoCompactSession.setThreshold(threshold);
+}
+
+// Set session override for auto-compact mode
+export function setAutoCompactMode(mode: CompressionMode | null): void {
+	autoCompactSession.setMode(mode);
+}
+
+// Reset all session overrides
+export function resetAutoCompactSession(): void {
+	autoCompactSession.reset();
 }

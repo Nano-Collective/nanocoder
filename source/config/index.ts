@@ -106,6 +106,45 @@ function createDefaultConfFile(filePath: string, fileName: string): void {
 	}
 }
 
+// Try to load auto-compact config from a specific path
+// Returns the config if found and valid, null otherwise
+function tryLoadAutoCompactFromPath(
+	configPath: string,
+	defaults: AutoCompactConfig,
+): AutoCompactConfig | null {
+	if (!existsSync(configPath)) {
+		return null;
+	}
+
+	try {
+		const rawData = readFileSync(configPath, 'utf-8');
+		const config = JSON.parse(rawData);
+		const autoCompact = config.nanocoder?.autoCompact;
+		if (autoCompact && typeof autoCompact === 'object') {
+			return {
+				enabled:
+					autoCompact.enabled !== undefined
+						? Boolean(autoCompact.enabled)
+						: defaults.enabled,
+				threshold: validateThreshold(
+					autoCompact.threshold ?? defaults.threshold,
+				),
+				mode: validateMode(autoCompact.mode ?? defaults.mode),
+				notifyUser:
+					autoCompact.notifyUser !== undefined
+						? Boolean(autoCompact.notifyUser)
+						: defaults.notifyUser,
+			};
+		}
+	} catch (error) {
+		logError(
+			`Failed to load auto-compact config from ${configPath}: ${String(error)}`,
+		);
+	}
+
+	return null;
+}
+
 // Load auto-compact configuration and Returns default config if not specified
 function loadAutoCompactConfig(): AutoCompactConfig {
 	const defaults: AutoCompactConfig = {
@@ -117,93 +156,24 @@ function loadAutoCompactConfig(): AutoCompactConfig {
 
 	// Try to load from project-level config first
 	const projectConfigPath = join(process.cwd(), 'agents.config.json');
-	if (existsSync(projectConfigPath)) {
-		try {
-			const rawData = readFileSync(projectConfigPath, 'utf-8');
-			const config = JSON.parse(rawData);
-			const autoCompact = config.nanocoder?.autoCompact;
-			if (autoCompact && typeof autoCompact === 'object') {
-				return {
-					enabled:
-						autoCompact.enabled !== undefined
-							? Boolean(autoCompact.enabled)
-							: defaults.enabled,
-					threshold: validateThreshold(
-						autoCompact.threshold ?? defaults.threshold,
-					),
-					mode: validateMode(autoCompact.mode ?? defaults.mode),
-					notifyUser:
-						autoCompact.notifyUser !== undefined
-							? Boolean(autoCompact.notifyUser)
-							: defaults.notifyUser,
-				};
-			}
-		} catch (error) {
-			logError(
-				`Failed to load auto-compact config from ${projectConfigPath}: ${String(error)}`,
-			);
-		}
+	const projectConfig = tryLoadAutoCompactFromPath(projectConfigPath, defaults);
+	if (projectConfig) {
+		return projectConfig;
 	}
 
 	// Try global config
 	const configDir = getConfigPath();
 	const globalConfigPath = join(configDir, 'agents.config.json');
-	if (existsSync(globalConfigPath)) {
-		try {
-			const rawData = readFileSync(globalConfigPath, 'utf-8');
-			const config = JSON.parse(rawData);
-			const autoCompact = config.nanocoder?.autoCompact;
-			if (autoCompact && typeof autoCompact === 'object') {
-				return {
-					enabled:
-						autoCompact.enabled !== undefined
-							? Boolean(autoCompact.enabled)
-							: defaults.enabled,
-					threshold: validateThreshold(
-						autoCompact.threshold ?? defaults.threshold,
-					),
-					mode: validateMode(autoCompact.mode ?? defaults.mode),
-					notifyUser:
-						autoCompact.notifyUser !== undefined
-							? Boolean(autoCompact.notifyUser)
-							: defaults.notifyUser,
-				};
-			}
-		} catch (error) {
-			logError(
-				`Failed to load auto-compact config from ${globalConfigPath}: ${String(error)}`,
-			);
-		}
+	const globalConfig = tryLoadAutoCompactFromPath(globalConfigPath, defaults);
+	if (globalConfig) {
+		return globalConfig;
 	}
 
 	// Fallback to home directory
 	const homePath = join(homedir(), '.agents.config.json');
-	if (existsSync(homePath)) {
-		try {
-			const rawData = readFileSync(homePath, 'utf-8');
-			const config = JSON.parse(rawData);
-			const autoCompact = config.nanocoder?.autoCompact;
-			if (autoCompact && typeof autoCompact === 'object') {
-				return {
-					enabled:
-						autoCompact.enabled !== undefined
-							? Boolean(autoCompact.enabled)
-							: defaults.enabled,
-					threshold: validateThreshold(
-						autoCompact.threshold ?? defaults.threshold,
-					),
-					mode: validateMode(autoCompact.mode ?? defaults.mode),
-					notifyUser:
-						autoCompact.notifyUser !== undefined
-							? Boolean(autoCompact.notifyUser)
-							: defaults.notifyUser,
-				};
-			}
-		} catch (error) {
-			logError(
-				`Failed to load auto-compact config from ${homePath}: ${String(error)}`,
-			);
-		}
+	const homeConfig = tryLoadAutoCompactFromPath(homePath, defaults);
+	if (homeConfig) {
+		return homeConfig;
 	}
 
 	return defaults;

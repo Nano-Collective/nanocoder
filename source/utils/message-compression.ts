@@ -2,6 +2,34 @@ import type {CompressionMode} from '@/types/config';
 import type {Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
 
+/**
+ * Compression configuration constants
+ */
+export const COMPRESSION_CONSTANTS = {
+	/** Default number of recent messages to keep at full detail */
+	DEFAULT_KEEP_RECENT_MESSAGES: 2,
+	/** Character threshold for compressing user messages */
+	USER_MESSAGE_COMPRESSION_THRESHOLD: 500,
+	/** Character threshold for compressing assistant messages with tool_calls */
+	ASSISTANT_WITH_TOOLS_THRESHOLD: 300,
+	/** Target length for aggressive text truncation */
+	AGGRESSIVE_TRUNCATION_LIMIT: 100,
+	/** Target length for default text truncation */
+	DEFAULT_TRUNCATION_LIMIT: 200,
+	/** Target length for aggressive assistant message truncation */
+	AGGRESSIVE_ASSISTANT_LIMIT: 150,
+	/** Target length for default assistant message truncation */
+	DEFAULT_ASSISTANT_LIMIT: 300,
+	/** Minimum valid auto-compact threshold percentage */
+	MIN_THRESHOLD_PERCENT: 50,
+	/** Maximum valid auto-compact threshold percentage */
+	MAX_THRESHOLD_PERCENT: 95,
+	/** Character threshold for compressing user messages in conservative mode */
+	CONSERVATIVE_USER_MESSAGE_THRESHOLD: 1000,
+	/** Target length for conservative mode text truncation */
+	CONSERVATIVE_TRUNCATION_LIMIT: 500,
+} as const;
+
 export interface CompressionResult {
 	compressedMessages: Message[];
 	originalTokenCount: number;
@@ -47,7 +75,9 @@ export function compressMessages(
 		};
 	}
 
-	const keepRecent = options.keepRecentMessages ?? 2;
+	const keepRecent =
+		options.keepRecentMessages ??
+		COMPRESSION_CONSTANTS.DEFAULT_KEEP_RECENT_MESSAGES;
 	const originalTokenCount = countTotalTokens(messages, tokenizer);
 
 	// Separate messages into: system, compressible, and recent (keep full)
@@ -332,14 +362,33 @@ function compressUserMessage(msg: Message, mode: CompressionMode): Message {
 
 	const content = msg.content || '';
 
-	// Conservative mode: keep as is
+	// Conservative mode: only compress very long messages (>1000 chars)
 	if (mode === 'conservative') {
+		if (
+			content.length > COMPRESSION_CONSTANTS.CONSERVATIVE_USER_MESSAGE_THRESHOLD
+		) {
+			const summary = summarizeText(
+				content,
+				COMPRESSION_CONSTANTS.CONSERVATIVE_TRUNCATION_LIMIT,
+			);
+			return {
+				...msg,
+				content: summary,
+			};
+		}
 		return msg;
 	}
 
 	// Default/Aggressive: summarize if very long
-	if (content.length > 500) {
-		const summary = summarizeText(content, mode === 'aggressive' ? 100 : 200);
+	if (
+		content.length > COMPRESSION_CONSTANTS.USER_MESSAGE_COMPRESSION_THRESHOLD
+	) {
+		const summary = summarizeText(
+			content,
+			mode === 'aggressive'
+				? COMPRESSION_CONSTANTS.AGGRESSIVE_TRUNCATION_LIMIT
+				: COMPRESSION_CONSTANTS.DEFAULT_TRUNCATION_LIMIT,
+		);
 		return {
 			...msg,
 			content: summary,
@@ -363,10 +412,18 @@ function compressAssistantMessage(
 	// Keep tool calls as is
 	if (msg.tool_calls && msg.tool_calls.length > 0) {
 		// Compress content if verbose, but keep tool calls
-		if (content.length > 300 && mode !== 'conservative') {
+		if (
+			content.length > COMPRESSION_CONSTANTS.ASSISTANT_WITH_TOOLS_THRESHOLD &&
+			mode !== 'conservative'
+		) {
 			return {
 				...msg,
-				content: summarizeText(content, mode === 'aggressive' ? 100 : 200),
+				content: summarizeText(
+					content,
+					mode === 'aggressive'
+						? COMPRESSION_CONSTANTS.AGGRESSIVE_TRUNCATION_LIMIT
+						: COMPRESSION_CONSTANTS.DEFAULT_TRUNCATION_LIMIT,
+				),
 			};
 		}
 		return msg;
@@ -378,8 +435,15 @@ function compressAssistantMessage(
 	}
 
 	// Default/Aggressive: summarize if very long
-	if (content.length > 500) {
-		const summary = summarizeText(content, mode === 'aggressive' ? 150 : 300);
+	if (
+		content.length > COMPRESSION_CONSTANTS.USER_MESSAGE_COMPRESSION_THRESHOLD
+	) {
+		const summary = summarizeText(
+			content,
+			mode === 'aggressive'
+				? COMPRESSION_CONSTANTS.AGGRESSIVE_ASSISTANT_LIMIT
+				: COMPRESSION_CONSTANTS.DEFAULT_ASSISTANT_LIMIT,
+		);
 		return {
 			...msg,
 			content: summary,

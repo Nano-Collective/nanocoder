@@ -20,6 +20,7 @@ import {
 } from '@/utils/auto-compact';
 import {compressionBackup} from '@/utils/compression-backup';
 import {compressMessages} from '@/utils/message-compression';
+import {processPromptTemplate} from '@/utils/prompt-processor';
 
 /** Command names that require special handling in the app */
 const SPECIAL_COMMANDS = {
@@ -298,6 +299,30 @@ async function handleCompactCommand(
 			preview = true;
 		} else if (arg === '--default') {
 			mode = 'default';
+		} else if (arg === '--restore') {
+			// Restore messages from backup
+			const restored = compressionBackup.restore();
+			if (restored) {
+				setMessages(restored);
+				onAddToChatQueue(
+					React.createElement(SuccessMessage, {
+						key: `compact-restore-${getNextComponentKey()}`,
+						message: `Restored ${restored.length} messages from backup.`,
+						hideBox: true,
+					}),
+				);
+				compressionBackup.clearBackup();
+			} else {
+				onAddToChatQueue(
+					React.createElement(ErrorMessage, {
+						key: `compact-restore-error-${getNextComponentKey()}`,
+						message: 'No backup available to restore.',
+						hideBox: true,
+					}),
+				);
+			}
+			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
+			return true;
 		} else if (arg === '--auto-on') {
 			// Enable auto-compact for current session
 			setAutoCompactEnabled(true);
@@ -369,8 +394,13 @@ async function handleCompactCommand(
 		// Create tokenizer
 		const tokenizer = createTokenizer(provider, model);
 
-		// Perform compression
-		const result = compressMessages(messages, tokenizer, {mode});
+		// Include system message in token calculations for consistency with /status and auto-compact
+		const systemPrompt = processPromptTemplate();
+		const systemMessage: Message = {role: 'system', content: systemPrompt};
+		const allMessages = [systemMessage, ...messages];
+
+		// Perform compression (includes system message for accurate token counting)
+		const result = compressMessages(allMessages, tokenizer, {mode});
 
 		// Clean up tokenizer
 		if (tokenizer.free) {
@@ -391,7 +421,11 @@ async function handleCompactCommand(
 			// Apply compression and store backup before compression
 			compressionBackup.storeBackup(messages);
 
-			setMessages(result.compressedMessages);
+			// Filter out system messages from compressed result (they're managed separately)
+			const compressedUserMessages = result.compressedMessages.filter(
+				msg => msg.role !== 'system',
+			);
+			setMessages(compressedUserMessages);
 
 			// Show success message
 			const message = `Context Compacted: ${result.originalTokenCount.toLocaleString()} tokens → ${result.compressedTokenCount.toLocaleString()} tokens (${Math.round(result.reductionPercentage)}% reduction)\n\nPreserved:\n• ${result.preservedInfo.keyDecisions} key decisions\n• ${result.preservedInfo.fileModifications} file modifications\n• ${result.preservedInfo.toolResults} tool results\n• ${result.preservedInfo.recentMessages} recent messages at full detail`;
