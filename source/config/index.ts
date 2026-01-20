@@ -1,5 +1,5 @@
 import {config as loadEnv} from 'dotenv';
-import {existsSync, mkdirSync, writeFileSync} from 'fs';
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'fs';
 import {homedir} from 'os';
 import {dirname, join} from 'path';
 import {fileURLToPath} from 'url';
@@ -10,7 +10,12 @@ import {
 import {getConfigPath} from '@/config/paths';
 import {loadPreferences} from '@/config/preferences';
 import {defaultTheme, getThemeColors} from '@/config/themes';
-import type {AppConfig, Colors} from '@/types/index';
+import type {
+	AppConfig,
+	AutoCompactConfig,
+	Colors,
+	CompressionMode,
+} from '@/types/index';
 import {logError} from '@/utils/message-queue';
 
 // Load .env file from working directory (shell environment takes precedence)
@@ -101,6 +106,123 @@ function createDefaultConfFile(filePath: string, fileName: string): void {
 	}
 }
 
+// Load auto-compact configuration and Returns default config if not specified
+function loadAutoCompactConfig(): AutoCompactConfig {
+	const defaults: AutoCompactConfig = {
+		enabled: true,
+		threshold: 60,
+		mode: 'conservative',
+		notifyUser: true,
+	};
+
+	// Try to load from project-level config first
+	const projectConfigPath = join(process.cwd(), 'agents.config.json');
+	if (existsSync(projectConfigPath)) {
+		try {
+			const rawData = readFileSync(projectConfigPath, 'utf-8');
+			const config = JSON.parse(rawData);
+			const autoCompact = config.nanocoder?.autoCompact;
+			if (autoCompact && typeof autoCompact === 'object') {
+				return {
+					enabled:
+						autoCompact.enabled !== undefined
+							? Boolean(autoCompact.enabled)
+							: defaults.enabled,
+					threshold: validateThreshold(
+						autoCompact.threshold ?? defaults.threshold,
+					),
+					mode: validateMode(autoCompact.mode ?? defaults.mode),
+					notifyUser:
+						autoCompact.notifyUser !== undefined
+							? Boolean(autoCompact.notifyUser)
+							: defaults.notifyUser,
+				};
+			}
+		} catch (error) {
+			logError(
+				`Failed to load auto-compact config from ${projectConfigPath}: ${String(error)}`,
+			);
+		}
+	}
+
+	// Try global config
+	const configDir = getConfigPath();
+	const globalConfigPath = join(configDir, 'agents.config.json');
+	if (existsSync(globalConfigPath)) {
+		try {
+			const rawData = readFileSync(globalConfigPath, 'utf-8');
+			const config = JSON.parse(rawData);
+			const autoCompact = config.nanocoder?.autoCompact;
+			if (autoCompact && typeof autoCompact === 'object') {
+				return {
+					enabled:
+						autoCompact.enabled !== undefined
+							? Boolean(autoCompact.enabled)
+							: defaults.enabled,
+					threshold: validateThreshold(
+						autoCompact.threshold ?? defaults.threshold,
+					),
+					mode: validateMode(autoCompact.mode ?? defaults.mode),
+					notifyUser:
+						autoCompact.notifyUser !== undefined
+							? Boolean(autoCompact.notifyUser)
+							: defaults.notifyUser,
+				};
+			}
+		} catch (error) {
+			logError(
+				`Failed to load auto-compact config from ${globalConfigPath}: ${String(error)}`,
+			);
+		}
+	}
+
+	// Fallback to home directory
+	const homePath = join(homedir(), '.agents.config.json');
+	if (existsSync(homePath)) {
+		try {
+			const rawData = readFileSync(homePath, 'utf-8');
+			const config = JSON.parse(rawData);
+			const autoCompact = config.nanocoder?.autoCompact;
+			if (autoCompact && typeof autoCompact === 'object') {
+				return {
+					enabled:
+						autoCompact.enabled !== undefined
+							? Boolean(autoCompact.enabled)
+							: defaults.enabled,
+					threshold: validateThreshold(
+						autoCompact.threshold ?? defaults.threshold,
+					),
+					mode: validateMode(autoCompact.mode ?? defaults.mode),
+					notifyUser:
+						autoCompact.notifyUser !== undefined
+							? Boolean(autoCompact.notifyUser)
+							: defaults.notifyUser,
+				};
+			}
+		} catch (error) {
+			logError(
+				`Failed to load auto-compact config from ${homePath}: ${String(error)}`,
+			);
+		}
+	}
+
+	return defaults;
+}
+
+// Validate and clamp threshold to valid range (50-95)
+function validateThreshold(threshold: unknown): number {
+	const num = typeof threshold === 'number' ? threshold : 60;
+	return Math.max(50, Math.min(95, Math.round(num)));
+}
+
+// Validate compression mode
+function validateMode(mode: unknown): CompressionMode {
+	if (mode === 'default' || mode === 'aggressive' || mode === 'conservative') {
+		return mode;
+	}
+	return 'conservative';
+}
+
 // Function to load app configuration from agents.config.json if it exists
 function loadAppConfig(): AppConfig {
 	// Load providers from the new hierarchical configuration system
@@ -110,9 +232,13 @@ function loadAppConfig(): AppConfig {
 	const mcpServersWithSource = loadAllMCPConfigs();
 	const mcpServers = mcpServersWithSource.map(item => item.server);
 
+	// Load auto-compact configuration
+	const autoCompact = loadAutoCompactConfig();
+
 	return {
 		providers,
 		mcpServers,
+		autoCompact,
 	};
 }
 

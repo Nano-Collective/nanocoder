@@ -40,6 +40,8 @@ export default memo(function Status({
 	planModeActive,
 	planPhase,
 	planSummary,
+	contextUsage,
+	autoCompactInfo,
 }: {
 	provider: string;
 	model: string;
@@ -56,6 +58,17 @@ export default memo(function Status({
 	planModeActive?: boolean;
 	planPhase?: PlanPhase;
 	planSummary?: string;
+	contextUsage?: {
+		currentTokens: number;
+		contextLimit: number | null;
+		percentUsed: number;
+	};
+	autoCompactInfo?: {
+		enabled: boolean;
+		threshold: number;
+		mode: string;
+		hasOverrides: boolean;
+	};
 }) {
 	const {boxWidth, isNarrow, truncatePath} = useResponsiveTerminal();
 	const colors = getThemeColors(theme);
@@ -161,6 +174,20 @@ export default memo(function Status({
 						>
 							{lspConnected === lspTotal ? '✓ ' : ''}LSP: {lspConnected}/
 							{lspTotal} connected
+						</Text>
+					)}
+					{contextUsage && contextUsage.contextLimit && (
+						<Text color={colors.info}>
+							<Text bold={true}>Context: </Text>
+							{contextUsage.currentTokens.toLocaleString()}/
+							{contextUsage.contextLimit.toLocaleString()} (
+							{Math.round(contextUsage.percentUsed)}%)
+						</Text>
+					)}
+					{autoCompactInfo && (
+						<Text color={colors.secondary}>
+							Auto-Compact: {autoCompactInfo.enabled ? '✓' : '✗'}
+							{autoCompactInfo.hasOverrides && ' (override)'}
 						</Text>
 					)}
 					{updateInfo?.hasUpdate && (
@@ -292,6 +319,36 @@ export default memo(function Status({
 											</Text>
 										))}
 								</Box>
+							)}
+						</Box>
+					)}
+					{contextUsage && contextUsage.contextLimit && (
+						<Box flexDirection="column">
+							<Text color={colors.info}>
+								<Text bold={true}>Context: </Text>
+								{contextUsage.currentTokens.toLocaleString()}/
+								{contextUsage.contextLimit.toLocaleString()} tokens (
+								{Math.round(contextUsage.percentUsed)}%)
+							</Text>
+							{contextUsage.percentUsed >= 60 && (
+								<Text color={colors.warning} italic>
+									↳ Consider using /compact to reduce context usage
+								</Text>
+							)}
+						</Box>
+					)}
+					{autoCompactInfo && (
+						<Box flexDirection="column">
+							<Text color={colors.secondary}>
+								<Text bold={true}>Auto-Compact: </Text>
+								{autoCompactInfo.enabled ? '✓ enabled' : '✗ disabled'}
+								{autoCompactInfo.hasOverrides && ' (session override)'}
+							</Text>
+							{autoCompactInfo.enabled && (
+								<Text color={colors.secondary} italic>
+									↳ Threshold: {autoCompactInfo.threshold}%, Mode:{' '}
+									{autoCompactInfo.mode}
+								</Text>
 							)}
 						</Box>
 					)}
