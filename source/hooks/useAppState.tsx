@@ -1,4 +1,3 @@
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {loadPreferences} from '@/config/preferences';
 import {defaultTheme} from '@/config/themes';
@@ -20,6 +19,7 @@ import type {ToolResult, UpdateInfo} from '@/types/index';
 import type {Tokenizer} from '@/types/tokenization.js';
 import type {ThemePreset} from '@/types/ui';
 import {BoundedMap} from '@/utils/bounded-map';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 
 export interface ConversationContext {
 	/**
@@ -89,6 +89,7 @@ export function useAppState() {
 	const [isCancelling, setIsCancelling] = useState<boolean>(false);
 	const [isConversationComplete, setIsConversationComplete] =
 		useState<boolean>(false);
+	const [isSettingsMode, setIsSettingsMode] = useState<boolean>(false);
 
 	// Cancellation state
 	const [abortController, setAbortController] =
@@ -257,6 +258,7 @@ export function useAppState() {
 		customCommandsCount,
 		isCancelling,
 		isConversationComplete,
+		isSettingsMode,
 		abortController,
 		isModelSelectionMode,
 		isProviderSelectionMode,
@@ -301,6 +303,7 @@ export function useAppState() {
 		setCustomCommandsCount,
 		setIsCancelling,
 		setIsConversationComplete,
+		setIsSettingsMode,
 		setAbortController,
 		setIsModelSelectionMode,
 		setIsProviderSelectionMode,

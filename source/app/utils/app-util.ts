@@ -1,4 +1,3 @@
-import React from 'react';
 import {parseInput} from '@/command-parser';
 import {commandRegistry} from '@/commands';
 import BashProgress from '@/components/bash-progress';
@@ -21,6 +20,7 @@ import {
 import {compressionBackup} from '@/utils/compression-backup';
 import {compressMessages} from '@/utils/message-compression';
 import {processPromptTemplate} from '@/utils/prompt-processor';
+import React from 'react';
 
 /** Command names that require special handling in the app */
 const SPECIAL_COMMANDS = {
@@ -31,6 +31,7 @@ const SPECIAL_COMMANDS = {
 	MODEL_DATABASE: 'model-database',
 	SETUP_PROVIDERS: 'setup-providers',
 	SETUP_MCP: 'setup-mcp',
+	SETTINGS: 'settings',
 	STATUS: 'status',
 	CHECKPOINT: 'checkpoint',
 	TITLE_SHAPE: 'title-shape',
@@ -191,6 +192,7 @@ async function handleSpecialCommand(
 		onEnterNanocoderShapeSelectionMode,
 		onEnterModelDatabaseMode,
 		onEnterConfigWizardMode,
+		onEnterSettingsMode,
 		onEnterMcpWizardMode,
 		onShowStatus,
 		onCommandComplete,
@@ -250,6 +252,11 @@ async function handleSpecialCommand(
 
 		case SPECIAL_COMMANDS.SETUP_MCP:
 			onEnterMcpWizardMode();
+			onCommandComplete?.();
+			return true;
+
+		case SPECIAL_COMMANDS.SETTINGS:
+			onEnterSettingsMode();
 			onCommandComplete?.();
 			return true;
 

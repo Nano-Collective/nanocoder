@@ -6,19 +6,19 @@
 		"useIgnoreFile": true
 	},
 	"files": {
-		"includes": [
-			"**",
-			"!**/dist",
-			"!**/pnpm-lock.yaml",
-			"!**/package-lock.json",
-			"!**/yarn.lock",
-			"!**/coverage",
-			"!**/agents",
-			"!**/node_modules",
-			"!**/plugins",
-			"!**/*.spec.ts",
-			"!**/*.spec.tsx",
-			"!**/.husky"
+		"include": ["**"],
+		"ignore": [
+			"dist",
+			"pnpm-lock.yaml",
+			"package-lock.json",
+			"yarn.lock",
+			"coverage",
+			"agents",
+			"node_modules",
+			"plugins",
+			"**/*.spec.ts",
+			"**/*.spec.tsx",
+			".husky"
 		]
 	},
 	"formatter": {
@@ -28,7 +28,7 @@
 		"lineEnding": "lf",
 		"lineWidth": 80
 	},
-	"assist": { "actions": { "source": { "organizeImports": "on" } } },
+	"organizeImports": { "enabled": true },
 	"linter": {
 		"enabled": true,
 		"rules": {

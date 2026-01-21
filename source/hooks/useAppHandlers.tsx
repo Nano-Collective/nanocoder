@@ -1,4 +1,3 @@
-import React from 'react';
 import {
 	createClearMessagesHandler,
 	handleMessageSubmission,
@@ -32,6 +31,7 @@ import {autoCompactSessionOverrides} from '@/utils/auto-compact';
 import {getLogger} from '@/utils/logging';
 import {addToMessageQueue} from '@/utils/message-queue';
 import {processPromptTemplate} from '@/utils/prompt-processor';
+import React from 'react';
 
 interface UseAppHandlersProps {
 	// State
@@ -80,6 +80,7 @@ interface UseAppHandlersProps {
 	enterNanocoderShapeSelectionMode: () => void;
 	enterModelDatabaseMode: () => void;
 	enterConfigWizardMode: () => void;
+	enterSettingsMode: () => void;
 	enterMcpWizardMode: () => void;
 
 	// Chat handler
@@ -352,6 +353,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				onEnterThemeSelectionMode: props.enterThemeSelectionMode,
 				onEnterModelDatabaseMode: props.enterModelDatabaseMode,
 				onEnterConfigWizardMode: props.enterConfigWizardMode,
+				onEnterSettingsMode: props.enterSettingsMode,
 				onEnterMcpWizardMode: props.enterMcpWizardMode,
 				onEnterCheckpointLoadMode: enterCheckpointLoadMode,
 				onEnterTitleShapeSelectionMode: props.enterTitleShapeSelectionMode,

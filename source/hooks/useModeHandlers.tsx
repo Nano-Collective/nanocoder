@@ -1,4 +1,3 @@
-import React from 'react';
 import {createLLMClient} from '@/client-factory';
 import {ErrorMessage, SuccessMessage} from '@/components/message-box';
 import {reloadAppConfig} from '@/config/index';
@@ -12,6 +11,7 @@ import {
 import {getToolManager} from '@/message-handler';
 import {LLMClient, Message} from '@/types/core';
 import type {NanocoderShape, ThemePreset, TitleShape} from '@/types/ui';
+import React from 'react';
 
 interface UseModeHandlersProps {
 	client: LLMClient | null;
@@ -30,6 +30,7 @@ interface UseModeHandlersProps {
 	setIsNanocoderShapeSelectionMode: (mode: boolean) => void;
 	setIsModelDatabaseMode: (mode: boolean) => void;
 	setIsConfigWizardMode: (mode: boolean) => void;
+	setIsSettingsMode: (mode: boolean) => void;
 	setIsMcpWizardMode: (mode: boolean) => void;
 	addToChatQueue: (component: React.ReactNode) => void;
 	getNextComponentKey: () => number;
@@ -55,6 +56,7 @@ export function useModeHandlers({
 	setIsNanocoderShapeSelectionMode,
 	setIsModelDatabaseMode,
 	setIsConfigWizardMode,
+	setIsSettingsMode,
 	setIsMcpWizardMode,
 	addToChatQueue,
 	getNextComponentKey,
@@ -394,6 +396,16 @@ export function useModeHandlers({
 		setIsMcpWizardMode(false);
 	};
 
+	// Helper function to enter settings mode
+	const enterSettingsMode = () => {
+		setIsSettingsMode(true);
+	};
+
+	// Handle settings cancel
+	const handleSettingsCancel = () => {
+		setIsSettingsMode(false);
+	};
+
 	return {
 		enterModelSelectionMode,
 		enterProviderSelectionMode,
@@ -406,6 +418,7 @@ export function useModeHandlers({
 		handleNanocoderShapeSelectionCancel,
 		enterModelDatabaseMode,
 		enterConfigWizardMode,
+		enterSettingsMode,
 		enterMcpWizardMode,
 		handleModelSelect,
 		handleModelSelectionCancel,
@@ -418,5 +431,6 @@ export function useModeHandlers({
 		handleConfigWizardCancel,
 		handleMcpWizardComplete,
 		handleMcpWizardCancel,
+		handleSettingsCancel,
 	};
 }
