@@ -13,6 +13,12 @@ import {getDiagnosticsTool} from '@/tools/lsp-get-diagnostics';
 import {readFileTool} from '@/tools/read-file';
 import {searchFileContentsTool} from '@/tools/search-file-contents';
 import {stringReplaceTool} from '@/tools/string-replace';
+import {
+	createTaskTool,
+	deleteTaskTool,
+	listTasksTool,
+	updateTaskTool,
+} from '@/tools/tasks';
 import {webSearchTool} from '@/tools/web-search';
 import {writeFileTool} from '@/tools/write-file';
 import type {
@@ -40,6 +46,11 @@ const allTools: NanocoderToolExport[] = [
 	gitCreatePRTool,
 	gitBranchSuggestTool,
 	gitStatusEnhancedTool,
+	// Task management tools
+	createTaskTool,
+	listTasksTool,
+	updateTaskTool,
+	deleteTaskTool,
 ];
 
 // Export native AI SDK tools registry (for passing directly to AI SDK)

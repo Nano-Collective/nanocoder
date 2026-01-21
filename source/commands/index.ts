@@ -15,6 +15,7 @@ export * from '@/commands/provider';
 export * from '@/commands/setup-mcp';
 export * from '@/commands/setup-providers';
 export * from '@/commands/status';
+export * from '@/commands/tasks';
 export * from '@/commands/theme';
 export * from '@/commands/title-shape';
 export * from '@/commands/update';
