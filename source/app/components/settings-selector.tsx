@@ -58,7 +58,7 @@ export function SettingsSelector({onSelect, onCancel}: SettingsSelectorProps) {
 			/>
 			<Box marginTop={1}>
 				<Text color={colors.secondary} dimColor>
-					Press Enter to select Esc to cancel
+					Press Enter to select, Esc to cancel
 				</Text>
 			</Box>
 		</TitledBoxWithPreferences>
