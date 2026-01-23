@@ -12,6 +12,7 @@ export * from '@/commands/model';
 export * from '@/commands/model-database';
 export * from '@/commands/nanocoder-shape';
 export * from '@/commands/provider';
+export * from '@/commands/settings';
 export * from '@/commands/setup-mcp';
 export * from '@/commands/setup-providers';
 export * from '@/commands/status';

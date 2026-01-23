@@ -17,7 +17,10 @@ export function SettingsSelector({onSelect, onCancel}: SettingsSelectorProps) {
 
 	const items = useMemo(() => {
 		const commands = commandRegistry.getAll();
+		const uiCommands = ['theme', 'title-shape', 'nanocoder-shape'];
+		
 		return commands
+			.filter(cmd => uiCommands.includes(cmd.name))
 			.map(cmd => ({
 				label: `/${cmd.name} - ${cmd.description}`,
 				value: cmd.name,
@@ -34,7 +37,7 @@ export function SettingsSelector({onSelect, onCancel}: SettingsSelectorProps) {
 
 	return (
 		<TitledBoxWithPreferences
-			title="Settings / Commands"
+			title="Settings"
 			width={width}
 			borderColor={colors.primary}
 			paddingX={1}
@@ -42,7 +45,7 @@ export function SettingsSelector({onSelect, onCancel}: SettingsSelectorProps) {
 			flexDirection="column"
 		>
 			<Box marginBottom={1}>
-				<Text color={colors.secondary}>Select a command to run:</Text>
+				<Text color={colors.secondary}>Select a UI setting to configure:</Text>
 			</Box>
 			<SelectInput
 				items={items}

@@ -17,6 +17,7 @@ import {
 	nanocoderShapeCommand,
 	providerCommand,
 	quitCommand,
+	settingsCommand,
 	setupMcpCommand,
 	setupProvidersCommand,
 	statusCommand,
@@ -393,6 +394,7 @@ export function useAppInitialization({
 				nanocoderShapeCommand,
 				checkpointCommand,
 				quitCommand,
+				settingsCommand,
 			]);
 
 			// Now start with the properly initialized objects (excluding MCP)
