@@ -17,3 +17,6 @@
 
 # Exclude TypeScript declaration files
 **/*.d.ts
+
+# Exclude plan validator (controlled input, false positive ReDoS warning)
+**/services/plan-validator.ts

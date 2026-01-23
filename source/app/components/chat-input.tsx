@@ -6,7 +6,7 @@ import ToolConfirmation from '@/components/tool-confirmation';
 import ToolExecutionIndicator from '@/components/tool-execution-indicator';
 import UserInput from '@/components/user-input';
 import {useTheme} from '@/hooks/useTheme';
-import type {DevelopmentMode, ToolCall} from '@/types';
+import type {DevelopmentMode, PlanModeState, ToolCall} from '@/types';
 
 export interface ChatInputProps {
 	// Execution state
@@ -30,6 +30,7 @@ export interface ChatInputProps {
 	customCommands: string[];
 	inputDisabled: boolean;
 	developmentMode: DevelopmentMode;
+	planModeState: PlanModeState;
 
 	// Handlers
 	onToolConfirm: (confirmed: boolean) => void;
@@ -59,6 +60,7 @@ export function ChatInput({
 	customCommands,
 	inputDisabled,
 	developmentMode,
+	planModeState,
 	onToolConfirm,
 	onToolCancel,
 	onSubmit,
@@ -100,6 +102,7 @@ export function ChatInput({
 					onCancel={onCancel}
 					onToggleMode={onToggleMode}
 					developmentMode={developmentMode}
+					planModeState={planModeState}
 				/>
 			) : /* Client Missing */
 			mcpInitialized && !client ? (

@@ -7,6 +7,9 @@ import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
 import {shouldRenderWelcome} from '@/app/helpers';
 import type {AppProps} from '@/app/types';
+import InteractiveQuestionPrompt from '@/components/interactive-question-prompt';
+import ModeSelectionPrompt from '@/components/mode-selection-prompt';
+import PlanReviewPrompt from '@/components/plan-review-prompt';
 import SecurityDisclaimer from '@/components/security-disclaimer';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {
@@ -15,7 +18,10 @@ import {
 } from '@/components/vscode-extension-prompt';
 import WelcomeMessage from '@/components/welcome-message';
 import {getThemeColors} from '@/config/themes';
-import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
+import {
+	resetPlanModeState,
+	setCurrentMode as setCurrentModeContext,
+} from '@/context/mode-context';
 import {useChatHandler} from '@/hooks/chat-handler';
 import {useAppHandlers} from '@/hooks/useAppHandlers';
 import {useAppInitialization} from '@/hooks/useAppInitialization';
@@ -34,6 +40,9 @@ import {
 } from '@/utils/logging';
 import {createPinoLogger} from '@/utils/logging/pino-logger';
 import {setGlobalMessageQueue} from '@/utils/message-queue';
+import {registerModeSelectionCallback} from '@/utils/mode-selection-registry';
+import {registerPlanReviewCallback} from '@/utils/plan-review-registry';
+import {registerQuestionPromptCallback} from '@/utils/question-selection-registry';
 
 export default function App({
 	vscodeMode = false,
@@ -257,6 +266,7 @@ export default function App({
 		onConversationComplete: () => {
 			appState.setIsConversationComplete(true);
 		},
+		setPlanPhase: appState.setPlanPhase,
 	});
 
 	// Setup tool handler
@@ -390,6 +400,18 @@ export default function App({
 		setIsToolExecuting: appState.setIsToolExecuting,
 		setIsCheckpointLoadMode: appState.setIsCheckpointLoadMode,
 		setCheckpointLoadData: appState.setCheckpointLoadData,
+		setPlanModeActive: appState.setPlanModeActive,
+		setPlanSummary: appState.setPlanSummary,
+		setPlanPhase: appState.setPlanPhase,
+		setPlanDirectoryPath: appState.setPlanDirectoryPath,
+		setProposalPath: appState.setProposalPath,
+		setDesignPath: appState.setDesignPath,
+		setSpecPath: appState.setSpecPath,
+		setTasksPath: appState.setTasksPath,
+		setPlanFilePath: appState.setPlanFilePath,
+		setCurrentDocument: appState.setCurrentDocument,
+		setCompletedDocuments: appState.setCompletedDocuments,
+		setValidationResults: appState.setValidationResults,
 		addToChatQueue: appState.addToChatQueue,
 		setLiveComponent: appState.setLiveComponent,
 		client: appState.client,
@@ -410,6 +432,123 @@ export default function App({
 	React.useEffect(() => {
 		handleMessageSubmitRef.current = appHandlers.handleMessageSubmit;
 	}, [appHandlers.handleMessageSubmit]);
+
+	// Register mode selection callback when in plan mode
+	React.useEffect(() => {
+		if (appState.developmentMode === 'plan') {
+			logger.debug('[MODE_SELECTION] Registering mode selection callback');
+
+			// Register callback for mode selection
+			registerModeSelectionCallback(
+				(
+					onSelect: (mode: import('@/types/core').DevelopmentMode) => void,
+					onCancel: () => void,
+					options?: import('@/utils/mode-selection-registry').ModeSelectionOptions,
+				) => {
+					logger.info('[MODE_SELECTION] Mode selection callback triggered', {
+						hasPlanContent: !!options?.planContent,
+						hasOnModify: !!options?.onModify,
+					});
+
+					// Trigger mode selection UI
+					appState.setIsModeSelectionMode(true);
+					logger.info('[MODE_SELECTION] Set isModeSelectionMode to true');
+
+					// Store the handlers and options for use by the UI component
+					appState.setPendingModeSelection({
+						onSelect,
+						onCancel,
+						onModify: options?.onModify,
+						planContent: options?.planContent,
+					});
+					logger.info(
+						'[MODE_SELECTION] Stored pending mode selection handlers',
+					);
+				},
+			);
+
+			// Cleanup on unmount or when leaving plan mode
+			return () => {
+				logger.debug('[MODE_SELECTION] Cleanup - unregistering callback');
+				registerModeSelectionCallback(null);
+				appState.setIsModeSelectionMode(false);
+			};
+		}
+	}, [
+		appState.developmentMode,
+		logger,
+		appState.setIsModeSelectionMode,
+		appState.setPendingModeSelection,
+	]);
+
+	// Register plan review callback when in plan mode
+	React.useEffect(() => {
+		if (appState.developmentMode === 'plan') {
+			// Register callback for plan review
+			registerPlanReviewCallback(
+				(
+					data: import('@/utils/plan-review-registry').PlanReviewData,
+					onApprove: () => void,
+					onCancel: () => void,
+				) => {
+					// Trigger plan review UI
+					appState.setIsPlanReviewMode(true);
+
+					// Store the data and callbacks for use by the UI component
+					appState.setPendingPlanReview({
+						data,
+						onApprove,
+						onReject: onCancel,
+					});
+				},
+			);
+
+			// Cleanup on unmount or when leaving plan mode
+			return () => {
+				registerPlanReviewCallback(null);
+				appState.setIsPlanReviewMode(false);
+			};
+		}
+	}, [appState.developmentMode, appState]);
+
+	// Register question prompt callback (available in all modes)
+	React.useEffect(() => {
+		logger.debug('[QUESTION_PROMPT] Registering question prompt callback');
+
+		// Register callback for question prompts
+		registerQuestionPromptCallback(
+			(
+				questions: import('@/utils/question-selection-registry').Question[],
+				onSubmit: (answers: Record<string, string>) => void,
+				onCancel: () => void,
+			) => {
+				logger.info('[QUESTION_PROMPT] Question prompt callback triggered', {
+					questionCount: questions.length,
+				});
+
+				// Trigger question prompt UI
+				appState.setIsQuestionPromptMode(true);
+
+				// Store the questions and callbacks for use by the UI component
+				appState.setPendingQuestionPrompt({
+					questions,
+					onSubmit,
+					onCancel,
+				});
+			},
+		);
+
+		// Cleanup on unmount
+		return () => {
+			logger.debug('[QUESTION_PROMPT] Cleanup - unregistering callback');
+			registerQuestionPromptCallback(null);
+			appState.setIsQuestionPromptMode(false);
+		};
+	}, [
+		logger,
+		appState.setIsQuestionPromptMode,
+		appState.setPendingQuestionPrompt,
+	]);
 
 	// Setup non-interactive mode
 	const {nonInteractiveLoadingMessage} = useNonInteractiveMode({
@@ -445,6 +584,9 @@ export default function App({
 				vscodeMode,
 				vscodePort: vscodeServer.actualPort,
 				vscodeRequestedPort: vscodeServer.requestedPort,
+				planModeActive: appState.planModeActive,
+				planPhase: appState.planPhase,
+				planSummary: appState.planSummary,
 			}),
 		[
 			shouldShowWelcome,
@@ -459,6 +601,9 @@ export default function App({
 			vscodeMode,
 			vscodeServer.actualPort,
 			vscodeServer.requestedPort,
+			appState.planModeActive,
+			appState.planPhase,
+			appState.planSummary,
 		],
 	);
 
@@ -613,6 +758,127 @@ export default function App({
 							/>
 						)}
 
+						{/* Mode Selection Prompt - shown after plan completion */}
+						{appState.isModeSelectionMode && appState.pendingModeSelection && (
+							<ModeSelectionPrompt
+								onSelect={mode => {
+									// Notify the tool handler (for logging/debugging)
+									appState.pendingModeSelection?.onSelect(mode);
+									// Update the global mode context
+									setCurrentModeContext(mode);
+									// Update React app state
+									appState.setDevelopmentMode(mode);
+									// Then reset plan mode state (both global and React)
+									resetPlanModeState();
+									appState.setPlanModeActive(false);
+									appState.setPlanSummary('');
+									appState.setPlanPhase('understanding');
+									appState.setPlanFilePath('');
+									// Clear the UI
+									appState.setIsModeSelectionMode(false);
+									appState.setPendingModeSelection(null);
+								}}
+								onCancel={() => {
+									// Notify the tool handler (for logging/debugging)
+									appState.pendingModeSelection?.onCancel();
+									// Switch to normal mode as default
+									setCurrentModeContext('normal');
+									appState.setDevelopmentMode('normal');
+									// Reset plan mode state
+									resetPlanModeState();
+									appState.setPlanModeActive(false);
+									appState.setPlanSummary('');
+									appState.setPlanPhase('understanding');
+									appState.setPlanFilePath('');
+									// Clear the UI
+									appState.setIsModeSelectionMode(false);
+									appState.setPendingModeSelection(null);
+								}}
+								onModify={() => {
+									appState.pendingModeSelection?.onModify?.();
+									// Stay in plan mode, just clear the UI
+									appState.setIsModeSelectionMode(false);
+									appState.setPendingModeSelection(null);
+								}}
+								planContent={appState.pendingModeSelection.planContent}
+							/>
+						)}
+
+						{/* Plan Review Prompt - shown before plan file is saved */}
+						{appState.isPlanReviewMode && appState.pendingPlanReview && (
+							<PlanReviewPrompt
+								data={appState.pendingPlanReview.data}
+								onApprove={() => {
+									appState.pendingPlanReview?.onApprove();
+									appState.setIsPlanReviewMode(false);
+									appState.setPendingPlanReview(null);
+								}}
+								onReject={() => {
+									appState.pendingPlanReview?.onReject();
+									appState.setIsPlanReviewMode(false);
+									appState.setPendingPlanReview(null);
+								}}
+							/>
+						)}
+
+						{/* Interactive Question Prompt - shown when AI needs to ask questions */}
+						{appState.isQuestionPromptMode &&
+							appState.pendingQuestionPrompt && (
+								<InteractiveQuestionPrompt
+									questions={appState.pendingQuestionPrompt.questions}
+									onSubmit={async answers => {
+										// Store questions and callbacks before clearing state
+										const questions =
+											appState.pendingQuestionPrompt?.questions || [];
+										const onSubmitCallback =
+											appState.pendingQuestionPrompt?.onSubmit;
+
+										// Clear the question prompt state
+										appState.setIsQuestionPromptMode(false);
+										appState.setPendingQuestionPrompt(null);
+
+										// Call the original callback (for logging)
+										onSubmitCallback?.(answers);
+
+										// Format the answers as a user message to continue the conversation
+										const answerLines = Object.entries(answers)
+											.filter(([key]) => key.startsWith('question_'))
+											.sort(([a], [b]) => {
+												const aIndex = parseInt(a.replace('question_', ''), 10);
+												const bIndex = parseInt(b.replace('question_', ''), 10);
+												return aIndex - bIndex;
+											})
+											.map(([_, value], index) => {
+												const question = questions[index];
+												return `Q: ${question?.question || ''}\nA: ${value}`;
+											});
+
+										const answerMessage = `My answers to your questions:\n\n${answerLines.join('\n\n')}`;
+
+										// Continue the conversation with the user's answers
+										// This ensures the LLM receives the answers and can proceed
+										try {
+											await chatHandler.handleChatMessage(answerMessage);
+										} catch (error) {
+											logger.error(
+												'[QUESTION_PROMPT] Failed to continue conversation after answers',
+												{
+													error:
+														error instanceof Error
+															? error.message
+															: String(error),
+												},
+											);
+										}
+									}}
+									onCancel={() => {
+										appState.pendingQuestionPrompt?.onCancel();
+										appState.setIsQuestionPromptMode(false);
+										appState.setPendingQuestionPrompt(null);
+									}}
+								/>
+							)}
+
 						{/* Chat Input - only rendered when not in modal mode */}
 						{appState.startChat &&
 							!(
@@ -623,8 +889,10 @@ export default function App({
 								appState.isConfigWizardMode ||
 								appState.isMcpWizardMode ||
 								appState.isTitleShapeSelectionMode ||
-								appState.isNanocoderShapeSelectionMode ||
-								appState.isCheckpointLoadMode
+								appState.isCheckpointLoadMode ||
+								appState.isModeSelectionMode ||
+								appState.isPlanReviewMode ||
+								appState.isQuestionPromptMode
 							) && (
 								<ChatInput
 									isCancelling={appState.isCancelling}
@@ -643,6 +911,20 @@ export default function App({
 										chatHandler.isGenerating || appState.isToolExecuting
 									}
 									developmentMode={appState.developmentMode}
+									planModeState={{
+										active: appState.planModeActive,
+										planSummary: appState.planSummary,
+										phase: appState.planPhase,
+										planDirectoryPath: appState.planDirectoryPath,
+										proposalPath: appState.proposalPath,
+										designPath: appState.designPath,
+										specPath: appState.specPath,
+										tasksPath: appState.tasksPath,
+										planFilePath: appState.planFilePath,
+										currentDocument: appState.currentDocument,
+										completedDocuments: appState.completedDocuments,
+										validationResults: appState.validationResults,
+									}}
 									onToolConfirm={toolHandler.handleToolConfirmation}
 									onToolCancel={toolHandler.handleToolConfirmationCancel}
 									onSubmit={appHandlers.handleMessageSubmit}

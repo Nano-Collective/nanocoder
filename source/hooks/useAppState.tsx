@@ -8,12 +8,15 @@ import {createTokenizer} from '@/tokenization/index.js';
 import {ToolManager} from '@/tools/tool-manager';
 import type {CheckpointListItem} from '@/types/checkpoint';
 import type {CustomCommand} from '@/types/commands';
+import type {ValidationResult} from '@/types/core';
 import {
 	DevelopmentMode,
+	DocumentType,
 	LLMClient,
 	LSPConnectionStatus,
 	MCPConnectionStatus,
 	Message,
+	PlanPhase,
 	ToolCall,
 } from '@/types/core';
 import type {ToolResult, UpdateInfo} from '@/types/index';
@@ -117,11 +120,51 @@ export function useAppState() {
 	} | null>(null);
 	const [isToolConfirmationMode, setIsToolConfirmationMode] =
 		useState<boolean>(false);
+	const [isModeSelectionMode, setIsModeSelectionMode] =
+		useState<boolean>(false);
+	const [pendingModeSelection, setPendingModeSelection] = useState<{
+		onSelect: (mode: DevelopmentMode) => void;
+		onCancel: () => void;
+		onModify?: () => void;
+		planContent?: string;
+	} | null>(null);
+	const [isPlanReviewMode, setIsPlanReviewMode] = useState<boolean>(false);
+	const [pendingPlanReview, setPendingPlanReview] = useState<{
+		data: import('@/utils/plan-review-registry').PlanReviewData;
+		onApprove: () => void;
+		onReject: () => void;
+	} | null>(null);
+	const [isQuestionPromptMode, setIsQuestionPromptMode] =
+		useState<boolean>(false);
+	const [pendingQuestionPrompt, setPendingQuestionPrompt] = useState<{
+		questions: import('@/utils/question-selection-registry').Question[];
+		onSubmit: (answers: Record<string, string>) => void;
+		onCancel: () => void;
+	} | null>(null);
 	const [isToolExecuting, setIsToolExecuting] = useState<boolean>(false);
 
 	// Development mode state
 	const [developmentMode, setDevelopmentMode] =
 		useState<DevelopmentMode>('normal');
+
+	// Plan mode state
+	const [planModeActive, setPlanModeActive] = useState<boolean>(false);
+	const [planSummary, setPlanSummary] = useState<string>('');
+	const [planPhase, setPlanPhase] = useState<PlanPhase>('understanding');
+	const [planDirectoryPath, setPlanDirectoryPath] = useState<string>('');
+	const [proposalPath, setProposalPath] = useState<string | null>(null);
+	const [designPath, setDesignPath] = useState<string | null>(null);
+	const [specPath, setSpecPath] = useState<string | null>(null);
+	const [tasksPath, setTasksPath] = useState<string | null>(null);
+	const [planFilePath, setPlanFilePath] = useState<string>('');
+	const [currentDocument, setCurrentDocument] = useState<DocumentType | null>(
+		null,
+	);
+	const [completedDocuments, setCompletedDocuments] = useState<
+		Set<DocumentType>
+	>(new Set());
+	const [validationResults, setValidationResults] =
+		useState<ValidationResult | null>(null);
 
 	// Tool confirmation state
 	const [pendingToolCalls, setPendingToolCalls] = useState<ToolCall[]>([]);
@@ -269,8 +312,26 @@ export function useAppState() {
 		isCheckpointLoadMode,
 		checkpointLoadData,
 		isToolConfirmationMode,
+		isModeSelectionMode,
+		pendingModeSelection,
+		isPlanReviewMode,
+		pendingPlanReview,
+		isQuestionPromptMode,
+		pendingQuestionPrompt,
 		isToolExecuting,
 		developmentMode,
+		planModeActive,
+		planSummary,
+		planPhase,
+		planDirectoryPath,
+		proposalPath,
+		designPath,
+		specPath,
+		tasksPath,
+		planFilePath,
+		currentDocument,
+		completedDocuments,
+		validationResults,
 		pendingToolCalls,
 		currentToolIndex,
 		completedToolResults,
@@ -313,8 +374,26 @@ export function useAppState() {
 		setIsCheckpointLoadMode,
 		setCheckpointLoadData,
 		setIsToolConfirmationMode,
+		setIsModeSelectionMode,
+		setPendingModeSelection,
+		setIsPlanReviewMode,
+		setPendingPlanReview,
+		setIsQuestionPromptMode,
+		setPendingQuestionPrompt,
 		setIsToolExecuting,
 		setDevelopmentMode,
+		setPlanModeActive,
+		setPlanSummary,
+		setPlanPhase,
+		setPlanDirectoryPath,
+		setProposalPath,
+		setDesignPath,
+		setSpecPath,
+		setTasksPath,
+		setPlanFilePath,
+		setCurrentDocument,
+		setCompletedDocuments,
+		setValidationResults,
 		setPendingToolCalls,
 		setCurrentToolIndex,
 		setCompletedToolResults,

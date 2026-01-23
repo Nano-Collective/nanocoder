@@ -4,11 +4,13 @@ import AssistantMessage from '@/components/assistant-message';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import UserMessage from '@/components/user-message';
 import {appConfig, getAppConfig} from '@/config/index';
+import {getCurrentMode} from '@/context/mode-context';
 import {parseToolCalls} from '@/tool-calling/index';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {LLMClient, Message, ToolCall, ToolResult} from '@/types/core';
 import {performAutoCompact} from '@/utils/auto-compact';
 import {MessageBuilder} from '@/utils/message-builder';
+import {processPhaseTransition} from '@/utils/plan/phase-transition-detector';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {displayToolResult} from '@/utils/tool-result-display';
 import {filterValidToolCalls} from '../utils/tool-filters';
@@ -39,6 +41,7 @@ interface ProcessAssistantResponseParams {
 		systemMessage: Message,
 	) => void;
 	onConversationComplete?: () => void;
+	setPlanPhase?: (phase: import('@/types/core').PlanPhase) => void;
 }
 
 /**
@@ -73,6 +76,7 @@ export const processAssistantResponse = async (
 		conversationStateManager,
 		onStartToolConfirmationFlow,
 		onConversationComplete,
+		setPlanPhase,
 	} = params;
 
 	// Ensure we have an abort controller for this request
@@ -174,6 +178,19 @@ export const processAssistantResponse = async (
 
 	const parsedToolCalls = parseResult.toolCalls;
 	const cleanedContent = parseResult.cleanedContent;
+
+	// Detect plan mode phase transitions in AI response
+	// This updates both global context and React state when phase changes
+	if (developmentMode === 'plan' && cleanedContent.trim()) {
+		const phaseChanged = processPhaseTransition(cleanedContent);
+		if (phaseChanged && setPlanPhase) {
+			// Import here to avoid circular dependency
+			// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+			const {getPlanPhase} = await import('@/context/mode-context');
+			const newPhase = getPlanPhase();
+			setPlanPhase(newPhase);
+		}
+	}
 
 	// Display the assistant response (cleaned of any tool calls)
 	if (cleanedContent.trim()) {
@@ -301,13 +318,8 @@ export const processAssistantResponse = async (
 
 	// Handle tool calls if present - this continues the loop
 	if (validToolCalls && validToolCalls.length > 0) {
-		// Note: Plan mode tool blocking was removed - the referenced tools
-		// (create_file, delete_lines, insert_lines, replace_lines) no longer exist.
-		// Plan mode restrictions are handled via needsApproval in tool definitions.
-		// TODO: Implement registry-based blocking for plan mode (track as separate issue).
-
 		// Separate tools that need confirmation vs those that don't
-		// Check tool's needsApproval property to determine if confirmation is needed
+		// Use centralized ToolManager approval logic for consistent behavior
 		const toolsNeedingConfirmation: ToolCall[] = [];
 		const toolsToExecuteDirectly: ToolCall[] = [];
 
@@ -338,180 +350,267 @@ export const processAssistantResponse = async (
 				}
 			}
 
-			// Check tool's needsApproval property from the tool definition
-			let toolNeedsApproval = true; // Default to requiring approval for safety
-			if (toolManager) {
-				const toolEntry = toolManager.getToolEntry(toolCall.function.name);
-				if (toolEntry?.tool) {
-					const needsApprovalProp = (
-						toolEntry.tool as unknown as {
-							needsApproval?:
-								| boolean
-								| ((args: unknown) => boolean | Promise<boolean>);
-						}
-					).needsApproval;
-					if (typeof needsApprovalProp === 'boolean') {
-						toolNeedsApproval = needsApprovalProp;
-					} else if (typeof needsApprovalProp === 'function') {
-						// Evaluate function - our tools use getCurrentMode() internally
-						// and don't actually need the args parameter
-						try {
-							const parsedArgs = parseToolArguments(
-								toolCall.function.arguments,
-							);
-							// Cast to any to handle AI SDK type signature mismatch
-							// Our tool implementations don't use the second parameter
-							toolNeedsApproval = await (
-								needsApprovalProp as (
-									args: unknown,
-								) => boolean | Promise<boolean>
-							)(parsedArgs);
-						} catch {
-							// If evaluation fails, require approval for safety
-							toolNeedsApproval = true;
-						}
-					}
-				}
-			}
+			// Use centralized ToolManager approval logic
+			// This provides consistent plan mode filtering across all tools
+			const canExecuteWithoutConfirmation = toolManager
+				? toolManager.shouldExecuteWithoutConfirmation(
+						toolCall.function.name,
+						validationFailed,
+					)
+				: false;
 
 			// Execute directly if:
 			// 1. Validation failed (need to send error back to model)
-			// 2. Tool has needsApproval: false
-			// 3. Explicitly allowed in non-interactive mode
-			// 4. In auto-accept mode (except bash which always needs approval)
-			const isBashTool = toolCall.function.name === 'execute_bash';
-			const isNonInteractiveAllowed =
-				nonInteractiveMode &&
-				nonInteractiveAllowList.has(toolCall.function.name);
-			const shouldExecuteDirectly =
-				validationFailed ||
-				!toolNeedsApproval ||
-				isNonInteractiveAllowed ||
-				(developmentMode === 'auto-accept' && !isBashTool);
+			// 2. Tool is allowed to execute without confirmation (per ToolManager)
+			if (validationFailed || canExecuteWithoutConfirmation) {
+				// Check tool's needsApproval property from the tool definition
+				let toolNeedsApproval = true; // Default to requiring approval for safety
+				if (toolManager) {
+					const toolEntry = toolManager.getToolEntry(toolCall.function.name);
+					if (toolEntry?.tool) {
+						const needsApprovalProp = (
+							toolEntry.tool as unknown as {
+								needsApproval?:
+									| boolean
+									| ((args: unknown) => boolean | Promise<boolean>);
+							}
+						).needsApproval;
+						if (typeof needsApprovalProp === 'boolean') {
+							toolNeedsApproval = needsApprovalProp;
+						} else if (typeof needsApprovalProp === 'function') {
+							// Evaluate function - our tools use getCurrentMode() internally
+							// and don't actually need the args parameter
+							try {
+								const parsedArgs = parseToolArguments(
+									toolCall.function.arguments,
+								);
+								// Cast to any to handle AI SDK type signature mismatch
+								// Our tool implementations don't use the second parameter
+								toolNeedsApproval = await (
+									needsApprovalProp as (
+										args: unknown,
+									) => boolean | Promise<boolean>
+								)(parsedArgs);
+							} catch {
+								// If evaluation fails, require approval for safety
+								toolNeedsApproval = true;
+							}
+						}
+					}
+				}
 
-			if (shouldExecuteDirectly) {
-				toolsToExecuteDirectly.push(toolCall);
-			} else {
-				toolsNeedingConfirmation.push(toolCall);
+				// Execute directly if:
+				// 1. Validation failed (need to send error back to model)
+				// 2. Tool has needsApproval: false
+				// 3. Explicitly allowed in non-interactive mode
+				// 4. In auto-accept mode (except bash which always needs approval)
+				const isBashTool = toolCall.function.name === 'execute_bash';
+				const isNonInteractiveAllowed =
+					nonInteractiveMode &&
+					nonInteractiveAllowList.has(toolCall.function.name);
+				const shouldExecuteDirectly =
+					validationFailed ||
+					!toolNeedsApproval ||
+					isNonInteractiveAllowed ||
+					(developmentMode === 'auto-accept' && !isBashTool);
+
+				if (shouldExecuteDirectly) {
+					toolsToExecuteDirectly.push(toolCall);
+				} else {
+					toolsNeedingConfirmation.push(toolCall);
+				}
 			}
-		}
 
-		// Execute non-confirmation tools directly
-		if (toolsToExecuteDirectly.length > 0) {
-			const directResults = await executeToolsDirectly(
-				toolsToExecuteDirectly,
-				toolManager,
-				conversationStateManager,
-				addToChatQueue,
-				getNextComponentKey,
-			);
+			// Execute non-confirmation tools directly
+			if (toolsToExecuteDirectly.length > 0) {
+				const directResults = await executeToolsDirectly(
+					toolsToExecuteDirectly,
+					toolManager,
+					conversationStateManager,
+					addToChatQueue,
+					getNextComponentKey,
+				);
 
-			// If we have results, continue the conversation with them
-			if (directResults.length > 0) {
-				// Add tool results to messages
-				const directBuilder = new MessageBuilder(updatedMessages);
-				directBuilder.addToolResults(directResults);
-				const updatedMessagesWithTools = directBuilder.build();
-				setMessages(updatedMessagesWithTools);
+				// If we have results, continue the conversation with them
+				if (directResults.length > 0) {
+					// Add tool results to messages
+					const directBuilder = new MessageBuilder(updatedMessages);
+					directBuilder.addToolResults(directResults);
+					const updatedMessagesWithTools = directBuilder.build();
+					setMessages(updatedMessagesWithTools);
 
-				// Continue the main conversation loop with tool results as context
+					// Continue the main conversation loop with tool results as context
+					// In plan mode, this ensures the LLM continues its analysis
+					await processAssistantResponse({
+						...params,
+						messages: updatedMessagesWithTools,
+					});
+					return;
+				}
+
+				// Edge case: Tools were executed but returned no results
+				// This shouldn't happen normally, but if it does, continue anyway
+				// Add a continuation prompt to keep the conversation going
+				const continuationPrompt: Message = {
+					role: 'user',
+					content:
+						'Please continue with your analysis based on the tools you just executed.',
+				};
+
+				const continuationBuilder = new MessageBuilder(updatedMessages);
+				continuationBuilder.addMessage(continuationPrompt);
+				const updatedMessagesWithContinuation = continuationBuilder.build();
+				setMessages(updatedMessagesWithContinuation);
+
 				await processAssistantResponse({
 					...params,
-					messages: updatedMessagesWithTools,
+					messages: updatedMessagesWithContinuation,
 				});
 				return;
 			}
+
+			// Start confirmation flow only for tools that need it
+			if (toolsNeedingConfirmation.length > 0) {
+				// In non-interactive mode, exit when tool approval is required
+				if (nonInteractiveMode) {
+					const toolNames = toolsNeedingConfirmation
+						.map(tc => tc.function.name)
+						.join(', ');
+					const errorMsg = `Tool approval required for: ${toolNames}. Exiting non-interactive mode`;
+
+					// Add error message to UI
+					addToChatQueue(
+						<ErrorMessage
+							key={`tool-approval-required-${Date.now()}`}
+							message={errorMsg}
+							hideBox={true}
+						/>,
+					);
+
+					// Add error to messages array so exit detection can find it
+					const errorMessage: Message = {
+						role: 'assistant',
+						content: errorMsg,
+					};
+					// Use updatedMessages which already includes auto-executed tool results
+					const errorBuilder = new MessageBuilder(updatedMessages);
+					errorBuilder.addMessage(errorMessage);
+					setMessages(errorBuilder.build());
+
+					// Signal completion to trigger exit
+					if (onConversationComplete) {
+						onConversationComplete();
+					}
+					return;
+				}
+
+				// Pass complete messages including assistant msg
+				// useToolHandler will add tool results
+				onStartToolConfirmationFlow(
+					toolsNeedingConfirmation,
+					updatedMessages, // Includes assistant message
+					assistantMsg,
+					systemMessage,
+				);
+			}
 		}
 
-		// Start confirmation flow only for tools that need it
-		if (toolsNeedingConfirmation.length > 0) {
-			// In non-interactive mode, exit when tool approval is required
-			if (nonInteractiveMode) {
-				const toolNames = toolsNeedingConfirmation
-					.map(tc => tc.function.name)
-					.join(', ');
-				const errorMsg = `Tool approval required for: ${toolNames}. Exiting non-interactive mode`;
+		// If no tool calls, the conversation naturally ends here
+		// BUT: if there's ALSO no content, that's likely an error - the model should have said something
+		// Auto-reprompt to help the model continue
+		if (validToolCalls.length === 0 && !cleanedContent.trim()) {
+			// Check if we just executed tools (updatedMessages should have tool results)
+			const lastMessage = updatedMessages[updatedMessages.length - 1];
+			const hasRecentToolResults = lastMessage?.role === 'tool';
 
-				// Add error message to UI
-				addToChatQueue(
-					<ErrorMessage
-						key={`tool-approval-required-${Date.now()}`}
-						message={errorMsg}
-						hideBox={true}
-					/>,
-				);
+			// Add a continuation message to help the model respond
+			// For recent tool results, ask for a summary; otherwise, ask to continue
+			const nudgeContent = hasRecentToolResults
+				? 'Please provide a summary or response based on the tool results above.'
+				: 'Please continue with the task.';
 
-				// Add error to messages array so exit detection can find it
-				const errorMessage: Message = {
-					role: 'assistant',
-					content: errorMsg,
-				};
-				// Use updatedMessages which already includes auto-executed tool results
-				const errorBuilder = new MessageBuilder(updatedMessages);
-				errorBuilder.addMessage(errorMessage);
-				setMessages(errorBuilder.build());
+			const nudgeMessage: Message = {
+				role: 'user',
+				content: nudgeContent,
+			};
 
-				// Signal completion to trigger exit
-				if (onConversationComplete) {
-					onConversationComplete();
+			// Display a "continue" message in chat so user knows what happened
+			addToChatQueue(
+				<UserMessage
+					key={`auto-continue-${getNextComponentKey()}`}
+					message="continue"
+				/>,
+			);
+
+			// Don't include the empty assistantMsg - it would cause API error
+			// "Assistant message must have either content or tool_calls"
+			const nudgeBuilder = new MessageBuilder(updatedMessages);
+			nudgeBuilder.addMessage(nudgeMessage);
+			const updatedMessagesWithNudge = nudgeBuilder.build();
+			setMessages(updatedMessagesWithNudge);
+
+			// Continue the conversation loop with the nudge
+			await processAssistantResponse({
+				...params,
+				messages: updatedMessagesWithNudge,
+			});
+			return;
+		}
+
+		if (validToolCalls.length === 0 && cleanedContent.trim()) {
+			const currentMode = getCurrentMode();
+			// In plan mode, don't auto-complete - continue the workflow
+			// Plan mode is a multi-phase autonomous workflow that should continue
+			// through all phases until exit_plan_mode is called
+			if (currentMode === 'plan') {
+				// Import here to avoid circular dependency
+				// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+				const {getPlanPhase} = await import('@/context/mode-context');
+				const currentPhase = getPlanPhase();
+
+				// Create phase-aware continuation prompt
+				let phasePrompt = '';
+				switch (currentPhase) {
+					case 'understanding':
+						phasePrompt =
+							'Please continue by creating the proposal.md document with your findings, then move to the Design phase.';
+						break;
+					case 'design':
+						phasePrompt =
+							'Please continue by creating the design.md document with your technical decisions, then move to the Review phase.';
+						break;
+					case 'review':
+						phasePrompt =
+							'Please continue by creating the spec.md document with requirements and Gherkin scenarios, then move to the Final Plan phase.';
+						break;
+					case 'final':
+						phasePrompt =
+							'Please continue by creating the tasks.md and plan.md documents, then call the exit-plan-mode tool.';
+						break;
+					default:
+						phasePrompt =
+							'Please continue with the next phase of the plan workflow. Create the required documents and move forward.';
 				}
+
+				// Add a continuation prompt to move to the next phase
+				const phaseBuilder = new MessageBuilder(updatedMessages);
+				phaseBuilder.addMessage({
+					role: 'user',
+					content: phasePrompt,
+				});
+				const updatedMessagesWithPhasePrompt = phaseBuilder.build();
+				setMessages(updatedMessagesWithPhasePrompt);
+
+				// Continue the conversation loop
+				await processAssistantResponse({
+					...params,
+					messages: updatedMessagesWithPhasePrompt,
+				});
 				return;
 			}
 
-			// Pass complete messages including assistant msg
-			// useToolHandler will add tool results
-			onStartToolConfirmationFlow(
-				toolsNeedingConfirmation,
-				updatedMessages, // Includes assistant message
-				assistantMsg,
-				systemMessage,
-			);
+			// In other modes, complete the conversation
+			onConversationComplete?.();
 		}
-	}
-
-	// If no tool calls, the conversation naturally ends here
-	// BUT: if there's ALSO no content, that's likely an error - the model should have said something
-	// Auto-reprompt to help the model continue
-	if (validToolCalls.length === 0 && !cleanedContent.trim()) {
-		// Check if we just executed tools (updatedMessages should have tool results)
-		const lastMessage = updatedMessages[updatedMessages.length - 1];
-		const hasRecentToolResults = lastMessage?.role === 'tool';
-
-		// Add a continuation message to help the model respond
-		// For recent tool results, ask for a summary; otherwise, ask to continue
-		const nudgeContent = hasRecentToolResults
-			? 'Please provide a summary or response based on the tool results above.'
-			: 'Please continue with the task.';
-
-		const nudgeMessage: Message = {
-			role: 'user',
-			content: nudgeContent,
-		};
-
-		// Display a "continue" message in chat so user knows what happened
-		addToChatQueue(
-			<UserMessage
-				key={`auto-continue-${getNextComponentKey()}`}
-				message="continue"
-			/>,
-		);
-
-		// Don't include the empty assistantMsg - it would cause API error
-		// "Assistant message must have either content or tool_calls"
-		const nudgeBuilder = new MessageBuilder(updatedMessages);
-		nudgeBuilder.addMessage(nudgeMessage);
-		const updatedMessagesWithNudge = nudgeBuilder.build();
-		setMessages(updatedMessagesWithNudge);
-
-		// Continue the conversation loop with the nudge
-		await processAssistantResponse({
-			...params,
-			messages: updatedMessagesWithNudge,
-		});
-		return;
-	}
-
-	if (validToolCalls.length === 0 && cleanedContent.trim()) {
-		onConversationComplete?.();
 	}
 };

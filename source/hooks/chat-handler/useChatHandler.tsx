@@ -31,6 +31,7 @@ export function useChatHandler({
 	nonInteractiveMode = false,
 	onStartToolConfirmationFlow,
 	onConversationComplete,
+	setPlanPhase,
 }: UseChatHandlerProps): ChatHandlerReturn {
 	// Conversation state manager for enhanced context
 	const conversationStateManager = React.useRef(new ConversationStateManager());
@@ -93,6 +94,7 @@ export function useChatHandler({
 					conversationStateManager,
 					onStartToolConfirmationFlow,
 					onConversationComplete,
+					setPlanPhase,
 				});
 			} catch (error) {
 				displayError(error, 'chat-error');
@@ -118,6 +120,7 @@ export function useChatHandler({
 			onConversationComplete,
 			displayError,
 			resetStreamingState,
+			setPlanPhase,
 		],
 	);
 
