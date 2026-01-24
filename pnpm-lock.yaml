@@ -113,7 +113,7 @@ importers:
         version: 2.0.5
       '@types/node':
         specifier: ^25.0.3
-        version: 25.0.8
+        version: 25.0.10
       '@types/react':
         specifier: ^19.0.0
         version: 19.2.8
@@ -137,7 +137,7 @@ importers:
         version: 4.0.0(@types/react@19.2.8)
       knip:
         specifier: ^5.66.2
-        version: 5.81.0(@types/node@25.0.8)(typescript@5.9.3)
+        version: 5.81.0(@types/node@25.0.10)(typescript@5.9.3)
       lint-staged:
         specifier: ^16.2.7
         version: 16.2.7
@@ -162,7 +162,7 @@ importers:
     devDependencies:
       '@types/node':
         specifier: ^25.0.3
-        version: 25.0.8
+        version: 25.0.10
       '@types/vscode':
         specifier: ^1.85.0
         version: 1.108.1
@@ -847,8 +847,8 @@ packages:
   '@types/node@18.19.130':
     resolution: {integrity: sha512-GRaXQx6jGfL8sKfaIDD6OupbIHBr9jv7Jnaml9tB7l4v068PAOXqfcujMMo5PhbIs6ggR1XODELqahT2R8v0fg==}
 
-  '@types/node@25.0.8':
-    resolution: {integrity: sha512-powIePYMmC3ibL0UJ2i2s0WIbq6cg6UyVFQxSCpaPxxzAaziRfimGivjdF943sSGV6RADVbk0Nvlm5P/FB44Zg==}
+  '@types/node@25.0.10':
+    resolution: {integrity: sha512-zWW5KPngR/yvakJgGOmZ5vTBemDoSqF3AcV/LrO5u5wTWyEAVVh+IT39G4gtyAkh3CtTZs8aX/yRM82OfzHJRg==}
 
   '@types/normalize-package-data@2.4.4':
     resolution: {integrity: sha512-37i+OaWTh9qeK4LSHPsyRC7NahnGotNuZvjLSgcPzblpHB3rrCJxAOgI5gCdKm7coonsaX1Of0ILiTcnZjbfxA==}
@@ -3890,7 +3890,7 @@ snapshots:
 
   '@types/ink@0.5.2':
     dependencies:
-      '@types/node': 25.0.8
+      '@types/node': 25.0.10
       '@types/prop-types': 15.7.15
 
   '@types/istanbul-lib-coverage@2.0.6': {}
@@ -3901,7 +3901,7 @@ snapshots:
     dependencies:
       undici-types: 5.26.5
 
-  '@types/node@25.0.8':
+  '@types/node@25.0.10':
     dependencies:
       undici-types: 7.16.0
 
@@ -3921,7 +3921,7 @@ snapshots:
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 25.0.8
+      '@types/node': 25.0.10
 
   '@typespec/ts-http-runtime@0.3.2':
     dependencies:
@@ -5299,10 +5299,10 @@ snapshots:
     dependencies:
       is-buffer: 1.1.6
 
-  knip@5.81.0(@types/node@25.0.8)(typescript@5.9.3):
+  knip@5.81.0(@types/node@25.0.10)(typescript@5.9.3):
     dependencies:
       '@nodelib/fs.walk': 1.2.8
-      '@types/node': 25.0.8
+      '@types/node': 25.0.10
       fast-glob: 3.3.3
       formatly: 0.3.0
       jiti: 2.6.1
