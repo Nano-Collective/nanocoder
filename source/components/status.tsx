@@ -198,7 +198,6 @@ export default memo(function Status({
 				/* Normal/Wide terminal: full layout with TitledBoxWithPreferences */
 				<TitledBoxWithPreferences
 					title="Status"
-					reversePowerline={true}
 					width={boxWidth}
 					borderColor={colors.info}
 					paddingX={2}

@@ -582,16 +582,13 @@ You can override this directory using `NANOCODER_DATA_DIR`.
 - `/provider` - Switch between configured AI providers
 - `/status` - Display current status (CWD, provider, model, theme, available updates, AGENTS setup)
 - `/model-database` - Browse coding models from OpenRouter (searchable, filterable by open/proprietary)
-- `/settings` - Interactive menu to access all commands
+- `/settings` - Interactive menu to access Nanocoder theme settings (theme, title-shape, nanocoder-shape) and commands
 - `/mcp` - Show connected MCP servers and their tools
 - `/custom-commands` - List all custom commands
 - `/checkpoint` - Save and restore conversation snapshots (see [Checkpointing](#checkpointing) section)
 - `/compact` - Compress message history to reduce context usage (see [Context Compression](docs/context-compression.md))
 - `/exit` - Exit the application
 - `/export` - Export current session to markdown file
-- `/theme` - Select a theme for the Nanocoder CLI
-- `/title-shape` - Select a title shape style for the Nanocoder CLI (real-time preview)
-- `/nanocoder-shape` - Select a branding font style for the Nanocoder welcome banner (real-time preview)
 - `/update` - Update Nanocoder to the latest version
 - `/usage` – Get current model context usage visually
 - `/lsp` – List connected LSP servers

@@ -1,6 +1,6 @@
+import React from 'react';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
-import React from 'react';
 import type {CheckpointListItem} from './checkpoint';
 import type {CustomCommand} from './commands';
 import type {Message} from './core';
@@ -13,9 +13,6 @@ export interface MessageSubmissionOptions {
 	onClearMessages: () => Promise<void>;
 	onEnterModelSelectionMode: () => void;
 	onEnterProviderSelectionMode: () => void;
-	onEnterThemeSelectionMode: () => void;
-	onEnterTitleShapeSelectionMode: () => void;
-	onEnterNanocoderShapeSelectionMode: () => void;
 	onEnterModelDatabaseMode: () => void;
 	onEnterConfigWizardMode: () => void;
 	onEnterSettingsMode: () => void;

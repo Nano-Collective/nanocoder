@@ -55,7 +55,6 @@ const MessageBox = memo(function MessageBox({
 			) : (
 				<TitledBoxWithPreferences
 					title={title}
-					reversePowerline={true}
 					width={boxWidth}
 					borderColor={color}
 					paddingX={2}

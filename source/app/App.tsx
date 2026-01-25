@@ -1,3 +1,6 @@
+import {Box, Text, useApp} from 'ink';
+import Spinner from 'ink-spinner';
+import React, {useEffect, useMemo} from 'react';
 import {createStaticComponents} from '@/app/components/app-container';
 import {ChatHistory} from '@/app/components/chat-history';
 import {ChatInput} from '@/app/components/chat-input';
@@ -7,10 +10,11 @@ import type {AppProps} from '@/app/types';
 import SecurityDisclaimer from '@/components/security-disclaimer';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {
-	VSCodeExtensionPrompt,
 	shouldPromptExtensionInstall,
+	VSCodeExtensionPrompt,
 } from '@/components/vscode-extension-prompt';
 import WelcomeMessage from '@/components/welcome-message';
+import {updateSelectedTheme} from '@/config/preferences';
 import {getThemeColors} from '@/config/themes';
 import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
 import {useChatHandler} from '@/hooks/chat-handler';
@@ -25,15 +29,13 @@ import {TitleShapeContext, updateTitleShape} from '@/hooks/useTitleShape';
 import {useToolHandler} from '@/hooks/useToolHandler';
 import {UIStateProvider} from '@/hooks/useUIState';
 import {useVSCodeServer} from '@/hooks/useVSCodeServer';
+import type {ThemePreset} from '@/types/ui';
 import {
 	generateCorrelationId,
 	withNewCorrelationContext,
 } from '@/utils/logging';
 import {createPinoLogger} from '@/utils/logging/pino-logger';
 import {setGlobalMessageQueue} from '@/utils/message-queue';
-import {Box, Text, useApp} from 'ink';
-import Spinner from 'ink-spinner';
-import React, {useEffect, useMemo} from 'react';
 
 export default function App({
 	vscodeMode = false,
@@ -166,7 +168,10 @@ export default function App({
 	const themeContextValue = {
 		currentTheme: appState.currentTheme,
 		colors: getThemeColors(appState.currentTheme),
-		setCurrentTheme: appState.setCurrentTheme,
+		setCurrentTheme: (theme: ThemePreset) => {
+			appState.setCurrentTheme(theme);
+			updateSelectedTheme(theme);
+		},
 	};
 
 	// Create title shape context value
@@ -356,9 +361,6 @@ export default function App({
 		setMessages: appState.updateMessages,
 		setIsModelSelectionMode: appState.setIsModelSelectionMode,
 		setIsProviderSelectionMode: appState.setIsProviderSelectionMode,
-		setIsThemeSelectionMode: appState.setIsThemeSelectionMode,
-		setIsTitleShapeSelectionMode: appState.setIsTitleShapeSelectionMode,
-		setIsNanocoderShapeSelectionMode: appState.setIsNanocoderShapeSelectionMode,
 		setIsModelDatabaseMode: appState.setIsModelDatabaseMode,
 		setIsConfigWizardMode: appState.setIsConfigWizardMode,
 		setIsSettingsMode: appState.setIsSettingsMode,
@@ -397,10 +399,6 @@ export default function App({
 		getMessageTokens: appState.getMessageTokens,
 		enterModelSelectionMode: modeHandlers.enterModelSelectionMode,
 		enterProviderSelectionMode: modeHandlers.enterProviderSelectionMode,
-		enterThemeSelectionMode: modeHandlers.enterThemeSelectionMode,
-		enterTitleShapeSelectionMode: modeHandlers.enterTitleShapeSelectionMode,
-		enterNanocoderShapeSelectionMode:
-			modeHandlers.enterNanocoderShapeSelectionMode,
 		enterModelDatabaseMode: modeHandlers.enterModelDatabaseMode,
 		enterConfigWizardMode: modeHandlers.enterConfigWizardMode,
 		enterSettingsMode: modeHandlers.enterSettingsMode,
@@ -566,61 +564,44 @@ export default function App({
 						{/* Modal Selectors - rendered below chat history */}
 						{(appState.isModelSelectionMode ||
 							appState.isProviderSelectionMode ||
-							appState.isThemeSelectionMode ||
 							appState.isModelDatabaseMode ||
 							appState.isConfigWizardMode ||
 							appState.isMcpWizardMode ||
-							appState.isTitleShapeSelectionMode ||
-							appState.isNanocoderShapeSelectionMode ||
+							appState.isSettingsMode ||
 							appState.isCheckpointLoadMode) && (
-							<ModalSelectors
-								isModelSelectionMode={appState.isModelSelectionMode}
-								isProviderSelectionMode={appState.isProviderSelectionMode}
-								isThemeSelectionMode={appState.isThemeSelectionMode}
-								isModelDatabaseMode={appState.isModelDatabaseMode}
-								isConfigWizardMode={appState.isConfigWizardMode}
-								isMcpWizardMode={appState.isMcpWizardMode}
-								isSettingsMode={appState.isSettingsMode}
-								isCheckpointLoadMode={appState.isCheckpointLoadMode}
-								isTitleShapeSelectionMode={appState.isTitleShapeSelectionMode}
-								isNanocoderShapeSelectionMode={
-									appState.isNanocoderShapeSelectionMode
-								}
-								client={appState.client}
-								currentModel={appState.currentModel}
-								currentProvider={appState.currentProvider}
-								checkpointLoadData={appState.checkpointLoadData}
-								onModelSelect={modeHandlers.handleModelSelect}
-								onModelSelectionCancel={modeHandlers.handleModelSelectionCancel}
-								onProviderSelect={modeHandlers.handleProviderSelect}
-								onProviderSelectionCancel={
-									modeHandlers.handleProviderSelectionCancel
-								}
-								onThemeSelect={modeHandlers.handleThemeSelect}
-								onTitleShapeSelect={modeHandlers.handleTitleShapeSelect}
-								onTitleShapeSelectionCancel={
-									modeHandlers.handleTitleShapeSelectionCancel
-								}
-								onNanocoderShapeSelect={modeHandlers.handleNanocoderShapeSelect}
-								onNanocoderShapeSelectionCancel={
-									modeHandlers.handleNanocoderShapeSelectionCancel
-								}
-								onThemeSelectionCancel={modeHandlers.handleThemeSelectionCancel}
-								onModelDatabaseCancel={modeHandlers.handleModelDatabaseCancel}
-								onConfigWizardComplete={modeHandlers.handleConfigWizardComplete}
-								onConfigWizardCancel={modeHandlers.handleConfigWizardCancel}
-								onMcpWizardComplete={modeHandlers.handleMcpWizardComplete}
-								onMcpWizardCancel={modeHandlers.handleMcpWizardCancel}
-								onSettingsSelect={commandName => {
-									modeHandlers.handleSettingsCancel();
-									setTimeout(() => {
-										handleMessageSubmitRef.current?.(`/${commandName}`);
-									}, 0);
-								}}
-								onSettingsCancel={modeHandlers.handleSettingsCancel}
-								onCheckpointSelect={appHandlers.handleCheckpointSelect}
-								onCheckpointCancel={appHandlers.handleCheckpointCancel}
-							/>
+							<Box marginLeft={-1} flexDirection="column">
+								<ModalSelectors
+									isModelSelectionMode={appState.isModelSelectionMode}
+									isProviderSelectionMode={appState.isProviderSelectionMode}
+									isModelDatabaseMode={appState.isModelDatabaseMode}
+									isConfigWizardMode={appState.isConfigWizardMode}
+									isMcpWizardMode={appState.isMcpWizardMode}
+									isSettingsMode={appState.isSettingsMode}
+									isCheckpointLoadMode={appState.isCheckpointLoadMode}
+									client={appState.client}
+									currentModel={appState.currentModel}
+									currentProvider={appState.currentProvider}
+									checkpointLoadData={appState.checkpointLoadData}
+									onModelSelect={modeHandlers.handleModelSelect}
+									onModelSelectionCancel={
+										modeHandlers.handleModelSelectionCancel
+									}
+									onProviderSelect={modeHandlers.handleProviderSelect}
+									onProviderSelectionCancel={
+										modeHandlers.handleProviderSelectionCancel
+									}
+									onModelDatabaseCancel={modeHandlers.handleModelDatabaseCancel}
+									onConfigWizardComplete={
+										modeHandlers.handleConfigWizardComplete
+									}
+									onConfigWizardCancel={modeHandlers.handleConfigWizardCancel}
+									onMcpWizardComplete={modeHandlers.handleMcpWizardComplete}
+									onMcpWizardCancel={modeHandlers.handleMcpWizardCancel}
+									onSettingsCancel={modeHandlers.handleSettingsCancel}
+									onCheckpointSelect={appHandlers.handleCheckpointSelect}
+									onCheckpointCancel={appHandlers.handleCheckpointCancel}
+								/>
+							</Box>
 						)}
 
 						{/* Chat Input - only rendered when not in modal mode */}
@@ -628,13 +609,10 @@ export default function App({
 							!(
 								appState.isModelSelectionMode ||
 								appState.isProviderSelectionMode ||
-								appState.isThemeSelectionMode ||
 								appState.isModelDatabaseMode ||
 								appState.isConfigWizardMode ||
 								appState.isSettingsMode ||
 								appState.isMcpWizardMode ||
-								appState.isTitleShapeSelectionMode ||
-								appState.isNanocoderShapeSelectionMode ||
 								appState.isCheckpointLoadMode
 							) && (
 								<ChatInput

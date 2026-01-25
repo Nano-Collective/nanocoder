@@ -1,3 +1,4 @@
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {loadPreferences} from '@/config/preferences';
 import {defaultTheme} from '@/config/themes';
@@ -19,7 +20,6 @@ import type {ToolResult, UpdateInfo} from '@/types/index';
 import type {Tokenizer} from '@/types/tokenization.js';
 import type {ThemePreset} from '@/types/ui';
 import {BoundedMap} from '@/utils/bounded-map';
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 
 export interface ConversationContext {
 	/**
@@ -99,12 +99,6 @@ export function useAppState() {
 	const [isModelSelectionMode, setIsModelSelectionMode] =
 		useState<boolean>(false);
 	const [isProviderSelectionMode, setIsProviderSelectionMode] =
-		useState<boolean>(false);
-	const [isThemeSelectionMode, setIsThemeSelectionMode] =
-		useState<boolean>(false);
-	const [isTitleShapeSelectionMode, setIsTitleShapeSelectionMode] =
-		useState<boolean>(false);
-	const [isNanocoderShapeSelectionMode, setIsNanocoderShapeSelectionMode] =
 		useState<boolean>(false);
 	const [isModelDatabaseMode, setIsModelDatabaseMode] =
 		useState<boolean>(false);
@@ -262,9 +256,6 @@ export function useAppState() {
 		abortController,
 		isModelSelectionMode,
 		isProviderSelectionMode,
-		isThemeSelectionMode,
-		isTitleShapeSelectionMode,
-		isNanocoderShapeSelectionMode,
 		isModelDatabaseMode,
 		isConfigWizardMode,
 		isMcpWizardMode,
@@ -307,9 +298,6 @@ export function useAppState() {
 		setAbortController,
 		setIsModelSelectionMode,
 		setIsProviderSelectionMode,
-		setIsThemeSelectionMode,
-		setIsTitleShapeSelectionMode,
-		setIsNanocoderShapeSelectionMode,
 		setIsModelDatabaseMode,
 		setIsConfigWizardMode,
 		setIsMcpWizardMode,

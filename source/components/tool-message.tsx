@@ -72,7 +72,6 @@ export default memo(function ToolMessage({
 			) : (
 				<TitledBoxWithPreferences
 					title={title || 'Tool Message'}
-					reversePowerline={true}
 					width={boxWidth}
 					borderColor={borderColor}
 					paddingX={2}

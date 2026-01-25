@@ -40,7 +40,6 @@ function CustomCommands({commands}: CustomCommandsProps) {
 	return (
 		<TitledBoxWithPreferences
 			title="Custom Commands"
-			reversePowerline={true}
 			width={75}
 			borderColor={colors.primary}
 			paddingX={2}
