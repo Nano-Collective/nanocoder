@@ -227,18 +227,22 @@ async function findModelById(modelId: string): Promise<ModelInfo | null> {
 
 	// Search through all providers
 	for (const [_providerId, provider] of Object.entries(data)) {
+		// Skip malformed provider entries
+		if (!provider || typeof provider !== 'object' || !provider.models) {
+			continue;
+		}
 		const model = provider.models[modelId];
 		if (model) {
 			return {
 				id: model.id,
 				name: model.name,
 				provider: provider.name,
-				contextLimit: model.limit.context,
-				outputLimit: model.limit.output,
-				supportsToolCalls: model.tool_call,
+				contextLimit: model.limit?.context ?? null,
+				outputLimit: model.limit?.output ?? null,
+				supportsToolCalls: model.tool_call ?? false,
 				cost: {
-					input: model.cost.input,
-					output: model.cost.output,
+					input: model.cost?.input ?? 0,
+					output: model.cost?.output ?? 0,
 				},
 			};
 		}
@@ -266,21 +270,29 @@ async function findModelByName(modelName: string): Promise<ModelInfo | null> {
 
 	// Search through all providers
 	for (const [_providerId, provider] of Object.entries(data)) {
+		// Skip malformed provider entries
+		if (!provider || typeof provider !== 'object' || !provider.models) {
+			continue;
+		}
 		for (const [_modelId, model] of Object.entries(provider.models)) {
+			// Skip malformed model entries
+			if (!model || typeof model !== 'object') {
+				continue;
+			}
 			if (
-				model.id.toLowerCase().includes(lowerName) ||
-				model.name.toLowerCase().includes(lowerName)
+				(model.id && model.id.toLowerCase().includes(lowerName)) ||
+				(model.name && model.name.toLowerCase().includes(lowerName))
 			) {
 				return {
 					id: model.id,
 					name: model.name,
 					provider: provider.name,
-					contextLimit: model.limit.context,
-					outputLimit: model.limit.output,
-					supportsToolCalls: model.tool_call,
+					contextLimit: model.limit?.context ?? null,
+					outputLimit: model.limit?.output ?? null,
+					supportsToolCalls: model.tool_call ?? false,
 					cost: {
-						input: model.cost.input,
-						output: model.cost.output,
+						input: model.cost?.input ?? 0,
+						output: model.cost?.output ?? 0,
 					},
 				};
 			}
@@ -297,38 +309,48 @@ async function findModelByName(modelName: string): Promise<ModelInfo | null> {
 export async function getModelContextLimit(
 	modelId: string,
 ): Promise<number | null> {
-	// Try Ollama fallback first with original model ID (before normalization)
-	// This handles cloud models like gpt-oss:20b-cloud
-	const ollamaLimitOriginal = getOllamaFallbackContextLimit(modelId);
-	if (ollamaLimitOriginal) {
-		return ollamaLimitOriginal;
+	try {
+		// Try Ollama fallback first with original model ID (before normalization)
+		// This handles cloud models like gpt-oss:20b-cloud
+		const ollamaLimitOriginal = getOllamaFallbackContextLimit(modelId);
+		if (ollamaLimitOriginal) {
+			return ollamaLimitOriginal;
+		}
+
+		// Strip :cloud or -cloud suffix if present (Ollama cloud models)
+		const normalizedModelId =
+			modelId.endsWith(':cloud') || modelId.endsWith('-cloud')
+				? modelId.slice(0, -6) // Remove ":cloud" or "-cloud"
+				: modelId;
+
+		// Try exact ID match first
+		let modelInfo = await findModelById(normalizedModelId);
+
+		// Try partial name match if exact match fails
+		if (!modelInfo) {
+			modelInfo = await findModelByName(normalizedModelId);
+		}
+
+		// If found in models.dev, return that
+		if (modelInfo) {
+			return modelInfo.contextLimit;
+		}
+
+		// Fall back to Ollama model defaults with normalized ID
+		const ollamaLimit = getOllamaFallbackContextLimit(normalizedModelId);
+		if (ollamaLimit) {
+			return ollamaLimit;
+		}
+
+		// No context limit found
+		return null;
+	} catch (error) {
+		// Log error but don't crash - just return null
+		const logger = getLogger();
+		logger.error(
+			{error: formatError(error), modelId},
+			'Error getting model context limit',
+		);
+		return null;
 	}
-
-	// Strip :cloud or -cloud suffix if present (Ollama cloud models)
-	const normalizedModelId =
-		modelId.endsWith(':cloud') || modelId.endsWith('-cloud')
-			? modelId.slice(0, -6) // Remove ":cloud" or "-cloud"
-			: modelId;
-
-	// Try exact ID match first
-	let modelInfo = await findModelById(normalizedModelId);
-
-	// Try partial name match if exact match fails
-	if (!modelInfo) {
-		modelInfo = await findModelByName(normalizedModelId);
-	}
-
-	// If found in models.dev, return that
-	if (modelInfo) {
-		return modelInfo.contextLimit;
-	}
-
-	// Fall back to Ollama model defaults with normalized ID
-	const ollamaLimit = getOllamaFallbackContextLimit(normalizedModelId);
-	if (ollamaLimit) {
-		return ollamaLimit;
-	}
-
-	// No context limit found
-	return null;
 }

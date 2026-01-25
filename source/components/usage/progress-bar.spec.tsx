@@ -297,20 +297,17 @@ test('ProgressBar total width equals specified width', t => {
 	t.is(totalChars, width);
 });
 
-test('ProgressBar handles zero width', t => {
+test('ProgressBar handles zero width with fallback to minimum', t => {
 	const {lastFrame} = render(
 		<ProgressBar percent={50} width={0} color="#00ff00" />,
 	);
 
 	const output = lastFrame();
-	// Output should be an empty string or have no progress characters
-	if (output) {
-		t.falsy(output.includes('█'));
-		t.falsy(output.includes('░'));
-	} else {
-		// Empty string is acceptable for zero width
-		t.is(output, '');
-	}
+	t.truthy(output);
+	// Zero width should fall back to minimum width (10) to prevent crashes
+	// 50% of 10 = 5 filled, 5 empty
+	t.is(output!.match(/█/g)?.length, 5);
+	t.is(output!.match(/░/g)?.length, 5);
 });
 
 // ============================================================================

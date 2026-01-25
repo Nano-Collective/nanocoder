@@ -14,9 +14,14 @@ interface ProgressBarProps {
  * Renders an ASCII progress bar
  */
 export function ProgressBar({percent, width, color}: ProgressBarProps) {
-	const clampedPercent = Math.min(100, Math.max(0, percent));
-	const filledWidth = Math.round((width * clampedPercent) / 100);
-	const emptyWidth = width - filledWidth;
+	// Ensure values are valid numbers to prevent crashes
+	const safePercent = Number.isFinite(percent) ? percent : 0;
+	const safeWidth =
+		Number.isFinite(width) && width > 0 ? Math.floor(width) : 10;
+
+	const clampedPercent = Math.min(100, Math.max(0, safePercent));
+	const filledWidth = Math.round((safeWidth * clampedPercent) / 100);
+	const emptyWidth = safeWidth - filledWidth;
 
 	const filledBar = '█'.repeat(filledWidth);
 	const emptyBar = '░'.repeat(emptyWidth);
