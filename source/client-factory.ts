@@ -130,6 +130,8 @@ function loadProviderConfigs(): AIProviderConfig[] {
 		// Tool configuration
 		disableTools: provider.disableTools,
 		disableToolModels: provider.disableToolModels,
+		// SDK provider package to use
+		sdkProvider: provider.sdkProvider,
 		config: {
 			baseURL: provider.baseUrl,
 			apiKey: provider.apiKey || 'dummy-key',

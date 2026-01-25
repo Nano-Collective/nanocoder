@@ -150,3 +150,58 @@ test('custom template: includes timeout', t => {
 
 	t.is(config.timeout, 60000);
 });
+
+test('gemini template: sets sdkProvider to google', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'gemini');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'Gemini',
+		apiKey: 'test-key',
+		model: 'gemini-2.5-flash',
+	});
+
+	t.is(config.sdkProvider, 'google');
+	t.is(config.name, 'Gemini');
+	t.deepEqual(config.models, ['gemini-2.5-flash']);
+});
+
+test('gemini template: handles multiple models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'gemini');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'Gemini',
+		apiKey: 'test-key',
+		model: 'gemini-3-flash-preview, gemini-3-pro-preview',
+	});
+
+	t.is(config.sdkProvider, 'google');
+	t.deepEqual(config.models, ['gemini-3-flash-preview', 'gemini-3-pro-preview']);
+});
+
+test('gemini template: uses default provider name', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'gemini');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: '',
+		apiKey: 'test-key',
+		model: 'gemini-2.5-flash',
+	});
+
+	t.is(config.name, 'Gemini');
+});
+
+test('gemini template: includes baseUrl for documentation', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'gemini');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'Gemini',
+		apiKey: 'test-key',
+		model: 'gemini-2.5-flash',
+	});
+
+	t.is(config.baseUrl, 'https://generativelanguage.googleapis.com/v1beta');
+});

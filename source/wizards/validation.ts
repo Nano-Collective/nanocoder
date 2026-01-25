@@ -1,5 +1,5 @@
 import {TIMEOUT_PROVIDER_CONNECTION_MS} from '@/constants';
-import type {ProviderConfig} from '../types/config';
+import type {ProviderConfig, SdkProvider} from '../types/config';
 import type {McpServerConfig} from './templates/mcp-templates';
 
 interface ValidationResult {
@@ -157,6 +157,7 @@ interface ProviderConfigObject {
 			apiKey?: string;
 			organizationId?: string;
 			timeout?: number;
+			sdkProvider?: SdkProvider;
 		}>;
 	};
 }
@@ -185,6 +186,7 @@ export function buildProviderConfigObject(
 					apiKey?: string;
 					organizationId?: string;
 					timeout?: number;
+					sdkProvider?: SdkProvider;
 				} = {
 					name: p.name,
 					models: p.models,
@@ -204,6 +206,10 @@ export function buildProviderConfigObject(
 
 				if (p.timeout) {
 					providerConfig.timeout = p.timeout;
+				}
+
+				if (p.sdkProvider) {
+					providerConfig.sdkProvider = p.sdkProvider;
 				}
 
 				return providerConfig;
@@ -251,6 +257,7 @@ export function buildConfigObject(
 			apiKey?: string;
 			organizationId?: string;
 			timeout?: number;
+			sdkProvider?: SdkProvider;
 		}>;
 		mcpServers?: McpServerConfig[];
 	};
@@ -264,6 +271,7 @@ export function buildConfigObject(
 				apiKey?: string;
 				organizationId?: string;
 				timeout?: number;
+				sdkProvider?: SdkProvider;
 			}>;
 			mcpServers?: McpServerConfig[];
 		};
@@ -277,6 +285,7 @@ export function buildConfigObject(
 					apiKey?: string;
 					organizationId?: string;
 					timeout?: number;
+					sdkProvider?: SdkProvider;
 				} = {
 					name: p.name,
 					models: p.models,
@@ -296,6 +305,10 @@ export function buildConfigObject(
 
 				if (p.timeout) {
 					providerConfig.timeout = p.timeout;
+				}
+
+				if (p.sdkProvider) {
+					providerConfig.sdkProvider = p.sdkProvider;
 				}
 
 				return providerConfig;
