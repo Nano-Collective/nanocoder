@@ -13,11 +13,9 @@ export interface MessageSubmissionOptions {
 	onClearMessages: () => Promise<void>;
 	onEnterModelSelectionMode: () => void;
 	onEnterProviderSelectionMode: () => void;
-	onEnterThemeSelectionMode: () => void;
-	onEnterTitleShapeSelectionMode: () => void;
-	onEnterNanocoderShapeSelectionMode: () => void;
 	onEnterModelDatabaseMode: () => void;
 	onEnterConfigWizardMode: () => void;
+	onEnterSettingsMode: () => void;
 	onEnterMcpWizardMode: () => void;
 	onEnterCheckpointLoadMode: (
 		checkpoints: CheckpointListItem[],

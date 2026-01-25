@@ -46,28 +46,6 @@ export type ThemePreset =
 	| 'catppuccin-macchiato'
 	| 'catppuccin-mocha';
 
-export type TitleShape =
-	| 'rounded'
-	| 'square'
-	| 'double'
-	| 'pill'
-	| 'arrow-left'
-	| 'arrow-right'
-	| 'arrow-double'
-	| 'angled-box'
-	| 'powerline-angled'
-	| 'powerline-angled-thin'
-	| 'powerline-block'
-	| 'powerline-block-alt'
-	| 'powerline-curved'
-	| 'powerline-curved-thin'
-	| 'powerline-flame'
-	| 'powerline-flame-thin'
-	| 'powerline-graph'
-	| 'powerline-ribbon'
-	| 'powerline-segment'
-	| 'powerline-segment-thin';
-
 export type NanocoderShape =
 	| 'block'
 	| 'slick'

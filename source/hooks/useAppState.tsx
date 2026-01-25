@@ -89,6 +89,7 @@ export function useAppState() {
 	const [isCancelling, setIsCancelling] = useState<boolean>(false);
 	const [isConversationComplete, setIsConversationComplete] =
 		useState<boolean>(false);
+	const [isSettingsMode, setIsSettingsMode] = useState<boolean>(false);
 
 	// Cancellation state
 	const [abortController, setAbortController] =
@@ -98,12 +99,6 @@ export function useAppState() {
 	const [isModelSelectionMode, setIsModelSelectionMode] =
 		useState<boolean>(false);
 	const [isProviderSelectionMode, setIsProviderSelectionMode] =
-		useState<boolean>(false);
-	const [isThemeSelectionMode, setIsThemeSelectionMode] =
-		useState<boolean>(false);
-	const [isTitleShapeSelectionMode, setIsTitleShapeSelectionMode] =
-		useState<boolean>(false);
-	const [isNanocoderShapeSelectionMode, setIsNanocoderShapeSelectionMode] =
 		useState<boolean>(false);
 	const [isModelDatabaseMode, setIsModelDatabaseMode] =
 		useState<boolean>(false);
@@ -257,12 +252,10 @@ export function useAppState() {
 		customCommandsCount,
 		isCancelling,
 		isConversationComplete,
+		isSettingsMode,
 		abortController,
 		isModelSelectionMode,
 		isProviderSelectionMode,
-		isThemeSelectionMode,
-		isTitleShapeSelectionMode,
-		isNanocoderShapeSelectionMode,
 		isModelDatabaseMode,
 		isConfigWizardMode,
 		isMcpWizardMode,
@@ -301,12 +294,10 @@ export function useAppState() {
 		setCustomCommandsCount,
 		setIsCancelling,
 		setIsConversationComplete,
+		setIsSettingsMode,
 		setAbortController,
 		setIsModelSelectionMode,
 		setIsProviderSelectionMode,
-		setIsThemeSelectionMode,
-		setIsTitleShapeSelectionMode,
-		setIsNanocoderShapeSelectionMode,
 		setIsModelDatabaseMode,
 		setIsConfigWizardMode,
 		setIsMcpWizardMode,

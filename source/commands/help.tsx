@@ -45,7 +45,6 @@ function Help({
 	return (
 		<TitledBoxWithPreferences
 			title="Help"
-			reversePowerline={true}
 			width={boxWidth}
 			borderColor={colors.primary}
 			paddingX={2}

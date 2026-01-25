@@ -27,14 +27,12 @@ const SPECIAL_COMMANDS = {
 	CLEAR: 'clear',
 	MODEL: 'model',
 	PROVIDER: 'provider',
-	THEME: 'theme',
 	MODEL_DATABASE: 'model-database',
 	SETUP_PROVIDERS: 'setup-providers',
 	SETUP_MCP: 'setup-mcp',
+	SETTINGS: 'settings',
 	STATUS: 'status',
 	CHECKPOINT: 'checkpoint',
-	TITLE_SHAPE: 'title-shape',
-	NANOCODER_SHAPE: 'nanocoder-shape',
 } as const;
 
 /** Checkpoint subcommands */
@@ -186,11 +184,9 @@ async function handleSpecialCommand(
 		onClearMessages,
 		onEnterModelSelectionMode,
 		onEnterProviderSelectionMode,
-		onEnterThemeSelectionMode,
-		onEnterTitleShapeSelectionMode,
-		onEnterNanocoderShapeSelectionMode,
 		onEnterModelDatabaseMode,
 		onEnterConfigWizardMode,
+		onEnterSettingsMode,
 		onEnterMcpWizardMode,
 		onShowStatus,
 		onCommandComplete,
@@ -223,21 +219,6 @@ async function handleSpecialCommand(
 			onCommandComplete?.();
 			return true;
 
-		case SPECIAL_COMMANDS.THEME:
-			onEnterThemeSelectionMode();
-			onCommandComplete?.();
-			return true;
-
-		case SPECIAL_COMMANDS.TITLE_SHAPE:
-			onEnterTitleShapeSelectionMode();
-			onCommandComplete?.();
-			return true;
-
-		case SPECIAL_COMMANDS.NANOCODER_SHAPE:
-			onEnterNanocoderShapeSelectionMode();
-			onCommandComplete?.();
-			return true;
-
 		case SPECIAL_COMMANDS.MODEL_DATABASE:
 			onEnterModelDatabaseMode();
 			onCommandComplete?.();
@@ -250,6 +231,11 @@ async function handleSpecialCommand(
 
 		case SPECIAL_COMMANDS.SETUP_MCP:
 			onEnterMcpWizardMode();
+			onCommandComplete?.();
+			return true;
+
+		case SPECIAL_COMMANDS.SETTINGS:
+			onEnterSettingsMode();
 			onCommandComplete?.();
 			return true;
 
