@@ -2,16 +2,10 @@ import React from 'react';
 import {createLLMClient} from '@/client-factory';
 import {ErrorMessage, SuccessMessage} from '@/components/message-box';
 import {reloadAppConfig} from '@/config/index';
-import {
-	loadPreferences,
-	savePreferences,
-	updateLastUsed,
-	updateNanocoderShape,
-	updateTitleShape,
-} from '@/config/preferences';
+import {loadPreferences, updateLastUsed} from '@/config/preferences';
 import {getToolManager} from '@/message-handler';
 import {LLMClient, Message} from '@/types/core';
-import type {NanocoderShape, ThemePreset, TitleShape} from '@/types/ui';
+import type {ThemePreset} from '@/types/ui';
 
 interface UseModeHandlersProps {
 	client: LLMClient | null;
@@ -25,11 +19,9 @@ interface UseModeHandlersProps {
 	setMessages: (messages: Message[]) => void;
 	setIsModelSelectionMode: (mode: boolean) => void;
 	setIsProviderSelectionMode: (mode: boolean) => void;
-	setIsThemeSelectionMode: (mode: boolean) => void;
-	setIsTitleShapeSelectionMode: (mode: boolean) => void;
-	setIsNanocoderShapeSelectionMode: (mode: boolean) => void;
 	setIsModelDatabaseMode: (mode: boolean) => void;
 	setIsConfigWizardMode: (mode: boolean) => void;
+	setIsSettingsMode: (mode: boolean) => void;
 	setIsMcpWizardMode: (mode: boolean) => void;
 	addToChatQueue: (component: React.ReactNode) => void;
 	getNextComponentKey: () => number;
@@ -46,15 +38,13 @@ export function useModeHandlers({
 	setClient,
 	setCurrentModel,
 	setCurrentProvider,
-	setCurrentTheme,
+	setCurrentTheme: _setCurrentTheme,
 	setMessages,
 	setIsModelSelectionMode,
 	setIsProviderSelectionMode,
-	setIsThemeSelectionMode,
-	setIsTitleShapeSelectionMode,
-	setIsNanocoderShapeSelectionMode,
 	setIsModelDatabaseMode,
 	setIsConfigWizardMode,
+	setIsSettingsMode,
 	setIsMcpWizardMode,
 	addToChatQueue,
 	getNextComponentKey,
@@ -162,89 +152,6 @@ export function useModeHandlers({
 	// Handle provider selection cancel
 	const handleProviderSelectionCancel = () => {
 		setIsProviderSelectionMode(false);
-	};
-
-	// Helper function to enter theme selection mode
-	const enterThemeSelectionMode = () => {
-		setIsThemeSelectionMode(true);
-	};
-
-	// Helper function to enter title shape selection mode
-	const enterTitleShapeSelectionMode = () => {
-		setIsTitleShapeSelectionMode(true);
-	};
-
-	// Handle title shape selection
-	const handleTitleShapeSelect = (selectedShape: TitleShape) => {
-		updateTitleShape(selectedShape);
-
-		// Add success message to chat queue
-		addToChatQueue(
-			<SuccessMessage
-				key={`title-shape-changed-${getNextComponentKey()}`}
-				message={`Title shape changed to: ${selectedShape}.`}
-				hideBox={true}
-			/>,
-		);
-
-		setIsTitleShapeSelectionMode(false);
-	};
-
-	// Handle title shape selection cancel
-	const handleTitleShapeSelectionCancel = () => {
-		setIsTitleShapeSelectionMode(false);
-	};
-
-	// Helper function to enter nanocoder shape selection mode
-	const enterNanocoderShapeSelectionMode = () => {
-		setIsNanocoderShapeSelectionMode(true);
-	};
-
-	// Handle nanocoder shape selection
-	const handleNanocoderShapeSelect = (selectedShape: NanocoderShape) => {
-		updateNanocoderShape(selectedShape);
-
-		// Add success message to chat queue
-		addToChatQueue(
-			<SuccessMessage
-				key={`nanocoder-shape-changed-${getNextComponentKey()}`}
-				message={`Nanocoder branding style changed to: ${selectedShape}.`}
-				hideBox={true}
-			/>,
-		);
-
-		setIsNanocoderShapeSelectionMode(false);
-	};
-
-	// Handle nanocoder shape selection cancel
-	const handleNanocoderShapeSelectionCancel = () => {
-		setIsNanocoderShapeSelectionMode(false);
-	};
-
-	// Handle theme selection
-	const handleThemeSelect = (selectedTheme: ThemePreset) => {
-		const preferences = loadPreferences();
-		preferences.selectedTheme = selectedTheme;
-		savePreferences(preferences);
-
-		// Update the theme state immediately for real-time switching
-		setCurrentTheme(selectedTheme);
-
-		// Add success message to chat queue
-		addToChatQueue(
-			<SuccessMessage
-				key={`theme-changed-${getNextComponentKey()}`}
-				message={`Theme changed to: ${selectedTheme}.`}
-				hideBox={true}
-			/>,
-		);
-
-		setIsThemeSelectionMode(false);
-	};
-
-	// Handle theme selection cancel
-	const handleThemeSelectionCancel = () => {
-		setIsThemeSelectionMode(false);
 	};
 
 	// Helper function to enter model database mode
@@ -394,29 +301,32 @@ export function useModeHandlers({
 		setIsMcpWizardMode(false);
 	};
 
+	// Helper function to enter settings mode
+	const enterSettingsMode = () => {
+		setIsSettingsMode(true);
+	};
+
+	// Handle settings cancel
+	const handleSettingsCancel = () => {
+		setIsSettingsMode(false);
+	};
+
 	return {
 		enterModelSelectionMode,
 		enterProviderSelectionMode,
-		enterThemeSelectionMode,
-		enterTitleShapeSelectionMode,
-		handleTitleShapeSelect,
-		handleTitleShapeSelectionCancel,
-		enterNanocoderShapeSelectionMode,
-		handleNanocoderShapeSelect,
-		handleNanocoderShapeSelectionCancel,
 		enterModelDatabaseMode,
 		enterConfigWizardMode,
+		enterSettingsMode,
 		enterMcpWizardMode,
 		handleModelSelect,
 		handleModelSelectionCancel,
 		handleProviderSelect,
 		handleProviderSelectionCancel,
-		handleThemeSelect,
-		handleThemeSelectionCancel,
 		handleModelDatabaseCancel,
 		handleConfigWizardComplete,
 		handleConfigWizardCancel,
 		handleMcpWizardComplete,
 		handleMcpWizardCancel,
+		handleSettingsCancel,
 	};
 }

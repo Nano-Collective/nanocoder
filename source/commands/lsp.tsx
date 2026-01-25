@@ -21,7 +21,6 @@ export function LSP({status}: LSPProps) {
 	return (
 		<TitledBoxWithPreferences
 			title="/lsp"
-			reversePowerline={true}
 			width={boxWidth}
 			borderColor={colors.primary}
 			paddingX={2}

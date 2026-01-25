@@ -412,7 +412,6 @@ export function ProviderWizard({
 	return (
 		<TitledBoxWithPreferences
 			title="Provider Wizard"
-			reversePowerline={true}
 			width={boxWidth}
 			borderColor={colors.primary}
 			paddingX={2}

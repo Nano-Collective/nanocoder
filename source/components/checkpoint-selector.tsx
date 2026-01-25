@@ -69,7 +69,6 @@ export default function CheckpointSelector({
 		return (
 			<TitledBoxWithPreferences
 				title="Checkpoint Load - Backup Confirmation"
-				reversePowerline={true}
 				width={boxWidth}
 				borderColor={colors.warning}
 				paddingX={2}
@@ -134,7 +133,6 @@ export default function CheckpointSelector({
 		return (
 			<TitledBoxWithPreferences
 				title="No Checkpoints Available"
-				reversePowerline={true}
 				width={boxWidth}
 				borderColor={colors.secondary}
 				paddingX={2}
@@ -156,7 +154,6 @@ export default function CheckpointSelector({
 	return (
 		<TitledBoxWithPreferences
 			title="Select Checkpoint to Load"
-			reversePowerline={true}
 			width={boxWidth}
 			borderColor={colors.primary}
 			paddingX={2}

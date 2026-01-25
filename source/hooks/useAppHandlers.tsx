@@ -75,11 +75,9 @@ interface UseAppHandlersProps {
 	// Mode handlers
 	enterModelSelectionMode: () => void;
 	enterProviderSelectionMode: () => void;
-	enterThemeSelectionMode: () => void;
-	enterTitleShapeSelectionMode: () => void;
-	enterNanocoderShapeSelectionMode: () => void;
 	enterModelDatabaseMode: () => void;
 	enterConfigWizardMode: () => void;
+	enterSettingsMode: () => void;
 	enterMcpWizardMode: () => void;
 
 	// Chat handler
@@ -349,14 +347,11 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				onClearMessages: clearMessages,
 				onEnterModelSelectionMode: props.enterModelSelectionMode,
 				onEnterProviderSelectionMode: props.enterProviderSelectionMode,
-				onEnterThemeSelectionMode: props.enterThemeSelectionMode,
 				onEnterModelDatabaseMode: props.enterModelDatabaseMode,
 				onEnterConfigWizardMode: props.enterConfigWizardMode,
+				onEnterSettingsMode: props.enterSettingsMode,
 				onEnterMcpWizardMode: props.enterMcpWizardMode,
 				onEnterCheckpointLoadMode: enterCheckpointLoadMode,
-				onEnterTitleShapeSelectionMode: props.enterTitleShapeSelectionMode,
-				onEnterNanocoderShapeSelectionMode:
-					props.enterNanocoderShapeSelectionMode,
 				onShowStatus: handleShowStatus,
 				onHandleChatMessage: props.handleChatMessage,
 				onAddToChatQueue: props.addToChatQueue,

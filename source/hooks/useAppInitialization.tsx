@@ -14,14 +14,12 @@ import {
 	mcpCommand,
 	modelCommand,
 	modelDatabaseCommand,
-	nanocoderShapeCommand,
 	providerCommand,
 	quitCommand,
+	settingsCommand,
 	setupMcpCommand,
 	setupProvidersCommand,
 	statusCommand,
-	themeCommand,
-	titleShapeCommand,
 	updateCommand,
 	usageCommand,
 } from '@/commands/index';
@@ -381,7 +379,6 @@ export function useAppInitialization({
 				lspCommand,
 				mcpCommand,
 				initCommand,
-				themeCommand,
 				exportCommand,
 				updateCommand,
 				modelDatabaseCommand,
@@ -389,10 +386,9 @@ export function useAppInitialization({
 				setupProvidersCommand,
 				setupMcpCommand,
 				usageCommand,
-				titleShapeCommand,
-				nanocoderShapeCommand,
 				checkpointCommand,
 				quitCommand,
+				settingsCommand,
 			]);
 
 			// Now start with the properly initialized objects (excluding MCP)

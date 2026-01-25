@@ -78,7 +78,6 @@ export default function ModelSelector({
 		return (
 			<TitledBoxWithPreferences
 				title="Model Selection"
-				reversePowerline={true}
 				width={boxWidth}
 				borderColor={colors.primary}
 				paddingX={2}
@@ -94,7 +93,6 @@ export default function ModelSelector({
 		return (
 			<TitledBoxWithPreferences
 				title="Model Selection - Error"
-				reversePowerline={true}
 				width={boxWidth}
 				borderColor={colors.error}
 				paddingX={2}
@@ -117,7 +115,6 @@ export default function ModelSelector({
 	return (
 		<TitledBoxWithPreferences
 			title="Select a Model"
-			reversePowerline={true}
 			width={boxWidth}
 			borderColor={colors.primary}
 			paddingX={2}

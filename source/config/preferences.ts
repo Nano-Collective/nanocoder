@@ -2,7 +2,7 @@ import {readFileSync, writeFileSync} from 'fs';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {getClosestConfigFile} from '@/config/index';
 import type {UserPreferences} from '@/types/index';
-import type {NanocoderShape} from '@/types/ui';
+import type {NanocoderShape, ThemePreset} from '@/types/ui';
 import {logError} from '@/utils/message-queue';
 
 let PREFERENCES_PATH: string | null = null;
@@ -65,6 +65,12 @@ export function updateTitleShape(shape: string): void {
 export function getTitleShape(): TitleShape | undefined {
 	const preferences = loadPreferences();
 	return preferences.titleShape;
+}
+
+export function updateSelectedTheme(theme: string): void {
+	const preferences = loadPreferences();
+	preferences.selectedTheme = theme as ThemePreset;
+	savePreferences(preferences);
 }
 
 export function getLastUsedModel(provider: string): string | undefined {
