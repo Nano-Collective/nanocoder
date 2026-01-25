@@ -79,6 +79,7 @@ interface UseAppHandlersProps {
 	enterConfigWizardMode: () => void;
 	enterSettingsMode: () => void;
 	enterMcpWizardMode: () => void;
+	enterExplorerMode: () => void;
 
 	// Chat handler
 	handleChatMessage: (message: string) => Promise<void>;
@@ -351,6 +352,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				onEnterConfigWizardMode: props.enterConfigWizardMode,
 				onEnterSettingsMode: props.enterSettingsMode,
 				onEnterMcpWizardMode: props.enterMcpWizardMode,
+				onEnterExplorerMode: props.enterExplorerMode,
 				onEnterCheckpointLoadMode: enterCheckpointLoadMode,
 				onShowStatus: handleShowStatus,
 				onHandleChatMessage: props.handleChatMessage,

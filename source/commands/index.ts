@@ -3,6 +3,7 @@ export * from '@/commands/clear';
 export * from '@/commands/compact';
 export * from '@/commands/custom-commands';
 export * from '@/commands/exit';
+export * from '@/commands/explorer';
 export * from '@/commands/export';
 export * from '@/commands/help';
 export * from '@/commands/init';

@@ -73,9 +73,11 @@ export default function UserInput({
 		showClearMessage,
 		showCompletions,
 		completions,
+		pendingFileMentions,
 		setShowClearMessage,
 		setShowCompletions,
 		setCompletions,
+		setPendingFileMentions,
 		resetUIState,
 	} = uiState;
 
@@ -89,6 +91,50 @@ export default function UserInput({
 	useEffect(() => {
 		void promptHistory.loadHistory();
 	}, []);
+
+	// Consume pending file mentions from explorer and insert into input
+	// Properly attach files by calling handleFileMention for each
+	useEffect(() => {
+		if (pendingFileMentions.length === 0) return;
+
+		const attachFiles = async () => {
+			let state = currentState;
+			let displayValue = state.displayValue;
+
+			for (const filePath of pendingFileMentions) {
+				// Create a temporary mention text to replace
+				const mentionText = `@${filePath}`;
+				// Add the mention to display value first
+				displayValue = displayValue
+					? `${displayValue} ${mentionText}`
+					: mentionText;
+
+				// Handle the file mention to create placeholder
+				const result = await handleFileMention(
+					filePath,
+					displayValue,
+					state.placeholderContent,
+					mentionText,
+				);
+
+				if (result) {
+					state = result;
+					displayValue = result.displayValue;
+				}
+			}
+
+			setInputState(state);
+			setTextInputKey(prev => prev + 1);
+			setPendingFileMentions([]);
+		};
+
+		void attachFiles();
+	}, [
+		pendingFileMentions,
+		currentState,
+		setInputState,
+		setPendingFileMentions,
+	]);
 
 	// Trigger file autocomplete when input changes
 	useEffect(() => {

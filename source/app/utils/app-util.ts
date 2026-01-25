@@ -33,6 +33,7 @@ const SPECIAL_COMMANDS = {
 	SETTINGS: 'settings',
 	STATUS: 'status',
 	CHECKPOINT: 'checkpoint',
+	EXPLORER: 'explorer',
 } as const;
 
 /** Checkpoint subcommands */
@@ -188,6 +189,7 @@ async function handleSpecialCommand(
 		onEnterConfigWizardMode,
 		onEnterSettingsMode,
 		onEnterMcpWizardMode,
+		onEnterExplorerMode,
 		onShowStatus,
 		onCommandComplete,
 		onAddToChatQueue,
@@ -243,6 +245,11 @@ async function handleSpecialCommand(
 			onShowStatus();
 			// Status adds to queue synchronously, give React time to render
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
+			return true;
+
+		case SPECIAL_COMMANDS.EXPLORER:
+			onEnterExplorerMode();
+			onCommandComplete?.();
 			return true;
 
 		default:

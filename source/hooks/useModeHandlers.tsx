@@ -23,6 +23,7 @@ interface UseModeHandlersProps {
 	setIsConfigWizardMode: (mode: boolean) => void;
 	setIsSettingsMode: (mode: boolean) => void;
 	setIsMcpWizardMode: (mode: boolean) => void;
+	setIsExplorerMode: (mode: boolean) => void;
 	addToChatQueue: (component: React.ReactNode) => void;
 	getNextComponentKey: () => number;
 	reinitializeMCPServers: (
@@ -46,6 +47,7 @@ export function useModeHandlers({
 	setIsConfigWizardMode,
 	setIsSettingsMode,
 	setIsMcpWizardMode,
+	setIsExplorerMode,
 	addToChatQueue,
 	getNextComponentKey,
 	reinitializeMCPServers,
@@ -311,6 +313,16 @@ export function useModeHandlers({
 		setIsSettingsMode(false);
 	};
 
+	// Helper function to enter explorer mode
+	const enterExplorerMode = () => {
+		setIsExplorerMode(true);
+	};
+
+	// Handle explorer cancel
+	const handleExplorerCancel = () => {
+		setIsExplorerMode(false);
+	};
+
 	return {
 		enterModelSelectionMode,
 		enterProviderSelectionMode,
@@ -328,5 +340,7 @@ export function useModeHandlers({
 		handleMcpWizardComplete,
 		handleMcpWizardCancel,
 		handleSettingsCancel,
+		enterExplorerMode,
+		handleExplorerCancel,
 	};
 }
