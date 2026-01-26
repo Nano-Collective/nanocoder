@@ -133,6 +133,7 @@ function loadProviderConfigs(): AIProviderConfig[] {
 		config: {
 			baseURL: provider.baseUrl,
 			apiKey: provider.apiKey || 'dummy-key',
+			headers: provider.headers ?? {},
 		},
 	}));
 }
@@ -148,6 +149,7 @@ async function testProviderConnection(
 		try {
 			await fetch(providerConfig.config.baseURL, {
 				signal: AbortSignal.timeout(TIMEOUT_PROVIDER_CONNECTION_MS),
+				headers: providerConfig.config.headers,
 			});
 			// Don't check response.ok as some servers return 404 for root path
 			// We just need to confirm the server responded (not a network error)

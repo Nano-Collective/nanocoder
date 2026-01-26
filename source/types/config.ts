@@ -19,6 +19,7 @@ export interface AIProviderConfig {
 	config: {
 		baseURL?: string;
 		apiKey?: string;
+		headers?: Record<string, string>;
 		[key: string]: unknown;
 	};
 }
@@ -41,6 +42,7 @@ export interface ProviderConfig {
 	// Tool configuration
 	disableTools?: boolean; // Disable tools for entire provider
 	disableToolModels?: string[]; // List of model names to disable tools for
+	headers?: Record<string, string>;
 	[key: string]: unknown; // Allow additional provider-specific config
 }
 

@@ -163,6 +163,7 @@ export async function handleChat(
 				// Can be used to add custom logging, metrics, or step tracking
 				onStepFinish: createOnStepFinishHandler(callbacks),
 				prepareStep: createPrepareStepHandler(),
+				headers: providerConfig.config.headers,
 			});
 
 			// Get the full text from the result
