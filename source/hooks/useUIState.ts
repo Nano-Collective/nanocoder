@@ -11,9 +11,11 @@ type UIState = {
 	showClearMessage: boolean;
 	showCompletions: boolean;
 	completions: Completion[];
+	pendingFileMentions: string[];
 	setShowClearMessage: React.Dispatch<React.SetStateAction<boolean>>;
 	setShowCompletions: React.Dispatch<React.SetStateAction<boolean>>;
 	setCompletions: React.Dispatch<React.SetStateAction<Completion[]>>;
+	setPendingFileMentions: React.Dispatch<React.SetStateAction<string[]>>;
 	resetUIState: () => void;
 };
 
@@ -24,11 +26,13 @@ function useUIState(): UIState {
 	const [showClearMessage, setShowClearMessage] = useState(false);
 	const [showCompletions, setShowCompletions] = useState(false);
 	const [completions, setCompletions] = useState<Completion[]>([]);
+	const [pendingFileMentions, setPendingFileMentions] = useState<string[]>([]);
 
 	const resetUIState = useCallback(() => {
 		setShowClearMessage(false);
 		setShowCompletions(false);
 		setCompletions([]);
+		setPendingFileMentions([]);
 	}, []);
 
 	return useMemo(
@@ -36,12 +40,20 @@ function useUIState(): UIState {
 			showClearMessage,
 			showCompletions,
 			completions,
+			pendingFileMentions,
 			setShowClearMessage,
 			setShowCompletions,
 			setCompletions,
+			setPendingFileMentions,
 			resetUIState,
 		}),
-		[showClearMessage, showCompletions, completions, resetUIState],
+		[
+			showClearMessage,
+			showCompletions,
+			completions,
+			pendingFileMentions,
+			resetUIState,
+		],
 	);
 }
 

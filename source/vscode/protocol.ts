@@ -14,7 +14,8 @@ export type ServerMessage =
 	| StatusMessage
 	| ConnectionAckMessage
 	| DiagnosticsRequestMessage
-	| CloseDiffMessage;
+	| CloseDiffMessage
+	| OpenFileMessage;
 
 // Message types from Extension to CLI
 export type ClientMessage =
@@ -79,6 +80,12 @@ export interface DiagnosticsRequestMessage {
 export interface CloseDiffMessage {
 	type: 'close_diff';
 	id: string;
+}
+
+// Open a file in VS Code editor
+export interface OpenFileMessage {
+	type: 'open_file';
+	filePath: string;
 }
 
 // User prompt from extension

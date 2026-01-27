@@ -17,6 +17,7 @@ import {
 	DiagnosticInfo,
 	DiagnosticsRequestMessage,
 	FileChangeMessage,
+	OpenFileMessage,
 	PendingChange,
 	PROTOCOL_VERSION,
 	ServerMessage,
@@ -309,6 +310,17 @@ export class VSCodeServer {
 		for (const id of pendingIds) {
 			this.closeDiff(id);
 		}
+	}
+
+	/**
+	 * Open a file in VS Code editor
+	 */
+	openFileInVSCode(filePath: string): void {
+		const message: OpenFileMessage = {
+			type: 'open_file',
+			filePath,
+		};
+		this.broadcast(message);
 	}
 
 	/**

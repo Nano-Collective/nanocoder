@@ -7,6 +7,7 @@ import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
 import {shouldRenderWelcome} from '@/app/helpers';
 import type {AppProps} from '@/app/types';
+import {FileExplorer} from '@/components/file-explorer';
 import SecurityDisclaimer from '@/components/security-disclaimer';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {
@@ -365,6 +366,7 @@ export default function App({
 		setIsConfigWizardMode: appState.setIsConfigWizardMode,
 		setIsSettingsMode: appState.setIsSettingsMode,
 		setIsMcpWizardMode: appState.setIsMcpWizardMode,
+		setIsExplorerMode: appState.setIsExplorerMode,
 		addToChatQueue: appState.addToChatQueue,
 		getNextComponentKey: appState.getNextComponentKey,
 		reinitializeMCPServers: appInitialization.reinitializeMCPServers,
@@ -403,6 +405,7 @@ export default function App({
 		enterConfigWizardMode: modeHandlers.enterConfigWizardMode,
 		enterSettingsMode: modeHandlers.enterSettingsMode,
 		enterMcpWizardMode: modeHandlers.enterMcpWizardMode,
+		enterExplorerMode: modeHandlers.enterExplorerMode,
 		handleChatMessage: chatHandler.handleChatMessage,
 	});
 
@@ -561,6 +564,13 @@ export default function App({
 							liveComponent={appState.liveComponent}
 						/>
 
+						{/* File Explorer - rendered below chat history */}
+						{appState.isExplorerMode && (
+							<Box marginLeft={-1} flexDirection="column">
+								<FileExplorer onClose={modeHandlers.handleExplorerCancel} />
+							</Box>
+						)}
+
 						{/* Modal Selectors - rendered below chat history */}
 						{(appState.isModelSelectionMode ||
 							appState.isProviderSelectionMode ||
@@ -613,7 +623,8 @@ export default function App({
 								appState.isConfigWizardMode ||
 								appState.isSettingsMode ||
 								appState.isMcpWizardMode ||
-								appState.isCheckpointLoadMode
+								appState.isCheckpointLoadMode ||
+								appState.isExplorerMode
 							) && (
 								<ChatInput
 									isCancelling={appState.isCancelling}

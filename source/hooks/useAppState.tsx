@@ -106,6 +106,7 @@ export function useAppState() {
 	const [isMcpWizardMode, setIsMcpWizardMode] = useState<boolean>(false);
 	const [isCheckpointLoadMode, setIsCheckpointLoadMode] =
 		useState<boolean>(false);
+	const [isExplorerMode, setIsExplorerMode] = useState<boolean>(false);
 	const [checkpointLoadData, setCheckpointLoadData] = useState<{
 		checkpoints: CheckpointListItem[];
 		currentMessageCount: number;
@@ -260,6 +261,7 @@ export function useAppState() {
 		isConfigWizardMode,
 		isMcpWizardMode,
 		isCheckpointLoadMode,
+		isExplorerMode,
 		checkpointLoadData,
 		isToolConfirmationMode,
 		isToolExecuting,
@@ -302,6 +304,7 @@ export function useAppState() {
 		setIsConfigWizardMode,
 		setIsMcpWizardMode,
 		setIsCheckpointLoadMode,
+		setIsExplorerMode,
 		setCheckpointLoadData,
 		setIsToolConfirmationMode,
 		setIsToolExecuting,
