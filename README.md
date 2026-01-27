@@ -367,6 +367,13 @@ Nanocoder looks for configuration in the following order (first found wins):
 				"baseUrl": "https://api.poe.com/v1",
 				"apiKey": "your-poe-api-key",
 				"models": ["Claude-Sonnet-4", "GPT-4o", "Gemini-2.5-Pro"]
+			},
+			{
+				"name": "Gemini",
+				"sdkProvider": "google",
+				"baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+				"apiKey": "your-gemini-api-key",
+				"models": ["gemini-3-flash-preview", "gemini-3-pro-preview"]
 			}
 		]
 	}
@@ -387,6 +394,7 @@ Nanocoder looks for configuration in the following order (first found wins):
 - **GitHub Models**: `"baseUrl": "https://models.github.ai/inference"` (requires PAT with `models:read` scope)
 - **Z.ai**: `"baseUrl": "https://api.z.ai/api/paas/v4/"`
 - **Z.ai Coding**: `"baseUrl": "https://api.z.ai/api/coding/paas/v4/"`
+- **Google Gemini**: `"sdkProvider": "google"` (get API key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey))
 
 **Provider Configuration:**
 
@@ -395,6 +403,9 @@ Nanocoder looks for configuration in the following order (first found wins):
 - `apiKey`: API key (optional, may not be required)
 - `models`: Available model list for `/model` command
 - `disableToolModels`: List of model names to disable tool calling for (optional)
+- `sdkProvider`: AI SDK provider package to use (optional, defaults to `openai-compatible`)
+  - `openai-compatible`: Default, works with any OpenAI-compatible API
+  - `google`: Use `@ai-sdk/google` for native Google Gemini support (required for Gemini 3 models with tool calling)
 
 **Environment Variables:**
 
