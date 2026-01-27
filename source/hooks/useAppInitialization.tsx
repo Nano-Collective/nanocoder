@@ -21,6 +21,7 @@ import {
 	setupMcpCommand,
 	setupProvidersCommand,
 	statusCommand,
+	tasksCommand,
 	updateCommand,
 	usageCommand,
 } from '@/commands/index';
@@ -36,6 +37,7 @@ import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getLSPManager, type LSPInitResult} from '@/lsp/index';
 import {setToolManagerGetter, setToolRegistryGetter} from '@/message-handler';
+import {clearAllTasks} from '@/tools/tasks';
 import {ToolManager} from '@/tools/tool-manager';
 import type {CustomCommand} from '@/types/commands';
 import {
@@ -349,6 +351,9 @@ export function useAppInitialization({
 			setClient(null);
 			setCurrentModel('');
 
+			// Clear task list at startup for fresh session
+			await clearAllTasks();
+
 			const newToolManager = new ToolManager();
 			const newCustomCommandLoader = new CustomCommandLoader();
 			const newCustomCommandExecutor = new CustomCommandExecutor();
@@ -390,6 +395,7 @@ export function useAppInitialization({
 				usageCommand,
 				checkpointCommand,
 				quitCommand,
+				tasksCommand,
 				settingsCommand,
 			]);
 
