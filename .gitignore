@@ -114,3 +114,5 @@ refactor.md
 .heap-snapshots
 
 coverage
+
+.nanocoder/tasks.json
