@@ -11,6 +11,9 @@ test('createProvider creates provider with basic config', t => {
 		config: {
 			baseURL: 'https://api.test.com',
 			apiKey: 'test-key',
+			headers: {
+				'Custom-Header': 'CustomValue',
+			},
 		},
 	};
 
@@ -45,6 +48,9 @@ test('createProvider handles provider with no API key', t => {
 		models: ['test-model'],
 		config: {
 			baseURL: 'https://api.test.com',
+			headers: {
+				'Custom-Header': 'CustomValue',
+			},
 		},
 	};
 
@@ -60,6 +66,26 @@ test('createProvider handles provider with no baseURL', t => {
 		type: 'openai',
 		models: ['test-model'],
 		config: {
+			apiKey: 'test-key',
+			headers: {
+				'Custom-Header': 'CustomValue',
+			},
+		},
+	};
+
+	const agent = new Agent();
+	const provider = createProvider(config, agent);
+
+	t.truthy(provider);
+});
+
+test('createProvider handles provider with no custom headers', t => {
+	const config: AIProviderConfig = {
+		name: 'TestProvider',
+		type: 'openai',
+		models: ['test-model'],
+		config: {
+			baseURL: 'https://api.test.com',
 			apiKey: 'test-key',
 		},
 	};
