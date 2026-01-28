@@ -18,7 +18,8 @@
 			"!plugins",
 			"!**/*.spec.ts",
 			"!**/*.spec.tsx",
-			"!.husky"
+			"!.husky",
+			"!.nanocoder"
 		]
 	},
 	"formatter": {

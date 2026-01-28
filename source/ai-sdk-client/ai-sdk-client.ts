@@ -1,4 +1,3 @@
-import {createOpenAICompatible} from '@ai-sdk/openai-compatible';
 import type {LanguageModel} from 'ai';
 import {Agent} from 'undici';
 import {TIMEOUT_SOCKET_DEFAULT_MS} from '@/constants';
@@ -13,10 +12,10 @@ import type {
 } from '@/types/index';
 import {getLogger} from '@/utils/logging';
 import {handleChat} from './chat/chat-handler.js';
-import {createProvider} from './providers/provider-factory.js';
+import {type AIProvider, createProvider} from './providers/provider-factory.js';
 
 export class AISDKClient implements LLMClient {
-	private provider: ReturnType<typeof createOpenAICompatible>;
+	private provider: AIProvider;
 	private currentModel: string;
 	private availableModels: string[];
 	private providerConfig: AIProviderConfig;

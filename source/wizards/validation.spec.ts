@@ -442,3 +442,56 @@ test('testProviderConnection: returns connected=true for reachable localhost', a
 		t.pass();
 	}
 });
+
+// ============================================================================
+// Tests for sdkProvider field
+// ============================================================================
+
+test('buildConfigObject: includes sdkProvider when present', t => {
+	const providers: ProviderConfig[] = [
+		{
+			name: 'Gemini',
+			sdkProvider: 'google',
+			apiKey: 'test-key',
+			models: ['gemini-2.5-flash'],
+		},
+	];
+
+	const config = buildConfigObject(providers, {});
+
+	t.is(config.nanocoder.providers[0].sdkProvider, 'google');
+});
+
+test('buildConfigObject: omits sdkProvider when not present', t => {
+	const providers: ProviderConfig[] = [
+		{
+			name: 'ollama',
+			baseUrl: 'http://localhost:11434',
+			models: ['llama2'],
+		},
+	];
+
+	const config = buildConfigObject(providers, {});
+
+	t.is(config.nanocoder.providers[0].sdkProvider, undefined);
+});
+
+test('buildConfigObject: handles Gemini provider with all fields', t => {
+	const providers: ProviderConfig[] = [
+		{
+			name: 'Gemini',
+			sdkProvider: 'google',
+			baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+			apiKey: 'test-api-key',
+			models: ['gemini-3-flash-preview', 'gemini-3-pro-preview'],
+		},
+	];
+
+	const config = buildConfigObject(providers, {});
+
+	t.is(config.nanocoder.providers[0].name, 'Gemini');
+	t.is(config.nanocoder.providers[0].sdkProvider, 'google');
+	t.is(config.nanocoder.providers[0].baseUrl, 'https://generativelanguage.googleapis.com/v1beta');
+	t.is(config.nanocoder.providers[0].apiKey, 'test-api-key');
+	t.deepEqual(config.nanocoder.providers[0].models, ['gemini-3-flash-preview', 'gemini-3-pro-preview']);
+});

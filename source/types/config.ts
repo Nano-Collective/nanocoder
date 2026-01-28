@@ -1,6 +1,9 @@
 import type {TitleShape} from '@/components/ui/styled-title';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
 
+// Supported AI SDK provider packages
+export type SdkProvider = 'openai-compatible' | 'google';
+
 // AI provider configurations (OpenAI-compatible)
 export interface AIProviderConfig {
 	name: string;
@@ -16,6 +19,8 @@ export interface AIProviderConfig {
 	// Tool configuration
 	disableTools?: boolean; // Disable tools for entire provider
 	disableToolModels?: string[]; // List of model names to disable tools for
+	// SDK provider package to use (default: 'openai-compatible')
+	sdkProvider?: SdkProvider;
 	config: {
 		baseURL?: string;
 		apiKey?: string;
@@ -43,6 +48,8 @@ export interface ProviderConfig {
 	disableTools?: boolean; // Disable tools for entire provider
 	disableToolModels?: string[]; // List of model names to disable tools for
 	headers?: Record<string, string>;
+	// SDK provider package to use (default: 'openai-compatible')
+	sdkProvider?: SdkProvider;
 	[key: string]: unknown; // Allow additional provider-specific config
 }
 
@@ -73,6 +80,8 @@ export interface AppConfig {
 		// Tool configuration
 		disableTools?: boolean; // Disable tools for entire provider
 		disableToolModels?: string[]; // List of model names to disable tools for
+		// SDK provider package to use (default: 'openai-compatible')
+		sdkProvider?: SdkProvider;
 		[key: string]: unknown; // Allow additional provider-specific config
 	}[];
 

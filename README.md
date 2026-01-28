@@ -367,6 +367,13 @@ Nanocoder looks for configuration in the following order (first found wins):
 				"baseUrl": "https://api.poe.com/v1",
 				"apiKey": "your-poe-api-key",
 				"models": ["Claude-Sonnet-4", "GPT-4o", "Gemini-2.5-Pro"]
+			},
+			{
+				"name": "Gemini",
+				"sdkProvider": "google",
+				"baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+				"apiKey": "your-gemini-api-key",
+				"models": ["gemini-3-flash-preview", "gemini-3-pro-preview"]
 			}
 		]
 	}
@@ -387,6 +394,7 @@ Nanocoder looks for configuration in the following order (first found wins):
 - **GitHub Models**: `"baseUrl": "https://models.github.ai/inference"` (requires PAT with `models:read` scope)
 - **Z.ai**: `"baseUrl": "https://api.z.ai/api/paas/v4/"`
 - **Z.ai Coding**: `"baseUrl": "https://api.z.ai/api/coding/paas/v4/"`
+- **Google Gemini**: `"sdkProvider": "google"` (get API key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey))
 
 **Provider Configuration:**
 
@@ -395,6 +403,9 @@ Nanocoder looks for configuration in the following order (first found wins):
 - `apiKey`: API key (optional, may not be required)
 - `models`: Available model list for `/model` command
 - `disableToolModels`: List of model names to disable tool calling for (optional)
+- `sdkProvider`: AI SDK provider package to use (optional, defaults to `openai-compatible`)
+  - `openai-compatible`: Default, works with any OpenAI-compatible API
+  - `google`: Use `@ai-sdk/google` for native Google Gemini support (required for Gemini 3 models with tool calling)
 
 **Environment Variables:**
 
@@ -592,6 +603,7 @@ You can override this directory using `NANOCODER_DATA_DIR`.
 - `/update` - Update Nanocoder to the latest version
 - `/usage` – Get current model context usage visually
 - `/lsp` – List connected LSP servers
+- `/explorer` - Interactive file browser to navigate, preview, and select files for context
 - `!command` - Execute bash commands directly without leaving Nanocoder (output becomes context for the LLM)
 - `@file` - Include file contents in messages automatically via fuzzy search as you type
 
@@ -653,6 +665,50 @@ Nanocoder supports conversation checkpointing, allowing you to save snapshots of
 
 # List all checkpoints to see your progress
 /checkpoint list
+```
+
+#### File Explorer
+
+The `/explorer` command opens an interactive file browser for navigating your project, previewing files with syntax highlighting, and selecting multiple files to add as context.
+
+**Navigation:**
+
+| Key | Action |
+|-----|--------|
+| ↑/↓ | Navigate through files and directories |
+| Enter | Expand/collapse directory or preview file |
+| Space | Toggle file/directory selection |
+| / | Enter search mode (filters all files including nested) |
+| Backspace | Collapse current directory |
+| Esc | Exit explorer (selected files are added to input) |
+
+**Features:**
+
+- **Tree view**: Browse your project structure with expandable directories
+- **File preview**: View file contents with syntax highlighting before selecting
+- **Compressed indentation**: Preview displays content with compressed indentation (tabs/4-spaces become 2-spaces) for narrow terminals
+- **Multi-select**: Select multiple files to add as context at once
+- **Directory selection**: Press Space on a directory to select all files within it
+- **Search**: Press `/` to filter files by name across the entire tree
+- **Token estimation**: Shows estimated token count for selected files with warning for large selections (10k+ tokens)
+- **VS Code integration**: When running with `--vscode`, previewing a file also opens it in VS Code for full-featured viewing
+
+**Selection indicators:**
+
+- `✓` - File or directory fully selected
+- `◐` - Directory partially selected (some files within)
+- `✗` - File not selected (in preview mode)
+- `v` / `>` - Directory expanded / collapsed
+
+**Example workflow:**
+
+```bash
+# Open the file explorer
+/explorer
+
+# Navigate to src/components, expand it
+# Select multiple component files with Space
+# Press Esc to add them to your input as @file mentions
 ```
 
 #### Custom Commands

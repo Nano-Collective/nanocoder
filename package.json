@@ -58,7 +58,8 @@
 		"assets/nanocoder-vscode.vsix"
 	],
 	"dependencies": {
-		"@ai-sdk/openai-compatible": "2.0.13",
+		"@ai-sdk/google": "^3.0.13",
+		"@ai-sdk/openai-compatible": "2.0.18",
 		"@anthropic-ai/tokenizer": "^0.0.4",
 		"@modelcontextprotocol/sdk": "^1.25.2",
 		"@nanocollective/get-md": "^1.0.2",

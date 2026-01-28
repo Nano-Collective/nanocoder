@@ -137,6 +137,39 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		}),
 	},
 	{
+		id: 'gemini',
+		name: 'Google Gemini',
+		fields: [
+			{
+				name: 'apiKey',
+				prompt: 'API Key (from https://aistudio.google.com/apikey)',
+				required: true,
+				sensitive: true,
+			},
+			{
+				name: 'model',
+				prompt: 'Model name(s) (comma-separated)',
+				default: 'gemini-3-flash-preview, gemini-3-pro-preview',
+				required: true,
+			},
+			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: 'Gemini',
+			},
+		],
+		buildConfig: answers => ({
+			name: answers.providerName || 'Gemini',
+			sdkProvider: 'google',
+			baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+			apiKey: answers.apiKey,
+			models: answers.model
+				.split(',')
+				.map(m => m.trim())
+				.filter(Boolean),
+		}),
+	},
+	{
 		id: 'openrouter',
 		name: 'OpenRouter',
 		fields: [
@@ -149,7 +182,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'z-ai/glm-4.7',
+				default: '',
 				required: true,
 			},
 			{
@@ -182,7 +215,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'gpt-5-codex',
+				default: '',
 				required: true,
 			},
 			{
@@ -226,7 +259,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'claude-4-sonnet',
+				default: '',
 				required: true,
 			},
 			{
@@ -259,7 +292,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'devstral-latest',
+				default: '',
 				required: true,
 			},
 			{
@@ -297,7 +330,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'glm-4.7, glm-4.5-air',
+				default: 'glm-4.7, glm-4.7-flash',
 				required: true,
 			},
 		],
@@ -330,7 +363,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'glm-4.7, glm-4.5-air',
+				default: 'glm-4.7, glm-4.7-flash',
 				required: true,
 			},
 		],
@@ -358,7 +391,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'openai/gpt-4o-mini',
+				default: '',
 				required: true,
 			},
 			{
@@ -390,7 +423,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'Claude-Sonnet-4, GPT-4o, Gemini-2.5-Pro',
+				default: '',
 				required: true,
 			},
 			{

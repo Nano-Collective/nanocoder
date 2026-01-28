@@ -1,5 +1,133 @@
 import test from 'ava';
-import {normalizeIndentation} from './indentation-normalizer';
+import {compressIndentation, normalizeIndentation} from './indentation-normalizer';
+
+// === compressIndentation tests ===
+
+test('compressIndentation - empty array returns empty array', t => {
+	const result = compressIndentation([]);
+	t.deepEqual(result, []);
+});
+
+test('compressIndentation - line with no indentation unchanged', t => {
+	const result = compressIndentation(['const x = 1;']);
+	t.deepEqual(result, ['const x = 1;']);
+});
+
+test('compressIndentation - converts tabs to 2 spaces', t => {
+	const input = [
+		'function test() {',
+		'\treturn 1;',
+		'}',
+	];
+	const expected = [
+		'function test() {',
+		'  return 1;',
+		'}',
+	];
+	t.deepEqual(compressIndentation(input), expected);
+});
+
+test('compressIndentation - converts 4 spaces to 2 spaces', t => {
+	const input = [
+		'function test() {',
+		'    return 1;',
+		'}',
+	];
+	const expected = [
+		'function test() {',
+		'  return 1;',
+		'}',
+	];
+	t.deepEqual(compressIndentation(input), expected);
+});
+
+test('compressIndentation - handles multiple indent levels with tabs', t => {
+	const input = [
+		'function test() {',
+		'\tif (true) {',
+		'\t\treturn 1;',
+		'\t}',
+		'}',
+	];
+	const expected = [
+		'function test() {',
+		'  if (true) {',
+		'    return 1;',
+		'  }',
+		'}',
+	];
+	t.deepEqual(compressIndentation(input), expected);
+});
+
+test('compressIndentation - handles multiple indent levels with 4 spaces', t => {
+	const input = [
+		'function test() {',
+		'    if (true) {',
+		'        return 1;',
+		'    }',
+		'}',
+	];
+	const expected = [
+		'function test() {',
+		'  if (true) {',
+		'    return 1;',
+		'  }',
+		'}',
+	];
+	t.deepEqual(compressIndentation(input), expected);
+});
+
+test('compressIndentation - preserves empty lines', t => {
+	const input = [
+		'function test() {',
+		'',
+		'\treturn 1;',
+		'}',
+	];
+	const expected = [
+		'function test() {',
+		'',
+		'  return 1;',
+		'}',
+	];
+	t.deepEqual(compressIndentation(input), expected);
+});
+
+test('compressIndentation - preserves whitespace-only lines', t => {
+	const input = [
+		'function test() {',
+		'    ',
+		'\treturn 1;',
+		'}',
+	];
+	const expected = [
+		'function test() {',
+		'    ',
+		'  return 1;',
+		'}',
+	];
+	t.deepEqual(compressIndentation(input), expected);
+});
+
+test('compressIndentation - deeply nested code becomes compact', t => {
+	const input = [
+		'class Foo {',
+		'\t\t\tdeepMethod() {',
+		'\t\t\t\treturn this.value;',
+		'\t\t\t}',
+		'}',
+	];
+	const expected = [
+		'class Foo {',
+		'      deepMethod() {',
+		'        return this.value;',
+		'      }',
+		'}',
+	];
+	t.deepEqual(compressIndentation(input), expected);
+});
+
+// === normalizeIndentation tests ===
 
 test('normalizeIndentation - empty array returns empty array', t => {
 	const result = normalizeIndentation([]);
