@@ -4,9 +4,11 @@ import {dirname, resolve} from 'node:path';
 import {highlight} from 'cli-highlight';
 import {Box, Text} from 'ink';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 
 import ToolMessage from '@/components/tool-message';
 import {isNanocoderToolAlwaysAllowed} from '@/config/nanocoder-tools-config';
+import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
 import {getCurrentMode} from '@/context/mode-context';
 import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
@@ -91,6 +93,41 @@ interface WriteFileArgs {
 	content?: string;
 }
 
+// Truncate a string with ANSI codes to fit terminal width (visual chars)
+const truncateAnsi = (str: string, maxWidth: number): string => {
+	const plainText = stripAnsi(str);
+	if (plainText.length <= maxWidth) return str;
+
+	let visibleCount = 0;
+	const ansiRegex = /\x1b\[[0-9;]*m/g;
+	let result = '';
+	let lastIndex = 0;
+
+	let match: RegExpExecArray | null;
+	while ((match = ansiRegex.exec(str)) !== null) {
+		const textBefore = str.slice(lastIndex, match.index);
+		for (const char of textBefore) {
+			if (visibleCount >= maxWidth - 1) break;
+			result += char;
+			visibleCount++;
+		}
+		if (visibleCount >= maxWidth - 1) break;
+		result += match[0];
+		lastIndex = match.index + match[0].length;
+	}
+
+	if (visibleCount < maxWidth - 1) {
+		const remaining = str.slice(lastIndex);
+		for (const char of remaining) {
+			if (visibleCount >= maxWidth - 1) break;
+			result += char;
+			visibleCount++;
+		}
+	}
+
+	return result + '\x1b[0m…';
+};
+
 // Create a component that will re-render when theme changes
 const WriteFileFormatter = React.memo(({args}: {args: WriteFileArgs}) => {
 	const themeContext = React.useContext(ThemeContext);
@@ -109,6 +146,11 @@ const WriteFileFormatter = React.memo(({args}: {args: WriteFileArgs}) => {
 	// Normalize indentation for display
 	const lines = newContent.split('\n');
 	const normalizedLines = normalizeIndentation(lines);
+
+	// Calculate available width for line content (terminal width - line number prefix - padding)
+	const terminalWidth = process.stdout.columns || DEFAULT_TERMINAL_COLUMNS;
+	const lineNumPrefixWidth = 6; // "1234 " = 5 chars + 1 for safety
+	const availableWidth = Math.max(terminalWidth - lineNumPrefixWidth - 2, 20);
 
 	const messageContent = (
 		<Box flexDirection="column">
@@ -135,17 +177,22 @@ const WriteFileFormatter = React.memo(({args}: {args: WriteFileArgs}) => {
 
 						try {
 							const highlighted = highlight(line, {language, theme: 'default'});
+							const truncated = truncateAnsi(highlighted, availableWidth);
 							return (
 								<Box key={i}>
 									<Text color={colors.secondary}>{lineNumStr} </Text>
-									<Text wrap="wrap">{highlighted}</Text>
+									<Text wrap="truncate-end">{truncated}</Text>
 								</Box>
 							);
 						} catch {
+							const truncated =
+								line.length > availableWidth
+									? line.slice(0, availableWidth - 1) + '…'
+									: line;
 							return (
 								<Box key={i}>
 									<Text color={colors.secondary}>{lineNumStr} </Text>
-									<Text wrap="wrap">{line}</Text>
+									<Text wrap="truncate-end">{truncated}</Text>
 								</Box>
 							);
 						}
