@@ -1,29 +1,37 @@
 /**
- * Git Workflow Tools Tests
+ * Git Tools Tests
  *
- * Tests for the git workflow integration tools including:
- * - git_smart_commit
- * - git_create_pr
- * - git_branch_suggest
- * - git_status_enhanced
+ * Tests for the git tools including:
+ * - git_status
+ * - git_diff
+ * - git_log
+ * - git_add
+ * - git_commit
+ * - git_push
+ * - git_pull
+ * - git_branch
+ * - git_stash
+ * - git_reset
+ * - git_pr
  */
 
 import React from 'react';
 import test from 'ava';
-import stripAnsi from 'strip-ansi';
 import {render} from 'ink-testing-library';
 import {ThemeContext} from '../../hooks/useTheme';
 import {themes} from '../../config/themes';
-import {gitSmartCommitTool} from './git-smart-commit';
-import {gitCreatePRTool} from './git-create-pr';
-import {gitBranchSuggestTool} from './git-branch-suggest';
-import {gitStatusEnhancedTool} from './git-status-enhanced';
-import {
-	analyzeChangesForCommitType,
-	suggestScope,
-	parseDiffStat,
-	parseGitStatus,
-} from './utils';
+import {gitStatusTool} from './git-status';
+import {gitDiffTool} from './git-diff';
+import {gitLogTool} from './git-log';
+import {gitAddTool} from './git-add';
+import {gitCommitTool} from './git-commit';
+import {gitPushTool} from './git-push';
+import {gitPullTool} from './git-pull';
+import {gitBranchTool} from './git-branch';
+import {gitStashTool} from './git-stash';
+import {gitResetTool} from './git-reset';
+import {gitPrTool} from './git-pr';
+import {parseGitStatus, isGitAvailable, isGhAvailable} from './utils';
 
 // ============================================================================
 // Test Helpers
@@ -45,125 +53,6 @@ function TestThemeProvider({children}: {children: React.ReactNode}) {
 		</ThemeContext.Provider>
 	);
 }
-
-// ============================================================================
-// Tests for Utils - analyzeChangesForCommitType
-// ============================================================================
-
-test('analyzeChangesForCommitType returns test for test files', t => {
-	const files = [
-		{path: 'src/utils.spec.ts', status: 'modified' as const, additions: 10, deletions: 5, isBinary: false},
-		{path: 'src/index.test.ts', status: 'added' as const, additions: 20, deletions: 0, isBinary: false},
-	];
-
-	const result = analyzeChangesForCommitType(files);
-	t.is(result, 'test');
-});
-
-test('analyzeChangesForCommitType returns docs for documentation', t => {
-	const files = [
-		{path: 'README.md', status: 'modified' as const, additions: 10, deletions: 5, isBinary: false},
-		{path: 'docs/guide.md', status: 'added' as const, additions: 20, deletions: 0, isBinary: false},
-	];
-
-	const result = analyzeChangesForCommitType(files);
-	t.is(result, 'docs');
-});
-
-test('analyzeChangesForCommitType returns ci for CI files', t => {
-	const files = [
-		{path: '.github/workflows/test.yml', status: 'modified' as const, additions: 10, deletions: 5, isBinary: false},
-		{path: '.circleci/config.yml', status: 'modified' as const, additions: 5, deletions: 2, isBinary: false},
-	];
-
-	const result = analyzeChangesForCommitType(files);
-	t.is(result, 'ci');
-});
-
-test('analyzeChangesForCommitType returns build for config files', t => {
-	const files = [
-		{path: 'package.json', status: 'modified' as const, additions: 1, deletions: 1, isBinary: false},
-		{path: 'tsconfig.json', status: 'modified' as const, additions: 2, deletions: 0, isBinary: false},
-	];
-
-	const result = analyzeChangesForCommitType(files);
-	t.is(result, 'build');
-});
-
-test('analyzeChangesForCommitType returns feat for new files', t => {
-	const files = [
-		{path: 'src/new-feature.ts', status: 'added' as const, additions: 100, deletions: 0, isBinary: false},
-	];
-
-	const result = analyzeChangesForCommitType(files);
-	t.is(result, 'feat');
-});
-
-test('analyzeChangesForCommitType returns chore for deletions', t => {
-	const files = [
-		{path: 'src/old-file.ts', status: 'deleted' as const, additions: 0, deletions: 50, isBinary: false},
-	];
-
-	const result = analyzeChangesForCommitType(files);
-	t.is(result, 'chore');
-});
-
-// ============================================================================
-// Tests for Utils - suggestScope
-// ============================================================================
-
-test('suggestScope returns directory name for single directory', t => {
-	const files = [
-		{path: 'source/tools/file1.ts', status: 'modified' as const, additions: 10, deletions: 5, isBinary: false},
-		{path: 'source/tools/file2.ts', status: 'modified' as const, additions: 5, deletions: 3, isBinary: false},
-	];
-
-	const result = suggestScope(files);
-	t.is(result, 'tools');
-});
-
-test('suggestScope returns undefined for mixed directories', t => {
-	const files = [
-		{path: 'source/tools/file1.ts', status: 'modified' as const, additions: 10, deletions: 5, isBinary: false},
-		{path: 'source/hooks/file2.ts', status: 'modified' as const, additions: 5, deletions: 3, isBinary: false},
-	];
-
-	const result = suggestScope(files);
-	t.is(result, undefined);
-});
-
-test('suggestScope returns undefined for empty array', t => {
-	const result = suggestScope([]);
-	t.is(result, undefined);
-});
-
-// ============================================================================
-// Tests for Utils - parseDiffStat
-// ============================================================================
-
-test('parseDiffStat parses standard diff stat', t => {
-	const diffStat = ` src/file1.ts | 10 ++++---
- src/file2.ts |  5 ++--
- 2 files changed, 10 insertions(+), 5 deletions(-)`;
-
-	const result = parseDiffStat(diffStat);
-	t.is(result.length, 2);
-	t.is(result[0].path, 'src/file1.ts');
-	t.is(result[1].path, 'src/file2.ts');
-});
-
-test('parseDiffStat handles empty input', t => {
-	const result = parseDiffStat('');
-	t.is(result.length, 0);
-});
-
-test('parseDiffStat handles binary files', t => {
-	const diffStat = ` image.png | Bin 0 -> 1234 bytes`;
-
-	const result = parseDiffStat(diffStat);
-	t.is(result.length, 1);
-	t.true(result[0].isBinary);
-});
 
 // ============================================================================
 // Tests for Utils - parseGitStatus
@@ -205,350 +94,48 @@ test('parseGitStatus handles empty input', t => {
 	t.is(result.untracked.length, 0);
 });
 
-// ============================================================================
-// Tests for git_smart_commit Tool Definition
-// ============================================================================
+test('parseGitStatus detects conflicts', t => {
+	const statusOutput = `UU conflicted-file.ts
+AA both-added.ts`;
 
-test('git_smart_commit tool has correct name', t => {
-	t.is(gitSmartCommitTool.name, 'git_smart_commit');
+	const result = parseGitStatus(statusOutput);
+	t.is(result.conflicts.length, 2);
 });
 
-test('git_smart_commit tool has AI SDK tool with execute', t => {
-	t.truthy(gitSmartCommitTool.tool);
+// ============================================================================
+// Tests for Availability Checks
+// ============================================================================
+
+test('isGitAvailable returns boolean', t => {
+	const result = isGitAvailable();
+	t.is(typeof result, 'boolean');
+});
+
+test('isGhAvailable returns boolean', t => {
+	const result = isGhAvailable();
+	t.is(typeof result, 'boolean');
+});
+
+// ============================================================================
+// Tests for git_status Tool Definition
+// ============================================================================
+
+test('git_status tool has correct name', t => {
+	t.is(gitStatusTool.name, 'git_status');
+});
+
+test('git_status tool has AI SDK tool with execute', t => {
+	t.truthy(gitStatusTool.tool);
 	// biome-ignore lint/suspicious/noExplicitAny: Test accessing internal tool structure
-	t.is(typeof (gitSmartCommitTool.tool as any).execute, 'function');
+	t.is(typeof (gitStatusTool.tool as any).execute, 'function');
 });
 
-test('git_smart_commit tool has formatter function', t => {
-	t.is(typeof gitSmartCommitTool.formatter, 'function');
+test('git_status tool has formatter function', t => {
+	t.is(typeof gitStatusTool.formatter, 'function');
 });
 
-test('git_smart_commit tool has validator function', t => {
-	t.is(typeof gitSmartCommitTool.validator, 'function');
-});
-
-// ============================================================================
-// Tests for git_smart_commit Formatter
-// ============================================================================
-
-test('GitSmartCommitFormatter renders correctly', t => {
-	const formatter = gitSmartCommitTool.formatter;
-	if (!formatter) {
-		t.fail('Formatter is not defined');
-		return;
-	}
-
-	const element = formatter(
-		{dryRun: true, includeBody: true},
-		'=== Smart Commit Analysis ===\nFiles changed: 3',
-	);
-	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
-
-	const output = lastFrame();
-	t.truthy(output);
-	t.regex(output!, /smart_commit/);
-	t.regex(output!, /dry-run/);
-});
-
-test('GitSmartCommitFormatter handles commit mode', t => {
-	const formatter = gitSmartCommitTool.formatter;
-	if (!formatter) {
-		t.fail('Formatter is not defined');
-		return;
-	}
-
-	const element = formatter(
-		{dryRun: false},
-		'Files changed: 2',
-	);
-	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
-
-	const output = lastFrame();
-	t.truthy(output);
-	t.regex(output!, /commit/);
-});
-
-test('GitSmartCommitFormatter displays hammer icon', t => {
-	const formatter = gitSmartCommitTool.formatter;
-	if (!formatter) {
-		t.fail('Formatter is not defined');
-		return;
-	}
-
-	const element = formatter(
-		{dryRun: true},
-		'=== Smart Commit Analysis ===\nFiles changed: 3',
-	);
-	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
-
-	const output = lastFrame();
-	t.truthy(output);
-	t.regex(output!, /⚒/); // Hammer icon
-	t.regex(output!, /git_smart_commit/);
-});
-
-test('GitSmartCommitFormatter shows commit type and message', t => {
-	const formatter = gitSmartCommitTool.formatter;
-	if (!formatter) {
-		t.fail('Formatter is not defined');
-		return;
-	}
-
-	const element = formatter(
-		{dryRun: true},
-		'=== Smart Commit Analysis ===\nFiles changed: 5\n=== Generated Commit Message ===\n\nfeat(auth): add user authentication',
-	);
-	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
-
-	const output = lastFrame();
-	t.truthy(output);
-	// Strip ANSI codes before regex matching (CI mode adds color codes)
-	const plainOutput = stripAnsi(output!);
-	t.regex(plainOutput, /Type: feat/);
-	t.regex(plainOutput, /Message:/);
-	t.regex(plainOutput, /add user authentication/);
-});
-
-test('GitSmartCommitFormatter handles breaking changes', t => {
-	const formatter = gitSmartCommitTool.formatter;
-	if (!formatter) {
-		t.fail('Formatter is not defined');
-		return;
-	}
-
-	const element = formatter(
-		{dryRun: true},
-		'=== Smart Commit Analysis ===\nFiles changed: 2\n=== Generated Commit Message ===\n\nfeat!: remove deprecated API\n\nBREAKING CHANGE: API has changed',
-	);
-	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
-
-	const output = lastFrame();
-	t.truthy(output);
-	t.regex(output!, /BREAKING/);
-});
-
-// ============================================================================
-// Tests for git_create_pr Tool Definition
-// ============================================================================
-
-test('git_create_pr tool has correct name', t => {
-	t.is(gitCreatePRTool.name, 'git_create_pr');
-});
-
-test('git_create_pr tool has AI SDK tool with execute', t => {
-	t.truthy(gitCreatePRTool.tool);
-	// biome-ignore lint/suspicious/noExplicitAny: Test accessing internal tool structure
-	t.is(typeof (gitCreatePRTool.tool as any).execute, 'function');
-});
-
-test('git_create_pr tool has formatter function', t => {
-	t.is(typeof gitCreatePRTool.formatter, 'function');
-});
-
-test('git_create_pr tool has validator function', t => {
-	t.is(typeof gitCreatePRTool.validator, 'function');
-});
-
-// ============================================================================
-// Tests for git_create_pr Formatter
-// ============================================================================
-
-test('GitCreatePRFormatter renders correctly', t => {
-	const formatter = gitCreatePRTool.formatter;
-	if (!formatter) {
-		t.fail('Formatter is not defined');
-		return;
-	}
-
-	const element = formatter(
-		{targetBranch: 'main', draft: false},
-		'Branch: feature -> main\n--- Title ---\nAdd new feature',
-	);
-	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
-
-	const output = lastFrame();
-	t.truthy(output);
-	t.regex(output!, /create_pr/);
-	t.regex(output!, /main/);
-});
-
-test('GitCreatePRFormatter shows draft indicator', t => {
-	const formatter = gitCreatePRTool.formatter;
-	if (!formatter) {
-		t.fail('Formatter is not defined');
-		return;
-	}
-
-	const element = formatter(
-		{draft: true},
-		'Branch: feature -> main',
-	);
-	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
-
-	const output = lastFrame();
-	t.truthy(output);
-	t.regex(output!, /Draft.*Yes/i);
-});
-
-test('GitCreatePRFormatter displays hammer icon', t => {
-	const formatter = gitCreatePRTool.formatter;
-	if (!formatter) {
-		t.fail('Formatter is not defined');
-		return;
-	}
-
-	const element = formatter(
-		{targetBranch: 'main', draft: false},
-		'Branch: feature -> main\n--- Title ---\nAdd new feature',
-	);
-	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
-
-	const output = lastFrame();
-	t.truthy(output);
-	t.regex(output!, /⚒/); // Hammer icon
-	t.regex(output!, /git_create_pr/);
-});
-
-test('GitCreatePRFormatter shows description preview', t => {
-	const formatter = gitCreatePRTool.formatter;
-	if (!formatter) {
-		t.fail('Formatter is not defined');
-		return;
-	}
-
-	const element = formatter(
-		{targetBranch: 'main'},
-		'Branch: feature -> main\n--- Title ---\nImplement user auth\n--- Description ---\n## Summary\n- Add login\n- Add register',
-	);
-	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
-
-	const output = lastFrame();
-	t.truthy(output);
-	t.regex(output!, /Title:/);
-	t.regex(output!, /Description:/);
-	t.regex(output!, /Add login/);
-});
-
-test('GitCreatePRFormatter shows breaking changes warning', t => {
-	const formatter = gitCreatePRTool.formatter;
-	if (!formatter) {
-		t.fail('Formatter is not defined');
-		return;
-	}
-
-	const element = formatter(
-		{targetBranch: 'main'},
-		'Branch: feature -> main\n--- Title ---\nAdd breaking change\n## Breaking Changes\n- Remove deprecated API',
-	);
-	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
-
-	const output = lastFrame();
-	t.truthy(output);
-	t.regex(output!, /Breaking Changes/i);
-});
-
-// ============================================================================
-// Tests for git_branch_suggest Tool Definition
-// ============================================================================
-
-test('git_branch_suggest tool has correct name', t => {
-	t.is(gitBranchSuggestTool.name, 'git_branch_suggest');
-});
-
-test('git_branch_suggest tool has AI SDK tool with execute', t => {
-	t.truthy(gitBranchSuggestTool.tool);
-	// biome-ignore lint/suspicious/noExplicitAny: Test accessing internal tool structure
-	t.is(typeof (gitBranchSuggestTool.tool as any).execute, 'function');
-});
-
-test('git_branch_suggest tool has formatter function', t => {
-	t.is(typeof gitBranchSuggestTool.formatter, 'function');
-});
-
-// ============================================================================
-// Tests for git_branch_suggest Formatter
-// ============================================================================
-
-test('GitBranchSuggestFormatter renders correctly', t => {
-	const formatter = gitBranchSuggestTool.formatter;
-	if (!formatter) {
-		t.fail('Formatter is not defined');
-		return;
-	}
-
-	const element = formatter(
-		{workType: 'feature', description: 'add user auth'},
-		'--- Suggested Branch Name ---\n  feature/add-user-auth\nDetected strategy: feature-branch',
-	);
-	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
-
-	const output = lastFrame();
-	t.truthy(output);
-	t.regex(output!, /branch_suggest/);
-	t.regex(output!, /feature/);
-});
-
-test('GitBranchSuggestFormatter shows ticket ID', t => {
-	const formatter = gitBranchSuggestTool.formatter;
-	if (!formatter) {
-		t.fail('Formatter is not defined');
-		return;
-	}
-
-	const element = formatter(
-		{workType: 'bugfix', description: 'fix login', ticketId: 'PROJ-123'},
-		'Branch: bugfix/PROJ-123/fix-login',
-	);
-	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
-
-	const output = lastFrame();
-	t.truthy(output);
-	t.regex(output!, /PROJ-123/);
-});
-
-// ============================================================================
-// Tests for git_status_enhanced Tool Definition
-// ============================================================================
-
-test('git_status_enhanced tool has correct name', t => {
-	t.is(gitStatusEnhancedTool.name, 'git_status_enhanced');
-});
-
-test('git_status_enhanced tool has AI SDK tool with execute', t => {
-	t.truthy(gitStatusEnhancedTool.tool);
-	// biome-ignore lint/suspicious/noExplicitAny: Test accessing internal tool structure
-	t.is(typeof (gitStatusEnhancedTool.tool as any).execute, 'function');
-});
-
-test('git_status_enhanced tool has formatter function', t => {
-	t.is(typeof gitStatusEnhancedTool.formatter, 'function');
-});
-
-// ============================================================================
-// Tests for git_status_enhanced Formatter
-// ============================================================================
-
-test('GitStatusEnhancedFormatter renders correctly', t => {
-	const formatter = gitStatusEnhancedTool.formatter;
-	if (!formatter) {
-		t.fail('Formatter is not defined');
-		return;
-	}
-
-	const element = formatter(
-		{detailed: false},
-		'Branch: main\nSummary: Working tree clean',
-	);
-	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
-
-	const output = lastFrame();
-	t.truthy(output);
-	t.regex(output!, /status_enhanced/);
-	t.regex(output!, /main/);
-});
-
-test('GitStatusEnhancedFormatter shows conflicts warning', t => {
-	const formatter = gitStatusEnhancedTool.formatter;
+test('git_status formatter renders correctly', t => {
+	const formatter = gitStatusTool.formatter;
 	if (!formatter) {
 		t.fail('Formatter is not defined');
 		return;
@@ -556,70 +143,383 @@ test('GitStatusEnhancedFormatter shows conflicts warning', t => {
 
 	const element = formatter(
 		{},
-		'Branch: feature\nSummary: 2 conflicts\n!!! CONFLICTS !!!',
+		'Branch: main\nUpstream: origin/main\nWorking tree clean',
 	);
 	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Conflicts/i);
+	t.regex(output!, /git_status/);
 });
 
-test('GitStatusEnhancedFormatter displays hammer icon', t => {
-	const formatter = gitStatusEnhancedTool.formatter;
+// ============================================================================
+// Tests for git_diff Tool Definition
+// ============================================================================
+
+test('git_diff tool has correct name', t => {
+	t.is(gitDiffTool.name, 'git_diff');
+});
+
+test('git_diff tool has AI SDK tool with execute', t => {
+	t.truthy(gitDiffTool.tool);
+	// biome-ignore lint/suspicious/noExplicitAny: Test accessing internal tool structure
+	t.is(typeof (gitDiffTool.tool as any).execute, 'function');
+});
+
+test('git_diff tool has formatter function', t => {
+	t.is(typeof gitDiffTool.formatter, 'function');
+});
+
+test('git_diff formatter renders correctly', t => {
+	const formatter = gitDiffTool.formatter;
 	if (!formatter) {
 		t.fail('Formatter is not defined');
 		return;
 	}
 
 	const element = formatter(
-		{detailed: true},
-		'Branch: main\nSummary: Working tree clean',
+		{staged: true},
+		'diff --git a/file.ts b/file.ts',
 	);
 	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /⚒/); // Hammer icon
-	t.regex(output!, /git_status_enhanced/);
+	t.regex(output!, /git_diff/);
 });
 
-test('GitStatusEnhancedFormatter shows detailed mode', t => {
-	const formatter = gitStatusEnhancedTool.formatter;
+// ============================================================================
+// Tests for git_log Tool Definition
+// ============================================================================
+
+test('git_log tool has correct name', t => {
+	t.is(gitLogTool.name, 'git_log');
+});
+
+test('git_log tool has AI SDK tool with execute', t => {
+	t.truthy(gitLogTool.tool);
+	// biome-ignore lint/suspicious/noExplicitAny: Test accessing internal tool structure
+	t.is(typeof (gitLogTool.tool as any).execute, 'function');
+});
+
+test('git_log tool has formatter function', t => {
+	t.is(typeof gitLogTool.formatter, 'function');
+});
+
+test('git_log formatter renders correctly', t => {
+	const formatter = gitLogTool.formatter;
 	if (!formatter) {
 		t.fail('Formatter is not defined');
 		return;
 	}
 
 	const element = formatter(
-		{detailed: true},
-		'Branch: main\nSummary: 1 file modified',
+		{count: 5},
+		'Showing 5 commit(s) on main:',
 	);
 	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /detailed/);
+	t.regex(output!, /git_log/);
 });
 
 // ============================================================================
-// Validator Tests
+// Tests for git_add Tool Definition
 // ============================================================================
 
-test('git_branch_suggest validator validates work type', t => {
-	// Test validator logic directly without git repo dependency
-	const validTypes = ['feature', 'bugfix', 'hotfix', 'release', 'chore'];
-
-	t.true(validTypes.includes('feature'));
-	t.true(validTypes.includes('bugfix'));
-	t.false(validTypes.includes('invalid'));
+test('git_add tool has correct name', t => {
+	t.is(gitAddTool.name, 'git_add');
 });
 
-test('git_branch_suggest validator validates description length', t => {
-	// Test description length validation logic
-	const shortDesc = 'ab';
-	const validDesc = 'add new feature';
+test('git_add tool has AI SDK tool with execute', t => {
+	t.truthy(gitAddTool.tool);
+	// biome-ignore lint/suspicious/noExplicitAny: Test accessing internal tool structure
+	t.is(typeof (gitAddTool.tool as any).execute, 'function');
+});
 
-	t.true(shortDesc.trim().length < 3);
-	t.true(validDesc.trim().length >= 3);
+test('git_add tool has formatter function', t => {
+	t.is(typeof gitAddTool.formatter, 'function');
+});
+
+test('git_add formatter renders correctly', t => {
+	const formatter = gitAddTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter(
+		{all: true},
+		'Staged 3 file(s)',
+	);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /git_add/);
+});
+
+// ============================================================================
+// Tests for git_commit Tool Definition
+// ============================================================================
+
+test('git_commit tool has correct name', t => {
+	t.is(gitCommitTool.name, 'git_commit');
+});
+
+test('git_commit tool has AI SDK tool with execute', t => {
+	t.truthy(gitCommitTool.tool);
+	// biome-ignore lint/suspicious/noExplicitAny: Test accessing internal tool structure
+	t.is(typeof (gitCommitTool.tool as any).execute, 'function');
+});
+
+test('git_commit tool has formatter function', t => {
+	t.is(typeof gitCommitTool.formatter, 'function');
+});
+
+test('git_commit tool has validator function', t => {
+	t.is(typeof gitCommitTool.validator, 'function');
+});
+
+test('git_commit formatter renders correctly', t => {
+	const formatter = gitCommitTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter(
+		{message: 'feat: add new feature'},
+		'Commit created: abc1234',
+	);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /git_commit/);
+	t.regex(output!, /feat: add new feature/);
+});
+
+// ============================================================================
+// Tests for git_push Tool Definition
+// ============================================================================
+
+test('git_push tool has correct name', t => {
+	t.is(gitPushTool.name, 'git_push');
+});
+
+test('git_push tool has AI SDK tool with execute', t => {
+	t.truthy(gitPushTool.tool);
+	// biome-ignore lint/suspicious/noExplicitAny: Test accessing internal tool structure
+	t.is(typeof (gitPushTool.tool as any).execute, 'function');
+});
+
+test('git_push tool has formatter function', t => {
+	t.is(typeof gitPushTool.formatter, 'function');
+});
+
+test('git_push tool has validator function', t => {
+	t.is(typeof gitPushTool.validator, 'function');
+});
+
+test('git_push formatter shows force warning', t => {
+	const formatter = gitPushTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter(
+		{force: true},
+		'',
+	);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /FORCE PUSH/i);
+});
+
+// ============================================================================
+// Tests for git_pull Tool Definition
+// ============================================================================
+
+test('git_pull tool has correct name', t => {
+	t.is(gitPullTool.name, 'git_pull');
+});
+
+test('git_pull tool has AI SDK tool with execute', t => {
+	t.truthy(gitPullTool.tool);
+	// biome-ignore lint/suspicious/noExplicitAny: Test accessing internal tool structure
+	t.is(typeof (gitPullTool.tool as any).execute, 'function');
+});
+
+test('git_pull tool has formatter function', t => {
+	t.is(typeof gitPullTool.formatter, 'function');
+});
+
+test('git_pull formatter renders correctly', t => {
+	const formatter = gitPullTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter(
+		{rebase: true},
+		'Pulled from origin/main',
+	);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /git_pull/);
+});
+
+// ============================================================================
+// Tests for git_branch Tool Definition
+// ============================================================================
+
+test('git_branch tool has correct name', t => {
+	t.is(gitBranchTool.name, 'git_branch');
+});
+
+test('git_branch tool has AI SDK tool with execute', t => {
+	t.truthy(gitBranchTool.tool);
+	// biome-ignore lint/suspicious/noExplicitAny: Test accessing internal tool structure
+	t.is(typeof (gitBranchTool.tool as any).execute, 'function');
+});
+
+test('git_branch tool has formatter function', t => {
+	t.is(typeof gitBranchTool.formatter, 'function');
+});
+
+test('git_branch formatter shows force delete warning', t => {
+	const formatter = gitBranchTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter(
+		{delete: 'feature-branch', force: true},
+		'',
+	);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /FORCE DELETE/i);
+});
+
+// ============================================================================
+// Tests for git_stash Tool Definition
+// ============================================================================
+
+test('git_stash tool has correct name', t => {
+	t.is(gitStashTool.name, 'git_stash');
+});
+
+test('git_stash tool has AI SDK tool with execute', t => {
+	t.truthy(gitStashTool.tool);
+	// biome-ignore lint/suspicious/noExplicitAny: Test accessing internal tool structure
+	t.is(typeof (gitStashTool.tool as any).execute, 'function');
+});
+
+test('git_stash tool has formatter function', t => {
+	t.is(typeof gitStashTool.formatter, 'function');
+});
+
+test('git_stash formatter shows clear warning', t => {
+	const formatter = gitStashTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter(
+		{clear: true},
+		'',
+	);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /permanently delete/i);
+});
+
+// ============================================================================
+// Tests for git_reset Tool Definition
+// ============================================================================
+
+test('git_reset tool has correct name', t => {
+	t.is(gitResetTool.name, 'git_reset');
+});
+
+test('git_reset tool has AI SDK tool with execute', t => {
+	t.truthy(gitResetTool.tool);
+	// biome-ignore lint/suspicious/noExplicitAny: Test accessing internal tool structure
+	t.is(typeof (gitResetTool.tool as any).execute, 'function');
+});
+
+test('git_reset tool has formatter function', t => {
+	t.is(typeof gitResetTool.formatter, 'function');
+});
+
+test('git_reset formatter shows hard reset warning', t => {
+	const formatter = gitResetTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter(
+		{mode: 'hard'},
+		'',
+	);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /WARNING/i);
+	t.regex(output!, /permanently discard/i);
+});
+
+// ============================================================================
+// Tests for git_pr Tool Definition
+// ============================================================================
+
+test('git_pr tool has correct name', t => {
+	t.is(gitPrTool.name, 'git_pr');
+});
+
+test('git_pr tool has AI SDK tool with execute', t => {
+	t.truthy(gitPrTool.tool);
+	// biome-ignore lint/suspicious/noExplicitAny: Test accessing internal tool structure
+	t.is(typeof (gitPrTool.tool as any).execute, 'function');
+});
+
+test('git_pr tool has formatter function', t => {
+	t.is(typeof gitPrTool.formatter, 'function');
+});
+
+test('git_pr formatter renders create action correctly', t => {
+	const formatter = gitPrTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter(
+		{create: {title: 'Add new feature', draft: true}},
+		'',
+	);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /git_pr/);
+	t.regex(output!, /create/i);
+	t.regex(output!, /Add new feature/);
 });
