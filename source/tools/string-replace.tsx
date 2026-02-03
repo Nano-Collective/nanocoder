@@ -50,13 +50,13 @@ const executeStringReplace = async (
 
 	if (occurrences === 0) {
 		throw new Error(
-			`Content not found in file. The file may have changed since you last read it.\n\nSearching for:\n${old_str}\n\nSuggestion: Read the file again to see current contents.`,
+			`Content not found in file. The file may have changed since you last read it.\n`,
 		);
 	}
 
 	if (occurrences > 1) {
 		throw new Error(
-			`Found ${occurrences} matches for the search string. Please provide more surrounding context to make the match unique.\n\nSearching for:\n${old_str}`,
+			`Found ${occurrences} matches for the search string. Please provide more surrounding context to make the match unique\n`,
 		);
 	}
 
