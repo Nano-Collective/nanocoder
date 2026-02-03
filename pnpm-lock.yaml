@@ -37,7 +37,7 @@ importers:
         version: 6.0.62(zod@4.3.5)
       cheerio:
         specifier: ^1.1.2
-        version: 1.2.0
+        version: 1.1.2
       cli-highlight:
         specifier: ^2.1.11
         version: 2.1.11
@@ -55,25 +55,25 @@ importers:
         version: 7.0.5
       ink:
         specifier: ^6.3.1
-        version: 6.6.0(@types/react@19.2.10)(react@19.2.4)
+        version: 6.6.0(@types/react@19.2.8)(react@19.2.3)
       ink-big-text:
         specifier: ^2.0.0
-        version: 2.0.0(ink@6.6.0(@types/react@19.2.10)(react@19.2.4))(react@19.2.4)
+        version: 2.0.0(ink@6.6.0(@types/react@19.2.8)(react@19.2.3))(react@19.2.3)
       ink-gradient:
         specifier: ^3.0.0
-        version: 3.0.0(ink@6.6.0(@types/react@19.2.10)(react@19.2.4))
+        version: 3.0.0(ink@6.6.0(@types/react@19.2.8)(react@19.2.3))
       ink-select-input:
         specifier: ^6.2.0
-        version: 6.2.0(ink@6.6.0(@types/react@19.2.10)(react@19.2.4))(react@19.2.4)
+        version: 6.2.0(ink@6.6.0(@types/react@19.2.8)(react@19.2.3))(react@19.2.3)
       ink-spinner:
         specifier: ^5.0.0
-        version: 5.0.0(ink@6.6.0(@types/react@19.2.10)(react@19.2.4))(react@19.2.4)
+        version: 5.0.0(ink@6.6.0(@types/react@19.2.8)(react@19.2.3))(react@19.2.3)
       ink-tab:
         specifier: ^5.2.0
-        version: 5.2.0(@types/react@19.2.10)(ink@6.6.0(@types/react@19.2.10)(react@19.2.4))(react@19.2.4)
+        version: 5.2.0(@types/react@19.2.8)(ink@6.6.0(@types/react@19.2.8)(react@19.2.3))(react@19.2.3)
       ink-text-input:
         specifier: ^6.0.0
-        version: 6.0.0(ink@6.6.0(@types/react@19.2.10)(react@19.2.4))(react@19.2.4)
+        version: 6.0.0(ink@6.6.0(@types/react@19.2.8)(react@19.2.3))(react@19.2.3)
       llama-tokenizer-js:
         specifier: ^1.2.2
         version: 1.2.2
@@ -88,7 +88,7 @@ importers:
         version: 4.0.0
       react:
         specifier: ^19.0.0
-        version: 19.2.4
+        version: 19.2.3
       sonic-boom:
         specifier: ^4.0.0
         version: 4.2.0
@@ -110,7 +110,7 @@ importers:
         version: 6.0.0
       '@biomejs/biome':
         specifier: ^2.3.10
-        version: 2.3.13
+        version: 2.3.11
       '@types/ink-text-input':
         specifier: ^2.0.5
         version: 2.0.5
@@ -119,7 +119,7 @@ importers:
         version: 25.0.10
       '@types/react':
         specifier: ^19.0.0
-        version: 19.2.10
+        version: 19.2.8
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
@@ -137,7 +137,7 @@ importers:
         version: 9.1.7
       ink-testing-library:
         specifier: ^4.0.0
-        version: 4.0.0(@types/react@19.2.10)
+        version: 4.0.0(@types/react@19.2.8)
       knip:
         specifier: ^5.66.2
         version: 5.81.0(@types/node@25.0.10)(typescript@5.9.3)
@@ -201,12 +201,6 @@ packages:
 
   '@ai-sdk/openai-compatible@2.0.24':
     resolution: {integrity: sha512-3QrCKpQCn3g6sIMoFGuEroaqk7Xg+qfsohRp4dKszjto5stjBg4SdtOKqHg+CpE3X4woj2O62w2qr5dSekMZeQ==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
-
-  '@ai-sdk/provider-utils@4.0.11':
-    resolution: {integrity: sha512-y/WOPpcZaBjvNaogy83mBsCRPvbtaK0y1sY9ckRrrbTGMvG2HC/9Y/huqNXKnLAxUIME2PGa2uvF2CDwIsxoXQ==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -304,55 +298,55 @@ packages:
     resolution: {integrity: sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA==}
     engines: {node: '>=18'}
 
-  '@biomejs/biome@2.3.13':
-    resolution: {integrity: sha512-Fw7UsV0UAtWIBIm0M7g5CRerpu1eKyKAXIazzxhbXYUyMkwNrkX/KLkGI7b+uVDQ5cLUMfOC9vR60q9IDYDstA==}
+  '@biomejs/biome@2.3.11':
+    resolution: {integrity: sha512-/zt+6qazBWguPG6+eWmiELqO+9jRsMZ/DBU3lfuU2ngtIQYzymocHhKiZRyrbra4aCOoyTg/BmY+6WH5mv9xmQ==}
     engines: {node: '>=14.21.3'}
     hasBin: true
 
-  '@biomejs/cli-darwin-arm64@2.3.13':
-    resolution: {integrity: sha512-0OCwP0/BoKzyJHnFdaTk/i7hIP9JHH9oJJq6hrSCPmJPo8JWcJhprK4gQlhFzrwdTBAW4Bjt/RmCf3ZZe59gwQ==}
+  '@biomejs/cli-darwin-arm64@2.3.11':
+    resolution: {integrity: sha512-/uXXkBcPKVQY7rc9Ys2CrlirBJYbpESEDme7RKiBD6MmqR2w3j0+ZZXRIL2xiaNPsIMMNhP1YnA+jRRxoOAFrA==}
     engines: {node: '>=14.21.3'}
     cpu: [arm64]
     os: [darwin]
 
-  '@biomejs/cli-darwin-x64@2.3.13':
-    resolution: {integrity: sha512-AGr8OoemT/ejynbIu56qeil2+F2WLkIjn2d8jGK1JkchxnMUhYOfnqc9sVzcRxpG9Ycvw4weQ5sprRvtb7Yhcw==}
+  '@biomejs/cli-darwin-x64@2.3.11':
+    resolution: {integrity: sha512-fh7nnvbweDPm2xEmFjfmq7zSUiox88plgdHF9OIW4i99WnXrAC3o2P3ag9judoUMv8FCSUnlwJCM1B64nO5Fbg==}
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [darwin]
 
-  '@biomejs/cli-linux-arm64-musl@2.3.13':
-    resolution: {integrity: sha512-TUdDCSY+Eo/EHjhJz7P2GnWwfqet+lFxBZzGHldrvULr59AgahamLs/N85SC4+bdF86EhqDuuw9rYLvLFWWlXA==}
+  '@biomejs/cli-linux-arm64-musl@2.3.11':
+    resolution: {integrity: sha512-XPSQ+XIPZMLaZ6zveQdwNjbX+QdROEd1zPgMwD47zvHV+tCGB88VH+aynyGxAHdzL+Tm/+DtKST5SECs4iwCLg==}
     engines: {node: '>=14.21.3'}
     cpu: [arm64]
     os: [linux]
 
-  '@biomejs/cli-linux-arm64@2.3.13':
-    resolution: {integrity: sha512-xvOiFkrDNu607MPMBUQ6huHmBG1PZLOrqhtK6pXJW3GjfVqJg0Z/qpTdhXfcqWdSZHcT+Nct2fOgewZvytESkw==}
+  '@biomejs/cli-linux-arm64@2.3.11':
+    resolution: {integrity: sha512-l4xkGa9E7Uc0/05qU2lMYfN1H+fzzkHgaJoy98wO+b/7Gl78srbCRRgwYSW+BTLixTBrM6Ede5NSBwt7rd/i6g==}
     engines: {node: '>=14.21.3'}
     cpu: [arm64]
     os: [linux]
 
-  '@biomejs/cli-linux-x64-musl@2.3.13':
-    resolution: {integrity: sha512-0bdwFVSbbM//Sds6OjtnmQGp4eUjOTt6kHvR/1P0ieR9GcTUAlPNvPC3DiavTqq302W34Ae2T6u5VVNGuQtGlQ==}
+  '@biomejs/cli-linux-x64-musl@2.3.11':
+    resolution: {integrity: sha512-vU7a8wLs5C9yJ4CB8a44r12aXYb8yYgBn+WeyzbMjaCMklzCv1oXr8x+VEyWodgJt9bDmhiaW/I0RHbn7rsNmw==}
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [linux]
 
-  '@biomejs/cli-linux-x64@2.3.13':
-    resolution: {integrity: sha512-s+YsZlgiXNq8XkgHs6xdvKDFOj/bwTEevqEY6rC2I3cBHbxXYU1LOZstH3Ffw9hE5tE1sqT7U23C00MzkXztMw==}
+  '@biomejs/cli-linux-x64@2.3.11':
+    resolution: {integrity: sha512-/1s9V/H3cSe0r0Mv/Z8JryF5x9ywRxywomqZVLHAoa/uN0eY7F8gEngWKNS5vbbN/BsfpCG5yeBT5ENh50Frxg==}
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [linux]
 
-  '@biomejs/cli-win32-arm64@2.3.13':
-    resolution: {integrity: sha512-QweDxY89fq0VvrxME+wS/BXKmqMrOTZlN9SqQ79kQSIc3FrEwvW/PvUegQF6XIVaekncDykB5dzPqjbwSKs9DA==}
+  '@biomejs/cli-win32-arm64@2.3.11':
+    resolution: {integrity: sha512-PZQ6ElCOnkYapSsysiTy0+fYX+agXPlWugh6+eQ6uPKI3vKAqNp6TnMhoM3oY2NltSB89hz59o8xIfOdyhi9Iw==}
     engines: {node: '>=14.21.3'}
     cpu: [arm64]
     os: [win32]
 
-  '@biomejs/cli-win32-x64@2.3.13':
-    resolution: {integrity: sha512-trDw2ogdM2lyav9WFQsdsfdVy1dvZALymRpgmWsvSez0BJzBjulhOT/t+wyKeh3pZWvwP3VMs1SoOKwO3wecMQ==}
+  '@biomejs/cli-win32-x64@2.3.11':
+    resolution: {integrity: sha512-43VrG813EW+b5+YbDbz31uUsheX+qFKCpXeY9kfdAx+ww3naKxeVkTD9zLIWxUPfJquANMHrmW3wbe/037G0Qg==}
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [win32]
@@ -881,8 +875,8 @@ packages:
   '@types/prop-types@15.7.15':
     resolution: {integrity: sha512-F6bEyamV9jKGAFBEmlQnesRPGOQqS2+Uwi0Em15xenOxHaf2hv6L8YCVn3rPdPJOiJfPiCnLIRyvwVaqMY3MIw==}
 
-  '@types/react@19.2.10':
-    resolution: {integrity: sha512-WPigyYuGhgZ/cTPRXB2EwUw+XvsRA3GqHlsP4qteqrnnjDrApbS7MxcGr/hke5iUoeB7E/gQtrs9I37zAJ0Vjw==}
+  '@types/react@19.2.8':
+    resolution: {integrity: sha512-3MbSL37jEchWZz2p2mjntRZtPt837ij10ApxKfgmXCTuHWagYg7iA5bqPw6C8BMPfwidlvfPI/fxOc42HLhcyg==}
 
   '@types/sarif@2.1.7':
     resolution: {integrity: sha512-kRz0VEkJqWLf1LLVN4pT1cg1Z9wAuvI6L97V3m2f5B76Tg8d413ddvLBPTEHAZJlnn4XSvu0FkZtViCQGVyrXQ==}
@@ -1200,10 +1194,6 @@ packages:
     resolution: {integrity: sha512-IkxPpb5rS/d1IiLbHMgfPuS0FgiWTtFIm/Nj+2woXDLTZ7fOT2eqzgYbdMlLweqlHbsZjxEChoVK+7iph7jyQg==}
     engines: {node: '>=20.18.1'}
 
-  cheerio@1.2.0:
-    resolution: {integrity: sha512-WDrybc/gKFpTYQutKIK6UvfcuxijIZfMfXaYm8NMsPQxSYvf+13fXUJ4rztGGbJcBQ/GF55gvrZ0Bc0bj/mqvg==}
-    engines: {node: '>=20.18.1'}
-
   chokidar@3.6.0:
     resolution: {integrity: sha512-7VT13fmjotKpGipCW9JEQAusEPE+Ei8nl6/g4FBAmIm0GOOLMua9NDDo/DWp0ZAxCr3cPq5ZpBqmPAQgDda2Pw==}
     engines: {node: '>= 8.10.0'}
@@ -1487,10 +1477,6 @@ packages:
 
   entities@6.0.1:
     resolution: {integrity: sha512-aN97NXWF6AWBTahfVOIrB/NShkzi5H7F9r1s9mD3cDj4Ko5f2qhhVoYMibXF7GlLveb/D2ioWay8lxI97Ven3g==}
-    engines: {node: '>=0.12'}
-
-  entities@7.0.1:
-    resolution: {integrity: sha512-TWrgLOFUQTH994YUyl1yT4uyavY5nNB5muff+RtWaqNVCAK408b5ZnnbNAUEWLTCpum9w6arT70i1XdQ4UeOPA==}
     engines: {node: '>=0.12'}
 
   environment@1.1.0:
@@ -1831,9 +1817,6 @@ packages:
 
   htmlparser2@10.0.0:
     resolution: {integrity: sha512-TwAZM+zE5Tq3lrEHvOlvwgj1XLWQCtaaibSN11Q+gGBAS7Y1uZSWwXXRe4iF6OXnaq1riyQAPFOBtYc77Mxq0g==}
-
-  htmlparser2@10.1.0:
-    resolution: {integrity: sha512-VTZkM9GWRAtEpveh7MSF6SjjrpNVNNVJfFup7xTY3UpFtm67foy9HDVXneLtFVt4pMz5kZtgNcvCniNFb1hlEQ==}
 
   http-errors@2.0.1:
     resolution: {integrity: sha512-4FbRdAX+bSdmo4AUFuS0WNiPz8NgFt+r8ThgNWmlrjQjt1Q7ZR9+zTlce2859x4KSXrwIsaeTqDoKQmtP8pLmQ==}
@@ -2671,8 +2654,8 @@ packages:
     peerDependencies:
       react: ^19.2.0
 
-  react@19.2.4:
-    resolution: {integrity: sha512-9nfp2hYpCwOjAN+8TZFGhtWEwgvWHXqESH8qT89AT/lWklpLON22Lc8pEtnpsZz7VmawabSU0gCjnj8aC0euHQ==}
+  react@19.2.3:
+    resolution: {integrity: sha512-Ku/hhYbVjOQnXDZFv2+RibmLFGwFdeeKHFcOTlrt7xplBnya5OGn/hIRDsqDiSUcfORsDC7MPxwork8jBwsIWA==}
     engines: {node: '>=0.10.0'}
 
   read-pkg@9.0.1:
@@ -2961,7 +2944,6 @@ packages:
   tar@7.5.4:
     resolution: {integrity: sha512-AN04xbWGrSTDmVwlI4/GTlIIwMFk/XEv7uL8aa57zuvRy6s4hdBed+lVq2fAZ89XDa7Us3ANXcE3Tvqvja1kTA==}
     engines: {node: '>=18'}
-    deprecated: Old versions of tar are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exhorbitant rates) by contacting i@izs.me
 
   temp-dir@3.0.0:
     resolution: {integrity: sha512-nHc6S/bwIilKHNRgK/3jlhDoIHcp45YgyiwcAk46Tr0LfEqGBVpmiAyuiuxeVE44m3mXnEeVhaipLOEWmH+Njw==}
@@ -3093,10 +3075,6 @@ packages:
 
   undici@7.18.2:
     resolution: {integrity: sha512-y+8YjDFzWdQlSE9N5nzKMT3g4a5UBX1HKowfdXh0uvAnTaqqwqB92Jt4UXBAeKekDs5IaDKyJFR4X1gYVCgXcw==}
-    engines: {node: '>=20.18.1'}
-
-  undici@7.19.2:
-    resolution: {integrity: sha512-4VQSpGEGsWzk0VYxyB/wVX/Q7qf9t5znLRgs0dzszr9w9Fej/8RVNQ+S20vdXSAyra/bJ7ZQfGv6ZMj7UEbzSg==}
     engines: {node: '>=20.18.1'}
 
   unicorn-magic@0.1.0:
@@ -3328,13 +3306,6 @@ snapshots:
       eventsource-parser: 3.0.6
       zod: 4.3.5
 
-  '@ai-sdk/provider-utils@4.0.11(zod@4.3.5)':
-    dependencies:
-      '@ai-sdk/provider': 3.0.6
-      '@standard-schema/spec': 1.1.0
-      eventsource-parser: 3.0.6
-      zod: 4.3.5
-
   '@ai-sdk/provider-utils@4.0.9(zod@4.3.5)':
     dependencies:
       '@ai-sdk/provider': 3.0.5
@@ -3464,39 +3435,39 @@ snapshots:
 
   '@bcoe/v8-coverage@1.0.2': {}
 
-  '@biomejs/biome@2.3.13':
+  '@biomejs/biome@2.3.11':
     optionalDependencies:
-      '@biomejs/cli-darwin-arm64': 2.3.13
-      '@biomejs/cli-darwin-x64': 2.3.13
-      '@biomejs/cli-linux-arm64': 2.3.13
-      '@biomejs/cli-linux-arm64-musl': 2.3.13
-      '@biomejs/cli-linux-x64': 2.3.13
-      '@biomejs/cli-linux-x64-musl': 2.3.13
-      '@biomejs/cli-win32-arm64': 2.3.13
-      '@biomejs/cli-win32-x64': 2.3.13
+      '@biomejs/cli-darwin-arm64': 2.3.11
+      '@biomejs/cli-darwin-x64': 2.3.11
+      '@biomejs/cli-linux-arm64': 2.3.11
+      '@biomejs/cli-linux-arm64-musl': 2.3.11
+      '@biomejs/cli-linux-x64': 2.3.11
+      '@biomejs/cli-linux-x64-musl': 2.3.11
+      '@biomejs/cli-win32-arm64': 2.3.11
+      '@biomejs/cli-win32-x64': 2.3.11
 
-  '@biomejs/cli-darwin-arm64@2.3.13':
+  '@biomejs/cli-darwin-arm64@2.3.11':
     optional: true
 
-  '@biomejs/cli-darwin-x64@2.3.13':
+  '@biomejs/cli-darwin-x64@2.3.11':
     optional: true
 
-  '@biomejs/cli-linux-arm64-musl@2.3.13':
+  '@biomejs/cli-linux-arm64-musl@2.3.11':
     optional: true
 
-  '@biomejs/cli-linux-arm64@2.3.13':
+  '@biomejs/cli-linux-arm64@2.3.11':
     optional: true
 
-  '@biomejs/cli-linux-x64-musl@2.3.13':
+  '@biomejs/cli-linux-x64-musl@2.3.11':
     optional: true
 
-  '@biomejs/cli-linux-x64@2.3.13':
+  '@biomejs/cli-linux-x64@2.3.11':
     optional: true
 
-  '@biomejs/cli-win32-arm64@2.3.13':
+  '@biomejs/cli-win32-arm64@2.3.11':
     optional: true
 
-  '@biomejs/cli-win32-x64@2.3.13':
+  '@biomejs/cli-win32-x64@2.3.11':
     optional: true
 
   '@colors/colors@1.5.0':
@@ -3730,7 +3701,7 @@ snapshots:
     dependencies:
       '@mozilla/readability': 0.6.0
       ajv: 8.17.1
-      cheerio: 1.2.0
+      cheerio: 1.1.2
       commander: 14.0.2
       happy-dom-without-node: 14.12.3
       turndown: 7.2.2
@@ -3974,7 +3945,7 @@ snapshots:
 
   '@types/prop-types@15.7.15': {}
 
-  '@types/react@19.2.10':
+  '@types/react@19.2.8':
     dependencies:
       csstype: 3.2.3
 
@@ -4374,20 +4345,6 @@ snapshots:
       undici: 7.18.2
       whatwg-mimetype: 4.0.0
 
-  cheerio@1.2.0:
-    dependencies:
-      cheerio-select: 2.1.0
-      dom-serializer: 2.0.0
-      domhandler: 5.0.3
-      domutils: 3.2.2
-      encoding-sniffer: 0.2.1
-      htmlparser2: 10.1.0
-      parse5: 7.3.0
-      parse5-htmlparser2-tree-adapter: 7.1.0
-      parse5-parser-stream: 7.1.2
-      undici: 7.19.2
-      whatwg-mimetype: 4.0.0
-
   chokidar@3.6.0:
     dependencies:
       anymatch: 3.1.3
@@ -4647,8 +4604,6 @@ snapshots:
   entities@4.5.0: {}
 
   entities@6.0.1: {}
-
-  entities@7.0.1: {}
 
   environment@1.1.0: {}
 
@@ -5079,13 +5034,6 @@ snapshots:
       domutils: 3.2.2
       entities: 6.0.1
 
-  htmlparser2@10.1.0:
-    dependencies:
-      domelementtype: 2.3.0
-      domhandler: 5.0.3
-      domutils: 3.2.2
-      entities: 7.0.1
-
   http-errors@2.0.1:
     dependencies:
       depd: 2.0.0
@@ -5145,53 +5093,53 @@ snapshots:
   ini@1.3.8:
     optional: true
 
-  ink-big-text@2.0.0(ink@6.6.0(@types/react@19.2.10)(react@19.2.4))(react@19.2.4):
+  ink-big-text@2.0.0(ink@6.6.0(@types/react@19.2.8)(react@19.2.3))(react@19.2.3):
     dependencies:
       cfonts: 3.3.1
-      ink: 6.6.0(@types/react@19.2.10)(react@19.2.4)
+      ink: 6.6.0(@types/react@19.2.8)(react@19.2.3)
       prop-types: 15.8.1
-      react: 19.2.4
+      react: 19.2.3
 
-  ink-gradient@3.0.0(ink@6.6.0(@types/react@19.2.10)(react@19.2.4)):
+  ink-gradient@3.0.0(ink@6.6.0(@types/react@19.2.8)(react@19.2.3)):
     dependencies:
       '@types/gradient-string': 1.1.6
       gradient-string: 2.0.2
-      ink: 6.6.0(@types/react@19.2.10)(react@19.2.4)
+      ink: 6.6.0(@types/react@19.2.8)(react@19.2.3)
       prop-types: 15.8.1
       strip-ansi: 7.1.2
 
-  ink-select-input@6.2.0(ink@6.6.0(@types/react@19.2.10)(react@19.2.4))(react@19.2.4):
+  ink-select-input@6.2.0(ink@6.6.0(@types/react@19.2.8)(react@19.2.3))(react@19.2.3):
     dependencies:
       figures: 6.1.0
-      ink: 6.6.0(@types/react@19.2.10)(react@19.2.4)
-      react: 19.2.4
+      ink: 6.6.0(@types/react@19.2.8)(react@19.2.3)
+      react: 19.2.3
       to-rotated: 1.0.0
 
-  ink-spinner@5.0.0(ink@6.6.0(@types/react@19.2.10)(react@19.2.4))(react@19.2.4):
+  ink-spinner@5.0.0(ink@6.6.0(@types/react@19.2.8)(react@19.2.3))(react@19.2.3):
     dependencies:
       cli-spinners: 2.9.2
-      ink: 6.6.0(@types/react@19.2.10)(react@19.2.4)
-      react: 19.2.4
+      ink: 6.6.0(@types/react@19.2.8)(react@19.2.3)
+      react: 19.2.3
 
-  ink-tab@5.2.0(@types/react@19.2.10)(ink@6.6.0(@types/react@19.2.10)(react@19.2.4))(react@19.2.4):
+  ink-tab@5.2.0(@types/react@19.2.8)(ink@6.6.0(@types/react@19.2.8)(react@19.2.3))(react@19.2.3):
     dependencies:
-      ink: 6.6.0(@types/react@19.2.10)(react@19.2.4)
-      react: 19.2.4
+      ink: 6.6.0(@types/react@19.2.8)(react@19.2.3)
+      react: 19.2.3
     optionalDependencies:
-      '@types/react': 19.2.10
+      '@types/react': 19.2.8
 
-  ink-testing-library@4.0.0(@types/react@19.2.10):
+  ink-testing-library@4.0.0(@types/react@19.2.8):
     optionalDependencies:
-      '@types/react': 19.2.10
+      '@types/react': 19.2.8
 
-  ink-text-input@6.0.0(ink@6.6.0(@types/react@19.2.10)(react@19.2.4))(react@19.2.4):
+  ink-text-input@6.0.0(ink@6.6.0(@types/react@19.2.8)(react@19.2.3))(react@19.2.3):
     dependencies:
       chalk: 5.6.2
-      ink: 6.6.0(@types/react@19.2.10)(react@19.2.4)
-      react: 19.2.4
+      ink: 6.6.0(@types/react@19.2.8)(react@19.2.3)
+      react: 19.2.3
       type-fest: 4.41.0
 
-  ink@6.6.0(@types/react@19.2.10)(react@19.2.4):
+  ink@6.6.0(@types/react@19.2.8)(react@19.2.3):
     dependencies:
       '@alcalzone/ansi-tokenize': 0.2.3
       ansi-escapes: 7.2.0
@@ -5206,8 +5154,8 @@ snapshots:
       indent-string: 5.0.0
       is-in-ci: 2.0.0
       patch-console: 2.0.0
-      react: 19.2.4
-      react-reconciler: 0.33.0(react@19.2.4)
+      react: 19.2.3
+      react-reconciler: 0.33.0(react@19.2.3)
       signal-exit: 3.0.7
       slice-ansi: 7.1.2
       stack-utils: 2.0.6
@@ -5218,7 +5166,7 @@ snapshots:
       ws: 8.19.0
       yoga-layout: 3.2.1
     optionalDependencies:
-      '@types/react': 19.2.10
+      '@types/react': 19.2.8
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -5912,12 +5860,12 @@ snapshots:
 
   react-is@16.13.1: {}
 
-  react-reconciler@0.33.0(react@19.2.4):
+  react-reconciler@0.33.0(react@19.2.3):
     dependencies:
-      react: 19.2.4
+      react: 19.2.3
       scheduler: 0.27.0
 
-  react@19.2.4: {}
+  react@19.2.3: {}
 
   read-pkg@9.0.1:
     dependencies:
@@ -6368,8 +6316,6 @@ snapshots:
   undici-types@7.16.0: {}
 
   undici@7.18.2: {}
-
-  undici@7.19.2: {}
 
   unicorn-magic@0.1.0: {}
 
