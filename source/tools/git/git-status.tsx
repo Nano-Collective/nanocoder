@@ -334,7 +334,7 @@ function GitStatusFormatter({result}: {result?: string}): React.ReactElement {
 				!hasConflicts &&
 				branch && (
 					<Box marginTop={1}>
-						<Text color={colors.success}>Working tree clean</Text>
+						<Text color={colors.success}>✓ Working tree clean</Text>
 					</Box>
 				)}
 		</Box>
