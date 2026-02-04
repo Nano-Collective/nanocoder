@@ -99,6 +99,9 @@ importers:
       undici:
         specifier: ^7.16.0
         version: 7.18.2
+      wrap-ansi:
+        specifier: ^9.0.2
+        version: 9.0.2
       ws:
         specifier: ^8.18.0
         version: 8.19.0

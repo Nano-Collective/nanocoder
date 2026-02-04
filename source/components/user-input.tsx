@@ -485,11 +485,10 @@ export default function UserInput({
 			)}
 			<Box
 				flexDirection="column"
-				paddingY={1}
 				marginTop={1}
 				backgroundColor={colors.base}
 				width={boxWidth}
-				paddingLeft={1}
+				padding={1}
 				borderStyle="bold"
 				borderLeft={true}
 				borderRight={false}
@@ -499,7 +498,9 @@ export default function UserInput({
 			>
 				{/* Input row */}
 				<Box>
-					<Text color={isBashMode ? colors.tool : textColor}>{'>'} </Text>
+					{input.length === 0 && (
+						<Text color={isBashMode ? colors.tool : textColor}>{'>'} </Text>
+					)}
 					<TextInput
 						key={textInputKey}
 						value={input}

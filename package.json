@@ -85,6 +85,7 @@
 		"sonic-boom": "^4.0.0",
 		"tiktoken": "^1.0.22",
 		"undici": "^7.16.0",
+		"wrap-ansi": "^9.0.2",
 		"ws": "^8.18.0",
 		"xdg-basedir": "^5.1.0"
 	},
