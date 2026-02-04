@@ -333,7 +333,7 @@ function GitStatusFormatter({result}: {result?: string}): React.ReactElement {
 				untrackedCount === 0 &&
 				!hasConflicts &&
 				branch && (
-					<Box>
+					<Box marginTop={1}>
 						<Text color={colors.success}>Working tree clean</Text>
 					</Box>
 				)}
