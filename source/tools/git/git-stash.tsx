@@ -381,38 +381,38 @@ function GitStashFormatter({
 			)}
 
 			{result?.includes('stashed successfully') && (
-				<Box>
-					<Text color={colors.success}>Changes stashed</Text>
+				<Box marginTop={1}>
+					<Text color={colors.success}>✓ Changes stashed</Text>
 				</Box>
 			)}
 
 			{result?.includes('Applied') && (
-				<Box>
-					<Text color={colors.success}>Stash applied</Text>
+				<Box marginTop={1}>
+					<Text color={colors.success}>✓ Stash applied</Text>
 				</Box>
 			)}
 
 			{result?.includes('Dropped') && (
-				<Box>
-					<Text color={colors.success}>Stash dropped</Text>
+				<Box marginTop={1}>
+					<Text color={colors.success}>✓ Stash dropped</Text>
 				</Box>
 			)}
 
 			{result?.includes('Cleared all') && (
-				<Box>
-					<Text color={colors.success}>All stashes cleared</Text>
+				<Box marginTop={1}>
+					<Text color={colors.success}>✓ All stashes cleared</Text>
 				</Box>
 			)}
 
 			{result?.includes('CONFLICT') && (
-				<Box>
-					<Text color={colors.error}>Merge conflicts detected!</Text>
+				<Box marginTop={1}>
+					<Text color={colors.error}>✗ Merge conflicts detected.</Text>
 				</Box>
 			)}
 
 			{result?.includes('Error:') && !result.includes('CONFLICT') && (
-				<Box>
-					<Text color={colors.error}>{result}</Text>
+				<Box marginTop={1}>
+					<Text color={colors.error}>✗ {result}</Text>
 				</Box>
 			)}
 		</Box>

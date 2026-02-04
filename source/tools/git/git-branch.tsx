@@ -369,26 +369,26 @@ function GitBranchFormatter({
 			)}
 
 			{result?.includes('Switched to') && (
-				<Box>
-					<Text color={colors.success}>Switch completed</Text>
+				<Box marginTop={1}>
+					<Text color={colors.success}>✓ Switch completed</Text>
 				</Box>
 			)}
 
 			{result?.includes('Created and switched') && (
-				<Box>
-					<Text color={colors.success}>Branch created</Text>
+				<Box marginTop={1}>
+					<Text color={colors.success}>✓ Branch created</Text>
 				</Box>
 			)}
 
 			{result?.includes('Deleted branch') && (
-				<Box>
-					<Text color={colors.success}>Branch deleted</Text>
+				<Box marginTop={1}>
+					<Text color={colors.success}>✓ Branch deleted</Text>
 				</Box>
 			)}
 
 			{result?.includes('Error:') && (
-				<Box>
-					<Text color={colors.error}>{result}</Text>
+				<Box marginTop={1}>
+					<Text color={colors.error}>✗ {result}</Text>
 				</Box>
 			)}
 		</Box>

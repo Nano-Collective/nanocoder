@@ -143,7 +143,6 @@ function GitAddFormatter({
 	let fileCount = 0;
 	let additions = 0;
 	let deletions = 0;
-	let files: string[] = [];
 
 	if (result) {
 		const countMatch = result.match(/Staged (\d+) file/);
@@ -153,12 +152,6 @@ function GitAddFormatter({
 		if (statsMatch) {
 			additions = parseInt(statsMatch[1], 10);
 			deletions = parseInt(statsMatch[2], 10);
-		}
-
-		// Extract file names
-		const fileMatches = result.match(/^\s+[AMDRC]\s+(.+)$/gm);
-		if (fileMatches) {
-			files = fileMatches.map(m => m.trim().split(/\s+/).slice(1).join(' '));
 		}
 	}
 
@@ -187,18 +180,6 @@ function GitAddFormatter({
 					<Text color={colors.text}>, </Text>
 					<Text color={colors.error}>-{deletions}</Text>
 					<Text color={colors.text}>)</Text>
-				</Box>
-			)}
-
-			{files.length > 0 && files.length <= 5 && (
-				<Box flexDirection="column" marginTop={0}>
-					<Text color={colors.secondary}>Files:</Text>
-					{files.slice(0, 5).map((file, i) => (
-						<Text key={i} color={colors.text}>
-							{'  '}
-							{file}
-						</Text>
-					))}
 				</Box>
 			)}
 

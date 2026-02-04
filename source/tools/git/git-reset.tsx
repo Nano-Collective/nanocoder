@@ -290,14 +290,14 @@ function GitResetFormatter({
 			)}
 
 			{result?.includes('Reset to') && (
-				<Box>
-					<Text color={colors.success}>Reset completed</Text>
+				<Box marginTop={1}>
+					<Text color={colors.success}>✓ Reset completed</Text>
 				</Box>
 			)}
 
 			{result?.includes('Error:') && (
-				<Box>
-					<Text color={colors.error}>{result}</Text>
+				<Box marginTop={1}>
+					<Text color={colors.error}>✗ {result}</Text>
 				</Box>
 			)}
 		</Box>

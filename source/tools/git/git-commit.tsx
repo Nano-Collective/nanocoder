@@ -204,26 +204,6 @@ function GitCommitFormatter({
 		<Box flexDirection="column" marginBottom={1}>
 			<Text color={colors.tool}>⚒ git_commit</Text>
 
-			<Box flexDirection="column">
-				<Text color={colors.secondary}>Message:</Text>
-				<Box marginLeft={2}>
-					<Text color={colors.primary}>{args.message}</Text>
-				</Box>
-			</Box>
-
-			{args.body && (
-				<Box flexDirection="column">
-					<Text color={colors.secondary}>Body:</Text>
-					<Box marginLeft={2}>
-						<Text color={colors.text}>
-							{args.body.length > 100
-								? `${args.body.substring(0, 100)}...`
-								: args.body}
-						</Text>
-					</Box>
-				</Box>
-			)}
-
 			{!result && stagedCount > 0 && (
 				<Box>
 					<Text color={colors.secondary}>Staged: </Text>
@@ -254,9 +234,29 @@ function GitCommitFormatter({
 				</Box>
 			)}
 
+			<Box flexDirection="column">
+				<Text color={colors.secondary}>Message:</Text>
+				<Box marginLeft={2}>
+					<Text color={colors.primary}>{args.message}</Text>
+				</Box>
+			</Box>
+
+			{args.body && (
+				<Box flexDirection="column">
+					<Text color={colors.secondary}>Body:</Text>
+					<Box marginLeft={2}>
+						<Text color={colors.text}>
+							{args.body.length > 100
+								? `${args.body.substring(0, 100)}...`
+								: args.body}
+						</Text>
+					</Box>
+				</Box>
+			)}
+
 			{result?.includes('Commit created') && (
-				<Box>
-					<Text color={colors.success}>Commit created successfully</Text>
+				<Box marginTop={1}>
+					<Text color={colors.success}>✓ Commit created successfully</Text>
 				</Box>
 			)}
 

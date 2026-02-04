@@ -250,7 +250,6 @@ function GitStatusFormatter({result}: {result?: string}): React.ReactElement {
 
 	// Parse result for display
 	let branch = '';
-	let upstream = '';
 	let ahead = 0;
 	let behind = 0;
 	let stagedCount = 0;
@@ -261,11 +260,6 @@ function GitStatusFormatter({result}: {result?: string}): React.ReactElement {
 	if (result) {
 		const branchMatch = result.match(/Branch: (.+)/);
 		if (branchMatch) branch = branchMatch[1];
-
-		const upstreamMatch = result.match(/Upstream: (.+)/);
-		if (upstreamMatch && upstreamMatch[1] !== 'not set') {
-			upstream = upstreamMatch[1];
-		}
 
 		const syncMatch = result.match(/Sync: (.+)/);
 		if (syncMatch) {
@@ -295,7 +289,6 @@ function GitStatusFormatter({result}: {result?: string}): React.ReactElement {
 				<Box>
 					<Text color={colors.secondary}>Branch: </Text>
 					<Text color={colors.primary}>{branch}</Text>
-					{upstream && <Text color={colors.secondary}> → {upstream}</Text>}
 				</Box>
 			)}
 

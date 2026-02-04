@@ -214,9 +214,6 @@ function GitPushFormatter({
 					<Box>
 						<Text color={colors.secondary}>Branch: </Text>
 						<Text color={colors.primary}>{preview.branch}</Text>
-						{preview.upstream && (
-							<Text color={colors.secondary}> → {preview.upstream}</Text>
-						)}
 					</Box>
 
 					{preview.commits.length > 0 && (
@@ -227,11 +224,11 @@ function GitPushFormatter({
 							{preview.commits.slice(0, 5).map((commit, i) => (
 								<Text key={i} color={colors.text}>
 									{'  '}
-									{commit.shortHash} {commit.subject}
+									{commit.shortHash}
 								</Text>
 							))}
 							{preview.commits.length > 5 && (
-								<Text color={colors.secondary}>
+								<Text color={colors.primary}>
 									{'  '}... and {preview.commits.length - 5} more
 								</Text>
 							)}

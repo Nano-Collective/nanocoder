@@ -186,13 +186,13 @@ function GitDiffFormatter({
 			)}
 
 			{isEmpty && (
-				<Box>
+				<Box marginTop={1}>
 					<Text color={colors.success}>No changes</Text>
 				</Box>
 			)}
 
 			{!isEmpty && filesChanged > 0 && (
-				<Box>
+				<Box marginTop={1}>
 					<Text color={colors.secondary}>Stats: </Text>
 					<Text color={colors.text}>{filesChanged} files, </Text>
 					<Text color={colors.success}>+{insertions}</Text>

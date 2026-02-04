@@ -142,8 +142,8 @@ function GitLogFormatter({
 		const branchMatch = result.match(/on (.+):/);
 		if (branchMatch) branch = branchMatch[1];
 
-		// Extract date range from first and last commits
-		const dateMatches = result.match(/\(([^)]+)\)/g);
+		// Extract date range from commits (looking for relative dates like "2 hours ago")
+		const dateMatches = result.match(/\((\d+\s+\w+\s+ago|today|yesterday)\)/gi);
 		if (dateMatches && dateMatches.length > 0) {
 			const first = dateMatches[0].replace(/[()]/g, '');
 			const last = dateMatches[dateMatches.length - 1].replace(/[()]/g, '');

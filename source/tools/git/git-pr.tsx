@@ -395,14 +395,14 @@ function GitPrFormatter({
 			)}
 
 			{result?.includes('created successfully') && (
-				<Box>
-					<Text color={colors.success}>PR created successfully</Text>
+				<Box marginTop={1}>
+					<Text color={colors.success}>✓ PR created successfully</Text>
 				</Box>
 			)}
 
 			{result?.includes('Error:') && (
-				<Box>
-					<Text color={colors.error}>{result}</Text>
+				<Box marginTop={1}>
+					<Text color={colors.error}>✗ {result}</Text>
 				</Box>
 			)}
 		</Box>

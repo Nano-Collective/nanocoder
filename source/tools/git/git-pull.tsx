@@ -231,26 +231,26 @@ function GitPullFormatter({
 			)}
 
 			{result?.includes('Pulled from') && (
-				<Box>
-					<Text color={colors.success}>Pull completed successfully</Text>
+				<Box marginTop={1}>
+					<Text color={colors.success}>✓ Pull completed successfully</Text>
 				</Box>
 			)}
 
 			{result?.includes('Already up to date') && (
-				<Box>
-					<Text color={colors.success}>Already up to date</Text>
+				<Box marginTop={1}>
+					<Text color={colors.success}>✓ Already up to date</Text>
 				</Box>
 			)}
 
 			{result?.includes('CONFLICT') && (
-				<Box>
-					<Text color={colors.error}>Merge conflicts detected!</Text>
+				<Box marginTop={1}>
+					<Text color={colors.error}>✗ Merge conflicts detected!</Text>
 				</Box>
 			)}
 
 			{result?.includes('Error:') && !result.includes('CONFLICT') && (
-				<Box>
-					<Text color={colors.error}>{result}</Text>
+				<Box marginTop={1}>
+					<Text color={colors.error}>✗ {result}</Text>
 				</Box>
 			)}
 		</Box>
