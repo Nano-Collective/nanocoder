@@ -339,9 +339,7 @@ function GitPrFormatter({
 					{preview && (
 						<Box>
 							<Text color={colors.secondary}>Branch: </Text>
-							<Text color={colors.text}>
-								{preview.base} ← {preview.branch}
-							</Text>
+							<Text color={colors.text}>{preview.branch}</Text>
 						</Box>
 					)}
 
