@@ -62,7 +62,7 @@ async function getCommitPreview(args: GitCommitInput): Promise<{
 	if (args.amend) {
 		const pushed = await isLastCommitPushed();
 		if (pushed) {
-			amendWarning = 'WARNING: Amending a commit that has already been pushed!';
+			amendWarning = 'Warning: Amending a commit that has already been pushed!';
 		}
 	}
 
