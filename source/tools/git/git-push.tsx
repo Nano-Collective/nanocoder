@@ -236,7 +236,7 @@ function GitPushFormatter({
 					)}
 
 					{preview.commits.length === 0 && !result && (
-						<Box>
+						<Box marginTop={1}>
 							<Text color={colors.warning}>
 								No commits to push (up to date)
 							</Text>
