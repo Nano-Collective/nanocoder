@@ -1,5 +1,6 @@
 import {Box, Text} from 'ink';
 import {memo} from 'react';
+import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {UserMessageProps} from '@/types/index';
 
@@ -49,18 +50,27 @@ function parseLineWithPlaceholders(line: string) {
 
 export default memo(function UserMessage({message}: UserMessageProps) {
 	const {colors} = useTheme();
+	const boxWidth = useTerminalWidth();
 
 	// Strip VS Code context blocks from display
 	const displayMessage = stripVSCodeContext(message);
 	const lines = displayMessage.split('\n');
 
 	return (
-		<Box flexDirection="column" marginBottom={1}>
-			<Box>
-				<Text color={colors.secondary} bold>
-					You:
-				</Text>
-			</Box>
+		<Box
+			flexDirection="column"
+			marginBottom={2}
+			backgroundColor={colors.base}
+			width={boxWidth}
+			paddingY={1}
+			paddingLeft={1}
+			borderStyle="bold"
+			borderLeft={true}
+			borderRight={false}
+			borderTop={false}
+			borderBottom={false}
+			borderLeftColor={colors.primary}
+		>
 			<Box flexDirection="column">
 				{lines.map((line, lineIndex) => {
 					// Skip empty lines - they create paragraph spacing via marginBottom

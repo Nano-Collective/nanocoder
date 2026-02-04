@@ -44,7 +44,24 @@ export type ThemePreset =
 	| 'catppuccin-latte'
 	| 'catppuccin-frappe'
 	| 'catppuccin-macchiato'
-	| 'catppuccin-mocha';
+	| 'catppuccin-mocha'
+	| 'gruvbox-dark'
+	| 'gruvbox-light'
+	| 'solarized-dark'
+	| 'solarized-light'
+	| 'one-dark'
+	| 'one-light'
+	| 'monokai'
+	| 'github-dark'
+	| 'github-light'
+	| 'rose-pine'
+	| 'rose-pine-moon'
+	| 'ayu-dark'
+	| 'ayu-mirage'
+	| 'ayu-light'
+	| 'night-owl'
+	| 'palenight'
+	| 'horizon';
 
 export type NanocoderShape =
 	| 'block'

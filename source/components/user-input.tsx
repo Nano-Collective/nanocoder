@@ -473,25 +473,33 @@ export default function UserInput({
 	}
 
 	return (
-		<Box flexDirection="column" paddingY={1} width="100%" marginTop={1}>
+		<>
+			{!isBashMode ? (
+				<Text color={colors.primary} bold>
+					What would you like me to help with?
+				</Text>
+			) : (
+				<Text color={colors.tool} bold>
+					Bash mode
+				</Text>
+			)}
 			<Box
 				flexDirection="column"
-				borderStyle={isBashMode ? 'round' : undefined}
-				borderColor={isBashMode ? colors.tool : undefined}
-				paddingX={isBashMode ? 1 : 0}
-				width={isBashMode ? boxWidth : undefined}
+				paddingY={1}
+				marginTop={1}
+				backgroundColor={colors.base}
+				width={boxWidth}
+				paddingLeft={1}
+				borderStyle="bold"
+				borderLeft={true}
+				borderRight={false}
+				borderTop={false}
+				borderBottom={false}
+				borderLeftColor={isBashMode ? colors.tool : colors.primary}
 			>
-				{!isBashMode && (
-					<>
-						<Text color={colors.primary} bold>
-							What would you like me to help with?
-						</Text>
-					</>
-				)}
-
 				{/* Input row */}
 				<Box>
-					<Text color={textColor}>{'>'} </Text>
+					<Text color={isBashMode ? colors.tool : textColor}>{'>'} </Text>
 					<TextInput
 						key={textInputKey}
 						value={input}
@@ -502,55 +510,49 @@ export default function UserInput({
 					/>
 				</Box>
 
-				{isBashMode && (
-					<Text color={colors.tool} dimColor>
-						Bash Mode
-					</Text>
-				)}
 				{showClearMessage && (
 					<Text color={colors.secondary} dimColor>
 						Press escape again to clear
 					</Text>
 				)}
-				{showCompletions && completions.length > 0 && (
-					<Box flexDirection="column" marginTop={1}>
-						<Text color={colors.secondary}>Available commands:</Text>
-						{completions.map((completion, index) => (
-							<Text
-								key={index}
-								color={completion.isCustom ? colors.info : colors.primary}
-							>
-								/{completion.name}
-							</Text>
-						))}
-					</Box>
-				)}
-				{isFileAutocompleteMode && fileCompletions.length > 0 && (
-					<Box flexDirection="column" marginTop={1}>
-						<Text color={colors.secondary}>
-							File suggestions (↑/↓ to navigate, Tab to select):
-						</Text>
-						{fileCompletions.slice(0, 5).map((file, index) => (
-							<Text
-								key={index}
-								color={
-									index === selectedFileIndex ? colors.info : colors.primary
-								}
-								bold={index === selectedFileIndex}
-							>
-								{index === selectedFileIndex ? '▸ ' : '  '}
-								{file.path}
-							</Text>
-						))}
-					</Box>
-				)}
 			</Box>
+
+			{showCompletions && completions.length > 0 && (
+				<Box flexDirection="column" marginTop={1}>
+					<Text color={colors.secondary}>Available commands:</Text>
+					{completions.map((completion, index) => (
+						<Text
+							key={index}
+							color={completion.isCustom ? colors.info : colors.primary}
+						>
+							/{completion.name}
+						</Text>
+					))}
+				</Box>
+			)}
+			{isFileAutocompleteMode && fileCompletions.length > 0 && (
+				<Box flexDirection="column" marginTop={1}>
+					<Text color={colors.secondary}>
+						File suggestions (↑/↓ to navigate, Tab to select):
+					</Text>
+					{fileCompletions.slice(0, 5).map((file, index) => (
+						<Text
+							key={index}
+							color={index === selectedFileIndex ? colors.info : colors.primary}
+							bold={index === selectedFileIndex}
+						>
+							{index === selectedFileIndex ? '▸ ' : '  '}
+							{file.path}
+						</Text>
+					))}
+				</Box>
+			)}
 
 			{/* Development mode indicator - always visible */}
 			<DevelopmentModeIndicator
 				developmentMode={developmentMode}
 				colors={colors}
 			/>
-		</Box>
+		</>
 	);
 }
