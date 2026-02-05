@@ -765,6 +765,18 @@ test('parseMarkdown converts <br> tags to newlines', t => {
 	t.false(result.includes('<BR'));
 });
 
+test('AssistantMessage displays approximate token count', t => {
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<AssistantMessage message="Hello world" model="test-model" />
+		</MockThemeProvider>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /~\d+ tokens/);
+});
+
 test('parseMarkdown preserves spacing before bullet lists', t => {
 	const text = `I can assist with tasks such as:
 

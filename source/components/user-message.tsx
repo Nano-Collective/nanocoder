@@ -4,6 +4,7 @@ import wrapAnsi from 'wrap-ansi';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {UserMessageProps} from '@/types/index';
+import {calculateTokens} from '@/utils/token-calculator';
 
 // Strip VS Code context blocks from display (code is still sent to LLM)
 function stripVSCodeContext(message: string): string {
@@ -80,6 +81,7 @@ function parseLineWithPlaceholders(line: string) {
 export default memo(function UserMessage({message}: UserMessageProps) {
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
+	const tokens = calculateTokens(message);
 
 	// Inner text width: outer width minus left border (1) and padding (1 each side)
 	const textWidth = boxWidth - 3;
@@ -101,7 +103,7 @@ export default memo(function UserMessage({message}: UserMessageProps) {
 			</Box>
 			<Box
 				flexDirection="column"
-				marginBottom={2}
+				marginBottom={1}
 				backgroundColor={colors.base}
 				width={boxWidth}
 				padding={1}
@@ -141,6 +143,11 @@ export default memo(function UserMessage({message}: UserMessageProps) {
 						);
 					})}
 				</Box>
+			</Box>
+			<Box marginBottom={2}>
+				<Text color={colors.secondary} dimColor>
+					~{tokens.toLocaleString()} tokens
+				</Text>
 			</Box>
 		</>
 	);

@@ -5,6 +5,7 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {parseMarkdown} from '@/markdown-parser/index';
 import type {AssistantMessageProps} from '@/types/index';
+import {calculateTokens} from '@/utils/token-calculator';
 
 // Ink uses wrap-ansi with trim: false, which preserves the space at word
 // boundaries as leading whitespace on continuation lines. This function
@@ -43,6 +44,7 @@ export default memo(function AssistantMessage({
 }: AssistantMessageProps) {
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
+	const tokens = calculateTokens(message);
 
 	// Inner text width: outer width minus left border (1) and padding (1 each side)
 	const textWidth = boxWidth - 3;
@@ -68,7 +70,7 @@ export default memo(function AssistantMessage({
 			</Box>
 			<Box
 				flexDirection="column"
-				marginBottom={2}
+				marginBottom={1}
 				backgroundColor={colors.base}
 				width={boxWidth}
 				padding={1}
@@ -80,6 +82,11 @@ export default memo(function AssistantMessage({
 				borderLeftColor={colors.secondary}
 			>
 				<Text>{renderedMessage}</Text>
+			</Box>
+			<Box marginBottom={2}>
+				<Text color={colors.secondary} dimColor>
+					~{tokens.toLocaleString()} tokens
+				</Text>
 			</Box>
 		</>
 	);

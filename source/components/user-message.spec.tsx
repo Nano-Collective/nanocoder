@@ -294,6 +294,18 @@ test('UserMessage handles message without VS Code context normally', t => {
 	t.regex(output!, /Regular message without VS Code context/);
 });
 
+test('UserMessage displays approximate token count', t => {
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<UserMessage message="Hello world" />
+		</MockThemeProvider>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /~\d+ tokens/);
+});
+
 test('UserMessage handles multiple VS Code context blocks', t => {
 	const message = `Compare these:
 
