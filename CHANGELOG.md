@@ -1,3 +1,37 @@
+# 1.22.0
+
+- Added `/explorer` command for interactive file browsing with tree view navigation, file preview with syntax highlighting, multi-file selection, search mode, and VS Code integration. Closes #298.
+
+- Added task management tools (`create_task`, `list_tasks`, `update_task`, `delete_task`) with `/tasks` slash command for models to track and manage progress on complex work. Tasks persist in `.nanocoder/tasks.json` and are automatically cleared on CLI boot and `/clear` command.
+
+- Added `/settings` command for interactive command menu to configure UI theme and shapes without editing config files directly.
+
+- Added `sdkProvider` configuration option for native Google Gemini support. This fixes the "missing thought_signature" error with Gemini 3 models by using the `@ai-sdk/google` package. Closes #302.
+
+- Added custom headers support in provider configuration. This enables authentication through tunnels like Cloudflare. Thanks to @nicolalamacchia.
+
+- Added Kimi Code provider template in configuration wizard.
+
+- Added new themes with updated user input and user message styling for better visual clarity and consistency.
+
+- Added token count display after messages and completion message to provide visibility into context usage throughout conversations.
+
+- Refactored git tools for better consistency, improved error handling, standardized parameter handling across all git operations, and enhanced user feedback messages.
+
+- Added line truncation in `write_file` and `string_replace` formatters to prevent excessive output from files with very long lines and neaten user experience on narrow terminals.
+
+- Fix: `/usage` command crash when context data is unavailable.
+
+- Fix: String replace error handling for edge cases.
+
+- Fix: Multiple security audit issues resolved.
+
+- Fix: Various styling improvements across components.
+
+- Fix: Dependency lockfile issues resolved.
+
+If there are any problems, feedback or thoughts please drop an issue or message us through Discord! Thank you for using Nanocoder. 🙌
+
 # 1.21.0
 
 - Added `/compact` command for context compression with `--restore` flag support to restore messages from backup. The command now includes auto-compact functionality, consistent token counting, and improved compression for very long messages. Thanks to @Pahari47.
