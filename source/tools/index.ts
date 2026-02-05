@@ -2,12 +2,7 @@ import React from 'react';
 import {executeBashTool} from '@/tools/execute-bash';
 import {fetchUrlTool} from '@/tools/fetch-url';
 import {findFilesTool} from '@/tools/find-files';
-import {
-	gitBranchSuggestTool,
-	gitCreatePRTool,
-	gitSmartCommitTool,
-	gitStatusEnhancedTool,
-} from '@/tools/git';
+import {getGitTools} from '@/tools/git';
 import {listDirectoryTool} from '@/tools/list-directory';
 import {getDiagnosticsTool} from '@/tools/lsp-get-diagnostics';
 import {readFileTool} from '@/tools/read-file';
@@ -28,9 +23,8 @@ import type {
 	ToolHandler,
 } from '@/types/index';
 
-// Array of all tool exports from individual tool files
-// Each tool exports: { name, tool, formatter?, validator? }
-const allTools: NanocoderToolExport[] = [
+// Static tools (always available)
+const staticTools: NanocoderToolExport[] = [
 	readFileTool,
 	writeFileTool,
 	stringReplaceTool,
@@ -41,17 +35,20 @@ const allTools: NanocoderToolExport[] = [
 	searchFileContentsTool,
 	getDiagnosticsTool,
 	listDirectoryTool,
-	// Git workflow tools
-	gitSmartCommitTool,
-	gitCreatePRTool,
-	gitBranchSuggestTool,
-	gitStatusEnhancedTool,
 	// Task management tools
 	createTaskTool,
 	listTasksTool,
 	updateTaskTool,
 	deleteTaskTool,
 ];
+
+// Conditionally available tools (based on system capabilities)
+// Git tools are only registered if git is installed
+// PR tool additionally requires gh CLI
+const conditionalTools: NanocoderToolExport[] = [...getGitTools()];
+
+// Combine all tools
+const allTools: NanocoderToolExport[] = [...staticTools, ...conditionalTools];
 
 // Export native AI SDK tools registry (for passing directly to AI SDK)
 export const nativeToolsRegistry: Record<string, AISDKCoreTool> =
