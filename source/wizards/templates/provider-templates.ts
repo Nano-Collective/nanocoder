@@ -411,6 +411,38 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		}),
 	},
 	{
+		id: 'kimi-code',
+		name: 'Kimi Code',
+		fields: [
+			{
+				name: 'apiKey',
+				prompt: 'API Key',
+				required: true,
+				sensitive: true,
+			},
+			{
+				name: 'model',
+				prompt: 'Model name(s) (comma-separated)',
+				default: '',
+				required: true,
+			},
+			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: 'Kimi Code',
+			},
+		],
+		buildConfig: answers => ({
+			name: answers.providerName || 'Kimi Code',
+			baseUrl: 'https://api.kimi.com/coding/v1',
+			apiKey: answers.apiKey,
+			models: answers.model
+				.split(',')
+				.map(m => m.trim())
+				.filter(Boolean),
+		}),
+	},
+	{
 		id: 'poe',
 		name: 'Poe',
 		fields: [

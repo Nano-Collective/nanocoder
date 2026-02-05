@@ -4,10 +4,12 @@ import {resolve} from 'node:path';
 import {highlight} from 'cli-highlight';
 import {Box, Text} from 'ink';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 
 import ToolMessage from '@/components/tool-message';
 import {getColors} from '@/config/index';
 import {isNanocoderToolAlwaysAllowed} from '@/config/nanocoder-tools-config';
+import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
 import {getCurrentMode} from '@/context/mode-context';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
@@ -155,6 +157,47 @@ const StringReplaceFormatter = React.memo(
 	},
 );
 
+// Truncate a line to fit terminal width
+const truncateLine = (line: string, maxWidth: number): string => {
+	if (line.length <= maxWidth) return line;
+	return line.slice(0, maxWidth - 1) + '…';
+};
+
+// Truncate a string with ANSI codes to fit terminal width (visual chars)
+const truncateAnsi = (str: string, maxWidth: number): string => {
+	const plainText = stripAnsi(str);
+	if (plainText.length <= maxWidth) return str;
+
+	let visibleCount = 0;
+	const ansiRegex = /\x1b\[[0-9;]*m/g;
+	let result = '';
+	let lastIndex = 0;
+
+	let match: RegExpExecArray | null;
+	while ((match = ansiRegex.exec(str)) !== null) {
+		const textBefore = str.slice(lastIndex, match.index);
+		for (const char of textBefore) {
+			if (visibleCount >= maxWidth - 1) break;
+			result += char;
+			visibleCount++;
+		}
+		if (visibleCount >= maxWidth - 1) break;
+		result += match[0];
+		lastIndex = match.index + match[0].length;
+	}
+
+	if (visibleCount < maxWidth - 1) {
+		const remaining = str.slice(lastIndex);
+		for (const char of remaining) {
+			if (visibleCount >= maxWidth - 1) break;
+			result += char;
+			visibleCount++;
+		}
+	}
+
+	return result + '\x1b[0m…';
+};
+
 async function formatStringReplacePreview(
 	args: StringReplaceArgs,
 	result?: string,
@@ -162,6 +205,11 @@ async function formatStringReplacePreview(
 ): Promise<React.ReactElement> {
 	const themeColors = colors || getColors();
 	const {path, old_str, new_str} = args;
+
+	// Calculate available width for line content (terminal width - line number prefix - diff marker - padding)
+	const terminalWidth = process.stdout.columns || DEFAULT_TERMINAL_COLUMNS;
+	const lineNumPrefixWidth = 8; // "1234 + " = 7 chars + 1 for safety
+	const availableWidth = Math.max(terminalWidth - lineNumPrefixWidth - 2, 20);
 
 	const isResult = result !== undefined;
 
@@ -198,7 +246,7 @@ async function formatStringReplacePreview(
 							<Text color={themeColors.secondary}>Searching for:</Text>
 							{old_str.split('\n').map((line, i) => (
 								<Text key={i} color={themeColors.text}>
-									{line}
+									{truncateLine(line, availableWidth)}
 								</Text>
 							))}
 						</Box>
@@ -230,7 +278,7 @@ async function formatStringReplacePreview(
 							<Text color={themeColors.secondary}>Searching for:</Text>
 							{old_str.split('\n').map((line, i) => (
 								<Text key={i} color={themeColors.text}>
-									{line}
+									{truncateLine(line, availableWidth)}
 								</Text>
 							))}
 						</Box>
@@ -328,15 +376,19 @@ async function formatStringReplacePreview(
 			const line = normalizedContextBefore[i] || '';
 			let displayLine: string;
 			try {
-				displayLine = highlight(line, {language, theme: 'default'});
+				displayLine = truncateAnsi(
+					highlight(line, {language, theme: 'default'}),
+					availableWidth,
+				);
 			} catch {
-				displayLine = line;
+				displayLine = truncateLine(line, availableWidth);
 			}
 
 			contextBefore.push(
-				<Text key={`before-${i}`} color={themeColors.secondary}>
-					{lineNumStr} {displayLine}
-				</Text>,
+				<Box key={`before-${i}`}>
+					<Text color={themeColors.secondary}>{lineNumStr} </Text>
+					<Text wrap="truncate-end">{displayLine}</Text>
+				</Box>,
 			);
 		}
 
@@ -357,14 +409,12 @@ async function formatStringReplacePreview(
 			// Check if lines are identical - show as unchanged context
 			if (oldLine !== null && newLine !== null && oldLine === newLine) {
 				const lineNumStr = String(startLine + oldIdx).padStart(4, ' ');
+				const truncatedLine = truncateLine(oldLine, availableWidth);
 				diffLines.push(
-					<Text
-						key={`diff-${diffKey++}`}
-						color={themeColors.secondary}
-						wrap="wrap"
-					>
-						{lineNumStr} {oldLine}
-					</Text>,
+					<Box key={`diff-${diffKey++}`}>
+						<Text color={themeColors.secondary}>{lineNumStr} </Text>
+						<Text wrap="truncate-end">{truncatedLine}</Text>
+					</Box>,
 				);
 				oldIdx++;
 				newIdx++;
@@ -374,7 +424,10 @@ async function formatStringReplacePreview(
 				areLinesSimlar(oldLine, newLine)
 			) {
 				// Lines are similar but different - show inline diff with word-level highlighting
-				const segments = computeInlineDiff(oldLine, newLine);
+				// Truncate lines before computing diff for display
+				const truncatedOldLine = truncateLine(oldLine, availableWidth);
+				const truncatedNewLine = truncateLine(newLine, availableWidth);
+				const segments = computeInlineDiff(truncatedOldLine, truncatedNewLine);
 				const lineNumStr = String(startLine + oldIdx).padStart(4, ' ');
 
 				// Render removed line with inline highlights
@@ -395,14 +448,21 @@ async function formatStringReplacePreview(
 				}
 
 				diffLines.push(
-					<Text
-						key={`diff-${diffKey++}`}
-						backgroundColor={themeColors.diffRemoved}
-						color={themeColors.diffRemovedText}
-						wrap="wrap"
-					>
-						{lineNumStr} - {oldParts}
-					</Text>,
+					<Box key={`diff-${diffKey++}`}>
+						<Text
+							backgroundColor={themeColors.diffRemoved}
+							color={themeColors.diffRemovedText}
+						>
+							{lineNumStr} -
+						</Text>
+						<Text
+							wrap="truncate-end"
+							backgroundColor={themeColors.diffRemoved}
+							color={themeColors.diffRemovedText}
+						>
+							{oldParts}
+						</Text>
+					</Box>,
 				);
 
 				// Render added line with inline highlights
@@ -423,14 +483,21 @@ async function formatStringReplacePreview(
 				}
 
 				diffLines.push(
-					<Text
-						key={`diff-${diffKey++}`}
-						backgroundColor={themeColors.diffAdded}
-						color={themeColors.diffAddedText}
-						wrap="wrap"
-					>
-						{lineNumStr} + {newParts}
-					</Text>,
+					<Box key={`diff-${diffKey++}`}>
+						<Text
+							backgroundColor={themeColors.diffAdded}
+							color={themeColors.diffAddedText}
+						>
+							{lineNumStr} +
+						</Text>
+						<Text
+							wrap="truncate-end"
+							backgroundColor={themeColors.diffAdded}
+							color={themeColors.diffAddedText}
+						>
+							{newParts}
+						</Text>
+					</Box>,
 				);
 
 				oldIdx++;
@@ -438,29 +505,45 @@ async function formatStringReplacePreview(
 			} else if (oldLine !== null) {
 				// Show removed line
 				const lineNumStr = String(startLine + oldIdx).padStart(4, ' ');
+				const truncatedLine = truncateLine(oldLine, availableWidth);
 				diffLines.push(
-					<Text
-						key={`diff-${diffKey++}`}
-						backgroundColor={themeColors.diffRemoved}
-						color={themeColors.diffRemovedText}
-						wrap="wrap"
-					>
-						{lineNumStr} - {oldLine}
-					</Text>,
+					<Box key={`diff-${diffKey++}`}>
+						<Text
+							backgroundColor={themeColors.diffRemoved}
+							color={themeColors.diffRemovedText}
+						>
+							{lineNumStr} -
+						</Text>
+						<Text
+							wrap="truncate-end"
+							backgroundColor={themeColors.diffRemoved}
+							color={themeColors.diffRemovedText}
+						>
+							{truncatedLine}
+						</Text>
+					</Box>,
 				);
 				oldIdx++;
 			} else if (newLine !== null) {
 				// Show added line
 				const lineNumStr = String(startLine + newIdx).padStart(4, ' ');
+				const truncatedLine = truncateLine(newLine, availableWidth);
 				diffLines.push(
-					<Text
-						key={`diff-${diffKey++}`}
-						backgroundColor={themeColors.diffAdded}
-						color={themeColors.diffAddedText}
-						wrap="wrap"
-					>
-						{lineNumStr} + {newLine}
-					</Text>,
+					<Box key={`diff-${diffKey++}`}>
+						<Text
+							backgroundColor={themeColors.diffAdded}
+							color={themeColors.diffAddedText}
+						>
+							{lineNumStr} +
+						</Text>
+						<Text
+							wrap="truncate-end"
+							backgroundColor={themeColors.diffAdded}
+							color={themeColors.diffAddedText}
+						>
+							{truncatedLine}
+						</Text>
+					</Box>,
 				);
 				newIdx++;
 			}
@@ -474,15 +557,19 @@ async function formatStringReplacePreview(
 			const line = normalizedContextAfter[i] || '';
 			let displayLine: string;
 			try {
-				displayLine = highlight(line, {language, theme: 'default'});
+				displayLine = truncateAnsi(
+					highlight(line, {language, theme: 'default'}),
+					availableWidth,
+				);
 			} catch {
-				displayLine = line;
+				displayLine = truncateLine(line, availableWidth);
 			}
 
 			contextAfter.push(
-				<Text key={`after-${i}`} color={themeColors.secondary}>
-					{lineNumStr} {displayLine}
-				</Text>,
+				<Box key={`after-${i}`}>
+					<Text color={themeColors.secondary}>{lineNumStr} </Text>
+					<Text wrap="truncate-end">{displayLine}</Text>
+				</Box>,
 			);
 		}
 
