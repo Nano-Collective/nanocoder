@@ -100,6 +100,7 @@ const OLLAMA_MODEL_CONTEXT_LIMITS: Record<string, number> = {
 	'glm-4.7': 200000,
 
 	// Moonshot AI models
+	'kimi-for-coding': 256000,
 	'kimi-k2:1t-cloud': 256000,
 	'kimi-k2-thinking:cloud': 256000,
 
