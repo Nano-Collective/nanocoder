@@ -13,7 +13,6 @@ const adjectives = [
 	'zippy',
 	'lively',
 	'focused',
-	'earnest',
 	'peppy',
 	'resolute',
 	'deft',

@@ -35,6 +35,9 @@ export function useChatHandler({
 	// Conversation state manager for enhanced context
 	const conversationStateManager = React.useRef(new ConversationStateManager());
 
+	// Track when the current conversation started for elapsed time display
+	const conversationStartTimeRef = React.useRef<number>(Date.now());
+
 	// State for streaming message content
 	const [streamingContent, setStreamingContent] = React.useState<string>('');
 	const [isGenerating, setIsGenerating] = React.useState<boolean>(false);
@@ -93,6 +96,7 @@ export function useChatHandler({
 					conversationStateManager,
 					onStartToolConfirmationFlow,
 					onConversationComplete,
+					conversationStartTime: conversationStartTimeRef.current,
 				});
 			} catch (error) {
 				displayError(error, 'chat-error');
@@ -124,6 +128,9 @@ export function useChatHandler({
 	// Handle chat message processing
 	const handleChatMessage = async (message: string) => {
 		if (!client || !toolManager) return;
+
+		// Record conversation start time for elapsed time display
+		conversationStartTimeRef.current = Date.now();
 
 		// For display purposes, try to get the placeholder version from history
 		// This preserves the nice placeholder display in chat history
