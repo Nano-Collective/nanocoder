@@ -1,3 +1,4 @@
+import {type AnthropicProvider, createAnthropic} from '@ai-sdk/anthropic';
 import {
 	createGoogleGenerativeAI,
 	type GoogleGenerativeAIProvider,
@@ -13,7 +14,8 @@ import {getLogger} from '@/utils/logging';
 // Union type for supported providers
 export type AIProvider =
 	| OpenAICompatibleProvider<string, string, string, string>
-	| GoogleGenerativeAIProvider;
+	| GoogleGenerativeAIProvider
+	| AnthropicProvider;
 
 /**
  * Creates an AI SDK provider based on the sdkProvider configuration.
@@ -27,6 +29,19 @@ export function createProvider(
 	const {config, sdkProvider} = providerConfig;
 
 	// Use explicit sdkProvider if set, otherwise default to 'openai-compatible'
+	if (sdkProvider === 'anthropic') {
+		logger.info('Using @ai-sdk/anthropic provider', {
+			provider: providerConfig.name,
+			sdkProvider,
+		});
+
+		return createAnthropic({
+			baseURL: config.baseURL || undefined,
+			apiKey: config.apiKey ?? '',
+			headers: config.headers,
+		});
+	}
+
 	if (sdkProvider === 'google') {
 		logger.info('Using @ai-sdk/google provider', {
 			provider: providerConfig.name,

@@ -1,7 +1,7 @@
 {
 	"name": "@nanocollective/nanocoder",
 	"main": "dist/cli.js",
-	"version": "1.22.0",
+	"version": "1.22.1",
 	"description": "A local-first CLI coding agent that brings the power of agentic coding tools like Claude Code and Gemini CLI to local models or controlled APIs like OpenRouter",
 	"keywords": [
 		"cli",
@@ -58,6 +58,7 @@
 		"assets/nanocoder-vscode.vsix"
 	],
 	"dependencies": {
+		"@ai-sdk/anthropic": "^3.0.37",
 		"@ai-sdk/google": "^3.0.13",
 		"@ai-sdk/openai-compatible": "2.0.24",
 		"@anthropic-ai/tokenizer": "^0.0.4",

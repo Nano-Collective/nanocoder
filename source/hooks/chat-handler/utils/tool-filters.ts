@@ -2,21 +2,17 @@ import type {ToolManager} from '@/tools/tool-manager';
 import type {ToolCall, ToolResult} from '@/types/core';
 
 /**
- * Filters out invalid tool calls and deduplicates by ID and function signature.
+ * Filters out invalid tool calls.
  * Returns valid tool calls and error results for invalid ones.
  *
  * Handles:
  * - Empty tool calls (missing id or function name)
  * - Tools that don't exist in the tool manager
- * - Duplicate tool call IDs (GPT-5 issue)
- * - Functionally identical tool calls (same tool + arguments)
  */
 export const filterValidToolCalls = (
 	toolCalls: ToolCall[],
 	toolManager: ToolManager | null,
 ): {validToolCalls: ToolCall[]; errorResults: ToolResult[]} => {
-	const seenIds = new Set<string>();
-	const seenFunctionCalls = new Set<string>();
 	const validToolCalls: ToolCall[] = [];
 	const errorResults: ToolResult[] = [];
 
@@ -42,21 +38,6 @@ export const filterValidToolCalls = (
 			continue;
 		}
 
-		// Filter out duplicate tool call IDs (GPT-5 issue)
-		if (seenIds.has(toolCall.id)) {
-			continue;
-		}
-
-		// Filter out functionally identical tool calls (same tool + args)
-		const functionSignature = `${toolCall.function.name}:${JSON.stringify(
-			toolCall.function.arguments,
-		)}`;
-		if (seenFunctionCalls.has(functionSignature)) {
-			continue;
-		}
-
-		seenIds.add(toolCall.id);
-		seenFunctionCalls.add(functionSignature);
 		validToolCalls.push(toolCall);
 	}
 

@@ -114,6 +114,42 @@ test('createProvider uses @ai-sdk/google when sdkProvider is google', t => {
 	t.is(typeof provider, 'function');
 });
 
+test('createProvider uses @ai-sdk/anthropic when sdkProvider is anthropic', t => {
+	const config: AIProviderConfig = {
+		name: 'Anthropic',
+		type: 'openai',
+		models: ['claude-sonnet-4-5-20250929'],
+		sdkProvider: 'anthropic',
+		config: {
+			apiKey: 'test-key',
+		},
+	};
+
+	const agent = new Agent();
+	const provider = createProvider(config, agent);
+
+	t.truthy(provider);
+	t.is(typeof provider, 'function');
+});
+
+test('createProvider anthropic provider works without baseURL', t => {
+	const config: AIProviderConfig = {
+		name: 'Anthropic',
+		type: 'openai',
+		models: ['claude-sonnet-4-5-20250929'],
+		sdkProvider: 'anthropic',
+		config: {
+			apiKey: 'test-key',
+			// No baseURL - @ai-sdk/anthropic handles this internally
+		},
+	};
+
+	const agent = new Agent();
+	const provider = createProvider(config, agent);
+
+	t.truthy(provider);
+});
+
 test('createProvider uses openai-compatible by default when sdkProvider not set', t => {
 	const config: AIProviderConfig = {
 		name: 'CustomProvider',

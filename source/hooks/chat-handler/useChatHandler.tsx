@@ -145,10 +145,12 @@ export function useChatHandler({
 			assembledFromHistory === message ? lastEntry.displayValue : message;
 
 		// Add user message to chat using display version (with placeholders)
+		// Pass the full assembled message for accurate token counting
 		addToChatQueue(
 			<UserMessage
 				key={`user-${getNextComponentKey()}`}
 				message={displayMessage}
+				tokenContent={message}
 			/>,
 		);
 

@@ -78,10 +78,13 @@ function parseLineWithPlaceholders(line: string) {
 	return segments;
 }
 
-export default memo(function UserMessage({message}: UserMessageProps) {
+export default memo(function UserMessage({
+	message,
+	tokenContent,
+}: UserMessageProps) {
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
-	const tokens = calculateTokens(message);
+	const tokens = calculateTokens(tokenContent ?? message);
 
 	// Inner text width: outer width minus left border (1) and padding (1 each side)
 	const textWidth = boxWidth - 3;

@@ -20,4 +20,5 @@ export interface ToolExecutionIndicatorProps {
 
 export interface UserMessageProps {
 	message: string;
+	tokenContent?: string; // Full assembled content for accurate token counting
 }

@@ -270,6 +270,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		],
 		buildConfig: answers => ({
 			name: answers.providerName || 'anthropic',
+			sdkProvider: 'anthropic',
 			baseUrl: 'https://api.anthropic.com/v1',
 			apiKey: answers.apiKey,
 			models: answers.model
@@ -423,7 +424,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: '',
+				default: 'kimi-for-coding',
 				required: true,
 			},
 			{
@@ -434,6 +435,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		],
 		buildConfig: answers => ({
 			name: answers.providerName || 'Kimi Code',
+			sdkProvider: 'anthropic',
 			baseUrl: 'https://api.kimi.com/coding/v1',
 			apiKey: answers.apiKey,
 			models: answers.model

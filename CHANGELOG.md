@@ -1,3 +1,13 @@
+# 1.22.1
+
+- Added native Anthropic SDK support via `@ai-sdk/anthropic` package. The Anthropic Claude provider template now uses `sdkProvider: 'anthropic'` for direct API integration instead of the OpenAI-compatible wrapper.
+
+- Fixed Kimi Code provider template to use the native `@ai-sdk/anthropic` SDK with correct base URL and configuration passthrough.
+
+- Fix: User message token count now reflects the full assembled content including pasted content and tagged file contents, instead of only counting the placeholder text.
+
+- Fix: Removed aggressive tool call deduplication that silently dropped duplicate tool call IDs and identical function signatures. This could cause "Tool result is missing for tool call" errors with providers like Anthropic that strictly validate tool call/result pairing.
+
 # 1.22.0
 
 - Added `/explorer` command for interactive file browsing with tree view navigation, file preview with syntax highlighting, multi-file selection, search mode, and VS Code integration. Closes #298.
