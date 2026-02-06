@@ -1,3 +1,7 @@
+# 1.22.2
+
+- Fix: Markdown tables in assistant messages were rendered at full terminal width instead of accounting for the message box border and padding, causing broken box-drawing characters when lines wrapped.
+
 # 1.22.1
 
 - Added native Anthropic SDK support via `@ai-sdk/anthropic` package. The Anthropic Claude provider template now uses `sdkProvider: 'anthropic'` for direct API integration instead of the OpenAI-compatible wrapper.

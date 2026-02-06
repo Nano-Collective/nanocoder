@@ -11,7 +11,11 @@ function _getColor(themeColors: Colors, colorProperty: keyof Colors): string {
 }
 
 // Basic markdown parser for terminal
-export function parseMarkdown(text: string, themeColors: Colors): string {
+export function parseMarkdown(
+	text: string,
+	themeColors: Colors,
+	width?: number,
+): string {
 	// First decode HTML entities
 	let result = decodeHtmlEntities(text);
 
@@ -22,7 +26,7 @@ export function parseMarkdown(text: string, themeColors: Colors): string {
 	result = result.replace(
 		/(?:^|\n)((?:\|.+\|\n)+)/gm,
 		(_match, tableText: string) => {
-			return '\n' + parseMarkdownTable(tableText, themeColors) + '\n';
+			return '\n' + parseMarkdownTable(tableText, themeColors, width) + '\n';
 		},
 	);
 

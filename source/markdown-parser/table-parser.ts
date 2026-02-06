@@ -8,6 +8,7 @@ import {stripMarkdown} from './utils';
 export function parseMarkdownTable(
 	tableText: string,
 	themeColors: Colors,
+	width?: number,
 ): string {
 	const lines = tableText.trim().split('\n');
 	if (lines.length < 2) return tableText;
@@ -46,7 +47,8 @@ export function parseMarkdownTable(
 	const dataWidths = dataRows.map(row => row.map(cell => cell.length));
 
 	// Calculate column widths properly
-	const terminalWidth = process.stdout.columns || DEFAULT_TERMINAL_WIDTH;
+	const terminalWidth =
+		width || process.stdout.columns || DEFAULT_TERMINAL_WIDTH;
 	const numCols = header.length;
 
 	// Get max content width for each column

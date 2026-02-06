@@ -53,7 +53,7 @@ export default memo(function AssistantMessage({
 	// Pre-wrap to avoid Ink's trim:false leaving leading spaces on wrapped lines
 	const renderedMessage = useMemo(() => {
 		try {
-			const parsed = parseMarkdown(message, colors).trimEnd();
+			const parsed = parseMarkdown(message, colors, textWidth).trimEnd();
 			return wrapWithTrimmedContinuations(parsed, textWidth);
 		} catch {
 			// Fallback to plain text if markdown parsing fails
