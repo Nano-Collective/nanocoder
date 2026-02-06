@@ -60,7 +60,7 @@
 	"dependencies": {
 		"@ai-sdk/anthropic": "^3.0.37",
 		"@ai-sdk/google": "^3.0.13",
-		"@ai-sdk/openai-compatible": "2.0.24",
+		"@ai-sdk/openai-compatible": "2.0.27",
 		"@anthropic-ai/tokenizer": "^0.0.4",
 		"@modelcontextprotocol/sdk": "^1.26.0",
 		"@nanocollective/get-md": "^1.0.2",
