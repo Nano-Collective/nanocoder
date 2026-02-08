@@ -127,7 +127,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		} else {
 			logger.debug('Cancel requested but no active operation to cancel');
 		}
-	}, [props.abortController, props.setIsCancelling, logger]);
+	}, [props.abortController, props.setIsCancelling, logger, props]);
 
 	// Toggle development mode handler
 	const handleToggleDevelopmentMode = React.useCallback(() => {
@@ -153,7 +153,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 			return nextMode;
 		});
-	}, [props.setDevelopmentMode, logger]);
+	}, [props.setDevelopmentMode, logger, props]);
 
 	// Show status handler
 	const handleShowStatus = React.useCallback(async () => {
@@ -324,7 +324,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	const handleCheckpointCancel = React.useCallback(() => {
 		props.setIsCheckpointLoadMode(false);
 		props.setCheckpointLoadData(null);
-	}, [props.setIsCheckpointLoadMode, props.setCheckpointLoadData]);
+	}, [props.setIsCheckpointLoadMode, props.setCheckpointLoadData, props]);
 
 	// Enter checkpoint load mode handler
 	const enterCheckpointLoadMode = React.useCallback(
@@ -332,7 +332,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.setCheckpointLoadData({checkpoints, currentMessageCount});
 			props.setIsCheckpointLoadMode(true);
 		},
-		[props.setCheckpointLoadData, props.setIsCheckpointLoadMode],
+		[props.setCheckpointLoadData, props.setIsCheckpointLoadMode, props],
 	);
 
 	// Message submit handler
