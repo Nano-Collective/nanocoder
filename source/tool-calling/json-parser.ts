@@ -126,7 +126,7 @@ export function parseJSONToolCalls(content: string): ToolCall[] {
 
 	// Look for embedded tool calls using regex patterns
 	const toolCallPatterns = [
-		/\{"name":\s*"([^"]+)",\s*"arguments":\s*\{[\s\S]*?\}\}/g,
+		/\{"name":\s*"([^"]+)",\s*"arguments":\s*(\{[\s\S]*?\})\}/g,
 	];
 
 	for (const pattern of toolCallPatterns) {
@@ -197,9 +197,7 @@ export function cleanJSONToolCalls(
 	// Remove JSON blocks that were parsed as tool calls (for non-code-block cases)
 	const toolCallPatterns = [
 		/\{\s*\n\s*"name":\s*"([^"]+)",\s*\n\s*"arguments":\s*\{[\s\S]*?\}\s*\n\s*\}/g, // Multiline JSON blocks
-		/\{"name":\s*"([^"]+)",\s*"arguments":\s*(\{[^}]*\})\}/g,
-		/\{"name":\s*"([^"]+)",\s*"arguments":\s*(\{[^}]+\})\}/g,
-		/\{"name":\s*"([^"]+)",\s*"arguments":\s*"([^"]+)"\}/g,
+		/\{"name":\s*"([^"]+)",\s*"arguments":\s*(\{[\s\S]*?\})\}/g, // Consolidated inline pattern
 	];
 
 	for (const pattern of toolCallPatterns) {

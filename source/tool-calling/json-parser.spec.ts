@@ -204,6 +204,7 @@ test('parseJSONToolCalls: parses inline JSON tool calls', t => {
 
 	t.is(calls.length, 1);
 	t.is(calls[0].function.name, 'read_file');
+	t.deepEqual(calls[0].function.arguments, {path: '/test.txt'});
 });
 
 test('parseJSONToolCalls: handles nested objects in arguments', t => {
