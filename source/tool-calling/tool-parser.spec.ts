@@ -274,7 +274,7 @@ test('parseToolCalls: handles empty JSON object', t => {
 	}
 });
 
-test('parseToolCalls: deduplicates identical tool calls', t => {
+test('parseToolCalls: preserves identical tool calls (no deduplication)', t => {
 	const content = `
 {
   "name": "read_file",
@@ -295,8 +295,8 @@ test('parseToolCalls: deduplicates identical tool calls', t => {
 
 	t.true(result.success);
 	if (result.success) {
-		// Should deduplicate to single call
-		t.is(result.toolCalls.length, 1);
+		// No deduplication - both calls preserved
+		t.is(result.toolCalls.length, 2);
 	}
 });
 

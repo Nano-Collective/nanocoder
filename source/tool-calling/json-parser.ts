@@ -126,9 +126,7 @@ export function parseJSONToolCalls(content: string): ToolCall[] {
 
 	// Look for embedded tool calls using regex patterns
 	const toolCallPatterns = [
-		/\{"name":\s*"([^"]+)",\s*"arguments":\s*(\{[^}]*\})\}/g,
-		/\{"name":\s*"([^"]+)",\s*"arguments":\s*(\{[^}]+\})\}/g,
-		/\{"name":\s*"([^"]+)",\s*"arguments":\s*"([^"]+)"\}/g,
+		/\{"name":\s*"([^"]+)",\s*"arguments":\s*\{[\s\S]*?\}\}/g,
 	];
 
 	for (const pattern of toolCallPatterns) {
@@ -155,30 +153,7 @@ export function parseJSONToolCalls(content: string): ToolCall[] {
 		}
 	}
 
-	// Deduplicate identical tool calls
-	const uniqueCalls = deduplicateToolCalls(extractedCalls);
-
-	return uniqueCalls;
-}
-
-function deduplicateToolCalls(toolCalls: ToolCall[]): ToolCall[] {
-	const seen = new Set<string>();
-	const unique: ToolCall[] = [];
-
-	for (const call of toolCalls) {
-		// Create a hash of the function name and arguments for comparison
-		const hash = `${call.function.name}:${JSON.stringify(
-			call.function.arguments,
-		)}`;
-
-		if (!seen.has(hash)) {
-			seen.add(hash);
-			unique.push(call);
-		}
-		// Else: duplicate, skip it
-	}
-
-	return unique;
+	return extractedCalls;
 }
 
 /**
