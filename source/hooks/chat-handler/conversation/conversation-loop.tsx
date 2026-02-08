@@ -413,7 +413,6 @@ export const processAssistantResponse = async (
 				getNextComponentKey,
 			);
 
-			// If we have results, continue the conversation with them
 			if (directResults.length > 0) {
 				// Add tool results to messages
 				const directBuilder = new MessageBuilder(updatedMessages);
@@ -421,7 +420,21 @@ export const processAssistantResponse = async (
 				const updatedMessagesWithTools = directBuilder.build();
 				setMessages(updatedMessagesWithTools);
 
-				// Continue the main conversation loop with tool results as context
+				// If there are also tools needing confirmation, start that flow
+				// instead of recursing. Recursing would send messages to the API
+				// with the assistant's tool_calls for ALL tools but only results
+				// for the direct ones, causing "Tool result is missing" errors.
+				if (toolsNeedingConfirmation.length > 0) {
+					onStartToolConfirmationFlow(
+						toolsNeedingConfirmation,
+						updatedMessagesWithTools,
+						assistantMsg,
+						systemMessage,
+					);
+					return;
+				}
+
+				// No confirmation needed - continue conversation loop
 				await processAssistantResponse({
 					...params,
 					messages: updatedMessagesWithTools,
