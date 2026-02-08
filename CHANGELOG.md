@@ -1,3 +1,11 @@
+# 1.22.3
+
+- Fix: Removed tool call deduplication from JSON parser that silently dropped duplicate tool calls, breaking the 1:1 pairing between tool calls and results expected by AI SDK. This caused "Tool result is missing for tool call" errors that would end the agent's turn prematurely. Consolidated three overlapping regex patterns into a single comprehensive pattern to prevent duplicate matches. Thanks to @cleyesode.
+
+- Fix: Added missing capture group for arguments in the consolidated JSON tool call regex pattern, which caused inline tool calls to have empty arguments instead of actual parsed values.
+
+- Dependency updates: `@ai-sdk/openai-compatible` 2.0.27, `undici` 7.21.0, `@biomejs/biome` 2.3.14, `@types/vscode` 1.109.0, `@types/node` 25.2.1.
+
 # 1.22.2
 
 - Fix: Markdown tables in assistant messages were rendered at full terminal width instead of accounting for the message box border and padding, causing broken box-drawing characters when lines wrapped.
