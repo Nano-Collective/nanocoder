@@ -134,17 +134,17 @@ export function parseJSONToolCalls(content: string): ToolCall[] {
 		while ((match = pattern.exec(content)) !== null) {
 			const [, name, argsStr] = match;
 			try {
-				let args: Record<string, unknown> | string;
+				let args: Record<string, unknown>;
 				if (argsStr && argsStr.startsWith('{')) {
 					args = JSON.parse(argsStr || '{}') as Record<string, unknown>;
 				} else {
-					args = argsStr || '';
+					args = {}; // Fallback to empty object for malformed arguments
 				}
 				extractedCalls.push({
 					id: `call_${Date.now()}_${extractedCalls.length}`,
 					function: {
 						name: name || '',
-						arguments: args as Record<string, unknown>,
+						arguments: args,
 					},
 				});
 			} catch {
