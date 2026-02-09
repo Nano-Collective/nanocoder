@@ -952,3 +952,68 @@ test('parseJSONToolCalls: handles special JSON characters in strings', t => {
 	// JSON.stringify/parse: backslash in object becomes escaped in JSON, then unescaped back to single backslash
 	t.is(args.text, 'Quotes: "double" and \'single\'. Newlines: \\n, Tabs: \\t, Backslash: \\');
 });
+
+// Malformed Arguments Tests (Edge Cases That Caused Bug)
+
+test('parseJSONToolCalls: handles null arguments', t => {
+	const content = '{"name": "write_file", "arguments": null}';
+
+	const calls = parseJSONToolCalls(content);
+
+	// Should return empty array since null is not a valid object
+	t.is(calls.length, 0);
+});
+
+test('parseJSONToolCalls: handles empty string arguments', t => {
+	const content = '{"name": "write_file", "arguments": ""}';
+
+	const calls = parseJSONToolCalls(content);
+
+	// Should return empty array since empty string is not a valid object
+	t.is(calls.length, 0);
+});
+
+test('parseJSONToolCalls: handles non-JSON values as arguments', t => {
+	const content = '{"name": "write_file", "arguments": "just a string"}';
+
+	const calls = parseJSONToolCalls(content);
+
+	// Should return empty array since string is not a valid object
+	t.is(calls.length, 0);
+});
+
+test('parseJSONToolCalls: handles undefined arguments', t => {
+	const content = '{"name": "write_file", "arguments": undefined}';
+
+	const calls = parseJSONToolCalls(content);
+
+	// Should return empty array since undefined is not a valid object
+	t.is(calls.length, 0);
+});
+
+test('parseJSONToolCalls: handles numeric arguments', t => {
+	const content = '{"name": "write_file", "arguments": 12345}';
+
+	const calls = parseJSONToolCalls(content);
+
+	// Should return empty array since number is not a valid object
+	t.is(calls.length, 0);
+});
+
+test('parseJSONToolCalls: handles boolean arguments', t => {
+	const content = '{"name": "write_file", "arguments": true}';
+
+	const calls = parseJSONToolCalls(content);
+
+	// Should return empty array since boolean is not a valid object
+	t.is(calls.length, 0);
+});
+
+test('parseJSONToolCalls: handles array arguments', t => {
+	const content = '{"name": "write_file", "arguments": [1, 2, 3]}';
+
+	const calls = parseJSONToolCalls(content);
+
+	// Should return empty array since array is not a valid object in the expected format
+	t.is(calls.length, 0);
+});
