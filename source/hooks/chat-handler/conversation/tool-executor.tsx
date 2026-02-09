@@ -1,6 +1,7 @@
 import type React from 'react';
 import type {ConversationStateManager} from '@/app/utils/conversation-state';
 import {ErrorMessage} from '@/components/message-box';
+import type {ToolManager} from '@/tools/tool-manager';
 import type {ToolCall, ToolResult} from '@/types/core';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {displayToolResult} from '@/utils/tool-result-display';
