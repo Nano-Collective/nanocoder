@@ -42,7 +42,8 @@ export function parseMarkdown(
 		/```([a-zA-Z0-9\-+#]+)?\n([\s\S]*?)```/g,
 		(_match, lang: string | undefined, code: string) => {
 			try {
-				const codeStr = String(code).trim();
+				// Convert tabs to 2 spaces to prevent terminal rendering at 8-space width
+				const codeStr = String(code).trim().replace(/\t/g, '  ');
 				// Apply syntax highlighting with detected language
 				const highlighted = highlight(codeStr, {
 					language: lang || 'plaintext',
@@ -53,7 +54,9 @@ export function parseMarkdown(
 				return placeholder;
 			} catch {
 				// Fallback to plain colored text if highlighting fails
-				const formatted = chalk.hex(themeColors.tool)(String(code).trim());
+				const formatted = chalk.hex(themeColors.tool)(
+					String(code).trim().replace(/\t/g, '  '),
+				);
 				const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
 				codeBlocks.push(formatted);
 				return placeholder;

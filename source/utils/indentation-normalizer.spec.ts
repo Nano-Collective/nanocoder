@@ -212,14 +212,34 @@ test('normalizeIndentation - empty lines are preserved', t => {
 	t.deepEqual(normalizeIndentation(input), expected);
 });
 
-test('normalizeIndentation - handles code with no minimum indentation', t => {
+test('normalizeIndentation - handles space-indented code with no minimum indentation', t => {
 	const input = [
 		'function test() {',
 		'  return 1;',
 		'}',
 	];
-	// Already at 0 indentation, should return as-is
-	t.deepEqual(normalizeIndentation(input), input);
+	// Already at 0 indentation with spaces, should convert to 2-space units
+	const expected = [
+		'function test() {',
+		'  return 1;',
+		'}',
+	];
+	t.deepEqual(normalizeIndentation(input), expected);
+});
+
+test('normalizeIndentation - converts tabs to spaces even when min indent is 0', t => {
+	const input = [
+		'}',
+		'\t\tconst x = 1;',
+		'\t\t\tconst y = 2;',
+	];
+	// Min indent is 0 (from '}'), but tabs must still be converted to 2-space units
+	const expected = [
+		'}',
+		'    const x = 1;',
+		'      const y = 2;',
+	];
+	t.deepEqual(normalizeIndentation(input), expected);
 });
 
 test('normalizeIndentation - deeply nested code', t => {

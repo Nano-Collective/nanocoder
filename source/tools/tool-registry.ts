@@ -154,12 +154,34 @@ export class ToolRegistry {
 
 	/**
 	 * Get all native AI SDK tools as a record (compatible with old API)
+	 * Tools with validators get their execute functions wrapped so that
+	 * validation runs before execution in all code paths, including
+	 * AI SDK auto-execution which bypasses external validator checks.
 	 * @returns Record mapping tool names to AISDKCoreTool objects
 	 */
 	getNativeTools(): Record<string, AISDKCoreTool> {
 		const nativeTools: Record<string, AISDKCoreTool> = {};
 		for (const [name, entry] of this.tools) {
-			nativeTools[name] = entry.tool;
+			if (entry.validator && entry.tool.execute) {
+				const originalExecute = entry.tool.execute;
+				const validator = entry.validator;
+				nativeTools[name] = {
+					...entry.tool,
+					execute: async (args: unknown, options: unknown) => {
+						const validationResult = await validator(args);
+						if (!validationResult.valid) {
+							throw new Error(validationResult.error);
+						}
+						return (originalExecute as Function).call(
+							entry.tool,
+							args,
+							options,
+						);
+					},
+				};
+			} else {
+				nativeTools[name] = entry.tool;
+			}
 		}
 		return nativeTools;
 	}

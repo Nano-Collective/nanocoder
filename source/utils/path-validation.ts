@@ -66,6 +66,11 @@ export function isValidFilePath(filePath: string): boolean {
 		return false;
 	}
 
+	// Reject home directory shorthand (~ is not expanded by Node.js)
+	if (filePath.startsWith('~')) {
+		return false;
+	}
+
 	// Reject paths that start with special characters that could be problematic
 	if (filePath.startsWith('/') || filePath.startsWith('\\')) {
 		return false;

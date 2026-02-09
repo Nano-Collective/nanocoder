@@ -592,7 +592,7 @@ async function formatStringReplacePreview(
 					<Text color={themeColors.text}>{rangeDesc}</Text>
 				</Box>
 
-				<Box flexDirection="column" marginTop={1}>
+				<Box flexDirection="column" marginTop={1} marginBottom={1}>
 					<Text color={themeColors.success}>
 						{isResult ? '✓ Replace completed' : '✓ Replacing'}{' '}
 						{oldStrLines.length} line{oldStrLines.length > 1 ? 's' : ''} with{' '}

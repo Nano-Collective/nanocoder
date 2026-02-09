@@ -97,15 +97,10 @@ export function normalizeIndentation(lines: string[]): string[] {
 		return lines;
 	}
 
-	// No normalization needed if already at 0 indentation
-	if (minIndent === 0) {
-		return lines;
-	}
-
 	// Always use 2 spaces for display (compact and terminal-friendly)
 	const indentChar = '  ';
 
-	// Normalize each line
+	// Normalize each line - convert tabs to spaces and subtract minimum indent
 	return lines.map(line => {
 		if (line.trim().length === 0) {
 			return line; // Keep empty lines as-is
