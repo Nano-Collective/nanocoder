@@ -592,10 +592,11 @@ test('parseJSONToolCalls: handles special characters in arguments', t => {
 test('parseJSONToolCalls: handles numbers in arguments', t => {
 	const content = `
 {
-  "name": "repeat_tool",
+  "name": "number_tool",
   "arguments": {
-    "count": 42,
-    "delay": 1.5
+    "value": 123,
+    "decimal": 0.5,
+    "negative": -42
   }
 }
   `;
@@ -603,7 +604,7 @@ test('parseJSONToolCalls: handles numbers in arguments', t => {
 	const calls = parseJSONToolCalls(content);
 
 	t.is(calls.length, 1);
-	t.deepEqual(calls[0].function.arguments, {count: 42, delay: 1.5});
+	t.deepEqual(calls[0].function.arguments, {value: 123, decimal: 0.5, negative: -42});
 });
 
 test('parseJSONToolCalls: handles booleans in arguments', t => {
@@ -637,4 +638,382 @@ test('parseJSONToolCalls: handles null in arguments', t => {
 
 	t.is(calls.length, 1);
 	t.deepEqual(calls[0].function.arguments, {optionalValue: null});
+});
+
+// Edge Case Tests
+
+test('parseJSONToolCalls: handles deeply nested objects (3+ levels)', t => {
+	const content = `
+{
+  "name": "deeply_nested_tool",
+  "arguments": {
+    "level1": {
+      "level2": {
+        "level3": {
+          "value": "deep"
+        }
+      }
+    }
+  }
+}
+  `;
+
+	const calls = parseJSONToolCalls(content);
+
+	t.is(calls.length, 1);
+	t.is(calls[0].function.name, 'deeply_nested_tool');
+	t.true(
+		(calls[0].function.arguments as {level1: {level2: {level3: {value: string}}}}).level1.level2.level3.value === 'deep',
+	);
+});
+
+test('parseJSONToolCalls: handles arrays with mixed types', t => {
+	const content = `
+{
+  "name": "mixed_array_tool",
+  "arguments": {
+    "data": [
+      1,
+      "string",
+      true,
+      null,
+      {
+        "nested": "value"
+      },
+      [1, 2, 3],
+      "another_string"
+    ]
+  }
+}
+  `;
+
+	const calls = parseJSONToolCalls(content);
+
+	t.is(calls.length, 1);
+	const args = calls[0].function.arguments as {data: unknown};
+	t.deepEqual(args.data, [
+		1,
+		'string',
+		true,
+		null,
+		{nested: 'value'},
+		[1, 2, 3],
+		'another_string',
+	]);
+});
+
+test('parseJSONToolCalls: handles arrays of objects', t => {
+	const content = `
+{
+  "name": "objects_array_tool",
+  "arguments": {
+    "items": [
+      {"id": 1, "name": "Item 1"},
+      {"id": 2, "name": "Item 2"},
+      {"id": 3, "name": "Item 3"}
+    ]
+  }
+}
+  `;
+
+	const calls = parseJSONToolCalls(content);
+
+	t.is(calls.length, 1);
+	const args = calls[0].function.arguments as {items: unknown[]};
+	t.deepEqual(args.items, [
+		{id: 1, name: 'Item 1'},
+		{id: 2, name: 'Item 2'},
+		{id: 3, name: 'Item 3'},
+	]);
+});
+
+test('parseJSONToolCalls: handles empty strings in arguments', t => {
+	const content = `
+{
+  "name": "empty_string_tool",
+  "arguments": {
+    "name": "",
+    "description": ""
+  }
+}
+  `;
+
+	const calls = parseJSONToolCalls(content);
+
+	t.is(calls.length, 1);
+	t.deepEqual(calls[0].function.arguments, {name: '', description: ''});
+});
+
+test('parseJSONToolCalls: handles unicode characters in arguments', t => {
+	const content = `
+{
+  "name": "unicode_tool",
+  "arguments": {
+    "text": "Hello 世界 🌍",
+    "emoji": "😀🎉",
+    "chinese": "中文"
+  }
+}
+  `;
+
+	const calls = parseJSONToolCalls(content);
+
+	t.is(calls.length, 1);
+	t.is(calls[0].function.name, 'unicode_tool');
+	t.true((calls[0].function.arguments as {text: string}).text.includes('世界'));
+});
+
+test('parseJSONToolCalls: handles unicode characters in tool names', t => {
+	const content = `
+{
+  "name": "工具调用",
+  "arguments": {
+    "path": "/test.txt"
+  }
+}
+  `;
+
+	const calls = parseJSONToolCalls(content);
+
+	t.is(calls.length, 1);
+	t.is(calls[0].function.name, '工具调用');
+});
+
+test('parseJSONToolCalls: handles tool calls with only whitespace', t => {
+	const content = '   \n\n   \t   ';
+
+	const calls = parseJSONToolCalls(content);
+
+	t.is(calls.length, 0);
+});
+
+test('parseJSONToolCalls: handles multiple identical tool calls with different formatting', t => {
+	const content = `
+{"name":"read_file","arguments":{"path":"/test.txt"}}
+{
+  "name": "read_file",
+  "arguments": {
+    "path": "/test.txt"
+  }
+}
+{"name": "read_file", "arguments": {"path": "/test.txt"}}
+  `;
+
+	const calls = parseJSONToolCalls(content);
+
+	// Should preserve all 3 calls (no deduplication)
+	t.is(calls.length, 3);
+});
+
+test('parseJSONToolCalls: handles escaped characters in arguments', t => {
+	const content = `
+{
+  "name": "escaped_tool",
+  "arguments": {
+    "path": "/path/with/backslashes",
+    "content": "Line1\\nLine2\\tTabbed"
+  }
+}
+  `;
+
+	const calls = parseJSONToolCalls(content);
+
+	t.is(calls.length, 1);
+	const args = calls[0].function.arguments as {path: string; content: string};
+	t.is(args.path, '/path/with/backslashes');
+	t.is(args.content, 'Line1\nLine2\tTabbed');
+});
+
+test('parseJSONToolCalls: handles very long strings', t => {
+	const longString = 'A'.repeat(10000);
+	const content = `
+{
+  "name": "long_string_tool",
+  "arguments": {
+    "content": "${longString}"
+  }
+}
+  `;
+
+	const calls = parseJSONToolCalls(content);
+
+	t.is(calls.length, 1);
+	const args = calls[0].function.arguments as {content: string};
+	t.is(args.content.length, 10000);
+});
+
+test('parseJSONToolCalls: handles empty array in arguments', t => {
+	const content = `
+{
+  "name": "empty_array_tool",
+  "arguments": {
+    "items": []
+  }
+}
+  `;
+
+	const calls = parseJSONToolCalls(content);
+
+	t.is(calls.length, 1);
+	t.deepEqual(calls[0].function.arguments, {items: []});
+});
+
+test('parseJSONToolCalls: handles nested empty arrays', t => {
+	const content = `
+{
+  "name": "nested_array_tool",
+  "arguments": {
+    "matrix": [[], [], []]
+  }
+}
+  `;
+
+	const calls = parseJSONToolCalls(content);
+
+	t.is(calls.length, 1);
+	const args = calls[0].function.arguments as {matrix: unknown};
+	t.deepEqual(args.matrix, [[], [], []]);
+});
+
+test('parseJSONToolCalls: handles boolean values in nested structures', t => {
+	const content = `
+{
+  "name": "nested_bool_tool",
+  "arguments": {
+    "config": {
+      "enabled": true,
+      "debug": false,
+      "verbose": true
+    }
+  }
+}
+  `;
+
+	const calls = parseJSONToolCalls(content);
+
+	t.is(calls.length, 1);
+	const args = calls[0].function.arguments as {config: unknown};
+	t.deepEqual(args.config, {enabled: true, debug: false, verbose: true});
+});
+
+test('parseJSONToolCalls: handles null values in nested structures', t => {
+	const content = `
+{
+  "name": "nested_null_tool",
+  "arguments": {
+    "data": {
+      "optional": null,
+      "nested": {
+        "nullable": null
+      }
+    }
+  }
+}
+  `;
+
+	const calls = parseJSONToolCalls(content);
+
+	t.is(calls.length, 1);
+	const args = calls[0].function.arguments as {data: unknown};
+	t.deepEqual(args.data, {optional: null, nested: {nullable: null}});
+});
+
+test('parseJSONToolCalls: handles deeply nested arrays', t => {
+	const content = `
+{
+  "name": "deep_array_tool",
+  "arguments": {
+    "nested": [
+      [1, [2, [3, [4, [5]]]]]
+    ]
+  }
+}
+  `;
+
+	const calls = parseJSONToolCalls(content);
+
+	t.is(calls.length, 1);
+	const args = calls[0].function.arguments as {nested: unknown};
+	t.deepEqual(args.nested, [[1, [2, [3, [4, [5]]]]]]);
+});
+
+test('parseJSONToolCalls: handles special JSON characters in strings', t => {
+	const content = JSON.stringify({
+		name: 'special_chars_tool',
+		arguments: {
+			text: 'Quotes: "double" and \'single\'. Newlines: \\n, Tabs: \\t, Backslash: \\',
+		},
+	});
+
+	const calls = parseJSONToolCalls(content);
+
+	t.is(calls.length, 1);
+	const args = calls[0].function.arguments as {text: string};
+	// JSON.stringify/parse: backslash in object becomes escaped in JSON, then unescaped back to single backslash
+	t.is(args.text, 'Quotes: "double" and \'single\'. Newlines: \\n, Tabs: \\t, Backslash: \\');
+});
+
+// Malformed Arguments Tests (Edge Cases That Caused Bug)
+
+test('parseJSONToolCalls: handles null arguments', t => {
+	const content = '{"name": "write_file", "arguments": null}';
+
+	const calls = parseJSONToolCalls(content);
+
+	// Should return empty array since null is not a valid object
+	t.is(calls.length, 0);
+});
+
+test('parseJSONToolCalls: handles empty string arguments', t => {
+	const content = '{"name": "write_file", "arguments": ""}';
+
+	const calls = parseJSONToolCalls(content);
+
+	// Should return empty array since empty string is not a valid object
+	t.is(calls.length, 0);
+});
+
+test('parseJSONToolCalls: handles non-JSON values as arguments', t => {
+	const content = '{"name": "write_file", "arguments": "just a string"}';
+
+	const calls = parseJSONToolCalls(content);
+
+	// Should return empty array since string is not a valid object
+	t.is(calls.length, 0);
+});
+
+test('parseJSONToolCalls: handles undefined arguments', t => {
+	const content = '{"name": "write_file", "arguments": undefined}';
+
+	const calls = parseJSONToolCalls(content);
+
+	// Should return empty array since undefined is not a valid object
+	t.is(calls.length, 0);
+});
+
+test('parseJSONToolCalls: handles numeric arguments', t => {
+	const content = '{"name": "write_file", "arguments": 12345}';
+
+	const calls = parseJSONToolCalls(content);
+
+	// Should return empty array since number is not a valid object
+	t.is(calls.length, 0);
+});
+
+test('parseJSONToolCalls: handles boolean arguments', t => {
+	const content = '{"name": "write_file", "arguments": true}';
+
+	const calls = parseJSONToolCalls(content);
+
+	// Should return empty array since boolean is not a valid object
+	t.is(calls.length, 0);
+});
+
+test('parseJSONToolCalls: handles array arguments', t => {
+	const content = '{"name": "write_file", "arguments": [1, 2, 3]}';
+
+	const calls = parseJSONToolCalls(content);
+
+	// Should return empty array since array is not a valid object in the expected format
+	t.is(calls.length, 0);
 });
