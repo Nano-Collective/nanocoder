@@ -3,6 +3,7 @@ import type {ConversationStateManager} from '@/app/utils/conversation-state';
 import {ErrorMessage} from '@/components/message-box';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {ToolCall, ToolResult} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {displayToolResult} from '@/utils/tool-result-display';
 
@@ -83,7 +84,7 @@ export const executeToolsDirectly = async (
 			tool_call_id: invalidCall.toolCall.id,
 			role: 'tool' as const,
 			name: invalidCall.toolCall.function.name,
-			content: `Validation failed: ${invalidCall.error || 'Unknown error'}`,
+			content: `Validation failed: ${formatError(invalidCall.error)}`,
 		};
 		directResults.push(errorResult);
 
@@ -113,7 +114,7 @@ export const executeToolsDirectly = async (
 				tool_call_id: toolCall.id,
 				role: 'tool' as const,
 				name: toolCall.function.name,
-				content: `Error: ${error}`,
+				content: `Error: ${formatError(error)}`,
 			};
 			directResults.push(errorResult);
 
