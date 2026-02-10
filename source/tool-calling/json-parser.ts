@@ -84,11 +84,19 @@ export function parseJSONToolCalls(content: string): ToolCall[] {
 			};
 
 			if (parsed.name && parsed.arguments !== undefined) {
+				// Reject null, undefined, or non-object arguments
+				if (
+					parsed.arguments === null ||
+					typeof parsed.arguments !== 'object' ||
+					Array.isArray(parsed.arguments)
+				) {
+					return extractedCalls;
+				}
 				const toolCall = {
 					id: `call_${Date.now()}`,
 					function: {
 						name: parsed.name || '',
-						arguments: parsed.arguments || {},
+						arguments: parsed.arguments,
 					},
 				};
 				extractedCalls.push(toolCall);
@@ -110,11 +118,19 @@ export function parseJSONToolCalls(content: string): ToolCall[] {
 				arguments?: Record<string, unknown>;
 			};
 			if (parsed.name && parsed.arguments !== undefined) {
+				// Reject null, undefined, or non-object arguments
+				if (
+					parsed.arguments === null ||
+					typeof parsed.arguments !== 'object' ||
+					Array.isArray(parsed.arguments)
+				) {
+					continue;
+				}
 				const toolCall = {
 					id: `call_${Date.now()}_${extractedCalls.length}`,
 					function: {
 						name: parsed.name || '',
-						arguments: parsed.arguments || {},
+						arguments: parsed.arguments,
 					},
 				};
 				extractedCalls.push(toolCall);
@@ -134,21 +150,31 @@ export function parseJSONToolCalls(content: string): ToolCall[] {
 		while ((match = pattern.exec(content)) !== null) {
 			const [, name, argsStr] = match;
 			try {
-				let args: Record<string, unknown>;
+				let args: Record<string, unknown> | null = null;
+				// Only parse if arguments is a JSON object
 				if (argsStr && argsStr.startsWith('{')) {
-					args = JSON.parse(argsStr || '{}') as Record<string, unknown>;
-				} else {
-					args = {}; // Fallback to empty object for malformed arguments
+					const parsed = JSON.parse(argsStr || '{}');
+					// Ensure arguments is a non-null object (not null, undefined, primitive, or array)
+					if (
+						parsed !== null &&
+						typeof parsed === 'object' &&
+						!Array.isArray(parsed)
+					) {
+						args = parsed as Record<string, unknown>;
+					}
 				}
-				extractedCalls.push({
-					id: `call_${Date.now()}_${extractedCalls.length}`,
-					function: {
-						name: name || '',
-						arguments: args,
-					},
-				});
+				// Only add tool call if we have a valid object
+				if (args !== null) {
+					extractedCalls.push({
+						id: `call_${Date.now()}_${extractedCalls.length}`,
+						function: {
+							name: name || '',
+							arguments: args,
+						},
+					});
+				}
 			} catch {
-				// Failed to parse - will be caught by malformed detection
+				// Failed to parse - skip this tool call
 			}
 		}
 	}
