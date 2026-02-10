@@ -241,15 +241,6 @@ async function formatStringReplacePreview(
 								since you last read it.
 							</Text>
 						</Box>
-
-						<Box flexDirection="column" marginTop={1}>
-							<Text color={themeColors.secondary}>Searching for:</Text>
-							{old_str.split('\n').map((line, i) => (
-								<Text key={i} color={themeColors.text}>
-									{truncateLine(line, availableWidth)}
-								</Text>
-							))}
-						</Box>
 					</Box>
 				);
 				return <ToolMessage message={errorContent} hideBox={true} />;
@@ -272,15 +263,6 @@ async function formatStringReplacePreview(
 							<Text color={themeColors.secondary}>
 								Add more surrounding context to make the match unique.
 							</Text>
-						</Box>
-
-						<Box flexDirection="column" marginTop={1}>
-							<Text color={themeColors.secondary}>Searching for:</Text>
-							{old_str.split('\n').map((line, i) => (
-								<Text key={i} color={themeColors.text}>
-									{truncateLine(line, availableWidth)}
-								</Text>
-							))}
 						</Box>
 					</Box>
 				);
@@ -749,14 +731,14 @@ const stringReplaceValidator = async (
 		if (occurrences === 0) {
 			return {
 				valid: false,
-				error: `⚒ Content not found in file. The file may have changed since you last read it.\n\nSearching for:\n${old_str}\n\nSuggestion: Read the file again to see current contents.`,
+				error: `⚒ Content not found in file. The file may have changed since you last read it. Suggestion: Read the file again to see current contents.`,
 			};
 		}
 
 		if (occurrences > 1) {
 			return {
 				valid: false,
-				error: `⚒ Found ${occurrences} matches for the search string. Please provide more surrounding context to make the match unique.\n\nSearching for:\n${old_str}`,
+				error: `⚒ Found ${occurrences} matches for the search string. Please provide more surrounding context to make the match unique.`,
 			};
 		}
 	} catch (error) {
