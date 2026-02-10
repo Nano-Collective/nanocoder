@@ -154,14 +154,14 @@ export class DiffManager {
 		// Track these editors
 		this.openEditors.set(id, [originalUri, modifiedUri]);
 
-		// Open diff editor (vscode.diff doesn't support preserveFocus)
+		// Open diff editor with preserveFocus to avoid stealing terminal focus
 		const title = `Nanocoder: ${fileName} (${change.toolName})`;
 		await vscode.commands.executeCommand(
 			'vscode.diff',
 			originalUri,
 			modifiedUri,
 			title,
-			{preview: true},
+			{preview: true, preserveFocus: true},
 		);
 
 		// Restore terminal focus after diff opens
