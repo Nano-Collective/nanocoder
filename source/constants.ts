@@ -131,6 +131,62 @@ export const COST_SCORE_CHEAP = 7;
 export const COST_SCORE_MODERATE = 5;
 export const COST_SCORE_EXPENSIVE = 3;
 
+// === FILE TAGGING ===
+export const MAX_FILE_TAG_SIZE_BYTES = 512_000; // 512 KB
+export const BINARY_FILE_EXTENSIONS = new Set([
+	// Images
+	'.gif',
+	'.png',
+	'.jpg',
+	'.jpeg',
+	'.ico',
+	'.bmp',
+	'.webp',
+	'.svg',
+	'.tiff',
+	// Media
+	'.mp3',
+	'.mp4',
+	'.mov',
+	'.avi',
+	'.wav',
+	'.flac',
+	'.ogg',
+	'.webm',
+	// Archives
+	'.zip',
+	'.tar',
+	'.gz',
+	'.rar',
+	'.7z',
+	// Executables
+	'.exe',
+	'.dll',
+	'.so',
+	'.dylib',
+	'.wasm',
+	// Documents
+	'.pdf',
+	'.doc',
+	'.docx',
+	'.xls',
+	'.xlsx',
+	'.ppt',
+	'.pptx',
+	// Fonts
+	'.woff',
+	'.woff2',
+	'.ttf',
+	'.otf',
+	'.eot',
+	// Other
+	'.bin',
+	'.dat',
+	'.o',
+	'.class',
+	'.pyc',
+]);
+
 // === FILE EXPLORER ===
 export const FILE_EXPLORER_VISIBLE_ITEMS = 15;
 export const FILE_EXPLORER_TOKEN_WARNING_THRESHOLD = 10000;

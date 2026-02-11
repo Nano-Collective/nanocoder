@@ -2,6 +2,7 @@ import {mkdir, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import {MAX_FILE_TAG_SIZE_BYTES} from '@/constants.js';
 import {loadFileContent} from './file-content-loader.js';
 
 console.log(`\nfile-content-loader.spec.ts`);
@@ -26,6 +27,13 @@ test.before(async () => {
 		'import React from "react";\n\nexport function App() {\n  return <div>Hello</div>;\n}',
 		'utf-8',
 	);
+
+	// Create a binary file (by extension)
+	await writeFile(join(testDir, 'image.gif'), Buffer.from('GIF89a'));
+
+	// Create a large text file exceeding the size limit
+	const largeContent = 'x'.repeat(MAX_FILE_TAG_SIZE_BYTES + 1);
+	await writeFile(join(testDir, 'huge.csv'), largeContent, 'utf-8');
 });
 
 test.after.always(async () => {
@@ -131,5 +139,38 @@ test('stores absolute path in metadata', async t => {
 	t.truthy(result.metadata.absolutePath);
 	// Absolute path should be longer or equal (handles relative paths)
 	t.true(result.metadata.absolutePath.length >= relativePath.length);
+});
+
+test('returns metadata for binary file extensions', async t => {
+	const result = await loadFileContent(join(testDir, 'image.gif'));
+
+	t.true(result.success);
+	t.truthy(result.content);
+	t.true(result.content!.includes('[Binary file:'));
+	t.true(result.content!.includes('Type: GIF'));
+	t.true(result.content!.includes('Binary files cannot be included'));
+	t.is(result.metadata.lineCount, 0);
+});
+
+test('returns metadata for files exceeding size limit', async t => {
+	const result = await loadFileContent(join(testDir, 'huge.csv'));
+
+	t.true(result.success);
+	t.truthy(result.content);
+	t.true(result.content!.includes('[Large file:'));
+	t.true(result.content!.includes('exceeds'));
+	t.true(result.content!.includes('limit for inline tagging'));
+	t.is(result.metadata.lineCount, 0);
+});
+
+test('allows large files when line range is specified', async t => {
+	const result = await loadFileContent(join(testDir, 'huge.csv'), {
+		start: 1,
+		end: 1,
+	});
+
+	t.true(result.success);
+	// Should load the content (not metadata) since a line range was given
+	t.true(result.content!.startsWith('Path:'));
 });
 
