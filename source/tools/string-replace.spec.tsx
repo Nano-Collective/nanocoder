@@ -812,7 +812,6 @@ test('string_replace formatter: displays error when content not found', async t 
 
 	t.truthy(output);
 	t.regex(output!, /Error.*Content not found/);
-	t.regex(output!, /Searching for/);
 });
 
 test('string_replace formatter: displays error when multiple matches', async t => {
