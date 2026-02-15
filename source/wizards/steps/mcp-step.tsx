@@ -1,8 +1,8 @@
 import {Box, Text, useInput} from 'ink';
 import SelectInput from 'ink-select-input';
 import {Tab, Tabs} from 'ink-tab';
-import TextInput from 'ink-text-input';
 import {useEffect, useState} from 'react';
+import TextInput from '@/components/text-input';
 import {colors} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {
