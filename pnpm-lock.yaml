@@ -64,8 +64,8 @@ importers:
         specifier: ^2.0.0
         version: 2.0.0(ink@6.6.0(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)
       ink-gradient:
-        specifier: ^3.0.0
-        version: 3.0.0(ink@6.6.0(@types/react@19.2.14)(react@19.2.4))
+        specifier: ^4.0.0
+        version: 4.0.0(ink@6.6.0(@types/react@19.2.14)(react@19.2.4))
       ink-select-input:
         specifier: ^6.2.0
         version: 6.2.0(ink@6.6.0(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)
@@ -2148,9 +2148,9 @@ packages:
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
 
-  gradient-string@2.0.2:
-    resolution: {integrity: sha512-rEDCuqUQ4tbD78TpzsMtt5OIf0cBCSDWSJtUDaF6JsAh+k0v9r++NzxNEG87oDZx9ZwGhD8DaezR2L/yrw0Jdw==}
-    engines: {node: '>=10'}
+  gradient-string@3.0.0:
+    resolution: {integrity: sha512-frdKI4Qi8Ihp4C6wZNB565de/THpIaw3DjP5ku87M+N9rNSGmPTjfkq61SdRXB7eCaL8O1hkKDvf6CDMtOzIAg==}
+    engines: {node: '>=14'}
 
   happy-dom-without-node@14.12.3:
     resolution: {integrity: sha512-1wp8+GFneT8mBjVnzancXHRuscEUH3vnb38lfCHPxuSu6OiRw1kQzHFbTGYlNCU2YXOlVIlzsS6xg9nAr7Xg6Q==}
@@ -2272,11 +2272,11 @@ packages:
       ink: '>=4'
       react: '>=18'
 
-  ink-gradient@3.0.0:
-    resolution: {integrity: sha512-OVyPBovBxE1tFcBhSamb+P1puqDP6pG3xFe2W9NiLgwUZd9RbcjBeR7twLbliUT9navrUstEf1ZcPKKvx71BsQ==}
-    engines: {node: '>=16'}
+  ink-gradient@4.0.0:
+    resolution: {integrity: sha512-Yx227CStr4DaXVkRAQPbBufSUTqe4a4FLOPVoypXZyae5h3A5jWyqZpTmAIbm7iiiqNYCkKIFBUPJM6nSICfxA==}
+    engines: {node: '>=20'}
     peerDependencies:
-      ink: '>=4'
+      ink: '>=6'
 
   ink-select-input@6.2.0:
     resolution: {integrity: sha512-304fZXxkpYxJ9si5lxRCaX01GNlmPBgOZumXXRnPYbHW/iI31cgQynqk2tRypGLOF1cMIwPUzL2LSm6q4I5rQQ==}
@@ -5878,9 +5878,9 @@ snapshots:
 
   graceful-fs@4.2.11: {}
 
-  gradient-string@2.0.2:
+  gradient-string@3.0.0:
     dependencies:
-      chalk: 4.1.2
+      chalk: 5.6.2
       tinygradient: 1.1.5
 
   happy-dom-without-node@14.12.3:
@@ -5992,12 +5992,11 @@ snapshots:
       prop-types: 15.8.1
       react: 19.2.4
 
-  ink-gradient@3.0.0(ink@6.6.0(@types/react@19.2.14)(react@19.2.4)):
+  ink-gradient@4.0.0(ink@6.6.0(@types/react@19.2.14)(react@19.2.4)):
     dependencies:
       '@types/gradient-string': 1.1.6
-      gradient-string: 2.0.2
+      gradient-string: 3.0.0
       ink: 6.6.0(@types/react@19.2.14)(react@19.2.4)
-      prop-types: 15.8.1
       strip-ansi: 7.1.2
 
   ink-select-input@6.2.0(ink@6.6.0(@types/react@19.2.14)(react@19.2.4))(react@19.2.4):
