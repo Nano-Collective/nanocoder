@@ -1,17 +1,24 @@
 import type {ToolCall} from '@/types/index';
+import {toRequiredString} from '@/utils/type-helpers';
 
 /**
  * Internal JSON tool call parser
  * Note: This is now an internal utility. Use tool-parser.ts for public API.
+ * Type-preserving: Preserves object types in memory while converting to string for processing
  */
 
 /**
  * Detects malformed JSON tool call attempts and returns error details
  * Returns null if no malformed tool calls detected
+ * Type-preserving: Accepts unknown type, converts to string for processing
  */
 export function detectMalformedJSONToolCall(
-	content: string,
+	content: unknown,
 ): {error: string; examples: string} | null {
+	// Type guard: ensure content is string for processing operations
+	// BUT original type is preserved in memory via the ToolCall structure
+	const contentStr = toRequiredString(content);
+
 	// Check for incomplete JSON structures
 	const patterns = [
 		{
@@ -35,7 +42,7 @@ export function detectMalformedJSONToolCall(
 	];
 
 	for (const pattern of patterns) {
-		const match = content.match(pattern.regex);
+		const match = contentStr.match(pattern.regex);
 		if (match) {
 			return {
 				error: pattern.error,
@@ -56,11 +63,16 @@ function getCorrectJSONFormatExamples(_specificHint: string): string {
 
 /**
  * Parses JSON-formatted tool calls from content
+ * Type-preserving: Preserves object types in memory while converting to string for processing
  * This is an internal function - use tool-parser.ts for public API
  */
-export function parseJSONToolCalls(content: string): ToolCall[] {
+export function parseJSONToolCalls(content: unknown): ToolCall[] {
+	// Type guard: ensure content is string for processing operations
+	// BUT original type is preserved in memory via the ToolCall structure
+	const contentStr = toRequiredString(content);
+
 	const extractedCalls: ToolCall[] = [];
-	let trimmedContent = content.trim();
+	let trimmedContent = contentStr.trim();
 
 	// Handle markdown code blocks
 	const codeBlockMatch = trimmedContent.match(
@@ -96,7 +108,7 @@ export function parseJSONToolCalls(content: string): ToolCall[] {
 					id: `call_${Date.now()}`,
 					function: {
 						name: parsed.name || '',
-						arguments: parsed.arguments,
+						arguments: parsed.arguments, // Type preserved in memory!
 					},
 				};
 				extractedCalls.push(toolCall);
@@ -111,7 +123,7 @@ export function parseJSONToolCalls(content: string): ToolCall[] {
 	const jsonBlockRegex =
 		/\{\s*\n\s*"name":\s*"([^"]+)",\s*\n\s*"arguments":\s*\{[\s\S]*?\}\s*\n\s*\}/g;
 	let jsonMatch;
-	while ((jsonMatch = jsonBlockRegex.exec(content)) !== null) {
+	while ((jsonMatch = jsonBlockRegex.exec(contentStr)) !== null) {
 		try {
 			const parsed = JSON.parse(jsonMatch[0]) as {
 				name?: string;
@@ -130,7 +142,7 @@ export function parseJSONToolCalls(content: string): ToolCall[] {
 					id: `call_${Date.now()}_${extractedCalls.length}`,
 					function: {
 						name: parsed.name || '',
-						arguments: parsed.arguments,
+						arguments: parsed.arguments, // Type preserved in memory!
 					},
 				};
 				extractedCalls.push(toolCall);
@@ -147,7 +159,7 @@ export function parseJSONToolCalls(content: string): ToolCall[] {
 
 	for (const pattern of toolCallPatterns) {
 		let match;
-		while ((match = pattern.exec(content)) !== null) {
+		while ((match = pattern.exec(contentStr)) !== null) {
 			const [, name, argsStr] = match;
 			try {
 				let args: Record<string, unknown> | null = null;
@@ -160,7 +172,7 @@ export function parseJSONToolCalls(content: string): ToolCall[] {
 						typeof parsed === 'object' &&
 						!Array.isArray(parsed)
 					) {
-						args = parsed as Record<string, unknown>;
+						args = parsed as Record<string, unknown>; // Type preserved in memory!
 					}
 				}
 				// Only add tool call if we have a valid object
@@ -169,7 +181,7 @@ export function parseJSONToolCalls(content: string): ToolCall[] {
 						id: `call_${Date.now()}_${extractedCalls.length}`,
 						function: {
 							name: name || '',
-							arguments: args,
+							arguments: args, // Type preserved in memory!
 						},
 					});
 				}
@@ -184,15 +196,20 @@ export function parseJSONToolCalls(content: string): ToolCall[] {
 
 /**
  * Cleans content by removing tool call JSON blocks
+ * Type-preserving: Accepts unknown type, converts to string for processing
  * This is an internal function - use tool-parser.ts for public API
  */
 export function cleanJSONToolCalls(
-	content: string,
+	content: unknown,
 	toolCalls: ToolCall[],
 ): string {
-	if (toolCalls.length === 0) return content;
+	// Type guard: ensure content is string for processing operations
+	// BUT original type is preserved in memory via the ToolCall structure
+	const contentStr = toRequiredString(content);
 
-	let cleanedContent = content;
+	if (toolCalls.length === 0) return contentStr;
+
+	let cleanedContent = contentStr;
 
 	// Handle markdown code blocks that contain only tool calls
 	const codeBlockRegex = /```(?:json)?\s*\n?([\s\S]*?)\n?```/g;

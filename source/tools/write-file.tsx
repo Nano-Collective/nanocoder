@@ -18,6 +18,7 @@ import {normalizeIndentation} from '@/utils/indentation-normalizer';
 import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
 import {calculateTokens} from '@/utils/token-calculator';
+import {ensureString} from '@/utils/type-helpers';
 import {
 	closeDiffInVSCode,
 	isVSCodeConnected,
@@ -26,12 +27,16 @@ import {
 
 const executeWriteFile = async (args: {
 	path: string;
-	content: string;
+	content: unknown; // Note: change type to unknown to accept non-string
 }): Promise<string> => {
 	const absPath = resolve(args.path);
 	const fileExists = existsSync(absPath);
 
-	await writeFile(absPath, args.content, 'utf-8');
+	// Type guard: ensure content is string for write operation
+	// Storage is safe (fs.writeFile ensures string-only), but we need to convert for safety
+	const contentStr = ensureString(args.content);
+
+	await writeFile(absPath, contentStr, 'utf-8');
 
 	// Invalidate cache after write
 	invalidateCache(absPath);
@@ -58,7 +63,8 @@ const executeWriteFile = async (args: {
 const writeFileCoreTool = tool({
 	description:
 		'Write content to a file (creates new file or overwrites existing file). Use this for complete file rewrites, generated code, or when most of the file needs to change. For small targeted edits, use string_replace instead.',
-	inputSchema: jsonSchema<{path: string; content: string}>({
+	inputSchema: jsonSchema<{path: string; content: unknown}>({
+		// Note: change to unknown
 		type: 'object',
 		properties: {
 			path: {
@@ -66,8 +72,9 @@ const writeFileCoreTool = tool({
 				description: 'The path to the file to write.',
 			},
 			content: {
-				type: 'string',
-				description: 'The complete content to write to the file.',
+				type: ['string', 'object', 'array', 'null', 'number', 'boolean'], // Allow multiple types
+				description:
+					'The complete content to write to the file. Can be string, object, array, or number. Objects/arrays will be converted to JSON strings for storage, but types are preserved in memory.',
 			},
 		},
 		required: ['path', 'content'],
@@ -261,7 +268,7 @@ const writeFileFormatter = async (
 
 const writeFileValidator = async (args: {
 	path: string;
-	content: string;
+	content: unknown;
 }): Promise<{valid: true} | {valid: false; error: string}> => {
 	// Validate path boundary first to prevent directory traversal
 	if (!isValidFilePath(args.path)) {
@@ -304,6 +311,26 @@ const writeFileValidator = async (args: {
 		return {
 			valid: false,
 			error: `⚒ Cannot access parent directory "${parentDir}": ${errorMessage}`,
+		};
+	}
+
+	// Check if content is valid (not null/undefined)
+	if (args.content === null || args.content === undefined) {
+		return {
+			valid: false,
+			error: `⚒ Invalid content: content cannot be null or undefined.`,
+		};
+	}
+
+	// Convert content to string for validation (but preserve type in memory)
+	const contentStr = ensureString(args.content);
+
+	// Check if content is empty string or whitespace only
+	const trimmedContent = contentStr.trim();
+	if (trimmedContent.length === 0) {
+		return {
+			valid: false,
+			error: `⚒ Invalid content: file would be empty. Provide actual content to write.`,
 		};
 	}
 
