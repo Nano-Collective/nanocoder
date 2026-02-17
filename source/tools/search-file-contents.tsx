@@ -1,4 +1,5 @@
 import {execFile} from 'node:child_process';
+import path from 'node:path';
 import {promisify} from 'node:util';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -14,6 +15,7 @@ import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {DEFAULT_IGNORE_DIRS, loadGitignore} from '@/utils/gitignore-loader';
+import {isValidFilePath} from '@/utils/path-validation';
 import {calculateTokens} from '@/utils/token-calculator';
 
 const execFileAsync = promisify(execFile);
@@ -32,6 +34,8 @@ async function searchFileContents(
 	cwd: string,
 	maxResults: number,
 	caseSensitive: boolean,
+	include?: string,
+	searchPath?: string,
 ): Promise<{matches: SearchMatch[]; truncated: boolean}> {
 	try {
 		const ig = loadGitignore(cwd);
@@ -47,8 +51,21 @@ async function searchFileContents(
 			grepArgs.push('-i');
 		}
 
-		// Add include and exclude patterns
-		grepArgs.push('--include=*');
+		// Add include patterns
+		if (include) {
+			// Support brace expansion like "*.{ts,tsx}" → multiple --include args
+			const braceMatch = include.match(/^\*\.\{(.+)\}$/);
+			if (braceMatch) {
+				for (const ext of braceMatch[1].split(',')) {
+					grepArgs.push(`--include=*.${ext.trim()}`);
+				}
+			} else {
+				grepArgs.push(`--include=${include}`);
+			}
+		} else {
+			grepArgs.push('--include=*');
+		}
+
 		// Dynamically add exclusions from DEFAULT_IGNORE_DIRS
 		for (const dir of DEFAULT_IGNORE_DIRS) {
 			grepArgs.push(`--exclude-dir=${dir}`);
@@ -57,8 +74,12 @@ async function searchFileContents(
 		// Add the search query (no escaping needed with array-based args)
 		grepArgs.push(query);
 
-		// Add search path
-		grepArgs.push('.');
+		// Add search path (scoped directory or cwd)
+		if (searchPath) {
+			grepArgs.push(searchPath);
+		} else {
+			grepArgs.push('.');
+		}
 
 		// Execute grep command with array-based arguments
 		const {stdout} = await execFileAsync('grep', grepArgs, {
@@ -68,11 +89,21 @@ async function searchFileContents(
 
 		const matches: SearchMatch[] = [];
 		const lines = stdout.trim().split('\n').filter(Boolean);
+		const cwdPrefix = path.resolve(cwd) + path.sep;
 
 		for (const line of lines) {
-			const match = line.match(/^\.\/(.+?):(\d+):(.*)$/);
+			// Match both relative (./path) and absolute (/abs/path) grep output
+			const match =
+				line.match(/^\.\/(.+?):(\d+):(.*)$/) ||
+				line.match(/^(.+?):(\d+):(.*)$/);
 			if (match) {
-				const filePath = match[1];
+				// Normalize to relative path from cwd
+				let filePath = match[1];
+				if (path.isAbsolute(filePath)) {
+					filePath = filePath.startsWith(cwdPrefix)
+						? filePath.slice(cwdPrefix.length)
+						: filePath;
+				}
 
 				// Skip files ignored by gitignore
 				if (ig.ignores(filePath)) {
@@ -116,6 +147,8 @@ interface SearchFileContentsArgs {
 	query: string;
 	maxResults?: number;
 	caseSensitive?: boolean;
+	include?: string;
+	path?: string;
 }
 
 const executeSearchFileContents = async (
@@ -128,12 +161,26 @@ const executeSearchFileContents = async (
 	);
 	const caseSensitive = args.caseSensitive || false;
 
+	// Validate and resolve search path if provided
+	let searchPath: string | undefined;
+	if (args.path) {
+		if (!isValidFilePath(args.path)) {
+			return `Error: Invalid path "${args.path}"`;
+		}
+		searchPath = path.resolve(cwd, args.path);
+		if (!searchPath.startsWith(path.resolve(cwd))) {
+			return `Error: Path escapes project directory: ${args.path}`;
+		}
+	}
+
 	try {
 		const {matches, truncated} = await searchFileContents(
 			args.query,
 			cwd,
 			maxResults,
 			caseSensitive,
+			args.include,
+			searchPath,
 		);
 
 		if (matches.length === 0) {
@@ -158,7 +205,7 @@ const executeSearchFileContents = async (
 
 const searchFileContentsCoreTool = tool({
 	description:
-		'Search for text or code inside files. AUTO-ACCEPTED (no user approval needed). Use this INSTEAD OF bash grep/rg/ag/ack commands. Supports extended regex (e.g., "foo|bar", "func(tion)?"). Returns file:line with matching content. Use to find: function definitions, variable usage, import statements, TODO comments. Case-insensitive by default (use caseSensitive=true for exact matching).',
+		'Search for text or code inside files. AUTO-ACCEPTED (no user approval needed). Use this INSTEAD OF bash grep/rg/ag/ack commands. Supports extended regex (e.g., "foo|bar", "func(tion)?"). Returns file:line with matching content. Use to find: function definitions, variable usage, import statements, TODO comments. Case-insensitive by default (use caseSensitive=true for exact matching). Use include to filter by file type (e.g., "*.ts") and path to scope to a directory (e.g., "src/components").',
 	inputSchema: jsonSchema<SearchFileContentsArgs>({
 		type: 'object',
 		properties: {
@@ -177,6 +224,16 @@ const searchFileContentsCoreTool = tool({
 				description:
 					'Whether to perform case-sensitive search (default: false)',
 			},
+			include: {
+				type: 'string',
+				description:
+					'Glob pattern to filter which files are searched (e.g., "*.ts", "*.{ts,tsx}", "*.spec.ts"). Only files matching this pattern will be searched.',
+			},
+			path: {
+				type: 'string',
+				description:
+					'Directory to scope the search to (relative path, e.g., "src/components", "source/tools"). Only files within this directory will be searched.',
+			},
 		},
 		required: ['query'],
 	}),
@@ -192,6 +249,8 @@ interface SearchFileContentsFormatterProps {
 		query: string;
 		maxResults?: number;
 		caseSensitive?: boolean;
+		include?: string;
+		path?: string;
 	};
 	result?: string;
 }
@@ -225,6 +284,20 @@ const SearchFileContentsFormatter = React.memo(
 					<Text color={colors.secondary}>Query: </Text>
 					<Text color={colors.text}>{args.query}</Text>
 				</Box>
+
+				{args.include && (
+					<Box>
+						<Text color={colors.secondary}>Include: </Text>
+						<Text color={colors.text}>{args.include}</Text>
+					</Box>
+				)}
+
+				{args.path && (
+					<Box>
+						<Text color={colors.secondary}>Path: </Text>
+						<Text color={colors.text}>{args.path}</Text>
+					</Box>
+				)}
 
 				{args.caseSensitive && (
 					<Box>

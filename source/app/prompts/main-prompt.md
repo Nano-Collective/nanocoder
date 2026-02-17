@@ -107,7 +107,7 @@ Don't use: `execute_bash("ls -la src/")` → Use: `list_directory("src")`
 
 **Available tools**:
 - **find_files**: Locate files by glob pattern
-- **search_file_contents**: Find code patterns across codebase
+- **search_file_contents**: Find code patterns across codebase. Use `include` to filter by file type (e.g., `"*.tsx"`), `path` to scope to a directory (e.g., `"src/hooks"`)
 - **read_file**: Read files with progressive disclosure (>300 lines returns metadata first, then use line ranges). Use metadata_only=true to get metadata without content.
 - **list_directory**: List directory contents with optional recursion
 - **lsp_get_diagnostics**: Check for errors/linting issues (before and after changes)
@@ -118,6 +118,8 @@ Don't use: `execute_bash("ls -la src/")` → Use: `list_directory("src")`
   - Use `maxResults` to limit output for broad patterns
 - **Need to find code patterns?** → Use `search_file_contents` with query
   - Use `caseSensitive=true` for exact symbol matching
+  - Use `include="*.ts"` to limit to specific file types
+  - Use `path="src/components"` to scope to a directory
 - **Need to read a file?** → Use `read_file`
   - Files ≤300 lines return content directly
   - Files >300 lines return metadata first; use `start_line`/`end_line` for content
