@@ -3,6 +3,8 @@ import test from 'ava';
 import React from 'react';
 import {DevelopmentModeIndicator} from './development-mode-indicator';
 
+void React; // JSX runtime requires React in scope
+
 // Mock colors object matching the theme structure
 const mockColors = {
 	primary: '#FFFFFF',
