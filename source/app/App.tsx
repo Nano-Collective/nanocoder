@@ -22,6 +22,7 @@ import {useChatHandler} from '@/hooks/chat-handler';
 import {useAppHandlers} from '@/hooks/useAppHandlers';
 import {useAppInitialization} from '@/hooks/useAppInitialization';
 import {useAppState} from '@/hooks/useAppState';
+import {useContextPercentage} from '@/hooks/useContextPercentage';
 import {useDirectoryTrust} from '@/hooks/useDirectoryTrust';
 import {useModeHandlers} from '@/hooks/useModeHandlers';
 import {useNonInteractiveMode} from '@/hooks/useNonInteractiveMode';
@@ -263,6 +264,18 @@ export default function App({
 		onConversationComplete: () => {
 			appState.setIsConversationComplete(true);
 		},
+	});
+
+	// Track context window usage percentage
+	useContextPercentage({
+		currentModel: appState.currentModel,
+		messages: appState.messages,
+		tokenizer: appState.tokenizer,
+		getMessageTokens: appState.getMessageTokens,
+		toolManager: appState.toolManager,
+		streamingTokenCount: chatHandler.tokenCount,
+		setContextPercentUsed: appState.setContextPercentUsed,
+		setContextLimit: appState.setContextLimit,
 	});
 
 	// Setup tool handler
@@ -643,6 +656,7 @@ export default function App({
 										chatHandler.isGenerating || appState.isToolExecuting
 									}
 									developmentMode={appState.developmentMode}
+									contextPercentUsed={appState.contextPercentUsed}
 									onToolConfirm={toolHandler.handleToolConfirmation}
 									onToolCancel={toolHandler.handleToolConfirmationCancel}
 									onSubmit={appHandlers.handleMessageSubmit}

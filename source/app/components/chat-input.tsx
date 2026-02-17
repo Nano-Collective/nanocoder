@@ -30,6 +30,7 @@ export interface ChatInputProps {
 	customCommands: string[];
 	inputDisabled: boolean;
 	developmentMode: DevelopmentMode;
+	contextPercentUsed: number | null;
 
 	// Handlers
 	onToolConfirm: (confirmed: boolean) => void;
@@ -59,6 +60,7 @@ export function ChatInput({
 	customCommands,
 	inputDisabled,
 	developmentMode,
+	contextPercentUsed,
 	onToolConfirm,
 	onToolCancel,
 	onSubmit,
@@ -100,6 +102,7 @@ export function ChatInput({
 					onCancel={onCancel}
 					onToggleMode={onToggleMode}
 					developmentMode={developmentMode}
+					contextPercentUsed={contextPercentUsed}
 				/>
 			) : /* Client Missing */
 			mcpInitialized && !client ? (

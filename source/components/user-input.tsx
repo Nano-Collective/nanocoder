@@ -26,6 +26,7 @@ interface ChatProps {
 	onCancel?: () => void; // Callback when user presses escape while thinking
 	onToggleMode?: () => void; // Callback when user presses shift+tab to toggle development mode
 	developmentMode?: DevelopmentMode; // Current development mode
+	contextPercentUsed?: number | null; // Context window usage percentage
 }
 
 export default function UserInput({
@@ -36,6 +37,7 @@ export default function UserInput({
 	onCancel,
 	onToggleMode,
 	developmentMode = 'normal',
+	contextPercentUsed,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
 	const {colors} = useTheme();
@@ -467,6 +469,7 @@ export default function UserInput({
 				<DevelopmentModeIndicator
 					developmentMode={developmentMode}
 					colors={colors}
+					contextPercentUsed={contextPercentUsed ?? null}
 				/>
 			</Box>
 		);
@@ -553,6 +556,7 @@ export default function UserInput({
 			<DevelopmentModeIndicator
 				developmentMode={developmentMode}
 				colors={colors}
+				contextPercentUsed={contextPercentUsed ?? null}
 			/>
 		</>
 	);

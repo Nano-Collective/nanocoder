@@ -183,6 +183,12 @@ export const DEVELOPMENT_MODE_LABELS: Record<DevelopmentMode, string> = {
 	plan: '⏸ plan mode on',
 };
 
+export const DEVELOPMENT_MODE_LABELS_NARROW: Record<DevelopmentMode, string> = {
+	normal: '▶ normal',
+	'auto-accept': '⏵⏵ auto',
+	plan: '⏸ plan',
+};
+
 // Connection status types for MCP and LSP servers
 export type ConnectionStatus = 'connected' | 'failed' | 'pending';
 

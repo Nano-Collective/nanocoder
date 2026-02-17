@@ -8,7 +8,6 @@ import {assemblePrompt, processPromptTemplate} from '@/utils/prompt-processor';
 import {processAssistantResponse} from './conversation/conversation-loop';
 import {createResetStreamingState} from './state/streaming-state';
 import type {ChatHandlerReturn, UseChatHandlerProps} from './types';
-import {checkContextUsage} from './utils/context-checker';
 import {displayError as displayErrorHelper} from './utils/message-helpers';
 
 /**
@@ -178,16 +177,6 @@ export function useChatHandler({
 				role: 'system',
 				content: systemPrompt,
 			};
-
-			// Check context usage and warn if approaching limit
-			await checkContextUsage(
-				updatedMessages,
-				systemMessage,
-				currentProvider,
-				currentModel,
-				addToChatQueue,
-				getNextComponentKey,
-			);
 
 			// Use the conversation loop
 			await processAssistantResponseWithErrorHandling(

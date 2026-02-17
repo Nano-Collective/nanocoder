@@ -119,6 +119,12 @@ export function useAppState() {
 	const [developmentMode, setDevelopmentMode] =
 		useState<DevelopmentMode>('normal');
 
+	// Context usage state
+	const [contextPercentUsed, setContextPercentUsed] = useState<number | null>(
+		null,
+	);
+	const [contextLimit, setContextLimit] = useState<number | null>(null);
+
 	// Tool confirmation state
 	const [pendingToolCalls, setPendingToolCalls] = useState<ToolCall[]>([]);
 	const [currentToolIndex, setCurrentToolIndex] = useState<number>(0);
@@ -266,6 +272,8 @@ export function useAppState() {
 		isToolConfirmationMode,
 		isToolExecuting,
 		developmentMode,
+		contextPercentUsed,
+		contextLimit,
 		pendingToolCalls,
 		currentToolIndex,
 		completedToolResults,
@@ -309,6 +317,8 @@ export function useAppState() {
 		setIsToolConfirmationMode,
 		setIsToolExecuting,
 		setDevelopmentMode,
+		setContextPercentUsed,
+		setContextLimit,
 		setPendingToolCalls,
 		setCurrentToolIndex,
 		setCompletedToolResults,
