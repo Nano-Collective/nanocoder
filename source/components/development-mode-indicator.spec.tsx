@@ -22,13 +22,12 @@ const mockColors = {
 
 test('DevelopmentModeIndicator renders with normal mode', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} />,
+		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /normal mode on/);
-	t.regex(output!, /Shift\+Tab to cycle/);
 });
 
 test('DevelopmentModeIndicator renders with auto-accept mode', t => {
@@ -36,29 +35,28 @@ test('DevelopmentModeIndicator renders with auto-accept mode', t => {
 		<DevelopmentModeIndicator
 			developmentMode="auto-accept"
 			colors={mockColors}
+			contextPercentUsed={null}
 		/>,
 	);
 
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /auto-accept mode on/);
-	t.regex(output!, /Shift\+Tab to cycle/);
 });
 
 test('DevelopmentModeIndicator renders with plan mode', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="plan" colors={mockColors} />,
+		<DevelopmentModeIndicator developmentMode="plan" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /plan mode on/);
-	t.regex(output!, /Shift\+Tab to cycle/);
 });
 
 test('DevelopmentModeIndicator renders without crashing', t => {
 	const {unmount} = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} />,
+		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	t.notThrows(() => unmount());
@@ -74,7 +72,7 @@ test('DevelopmentModeIndicator accepts all valid development modes', t => {
 	for (const mode of modes) {
 		t.notThrows(() => {
 			render(
-				<DevelopmentModeIndicator developmentMode={mode} colors={mockColors} />,
+				<DevelopmentModeIndicator developmentMode={mode} colors={mockColors} contextPercentUsed={null} />,
 			);
 		});
 	}
@@ -86,6 +84,7 @@ test('DevelopmentModeIndicator accepts colors object', t => {
 			<DevelopmentModeIndicator
 				developmentMode="normal"
 				colors={mockColors}
+				contextPercentUsed={null}
 			/>,
 		);
 	});
@@ -105,7 +104,7 @@ test('DevelopmentModeIndicator has correct display name', t => {
 
 test('DevelopmentModeIndicator shows mode label in bold', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} />,
+		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const output = lastFrame();
@@ -113,18 +112,27 @@ test('DevelopmentModeIndicator shows mode label in bold', t => {
 	t.regex(output!, /normal mode on/);
 });
 
-test('DevelopmentModeIndicator shows instructions', t => {
+test('DevelopmentModeIndicator shows context percentage when provided', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} />,
+		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={42} />,
 	);
 
 	const output = lastFrame();
-	t.regex(output!, /\(Shift\+Tab to cycle\)/);
+	t.regex(output!, /ctx: 42%/);
+});
+
+test('DevelopmentModeIndicator hides context percentage when null', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
+	);
+
+	const output = lastFrame();
+	t.notRegex(output!, /ctx:/);
 });
 
 test('DevelopmentModeIndicator normal mode uses correct label', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} />,
+		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const output = lastFrame();
@@ -138,6 +146,7 @@ test('DevelopmentModeIndicator auto-accept mode uses correct label', t => {
 		<DevelopmentModeIndicator
 			developmentMode="auto-accept"
 			colors={mockColors}
+			contextPercentUsed={null}
 		/>,
 	);
 
@@ -149,7 +158,7 @@ test('DevelopmentModeIndicator auto-accept mode uses correct label', t => {
 
 test('DevelopmentModeIndicator plan mode uses correct label', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="plan" colors={mockColors} />,
+		<DevelopmentModeIndicator developmentMode="plan" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const output = lastFrame();
@@ -165,12 +174,12 @@ test('DevelopmentModeIndicator plan mode uses correct label', t => {
 test('DevelopmentModeIndicator is memoized', t => {
 	// React.memo components should have the same reference when props don't change
 	const firstRender = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} />,
+		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
 	);
 	const firstOutput = firstRender.lastFrame();
 
 	const secondRender = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} />,
+		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
 	);
 	const secondOutput = secondRender.lastFrame();
 
@@ -180,7 +189,7 @@ test('DevelopmentModeIndicator is memoized', t => {
 
 test('DevelopmentModeIndicator updates when developmentMode changes', t => {
 	const {lastFrame, rerender} = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} />,
+		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const normalOutput = lastFrame();
@@ -190,6 +199,7 @@ test('DevelopmentModeIndicator updates when developmentMode changes', t => {
 		<DevelopmentModeIndicator
 			developmentMode="auto-accept"
 			colors={mockColors}
+			contextPercentUsed={null}
 		/>,
 	);
 
@@ -203,18 +213,18 @@ test('DevelopmentModeIndicator updates when developmentMode changes', t => {
 
 test('DevelopmentModeIndicator has correct structure', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} />,
+		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={25} />,
 	);
 
 	const output = lastFrame();
-	// Should have both the mode label and the instructions
+	// Should have the mode label and context percentage
 	t.regex(output!, /normal mode on/);
-	t.regex(output!, /\(Shift\+Tab to cycle\)/);
+	t.regex(output!, /ctx: 25%/);
 });
 
 test('DevelopmentModeIndicator component can be unmounted', t => {
 	const {unmount} = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} />,
+		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	t.notThrows(() => {
@@ -228,7 +238,7 @@ test('DevelopmentModeIndicator component can be unmounted', t => {
 
 test('DevelopmentModeIndicator handles rapid mode changes', t => {
 	const {lastFrame, rerender} = render(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} />,
+		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	// Cycle through modes rapidly
@@ -236,13 +246,14 @@ test('DevelopmentModeIndicator handles rapid mode changes', t => {
 		<DevelopmentModeIndicator
 			developmentMode="auto-accept"
 			colors={mockColors}
+			contextPercentUsed={null}
 		/>,
 	);
 	rerender(
-		<DevelopmentModeIndicator developmentMode="plan" colors={mockColors} />,
+		<DevelopmentModeIndicator developmentMode="plan" colors={mockColors} contextPercentUsed={null} />,
 	);
 	rerender(
-		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} />,
+		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const output = lastFrame();
@@ -262,6 +273,7 @@ test('DevelopmentModeIndicator handles custom colors', t => {
 			<DevelopmentModeIndicator
 				developmentMode="normal"
 				colors={customColors}
+				contextPercentUsed={null}
 			/>,
 		);
 	});
