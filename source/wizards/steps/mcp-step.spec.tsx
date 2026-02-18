@@ -393,11 +393,8 @@ test('McpStep handles fetch server config', t => {
 		fetch: {
 			name: 'fetch',
 			transport: 'stdio',
-			command: 'npx',
-			args: ['-y', '@modelcontextprotocol/server-fetch'],
-			env: {
-				USER_AGENT: 'ModelContextProtocol/1.0',
-			},
+			command: 'uvx',
+			args: ['mcp-server-fetch'],
 		},
 	};
 
@@ -436,8 +433,8 @@ test('McpStep handles server without env variables', t => {
 		fetch: {
 			name: 'fetch',
 			transport: 'stdio',
-			command: 'npx',
-			args: ['-y', '@modelcontextprotocol/server-fetch'],
+			command: 'uvx',
+			args: ['mcp-server-fetch'],
 		},
 	};
 
