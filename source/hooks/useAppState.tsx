@@ -20,6 +20,7 @@ import type {ToolResult, UpdateInfo} from '@/types/index';
 import type {Tokenizer} from '@/types/tokenization.js';
 import type {ThemePreset} from '@/types/ui';
 import {BoundedMap} from '@/utils/bounded-map';
+import type {PendingQuestion} from '@/utils/question-queue';
 
 export interface ConversationContext {
 	/**
@@ -114,6 +115,11 @@ export function useAppState() {
 	const [isToolConfirmationMode, setIsToolConfirmationMode] =
 		useState<boolean>(false);
 	const [isToolExecuting, setIsToolExecuting] = useState<boolean>(false);
+
+	// Question mode state (ask_question tool)
+	const [isQuestionMode, setIsQuestionMode] = useState<boolean>(false);
+	const [pendingQuestion, setPendingQuestion] =
+		useState<PendingQuestion | null>(null);
 
 	// Development mode state
 	const [developmentMode, setDevelopmentMode] =
@@ -271,6 +277,8 @@ export function useAppState() {
 		checkpointLoadData,
 		isToolConfirmationMode,
 		isToolExecuting,
+		isQuestionMode,
+		pendingQuestion,
 		developmentMode,
 		contextPercentUsed,
 		contextLimit,
@@ -316,6 +324,8 @@ export function useAppState() {
 		setCheckpointLoadData,
 		setIsToolConfirmationMode,
 		setIsToolExecuting,
+		setIsQuestionMode,
+		setPendingQuestion,
 		setDevelopmentMode,
 		setContextPercentUsed,
 		setContextLimit,
