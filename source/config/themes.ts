@@ -745,6 +745,26 @@ export const themes: Record<ThemePreset, Theme> = {
 			diffRemovedText: '#e95678',
 		},
 	},
+	kanagawa: {
+		name: 'kanagawa',
+		displayName: 'Kanagawa',
+		themeType: 'dark',
+		colors: {
+			text: '#dcd7ba',
+			base: '#1f2335',
+			primary: '#c792ea',
+			tool: '#7aa2f7',
+			secondary: '#6c7a89',
+			success: '#9ece6a',
+			error: '#f7768e',
+			info: '#2ac3de',
+			warning: '#e0af68',
+			diffAdded: '#1f2f1e',
+			diffRemoved: '#2f1f1f',
+			diffAddedText: '#9ece6a',
+			diffRemovedText: '#f7768e',
+		},
+	},
 };
 
 export function getThemeColors(themePreset: ThemePreset) {
