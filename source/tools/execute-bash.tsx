@@ -102,7 +102,7 @@ function ExecuteBashFormatterComponent({
 	const {colors} = useTheme();
 
 	return (
-		<Box flexDirection="column">
+		<Box flexDirection="column" marginBottom={1}>
 			<Text color={colors.tool}>⚒ execute_bash</Text>
 			<Box>
 				<Text color={colors.secondary}>Command: </Text>

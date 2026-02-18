@@ -1,3 +1,5 @@
+import {existsSync, mkdirSync, writeFileSync} from 'node:fs';
+import {join} from 'node:path';
 import React from 'react';
 import {parseInput} from '@/command-parser';
 import {commandRegistry} from '@/commands';
@@ -34,6 +36,7 @@ const SPECIAL_COMMANDS = {
 	STATUS: 'status',
 	CHECKPOINT: 'checkpoint',
 	EXPLORER: 'explorer',
+	SCHEDULE: 'schedule',
 } as const;
 
 /** Checkpoint subcommands */
@@ -255,6 +258,116 @@ async function handleSpecialCommand(
 		default:
 			return false;
 	}
+}
+
+/**
+ * Handles /schedule start as a special case that enters scheduler mode.
+ * Other /schedule subcommands go through the normal command registry.
+ * Returns true if handled.
+ */
+async function handleScheduleStart(
+	commandParts: string[],
+	options: MessageSubmissionOptions,
+): Promise<boolean> {
+	if (
+		commandParts[0] !== SPECIAL_COMMANDS.SCHEDULE ||
+		commandParts[1] !== 'start'
+	) {
+		return false;
+	}
+
+	const {onEnterSchedulerMode, onCommandComplete} = options;
+
+	if (onEnterSchedulerMode) {
+		onEnterSchedulerMode();
+		onCommandComplete?.();
+	} else {
+		options.onAddToChatQueue(
+			React.createElement(ErrorMessage, {
+				key: `schedule-error-${options.getNextComponentKey()}`,
+				message: 'Scheduler mode is not available.',
+			}),
+		);
+		onCommandComplete?.();
+	}
+
+	return true;
+}
+
+/**
+ * Handles /schedule create — creates the schedule file and prompts the AI to help write it.
+ * Returns true if handled.
+ */
+async function handleScheduleCreate(
+	commandParts: string[],
+	options: MessageSubmissionOptions,
+): Promise<boolean> {
+	if (
+		commandParts[0] !== SPECIAL_COMMANDS.SCHEDULE ||
+		commandParts[1] !== 'create'
+	) {
+		return false;
+	}
+
+	const {
+		onAddToChatQueue,
+		onHandleChatMessage,
+		onCommandComplete,
+		getNextComponentKey,
+	} = options;
+	const fileName = commandParts[2];
+
+	if (!fileName) {
+		onAddToChatQueue(
+			React.createElement(ErrorMessage, {
+				key: `schedule-create-error-${getNextComponentKey()}`,
+				message:
+					'Usage: /schedule create <name>\nExample: /schedule create deps-update',
+			}),
+		);
+		onCommandComplete?.();
+		return true;
+	}
+
+	const safeName = fileName.endsWith('.md') ? fileName : `${fileName}.md`;
+	const schedulesDir = join(process.cwd(), '.nanocoder', 'schedules');
+	const filePath = join(schedulesDir, safeName);
+
+	if (existsSync(filePath)) {
+		onAddToChatQueue(
+			React.createElement(ErrorMessage, {
+				key: `schedule-create-exists-${getNextComponentKey()}`,
+				message: `Schedule file already exists: .nanocoder/schedules/${safeName}`,
+			}),
+		);
+		onCommandComplete?.();
+		return true;
+	}
+
+	mkdirSync(schedulesDir, {recursive: true});
+
+	const template = `---
+description: ${safeName.replace(/\.md$/, '')} scheduled command
+---
+
+`;
+
+	writeFileSync(filePath, template, 'utf-8');
+
+	onAddToChatQueue(
+		React.createElement(SuccessMessage, {
+			key: `schedule-created-${getNextComponentKey()}`,
+			message: `Created schedule file: .nanocoder/schedules/${safeName}`,
+			hideBox: true,
+		}),
+	);
+
+	// Ask the AI to help write the schedule command content
+	await onHandleChatMessage(
+		`I just created a new schedule command file at .nanocoder/schedules/${safeName}. Help me write the content for this scheduled task. Ask me what I want this scheduled job to do, then write the markdown prompt into the file using the write_file tool. The file should contain a clear prompt that instructs the AI agent what to do when this schedule runs. Keep the YAML frontmatter at the top with the description field.`,
+	);
+
+	return true;
 }
 
 // Handles compact command, Returns true if compact command was handled
@@ -584,6 +697,16 @@ async function handleSlashCommand(
 	// Try compact command
 	const commandParts = message.slice(1).trim().split(/\s+/);
 	if (await handleCompactCommand(commandParts, options)) {
+		return;
+	}
+
+	// Try /schedule start (enters scheduler mode)
+	if (await handleScheduleStart(commandParts, options)) {
+		return;
+	}
+
+	// Try /schedule create (creates file + AI assistance)
+	if (await handleScheduleCreate(commandParts, options)) {
 		return;
 	}
 

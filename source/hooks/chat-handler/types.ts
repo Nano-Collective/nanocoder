@@ -15,7 +15,7 @@ export interface UseChatHandlerProps {
 	getNextComponentKey: () => number;
 	abortController: AbortController | null;
 	setAbortController: (controller: AbortController | null) => void;
-	developmentMode?: 'normal' | 'auto-accept' | 'plan';
+	developmentMode?: 'normal' | 'auto-accept' | 'plan' | 'scheduler';
 	nonInteractiveMode?: boolean;
 	onStartToolConfirmationFlow: (
 		toolCalls: ToolCall[],

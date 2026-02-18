@@ -56,6 +56,16 @@ test('DevelopmentModeIndicator renders with plan mode', t => {
 	t.regex(output!, /plan mode on/);
 });
 
+test('DevelopmentModeIndicator renders with scheduler mode', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator developmentMode="scheduler" colors={mockColors} contextPercentUsed={null} />,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /scheduler mode on/);
+});
+
 test('DevelopmentModeIndicator renders without crashing', t => {
 	const {unmount} = render(
 		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={null} />,
@@ -69,7 +79,7 @@ test('DevelopmentModeIndicator renders without crashing', t => {
 // ============================================================================
 
 test('DevelopmentModeIndicator accepts all valid development modes', t => {
-	const modes = ['normal', 'auto-accept', 'plan'] as const;
+	const modes = ['normal', 'auto-accept', 'plan', 'scheduler'] as const;
 
 	for (const mode of modes) {
 		t.notThrows(() => {
@@ -167,6 +177,18 @@ test('DevelopmentModeIndicator plan mode uses correct label', t => {
 	t.regex(output!, /plan mode on/);
 	t.notRegex(output!, /normal mode on/);
 	t.notRegex(output!, /auto-accept mode on/);
+});
+
+test('DevelopmentModeIndicator scheduler mode uses correct label', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator developmentMode="scheduler" colors={mockColors} contextPercentUsed={null} />,
+	);
+
+	const output = lastFrame();
+	t.regex(output!, /scheduler mode on/);
+	t.notRegex(output!, /normal mode on/);
+	t.notRegex(output!, /auto-accept mode on/);
+	t.notRegex(output!, /plan mode on/);
 });
 
 // ============================================================================

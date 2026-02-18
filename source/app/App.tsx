@@ -8,6 +8,7 @@ import {ModalSelectors} from '@/app/components/modal-selectors';
 import {shouldRenderWelcome} from '@/app/helpers';
 import type {AppProps} from '@/app/types';
 import {FileExplorer} from '@/components/file-explorer';
+import {SchedulerView} from '@/components/scheduler-view';
 import SecurityDisclaimer from '@/components/security-disclaimer';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {
@@ -26,6 +27,7 @@ import {useContextPercentage} from '@/hooks/useContextPercentage';
 import {useDirectoryTrust} from '@/hooks/useDirectoryTrust';
 import {useModeHandlers} from '@/hooks/useModeHandlers';
 import {useNonInteractiveMode} from '@/hooks/useNonInteractiveMode';
+import {useSchedulerMode} from '@/hooks/useSchedulerMode';
 import {ThemeContext} from '@/hooks/useTheme';
 import {TitleShapeContext, updateTitleShape} from '@/hooks/useTitleShape';
 import {useToolHandler} from '@/hooks/useToolHandler';
@@ -274,6 +276,7 @@ export default function App({
 		getMessageTokens: appState.getMessageTokens,
 		toolManager: appState.toolManager,
 		streamingTokenCount: chatHandler.tokenCount,
+		contextLimit: appState.contextLimit,
 		setContextPercentUsed: appState.setContextPercentUsed,
 		setContextLimit: appState.setContextLimit,
 	});
@@ -385,6 +388,16 @@ export default function App({
 		reinitializeMCPServers: appInitialization.reinitializeMCPServers,
 	});
 
+	// Scheduler mode enter handler
+	const enterSchedulerMode = React.useCallback(() => {
+		appState.setIsSchedulerMode(true);
+	}, [appState.setIsSchedulerMode, appState]);
+
+	// Scheduler mode exit handler
+	const exitSchedulerMode = React.useCallback(() => {
+		appState.setIsSchedulerMode(false);
+	}, [appState.setIsSchedulerMode, appState]);
+
 	// Setup app handlers
 	const appHandlers = useAppHandlers({
 		messages: appState.messages,
@@ -419,6 +432,7 @@ export default function App({
 		enterSettingsMode: modeHandlers.enterSettingsMode,
 		enterMcpWizardMode: modeHandlers.enterMcpWizardMode,
 		enterExplorerMode: modeHandlers.enterExplorerMode,
+		enterSchedulerMode,
 		handleChatMessage: chatHandler.handleChatMessage,
 	});
 
@@ -441,6 +455,20 @@ export default function App({
 		},
 		setDevelopmentMode: appState.setDevelopmentMode,
 		handleMessageSubmit: appHandlers.handleMessageSubmit,
+	});
+
+	// Setup scheduler mode
+	const schedulerMode = useSchedulerMode({
+		isSchedulerMode: appState.isSchedulerMode,
+		mcpInitialized: appState.mcpInitialized,
+		setDevelopmentMode: appState.setDevelopmentMode,
+		handleMessageSubmit: appHandlers.handleMessageSubmit,
+		clearMessages: appHandlers.clearMessages,
+		isConversationComplete: appState.isConversationComplete,
+		isToolExecuting: appState.isToolExecuting,
+		isToolConfirmationMode: appState.isToolConfirmationMode,
+		messages: appState.messages,
+		addToChatQueue: appState.addToChatQueue,
 	});
 
 	const shouldShowWelcome = shouldRenderWelcome(nonInteractiveMode);
@@ -627,8 +655,22 @@ export default function App({
 							</Box>
 						)}
 
-						{/* Chat Input - only rendered when not in modal mode */}
+						{/* Scheduler View - replaces ChatInput in scheduler mode */}
+						{appState.isSchedulerMode && (
+							<SchedulerView
+								activeJobCount={schedulerMode.activeJobCount}
+								queueLength={schedulerMode.queueLength}
+								isProcessing={schedulerMode.isProcessing}
+								currentJobCommand={schedulerMode.currentJobCommand}
+								developmentMode={appState.developmentMode}
+								contextPercentUsed={appState.contextPercentUsed}
+								onExit={exitSchedulerMode}
+							/>
+						)}
+
+						{/* Chat Input - only rendered when not in modal mode or scheduler mode */}
 						{appState.startChat &&
+							!appState.isSchedulerMode &&
 							!(
 								appState.isModelSelectionMode ||
 								appState.isProviderSelectionMode ||
