@@ -8,6 +8,7 @@ import {WebSocket, WebSocketServer} from 'ws';
 import {BoundedMap} from '@/utils/bounded-map';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
+import {getShutdownManager} from '@/utils/shutdown';
 import {
 	AssistantMessage,
 	ClientMessage,
@@ -452,6 +453,16 @@ export async function getVSCodeServer(port?: number): Promise<VSCodeServer> {
 	// This is important for synchronous functions like sendFileChangeToVSCode
 	serverInstance = new VSCodeServer(port);
 	serverInitPromise = Promise.resolve(serverInstance);
+
+	getShutdownManager().register({
+		name: 'vscode-server',
+		priority: 10,
+		handler: async () => {
+			if (serverInstance) {
+				await serverInstance.stop();
+			}
+		},
+	});
 
 	return serverInitPromise;
 }
