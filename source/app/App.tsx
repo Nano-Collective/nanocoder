@@ -44,6 +44,7 @@ import {
 	type PendingQuestion,
 	setGlobalQuestionHandler,
 } from '@/utils/question-queue';
+import {getShutdownManager} from '@/utils/shutdown';
 
 export default function App({
 	vscodeMode = false,
@@ -97,9 +98,7 @@ export default function App({
 
 	const handleExit = () => {
 		exit();
-		// Force exit - at security disclaimer stage, no services need cleanup
-		// TODO: Replace with ShutdownManager.gracefulShutdown() once #239 is implemented
-		process.exit(0);
+		void getShutdownManager().gracefulShutdown(0);
 	};
 
 	// VS Code server integration

@@ -1,7 +1,7 @@
 import {Box, Text, useInput} from 'ink';
 import SelectInput from 'ink-select-input';
-import TextInput from 'ink-text-input';
 import {useRef, useState} from 'react';
+import TextInput from '@/components/text-input';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {PendingQuestion} from '@/utils/question-queue';
