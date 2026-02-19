@@ -1,7 +1,7 @@
 import {readdir, readFile} from 'node:fs/promises';
-import {homedir} from 'node:os';
 import {join} from 'node:path';
 import {existsSync} from 'fs';
+import {getConfigPath} from '@/config/paths';
 import type {SkillMetadata, SkillSource} from '@/types/skill';
 import {getLogger} from '@/utils/logging';
 import {parseSkillFrontmatter} from './skill-frontmatter';
@@ -26,7 +26,7 @@ export class SkillDiscovery {
 	private initializeDefaultSources(): void {
 		this.addSource({
 			type: 'personal',
-			location: join(homedir(), '.nanocoder', 'skills'),
+			location: join(getConfigPath(), 'skills'),
 			priority: 1,
 			enabled: true,
 		});

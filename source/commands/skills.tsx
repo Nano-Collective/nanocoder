@@ -24,7 +24,7 @@ async function listAvailableSkills(
 		return React.createElement(InfoMessage, {
 			key: `skills-${Date.now()}`,
 			message:
-				'No Skills available. Add skills in ~/.nanocoder/skills or .nanocoder/skills in your project.',
+				'No Skills available. Add skills in your config directory under skills/ (e.g. ~/.config/nanocoder/skills) or .nanocoder/skills in your project.',
 			hideBox: true,
 		});
 	}
