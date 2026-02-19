@@ -80,6 +80,7 @@ interface UseAppHandlersProps {
 	enterSettingsMode: () => void;
 	enterMcpWizardMode: () => void;
 	enterExplorerMode: () => void;
+	enterSchedulerMode: () => void;
 
 	// Chat handler
 	handleChatMessage: (message: string) => Promise<void>;
@@ -132,6 +133,9 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	// Toggle development mode handler
 	const handleToggleDevelopmentMode = React.useCallback(() => {
 		props.setDevelopmentMode(currentMode => {
+			// Don't allow toggling out of scheduler mode via Shift+Tab
+			if (currentMode === 'scheduler') return currentMode;
+
 			const modes: Array<'normal' | 'auto-accept' | 'plan'> = [
 				'normal',
 				'auto-accept',
@@ -353,6 +357,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				onEnterSettingsMode: props.enterSettingsMode,
 				onEnterMcpWizardMode: props.enterMcpWizardMode,
 				onEnterExplorerMode: props.enterExplorerMode,
+				onEnterSchedulerMode: props.enterSchedulerMode,
 				onEnterCheckpointLoadMode: enterCheckpointLoadMode,
 				onShowStatus: handleShowStatus,
 				onHandleChatMessage: props.handleChatMessage,

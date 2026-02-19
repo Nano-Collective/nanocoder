@@ -29,7 +29,7 @@ function getContextColor(
 
 /**
  * Development mode indicator component
- * Shows the current development mode (normal/auto-accept/plan) and instructions
+ * Shows the current development mode (normal/auto-accept/plan/scheduler) and instructions
  * Always visible to help users understand the current mode
  */
 export const DevelopmentModeIndicator = React.memo(
@@ -49,13 +49,16 @@ export const DevelopmentModeIndicator = React.memo(
 					color={
 						developmentMode === 'normal'
 							? colors.secondary
-							: developmentMode === 'auto-accept'
+							: developmentMode === 'auto-accept' ||
+									developmentMode === 'scheduler'
 								? colors.info
 								: colors.warning
 					}
 				>
 					<Text bold>{modeLabel}</Text>
-					{isNarrow && <Text dimColor> (Shift+Tab to cycle)</Text>}
+					{isNarrow && developmentMode !== 'scheduler' && (
+						<Text dimColor> (Shift+Tab to cycle)</Text>
+					)}
 				</Text>
 				{contextPercentUsed !== null && (
 					<>

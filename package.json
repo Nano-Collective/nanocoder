@@ -69,6 +69,7 @@
 		"cheerio": "^1.1.2",
 		"cli-highlight": "^2.1.11",
 		"cli-table3": "^0.6.5",
+		"croner": "^10.0.1",
 		"diff": "^8.0.2",
 		"dotenv": "^17.2.3",
 		"ignore": "^7.0.5",

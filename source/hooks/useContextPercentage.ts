@@ -16,6 +16,7 @@ interface UseContextPercentageProps {
 	getMessageTokens: (message: Message) => number;
 	toolManager: ToolManager | null;
 	streamingTokenCount: number;
+	contextLimit: number | null;
 	setContextPercentUsed: (value: number | null) => void;
 	setContextLimit: (value: number | null) => void;
 }
@@ -27,6 +28,7 @@ export function useContextPercentage({
 	getMessageTokens,
 	toolManager,
 	streamingTokenCount,
+	contextLimit,
 	setContextPercentUsed,
 	setContextLimit,
 }: UseContextPercentageProps): void {
@@ -61,7 +63,7 @@ export function useContextPercentage({
 		};
 	}, [currentModel, setContextLimit, setContextPercentUsed]);
 
-	// Effect 2: Recalculate percentage when messages or streaming tokens change
+	// Effect 2: Recalculate percentage when messages, streaming tokens, or context limit change
 	useEffect(() => {
 		const limit = contextLimitRef.current;
 		if (!limit) {
@@ -98,6 +100,8 @@ export function useContextPercentage({
 		const total = breakdown.total + toolDefTokens + streamingTokenCount;
 		const percent = Math.round((total / limit) * 100);
 		setContextPercentUsed(percent);
+		// contextLimit is included to re-trigger calculation after async limit resolution
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [
 		messages,
 		tokenizer,
