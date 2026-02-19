@@ -1,4 +1,5 @@
 import {MCPClient} from '@/mcp/mcp-client';
+import {SkillManager} from '@/skills/skill-manager';
 import {
 	nativeToolsRegistry as staticNativeToolsRegistry,
 	toolFormatters as staticToolFormatters,
@@ -34,6 +35,11 @@ export class ToolManager {
 	 */
 	private mcpClient: MCPClient | null = null;
 
+	/**
+	 * Skills manager for modular capabilities (progressive disclosure)
+	 */
+	private skillManager: SkillManager;
+
 	constructor() {
 		// Initialize with static tools using ToolRegistry factory method
 		this.registry = ToolRegistry.fromRegistries(
@@ -43,6 +49,7 @@ export class ToolManager {
 			staticToolValidators,
 			staticToolStreamingFormatters,
 		);
+		this.skillManager = new SkillManager(this);
 	}
 
 	/**
@@ -217,5 +224,12 @@ export class ToolManager {
 	 */
 	getMCPClient() {
 		return this.mcpClient;
+	}
+
+	/**
+	 * Get the Skills manager for modular capabilities
+	 */
+	getSkillManager(): SkillManager {
+		return this.skillManager;
 	}
 }
