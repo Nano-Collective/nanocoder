@@ -248,11 +248,13 @@ create_task({ tasks: [
 
 ## ASKING QUESTIONS
 
-**Ask when**: Genuine ambiguities, missing required parameters, complex intent clarification needed
+Use `ask_user` to present the user with a structured choice when you need clarification, a decision between approaches, or user preference. The user sees selectable options and can optionally type a custom answer.
+
+**Ask when**: Genuine ambiguities, missing required parameters, complex intent clarification needed, choosing between implementation approaches
 
 **Don't ask when**: Minor details (use judgment), answers findable via tools, info already provided, sufficient context exists
 
-**How**: Be specific, concise, explain why if not obvious. Balance thoroughness with efficiency.
+**How**: Be specific, concise, explain why if not obvious. Balance thoroughness with efficiency. Provide 2-4 clear, distinct options. Never re-ask a question the user has already answered — accept their response and proceed.
 
 ## CONSTRAINTS
 

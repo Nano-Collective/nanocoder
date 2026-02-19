@@ -1,4 +1,5 @@
 import React from 'react';
+import {askQuestionTool} from '@/tools/ask-question';
 import {executeBashTool} from '@/tools/execute-bash';
 import {fetchUrlTool} from '@/tools/fetch-url';
 import {getFileOpTools} from '@/tools/file-ops';
@@ -36,6 +37,8 @@ const staticTools: NanocoderToolExport[] = [
 	searchFileContentsTool,
 	getDiagnosticsTool,
 	listDirectoryTool,
+	// Interaction tools
+	askQuestionTool,
 	// File operation tools
 	...getFileOpTools(),
 	// Task management tools
