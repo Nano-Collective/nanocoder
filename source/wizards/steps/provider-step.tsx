@@ -1,8 +1,8 @@
 import {Box, Text, useInput} from 'ink';
 import SelectInput from 'ink-select-input';
 import Spinner from 'ink-spinner';
-import TextInput from 'ink-text-input';
 import {useEffect, useRef, useState} from 'react';
+import TextInput from '@/components/text-input';
 import {colors} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import type {ProviderConfig} from '../../types/config';

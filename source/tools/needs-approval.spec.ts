@@ -6,9 +6,9 @@ import {findFilesTool} from './find-files.js';
 import {getDiagnosticsTool} from './lsp-get-diagnostics.js';
 import {readFileTool} from './read-file.js';
 import {searchFileContentsTool} from './search-file-contents.js';
-import {stringReplaceTool} from './string-replace.js';
+import {stringReplaceTool} from './file-ops/string-replace.js';
 import {webSearchTool} from './web-search.js';
-import {writeFileTool} from './write-file.js';
+import {writeFileTool} from './file-ops/write-file.js';
 
 // ============================================================================
 // Tests for needsApproval Logic (AI SDK v6)

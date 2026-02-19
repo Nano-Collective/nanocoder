@@ -11,8 +11,11 @@ function createDefaultProps(
 		isCancelling: false,
 		isToolExecuting: false,
 		isToolConfirmationMode: false,
+		isQuestionMode: false,
 		pendingToolCalls: [],
 		currentToolIndex: 0,
+		pendingQuestion: null,
+		onQuestionAnswer: () => {},
 		mcpInitialized: true,
 		client: {},
 		nonInteractivePrompt: undefined,
@@ -20,6 +23,7 @@ function createDefaultProps(
 		customCommands: [],
 		inputDisabled: false,
 		developmentMode: 'normal',
+		contextPercentUsed: null,
 		onToolConfirm: async () => {},
 		onToolCancel: () => {},
 		onSubmit: async () => {},
@@ -125,5 +129,37 @@ test('ChatInput shows cancelling indicator when cancelling', t => {
 	const {lastFrame, unmount} = renderWithTheme(<ChatInput {...props} />);
 	const output = lastFrame();
 	t.truthy(output);
+	unmount();
+});
+
+test('ChatInput shows question prompt when in question mode', t => {
+	const props = createDefaultProps({
+		isQuestionMode: true,
+		pendingQuestion: {
+			question: 'Which database?',
+			options: ['PostgreSQL', 'SQLite'],
+			allowFreeform: true,
+		},
+	});
+
+	const {lastFrame, unmount} = renderWithTheme(<ChatInput {...props} />);
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Which database/);
+	t.regex(output!, /PostgreSQL/);
+	t.regex(output!, /SQLite/);
+	unmount();
+});
+
+test('ChatInput does not show question prompt when not in question mode', t => {
+	const props = createDefaultProps({
+		isQuestionMode: false,
+		pendingQuestion: null,
+	});
+
+	const {lastFrame, unmount} = renderWithTheme(<ChatInput {...props} />);
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /Which database/);
 	unmount();
 });
