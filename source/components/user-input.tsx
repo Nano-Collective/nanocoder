@@ -1,9 +1,9 @@
 import {Box, Text, useFocus, useInput} from 'ink';
 import Spinner from 'ink-spinner';
-import TextInput from 'ink-text-input';
 import {useCallback, useEffect, useMemo, useState} from 'react';
 import {commandRegistry} from '@/commands';
 import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
+import TextInput from '@/components/text-input';
 import {useInputState} from '@/hooks/useInputState';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -292,7 +292,7 @@ export default function UserInput({
 					// At first history item, go to blank
 					setHistoryIndex(-2);
 					setOriginalInput('');
-					updateInput('');
+					setInputState({displayValue: '', placeholderContent: {}});
 					setTextInputKey(prev => prev + 1);
 				} else if (historyIndex === -2) {
 					// At blank, cycle back to last history item
@@ -306,7 +306,7 @@ export default function UserInput({
 					setOriginalInput(input);
 					setHistoryIndex(-2);
 					setOriginalInput('');
-					updateInput('');
+					setInputState({displayValue: '', placeholderContent: {}});
 					setTextInputKey(prev => prev + 1);
 				} else if (historyIndex === -2) {
 					// At blank, cycle to first history item
@@ -323,19 +323,12 @@ export default function UserInput({
 					// At last history item, cycle back to blank
 					setHistoryIndex(-2);
 					setOriginalInput('');
-					updateInput('');
+					setInputState({displayValue: '', placeholderContent: {}});
 					setTextInputKey(prev => prev + 1);
 				}
 			}
 		},
-		[
-			historyIndex,
-			input,
-			setHistoryIndex,
-			setOriginalInput,
-			setInputState,
-			updateInput,
-		],
+		[historyIndex, input, setHistoryIndex, setOriginalInput, setInputState],
 	);
 
 	useInput((inputChar, key) => {

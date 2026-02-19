@@ -38,6 +38,10 @@ import {
 } from '@/utils/logging';
 import {createPinoLogger} from '@/utils/logging/pino-logger';
 import {setGlobalMessageQueue} from '@/utils/message-queue';
+import {
+	type PendingQuestion,
+	setGlobalQuestionHandler,
+} from '@/utils/question-queue';
 import {getShutdownManager} from '@/utils/shutdown';
 
 export default function App({
@@ -192,6 +196,35 @@ export default function App({
 			chatQueueFunction: 'addToChatQueue',
 		});
 	}, [appState.addToChatQueue, logger]);
+
+	// Question handler - ref holds the resolver for the pending question promise
+	const questionResolverRef = React.useRef<((answer: string) => void) | null>(
+		null,
+	);
+
+	// Initialize global question handler
+	React.useEffect(() => {
+		setGlobalQuestionHandler((question: PendingQuestion) => {
+			return new Promise<string>(resolve => {
+				questionResolverRef.current = resolve;
+				appState.setPendingQuestion(question);
+				appState.setIsQuestionMode(true);
+			});
+		});
+	}, [appState.setPendingQuestion, appState.setIsQuestionMode, appState]);
+
+	// Handle user answering a question
+	const handleQuestionAnswer = React.useCallback(
+		(answer: string) => {
+			if (questionResolverRef.current) {
+				questionResolverRef.current(answer);
+				questionResolverRef.current = null;
+			}
+			appState.setIsQuestionMode(false);
+			appState.setPendingQuestion(null);
+		},
+		[appState.setIsQuestionMode, appState.setPendingQuestion, appState],
+	);
 
 	// Log important application state changes
 	React.useEffect(() => {
@@ -642,8 +675,11 @@ export default function App({
 									isCancelling={appState.isCancelling}
 									isToolExecuting={appState.isToolExecuting}
 									isToolConfirmationMode={appState.isToolConfirmationMode}
+									isQuestionMode={appState.isQuestionMode}
 									pendingToolCalls={appState.pendingToolCalls}
 									currentToolIndex={appState.currentToolIndex}
+									pendingQuestion={appState.pendingQuestion}
+									onQuestionAnswer={handleQuestionAnswer}
 									mcpInitialized={appState.mcpInitialized}
 									client={appState.client}
 									nonInteractivePrompt={nonInteractivePrompt}

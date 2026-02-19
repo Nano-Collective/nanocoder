@@ -5,9 +5,9 @@ import test from 'ava';
 import stripAnsi from 'strip-ansi';
 import {render} from 'ink-testing-library';
 import React from 'react';
-import {themes} from '../config/themes.js';
-import {setCurrentMode} from '../context/mode-context.js';
-import {ThemeContext} from '../hooks/useTheme.js';
+import {themes} from '../../config/themes.js';
+import {setCurrentMode} from '../../context/mode-context.js';
+import {ThemeContext} from '../../hooks/useTheme.js';
 import {writeFileTool} from './write-file.js';
 
 // ============================================================================
