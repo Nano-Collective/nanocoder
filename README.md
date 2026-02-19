@@ -606,6 +606,7 @@ You can override this directory using `NANOCODER_DATA_DIR`.
 - `/update` - Update Nanocoder to the latest version
 - `/usage` – Get current model context usage visually
 - `/lsp` – List connected LSP servers
+- `/schedule` – Schedule recurring AI tasks (see [Scheduled Tasks](#scheduled-tasks) section)
 - `/explorer` - Interactive file browser to navigate, preview, and select files for context
 - `!command` - Execute bash commands directly without leaving Nanocoder (output becomes context for the LLM)
 - `@file` - Include file contents in messages automatically via fuzzy search as you type
@@ -708,6 +709,34 @@ The LLM has access to task management tools (`create_task`, `list_tasks`, `updat
 - Tasks are automatically cleared when Nanocoder starts (to keep the task list fresh)
 - Tasks are also cleared when using the `/clear` command
 - Consider adding `.nanocoder/tasks.json` to your `.gitignore` if you want to exclude it from version control
+
+#### Scheduled Tasks
+
+Nanocoder supports scheduling recurring AI tasks using cron expressions. This is useful for automating routine coding tasks like dependency updates, code reviews, or daily standup summaries.
+
+**Quick Start:**
+
+```bash
+# Create a new scheduled task file
+/schedule create deps-update
+
+# Add a schedule for it (every Monday at 9am)
+/schedule add "0 9 * * MON" deps-update
+
+# Start the scheduler
+/schedule start
+```
+
+**Commands:**
+
+- `/schedule create <name>` - Create a new scheduled task file
+- `/schedule add "<cron>" <name>` - Add a schedule for a task (`.md` extension inferred)
+- `/schedule list` - Show all configured schedules
+- `/schedule remove <id>` - Remove a schedule by ID
+- `/schedule logs [id]` - Show execution logs
+- `/schedule start` - Enter scheduler mode to run scheduled tasks
+
+> **Full documentation**: See the [Scheduled Tasks Guide](docs/scheduler.md) for detailed usage, examples, and tips.
 
 #### File Explorer
 
