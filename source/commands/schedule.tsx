@@ -38,7 +38,7 @@ function ScheduleListDisplay({schedules}: {schedules: Schedule[]}) {
 			<Box marginY={1}>
 				<Text color={colors.secondary}>
 					No schedules configured. Use /schedule create name && /schedule add
-					"cron" name.md
+					"cron" name
 				</Text>
 			</Box>
 		);
@@ -102,19 +102,24 @@ export const scheduleCommand: Command = {
 		// Add a new schedule
 		if (subcommand === 'add') {
 			const rest = args.slice(1).join(' ');
-			// Parse: "cron expression" command.md
+			// Parse: "cron expression" command.md (or just command)
 			const cronMatch = rest.match(/^"([^"]+)"\s+(.+)$/);
 			if (!cronMatch) {
 				return React.createElement(ScheduleMessage, {
 					key: `schedule-error-${Date.now()}`,
 					message:
-						'Usage: /schedule add "cron expression" command.md\nExample: /schedule add "0 9 * * MON" deps-update.md',
+						'Usage: /schedule add "cron expression" command\nExample: /schedule add "0 9 * * MON" deps-update',
 					isError: true,
 				});
 			}
 
 			const cronExpr = cronMatch[1] ?? '';
-			const commandFile = cronMatch[2]?.trim() ?? '';
+			let commandFile = cronMatch[2]?.trim() ?? '';
+
+			// Infer .md extension if not provided
+			if (!commandFile.endsWith('.md')) {
+				commandFile = `${commandFile}.md`;
+			}
 
 			// Validate cron
 			const cronError = validateCron(cronExpr);
