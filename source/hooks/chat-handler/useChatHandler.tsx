@@ -2,6 +2,7 @@ import React from 'react';
 import {ConversationStateManager} from '@/app/utils/conversation-state';
 import UserMessage from '@/components/user-message';
 import {promptHistory} from '@/prompt-history';
+import {SkillIntegration} from '@/skills/skill-integration';
 import type {Message} from '@/types/core';
 import {MessageBuilder} from '@/utils/message-builder';
 import {assemblePrompt, processPromptTemplate} from '@/utils/prompt-processor';
@@ -171,7 +172,17 @@ export function useChatHandler({
 
 		try {
 			// Load and process system prompt
-			const systemPrompt = processPromptTemplate();
+			let systemPrompt = processPromptTemplate();
+
+			// Enhance with relevant Skills (progressive disclosure)
+			const skillManager = toolManager.getSkillManager();
+			if (skillManager) {
+				const integration = new SkillIntegration(skillManager, toolManager);
+				systemPrompt = await integration.enhanceSystemPrompt(
+					systemPrompt,
+					message,
+				);
+			}
 
 			// Create stream request
 			const systemMessage: Message = {
