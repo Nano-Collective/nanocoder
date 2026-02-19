@@ -2,7 +2,7 @@ import React from 'react';
 import {ConversationStateManager} from '@/app/utils/conversation-state';
 import UserMessage from '@/components/user-message';
 import {promptHistory} from '@/prompt-history';
-import {SkillIntegration} from '@/skills/skill-integration';
+import {SkillIntegration} from '@/skills';
 import type {Message} from '@/types/core';
 import {MessageBuilder} from '@/utils/message-builder';
 import {assemblePrompt, processPromptTemplate} from '@/utils/prompt-processor';

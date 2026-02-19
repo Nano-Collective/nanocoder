@@ -1,11 +1,18 @@
 import test from 'ava';
 import React from 'react';
-import {setToolManagerGetter} from '@/message-handler';
-import type {SkillManager} from '@/skills/skill-manager';
-import type {ToolManager} from '@/tools/tool-manager';
-import type {Message} from '@/types/core';
-import type {SkillMetadata} from '@/types/skill';
+import {setToolManagerGetter} from '../message-handler';
+import type {SkillManager} from '../skills/skill-manager';
+import type {ToolManager} from '../tools/tool-manager';
+import type {Message} from '../types/core';
+import type {SkillMetadata} from '../types/skill';
 import {skillsCommand} from './skills';
+
+/** Result of skills command handler (InfoMessage with message prop) */
+type SkillsCommandResult = React.ReactElement<{message?: string; hideBox?: boolean}>;
+
+function getMessage(result: unknown): string {
+	return (result as SkillsCommandResult).props?.message ?? '';
+}
 
 const mockMetadata: (overrides?: Partial<SkillMetadata>) => SkillMetadata = (
 	overrides = {},
@@ -89,10 +96,8 @@ test('skills command returns message when tool manager is null', async t => {
 	);
 	t.truthy(result);
 	t.true(React.isValidElement(result));
-	t.true(
-		(result as React.ReactElement).props?.message?.includes('not available') ||
-			(result as React.ReactElement).props?.message?.includes('not ready'),
-	);
+	const msg = getMessage(result);
+	t.true(msg.includes('not available') || msg.includes('not ready'));
 });
 
 // ============================================================================
@@ -109,9 +114,7 @@ test('skills command list returns no-skills message when none available', async 
 	);
 	t.truthy(result);
 	t.true(React.isValidElement(result));
-	t.true(
-		(result as React.ReactElement).props?.message?.includes('No Skills available'),
-	);
+	t.true(getMessage(result).includes('No Skills available'));
 });
 
 // ============================================================================
@@ -134,7 +137,7 @@ test('skills command list returns skills grouped by category', async t => {
 	);
 	t.truthy(result);
 	t.true(React.isValidElement(result));
-	const message = (result as React.ReactElement).props?.message ?? '';
+	const message = getMessage(result);
 	t.true(message.includes('Skill A'));
 	t.true(message.includes('Skill B'));
 	t.true(message.includes('Skill C'));
@@ -155,10 +158,8 @@ test('skills command show without id returns usage', async t => {
 	);
 	t.truthy(result);
 	t.true(React.isValidElement(result));
-	t.true(
-		(result as React.ReactElement).props?.message?.includes('Usage:') ||
-			(result as React.ReactElement).props?.message?.includes('skill-id'),
-	);
+	const msg = getMessage(result);
+	t.true(msg.includes('Usage:') || msg.includes('skill-id'));
 });
 
 // ============================================================================
@@ -175,9 +176,7 @@ test('skills command show with unknown id returns not found', async t => {
 	);
 	t.truthy(result);
 	t.true(React.isValidElement(result));
-	t.true(
-		(result as React.ReactElement).props?.message?.includes('not found'),
-	);
+	t.true(getMessage(result).includes('not found'));
 });
 
 // ============================================================================
@@ -210,7 +209,7 @@ test('skills command show with valid id returns skill details', async t => {
 	);
 	t.truthy(result);
 	t.true(React.isValidElement(result));
-	const message = (result as React.ReactElement).props?.message ?? '';
+	const message = getMessage(result);
 	t.true(message.includes('My Skill'));
 	t.true(message.includes('Generates docs'));
 	t.true(message.includes('read_file'));
@@ -236,9 +235,7 @@ test('skills command refresh returns success message', async t => {
 	t.true(initialized);
 	t.truthy(result);
 	t.true(React.isValidElement(result));
-	t.true(
-		(result as React.ReactElement).props?.message?.toLowerCase().includes('refresh'),
-	);
+	t.true(getMessage(result).toLowerCase().includes('refresh'));
 });
 
 // ============================================================================
@@ -255,5 +252,5 @@ test('skills command unknown subcommand returns usage', async t => {
 	);
 	t.truthy(result);
 	t.true(React.isValidElement(result));
-	t.true((result as React.ReactElement).props?.message?.includes('Usage:'));
+	t.true(getMessage(result).includes('Usage:'));
 });

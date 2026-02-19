@@ -1,5 +1,5 @@
 import {MCPClient} from '@/mcp/mcp-client';
-import {SkillManager} from '@/skills/skill-manager';
+import {SkillManager} from '@/skills';
 import {
 	nativeToolsRegistry as staticNativeToolsRegistry,
 	toolFormatters as staticToolFormatters,

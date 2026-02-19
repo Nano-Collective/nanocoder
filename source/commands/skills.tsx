@@ -6,7 +6,7 @@
 import React from 'react';
 import {InfoMessage} from '@/components/message-box';
 import {getToolManager} from '@/message-handler';
-import type {SkillManager} from '@/skills/skill-manager';
+import type {SkillManager} from '@/skills';
 import type {Command} from '@/types/commands';
 import type {Message} from '@/types/core';
 import type {SkillMetadata} from '@/types/skill';
