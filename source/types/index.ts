@@ -8,6 +8,7 @@ export * from '@/types/config';
 export * from '@/types/core';
 export * from '@/types/hooks';
 export * from '@/types/mcp';
+export * from '@/types/skill';
 export * from '@/types/system';
 export * from '@/types/ui';
 export * from '@/types/utils';
