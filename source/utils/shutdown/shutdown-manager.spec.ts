@@ -227,3 +227,36 @@ test.serial('gracefulShutdown passes exit code', async (t) => {
 	await manager.gracefulShutdown(42);
 	t.is(exitCalled, 42);
 });
+
+test.serial('uses NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT env var', (t) => {
+	const originalEnv = process.env.NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT;
+
+	process.env.NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT = '10000';
+	const manager = getShutdownManager();
+	t.is(manager['timeoutMs'], 10000);
+
+	process.env.NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT = originalEnv ?? '';
+	resetShutdownManager();
+});
+
+test.serial('programmatic timeoutMs takes priority over env var', (t) => {
+	const originalEnv = process.env.NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT;
+
+	process.env.NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT = '5000';
+	const manager = new ShutdownManager({timeoutMs: 15000});
+	t.is(manager['timeoutMs'], 15000);
+
+	process.env.NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT = originalEnv ?? '';
+});
+
+test.serial('invalid env var falls back to default', (t) => {
+	const originalEnv = process.env.NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT;
+
+	process.env.NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT = 'invalid';
+	const manager = getShutdownManager();
+	// parseInt('invalid') returns NaN, which should fall back to default
+	t.is(manager['timeoutMs'], 5000);
+
+	process.env.NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT = originalEnv ?? '';
+	resetShutdownManager();
+});

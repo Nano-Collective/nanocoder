@@ -2,6 +2,7 @@ import {loggerProvider} from '@/utils/logging/logger-provider';
 import type {ShutdownHandler, ShutdownManagerOptions} from './types';
 
 const DEFAULT_TIMEOUT_MS = 5000;
+const ENV_SHUTDOWN_TIMEOUT = 'NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT';
 
 export class ShutdownManager {
 	private handlers: Map<string, ShutdownHandler> = new Map();
@@ -17,7 +18,13 @@ export class ShutdownManager {
 	) => void;
 
 	constructor(options?: ShutdownManagerOptions) {
-		this.timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+		const envTimeout = process.env[ENV_SHUTDOWN_TIMEOUT];
+		const parsedEnvTimeout = envTimeout ? parseInt(envTimeout, 10) : undefined;
+		const isValidTimeout = Number.isFinite(parsedEnvTimeout);
+		this.timeoutMs =
+			options?.timeoutMs ??
+			(isValidTimeout ? parsedEnvTimeout : undefined) ??
+			DEFAULT_TIMEOUT_MS;
 
 		this.boundSigterm = () => {
 			void this.gracefulShutdown(0);
