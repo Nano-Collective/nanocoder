@@ -64,7 +64,7 @@
 		"@anthropic-ai/tokenizer": "^0.0.4",
 		"@modelcontextprotocol/sdk": "^1.26.0",
 		"@nanocollective/get-md": "^1.0.2",
-		"ai": "6.0.62",
+		"ai": "6.0.95",
 		"chalk": "^5.2.0",
 		"cheerio": "^1.1.2",
 		"cli-highlight": "^2.1.11",
