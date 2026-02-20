@@ -20,7 +20,6 @@ import {
 	toStringSafe,
 	toRequiredString,
 	toJSONString,
-	clone,
 	getTypeName,
 } from './type-helpers.js';
 
@@ -320,37 +319,4 @@ test('getTypeName returns correct type names', t => {
 	t.is(getTypeName(true), 'boolean');
 	t.is(getTypeName([1, 2, 3]), 'array');
 	t.is(getTypeName({key: 'value'}), 'object');
-});
-
-test('clone preserves types', t => {
-	const original = {name: 'test', value: 42, items: [1, 2, 3]};
-	const cloned = clone(original);
-	t.is(cloned.name, original.name);
-	t.is(cloned.value, original.value);
-	t.deepEqual(cloned.items, original.items);
-});
-
-test('clone handles null and undefined', t => {
-	t.is(clone(null), null);
-	t.is(clone(undefined), undefined);
-});
-
-test('clone handles primitive types', t => {
-	t.is(clone('hello'), 'hello');
-	t.is(clone(42), 42);
-	t.is(clone(true), true);
-});
-
-test('clone handles arrays', t => {
-	const original = [1, 2, 3];
-	const cloned = clone(original);
-	t.deepEqual(cloned, original);
-	t.not(cloned, original); // Should be a new array
-});
-
-test('clone handles objects', t => {
-	const original = {a: 1, b: 2};
-	const cloned = clone(original);
-	t.deepEqual(cloned, original);
-	t.not(cloned, original); // Should be a new object
 });

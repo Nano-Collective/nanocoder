@@ -71,9 +71,6 @@ export interface ResponseMetadata {
 	/** Whether response contained JSON tool call structures */
 	hasJSONBlocks: boolean;
 
-	/** Whether this is a streaming chunk */
-	isStreaming: boolean;
-
 	/** Confidence level in the response type classification */
 	confidence: 'high' | 'medium' | 'low';
 
@@ -112,7 +109,6 @@ export async function normalizeLLMResponse(
 	const {
 		preserveRawTypes = false, // If true, keeps object structure instead of JSON.stringify
 		allowMixedContent = true, // If true, extracts tool calls from mixed content
-		detectStreaming = false, // If true, treats as streaming chunk
 	} = options;
 
 	// Step 1: Detect response type and convert to string for parsing
@@ -134,15 +130,18 @@ export async function normalizeLLMResponse(
 		content,
 	);
 
-	const metadata = buildMetadata(content, {
-		hasCodeBlocks,
-		hasXMLTags: /<[^>]+>/.test(content),
-		hasJSONBlocks,
-		isStreaming: detectStreaming,
-		detectedFormat,
-		malformedError,
-		isMalformed,
-	});
+	const metadata = buildMetadata(
+		content,
+		{
+			hasCodeBlocks,
+			hasXMLTags: /<[^>]+>/.test(content),
+			hasJSONBlocks,
+			detectedFormat,
+			malformedError,
+			isMalformed,
+		},
+		toolCalls.length > 0,
+	);
 
 	return {
 		raw: preserveRawTypes ? response : undefined, // Only preserve if requested
@@ -320,11 +319,9 @@ async function extractToolCalls(
 /**
  * Detects if content contains malformed patterns
  *
- * Malformed patterns include:
- * - Incomplete JSON (missing fields)
- * - Invalid XML syntax
- * - Completely invalid JSON (unquoted strings, missing colons, etc.)
- * - Non-standard tool call formats
+ * Logic:
+ * 1. If it parses as valid JSON via try/catch, it is NOT malformed.
+ * 2. If parsing fails, check for known "broken tool call" signatures.
  *
  * @param content - Content to check
  * @returns True if malformed patterns detected
@@ -332,21 +329,26 @@ async function extractToolCalls(
 function hasMalformedPatterns(content: string): boolean {
 	const trimmed = content.trim();
 
-	// Check for empty JSON object (not a valid tool call)
-	if (trimmed === '{}' || trimmed === '{\n}' || trimmed === '{\t}') {
-		return true;
+	// 1. Sanity Check: Empty content is not "malformed", just empty.
+	if (!trimmed) {
+		return false;
 	}
 
-	// Check for completely invalid JSON (e.g., "{invalid json}")
-	// This pattern looks for JSON that has { and } but contains unquoted strings
-	// or other syntax errors
-	const invalidJSONRegex = /^\s*\{[^}]*\w+[^}]*\}\s*$/s;
-	if (invalidJSONRegex.test(trimmed)) {
-		return true;
+	// 2. THE SAFETY CHECK: Trust the Runtime (JSON.parse)
+	// We check if it starts and ends with braces to identify it as a candidate for an Object.
+	if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+		try {
+			// CRASH PROTECTION: If this succeeds, the JSON is valid.
+			// Therefore, it cannot be "malformed".
+			JSON.parse(trimmed);
+			return false;
+		} catch (_e) {
+			// It crashed. It might be malformed.
+			// Fall through to regex checks below.
+		}
 	}
 
-	// Check for malformed JSON patterns
-	// These patterns should only match truly malformed JSON, not valid tool calls
+	// 3. Check for specific broken tool call patterns.
 	const malformedJSONPatterns = [
 		/^\s*\{\s*"name"\s*:\s*"[^"]+"\s*\}\s*$/, // name only, no arguments
 		/^\s*\{\s*"arguments"\s*:\s*\}\s*$/, // arguments only, no name
@@ -361,7 +363,7 @@ function hasMalformedPatterns(content: string): boolean {
 		}
 	}
 
-	// Check for malformed XML patterns
+	// 4. Check for malformed XML patterns
 	const malformedXMLPatterns = [
 		/\[(?:tool_use|Tool):\s*(\w+)\]/i, // [tool_use: name] syntax
 		/<function=(\w+)>/, // <function=name> syntax
@@ -382,11 +384,13 @@ function hasMalformedPatterns(content: string): boolean {
  *
  * @param content - Normalized content
  * @param partialMetadata - Partial metadata from earlier detection
+ * @param hasToolCalls - Whether tool calls were actually extracted
  * @returns Complete metadata object
  */
 function buildMetadata(
 	content: string,
 	partialMetadata: Partial<ResponseMetadata>,
+	hasToolCalls: boolean,
 ): ResponseMetadata {
 	// Check if content looks like JSON (has { and })
 	// Check if content looks like XML (has < and >)
@@ -403,13 +407,15 @@ function buildMetadata(
 		hasCodeBlocks: partialMetadata.hasCodeBlocks ?? hasCodeBlocks,
 		hasXMLTags: partialMetadata.hasXMLTags ?? hasXMLTags,
 		hasJSONBlocks: partialMetadata.hasJSONBlocks ?? hasJSONBlocks,
-		isStreaming: partialMetadata.isStreaming ?? false,
-		confidence: determineConfidence({
-			...partialMetadata,
-			hasCodeBlocks,
-			hasXMLTags,
-			hasJSONBlocks,
-		}),
+		confidence: determineConfidence(
+			{
+				...partialMetadata,
+				hasCodeBlocks,
+				hasXMLTags,
+				hasJSONBlocks,
+			},
+			hasToolCalls,
+		),
 		detectedFormat: partialMetadata.detectedFormat ?? 'unknown',
 		isMalformed: partialMetadata.isMalformed ?? hasMalformedPatterns(content),
 		malformedError: partialMetadata.malformedError,
@@ -425,37 +431,35 @@ function buildMetadata(
  * - LOW: No format detected (plain text with no tool calls)
  *
  * @param metadata - Metadata from response
+ * @param hasToolCalls - Whether tool calls were actually extracted
  * @returns Confidence level
  */
 function determineConfidence(
 	metadata: Partial<ResponseMetadata>,
+	hasToolCalls: boolean,
 ): 'high' | 'medium' | 'low' {
-	// High confidence if tool calls were successfully extracted
-	// Note: We need to track whether tool calls were actually found, not just that content exists
-	// This is determined by whether the response is malformed (no tool calls found and patterns detected)
-	if (!metadata.isMalformed) {
+	// High confidence if we actually extracted tool calls
+	if (hasToolCalls) {
 		return 'high';
 	}
 
-	// Medium confidence if format detected but no tool calls
+	// If it is explicitly malformed, confidence is LOW
+	if (metadata.isMalformed) {
+		return 'low';
+	}
+
+	// Medium confidence if it looks like code/data, but contained no valid tools
 	if (
 		metadata.detectedFormat === 'json' ||
 		metadata.detectedFormat === 'xml' ||
-		metadata.hasCodeBlocks
+		metadata.hasCodeBlocks ||
+		metadata.hasJSONBlocks ||
+		metadata.hasXMLTags
 	) {
 		return 'medium';
 	}
 
-	// Low confidence if plain text with no format indicators
-	if (
-		metadata.detectedFormat === 'plain' &&
-		!metadata.hasJSONBlocks &&
-		!metadata.hasXMLTags &&
-		!metadata.hasCodeBlocks
-	) {
-		return 'low';
-	}
-
+	// LOW: Plain text with no format indicators
 	return 'low';
 }
 
@@ -482,77 +486,6 @@ function hasEmbeddedToolCallPatterns(content: string): boolean {
 	}
 
 	return false;
-}
-
-// ============================================================================
-// STREAMING RESPONSE HANDLING
-// ============================================================================
-
-/**
- * Handles streaming chunks from LLM
- *
- * Streaming chunks can be:
- * - Partial strings (incomplete sentences)
- * - JSON objects (partial tool calls)
- * - Mixed content (text + partial tool calls)
- *
- * This function normalizes streaming chunks and accumulates tool calls
- *
- * @param previousResponse - Previous normalized response
- * @param newChunk - New chunk from streaming
- * @returns Updated normalized response
- */
-async function _normalizeStreamingResponse(
-	previousResponse: NormalizedResponse,
-	newChunk: string,
-): Promise<NormalizedResponse> {
-	// If previous response had tool calls, accumulate them
-	let accumulatedToolCalls = previousResponse.toolCalls;
-
-	// If previous response was malformed, try to recover with new chunk
-	let accumulatedContent = previousResponse.content;
-	if (previousResponse.metadata.isMalformed) {
-		accumulatedContent += newChunk;
-	} else {
-		accumulatedContent = previousResponse.content + newChunk;
-	}
-
-	// Normalize the combined content
-	const normalized = await normalizeLLMResponse(accumulatedContent, {
-		preserveRawTypes: false,
-		allowMixedContent: true,
-		detectStreaming: true,
-	});
-
-	return {
-		...normalized,
-		toolCalls: accumulatedToolCalls,
-	};
-}
-
-/**
- * Finalizes a streaming response
- *
- * Called when streaming is complete to ensure all tool calls are captured
- *
- * @param streamingResponse - Response accumulated during streaming
- * @returns Final normalized response
- */
-function _finalizeStreamingResponse(
-	streamingResponse: NormalizedResponse,
-): NormalizedResponse {
-	// If tool calls were accumulated, ensure they're in the final response
-	if (streamingResponse.toolCalls.length > 0) {
-		return {
-			...streamingResponse,
-			metadata: {
-				...streamingResponse.metadata,
-				confidence: 'high',
-			},
-		};
-	}
-
-	return streamingResponse;
 }
 
 // ============================================================================
@@ -613,36 +546,6 @@ export function isResponseComplete(response: NormalizedResponse): boolean {
 	);
 }
 
-/**
- * Gets a human-readable error message for malformed responses
- *
- * @param response - Normalized response with metadata
- * @returns Error message or empty string
- */
-function _getMalformedResponseMessage(response: NormalizedResponse): string {
-	if (!response.metadata.isMalformed) {
-		return '';
-	}
-
-	const messages: string[] = [];
-
-	if (response.metadata.hasJSONBlocks) {
-		messages.push('JSON tool calls detected but parsing failed');
-	}
-
-	if (response.metadata.hasXMLTags) {
-		messages.push('XML tool calls detected but parsing failed');
-	}
-
-	if (response.metadata.malformedError) {
-		messages.push(response.metadata.malformedError);
-	}
-
-	return messages.length > 0
-		? messages.join('; ')
-		: 'Response appears malformed';
-}
-
 // ============================================================================
 // TYPE DEFINITIONS
 // ============================================================================
@@ -653,9 +556,6 @@ export interface NormalizeOptions {
 
 	/** If true, extracts tool calls from mixed content (text + tool calls) */
 	allowMixedContent?: boolean;
-
-	/** If true, treats the response as a streaming chunk */
-	detectStreaming?: boolean;
 }
 
 interface ExtractOptions {

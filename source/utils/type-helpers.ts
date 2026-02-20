@@ -140,75 +140,13 @@ export function isUndefined(value: unknown): value is undefined {
 // ============================================================================
 
 /**
- * Converts unknown value to a required string
- *
- * This function is used for:
- * 1. PARSING OPERATIONS - where strings are required
- * 2. INTERNAL PROCESSING - where we need to ensure string type
- *
- * The original type is NOT preserved in memory - this is for processing-only.
- * Type preservation happens in the ToolCall structure itself.
- *
- * @param value - Value to convert (unknown type)
- * @returns String representation of the value
- *
- * @example
- * ```typescript
- * // LLM passes object
- * const response = {path: "/tmp/test.txt", content: "hello"};
- *
- * // Convert to string for parsing
- * const contentStr = toRequiredString(response);
- * // contentStr = '{"path": "/tmp/test.txt", "content": "hello"}'
- *
- * // Parse tool calls
- * const toolCalls = parseToolCalls(contentStr);
- * // ToolCall.arguments preserved as object in memory
- * ```
- */
-export function toRequiredString(value: unknown): string {
-	// Handle null/undefined
-	if (value === null || value === undefined) {
-		return '';
-	}
-
-	// Handle string - return as-is
-	if (isString(value)) {
-		return value;
-	}
-
-	// Handle number - convert to string
-	if (isNumber(value)) {
-		return String(value);
-	}
-
-	// Handle boolean - convert to string
-	if (isBoolean(value)) {
-		return String(value);
-	}
-
-	// Handle array - convert to JSON string
-	if (isArray(value)) {
-		return JSON.stringify(value);
-	}
-
-	// Handle object - convert to JSON string
-	if (isObject(value)) {
-		return JSON.stringify(value);
-	}
-
-	// Fallback for unknown types
-	return String(value);
-}
-
-/**
  * Ensures value is a string for display/storage operations
  *
  * This function is used for:
  * 1. DISPLAY OPERATIONS - where we need to display content
  * 2. STORAGE OPERATIONS - where we write to disk
  *
- * For display/storage, we convert to string. For parsing, use toRequiredString().
+ * For display/storage, we convert to string.
  *
  * @param value - Value to convert (unknown type)
  * @returns String representation of the value
@@ -391,159 +329,34 @@ export function toJSONString(
 }
 
 // ============================================================================
-// TYPE EXTRACTION FUNCTIONS
-// ============================================================================
-
-/**
- * Safely extracts a string value from unknown object
- *
- * @param obj - Object to extract from (unknown type)
- * @param key - Key to extract
- * @param defaultValue - Default value if key not found
- * @returns Extracted string or default value
- */
-export function getStringFromObject(
-	obj: unknown,
-	key: string,
-	defaultValue: string = '',
-): string {
-	if (!isObject(obj)) {
-		return defaultValue;
-	}
-
-	const value = obj[key];
-	if (isString(value)) {
-		return value;
-	}
-
-	return defaultValue;
-}
-
-/**
- * Safely extracts a number value from unknown object
- *
- * @param obj - Object to extract from (unknown type)
- * @param key - Key to extract
- * @param defaultValue - Default value if key not found
- * @returns Extracted number or default value
- */
-export function getNumberFromObject(
-	obj: unknown,
-	key: string,
-	defaultValue: number = 0,
-): number {
-	if (!isObject(obj)) {
-		return defaultValue;
-	}
-
-	const value = obj[key];
-	if (isNumber(value)) {
-		return value;
-	}
-
-	return defaultValue;
-}
-
-/**
- * Safely extracts a boolean value from unknown object
- *
- * @param obj - Object to extract from (unknown type)
- * @param key - Key to extract
- * @param defaultValue - Default value if key not found
- * @returns Extracted boolean or default value
- */
-export function getBooleanFromObject(
-	obj: unknown,
-	key: string,
-	defaultValue: boolean = false,
-): boolean {
-	if (!isObject(obj)) {
-		return defaultValue;
-	}
-
-	const value = obj[key];
-	if (isBoolean(value)) {
-		return value;
-	}
-
-	return defaultValue;
-}
-
-/**
- * Safely extracts an array value from unknown object
- *
- * @param obj - Object to extract from (unknown type)
- * @param key - Key to extract
- * @param defaultValue - Default value if key not found
- * @returns Extracted array or default value
- */
-export function getArrayFromObject(
-	obj: unknown,
-	key: string,
-	defaultValue: unknown[] = [],
-): unknown[] {
-	if (!isObject(obj)) {
-		return defaultValue;
-	}
-
-	const value = obj[key];
-	if (isArray(value)) {
-		return value;
-	}
-
-	return defaultValue;
-}
-
-/**
- * Safely extracts an object value from unknown object
- *
- * @param obj - Object to extract from (unknown type)
- * @param key - Key to extract
- * @param defaultValue - Default value if key not found
- * @returns Extracted object or default value
- */
-export function getObjectFromObject(
-	obj: unknown,
-	key: string,
-	defaultValue: Record<string, unknown> = {},
-): Record<string, unknown> {
-	if (!isObject(obj)) {
-		return defaultValue;
-	}
-
-	const value = obj[key];
-	if (isObject(value)) {
-		return value;
-	}
-
-	return defaultValue;
-}
-
-// ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
 
 /**
- * Checks if value is empty (null, undefined, empty string, empty array, empty object)
+ * Checks if value is empty
  *
  * @param value - Value to check
  * @returns True if value is empty, false otherwise
  */
 export function isEmpty(value: unknown): boolean {
+	// Check for null or undefined
 	if (value === null || value === undefined) {
 		return true;
 	}
 
-	if (isString(value)) {
-		return value.trim().length === 0;
+	// Check for empty string
+	if (isString(value) && value === '') {
+		return true;
 	}
 
-	if (isArray(value)) {
-		return value.length === 0;
+	// Check for empty array
+	if (isArray(value) && value.length === 0) {
+		return true;
 	}
 
-	if (isObject(value)) {
-		return Object.keys(value).length === 0;
+	// Check for empty object
+	if (isObject(value) && Object.keys(value).length === 0) {
+		return true;
 	}
 
 	return false;
@@ -557,78 +370,6 @@ export function isEmpty(value: unknown): boolean {
  */
 export function isNotEmpty(value: unknown): boolean {
 	return !isEmpty(value);
-}
-
-/**
- * Clones a value safely, preserving type
- *
- * @param value - Value to clone
- * @returns Cloned value
- */
-export function clone<T>(value: T): T {
-	if (value === null || value === undefined) {
-		return value;
-	}
-
-	if (isString(value)) {
-		return value as T;
-	}
-
-	if (isNumber(value)) {
-		return value as T;
-	}
-
-	if (isBoolean(value)) {
-		return value as T;
-	}
-
-	if (isArray(value)) {
-		return JSON.parse(JSON.stringify(value)) as T;
-	}
-
-	if (isObject(value)) {
-		return JSON.parse(JSON.stringify(value)) as T;
-	}
-
-	return value;
-}
-
-/**
- * Gets the type name of a value
- *
- * @param value - Value to check
- * @returns Type name string
- */
-export function getTypeName(value: unknown): string {
-	if (value === null) {
-		return 'null';
-	}
-
-	if (value === undefined) {
-		return 'undefined';
-	}
-
-	if (isString(value)) {
-		return 'string';
-	}
-
-	if (isNumber(value)) {
-		return 'number';
-	}
-
-	if (isBoolean(value)) {
-		return 'boolean';
-	}
-
-	if (isArray(value)) {
-		return 'array';
-	}
-
-	if (isObject(value)) {
-		return 'object';
-	}
-
-	return 'unknown';
 }
 
 // ============================================================================

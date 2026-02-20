@@ -1,5 +1,5 @@
 import type {ToolCall} from '@/types/index';
-import {toRequiredString} from '@/utils/type-helpers';
+import {ensureString} from '@/utils/type-helpers';
 
 /**
  * Internal JSON tool call parser
@@ -17,25 +17,30 @@ export function detectMalformedJSONToolCall(
 ): {error: string; examples: string} | null {
 	// Type guard: ensure content is string for processing operations
 	// BUT original type is preserved in memory via the ToolCall structure
-	const contentStr = toRequiredString(content);
+	const contentStr = ensureString(content);
 
 	// Check for incomplete JSON structures
+	// FIX: Anchor to line start (?:^|\n) to avoid matching inline text like "I tried {"name":...}"
 	const patterns = [
 		{
 			// Incomplete JSON with name but missing arguments
-			regex: /\{\s*"name"\s*:\s*"[^"]+"\s*,?\s*\}/,
+			// Anchored to line start or after newline
+			regex: /(?:^|\n)\s*\{\s*"name"\s*:\s*"[^"]+"\s*,?\s*\}/,
 			error: 'Incomplete tool call: missing "arguments" field',
 			hint: 'Tool calls must include both "name" and "arguments" fields',
 		},
 		{
 			// Incomplete JSON with arguments but missing name
-			regex: /\{\s*"arguments"\s*:\s*\{[^}]*\}\s*\}/,
+			// Anchored to line start or after newline
+			regex: /(?:^|\n)\s*\{\s*"arguments"\s*:\s*\{[^}]*\}\s*\}/,
 			error: 'Incomplete tool call: missing "name" field',
 			hint: 'Tool calls must include both "name" and "arguments" fields',
 		},
 		{
 			// Malformed arguments (not an object)
-			regex: /\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*"[^"]*"\s*\}/,
+			// Anchored to line start or after newline
+			regex:
+				/(?:^|\n)\s*\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*"[^"]*"\s*\}/,
 			error: 'Invalid tool call: "arguments" must be an object, not a string',
 			hint: 'Use {"name": "tool_name", "arguments": {...}} format',
 		},
@@ -67,9 +72,8 @@ function getCorrectJSONFormatExamples(_specificHint: string): string {
  * This is an internal function - use tool-parser.ts for public API
  */
 export function parseJSONToolCalls(content: unknown): ToolCall[] {
-	// Type guard: ensure content is string for processing operations
-	// BUT original type is preserved in memory via the ToolCall structure
-	const contentStr = toRequiredString(content);
+	// Convert to string for processing (this is done by the Formatter before calling this)
+	const contentStr = ensureString(content);
 
 	const extractedCalls: ToolCall[] = [];
 	let trimmedContent = contentStr.trim();
@@ -205,7 +209,7 @@ export function cleanJSONToolCalls(
 ): string {
 	// Type guard: ensure content is string for processing operations
 	// BUT original type is preserved in memory via the ToolCall structure
-	const contentStr = toRequiredString(content);
+	const contentStr = ensureString(content);
 
 	if (toolCalls.length === 0) return contentStr;
 

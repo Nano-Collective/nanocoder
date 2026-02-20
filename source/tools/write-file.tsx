@@ -72,9 +72,9 @@ const writeFileCoreTool = tool({
 				description: 'The path to the file to write.',
 			},
 			content: {
-				type: ['string', 'object', 'array', 'null', 'number', 'boolean'], // Allow multiple types
+				type: 'string', // Guide LLM to send strings
 				description:
-					'The complete content to write to the file. Can be string, object, array, or number. Objects/arrays will be converted to JSON strings for storage, but types are preserved in memory.',
+					'The complete content to write to the file. Objects/arrays will be converted to JSON strings for storage.',
 			},
 		},
 		required: ['path', 'content'],
@@ -323,16 +323,10 @@ const writeFileValidator = async (args: {
 	}
 
 	// Convert content to string for validation (but preserve type in memory)
-	const contentStr = ensureString(args.content);
+	const _contentStr = ensureString(args.content);
 
-	// Check if content is empty string or whitespace only
-	const trimmedContent = contentStr.trim();
-	if (trimmedContent.length === 0) {
-		return {
-			valid: false,
-			error: `⚒ Invalid content: file would be empty. Provide actual content to write.`,
-		};
-	}
+	// Allow empty strings (intentional file creation)
+	// Only reject null/undefined, which we already checked above
 
 	// Check for invalid path characters or attempts to write to system directories
 	const invalidPatterns = [

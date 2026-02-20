@@ -1,5 +1,5 @@
 import type {ToolCall} from '@/types/index';
-import {toRequiredString} from '@/utils/type-helpers';
+import {ensureString} from '@/utils/type-helpers';
 
 interface ParsedToolCall {
 	toolName: string;
@@ -23,7 +23,7 @@ export class XMLToolCallParser {
 		let match;
 
 		// Handle content that might be wrapped in markdown code blocks
-		let processedContent = toRequiredString(content);
+		let processedContent = ensureString(content);
 		const codeBlockMatch = processedContent.match(
 			/```(?:\w+)?\s*\n?([\s\S]*?)\n?```/,
 		);
@@ -183,7 +183,7 @@ export class XMLToolCallParser {
 	 * Type-preserving: Accepts unknown type, converts to string for processing
 	 */
 	static removeToolCallsFromContent(content: unknown): string {
-		let cleanedContent = toRequiredString(content);
+		let cleanedContent = ensureString(content);
 
 		// Remove all markdown code blocks that contain XML tool calls (using global flag)
 		cleanedContent = cleanedContent.replace(
@@ -246,7 +246,7 @@ export class XMLToolCallParser {
 	): {error: string; examples: string} | null {
 		// Type guard: ensure content is string for processing operations
 		// BUT original type is preserved in memory via the ToolCall structure
-		const contentStr = toRequiredString(content);
+		const contentStr = ensureString(content);
 		// Common malformed patterns
 		const patterns = [
 			{
