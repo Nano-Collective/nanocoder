@@ -240,7 +240,7 @@ function GitResetFormatter({
 			{args.mode === 'hard' && (
 				<Box>
 					<Text color={colors.error}>
-						⚠️ WARNING: This will permanently discard uncommitted work!
+						This will permanently discard uncommitted work!
 					</Text>
 				</Box>
 			)}
