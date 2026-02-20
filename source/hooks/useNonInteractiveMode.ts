@@ -5,6 +5,7 @@ import {TIMEOUT_EXECUTION_MAX_MS, TIMEOUT_OUTPUT_FLUSH_MS} from '@/constants';
 import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
 import type {DevelopmentMode, LLMClient} from '@/types';
 import {getLogger} from '@/utils/logging';
+import {getShutdownManager} from '@/utils/shutdown';
 
 interface UseNonInteractiveModeProps {
 	nonInteractivePrompt?: string;
@@ -87,10 +88,9 @@ export function useNonInteractiveMode({
 					// Error message already printed by useChatHandler
 				}
 				// Wait a bit to ensure all output is flushed
+				const code = reason === 'error' || reason === 'tool-approval' ? 1 : 0;
 				const timer = setTimeout(() => {
-					process.exit(
-						reason === 'error' || reason === 'tool-approval' ? 1 : 0,
-					);
+					void getShutdownManager().gracefulShutdown(code);
 				}, TIMEOUT_OUTPUT_FLUSH_MS);
 
 				return () => clearTimeout(timer);

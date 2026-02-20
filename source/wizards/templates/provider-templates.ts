@@ -331,7 +331,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'glm-4.7, glm-4.7-flash',
+				default: 'glm-5, glm-4.7, glm-4.7-flash',
 				required: true,
 			},
 		],
@@ -364,7 +364,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'glm-4.7, glm-4.7-flash',
+				default: 'glm-5, glm-4.7, glm-4.7-flash',
 				required: true,
 			},
 		],
@@ -437,6 +437,39 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			name: answers.providerName || 'Kimi Code',
 			sdkProvider: 'anthropic',
 			baseUrl: 'https://api.kimi.com/coding/v1',
+			apiKey: answers.apiKey,
+			models: answers.model
+				.split(',')
+				.map(m => m.trim())
+				.filter(Boolean),
+		}),
+	},
+	{
+		id: 'minimax-coding',
+		name: 'MiniMax Coding Plan',
+		fields: [
+			{
+				name: 'apiKey',
+				prompt: 'API Key',
+				required: true,
+				sensitive: true,
+			},
+			{
+				name: 'model',
+				prompt: 'Model name(s) (comma-separated)',
+				default: 'MiniMax-M2.5',
+				required: true,
+			},
+			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: 'MiniMax Coding',
+			},
+		],
+		buildConfig: answers => ({
+			name: answers.providerName || 'MiniMax Coding',
+			sdkProvider: 'anthropic',
+			baseUrl: 'https://api.minimax.io/anthropic/v1',
 			apiKey: answers.apiKey,
 			models: answers.model
 				.split(',')

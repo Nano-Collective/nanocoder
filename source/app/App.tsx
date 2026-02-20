@@ -8,6 +8,7 @@ import {ModalSelectors} from '@/app/components/modal-selectors';
 import {shouldRenderWelcome} from '@/app/helpers';
 import type {AppProps} from '@/app/types';
 import {FileExplorer} from '@/components/file-explorer';
+import {SchedulerView} from '@/components/scheduler-view';
 import SecurityDisclaimer from '@/components/security-disclaimer';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {
@@ -22,9 +23,11 @@ import {useChatHandler} from '@/hooks/chat-handler';
 import {useAppHandlers} from '@/hooks/useAppHandlers';
 import {useAppInitialization} from '@/hooks/useAppInitialization';
 import {useAppState} from '@/hooks/useAppState';
+import {useContextPercentage} from '@/hooks/useContextPercentage';
 import {useDirectoryTrust} from '@/hooks/useDirectoryTrust';
 import {useModeHandlers} from '@/hooks/useModeHandlers';
 import {useNonInteractiveMode} from '@/hooks/useNonInteractiveMode';
+import {useSchedulerMode} from '@/hooks/useSchedulerMode';
 import {ThemeContext} from '@/hooks/useTheme';
 import {TitleShapeContext, updateTitleShape} from '@/hooks/useTitleShape';
 import {useToolHandler} from '@/hooks/useToolHandler';
@@ -37,6 +40,11 @@ import {
 } from '@/utils/logging';
 import {createPinoLogger} from '@/utils/logging/pino-logger';
 import {setGlobalMessageQueue} from '@/utils/message-queue';
+import {
+	type PendingQuestion,
+	setGlobalQuestionHandler,
+} from '@/utils/question-queue';
+import {getShutdownManager} from '@/utils/shutdown';
 
 export default function App({
 	vscodeMode = false,
@@ -90,9 +98,7 @@ export default function App({
 
 	const handleExit = () => {
 		exit();
-		// Force exit - at security disclaimer stage, no services need cleanup
-		// TODO: Replace with ShutdownManager.gracefulShutdown() once #239 is implemented
-		process.exit(0);
+		void getShutdownManager().gracefulShutdown(0);
 	};
 
 	// VS Code server integration
@@ -193,6 +199,35 @@ export default function App({
 		});
 	}, [appState.addToChatQueue, logger]);
 
+	// Question handler - ref holds the resolver for the pending question promise
+	const questionResolverRef = React.useRef<((answer: string) => void) | null>(
+		null,
+	);
+
+	// Initialize global question handler
+	React.useEffect(() => {
+		setGlobalQuestionHandler((question: PendingQuestion) => {
+			return new Promise<string>(resolve => {
+				questionResolverRef.current = resolve;
+				appState.setPendingQuestion(question);
+				appState.setIsQuestionMode(true);
+			});
+		});
+	}, [appState.setPendingQuestion, appState.setIsQuestionMode, appState]);
+
+	// Handle user answering a question
+	const handleQuestionAnswer = React.useCallback(
+		(answer: string) => {
+			if (questionResolverRef.current) {
+				questionResolverRef.current(answer);
+				questionResolverRef.current = null;
+			}
+			appState.setIsQuestionMode(false);
+			appState.setPendingQuestion(null);
+		},
+		[appState.setIsQuestionMode, appState.setPendingQuestion, appState],
+	);
+
 	// Log important application state changes
 	React.useEffect(() => {
 		if (appState.client) {
@@ -263,6 +298,19 @@ export default function App({
 		onConversationComplete: () => {
 			appState.setIsConversationComplete(true);
 		},
+	});
+
+	// Track context window usage percentage
+	useContextPercentage({
+		currentModel: appState.currentModel,
+		messages: appState.messages,
+		tokenizer: appState.tokenizer,
+		getMessageTokens: appState.getMessageTokens,
+		toolManager: appState.toolManager,
+		streamingTokenCount: chatHandler.tokenCount,
+		contextLimit: appState.contextLimit,
+		setContextPercentUsed: appState.setContextPercentUsed,
+		setContextLimit: appState.setContextLimit,
 	});
 
 	// Setup tool handler
@@ -372,6 +420,16 @@ export default function App({
 		reinitializeMCPServers: appInitialization.reinitializeMCPServers,
 	});
 
+	// Scheduler mode enter handler
+	const enterSchedulerMode = React.useCallback(() => {
+		appState.setIsSchedulerMode(true);
+	}, [appState.setIsSchedulerMode, appState]);
+
+	// Scheduler mode exit handler
+	const exitSchedulerMode = React.useCallback(() => {
+		appState.setIsSchedulerMode(false);
+	}, [appState.setIsSchedulerMode, appState]);
+
 	// Setup app handlers
 	const appHandlers = useAppHandlers({
 		messages: appState.messages,
@@ -406,6 +464,7 @@ export default function App({
 		enterSettingsMode: modeHandlers.enterSettingsMode,
 		enterMcpWizardMode: modeHandlers.enterMcpWizardMode,
 		enterExplorerMode: modeHandlers.enterExplorerMode,
+		enterSchedulerMode,
 		handleChatMessage: chatHandler.handleChatMessage,
 	});
 
@@ -428,6 +487,20 @@ export default function App({
 		},
 		setDevelopmentMode: appState.setDevelopmentMode,
 		handleMessageSubmit: appHandlers.handleMessageSubmit,
+	});
+
+	// Setup scheduler mode
+	const schedulerMode = useSchedulerMode({
+		isSchedulerMode: appState.isSchedulerMode,
+		mcpInitialized: appState.mcpInitialized,
+		setDevelopmentMode: appState.setDevelopmentMode,
+		handleMessageSubmit: appHandlers.handleMessageSubmit,
+		clearMessages: appHandlers.clearMessages,
+		isConversationComplete: appState.isConversationComplete,
+		isToolExecuting: appState.isToolExecuting,
+		isToolConfirmationMode: appState.isToolConfirmationMode,
+		messages: appState.messages,
+		addToChatQueue: appState.addToChatQueue,
 	});
 
 	const shouldShowWelcome = shouldRenderWelcome(nonInteractiveMode);
@@ -614,8 +687,22 @@ export default function App({
 							</Box>
 						)}
 
-						{/* Chat Input - only rendered when not in modal mode */}
+						{/* Scheduler View - replaces ChatInput in scheduler mode */}
+						{appState.isSchedulerMode && (
+							<SchedulerView
+								activeJobCount={schedulerMode.activeJobCount}
+								queueLength={schedulerMode.queueLength}
+								isProcessing={schedulerMode.isProcessing}
+								currentJobCommand={schedulerMode.currentJobCommand}
+								developmentMode={appState.developmentMode}
+								contextPercentUsed={appState.contextPercentUsed}
+								onExit={exitSchedulerMode}
+							/>
+						)}
+
+						{/* Chat Input - only rendered when not in modal mode or scheduler mode */}
 						{appState.startChat &&
+							!appState.isSchedulerMode &&
 							!(
 								appState.isModelSelectionMode ||
 								appState.isProviderSelectionMode ||
@@ -630,8 +717,11 @@ export default function App({
 									isCancelling={appState.isCancelling}
 									isToolExecuting={appState.isToolExecuting}
 									isToolConfirmationMode={appState.isToolConfirmationMode}
+									isQuestionMode={appState.isQuestionMode}
 									pendingToolCalls={appState.pendingToolCalls}
 									currentToolIndex={appState.currentToolIndex}
+									pendingQuestion={appState.pendingQuestion}
+									onQuestionAnswer={handleQuestionAnswer}
 									mcpInitialized={appState.mcpInitialized}
 									client={appState.client}
 									nonInteractivePrompt={nonInteractivePrompt}
@@ -643,6 +733,7 @@ export default function App({
 										chatHandler.isGenerating || appState.isToolExecuting
 									}
 									developmentMode={appState.developmentMode}
+									contextPercentUsed={appState.contextPercentUsed}
 									onToolConfirm={toolHandler.handleToolConfirmation}
 									onToolCancel={toolHandler.handleToolConfirmationCancel}
 									onSubmit={appHandlers.handleMessageSubmit}

@@ -12,6 +12,7 @@ export * from '@/commands/mcp';
 export * from '@/commands/model';
 export * from '@/commands/model-database';
 export * from '@/commands/provider';
+export * from '@/commands/schedule';
 export * from '@/commands/settings';
 export * from '@/commands/setup-mcp';
 export * from '@/commands/setup-providers';

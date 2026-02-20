@@ -61,7 +61,8 @@ export type ThemePreset =
 	| 'ayu-light'
 	| 'night-owl'
 	| 'palenight'
-	| 'horizon';
+	| 'horizon'
+	| 'kanagawa';
 
 export type NanocoderShape =
 	| 'block'

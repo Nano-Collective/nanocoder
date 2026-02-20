@@ -4,6 +4,7 @@ import AssistantMessage from '@/components/assistant-message';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import UserMessage from '@/components/user-message';
 import {appConfig, getAppConfig} from '@/config/index';
+import {getCurrentMode} from '@/context/mode-context';
 import {parseToolCalls} from '@/tool-calling/index';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {LLMClient, Message, ToolCall, ToolResult} from '@/types/core';
@@ -31,7 +32,7 @@ interface ProcessAssistantResponseParams {
 	getNextComponentKey: () => number;
 	currentProvider: string;
 	currentModel: string;
-	developmentMode: 'normal' | 'auto-accept' | 'plan';
+	developmentMode: 'normal' | 'auto-accept' | 'plan' | 'scheduler';
 	nonInteractiveMode: boolean;
 	conversationStateManager: React.MutableRefObject<ConversationStateManager>;
 	onStartToolConfirmationFlow: (
@@ -431,11 +432,15 @@ export const processAssistantResponse = async (
 			const isNonInteractiveAllowed =
 				nonInteractiveMode &&
 				nonInteractiveAllowList.has(toolCall.function.name);
+			// Use getCurrentMode() for scheduler check to avoid stale closure issues
+			// (the scheduler sets mode synchronously via global context)
+			const activeMode = getCurrentMode();
 			const shouldExecuteDirectly =
 				validationFailed ||
 				!toolNeedsApproval ||
 				isNonInteractiveAllowed ||
-				(developmentMode === 'auto-accept' && !isBashTool);
+				(developmentMode === 'auto-accept' && !isBashTool) ||
+				activeMode === 'scheduler';
 
 			if (shouldExecuteDirectly) {
 				toolsToExecuteDirectly.push(toolCall);

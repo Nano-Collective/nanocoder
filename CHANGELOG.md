@@ -1,3 +1,21 @@
+# 1.22.5
+
+- Added MiniMax Coding Plan and GLM-5 to provider templates in the configuration wizard.
+
+- Fix: Model context limit lookups now use models.dev as the primary source instead of the hardcoded fallback table. This prevents stale hardcoded values from overriding accurate upstream data. The hardcoded table remains as an offline-only fallback. Also fixes greedy key matching where shorter keys like `mixtral` would match before `mixtral:8x22b`, and replaces first-match name lookups with scored matching for more accurate results.
+
+- Fix: Binary and excessively large files tagged with `@` no longer pollute the LLM context window with unreadable content.
+
+- Fix: Diff preview panel no longer steals terminal focus from the active input.
+
+- Fix: Reduced verbosity of the `string_replace` error formatter output.
+
+- Fix: Reject null and non-object arguments in JSON tool calls, preventing formatter crashes from malformed tool call arguments. Thanks to @cleyesode.
+
+- Fix: Restored `formatError` usage for validation and execution errors.
+
+- Dependency updates: `ink-gradient` 4.0.0, `react` 19.2.4, `@nanocollective/get-md` 1.1.1, `@ai-sdk/anthropic` 3.0.43, `pino` 10.3.1, `@types/react` 19.2.14.
+
 # 1.22.4
 
 - Security: Tool validators now run inside the AI SDK's auto-execution loop. Previously, tools with `needsApproval: false` (like `read_file`) were auto-executed by the AI SDK's `generateText` without any path validation, allowing the model to read or write files outside the project directory using absolute or `~` paths. Validators are now wrapped into each tool's `execute` function at registration time, ensuring validation runs in all code paths.

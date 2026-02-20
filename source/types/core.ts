@@ -175,12 +175,20 @@ export interface LLMClient {
 	clearContext(): Promise<void>;
 }
 
-export type DevelopmentMode = 'normal' | 'auto-accept' | 'plan';
+export type DevelopmentMode = 'normal' | 'auto-accept' | 'plan' | 'scheduler';
 
 export const DEVELOPMENT_MODE_LABELS: Record<DevelopmentMode, string> = {
 	normal: '▶ normal mode on',
 	'auto-accept': '⏵⏵ auto-accept mode on',
 	plan: '⏸ plan mode on',
+	scheduler: '⏵⏵ scheduler mode on',
+};
+
+export const DEVELOPMENT_MODE_LABELS_NARROW: Record<DevelopmentMode, string> = {
+	normal: '▶ normal',
+	'auto-accept': '⏵⏵ auto',
+	plan: '⏸ plan',
+	scheduler: '⏵⏵ scheduler',
 };
 
 // Connection status types for MCP and LSP servers

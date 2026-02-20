@@ -112,7 +112,7 @@ test('brave-search template: creates config with API key', t => {
 	});
 });
 
-test('fetch template: creates config without env when no user agent', t => {
+test('fetch template: creates config without user-agent arg when default or empty', t => {
 	const template = MCP_TEMPLATES.find(t => t.id === 'fetch');
 	t.truthy(template);
 
@@ -121,11 +121,11 @@ test('fetch template: creates config without env when no user agent', t => {
 	});
 
 	t.is(config.name, 'fetch');
-	t.deepEqual(config.args, ['-y', '@modelcontextprotocol/server-fetch']);
-	t.is(config.env, undefined);
+	t.deepEqual(config.args, ['mcp-server-fetch']);
+	t.is(config.command, 'uvx');
 });
 
-test('fetch template: creates config with env when user agent provided', t => {
+test('fetch template: creates config with user-agent arg when custom user agent provided', t => {
 	const template = MCP_TEMPLATES.find(t => t.id === 'fetch');
 	t.truthy(template);
 
@@ -134,10 +134,8 @@ test('fetch template: creates config with env when user agent provided', t => {
 	});
 
 	t.is(config.name, 'fetch');
-	t.deepEqual(config.args, ['-y', '@modelcontextprotocol/server-fetch']);
-	t.deepEqual(config.env, {
-		USER_AGENT: 'CustomBot/1.0',
-	});
+	t.deepEqual(config.args, ['mcp-server-fetch', '--user-agent=CustomBot/1.0']);
+	t.is(config.command, 'uvx');
 });
 
 test('custom template: single arg', t => {

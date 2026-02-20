@@ -2,21 +2,28 @@ import {Box, Text} from 'ink';
 import Spinner from 'ink-spinner';
 import React from 'react';
 import CancellingIndicator from '@/components/cancelling-indicator';
+import QuestionPrompt from '@/components/question-prompt';
 import ToolConfirmation from '@/components/tool-confirmation';
 import ToolExecutionIndicator from '@/components/tool-execution-indicator';
 import UserInput from '@/components/user-input';
 import {useTheme} from '@/hooks/useTheme';
 import type {DevelopmentMode, ToolCall} from '@/types';
+import type {PendingQuestion} from '@/utils/question-queue';
 
 export interface ChatInputProps {
 	// Execution state
 	isCancelling: boolean;
 	isToolExecuting: boolean;
 	isToolConfirmationMode: boolean;
+	isQuestionMode: boolean;
 
 	// Tool state
 	pendingToolCalls: ToolCall[];
 	currentToolIndex: number;
+
+	// Question state (ask_question tool)
+	pendingQuestion: PendingQuestion | null;
+	onQuestionAnswer: (answer: string) => void;
 
 	// Client state
 	mcpInitialized: boolean;
@@ -30,6 +37,7 @@ export interface ChatInputProps {
 	customCommands: string[];
 	inputDisabled: boolean;
 	developmentMode: DevelopmentMode;
+	contextPercentUsed: number | null;
 
 	// Handlers
 	onToolConfirm: (confirmed: boolean) => void;
@@ -50,8 +58,11 @@ export function ChatInput({
 	isCancelling,
 	isToolExecuting,
 	isToolConfirmationMode,
+	isQuestionMode,
 	pendingToolCalls,
 	currentToolIndex,
+	pendingQuestion,
+	onQuestionAnswer,
 	mcpInitialized,
 	client,
 	nonInteractivePrompt,
@@ -59,6 +70,7 @@ export function ChatInput({
 	customCommands,
 	inputDisabled,
 	developmentMode,
+	contextPercentUsed,
 	onToolConfirm,
 	onToolCancel,
 	onSubmit,
@@ -91,6 +103,12 @@ export function ChatInput({
 					currentIndex={currentToolIndex}
 					totalTools={pendingToolCalls.length}
 				/>
+			) : /* Question Prompt (ask_question tool) */
+			isQuestionMode && pendingQuestion ? (
+				<QuestionPrompt
+					question={pendingQuestion}
+					onAnswer={onQuestionAnswer}
+				/>
 			) : /* User Input */
 			mcpInitialized && client && !nonInteractivePrompt ? (
 				<UserInput
@@ -100,6 +118,7 @@ export function ChatInput({
 					onCancel={onCancel}
 					onToggleMode={onToggleMode}
 					developmentMode={developmentMode}
+					contextPercentUsed={contextPercentUsed}
 				/>
 			) : /* Client Missing */
 			mcpInitialized && !client ? (

@@ -87,7 +87,7 @@ const writeFileCoreTool = tool({
 		}
 
 		const mode = getCurrentMode();
-		return mode !== 'auto-accept'; // true in normal/plan, false in auto-accept
+		return mode !== 'auto-accept' && mode !== 'scheduler';
 	},
 	execute: async (args, _options) => {
 		return await executeWriteFile(args);

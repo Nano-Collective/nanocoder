@@ -4,9 +4,9 @@ import {join} from 'node:path';
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
-import {themes} from '../config/themes.js';
-import {setCurrentMode} from '../context/mode-context.js';
-import {ThemeContext} from '../hooks/useTheme.js';
+import {themes} from '../../config/themes.js';
+import {setCurrentMode} from '../../context/mode-context.js';
+import {ThemeContext} from '../../hooks/useTheme.js';
 import {stringReplaceTool} from './string-replace.js';
 
 // ============================================================================
@@ -668,7 +668,7 @@ test('string_replace validator: handles file read errors', async t => {
 	const filePath = await createTestFile('test.txt', 'content\n');
 
 	// Mock getCachedFileContent to throw an error
-	const originalCache = await import('../utils/file-cache.js');
+	const originalCache = await import('../../utils/file-cache.js');
 	const mockError = new Error('EACCES: permission denied');
 
 	// Since we can't easily mock the file cache, we'll test with an invalid path
