@@ -65,18 +65,7 @@ export function parseToolCalls(content: unknown): ParseResult {
 	// Strip tags first - some models (like GLM-4) emit these for chain-of-thought
 	const strippedContent = stripThinkTags(contentStr);
 
-	// 1. Check for malformed XML patterns first (before validating with hasToolCalls)
-	const xmlMalformed =
-		XMLToolCallParser.detectMalformedToolCall(strippedContent);
-	if (xmlMalformed) {
-		return {
-			success: false,
-			error: xmlMalformed.error,
-			examples: xmlMalformed.examples,
-		};
-	}
-
-	// 2. Try XML parser for valid tool calls
+	// 1. Try XML parser for valid tool calls (OPTIMISTIC: Success first!)
 	if (XMLToolCallParser.hasToolCalls(strippedContent)) {
 		// Parse valid XML tool calls
 		const parsedCalls = XMLToolCallParser.parseToolCalls(strippedContent);
@@ -91,6 +80,17 @@ export function parseToolCalls(content: unknown): ParseResult {
 				cleanedContent,
 			};
 		}
+	}
+
+	// 2. Check for malformed XML patterns (DEFENSIVE: Error second!)
+	const xmlMalformed =
+		XMLToolCallParser.detectMalformedToolCall(strippedContent);
+	if (xmlMalformed) {
+		return {
+			success: false,
+			error: xmlMalformed.error,
+			examples: xmlMalformed.examples,
+		};
 	}
 
 	// 3. Fall back to JSON parser
