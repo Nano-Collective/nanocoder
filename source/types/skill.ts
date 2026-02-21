@@ -47,7 +47,6 @@ export interface Skill {
 	metadata: SkillMetadata;
 	content?: SkillContent;
 	allowedTools?: string[];
-	blockedTools?: string[];
 	resources?: SkillResource[];
 	source: SkillSource;
 	location: string;

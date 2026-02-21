@@ -39,6 +39,14 @@ export function useChatHandler({
 	// Track when the current conversation started for elapsed time display
 	const conversationStartTimeRef = React.useRef<number>(Date.now());
 
+	// Memoize SkillIntegration to avoid recreating on every message
+	const skillIntegration = React.useMemo(() => {
+		if (!toolManager) return null;
+		const skillManager = toolManager.getSkillManager();
+		if (!skillManager) return null;
+		return new SkillIntegration(skillManager, toolManager);
+	}, [toolManager]);
+
 	// State for streaming message content
 	const [streamingContent, setStreamingContent] = React.useState<string>('');
 	const [isGenerating, setIsGenerating] = React.useState<boolean>(false);
@@ -175,10 +183,8 @@ export function useChatHandler({
 			let systemPrompt = processPromptTemplate();
 
 			// Enhance with relevant Skills (progressive disclosure)
-			const skillManager = toolManager.getSkillManager();
-			if (skillManager) {
-				const integration = new SkillIntegration(skillManager, toolManager);
-				systemPrompt = await integration.enhanceSystemPrompt(
+			if (skillIntegration) {
+				systemPrompt = await skillIntegration.enhanceSystemPrompt(
 					systemPrompt,
 					message,
 				);

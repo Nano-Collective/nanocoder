@@ -12,6 +12,17 @@ export interface SkillFrontmatter extends SkillMetadata {
  * Parse YAML-like frontmatter for SKILL.md.
  * Handles: name, description, category, allowed-tools, tags, triggers,
  * estimated-tokens, version, author, examples, references, dependencies.
+ *
+ * Supported syntax:
+ * - Simple key: value pairs
+ * - Quoted values: key: "value with: colon" or key: 'value with: colon'
+ * - Array values: key: [item1, item2] or key:\n  - item1\n  - item2
+ * - Numbers: key: 123
+ *
+ * Limitations (not supported):
+ * - Multi-line values (use quotes)
+ * - Nested objects
+ * - Escape sequences
  */
 export function parseSkillFrontmatter(
 	raw: string,
@@ -46,11 +57,12 @@ export function parseSkillFrontmatter(
 			continue;
 		}
 
-		const colonIdx = trimmed.indexOf(':');
+		const colonIdx = findColonOutsideQuotes(trimmed);
 		if (colonIdx === -1) continue;
 
 		const key = trimmed.slice(0, colonIdx).trim();
-		const value = trimmed.slice(colonIdx + 1).trim();
+		const rawValue = trimmed.slice(colonIdx + 1);
+		const value = extractValue(rawValue);
 
 		if (arrayKeys.has(key)) {
 			currentKey = key;
@@ -64,7 +76,7 @@ export function parseSkillFrontmatter(
 		currentKey = null;
 		if (value) {
 			const num = Number(value);
-			meta[key] = Number.isNaN(num) ? value.replace(/^["']|["']$/g, '') : num;
+			meta[key] = Number.isNaN(num) ? value : num;
 		}
 	}
 
@@ -94,15 +106,45 @@ export function parseSkillFrontmatter(
 	};
 }
 
+function findColonOutsideQuotes(line: string): number {
+	let inSingleQuote = false;
+	let inDoubleQuote = false;
+
+	for (let i = 0; i < line.length; i++) {
+		const char = line[i];
+
+		if (char === "'" && !inDoubleQuote) {
+			inSingleQuote = !inSingleQuote;
+		} else if (char === '"' && !inSingleQuote) {
+			inDoubleQuote = !inDoubleQuote;
+		} else if (char === ':' && !inSingleQuote && !inDoubleQuote) {
+			return i;
+		}
+	}
+
+	return -1;
+}
+
+function extractValue(rawValue: string): string {
+	const trimmed = rawValue.trim();
+	if (
+		(trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+		(trimmed.startsWith("'") && trimmed.endsWith("'"))
+	) {
+		return trimmed.slice(1, -1);
+	}
+	return trimmed;
+}
+
 function parseArrayValue(value: string): string[] {
 	const v = value.trim();
 	if (v.startsWith('[') && v.endsWith(']')) {
 		return v
 			.slice(1, -1)
 			.split(',')
-			.map(s => s.trim().replace(/^["']|["']$/g, ''))
+			.map(s => extractValue(s.trim()))
 			.filter(Boolean);
 	}
-	if (v) return [v.replace(/^["']|["']$/g, '')];
+	if (v) return [extractValue(v)];
 	return [];
 }

@@ -8,7 +8,10 @@ import type {
 	SkillSource,
 } from '@/types/skill';
 import {SkillDiscovery} from './skill-discovery';
-import {parseSkillFrontmatter} from './skill-frontmatter';
+import {
+	parseSkillFrontmatter,
+	type SkillFrontmatter,
+} from './skill-frontmatter';
 
 const SKILL_FILE = 'SKILL.md';
 const RESOURCES_DIR = 'resources';
@@ -66,7 +69,7 @@ export class SkillManager {
 	private async loadSkillFromPath(
 		skillPath: string,
 		source: SkillSource,
-		metadata: SkillMetadata,
+		metadata: SkillFrontmatter,
 		dirName: string,
 	): Promise<Skill | null> {
 		const skillFile = join(skillPath, SKILL_FILE);
@@ -210,7 +213,7 @@ export class SkillManager {
 		if (meta.tags?.length) {
 			for (const tag of meta.tags) {
 				if (requestLower.includes(tag.toLowerCase())) {
-					score += 3;
+					score += 5;
 				}
 			}
 		}
@@ -261,12 +264,17 @@ export class SkillManager {
 		let template = await readFile(templatePath, 'utf-8');
 		if (args) {
 			for (const [key, value] of Object.entries(args)) {
+				const escapedKey = escapeRegExp(key);
 				template = template.replace(
-					new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g'),
+					new RegExp(`\\{\\{\\s*${escapedKey}\\s*\\}\\}`, 'g'),
 					String(value),
 				);
 			}
 		}
 		return template;
 	}
+}
+
+function escapeRegExp(string: string): string {
+	return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

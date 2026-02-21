@@ -4,7 +4,10 @@ import {existsSync} from 'fs';
 import {getConfigPath} from '@/config/paths';
 import type {SkillMetadata, SkillSource} from '@/types/skill';
 import {getLogger} from '@/utils/logging';
-import {parseSkillFrontmatter} from './skill-frontmatter';
+import {
+	parseSkillFrontmatter,
+	type SkillFrontmatter,
+} from './skill-frontmatter';
 
 const SKILL_FILE = 'SKILL.md';
 
@@ -16,7 +19,7 @@ export interface SkillPathInfo {
 
 export class SkillDiscovery {
 	private sources = new Map<string, SkillSource>();
-	private metadataCache = new Map<string, SkillMetadata>();
+	private metadataCache = new Map<string, SkillFrontmatter>();
 	private pathCache = new Map<string, SkillPathInfo>();
 
 	constructor() {
@@ -130,11 +133,11 @@ export class SkillDiscovery {
 		}
 	}
 
-	getCachedMetadata(skillId: string): SkillMetadata | undefined {
+	getCachedMetadata(skillId: string): SkillFrontmatter | undefined {
 		return this.metadataCache.get(skillId);
 	}
 
-	getAllCachedMetadata(): SkillMetadata[] {
+	getAllCachedMetadata(): SkillFrontmatter[] {
 		return Array.from(this.metadataCache.values());
 	}
 

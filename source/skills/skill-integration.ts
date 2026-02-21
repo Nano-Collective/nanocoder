@@ -90,11 +90,7 @@ When a Skill is relevant, use its instructions. Tool restrictions listed in a Sk
 
 		for (const tool of requestedTools) {
 			if (skill.allowedTools.includes(tool)) {
-				if (!skill.blockedTools?.includes(tool)) {
-					allowed.push(tool);
-				} else {
-					blocked.push(tool);
-				}
+				allowed.push(tool);
 			} else {
 				blocked.push(tool);
 			}

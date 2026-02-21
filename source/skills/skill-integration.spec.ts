@@ -134,22 +134,3 @@ test('SkillIntegration validateSkillToolAccess filters by allowedTools', t => {
 	t.deepEqual(allowed, ['read_file']);
 	t.deepEqual(blocked, ['write_file', 'execute_bash']);
 });
-
-test('SkillIntegration validateSkillToolAccess blocks tools in blockedTools', t => {
-	const skill = makeSkill({
-		allowedTools: ['read_file', 'write_file'],
-		blockedTools: ['write_file'],
-	});
-	const mockTm = createMockToolManager([]);
-	const mockSm = createMockSkillManager({
-		getLoadedSkill: (id: string) => (id === 'project:test' ? skill : undefined),
-	});
-	const integration = new SkillIntegration(mockSm, mockTm);
-
-	const {allowed, blocked} = integration.validateSkillToolAccess('project:test', [
-		'read_file',
-		'write_file',
-	]);
-	t.deepEqual(allowed, ['read_file']);
-	t.deepEqual(blocked, ['write_file']);
-});

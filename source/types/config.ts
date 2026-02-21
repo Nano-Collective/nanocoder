@@ -106,33 +106,6 @@ export interface AppConfig {
 
 	// Auto-compact configuration
 	autoCompact?: AutoCompactConfig;
-
-	// Skills configuration (optional)
-	skills?: SkillConfig;
-}
-
-export interface SkillConfig {
-	enabled: boolean;
-	sources: SkillSourceConfig[];
-	maxTokensPerSkill: number;
-	maxSkillsInContext: number;
-	autoRefresh: boolean;
-	security: SkillSecurityConfig;
-}
-
-export interface SkillSourceConfig {
-	type: 'personal' | 'project' | 'plugin' | 'remote';
-	location: string;
-	enabled: boolean;
-	priority: number;
-	trusted?: boolean;
-}
-
-export interface SkillSecurityConfig {
-	allowExecutables: boolean;
-	sandboxMode: boolean;
-	requireExplicitActivation: boolean;
-	maxResourceSize: number;
 }
 
 // MCP Server configuration with source tracking
