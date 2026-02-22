@@ -1,6 +1,7 @@
 import {XMLToolCallParser} from '@/tool-calling/xml-parser';
 import type {AISDKCoreTool, StreamCallbacks, ToolCall} from '@/types/index';
 import {getLogger} from '@/utils/logging';
+import {normalizeLLMResponse} from '@/utils/response-formatter';
 
 export interface XMLToolProcessingResult {
 	toolCalls: ToolCall[];
@@ -10,21 +11,27 @@ export interface XMLToolProcessingResult {
 /**
  * Processes XML tool calls from response content
  */
-export function processXMLToolCalls(
-	content: string,
+export async function processXMLToolCalls(
+	response: unknown,
 	tools: Record<string, AISDKCoreTool>,
 	callbacks: StreamCallbacks,
-): XMLToolProcessingResult {
+): Promise<XMLToolProcessingResult> {
 	const logger = getLogger();
 	const toolCalls: ToolCall[] = [];
-	let cleanedContent = content;
+
+	// NEW: Normalize response before processing
+	const normalized = await normalizeLLMResponse(response);
+	const content = normalized.content;
 
 	// Only process if tools are available and no native tool calls were found
 	if (Object.keys(tools).length === 0 || !content) {
-		return {toolCalls, cleanedContent};
+		return {toolCalls, cleanedContent: content};
 	}
 
 	logger.debug('Checking for XML tool calls in response content');
+
+	// Initialize cleanedContent with original content (preserved if no tool calls found)
+	let cleanedContent = content;
 
 	// First check for malformed XML tool calls
 	const malformedError = XMLToolCallParser.detectMalformedToolCall(content);

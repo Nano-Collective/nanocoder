@@ -242,7 +242,7 @@ export async function handleChat(
 
 			// Check for XML tool calls if no native ones
 			let content = fullText;
-			const xmlResult = processXMLToolCalls(content, tools, callbacks);
+			const xmlResult = await processXMLToolCalls(content, tools, callbacks);
 			if (xmlResult.toolCalls.length > 0) {
 				toolCalls.push(...xmlResult.toolCalls);
 				content = xmlResult.cleanedContent;

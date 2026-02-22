@@ -18,6 +18,7 @@ import {normalizeIndentation} from '@/utils/indentation-normalizer';
 import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
 import {calculateTokens} from '@/utils/token-calculator';
+import {ensureString} from '@/utils/type-helpers';
 import {
 	closeDiffInVSCode,
 	isVSCodeConnected,
@@ -26,12 +27,16 @@ import {
 
 const executeWriteFile = async (args: {
 	path: string;
-	content: string;
+	content: unknown; // Note: change type to unknown to accept non-string
 }): Promise<string> => {
 	const absPath = resolve(args.path);
 	const fileExists = existsSync(absPath);
 
-	await writeFile(absPath, args.content, 'utf-8');
+	// Type guard: ensure content is string for write operation
+	// Storage is safe (fs.writeFile ensures string-only), but we need to convert for safety
+	const contentStr = ensureString(args.content);
+
+	await writeFile(absPath, contentStr, 'utf-8');
 
 	// Invalidate cache after write
 	invalidateCache(absPath);
@@ -58,7 +63,8 @@ const executeWriteFile = async (args: {
 const writeFileCoreTool = tool({
 	description:
 		'Write content to a file (creates new file or overwrites existing file). Use this for complete file rewrites, generated code, or when most of the file needs to change. For small targeted edits, use string_replace instead.',
-	inputSchema: jsonSchema<{path: string; content: string}>({
+	inputSchema: jsonSchema<{path: string; content: unknown}>({
+		// Note: change to unknown
 		type: 'object',
 		properties: {
 			path: {
@@ -66,8 +72,9 @@ const writeFileCoreTool = tool({
 				description: 'The path to the file to write.',
 			},
 			content: {
-				type: 'string',
-				description: 'The complete content to write to the file.',
+				type: 'string', // Guide LLM to send strings
+				description:
+					'The complete content to write to the file. Objects/arrays will be converted to JSON strings for storage.',
 			},
 		},
 		required: ['path', 'content'],
@@ -136,7 +143,7 @@ const WriteFileFormatter = React.memo(({args}: {args: WriteFileArgs}) => {
 	}
 	const {colors} = themeContext;
 	const path = args.path || args.file_path || 'unknown';
-	const newContent = args.content || '';
+	const newContent = ensureString(args.content);
 	const lineCount = newContent.split('\n').length;
 	const charCount = newContent.length;
 
@@ -261,7 +268,7 @@ const writeFileFormatter = async (
 
 const writeFileValidator = async (args: {
 	path: string;
-	content: string;
+	content: unknown;
 }): Promise<{valid: true} | {valid: false; error: string}> => {
 	// Validate path boundary first to prevent directory traversal
 	if (!isValidFilePath(args.path)) {
@@ -306,6 +313,17 @@ const writeFileValidator = async (args: {
 			error: `⚒ Cannot access parent directory "${parentDir}": ${errorMessage}`,
 		};
 	}
+
+	// Check if content is valid (not null/undefined)
+	if (args.content === null || args.content === undefined) {
+		return {
+			valid: false,
+			error: `⚒ Invalid content: content cannot be null or undefined.`,
+		};
+	}
+
+	// Allow empty strings (intentional file creation)
+	// Only reject null/undefined, which we already checked above
 
 	// Check for invalid path characters or attempts to write to system directories
 	const invalidPatterns = [

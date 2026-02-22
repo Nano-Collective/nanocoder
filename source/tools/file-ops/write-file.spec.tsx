@@ -841,6 +841,33 @@ test('write_file formatter: renders syntax highlighting for code', async t => {
 	t.regex(output!, /greeting/);
 });
 
+test('write_file formatter: handles object content (regression test)', async t => {
+	const formatter = writeFileTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter not defined');
+		return;
+	}
+
+	// Regression: This used to crash with "split is not a function"
+	// We cast to any to simulate the runtime behavior where content is an object
+	const element = await formatter({
+		path: 'manifest.json',
+		// biome-ignore lint/suspicious/noExplicitAny: Simulating raw LLM output
+		content: {test_id: 1, status: 'success'} as any,
+	});
+
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+	const output = lastFrame();
+
+	t.truthy(output);
+	// Strip ANSI color codes before regex matching to avoid failures due to syntax highlighting
+	const plainOutput = stripAnsi(output!);
+	t.regex(plainOutput, /write_file/);
+	t.regex(plainOutput, /manifest\.json/);
+	// ensureString converts object to JSON string, so we expect the keys to appear
+	t.regex(plainOutput, /"test_id":1/);
+});
+
 // ============================================================================
 // Cleanup
 // ============================================================================

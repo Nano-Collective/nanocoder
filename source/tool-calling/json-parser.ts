@@ -1,41 +1,53 @@
 import type {ToolCall} from '@/types/index';
+import {ensureString} from '@/utils/type-helpers';
 
 /**
  * Internal JSON tool call parser
  * Note: This is now an internal utility. Use tool-parser.ts for public API.
+ * Type-preserving: Preserves object types in memory while converting to string for processing
  */
 
 /**
  * Detects malformed JSON tool call attempts and returns error details
  * Returns null if no malformed tool calls detected
+ * Type-preserving: Accepts unknown type, converts to string for processing
  */
 export function detectMalformedJSONToolCall(
-	content: string,
+	content: unknown,
 ): {error: string; examples: string} | null {
+	// Type guard: ensure content is string for processing operations
+	// BUT original type is preserved in memory via the ToolCall structure
+	const contentStr = ensureString(content);
+
 	// Check for incomplete JSON structures
+	// FIX: Anchor to line start (?:^|\n) to avoid matching inline text like "I tried {"name":...}"
 	const patterns = [
 		{
 			// Incomplete JSON with name but missing arguments
-			regex: /\{\s*"name"\s*:\s*"[^"]+"\s*,?\s*\}/,
+			// Anchored to line start or after newline
+			regex: /(?:^|\n)\s*\{\s*"name"\s*:\s*"[^"]+"\s*,?\s*\}/,
 			error: 'Incomplete tool call: missing "arguments" field',
 			hint: 'Tool calls must include both "name" and "arguments" fields',
 		},
 		{
 			// Incomplete JSON with arguments but missing name
-			regex: /\{\s*"arguments"\s*:\s*\{[^}]*\}\s*\}/,
+			// Anchored to line start or after newline
+			regex: /(?:^|\n)\s*\{\s*"arguments"\s*:\s*\{[^}]*\}\s*\}/,
 			error: 'Incomplete tool call: missing "name" field',
 			hint: 'Tool calls must include both "name" and "arguments" fields',
 		},
 		{
 			// Malformed arguments (not an object)
-			regex: /\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*"[^"]*"\s*\}/,
+			// Anchored to line start or after newline
+			regex:
+				/(?:^|\n)\s*\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*"[^"]*"\s*\}/,
 			error: 'Invalid tool call: "arguments" must be an object, not a string',
 			hint: 'Use {"name": "tool_name", "arguments": {...}} format',
 		},
 	];
 
 	for (const pattern of patterns) {
-		const match = content.match(pattern.regex);
+		const match = contentStr.match(pattern.regex);
 		if (match) {
 			return {
 				error: pattern.error,
@@ -56,11 +68,15 @@ function getCorrectJSONFormatExamples(_specificHint: string): string {
 
 /**
  * Parses JSON-formatted tool calls from content
+ * Type-preserving: Preserves object types in memory while converting to string for processing
  * This is an internal function - use tool-parser.ts for public API
  */
-export function parseJSONToolCalls(content: string): ToolCall[] {
+export function parseJSONToolCalls(content: unknown): ToolCall[] {
+	// Convert to string for processing (this is done by the Formatter before calling this)
+	const contentStr = ensureString(content);
+
 	const extractedCalls: ToolCall[] = [];
-	let trimmedContent = content.trim();
+	let trimmedContent = contentStr.trim();
 
 	// Handle markdown code blocks
 	const codeBlockMatch = trimmedContent.match(
@@ -96,7 +112,7 @@ export function parseJSONToolCalls(content: string): ToolCall[] {
 					id: `call_${Date.now()}`,
 					function: {
 						name: parsed.name || '',
-						arguments: parsed.arguments,
+						arguments: parsed.arguments, // Type preserved in memory!
 					},
 				};
 				extractedCalls.push(toolCall);
@@ -111,7 +127,7 @@ export function parseJSONToolCalls(content: string): ToolCall[] {
 	const jsonBlockRegex =
 		/\{\s*\n\s*"name":\s*"([^"]+)",\s*\n\s*"arguments":\s*\{[\s\S]*?\}\s*\n\s*\}/g;
 	let jsonMatch;
-	while ((jsonMatch = jsonBlockRegex.exec(content)) !== null) {
+	while ((jsonMatch = jsonBlockRegex.exec(contentStr)) !== null) {
 		try {
 			const parsed = JSON.parse(jsonMatch[0]) as {
 				name?: string;
@@ -130,7 +146,7 @@ export function parseJSONToolCalls(content: string): ToolCall[] {
 					id: `call_${Date.now()}_${extractedCalls.length}`,
 					function: {
 						name: parsed.name || '',
-						arguments: parsed.arguments,
+						arguments: parsed.arguments, // Type preserved in memory!
 					},
 				};
 				extractedCalls.push(toolCall);
@@ -147,7 +163,7 @@ export function parseJSONToolCalls(content: string): ToolCall[] {
 
 	for (const pattern of toolCallPatterns) {
 		let match;
-		while ((match = pattern.exec(content)) !== null) {
+		while ((match = pattern.exec(contentStr)) !== null) {
 			const [, name, argsStr] = match;
 			try {
 				let args: Record<string, unknown> | null = null;
@@ -160,7 +176,7 @@ export function parseJSONToolCalls(content: string): ToolCall[] {
 						typeof parsed === 'object' &&
 						!Array.isArray(parsed)
 					) {
-						args = parsed as Record<string, unknown>;
+						args = parsed as Record<string, unknown>; // Type preserved in memory!
 					}
 				}
 				// Only add tool call if we have a valid object
@@ -169,7 +185,7 @@ export function parseJSONToolCalls(content: string): ToolCall[] {
 						id: `call_${Date.now()}_${extractedCalls.length}`,
 						function: {
 							name: name || '',
-							arguments: args,
+							arguments: args, // Type preserved in memory!
 						},
 					});
 				}
@@ -184,15 +200,20 @@ export function parseJSONToolCalls(content: string): ToolCall[] {
 
 /**
  * Cleans content by removing tool call JSON blocks
+ * Type-preserving: Accepts unknown type, converts to string for processing
  * This is an internal function - use tool-parser.ts for public API
  */
 export function cleanJSONToolCalls(
-	content: string,
+	content: unknown,
 	toolCalls: ToolCall[],
 ): string {
-	if (toolCalls.length === 0) return content;
+	// Type guard: ensure content is string for processing operations
+	// BUT original type is preserved in memory via the ToolCall structure
+	const contentStr = ensureString(content);
 
-	let cleanedContent = content;
+	if (toolCalls.length === 0) return contentStr;
+
+	let cleanedContent = contentStr;
 
 	// Handle markdown code blocks that contain only tool calls
 	const codeBlockRegex = /```(?:json)?\s*\n?([\s\S]*?)\n?```/g;

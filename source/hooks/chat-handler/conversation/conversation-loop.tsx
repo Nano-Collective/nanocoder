@@ -193,11 +193,31 @@ export const processAssistantResponse = async (
 		);
 	}
 
-	// Merge structured tool calls from AI SDK with content-parsed tool calls
-	const allToolCalls = [...(toolCalls || []), ...parsedToolCalls];
+	// NEW: Deduplicate parsed calls to prevent "Ghost Echo" effect
+	// Only keep parsed calls that are NOT duplicates of native calls
+	const uniqueParsedCalls = parsedToolCalls.filter(parsedCall => {
+		const isDuplicate = (toolCalls || []).some(nativeCall => {
+			// A. Check Name
+			if (nativeCall.function.name !== parsedCall.function.name) {
+				return false;
+			}
+
+			// B. Check Arguments (using ensureString for safe comparison)
+			const nativeArgs = JSON.stringify(nativeCall.function.arguments);
+			const parsedArgs = JSON.stringify(parsedCall.function.arguments);
+
+			return nativeArgs === parsedArgs;
+		});
+
+		// Keep it only if it is NOT a duplicate
+		return !isDuplicate;
+	});
+
+	// Merge native calls with unique parsed calls
+	const deduplicatedToolCalls = [...(toolCalls || []), ...uniqueParsedCalls];
 
 	const {validToolCalls, errorResults} = filterValidToolCalls(
-		allToolCalls,
+		deduplicatedToolCalls,
 		toolManager,
 	);
 
@@ -292,9 +312,23 @@ export const processAssistantResponse = async (
 			);
 		}
 
+		// FIX: Satisfy the AI SDK's strict 1:1 Tool Call/Result mapping.
+		// If we are aborting this turn to self-correct the bad tools,
+		// we MUST provide a cancellation result for the valid tools we are skipping.
+		const abortedResults: ToolResult[] = validToolCalls.map(tc => ({
+			tool_call_id: tc.id,
+			role: 'tool',
+			name: tc.function.name,
+			content:
+				'Execution aborted because another tool call in this request was invalid. Please fix the invalid tool call and try again.',
+		}));
+
+		// Combine the actual errors with the aborted placeholders
+		const allResultsForThisTurn = [...errorResults, ...abortedResults];
+
 		// Send error results back to model for self-correction
 		const errorBuilder = new MessageBuilder(updatedMessages);
-		errorBuilder.addToolResults(errorResults);
+		errorBuilder.addToolResults(allResultsForThisTurn);
 		const updatedMessagesWithError = errorBuilder.build();
 		setMessages(updatedMessagesWithError);
 

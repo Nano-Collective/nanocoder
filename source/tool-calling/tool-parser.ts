@@ -5,14 +5,15 @@ import {
 } from '@/tool-calling/json-parser';
 import {XMLToolCallParser} from '@/tool-calling/xml-parser';
 import type {ToolCall} from '@/types/index';
+import {ensureString} from '@/utils/type-helpers';
 
 /**
- * Strip <think>...</think> tags from content (some models output thinking that shouldn't be shown)
+ * Strip  tags from content (some models output thinking that shouldn't be shown)
  */
 function stripThinkTags(content: string): string {
 	return (
 		content
-			// Strip complete <think>...</think> blocks
+			// Strip complete  blocks
 			.replace(/<think>[\s\S]*?<\/think>/gi, '')
 			// Strip orphaned/incomplete think tags
 			.replace(/<think>[\s\S]*$/gi, '')
@@ -55,24 +56,16 @@ type ParseResult =
 
 /**
  * Unified tool call parser that tries XML first, then falls back to JSON
- * Returns errors for malformed tool calls instead of silently failing
+ * Type-preserving: Accepts unknown type, converts to string for processing
  */
-export function parseToolCalls(content: string): ParseResult {
-	// Strip <think> tags first - some models (like GLM-4) emit these for chain-of-thought
-	const strippedContent = stripThinkTags(content);
+export function parseToolCalls(content: unknown): ParseResult {
+	// 1. Safety Coercion
+	const contentStr = ensureString(content);
 
-	// 1. Check for malformed XML patterns first (before validating with hasToolCalls)
-	const xmlMalformed =
-		XMLToolCallParser.detectMalformedToolCall(strippedContent);
-	if (xmlMalformed) {
-		return {
-			success: false,
-			error: xmlMalformed.error,
-			examples: xmlMalformed.examples,
-		};
-	}
+	// Strip tags first - some models (like GLM-4) emit these for chain-of-thought
+	const strippedContent = stripThinkTags(contentStr);
 
-	// 2. Try XML parser for valid tool calls
+	// 1. Try XML parser for valid tool calls (OPTIMISTIC: Success first!)
 	if (XMLToolCallParser.hasToolCalls(strippedContent)) {
 		// Parse valid XML tool calls
 		const parsedCalls = XMLToolCallParser.parseToolCalls(strippedContent);
@@ -89,18 +82,20 @@ export function parseToolCalls(content: string): ParseResult {
 		}
 	}
 
-	// 3. Fall back to JSON parser
-	// Check for malformed JSON tool calls
-	const jsonMalformed = detectMalformedJSONToolCall(strippedContent);
-	if (jsonMalformed) {
+	// 2. Check for malformed XML patterns (DEFENSIVE: Error second!)
+	const xmlMalformed =
+		XMLToolCallParser.detectMalformedToolCall(strippedContent);
+	if (xmlMalformed) {
 		return {
 			success: false,
-			error: jsonMalformed.error,
-			examples: jsonMalformed.examples,
+			error: xmlMalformed.error,
+			examples: xmlMalformed.examples,
 		};
 	}
 
-	// Parse valid JSON tool calls
+	// 3. Fall back to JSON parser
+	// FIX: Check for valid JSON tool calls FIRST (optimistic approach)
+	// This prevents malformed detection from catching text that's NOT a tool call attempt
 	const jsonCalls = parseJSONToolCalls(strippedContent);
 	if (jsonCalls.length > 0) {
 		const cleanedContent = cleanJSONToolCalls(strippedContent, jsonCalls);
@@ -111,7 +106,17 @@ export function parseToolCalls(content: string): ParseResult {
 		};
 	}
 
-	// 4. No tool calls found - still normalize whitespace in content
+	// 4. If no valid tools found, check for malformed patterns
+	const jsonMalformed = detectMalformedJSONToolCall(strippedContent);
+	if (jsonMalformed) {
+		return {
+			success: false,
+			error: jsonMalformed.error,
+			examples: jsonMalformed.examples,
+		};
+	}
+
+	// 5. No tool calls found - still normalize whitespace in content
 	return {
 		success: true,
 		toolCalls: [],

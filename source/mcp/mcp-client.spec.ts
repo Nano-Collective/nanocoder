@@ -1013,3 +1013,55 @@ test('MCPClient: non-whitelisted tools still require approval', async t => {
 			: tool?.needsApproval ?? false;
 	t.true(needsApproval);
 });
+
+// ============================================================================
+// Regression Tests for Smart Schema Sanitization
+// ============================================================================
+
+test('callTool sanitizes object arguments to strings when schema expects a string (regression test)', async t => {
+	const client = new MCPClient();
+
+	// 1. SETUP: Mock the internal state to simulate a connected server and a tool definition.
+	const mockServerName = 'test-server';
+	const mockToolName = 'fake_write_file';
+
+	// @ts-ignore - Accessing private properties for testing
+	client.serverTools.set(mockServerName, [
+		{
+			name: mockToolName,
+			description: 'A test tool',
+			serverName: mockServerName,
+			inputSchema: {
+				type: 'object',
+				properties: {
+					path: { type: 'string' },
+					content: { type: 'string' } // <-- Schema demands a string here
+				},
+			},
+		},
+	]);
+	// @ts-ignore
+	client.clients.set(mockServerName, {}); // Dummy client object
+
+	// 2. SPY: We will "spy" on executeToolCall to see what arguments it receives.
+	let capturedArgs: Record<string, unknown> | undefined;
+	// @ts-ignore
+	client.executeToolCall = async (_client: unknown, _toolName: string, args: Record<string, unknown>) => {
+		capturedArgs = args;
+		return "Mock success";
+	};
+
+	// 3. ACTION: Call the public method with the "bad" data (an object for 'content').
+	await client.callTool(mockToolName, {
+		path: 'test.txt',
+		content: { "key": "value" } // <-- This is the object that caused the crash.
+	});
+
+	// 4. ASSERTION: Verify the captured arguments were sanitized.
+	t.truthy(capturedArgs, 'executeToolCall should have been called');
+	if (capturedArgs) {
+		t.is(typeof capturedArgs.content, 'string', 'The content object should have been converted to a string');
+		t.is(capturedArgs.content, '{"key":"value"}', 'The string content should be the JSON stringified version');
+		t.is(typeof capturedArgs.path, 'string', 'Path should remain a string');
+	}
+});
