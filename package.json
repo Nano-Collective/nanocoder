@@ -64,7 +64,7 @@
 		"@anthropic-ai/tokenizer": "^0.0.4",
 		"@modelcontextprotocol/sdk": "^1.26.0",
 		"@nanocollective/get-md": "^1.0.2",
-		"ai": "6.0.62",
+		"ai": "6.0.97",
 		"chalk": "^5.2.0",
 		"cheerio": "^1.1.2",
 		"cli-highlight": "^2.1.11",
@@ -156,11 +156,6 @@
 			"tar@<7.5.4": ">=7.5.4",
 			"tar@>=7.4.0 <7.5.4": ">=7.5.4",
 			"minimatch@<10.2.1": ">=10.2.1"
-		},
-		"auditConfig": {
-			"ignoreCves": [
-				"GHSA-8r9q-7v3j-jr4g"
-			]
 		}
 	}
 }
