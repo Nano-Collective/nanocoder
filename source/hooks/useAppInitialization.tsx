@@ -21,6 +21,7 @@ import {
 	settingsCommand,
 	setupMcpCommand,
 	setupProvidersCommand,
+	skillsCommand,
 	statusCommand,
 	tasksCommand,
 	updateCommand,
@@ -393,6 +394,7 @@ export function useAppInitialization({
 				statusCommand,
 				setupProvidersCommand,
 				setupMcpCommand,
+				skillsCommand,
 				usageCommand,
 				checkpointCommand,
 				quitCommand,
@@ -403,6 +405,9 @@ export function useAppInitialization({
 
 			// Now start with the properly initialized objects (excluding MCP)
 			await start(newToolManager, newCustomCommandLoader, preferences);
+
+			// Initialize Skills (discover and cache metadata)
+			await newToolManager.getSkillManager().initialize();
 
 			// Check for updates before showing UI
 			try {
