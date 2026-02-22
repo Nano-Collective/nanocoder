@@ -143,7 +143,7 @@ const WriteFileFormatter = React.memo(({args}: {args: WriteFileArgs}) => {
 	}
 	const {colors} = themeContext;
 	const path = args.path || args.file_path || 'unknown';
-	const newContent = args.content || '';
+	const newContent = ensureString(args.content);
 	const lineCount = newContent.split('\n').length;
 	const charCount = newContent.length;
 
@@ -321,9 +321,6 @@ const writeFileValidator = async (args: {
 			error: `⚒ Invalid content: content cannot be null or undefined.`,
 		};
 	}
-
-	// Convert content to string for validation (but preserve type in memory)
-	const _contentStr = ensureString(args.content);
 
 	// Allow empty strings (intentional file creation)
 	// Only reject null/undefined, which we already checked above

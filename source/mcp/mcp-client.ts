@@ -28,6 +28,7 @@ import {
 	startMetrics,
 	withNewCorrelationContext,
 } from '@/utils/logging';
+import {ensureString} from '@/utils/type-helpers';
 import {TransportFactory} from './transport-factory.js';
 
 export class MCPClient {
@@ -442,7 +443,31 @@ export class MCPClient {
 			);
 		}
 
-		return this.executeToolCall(client, mapping.originalName, args);
+		// Sanitize arguments: If schema expects a string but we got an object, ensureString it.
+		const serverTools = this.serverTools.get(mapping.serverName) || [];
+		const toolDef = serverTools.find(t => t.name === mapping.originalName);
+		const sanitizedArgs = {...args};
+
+		if (toolDef?.inputSchema) {
+			const schema = toolDef.inputSchema as {
+				properties?: Record<string, {type?: string}>;
+			};
+			if (schema.properties) {
+				for (const [key, value] of Object.entries(args)) {
+					const propSchema = schema.properties[key];
+					// Only coerce if the schema explicitly demands a string and we have an object
+					if (
+						propSchema?.type === 'string' &&
+						typeof value === 'object' &&
+						value !== null
+					) {
+						sanitizedArgs[key] = ensureString(value);
+					}
+				}
+			}
+		}
+
+		return this.executeToolCall(client, mapping.originalName, sanitizedArgs);
 	}
 
 	private async executeToolCall(

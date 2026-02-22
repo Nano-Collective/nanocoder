@@ -11,7 +11,6 @@ import type {LLMClient, Message, ToolCall, ToolResult} from '@/types/core';
 import {performAutoCompact} from '@/utils/auto-compact';
 import {formatElapsedTime, getRandomAdjective} from '@/utils/completion-note';
 import {MessageBuilder} from '@/utils/message-builder';
-import {normalizeLLMResponse} from '@/utils/response-formatter';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {displayToolResult} from '@/utils/tool-result-display';
 import {filterValidToolCalls} from '../utils/tool-filters';
@@ -131,11 +130,8 @@ export const processAssistantResponse = async (
 	const toolCalls = message.tool_calls || null;
 	const fullContent = message.content || '';
 
-	// NEW: Normalize LLM response before parsing
-	const normalized = await normalizeLLMResponse(fullContent);
-
 	// Parse any tool calls from content for non-tool-calling models
-	const parseResult = parseToolCalls(normalized.content);
+	const parseResult = parseToolCalls(fullContent);
 
 	// Check for malformed tool calls and send error back to model for self-correction
 	if (!parseResult.success) {
@@ -184,7 +180,7 @@ export const processAssistantResponse = async (
 	}
 
 	const parsedToolCalls = parseResult.toolCalls;
-	const cleanedContent = parseResult.cleanedContent || normalized.content;
+	const cleanedContent = parseResult.cleanedContent;
 
 	// Display the assistant response (cleaned of any tool calls)
 	if (cleanedContent.trim()) {
@@ -196,9 +192,6 @@ export const processAssistantResponse = async (
 			/>,
 		);
 	}
-
-	// Merge structured tool calls from AI SDK with content-parsed tool calls
-	const _allToolCalls = [...(toolCalls || []), ...parsedToolCalls];
 
 	// NEW: Deduplicate parsed calls to prevent "Ghost Echo" effect
 	// Only keep parsed calls that are NOT duplicates of native calls
