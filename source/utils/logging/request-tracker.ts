@@ -4,6 +4,7 @@
  */
 
 import {randomBytes} from 'node:crypto';
+import nodeProcess from 'node:process';
 
 import {MAX_COMPLETED_REQUESTS} from '@/constants';
 import {generateCorrelationId, getLogger} from './index.js';
@@ -12,6 +13,18 @@ import {
 	formatBytes,
 	trackPerformance,
 } from './performance.js';
+
+// Safe memory usage getter with runtime checks
+const getSafeMemory = () => {
+	try {
+		if (nodeProcess && typeof nodeProcess.memoryUsage === 'function') {
+			return nodeProcess.memoryUsage();
+		}
+	} catch {
+		// Ignore any errors during process.memoryUsage()
+	}
+	return {rss: 0, heapTotal: 0, heapUsed: 0, external: 0, arrayBuffers: 0};
+};
 
 // Get logger instance directly to avoid circular dependencies
 const logger = getLogger();
@@ -102,7 +115,7 @@ export class RequestTracker {
 			startTime: Date.now(),
 			status: 'pending',
 			correlationId: generateCorrelationId(),
-			memoryStart: process.memoryUsage(),
+			memoryStart: getSafeMemory(),
 		};
 
 		this.activeRequests.set(id, request);
@@ -140,7 +153,7 @@ export class RequestTracker {
 		}
 
 		const endTime = Date.now();
-		const memoryEnd = process.memoryUsage();
+		const memoryEnd = getSafeMemory();
 		const duration = endTime - request.startTime;
 		let memoryDelta: Record<string, number> | undefined;
 		if (request.memoryStart) {
@@ -210,7 +223,7 @@ export class RequestTracker {
 		}
 
 		const endTime = Date.now();
-		const memoryEnd = process.memoryUsage();
+		const memoryEnd = getSafeMemory();
 		const duration = endTime - request.startTime;
 		let memoryDelta: Record<string, number> | undefined;
 		if (request.memoryStart) {
@@ -282,7 +295,7 @@ export class RequestTracker {
 		}
 
 		const endTime = Date.now();
-		const memoryEnd = process.memoryUsage();
+		const memoryEnd = getSafeMemory();
 		const duration = endTime - request.startTime;
 		let memoryDelta: Record<string, number> | undefined;
 		if (request.memoryStart) {
@@ -344,7 +357,7 @@ export class RequestTracker {
 		}
 
 		const endTime = Date.now();
-		const memoryEnd = process.memoryUsage();
+		const memoryEnd = getSafeMemory();
 		const duration = endTime - request.startTime;
 		let memoryDelta: Record<string, number> | undefined;
 		if (request.memoryStart) {

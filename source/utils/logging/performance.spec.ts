@@ -6,6 +6,7 @@ import {
 import {
 	checkMemoryThresholds,
 	measureTime,
+	startMetrics,
 	takePerformanceSnapshot,
 	trackPerformance,
 } from './performance.js';
@@ -206,4 +207,43 @@ test('trackPerformance maintains context across Promise boundaries', async t => 
 
 	t.true(result, 'Context should persist across async boundaries');
 	t.truthy(contextId, 'Should have a valid context ID');
+});
+
+// Edge case tests for process.unavailable scenarios
+// Use test.serial because we are mutating the global process object!
+test.serial('startMetrics works when process.memoryUsage throws', t => {
+	const originalMemoryUsage = process.memoryUsage;
+
+	// Mock to simulate environment failure
+	process.memoryUsage = () => { throw new Error('process unavailable'); };
+
+	try {
+		const metrics = startMetrics();
+		t.truthy(metrics.startTime);
+		// Correct property name: memoryUsage
+		t.deepEqual(metrics.memoryUsage, {rss: 0, heapTotal: 0, heapUsed: 0, external: 0, arrayBuffers: 0});
+	} finally {
+		// Restore the global object
+		process.memoryUsage = originalMemoryUsage;
+	}
+});
+
+test.serial('takePerformanceSnapshot works when process throws', t => {
+	const originalMemoryUsage = process.memoryUsage;
+	const originalCpuUsage = process.cpuUsage;
+
+	process.memoryUsage = () => { throw new Error('process unavailable'); };
+	process.cpuUsage = () => { throw new Error('process unavailable'); };
+
+	try {
+		const snapshot = takePerformanceSnapshot({ includeCpu: true });
+
+		// Verify fallbacks were used safely
+		t.deepEqual(snapshot.memory, {rss: 0, heapTotal: 0, heapUsed: 0, external: 0, arrayBuffers: 0});
+		t.deepEqual(snapshot.cpu, {user: 0, system: 0});
+		t.truthy(snapshot.timestamp);
+	} finally {
+		process.memoryUsage = originalMemoryUsage;
+		process.cpuUsage = originalCpuUsage;
+	}
 });
