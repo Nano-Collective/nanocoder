@@ -8,10 +8,7 @@ import type {
 	SkillSource,
 } from '@/types/skill';
 import {SkillDiscovery} from './skill-discovery';
-import {
-	parseSkillFrontmatter,
-	type SkillFrontmatter,
-} from './skill-frontmatter';
+import type {SkillFrontmatter} from './skill-frontmatter';
 
 const SKILL_FILE = 'SKILL.md';
 const RESOURCES_DIR = 'resources';
@@ -86,11 +83,6 @@ export class SkillManager {
 		}
 
 		const skillId = `${source.type}:${dirName}`;
-		const frontmatter = parseSkillFrontmatter(match[1], skillId);
-		if (!frontmatter) {
-			return null;
-		}
-
 		const body = (match[2] ?? '').trim();
 		const resources = await this.loadSkillResources(skillPath);
 
@@ -107,14 +99,14 @@ export class SkillManager {
 			name: metadata.name,
 			description: metadata.description,
 			category: metadata.category,
-			version: frontmatter.version ?? '1.0.0',
-			author: frontmatter.author,
+			version: metadata.version ?? '1.0.0',
+			author: metadata.author,
 			metadata,
 			content: {
 				instructions: body,
-				examples: frontmatter.examples,
-				references: frontmatter.references,
-				dependencies: frontmatter.dependencies,
+				examples: metadata.examples,
+				references: metadata.references,
+				dependencies: metadata.dependencies,
 			},
 			allowedTools: metadata.allowedTools,
 			resources,
