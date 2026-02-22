@@ -987,6 +987,55 @@ test('RequestTracker handles memory calculation errors gracefully', t => {
 	// No cleanup needed since we didn't mock memoryUsage
 });
 
+test.serial('RequestTracker handles process.memoryUsage throws', t => {
+	const tracker = new RequestTracker();
+	const originalMemoryUsage = process.memoryUsage;
+
+	// Mock to simulate environment failure
+	process.memoryUsage = () => { throw new Error('process unavailable'); };
+
+	try {
+		const metadata = {
+			type: 'http' as const,
+			method: 'GET',
+			url: '/test',
+			endpoint: '/test',
+			provider: 'test-provider',
+			model: 'test-model',
+			toolName: 'test-tool',
+			serverName: 'test-server',
+			correlationId: 'test-correlation',
+			startTime: Date.now(),
+			endTime: Date.now(),
+			duration: 100,
+			memoryStart: {rss: 0, heapTotal: 0, heapUsed: 0, external: 0, arrayBuffers: 0},
+			memoryEnd: {rss: 0, heapTotal: 0, heapUsed: 0, external: 0, arrayBuffers: 0},
+			memoryDelta: {heapUsed: 1024, heapTotal: 2048, external: 512, rss: 4096},
+			status: 'success' as const,
+			statusCode: 200,
+			errorType: undefined,
+			errorMessage: undefined,
+			requestSize: 1024,
+			responseSize: 2048,
+			retryCount: 0,
+			userId: 'test-user',
+			sessionId: 'test-session',
+			tags: ['test', 'request'],
+			customData: {key: 'value'},
+		};
+
+		const requestId = tracker.startRequest(metadata);
+		const completed = tracker.completeRequest(requestId, {statusCode: 200});
+
+		// Should still complete the request successfully
+		t.truthy(completed);
+		t.is(completed?.status, 'success');
+	} finally {
+		// Restore the global object
+		process.memoryUsage = originalMemoryUsage;
+	}
+});
+
 // Test performance characteristics
 // ============================================================================
 

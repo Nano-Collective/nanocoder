@@ -2,6 +2,7 @@
  * Main health monitoring class
  */
 
+import nodeProcess from 'node:process';
 import {loadavg} from 'os';
 import {
 	COOLDOWN_ALERT_MS,
@@ -32,6 +33,34 @@ import {runHealthCheck} from './health-check-runner.js';
 
 // Get logger instance directly to avoid circular dependencies
 const logger = getLogger();
+
+/**
+ * Safe memory usage getter with runtime checks
+ */
+const getSafeMemory = (): NodeJS.MemoryUsage => {
+	try {
+		if (nodeProcess && typeof nodeProcess.memoryUsage === 'function') {
+			return nodeProcess.memoryUsage();
+		}
+	} catch {
+		// Ignore any errors during process.memoryUsage()
+	}
+	return {rss: 0, heapTotal: 0, heapUsed: 0, external: 0, arrayBuffers: 0};
+};
+
+/**
+ * Safe CPU usage getter with runtime checks
+ */
+const getSafeCpuUsage = (): NodeJS.CpuUsage => {
+	try {
+		if (nodeProcess && typeof nodeProcess.cpuUsage === 'function') {
+			return nodeProcess.cpuUsage();
+		}
+	} catch {
+		// Ignore any errors during process.cpuUsage()
+	}
+	return {user: 0, system: 0};
+};
 
 /**
  * Health monitoring system
@@ -238,8 +267,8 @@ export class HealthMonitor {
 	 */
 	getSystemMetrics(): SystemMetrics {
 		const _now = Date.now();
-		const memory = process.memoryUsage();
-		const cpuUsage = process.cpuUsage();
+		const memory = getSafeMemory();
+		const cpuUsage = getSafeCpuUsage();
 		const requestStats = globalRequestTracker.getStats();
 		const logStats = globalLogStorage.getEntryCount();
 		const perfStats = globalPerformanceMonitor.getAllStats();

@@ -2,14 +2,30 @@
  * Memory health check
  */
 
+import nodeProcess from 'node:process';
+
 import type {HealthCheck, HealthCheckConfig} from '../types.js';
+
+/**
+ * Safe memory usage getter with runtime checks
+ */
+const getSafeMemory = (): NodeJS.MemoryUsage => {
+	try {
+		if (nodeProcess && typeof nodeProcess.memoryUsage === 'function') {
+			return nodeProcess.memoryUsage();
+		}
+	} catch {
+		// Ignore any errors during process.memoryUsage()
+	}
+	return {rss: 0, heapTotal: 0, heapUsed: 0, external: 0, arrayBuffers: 0};
+};
 
 /**
  * Check memory usage
  */
 export function checkMemory(config: HealthCheckConfig): HealthCheck {
 	const startTime = performance.now();
-	const memory = process.memoryUsage();
+	const memory = getSafeMemory();
 	const heapUsagePercent = memory.heapUsed / memory.heapTotal;
 	const externalMB = memory.external / 1024 / 1024;
 
