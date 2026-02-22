@@ -860,10 +860,12 @@ test('write_file formatter: handles object content (regression test)', async t =
 	const output = lastFrame();
 
 	t.truthy(output);
-	t.regex(output!, /write_file/);
-	t.regex(output!, /manifest\.json/);
+	// Strip ANSI color codes before regex matching to avoid failures due to syntax highlighting
+	const plainOutput = stripAnsi(output!);
+	t.regex(plainOutput, /write_file/);
+	t.regex(plainOutput, /manifest\.json/);
 	// ensureString converts object to JSON string, so we expect the keys to appear
-	t.regex(output!, /"test_id":1/);
+	t.regex(plainOutput, /"test_id":1/);
 });
 
 // ============================================================================
