@@ -28,6 +28,7 @@ import {
 	startMetrics,
 	withNewCorrelationContext,
 } from '@/utils/logging';
+import {getSafeMemory} from '@/utils/logging/safe-process.js';
 import {ensureString} from '@/utils/type-helpers';
 import {TransportFactory} from './transport-factory.js';
 
@@ -150,7 +151,7 @@ export class MCPClient {
 					toolCount: tools.length,
 					duration: `${finalMetrics.duration.toFixed(2)}ms`,
 					memoryDelta: formatMemoryUsage(
-						finalMetrics.memoryUsage || process.memoryUsage(),
+						finalMetrics.memoryUsage || getSafeMemory(),
 					),
 					correlationId,
 				});
@@ -163,7 +164,7 @@ export class MCPClient {
 					errorName: error instanceof Error ? error.name : 'Unknown',
 					duration: `${finalMetrics.duration.toFixed(2)}ms`,
 					memoryDelta: formatMemoryUsage(
-						finalMetrics.memoryUsage || process.memoryUsage(),
+						finalMetrics.memoryUsage || getSafeMemory(),
 					),
 					correlationId,
 				});

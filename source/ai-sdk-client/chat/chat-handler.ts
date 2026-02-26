@@ -24,6 +24,7 @@ import {
 	startMetrics,
 	withNewCorrelationContext,
 } from '@/utils/logging';
+import {getSafeMemory} from '@/utils/logging/safe-process.js';
 import {convertToModelMessages} from '../converters/message-converter.js';
 import {
 	convertAISDKToolCalls,
@@ -257,7 +258,7 @@ export async function handleChat(
 				responseLength: content.length,
 				toolCallsFound: toolCalls.length,
 				memoryDelta: formatMemoryUsage(
-					finalMetrics.memoryUsage || process.memoryUsage(),
+					finalMetrics.memoryUsage || getSafeMemory(),
 				),
 				correlationId,
 				provider: providerConfig.name,
@@ -368,7 +369,7 @@ export async function handleChat(
 				correlationId,
 				provider: providerConfig.name,
 				memoryDelta: formatMemoryUsage(
-					finalMetrics.memoryUsage || process.memoryUsage(),
+					finalMetrics.memoryUsage || getSafeMemory(),
 				),
 			});
 

@@ -2,6 +2,7 @@
  * Memory health check
  */
 
+import {getSafeMemory} from '../../safe-process.js';
 import type {HealthCheck, HealthCheckConfig} from '../types.js';
 
 /**
@@ -9,7 +10,7 @@ import type {HealthCheck, HealthCheckConfig} from '../types.js';
  */
 export function checkMemory(config: HealthCheckConfig): HealthCheck {
 	const startTime = performance.now();
-	const memory = process.memoryUsage();
+	const memory = getSafeMemory();
 	const heapUsagePercent = memory.heapUsed / memory.heapTotal;
 	const externalMB = memory.external / 1024 / 1024;
 

@@ -7,6 +7,7 @@ import {randomBytes} from 'node:crypto';
 import {loadavg} from 'node:os';
 
 import {generateCorrelationId} from './index.js';
+import {getSafeCpuUsage, getSafeMemory} from './safe-process.js';
 import type {Logger, PerformanceMetrics} from './types.js';
 
 // Create correlation context function
@@ -22,7 +23,7 @@ import {correlationStorage} from './correlation.js';
 
 // Private CPU usage functions (used internally)
 function getCpuUsage(): NodeJS.CpuUsage {
-	return process.cpuUsage();
+	return getSafeCpuUsage();
 }
 
 function calculateCpuUsage(
@@ -103,7 +104,7 @@ const logger: Logger = new Proxy({} as Logger, {
 export function startMetrics(): PerformanceMetrics {
 	return {
 		startTime: performance.now(),
-		memoryUsage: process.memoryUsage(),
+		memoryUsage: getSafeMemory(),
 	};
 }
 
@@ -119,7 +120,7 @@ export function endMetrics(
 	return {
 		...metrics,
 		duration,
-		memoryUsage: process.memoryUsage(),
+		memoryUsage: getSafeMemory(),
 	};
 }
 
@@ -193,7 +194,7 @@ export function trackPerformance<T extends (...args: unknown[]) => unknown>(
 
 	return (async (...args: Parameters<T>) => {
 		const metrics = startMetrics();
-		const cpuStart = process.cpuUsage();
+		const cpuStart = getSafeCpuUsage();
 
 		// Create new correlation context for this performance tracking
 		const context = createCorrelationContext();
@@ -204,10 +205,10 @@ export function trackPerformance<T extends (...args: unknown[]) => unknown>(
 				const result = await fn(...args);
 
 				const end = endMetrics(metrics);
-				const cpuEnd = process.cpuUsage();
+				const cpuEnd = getSafeCpuUsage();
 				const memoryDelta = calculateMemoryDelta(
-					metrics.memoryUsage || process.memoryUsage(),
-					end.memoryUsage || process.memoryUsage(),
+					metrics.memoryUsage || getSafeMemory(),
+					end.memoryUsage || getSafeMemory(),
 				);
 
 				// Calculate CPU usage percentage
@@ -234,7 +235,7 @@ export function trackPerformance<T extends (...args: unknown[]) => unknown>(
 						rss: formatBytes(memoryDelta.rssDelta),
 					};
 					perfData.currentMemory = formatMemoryUsage(
-						end.memoryUsage || process.memoryUsage(),
+						end.memoryUsage || getSafeMemory(),
 					);
 				}
 
@@ -293,8 +294,8 @@ export function trackPerformance<T extends (...args: unknown[]) => unknown>(
 			} catch (error) {
 				const end = endMetrics(metrics);
 				const memoryDelta = calculateMemoryDelta(
-					metrics.memoryUsage || process.memoryUsage(),
-					end.memoryUsage || process.memoryUsage(),
+					metrics.memoryUsage || getSafeMemory(),
+					end.memoryUsage || getSafeMemory(),
 				);
 				const cpuEnd = getCpuUsage();
 				const cpuPercent = calculateCpuUsage(cpuStart, cpuEnd, end.duration);
@@ -349,8 +350,8 @@ export async function measureTime<T>(
 	} = options || {};
 
 	const start = performance.now();
-	const memoryStart = process.memoryUsage();
-	const cpuStart = trackCpu ? process.cpuUsage() : undefined;
+	const memoryStart = getSafeMemory();
+	const cpuStart = trackCpu ? getSafeCpuUsage() : undefined;
 
 	// Create new correlation context for this measurement
 	const context = createCorrelationContext();
@@ -360,8 +361,8 @@ export async function measureTime<T>(
 		try {
 			const result = await fn();
 			const duration = performance.now() - start;
-			const memoryEnd = process.memoryUsage();
-			const cpuEnd = trackCpu ? process.cpuUsage() : undefined;
+			const memoryEnd = getSafeMemory();
+			const cpuEnd = trackCpu ? getSafeCpuUsage() : undefined;
 
 			let memoryDelta: Record<string, number> | undefined;
 			let cpuUsage: number | undefined;
@@ -586,13 +587,17 @@ export function takePerformanceSnapshot(options?: {
 	const correlationId = options?.correlationId || generateCorrelationId();
 	const includeCpu = options?.includeCpu !== false;
 
+	// Capture memory once to avoid double call and ensure consistency
+	const memory = getSafeMemory();
+	const uptime = process.uptime();
+
 	const snapshot: SystemPerformanceSnapshot = {
 		timestamp: new Date().toISOString(),
-		memory: process.memoryUsage(),
-		memoryFormatted: formatMemoryUsage(process.memoryUsage()),
-		cpu: includeCpu ? process.cpuUsage() : {user: 0, system: 0},
-		uptime: process.uptime(),
-		uptimeFormatted: formatUptime(process.uptime()),
+		memory,
+		memoryFormatted: formatMemoryUsage(memory),
+		cpu: includeCpu ? getSafeCpuUsage() : {user: 0, system: 0},
+		uptime,
+		uptimeFormatted: formatUptime(uptime),
 		loadAverage: loadavg(),
 		platform: process.platform,
 		arch: process.arch,
