@@ -27,8 +27,7 @@ import {useDirectoryTrust} from '@/hooks/useDirectoryTrust';
 import {useModeHandlers} from '@/hooks/useModeHandlers';
 import {useNonInteractiveMode} from '@/hooks/useNonInteractiveMode';
 import {useSchedulerMode} from '@/hooks/useSchedulerMode';
-import {ThemeContext} from '@/hooks/useTheme';
-import {TitleShapeContext, updateTitleShape} from '@/hooks/useTitleShape';
+import {useSessionAutosave} from '@/hooks/useSessionAutosave';
 import {useToolHandler} from '@/hooks/useToolHandler';
 import {UIStateProvider} from '@/hooks/useUIState';
 import {useVSCodeServer} from '@/hooks/useVSCodeServer';
@@ -554,6 +553,13 @@ export default function App({
 		isToolConfirmationMode: appState.isToolConfirmationMode,
 		messages: appState.messages,
 		addToChatQueue: appState.addToChatQueue,
+	});
+
+	// Setup session autosave
+	useSessionAutosave({
+		messages: appState.messages,
+		currentProvider: appState.currentProvider,
+		currentModel: appState.currentModel,
 	});
 
 	const shouldShowWelcome = shouldRenderWelcome(nonInteractiveMode);
