@@ -51,8 +51,9 @@ export class SessionManager {
 			try {
 				await fs.access(this.sessionsIndexPath);
 			} catch (_error) {
-				// If sessions.json doesn't exist, create it with empty array
-				await fs.writeFile(this.sessionsIndexPath, JSON.stringify([]));
+				await fs.writeFile(this.sessionsIndexPath, JSON.stringify([]), {
+					mode: 0o600,
+				});
 			}
 
 			// Perform cleanup of old sessions if configured
@@ -89,8 +90,9 @@ export class SessionManager {
 	async saveSession(session: Session): Promise<void> {
 		const sessionFilePath = path.join(this.sessionsDir, `${session.id}.json`);
 
-		// Save the session file
-		await fs.writeFile(sessionFilePath, JSON.stringify(session, null, 2));
+		await fs.writeFile(sessionFilePath, JSON.stringify(session, null, 2), {
+			mode: 0o600,
+		});
 
 		// Update sessions index
 		const sessions = await this.listSessions();
@@ -116,6 +118,7 @@ export class SessionManager {
 		await fs.writeFile(
 			this.sessionsIndexPath,
 			JSON.stringify(sessions, null, 2),
+			{mode: 0o600},
 		);
 	}
 
@@ -160,6 +163,7 @@ export class SessionManager {
 			await fs.writeFile(
 				this.sessionsIndexPath,
 				JSON.stringify(filteredSessions, null, 2),
+				{mode: 0o600},
 			);
 		} catch (_error) {
 			// Ignore errors if file doesn't exist

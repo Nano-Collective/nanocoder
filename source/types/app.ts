@@ -1,6 +1,7 @@
 import React from 'react';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
+import type {Session} from '@/session/session-manager';
 import type {CheckpointListItem} from './checkpoint';
 import type {CustomCommand} from './commands';
 import type {Message} from './core';
@@ -23,6 +24,8 @@ export interface MessageSubmissionOptions {
 		checkpoints: CheckpointListItem[],
 		currentMessageCount: number,
 	) => void;
+	onEnterSessionSelectorMode?: () => void;
+	onResumeSession?: (session: Session) => void;
 	onShowStatus: () => void;
 	onEnterSchedulerMode?: () => void;
 	onHandleChatMessage: (message: string) => Promise<void>;

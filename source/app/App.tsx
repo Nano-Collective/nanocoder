@@ -504,6 +504,10 @@ export default function App({
 		setIsToolExecuting: appState.setIsToolExecuting,
 		setIsCheckpointLoadMode: appState.setIsCheckpointLoadMode,
 		setCheckpointLoadData: appState.setCheckpointLoadData,
+		setIsSessionSelectorMode: appState.setIsSessionSelectorMode,
+		setCurrentSessionId: appState.setCurrentSessionId,
+		setCurrentProvider: appState.setCurrentProvider,
+		setCurrentModel: appState.setCurrentModel,
 		addToChatQueue: appState.addToChatQueue,
 		setLiveComponent: appState.setLiveComponent,
 		client: appState.client,
@@ -560,6 +564,8 @@ export default function App({
 		messages: appState.messages,
 		currentProvider: appState.currentProvider,
 		currentModel: appState.currentModel,
+		currentSessionId: appState.currentSessionId,
+		setCurrentSessionId: appState.setCurrentSessionId,
 	});
 
 	const shouldShowWelcome = shouldRenderWelcome(nonInteractiveMode);
@@ -720,7 +726,8 @@ export default function App({
 							appState.isConfigWizardMode ||
 							appState.isMcpWizardMode ||
 							appState.isSettingsMode ||
-							appState.isCheckpointLoadMode) && (
+							appState.isCheckpointLoadMode ||
+							appState.isSessionSelectorMode) && (
 							<Box marginLeft={-1} flexDirection="column">
 								<ModalSelectors
 									isModelSelectionMode={appState.isModelSelectionMode}
@@ -730,6 +737,7 @@ export default function App({
 									isMcpWizardMode={appState.isMcpWizardMode}
 									isSettingsMode={appState.isSettingsMode}
 									isCheckpointLoadMode={appState.isCheckpointLoadMode}
+									isSessionSelectorMode={appState.isSessionSelectorMode}
 									client={appState.client}
 									currentModel={appState.currentModel}
 									currentProvider={appState.currentProvider}
@@ -752,6 +760,10 @@ export default function App({
 									onSettingsCancel={modeHandlers.handleSettingsCancel}
 									onCheckpointSelect={appHandlers.handleCheckpointSelect}
 									onCheckpointCancel={appHandlers.handleCheckpointCancel}
+									onSessionSelect={sessionId =>
+										void appHandlers.handleSessionSelect(sessionId)
+									}
+									onSessionCancel={appHandlers.handleSessionCancel}
 								/>
 							</Box>
 						)}
@@ -780,6 +792,7 @@ export default function App({
 								appState.isSettingsMode ||
 								appState.isMcpWizardMode ||
 								appState.isCheckpointLoadMode ||
+								appState.isSessionSelectorMode ||
 								appState.isExplorerMode ||
 								appState.isIdeSelectionMode
 							) && (

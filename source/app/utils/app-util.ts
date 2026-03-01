@@ -17,6 +17,7 @@ import {
 	setSessionContextLimit,
 } from '@/models/index';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {sessionManager} from '@/session/session-manager';
 import {createTokenizer} from '@/tokenization/index';
 import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
 import type {CompressionMode} from '@/types/config';
@@ -52,6 +53,15 @@ const CHECKPOINT_SUBCOMMANDS = {
 	LOAD: 'load',
 	RESTORE: 'restore',
 } as const;
+
+/** Resume/session command names (including aliases) */
+const RESUME_COMMANDS = ['resume', 'sessions', 'history'] as const;
+
+function isResumeCommand(commandName: string): boolean {
+	return RESUME_COMMANDS.includes(
+		commandName.toLowerCase() as (typeof RESUME_COMMANDS)[number],
+	);
+}
 
 /**
  * Extracts error message from an unknown error
@@ -863,6 +873,115 @@ async function handleCheckpointLoad(
 }
 
 /**
+ * Handles /resume, /sessions, /history (session resume).
+ * No args: show session selector. One arg: resume by "last", id, or list index.
+ * Returns true if handled.
+ */
+async function handleResumeCommand(
+	commandParts: string[],
+	options: MessageSubmissionOptions,
+): Promise<boolean> {
+	const commandName = commandParts[0]?.toLowerCase();
+	if (!commandName || !isResumeCommand(commandName)) {
+		return false;
+	}
+
+	const {
+		onAddToChatQueue,
+		onEnterSessionSelectorMode,
+		onResumeSession,
+		onCommandComplete,
+		getNextComponentKey,
+	} = options;
+
+	if (!onEnterSessionSelectorMode || !onResumeSession) {
+		onCommandComplete?.();
+		return true;
+	}
+
+	const args = commandParts.slice(1);
+
+	// No args: show session selector
+	if (args.length === 0) {
+		try {
+			await sessionManager.initialize();
+			onEnterSessionSelectorMode();
+		} catch (error) {
+			onAddToChatQueue(
+				React.createElement(ErrorMessage, {
+					key: `resume-error-${getNextComponentKey()}`,
+					message: `Failed to initialize sessions: ${getErrorMessage(error)}`,
+					hideBox: true,
+				}),
+			);
+			onCommandComplete?.();
+		}
+		return true;
+	}
+
+	// One arg: resolve and load session
+	const sessionIdOrSpecial = args[0];
+	try {
+		await sessionManager.initialize();
+		const sessions = await sessionManager.listSessions();
+		const sorted = [...sessions].sort(
+			(a, b) =>
+				new Date(b.lastAccessedAt).getTime() -
+				new Date(a.lastAccessedAt).getTime(),
+		);
+
+		let sessionId: string | null = null;
+
+		if (sessionIdOrSpecial.toLowerCase() === 'last') {
+			if (sorted.length > 0) sessionId = sorted[0].id;
+		} else {
+			const index = Number.parseInt(sessionIdOrSpecial, 10);
+			if (!Number.isNaN(index) && index >= 1 && index <= sorted.length) {
+				sessionId = sorted[index - 1].id;
+			} else {
+				sessionId = sessionIdOrSpecial;
+			}
+		}
+
+		if (!sessionId) {
+			onAddToChatQueue(
+				React.createElement(InfoMessage, {
+					key: `resume-info-${getNextComponentKey()}`,
+					message: 'No sessions found.',
+					hideBox: true,
+				}),
+			);
+			onCommandComplete?.();
+			return true;
+		}
+
+		const session = await sessionManager.loadSession(sessionId);
+		if (session) {
+			onResumeSession(session);
+		} else {
+			onAddToChatQueue(
+				React.createElement(ErrorMessage, {
+					key: `resume-error-${getNextComponentKey()}`,
+					message: `Session not found: ${sessionId}`,
+					hideBox: true,
+				}),
+			);
+		}
+	} catch (error) {
+		onAddToChatQueue(
+			React.createElement(ErrorMessage, {
+				key: `resume-error-${getNextComponentKey()}`,
+				message: `Failed to resume session: ${getErrorMessage(error)}`,
+				hideBox: true,
+			}),
+		);
+	}
+
+	onCommandComplete?.();
+	return true;
+}
+
+/**
  * Handles built-in commands via the command registry
  */
 async function handleBuiltInCommand(
@@ -971,6 +1090,11 @@ async function handleSlashCommand(
 
 	// Try checkpoint load
 	if (await handleCheckpointLoad(commandParts, options)) {
+		return;
+	}
+
+	// Try /resume, /sessions, /history
+	if (await handleResumeCommand(commandParts, options)) {
 		return;
 	}
 
