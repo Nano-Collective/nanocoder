@@ -101,10 +101,6 @@ function Help({
 					</Text>
 				))
 			)}
-			<Text color={colors.text}>
-				{' '}
-				• /resume - Resume a previous chat session
-			</Text>
 		</TitledBoxWithPreferences>
 	);
 }
