@@ -37,8 +37,10 @@ export class SessionManager {
 
 		// Resolve session directory path
 		let sessionDirPath = sessionConfig?.directory || '~/.nanocoder-sessions';
-		if (sessionDirPath.startsWith('~')) {
-			sessionDirPath = path.join(os.homedir(), sessionDirPath.slice(1));
+		if (sessionDirPath === '~') {
+			sessionDirPath = os.homedir();
+		} else if (sessionDirPath.startsWith('~/')) {
+			sessionDirPath = path.join(os.homedir(), sessionDirPath.slice(2));
 		}
 
 		this.sessionsDir = sessionDirPath;
