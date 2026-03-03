@@ -227,17 +227,17 @@ function tryLoadSessionsFromPath(
 				saveInterval: normalizeSessionNumber(
 					sessions.saveInterval,
 					1000, // Minimum 1 second
-					defaults.saveInterval,
+					defaults.saveInterval ?? 30000,
 				),
 				maxSessions: normalizeSessionNumber(
 					sessions.maxSessions,
 					1,
-					defaults.maxSessions,
+					defaults.maxSessions ?? 100,
 				),
 				retentionDays: normalizeSessionNumber(
 					sessions.retentionDays,
 					1,
-					defaults.retentionDays,
+					defaults.retentionDays ?? 30,
 				),
 				directory: sessions.directory || defaults.directory,
 			};
