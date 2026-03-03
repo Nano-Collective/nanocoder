@@ -49,7 +49,8 @@ export class SessionManager {
 
 	async initialize(): Promise<void> {
 		try {
-			await fs.mkdir(this.sessionsDir, {recursive: true});
+			await fs.mkdir(this.sessionsDir, {recursive: true, mode: 0o700});
+			await fs.chmod(this.sessionsDir, 0o700);
 			try {
 				await fs.access(this.sessionsIndexPath);
 			} catch (_error) {
