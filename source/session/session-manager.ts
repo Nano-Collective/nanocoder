@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,9 +28,11 @@ export interface SessionMetadata {
 	workingDirectory: string;
 }
 
-export class SessionManager {
+class SessionManager {
 	private sessionsDir: string;
 	private sessionsIndexPath: string;
+	/** Serializes read-modify-write of sessions.json to prevent lost updates from concurrent autosave/resume. */
+	private indexWriteLock: Promise<void> = Promise.resolve();
 
 	constructor() {
 		const config = getAppConfig();
@@ -57,6 +60,7 @@ export class SessionManager {
 				await fs.writeFile(this.sessionsIndexPath, JSON.stringify([]), {
 					mode: 0o600,
 				});
+				await fs.chmod(this.sessionsIndexPath, 0o600);
 			}
 
 			// Perform cleanup of old sessions if configured
@@ -70,7 +74,7 @@ export class SessionManager {
 	async createSession(
 		sessionData: Omit<Session, 'id' | 'createdAt' | 'lastAccessedAt'>,
 	): Promise<Session> {
-		const sessionId = Date.now().toString();
+		const sessionId = crypto.randomUUID();
 		const timestamp = new Date().toISOString();
 
 		const session: Session = {
@@ -96,33 +100,36 @@ export class SessionManager {
 		await fs.writeFile(sessionFilePath, JSON.stringify(session, null, 2), {
 			mode: 0o600,
 		});
+		await fs.chmod(sessionFilePath, 0o600);
 
-		// Update sessions index
-		const sessions = await this.listSessions();
-		const existingSessionIndex = sessions.findIndex(s => s.id === session.id);
+		await this.withIndexLock(async () => {
+			const sessions = await this.listSessions();
+			const existingSessionIndex = sessions.findIndex(s => s.id === session.id);
 
-		const sessionMetadata: SessionMetadata = {
-			id: session.id,
-			title: session.title,
-			createdAt: session.createdAt,
-			lastAccessedAt: new Date().toISOString(),
-			messageCount: session.messageCount,
-			provider: session.provider,
-			model: session.model,
-			workingDirectory: session.workingDirectory,
-		};
+			const sessionMetadata: SessionMetadata = {
+				id: session.id,
+				title: session.title,
+				createdAt: session.createdAt,
+				lastAccessedAt: new Date().toISOString(),
+				messageCount: session.messageCount,
+				provider: session.provider,
+				model: session.model,
+				workingDirectory: session.workingDirectory,
+			};
 
-		if (existingSessionIndex >= 0) {
-			sessions[existingSessionIndex] = sessionMetadata;
-		} else {
-			sessions.push(sessionMetadata);
-		}
+			if (existingSessionIndex >= 0) {
+				sessions[existingSessionIndex] = sessionMetadata;
+			} else {
+				sessions.push(sessionMetadata);
+			}
 
-		await fs.writeFile(
-			this.sessionsIndexPath,
-			JSON.stringify(sessions, null, 2),
-			{mode: 0o600},
-		);
+			await fs.writeFile(
+				this.sessionsIndexPath,
+				JSON.stringify(sessions, null, 2),
+				{mode: 0o600},
+			);
+			await fs.chmod(this.sessionsIndexPath, 0o600);
+		});
 	}
 
 	async listSessions(): Promise<SessionMetadata[]> {
@@ -156,18 +163,19 @@ export class SessionManager {
 
 	async deleteSession(sessionId: string): Promise<void> {
 		try {
-			// Remove session file
 			const sessionFilePath = path.join(this.sessionsDir, `${sessionId}.json`);
 			await fs.unlink(sessionFilePath);
 
-			// Remove from sessions index
-			const sessions = await this.listSessions();
-			const filteredSessions = sessions.filter(s => s.id !== sessionId);
-			await fs.writeFile(
-				this.sessionsIndexPath,
-				JSON.stringify(filteredSessions, null, 2),
-				{mode: 0o600},
-			);
+			await this.withIndexLock(async () => {
+				const sessions = await this.listSessions();
+				const filteredSessions = sessions.filter(s => s.id !== sessionId);
+				await fs.writeFile(
+					this.sessionsIndexPath,
+					JSON.stringify(filteredSessions, null, 2),
+					{mode: 0o600},
+				);
+				await fs.chmod(this.sessionsIndexPath, 0o600);
+			});
 		} catch (_error) {
 			// Ignore errors if file doesn't exist
 		}
@@ -175,6 +183,21 @@ export class SessionManager {
 
 	async getSessionDirectory(): Promise<string> {
 		return this.sessionsDir;
+	}
+
+	/** Run a read-modify-write on the index one at a time to avoid lost updates. */
+	private async withIndexLock<T>(fn: () => Promise<T>): Promise<T> {
+		const prev = this.indexWriteLock;
+		let release!: () => void;
+		this.indexWriteLock = new Promise<void>(r => {
+			release = r;
+		});
+		await prev;
+		try {
+			return await fn();
+		} finally {
+			release();
+		}
 	}
 
 	private async enforceSessionLimits(): Promise<void> {

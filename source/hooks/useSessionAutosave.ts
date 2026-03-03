@@ -34,8 +34,16 @@ export function useSessionAutosave({
 		}
 	}, [messages.length, currentSessionId, setCurrentSessionId]);
 
-	// Initialize session manager
+	// Initialize session manager only when autosave is enabled (avoids creating
+	// sessions dir/index and running retention when user has autosave off).
+	// /resume initializes the manager when the user explicitly runs it.
 	useEffect(() => {
+		const config = getAppConfig();
+		const autoSave = config.sessions?.autoSave ?? true;
+		if (!autoSave) {
+			return;
+		}
+
 		const initialize = async () => {
 			if (!initializedRef.current) {
 				try {

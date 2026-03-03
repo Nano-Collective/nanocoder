@@ -1,4 +1,4 @@
-import {Box, Text, useApp, useInput} from 'ink';
+import {Box, Text, useInput} from 'ink';
 import SelectInput from 'ink-select-input';
 import React, {useEffect, useState} from 'react';
 import type {SessionMetadata} from '@/session/session-manager';
@@ -15,7 +15,6 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 }) => {
 	const [sessions, setSessions] = useState<SessionMetadata[]>([]);
 	const [loading, setLoading] = useState(true);
-	const {} = useApp();
 
 	useEffect(() => {
 		const loadSessions = async () => {
@@ -40,6 +39,10 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 
 	useInput((input, _) => {
 		if (input === 'q' || input === 'Q') {
+			onCancel();
+			return;
+		}
+		if (!loading && sessions.length === 0) {
 			onCancel();
 		}
 	});

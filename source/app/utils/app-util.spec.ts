@@ -266,3 +266,228 @@ test('ide command parsing - recognized as special command', t => {
 		true,
 	);
 });
+
+// --- Resume command tests (/resume, /sessions, /history) ---
+
+import React from 'react';
+import {handleMessageSubmission} from './app-util.js';
+import type {MessageSubmissionOptions} from '@/types/index';
+import type {Session} from '@/session/session-manager';
+import {sessionManager} from '@/session/session-manager';
+
+function createResumeTestOptions(overrides: {
+	onEnterSessionSelectorMode?: () => void;
+	onResumeSession?: (session: Session) => void;
+	onAddToChatQueue?: (component: React.ReactNode) => void;
+	onCommandComplete?: () => void;
+	getNextComponentKey?: () => number;
+}): MessageSubmissionOptions {
+	let key = 0;
+	return {
+		customCommandCache: new Map(),
+		customCommandLoader: null,
+		customCommandExecutor: null,
+		onClearMessages: async () => {},
+		onEnterModelSelectionMode: () => {},
+		onEnterProviderSelectionMode: () => {},
+		onEnterModelDatabaseMode: () => {},
+		onEnterConfigWizardMode: () => {},
+		onEnterSettingsMode: () => {},
+		onEnterMcpWizardMode: () => {},
+		onEnterExplorerMode: () => {},
+		onEnterIdeSelectionMode: () => {},
+		onEnterCheckpointLoadMode: () => {},
+		onShowStatus: () => {},
+		onHandleChatMessage: async () => {},
+		onAddToChatQueue: overrides.onAddToChatQueue ?? (() => {}),
+		setLiveComponent: () => {},
+		setIsToolExecuting: () => {},
+		getNextComponentKey: overrides.getNextComponentKey ?? (() => ++key),
+		setMessages: () => {},
+		messages: [],
+		provider: 'test',
+		model: 'test',
+		theme: 'dark',
+		updateInfo: null,
+		getMessageTokens: () => 0,
+		onEnterSessionSelectorMode: overrides.onEnterSessionSelectorMode,
+		onResumeSession: overrides.onResumeSession,
+		onCommandComplete: overrides.onCommandComplete,
+	};
+}
+
+test.serial('resume command - /resume with no args enters session selector mode', async t => {
+	let selectorCalled = false;
+	const origInit = sessionManager.initialize.bind(sessionManager);
+	sessionManager.initialize = async () => {};
+	try {
+		const options = createResumeTestOptions({
+			onEnterSessionSelectorMode: () => {
+				selectorCalled = true;
+			},
+			onResumeSession: () => {},
+		});
+		await handleMessageSubmission('/resume', options);
+		t.true(selectorCalled, 'onEnterSessionSelectorMode should be called');
+	} finally {
+		sessionManager.initialize = origInit;
+	}
+});
+
+test.serial('resume command - /sessions alias enters session selector mode', async t => {
+	let selectorCalled = false;
+	const origInit = sessionManager.initialize.bind(sessionManager);
+	sessionManager.initialize = async () => {};
+	try {
+		const options = createResumeTestOptions({
+			onEnterSessionSelectorMode: () => {
+				selectorCalled = true;
+			},
+			onResumeSession: () => {},
+		});
+		await handleMessageSubmission('/sessions', options);
+		t.true(selectorCalled, 'onEnterSessionSelectorMode should be called for /sessions');
+	} finally {
+		sessionManager.initialize = origInit;
+	}
+});
+
+test.serial('resume command - /history alias enters session selector mode', async t => {
+	let selectorCalled = false;
+	const origInit = sessionManager.initialize.bind(sessionManager);
+	sessionManager.initialize = async () => {};
+	try {
+		const options = createResumeTestOptions({
+			onEnterSessionSelectorMode: () => {
+				selectorCalled = true;
+			},
+			onResumeSession: () => {},
+		});
+		await handleMessageSubmission('/history', options);
+		t.true(selectorCalled, 'onEnterSessionSelectorMode should be called for /history');
+	} finally {
+		sessionManager.initialize = origInit;
+	}
+});
+
+test.serial('resume command - /resume last resumes most recent session', async t => {
+	const mockSession: Session = {
+		id: 'session-1',
+		title: 'Recent',
+		createdAt: new Date().toISOString(),
+		lastAccessedAt: new Date().toISOString(),
+		messageCount: 5,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [],
+	};
+	const origInit = sessionManager.initialize.bind(sessionManager);
+	const origList = sessionManager.listSessions.bind(sessionManager);
+	const origLoad = sessionManager.loadSession.bind(sessionManager);
+	sessionManager.initialize = async () => {};
+	sessionManager.listSessions = async () => [
+		{
+			id: mockSession.id,
+			title: mockSession.title,
+			createdAt: mockSession.createdAt,
+			lastAccessedAt: mockSession.lastAccessedAt,
+			messageCount: mockSession.messageCount,
+			provider: mockSession.provider,
+			model: mockSession.model,
+			workingDirectory: mockSession.workingDirectory,
+		},
+	];
+	sessionManager.loadSession = async (id: string) =>
+		id === mockSession.id ? mockSession : null;
+	try {
+		let resumedSession: Session | null = null;
+		const options = createResumeTestOptions({
+			onResumeSession: (session) => {
+				resumedSession = session;
+			},
+			onEnterSessionSelectorMode: () => {},
+		});
+		await handleMessageSubmission('/resume last', options);
+		t.truthy(resumedSession, 'onResumeSession should be called');
+		t.is(resumedSession!.id, mockSession.id);
+	} finally {
+		sessionManager.initialize = origInit;
+		sessionManager.listSessions = origList;
+		sessionManager.loadSession = origLoad;
+	}
+});
+
+test.serial('resume command - /resume 1 resumes session at index 1', async t => {
+	const mockSession: Session = {
+		id: 'session-first',
+		title: 'First',
+		createdAt: new Date().toISOString(),
+		lastAccessedAt: new Date().toISOString(),
+		messageCount: 2,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [],
+	};
+	const origInit = sessionManager.initialize.bind(sessionManager);
+	const origList = sessionManager.listSessions.bind(sessionManager);
+	const origLoad = sessionManager.loadSession.bind(sessionManager);
+	sessionManager.initialize = async () => {};
+	sessionManager.listSessions = async () => [
+		{
+			id: 'session-first',
+			title: 'First',
+			createdAt: mockSession.createdAt,
+			lastAccessedAt: mockSession.lastAccessedAt,
+			messageCount: 2,
+			provider: 'test',
+			model: 'test',
+			workingDirectory: '/tmp',
+		},
+	];
+	sessionManager.loadSession = async (id: string) =>
+		id === mockSession.id ? mockSession : null;
+	try {
+		let resumedSession: Session | null = null;
+		const options = createResumeTestOptions({
+			onResumeSession: (session) => {
+				resumedSession = session;
+			},
+			onEnterSessionSelectorMode: () => {},
+		});
+		await handleMessageSubmission('/resume 1', options);
+		t.truthy(resumedSession);
+		t.is(resumedSession!.id, 'session-first');
+	} finally {
+		sessionManager.initialize = origInit;
+		sessionManager.listSessions = origList;
+		sessionManager.loadSession = origLoad;
+	}
+});
+
+test.serial('resume command - invalid session id shows error message', async t => {
+	const origInit = sessionManager.initialize.bind(sessionManager);
+	const origList = sessionManager.listSessions.bind(sessionManager);
+	const origLoad = sessionManager.loadSession.bind(sessionManager);
+	sessionManager.initialize = async () => {};
+	sessionManager.listSessions = async () => [];
+	sessionManager.loadSession = async () => null;
+	try {
+		let queuedComponent: React.ReactNode = null;
+		const options = createResumeTestOptions({
+			onAddToChatQueue: (component) => {
+				queuedComponent = component;
+			},
+			onEnterSessionSelectorMode: () => {},
+			onResumeSession: () => {},
+		});
+		await handleMessageSubmission('/resume no-such-id', options);
+		t.truthy(queuedComponent, 'onAddToChatQueue should be called with error');
+		t.true(React.isValidElement(queuedComponent), 'queued component should be a React element');
+	} finally {
+		sessionManager.initialize = origInit;
+		sessionManager.listSessions = origList;
+		sessionManager.loadSession = origLoad;
+	}
+});

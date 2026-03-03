@@ -11,7 +11,6 @@
 		"nanocoder-dummy-file.ts",
 		"source/utils/message-queue.tsx",
 		"source/vscode/**/*.ts",
-		"source/hooks/useVSCodeServer.tsx",
 		"plugins/**/*",
 		"scripts/fetch-models.js",
 		".husky/**",
