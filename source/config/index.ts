@@ -208,23 +208,37 @@ function tryLoadSessionsFromPath(
 		const config = JSON.parse(rawData);
 		const sessions = config.nanocoder?.sessions;
 		if (sessions && typeof sessions === 'object') {
+			const normalizeSessionNumber = (
+				value: unknown,
+				min: number,
+				fallback: number,
+			): number => {
+				if (typeof value === 'number' && Number.isFinite(value)) {
+					return Math.max(min, value);
+				}
+				return fallback;
+			};
+
 			return {
 				autoSave:
 					sessions.autoSave !== undefined
 						? Boolean(sessions.autoSave)
 						: defaults.autoSave,
-				saveInterval:
-					sessions.saveInterval !== undefined
-						? Math.max(1000, sessions.saveInterval) // Minimum 1 second
-						: defaults.saveInterval,
-				maxSessions:
-					sessions.maxSessions !== undefined
-						? Math.max(1, sessions.maxSessions)
-						: defaults.maxSessions,
-				retentionDays:
-					sessions.retentionDays !== undefined
-						? Math.max(1, sessions.retentionDays)
-						: defaults.retentionDays,
+				saveInterval: normalizeSessionNumber(
+					sessions.saveInterval,
+					1000, // Minimum 1 second
+					defaults.saveInterval,
+				),
+				maxSessions: normalizeSessionNumber(
+					sessions.maxSessions,
+					1,
+					defaults.maxSessions,
+				),
+				retentionDays: normalizeSessionNumber(
+					sessions.retentionDays,
+					1,
+					defaults.retentionDays,
+				),
 				directory: sessions.directory || defaults.directory,
 			};
 		}
