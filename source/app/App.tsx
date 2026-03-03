@@ -31,6 +31,8 @@ import {useSessionAutosave} from '@/hooks/useSessionAutosave';
 import {useToolHandler} from '@/hooks/useToolHandler';
 import {UIStateProvider} from '@/hooks/useUIState';
 import {useVSCodeServer} from '@/hooks/useVSCodeServer';
+import {ThemeContext} from '@/hooks/useTheme';
+import {TitleShapeContext, updateTitleShape} from '@/hooks/useTitleShape';
 import type {ThemePreset} from '@/types/ui';
 import {
 	generateCorrelationId,
