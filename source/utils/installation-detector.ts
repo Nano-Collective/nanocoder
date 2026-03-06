@@ -46,6 +46,32 @@ export function detectFromPath(modulePath: string): InstallationMethod | null {
 }
 
 /**
+ * Detects installation method from environment variables.
+ * Exported for testing purposes.
+ * @returns The detected installation method or null if not detected from env
+ */
+export function detectFromEnv(): InstallationMethod | null {
+	// Check npm-specific env vars first (more specific to npm context)
+	if (
+		safeProcess.env?.npm_config_prefix ||
+		safeProcess.env?.npm_config_global ||
+		safeProcess.env?.PNPM_HOME ||
+		safeProcess.env?.npm_execpath
+	) {
+		return 'npm';
+	}
+
+	// Homebrew env vars are a weak signal — HOMEBREW_PREFIX is set system-wide
+	// on any macOS with Homebrew installed, not just for Homebrew-installed packages.
+	// Only use as a last resort fallback.
+	if (safeProcess.env?.HOMEBREW_PREFIX || safeProcess.env?.HOMEBREW_CELLAR) {
+		return 'homebrew';
+	}
+
+	return null;
+}
+
+/**
  * Detects how Nanocoder was installed by using multiple detection strategies.
  * Uses a combination of path inspection, environment variables, and file system markers.
  * An environment variable `NANOCODER_INSTALL_METHOD` can be used to override detection for testing.
@@ -72,56 +98,45 @@ export function detectInstallationMethod(): InstallationMethod {
 		);
 	}
 
-	// Strategy 1: Check environment variables (most reliable after override)
-	if (safeProcess.env?.HOMEBREW_PREFIX || safeProcess.env?.HOMEBREW_CELLAR) {
-		return 'homebrew';
-	}
-
-	// Use the module path of this file (compiled output in `dist`) to determine how it was installed.
+	// Strategy 1: Path-based detection (most reliable — checks actual install location)
 	const modulePath = dirname(fileURLToPath(import.meta.url));
-
-	// Strategy 2: Check path-based detection
 	const pathResult = detectFromPath(modulePath);
 	if (pathResult) {
 		return pathResult;
+	}
+
+	// Strategy 2: Environment variables as fallback
+	const envResult = detectFromEnv();
+	if (envResult) {
+		return envResult;
 	}
 
 	return 'unknown';
 }
 
 /**
- * Checks if this is an npm-based installation (npm, pnpm, or yarn).
- * Uses multiple detection strategies for robustness across different package managers.
+ * Checks if this is an npm-based installation (npm, pnpm, or yarn) based on the module path.
+ * Environment variable checks are handled separately by detectFromEnv().
  */
 function isNpmBasedInstallation(modulePath: string): boolean {
-	// Check 1: Environment variables set by package managers
-	if (
-		safeProcess.env?.npm_config_prefix ||
-		safeProcess.env?.npm_config_global ||
-		safeProcess.env?.PNPM_HOME ||
-		safeProcess.env?.npm_execpath
-	) {
-		return true;
-	}
-
-	// Check 2: Standard node_modules path (npm, yarn v1)
+	// Check 1: Standard node_modules path (npm, yarn v1)
 	if (modulePath.includes('node_modules')) {
 		return true;
 	}
 
-	// Check 3: pnpm store structure (.pnpm directory)
+	// Check 2: pnpm store structure (.pnpm directory)
 	if (modulePath.includes(`.pnpm${sep}`)) {
 		return true;
 	}
 
-	// Check 4: Look for .bin directory in parent paths (all package managers use this)
+	// Check 3: Look for .bin directory in parent paths (all package managers use this)
 	// This handles symlinked executables
 	const binDirPattern = `${sep}.bin${sep}`;
 	if (modulePath.includes(binDirPattern)) {
 		return true;
 	}
 
-	// Check 5: Look for package.json in expected locations relative to the module
+	// Check 4: Look for package.json in expected locations relative to the module
 	// For global installs, package.json should be in parent directories
 	// This handles edge cases like custom install locations
 	return hasPackageJsonMarker(modulePath);

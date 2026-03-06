@@ -31,7 +31,8 @@ test('normalizeLLMResponse - handles JSON object with tool_calls', async t => {
 
 	t.is(normalized.metadata.detectedFormat, 'json');
 	t.true(normalized.metadata.hasJSONBlocks);
-	t.true(normalized.toolCalls.length > 0);
+	// JSON tool call extraction was removed - only XML extraction remains
+	t.is(normalized.toolCalls.length, 0);
 });
 
 test('normalizeLLMResponse - handles plain JSON object', async t => {
@@ -137,8 +138,8 @@ test('normalizeLLMResponse - detects XML format', async t => {
 });
 
 // Confidence scoring tests
-test('normalizeLLMResponse - sets high confidence when tool calls found', async t => {
-	const response = '{"name": "write_file", "arguments": {}}';
+test('normalizeLLMResponse - sets high confidence when XML tool calls found', async t => {
+	const response = '<write_file><path>/test.txt</path></write_file>';
 	const normalized = await normalizeLLMResponse(response);
 
 	t.is(normalized.metadata.confidence, 'high');
@@ -159,8 +160,8 @@ test('normalizeLLMResponse - sets low confidence for plain text', async t => {
 });
 
 // Response completion tests
-test('isResponseComplete - returns true for valid response', async t => {
-	const response = '{"name": "write_file", "arguments": {}}';
+test('isResponseComplete - returns true for valid XML tool response', async t => {
+	const response = '<write_file><path>/test.txt</path></write_file>';
 	const normalized = await normalizeLLMResponse(response);
 
 	t.true(isResponseComplete(normalized));
@@ -174,7 +175,7 @@ test('isResponseComplete - returns false for empty content', async t => {
 	t.true(isResponseComplete(normalized));
 });
 
-test('isResponseComplete - returns false for truly malformed JSON', async t => {
+test('isResponseComplete - returns false for truly malformed XML', async t => {
 	// Use a pattern explicitly defined in our malformed detector
 	// This triggers isMalformed: true via the XML regex fallback
 	const response = '[tool_use: write_file]';
@@ -193,7 +194,7 @@ test('isResponseComplete - returns false for empty string', async t => {
 
 // FormatNormalizedResponse tests
 test('formatNormalizedResponse - formats response correctly', async t => {
-	const response = '{"name": "write_file", "arguments": {}}';
+	const response = '<write_file><path>/test.txt</path></write_file>';
 	const normalized = await normalizeLLMResponse(response);
 
 	const formatted = formatNormalizedResponse(normalized);
@@ -206,18 +207,17 @@ test('formatNormalizedResponse - formats response correctly', async t => {
 });
 
 // Mixed content tests
-test('normalizeLLMResponse - handles mixed content with tool calls', async t => {
+test('normalizeLLMResponse - handles mixed content with XML tool calls', async t => {
 	const response = `Let me read that file for you.
 
-\`\`\`json
-{"name": "read_file", "arguments": {"path": "/test.txt"}}
-\`\`\`
+<read_file>
+<path>/test.txt</path>
+</read_file>
 
 Here's what I found:`;
 	const normalized = await normalizeLLMResponse(response);
 
-	t.true(normalized.metadata.hasCodeBlocks);
-	t.true(normalized.metadata.hasJSONBlocks);
+	t.true(normalized.metadata.hasXMLTags);
 	t.true(normalized.toolCalls.length > 0);
 });
 
@@ -235,7 +235,6 @@ Let me know if you need anything else.`;
 
 	t.true(normalized.metadata.hasCodeBlocks);
 	t.false(normalized.metadata.hasJSONBlocks);
-	t.false(normalized.metadata.hasXMLTags);
 	t.is(normalized.toolCalls.length, 0);
 });
 
@@ -283,8 +282,8 @@ test('normalizeLLMResponse - handles very long content', async t => {
 });
 
 // Tool call extraction tests
-test('normalizeLLMResponse - extracts single tool call from JSON', async t => {
-	const response = '{"name": "write_file", "arguments": {"path": "/test.txt", "content": "hello"}}';
+test('normalizeLLMResponse - extracts single tool call from XML', async t => {
+	const response = '<write_file><path>/test.txt</path><content>hello</content></write_file>';
 	const normalized = await normalizeLLMResponse(response);
 
 	t.is(normalized.toolCalls.length, 1);
@@ -292,14 +291,14 @@ test('normalizeLLMResponse - extracts single tool call from JSON', async t => {
 	t.is(typeof normalized.toolCalls[0].function.arguments, 'object');
 });
 
-test('normalizeLLMResponse - extracts multiple tool calls from JSON', async t => {
-	const response = '{"name": "read_file", "arguments": {"path": "/test1.txt"}}\n{"name": "read_file", "arguments": {"path": "/test2.txt"}}';
+test('normalizeLLMResponse - extracts multiple tool calls from XML', async t => {
+	const response = '<read_file><path>/test1.txt</path></read_file>\n<read_file><path>/test2.txt</path></read_file>';
 	const normalized = await normalizeLLMResponse(response);
 
 	t.is(normalized.toolCalls.length, 2);
 });
 
-test('normalizeLLMResponse - extracts tool call from XML', async t => {
+test('normalizeLLMResponse - extracts tool call from XML format', async t => {
 	const response = '<write_file><path>/test.txt</path><content>hello</content></write_file>';
 	const normalized = await normalizeLLMResponse(response);
 
@@ -308,7 +307,7 @@ test('normalizeLLMResponse - extracts tool call from XML', async t => {
 });
 
 // Metadata tests
-test('normalizeLLMResponse - sets correct metadata flags', async t => {
+test('normalizeLLMResponse - sets correct metadata for JSON format', async t => {
 	const response = '{"name": "write_file", "arguments": {}}';
 	const normalized = await normalizeLLMResponse(response);
 
@@ -353,16 +352,10 @@ test('normalizeLLMResponse - ignores malformed JSON when embedded inline', async
 });
 
 test('normalizeLLMResponse - detects malformed JSON when starting on a new line', async t => {
-	// This broken pattern starts on a new line, so the anchor SHOULD catch it.
+	// This broken pattern starts on a new line
 	const response = 'I will try to fix this:\n{"name": "write_file"}';
 	const normalized = await normalizeLLMResponse(response);
 
-	// This is currently a limitation: the dispatcher sees mixed text and
-	// hands it to the tool-parser. If tool-parser reordering is correct,
-	// and it eventually calls detectMalformedJSONToolCall...
-	// it will find the line-start error.
-
-	// Note: Because it's "Mixed" format, we check the specific parser result.
 	t.is(normalized.toolCalls.length, 0);
 });
 
@@ -386,45 +379,14 @@ test('normalizeLLMResponse - handles invalid XML gracefully', async t => {
 	t.true(normalized.toolCalls.length === 0);
 });
 
-// Type preservation tests
-test('normalizeLLMResponse - preserves argument types in tool calls', async t => {
-	const response = '{"name": "write_file", "arguments": {"path": "/test.txt", "count": 42, "enabled": true, "items": [1, 2, 3]}}';
+// XML type preservation tests
+test('normalizeLLMResponse - preserves argument types in XML tool calls', async t => {
+	const response = '<write_file><path>/test.txt</path><content>hello world</content></write_file>';
 	const normalized = await normalizeLLMResponse(response);
 
 	t.is(normalized.toolCalls.length, 1);
 	const args = normalized.toolCalls[0].function.arguments;
 
-	// All types should be preserved
 	t.is(typeof args.path, 'string');
-	t.is(typeof args.count, 'number');
-	t.is(typeof args.enabled, 'boolean');
-	t.true(Array.isArray(args.items));
-});
-
-// Complex scenarios
-test('normalizeLLMResponse - handles nested JSON objects', async t => {
-	const response = '{"name": "configure", "arguments": {"options": {"timeout": 5000, "retries": 3, "settings": {"level": "debug", "verbose": true}}}}';
-	const normalized = await normalizeLLMResponse(response);
-
-	t.is(normalized.toolCalls.length, 1);
-	const args = normalized.toolCalls[0].function.arguments;
-
-	// Nested types should be preserved
-	t.is(typeof args.options.timeout, 'number');
-	t.is(typeof args.options.retries, 'number');
-	t.is(typeof args.options.settings.level, 'string');
-	t.is(typeof args.options.settings.verbose, 'boolean');
-});
-
-test('normalizeLLMResponse - handles special characters in content', async t => {
-	const response = '{"name": "write_file", "arguments": {"path": "/test.txt", "content": "Hello & goodbye\\nLine 2\\tTabbed"}}';
-	const normalized = await normalizeLLMResponse(response);
-
-	t.is(normalized.toolCalls.length, 1);
-	const args = normalized.toolCalls[0].function.arguments;
-
-	// Special characters should be preserved
-	t.true(args.content.includes('&'));
-	t.true(args.content.includes('\n'));
-	t.true(args.content.includes('\t'));
+	t.is(typeof args.content, 'string');
 });

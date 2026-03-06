@@ -2,7 +2,7 @@ import {convertToMarkdown} from '@nanocollective/get-md';
 import {Box, Text} from 'ink';
 import React from 'react';
 
-import {MAX_URL_CONTENT_BYTES} from '@/constants';
+import {DEFAULT_TERMINAL_COLUMNS, MAX_URL_CONTENT_BYTES} from '@/constants';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
@@ -80,13 +80,24 @@ function FetchUrlFormatterComponent({
 		wasTruncated = result.includes('[Content truncated');
 	}
 
+	const terminalWidth = process.stdout.columns || DEFAULT_TERMINAL_COLUMNS;
+	const urlLabelWidth = 6; // "URL: " + 1 margin
+	const availableWidth = Math.max(terminalWidth - urlLabelWidth, 20);
+
+	const truncatedUrl =
+		url.length <= availableWidth
+			? url
+			: url.slice(0, Math.floor(availableWidth / 2) - 1) +
+				'…' +
+				url.slice(-(Math.ceil(availableWidth / 2) - 1));
+
 	return (
 		<Box flexDirection="column" marginBottom={1}>
 			<Text color={colors.tool}>⚒ fetch_url</Text>
 			<Box>
 				<Text color={colors.secondary}>URL: </Text>
 				<Box marginLeft={1}>
-					<Text color={colors.text}>{url}</Text>
+					<Text color={colors.text}>{truncatedUrl}</Text>
 				</Box>
 			</Box>
 			{result && (

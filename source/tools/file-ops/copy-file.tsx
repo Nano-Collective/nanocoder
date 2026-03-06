@@ -50,7 +50,7 @@ const copyFileCoreTool = tool({
 			return false;
 		}
 		const mode = getCurrentMode();
-		return mode !== 'auto-accept';
+		return mode !== 'auto-accept' && mode !== 'scheduler';
 	},
 	execute: async (args, _options) => {
 		return await executeCopyFile(args);

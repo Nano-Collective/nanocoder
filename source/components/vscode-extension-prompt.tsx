@@ -4,9 +4,10 @@ import React, {useEffect, useState} from 'react';
 import {defaultTheme, getThemeColors} from '@/config/themes';
 import {TIMEOUT_VSCODE_EXTENSION_SKIP_MS} from '@/constants';
 import {
+	getExtensionStatus,
 	installExtension,
-	isExtensionInstalled,
 	isVSCodeCliAvailable,
+	type VSCodeStatus,
 } from '@/vscode/extension-installer';
 
 interface VSCodeExtensionPromptProps {
@@ -25,44 +26,66 @@ type PromptState =
 enum InstallOption {
 	Yes = 'yes',
 	No = 'no',
+	Select = 'select',
 }
 
 /**
  * Ink component that prompts the user to install the VS Code extension
  * when running with --vscode flag and the extension isn't installed
  */
-// Compute initial state synchronously
-function getInitialState(): PromptState {
-	if (isExtensionInstalled()) {
-		return 'checking'; // Will trigger onComplete in effect
-	}
-	if (!isVSCodeCliAvailable()) {
-		return 'no-cli';
-	}
-	return 'prompt';
-}
-
 export function VSCodeExtensionPrompt({
 	onComplete,
 	onSkip,
 }: VSCodeExtensionPromptProps) {
-	const [state, setState] = useState<PromptState>(getInitialState);
+	const [state, setState] = useState<PromptState>('checking');
+	const [statuses, setStatuses] = useState<VSCodeStatus[]>([]);
 	const [message, setMessage] = useState('');
+	const [selectedClis, setSelectedClis] = useState<string[]>([]);
+	const [isSelecting, setIsSelecting] = useState(false);
 	const colors = getThemeColors(defaultTheme);
 
-	const handleInstall = React.useCallback(async () => {
-		const result = await installExtension();
-		if (result.success) {
-			setMessage(result.message);
-			setState('success');
-			// Wait for user to press Enter
-		} else {
-			setMessage(result.message);
-			setState('error');
-			// Auto-continue after showing error
-			setTimeout(onSkip, TIMEOUT_VSCODE_EXTENSION_SKIP_MS);
+	// Check status on mount
+	useEffect(() => {
+		async function check() {
+			const available = await isVSCodeCliAvailable();
+			if (!available) {
+				setState('no-cli');
+				return;
+			}
+
+			const currentStatuses = await getExtensionStatus();
+			setStatuses(currentStatuses);
+
+			const missing = currentStatuses.filter(s => !s.extensionInstalled);
+			if (missing.length === 0) {
+				onComplete();
+			} else {
+				setSelectedClis(missing.map(s => s.cli));
+				setState('prompt');
+			}
 		}
-	}, [onSkip]);
+
+		if (state === 'checking') {
+			void check();
+		}
+	}, [state, onComplete]);
+
+	const handleInstall = React.useCallback(
+		async (clis?: string[]) => {
+			setState('installing');
+			const result = await installExtension(clis);
+
+			setMessage(result.message);
+			if (result.success) {
+				setState('success');
+			} else {
+				setState('error');
+				// Auto-continue after showing error
+				setTimeout(onSkip, TIMEOUT_VSCODE_EXTENSION_SKIP_MS);
+			}
+		},
+		[onSkip],
+	);
 
 	// Handle Enter key press in success state
 	useInput(
@@ -74,13 +97,6 @@ export function VSCodeExtensionPrompt({
 		{isActive: state === 'success'},
 	);
 
-	// Handle already-installed case
-	useEffect(() => {
-		if (isExtensionInstalled()) {
-			onComplete();
-		}
-	}, [onComplete]);
-
 	// Handle no-cli case - auto-skip after showing message
 	useEffect(() => {
 		if (state === 'no-cli') {
@@ -89,11 +105,24 @@ export function VSCodeExtensionPrompt({
 		}
 	}, [state, onSkip]);
 
-	const items: {label: string; value: InstallOption}[] = [
+	const availableMissing = statuses.filter(s => !s.extensionInstalled);
+
+	const items = [
 		{
-			label: 'Yes, install extension',
+			label:
+				availableMissing.length > 1
+					? `Yes, install to all (${availableMissing.map(s => s.cli).join(', ')})`
+					: `Yes, install to ${availableMissing[0]?.cli}`,
 			value: InstallOption.Yes,
 		},
+		...(availableMissing.length > 1
+			? [
+					{
+						label: 'Choose editors...',
+						value: InstallOption.Select,
+					},
+				]
+			: []),
 		{
 			label: 'No, skip for now',
 			value: InstallOption.No,
@@ -102,11 +131,18 @@ export function VSCodeExtensionPrompt({
 
 	const handleSelect = (item: {label: string; value: InstallOption}) => {
 		if (item.value === InstallOption.Yes) {
-			setState('installing');
-			void handleInstall();
+			void handleInstall(availableMissing.map(s => s.cli));
+		} else if (item.value === InstallOption.Select) {
+			setIsSelecting(true);
 		} else {
 			onSkip();
 		}
+	};
+
+	const handleCliToggle = (cli: string) => {
+		setSelectedClis(prev =>
+			prev.includes(cli) ? prev.filter(c => c !== cli) : [...prev, cli],
+		);
 	};
 
 	if (state === 'checking') {
@@ -121,15 +157,21 @@ export function VSCodeExtensionPrompt({
 		return (
 			<Box flexDirection="column" paddingY={1}>
 				<Text color={colors.warning}>
-					VS Code CLI not found. To enable VS Code integration:
+					No supported VS Code flavor (Code, Cursor, VSCodium, Windsurf, Trae)
+					found in PATH.
 				</Text>
+				<Box marginTop={1}>
+					<Text color={colors.text}>To enable VS Code integration:</Text>
+				</Box>
 				<Box marginLeft={2} flexDirection="column" marginTop={1}>
-					<Text color={colors.secondary}>1. Open VS Code</Text>
+					<Text color={colors.secondary}>
+						1. Open VS Code or your preferred editor
+					</Text>
 					<Text color={colors.secondary}>
 						2. Press Cmd+Shift+P (Mac) or Ctrl+Shift+P (Windows/Linux)
 					</Text>
 					<Text color={colors.secondary}>
-						3. Type "Shell Command: Install 'code' command in PATH"
+						3. Search for "Shell Command: Install 'code' command in PATH"
 					</Text>
 				</Box>
 				<Box marginTop={1}>
@@ -142,6 +184,46 @@ export function VSCodeExtensionPrompt({
 	}
 
 	if (state === 'prompt') {
+		if (isSelecting) {
+			const selectionItems = availableMissing.map(s => ({
+				label: `${selectedClis.includes(s.cli) ? '[x]' : '[ ]'} ${s.cli}`,
+				value: s.cli,
+			}));
+
+			return (
+				<Box flexDirection="column" paddingY={1}>
+					<Text color={colors.primary} bold>
+						Select Editors
+					</Text>
+					<Box marginTop={1}>
+						<SelectInput
+							items={[
+								...selectionItems,
+								{label: '--- Confirm ---', value: 'confirm'},
+								{label: '--- Back ---', value: 'back'},
+							]}
+							onSelect={item => {
+								if (item.value === 'confirm') {
+									if (selectedClis.length > 0) {
+										void handleInstall(selectedClis);
+									}
+								} else if (item.value === 'back') {
+									setIsSelecting(false);
+								} else {
+									handleCliToggle(item.value);
+								}
+							}}
+						/>
+					</Box>
+					<Box marginTop={1}>
+						<Text dimColor>
+							Space/Enter to toggle, select Confirm to proceed
+						</Text>
+					</Box>
+				</Box>
+			);
+		}
+
 		return (
 			<Box flexDirection="column" paddingY={1}>
 				<Text color={colors.primary} bold>
@@ -153,6 +235,19 @@ export function VSCodeExtensionPrompt({
 						modifies files.
 					</Text>
 				</Box>
+
+				{statuses.length > 0 && (
+					<Box marginTop={1} flexDirection="column">
+						<Text color={colors.secondary}>Detected editors:</Text>
+						{statuses.map(s => (
+							<Text key={s.cli} color={s.extensionInstalled ? 'gray' : 'white'}>
+								{s.extensionInstalled ? '  ✓' : '  !'} {s.cli}{' '}
+								{s.extensionInstalled ? '(Installed)' : '(Missing)'}
+							</Text>
+						))}
+					</Box>
+				)}
+
 				<Box marginTop={1}>
 					<Text color={colors.text}>Install the extension now?</Text>
 				</Box>
@@ -198,14 +293,9 @@ export function VSCodeExtensionPrompt({
 
 /**
  * Check if we should show the extension install prompt
- * Returns true if --vscode flag is present and extension is not installed
+ * Returns true if --vscode flag is present
+ * The component itself will check if it's already installed
  */
 export function shouldPromptExtensionInstall(): boolean {
-	const hasVSCodeFlag = process.argv.includes('--vscode');
-	if (!hasVSCodeFlag) return false;
-
-	// Don't prompt if extension is already installed
-	if (isExtensionInstalled()) return false;
-
-	return true;
+	return process.argv.includes('--vscode');
 }

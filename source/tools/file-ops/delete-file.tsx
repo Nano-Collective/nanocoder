@@ -5,6 +5,8 @@ import {Box, Text} from 'ink';
 import React from 'react';
 
 import ToolMessage from '@/components/tool-message';
+import {isNanocoderToolAlwaysAllowed} from '@/config/nanocoder-tools-config';
+import {getCurrentMode} from '@/context/mode-context';
 import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
@@ -42,8 +44,12 @@ const deleteFileCoreTool = tool({
 		},
 		required: ['path'],
 	}),
-	// High risk: destructive operation, always requires approval
-	needsApproval: true,
+	// High risk: destructive operation, requires approval in most modes
+	needsApproval: () => {
+		if (isNanocoderToolAlwaysAllowed('delete_file')) return false;
+		const mode = getCurrentMode();
+		return mode !== 'auto-accept' && mode !== 'scheduler';
+	},
 	execute: async (args, _options) => {
 		return await executeDeleteFile(args);
 	},

@@ -1,6 +1,6 @@
 import {Box, Text, useFocus, useInput} from 'ink';
 import Spinner from 'ink-spinner';
-import {useCallback, useEffect, useMemo, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {commandRegistry} from '@/commands';
 import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
 import TextInput from '@/components/text-input';
@@ -10,6 +10,7 @@ import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
 import {promptHistory} from '@/prompt-history';
 import type {DevelopmentMode} from '@/types/core';
+import type {InputState} from '@/types/hooks';
 import {Completion} from '@/types/index';
 import {
 	getCurrentFileMention,
@@ -45,7 +46,11 @@ export default function UserInput({
 	const uiState = useUIStateContext();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
 	const [textInputKey, setTextInputKey] = useState(0);
-	// Store the original InputState (including placeholders) when starting history navigation
+	// Store the full InputState draft when starting history navigation, so it can be restored
+	const savedDraftRef = useRef<InputState>({
+		displayValue: '',
+		placeholderContent: {},
+	});
 	// File autocomplete state
 	const [isFileAutocompleteMode, setIsFileAutocompleteMode] = useState(false);
 	const [fileCompletions, setFileCompletions] = useState<
@@ -278,7 +283,8 @@ export default function UserInput({
 
 			if (direction === 'up') {
 				if (historyIndex === -1) {
-					// Save the full current state (including placeholders) before starting navigation
+					// Save the full current state before starting navigation
+					savedDraftRef.current = currentState;
 					setOriginalInput(input);
 					setHistoryIndex(history.length - 1);
 					setInputState(history[history.length - 1]);
@@ -289,27 +295,28 @@ export default function UserInput({
 					setInputState(history[newIndex]);
 					setTextInputKey(prev => prev + 1);
 				} else if (historyIndex === 0) {
-					// At first history item, go to blank
+					// At first history item, restore saved draft
 					setHistoryIndex(-2);
-					setOriginalInput('');
-					setInputState({displayValue: '', placeholderContent: {}});
+					setInputState(savedDraftRef.current);
 					setTextInputKey(prev => prev + 1);
 				} else if (historyIndex === -2) {
-					// At blank, cycle back to last history item
+					// At draft, cycle back to last history item
+					savedDraftRef.current = currentState;
 					setHistoryIndex(history.length - 1);
 					setInputState(history[history.length - 1]);
 					setTextInputKey(prev => prev + 1);
 				}
 			} else {
 				if (historyIndex === -1) {
-					// At original input, go to blank when cycling down
+					// Save draft, go to draft cycling state (visually a no-op)
+					savedDraftRef.current = currentState;
 					setOriginalInput(input);
 					setHistoryIndex(-2);
-					setOriginalInput('');
-					setInputState({displayValue: '', placeholderContent: {}});
+					setInputState(savedDraftRef.current);
 					setTextInputKey(prev => prev + 1);
 				} else if (historyIndex === -2) {
-					// At blank, cycle to first history item
+					// At draft, cycle to first history item
+					savedDraftRef.current = currentState;
 					setHistoryIndex(0);
 					setInputState(history[0]);
 					setTextInputKey(prev => prev + 1);
@@ -320,15 +327,21 @@ export default function UserInput({
 					setInputState(history[newIndex]);
 					setTextInputKey(prev => prev + 1);
 				} else if (historyIndex === history.length - 1) {
-					// At last history item, cycle back to blank
+					// At last history item, restore saved draft
 					setHistoryIndex(-2);
-					setOriginalInput('');
-					setInputState({displayValue: '', placeholderContent: {}});
+					setInputState(savedDraftRef.current);
 					setTextInputKey(prev => prev + 1);
 				}
 			}
 		},
-		[historyIndex, input, setHistoryIndex, setOriginalInput, setInputState],
+		[
+			historyIndex,
+			input,
+			currentState,
+			setHistoryIndex,
+			setOriginalInput,
+			setInputState,
+		],
 	);
 
 	useInput((inputChar, key) => {

@@ -246,30 +246,14 @@ async function extractToolCalls(
 	content: string,
 	options: ExtractOptions,
 ): Promise<{toolCalls: ToolCall[]; malformedError?: string}> {
-	const {allowMixedContent, detectedFormat} = options;
+	const {allowMixedContent} = options;
 
 	// If no content, no tool calls
 	if (!content) {
 		return {toolCalls: []};
 	}
 
-	// CASE 1: Detected JSON format - try JSON parser
-	if (detectedFormat === 'json') {
-		try {
-			// Import here to avoid circular dependencies
-			const {parseJSONToolCalls} = await import('@/tool-calling/json-parser');
-			const toolCalls = parseJSONToolCalls(content);
-
-			if (toolCalls.length > 0) {
-				return {toolCalls};
-			}
-		} catch (error) {
-			// If JSON parsing fails, fall through to mixed content handling
-			console.warn('JSON parsing failed, trying mixed content:', error);
-		}
-	}
-
-	// CASE 2: Try XML parser
+	// Try XML parser
 	try {
 		const {XMLToolCallParser} = await import('@/tool-calling/xml-parser');
 

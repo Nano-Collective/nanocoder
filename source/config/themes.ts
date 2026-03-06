@@ -765,6 +765,27 @@ export const themes: Record<ThemePreset, Theme> = {
 			diffRemovedText: '#f7768e',
 		},
 	},
+	'aurora-borealis': {
+		name: 'aurora-borealis',
+		displayName: 'Aurora Borealis',
+		themeType: 'dark',
+		colors: {
+			text: '#e8f4f8',
+			base: '#0a0f14',
+			primary: '#00ff9f',
+			tool: '#00d4ff',
+			success: '#39ff14',
+			error: '#ff006e',
+			secondary: '#7b68ee',
+			info: '#00ffff',
+			warning: '#ffd700',
+			diffAdded: '#0a2f1a',
+			diffRemoved: '#2f0a1a',
+			diffAddedText: '#39ff14',
+			diffRemovedText: '#ff006e',
+			gradientColors: ['#00ff9f', '#00d4ff', '#7b68ee'],
+		},
+	},
 };
 
 export function getThemeColors(themePreset: ThemePreset) {

@@ -8,6 +8,7 @@ import type {
 	LLMChatResponse,
 	LLMClient,
 	Message,
+	ModeOverrides,
 	StreamCallbacks,
 } from '@/types/index';
 import {getLogger} from '@/utils/logging';
@@ -127,6 +128,7 @@ export class AISDKClient implements LLMClient {
 		tools: Record<string, AISDKCoreTool>,
 		callbacks: StreamCallbacks,
 		signal?: AbortSignal,
+		modeOverrides?: ModeOverrides,
 	): Promise<LLMChatResponse> {
 		// Get the language model instance from the provider
 		const model = this.provider(this.currentModel) as unknown as LanguageModel;
@@ -141,6 +143,7 @@ export class AISDKClient implements LLMClient {
 			callbacks,
 			signal,
 			maxRetries: this.maxRetries,
+			modeOverrides,
 		});
 	}
 

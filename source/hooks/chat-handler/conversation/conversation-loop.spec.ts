@@ -1,5 +1,5 @@
 import test from 'ava';
-import {processAssistantResponse} from './conversation-loop.js';
+import {processAssistantResponse, resetFallbackNotice} from './conversation-loop.js';
 import type {Message, ToolCall, ToolResult} from '@/types/core';
 
 // ============================================================================
@@ -11,6 +11,7 @@ const createMockClient = (response: {
 	toolCalls?: ToolCall[] | null;
 	content?: string;
 	autoExecutedMessages?: Message[];
+	toolsDisabled?: boolean;
 }) => ({
 	chat: async () => ({
 		choices: [
@@ -22,6 +23,7 @@ const createMockClient = (response: {
 			},
 		],
 		autoExecutedMessages: response.autoExecutedMessages,
+		toolsDisabled: response.toolsDisabled ?? false,
 	}),
 });
 
@@ -260,4 +262,100 @@ test('createMockToolManager - creates valid mock', t => {
 	t.truthy(mockManager.getAllTools);
 	t.truthy(mockManager.hasTool);
 	t.truthy(mockManager.getTool);
+});
+
+// ============================================================================
+// XML Fallback Notice Tests
+// ============================================================================
+
+test.serial('processAssistantResponse - shows XML fallback notice when toolsDisabled is true', async t => {
+	resetFallbackNotice();
+
+	const queuedComponents: any[] = [];
+	const params = createDefaultParams({
+		client: createMockClient({
+			content: 'Here is my response!',
+			toolCalls: null,
+			toolsDisabled: true,
+		}),
+		addToChatQueue: (component: any) => {
+			queuedComponents.push(component);
+		},
+	});
+
+	await processAssistantResponse(params);
+
+	// Should have queued the fallback notice (plus the assistant message and completion message)
+	const fallbackNotice = queuedComponents.find(
+		(c: any) => c.props?.message === 'Model does not support native tool calling. Using XML fallback.',
+	);
+	t.truthy(fallbackNotice, 'Should queue XML fallback notice');
+});
+
+test.serial('processAssistantResponse - shows XML fallback notice only once across calls', async t => {
+	resetFallbackNotice();
+
+	const queuedComponents: any[] = [];
+	const addToChatQueue = (component: any) => {
+		queuedComponents.push(component);
+	};
+
+	const params = createDefaultParams({
+		client: createMockClient({
+			content: 'First response',
+			toolCalls: null,
+			toolsDisabled: true,
+		}),
+		addToChatQueue,
+	});
+
+	// First call - should show notice
+	await processAssistantResponse(params);
+
+	const firstCallNotices = queuedComponents.filter(
+		(c: any) => c.props?.message === 'Model does not support native tool calling. Using XML fallback.',
+	);
+	t.is(firstCallNotices.length, 1, 'Should show notice on first call');
+
+	// Clear queue and call again
+	queuedComponents.length = 0;
+
+	const params2 = createDefaultParams({
+		client: createMockClient({
+			content: 'Second response',
+			toolCalls: null,
+			toolsDisabled: true,
+		}),
+		addToChatQueue,
+	});
+
+	await processAssistantResponse(params2);
+
+	const secondCallNotices = queuedComponents.filter(
+		(c: any) => c.props?.message === 'Model does not support native tool calling. Using XML fallback.',
+	);
+	t.is(secondCallNotices.length, 0, 'Should not show notice on second call');
+});
+
+test.serial('processAssistantResponse - does not show XML fallback notice when toolsDisabled is false', async t => {
+	resetFallbackNotice();
+
+	const queuedComponents: any[] = [];
+	const params = createDefaultParams({
+		client: createMockClient({
+			content: 'Here is my response!',
+			toolCalls: null,
+			toolsDisabled: false,
+		}),
+		addToChatQueue: (component: any) => {
+			queuedComponents.push(component);
+		},
+	});
+
+	await processAssistantResponse(params);
+
+	const fallbackNotice = queuedComponents.find(
+		(c: any) => c.props?.message === 'Model does not support native tool calling. Using XML fallback.',
+	);
+	t.falsy(fallbackNotice, 'Should not queue XML fallback notice when toolsDisabled is false');
 });

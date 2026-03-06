@@ -13,7 +13,10 @@ import {SuccessMessage} from '@/components/message-box';
 import {SchedulerView} from '@/components/scheduler-view';
 import SecurityDisclaimer from '@/components/security-disclaimer';
 import type {TitleShape} from '@/components/ui/styled-title';
-import {VSCodeExtensionPrompt} from '@/components/vscode-extension-prompt';
+import {
+	shouldPromptExtensionInstall,
+	VSCodeExtensionPrompt,
+} from '@/components/vscode-extension-prompt';
 import WelcomeMessage from '@/components/welcome-message';
 import {updateSelectedTheme} from '@/config/preferences';
 import {getThemeColors} from '@/config/themes';
@@ -92,7 +95,7 @@ export default function App({
 
 	// VS Code extension installation prompt state
 	const [showExtensionPrompt, setShowExtensionPrompt] = React.useState(
-		() => vscodeMode && !isExtensionInstalled(),
+		() => vscodeMode && shouldPromptExtensionInstall(),
 	);
 	const [extensionPromptComplete, setExtensionPromptComplete] =
 		React.useState(false);
@@ -443,18 +446,20 @@ export default function App({
 				appState.setIsVscodeEnabled(true);
 
 				// Check if extension needs installing
-				if (!isExtensionInstalled()) {
-					setShowExtensionPrompt(true);
-					setExtensionPromptComplete(false);
-				} else {
-					appState.addToChatQueue(
-						<SuccessMessage
-							key={`ide-vscode-enabled-${appState.getNextComponentKey()}`}
-							message="VS Code integration enabled. Starting server..."
-							hideBox={true}
-						/>,
-					);
-				}
+				void (async () => {
+					if (!(await isExtensionInstalled())) {
+						setShowExtensionPrompt(true);
+						setExtensionPromptComplete(false);
+					} else {
+						appState.addToChatQueue(
+							<SuccessMessage
+								key={`ide-vscode-enabled-${appState.getNextComponentKey()}`}
+								message="VS Code integration enabled. Starting server..."
+								hideBox={true}
+							/>,
+						);
+					}
+				})();
 			}
 		},
 		[appState],

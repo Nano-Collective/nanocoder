@@ -4,6 +4,7 @@ import React from 'react';
 import BashProgress from '@/components/bash-progress';
 import {isNanocoderToolAlwaysAllowed} from '@/config/nanocoder-tools-config';
 import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
+import {getCurrentMode} from '@/context/mode-context';
 import {useTheme} from '@/hooks/useTheme';
 import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
 import type {NanocoderToolExport} from '@/types/core';
@@ -82,6 +83,10 @@ const executeBashCoreTool = tool({
 		if (isNanocoderToolAlwaysAllowed('execute_bash')) {
 			return false;
 		}
+
+		// Scheduler mode auto-executes all tools including bash
+		const mode = getCurrentMode();
+		if (mode === 'scheduler') return false;
 
 		// Even in auto-accept mode, bash commands should require approval for security
 		return true;

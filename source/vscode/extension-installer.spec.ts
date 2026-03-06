@@ -1,5 +1,6 @@
 import test from 'ava';
 import {
+	getExtensionStatus,
 	getVsixPath,
 	installExtension,
 	isExtensionInstalled,
@@ -10,29 +11,47 @@ import {
 // Tests for isVSCodeCliAvailable
 // ============================================================================
 
-test('isVSCodeCliAvailable returns a boolean', t => {
-	const result = isVSCodeCliAvailable();
+test('isVSCodeCliAvailable returns a boolean', async t => {
+	const result = await isVSCodeCliAvailable();
 	t.is(typeof result, 'boolean');
 });
 
-test('isVSCodeCliAvailable does not throw', t => {
-	t.notThrows(() => {
-		isVSCodeCliAvailable();
+test('isVSCodeCliAvailable does not throw', async t => {
+	await t.notThrowsAsync(async () => {
+		await isVSCodeCliAvailable();
 	});
+});
+
+// ============================================================================
+// Tests for getExtensionStatus
+// ============================================================================
+
+test('getExtensionStatus returns an array of status objects', async t => {
+	const statuses = await getExtensionStatus();
+	t.true(Array.isArray(statuses));
+
+	if (statuses.length > 0) {
+		const status = statuses[0];
+		if (status) {
+			t.is(typeof status.cli, 'string');
+			t.is(typeof status.available, 'boolean');
+			t.is(typeof status.extensionInstalled, 'boolean');
+		}
+	}
 });
 
 // ============================================================================
 // Tests for isExtensionInstalled
 // ============================================================================
 
-test('isExtensionInstalled returns a boolean', t => {
-	const result = isExtensionInstalled();
+test('isExtensionInstalled returns a boolean', async t => {
+	const result = await isExtensionInstalled();
 	t.is(typeof result, 'boolean');
 });
 
-test('isExtensionInstalled does not throw', t => {
-	t.notThrows(() => {
-		isExtensionInstalled();
+test('isExtensionInstalled does not throw', async t => {
+	await t.notThrowsAsync(async () => {
+		await isExtensionInstalled();
 	});
 });
 
@@ -50,12 +69,12 @@ test('installExtension returns a promise', async t => {
 	await result.catch(() => {});
 });
 
-test('installExtension returns object with success and message', async t => {
+test('installExtension returns object with success, message, and results', async t => {
 	const result = await installExtension();
 
 	t.is(typeof result.success, 'boolean');
 	t.is(typeof result.message, 'string');
-	t.true(result.message.length > 0);
+	t.true(Array.isArray(result.results));
 });
 
 // If VS Code CLI is not available, installExtension should return appropriate message
@@ -64,9 +83,10 @@ test('installExtension handles missing VS Code CLI gracefully', async t => {
 	// installExtension should return a helpful message
 	const result = await installExtension();
 
-	if (!isVSCodeCliAvailable()) {
+	const isAvailable = await isVSCodeCliAvailable();
+	if (!isAvailable) {
 		t.false(result.success);
-		t.true(result.message.includes('VS Code CLI'));
+		t.true(result.message.includes('No supported VS Code flavor found'));
 	} else {
 		// If VS Code is available, the result depends on whether VSIX exists
 		t.is(typeof result.success, 'boolean');
@@ -109,7 +129,8 @@ test('getVsixPath throws when VSIX does not exist', t => {
 test('installExtension with VSIX missing returns appropriate error', async t => {
 	// This test documents the expected behavior when VSIX is missing
 	// but VS Code CLI is available
-	if (!isVSCodeCliAvailable()) {
+	const isAvailable = await isVSCodeCliAvailable();
+	if (!isAvailable) {
 		t.pass(); // Skip if VS Code not available
 		return;
 	}
@@ -131,18 +152,19 @@ test('installExtension with VSIX missing returns appropriate error', async t => 
 // Type safety tests
 // ============================================================================
 
-test('isVSCodeCliAvailable has correct return type', t => {
-	const result: boolean = isVSCodeCliAvailable();
+test('isVSCodeCliAvailable has correct return type', async t => {
+	const result: boolean = await isVSCodeCliAvailable();
 	t.is(typeof result, 'boolean');
 });
 
-test('isExtensionInstalled has correct return type', t => {
-	const result: boolean = isExtensionInstalled();
+test('isExtensionInstalled has correct return type', async t => {
+	const result: boolean = await isExtensionInstalled();
 	t.is(typeof result, 'boolean');
 });
 
 test('installExtension has correct return type', async t => {
-	const result: {success: boolean; message: string} = await installExtension();
+	const result: {success: boolean; message: string; results: any[]} =
+		await installExtension();
 	t.is(typeof result.success, 'boolean');
 	t.is(typeof result.message, 'string');
 });

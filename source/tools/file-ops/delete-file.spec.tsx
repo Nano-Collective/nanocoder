@@ -31,8 +31,8 @@ test('delete_file tool has correct name', t => {
 	t.is(deleteFileTool.name, 'delete_file');
 });
 
-test('delete_file always requires approval', t => {
-	t.is(deleteFileTool.tool.needsApproval, true);
+test('delete_file needsApproval is a function', t => {
+	t.is(typeof deleteFileTool.tool.needsApproval, 'function');
 });
 
 test('delete_file tool has handler function', t => {

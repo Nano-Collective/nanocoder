@@ -53,6 +53,65 @@ test('ollama template: filters empty strings', t => {
 	t.deepEqual(config.models, ['llama2', 'codellama']);
 });
 
+test('mlx-server template: single model', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'mlx-server');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'mlx-server',
+		baseUrl: 'http://localhost:8080/v1',
+		model: 'mlx-community/Qwen2.5-Coder-32B-Instruct-4bit',
+	});
+
+	t.deepEqual(config.models, [
+		'mlx-community/Qwen2.5-Coder-32B-Instruct-4bit',
+	]);
+	t.is(config.name, 'mlx-server');
+	t.is(config.baseUrl, 'http://localhost:8080/v1');
+});
+
+test('mlx-server template: multiple comma-separated models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'mlx-server');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'mlx-server',
+		baseUrl: 'http://localhost:8080/v1',
+		model: 'mlx-community/Qwen2.5-Coder-32B-Instruct-4bit, mlx-community/Llama-3.3-70B-Instruct-4bit',
+	});
+
+	t.deepEqual(config.models, [
+		'mlx-community/Qwen2.5-Coder-32B-Instruct-4bit',
+		'mlx-community/Llama-3.3-70B-Instruct-4bit',
+	]);
+});
+
+test('mlx-server template: uses default name when empty', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'mlx-server');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: '',
+		baseUrl: 'http://localhost:8080/v1',
+		model: 'some-model',
+	});
+
+	t.is(config.name, 'mlx-server');
+});
+
+test('mlx-server template: uses default baseUrl when empty', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'mlx-server');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'mlx-server',
+		baseUrl: '',
+		model: 'some-model',
+	});
+
+	t.is(config.baseUrl, 'http://localhost:8080/v1');
+});
+
 test('custom template: single model', t => {
 	const template = PROVIDER_TEMPLATES.find(t => t.id === 'custom');
 	t.truthy(template);

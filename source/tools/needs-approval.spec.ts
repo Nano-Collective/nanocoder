@@ -2,13 +2,16 @@ import test from 'ava';
 import {setCurrentMode} from '../context/mode-context.js';
 import {executeBashTool} from './execute-bash.js';
 import {fetchUrlTool} from './fetch-url.js';
+import {copyFileTool} from './file-ops/copy-file.js';
+import {deleteFileTool} from './file-ops/delete-file.js';
+import {moveFileTool} from './file-ops/move-file.js';
+import {stringReplaceTool} from './file-ops/string-replace.js';
+import {writeFileTool} from './file-ops/write-file.js';
 import {findFilesTool} from './find-files.js';
 import {getDiagnosticsTool} from './lsp-get-diagnostics.js';
 import {readFileTool} from './read-file.js';
 import {searchFileContentsTool} from './search-file-contents.js';
-import {stringReplaceTool} from './file-ops/string-replace.js';
 import {webSearchTool} from './web-search.js';
-import {writeFileTool} from './file-ops/write-file.js';
 
 // ============================================================================
 // Tests for needsApproval Logic (AI SDK v6)
@@ -274,6 +277,91 @@ test('lsp_get_diagnostics never requires approval in plan mode', async t => {
 		path: 'test.txt',
 	});
 	t.false(needsApproval);
+});
+
+// ============================================================================
+// SCHEDULER MODE: All tools auto-execute
+// ============================================================================
+
+test('execute_bash does NOT require approval in scheduler mode', async t => {
+	setCurrentMode('scheduler');
+	const needsApproval = await evaluateNeedsApproval(executeBashTool, {
+		command: 'ls',
+	});
+	t.false(needsApproval);
+});
+
+test('write_file does NOT require approval in scheduler mode', async t => {
+	setCurrentMode('scheduler');
+	const needsApproval = await evaluateNeedsApproval(writeFileTool, {
+		path: 'test.txt',
+		content: 'test',
+	});
+	t.false(needsApproval);
+});
+
+test('string_replace does NOT require approval in scheduler mode', async t => {
+	setCurrentMode('scheduler');
+	const needsApproval = await evaluateNeedsApproval(stringReplaceTool, {
+		path: 'test.txt',
+		old_str: 'old',
+		new_str: 'new',
+	});
+	t.false(needsApproval);
+});
+
+test('delete_file does NOT require approval in scheduler mode', async t => {
+	setCurrentMode('scheduler');
+	const needsApproval = await evaluateNeedsApproval(deleteFileTool, {
+		path: 'test.txt',
+	});
+	t.false(needsApproval);
+});
+
+test('copy_file does NOT require approval in scheduler mode', async t => {
+	setCurrentMode('scheduler');
+	const needsApproval = await evaluateNeedsApproval(copyFileTool, {
+		source: 'a.txt',
+		destination: 'b.txt',
+	});
+	t.false(needsApproval);
+});
+
+test('move_file does NOT require approval in scheduler mode', async t => {
+	setCurrentMode('scheduler');
+	const needsApproval = await evaluateNeedsApproval(moveFileTool, {
+		source: 'a.txt',
+		destination: 'b.txt',
+	});
+	t.false(needsApproval);
+});
+
+// ============================================================================
+// DELETE FILE: Mode-dependent approval
+// ============================================================================
+
+test('delete_file requires approval in normal mode', async t => {
+	setCurrentMode('normal');
+	const needsApproval = await evaluateNeedsApproval(deleteFileTool, {
+		path: 'test.txt',
+	});
+	t.true(needsApproval);
+});
+
+test('delete_file does NOT require approval in auto-accept mode', async t => {
+	setCurrentMode('auto-accept');
+	const needsApproval = await evaluateNeedsApproval(deleteFileTool, {
+		path: 'test.txt',
+	});
+	t.false(needsApproval);
+});
+
+test('delete_file requires approval in plan mode', async t => {
+	setCurrentMode('plan');
+	const needsApproval = await evaluateNeedsApproval(deleteFileTool, {
+		path: 'test.txt',
+	});
+	t.true(needsApproval);
 });
 
 // Cleanup: ensure mode is reset after all tests

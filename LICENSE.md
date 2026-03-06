@@ -1,6 +1,6 @@
 # License
 
-MIT License with Attribution
+MIT License
 
 Copyright (c) 2026 Nano Collective
 
@@ -12,20 +12,6 @@ copies of the Software, and to permit persons to whom the Software is
 furnished to do so, subject to the following conditions:
 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-## Attribution Requirement
-
-Any use, reproduction, or distribution of the Software, or any derivative works based on the Software, must include clear and prominent attribution to the original creators and contributors of Nanocoder. This attribution must include:
-
-1. The name "Nanocoder" and a reference to the original project
-2. A link to the original repository: https://github.com/nano-collective/nanocoder
-3. Credit to "Nano Collective and contributors"
-
-This attribution should be included in:
-
-- User-facing documentation (README, About pages, etc.)
-- Source code comments or LICENSE files in derivative works
-- Any public presentation, publication, or distribution of the Software
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,

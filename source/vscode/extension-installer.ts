@@ -2,14 +2,43 @@
  * VS Code extension installation utilities
  */
 
-import {execSync, spawn} from 'child_process';
+import {exec as execAsync, spawn} from 'child_process';
 import {existsSync} from 'fs';
 import {dirname, join} from 'path';
 import {platform} from 'process';
 import {fileURLToPath} from 'url';
+import {promisify} from 'util';
 
+const exec = promisify(execAsync);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isWindows = platform === 'win32';
+
+/**
+ * List of supported VS Code CLI executables (including forks).
+ * These are known to support the --install-extension and --list-extensions CLI flags.
+ */
+export const SUPPORTED_CLIS = [
+	'code',
+	'code-insiders',
+	'cursor',
+	'codium',
+	'vscodium',
+	'windsurf',
+	'trae',
+	'positron',
+];
+
+/**
+ * Interface for VS Code flavor status
+ */
+export interface VSCodeStatus {
+	cli: string;
+	available: boolean;
+	extensionInstalled: boolean;
+}
+
+// Cache for available CLIs to avoid repeated slow PATH lookups
+let cachedAvailableClis: string[] | null = null;
 
 /**
  * Get the path to the bundled VSIX file
@@ -32,103 +61,193 @@ export function getVsixPath(): string {
 }
 
 /**
- * Check if the VS Code CLI is available
+ * Get all available VS Code (or fork) CLIs in the PATH.
+ * Uses parallel async checks with timeouts for better performance.
  */
-export function isVSCodeCliAvailable(): boolean {
-	try {
-		execSync('code --version', {
-			stdio: 'ignore',
-			...(isWindows && {shell: 'cmd.exe'}),
-		});
-		return true;
-	} catch {
-		return false;
+export async function getAvailableClis(
+	forceRefresh = false,
+): Promise<string[]> {
+	if (cachedAvailableClis && !forceRefresh) {
+		return cachedAvailableClis;
 	}
+
+	const results = await Promise.all(
+		SUPPORTED_CLIS.map(async cli => {
+			try {
+				// Use a short timeout (2s) to avoid hanging on unresponsive executables
+				await exec(`${cli} --version`, {
+					timeout: 2000,
+					...(isWindows && {shell: 'cmd.exe'}),
+				});
+				return cli;
+			} catch {
+				return null;
+			}
+		}),
+	);
+
+	cachedAvailableClis = results.filter((cli): cli is string => cli !== null);
+	return cachedAvailableClis;
 }
 
 /**
- * Check if the nanocoder VS Code extension is installed
+ * Check if any VS Code CLI is available
  */
-export function isExtensionInstalled(): boolean {
-	try {
-		const output = execSync('code --list-extensions', {
-			encoding: 'utf-8',
-			stdio: ['pipe', 'pipe', 'ignore'],
-			...(isWindows && {shell: 'cmd.exe'}),
-		});
-		return output.toLowerCase().includes('nanocollective.nanocoder-vscode');
-	} catch {
-		return false;
-	}
+export async function isVSCodeCliAvailable(): Promise<boolean> {
+	const available = await getAvailableClis();
+	return available.length > 0;
 }
 
 /**
- * Install the VS Code extension from the bundled VSIX
- * Returns a promise that resolves when installation is complete
+ * Get detailed status for all supported VS Code flavors
  */
-export async function installExtension(): Promise<{
+export async function getExtensionStatus(): Promise<VSCodeStatus[]> {
+	const availableClis = await getAvailableClis();
+
+	return Promise.all(
+		availableClis.map(async cli => {
+			try {
+				const {stdout} = await exec(`${cli} --list-extensions`, {
+					timeout: 5000,
+					encoding: 'utf-8',
+					...(isWindows && {shell: 'cmd.exe'}),
+				});
+
+				const extensionInstalled = stdout
+					.toLowerCase()
+					.includes('nanocollective.nanocoder-vscode');
+
+				return {
+					cli,
+					available: true,
+					extensionInstalled,
+				};
+			} catch {
+				return {
+					cli,
+					available: true,
+					extensionInstalled: false,
+				};
+			}
+		}),
+	);
+}
+
+/**
+ * Check if the nanocoder VS Code extension is installed in any available VS Code flavor
+ * @deprecated Use getExtensionStatus() for richer information
+ */
+export async function isExtensionInstalled(): Promise<boolean> {
+	const status = await getExtensionStatus();
+	return status.some(s => s.extensionInstalled);
+}
+
+/**
+ * Install the VS Code extension to a specific CLI
+ */
+async function installToCli(cli: string, vsixPath: string): Promise<boolean> {
+	// Validate CLI is in the allowed list to prevent command injection
+	// This check satisfies semgrep's detect-child-process rule
+	if (!SUPPORTED_CLIS.includes(cli)) {
+		return false;
+	}
+
+	return new Promise(resolve => {
+		// nosemgrep
+		const child = spawn(cli, ['--install-extension', vsixPath], {
+			stdio: ['ignore', 'pipe', 'pipe'],
+			...(isWindows && {shell: 'cmd.exe'}),
+		});
+
+		// Add a timeout for installation (30s)
+		const timeout = setTimeout(() => {
+			child.kill();
+			resolve(false);
+		}, 30000);
+
+		child.on('close', code => {
+			clearTimeout(timeout);
+			resolve(code === 0);
+		});
+
+		child.on('error', () => {
+			clearTimeout(timeout);
+			resolve(false);
+		});
+	});
+}
+
+/**
+ * Install the VS Code extension from the bundled VSIX to all or specific available VS Code flavors.
+ * Returns a promise that resolves when installation is complete.
+ */
+export async function installExtension(targetClis?: string[]): Promise<{
 	success: boolean;
 	message: string;
+	results: {cli: string; success: boolean}[];
 }> {
-	if (!isVSCodeCliAvailable()) {
+	const availableClis = await getAvailableClis();
+	const clisToInstall = targetClis
+		? targetClis.filter(cli => availableClis.includes(cli))
+		: availableClis;
+
+	if (clisToInstall.length === 0) {
+		const checkedList = SUPPORTED_CLIS.join(', ');
 		return {
 			success: false,
 			message:
-				'VS Code CLI not found. Please install the "code" command:\n' +
-				'  1. Open VS Code\n' +
+				`No supported VS Code flavor found. Checked: ${checkedList}\n\n` +
+				"Please ensure your editor's CLI is in your PATH. To enable it:\n" +
+				'  1. Open VS Code or your preferred editor\n' +
 				'  2. Press Cmd+Shift+P (Mac) or Ctrl+Shift+P (Windows/Linux)\n' +
-				'  3. Type "Shell Command: Install \'code\' command in PATH"',
+				'  3. Search for "Shell Command: Install \'code\' command in PATH"',
+			results: [],
 		};
 	}
 
 	try {
 		const vsixPath = getVsixPath();
+		const results = await Promise.all(
+			clisToInstall.map(async cli => ({
+				cli,
+				success: await installToCli(cli, vsixPath),
+			})),
+		);
 
-		return new Promise(resolve => {
-			const child = spawn('code', ['--install-extension', vsixPath], {
-				stdio: ['ignore', 'pipe', 'pipe'],
-				...(isWindows && {shell: 'cmd.exe'}), // Required on Windows to find code.cmd
-			});
+		const successful = results.filter(r => r.success);
 
-			let stdout = '';
-			let stderr = '';
+		if (successful.length === 0) {
+			return {
+				success: false,
+				message: `Failed to install extension to: ${clisToInstall.join(', ')}.`,
+				results,
+			};
+		}
 
-			child.stdout?.on('data', (data: Buffer) => {
-				stdout += data.toString();
-			});
+		const successMessage =
+			successful.length === clisToInstall.length
+				? `VS Code extension installed successfully for: ${successful
+						.map(r => r.cli)
+						.join(', ')}!`
+				: `VS Code extension installed for: ${successful
+						.map(r => r.cli)
+						.join(', ')}. (Failed for: ${results
+						.filter(r => !r.success)
+						.map(r => r.cli)
+						.join(', ')})`;
 
-			child.stderr?.on('data', (data: Buffer) => {
-				stderr += data.toString();
-			});
-
-			child.on('close', code => {
-				if (code === 0) {
-					resolve({
-						success: true,
-						message:
-							'VS Code extension installed successfully! Please reload VS Code to activate it.',
-					});
-				} else {
-					resolve({
-						success: false,
-						message: `Failed to install extension: ${stderr || stdout}`,
-					});
-				}
-			});
-
-			child.on('error', error => {
-				resolve({
-					success: false,
-					message: `Failed to install extension: ${error.message}`,
-				});
-			});
-		});
+		return {
+			success: true,
+			message: `${successMessage} Please reload your editor to activate it.`,
+			results,
+		};
 	} catch (error) {
 		return {
 			success: false,
 			message: `Failed to install extension: ${
 				error instanceof Error ? error.message : String(error)
 			}`,
+			results: [],
 		};
 	}
 }

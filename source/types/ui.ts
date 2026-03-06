@@ -62,7 +62,8 @@ export type ThemePreset =
 	| 'night-owl'
 	| 'palenight'
 	| 'horizon'
-	| 'kanagawa';
+	| 'kanagawa'
+	| 'aurora-borealis';
 
 export type NanocoderShape =
 	| 'block'

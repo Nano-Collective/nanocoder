@@ -1,8 +1,3 @@
-import {
-	cleanJSONToolCalls,
-	detectMalformedJSONToolCall,
-	parseJSONToolCalls,
-} from '@/tool-calling/json-parser';
 import {XMLToolCallParser} from '@/tool-calling/xml-parser';
 import type {ToolCall} from '@/types/index';
 import {ensureString} from '@/utils/type-helpers';
@@ -55,8 +50,9 @@ type ParseResult =
 	  };
 
 /**
- * Unified tool call parser that tries XML first, then falls back to JSON
- * Type-preserving: Accepts unknown type, converts to string for processing
+ * Parses XML tool calls from content (used for non-tool-calling models).
+ * Only runs on the XML fallback path when native tool calling is disabled.
+ * Type-preserving: Accepts unknown type, converts to string for processing.
  */
 export function parseToolCalls(content: unknown): ParseResult {
 	// 1. Safety Coercion
@@ -65,7 +61,7 @@ export function parseToolCalls(content: unknown): ParseResult {
 	// Strip tags first - some models (like GLM-4) emit these for chain-of-thought
 	const strippedContent = stripThinkTags(contentStr);
 
-	// 1. Try XML parser for valid tool calls (OPTIMISTIC: Success first!)
+	// 2. Try XML parser for valid tool calls (OPTIMISTIC: Success first!)
 	if (XMLToolCallParser.hasToolCalls(strippedContent)) {
 		// Parse valid XML tool calls
 		const parsedCalls = XMLToolCallParser.parseToolCalls(strippedContent);
@@ -82,7 +78,7 @@ export function parseToolCalls(content: unknown): ParseResult {
 		}
 	}
 
-	// 2. Check for malformed XML patterns (DEFENSIVE: Error second!)
+	// 3. Check for malformed XML patterns (DEFENSIVE: Error second!)
 	const xmlMalformed =
 		XMLToolCallParser.detectMalformedToolCall(strippedContent);
 	if (xmlMalformed) {
@@ -93,30 +89,7 @@ export function parseToolCalls(content: unknown): ParseResult {
 		};
 	}
 
-	// 3. Fall back to JSON parser
-	// FIX: Check for valid JSON tool calls FIRST (optimistic approach)
-	// This prevents malformed detection from catching text that's NOT a tool call attempt
-	const jsonCalls = parseJSONToolCalls(strippedContent);
-	if (jsonCalls.length > 0) {
-		const cleanedContent = cleanJSONToolCalls(strippedContent, jsonCalls);
-		return {
-			success: true,
-			toolCalls: jsonCalls,
-			cleanedContent,
-		};
-	}
-
-	// 4. If no valid tools found, check for malformed patterns
-	const jsonMalformed = detectMalformedJSONToolCall(strippedContent);
-	if (jsonMalformed) {
-		return {
-			success: false,
-			error: jsonMalformed.error,
-			examples: jsonMalformed.examples,
-		};
-	}
-
-	// 5. No tool calls found - still normalize whitespace in content
+	// 4. No tool calls found - normalize whitespace in content
 	return {
 		success: true,
 		toolCalls: [],

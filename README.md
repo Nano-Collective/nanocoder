@@ -143,6 +143,10 @@ Or install from `packages` output:
 }
 ```
 
+### Uninstalling
+
+See the [Uninstalling Guide](docs/uninstalling.md) for full instructions on removing Nanocoder, troubleshooting leftover binaries, and cleaning up configuration files.
+
 ### For Development
 
 If you want to contribute or modify Nanocoder:
