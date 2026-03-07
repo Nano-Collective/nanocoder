@@ -115,6 +115,9 @@ export function useAppState() {
 		checkpoints: CheckpointListItem[];
 		currentMessageCount: number;
 	} | null>(null);
+	const [isSessionSelectorMode, setIsSessionSelectorMode] =
+		useState<boolean>(false);
+	const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
 	const [isToolConfirmationMode, setIsToolConfirmationMode] =
 		useState<boolean>(false);
 	const [isToolExecuting, setIsToolExecuting] = useState<boolean>(false);
@@ -281,6 +284,8 @@ export function useAppState() {
 		isVscodeEnabled,
 		isSchedulerMode,
 		checkpointLoadData,
+		isSessionSelectorMode,
+		currentSessionId,
 		isToolConfirmationMode,
 		isToolExecuting,
 		isQuestionMode,
@@ -331,6 +336,8 @@ export function useAppState() {
 		setIsVscodeEnabled,
 		setIsSchedulerMode,
 		setCheckpointLoadData,
+		setIsSessionSelectorMode,
+		setCurrentSessionId,
 		setIsToolConfirmationMode,
 		setIsToolExecuting,
 		setIsQuestionMode,
