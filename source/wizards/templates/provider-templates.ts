@@ -445,6 +445,33 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		}),
 	},
 	{
+		id: 'github-copilot',
+		name: 'GitHub Copilot',
+		fields: [
+			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: 'GitHub Copilot',
+			},
+			{
+				name: 'model',
+				prompt:
+					'Model name(s) (comma-separated). Type /copilot-login in the chat or run "nanocoder copilot login" if not logged in.',
+				default: 'gpt-4o,claude-3-5-sonnet-20241022',
+				required: true,
+			},
+		],
+		buildConfig: answers => ({
+			name: answers.providerName || 'GitHub Copilot',
+			baseUrl: 'https://api.githubcopilot.com',
+			models: answers.model
+				.split(',')
+				.map(m => m.trim())
+				.filter(Boolean),
+			sdkProvider: 'github-copilot',
+		}),
+	},
+	{
 		id: 'kimi-code',
 		name: 'Kimi Code',
 		fields: [

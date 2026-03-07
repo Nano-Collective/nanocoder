@@ -8,6 +8,15 @@ import {
 	type OpenAICompatibleProvider,
 } from '@ai-sdk/openai-compatible';
 import {type Agent, fetch as undiciFetch} from 'undici';
+import {
+	COPILOT_HEADERS,
+	getCopilotAccessToken,
+	getCopilotBaseUrl,
+} from '@/auth/github-copilot';
+import {
+	getCopilotNoCredentialsMessage,
+	loadCopilotCredential,
+} from '@/config/copilot-credentials';
 import type {AIProviderConfig} from '@/types/index';
 import {getLogger} from '@/utils/logging';
 
@@ -50,6 +59,51 @@ export function createProvider(
 
 		return createGoogleGenerativeAI({
 			apiKey: config.apiKey ?? '',
+		});
+	}
+
+	if (sdkProvider === 'github-copilot') {
+		logger.info('Using GitHub Copilot subscription provider', {
+			provider: providerConfig.name,
+		});
+
+		const credential = loadCopilotCredential(providerConfig.name);
+		if (!credential) {
+			throw new Error(getCopilotNoCredentialsMessage(providerConfig.name));
+		}
+
+		const domain = credential.enterpriseUrl ?? 'github.com';
+		const baseURL = config.baseURL?.trim() || getCopilotBaseUrl(domain);
+
+		const copilotFetch = async (
+			input: string | URL | Request,
+			init?: RequestInit,
+		): Promise<Response> => {
+			const {token} = await getCopilotAccessToken(
+				credential.oauthToken,
+				domain,
+			);
+			const headers = new Headers(init?.headers);
+			headers.set('Authorization', `Bearer ${token}`);
+			headers.set('Openai-Intent', 'conversation-edits');
+			headers.set('X-Initiator', 'agent');
+			for (const [k, v] of Object.entries(COPILOT_HEADERS)) {
+				headers.set(k, v);
+			}
+			return undiciFetch(input as string | URL, {
+				...init,
+				headers,
+				dispatcher: undiciAgent,
+			}) as Promise<Response>;
+		};
+
+		return createOpenAICompatible({
+			name: providerConfig.name,
+			baseURL,
+			// Non-empty placeholder; auth is via custom fetch Authorization header
+			apiKey: 'dummy-key',
+			fetch: copilotFetch,
+			headers: config.headers ?? {},
 		});
 	}
 

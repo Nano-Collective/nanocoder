@@ -18,7 +18,10 @@ if (args.includes('--version') || args.includes('-v')) {
 // Handle --help/-h flag
 if (args.includes('--help') || args.includes('-h')) {
 	console.log(`
-Usage: nanocoder [options]
+Usage: nanocoder [options] [command]
+
+Commands:
+  copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
 
 Options:
   -v, --version    Show version number
@@ -67,11 +70,41 @@ if (runCommandIndex !== -1 && args[runCommandIndex + 1]) {
 
 const nonInteractiveMode = runCommandIndex !== -1;
 
-render(
-	<App
-		vscodeMode={vscodeMode}
-		vscodePort={vscodePort}
-		nonInteractivePrompt={nonInteractivePrompt}
-		nonInteractiveMode={nonInteractiveMode}
-	/>,
-);
+// Handle copilot login from CLI (no App)
+if (args[0] === 'copilot' && args[1] === 'login') {
+	const providerName = args[2]?.trim() || 'GitHub Copilot';
+	(async () => {
+		try {
+			const {runCopilotLoginFlow} = await import('@/auth/github-copilot');
+			console.log('Starting GitHub Copilot login...');
+			await runCopilotLoginFlow(providerName, {
+				onShowCode(verificationUri, userCode) {
+					console.log('');
+					console.log('  1. Open this URL in your browser:');
+					console.log('');
+					console.log('     ' + verificationUri);
+					console.log('');
+					console.log('  2. Enter this code when prompted:');
+					console.log('');
+					console.log('     ' + userCode);
+					console.log('');
+					console.log('Waiting for you to complete login...');
+				},
+			});
+			console.log('\nLogged in. Credential saved for "' + providerName + '".');
+			process.exit(0);
+		} catch (err) {
+			console.error(err instanceof Error ? err.message : err);
+			process.exit(1);
+		}
+	})();
+} else {
+	render(
+		<App
+			vscodeMode={vscodeMode}
+			vscodePort={vscodePort}
+			nonInteractivePrompt={nonInteractivePrompt}
+			nonInteractiveMode={nonInteractiveMode}
+		/>,
+	);
+}

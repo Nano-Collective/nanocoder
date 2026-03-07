@@ -1,4 +1,7 @@
 import test from 'ava';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import type {AIProviderConfig} from '@/types/index';
 import {Agent} from 'undici';
 import {createProvider} from './provider-factory.js';
@@ -203,4 +206,37 @@ test('createProvider google provider works without baseURL', t => {
 	const provider = createProvider(config, agent);
 
 	t.truthy(provider);
+});
+
+test.serial('createProvider throws when github-copilot has no stored credential', t => {
+	const config: AIProviderConfig = {
+		name: 'GitHub Copilot',
+		type: 'openai',
+		models: ['gpt-4o'],
+		sdkProvider: 'github-copilot',
+		config: {
+			baseURL: 'https://api.githubcopilot.com',
+			apiKey: '',
+		},
+	};
+
+	const tmpDir = fs.mkdtempSync(
+		path.join(os.tmpdir(), 'nanocoder-copilot-test-'),
+	);
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	process.env.NANOCODER_CONFIG_DIR = tmpDir;
+	try {
+		const agent = new Agent();
+		t.throws(
+			() => createProvider(config, agent),
+			{message: /No Copilot credentials/},
+		);
+	} finally {
+		if (originalConfigDir !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+		fs.rmSync(tmpDir, {recursive: true, force: true});
+	}
 });
