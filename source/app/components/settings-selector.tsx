@@ -461,27 +461,30 @@ function SettingsNanocoderShapePanel({
 		}
 	});
 
-	const shapeOptions: {label: string; value: NanocoderShape}[] = [
-		{label: 'Tiny (default)', value: 'tiny'},
-		{label: 'Block', value: 'block'},
-		{label: 'Simple', value: 'simple'},
-		{label: 'Simple Block', value: 'simpleBlock'},
-		{label: 'Slick', value: 'slick'},
-		{label: 'Grid', value: 'grid'},
-		{label: 'Pallet', value: 'pallet'},
-		{label: 'Shade', value: 'shade'},
-		{label: '3D', value: '3d'},
-		{label: 'Simple 3D', value: 'simple3d'},
-		{label: 'Chrome', value: 'chrome'},
-		{label: 'Huge', value: 'huge'},
-	];
+	const shapeOptions: {label: string; value: NanocoderShape}[] = useMemo(
+		() => [
+			{label: 'Tiny (default)', value: 'tiny'},
+			{label: 'Block', value: 'block'},
+			{label: 'Simple', value: 'simple'},
+			{label: 'Simple Block', value: 'simpleBlock'},
+			{label: 'Slick', value: 'slick'},
+			{label: 'Grid', value: 'grid'},
+			{label: 'Pallet', value: 'pallet'},
+			{label: 'Shade', value: 'shade'},
+			{label: '3D', value: '3d'},
+			{label: 'Simple 3D', value: 'simple3d'},
+			{label: 'Chrome', value: 'chrome'},
+			{label: 'Huge', value: 'huge'},
+		],
+		[],
+	);
 
 	const initialIndex = useMemo(() => {
 		const index = shapeOptions.findIndex(
 			option => option.value === originalShape,
 		);
 		return index >= 0 ? index : 0;
-	}, [originalShape]);
+	}, [originalShape, shapeOptions]);
 
 	const handleSelect = (item: {label: string; value: NanocoderShape}) => {
 		updateNanocoderShape(item.value);
