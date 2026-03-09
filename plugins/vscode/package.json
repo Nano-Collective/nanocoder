@@ -104,5 +104,10 @@
 	},
 	"dependencies": {
 		"ws": "^8.16.0"
+	},
+	"pnpm": {
+		"overrides": {
+			"underscore": "1.13.8"
+		}
 	}
 }
