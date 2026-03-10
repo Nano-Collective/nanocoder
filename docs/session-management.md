@@ -11,10 +11,18 @@ Nanocoder provides automatic session storage and management to save and restore 
 
 ## Storage Location
 
-Sessions are stored in `~/.nanocoder-sessions/` by default, with the following structure:
+Sessions are stored in the platform-specific app data directory by default:
+
+| Platform | Default Path |
+|----------|-------------|
+| macOS | `~/Library/Application Support/nanocoder/sessions/` |
+| Linux | `~/.local/share/nanocoder/sessions/` |
+| Windows | `%APPDATA%/nanocoder/sessions/` |
+
+This can be overridden via the `directory` config option or `NANOCODER_DATA_DIR` env var.
 
 ```
-~/.nanocoder-sessions/
+<app-data>/nanocoder/sessions/
 ├── sessions.json          # Index of all sessions
 └── {session-id}.json      # Individual session files
 ```
@@ -31,7 +39,7 @@ Session behavior can be customized through the `agents.config.json` file:
       "saveInterval": 30000,
       "maxSessions": 100,
       "retentionDays": 30,
-      "directory": "~/.nanocoder-sessions"
+      "directory": ""
     }
   }
 }
@@ -43,7 +51,7 @@ Session behavior can be customized through the `agents.config.json` file:
 - `saveInterval`: Time interval between saves in milliseconds (default: `30000` - 30 seconds)
 - `maxSessions`: Maximum number of sessions to keep (default: `100`)
 - `retentionDays`: Automatically delete sessions older than this many days (default: `30`)
-- `directory`: Directory to store session files (default: `"~/.nanocoder-sessions"`)
+- `directory`: Directory to store session files (default: platform app data path + `/sessions`)
 
 ## Commands
 
@@ -64,7 +72,7 @@ Each session contains the following information:
 
 ```typescript
 interface Session {
-  id: string;              // Unique session ID (timestamp-based)
+  id: string;              // Unique session ID (UUID v4)
   title: string;           // Auto-generated from first message or manual
   createdAt: string;       // ISO timestamp
   lastAccessedAt: string;  // ISO timestamp

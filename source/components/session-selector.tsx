@@ -9,6 +9,31 @@ interface SessionSelectorProps {
 	onCancel: () => void;
 }
 
+function formatTimeAgo(dateString: string): string {
+	const date = new Date(dateString);
+	const now = new Date();
+	const diffInMs = now.getTime() - date.getTime();
+	const diffInHours = diffInMs / (1000 * 60 * 60);
+	const diffInDays = diffInHours / 24;
+
+	if (diffInHours < 1) {
+		return 'just now';
+	} else if (diffInHours < 24) {
+		const hours = Math.floor(diffInHours);
+		return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+	} else if (diffInDays < 7) {
+		const days = Math.floor(diffInDays);
+		return `${days} day${days > 1 ? 's' : ''} ago`;
+	} else {
+		const weeks = Math.floor(diffInDays / 7);
+		return `${weeks} week${weeks > 1 ? 's' : ''} ago`;
+	}
+}
+
+function formatMessageCount(count: number): string {
+	return `${count} message${count !== 1 ? 's' : ''}`;
+}
+
 const SessionSelector: React.FC<SessionSelectorProps> = ({
 	onSelect,
 	onCancel,
@@ -39,7 +64,9 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 
 	useInput((input, _) => {
 		if (input === 'q' || input === 'Q') {
-			onCancel();
+			if (!loading) {
+				onCancel();
+			}
 			return;
 		}
 		if (!loading && sessions.length === 0) {
@@ -63,31 +90,6 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 			</Box>
 		);
 	}
-
-	const formatTimeAgo = (dateString: string): string => {
-		const date = new Date(dateString);
-		const now = new Date();
-		const diffInMs = now.getTime() - date.getTime();
-		const diffInHours = diffInMs / (1000 * 60 * 60);
-		const diffInDays = diffInHours / 24;
-
-		if (diffInHours < 1) {
-			return 'just now';
-		} else if (diffInHours < 24) {
-			const hours = Math.floor(diffInHours);
-			return `${hours} hour${hours > 1 ? 's' : ''} ago`;
-		} else if (diffInDays < 7) {
-			const days = Math.floor(diffInDays);
-			return `${days} day${days > 1 ? 's' : ''} ago`;
-		} else {
-			const weeks = Math.floor(diffInDays / 7);
-			return `${weeks} week${weeks > 1 ? 's' : ''} ago`;
-		}
-	};
-
-	const formatMessageCount = (count: number): string => {
-		return `${count} message${count !== 1 ? 's' : ''}`;
-	};
 
 	const items = sessions.map((session, index) => ({
 		label: `[${index + 1}] ${session.title} (${formatMessageCount(session.messageCount)}) - ${formatTimeAgo(session.lastAccessedAt)}`,

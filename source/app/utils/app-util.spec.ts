@@ -1,4 +1,9 @@
 import test from 'ava';
+import React from 'react';
+import {handleMessageSubmission, parseContextLimit} from './app-util.js';
+import type {MessageSubmissionOptions} from '@/types/index';
+import type {Session} from '@/session/session-manager';
+import {sessionManager} from '@/session/session-manager';
 
 // Test command parsing edge cases
 // These tests document the expected behavior of parsing patterns
@@ -190,9 +195,7 @@ test('commands create - preserves .md extension when present', t => {
 	t.is(safeName, 'my-tool.md');
 });
 
-// Test parseContextLimit — imported from the actual module
-import {parseContextLimit} from './app-util.js';
-
+// Test parseContextLimit
 test('parseContextLimit - plain number', t => {
 	t.is(parseContextLimit('8192'), 8192);
 });
@@ -268,12 +271,6 @@ test('ide command parsing - recognized as special command', t => {
 });
 
 // --- Resume command tests (/resume, /sessions, /history) ---
-
-import React from 'react';
-import {handleMessageSubmission} from './app-util.js';
-import type {MessageSubmissionOptions} from '@/types/index';
-import type {Session} from '@/session/session-manager';
-import {sessionManager} from '@/session/session-manager';
 
 function createResumeTestOptions(overrides: {
 	onEnterSessionSelectorMode?: () => void;

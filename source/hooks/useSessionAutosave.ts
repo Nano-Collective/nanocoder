@@ -91,7 +91,7 @@ export function useSessionAutosave({
 					: `Session ${new Date().toLocaleDateString()}`;
 
 				if (currentSessionId) {
-					const session = await sessionManager.loadSession(currentSessionId);
+					const session = await sessionManager.readSession(currentSessionId);
 					if (session) {
 						session.messages = messages;
 						session.messageCount = messages.length;

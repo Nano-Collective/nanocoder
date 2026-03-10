@@ -896,6 +896,13 @@ async function handleResumeCommand(
 	} = options;
 
 	if (!onEnterSessionSelectorMode || !onResumeSession) {
+		onAddToChatQueue(
+			React.createElement(ErrorMessage, {
+				key: `resume-error-${getNextComponentKey()}`,
+				message: 'Session management is not available in this context.',
+				hideBox: true,
+			}),
+		);
 		onCommandComplete?.();
 		return true;
 	}
@@ -907,6 +914,7 @@ async function handleResumeCommand(
 		try {
 			await sessionManager.initialize();
 			onEnterSessionSelectorMode();
+			onCommandComplete?.();
 		} catch (error) {
 			onAddToChatQueue(
 				React.createElement(ErrorMessage, {
