@@ -3,6 +3,7 @@ import {join} from 'node:path';
 import React from 'react';
 import {parseInput} from '@/command-parser';
 import {commandRegistry} from '@/commands';
+import {CopilotLogin} from '@/commands/copilot-login';
 import BashProgress from '@/components/bash-progress';
 import {
 	ErrorMessage,
@@ -982,6 +983,63 @@ async function handleResumeCommand(
 }
 
 /**
+ * Handles /copilot-login as a live component so spinners animate and state updates render.
+ * Returns true if handled.
+ */
+function handleCopilotLogin(
+	commandParts: string[],
+	options: MessageSubmissionOptions,
+): boolean {
+	if (commandParts[0] !== 'copilot-login') {
+		return false;
+	}
+
+	const {
+		setLiveComponent,
+		setIsToolExecuting,
+		onAddToChatQueue,
+		onCommandComplete,
+		getNextComponentKey,
+	} = options;
+
+	const providerName = commandParts[1]?.trim() || 'GitHub Copilot';
+
+	setIsToolExecuting(true);
+
+	setLiveComponent(
+		React.createElement(CopilotLogin, {
+			key: `copilot-login-live-${getNextComponentKey()}`,
+			providerName,
+			onDone: result => {
+				setLiveComponent(null);
+				setIsToolExecuting(false);
+
+				if (result.success) {
+					onAddToChatQueue(
+						React.createElement(SuccessMessage, {
+							key: `copilot-login-done-${getNextComponentKey()}`,
+							message: `Logged in. Credential saved for "${providerName}".`,
+							hideBox: true,
+						}),
+					);
+				} else {
+					onAddToChatQueue(
+						React.createElement(ErrorMessage, {
+							key: `copilot-login-error-${getNextComponentKey()}`,
+							message: result.error ?? 'Login failed.',
+						}),
+					);
+				}
+
+				onCommandComplete?.();
+			},
+		}),
+	);
+
+	return true;
+}
+
+/**
  * Handles built-in commands via the command registry
  */
 async function handleBuiltInCommand(
@@ -1095,6 +1153,11 @@ async function handleSlashCommand(
 
 	// Try /resume, /sessions, /history
 	if (await handleResumeCommand(commandParts, options)) {
+		return;
+	}
+
+	// Try /copilot-login (uses live component for animated spinners)
+	if (handleCopilotLogin(commandParts, options)) {
 		return;
 	}
 

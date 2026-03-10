@@ -2,7 +2,11 @@ import type {TitleShape} from '@/components/ui/styled-title';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
 
 // Supported AI SDK provider packages
-export type SdkProvider = 'openai-compatible' | 'google' | 'anthropic';
+export type SdkProvider =
+	| 'openai-compatible'
+	| 'google'
+	| 'anthropic'
+	| 'github-copilot';
 
 // AI provider configurations (OpenAI-compatible)
 export interface AIProviderConfig {

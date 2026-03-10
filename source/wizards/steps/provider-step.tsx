@@ -233,6 +233,8 @@ export function ProviderStep({
 				// Find matching template (or use custom)
 				const template =
 					PROVIDER_TEMPLATES.find(t => t.id === provider.name) ||
+					(provider.sdkProvider &&
+						PROVIDER_TEMPLATES.find(t => t.id === provider.sdkProvider)) ||
 					PROVIDER_TEMPLATES.find(t => t.id === 'custom');
 
 				if (template) {

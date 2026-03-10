@@ -19,7 +19,10 @@ test('parseAPIError handles APICallError with 400 status', t => {
 	});
 
 	const result = parseAPIError(error);
-	t.is(result, 'Bad request: Bad input');
+	t.is(
+		result,
+		'Bad request: Bad input\nURL: https://api.example.com\nResponse body: {"error":{"message":"Bad input"}}',
+	);
 });
 
 test('parseAPIError handles APICallError with 401 status', t => {

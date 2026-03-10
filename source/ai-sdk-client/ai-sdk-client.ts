@@ -1,3 +1,4 @@
+import type {OpenAIProvider} from '@ai-sdk/openai';
 import type {LanguageModel} from 'ai';
 import {Agent} from 'undici';
 import {TIMEOUT_SOCKET_DEFAULT_MS} from '@/constants';
@@ -131,7 +132,16 @@ export class AISDKClient implements LLMClient {
 		modeOverrides?: ModeOverrides,
 	): Promise<LLMChatResponse> {
 		// Get the language model instance from the provider
-		const model = this.provider(this.currentModel) as unknown as LanguageModel;
+		// GitHub Copilot requires routing: GPT-5+ → Responses API, others → Chat Completions
+		let model: LanguageModel;
+		if (this.providerConfig.sdkProvider === 'github-copilot') {
+			const copilot = this.provider as unknown as OpenAIProvider;
+			model = this.currentModel.includes('gpt-5')
+				? copilot.responses(this.currentModel)
+				: copilot.chat(this.currentModel);
+		} else {
+			model = this.provider(this.currentModel) as unknown as LanguageModel;
+		}
 
 		// Delegate to chat handler
 		return await handleChat({

@@ -495,3 +495,22 @@ test('buildConfigObject: handles Gemini provider with all fields', t => {
 	t.is(config.nanocoder.providers[0].apiKey, 'test-api-key');
 	t.deepEqual(config.nanocoder.providers[0].models, ['gemini-3-flash-preview', 'gemini-3-pro-preview']);
 });
+
+test('buildConfigObject: handles GitHub Copilot provider with sdkProvider github-copilot', t => {
+	const providers: ProviderConfig[] = [
+		{
+			name: 'GitHub Copilot',
+			sdkProvider: 'github-copilot',
+			baseUrl: 'https://api.githubcopilot.com',
+			models: ['gpt-4o', 'claude-3-5-sonnet-20241022'],
+		},
+	];
+
+	const config = buildConfigObject(providers, {});
+
+	const p = config.nanocoder.providers[0];
+	t.is(p.name, 'GitHub Copilot');
+	t.is(p.sdkProvider, 'github-copilot');
+	t.is(p.baseUrl, 'https://api.githubcopilot.com');
+	t.deepEqual(p.models, ['gpt-4o', 'claude-3-5-sonnet-20241022']);
+});

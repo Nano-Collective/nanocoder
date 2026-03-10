@@ -61,11 +61,12 @@
 	"dependencies": {
 		"@ai-sdk/anthropic": "^3.0.37",
 		"@ai-sdk/google": "^3.0.13",
+		"@ai-sdk/openai": "^3.0.41",
 		"@ai-sdk/openai-compatible": "2.0.31",
 		"@anthropic-ai/tokenizer": "^0.0.4",
 		"@modelcontextprotocol/sdk": "^1.26.0",
 		"@nanocollective/get-md": "^1.0.2",
-		"ai": "6.0.105",
+		"ai": "6.0.116",
 		"chalk": "^5.2.0",
 		"cheerio": "^1.1.2",
 		"cli-highlight": "^2.1.11",
@@ -88,7 +89,7 @@
 		"sonic-boom": "^4.0.0",
 		"tiktoken": "^1.0.22",
 		"undici": "^7.16.0",
-		"wrap-ansi": "^9.0.2",
+		"wrap-ansi": "^10.0.0",
 		"ws": "^8.18.0",
 		"xdg-basedir": "^5.1.0"
 	},
@@ -159,7 +160,7 @@
 			"@vscode/vsce>minimatch": "^3.0.5",
 			"@modelcontextprotocol/sdk>hono": ">=4.12.4",
 			"@modelcontextprotocol/sdk>@hono/node-server": ">=1.19.10",
-			"underscore": "1.13.8",
+			"underscore": ">=1.13.8",
 			"express-rate-limit": ">=8.2.2"
 		}
 	}

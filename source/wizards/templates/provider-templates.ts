@@ -445,6 +445,32 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		}),
 	},
 	{
+		id: 'github-copilot',
+		name: 'GitHub Copilot',
+		fields: [
+			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: 'GitHub Copilot',
+			},
+			{
+				name: 'model',
+				prompt: 'Model name(s) (comma-separated).',
+				default: 'gpt-4.1, gpt-5.3-codex, claude-sonnet-4.6',
+				required: true,
+			},
+		],
+		buildConfig: answers => ({
+			name: answers.providerName || 'GitHub Copilot',
+			baseUrl: 'https://api.githubcopilot.com',
+			models: answers.model
+				.split(',')
+				.map(m => m.trim())
+				.filter(Boolean),
+			sdkProvider: 'github-copilot',
+		}),
+	},
+	{
 		id: 'kimi-code',
 		name: 'Kimi Code',
 		fields: [

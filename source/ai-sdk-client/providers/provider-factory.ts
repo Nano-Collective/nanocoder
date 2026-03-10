@@ -3,17 +3,28 @@ import {
 	createGoogleGenerativeAI,
 	type GoogleGenerativeAIProvider,
 } from '@ai-sdk/google';
+import {createOpenAI, type OpenAIProvider} from '@ai-sdk/openai';
 import {
 	createOpenAICompatible,
 	type OpenAICompatibleProvider,
 } from '@ai-sdk/openai-compatible';
 import {type Agent, fetch as undiciFetch} from 'undici';
+import {
+	COPILOT_HEADERS,
+	getCopilotAccessToken,
+	getCopilotBaseUrl,
+} from '@/auth/github-copilot';
+import {
+	getCopilotNoCredentialsMessage,
+	loadCopilotCredential,
+} from '@/config/copilot-credentials';
 import type {AIProviderConfig} from '@/types/index';
 import {getLogger} from '@/utils/logging';
 
 // Union type for supported providers
 export type AIProvider =
 	| OpenAICompatibleProvider<string, string, string, string>
+	| OpenAIProvider
 	| GoogleGenerativeAIProvider
 	| AnthropicProvider;
 
@@ -50,6 +61,75 @@ export function createProvider(
 
 		return createGoogleGenerativeAI({
 			apiKey: config.apiKey ?? '',
+		});
+	}
+
+	if (sdkProvider === 'github-copilot') {
+		logger.info('Using GitHub Copilot subscription provider', {
+			provider: providerConfig.name,
+		});
+
+		const credential = loadCopilotCredential(providerConfig.name);
+		if (!credential) {
+			throw new Error(getCopilotNoCredentialsMessage(providerConfig.name));
+		}
+
+		const domain = credential.enterpriseUrl ?? 'github.com';
+		const baseURL = config.baseURL?.trim() || getCopilotBaseUrl(domain);
+
+		const copilotFetch = async (
+			input: string | URL | Request,
+			init?: RequestInit,
+		): Promise<Response> => {
+			const {token} = await getCopilotAccessToken(
+				credential.oauthToken,
+				domain,
+			);
+
+			// Build headers via Headers (case-insensitive) to avoid
+			// duplicate keys when merging SDK lowercase and Copilot mixed-case.
+			const h = new Headers();
+			if (init?.headers) {
+				const src =
+					init.headers instanceof Headers
+						? init.headers
+						: new Headers(
+								init.headers as ConstructorParameters<typeof Headers>[0],
+							);
+				src.forEach((v, k) => {
+					if (k !== 'authorization') {
+						h.set(k, v);
+					}
+				});
+			}
+			for (const [k, v] of Object.entries(COPILOT_HEADERS)) {
+				h.set(k, v);
+			}
+			h.set('Authorization', `Bearer ${token}`);
+			h.set('Openai-Intent', 'conversation-edits');
+			h.set('X-Initiator', 'agent');
+
+			// Convert to plain object for undici
+			const headers: Record<string, string> = {};
+			h.forEach((v, k) => {
+				headers[k] = v;
+			});
+
+			return undiciFetch(input as string | URL, {
+				method: init?.method,
+				body: init?.body,
+				signal: init?.signal,
+				headers,
+				dispatcher: undiciAgent,
+			}) as Promise<Response>;
+		};
+
+		return createOpenAI({
+			baseURL,
+			// Empty key — auth is handled entirely by copilotFetch's Authorization header
+			apiKey: '',
+			fetch: copilotFetch,
+			headers: config.headers ?? {},
 		});
 	}
 

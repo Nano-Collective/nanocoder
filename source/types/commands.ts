@@ -1,6 +1,6 @@
 import {Message} from '@/types/core';
 
-export interface Command<T = React.ReactElement> {
+export interface Command<T = React.ReactElement | void> {
 	name: string;
 	description: string;
 	handler: (

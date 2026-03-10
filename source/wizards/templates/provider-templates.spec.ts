@@ -264,3 +264,18 @@ test('gemini template: includes baseUrl for documentation', t => {
 
 	t.is(config.baseUrl, 'https://generativelanguage.googleapis.com/v1beta');
 });
+
+test('github-copilot template: sets sdkProvider and defaults', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'github-copilot');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: '',
+		model: 'gpt-4.1, gpt-5.3-codex, claude-sonnet-4.6',
+	});
+
+	t.is(config.name, 'GitHub Copilot');
+	t.is(config.sdkProvider, 'github-copilot');
+	t.is(config.baseUrl, 'https://api.githubcopilot.com');
+	t.deepEqual(config.models, ['gpt-4.1', 'gpt-5.3-codex', 'claude-sonnet-4.6']);
+});

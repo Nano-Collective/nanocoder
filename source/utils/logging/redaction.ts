@@ -23,6 +23,8 @@ export const DEFAULT_REDACT_PATHS = [
 	'public_key',
 	'accessToken',
 	'access_token',
+	'oauthToken',
+	'oauth_token',
 	'refreshToken',
 	'refresh_token',
 ];

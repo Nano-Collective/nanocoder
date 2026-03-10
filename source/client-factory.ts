@@ -1,6 +1,10 @@
 import {existsSync} from 'fs';
 import {join} from 'path';
 import {AISDKClient} from '@/ai-sdk-client';
+import {
+	getCopilotNoCredentialsMessage,
+	loadCopilotCredential,
+} from '@/config/copilot-credentials';
 import {getClosestConfigFile} from '@/config/index';
 import {loadAllProviderConfigs} from '@/config/mcp-config-loader';
 import {loadPreferences} from '@/config/preferences';
@@ -172,7 +176,16 @@ async function testProviderConnection(
 			// Other errors (like HTTP errors) mean the server is responding, so pass
 		}
 	}
-	// Require API key for hosted providers
+	// GitHub Copilot: require stored credential instead of apiKey
+	if (providerConfig.sdkProvider === 'github-copilot') {
+		const credential = loadCopilotCredential(providerConfig.name);
+		if (!credential?.oauthToken) {
+			throw new Error(getCopilotNoCredentialsMessage(providerConfig.name));
+		}
+		return;
+	}
+
+	// Require API key for other hosted providers
 	if (
 		!providerConfig.config.apiKey &&
 		!(
