@@ -1,6 +1,7 @@
 import {Box, Text, useInput} from 'ink';
 import SelectInput from 'ink-select-input';
 import React, {useEffect, useState} from 'react';
+import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import type {SessionMetadata} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
 
@@ -44,6 +45,7 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 }) => {
 	const [sessions, setSessions] = useState<SessionMetadata[]>([]);
 	const [loading, setLoading] = useState(true);
+	const {actualWidth, truncate} = useResponsiveTerminal();
 
 	useEffect(() => {
 		const loadSessions = async () => {
@@ -95,10 +97,21 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 		);
 	}
 
-	const items = sessions.map((session, index) => ({
-		label: `[${index + 1}] ${session.title} (${formatMessageCount(session.messageCount)}) - ${formatTimeAgo(session.lastAccessedAt)}`,
-		value: session.id,
-	}));
+	const items = sessions.map((session, index) => {
+		const prefix = `[${index + 1}] `;
+		const suffix = ` (${formatMessageCount(session.messageCount)}) - ${formatTimeAgo(session.lastAccessedAt)}`;
+		// 4 accounts for the `> ` selector indicator + margin
+		const maxTitleLength = actualWidth - prefix.length - suffix.length - 4;
+		const truncatedTitle =
+			maxTitleLength > 10
+				? truncate(session.title, maxTitleLength)
+				: session.title;
+
+		return {
+			label: `${prefix}${truncatedTitle}${suffix}`,
+			value: session.id,
+		};
+	});
 
 	const handleSelect = (item: {value: string}) => {
 		const selectedSession = sessions.find(s => s.id === item.value);
