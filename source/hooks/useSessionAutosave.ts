@@ -95,12 +95,11 @@ export function useSessionAutosave({
 						? messages.slice(-maxMessages)
 						: messages;
 
-				const firstUserMessage = messagesToSave.find(
-					msg => msg.role === 'user',
-				);
-				const title = firstUserMessage
-					? firstUserMessage.content.substring(0, 50) +
-						(firstUserMessage.content.length > 50 ? '...' : '')
+				const userMessages = messagesToSave.filter(msg => msg.role === 'user');
+				const lastUserMessage = userMessages[userMessages.length - 1];
+				const title = lastUserMessage
+					? lastUserMessage.content.substring(0, 50) +
+						(lastUserMessage.content.length > 50 ? '...' : '')
 					: `Session ${new Date().toLocaleDateString()}`;
 
 				if (currentSessionId) {

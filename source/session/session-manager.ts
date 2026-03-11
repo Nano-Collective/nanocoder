@@ -190,7 +190,6 @@ export class SessionManager {
 		// to prevent orphaned files if the process dies between them.
 		await this.withIndexLock(async () => {
 			const sessionFilePath = path.join(this.sessionsDir, `${session.id}.json`);
-			const timestamp = new Date().toISOString();
 
 			// Write session file atomically
 			await atomicWriteFile(
@@ -207,7 +206,7 @@ export class SessionManager {
 				id: session.id,
 				title: session.title,
 				createdAt: session.createdAt,
-				lastAccessedAt: timestamp,
+				lastAccessedAt: session.lastAccessedAt,
 				messageCount: session.messageCount,
 				provider: session.provider,
 				model: session.model,

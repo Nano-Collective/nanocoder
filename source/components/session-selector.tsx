@@ -9,15 +9,19 @@ interface SessionSelectorProps {
 	onCancel: () => void;
 }
 
-function formatTimeAgo(dateString: string): string {
+export function formatTimeAgo(dateString: string): string {
 	const date = new Date(dateString);
 	const now = new Date();
 	const diffInMs = now.getTime() - date.getTime();
-	const diffInHours = diffInMs / (1000 * 60 * 60);
+	const diffInMinutes = diffInMs / (1000 * 60);
+	const diffInHours = diffInMinutes / 60;
 	const diffInDays = diffInHours / 24;
 
-	if (diffInHours < 1) {
+	if (diffInMinutes < 5) {
 		return 'just now';
+	} else if (diffInMinutes < 60) {
+		const minutes = Math.floor(diffInMinutes);
+		return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
 	} else if (diffInHours < 24) {
 		const hours = Math.floor(diffInHours);
 		return `${hours} hour${hours > 1 ? 's' : ''} ago`;
@@ -30,7 +34,7 @@ function formatTimeAgo(dateString: string): string {
 	}
 }
 
-function formatMessageCount(count: number): string {
+export function formatMessageCount(count: number): string {
 	return `${count} message${count !== 1 ? 's' : ''}`;
 }
 
@@ -62,8 +66,8 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 		loadSessions();
 	}, []);
 
-	useInput((input, _) => {
-		if (input === 'q' || input === 'Q') {
+	useInput((_input, key) => {
+		if (key.escape) {
 			if (!loading) {
 				onCancel();
 			}
@@ -116,7 +120,7 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 				/>
 			</Box>
 			<Box marginTop={1}>
-				<Text dimColor>↑/↓ to navigate • Enter to select • 'q' to cancel</Text>
+				<Text dimColor>↑/↓ to navigate • Enter to select • Esc to cancel</Text>
 			</Box>
 		</Box>
 	);

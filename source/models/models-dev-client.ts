@@ -189,7 +189,9 @@ async function findModelById(modelId: string): Promise<ModelInfo | null> {
 		return null;
 	}
 
-	// Search through all providers
+	let bestMatch: ModelInfo | null = null;
+
+	// Search through all providers, picking the match with highest context limit
 	for (const [_providerId, provider] of Object.entries(data)) {
 		// Skip malformed provider entries
 		if (!provider || typeof provider !== 'object' || !provider.models) {
@@ -197,22 +199,30 @@ async function findModelById(modelId: string): Promise<ModelInfo | null> {
 		}
 		const model = provider.models[modelId];
 		if (model) {
-			return {
-				id: model.id,
-				name: model.name,
-				provider: provider.name,
-				contextLimit: model.limit?.context ?? null,
-				outputLimit: model.limit?.output ?? null,
-				supportsToolCalls: model.tool_call ?? false,
-				cost: {
-					input: model.cost?.input ?? 0,
-					output: model.cost?.output ?? 0,
-				},
-			};
+			const contextLimit = model.limit?.context ?? null;
+			if (
+				!bestMatch ||
+				(contextLimit !== null &&
+					(bestMatch.contextLimit === null ||
+						contextLimit > bestMatch.contextLimit))
+			) {
+				bestMatch = {
+					id: model.id,
+					name: model.name,
+					provider: provider.name,
+					contextLimit,
+					outputLimit: model.limit?.output ?? null,
+					supportsToolCalls: model.tool_call ?? false,
+					cost: {
+						input: model.cost?.input ?? 0,
+						output: model.cost?.output ?? 0,
+					},
+				};
+			}
 		}
 	}
 
-	return null;
+	return bestMatch;
 }
 
 /**
