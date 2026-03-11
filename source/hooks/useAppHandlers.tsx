@@ -68,6 +68,7 @@ interface UseAppHandlersProps {
 		} | null,
 	) => void;
 	setIsSessionSelectorMode: (value: boolean) => void;
+	setShowAllSessions: (value: boolean) => void;
 	setCurrentSessionId: (value: string | null) => void;
 	setCurrentProvider: (value: string) => void;
 	setCurrentModel: (value: string) => void;
@@ -103,7 +104,7 @@ export interface AppHandlers {
 		createBackup: boolean,
 	) => Promise<void>;
 	handleCheckpointCancel: () => void;
-	enterSessionSelectorMode: () => void;
+	enterSessionSelectorMode: (showAll?: boolean) => void;
 	handleSessionSelect: (sessionId: string) => Promise<void>;
 	handleSessionCancel: () => void;
 	enterCheckpointLoadMode: (
@@ -381,9 +382,13 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	);
 
 	// Enter session selector mode (for /resume with no args)
-	const enterSessionSelectorMode = React.useCallback(() => {
-		props.setIsSessionSelectorMode(true);
-	}, [props.setIsSessionSelectorMode, props]);
+	const enterSessionSelectorMode = React.useCallback(
+		(showAll?: boolean) => {
+			props.setShowAllSessions(showAll ?? false);
+			props.setIsSessionSelectorMode(true);
+		},
+		[props.setShowAllSessions, props.setIsSessionSelectorMode, props],
+	);
 
 	// Load and apply a session (messages, provider, model)
 	const applySession = React.useCallback(

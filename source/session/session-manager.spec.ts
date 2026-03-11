@@ -293,6 +293,88 @@ test.serial(
 	},
 );
 
+// --- listSessions with workingDirectory filter ---
+
+test.serial(
+	'listSessions with workingDirectory filter returns matching sessions',
+	async t => {
+		await manager.createSession({
+			title: 'Project A',
+			messageCount: 0,
+			provider: 'test',
+			model: 'test',
+			workingDirectory: '/project-a',
+			messages: [],
+		});
+		await manager.createSession({
+			title: 'Project B',
+			messageCount: 0,
+			provider: 'test',
+			model: 'test',
+			workingDirectory: '/project-b',
+			messages: [],
+		});
+		await manager.createSession({
+			title: 'Project A again',
+			messageCount: 0,
+			provider: 'test',
+			model: 'test',
+			workingDirectory: '/project-a',
+			messages: [],
+		});
+
+		const filtered = await manager.listSessions({
+			workingDirectory: '/project-a',
+		});
+		t.is(filtered.length, 2);
+		t.true(filtered.every(s => s.workingDirectory === '/project-a'));
+	},
+);
+
+test.serial(
+	'listSessions with workingDirectory filter returns empty for no matches',
+	async t => {
+		await manager.createSession({
+			title: 'Project A',
+			messageCount: 0,
+			provider: 'test',
+			model: 'test',
+			workingDirectory: '/project-a',
+			messages: [],
+		});
+
+		const filtered = await manager.listSessions({
+			workingDirectory: '/project-b',
+		});
+		t.is(filtered.length, 0);
+	},
+);
+
+test.serial(
+	'listSessions without filter returns all sessions',
+	async t => {
+		await manager.createSession({
+			title: 'Project A',
+			messageCount: 0,
+			provider: 'test',
+			model: 'test',
+			workingDirectory: '/project-a',
+			messages: [],
+		});
+		await manager.createSession({
+			title: 'Project B',
+			messageCount: 0,
+			provider: 'test',
+			model: 'test',
+			workingDirectory: '/project-b',
+			messages: [],
+		});
+
+		const all = await manager.listSessions();
+		t.is(all.length, 2);
+	},
+);
+
 // --- validation ---
 
 test.serial('readSession rejects path traversal IDs', async t => {

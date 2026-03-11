@@ -117,6 +117,7 @@ export function useAppState() {
 	} | null>(null);
 	const [isSessionSelectorMode, setIsSessionSelectorMode] =
 		useState<boolean>(false);
+	const [showAllSessions, setShowAllSessions] = useState<boolean>(false);
 	const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
 	const [isToolConfirmationMode, setIsToolConfirmationMode] =
 		useState<boolean>(false);
@@ -285,6 +286,7 @@ export function useAppState() {
 		isSchedulerMode,
 		checkpointLoadData,
 		isSessionSelectorMode,
+		showAllSessions,
 		currentSessionId,
 		isToolConfirmationMode,
 		isToolExecuting,
@@ -337,6 +339,7 @@ export function useAppState() {
 		setIsSchedulerMode,
 		setCheckpointLoadData,
 		setIsSessionSelectorMode,
+		setShowAllSessions,
 		setCurrentSessionId,
 		setIsToolConfirmationMode,
 		setIsToolExecuting,

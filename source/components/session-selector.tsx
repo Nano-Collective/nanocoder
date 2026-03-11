@@ -8,6 +8,7 @@ import {sessionManager} from '@/session/session-manager';
 interface SessionSelectorProps {
 	onSelect: (session: SessionMetadata | null) => void;
 	onCancel: () => void;
+	showAll?: boolean;
 }
 
 export function formatTimeAgo(dateString: string): string {
@@ -42,15 +43,18 @@ export function formatMessageCount(count: number): string {
 const SessionSelector: React.FC<SessionSelectorProps> = ({
 	onSelect,
 	onCancel,
+	showAll,
 }) => {
 	const [sessions, setSessions] = useState<SessionMetadata[]>([]);
 	const [loading, setLoading] = useState(true);
+	const [hasOtherSessions, setHasOtherSessions] = useState(false);
 	const {actualWidth, truncate} = useResponsiveTerminal();
 
 	useEffect(() => {
 		const loadSessions = async () => {
 			try {
-				const sessionList = await sessionManager.listSessions();
+				const filter = showAll ? undefined : {workingDirectory: process.cwd()};
+				const sessionList = await sessionManager.listSessions(filter);
 				// Sort by lastAccessedAt descending (most recent first)
 				const sortedSessions = sessionList.sort(
 					(a, b) =>
@@ -58,6 +62,12 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 						new Date(a.lastAccessedAt).getTime(),
 				);
 				setSessions(sortedSessions);
+
+				// Check if there are sessions in other projects
+				if (!showAll && sortedSessions.length === 0) {
+					const allSessions = await sessionManager.listSessions();
+					setHasOtherSessions(allSessions.length > 0);
+				}
 			} catch (error) {
 				console.error('Failed to load sessions:', error);
 			} finally {
@@ -66,7 +76,7 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 		};
 
 		loadSessions();
-	}, []);
+	}, [showAll]);
 
 	useInput((_input, key) => {
 		if (key.escape) {
@@ -91,7 +101,14 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 	if (sessions.length === 0) {
 		return (
 			<Box flexDirection="column" marginY={1}>
-				<Text>No saved sessions found.</Text>
+				{hasOtherSessions ? (
+					<>
+						<Text>No sessions for this project.</Text>
+						<Text dimColor>Use /resume --all to see all sessions.</Text>
+					</>
+				) : (
+					<Text>No saved sessions found.</Text>
+				)}
 				<Text dimColor>Press any key to continue...</Text>
 			</Box>
 		);

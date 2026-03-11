@@ -24,7 +24,7 @@ export interface MessageSubmissionOptions {
 		checkpoints: CheckpointListItem[],
 		currentMessageCount: number,
 	) => void;
-	onEnterSessionSelectorMode?: () => void;
+	onEnterSessionSelectorMode?: (showAll?: boolean) => void;
 	onResumeSession?: (session: Session) => void;
 	onShowStatus: () => void;
 	onEnterSchedulerMode?: () => void;

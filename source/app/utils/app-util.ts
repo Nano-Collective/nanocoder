@@ -907,7 +907,9 @@ async function handleResumeCommand(
 		return true;
 	}
 
-	const args = commandParts.slice(1);
+	const rawArgs = commandParts.slice(1);
+	const showAll = rawArgs.includes('--all');
+	const args = rawArgs.filter(a => a !== '--all');
 
 	try {
 		await sessionManager.initialize();
@@ -925,7 +927,7 @@ async function handleResumeCommand(
 
 	// No args: show session selector
 	if (args.length === 0) {
-		onEnterSessionSelectorMode();
+		onEnterSessionSelectorMode(showAll || undefined);
 		onCommandComplete?.();
 		return true;
 	}
@@ -933,7 +935,8 @@ async function handleResumeCommand(
 	// One arg: resolve and load session
 	const sessionIdOrSpecial = args[0];
 	try {
-		const sessions = await sessionManager.listSessions();
+		const listOptions = showAll ? undefined : {workingDirectory: process.cwd()};
+		const sessions = await sessionManager.listSessions(listOptions);
 		const sorted = [...sessions].sort(
 			(a, b) =>
 				new Date(b.lastAccessedAt).getTime() -

@@ -512,6 +512,7 @@ export default function App({
 		setIsCheckpointLoadMode: appState.setIsCheckpointLoadMode,
 		setCheckpointLoadData: appState.setCheckpointLoadData,
 		setIsSessionSelectorMode: appState.setIsSessionSelectorMode,
+		setShowAllSessions: appState.setShowAllSessions,
 		setCurrentSessionId: appState.setCurrentSessionId,
 		setCurrentProvider: appState.setCurrentProvider,
 		setCurrentModel: appState.setCurrentModel,
@@ -745,6 +746,7 @@ export default function App({
 									isSettingsMode={appState.isSettingsMode}
 									isCheckpointLoadMode={appState.isCheckpointLoadMode}
 									isSessionSelectorMode={appState.isSessionSelectorMode}
+									showAllSessions={appState.showAllSessions}
 									client={appState.client}
 									currentModel={appState.currentModel}
 									currentProvider={appState.currentProvider}

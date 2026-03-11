@@ -18,6 +18,7 @@ export interface ModalSelectorsProps {
 	isMcpWizardMode: boolean;
 	isCheckpointLoadMode: boolean;
 	isSessionSelectorMode: boolean;
+	showAllSessions: boolean;
 	isSettingsMode: boolean;
 
 	// Current values
@@ -72,6 +73,7 @@ export function ModalSelectors({
 	isMcpWizardMode,
 	isCheckpointLoadMode,
 	isSessionSelectorMode,
+	showAllSessions,
 	isSettingsMode,
 	client,
 	currentModel,
@@ -159,6 +161,7 @@ export function ModalSelectors({
 					meta ? void onSessionSelect(meta.id) : onSessionCancel()
 				}
 				onCancel={onSessionCancel}
+				showAll={showAllSessions}
 			/>
 		);
 	}

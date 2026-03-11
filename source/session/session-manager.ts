@@ -294,8 +294,17 @@ export class SessionManager {
 		}
 	}
 
-	async listSessions(): Promise<SessionMetadata[]> {
-		return this.readIndex();
+	async listSessions(options?: {
+		workingDirectory?: string;
+	}): Promise<SessionMetadata[]> {
+		const sessions = await this.readIndex();
+		if (options?.workingDirectory) {
+			const normalized = path.normalize(options.workingDirectory);
+			return sessions.filter(
+				s => path.normalize(s.workingDirectory) === normalized,
+			);
+		}
+		return sessions;
 	}
 
 	/** Read a session from disk without updating lastAccessedAt (no write). */

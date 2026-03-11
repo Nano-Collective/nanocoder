@@ -273,7 +273,7 @@ test('ide command parsing - recognized as special command', t => {
 // --- Resume command tests (/resume, /sessions, /history) ---
 
 function createResumeTestOptions(overrides: {
-	onEnterSessionSelectorMode?: () => void;
+	onEnterSessionSelectorMode?: (showAll?: boolean) => void;
 	onResumeSession?: (session: Session) => void;
 	onAddToChatQueue?: (component: React.ReactNode) => void;
 	onCommandComplete?: () => void;
@@ -486,5 +486,41 @@ test.serial('resume command - invalid session id shows error message', async t =
 		sessionManager.initialize = origInit;
 		sessionManager.listSessions = origList;
 		sessionManager.loadSession = origLoad;
+	}
+});
+
+test.serial('resume command - /resume --all opens selector in show-all mode', async t => {
+	let showAllValue: boolean | undefined;
+	const origInit = sessionManager.initialize.bind(sessionManager);
+	sessionManager.initialize = async () => {};
+	try {
+		const options = createResumeTestOptions({
+			onEnterSessionSelectorMode: (showAll) => {
+				showAllValue = showAll;
+			},
+			onResumeSession: () => {},
+		});
+		await handleMessageSubmission('/resume --all', options);
+		t.true(showAllValue, 'onEnterSessionSelectorMode should be called with true');
+	} finally {
+		sessionManager.initialize = origInit;
+	}
+});
+
+test.serial('resume command - /resume without --all opens selector in project mode', async t => {
+	let showAllValue: boolean | undefined = true;
+	const origInit = sessionManager.initialize.bind(sessionManager);
+	sessionManager.initialize = async () => {};
+	try {
+		const options = createResumeTestOptions({
+			onEnterSessionSelectorMode: (showAll) => {
+				showAllValue = showAll;
+			},
+			onResumeSession: () => {},
+		});
+		await handleMessageSubmission('/resume', options);
+		t.is(showAllValue, undefined, 'onEnterSessionSelectorMode should be called without showAll');
+	} finally {
+		sessionManager.initialize = origInit;
 	}
 });

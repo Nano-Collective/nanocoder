@@ -15,6 +15,8 @@ function createDefaultProps(
 		isConfigWizardMode: false,
 		isMcpWizardMode: false,
 		isCheckpointLoadMode: false,
+		isSessionSelectorMode: false,
+		showAllSessions: false,
 		isSettingsMode: false,
 		client: null,
 		currentModel: 'test-model',
@@ -31,6 +33,8 @@ function createDefaultProps(
 		onMcpWizardCancel: () => {},
 		onCheckpointSelect: async () => {},
 		onCheckpointCancel: () => {},
+		onSessionSelect: () => {},
+		onSessionCancel: () => {},
 		onSettingsCancel: () => {},
 		...overrides,
 	};
