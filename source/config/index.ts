@@ -193,6 +193,99 @@ function validateMode(mode: unknown): CompressionMode {
 	return 'conservative';
 }
 
+// Try to load session config from a specific path
+// Returns the config if found and valid, null otherwise
+function tryLoadSessionsFromPath(
+	configPath: string,
+	defaults: NonNullable<AppConfig['sessions']>,
+): AppConfig['sessions'] | null {
+	if (!existsSync(configPath)) {
+		return null;
+	}
+
+	try {
+		const rawData = readFileSync(configPath, 'utf-8');
+		const config = JSON.parse(rawData);
+		const sessions = config.nanocoder?.sessions;
+		if (sessions && typeof sessions === 'object') {
+			const normalizeSessionNumber = (
+				value: unknown,
+				min: number,
+				fallback: number,
+			): number => {
+				if (typeof value === 'number' && Number.isFinite(value)) {
+					return Math.max(min, value);
+				}
+				return fallback;
+			};
+
+			return {
+				autoSave:
+					sessions.autoSave !== undefined
+						? Boolean(sessions.autoSave)
+						: defaults.autoSave,
+				saveInterval: normalizeSessionNumber(
+					sessions.saveInterval,
+					1000, // Minimum 1 second
+					defaults.saveInterval ?? 30000,
+				),
+				maxSessions: normalizeSessionNumber(
+					sessions.maxSessions,
+					1,
+					defaults.maxSessions ?? 100,
+				),
+				retentionDays: normalizeSessionNumber(
+					sessions.retentionDays,
+					1,
+					defaults.retentionDays ?? 30,
+				),
+				directory: sessions.directory || defaults.directory,
+			};
+		}
+	} catch (error) {
+		logError(
+			`Failed to load session config from ${configPath}: ${String(error)}`,
+		);
+	}
+
+	return null;
+}
+
+// Load session configuration and Returns default config if not specified
+function loadSessionConfig(): AppConfig['sessions'] {
+	const defaults: NonNullable<AppConfig['sessions']> = {
+		autoSave: true,
+		saveInterval: 30000, // 30 seconds
+		maxSessions: 100,
+		retentionDays: 30,
+		directory: '~/.nanocoder-sessions',
+	};
+
+	// Try to load from project-level config first
+	const projectConfigPath = join(process.cwd(), 'agents.config.json');
+	const projectConfig = tryLoadSessionsFromPath(projectConfigPath, defaults);
+	if (projectConfig) {
+		return projectConfig;
+	}
+
+	// Try global config
+	const configDir = getConfigPath();
+	const globalConfigPath = join(configDir, 'agents.config.json');
+	const globalConfig = tryLoadSessionsFromPath(globalConfigPath, defaults);
+	if (globalConfig) {
+		return globalConfig;
+	}
+
+	// Fallback to home directory
+	const homePath = join(homedir(), '.agents.config.json');
+	const homeConfig = tryLoadSessionsFromPath(homePath, defaults);
+	if (homeConfig) {
+		return homeConfig;
+	}
+
+	return defaults;
+}
+
 // Function to load app configuration from agents.config.json if it exists
 function loadAppConfig(): AppConfig {
 	// Load providers from the new hierarchical configuration system
@@ -205,10 +298,14 @@ function loadAppConfig(): AppConfig {
 	// Load auto-compact configuration
 	const autoCompact = loadAutoCompactConfig();
 
+	// Load session configuration
+	const sessions = loadSessionConfig();
+
 	return {
 		providers,
 		mcpServers,
 		autoCompact,
+		sessions,
 	};
 }
 

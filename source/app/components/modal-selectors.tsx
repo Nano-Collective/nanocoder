@@ -3,6 +3,7 @@ import {ModelDatabaseDisplay} from '@/commands/model-database';
 import CheckpointSelector from '@/components/checkpoint-selector';
 import ModelSelector from '@/components/model-selector';
 import ProviderSelector from '@/components/provider-selector';
+import SessionSelector from '@/components/session-selector';
 import type {CheckpointListItem, LLMClient} from '@/types';
 import {McpWizard} from '@/wizards/mcp-wizard';
 import {ProviderWizard} from '@/wizards/provider-wizard';
@@ -16,6 +17,7 @@ export interface ModalSelectorsProps {
 	isConfigWizardMode: boolean;
 	isMcpWizardMode: boolean;
 	isCheckpointLoadMode: boolean;
+	isSessionSelectorMode: boolean;
 	isSettingsMode: boolean;
 
 	// Current values
@@ -50,6 +52,10 @@ export interface ModalSelectorsProps {
 	onCheckpointSelect: (name: string, backup: boolean) => Promise<void>;
 	onCheckpointCancel: () => void;
 
+	// Handlers - Session resume
+	onSessionSelect: (sessionId: string) => void;
+	onSessionCancel: () => void;
+
 	// Handlers - Settings
 	onSettingsCancel: () => void;
 }
@@ -65,6 +71,7 @@ export function ModalSelectors({
 	isConfigWizardMode,
 	isMcpWizardMode,
 	isCheckpointLoadMode,
+	isSessionSelectorMode,
 	isSettingsMode,
 	client,
 	currentModel,
@@ -81,6 +88,8 @@ export function ModalSelectors({
 	onMcpWizardCancel,
 	onCheckpointSelect,
 	onCheckpointCancel,
+	onSessionSelect,
+	onSessionCancel,
 	onSettingsCancel,
 }: ModalSelectorsProps): React.ReactElement | null {
 	if (isModelSelectionMode) {
@@ -139,6 +148,17 @@ export function ModalSelectors({
 				currentMessageCount={checkpointLoadData.currentMessageCount}
 				onSelect={(name, backup) => void onCheckpointSelect(name, backup)}
 				onCancel={onCheckpointCancel}
+			/>
+		);
+	}
+
+	if (isSessionSelectorMode) {
+		return (
+			<SessionSelector
+				onSelect={meta =>
+					meta ? void onSessionSelect(meta.id) : onSessionCancel()
+				}
+				onCancel={onSessionCancel}
 			/>
 		);
 	}

@@ -110,6 +110,16 @@ export interface AppConfig {
 
 	// Auto-compact configuration
 	autoCompact?: AutoCompactConfig;
+
+	// Session configuration
+	sessions?: {
+		autoSave?: boolean;
+		saveInterval?: number;
+		maxSessions?: number;
+		maxMessages?: number;
+		retentionDays?: number;
+		directory?: string;
+	};
 }
 
 // MCP Server configuration with source tracking
