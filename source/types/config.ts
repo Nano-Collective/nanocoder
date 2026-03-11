@@ -116,6 +116,7 @@ export interface AppConfig {
 		autoSave?: boolean;
 		saveInterval?: number;
 		maxSessions?: number;
+		maxMessages?: number;
 		retentionDays?: number;
 		directory?: string;
 	};

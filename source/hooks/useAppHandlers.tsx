@@ -281,7 +281,22 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				autoCompactInfo={autoCompactInfo}
 			/>,
 		);
-	}, [props, logger]);
+	}, [
+		props.currentProvider,
+		props.currentModel,
+		props.currentTheme,
+		props.updateInfo,
+		props.mcpServersStatus,
+		props.lspServersStatus,
+		props.preferencesLoaded,
+		props.customCommandsCount,
+		props.messages,
+		props.getMessageTokens,
+		props.addToChatQueue,
+		props.getNextComponentKey,
+		logger,
+		props,
+	]);
 
 	// Checkpoint select handler
 	const handleCheckpointSelect = React.useCallback(
@@ -338,7 +353,16 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				props.setCheckpointLoadData(null);
 			}
 		},
-		[props],
+		[
+			props.messages,
+			props.currentProvider,
+			props.currentModel,
+			props.addToChatQueue,
+			props.getNextComponentKey,
+			props.setIsCheckpointLoadMode,
+			props.setCheckpointLoadData,
+			props,
+		],
 	);
 
 	// Checkpoint cancel handler
@@ -464,12 +488,37 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			});
 		},
 		[
-			props,
+			props.setIsConversationComplete,
+			props.customCommandCache,
+			props.customCommandLoader,
+			props.customCommandExecutor,
+			props.enterModelSelectionMode,
+			props.enterProviderSelectionMode,
+			props.enterModelDatabaseMode,
+			props.enterConfigWizardMode,
+			props.enterSettingsMode,
+			props.enterMcpWizardMode,
+			props.enterExplorerMode,
+			props.enterIdeSelectionMode,
+			props.enterSchedulerMode,
+			props.handleChatMessage,
+			props.addToChatQueue,
+			props.setLiveComponent,
+			props.setIsToolExecuting,
+			props.getNextComponentKey,
+			props.updateMessages,
+			props.messages,
+			props.currentProvider,
+			props.currentModel,
+			props.currentTheme,
+			props.updateInfo,
+			props.getMessageTokens,
 			clearMessages,
 			enterCheckpointLoadMode,
 			handleShowStatus,
 			applySession,
 			enterSessionSelectorMode,
+			props,
 		],
 	);
 

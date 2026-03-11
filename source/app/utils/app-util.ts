@@ -909,29 +909,30 @@ async function handleResumeCommand(
 
 	const args = commandParts.slice(1);
 
+	try {
+		await sessionManager.initialize();
+	} catch (error) {
+		onAddToChatQueue(
+			React.createElement(ErrorMessage, {
+				key: `resume-error-${getNextComponentKey()}`,
+				message: `Failed to initialize sessions: ${getErrorMessage(error)}`,
+				hideBox: true,
+			}),
+		);
+		onCommandComplete?.();
+		return true;
+	}
+
 	// No args: show session selector
 	if (args.length === 0) {
-		try {
-			await sessionManager.initialize();
-			onEnterSessionSelectorMode();
-			onCommandComplete?.();
-		} catch (error) {
-			onAddToChatQueue(
-				React.createElement(ErrorMessage, {
-					key: `resume-error-${getNextComponentKey()}`,
-					message: `Failed to initialize sessions: ${getErrorMessage(error)}`,
-					hideBox: true,
-				}),
-			);
-			onCommandComplete?.();
-		}
+		onEnterSessionSelectorMode();
+		onCommandComplete?.();
 		return true;
 	}
 
 	// One arg: resolve and load session
 	const sessionIdOrSpecial = args[0];
 	try {
-		await sessionManager.initialize();
 		const sessions = await sessionManager.listSessions();
 		const sorted = [...sessions].sort(
 			(a, b) =>

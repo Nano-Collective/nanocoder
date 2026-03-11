@@ -2,6 +2,7 @@ import {useEffect, useRef} from 'react';
 import {getAppConfig} from '@/config/index';
 import {sessionManager} from '@/session/session-manager';
 import type {Message} from '@/types/core';
+import {logWarning} from '@/utils/message-queue';
 
 interface UseSessionAutosaveProps {
 	messages: Message[];
@@ -23,7 +24,7 @@ export function useSessionAutosave({
 	currentSessionId,
 	setCurrentSessionId,
 }: UseSessionAutosaveProps) {
-	const initializedRef = useRef(false);
+	const initPromiseRef = useRef<Promise<boolean> | null>(null);
 	const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 	const lastSaveRef = useRef<number>(0);
 
@@ -44,18 +45,17 @@ export function useSessionAutosave({
 			return;
 		}
 
-		const initialize = async () => {
-			if (!initializedRef.current) {
-				try {
-					await sessionManager.initialize();
-					initializedRef.current = true;
-				} catch (error) {
-					console.warn('Failed to initialize session manager:', error);
-				}
-			}
-		};
-
-		void initialize();
+		if (!initPromiseRef.current) {
+			initPromiseRef.current = sessionManager
+				.initialize()
+				.then(() => true)
+				.catch(error => {
+					logWarning(
+						`Session autosave disabled: failed to initialize session storage. ${error instanceof Error ? error.message : String(error)}`,
+					);
+					return false;
+				});
+		}
 
 		return () => {
 			if (timeoutRef.current) {
@@ -70,8 +70,9 @@ export function useSessionAutosave({
 		const sessionConfig = config.sessions;
 		const autoSave = sessionConfig?.autoSave ?? true;
 		const saveInterval = sessionConfig?.saveInterval ?? 30000;
+		const maxMessages = sessionConfig?.maxMessages ?? 1000;
 
-		if (!autoSave || !initializedRef.current || messages.length === 0) {
+		if (!autoSave || !initPromiseRef.current || messages.length === 0) {
 			return;
 		}
 
@@ -84,7 +85,19 @@ export function useSessionAutosave({
 
 		const saveSession = async () => {
 			try {
-				const firstUserMessage = messages.find(msg => msg.role === 'user');
+				// Wait for initialization to complete before saving
+				const initialized = await initPromiseRef.current;
+				if (!initialized) return;
+
+				// Truncate to most recent messages to prevent unbounded session sizes
+				const messagesToSave =
+					messages.length > maxMessages
+						? messages.slice(-maxMessages)
+						: messages;
+
+				const firstUserMessage = messagesToSave.find(
+					msg => msg.role === 'user',
+				);
 				const title = firstUserMessage
 					? firstUserMessage.content.substring(0, 50) +
 						(firstUserMessage.content.length > 50 ? '...' : '')
@@ -93,32 +106,33 @@ export function useSessionAutosave({
 				if (currentSessionId) {
 					const session = await sessionManager.readSession(currentSessionId);
 					if (session) {
-						session.messages = messages;
-						session.messageCount = messages.length;
+						session.messages = messagesToSave;
+						session.messageCount = messagesToSave.length;
 						session.title = title;
 						session.provider = currentProvider;
 						session.model = currentModel;
-						session.lastAccessedAt = new Date().toISOString();
+						// Don't set lastAccessedAt here — saveSession() handles
+						// the timestamp in both the file and index consistently.
 						await sessionManager.saveSession(session);
 					} else {
 						const newSession = await sessionManager.createSession({
 							title,
-							messageCount: messages.length,
+							messageCount: messagesToSave.length,
 							provider: currentProvider,
 							model: currentModel,
 							workingDirectory: process.cwd(),
-							messages,
+							messages: messagesToSave,
 						});
 						setCurrentSessionId(newSession.id);
 					}
 				} else {
 					const newSession = await sessionManager.createSession({
 						title,
-						messageCount: messages.length,
+						messageCount: messagesToSave.length,
 						provider: currentProvider,
 						model: currentModel,
 						workingDirectory: process.cwd(),
-						messages,
+						messages: messagesToSave,
 					});
 					setCurrentSessionId(newSession.id);
 				}

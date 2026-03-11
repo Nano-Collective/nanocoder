@@ -59,14 +59,51 @@ function isValidSession(obj: unknown): obj is Session {
 	return isValidSessionMetadata(obj) && Array.isArray(obj.messages);
 }
 
-class SessionManager {
+/** Write data to a temp file then atomically rename into place. */
+async function atomicWriteFile(
+	filePath: string,
+	data: string,
+	mode: number,
+): Promise<void> {
+	const tmpPath = `${filePath}.${crypto.randomUUID()}.tmp`;
+	try {
+		await fs.writeFile(tmpPath, data, {mode});
+		await fs.rename(tmpPath, filePath);
+	} catch (error) {
+		// Clean up temp file on failure
+		try {
+			await fs.unlink(tmpPath);
+		} catch (_cleanupError) {
+			// Ignore cleanup errors
+		}
+		throw error;
+	}
+}
+
+function isEnoent(error: unknown): boolean {
+	return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+}
+
+export class SessionManager {
 	private sessionsDir!: string;
 	private sessionsIndexPath!: string;
 	private initialized = false;
 	/** Serializes read-modify-write of sessions.json to prevent lost updates from concurrent autosave/resume. */
 	private indexWriteLock: Promise<void> = Promise.resolve();
+	/** Optional explicit directory override (used by tests). */
+	private readonly overrideDir?: string;
+
+	constructor(sessionsDir?: string) {
+		this.overrideDir = sessionsDir;
+	}
 
 	private resolveSessionsDir(): void {
+		if (this.overrideDir) {
+			this.sessionsDir = this.overrideDir;
+			this.sessionsIndexPath = path.join(this.sessionsDir, 'sessions.json');
+			return;
+		}
+
 		const config = getAppConfig();
 		const sessionConfig = config.sessions;
 		const configuredDir = sessionConfig?.directory;
@@ -104,10 +141,11 @@ class SessionManager {
 			try {
 				await fs.access(this.sessionsIndexPath);
 			} catch (_error) {
-				await fs.writeFile(this.sessionsIndexPath, JSON.stringify([]), {
-					mode: 0o600,
-				});
-				await fs.chmod(this.sessionsIndexPath, 0o600);
+				await atomicWriteFile(
+					this.sessionsIndexPath,
+					JSON.stringify([]),
+					0o600,
+				);
 			}
 
 			this.initialized = true;
@@ -148,14 +186,20 @@ class SessionManager {
 			throw new Error(`Invalid session ID: ${session.id}`);
 		}
 
-		const sessionFilePath = path.join(this.sessionsDir, `${session.id}.json`);
-
-		await fs.writeFile(sessionFilePath, JSON.stringify(session, null, 2), {
-			mode: 0o600,
-		});
-		await fs.chmod(sessionFilePath, 0o600);
-
+		// File write and index update happen together under the lock
+		// to prevent orphaned files if the process dies between them.
 		await this.withIndexLock(async () => {
+			const sessionFilePath = path.join(this.sessionsDir, `${session.id}.json`);
+			const timestamp = new Date().toISOString();
+
+			// Write session file atomically
+			await atomicWriteFile(
+				sessionFilePath,
+				JSON.stringify(session, null, 2),
+				0o600,
+			);
+
+			// Update index
 			const sessions = await this.readIndex();
 			const existingSessionIndex = sessions.findIndex(s => s.id === session.id);
 
@@ -163,7 +207,7 @@ class SessionManager {
 				id: session.id,
 				title: session.title,
 				createdAt: session.createdAt,
-				lastAccessedAt: new Date().toISOString(),
+				lastAccessedAt: timestamp,
 				messageCount: session.messageCount,
 				provider: session.provider,
 				model: session.model,
@@ -176,12 +220,11 @@ class SessionManager {
 				sessions.push(sessionMetadata);
 			}
 
-			await fs.writeFile(
+			await atomicWriteFile(
 				this.sessionsIndexPath,
 				JSON.stringify(sessions, null, 2),
-				{mode: 0o600},
+				0o600,
 			);
-			await fs.chmod(this.sessionsIndexPath, 0o600);
 		});
 	}
 
@@ -190,8 +233,63 @@ class SessionManager {
 		try {
 			const data = await fs.readFile(this.sessionsIndexPath, 'utf-8');
 			const parsed: unknown = JSON.parse(data);
-			if (!Array.isArray(parsed)) return [];
-			return parsed.filter(isValidSessionMetadata);
+			if (!Array.isArray(parsed)) return this.rebuildIndex();
+			const valid = parsed.filter(isValidSessionMetadata);
+			if (valid.length === 0 && parsed.length > 0) {
+				// Index had entries but none were valid — try recovery
+				return this.rebuildIndex();
+			}
+			return valid;
+		} catch (_error) {
+			return this.rebuildIndex();
+		}
+	}
+
+	/**
+	 * Rebuild the index by scanning session files on disk.
+	 * Called when the index is missing, corrupt, or empty despite files existing.
+	 */
+	private async rebuildIndex(): Promise<SessionMetadata[]> {
+		try {
+			const entries = await fs.readdir(this.sessionsDir);
+			const sessionFiles = entries.filter(
+				e => e.endsWith('.json') && e !== 'sessions.json',
+			);
+			if (sessionFiles.length === 0) return [];
+
+			const metadata: SessionMetadata[] = [];
+			for (const file of sessionFiles) {
+				try {
+					const filePath = path.join(this.sessionsDir, file);
+					const data = await fs.readFile(filePath, 'utf-8');
+					const parsed: unknown = JSON.parse(data);
+					if (isValidSession(parsed)) {
+						metadata.push({
+							id: parsed.id,
+							title: parsed.title,
+							createdAt: parsed.createdAt,
+							lastAccessedAt: parsed.lastAccessedAt,
+							messageCount: parsed.messageCount,
+							provider: parsed.provider,
+							model: parsed.model,
+							workingDirectory: parsed.workingDirectory,
+						});
+					}
+				} catch (_fileError) {
+					// Skip unreadable files
+				}
+			}
+
+			// Persist rebuilt index
+			if (metadata.length > 0) {
+				await atomicWriteFile(
+					this.sessionsIndexPath,
+					JSON.stringify(metadata, null, 2),
+					0o600,
+				);
+			}
+
+			return metadata;
 		} catch (_error) {
 			return [];
 		}
@@ -241,9 +339,7 @@ class SessionManager {
 		try {
 			await fs.unlink(sessionFilePath);
 		} catch (error: unknown) {
-			if (
-				!(error instanceof Error && 'code' in error && error.code === 'ENOENT')
-			) {
+			if (!isEnoent(error)) {
 				throw error;
 			}
 		}
@@ -252,12 +348,11 @@ class SessionManager {
 		await this.withIndexLock(async () => {
 			const sessions = await this.readIndex();
 			const filteredSessions = sessions.filter(s => s.id !== sessionId);
-			await fs.writeFile(
+			await atomicWriteFile(
 				this.sessionsIndexPath,
 				JSON.stringify(filteredSessions, null, 2),
-				{mode: 0o600},
+				0o600,
 			);
-			await fs.chmod(this.sessionsIndexPath, 0o600);
 		});
 	}
 
@@ -302,32 +397,26 @@ class SessionManager {
 			);
 			const idsToDelete = new Set(sessionsToDelete.map(s => s.id));
 
-			// Delete files — only ignore ENOENT
+			// Rewrite index first so sessions are deregistered even if
+			// file deletion partially fails.
+			const remaining = sortedSessions.filter(s => !idsToDelete.has(s.id));
+			await atomicWriteFile(
+				this.sessionsIndexPath,
+				JSON.stringify(remaining, null, 2),
+				0o600,
+			);
+
+			// Then delete files — only ignore ENOENT
 			for (const session of sessionsToDelete) {
 				const filePath = path.join(this.sessionsDir, `${session.id}.json`);
 				try {
 					await fs.unlink(filePath);
 				} catch (error: unknown) {
-					if (
-						!(
-							error instanceof Error &&
-							'code' in error &&
-							error.code === 'ENOENT'
-						)
-					) {
+					if (!isEnoent(error)) {
 						throw error;
 					}
 				}
 			}
-
-			// Rewrite index once
-			const remaining = sortedSessions.filter(s => !idsToDelete.has(s.id));
-			await fs.writeFile(
-				this.sessionsIndexPath,
-				JSON.stringify(remaining, null, 2),
-				{mode: 0o600},
-			);
-			await fs.chmod(this.sessionsIndexPath, 0o600);
 		});
 	}
 
@@ -349,32 +438,26 @@ class SessionManager {
 
 			const idsToDelete = new Set(oldSessions.map(s => s.id));
 
-			// Delete files — only ignore ENOENT
+			// Rewrite index first so sessions are deregistered even if
+			// file deletion partially fails.
+			const remaining = sessions.filter(s => !idsToDelete.has(s.id));
+			await atomicWriteFile(
+				this.sessionsIndexPath,
+				JSON.stringify(remaining, null, 2),
+				0o600,
+			);
+
+			// Then delete files — only ignore ENOENT
 			for (const session of oldSessions) {
 				const filePath = path.join(this.sessionsDir, `${session.id}.json`);
 				try {
 					await fs.unlink(filePath);
 				} catch (error: unknown) {
-					if (
-						!(
-							error instanceof Error &&
-							'code' in error &&
-							error.code === 'ENOENT'
-						)
-					) {
+					if (!isEnoent(error)) {
 						throw error;
 					}
 				}
 			}
-
-			// Rewrite index once
-			const remaining = sessions.filter(s => !idsToDelete.has(s.id));
-			await fs.writeFile(
-				this.sessionsIndexPath,
-				JSON.stringify(remaining, null, 2),
-				{mode: 0o600},
-			);
-			await fs.chmod(this.sessionsIndexPath, 0o600);
 		});
 	}
 }
