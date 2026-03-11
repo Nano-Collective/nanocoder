@@ -59,6 +59,22 @@ test('isNonInteractiveModeComplete returns error when error messages present', t
 	t.is(result.reason, 'error');
 });
 
+test('isNonInteractiveModeComplete does not treat message content containing "error" as an error', t => {
+	const state: NonInteractiveModeState = {
+		isToolExecuting: false,
+		isToolConfirmationMode: false,
+		isConversationComplete: true,
+		messages: [{role: 'user', content: 'Analyse the error'}],
+	};
+
+	const startTime = Date.now();
+	const maxTime = 10000;
+
+	const result = isNonInteractiveModeComplete(state, startTime, maxTime);
+	t.true(result.shouldExit);
+	t.is(result.reason, 'complete');
+});
+
 test('isNonInteractiveModeComplete returns complete when conversation finished', t => {
 	const state: NonInteractiveModeState = {
 		isToolExecuting: false,
