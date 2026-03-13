@@ -149,7 +149,7 @@ export interface MCPServerConfig {
 	tags?: string[];
 	enabled?: boolean;
 	// Optional source information for display purposes
-	source?: 'project' | 'global';
+	source?: 'project' | 'global' | 'env';
 }
 
 export interface UserPreferences {
