@@ -118,7 +118,13 @@ export function useNonInteractiveMode({
 				return () => clearTimeout(timer);
 			}
 		}
-	}, [nonInteractivePrompt, nonInteractiveSubmitted, appState, startTime]);
+	}, [
+		nonInteractivePrompt,
+		nonInteractiveSubmitted,
+		appState,
+		startTime,
+		client,
+	]);
 
 	// Compute loading message
 	const nonInteractiveLoadingMessage = React.useMemo(() => {

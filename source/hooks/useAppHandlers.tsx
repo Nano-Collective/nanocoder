@@ -358,8 +358,6 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.messages,
 			props.currentProvider,
 			props.currentModel,
-			props.addToChatQueue,
-			props.getNextComponentKey,
 			props.setIsCheckpointLoadMode,
 			props.setCheckpointLoadData,
 			props,
