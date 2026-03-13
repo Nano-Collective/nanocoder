@@ -18,14 +18,18 @@ if (args.includes('--version') || args.includes('-v')) {
 // Handle --help/-h flag
 if (args.includes('--help') || args.includes('-h')) {
 	console.log(`
-Usage: nanocoder [options]
+Usage: nanocoder [options] [command]
 
 Options:
-  -v, --version    Show version number
-  -h, --help       Show help
-  --vscode         Run in VS Code mode
-  --vscode-port    Specify VS Code port
-  run              Run in non-interactive mode
+  -v, --version            Show version number
+  -h, --help               Show help
+  --vscode                 Run in VS Code mode
+  --vscode-port <port>     Specify VS Code port
+  --provider <provider>    Override default provider
+  --model <model>          Override default model
+
+Commands:
+  run <prompt>             Run in non-interactive mode
   `);
 	process.exit(0);
 }
@@ -42,6 +46,19 @@ if (portArgIndex !== -1 && args[portArgIndex + 1]) {
 	}
 }
 
+// Extract simple overrides early
+const runtimeOverrides: {provider?: string; model?: string} = {};
+
+const providerArgIndex = args.findIndex(arg => arg === '--provider');
+if (providerArgIndex !== -1 && args[providerArgIndex + 1]) {
+	runtimeOverrides.provider = args[providerArgIndex + 1];
+}
+
+const modelArgIndex = args.findIndex(arg => arg === '--model');
+if (modelArgIndex !== -1 && args[modelArgIndex + 1]) {
+	runtimeOverrides.model = args[modelArgIndex + 1];
+}
+
 // Check for non-interactive mode (run command)
 let nonInteractivePrompt: string | undefined;
 const runCommandIndex = args.findIndex(arg => arg === 'run');
@@ -50,12 +67,21 @@ const afterRunArgs =
 if (runCommandIndex !== -1 && args[runCommandIndex + 1]) {
 	// Filter out known flags after 'run' when constructing the prompt
 	const promptArgs: string[] = [];
-	const _knownFlags = new Set(['--vscode', '--vscode-port']);
+	const _knownFlags = new Set([
+		'--vscode',
+		'--vscode-port',
+		'--provider',
+		'--model',
+	]);
 	for (let i = 0; i < afterRunArgs.length; i++) {
 		const arg = afterRunArgs[i];
 		if (arg === '--vscode') {
 			continue; // skip this flag
-		} else if (arg === '--vscode-port') {
+		} else if (
+			arg === '--vscode-port' ||
+			arg === '--provider' ||
+			arg === '--model'
+		) {
 			i++; // skip this flag and its value
 			continue;
 		} else {
@@ -73,5 +99,6 @@ render(
 		vscodePort={vscodePort}
 		nonInteractivePrompt={nonInteractivePrompt}
 		nonInteractiveMode={nonInteractiveMode}
+		runtimeOverrides={runtimeOverrides}
 	/>,
 );

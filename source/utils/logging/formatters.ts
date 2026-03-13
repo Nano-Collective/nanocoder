@@ -51,10 +51,7 @@ export function serializeError(err: Error): Record<string, any> {
 			message: err.message,
 			stack:
 				process.env.NODE_ENV === 'production'
-					? err.stack
-							?.split('\n')
-							.slice(0, 3)
-							.join('\n') // Limit stack traces in production
+					? err.stack?.split('\n').slice(0, 3).join('\n') // Limit stack traces in production
 					: err.stack,
 			// biome-ignore lint/suspicious/noExplicitAny: Dynamic error properties
 			code: (err as any).code,

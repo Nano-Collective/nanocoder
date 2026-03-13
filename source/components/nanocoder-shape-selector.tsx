@@ -50,20 +50,23 @@ export default function NanocoderShapeSelector({
 	});
 
 	// Create nanocoder shape options with descriptions
-	const shapeOptions: NanocoderShapeOption[] = [
-		{label: 'Tiny (default) - Compact, minimal style', value: 'tiny'},
-		{label: 'Block - Bold, blocky letters', value: 'block'},
-		{label: 'Simple - Clean, straightforward', value: 'simple'},
-		{label: 'Simple Block - Simple with block style', value: 'simpleBlock'},
-		{label: 'Slick - Sleek, modern look', value: 'slick'},
-		{label: 'Grid - Grid-based pattern', value: 'grid'},
-		{label: 'Pallet - Artistic palette style', value: 'pallet'},
-		{label: 'Shade - Shaded 3D effect', value: 'shade'},
-		{label: '3D - Full 3D perspective', value: '3d'},
-		{label: 'Simple 3D - Simplified 3D look', value: 'simple3d'},
-		{label: 'Chrome - Metallic chrome finish', value: 'chrome'},
-		{label: 'Huge - Extra large display', value: 'huge'},
-	];
+	const shapeOptions: NanocoderShapeOption[] = useMemo(
+		() => [
+			{label: 'Tiny (default) - Compact, minimal style', value: 'tiny'},
+			{label: 'Block - Bold, blocky letters', value: 'block'},
+			{label: 'Simple - Clean, straightforward', value: 'simple'},
+			{label: 'Simple Block - Simple with block style', value: 'simpleBlock'},
+			{label: 'Slick - Sleek, modern look', value: 'slick'},
+			{label: 'Grid - Grid-based pattern', value: 'grid'},
+			{label: 'Pallet - Artistic palette style', value: 'pallet'},
+			{label: 'Shade - Shaded 3D effect', value: 'shade'},
+			{label: '3D - Full 3D perspective', value: '3d'},
+			{label: 'Simple 3D - Simplified 3D look', value: 'simple3d'},
+			{label: 'Chrome - Metallic chrome finish', value: 'chrome'},
+			{label: 'Huge - Extra large display', value: 'huge'},
+		],
+		[],
+	);
 
 	// Find index of current shape for initial selection
 	const initialIndex = useMemo(() => {
@@ -71,7 +74,7 @@ export default function NanocoderShapeSelector({
 			option => option.value === originalShape,
 		);
 		return index >= 0 ? index : 0;
-	}, [originalShape]);
+	}, [originalShape, shapeOptions]);
 
 	const handleSelect = (item: NanocoderShapeOption) => {
 		onComplete(item.value);

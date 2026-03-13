@@ -43,64 +43,67 @@ export default function TitleShapeSelector({
 	});
 
 	// Create title shape options
-	const shapeOptions: TitleShapeOption[] = [
-		{label: 'Pill :- Demo Title', value: 'pill'},
-		{label: 'Rounded :- ╭ Demo Title ╮', value: 'rounded'},
-		{label: 'Square :- ┌ Demo Title ┐', value: 'square'},
-		{label: 'Double :- ╔ Demo Title ╗', value: 'double'},
-		{label: 'Arrow Left :- ← Demo Title →', value: 'arrow-left'},
-		{label: 'Arrow Right :- → Demo Title ←', value: 'arrow-right'},
-		{label: 'Arrow Double :- « Demo Title »', value: 'arrow-double'},
-		{label: 'Angled Box :- ╱ Demo Title ╲', value: 'angled-box'},
-		{
-			label: 'Powerline Angled :-  Demo Title  (Requires Nerd Fonts)',
-			value: 'powerline-angled',
-		},
-		{
-			label: 'Powerline Angled Thin :-  Demo Title  (Requires Nerd Fonts)',
-			value: 'powerline-angled-thin',
-		},
-		{
-			label: 'Powerline Block :-  Demo Title  (Requires Nerd Fonts)',
-			value: 'powerline-block',
-		},
-		{
-			label: 'Powerline Block Alt :-  Demo Title  (Requires Nerd Fonts)',
-			value: 'powerline-block-alt',
-		},
-		{
-			label: 'Powerline Curved :-  Demo Title  (Requires Nerd Fonts)',
-			value: 'powerline-curved',
-		},
-		{
-			label: 'Powerline Curved Thin :-  Demo Title  (Requires Nerd Fonts)',
-			value: 'powerline-curved-thin',
-		},
-		{
-			label: 'Powerline Flame :-  Demo Title  (Requires Nerd Fonts)',
-			value: 'powerline-flame',
-		},
-		{
-			label: 'Powerline Flame Thin :-  Demo Title  (Requires Nerd Fonts)',
-			value: 'powerline-flame-thin',
-		},
-		{
-			label: 'Powerline Graph :-  Demo Title  (Requires Nerd Fonts)',
-			value: 'powerline-graph',
-		},
-		{
-			label: 'Powerline Ribbon :-  Demo Title  (Requires Nerd Fonts)',
-			value: 'powerline-ribbon',
-		},
-		{
-			label: 'Powerline Segment :-  Demo Title  (Requires Nerd Fonts)',
-			value: 'powerline-segment',
-		},
-		{
-			label: 'Powerline Segment Thin :-  Demo Title  (Requires Nerd Fonts)',
-			value: 'powerline-segment-thin',
-		},
-	];
+	const shapeOptions: TitleShapeOption[] = useMemo(
+		() => [
+			{label: 'Pill :- Demo Title', value: 'pill'},
+			{label: 'Rounded :- ╭ Demo Title ╮', value: 'rounded'},
+			{label: 'Square :- ┌ Demo Title ┐', value: 'square'},
+			{label: 'Double :- ╔ Demo Title ╗', value: 'double'},
+			{label: 'Arrow Left :- ← Demo Title →', value: 'arrow-left'},
+			{label: 'Arrow Right :- → Demo Title ←', value: 'arrow-right'},
+			{label: 'Arrow Double :- « Demo Title »', value: 'arrow-double'},
+			{label: 'Angled Box :- ╱ Demo Title ╲', value: 'angled-box'},
+			{
+				label: 'Powerline Angled :-  Demo Title  (Requires Nerd Fonts)',
+				value: 'powerline-angled',
+			},
+			{
+				label: 'Powerline Angled Thin :-  Demo Title  (Requires Nerd Fonts)',
+				value: 'powerline-angled-thin',
+			},
+			{
+				label: 'Powerline Block :-  Demo Title  (Requires Nerd Fonts)',
+				value: 'powerline-block',
+			},
+			{
+				label: 'Powerline Block Alt :-  Demo Title  (Requires Nerd Fonts)',
+				value: 'powerline-block-alt',
+			},
+			{
+				label: 'Powerline Curved :-  Demo Title  (Requires Nerd Fonts)',
+				value: 'powerline-curved',
+			},
+			{
+				label: 'Powerline Curved Thin :-  Demo Title  (Requires Nerd Fonts)',
+				value: 'powerline-curved-thin',
+			},
+			{
+				label: 'Powerline Flame :-  Demo Title  (Requires Nerd Fonts)',
+				value: 'powerline-flame',
+			},
+			{
+				label: 'Powerline Flame Thin :-  Demo Title  (Requires Nerd Fonts)',
+				value: 'powerline-flame-thin',
+			},
+			{
+				label: 'Powerline Graph :-  Demo Title  (Requires Nerd Fonts)',
+				value: 'powerline-graph',
+			},
+			{
+				label: 'Powerline Ribbon :-  Demo Title  (Requires Nerd Fonts)',
+				value: 'powerline-ribbon',
+			},
+			{
+				label: 'Powerline Segment :-  Demo Title  (Requires Nerd Fonts)',
+				value: 'powerline-segment',
+			},
+			{
+				label: 'Powerline Segment Thin :-  Demo Title  (Requires Nerd Fonts)',
+				value: 'powerline-segment-thin',
+			},
+		],
+		[],
+	);
 
 	// Find index of current shape for initial selection
 	const initialIndex = useMemo(() => {
@@ -108,7 +111,7 @@ export default function TitleShapeSelector({
 			option => option.value === originalShape,
 		);
 		return index >= 0 ? index : 0;
-	}, [originalShape]);
+	}, [originalShape, shapeOptions]);
 
 	const [_currentIndex, _setCurrentIndex] = useState(initialIndex);
 
