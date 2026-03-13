@@ -71,10 +71,32 @@ export function useNonInteractiveMode({
 	// Exit when processing is complete
 	React.useEffect(() => {
 		if (nonInteractivePrompt && nonInteractiveSubmitted) {
+			// Calculate timeout based on provider config if available
+			let effectiveTimeout = TIMEOUT_EXECUTION_MAX_MS;
+
+			if (client) {
+				const providerConfig = client.getProviderConfig();
+				const {requestTimeout, socketTimeout} = providerConfig;
+				// Prefer socketTimeout, fallback to requestTimeout
+				const configuredTimeout = socketTimeout ?? requestTimeout;
+
+				if (configuredTimeout === -1) {
+					// -1 means no timeout
+					effectiveTimeout = Number.MAX_SAFE_INTEGER;
+				} else if (configuredTimeout !== undefined) {
+					// If the provider timeout is longer than the default 5 mins,
+					// we should allow it to run for at least that long
+					effectiveTimeout = Math.max(
+						TIMEOUT_EXECUTION_MAX_MS,
+						configuredTimeout * 2,
+					);
+				}
+			}
+
 			const {shouldExit, reason} = isNonInteractiveModeComplete(
 				appState,
 				startTime,
-				TIMEOUT_EXECUTION_MAX_MS,
+				effectiveTimeout,
 			);
 
 			if (shouldExit) {

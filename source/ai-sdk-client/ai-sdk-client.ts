@@ -168,4 +168,8 @@ export class AISDKClient implements LLMClient {
 		// No internal state to clear
 		return Promise.resolve();
 	}
+
+	getProviderConfig(): AIProviderConfig {
+		return this.providerConfig;
+	}
 }
