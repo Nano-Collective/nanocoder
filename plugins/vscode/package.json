@@ -2,7 +2,7 @@
 	"name": "nanocoder-vscode",
 	"displayName": "Nanocoder",
 	"description": "VS Code integration for Nanocoder - local-first AI coding assistant",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"publisher": "nanocollective",
 	"repository": {
 		"type": "git",

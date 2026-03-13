@@ -104,6 +104,39 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		}),
 	},
 	{
+		id: 'mlx-server',
+		name: 'MLX Server',
+		modelsEndpoint: 'openai-compatible',
+		fields: [
+			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: 'mlx-server',
+				required: true,
+			},
+			{
+				name: 'baseUrl',
+				prompt: 'Base URL',
+				default: 'http://localhost:8080/v1',
+				validator: urlValidator,
+			},
+			{
+				name: 'model',
+				prompt: 'Model name(s) (comma-separated)',
+				default: '',
+				required: true,
+			},
+		],
+		buildConfig: answers => ({
+			name: answers.providerName || 'mlx-server',
+			baseUrl: answers.baseUrl || 'http://localhost:8080/v1',
+			models: answers.model
+				.split(',')
+				.map(m => m.trim())
+				.filter(Boolean),
+		}),
+	},
+	{
 		id: 'lmstudio',
 		name: 'LM Studio',
 		modelsEndpoint: 'openai-compatible',
@@ -137,6 +170,39 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		}),
 	},
 	{
+		id: 'gemini',
+		name: 'Google Gemini',
+		fields: [
+			{
+				name: 'apiKey',
+				prompt: 'API Key (from https://aistudio.google.com/apikey)',
+				required: true,
+				sensitive: true,
+			},
+			{
+				name: 'model',
+				prompt: 'Model name(s) (comma-separated)',
+				default: 'gemini-3-flash-preview, gemini-3-pro-preview',
+				required: true,
+			},
+			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: 'Gemini',
+			},
+		],
+		buildConfig: answers => ({
+			name: answers.providerName || 'Gemini',
+			sdkProvider: 'google',
+			baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+			apiKey: answers.apiKey,
+			models: answers.model
+				.split(',')
+				.map(m => m.trim())
+				.filter(Boolean),
+		}),
+	},
+	{
 		id: 'openrouter',
 		name: 'OpenRouter',
 		fields: [
@@ -149,7 +215,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'z-ai/glm-4.7',
+				default: '',
 				required: true,
 			},
 			{
@@ -182,7 +248,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'gpt-5-codex',
+				default: '',
 				required: true,
 			},
 			{
@@ -226,7 +292,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'claude-4-sonnet',
+				default: '',
 				required: true,
 			},
 			{
@@ -237,6 +303,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		],
 		buildConfig: answers => ({
 			name: answers.providerName || 'anthropic',
+			sdkProvider: 'anthropic',
 			baseUrl: 'https://api.anthropic.com/v1',
 			apiKey: answers.apiKey,
 			models: answers.model
@@ -259,7 +326,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'devstral-latest',
+				default: '',
 				required: true,
 			},
 			{
@@ -297,7 +364,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'glm-4.7, glm-4.5-air',
+				default: 'glm-5, glm-4.7, glm-4.7-flash',
 				required: true,
 			},
 		],
@@ -330,7 +397,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'glm-4.7, glm-4.5-air',
+				default: 'glm-5, glm-4.7, glm-4.7-flash',
 				required: true,
 			},
 		],
@@ -358,7 +425,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'openai/gpt-4o-mini',
+				default: '',
 				required: true,
 			},
 			{
@@ -370,6 +437,98 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		buildConfig: answers => ({
 			name: answers.providerName || 'GitHub Models',
 			baseUrl: 'https://models.github.ai/inference',
+			apiKey: answers.apiKey,
+			models: answers.model
+				.split(',')
+				.map(m => m.trim())
+				.filter(Boolean),
+		}),
+	},
+	{
+		id: 'github-copilot',
+		name: 'GitHub Copilot',
+		fields: [
+			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: 'GitHub Copilot',
+			},
+			{
+				name: 'model',
+				prompt: 'Model name(s) (comma-separated).',
+				default: 'gpt-4.1, gpt-5.3-codex, claude-sonnet-4.6',
+				required: true,
+			},
+		],
+		buildConfig: answers => ({
+			name: answers.providerName || 'GitHub Copilot',
+			baseUrl: 'https://api.githubcopilot.com',
+			models: answers.model
+				.split(',')
+				.map(m => m.trim())
+				.filter(Boolean),
+			sdkProvider: 'github-copilot',
+		}),
+	},
+	{
+		id: 'kimi-code',
+		name: 'Kimi Code',
+		fields: [
+			{
+				name: 'apiKey',
+				prompt: 'API Key',
+				required: true,
+				sensitive: true,
+			},
+			{
+				name: 'model',
+				prompt: 'Model name(s) (comma-separated)',
+				default: 'kimi-for-coding',
+				required: true,
+			},
+			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: 'Kimi Code',
+			},
+		],
+		buildConfig: answers => ({
+			name: answers.providerName || 'Kimi Code',
+			sdkProvider: 'anthropic',
+			baseUrl: 'https://api.kimi.com/coding/v1',
+			apiKey: answers.apiKey,
+			models: answers.model
+				.split(',')
+				.map(m => m.trim())
+				.filter(Boolean),
+		}),
+	},
+	{
+		id: 'minimax-coding',
+		name: 'MiniMax Coding Plan',
+		fields: [
+			{
+				name: 'apiKey',
+				prompt: 'API Key',
+				required: true,
+				sensitive: true,
+			},
+			{
+				name: 'model',
+				prompt: 'Model name(s) (comma-separated)',
+				default: 'MiniMax-M2.5',
+				required: true,
+			},
+			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: 'MiniMax Coding',
+			},
+		],
+		buildConfig: answers => ({
+			name: answers.providerName || 'MiniMax Coding',
+			sdkProvider: 'anthropic',
+			baseUrl: 'https://api.minimax.io/anthropic/v1',
 			apiKey: answers.apiKey,
 			models: answers.model
 				.split(',')
@@ -390,7 +549,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'Claude-Sonnet-4, GPT-4o, Gemini-2.5-Pro',
+				default: '',
 				required: true,
 			},
 			{

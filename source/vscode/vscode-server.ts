@@ -8,6 +8,7 @@ import {WebSocket, WebSocketServer} from 'ws';
 import {BoundedMap} from '@/utils/bounded-map';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
+import {getShutdownManager} from '@/utils/shutdown';
 import {
 	AssistantMessage,
 	ClientMessage,
@@ -17,6 +18,7 @@ import {
 	DiagnosticInfo,
 	DiagnosticsRequestMessage,
 	FileChangeMessage,
+	OpenFileMessage,
 	PendingChange,
 	PROTOCOL_VERSION,
 	ServerMessage,
@@ -312,6 +314,17 @@ export class VSCodeServer {
 	}
 
 	/**
+	 * Open a file in VS Code editor
+	 */
+	openFileInVSCode(filePath: string): void {
+		const message: OpenFileMessage = {
+			type: 'open_file',
+			filePath,
+		};
+		this.broadcast(message);
+	}
+
+	/**
 	 * Get a pending change by ID
 	 */
 	getPendingChange(id: string): PendingChange | undefined {
@@ -440,6 +453,16 @@ export async function getVSCodeServer(port?: number): Promise<VSCodeServer> {
 	// This is important for synchronous functions like sendFileChangeToVSCode
 	serverInstance = new VSCodeServer(port);
 	serverInitPromise = Promise.resolve(serverInstance);
+
+	getShutdownManager().register({
+		name: 'vscode-server',
+		priority: 10,
+		handler: async () => {
+			if (serverInstance) {
+				await serverInstance.stop();
+			}
+		},
+	});
 
 	return serverInitPromise;
 }

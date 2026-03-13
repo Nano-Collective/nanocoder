@@ -5,12 +5,10 @@ Thank you for your interest in contributing to Nanocoder! We welcome contributio
 ## Table of Contents
 
 - [Getting Started](#getting-started)
+- [How to Contribute](#how-to-contribute)
 - [Development Setup](#development-setup)
-- [Making Changes](#making-changes)
 - [Testing](#testing)
 - [Coding Standards](#coding-standards)
-- [Submitting Changes](#submitting-changes)
-- [Issue Guidelines](#issue-guidelines)
 - [Community and Communication](#community-and-communication)
 
 ## Getting Started
@@ -19,7 +17,20 @@ Before contributing, please:
 
 1. Read our [README](README.md) to understand what Nanocoder does
 2. Check our [issue tracker](https://github.com/Nano-Collective/nanocoder/issues) for existing issues
-3. Look for issues labeled `good first issue` or `help wanted` if you're new to the project
+
+## How to Contribute
+
+### Finding Work
+
+Browse our open issues. If you find an unassigned issue you'd like to work on, comment on it to let us know you're picking it up.
+
+### Working on an Issue
+
+1. **Check for a spec** - Some issues include a specification or implementation details. Feel free to follow it or propose alternatives if you think you have a better approach.
+
+2. **No spec? Write one** - If the issue lacks a spec, draft one and post it in the issue comments for discussion before starting work.
+
+3. **Submit a PR** - When ready, open a pull request referencing the issue. We'll review it and work with you to get it merged.
 
 ## Development Setup
 
@@ -41,24 +52,19 @@ Before contributing, please:
 2. **Install dependencies:**
 
    ```bash
-   npm install
+   pnpm install
    ```
 
 3. **Build the project:**
 
    ```bash
-   npm run build
+   pnpm run build
    ```
 
 4. **Test your setup:**
 
    ```bash
-   npm run start
-   ```
-
-5. **For development with auto-rebuild:**
-   ```bash
-   npm run dev
+   pnpm run start
    ```
 
 ### Using Dev Containers (Recommended)
@@ -175,55 +181,6 @@ This project uses **husky** and **lint-staged** to automatically format staged f
 git commit --no-verify -m "your message"
 ```
 
-## Making Changes
-
-### Types of Contributions
-
-1. **Bug Fixes**: Address existing issues or problems
-2. **New Features**: Add functionality (new AI providers, tools, commands)
-3. **Improvements**: Enhance existing features or performance
-4. **Documentation**: Improve README, comments, or guides
-5. **Testing**: Add or improve tests
-
-### Development Workflow
-
-1. **Create a branch:**
-
-   ```bash
-   git checkout -b feature/your-feature-name
-   ```
-
-2. **Make your changes:**
-
-   - Follow the existing code style
-   - Add appropriate TypeScript types
-   - Update documentation if needed
-
-3. **Test your changes:**
-
-   ```bash
-   npm run build
-   npm run start
-   ```
-
-4. **Commit your changes:**
-   ```bash
-   git add .
-   git commit -m "feat: add your feature description"
-   ```
-
-### Commit Message Convention
-
-We follow conventional commits:
-
-- `feat:` - New features
-- `mod:` – Smaller modifications to existing features
-- `fix:` - Bug fixes
-- `docs:` - Documentation changes
-- `refactor:` - Code refactoring
-- `test:` - Adding or modifying tests
-- `chore:` - Build process or auxiliary tool changes
-
 ## Testing
 
 ### Automated Testing Requirements
@@ -238,7 +195,7 @@ All new features and bug fixes should include appropriate tests:
    pnpm test:all
    ```
 
-   This command runs: Biome formatting checks, type checks, ESLint checks, AVA tests, and Knip.
+   This command runs: Biome formatting checks, type checks, lint checks, AVA tests, Knip, security scans.
 
 4. **Test Requirements for PRs**:
    - New features **must** include passing tests in `.spec.ts/tsx` files
@@ -322,255 +279,9 @@ See `source/hooks/__tests__/` for examples of this pattern in practice.
 - **Comments**: Add comments for complex logic, not obvious code
 - **Error Handling**: Always handle errors gracefully
 
-### File Organization
-
-- **Imports**: Group external imports, then internal imports
-- **Exports**: Use named exports; avoid default exports where possible
-- **Modules**: Keep files focused on a single responsibility
-
 ### Logging
 
-Nanocoder uses a structured logging system based on Pino for production-grade observability. When contributing code, follow these logging practices:
-
-#### Import and Basic Usage
-
-```typescript
-import { getLogger } from '@/utils/logging';
-
-const logger = getLogger();
-
-logger.info('Tool execution completed', { tool: 'read-file', filePath: 'src/app.tsx', duration: 42 });
-logger.error('Model request failed', { error, context: { model: 'llama3', provider: 'ollama' } });
-logger.debug('Parsing tool call', { toolName: 'create-file', arguments: { path: 'test.ts' } });
-```
-
-#### Log Levels
-
-Choose the appropriate level for your logs:
-
-- `logger.fatal()` - Critical system failures that require immediate attention
-- `logger.error()` - Operation failures and errors
-- `logger.warn()` - Warning conditions and potential issues
-- `logger.info()` - Significant events and state changes (default for production)
-- `logger.http()` - HTTP request/response logging
-- `logger.debug()` - Detailed debugging information (development only)
-- `logger.trace()` - Very detailed trace information (development only)
-
-#### Structured Logging
-
-Always use structured data with context objects instead of string concatenation:
-
-**Good:**
-```typescript
-logger.info('File operation completed', {
-  operation: 'write',
-  filePath: '/path/to/file.ts',
-  linesWritten: 42,
-  duration: 15
-});
-```
-
-**Avoid:**
-```typescript
-logger.info(`Wrote 42 lines to /path/to/file.ts in 15ms`);
-```
-
-#### Performance Tracking
-
-For expensive operations, use performance monitoring:
-
-```typescript
-import { startMetrics, endMetrics } from '@/utils/logging';
-
-const metrics = startMetrics();
-const analysis = await analyzeCodebase(projectPath);
-const finalMetrics = endMetrics(metrics);
-
-logger.info('Codebase analysis completed', {
-  filesAnalyzed: analysis.fileCount,
-  duration: finalMetrics.duration,
-  memoryDelta: finalMetrics.memoryUsage
-});
-```
-
-#### Request Tracking
-
-Use request trackers for external calls:
-
-```typescript
-import { httpTracker, aiTracker, mcpTracker } from '@/utils/logging';
-
-// HTTP requests (e.g., web search tool)
-const requestId = httpTracker.get('https://api.example.com/search', async () => {
-  return await fetchSearchResults(query);
-});
-
-// AI provider calls (LLM interactions)
-const aiRequestId = aiTracker.chat('ollama', 'llama3', async () => {
-  return await client.chat(messages, tools);
-});
-
-// MCP server tool calls
-const mcpRequestId = mcpTracker.tool('filesystem', 'read-file', async () => {
-  return await mcpClient.executeTool('read-file', { path: 'src/app.tsx' });
-});
-```
-
-#### Correlation Tracking
-
-For operations that span multiple functions or components, use correlation contexts:
-
-```typescript
-import { withNewCorrelationContext, getCorrelationId } from '@/utils/logging';
-
-await withNewCorrelationContext(async () => {
-  const correlationId = getCorrelationId();
-  logger.info('Starting code refactoring', { correlationId, file: 'app.tsx' });
-
-  // All logs within this context share the same correlation ID
-  await analyzeCode();
-  await generateChanges();
-  await applyChanges();
-
-  logger.info('Refactoring completed', { correlationId, changes: 3 });
-});
-```
-
-#### When to Add Logging
-
-Add logging for:
-
-- **State changes**: Mode transitions, configuration updates
-- **External operations**: API calls, file I/O, network requests
-- **Error conditions**: Failures, validation errors, edge cases
-- **Performance-critical operations**: Long-running tasks, expensive computations
-- **User actions**: Commands, tool executions, important interactions
-
-Avoid logging:
-
-- **Sensitive data**: API keys, passwords, tokens (automatically redacted)
-- **High-frequency events**: Avoid logging in tight loops
-- **Trivial operations**: Simple getters, basic calculations
-
-#### Environment Considerations
-
-- **Production**: Logs default to `silent` level (clean CLI UX)
-- **Development**: Set `NODE_ENV=development` or `NANOCODER_LOG_LEVEL=debug` to see logs
-- **Testing**: Logs are silenced during tests
-
-#### Child Loggers
-
-Use child loggers for module-specific context:
-
-```typescript
-const logger = getLogger();
-const aiLogger = logger.child({ module: 'ai-client', provider: 'ollama', model: 'llama3' });
-
-aiLogger.info('Streaming response started'); // Automatically includes AI client context
-```
-
-#### Documentation
-
-For more details, see [`docs/pino-logging.md`](docs/pino-logging.md).
-
-## Submitting Changes
-
-### Pull Request Process
-
-1. **Update Documentation**: If your change affects user-facing behavior
-2. **Test Thoroughly**: Ensure your changes work across different scenarios
-3. **Create Pull Request**: With a clear title and description
-
-### Pull Request Template
-
-```markdown
-## Description
-
-Brief description of what this PR does
-
-## Type of Change
-
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Breaking change
-- [ ] Documentation update
-
-## Testing
-
-- [ ] Tested with Ollama
-- [ ] Tested with OpenRouter
-- [ ] Tested with OpenAI-compatible API
-- [ ] Tested MCP integration (if applicable)
-
-## Checklist
-
-- [ ] Code follows project style guidelines
-- [ ] Self-review completed
-- [ ] Documentation updated (if needed)
-- [ ] No breaking changes (or clearly documented)
-```
-
-### Review Process
-
-- Maintainers will review your PR
-- Address feedback promptly
-- Be open to suggestions and changes
-- Once approved, we'll merge your contribution
-
-## Issue Guidelines
-
-### Reporting Bugs
-
-When reporting bugs, please include:
-
-- **Environment**: OS, Node.js version, Nanocoder version
-- **AI Provider**: Which provider you were using
-- **Configuration**: Relevant config (sanitize API keys)
-- **Steps to Reproduce**: Clear, step-by-step instructions
-- **Expected vs Actual**: What should happen vs what actually happens
-- **Logs**: Any relevant error messages or debug output
-
-### Requesting Features
-
-For feature requests:
-
-- **Use Case**: Explain why this feature would be useful
-- **Proposed Solution**: If you have ideas on implementation
-- **Alternatives**: Other ways you've considered solving this
-- **Additional Context**: Screenshots, examples, or references
-
-### Issue Labels
-
-- `bug` - Something isn't working
-- `enhancement` - New feature or improvement
-- `good first issue` - Good for newcomers
-- `help wanted` - Extra attention needed
-- `documentation` - Documentation improvements
-- `question` - Questions or discussions
-
-## Community and Communication
-
-### Getting Help
-
-- **GitHub Issues**: For bugs, features, and questions
-- **Discord Server**: Join our community Discord server for real-time discussions, help, and collaboration: [Join our Discord server](https://discord.gg/ktPDV6rekE)
-
-### Code of Conduct
-
-- Be respectful and inclusive
-- Focus on constructive feedback
-- Help create a welcoming environment for all contributors
-- Remember that everyone is learning and contributing voluntarily
-
-### Recognition
-
-All contributors are recognized in the project. We appreciate:
-
-- Code contributions
-- Bug reports and testing
-- Documentation improvements
-- Feature suggestions and feedback
-- Community support and discussions
+Nanocoder uses structured logging based on Pino. See [`docs/pino-logging.md`](docs/pino-logging.md) for details.
 
 ## Development Tips
 
@@ -597,6 +308,30 @@ All contributors are recognized in the project. We appreciate:
 - Maintain consistent CLI interface
 - Provide clear feedback to users
 - Handle long-running operations gracefully
+
+## Community and Communication
+
+### Getting Help
+
+- **GitHub Issues**: For bugs, features, and questions
+- **Discord Server**: Join our community Discord server for real-time discussions, help, and collaboration: [Join our Discord server](https://discord.gg/ktPDV6rekE)
+
+### Code of Conduct
+
+- Be respectful and inclusive
+- Focus on constructive feedback
+- Help create a welcoming environment for all contributors
+- Remember that everyone is learning and contributing voluntarily
+
+### Recognition
+
+All contributors are recognized in the project. We appreciate:
+
+- Code contributions
+- Bug reports and testing
+- Documentation improvements
+- Feature suggestions and feedback
+- Community support and discussions
 
 ---
 

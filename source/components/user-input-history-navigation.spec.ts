@@ -6,15 +6,17 @@ import {PlaceholderType, type InputState} from '../types/hooks';
  * Tests for history navigation cycling behavior
  *
  * These tests verify that the history navigation properly cycles through:
- * - Up arrow: blank → last → ... → first → blank → last → ...
- * - Down arrow: blank → first → ... → last → blank → first → ...
+ * - Up arrow: draft → last → ... → first → draft → last → ...
+ * - Down arrow: draft → first → ... → last → draft → first → ...
+ *
+ * The user's in-progress draft is preserved throughout navigation.
  */
 
 // Simulate the history navigation state machine
 class HistoryNavigationSimulator {
 	private historyIndex: number = -1;
 	private originalInput: string = '';
-	private originalInputState: InputState | null = null;
+	private savedDraft: InputState;
 	private currentInput: string = '';
 	private currentState: InputState;
 
@@ -27,6 +29,7 @@ class HistoryNavigationSimulator {
 			displayValue: initialInput,
 			placeholderContent: {},
 		};
+		this.savedDraft = {...this.currentState};
 	}
 
 	// Simulates the Up arrow key navigation logic
@@ -35,7 +38,7 @@ class HistoryNavigationSimulator {
 
 		if (this.historyIndex === -1) {
 			// Save current state before starting navigation
-			this.originalInputState = this.currentState;
+			this.savedDraft = this.currentState;
 			this.originalInput = this.currentInput;
 			this.historyIndex = this.history.length - 1;
 			this.currentState = this.history[this.history.length - 1];
@@ -46,13 +49,13 @@ class HistoryNavigationSimulator {
 			this.currentState = this.history[newIndex];
 			this.currentInput = this.currentState.displayValue;
 		} else if (this.historyIndex === 0) {
-			// At first history item, go to blank
+			// At first history item, restore saved draft
 			this.historyIndex = -2;
-			this.originalInput = '';
-			this.currentInput = '';
-			this.currentState = {displayValue: '', placeholderContent: {}};
+			this.currentState = this.savedDraft;
+			this.currentInput = this.savedDraft.displayValue;
 		} else if (this.historyIndex === -2) {
-			// At blank, cycle back to last history item
+			// At draft, save any edits and cycle back to last history item
+			this.savedDraft = this.currentState;
 			this.historyIndex = this.history.length - 1;
 			this.currentState = this.history[this.history.length - 1];
 			this.currentInput = this.currentState.displayValue;
@@ -64,15 +67,15 @@ class HistoryNavigationSimulator {
 		if (this.history.length === 0) return;
 
 		if (this.historyIndex === -1) {
-			// At original input, go to blank when cycling down
-			this.originalInputState = this.currentState;
+			// Save draft, go to draft cycling state (visually a no-op)
+			this.savedDraft = this.currentState;
 			this.originalInput = this.currentInput;
 			this.historyIndex = -2;
-			this.originalInput = '';
-			this.currentInput = '';
-			this.currentState = {displayValue: '', placeholderContent: {}};
+			this.currentState = this.savedDraft;
+			this.currentInput = this.savedDraft.displayValue;
 		} else if (this.historyIndex === -2) {
-			// At blank, cycle to first history item
+			// At draft, save any edits and cycle to first history item
+			this.savedDraft = this.currentState;
 			this.historyIndex = 0;
 			this.currentState = this.history[0];
 			this.currentInput = this.currentState.displayValue;
@@ -83,11 +86,10 @@ class HistoryNavigationSimulator {
 			this.currentState = this.history[newIndex];
 			this.currentInput = this.currentState.displayValue;
 		} else if (this.historyIndex === this.history.length - 1) {
-			// At last history item, cycle back to blank
+			// At last history item, restore saved draft
 			this.historyIndex = -2;
-			this.originalInput = '';
-			this.currentInput = '';
-			this.currentState = {displayValue: '', placeholderContent: {}};
+			this.currentState = this.savedDraft;
+			this.currentInput = this.savedDraft.displayValue;
 		}
 	}
 
@@ -108,13 +110,13 @@ class HistoryNavigationSimulator {
 // Single Message History Tests
 // ============================================================================
 
-test('single message: up cycles through history → blank → history', t => {
+test('single message: up cycles through history → draft → history', t => {
 	const history: InputState[] = [
 		{displayValue: 'message1', placeholderContent: {}},
 	];
 	const nav = new HistoryNavigationSimulator(history, '');
 
-	// Start at blank (index -1)
+	// Start at draft (index -1, empty draft)
 	t.is(nav.getHistoryIndex(), -1);
 	t.is(nav.getCurrentInput(), '');
 
@@ -123,7 +125,7 @@ test('single message: up cycles through history → blank → history', t => {
 	t.is(nav.getHistoryIndex(), 0);
 	t.is(nav.getCurrentInput(), 'message1');
 
-	// Up → blank
+	// Up → draft (empty)
 	nav.navigateUp();
 	t.is(nav.getHistoryIndex(), -2);
 	t.is(nav.getCurrentInput(), '');
@@ -133,23 +135,23 @@ test('single message: up cycles through history → blank → history', t => {
 	t.is(nav.getHistoryIndex(), 0);
 	t.is(nav.getCurrentInput(), 'message1');
 
-	// Up → blank again
+	// Up → draft again
 	nav.navigateUp();
 	t.is(nav.getHistoryIndex(), -2);
 	t.is(nav.getCurrentInput(), '');
 });
 
-test('single message: down cycles through blank → history → blank', t => {
+test('single message: down cycles through draft → history → draft', t => {
 	const history: InputState[] = [
 		{displayValue: 'message1', placeholderContent: {}},
 	];
 	const nav = new HistoryNavigationSimulator(history, '');
 
-	// Start at blank (index -1)
+	// Start at draft (index -1, empty draft)
 	t.is(nav.getHistoryIndex(), -1);
 	t.is(nav.getCurrentInput(), '');
 
-	// Down → blank cycling state
+	// Down → draft cycling state (visually same as draft)
 	nav.navigateDown();
 	t.is(nav.getHistoryIndex(), -2);
 	t.is(nav.getCurrentInput(), '');
@@ -159,7 +161,7 @@ test('single message: down cycles through blank → history → blank', t => {
 	t.is(nav.getHistoryIndex(), 0);
 	t.is(nav.getCurrentInput(), 'message1');
 
-	// Down → blank again
+	// Down → draft again
 	nav.navigateDown();
 	t.is(nav.getHistoryIndex(), -2);
 	t.is(nav.getCurrentInput(), '');
@@ -170,7 +172,7 @@ test('single message: down cycles through blank → history → blank', t => {
 	t.is(nav.getCurrentInput(), 'message1');
 });
 
-test('single message: up then down returns to original', t => {
+test('single message: up then down restores draft', t => {
 	const history: InputState[] = [
 		{displayValue: 'message1', placeholderContent: {}},
 	];
@@ -183,9 +185,9 @@ test('single message: up then down returns to original', t => {
 	nav.navigateUp();
 	t.is(nav.getCurrentInput(), 'message1');
 
-	// Down → back to blank (lost typing)
+	// Down → restores draft
 	nav.navigateDown();
-	t.is(nav.getCurrentInput(), '');
+	t.is(nav.getCurrentInput(), 'typing...');
 });
 
 // ============================================================================
@@ -287,6 +289,86 @@ test('three messages: mixing up and down navigation', t => {
 });
 
 // ============================================================================
+// Draft Preservation Tests
+// ============================================================================
+
+test('draft is preserved when navigating up through all history and back', t => {
+	const history: InputState[] = [
+		{displayValue: 'message1', placeholderContent: {}},
+		{displayValue: 'message2', placeholderContent: {}},
+	];
+	const nav = new HistoryNavigationSimulator(history, 'my draft');
+
+	// Start with draft
+	t.is(nav.getCurrentInput(), 'my draft');
+
+	// Up → message2
+	nav.navigateUp();
+	t.is(nav.getCurrentInput(), 'message2');
+
+	// Up → message1
+	nav.navigateUp();
+	t.is(nav.getCurrentInput(), 'message1');
+
+	// Up → draft restored
+	nav.navigateUp();
+	t.is(nav.getHistoryIndex(), -2);
+	t.is(nav.getCurrentInput(), 'my draft');
+
+	// Up → cycles back to message2
+	nav.navigateUp();
+	t.is(nav.getCurrentInput(), 'message2');
+});
+
+test('draft is preserved when navigating down through all history and back', t => {
+	const history: InputState[] = [
+		{displayValue: 'message1', placeholderContent: {}},
+		{displayValue: 'message2', placeholderContent: {}},
+	];
+	const nav = new HistoryNavigationSimulator(history, 'my draft');
+
+	// Down → draft cycling state (still shows draft)
+	nav.navigateDown();
+	t.is(nav.getCurrentInput(), 'my draft');
+
+	// Down → message1
+	nav.navigateDown();
+	t.is(nav.getCurrentInput(), 'message1');
+
+	// Down → message2
+	nav.navigateDown();
+	t.is(nav.getCurrentInput(), 'message2');
+
+	// Down → draft restored
+	nav.navigateDown();
+	t.is(nav.getHistoryIndex(), -2);
+	t.is(nav.getCurrentInput(), 'my draft');
+});
+
+test('draft is preserved across mixed up/down navigation', t => {
+	const history: InputState[] = [
+		{displayValue: 'old', placeholderContent: {}},
+	];
+	const nav = new HistoryNavigationSimulator(history, 'wip');
+
+	// Up → history
+	nav.navigateUp();
+	t.is(nav.getCurrentInput(), 'old');
+
+	// Down → back to draft
+	nav.navigateDown();
+	t.is(nav.getCurrentInput(), 'wip');
+
+	// Up again → history
+	nav.navigateUp();
+	t.is(nav.getCurrentInput(), 'old');
+
+	// Up again → back to draft
+	nav.navigateUp();
+	t.is(nav.getCurrentInput(), 'wip');
+});
+
+// ============================================================================
 // Empty History Tests
 // ============================================================================
 
@@ -356,7 +438,7 @@ test('continuous cycling: 10 ups then 10 downs returns to start', t => {
 	}
 
 	// Should be back at a predictable state
-	// After 10 ups and 10 downs, we should be at blank state
+	// After 10 ups and 10 downs, we should be at draft state
 	t.is(nav.getHistoryIndex(), -2);
 });
 

@@ -86,159 +86,6 @@ And some text after.
 	}
 });
 
-// JSON Parser Tests
-
-test('parseToolCalls: successfully parses valid JSON tool call', t => {
-	const content = `
-{
-  "name": "read_file",
-  "arguments": {
-    "path": "/path/to/file.txt"
-  }
-}
-  `;
-
-	const result = parseToolCalls(content);
-
-	t.true(result.success);
-	if (result.success) {
-		t.is(result.toolCalls.length, 1);
-		t.is(result.toolCalls[0].function.name, 'read_file');
-		t.deepEqual(result.toolCalls[0].function.arguments, {
-			path: '/path/to/file.txt',
-		});
-	}
-});
-
-test('parseToolCalls: detects malformed JSON missing arguments field', t => {
-	const content = `
-{
-  "name": "read_file"
-}
-  `;
-
-	const result = parseToolCalls(content);
-
-	t.false(result.success);
-	if (!result.success) {
-		t.regex(result.error, /missing "arguments" field/i);
-		t.regex(result.examples, /native tool calling format/i);
-	}
-});
-
-test('parseToolCalls: detects malformed JSON missing name field', t => {
-	const content = `
-{
-  "arguments": {
-    "path": "/path/to/file.txt"
-  }
-}
-  `;
-
-	const result = parseToolCalls(content);
-
-	t.false(result.success);
-	if (!result.success) {
-		t.regex(result.error, /missing "name" field/i);
-		t.regex(result.examples, /native tool calling format/i);
-	}
-});
-
-test('parseToolCalls: detects malformed JSON with string arguments', t => {
-	const content = `
-{
-  "name": "read_file",
-  "arguments": "/path/to/file.txt"
-}
-  `;
-
-	const result = parseToolCalls(content);
-
-	t.false(result.success);
-	if (!result.success) {
-		t.regex(result.error, /"arguments" must be an object/i);
-		t.regex(result.examples, /native tool calling format/i);
-	}
-});
-
-test('parseToolCalls: handles JSON in markdown code blocks', t => {
-	const content = `
-\`\`\`json
-{
-  "name": "read_file",
-  "arguments": {
-    "path": "/path/to/file.txt"
-  }
-}
-\`\`\`
-  `;
-
-	const result = parseToolCalls(content);
-
-	t.true(result.success);
-	if (result.success) {
-		t.is(result.toolCalls.length, 1);
-		t.is(result.toolCalls[0].function.name, 'read_file');
-	}
-});
-
-test('parseToolCalls: cleans JSON tool calls from content', t => {
-	const content = `
-Here is some text before.
-
-{
-  "name": "read_file",
-  "arguments": {
-    "path": "/path/to/file.txt"
-  }
-}
-
-And some text after.
-  `;
-
-	const result = parseToolCalls(content);
-
-	t.true(result.success);
-	if (result.success) {
-		t.is(result.toolCalls.length, 1);
-		t.regex(result.cleanedContent, /Here is some text before/);
-		t.regex(result.cleanedContent, /And some text after/);
-		t.notRegex(result.cleanedContent, /"name":\s*"read_file"/);
-	}
-});
-
-// Priority Tests (XML should be tried first)
-
-test('parseToolCalls: prioritizes XML over JSON when both present', t => {
-	const content = `
-<read_file>
-  <path>/xml/path.txt</path>
-</read_file>
-
-{
-  "name": "read_file",
-  "arguments": {
-    "path": "/json/path.txt"
-  }
-}
-  `;
-
-	const result = parseToolCalls(content);
-
-	t.true(result.success);
-	if (result.success) {
-		// Should parse XML first and return immediately
-		t.is(result.toolCalls.length, 1);
-		t.is(result.toolCalls[0].function.name, 'read_file');
-		// Verify it's the XML call (xml_call_ prefix)
-		t.regex(result.toolCalls[0].id, /xml_call/);
-		t.is(
-			(result.toolCalls[0].function.arguments as {path: string}).path,
-			'/xml/path.txt',
-		);
-	}
-});
-
 // Edge Cases
 
 test('parseToolCalls: handles empty content', t => {
@@ -274,29 +121,23 @@ test('parseToolCalls: handles empty JSON object', t => {
 	}
 });
 
-test('parseToolCalls: deduplicates identical tool calls', t => {
+test('parseToolCalls: preserves identical XML tool calls (no deduplication)', t => {
 	const content = `
-{
-  "name": "read_file",
-  "arguments": {
-    "path": "/path/to/file.txt"
-  }
-}
+<read_file>
+  <path>/path/to/file.txt</path>
+</read_file>
 
-{
-  "name": "read_file",
-  "arguments": {
-    "path": "/path/to/file.txt"
-  }
-}
+<read_file>
+  <path>/path/to/file.txt</path>
+</read_file>
   `;
 
 	const result = parseToolCalls(content);
 
 	t.true(result.success);
 	if (result.success) {
-		// Should deduplicate to single call
-		t.is(result.toolCalls.length, 1);
+		// No deduplication - both calls preserved
+		t.is(result.toolCalls.length, 2);
 	}
 });
 

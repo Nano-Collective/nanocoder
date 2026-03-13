@@ -6,9 +6,35 @@ import type {ToolCall, ToolResult} from '@/types/core';
 // Test Helpers
 // ============================================================================
 
+import {setToolRegistryGetter} from '@/message-handler';
+
+// Mock tool registry for tests
+const mockToolHandler: ToolCall['function']['name'] extends infer T
+  ? Record<string, (args: Record<string, unknown>) => Promise<string>>
+  : Record<string, any> = {
+  test_tool: async () => 'Tool executed',
+  tool1: async () => 'Tool 1 executed',
+  tool2: async () => 'Tool 2 executed',
+  tool3: async () => 'Tool 3 executed',
+  failing_tool: async () => {
+    throw new Error('Tool execution failed');
+  },
+  passing_tool: async () => 'Tool passed',
+  unvalidated_tool: async () => 'Tool executed',
+  validated_tool: async () => 'Tool executed',
+};
+
+const createMockToolRegistry = () => mockToolHandler;
+
+// Set up tool registry before all tests
+test.before(async () => {
+  setToolRegistryGetter(createMockToolRegistry);
+});
+
 // Create a mock tool manager
 const createMockToolManager = (config: {
 	validatorResult?: {valid: boolean; error?: string};
+	shouldFail?: boolean;
 } = {}) => ({
 	getToolValidator: (name: string) => {
 		if (config.validatorResult) {
@@ -17,9 +43,15 @@ const createMockToolManager = (config: {
 		return undefined;
 	},
 	getTool: (name: string) => ({
-		execute: async () => 'Tool executed',
+		execute: async () => {
+			if (config.shouldFail) {
+				throw new Error('Tool execution failed');
+			}
+			return 'Tool executed';
+		},
 	}),
 	hasTool: (name: string) => true,
+	getToolFormatter: (name: string) => undefined,
 });
 
 // Create a mock conversation state manager
@@ -31,7 +63,7 @@ const createMockConversationStateManager = () => ({
 });
 
 // ============================================================================
-// Validation Failure Tests (lines 32-62)
+// Validation Failure Tests
 // ============================================================================
 
 test('executeToolsDirectly - handles validation failure', async t => {
@@ -63,7 +95,7 @@ test('executeToolsDirectly - handles validation failure', async t => {
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		1,
+		() => 1,
 	);
 
 	t.is(results.length, 1);
@@ -72,7 +104,7 @@ test('executeToolsDirectly - handles validation failure', async t => {
 	t.true(results[0].content.includes('Validation failed'));
 });
 
-test('executeToolsDirectly - continues to next tool after validation failure', async t => {
+test('executeToolsDirectly - continues after validation failure', async t => {
 	const toolCalls: ToolCall[] = [
 		{
 			id: 'call_1',
@@ -90,19 +122,31 @@ test('executeToolsDirectly - continues to next tool after validation failure', a
 		},
 	];
 
-	let callCount = 0;
 	const conversationStateManager = createMockConversationStateManager();
 	const addToChatQueue = () => {};
 
-	// Mock processToolUse to simulate successful execution for second tool
-	// We need to mock the dynamic import of processToolUse
-	// For now, this test documents the expected behavior
+	const toolManager = createMockToolManager({
+		validatorResult: {
+			valid: false,
+			error: 'Validation failed',
+		},
+	});
 
-	t.pass('Continuation after validation failure requires processToolUse mock');
+	// Should skip validation failure and continue to next tool
+	const results = await executeToolsDirectly(
+		toolCalls,
+		toolManager,
+		conversationStateManager as any,
+		addToChatQueue,
+		() => 1,
+	);
+
+	// Both tools should be attempted (validation happens for all first)
+	t.is(results.length, 2);
 });
 
 // ============================================================================
-// Successful Execution Tests (lines 64-80)
+// Successful Execution Tests
 // ============================================================================
 
 test('executeToolsDirectly - executes tool successfully', async t => {
@@ -122,38 +166,64 @@ test('executeToolsDirectly - executes tool successfully', async t => {
 	const toolManager = createMockToolManager({
 		// No validator means no validation check
 		validatorResult: undefined,
+		shouldFail: false,
 	});
 
-	// This would execute the tool successfully
-	// but requires processToolUse to be mocked
+	const results = await executeToolsDirectly(
+		toolCalls,
+		toolManager,
+		conversationStateManager as any,
+		addToChatQueue,
+		() => 1,
+	);
 
-	t.pass('Successful execution requires processToolUse mock');
+	t.is(results.length, 1);
+	t.is(results[0].role, 'tool');
+	t.is(results[0].name, 'test_tool');
+	t.true(results[0].content.includes('Tool executed'));
 });
 
-test('executeToolsDirectly - executes multiple tools', async t => {
+test('executeToolsDirectly - executes multiple tools in parallel', async t => {
 	const toolCalls: ToolCall[] = [
 		{
 			id: 'call_1',
-			function: {name: 'tool1', arguments: '{}'},
+			function: {name: 'tool1', arguments: '{"arg1": "value1"}'},
 		},
 		{
 			id: 'call_2',
-			function: {name: 'tool2', arguments: '{}'},
+			function: {name: 'tool2', arguments: '{"arg2": "value2"}'},
 		},
 		{
 			id: 'call_3',
-			function: {name: 'tool3', arguments: '{}'},
+			function: {name: 'tool3', arguments: '{"arg3": "value3"}'},
 		},
 	];
 
 	const conversationStateManager = createMockConversationStateManager();
 	const addToChatQueue = () => {};
 
-	t.pass('Multiple tool execution requires processToolUse mock');
+	const toolManager = createMockToolManager({
+		validatorResult: undefined,
+		shouldFail: false,
+	});
+
+	const results = await executeToolsDirectly(
+		toolCalls,
+		toolManager,
+		conversationStateManager as any,
+		addToChatQueue,
+		() => 1,
+	);
+
+	// All three tools should execute
+	t.is(results.length, 3);
+	// All results should have unique tool_call_ids
+	const toolIds = results.map(r => r.tool_call_id);
+	t.is(new Set(toolIds).size, 3);
 });
 
 // ============================================================================
-// Error Handling Tests (lines 81-105)
+// Error Handling Tests
 // ============================================================================
 
 test('executeToolsDirectly - handles execution error gracefully', async t => {
@@ -170,12 +240,22 @@ test('executeToolsDirectly - handles execution error gracefully', async t => {
 	const conversationStateManager = createMockConversationStateManager();
 	const addToChatQueue = () => {};
 
-	const toolManager = createMockToolManager();
+	const toolManager = createMockToolManager({
+		shouldFail: true,
+	});
 
-	// This would catch the error and return an error result
-	// but requires processToolUse to be mocked
+	const results = await executeToolsDirectly(
+		toolCalls,
+		toolManager,
+		conversationStateManager as any,
+		addToChatQueue,
+		() => 1,
+	);
 
-	t.pass('Error handling requires processToolUse mock');
+	t.is(results.length, 1);
+	t.is(results[0].role, 'tool');
+	t.is(results[0].name, 'failing_tool');
+	t.true(results[0].content.includes('Error:'));
 });
 
 test('executeToolsDirectly - continues after error with remaining tools', async t => {
@@ -193,7 +273,20 @@ test('executeToolsDirectly - continues after error with remaining tools', async 
 	const conversationStateManager = createMockConversationStateManager();
 	const addToChatQueue = () => {};
 
-	t.pass('Continue after error requires processToolUse mock');
+	const toolManager = createMockToolManager({
+		shouldFail: true,
+	});
+
+	const results = await executeToolsDirectly(
+		toolCalls,
+		toolManager,
+		conversationStateManager as any,
+		addToChatQueue,
+		() => 1,
+	);
+
+	// Both tools should be attempted (execution happens for all in parallel)
+	t.is(results.length, 2);
 });
 
 // ============================================================================
@@ -211,7 +304,7 @@ test('executeToolsDirectly - returns empty array for no tools', async t => {
 		null,
 		conversationStateManager as any,
 		addToChatQueue,
-		1,
+		() => 1,
 	);
 
 	t.deepEqual(results, []);
@@ -228,8 +321,17 @@ test('executeToolsDirectly - handles null tool manager', async t => {
 	const conversationStateManager = createMockConversationStateManager();
 	const addToChatQueue = () => {};
 
-	// Should still work without a tool manager (no validation possible)
-	t.pass('Null tool manager requires processToolUse mock');
+	const toolManager = null;
+
+	const results = await executeToolsDirectly(
+		toolCalls,
+		toolManager,
+		conversationStateManager as any,
+		addToChatQueue,
+		() => 1,
+	);
+
+	t.is(results.length, 1);
 });
 
 test('executeToolsDirectly - handles tool with no validator', async t => {
@@ -246,9 +348,18 @@ test('executeToolsDirectly - handles tool with no validator', async t => {
 	const toolManager = createMockToolManager({
 		// No validator defined for this tool
 		validatorResult: undefined,
+		shouldFail: false,
 	});
 
-	t.pass('No validator requires processToolUse mock');
+	const results = await executeToolsDirectly(
+		toolCalls,
+		toolManager,
+		conversationStateManager as any,
+		addToChatQueue,
+		() => 1,
+	);
+
+	t.is(results.length, 1);
 });
 
 test('executeToolsDirectly - handles tool with valid validation', async t => {
@@ -267,7 +378,16 @@ test('executeToolsDirectly - handles tool with valid validation', async t => {
 
 	const toolManager = createMockToolManager({
 		validatorResult: {valid: true},
+		shouldFail: false,
 	});
 
-	t.pass('Valid validation requires processToolUse mock');
+	const results = await executeToolsDirectly(
+		toolCalls,
+		toolManager,
+		conversationStateManager as any,
+		addToChatQueue,
+		() => 1,
+	);
+
+	t.is(results.length, 1);
 });

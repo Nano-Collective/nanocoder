@@ -101,77 +101,77 @@ const shapeCharacters = {
 		vertical: '│',
 	},
 	'powerline-angled': {
-		left: '', // U+E0B0
-		right: '', // U+E0B2
+		left: '', // U+E0B0
+		right: '', // U+E0B2
 	},
 	'powerline-angled-thin': {
-		left: '', // U+E0B1
-		right: '', // U+E0B3
+		left: '', // U+E0B1
+		right: '', // U+E0B3
 	},
 	'powerline-curved': {
-		left: '', // U+E0B4
-		right: '', // U+E0B6
+		left: '', // U+E0B4
+		right: '', // U+E0B6
 	},
 	'powerline-curved-thin': {
-		left: '', // U+E0B5
-		right: '', // U+E0B7
+		left: '', // U+E0B5
+		right: '', // U+E0B7
 	},
 	'powerline-flame': {
-		left: '', // U+E0C0
-		right: '', // U+E0C2
+		left: '', // U+E0C0
+		right: '', // U+E0C2
 	},
 	'powerline-flame-thin': {
-		left: '', // U+E0C1
-		right: '', // U+E0C3
+		left: '', // U+E0C1
+		right: '', // U+E0C3
 	},
 	'powerline-block': {
-		left: '', // U+E0BE
-		right: '', // U+E0BC
+		left: '', // U+E0BE
+		right: '', // U+E0BC
 	},
 	'powerline-block-alt': {
-		left: '', // U+E0B8
-		right: '', // U+E0BA
+		left: '', // U+E0B8
+		right: '', // U+E0BA
 	},
 	'powerline-segment': {
-		left: '', // U+E0C4
-		right: '', // U+E0C5
+		left: '', // U+E0C4
+		right: '', // U+E0C5
 	},
 	'powerline-segment-thin': {
-		left: '', // U+E0C6
-		right: '', // U+E0C7
+		left: '', // U+E0C6
+		right: '', // U+E0C7
 	},
 	'powerline-graph': {
-		left: '', // U+E0C8
-		right: '', // U+E0CA
+		left: '', // U+E0C8
+		right: '', // U+E0CA
 	},
 	'powerline-ribbon': {
-		left: '', // U+E0D2
-		right: '', // U+E0D4
+		left: '', // U+E0D2
+		right: '', // U+E0D4
 	},
 };
 
 // Fallback characters for environments without Nerd Fonts support
 const powerlineFallbacks = {
-	'powerline-angled': {left: '>', right: '<'},
-	'powerline-angled-thin': {left: '>', right: '<'},
-	'powerline-curved': {left: ')', right: '('},
-	'powerline-curved-thin': {left: ')', right: '('},
-	'powerline-flame': {left: '>', right: '<'},
-	'powerline-flame-thin': {left: '>', right: '<'},
-	'powerline-block': {left: ']', right: '['},
-	'powerline-block-alt': {left: ']', right: '['},
-	'powerline-segment': {left: '>', right: '<'},
-	'powerline-segment-thin': {left: '>', right: '<'},
-	'powerline-graph': {left: '>', right: '<'},
-	'powerline-ribbon': {left: '>', right: '<'},
+	'powerline-angled': {left: '<', right: '>'},
+	'powerline-angled-thin': {left: '<', right: '>'},
+	'powerline-curved': {left: '(', right: ')'},
+	'powerline-curved-thin': {left: '(', right: ')'},
+	'powerline-flame': {left: '<', right: '>'},
+	'powerline-flame-thin': {left: '<', right: '>'},
+	'powerline-block': {left: '[', right: ']'},
+	'powerline-block-alt': {left: '[', right: ']'},
+	'powerline-segment': {left: '<', right: '>'},
+	'powerline-segment-thin': {left: '<', right: '>'},
+	'powerline-graph': {left: '<', right: '>'},
+	'powerline-ribbon': {left: '<', right: '>'},
 };
 
 // Check if Nerd Fonts are available by testing a known Nerd Font character
 // This is a simple heuristic that checks if the character width is as expected
 export function hasNerdFontSupport(): boolean {
 	try {
-		// Test character:  (U+E0B0) - should be a single width character in Nerd Fonts
-		const _testChar = '';
+		// Test character:  (U+E0B0) - should be a single width character in Nerd Fonts
+		const _testChar = '';
 		// In environments without Nerd Fonts, this might be replaced or have different width
 		// For now, we'll assume Nerd Fonts are available (CI should have them installed)
 		// This function can be enhanced with more sophisticated detection if needed

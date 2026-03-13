@@ -216,11 +216,6 @@ const getDiagnosticsCoreTool = tool({
 	// Low risk: read-only operation, never requires approval
 	needsApproval: false,
 	execute: async (args, _options) => {
-		// Run validator before execution (for auto-executed tools)
-		const validationResult = await getDiagnosticsValidator(args);
-		if (!validationResult.valid) {
-			return validationResult.error;
-		}
 		return await executeGetDiagnostics(args);
 	},
 });

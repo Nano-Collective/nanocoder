@@ -45,7 +45,6 @@ function Help({
 	return (
 		<TitledBoxWithPreferences
 			title="Help"
-			reversePowerline={true}
 			width={boxWidth}
 			borderColor={colors.primary}
 			paddingX={2}
@@ -85,6 +84,7 @@ function Help({
 			<Text color={colors.text}> • Edit files {'>'} Update bar.ts to...</Text>
 			<Text color={colors.text}> • Fix errors {'>'} cargo build</Text>
 			<Text color={colors.text}> • Run commands {'>'} /help</Text>
+			<Text color={colors.text}> • Resume sessions {'>'} /resume</Text>
 
 			<Box marginTop={1}>
 				<Text color={colors.primary} bold>

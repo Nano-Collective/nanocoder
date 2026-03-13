@@ -2,25 +2,24 @@ import React from 'react';
 import {ModelDatabaseDisplay} from '@/commands/model-database';
 import CheckpointSelector from '@/components/checkpoint-selector';
 import ModelSelector from '@/components/model-selector';
-import NanocoderShapeSelector from '@/components/nanocoder-shape-selector';
 import ProviderSelector from '@/components/provider-selector';
-import ThemeSelector from '@/components/theme-selector';
-import TitleShapeSelector from '@/components/title-shape-selector';
+import SessionSelector from '@/components/session-selector';
 import type {CheckpointListItem, LLMClient} from '@/types';
 import {McpWizard} from '@/wizards/mcp-wizard';
 import {ProviderWizard} from '@/wizards/provider-wizard';
+import {SettingsSelector} from './settings-selector';
 
 export interface ModalSelectorsProps {
 	// State flags
 	isModelSelectionMode: boolean;
 	isProviderSelectionMode: boolean;
-	isThemeSelectionMode: boolean;
 	isModelDatabaseMode: boolean;
 	isConfigWizardMode: boolean;
 	isMcpWizardMode: boolean;
 	isCheckpointLoadMode: boolean;
-	isTitleShapeSelectionMode: boolean;
-	isNanocoderShapeSelectionMode: boolean;
+	isSessionSelectorMode: boolean;
+	showAllSessions: boolean;
+	isSettingsMode: boolean;
 
 	// Current values
 	client: LLMClient | null;
@@ -39,18 +38,6 @@ export interface ModalSelectorsProps {
 	onProviderSelect: (provider: string) => Promise<void>;
 	onProviderSelectionCancel: () => void;
 
-	// Handlers - Theme Selection
-	onThemeSelect: (theme: import('@/types/ui').ThemePreset) => void;
-	onThemeSelectionCancel: () => void;
-
-	// Handlers - Title Shape Selection
-	onTitleShapeSelect: (shape: import('@/types/ui').TitleShape) => void;
-	onTitleShapeSelectionCancel: () => void;
-
-	// Handlers - Nanocoder Shape Selection
-	onNanocoderShapeSelect: (shape: import('@/types/ui').NanocoderShape) => void;
-	onNanocoderShapeSelectionCancel: () => void;
-
 	// Handlers - Model Database
 	onModelDatabaseCancel: () => void;
 
@@ -65,6 +52,13 @@ export interface ModalSelectorsProps {
 	// Handlers - Checkpoint
 	onCheckpointSelect: (name: string, backup: boolean) => Promise<void>;
 	onCheckpointCancel: () => void;
+
+	// Handlers - Session resume
+	onSessionSelect: (sessionId: string) => void;
+	onSessionCancel: () => void;
+
+	// Handlers - Settings
+	onSettingsCancel: () => void;
 }
 
 /**
@@ -74,13 +68,13 @@ export interface ModalSelectorsProps {
 export function ModalSelectors({
 	isModelSelectionMode,
 	isProviderSelectionMode,
-	isThemeSelectionMode,
 	isModelDatabaseMode,
 	isConfigWizardMode,
 	isMcpWizardMode,
 	isCheckpointLoadMode,
-	isTitleShapeSelectionMode,
-	isNanocoderShapeSelectionMode,
+	isSessionSelectorMode,
+	showAllSessions,
+	isSettingsMode,
 	client,
 	currentModel,
 	currentProvider,
@@ -89,8 +83,6 @@ export function ModalSelectors({
 	onModelSelectionCancel,
 	onProviderSelect,
 	onProviderSelectionCancel,
-	onThemeSelect,
-	onThemeSelectionCancel,
 	onModelDatabaseCancel,
 	onConfigWizardComplete,
 	onConfigWizardCancel,
@@ -98,10 +90,9 @@ export function ModalSelectors({
 	onMcpWizardCancel,
 	onCheckpointSelect,
 	onCheckpointCancel,
-	onTitleShapeSelect,
-	onTitleShapeSelectionCancel,
-	onNanocoderShapeSelect,
-	onNanocoderShapeSelectionCancel,
+	onSessionSelect,
+	onSessionCancel,
+	onSettingsCancel,
 }: ModalSelectorsProps): React.ReactElement | null {
 	if (isModelSelectionMode) {
 		return (
@@ -124,31 +115,8 @@ export function ModalSelectors({
 		);
 	}
 
-	if (isThemeSelectionMode) {
-		return (
-			<ThemeSelector
-				onThemeSelect={onThemeSelect}
-				onCancel={onThemeSelectionCancel}
-			/>
-		);
-	}
-
-	if (isTitleShapeSelectionMode) {
-		return (
-			<TitleShapeSelector
-				onComplete={onTitleShapeSelect}
-				onCancel={onTitleShapeSelectionCancel}
-			/>
-		);
-	}
-
-	if (isNanocoderShapeSelectionMode) {
-		return (
-			<NanocoderShapeSelector
-				onComplete={onNanocoderShapeSelect}
-				onCancel={onNanocoderShapeSelectionCancel}
-			/>
-		);
+	if (isSettingsMode) {
+		return <SettingsSelector onCancel={onSettingsCancel} />;
 	}
 
 	if (isModelDatabaseMode) {
@@ -182,6 +150,18 @@ export function ModalSelectors({
 				currentMessageCount={checkpointLoadData.currentMessageCount}
 				onSelect={(name, backup) => void onCheckpointSelect(name, backup)}
 				onCancel={onCheckpointCancel}
+			/>
+		);
+	}
+
+	if (isSessionSelectorMode) {
+		return (
+			<SessionSelector
+				onSelect={meta =>
+					meta ? void onSessionSelect(meta.id) : onSessionCancel()
+				}
+				onCancel={onSessionCancel}
+				showAll={showAllSessions}
 			/>
 		);
 	}

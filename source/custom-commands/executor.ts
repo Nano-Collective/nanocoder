@@ -29,8 +29,20 @@ export class CustomCommandExecutor {
 			variables,
 		);
 
-		// Add a note about this being a custom command that can be improved
-		const fullPrompt = `[Executing custom command: /${command.fullName}]\n\n${promptContent}\n\n[Note: If this custom command could be improved, please provide feedback on how to enhance it.]`;
+		// Build the full prompt
+		let fullPrompt = `[Executing custom command: /${command.fullName}]\n\n${promptContent}`;
+
+		// Append resource information if available
+		if (command.loadedResources?.length) {
+			fullPrompt += '\n\n[Available resources:';
+			for (const r of command.loadedResources) {
+				fullPrompt += `\n  - ${r.name} (${r.type})`;
+			}
+			fullPrompt += ']';
+		}
+
+		fullPrompt +=
+			'\n\n[Note: If this custom command could be improved, please provide feedback on how to enhance it.]';
 
 		// Execute the prompt as if the user typed it
 		return fullPrompt;

@@ -384,6 +384,9 @@ export function ProviderWizard({
 				);
 			}
 			case 'complete': {
+				const hasCopilotProvider = providers.some(
+					p => p.sdkProvider === 'github-copilot',
+				);
 				return (
 					<Box flexDirection="column">
 						<Box marginBottom={1}>
@@ -397,6 +400,13 @@ export function ProviderWizard({
 						<Box marginBottom={1}>
 							<Text dimColor> {providerConfigPath}</Text>
 						</Box>
+						{hasCopilotProvider && (
+							<Box marginBottom={1}>
+								<Text color={colors.primary}>
+									Run /copilot-login to auth with Copilot.
+								</Text>
+							</Box>
+						)}
 						<Box>
 							<Text color={colors.secondary}>Press Enter to continue</Text>
 						</Box>
@@ -412,7 +422,6 @@ export function ProviderWizard({
 	return (
 		<TitledBoxWithPreferences
 			title="Provider Wizard"
-			reversePowerline={true}
 			width={boxWidth}
 			borderColor={colors.primary}
 			paddingX={2}

@@ -155,7 +155,6 @@ function ModelDatabaseDisplay({onCancel}: ModelDatabaseDisplayProps) {
 		return (
 			<TitledBoxWithPreferences
 				title="/model-database"
-				reversePowerline={true}
 				width={boxWidth}
 				borderColor={colors.primary}
 				paddingX={2}
@@ -170,7 +169,6 @@ function ModelDatabaseDisplay({onCancel}: ModelDatabaseDisplayProps) {
 		return (
 			<TitledBoxWithPreferences
 				title="/model-database"
-				reversePowerline={true}
 				width={boxWidth}
 				borderColor={colors.error}
 				paddingX={2}
@@ -184,7 +182,6 @@ function ModelDatabaseDisplay({onCancel}: ModelDatabaseDisplayProps) {
 	return (
 		<TitledBoxWithPreferences
 			title="/model-database"
-			reversePowerline={true}
 			width={boxWidth}
 			borderColor={colors.primary}
 			paddingX={2}

@@ -20,6 +20,7 @@ import type {ToolResult, UpdateInfo} from '@/types/index';
 import type {Tokenizer} from '@/types/tokenization.js';
 import type {ThemePreset} from '@/types/ui';
 import {BoundedMap} from '@/utils/bounded-map';
+import type {PendingQuestion} from '@/utils/question-queue';
 
 export interface ConversationContext {
 	/**
@@ -89,6 +90,7 @@ export function useAppState() {
 	const [isCancelling, setIsCancelling] = useState<boolean>(false);
 	const [isConversationComplete, setIsConversationComplete] =
 		useState<boolean>(false);
+	const [isSettingsMode, setIsSettingsMode] = useState<boolean>(false);
 
 	// Cancellation state
 	const [abortController, setAbortController] =
@@ -99,29 +101,42 @@ export function useAppState() {
 		useState<boolean>(false);
 	const [isProviderSelectionMode, setIsProviderSelectionMode] =
 		useState<boolean>(false);
-	const [isThemeSelectionMode, setIsThemeSelectionMode] =
-		useState<boolean>(false);
-	const [isTitleShapeSelectionMode, setIsTitleShapeSelectionMode] =
-		useState<boolean>(false);
-	const [isNanocoderShapeSelectionMode, setIsNanocoderShapeSelectionMode] =
-		useState<boolean>(false);
 	const [isModelDatabaseMode, setIsModelDatabaseMode] =
 		useState<boolean>(false);
 	const [isConfigWizardMode, setIsConfigWizardMode] = useState<boolean>(false);
 	const [isMcpWizardMode, setIsMcpWizardMode] = useState<boolean>(false);
 	const [isCheckpointLoadMode, setIsCheckpointLoadMode] =
 		useState<boolean>(false);
+	const [isExplorerMode, setIsExplorerMode] = useState<boolean>(false);
+	const [isIdeSelectionMode, setIsIdeSelectionMode] = useState<boolean>(false);
+	const [isVscodeEnabled, setIsVscodeEnabled] = useState<boolean>(false);
+	const [isSchedulerMode, setIsSchedulerMode] = useState<boolean>(false);
 	const [checkpointLoadData, setCheckpointLoadData] = useState<{
 		checkpoints: CheckpointListItem[];
 		currentMessageCount: number;
 	} | null>(null);
+	const [isSessionSelectorMode, setIsSessionSelectorMode] =
+		useState<boolean>(false);
+	const [showAllSessions, setShowAllSessions] = useState<boolean>(false);
+	const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
 	const [isToolConfirmationMode, setIsToolConfirmationMode] =
 		useState<boolean>(false);
 	const [isToolExecuting, setIsToolExecuting] = useState<boolean>(false);
 
+	// Question mode state (ask_question tool)
+	const [isQuestionMode, setIsQuestionMode] = useState<boolean>(false);
+	const [pendingQuestion, setPendingQuestion] =
+		useState<PendingQuestion | null>(null);
+
 	// Development mode state
 	const [developmentMode, setDevelopmentMode] =
 		useState<DevelopmentMode>('normal');
+
+	// Context usage state
+	const [contextPercentUsed, setContextPercentUsed] = useState<number | null>(
+		null,
+	);
+	const [contextLimit, setContextLimit] = useState<number | null>(null);
 
 	// Tool confirmation state
 	const [pendingToolCalls, setPendingToolCalls] = useState<ToolCall[]>([]);
@@ -257,20 +272,29 @@ export function useAppState() {
 		customCommandsCount,
 		isCancelling,
 		isConversationComplete,
+		isSettingsMode,
 		abortController,
 		isModelSelectionMode,
 		isProviderSelectionMode,
-		isThemeSelectionMode,
-		isTitleShapeSelectionMode,
-		isNanocoderShapeSelectionMode,
 		isModelDatabaseMode,
 		isConfigWizardMode,
 		isMcpWizardMode,
 		isCheckpointLoadMode,
+		isExplorerMode,
+		isIdeSelectionMode,
+		isVscodeEnabled,
+		isSchedulerMode,
 		checkpointLoadData,
+		isSessionSelectorMode,
+		showAllSessions,
+		currentSessionId,
 		isToolConfirmationMode,
 		isToolExecuting,
+		isQuestionMode,
+		pendingQuestion,
 		developmentMode,
+		contextPercentUsed,
+		contextLimit,
 		pendingToolCalls,
 		currentToolIndex,
 		completedToolResults,
@@ -301,20 +325,29 @@ export function useAppState() {
 		setCustomCommandsCount,
 		setIsCancelling,
 		setIsConversationComplete,
+		setIsSettingsMode,
 		setAbortController,
 		setIsModelSelectionMode,
 		setIsProviderSelectionMode,
-		setIsThemeSelectionMode,
-		setIsTitleShapeSelectionMode,
-		setIsNanocoderShapeSelectionMode,
 		setIsModelDatabaseMode,
 		setIsConfigWizardMode,
 		setIsMcpWizardMode,
 		setIsCheckpointLoadMode,
+		setIsExplorerMode,
+		setIsIdeSelectionMode,
+		setIsVscodeEnabled,
+		setIsSchedulerMode,
 		setCheckpointLoadData,
+		setIsSessionSelectorMode,
+		setShowAllSessions,
+		setCurrentSessionId,
 		setIsToolConfirmationMode,
 		setIsToolExecuting,
+		setIsQuestionMode,
+		setPendingQuestion,
 		setDevelopmentMode,
+		setContextPercentUsed,
+		setContextLimit,
 		setPendingToolCalls,
 		setCurrentToolIndex,
 		setCompletedToolResults,

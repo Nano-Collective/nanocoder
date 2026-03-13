@@ -1,6 +1,7 @@
 import React from 'react';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
+import type {Session} from '@/session/session-manager';
 import type {CheckpointListItem} from './checkpoint';
 import type {CustomCommand} from './commands';
 import type {Message} from './core';
@@ -13,17 +14,20 @@ export interface MessageSubmissionOptions {
 	onClearMessages: () => Promise<void>;
 	onEnterModelSelectionMode: () => void;
 	onEnterProviderSelectionMode: () => void;
-	onEnterThemeSelectionMode: () => void;
-	onEnterTitleShapeSelectionMode: () => void;
-	onEnterNanocoderShapeSelectionMode: () => void;
 	onEnterModelDatabaseMode: () => void;
 	onEnterConfigWizardMode: () => void;
+	onEnterSettingsMode: () => void;
 	onEnterMcpWizardMode: () => void;
+	onEnterExplorerMode: () => void;
+	onEnterIdeSelectionMode: () => void;
 	onEnterCheckpointLoadMode: (
 		checkpoints: CheckpointListItem[],
 		currentMessageCount: number,
 	) => void;
+	onEnterSessionSelectorMode?: (showAll?: boolean) => void;
+	onResumeSession?: (session: Session) => void;
 	onShowStatus: () => void;
+	onEnterSchedulerMode?: () => void;
 	onHandleChatMessage: (message: string) => Promise<void>;
 	onAddToChatQueue: (component: React.ReactNode) => void;
 	setLiveComponent: (component: React.ReactNode) => void;

@@ -1,4 +1,5 @@
 import type {ToolCall} from '@/types/index';
+import {ensureString} from '@/utils/type-helpers';
 
 interface ParsedToolCall {
 	toolName: string;
@@ -15,14 +16,17 @@ export class XMLToolCallParser {
 
 	/**
 	 * Extracts tool calls from text content containing XML-formatted tool calls
+	 * Type-preserving: Accepts unknown type, converts to string for processing
 	 */
-	static parseToolCalls(content: string): ParsedToolCall[] {
+	static parseToolCalls(content: unknown): ParsedToolCall[] {
 		const toolCalls: ParsedToolCall[] = [];
 		let match;
 
 		// Handle content that might be wrapped in markdown code blocks
-		let processedContent = content;
-		const codeBlockMatch = content.match(/```(?:\w+)?\s*\n?([\s\S]*?)\n?```/);
+		let processedContent = ensureString(content);
+		const codeBlockMatch = processedContent.match(
+			/```(?:\w+)?\s*\n?([\s\S]*?)\n?```/,
+		);
 		if (codeBlockMatch && codeBlockMatch[1]) {
 			processedContent = codeBlockMatch[1].trim();
 		}
@@ -176,9 +180,10 @@ export class XMLToolCallParser {
 
 	/**
 	 * Removes XML tool call blocks from content, leaving only the text
+	 * Type-preserving: Accepts unknown type, converts to string for processing
 	 */
-	static removeToolCallsFromContent(content: string): string {
-		let cleanedContent = content;
+	static removeToolCallsFromContent(content: unknown): string {
+		let cleanedContent = ensureString(content);
 
 		// Remove all markdown code blocks that contain XML tool calls (using global flag)
 		cleanedContent = cleanedContent.replace(
@@ -187,7 +192,9 @@ export class XMLToolCallParser {
 				if (blockContent) {
 					// Reset regex and check if this block contains XML tool calls
 					this.TOOL_CALL_REGEX.lastIndex = 0;
-					if (this.TOOL_CALL_REGEX.test(blockContent)) {
+					const testResult = this.TOOL_CALL_REGEX.test(blockContent);
+					this.TOOL_CALL_REGEX.lastIndex = 0; // Reset again after test
+					if (testResult) {
 						// This code block contains XML tool calls, remove it entirely
 						return '';
 					}
@@ -221,8 +228,9 @@ export class XMLToolCallParser {
 
 	/**
 	 * Checks if content contains XML-formatted tool calls
+	 * Type-preserving: Accepts unknown type, converts to string for processing
 	 */
-	static hasToolCalls(content: string): boolean {
+	static hasToolCalls(content: unknown): boolean {
 		// Use parseToolCalls with validation to ensure we only detect valid tool calls
 		const toolCalls = this.parseToolCalls(content);
 		return toolCalls.length > 0;
@@ -231,10 +239,14 @@ export class XMLToolCallParser {
 	/**
 	 * Detects malformed XML tool call attempts and returns error details
 	 * Returns null if no malformed tool calls detected
+	 * Type-preserving: Accepts unknown type, converts to string for processing
 	 */
 	static detectMalformedToolCall(
-		content: string,
+		content: unknown,
 	): {error: string; examples: string} | null {
+		// Type guard: ensure content is string for processing operations
+		// BUT original type is preserved in memory via the ToolCall structure
+		const contentStr = ensureString(content);
 		// Common malformed patterns
 		const patterns = [
 			{
@@ -268,7 +280,7 @@ export class XMLToolCallParser {
 		];
 
 		for (const pattern of patterns) {
-			const match = content.match(pattern.regex);
+			const match = contentStr.match(pattern.regex);
 			if (match) {
 				return {
 					error: pattern.error,

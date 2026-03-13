@@ -89,7 +89,7 @@ test('UserInput renders development mode indicator', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Normal Mode|Shift\+Tab/); // Development mode indicator
+	t.regex(output!, /normal mode on/); // Development mode indicator
 });
 
 test('UserInput renders auto-accept mode indicator', t => {

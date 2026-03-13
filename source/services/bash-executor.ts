@@ -56,10 +56,15 @@ export class BashExecutor extends EventEmitter {
 		proc.stdout.on('data', (data: Buffer) => {
 			state.fullOutput += data.toString();
 			state.outputPreview = state.fullOutput.slice(-BASH_OUTPUT_PREVIEW_LENGTH);
+			// Emit progress immediately when output is received
+			// This ensures fast commands still show streaming output
+			this.emit('progress', {...state});
 		});
 
 		proc.stderr.on('data', (data: Buffer) => {
 			state.stderr += data.toString();
+			// Emit progress immediately when stderr is received
+			this.emit('progress', {...state});
 		});
 
 		// Progress interval - emit updates every 500ms

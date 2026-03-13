@@ -6,7 +6,7 @@
 import React from 'react';
 import {UsageDisplay} from '@/components/usage/usage-display';
 import {getToolManager} from '@/message-handler';
-import {getModelContextLimit} from '@/models/index';
+import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
 import {createTokenizer} from '@/tokenization/index';
 import type {Command} from '@/types/commands';
 import type {Message} from '@/types/core';
@@ -31,8 +31,25 @@ export const usageCommand: Command = {
 	) => {
 		const {provider, model, getMessageTokens} = metadata;
 
-		// Create tokenizer for accurate breakdown
-		const tokenizer = createTokenizer(provider, model);
+		let tokenizer;
+		let tokenizerName = 'fallback';
+
+		try {
+			// Create tokenizer for accurate breakdown
+			tokenizer = createTokenizer(provider, model);
+			tokenizerName = tokenizer.getName();
+		} catch {
+			// Fallback to a simple tokenizer if creation fails
+			tokenizer = {
+				encode: (text: string) => Math.ceil((text || '').length / 4),
+				countTokens: (message: Message) =>
+					Math.ceil(
+						((message.content || '') + (message.role || '')).length / 4,
+					),
+				getName: () => 'fallback',
+			};
+			tokenizerName = 'fallback (error)';
+		}
 
 		// Generate the system prompt to include in token calculation
 		const toolManager = getToolManager();
@@ -51,17 +68,25 @@ export const usageCommand: Command = {
 			[systemMessage, ...messages],
 			tokenizer,
 			message => {
-				// For system message, always use tokenizer directly to avoid cache misses
-				if (message.role === 'system') {
-					return tokenizer.countTokens(message);
+				try {
+					// For system message, always use tokenizer directly to avoid cache misses
+					if (message.role === 'system') {
+						return tokenizer.countTokens(message);
+					}
+					// For other messages, use cached token counts
+					const tokens = getMessageTokens(message);
+					// Ensure we always return a valid number
+					return typeof tokens === 'number' && !Number.isNaN(tokens)
+						? tokens
+						: 0;
+				} catch {
+					// Fallback to simple estimation if tokenization fails
+					return Math.ceil(
+						((message.content || '') + (message.role || '')).length / 4,
+					);
 				}
-				// For other messages, use cached token counts
-				return getMessageTokens(message);
 			},
 		);
-
-		// Extract tokenizer name before cleanup
-		const tokenizerName = tokenizer.getName();
 
 		// Clean up tokenizer resources
 		if (tokenizer.free) {
@@ -82,8 +107,9 @@ export const usageCommand: Command = {
 			total: baseBreakdown.total + toolDefinitions,
 		};
 
-		// Get context limit from models.dev
-		const contextLimit = await getModelContextLimit(model);
+		// Get context limit: session override takes priority
+		const sessionLimit = getSessionContextLimit();
+		const contextLimit = sessionLimit ?? (await getModelContextLimit(model));
 
 		return React.createElement(UsageDisplay, {
 			key: `usage-${Date.now()}`,

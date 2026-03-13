@@ -2,8 +2,8 @@ import test from 'ava';
 import {mkdir, rm, writeFile as fsWriteFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {writeFileTool} from './write-file.js';
-import {stringReplaceTool} from './string-replace.js';
+import {writeFileTool} from './file-ops/write-file.js';
+import {stringReplaceTool} from './file-ops/string-replace.js';
 import {readFileTool} from './read-file.js';
 
 // ============================================================================

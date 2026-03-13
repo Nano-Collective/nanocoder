@@ -19,7 +19,7 @@ const MockThemeProvider = ({children}: {children: React.ReactNode}) => {
 
 test('clearCommand has correct name and description', t => {
 	t.is(clearCommand.name, 'clear');
-	t.is(clearCommand.description, 'Clear the chat history and model context');
+	t.is(clearCommand.description, 'Clear the chat history, model context, and tasks');
 });
 
 test('clearCommand handler returns React element', async t => {
@@ -39,6 +39,6 @@ test('clearCommand renders Clear component', async t => {
 
 		// Verify the output contains the expected message
 		t.truthy(output);
-		t.regex(output!, /Chat Cleared/);
+		t.regex(output!, /Chat and tasks cleared/);
 	}
 });

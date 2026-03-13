@@ -38,7 +38,7 @@ export const executeToolsDirectly = async (
 						tool_call_id: toolCall.id,
 						role: 'tool' as const,
 						name: toolCall.function.name,
-						content: validationResult.error,
+						content: `Validation failed: ${formatError(validationResult.error)}`,
 					};
 					directResults.push(errorResult);
 

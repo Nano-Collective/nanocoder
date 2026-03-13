@@ -1,4 +1,59 @@
 /**
+ * Compresses indentation for compact display in narrow terminals.
+ * Converts all indentation to 2-space units regardless of original style.
+ * Detects whether the file uses 2, 4, or tab-based indentation.
+ *
+ * Example:
+ *   Input:  ["function test() {", "\t\treturn 1;", "}"]
+ *   Output: ["function test() {", "  return 1;", "}"]
+ */
+export function compressIndentation(lines: string[]): string[] {
+	if (lines.length === 0) {
+		return lines;
+	}
+
+	// Detect the indentation style by finding the smallest non-zero space indent
+	let detectedSpaceIndent = 0;
+	for (const line of lines) {
+		if (line.trim().length === 0) continue;
+		const match = line.match(/^( +)/);
+		if (match) {
+			const spaces = match[1].length;
+			if (spaces > 0) {
+				if (detectedSpaceIndent === 0 || spaces < detectedSpaceIndent) {
+					detectedSpaceIndent = spaces;
+				}
+			}
+		}
+	}
+
+	// Default to 4 spaces if we can't detect (common default)
+	const spaceUnit = detectedSpaceIndent > 0 ? detectedSpaceIndent : 4;
+
+	return lines.map(line => {
+		if (line.trim().length === 0) {
+			return line; // Keep empty/whitespace lines as-is
+		}
+
+		// Count leading whitespace
+		const match = line.match(/^(\s+)/);
+		if (!match) {
+			return line; // No indentation
+		}
+
+		const whitespace = match[1];
+
+		// Calculate indentation level (tab = 1 unit, spaceUnit spaces = 1 unit)
+		const tabCount = (whitespace.match(/\t/g) || []).length;
+		const spaceCount = (whitespace.match(/ /g) || []).length;
+		const indentLevel = tabCount + Math.floor(spaceCount / spaceUnit);
+
+		// Use 2 spaces per indent level for compact display
+		return '  '.repeat(indentLevel) + line.trimStart();
+	});
+}
+
+/**
  * Detects the minimum indentation level in a set of lines and returns
  * normalized lines with relative indentation.
  *
@@ -42,15 +97,10 @@ export function normalizeIndentation(lines: string[]): string[] {
 		return lines;
 	}
 
-	// No normalization needed if already at 0 indentation
-	if (minIndent === 0) {
-		return lines;
-	}
-
 	// Always use 2 spaces for display (compact and terminal-friendly)
 	const indentChar = '  ';
 
-	// Normalize each line
+	// Normalize each line - convert tabs to spaces and subtract minimum indent
 	return lines.map(line => {
 		if (line.trim().length === 0) {
 			return line; // Keep empty lines as-is

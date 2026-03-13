@@ -64,6 +64,10 @@ const mockTransportFactory = {
 
 console.log(`\nmcp-client.spec.ts`);
 
+// Skip integration tests in CI environments (they require external network access)
+const isCI = process.env.CI === 'true' || process.env.CI === '1';
+const testOrSkip = isCI ? test.skip : test;
+
 // ============================================================================
 // Tests for MCPClient - Transport Support
 // ============================================================================
@@ -659,7 +663,7 @@ test('MCPClient.getServerInfo: returns undefined when only tools exist', t => {
 // These tests use real remote MCP servers via HTTP transport
 // They test the actual connection, tool listing, and tool execution flow
 
-test('MCPClient.connectToServer: connects to remote HTTP MCP server', async t => {
+testOrSkip('MCPClient.connectToServer: connects to remote HTTP MCP server', async t => {
 	const client = new MCPClient();
 
 	// Use DeepWiki public MCP server (no auth required)
@@ -694,7 +698,7 @@ test('MCPClient.connectToServer: connects to remote HTTP MCP server', async t =>
 	t.is(client.getServerTools('test-deepwiki').length, 0);
 });
 
-test('MCPClient.connectToServer: connects to Remote Fetch HTTP server and fetches content', async t => {
+testOrSkip('MCPClient.connectToServer: connects to Remote Fetch HTTP server and fetches content', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -726,7 +730,7 @@ test('MCPClient.connectToServer: connects to Remote Fetch HTTP server and fetche
 	t.false(client.isServerConnected('test-remote-fetch'));
 });
 
-test('MCPClient.connectToServers: connects to multiple HTTP servers', async t => {
+testOrSkip('MCPClient.connectToServers: connects to multiple HTTP servers', async t => {
 	const client = new MCPClient();
 
 	const servers = [
@@ -762,7 +766,7 @@ test('MCPClient.connectToServers: connects to multiple HTTP servers', async t =>
 	await client.disconnect();
 });
 
-test('MCPClient.getAllTools: builds tools registry from connected HTTP server', async t => {
+testOrSkip('MCPClient.getAllTools: builds tools registry from connected HTTP server', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -793,7 +797,7 @@ test('MCPClient.getAllTools: builds tools registry from connected HTTP server', 
 	await client.disconnect();
 });
 
-test('MCPClient.getNativeToolsRegistry: creates registry from connected HTTP server', async t => {
+testOrSkip('MCPClient.getNativeToolsRegistry: creates registry from connected HTTP server', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -825,7 +829,7 @@ test('MCPClient.getNativeToolsRegistry: creates registry from connected HTTP ser
 	await client.disconnect();
 });
 
-test('MCPClient.callTool: executes tool on connected HTTP server', async t => {
+testOrSkip('MCPClient.callTool: executes tool on connected HTTP server', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -856,7 +860,7 @@ test('MCPClient.callTool: executes tool on connected HTTP server', async t => {
 	await client.disconnect();
 });
 
-test('MCPClient.getToolMapping: returns mapping from connected HTTP server', async t => {
+testOrSkip('MCPClient.getToolMapping: returns mapping from connected HTTP server', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -887,7 +891,7 @@ test('MCPClient.getToolMapping: returns mapping from connected HTTP server', asy
 	await client.disconnect();
 });
 
-test('MCPClient.getToolEntries: returns entries from connected HTTP server', async t => {
+testOrSkip('MCPClient.getToolEntries: returns entries from connected HTTP server', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -917,7 +921,7 @@ test('MCPClient.getToolEntries: returns entries from connected HTTP server', asy
 // Error Handling Tests with Real Servers
 // ============================================================================
 
-test('MCPClient.connectToServer: handles invalid URL gracefully', async t => {
+testOrSkip('MCPClient.connectToServer: handles invalid URL gracefully', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -930,7 +934,7 @@ test('MCPClient.connectToServer: handles invalid URL gracefully', async t => {
 	await t.throwsAsync(async () => await client.connectToServer(server));
 });
 
-test('MCPClient.connectToServer: validates websocket URL protocol', async t => {
+testOrSkip('MCPClient.connectToServer: validates websocket URL protocol', async t => {
 	const client = new MCPClient();
 
 	const server = {
@@ -1008,4 +1012,56 @@ test('MCPClient: non-whitelisted tools still require approval', async t => {
 			? await tool.needsApproval({}, {toolCallId: 'test', messages: []})
 			: tool?.needsApproval ?? false;
 	t.true(needsApproval);
+});
+
+// ============================================================================
+// Regression Tests for Smart Schema Sanitization
+// ============================================================================
+
+test('callTool sanitizes object arguments to strings when schema expects a string (regression test)', async t => {
+	const client = new MCPClient();
+
+	// 1. SETUP: Mock the internal state to simulate a connected server and a tool definition.
+	const mockServerName = 'test-server';
+	const mockToolName = 'fake_write_file';
+
+	// @ts-ignore - Accessing private properties for testing
+	client.serverTools.set(mockServerName, [
+		{
+			name: mockToolName,
+			description: 'A test tool',
+			serverName: mockServerName,
+			inputSchema: {
+				type: 'object',
+				properties: {
+					path: { type: 'string' },
+					content: { type: 'string' } // <-- Schema demands a string here
+				},
+			},
+		},
+	]);
+	// @ts-ignore
+	client.clients.set(mockServerName, {}); // Dummy client object
+
+	// 2. SPY: We will "spy" on executeToolCall to see what arguments it receives.
+	let capturedArgs: Record<string, unknown> | undefined;
+	// @ts-ignore
+	client.executeToolCall = async (_client: unknown, _toolName: string, args: Record<string, unknown>) => {
+		capturedArgs = args;
+		return "Mock success";
+	};
+
+	// 3. ACTION: Call the public method with the "bad" data (an object for 'content').
+	await client.callTool(mockToolName, {
+		path: 'test.txt',
+		content: { "key": "value" } // <-- This is the object that caused the crash.
+	});
+
+	// 4. ASSERTION: Verify the captured arguments were sanitized.
+	t.truthy(capturedArgs, 'executeToolCall should have been called');
+	if (capturedArgs) {
+		t.is(typeof capturedArgs.content, 'string', 'The content object should have been converted to a string');
+		t.is(capturedArgs.content, '{"key":"value"}', 'The string content should be the JSON stringified version');
+		t.is(typeof capturedArgs.path, 'string', 'Path should remain a string');
+	}
 });

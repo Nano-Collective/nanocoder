@@ -1,5 +1,6 @@
 import test from 'ava';
 import {
+	detectFromEnv,
 	detectFromPath,
 	detectInstallationMethod,
 } from './installation-detector';
@@ -38,36 +39,45 @@ test('detectInstallationMethod: respects env override for unknown', t => {
 	t.is(detectInstallationMethod(), 'unknown');
 });
 
-// Homebrew environment variable detection
-test('detectInstallationMethod: detects homebrew via HOMEBREW_PREFIX', t => {
+// detectFromEnv tests
+test('detectFromEnv: detects homebrew via HOMEBREW_PREFIX', t => {
 	process.env.HOMEBREW_PREFIX = '/opt/homebrew';
-	t.is(detectInstallationMethod(), 'homebrew');
+	t.is(detectFromEnv(), 'homebrew');
 });
 
-test('detectInstallationMethod: detects homebrew via HOMEBREW_CELLAR', t => {
+test('detectFromEnv: detects homebrew via HOMEBREW_CELLAR', t => {
 	process.env.HOMEBREW_CELLAR = '/opt/homebrew/Cellar';
-	t.is(detectInstallationMethod(), 'homebrew');
+	t.is(detectFromEnv(), 'homebrew');
 });
 
-// NPM environment variable detection
-test('detectInstallationMethod: detects npm via npm_config_prefix', t => {
+test('detectFromEnv: detects npm via npm_config_prefix', t => {
 	process.env.npm_config_prefix = '/usr/local';
-	t.is(detectInstallationMethod(), 'npm');
+	t.is(detectFromEnv(), 'npm');
 });
 
-test('detectInstallationMethod: detects npm via npm_config_global', t => {
+test('detectFromEnv: detects npm via npm_config_global', t => {
 	process.env.npm_config_global = 'true';
-	t.is(detectInstallationMethod(), 'npm');
+	t.is(detectFromEnv(), 'npm');
 });
 
-test('detectInstallationMethod: detects npm via PNPM_HOME', t => {
+test('detectFromEnv: detects npm via PNPM_HOME', t => {
 	process.env.PNPM_HOME = '/home/user/.local/share/pnpm';
-	t.is(detectInstallationMethod(), 'npm');
+	t.is(detectFromEnv(), 'npm');
 });
 
-test('detectInstallationMethod: detects npm via npm_execpath', t => {
+test('detectFromEnv: detects npm via npm_execpath', t => {
 	process.env.npm_execpath = '/usr/local/lib/node_modules/npm/bin/npm-cli.js';
-	t.is(detectInstallationMethod(), 'npm');
+	t.is(detectFromEnv(), 'npm');
+});
+
+test('detectFromEnv: npm env vars take precedence over HOMEBREW_PREFIX', t => {
+	process.env.npm_config_prefix = '/usr/local';
+	process.env.HOMEBREW_PREFIX = '/opt/homebrew';
+	t.is(detectFromEnv(), 'npm');
+});
+
+test('detectFromEnv: returns null when no env vars set', t => {
+	t.is(detectFromEnv(), null);
 });
 
 // Path Detection Tests
@@ -149,11 +159,13 @@ test('detectFromPath: homebrew takes precedence over node_modules', t => {
 	t.is(detectFromPath(path), 'homebrew');
 });
 
-// Edge case tests
-test('detectInstallationMethod: env vars take precedence over path', t => {
-	// Even if running from a homebrew path, HOMEBREW_PREFIX should be checked first
+// Priority tests
+test('detectInstallationMethod: path detection takes precedence over env vars', t => {
+	// HOMEBREW_PREFIX is set system-wide on any macOS with Homebrew,
+	// but path-based detection should take priority to avoid false positives
 	process.env.HOMEBREW_PREFIX = '/opt/homebrew';
-	t.is(detectInstallationMethod(), 'homebrew');
+	// In the test environment, the module is in node_modules, so path detection returns 'npm'
+	t.is(detectInstallationMethod(), 'npm');
 });
 
 test('detectInstallationMethod: ignores invalid env override and continues detection', t => {

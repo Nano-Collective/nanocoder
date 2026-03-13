@@ -45,8 +45,14 @@ export function parseAPIError(error: unknown): string {
 		// Format based on status code
 		if (statusCode) {
 			switch (statusCode) {
-				case 400:
-					return `Bad request: ${cleanMessage}`;
+				case 400: {
+					const url = rootError.url ? `\nURL: ${rootError.url}` : '';
+					const body =
+						rootError.responseBody && rootError.responseBody !== cleanMessage
+							? `\nResponse body: ${rootError.responseBody}`
+							: '';
+					return `Bad request: ${cleanMessage}${url}${body}`;
+				}
 				case 401:
 					return 'Authentication failed: Invalid API key or credentials';
 				case 403:
@@ -138,7 +144,10 @@ export function parseAPIError(error: unknown): string {
 	// Handle network errors
 	if (
 		errorMessage.includes('ECONNREFUSED') ||
-		errorMessage.includes('connect')
+		errorMessage.includes('ECONNRESET') ||
+		errorMessage.includes('ENOTFOUND') ||
+		errorMessage.includes('connect ETIMEDOUT') ||
+		errorMessage.includes('Failed to fetch')
 	) {
 		return 'Connection failed: Unable to reach the model server';
 	}

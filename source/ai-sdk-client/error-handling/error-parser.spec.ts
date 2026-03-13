@@ -19,7 +19,10 @@ test('parseAPIError handles APICallError with 400 status', t => {
 	});
 
 	const result = parseAPIError(error);
-	t.is(result, 'Bad request: Bad input');
+	t.is(
+		result,
+		'Bad request: Bad input\nURL: https://api.example.com\nResponse body: {"error":{"message":"Bad input"}}',
+	);
 });
 
 test('parseAPIError handles APICallError with 401 status', t => {
@@ -148,6 +151,45 @@ test('parseAPIError handles token limit errors', t => {
 		result,
 		'Too many tokens: Please shorten your message or clear conversation history',
 	);
+});
+
+test('parseAPIError handles ECONNRESET errors', t => {
+	const error = new Error('read ECONNRESET');
+	const result = parseAPIError(error);
+	t.is(result, 'Connection failed: Unable to reach the model server');
+});
+
+test('parseAPIError handles ENOTFOUND errors', t => {
+	const error = new Error('getaddrinfo ENOTFOUND example.invalid');
+	const result = parseAPIError(error);
+	t.is(result, 'Connection failed: Unable to reach the model server');
+});
+
+test('parseAPIError handles connect ETIMEDOUT errors as timeout', t => {
+	// ETIMEDOUT is caught by the timeout check first, which is correct
+	const error = new Error('connect ETIMEDOUT 1.2.3.4:443');
+	const result = parseAPIError(error);
+	t.is(result, 'Request timed out: The model took too long to respond');
+});
+
+test('parseAPIError handles Failed to fetch errors', t => {
+	const error = new Error('Failed to fetch');
+	const result = parseAPIError(error);
+	t.is(result, 'Connection failed: Unable to reach the model server');
+});
+
+test('parseAPIError does not misclassify "disconnect" as connection error', t => {
+	const error = new Error('Client disconnect during streaming');
+	const result = parseAPIError(error);
+	// Should fall through to generic handler, not "Connection failed"
+	t.is(result, 'Client disconnect during streaming');
+});
+
+test('parseAPIError does not misclassify "reconnect" as connection error', t => {
+	const error = new Error('Please reconnect to continue');
+	const result = parseAPIError(error);
+	// Should fall through to generic handler, not "Connection failed"
+	t.is(result, 'Please reconnect to continue');
 });
 
 test('parseAPIError handles generic errors', t => {

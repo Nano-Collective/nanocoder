@@ -86,7 +86,6 @@ export function UsageDisplay({
 	return (
 		<TitledBoxWithPreferences
 			title="Context Usage"
-			reversePowerline={true}
 			width={boxWidth}
 			borderColor={colors.info}
 			paddingX={2}

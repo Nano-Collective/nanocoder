@@ -1,6 +1,7 @@
 import React from 'react';
 import {ConversationStateManager} from '@/app/utils/conversation-state';
 import UserMessage from '@/components/user-message';
+import {CommandIntegration} from '@/custom-commands/command-integration';
 import {promptHistory} from '@/prompt-history';
 import type {Message} from '@/types/core';
 import {MessageBuilder} from '@/utils/message-builder';
@@ -8,7 +9,6 @@ import {assemblePrompt, processPromptTemplate} from '@/utils/prompt-processor';
 import {processAssistantResponse} from './conversation/conversation-loop';
 import {createResetStreamingState} from './state/streaming-state';
 import type {ChatHandlerReturn, UseChatHandlerProps} from './types';
-import {checkContextUsage} from './utils/context-checker';
 import {displayError as displayErrorHelper} from './utils/message-helpers';
 
 /**
@@ -18,6 +18,7 @@ import {displayError as displayErrorHelper} from './utils/message-helpers';
 export function useChatHandler({
 	client,
 	toolManager,
+	customCommandLoader,
 	messages,
 	setMessages,
 	currentProvider,
@@ -34,6 +35,15 @@ export function useChatHandler({
 }: UseChatHandlerProps): ChatHandlerReturn {
 	// Conversation state manager for enhanced context
 	const conversationStateManager = React.useRef(new ConversationStateManager());
+
+	// Track when the current conversation started for elapsed time display
+	const conversationStartTimeRef = React.useRef<number>(Date.now());
+
+	// Memoize CommandIntegration to avoid recreating on every message
+	const commandIntegration = React.useMemo(() => {
+		if (!toolManager || !customCommandLoader) return null;
+		return new CommandIntegration(customCommandLoader, toolManager);
+	}, [toolManager, customCommandLoader]);
 
 	// State for streaming message content
 	const [streamingContent, setStreamingContent] = React.useState<string>('');
@@ -86,12 +96,14 @@ export function useChatHandler({
 					setMessages,
 					addToChatQueue,
 					getNextComponentKey,
+					currentProvider,
 					currentModel,
 					developmentMode,
 					nonInteractiveMode,
 					conversationStateManager,
 					onStartToolConfirmationFlow,
 					onConversationComplete,
+					conversationStartTime: conversationStartTimeRef.current,
 				});
 			} catch (error) {
 				displayError(error, 'chat-error');
@@ -109,6 +121,7 @@ export function useChatHandler({
 			setMessages,
 			addToChatQueue,
 			getNextComponentKey,
+			currentProvider,
 			currentModel,
 			developmentMode,
 			nonInteractiveMode,
@@ -123,6 +136,9 @@ export function useChatHandler({
 	const handleChatMessage = async (message: string) => {
 		if (!client || !toolManager) return;
 
+		// Record conversation start time for elapsed time display
+		conversationStartTimeRef.current = Date.now();
+
 		// For display purposes, try to get the placeholder version from history
 		// This preserves the nice placeholder display in chat history
 		// Only use history entry if the assembled prompt matches the current message
@@ -136,10 +152,12 @@ export function useChatHandler({
 			assembledFromHistory === message ? lastEntry.displayValue : message;
 
 		// Add user message to chat using display version (with placeholders)
+		// Pass the full assembled message for accurate token counting
 		addToChatQueue(
 			<UserMessage
 				key={`user-${getNextComponentKey()}`}
 				message={displayMessage}
+				tokenContent={message}
 			/>,
 		);
 
@@ -160,23 +178,21 @@ export function useChatHandler({
 
 		try {
 			// Load and process system prompt
-			const systemPrompt = processPromptTemplate();
+			let systemPrompt = processPromptTemplate();
+
+			// Enhance with relevant commands (progressive disclosure)
+			if (commandIntegration) {
+				systemPrompt = commandIntegration.enhanceSystemPrompt(
+					systemPrompt,
+					message,
+				);
+			}
 
 			// Create stream request
 			const systemMessage: Message = {
 				role: 'system',
 				content: systemPrompt,
 			};
-
-			// Check context usage and warn if approaching limit
-			await checkContextUsage(
-				updatedMessages,
-				systemMessage,
-				currentProvider,
-				currentModel,
-				addToChatQueue,
-				getNextComponentKey,
-			);
 
 			// Use the conversation loop
 			await processAssistantResponseWithErrorHandling(

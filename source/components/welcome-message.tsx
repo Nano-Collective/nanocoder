@@ -65,7 +65,6 @@ export default memo(function WelcomeMessage() {
 
 					<TitledBoxWithPreferences
 						title={`✻ Welcome to Nanocoder ${packageJson.version} ✻`}
-						reversePowerline={true}
 						width={boxWidth}
 						borderColor={colors.primary}
 						paddingX={2}

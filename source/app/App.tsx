@@ -7,6 +7,10 @@ import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
 import {shouldRenderWelcome} from '@/app/helpers';
 import type {AppProps} from '@/app/types';
+import {FileExplorer} from '@/components/file-explorer';
+import {IdeSelector} from '@/components/ide-selector';
+import {SuccessMessage} from '@/components/message-box';
+import {SchedulerView} from '@/components/scheduler-view';
 import SecurityDisclaimer from '@/components/security-disclaimer';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {
@@ -14,26 +18,37 @@ import {
 	VSCodeExtensionPrompt,
 } from '@/components/vscode-extension-prompt';
 import WelcomeMessage from '@/components/welcome-message';
+import {updateSelectedTheme} from '@/config/preferences';
 import {getThemeColors} from '@/config/themes';
 import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
 import {useChatHandler} from '@/hooks/chat-handler';
 import {useAppHandlers} from '@/hooks/useAppHandlers';
 import {useAppInitialization} from '@/hooks/useAppInitialization';
 import {useAppState} from '@/hooks/useAppState';
+import {useContextPercentage} from '@/hooks/useContextPercentage';
 import {useDirectoryTrust} from '@/hooks/useDirectoryTrust';
 import {useModeHandlers} from '@/hooks/useModeHandlers';
 import {useNonInteractiveMode} from '@/hooks/useNonInteractiveMode';
+import {useSchedulerMode} from '@/hooks/useSchedulerMode';
+import {useSessionAutosave} from '@/hooks/useSessionAutosave';
 import {ThemeContext} from '@/hooks/useTheme';
 import {TitleShapeContext, updateTitleShape} from '@/hooks/useTitleShape';
 import {useToolHandler} from '@/hooks/useToolHandler';
 import {UIStateProvider} from '@/hooks/useUIState';
 import {useVSCodeServer} from '@/hooks/useVSCodeServer';
+import type {ThemePreset} from '@/types/ui';
 import {
 	generateCorrelationId,
 	withNewCorrelationContext,
 } from '@/utils/logging';
 import {createPinoLogger} from '@/utils/logging/pino-logger';
 import {setGlobalMessageQueue} from '@/utils/message-queue';
+import {
+	type PendingQuestion,
+	setGlobalQuestionHandler,
+} from '@/utils/question-queue';
+import {getShutdownManager} from '@/utils/shutdown';
+import {isExtensionInstalled} from '@/vscode/extension-installer';
 
 export default function App({
 	vscodeMode = false,
@@ -88,9 +103,7 @@ export default function App({
 
 	const handleExit = () => {
 		exit();
-		// Force exit - at security disclaimer stage, no services need cleanup
-		// TODO: Replace with ShutdownManager.gracefulShutdown() once #239 is implemented
-		process.exit(0);
+		void getShutdownManager().gracefulShutdown(0);
 	};
 
 	// VS Code server integration
@@ -155,8 +168,10 @@ export default function App({
 		[logger],
 	);
 
+	const effectiveVscodeEnabled = vscodeMode || appState.isVscodeEnabled;
+
 	const vscodeServer = useVSCodeServer({
-		enabled: vscodeMode,
+		enabled: effectiveVscodeEnabled,
 		port: vscodePort,
 		currentModel: appState.currentModel,
 		currentProvider: appState.currentProvider,
@@ -167,7 +182,10 @@ export default function App({
 	const themeContextValue = {
 		currentTheme: appState.currentTheme,
 		colors: getThemeColors(appState.currentTheme),
-		setCurrentTheme: appState.setCurrentTheme,
+		setCurrentTheme: (theme: ThemePreset) => {
+			appState.setCurrentTheme(theme);
+			updateSelectedTheme(theme);
+		},
 	};
 
 	// Create title shape context value
@@ -187,6 +205,35 @@ export default function App({
 			chatQueueFunction: 'addToChatQueue',
 		});
 	}, [appState.addToChatQueue, logger]);
+
+	// Question handler - ref holds the resolver for the pending question promise
+	const questionResolverRef = React.useRef<((answer: string) => void) | null>(
+		null,
+	);
+
+	// Initialize global question handler
+	React.useEffect(() => {
+		setGlobalQuestionHandler((question: PendingQuestion) => {
+			return new Promise<string>(resolve => {
+				questionResolverRef.current = resolve;
+				appState.setPendingQuestion(question);
+				appState.setIsQuestionMode(true);
+			});
+		});
+	}, [appState.setPendingQuestion, appState.setIsQuestionMode, appState]);
+
+	// Handle user answering a question
+	const handleQuestionAnswer = React.useCallback(
+		(answer: string) => {
+			if (questionResolverRef.current) {
+				questionResolverRef.current(answer);
+				questionResolverRef.current = null;
+			}
+			appState.setIsQuestionMode(false);
+			appState.setPendingQuestion(null);
+		},
+		[appState.setIsQuestionMode, appState.setPendingQuestion, appState],
+	);
 
 	// Log important application state changes
 	React.useEffect(() => {
@@ -228,6 +275,7 @@ export default function App({
 	const chatHandler = useChatHandler({
 		client: appState.client,
 		toolManager: appState.toolManager,
+		customCommandLoader: appState.customCommandLoader,
 		messages: appState.messages,
 		setMessages: appState.updateMessages,
 		currentProvider: appState.currentProvider,
@@ -258,6 +306,19 @@ export default function App({
 		onConversationComplete: () => {
 			appState.setIsConversationComplete(true);
 		},
+	});
+
+	// Track context window usage percentage
+	useContextPercentage({
+		currentModel: appState.currentModel,
+		messages: appState.messages,
+		tokenizer: appState.tokenizer,
+		getMessageTokens: appState.getMessageTokens,
+		toolManager: appState.toolManager,
+		streamingTokenCount: chatHandler.tokenCount,
+		contextLimit: appState.contextLimit,
+		setContextPercentUsed: appState.setContextPercentUsed,
+		setContextLimit: appState.setContextLimit,
 	});
 
 	// Setup tool handler
@@ -358,16 +419,76 @@ export default function App({
 		setMessages: appState.updateMessages,
 		setIsModelSelectionMode: appState.setIsModelSelectionMode,
 		setIsProviderSelectionMode: appState.setIsProviderSelectionMode,
-		setIsThemeSelectionMode: appState.setIsThemeSelectionMode,
-		setIsTitleShapeSelectionMode: appState.setIsTitleShapeSelectionMode,
-		setIsNanocoderShapeSelectionMode: appState.setIsNanocoderShapeSelectionMode,
 		setIsModelDatabaseMode: appState.setIsModelDatabaseMode,
 		setIsConfigWizardMode: appState.setIsConfigWizardMode,
+		setIsSettingsMode: appState.setIsSettingsMode,
 		setIsMcpWizardMode: appState.setIsMcpWizardMode,
+		setIsExplorerMode: appState.setIsExplorerMode,
+		setIsIdeSelectionMode: appState.setIsIdeSelectionMode,
 		addToChatQueue: appState.addToChatQueue,
 		getNextComponentKey: appState.getNextComponentKey,
 		reinitializeMCPServers: appInitialization.reinitializeMCPServers,
 	});
+
+	// Scheduler mode enter handler
+	const enterSchedulerMode = React.useCallback(() => {
+		appState.setIsSchedulerMode(true);
+	}, [appState.setIsSchedulerMode, appState]);
+
+	// Scheduler mode exit handler
+	const exitSchedulerMode = React.useCallback(() => {
+		appState.setIsSchedulerMode(false);
+	}, [appState.setIsSchedulerMode, appState]);
+
+	// IDE selection handler
+	const handleIdeSelect = React.useCallback(
+		(ide: string) => {
+			appState.setIsIdeSelectionMode(false);
+			if (ide === 'vscode') {
+				appState.setIsVscodeEnabled(true);
+
+				// Check if extension needs installing
+				void (async () => {
+					if (!(await isExtensionInstalled())) {
+						setShowExtensionPrompt(true);
+						setExtensionPromptComplete(false);
+					} else {
+						appState.addToChatQueue(
+							<SuccessMessage
+								key={`ide-vscode-enabled-${appState.getNextComponentKey()}`}
+								message="VS Code integration enabled. Starting server..."
+								hideBox={true}
+							/>,
+						);
+					}
+				})();
+			}
+		},
+		[appState],
+	);
+
+	// Show confirmation once VS Code server is ready with its port
+	const prevVscodePortRef = React.useRef(vscodeServer.actualPort);
+	React.useEffect(() => {
+		const prevPort = prevVscodePortRef.current;
+		prevVscodePortRef.current = vscodeServer.actualPort;
+
+		// Only show message when port transitions from null to a value
+		// and it was triggered by /ide (not the --vscode CLI flag)
+		if (
+			prevPort === null &&
+			vscodeServer.actualPort !== null &&
+			appState.isVscodeEnabled
+		) {
+			appState.addToChatQueue(
+				<SuccessMessage
+					key={`ide-vscode-ready-${appState.getNextComponentKey()}`}
+					message={`VS Code server listening on port ${vscodeServer.actualPort}`}
+					hideBox={true}
+				/>,
+			);
+		}
+	}, [vscodeServer.actualPort, appState]);
 
 	// Setup app handlers
 	const appHandlers = useAppHandlers({
@@ -392,19 +513,24 @@ export default function App({
 		setIsToolExecuting: appState.setIsToolExecuting,
 		setIsCheckpointLoadMode: appState.setIsCheckpointLoadMode,
 		setCheckpointLoadData: appState.setCheckpointLoadData,
+		setIsSessionSelectorMode: appState.setIsSessionSelectorMode,
+		setShowAllSessions: appState.setShowAllSessions,
+		setCurrentSessionId: appState.setCurrentSessionId,
+		setCurrentProvider: appState.setCurrentProvider,
+		setCurrentModel: appState.setCurrentModel,
 		addToChatQueue: appState.addToChatQueue,
 		setLiveComponent: appState.setLiveComponent,
 		client: appState.client,
 		getMessageTokens: appState.getMessageTokens,
 		enterModelSelectionMode: modeHandlers.enterModelSelectionMode,
 		enterProviderSelectionMode: modeHandlers.enterProviderSelectionMode,
-		enterThemeSelectionMode: modeHandlers.enterThemeSelectionMode,
-		enterTitleShapeSelectionMode: modeHandlers.enterTitleShapeSelectionMode,
-		enterNanocoderShapeSelectionMode:
-			modeHandlers.enterNanocoderShapeSelectionMode,
 		enterModelDatabaseMode: modeHandlers.enterModelDatabaseMode,
 		enterConfigWizardMode: modeHandlers.enterConfigWizardMode,
+		enterSettingsMode: modeHandlers.enterSettingsMode,
 		enterMcpWizardMode: modeHandlers.enterMcpWizardMode,
+		enterExplorerMode: modeHandlers.enterExplorerMode,
+		enterIdeSelectionMode: modeHandlers.enterIdeSelectionMode,
+		enterSchedulerMode,
 		handleChatMessage: chatHandler.handleChatMessage,
 	});
 
@@ -429,6 +555,29 @@ export default function App({
 		handleMessageSubmit: appHandlers.handleMessageSubmit,
 	});
 
+	// Setup scheduler mode
+	const schedulerMode = useSchedulerMode({
+		isSchedulerMode: appState.isSchedulerMode,
+		mcpInitialized: appState.mcpInitialized,
+		setDevelopmentMode: appState.setDevelopmentMode,
+		handleMessageSubmit: appHandlers.handleMessageSubmit,
+		clearMessages: appHandlers.clearMessages,
+		isConversationComplete: appState.isConversationComplete,
+		isToolExecuting: appState.isToolExecuting,
+		isToolConfirmationMode: appState.isToolConfirmationMode,
+		messages: appState.messages,
+		addToChatQueue: appState.addToChatQueue,
+	});
+
+	// Setup session autosave
+	useSessionAutosave({
+		messages: appState.messages,
+		currentProvider: appState.currentProvider,
+		currentModel: appState.currentModel,
+		currentSessionId: appState.currentSessionId,
+		setCurrentSessionId: appState.setCurrentSessionId,
+	});
+
 	const shouldShowWelcome = shouldRenderWelcome(nonInteractiveMode);
 
 	// Memoize static components
@@ -444,7 +593,7 @@ export default function App({
 				lspServersStatus: appState.lspServersStatus,
 				preferencesLoaded: appState.preferencesLoaded,
 				customCommandsCount: appState.customCommandsCount,
-				vscodeMode,
+				vscodeMode: effectiveVscodeEnabled,
 				vscodePort: vscodeServer.actualPort,
 				vscodeRequestedPort: vscodeServer.requestedPort,
 			}),
@@ -458,7 +607,7 @@ export default function App({
 			appState.lspServersStatus,
 			appState.preferencesLoaded,
 			appState.customCommandsCount,
-			vscodeMode,
+			effectiveVscodeEnabled,
 			vscodeServer.actualPort,
 			vscodeServer.requestedPort,
 		],
@@ -563,77 +712,110 @@ export default function App({
 							liveComponent={appState.liveComponent}
 						/>
 
+						{/* File Explorer - rendered below chat history */}
+						{appState.isExplorerMode && (
+							<Box marginLeft={-1} flexDirection="column">
+								<FileExplorer onClose={modeHandlers.handleExplorerCancel} />
+							</Box>
+						)}
+
+						{/* IDE Selector - rendered below chat history */}
+						{appState.isIdeSelectionMode && (
+							<Box marginLeft={-1} flexDirection="column">
+								<IdeSelector
+									onSelect={handleIdeSelect}
+									onCancel={modeHandlers.handleIdeSelectionCancel}
+								/>
+							</Box>
+						)}
+
 						{/* Modal Selectors - rendered below chat history */}
 						{(appState.isModelSelectionMode ||
 							appState.isProviderSelectionMode ||
-							appState.isThemeSelectionMode ||
 							appState.isModelDatabaseMode ||
 							appState.isConfigWizardMode ||
 							appState.isMcpWizardMode ||
-							appState.isTitleShapeSelectionMode ||
-							appState.isNanocoderShapeSelectionMode ||
-							appState.isCheckpointLoadMode) && (
-							<ModalSelectors
-								isModelSelectionMode={appState.isModelSelectionMode}
-								isProviderSelectionMode={appState.isProviderSelectionMode}
-								isThemeSelectionMode={appState.isThemeSelectionMode}
-								isModelDatabaseMode={appState.isModelDatabaseMode}
-								isConfigWizardMode={appState.isConfigWizardMode}
-								isMcpWizardMode={appState.isMcpWizardMode}
-								isCheckpointLoadMode={appState.isCheckpointLoadMode}
-								isTitleShapeSelectionMode={appState.isTitleShapeSelectionMode}
-								isNanocoderShapeSelectionMode={
-									appState.isNanocoderShapeSelectionMode
-								}
-								client={appState.client}
-								currentModel={appState.currentModel}
-								currentProvider={appState.currentProvider}
-								checkpointLoadData={appState.checkpointLoadData}
-								onModelSelect={modeHandlers.handleModelSelect}
-								onModelSelectionCancel={modeHandlers.handleModelSelectionCancel}
-								onProviderSelect={modeHandlers.handleProviderSelect}
-								onProviderSelectionCancel={
-									modeHandlers.handleProviderSelectionCancel
-								}
-								onThemeSelect={modeHandlers.handleThemeSelect}
-								onTitleShapeSelect={modeHandlers.handleTitleShapeSelect}
-								onTitleShapeSelectionCancel={
-									modeHandlers.handleTitleShapeSelectionCancel
-								}
-								onNanocoderShapeSelect={modeHandlers.handleNanocoderShapeSelect}
-								onNanocoderShapeSelectionCancel={
-									modeHandlers.handleNanocoderShapeSelectionCancel
-								}
-								onThemeSelectionCancel={modeHandlers.handleThemeSelectionCancel}
-								onModelDatabaseCancel={modeHandlers.handleModelDatabaseCancel}
-								onConfigWizardComplete={modeHandlers.handleConfigWizardComplete}
-								onConfigWizardCancel={modeHandlers.handleConfigWizardCancel}
-								onMcpWizardComplete={modeHandlers.handleMcpWizardComplete}
-								onMcpWizardCancel={modeHandlers.handleMcpWizardCancel}
-								onCheckpointSelect={appHandlers.handleCheckpointSelect}
-								onCheckpointCancel={appHandlers.handleCheckpointCancel}
+							appState.isSettingsMode ||
+							appState.isCheckpointLoadMode ||
+							appState.isSessionSelectorMode) && (
+							<Box marginLeft={-1} flexDirection="column">
+								<ModalSelectors
+									isModelSelectionMode={appState.isModelSelectionMode}
+									isProviderSelectionMode={appState.isProviderSelectionMode}
+									isModelDatabaseMode={appState.isModelDatabaseMode}
+									isConfigWizardMode={appState.isConfigWizardMode}
+									isMcpWizardMode={appState.isMcpWizardMode}
+									isSettingsMode={appState.isSettingsMode}
+									isCheckpointLoadMode={appState.isCheckpointLoadMode}
+									isSessionSelectorMode={appState.isSessionSelectorMode}
+									showAllSessions={appState.showAllSessions}
+									client={appState.client}
+									currentModel={appState.currentModel}
+									currentProvider={appState.currentProvider}
+									checkpointLoadData={appState.checkpointLoadData}
+									onModelSelect={modeHandlers.handleModelSelect}
+									onModelSelectionCancel={
+										modeHandlers.handleModelSelectionCancel
+									}
+									onProviderSelect={modeHandlers.handleProviderSelect}
+									onProviderSelectionCancel={
+										modeHandlers.handleProviderSelectionCancel
+									}
+									onModelDatabaseCancel={modeHandlers.handleModelDatabaseCancel}
+									onConfigWizardComplete={
+										modeHandlers.handleConfigWizardComplete
+									}
+									onConfigWizardCancel={modeHandlers.handleConfigWizardCancel}
+									onMcpWizardComplete={modeHandlers.handleMcpWizardComplete}
+									onMcpWizardCancel={modeHandlers.handleMcpWizardCancel}
+									onSettingsCancel={modeHandlers.handleSettingsCancel}
+									onCheckpointSelect={appHandlers.handleCheckpointSelect}
+									onCheckpointCancel={appHandlers.handleCheckpointCancel}
+									onSessionSelect={sessionId =>
+										void appHandlers.handleSessionSelect(sessionId)
+									}
+									onSessionCancel={appHandlers.handleSessionCancel}
+								/>
+							</Box>
+						)}
+
+						{/* Scheduler View - replaces ChatInput in scheduler mode */}
+						{appState.isSchedulerMode && (
+							<SchedulerView
+								activeJobCount={schedulerMode.activeJobCount}
+								queueLength={schedulerMode.queueLength}
+								isProcessing={schedulerMode.isProcessing}
+								currentJobCommand={schedulerMode.currentJobCommand}
+								developmentMode={appState.developmentMode}
+								contextPercentUsed={appState.contextPercentUsed}
+								onExit={exitSchedulerMode}
 							/>
 						)}
 
-						{/* Chat Input - only rendered when not in modal mode */}
+						{/* Chat Input - only rendered when not in modal mode or scheduler mode */}
 						{appState.startChat &&
+							!appState.isSchedulerMode &&
 							!(
 								appState.isModelSelectionMode ||
 								appState.isProviderSelectionMode ||
-								appState.isThemeSelectionMode ||
 								appState.isModelDatabaseMode ||
 								appState.isConfigWizardMode ||
+								appState.isSettingsMode ||
 								appState.isMcpWizardMode ||
-								appState.isTitleShapeSelectionMode ||
-								appState.isNanocoderShapeSelectionMode ||
-								appState.isCheckpointLoadMode
+								appState.isCheckpointLoadMode ||
+								appState.isSessionSelectorMode ||
+								appState.isExplorerMode ||
+								appState.isIdeSelectionMode
 							) && (
 								<ChatInput
 									isCancelling={appState.isCancelling}
 									isToolExecuting={appState.isToolExecuting}
 									isToolConfirmationMode={appState.isToolConfirmationMode}
+									isQuestionMode={appState.isQuestionMode}
 									pendingToolCalls={appState.pendingToolCalls}
 									currentToolIndex={appState.currentToolIndex}
+									pendingQuestion={appState.pendingQuestion}
+									onQuestionAnswer={handleQuestionAnswer}
 									mcpInitialized={appState.mcpInitialized}
 									client={appState.client}
 									nonInteractivePrompt={nonInteractivePrompt}
@@ -645,6 +827,7 @@ export default function App({
 										chatHandler.isGenerating || appState.isToolExecuting
 									}
 									developmentMode={appState.developmentMode}
+									contextPercentUsed={appState.contextPercentUsed}
 									onToolConfirm={toolHandler.handleToolConfirmation}
 									onToolCancel={toolHandler.handleToolConfirmationCancel}
 									onSubmit={appHandlers.handleMessageSubmit}

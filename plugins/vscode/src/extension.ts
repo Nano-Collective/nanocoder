@@ -7,6 +7,7 @@ import {
 	FileChangeMessage,
 	CloseDiffMessage,
 	DiagnosticInfo,
+	OpenFileMessage,
 } from './protocol';
 
 const DEFAULT_PORT = 51820;
@@ -126,6 +127,9 @@ function handleServerMessage(message: ServerMessage): void {
 		case 'close_diff':
 			handleCloseDiff(message);
 			break;
+		case 'open_file':
+			handleOpenFile(message);
+			break;
 		case 'status':
 			if (message.model) {
 				statusBarItem.text = `$(check) ${message.model}`;
@@ -158,6 +162,17 @@ function handleFileChange(message: FileChangeMessage): void {
 function handleCloseDiff(message: CloseDiffMessage): void {
 	// Close the diff preview when tool is confirmed/rejected in CLI
 	diffManager.closeDiff(message.id);
+}
+
+function handleOpenFile(message: OpenFileMessage): void {
+	// Open the file in VS Code editor for viewing
+	const uri = vscode.Uri.file(message.filePath);
+	vscode.window.showTextDocument(uri, {
+		preview: true,
+		preserveFocus: false,
+		selection: new vscode.Range(0, 0, 0, 0), // Position cursor at start of file
+	});
+	outputChannel.appendLine(`Opened file: ${message.filePath}`);
 }
 
 function handleDiagnosticsRequest(filePath?: string): void {

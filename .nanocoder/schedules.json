@@ -1,0 +1,12 @@
+{
+  "schedules": [
+    {
+      "id": "f7413179",
+      "cron": "*/1 * * * *",
+      "command": "issue-check.md",
+      "enabled": true,
+      "createdAt": "2026-02-18T20:41:23.436Z",
+      "lastRunAt": "2026-02-18T21:26:36.022Z"
+    }
+  ]
+}

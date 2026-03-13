@@ -27,7 +27,6 @@ function InitSuccess({
 	return (
 		<TitledBoxWithPreferences
 			title="Project Initialized"
-			reversePowerline={true}
 			width={boxWidth}
 			borderColor={colors.primary}
 			paddingX={2}

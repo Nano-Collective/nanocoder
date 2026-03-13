@@ -689,3 +689,232 @@ Content`;
 
 	t.is(result.metadata.description, 'Time: 10:30');
 });
+
+// ============================================================================
+// Skill-like Frontmatter Keys (tags, triggers, etc.)
+// ============================================================================
+
+test('parseEnhancedFrontmatter parses tags as JSON array', t => {
+	const filePath = join(testDir, 'tags-json.md');
+	const content = `---
+description: Tagged command
+tags: [api, openapi, rest]
+---
+Content`;
+
+	writeFileSync(filePath, content, 'utf-8');
+
+	const result = parseCommandFile(filePath);
+
+	t.deepEqual(result.metadata.tags, ['api', 'openapi', 'rest']);
+});
+
+test('parseEnhancedFrontmatter parses tags as YAML dash syntax', t => {
+	const filePath = join(testDir, 'tags-dash.md');
+	const content = `---
+description: Tagged command
+tags:
+  - api
+  - openapi
+  - rest
+---
+Content`;
+
+	writeFileSync(filePath, content, 'utf-8');
+
+	const result = parseCommandFile(filePath);
+
+	t.deepEqual(result.metadata.tags, ['api', 'openapi', 'rest']);
+});
+
+test('parseEnhancedFrontmatter parses triggers', t => {
+	const filePath = join(testDir, 'triggers.md');
+	const content = `---
+description: Triggered command
+triggers: [api docs, openapi]
+---
+Content`;
+
+	writeFileSync(filePath, content, 'utf-8');
+
+	const result = parseCommandFile(filePath);
+
+	t.deepEqual(result.metadata.triggers, ['api docs', 'openapi']);
+});
+
+test('parseEnhancedFrontmatter parses estimated-tokens as number', t => {
+	const filePath = join(testDir, 'estimated-tokens.md');
+	const content = `---
+description: Token-estimated command
+estimated-tokens: 2500
+---
+Content`;
+
+	writeFileSync(filePath, content, 'utf-8');
+
+	const result = parseCommandFile(filePath);
+
+	t.is(result.metadata.estimatedTokens, 2500);
+});
+
+test('parseEnhancedFrontmatter parses resources boolean', t => {
+	const filePath = join(testDir, 'resources-bool.md');
+	const content = `---
+description: Command with resources
+resources: true
+---
+Content`;
+
+	writeFileSync(filePath, content, 'utf-8');
+
+	const result = parseCommandFile(filePath);
+
+	t.is(result.metadata.resources, true);
+});
+
+test('parseEnhancedFrontmatter parses resources false', t => {
+	const filePath = join(testDir, 'resources-false.md');
+	const content = `---
+description: Command without resources
+resources: false
+---
+Content`;
+
+	writeFileSync(filePath, content, 'utf-8');
+
+	const result = parseCommandFile(filePath);
+
+	t.is(result.metadata.resources, false);
+});
+
+test('parseEnhancedFrontmatter parses category', t => {
+	const filePath = join(testDir, 'category.md');
+	const content = `---
+description: Categorized command
+category: code-generation
+---
+Content`;
+
+	writeFileSync(filePath, content, 'utf-8');
+
+	const result = parseCommandFile(filePath);
+
+	t.is(result.metadata.category, 'code-generation');
+});
+
+test('parseEnhancedFrontmatter parses version and author', t => {
+	const filePath = join(testDir, 'version-author.md');
+	const content = `---
+description: Versioned command
+version: 2.1.0
+author: Jane Doe
+---
+Content`;
+
+	writeFileSync(filePath, content, 'utf-8');
+
+	const result = parseCommandFile(filePath);
+
+	t.is(result.metadata.version, '2.1.0');
+	t.is(result.metadata.author, 'Jane Doe');
+});
+
+test('parseEnhancedFrontmatter parses examples array', t => {
+	const filePath = join(testDir, 'examples.md');
+	const content = `---
+description: Command with examples
+examples:
+  - Generate an API spec for user service
+  - Create REST docs from code
+---
+Content`;
+
+	writeFileSync(filePath, content, 'utf-8');
+
+	const result = parseCommandFile(filePath);
+
+	t.deepEqual(result.metadata.examples, [
+		'Generate an API spec for user service',
+		'Create REST docs from code',
+	]);
+});
+
+test('parseEnhancedFrontmatter parses references and dependencies', t => {
+	const filePath = join(testDir, 'refs-deps.md');
+	const content = `---
+description: Command with refs and deps
+references: [https://example.com/docs, https://example.com/api]
+dependencies: [openapi-gen, yaml-parser]
+---
+Content`;
+
+	writeFileSync(filePath, content, 'utf-8');
+
+	const result = parseCommandFile(filePath);
+
+	t.deepEqual(result.metadata.references, [
+		'https://example.com/docs',
+		'https://example.com/api',
+	]);
+	t.deepEqual(result.metadata.dependencies, ['openapi-gen', 'yaml-parser']);
+});
+
+test('parseEnhancedFrontmatter handles full unified command format', t => {
+	const filePath = join(testDir, 'unified-full.md');
+	const content = `---
+description: Generate OpenAPI specs from code
+aliases: [api-gen]
+parameters: [format]
+tags: [api, openapi, rest]
+triggers: [api docs, openapi]
+estimated-tokens: 2500
+resources: true
+category: code-generation
+version: 1.0.0
+author: Nanocoder Team
+examples:
+  - Generate API spec for user service
+  - Create REST docs
+references: [https://openapi.org]
+dependencies: [yaml-parser]
+---
+Generate an OpenAPI spec in {{format}} format.`;
+
+	writeFileSync(filePath, content, 'utf-8');
+
+	const result = parseCommandFile(filePath);
+
+	t.is(result.metadata.description, 'Generate OpenAPI specs from code');
+	t.deepEqual(result.metadata.aliases, ['api-gen']);
+	t.deepEqual(result.metadata.parameters, ['format']);
+	t.deepEqual(result.metadata.tags, ['api', 'openapi', 'rest']);
+	t.deepEqual(result.metadata.triggers, ['api docs', 'openapi']);
+	t.is(result.metadata.estimatedTokens, 2500);
+	t.is(result.metadata.resources, true);
+	t.is(result.metadata.category, 'code-generation');
+	t.is(result.metadata.version, '1.0.0');
+	t.is(result.metadata.author, 'Nanocoder Team');
+	t.deepEqual(result.metadata.examples, [
+		'Generate API spec for user service',
+		'Create REST docs',
+	]);
+	t.deepEqual(result.metadata.references, ['https://openapi.org']);
+	t.deepEqual(result.metadata.dependencies, ['yaml-parser']);
+	t.is(result.content, 'Generate an OpenAPI spec in {{format}} format.');
+});
+
+test('parseEnhancedFrontmatter handles quoted value with colon', t => {
+	const filePath = join(testDir, 'quoted-colon.md');
+	const content = `---
+description: "Command with: colon"
+tags: ["tag:one", "tag:two"]
+---
+Content`;
+
+	writeFileSync(filePath, content, 'utf-8');
+
+	const result = parseCommandFile(filePath);
+
+	t.is(result.metadata.description, 'Command with: colon');
+	t.deepEqual(result.metadata.tags, ['tag:one', 'tag:two']);
+});

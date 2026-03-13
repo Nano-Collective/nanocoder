@@ -9,10 +9,15 @@ import {
 	WarningMessage,
 } from '@/components/message-box';
 import Status from '@/components/status';
+import {getAppConfig} from '@/config/index';
 import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
+import {getModelContextLimit} from '@/models/index';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import type {Session} from '@/session/session-manager';
+import {sessionManager} from '@/session/session-manager';
+import {createTokenizer} from '@/tokenization/index';
 import type {
 	CheckpointListItem,
 	DevelopmentMode,
@@ -24,8 +29,11 @@ import type {
 import type {CustomCommand} from '@/types/commands';
 import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
+import {calculateTokenBreakdown} from '@/usage/calculator';
+import {autoCompactSessionOverrides} from '@/utils/auto-compact';
 import {getLogger} from '@/utils/logging';
 import {addToMessageQueue} from '@/utils/message-queue';
+import {processPromptTemplate} from '@/utils/prompt-processor';
 
 interface UseAppHandlersProps {
 	// State
@@ -59,6 +67,11 @@ interface UseAppHandlersProps {
 			currentMessageCount: number;
 		} | null,
 	) => void;
+	setIsSessionSelectorMode: (value: boolean) => void;
+	setShowAllSessions: (value: boolean) => void;
+	setCurrentSessionId: (value: string | null) => void;
+	setCurrentProvider: (value: string) => void;
+	setCurrentModel: (value: string) => void;
 
 	// Callbacks
 	addToChatQueue: (component: React.ReactNode) => void;
@@ -69,12 +82,13 @@ interface UseAppHandlersProps {
 	// Mode handlers
 	enterModelSelectionMode: () => void;
 	enterProviderSelectionMode: () => void;
-	enterThemeSelectionMode: () => void;
-	enterTitleShapeSelectionMode: () => void;
-	enterNanocoderShapeSelectionMode: () => void;
 	enterModelDatabaseMode: () => void;
 	enterConfigWizardMode: () => void;
+	enterSettingsMode: () => void;
 	enterMcpWizardMode: () => void;
+	enterExplorerMode: () => void;
+	enterIdeSelectionMode: () => void;
+	enterSchedulerMode: () => void;
 
 	// Chat handler
 	handleChatMessage: (message: string) => Promise<void>;
@@ -90,6 +104,9 @@ export interface AppHandlers {
 		createBackup: boolean,
 	) => Promise<void>;
 	handleCheckpointCancel: () => void;
+	enterSessionSelectorMode: (showAll?: boolean) => void;
+	handleSessionSelect: (sessionId: string) => Promise<void>;
+	handleSessionCancel: () => void;
 	enterCheckpointLoadMode: (
 		checkpoints: CheckpointListItem[],
 		currentMessageCount: number,
@@ -105,8 +122,15 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 	// Clear messages handler
 	const clearMessages = React.useMemo(
-		() => createClearMessagesHandler(props.updateMessages, props.client),
-		[props.updateMessages, props.client],
+		() => async () => {
+			const baseClear = createClearMessagesHandler(
+				props.updateMessages,
+				props.client,
+			);
+			await baseClear();
+			props.setCurrentSessionId(null);
+		},
+		[props.updateMessages, props.client, props.setCurrentSessionId, props],
 	);
 
 	// Cancel handler
@@ -122,11 +146,14 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		} else {
 			logger.debug('Cancel requested but no active operation to cancel');
 		}
-	}, [props.abortController, props.setIsCancelling, logger]);
+	}, [props.abortController, props.setIsCancelling, logger, props]);
 
 	// Toggle development mode handler
 	const handleToggleDevelopmentMode = React.useCallback(() => {
 		props.setDevelopmentMode(currentMode => {
+			// Don't allow toggling out of scheduler mode via Shift+Tab
+			if (currentMode === 'scheduler') return currentMode;
+
 			const modes: Array<'normal' | 'auto-accept' | 'plan'> = [
 				'normal',
 				'auto-accept',
@@ -148,15 +175,97 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 			return nextMode;
 		});
-	}, [props.setDevelopmentMode, logger]);
+	}, [props.setDevelopmentMode, logger, props]);
 
 	// Show status handler
-	const handleShowStatus = React.useCallback(() => {
+	const handleShowStatus = React.useCallback(async () => {
 		logger.debug('Status display requested', {
 			currentProvider: props.currentProvider,
 			currentModel: props.currentModel,
 			currentTheme: props.currentTheme,
 		});
+
+		// Calculate context usage and auto-compact info
+		let contextUsage:
+			| {
+					currentTokens: number;
+					contextLimit: number | null;
+					percentUsed: number;
+			  }
+			| undefined;
+		let autoCompactInfo:
+			| {
+					enabled: boolean;
+					threshold: number;
+					mode: string;
+					hasOverrides: boolean;
+			  }
+			| undefined;
+
+		try {
+			// Calculate context usage
+			const contextLimit = await getModelContextLimit(props.currentModel);
+			if (contextLimit && props.messages.length > 0) {
+				const tokenizer = createTokenizer(
+					props.currentProvider,
+					props.currentModel,
+				);
+				try {
+					const systemPrompt = processPromptTemplate();
+					const systemMessage: Message = {
+						role: 'system',
+						content: systemPrompt,
+					};
+					const breakdown = calculateTokenBreakdown(
+						[systemMessage, ...props.messages],
+						tokenizer,
+						props.getMessageTokens,
+					);
+					const percentUsed = (breakdown.total / contextLimit) * 100;
+					contextUsage = {
+						currentTokens: breakdown.total,
+						contextLimit,
+						percentUsed,
+					};
+				} finally {
+					if (tokenizer.free) {
+						tokenizer.free();
+					}
+				}
+			}
+
+			// Get auto-compact info
+			const config = getAppConfig();
+			const autoCompactConfig = config.autoCompact;
+			if (autoCompactConfig) {
+				const enabled =
+					autoCompactSessionOverrides.enabled !== null
+						? autoCompactSessionOverrides.enabled
+						: autoCompactConfig.enabled;
+				const threshold =
+					autoCompactSessionOverrides.threshold !== null
+						? autoCompactSessionOverrides.threshold
+						: autoCompactConfig.threshold;
+				const mode =
+					autoCompactSessionOverrides.mode !== null
+						? autoCompactSessionOverrides.mode
+						: autoCompactConfig.mode;
+				const hasOverrides =
+					autoCompactSessionOverrides.enabled !== null ||
+					autoCompactSessionOverrides.threshold !== null ||
+					autoCompactSessionOverrides.mode !== null;
+
+				autoCompactInfo = {
+					enabled,
+					threshold,
+					mode,
+					hasOverrides,
+				};
+			}
+		} catch (error) {
+			logger.debug('Failed to calculate status info', {error});
+			// Continue without context usage/auto-compact info
+		}
 
 		props.addToChatQueue(
 			<Status
@@ -169,9 +278,26 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				lspServersStatus={props.lspServersStatus}
 				preferencesLoaded={props.preferencesLoaded}
 				customCommandsCount={props.customCommandsCount}
+				contextUsage={contextUsage}
+				autoCompactInfo={autoCompactInfo}
 			/>,
 		);
-	}, [props, logger]);
+	}, [
+		props.currentProvider,
+		props.currentModel,
+		props.currentTheme,
+		props.updateInfo,
+		props.mcpServersStatus,
+		props.lspServersStatus,
+		props.preferencesLoaded,
+		props.customCommandsCount,
+		props.messages,
+		props.getMessageTokens,
+		props.addToChatQueue,
+		props.getNextComponentKey,
+		logger,
+		props,
+	]);
 
 	// Checkpoint select handler
 	const handleCheckpointSelect = React.useCallback(
@@ -228,14 +354,23 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				props.setCheckpointLoadData(null);
 			}
 		},
-		[props],
+		[
+			props.messages,
+			props.currentProvider,
+			props.currentModel,
+			props.addToChatQueue,
+			props.getNextComponentKey,
+			props.setIsCheckpointLoadMode,
+			props.setCheckpointLoadData,
+			props,
+		],
 	);
 
 	// Checkpoint cancel handler
 	const handleCheckpointCancel = React.useCallback(() => {
 		props.setIsCheckpointLoadMode(false);
 		props.setCheckpointLoadData(null);
-	}, [props.setIsCheckpointLoadMode, props.setCheckpointLoadData]);
+	}, [props.setIsCheckpointLoadMode, props.setCheckpointLoadData, props]);
 
 	// Enter checkpoint load mode handler
 	const enterCheckpointLoadMode = React.useCallback(
@@ -243,8 +378,80 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.setCheckpointLoadData({checkpoints, currentMessageCount});
 			props.setIsCheckpointLoadMode(true);
 		},
-		[props.setCheckpointLoadData, props.setIsCheckpointLoadMode],
+		[props.setCheckpointLoadData, props.setIsCheckpointLoadMode, props],
 	);
+
+	// Enter session selector mode (for /resume with no args)
+	const enterSessionSelectorMode = React.useCallback(
+		(showAll?: boolean) => {
+			props.setShowAllSessions(showAll ?? false);
+			props.setIsSessionSelectorMode(true);
+		},
+		[props.setShowAllSessions, props.setIsSessionSelectorMode, props],
+	);
+
+	// Load and apply a session (messages, provider, model)
+	const applySession = React.useCallback(
+		(session: Session) => {
+			props.updateMessages(session.messages);
+			props.setCurrentProvider(session.provider);
+			props.setCurrentModel(session.model);
+			props.setCurrentSessionId(session.id);
+			props.addToChatQueue(
+				<SuccessMessage
+					key={`resume-success-${Date.now()}`}
+					message={`Resumed session: ${session.title}`}
+					hideBox={true}
+				/>,
+			);
+			props.setIsSessionSelectorMode(false);
+		},
+		[
+			props.updateMessages,
+			props.setCurrentProvider,
+			props.setCurrentModel,
+			props.setCurrentSessionId,
+			props.setIsSessionSelectorMode,
+			props.addToChatQueue,
+			props,
+		],
+	);
+
+	const handleSessionSelect = React.useCallback(
+		async (sessionId: string) => {
+			try {
+				const session = await sessionManager.loadSession(sessionId);
+				if (session) {
+					applySession(session);
+				} else {
+					props.addToChatQueue(
+						<ErrorMessage
+							key={`resume-error-${Date.now()}`}
+							message="Session not found"
+							hideBox={true}
+						/>,
+					);
+					props.setIsSessionSelectorMode(false);
+				}
+			} catch (error) {
+				props.addToChatQueue(
+					<ErrorMessage
+						key={`resume-error-${Date.now()}`}
+						message={`Failed to load session: ${
+							error instanceof Error ? error.message : 'Unknown error'
+						}`}
+						hideBox={true}
+					/>,
+				);
+				props.setIsSessionSelectorMode(false);
+			}
+		},
+		[applySession, props.addToChatQueue, props.setIsSessionSelectorMode, props],
+	);
+
+	const handleSessionCancel = React.useCallback(() => {
+		props.setIsSessionSelectorMode(false);
+	}, [props.setIsSessionSelectorMode, props]);
 
 	// Message submit handler
 	const handleMessageSubmit = React.useCallback(
@@ -259,14 +466,16 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				onClearMessages: clearMessages,
 				onEnterModelSelectionMode: props.enterModelSelectionMode,
 				onEnterProviderSelectionMode: props.enterProviderSelectionMode,
-				onEnterThemeSelectionMode: props.enterThemeSelectionMode,
 				onEnterModelDatabaseMode: props.enterModelDatabaseMode,
 				onEnterConfigWizardMode: props.enterConfigWizardMode,
+				onEnterSettingsMode: props.enterSettingsMode,
 				onEnterMcpWizardMode: props.enterMcpWizardMode,
+				onEnterExplorerMode: props.enterExplorerMode,
+				onEnterIdeSelectionMode: props.enterIdeSelectionMode,
+				onEnterSchedulerMode: props.enterSchedulerMode,
 				onEnterCheckpointLoadMode: enterCheckpointLoadMode,
-				onEnterTitleShapeSelectionMode: props.enterTitleShapeSelectionMode,
-				onEnterNanocoderShapeSelectionMode:
-					props.enterNanocoderShapeSelectionMode,
+				onEnterSessionSelectorMode: enterSessionSelectorMode,
+				onResumeSession: session => applySession(session),
 				onShowStatus: handleShowStatus,
 				onHandleChatMessage: props.handleChatMessage,
 				onAddToChatQueue: props.addToChatQueue,
@@ -283,7 +492,39 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				getMessageTokens: props.getMessageTokens,
 			});
 		},
-		[props, clearMessages, enterCheckpointLoadMode, handleShowStatus],
+		[
+			props.setIsConversationComplete,
+			props.customCommandCache,
+			props.customCommandLoader,
+			props.customCommandExecutor,
+			props.enterModelSelectionMode,
+			props.enterProviderSelectionMode,
+			props.enterModelDatabaseMode,
+			props.enterConfigWizardMode,
+			props.enterSettingsMode,
+			props.enterMcpWizardMode,
+			props.enterExplorerMode,
+			props.enterIdeSelectionMode,
+			props.enterSchedulerMode,
+			props.handleChatMessage,
+			props.addToChatQueue,
+			props.setLiveComponent,
+			props.setIsToolExecuting,
+			props.getNextComponentKey,
+			props.updateMessages,
+			props.messages,
+			props.currentProvider,
+			props.currentModel,
+			props.currentTheme,
+			props.updateInfo,
+			props.getMessageTokens,
+			clearMessages,
+			enterCheckpointLoadMode,
+			handleShowStatus,
+			applySession,
+			enterSessionSelectorMode,
+			props,
+		],
 	);
 
 	return {
@@ -294,6 +535,9 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		handleCheckpointSelect,
 		handleCheckpointCancel,
 		enterCheckpointLoadMode,
+		enterSessionSelectorMode,
+		handleSessionSelect,
+		handleSessionCancel,
 		handleMessageSubmit,
 	};
 }

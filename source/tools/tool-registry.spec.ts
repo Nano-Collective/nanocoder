@@ -272,8 +272,34 @@ test('ToolRegistry - getNativeTools returns record of native tools', t => {
 
 	const nativeTools = registry.getNativeTools();
 
+	t.truthy(nativeTools.tool1);
+	t.truthy(nativeTools.tool2);
+	t.is(Object.keys(nativeTools).length, 2);
+});
+
+test('ToolRegistry - getNativeTools returns unwrapped tools when no validator', t => {
+	const registry = new ToolRegistry();
+	const tool1: ToolEntry['tool'] = { execute: async () => 'test 1' } as any;
+
+	registry.register(createMockToolEntry({ name: 'tool1', tool: tool1, validator: undefined }));
+
+	const nativeTools = registry.getNativeTools();
+
 	t.is(nativeTools.tool1, tool1);
-	t.is(nativeTools.tool2, tool2);
+});
+
+test('ToolRegistry - getNativeTools wraps execute with validator', async t => {
+	const registry = new ToolRegistry();
+	const tool1: ToolEntry['tool'] = { execute: async () => 'test result' } as any;
+	const rejectValidator = async () => ({ valid: false as const, error: 'path not allowed' });
+
+	registry.register(createMockToolEntry({ name: 'tool1', tool: tool1, validator: rejectValidator }));
+
+	const nativeTools = registry.getNativeTools();
+
+	await t.throwsAsync(() => nativeTools.tool1.execute!({} as any, {} as any), {
+		message: 'path not allowed',
+	});
 });
 
 test('ToolRegistry - getAllEntries returns array of all entries', t => {

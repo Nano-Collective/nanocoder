@@ -1,15 +1,16 @@
 import {Box, Text, useFocus, useInput} from 'ink';
 import Spinner from 'ink-spinner';
-import TextInput from 'ink-text-input';
-import {useCallback, useEffect, useMemo, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {commandRegistry} from '@/commands';
 import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
+import TextInput from '@/components/text-input';
 import {useInputState} from '@/hooks/useInputState';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
 import {promptHistory} from '@/prompt-history';
 import type {DevelopmentMode} from '@/types/core';
+import type {InputState} from '@/types/hooks';
 import {Completion} from '@/types/index';
 import {
 	getCurrentFileMention,
@@ -26,6 +27,7 @@ interface ChatProps {
 	onCancel?: () => void; // Callback when user presses escape while thinking
 	onToggleMode?: () => void; // Callback when user presses shift+tab to toggle development mode
 	developmentMode?: DevelopmentMode; // Current development mode
+	contextPercentUsed?: number | null; // Context window usage percentage
 }
 
 export default function UserInput({
@@ -36,6 +38,7 @@ export default function UserInput({
 	onCancel,
 	onToggleMode,
 	developmentMode = 'normal',
+	contextPercentUsed,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
 	const {colors} = useTheme();
@@ -43,7 +46,11 @@ export default function UserInput({
 	const uiState = useUIStateContext();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
 	const [textInputKey, setTextInputKey] = useState(0);
-	// Store the original InputState (including placeholders) when starting history navigation
+	// Store the full InputState draft when starting history navigation, so it can be restored
+	const savedDraftRef = useRef<InputState>({
+		displayValue: '',
+		placeholderContent: {},
+	});
 	// File autocomplete state
 	const [isFileAutocompleteMode, setIsFileAutocompleteMode] = useState(false);
 	const [fileCompletions, setFileCompletions] = useState<
@@ -64,9 +71,6 @@ export default function UserInput({
 		setHistoryIndex,
 		updateInput,
 		resetInput,
-		// New paste handling functions
-		undo,
-		redo,
 		deletePlaceholder: _deletePlaceholder,
 		currentState,
 		setInputState,
@@ -76,9 +80,11 @@ export default function UserInput({
 		showClearMessage,
 		showCompletions,
 		completions,
+		pendingFileMentions,
 		setShowClearMessage,
 		setShowCompletions,
 		setCompletions,
+		setPendingFileMentions,
 		resetUIState,
 	} = uiState;
 
@@ -92,6 +98,50 @@ export default function UserInput({
 	useEffect(() => {
 		void promptHistory.loadHistory();
 	}, []);
+
+	// Consume pending file mentions from explorer and insert into input
+	// Properly attach files by calling handleFileMention for each
+	useEffect(() => {
+		if (pendingFileMentions.length === 0) return;
+
+		const attachFiles = async () => {
+			let state = currentState;
+			let displayValue = state.displayValue;
+
+			for (const filePath of pendingFileMentions) {
+				// Create a temporary mention text to replace
+				const mentionText = `@${filePath}`;
+				// Add the mention to display value first
+				displayValue = displayValue
+					? `${displayValue} ${mentionText}`
+					: mentionText;
+
+				// Handle the file mention to create placeholder
+				const result = await handleFileMention(
+					filePath,
+					displayValue,
+					state.placeholderContent,
+					mentionText,
+				);
+
+				if (result) {
+					state = result;
+					displayValue = result.displayValue;
+				}
+			}
+
+			setInputState(state);
+			setTextInputKey(prev => prev + 1);
+			setPendingFileMentions([]);
+		};
+
+		void attachFiles();
+	}, [
+		pendingFileMentions,
+		currentState,
+		setInputState,
+		setPendingFileMentions,
+	]);
 
 	// Trigger file autocomplete when input changes
 	useEffect(() => {
@@ -233,7 +283,8 @@ export default function UserInput({
 
 			if (direction === 'up') {
 				if (historyIndex === -1) {
-					// Save the full current state (including placeholders) before starting navigation
+					// Save the full current state before starting navigation
+					savedDraftRef.current = currentState;
 					setOriginalInput(input);
 					setHistoryIndex(history.length - 1);
 					setInputState(history[history.length - 1]);
@@ -244,27 +295,28 @@ export default function UserInput({
 					setInputState(history[newIndex]);
 					setTextInputKey(prev => prev + 1);
 				} else if (historyIndex === 0) {
-					// At first history item, go to blank
+					// At first history item, restore saved draft
 					setHistoryIndex(-2);
-					setOriginalInput('');
-					updateInput('');
+					setInputState(savedDraftRef.current);
 					setTextInputKey(prev => prev + 1);
 				} else if (historyIndex === -2) {
-					// At blank, cycle back to last history item
+					// At draft, cycle back to last history item
+					savedDraftRef.current = currentState;
 					setHistoryIndex(history.length - 1);
 					setInputState(history[history.length - 1]);
 					setTextInputKey(prev => prev + 1);
 				}
 			} else {
 				if (historyIndex === -1) {
-					// At original input, go to blank when cycling down
+					// Save draft, go to draft cycling state (visually a no-op)
+					savedDraftRef.current = currentState;
 					setOriginalInput(input);
 					setHistoryIndex(-2);
-					setOriginalInput('');
-					updateInput('');
+					setInputState(savedDraftRef.current);
 					setTextInputKey(prev => prev + 1);
 				} else if (historyIndex === -2) {
-					// At blank, cycle to first history item
+					// At draft, cycle to first history item
+					savedDraftRef.current = currentState;
 					setHistoryIndex(0);
 					setInputState(history[0]);
 					setTextInputKey(prev => prev + 1);
@@ -275,10 +327,9 @@ export default function UserInput({
 					setInputState(history[newIndex]);
 					setTextInputKey(prev => prev + 1);
 				} else if (historyIndex === history.length - 1) {
-					// At last history item, cycle back to blank
+					// At last history item, restore saved draft
 					setHistoryIndex(-2);
-					setOriginalInput('');
-					updateInput('');
+					setInputState(savedDraftRef.current);
 					setTextInputKey(prev => prev + 1);
 				}
 			}
@@ -286,10 +337,10 @@ export default function UserInput({
 		[
 			historyIndex,
 			input,
+			currentState,
 			setHistoryIndex,
 			setOriginalInput,
 			setInputState,
-			updateInput,
 		],
 	);
 
@@ -314,20 +365,6 @@ export default function UserInput({
 		// Handle special keys
 		if (key.escape) {
 			handleEscape();
-			return;
-		}
-
-		// Ctrl+B removed - no longer needed with new paste system
-
-		// Undo: Ctrl+_ (Ctrl+Shift+-)
-		if (key.ctrl && inputChar === '_') {
-			undo();
-			return;
-		}
-
-		// Redo: Ctrl+Y
-		if (key.ctrl && inputChar === 'y') {
-			redo();
 			return;
 		}
 
@@ -438,31 +475,41 @@ export default function UserInput({
 				<DevelopmentModeIndicator
 					developmentMode={developmentMode}
 					colors={colors}
+					contextPercentUsed={contextPercentUsed ?? null}
 				/>
 			</Box>
 		);
 	}
 
 	return (
-		<Box flexDirection="column" paddingY={1} width="100%" marginTop={1}>
+		<>
+			{!isBashMode ? (
+				<Text color={colors.primary} bold>
+					What would you like me to help with?
+				</Text>
+			) : (
+				<Text color={colors.tool} bold>
+					Bash mode
+				</Text>
+			)}
 			<Box
 				flexDirection="column"
-				borderStyle={isBashMode ? 'round' : undefined}
-				borderColor={isBashMode ? colors.tool : undefined}
-				paddingX={isBashMode ? 1 : 0}
-				width={isBashMode ? boxWidth : undefined}
+				marginTop={1}
+				backgroundColor={colors.base}
+				width={boxWidth}
+				padding={1}
+				borderStyle="bold"
+				borderLeft={true}
+				borderRight={false}
+				borderTop={false}
+				borderBottom={false}
+				borderLeftColor={isBashMode ? colors.tool : colors.primary}
 			>
-				{!isBashMode && (
-					<>
-						<Text color={colors.primary} bold>
-							What would you like me to help with?
-						</Text>
-					</>
-				)}
-
 				{/* Input row */}
 				<Box>
-					<Text color={textColor}>{'>'} </Text>
+					{input.length === 0 && (
+						<Text color={isBashMode ? colors.tool : textColor}>{'>'} </Text>
+					)}
 					<TextInput
 						key={textInputKey}
 						value={input}
@@ -473,55 +520,50 @@ export default function UserInput({
 					/>
 				</Box>
 
-				{isBashMode && (
-					<Text color={colors.tool} dimColor>
-						Bash Mode
-					</Text>
-				)}
 				{showClearMessage && (
 					<Text color={colors.secondary} dimColor>
 						Press escape again to clear
 					</Text>
 				)}
-				{showCompletions && completions.length > 0 && (
-					<Box flexDirection="column" marginTop={1}>
-						<Text color={colors.secondary}>Available commands:</Text>
-						{completions.map((completion, index) => (
-							<Text
-								key={index}
-								color={completion.isCustom ? colors.info : colors.primary}
-							>
-								/{completion.name}
-							</Text>
-						))}
-					</Box>
-				)}
-				{isFileAutocompleteMode && fileCompletions.length > 0 && (
-					<Box flexDirection="column" marginTop={1}>
-						<Text color={colors.secondary}>
-							File suggestions (↑/↓ to navigate, Tab to select):
-						</Text>
-						{fileCompletions.slice(0, 5).map((file, index) => (
-							<Text
-								key={index}
-								color={
-									index === selectedFileIndex ? colors.info : colors.primary
-								}
-								bold={index === selectedFileIndex}
-							>
-								{index === selectedFileIndex ? '▸ ' : '  '}
-								{file.path}
-							</Text>
-						))}
-					</Box>
-				)}
 			</Box>
+
+			{showCompletions && completions.length > 0 && (
+				<Box flexDirection="column" marginTop={1}>
+					<Text color={colors.secondary}>Available commands:</Text>
+					{completions.map((completion, index) => (
+						<Text
+							key={index}
+							color={completion.isCustom ? colors.info : colors.primary}
+						>
+							/{completion.name}
+						</Text>
+					))}
+				</Box>
+			)}
+			{isFileAutocompleteMode && fileCompletions.length > 0 && (
+				<Box flexDirection="column" marginTop={1}>
+					<Text color={colors.secondary}>
+						File suggestions (↑/↓ to navigate, Tab to select):
+					</Text>
+					{fileCompletions.slice(0, 5).map((file, index) => (
+						<Text
+							key={index}
+							color={index === selectedFileIndex ? colors.info : colors.primary}
+							bold={index === selectedFileIndex}
+						>
+							{index === selectedFileIndex ? '▸ ' : '  '}
+							{file.path}
+						</Text>
+					))}
+				</Box>
+			)}
 
 			{/* Development mode indicator - always visible */}
 			<DevelopmentModeIndicator
 				developmentMode={developmentMode}
 				colors={colors}
+				contextPercentUsed={contextPercentUsed ?? null}
 			/>
-		</Box>
+		</>
 	);
 }

@@ -19,6 +19,7 @@ import {globalLogStorage} from '../../log-query/index.js';
 import {loggerProvider} from '../../logger-provider.js';
 import {globalPerformanceMonitor} from '../../performance.js';
 import {globalRequestTracker} from '../../request-tracker.js';
+import {getSafeCpuUsage, getSafeMemory} from '../../safe-process.js';
 
 const getLogger = () => loggerProvider.getLogger();
 
@@ -238,8 +239,8 @@ export class HealthMonitor {
 	 */
 	getSystemMetrics(): SystemMetrics {
 		const _now = Date.now();
-		const memory = process.memoryUsage();
-		const cpuUsage = process.cpuUsage();
+		const memory = getSafeMemory();
+		const cpuUsage = getSafeCpuUsage();
 		const requestStats = globalRequestTracker.getStats();
 		const logStats = globalLogStorage.getEntryCount();
 		const perfStats = globalPerformanceMonitor.getAllStats();

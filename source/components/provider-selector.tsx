@@ -58,7 +58,6 @@ export default function ProviderSelector({
 	return (
 		<TitledBoxWithPreferences
 			title="Select a Provider"
-			reversePowerline={true}
 			width={boxWidth}
 			borderColor={colors.primary}
 			paddingX={2}

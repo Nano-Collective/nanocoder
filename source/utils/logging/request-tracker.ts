@@ -12,6 +12,7 @@ import {
 	formatBytes,
 	trackPerformance,
 } from './performance.js';
+import {getSafeMemory} from './safe-process.js';
 
 // Get logger instance directly to avoid circular dependencies
 const logger = getLogger();
@@ -102,7 +103,7 @@ export class RequestTracker {
 			startTime: Date.now(),
 			status: 'pending',
 			correlationId: generateCorrelationId(),
-			memoryStart: process.memoryUsage(),
+			memoryStart: getSafeMemory(),
 		};
 
 		this.activeRequests.set(id, request);
@@ -140,7 +141,7 @@ export class RequestTracker {
 		}
 
 		const endTime = Date.now();
-		const memoryEnd = process.memoryUsage();
+		const memoryEnd = getSafeMemory();
 		const duration = endTime - request.startTime;
 		let memoryDelta: Record<string, number> | undefined;
 		if (request.memoryStart) {
@@ -210,7 +211,7 @@ export class RequestTracker {
 		}
 
 		const endTime = Date.now();
-		const memoryEnd = process.memoryUsage();
+		const memoryEnd = getSafeMemory();
 		const duration = endTime - request.startTime;
 		let memoryDelta: Record<string, number> | undefined;
 		if (request.memoryStart) {
@@ -282,7 +283,7 @@ export class RequestTracker {
 		}
 
 		const endTime = Date.now();
-		const memoryEnd = process.memoryUsage();
+		const memoryEnd = getSafeMemory();
 		const duration = endTime - request.startTime;
 		let memoryDelta: Record<string, number> | undefined;
 		if (request.memoryStart) {
@@ -344,7 +345,7 @@ export class RequestTracker {
 		}
 
 		const endTime = Date.now();
-		const memoryEnd = process.memoryUsage();
+		const memoryEnd = getSafeMemory();
 		const duration = endTime - request.startTime;
 		let memoryDelta: Record<string, number> | undefined;
 		if (request.memoryStart) {

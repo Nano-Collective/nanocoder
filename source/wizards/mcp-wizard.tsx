@@ -410,7 +410,6 @@ export function McpWizard({projectDir, onComplete, onCancel}: McpWizardProps) {
 	return (
 		<TitledBoxWithPreferences
 			title="MCP Server Configuration"
-			reversePowerline={true}
 			width={boxWidth}
 			borderColor={colors.primary}
 			paddingX={2}

@@ -3,6 +3,8 @@
  * Uses dependency injection pattern to avoid circular dependencies
  */
 
+import {getShutdownManager} from '@/utils/shutdown';
+import {globalHealthMonitor} from './health-monitor/core/health-monitor';
 import {loggerProvider} from './logger-provider';
 import type {Logger, LoggerConfig, LogLevel} from './types';
 
@@ -107,7 +109,7 @@ export async function flush(): Promise<void> {
 /**
  * Flush logs synchronously (for signal handlers)
  */
-function flushSync(): void {
+function _flushSync(): void {
 	loggerProvider.flushSync();
 }
 
@@ -118,39 +120,24 @@ export async function end(): Promise<void> {
 	await loggerProvider.end();
 }
 
-// Setup graceful shutdown handlers
-// Using synchronous flushSync() for reliable log flushing on signals
-process.once('SIGTERM', () => {
-	log.info('\n[LOGGER] Received SIGTERM, flushing logs...');
-	flushSync();
-	process.stderr.write('[LOGGER] Graceful shutdown completed\n');
-	process.exit(0);
+// Register cleanup handlers with ShutdownManager
+const shutdownManager = getShutdownManager();
+
+shutdownManager.register({
+	name: 'health-monitor',
+	priority: 40,
+	handler: async () => {
+		globalHealthMonitor.stop();
+	},
 });
 
-process.once('SIGINT', () => {
-	log.info('\n[LOGGER] Received SIGINT, flushing logs...');
-	flushSync();
-	process.stderr.write('[LOGGER] Graceful shutdown completed\n');
-	process.exit(0);
-});
-
-// Handle uncaught exceptions and unhandled rejections
-process.on('uncaughtException', err => {
-	void (async () => {
-		const logger = getLogger();
-		logger.fatal({err}, 'Uncaught exception');
-		await flush();
-		process.exit(1);
-	})();
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-	void (async () => {
-		const logger = getLogger();
-		logger.fatal({reason, promise}, 'Unhandled promise rejection');
-		await flush();
-		process.exit(1);
-	})();
+shutdownManager.register({
+	name: 'logger',
+	priority: 100,
+	handler: async () => {
+		await loggerProvider.flush();
+		await loggerProvider.end();
+	},
 });
 
 // Export configuration utilities

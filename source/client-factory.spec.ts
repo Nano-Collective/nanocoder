@@ -860,6 +860,111 @@ test.serial(
 	},
 );
 
+// ============================================================================
+// createLLMClient - 127.0.0.1 Provider Tests
+// ============================================================================
+
+test.serial(
+	'createLLMClient: succeeds with 127.0.0.1 provider that responds',
+	async t => {
+		globalThis.fetch = createMockFetch(true, 200);
+
+		const configDir = join(testDir, 'ip-localhost-success-test');
+		mkdirSync(configDir, {recursive: true});
+
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'OllamaIP',
+							baseUrl: 'http://127.0.0.1:11434/v1',
+							models: ['llama3'],
+						},
+					],
+				},
+			},
+			configDir,
+		);
+
+		process.cwd = () => configDir;
+		reloadAppConfig();
+
+		const result = await createLLMClient();
+
+		t.truthy(result);
+		t.truthy(result.client);
+		t.truthy(result.actualProvider);
+	},
+);
+
+test.serial(
+	'createLLMClient: 127.0.0.1 provider fails when server not accessible',
+	async t => {
+		globalThis.fetch = createMockFetch(false);
+
+		const configDir = join(testDir, 'ip-localhost-fail-test');
+		mkdirSync(configDir, {recursive: true});
+
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'OllamaIP',
+							baseUrl: 'http://127.0.0.1:11434/v1',
+							models: ['llama3'],
+						},
+					],
+				},
+			},
+			configDir,
+		);
+
+		process.cwd = () => configDir;
+		clearAppConfig();
+		reloadAppConfig();
+
+		const error = await t.throwsAsync(createLLMClient());
+		t.regex(error.message, /All configured providers failed/);
+	},
+);
+
+test.serial(
+	'createLLMClient: 127.0.0.1 provider does not require API key',
+	async t => {
+		globalThis.fetch = createMockFetch(true, 200);
+
+		const configDir = join(testDir, 'ip-localhost-no-key-test');
+		mkdirSync(configDir, {recursive: true});
+
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'OllamaIP',
+							baseUrl: 'http://127.0.0.1:11434/v1',
+							models: ['llama3'],
+							// No apiKey - should still work for local providers
+						},
+					],
+				},
+			},
+			configDir,
+		);
+
+		process.cwd = () => configDir;
+		reloadAppConfig();
+
+		const result = await createLLMClient();
+
+		t.truthy(result);
+		t.truthy(result.client);
+		t.truthy(result.actualProvider);
+	},
+);
+
 test.serial(
 	'createLLMClient: handles provider with empty models array',
 	async t => {

@@ -1,11 +1,16 @@
 import {existsSync} from 'fs';
 import {join} from 'path';
 import {AISDKClient} from '@/ai-sdk-client';
+import {
+	getCopilotNoCredentialsMessage,
+	loadCopilotCredential,
+} from '@/config/copilot-credentials';
 import {getClosestConfigFile} from '@/config/index';
 import {loadAllProviderConfigs} from '@/config/mcp-config-loader';
 import {loadPreferences} from '@/config/preferences';
 import {TIMEOUT_PROVIDER_CONNECTION_MS} from '@/constants';
 import type {AIProviderConfig, LLMClient} from '@/types/index';
+import {isLocalURL} from '@/utils/url-utils';
 
 // Custom error class for configuration errors that need special UI handling
 export class ConfigurationError extends Error {
@@ -127,9 +132,15 @@ function loadProviderConfigs(): AIProviderConfig[] {
 		requestTimeout: provider.requestTimeout,
 		socketTimeout: provider.socketTimeout,
 		connectionPool: provider.connectionPool,
+		// Tool configuration
+		disableTools: provider.disableTools,
+		disableToolModels: provider.disableToolModels,
+		// SDK provider package to use
+		sdkProvider: provider.sdkProvider,
 		config: {
 			baseURL: provider.baseUrl,
 			apiKey: provider.apiKey || 'dummy-key',
+			headers: provider.headers ?? {},
 		},
 	}));
 }
@@ -140,11 +151,12 @@ async function testProviderConnection(
 	// Test local servers for connectivity
 	if (
 		providerConfig.config.baseURL &&
-		providerConfig.config.baseURL.includes('localhost')
+		isLocalURL(providerConfig.config.baseURL)
 	) {
 		try {
 			await fetch(providerConfig.config.baseURL, {
 				signal: AbortSignal.timeout(TIMEOUT_PROVIDER_CONNECTION_MS),
+				headers: providerConfig.config.headers,
 			});
 			// Don't check response.ok as some servers return 404 for root path
 			// We just need to confirm the server responded (not a network error)
@@ -164,10 +176,21 @@ async function testProviderConnection(
 			// Other errors (like HTTP errors) mean the server is responding, so pass
 		}
 	}
-	// Require API key for hosted providers
+	// GitHub Copilot: require stored credential instead of apiKey
+	if (providerConfig.sdkProvider === 'github-copilot') {
+		const credential = loadCopilotCredential(providerConfig.name);
+		if (!credential?.oauthToken) {
+			throw new Error(getCopilotNoCredentialsMessage(providerConfig.name));
+		}
+		return;
+	}
+
+	// Require API key for other hosted providers
 	if (
 		!providerConfig.config.apiKey &&
-		!providerConfig.config.baseURL?.includes('localhost')
+		!(
+			providerConfig.config.baseURL && isLocalURL(providerConfig.config.baseURL)
+		)
 	) {
 		throw new Error('API key required for hosted providers');
 	}

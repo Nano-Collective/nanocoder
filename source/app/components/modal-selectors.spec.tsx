@@ -11,10 +11,13 @@ function createDefaultProps(
 	return {
 		isModelSelectionMode: false,
 		isProviderSelectionMode: false,
-		isThemeSelectionMode: false,
 		isModelDatabaseMode: false,
 		isConfigWizardMode: false,
+		isMcpWizardMode: false,
 		isCheckpointLoadMode: false,
+		isSessionSelectorMode: false,
+		showAllSessions: false,
+		isSettingsMode: false,
 		client: null,
 		currentModel: 'test-model',
 		currentProvider: 'test-provider',
@@ -23,13 +26,16 @@ function createDefaultProps(
 		onModelSelectionCancel: () => {},
 		onProviderSelect: async () => {},
 		onProviderSelectionCancel: () => {},
-		onThemeSelect: () => {},
-		onThemeSelectionCancel: () => {},
 		onModelDatabaseCancel: () => {},
 		onConfigWizardComplete: async () => {},
 		onConfigWizardCancel: () => {},
+		onMcpWizardComplete: async () => {},
+		onMcpWizardCancel: () => {},
 		onCheckpointSelect: async () => {},
 		onCheckpointCancel: () => {},
+		onSessionSelect: () => {},
+		onSessionCancel: () => {},
+		onSettingsCancel: () => {},
 		...overrides,
 	};
 }
@@ -65,17 +71,6 @@ test('ModalSelectors renders ProviderSelector when isProviderSelectionMode is tr
 	unmount();
 });
 
-test('ModalSelectors renders ThemeSelector when isThemeSelectionMode is true', t => {
-	const props = createDefaultProps({isThemeSelectionMode: true});
-	const component = ModalSelectors(props);
-	t.truthy(component);
-
-	const {lastFrame, unmount} = renderWithTheme(<>{component}</>);
-	const output = lastFrame();
-	t.truthy(output);
-	unmount();
-});
-
 test('ModalSelectors renders ModelDatabaseDisplay when isModelDatabaseMode is true', t => {
 	const props = createDefaultProps({isModelDatabaseMode: true});
 	const component = ModalSelectors(props);
@@ -89,6 +84,28 @@ test('ModalSelectors renders ModelDatabaseDisplay when isModelDatabaseMode is tr
 
 test('ModalSelectors renders ConfigWizard when isConfigWizardMode is true', t => {
 	const props = createDefaultProps({isConfigWizardMode: true});
+	const component = ModalSelectors(props);
+	t.truthy(component);
+
+	const {lastFrame, unmount} = renderWithTheme(<>{component}</>);
+	const output = lastFrame();
+	t.truthy(output);
+	unmount();
+});
+
+test('ModalSelectors renders McpWizard when isMcpWizardMode is true', t => {
+	const props = createDefaultProps({isMcpWizardMode: true});
+	const component = ModalSelectors(props);
+	t.truthy(component);
+
+	const {lastFrame, unmount} = renderWithTheme(<>{component}</>);
+	const output = lastFrame();
+	t.truthy(output);
+	unmount();
+});
+
+test('ModalSelectors renders SettingsSelector when isSettingsMode is true', t => {
+	const props = createDefaultProps({isSettingsMode: true});
 	const component = ModalSelectors(props);
 	t.truthy(component);
 
@@ -128,7 +145,7 @@ test('ModalSelectors prioritizes first active mode when multiple are true', t =>
 	const props = createDefaultProps({
 		isModelSelectionMode: true,
 		isProviderSelectionMode: true,
-		isThemeSelectionMode: true,
+		isModelDatabaseMode: true,
 		client: {}, // Mock client for ModelSelector
 	});
 	const component = ModalSelectors(props);

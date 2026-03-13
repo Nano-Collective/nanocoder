@@ -152,6 +152,15 @@ export interface LLMChatResponse {
 	// Auto-executed messages (assistant + tool results) from AI SDK multi-step execution
 	// These need to be added to message history for proper context tracking
 	autoExecutedMessages?: Message[];
+	// Whether native tools were disabled for this request (XML fallback path)
+	// When true, the conversation loop should parse response text for XML tool calls
+	toolsDisabled?: boolean;
+	// Tool calls that the AI SDK identified as needing approval (needsApproval: true)
+	// These were NOT auto-executed and require user confirmation
+	approvalRequests?: Array<{
+		toolCallId: string;
+		toolName: string;
+	}>;
 }
 
 export interface StreamCallbacks {
@@ -159,6 +168,15 @@ export interface StreamCallbacks {
 	onToolCall?: (toolCall: ToolCall) => void;
 	onToolExecuted?: (toolCall: ToolCall, result: string) => void;
 	onFinish?: () => void;
+}
+
+/**
+ * Non-interactive mode overrides for tool approval.
+ * When nonInteractiveMode is true, tools in the allowList bypass approval.
+ */
+export interface ModeOverrides {
+	nonInteractiveMode: boolean;
+	nonInteractiveAlwaysAllow: string[];
 }
 
 export interface LLMClient {
@@ -171,16 +189,25 @@ export interface LLMClient {
 		tools: Record<string, AISDKCoreTool>,
 		callbacks: StreamCallbacks,
 		signal?: AbortSignal,
+		modeOverrides?: ModeOverrides,
 	): Promise<LLMChatResponse>;
 	clearContext(): Promise<void>;
 }
 
-export type DevelopmentMode = 'normal' | 'auto-accept' | 'plan';
+export type DevelopmentMode = 'normal' | 'auto-accept' | 'plan' | 'scheduler';
 
 export const DEVELOPMENT_MODE_LABELS: Record<DevelopmentMode, string> = {
 	normal: '▶ normal mode on',
 	'auto-accept': '⏵⏵ auto-accept mode on',
 	plan: '⏸ plan mode on',
+	scheduler: '⏵⏵ scheduler mode on',
+};
+
+export const DEVELOPMENT_MODE_LABELS_NARROW: Record<DevelopmentMode, string> = {
+	normal: '▶ normal',
+	'auto-accept': '⏵⏵ auto',
+	plan: '⏸ plan',
+	scheduler: '⏵⏵ scheduler',
 };
 
 // Connection status types for MCP and LSP servers

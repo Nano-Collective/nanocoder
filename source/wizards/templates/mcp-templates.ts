@@ -159,7 +159,7 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 		id: 'fetch',
 		name: 'Fetch',
 		description: 'HTTP requests and web scraping',
-		command: 'npx',
+		command: 'uvx',
 		fields: [
 			{
 				name: 'userAgent',
@@ -169,17 +169,21 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 			},
 		],
 		buildConfig: answers => {
+			const args: string[] = ['mcp-server-fetch'];
+			if (
+				answers.userAgent &&
+				answers.userAgent !== 'ModelContextProtocol/1.0'
+			) {
+				args.push(`--user-agent=${answers.userAgent}`);
+			}
 			const config: McpServerConfig = {
 				name: 'fetch',
 				transport: 'stdio' as McpTransportType,
-				command: 'npx',
-				args: ['-y', '@modelcontextprotocol/server-fetch'],
+				command: 'uvx',
+				args,
 				description: 'HTTP requests and web scraping',
 				tags: ['http', 'scraping', 'fetch', 'stdio'],
 			};
-			if (answers.userAgent) {
-				config.env = {USER_AGENT: answers.userAgent};
-			}
 			return config;
 		},
 		category: 'local',

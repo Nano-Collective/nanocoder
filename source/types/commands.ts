@@ -1,6 +1,6 @@
 import {Message} from '@/types/core';
 
-export interface Command<T = React.ReactElement> {
+export interface Command<T = React.ReactElement | void> {
 	name: string;
 	description: string;
 	handler: (
@@ -29,6 +29,25 @@ export interface CustomCommandMetadata {
 	description?: string;
 	aliases?: string[];
 	parameters?: string[];
+	// Skill-like fields (all optional)
+	tags?: string[];
+	triggers?: string[];
+	estimatedTokens?: number;
+	resources?: boolean;
+	category?: string;
+	version?: string;
+	author?: string;
+	examples?: string[];
+	references?: string[];
+	dependencies?: string[];
+}
+
+export interface CommandResource {
+	name: string;
+	path: string;
+	type: 'script' | 'template' | 'document' | 'config';
+	description?: string;
+	executable?: boolean;
 }
 
 export interface CustomCommand {
@@ -38,6 +57,10 @@ export interface CustomCommand {
 	fullName: string; // e.g., "refactor:dry" or just "test"
 	metadata: CustomCommandMetadata;
 	content: string; // The markdown content without frontmatter
+	// Skill-like fields (populated for commands with auto-injection capabilities)
+	source?: 'personal' | 'project';
+	lastModified?: Date;
+	loadedResources?: CommandResource[];
 }
 
 export interface ParsedCustomCommand {

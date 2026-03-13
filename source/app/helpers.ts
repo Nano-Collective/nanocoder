@@ -23,12 +23,9 @@ export function isNonInteractiveModeComplete(
 	const _hasMessages = appState.messages.length > 0;
 	const hasTimedOut = Date.now() - startTime > maxExecutionTimeMs;
 
-	// Check for error messages in the messages array
+	// Check for error messages in the messages array (only check role, not content)
 	const hasErrorMessages = appState.messages.some(
-		(message: {role: string; content: string}) =>
-			message.role === 'error' ||
-			(typeof message.content === 'string' &&
-				message.content.toLowerCase().includes('error')),
+		(message: {role: string; content: string}) => message.role === 'error',
 	);
 
 	// Check for tool approval required messages

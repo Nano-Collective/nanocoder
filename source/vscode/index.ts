@@ -10,10 +10,13 @@
  */
 
 export {
+	getExtensionStatus,
 	getVsixPath,
 	installExtension,
 	isExtensionInstalled,
 	isVSCodeCliAvailable,
+	SUPPORTED_CLIS,
+	type VSCodeStatus,
 } from './extension-installer';
 
 export {

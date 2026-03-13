@@ -1,4 +1,4 @@
-import {createOpenAICompatible} from '@ai-sdk/openai-compatible';
+import type {OpenAIProvider} from '@ai-sdk/openai';
 import type {LanguageModel} from 'ai';
 import {Agent} from 'undici';
 import {TIMEOUT_SOCKET_DEFAULT_MS} from '@/constants';
@@ -9,14 +9,15 @@ import type {
 	LLMChatResponse,
 	LLMClient,
 	Message,
+	ModeOverrides,
 	StreamCallbacks,
 } from '@/types/index';
 import {getLogger} from '@/utils/logging';
 import {handleChat} from './chat/chat-handler.js';
-import {createProvider} from './providers/provider-factory.js';
+import {type AIProvider, createProvider} from './providers/provider-factory.js';
 
 export class AISDKClient implements LLMClient {
-	private provider: ReturnType<typeof createOpenAICompatible>;
+	private provider: AIProvider;
 	private currentModel: string;
 	private availableModels: string[];
 	private providerConfig: AIProviderConfig;
@@ -128,9 +129,19 @@ export class AISDKClient implements LLMClient {
 		tools: Record<string, AISDKCoreTool>,
 		callbacks: StreamCallbacks,
 		signal?: AbortSignal,
+		modeOverrides?: ModeOverrides,
 	): Promise<LLMChatResponse> {
 		// Get the language model instance from the provider
-		const model = this.provider(this.currentModel) as unknown as LanguageModel;
+		// GitHub Copilot requires routing: GPT-5+ → Responses API, others → Chat Completions
+		let model: LanguageModel;
+		if (this.providerConfig.sdkProvider === 'github-copilot') {
+			const copilot = this.provider as unknown as OpenAIProvider;
+			model = this.currentModel.includes('gpt-5')
+				? copilot.responses(this.currentModel)
+				: copilot.chat(this.currentModel);
+		} else {
+			model = this.provider(this.currentModel) as unknown as LanguageModel;
+		}
 
 		// Delegate to chat handler
 		return await handleChat({
@@ -142,6 +153,7 @@ export class AISDKClient implements LLMClient {
 			callbacks,
 			signal,
 			maxRetries: this.maxRetries,
+			modeOverrides,
 		});
 	}
 

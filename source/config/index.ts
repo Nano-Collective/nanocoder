@@ -1,5 +1,5 @@
 import {config as loadEnv} from 'dotenv';
-import {existsSync, mkdirSync, writeFileSync} from 'fs';
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'fs';
 import {homedir} from 'os';
 import {dirname, join} from 'path';
 import {fileURLToPath} from 'url';
@@ -10,7 +10,12 @@ import {
 import {getConfigPath} from '@/config/paths';
 import {loadPreferences} from '@/config/preferences';
 import {defaultTheme, getThemeColors} from '@/config/themes';
-import type {AppConfig, Colors} from '@/types/index';
+import type {
+	AppConfig,
+	AutoCompactConfig,
+	Colors,
+	CompressionMode,
+} from '@/types/index';
 import {logError} from '@/utils/message-queue';
 
 // Load .env file from working directory (shell environment takes precedence)
@@ -101,6 +106,186 @@ function createDefaultConfFile(filePath: string, fileName: string): void {
 	}
 }
 
+// Try to load auto-compact config from a specific path
+// Returns the config if found and valid, null otherwise
+function tryLoadAutoCompactFromPath(
+	configPath: string,
+	defaults: AutoCompactConfig,
+): AutoCompactConfig | null {
+	if (!existsSync(configPath)) {
+		return null;
+	}
+
+	try {
+		const rawData = readFileSync(configPath, 'utf-8');
+		const config = JSON.parse(rawData);
+		const autoCompact = config.nanocoder?.autoCompact;
+		if (autoCompact && typeof autoCompact === 'object') {
+			return {
+				enabled:
+					autoCompact.enabled !== undefined
+						? Boolean(autoCompact.enabled)
+						: defaults.enabled,
+				threshold: validateThreshold(
+					autoCompact.threshold ?? defaults.threshold,
+				),
+				mode: validateMode(autoCompact.mode ?? defaults.mode),
+				notifyUser:
+					autoCompact.notifyUser !== undefined
+						? Boolean(autoCompact.notifyUser)
+						: defaults.notifyUser,
+			};
+		}
+	} catch (error) {
+		logError(
+			`Failed to load auto-compact config from ${configPath}: ${String(error)}`,
+		);
+	}
+
+	return null;
+}
+
+// Load auto-compact configuration and Returns default config if not specified
+function loadAutoCompactConfig(): AutoCompactConfig {
+	const defaults: AutoCompactConfig = {
+		enabled: true,
+		threshold: 60,
+		mode: 'conservative',
+		notifyUser: true,
+	};
+
+	// Try to load from project-level config first
+	const projectConfigPath = join(process.cwd(), 'agents.config.json');
+	const projectConfig = tryLoadAutoCompactFromPath(projectConfigPath, defaults);
+	if (projectConfig) {
+		return projectConfig;
+	}
+
+	// Try global config
+	const configDir = getConfigPath();
+	const globalConfigPath = join(configDir, 'agents.config.json');
+	const globalConfig = tryLoadAutoCompactFromPath(globalConfigPath, defaults);
+	if (globalConfig) {
+		return globalConfig;
+	}
+
+	// Fallback to home directory
+	const homePath = join(homedir(), '.agents.config.json');
+	const homeConfig = tryLoadAutoCompactFromPath(homePath, defaults);
+	if (homeConfig) {
+		return homeConfig;
+	}
+
+	return defaults;
+}
+
+// Validate and clamp threshold to valid range (50-95)
+function validateThreshold(threshold: unknown): number {
+	const num = typeof threshold === 'number' ? threshold : 60;
+	return Math.max(50, Math.min(95, Math.round(num)));
+}
+
+// Validate compression mode
+function validateMode(mode: unknown): CompressionMode {
+	if (mode === 'default' || mode === 'aggressive' || mode === 'conservative') {
+		return mode;
+	}
+	return 'conservative';
+}
+
+// Try to load session config from a specific path
+// Returns the config if found and valid, null otherwise
+function tryLoadSessionsFromPath(
+	configPath: string,
+	defaults: NonNullable<AppConfig['sessions']>,
+): AppConfig['sessions'] | null {
+	if (!existsSync(configPath)) {
+		return null;
+	}
+
+	try {
+		const rawData = readFileSync(configPath, 'utf-8');
+		const config = JSON.parse(rawData);
+		const sessions = config.nanocoder?.sessions;
+		if (sessions && typeof sessions === 'object') {
+			const normalizeSessionNumber = (
+				value: unknown,
+				min: number,
+				fallback: number,
+			): number => {
+				if (typeof value === 'number' && Number.isFinite(value)) {
+					return Math.max(min, value);
+				}
+				return fallback;
+			};
+
+			return {
+				autoSave:
+					sessions.autoSave !== undefined
+						? Boolean(sessions.autoSave)
+						: defaults.autoSave,
+				saveInterval: normalizeSessionNumber(
+					sessions.saveInterval,
+					1000, // Minimum 1 second
+					defaults.saveInterval ?? 30000,
+				),
+				maxSessions: normalizeSessionNumber(
+					sessions.maxSessions,
+					1,
+					defaults.maxSessions ?? 100,
+				),
+				retentionDays: normalizeSessionNumber(
+					sessions.retentionDays,
+					1,
+					defaults.retentionDays ?? 30,
+				),
+				directory: sessions.directory || defaults.directory,
+			};
+		}
+	} catch (error) {
+		logError(
+			`Failed to load session config from ${configPath}: ${String(error)}`,
+		);
+	}
+
+	return null;
+}
+
+// Load session configuration and Returns default config if not specified
+function loadSessionConfig(): AppConfig['sessions'] {
+	const defaults: NonNullable<AppConfig['sessions']> = {
+		autoSave: true,
+		saveInterval: 30000, // 30 seconds
+		maxSessions: 100,
+		retentionDays: 30,
+		directory: '~/.nanocoder-sessions',
+	};
+
+	// Try to load from project-level config first
+	const projectConfigPath = join(process.cwd(), 'agents.config.json');
+	const projectConfig = tryLoadSessionsFromPath(projectConfigPath, defaults);
+	if (projectConfig) {
+		return projectConfig;
+	}
+
+	// Try global config
+	const configDir = getConfigPath();
+	const globalConfigPath = join(configDir, 'agents.config.json');
+	const globalConfig = tryLoadSessionsFromPath(globalConfigPath, defaults);
+	if (globalConfig) {
+		return globalConfig;
+	}
+
+	// Fallback to home directory
+	const homePath = join(homedir(), '.agents.config.json');
+	const homeConfig = tryLoadSessionsFromPath(homePath, defaults);
+	if (homeConfig) {
+		return homeConfig;
+	}
+
+	return defaults;
+}
+
 // Function to load app configuration from agents.config.json if it exists
 function loadAppConfig(): AppConfig {
 	// Load providers from the new hierarchical configuration system
@@ -110,9 +295,17 @@ function loadAppConfig(): AppConfig {
 	const mcpServersWithSource = loadAllMCPConfigs();
 	const mcpServers = mcpServersWithSource.map(item => item.server);
 
+	// Load auto-compact configuration
+	const autoCompact = loadAutoCompactConfig();
+
+	// Load session configuration
+	const sessions = loadSessionConfig();
+
 	return {
 		providers,
 		mcpServers,
+		autoCompact,
+		sessions,
 	};
 }
 

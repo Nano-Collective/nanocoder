@@ -18,6 +18,7 @@ import type {
 	ToolHandler,
 	ToolValidator,
 } from '@/types/index';
+import {getShutdownManager} from '@/utils/shutdown';
 
 /**
  * Manages both static tools and dynamic MCP tools
@@ -54,6 +55,14 @@ export class ToolManager {
 	): Promise<MCPInitResult[]> {
 		if (servers && servers.length > 0) {
 			this.mcpClient = new MCPClient();
+
+			getShutdownManager().register({
+				name: 'mcp-client',
+				priority: 20,
+				handler: async () => {
+					await this.disconnectMCP();
+				},
+			});
 
 			const results = await this.mcpClient.connectToServers(
 				servers,
@@ -166,6 +175,8 @@ export class ToolManager {
 
 			this.mcpClient = null;
 		}
+
+		getShutdownManager().unregister('mcp-client');
 	}
 
 	/**

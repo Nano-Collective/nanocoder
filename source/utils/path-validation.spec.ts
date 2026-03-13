@@ -51,6 +51,12 @@ test('isValidFilePath: rejects paths with null bytes', (t) => {
 	t.false(isValidFilePath('\0'));
 });
 
+test('isValidFilePath: rejects home directory shorthand paths', (t) => {
+	t.false(isValidFilePath('~/file.txt'));
+	t.false(isValidFilePath('~/Documents/project/file.txt'));
+	t.false(isValidFilePath('~'));
+});
+
 test('isValidFilePath: rejects paths starting with separators', (t) => {
 	t.false(isValidFilePath('/file.txt'));
 	t.false(isValidFilePath('\\file.txt'));
@@ -167,6 +173,7 @@ test('security: prevents absolute path variations', (t) => {
 	t.false(isValidFilePath('\\etc\\passwd'));
 	t.false(isValidFilePath('C:/Windows/System32'));
 	t.false(isValidFilePath('C:\\Windows\\System32'));
+	t.false(isValidFilePath('~/Documents/secret.txt'));
 });
 
 test('security: prevents null byte injection variations', (t) => {

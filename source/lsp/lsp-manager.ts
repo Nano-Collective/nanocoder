@@ -7,6 +7,7 @@ import {EventEmitter} from 'events';
 import {readFile} from 'fs/promises';
 import {extname} from 'path';
 import {fileURLToPath} from 'url';
+import {getShutdownManager} from '@/utils/shutdown';
 import {LSPClient, LSPServerConfig} from './lsp-client';
 import {
 	CodeAction,
@@ -422,6 +423,16 @@ export async function getLSPManager(
 	// Create manager synchronously to ensure instance is set immediately
 	lspManagerInstance = new LSPManager(config);
 	lspManagerInitPromise = Promise.resolve(lspManagerInstance);
+
+	getShutdownManager().register({
+		name: 'lsp-manager',
+		priority: 30,
+		handler: async () => {
+			if (lspManagerInstance) {
+				await lspManagerInstance.shutdown();
+			}
+		},
+	});
 
 	return lspManagerInitPromise;
 }

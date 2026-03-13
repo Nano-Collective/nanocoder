@@ -1317,3 +1317,224 @@ test.serial('search_file_contents handles whitespace in query', async t => {
 		rmSync(testDir, {recursive: true, force: true});
 	}
 });
+
+// ============================================================================
+// Tests for include parameter (file type filtering)
+// ============================================================================
+
+test.serial(
+	'search_file_contents filters by include pattern',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-search-include-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, 'app.ts'), 'const includeTarget = "ts";');
+			writeFileSync(join(testDir, 'app.js'), 'const includeTarget = "js";');
+			writeFileSync(join(testDir, 'style.css'), '.includeTarget { color: red; }');
+
+			const originalCwd = process.cwd();
+
+			try {
+				process.chdir(testDir);
+
+				const result = await searchFileContentsTool.tool.execute!(
+					{
+						query: 'includeTarget',
+						include: '*.ts',
+						maxResults: 30,
+					},
+					{toolCallId: 'test', messages: []},
+				);
+
+				t.true(result.includes('app.ts'), 'Should include .ts files');
+				t.false(result.includes('app.js'), 'Should exclude .js files');
+				t.false(result.includes('style.css'), 'Should exclude .css files');
+			} finally {
+				process.chdir(originalCwd);
+			}
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'search_file_contents supports brace expansion in include',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-search-include-brace-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, 'app.ts'), 'const braceTarget = "ts";');
+			writeFileSync(join(testDir, 'app.tsx'), 'const braceTarget = "tsx";');
+			writeFileSync(join(testDir, 'app.js'), 'const braceTarget = "js";');
+
+			const originalCwd = process.cwd();
+
+			try {
+				process.chdir(testDir);
+
+				const result = await searchFileContentsTool.tool.execute!(
+					{
+						query: 'braceTarget',
+						include: '*.{ts,tsx}',
+						maxResults: 30,
+					},
+					{toolCallId: 'test', messages: []},
+				);
+
+				t.true(result.includes('app.ts'), 'Should include .ts files');
+				t.true(result.includes('app.tsx'), 'Should include .tsx files');
+				t.false(result.includes('app.js'), 'Should exclude .js files');
+			} finally {
+				process.chdir(originalCwd);
+			}
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+// ============================================================================
+// Tests for path parameter (directory scoping)
+// ============================================================================
+
+test.serial(
+	'search_file_contents scopes search to specified path',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-search-path-temp');
+
+		try {
+			mkdirSync(join(testDir, 'src'), {recursive: true});
+			mkdirSync(join(testDir, 'lib'), {recursive: true});
+			writeFileSync(join(testDir, 'src', 'app.ts'), 'const pathTarget = "src";');
+			writeFileSync(join(testDir, 'lib', 'util.ts'), 'const pathTarget = "lib";');
+
+			const originalCwd = process.cwd();
+
+			try {
+				process.chdir(testDir);
+
+				const result = await searchFileContentsTool.tool.execute!(
+					{
+						query: 'pathTarget',
+						path: 'src',
+						maxResults: 30,
+					},
+					{toolCallId: 'test', messages: []},
+				);
+
+				t.true(result.includes('app.ts'), 'Should include files in src/');
+				t.false(result.includes('util.ts'), 'Should exclude files in lib/');
+			} finally {
+				process.chdir(originalCwd);
+			}
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'search_file_contents rejects invalid path',
+	async t => {
+		t.timeout(10000);
+
+		const result = await searchFileContentsTool.tool.execute!(
+			{
+				query: 'test',
+				path: '../etc',
+				maxResults: 30,
+			},
+			{toolCallId: 'test', messages: []},
+		);
+
+		t.regex(result, /Error:.*Invalid path/, 'Should reject path traversal');
+	},
+);
+
+test.serial(
+	'search_file_contents combines include and path',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-search-include-path-temp');
+
+		try {
+			mkdirSync(join(testDir, 'src'), {recursive: true});
+			mkdirSync(join(testDir, 'lib'), {recursive: true});
+			writeFileSync(join(testDir, 'src', 'app.ts'), 'const comboTarget = "ts";');
+			writeFileSync(join(testDir, 'src', 'app.js'), 'const comboTarget = "js";');
+			writeFileSync(join(testDir, 'lib', 'util.ts'), 'const comboTarget = "lib";');
+
+			const originalCwd = process.cwd();
+
+			try {
+				process.chdir(testDir);
+
+				const result = await searchFileContentsTool.tool.execute!(
+					{
+						query: 'comboTarget',
+						include: '*.ts',
+						path: 'src',
+						maxResults: 30,
+					},
+					{toolCallId: 'test', messages: []},
+				);
+
+				t.true(result.includes('app.ts'), 'Should include .ts in src/');
+				t.false(result.includes('app.js'), 'Should exclude .js in src/');
+				t.false(result.includes('util.ts'), 'Should exclude .ts in lib/');
+			} finally {
+				process.chdir(originalCwd);
+			}
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+// ============================================================================
+// Tests for include/path formatter display
+// ============================================================================
+
+test('SearchFileContentsFormatter shows include parameter', t => {
+	const formatter = searchFileContentsTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter(
+		{query: 'test', include: '*.ts'},
+		'Found 5 matches',
+	);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Include:/);
+	t.regex(output!, /\*\.ts/);
+});
+
+test('SearchFileContentsFormatter shows path parameter', t => {
+	const formatter = searchFileContentsTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter(
+		{query: 'test', path: 'src/components'},
+		'Found 3 matches',
+	);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Path:/);
+	t.regex(output!, /src\/components/);
+});

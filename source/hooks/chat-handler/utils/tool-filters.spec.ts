@@ -77,7 +77,7 @@ test('filterValidToolCalls - creates error for non-existent tools', t => {
 	t.true(errorResults[0].content.includes('does not exist'));
 });
 
-test('filterValidToolCalls - deduplicates by ID', t => {
+test('filterValidToolCalls - allows duplicate IDs through', t => {
 	const toolCalls: ToolCall[] = [
 		{
 			id: 'call_1',
@@ -91,12 +91,10 @@ test('filterValidToolCalls - deduplicates by ID', t => {
 
 	const {validToolCalls} = filterValidToolCalls(toolCalls, null);
 
-	t.is(validToolCalls.length, 1);
-	t.is(validToolCalls[0].id, 'call_1');
-	t.deepEqual(validToolCalls[0].function.arguments, {a: 1}); // First one wins
+	t.is(validToolCalls.length, 2);
 });
 
-test('filterValidToolCalls - deduplicates by function signature', t => {
+test('filterValidToolCalls - allows identical function signatures through', t => {
 	const toolCalls: ToolCall[] = [
 		{
 			id: 'call_1',
@@ -110,8 +108,7 @@ test('filterValidToolCalls - deduplicates by function signature', t => {
 
 	const {validToolCalls} = filterValidToolCalls(toolCalls, null);
 
-	t.is(validToolCalls.length, 1);
-	t.is(validToolCalls[0].id, 'call_1'); // First one wins
+	t.is(validToolCalls.length, 2);
 });
 
 test('filterValidToolCalls - allows different tool calls', t => {

@@ -312,3 +312,290 @@ test('CustomCommandLoader - loadCommands clears aliases on reload', t => {
 	loader.loadCommands();
 	t.is(loader.getAllCommands().length, 1);
 });
+
+// ============================================================================
+// Directory-as-command
+// ============================================================================
+
+test('CustomCommandLoader - loads directory-as-command when dirname.md exists', t => {
+	const testDir = createTestDir('dir-as-cmd');
+	t.teardown(() => cleanupTestDir(testDir));
+
+	const commandsDir = join(testDir, '.nanocoder', 'commands');
+	const apiDocsDir = join(commandsDir, 'api-docs');
+	mkdirSync(apiDocsDir, {recursive: true});
+
+	// Create command file matching directory name
+	writeFileSync(
+		join(apiDocsDir, 'api-docs.md'),
+		`---
+description: Generate API docs
+tags: [api]
+---
+Generate API documentation.`,
+		'utf-8',
+	);
+
+	const loader = new CustomCommandLoader(testDir);
+	loader.loadCommands();
+
+	const command = loader.getCommand('api-docs');
+	t.truthy(command);
+	t.is(command?.name, 'api-docs');
+	t.is(command?.metadata.description, 'Generate API docs');
+	t.deepEqual(command?.metadata.tags, ['api']);
+});
+
+test('CustomCommandLoader - directory-as-command loads resources', t => {
+	const testDir = createTestDir('dir-resources');
+	t.teardown(() => cleanupTestDir(testDir));
+
+	const commandsDir = join(testDir, '.nanocoder', 'commands');
+	const mySkillDir = join(commandsDir, 'my-skill');
+	const resourcesDir = join(mySkillDir, 'resources');
+	mkdirSync(resourcesDir, {recursive: true});
+
+	writeFileSync(
+		join(mySkillDir, 'my-skill.md'),
+		`---
+description: Skill with resources
+resources: true
+---
+Do stuff.`,
+		'utf-8',
+	);
+	writeFileSync(join(resourcesDir, 'template.yaml'), 'key: value', 'utf-8');
+	writeFileSync(join(resourcesDir, 'helper.sh'), '#!/bin/bash\necho hi', 'utf-8');
+
+	const loader = new CustomCommandLoader(testDir);
+	loader.loadCommands();
+
+	const command = loader.getCommand('my-skill');
+	t.truthy(command);
+	t.truthy(command?.loadedResources);
+	t.is(command?.loadedResources?.length, 2);
+
+	const templateRes = command?.loadedResources?.find(
+		r => r.name === 'template.yaml',
+	);
+	t.truthy(templateRes);
+	t.is(templateRes?.type, 'config');
+
+	const scriptRes = command?.loadedResources?.find(
+		r => r.name === 'helper.sh',
+	);
+	t.truthy(scriptRes);
+	t.is(scriptRes?.type, 'script');
+});
+
+test('CustomCommandLoader - directory-as-command falls back to namespace when no dirname.md', t => {
+	const testDir = createTestDir('dir-namespace-fallback');
+	t.teardown(() => cleanupTestDir(testDir));
+
+	const commandsDir = join(testDir, '.nanocoder', 'commands');
+	const subDir = join(commandsDir, 'mygroup');
+	mkdirSync(subDir, {recursive: true});
+
+	// No mygroup.md inside mygroup/, so it should be treated as a namespace
+	createCommandFile(join(subDir, 'sub-cmd.md'), 'A sub command');
+
+	const loader = new CustomCommandLoader(testDir);
+	loader.loadCommands();
+
+	const command = loader.getCommand('mygroup:sub-cmd');
+	t.truthy(command);
+	t.is(command?.namespace, 'mygroup');
+});
+
+// ============================================================================
+// Auto-injectable commands
+// ============================================================================
+
+test('CustomCommandLoader - getAutoInjectableCommands returns commands with triggers', t => {
+	const testDir = createTestDir('auto-inject-triggers');
+	t.teardown(() => cleanupTestDir(testDir));
+
+	const commandsDir = join(testDir, '.nanocoder', 'commands');
+	mkdirSync(commandsDir, {recursive: true});
+
+	writeFileSync(
+		join(commandsDir, 'auto.md'),
+		`---
+description: Auto-injectable
+triggers: [generate api]
+---
+Auto content`,
+		'utf-8',
+	);
+	createCommandFile(join(commandsDir, 'manual.md'), 'Manual only');
+
+	const loader = new CustomCommandLoader(testDir);
+	loader.loadCommands();
+
+	const autoInjectable = loader.getAutoInjectableCommands();
+	t.is(autoInjectable.length, 1);
+	t.is(autoInjectable[0]?.name, 'auto');
+});
+
+test('CustomCommandLoader - getAutoInjectableCommands returns commands with tags', t => {
+	const testDir = createTestDir('auto-inject-tags');
+	t.teardown(() => cleanupTestDir(testDir));
+
+	const commandsDir = join(testDir, '.nanocoder', 'commands');
+	mkdirSync(commandsDir, {recursive: true});
+
+	writeFileSync(
+		join(commandsDir, 'tagged.md'),
+		`---
+description: Tagged command
+tags: [testing]
+---
+Tagged content`,
+		'utf-8',
+	);
+
+	const loader = new CustomCommandLoader(testDir);
+	loader.loadCommands();
+
+	const autoInjectable = loader.getAutoInjectableCommands();
+	t.is(autoInjectable.length, 1);
+	t.is(autoInjectable[0]?.name, 'tagged');
+});
+
+test('CustomCommandLoader - getAutoInjectableCommands returns empty when no triggers or tags', t => {
+	const testDir = createTestDir('auto-inject-none');
+	t.teardown(() => cleanupTestDir(testDir));
+
+	const commandsDir = join(testDir, '.nanocoder', 'commands');
+	mkdirSync(commandsDir, {recursive: true});
+	createCommandFile(join(commandsDir, 'plain.md'), 'Plain command');
+
+	const loader = new CustomCommandLoader(testDir);
+	loader.loadCommands();
+
+	const autoInjectable = loader.getAutoInjectableCommands();
+	t.is(autoInjectable.length, 0);
+});
+
+// ============================================================================
+// Relevance scoring
+// ============================================================================
+
+test('CustomCommandLoader - findRelevantCommands matches by trigger', t => {
+	const testDir = createTestDir('relevance-trigger');
+	t.teardown(() => cleanupTestDir(testDir));
+
+	const commandsDir = join(testDir, '.nanocoder', 'commands');
+	mkdirSync(commandsDir, {recursive: true});
+
+	writeFileSync(
+		join(commandsDir, 'api-cmd.md'),
+		`---
+description: API command
+triggers: [api docs, openapi]
+---
+Generate API docs.`,
+		'utf-8',
+	);
+
+	const loader = new CustomCommandLoader(testDir);
+	loader.loadCommands();
+
+	const relevant = loader.findRelevantCommands('generate api docs please', [
+		'read_file',
+	]);
+	t.is(relevant.length, 1);
+	t.is(relevant[0]?.name, 'api-cmd');
+});
+
+test('CustomCommandLoader - findRelevantCommands matches by tag', t => {
+	const testDir = createTestDir('relevance-tag');
+	t.teardown(() => cleanupTestDir(testDir));
+
+	const commandsDir = join(testDir, '.nanocoder', 'commands');
+	mkdirSync(commandsDir, {recursive: true});
+
+	writeFileSync(
+		join(commandsDir, 'test-cmd.md'),
+		`---
+description: Testing command
+tags: [testing, quality]
+triggers: [write tests]
+---
+Write unit tests.`,
+		'utf-8',
+	);
+
+	const loader = new CustomCommandLoader(testDir);
+	loader.loadCommands();
+
+	const relevant = loader.findRelevantCommands(
+		'help with testing this module',
+		[],
+	);
+	t.is(relevant.length, 1);
+	t.is(relevant[0]?.name, 'test-cmd');
+});
+
+test('CustomCommandLoader - findRelevantCommands returns empty when no match', t => {
+	const testDir = createTestDir('relevance-no-match');
+	t.teardown(() => cleanupTestDir(testDir));
+
+	const commandsDir = join(testDir, '.nanocoder', 'commands');
+	mkdirSync(commandsDir, {recursive: true});
+
+	writeFileSync(
+		join(commandsDir, 'api-cmd.md'),
+		`---
+description: API command
+triggers: [api docs]
+---
+Generate API docs.`,
+		'utf-8',
+	);
+
+	const loader = new CustomCommandLoader(testDir);
+	loader.loadCommands();
+
+	const relevant = loader.findRelevantCommands(
+		'fix the login bug',
+		['read_file'],
+	);
+	t.is(relevant.length, 0);
+});
+
+// ============================================================================
+// Source tracking
+// ============================================================================
+
+test('CustomCommandLoader - commands have source set to project', t => {
+	const testDir = createTestDir('source-project');
+	t.teardown(() => cleanupTestDir(testDir));
+
+	const commandsDir = join(testDir, '.nanocoder', 'commands');
+	mkdirSync(commandsDir, {recursive: true});
+	createCommandFile(join(commandsDir, 'test.md'), 'Test');
+
+	const loader = new CustomCommandLoader(testDir);
+	loader.loadCommands();
+
+	const command = loader.getCommand('test');
+	t.is(command?.source, 'project');
+});
+
+test('CustomCommandLoader - commands have lastModified set', t => {
+	const testDir = createTestDir('last-modified');
+	t.teardown(() => cleanupTestDir(testDir));
+
+	const commandsDir = join(testDir, '.nanocoder', 'commands');
+	mkdirSync(commandsDir, {recursive: true});
+	createCommandFile(join(commandsDir, 'test.md'), 'Test');
+
+	const loader = new CustomCommandLoader(testDir);
+	loader.loadCommands();
+
+	const command = loader.getCommand('test');
+	t.truthy(command?.lastModified);
+	t.true(command!.lastModified instanceof Date);
+});
+

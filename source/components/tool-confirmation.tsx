@@ -113,11 +113,16 @@ export default function ToolConfirmation({
 		}
 	});
 
-	// Auto-cancel if there's a formatter error (not validation error)
+	// Auto-handle errors without user interaction
 	React.useEffect(() => {
 		if (hasFormatterError && !hasValidationError) {
 			// Automatically cancel the tool execution only for formatter crashes
 			onConfirm(false);
+		}
+		if (hasValidationError) {
+			// Automatically proceed to execution phase where the validator
+			// will fail again and pass the error back to the model to correct
+			onConfirm(true);
 		}
 	}, [hasFormatterError, hasValidationError, onConfirm]);
 
@@ -152,18 +157,16 @@ export default function ToolConfirmation({
 					</Box>
 				)}
 
-				{/* Only show approval prompt if there's no formatter crash */}
-				{!(hasFormatterError && !hasValidationError) && (
+				{/* Only show approval prompt if there's no error */}
+				{!hasFormatterError && !hasValidationError && (
 					<>
 						<Box marginBottom={1}>
 							<Text color={colors.tool}>
-								{hasValidationError
-									? 'Validation failed. Do you still want to execute this tool?'
-									: `Do you want to execute ${
-											mcpInfo.isMCPTool
-												? `MCP tool "${toolCall.function.name}" from server "${mcpInfo.serverName}"`
-												: `tool "${toolCall.function.name}"`
-										}?`}
+								{`Do you want to execute ${
+									mcpInfo.isMCPTool
+										? `MCP tool "${toolCall.function.name}" from server "${mcpInfo.serverName}"`
+										: `tool "${toolCall.function.name}"`
+								}?`}
 							</Text>
 						</Box>
 

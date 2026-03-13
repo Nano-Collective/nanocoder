@@ -1,8 +1,8 @@
 import {Box, Text, useInput} from 'ink';
 import SelectInput from 'ink-select-input';
 import Spinner from 'ink-spinner';
-import TextInput from 'ink-text-input';
 import {useEffect, useRef, useState} from 'react';
+import TextInput from '@/components/text-input';
 import {colors} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import type {ProviderConfig} from '../../types/config';
@@ -233,6 +233,8 @@ export function ProviderStep({
 				// Find matching template (or use custom)
 				const template =
 					PROVIDER_TEMPLATES.find(t => t.id === provider.name) ||
+					(provider.sdkProvider &&
+						PROVIDER_TEMPLATES.find(t => t.id === provider.sdkProvider)) ||
 					PROVIDER_TEMPLATES.find(t => t.id === 'custom');
 
 				if (template) {

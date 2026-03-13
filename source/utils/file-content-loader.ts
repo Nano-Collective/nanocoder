@@ -1,5 +1,6 @@
 import {readFile, stat} from 'node:fs/promises';
-import {resolve} from 'node:path';
+import {extname, resolve} from 'node:path';
+import {BINARY_FILE_EXTENSIONS, MAX_FILE_TAG_SIZE_BYTES} from '@/constants.js';
 
 interface FileContentResult {
 	success: boolean;
@@ -41,6 +42,59 @@ export async function loadFileContent(
 					lineCount: 0,
 					lineRange,
 					tokens: 0,
+				},
+			};
+		}
+
+		// Binary extension check
+		const ext = extname(absPath).toLowerCase();
+		if (BINARY_FILE_EXTENSIONS.has(ext)) {
+			const fileType = ext.slice(1).toUpperCase();
+			const metadataContent = [
+				`[Binary file: ${filePath}]`,
+				`Type: ${fileType}`,
+				`Size: ${fileStats.size.toLocaleString()} bytes (${formatBytes(fileStats.size)})`,
+				`Last Modified: ${fileStats.mtime.toISOString()}`,
+				'',
+				'(Binary files cannot be included as text content)',
+			].join('\n');
+
+			return {
+				success: true,
+				content: metadataContent,
+				metadata: {
+					path: filePath,
+					absolutePath: absPath,
+					size: fileStats.size,
+					lineCount: 0,
+					lineRange,
+					tokens: Math.ceil(metadataContent.length / 4),
+				},
+			};
+		}
+
+		// Size check
+		if (fileStats.size > MAX_FILE_TAG_SIZE_BYTES && !lineRange) {
+			const estimatedLines = Math.round(fileStats.size / 40);
+			const metadataContent = [
+				`[Large file: ${filePath}]`,
+				`Size: ${fileStats.size.toLocaleString()} bytes (${formatBytes(fileStats.size)})`,
+				`Lines: ~${estimatedLines.toLocaleString()}`,
+				`Last Modified: ${fileStats.mtime.toISOString()}`,
+				'',
+				`(File exceeds ${formatBytes(MAX_FILE_TAG_SIZE_BYTES)} limit for inline tagging. Use @file:1-100 to tag specific line ranges)`,
+			].join('\n');
+
+			return {
+				success: true,
+				content: metadataContent,
+				metadata: {
+					path: filePath,
+					absolutePath: absPath,
+					size: fileStats.size,
+					lineCount: 0,
+					lineRange,
+					tokens: Math.ceil(metadataContent.length / 4),
 				},
 			};
 		}
@@ -133,4 +187,10 @@ export async function loadFileContent(
  */
 function formatFileContent(lines: string[], filePath: string): string {
 	return `Path: ${filePath}\n\n${lines.join('\n')}`;
+}
+
+function formatBytes(bytes: number): string {
+	if (bytes < 1024) return `${bytes} B`;
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+	return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }

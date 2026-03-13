@@ -37,6 +37,7 @@ A local-first CLI coding agent that brings the power of agentic coding tools lik
   - [Advanced Tool System](#advanced-tool-system)
   - [Custom Command System](#custom-command-system)
   - [Enhanced User Experience](#enhanced-user-experience)
+  - [Keyboard Shortcuts](#keyboard-shortcuts)
   - [Developer Features](#developer-features)
 - [VS Code Extension](#vs-code-extension)
 - [Community](#community)
@@ -141,6 +142,10 @@ Or install from `packages` output:
   ];
 }
 ```
+
+### Uninstalling
+
+See the [Uninstalling Guide](docs/uninstalling.md) for full instructions on removing Nanocoder, troubleshooting leftover binaries, and cleaning up configuration files.
 
 ### For Development
 
@@ -285,7 +290,7 @@ Nanocoder supports any OpenAI-compatible API through a unified provider configur
 
 1. **Interactive Setup (Recommended for new users)**: Run `/setup-providers` inside Nanocoder for a guided wizard with provider templates. The wizard allows you to:
    - Choose between project-level or global configuration
-   - Select from common provider templates (Ollama, OpenRouter, LM Studio, etc.)
+   - Select from common provider templates (Ollama, OpenRouter, LM Studio, Kimi Code, etc.)
    - Add custom OpenAI-compatible providers manually
    - Edit or delete existing providers
    - Fetch available models automatically from your provider
@@ -366,6 +371,13 @@ Nanocoder looks for configuration in the following order (first found wins):
 				"baseUrl": "https://api.poe.com/v1",
 				"apiKey": "your-poe-api-key",
 				"models": ["Claude-Sonnet-4", "GPT-4o", "Gemini-2.5-Pro"]
+			},
+			{
+				"name": "Gemini",
+				"sdkProvider": "google",
+				"baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+				"apiKey": "your-gemini-api-key",
+				"models": ["gemini-3-flash-preview", "gemini-3-pro-preview"]
 			}
 		]
 	}
@@ -386,6 +398,8 @@ Nanocoder looks for configuration in the following order (first found wins):
 - **GitHub Models**: `"baseUrl": "https://models.github.ai/inference"` (requires PAT with `models:read` scope)
 - **Z.ai**: `"baseUrl": "https://api.z.ai/api/paas/v4/"`
 - **Z.ai Coding**: `"baseUrl": "https://api.z.ai/api/coding/paas/v4/"`
+- **Kimi Code**: `"sdkProvider": "anthroopic"`, `"baseUrl": "https://api.kimi.com/coding/v1"`
+- **Google Gemini**: `"sdkProvider": "google"` (get API key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey))
 
 **Provider Configuration:**
 
@@ -393,16 +407,22 @@ Nanocoder looks for configuration in the following order (first found wins):
 - `baseUrl`: OpenAI-compatible API endpoint
 - `apiKey`: API key (optional, may not be required)
 - `models`: Available model list for `/model` command
+- `disableToolModels`: List of model names to disable tool calling for (optional)
+- `sdkProvider`: AI SDK provider package to use (optional, defaults to `openai-compatible`)
+  - `openai-compatible`: Default, works with any OpenAI-compatible API
+  - `google`: Use `@ai-sdk/google` for native Google Gemini support (required for Gemini 3 models with tool calling)
+  - `anthropic`: Use `@ai-sdk/anthropic` for providers that require it like Kimi Coding
 
 **Environment Variables:**
 
 Keep API keys out of version control using environment variables. Variables are loaded from shell environment (`.bashrc`, `.zshrc`) or `.env` file in your working directory.
 
 - `NANOCODER_CONFIG_DIR`: Override the global configuration directory.
+- `NANOCODER_CONTEXT_LIMIT`: Set a default context limit (in tokens) for models not found on models.dev. This is used as a fallback when the model's context window is unknown, enabling auto-compact and `/usage` to work correctly.
 - `NANOCODER_DATA_DIR`: Override the application data directory used for internal data like usage statistics.
 
 **Syntax:** `$VAR_NAME`, `${VAR_NAME}`, or `${VAR_NAME:-default}`
-**Supported in:** `baseUrl`, `apiKey`, `models`, MCP server `command`, `args`, `env`
+**Supported in:** `baseUrl`, `apiKey`, `models`, `disableToolModels`, `MCP server`, `command`, `args`, `env`
 
 See `.env.example` for setup instructions
 
@@ -579,18 +599,22 @@ You can override this directory using `NANOCODER_DATA_DIR`.
 - `/model` - Switch between available models
 - `/provider` - Switch between configured AI providers
 - `/status` - Display current status (CWD, provider, model, theme, available updates, AGENTS setup)
+- `/tasks` - Manage task list for tracking complex work (see [Task Management](#task-management) section)
 - `/model-database` - Browse coding models from OpenRouter (searchable, filterable by open/proprietary)
+- `/settings` - Interactive menu to access Nanocoder theme settings (theme, title-shape, nanocoder-shape) and commands
 - `/mcp` - Show connected MCP servers and their tools
 - `/custom-commands` - List all custom commands
 - `/checkpoint` - Save and restore conversation snapshots (see [Checkpointing](#checkpointing) section)
+- `/compact` - Compress message history to reduce context usage (see [Context Compression](docs/context-compression.md))
+- `/context-max` - Set maximum context length for the current session (useful for models not listed on models.dev)
 - `/exit` - Exit the application
 - `/export` - Export current session to markdown file
-- `/theme` - Select a theme for the Nanocoder CLI
-- `/title-shape` - Select a title shape style for the Nanocoder CLI (real-time preview)
-- `/nanocoder-shape` - Select a branding font style for the Nanocoder welcome banner (real-time preview)
 - `/update` - Update Nanocoder to the latest version
 - `/usage` – Get current model context usage visually
 - `/lsp` – List connected LSP servers
+- `/schedule` – Schedule recurring AI tasks (see [Scheduled Tasks](#scheduled-tasks) section)
+- `/explorer` - Interactive file browser to navigate, preview, and select files for context
+- `/ide` - Connect to an IDE for live integration (e.g., VS Code diff previews)
 - `!command` - Execute bash commands directly without leaving Nanocoder (output becomes context for the LLM)
 - `@file` - Include file contents in messages automatically via fuzzy search as you type
 
@@ -654,46 +678,147 @@ Nanocoder supports conversation checkpointing, allowing you to save snapshots of
 /checkpoint list
 ```
 
+#### Task Management
+
+Nanocoder provides a task management system for tracking complex multi-step work. Tasks persist in `.nanocoder/tasks.json` and are useful for both users and AI models to track progress on involved tasks.
+
+The LLM has access to task management tools (`create_task`, `list_tasks`, `update_task`, `delete_task`) and will automatically use them to track progress on complex work. You don't need to manually create tasks if you don't want to - the AI will manage them for you.
+
+**Task Commands:**
+
+- `/tasks` - Show all tasks with their status
+- `/tasks add <title>` - Add a new task (also works: `/tasks <title>`)
+- `/tasks remove <number>` - Remove a task by number (alias: `/tasks rm <number>`)
+- `/tasks clear` - Clear all tasks
+
+**Examples:**
+
+```bash
+# View current tasks
+/tasks
+
+# Add a new task
+/tasks add Implement user authentication
+
+# Or simply type the task title
+/tasks Implement user authentication
+
+# Remove a task (note the number)
+/tasks remove 1
+
+# Clear all tasks
+/tasks clear
+```
+
+**Storage:**
+
+- Tasks are stored in `.nanocoder/tasks.json` in your project directory
+- Tasks are automatically cleared when Nanocoder starts (to keep the task list fresh)
+- Tasks are also cleared when using the `/clear` command
+- Consider adding `.nanocoder/tasks.json` to your `.gitignore` if you want to exclude it from version control
+
+#### Scheduled Tasks
+
+Nanocoder supports scheduling recurring AI tasks using cron expressions. This is useful for automating routine coding tasks like dependency updates, code reviews, or daily standup summaries.
+
+**Quick Start:**
+
+```bash
+# Create a new scheduled task file
+/schedule create deps-update
+
+# Add a schedule for it (every Monday at 9am)
+/schedule add "0 9 * * MON" deps-update
+
+# Start the scheduler
+/schedule start
+```
+
+**Commands:**
+
+- `/schedule create <name>` - Create a new scheduled task file
+- `/schedule add "<cron>" <name>` - Add a schedule for a task (`.md` extension inferred)
+- `/schedule list` - Show all configured schedules
+- `/schedule remove <id>` - Remove a schedule by ID
+- `/schedule logs [id]` - Show execution logs
+- `/schedule start` - Enter scheduler mode to run scheduled tasks
+
+> **Full documentation**: See the [Scheduled Tasks Guide](docs/scheduler.md) for detailed usage, examples, and tips.
+
+#### File Explorer
+
+The `/explorer` command opens an interactive file browser for navigating your project, previewing files with syntax highlighting, and selecting multiple files to add as context.
+
+**Navigation:**
+
+| Key | Action |
+|-----|--------|
+| ↑/↓ | Navigate through files and directories |
+| Enter | Expand/collapse directory or preview file |
+| Space | Toggle file/directory selection |
+| / | Enter search mode (filters all files including nested) |
+| Backspace | Collapse current directory |
+| Esc | Exit explorer (selected files are added to input) |
+
+**Features:**
+
+- **Tree view**: Browse your project structure with expandable directories
+- **File preview**: View file contents with syntax highlighting before selecting
+- **Compressed indentation**: Preview displays content with compressed indentation (tabs/4-spaces become 2-spaces) for narrow terminals
+- **Multi-select**: Select multiple files to add as context at once
+- **Directory selection**: Press Space on a directory to select all files within it
+- **Search**: Press `/` to filter files by name across the entire tree
+- **Token estimation**: Shows estimated token count for selected files with warning for large selections (10k+ tokens)
+- **VS Code integration**: When running with `--vscode`, previewing a file also opens it in VS Code for full-featured viewing
+
+**Selection indicators:**
+
+- `✓` - File or directory fully selected
+- `◐` - Directory partially selected (some files within)
+- `✗` - File not selected (in preview mode)
+- `v` / `>` - Directory expanded / collapsed
+
+**Example workflow:**
+
+```bash
+# Open the file explorer
+/explorer
+
+# Navigate to src/components, expand it
+# Select multiple component files with Space
+# Press Esc to add them to your input as @file mentions
+```
+
 #### Custom Commands
 
-Nanocoder supports custom commands defined as markdown files in the `.nanocoder/commands` directory. Like `agents.config.json`, this directory is created per codebase, allowing you to create reusable prompts with parameters and organize them by category specific to each project.
+Nanocoder supports custom commands defined as markdown files in `.nanocoder/commands/`. Define reusable AI prompts with parameters, aliases, and auto-injection support, organized per project.
 
-**Example custom command** (`.nanocoder/commands/test.md`):
+```bash
+# Create a command with AI assistance
+/commands create review-code
+
+# Or create the file manually in .nanocoder/commands/review-code.md
+```
+
+**Example** (`.nanocoder/commands/test.md`):
 
 ```markdown
 ---
-description: 'Generate comprehensive unit tests for the specified component'
-aliases: ['testing', 'spec']
-parameters:
-  - name: 'component'
-    description: 'The component or function to test'
-    required: true
+description: Generate comprehensive unit tests
+aliases: [unittest, test-gen]
+parameters: [filename]
 ---
 
-Generate comprehensive unit tests for {{component}}. Include:
-
-- Happy path scenarios
-- Edge cases and error handling
-- Mock dependencies where appropriate
-- Clear test descriptions
+Generate comprehensive unit tests for {{filename}}.
 ```
 
-**Usage**: `/test component="UserService"`
+**Usage**: `/test src/utils.ts`
 
-**Features**:
+**Commands**: `/commands` (list), `/commands show <name>`, `/commands refresh`, `/commands create <name>`
 
-- YAML frontmatter for metadata (description, aliases, parameters)
-- Template variable substitution with `{{parameter}}` syntax
-- Namespace support through directories (e.g., `/refactor:dry`)
-- Autocomplete integration for command discovery
-- Parameter validation and prompting
+**Pre-installed**: `/test`, `/review`, `/refactor:dry`, `/refactor:solid`
 
-**Pre-installed Commands**:
-
-- `/test` - Generate comprehensive unit tests for components
-- `/review` - Perform thorough code reviews with suggestions
-- `/refactor:dry` - Apply DRY (Don't Repeat Yourself) principle
-- `/refactor:solid` - Apply SOLID design principles
+> **Full documentation**: See the [Custom Commands Guide](docs/custom-commands.md) for frontmatter reference, auto-injection, resources, namespaces, and more.
 
 ## Features
 
@@ -716,10 +841,11 @@ Generate comprehensive unit tests for {{component}}. Include:
 ### Custom Command System
 
 - **Markdown-based commands**: Define reusable prompts in `.nanocoder/commands/`
+- **AI-assisted creation**: `/commands create <name>` scaffolds a command and helps you write it
 - **Template variables**: Use `{{parameter}}` syntax for dynamic content
-- **Namespace organization**: Organize commands in folders (e.g., `refactor/dry.md`)
-- **Autocomplete support**: Tab completion for command discovery
-- **Rich metadata**: YAML frontmatter for descriptions, aliases, and parameters
+- **Auto-injection**: Commands with tags/triggers are automatically injected into context when relevant
+- **Namespace organization**: Organize commands in folders (e.g., `refactor/dry.md` becomes `/refactor:dry`)
+- **Rich metadata**: YAML frontmatter for descriptions, aliases, parameters, and [more](docs/custom-commands.md)
 
 ### Enhanced User Experience
 
@@ -733,6 +859,21 @@ Generate comprehensive unit tests for {{component}}. Include:
   - **Normal mode**: Standard tool confirmation flow - review potentially dangerous tool calls before execution
   - **Auto-accept mode**: Automatically accepts more tool calls without confirmation for faster workflows
   - **Plan mode**: AI suggests actions but doesn't execute tools - useful for planning and exploration
+
+### Keyboard Shortcuts
+
+| Action | Shortcut | Notes |
+|--------|----------|-------|
+| Submit prompt | Enter | |
+| New line (multi-line input) | Ctrl+J | Most reliable across terminals |
+| New line (multi-line input) | Shift+Enter | Terminal-dependent |
+| New line (multi-line input) | Option/Alt+Enter | VS Code integrated terminal |
+| Toggle development mode | Shift+Tab | Cycles through normal/auto-accept/plan |
+| Cancel AI response | Esc | While AI is processing |
+| Clear input | Esc (twice) | Press Esc twice to clear current input |
+| History navigation | ↑/↓ | Navigate through prompt history |
+
+> **Note on multi-line input**: Terminal support for Shift+Enter / Option/Alt+Enter varies in terminals and operating systems. If one of these shortcuts doesn't work in your terminal, try and use Ctrl+J which sends a literal newline character and works more reliably across platforms and software.
 
 ### Developer Features
 
