@@ -22,6 +22,8 @@ export interface NonInteractiveModeResult {
 	nonInteractiveLoadingMessage: string | null;
 }
 
+const TIMEOUT_BUFFER_FACTOR = 2;
+
 /**
  * Handles non-interactive mode logic:
  * - Automatically submits prompt when ready
@@ -88,7 +90,7 @@ export function useNonInteractiveMode({
 					// we should allow it to run for at least that long
 					effectiveTimeout = Math.max(
 						TIMEOUT_EXECUTION_MAX_MS,
-						configuredTimeout * 2,
+						configuredTimeout * TIMEOUT_BUFFER_FACTOR,
 					);
 				}
 			}
