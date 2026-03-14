@@ -41,6 +41,7 @@ interface UseToolHandlerProps {
 	client?: LLMClient | null;
 	currentProvider?: string;
 	setDevelopmentMode?: (mode: DevelopmentMode) => void;
+	compactToolDisplay?: boolean;
 }
 
 export function useToolHandler({
@@ -63,6 +64,7 @@ export function useToolHandler({
 	client: _client,
 	currentProvider: _currentProvider,
 	setDevelopmentMode,
+	compactToolDisplay,
 }: UseToolHandlerProps) {
 	// Continue conversation with tool results - maintains the proper loop
 	const continueConversationWithToolResults = async (
@@ -319,6 +321,7 @@ export function useToolHandler({
 					toolManager,
 					addToChatQueue,
 					getNextComponentKey,
+					compactToolDisplay,
 				);
 			}
 

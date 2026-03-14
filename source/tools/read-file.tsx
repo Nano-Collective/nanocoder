@@ -482,4 +482,5 @@ export const readFileTool: NanocoderToolExport = {
 	tool: readFileCoreTool,
 	formatter: readFileFormatter,
 	validator: readFileValidator,
+	readOnly: true,
 };

@@ -92,4 +92,5 @@ export const listTasksTool: NanocoderToolExport = {
 	name: 'list_tasks' as const,
 	tool: listTasksCoreTool,
 	formatter: listTasksFormatter,
+	readOnly: true,
 };

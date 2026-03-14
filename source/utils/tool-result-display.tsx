@@ -1,9 +1,131 @@
+import {Box, Text} from 'ink';
 import React from 'react';
 import {ErrorMessage} from '@/components/message-box';
 import ToolMessage from '@/components/tool-message';
+import {useTheme} from '@/hooks/useTheme';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {ToolCall, ToolResult} from '@/types/index';
 import {parseToolArguments} from '@/utils/tool-args-parser';
+
+/**
+ * Compact tool result display - shows "⚒ toolName  description" in tool color.
+ */
+function CompactToolResult({
+	toolName,
+	description,
+}: {
+	toolName: string;
+	description: string;
+}) {
+	const {colors} = useTheme();
+	return (
+		<Text color={colors.tool}>
+			{'\u2692'} {description}
+		</Text>
+	);
+}
+
+/**
+ * Generate a compact grouped description for N calls of the same tool.
+ * Always uses count-based phrasing for consistency.
+ */
+function getGroupedCompactDescription(toolName: string, count: number): string {
+	const s = count === 1 ? '' : 's';
+	switch (toolName) {
+		case 'read_file':
+			return `Read ${count} file${s}`;
+		case 'write_file':
+			return `Wrote ${count} file${s}`;
+		case 'string_replace':
+			return `Made ${count} edit${s}`;
+		case 'execute_bash':
+			return `Ran ${count} command${s}`;
+		case 'search_file_contents':
+			return `Searched for ${count} pattern${s}`;
+		case 'find_files':
+			return `Ran ${count} file search${count === 1 ? '' : 'es'}`;
+		case 'list_directory':
+			return `Listed ${count} director${count === 1 ? 'y' : 'ies'}`;
+		case 'web_search':
+			return `Ran ${count} web search${count === 1 ? '' : 'es'}`;
+		case 'fetch_url':
+			return `Fetched ${count} URL${s}`;
+		case 'git_status':
+		case 'git_diff':
+		case 'git_log':
+			return `Ran ${count} git command${s}`;
+		case 'lsp_get_diagnostics':
+			return `Got diagnostics ${count} time${s}`;
+		case 'create_task':
+			return `Created ${count} task${s}`;
+		case 'list_tasks':
+			return `Listed tasks ${count} time${s}`;
+		case 'update_task':
+			return `Updated ${count} task${s}`;
+		case 'delete_task':
+			return `Deleted ${count} task${s}`;
+		case 'ask_question':
+			return `Asked ${count} question${s}`;
+		default:
+			return `Executed ${toolName} \u00d7 ${count}`;
+	}
+}
+
+/**
+ * Live display component for running compact tool counts.
+ * Shows accumulated counts during execution (e.g. "⚒ Read 7 files").
+ * Rendered in the live area (not Static) so it updates in-place.
+ */
+export function LiveCompactCounts({counts}: {counts: Record<string, number>}) {
+	const {colors} = useTheme();
+	return (
+		<Box flexDirection="column" marginBottom={1}>
+			{Object.entries(counts).map(([toolName, count]) => (
+				<Text key={toolName} color={colors.tool}>
+					{'\u2692'} {getGroupedCompactDescription(toolName, count)}
+				</Text>
+			))}
+		</Box>
+	);
+}
+
+/**
+ * Flush accumulated compact counts to the static chat queue.
+ * Called when the conversation loop finishes to persist the summary.
+ */
+export function displayCompactCountsSummary(
+	counts: Record<string, number>,
+	addToChatQueue: (component: React.ReactNode) => void,
+	getNextComponentKey: () => number,
+): void {
+	const entries = Object.entries(counts);
+	for (let i = 0; i < entries.length; i++) {
+		const [toolName, count] = entries[i];
+		const isLast = i === entries.length - 1;
+		const description = getGroupedCompactDescription(toolName, count);
+		if (isLast) {
+			// Last entry gets wrapped in a flex-column Box with marginBottom
+			// to separate from subsequent content (same pattern as ToolMessage)
+			addToChatQueue(
+				<Box
+					key={`tool-compact-summary-${toolName}-${getNextComponentKey()}`}
+					flexDirection="column"
+					marginBottom={1}
+				>
+					<CompactToolResult toolName={toolName} description={description} />
+				</Box>,
+			);
+		} else {
+			addToChatQueue(
+				<CompactToolResult
+					key={`tool-compact-summary-${toolName}-${getNextComponentKey()}`}
+					toolName={toolName}
+					description={description}
+				/>,
+			);
+		}
+	}
+}
 
 /**
  * Display tool result with proper formatting
@@ -14,6 +136,7 @@ import {parseToolArguments} from '@/utils/tool-args-parser';
  * @param toolManager - The tool manager instance (for formatters)
  * @param addToChatQueue - Function to add components to chat queue
  * @param getNextComponentKey - Function to generate unique React keys
+ * @param compact - When true, show one-liner instead of full formatter output
  */
 export async function displayToolResult(
 	toolCall: ToolCall,
@@ -21,12 +144,13 @@ export async function displayToolResult(
 	toolManager: ToolManager | null,
 	addToChatQueue: (component: React.ReactNode) => void,
 	getNextComponentKey: () => number,
+	compact?: boolean,
 ): Promise<void> {
 	// Check if this is an error result
 	const isError = result.content.startsWith('Error: ');
 
 	if (isError) {
-		// Display as error message
+		// Display as error message - always shown in full
 		const errorMessage = result.content.replace(/^Error: /, '');
 		addToChatQueue(
 			<ErrorMessage
@@ -35,6 +159,19 @@ export async function displayToolResult(
 				}-${getNextComponentKey()}-${Date.now()}`}
 				message={errorMessage}
 				hideBox={true}
+			/>,
+		);
+		return;
+	}
+
+	// Compact mode: show count-based one-liner instead of full formatter output
+	if (compact) {
+		const description = getGroupedCompactDescription(result.name, 1);
+		addToChatQueue(
+			<CompactToolResult
+				key={`tool-compact-${result.tool_call_id}-${getNextComponentKey()}`}
+				toolName={result.name}
+				description={description}
 			/>,
 		);
 		return;

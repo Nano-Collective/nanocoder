@@ -26,6 +26,9 @@ export interface UseChatHandlerProps {
 		systemMessage: Message,
 	) => void;
 	onConversationComplete?: () => void;
+	compactToolDisplayRef?: React.RefObject<boolean>;
+	onSetCompactToolCounts?: (counts: Record<string, number> | null) => void;
+	compactToolCountsRef?: React.MutableRefObject<Record<string, number>>;
 }
 
 export interface ChatHandlerReturn {

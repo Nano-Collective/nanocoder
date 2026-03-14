@@ -3,15 +3,8 @@ import type {StreamCallbacks} from '@/types/index';
 import {createOnStepFinishHandler, createPrepareStepHandler} from './streaming-handler.js';
 import type {TestableMessage} from '../types.js';
 
-test('createOnStepFinishHandler calls onToolExecuted callback', t => {
-	let callbackCalled = false;
-	const callbacks: StreamCallbacks = {
-		onToolExecuted: (toolCall, result) => {
-			callbackCalled = true;
-			t.is(toolCall.function.name, 'test_tool');
-			t.is(result, 'test output');
-		},
-	};
+test('createOnStepFinishHandler handles steps with tool calls (logging only)', t => {
+	const callbacks: StreamCallbacks = {};
 
 	const handler = createOnStepFinishHandler(callbacks);
 	handler({
@@ -22,22 +15,14 @@ test('createOnStepFinishHandler calls onToolExecuted callback', t => {
 				input: {},
 			},
 		],
-		toolResults: [
-			{
-				output: 'test output',
-			},
-		],
 	});
 
-	t.true(callbackCalled);
+	// No error means logging worked fine
+	t.pass();
 });
 
 test('createOnStepFinishHandler handles steps without tool calls', t => {
-	const callbacks: StreamCallbacks = {
-		onToolExecuted: () => {
-			t.fail('Should not be called');
-		},
-	};
+	const callbacks: StreamCallbacks = {};
 
 	const handler = createOnStepFinishHandler(callbacks);
 	handler({
@@ -48,11 +33,7 @@ test('createOnStepFinishHandler handles steps without tool calls', t => {
 });
 
 test('createOnStepFinishHandler handles steps with tool calls but no results', t => {
-	const callbacks: StreamCallbacks = {
-		onToolExecuted: () => {
-			t.fail('Should not be called');
-		},
-	};
+	const callbacks: StreamCallbacks = {};
 
 	const handler = createOnStepFinishHandler(callbacks);
 	handler({
@@ -66,33 +47,6 @@ test('createOnStepFinishHandler handles steps with tool calls but no results', t
 	});
 
 	t.pass();
-});
-
-test('createOnStepFinishHandler converts object output to JSON string', t => {
-	let resultReceived = '';
-	const callbacks: StreamCallbacks = {
-		onToolExecuted: (_toolCall, result) => {
-			resultReceived = result;
-		},
-	};
-
-	const handler = createOnStepFinishHandler(callbacks);
-	handler({
-		toolCalls: [
-			{
-				toolCallId: 'call_123',
-				toolName: 'test_tool',
-				input: {},
-			},
-		],
-		toolResults: [
-			{
-				output: {key: 'value'},
-			},
-		],
-	});
-
-	t.is(resultReceived, '{"key":"value"}');
 });
 
 test('createPrepareStepHandler filters empty assistant messages', t => {

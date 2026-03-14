@@ -323,3 +323,54 @@ test('UserInput component structure is valid', t => {
 	t.truthy(output);
 	t.true(output!.length > 0);
 });
+
+// ============================================================================
+// Compact Tool Display Tests
+// ============================================================================
+
+test('UserInput shows ctrl-o expand hint when disabled with compact display on', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				disabled={true}
+				onToggleCompactDisplay={() => {}}
+				compactToolDisplay={true}
+			/>
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /ctrl-o.*expand/);
+	unmount();
+});
+
+test('UserInput shows ctrl-o compact hint when disabled with compact display off', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				disabled={true}
+				onToggleCompactDisplay={() => {}}
+				compactToolDisplay={false}
+			/>
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /ctrl-o.*compact/);
+	unmount();
+});
+
+test('UserInput does not show ctrl-o hint when onToggleCompactDisplay is not provided', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput disabled={true} />
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /ctrl-o/);
+	unmount();
+});

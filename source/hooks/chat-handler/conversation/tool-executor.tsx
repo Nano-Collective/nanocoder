@@ -8,8 +8,95 @@ import {parseToolArguments} from '@/utils/tool-args-parser';
 import {displayToolResult} from '@/utils/tool-result-display';
 
 /**
+ * Validates and executes a single tool call.
+ * Returns the tool call paired with its result for sequential post-processing.
+ */
+const executeOne = async (
+	toolCall: ToolCall,
+	toolManager: ToolManager | null,
+	processToolUse: (toolCall: ToolCall) => Promise<ToolResult>,
+): Promise<{
+	toolCall: ToolCall;
+	result: ToolResult;
+	validationError?: string;
+}> => {
+	try {
+		// Run validator if available
+		const validator = toolManager?.getToolValidator(toolCall.function.name);
+		if (validator) {
+			const parsedArgs = parseToolArguments(toolCall.function.arguments);
+			const validationResult = await validator(parsedArgs);
+			if (!validationResult.valid) {
+				return {
+					toolCall,
+					result: {
+						tool_call_id: toolCall.id,
+						role: 'tool' as const,
+						name: toolCall.function.name,
+						content: `Validation failed: ${formatError(validationResult.error)}`,
+					},
+					validationError: validationResult.error,
+				};
+			}
+		}
+
+		const result = await processToolUse(toolCall);
+		return {toolCall, result};
+	} catch (error) {
+		return {
+			toolCall,
+			result: {
+				tool_call_id: toolCall.id,
+				role: 'tool' as const,
+				name: toolCall.function.name,
+				content: `Error: ${formatError(error)}`,
+			},
+		};
+	}
+};
+
+/**
+ * Groups consecutive read-only tools for parallel execution.
+ * Non-read-only tools form single-item groups to preserve ordering.
+ *
+ * Example: [read, read, write, read, read] → [[read, read], [write], [read, read]]
+ */
+const groupByReadOnly = (
+	tools: ToolCall[],
+	toolManager: ToolManager | null,
+): ToolCall[][] => {
+	const groups: ToolCall[][] = [];
+	let currentGroup: ToolCall[] = [];
+	let currentIsReadOnly: boolean | null = null;
+
+	for (const toolCall of tools) {
+		const isReadOnly = toolManager?.isReadOnly(toolCall.function.name) ?? false;
+
+		if (isReadOnly && currentIsReadOnly === true) {
+			// Continue the current read-only group
+			currentGroup.push(toolCall);
+		} else {
+			// Start a new group
+			if (currentGroup.length > 0) {
+				groups.push(currentGroup);
+			}
+			currentGroup = [toolCall];
+			currentIsReadOnly = isReadOnly;
+		}
+	}
+
+	if (currentGroup.length > 0) {
+		groups.push(currentGroup);
+	}
+
+	return groups;
+};
+
+/**
  * Executes tools directly without confirmation.
- * Handles validation, execution, and error display.
+ * Read-only tools in consecutive groups are executed in parallel.
+ * Non-read-only tools are executed sequentially to preserve ordering.
+ * Results are displayed in the original input order.
  *
  * @returns Array of tool results from executed tools
  */
@@ -19,89 +106,90 @@ export const executeToolsDirectly = async (
 	conversationStateManager: React.MutableRefObject<ConversationStateManager>,
 	addToChatQueue: (component: React.ReactNode) => void,
 	getNextComponentKey: () => number,
+	options?: {
+		compactDisplay?: boolean;
+		onCompactToolCount?: (toolName: string) => void;
+	},
 ): Promise<ToolResult[]> => {
 	// Import processToolUse here to avoid circular dependencies
 	const {processToolUse} = await import('@/message-handler');
+
+	// Group consecutive read-only tools for parallel execution
+	const groups = groupByReadOnly(toolsToExecuteDirectly, toolManager);
+
 	const directResults: ToolResult[] = [];
 
-	for (const toolCall of toolsToExecuteDirectly) {
-		try {
-			// Run validator if available
-			const validator = toolManager?.getToolValidator(toolCall.function.name);
-			if (validator) {
-				const parsedArgs = parseToolArguments(toolCall.function.arguments);
+	for (const group of groups) {
+		const isReadOnlyGroup =
+			toolManager?.isReadOnly(group[0].function.name) ?? false;
 
-				const validationResult = await validator(parsedArgs);
-				if (!validationResult.valid) {
-					// Validation failed - create error result and skip execution
-					const errorResult: ToolResult = {
-						tool_call_id: toolCall.id,
-						role: 'tool' as const,
-						name: toolCall.function.name,
-						content: `Validation failed: ${formatError(validationResult.error)}`,
-					};
-					directResults.push(errorResult);
+		let executions: Array<{
+			toolCall: ToolCall;
+			result: ToolResult;
+			validationError?: string;
+		}>;
 
-					// Update conversation state with error
-					conversationStateManager.current.updateAfterToolExecution(
-						toolCall,
-						errorResult.content,
-					);
-
-					// Display the validation error to the user
-					addToChatQueue(
-						<ErrorMessage
-							key={`validation-error-${toolCall.id}-${Date.now()}`}
-							message={validationResult.error}
-							hideBox={true}
-						/>,
-					);
-
-					continue; // Skip to next tool
-				}
+		if (isReadOnlyGroup && group.length > 1) {
+			// Parallel execution for consecutive read-only tools
+			executions = await Promise.all(
+				group.map(toolCall =>
+					executeOne(toolCall, toolManager, processToolUse),
+				),
+			);
+		} else {
+			// Sequential execution for non-read-only tools (or single-item groups)
+			executions = [];
+			for (const toolCall of group) {
+				executions.push(
+					await executeOne(toolCall, toolManager, processToolUse),
+				);
 			}
+		}
 
-			const result = await processToolUse(toolCall);
+		// Display results in order
+		for (const {toolCall, result, validationError} of executions) {
 			directResults.push(result);
 
-			// Update conversation state with tool execution
+			// Update conversation state
 			conversationStateManager.current.updateAfterToolExecution(
 				toolCall,
 				result.content,
 			);
 
-			// Display the tool result immediately
-			await displayToolResult(
-				toolCall,
-				result,
-				toolManager,
-				addToChatQueue,
-				getNextComponentKey,
-			);
-		} catch (error) {
-			// Handle tool execution errors
-			const errorResult: ToolResult = {
-				tool_call_id: toolCall.id,
-				role: 'tool' as const,
-				name: toolCall.function.name,
-				content: `Error: ${formatError(error)}`,
-			};
-			directResults.push(errorResult);
-
-			// Update conversation state with error
-			conversationStateManager.current.updateAfterToolExecution(
-				toolCall,
-				errorResult.content,
-			);
-
-			// Display the error result
-			await displayToolResult(
-				toolCall,
-				errorResult,
-				toolManager,
-				addToChatQueue,
-				getNextComponentKey,
-			);
+			if (validationError) {
+				// Display validation error (always shown in full)
+				addToChatQueue(
+					<ErrorMessage
+						key={`validation-error-${toolCall.id}-${Date.now()}`}
+						message={validationError}
+						hideBox={true}
+					/>,
+				);
+			} else if (options?.compactDisplay) {
+				// In compact mode, signal the count callback for live display
+				const isError = result.content.startsWith('Error: ');
+				if (isError) {
+					// Errors always shown in full
+					await displayToolResult(
+						toolCall,
+						result,
+						toolManager,
+						addToChatQueue,
+						getNextComponentKey,
+					);
+				} else {
+					options.onCompactToolCount?.(result.name);
+				}
+			} else {
+				// Full display mode
+				await displayToolResult(
+					toolCall,
+					result,
+					toolManager,
+					addToChatQueue,
+					getNextComponentKey,
+				);
+			}
 		}
 	}
 

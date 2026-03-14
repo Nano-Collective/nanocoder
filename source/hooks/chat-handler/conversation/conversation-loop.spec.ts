@@ -10,7 +10,6 @@ import type {Message, ToolCall, ToolResult} from '@/types/core';
 const createMockClient = (response: {
 	toolCalls?: ToolCall[] | null;
 	content?: string;
-	autoExecutedMessages?: Message[];
 	toolsDisabled?: boolean;
 }) => ({
 	chat: async () => ({
@@ -22,7 +21,6 @@ const createMockClient = (response: {
 				},
 			},
 		],
-		autoExecutedMessages: response.autoExecutedMessages,
 		toolsDisabled: response.toolsDisabled ?? false,
 	}),
 });
@@ -34,6 +32,7 @@ const createMockToolManager = (config: {
 	needsApproval?: boolean | (() => boolean);
 }) => ({
 	getAllTools: () => ({}),
+	getAllToolsWithoutExecute: () => ({}),
 	hasTool: (name: string) => config.tools?.includes(name) || false,
 	getTool: (name: string) => ({
 		execute: async () => 'Tool executed',

@@ -187,6 +187,22 @@ export class ToolRegistry {
 	}
 
 	/**
+	 * Get all native AI SDK tools with execute functions removed.
+	 * The SDK still gets schemas and descriptions for the model,
+	 * but cannot auto-execute anything — tool calls are returned
+	 * for us to handle (parallel execution, confirmation, etc.).
+	 * @returns Record mapping tool names to AISDKCoreTool objects without execute
+	 */
+	getNativeToolsWithoutExecute(): Record<string, AISDKCoreTool> {
+		const nativeTools: Record<string, AISDKCoreTool> = {};
+		for (const [name, entry] of this.tools) {
+			const {execute: _, ...toolWithoutExecute} = entry.tool;
+			nativeTools[name] = toolWithoutExecute as AISDKCoreTool;
+		}
+		return nativeTools;
+	}
+
+	/**
 	 * Get all tool entries
 	 * @returns Array of all ToolEntry objects
 	 */
@@ -241,6 +257,7 @@ export class ToolRegistry {
 		formatters?: Record<string, ToolFormatter>,
 		validators?: Record<string, ToolValidator>,
 		streamingFormatters?: Record<string, StreamingFormatter>,
+		readOnlyFlags?: Record<string, boolean>,
 	): ToolRegistry {
 		const registry = new ToolRegistry();
 
@@ -254,6 +271,7 @@ export class ToolRegistry {
 					formatter: formatters?.[name],
 					validator: validators?.[name],
 					streamingFormatter: streamingFormatters?.[name],
+					readOnly: readOnlyFlags?.[name],
 				});
 			}
 		}

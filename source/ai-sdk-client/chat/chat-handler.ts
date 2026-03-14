@@ -27,11 +27,7 @@ import {
 } from '@/utils/logging';
 import {getSafeMemory} from '@/utils/logging/safe-process.js';
 import {convertToModelMessages} from '../converters/message-converter.js';
-import {
-	convertAISDKToolCalls,
-	generateToolCallId,
-	getToolResultOutput,
-} from '../converters/tool-converter.js';
+import {convertAISDKToolCalls} from '../converters/tool-converter.js';
 import {extractRootError} from '../error-handling/error-extractor.js';
 import {parseAPIError} from '../error-handling/error-parser.js';
 import {isToolSupportError} from '../error-handling/tool-error-detector.js';
@@ -204,96 +200,12 @@ export async function handleChat(
 				callbacks.onToken?.(fullText);
 			}
 
-			// Extract approval requests from result.content
-			const approvalRequests: Array<{
-				toolCallId: string;
-				toolName: string;
-			}> = [];
-			if (result.content) {
-				for (const part of result.content) {
-					if (part.type === 'tool-approval-request' && 'toolCall' in part) {
-						const approvalPart = part as {
-							type: 'tool-approval-request';
-							approvalId: string;
-							toolCall: {toolCallId: string; toolName: string};
-						};
-						approvalRequests.push({
-							toolCallId: approvalPart.toolCall.toolCallId,
-							toolName: approvalPart.toolCall.toolName,
-						});
-					}
-				}
-			}
-
-			const approvalRequestIds = new Set(
-				approvalRequests.map(r => r.toolCallId),
-			);
-
-			// Extract auto-executed assistant messages and tool results from steps
-			const autoExecutedMessages: Array<Message> = [];
-			for (const step of result.steps) {
-				if (
-					step.toolCalls &&
-					step.toolCalls.length > 0 &&
-					step.toolResults &&
-					step.toolResults.length > 0
-				) {
-					const resultsByCallId = new Map<string, unknown>();
-					for (const tr of step.toolResults) {
-						const trAny = tr as {
-							toolCallId?: string;
-							output: unknown;
-						};
-						if (trAny.toolCallId) {
-							resultsByCallId.set(trAny.toolCallId, trAny.output);
-						}
-					}
-
-					const executedToolCalls = step.toolCalls.filter(tc => {
-						const callId = tc.toolCallId || '';
-						return (
-							resultsByCallId.has(callId) && !approvalRequestIds.has(callId)
-						);
-					});
-
-					if (executedToolCalls.length > 0) {
-						const stepToolCalls: ToolCall[] =
-							convertAISDKToolCalls(executedToolCalls);
-
-						autoExecutedMessages.push({
-							role: 'assistant',
-							content: step.text || '',
-							tool_calls: stepToolCalls,
-						});
-
-						for (const toolCall of executedToolCalls) {
-							const callId = toolCall.toolCallId || generateToolCallId();
-							const resultOutput = resultsByCallId.get(callId);
-							const resultStr =
-								resultOutput !== undefined
-									? getToolResultOutput(resultOutput)
-									: '';
-
-							autoExecutedMessages.push({
-								role: 'tool' as const,
-								content: resultStr,
-								tool_call_id: callId,
-								name: toolCall.toolName,
-							});
-						}
-					}
-				}
-			}
-
-			// Extract only tool calls that need approval (not auto-executed ones)
-			const toolCalls: ToolCall[] = [];
-			if (result.toolCalls.length > 0 && approvalRequestIds.size > 0) {
-				for (const toolCall of result.toolCalls) {
-					if (approvalRequestIds.has(toolCall.toolCallId)) {
-						toolCalls.push(convertAISDKToolCalls([toolCall])[0]);
-					}
-				}
-			}
+			// Without execute functions on tools, the SDK doesn't auto-execute anything.
+			// All tool calls are returned for us to handle (parallel execution, confirmation, etc.).
+			const toolCalls: ToolCall[] =
+				result.toolCalls.length > 0
+					? convertAISDKToolCalls(result.toolCalls)
+					: [];
 
 			const content = fullText;
 
@@ -324,11 +236,7 @@ export async function handleChat(
 						},
 					},
 				],
-				autoExecutedMessages:
-					autoExecutedMessages.length > 0 ? autoExecutedMessages : undefined,
 				toolsDisabled: shouldDisableTools,
-				approvalRequests:
-					approvalRequests.length > 0 ? approvalRequests : undefined,
 			};
 		} catch (error) {
 			// Calculate performance metrics even for errors

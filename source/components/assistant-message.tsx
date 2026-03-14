@@ -63,7 +63,7 @@ export default memo(function AssistantMessage({
 
 	return (
 		<>
-			<Box marginBottom={1}>
+			<Box marginBottom={1} marginTop={1}>
 				<Text color={colors.info} bold>
 					{model}:
 				</Text>

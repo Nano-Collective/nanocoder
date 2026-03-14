@@ -26,6 +26,8 @@ interface ChatProps {
 	disabled?: boolean; // Disable input when AI is processing
 	onCancel?: () => void; // Callback when user presses escape while thinking
 	onToggleMode?: () => void; // Callback when user presses shift+tab to toggle development mode
+	onToggleCompactDisplay?: () => void; // Callback when user presses ctrl+o to toggle compact tool display
+	compactToolDisplay?: boolean; // Current compact display state
 	developmentMode?: DevelopmentMode; // Current development mode
 	contextPercentUsed?: number | null; // Context window usage percentage
 }
@@ -37,6 +39,8 @@ export default function UserInput({
 	disabled = false,
 	onCancel,
 	onToggleMode,
+	onToggleCompactDisplay,
+	compactToolDisplay = true,
 	developmentMode = 'normal',
 	contextPercentUsed,
 }: ChatProps) {
@@ -57,12 +61,6 @@ export default function UserInput({
 		Array<{path: string; score: number}>
 	>([]);
 	const [selectedFileIndex, setSelectedFileIndex] = useState(0);
-
-	// Responsive placeholder text
-	const defaultPlaceholder = isNarrow
-		? '/ for commands, ! for bash, ↑/↓ history'
-		: 'Type `/` and then press Tab for command suggestions or `!` to execute bash commands. Use ↑/↓ for history.';
-	const actualPlaceholder = placeholder ?? defaultPlaceholder;
 
 	const {
 		input,
@@ -357,6 +355,12 @@ export default function UserInput({
 			return;
 		}
 
+		// Handle ctrl+o to toggle compact tool display (always available)
+		if (key.ctrl && inputChar === 'o' && onToggleCompactDisplay) {
+			onToggleCompactDisplay();
+			return;
+		}
+
 		// Block all other input when disabled
 		if (disabled) {
 			return;
@@ -471,6 +475,13 @@ export default function UserInput({
 			<Box flexDirection="column" paddingY={1} width="100%" marginTop={1}>
 				<Text color={colors.secondary} dimColor>
 					<Spinner type="dots" /> Press Esc to cancel
+					{onToggleCompactDisplay && (
+						<Text>
+							{' '}
+							· ctrl-o {compactToolDisplay ? 'expand' : 'compact'}{' '}
+							{isNarrow ? '' : 'tool results'}
+						</Text>
+					)}
 				</Text>
 				<DevelopmentModeIndicator
 					developmentMode={developmentMode}
@@ -515,7 +526,7 @@ export default function UserInput({
 						value={input}
 						onChange={updateInput}
 						onSubmit={handleSubmit}
-						placeholder={actualPlaceholder}
+						placeholder="/ commands, ! bash, ↑/↓ history"
 						focus={isFocused}
 					/>
 				</Box>

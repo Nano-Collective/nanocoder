@@ -2,6 +2,7 @@ import {render} from 'ink-testing-library';
 import React from 'react';
 import {ThemeContext} from '@/hooks/useTheme';
 import {TitleShapeContext} from '@/hooks/useTitleShape';
+import {UIStateProvider} from '@/hooks/useUIState';
 import type {Colors, ThemePreset} from '@/types/ui';
 
 // Default test colors that match the structure used in the app
@@ -41,7 +42,7 @@ function TestThemeProvider({children}: {children: React.ReactNode}) {
 	return (
 		<TitleShapeContext.Provider value={testTitleShapeContext}>
 			<ThemeContext.Provider value={testThemeContext}>
-				{children}
+				<UIStateProvider>{children}</UIStateProvider>
 			</ThemeContext.Provider>
 		</TitleShapeContext.Provider>
 	);

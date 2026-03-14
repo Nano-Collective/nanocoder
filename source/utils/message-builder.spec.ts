@@ -69,21 +69,6 @@ test('MessageBuilder addToolResults adds tool messages', t => {
 	t.is(messages[1].tool_call_id, 'tool_2');
 });
 
-test('MessageBuilder addAutoExecutedMessages adds multiple messages', t => {
-	const builder = new MessageBuilder([]);
-	const autoMessages: Message[] = [
-		{role: 'assistant', content: '', tool_calls: [{id: '1', function: {name: 'test', arguments: {}}}]},
-		{role: 'tool', content: 'result', tool_call_id: '1', name: 'test'},
-	];
-
-	builder.addAutoExecutedMessages(autoMessages);
-	const messages = builder.build();
-
-	t.is(messages.length, 2);
-	t.is(messages[0].role, 'assistant');
-	t.is(messages[1].role, 'tool');
-});
-
 test('MessageBuilder addUserMessage adds user message', t => {
 	const builder = new MessageBuilder([]);
 

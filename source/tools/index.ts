@@ -129,6 +129,17 @@ export const toolValidators: Record<
 	>,
 );
 
+// Export readOnly flags for parallel execution safety
+export const toolReadOnlyFlags: Record<string, boolean> = allTools.reduce(
+	(acc, t) => {
+		if (t.readOnly) {
+			acc[t.name] = true;
+		}
+		return acc;
+	},
+	{} as Record<string, boolean>,
+);
+
 // Export streaming formatter registry for real-time progress tools
 export const toolStreamingFormatters: Record<string, StreamingFormatter> =
 	allTools.reduce(

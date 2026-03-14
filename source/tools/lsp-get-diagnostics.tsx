@@ -317,4 +317,5 @@ export const getDiagnosticsTool: NanocoderToolExport = {
 	tool: getDiagnosticsCoreTool,
 	formatter: getDiagnosticsFormatter,
 	validator: getDiagnosticsValidator,
+	readOnly: true,
 };

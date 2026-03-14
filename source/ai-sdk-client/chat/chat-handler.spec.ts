@@ -93,7 +93,6 @@ test('ChatHandlerParams accepts callbacks', t => {
 	const callbacks: StreamCallbacks = {
 		onToken: () => {},
 		onToolCall: () => {},
-		onToolExecuted: () => {},
 		onFinish: () => {},
 	};
 
@@ -116,6 +115,5 @@ test('ChatHandlerParams accepts callbacks', t => {
 
 	t.truthy(params.callbacks.onToken);
 	t.truthy(params.callbacks.onToolCall);
-	t.truthy(params.callbacks.onToolExecuted);
 	t.truthy(params.callbacks.onFinish);
 });

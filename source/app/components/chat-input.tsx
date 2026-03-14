@@ -9,6 +9,7 @@ import UserInput from '@/components/user-input';
 import {useTheme} from '@/hooks/useTheme';
 import type {DevelopmentMode, ToolCall} from '@/types';
 import type {PendingQuestion} from '@/utils/question-queue';
+import {LiveCompactCounts} from '@/utils/tool-result-display';
 
 export interface ChatInputProps {
 	// Execution state
@@ -38,6 +39,11 @@ export interface ChatInputProps {
 	inputDisabled: boolean;
 	developmentMode: DevelopmentMode;
 	contextPercentUsed: number | null;
+
+	// Tool display
+	compactToolCounts?: Record<string, number> | null;
+	onToggleCompactDisplay?: () => void;
+	compactToolDisplay?: boolean;
 
 	// Handlers
 	onToolConfirm: (confirmed: boolean) => void;
@@ -71,6 +77,9 @@ export function ChatInput({
 	inputDisabled,
 	developmentMode,
 	contextPercentUsed,
+	compactToolCounts,
+	onToggleCompactDisplay,
+	compactToolDisplay,
 	onToolConfirm,
 	onToolCancel,
 	onSubmit,
@@ -85,6 +94,11 @@ export function ChatInput({
 
 	return (
 		<Box flexDirection="column" marginLeft={-1}>
+			{/* Live compact tool counts - running tally during auto-execution */}
+			{compactToolCounts && Object.keys(compactToolCounts).length > 0 && (
+				<LiveCompactCounts counts={compactToolCounts} />
+			)}
+
 			{isCancelling && <CancellingIndicator />}
 
 			{/* Tool Confirmation */}
@@ -117,6 +131,8 @@ export function ChatInput({
 					disabled={inputDisabled}
 					onCancel={onCancel}
 					onToggleMode={onToggleMode}
+					onToggleCompactDisplay={onToggleCompactDisplay}
+					compactToolDisplay={compactToolDisplay}
 					developmentMode={developmentMode}
 					contextPercentUsed={contextPercentUsed}
 				/>

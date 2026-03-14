@@ -1,19 +1,15 @@
 import type {ModelMessage} from 'ai';
-import type {StreamCallbacks, ToolCall} from '@/types/index';
+import type {StreamCallbacks} from '@/types/index';
 import {getLogger} from '@/utils/logging';
 import {isEmptyAssistantMessage} from '../converters/message-converter.js';
-import {
-	convertAISDKToolCall,
-	getToolResultOutput,
-} from '../converters/tool-converter.js';
 import type {TestableMessage} from '../types.js';
 
 /**
  * Creates the onStepFinish callback for AI SDK generateText
- * This handles logging and displaying tool execution results
+ * Since tools have no execute functions, this only handles logging.
  */
 export function createOnStepFinishHandler(
-	callbacks: StreamCallbacks,
+	_callbacks: StreamCallbacks,
 ): (step: {
 	toolCalls?: Array<{toolCallId?: string; toolName: string; input: unknown}>;
 	toolResults?: Array<{output: unknown}>;
@@ -22,33 +18,11 @@ export function createOnStepFinishHandler(
 	const logger = getLogger();
 
 	return step => {
-		// Log tool execution steps
+		// Log tool call steps (no results since execute is stripped)
 		if (step.toolCalls && step.toolCalls.length > 0) {
 			logger.trace('AI SDK tool step', {
-				stepType: 'tool_execution',
+				stepType: 'tool_call',
 				toolCount: step.toolCalls.length,
-				hasResults: !!step.toolResults,
-			});
-		}
-
-		// Display formatters for auto-executed tools (after execution with results)
-		if (
-			step.toolCalls &&
-			step.toolResults &&
-			step.toolCalls.length === step.toolResults.length
-		) {
-			step.toolCalls.forEach((toolCall, idx) => {
-				const toolResult = step.toolResults?.[idx];
-				if (!toolResult) return;
-				const tc: ToolCall = convertAISDKToolCall(toolCall);
-				const resultStr = getToolResultOutput(toolResult.output);
-
-				logger.debug('Tool executed', {
-					toolName: tc.function.name,
-					resultLength: resultStr.length,
-				});
-
-				callbacks.onToolExecuted?.(tc, resultStr);
 			});
 		}
 	};

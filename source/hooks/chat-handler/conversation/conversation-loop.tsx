@@ -17,7 +17,7 @@ import {performAutoCompact} from '@/utils/auto-compact';
 import {formatElapsedTime, getRandomAdjective} from '@/utils/completion-note';
 import {MessageBuilder} from '@/utils/message-builder';
 import {parseToolArguments} from '@/utils/tool-args-parser';
-import {displayToolResult} from '@/utils/tool-result-display';
+import {displayCompactCountsSummary} from '@/utils/tool-result-display';
 import {filterValidToolCalls} from '../utils/tool-filters';
 import {executeToolsDirectly} from './tool-executor';
 
@@ -47,6 +47,9 @@ interface ProcessAssistantResponseParams {
 	) => void;
 	onConversationComplete?: () => void;
 	conversationStartTime?: number;
+	compactToolDisplayRef?: React.RefObject<boolean>;
+	onSetCompactToolCounts?: (counts: Record<string, number> | null) => void;
+	compactToolCountsRef?: React.MutableRefObject<Record<string, number>>;
 }
 
 // Module-level flag: show XML fallback notice only once per process lifetime.
@@ -89,9 +92,28 @@ export const processAssistantResponse = async (
 		onStartToolConfirmationFlow,
 		onConversationComplete,
 		conversationStartTime,
+		compactToolDisplayRef,
+		onSetCompactToolCounts,
+		compactToolCountsRef,
 	} = params;
 
 	const startTime = conversationStartTime ?? Date.now();
+
+	// Helper to flush accumulated compact counts to the static chat queue and clear live display
+	const flushCompactCounts = () => {
+		if (compactToolCountsRef) {
+			const counts = compactToolCountsRef.current;
+			if (Object.keys(counts).length > 0) {
+				displayCompactCountsSummary(
+					counts,
+					addToChatQueue,
+					getNextComponentKey,
+				);
+				compactToolCountsRef.current = {};
+			}
+		}
+		onSetCompactToolCounts?.(null);
+	};
 
 	// Ensure we have an abort controller for this request
 	let controller = abortController;
@@ -115,30 +137,8 @@ export const processAssistantResponse = async (
 
 	const result = await client.chat(
 		[systemMessage, ...messages],
-		toolManager?.getAllTools() || {},
-		{
-			onToolExecuted: (toolCall: ToolCall, result: string) => {
-				// Display formatter for auto-executed tools (after execution with results)
-				void (async () => {
-					const toolResult: ToolResult = {
-						tool_call_id: toolCall.id,
-						role: 'tool' as const,
-						name: toolCall.function.name,
-						content: result,
-					};
-					await displayToolResult(
-						toolCall,
-						toolResult,
-						toolManager,
-						addToChatQueue,
-						getNextComponentKey,
-					);
-				})();
-			},
-			onFinish: () => {
-				setIsGenerating(false);
-			},
-		},
+		toolManager?.getAllToolsWithoutExecute() || {},
+		{},
 		controller.signal,
 		modeOverrides,
 	);
@@ -203,10 +203,6 @@ export const processAssistantResponse = async (
 		const updatedMessagesWithError = malformedBuilder.build();
 		setMessages(updatedMessagesWithError);
 
-		// Clear streaming state before recursing
-		setIsGenerating(false);
-		setStreamingContent('');
-
 		// Continue the main conversation loop with error message as context
 		await processAssistantResponse({
 			...params,
@@ -219,6 +215,17 @@ export const processAssistantResponse = async (
 	const parsedToolCalls = parseResult.toolCalls;
 	const cleanedContent = parseResult.cleanedContent;
 
+	// Combine native tool calls with any parsed from content (XML fallback path)
+	// Native and parsed are mutually exclusive: native comes from tool-calling models,
+	// parsed comes from non-tool-calling models using XML in text
+	const allToolCalls = [...(toolCalls || []), ...parsedToolCalls];
+
+	// If this is the final response (no tool calls), flush compact counts
+	// BEFORE the assistant message so the summary appears above it
+	if (allToolCalls.length === 0) {
+		flushCompactCounts();
+	}
+
 	// Display the assistant response (cleaned of any tool calls)
 	if (cleanedContent.trim()) {
 		addToChatQueue(
@@ -229,11 +236,6 @@ export const processAssistantResponse = async (
 			/>,
 		);
 	}
-
-	// Combine native tool calls with any parsed from content (XML fallback path)
-	// Native and parsed are mutually exclusive: native comes from tool-calling models,
-	// parsed comes from non-tool-calling models using XML in text
-	const allToolCalls = [...(toolCalls || []), ...parsedToolCalls];
 
 	const {validToolCalls, errorResults} = filterValidToolCalls(
 		allToolCalls,
@@ -254,12 +256,6 @@ export const processAssistantResponse = async (
 	// Build updated messages array using MessageBuilder
 	const builder = new MessageBuilder(messages);
 
-	// Add auto-executed messages (assistant + tool results) from AI SDK multi-step execution
-	// This ensures they're counted in usage tracking and included in context
-	if (result.autoExecutedMessages && result.autoExecutedMessages.length > 0) {
-		builder.addAutoExecutedMessages(result.autoExecutedMessages);
-	}
-
 	// Add the final assistant message if it has content or tool calls
 	if (hasValidAssistantMessage) {
 		builder.addAssistantMessage(assistantMsg);
@@ -272,10 +268,7 @@ export const processAssistantResponse = async (
 	const updatedMessages = builder.build();
 
 	// Update messages state once with all changes
-	if (
-		(result.autoExecutedMessages && result.autoExecutedMessages.length > 0) ||
-		hasValidAssistantMessage
-	) {
+	if (hasValidAssistantMessage) {
 		setMessages(updatedMessages);
 	}
 
@@ -314,8 +307,8 @@ export const processAssistantResponse = async (
 		// Silently fail auto-compact, don't interrupt the conversation
 	}
 
-	// Clear streaming state after response is complete
-	setIsGenerating(false);
+	// Clear streaming content (but don't set isGenerating=false yet —
+	// we may still need to execute tools and recurse)
 	setStreamingContent('');
 
 	// Handle error results for non-existent tools
@@ -362,96 +355,71 @@ export const processAssistantResponse = async (
 
 	// Handle tool calls if present - this continues the loop
 	if (validToolCalls && validToolCalls.length > 0) {
-		// Use AI SDK's approval requests to determine which tools need confirmation.
-		// On the native path, tools without approval requests were auto-executed by the SDK
-		// (their results are in autoExecutedMessages). Only approval-requested tools need confirmation.
-		// On the XML fallback path, ALL tools need manual handling since the SDK didn't execute any.
+		// Both native and XML fallback paths now use the same logic:
+		// the SDK never auto-executes tools (execute is stripped), so we
+		// evaluate needsApproval ourselves and split into direct vs confirmation.
+		const toolsNeedingConfirmation: ToolCall[] = [];
+		const toolsToExecuteDirectly: ToolCall[] = [];
 
-		let toolsNeedingConfirmation: ToolCall[];
-		let toolsToExecuteDirectly: ToolCall[];
+		for (const toolCall of validToolCalls) {
+			// Run validators (for XML fallback path, catches parse errors)
+			let validationFailed = false;
+			if (toolCall.function.name === '__xml_validation_error__') {
+				validationFailed = true;
+			} else if (toolManager) {
+				const validator = toolManager.getToolValidator(toolCall.function.name);
+				if (validator) {
+					try {
+						const parsedArgs = parseToolArguments(toolCall.function.arguments);
+						const validationResult = await validator(parsedArgs);
+						if (!validationResult.valid) {
+							validationFailed = true;
+						}
+					} catch {
+						validationFailed = true;
+					}
+				}
+			}
 
-		if (result.toolsDisabled) {
-			// XML fallback path: SDK didn't execute anything, we handle all tools manually
-			// We must evaluate needsApproval ourselves since the SDK wasn't involved
-			toolsNeedingConfirmation = [];
-			toolsToExecuteDirectly = [];
-
-			for (const toolCall of validToolCalls) {
-				// Run validators for XML fallback path
-				let validationFailed = false;
-				if (toolCall.function.name === '__xml_validation_error__') {
-					validationFailed = true;
-				} else if (toolManager) {
-					const validator = toolManager.getToolValidator(
-						toolCall.function.name,
-					);
-					if (validator) {
+			// Evaluate needsApproval from tool definition
+			let toolNeedsApproval = true;
+			if (toolManager) {
+				const toolEntry = toolManager.getToolEntry(toolCall.function.name);
+				if (toolEntry?.tool) {
+					const needsApprovalProp = (
+						toolEntry.tool as unknown as {
+							needsApproval?:
+								| boolean
+								| ((args: unknown) => boolean | Promise<boolean>);
+						}
+					).needsApproval;
+					if (typeof needsApprovalProp === 'boolean') {
+						toolNeedsApproval = needsApprovalProp;
+					} else if (typeof needsApprovalProp === 'function') {
 						try {
 							const parsedArgs = parseToolArguments(
 								toolCall.function.arguments,
 							);
-							const validationResult = await validator(parsedArgs);
-							if (!validationResult.valid) {
-								validationFailed = true;
-							}
+							toolNeedsApproval = await (
+								needsApprovalProp as (
+									args: unknown,
+								) => boolean | Promise<boolean>
+							)(parsedArgs);
 						} catch {
-							validationFailed = true;
+							toolNeedsApproval = true;
 						}
 					}
-				}
-
-				// Evaluate needsApproval from tool definition (same logic as AI SDK would use)
-				let toolNeedsApproval = true;
-				if (toolManager) {
-					const toolEntry = toolManager.getToolEntry(toolCall.function.name);
-					if (toolEntry?.tool) {
-						const needsApprovalProp = (
-							toolEntry.tool as unknown as {
-								needsApproval?:
-									| boolean
-									| ((args: unknown) => boolean | Promise<boolean>);
-							}
-						).needsApproval;
-						if (typeof needsApprovalProp === 'boolean') {
-							toolNeedsApproval = needsApprovalProp;
-						} else if (typeof needsApprovalProp === 'function') {
-							try {
-								const parsedArgs = parseToolArguments(
-									toolCall.function.arguments,
-								);
-								toolNeedsApproval = await (
-									needsApprovalProp as (
-										args: unknown,
-									) => boolean | Promise<boolean>
-								)(parsedArgs);
-							} catch {
-								toolNeedsApproval = true;
-							}
-						}
-					}
-				}
-
-				if (validationFailed || !toolNeedsApproval) {
-					toolsToExecuteDirectly.push(toolCall);
-				} else {
-					toolsNeedingConfirmation.push(toolCall);
 				}
 			}
-		} else {
-			// Native path: use AI SDK's approval requests to identify tools needing confirmation
-			const approvalRequestIds = new Set(
-				(result.approvalRequests || []).map(r => r.toolCallId),
-			);
 
-			// Tools with approval requests need user confirmation
-			// Tools without were auto-executed by the SDK (results already in autoExecutedMessages)
-			toolsNeedingConfirmation = validToolCalls.filter(tc =>
-				approvalRequestIds.has(tc.id),
-			);
-			toolsToExecuteDirectly = [];
+			if (validationFailed || !toolNeedsApproval) {
+				toolsToExecuteDirectly.push(toolCall);
+			} else {
+				toolsNeedingConfirmation.push(toolCall);
+			}
 		}
 
-		// Execute tools that need direct execution (XML fallback validation failures)
+		// Execute tools that don't need confirmation (parallel via Promise.all)
 		if (toolsToExecuteDirectly.length > 0) {
 			const directResults = await executeToolsDirectly(
 				toolsToExecuteDirectly,
@@ -459,6 +427,16 @@ export const processAssistantResponse = async (
 				conversationStateManager,
 				addToChatQueue,
 				getNextComponentKey,
+				{
+					compactDisplay: compactToolDisplayRef?.current,
+					onCompactToolCount: (toolName: string) => {
+						if (compactToolCountsRef) {
+							const counts = compactToolCountsRef.current;
+							counts[toolName] = (counts[toolName] ?? 0) + 1;
+							onSetCompactToolCounts?.({...counts});
+						}
+					},
+				},
 			);
 
 			if (directResults.length > 0) {
@@ -470,6 +448,7 @@ export const processAssistantResponse = async (
 
 				// If there are also tools needing confirmation, start that flow
 				if (toolsNeedingConfirmation.length > 0) {
+					flushCompactCounts();
 					onStartToolConfirmationFlow(
 						toolsNeedingConfirmation,
 						updatedMessagesWithTools,
@@ -491,6 +470,9 @@ export const processAssistantResponse = async (
 
 		// Start confirmation flow only for tools that need it
 		if (toolsNeedingConfirmation.length > 0) {
+			// Flush compact counts before entering confirmation or exiting
+			flushCompactCounts();
+
 			// In non-interactive mode, exit when tool approval is required
 			if (nonInteractiveMode) {
 				const toolNames = toolsNeedingConfirmation
@@ -518,14 +500,15 @@ export const processAssistantResponse = async (
 				setMessages(errorBuilder.build());
 
 				// Signal completion to trigger exit
+				setIsGenerating(false);
 				if (onConversationComplete) {
 					onConversationComplete();
 				}
 				return;
 			}
 
-			// Pass complete messages including assistant msg
-			// useToolHandler will add tool results
+			// Hand off to confirmation flow — it manages its own generating state
+			setIsGenerating(false);
 			onStartToolConfirmationFlow(
 				toolsNeedingConfirmation,
 				updatedMessages, // Includes assistant message
@@ -555,19 +538,12 @@ export const processAssistantResponse = async (
 		};
 
 		// Display a "continue" message when the model produced empty text
-		// without any prior tool execution. When the SDK auto-executed tools
-		// and the model's response was empty, continue silently — the model
-		// just needs another turn to process tool results.
-		const hasAutoExecutedTools =
-			result.autoExecutedMessages && result.autoExecutedMessages.length > 0;
-		if (!hasAutoExecutedTools) {
-			addToChatQueue(
-				<UserMessage
-					key={`auto-continue-${getNextComponentKey()}`}
-					message="continue"
-				/>,
-			);
-		}
+		addToChatQueue(
+			<UserMessage
+				key={`auto-continue-${getNextComponentKey()}`}
+				message="continue"
+			/>,
+		);
 
 		// Don't include the empty assistantMsg - it would cause API error
 		// "Assistant message must have either content or tool_calls"
@@ -586,6 +562,7 @@ export const processAssistantResponse = async (
 	}
 
 	if (validToolCalls.length === 0 && cleanedContent.trim()) {
+		setIsGenerating(false);
 		const adjective = getRandomAdjective();
 		const elapsed = formatElapsedTime(startTime);
 		addToChatQueue(

@@ -4,7 +4,12 @@ import {ErrorMessage} from '../components/message-box.js';
 import ToolMessage from '../components/tool-message.js';
 import type {ToolManager} from '../tools/tool-manager.js';
 import type {ToolCall, ToolResult} from '../types/core.js';
-import {displayToolResult} from './tool-result-display.js';
+import {renderWithTheme} from '../test-utils/render-with-theme.js';
+import {
+	LiveCompactCounts,
+	displayCompactCountsSummary,
+	displayToolResult,
+} from './tool-result-display.js';
 
 // ============================================================================
 // Type Definitions
@@ -482,4 +487,174 @@ test('displayToolResult - handles complex multi-tool scenario', async t => {
 	queue.forEach(item => {
 		t.true(React.isValidElement(item));
 	});
+});
+
+// ============================================================================
+// Tests for Compact Display Mode
+// ============================================================================
+
+test('displayToolResult - compact mode adds single compact element to queue', async t => {
+	const toolCall = createMockToolCall('call-1', 'read_file', {path: '/test'});
+	const result = createMockToolResult('call-1', 'read_file', 'file contents');
+	const {addToChatQueue, queue} = createMockAddToChatQueue();
+
+	await displayToolResult(
+		toolCall,
+		result,
+		null,
+		addToChatQueue,
+		mockGetNextComponentKey,
+		true, // compact
+	);
+
+	t.is(queue.length, 1);
+	t.true(React.isValidElement(queue[0]));
+});
+
+test('displayToolResult - compact mode still shows errors in full', async t => {
+	const toolCall = createMockToolCall('call-1', 'read_file');
+	const result = createMockToolResult(
+		'call-1',
+		'read_file',
+		'Error: File not found',
+	);
+	const {addToChatQueue, queue} = createMockAddToChatQueue();
+
+	await displayToolResult(
+		toolCall,
+		result,
+		null,
+		addToChatQueue,
+		mockGetNextComponentKey,
+		true, // compact
+	);
+
+	t.is(queue.length, 1);
+	const element = queue[0] as React.ReactElement<ErrorMessageProps>;
+	t.is(element.type, ErrorMessage);
+	t.is(element.props.message, 'File not found');
+});
+
+// ============================================================================
+// Tests for displayCompactCountsSummary
+// ============================================================================
+
+test('displayCompactCountsSummary - adds one element per tool type', t => {
+	const {addToChatQueue, queue} = createMockAddToChatQueue();
+
+	displayCompactCountsSummary(
+		{read_file: 5, search_file_contents: 2},
+		addToChatQueue,
+		createMockGetNextComponentKey(),
+	);
+
+	t.is(queue.length, 2);
+});
+
+test('displayCompactCountsSummary - handles single tool type', t => {
+	const {addToChatQueue, queue} = createMockAddToChatQueue();
+
+	displayCompactCountsSummary(
+		{read_file: 3},
+		addToChatQueue,
+		createMockGetNextComponentKey(),
+	);
+
+	t.is(queue.length, 1);
+});
+
+test('displayCompactCountsSummary - handles empty counts', t => {
+	const {addToChatQueue, queue} = createMockAddToChatQueue();
+
+	displayCompactCountsSummary(
+		{},
+		addToChatQueue,
+		createMockGetNextComponentKey(),
+	);
+
+	t.is(queue.length, 0);
+});
+
+// ============================================================================
+// LiveCompactCounts Component Tests
+// ============================================================================
+
+test('LiveCompactCounts - renders tool counts', t => {
+	const {lastFrame, unmount} = renderWithTheme(
+		<LiveCompactCounts counts={{read_file: 3, search_file_contents: 2}} />,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Read 3 files/);
+	t.regex(output!, /Searched for 2 patterns/);
+	unmount();
+});
+
+test('LiveCompactCounts - renders single count without plural', t => {
+	const {lastFrame, unmount} = renderWithTheme(
+		<LiveCompactCounts counts={{write_file: 1}} />,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Wrote 1 file/);
+	t.notRegex(output!, /files/);
+	unmount();
+});
+
+test('LiveCompactCounts - renders empty counts without error', t => {
+	const {lastFrame, unmount} = renderWithTheme(
+		<LiveCompactCounts counts={{}} />,
+	);
+
+	// Empty counts renders nothing - should not throw
+	t.notThrows(() => lastFrame());
+	unmount();
+});
+
+test('LiveCompactCounts - renders hammer icon for each entry', t => {
+	const {lastFrame, unmount} = renderWithTheme(
+		<LiveCompactCounts counts={{read_file: 1, execute_bash: 2}} />,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	const hammerCount = (output!.match(/\u2692/g) || []).length;
+	t.is(hammerCount, 2);
+	unmount();
+});
+
+// ============================================================================
+// Compact Description Mapping Tests (via displayToolResult compact mode)
+// ============================================================================
+
+test('displayToolResult compact - read_file shows compact description', t => {
+	const {addToChatQueue, queue} = createMockAddToChatQueue();
+	const toolCall = createMockToolCall('1', 'read_file', {path: '/test.ts'});
+	const result = createMockToolResult('1', 'read_file', 'file contents');
+
+	displayToolResult(toolCall, result, null, addToChatQueue, mockGetNextComponentKey, true);
+
+	t.is(queue.length, 1);
+});
+
+test('displayToolResult compact - execute_bash shows compact description', t => {
+	const {addToChatQueue, queue} = createMockAddToChatQueue();
+	const toolCall = createMockToolCall('1', 'execute_bash', {command: 'ls'});
+	const result = createMockToolResult('1', 'execute_bash', 'output');
+
+	displayToolResult(toolCall, result, null, addToChatQueue, mockGetNextComponentKey, true);
+
+	t.is(queue.length, 1);
+});
+
+test('displayToolResult compact - unknown tool uses default description', t => {
+	const {addToChatQueue, queue} = createMockAddToChatQueue();
+	const toolCall = createMockToolCall('1', 'custom_mcp_tool', {});
+	const result = createMockToolResult('1', 'custom_mcp_tool', 'output');
+
+	displayToolResult(toolCall, result, null, addToChatQueue, mockGetNextComponentKey, true);
+
+	t.is(queue.length, 1);
 });

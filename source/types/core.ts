@@ -114,6 +114,7 @@ export interface NanocoderToolExport {
 	formatter?: ToolFormatter; // For UI display (after execution)
 	streamingFormatter?: StreamingFormatter; // For real-time progress (before execution)
 	validator?: ToolValidator; // For pre-execution validation
+	readOnly?: boolean; // Safe to parallelize (no side effects)
 }
 
 /**
@@ -137,6 +138,7 @@ export interface ToolEntry {
 	formatter?: ToolFormatter; // For UI (React component, after execution)
 	streamingFormatter?: StreamingFormatter; // For real-time progress (before execution)
 	validator?: ToolValidator; // For validation
+	readOnly?: boolean; // Safe to parallelize (no side effects)
 }
 
 interface LLMMessage {
@@ -149,24 +151,14 @@ export interface LLMChatResponse {
 	choices: Array<{
 		message: LLMMessage;
 	}>;
-	// Auto-executed messages (assistant + tool results) from AI SDK multi-step execution
-	// These need to be added to message history for proper context tracking
-	autoExecutedMessages?: Message[];
 	// Whether native tools were disabled for this request (XML fallback path)
 	// When true, the conversation loop should parse response text for XML tool calls
 	toolsDisabled?: boolean;
-	// Tool calls that the AI SDK identified as needing approval (needsApproval: true)
-	// These were NOT auto-executed and require user confirmation
-	approvalRequests?: Array<{
-		toolCallId: string;
-		toolName: string;
-	}>;
 }
 
 export interface StreamCallbacks {
 	onToken?: (token: string) => void;
 	onToolCall?: (toolCall: ToolCall) => void;
-	onToolExecuted?: (toolCall: ToolCall, result: string) => void;
 	onFinish?: () => void;
 }
 

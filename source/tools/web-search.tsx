@@ -220,4 +220,5 @@ export const webSearchTool: NanocoderToolExport = {
 	tool: webSearchCoreTool,
 	formatter: webSearchFormatter,
 	validator: webSearchValidator,
+	readOnly: true,
 };

@@ -392,6 +392,62 @@ test('ToolRegistry - clear removes all tools', t => {
 	t.false(registry.hasTool('tool3'));
 });
 
+// ============================================================================
+// readOnly Flag Tests
+// ============================================================================
+
+test('ToolRegistry - register preserves readOnly true', t => {
+	const registry = new ToolRegistry();
+	const entry = createMockToolEntry({ readOnly: true });
+
+	registry.register(entry);
+	const retrieved = registry.getEntry('test-tool');
+
+	t.is(retrieved?.readOnly, true);
+});
+
+test('ToolRegistry - register preserves readOnly false', t => {
+	const registry = new ToolRegistry();
+	const entry = createMockToolEntry({ readOnly: false });
+
+	registry.register(entry);
+	const retrieved = registry.getEntry('test-tool');
+
+	t.is(retrieved?.readOnly, false);
+});
+
+test('ToolRegistry - register preserves readOnly undefined', t => {
+	const registry = new ToolRegistry();
+	const entry = createMockToolEntry();
+	// Default createMockToolEntry doesn't set readOnly
+
+	registry.register(entry);
+	const retrieved = registry.getEntry('test-tool');
+
+	t.is(retrieved?.readOnly, undefined);
+});
+
+test('ToolRegistry - fromRegistries applies readOnly flags', t => {
+	const handler: ToolEntry['handler'] = async () => 'test';
+	const tool: ToolEntry['tool'] = { execute: async () => 'test' } as any;
+
+	const registry = ToolRegistry.fromRegistries(
+		{ tool1: handler, tool2: handler },
+		{ tool1: tool, tool2: tool },
+		undefined,
+		undefined,
+		undefined,
+		{ tool1: true },
+	);
+
+	t.is(registry.getEntry('tool1')?.readOnly, true);
+	t.is(registry.getEntry('tool2')?.readOnly, undefined);
+});
+
+// ============================================================================
+// fromRegistries Tests
+// ============================================================================
+
 test('ToolRegistry - fromRegistries creates registry from records', t => {
 	const handler1: ToolEntry['handler'] = async () => 'test';
 	const handler2: ToolEntry['handler'] = async () => 'test';

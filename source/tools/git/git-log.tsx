@@ -215,4 +215,5 @@ export const gitLogTool: NanocoderToolExport = {
 	name: 'git_log' as const,
 	tool: gitLogCoreTool,
 	formatter,
+	readOnly: true,
 };

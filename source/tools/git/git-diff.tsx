@@ -216,4 +216,5 @@ export const gitDiffTool: NanocoderToolExport = {
 	name: 'git_diff' as const,
 	tool: gitDiffCoreTool,
 	formatter,
+	readOnly: true,
 };

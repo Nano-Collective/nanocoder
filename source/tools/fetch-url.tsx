@@ -173,4 +173,5 @@ export const fetchUrlTool: NanocoderToolExport = {
 	tool: fetchUrlCoreTool,
 	formatter: fetchUrlFormatter,
 	validator: fetchUrlValidator,
+	readOnly: true,
 };

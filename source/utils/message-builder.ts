@@ -13,15 +13,6 @@ export class MessageBuilder {
 	}
 
 	/**
-	 * Add auto-executed messages from AI SDK multi-step execution.
-	 * These include both assistant messages (with tool_calls) and tool result messages.
-	 */
-	addAutoExecutedMessages(autoMessages: Message[]): this {
-		this.messages.push(...autoMessages);
-		return this;
-	}
-
-	/**
 	 * Add an assistant message (with or without tool_calls).
 	 */
 	addAssistantMessage(msg: Message): this {

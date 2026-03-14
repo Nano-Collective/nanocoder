@@ -338,4 +338,5 @@ export const searchFileContentsTool: NanocoderToolExport = {
 	name: 'search_file_contents' as const,
 	tool: searchFileContentsCoreTool,
 	formatter: searchFileContentsFormatter,
+	readOnly: true,
 };

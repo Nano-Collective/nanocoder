@@ -356,4 +356,5 @@ export const gitStatusTool: NanocoderToolExport = {
 	name: 'git_status' as const,
 	tool: gitStatusCoreTool,
 	formatter,
+	readOnly: true,
 };

@@ -48,6 +48,7 @@ import {
 	setGlobalQuestionHandler,
 } from '@/utils/question-queue';
 import {getShutdownManager} from '@/utils/shutdown';
+import {displayCompactCountsSummary} from '@/utils/tool-result-display';
 import {isExtensionInstalled} from '@/vscode/extension-installer';
 
 export default function App({
@@ -304,7 +305,12 @@ export default function App({
 		},
 		onConversationComplete: () => {
 			appState.setIsConversationComplete(true);
+			appState.setCompactToolCounts(null);
+			appState.compactToolCountsRef.current = {};
 		},
+		compactToolDisplayRef: appState.compactToolDisplayRef,
+		onSetCompactToolCounts: appState.setCompactToolCounts,
+		compactToolCountsRef: appState.compactToolCountsRef,
 	});
 
 	// Track context window usage percentage
@@ -341,6 +347,7 @@ export default function App({
 		client: appState.client,
 		currentProvider: appState.currentProvider,
 		setDevelopmentMode: appState.setDevelopmentMode,
+		compactToolDisplay: appState.compactToolDisplay,
 	});
 
 	// Log when application is fully ready
@@ -826,6 +833,26 @@ export default function App({
 									}
 									developmentMode={appState.developmentMode}
 									contextPercentUsed={appState.contextPercentUsed}
+									compactToolCounts={appState.compactToolCounts}
+									compactToolDisplay={appState.compactToolDisplay}
+									onToggleCompactDisplay={() => {
+										const expanding = appState.compactToolDisplay;
+										appState.setCompactToolDisplay(!expanding);
+
+										// When expanding, flush accumulated counts to static
+										if (expanding) {
+											const counts = appState.compactToolCountsRef.current;
+											if (Object.keys(counts).length > 0) {
+												displayCompactCountsSummary(
+													counts,
+													appState.addToChatQueue,
+													appState.getNextComponentKey,
+												);
+												appState.compactToolCountsRef.current = {};
+												appState.setCompactToolCounts(null);
+											}
+										}
+									}}
 									onToolConfirm={toolHandler.handleToolConfirmation}
 									onToolCancel={toolHandler.handleToolConfirmationCancel}
 									onSubmit={appHandlers.handleMessageSubmit}

@@ -32,6 +32,9 @@ export function useChatHandler({
 	nonInteractiveMode = false,
 	onStartToolConfirmationFlow,
 	onConversationComplete,
+	compactToolDisplayRef,
+	onSetCompactToolCounts,
+	compactToolCountsRef,
 }: UseChatHandlerProps): ChatHandlerReturn {
 	// Conversation state manager for enhanced context
 	const conversationStateManager = React.useRef(new ConversationStateManager());
@@ -104,6 +107,9 @@ export function useChatHandler({
 					onStartToolConfirmationFlow,
 					onConversationComplete,
 					conversationStartTime: conversationStartTimeRef.current,
+					compactToolDisplayRef,
+					onSetCompactToolCounts,
+					compactToolCountsRef,
 				});
 			} catch (error) {
 				displayError(error, 'chat-error');
@@ -127,6 +133,9 @@ export function useChatHandler({
 			nonInteractiveMode,
 			onStartToolConfirmationFlow,
 			onConversationComplete,
+			compactToolDisplayRef,
+			compactToolCountsRef,
+			onSetCompactToolCounts,
 			displayError,
 			resetStreamingState,
 		],

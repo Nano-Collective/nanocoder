@@ -531,6 +531,70 @@ test('static tools - search_file_contents tool exists', t => {
 // Concurrent Access Tests
 // ============================================================================
 
+// ============================================================================
+// isReadOnly Tests
+// ============================================================================
+
+test('isReadOnly - returns true for read_file', t => {
+	const manager = new ToolManager();
+	t.true(manager.isReadOnly('read_file'));
+});
+
+test('isReadOnly - returns true for all read-only tools', t => {
+	const manager = new ToolManager();
+	const readOnlyTools = [
+		'read_file',
+		'find_files',
+		'search_file_contents',
+		'list_directory',
+		'web_search',
+		'fetch_url',
+		'lsp_get_diagnostics',
+		'git_status',
+		'git_diff',
+		'git_log',
+		'list_tasks',
+	];
+
+	for (const toolName of readOnlyTools) {
+		if (manager.hasTool(toolName)) {
+			t.true(manager.isReadOnly(toolName), `${toolName} should be read-only`);
+		}
+	}
+});
+
+test('isReadOnly - returns false for mutating tools', t => {
+	const manager = new ToolManager();
+	const mutatingTools = [
+		'write_file',
+		'string_replace',
+		'execute_bash',
+		'create_task',
+		'update_task',
+		'delete_task',
+	];
+
+	for (const toolName of mutatingTools) {
+		if (manager.hasTool(toolName)) {
+			t.false(manager.isReadOnly(toolName), `${toolName} should not be read-only`);
+		}
+	}
+});
+
+test('isReadOnly - returns false for non-existent tool', t => {
+	const manager = new ToolManager();
+	t.false(manager.isReadOnly('non-existent-tool-xyz'));
+});
+
+test('isReadOnly - returns false for empty string', t => {
+	const manager = new ToolManager();
+	t.false(manager.isReadOnly(''));
+});
+
+// ============================================================================
+// Concurrent Access Tests
+// ============================================================================
+
 test('concurrent - multiple simultaneous tool accesses', t => {
 	const manager = new ToolManager();
 

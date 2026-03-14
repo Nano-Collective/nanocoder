@@ -8,6 +8,8 @@ import type {ToolCall, ToolResult} from '@/types/core';
 
 import {setToolRegistryGetter} from '@/message-handler';
 
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 // Mock tool registry for tests
 const mockToolHandler: ToolCall['function']['name'] extends infer T
   ? Record<string, (args: Record<string, unknown>) => Promise<string>>
@@ -16,6 +18,9 @@ const mockToolHandler: ToolCall['function']['name'] extends infer T
   tool1: async () => 'Tool 1 executed',
   tool2: async () => 'Tool 2 executed',
   tool3: async () => 'Tool 3 executed',
+  slow_tool1: async () => { await delay(50); return 'Slow tool 1 done'; },
+  slow_tool2: async () => { await delay(50); return 'Slow tool 2 done'; },
+  slow_tool3: async () => { await delay(50); return 'Slow tool 3 done'; },
   failing_tool: async () => {
     throw new Error('Tool execution failed');
   },
@@ -35,6 +40,7 @@ test.before(async () => {
 const createMockToolManager = (config: {
 	validatorResult?: {valid: boolean; error?: string};
 	shouldFail?: boolean;
+	readOnlyTools?: string[];
 } = {}) => ({
 	getToolValidator: (name: string) => {
 		if (config.validatorResult) {
@@ -52,6 +58,7 @@ const createMockToolManager = (config: {
 	}),
 	hasTool: (name: string) => true,
 	getToolFormatter: (name: string) => undefined,
+	isReadOnly: (name: string) => config.readOnlyTools?.includes(name) ?? false,
 });
 
 // Create a mock conversation state manager
@@ -183,7 +190,7 @@ test('executeToolsDirectly - executes tool successfully', async t => {
 	t.true(results[0].content.includes('Tool executed'));
 });
 
-test('executeToolsDirectly - executes multiple tools in parallel', async t => {
+test('executeToolsDirectly - executes multiple read-only tools in parallel', async t => {
 	const toolCalls: ToolCall[] = [
 		{
 			id: 'call_1',
@@ -205,6 +212,7 @@ test('executeToolsDirectly - executes multiple tools in parallel', async t => {
 	const toolManager = createMockToolManager({
 		validatorResult: undefined,
 		shouldFail: false,
+		readOnlyTools: ['tool1', 'tool2', 'tool3'],
 	});
 
 	const results = await executeToolsDirectly(
@@ -220,6 +228,97 @@ test('executeToolsDirectly - executes multiple tools in parallel', async t => {
 	// All results should have unique tool_call_ids
 	const toolIds = results.map(r => r.tool_call_id);
 	t.is(new Set(toolIds).size, 3);
+});
+
+test('executeToolsDirectly - runs read-only tools concurrently (timing)', async t => {
+	const toolCalls: ToolCall[] = [
+		{id: 'slow_1', function: {name: 'slow_tool1', arguments: '{}'}},
+		{id: 'slow_2', function: {name: 'slow_tool2', arguments: '{}'}},
+		{id: 'slow_3', function: {name: 'slow_tool3', arguments: '{}'}},
+	];
+
+	const conversationStateManager = createMockConversationStateManager();
+	const addToChatQueue = () => {};
+	const toolManager = createMockToolManager({
+		validatorResult: undefined,
+		shouldFail: false,
+		readOnlyTools: ['slow_tool1', 'slow_tool2', 'slow_tool3'],
+	});
+
+	const start = Date.now();
+	const results = await executeToolsDirectly(
+		toolCalls,
+		toolManager,
+		conversationStateManager as any,
+		addToChatQueue,
+		() => 1,
+	);
+	const elapsed = Date.now() - start;
+
+	t.is(results.length, 3);
+	// 3 tools x 50ms each: sequential would take ~150ms, parallel should take ~50ms
+	// Use 120ms threshold to account for overhead while catching sequential execution
+	t.true(elapsed < 120, `Expected parallel execution (<120ms) but took ${elapsed}ms`);
+});
+
+test('executeToolsDirectly - preserves result order matching input order', async t => {
+	const toolCalls: ToolCall[] = [
+		{id: 'slow_1', function: {name: 'slow_tool1', arguments: '{}'}},
+		{id: 'slow_2', function: {name: 'slow_tool2', arguments: '{}'}},
+		{id: 'slow_3', function: {name: 'slow_tool3', arguments: '{}'}},
+	];
+
+	const conversationStateManager = createMockConversationStateManager();
+	const addToChatQueue = () => {};
+	const toolManager = createMockToolManager({
+		validatorResult: undefined,
+		shouldFail: false,
+		readOnlyTools: ['slow_tool1', 'slow_tool2', 'slow_tool3'],
+	});
+
+	const results = await executeToolsDirectly(
+		toolCalls,
+		toolManager,
+		conversationStateManager as any,
+		addToChatQueue,
+		() => 1,
+	);
+
+	// Results must be in same order as input tool calls
+	t.is(results[0].tool_call_id, 'slow_1');
+	t.is(results[1].tool_call_id, 'slow_2');
+	t.is(results[2].tool_call_id, 'slow_3');
+});
+
+test('executeToolsDirectly - runs non-read-only tools sequentially (timing)', async t => {
+	const toolCalls: ToolCall[] = [
+		{id: 'slow_1', function: {name: 'slow_tool1', arguments: '{}'}},
+		{id: 'slow_2', function: {name: 'slow_tool2', arguments: '{}'}},
+		{id: 'slow_3', function: {name: 'slow_tool3', arguments: '{}'}},
+	];
+
+	const conversationStateManager = createMockConversationStateManager();
+	const addToChatQueue = () => {};
+	const toolManager = createMockToolManager({
+		validatorResult: undefined,
+		shouldFail: false,
+		// NOT marking as readOnly — should run sequentially
+		readOnlyTools: [],
+	});
+
+	const start = Date.now();
+	const results = await executeToolsDirectly(
+		toolCalls,
+		toolManager,
+		conversationStateManager as any,
+		addToChatQueue,
+		() => 1,
+	);
+	const elapsed = Date.now() - start;
+
+	t.is(results.length, 3);
+	// 3 tools x 50ms each: sequential should take ~150ms
+	t.true(elapsed >= 120, `Expected sequential execution (>=120ms) but took ${elapsed}ms`);
 });
 
 // ============================================================================
@@ -362,6 +461,50 @@ test('executeToolsDirectly - handles tool with no validator', async t => {
 	t.is(results.length, 1);
 });
 
+// ============================================================================
+// Compact Display Tests
+// ============================================================================
+
+test('executeToolsDirectly - compact display calls onCompactToolCount instead of adding to chat queue', async t => {
+	const toolCalls: ToolCall[] = [
+		{id: 'call_1', function: {name: 'tool1', arguments: '{}'}},
+		{id: 'call_2', function: {name: 'tool1', arguments: '{}'}},
+		{id: 'call_3', function: {name: 'tool2', arguments: '{}'}},
+	];
+
+	const conversationStateManager = createMockConversationStateManager();
+	const addToChatQueueCalls: unknown[] = [];
+	const addToChatQueue = (component: unknown) => {
+		addToChatQueueCalls.push(component);
+	};
+	const toolManager = createMockToolManager({
+		validatorResult: undefined,
+		shouldFail: false,
+	});
+
+	const compactCounts: Array<string> = [];
+
+	const results = await executeToolsDirectly(
+		toolCalls,
+		toolManager,
+		conversationStateManager as any,
+		addToChatQueue,
+		() => 1,
+		{
+			compactDisplay: true,
+			onCompactToolCount: (toolName) => {
+				compactCounts.push(toolName);
+			},
+		},
+	);
+
+	t.is(results.length, 3);
+	// Compact mode should NOT add to chat queue (counts are displayed live instead)
+	t.is(addToChatQueueCalls.length, 0);
+	// Should have called onCompactToolCount for each tool
+	t.deepEqual(compactCounts, ['tool1', 'tool1', 'tool2']);
+});
+
 test('executeToolsDirectly - handles tool with valid validation', async t => {
 	const toolCalls: ToolCall[] = [
 		{
@@ -390,4 +533,140 @@ test('executeToolsDirectly - handles tool with valid validation', async t => {
 	);
 
 	t.is(results.length, 1);
+});
+
+test('executeToolsDirectly - groupByReadOnly groups consecutive read-only tools', async t => {
+	// [read, read, write, read, read] should produce groups:
+	// [[read, read], [write], [read, read]]
+	const toolCalls: ToolCall[] = [
+		{id: 'call_1', function: {name: 'slow_tool1', arguments: '{}'}},
+		{id: 'call_2', function: {name: 'slow_tool2', arguments: '{}'}},
+		{id: 'call_3', function: {name: 'tool1', arguments: '{}'}},
+		{id: 'call_4', function: {name: 'slow_tool3', arguments: '{}'}},
+		{id: 'call_5', function: {name: 'slow_tool1', arguments: '{}'}},
+	];
+
+	const conversationStateManager = createMockConversationStateManager();
+	const addToChatQueue = () => {};
+	const toolManager = createMockToolManager({
+		validatorResult: undefined,
+		shouldFail: false,
+		readOnlyTools: ['slow_tool1', 'slow_tool2', 'slow_tool3'],
+	});
+
+	const start = Date.now();
+	const results = await executeToolsDirectly(
+		toolCalls,
+		toolManager,
+		conversationStateManager as any,
+		addToChatQueue,
+		() => 1,
+	);
+	const elapsed = Date.now() - start;
+
+	t.is(results.length, 5);
+	// If grouped correctly: group1 (2 parallel ~50ms) + group2 (1 sequential) + group3 (2 parallel ~50ms)
+	// Total ~100ms + overhead, NOT 250ms (5 * 50ms sequential)
+	t.true(elapsed < 200, `Should be faster than sequential (took ${elapsed}ms)`);
+});
+
+test('executeToolsDirectly - onCompactToolCount receives correct tool names', async t => {
+	const toolCalls: ToolCall[] = [
+		{id: 'call_1', function: {name: 'tool1', arguments: '{}'}},
+		{id: 'call_2', function: {name: 'tool2', arguments: '{}'}},
+		{id: 'call_3', function: {name: 'tool1', arguments: '{}'}},
+	];
+
+	const conversationStateManager = createMockConversationStateManager();
+	const addToChatQueue = () => {};
+	const toolManager = createMockToolManager({
+		validatorResult: undefined,
+		shouldFail: false,
+	});
+
+	const countedTools: string[] = [];
+
+	await executeToolsDirectly(
+		toolCalls,
+		toolManager,
+		conversationStateManager as any,
+		addToChatQueue,
+		() => 1,
+		{
+			compactDisplay: true,
+			onCompactToolCount: (toolName) => {
+				countedTools.push(toolName);
+			},
+		},
+	);
+
+	t.is(countedTools.length, 3);
+	t.is(countedTools[0], 'tool1');
+	t.is(countedTools[1], 'tool2');
+	t.is(countedTools[2], 'tool1');
+});
+
+test('executeToolsDirectly - compact mode without onCompactToolCount does not error', async t => {
+	const toolCalls: ToolCall[] = [
+		{id: 'call_1', function: {name: 'tool1', arguments: '{}'}},
+	];
+
+	const conversationStateManager = createMockConversationStateManager();
+	const addToChatQueue = () => {};
+	const toolManager = createMockToolManager({
+		validatorResult: undefined,
+		shouldFail: false,
+	});
+
+	await t.notThrowsAsync(async () => {
+		await executeToolsDirectly(
+			toolCalls,
+			toolManager,
+			conversationStateManager as any,
+			addToChatQueue,
+			() => 1,
+			{
+				compactDisplay: true,
+				// onCompactToolCount intentionally omitted
+			},
+		);
+	});
+});
+
+test('executeToolsDirectly - compact mode still displays errors in full', async t => {
+	const toolCalls: ToolCall[] = [
+		{id: 'call_1', function: {name: 'failing_tool', arguments: '{}'}},
+	];
+
+	const conversationStateManager = createMockConversationStateManager();
+	const addToChatQueueCalls: unknown[] = [];
+	const addToChatQueue = (component: unknown) => {
+		addToChatQueueCalls.push(component);
+	};
+	const toolManager = createMockToolManager({
+		validatorResult: undefined,
+		shouldFail: true,
+	});
+
+	const compactCounts: string[] = [];
+
+	const results = await executeToolsDirectly(
+		toolCalls,
+		toolManager,
+		conversationStateManager as any,
+		addToChatQueue,
+		() => 1,
+		{
+			compactDisplay: true,
+			onCompactToolCount: (toolName) => {
+				compactCounts.push(toolName);
+			},
+		},
+	);
+
+	t.is(results.length, 1);
+	t.true(results[0].content.includes('Error:'));
+	// Error results should be displayed in full (added to chat queue), not counted
+	t.true(addToChatQueueCalls.length > 0);
+	t.is(compactCounts.length, 0);
 });

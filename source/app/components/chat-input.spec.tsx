@@ -163,3 +163,28 @@ test('ChatInput does not show question prompt when not in question mode', t => {
 	t.notRegex(output!, /Which database/);
 	unmount();
 });
+
+test('ChatInput shows live compact counts when compactToolCounts provided', t => {
+	const props = createDefaultProps({
+		compactToolCounts: {read_file: 5, search_file_contents: 2},
+	});
+
+	const {lastFrame, unmount} = renderWithTheme(<ChatInput {...props} />);
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Read 5 files/);
+	t.regex(output!, /Searched for 2 patterns/);
+	unmount();
+});
+
+test('ChatInput does not show compact counts when null', t => {
+	const props = createDefaultProps({
+		compactToolCounts: null,
+	});
+
+	const {lastFrame, unmount} = renderWithTheme(<ChatInput {...props} />);
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /Read.*files/);
+	unmount();
+});

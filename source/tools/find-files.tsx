@@ -257,4 +257,5 @@ export const findFilesTool: NanocoderToolExport = {
 	name: 'find_files' as const,
 	tool: findFilesCoreTool,
 	formatter: findFilesFormatter,
+	readOnly: true,
 };

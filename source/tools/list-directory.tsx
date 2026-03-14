@@ -329,4 +329,5 @@ export const listDirectoryTool: NanocoderToolExport = {
 	name: 'list_directory' as const,
 	tool: listDirectoryCoreTool,
 	formatter: listDirectoryFormatter,
+	readOnly: true,
 };

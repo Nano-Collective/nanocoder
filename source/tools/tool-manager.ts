@@ -2,6 +2,7 @@ import {MCPClient} from '@/mcp/mcp-client';
 import {
 	nativeToolsRegistry as staticNativeToolsRegistry,
 	toolFormatters as staticToolFormatters,
+	toolReadOnlyFlags as staticToolReadOnlyFlags,
 	toolRegistry as staticToolRegistry,
 	toolStreamingFormatters as staticToolStreamingFormatters,
 	toolValidators as staticToolValidators,
@@ -43,6 +44,7 @@ export class ToolManager {
 			staticToolFormatters,
 			staticToolValidators,
 			staticToolStreamingFormatters,
+			staticToolReadOnlyFlags,
 		);
 	}
 
@@ -87,6 +89,15 @@ export class ToolManager {
 	}
 
 	/**
+	 * Get all native AI SDK tools with execute functions removed.
+	 * Without execute, the SDK returns tool calls for us to handle
+	 * (parallel execution, confirmation flow, etc.).
+	 */
+	getAllToolsWithoutExecute(): Record<string, AISDKCoreTool> {
+		return this.registry.getNativeToolsWithoutExecute();
+	}
+
+	/**
 	 * Get all tool handlers
 	 */
 	getToolRegistry(): Record<string, ToolHandler> {
@@ -119,6 +130,13 @@ export class ToolManager {
 	 */
 	getStreamingFormatter(toolName: string): StreamingFormatter | undefined {
 		return this.registry.getStreamingFormatter(toolName);
+	}
+
+	/**
+	 * Check if a tool is read-only (safe to parallelize)
+	 */
+	isReadOnly(toolName: string): boolean {
+		return this.registry.getEntry(toolName)?.readOnly === true;
 	}
 
 	/**
