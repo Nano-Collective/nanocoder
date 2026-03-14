@@ -1,5 +1,5 @@
 import React from 'react';
-import {isNonInteractiveModeComplete} from '@/app/helpers';
+import {isNonInteractiveModeComplete} from '@/app';
 import type {NonInteractiveModeState} from '@/app/types';
 import {TIMEOUT_EXECUTION_MAX_MS, TIMEOUT_OUTPUT_FLUSH_MS} from '@/constants';
 import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
