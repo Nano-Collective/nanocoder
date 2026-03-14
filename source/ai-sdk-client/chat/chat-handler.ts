@@ -37,6 +37,32 @@ import {
 	createPrepareStepHandler,
 } from './streaming-handler.js';
 
+/**
+ * Recursively removes 'description' and 'example' fields from a JSON schema
+ * to reduce token usage and cognitive load for small models.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: Necessary for generic JSON schema transformation
+export function simplifyToolSchema(schema: any): any {
+	if (!schema || typeof schema !== 'object') {
+		return schema;
+	}
+
+	if (Array.isArray(schema)) {
+		return schema.map(item => simplifyToolSchema(item));
+	}
+
+	// biome-ignore lint/suspicious/noExplicitAny: Final schema object build
+	const result: any = {};
+	for (const key of Object.keys(schema)) {
+		// Skip description and example fields
+		if (key === 'description' || key === 'example' || key === 'examples') {
+			continue;
+		}
+		result[key] = simplifyToolSchema(schema[key]);
+	}
+	return result;
+}
+
 export interface ChatHandlerParams {
 	model: LanguageModel;
 	currentModel: string;
@@ -129,6 +155,27 @@ export async function handleChat(
 						return [name, toolDef];
 					}),
 				);
+			}
+
+			// Apply schema simplification if enabled
+			const smmConfig = providerConfig.smallModelMode;
+			if (smmConfig?.enabled && smmConfig.simplifiedSchemas) {
+				effectiveTools = Object.fromEntries(
+					Object.entries(effectiveTools).map(([name, toolDef]) => {
+						// biome-ignore lint/suspicious/noExplicitAny: Cast to access inputSchema which is an internal AI SDK type often nested deeply
+						const toolAny = toolDef as any;
+						return [
+							name,
+							{
+								...toolDef,
+								inputSchema: simplifyToolSchema(toolAny.inputSchema),
+							} as AISDKCoreTool,
+						];
+					}),
+				);
+				logger.debug('Simplified tool schemas for small model mode', {
+					correlationId,
+				});
 			}
 
 			// Tools are already in AI SDK format - use directly
@@ -255,17 +302,63 @@ export async function handleChat(
 
 			// Check if error indicates tool support issue and we haven't retried
 			if (!skipTools && isToolSupportError(error)) {
-				logger.warn('Tool support error detected, retrying without tools', {
-					model: currentModel,
-					error: error instanceof Error ? error.message : error,
-					correlationId,
-					provider: providerConfig.name,
-				});
+				const smmConfig = providerConfig.smallModelMode;
 
-				// Retry without tools
+				// Case 1: Already in SMM, but hit a tool error.
+				// Enable aggressive simplification and slim prompt for the retry.
+				if (smmConfig?.enabled) {
+					logger.warn(
+						'Tool support error in Small Model Mode, retrying with maximized simplification',
+						{
+							model: currentModel,
+							correlationId,
+						},
+					);
+
+					const maxSimpConfig = {
+						...providerConfig,
+						smallModelMode: {
+							...smmConfig,
+							simplifiedSchemas: true,
+							slimPrompt: true,
+							// If minimal profile isn't already active, maybe try it?
+							// For now just stick to maximizing simplification.
+						},
+					};
+
+					return await handleChat({
+						...params,
+						providerConfig: maxSimpConfig,
+						skipTools: true, // This currently disables native tools entirely.
+						// Wait, skipTools=true in handleChat makes it use XML for ALL tools.
+						// That might actually be better for small models failing native tools.
+					});
+				}
+
+				// Case 2: Not in SMM. Enable it for the retry.
+				logger.warn(
+					'Tool support error detected, retrying with Small Model Mode enabled',
+					{
+						model: currentModel,
+						error: error instanceof Error ? error.message : error,
+						correlationId,
+						provider: providerConfig.name,
+					},
+				);
+
+				const smmRetryConfig = {
+					...providerConfig,
+					smallModelMode: {
+						enabled: true,
+						simplifiedSchemas: true,
+						slimPrompt: true,
+					},
+				};
+
 				return await handleChat({
 					...params,
-					skipTools: true, // Mark that we're retrying
+					providerConfig: smmRetryConfig,
+					skipTools: true, // Use XML fallback for retry
 				});
 			}
 

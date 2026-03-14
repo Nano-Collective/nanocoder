@@ -71,16 +71,26 @@ function injectSystemInfo(prompt: string): string {
 	);
 }
 
+export interface PromptOptions {
+	slim?: boolean;
+}
+
 /**
  * Process the main prompt template by injecting system info
  */
-export function processPromptTemplate(): string {
+export function processPromptTemplate(options?: PromptOptions): string {
 	let systemPrompt = 'You are a helpful AI assistant.'; // fallback
 
+	// Determine which prompt file to load
+	const isSlim = options?.slim === true;
+	const targetPromptPath = isSlim
+		? join(__dirname, '../../source/app/prompts/main-prompt-slim.md')
+		: promptPath;
+
 	// Load base prompt
-	if (existsSync(promptPath)) {
+	if (existsSync(targetPromptPath)) {
 		try {
-			systemPrompt = readFileSync(promptPath, 'utf-8');
+			systemPrompt = readFileSync(targetPromptPath, 'utf-8');
 		} catch (error) {
 			const errorMessage =
 				error instanceof Error ? error.message : String(error);

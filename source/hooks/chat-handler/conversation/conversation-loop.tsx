@@ -15,11 +15,52 @@ import type {
 } from '@/types/core';
 import {performAutoCompact} from '@/utils/auto-compact';
 import {formatElapsedTime, getRandomAdjective} from '@/utils/completion-note';
+import {getLogger} from '@/utils/logging';
 import {MessageBuilder} from '@/utils/message-builder';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {displayCompactCountsSummary} from '@/utils/tool-result-display';
 import {filterValidToolCalls} from '../utils/tool-filters';
 import {executeToolsDirectly} from './tool-executor';
+
+// Tool profiles for small model mode - maps profile names to allowed tool names
+const TOOL_PROFILES: Record<string, string[]> = {
+	minimal: [
+		'read_file',
+		'write_file',
+		'string_replace',
+		'execute_bash',
+		'list_directory',
+	],
+	'code-edit': [
+		'read_file',
+		'write_file',
+		'string_replace',
+		'find_files',
+		'search_file_contents',
+		'list_directory',
+		'execute_bash',
+	],
+	explore: [
+		'read_file',
+		'find_files',
+		'search_file_contents',
+		'list_directory',
+		'fetch_url',
+		'web_search',
+	],
+	git: [
+		'git_status',
+		'git_diff',
+		'git_log',
+		'git_add',
+		'git_commit',
+		'git_push',
+		'git_pull',
+		'git_branch',
+		'read_file',
+		'execute_bash',
+	],
+};
 
 interface ProcessAssistantResponseParams {
 	systemMessage: Message;
@@ -135,9 +176,28 @@ export const processAssistantResponse = async (
 			}
 		: undefined;
 
+	// Get all available tools, then apply small model mode filtering
+	const config = getAppConfig();
+	const smmConfig = config.smallModelMode;
+	let tools = toolManager?.getAllToolsWithoutExecute() || {};
+
+	if (smmConfig?.enabled && smmConfig?.toolProfile) {
+		const allowedTools = TOOL_PROFILES[smmConfig.toolProfile];
+		if (allowedTools) {
+			// Filter tools to only those in the profile
+			const filtered: typeof tools = {};
+			for (const toolName of allowedTools) {
+				if (tools[toolName]) {
+					filtered[toolName] = tools[toolName];
+				}
+			}
+			tools = filtered;
+		}
+	}
+
 	const result = await client.chat(
 		[systemMessage, ...messages],
-		toolManager?.getAllToolsWithoutExecute() || {},
+		tools,
 		{},
 		controller.signal,
 		modeOverrides,
@@ -237,6 +297,23 @@ export const processAssistantResponse = async (
 		);
 	}
 
+	// Enforce maxToolsPerTurn for small model mode
+	if (
+		smmConfig?.enabled &&
+		smmConfig?.maxToolsPerTurn &&
+		allToolCalls.length > smmConfig.maxToolsPerTurn
+	) {
+		const logger = getLogger();
+		logger.warn('Pruning excessive tool calls for small model mode', {
+			originalCount: allToolCalls.length,
+			maxAllowed: smmConfig.maxToolsPerTurn,
+		});
+		// In Small Model Mode, we slice the array to stay within limits
+		const prunedToolCalls = allToolCalls.slice(0, smmConfig.maxToolsPerTurn);
+		// Update the local variable used in subsequent logic
+		allToolCalls.length = 0;
+		allToolCalls.push(...prunedToolCalls);
+	}
 	const {validToolCalls, errorResults} = filterValidToolCalls(
 		allToolCalls,
 		toolManager,

@@ -1,7 +1,7 @@
 import test from 'ava';
 import {calculateEffectiveTimeout} from './useNonInteractiveMode.js';
 import {TIMEOUT_EXECUTION_MAX_MS} from '../constants.js';
-import type {LLMClient} from '../types/index.js';
+import type {LLMClient} from '../types/core.js';
 
 test('calculateEffectiveTimeout returns default when client is null', t => {
 	const result = calculateEffectiveTimeout(null);

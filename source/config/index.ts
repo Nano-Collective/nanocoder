@@ -145,12 +145,130 @@ function tryLoadAutoCompactFromPath(
 	return null;
 }
 
+// Try to load small model mode config from a specific path
+// Returns the config if found and valid, null otherwise
+function tryLoadSmallModelModeFromPath(
+	configPath: string,
+	defaults: NonNullable<AppConfig['smallModelMode']>,
+): AppConfig['smallModelMode'] | null {
+	if (!existsSync(configPath)) {
+		return null;
+	}
+
+	try {
+		const rawData = readFileSync(configPath, 'utf-8');
+		const config = JSON.parse(rawData);
+		const smallModelMode =
+			config.nanocoder?.smallModelMode || config.smallModelMode;
+
+		if (smallModelMode && typeof smallModelMode === 'object') {
+			return {
+				enabled:
+					smallModelMode.enabled !== undefined
+						? Boolean(smallModelMode.enabled)
+						: defaults.enabled,
+				slimPrompt:
+					smallModelMode.slimPrompt !== undefined
+						? Boolean(smallModelMode.slimPrompt)
+						: defaults.slimPrompt,
+				toolProfile:
+					smallModelMode.toolProfile !== undefined
+						? smallModelMode.toolProfile
+						: defaults.toolProfile,
+				maxToolsPerTurn:
+					typeof smallModelMode.maxToolsPerTurn === 'number'
+						? smallModelMode.maxToolsPerTurn
+						: defaults.maxToolsPerTurn,
+				aggressiveCompact:
+					smallModelMode.aggressiveCompact !== undefined
+						? Boolean(smallModelMode.aggressiveCompact)
+						: defaults.aggressiveCompact,
+				simplifiedSchemas:
+					smallModelMode.simplifiedSchemas !== undefined
+						? Boolean(smallModelMode.simplifiedSchemas)
+						: defaults.simplifiedSchemas,
+				plannerModel: smallModelMode.plannerModel || defaults.plannerModel,
+			};
+		}
+	} catch (error) {
+		logError(
+			`Failed to load small model mode config from ${configPath}: ${String(error)}`,
+		);
+	}
+
+	return null;
+}
+
+// Load small model mode configuration
+function loadSmallModelModeConfig(): AppConfig['smallModelMode'] {
+	const defaults: NonNullable<AppConfig['smallModelMode']> = {
+		enabled: false,
+		slimPrompt: true,
+		toolProfile: 'minimal',
+		maxToolsPerTurn: 1,
+		aggressiveCompact: true,
+		simplifiedSchemas: true,
+	};
+
+	// Try to load from project-level config first
+	const projectConfigPath = join(process.cwd(), 'agents.config.json');
+	const projectConfig = tryLoadSmallModelModeFromPath(
+		projectConfigPath,
+		defaults,
+	);
+	if (projectConfig) {
+		return projectConfig;
+	}
+
+	// Try global config
+	const configDir = getConfigPath();
+	const globalConfigPath = join(configDir, 'agents.config.json');
+	const globalConfig = tryLoadSmallModelModeFromPath(
+		globalConfigPath,
+		defaults,
+	);
+	if (globalConfig) {
+		return globalConfig;
+	}
+
+	// Fallback to home directory
+	const homePath = join(homedir(), '.agents.config.json');
+	const homeConfig = tryLoadSmallModelModeFromPath(homePath, defaults);
+	if (homeConfig) {
+		return homeConfig;
+	}
+
+	return defaults;
+}
+
+/**
+ * Checks if a model name matches known "small" model patterns (< 10B parameters)
+ */
+export function isSmallModel(modelName: string): boolean {
+	const smallModelPatterns = [
+		/llama-?3\.?[12]?.*?[138]b/i,
+		/gemma-?2?.*?[279]b/i,
+		/phi-?[34]/i,
+		/qwen.*?([0-9.]+)b/i, // Broadly catch qwen small models
+		/mistral.*?7b/i,
+		/deepseek.*?coder.*?1\.3b/i,
+		/stable-?lm-?3b/i,
+	];
+
+	return smallModelPatterns.some(pattern => pattern.test(modelName));
+}
+
 // Load auto-compact configuration and Returns default config if not specified
-function loadAutoCompactConfig(): AutoCompactConfig {
+function loadAutoCompactConfig(
+	smallModelMode?: AppConfig['smallModelMode'],
+): AutoCompactConfig {
+	const isAggressiveDefault =
+		smallModelMode?.enabled && smallModelMode?.aggressiveCompact;
+
 	const defaults: AutoCompactConfig = {
 		enabled: true,
-		threshold: 60,
-		mode: 'conservative',
+		threshold: isAggressiveDefault ? 40 : 60,
+		mode: isAggressiveDefault ? 'aggressive' : 'conservative',
 		notifyUser: true,
 	};
 
@@ -295,16 +413,38 @@ function loadAppConfig(): AppConfig {
 	const mcpServersWithSource = loadAllMCPConfigs();
 	const mcpServers = mcpServersWithSource.map(item => item.server);
 
-	// Load auto-compact configuration
-	const autoCompact = loadAutoCompactConfig();
+	// Load global small model mode configuration
+	const smallModelMode = loadSmallModelModeConfig();
+
+	// Load auto-compact configuration, passing small model mode to inform defaults
+	const autoCompact = loadAutoCompactConfig(smallModelMode);
 
 	// Load session configuration
 	const sessions = loadSessionConfig();
 
+	// Auto-detect small model mode for providers if not explicitly configured
+	const augmentedProviders = providers.map(provider => {
+		if (provider.smallModelMode?.enabled === undefined) {
+			// Check if the primary model (first one) is a small model
+			const primaryModel = provider.models[0];
+			if (primaryModel && isSmallModel(primaryModel)) {
+				return {
+					...provider,
+					smallModelMode: {
+						...smallModelMode, // Use global defaults
+						enabled: true,
+					},
+				};
+			}
+		}
+		return provider;
+	});
+
 	return {
-		providers,
+		providers: augmentedProviders,
 		mcpServers,
 		autoCompact,
+		smallModelMode,
 		sessions,
 	};
 }
