@@ -302,14 +302,27 @@ export function useToolHandler({
 
 				// Clear live component and add static completed result to chat queue
 				setLiveComponent(null);
-				addToChatQueue(
-					<BashProgress
-						key={`streaming-tool-complete-${currentTool.id}-${getNextComponentKey()}-${Date.now()}`}
-						executionId={executionId}
-						command={commandStr}
-						completedState={bashResult}
-					/>,
-				);
+
+				if (compactToolDisplay) {
+					// In compact mode, use displayToolResult for consistent one-liner display
+					await displayToolResult(
+						currentTool,
+						result,
+						toolManager,
+						addToChatQueue,
+						getNextComponentKey,
+						true,
+					);
+				} else {
+					addToChatQueue(
+						<BashProgress
+							key={`streaming-tool-complete-${currentTool.id}-${getNextComponentKey()}-${Date.now()}`}
+							executionId={executionId}
+							command={commandStr}
+							completedState={bashResult}
+						/>,
+					);
+				}
 			} else {
 				// Regular tool - use standard flow
 				result = await processToolUse(currentTool);

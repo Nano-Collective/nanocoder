@@ -106,7 +106,7 @@ const moveFileValidator = async (
 	if (!isValidFilePath(args.source)) {
 		return {
 			valid: false,
-			error: `⚒ Invalid source path: "${args.source}". Path must be relative and within the project directory.`,
+			error: `⚒ Invalid source path. Path must be relative and within the project directory.`,
 		};
 	}
 
@@ -114,7 +114,7 @@ const moveFileValidator = async (
 	if (!isValidFilePath(args.destination)) {
 		return {
 			valid: false,
-			error: `⚒ Invalid destination path: "${args.destination}". Path must be relative and within the project directory.`,
+			error: `⚒ Invalid destination path. Path must be relative and within the project directory.`,
 		};
 	}
 

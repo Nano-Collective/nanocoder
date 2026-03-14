@@ -676,7 +676,7 @@ const stringReplaceValidator = async (
 	if (!isValidFilePath(path)) {
 		return {
 			valid: false,
-			error: `⚒ Invalid file path: "${path}". Path must be relative and within the project directory.`,
+			error: `⚒ Invalid file path. Path must be relative and within the project directory.`,
 		};
 	}
 

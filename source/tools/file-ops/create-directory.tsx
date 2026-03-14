@@ -92,7 +92,7 @@ const createDirectoryValidator = async (
 	if (!isValidFilePath(args.path)) {
 		return {
 			valid: false,
-			error: `⚒ Invalid path: "${args.path}". Path must be relative and within the project directory.`,
+			error: `⚒ Invalid path. Path must be relative and within the project directory.`,
 		};
 	}
 

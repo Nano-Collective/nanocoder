@@ -98,7 +98,7 @@ const deleteFileValidator = async (
 	if (!isValidFilePath(args.path)) {
 		return {
 			valid: false,
-			error: `⚒ Invalid file path: "${args.path}". Path must be relative and within the project directory.`,
+			error: `⚒ Invalid file path. Path must be relative and within the project directory.`,
 		};
 	}
 
