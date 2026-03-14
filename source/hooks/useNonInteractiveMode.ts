@@ -25,6 +25,34 @@ export interface NonInteractiveModeResult {
 const TIMEOUT_BUFFER_FACTOR = 2;
 
 /**
+ * Calculates the effective timeout based on provider configuration.
+ */
+export function calculateEffectiveTimeout(client: LLMClient | null): number {
+	let effectiveTimeout = TIMEOUT_EXECUTION_MAX_MS;
+
+	if (client) {
+		const providerConfig = client.getProviderConfig();
+		const {requestTimeout, socketTimeout} = providerConfig;
+		// Prefer socketTimeout, fallback to requestTimeout
+		const configuredTimeout = socketTimeout ?? requestTimeout;
+
+		if (configuredTimeout === -1) {
+			// -1 means no timeout
+			effectiveTimeout = Number.MAX_SAFE_INTEGER;
+		} else if (configuredTimeout !== undefined) {
+			// If the provider timeout is longer than the default 5 mins,
+			// we should allow it to run for at least that long
+			effectiveTimeout = Math.max(
+				TIMEOUT_EXECUTION_MAX_MS,
+				configuredTimeout * TIMEOUT_BUFFER_FACTOR,
+			);
+		}
+	}
+
+	return effectiveTimeout;
+}
+
+/**
  * Handles non-interactive mode logic:
  * - Automatically submits prompt when ready
  * - Sets auto-accept mode
@@ -74,26 +102,7 @@ export function useNonInteractiveMode({
 	React.useEffect(() => {
 		if (nonInteractivePrompt && nonInteractiveSubmitted) {
 			// Calculate timeout based on provider config if available
-			let effectiveTimeout = TIMEOUT_EXECUTION_MAX_MS;
-
-			if (client) {
-				const providerConfig = client.getProviderConfig();
-				const {requestTimeout, socketTimeout} = providerConfig;
-				// Prefer socketTimeout, fallback to requestTimeout
-				const configuredTimeout = socketTimeout ?? requestTimeout;
-
-				if (configuredTimeout === -1) {
-					// -1 means no timeout
-					effectiveTimeout = Number.MAX_SAFE_INTEGER;
-				} else if (configuredTimeout !== undefined) {
-					// If the provider timeout is longer than the default 5 mins,
-					// we should allow it to run for at least that long
-					effectiveTimeout = Math.max(
-						TIMEOUT_EXECUTION_MAX_MS,
-						configuredTimeout * TIMEOUT_BUFFER_FACTOR,
-					);
-				}
-			}
+			const effectiveTimeout = calculateEffectiveTimeout(client);
 
 			const {shouldExit, reason} = isNonInteractiveModeComplete(
 				appState,

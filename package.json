@@ -59,13 +59,14 @@
 		"assets/nanocoder-vscode.vsix"
 	],
 	"dependencies": {
-		"@ai-sdk/anthropic": "^3.0.37",
-		"@ai-sdk/google": "^3.0.13",
+		"@ai-sdk/anthropic": "^3.0.58",
+		"@ai-sdk/google": "^3.0.43",
 		"@ai-sdk/openai": "^3.0.41",
 		"@ai-sdk/openai-compatible": "2.0.31",
 		"@anthropic-ai/tokenizer": "^0.0.4",
 		"@modelcontextprotocol/sdk": "^1.26.0",
 		"@nanocollective/get-md": "^1.0.2",
+		"@types/wrap-ansi": "^8.1.0",
 		"ai": "6.0.116",
 		"chalk": "^5.2.0",
 		"cheerio": "^1.1.2",
