@@ -160,8 +160,10 @@
 			"@vscode/vsce>minimatch": "^3.0.5",
 			"@modelcontextprotocol/sdk>hono": ">=4.12.4",
 			"@modelcontextprotocol/sdk>@hono/node-server": ">=1.19.10",
-			"underscore": ">=1.13.8",
-			"express-rate-limit": ">=8.2.2"
+			"express-rate-limit": ">=8.2.2",
+			"simple-git": ">=3.32.3",
+			"flatted": ">=3.4.0",
+			"tinyexec": ">=1.0.4"
 		}
 	}
 }
