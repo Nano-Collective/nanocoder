@@ -47,7 +47,9 @@ export function isValidFilePath(filePath: string): boolean {
 	}
 
 	// Reject paths that try to escape parent directories
-	if (filePath.includes('..')) {
+	// Check for '..' as a path segment, not substring (e.g. [[...slug]] is valid)
+	const segments = filePath.split(/[/\\]/);
+	if (segments.some(seg => seg === '..')) {
 		return false;
 	}
 

@@ -38,7 +38,7 @@ const executeListDirectory = async (
 	// Validate path
 	if (!isValidFilePath(dirPath)) {
 		throw new Error(
-			`Invalid path: "${dirPath}". Path must be relative and within the project directory.`,
+			`⚒ Invalid path. Path must be relative and within the project directory.`,
 		);
 	}
 

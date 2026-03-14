@@ -62,6 +62,13 @@ test('isValidFilePath: rejects paths starting with separators', (t) => {
 	t.false(isValidFilePath('\\file.txt'));
 });
 
+test('isValidFilePath: accepts Next.js dynamic route paths with brackets', (t) => {
+	t.true(isValidFilePath('app/[project]/page.tsx'));
+	t.true(isValidFilePath('app/[project]/docs/[version]/page.tsx'));
+	t.true(isValidFilePath('app/[project]/docs/[version]/[[...slug]]/page.tsx'));
+	t.true(isValidFilePath('app/[...catchAll]/page.tsx'));
+});
+
 test('isValidFilePath: accepts hidden files (starting with dot)', (t) => {
 	t.true(isValidFilePath('.gitignore'));
 	t.true(isValidFilePath('.github/workflows/ci.yml'));
