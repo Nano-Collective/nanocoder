@@ -1,5 +1,5 @@
 import React from 'react';
-import {isNonInteractiveModeComplete} from '@/app/helpers';
+import {isNonInteractiveModeComplete} from '@/app';
 import type {NonInteractiveModeState} from '@/app/types';
 import {TIMEOUT_EXECUTION_MAX_MS, TIMEOUT_OUTPUT_FLUSH_MS} from '@/constants';
 import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
@@ -20,6 +20,42 @@ interface UseNonInteractiveModeProps {
 export interface NonInteractiveModeResult {
 	nonInteractiveSubmitted: boolean;
 	nonInteractiveLoadingMessage: string | null;
+}
+
+// Buffer factor ensures we allow enough time for the provider response plus overhead
+// Doubling is used because provider timeouts often refer to individual request segments
+// or initial socket connection, while this execution timeout covers the entire
+// multi-step process including output flushing and initial setup.
+const TIMEOUT_BUFFER_FACTOR = 2;
+
+/**
+ * Calculates the effective timeout based on provider configuration.
+ *
+ * @param client - The LLM client which may have provider-level timeouts
+ * @returns Final timeout in milliseconds
+ */
+export function calculateEffectiveTimeout(client: LLMClient | null): number {
+	let effectiveTimeout = TIMEOUT_EXECUTION_MAX_MS;
+
+	if (client) {
+		const configuredTimeout = client.getTimeout();
+
+		if (configuredTimeout === -1) {
+			// -1 means no timeout
+			effectiveTimeout = Number.MAX_SAFE_INTEGER;
+		} else if (configuredTimeout !== undefined) {
+			// If the provider timeout is longer than the default 5 mins,
+			// we should allow it to run for at least that long with a safety buffer.
+			// We use a buffer because the overall execution includes overhead beyond
+			// the raw provider request time.
+			effectiveTimeout = Math.max(
+				TIMEOUT_EXECUTION_MAX_MS,
+				configuredTimeout * TIMEOUT_BUFFER_FACTOR,
+			);
+		}
+	}
+
+	return effectiveTimeout;
 }
 
 /**
@@ -71,10 +107,13 @@ export function useNonInteractiveMode({
 	// Exit when processing is complete
 	React.useEffect(() => {
 		if (nonInteractivePrompt && nonInteractiveSubmitted) {
+			// Calculate timeout based on provider config if available
+			const effectiveTimeout = calculateEffectiveTimeout(client);
+
 			const {shouldExit, reason} = isNonInteractiveModeComplete(
 				appState,
 				startTime,
-				TIMEOUT_EXECUTION_MAX_MS,
+				effectiveTimeout,
 			);
 
 			if (shouldExit) {
@@ -96,7 +135,13 @@ export function useNonInteractiveMode({
 				return () => clearTimeout(timer);
 			}
 		}
-	}, [nonInteractivePrompt, nonInteractiveSubmitted, appState, startTime]);
+	}, [
+		nonInteractivePrompt,
+		nonInteractiveSubmitted,
+		appState,
+		startTime,
+		client,
+	]);
 
 	// Compute loading message
 	const nonInteractiveLoadingMessage = React.useMemo(() => {

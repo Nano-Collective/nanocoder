@@ -168,4 +168,10 @@ export class AISDKClient implements LLMClient {
 		// No internal state to clear
 		return Promise.resolve();
 	}
+
+	getTimeout(): number | undefined {
+		return (
+			this.providerConfig.socketTimeout ?? this.providerConfig.requestTimeout
+		);
+	}
 }

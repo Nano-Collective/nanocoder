@@ -184,6 +184,7 @@ export interface LLMClient {
 		modeOverrides?: ModeOverrides,
 	): Promise<LLMChatResponse>;
 	clearContext(): Promise<void>;
+	getTimeout(): number | undefined;
 }
 
 export type DevelopmentMode = 'normal' | 'auto-accept' | 'plan' | 'scheduler';

@@ -79,9 +79,20 @@ test.after.always(async () => {
 	// Clear the array
 	createdLoggers.length = 0;
 
-	// Clean up test directory
+	// Clean up test directory with retries for Windows
 	if (existsSync(testLogDir)) {
-		rmSync(testLogDir, {recursive: true, force: true});
+		let retries = 5;
+		while (retries > 0) {
+			try {
+				rmSync(testLogDir, {recursive: true, force: true});
+				break;
+			} catch (error) {
+				retries--;
+				if (retries === 0) throw error;
+				// Wait 100ms before retrying
+				await new Promise(resolve => setTimeout(resolve, 100));
+			}
+		}
 	}
 });
 

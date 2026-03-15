@@ -163,7 +163,7 @@ function createEnhancedLogger(
 				const endMethod = destination.end as (() => void) | undefined;
 				if (endMethod && typeof endMethod === 'function') {
 					try {
-						endMethod();
+						(destination as {end: () => void}).end();
 					} catch (error: unknown) {
 						// Ignore errors when ending an already-closed or invalid stream
 						// This can happen when end() is called multiple times or the destination
@@ -327,7 +327,7 @@ export function createLoggerWithTransport(
 		true, // Enable user ID redaction
 	);
 
-	return createEnhancedLogger(pinoLogger, undefined, redactionRules);
+	return createEnhancedLogger(pinoLogger, actualTransport, redactionRules);
 }
 
 /**
