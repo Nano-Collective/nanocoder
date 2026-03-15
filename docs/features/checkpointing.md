@@ -6,30 +6,20 @@ sidebar_order: 4
 
 # Checkpointing
 
-Nanocoder supports conversation checkpointing, allowing you to save snapshots of your coding sessions and restore them later. This is perfect for experimenting with different approaches or preserving important milestones.
+Checkpointing lets you save a snapshot of your current session — conversation history, file changes, and configuration — so you can experiment freely and roll back if things don't work out. Think of it like a save point in a game.
 
-## Checkpoint Commands
+## When to Use Checkpoints
 
-- `/checkpoint create [name]` - Create a checkpoint with optional custom name
-  - Auto-generates timestamp-based name if not provided
-  - Captures conversation history, modified files, and AI model configuration
-  - Example: `/checkpoint create feature-auth-v1`
+- Before attempting a risky refactor or architectural change
+- When you want to try two different approaches and compare
+- To preserve a working state before the AI makes further changes
 
-- `/checkpoint list` - List all available checkpoints
-  - Shows checkpoint name, creation time, message count, and files changed
-  - Sorted by creation date (newest first)
+## Commands
 
-- `/checkpoint load [name]` - Restore files from a checkpoint
-  - **Without name**: Shows interactive list to select checkpoint
-  - **With name**: Directly loads the specified checkpoint
-  - Prompts "Create backup before loading? (Y/n)" if current session has messages
-  - Press Y (or Enter) to auto-backup, N to skip, Esc to cancel
-  - Note: Conversation history restore requires restarting Nanocoder
-  - Example: `/checkpoint load` (interactive) or `/checkpoint load feature-auth-v1`
-
-- `/checkpoint delete <name>` - Delete a checkpoint permanently
-  - Removes checkpoint and all associated data
-  - Example: `/checkpoint delete old-checkpoint`
+- `/checkpoint create [name]` — Save a checkpoint (auto-generates a timestamp name if omitted)
+- `/checkpoint list` — List all checkpoints with creation time, message count, and files changed
+- `/checkpoint load [name]` — Restore files from a checkpoint (interactive selector if no name given)
+- `/checkpoint delete <name>` — Permanently delete a checkpoint
 
 ## What Gets Saved
 
@@ -38,25 +28,27 @@ Nanocoder supports conversation checkpointing, allowing you to save snapshots of
 - Active provider and model configuration
 - Timestamp and metadata
 
-## Storage Location
-
-- Checkpoints are stored in `.nanocoder/checkpoints/` in your project directory
-- Each project has its own checkpoints
-- Consider adding `.nanocoder/checkpoints` to your `.gitignore`
-
 ## Example Workflow
 
 ```bash
-# Create a checkpoint before trying a new approach
+# Save current state before trying something new
 /checkpoint create before-refactor
 
-# Make some experimental changes...
-# If things go wrong, restore the checkpoint
+# Ask the AI to try an approach...
+# If it doesn't work out:
 /checkpoint load before-refactor
 
-# Or if things went well, create a new checkpoint
+# If it went well, save the new state:
 /checkpoint create after-refactor
 
-# List all checkpoints to see your progress
+# Compare what you have:
 /checkpoint list
 ```
+
+When loading a checkpoint that would overwrite current work, Nanocoder prompts you to create a backup first.
+
+## Storage
+
+Checkpoints are stored in `.nanocoder/checkpoints/` in your project directory. Each project has its own checkpoints. Consider adding `.nanocoder/checkpoints` to your `.gitignore`.
+
+> **Note:** Loading a checkpoint restores files immediately, but restoring conversation history requires restarting Nanocoder.

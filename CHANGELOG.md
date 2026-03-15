@@ -1,3 +1,21 @@
+# 1.24.0
+
+- **BREAKING**: Removed legacy `~/.agents.config.json` config file support. Nanocoder no longer checks the home directory for a dot-prefixed config file. If you are still using this path, move your config to the platform-specific directory: `~/Library/Preferences/nanocoder/agents.config.json` (macOS), `~/.config/nanocoder/agents.config.json` (Linux), or `%APPDATA%\nanocoder\agents.config.json` (Windows).
+
+- **BREAKING**: Removed legacy `~/.nanocoder-preferences.json` preferences file support. Preferences are now only loaded from the platform-specific directory (e.g. `~/Library/Preferences/nanocoder/nanocoder-preferences.json` on macOS) or a project-level `nanocoder-preferences.json` in your working directory. To migrate, move your existing file: `mv ~/.nanocoder-preferences.json ~/Library/Preferences/nanocoder/nanocoder-preferences.json`
+
+- **BREAKING**: Removed deprecated array format for MCP server configuration. Only the object format is now supported: `{ "mcpServers": { "serverName": { ... } } }`. If you are using the array format in `.mcp.json`, convert each array entry to an object key using the server name.
+
+- **BREAKING**: Removed `agents.config.json` fallback for MCP server loading. Global MCP servers must now be configured in `~/.config/nanocoder/.mcp.json` (Linux), `~/Library/Preferences/nanocoder/.mcp.json` (macOS), or `%APPDATA%\nanocoder\.mcp.json` (Windows). Provider configuration still uses `agents.config.json`.
+
+- **BREAKING**: Removed `auth` and `reconnect` fields from MCP server configuration. The `auth` field was never functional (both HTTP and WebSocket transports logged warnings that it was unsupported). The `reconnect` field was never implemented. Use `headers` for HTTP authentication instead (e.g. `"headers": { "Authorization": "Bearer $TOKEN" }`).
+
+- Fix: `alwaysAllow` field in MCP server configuration was silently dropped during config loading due to a missing field mapping. MCP tools configured with `alwaysAllow` now correctly skip confirmation prompts as documented.
+
+- Restructured documentation into a Nextra-compatible `docs/` folder structure with nested sections for getting-started, configuration, and features. The README is now a concise landing page linking to the full docs.
+
+If there are any problems, feedback or thoughts please drop an issue or message us through Discord! Thank you for using Nanocoder.
+
 # 1.23.0
 
 - Added `ask_user` tool for interactive question prompts. The LLM can now present the user with a question and selectable options during a conversation, returning their answer to guide the next step. Uses a global question-queue to bridge the tool's suspended Promise with the Ink UI component.

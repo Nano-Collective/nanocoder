@@ -6,16 +6,14 @@ sidebar_order: 5
 
 # Logging Configuration
 
-Nanocoder includes comprehensive structured logging with Pino, providing enterprise-grade logging capabilities including correlation tracking, performance monitoring, and security features.
+Nanocoder includes structured logging with Pino, providing correlation tracking, performance monitoring, and automatic PII redaction.
 
 ## Quick Start
 
 ```bash
 # Environment Variables
 NANOCODER_LOG_LEVEL=debug          # Log level (trace, debug, info, warn, error, fatal)
-NANOCODER_LOG_TO_FILE=true         # Enable file logging
-NANOCODER_LOG_TO_CONSOLE=true      # Enable console logging
-NANOCODER_LOG_DIR=/var/log/nanocoder # Log directory
+NANOCODER_LOG_DIR=/var/log/nanocoder # Log directory override
 NANOCODER_CORRELATION_ENABLED=true  # Enable correlation tracking
 ```
 
@@ -25,25 +23,24 @@ NANOCODER_CORRELATION_ENABLED=true  # Enable correlation tracking
 - Correlation tracking across components
 - Automatic PII detection and redaction
 - Performance monitoring and metrics
-- Production-ready file rotation and compression
 
 ## Default Log File Locations
 
-When `NANOCODER_LOG_TO_FILE=true` is set, logs are stored in platform-specific locations:
+Logs are always written to file. The default locations are platform-specific:
 
-- **macOS**: `~/Library/Preferences/nanocoder/logs`
-- **Linux/Unix**: `~/.config/nanocoder/logs/nanocoder/`
-- **Windows**: `%APPDATA%\nanocoder\logs\`
+- **macOS**: `~/Library/Logs/nanocoder`
+- **Linux/Unix**: `~/.local/state/nanocoder/logs` (or `$XDG_STATE_HOME/nanocoder/logs`)
+- **Windows**: `%LOCALAPPDATA%/nanocoder/logs`
 
-You can override the default location using `NANOCODER_LOG_DIR` environment variable.
+You can override the default location using the `NANOCODER_LOG_DIR` environment variable.
+
+To disable file logging entirely, set `NANOCODER_LOG_DISABLE_FILE=true`.
 
 ## Configuration Examples
 
 **Development:**
 ```bash
 NANOCODER_LOG_LEVEL=debug
-NANOCODER_LOG_TO_FILE=false
-NANOCODER_LOG_TO_CONSOLE=true
 NANOCODER_CORRELATION_ENABLED=true
 NANOCODER_CORRELATION_DEBUG=true
 ```
@@ -51,8 +48,6 @@ NANOCODER_CORRELATION_DEBUG=true
 **Production:**
 ```bash
 NANOCODER_LOG_LEVEL=info
-NANOCODER_LOG_TO_FILE=true
-NANOCODER_LOG_TO_CONSOLE=false
 NANOCODER_LOG_DIR=/var/log/nanocoder
 NANOCODER_CORRELATION_ENABLED=true
 NANOCODER_CORRELATION_DEBUG=false
@@ -63,19 +58,17 @@ NANOCODER_CORRELATION_DEBUG=false
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `NANOCODER_LOG_LEVEL` | Log level (trace, debug, info, warn, error, fatal) | `info` |
-| `NANOCODER_LOG_TO_FILE` | Enable file logging | `false` |
-| `NANOCODER_LOG_TO_CONSOLE` | Enable console logging | `true` |
+| `NANOCODER_LOG_TO_FILE` | Enable file logging | `true` |
 | `NANOCODER_LOG_DIR` | Log directory override | Platform default |
-| `NANOCODER_LOG_TRANSPORTS` | Transport configuration | `default` |
+| `NANOCODER_LOG_DISABLE_FILE` | Disable file logging entirely | `false` |
 | `NANOCODER_CORRELATION_DEBUG` | Debug correlation tracking | `false` |
 | `NANOCODER_CORRELATION_ENABLED` | Enable correlation tracking | `true` |
-| `NANOCODER_CORRELATION_LEGACY_FALLBACK` | Disable legacy fallback | `false` |
 
 ## Key Capabilities
 
 ### Correlation Tracking
 
-Unique correlation IDs are generated for request tracking across components. This enables cross-component request correlation with metadata support and async context preservation.
+Unique correlation IDs are generated for request tracking across components. This enables cross-component request correlation with metadata support and async context preservation using `AsyncLocalStorage`.
 
 ### Security & Data Protection
 
@@ -134,10 +127,11 @@ await withNewCorrelationContext(async (context) => {
 
 ## Troubleshooting
 
-### Logs not appearing in console
+### Logs not appearing
 
-- Check that `NANOCODER_LOG_TO_CONSOLE` is set to `true`
-- Verify the log level allows your messages through
+- Check `NANOCODER_LOG_LEVEL` allows your messages through (e.g. `debug` level won't show with `info` level set)
+- Verify the log directory exists and is writable
+- Check `NANOCODER_LOG_DISABLE_FILE` is not set to `true`
 
 ### Performance degradation with logging
 
@@ -148,5 +142,3 @@ await withNewCorrelationContext(async (context) => {
 
 - The automatic redaction system handles common patterns
 - Add custom redaction rules for application-specific fields
-
-For the complete API reference, advanced features, and detailed troubleshooting, see the full [Pino Logging Implementation Guide](https://github.com/Nano-Collective/nanocoder/blob/main/docs/pino-logging.md) in the repository.

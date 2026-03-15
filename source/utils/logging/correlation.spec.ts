@@ -386,80 +386,57 @@ test('correlation ID format validation', t => {
 });
 
 /**
- * Test AsyncLocalStorage-only mode (legacy context disabled)
- * This test verifies that the system works correctly without legacy context fallback
+ * Test AsyncLocalStorage-based correlation context
  */
-test('AsyncLocalStorage-only mode works without legacy context', t => {
-	// Save original environment variable
-	const originalEnv = process.env.NANOCODER_CORRELATION_LEGACY_FALLBACK;
+test('AsyncLocalStorage correlation context works correctly', t => {
+	const testId = generateCorrelationId();
+	const testMetadata = {source: 'test', version: '1.0.0'};
 
-	try {
-		// Disable legacy context
-		process.env.NANOCODER_CORRELATION_LEGACY_FALLBACK = 'false';
+	const result = withNewCorrelationContext(
+		(context: CorrelationContext) => {
+			t.truthy(context, 'Should have context');
+			t.is(context.id, testId, 'Should have correct ID');
+			t.deepEqual(
+				context.metadata,
+				testMetadata,
+				'Should have correct metadata',
+			);
 
-		// Test that AsyncLocalStorage still works
-		const testId = generateCorrelationId();
-		const testMetadata = {source: 'test', version: '1.0.0'};
+			t.is(getCorrelationId(), testId, 'Should get correct ID');
+			t.deepEqual(
+				getCorrelationMetadata(),
+				testMetadata,
+				'Should get correct metadata',
+			);
 
-		const result = withNewCorrelationContext(
-			(context: CorrelationContext) => {
-				// Verify context is created correctly
-				t.truthy(context, 'Should have context');
-				t.is(context.id, testId, 'Should have correct ID');
-				t.deepEqual(
-					context.metadata,
-					testMetadata,
-					'Should have correct metadata',
-				);
+			t.is(
+				getCurrentCorrelationContext(),
+				context,
+				'Should use AsyncLocalStorage context',
+			);
 
-				// Verify context is accessible within AsyncLocalStorage
-				t.is(getCorrelationId(), testId, 'Should get correct ID');
-				t.deepEqual(
-					getCorrelationMetadata(),
-					testMetadata,
-					'Should get correct metadata',
-				);
+			return 'success';
+		},
+		testId,
+		testMetadata,
+	);
 
-				// Verify legacy context is not used
-				t.is(
-					getCurrentCorrelationContext(),
-					context,
-					'Should use AsyncLocalStorage context',
-				);
+	t.is(result, 'success', 'Should execute successfully');
 
-				return 'success';
-			},
-			testId,
-			testMetadata,
-		);
+	const nestedResult = withNewCorrelationContext(
+		(context: CorrelationContext) => {
+			const current = getCurrentCorrelationContext();
+			t.truthy(current, 'Should have AsyncLocalStorage context');
+			t.is(current!.id, context.id, 'Should match current context');
 
-		t.is(result, 'success', 'Should execute successfully');
+			const formatted = formatCorrelationForLog();
+			t.truthy(formatted.correlationId, 'Should format for logging');
 
-		// Verify no legacy context was used
-		const asyncOnlyResult = withNewCorrelationContext(
-			(context: CorrelationContext) => {
-				// In AsyncLocalStorage-only mode, legacy context should not interfere
-				const current = getCurrentCorrelationContext();
-				t.truthy(current, 'Should have AsyncLocalStorage context');
-				t.is(current!.id, context.id, 'Should match current context');
+			return true;
+		},
+	);
 
-				// Format for logging should work
-				const formatted = formatCorrelationForLog();
-				t.truthy(formatted.correlationId, 'Should format for logging');
-
-				return true;
-			},
-		);
-
-		t.true(asyncOnlyResult, 'Should work without legacy context');
-	} finally {
-		// Restore original environment variable
-		if (originalEnv === undefined) {
-			delete process.env.NANOCODER_CORRELATION_LEGACY_FALLBACK;
-		} else {
-			process.env.NANOCODER_CORRELATION_LEGACY_FALLBACK = originalEnv;
-		}
-	}
+	t.true(nestedResult, 'Should work correctly');
 });
 
 /**

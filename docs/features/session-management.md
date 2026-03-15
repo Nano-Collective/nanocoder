@@ -6,18 +6,33 @@ sidebar_order: 7
 
 # Session Management
 
-Nanocoder provides automatic session storage and management to save and restore chat conversations.
+Nanocoder automatically saves your conversations so you can close the terminal and pick up where you left off. Sessions are saved in the background — you don't need to do anything special.
 
-## Features
+## Resuming a Session
 
-- **Automatic Session Saving**: Conversations are automatically saved to disk at regular intervals
-- **Session Listing**: View and manage previous chat sessions
-- **Session Resumption**: Resume any past session with full conversation context
-- **Configuration Options**: Customize session behavior through configuration
+```bash
+/resume         # browse recent sessions with an interactive selector
+/resume last    # jump straight into the most recent session
+/resume {id}    # resume a specific session by ID
+/resume {n}     # resume by list index number
+```
+
+You can also use the aliases `/sessions` or `/history`.
+
+## What Gets Saved
+
+Each session captures:
+
+- Full conversation history (all messages)
+- Provider and model used
+- Working directory
+- Timestamps and message count
+
+Sessions are saved every 30 seconds by default and retained for 30 days.
 
 ## Storage Location
 
-Sessions are stored in the platform-specific app data directory by default:
+Sessions are stored in the platform-specific app data directory:
 
 | Platform | Default Path |
 |----------|-------------|
@@ -25,17 +40,11 @@ Sessions are stored in the platform-specific app data directory by default:
 | Linux | `~/.local/share/nanocoder/sessions/` |
 | Windows | `%APPDATA%/nanocoder/sessions/` |
 
-This can be overridden via the `directory` config option or `NANOCODER_DATA_DIR` env var.
-
-```
-<app-data>/nanocoder/sessions/
-├── sessions.json          # Index of all sessions
-└── {session-id}.json      # Individual session files
-```
+This can be overridden via the `directory` config option or `NANOCODER_DATA_DIR` environment variable.
 
 ## Configuration
 
-Session behavior can be customized through the `agents.config.json` file:
+Customize session behaviour in your `agents.config.json`:
 
 ```json
 {
@@ -44,6 +53,7 @@ Session behavior can be customized through the `agents.config.json` file:
       "autoSave": true,
       "saveInterval": 30000,
       "maxSessions": 100,
+      "maxMessages": 1000,
       "retentionDays": 30,
       "directory": ""
     }
@@ -51,41 +61,11 @@ Session behavior can be customized through the `agents.config.json` file:
 }
 ```
 
-### Configuration Options
-
-- `autoSave`: Enable/disable automatic session saving (default: `true`)
-- `saveInterval`: Time interval between saves in milliseconds (default: `30000` - 30 seconds)
-- `maxSessions`: Maximum number of sessions to keep (default: `100`)
-- `retentionDays`: Automatically delete sessions older than this many days (default: `30`)
-- `directory`: Directory to store session files (default: platform app data path + `/sessions`)
-
-## Commands
-
-### `/resume`
-
-Resume a previous chat session with various options:
-
-- `/resume` - Show session selector UI
-- `/resume {id}` - Resume specific session by ID
-- `/resume {number}` - Resume by list index
-- `/resume last` - Resume most recent session
-
-Aliases: `/sessions`, `/history`
-
-## Session Schema
-
-Each session contains the following information:
-
-```typescript
-interface Session {
-  id: string;              // Unique session ID (UUID v4)
-  title: string;           // Auto-generated from first message or manual
-  createdAt: string;       // ISO timestamp
-  lastAccessedAt: string;  // ISO timestamp
-  messageCount: number;    // Number of messages
-  provider: string;        // LLM provider used
-  model: string;           // Model used
-  workingDirectory: string; // CWD when session created
-  messages: Message[];     // Full conversation history
-}
-```
+| Option | Default | Description |
+|--------|---------|-------------|
+| `autoSave` | `true` | Enable/disable automatic saving |
+| `saveInterval` | `30000` | Milliseconds between saves (minimum 1000) |
+| `maxSessions` | `100` | Maximum sessions to keep (minimum 1) |
+| `maxMessages` | `1000` | Maximum messages saved per session — older messages are truncated (minimum 1) |
+| `retentionDays` | `30` | Auto-delete sessions older than this (minimum 1) |
+| `directory` | (platform default) | Custom storage directory |

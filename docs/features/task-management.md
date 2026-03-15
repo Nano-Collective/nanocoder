@@ -6,39 +6,37 @@ sidebar_order: 5
 
 # Task Management
 
-Nanocoder provides a task management system for tracking complex multi-step work. Tasks persist in `.nanocoder/tasks.json` and are useful for both users and AI models to track progress on involved tasks.
+For complex, multi-step work, the task system helps you and the AI stay aligned on what needs to be done. You can create tasks manually, or the AI will create and update them automatically when working on involved problems.
 
-The LLM has access to task management tools (`create_task`, `list_tasks`, `update_task`, `delete_task`) and will automatically use them to track progress on complex work. You don't need to manually create tasks if you don't want to - the AI will manage them for you.
+## When to Use Tasks
 
-## Task Commands
+- Breaking down a large feature into trackable steps
+- Keeping the AI focused on a specific piece of work within a larger plan
+- Tracking progress across a session
 
-- `/tasks` - Show all tasks with their status
-- `/tasks add <title>` - Add a new task (also works: `/tasks <title>`)
-- `/tasks remove <number>` - Remove a task by number (alias: `/tasks rm <number>`)
-- `/tasks clear` - Clear all tasks
-
-## Examples
+## Commands
 
 ```bash
-# View current tasks
-/tasks
-
-# Add a new task
-/tasks add Implement user authentication
-
-# Or simply type the task title
-/tasks Implement user authentication
-
-# Remove a task (note the number)
-/tasks remove 1
-
-# Clear all tasks
-/tasks clear
+/tasks                          # View all tasks with status
+/tasks add Implement auth       # Add a new task
+/tasks Implement auth           # Shorthand — same as above
+/tasks remove 1                 # Remove task by number
+/tasks rm 1                     # Alias for remove
+/tasks clear                    # Clear all tasks
 ```
+
+## AI-Managed Tasks
+
+The AI has access to task management tools (`create_task`, `list_tasks`, `update_task`, `delete_task`) and will use them proactively when working on complex problems. You can ask the AI to break work into tasks:
+
+```
+Break this feature into tasks and work through them one by one.
+```
+
+The AI will create a task list, mark tasks as in-progress or complete as it works, and keep the list updated.
 
 ## Storage
 
 - Tasks are stored in `.nanocoder/tasks.json` in your project directory
-- Tasks are automatically cleared when Nanocoder starts (to keep the task list fresh)
-- Tasks are also cleared when using the `/clear` command
-- Consider adding `.nanocoder/tasks.json` to your `.gitignore` if you want to exclude it from version control
+- Tasks are automatically cleared on startup and when using `/clear` to keep the list fresh
+- Consider adding `.nanocoder/tasks.json` to your `.gitignore`

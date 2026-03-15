@@ -131,25 +131,13 @@ export interface MCPServerConfig {
 	env?: Record<string, string>;
 	url?: string;
 	headers?: Record<string, string>;
-	auth?: {
-		type: 'bearer' | 'basic' | 'api-key' | 'custom';
-		token?: string;
-		username?: string;
-		password?: string;
-		apiKey?: string;
-		customHeaders?: Record<string, string>;
-	};
 	timeout?: number;
-	reconnect?: {
-		enabled: boolean;
-		maxAttempts: number;
-		backoffMs: number;
-	};
+	alwaysAllow?: string[];
 	description?: string;
 	tags?: string[];
 	enabled?: boolean;
 	// Optional source information for display purposes
-	source?: 'project' | 'global';
+	source?: 'project' | 'global' | 'env';
 }
 
 export interface UserPreferences {

@@ -15,14 +15,6 @@ export interface McpServerConfig {
 	// Remote transport-specific
 	url?: string;
 	headers?: Record<string, string>;
-	auth?: {
-		type: 'bearer' | 'basic' | 'api-key' | 'custom';
-		token?: string;
-		username?: string;
-		password?: string;
-		apiKey?: string;
-		customHeaders?: Record<string, string>;
-	};
 	timeout?: number;
 
 	// Common

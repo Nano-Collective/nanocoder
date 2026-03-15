@@ -28,12 +28,12 @@ export interface LogEntry {
 	pid: number;
 	hostname: string;
 	correlationId?: string;
-	nodeVersion?: string; // NEW: Node.js version field
-	platform?: string; // NEW: platform field
-	arch?: string; // NEW: architecture field
-	service?: string; // NEW: service field
-	version?: string; // NEW: version field
-	environment?: string; // NEW: environment field
+	nodeVersion?: string;
+	platform?: string;
+	arch?: string;
+	service?: string;
+	version?: string;
+	environment?: string;
 	msg: string;
 	[key: string]: unknown;
 }
@@ -133,16 +133,6 @@ export interface TransportConfig {
 		periodicFlush?: number;
 	};
 }
-
-/**
- * CLI configuration for logging control
- */
-// export interface LoggingCliConfig {
-// 	logToFile?: boolean;
-// 	logToConsole?: boolean;
-// 	noLogFile?: boolean;
-// 	noLogConsole?: boolean;
-// }
 
 /**
  * Environment-specific transport configuration

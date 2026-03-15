@@ -33,7 +33,6 @@ export interface CustomCommandMetadata {
 	tags?: string[];
 	triggers?: string[];
 	estimatedTokens?: number;
-	resources?: boolean;
 	category?: string;
 	version?: string;
 	author?: string;

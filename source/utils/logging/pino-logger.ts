@@ -267,13 +267,12 @@ export function createPinoLogger(config?: Partial<LoggerConfig>): Logger {
 		timestamp: pino.stdTimeFunctions.isoTime,
 		base: {
 			pid: process.pid,
-			// REMOVED: hostname field
-			platform: process.platform, // NEW: platform field
-			arch: process.arch, // NEW: architecture field
+			platform: process.platform,
+			arch: process.arch,
 			service: 'nanocoder',
 			version: process.env.npm_package_version || 'unknown',
-			environment: process.env.NODE_ENV || 'production', // Default to production for CLI tools
-			nodeVersion: process.version, // NEW: Node.js version field
+			environment: process.env.NODE_ENV || 'production',
+			nodeVersion: process.version,
 		},
 	};
 
@@ -314,7 +313,7 @@ export function createLoggerWithTransport(
 			service: 'nanocoder',
 			version: process.env.npm_package_version || 'unknown',
 			environment: process.env.NODE_ENV || 'production',
-			nodeVersion: process.version, // NEW: Node.js version field
+			nodeVersion: process.version,
 		},
 	};
 
