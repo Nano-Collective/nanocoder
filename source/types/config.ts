@@ -25,6 +25,8 @@ export interface AIProviderConfig {
 	disableToolModels?: string[]; // List of model names to disable tools for
 	// SDK provider package to use (default: 'openai-compatible')
 	sdkProvider?: SdkProvider;
+	// Small model optimizations
+	smallModelMode?: SmallModelModeConfig;
 	config: {
 		baseURL?: string;
 		apiKey?: string;
@@ -54,6 +56,8 @@ export interface ProviderConfig {
 	headers?: Record<string, string>;
 	// SDK provider package to use (default: 'openai-compatible')
 	sdkProvider?: SdkProvider;
+	// Small model optimizations
+	smallModelMode?: SmallModelModeConfig;
 	[key: string]: unknown; // Allow additional provider-specific config
 }
 
@@ -65,6 +69,16 @@ export interface AutoCompactConfig {
 	threshold: number;
 	mode: CompressionMode;
 	notifyUser: boolean;
+}
+
+export interface SmallModelModeConfig {
+	enabled: boolean;
+	slimPrompt?: boolean;
+	toolProfile?: 'code-edit' | 'explore' | 'git' | 'minimal';
+	maxToolsPerTurn?: number;
+	aggressiveCompact?: boolean;
+	simplifiedSchemas?: boolean;
+	plannerModel?: string;
 }
 
 export interface AppConfig {
@@ -86,6 +100,8 @@ export interface AppConfig {
 		disableToolModels?: string[]; // List of model names to disable tools for
 		// SDK provider package to use (default: 'openai-compatible')
 		sdkProvider?: SdkProvider;
+		// Small model optimizations
+		smallModelMode?: SmallModelModeConfig;
 		[key: string]: unknown; // Allow additional provider-specific config
 	}[];
 
@@ -110,6 +126,9 @@ export interface AppConfig {
 
 	// Auto-compact configuration
 	autoCompact?: AutoCompactConfig;
+
+	// Global small model mode configuration
+	smallModelMode?: SmallModelModeConfig;
 
 	// Session configuration
 	sessions?: {
@@ -149,7 +168,7 @@ export interface MCPServerConfig {
 	tags?: string[];
 	enabled?: boolean;
 	// Optional source information for display purposes
-	source?: 'project' | 'global';
+	source?: 'project' | 'global' | 'env';
 }
 
 export interface UserPreferences {

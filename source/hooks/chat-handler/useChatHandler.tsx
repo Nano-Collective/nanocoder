@@ -1,6 +1,7 @@
 import React from 'react';
 import {ConversationStateManager} from '@/app/utils/conversation-state';
 import UserMessage from '@/components/user-message';
+import {getAppConfig} from '@/config/index';
 import {CommandIntegration} from '@/custom-commands/command-integration';
 import {promptHistory} from '@/prompt-history';
 import type {Message} from '@/types/core';
@@ -187,7 +188,10 @@ export function useChatHandler({
 
 		try {
 			// Load and process system prompt
-			let systemPrompt = processPromptTemplate();
+			const config = getAppConfig();
+			const useSlimPrompt =
+				config.smallModelMode?.enabled && config.smallModelMode?.slimPrompt;
+			let systemPrompt = processPromptTemplate({slim: useSlimPrompt});
 
 			// Enhance with relevant commands (progressive disclosure)
 			if (commandIntegration) {
@@ -195,6 +199,19 @@ export function useChatHandler({
 					systemPrompt,
 					message,
 				);
+			}
+
+			// Enforce single-tool mode or maxToolsPerTurn in system prompt
+			if (
+				config.smallModelMode?.enabled &&
+				config.smallModelMode.maxToolsPerTurn
+			) {
+				const maxTools = config.smallModelMode.maxToolsPerTurn;
+				const instruction =
+					maxTools === 1
+						? '\n\nIMPORTANT: You MUST ONLY call ONE tool at a time. Do not call multiple tools in a single response.'
+						: `\n\nIMPORTANT: You MUST NOT call more than ${maxTools} tools in a single response.`;
+				systemPrompt += instruction;
 			}
 
 			// Create stream request
