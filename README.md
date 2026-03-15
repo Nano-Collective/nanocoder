@@ -30,10 +30,10 @@ Also available via [Homebrew](docs/getting-started/installation.md#homebrew-maco
 Full documentation is available in the [docs/](docs/) folder:
 
 - **[Getting Started](docs/getting-started/index.md)** - Installation, setup, and first steps
-- **[Usage](docs/usage/index.md)** - Interactive mode, non-interactive mode, CLI options, keyboard shortcuts
 - **[Configuration](docs/configuration/index.md)** - AI providers, MCP servers, preferences, logging, timeouts
-- **[Features](docs/features/index.md)** - Custom commands, checkpointing, task management, scheduler, sessions
+- **[Features](docs/features/index.md)** - Custom commands, checkpointing, development modes, task management, and more
 - **[Commands Reference](docs/commands.md)** - Complete list of built-in slash commands
+- **[Keyboard Shortcuts](docs/keyboard-shortcuts.md)** - Full shortcut reference
 - **[Community](docs/community.md)** - Contributing, Discord, and how to help
 
 ## Community

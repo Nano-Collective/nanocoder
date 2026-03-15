@@ -6,7 +6,9 @@ sidebar_order: 2
 
 # Custom Commands
 
-Custom commands let you define reusable AI prompts as markdown files. Each command becomes a slash command you can invoke during a session, with support for parameters, aliases, auto-injection, and namespace organization.
+If you find yourself typing the same kind of prompt repeatedly — "review this file for bugs", "write tests following our conventions", "check for security issues" — custom commands let you save those prompts as markdown files and invoke them as slash commands.
+
+Each command becomes a `/command` you can run during any session, with support for parameters, aliases, auto-injection based on keywords, and namespace organization.
 
 ## Quick Start
 
@@ -66,7 +68,6 @@ parameters: [filename, target]
 tags: [testing, quality]
 triggers: [write tests, unit test]
 estimated-tokens: 2000
-resources: true
 category: testing
 version: 1.0.0
 author: your-name
@@ -88,7 +89,6 @@ dependencies: [other-command]
 | `tags` | string[] | Keywords for auto-injection when the user's message matches |
 | `triggers` | string[] | Phrases that auto-inject this command into context |
 | `estimated-tokens` | number | Token budget hint, shown in `/commands` list for auto-injectable commands |
-| `resources` | boolean | If `true`, loads sibling files in the same directory as extra context |
 | `category` | string | Organizational grouping, shown in `/commands show` |
 | `version` | string | Version string, shown in `/commands show` |
 | `author` | string | Author name, shown in `/commands show` |
@@ -156,14 +156,15 @@ When writing tests for this project, follow these conventions:
 
 ## Resources
 
-When `resources: true` is set, all sibling files in the same directory as the command are loaded and passed as additional context. This is useful for directory-as-command patterns where you bundle templates, configs, or reference documents alongside the command.
+When using the directory-as-command pattern, files in a `resources/` subdirectory are automatically loaded and passed as additional context. This is useful for bundling templates, configs, or reference documents alongside the command.
 
 ```
 .nanocoder/commands/
   api-gen/
-    api-gen.md        -> The command (must match directory name)
-    template.yaml     -> Loaded as a resource
-    examples.json     -> Loaded as a resource
+    api-gen.md            -> The command (must match directory name)
+    resources/
+      template.yaml       -> Loaded as a resource
+      examples.json       -> Loaded as a resource
 ```
 
 ## Commands

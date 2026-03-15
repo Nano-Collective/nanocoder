@@ -1,12 +1,18 @@
 ---
 title: "File Explorer"
 description: "Interactive file browser for navigating and selecting files as context"
-sidebar_order: 3
+sidebar_order: 9
 ---
 
 # File Explorer
 
-The `/explorer` command opens an interactive file browser for navigating your project, previewing files with syntax highlighting, and selecting multiple files to add as context.
+Sometimes you want to browse your project and pick files visually rather than typing `@filename` from memory. The `/explorer` command opens an interactive file browser where you can navigate your project tree, preview files with syntax highlighting, and select multiple files to add as context.
+
+## Opening the Explorer
+
+```bash
+/explorer
+```
 
 ## Navigation
 
@@ -43,7 +49,11 @@ The `/explorer` command opens an interactive file browser for navigating your pr
 # Open the file explorer
 /explorer
 
-# Navigate to src/components, expand it
-# Select multiple component files with Space
-# Press Esc to add them to your input as @file mentions
+# Navigate to src/components, expand it with Enter
+# Select the files you need with Space
+# Use / to search for a specific file if the tree is large
+# Press Esc — selected files are added to your input as @file mentions
+# Type your question and press Enter
 ```
+
+The explorer respects your `.gitignore`, so you won't see `node_modules`, `dist`, or other ignored directories.

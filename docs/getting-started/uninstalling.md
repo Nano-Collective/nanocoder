@@ -56,9 +56,6 @@ rm -rf ~/Library/Preferences/nanocoder/
 # Linux
 rm -rf ~/.config/nanocoder/
 
-# Legacy config (all platforms)
-rm -f ~/.agents.config.json
-
 # Per-project config (in each project directory)
 rm -f .mcp.json
 rm -rf .nanocoder/

@@ -6,7 +6,9 @@ sidebar_order: 6
 
 # Scheduled Tasks
 
-Nanocoder supports scheduling recurring AI tasks using cron expressions. This is useful for automating routine coding tasks like dependency updates, code reviews, or daily standup summaries.
+Some tasks are worth running regularly — checking for outdated dependencies, summarising recent commits, or scanning for common issues. The scheduler lets you define these as markdown prompts and run them automatically on a cron schedule.
+
+Tasks execute in non-interactive mode, so Nanocoder handles everything autonomously and logs the results for you to review.
 
 ## Quick Start
 
@@ -35,13 +37,13 @@ When a scheduled task executes, Nanocoder:
 
 ### `/schedule create <name>`
 
-Creates a new scheduled task file and prompts you to write the prompt content.
+Creates a new scheduled task file and starts an AI-assisted conversation to help you build the prompt content. The AI will ask what you want the scheduled job to do, then write the markdown prompt into the file for you.
 
 ```bash
 /schedule create daily-summary
 ```
 
-The `.md` extension is added automatically. This opens the file in your editor for you to write the prompt.
+The `.md` extension is added automatically.
 
 **Schedule file format:**
 
