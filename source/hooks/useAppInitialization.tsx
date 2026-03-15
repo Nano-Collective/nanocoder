@@ -72,6 +72,8 @@ interface UseAppInitializationProps {
 	getNextComponentKey: () => number;
 	customCommandCache: Map<string, CustomCommand>;
 	setIsConfigWizardMode: (mode: boolean) => void;
+	cliProvider?: string;
+	cliModel?: string;
 }
 
 export function useAppInitialization({
@@ -93,27 +95,42 @@ export function useAppInitialization({
 	getNextComponentKey,
 	customCommandCache,
 	setIsConfigWizardMode,
+	cliProvider,
+	cliModel,
 }: UseAppInitializationProps) {
 	// Initialize LLM client and model
-	const initializeClient = async (preferredProvider?: string) => {
-		const {client, actualProvider} = await createLLMClient(preferredProvider);
+	const initializeClient = async (
+		preferredProvider?: string,
+		preferredModel?: string,
+	) => {
+		const {client, actualProvider} = await createLLMClient(
+			preferredProvider,
+			preferredModel,
+		);
 		setClient(client);
 		setCurrentProvider(actualProvider);
 
-		// Try to use the last used model for this provider
-		const lastUsedModel = getLastUsedModel(actualProvider);
-
+		// Use CLI model if provided, otherwise try last used model
 		let finalModel: string;
-		if (lastUsedModel) {
-			const availableModels = await client.getAvailableModels();
-			if (availableModels.includes(lastUsedModel)) {
-				client.setModel(lastUsedModel);
-				finalModel = lastUsedModel;
+		if (preferredModel) {
+			// CLI model specified - use it directly
+			client.setModel(preferredModel);
+			finalModel = preferredModel;
+		} else {
+			// Try to use the last used model for this provider
+			const lastUsedModel = getLastUsedModel(actualProvider);
+
+			if (lastUsedModel) {
+				const availableModels = await client.getAvailableModels();
+				if (availableModels.includes(lastUsedModel)) {
+					client.setModel(lastUsedModel);
+					finalModel = lastUsedModel;
+				} else {
+					finalModel = client.getCurrentModel();
+				}
 			} else {
 				finalModel = client.getCurrentModel();
 			}
-		} else {
-			finalModel = client.getCurrentModel();
 		}
 
 		setCurrentModel(finalModel);
@@ -309,21 +326,39 @@ export function useAppInitialization({
 		preferences: UserPreferences,
 	): Promise<void> => {
 		try {
-			await initializeClient(preferences.lastProvider);
+			// Use CLI provider/model if provided, otherwise use preferences
+			const provider = cliProvider || preferences.lastProvider;
+			const model = cliModel || undefined;
+			await initializeClient(provider, model);
 		} catch (error) {
-			// Check if it's a ConfigurationError - launch wizard for any config issue
+			// Check if it's a ConfigurationError
 			if (error instanceof ConfigurationError) {
-				addToChatQueue(
-					<InfoMessage
-						key={`config-error-${getNextComponentKey()}`}
-						message="Configuration needed. Let's set up your providers..."
-						hideBox={true}
-					/>,
-				);
-				// Trigger wizard mode after showing UI
-				setTimeout(() => {
-					setIsConfigWizardMode(true);
-				}, 100);
+				// Only trigger wizard if config is empty/missing, not for invalid CLI args
+				if (
+					error.isEmptyConfig ||
+					error.message.includes('No providers configured')
+				) {
+					addToChatQueue(
+						<InfoMessage
+							key={`config-error-${getNextComponentKey()}`}
+							message="Configuration needed. Let's set up your providers..."
+							hideBox={true}
+						/>,
+					);
+					// Trigger wizard mode after showing UI
+					setTimeout(() => {
+						setIsConfigWizardMode(true);
+					}, 100);
+				} else {
+					// Invalid CLI provider/model - show error and don't trigger wizard
+					addToChatQueue(
+						<ErrorMessage
+							key={`config-error-${getNextComponentKey()}`}
+							message={error.message}
+							hideBox={true}
+						/>,
+					);
+				}
 			} else {
 				// Regular error - show simple error message
 				addToChatQueue(

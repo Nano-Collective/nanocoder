@@ -27,28 +27,30 @@ export class ConfigurationError extends Error {
 
 export async function createLLMClient(
 	provider?: string,
+	model?: string,
 ): Promise<{client: LLMClient; actualProvider: string}> {
 	// Check if agents.config.json exists
 	const agentsJsonPath = getClosestConfigFile('agents.config.json');
 	const hasConfigFile = existsSync(agentsJsonPath);
 
 	// Use AI SDK - it handles both tool-calling and non-tool-calling models
-	return createAISDKClient(provider, hasConfigFile);
+	return createAISDKClient(provider, model, hasConfigFile);
 }
 
 async function createAISDKClient(
 	requestedProvider?: string,
+	requestedModel?: string,
 	hasConfigFile = true,
 ): Promise<{client: LLMClient; actualProvider: string}> {
 	// Load provider configs
 	const providers = loadProviderConfigs();
 
-	if (providers.length === 0) {
-		const configPath = getClosestConfigFile('agents.config.json');
-		const cwd = process.cwd();
-		const isInCwd = configPath.startsWith(cwd);
-		const cwdPath = !isInCwd ? join(cwd, 'agents.config.json') : undefined;
+	const configPath = getClosestConfigFile('agents.config.json');
+	const cwd = process.cwd();
+	const isInCwd = configPath.startsWith(cwd);
+	const cwdPath = !isInCwd ? join(cwd, 'agents.config.json') : undefined;
 
+	if (providers.length === 0) {
 		if (!hasConfigFile) {
 			throw new ConfigurationError(
 				'No agents.config.json found',
@@ -76,6 +78,33 @@ async function createAISDKClient(
 		targetProvider = preferences.lastProvider || providers[0].name;
 	}
 
+	// Validate provider exists if specified
+	if (requestedProvider) {
+		const providerConfig = providers.find(p => p.name === requestedProvider);
+		if (!providerConfig) {
+			const availableProviders = providers.map(p => p.name).join(', ');
+			throw new ConfigurationError(
+				`Provider '${requestedProvider}' not found in agents.config.json. Available providers: ${availableProviders}`,
+				configPath,
+				cwdPath,
+				false,
+			);
+		}
+
+		// Validate model exists in provider's model list if specified
+		if (requestedModel) {
+			if (!providerConfig.models.includes(requestedModel)) {
+				const availableModels = providerConfig.models.join(', ');
+				throw new ConfigurationError(
+					`Model '${requestedModel}' not available for provider '${requestedProvider}'. Available models: ${availableModels}`,
+					configPath,
+					cwdPath,
+					false,
+				);
+			}
+		}
+	}
+
 	// Order providers: requested first, then others
 	const availableProviders = providers.map(p => p.name);
 	const providerOrder = [
@@ -96,6 +125,11 @@ async function createAISDKClient(
 			await testProviderConnection(providerConfig);
 
 			const client = await AISDKClient.create(providerConfig);
+
+			// Set model if specified
+			if (requestedModel) {
+				client.setModel(requestedModel);
+			}
 
 			return {client, actualProvider: providerType};
 		} catch (error: unknown) {

@@ -46,7 +46,15 @@ nanocoder -h
 | `--help` | `-h` | Show usage information and available options |
 | `--vscode` | | Run in VS Code mode (for extension) |
 | `--vscode-port` | | Specify VS Code server port |
+| `--provider` | | Specify AI provider (must be configured in agents.config.json) |
+| `--model` | | Specify AI model (must be available for the provider) |
 | `run` | | Run in non-interactive mode |
+
+**Provider/Model Flags:**
+
+The `--provider` and `--model` flags allow you to specify the AI provider and model directly from the CLI, bypassing the need to use slash commands or edit configuration files. Providers must be pre-configured in your `agents.config.json` file.
+
+If an invalid provider or model is specified, nanocoder will show an error message indicating the issue.
 
 ## Interactive Mode
 
@@ -64,6 +72,20 @@ This will open an interactive chat session where you can:
 - Tag files with `@`
 - Review and approve tool executions
 - Switch between different models and providers
+
+**Starting with Specific Provider/Model:**
+
+You can launch interactive mode with a specific provider and model using CLI flags:
+
+```bash
+# Start with specific provider
+nanocoder --provider ollama
+
+# Start with specific provider and model
+nanocoder --provider openrouter --model google/gemini-3.1-flash
+```
+
+This bypasses the need to use `/provider` or `/model` slash commands on startup.
 
 ## Non-Interactive Mode
 
@@ -87,6 +109,12 @@ nanocoder run "write unit tests for all functions in utils.js"
 
 # Refactoring
 nanocoder run "refactor the database connection to use a connection pool"
+
+# With specific provider and model
+nanocoder --provider openrouter --model google/gemini-3.1-flash run "analyze src/app.ts"
+
+# Flags after 'run' command
+nanocoder run --provider openrouter --model anthropic/claude-sonnet-4-20250514 "refactor database module"
 ```
 
 **Non-interactive mode behavior:**
@@ -95,6 +123,13 @@ nanocoder run "refactor the database connection to use a connection pool"
 - Runs in auto-accept mode (tools execute without confirmation)
 - Displays all output and tool execution results
 - Exits automatically when the task is complete
+- Uses specified provider/model if `--provider` and `--model` flags are provided
+
+**Error Handling:**
+
+If you specify an invalid provider or model, nanocoder will show an error:
+- Provider not found in `agents.config.json`: Shows available providers
+- Model not available for provider: Shows available models for that provider
 
 **Note:** When using non-interactive mode with VS Code integration, place any flags (like `--vscode` or `--vscode-port`) before the `run` command:
 
