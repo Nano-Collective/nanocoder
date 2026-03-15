@@ -272,29 +272,8 @@ test('TransportFactory.getTransportTips: handles unknown transport', t => {
 });
 
 // ============================================================================
-// Tests for Header Warning Functionality (New Feature)
+// Tests for Header Support
 // ============================================================================
-
-test('TransportFactory.createTransport: warns about auth config for websocket transport', t => {
-	// Test that transport is created despite auth config warning
-	// Note: Warnings are now logged via the logging system (logWarning),
-	// not console.warn directly
-	const server: MCPServer = {
-		name: 'test-websocket-with-auth',
-		transport: 'websocket',
-		url: 'ws://localhost:3000/mcp',
-		auth: {
-			type: 'bearer',
-			token: 'token123',
-		},
-	};
-
-	const transport = TransportFactory.createTransport(server);
-
-	// Transport should still be created even with unsupported auth config
-	t.truthy(transport);
-	// Warning is logged via logWarning() to the logging system
-});
 
 test('TransportFactory.createTransport: creates http transport with headers', t => {
 	const server: MCPServer = {
@@ -309,27 +288,6 @@ test('TransportFactory.createTransport: creates http transport with headers', t 
 	const transport = TransportFactory.createTransport(server);
 
 	t.truthy(transport);
-});
-
-test('TransportFactory.createTransport: warns about auth config for http transport', t => {
-	// Test that transport is created despite auth config warning
-	// Note: Warnings are now logged via the logging system (logWarning),
-	// not console.warn directly
-	const server: MCPServer = {
-		name: 'test-http-with-auth',
-		transport: 'http',
-		url: 'https://example.com/mcp',
-		auth: {
-			type: 'bearer',
-			token: 'token123',
-		},
-	};
-
-	const transport = TransportFactory.createTransport(server);
-
-	// Transport should still be created even with unsupported auth config
-	t.truthy(transport);
-	// Warning is logged via logWarning() to the logging system
 });
 
 test('TransportFactory.validateServerConfig: validates http config with headers', t => {

@@ -14,27 +14,8 @@ export interface MCPServerWithSource {
 }
 
 /**
- * Show deprecation warning for array format MCP configuration
- */
-function showArrayFormatDeprecationWarning() {
-	logError('Warning: Array format for MCP servers is deprecated.');
-	logError(
-		'Please use object format: { "mcpServers": { "serverName": { ... } } }',
-	);
-}
-
-/**
- * Show deprecation warning for MCP servers in agents.config.json
- */
-function showAgentsConfigDeprecationWarning() {
-	const _configPath = join(getConfigPath(), '.mcp.json');
-	logError('Warning: MCP servers in agents.config.json are deprecated.');
-	logError(`Please migrate to ${_configPath}. See documentation for details.`);
-}
-
-/**
- * Parse MCP servers from config object, supporting both array and object formats
- * Converts array format to normalized server list with deprecation warning
+ * Parse MCP servers from .mcp.json config object.
+ * Only supports object format: { "mcpServers": { "serverName": { ... } } }
  */
 function parseMCPServers(config: unknown): unknown[] | null {
 	if (typeof config !== 'object' || config === null) {
@@ -42,47 +23,43 @@ function parseMCPServers(config: unknown): unknown[] | null {
 	}
 
 	const configObj = config as Record<string, unknown>;
-	let mcpServers: unknown[] | null = null;
-	let usedArrayFormat = false;
 
-	// Direct array format at root
-	if (Array.isArray(config)) {
-		mcpServers = config;
-		usedArrayFormat = true;
-	} else if (
-		'nanocoder' in configObj &&
-		configObj.nanocoder &&
-		typeof configObj.nanocoder === 'object' &&
-		'mcpServers' in configObj.nanocoder &&
-		Array.isArray((configObj.nanocoder as Record<string, unknown>).mcpServers)
-	) {
-		mcpServers = (configObj.nanocoder as Record<string, unknown>)
-			.mcpServers as unknown[];
-		usedArrayFormat = true;
-	} else if ('mcpServers' in configObj && Array.isArray(configObj.mcpServers)) {
-		mcpServers = configObj.mcpServers;
-		usedArrayFormat = true;
-	} else if (
+	if (
 		'mcpServers' in configObj &&
 		configObj.mcpServers &&
 		typeof configObj.mcpServers === 'object' &&
 		!Array.isArray(configObj.mcpServers)
 	) {
-		// Claude Code format: { "serverName": { ...serverConfig } }
-		mcpServers = Object.entries(
-			configObj.mcpServers as Record<string, unknown>,
-		).map(([name, serverConfig]) => ({
-			name,
-			...(serverConfig as object),
-		}));
+		return Object.entries(configObj.mcpServers as Record<string, unknown>).map(
+			([name, serverConfig]) => ({
+				name,
+				...(serverConfig as object),
+			}),
+		);
 	}
 
-	// Show deprecation warning if array format was used
-	if (usedArrayFormat && mcpServers && mcpServers.length > 0) {
-		showArrayFormatDeprecationWarning();
-	}
+	return null;
+}
 
-	return mcpServers;
+/**
+ * Map a raw parsed server object to MCPServerConfig
+ */
+function mapServerConfig(server: unknown): MCPServerConfig {
+	const typedServer = server as MCPServerConfig;
+	return {
+		name: typedServer.name,
+		transport: typedServer.transport,
+		command: typedServer.command,
+		args: typedServer.args,
+		env: typedServer.env,
+		url: typedServer.url,
+		headers: typedServer.headers,
+		timeout: typedServer.timeout,
+		alwaysAllow: typedServer.alwaysAllow,
+		description: typedServer.description,
+		tags: typedServer.tags,
+		enabled: typedServer.enabled,
+	};
 }
 
 /**
@@ -102,30 +79,12 @@ export function loadProjectMCPConfig(): MCPServerWithSource[] {
 		const mcpServers = parseMCPServers(config);
 
 		if (Array.isArray(mcpServers) && mcpServers.length > 0) {
-			// Apply environment variable substitution
 			const processedServers = substituteEnvVars(mcpServers);
 
-			return processedServers.map((server: unknown) => {
-				const typedServer = server as MCPServerConfig;
-				return {
-					server: {
-						name: typedServer.name,
-						transport: typedServer.transport,
-						command: typedServer.command,
-						args: typedServer.args,
-						env: typedServer.env,
-						url: typedServer.url,
-						headers: typedServer.headers,
-						auth: typedServer.auth,
-						timeout: typedServer.timeout,
-						reconnect: typedServer.reconnect,
-						description: typedServer.description,
-						tags: typedServer.tags,
-						enabled: typedServer.enabled,
-					},
-					source: 'project' as ConfigSource,
-				};
-			});
+			return processedServers.map((server: unknown) => ({
+				server: mapServerConfig(server),
+				source: 'project' as ConfigSource,
+			}));
 		}
 	} catch (error) {
 		logError(`Failed to load MCP config from ${configPath}: ${String(error)}`);
@@ -136,127 +95,31 @@ export function loadProjectMCPConfig(): MCPServerWithSource[] {
 
 /**
  * Load global MCP configuration from ~/.config/nanocoder/.mcp.json
- * Falls back to agents.config.json with deprecation warning
  */
 export function loadGlobalMCPConfig(): MCPServerWithSource[] {
 	const configDir = getConfigPath();
-	const newConfigPath = join(configDir, '.mcp.json');
+	const configPath = join(configDir, '.mcp.json');
 
-	// First, check the new .mcp.json location
-	if (existsSync(newConfigPath)) {
-		try {
-			const rawData = readFileSync(newConfigPath, 'utf-8');
-			const config = JSON.parse(rawData);
-
-			const mcpServers = parseMCPServers(config);
-
-			if (Array.isArray(mcpServers) && mcpServers.length > 0) {
-				const processedServers = substituteEnvVars(mcpServers);
-
-				return processedServers.map((server: unknown) => {
-					const typedServer = server as MCPServerConfig;
-					return {
-						server: {
-							name: typedServer.name,
-							transport: typedServer.transport,
-							command: typedServer.command,
-							args: typedServer.args,
-							env: typedServer.env,
-							url: typedServer.url,
-							headers: typedServer.headers,
-							auth: typedServer.auth,
-							timeout: typedServer.timeout,
-							reconnect: typedServer.reconnect,
-							description: typedServer.description,
-							tags: typedServer.tags,
-							enabled: typedServer.enabled,
-						},
-						source: 'global' as ConfigSource,
-					};
-				});
-			}
-		} catch (error) {
-			logError(
-				`Failed to load MCP config from ${newConfigPath}: ${String(error)}`,
-			);
-		}
-
+	if (!existsSync(configPath)) {
 		return [];
 	}
 
-	// Fallback to agents.config.json in config directory
-	const legacyConfigPath = join(configDir, 'agents.config.json');
-	if (existsSync(legacyConfigPath)) {
-		return loadMCPConfigFromAgentsConfig(legacyConfigPath);
-	}
-
-	return [];
-}
-
-/**
- * Load MCP config from legacy agents.config.json with deprecation warning
- */
-function loadMCPConfigFromAgentsConfig(
-	filePath: string,
-): MCPServerWithSource[] {
 	try {
-		const rawData = readFileSync(filePath, 'utf-8');
+		const rawData = readFileSync(configPath, 'utf-8');
 		const config = JSON.parse(rawData);
 
-		let mcpServers: unknown[] | null = null;
-		let hasMcpServers = false;
-
-		if (config.nanocoder && Array.isArray(config.nanocoder.mcpServers)) {
-			mcpServers = config.nanocoder.mcpServers;
-			hasMcpServers = mcpServers !== null && mcpServers.length > 0;
-		} else if (
-			config.nanocoder &&
-			config.nanocoder.mcpServers &&
-			typeof config.nanocoder.mcpServers === 'object' &&
-			!Array.isArray(config.nanocoder.mcpServers)
-		) {
-			// Claude Code format in agents.config.json
-			mcpServers = Object.entries(
-				config.nanocoder.mcpServers as Record<string, unknown>,
-			).map(([name, serverConfig]) => ({
-				name,
-				...(serverConfig as object),
-			}));
-			hasMcpServers = mcpServers && mcpServers.length > 0;
-		}
-
-		// Show deprecation warning if MCP servers found in agents.config.json
-		if (hasMcpServers) {
-			showAgentsConfigDeprecationWarning();
-		}
+		const mcpServers = parseMCPServers(config);
 
 		if (Array.isArray(mcpServers) && mcpServers.length > 0) {
 			const processedServers = substituteEnvVars(mcpServers);
 
-			return processedServers.map((server: unknown) => {
-				const typedServer = server as MCPServerConfig;
-				return {
-					server: {
-						name: typedServer.name,
-						transport: typedServer.transport,
-						command: typedServer.command,
-						args: typedServer.args,
-						env: typedServer.env,
-						url: typedServer.url,
-						headers: typedServer.headers,
-						auth: typedServer.auth,
-						timeout: typedServer.timeout,
-						reconnect: typedServer.reconnect,
-						description: typedServer.description,
-						tags: typedServer.tags,
-						enabled: typedServer.enabled,
-					},
-					source: 'global' as ConfigSource,
-				};
-			});
+			return processedServers.map((server: unknown) => ({
+				server: mapServerConfig(server),
+				source: 'global' as ConfigSource,
+			}));
 		}
 	} catch (error) {
-		logError(`Failed to load MCP config from ${filePath}: ${String(error)}`);
+		logError(`Failed to load MCP config from ${configPath}: ${String(error)}`);
 	}
 
 	return [];

@@ -24,26 +24,6 @@ test('validateMCPConfigSecurity - warns about hardcoded credentials in env vars'
 	});
 });
 
-test('validateMCPConfigSecurity - warns about hardcoded credentials in auth', t => {
-	const mcpServers: MCPServerConfig[] = [
-		{
-			name: 'auth-server',
-			transport: 'http',
-			url: 'http://localhost:8080',
-			auth: {
-				type: 'api-key',
-				apiKey: 'hardcoded-api-key' // This should trigger a warning
-			}
-		}
-	];
-
-	// The function should run without errors when given hardcoded credentials
-	// Warning behavior may vary based on implementation
-	t.notThrows(() => {
-		validateMCPConfigSecurity(mcpServers);
-	});
-});
-
 test('validateMCPConfigSecurity - warns about hardcoded headers', t => {
 	const mcpServers: MCPServerConfig[] = [
 		{
