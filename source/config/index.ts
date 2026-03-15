@@ -1,6 +1,5 @@
 import {config as loadEnv} from 'dotenv';
 import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'fs';
-import {homedir} from 'os';
 import {dirname, join} from 'path';
 import {fileURLToPath} from 'url';
 import {
@@ -51,16 +50,6 @@ export function getClosestConfigFile(fileName: string): string {
 				confDirMap[fileName] = cwdPath; // nosemgrep
 
 				return cwdPath; // nosemgrep
-			}
-
-			// Next lets check the $HOME for a hidden file. This should only be for
-			// legacy support
-			const homePath = join(homedir(), `.${fileName}`); // nosemgrep
-			if (existsSync(homePath)) {
-				// nosemgrep
-				confDirMap[fileName] = homePath; // nosemgrep
-
-				return homePath; // nosemgrep
 			}
 		}
 
@@ -169,13 +158,6 @@ function loadAutoCompactConfig(): AutoCompactConfig {
 		return globalConfig;
 	}
 
-	// Fallback to home directory
-	const homePath = join(homedir(), '.agents.config.json');
-	const homeConfig = tryLoadAutoCompactFromPath(homePath, defaults);
-	if (homeConfig) {
-		return homeConfig;
-	}
-
 	return defaults;
 }
 
@@ -274,13 +256,6 @@ function loadSessionConfig(): AppConfig['sessions'] {
 	const globalConfig = tryLoadSessionsFromPath(globalConfigPath, defaults);
 	if (globalConfig) {
 		return globalConfig;
-	}
-
-	// Fallback to home directory
-	const homePath = join(homedir(), '.agents.config.json');
-	const homeConfig = tryLoadSessionsFromPath(homePath, defaults);
-	if (homeConfig) {
-		return homeConfig;
 	}
 
 	return defaults;

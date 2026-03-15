@@ -1,5 +1,4 @@
 import {existsSync, readFileSync} from 'fs';
-import {homedir} from 'os';
 import {join} from 'path';
 import {substituteEnvVars} from '@/config/env-substitution';
 import {getConfigPath} from '@/config/paths';
@@ -185,12 +184,7 @@ export function loadGlobalMCPConfig(): MCPServerWithSource[] {
 		return [];
 	}
 
-	// Fallback to legacy agents.config.json with deprecation warning
-	const homePath = join(homedir(), '.agents.config.json');
-	if (existsSync(homePath)) {
-		return loadMCPConfigFromAgentsConfig(homePath);
-	}
-
+	// Fallback to agents.config.json in config directory
 	const legacyConfigPath = join(configDir, 'agents.config.json');
 	if (existsSync(legacyConfigPath)) {
 		return loadMCPConfigFromAgentsConfig(legacyConfigPath);
@@ -373,16 +367,7 @@ function loadGlobalProviderConfigs(): ProviderConfig[] {
 	// Use the same path resolution logic as getClosestConfigFile
 	const configDir = getConfigPath();
 
-	// Check the $HOME for a hidden file. This should only be for legacy support
-	const homePath = join(homedir(), '.agents.config.json');
-	if (existsSync(homePath)) {
-		const providers = loadProviderConfigFromFile(homePath);
-		if (providers.length > 0) {
-			return providers;
-		}
-	}
-
-	// Next, lets look for a user level config.
+	// Look for a user level config.
 	const configPath = join(configDir, 'agents.config.json');
 	if (existsSync(configPath)) {
 		return loadProviderConfigFromFile(configPath);
