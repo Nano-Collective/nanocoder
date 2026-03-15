@@ -1,7 +1,7 @@
 ---
 title: "Features"
 description: "Overview of Nanocoder's key features and capabilities"
-sidebar_order: 1
+sidebar_order: 5
 ---
 
 # Features

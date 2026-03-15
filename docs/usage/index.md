@@ -1,7 +1,7 @@
 ---
 title: "Usage"
 description: "How to use Nanocoder in interactive and non-interactive modes"
-sidebar_order: 1
+sidebar_order: 3
 ---
 
 # Usage

@@ -1,7 +1,7 @@
 ---
 title: "Getting Started"
 description: "Get up and running with Nanocoder quickly"
-sidebar_order: 1
+sidebar_order: 2
 ---
 
 # Getting Started

@@ -1,7 +1,7 @@
 ---
 title: "Configuration"
 description: "Configure Nanocoder providers, preferences, and settings"
-sidebar_order: 1
+sidebar_order: 4
 ---
 
 # Configuration
