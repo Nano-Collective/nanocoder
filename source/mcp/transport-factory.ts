@@ -3,7 +3,6 @@ import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/st
 import {WebSocketClientTransport} from '@modelcontextprotocol/sdk/client/websocket.js';
 import {execFileSync} from 'child_process';
 import {accessSync, constants as fsConstants} from 'fs';
-import {logWarning} from '@/utils/message-queue';
 import type {MCPServer, MCPTransportType} from '../types/mcp.js';
 
 /**
@@ -154,22 +153,7 @@ export class TransportFactory {
 			);
 		}
 
-		const transport = new WebSocketClientTransport(url);
-
-		// Note: The WebSocketClientTransport doesn't directly support headers in the current SDK
-		// Authentication would need to be handled at the protocol level or via URL parameters
-		if (server.auth) {
-			logWarning('WebSocket transport has unsupported auth config', true, {
-				context: {
-					serverName: server.name,
-					transportType: 'websocket',
-					reason:
-						'Current SDK does not support headers for WebSocket transport',
-				},
-			});
-		}
-
-		return transport;
+		return new WebSocketClientTransport(url);
 	}
 
 	/**
@@ -197,29 +181,8 @@ export class TransportFactory {
 		const transportOptions = server.headers
 			? {requestInit: {headers: server.headers}}
 			: undefined;
-		const transport = new StreamableHTTPClientTransport(url, transportOptions);
 
-		if (server.auth) {
-			logWarning('HTTP transport has unsupported auth config', true, {
-				context: {
-					serverName: server.name,
-					transportType: 'http',
-					reason:
-						'Current SDK does not support custom headers for HTTP transport',
-				},
-			});
-		}
-
-		// Check if headers are specified but cannot be used
-		if (server.headers) {
-			const headerKeys = Object.keys(server.headers);
-			if (headerKeys.length > 0) {
-				// Headers are now being used, so don't show the warning anymore
-				// console.warn(...) - Commented out since headers are now supported
-			}
-		}
-
-		return transport;
+		return new StreamableHTTPClientTransport(url, transportOptions);
 	}
 
 	/**
@@ -300,16 +263,15 @@ export class TransportFactory {
 					'Requires a ws:// or wss:// URL', // nosemgrep
 					'Supports real-time bidirectional communication',
 					'Best for interactive remote services',
-					'Note: Custom headers are not currently supported by the SDK and will be ignored',
 				];
 
 			case 'http':
 				return [
-					'HTTP transport connects to remote MCP servers via REST API',
+					'HTTP transport connects to remote MCP servers',
 					'Requires an http:// or https:// URL',
 					'Uses the StreamableHTTP protocol from MCP specification',
 					'Best for stateless remote services and APIs',
-					'Custom headers are now supported for authentication',
+					'Custom headers are supported for authentication',
 				];
 
 			default:

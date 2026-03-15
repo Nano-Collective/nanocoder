@@ -1,14 +1,5 @@
 export type MCPTransportType = 'stdio' | 'websocket' | 'http';
 
-export interface MCPAuthConfig {
-	type: 'bearer' | 'basic' | 'api-key' | 'custom';
-	token?: string;
-	username?: string;
-	password?: string;
-	apiKey?: string;
-	customHeaders?: Record<string, string>;
-}
-
 export interface MCPServer {
 	name: string;
 	transport: MCPTransportType;
@@ -21,13 +12,8 @@ export interface MCPServer {
 	// Remote transport-specific fields
 	url?: string;
 	headers?: Record<string, string>;
-	auth?: MCPAuthConfig;
 	timeout?: number;
-	reconnect?: {
-		enabled: boolean;
-		maxAttempts: number;
-		backoffMs: number;
-	};
+
 	// Tools that can be executed without asking for approval
 	alwaysAllow?: string[];
 

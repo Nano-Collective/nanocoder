@@ -28,34 +28,6 @@ export function validateMCPConfigSecurity(mcpServers: MCPServerConfig[]): void {
 			}
 		}
 
-		// Check for hardcoded credentials in auth configuration
-		if (server.auth) {
-			if (server.auth.token && !server.auth.token.startsWith('$')) {
-				logWarning(
-					`Security warning: Hardcoded token detected in MCP server "${server.name}". ` +
-						'Consider using environment variable references (e.g., "$TOKEN") instead of hardcoded values.',
-				);
-			}
-			if (server.auth.username && !server.auth.username.startsWith('$')) {
-				logWarning(
-					`Security warning: Hardcoded username detected in MCP server "${server.name}". ` +
-						'Consider using environment variable references (e.g., "$USERNAME") instead of hardcoded values.',
-				);
-			}
-			if (server.auth.password && !server.auth.password.startsWith('$')) {
-				logWarning(
-					`Security warning: Hardcoded password detected in MCP server "${server.name}". ` +
-						'Consider using environment variable references (e.g., "$PASSWORD") instead of hardcoded values.',
-				);
-			}
-			if (server.auth.apiKey && !server.auth.apiKey.startsWith('$')) {
-				logWarning(
-					`Security warning: Hardcoded API key detected in MCP server "${server.name}". ` +
-						'Consider using environment variable references (e.g., "$API_KEY") instead of hardcoded values.',
-				);
-			}
-		}
-
 		// Check for hardcoded credentials in headers
 		if (server.headers) {
 			for (const [key, value] of Object.entries(server.headers)) {

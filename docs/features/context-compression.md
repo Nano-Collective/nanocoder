@@ -1,15 +1,25 @@
+---
+title: "Context Compression"
+description: "Manage token usage during extended conversations with intelligent compression"
+sidebar_order: 3
+---
+
 # Context Compression
 
-Nanocoder includes a context compression system to manage token usage during extended conversations. This helps prevent hitting context limits and reduces costs when using paid APIs.
+Every message in your conversation takes up space in the model's context window. In long sessions, you'll eventually hit the limit — the AI loses access to earlier messages and starts losing track of what you've discussed. Context compression solves this by intelligently condensing older messages while keeping the important parts.
 
-## Overview
+This matters most when you're on extended coding sessions or using paid APIs where token usage affects cost.
 
-As conversations grow longer, the context window fills up with message history. The compression system intelligently compresses older messages while preserving important information like:
+## How It Works
+
+The compression system preserves:
 
 - Recent messages (kept at full detail)
 - Key decisions and choices made
 - File modifications and their outcomes
 - Tool execution results
+
+Older messages are summarized to their essential content.
 
 ## Manual Compression
 

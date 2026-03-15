@@ -1,3 +1,9 @@
+---
+title: "Uninstalling"
+description: "How to uninstall Nanocoder and clean up configuration files"
+sidebar_order: 3
+---
+
 # Uninstalling Nanocoder
 
 ## Finding Your Installation
@@ -49,9 +55,6 @@ rm -rf ~/Library/Preferences/nanocoder/
 
 # Linux
 rm -rf ~/.config/nanocoder/
-
-# Legacy config (all platforms)
-rm -f ~/.agents.config.json
 
 # Per-project config (in each project directory)
 rm -f .mcp.json

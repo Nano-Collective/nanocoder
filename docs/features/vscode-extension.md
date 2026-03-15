@@ -1,6 +1,14 @@
+---
+title: "VS Code Extension"
+description: "Live diff previews and editor integration with the VS Code extension"
+sidebar_order: 8
+---
+
 # VS Code Extension
 
-Nanocoder includes a VS Code extension that integrates your editor with the CLI. Key features include:
+If you use VS Code as your editor, the Nanocoder extension bridges it with the CLI. When the AI proposes a file edit, you see a full diff preview in VS Code before approving. You can also right-click selected code to ask questions about it directly.
+
+**Key features:**
 
 - **Ask About Code**: Right-click selected code to ask Nanocoder questions directly from VS Code
 - **Live Diff Preview**: See proposed file changes in VS Code's diff viewer before approving
@@ -46,18 +54,28 @@ If you prefer to install manually or the automatic installation doesn't work:
 
 ## Usage
 
-1. **Start Nanocoder with VS Code integration**:
+1. **Start Nanocoder with VS Code integration** using one of these methods:
+
+   **From the CLI flag:**
 
    ```bash
    nanocoder --vscode
    ```
 
-   Or from within VS Code:
+   **From within a Nanocoder session:**
+
+   ```bash
+   /ide
+   ```
+
+   This opens an interactive selector where you can choose VS Code. Nanocoder will check if the extension is installed and prompt you to install it if needed, then start the integration server.
+
+   **From within VS Code:**
 
    - Press `Cmd+Shift+P` / `Ctrl+Shift+P`
    - Run "Nanocoder: Start Nanocoder CLI"
 
-2. **The extension connects automatically** when Nanocoder starts with `--vscode`
+2. **The extension connects automatically** when Nanocoder starts with `--vscode` or after selecting VS Code via `/ide`
 
 3. **View diff previews**: When Nanocoder suggests file changes, a diff view automatically opens in VS Code showing:
 

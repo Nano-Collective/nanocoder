@@ -21,11 +21,6 @@ const ARRAY_KEYS = new Set([
 const NUMBER_KEYS = new Set(['estimated-tokens']);
 
 /**
- * Set of frontmatter keys that are parsed as booleans
- */
-const BOOLEAN_KEYS = new Set(['resources']);
-
-/**
  * Parse a value that may be a JSON-style array or a single item.
  * Returns an array of strings.
  */
@@ -64,8 +59,6 @@ function parseEnhancedFrontmatter(frontmatter: string): CustomCommandMetadata {
 			if (!Number.isNaN(num)) {
 				raw[key] = num;
 			}
-		} else if (BOOLEAN_KEYS.has(key)) {
-			raw[key] = trimmedValue === 'true';
 		} else {
 			raw[key] = trimmedValue.replace(/^["']|["']$/g, '');
 		}
@@ -196,7 +189,6 @@ function mapRawToMetadata(raw: Record<string, unknown>): CustomCommandMetadata {
 	if (raw.triggers) metadata.triggers = raw.triggers as string[];
 	if (typeof raw['estimated-tokens'] === 'number')
 		metadata.estimatedTokens = raw['estimated-tokens'];
-	if (typeof raw.resources === 'boolean') metadata.resources = raw.resources;
 	if (raw.category) metadata.category = raw.category as string;
 	if (raw.version) metadata.version = raw.version as string;
 	if (raw.author) metadata.author = raw.author as string;
