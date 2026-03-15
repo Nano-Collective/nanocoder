@@ -331,19 +331,34 @@ export function useAppInitialization({
 			const model = cliModel || undefined;
 			await initializeClient(provider, model);
 		} catch (error) {
-			// Check if it's a ConfigurationError - launch wizard for any config issue
+			// Check if it's a ConfigurationError
 			if (error instanceof ConfigurationError) {
-				addToChatQueue(
-					<InfoMessage
-						key={`config-error-${getNextComponentKey()}`}
-						message="Configuration needed. Let's set up your providers..."
-						hideBox={true}
-					/>,
-				);
-				// Trigger wizard mode after showing UI
-				setTimeout(() => {
-					setIsConfigWizardMode(true);
-				}, 100);
+				// Only trigger wizard if config is empty/missing, not for invalid CLI args
+				if (
+					error.isEmptyConfig ||
+					error.message.includes('No providers configured')
+				) {
+					addToChatQueue(
+						<InfoMessage
+							key={`config-error-${getNextComponentKey()}`}
+							message="Configuration needed. Let's set up your providers..."
+							hideBox={true}
+						/>,
+					);
+					// Trigger wizard mode after showing UI
+					setTimeout(() => {
+						setIsConfigWizardMode(true);
+					}, 100);
+				} else {
+					// Invalid CLI provider/model - show error and don't trigger wizard
+					addToChatQueue(
+						<ErrorMessage
+							key={`config-error-${getNextComponentKey()}`}
+							message={error.message}
+							hideBox={true}
+						/>,
+					);
+				}
 			} else {
 				// Regular error - show simple error message
 				addToChatQueue(
