@@ -72,6 +72,10 @@ interface UseAppInitializationProps {
 	getNextComponentKey: () => number;
 	customCommandCache: Map<string, CustomCommand>;
 	setIsConfigWizardMode: (mode: boolean) => void;
+	runtimeOverrides?: {
+		provider?: string;
+		model?: string;
+	};
 }
 
 export function useAppInitialization({
@@ -93,27 +97,41 @@ export function useAppInitialization({
 	getNextComponentKey,
 	customCommandCache,
 	setIsConfigWizardMode,
+	runtimeOverrides,
 }: UseAppInitializationProps) {
 	// Initialize LLM client and model
-	const initializeClient = async (preferredProvider?: string) => {
+	const initializeClient = async (
+		preferredProvider?: string,
+		preferredModel?: string,
+	) => {
 		const {client, actualProvider} = await createLLMClient(preferredProvider);
 		setClient(client);
 		setCurrentProvider(actualProvider);
 
-		// Try to use the last used model for this provider
-		const lastUsedModel = getLastUsedModel(actualProvider);
-
+		// Try to use the preferred model first, then the last used model for this provider
 		let finalModel: string;
-		if (lastUsedModel) {
+		if (preferredModel) {
 			const availableModels = await client.getAvailableModels();
-			if (availableModels.includes(lastUsedModel)) {
-				client.setModel(lastUsedModel);
-				finalModel = lastUsedModel;
+			if (availableModels.includes(preferredModel)) {
+				client.setModel(preferredModel);
+				finalModel = preferredModel;
 			} else {
+				// Fallback if the override model isn't valid for this provider
 				finalModel = client.getCurrentModel();
 			}
 		} else {
-			finalModel = client.getCurrentModel();
+			const lastUsedModel = getLastUsedModel(actualProvider);
+			if (lastUsedModel) {
+				const availableModels = await client.getAvailableModels();
+				if (availableModels.includes(lastUsedModel)) {
+					client.setModel(lastUsedModel);
+					finalModel = lastUsedModel;
+				} else {
+					finalModel = client.getCurrentModel();
+				}
+			} else {
+				finalModel = client.getCurrentModel();
+			}
 		}
 
 		setCurrentModel(finalModel);
@@ -309,7 +327,10 @@ export function useAppInitialization({
 		preferences: UserPreferences,
 	): Promise<void> => {
 		try {
-			await initializeClient(preferences.lastProvider);
+			await initializeClient(
+				runtimeOverrides?.provider || preferences.lastProvider,
+				runtimeOverrides?.model,
+			);
 		} catch (error) {
 			// Check if it's a ConfigurationError - launch wizard for any config issue
 			if (error instanceof ConfigurationError) {

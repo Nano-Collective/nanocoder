@@ -6,6 +6,10 @@ export interface AppProps {
 	vscodePort?: number;
 	nonInteractivePrompt?: string;
 	nonInteractiveMode?: boolean;
+	runtimeOverrides?: {
+		provider?: string;
+		model?: string;
+	};
 }
 
 /**
