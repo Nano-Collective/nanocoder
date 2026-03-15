@@ -337,6 +337,35 @@ test('loadEnvMCPConfigs - loads from NANOCODER_MCPSERVERS environment variable',
     }
 });
 
+test('loadEnvMCPConfigs - supports mcpServers wrapper format', t => {
+    const originalValue = process.env.NANOCODER_MCPSERVERS;
+
+    try {
+        const config = {
+            mcpServers: {
+                'wrapped-server': {
+                    transport: 'http',
+                    url: 'http://localhost:9090'
+                }
+            }
+        };
+        process.env.NANOCODER_MCPSERVERS = JSON.stringify(config);
+
+        const allConfigs = loadAllMCPConfigs();
+
+        const wrappedServer = allConfigs.find(c => c.server.name === 'wrapped-server');
+        t.truthy(wrappedServer);
+        t.is(wrappedServer?.source, 'env');
+        t.is(wrappedServer?.server.url, 'http://localhost:9090');
+    } finally {
+        if (originalValue !== undefined) {
+            process.env.NANOCODER_MCPSERVERS = originalValue;
+        } else {
+            delete process.env.NANOCODER_MCPSERVERS;
+        }
+    }
+});
+
 test('loadEnvMCPConfigs - loads from NANOCODER_MCPSERVERS_FILE', t => {
     const testDir = t.context.testDir as string;
     const originalValue = process.env.NANOCODER_MCPSERVERS;
@@ -508,34 +537,36 @@ test('hierarchical precedence - env overrides project and global', t => {
     const testDir = t.context.testDir as string;
     const originalMcpServers = process.env.NANOCODER_MCPSERVERS;
     const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+    const originalNodeEnv = process.env.NODE_ENV;
 
     try {
-        // Set up project config
+        // Enable global config loading for this test
+        delete process.env.NODE_ENV;
+
+        // Set up project config (object format as used by .mcp.json)
         const projectConfig = {
-            mcpServers: [
-                {
-                    name: 'override-test',
+            mcpServers: {
+                'override-test': {
                     transport: 'stdio',
                     command: 'project-command'
                 }
-            ]
+            }
         };
         writeFileSync(join(testDir, '.mcp.json'), JSON.stringify(projectConfig));
 
-        // Set up global config
-        process.env.NANOCODER_CONFIG_DIR = testDir;
+        // Set up global config in a separate directory
+        const globalDir = join(testDir, 'global-config');
+        mkdirSync(globalDir, {recursive: true});
+        process.env.NANOCODER_CONFIG_DIR = globalDir;
         const globalConfig = {
-            nanocoder: {
-                mcpServers: [
-                    {
-                        name: 'override-test',
-                        transport: 'stdio',
-                        command: 'global-command'
-                    }
-                ]
+            mcpServers: {
+                'override-test': {
+                    transport: 'stdio',
+                    command: 'global-command'
+                }
             }
         };
-        writeFileSync(join(testDir, 'agents.config.json'), JSON.stringify(globalConfig));
+        writeFileSync(join(globalDir, '.mcp.json'), JSON.stringify(globalConfig));
 
         // Set up env config (should override both)
         const envConfig = [
@@ -566,6 +597,11 @@ test('hierarchical precedence - env overrides project and global', t => {
         } else {
             delete process.env.NANOCODER_CONFIG_DIR;
         }
+        if (originalNodeEnv !== undefined) {
+            process.env.NODE_ENV = originalNodeEnv;
+        } else {
+            delete process.env.NODE_ENV;
+        }
     }
 });
 
@@ -573,22 +609,16 @@ test('hierarchical precedence - NANOCODER_PROVIDERS overrides all', t => {
     const testDir = t.context.testDir as string;
     const originalProviders = process.env.NANOCODER_PROVIDERS;
     const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+    const originalNodeEnv = process.env.NODE_ENV;
 
     try {
-        // Set up project config
-        const projectConfig = {
-            providers: [
-                {
-                    name: 'provider-override-test',
-                    baseUrl: 'http://project-url',
-                    models: ['project-model']
-                }
-            ]
-        };
-        writeFileSync(join(testDir, 'agents.config.json'), JSON.stringify(projectConfig));
+        // Enable global config loading for this test
+        delete process.env.NODE_ENV;
 
-        // Set up global config
-        process.env.NANOCODER_CONFIG_DIR = testDir;
+        // Set up global config in a separate directory
+        const globalDir = join(testDir, 'global-config');
+        mkdirSync(globalDir, {recursive: true});
+        process.env.NANOCODER_CONFIG_DIR = globalDir;
         const globalConfig = {
             nanocoder: {
                 providers: [
@@ -600,7 +630,19 @@ test('hierarchical precedence - NANOCODER_PROVIDERS overrides all', t => {
                 ]
             }
         };
-        writeFileSync(join(testDir, 'agents.config.json'), JSON.stringify(globalConfig));
+        writeFileSync(join(globalDir, 'agents.config.json'), JSON.stringify(globalConfig));
+
+        // Set up project config in the working directory
+        const projectConfig = {
+            providers: [
+                {
+                    name: 'provider-override-test',
+                    baseUrl: 'http://project-url',
+                    models: ['project-model']
+                }
+            ]
+        };
+        writeFileSync(join(testDir, 'agents.config.json'), JSON.stringify(projectConfig));
 
         // Set up env config (should override both)
         const envConfig = [
@@ -630,6 +672,11 @@ test('hierarchical precedence - NANOCODER_PROVIDERS overrides all', t => {
             process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
         } else {
             delete process.env.NANOCODER_CONFIG_DIR;
+        }
+        if (originalNodeEnv !== undefined) {
+            process.env.NODE_ENV = originalNodeEnv;
+        } else {
+            delete process.env.NODE_ENV;
         }
     }
 });

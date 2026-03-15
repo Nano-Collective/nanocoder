@@ -197,33 +197,22 @@ function loadEnvMCPConfigs(): MCPServerWithSource[] {
 	try {
 		const config = JSON.parse(rawData);
 
-		// Accept direct array or standard agents.config.json wrapper format
-		const mcpServers = parseMCPServers(config);
+		// Accept direct array format (env vars) or standard .mcp.json wrapper format
+		let servers: unknown[] | null = null;
 
-		if (Array.isArray(mcpServers) && mcpServers.length > 0) {
-			const processedServers = substituteEnvVars(mcpServers);
+		if (Array.isArray(config)) {
+			servers = config;
+		} else {
+			servers = parseMCPServers(config);
+		}
 
-			return processedServers.map((server: unknown) => {
-				const typedServer = server as MCPServerConfig;
-				return {
-					server: {
-						name: typedServer.name,
-						transport: typedServer.transport,
-						command: typedServer.command,
-						args: typedServer.args,
-						env: typedServer.env,
-						url: typedServer.url,
-						headers: typedServer.headers,
-						auth: typedServer.auth,
-						timeout: typedServer.timeout,
-						reconnect: typedServer.reconnect,
-						description: typedServer.description,
-						tags: typedServer.tags,
-						enabled: typedServer.enabled,
-					},
-					source: 'env' as ConfigSource,
-				};
-			});
+		if (Array.isArray(servers) && servers.length > 0) {
+			const processedServers = substituteEnvVars(servers);
+
+			return processedServers.map((server: unknown) => ({
+				server: mapServerConfig(server),
+				source: 'env' as ConfigSource,
+			}));
 		}
 	} catch (error) {
 		logError(`Failed to parse MCP configs from environment: ${String(error)}`);

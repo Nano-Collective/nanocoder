@@ -83,6 +83,30 @@ Use dedicated AI SDK packages for native API support, enabled via the `sdkProvid
 | `anthropic` | Native Anthropic support via `@ai-sdk/anthropic`. Also used by Kimi Code and MiniMax |
 | `github-copilot` | GitHub Copilot with device OAuth authentication |
 
+## Environment Variable Overrides
+
+Override provider configurations via environment variables. These take **highest precedence**, overriding both project and global config files when the same provider name exists.
+
+| Variable | Description |
+|----------|-------------|
+| `NANOCODER_PROVIDERS` | JSON string containing provider configurations |
+| `NANOCODER_PROVIDERS_FILE` | Path to a JSON file (used if `NANOCODER_PROVIDERS` is not set) |
+
+The JSON value accepts a direct array, or the standard `agents.config.json` wrapper formats:
+
+```bash
+# Direct array
+export NANOCODER_PROVIDERS='[{"name":"my-provider","baseUrl":"http://localhost:1234/v1","models":["model-1"]}]'
+
+# Wrapper format
+export NANOCODER_PROVIDERS='{"nanocoder":{"providers":[{"name":"my-provider","baseUrl":"http://localhost:1234/v1","models":["model-1"]}]}}'
+
+# File-based
+export NANOCODER_PROVIDERS_FILE=/path/to/providers.json
+```
+
+**Precedence order:** Environment variables > Project `agents.config.json` > Global `agents.config.json`
+
 ## Environment Variable Substitution
 
 API keys and other config values support environment variable substitution:

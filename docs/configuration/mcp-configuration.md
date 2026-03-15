@@ -49,6 +49,37 @@ Use `/mcp` to view connected servers and their tools. Use `/setup-mcp` for inter
 
 Both are loaded together. When the same server name exists in both, the project-level config takes precedence.
 
+### Environment Variable Overrides
+
+You can also define MCP servers via environment variables. These take **highest precedence**, overriding both project and global configs when the same server name exists.
+
+| Variable | Description |
+|----------|-------------|
+| `NANOCODER_MCPSERVERS` | JSON string containing MCP server configurations |
+| `NANOCODER_MCPSERVERS_FILE` | Path to a JSON file (used if `NANOCODER_MCPSERVERS` is not set) |
+
+The JSON value accepts either a direct array or the standard `mcpServers` wrapper format:
+
+**Direct array format:**
+
+```bash
+export NANOCODER_MCPSERVERS='[{"name":"my-server","transport":"http","url":"https://example.com/mcp"}]'
+```
+
+**Wrapper format (same as `.mcp.json`):**
+
+```bash
+export NANOCODER_MCPSERVERS='{"mcpServers":{"my-server":{"transport":"http","url":"https://example.com/mcp"}}}'
+```
+
+**File-based:**
+
+```bash
+export NANOCODER_MCPSERVERS_FILE=/path/to/mcp-servers.json
+```
+
+**Precedence order:** Environment variables > Project `.mcp.json` > Global `.mcp.json`
+
 ## Transport Types
 
 ### stdio

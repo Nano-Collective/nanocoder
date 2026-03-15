@@ -38,6 +38,19 @@ Keep API keys out of version control using environment variables. Variables are 
 | `NANOCODER_INSTALL_METHOD` | Override installation detection (`npm`, `homebrew`, `nix`, `unknown`) |
 | `NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT` | Graceful shutdown timeout in milliseconds (default: 5000) |
 
+### Provider & MCP Overrides
+
+Override provider and MCP server configurations via environment variables. These take highest precedence over project-level and global config files.
+
+| Variable | Description |
+|----------|-------------|
+| `NANOCODER_PROVIDERS` | JSON string of provider configurations (overrides all config files) |
+| `NANOCODER_PROVIDERS_FILE` | Path to a JSON file containing provider configurations (used if `NANOCODER_PROVIDERS` is not set) |
+| `NANOCODER_MCPSERVERS` | JSON string of MCP server configurations (overrides all config files) |
+| `NANOCODER_MCPSERVERS_FILE` | Path to a JSON file containing MCP server configurations (used if `NANOCODER_MCPSERVERS` is not set) |
+
+See [Providers](providers/index.md) and [MCP Configuration](mcp-configuration.md) for format details and examples.
+
 ### Logging
 
 These are covered in detail on the [Logging](logging.md) page.
