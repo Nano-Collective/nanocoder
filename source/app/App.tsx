@@ -1,7 +1,6 @@
 import {Box, Text, useApp} from 'ink';
 import Spinner from 'ink-spinner';
 import React, {useEffect, useMemo} from 'react';
-import {shouldRenderWelcome} from '@/app';
 import {createStaticComponents} from '@/app/components/app-container';
 import {ChatHistory} from '@/app/components/chat-history';
 import {ChatInput} from '@/app/components/chat-input';
@@ -50,6 +49,7 @@ import {
 import {getShutdownManager} from '@/utils/shutdown';
 import {displayCompactCountsSummary} from '@/utils/tool-result-display';
 import {isExtensionInstalled} from '@/vscode/extension-installer';
+import {shouldRenderWelcome} from './helpers';
 
 export default function App({
 	vscodeMode = false,
