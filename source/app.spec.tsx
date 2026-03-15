@@ -1,5 +1,5 @@
 import test from 'ava';
-import {isNonInteractiveModeComplete, shouldRenderWelcome} from './app/helpers';
+import {isNonInteractiveModeComplete, shouldRenderWelcome} from './app';
 
 // Test non-interactive mode integration
 // These tests verify that the App component correctly handles non-interactive mode

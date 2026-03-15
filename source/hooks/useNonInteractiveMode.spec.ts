@@ -10,7 +10,7 @@ test('calculateEffectiveTimeout returns default when client is null', t => {
 
 test('calculateEffectiveTimeout returns default when provider config has no timeouts', t => {
 	const mockClient = {
-		getProviderConfig: () => ({}),
+		getTimeout: () => undefined,
 	} as unknown as LLMClient;
 
 	const result = calculateEffectiveTimeout(mockClient);
@@ -19,7 +19,7 @@ test('calculateEffectiveTimeout returns default when provider config has no time
 
 test('calculateEffectiveTimeout returns max safe integer when timeout is -1', t => {
 	const mockClient = {
-		getProviderConfig: () => ({socketTimeout: -1}),
+		getTimeout: () => -1,
 	} as unknown as LLMClient;
 
 	const result = calculateEffectiveTimeout(mockClient);
@@ -29,7 +29,7 @@ test('calculateEffectiveTimeout returns max safe integer when timeout is -1', t 
 test('calculateEffectiveTimeout returns buffered socketTimeout when provided', t => {
 	const socketTimeout = 400000; // > 5 mins (300000ms)
 	const mockClient = {
-		getProviderConfig: () => ({socketTimeout}),
+		getTimeout: () => socketTimeout,
 	} as unknown as LLMClient;
 
 	const result = calculateEffectiveTimeout(mockClient);
@@ -39,7 +39,7 @@ test('calculateEffectiveTimeout returns buffered socketTimeout when provided', t
 test('calculateEffectiveTimeout fallbacks to requestTimeout if socketTimeout is missing', t => {
 	const requestTimeout = 500000;
 	const mockClient = {
-		getProviderConfig: () => ({requestTimeout}),
+		getTimeout: () => requestTimeout,
 	} as unknown as LLMClient;
 
 	const result = calculateEffectiveTimeout(mockClient);
@@ -48,9 +48,8 @@ test('calculateEffectiveTimeout fallbacks to requestTimeout if socketTimeout is 
 
 test('calculateEffectiveTimeout prefers socketTimeout over requestTimeout', t => {
 	const socketTimeout = 400000;
-	const requestTimeout = 500000;
 	const mockClient = {
-		getProviderConfig: () => ({socketTimeout, requestTimeout}),
+		getTimeout: () => socketTimeout,
 	} as unknown as LLMClient;
 
 	const result = calculateEffectiveTimeout(mockClient);
@@ -60,7 +59,7 @@ test('calculateEffectiveTimeout prefers socketTimeout over requestTimeout', t =>
 test('calculateEffectiveTimeout respects TIMEOUT_EXECUTION_MAX_MS as minimum', t => {
 	const socketTimeout = 50000; // Small timeout
 	const mockClient = {
-		getProviderConfig: () => ({socketTimeout}),
+		getTimeout: () => socketTimeout,
 	} as unknown as LLMClient;
 
 	const result = calculateEffectiveTimeout(mockClient);

@@ -32,7 +32,6 @@ import type {UpdateInfo} from '@/types/utils';
 import {calculateTokenBreakdown} from '@/usage/calculator';
 import {autoCompactSessionOverrides} from '@/utils/auto-compact';
 import {getLogger} from '@/utils/logging';
-import {addToMessageQueue} from '@/utils/message-queue';
 import {processPromptTemplate} from '@/utils/prompt-processor';
 
 interface UseAppHandlersProps {
@@ -314,9 +313,9 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 							props.currentModel,
 						);
 					} catch (error) {
-						addToMessageQueue(
+						props.addToChatQueue(
 							<WarningMessage
-								key={`backup-warning-${Date.now()}`}
+								key={`backup-warning-${props.getNextComponentKey()}`}
 								message={`Warning: Failed to create backup: ${
 									error instanceof Error ? error.message : 'Unknown error'
 								}`}
@@ -332,17 +331,17 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 				await manager.restoreFiles(checkpointData);
 
-				addToMessageQueue(
+				props.addToChatQueue(
 					<SuccessMessage
-						key={`restore-success-${Date.now()}`}
+						key={`restore-success-${props.getNextComponentKey()}`}
 						message={`✓ Checkpoint '${checkpointName}' restored successfully`}
 						hideBox={true}
 					/>,
 				);
 			} catch (error) {
-				addToMessageQueue(
+				props.addToChatQueue(
 					<ErrorMessage
-						key={`restore-error-${Date.now()}`}
+						key={`restore-error-${props.getNextComponentKey()}`}
 						message={`Failed to restore checkpoint: ${
 							error instanceof Error ? error.message : 'Unknown error'
 						}`}
@@ -360,6 +359,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.currentModel,
 			props.setIsCheckpointLoadMode,
 			props.setCheckpointLoadData,
+			props.addToChatQueue,
+			props.getNextComponentKey,
 			props,
 		],
 	);

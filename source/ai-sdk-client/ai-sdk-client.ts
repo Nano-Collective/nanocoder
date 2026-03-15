@@ -169,7 +169,9 @@ export class AISDKClient implements LLMClient {
 		return Promise.resolve();
 	}
 
-	getProviderConfig(): AIProviderConfig {
-		return this.providerConfig;
+	getTimeout(): number | undefined {
+		return (
+			this.providerConfig.socketTimeout ?? this.providerConfig.requestTimeout
+		);
 	}
 }

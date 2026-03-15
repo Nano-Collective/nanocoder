@@ -22,26 +22,32 @@ export interface NonInteractiveModeResult {
 	nonInteractiveLoadingMessage: string | null;
 }
 
+// Buffer factor ensures we allow enough time for the provider response plus overhead
+// Doubling is used because provider timeouts often refer to individual request segments
+// or initial socket connection, while this execution timeout covers the entire
+// multi-step process including output flushing and initial setup.
 const TIMEOUT_BUFFER_FACTOR = 2;
 
 /**
  * Calculates the effective timeout based on provider configuration.
+ *
+ * @param client - The LLM client which may have provider-level timeouts
+ * @returns Final timeout in milliseconds
  */
 export function calculateEffectiveTimeout(client: LLMClient | null): number {
 	let effectiveTimeout = TIMEOUT_EXECUTION_MAX_MS;
 
 	if (client) {
-		const providerConfig = client.getProviderConfig();
-		const {requestTimeout, socketTimeout} = providerConfig;
-		// Prefer socketTimeout, fallback to requestTimeout
-		const configuredTimeout = socketTimeout ?? requestTimeout;
+		const configuredTimeout = client.getTimeout();
 
 		if (configuredTimeout === -1) {
 			// -1 means no timeout
 			effectiveTimeout = Number.MAX_SAFE_INTEGER;
 		} else if (configuredTimeout !== undefined) {
 			// If the provider timeout is longer than the default 5 mins,
-			// we should allow it to run for at least that long
+			// we should allow it to run for at least that long with a safety buffer.
+			// We use a buffer because the overall execution includes overhead beyond
+			// the raw provider request time.
 			effectiveTimeout = Math.max(
 				TIMEOUT_EXECUTION_MAX_MS,
 				configuredTimeout * TIMEOUT_BUFFER_FACTOR,
