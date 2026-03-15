@@ -56,8 +56,8 @@ export default function App({
 	vscodePort,
 	nonInteractivePrompt,
 	nonInteractiveMode = false,
-	nonInteractiveProvider,
-	nonInteractiveModel,
+	cliProvider,
+	cliModel,
 }: AppProps) {
 	// Memoize the logger to prevent recreation on every render
 	const logger = useMemo(() => createPinoLogger(), []);
@@ -411,8 +411,8 @@ export default function App({
 		getNextComponentKey: appState.getNextComponentKey,
 		customCommandCache: appState.customCommandCache,
 		setIsConfigWizardMode: appState.setIsConfigWizardMode,
-		cliProvider: nonInteractiveProvider,
-		cliModel: nonInteractiveModel,
+		cliProvider,
+		cliModel,
 	});
 
 	// Setup mode handlers

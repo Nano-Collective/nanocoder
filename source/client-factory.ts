@@ -90,18 +90,24 @@ async function createAISDKClient(
 				false,
 			);
 		}
+	}
 
-		// Validate model exists in provider's model list if specified
-		if (requestedModel) {
-			if (!providerConfig.models.includes(requestedModel)) {
-				const availableModels = providerConfig.models.join(', ');
-				throw new ConfigurationError(
-					`Model '${requestedModel}' not available for provider '${requestedProvider}'. Available models: ${availableModels}`,
-					configPath,
-					cwdPath,
-					false,
-				);
-			}
+	// Validate model exists in the target provider's model list if specified
+	if (requestedModel) {
+		const resolvedProviderConfig =
+			providers.find(p => p.name === targetProvider) || providers[0];
+		if (
+			resolvedProviderConfig &&
+			resolvedProviderConfig.models.length > 0 &&
+			!resolvedProviderConfig.models.includes(requestedModel)
+		) {
+			const availableModels = resolvedProviderConfig.models.join(', ');
+			throw new ConfigurationError(
+				`Model '${requestedModel}' not available for provider '${resolvedProviderConfig.name}'. Available models: ${availableModels}`,
+				configPath,
+				cwdPath,
+				false,
+			);
 		}
 	}
 

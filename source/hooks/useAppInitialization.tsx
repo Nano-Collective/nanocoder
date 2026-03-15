@@ -110,12 +110,10 @@ export function useAppInitialization({
 		setClient(client);
 		setCurrentProvider(actualProvider);
 
-		// Use CLI model if provided, otherwise try last used model
+		// Use CLI model if provided (already set by createLLMClient), otherwise try last used model
 		let finalModel: string;
 		if (preferredModel) {
-			// CLI model specified - use it directly
-			client.setModel(preferredModel);
-			finalModel = preferredModel;
+			finalModel = client.getCurrentModel();
 		} else {
 			// Try to use the last used model for this provider
 			const lastUsedModel = getLastUsedModel(actualProvider);

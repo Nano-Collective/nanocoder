@@ -1082,6 +1082,51 @@ test.serial(
 );
 
 test.serial(
+	'createLLMClient: throws ConfigurationError when model not in default provider list (no --provider)',
+	async t => {
+		globalThis.fetch = createMockFetch(true, 200);
+
+		const configDir = join(testDir, 'invalid-model-no-provider-test');
+		mkdirSync(configDir, {recursive: true});
+
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'DefaultProvider',
+							baseUrl: 'http://localhost:8000/v1',
+							models: ['model1', 'model2'],
+						},
+					],
+				},
+			},
+			configDir,
+		);
+
+		process.cwd = () => configDir;
+		reloadAppConfig();
+
+		const error = await t.throwsAsync(
+			createLLMClient(undefined, 'InvalidModel'),
+		);
+
+		t.truthy(error instanceof ConfigurationError);
+		t.true(
+			(error as ConfigurationError).message.includes(
+				"Model 'InvalidModel' not available",
+			),
+		);
+		t.true(
+			(error as ConfigurationError).message.includes('DefaultProvider'),
+		);
+		t.true(
+			(error as ConfigurationError).message.includes('model1, model2'),
+		);
+	},
+);
+
+test.serial(
 	'createLLMClient: succeeds with valid provider and model',
 	async t => {
 		globalThis.fetch = createMockFetch(true, 200);

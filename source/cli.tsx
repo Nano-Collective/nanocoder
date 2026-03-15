@@ -131,8 +131,8 @@ if (args[0] === 'copilot' && args[1] === 'login') {
 			vscodePort={vscodePort}
 			nonInteractivePrompt={nonInteractivePrompt}
 			nonInteractiveMode={nonInteractiveMode}
-			nonInteractiveProvider={cliProvider}
-			nonInteractiveModel={cliModel}
+			cliProvider={cliProvider}
+			cliModel={cliModel}
 		/>,
 	);
 }
