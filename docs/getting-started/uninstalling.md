@@ -1,3 +1,9 @@
+---
+title: "Uninstalling"
+description: "How to uninstall Nanocoder and clean up configuration files"
+sidebar_order: 3
+---
+
 # Uninstalling Nanocoder
 
 ## Finding Your Installation

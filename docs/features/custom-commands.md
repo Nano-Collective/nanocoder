@@ -1,3 +1,9 @@
+---
+title: "Custom Commands"
+description: "Define reusable AI prompts as markdown files with parameters and auto-injection"
+sidebar_order: 2
+---
+
 # Custom Commands
 
 Custom commands let you define reusable AI prompts as markdown files. Each command becomes a slash command you can invoke during a session, with support for parameters, aliases, auto-injection, and namespace organization.

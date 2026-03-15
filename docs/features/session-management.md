@@ -1,3 +1,9 @@
+---
+title: "Session Management"
+description: "Save and resume chat conversations automatically"
+sidebar_order: 7
+---
+
 # Session Management
 
 Nanocoder provides automatic session storage and management to save and restore chat conversations.

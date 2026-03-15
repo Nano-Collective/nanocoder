@@ -1,3 +1,9 @@
+---
+title: "MCP Configuration"
+description: "Configure Model Context Protocol servers to extend Nanocoder's capabilities"
+sidebar_order: 3
+---
+
 # MCP Server Configuration Guide
 
 This guide covers how to configure Model Context Protocol (MCP) servers with Nanocoder, including both local and remote server setups.

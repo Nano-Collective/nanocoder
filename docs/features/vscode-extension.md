@@ -1,3 +1,9 @@
+---
+title: "VS Code Extension"
+description: "Live diff previews and editor integration with the VS Code extension"
+sidebar_order: 8
+---
+
 # VS Code Extension
 
 Nanocoder includes a VS Code extension that integrates your editor with the CLI. Key features include:

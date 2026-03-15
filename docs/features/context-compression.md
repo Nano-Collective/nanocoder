@@ -1,3 +1,9 @@
+---
+title: "Context Compression"
+description: "Manage token usage during extended conversations with intelligent compression"
+sidebar_order: 3
+---
+
 # Context Compression
 
 Nanocoder includes a context compression system to manage token usage during extended conversations. This helps prevent hitting context limits and reduces costs when using paid APIs.

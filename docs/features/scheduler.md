@@ -1,3 +1,9 @@
+---
+title: "Scheduler"
+description: "Schedule recurring AI tasks using cron expressions"
+sidebar_order: 6
+---
+
 # Scheduled Tasks
 
 Nanocoder supports scheduling recurring AI tasks using cron expressions. This is useful for automating routine coding tasks like dependency updates, code reviews, or daily standup summaries.
