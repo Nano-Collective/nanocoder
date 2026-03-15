@@ -4,22 +4,16 @@ import CheckpointSelector from '@/components/checkpoint-selector';
 import ModelSelector from '@/components/model-selector';
 import ProviderSelector from '@/components/provider-selector';
 import SessionSelector from '@/components/session-selector';
+import type {ActiveMode} from '@/hooks/useAppState';
 import type {CheckpointListItem, LLMClient} from '@/types';
 import {McpWizard} from '@/wizards/mcp-wizard';
 import {ProviderWizard} from '@/wizards/provider-wizard';
 import {SettingsSelector} from './settings-selector';
 
 export interface ModalSelectorsProps {
-	// State flags
-	isModelSelectionMode: boolean;
-	isProviderSelectionMode: boolean;
-	isModelDatabaseMode: boolean;
-	isConfigWizardMode: boolean;
-	isMcpWizardMode: boolean;
-	isCheckpointLoadMode: boolean;
-	isSessionSelectorMode: boolean;
-	showAllSessions: boolean;
+	activeMode: ActiveMode;
 	isSettingsMode: boolean;
+	showAllSessions: boolean;
 
 	// Current values
 	client: LLMClient | null;
@@ -66,15 +60,9 @@ export interface ModalSelectorsProps {
  * Returns null if no modal is active
  */
 export function ModalSelectors({
-	isModelSelectionMode,
-	isProviderSelectionMode,
-	isModelDatabaseMode,
-	isConfigWizardMode,
-	isMcpWizardMode,
-	isCheckpointLoadMode,
-	isSessionSelectorMode,
-	showAllSessions,
+	activeMode,
 	isSettingsMode,
+	showAllSessions,
 	client,
 	currentModel,
 	currentProvider,
@@ -94,7 +82,7 @@ export function ModalSelectors({
 	onSessionCancel,
 	onSettingsCancel,
 }: ModalSelectorsProps): React.ReactElement | null {
-	if (isModelSelectionMode) {
+	if (activeMode === 'model') {
 		return (
 			<ModelSelector
 				client={client}
@@ -105,7 +93,7 @@ export function ModalSelectors({
 		);
 	}
 
-	if (isProviderSelectionMode) {
+	if (activeMode === 'provider') {
 		return (
 			<ProviderSelector
 				currentProvider={currentProvider}
@@ -119,11 +107,11 @@ export function ModalSelectors({
 		return <SettingsSelector onCancel={onSettingsCancel} />;
 	}
 
-	if (isModelDatabaseMode) {
+	if (activeMode === 'modelDatabase') {
 		return <ModelDatabaseDisplay onCancel={onModelDatabaseCancel} />;
 	}
 
-	if (isConfigWizardMode) {
+	if (activeMode === 'configWizard') {
 		return (
 			<ProviderWizard
 				projectDir={process.cwd()}
@@ -133,7 +121,7 @@ export function ModalSelectors({
 		);
 	}
 
-	if (isMcpWizardMode) {
+	if (activeMode === 'mcpWizard') {
 		return (
 			<McpWizard
 				projectDir={process.cwd()}
@@ -143,7 +131,7 @@ export function ModalSelectors({
 		);
 	}
 
-	if (isCheckpointLoadMode && checkpointLoadData) {
+	if (activeMode === 'checkpointLoad' && checkpointLoadData) {
 		return (
 			<CheckpointSelector
 				checkpoints={checkpointLoadData.checkpoints}
@@ -154,7 +142,7 @@ export function ModalSelectors({
 		);
 	}
 
-	if (isSessionSelectorMode) {
+	if (activeMode === 'sessionSelector') {
 		return (
 			<SessionSelector
 				onSelect={meta =>

@@ -59,14 +59,13 @@ interface UseAppHandlersProps {
 	) => void;
 	setIsConversationComplete: (value: boolean) => void;
 	setIsToolExecuting: (value: boolean) => void;
-	setIsCheckpointLoadMode: (value: boolean) => void;
+	setActiveMode: (mode: import('@/hooks/useAppState').ActiveMode) => void;
 	setCheckpointLoadData: (
 		value: {
 			checkpoints: CheckpointListItem[];
 			currentMessageCount: number;
 		} | null,
 	) => void;
-	setIsSessionSelectorMode: (value: boolean) => void;
 	setShowAllSessions: (value: boolean) => void;
 	setCurrentSessionId: (value: string | null) => void;
 	setCurrentProvider: (value: string) => void;
@@ -349,7 +348,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					/>,
 				);
 			} finally {
-				props.setIsCheckpointLoadMode(false);
+				props.setActiveMode(null);
 				props.setCheckpointLoadData(null);
 			}
 		},
@@ -357,7 +356,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.messages,
 			props.currentProvider,
 			props.currentModel,
-			props.setIsCheckpointLoadMode,
+			props.setActiveMode,
 			props.setCheckpointLoadData,
 			props.addToChatQueue,
 			props.getNextComponentKey,
@@ -367,26 +366,26 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 	// Checkpoint cancel handler
 	const handleCheckpointCancel = React.useCallback(() => {
-		props.setIsCheckpointLoadMode(false);
+		props.setActiveMode(null);
 		props.setCheckpointLoadData(null);
-	}, [props.setIsCheckpointLoadMode, props.setCheckpointLoadData, props]);
+	}, [props.setActiveMode, props.setCheckpointLoadData, props]);
 
 	// Enter checkpoint load mode handler
 	const enterCheckpointLoadMode = React.useCallback(
 		(checkpoints: CheckpointListItem[], currentMessageCount: number) => {
 			props.setCheckpointLoadData({checkpoints, currentMessageCount});
-			props.setIsCheckpointLoadMode(true);
+			props.setActiveMode('checkpointLoad');
 		},
-		[props.setCheckpointLoadData, props.setIsCheckpointLoadMode, props],
+		[props.setCheckpointLoadData, props.setActiveMode, props],
 	);
 
 	// Enter session selector mode (for /resume with no args)
 	const enterSessionSelectorMode = React.useCallback(
 		(showAll?: boolean) => {
 			props.setShowAllSessions(showAll ?? false);
-			props.setIsSessionSelectorMode(true);
+			props.setActiveMode('sessionSelector');
 		},
-		[props.setShowAllSessions, props.setIsSessionSelectorMode, props],
+		[props.setShowAllSessions, props.setActiveMode, props],
 	);
 
 	// Load and apply a session (messages, provider, model)
@@ -403,14 +402,14 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					hideBox={true}
 				/>,
 			);
-			props.setIsSessionSelectorMode(false);
+			props.setActiveMode(null);
 		},
 		[
 			props.updateMessages,
 			props.setCurrentProvider,
 			props.setCurrentModel,
 			props.setCurrentSessionId,
-			props.setIsSessionSelectorMode,
+			props.setActiveMode,
 			props.addToChatQueue,
 			props,
 		],
@@ -430,7 +429,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 							hideBox={true}
 						/>,
 					);
-					props.setIsSessionSelectorMode(false);
+					props.setActiveMode(null);
 				}
 			} catch (error) {
 				props.addToChatQueue(
@@ -442,15 +441,15 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 						hideBox={true}
 					/>,
 				);
-				props.setIsSessionSelectorMode(false);
+				props.setActiveMode(null);
 			}
 		},
-		[applySession, props.addToChatQueue, props.setIsSessionSelectorMode, props],
+		[applySession, props.addToChatQueue, props.setActiveMode, props],
 	);
 
 	const handleSessionCancel = React.useCallback(() => {
-		props.setIsSessionSelectorMode(false);
-	}, [props.setIsSessionSelectorMode, props]);
+		props.setActiveMode(null);
+	}, [props.setActiveMode, props]);
 
 	// Message submit handler
 	const handleMessageSubmit = React.useCallback(

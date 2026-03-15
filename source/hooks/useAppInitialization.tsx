@@ -71,7 +71,7 @@ interface UseAppInitializationProps {
 	addToChatQueue: (component: React.ReactNode) => void;
 	getNextComponentKey: () => number;
 	customCommandCache: Map<string, CustomCommand>;
-	setIsConfigWizardMode: (mode: boolean) => void;
+	setActiveMode: (mode: import('@/hooks/useAppState').ActiveMode) => void;
 	cliProvider?: string;
 	cliModel?: string;
 }
@@ -94,7 +94,7 @@ export function useAppInitialization({
 	addToChatQueue,
 	getNextComponentKey,
 	customCommandCache,
-	setIsConfigWizardMode,
+	setActiveMode,
 	cliProvider,
 	cliModel,
 }: UseAppInitializationProps) {
@@ -345,7 +345,7 @@ export function useAppInitialization({
 					);
 					// Trigger wizard mode after showing UI
 					setTimeout(() => {
-						setIsConfigWizardMode(true);
+						setActiveMode('configWizard');
 					}, 100);
 				} else {
 					// Invalid CLI provider/model - show error and don't trigger wizard

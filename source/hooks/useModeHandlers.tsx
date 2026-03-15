@@ -3,28 +3,20 @@ import {createLLMClient} from '@/client-factory';
 import {ErrorMessage, SuccessMessage} from '@/components/message-box';
 import {reloadAppConfig} from '@/config/index';
 import {loadPreferences, updateLastUsed} from '@/config/preferences';
+import type {ActiveMode} from '@/hooks/useAppState';
 import {getToolManager} from '@/message-handler';
 import {LLMClient, Message} from '@/types/core';
-import type {ThemePreset} from '@/types/ui';
 
 interface UseModeHandlersProps {
 	client: LLMClient | null;
 	currentModel: string;
 	currentProvider: string;
-	currentTheme: ThemePreset;
 	setClient: (client: LLMClient | null) => void;
 	setCurrentModel: (model: string) => void;
 	setCurrentProvider: (provider: string) => void;
-	setCurrentTheme: (theme: ThemePreset) => void;
 	setMessages: (messages: Message[]) => void;
-	setIsModelSelectionMode: (mode: boolean) => void;
-	setIsProviderSelectionMode: (mode: boolean) => void;
-	setIsModelDatabaseMode: (mode: boolean) => void;
-	setIsConfigWizardMode: (mode: boolean) => void;
+	setActiveMode: (mode: ActiveMode) => void;
 	setIsSettingsMode: (mode: boolean) => void;
-	setIsMcpWizardMode: (mode: boolean) => void;
-	setIsExplorerMode: (mode: boolean) => void;
-	setIsIdeSelectionMode: (mode: boolean) => void;
 	addToChatQueue: (component: React.ReactNode) => void;
 	getNextComponentKey: () => number;
 	reinitializeMCPServers: (
@@ -36,33 +28,19 @@ export function useModeHandlers({
 	client,
 	currentModel,
 	currentProvider,
-	currentTheme: _currentTheme,
 	setClient,
 	setCurrentModel,
 	setCurrentProvider,
-	setCurrentTheme: _setCurrentTheme,
 	setMessages,
-	setIsModelSelectionMode,
-	setIsProviderSelectionMode,
-	setIsModelDatabaseMode,
-	setIsConfigWizardMode,
+	setActiveMode,
 	setIsSettingsMode,
-	setIsMcpWizardMode,
-	setIsExplorerMode,
-	setIsIdeSelectionMode,
 	addToChatQueue,
 	getNextComponentKey,
 	reinitializeMCPServers,
 }: UseModeHandlersProps) {
-	// Helper function to enter model selection mode
-	const enterModelSelectionMode = () => {
-		setIsModelSelectionMode(true);
-	};
-
-	// Helper function to enter provider selection mode
-	const enterProviderSelectionMode = () => {
-		setIsProviderSelectionMode(true);
-	};
+	// Generic enter/exit helpers
+	const enterMode = (mode: ActiveMode) => setActiveMode(mode);
+	const exitMode = () => setActiveMode(null);
 
 	// Handle model selection
 	const handleModelSelect = async (selectedModel: string) => {
@@ -77,7 +55,6 @@ export function useModeHandlers({
 			// Update preferences
 			updateLastUsed(currentProvider, selectedModel);
 
-			// Add success message to chat queue
 			addToChatQueue(
 				<SuccessMessage
 					key={`model-changed-${getNextComponentKey()}`}
@@ -86,25 +63,17 @@ export function useModeHandlers({
 				/>,
 			);
 		}
-		setIsModelSelectionMode(false);
-	};
-
-	// Handle model selection cancel
-	const handleModelSelectionCancel = () => {
-		setIsModelSelectionMode(false);
+		exitMode();
 	};
 
 	// Handle provider selection
 	const handleProviderSelect = async (selectedProvider: string) => {
 		if (selectedProvider !== currentProvider) {
 			try {
-				// Create new client for the selected provider
 				const {client: newClient, actualProvider} =
 					await createLLMClient(selectedProvider);
 
-				// Check if we got the provider we requested
 				if (actualProvider !== selectedProvider) {
-					// Provider was forced to a different one (likely due to missing config)
 					addToChatQueue(
 						<ErrorMessage
 							key={`provider-forced-${getNextComponentKey()}`}
@@ -112,24 +81,20 @@ export function useModeHandlers({
 							hideBox={true}
 						/>,
 					);
-					return; // Don't change anything
+					return;
 				}
 
 				setClient(newClient);
 				setCurrentProvider(actualProvider);
 
-				// Set the model from the new client
 				const newModel = newClient.getCurrentModel();
 				setCurrentModel(newModel);
 
-				// Clear message history when switching providers
 				setMessages([]);
 				await newClient.clearContext();
 
-				// Update preferences - use the actualProvider (which is what was successfully created)
 				updateLastUsed(actualProvider, newModel);
 
-				// Add success message to chat queue
 				addToChatQueue(
 					<SuccessMessage
 						key={`provider-changed-${getNextComponentKey()}`}
@@ -138,44 +103,21 @@ export function useModeHandlers({
 					/>,
 				);
 			} catch (error) {
-				// Add error message if provider change fails
 				addToChatQueue(
 					<ErrorMessage
 						key={`provider-error-${getNextComponentKey()}`}
-						message={`Failed to change provider to ${selectedProvider}: ${String(
-							error,
-						)}`}
+						message={`Failed to change provider to ${selectedProvider}: ${String(error)}`}
 						hideBox={true}
 					/>,
 				);
 			}
 		}
-		setIsProviderSelectionMode(false);
+		exitMode();
 	};
 
-	// Handle provider selection cancel
-	const handleProviderSelectionCancel = () => {
-		setIsProviderSelectionMode(false);
-	};
-
-	// Helper function to enter model database mode
-	const enterModelDatabaseMode = () => {
-		setIsModelDatabaseMode(true);
-	};
-
-	// Handle model database cancel
-	const handleModelDatabaseCancel = () => {
-		setIsModelDatabaseMode(false);
-	};
-
-	// Helper function to enter config wizard mode
-	const enterConfigWizardMode = () => {
-		setIsConfigWizardMode(true);
-	};
-
-	// Handle config wizard cancel/complete
+	// Handle config wizard complete - reinitializes client and MCP servers
 	const handleConfigWizardComplete = async (configPath?: string) => {
-		setIsConfigWizardMode(false);
+		exitMode();
 		if (configPath) {
 			addToChatQueue(
 				<SuccessMessage
@@ -185,10 +127,8 @@ export function useModeHandlers({
 				/>,
 			);
 
-			// Reload the app configuration to pick up the newly saved config
 			reloadAppConfig();
 
-			// Reinitialize client with new configuration
 			try {
 				const preferences = loadPreferences();
 				const {client: newClient, actualProvider} = await createLLMClient(
@@ -200,11 +140,9 @@ export function useModeHandlers({
 				const newModel = newClient.getCurrentModel();
 				setCurrentModel(newModel);
 
-				// Clear message history when switching providers
 				setMessages([]);
 				await newClient.clearContext();
 
-				// Reinitialize MCP servers with the new configuration
 				const toolManager = getToolManager();
 				if (toolManager) {
 					try {
@@ -220,9 +158,7 @@ export function useModeHandlers({
 						addToChatQueue(
 							<ErrorMessage
 								key={`mcp-reinit-error-${getNextComponentKey()}`}
-								message={`Failed to reinitialize MCP servers: ${String(
-									mcpError,
-								)}`}
+								message={`Failed to reinitialize MCP servers: ${String(mcpError)}`}
 								hideBox={true}
 							/>,
 						);
@@ -240,9 +176,7 @@ export function useModeHandlers({
 				addToChatQueue(
 					<ErrorMessage
 						key={`config-init-error-${getNextComponentKey()}`}
-						message={`Failed to initialize with new configuration: ${String(
-							error,
-						)}`}
+						message={`Failed to initialize with new configuration: ${String(error)}`}
 						hideBox={true}
 					/>,
 				);
@@ -250,18 +184,9 @@ export function useModeHandlers({
 		}
 	};
 
-	const handleConfigWizardCancel = () => {
-		setIsConfigWizardMode(false);
-	};
-
-	// Helper function to enter MCP wizard mode
-	const enterMcpWizardMode = () => {
-		setIsMcpWizardMode(true);
-	};
-
-	// Handle MCP wizard cancel/complete
+	// Handle MCP wizard complete - reinitializes MCP servers
 	const handleMcpWizardComplete = async (configPath?: string) => {
-		setIsMcpWizardMode(false);
+		exitMode();
 		if (configPath) {
 			addToChatQueue(
 				<SuccessMessage
@@ -271,10 +196,8 @@ export function useModeHandlers({
 				/>,
 			);
 
-			// Reload the app configuration to pick up the newly saved config
 			reloadAppConfig();
 
-			// Reinitialize MCP servers with the new configuration
 			const toolManager = getToolManager();
 			if (toolManager) {
 				try {
@@ -290,9 +213,7 @@ export function useModeHandlers({
 					addToChatQueue(
 						<ErrorMessage
 							key={`mcp-reinit-error-${getNextComponentKey()}`}
-							message={`Failed to reinitialize MCP servers: ${String(
-								mcpError,
-							)}`}
+							message={`Failed to reinitialize MCP servers: ${String(mcpError)}`}
 							hideBox={true}
 						/>,
 					);
@@ -301,60 +222,30 @@ export function useModeHandlers({
 		}
 	};
 
-	const handleMcpWizardCancel = () => {
-		setIsMcpWizardMode(false);
-	};
-
-	// Helper function to enter settings mode
-	const enterSettingsMode = () => {
-		setIsSettingsMode(true);
-	};
-
-	// Handle settings cancel
-	const handleSettingsCancel = () => {
-		setIsSettingsMode(false);
-	};
-
-	// Helper function to enter explorer mode
-	const enterExplorerMode = () => {
-		setIsExplorerMode(true);
-	};
-
-	// Handle explorer cancel
-	const handleExplorerCancel = () => {
-		setIsExplorerMode(false);
-	};
-
-	// Helper function to enter IDE selection mode
-	const enterIdeSelectionMode = () => {
-		setIsIdeSelectionMode(true);
-	};
-
-	// Handle IDE selection cancel
-	const handleIdeSelectionCancel = () => {
-		setIsIdeSelectionMode(false);
-	};
-
 	return {
-		enterModelSelectionMode,
-		enterProviderSelectionMode,
-		enterModelDatabaseMode,
-		enterConfigWizardMode,
-		enterSettingsMode,
-		enterMcpWizardMode,
+		enterMode,
+		exitMode,
+		// Convenience enter helpers
+		enterModelSelectionMode: () => enterMode('model'),
+		enterProviderSelectionMode: () => enterMode('provider'),
+		enterModelDatabaseMode: () => enterMode('modelDatabase'),
+		enterConfigWizardMode: () => enterMode('configWizard'),
+		enterMcpWizardMode: () => enterMode('mcpWizard'),
+		enterExplorerMode: () => enterMode('explorer'),
+		enterIdeSelectionMode: () => enterMode('ideSelection'),
+		enterSettingsMode: () => setIsSettingsMode(true),
+		// Cancel/complete handlers
 		handleModelSelect,
-		handleModelSelectionCancel,
+		handleModelSelectionCancel: exitMode,
 		handleProviderSelect,
-		handleProviderSelectionCancel,
-		handleModelDatabaseCancel,
+		handleProviderSelectionCancel: exitMode,
+		handleModelDatabaseCancel: exitMode,
 		handleConfigWizardComplete,
-		handleConfigWizardCancel,
+		handleConfigWizardCancel: exitMode,
 		handleMcpWizardComplete,
-		handleMcpWizardCancel,
-		handleSettingsCancel,
-		enterExplorerMode,
-		handleExplorerCancel,
-		enterIdeSelectionMode,
-		handleIdeSelectionCancel,
+		handleMcpWizardCancel: exitMode,
+		handleSettingsCancel: () => setIsSettingsMode(false),
+		handleExplorerCancel: exitMode,
+		handleIdeSelectionCancel: exitMode,
 	};
 }

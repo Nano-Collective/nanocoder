@@ -1,27 +1,9 @@
+import type {MCPServerConfig} from '@/types/config';
+
 export type MCPTransportType = 'stdio' | 'websocket' | 'http';
 
-export interface MCPServer {
-	name: string;
-	transport: MCPTransportType;
-
-	// STDIO-specific fields
-	command?: string;
-	args?: string[];
-	env?: Record<string, string>;
-
-	// Remote transport-specific fields
-	url?: string;
-	headers?: Record<string, string>;
-	timeout?: number;
-
-	// Tools that can be executed without asking for approval
-	alwaysAllow?: string[];
-
-	// Common fields
-	description?: string;
-	tags?: string[];
-	enabled?: boolean;
-}
+// MCPServer is MCPServerConfig without the source tracking field
+export type MCPServer = Omit<MCPServerConfig, 'source'>;
 
 export interface MCPTool {
 	name: string;

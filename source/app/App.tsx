@@ -359,8 +359,8 @@ export default function App({
 			appState.client &&
 			!appState.isToolExecuting &&
 			!appState.isToolConfirmationMode &&
-			!appState.isConfigWizardMode &&
-			!appState.isMcpWizardMode &&
+			appState.activeMode !== 'configWizard' &&
+			appState.activeMode !== 'mcpWizard' &&
 			appState.pendingToolCalls.length === 0
 		) {
 			const correlationId = generateCorrelationId();
@@ -383,8 +383,7 @@ export default function App({
 		appState.client,
 		appState.isToolExecuting,
 		appState.isToolConfirmationMode,
-		appState.isConfigWizardMode,
-		appState.isMcpWizardMode,
+		appState.activeMode,
 		appState.pendingToolCalls.length,
 		logger,
 		appState.developmentMode,
@@ -410,7 +409,7 @@ export default function App({
 		addToChatQueue: appState.addToChatQueue,
 		getNextComponentKey: appState.getNextComponentKey,
 		customCommandCache: appState.customCommandCache,
-		setIsConfigWizardMode: appState.setIsConfigWizardMode,
+		setActiveMode: appState.setActiveMode,
 		cliProvider,
 		cliModel,
 	});
@@ -420,39 +419,30 @@ export default function App({
 		client: appState.client,
 		currentModel: appState.currentModel,
 		currentProvider: appState.currentProvider,
-		currentTheme: appState.currentTheme,
 		setClient: appState.setClient,
 		setCurrentModel: appState.setCurrentModel,
 		setCurrentProvider: appState.setCurrentProvider,
-		setCurrentTheme: appState.setCurrentTheme,
 		setMessages: appState.updateMessages,
-		setIsModelSelectionMode: appState.setIsModelSelectionMode,
-		setIsProviderSelectionMode: appState.setIsProviderSelectionMode,
-		setIsModelDatabaseMode: appState.setIsModelDatabaseMode,
-		setIsConfigWizardMode: appState.setIsConfigWizardMode,
+		setActiveMode: appState.setActiveMode,
 		setIsSettingsMode: appState.setIsSettingsMode,
-		setIsMcpWizardMode: appState.setIsMcpWizardMode,
-		setIsExplorerMode: appState.setIsExplorerMode,
-		setIsIdeSelectionMode: appState.setIsIdeSelectionMode,
 		addToChatQueue: appState.addToChatQueue,
 		getNextComponentKey: appState.getNextComponentKey,
 		reinitializeMCPServers: appInitialization.reinitializeMCPServers,
 	});
 
-	// Scheduler mode enter handler
+	// Scheduler mode enter/exit handlers
 	const enterSchedulerMode = React.useCallback(() => {
-		appState.setIsSchedulerMode(true);
-	}, [appState.setIsSchedulerMode, appState]);
+		appState.setActiveMode('scheduler');
+	}, [appState.setActiveMode, appState]);
 
-	// Scheduler mode exit handler
 	const exitSchedulerMode = React.useCallback(() => {
-		appState.setIsSchedulerMode(false);
-	}, [appState.setIsSchedulerMode, appState]);
+		appState.setActiveMode(null);
+	}, [appState.setActiveMode, appState]);
 
 	// IDE selection handler
 	const handleIdeSelect = React.useCallback(
 		(ide: string) => {
-			appState.setIsIdeSelectionMode(false);
+			appState.setActiveMode(null);
 			if (ide === 'vscode') {
 				appState.setIsVscodeEnabled(true);
 
@@ -520,9 +510,8 @@ export default function App({
 		setDevelopmentMode: appState.setDevelopmentMode,
 		setIsConversationComplete: appState.setIsConversationComplete,
 		setIsToolExecuting: appState.setIsToolExecuting,
-		setIsCheckpointLoadMode: appState.setIsCheckpointLoadMode,
+		setActiveMode: appState.setActiveMode,
 		setCheckpointLoadData: appState.setCheckpointLoadData,
-		setIsSessionSelectorMode: appState.setIsSessionSelectorMode,
 		setShowAllSessions: appState.setShowAllSessions,
 		setCurrentSessionId: appState.setCurrentSessionId,
 		setCurrentProvider: appState.setCurrentProvider,
@@ -739,24 +728,15 @@ export default function App({
 						)}
 
 						{/* Modal Selectors - rendered below chat history */}
-						{(appState.isModelSelectionMode ||
-							appState.isProviderSelectionMode ||
-							appState.isModelDatabaseMode ||
-							appState.isConfigWizardMode ||
-							appState.isMcpWizardMode ||
-							appState.isSettingsMode ||
-							appState.isCheckpointLoadMode ||
-							appState.isSessionSelectorMode) && (
+						{(appState.activeMode !== null &&
+							appState.activeMode !== 'explorer' &&
+							appState.activeMode !== 'ideSelection' &&
+							appState.activeMode !== 'scheduler') ||
+						appState.isSettingsMode ? (
 							<Box marginLeft={-1} flexDirection="column">
 								<ModalSelectors
-									isModelSelectionMode={appState.isModelSelectionMode}
-									isProviderSelectionMode={appState.isProviderSelectionMode}
-									isModelDatabaseMode={appState.isModelDatabaseMode}
-									isConfigWizardMode={appState.isConfigWizardMode}
-									isMcpWizardMode={appState.isMcpWizardMode}
+									activeMode={appState.activeMode}
 									isSettingsMode={appState.isSettingsMode}
-									isCheckpointLoadMode={appState.isCheckpointLoadMode}
-									isSessionSelectorMode={appState.isSessionSelectorMode}
 									showAllSessions={appState.showAllSessions}
 									client={appState.client}
 									currentModel={appState.currentModel}
@@ -786,7 +766,7 @@ export default function App({
 									onSessionCancel={appHandlers.handleSessionCancel}
 								/>
 							</Box>
-						)}
+						) : null}
 
 						{/* Scheduler View - replaces ChatInput in scheduler mode */}
 						{appState.isSchedulerMode && (
@@ -803,19 +783,8 @@ export default function App({
 
 						{/* Chat Input - only rendered when not in modal mode or scheduler mode */}
 						{appState.startChat &&
-							!appState.isSchedulerMode &&
-							!(
-								appState.isModelSelectionMode ||
-								appState.isProviderSelectionMode ||
-								appState.isModelDatabaseMode ||
-								appState.isConfigWizardMode ||
-								appState.isSettingsMode ||
-								appState.isMcpWizardMode ||
-								appState.isCheckpointLoadMode ||
-								appState.isSessionSelectorMode ||
-								appState.isExplorerMode ||
-								appState.isIdeSelectionMode
-							) && (
+							appState.activeMode === null &&
+							!appState.isSettingsMode && (
 								<ChatInput
 									isCancelling={appState.isCancelling}
 									isToolExecuting={appState.isToolExecuting}

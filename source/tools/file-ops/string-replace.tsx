@@ -4,21 +4,20 @@ import {resolve} from 'node:path';
 import {highlight} from 'cli-highlight';
 import {Box, Text} from 'ink';
 import React from 'react';
-import stripAnsi from 'strip-ansi';
 
 import ToolMessage from '@/components/tool-message';
 import {getColors} from '@/config/index';
-import {isNanocoderToolAlwaysAllowed} from '@/config/nanocoder-tools-config';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
-import {getCurrentMode} from '@/context/mode-context';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import type {Colors} from '@/types/index';
+import {truncateAnsi} from '@/utils/ansi-truncate';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
 import {areLinesSimlar, computeInlineDiff} from '@/utils/inline-diff';
-import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
+import {validatePath} from '@/utils/path-validators';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
+import {createFileToolApproval} from '@/utils/tool-approval';
 import {
 	closeDiffInVSCode,
 	isVSCodeConnected,
@@ -136,16 +135,7 @@ const stringReplaceCoreTool = tool({
 		},
 		required: ['path', 'old_str', 'new_str'],
 	}),
-	// Medium risk: file write operation, requires approval except in auto-accept mode or if configured in nanocoderTools.alwaysAllow
-	needsApproval: () => {
-		// Check if this tool is configured to always be allowed
-		if (isNanocoderToolAlwaysAllowed('string_replace')) {
-			return false;
-		}
-
-		const mode = getCurrentMode();
-		return mode !== 'auto-accept' && mode !== 'scheduler';
-	},
+	needsApproval: createFileToolApproval('string_replace'),
 	execute: async (args, _options) => {
 		return await executeStringReplace(args);
 	},
@@ -161,41 +151,6 @@ const StringReplaceFormatter = React.memo(
 const truncateLine = (line: string, maxWidth: number): string => {
 	if (line.length <= maxWidth) return line;
 	return line.slice(0, maxWidth - 1) + '…';
-};
-
-// Truncate a string with ANSI codes to fit terminal width (visual chars)
-const truncateAnsi = (str: string, maxWidth: number): string => {
-	const plainText = stripAnsi(str);
-	if (plainText.length <= maxWidth) return str;
-
-	let visibleCount = 0;
-	const ansiRegex = /\x1b\[[0-9;]*m/g;
-	let result = '';
-	let lastIndex = 0;
-
-	let match: RegExpExecArray | null;
-	while ((match = ansiRegex.exec(str)) !== null) {
-		const textBefore = str.slice(lastIndex, match.index);
-		for (const char of textBefore) {
-			if (visibleCount >= maxWidth - 1) break;
-			result += char;
-			visibleCount++;
-		}
-		if (visibleCount >= maxWidth - 1) break;
-		result += match[0];
-		lastIndex = match.index + match[0].length;
-	}
-
-	if (visibleCount < maxWidth - 1) {
-		const remaining = str.slice(lastIndex);
-		for (const char of remaining) {
-			if (visibleCount >= maxWidth - 1) break;
-			result += char;
-			visibleCount++;
-		}
-	}
-
-	return result + '\x1b[0m…';
 };
 
 async function formatStringReplacePreview(
@@ -672,26 +627,8 @@ const stringReplaceValidator = async (
 ): Promise<{valid: true} | {valid: false; error: string}> => {
 	const {path, old_str} = args;
 
-	// Validate path boundary first to prevent directory traversal
-	if (!isValidFilePath(path)) {
-		return {
-			valid: false,
-			error: `⚒ Invalid file path. Path must be relative and within the project directory.`,
-		};
-	}
-
-	// Verify the resolved path stays within project boundaries
-	try {
-		const cwd = process.cwd();
-		resolveFilePath(path, cwd);
-	} catch (error) {
-		const errorMessage =
-			error instanceof Error ? error.message : 'Unknown error';
-		return {
-			valid: false,
-			error: `⚒ Path validation failed: ${errorMessage}`,
-		};
-	}
+	const pathResult = validatePath(path);
+	if (!pathResult.valid) return pathResult;
 
 	// Check if file exists
 	const absPath = resolve(path);

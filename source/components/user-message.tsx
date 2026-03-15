@@ -1,9 +1,9 @@
 import {Box, Text} from 'ink';
 import {memo} from 'react';
-import wrapAnsi from 'wrap-ansi';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {UserMessageProps} from '@/types/index';
+import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 import {calculateTokens} from '@/utils/token-calculator';
 
 // Strip VS Code context blocks from display (code is still sent to LLM)
@@ -12,34 +12,6 @@ function stripVSCodeContext(message: string): string {
 		/<!--vscode-context-->[\s\S]*?<!--\/vscode-context-->/g,
 		'',
 	);
-}
-
-// Pre-wrap text to avoid Ink's trim:false leaving leading spaces on wrapped lines.
-// Wraps each original line individually and trims only the artifact spaces
-// from continuation lines, preserving intentional indentation.
-function wrapWithTrimmedContinuations(text: string, width: number): string {
-	if (width <= 0) return text;
-	const originalLines = text.split('\n');
-	const result: string[] = [];
-
-	for (const line of originalLines) {
-		if (line === '') {
-			result.push('');
-			continue;
-		}
-		const wrapped = wrapAnsi(line, width, {trim: false, hard: true});
-		const subLines = wrapped.split('\n');
-
-		result.push(subLines[0] ?? '');
-
-		for (let i = 1; i < subLines.length; i++) {
-			result.push(
-				(subLines[i] ?? '').replace(/^((?:\x1b\[[0-9;]*m)*)\s/, '$1'),
-			);
-		}
-	}
-
-	return result.join('\n');
 }
 
 // Parse a line and return segments with file placeholders highlighted

@@ -8,7 +8,7 @@ import ToolMessage from '@/components/tool-message';
 import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
-import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
+import {validatePath} from '@/utils/path-validators';
 
 interface CreateDirectoryArgs {
 	path: string;
@@ -89,26 +89,7 @@ const createDirectoryFormatter = (
 const createDirectoryValidator = async (
 	args: CreateDirectoryArgs,
 ): Promise<{valid: true} | {valid: false; error: string}> => {
-	if (!isValidFilePath(args.path)) {
-		return {
-			valid: false,
-			error: `⚒ Invalid path. Path must be relative and within the project directory.`,
-		};
-	}
-
-	try {
-		const cwd = process.cwd();
-		resolveFilePath(args.path, cwd);
-	} catch (error) {
-		const errorMessage =
-			error instanceof Error ? error.message : 'Unknown error';
-		return {
-			valid: false,
-			error: `⚒ Path validation failed: ${errorMessage}`,
-		};
-	}
-
-	return {valid: true};
+	return validatePath(args.path);
 };
 
 export const createDirectoryTool: NanocoderToolExport = {

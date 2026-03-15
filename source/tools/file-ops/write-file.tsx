@@ -4,20 +4,19 @@ import {dirname, resolve} from 'node:path';
 import {highlight} from 'cli-highlight';
 import {Box, Text} from 'ink';
 import React from 'react';
-import stripAnsi from 'strip-ansi';
 
 import ToolMessage from '@/components/tool-message';
-import {isNanocoderToolAlwaysAllowed} from '@/config/nanocoder-tools-config';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
-import {getCurrentMode} from '@/context/mode-context';
 import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {truncateAnsi} from '@/utils/ansi-truncate';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
-import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
+import {validatePath} from '@/utils/path-validators';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
 import {calculateTokens} from '@/utils/token-calculator';
+import {createFileToolApproval} from '@/utils/tool-approval';
 import {ensureString} from '@/utils/type-helpers';
 import {
 	closeDiffInVSCode,
@@ -79,16 +78,7 @@ const writeFileCoreTool = tool({
 		},
 		required: ['path', 'content'],
 	}),
-	// Medium risk: file write operation, requires approval except in auto-accept mode or if configured in nanocoderTools.alwaysAllow
-	needsApproval: () => {
-		// Check if this tool is configured to always be allowed
-		if (isNanocoderToolAlwaysAllowed('write_file')) {
-			return false;
-		}
-
-		const mode = getCurrentMode();
-		return mode !== 'auto-accept' && mode !== 'scheduler';
-	},
+	needsApproval: createFileToolApproval('write_file'),
 	execute: async (args, _options) => {
 		return await executeWriteFile(args);
 	},
@@ -99,41 +89,6 @@ interface WriteFileArgs {
 	file_path?: string;
 	content?: string;
 }
-
-// Truncate a string with ANSI codes to fit terminal width (visual chars)
-const truncateAnsi = (str: string, maxWidth: number): string => {
-	const plainText = stripAnsi(str);
-	if (plainText.length <= maxWidth) return str;
-
-	let visibleCount = 0;
-	const ansiRegex = /\x1b\[[0-9;]*m/g;
-	let result = '';
-	let lastIndex = 0;
-
-	let match: RegExpExecArray | null;
-	while ((match = ansiRegex.exec(str)) !== null) {
-		const textBefore = str.slice(lastIndex, match.index);
-		for (const char of textBefore) {
-			if (visibleCount >= maxWidth - 1) break;
-			result += char;
-			visibleCount++;
-		}
-		if (visibleCount >= maxWidth - 1) break;
-		result += match[0];
-		lastIndex = match.index + match[0].length;
-	}
-
-	if (visibleCount < maxWidth - 1) {
-		const remaining = str.slice(lastIndex);
-		for (const char of remaining) {
-			if (visibleCount >= maxWidth - 1) break;
-			result += char;
-			visibleCount++;
-		}
-	}
-
-	return result + '\x1b[0m…';
-};
 
 // Create a component that will re-render when theme changes
 const WriteFileFormatter = React.memo(({args}: {args: WriteFileArgs}) => {
@@ -270,26 +225,8 @@ const writeFileValidator = async (args: {
 	path: string;
 	content: unknown;
 }): Promise<{valid: true} | {valid: false; error: string}> => {
-	// Validate path boundary first to prevent directory traversal
-	if (!isValidFilePath(args.path)) {
-		return {
-			valid: false,
-			error: `⚒ Invalid file path: "${args.path}". Path must be relative and within the project directory.`,
-		};
-	}
-
-	// Verify the resolved path stays within project boundaries
-	try {
-		const cwd = process.cwd();
-		resolveFilePath(args.path, cwd);
-	} catch (error) {
-		const errorMessage =
-			error instanceof Error ? error.message : 'Unknown error';
-		return {
-			valid: false,
-			error: `⚒ Path validation failed: ${errorMessage}`,
-		};
-	}
+	const pathResult = validatePath(args.path);
+	if (!pathResult.valid) return pathResult;
 
 	const absPath = resolve(args.path);
 

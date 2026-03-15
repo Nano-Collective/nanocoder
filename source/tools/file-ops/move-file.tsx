@@ -5,13 +5,12 @@ import {Box, Text} from 'ink';
 import React from 'react';
 
 import ToolMessage from '@/components/tool-message';
-import {isNanocoderToolAlwaysAllowed} from '@/config/nanocoder-tools-config';
-import {getCurrentMode} from '@/context/mode-context';
 import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {invalidateCache} from '@/utils/file-cache';
-import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
+import {validatePathPair} from '@/utils/path-validators';
+import {createFileToolApproval} from '@/utils/tool-approval';
 
 interface MoveFileArgs {
 	source: string;
@@ -45,13 +44,7 @@ const moveFileCoreTool = tool({
 		},
 		required: ['source', 'destination'],
 	}),
-	needsApproval: () => {
-		if (isNanocoderToolAlwaysAllowed('move_file')) {
-			return false;
-		}
-		const mode = getCurrentMode();
-		return mode !== 'auto-accept' && mode !== 'scheduler';
-	},
+	needsApproval: createFileToolApproval('move_file'),
 	execute: async (args, _options) => {
 		return await executeMoveFile(args);
 	},
@@ -102,34 +95,8 @@ const moveFileFormatter = (
 const moveFileValidator = async (
 	args: MoveFileArgs,
 ): Promise<{valid: true} | {valid: false; error: string}> => {
-	// Validate source path
-	if (!isValidFilePath(args.source)) {
-		return {
-			valid: false,
-			error: `⚒ Invalid source path. Path must be relative and within the project directory.`,
-		};
-	}
-
-	// Validate destination path
-	if (!isValidFilePath(args.destination)) {
-		return {
-			valid: false,
-			error: `⚒ Invalid destination path. Path must be relative and within the project directory.`,
-		};
-	}
-
-	try {
-		const cwd = process.cwd();
-		resolveFilePath(args.source, cwd);
-		resolveFilePath(args.destination, cwd);
-	} catch (error) {
-		const errorMessage =
-			error instanceof Error ? error.message : 'Unknown error';
-		return {
-			valid: false,
-			error: `⚒ Path validation failed: ${errorMessage}`,
-		};
-	}
+	const pathResult = validatePathPair(args.source, args.destination);
+	if (!pathResult.valid) return pathResult;
 
 	// Check source exists
 	const srcAbsPath = resolve(args.source);

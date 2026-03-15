@@ -22,6 +22,19 @@ import type {ThemePreset} from '@/types/ui';
 import {BoundedMap} from '@/utils/bounded-map';
 import type {PendingQuestion} from '@/utils/question-queue';
 
+export type ActiveMode =
+	| 'model'
+	| 'provider'
+	| 'modelDatabase'
+	| 'configWizard'
+	| 'mcpWizard'
+	| 'explorer'
+	| 'ideSelection'
+	| 'scheduler'
+	| 'checkpointLoad'
+	| 'sessionSelector'
+	| null;
+
 export interface ConversationContext {
 	/**
 	 * All messages up to (but not including) tool execution.
@@ -96,27 +109,13 @@ export function useAppState() {
 	const [abortController, setAbortController] =
 		useState<AbortController | null>(null);
 
-	// Mode states
-	const [isModelSelectionMode, setIsModelSelectionMode] =
-		useState<boolean>(false);
-	const [isProviderSelectionMode, setIsProviderSelectionMode] =
-		useState<boolean>(false);
-	const [isModelDatabaseMode, setIsModelDatabaseMode] =
-		useState<boolean>(false);
-	const [isConfigWizardMode, setIsConfigWizardMode] = useState<boolean>(false);
-	const [isMcpWizardMode, setIsMcpWizardMode] = useState<boolean>(false);
-	const [isCheckpointLoadMode, setIsCheckpointLoadMode] =
-		useState<boolean>(false);
-	const [isExplorerMode, setIsExplorerMode] = useState<boolean>(false);
-	const [isIdeSelectionMode, setIsIdeSelectionMode] = useState<boolean>(false);
+	// Unified modal/mode state - replaces 11 individual boolean states
+	const [activeMode, setActiveMode] = useState<ActiveMode>(null);
 	const [isVscodeEnabled, setIsVscodeEnabled] = useState<boolean>(false);
-	const [isSchedulerMode, setIsSchedulerMode] = useState<boolean>(false);
 	const [checkpointLoadData, setCheckpointLoadData] = useState<{
 		checkpoints: CheckpointListItem[];
 		currentMessageCount: number;
 	} | null>(null);
-	const [isSessionSelectorMode, setIsSessionSelectorMode] =
-		useState<boolean>(false);
 	const [showAllSessions, setShowAllSessions] = useState<boolean>(false);
 	const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
 	const [isToolConfirmationMode, setIsToolConfirmationMode] =
@@ -287,18 +286,25 @@ export function useAppState() {
 		isConversationComplete,
 		isSettingsMode,
 		abortController,
-		isModelSelectionMode,
-		isProviderSelectionMode,
-		isModelDatabaseMode,
-		isConfigWizardMode,
-		isMcpWizardMode,
-		isCheckpointLoadMode,
-		isExplorerMode,
-		isIdeSelectionMode,
+
+		// Unified mode state
+		activeMode,
+		setActiveMode,
+
+		// Derived mode booleans (read-only convenience)
+		isModelSelectionMode: activeMode === 'model',
+		isProviderSelectionMode: activeMode === 'provider',
+		isModelDatabaseMode: activeMode === 'modelDatabase',
+		isConfigWizardMode: activeMode === 'configWizard',
+		isMcpWizardMode: activeMode === 'mcpWizard',
+		isCheckpointLoadMode: activeMode === 'checkpointLoad',
+		isExplorerMode: activeMode === 'explorer',
+		isIdeSelectionMode: activeMode === 'ideSelection',
+		isSchedulerMode: activeMode === 'scheduler',
+		isSessionSelectorMode: activeMode === 'sessionSelector',
+
 		isVscodeEnabled,
-		isSchedulerMode,
 		checkpointLoadData,
-		isSessionSelectorMode,
 		showAllSessions,
 		currentSessionId,
 		isToolConfirmationMode,
@@ -344,18 +350,8 @@ export function useAppState() {
 		setIsConversationComplete,
 		setIsSettingsMode,
 		setAbortController,
-		setIsModelSelectionMode,
-		setIsProviderSelectionMode,
-		setIsModelDatabaseMode,
-		setIsConfigWizardMode,
-		setIsMcpWizardMode,
-		setIsCheckpointLoadMode,
-		setIsExplorerMode,
-		setIsIdeSelectionMode,
 		setIsVscodeEnabled,
-		setIsSchedulerMode,
 		setCheckpointLoadData,
-		setIsSessionSelectorMode,
 		setShowAllSessions,
 		setCurrentSessionId,
 		setIsToolConfirmationMode,

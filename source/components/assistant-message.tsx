@@ -1,42 +1,11 @@
 import {Box, Text} from 'ink';
 import {memo, useMemo} from 'react';
-import wrapAnsi from 'wrap-ansi';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {parseMarkdown} from '@/markdown-parser/index';
 import type {AssistantMessageProps} from '@/types/index';
+import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 import {calculateTokens} from '@/utils/token-calculator';
-
-// Ink uses wrap-ansi with trim: false, which preserves the space at word
-// boundaries as leading whitespace on continuation lines. This function
-// wraps each original line individually and trims only the artifact spaces
-// from continuation lines, preserving intentional indentation.
-function wrapWithTrimmedContinuations(text: string, width: number): string {
-	if (width <= 0) return text;
-	const originalLines = text.split('\n');
-	const result: string[] = [];
-
-	for (const line of originalLines) {
-		if (line === '') {
-			result.push('');
-			continue;
-		}
-		const wrapped = wrapAnsi(line, width, {trim: false, hard: true});
-		const subLines = wrapped.split('\n');
-
-		result.push(subLines[0] ?? '');
-
-		for (let i = 1; i < subLines.length; i++) {
-			// Trim the leading space that is a word-wrap artifact.
-			// Handle ANSI escape codes that may precede the space.
-			result.push(
-				(subLines[i] ?? '').replace(/^((?:\x1b\[[0-9;]*m)*)\s/, '$1'),
-			);
-		}
-	}
-
-	return result.join('\n');
-}
 
 export default memo(function AssistantMessage({
 	message,

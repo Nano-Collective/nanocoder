@@ -5,13 +5,12 @@ import {Box, Text} from 'ink';
 import React from 'react';
 
 import ToolMessage from '@/components/tool-message';
-import {isNanocoderToolAlwaysAllowed} from '@/config/nanocoder-tools-config';
-import {getCurrentMode} from '@/context/mode-context';
 import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {invalidateCache} from '@/utils/file-cache';
-import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
+import {validatePath} from '@/utils/path-validators';
+import {createFileToolApproval} from '@/utils/tool-approval';
 
 interface DeleteFileArgs {
 	path: string;
@@ -44,12 +43,7 @@ const deleteFileCoreTool = tool({
 		},
 		required: ['path'],
 	}),
-	// High risk: destructive operation, requires approval in most modes
-	needsApproval: () => {
-		if (isNanocoderToolAlwaysAllowed('delete_file')) return false;
-		const mode = getCurrentMode();
-		return mode !== 'auto-accept' && mode !== 'scheduler';
-	},
+	needsApproval: createFileToolApproval('delete_file'),
 	execute: async (args, _options) => {
 		return await executeDeleteFile(args);
 	},
@@ -95,24 +89,8 @@ const deleteFileFormatter = (
 const deleteFileValidator = async (
 	args: DeleteFileArgs,
 ): Promise<{valid: true} | {valid: false; error: string}> => {
-	if (!isValidFilePath(args.path)) {
-		return {
-			valid: false,
-			error: `⚒ Invalid file path. Path must be relative and within the project directory.`,
-		};
-	}
-
-	try {
-		const cwd = process.cwd();
-		resolveFilePath(args.path, cwd);
-	} catch (error) {
-		const errorMessage =
-			error instanceof Error ? error.message : 'Unknown error';
-		return {
-			valid: false,
-			error: `⚒ Path validation failed: ${errorMessage}`,
-		};
-	}
+	const pathResult = validatePath(args.path);
+	if (!pathResult.valid) return pathResult;
 
 	const absPath = resolve(args.path);
 

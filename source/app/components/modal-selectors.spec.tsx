@@ -9,15 +9,9 @@ function createDefaultProps(
 	overrides: Partial<ModalSelectorsProps> = {},
 ): ModalSelectorsProps {
 	return {
-		isModelSelectionMode: false,
-		isProviderSelectionMode: false,
-		isModelDatabaseMode: false,
-		isConfigWizardMode: false,
-		isMcpWizardMode: false,
-		isCheckpointLoadMode: false,
-		isSessionSelectorMode: false,
-		showAllSessions: false,
+		activeMode: null,
 		isSettingsMode: false,
+		showAllSessions: false,
 		client: null,
 		currentModel: 'test-model',
 		currentProvider: 'test-provider',
@@ -46,10 +40,10 @@ test('ModalSelectors returns null when no mode is active', t => {
 	t.is(result, null);
 });
 
-test('ModalSelectors renders ModelSelector when isModelSelectionMode is true', t => {
+test('ModalSelectors renders ModelSelector when activeMode is model', t => {
 	const props = createDefaultProps({
-		isModelSelectionMode: true,
-		client: {}, // Mock client
+		activeMode: 'model',
+		client: {},
 	});
 	const component = ModalSelectors(props);
 	t.truthy(component);
@@ -60,8 +54,8 @@ test('ModalSelectors renders ModelSelector when isModelSelectionMode is true', t
 	unmount();
 });
 
-test('ModalSelectors renders ProviderSelector when isProviderSelectionMode is true', t => {
-	const props = createDefaultProps({isProviderSelectionMode: true});
+test('ModalSelectors renders ProviderSelector when activeMode is provider', t => {
+	const props = createDefaultProps({activeMode: 'provider'});
 	const component = ModalSelectors(props);
 	t.truthy(component);
 
@@ -71,8 +65,8 @@ test('ModalSelectors renders ProviderSelector when isProviderSelectionMode is tr
 	unmount();
 });
 
-test('ModalSelectors renders ModelDatabaseDisplay when isModelDatabaseMode is true', t => {
-	const props = createDefaultProps({isModelDatabaseMode: true});
+test('ModalSelectors renders ModelDatabaseDisplay when activeMode is modelDatabase', t => {
+	const props = createDefaultProps({activeMode: 'modelDatabase'});
 	const component = ModalSelectors(props);
 	t.truthy(component);
 
@@ -82,8 +76,8 @@ test('ModalSelectors renders ModelDatabaseDisplay when isModelDatabaseMode is tr
 	unmount();
 });
 
-test('ModalSelectors renders ConfigWizard when isConfigWizardMode is true', t => {
-	const props = createDefaultProps({isConfigWizardMode: true});
+test('ModalSelectors renders ConfigWizard when activeMode is configWizard', t => {
+	const props = createDefaultProps({activeMode: 'configWizard'});
 	const component = ModalSelectors(props);
 	t.truthy(component);
 
@@ -93,8 +87,8 @@ test('ModalSelectors renders ConfigWizard when isConfigWizardMode is true', t =>
 	unmount();
 });
 
-test('ModalSelectors renders McpWizard when isMcpWizardMode is true', t => {
-	const props = createDefaultProps({isMcpWizardMode: true});
+test('ModalSelectors renders McpWizard when activeMode is mcpWizard', t => {
+	const props = createDefaultProps({activeMode: 'mcpWizard'});
 	const component = ModalSelectors(props);
 	t.truthy(component);
 
@@ -115,9 +109,9 @@ test('ModalSelectors renders SettingsSelector when isSettingsMode is true', t =>
 	unmount();
 });
 
-test('ModalSelectors renders CheckpointSelector when isCheckpointLoadMode is true and data exists', t => {
+test('ModalSelectors renders CheckpointSelector when activeMode is checkpointLoad and data exists', t => {
 	const props = createDefaultProps({
-		isCheckpointLoadMode: true,
+		activeMode: 'checkpointLoad',
 		checkpointLoadData: {
 			checkpoints: [],
 			currentMessageCount: 0,
@@ -132,22 +126,17 @@ test('ModalSelectors renders CheckpointSelector when isCheckpointLoadMode is tru
 	unmount();
 });
 
-test('ModalSelectors returns null when isCheckpointLoadMode is true but data is null', t => {
+test('ModalSelectors returns null when activeMode is checkpointLoad but data is null', t => {
 	const props = createDefaultProps({
-		isCheckpointLoadMode: true,
+		activeMode: 'checkpointLoad',
 		checkpointLoadData: null,
 	});
 	const result = ModalSelectors(props);
 	t.is(result, null);
 });
 
-test('ModalSelectors prioritizes first active mode when multiple are true', t => {
-	const props = createDefaultProps({
-		isModelSelectionMode: true,
-		isProviderSelectionMode: true,
-		isModelDatabaseMode: true,
-		client: {}, // Mock client for ModelSelector
-	});
+test('ModalSelectors renders SessionSelector when activeMode is sessionSelector', t => {
+	const props = createDefaultProps({activeMode: 'sessionSelector'});
 	const component = ModalSelectors(props);
 	t.truthy(component);
 

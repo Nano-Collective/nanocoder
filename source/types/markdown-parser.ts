@@ -1,11 +1,14 @@
-// Color scheme for terminal output
-export interface Colors {
-	primary: string;
-	secondary: string;
-	success: string;
-	error: string;
-	warning: string;
-	info: string;
-	text: string;
-	tool: string;
-}
+import type {Colors as FullColors} from '@/types/ui';
+
+// Subset of Colors used by the markdown parser
+export type Colors = Pick<
+	FullColors,
+	| 'primary'
+	| 'secondary'
+	| 'success'
+	| 'error'
+	| 'warning'
+	| 'info'
+	| 'text'
+	| 'tool'
+>;
