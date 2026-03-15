@@ -322,7 +322,6 @@ export function buildConfigObject(
 			env: server.env,
 			url: server.url,
 			headers: server.headers,
-			auth: server.auth,
 			timeout: server.timeout,
 			alwaysAllow: server.alwaysAllow,
 			description: server.description,
