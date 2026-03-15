@@ -1,11 +1,11 @@
 import {Box, Text, useApp} from 'ink';
 import Spinner from 'ink-spinner';
 import React, {useEffect, useMemo} from 'react';
+import {shouldRenderWelcome} from '@/app';
 import {createStaticComponents} from '@/app/components/app-container';
 import {ChatHistory} from '@/app/components/chat-history';
 import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
-import {shouldRenderWelcome} from '@/app/helpers';
 import type {AppProps} from '@/app/types';
 import {FileExplorer} from '@/components/file-explorer';
 import {IdeSelector} from '@/components/ide-selector';
