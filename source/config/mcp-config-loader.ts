@@ -318,7 +318,7 @@ export function loadAllMCPConfigs(): MCPServerWithSource[] {
 /**
  * Load MCP configuration from environment variables (highest precedence)
  */
-export function loadEnvMCPConfigs(): MCPServerWithSource[] {
+function loadEnvMCPConfigs(): MCPServerWithSource[] {
 	let rawData = process.env.NANOCODER_MCPSERVERS;
 
 	if (!rawData && process.env.NANOCODER_MCPSERVERS_FILE) {
