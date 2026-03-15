@@ -555,3 +555,334 @@ test('loadProjectMCPConfig - handles .mcp.json with empty mcpServers object', t 
 	// Should return empty array, not crash
 	t.is(result.length, 0);
 });
+
+// ============================================================================
+// Environment Variable Configuration Tests (Issue #307)
+// ============================================================================
+
+test('loadEnvMCPConfigs - loads from NANOCODER_MCPSERVERS environment variable', t => {
+	const originalValue = process.env.NANOCODER_MCPSERVERS;
+	
+	try {
+		const config = [
+			{
+				name: 'env-server',
+				transport: 'stdio',
+				command: 'npx',
+				args: ['env-server']
+			}
+		];
+		process.env.NANOCODER_MCPSERVERS = JSON.stringify(config);
+		
+		// Access through loadAllMCPConfigs which internally calls loadEnvMCPConfigs
+		const allConfigs = loadAllMCPConfigs();
+		
+		// Should find the env server
+		const envServer = allConfigs.find(c => c.server.name === 'env-server');
+		t.truthy(envServer);
+		t.is(envServer?.source, 'env');
+	} finally {
+		if (originalValue !== undefined) {
+			process.env.NANOCODER_MCPSERVERS = originalValue;
+		} else {
+			delete process.env.NANOCODER_MCPSERVERS;
+		}
+	}
+});
+
+test('loadEnvMCPConfigs - loads from NANOCODER_MCPSERVERS_FILE', t => {
+	const testDir = t.context.testDir as string;
+	const originalValue = process.env.NANOCODER_MCPSERVERS;
+	const originalFileValue = process.env.NANOCODER_MCPSERVERS_FILE;
+	
+	try {
+		const config = [
+			{
+				name: 'file-server',
+				transport: 'http',
+				url: 'http://localhost:8080'
+			}
+		];
+		
+		const filePath = join(testDir, 'mcp-servers.json');
+		writeFileSync(filePath, JSON.stringify(config));
+		
+		process.env.NANOCODER_MCPSERVERS_FILE = filePath;
+		delete process.env.NANOCODER_MCPSERVERS; // Ensure direct var doesn't interfere
+		
+		const allConfigs = loadAllMCPConfigs();
+		
+		const fileServer = allConfigs.find(c => c.server.name === 'file-server');
+		t.truthy(fileServer);
+		t.is(fileServer?.source, 'env');
+	} finally {
+		if (originalValue !== undefined) {
+			process.env.NANOCODER_MCPSERVERS = originalValue;
+		} else {
+			delete process.env.NANOCODER_MCPSERVERS;
+		}
+		if (originalFileValue !== undefined) {
+			process.env.NANOCODER_MCPSERVERS_FILE = originalFileValue;
+		} else {
+			delete process.env.NANOCODER_MCPSERVERS_FILE;
+		}
+	}
+});
+
+test('loadEnvMCPConfigs - handles invalid JSON gracefully', t => {
+	const originalValue = process.env.NANOCODER_MCPSERVERS;
+	
+	try {
+		process.env.NANOCODER_MCPSERVERS = 'invalid json {';
+		
+		// Should not crash, should return empty array
+		const allConfigs = loadAllMCPConfigs();
+		const envServers = allConfigs.filter(c => c.source === 'env');
+		t.is(envServers.length, 0);
+	} finally {
+		if (originalValue !== undefined) {
+			process.env.NANOCODER_MCPSERVERS = originalValue;
+		} else {
+			delete process.env.NANOCODER_MCPSERVERS;
+		}
+	}
+});
+
+test('loadEnvMCPConfigs - returns empty array when no env vars set', t => {
+	const originalValue = process.env.NANOCODER_MCPSERVERS;
+	const originalFileValue = process.env.NANOCODER_MCPSERVERS_FILE;
+	
+	try {
+		delete process.env.NANOCODER_MCPSERVERS;
+		delete process.env.NANOCODER_MCPSERVERS_FILE;
+		
+		const allConfigs = loadAllMCPConfigs();
+		const envServers = allConfigs.filter(c => c.source === 'env');
+		t.is(envServers.length, 0);
+	} finally {
+		if (originalValue !== undefined) {
+			process.env.NANOCODER_MCPSERVERS = originalValue;
+		}
+		if (originalFileValue !== undefined) {
+			process.env.NANOCODER_MCPSERVERS_FILE = originalFileValue;
+		}
+	}
+});
+
+test('loadEnvProviderConfigs - loads from NANOCODER_PROVIDERS environment variable', t => {
+	const originalValue = process.env.NANOCODER_PROVIDERS;
+	
+	try {
+		const providers = [
+			{
+				name: 'env-provider',
+				baseUrl: 'http://localhost:1234',
+				apiKey: 'env-key',
+				models: ['test-model']
+			}
+		];
+		process.env.NANOCODER_PROVIDERS = JSON.stringify(providers);
+		
+		const allProviders = loadAllProviderConfigs();
+		
+		const envProvider = allProviders.find(p => p.name === 'env-provider');
+		t.truthy(envProvider);
+		t.is(envProvider?.baseUrl, 'http://localhost:1234');
+	} finally {
+		if (originalValue !== undefined) {
+			process.env.NANOCODER_PROVIDERS = originalValue;
+		} else {
+			delete process.env.NANOCODER_PROVIDERS;
+		}
+	}
+});
+
+test('loadEnvProviderConfigs - supports nanocoder wrapper format', t => {
+	const originalValue = process.env.NANOCODER_PROVIDERS;
+	
+	try {
+		const config = {
+			nanocoder: {
+				providers: [
+					{
+						name: 'wrapped-provider',
+						baseUrl: 'http://localhost:5678',
+						models: ['model-1']
+					}
+				]
+			}
+		};
+		process.env.NANOCODER_PROVIDERS = JSON.stringify(config);
+		
+		const allProviders = loadAllProviderConfigs();
+		
+		const wrappedProvider = allProviders.find(p => p.name === 'wrapped-provider');
+		t.truthy(wrappedProvider);
+		t.is(wrappedProvider?.baseUrl, 'http://localhost:5678');
+	} finally {
+		if (originalValue !== undefined) {
+			process.env.NANOCODER_PROVIDERS = originalValue;
+		} else {
+			delete process.env.NANOCODER_PROVIDERS;
+		}
+	}
+});
+
+test('loadEnvProviderConfigs - supports direct providers format', t => {
+	const originalValue = process.env.NANOCODER_PROVIDERS;
+	
+	try {
+		const config = {
+			providers: [
+				{
+					name: 'direct-provider',
+					baseUrl: 'http://localhost:9012',
+					models: ['model-2']
+				}
+			]
+		};
+		process.env.NANOCODER_PROVIDERS = JSON.stringify(config);
+		
+		const allProviders = loadAllProviderConfigs();
+		
+		const directProvider = allProviders.find(p => p.name === 'direct-provider');
+		t.truthy(directProvider);
+		t.is(directProvider?.baseUrl, 'http://localhost:9012');
+	} finally {
+		if (originalValue !== undefined) {
+			process.env.NANOCODER_PROVIDERS = originalValue;
+		} else {
+			delete process.env.NANOCODER_PROVIDERS;
+		}
+	}
+});
+
+test('hierarchical precedence - env overrides project and global', t => {
+	const testDir = t.context.testDir as string;
+	const originalMcpServers = process.env.NANOCODER_MCPSERVERS;
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	
+	try {
+		// Set up project config
+		const projectConfig = {
+			mcpServers: [
+				{
+					name: 'override-test',
+					transport: 'stdio',
+					command: 'project-command'
+				}
+			]
+		};
+		writeFileSync(join(testDir, '.mcp.json'), JSON.stringify(projectConfig));
+		
+		// Set up global config
+		process.env.NANOCODER_CONFIG_DIR = testDir;
+		const globalConfig = {
+			nanocoder: {
+				mcpServers: [
+					{
+						name: 'override-test',
+						transport: 'stdio',
+						command: 'global-command'
+					}
+				]
+			}
+		};
+		writeFileSync(join(testDir, 'agents.config.json'), JSON.stringify(globalConfig));
+		
+		// Set up env config (should override both)
+		const envConfig = [
+			{
+				name: 'override-test',
+				transport: 'http',
+				url: 'http://env-url'
+			}
+		];
+		process.env.NANOCODER_MCPSERVERS = JSON.stringify(envConfig);
+		
+		const allConfigs = loadAllMCPConfigs();
+		
+		// Should have only one server with the env config
+		const matchingServers = allConfigs.filter(c => c.server.name === 'override-test');
+		t.is(matchingServers.length, 1);
+		t.is(matchingServers[0].server.transport, 'http');
+		t.is(matchingServers[0].server.url, 'http://env-url');
+		t.is(matchingServers[0].source, 'env');
+	} finally {
+		if (originalMcpServers !== undefined) {
+			process.env.NANOCODER_MCPSERVERS = originalMcpServers;
+		} else {
+			delete process.env.NANOCODER_MCPSERVERS;
+		}
+		if (originalConfigDir !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+});
+
+test('hierarchical precedence - NANOCODER_PROVIDERS overrides all', t => {
+	const testDir = t.context.testDir as string;
+	const originalProviders = process.env.NANOCODER_PROVIDERS;
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	
+	try {
+		// Set up project config
+		const projectConfig = {
+			providers: [
+				{
+					name: 'provider-override-test',
+					baseUrl: 'http://project-url',
+					models: ['project-model']
+				}
+			]
+		};
+		writeFileSync(join(testDir, 'agents.config.json'), JSON.stringify(projectConfig));
+		
+		// Set up global config
+		process.env.NANOCODER_CONFIG_DIR = testDir;
+		const globalConfig = {
+			nanocoder: {
+				providers: [
+					{
+						name: 'provider-override-test',
+						baseUrl: 'http://global-url',
+						models: ['global-model']
+					}
+				]
+			}
+		};
+		writeFileSync(join(testDir, 'agents.config.json'), JSON.stringify(globalConfig));
+		
+		// Set up env config (should override both)
+		const envConfig = [
+			{
+				name: 'provider-override-test',
+				baseUrl: 'http://env-url',
+				apiKey: 'env-key',
+				models: ['env-model']
+			}
+		];
+		process.env.NANOCODER_PROVIDERS = JSON.stringify(envConfig);
+		
+		const allProviders = loadAllProviderConfigs();
+		
+		// Should have only one provider with the env config
+		const matchingProviders = allProviders.filter(p => p.name === 'provider-override-test');
+		t.is(matchingProviders.length, 1);
+		t.is(matchingProviders[0].baseUrl, 'http://env-url');
+		t.is(matchingProviders[0].apiKey, 'env-key');
+	} finally {
+		if (originalProviders !== undefined) {
+			process.env.NANOCODER_PROVIDERS = originalProviders;
+		} else {
+			delete process.env.NANOCODER_PROVIDERS;
+		}
+		if (originalConfigDir !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+});
