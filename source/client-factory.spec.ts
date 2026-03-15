@@ -998,3 +998,120 @@ test.serial(
 		t.truthy(result.actualProvider); // Actual provider name may vary based on default config
 	},
 );
+
+test.serial(
+	'createLLMClient: throws ConfigurationError when provider not found',
+	async t => {
+		globalThis.fetch = createMockFetch(true, 200);
+
+		const configDir = join(testDir, 'invalid-provider-test');
+		mkdirSync(configDir, {recursive: true});
+
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'ValidProvider',
+							baseUrl: 'http://localhost:8000/v1',
+							models: ['model1', 'model2'],
+						},
+					],
+				},
+			},
+			configDir,
+		);
+
+		process.cwd = () => configDir;
+		reloadAppConfig();
+
+		const error = await t.throwsAsync(createLLMClient('InvalidProvider'));
+
+		t.truthy(error instanceof ConfigurationError);
+		t.true(
+			(error as ConfigurationError).message.includes(
+				"Provider 'InvalidProvider' not found",
+			),
+		);
+		t.true(
+			(error as ConfigurationError).message.includes('ValidProvider'),
+		);
+	},
+);
+
+test.serial(
+	'createLLMClient: throws ConfigurationError when model not in provider list',
+	async t => {
+		globalThis.fetch = createMockFetch(true, 200);
+
+		const configDir = join(testDir, 'invalid-model-test');
+		mkdirSync(configDir, {recursive: true});
+
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'TestProvider',
+							baseUrl: 'http://localhost:8000/v1',
+							models: ['model1', 'model2'],
+						},
+					],
+				},
+			},
+			configDir,
+		);
+
+		process.cwd = () => configDir;
+		reloadAppConfig();
+
+		const error = await t.throwsAsync(
+			createLLMClient('TestProvider', 'InvalidModel'),
+		);
+
+		t.truthy(error instanceof ConfigurationError);
+		t.true(
+			(error as ConfigurationError).message.includes(
+				"Model 'InvalidModel' not available",
+			),
+		);
+		t.true(
+			(error as ConfigurationError).message.includes('model1, model2'),
+		);
+	},
+);
+
+test.serial(
+	'createLLMClient: succeeds with valid provider and model',
+	async t => {
+		globalThis.fetch = createMockFetch(true, 200);
+
+		const configDir = join(testDir, 'valid-provider-model-test');
+		mkdirSync(configDir, {recursive: true});
+
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'TestProvider',
+							baseUrl: 'http://localhost:8000/v1',
+							models: ['model1', 'model2'],
+						},
+					],
+				},
+			},
+			configDir,
+		);
+
+		process.cwd = () => configDir;
+		reloadAppConfig();
+
+		const result = await createLLMClient('TestProvider', 'model1');
+
+		t.truthy(result);
+		t.truthy(result.client);
+		t.is(result.actualProvider, 'TestProvider');
+		t.is(result.client.getCurrentModel(), 'model1');
+	},
+);

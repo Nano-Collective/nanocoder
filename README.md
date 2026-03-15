@@ -25,6 +25,21 @@ nanocoder
 
 Also available via [Homebrew](docs/getting-started/installation.md#homebrew-macoslinux) and [Nix Flakes](docs/getting-started/installation.md#nix-flakes).
 
+### CLI Flags
+
+Specify provider and model directly:
+
+```bash
+# Non-interactive mode with specific provider/model
+nanocoder --provider openrouter --model google/gemini-3.1-flash run "analyze src/app.ts"
+
+# Interactive mode starting with specific provider
+nanocoder --provider ollama --model llama3.1
+
+# Flags can appear before or after 'run' command
+nanocoder run --provider openrouter "refactor database module"
+```
+
 ## Documentation
 
 Full documentation is available in the [docs/](docs/) folder:
