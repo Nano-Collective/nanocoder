@@ -359,7 +359,6 @@ test('CustomCommandLoader - directory-as-command loads resources', t => {
 		join(mySkillDir, 'my-skill.md'),
 		`---
 description: Skill with resources
-resources: true
 ---
 Do stuff.`,
 		'utf-8',

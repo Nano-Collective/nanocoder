@@ -757,36 +757,6 @@ Content`;
 	t.is(result.metadata.estimatedTokens, 2500);
 });
 
-test('parseEnhancedFrontmatter parses resources boolean', t => {
-	const filePath = join(testDir, 'resources-bool.md');
-	const content = `---
-description: Command with resources
-resources: true
----
-Content`;
-
-	writeFileSync(filePath, content, 'utf-8');
-
-	const result = parseCommandFile(filePath);
-
-	t.is(result.metadata.resources, true);
-});
-
-test('parseEnhancedFrontmatter parses resources false', t => {
-	const filePath = join(testDir, 'resources-false.md');
-	const content = `---
-description: Command without resources
-resources: false
----
-Content`;
-
-	writeFileSync(filePath, content, 'utf-8');
-
-	const result = parseCommandFile(filePath);
-
-	t.is(result.metadata.resources, false);
-});
-
 test('parseEnhancedFrontmatter parses category', t => {
 	const filePath = join(testDir, 'category.md');
 	const content = `---
@@ -868,7 +838,6 @@ parameters: [format]
 tags: [api, openapi, rest]
 triggers: [api docs, openapi]
 estimated-tokens: 2500
-resources: true
 category: code-generation
 version: 1.0.0
 author: Nanocoder Team
@@ -890,7 +859,6 @@ Generate an OpenAPI spec in {{format}} format.`;
 	t.deepEqual(result.metadata.tags, ['api', 'openapi', 'rest']);
 	t.deepEqual(result.metadata.triggers, ['api docs', 'openapi']);
 	t.is(result.metadata.estimatedTokens, 2500);
-	t.is(result.metadata.resources, true);
 	t.is(result.metadata.category, 'code-generation');
 	t.is(result.metadata.version, '1.0.0');
 	t.is(result.metadata.author, 'Nanocoder Team');
