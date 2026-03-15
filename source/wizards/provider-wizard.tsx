@@ -12,7 +12,7 @@ import SelectInput from 'ink-select-input';
 import Spinner from 'ink-spinner';
 import {useEffect, useState} from 'react';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
-import {colors} from '@/config/index';
+import {getColors} from '@/config/index';
 import {getConfigPath} from '@/config/paths';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {logError, logInfo} from '@/utils/message-queue';
@@ -41,6 +41,7 @@ export function ProviderWizard({
 	onComplete,
 	onCancel,
 }: ProviderWizardProps) {
+	const colors = getColors();
 	const [step, setStep] = useState<WizardStep>('location');
 	const [providerConfigPath, setProviderConfigPath] = useState('');
 	const [providers, setProviders] = useState<ProviderConfig[]>([]);

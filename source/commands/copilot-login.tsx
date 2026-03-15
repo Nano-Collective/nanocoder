@@ -2,7 +2,7 @@ import {Box, Text, useInput} from 'ink';
 import Spinner from 'ink-spinner';
 import {useEffect, useState} from 'react';
 import {runCopilotLoginFlow} from '@/auth/github-copilot';
-import {colors} from '@/config/index';
+import {getColors} from '@/config/index';
 
 const DEFAULT_PROVIDER_NAME = 'GitHub Copilot';
 
@@ -20,6 +20,7 @@ export function CopilotLogin({
 	providerName?: string;
 	onDone?: (result: CopilotLoginResult) => void;
 }) {
+	const colors = getColors();
 	const [status, setStatus] = useState<Status>('starting');
 	const [verificationUri, setVerificationUri] = useState('');
 	const [userCode, setUserCode] = useState('');

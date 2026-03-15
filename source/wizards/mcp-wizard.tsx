@@ -12,7 +12,7 @@ import SelectInput from 'ink-select-input';
 import Spinner from 'ink-spinner';
 import {useEffect, useState} from 'react';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
-import {colors} from '@/config/index';
+import {getColors} from '@/config/index';
 import {getConfigPath} from '@/config/paths';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {logError, logInfo} from '@/utils/message-queue';
@@ -37,6 +37,7 @@ type WizardStep =
 	| 'complete';
 
 export function McpWizard({projectDir, onComplete, onCancel}: McpWizardProps) {
+	const colors = getColors();
 	const [step, setStep] = useState<WizardStep>('location');
 	const [mcpConfigPath, setMcpConfigPath] = useState('');
 	const [mcpServers, setMcpServers] = useState<Record<string, McpServerConfig>>(

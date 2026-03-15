@@ -1,5 +1,4 @@
-import React from 'react';
-import type {Command} from '@/types/commands';
+import {createStubCommand} from '@/commands/create-stub-command';
 
 /**
  * The /compact command compresses message history to reduce context usage.
@@ -7,10 +6,6 @@ import type {Command} from '@/types/commands';
  * Note: The actual command logic is handled in app-util.ts handleCompactCommand()
  * because it requires access to app state (messages, setMessages, provider, model)
  * that isn't available through the standard command handler interface.
- *
- * This command definition exists to:
- * 1. Register the command in the command registry for /help and autocomplete
- * 2. Provide the command description to users
  *
  * Available flags:
  * --aggressive    - Aggressive compression mode (removes more content)
@@ -22,12 +17,7 @@ import type {Command} from '@/types/commands';
  * --auto-off      - Disable auto-compact for this session
  * --threshold <n> - Set auto-compact threshold (50-95%) for this session
  */
-export const compactCommand: Command = {
-	name: 'compact',
-	description:
-		'Compress message history to reduce context usage (use --aggressive, --conservative, --preview, --restore, --auto-on, --auto-off, --threshold <n>)',
-	handler: async (_args: string[], _messages, _metadata) => {
-		// Handler returns empty fragment - actual logic in app-util.ts handleCompactCommand()
-		return Promise.resolve(React.createElement(React.Fragment));
-	},
-};
+export const compactCommand = createStubCommand(
+	'compact',
+	'Compress message history to reduce context usage (use --aggressive, --conservative, --preview, --restore, --auto-on, --auto-off, --threshold <n>)',
+);

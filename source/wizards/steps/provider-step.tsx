@@ -3,7 +3,7 @@ import SelectInput from 'ink-select-input';
 import Spinner from 'ink-spinner';
 import {useEffect, useRef, useState} from 'react';
 import TextInput from '@/components/text-input';
-import {colors} from '@/config/index';
+import {getColors} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import type {ProviderConfig} from '../../types/config';
 import {
@@ -72,6 +72,7 @@ export function ProviderStep({
 	existingProviders = [],
 	configExists = false,
 }: ProviderStepProps) {
+	const colors = getColors();
 	const {isNarrow} = useResponsiveTerminal();
 	const [providers, setProviders] =
 		useState<ProviderConfig[]>(existingProviders);

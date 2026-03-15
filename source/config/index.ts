@@ -303,13 +303,6 @@ export function getAppConfig(): AppConfig {
 	return _appConfig;
 }
 
-// Legacy export for backward compatibility - use a getter
-export const appConfig = new Proxy({} as AppConfig, {
-	get(_target, prop) {
-		return getAppConfig()[prop as keyof AppConfig];
-	},
-});
-
 // Function to reload the app configuration (useful after config file changes)
 export function reloadAppConfig(): void {
 	_appConfig = loadAppConfig();
@@ -330,13 +323,6 @@ export function getColors(): Colors {
 	}
 	return cachedColors;
 }
-
-// Legacy export for backwards compatibility - use a getter to avoid circular dependency
-export const colors = new Proxy({} as Colors, {
-	get(_target, prop) {
-		return getColors()[prop as keyof Colors];
-	},
-});
 
 // Get the package root directory (where this module is installed)
 const __filename = fileURLToPath(import.meta.url);

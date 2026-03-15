@@ -31,7 +31,7 @@ import {
 	usageCommand,
 } from '@/commands/index';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
-import {appConfig, reloadAppConfig} from '@/config/index';
+import {getAppConfig, reloadAppConfig} from '@/config/index';
 import {
 	getLastUsedModel,
 	loadPreferences,
@@ -160,12 +160,13 @@ export function useAppInitialization({
 
 	// Initialize MCP servers if configured
 	const initializeMCPServers = async (toolManager: ToolManager) => {
-		if (appConfig.mcpServers && appConfig.mcpServers.length > 0) {
+		const config = getAppConfig();
+		if (config.mcpServers && config.mcpServers.length > 0) {
 			// Validate security for project-level configurations
-			validateProjectConfigSecurity(appConfig.mcpServers);
+			validateProjectConfigSecurity(config.mcpServers);
 
 			// Initialize status array
-			const mcpStatus: MCPConnectionStatus[] = appConfig.mcpServers.map(
+			const mcpStatus: MCPConnectionStatus[] = config.mcpServers.map(
 				server => ({
 					name: server.name,
 					status: 'pending' as const,
@@ -196,7 +197,7 @@ export function useAppInitialization({
 			};
 
 			try {
-				await toolManager.initializeMCP(appConfig.mcpServers, onProgress);
+				await toolManager.initializeMCP(config.mcpServers, onProgress);
 			} catch (error) {
 				// Mark all pending servers as failed
 				mcpStatus.forEach((status, index) => {
@@ -221,11 +222,12 @@ export function useAppInitialization({
 
 	// Initialize LSP servers with auto-discovery
 	const initializeLSPServers = async () => {
+		const lspConfig = getAppConfig();
 		const lspManager = await getLSPManager({
 			rootUri: `file://${process.cwd()}`,
 			autoDiscover: true,
 			// Use custom servers from config if provided
-			servers: appConfig.lspServers?.map(server => ({
+			servers: lspConfig.lspServers?.map(server => ({
 				name: server.name,
 				command: server.command,
 				args: server.args,
@@ -238,8 +240,8 @@ export function useAppInitialization({
 		const lspStatus: LSPConnectionStatus[] = [];
 
 		// Add configured servers to status
-		if (appConfig.lspServers) {
-			for (const server of appConfig.lspServers) {
+		if (lspConfig.lspServers) {
+			for (const server of lspConfig.lspServers) {
 				lspStatus.push({
 					name: server.name,
 					status: 'pending',
@@ -282,7 +284,7 @@ export function useAppInitialization({
 		try {
 			await lspManager.initialize({
 				autoDiscover: true,
-				servers: appConfig.lspServers?.map(server => ({
+				servers: lspConfig.lspServers?.map(server => ({
 					name: server.name,
 					command: server.command,
 					args: server.args,

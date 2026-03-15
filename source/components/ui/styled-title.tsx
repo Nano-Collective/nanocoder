@@ -260,14 +260,14 @@ export function StyledTitle({
 			<Box width={width} {...boxProps}>
 				<Box>
 					{icon && <Text>{icon} </Text>}
-					<Text color={effectiveTextColor} bold>
+					<Text color={borderColor} bold>
 						{arrowShapes.left}
 					</Text>
 					<Text backgroundColor={borderColor} color={effectiveTextColor} bold>
 						{' '}
 						{title}{' '}
 					</Text>
-					<Text color={effectiveTextColor} bold>
+					<Text color={borderColor} bold>
 						{arrowShapes.right}
 					</Text>
 				</Box>
@@ -304,14 +304,14 @@ export function StyledTitle({
 		<Box width={width} {...boxProps}>
 			<Box>
 				{icon && <Text>{icon} </Text>}
-				<Text color={effectiveTextColor} bold>
+				<Text color={borderColor} bold>
 					{boxShapes.topLeft}
 				</Text>
 				<Text backgroundColor={borderColor} color={effectiveTextColor} bold>
 					{' '}
 					{title}{' '}
 				</Text>
-				<Text color={effectiveTextColor} bold>
+				<Text color={borderColor} bold>
 					{boxShapes.topRight}
 				</Text>
 			</Box>

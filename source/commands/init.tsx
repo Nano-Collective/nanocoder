@@ -4,7 +4,7 @@ import {join} from 'path';
 import React from 'react';
 import {ErrorMessage} from '@/components/message-box';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
-import {colors} from '@/config/index';
+import {getColors} from '@/config/index';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {AgentsTemplateGenerator} from '@/init/agents-template-generator';
 import {ExistingRulesExtractor} from '@/init/existing-rules-extractor';
@@ -23,6 +23,7 @@ function InitSuccess({
 		totalFiles: number;
 	};
 }) {
+	const colors = getColors();
 	const boxWidth = useTerminalWidth();
 	return (
 		<TitledBoxWithPreferences

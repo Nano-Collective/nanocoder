@@ -3,7 +3,7 @@ import type {ConversationStateManager} from '@/app/utils/conversation-state';
 import AssistantMessage from '@/components/assistant-message';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import UserMessage from '@/components/user-message';
-import {appConfig, getAppConfig} from '@/config/index';
+import {getAppConfig} from '@/config/index';
 import {parseToolCalls} from '@/tool-calling/index';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
@@ -131,7 +131,7 @@ export const processAssistantResponse = async (
 	const modeOverrides: ModeOverrides | undefined = nonInteractiveMode
 		? {
 				nonInteractiveMode: true,
-				nonInteractiveAlwaysAllow: appConfig.alwaysAllow ?? [],
+				nonInteractiveAlwaysAllow: getAppConfig().alwaysAllow ?? [],
 			}
 		: undefined;
 

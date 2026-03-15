@@ -3,7 +3,7 @@ import {join} from 'node:path';
 import {Box, Text, useInput} from 'ink';
 import SelectInput from 'ink-select-input';
 import {useState} from 'react';
-import {colors} from '@/config';
+import {getColors} from '@/config';
 import {getConfigPath} from '@/config/paths';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 
@@ -27,6 +27,7 @@ export function LocationStep({
 	projectDir,
 	configFileName = 'agents.config.json',
 }: LocationStepProps) {
+	const colors = getColors();
 	const {isNarrow, truncatePath} = useResponsiveTerminal();
 	const projectPath = join(projectDir, configFileName);
 	const globalPath = join(getConfigPath(), configFileName);

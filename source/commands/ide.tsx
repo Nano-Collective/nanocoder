@@ -1,11 +1,3 @@
-import React from 'react';
-import type {Command} from '@/types/index';
+import {createStubCommand} from '@/commands/create-stub-command';
 
-export const ideCommand: Command = {
-	name: 'ide',
-	description: 'Connect to an IDE',
-	handler: (_args: string[], _messages, _metadata) => {
-		// Handled specially in app-util.ts - enters IDE selection mode
-		return Promise.resolve(React.createElement(React.Fragment));
-	},
-};
+export const ideCommand = createStubCommand('ide', 'Connect to an IDE');

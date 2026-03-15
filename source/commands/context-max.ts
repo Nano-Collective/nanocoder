@@ -1,5 +1,4 @@
-import React from 'react';
-import type {Command} from '@/types/commands';
+import {createStubCommand} from '@/commands/create-stub-command';
 
 /**
  * The /context-max command sets the maximum context length for the current session.
@@ -13,12 +12,7 @@ import type {Command} from '@/types/commands';
  * /context-max             - Show current effective context limit
  * /context-max --reset     - Clear session override
  */
-export const contextMaxCommand: Command = {
-	name: 'context-max',
-	description:
-		'Set maximum context length for this session (e.g. /context-max 128k, --reset to clear)',
-	handler: async (_args: string[], _messages, _metadata) => {
-		// Handler returns empty fragment - actual logic in app-util.ts handleContextMaxCommand()
-		return Promise.resolve(React.createElement(React.Fragment));
-	},
-};
+export const contextMaxCommand = createStubCommand(
+	'context-max',
+	'Set maximum context length for this session (e.g. /context-max 128k, --reset to clear)',
+);

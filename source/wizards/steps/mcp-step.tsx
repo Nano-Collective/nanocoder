@@ -3,7 +3,7 @@ import SelectInput from 'ink-select-input';
 import {Tab, Tabs} from 'ink-tab';
 import {useEffect, useState} from 'react';
 import TextInput from '@/components/text-input';
-import {colors} from '@/config/index';
+import {getColors} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {
 	MCP_TEMPLATES,
@@ -39,6 +39,7 @@ export function McpStep({
 	existingServers = {},
 	configExists = false,
 }: McpStepProps) {
+	const colors = getColors();
 	const {isNarrow} = useResponsiveTerminal();
 	const [servers, setServers] =
 		useState<Record<string, McpServerConfig>>(existingServers);

@@ -2,7 +2,7 @@ import {Box, Text, useInput} from 'ink';
 import SelectInput from 'ink-select-input';
 import {useState} from 'react';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
-import {appConfig} from '@/config/index';
+import {getAppConfig} from '@/config/index';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 
@@ -28,8 +28,9 @@ export default function ProviderSelector({
 	const getProviderOptions = (): ProviderOption[] => {
 		const options: ProviderOption[] = [];
 
-		if (appConfig.providers) {
-			for (const provider of appConfig.providers) {
+		const config = getAppConfig();
+		if (config.providers) {
+			for (const provider of config.providers) {
 				options.push({
 					label: `${provider.name}${
 						currentProvider === provider.name ? ' (current)' : ''
