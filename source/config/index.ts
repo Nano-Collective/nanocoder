@@ -216,6 +216,11 @@ function tryLoadSessionsFromPath(
 					1,
 					defaults.maxSessions ?? 100,
 				),
+				maxMessages: normalizeSessionNumber(
+					sessions.maxMessages,
+					1,
+					defaults.maxMessages ?? 1000,
+				),
 				retentionDays: normalizeSessionNumber(
 					sessions.retentionDays,
 					1,
@@ -239,8 +244,9 @@ function loadSessionConfig(): AppConfig['sessions'] {
 		autoSave: true,
 		saveInterval: 30000, // 30 seconds
 		maxSessions: 100,
+		maxMessages: 1000,
 		retentionDays: 30,
-		directory: '~/.nanocoder-sessions',
+		directory: '',
 	};
 
 	// Try to load from project-level config first
