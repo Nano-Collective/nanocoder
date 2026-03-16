@@ -9,6 +9,9 @@
 **/tests/**
 **/__tests__/**
 
+# Exclude documentation
+**/docs/**
+
 # Exclude configuration and build files
 **/.husky/**
 **/dist/**
