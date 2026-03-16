@@ -10,9 +10,57 @@
 
 - **BREAKING**: Removed `auth` and `reconnect` fields from MCP server configuration. The `auth` field was never functional (both HTTP and WebSocket transports logged warnings that it was unsupported). The `reconnect` field was never implemented. Use `headers` for HTTP authentication instead (e.g. `"headers": { "Authorization": "Bearer $TOKEN" }`).
 
-- Fix: `alwaysAllow` field in MCP server configuration was silently dropped during config loading due to a missing field mapping. MCP tools configured with `alwaysAllow` now correctly skip confirmation prompts as documented.
+- Added `/resume` command for restoring previous chat sessions. Sessions are automatically saved and can be resumed from an interactive selector. Sessions are filtered by the current project directory by default, with an `--all` flag to show all sessions. Thanks to @yashksaini-coder.
+
+- Added `--provider` and `--model` CLI flags for non-interactive provider and model specification, allowing CI/CD scripts and automation to skip the setup wizard. Closes #394. Thanks to @james2doyle.
+
+- Added `NANOCODER_PROVIDERS` environment variable support for configuring providers without config files, useful for Docker containers and CI environments. Closes #307. Thanks to @kaustubha07.
+
+- Added GitHub Copilot as a provider template with OAuth device flow authentication and `/copilot-login` command. Thanks to @yashksaini-coder.
+
+- Added MLX Server provider template for local Apple Silicon inference. Closes #318.
+
+- Added parallel tool execution allowing the model to run multiple independent tool calls concurrently for faster task completion.
+
+- Added compact mode toggle via `Ctrl+L` in chat input to collapse the conversation view.
+
+- Added VS Code fork support for IDE integration (Cursor, Windsurf, VSCodium, etc.). Thanks to @kapsner.
+
+- Added Aurora Borealis theme.
+
+- Added notice when the model falls back to XML tool calls, informing users they can switch to a model with native tool calling support.
+
+- Adopted AI SDK human-in-the-loop pattern for tool approval. Tool confirmation now uses the SDK's built-in `tool-approval-request`/`tool-approval-response` flow instead of manual tool-call splitting, improving reliability and reducing code complexity.
+
+- Simplified tool processing by removing double XML parsing and the JSON tool call parser. Tool call parsing now happens in a single place and only on the XML fallback path for non-tool-calling models.
 
 - Restructured documentation into a Nextra-compatible `docs/` folder structure with nested sections for getting-started, configuration, and features. The README is now a concise landing page linking to the full docs.
+
+- Refactored app-utils into focused handler files, extracted shared utilities, unified mode state, and stubbed commands for cleaner architecture.
+
+- Fix: `alwaysAllow` field in MCP server configuration was silently dropped during config loading due to a missing field mapping. MCP tools configured with `alwaysAllow` now correctly skip confirmation prompts as documented.
+
+- Fix: Provider timeouts are now respected in non-interactive mode. Thanks to @kaustubha07. Closes #402.
+
+- Fix: Non-interactive mode no longer exits prematurely when the prompt or response contains the word "error".
+
+- Fix: Invalid CLI arguments no longer trigger the setup wizard. Thanks to @james2doyle.
+
+- Fix: Installation detector no longer falsely reports Homebrew on macOS when `HOMEBREW_PREFIX` is set but Nanocoder was installed via npm. Closes #392.
+
+- Fix: Preserve draft message when navigating through history with arrow keys.
+
+- Fix: `fetch_url` display now truncates to fit terminal width.
+
+- Fix: Validation failures no longer incorrectly prompt for tool confirmation.
+
+- Fix: Various error message and `execute_bash` formatter improvements.
+
+- Fix: Safe process metrics refactored into shared module to prevent duplicate declarations. Thanks to @cleyesode.
+
+- Security: Package audit failures resolved.
+
+- Dependency updates: `ai` 6.0.116, `@ai-sdk/anthropic` 3.0.58, `@ai-sdk/google` 3.0.33, `@ai-sdk/openai-compatible` 2.0.30, `@modelcontextprotocol/sdk` 1.27.1, `undici` 7.24.0, `cheerio` 1.2.0, `dotenv` 17.3.1, `wrap-ansi` 10.0.0.
 
 If there are any problems, feedback or thoughts please drop an issue or message us through Discord! Thank you for using Nanocoder.
 
