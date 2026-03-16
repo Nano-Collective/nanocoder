@@ -42,7 +42,7 @@ nanocoder run --provider openrouter "refactor database module"
 
 ## Documentation
 
-Full documentation is available in the [docs/](docs/) folder:
+Full documentation is available online at **[docs.nanocollective.org](https://docs.nanocollective.org/nanocoder/docs)** or in the [docs/](docs/) folder:
 
 - **[Getting Started](docs/getting-started/index.md)** - Installation, setup, and first steps
 - **[Configuration](docs/configuration/index.md)** - AI providers, MCP servers, preferences, logging, timeouts
