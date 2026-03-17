@@ -1538,3 +1538,353 @@ test('SearchFileContentsFormatter shows path parameter', t => {
 	t.regex(output!, /Path:/);
 	t.regex(output!, /src\/components/);
 });
+
+// ============================================================================
+// Tests for Empty Query Validation
+// ============================================================================
+
+test.serial('search_file_contents rejects empty query', async t => {
+	t.timeout(10000);
+
+	const result = await searchFileContentsTool.tool.execute!(
+		{
+			query: '',
+			maxResults: 30,
+		},
+		{toolCallId: 'test', messages: []},
+	);
+
+	t.regex(result, /Error:.*empty/, 'Should reject empty query');
+});
+
+test.serial('search_file_contents rejects whitespace-only query', async t => {
+	t.timeout(10000);
+
+	const result = await searchFileContentsTool.tool.execute!(
+		{
+			query: '   ',
+			maxResults: 30,
+		},
+		{toolCallId: 'test', messages: []},
+	);
+
+	t.regex(result, /Error:.*empty/, 'Should reject whitespace-only query');
+});
+
+// ============================================================================
+// Tests for Whole Word Matching
+// ============================================================================
+
+test.serial(
+	'search_file_contents matches whole words only with wholeWord flag',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-search-wholeword-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(
+				join(testDir, 'test.ts'),
+				'const test = 1;\nconst testing = 2;\nconst mytest = 3;\nconst contest = 4;',
+			);
+
+			const originalCwd = process.cwd();
+
+			try {
+				process.chdir(testDir);
+
+				const result = await searchFileContentsTool.tool.execute!(
+					{
+						query: 'test',
+						wholeWord: true,
+						maxResults: 30,
+					},
+					{toolCallId: 'test', messages: []},
+				);
+
+				t.true(
+					result.includes('const test ='),
+					'Should match whole word "test"',
+				);
+				t.false(
+					result.includes('testing'),
+					'Should not match "testing"',
+				);
+				t.false(
+					result.includes('mytest'),
+					'Should not match "mytest"',
+				);
+				t.false(
+					result.includes('contest'),
+					'Should not match "contest"',
+				);
+			} finally {
+				process.chdir(originalCwd);
+			}
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'search_file_contents without wholeWord matches partial words',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-search-no-wholeword-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(
+				join(testDir, 'test.ts'),
+				'const test = 1;\nconst testing = 2;\nconst mytest = 3;',
+			);
+
+			const originalCwd = process.cwd();
+
+			try {
+				process.chdir(testDir);
+
+				const result = await searchFileContentsTool.tool.execute!(
+					{
+						query: 'test',
+						maxResults: 30,
+					},
+					{toolCallId: 'test', messages: []},
+				);
+
+				t.true(result.includes('const test ='), 'Should match "test"');
+				t.true(
+					result.includes('testing'),
+					'Should also match "testing" without wholeWord',
+				);
+				t.true(
+					result.includes('mytest'),
+					'Should also match "mytest" without wholeWord',
+				);
+			} finally {
+				process.chdir(originalCwd);
+			}
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+// ============================================================================
+// Tests for Context Lines
+// ============================================================================
+
+test.serial(
+	'search_file_contents returns context lines when contextLines is set',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-search-context-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(
+				join(testDir, 'test.ts'),
+				'line1\nline2\nline3\nTARGET_MATCH\nline5\nline6\nline7',
+			);
+
+			const originalCwd = process.cwd();
+
+			try {
+				process.chdir(testDir);
+
+				const result = await searchFileContentsTool.tool.execute!(
+					{
+						query: 'TARGET_MATCH',
+						contextLines: 2,
+						maxResults: 30,
+					},
+					{toolCallId: 'test', messages: []},
+				);
+
+				t.true(result.includes('test.ts'), 'Should find the file');
+				t.true(
+					result.includes('TARGET_MATCH'),
+					'Should include the match',
+				);
+				t.true(
+					result.includes('line2') || result.includes('line3'),
+					'Should include context before',
+				);
+				t.true(
+					result.includes('line5') || result.includes('line6'),
+					'Should include context after',
+				);
+			} finally {
+				process.chdir(originalCwd);
+			}
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'search_file_contents clamps contextLines to max 10',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-search-context-max-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			// Create file with 25 lines
+			const lines = Array.from({length: 25}, (_, i) => `line${i + 1}`);
+			lines[12] = 'CONTEXT_CLAMP_MATCH';
+			writeFileSync(join(testDir, 'test.ts'), lines.join('\n'));
+
+			const originalCwd = process.cwd();
+
+			try {
+				process.chdir(testDir);
+
+				// Request 100 context lines, should be clamped to 10
+				const result = await searchFileContentsTool.tool.execute!(
+					{
+						query: 'CONTEXT_CLAMP_MATCH',
+						contextLines: 100,
+						maxResults: 30,
+					},
+					{toolCallId: 'test', messages: []},
+				);
+
+				t.true(result.includes('test.ts'), 'Should find the file');
+				t.true(
+					result.includes('CONTEXT_CLAMP_MATCH'),
+					'Should include the match',
+				);
+				// Match is at line 13, with context clamped to 10, earliest context is line 3
+				// line1 and line2 should not appear
+				// Use regex to avoid false matches with line10, line11, etc.
+				t.notRegex(
+					result,
+					/\bline1\b/,
+					'Should not include line1 (beyond clamped context)',
+				);
+				t.notRegex(
+					result,
+					/\bline2\b/,
+					'Should not include line2 (beyond clamped context)',
+				);
+			} finally {
+				process.chdir(originalCwd);
+			}
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+// ============================================================================
+// Tests for Binary File Skipping (-I flag)
+// ============================================================================
+
+test.serial(
+	'search_file_contents skips binary files with -I flag',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-search-binary-skip-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			// Write a file with binary content that also contains the search term
+			const binaryContent = Buffer.concat([
+				Buffer.from('binarySkipTarget'),
+				Buffer.from([0x00, 0x01, 0x02, 0xff]),
+				Buffer.from('more text'),
+			]);
+			writeFileSync(join(testDir, 'binary.dat'), binaryContent);
+			writeFileSync(
+				join(testDir, 'text.ts'),
+				'const binarySkipTarget = true;',
+			);
+
+			const originalCwd = process.cwd();
+
+			try {
+				process.chdir(testDir);
+
+				const result = await searchFileContentsTool.tool.execute!(
+					{
+						query: 'binarySkipTarget',
+						maxResults: 30,
+					},
+					{toolCallId: 'test', messages: []},
+				);
+
+				t.true(result.includes('text.ts'), 'Should find text file');
+				t.false(
+					result.includes('binary.dat'),
+					'Should skip binary file',
+				);
+			} finally {
+				process.chdir(originalCwd);
+			}
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+// ============================================================================
+// Tests for Formatter with New Parameters
+// ============================================================================
+
+test('SearchFileContentsFormatter shows wholeWord indicator', t => {
+	const formatter = searchFileContentsTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter(
+		{query: 'test', wholeWord: true},
+		'Found 5 matches',
+	);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Whole word:/);
+});
+
+test('SearchFileContentsFormatter shows context lines indicator', t => {
+	const formatter = searchFileContentsTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter(
+		{query: 'test', contextLines: 3},
+		'Found 5 matches',
+	);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Context:/);
+	t.regex(output!, /±3 lines/);
+});
+
+test('SearchFileContentsFormatter hides context when 0', t => {
+	const formatter = searchFileContentsTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter(
+		{query: 'test', contextLines: 0},
+		'Found 5 matches',
+	);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /Context:/);
+});

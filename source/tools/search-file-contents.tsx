@@ -20,6 +20,9 @@ import {calculateTokens} from '@/utils/token-calculator';
 
 const execFileAsync = promisify(execFile);
 
+const GREP_TIMEOUT_MS = 30_000;
+const MAX_CONTEXT_LINES = 10;
+
 interface SearchMatch {
 	file: string;
 	line: number;
@@ -36,6 +39,8 @@ async function searchFileContents(
 	caseSensitive: boolean,
 	include?: string,
 	searchPath?: string,
+	wholeWord?: boolean,
+	contextLines?: number,
 ): Promise<{matches: SearchMatch[]; truncated: boolean}> {
 	try {
 		const ig = loadGitignore(cwd);
@@ -44,11 +49,24 @@ async function searchFileContents(
 		const grepArgs: string[] = [
 			'-rn', // recursive with line numbers
 			'-E', // extended regex
+			'-I', // skip binary files
 		];
 
 		// Add case sensitivity flag
 		if (!caseSensitive) {
 			grepArgs.push('-i');
+		}
+
+		// Add whole word matching
+		if (wholeWord) {
+			grepArgs.push('-w');
+		}
+
+		// Add context lines
+		const hasContext = contextLines !== undefined && contextLines > 0;
+		if (hasContext) {
+			const clamped = Math.min(contextLines, MAX_CONTEXT_LINES);
+			grepArgs.push('-C', `${clamped}`);
 		}
 
 		// Add include patterns
@@ -81,63 +99,136 @@ async function searchFileContents(
 			grepArgs.push('.');
 		}
 
-		// Execute grep command with array-based arguments
+		// Execute grep command with array-based arguments and timeout
 		const {stdout} = await execFileAsync('grep', grepArgs, {
 			cwd,
 			maxBuffer: BUFFER_FIND_FILES_BYTES * BUFFER_GREP_MULTIPLIER,
+			timeout: GREP_TIMEOUT_MS,
 		});
 
 		const matches: SearchMatch[] = [];
-		const lines = stdout.trim().split('\n').filter(Boolean);
 		const cwdPrefix = path.resolve(cwd) + path.sep;
 
-		for (const line of lines) {
-			// Match both relative (./path) and absolute (/abs/path) grep output
-			const match =
-				line.match(/^\.\/(.+?):(\d+):(.*)$/) ||
-				line.match(/^(.+?):(\d+):(.*)$/);
-			if (match) {
-				// Normalize to relative path from cwd
-				let filePath = match[1];
-				if (path.isAbsolute(filePath)) {
-					filePath = filePath.startsWith(cwdPrefix)
-						? filePath.slice(cwdPrefix.length)
-						: filePath;
+		if (hasContext) {
+			// Context mode: split by group separator (BSD grep default: --)
+			const groups = stdout.trim().split('\n--\n');
+
+			for (const group of groups) {
+				const lines = group.split('\n').filter(Boolean);
+
+				// First pass: find file path and line number from a match line
+				let file = '';
+				let lineNum = 0;
+				for (const l of lines) {
+					const matchLine =
+						l.match(/^\.\/(.+?):(\d+):(.*)$/) || l.match(/^(.+?):(\d+):(.*)$/);
+					if (matchLine) {
+						let filePath = matchLine[1];
+						if (path.isAbsolute(filePath)) {
+							filePath = filePath.startsWith(cwdPrefix)
+								? filePath.slice(cwdPrefix.length)
+								: filePath;
+						}
+						file = filePath;
+						lineNum = parseInt(matchLine[2], 10);
+						break;
+					}
 				}
 
-				// Skip files ignored by gitignore
-				if (ig.ignores(filePath)) {
-					continue;
+				if (!file) continue;
+				if (ig.ignores(file)) continue;
+
+				// Second pass: extract content from all lines using known file path
+				const contentLines: string[] = [];
+				for (const l of lines) {
+					const prefix = l.startsWith('./') ? `./${file}` : file;
+					if (l.startsWith(`${prefix}:`)) {
+						const rest = l.slice(prefix.length + 1);
+						const colonIdx = rest.indexOf(':');
+						const num = rest.slice(0, colonIdx);
+						const text = rest.slice(colonIdx + 1);
+						contentLines.push(`${num}: ${text}`);
+					} else if (l.startsWith(`${prefix}-`)) {
+						const rest = l.slice(prefix.length + 1);
+						const dashIdx = rest.indexOf('-');
+						const num = rest.slice(0, dashIdx);
+						const text = rest.slice(dashIdx + 1);
+						contentLines.push(`${num}: ${text}`);
+					}
 				}
 
-				// Truncate long lines to prevent token explosion
-				const MAX_CONTENT_LENGTH = 300;
-				let content = match[3].trim();
-				if (content.length > MAX_CONTENT_LENGTH) {
-					content = content.slice(0, MAX_CONTENT_LENGTH) + '…';
+				// Higher content limit for context blocks
+				const MAX_CONTEXT_CONTENT_LENGTH = 1500;
+				let content = contentLines.join('\n');
+				if (content.length > MAX_CONTEXT_CONTENT_LENGTH) {
+					content = content.slice(0, MAX_CONTEXT_CONTENT_LENGTH) + '…';
 				}
 
-				matches.push({
-					file: filePath,
-					line: parseInt(match[2], 10),
-					content,
-				});
+				matches.push({file, line: lineNum, content});
+				if (matches.length >= maxResults) break;
+			}
+		} else {
+			// Standard mode: parse line-by-line
+			const lines = stdout.trim().split('\n').filter(Boolean);
 
-				// Stop once we have enough matches
-				if (matches.length >= maxResults) {
-					break;
+			for (const line of lines) {
+				// Match both relative (./path) and absolute (/abs/path) grep output
+				const match =
+					line.match(/^\.\/(.+?):(\d+):(.*)$/) ||
+					line.match(/^(.+?):(\d+):(.*)$/);
+				if (match) {
+					// Normalize to relative path from cwd
+					let filePath = match[1];
+					if (path.isAbsolute(filePath)) {
+						filePath = filePath.startsWith(cwdPrefix)
+							? filePath.slice(cwdPrefix.length)
+							: filePath;
+					}
+
+					// Skip files ignored by gitignore
+					if (ig.ignores(filePath)) {
+						continue;
+					}
+
+					// Truncate long lines to prevent token explosion
+					const MAX_CONTENT_LENGTH = 300;
+					let content = match[3].trim();
+					if (content.length > MAX_CONTENT_LENGTH) {
+						content = content.slice(0, MAX_CONTENT_LENGTH) + '…';
+					}
+
+					matches.push({
+						file: filePath,
+						line: parseInt(match[2], 10),
+						content,
+					});
+
+					// Stop once we have enough matches
+					if (matches.length >= maxResults) {
+						break;
+					}
 				}
 			}
 		}
 
 		return {
 			matches,
-			truncated: lines.length >= maxResults || matches.length >= maxResults,
+			truncated: matches.length >= maxResults,
 		};
 	} catch (error: unknown) {
 		// grep returns exit code 1 when no matches found
 		if (error instanceof Error && 'code' in error && error.code === 1) {
 			return {matches: [], truncated: false};
+		}
+		// Handle timeout
+		if (
+			error instanceof Error &&
+			'killed' in error &&
+			(error as NodeJS.ErrnoException & {killed?: boolean}).killed
+		) {
+			throw new Error(
+				'Search timed out after 30 seconds. Try a more specific query or narrower path.',
+			);
 		}
 		throw error;
 	}
@@ -149,11 +240,18 @@ interface SearchFileContentsArgs {
 	caseSensitive?: boolean;
 	include?: string;
 	path?: string;
+	wholeWord?: boolean;
+	contextLines?: number;
 }
 
 const executeSearchFileContents = async (
 	args: SearchFileContentsArgs,
 ): Promise<string> => {
+	// Validate query
+	if (!args.query || !args.query.trim()) {
+		return 'Error: Search query cannot be empty';
+	}
+
 	const cwd = process.cwd();
 	const maxResults = Math.min(
 		args.maxResults || DEFAULT_SEARCH_RESULTS,
@@ -181,6 +279,8 @@ const executeSearchFileContents = async (
 			caseSensitive,
 			args.include,
 			searchPath,
+			args.wholeWord,
+			args.contextLines,
 		);
 
 		if (matches.length === 0) {
@@ -205,7 +305,7 @@ const executeSearchFileContents = async (
 
 const searchFileContentsCoreTool = tool({
 	description:
-		'Search for text or code inside files. AUTO-ACCEPTED (no user approval needed). Use this INSTEAD OF bash grep/rg/ag/ack commands. Supports extended regex (e.g., "foo|bar", "func(tion)?"). Returns file:line with matching content. Use to find: function definitions, variable usage, import statements, TODO comments. Case-insensitive by default (use caseSensitive=true for exact matching). Use include to filter by file type (e.g., "*.ts") and path to scope to a directory (e.g., "src/components").',
+		'Search for text or code inside files. AUTO-ACCEPTED (no user approval needed). Use this INSTEAD OF bash grep/rg/ag/ack commands. Supports extended regex (e.g., "foo|bar", "func(tion)?"). Returns file:line with matching content. Use to find: function definitions, variable usage, import statements, TODO comments. Case-insensitive by default (use caseSensitive=true for exact matching). Use include to filter by file type (e.g., "*.ts") and path to scope to a directory (e.g., "src/components"). Use wholeWord=true for exact word boundaries. Use contextLines to see surrounding code.',
 	inputSchema: jsonSchema<SearchFileContentsArgs>({
 		type: 'object',
 		properties: {
@@ -234,6 +334,16 @@ const searchFileContentsCoreTool = tool({
 				description:
 					'Directory to scope the search to (relative path, e.g., "src/components", "source/tools"). Only files within this directory will be searched.',
 			},
+			wholeWord: {
+				type: 'boolean',
+				description:
+					'Match whole words only, preventing partial matches (default: false). Useful for finding exact variable/function names.',
+			},
+			contextLines: {
+				type: 'number',
+				description:
+					'Number of lines to show before and after each match (default: 0, max: 10). Useful for understanding surrounding code context.',
+			},
 		},
 		required: ['query'],
 	}),
@@ -251,6 +361,8 @@ interface SearchFileContentsFormatterProps {
 		caseSensitive?: boolean;
 		include?: string;
 		path?: string;
+		wholeWord?: boolean;
+		contextLines?: number;
 	};
 	result?: string;
 }
@@ -303,6 +415,20 @@ const SearchFileContentsFormatter = React.memo(
 					<Box>
 						<Text color={colors.secondary}>Case sensitive: </Text>
 						<Text color={colors.text}>yes</Text>
+					</Box>
+				)}
+
+				{args.wholeWord && (
+					<Box>
+						<Text color={colors.secondary}>Whole word: </Text>
+						<Text color={colors.text}>yes</Text>
+					</Box>
+				)}
+
+				{args.contextLines !== undefined && args.contextLines > 0 && (
+					<Box>
+						<Text color={colors.secondary}>Context: </Text>
+						<Text color={colors.text}>±{args.contextLines} lines</Text>
 					</Box>
 				)}
 
