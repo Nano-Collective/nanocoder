@@ -18,6 +18,10 @@ const mockToolHandler: ToolCall['function']['name'] extends infer T
   tool1: async () => 'Tool 1 executed',
   tool2: async () => 'Tool 2 executed',
   tool3: async () => 'Tool 3 executed',
+  create_task: async () => 'Task created',
+  list_tasks: async () => 'Tasks listed',
+  update_task: async () => 'Task updated',
+  delete_task: async () => 'Task deleted',
   slow_tool1: async () => { await delay(50); return 'Slow tool 1 done'; },
   slow_tool2: async () => { await delay(50); return 'Slow tool 2 done'; },
   slow_tool3: async () => { await delay(50); return 'Slow tool 3 done'; },
@@ -631,6 +635,48 @@ test('executeToolsDirectly - compact mode without onCompactToolCount does not er
 			},
 		);
 	});
+});
+
+test('executeToolsDirectly - compact mode always expands task tools', async t => {
+	const toolCalls: ToolCall[] = [
+		{id: 'call_1', function: {name: 'tool1', arguments: '{}'}},
+		{id: 'call_2', function: {name: 'create_task', arguments: '{}'}},
+		{id: 'call_3', function: {name: 'list_tasks', arguments: '{}'}},
+		{id: 'call_4', function: {name: 'update_task', arguments: '{}'}},
+		{id: 'call_5', function: {name: 'delete_task', arguments: '{}'}},
+	];
+
+	const conversationStateManager = createMockConversationStateManager();
+	const addToChatQueueCalls: unknown[] = [];
+	const addToChatQueue = (component: unknown) => {
+		addToChatQueueCalls.push(component);
+	};
+	const toolManager = createMockToolManager({
+		validatorResult: undefined,
+		shouldFail: false,
+	});
+
+	const compactCounts: string[] = [];
+
+	const results = await executeToolsDirectly(
+		toolCalls,
+		toolManager,
+		conversationStateManager as any,
+		addToChatQueue,
+		() => 1,
+		{
+			compactDisplay: true,
+			onCompactToolCount: (toolName) => {
+				compactCounts.push(toolName);
+			},
+		},
+	);
+
+	t.is(results.length, 5);
+	// Only tool1 should be compacted (counted), task tools should be expanded
+	t.deepEqual(compactCounts, ['tool1']);
+	// Task tools should have added to chat queue (expanded display)
+	t.true(addToChatQueueCalls.length >= 4, 'Task tools should be displayed expanded');
 });
 
 test('executeToolsDirectly - compact mode still displays errors in full', async t => {

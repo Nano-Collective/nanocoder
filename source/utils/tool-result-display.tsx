@@ -8,6 +8,17 @@ import type {ToolCall, ToolResult} from '@/types/index';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 
 /**
+ * Tools that should always show expanded (full formatter) output,
+ * even when compact display mode is enabled.
+ */
+export const ALWAYS_EXPANDED_TOOLS = new Set([
+	'create_task',
+	'list_tasks',
+	'update_task',
+	'delete_task',
+]);
+
+/**
  * Compact tool result display - shows "⚒ toolName  description" in tool color.
  */
 function CompactToolResult({
@@ -56,14 +67,6 @@ function getGroupedCompactDescription(toolName: string, count: number): string {
 			return `Ran ${count} git command${s}`;
 		case 'lsp_get_diagnostics':
 			return `Got diagnostics ${count} time${s}`;
-		case 'create_task':
-			return `Created ${count} task${s}`;
-		case 'list_tasks':
-			return `Listed tasks ${count} time${s}`;
-		case 'update_task':
-			return `Updated ${count} task${s}`;
-		case 'delete_task':
-			return `Deleted ${count} task${s}`;
 		case 'ask_question':
 			return `Asked ${count} question${s}`;
 		default:
@@ -165,7 +168,8 @@ export async function displayToolResult(
 	}
 
 	// Compact mode: show count-based one-liner instead of full formatter output
-	if (compact) {
+	// (skip for tools that should always show expanded output)
+	if (compact && !ALWAYS_EXPANDED_TOOLS.has(result.name)) {
 		const description = getGroupedCompactDescription(result.name, 1);
 		addToChatQueue(
 			<CompactToolResult
