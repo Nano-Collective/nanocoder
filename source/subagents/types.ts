@@ -115,18 +115,6 @@ export interface SubagentConfigWithSource extends SubagentConfig {
 }
 
 /**
- * Auto-delegation suggestion from the AutoDelegator.
- */
-export interface DelegationSuggestion {
-	/** Whether delegation should occur */
-	shouldDelegate: boolean;
-	/** Which subagent to use (if delegating) */
-	subagent?: string;
-	/** Reason for the delegation suggestion */
-	reason?: string;
-}
-
-/**
  * Frontmatter schema for markdown-based subagent definitions.
  * This is parsed from the YAML frontmatter of .md files.
  */
