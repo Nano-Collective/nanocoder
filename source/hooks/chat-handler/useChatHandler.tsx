@@ -1,8 +1,11 @@
 import React from 'react';
 import {ConversationStateManager} from '@/app/utils/conversation-state';
 import UserMessage from '@/components/user-message';
+import {getAppConfig} from '@/config/index';
 import {CommandIntegration} from '@/custom-commands/command-integration';
 import {promptHistory} from '@/prompt-history';
+import {AutoDelegator} from '@/subagents/auto-delegate';
+import {getSubagentLoader} from '@/subagents/subagent-loader';
 import type {Message} from '@/types/core';
 import {MessageBuilder} from '@/utils/message-builder';
 import {assemblePrompt, processPromptTemplate} from '@/utils/prompt-processor';
@@ -173,8 +176,32 @@ export function useChatHandler({
 		// Add user message to conversation history
 		const builder = new MessageBuilder(messages);
 		builder.addUserMessage(message);
-		const updatedMessages = builder.build();
+		let updatedMessages = builder.build();
 		setMessages(updatedMessages);
+
+		// Auto-delegation: check if message should be delegated to a subagent
+		const config = getAppConfig();
+		if (config?.subagents?.autoDelegate) {
+			try {
+				const loader = getSubagentLoader();
+				const subagentsMap = new Map(
+					(await loader.listSubagents()).map(agent => [agent.name, agent]),
+				);
+				const delegator = new AutoDelegator(subagentsMap);
+				const delegation = delegator.shouldDelegate(message);
+
+				if (delegation.shouldDelegate && delegation.subagent) {
+					// Modify the message to explicitly request delegation
+					const delegationMessage = `[Use the ${delegation.subagent} subagent to help with this task] ${message}`;
+					builder.addUserMessage(delegationMessage);
+					updatedMessages = builder.build();
+					setMessages(updatedMessages);
+				}
+			} catch {
+				// If auto-delegation fails, continue with original message
+				// Don't let delegation errors break the chat flow
+			}
+		}
 
 		// Initialize conversation state if this is a new conversation
 		if (messages.length === 0) {

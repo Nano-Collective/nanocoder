@@ -159,6 +159,17 @@ export function useAppState() {
 	const [currentConversationContext, setCurrentConversationContext] =
 		useState<ConversationContext | null>(null);
 
+	// Subagent state - tracks active subagent delegation
+	const [activeSubagent, setActiveSubagent] = useState<{
+		name: string | null;
+		description: string | null;
+		startTime: number | null;
+	}>({
+		name: null,
+		description: null,
+		startTime: null,
+	});
+
 	// Chat queue for components
 	const [chatComponents, setChatComponents] = useState<React.ReactNode[]>([]);
 	// Live component that renders outside Static for real-time updates (e.g., BashProgress)
@@ -325,6 +336,10 @@ export function useAppState() {
 		chatComponents,
 		getNextComponentKey,
 		tokenizer,
+
+		// Subagent state
+		activeSubagent,
+		setActiveSubagent,
 
 		// Setters
 		setClient,

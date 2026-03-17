@@ -1,6 +1,7 @@
 import {Box} from 'ink';
 import React from 'react';
 import ChatQueue from '@/components/chat-queue';
+import {SubagentActivity} from '@/components/subagent-activity';
 
 export interface ChatHistoryProps {
 	/** Whether the chat has started (ready to display) */
@@ -11,6 +12,12 @@ export interface ChatHistoryProps {
 	queuedComponents: React.ReactNode[];
 	/** Live component that renders outside Static (for real-time updates) */
 	liveComponent?: React.ReactNode;
+	/** Active subagent information */
+	activeSubagent?: {
+		name: string | null;
+		description: string | null;
+		startTime: number | null;
+	};
 }
 
 /**
@@ -28,6 +35,7 @@ export function ChatHistory({
 	staticComponents,
 	queuedComponents,
 	liveComponent,
+	activeSubagent,
 }: ChatHistoryProps): React.ReactElement {
 	return (
 		<Box flexGrow={1} flexDirection="column" minHeight={0}>
@@ -36,6 +44,16 @@ export function ChatHistory({
 					staticComponents={staticComponents}
 					queuedComponents={queuedComponents}
 				/>
+			)}
+			{/* Subagent activity indicator - shows when a subagent is working */}
+			{activeSubagent?.name && (
+				<Box marginLeft={-1} marginTop={1}>
+					<SubagentActivity
+						subagentName={activeSubagent.name}
+						description={activeSubagent.description}
+						startTime={activeSubagent.startTime}
+					/>
+				</Box>
 			)}
 			{/* Live component renders outside Static for real-time updates */}
 			{liveComponent && <Box marginLeft={-1}>{liveComponent}</Box>}

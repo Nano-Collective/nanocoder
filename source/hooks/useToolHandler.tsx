@@ -1,6 +1,7 @@
 import React from 'react';
 import BashProgress from '@/components/bash-progress';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
+import {SubagentResult} from '@/components/subagent-result';
 import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
 import {ConversationContext} from '@/hooks/useAppState';
 import {getToolManager, processToolUse} from '@/message-handler';
@@ -42,6 +43,17 @@ interface UseToolHandlerProps {
 	currentProvider?: string;
 	setDevelopmentMode?: (mode: DevelopmentMode) => void;
 	compactToolDisplay?: boolean;
+	// Subagent state
+	activeSubagent: {
+		name: string | null;
+		description: string | null;
+		startTime: number | null;
+	};
+	setActiveSubagent: (subagent: {
+		name: string | null;
+		description: string | null;
+		startTime: number | null;
+	}) => void;
 }
 
 export function useToolHandler({
@@ -65,6 +77,8 @@ export function useToolHandler({
 	currentProvider: _currentProvider,
 	setDevelopmentMode,
 	compactToolDisplay,
+	activeSubagent,
+	setActiveSubagent,
 }: UseToolHandlerProps) {
 	// Continue conversation with tool results - maintains the proper loop
 	const continueConversationWithToolResults = async (
@@ -264,6 +278,29 @@ export function useToolHandler({
 				);
 			}
 
+			// Special handling for agent (subagent delegation) tool
+			if (currentTool.function.name === 'agent') {
+				const parsedArgs = parseToolArguments(currentTool.function.arguments);
+				const subagentType = parsedArgs.subagent_type as string;
+				const description = parsedArgs.description as string;
+
+				// Set active subagent state for UI display
+				setActiveSubagent({
+					name: subagentType,
+					description,
+					startTime: Date.now(),
+				});
+
+				// Show subagent delegation message
+				addToChatQueue(
+					<InfoMessage
+						key={`agent-delegation-${getNextComponentKey()}-${Date.now()}`}
+						message={`Delegating to ${subagentType} agent: ${description}`}
+						hideBox={true}
+					/>,
+				);
+			}
+
 			// Check if tool has a streaming formatter (for real-time progress)
 			const streamingFormatter = toolManager?.getStreamingFormatter(
 				currentTool.function.name,
@@ -327,15 +364,42 @@ export function useToolHandler({
 				// Regular tool - use standard flow
 				result = await processToolUse(currentTool);
 
-				// Display the tool result
-				await displayToolResult(
-					currentTool,
-					result,
-					toolManager,
-					addToChatQueue,
-					getNextComponentKey,
-					compactToolDisplay,
-				);
+				// Special handling for agent tool results
+				if (currentTool.function.name === 'agent') {
+					const parsedArgs = parseToolArguments(currentTool.function.arguments);
+
+					// Display subagent result with formatted output
+					addToChatQueue(
+						<SubagentResult
+							key={`agent-result-${getNextComponentKey()}-${Date.now()}`}
+							subagentName={activeSubagent.name || 'unknown'}
+							description={parsedArgs.description as string}
+							result={result.content}
+							executionTimeMs={
+								activeSubagent.startTime
+									? Date.now() - activeSubagent.startTime
+									: 0
+							}
+						/>,
+					);
+
+					// Clear active subagent state
+					setActiveSubagent({
+						name: null,
+						description: null,
+						startTime: null,
+					});
+				} else {
+					// Display the tool result
+					await displayToolResult(
+						currentTool,
+						result,
+						toolManager,
+						addToChatQueue,
+						getNextComponentKey,
+						compactToolDisplay,
+					);
+				}
 			}
 
 			const newResults = [...completedToolResults, result];
