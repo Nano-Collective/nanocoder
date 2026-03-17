@@ -203,7 +203,8 @@ export class SubagentLoader {
 				});
 			} catch (error) {
 				// Log error but continue loading other files
-				console.error(`Failed to load agent from ${filePath}:`, error);
+				console.error('Failed to load agent from:', filePath);
+				console.error('Error:', error);
 			}
 		}
 
