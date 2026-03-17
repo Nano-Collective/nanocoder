@@ -528,6 +528,7 @@ export default function UserInput({
 						onSubmit={handleSubmit}
 						placeholder="/ commands, ! bash, ↑/↓ history"
 						focus={isFocused}
+						wrapWidth={boxWidth - 3}
 					/>
 				</Box>
 

@@ -1,6 +1,7 @@
 import chalk from 'chalk';
 import {Text, useInput} from 'ink';
 import {useEffect, useState} from 'react';
+import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 
 export type Props = {
 	readonly placeholder?: string;
@@ -11,6 +12,7 @@ export type Props = {
 	readonly value: string;
 	readonly onChange: (value: string) => void;
 	readonly onSubmit?: (value: string) => void;
+	readonly wrapWidth?: number;
 };
 
 function TextInput({
@@ -22,6 +24,7 @@ function TextInput({
 	showCursor = true,
 	onChange,
 	onSubmit,
+	wrapWidth,
 }: Props) {
 	const [state, setState] = useState({
 		cursorOffset: (originalValue || '').length,
@@ -222,15 +225,18 @@ function TextInput({
 		{isActive: focus},
 	);
 
-	return (
-		<Text>
-			{placeholder
-				? value.length > 0
-					? renderedValue
-					: renderedPlaceholder
-				: renderedValue}
-		</Text>
-	);
+	const finalValue = placeholder
+		? value.length > 0
+			? renderedValue
+			: renderedPlaceholder
+		: renderedValue;
+
+	const displayValue =
+		wrapWidth && wrapWidth > 0 && finalValue
+			? wrapWithTrimmedContinuations(finalValue, wrapWidth)
+			: finalValue;
+
+	return <Text>{displayValue}</Text>;
 }
 
 export default TextInput;
