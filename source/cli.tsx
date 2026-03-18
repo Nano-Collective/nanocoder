@@ -2,6 +2,8 @@
 import {render} from 'ink';
 import {createRequire} from 'module';
 import App from '@/app';
+import {parseContextLimit} from '@/app/utils/handlers/context-max-handler';
+import {setSessionContextLimit} from '@/models/index';
 
 const require = createRequire(import.meta.url);
 const {version} = require('../package.json');
@@ -30,11 +32,12 @@ Options:
   --vscode-port    Specify VS Code port
   --provider       Specify AI provider (must be configured in agents.config.json)
   --model          Specify AI model (must be available for the provider)
+  --context-max    Set maximum context length in tokens (supports k/K suffix, e.g. 128k)
   run              Run in non-interactive mode
 
 Examples:
   nanocoder --provider openrouter --model google/gemini-3.1-flash run "analyze src/app.ts"
-  nanocoder --provider ollama --model llama3.1
+  nanocoder --provider ollama --model llama3.1 --context-max 128k
   nanocoder run --provider openrouter "refactor database module"
   `);
 	process.exit(0);
@@ -66,6 +69,20 @@ if (modelArgIndex !== -1 && args[modelArgIndex + 1]) {
 	cliModel = args[modelArgIndex + 1];
 }
 
+// Extract --context-max if specified
+const contextMaxArgIndex = args.findIndex(arg => arg === '--context-max');
+if (contextMaxArgIndex !== -1 && args[contextMaxArgIndex + 1]) {
+	const limit = parseContextLimit(args[contextMaxArgIndex + 1]);
+	if (limit !== null) {
+		setSessionContextLimit(limit);
+	} else {
+		console.error(
+			`Invalid --context-max value: "${args[contextMaxArgIndex + 1]}". Use a positive number, e.g. 8192 or 128k`,
+		);
+		process.exit(1);
+	}
+}
+
 // Check for non-interactive mode (run command)
 let nonInteractivePrompt: string | undefined;
 const runCommandIndex = args.findIndex(arg => arg === 'run');
@@ -85,6 +102,9 @@ if (runCommandIndex !== -1 && args[runCommandIndex + 1]) {
 			i++; // skip this flag and its value
 			continue;
 		} else if (arg === '--model') {
+			i++; // skip this flag and its value
+			continue;
+		} else if (arg === '--context-max') {
 			i++; // skip this flag and its value
 			continue;
 		} else {

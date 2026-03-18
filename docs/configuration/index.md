@@ -33,7 +33,7 @@ Keep API keys out of version control using environment variables. Variables are 
 | Variable | Description |
 |----------|-------------|
 | `NANOCODER_CONFIG_DIR` | Override the global configuration directory (skips all other config lookups) |
-| `NANOCODER_CONTEXT_LIMIT` | Default context limit (tokens) for models not found on models.dev. Enables auto-compact and `/usage` to work correctly |
+| `NANOCODER_CONTEXT_LIMIT` | Default context limit (tokens) for models not found on models.dev. Enables auto-compact and `/usage` to work correctly. Can also be set via the `--context-max` CLI flag (which takes priority) |
 | `NANOCODER_DATA_DIR` | Override the application data directory for internal data like usage statistics |
 | `NANOCODER_INSTALL_METHOD` | Override installation detection (`npm`, `homebrew`, `nix`, `unknown`) |
 | `NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT` | Graceful shutdown timeout in milliseconds (default: 5000) |

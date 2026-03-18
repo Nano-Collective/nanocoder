@@ -48,6 +48,7 @@ nanocoder -h
 | `--vscode-port` | | Specify VS Code server port |
 | `--provider` | | Specify AI provider (must be configured in agents.config.json) |
 | `--model` | | Specify AI model (must be available for the provider) |
+| `--context-max` | | Set maximum context length in tokens (supports k/K suffix, e.g. `128k`) |
 | `run` | | Run in non-interactive mode |
 
 **Provider/Model Flags:**
@@ -113,6 +114,9 @@ nanocoder run "refactor the database connection to use a connection pool"
 # With specific provider and model
 nanocoder --provider openrouter --model google/gemini-3.1-flash run "analyze src/app.ts"
 
+# With context limit override (useful when model context isn't auto-detected)
+nanocoder --provider ollama --model llama3.1 --context-max 128k run "analyze src/app.ts"
+
 # Flags after 'run' command
 nanocoder run --provider openrouter --model anthropic/claude-sonnet-4-20250514 "refactor database module"
 ```
@@ -124,6 +128,7 @@ nanocoder run --provider openrouter --model anthropic/claude-sonnet-4-20250514 "
 - Displays all output and tool execution results
 - Exits automatically when the task is complete
 - Uses specified provider/model if `--provider` and `--model` flags are provided
+- Respects `--context-max` flag or `NANOCODER_CONTEXT_LIMIT` env var for context limit override
 
 **Error Handling:**
 
