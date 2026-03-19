@@ -516,7 +516,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'MiniMax-M2.5',
+				default: 'MiniMax-M2.7',
 				required: true,
 			},
 			{

@@ -292,7 +292,7 @@ test('minimax-coding template: sets sdkProvider to anthropic with minimax baseUr
 
 	const config = template!.buildConfig({
 		apiKey: 'test-key',
-		model: 'MiniMax-M2.5',
+		model: 'MiniMax-M2.7',
 		providerName: '',
 	});
 
