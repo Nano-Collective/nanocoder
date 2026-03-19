@@ -1,7 +1,7 @@
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
-import {ProviderStep} from './provider-step.js';
+import {findTemplateForProvider, ProviderStep} from './provider-step.js';
 
 // ============================================================================
 // Tests for ProviderStep Component Rendering
@@ -653,4 +653,65 @@ test('ProviderStep renders without errors on multiple frames', t => {
 	for (const frame of frames) {
 		t.truthy(frame);
 	}
+});
+
+// ============================================================================
+// Tests for findTemplateForProvider (edit-flow template resolution)
+// Regression tests for bug where MiniMax/Kimi (sdkProvider: 'anthropic')
+// incorrectly resolved to the Anthropic Claude template during editing.
+// ============================================================================
+
+test('findTemplateForProvider: matches ollama by id', t => {
+	const template = findTemplateForProvider('ollama');
+	t.truthy(template);
+	t.is(template!.id, 'ollama');
+});
+
+test('findTemplateForProvider: matches anthropic by id', t => {
+	const template = findTemplateForProvider('anthropic');
+	t.truthy(template);
+	t.is(template!.id, 'anthropic');
+});
+
+test('findTemplateForProvider: MiniMax Coding resolves to custom, not anthropic', t => {
+	// MiniMax provider config has name: 'MiniMax Coding' (from buildConfig)
+	// It must NOT resolve to the 'anthropic' template (which would happen if
+	// we matched by sdkProvider, since MiniMax uses sdkProvider: 'anthropic')
+	const template = findTemplateForProvider('MiniMax Coding');
+	t.truthy(template);
+	t.not(template!.id, 'anthropic');
+	// Falls through to custom since 'MiniMax Coding' doesn't match any template id or name exactly
+	t.is(template!.id, 'custom');
+});
+
+test('findTemplateForProvider: Kimi Code resolves to kimi-code template by name', t => {
+	// Kimi provider config has name: 'Kimi Code' (from buildConfig)
+	// Template name is also 'Kimi Code', so it matches by name
+	const template = findTemplateForProvider('Kimi Code');
+	t.truthy(template);
+	t.is(template!.id, 'kimi-code');
+	// Kimi template does not have modelsEndpoint, so no spurious fetch
+	t.is(template!.modelsEndpoint, undefined);
+});
+
+test('findTemplateForProvider: matches template by name when id does not match', t => {
+	// Template name: 'MiniMax Coding Plan', id: 'minimax-coding'
+	const template = findTemplateForProvider('MiniMax Coding Plan');
+	t.truthy(template);
+	t.is(template!.id, 'minimax-coding');
+});
+
+test('findTemplateForProvider: unknown provider falls back to custom', t => {
+	const template = findTemplateForProvider('some-unknown-provider');
+	t.truthy(template);
+	t.is(template!.id, 'custom');
+});
+
+test('findTemplateForProvider: resolved template for MiniMax has no cloud modelsEndpoint', t => {
+	// The critical assertion: whatever template MiniMax resolves to,
+	// it must not have a cloud modelsEndpoint that would hit Anthropic's API
+	const template = findTemplateForProvider('MiniMax Coding');
+	t.truthy(template);
+	// modelsEndpoint should not be 'anthropic' (which would fetch from api.anthropic.com)
+	t.not(template!.modelsEndpoint, 'anthropic');
 });

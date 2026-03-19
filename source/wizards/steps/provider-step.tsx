@@ -65,6 +65,22 @@ interface TemplateOption {
 	value: string;
 }
 
+/**
+ * Find the best matching template for an existing provider config.
+ * Match by id first, then by template name, then fall back to custom.
+ * Avoid matching by sdkProvider alone — e.g. MiniMax uses sdkProvider: 'anthropic'
+ * but should not resolve to the Anthropic Claude template.
+ */
+export function findTemplateForProvider(
+	providerName: string,
+): ProviderTemplate | undefined {
+	return (
+		PROVIDER_TEMPLATES.find(t => t.id === providerName) ||
+		PROVIDER_TEMPLATES.find(t => t.name === providerName) ||
+		PROVIDER_TEMPLATES.find(t => t.id === 'custom')
+	);
+}
+
 export function ProviderStep({
 	onComplete,
 	onBack,
@@ -231,12 +247,7 @@ export function ProviderStep({
 		if (item.value === 'edit' && editingIndex !== null) {
 			const provider = providers[editingIndex];
 			if (provider) {
-				// Find matching template (or use custom)
-				const template =
-					PROVIDER_TEMPLATES.find(t => t.id === provider.name) ||
-					(provider.sdkProvider &&
-						PROVIDER_TEMPLATES.find(t => t.id === provider.sdkProvider)) ||
-					PROVIDER_TEMPLATES.find(t => t.id === 'custom');
+				const template = findTemplateForProvider(provider.name);
 
 				if (template) {
 					setSelectedTemplate(template);
