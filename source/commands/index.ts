@@ -1,5 +1,6 @@
 export * from '@/commands/checkpoint';
 export * from '@/commands/clear';
+export * from '@/commands/codex-login-command';
 export * from '@/commands/compact';
 export * from '@/commands/context-max';
 export * from '@/commands/copilot-login-command';

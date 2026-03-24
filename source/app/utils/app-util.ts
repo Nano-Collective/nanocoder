@@ -1,6 +1,7 @@
 import React from 'react';
 import {parseInput} from '@/command-parser';
 import {commandRegistry} from '@/commands';
+import {CodexLogin} from '@/commands/codex-login';
 import {CopilotLogin} from '@/commands/copilot-login';
 import BashProgress from '@/components/bash-progress';
 import {
@@ -342,7 +343,7 @@ function handleCopilotLogin(
 					onAddToChatQueue(
 						React.createElement(SuccessMessage, {
 							key: `copilot-login-done-${getNextComponentKey()}`,
-							message: `Logged in. Credential saved for "${providerName}".`,
+							message: `Logged in. Credentials saved for "${providerName}".`,
 							hideBox: true,
 						}),
 					);
@@ -351,6 +352,65 @@ function handleCopilotLogin(
 						React.createElement(ErrorMessage, {
 							key: `copilot-login-error-${getNextComponentKey()}`,
 							message: result.error ?? 'Login failed.',
+							hideBox: true,
+						}),
+					);
+				}
+
+				onCommandComplete?.();
+			},
+		}),
+	);
+
+	return true;
+}
+
+/**
+ * Handles /codex-login as a live component.
+ * Returns true if handled.
+ */
+function handleCodexLogin(
+	commandParts: string[],
+	options: MessageSubmissionOptions,
+): boolean {
+	if (commandParts[0] !== 'codex-login') {
+		return false;
+	}
+
+	const {
+		setLiveComponent,
+		setIsToolExecuting,
+		onAddToChatQueue,
+		onCommandComplete,
+		getNextComponentKey,
+	} = options;
+
+	const providerName = commandParts[1]?.trim() || 'ChatGPT';
+
+	setIsToolExecuting(true);
+
+	setLiveComponent(
+		React.createElement(CodexLogin, {
+			key: `codex-login-live-${getNextComponentKey()}`,
+			providerName,
+			onDone: result => {
+				setLiveComponent(null);
+				setIsToolExecuting(false);
+
+				if (result.success) {
+					onAddToChatQueue(
+						React.createElement(SuccessMessage, {
+							key: `codex-login-done-${getNextComponentKey()}`,
+							message: `Logged in. Credentials saved for "${providerName}".`,
+							hideBox: true,
+						}),
+					);
+				} else {
+					onAddToChatQueue(
+						React.createElement(ErrorMessage, {
+							key: `codex-login-error-${getNextComponentKey()}`,
+							message: result.error ?? 'Login failed.',
+							hideBox: true,
 						}),
 					);
 				}
@@ -443,6 +503,7 @@ async function handleSlashCommand(
 	if (await handleCheckpointLoad(commandParts, options)) return;
 	if (await handleResumeCommand(commandParts, options)) return;
 	if (handleCopilotLogin(commandParts, options)) return;
+	if (handleCodexLogin(commandParts, options)) return;
 
 	await handleBuiltInCommand(message, options);
 }

@@ -1,9 +1,9 @@
 import type {LanguageModel} from 'ai';
 import {
-	generateText,
 	InvalidToolInputError,
 	NoSuchToolError,
 	stepCountIs,
+	streamText,
 	ToolCallRepairError,
 } from 'ai';
 import {MAX_TOOL_STEPS} from '@/constants';
@@ -174,7 +174,24 @@ export async function handleChat(
 			// Tools with needsApproval: false auto-execute in the SDK's loop
 			// Tools with needsApproval: true cause the SDK to stop for approval
 			// stopWhen controls when the tool loop stops (max MAX_TOOL_STEPS steps)
-			const result = await generateText({
+
+			// ChatGPT/Codex backend requires the system message as a top-level
+			// `instructions` field rather than as an input item. Extract it and
+			// pass via providerOptions so the Responses API includes it.
+			let providerOptions:
+				| Record<string, Record<string, string | boolean>>
+				| undefined;
+			if (providerConfig.sdkProvider === 'chatgpt-codex') {
+				const systemMsg = messagesWithToolPrompt.find(m => m.role === 'system');
+				providerOptions = {
+					openai: {
+						...(systemMsg ? {instructions: systemMsg.content} : {}),
+						store: false,
+					},
+				};
+			}
+
+			const result = streamText({
 				model,
 				messages: modelMessages,
 				tools: aiTools,
@@ -184,27 +201,57 @@ export async function handleChat(
 				onStepFinish: createOnStepFinishHandler(callbacks),
 				prepareStep: createPrepareStepHandler(),
 				headers: providerConfig.config.headers,
+				providerOptions,
 			});
 
-			const fullText = result.text;
+			// Stream tokens to the UI in batched chunks to avoid excessive
+			// React/Ink re-renders that cause terminal flickering.
+			const FLUSH_INTERVAL_MS = 150;
+			let tokenBuffer = '';
+			let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+			const flushBuffer = () => {
+				if (tokenBuffer) {
+					callbacks.onToken?.(tokenBuffer);
+					tokenBuffer = '';
+				}
+				flushTimer = null;
+			};
+
+			for await (const chunk of result.textStream) {
+				if (chunk) {
+					tokenBuffer += chunk;
+					if (!flushTimer) {
+						flushTimer = setTimeout(flushBuffer, FLUSH_INTERVAL_MS);
+					}
+				}
+			}
+
+			// Flush any remaining tokens
+			if (flushTimer) {
+				clearTimeout(flushTimer);
+			}
+			flushBuffer();
+
+			// After streaming completes, collect final results
+			const [fullText, resolvedToolCalls, resolvedSteps] = await Promise.all([
+				result.text,
+				result.toolCalls,
+				result.steps,
+			]);
 
 			logger.debug('AI SDK response received', {
 				responseLength: fullText.length,
-				hasToolCalls: result.toolCalls.length > 0,
-				toolCallCount: result.toolCalls.length,
-				stepCount: result.steps.length,
+				hasToolCalls: resolvedToolCalls.length > 0,
+				toolCallCount: resolvedToolCalls.length,
+				stepCount: resolvedSteps.length,
 			});
-
-			// Send the complete text to the callback
-			if (fullText) {
-				callbacks.onToken?.(fullText);
-			}
 
 			// Without execute functions on tools, the SDK doesn't auto-execute anything.
 			// All tool calls are returned for us to handle (parallel execution, confirmation, etc.).
 			const toolCalls: ToolCall[] =
-				result.toolCalls.length > 0
-					? convertAISDKToolCalls(result.toolCalls)
+				resolvedToolCalls.length > 0
+					? convertAISDKToolCalls(resolvedToolCalls)
 					: [];
 
 			const content = fullText;

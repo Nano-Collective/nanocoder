@@ -541,7 +541,7 @@ test.serial('read_file validator rejects end_line < start_line', async t => {
 	}
 });
 
-test.serial('read_file validator rejects end_line > file length', async t => {
+test.serial('read_file validator clamps end_line to file length', async t => {
 	t.timeout(10000);
 	const testDir = join(process.cwd(), 'test-read-validate-length-temp');
 	const originalCwd = process.cwd();
@@ -551,15 +551,12 @@ test.serial('read_file validator rejects end_line > file length', async t => {
 		writeFileSync(join(testDir, 'test.ts'), 'line1\nline2\nline3');
 		process.chdir(testDir);
 
-		const result = await readFileTool.validator!({
-			path: 'test.ts',
-			end_line: 100,
-		});
+		const args = {path: 'test.ts', end_line: 100};
+		const result = await readFileTool.validator!(args);
 
-		t.false(result.valid);
-		if (!result.valid) {
-			t.regex(result.error, /exceeds file length/);
-		}
+		// Validator should accept and clamp end_line instead of rejecting
+		t.true(result.valid);
+		t.is(args.end_line, 3);
 	} finally {
 		process.chdir(originalCwd);
 		rmSync(testDir, {recursive: true, force: true});

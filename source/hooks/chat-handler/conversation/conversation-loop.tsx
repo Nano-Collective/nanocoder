@@ -135,10 +135,16 @@ export const processAssistantResponse = async (
 			}
 		: undefined;
 
+	let streamedContent = '';
 	const result = await client.chat(
 		[systemMessage, ...messages],
 		toolManager?.getAllToolsWithoutExecute() || {},
-		{},
+		{
+			onToken: (token: string) => {
+				streamedContent += token;
+				setStreamingContent(streamedContent);
+			},
+		},
 		controller.signal,
 		modeOverrides,
 	);
@@ -226,7 +232,10 @@ export const processAssistantResponse = async (
 		flushCompactCounts();
 	}
 
-	// Display the assistant response (cleaned of any tool calls)
+	// Clear streaming content and add static message in one go so the
+	// live StreamingMessage disappears at the same time the static
+	// AssistantMessage appears, avoiding a visual jump.
+	setStreamingContent('');
 	if (cleanedContent.trim()) {
 		addToChatQueue(
 			<AssistantMessage

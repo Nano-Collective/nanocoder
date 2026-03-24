@@ -9,7 +9,7 @@ import type {LanguageModel} from 'ai';
 import type {ChatHandlerParams} from './chat-handler.js';
 
 // Note: This file contains basic structure tests
-// Full integration tests would require mocking the AI SDK's generateText function
+// Full integration tests would require mocking the AI SDK's streamText function
 // which is complex and better tested through the full AISDKClient
 
 test('ChatHandlerParams has correct structure', t => {

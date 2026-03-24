@@ -116,8 +116,36 @@ if (runCommandIndex !== -1 && args[runCommandIndex + 1]) {
 
 const nonInteractiveMode = runCommandIndex !== -1;
 
-// Handle copilot login from CLI (no App)
-if (args[0] === 'copilot' && args[1] === 'login') {
+// Handle codex login from CLI (no App)
+if (args[0] === 'codex' && args[1] === 'login') {
+	const providerName = args[2]?.trim() || 'ChatGPT';
+	(async () => {
+		try {
+			const {runCodexLoginFlow} = await import('@/auth/chatgpt-codex');
+			console.log('Starting ChatGPT/Codex login...');
+			await runCodexLoginFlow(providerName, {
+				onShowCode(verificationUrl, userCode) {
+					console.log('');
+					console.log('  1. Open this URL in your browser:');
+					console.log('');
+					console.log('     ' + verificationUrl);
+					console.log('');
+					console.log('  2. Enter this code when prompted:');
+					console.log('');
+					console.log('     ' + userCode);
+					console.log('');
+					console.log('Waiting for you to complete login...');
+				},
+			});
+			console.log('\nLogged in. Credentials saved for "' + providerName + '".');
+			process.exit(0);
+		} catch (err) {
+			console.error(err instanceof Error ? err.message : err);
+			process.exit(1);
+		}
+	})();
+	// Handle copilot login from CLI (no App)
+} else if (args[0] === 'copilot' && args[1] === 'login') {
 	const providerName = args[2]?.trim() || 'GitHub Copilot';
 	(async () => {
 		try {
@@ -137,7 +165,7 @@ if (args[0] === 'copilot' && args[1] === 'login') {
 					console.log('Waiting for you to complete login...');
 				},
 			});
-			console.log('\nLogged in. Credential saved for "' + providerName + '".');
+			console.log('\nLogged in. Credentials saved for "' + providerName + '".');
 			process.exit(0);
 		} catch (err) {
 			console.error(err instanceof Error ? err.message : err);

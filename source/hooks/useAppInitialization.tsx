@@ -4,6 +4,7 @@ import {commandRegistry} from '@/commands';
 import {
 	checkpointCommand,
 	clearCommand,
+	codexLoginCommand,
 	commandsCommand,
 	compactCommand,
 	contextMaxCommand,
@@ -419,6 +420,7 @@ export function useAppInitialization({
 				exitCommand,
 				clearCommand,
 				compactCommand,
+				codexLoginCommand,
 				copilotLoginCommand,
 				contextMaxCommand,
 				modelCommand,

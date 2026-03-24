@@ -208,6 +208,84 @@ test('createProvider google provider works without baseURL', t => {
 	t.truthy(provider);
 });
 
+test.serial('createProvider throws when chatgpt-codex has no stored credential', t => {
+	const config: AIProviderConfig = {
+		name: 'ChatGPT',
+		type: 'openai',
+		models: ['gpt-5.4'],
+		sdkProvider: 'chatgpt-codex',
+		config: {
+			baseURL: 'https://chatgpt.com/backend-api/codex',
+			apiKey: '',
+		},
+	};
+
+	const tmpDir = fs.mkdtempSync(
+		path.join(os.tmpdir(), 'nanocoder-codex-test-'),
+	);
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	process.env.NANOCODER_CONFIG_DIR = tmpDir;
+	try {
+		const agent = new Agent();
+		t.throws(
+			() => createProvider(config, agent),
+			{message: /No Codex credentials/},
+		);
+	} finally {
+		if (originalConfigDir !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+		fs.rmSync(tmpDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('createProvider creates chatgpt-codex provider with stored credential', t => {
+	const config: AIProviderConfig = {
+		name: 'ChatGPT',
+		type: 'openai',
+		models: ['gpt-5.4'],
+		sdkProvider: 'chatgpt-codex',
+		config: {
+			baseURL: 'https://chatgpt.com/backend-api/codex',
+			apiKey: '',
+		},
+	};
+
+	const tmpDir = fs.mkdtempSync(
+		path.join(os.tmpdir(), 'nanocoder-codex-test-'),
+	);
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	process.env.NANOCODER_CONFIG_DIR = tmpDir;
+	try {
+		// Write a credential file
+		fs.writeFileSync(
+			path.join(tmpDir, 'codex-credentials.json'),
+			JSON.stringify({
+				ChatGPT: {
+					accessToken: 'test-token',
+					refreshToken: 'test-refresh',
+					expiresAt: Date.now() + 3600000,
+					accountId: 'acc-1',
+				},
+			}),
+			{encoding: 'utf-8', mode: 0o600},
+		);
+
+		const agent = new Agent();
+		const provider = createProvider(config, agent);
+		t.truthy(provider);
+	} finally {
+		if (originalConfigDir !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+		fs.rmSync(tmpDir, {recursive: true, force: true});
+	}
+});
+
 test.serial('createProvider throws when github-copilot has no stored credential', t => {
 	const config: AIProviderConfig = {
 		name: 'GitHub Copilot',

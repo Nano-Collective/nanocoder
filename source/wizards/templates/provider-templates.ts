@@ -445,6 +445,32 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		}),
 	},
 	{
+		id: 'chatgpt-codex',
+		name: 'ChatGPT / Codex',
+		fields: [
+			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: 'ChatGPT / Codex',
+			},
+			{
+				name: 'model',
+				prompt: 'Model name(s) (comma-separated).',
+				default: '',
+				required: true,
+			},
+		],
+		buildConfig: answers => ({
+			name: answers.providerName || 'ChatGPT',
+			baseUrl: 'https://chatgpt.com/backend-api/codex',
+			models: answers.model
+				.split(',')
+				.map(m => m.trim())
+				.filter(Boolean),
+			sdkProvider: 'chatgpt-codex',
+		}),
+	},
+	{
 		id: 'github-copilot',
 		name: 'GitHub Copilot',
 		fields: [

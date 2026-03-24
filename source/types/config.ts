@@ -6,6 +6,7 @@ export type SdkProvider =
 	| 'openai-compatible'
 	| 'google'
 	| 'anthropic'
+	| 'chatgpt-codex'
 	| 'github-copilot';
 
 // AI provider configurations (OpenAI-compatible)

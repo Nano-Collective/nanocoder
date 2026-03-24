@@ -163,7 +163,7 @@
 			"@modelcontextprotocol/sdk>@hono/node-server": ">=1.19.10",
 			"express-rate-limit": ">=8.2.2",
 			"simple-git": ">=3.32.3",
-			"flatted": ">=3.4.0",
+			"flatted": ">=3.4.2",
 			"tinyexec": ">=1.0.4"
 		}
 	}

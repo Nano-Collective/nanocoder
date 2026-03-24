@@ -388,6 +388,9 @@ export function ProviderWizard({
 				const hasCopilotProvider = providers.some(
 					p => p.sdkProvider === 'github-copilot',
 				);
+				const hasCodexProvider = providers.some(
+					p => p.sdkProvider === 'chatgpt-codex',
+				);
 				return (
 					<Box flexDirection="column">
 						<Box marginBottom={1}>
@@ -405,6 +408,13 @@ export function ProviderWizard({
 							<Box marginBottom={1}>
 								<Text color={colors.primary}>
 									Run /copilot-login to auth with Copilot.
+								</Text>
+							</Box>
+						)}
+						{hasCodexProvider && (
+							<Box marginBottom={1}>
+								<Text color={colors.primary}>
+									Run /codex-login to auth with ChatGPT/Codex.
 								</Text>
 							</Box>
 						)}

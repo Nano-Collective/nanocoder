@@ -2,6 +2,10 @@ import {existsSync} from 'fs';
 import {join} from 'path';
 import {AISDKClient} from '@/ai-sdk-client';
 import {
+	getCodexNoCredentialsMessage,
+	loadCodexCredential,
+} from '@/config/codex-credentials';
+import {
 	getCopilotNoCredentialsMessage,
 	loadCopilotCredential,
 } from '@/config/copilot-credentials';
@@ -221,6 +225,15 @@ async function testProviderConnection(
 		const credential = loadCopilotCredential(providerConfig.name);
 		if (!credential?.oauthToken) {
 			throw new Error(getCopilotNoCredentialsMessage(providerConfig.name));
+		}
+		return;
+	}
+
+	// ChatGPT/Codex: require stored credential instead of apiKey
+	if (providerConfig.sdkProvider === 'chatgpt-codex') {
+		const credential = loadCodexCredential(providerConfig.name);
+		if (!credential?.accessToken) {
+			throw new Error(getCodexNoCredentialsMessage(providerConfig.name));
 		}
 		return;
 	}

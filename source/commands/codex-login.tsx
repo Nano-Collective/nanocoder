@@ -1,28 +1,28 @@
 import {Box, Text, useInput} from 'ink';
 import Spinner from 'ink-spinner';
 import {useEffect, useState} from 'react';
-import {runCopilotLoginFlow} from '@/auth/github-copilot';
+import {runCodexLoginFlow} from '@/auth/chatgpt-codex';
 import {getColors} from '@/config/index';
 
-const DEFAULT_PROVIDER_NAME = 'GitHub Copilot';
+const DEFAULT_PROVIDER_NAME = 'ChatGPT';
 
 type Status = 'starting' | 'visit' | 'polling' | 'done' | 'error';
 
-export interface CopilotLoginResult {
+export interface CodexLoginResult {
 	success: boolean;
 	error?: string;
 }
 
-export function CopilotLogin({
+export function CodexLogin({
 	providerName = DEFAULT_PROVIDER_NAME,
 	onDone,
 }: {
 	providerName?: string;
-	onDone?: (result: CopilotLoginResult) => void;
+	onDone?: (result: CodexLoginResult) => void;
 }) {
 	const colors = getColors();
 	const [status, setStatus] = useState<Status>('starting');
-	const [verificationUri, setVerificationUri] = useState('');
+	const [verificationUrl, setVerificationUrl] = useState('');
 	const [userCode, setUserCode] = useState('');
 	const [error, setError] = useState<string | null>(null);
 
@@ -31,10 +31,10 @@ export function CopilotLogin({
 
 		(async () => {
 			try {
-				await runCopilotLoginFlow(providerName, {
-					onShowCode(uri, code) {
+				await runCodexLoginFlow(providerName, {
+					onShowCode(url, code) {
 						if (cancelled) return;
-						setVerificationUri(uri);
+						setVerificationUrl(url);
 						setUserCode(code);
 						setStatus('visit');
 					},
@@ -73,7 +73,7 @@ export function CopilotLogin({
 		return (
 			<Box flexDirection="column" paddingY={1}>
 				<Text color={colors.primary}>
-					<Spinner type="dots" /> Starting GitHub Copilot login…
+					<Spinner type="dots" /> Starting ChatGPT/Codex login…
 				</Text>
 			</Box>
 		);
@@ -86,7 +86,7 @@ export function CopilotLogin({
 					<Text bold>Visit this URL and enter the code:</Text>
 				</Box>
 				<Box marginBottom={1}>
-					<Text color={colors.primary}>{verificationUri}</Text>
+					<Text color={colors.primary}>{verificationUrl}</Text>
 				</Box>
 				<Text bold>Code: {userCode}</Text>
 				{status === 'polling' && (

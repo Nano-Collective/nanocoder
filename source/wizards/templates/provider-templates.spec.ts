@@ -299,7 +299,7 @@ test('minimax-coding template: sets sdkProvider to anthropic with minimax baseUr
 	t.is(config.sdkProvider, 'anthropic');
 	t.is(config.baseUrl, 'https://api.minimax.io/anthropic/v1');
 	t.is(config.name, 'MiniMax Coding');
-	t.deepEqual(config.models, ['MiniMax-M2.5']);
+	t.deepEqual(config.models, ['MiniMax-M2.7']);
 });
 
 test('minimax-coding template: does not have modelsEndpoint', t => {
