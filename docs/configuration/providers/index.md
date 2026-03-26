@@ -51,6 +51,7 @@ Use dedicated AI SDK packages for native API support, enabled via the `sdkProvid
 - [Anthropic Claude](anthropic.md) - Native Anthropic API support
 - [Google Gemini](gemini.md) - Native Google Gemini support
 - [GitHub Copilot](github-copilot.md) - GitHub Copilot with device OAuth
+- [ChatGPT / Codex](chatgpt-codex.md) - ChatGPT Codex with browser login
 - [Kimi Code](kimi-code.md) - Kimi's Anthropic-compatible coding API
 - [MiniMax Coding](minimax.md) - MiniMax Anthropic-compatible API
 
