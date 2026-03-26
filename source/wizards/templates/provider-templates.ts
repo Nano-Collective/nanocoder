@@ -1,5 +1,4 @@
 import type {ProviderConfig} from '../../types/config';
-import type {ModelsEndpointType} from '../utils/fetch-local-models';
 
 export interface TemplateField {
 	name: string;
@@ -15,7 +14,6 @@ export interface ProviderTemplate {
 	name: string;
 	fields: TemplateField[];
 	buildConfig: (answers: Record<string, string>) => ProviderConfig;
-	modelsEndpoint?: ModelsEndpointType; // Hint for fetching models from local providers
 }
 
 const urlValidator = (value: string): string | undefined => {
@@ -40,12 +38,11 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 	{
 		id: 'ollama',
 		name: 'Ollama',
-		modelsEndpoint: 'ollama',
 		fields: [
 			{
 				name: 'providerName',
 				prompt: 'Provider name',
-				default: 'ollama',
+				default: 'Ollama',
 				required: true,
 			},
 			{
@@ -73,7 +70,6 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 	{
 		id: 'llama-cpp',
 		name: 'llama.cpp server',
-		modelsEndpoint: 'openai-compatible',
 		fields: [
 			{
 				name: 'providerName',
@@ -106,12 +102,11 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 	{
 		id: 'mlx-server',
 		name: 'MLX Server',
-		modelsEndpoint: 'openai-compatible',
 		fields: [
 			{
 				name: 'providerName',
 				prompt: 'Provider name',
-				default: 'mlx-server',
+				default: 'MLX Server',
 				required: true,
 			},
 			{
@@ -128,7 +123,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			},
 		],
 		buildConfig: answers => ({
-			name: answers.providerName || 'mlx-server',
+			name: answers.providerName || 'MLX Server',
 			baseUrl: answers.baseUrl || 'http://localhost:8080/v1',
 			models: answers.model
 				.split(',')
@@ -139,12 +134,11 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 	{
 		id: 'lmstudio',
 		name: 'LM Studio',
-		modelsEndpoint: 'openai-compatible',
 		fields: [
 			{
 				name: 'providerName',
 				prompt: 'Provider name',
-				default: 'lmstudio',
+				default: 'LM Studio',
 				required: true,
 			},
 			{
@@ -161,7 +155,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			},
 		],
 		buildConfig: answers => ({
-			name: answers.providerName || 'lmstudio',
+			name: answers.providerName || 'LM Studio',
 			baseUrl: answers.baseUrl || 'http://localhost:1234/v1',
 			models: answers.model
 				.split(',')
@@ -174,6 +168,11 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		name: 'Google Gemini',
 		fields: [
 			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: 'Google Gemini',
+			},
+			{
 				name: 'apiKey',
 				prompt: 'API Key (from https://aistudio.google.com/apikey)',
 				required: true,
@@ -182,17 +181,12 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'gemini-3-flash-preview, gemini-3-pro-preview',
+				default: '',
 				required: true,
-			},
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'Gemini',
 			},
 		],
 		buildConfig: answers => ({
-			name: answers.providerName || 'Gemini',
+			name: answers.providerName || 'Google Gemini',
 			sdkProvider: 'google',
 			baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
 			apiKey: answers.apiKey,
@@ -207,6 +201,11 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		name: 'OpenRouter',
 		fields: [
 			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: 'OpenRouter',
+			},
+			{
 				name: 'apiKey',
 				prompt: 'API Key',
 				required: true,
@@ -217,11 +216,6 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 				prompt: 'Model name(s) (comma-separated)',
 				default: '',
 				required: true,
-			},
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'OpenRouter',
 			},
 		],
 		buildConfig: answers => ({
@@ -237,8 +231,12 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 	{
 		id: 'openai',
 		name: 'OpenAI',
-		modelsEndpoint: 'openai',
 		fields: [
+			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: 'OpenAI',
+			},
 			{
 				name: 'apiKey',
 				prompt: 'API Key',
@@ -256,15 +254,10 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 				prompt: 'Organization ID (optional)',
 				required: false,
 			},
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'openai',
-			},
 		],
 		buildConfig: answers => {
 			const config: ProviderConfig = {
-				name: answers.providerName || 'openai',
+				name: answers.providerName || 'OpenAI',
 				baseUrl: 'https://api.openai.com/v1',
 				apiKey: answers.apiKey,
 				models: answers.model
@@ -281,8 +274,12 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 	{
 		id: 'anthropic',
 		name: 'Anthropic Claude',
-		modelsEndpoint: 'anthropic',
 		fields: [
+			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: 'Anthropic Claude',
+			},
 			{
 				name: 'apiKey',
 				prompt: 'API Key',
@@ -295,14 +292,9 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 				default: '',
 				required: true,
 			},
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'anthropic',
-			},
 		],
 		buildConfig: answers => ({
-			name: answers.providerName || 'anthropic',
+			name: answers.providerName || 'Anthropic Claude',
 			sdkProvider: 'anthropic',
 			baseUrl: 'https://api.anthropic.com/v1',
 			apiKey: answers.apiKey,
@@ -315,8 +307,12 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 	{
 		id: 'mistral',
 		name: 'Mistral AI',
-		modelsEndpoint: 'mistral',
 		fields: [
+			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: 'Mistral AI',
+			},
 			{
 				name: 'apiKey',
 				prompt: 'API Key',
@@ -329,14 +325,9 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 				default: '',
 				required: true,
 			},
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'Mistral',
-			},
 		],
 		buildConfig: answers => ({
-			name: answers.providerName || 'Mistral',
+			name: answers.providerName || 'Mistral AI',
 			baseUrl: 'https://api.mistral.ai/v1',
 			apiKey: answers.apiKey,
 			models: answers.model
@@ -364,7 +355,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'glm-5, glm-4.7, glm-4.7-flash',
+				default: '',
 				required: true,
 			},
 		],
@@ -397,7 +388,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: 'glm-5, glm-4.7, glm-4.7-flash',
+				default: '',
 				required: true,
 			},
 		],
@@ -414,8 +405,12 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 	{
 		id: 'github-models',
 		name: 'GitHub Models',
-		modelsEndpoint: 'github',
 		fields: [
+			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: 'GitHub Models',
+			},
 			{
 				name: 'apiKey',
 				prompt: 'GitHub Token (PAT with models:read scope)',
@@ -427,11 +422,6 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 				prompt: 'Model name(s) (comma-separated)',
 				default: '',
 				required: true,
-			},
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'GitHub Models',
 			},
 		],
 		buildConfig: answers => ({
@@ -461,7 +451,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			},
 		],
 		buildConfig: answers => ({
-			name: answers.providerName || 'ChatGPT',
+			name: answers.providerName || 'ChatGPT / Codex',
 			baseUrl: 'https://chatgpt.com/backend-api/codex',
 			models: answers.model
 				.split(',')
@@ -482,7 +472,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated).',
-				default: 'gpt-4.1, gpt-5.3-codex, claude-sonnet-4.6',
+				default: '',
 				required: true,
 			},
 		],
@@ -501,6 +491,11 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		name: 'Kimi Code',
 		fields: [
 			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: 'Kimi Code',
+			},
+			{
 				name: 'apiKey',
 				prompt: 'API Key',
 				required: true,
@@ -511,11 +506,6 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 				prompt: 'Model name(s) (comma-separated)',
 				default: 'kimi-for-coding',
 				required: true,
-			},
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'Kimi Code',
 			},
 		],
 		buildConfig: answers => ({
@@ -534,6 +524,11 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		name: 'MiniMax Coding Plan',
 		fields: [
 			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: 'MiniMax Coding',
+			},
+			{
 				name: 'apiKey',
 				prompt: 'API Key',
 				required: true,
@@ -544,11 +539,6 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 				prompt: 'Model name(s) (comma-separated)',
 				default: 'MiniMax-M2.7',
 				required: true,
-			},
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'MiniMax Coding',
 			},
 		],
 		buildConfig: answers => ({
@@ -567,6 +557,11 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		name: 'Poe',
 		fields: [
 			{
+				name: 'providerName',
+				prompt: 'Provider name',
+				default: 'Poe',
+			},
+			{
 				name: 'apiKey',
 				prompt: 'API Key (from poe.com/api_key)',
 				required: true,
@@ -577,11 +572,6 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 				prompt: 'Model name(s) (comma-separated)',
 				default: '',
 				required: true,
-			},
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'Poe',
 			},
 		],
 		buildConfig: answers => ({
@@ -597,7 +587,6 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 	{
 		id: 'custom',
 		name: 'Custom Provider',
-		modelsEndpoint: 'openai-compatible',
 		fields: [
 			{
 				name: 'providerName',

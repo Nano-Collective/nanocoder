@@ -96,7 +96,7 @@ test('mlx-server template: uses default name when empty', t => {
 		model: 'some-model',
 	});
 
-	t.is(config.name, 'mlx-server');
+	t.is(config.name, 'MLX Server');
 });
 
 test('mlx-server template: uses default baseUrl when empty', t => {
@@ -249,7 +249,7 @@ test('gemini template: uses default provider name', t => {
 		model: 'gemini-2.5-flash',
 	});
 
-	t.is(config.name, 'Gemini');
+	t.is(config.name, 'Google Gemini');
 });
 
 test('gemini template: includes baseUrl for documentation', t => {
@@ -302,18 +302,6 @@ test('minimax-coding template: sets sdkProvider to anthropic with minimax baseUr
 	t.deepEqual(config.models, ['MiniMax-M2.7']);
 });
 
-test('minimax-coding template: does not have modelsEndpoint', t => {
-	const template = PROVIDER_TEMPLATES.find(t => t.id === 'minimax-coding');
-	t.truthy(template);
-	t.is(template!.modelsEndpoint, undefined);
-});
-
-test('kimi-code template: does not have modelsEndpoint', t => {
-	const template = PROVIDER_TEMPLATES.find(t => t.id === 'kimi-code');
-	t.truthy(template);
-	t.is(template!.modelsEndpoint, undefined);
-});
-
 test('no template id matches an sdkProvider value used by a different template', t => {
 	// This guards against the edit-lookup bug where matching by sdkProvider
 	// would resolve to the wrong template (e.g. MiniMax -> Anthropic Claude)
@@ -346,7 +334,7 @@ test('no template id matches an sdkProvider value used by a different template',
 	}
 });
 
-test('anthropic template has modelsEndpoint but minimax and kimi do not', t => {
+test('anthropic, minimax, and kimi templates set expected sdkProvider values', t => {
 	const anthropic = PROVIDER_TEMPLATES.find(t => t.id === 'anthropic');
 	const minimax = PROVIDER_TEMPLATES.find(t => t.id === 'minimax-coding');
 	const kimi = PROVIDER_TEMPLATES.find(t => t.id === 'kimi-code');
@@ -355,7 +343,28 @@ test('anthropic template has modelsEndpoint but minimax and kimi do not', t => {
 	t.truthy(minimax);
 	t.truthy(kimi);
 
-	t.is(anthropic!.modelsEndpoint, 'anthropic');
-	t.is(minimax!.modelsEndpoint, undefined);
-	t.is(kimi!.modelsEndpoint, undefined);
+	t.is(
+		anthropic!.buildConfig({
+			providerName: 'Anthropic Claude',
+			apiKey: 'test-key',
+			model: 'claude-sonnet-4-5-20250929',
+		}).sdkProvider,
+		'anthropic',
+	);
+	t.is(
+		minimax!.buildConfig({
+			providerName: 'MiniMax Coding',
+			apiKey: 'test-key',
+			model: 'MiniMax-M2.7',
+		}).sdkProvider,
+		'anthropic',
+	);
+	t.is(
+		kimi!.buildConfig({
+			providerName: 'Kimi Code',
+			apiKey: 'test-key',
+			model: 'kimi-for-coding',
+		}).sdkProvider,
+		'anthropic',
+	);
 });

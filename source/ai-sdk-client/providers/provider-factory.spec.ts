@@ -210,7 +210,7 @@ test('createProvider google provider works without baseURL', t => {
 
 test.serial('createProvider throws when chatgpt-codex has no stored credential', t => {
 	const config: AIProviderConfig = {
-		name: 'ChatGPT',
+		name: 'ChatGPT / Codex',
 		type: 'openai',
 		models: ['gpt-5.4'],
 		sdkProvider: 'chatgpt-codex',
@@ -243,7 +243,7 @@ test.serial('createProvider throws when chatgpt-codex has no stored credential',
 
 test.serial('createProvider creates chatgpt-codex provider with stored credential', t => {
 	const config: AIProviderConfig = {
-		name: 'ChatGPT',
+		name: 'ChatGPT / Codex',
 		type: 'openai',
 		models: ['gpt-5.4'],
 		sdkProvider: 'chatgpt-codex',
@@ -263,7 +263,7 @@ test.serial('createProvider creates chatgpt-codex provider with stored credentia
 		fs.writeFileSync(
 			path.join(tmpDir, 'codex-credentials.json'),
 			JSON.stringify({
-				ChatGPT: {
+				'ChatGPT / Codex': {
 					accessToken: 'test-token',
 					refreshToken: 'test-refresh',
 					expiresAt: Date.now() + 3600000,

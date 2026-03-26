@@ -104,7 +104,7 @@ export function CodexLogin({
 		return (
 			<Box flexDirection="column" paddingY={1}>
 				<Box marginBottom={1}>
-					<Text color="green">
+					<Text color={colors.success}>
 						Logged in. Credentials saved for "{providerName}".
 					</Text>
 				</Box>
@@ -117,7 +117,7 @@ export function CodexLogin({
 		return (
 			<Box flexDirection="column" paddingY={1}>
 				<Box marginBottom={1}>
-					<Text color="red">{error}</Text>
+					<Text color={colors.error}>{error}</Text>
 				</Box>
 				<Text dimColor>Press Enter to continue.</Text>
 			</Box>

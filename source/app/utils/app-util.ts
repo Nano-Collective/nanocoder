@@ -385,7 +385,7 @@ function handleCodexLogin(
 		getNextComponentKey,
 	} = options;
 
-	const providerName = commandParts[1]?.trim() || 'ChatGPT';
+	const providerName = commandParts[1]?.trim() || 'ChatGPT / Codex';
 
 	setIsToolExecuting(true);
 

@@ -372,12 +372,21 @@ test('ProviderStep renders multiple provider names when added', t => {
 // Tests for ProviderStep Delete Config Feature
 // ============================================================================
 
-test('ProviderStep shows delete option when config exists and onDelete provided', t => {
+test('ProviderStep shows delete option when providers exist and config exists', t => {
+	const existingProviders = [
+		{
+			name: 'test',
+			baseUrl: 'http://localhost:8080/v1',
+			models: ['model1'],
+		},
+	];
+
 	const {lastFrame} = render(
 		<ProviderStep
 			onComplete={() => {}}
 			onDelete={() => {}}
 			configExists={true}
+			existingProviders={existingProviders}
 		/>,
 	);
 
@@ -466,10 +475,11 @@ test('ProviderStep shows all initial options with providers', t => {
 	);
 
 	const output = lastFrame();
-	t.regex(output!, /Choose from common templates/);
-	t.regex(output!, /Add custom provider manually/);
+	t.regex(output!, /Add another provider/);
 	t.regex(output!, /Edit existing providers/);
 	t.regex(output!, /Done & Save/);
+	t.notRegex(output!, /Choose from common templates/);
+	t.notRegex(output!, /Add custom provider manually/);
 });
 
 // ============================================================================
@@ -498,11 +508,12 @@ test('ProviderStep renders with all props combined', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	// Should show all relevant options
-	t.regex(output!, /Choose from common templates/);
-	t.regex(output!, /Add custom provider manually/);
+	t.regex(output!, /Add another provider/);
 	t.regex(output!, /Edit existing providers/);
 	t.regex(output!, /Done & Save/);
 	t.regex(output!, /Delete config file/);
+	t.notRegex(output!, /Choose from common templates/);
+	t.notRegex(output!, /Add custom provider manually/);
 });
 
 test('ProviderStep shows provider count message', t => {
@@ -662,56 +673,61 @@ test('ProviderStep renders without errors on multiple frames', t => {
 // ============================================================================
 
 test('findTemplateForProvider: matches ollama by id', t => {
-	const template = findTemplateForProvider('ollama');
+	const template = findTemplateForProvider({name: 'ollama', models: []});
 	t.truthy(template);
 	t.is(template!.id, 'ollama');
 });
 
 test('findTemplateForProvider: matches anthropic by id', t => {
-	const template = findTemplateForProvider('anthropic');
+	const template = findTemplateForProvider({name: 'anthropic', models: []});
 	t.truthy(template);
 	t.is(template!.id, 'anthropic');
 });
 
-test('findTemplateForProvider: MiniMax Coding resolves to custom, not anthropic', t => {
-	// MiniMax provider config has name: 'MiniMax Coding' (from buildConfig)
-	// It must NOT resolve to the 'anthropic' template (which would happen if
-	// we matched by sdkProvider, since MiniMax uses sdkProvider: 'anthropic')
-	const template = findTemplateForProvider('MiniMax Coding');
+test('findTemplateForProvider: MiniMax Coding resolves by baseUrl', t => {
+	// MiniMax provider config has name: 'MiniMax Coding' and a unique baseUrl
+	const template = findTemplateForProvider({
+		name: 'MiniMax Coding',
+		baseUrl: 'https://api.minimax.io/anthropic/v1',
+		models: [],
+	});
 	t.truthy(template);
-	t.not(template!.id, 'anthropic');
-	// Falls through to custom since 'MiniMax Coding' doesn't match any template id or name exactly
-	t.is(template!.id, 'custom');
+	t.is(template!.id, 'minimax-coding');
 });
 
 test('findTemplateForProvider: Kimi Code resolves to kimi-code template by name', t => {
-	// Kimi provider config has name: 'Kimi Code' (from buildConfig)
-	// Template name is also 'Kimi Code', so it matches by name
-	const template = findTemplateForProvider('Kimi Code');
+	const template = findTemplateForProvider({name: 'Kimi Code', models: []});
 	t.truthy(template);
 	t.is(template!.id, 'kimi-code');
-	// Kimi template does not have modelsEndpoint, so no spurious fetch
-	t.is(template!.modelsEndpoint, undefined);
 });
 
 test('findTemplateForProvider: matches template by name when id does not match', t => {
-	// Template name: 'MiniMax Coding Plan', id: 'minimax-coding'
-	const template = findTemplateForProvider('MiniMax Coding Plan');
+	const template = findTemplateForProvider({
+		name: 'MiniMax Coding Plan',
+		models: [],
+	});
 	t.truthy(template);
 	t.is(template!.id, 'minimax-coding');
 });
 
 test('findTemplateForProvider: unknown provider falls back to custom', t => {
-	const template = findTemplateForProvider('some-unknown-provider');
+	const template = findTemplateForProvider({
+		name: 'some-unknown-provider',
+		models: [],
+	});
 	t.truthy(template);
 	t.is(template!.id, 'custom');
 });
 
-test('findTemplateForProvider: resolved template for MiniMax has no cloud modelsEndpoint', t => {
-	// The critical assertion: whatever template MiniMax resolves to,
-	// it must not have a cloud modelsEndpoint that would hit Anthropic's API
-	const template = findTemplateForProvider('MiniMax Coding');
+test('findTemplateForProvider: ChatGPT resolves to chatgpt-codex by baseUrl', t => {
+	// buildConfig sets name: 'ChatGPT' but template name is 'ChatGPT / Codex'
+	// Should still match via baseUrl
+	const template = findTemplateForProvider({
+		name: 'ChatGPT / Codex',
+		baseUrl: 'https://chatgpt.com/backend-api/codex',
+		sdkProvider: 'chatgpt-codex',
+		models: [],
+	});
 	t.truthy(template);
-	// modelsEndpoint should not be 'anthropic' (which would fetch from api.anthropic.com)
-	t.not(template!.modelsEndpoint, 'anthropic');
+	t.is(template!.id, 'chatgpt-codex');
 });

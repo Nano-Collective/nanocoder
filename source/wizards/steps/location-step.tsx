@@ -51,12 +51,12 @@ export function LocationStep({
 
 	const locationOptions: LocationOption[] = [
 		{
-			label: `Current project directory`,
-			value: 'project',
-		},
-		{
 			label: `Global user config`,
 			value: 'global',
+		},
+		{
+			label: `Current project directory`,
+			value: 'project',
 		},
 	];
 
