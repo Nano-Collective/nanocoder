@@ -8,6 +8,7 @@ import {
 	MAX_WEB_SEARCH_QUERY_LENGTH,
 	TIMEOUT_WEB_SEARCH_MS,
 } from '@/constants';
+import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
@@ -136,6 +137,7 @@ function WebSearchFormatterComponent({
 	maxResults: number;
 	result?: string;
 }): React.ReactElement {
+	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
 
 	// Parse result to count actual results
@@ -148,12 +150,14 @@ function WebSearchFormatterComponent({
 	}
 
 	return (
-		<Box flexDirection="column" marginBottom={1}>
+		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
 			<Text color={colors.tool}>⚒ web_search</Text>
 			<Box>
 				<Text color={colors.secondary}>Query: </Text>
-				<Box marginLeft={1}>
-					<Text color={colors.text}>{query}</Text>
+				<Box marginLeft={1} flexShrink={1}>
+					<Text wrap="truncate-end" color={colors.text}>
+						{query}
+					</Text>
 				</Box>
 			</Box>
 			<Box>

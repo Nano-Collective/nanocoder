@@ -7,6 +7,7 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 
+import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
@@ -169,6 +170,7 @@ function GitPushFormatter({
 	args: GitPushInput;
 	result?: string;
 }): React.ReactElement {
+	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
 	const [preview, setPreview] = React.useState<{
 		remote: string;
@@ -191,7 +193,7 @@ function GitPushFormatter({
 	const isForce = args.force || args.forceWithLease;
 
 	return (
-		<Box flexDirection="column" marginBottom={1}>
+		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
 			<Text color={colors.tool}>⚒ git_push</Text>
 
 			{isForce && (

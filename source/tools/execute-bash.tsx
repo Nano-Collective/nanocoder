@@ -5,6 +5,7 @@ import BashProgress from '@/components/bash-progress';
 import {isNanocoderToolAlwaysAllowed} from '@/config/nanocoder-tools-config';
 import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {getCurrentMode} from '@/context/mode-context';
+import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
 import type {NanocoderToolExport} from '@/types/core';
@@ -104,15 +105,18 @@ function ExecuteBashFormatterComponent({
 }: {
 	command: string;
 }): React.ReactElement {
+	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
 
 	return (
-		<Box flexDirection="column" marginBottom={1}>
+		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
 			<Text color={colors.tool}>⚒ execute_bash</Text>
 			<Box>
 				<Text color={colors.secondary}>Command: </Text>
-				<Box marginLeft={1}>
-					<Text color={colors.primary}>{command}</Text>
+				<Box marginLeft={1} flexShrink={1}>
+					<Text wrap="truncate-end" color={colors.primary}>
+						{command}
+					</Text>
 				</Box>
 			</Box>
 		</Box>

@@ -242,7 +242,9 @@ const GetDiagnosticsFormatter = React.memo(
 				{args.path ? (
 					<Box>
 						<Text color={colors.secondary}>Path: </Text>
-						<Text color={colors.text}>{args.path}</Text>
+						<Text wrap="truncate-end" color={colors.text}>
+							{args.path}
+						</Text>
 					</Box>
 				) : (
 					<Box>

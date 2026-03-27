@@ -63,6 +63,43 @@ test('delete_file formatter renders path', t => {
 	t.regex(output!, /src\/old\.ts/);
 });
 
+test('delete_file formatter truncates long path instead of wrapping', t => {
+	const formatter = deleteFileTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const longPath =
+		'source/very/deeply/nested/directory/structure/that/goes/on/and/on/to/exceed/the/terminal/width/for/testing/purposes/file.ts';
+	const element = formatter({path: longPath}, `File deleted: ${longPath}`);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /delete_file/);
+	// Path should be truncated — should not contain the full end of path
+	t.false(
+		output!.includes('purposes/file.ts'),
+		'Long path should be truncated, not fully displayed',
+	);
+});
+
+test('delete_file formatter does not truncate short path', t => {
+	const formatter = deleteFileTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter({path: 'src/file.ts'}, 'File deleted: src/file.ts');
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /src\/file\.ts/);
+});
+
 // ============================================================================
 // Validator
 // ============================================================================

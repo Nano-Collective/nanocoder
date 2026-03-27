@@ -7,6 +7,7 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 
+import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
@@ -128,6 +129,7 @@ function GitLogFormatter({
 	args: GitLogInput;
 	result?: string;
 }): React.ReactElement {
+	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
 
 	// Parse result for display
@@ -163,7 +165,7 @@ function GitLogFormatter({
 	if (args.file) filters.push(`file: ${args.file}`);
 
 	return (
-		<Box flexDirection="column" marginBottom={1}>
+		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
 			<Text color={colors.tool}>⚒ git_log</Text>
 
 			{branch && (
@@ -190,7 +192,9 @@ function GitLogFormatter({
 			{filters.length > 0 && (
 				<Box>
 					<Text color={colors.secondary}>Filters: </Text>
-					<Text color={colors.text}>{filters.join(', ')}</Text>
+					<Text wrap="truncate-end" color={colors.text}>
+						{filters.join(', ')}
+					</Text>
 				</Box>
 			)}
 

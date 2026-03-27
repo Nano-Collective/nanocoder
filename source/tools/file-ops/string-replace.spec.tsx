@@ -723,13 +723,13 @@ test('string_replace formatter: renders preview with basic replacement', async t
 		old_str: 'const y = 2;',
 		new_str: 'const y = 5;',
 	});
-
+	
 	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
 	const output = lastFrame();
 
 	t.truthy(output);
 	t.regex(output!, /string_replace/);
-	t.regex(output!, /test\.ts/);
+	t.regex(output!, /Path:/);
 	t.regex(output!, /Replacing 1 line/);
 });
 
@@ -758,7 +758,7 @@ test('string_replace formatter: shows normalized indentation for deeply indented
 	// Should show normalized indentation (not the original deep nesting)
 	// The leftmost code should start at column 0 after line numbers
 	t.regex(output!, /string_replace/);
-	t.regex(output!, /nested\.tsx/);
+	t.regex(output!, /Path:/);
 });
 
 test('string_replace formatter: shows context before and after', async t => {
@@ -923,7 +923,7 @@ test('string_replace formatter: normalizes tabs to 2 spaces', async t => {
 	t.truthy(output);
 	// Should normalize tabs to spaces for display
 	t.regex(output!, /string_replace/);
-	t.regex(output!, /tabs\.ts/);
+	t.regex(output!, /Path:/);
 });
 
 // ============================================================================

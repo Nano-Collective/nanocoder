@@ -102,32 +102,24 @@ export function displayCompactCountsSummary(
 	getNextComponentKey: () => number,
 ): void {
 	const entries = Object.entries(counts);
-	for (let i = 0; i < entries.length; i++) {
-		const [toolName, count] = entries[i];
-		const isLast = i === entries.length - 1;
-		const description = getGroupedCompactDescription(toolName, count);
-		if (isLast) {
-			// Last entry gets wrapped in a flex-column Box with marginBottom
-			// to separate from subsequent content (same pattern as ToolMessage)
-			addToChatQueue(
-				<Box
-					key={`tool-compact-summary-${toolName}-${getNextComponentKey()}`}
-					flexDirection="column"
-					marginBottom={1}
-				>
-					<CompactToolResult toolName={toolName} description={description} />
-				</Box>,
-			);
-		} else {
-			addToChatQueue(
+	if (entries.length === 0) return;
+
+	// Wrap all entries in a single Box with marginBottom for consistent spacing
+	addToChatQueue(
+		<Box
+			key={`tool-compact-summary-${getNextComponentKey()}`}
+			flexDirection="column"
+			marginBottom={1}
+		>
+			{entries.map(([toolName, count]) => (
 				<CompactToolResult
-					key={`tool-compact-summary-${toolName}-${getNextComponentKey()}`}
+					key={toolName}
 					toolName={toolName}
-					description={description}
-				/>,
-			);
-		}
-	}
+					description={getGroupedCompactDescription(toolName, count)}
+				/>
+			))}
+		</Box>,
+	);
 }
 
 /**

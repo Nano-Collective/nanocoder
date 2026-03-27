@@ -96,6 +96,28 @@ test('ExecuteBashFormatter handles complex commands', t => {
 	t.regex(output!, /find/);
 });
 
+test('ExecuteBashFormatter truncates long command instead of wrapping', t => {
+	const formatter = executeBashTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const longCommand =
+		'find /very/long/path/to/some/directory -name "*.ts" -exec grep -l "someVeryLongPatternThatExceedsTheTerminalWidth" {} \\; | sort | uniq -c | sort -rn | head -20';
+	const element = formatter({command: longCommand});
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /execute_bash/);
+	// Should not contain the full end of the command
+	t.false(
+		output!.includes('head -20'),
+		'Long command should be truncated, not fully displayed',
+	);
+});
+
 // ============================================================================
 // Tests for execute_bash Tool Handler - Basic Functionality
 // ============================================================================

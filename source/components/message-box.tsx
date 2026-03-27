@@ -39,7 +39,11 @@ const MessageBox = memo(function MessageBox({
 	return (
 		<>
 			{hideBox ? (
-				<Box width={boxWidth} flexDirection="column" marginBottom={1}>
+				<Box
+					width={boxWidth}
+					flexDirection="column"
+					marginBottom={marginBottom}
+				>
 					<Text color={color}>{message}</Text>
 				</Box>
 			) : hideTitle ? (

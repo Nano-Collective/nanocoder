@@ -94,8 +94,10 @@ export default function BashProgress({
 
 			<Box>
 				<Text color={colors.secondary}>Command: </Text>
-				<Box marginLeft={1}>
-					<Text color={colors.primary}>{command}</Text>
+				<Box marginLeft={1} flexShrink={1}>
+					<Text wrap="truncate-end" color={colors.primary}>
+						{command}
+					</Text>
 				</Box>
 			</Box>
 			{state.isComplete && (

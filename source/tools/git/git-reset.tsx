@@ -8,6 +8,7 @@ import {Box, Text} from 'ink';
 import React from 'react';
 
 import {getCurrentMode} from '@/context/mode-context';
+import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
@@ -207,6 +208,7 @@ function GitResetFormatter({
 	args: GitResetInput;
 	result?: string;
 }): React.ReactElement {
+	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
 	const [preview, setPreview] = React.useState<{
 		commitsAffected: CommitInfo[];
@@ -234,7 +236,7 @@ function GitResetFormatter({
 	};
 
 	return (
-		<Box flexDirection="column" marginBottom={1}>
+		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
 			<Text color={colors.tool}>⚒ git_reset</Text>
 
 			{args.mode === 'hard' && (
@@ -261,7 +263,9 @@ function GitResetFormatter({
 			{args.file && (
 				<Box>
 					<Text color={colors.secondary}>File: </Text>
-					<Text color={colors.text}>{args.file}</Text>
+					<Text wrap="truncate-end" color={colors.text}>
+						{args.file}
+					</Text>
 				</Box>
 			)}
 

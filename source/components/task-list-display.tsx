@@ -1,4 +1,5 @@
 import {Box, Text} from 'ink';
+import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {Task} from '@/tools/tasks/types';
 
@@ -17,6 +18,7 @@ export function TaskListDisplay({
 	tasks,
 	title = 'Tasks',
 }: TaskListDisplayProps) {
+	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
 
 	if (tasks.length === 0) {
@@ -41,7 +43,7 @@ export function TaskListDisplay({
 	};
 
 	return (
-		<Box flexDirection="column" marginBottom={1}>
+		<Box flexDirection="column" marginTop={1} marginBottom={1}>
 			<Box flexDirection="column">
 				<Box>
 					<Text bold color={colors.primary}>
@@ -51,7 +53,7 @@ export function TaskListDisplay({
 				<Box flexDirection="column">
 					{/* Task rows */}
 					{tasks.map((task, index) => (
-						<Box key={task.id} flexDirection="row">
+						<Box key={task.id} flexDirection="row" width={boxWidth}>
 							<Box width={2}>
 								<Text color={getStatusColor(task.status)}>
 									{STATUS_ICONS[task.status]}
@@ -60,8 +62,9 @@ export function TaskListDisplay({
 							<Box width={3}>
 								<Text color={colors.secondary}>{index + 1}.</Text>
 							</Box>
-							<Box>
+							<Box flexShrink={1}>
 								<Text
+									wrap="truncate-end"
 									color={
 										task.status === 'completed' ? colors.secondary : colors.text
 									}

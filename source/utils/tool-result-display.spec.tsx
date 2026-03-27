@@ -539,7 +539,7 @@ test('displayToolResult - compact mode still shows errors in full', async t => {
 // Tests for displayCompactCountsSummary
 // ============================================================================
 
-test('displayCompactCountsSummary - adds one element per tool type', t => {
+test('displayCompactCountsSummary - adds single wrapper element for all tool types', t => {
 	const {addToChatQueue, queue} = createMockAddToChatQueue();
 
 	displayCompactCountsSummary(
@@ -548,7 +548,7 @@ test('displayCompactCountsSummary - adds one element per tool type', t => {
 		createMockGetNextComponentKey(),
 	);
 
-	t.is(queue.length, 2);
+	t.is(queue.length, 1);
 });
 
 test('displayCompactCountsSummary - handles single tool type', t => {

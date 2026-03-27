@@ -63,13 +63,17 @@ const CreateDirectoryFormatter = React.memo(
 
 				<Box>
 					<Text color={colors.secondary}>Path: </Text>
-					<Text color={colors.text}>{args.path}</Text>
+					<Text wrap="truncate-end" color={colors.text}>
+						{args.path}
+					</Text>
 				</Box>
 
 				{result && (
 					<Box>
 						<Text color={colors.secondary}>Result: </Text>
-						<Text color={colors.text}>{result}</Text>
+						<Text wrap="truncate-end" color={colors.text}>
+							{result}
+						</Text>
 					</Box>
 				)}
 			</Box>

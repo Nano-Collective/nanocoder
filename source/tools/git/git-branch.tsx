@@ -8,6 +8,7 @@ import {Box, Text} from 'ink';
 import React from 'react';
 
 import {getCurrentMode} from '@/context/mode-context';
+import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
@@ -271,6 +272,7 @@ function GitBranchFormatter({
 	args: GitBranchInput;
 	result?: string;
 }): React.ReactElement {
+	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
 
 	// Determine action
@@ -299,7 +301,7 @@ function GitBranchFormatter({
 	}
 
 	return (
-		<Box flexDirection="column" marginBottom={1}>
+		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
 			<Text color={colors.tool}>⚒ git_branch</Text>
 
 			<Box>
