@@ -149,7 +149,7 @@ importers:
         version: 4.0.0(@types/react@19.2.14)
       knip:
         specifier: ^6.0.0
-        version: 6.0.0
+        version: 6.0.6
       lint-staged:
         specifier: ^16.3.3
         version: 16.3.3
@@ -2209,6 +2209,9 @@ packages:
   get-tsconfig@4.13.6:
     resolution: {integrity: sha512-shZT/QMiSHc/YBLxxOkMtgSid5HFoauqCE3/exfsEcwg1WkeqjG+V40yBbBrsD+jW2HDXcs28xOfcbm2jI8Ddw==}
 
+  get-tsconfig@4.13.7:
+    resolution: {integrity: sha512-7tN6rFgBlMgpBML5j8typ92BKFi2sFQvIdpAqLA2beia5avZDrMs0FLZiM5etShWq5irVyGcGMEA1jcDaK7A/Q==}
+
   github-from-package@0.0.0:
     resolution: {integrity: sha512-SyHy3T1v2NUXn29OsWdxmK6RwHD+vkj3v8en8AOBZ1wBQ/hCAQ5bAQTD02kW4W9tUp/3Qh6J8r9EvntiyCmOOw==}
 
@@ -2641,8 +2644,8 @@ packages:
     resolution: {integrity: sha512-NOW9QQXMoZGg/oqnVNoNTTIFEIid1627WCffUBJEdMxYApq7mNE7CpzucIPc+ZQg25Phej7IJSmX3hO+oblOtQ==}
     engines: {node: '>=0.10.0'}
 
-  knip@6.0.0:
-    resolution: {integrity: sha512-5jQORgiHvO+9UiqmzZeyixg9Mc56A1Bze3sVI5XXeXy8tdh+CDD1SovjTc9CEKovJoM2NgZ3E58ZozYT8xrepA==}
+  knip@6.0.6:
+    resolution: {integrity: sha512-PA+r1mTDLHH3eShlffn2ZDyH1hHvmgDj7JsTP3JKuhV/jZTyHbRkGcOd+uaSxfJZmcZyOE5zw3naP33WllTIlA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
 
@@ -6000,6 +6003,10 @@ snapshots:
     dependencies:
       resolve-pkg-maps: 1.0.0
 
+  get-tsconfig@4.13.7:
+    dependencies:
+      resolve-pkg-maps: 1.0.0
+
   github-from-package@0.0.0:
     optional: true
 
@@ -6445,12 +6452,12 @@ snapshots:
     dependencies:
       is-buffer: 1.1.6
 
-  knip@6.0.0:
+  knip@6.0.6:
     dependencies:
       '@nodelib/fs.walk': 1.2.8
       fast-glob: 3.3.3
       formatly: 0.3.0
-      get-tsconfig: 4.13.6
+      get-tsconfig: 4.13.7
       jiti: 2.6.1
       minimist: 1.2.8
       oxc-parser: 0.120.0
