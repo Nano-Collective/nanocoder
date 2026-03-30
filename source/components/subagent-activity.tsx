@@ -19,12 +19,30 @@ export const SubagentActivity: React.FC<SubagentActivityProps> = ({
 	description,
 	startTime,
 }) => {
+	// Track elapsed time with proper interval updates
+	const [elapsed, setElapsed] = React.useState(0);
+
+	React.useEffect(() => {
+		if (!startTime) {
+			setElapsed(0);
+			return;
+		}
+
+		// Update immediately
+		setElapsed(Date.now() - startTime);
+
+		// Then update every 100ms for smooth display
+		const interval = setInterval(() => {
+			setElapsed(Date.now() - (startTime || 0));
+		}, 100);
+
+		return () => clearInterval(interval);
+	}, [startTime]);
+
 	if (!subagentName) {
 		return null;
 	}
 
-	// Calculate elapsed time
-	const elapsed = startTime ? Date.now() - startTime : 0;
 	const elapsedSeconds = (elapsed / 1000).toFixed(1);
 
 	return (

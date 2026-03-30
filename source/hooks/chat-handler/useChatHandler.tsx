@@ -173,11 +173,8 @@ export function useChatHandler({
 			/>,
 		);
 
-		// Add user message to conversation history
-		const builder = new MessageBuilder(messages);
-		builder.addUserMessage(message);
-		let updatedMessages = builder.build();
-		setMessages(updatedMessages);
+		// Determine final message (with auto-delegation prefix if applicable)
+		let finalMessage = message;
 
 		// Auto-delegation: check if message should be delegated to a subagent
 		const config = getAppConfig();
@@ -192,16 +189,20 @@ export function useChatHandler({
 
 				if (delegation.shouldDelegate && delegation.subagent) {
 					// Modify the message to explicitly request delegation
-					const delegationMessage = `[Use the ${delegation.subagent} subagent to help with this task] ${message}`;
-					builder.addUserMessage(delegationMessage);
-					updatedMessages = builder.build();
-					setMessages(updatedMessages);
+					// Replace the message rather than appending to avoid duplicates
+					finalMessage = `[Use the ${delegation.subagent} subagent to help with this task] ${message}`;
 				}
 			} catch {
 				// If auto-delegation fails, continue with original message
 				// Don't let delegation errors break the chat flow
 			}
 		}
+
+		// Add user message to conversation history (single addition)
+		const builder = new MessageBuilder(messages);
+		builder.addUserMessage(finalMessage);
+		const updatedMessages = builder.build();
+		setMessages(updatedMessages);
 
 		// Initialize conversation state if this is a new conversation
 		if (messages.length === 0) {

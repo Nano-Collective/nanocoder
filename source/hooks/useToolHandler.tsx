@@ -425,6 +425,12 @@ export function useToolHandler({
 				/>,
 			);
 			resetToolConfirmationState();
+			// Clear active subagent state to prevent spinner from hanging
+			setActiveSubagent({
+				name: null,
+				description: null,
+				startTime: null,
+			});
 		}
 	};
 

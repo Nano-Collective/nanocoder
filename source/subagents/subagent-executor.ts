@@ -14,6 +14,9 @@ import type {
 	SubagentTask,
 } from './types.js';
 
+/** Maximum recursion depth for subagent delegation */
+const MAX_SUBAGENT_DEPTH = 2;
+
 /**
  * SubagentExecutor manages the execution of delegated tasks to subagents.
  * Each subagent runs in an isolated context with filtered tools.
@@ -42,10 +45,27 @@ export class SubagentExecutor {
 	/**
 	 * Execute a subagent task.
 	 * @param task - The task to delegate
+	 * @param signal - Optional abort signal for cancellation
+	 * @param depth - Current recursion depth (internal use)
 	 * @returns The result from the subagent execution
 	 */
-	async execute(task: SubagentTask): Promise<SubagentResult> {
+	async execute(
+		task: SubagentTask,
+		signal?: AbortSignal,
+		depth = 0,
+	): Promise<SubagentResult> {
 		const startTime = Date.now();
+
+		// Prevent infinite recursion
+		if (depth >= MAX_SUBAGENT_DEPTH) {
+			return {
+				subagentName: task.subagent_type,
+				output: '',
+				success: false,
+				error: `Maximum subagent recursion depth (${MAX_SUBAGENT_DEPTH}) exceeded`,
+				executionTimeMs: Date.now() - startTime,
+			};
+		}
 
 		try {
 			// Load the subagent configuration
@@ -67,11 +87,11 @@ export class SubagentExecutor {
 			// Create isolated context for the subagent
 			const context = this.createSubagentContext(config, task);
 
-			// Get filtered tools for this subagent
+			// Get filtered tools for this subagent (excludes agent tool to prevent recursion)
 			const filteredTools = this.filterTools(config);
 
-			// Create or get client for this subagent
-			const client = await this.createSubagentClient(config);
+			// Get client and track original model for restoration
+			const {originalModel} = this.prepareClient(config);
 
 			// Build initial messages
 			const messages: Message[] = [
@@ -79,20 +99,28 @@ export class SubagentExecutor {
 				...context.initialMessages,
 			];
 
-			// Execute the subagent conversation
-			const output = await this.runSubagentConversation(
-				client,
-				messages,
-				filteredTools,
-				config.maxTurns,
-			);
+			try {
+				// Execute the subagent conversation
+				const output = await this.runSubagentConversation(
+					messages,
+					filteredTools,
+					config.maxTurns,
+					config,
+					signal,
+				);
 
-			return {
-				subagentName: config.name,
-				output,
-				success: true,
-				executionTimeMs: Date.now() - startTime,
-			};
+				return {
+					subagentName: config.name,
+					output,
+					success: true,
+					executionTimeMs: Date.now() - startTime,
+				};
+			} finally {
+				// Restore original model if we changed it
+				if (originalModel !== null) {
+					this.parentClient.setModel(originalModel);
+				}
+			}
 		} catch (error) {
 			return {
 				subagentName: task.subagent_type,
@@ -183,6 +211,7 @@ export class SubagentExecutor {
 
 	/**
 	 * Filter tools based on subagent configuration.
+	 * Always excludes the 'agent' tool to prevent infinite recursion.
 	 * @param config - The subagent configuration
 	 * @returns Record of filtered AI SDK tools
 	 */
@@ -197,6 +226,8 @@ export class SubagentExecutor {
 			AISDKCoreTool
 		>;
 		for (const name of availableNames) {
+			// Always exclude agent tool to prevent infinite recursion
+			if (name === 'agent') continue;
 			if (name in allTools) {
 				filtered[name] = allTools[name] as AISDKCoreTool;
 			}
@@ -206,43 +237,43 @@ export class SubagentExecutor {
 	}
 
 	/**
-	 * Create or get a client for the subagent.
+	 * Prepare the client for subagent execution.
+	 * Sets the model if different from parent, returns original model for restoration.
 	 * @param config - The subagent configuration
-	 * @returns A client configured for the subagent
+	 * @returns Object containing the original model (null if not changed)
 	 */
-	private async createSubagentClient(
-		config: SubagentConfigWithSource,
-	): Promise<LLMClient> {
-		// If model is 'inherit', use the parent client's model
+	private prepareClient(config: SubagentConfigWithSource): {
+		originalModel: string | null;
+	} {
+		// If model is 'inherit' or not specified, use parent client as-is
 		if (config.model === 'inherit' || !config.model) {
-			return this.parentClient;
+			return {originalModel: null};
 		}
 
-		// Otherwise, we need to create a new client with the specified model
-		// For now, we'll reuse the parent client but change the model
-		// In a future implementation, we might create a separate client
-		const client = this.parentClient;
-		const modelToUse = config.model;
+		// Save original model for restoration
+		const originalModel = this.parentClient.getCurrentModel();
 
-		// Set the model on the client
-		client.setModel(modelToUse);
+		// Set the model on the parent client
+		this.parentClient.setModel(config.model);
 
-		return client;
+		return {originalModel};
 	}
 
 	/**
 	 * Run the subagent conversation loop.
-	 * @param client - The LLM client to use
 	 * @param messages - Initial messages for the conversation
 	 * @param tools - Available tools for the subagent
 	 * @param maxTurns - Maximum number of conversation turns
+	 * @param config - The subagent configuration for permission enforcement
+	 * @param signal - Optional abort signal for cancellation
 	 * @returns The final output from the subagent
 	 */
 	private async runSubagentConversation(
-		client: LLMClient,
 		messages: Message[],
 		tools: Record<string, AISDKCoreTool>,
 		maxTurns: number | undefined,
+		config: SubagentConfigWithSource,
+		signal?: AbortSignal,
 	): Promise<string> {
 		const maxIterations = maxTurns ?? 10; // Default max turns
 		let iterations = 0;
@@ -251,18 +282,21 @@ export class SubagentExecutor {
 		while (iterations < maxIterations) {
 			iterations++;
 
-			// Filter to only non-tool messages for the chat call
-			// Tool messages are added after tool execution in the loop
-			const chatMessages = messages.filter(
-				msg => msg.role !== 'tool',
-			) as Message[];
+			// CRITICAL FIX: Do NOT filter out tool messages
+			// The OpenAI-compatible API requires tool results after tool_calls
+			// Passing all messages allows the LLM to see tool execution results
 
 			// Get response from LLM
-			const response = await client.chat(chatMessages, tools, {
-				onToken: token => {
-					output += token;
+			const response = await this.parentClient.chat(
+				messages,
+				tools,
+				{
+					onToken: token => {
+						output += token;
+					},
 				},
-			});
+				signal,
+			);
 
 			// Check if there were tool calls
 			const toolCalls = response.choices[0]?.message.tool_calls;
@@ -277,6 +311,21 @@ export class SubagentExecutor {
 				// Execute each tool call
 				for (const toolCall of toolCalls) {
 					const toolName = toolCall.function.name;
+
+					// Permission enforcement: check if tool is allowed in readOnly mode
+					if (config.permissionMode === 'readOnly') {
+						const isReadOnly = this.toolManager.isReadOnly(toolName);
+						if (!isReadOnly) {
+							messages.push({
+								role: 'tool',
+								content: `Error: Tool '${toolName}' is not read-only. Subagent is in read-only mode.`,
+								tool_call_id: toolCall.id,
+								name: toolName,
+							});
+							continue;
+						}
+					}
+
 					const toolHandler = this.toolManager.getToolHandler(toolName);
 
 					if (toolHandler) {
@@ -296,6 +345,13 @@ export class SubagentExecutor {
 								name: toolName,
 							});
 						}
+					} else {
+						messages.push({
+							role: 'tool',
+							content: `Error: Tool '${toolName}' not found`,
+							tool_call_id: toolCall.id,
+							name: toolName,
+						});
 					}
 				}
 

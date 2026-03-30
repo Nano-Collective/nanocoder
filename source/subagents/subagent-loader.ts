@@ -165,6 +165,14 @@ export class SubagentLoader {
 	}
 
 	/**
+	 * Get the project root directory.
+	 * @returns The project root path
+	 */
+	getProjectRoot(): string {
+		return this.projectRoot;
+	}
+
+	/**
 	 * Load subagent definitions from a directory.
 	 * @param dirPath - Directory path to load from
 	 * @param priority - Priority level for loaded configs
@@ -184,6 +192,9 @@ export class SubagentLoader {
 		const agents: SubagentConfigWithSource[] = [];
 		const entries = await fs.readdir(dirPath, {withFileTypes: true});
 
+		// Import the parser once, before the loop, to avoid repeated async overhead
+		const {parseSubagentMarkdown} = await import('./markdown-parser.js');
+
 		for (const entry of entries) {
 			if (!entry.isFile() || !entry.name.endsWith('.md')) {
 				continue;
@@ -191,7 +202,6 @@ export class SubagentLoader {
 
 			const filePath = path.join(dirPath, entry.name);
 			try {
-				const {parseSubagentMarkdown} = await import('./markdown-parser.js');
 				const parsed = await parseSubagentMarkdown(filePath);
 				agents.push({
 					...parsed.config,
@@ -284,7 +294,7 @@ let globalLoader: SubagentLoader | null = null;
 export function getSubagentLoader(projectRoot?: string): SubagentLoader {
 	if (
 		!globalLoader ||
-		(projectRoot && globalLoader['projectRoot'] !== projectRoot)
+		(projectRoot && globalLoader.getProjectRoot() !== projectRoot)
 	) {
 		globalLoader = new SubagentLoader(projectRoot);
 	}

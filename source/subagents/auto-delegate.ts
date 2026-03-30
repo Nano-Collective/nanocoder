@@ -45,19 +45,21 @@ export class AutoDelegator {
 	shouldDelegate(userMessage: string): AutoDelegateResult {
 		const message = userMessage.toLowerCase().trim();
 
-		// Check each available subagent to see if it matches
-		for (const [name, config] of this.availableSubagents) {
-			const match = this.checkSubagentMatch(message, name, config);
-			if (match.shouldDelegate) {
-				return match;
-			}
-		}
-
-		// Default: no delegation
-		return {
+		// Track the best match across all subagents
+		let bestMatch: AutoDelegateResult = {
 			shouldDelegate: false,
 			confidence: 0,
 		};
+
+		// Check each available subagent and find the best match
+		for (const [name, config] of this.availableSubagents) {
+			const match = this.checkSubagentMatch(message, name, config);
+			if (match.shouldDelegate && match.confidence > bestMatch.confidence) {
+				bestMatch = match;
+			}
+		}
+
+		return bestMatch;
 	}
 
 	/**
