@@ -32,10 +32,6 @@ import {extractRootError} from '../error-handling/error-extractor.js';
 import {parseAPIError} from '../error-handling/error-parser.js';
 import {isToolSupportError} from '../error-handling/tool-error-detector.js';
 import {
-	formatToolsForPrompt,
-	formatToolsForPromptSimplified,
-} from '../tools/tool-prompt-formatter.js';
-import {
 	createOnStepFinishHandler,
 	createPrepareStepHandler,
 } from './streaming-handler.js';
@@ -120,34 +116,11 @@ export async function handleChat(
 					? tools
 					: undefined;
 
-			// When native tools are disabled but we have tools, inject definitions into system prompt
-			// This allows the model to still use tools via XML format
-			let messagesWithToolPrompt = messages;
-			if (shouldDisableTools && Object.keys(tools).length > 0) {
-				const toolPrompt = modeOverrides?.useSimplifiedToolPrompt
-					? formatToolsForPromptSimplified(tools)
-					: formatToolsForPrompt(tools);
-				if (toolPrompt) {
-					// Find and augment the system message with tool definitions
-					messagesWithToolPrompt = messages.map((msg, index) => {
-						if (msg.role === 'system' && index === 0) {
-							return {
-								...msg,
-								content: msg.content + toolPrompt,
-							};
-						}
-						return msg;
-					});
-
-					logger.debug('Injected tool definitions into system prompt', {
-						toolCount: Object.keys(tools).length,
-						promptLength: toolPrompt.length,
-					});
-				}
-			}
+			// XML tool definitions are already included in the system prompt
+			// when native tools are disabled (handled upstream in useChatHandler).
 
 			// Convert messages to AI SDK v5 ModelMessage format
-			const modelMessages = convertToModelMessages(messagesWithToolPrompt);
+			const modelMessages = convertToModelMessages(messages);
 
 			logger.debug('AI SDK request prepared', {
 				messageCount: modelMessages.length,
@@ -166,7 +139,7 @@ export async function handleChat(
 				| Record<string, Record<string, string | boolean>>
 				| undefined;
 			if (providerConfig.sdkProvider === 'chatgpt-codex') {
-				const systemMsg = messagesWithToolPrompt.find(m => m.role === 'system');
+				const systemMsg = messages.find(m => m.role === 'system');
 				providerOptions = {
 					openai: {
 						...(systemMsg ? {instructions: systemMsg.content} : {}),

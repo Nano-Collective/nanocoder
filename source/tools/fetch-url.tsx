@@ -44,7 +44,8 @@ const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
 };
 
 const fetchUrlCoreTool = tool({
-	description: 'Fetch and parse markdown content from a URL',
+	description:
+		'Fetch a URL and return its content as cleaned markdown. HTML is converted to readable text. Use for reading documentation pages, blog posts, or any web content.',
 	inputSchema: jsonSchema<FetchArgs>({
 		type: 'object',
 		properties: {

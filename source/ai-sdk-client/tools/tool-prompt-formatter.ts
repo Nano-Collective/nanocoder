@@ -68,11 +68,14 @@ function formatSingleTool(name: string, tool: AISDKCoreTool): string {
 
 		output += '\n';
 
-		// Add example usage
+		// Add example usage — prefer required params, fall back to any params
+		const exampleParams =
+			required.length > 0
+				? required.slice(0, 2)
+				: Object.keys(properties).slice(0, 2);
 		output += '**Example:**\n```xml\n';
 		output += `<${name}>\n`;
-		for (const paramName of required.slice(0, 2)) {
-			// Show first 2 required params
+		for (const paramName of exampleParams) {
 			output += `<${paramName}>value</${paramName}>\n`;
 		}
 		output += `</${name}>\n`;
@@ -80,60 +83,6 @@ function formatSingleTool(name: string, tool: AISDKCoreTool): string {
 	}
 
 	return output;
-}
-
-/**
- * Simplified tool formatter for model mode.
- * One-line descriptions, required parameters only, no examples.
- * Reduces token usage for constrained models on the XML fallback path.
- */
-export function formatToolsForPromptSimplified(
-	tools: Record<string, AISDKCoreTool>,
-): string {
-	const toolNames = Object.keys(tools);
-
-	if (toolNames.length === 0) {
-		return '';
-	}
-
-	let prompt = '\n\n## AVAILABLE TOOLS\n\n';
-	prompt += 'Use XML format: `<tool_name><param>value</param></tool_name>`\n\n';
-
-	for (const name of toolNames) {
-		const tool = tools[name];
-		const description = extractDescription(tool);
-		const truncatedDesc = description
-			? description.length > 80
-				? `${description.slice(0, 77)}...`
-				: description
-			: '';
-
-		prompt += `### ${name}\n${truncatedDesc}\n`;
-
-		const schema = extractInputSchema(tool);
-		if (schema && schema.properties) {
-			const required = (schema.required as string[]) || [];
-			const properties = schema.properties as Record<
-				string,
-				{type?: string; description?: string}
-			>;
-
-			if (required.length > 0) {
-				prompt += 'Required: ';
-				prompt += required
-					.map(p => {
-						const typeStr = properties[p]?.type || 'any';
-						return `\`${p}\` (${typeStr})`;
-					})
-					.join(', ');
-				prompt += '\n';
-			}
-		}
-
-		prompt += '\n';
-	}
-
-	return prompt;
 }
 
 /**

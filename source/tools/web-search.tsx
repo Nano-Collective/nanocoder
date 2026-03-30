@@ -105,7 +105,7 @@ const executeWebSearch = async (args: SearchArgs): Promise<string> => {
 
 const webSearchCoreTool = tool({
 	description:
-		'Search the web for information (scrapes Brave Search, returns markdown)',
+		'Search the web and return results as markdown. Use for finding documentation, API references, error solutions, and current information.',
 	inputSchema: jsonSchema<SearchArgs>({
 		type: 'object',
 		properties: {

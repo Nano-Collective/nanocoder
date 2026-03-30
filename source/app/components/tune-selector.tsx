@@ -26,6 +26,7 @@ type MainAction =
 	| 'preset'
 	| 'toolProfile'
 	| 'aggressiveCompact'
+	| 'disableNativeTools'
 	| 'parameters'
 	| 'apply';
 
@@ -89,6 +90,10 @@ function TuneMainMenu({
 				{
 					label: `Aggressive Compact - ${config.aggressiveCompact ? 'ON' : 'OFF'}`,
 					value: 'aggressiveCompact',
+				},
+				{
+					label: `Native Tool Calling - ${config.disableNativeTools ? 'OFF (XML fallback)' : 'ON'}`,
+					value: 'disableNativeTools',
 				},
 				{
 					label: `Model Parameters - ${config.modelParameters ? 'configured' : 'defaults'}`,
@@ -649,6 +654,12 @@ export function TuneSelector({
 				setConfig(prev => ({
 					...prev,
 					aggressiveCompact: !prev.aggressiveCompact,
+				}));
+				break;
+			case 'disableNativeTools':
+				setConfig(prev => ({
+					...prev,
+					disableNativeTools: !prev.disableNativeTools,
 				}));
 				break;
 			case 'parameters':

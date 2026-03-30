@@ -5,6 +5,8 @@
 
 import React from 'react';
 import {UsageDisplay} from '@/components/usage/usage-display';
+import {getAppConfig} from '@/config/index';
+import {loadPreferences} from '@/config/preferences';
 import {getToolManager} from '@/message-handler';
 import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
 import {createTokenizer} from '@/tokenization/index';
@@ -93,13 +95,22 @@ export const usageCommand: Command = {
 			tokenizer.free();
 		}
 
-		// Calculate tool definitions tokens and create final breakdown (immutable)
-		// Note: Tool definitions are sent separately to the API and add token overhead
-		const toolDefinitions = toolManager
-			? calculateToolDefinitionsTokens(
-					Object.keys(toolManager.getToolRegistry()).length,
-				)
-			: 0;
+		// Calculate tool definitions tokens (only when native tool calling is active)
+		// When tools are disabled (XML fallback), definitions are in the system prompt instead
+		const config = getAppConfig();
+		const providerConfig = config.providers?.find(p => p.name === provider);
+		const prefs = loadPreferences();
+		const nativeToolsDisabled =
+			providerConfig?.disableTools === true ||
+			(providerConfig?.disableToolModels?.includes(model) ?? false) ||
+			(prefs.tune?.enabled && prefs.tune.disableNativeTools);
+
+		const toolDefinitions =
+			toolManager && !nativeToolsDisabled
+				? calculateToolDefinitionsTokens(
+						Object.keys(toolManager.getToolRegistry()).length,
+					)
+				: 0;
 
 		const breakdown = {
 			...baseBreakdown,

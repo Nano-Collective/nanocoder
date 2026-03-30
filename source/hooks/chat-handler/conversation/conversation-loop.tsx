@@ -133,18 +133,15 @@ export const processAssistantResponse = async (
 	setTokenCount(0);
 
 	// Build mode overrides for non-interactive mode and tune settings
-	const useSimplifiedToolPrompt = tune?.enabled === true;
 	const modelParameters = tune?.enabled ? tune.modelParameters : undefined;
-	const hasTuneOverrides = useSimplifiedToolPrompt || modelParameters;
 	const nonInteractiveAlwaysAllow = nonInteractiveMode
 		? (getAppConfig().alwaysAllow ?? [])
 		: [];
 	const modeOverrides: ModeOverrides | undefined =
-		nonInteractiveMode || hasTuneOverrides
+		nonInteractiveMode || modelParameters
 			? {
 					nonInteractiveMode,
 					nonInteractiveAlwaysAllow,
-					useSimplifiedToolPrompt,
 					modelParameters,
 				}
 			: undefined;

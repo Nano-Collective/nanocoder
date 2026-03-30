@@ -1,4 +1,5 @@
 import React from 'react';
+import {formatToolsForPrompt} from '@/ai-sdk-client/tools/tool-prompt-formatter';
 import {ConversationStateManager} from '@/app/utils/conversation-state';
 import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
@@ -6,7 +7,7 @@ import {CommandIntegration} from '@/custom-commands/command-integration';
 import {promptHistory} from '@/prompt-history';
 import type {Message} from '@/types/core';
 import {MessageBuilder} from '@/utils/message-builder';
-import {buildSystemPrompt} from '@/utils/prompt-builder';
+import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 import {assemblePrompt} from '@/utils/prompt-processor';
 import {processAssistantResponse} from './conversation/conversation-loop';
 import {createResetStreamingState} from './state/streaming-state';
@@ -42,8 +43,9 @@ export function useChatHandler({
 	// Conversation state manager for enhanced context
 	const conversationStateManager = React.useRef(new ConversationStateManager());
 
-	// Check if native tool calling is disabled for the current provider/model
+	// Check if native tool calling is disabled (provider config or tune override)
 	const toolsDisabled = React.useMemo(() => {
+		if (tune?.enabled && tune.disableNativeTools) return true;
 		const config = getAppConfig();
 		const provider = config.providers?.find(p => p.name === currentProvider);
 		if (!provider) return false;
@@ -51,18 +53,37 @@ export function useChatHandler({
 			provider.disableTools === true ||
 			(provider.disableToolModels?.includes(currentModel) ?? false)
 		);
-	}, [currentProvider, currentModel]);
+	}, [currentProvider, currentModel, tune]);
 
 	// Cache the base system prompt — only rebuild when mode, tune, tools, or toolsDisabled change
 	// This preserves KV cache by keeping the system message stable across turns
+	// When native tools are disabled, XML tool definitions are included in the prompt
+	// so token counting reflects the full system message the model actually sees.
 	const cachedBasePrompt = React.useMemo(() => {
 		if (!toolManager) return null;
-		return buildSystemPrompt(
+		const availableNames = toolManager.getAvailableToolNames(
+			tune,
+			developmentMode,
+		);
+		let prompt = buildSystemPrompt(
 			developmentMode,
 			tune,
-			toolManager.getAvailableToolNames(tune, developmentMode),
+			availableNames,
 			toolsDisabled,
 		);
+
+		if (toolsDisabled) {
+			const tools = toolManager.getFilteredToolsWithoutExecute(availableNames);
+			const toolPrompt = formatToolsForPrompt(tools);
+			if (toolPrompt) {
+				prompt += toolPrompt;
+			}
+		}
+
+		// Update the cached prompt so /usage and context % see the full prompt
+		setLastBuiltPrompt(prompt);
+
+		return prompt;
 	}, [developmentMode, tune, toolManager, toolsDisabled]);
 
 	// Track when the current conversation started for elapsed time display

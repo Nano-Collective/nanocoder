@@ -31,8 +31,7 @@ const executeDeleteFile = async (args: DeleteFileArgs): Promise<string> => {
 };
 
 const deleteFileCoreTool = tool({
-	description:
-		'Delete a file. Only deletes single files, not directories. Always requires user approval.',
+	description: 'Delete a file. Only deletes single files, not directories.',
 	inputSchema: jsonSchema<DeleteFileArgs>({
 		type: 'object',
 		properties: {

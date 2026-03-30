@@ -58,6 +58,14 @@ export function getLastBuiltPrompt(): string {
 	);
 }
 
+/**
+ * Update the cached prompt after post-processing (e.g. XML tool injection).
+ * Ensures token-counting callers see the full prompt the model receives.
+ */
+export function setLastBuiltPrompt(prompt: string): void {
+	lastBuiltPrompt = prompt;
+}
+
 function generateSystemInfo(): string {
 	const now = new Date();
 	const dateStr = now.toISOString().split('T')[0];

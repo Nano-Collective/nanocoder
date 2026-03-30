@@ -47,14 +47,6 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 	scheduler: ['ask_user'],
 };
 
-// Exploration tools for plan mode on minimal profile
-const PLAN_MINIMAL_TOOLS = [
-	'read_file',
-	'find_files',
-	'search_file_contents',
-	'list_directory',
-];
-
 /**
  * Manages both static tools and dynamic MCP tools.
  * Single authority for tool availability, filtering, and approval policy.
@@ -111,15 +103,6 @@ export class ToolManager {
 		developmentMode?: DevelopmentMode,
 	): string[] {
 		let names = this.getToolNames();
-
-		// In plan mode with minimal profile, use a curated exploration set
-		if (
-			developmentMode === 'plan' &&
-			tuneConfig?.enabled &&
-			tuneConfig.toolProfile === 'minimal'
-		) {
-			return PLAN_MINIMAL_TOOLS;
-		}
 
 		if (tuneConfig?.enabled && tuneConfig.toolProfile !== 'full') {
 			const profileTools = getToolsForProfile(tuneConfig.toolProfile);

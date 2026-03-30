@@ -690,7 +690,7 @@ test('getAvailableToolNames - returns all tools when tune disabled', t => {
 test('getAvailableToolNames - filters to minimal profile', t => {
 	const manager = new ToolManager();
 	const result = manager.getAvailableToolNames({enabled: true, toolProfile: 'minimal', aggressiveCompact: false});
-	t.deepEqual(result, ['read_file', 'string_replace', 'execute_bash']);
+	t.deepEqual(result, ['read_file', 'write_file', 'string_replace', 'execute_bash', 'find_files', 'search_file_contents', 'list_directory']);
 });
 
 test('getAvailableToolNames - full profile returns all minus mode exclusions', t => {
@@ -713,9 +713,10 @@ test('getAvailableToolNames - plan mode excludes mutation tools', t => {
 	t.true(result.includes('find_files'));
 });
 
-test('getAvailableToolNames - plan + minimal returns curated exploration set', t => {
+test('getAvailableToolNames - plan + minimal excludes mutation tools from minimal set', t => {
 	const manager = new ToolManager();
 	const result = manager.getAvailableToolNames({enabled: true, toolProfile: 'minimal', aggressiveCompact: false}, 'plan');
+	// Plan mode excludes write_file, string_replace, execute_bash from minimal
 	t.deepEqual(result, ['read_file', 'find_files', 'search_file_contents', 'list_directory']);
 });
 
@@ -892,4 +893,44 @@ test('parity - nonInteractiveAlwaysAllow does not change available tool set', t 
 		Object.keys(toolsWith).sort(),
 		'nonInteractiveAlwaysAllow should not add or remove tools',
 	);
+});
+
+// ============================================================================
+// XML Fallback — prompt grows when tool definitions are injected
+// ============================================================================
+
+import {formatToolsForPrompt} from '../ai-sdk-client/tools/tool-prompt-formatter.js';
+
+test('XML fallback - tool definitions add significant length to system prompt', t => {
+	const manager = new ToolManager();
+	const availableNames = manager.getAvailableToolNames(undefined, 'normal');
+	const nativePrompt = buildSystemPrompt('normal', undefined, availableNames, false);
+
+	// Simulate what useChatHandler does when toolsDisabled=true
+	const xmlPrompt = buildSystemPrompt('normal', undefined, availableNames, true);
+	const tools = manager.getFilteredToolsWithoutExecute(availableNames);
+	const toolDefs = formatToolsForPrompt(tools);
+	const fullXmlPrompt = xmlPrompt + toolDefs;
+
+	// The XML prompt with tool definitions should be substantially larger
+	t.true(
+		fullXmlPrompt.length > nativePrompt.length,
+		'XML fallback prompt (with tool defs) should be larger than native prompt',
+	);
+	// Tool definitions alone should be significant
+	t.true(
+		toolDefs.length > 1000,
+		'Tool definitions should be at least 1000 characters',
+	);
+});
+
+test('XML fallback - tool definitions include examples per tool', t => {
+	const manager = new ToolManager();
+	const availableNames = manager.getAvailableToolNames(undefined, 'normal');
+	const tools = manager.getFilteredToolsWithoutExecute(availableNames);
+	const defs = formatToolsForPrompt(tools);
+
+	// Should include XML examples
+	t.true(defs.includes('**Example:**'));
+	t.true(defs.includes('```xml'));
 });

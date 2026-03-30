@@ -3,6 +3,7 @@ import {
 	buildSystemPrompt,
 	getLastBuiltPrompt,
 	resetSectionCache,
+	setLastBuiltPrompt,
 } from './prompt-builder.js';
 import type {TuneConfig} from '@/types/config';
 import {TUNE_DEFAULTS} from '@/types/config';
@@ -181,7 +182,7 @@ test('buildSystemPrompt - plan mode excludes constraints', t => {
 // ============================================================================
 
 test('buildSystemPrompt - minimal profile appends single-tool instruction', t => {
-	const result = buildSystemPrompt('normal', TUNE_MINIMAL, ['read_file', 'string_replace', 'execute_bash']);
+	const result = buildSystemPrompt('normal', TUNE_MINIMAL, ['read_file', 'write_file', 'string_replace', 'execute_bash', 'find_files', 'search_file_contents', 'list_directory']);
 	t.true(result.includes('Call exactly ONE tool per response'));
 });
 
@@ -234,7 +235,7 @@ test('getLastBuiltPrompt - returns last built prompt after build', t => {
 
 test('buildSystemPrompt - minimal profile produces smaller prompt than full', t => {
 	const fullPrompt = buildSystemPrompt('normal', TUNE_FULL, ALL_TOOLS);
-	const minimalPrompt = buildSystemPrompt('normal', TUNE_MINIMAL, ['read_file', 'string_replace', 'execute_bash']);
+	const minimalPrompt = buildSystemPrompt('normal', TUNE_MINIMAL, ['read_file', 'write_file', 'string_replace', 'execute_bash', 'find_files', 'search_file_contents', 'list_directory']);
 	t.true(minimalPrompt.length < fullPrompt.length);
 });
 
@@ -242,4 +243,31 @@ test('buildSystemPrompt - plan mode produces smaller prompt than normal', t => {
 	const normalPrompt = buildSystemPrompt('normal', undefined, ALL_TOOLS);
 	const planPrompt = buildSystemPrompt('plan', undefined, ALL_TOOLS);
 	t.true(planPrompt.length < normalPrompt.length);
+});
+
+// ============================================================================
+// setLastBuiltPrompt — cache override for post-processing
+// ============================================================================
+
+test('setLastBuiltPrompt - overrides the cached prompt', t => {
+	buildSystemPrompt('normal', undefined, ALL_TOOLS);
+	const before = getLastBuiltPrompt();
+
+	const augmented = before + '\n\n## EXTRA TOOL DEFINITIONS\n...lots of XML...';
+	setLastBuiltPrompt(augmented);
+
+	const after = getLastBuiltPrompt();
+	t.is(after, augmented);
+	t.true(after.length > before.length);
+});
+
+test('buildSystemPrompt - XML fallback prompt differs from native prompt', t => {
+	const nativePrompt = buildSystemPrompt('normal', undefined, ALL_TOOLS, false);
+	const xmlPrompt = buildSystemPrompt('normal', undefined, ALL_TOOLS, true);
+
+	// They should differ — XML version has different tool rules section
+	t.not(nativePrompt, xmlPrompt);
+	// XML version includes XML format instructions
+	t.true(xmlPrompt.includes('does not support native tool calling'));
+	t.false(nativePrompt.includes('does not support native tool calling'));
 });

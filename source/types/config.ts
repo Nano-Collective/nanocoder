@@ -164,6 +164,7 @@ export interface TuneConfig {
 	enabled: boolean;
 	toolProfile: ToolProfile;
 	aggressiveCompact: boolean;
+	disableNativeTools?: boolean;
 	modelParameters?: ModelParameters;
 }
 

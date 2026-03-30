@@ -169,7 +169,6 @@ export interface StreamCallbacks {
 export interface ModeOverrides {
 	nonInteractiveMode: boolean;
 	nonInteractiveAlwaysAllow: string[];
-	useSimplifiedToolPrompt?: boolean;
 	modelParameters?: import('@/types/config').ModelParameters;
 }
 

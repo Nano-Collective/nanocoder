@@ -8,7 +8,7 @@ import {
 	calculateTokenBreakdown,
 	calculateToolDefinitionsTokens,
 } from '@/usage/calculator';
-import {buildSystemPrompt} from '@/utils/prompt-builder';
+import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 
 interface UseContextPercentageProps {
 	currentModel: string;
@@ -76,12 +76,8 @@ export function useContextPercentage({
 			return;
 		}
 
-		// Include system prompt in calculation using the dynamic builder
-		const systemPrompt = buildSystemPrompt(
-			developmentMode,
-			tune,
-			toolManager?.getAvailableToolNames(tune, developmentMode) ?? [],
-		);
+		// Use the cached prompt which includes XML tool definitions when applicable
+		const systemPrompt = getLastBuiltPrompt();
 		const systemMessage: Message = {
 			role: 'system',
 			content: systemPrompt,
@@ -99,12 +95,15 @@ export function useContextPercentage({
 			},
 		);
 
-		// Include tool definition overhead (same as /usage command)
-		const toolDefTokens = toolManager
-			? calculateToolDefinitionsTokens(
-					Object.keys(toolManager.getToolRegistry()).length,
-				)
-			: 0;
+		// Include tool definition overhead (only when native tool calling is active)
+		// When tools are disabled (XML fallback), definitions are in the system prompt
+		const nativeToolsDisabled = tune?.enabled && tune.disableNativeTools;
+		const toolDefTokens =
+			toolManager && !nativeToolsDisabled
+				? calculateToolDefinitionsTokens(
+						Object.keys(toolManager.getToolRegistry()).length,
+					)
+				: 0;
 
 		const total = breakdown.total + toolDefTokens + streamingTokenCount;
 		const percent = Math.round((total / limit) * 100);
@@ -118,7 +117,6 @@ export function useContextPercentage({
 		toolManager,
 		streamingTokenCount,
 		setContextPercentUsed,
-		developmentMode,
 		tune,
 	]);
 }
