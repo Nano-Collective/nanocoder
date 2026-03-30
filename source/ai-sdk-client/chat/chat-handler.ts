@@ -112,33 +112,12 @@ export async function handleChat(
 
 	return await withNewCorrelationContext(async _context => {
 		try {
-			// Apply non-interactive mode overrides to tool approval
-			// In non-interactive mode, tools in the allowList should bypass needsApproval
-			let effectiveTools = tools;
-			if (
-				modeOverrides?.nonInteractiveMode &&
-				modeOverrides.nonInteractiveAlwaysAllow.length > 0
-			) {
-				const allowSet = new Set(modeOverrides.nonInteractiveAlwaysAllow);
-				effectiveTools = Object.fromEntries(
-					Object.entries(tools).map(([name, toolDef]) => {
-						if (allowSet.has(name)) {
-							// Override needsApproval to false for allowed tools
-							return [
-								name,
-								{...toolDef, needsApproval: false} as AISDKCoreTool,
-							];
-						}
-						return [name, toolDef];
-					}),
-				);
-			}
-
-			// Tools are already in AI SDK format - use directly
+			// Tools arrive with approval policy already resolved by ToolManager.
+			// No approval mutation needed here — chat handler is a pure SDK caller.
 			const aiTools = shouldDisableTools
 				? undefined
-				: Object.keys(effectiveTools).length > 0
-					? effectiveTools
+				: Object.keys(tools).length > 0
+					? tools
 					: undefined;
 
 			// When native tools are disabled but we have tools, inject definitions into system prompt

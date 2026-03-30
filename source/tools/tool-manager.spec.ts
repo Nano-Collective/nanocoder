@@ -670,3 +670,226 @@ test('getFilteredTools - full tool list returns all tools', t => {
 	const filtered = manager.getFilteredTools(allNames);
 	t.is(Object.keys(filtered).length, allNames.length);
 });
+
+// ============================================================================
+// getAvailableToolNames Tests (moved from prompt-builder)
+// ============================================================================
+
+test('getAvailableToolNames - returns all tools when no tune or mode', t => {
+	const manager = new ToolManager();
+	const result = manager.getAvailableToolNames();
+	t.deepEqual(result, manager.getToolNames());
+});
+
+test('getAvailableToolNames - returns all tools when tune disabled', t => {
+	const manager = new ToolManager();
+	const result = manager.getAvailableToolNames({enabled: false, toolProfile: 'full', aggressiveCompact: false});
+	t.deepEqual(result, manager.getToolNames());
+});
+
+test('getAvailableToolNames - filters to minimal profile', t => {
+	const manager = new ToolManager();
+	const result = manager.getAvailableToolNames({enabled: true, toolProfile: 'minimal', aggressiveCompact: false});
+	t.deepEqual(result, ['read_file', 'string_replace', 'execute_bash']);
+});
+
+test('getAvailableToolNames - full profile returns all minus mode exclusions', t => {
+	const manager = new ToolManager();
+	const result = manager.getAvailableToolNames({enabled: true, toolProfile: 'full', aggressiveCompact: false}, 'scheduler');
+	t.false(result.includes('ask_user'));
+	t.true(result.includes('read_file'));
+});
+
+test('getAvailableToolNames - plan mode excludes mutation tools', t => {
+	const manager = new ToolManager();
+	const result = manager.getAvailableToolNames({enabled: true, toolProfile: 'full', aggressiveCompact: false}, 'plan');
+	t.false(result.includes('string_replace'));
+	t.false(result.includes('write_file'));
+	t.false(result.includes('execute_bash'));
+	t.false(result.includes('git_commit'));
+	t.false(result.includes('create_task'));
+	// Read-only tools remain
+	t.true(result.includes('read_file'));
+	t.true(result.includes('find_files'));
+});
+
+test('getAvailableToolNames - plan + minimal returns curated exploration set', t => {
+	const manager = new ToolManager();
+	const result = manager.getAvailableToolNames({enabled: true, toolProfile: 'minimal', aggressiveCompact: false}, 'plan');
+	t.deepEqual(result, ['read_file', 'find_files', 'search_file_contents', 'list_directory']);
+});
+
+// ============================================================================
+// getEffectiveTools Tests
+// ============================================================================
+
+test('getEffectiveTools - returns filtered tools without execute', t => {
+	const manager = new ToolManager();
+	const names = ['read_file'];
+	const tools = manager.getEffectiveTools(names);
+	t.is(Object.keys(tools).length, 1);
+	t.truthy(tools.read_file);
+});
+
+test('getEffectiveTools - applies nonInteractiveAlwaysAllow override', t => {
+	const manager = new ToolManager();
+	const names = manager.getToolNames();
+	const tools = manager.getEffectiveTools(names, {
+		nonInteractiveAlwaysAllow: ['execute_bash'],
+	});
+	// The execute_bash tool should have needsApproval set to false
+	const bashTool = tools.execute_bash as any;
+	t.is(bashTool.needsApproval, false);
+});
+
+test('getEffectiveTools - does not override approval for tools not in allow list', t => {
+	const manager = new ToolManager();
+	const names = manager.getToolNames();
+	const toolsBefore = manager.getEffectiveTools(names);
+	const toolsAfter = manager.getEffectiveTools(names, {
+		nonInteractiveAlwaysAllow: ['execute_bash'],
+	});
+	// write_file should not be changed by the allow list override
+	const writeBefore = toolsBefore.write_file as any;
+	const writeAfter = toolsAfter.write_file as any;
+	t.is(writeAfter.needsApproval, writeBefore.needsApproval);
+});
+
+// ============================================================================
+// Prompt/Runtime Parity Tests
+// ============================================================================
+// These tests verify that the tool names used for prompt building and the tool
+// names used for runtime execution are always identical for a given mode/tune
+// combo. This is the key invariant that prevents prompt/runtime drift.
+
+import {buildSystemPrompt} from '../utils/prompt-builder.js';
+import type {TuneConfig} from '@/types/config';
+import type {DevelopmentMode} from '@/types/core';
+
+/**
+ * Helper: given a mode and tune, verify that getAvailableToolNames() and
+ * getEffectiveTools() produce the exact same set of tool names.
+ */
+function assertPromptRuntimeParity(
+	t: any,
+	manager: ToolManager,
+	tune: TuneConfig | undefined,
+	mode: DevelopmentMode,
+	label: string,
+) {
+	const availableNames = manager.getAvailableToolNames(tune, mode);
+	const effectiveTools = manager.getEffectiveTools(availableNames);
+	const runtimeNames = Object.keys(effectiveTools).sort();
+	const promptNames = [...availableNames].sort();
+
+	t.deepEqual(
+		runtimeNames,
+		promptNames,
+		`Prompt/runtime parity broken for ${label}`,
+	);
+
+	// Also verify the prompt builds without error using these names
+	t.notThrows(
+		() => buildSystemPrompt(mode, tune, availableNames),
+		`buildSystemPrompt should not throw for ${label}`,
+	);
+}
+
+test('parity - normal mode, no tune', t => {
+	const manager = new ToolManager();
+	assertPromptRuntimeParity(t, manager, undefined, 'normal', 'normal/no-tune');
+});
+
+test('parity - auto-accept mode, no tune', t => {
+	const manager = new ToolManager();
+	assertPromptRuntimeParity(
+		t,
+		manager,
+		undefined,
+		'auto-accept',
+		'auto-accept/no-tune',
+	);
+});
+
+test('parity - plan mode, no tune', t => {
+	const manager = new ToolManager();
+	assertPromptRuntimeParity(t, manager, undefined, 'plan', 'plan/no-tune');
+});
+
+test('parity - scheduler mode, no tune', t => {
+	const manager = new ToolManager();
+	assertPromptRuntimeParity(
+		t,
+		manager,
+		undefined,
+		'scheduler',
+		'scheduler/no-tune',
+	);
+});
+
+test('parity - normal mode, full profile', t => {
+	const manager = new ToolManager();
+	const tune: TuneConfig = {
+		enabled: true,
+		toolProfile: 'full',
+		aggressiveCompact: false,
+	};
+	assertPromptRuntimeParity(t, manager, tune, 'normal', 'normal/full');
+});
+
+test('parity - normal mode, minimal profile', t => {
+	const manager = new ToolManager();
+	const tune: TuneConfig = {
+		enabled: true,
+		toolProfile: 'minimal',
+		aggressiveCompact: false,
+	};
+	assertPromptRuntimeParity(t, manager, tune, 'normal', 'normal/minimal');
+});
+
+test('parity - plan mode, minimal profile', t => {
+	const manager = new ToolManager();
+	const tune: TuneConfig = {
+		enabled: true,
+		toolProfile: 'minimal',
+		aggressiveCompact: false,
+	};
+	assertPromptRuntimeParity(t, manager, tune, 'plan', 'plan/minimal');
+});
+
+test('parity - plan mode, full profile', t => {
+	const manager = new ToolManager();
+	const tune: TuneConfig = {
+		enabled: true,
+		toolProfile: 'full',
+		aggressiveCompact: false,
+	};
+	assertPromptRuntimeParity(t, manager, tune, 'plan', 'plan/full');
+});
+
+test('parity - scheduler mode, full profile', t => {
+	const manager = new ToolManager();
+	const tune: TuneConfig = {
+		enabled: true,
+		toolProfile: 'full',
+		aggressiveCompact: false,
+	};
+	assertPromptRuntimeParity(t, manager, tune, 'scheduler', 'scheduler/full');
+});
+
+test('parity - nonInteractiveAlwaysAllow does not change available tool set', t => {
+	const manager = new ToolManager();
+	const availableNames = manager.getAvailableToolNames(undefined, 'normal');
+
+	// With allow list, the set of tools should be identical — only approval changes
+	const toolsWithout = manager.getEffectiveTools(availableNames);
+	const toolsWith = manager.getEffectiveTools(availableNames, {
+		nonInteractiveAlwaysAllow: ['execute_bash', 'write_file'],
+	});
+
+	t.deepEqual(
+		Object.keys(toolsWithout).sort(),
+		Object.keys(toolsWith).sort(),
+		'nonInteractiveAlwaysAllow should not add or remove tools',
+	);
+});

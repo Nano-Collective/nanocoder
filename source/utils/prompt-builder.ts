@@ -2,8 +2,7 @@ import {existsSync, readFileSync} from 'fs';
 import {homedir, platform, release} from 'os';
 import {basename, dirname, join, normalize} from 'path';
 import {fileURLToPath} from 'url';
-import type {ToolManager} from '@/tools/tool-manager';
-import {getToolsForProfile, isSingleToolProfile} from '@/tools/tool-profiles';
+import {isSingleToolProfile} from '@/tools/tool-profiles';
 import type {TuneConfig} from '@/types/config';
 import {TUNE_DEFAULTS} from '@/types/config';
 import type {DevelopmentMode} from '@/types/core';
@@ -127,89 +126,6 @@ function hasAnyGitTool(toolSet: Set<string>): boolean {
 		if (name.startsWith('git_')) return true;
 	}
 	return false;
-}
-
-// Tools to exclude per development mode
-const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
-	normal: [],
-	'auto-accept': [],
-	plan: [
-		// No mutation tools — plan mode is read-only exploration
-		'write_file',
-		'string_replace',
-		'delete_file',
-		'move_file',
-		'copy_file',
-		'create_directory',
-		'execute_bash',
-		// No task tools — plan mode produces the plan itself
-		'create_task',
-		'update_task',
-		'delete_task',
-		'list_tasks',
-		// No git mutation tools — keep read-only git tools
-		'git_add',
-		'git_commit',
-		'git_push',
-		'git_pull',
-		'git_branch',
-		'git_stash',
-		'git_reset',
-	],
-	scheduler: ['ask_user'],
-};
-
-/**
- * Get tool names that should be excluded for a given development mode.
- */
-function getModeExcludedTools(mode: DevelopmentMode): string[] {
-	return MODE_EXCLUDED_TOOLS[mode];
-}
-
-/**
- * Get the list of tool names available given the current tune config.
- * Used by both the prompt builder and token counting callers.
- */
-// Exploration tools for plan mode on minimal profile
-// Enough to investigate a codebase, not overwhelming for small models
-const PLAN_MINIMAL_TOOLS = [
-	'read_file',
-	'find_files',
-	'search_file_contents',
-	'list_directory',
-];
-
-export function getAvailableToolNames(
-	toolManager: ToolManager | null,
-	tuneConfig?: TuneConfig,
-	developmentMode?: DevelopmentMode,
-): string[] {
-	let names = toolManager?.getToolNames() ?? [];
-
-	// In plan mode with minimal profile, use a curated exploration set
-	if (
-		developmentMode === 'plan' &&
-		tuneConfig?.enabled &&
-		tuneConfig.toolProfile === 'minimal'
-	) {
-		return PLAN_MINIMAL_TOOLS;
-	}
-
-	if (tuneConfig?.enabled && tuneConfig.toolProfile !== 'full') {
-		const profileTools = getToolsForProfile(tuneConfig.toolProfile);
-		if (profileTools.length > 0) {
-			names = profileTools;
-		}
-	}
-	// Apply mode-based exclusions
-	if (developmentMode) {
-		const excluded = getModeExcludedTools(developmentMode);
-		if (excluded.length > 0) {
-			const excludeSet = new Set(excluded);
-			names = names.filter(n => !excludeSet.has(n));
-		}
-	}
-	return names;
 }
 
 /**

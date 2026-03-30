@@ -18,7 +18,6 @@ import type {
 import {performAutoCompact} from '@/utils/auto-compact';
 import {formatElapsedTime, getRandomAdjective} from '@/utils/completion-note';
 import {MessageBuilder} from '@/utils/message-builder';
-import {getAvailableToolNames} from '@/utils/prompt-builder';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {displayCompactCountsSummary} from '@/utils/tool-result-display';
 import {filterValidToolCalls} from '../utils/tool-filters';
@@ -137,32 +136,28 @@ export const processAssistantResponse = async (
 	const useSimplifiedToolPrompt = tune?.enabled === true;
 	const modelParameters = tune?.enabled ? tune.modelParameters : undefined;
 	const hasTuneOverrides = useSimplifiedToolPrompt || modelParameters;
+	const nonInteractiveAlwaysAllow = nonInteractiveMode
+		? (getAppConfig().alwaysAllow ?? [])
+		: [];
 	const modeOverrides: ModeOverrides | undefined =
 		nonInteractiveMode || hasTuneOverrides
 			? {
 					nonInteractiveMode,
-					nonInteractiveAlwaysAllow: nonInteractiveMode
-						? (getAppConfig().alwaysAllow ?? [])
-						: [],
+					nonInteractiveAlwaysAllow,
 					useSimplifiedToolPrompt,
 					modelParameters,
 				}
 			: undefined;
 
-	// Get tools — use the same logic as the prompt builder to ensure
-	// available tools match what the system prompt describes
-	const availableNames = getAvailableToolNames(
-		toolManager,
-		tune,
-		developmentMode,
-	);
-	const allTools = toolManager?.getAllToolsWithoutExecute() || {};
-	// If getAvailableToolNames returned the full list, use all tools directly
-	// Otherwise filter to only the allowed set
-	const tools =
-		availableNames.length > 0 && toolManager
-			? toolManager.getFilteredToolsWithoutExecute(availableNames)
-			: allTools;
+	// Get effective tools — ToolManager is the single authority for
+	// availability (mode + profile filtering) and approval policy
+	const availableNames =
+		toolManager?.getAvailableToolNames(tune, developmentMode) ?? [];
+	const tools = toolManager
+		? toolManager.getEffectiveTools(availableNames, {
+				nonInteractiveAlwaysAllow,
+			})
+		: {};
 
 	let streamedContent = '';
 	const result = await client.chat(

@@ -6,7 +6,7 @@ import {CommandIntegration} from '@/custom-commands/command-integration';
 import {promptHistory} from '@/prompt-history';
 import type {Message} from '@/types/core';
 import {MessageBuilder} from '@/utils/message-builder';
-import {buildSystemPrompt, getAvailableToolNames} from '@/utils/prompt-builder';
+import {buildSystemPrompt} from '@/utils/prompt-builder';
 import {assemblePrompt} from '@/utils/prompt-processor';
 import {processAssistantResponse} from './conversation/conversation-loop';
 import {createResetStreamingState} from './state/streaming-state';
@@ -60,7 +60,7 @@ export function useChatHandler({
 		return buildSystemPrompt(
 			developmentMode,
 			tune,
-			getAvailableToolNames(toolManager, tune, developmentMode),
+			toolManager.getAvailableToolNames(tune, developmentMode),
 			toolsDisabled,
 		);
 	}, [developmentMode, tune, toolManager, toolsDisabled]);
@@ -220,7 +220,7 @@ export function useChatHandler({
 				buildSystemPrompt(
 					developmentMode,
 					tune,
-					getAvailableToolNames(toolManager, tune, developmentMode),
+					toolManager?.getAvailableToolNames(tune, developmentMode) ?? [],
 					toolsDisabled,
 				);
 

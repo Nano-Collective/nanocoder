@@ -8,7 +8,7 @@ import {
 	calculateTokenBreakdown,
 	calculateToolDefinitionsTokens,
 } from '@/usage/calculator';
-import {buildSystemPrompt, getAvailableToolNames} from '@/utils/prompt-builder';
+import {buildSystemPrompt} from '@/utils/prompt-builder';
 
 interface UseContextPercentageProps {
 	currentModel: string;
@@ -80,7 +80,7 @@ export function useContextPercentage({
 		const systemPrompt = buildSystemPrompt(
 			developmentMode,
 			tune,
-			getAvailableToolNames(toolManager, tune, developmentMode),
+			toolManager?.getAvailableToolNames(tune, developmentMode) ?? [],
 		);
 		const systemMessage: Message = {
 			role: 'system',

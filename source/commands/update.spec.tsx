@@ -1,8 +1,18 @@
 import test from 'ava';
-import {toolRegistry} from '../tools/index.js';
+import {setToolManagerGetter} from '../message-handler.js';
 import {hasCommandFailed, updateCommand} from './update.js';
 
 console.log(`\nupdate.spec.tsx`);
+
+// Helper to create a mock ToolManager with a custom execute_bash handler
+function mockToolManager(executeBash: (args: any) => Promise<string>) {
+	return {
+		getToolHandler: (name: string) => {
+			if (name === 'execute_bash') return executeBash;
+			return undefined;
+		},
+	} as any;
+}
 
 // Command Metadata Tests
 // These tests verify the command is properly configured
@@ -47,17 +57,18 @@ test('updateCommand: runs update command when installed via npm', async t => {
 	process.env.NANOCODER_INSTALL_METHOD = 'npm';
 
 	let called = false;
-	const originalExecuteBash = toolRegistry.execute_bash;
-	toolRegistry.execute_bash = async ({command}: {command: string}) => {
-		called = true;
-		t.is(command, 'npm update -g @nanocollective/nanocoder');
-		return 'ok';
-	};
+	setToolManagerGetter(() =>
+		mockToolManager(async ({command}: {command: string}) => {
+			called = true;
+			t.is(command, 'npm update -g @nanocollective/nanocoder');
+			return 'ok';
+		}),
+	);
 
 	await updateCommand.handler([]);
 
 	// Cleanup
-	toolRegistry.execute_bash = originalExecuteBash;
+	setToolManagerGetter(() => null);
 	globalThis.fetch = originalFetch;
 	delete process.env.NANOCODER_INSTALL_METHOD;
 
@@ -81,16 +92,17 @@ test('updateCommand: does not run execute_bash for nix installations', async t =
 	process.env.NANOCODER_INSTALL_METHOD = 'nix';
 
 	let called = false;
-	const originalExecuteBash = toolRegistry.execute_bash;
-	toolRegistry.execute_bash = async ({command}: {command: string}) => {
-		called = true;
-		return 'ok';
-	};
+	setToolManagerGetter(() =>
+		mockToolManager(async () => {
+			called = true;
+			return 'ok';
+		}),
+	);
 
 	await updateCommand.handler([]);
 
 	// Cleanup
-	toolRegistry.execute_bash = originalExecuteBash;
+	setToolManagerGetter(() => null);
 	globalThis.fetch = originalFetch;
 	delete process.env.NANOCODER_INSTALL_METHOD;
 
@@ -113,10 +125,11 @@ test('updateCommand: handles execute_bash failure with error message', async t =
 
 	process.env.NANOCODER_INSTALL_METHOD = 'npm';
 
-	const originalExecuteBash = toolRegistry.execute_bash;
-	toolRegistry.execute_bash = async () => {
-		throw new Error('command failed: permission denied');
-	};
+	setToolManagerGetter(() =>
+		mockToolManager(async () => {
+			throw new Error('command failed: permission denied');
+		}),
+	);
 
 	const result = await updateCommand.handler([]);
 	// Expect the result is a React element with props.message containing 'Failed to execute'
@@ -124,7 +137,7 @@ test('updateCommand: handles execute_bash failure with error message', async t =
 	t.truthy(result.props?.message?.includes('Failed to execute'));
 
 	// Cleanup
-	toolRegistry.execute_bash = originalExecuteBash;
+	setToolManagerGetter(() => null);
 	globalThis.fetch = originalFetch;
 	delete process.env.NANOCODER_INSTALL_METHOD;
 });

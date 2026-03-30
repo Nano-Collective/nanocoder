@@ -1,7 +1,6 @@
 import test from 'ava';
 import {
 	buildSystemPrompt,
-	getAvailableToolNames,
 	getLastBuiltPrompt,
 	resetSectionCache,
 } from './prompt-builder.js';
@@ -14,14 +13,6 @@ console.log('\nprompt-builder.spec.ts');
 test.beforeEach(() => {
 	resetSectionCache();
 });
-
-// Mock tool manager
-const createMockToolManager = (toolNames: string[]) =>
-	({
-		getToolNames: () => toolNames,
-		getFilteredToolsWithoutExecute: () => ({}),
-		getAllToolsWithoutExecute: () => ({}),
-	}) as any;
 
 const ALL_TOOLS = [
 	'read_file', 'string_replace', 'write_file', 'find_files',
@@ -219,61 +210,6 @@ test('buildSystemPrompt - XML fallback uses XML tool rules', t => {
 	t.true(result.includes('does not support native tool calling'));
 	t.true(result.includes('<tool_name>'));
 	t.true(result.includes('<param1>value1</param1>'));
-});
-
-// ============================================================================
-// getAvailableToolNames
-// ============================================================================
-
-test('getAvailableToolNames - returns all tools when no tune', t => {
-	const tm = createMockToolManager(ALL_TOOLS);
-	const result = getAvailableToolNames(tm);
-	t.deepEqual(result, ALL_TOOLS);
-});
-
-test('getAvailableToolNames - returns all tools when tune disabled', t => {
-	const tm = createMockToolManager(ALL_TOOLS);
-	const result = getAvailableToolNames(tm, TUNE_DEFAULTS);
-	t.deepEqual(result, ALL_TOOLS);
-});
-
-test('getAvailableToolNames - filters to minimal profile', t => {
-	const tm = createMockToolManager(ALL_TOOLS);
-	const result = getAvailableToolNames(tm, TUNE_MINIMAL);
-	t.deepEqual(result, ['read_file', 'string_replace', 'execute_bash']);
-});
-
-test('getAvailableToolNames - full profile returns all minus mode exclusions', t => {
-	const tm = createMockToolManager(ALL_TOOLS);
-	const result = getAvailableToolNames(tm, TUNE_FULL, 'scheduler');
-	t.false(result.includes('ask_user'));
-	t.true(result.includes('read_file'));
-});
-
-test('getAvailableToolNames - plan mode excludes mutation tools', t => {
-	const tm = createMockToolManager(ALL_TOOLS);
-	const result = getAvailableToolNames(tm, TUNE_FULL, 'plan');
-	t.false(result.includes('string_replace'));
-	t.false(result.includes('write_file'));
-	t.false(result.includes('execute_bash'));
-	t.false(result.includes('git_commit'));
-	t.false(result.includes('create_task'));
-	// Read-only tools remain
-	t.true(result.includes('read_file'));
-	t.true(result.includes('find_files'));
-	t.true(result.includes('git_status'));
-	t.true(result.includes('git_diff'));
-});
-
-test('getAvailableToolNames - plan + minimal returns curated exploration set', t => {
-	const tm = createMockToolManager(ALL_TOOLS);
-	const result = getAvailableToolNames(tm, TUNE_MINIMAL, 'plan');
-	t.deepEqual(result, ['read_file', 'find_files', 'search_file_contents', 'list_directory']);
-});
-
-test('getAvailableToolNames - returns empty when no tool manager', t => {
-	const result = getAvailableToolNames(null);
-	t.deepEqual(result, []);
 });
 
 // ============================================================================
