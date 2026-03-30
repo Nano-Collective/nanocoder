@@ -1,6 +1,7 @@
 import {readFileSync, writeFileSync} from 'fs';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {getClosestConfigFile} from '@/config/index';
+import type {TuneConfig} from '@/types/config';
 import type {UserPreferences} from '@/types/index';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
 import {logError} from '@/utils/message-queue';
@@ -87,4 +88,10 @@ export function updateNanocoderShape(shape: NanocoderShape): void {
 export function getNanocoderShape(): NanocoderShape | undefined {
 	const preferences = loadPreferences();
 	return preferences.nanocoderShape;
+}
+
+export function saveTune(config: TuneConfig): void {
+	const preferences = loadPreferences();
+	preferences.tune = config;
+	savePreferences(preferences);
 }

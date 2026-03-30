@@ -615,3 +615,58 @@ test('concurrent - multiple simultaneous tool accesses', t => {
 	t.true(new Set(names).size === 1, 'Tool names count should be consistent');
 	t.true(new Set(tools).size === 1, 'All tools count should be consistent');
 });
+
+// ============================================================================
+// Tool Filtering Tests (for /tune tool profiles)
+// ============================================================================
+
+test('getFilteredTools - returns only tools matching allowed names', t => {
+	const manager = new ToolManager();
+	const allTools = manager.getAllTools();
+	const allNames = Object.keys(allTools);
+
+	// Filter to just read_file if it exists
+	if (allNames.includes('read_file')) {
+		const filtered = manager.getFilteredTools(['read_file']);
+		t.is(Object.keys(filtered).length, 1);
+		t.truthy(filtered.read_file);
+	} else {
+		t.pass('read_file not in static tools');
+	}
+});
+
+test('getFilteredTools - returns empty for non-existent tool names', t => {
+	const manager = new ToolManager();
+	const filtered = manager.getFilteredTools(['nonexistent_tool']);
+	t.is(Object.keys(filtered).length, 0);
+});
+
+test('getFilteredToolsWithoutExecute - returns tools without execute functions', t => {
+	const manager = new ToolManager();
+	const allNames = manager.getToolNames();
+
+	if (allNames.length > 0) {
+		const filtered = manager.getFilteredToolsWithoutExecute([allNames[0]!]);
+		t.is(Object.keys(filtered).length, 1);
+	} else {
+		t.pass('No tools available');
+	}
+});
+
+test('getFilteredTools - filters to minimal profile tools', t => {
+	const manager = new ToolManager();
+	const minimalTools = ['read_file', 'string_replace', 'execute_bash'];
+	const filtered = manager.getFilteredTools(minimalTools);
+
+	// Should only contain tools that exist in both the registry and the filter list
+	for (const name of Object.keys(filtered)) {
+		t.true(minimalTools.includes(name), `${name} should be in minimal profile`);
+	}
+});
+
+test('getFilteredTools - full tool list returns all tools', t => {
+	const manager = new ToolManager();
+	const allNames = manager.getToolNames();
+	const filtered = manager.getFilteredTools(allNames);
+	t.is(Object.keys(filtered).length, allNames.length);
+});

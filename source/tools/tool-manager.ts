@@ -98,6 +98,43 @@ export class ToolManager {
 	}
 
 	/**
+	 * Get a filtered subset of native AI SDK tools by allowed names.
+	 * Used by model mode tool profiles.
+	 */
+	getFilteredTools(allowedToolNames: string[]): Record<string, AISDKCoreTool> {
+		const all = this.registry.getNativeTools();
+		return this.filterByNames(all, allowedToolNames);
+	}
+
+	/**
+	 * Get a filtered subset of native AI SDK tools (without execute) by allowed names.
+	 * Used by model mode tool profiles.
+	 */
+	getFilteredToolsWithoutExecute(
+		allowedToolNames: string[],
+	): Record<string, AISDKCoreTool> {
+		const all = this.registry.getNativeToolsWithoutExecute();
+		return this.filterByNames(all, allowedToolNames);
+	}
+
+	/**
+	 * Filter a tools record to only include tools with matching names
+	 */
+	private filterByNames(
+		tools: Record<string, AISDKCoreTool>,
+		allowedNames: string[],
+	): Record<string, AISDKCoreTool> {
+		const nameSet = new Set(allowedNames);
+		const filtered: Record<string, AISDKCoreTool> = {};
+		for (const [name, tool] of Object.entries(tools)) {
+			if (nameSet.has(name)) {
+				filtered[name] = tool;
+			}
+		}
+		return filtered;
+	}
+
+	/**
 	 * Get all tool handlers
 	 */
 	getToolRegistry(): Record<string, ToolHandler> {

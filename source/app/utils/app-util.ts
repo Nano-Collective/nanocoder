@@ -40,6 +40,7 @@ const SPECIAL_COMMANDS = {
 	CHECKPOINT: 'checkpoint',
 	EXPLORER: 'explorer',
 	IDE: 'ide',
+	TUNE: 'tune',
 } as const;
 
 /** Checkpoint subcommands */
@@ -241,6 +242,11 @@ async function handleSpecialCommand(
 
 		case SPECIAL_COMMANDS.IDE:
 			options.onEnterIdeSelectionMode();
+			onCommandComplete?.();
+			return true;
+
+		case SPECIAL_COMMANDS.TUNE:
+			options.onEnterTune();
 			onCommandComplete?.();
 			return true;
 

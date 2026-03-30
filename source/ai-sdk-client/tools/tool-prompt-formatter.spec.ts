@@ -1,6 +1,9 @@
 import test from 'ava';
 import {jsonSchema, tool} from 'ai';
-import {formatToolsForPrompt} from './tool-prompt-formatter.js';
+import {
+	formatToolsForPrompt,
+	formatToolsForPromptSimplified,
+} from './tool-prompt-formatter.js';
 
 // Create test tools using AI SDK's tool() function
 const createTestTool = (
@@ -155,4 +158,92 @@ test('formatToolsForPrompt shows parameter types', t => {
 	t.true(result.includes('(string)'));
 	t.true(result.includes('(number)'));
 	t.true(result.includes('(boolean)'));
+});
+
+// ============================================================================
+// formatToolsForPromptSimplified
+// ============================================================================
+
+test('formatToolsForPromptSimplified returns empty string for empty tools', t => {
+	const result = formatToolsForPromptSimplified({});
+	t.is(result, '');
+});
+
+test('formatToolsForPromptSimplified uses concise XML format header', t => {
+	const tools = {
+		read_file: createTestTool(
+			'read_file',
+			'Read a file from the filesystem',
+			{path: {type: 'string', description: 'The path'}},
+			['path'],
+		),
+	};
+	const result = formatToolsForPromptSimplified(tools);
+	t.true(result.includes('## AVAILABLE TOOLS'));
+	t.true(result.includes('XML format'));
+	t.true(result.includes('<tool_name>'));
+});
+
+test('formatToolsForPromptSimplified truncates long descriptions', t => {
+	const longDesc = 'A'.repeat(100);
+	const tools = {
+		long_tool: createTestTool(
+			'long_tool',
+			longDesc,
+			{param: {type: 'string', description: 'A param'}},
+			['param'],
+		),
+	};
+	const result = formatToolsForPromptSimplified(tools);
+	t.true(result.includes('...'));
+	// Should not contain the full 100-char description
+	t.false(result.includes(longDesc));
+});
+
+test('formatToolsForPromptSimplified shows only required params', t => {
+	const tools = {
+		test_tool: createTestTool(
+			'test_tool',
+			'Test tool',
+			{
+				required_param: {type: 'string', description: 'Required'},
+				optional_param: {type: 'number', description: 'Optional'},
+			},
+			['required_param'],
+		),
+	};
+	const result = formatToolsForPromptSimplified(tools);
+	t.true(result.includes('Required:'));
+	t.true(result.includes('`required_param`'));
+});
+
+test('formatToolsForPromptSimplified does not include examples', t => {
+	const tools = {
+		test_tool: createTestTool(
+			'test_tool',
+			'Test tool',
+			{param: {type: 'string', description: 'A param'}},
+			['param'],
+		),
+	};
+	const result = formatToolsForPromptSimplified(tools);
+	t.false(result.includes('**Example:**'));
+});
+
+test('formatToolsForPromptSimplified is shorter than full formatter', t => {
+	const tools = {
+		read_file: createTestTool(
+			'read_file',
+			'Read a file from the filesystem with line numbers',
+			{
+				path: {type: 'string', description: 'The path to the file'},
+				start_line: {type: 'number', description: 'Start line'},
+				end_line: {type: 'number', description: 'End line'},
+			},
+			['path'],
+		),
+	};
+	const full = formatToolsForPrompt(tools);
+	const simplified = formatToolsForPromptSimplified(tools);
+	t.true(simplified.length < full.length);
 });

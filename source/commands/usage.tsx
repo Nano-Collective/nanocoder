@@ -14,7 +14,7 @@ import {
 	calculateTokenBreakdown,
 	calculateToolDefinitionsTokens,
 } from '@/usage/calculator';
-import {processPromptTemplate} from '@/utils/prompt-processor';
+import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 
 export const usageCommand: Command = {
 	name: 'usage',
@@ -53,7 +53,7 @@ export const usageCommand: Command = {
 
 		// Generate the system prompt to include in token calculation
 		const toolManager = getToolManager();
-		const systemPrompt = processPromptTemplate();
+		const systemPrompt = getLastBuiltPrompt();
 
 		// Create system message to include in token calculation
 		const systemMessage: Message = {

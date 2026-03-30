@@ -116,4 +116,5 @@ refactor.md
 coverage
 
 .nanocoder/tasks.json
+.generated-prompts/
 .github/issues/docs

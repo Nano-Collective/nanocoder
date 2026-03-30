@@ -6,6 +6,8 @@ import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
 import {parseToolCalls} from '@/tool-calling/index';
 import type {ToolManager} from '@/tools/tool-manager';
+import {isSingleToolProfile} from '@/tools/tool-profiles';
+import type {TuneConfig} from '@/types/config';
 import type {
 	LLMClient,
 	Message,
@@ -16,6 +18,7 @@ import type {
 import {performAutoCompact} from '@/utils/auto-compact';
 import {formatElapsedTime, getRandomAdjective} from '@/utils/completion-note';
 import {MessageBuilder} from '@/utils/message-builder';
+import {getAvailableToolNames} from '@/utils/prompt-builder';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {displayCompactCountsSummary} from '@/utils/tool-result-display';
 import {filterValidToolCalls} from '../utils/tool-filters';
@@ -50,6 +53,7 @@ interface ProcessAssistantResponseParams {
 	compactToolDisplayRef?: React.RefObject<boolean>;
 	onSetCompactToolCounts?: (counts: Record<string, number> | null) => void;
 	compactToolCountsRef?: React.MutableRefObject<Record<string, number>>;
+	tune?: TuneConfig;
 }
 
 // Module-level flag: show XML fallback notice only once per process lifetime.
@@ -95,6 +99,8 @@ export const processAssistantResponse = async (
 		compactToolDisplayRef,
 		onSetCompactToolCounts,
 		compactToolCountsRef,
+		tune,
+		developmentMode,
 	} = params;
 
 	const startTime = conversationStartTime ?? Date.now();
@@ -127,18 +133,41 @@ export const processAssistantResponse = async (
 	setStreamingContent('');
 	setTokenCount(0);
 
-	// Build mode overrides for non-interactive mode
-	const modeOverrides: ModeOverrides | undefined = nonInteractiveMode
-		? {
-				nonInteractiveMode: true,
-				nonInteractiveAlwaysAllow: getAppConfig().alwaysAllow ?? [],
-			}
-		: undefined;
+	// Build mode overrides for non-interactive mode and tune settings
+	const useSimplifiedToolPrompt = tune?.enabled === true;
+	const modelParameters = tune?.enabled ? tune.modelParameters : undefined;
+	const hasTuneOverrides = useSimplifiedToolPrompt || modelParameters;
+	const modeOverrides: ModeOverrides | undefined =
+		nonInteractiveMode || hasTuneOverrides
+			? {
+					nonInteractiveMode,
+					nonInteractiveAlwaysAllow: nonInteractiveMode
+						? (getAppConfig().alwaysAllow ?? [])
+						: [],
+					useSimplifiedToolPrompt,
+					modelParameters,
+				}
+			: undefined;
+
+	// Get tools — use the same logic as the prompt builder to ensure
+	// available tools match what the system prompt describes
+	const availableNames = getAvailableToolNames(
+		toolManager,
+		tune,
+		developmentMode,
+	);
+	const allTools = toolManager?.getAllToolsWithoutExecute() || {};
+	// If getAvailableToolNames returned the full list, use all tools directly
+	// Otherwise filter to only the allowed set
+	const tools =
+		availableNames.length > 0 && toolManager
+			? toolManager.getFilteredToolsWithoutExecute(availableNames)
+			: allTools;
 
 	let streamedContent = '';
 	const result = await client.chat(
 		[systemMessage, ...messages],
-		toolManager?.getAllToolsWithoutExecute() || {},
+		tools,
 		{
 			onToken: (token: string) => {
 				streamedContent += token;
@@ -224,7 +253,15 @@ export const processAssistantResponse = async (
 	// Combine native tool calls with any parsed from content (XML fallback path)
 	// Native and parsed are mutually exclusive: native comes from tool-calling models,
 	// parsed comes from non-tool-calling models using XML in text
-	const allToolCalls = [...(toolCalls || []), ...parsedToolCalls];
+	let allToolCalls = [...(toolCalls || []), ...parsedToolCalls];
+
+	// Single-tool enforcement: truncate to first tool call
+	// Active when tune profile implies single-tool (e.g. minimal profile)
+	const enforceSingleTool =
+		tune?.enabled && isSingleToolProfile(tune.toolProfile);
+	if (enforceSingleTool && allToolCalls.length > 1) {
+		allToolCalls = allToolCalls.slice(0, 1);
+	}
 
 	// If this is the final response (no tool calls), flush compact counts
 	// BEFORE the assistant message so the summary appears above it

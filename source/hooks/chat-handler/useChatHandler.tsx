@@ -1,11 +1,13 @@
 import React from 'react';
 import {ConversationStateManager} from '@/app/utils/conversation-state';
 import UserMessage from '@/components/user-message';
+import {getAppConfig} from '@/config/index';
 import {CommandIntegration} from '@/custom-commands/command-integration';
 import {promptHistory} from '@/prompt-history';
 import type {Message} from '@/types/core';
 import {MessageBuilder} from '@/utils/message-builder';
-import {assemblePrompt, processPromptTemplate} from '@/utils/prompt-processor';
+import {buildSystemPrompt, getAvailableToolNames} from '@/utils/prompt-builder';
+import {assemblePrompt} from '@/utils/prompt-processor';
 import {processAssistantResponse} from './conversation/conversation-loop';
 import {createResetStreamingState} from './state/streaming-state';
 import type {ChatHandlerReturn, UseChatHandlerProps} from './types';
@@ -35,9 +37,33 @@ export function useChatHandler({
 	compactToolDisplayRef,
 	onSetCompactToolCounts,
 	compactToolCountsRef,
+	tune,
 }: UseChatHandlerProps): ChatHandlerReturn {
 	// Conversation state manager for enhanced context
 	const conversationStateManager = React.useRef(new ConversationStateManager());
+
+	// Check if native tool calling is disabled for the current provider/model
+	const toolsDisabled = React.useMemo(() => {
+		const config = getAppConfig();
+		const provider = config.providers?.find(p => p.name === currentProvider);
+		if (!provider) return false;
+		return (
+			provider.disableTools === true ||
+			(provider.disableToolModels?.includes(currentModel) ?? false)
+		);
+	}, [currentProvider, currentModel]);
+
+	// Cache the base system prompt — only rebuild when mode, tune, tools, or toolsDisabled change
+	// This preserves KV cache by keeping the system message stable across turns
+	const cachedBasePrompt = React.useMemo(() => {
+		if (!toolManager) return null;
+		return buildSystemPrompt(
+			developmentMode,
+			tune,
+			getAvailableToolNames(toolManager, tune, developmentMode),
+			toolsDisabled,
+		);
+	}, [developmentMode, tune, toolManager, toolsDisabled]);
 
 	// Track when the current conversation started for elapsed time display
 	const conversationStartTimeRef = React.useRef<number>(Date.now());
@@ -110,6 +136,7 @@ export function useChatHandler({
 					compactToolDisplayRef,
 					onSetCompactToolCounts,
 					compactToolCountsRef,
+					tune,
 				});
 			} catch (error) {
 				displayError(error, 'chat-error');
@@ -136,6 +163,7 @@ export function useChatHandler({
 			compactToolDisplayRef,
 			compactToolCountsRef,
 			onSetCompactToolCounts,
+			tune,
 			displayError,
 			resetStreamingState,
 		],
@@ -186,8 +214,15 @@ export function useChatHandler({
 		setAbortController(controller);
 
 		try {
-			// Load and process system prompt
-			let systemPrompt = processPromptTemplate();
+			// Use cached base prompt (stable across turns to preserve KV cache)
+			let systemPrompt =
+				cachedBasePrompt ??
+				buildSystemPrompt(
+					developmentMode,
+					tune,
+					getAvailableToolNames(toolManager, tune, developmentMode),
+					toolsDisabled,
+				);
 
 			// Enhance with relevant commands (progressive disclosure)
 			if (commandIntegration) {

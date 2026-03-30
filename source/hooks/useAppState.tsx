@@ -2,12 +2,14 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {loadPreferences} from '@/config/preferences';
 import {defaultTheme} from '@/config/themes';
+import {resolveTune} from '@/config/tune';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {createTokenizer} from '@/tokenization/index.js';
 import {ToolManager} from '@/tools/tool-manager';
 import type {CheckpointListItem} from '@/types/checkpoint';
 import type {CustomCommand} from '@/types/commands';
+import type {TuneConfig} from '@/types/config';
 import {
 	DevelopmentMode,
 	LLMClient,
@@ -33,6 +35,7 @@ export type ActiveMode =
 	| 'scheduler'
 	| 'checkpointLoad'
 	| 'sessionSelector'
+	| 'tune'
 	| null;
 
 export interface ConversationContext {
@@ -143,6 +146,11 @@ export function useAppState() {
 	// Development mode state
 	const [developmentMode, setDevelopmentMode] =
 		useState<DevelopmentMode>('normal');
+
+	// Model mode state — resolved from config layers on startup
+	const [tune, setTune] = useState<TuneConfig>(() => {
+		return resolveTune(undefined, undefined, preferences);
+	});
 
 	// Context usage state
 	const [contextPercentUsed, setContextPercentUsed] = useState<number | null>(
@@ -302,6 +310,7 @@ export function useAppState() {
 		isIdeSelectionMode: activeMode === 'ideSelection',
 		isSchedulerMode: activeMode === 'scheduler',
 		isSessionSelectorMode: activeMode === 'sessionSelector',
+		isTuneActive: activeMode === 'tune',
 
 		isVscodeEnabled,
 		checkpointLoadData,
@@ -316,6 +325,7 @@ export function useAppState() {
 		isQuestionMode,
 		pendingQuestion,
 		developmentMode,
+		tune,
 		contextPercentUsed,
 		contextLimit,
 		pendingToolCalls,
@@ -361,6 +371,7 @@ export function useAppState() {
 		setIsQuestionMode,
 		setPendingQuestion,
 		setDevelopmentMode,
+		setTune,
 		setContextPercentUsed,
 		setContextLimit,
 		setPendingToolCalls,

@@ -14,7 +14,7 @@ import {
 } from '@/utils/auto-compact';
 import {compressionBackup} from '@/utils/compression-backup';
 import {compressMessages} from '@/utils/message-compression';
-import {processPromptTemplate} from '@/utils/prompt-processor';
+import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 
 /**
  * Handles /compact command. Returns true if handled.
@@ -140,7 +140,7 @@ export async function handleCompactCommand(
 		}
 
 		const tokenizer = createTokenizer(provider, model);
-		const systemPrompt = processPromptTemplate();
+		const systemPrompt = getLastBuiltPrompt();
 		const systemMessage: Message = {role: 'system', content: systemPrompt};
 		const allMessages = [systemMessage, ...messages];
 		const result = compressMessages(allMessages, tokenizer, {mode});

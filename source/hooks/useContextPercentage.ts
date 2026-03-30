@@ -1,13 +1,14 @@
 import {useEffect, useRef} from 'react';
 import {getModelContextLimit} from '@/models/index';
 import type {ToolManager} from '@/tools/tool-manager';
-import type {Message} from '@/types/core';
+import type {TuneConfig} from '@/types/config';
+import type {DevelopmentMode, Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
 import {
 	calculateTokenBreakdown,
 	calculateToolDefinitionsTokens,
 } from '@/usage/calculator';
-import {processPromptTemplate} from '@/utils/prompt-processor';
+import {buildSystemPrompt, getAvailableToolNames} from '@/utils/prompt-builder';
 
 interface UseContextPercentageProps {
 	currentModel: string;
@@ -19,6 +20,8 @@ interface UseContextPercentageProps {
 	contextLimit: number | null;
 	setContextPercentUsed: (value: number | null) => void;
 	setContextLimit: (value: number | null) => void;
+	developmentMode?: DevelopmentMode;
+	tune?: TuneConfig;
 }
 
 export function useContextPercentage({
@@ -31,6 +34,8 @@ export function useContextPercentage({
 	contextLimit,
 	setContextPercentUsed,
 	setContextLimit,
+	developmentMode = 'normal',
+	tune,
 }: UseContextPercentageProps): void {
 	const contextLimitRef = useRef<number | null>(null);
 	const lastModelRef = useRef<string>('');
@@ -71,8 +76,12 @@ export function useContextPercentage({
 			return;
 		}
 
-		// Include system prompt in calculation (same as /usage command)
-		const systemPrompt = processPromptTemplate();
+		// Include system prompt in calculation using the dynamic builder
+		const systemPrompt = buildSystemPrompt(
+			developmentMode,
+			tune,
+			getAvailableToolNames(toolManager, tune, developmentMode),
+		);
 		const systemMessage: Message = {
 			role: 'system',
 			content: systemPrompt,
@@ -109,5 +118,7 @@ export function useContextPercentage({
 		toolManager,
 		streamingTokenCount,
 		setContextPercentUsed,
+		developmentMode,
+		tune,
 	]);
 }

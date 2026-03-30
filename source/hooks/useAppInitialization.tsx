@@ -28,6 +28,7 @@ import {
 	setupProvidersCommand,
 	statusCommand,
 	tasksCommand,
+	tuneCommand,
 	updateCommand,
 	usageCommand,
 } from '@/commands/index';
@@ -443,6 +444,7 @@ export function useAppInitialization({
 				resumeCommand,
 				tasksCommand,
 				settingsCommand,
+				tuneCommand,
 				scheduleCommand,
 			]);
 

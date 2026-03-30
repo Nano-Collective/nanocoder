@@ -31,7 +31,10 @@ import {convertAISDKToolCalls} from '../converters/tool-converter.js';
 import {extractRootError} from '../error-handling/error-extractor.js';
 import {parseAPIError} from '../error-handling/error-parser.js';
 import {isToolSupportError} from '../error-handling/tool-error-detector.js';
-import {formatToolsForPrompt} from '../tools/tool-prompt-formatter.js';
+import {
+	formatToolsForPrompt,
+	formatToolsForPromptSimplified,
+} from '../tools/tool-prompt-formatter.js';
 import {
 	createOnStepFinishHandler,
 	createPrepareStepHandler,
@@ -142,7 +145,9 @@ export async function handleChat(
 			// This allows the model to still use tools via XML format
 			let messagesWithToolPrompt = messages;
 			if (shouldDisableTools && Object.keys(tools).length > 0) {
-				const toolPrompt = formatToolsForPrompt(tools);
+				const toolPrompt = modeOverrides?.useSimplifiedToolPrompt
+					? formatToolsForPromptSimplified(tools)
+					: formatToolsForPrompt(tools);
 				if (toolPrompt) {
 					// Find and augment the system message with tool definitions
 					messagesWithToolPrompt = messages.map((msg, index) => {
@@ -202,6 +207,18 @@ export async function handleChat(
 				prepareStep: createPrepareStepHandler(),
 				headers: providerConfig.config.headers,
 				providerOptions,
+				// Model parameters from /tune — passed directly to AI SDK
+				...(modeOverrides?.modelParameters && {
+					temperature: modeOverrides.modelParameters.temperature,
+					topP: modeOverrides.modelParameters.topP,
+					topK: modeOverrides.modelParameters.topK,
+					maxTokens: modeOverrides.modelParameters.maxTokens,
+					frequencyPenalty: modeOverrides.modelParameters.frequencyPenalty,
+					presencePenalty: modeOverrides.modelParameters.presencePenalty,
+					...(modeOverrides.modelParameters.stop && {
+						stopSequences: modeOverrides.modelParameters.stop,
+					}),
+				}),
 			});
 
 			// Stream tokens to the UI in batched chunks to avoid excessive

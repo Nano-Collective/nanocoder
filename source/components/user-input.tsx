@@ -9,6 +9,7 @@ import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
 import {promptHistory} from '@/prompt-history';
+import type {TuneConfig} from '@/types/config';
 import type {DevelopmentMode} from '@/types/core';
 import type {InputState} from '@/types/hooks';
 import {Completion} from '@/types/index';
@@ -30,6 +31,7 @@ interface ChatProps {
 	compactToolDisplay?: boolean; // Current compact display state
 	developmentMode?: DevelopmentMode; // Current development mode
 	contextPercentUsed?: number | null; // Context window usage percentage
+	tune?: TuneConfig; // Model mode configuration
 }
 
 export default function UserInput({
@@ -43,6 +45,7 @@ export default function UserInput({
 	compactToolDisplay = true,
 	developmentMode = 'normal',
 	contextPercentUsed,
+	tune,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
 	const {colors} = useTheme();
@@ -487,6 +490,7 @@ export default function UserInput({
 					developmentMode={developmentMode}
 					colors={colors}
 					contextPercentUsed={contextPercentUsed ?? null}
+					tune={tune}
 				/>
 			</Box>
 		);
@@ -575,6 +579,7 @@ export default function UserInput({
 				developmentMode={developmentMode}
 				colors={colors}
 				contextPercentUsed={contextPercentUsed ?? null}
+				tune={tune}
 			/>
 		</>
 	);
