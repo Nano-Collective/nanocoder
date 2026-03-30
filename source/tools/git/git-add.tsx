@@ -8,6 +8,7 @@ import {Box, Text} from 'ink';
 import React from 'react';
 
 import {getCurrentMode} from '@/context/mode-context';
+import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
@@ -137,6 +138,7 @@ function GitAddFormatter({
 	args: GitAddInput;
 	result?: string;
 }): React.ReactElement {
+	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
 
 	// Parse result for display
@@ -164,7 +166,7 @@ function GitAddFormatter({
 	}
 
 	return (
-		<Box flexDirection="column" marginBottom={1}>
+		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
 			<Text color={colors.tool}>⚒ git_add</Text>
 
 			<Box>

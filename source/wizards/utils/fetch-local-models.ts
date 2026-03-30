@@ -15,10 +15,6 @@ export type CloudModelsEndpointType =
 	| 'openai'
 	| 'mistral'
 	| 'github';
-export type ModelsEndpointType =
-	| LocalModelsEndpointType
-	| CloudModelsEndpointType;
-
 interface OllamaResponse {
 	models: Array<{name: string}>;
 }

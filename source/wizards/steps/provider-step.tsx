@@ -10,36 +10,11 @@ import {
 	PROVIDER_TEMPLATES,
 	type ProviderTemplate,
 } from '../templates/provider-templates';
-import {fetchCloudModels} from '../utils/fetch-cloud-models';
 import {
-	type CloudModelsEndpointType,
-	fetchLocalModels,
-	type LocalModel,
-	type LocalModelsEndpointType,
-} from '../utils/fetch-local-models';
-
-// Helper to check if modelsEndpoint is a cloud provider type
-const CLOUD_ENDPOINTS: CloudModelsEndpointType[] = [
-	'anthropic',
-	'openai',
-	'mistral',
-	'github',
-];
-const isCloudEndpoint = (
-	endpoint: string | undefined,
-): endpoint is CloudModelsEndpointType => {
-	return CLOUD_ENDPOINTS.includes(endpoint as CloudModelsEndpointType);
-};
-
-const LOCAL_ENDPOINTS: LocalModelsEndpointType[] = [
-	'ollama',
-	'openai-compatible',
-];
-const isLocalEndpoint = (
-	endpoint: string | undefined,
-): endpoint is LocalModelsEndpointType => {
-	return LOCAL_ENDPOINTS.includes(endpoint as LocalModelsEndpointType);
-};
+	type ApiCompatibility,
+	type FetchedModel,
+	fetchModels,
+} from '../utils/fetch-models';
 
 interface ProviderStepProps {
 	onComplete: (providers: ProviderConfig[]) => void;
@@ -55,7 +30,6 @@ type Mode =
 	| 'edit-selection'
 	| 'edit-or-delete'
 	| 'field-input'
-	| 'model-source-choice'
 	| 'fetching-models'
 	| 'model-selection'
 	| 'done';
@@ -63,6 +37,40 @@ type Mode =
 interface TemplateOption {
 	label: string;
 	value: string;
+}
+
+/**
+ * Find the best matching template for an existing provider config.
+ * Match by id, name, or baseUrl — then fall back to custom.
+ */
+export function findTemplateForProvider(
+	provider: ProviderConfig,
+): ProviderTemplate | undefined {
+	// Match by template id or name
+	const byId = PROVIDER_TEMPLATES.find(t => t.id === provider.name);
+	if (byId) return byId;
+	const byName = PROVIDER_TEMPLATES.find(t => t.name === provider.name);
+	if (byName) return byName;
+
+	// Match by baseUrl — each non-custom template has a unique hardcoded baseUrl
+	if (provider.baseUrl) {
+		for (const template of PROVIDER_TEMPLATES) {
+			if (template.id === 'custom') continue;
+			try {
+				const config = template.buildConfig({
+					providerName: '_',
+					model: '_',
+					apiKey: '_',
+					baseUrl: '_',
+				});
+				if (config.baseUrl === provider.baseUrl) return template;
+			} catch {
+				// Skip templates that fail with placeholder data
+			}
+		}
+	}
+
+	return PROVIDER_TEMPLATES.find(t => t.id === 'custom');
 }
 
 export function ProviderStep({
@@ -92,32 +100,19 @@ export function ProviderStep({
 	const [inputKey, setInputKey] = useState(0);
 	const [cameFromCustom, setCameFromCustom] = useState(false);
 	const [editingIndex, setEditingIndex] = useState<number | null>(null);
-	const [fetchedModels, setFetchedModels] = useState<LocalModel[]>([]);
+	const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
 	const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(
 		new Set(),
 	);
-	const [fetchError, setFetchError] = useState<string | null>(null);
 
-	// Ref to store timeout ID for cleanup (prevents memory leak)
-	const fallbackTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-	// Ref to track current template during async operations (prevents stale closure)
-	const currentTemplateRef = useRef<ProviderTemplate | null>(null);
 	// Ref to track if component is mounted (prevents setState after unmount)
 	const isMountedRef = useRef(true);
-
-	// Keep template ref in sync with state
-	useEffect(() => {
-		currentTemplateRef.current = selectedTemplate;
-	}, [selectedTemplate]);
 
 	// Track mount status and cleanup on unmount
 	useEffect(() => {
 		isMountedRef.current = true;
 		return () => {
 			isMountedRef.current = false;
-			if (fallbackTimeoutRef.current) {
-				clearTimeout(fallbackTimeoutRef.current);
-			}
 		};
 	}, []);
 
@@ -128,26 +123,23 @@ export function ProviderStep({
 		if (selectedTemplate !== null) {
 			setFetchedModels([]);
 			setSelectedModelIds(new Set());
-			setFetchError(null);
-		}
-		// Also clear any pending fallback timeout when template changes
-		if (fallbackTimeoutRef.current) {
-			clearTimeout(fallbackTimeoutRef.current);
-			fallbackTimeoutRef.current = null;
 		}
 	}, [selectedTemplate]);
 
-	const initialOptions = [
-		{label: 'Choose from common templates', value: 'templates'},
-		{label: 'Add custom provider manually', value: 'custom'},
-		...(providers.length > 0
-			? [{label: 'Edit existing providers', value: 'edit'}]
-			: []),
-		...(providers.length > 0 ? [{label: 'Done & Save', value: 'done'}] : []),
-		...(configExists && onDelete
-			? [{label: 'Delete config file', value: 'delete'}]
-			: []),
-	];
+	const initialOptions =
+		providers.length > 0
+			? [
+					{label: 'Add another provider', value: 'templates'},
+					{label: 'Edit existing providers', value: 'edit'},
+					{label: 'Done & Save', value: 'done'},
+					...(configExists && onDelete
+						? [{label: 'Delete config file', value: 'delete'}]
+						: []),
+				]
+			: [
+					{label: 'Choose from common templates', value: 'templates'},
+					{label: 'Add custom provider manually', value: 'custom'},
+				];
 
 	const getTemplateOptions = (): TemplateOption[] => [
 		...PROVIDER_TEMPLATES.map(template => ({
@@ -157,12 +149,10 @@ export function ProviderStep({
 		...(providers.length > 0 ? [{label: 'Done & Save', value: 'done'}] : []),
 	];
 
-	const editOptions: TemplateOption[] = [
-		...providers.map((provider, index) => ({
-			label: `${index + 1}. ${provider.name}`,
-			value: `edit-${index}`,
-		})),
-	];
+	const editOptions: TemplateOption[] = providers.map((provider, index) => ({
+		label: provider.name,
+		value: `edit-${index}`,
+	}));
 
 	const handleInitialSelect = (item: {value: string}) => {
 		if (item.value === 'templates') {
@@ -209,7 +199,6 @@ export function ProviderStep({
 	};
 
 	const handleEditSelect = (item: TemplateOption) => {
-		// Store the index and show edit/delete options
 		if (item.value.startsWith('edit-')) {
 			const index = Number.parseInt(item.value.replace('edit-', ''), 10);
 			setEditingIndex(index);
@@ -219,11 +208,9 @@ export function ProviderStep({
 
 	const handleEditOrDeleteChoice = (item: {value: string}) => {
 		if (item.value === 'delete' && editingIndex !== null) {
-			// Delete the provider
 			const newProviders = providers.filter((_, i) => i !== editingIndex);
 			setProviders(newProviders);
 			setEditingIndex(null);
-			// Always go back to initial menu after deleting
 			setMode('select-template-or-custom');
 			return;
 		}
@@ -231,18 +218,12 @@ export function ProviderStep({
 		if (item.value === 'edit' && editingIndex !== null) {
 			const provider = providers[editingIndex];
 			if (provider) {
-				// Find matching template (or use custom)
-				const template =
-					PROVIDER_TEMPLATES.find(t => t.id === provider.name) ||
-					(provider.sdkProvider &&
-						PROVIDER_TEMPLATES.find(t => t.id === provider.sdkProvider)) ||
-					PROVIDER_TEMPLATES.find(t => t.id === 'custom');
+				const template = findTemplateForProvider(provider);
 
 				if (template) {
 					setSelectedTemplate(template);
 					setCurrentFieldIndex(0);
 
-					// Pre-populate field answers from existing provider
 					const answers: Record<string, string> = {};
 					if (provider.name) answers.providerName = provider.name;
 					if (provider.baseUrl) answers.baseUrl = provider.baseUrl;
@@ -275,6 +256,18 @@ export function ProviderStep({
 			return;
 		}
 
+		// Validate duplicate provider names
+		if (currentField.name === 'providerName' && currentValue.trim()) {
+			const nameLower = currentValue.trim().toLowerCase();
+			const isDuplicate = providers.some(
+				(p, i) => p.name.toLowerCase() === nameLower && i !== editingIndex,
+			);
+			if (isDuplicate) {
+				setError(`A provider named '${currentValue.trim()}' already exists`);
+				return;
+			}
+		}
+
 		// Validate with custom validator
 		if (currentField.validator && currentValue.trim()) {
 			const validationError = currentField.validator(currentValue);
@@ -296,19 +289,9 @@ export function ProviderStep({
 		if (currentFieldIndex < selectedTemplate.fields.length - 1) {
 			const nextField = selectedTemplate.fields[currentFieldIndex + 1];
 
-			// Check if we should offer to fetch models
-			// For local providers: after baseUrl field
-			// For cloud providers: after apiKey field
-			const shouldOfferModelFetch =
-				nextField?.name === 'model' &&
-				selectedTemplate.modelsEndpoint &&
-				((currentField.name === 'baseUrl' &&
-					isLocalEndpoint(selectedTemplate.modelsEndpoint)) ||
-					(currentField.name === 'apiKey' &&
-						isCloudEndpoint(selectedTemplate.modelsEndpoint)));
-
-			if (shouldOfferModelFetch) {
-				setMode('model-source-choice');
+			// Auto-fetch models when we reach the model field
+			if (nextField?.name === 'model') {
+				handleFetchModels(newAnswers);
 				return;
 			}
 
@@ -340,13 +323,16 @@ export function ProviderStep({
 					setProviders([...providers, providerConfig]);
 				}
 
-				// Reset for next provider
+				// Reset and go back to appropriate screen
+				const wasEditing = editingIndex !== null;
 				setSelectedTemplate(null);
 				setCurrentFieldIndex(0);
 				setFieldAnswers({});
 				setCurrentValue('');
 				setEditingIndex(null);
-				setMode('template-selection');
+				setMode(
+					wasEditing ? 'select-template-or-custom' : 'template-selection',
+				);
 			} catch (err) {
 				setError(
 					err instanceof Error ? err.message : 'Failed to build configuration',
@@ -355,52 +341,57 @@ export function ProviderStep({
 		}
 	};
 
-	const handleModelSourceChoice = async (item: {value: string}) => {
-		if (item.value === 'manual') {
-			// User chose to enter manually - go to model field input
-			const modelFieldIndex = selectedTemplate?.fields.findIndex(
-				f => f.name === 'model',
+	const goToManualModelInput = (answers: Record<string, string>) => {
+		const modelFieldIndex = selectedTemplate?.fields.findIndex(
+			f => f.name === 'model',
+		);
+		if (modelFieldIndex !== undefined && modelFieldIndex >= 0) {
+			setCurrentFieldIndex(modelFieldIndex);
+			const modelField = selectedTemplate?.fields[modelFieldIndex];
+			setCurrentValue(
+				answers[modelField?.name || ''] || modelField?.default || '',
 			);
-			if (modelFieldIndex !== undefined && modelFieldIndex >= 0) {
-				setCurrentFieldIndex(modelFieldIndex);
-				const modelField = selectedTemplate?.fields[modelFieldIndex];
-				setCurrentValue(
-					fieldAnswers[modelField?.name || ''] || modelField?.default || '',
-				);
-				setMode('field-input');
-			}
+			setMode('field-input');
+		}
+	};
+
+	const handleFetchModels = async (answers: Record<string, string>) => {
+		if (!selectedTemplate) return;
+
+		// Build a partial config to get the baseUrl, apiKey, and sdkProvider
+		const partialConfig = selectedTemplate.buildConfig({
+			...answers,
+			model: '_',
+		});
+		const baseUrl = partialConfig.baseUrl;
+		const apiKey = partialConfig.apiKey;
+		const sdkProvider = partialConfig.sdkProvider;
+
+		// Skip fetch for providers requiring special auth flows
+		if (
+			!baseUrl ||
+			sdkProvider === 'github-copilot' ||
+			sdkProvider === 'chatgpt-codex'
+		) {
+			goToManualModelInput(answers);
 			return;
 		}
 
-		// User chose to fetch models
-		const endpointType = selectedTemplate?.modelsEndpoint;
-		const isCloud = isCloudEndpoint(endpointType);
+		// Determine API compatibility from sdkProvider or template id
+		let apiCompatibility: ApiCompatibility = 'openai-compatible';
+		if (selectedTemplate.id === 'ollama') {
+			apiCompatibility = 'ollama';
+		} else if (sdkProvider === 'anthropic') {
+			apiCompatibility = 'anthropic';
+		} else if (sdkProvider === 'google') {
+			apiCompatibility = 'google';
+		}
 
-		// For cloud providers, we need the API key; for local providers, we need baseUrl
-		if (isCloud) {
-			const apiKey = fieldAnswers.apiKey;
-			if (!apiKey || !apiKey.trim()) {
-				setFetchError('API key is required');
-				const modelFieldIndex = selectedTemplate?.fields.findIndex(
-					f => f.name === 'model',
-				);
-				if (modelFieldIndex !== undefined && modelFieldIndex >= 0) {
-					setCurrentFieldIndex(modelFieldIndex);
-					const modelField = selectedTemplate?.fields[modelFieldIndex];
-					setCurrentValue(
-						fieldAnswers[modelField?.name || ''] || modelField?.default || '',
-					);
-					setMode('field-input');
-				}
-				return;
-			}
+		setMode('fetching-models');
 
-			setMode('fetching-models');
-			setFetchError(null);
+		try {
+			const result = await fetchModels(baseUrl, apiCompatibility, apiKey);
 
-			const result = await fetchCloudModels(endpointType, apiKey);
-
-			// Guard against setState after unmount
 			if (!isMountedRef.current) return;
 
 			if (result.success && result.models.length > 0) {
@@ -409,93 +400,12 @@ export function ProviderStep({
 				setMode('model-selection');
 				return;
 			}
-
-			// API key validation failed - go back to API key field with error
-			// This is a meaningful check: invalid keys should be fixed, not bypassed
-			const apiKeyIndex = selectedTemplate?.fields.findIndex(
-				f => f.name === 'apiKey',
-			);
-			if (apiKeyIndex !== undefined && apiKeyIndex >= 0) {
-				setCurrentFieldIndex(apiKeyIndex);
-				setCurrentValue(''); // Clear the invalid key
-				setError(result.error || 'Failed to validate API key');
-				setMode('field-input');
-			}
-			return;
-		} else {
-			// Local provider - need baseUrl
-			const baseUrl = fieldAnswers.baseUrl;
-
-			if (!baseUrl || !baseUrl.trim()) {
-				setFetchError('Base URL is required');
-				const modelFieldIndex = selectedTemplate?.fields.findIndex(
-					f => f.name === 'model',
-				);
-				if (modelFieldIndex !== undefined && modelFieldIndex >= 0) {
-					setCurrentFieldIndex(modelFieldIndex);
-					const modelField = selectedTemplate?.fields[modelFieldIndex];
-					setCurrentValue(
-						fieldAnswers[modelField?.name || ''] || modelField?.default || '',
-					);
-					setMode('field-input');
-				}
-				return;
-			}
-
-			setMode('fetching-models');
-			setFetchError(null);
-
-			const localEndpoint = isLocalEndpoint(endpointType)
-				? endpointType
-				: 'openai-compatible';
-			const result = await fetchLocalModels(baseUrl, localEndpoint);
-
-			// Guard against setState after unmount
-			if (!isMountedRef.current) return;
-
-			if (result.success && result.models.length > 0) {
-				setFetchedModels(result.models);
-				setSelectedModelIds(new Set());
-				setMode('model-selection');
-				return;
-			}
-
-			// Fetch failed - show brief error and fallback to manual input
-			setFetchError(result.error || 'Failed to fetch models');
+		} catch {
+			// Silent failure
 		}
 
-		// Both branches fall through here on failure - set up fallback timeout
-		// Clear any existing timeout before setting a new one
-		if (fallbackTimeoutRef.current) {
-			clearTimeout(fallbackTimeoutRef.current);
-		}
-
-		// Capture fieldAnswers at this moment to avoid stale closure
-		const capturedFieldAnswers = {...fieldAnswers};
-
-		// After a brief delay, go to manual input (500ms - short enough to not frustrate)
-		fallbackTimeoutRef.current = setTimeout(() => {
-			// Guard against setState after unmount
-			if (!isMountedRef.current) return;
-
-			// Use ref for template to get current value (prevents stale closure)
-			const template = currentTemplateRef.current;
-			if (!template) return;
-
-			const modelFieldIndex = template.fields.findIndex(
-				f => f.name === 'model',
-			);
-			if (modelFieldIndex !== undefined && modelFieldIndex >= 0) {
-				setCurrentFieldIndex(modelFieldIndex);
-				const modelField = template.fields[modelFieldIndex];
-				setCurrentValue(
-					capturedFieldAnswers[modelField?.name || ''] ||
-						modelField?.default ||
-						'',
-				);
-				setMode('field-input');
-			}
-		}, 500);
+		if (!isMountedRef.current) return;
+		goToManualModelInput(answers);
 	};
 
 	const handleModelToggle = (modelId: string) => {
@@ -563,7 +473,8 @@ export function ProviderStep({
 					setProviders([...providers, providerConfig]);
 				}
 
-				// Reset for next provider
+				// Reset and go back to appropriate screen
+				const wasEditing = editingIndex !== null;
 				setSelectedTemplate(null);
 				setCurrentFieldIndex(0);
 				setFieldAnswers({});
@@ -571,7 +482,9 @@ export function ProviderStep({
 				setEditingIndex(null);
 				setFetchedModels([]);
 				setSelectedModelIds(new Set());
-				setMode('template-selection');
+				setMode(
+					wasEditing ? 'select-template-or-custom' : 'template-selection',
+				);
 			} catch (err) {
 				setError(
 					err instanceof Error ? err.message : 'Failed to build configuration',
@@ -622,30 +535,24 @@ export function ProviderStep({
 			} else if (mode === 'edit-selection') {
 				// In edit selection, go back to initial choice
 				setMode('select-template-or-custom');
-			} else if (mode === 'model-source-choice') {
-				// In model source choice, go back to the appropriate field
-				// Cloud providers: go back to apiKey; Local providers: go back to baseUrl
-				const isCloud = isCloudEndpoint(selectedTemplate?.modelsEndpoint);
-				const fieldToGoBack = isCloud ? 'apiKey' : 'baseUrl';
-				const fieldIndex = selectedTemplate?.fields.findIndex(
-					f => f.name === fieldToGoBack,
-				);
-				if (fieldIndex !== undefined && fieldIndex >= 0) {
-					setCurrentFieldIndex(fieldIndex);
-					const field = selectedTemplate?.fields[fieldIndex];
-					setCurrentValue(
-						fieldAnswers[field?.name || ''] || field?.default || '',
-					);
-					setError(null);
-					setMode('field-input');
-				}
 			} else if (mode === 'model-selection') {
-				// In model selection, go back to model source choice
+				// Go back to the field before the model field
+				const modelFieldIndex = selectedTemplate?.fields.findIndex(
+					f => f.name === 'model',
+				);
+				const prevIndex =
+					modelFieldIndex !== undefined && modelFieldIndex > 0
+						? modelFieldIndex - 1
+						: 0;
+				setCurrentFieldIndex(prevIndex);
+				const prevField = selectedTemplate?.fields[prevIndex];
+				setCurrentValue(
+					fieldAnswers[prevField?.name || ''] || prevField?.default || '',
+				);
 				setFetchedModels([]);
 				setSelectedModelIds(new Set());
-				setFetchError(null);
 				setError(null);
-				setMode('model-source-choice');
+				setMode('field-input');
 			} else if (mode === 'select-template-or-custom') {
 				// At root level, call parent's onBack
 				if (onBack) {
@@ -671,11 +578,23 @@ export function ProviderStep({
 
 		if (mode === 'model-selection') {
 			if (key.escape) {
-				// Go back to model source choice
 				setFetchedModels([]);
 				setSelectedModelIds(new Set());
 				setError(null);
-				setMode('model-source-choice');
+				// Go back to the field before the model field
+				const modelFieldIndex = selectedTemplate?.fields.findIndex(
+					f => f.name === 'model',
+				);
+				const prevIndex =
+					modelFieldIndex !== undefined && modelFieldIndex > 0
+						? modelFieldIndex - 1
+						: 0;
+				setCurrentFieldIndex(prevIndex);
+				const prevField = selectedTemplate?.fields[prevIndex];
+				setCurrentValue(
+					fieldAnswers[prevField?.name || ''] || prevField?.default || '',
+				);
+				setMode('field-input');
 			}
 		}
 	});
@@ -841,39 +760,6 @@ export function ProviderStep({
 		);
 	}
 
-	if (mode === 'model-source-choice' && selectedTemplate) {
-		const modelSourceOptions = [
-			{label: 'Fetch available models from server', value: 'fetch'},
-			{label: 'Enter model names manually', value: 'manual'},
-		];
-
-		return (
-			<Box flexDirection="column">
-				<Box marginBottom={1}>
-					<Text bold color={colors.primary}>
-						{selectedTemplate.name} Configuration
-					</Text>
-				</Box>
-				<Box marginBottom={1}>
-					<Text>How would you like to specify models?</Text>
-				</Box>
-				<SelectInput
-					items={modelSourceOptions}
-					onSelect={(item: {value: string}) => handleModelSourceChoice(item)}
-				/>
-				{isNarrow ? (
-					<Box flexDirection="column" marginTop={1}>
-						<Text color={colors.secondary}>Shift+Tab: go back</Text>
-					</Box>
-				) : (
-					<Box marginTop={1}>
-						<Text color={colors.secondary}>Shift+Tab to go back</Text>
-					</Box>
-				)}
-			</Box>
-		);
-	}
-
 	if (mode === 'fetching-models' && selectedTemplate) {
 		return (
 			<Box flexDirection="column">
@@ -882,21 +768,12 @@ export function ProviderStep({
 						{selectedTemplate.name} Configuration
 					</Text>
 				</Box>
-				{fetchError ? (
-					<Box flexDirection="column">
-						<Box marginBottom={1}>
-							<Text color={colors.error}>{fetchError}</Text>
-						</Box>
-						<Text dimColor>Falling back to manual input...</Text>
-					</Box>
-				) : (
-					<Box>
-						<Text color={colors.info}>
-							<Spinner type="dots" /> Fetching models from{' '}
-							{fieldAnswers.baseUrl || selectedTemplate.name}...
-						</Text>
-					</Box>
-				)}
+				<Box>
+					<Text color={colors.info}>
+						<Spinner type="dots" /> Fetching models from{' '}
+						{fieldAnswers.baseUrl || selectedTemplate.name}...
+					</Text>
+				</Box>
 			</Box>
 		);
 	}

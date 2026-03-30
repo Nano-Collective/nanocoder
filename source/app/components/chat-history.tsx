@@ -56,7 +56,11 @@ export function ChatHistory({
 				</Box>
 			)}
 			{/* Live component renders outside Static for real-time updates */}
-			{liveComponent && <Box marginLeft={-1}>{liveComponent}</Box>}
+			{liveComponent && (
+				<Box marginLeft={-1} flexDirection="column">
+					{liveComponent}
+				</Box>
+			)}
 		</Box>
 	);
 }

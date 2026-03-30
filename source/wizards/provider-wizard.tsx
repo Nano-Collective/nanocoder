@@ -320,6 +320,15 @@ export function ProviderWizard({
 								{providers.map((provider, index) => (
 									<Text key={index} color={colors.success}>
 										• {provider.name}
+										<Text dimColor>
+											{' '}
+											({provider.models.length}{' '}
+											{provider.models.length === 1 ? 'model' : 'models'}
+											{provider.models.length <= 3
+												? `: ${provider.models.join(', ')}`
+												: ''}
+											)
+										</Text>
 									</Text>
 								))}
 							</Box>
@@ -385,9 +394,26 @@ export function ProviderWizard({
 				);
 			}
 			case 'complete': {
-				const hasCopilotProvider = providers.some(
+				// Show a single, most relevant next-step hint
+				const copilotProviders = providers.filter(
 					p => p.sdkProvider === 'github-copilot',
 				);
+				const codexProviders = providers.filter(
+					p => p.sdkProvider === 'chatgpt-codex',
+				);
+				const localProviders = providers.filter(
+					p =>
+						!p.apiKey &&
+						p.baseUrl &&
+						(p.baseUrl.includes('localhost') ||
+							p.baseUrl.includes('127.0.0.1')),
+				);
+
+				// Priority: auth-required providers first, then local, then generic
+				const needsAuth =
+					copilotProviders.length > 0 || codexProviders.length > 0;
+				const hasLocal = localProviders.length > 0;
+
 				return (
 					<Box flexDirection="column">
 						<Box marginBottom={1}>
@@ -396,15 +422,28 @@ export function ProviderWizard({
 							</Text>
 						</Box>
 						<Box marginBottom={1}>
-							<Text dimColor>Saved to:</Text>
+							<Text dimColor>Saved to: {providerConfigPath}</Text>
 						</Box>
-						<Box marginBottom={1}>
-							<Text dimColor> {providerConfigPath}</Text>
-						</Box>
-						{hasCopilotProvider && (
+						{needsAuth && (
+							<Box marginBottom={1} flexDirection="column">
+								{copilotProviders.length > 0 && (
+									<Text color={colors.primary}>
+										Run /copilot-login to auth with Copilot.
+									</Text>
+								)}
+								{codexProviders.length > 0 && (
+									<Text color={colors.primary}>
+										Run /codex-login to auth with ChatGPT/Codex.
+									</Text>
+								)}
+							</Box>
+						)}
+						{hasLocal && (
 							<Box marginBottom={1}>
-								<Text color={colors.primary}>
-									Run /copilot-login to auth with Copilot.
+								<Text dimColor>
+									Ensure your local{' '}
+									{localProviders.length === 1 ? 'server is' : 'servers are'}{' '}
+									running before use.
 								</Text>
 							</Box>
 						)}

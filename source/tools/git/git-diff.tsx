@@ -7,6 +7,7 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 
+import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
@@ -125,6 +126,7 @@ function GitDiffFormatter({
 	args: GitDiffInput;
 	result?: string;
 }): React.ReactElement {
+	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
 
 	// Parse result for stats
@@ -163,7 +165,7 @@ function GitDiffFormatter({
 	}
 
 	return (
-		<Box flexDirection="column" marginBottom={1}>
+		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
 			<Text color={colors.tool}>⚒ git_diff</Text>
 
 			<Box>
@@ -174,7 +176,9 @@ function GitDiffFormatter({
 			{args.file && (
 				<Box>
 					<Text color={colors.secondary}>File: </Text>
-					<Text color={colors.primary}>{args.file}</Text>
+					<Text wrap="truncate-end" color={colors.primary}>
+						{args.file}
+					</Text>
 				</Box>
 			)}
 

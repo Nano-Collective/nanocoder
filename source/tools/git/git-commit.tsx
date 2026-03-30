@@ -7,6 +7,7 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 
+import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
@@ -179,6 +180,7 @@ function GitCommitFormatter({
 	args: GitCommitInput;
 	result?: string;
 }): React.ReactElement {
+	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
 	const [preview, setPreview] = React.useState<{
 		staged: FileChange[];
@@ -201,7 +203,7 @@ function GitCommitFormatter({
 	const deletions = preview?.totalDeletions || 0;
 
 	return (
-		<Box flexDirection="column" marginBottom={1}>
+		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
 			<Text color={colors.tool}>⚒ git_commit</Text>
 
 			{!result && stagedCount > 0 && (
@@ -236,8 +238,10 @@ function GitCommitFormatter({
 
 			<Box flexDirection="column">
 				<Text color={colors.secondary}>Message:</Text>
-				<Box marginLeft={2}>
-					<Text color={colors.primary}>{args.message}</Text>
+				<Box marginLeft={2} flexShrink={1}>
+					<Text wrap="truncate-end" color={colors.primary}>
+						{args.message}
+					</Text>
 				</Box>
 			</Box>
 

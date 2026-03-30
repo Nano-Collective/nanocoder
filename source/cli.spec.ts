@@ -9,13 +9,21 @@ function parsePrompt(args: string[]): string | undefined {
 	if (runCommandIndex !== -1 && args[runCommandIndex + 1]) {
 		// Filter out known flags after 'run' when constructing the prompt
 		const promptArgs: string[] = [];
-		const knownFlags = new Set(['--vscode', '--vscode-port']);
 		const afterRunArgs = args.slice(runCommandIndex + 1);
 		for (let i = 0; i < afterRunArgs.length; i++) {
 			const arg = afterRunArgs[i];
 			if (arg === '--vscode') {
 				continue; // skip this flag
 			} else if (arg === '--vscode-port') {
+				i++; // skip this flag and its value
+				continue;
+			} else if (arg === '--provider') {
+				i++; // skip this flag and its value
+				continue;
+			} else if (arg === '--model') {
+				i++; // skip this flag and its value
+				continue;
+			} else if (arg === '--context-max') {
 				i++; // skip this flag and its value
 				continue;
 			} else {
@@ -176,4 +184,43 @@ test('CLI parsing: detects help flag with other arguments', t => {
 	const hasHelpFlag = args.includes('--help') || args.includes('-h');
 
 	t.true(hasHelpFlag);
+});
+
+// --context-max flag tests
+test('CLI parsing: filters out --context-max flag and value after run command', t => {
+	const args = ['run', 'analyze', 'code', '--context-max', '128k'];
+	const prompt = parsePrompt(args);
+
+	t.is(prompt, 'analyze code');
+});
+
+test('CLI parsing: filters out --context-max mixed with other flags after run', t => {
+	const args = [
+		'run',
+		'--provider',
+		'ollama',
+		'--context-max',
+		'32000',
+		'analyze',
+		'code',
+	];
+	const prompt = parsePrompt(args);
+
+	t.is(prompt, 'analyze code');
+});
+
+test('CLI parsing: extracts --context-max value from args', t => {
+	const args = ['--context-max', '128k', 'run', 'hello'];
+	const contextMaxArgIndex = args.findIndex(arg => arg === '--context-max');
+
+	t.is(contextMaxArgIndex, 0);
+	t.is(args[contextMaxArgIndex + 1], '128k');
+});
+
+test('CLI parsing: --context-max with numeric value', t => {
+	const args = ['--context-max', '32000', 'run', 'hello'];
+	const contextMaxArgIndex = args.findIndex(arg => arg === '--context-max');
+
+	t.is(contextMaxArgIndex, 0);
+	t.is(args[contextMaxArgIndex + 1], '32000');
 });

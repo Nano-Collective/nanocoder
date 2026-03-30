@@ -7,6 +7,7 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 
+import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
@@ -293,6 +294,7 @@ function GitPrFormatter({
 	args: GitPrInput;
 	result?: string;
 }): React.ReactElement {
+	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
 	const [preview, setPreview] = React.useState<{
 		commits: CommitInfo[];
@@ -319,7 +321,7 @@ function GitPrFormatter({
 	}, [args, result]);
 
 	return (
-		<Box flexDirection="column" marginBottom={1}>
+		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
 			<Text color={colors.tool}>⚒ git_pr</Text>
 
 			<Box>
@@ -352,8 +354,10 @@ function GitPrFormatter({
 
 					<Box flexDirection="column">
 						<Text color={colors.secondary}>Title:</Text>
-						<Box marginLeft={2}>
-							<Text color={colors.primary}>{args.create.title}</Text>
+						<Box marginLeft={2} flexShrink={1}>
+							<Text wrap="truncate-end" color={colors.primary}>
+								{args.create.title}
+							</Text>
 						</Box>
 					</Box>
 

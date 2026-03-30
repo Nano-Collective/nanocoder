@@ -5,7 +5,10 @@ import type {ToolManager} from '@/tools/tool-manager';
 import type {ToolCall, ToolResult} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {parseToolArguments} from '@/utils/tool-args-parser';
-import {displayToolResult} from '@/utils/tool-result-display';
+import {
+	ALWAYS_EXPANDED_TOOLS,
+	displayToolResult,
+} from '@/utils/tool-result-display';
 
 /**
  * Validates and executes a single tool call.
@@ -165,8 +168,12 @@ export const executeToolsDirectly = async (
 						hideBox={true}
 					/>,
 				);
-			} else if (options?.compactDisplay) {
+			} else if (
+				options?.compactDisplay &&
+				!ALWAYS_EXPANDED_TOOLS.has(result.name)
+			) {
 				// In compact mode, signal the count callback for live display
+				// (skip for tools that should always show expanded output)
 				const isError = result.content.startsWith('Error: ');
 				if (isError) {
 					// Errors always shown in full

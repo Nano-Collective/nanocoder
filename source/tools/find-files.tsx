@@ -222,7 +222,9 @@ const FindFilesFormatter = React.memo(
 
 				<Box>
 					<Text color={colors.secondary}>Pattern: </Text>
-					<Text color={colors.text}>{args.pattern}</Text>
+					<Text wrap="truncate-end" color={colors.text}>
+						{args.pattern}
+					</Text>
 				</Box>
 
 				<Box>

@@ -133,8 +133,12 @@ export class AISDKClient implements LLMClient {
 	): Promise<LLMChatResponse> {
 		// Get the language model instance from the provider
 		// GitHub Copilot requires routing: GPT-5+ → Responses API, others → Chat Completions
+		// ChatGPT/Codex always uses the Responses API
 		let model: LanguageModel;
-		if (this.providerConfig.sdkProvider === 'github-copilot') {
+		if (this.providerConfig.sdkProvider === 'chatgpt-codex') {
+			const codex = this.provider as unknown as OpenAIProvider;
+			model = codex.responses(this.currentModel);
+		} else if (this.providerConfig.sdkProvider === 'github-copilot') {
 			const copilot = this.provider as unknown as OpenAIProvider;
 			model = this.currentModel.includes('gpt-5')
 				? copilot.responses(this.currentModel)

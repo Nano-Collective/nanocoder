@@ -8,6 +8,17 @@ import type {ToolCall, ToolResult} from '@/types/index';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 
 /**
+ * Tools that should always show expanded (full formatter) output,
+ * even when compact display mode is enabled.
+ */
+export const ALWAYS_EXPANDED_TOOLS = new Set([
+	'create_task',
+	'list_tasks',
+	'update_task',
+	'delete_task',
+]);
+
+/**
  * Compact tool result display - shows "⚒ toolName  description" in tool color.
  */
 function CompactToolResult({
@@ -56,14 +67,6 @@ function getGroupedCompactDescription(toolName: string, count: number): string {
 			return `Ran ${count} git command${s}`;
 		case 'lsp_get_diagnostics':
 			return `Got diagnostics ${count} time${s}`;
-		case 'create_task':
-			return `Created ${count} task${s}`;
-		case 'list_tasks':
-			return `Listed tasks ${count} time${s}`;
-		case 'update_task':
-			return `Updated ${count} task${s}`;
-		case 'delete_task':
-			return `Deleted ${count} task${s}`;
 		case 'ask_question':
 			return `Asked ${count} question${s}`;
 		default:
@@ -99,32 +102,24 @@ export function displayCompactCountsSummary(
 	getNextComponentKey: () => number,
 ): void {
 	const entries = Object.entries(counts);
-	for (let i = 0; i < entries.length; i++) {
-		const [toolName, count] = entries[i];
-		const isLast = i === entries.length - 1;
-		const description = getGroupedCompactDescription(toolName, count);
-		if (isLast) {
-			// Last entry gets wrapped in a flex-column Box with marginBottom
-			// to separate from subsequent content (same pattern as ToolMessage)
-			addToChatQueue(
-				<Box
-					key={`tool-compact-summary-${toolName}-${getNextComponentKey()}`}
-					flexDirection="column"
-					marginBottom={1}
-				>
-					<CompactToolResult toolName={toolName} description={description} />
-				</Box>,
-			);
-		} else {
-			addToChatQueue(
+	if (entries.length === 0) return;
+
+	// Wrap all entries in a single Box with marginBottom for consistent spacing
+	addToChatQueue(
+		<Box
+			key={`tool-compact-summary-${getNextComponentKey()}`}
+			flexDirection="column"
+			marginBottom={1}
+		>
+			{entries.map(([toolName, count]) => (
 				<CompactToolResult
-					key={`tool-compact-summary-${toolName}-${getNextComponentKey()}`}
+					key={toolName}
 					toolName={toolName}
-					description={description}
-				/>,
-			);
-		}
-	}
+					description={getGroupedCompactDescription(toolName, count)}
+				/>
+			))}
+		</Box>,
+	);
 }
 
 /**
@@ -165,7 +160,8 @@ export async function displayToolResult(
 	}
 
 	// Compact mode: show count-based one-liner instead of full formatter output
-	if (compact) {
+	// (skip for tools that should always show expanded output)
+	if (compact && !ALWAYS_EXPANDED_TOOLS.has(result.name)) {
 		const description = getGroupedCompactDescription(result.name, 1);
 		addToChatQueue(
 			<CompactToolResult

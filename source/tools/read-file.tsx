@@ -257,15 +257,18 @@ const ReadFileFormatter = React.memo(
 
 				<Box>
 					<Text color={colors.secondary}>Path: </Text>
-					<Box marginLeft={1}>
-						<Text color={colors.text}>
-							{path}{' '}
-							{fileInfo.isMetadataOnly && (
-								<Text color={colors.info}>(metadata only)</Text>
-							)}
+					<Box marginLeft={1} flexShrink={1}>
+						<Text wrap="truncate-end" color={colors.text}>
+							{path}
 						</Text>
 					</Box>
 				</Box>
+
+				{fileInfo.isMetadataOnly && (
+					<Box>
+						<Text color={colors.info}>(metadata only)</Text>
+					</Box>
+				)}
 
 				{fileInfo.isMetadataOnly ? (
 					<>
@@ -422,16 +425,13 @@ const readFileValidator = async (args: {
 			};
 		}
 
-		// Check if end_line exceeds file length
+		// Auto-clamp end_line to file length instead of erroring
 		if (args.end_line !== undefined) {
 			const cached = await getCachedFileContent(absPath);
 			const totalLines = cached.lines.length;
 
 			if (args.end_line > totalLines) {
-				return {
-					valid: false,
-					error: `⚒ end_line (${args.end_line}) exceeds file length (${totalLines} lines)`,
-				};
+				args.end_line = totalLines;
 			}
 		}
 

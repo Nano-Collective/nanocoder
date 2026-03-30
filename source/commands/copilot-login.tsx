@@ -59,9 +59,10 @@ export function CopilotLogin({
 		};
 	}, [providerName]);
 
-	// Allow user to dismiss with Enter when done or on error
 	useInput((_input, key) => {
-		if (key.return && status === 'done') {
+		if (key.escape) {
+			onDone?.({success: false, error: 'Login cancelled.'});
+		} else if (key.return && status === 'done') {
 			onDone?.({success: true});
 		} else if (key.return && status === 'error') {
 			onDone?.({success: false, error: error ?? undefined});
@@ -81,8 +82,12 @@ export function CopilotLogin({
 	if (status === 'visit' || status === 'polling') {
 		return (
 			<Box flexDirection="column" paddingY={1}>
-				<Text bold>Visit this URL and enter the code:</Text>
-				<Text color={colors.primary}>{verificationUri}</Text>
+				<Box marginBottom={1}>
+					<Text bold>Visit this URL and enter the code:</Text>
+				</Box>
+				<Box marginBottom={1}>
+					<Text color={colors.primary}>{verificationUri}</Text>
+				</Box>
 				<Text bold>Code: {userCode}</Text>
 				{status === 'polling' && (
 					<Box marginTop={1}>
@@ -98,9 +103,11 @@ export function CopilotLogin({
 	if (status === 'done') {
 		return (
 			<Box flexDirection="column" paddingY={1}>
-				<Text color="green">
-					Logged in. Credential saved for "{providerName}".
-				</Text>
+				<Box marginBottom={1}>
+					<Text color={colors.success}>
+						Logged in. Credentials saved for "{providerName}".
+					</Text>
+				</Box>
 				<Text dimColor>Press Enter to continue.</Text>
 			</Box>
 		);
@@ -109,7 +116,9 @@ export function CopilotLogin({
 	if (status === 'error') {
 		return (
 			<Box flexDirection="column" paddingY={1}>
-				<Text color="red">{error}</Text>
+				<Box marginBottom={1}>
+					<Text color={colors.error}>{error}</Text>
+				</Box>
 				<Text dimColor>Press Enter to continue.</Text>
 			</Box>
 		);

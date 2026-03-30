@@ -58,7 +58,9 @@ export async function formatStringReplacePreview(
 								<Text color={themeColors.tool}>⚒ string_replace</Text>
 								<Box>
 									<Text color={themeColors.secondary}>Path: </Text>
-									<Text color={themeColors.primary}>{path}</Text>
+									<Text wrap="truncate-end" color={themeColors.primary}>
+										{path}
+									</Text>
 								</Box>
 								<Box flexDirection="column" marginTop={1}>
 									<Text color={themeColors.error}>
@@ -81,7 +83,9 @@ export async function formatStringReplacePreview(
 								<Text color={themeColors.tool}>⚒ string_replace</Text>
 								<Box>
 									<Text color={themeColors.secondary}>Path: </Text>
-									<Text color={themeColors.primary}>{path}</Text>
+									<Text wrap="truncate-end" color={themeColors.primary}>
+										{path}
+									</Text>
 								</Box>
 								<Box flexDirection="column" marginTop={1}>
 									<Text color={themeColors.error}>
@@ -360,7 +364,9 @@ export async function formatStringReplacePreview(
 						<Text color={themeColors.tool}>⚒ string_replace</Text>
 						<Box>
 							<Text color={themeColors.secondary}>Path: </Text>
-							<Text color={themeColors.primary}>{path}</Text>
+							<Text wrap="truncate-end" color={themeColors.primary}>
+								{path}
+							</Text>
 						</Box>
 						<Box>
 							<Text color={themeColors.secondary}>Location: </Text>
@@ -392,7 +398,9 @@ export async function formatStringReplacePreview(
 						<Text color={themeColors.tool}>⚒ string_replace</Text>
 						<Box>
 							<Text color={themeColors.secondary}>Path: </Text>
-							<Text color={themeColors.primary}>{path}</Text>
+							<Text wrap="truncate-end" color={themeColors.primary}>
+								{path}
+							</Text>
 						</Box>
 						<Box>
 							<Text color={themeColors.error}>Error: </Text>

@@ -120,7 +120,9 @@ const WriteFileFormatter = React.memo(({args}: {args: WriteFileArgs}) => {
 
 			<Box>
 				<Text color={colors.secondary}>Path: </Text>
-				<Text color={colors.text}>{path}</Text>
+				<Text wrap="truncate-end" color={colors.text}>
+					{path}
+				</Text>
 			</Box>
 			<Box>
 				<Text color={colors.secondary}>Size: </Text>

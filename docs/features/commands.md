@@ -27,7 +27,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/custom-commands` | List all custom commands |
 | `/checkpoint` | Save and restore conversation snapshots (see [Checkpointing](checkpointing.md)) |
 | `/compact` | Compress message history to reduce context usage (see [Context Compression](context-compression.md)) |
-| `/context-max` | Set maximum context length for the current session (useful for models not listed on models.dev) |
+| `/context-max` | Set maximum context length for the current session (useful for models not listed on models.dev). Also available as `--context-max` CLI flag |
 | `/exit` | Exit the application |
 | `/export` | Export current session to markdown file |
 | `/update` | Update Nanocoder to the latest version |

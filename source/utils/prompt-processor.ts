@@ -47,7 +47,6 @@ function getOSName(): string {
 function generateSystemInfo(): string {
 	const now = new Date();
 	const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD
-	const timeStr = now.toTimeString().split(' ')[0]; // HH:MM:SS
 
 	return `Operating System: ${getOSName()}
 OS Version: ${release()}
@@ -55,8 +54,7 @@ Platform: ${platform()}
 Default Shell: ${getDefaultShell()}
 Home Directory: ${homedir()}
 Current Working Directory: ${process.cwd()}
-Current Date: ${dateStr}
-Current Time: ${timeStr}`;
+Current Date: ${dateStr}`;
 }
 
 /**

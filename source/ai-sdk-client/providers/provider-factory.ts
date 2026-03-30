@@ -9,11 +9,17 @@ import {
 	type OpenAICompatibleProvider,
 } from '@ai-sdk/openai-compatible';
 import {type Agent, fetch as undiciFetch} from 'undici';
+import {getValidCodexToken} from '@/auth/chatgpt-codex';
 import {
 	COPILOT_HEADERS,
 	getCopilotAccessToken,
 	getCopilotBaseUrl,
 } from '@/auth/github-copilot';
+import {
+	getCodexNoCredentialsMessage,
+	loadCodexCredential,
+	updateCodexCredential,
+} from '@/config/codex-credentials';
 import {
 	getCopilotNoCredentialsMessage,
 	loadCopilotCredential,
@@ -129,6 +135,85 @@ export function createProvider(
 			// Empty key — auth is handled entirely by copilotFetch's Authorization header
 			apiKey: '',
 			fetch: copilotFetch,
+			headers: config.headers ?? {},
+		});
+	}
+
+	if (sdkProvider === 'chatgpt-codex') {
+		logger.info('Using ChatGPT/Codex subscription provider', {
+			provider: providerConfig.name,
+		});
+
+		const credential = loadCodexCredential(providerConfig.name);
+		if (!credential) {
+			throw new Error(getCodexNoCredentialsMessage(providerConfig.name));
+		}
+
+		const baseURL =
+			config.baseURL?.trim() || 'https://chatgpt.com/backend-api/codex';
+
+		const codexFetch = async (
+			input: string | URL | Request,
+			init?: RequestInit,
+		): Promise<Response> => {
+			// Get valid token (refreshing if needed)
+			const {accessToken, accountId} = await getValidCodexToken(
+				credential,
+				tokens => {
+					updateCodexCredential(providerConfig.name, tokens);
+				},
+			);
+
+			const h = new Headers();
+			if (init?.headers) {
+				const src =
+					init.headers instanceof Headers
+						? init.headers
+						: new Headers(
+								init.headers as ConstructorParameters<typeof Headers>[0],
+							);
+				src.forEach((v, k) => {
+					if (k !== 'authorization') {
+						h.set(k, v);
+					}
+				});
+			}
+			h.set('Authorization', `Bearer ${accessToken}`);
+			h.set('ChatGPT-Account-Id', accountId);
+			h.set('originator', 'codex_cli_rs');
+
+			// Convert to plain object for undici
+			const headers: Record<string, string> = {};
+			h.forEach((v, k) => {
+				headers[k] = v;
+			});
+
+			// Codex backend requires store: false on every request.
+			// Patch the JSON body to ensure the backend accepts it.
+			let body = init?.body;
+			if (body && typeof body === 'string') {
+				try {
+					const parsed = JSON.parse(body) as Record<string, unknown>;
+					parsed.store = false;
+					body = JSON.stringify(parsed);
+				} catch {
+					// Not JSON — pass through
+				}
+			}
+
+			return undiciFetch(input as string | URL, {
+				method: init?.method,
+				body,
+				signal: init?.signal,
+				headers,
+				dispatcher: undiciAgent,
+			}) as Promise<Response>;
+		};
+
+		return createOpenAI({
+			baseURL,
+			apiKey: '',
+			fetch: codexFetch,
 			headers: config.headers ?? {},
 		});
 	}

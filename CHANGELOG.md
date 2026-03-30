@@ -1,3 +1,17 @@
+# 1.24.1
+
+- Added `--context-max` CLI flag for setting the context limit from the command line, complementing the existing `/context-max` command and `NANOCODER_CONTEXT_LIMIT` env variable.
+
+- Removed time from the system prompt to keep the KV cache more stable across requests. Thanks to @initialxy. Closes #415.
+
+- Task tool results are no longer displayed as compacted results during ensuring task progress remains visible in the conversation.
+
+- User input now uses the same text wrapping as assistant messages for a more consistent chat appearance.
+
+- Improved `search_file_contents` tool robustness.
+
+If there are any problems, feedback or thoughts please drop an issue or message us through Discord! Thank you for using Nanocoder.
+
 # 1.24.0
 
 - **BREAKING**: Removed legacy `~/.agents.config.json` config file support. Nanocoder no longer checks the home directory for a dot-prefixed config file. If you are still using this path, move your config to the platform-specific directory: `~/Library/Preferences/nanocoder/agents.config.json` (macOS), `~/.config/nanocoder/agents.config.json` (Linux), or `%APPDATA%\nanocoder\agents.config.json` (Windows).

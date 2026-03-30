@@ -64,18 +64,24 @@ const CopyFileFormatter = React.memo(
 
 				<Box>
 					<Text color={colors.secondary}>Source: </Text>
-					<Text color={colors.text}>{args.source}</Text>
+					<Text wrap="truncate-end" color={colors.text}>
+						{args.source}
+					</Text>
 				</Box>
 
 				<Box>
 					<Text color={colors.secondary}>Destination: </Text>
-					<Text color={colors.text}>{args.destination}</Text>
+					<Text wrap="truncate-end" color={colors.text}>
+						{args.destination}
+					</Text>
 				</Box>
 
 				{result && (
 					<Box>
 						<Text color={colors.secondary}>Result: </Text>
-						<Text color={colors.text}>{result}</Text>
+						<Text wrap="truncate-end" color={colors.text}>
+							{result}
+						</Text>
 					</Box>
 				)}
 			</Box>

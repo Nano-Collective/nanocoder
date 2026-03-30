@@ -1,7 +1,7 @@
 {
 	"name": "@nanocollective/nanocoder",
 	"main": "dist/cli.js",
-	"version": "1.23.0",
+	"version": "1.24.1",
 	"description": "A local-first CLI coding agent that brings the power of agentic coding tools like Claude Code and Gemini CLI to local models or controlled APIs like OpenRouter",
 	"keywords": [
 		"cli",
@@ -44,7 +44,7 @@
 		"test:lint": "biome lint .",
 		"test:lint:fix": "biome check --write --unsafe .",
 		"test:knip": "knip",
-		"test:audit": "pnpm audit --audit-level=high",
+		"test:audit": "pnpm audit --audit-level=high --ignore-unfixable",
 		"audit": "pnpm audit",
 		"test:security": "semgrep scan --config auto --error",
 		"format": "biome check --write .",
@@ -63,7 +63,7 @@
 		"@ai-sdk/anthropic": "^3.0.58",
 		"@ai-sdk/google": "^3.0.43",
 		"@ai-sdk/openai": "^3.0.41",
-		"@ai-sdk/openai-compatible": "2.0.31",
+		"@ai-sdk/openai-compatible": "2.0.35",
 		"@anthropic-ai/tokenizer": "^0.0.4",
 		"@modelcontextprotocol/sdk": "^1.26.0",
 		"@nanocollective/get-md": "^1.0.2",
@@ -104,8 +104,8 @@
 		"c8": "^11.0.0",
 		"husky": "^9.1.7",
 		"ink-testing-library": "^4.0.0",
-		"knip": "^5.66.2",
-		"lint-staged": "^16.2.7",
+		"knip": "^6.0.0",
+		"lint-staged": "^16.3.3",
 		"strip-ansi": "^7.1.2",
 		"tsc-alias": "^1.8.16",
 		"tsx": "^4.20.6",
@@ -155,16 +155,17 @@
 	},
 	"pnpm": {
 		"overrides": {
-			"glob@>=10.2.0 <10.5.0": ">=10.5.0",
 			"tar": ">=7.5.10",
-			"minimatch@<10.2.3": ">=10.2.3",
+			"yaml": ">=2.8.3",
+			"smol-toml": ">=1.6.1",
+			"picomatch@<2.3.2": ">=2.3.2",
+			"picomatch@>=4.0.0 <4.0.4": ">=4.0.4",
 			"@vscode/vsce>minimatch": "^3.0.5",
-			"@modelcontextprotocol/sdk>hono": ">=4.12.4",
-			"@modelcontextprotocol/sdk>@hono/node-server": ">=1.19.10",
 			"express-rate-limit": ">=8.2.2",
 			"simple-git": ">=3.32.3",
-			"flatted": ">=3.4.0",
+			"flatted": ">=3.4.2",
 			"tinyexec": ">=1.0.4"
-		}
+		},
+		"auditConfig": {}
 	}
 }

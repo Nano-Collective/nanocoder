@@ -11,6 +11,7 @@ import {IdeSelector} from '@/components/ide-selector';
 import {SuccessMessage} from '@/components/message-box';
 import {SchedulerView} from '@/components/scheduler-view';
 import SecurityDisclaimer from '@/components/security-disclaimer';
+import StreamingMessage from '@/components/streaming-message';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {
 	shouldPromptExtensionInstall,
@@ -314,6 +315,14 @@ export default function App({
 		onSetCompactToolCounts: appState.setCompactToolCounts,
 		compactToolCountsRef: appState.compactToolCountsRef,
 	});
+
+	// Track when streaming starts for tok/s calculation
+	const streamingStartRef = React.useRef<number>(Date.now());
+	const prevIsGenerating = React.useRef(false);
+	if (chatHandler.isGenerating && !prevIsGenerating.current) {
+		streamingStartRef.current = Date.now();
+	}
+	prevIsGenerating.current = chatHandler.isGenerating;
 
 	// Track context window usage percentage
 	useContextPercentage({
@@ -709,8 +718,17 @@ export default function App({
 							startChat={appState.startChat}
 							staticComponents={staticComponents}
 							queuedComponents={appState.chatComponents}
-							liveComponent={appState.liveComponent}
 							activeSubagent={appState.activeSubagent}
+							liveComponent={
+								appState.liveComponent ??
+								(chatHandler.isGenerating && chatHandler.streamingContent ? (
+									<StreamingMessage
+										message={chatHandler.streamingContent}
+										model={appState.currentModel}
+										startTime={streamingStartRef.current}
+									/>
+								) : null)
+							}
 						/>
 
 						{/* File Explorer - rendered below chat history */}
