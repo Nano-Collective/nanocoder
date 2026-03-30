@@ -46,19 +46,11 @@ export const DevelopmentModeIndicator = React.memo(
 			? DEVELOPMENT_MODE_LABELS_NARROW[developmentMode]
 			: DEVELOPMENT_MODE_LABELS[developmentMode];
 
-		// Build tune status string
-		let tuneLabel = '';
-		if (tune?.enabled) {
-			const parts: string[] = [tune.toolProfile];
-			if (tune.aggressiveCompact) parts.push('compact');
-			if (tune.modelParameters?.temperature !== undefined)
-				parts.push(`temp:${tune.modelParameters.temperature}`);
-			if (tune.modelParameters?.maxTokens !== undefined)
-				parts.push(`max:${tune.modelParameters.maxTokens}`);
-			tuneLabel = isNarrow
-				? `tune: ${tune.toolProfile}`
-				: `tune: ${parts.join(' | ')}`;
-		}
+		const tuneLabel = tune?.enabled
+			? isNarrow
+				? 'tune: ✓'
+				: 'tune: enabled'
+			: '';
 
 		return (
 			<Box marginTop={1}>
