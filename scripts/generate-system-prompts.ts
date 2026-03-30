@@ -472,7 +472,8 @@ results.sort((a, b) => a.chars - b.chars);
 
 const summary: string[] = [];
 for (const r of results) {
-	const line = `  ${r.filename.padEnd(35)} ${String(r.lines).padStart(4)} lines  ${String(r.words).padStart(5)} words  ${String(r.chars).padStart(6)} chars  (${r.label})`;
+	const tokens = Math.ceil(r.chars / 4);
+	const line = `  ${r.filename.padEnd(35)} ${String(r.lines).padStart(4)} lines  ${String(r.words).padStart(5)} words  ${String(r.chars).padStart(6)} chars  ~${String(tokens).padStart(5)} tokens  (${r.label})`;
 	summary.push(line);
 	console.log(line);
 }
