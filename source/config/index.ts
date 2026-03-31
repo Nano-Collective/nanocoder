@@ -14,6 +14,7 @@ import type {
 	AutoCompactConfig,
 	Colors,
 	CompressionMode,
+	PasteConfig,
 } from '@/types/index';
 import {logError} from '@/utils/message-queue';
 
@@ -267,6 +268,63 @@ function loadSessionConfig(): AppConfig['sessions'] {
 	return defaults;
 }
 
+// Try to load paste config from a specific path
+// Returns the config if found and valid, null otherwise
+function tryLoadPasteFromPath(
+	configPath: string,
+	defaults: PasteConfig,
+): PasteConfig | null {
+	if (!existsSync(configPath)) {
+		return null;
+	}
+
+	try {
+		const rawData = readFileSync(configPath, 'utf-8');
+		const config = JSON.parse(rawData);
+		const paste = config.nanocoder?.paste;
+		if (paste && typeof paste === 'object') {
+			return {
+				singleLineThreshold:
+					typeof paste.singleLineThreshold === 'number' &&
+					Number.isFinite(paste.singleLineThreshold) &&
+					paste.singleLineThreshold > 0
+						? Math.round(paste.singleLineThreshold)
+						: defaults.singleLineThreshold,
+			};
+		}
+	} catch (error) {
+		logError(
+			`Failed to load paste config from ${configPath}: ${String(error)}`,
+		);
+	}
+
+	return null;
+}
+
+// Load paste configuration and Returns default config if not specified
+function loadPasteConfig(): PasteConfig {
+	const defaults: PasteConfig = {
+		singleLineThreshold: 800,
+	};
+
+	// Try to load from project-level config first
+	const projectConfigPath = join(process.cwd(), 'agents.config.json');
+	const projectConfig = tryLoadPasteFromPath(projectConfigPath, defaults);
+	if (projectConfig) {
+		return projectConfig;
+	}
+
+	// Try global config
+	const configDir = getConfigPath();
+	const globalConfigPath = join(configDir, 'agents.config.json');
+	const globalConfig = tryLoadPasteFromPath(globalConfigPath, defaults);
+	if (globalConfig) {
+		return globalConfig;
+	}
+
+	return defaults;
+}
+
 // Function to load app configuration from agents.config.json if it exists
 function loadAppConfig(): AppConfig {
 	// Load providers from the new hierarchical configuration system
@@ -282,11 +340,15 @@ function loadAppConfig(): AppConfig {
 	// Load session configuration
 	const sessions = loadSessionConfig();
 
+	// Load paste configuration
+	const paste = loadPasteConfig();
+
 	return {
 		providers,
 		mcpServers,
 		autoCompact,
 		sessions,
+		paste,
 	};
 }
 

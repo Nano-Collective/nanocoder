@@ -68,6 +68,11 @@ export interface AutoCompactConfig {
 	notifyUser: boolean;
 }
 
+// Paste handling configuration
+export interface PasteConfig {
+	singleLineThreshold: number;
+}
+
 export interface AppConfig {
 	// Providers array structure - all OpenAI compatible
 	providers?: {
@@ -111,6 +116,9 @@ export interface AppConfig {
 
 	// Auto-compact configuration
 	autoCompact?: AutoCompactConfig;
+
+	// Paste handling configuration
+	paste?: PasteConfig;
 
 	// Session configuration
 	sessions?: {
