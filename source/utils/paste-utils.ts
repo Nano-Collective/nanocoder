@@ -5,18 +5,21 @@ import {
 	PlaceholderType,
 } from '../types/hooks';
 
+const SINGLE_LINE_PASTE_THESHOLD_CHAR = 800;
+
 export function handlePaste(
 	pastedText: string,
 	currentDisplayValue: string,
 	currentPlaceholderContent: Record<string, PlaceholderContent>,
 	detectionMethod?: 'rate' | 'size' | 'multiline',
 ): InputState | null {
-	// No minimum threshold - any detected paste gets a placeholder
-	// This is especially important for multi-line pastes where only the first line
-	// may be captured by the input component
-	if (pastedText.length === 0) {
+	// If single line and <= 800 (default) chars, paste directly
+	const lineCount = pastedText.split(/\r\n|\r|\n/).length;
+	if (lineCount == 1 && pastedText.length <= SINGLE_LINE_PASTE_THESHOLD_CHAR) {
 		return null;
 	}
+
+	//If multiline or large text, create a placeholder...
 
 	// Generate simple incrementing ID based on existing paste placeholders
 	const existingPasteCount = Object.values(currentPlaceholderContent).filter(
