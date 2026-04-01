@@ -1,27 +1,15 @@
-import React from 'react';
-import {SuccessMessage} from '@/components/message-box';
-import {clearAllTasks} from '@/tools/tasks';
 import {Command} from '@/types/index';
 
-function Clear() {
-	return (
-		<SuccessMessage
-			hideBox={true}
-			message="Chat and tasks cleared."
-		></SuccessMessage>
-	);
-}
-
+/**
+ * Clear command registration for /help display.
+ * Actual handling is in app-util.ts handleSpecialCommand since it needs app state
+ * (onClearMessages) to clear chat history and model context.
+ */
 export const clearCommand: Command = {
 	name: 'clear',
 	description: 'Clear the chat history, model context, and tasks',
 	handler: async (_args: string[]) => {
-		// Clear all tasks
-		await clearAllTasks();
-
-		// Return info message saying chat was cleared
-		return React.createElement(Clear, {
-			key: `clear-${Date.now()}`,
-		});
+		// Handled by handleSpecialCommand in app-util.ts
+		return undefined;
 	},
 };
