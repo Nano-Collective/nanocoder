@@ -10,7 +10,7 @@ import {
  * Default threshold for single-line paste handling.
  * Pastes <= this character limit are inserted directly without placeholders.
  */
-const DEFAULT_SINGLE_LINE_PASTE_THRESHOLD = 800;
+export const DEFAULT_SINGLE_LINE_PASTE_THRESHOLD = 800;
 
 function getSingleLinePasteThreshold(): number {
 	const config = getAppConfig();
@@ -25,6 +25,10 @@ export function handlePaste(
 	currentPlaceholderContent: Record<string, PlaceholderContent>,
 	detectionMethod?: 'rate' | 'size' | 'multiline',
 ): InputState | null {
+	if (pastedText.length === 0) {
+		return null;
+	}
+
 	const threshold = getSingleLinePasteThreshold();
 
 	// If single line and <= threshold chars, paste directly
@@ -32,8 +36,6 @@ export function handlePaste(
 	if (lineCount === 1 && pastedText.length <= threshold) {
 		return null;
 	}
-
-	// If multiline or large text, create a placeholder...
 
 	// Generate simple incrementing ID based on existing paste placeholders
 	const existingPasteCount = Object.values(currentPlaceholderContent).filter(

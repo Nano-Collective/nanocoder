@@ -135,6 +135,24 @@ Configure automatic session saving and retention. See [Session Management](../fe
 | `retentionDays` | number | `30` | Auto-delete sessions older than this (minimum 1) |
 | `directory` | string | (platform default) | Custom storage directory for session files |
 
+### Paste Handling
+
+Configure how pasted text is handled in the input. By default, single-line pastes of 800 characters or fewer are inserted directly, while longer or multi-line pastes are collapsed into a `[Paste #N: X chars]` placeholder.
+
+```json
+{
+  "nanocoder": {
+    "paste": {
+      "singleLineThreshold": 800
+    }
+  }
+}
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `singleLineThreshold` | number | `800` | Maximum characters for a single-line paste to be inserted directly. Pastes longer than this (or multi-line pastes) become placeholders. Must be a positive integer. |
+
 ### Tool Auto-Approval
 
 Allow specific tools to run without confirmation, even in normal development mode.
