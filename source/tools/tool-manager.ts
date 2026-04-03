@@ -1,3 +1,4 @@
+import {getBraveSearchApiKey} from '@/config/nanocoder-tools-config';
 import {MCPClient} from '@/mcp/mcp-client';
 import {
 	nativeToolsRegistry as staticNativeToolsRegistry,
@@ -46,6 +47,11 @@ export class ToolManager {
 			staticToolStreamingFormatters,
 			staticToolReadOnlyFlags,
 		);
+
+		// Remove web_search if no Brave Search API key is configured
+		if (!getBraveSearchApiKey()) {
+			this.registry.unregister('web_search');
+		}
 	}
 
 	/**

@@ -2,6 +2,7 @@ import {config as loadEnv} from 'dotenv';
 import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'fs';
 import {dirname, join} from 'path';
 import {fileURLToPath} from 'url';
+import {substituteEnvVars} from '@/config/env-substitution';
 import {
 	loadAllMCPConfigs,
 	loadAllProviderConfigs,
@@ -267,6 +268,43 @@ function loadSessionConfig(): AppConfig['sessions'] {
 	return defaults;
 }
 
+function loadNanocoderToolsConfig(): AppConfig['nanocoderTools'] {
+	// Try project-level config first
+	const projectConfigPath = join(process.cwd(), 'agents.config.json');
+	const projectResult = tryLoadNanocoderToolsFromPath(projectConfigPath);
+	if (projectResult) {
+		return projectResult;
+	}
+
+	// Try global config
+	const configDir = getConfigPath();
+	const globalConfigPath = join(configDir, 'agents.config.json');
+	return tryLoadNanocoderToolsFromPath(globalConfigPath) ?? undefined;
+}
+
+function tryLoadNanocoderToolsFromPath(
+	configPath: string,
+): AppConfig['nanocoderTools'] | null {
+	if (!existsSync(configPath)) {
+		return null;
+	}
+
+	try {
+		const rawData = readFileSync(configPath, 'utf-8');
+		const config = JSON.parse(rawData);
+		const nanocoderTools = config.nanocoder?.nanocoderTools;
+		if (nanocoderTools && typeof nanocoderTools === 'object') {
+			return substituteEnvVars(nanocoderTools);
+		}
+	} catch (error) {
+		logError(
+			`Failed to load nanocoderTools config from ${configPath}: ${String(error)}`,
+		);
+	}
+
+	return null;
+}
+
 // Function to load app configuration from agents.config.json if it exists
 function loadAppConfig(): AppConfig {
 	// Load providers from the new hierarchical configuration system
@@ -282,11 +320,15 @@ function loadAppConfig(): AppConfig {
 	// Load session configuration
 	const sessions = loadSessionConfig();
 
+	// Load nanocoder tools configuration
+	const nanocoderTools = loadNanocoderToolsConfig();
+
 	return {
 		providers,
 		mcpServers,
 		autoCompact,
 		sessions,
+		nanocoderTools,
 	};
 }
 
