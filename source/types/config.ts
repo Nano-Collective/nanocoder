@@ -112,6 +112,9 @@ export interface AppConfig {
 	// Nanocoder-specific tool configurations
 	nanocoderTools?: {
 		alwaysAllow?: string[];
+		webSearch?: {
+			apiKey?: string;
+		};
 	};
 
 	// Auto-compact configuration

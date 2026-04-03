@@ -14,3 +14,12 @@ export function isNanocoderToolAlwaysAllowed(toolName: string): boolean {
 
 	return alwaysAllowList.includes(toolName);
 }
+
+/**
+ * Get the Brave Search API key from config, if configured.
+ * Returns undefined when no key is set (web_search tool should be disabled).
+ */
+export function getBraveSearchApiKey(): string | undefined {
+	const apiKey = getAppConfig().nanocoderTools?.webSearch?.apiKey;
+	return apiKey?.trim() || undefined;
+}

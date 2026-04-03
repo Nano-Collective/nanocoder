@@ -69,7 +69,6 @@
 		"@nanocollective/get-md": "^1.0.2",
 		"ai": "6.0.116",
 		"chalk": "^5.2.0",
-		"cheerio": "^1.1.2",
 		"cli-highlight": "^2.1.11",
 		"cli-table3": "^0.6.5",
 		"croner": "^10.0.1",

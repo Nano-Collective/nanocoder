@@ -24,6 +24,8 @@ Nanocoder looks for configuration in the following order (first found wins):
 
 > **Note:** When `NANOCODER_CONFIG_DIR` is set, it takes full precedence — the project-level and home directory checks are skipped, and Nanocoder looks for `agents.config.json` only in the specified directory.
 
+> **Tip:** Use `/setup-config` to list all available configuration files and open any of them in your `$EDITOR`.
+
 ## Environment Variables
 
 Keep API keys out of version control using environment variables. Variables are loaded from shell environment (`.bashrc`, `.zshrc`) or `.env` file in your working directory.
@@ -148,6 +150,24 @@ Allow specific tools to run without confirmation, even in normal development mod
 ```
 
 The `alwaysAllow` array accepts tool names. Tools listed here will execute immediately without prompting for approval.
+
+### Web Search
+
+The `web_search` tool uses the [Brave Search API](https://brave.com/search/api/) and requires an API key to enable. Without a key, the tool is not registered and won't be available to the model.
+
+Brave's free tier includes 2,000 queries per month. [Get an API key here](https://brave.com/search/api/).
+
+```json
+{
+  "nanocoderTools": {
+    "webSearch": {
+      "apiKey": "$BRAVE_SEARCH_API_KEY"
+    }
+  }
+}
+```
+
+The `apiKey` field supports environment variable substitution (`$VAR`, `${VAR}`, `${VAR:-default}`), so you can keep the actual key in your environment rather than in the config file.
 
 ## Sections
 

@@ -47,9 +47,6 @@ importers:
       chalk:
         specifier: ^5.2.0
         version: 5.6.2
-      cheerio:
-        specifier: ^1.1.2
-        version: 1.2.0
       cli-highlight:
         specifier: ^2.1.11
         version: 2.1.11

@@ -16,6 +16,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/init` | Initialize project with intelligent analysis, create AGENTS.md and configuration files. Use `/init --force` to regenerate AGENTS.md if it already exists |
 | `/setup-providers` | Interactive wizard for configuring AI providers with templates |
 | `/setup-mcp` | Interactive wizard for configuring MCP servers with templates |
+| `/setup-config` | Open a configuration file in your `$EDITOR` (lists project and global config files) |
 | `/clear` | Clear chat history |
 | `/model` | Switch between available models |
 | `/provider` | Switch between configured AI providers |
