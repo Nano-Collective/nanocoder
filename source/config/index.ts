@@ -2,6 +2,7 @@ import {config as loadEnv} from 'dotenv';
 import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'fs';
 import {dirname, join} from 'path';
 import {fileURLToPath} from 'url';
+import {substituteEnvVars} from '@/config/env-substitution';
 import {
 	loadAllMCPConfigs,
 	loadAllProviderConfigs,
@@ -14,8 +15,10 @@ import type {
 	AutoCompactConfig,
 	Colors,
 	CompressionMode,
+	PasteConfig,
 } from '@/types/index';
 import {logError} from '@/utils/message-queue';
+import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 
 // Load .env file from working directory (shell environment takes precedence)
 // Suppress dotenv console output by temporarily redirecting stdout
@@ -335,6 +338,100 @@ function tryLoadSubagentsFromPath(
 	return null;
 }
 
+// Try to load paste config from a specific path
+// Returns the config if found and valid, null otherwise
+function tryLoadPasteFromPath(
+	configPath: string,
+	defaults: PasteConfig,
+): PasteConfig | null {
+	if (!existsSync(configPath)) {
+		return null;
+	}
+
+	try {
+		const rawData = readFileSync(configPath, 'utf-8');
+		const config = JSON.parse(rawData);
+		const paste = config.nanocoder?.paste;
+		if (paste && typeof paste === 'object') {
+			return {
+				singleLineThreshold:
+					typeof paste.singleLineThreshold === 'number' &&
+					Number.isFinite(paste.singleLineThreshold) &&
+					paste.singleLineThreshold > 0
+						? Math.round(paste.singleLineThreshold)
+						: defaults.singleLineThreshold,
+			};
+		}
+	} catch (error) {
+		logError(
+			`Failed to load paste config from ${configPath}: ${String(error)}`,
+		);
+	}
+
+	return null;
+}
+
+// Load paste configuration and Returns default config if not specified
+function loadPasteConfig(): PasteConfig {
+	const defaults: PasteConfig = {
+		singleLineThreshold: DEFAULT_SINGLE_LINE_PASTE_THRESHOLD,
+	};
+
+	// Try to load from project-level config first
+	const projectConfigPath = join(process.cwd(), 'agents.config.json');
+	const projectConfig = tryLoadPasteFromPath(projectConfigPath, defaults);
+	if (projectConfig) {
+		return projectConfig;
+	}
+
+	// Try global config
+	const configDir = getConfigPath();
+	const globalConfigPath = join(configDir, 'agents.config.json');
+	const globalConfig = tryLoadPasteFromPath(globalConfigPath, defaults);
+	if (globalConfig) {
+		return globalConfig;
+	}
+
+	return defaults;
+}
+
+function loadNanocoderToolsConfig(): AppConfig['nanocoderTools'] {
+	// Try project-level config first
+	const projectConfigPath = join(process.cwd(), 'agents.config.json');
+	const projectResult = tryLoadNanocoderToolsFromPath(projectConfigPath);
+	if (projectResult) {
+		return projectResult;
+	}
+
+	// Try global config
+	const configDir = getConfigPath();
+	const globalConfigPath = join(configDir, 'agents.config.json');
+	return tryLoadNanocoderToolsFromPath(globalConfigPath) ?? undefined;
+}
+
+function tryLoadNanocoderToolsFromPath(
+	configPath: string,
+): AppConfig['nanocoderTools'] | null {
+	if (!existsSync(configPath)) {
+		return null;
+	}
+
+	try {
+		const rawData = readFileSync(configPath, 'utf-8');
+		const config = JSON.parse(rawData);
+		const nanocoderTools = config.nanocoder?.nanocoderTools;
+		if (nanocoderTools && typeof nanocoderTools === 'object') {
+			return substituteEnvVars(nanocoderTools);
+		}
+	} catch (error) {
+		logError(
+			`Failed to load nanocoderTools config from ${configPath}: ${String(error)}`,
+		);
+	}
+
+	return null;
+}
+
 // Function to load app configuration from agents.config.json if it exists
 function loadAppConfig(): AppConfig {
 	// Load providers from the new hierarchical configuration system
@@ -353,12 +450,20 @@ function loadAppConfig(): AppConfig {
 	// Load subagent configuration
 	const subagents = loadSubagentConfig();
 
+	// Load paste configuration
+	const paste = loadPasteConfig();
+
+	// Load nanocoder tools configuration
+	const nanocoderTools = loadNanocoderToolsConfig();
+
 	return {
 		providers,
 		mcpServers,
 		autoCompact,
 		sessions,
 		subagents,
+		paste,
+		nanocoderTools,
 	};
 }
 

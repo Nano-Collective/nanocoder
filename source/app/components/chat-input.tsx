@@ -3,10 +3,12 @@ import Spinner from 'ink-spinner';
 import React from 'react';
 import CancellingIndicator from '@/components/cancelling-indicator';
 import QuestionPrompt from '@/components/question-prompt';
+import {TaskListDisplay} from '@/components/task-list-display';
 import ToolConfirmation from '@/components/tool-confirmation';
 import ToolExecutionIndicator from '@/components/tool-execution-indicator';
 import UserInput from '@/components/user-input';
 import {useTheme} from '@/hooks/useTheme';
+import type {Task} from '@/tools/tasks/types';
 import type {DevelopmentMode, ToolCall} from '@/types';
 import type {PendingQuestion} from '@/utils/question-queue';
 import {LiveCompactCounts} from '@/utils/tool-result-display';
@@ -44,6 +46,7 @@ export interface ChatInputProps {
 	compactToolCounts?: Record<string, number> | null;
 	onToggleCompactDisplay?: () => void;
 	compactToolDisplay?: boolean;
+	liveTaskList?: Task[] | null;
 
 	// Handlers
 	onToolConfirm: (confirmed: boolean) => void;
@@ -80,6 +83,7 @@ export function ChatInput({
 	compactToolCounts,
 	onToggleCompactDisplay,
 	compactToolDisplay,
+	liveTaskList,
 	onToolConfirm,
 	onToolCancel,
 	onSubmit,
@@ -97,6 +101,11 @@ export function ChatInput({
 			{/* Live compact tool counts - running tally during auto-execution */}
 			{compactToolCounts && Object.keys(compactToolCounts).length > 0 && (
 				<LiveCompactCounts counts={compactToolCounts} />
+			)}
+
+			{/* Live task list - updates in-place below tool counts, above spinner */}
+			{liveTaskList && liveTaskList.length > 0 && (
+				<TaskListDisplay tasks={liveTaskList} title="Tasks" />
 			)}
 
 			{isCancelling && <CancellingIndicator />}

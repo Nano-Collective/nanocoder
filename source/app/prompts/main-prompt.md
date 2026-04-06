@@ -119,7 +119,7 @@ Don't use: `execute_bash("mkdir -p src/utils")` → Use: `create_directory("src/
 - **read_file**: Read files with progressive disclosure (>300 lines returns metadata first, then use line ranges). Use metadata_only=true to get metadata without content.
 - **list_directory**: List directory contents with optional recursion
 - **lsp_get_diagnostics**: Check for errors/linting issues (before and after changes)
-- **web_search / fetch_url**: Look up documentation, APIs, and solutions online
+- **web_search / fetch_url**: Look up documentation, APIs, and solutions online (web_search requires a Brave Search API key configured in `nanocoderTools.webSearch.apiKey`)
 
 **Tool Decision Tree**:
 - **Need to find files?** → Use `find_files` with glob pattern

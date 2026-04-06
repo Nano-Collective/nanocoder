@@ -38,6 +38,7 @@ export function useChatHandler({
 	compactToolDisplayRef,
 	onSetCompactToolCounts,
 	compactToolCountsRef,
+	onSetLiveTaskList,
 }: UseChatHandlerProps): ChatHandlerReturn {
 	// Conversation state manager for enhanced context
 	const conversationStateManager = React.useRef(new ConversationStateManager());
@@ -113,6 +114,7 @@ export function useChatHandler({
 					compactToolDisplayRef,
 					onSetCompactToolCounts,
 					compactToolCountsRef,
+					onSetLiveTaskList,
 				});
 			} catch (error) {
 				displayError(error, 'chat-error');
@@ -139,6 +141,7 @@ export function useChatHandler({
 			compactToolDisplayRef,
 			compactToolCountsRef,
 			onSetCompactToolCounts,
+			onSetLiveTaskList,
 			displayError,
 			resetStreamingState,
 		],

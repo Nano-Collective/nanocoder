@@ -1,8 +1,8 @@
-import * as cheerio from 'cheerio';
 import {Box, Text} from 'ink';
 import React from 'react';
 import {fetch} from 'undici';
 
+import {getBraveSearchApiKey} from '@/config/nanocoder-tools-config';
 import {
 	DEFAULT_WEB_SEARCH_RESULTS,
 	MAX_WEB_SEARCH_QUERY_LENGTH,
@@ -19,74 +19,69 @@ interface SearchArgs {
 	max_results?: number;
 }
 
-interface SearchResult {
+interface BraveSearchResult {
 	title: string;
 	url: string;
-	snippet: string;
+	description?: string;
 }
 
-const executeWebSearch = async (args: SearchArgs): Promise<string> => {
+interface BraveSearchResponse {
+	web?: {
+		results?: BraveSearchResult[];
+	};
+}
+
+export const executeWebSearch = async (args: SearchArgs): Promise<string> => {
+	const apiKey = getBraveSearchApiKey();
+	if (!apiKey) {
+		throw new Error(
+			'Brave Search API key not configured. Add it to agents.config.json under nanocoderTools.webSearch.apiKey',
+		);
+	}
+
 	const maxResults = args.max_results ?? DEFAULT_WEB_SEARCH_RESULTS;
 	const encodedQuery = encodeURIComponent(args.query);
 
 	try {
-		// Use Brave Search - scraper-friendly, no CAPTCHA
-		const searchUrl = `https://search.brave.com/search?q=${encodedQuery}`;
+		const searchUrl = `https://api.search.brave.com/res/v1/web/search?q=${encodedQuery}&count=${maxResults}`;
 
 		const response = await fetch(searchUrl, {
 			headers: {
-				'User-Agent':
-					'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-				Accept: 'text/html',
+				Accept: 'application/json',
+				'Accept-Encoding': 'gzip',
+				'X-Subscription-Token': apiKey,
 			},
 			signal: AbortSignal.timeout(TIMEOUT_WEB_SEARCH_MS),
 		});
+
+		if (response.status === 401 || response.status === 403) {
+			throw new Error('Invalid Brave Search API key');
+		}
+
+		if (response.status === 429) {
+			throw new Error('Brave Search API rate limit exceeded');
+		}
 
 		if (!response.ok) {
 			throw new Error(`HTTP ${response.status}: ${response.statusText}`);
 		}
 
-		const html = await response.text();
-		const $ = cheerio.load(html);
-
-		const results: SearchResult[] = [];
-
-		// Brave Search uses specific result containers
-		$('[data-type="web"]').each((_i, elem) => {
-			if (results.length >= maxResults) return;
-
-			const $elem = $(elem);
-
-			// Extract title and URL
-			const titleLink = $elem.find('a[href^="http"]').first();
-			const url = titleLink.attr('href');
-			const title = titleLink.text().trim();
-
-			// Extract snippet
-			const snippet = $elem.find('.snippet-description').text().trim();
-
-			if (url && title) {
-				results.push({
-					title: title || 'No title',
-					url,
-					snippet: snippet || '',
-				});
-			}
-		});
+		const data = (await response.json()) as BraveSearchResponse;
+		const results = data.web?.results ?? [];
 
 		if (results.length === 0) {
 			return `No results found for query: "${args.query}"`;
 		}
 
-		// Format results as markdown for easier LLM reading
 		let formattedResults = `# Web Search Results: "${args.query}"\n\n`;
 
 		for (let i = 0; i < results.length; i++) {
 			const result = results[i];
+			if (!result) continue;
 			formattedResults += `## ${i + 1}. ${result.title}\n\n`;
 			formattedResults += `**URL:** ${result.url}\n\n`;
-			if (result.snippet) {
-				formattedResults += `${result.snippet}\n\n`;
+			if (result.description) {
+				formattedResults += `${result.description}\n\n`;
 			}
 			formattedResults += '---\n\n';
 		}
@@ -97,15 +92,17 @@ const executeWebSearch = async (args: SearchArgs): Promise<string> => {
 			throw new Error('Search request timeout');
 		}
 
-		const errorMessage =
-			error instanceof Error ? error.message : 'Unknown error';
-		throw new Error(`Web search failed: ${errorMessage}`);
+		if (error instanceof Error) {
+			throw error;
+		}
+
+		throw new Error(`Web search failed: Unknown error`);
 	}
 };
 
 const webSearchCoreTool = tool({
 	description:
-		'Search the web for information (scrapes Brave Search, returns markdown)',
+		'Search the web for information using the Brave Search API (returns markdown formatted results)',
 	inputSchema: jsonSchema<SearchArgs>({
 		type: 'object',
 		properties: {
@@ -162,7 +159,7 @@ function WebSearchFormatterComponent({
 			</Box>
 			<Box>
 				<Text color={colors.secondary}>Engine: </Text>
-				<Text color={colors.text}>Brave Search</Text>
+				<Text color={colors.text}>Brave Search API</Text>
 			</Box>
 			{result && (
 				<>
@@ -173,7 +170,7 @@ function WebSearchFormatterComponent({
 						</Text>
 					</Box>
 					<Box>
-						<Text color={colors.secondary}>Tokens: </Text>
+						<Text color={colors.secondary}>Output: </Text>
 						<Text color={colors.text}>~{estimatedTokens} tokens</Text>
 					</Box>
 				</>
@@ -182,7 +179,7 @@ function WebSearchFormatterComponent({
 	);
 }
 
-const webSearchFormatter = (
+export const webSearchFormatter = (
 	args: SearchArgs,
 	result?: string,
 ): React.ReactElement => {
@@ -195,7 +192,7 @@ const webSearchFormatter = (
 	);
 };
 
-const webSearchValidator = (
+export const webSearchValidator = (
 	args: SearchArgs,
 ): Promise<{valid: true} | {valid: false; error: string}> => {
 	const query = args.query?.trim();

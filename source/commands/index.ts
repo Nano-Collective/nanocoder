@@ -20,6 +20,7 @@ export * from '@/commands/provider';
 export * from '@/commands/resume';
 export * from '@/commands/schedule';
 export * from '@/commands/settings';
+export * from '@/commands/setup-config';
 export * from '@/commands/setup-mcp';
 export * from '@/commands/setup-providers';
 export * from '@/commands/status';

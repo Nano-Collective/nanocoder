@@ -24,6 +24,8 @@ Nanocoder looks for configuration in the following order (first found wins):
 
 > **Note:** When `NANOCODER_CONFIG_DIR` is set, it takes full precedence — the project-level and home directory checks are skipped, and Nanocoder looks for `agents.config.json` only in the specified directory.
 
+> **Tip:** Use `/setup-config` to list all available configuration files and open any of them in your `$EDITOR`.
+
 ## Environment Variables
 
 Keep API keys out of version control using environment variables. Variables are loaded from shell environment (`.bashrc`, `.zshrc`) or `.env` file in your working directory.
@@ -133,6 +135,24 @@ Configure automatic session saving and retention. See [Session Management](../fe
 | `retentionDays` | number | `30` | Auto-delete sessions older than this (minimum 1) |
 | `directory` | string | (platform default) | Custom storage directory for session files |
 
+### Paste Handling
+
+Configure how pasted text is handled in the input. By default, single-line pastes of 800 characters or fewer are inserted directly, while longer or multi-line pastes are collapsed into a `[Paste #N: X chars]` placeholder.
+
+```json
+{
+  "nanocoder": {
+    "paste": {
+      "singleLineThreshold": 800
+    }
+  }
+}
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `singleLineThreshold` | number | `800` | Maximum characters for a single-line paste to be inserted directly. Pastes longer than this (or multi-line pastes) become placeholders. Must be a positive integer. |
+
 ### Tool Auto-Approval
 
 Allow specific tools to run without confirmation, even in normal development mode.
@@ -148,6 +168,24 @@ Allow specific tools to run without confirmation, even in normal development mod
 ```
 
 The `alwaysAllow` array accepts tool names. Tools listed here will execute immediately without prompting for approval.
+
+### Web Search
+
+The `web_search` tool uses the [Brave Search API](https://brave.com/search/api/) and requires an API key to enable. Without a key, the tool is not registered and won't be available to the model.
+
+Brave's free tier includes 2,000 queries per month. [Get an API key here](https://brave.com/search/api/).
+
+```json
+{
+  "nanocoderTools": {
+    "webSearch": {
+      "apiKey": "$BRAVE_SEARCH_API_KEY"
+    }
+  }
+}
+```
+
+The `apiKey` field supports environment variable substitution (`$VAR`, `${VAR}`, `${VAR:-default}`), so you can keep the actual key in your environment rather than in the config file.
 
 ## Sections
 

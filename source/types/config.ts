@@ -68,6 +68,11 @@ export interface AutoCompactConfig {
 	notifyUser: boolean;
 }
 
+// Paste handling configuration
+export interface PasteConfig {
+	singleLineThreshold: number;
+}
+
 export interface AppConfig {
 	// Providers array structure - all OpenAI compatible
 	providers?: {
@@ -107,6 +112,9 @@ export interface AppConfig {
 	// Nanocoder-specific tool configurations
 	nanocoderTools?: {
 		alwaysAllow?: string[];
+		webSearch?: {
+			apiKey?: string;
+		};
 	};
 
 	// Subagent configuration
@@ -119,6 +127,9 @@ export interface AppConfig {
 
 	// Auto-compact configuration
 	autoCompact?: AutoCompactConfig;
+
+	// Paste handling configuration
+	paste?: PasteConfig;
 
 	// Session configuration
 	sessions?: {

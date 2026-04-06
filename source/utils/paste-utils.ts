@@ -1,3 +1,4 @@
+import {getAppConfig} from '../config';
 import {
 	InputState,
 	PastePlaceholderContent,
@@ -5,16 +6,34 @@ import {
 	PlaceholderType,
 } from '../types/hooks';
 
+/**
+ * Default threshold for single-line paste handling.
+ * Pastes <= this character limit are inserted directly without placeholders.
+ */
+export const DEFAULT_SINGLE_LINE_PASTE_THRESHOLD = 800;
+
+function getSingleLinePasteThreshold(): number {
+	const config = getAppConfig();
+	return (
+		config?.paste?.singleLineThreshold ?? DEFAULT_SINGLE_LINE_PASTE_THRESHOLD
+	);
+}
+
 export function handlePaste(
 	pastedText: string,
 	currentDisplayValue: string,
 	currentPlaceholderContent: Record<string, PlaceholderContent>,
 	detectionMethod?: 'rate' | 'size' | 'multiline',
 ): InputState | null {
-	// No minimum threshold - any detected paste gets a placeholder
-	// This is especially important for multi-line pastes where only the first line
-	// may be captured by the input component
 	if (pastedText.length === 0) {
+		return null;
+	}
+
+	const threshold = getSingleLinePasteThreshold();
+
+	// If single line and <= threshold chars, paste directly
+	const lineCount = pastedText.split(/\r\n|\r|\n/).length;
+	if (lineCount === 1 && pastedText.length <= threshold) {
 		return null;
 	}
 
