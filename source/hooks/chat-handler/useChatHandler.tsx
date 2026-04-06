@@ -222,7 +222,7 @@ export function useChatHandler({
 			/>,
 		);
 
-		// Add user message to conversation history
+		// Add user message to conversation history (single addition)
 		const builder = new MessageBuilder(messages);
 		builder.addUserMessage(message);
 		const updatedMessages = builder.build();

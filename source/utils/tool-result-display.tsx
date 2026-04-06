@@ -80,6 +80,8 @@ function getGroupedCompactDescription(toolName: string, count: number): string {
 			return `Got diagnostics ${count} time${s}`;
 		case 'ask_question':
 			return `Asked ${count} question${s}`;
+		case 'agent':
+			return `Delegated ${count} task${s} to subagent${s}`;
 		default:
 			return `Executed ${toolName} \u00d7 ${count}`;
 	}

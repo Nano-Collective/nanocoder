@@ -1,3 +1,4 @@
+import {agentTool} from '@/tools/agent-tool';
 import {askQuestionTool} from '@/tools/ask-question';
 import {executeBashTool} from '@/tools/execute-bash';
 import {fetchUrlTool} from '@/tools/fetch-url';
@@ -31,6 +32,7 @@ const staticTools: NanocoderToolExport[] = [
 	searchFileContentsTool,
 	getDiagnosticsTool,
 	listDirectoryTool,
+	agentTool,
 	// Interaction tools
 	askQuestionTool,
 	// File operation tools

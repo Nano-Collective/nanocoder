@@ -45,7 +45,7 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 		'git_stash',
 		'git_reset',
 	],
-	scheduler: ['ask_user'],
+	scheduler: ['ask_user', 'agent'],
 };
 
 /**

@@ -122,7 +122,8 @@ export function ChatInput({
 			) : /* Tool Execution - skip indicator for streaming tools (they show their own progress) */
 			isToolExecuting &&
 				pendingToolCalls[currentToolIndex] &&
-				pendingToolCalls[currentToolIndex].function.name !== 'execute_bash' ? (
+				pendingToolCalls[currentToolIndex].function.name !== 'execute_bash' &&
+				pendingToolCalls[currentToolIndex].function.name !== 'agent' ? (
 				<ToolExecutionIndicator
 					toolName={pendingToolCalls[currentToolIndex].function.name}
 					currentIndex={currentToolIndex}

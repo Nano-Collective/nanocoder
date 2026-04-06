@@ -187,12 +187,20 @@ export async function handleChat(
 				flushTimer = null;
 			};
 
+			let lastYield = Date.now();
 			for await (const chunk of result.textStream) {
 				if (chunk) {
 					tokenBuffer += chunk;
 					if (!flushTimer) {
 						flushTimer = setTimeout(flushBuffer, FLUSH_INTERVAL_MS);
 					}
+				}
+				// Periodically yield to the event loop so timers and Ink renders
+				// can run during long streaming responses (e.g. subagent execution)
+				const now = Date.now();
+				if (now - lastYield >= 200) {
+					lastYield = now;
+					await new Promise<void>(resolve => setTimeout(resolve, 0));
 				}
 			}
 

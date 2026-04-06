@@ -2,6 +2,36 @@ import type {InputState} from '../types/hooks';
 import {PlaceholderType} from '../types/hooks';
 
 /**
+ * Cached subagent descriptions for injection into the system prompt.
+ * Set via setAvailableSubagents() during app initialization.
+ */
+let cachedSubagentDescriptions = 'No subagents available.';
+
+/**
+ * Set the available subagents for system prompt injection.
+ * Call this during app initialization after the subagent loader is ready.
+ */
+export function setAvailableSubagents(
+	agents: Array<{name: string; description: string}>,
+): void {
+	if (agents.length === 0) {
+		cachedSubagentDescriptions = 'No subagents available.';
+		return;
+	}
+
+	cachedSubagentDescriptions = agents
+		.map(a => `- **${a.name}**: ${a.description}`)
+		.join('\n');
+}
+
+/**
+ * Get the current subagent descriptions for prompt building.
+ */
+export function getSubagentDescriptions(): string {
+	return cachedSubagentDescriptions;
+}
+
+/**
  * Assemble the final prompt by replacing all placeholders with their full content
  * This function is called before sending the prompt to the AI
  */
@@ -32,10 +62,7 @@ export function assemblePrompt(inputState: InputState): string {
 					break;
 				}
 				default: {
-					// TypeScript will ensure this is unreachable with proper enum usage
-					// Exhaustiveness check to ensure all enum cases are handled
 					placeholderContent satisfies never;
-					// Fallback for safety, though this should never be reached
 					replacementContent = '';
 					break;
 				}

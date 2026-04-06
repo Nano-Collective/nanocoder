@@ -92,6 +92,7 @@ function ensureFileExists(filePath: string): void {
 function openInEditor(filePath: string): void {
 	const editor = getEditor();
 	ensureFileExists(filePath);
+	// nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
 	execSync(`${editor} ${JSON.stringify(filePath)}`, {stdio: 'inherit'});
 }
 

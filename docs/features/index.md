@@ -190,6 +190,17 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 /mcp            # see connected servers and tools
 ```
 
+### Subagents
+
+[Subagents](subagents.md) let the AI delegate focused tasks to specialized agents that run in isolated contexts. Each subagent has its own system prompt, filtered tools, and optionally a different model or provider. Only the result comes back to the main conversation.
+
+```bash
+/agents              # list available subagents
+/agents create my-agent   # create a custom subagent with AI help
+```
+
+Subagents are defined as markdown files in `.nanocoder/agents/`. You can use a local model for cheap research and a cloud model for the main conversation.
+
 ### Scheduled Tasks
 
 Automate recurring work with the [scheduler](scheduler.md):
@@ -213,6 +224,7 @@ Define task prompts as markdown files and schedule them with cron expressions. N
 | [Session Management](session-management.md) | Automatic session saving and resumption |
 | [Task Management](task-management.md) | Tracking multi-step work |
 | [Custom Commands](custom-commands.md) | Reusable AI prompts as markdown files |
+| [Subagents](subagents.md) | Delegate tasks to specialized AI agents with isolated context |
 | [File Explorer](file-explorer.md) | Interactive file browser for context selection |
 | [Scheduler](scheduler.md) | Recurring AI tasks with cron expressions |
 | [VS Code Extension](vscode-extension.md) | Editor integration with live diff previews |

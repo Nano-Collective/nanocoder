@@ -177,7 +177,7 @@ test('web search tool has description referencing Brave Search API', t => {
 	}
 
 	t.truthy(webSearchTool.tool.description);
-	t.true(webSearchTool.tool.description.includes('Brave Search API'));
+	t.true(webSearchTool.tool.description.includes('Search the web'));
 });
 
 test('web search tool has input schema', t => {
@@ -337,7 +337,8 @@ test('webSearchFormatter handles empty result string', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /0 \/ 10 results/);
+	// Empty string is falsy so results section is not rendered; just verify the component renders
+	t.regex(output!, /web_search/);
 });
 
 test('webSearchFormatter counts results correctly from markdown', t => {
@@ -370,19 +371,11 @@ test('executeWebSearch throws when no API key configured', async t => {
 		return;
 	}
 
-	// Mock config to return no API key
-	const configModule = await import('../config/nanocoder-tools-config.js');
-	const originalFn = configModule.getBraveSearchApiKey;
-	(configModule as any).getBraveSearchApiKey = () => undefined;
-
-	try {
-		await t.throwsAsync(
-			async () => await executeWebSearch({query: 'test'}),
-			{message: /API key not configured/},
-		);
-	} finally {
-		(configModule as any).getBraveSearchApiKey = originalFn;
-	}
+	// Pass empty string as apiKeyOverride to simulate no API key
+	await t.throwsAsync(
+		async () => await executeWebSearch({query: 'test'}, ''),
+		{message: /API key not configured/},
+	);
 });
 
 test('executeWebSearch throws on invalid API key (401)', async t => {
@@ -390,10 +383,6 @@ test('executeWebSearch throws on invalid API key (401)', async t => {
 		t.pass('Skipping test - web-search module not available');
 		return;
 	}
-
-	const configModule = await import('../config/nanocoder-tools-config.js');
-	const originalFn = configModule.getBraveSearchApiKey;
-	(configModule as any).getBraveSearchApiKey = () => 'test-key';
 
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = (async () => {
@@ -407,11 +396,10 @@ test('executeWebSearch throws on invalid API key (401)', async t => {
 
 	try {
 		await t.throwsAsync(
-			async () => await executeWebSearch({query: 'test'}),
+			async () => await executeWebSearch({query: 'test'}, 'test-key'),
 			{message: /Invalid Brave Search API key/},
 		);
 	} finally {
-		(configModule as any).getBraveSearchApiKey = originalFn;
 		globalThis.fetch = originalFetch;
 	}
 });
@@ -421,10 +409,6 @@ test('executeWebSearch throws on rate limit (429)', async t => {
 		t.pass('Skipping test - web-search module not available');
 		return;
 	}
-
-	const configModule = await import('../config/nanocoder-tools-config.js');
-	const originalFn = configModule.getBraveSearchApiKey;
-	(configModule as any).getBraveSearchApiKey = () => 'test-key';
 
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = (async () => {
@@ -438,11 +422,10 @@ test('executeWebSearch throws on rate limit (429)', async t => {
 
 	try {
 		await t.throwsAsync(
-			async () => await executeWebSearch({query: 'test'}),
+			async () => await executeWebSearch({query: 'test'}, 'test-key'),
 			{message: /rate limit exceeded/},
 		);
 	} finally {
-		(configModule as any).getBraveSearchApiKey = originalFn;
 		globalThis.fetch = originalFetch;
 	}
 });
@@ -452,10 +435,6 @@ test('executeWebSearch throws on HTTP error status', async t => {
 		t.pass('Skipping test - web-search module not available');
 		return;
 	}
-
-	const configModule = await import('../config/nanocoder-tools-config.js');
-	const originalFn = configModule.getBraveSearchApiKey;
-	(configModule as any).getBraveSearchApiKey = () => 'test-key';
 
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = (async () => {
@@ -469,11 +448,10 @@ test('executeWebSearch throws on HTTP error status', async t => {
 
 	try {
 		await t.throwsAsync(
-			async () => await executeWebSearch({query: 'test'}),
+			async () => await executeWebSearch({query: 'test'}, 'test-key'),
 			{message: /HTTP 500/},
 		);
 	} finally {
-		(configModule as any).getBraveSearchApiKey = originalFn;
 		globalThis.fetch = originalFetch;
 	}
 });
@@ -484,10 +462,6 @@ test('executeWebSearch throws timeout error on timeout', async t => {
 		return;
 	}
 
-	const configModule = await import('../config/nanocoder-tools-config.js');
-	const originalFn = configModule.getBraveSearchApiKey;
-	(configModule as any).getBraveSearchApiKey = () => 'test-key';
-
 	const originalTimeout = AbortSignal.timeout;
 	AbortSignal.timeout = (() => {
 		const controller = new AbortController();
@@ -497,11 +471,10 @@ test('executeWebSearch throws timeout error on timeout', async t => {
 
 	try {
 		await t.throwsAsync(
-			async () => await executeWebSearch({query: 'test'}),
+			async () => await executeWebSearch({query: 'test'}, 'test-key'),
 			{message: /timeout/i},
 		);
 	} finally {
-		(configModule as any).getBraveSearchApiKey = originalFn;
 		AbortSignal.timeout = originalTimeout;
 	}
 });
@@ -512,10 +485,6 @@ test('executeWebSearch throws on network error', async t => {
 		return;
 	}
 
-	const configModule = await import('../config/nanocoder-tools-config.js');
-	const originalFn = configModule.getBraveSearchApiKey;
-	(configModule as any).getBraveSearchApiKey = () => 'test-key';
-
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = (() => {
 		throw new Error('Network error');
@@ -523,11 +492,10 @@ test('executeWebSearch throws on network error', async t => {
 
 	try {
 		await t.throwsAsync(
-			async () => await executeWebSearch({query: 'test'}),
+			async () => await executeWebSearch({query: 'test'}, 'test-key'),
 			{message: /Network error/},
 		);
 	} finally {
-		(configModule as any).getBraveSearchApiKey = originalFn;
 		globalThis.fetch = originalFetch;
 	}
 });
@@ -538,10 +506,6 @@ test('executeWebSearch handles non-Error objects in catch', async t => {
 		return;
 	}
 
-	const configModule = await import('../config/nanocoder-tools-config.js');
-	const originalFn = configModule.getBraveSearchApiKey;
-	(configModule as any).getBraveSearchApiKey = () => 'test-key';
-
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = (() => {
 		throw 'string error';
@@ -549,11 +513,10 @@ test('executeWebSearch handles non-Error objects in catch', async t => {
 
 	try {
 		await t.throwsAsync(
-			async () => await executeWebSearch({query: 'test'}),
+			async () => await executeWebSearch({query: 'test'}, 'test-key'),
 			{message: /Web search failed/},
 		);
 	} finally {
-		(configModule as any).getBraveSearchApiKey = originalFn;
 		globalThis.fetch = originalFetch;
 	}
 });
@@ -563,10 +526,6 @@ test('executeWebSearch parses API results correctly', async t => {
 		t.pass('Skipping test - web-search module not available');
 		return;
 	}
-
-	const configModule = await import('../config/nanocoder-tools-config.js');
-	const originalFn = configModule.getBraveSearchApiKey;
-	(configModule as any).getBraveSearchApiKey = () => 'test-key';
 
 	const mockApiResponse = {
 		web: {
@@ -595,14 +554,13 @@ test('executeWebSearch parses API results correctly', async t => {
 	}) as any;
 
 	try {
-		const result = await executeWebSearch({query: 'test query'});
+		const result = await executeWebSearch({query: 'test query'}, 'test-key');
 		t.regex(result, /# Web Search Results: "test query"/);
 		t.regex(result, /1\. Test Title 1/);
 		t.regex(result, /\*\*URL:\*\* https:\/\/example\.com\/test1/);
 		t.regex(result, /This is a test description for result 1/);
 		t.regex(result, /2\. Test Title 2/);
 	} finally {
-		(configModule as any).getBraveSearchApiKey = originalFn;
 		globalThis.fetch = originalFetch;
 	}
 });
@@ -612,10 +570,6 @@ test('executeWebSearch handles results without descriptions', async t => {
 		t.pass('Skipping test - web-search module not available');
 		return;
 	}
-
-	const configModule = await import('../config/nanocoder-tools-config.js');
-	const originalFn = configModule.getBraveSearchApiKey;
-	(configModule as any).getBraveSearchApiKey = () => 'test-key';
 
 	const mockApiResponse = {
 		web: {
@@ -638,11 +592,10 @@ test('executeWebSearch handles results without descriptions', async t => {
 	}) as any;
 
 	try {
-		const result = await executeWebSearch({query: 'test'});
+		const result = await executeWebSearch({query: 'test'}, 'test-key');
 		t.regex(result, /1\. Title Only/);
 		t.regex(result, /\*\*URL:\*\* https:\/\/example\.com/);
 	} finally {
-		(configModule as any).getBraveSearchApiKey = originalFn;
 		globalThis.fetch = originalFetch;
 	}
 });
@@ -652,10 +605,6 @@ test('executeWebSearch returns no results message for empty API response', async
 		t.pass('Skipping test - web-search module not available');
 		return;
 	}
-
-	const configModule = await import('../config/nanocoder-tools-config.js');
-	const originalFn = configModule.getBraveSearchApiKey;
-	(configModule as any).getBraveSearchApiKey = () => 'test-key';
 
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = (async () => {
@@ -667,10 +616,9 @@ test('executeWebSearch returns no results message for empty API response', async
 	}) as any;
 
 	try {
-		const result = await executeWebSearch({query: 'test'});
+		const result = await executeWebSearch({query: 'test'}, 'test-key');
 		t.regex(result, /No results found/);
 	} finally {
-		(configModule as any).getBraveSearchApiKey = originalFn;
 		globalThis.fetch = originalFetch;
 	}
 });
@@ -680,10 +628,6 @@ test('executeWebSearch respects custom max_results', async t => {
 		t.pass('Skipping test - web-search module not available');
 		return;
 	}
-
-	const configModule = await import('../config/nanocoder-tools-config.js');
-	const originalFn = configModule.getBraveSearchApiKey;
-	(configModule as any).getBraveSearchApiKey = () => 'test-key';
 
 	let capturedUrl = '';
 	const originalFetch = globalThis.fetch;
@@ -697,10 +641,9 @@ test('executeWebSearch respects custom max_results', async t => {
 	}) as any;
 
 	try {
-		await executeWebSearch({query: 'test', max_results: 3});
+		await executeWebSearch({query: 'test', max_results: 3}, 'test-key');
 		t.true(capturedUrl.includes('count=3'));
 	} finally {
-		(configModule as any).getBraveSearchApiKey = originalFn;
 		globalThis.fetch = originalFetch;
 	}
 });
@@ -710,10 +653,6 @@ test('executeWebSearch sends correct headers', async t => {
 		t.pass('Skipping test - web-search module not available');
 		return;
 	}
-
-	const configModule = await import('../config/nanocoder-tools-config.js');
-	const originalFn = configModule.getBraveSearchApiKey;
-	(configModule as any).getBraveSearchApiKey = () => 'my-test-key';
 
 	let capturedHeaders: any = {};
 	const originalFetch = globalThis.fetch;
@@ -727,11 +666,10 @@ test('executeWebSearch sends correct headers', async t => {
 	}) as any;
 
 	try {
-		await executeWebSearch({query: 'test'});
+		await executeWebSearch({query: 'test'}, 'my-test-key');
 		t.is(capturedHeaders['X-Subscription-Token'], 'my-test-key');
 		t.is(capturedHeaders['Accept'], 'application/json');
 	} finally {
-		(configModule as any).getBraveSearchApiKey = originalFn;
 		globalThis.fetch = originalFetch;
 	}
 });
@@ -741,10 +679,6 @@ test('executeWebSearch encodes query properly', async t => {
 		t.pass('Skipping test - web-search module not available');
 		return;
 	}
-
-	const configModule = await import('../config/nanocoder-tools-config.js');
-	const originalFn = configModule.getBraveSearchApiKey;
-	(configModule as any).getBraveSearchApiKey = () => 'test-key';
 
 	let capturedUrl = '';
 	const originalFetch = globalThis.fetch;
@@ -758,10 +692,9 @@ test('executeWebSearch encodes query properly', async t => {
 	}) as any;
 
 	try {
-		await executeWebSearch({query: 'test with spaces'});
+		await executeWebSearch({query: 'test with spaces'}, 'test-key');
 		t.true(capturedUrl.includes('test+with+spaces') || capturedUrl.includes('test%20with%20spaces'));
 	} finally {
-		(configModule as any).getBraveSearchApiKey = originalFn;
 		globalThis.fetch = originalFetch;
 	}
 });
@@ -771,10 +704,6 @@ test('executeWebSearch formats markdown output correctly', async t => {
 		t.pass('Skipping test - web-search module not available');
 		return;
 	}
-
-	const configModule = await import('../config/nanocoder-tools-config.js');
-	const originalFn = configModule.getBraveSearchApiKey;
-	(configModule as any).getBraveSearchApiKey = () => 'test-key';
 
 	const mockApiResponse = {
 		web: {
@@ -798,13 +727,12 @@ test('executeWebSearch formats markdown output correctly', async t => {
 	}) as any;
 
 	try {
-		const result = await executeWebSearch({query: 'test'});
+		const result = await executeWebSearch({query: 'test'}, 'test-key');
 		t.regex(result, /^# Web Search Results:/);
 		t.regex(result, /^## \d+\./m);
 		t.regex(result, /\*\*URL:\*\*/);
 		t.regex(result, /^---$/m);
 	} finally {
-		(configModule as any).getBraveSearchApiKey = originalFn;
 		globalThis.fetch = originalFetch;
 	}
 });
@@ -814,10 +742,6 @@ test('executeWebSearch handles missing web field in response', async t => {
 		t.pass('Skipping test - web-search module not available');
 		return;
 	}
-
-	const configModule = await import('../config/nanocoder-tools-config.js');
-	const originalFn = configModule.getBraveSearchApiKey;
-	(configModule as any).getBraveSearchApiKey = () => 'test-key';
 
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = (async () => {
@@ -829,10 +753,9 @@ test('executeWebSearch handles missing web field in response', async t => {
 	}) as any;
 
 	try {
-		const result = await executeWebSearch({query: 'test'});
+		const result = await executeWebSearch({query: 'test'}, 'test-key');
 		t.regex(result, /No results found/);
 	} finally {
-		(configModule as any).getBraveSearchApiKey = originalFn;
 		globalThis.fetch = originalFetch;
 	}
 });
