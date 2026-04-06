@@ -316,6 +316,7 @@ export default function App({
 		onSetCompactToolCounts: appState.setCompactToolCounts,
 		compactToolCountsRef: appState.compactToolCountsRef,
 		onSetLiveTaskList: appState.setLiveTaskList,
+		tune: appState.tune,
 	});
 
 	// Track when streaming starts for tok/s calculation
@@ -337,6 +338,8 @@ export default function App({
 		contextLimit: appState.contextLimit,
 		setContextPercentUsed: appState.setContextPercentUsed,
 		setContextLimit: appState.setContextLimit,
+		developmentMode: appState.developmentMode,
+		tune: appState.tune,
 	});
 
 	// Setup tool handler
@@ -441,6 +444,7 @@ export default function App({
 		addToChatQueue: appState.addToChatQueue,
 		getNextComponentKey: appState.getNextComponentKey,
 		reinitializeMCPServers: appInitialization.reinitializeMCPServers,
+		setTune: appState.setTune,
 	});
 
 	// Scheduler mode enter/exit handlers
@@ -541,6 +545,7 @@ export default function App({
 		enterMcpWizardMode: modeHandlers.enterMcpWizardMode,
 		enterExplorerMode: modeHandlers.enterExplorerMode,
 		enterIdeSelectionMode: modeHandlers.enterIdeSelectionMode,
+		enterTune: modeHandlers.enterTune,
 		enterSchedulerMode,
 		handleChatMessage: chatHandler.handleChatMessage,
 	});
@@ -781,6 +786,9 @@ export default function App({
 									onMcpWizardComplete={modeHandlers.handleMcpWizardComplete}
 									onMcpWizardCancel={modeHandlers.handleMcpWizardCancel}
 									onSettingsCancel={modeHandlers.handleSettingsCancel}
+									tuneConfig={appState.tune}
+									onTuneSelect={modeHandlers.handleTuneSelect}
+									onTuneCancel={modeHandlers.handleTuneCancel}
 									onCheckpointSelect={appHandlers.handleCheckpointSelect}
 									onCheckpointCancel={appHandlers.handleCheckpointCancel}
 									onSessionSelect={sessionId =>
@@ -855,6 +863,7 @@ export default function App({
 									onSubmit={appHandlers.handleMessageSubmit}
 									onCancel={appHandlers.handleCancel}
 									onToggleMode={appHandlers.handleToggleDevelopmentMode}
+									tune={appState.tune}
 								/>
 							)}
 					</Box>

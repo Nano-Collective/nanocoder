@@ -1,16 +1,12 @@
 import {getBraveSearchApiKey} from '@/config/nanocoder-tools-config';
 import {MCPClient} from '@/mcp/mcp-client';
-import {
-	nativeToolsRegistry as staticNativeToolsRegistry,
-	toolFormatters as staticToolFormatters,
-	toolReadOnlyFlags as staticToolReadOnlyFlags,
-	toolRegistry as staticToolRegistry,
-	toolStreamingFormatters as staticToolStreamingFormatters,
-	toolValidators as staticToolValidators,
-} from '@/tools/index';
+import {allToolExports} from '@/tools/index';
+import {getToolsForProfile} from '@/tools/tool-profiles';
 import {ToolRegistry} from '@/tools/tool-registry';
+import type {TuneConfig} from '@/types/config';
 import type {
 	AISDKCoreTool,
+	DevelopmentMode,
 	MCPInitResult,
 	MCPServer,
 	MCPTool,
@@ -22,31 +18,46 @@ import type {
 } from '@/types/index';
 import {getShutdownManager} from '@/utils/shutdown';
 
+// Tools to exclude per development mode
+const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
+	normal: [],
+	'auto-accept': [],
+	plan: [
+		// No mutation tools — plan mode is read-only exploration
+		'write_file',
+		'string_replace',
+		'delete_file',
+		'move_file',
+		'copy_file',
+		'create_directory',
+		'execute_bash',
+		// No task tools — plan mode produces the plan itself
+		'create_task',
+		'update_task',
+		'delete_task',
+		'list_tasks',
+		// No git mutation tools — keep read-only git tools
+		'git_add',
+		'git_commit',
+		'git_push',
+		'git_pull',
+		'git_branch',
+		'git_stash',
+		'git_reset',
+	],
+	scheduler: ['ask_user'],
+};
+
 /**
- * Manages both static tools and dynamic MCP tools
- * All tools are stored in unified ToolEntry format via ToolRegistry
+ * Manages both static tools and dynamic MCP tools.
+ * Single authority for tool availability, filtering, and approval policy.
  */
 export class ToolManager {
-	/**
-	 * Unified tool registry using ToolRegistry helper class
-	 */
 	private registry: ToolRegistry;
-
-	/**
-	 * MCP client for dynamic tool discovery and execution
-	 */
 	private mcpClient: MCPClient | null = null;
 
 	constructor() {
-		// Initialize with static tools using ToolRegistry factory method
-		this.registry = ToolRegistry.fromRegistries(
-			staticToolRegistry,
-			staticNativeToolsRegistry,
-			staticToolFormatters,
-			staticToolValidators,
-			staticToolStreamingFormatters,
-			staticToolReadOnlyFlags,
-		);
+		this.registry = ToolRegistry.fromToolExports(allToolExports);
 
 		// Remove web_search if no Brave Search API key is configured
 		if (!getBraveSearchApiKey()) {
@@ -77,8 +88,6 @@ export class ToolManager {
 				onProgress,
 			);
 
-			// Register MCP tools using ToolRegistry
-			// getToolEntries() returns structured ToolEntry objects
 			const mcpToolEntries = this.mcpClient.getToolEntries();
 			this.registry.registerMany(mcpToolEntries);
 
@@ -87,74 +96,135 @@ export class ToolManager {
 		return [];
 	}
 
+	// =========================================================================
+	// Tool availability — single source of truth
+	// =========================================================================
+
 	/**
-	 * Get all available native AI SDK tools (static + MCP)
+	 * Get the list of tool names available given the current mode and tune config.
+	 * This is the single authority used by both prompt building and runtime.
 	 */
+	getAvailableToolNames(
+		tuneConfig?: TuneConfig,
+		developmentMode?: DevelopmentMode,
+	): string[] {
+		let names = this.getToolNames();
+
+		if (tuneConfig?.enabled && tuneConfig.toolProfile !== 'full') {
+			const profileTools = getToolsForProfile(tuneConfig.toolProfile);
+			if (profileTools.length > 0) {
+				names = profileTools;
+			}
+		}
+
+		// Apply mode-based exclusions
+		if (developmentMode) {
+			const excluded = MODE_EXCLUDED_TOOLS[developmentMode];
+			if (excluded.length > 0) {
+				const excludeSet = new Set(excluded);
+				names = names.filter(n => !excludeSet.has(n));
+			}
+		}
+
+		return names;
+	}
+
+	/**
+	 * Get effective tools with non-interactive approval overrides applied.
+	 * Resolves all approval policy in one place so chat-handler doesn't mutate tools.
+	 */
+	getEffectiveTools(
+		availableToolNames: string[],
+		options?: {
+			nonInteractiveAlwaysAllow?: string[];
+		},
+	): Record<string, AISDKCoreTool> {
+		const tools = this.getFilteredToolsWithoutExecute(availableToolNames);
+
+		if (
+			options?.nonInteractiveAlwaysAllow &&
+			options.nonInteractiveAlwaysAllow.length > 0
+		) {
+			const allowSet = new Set(options.nonInteractiveAlwaysAllow);
+			return Object.fromEntries(
+				Object.entries(tools).map(([name, toolDef]) => {
+					if (allowSet.has(name)) {
+						return [name, {...toolDef, needsApproval: false} as AISDKCoreTool];
+					}
+					return [name, toolDef];
+				}),
+			);
+		}
+
+		return tools;
+	}
+
+	// =========================================================================
+	// Tool access — delegates to ToolRegistry
+	// =========================================================================
+
 	getAllTools(): Record<string, AISDKCoreTool> {
 		return this.registry.getNativeTools();
 	}
 
-	/**
-	 * Get all native AI SDK tools with execute functions removed.
-	 * Without execute, the SDK returns tool calls for us to handle
-	 * (parallel execution, confirmation flow, etc.).
-	 */
 	getAllToolsWithoutExecute(): Record<string, AISDKCoreTool> {
 		return this.registry.getNativeToolsWithoutExecute();
 	}
 
-	/**
-	 * Get all tool handlers
-	 */
+	getFilteredTools(allowedToolNames: string[]): Record<string, AISDKCoreTool> {
+		const all = this.registry.getNativeTools();
+		return this.filterByNames(all, allowedToolNames);
+	}
+
+	getFilteredToolsWithoutExecute(
+		allowedToolNames: string[],
+	): Record<string, AISDKCoreTool> {
+		const all = this.registry.getNativeToolsWithoutExecute();
+		return this.filterByNames(all, allowedToolNames);
+	}
+
+	private filterByNames(
+		tools: Record<string, AISDKCoreTool>,
+		allowedNames: string[],
+	): Record<string, AISDKCoreTool> {
+		const nameSet = new Set(allowedNames);
+		const filtered: Record<string, AISDKCoreTool> = {};
+		for (const [name, tool] of Object.entries(tools)) {
+			if (nameSet.has(name)) {
+				filtered[name] = tool;
+			}
+		}
+		return filtered;
+	}
+
 	getToolRegistry(): Record<string, ToolHandler> {
 		return this.registry.getHandlers();
 	}
 
-	/**
-	 * Get a specific tool handler
-	 */
 	getToolHandler(toolName: string): ToolHandler | undefined {
 		return this.registry.getHandler(toolName);
 	}
 
-	/**
-	 * Get a specific tool formatter
-	 */
 	getToolFormatter(toolName: string): ToolFormatter | undefined {
 		return this.registry.getFormatter(toolName);
 	}
 
-	/**
-	 * Get a specific tool validator
-	 */
 	getToolValidator(toolName: string): ToolValidator | undefined {
 		return this.registry.getValidator(toolName);
 	}
 
-	/**
-	 * Get a specific streaming formatter
-	 */
 	getStreamingFormatter(toolName: string): StreamingFormatter | undefined {
 		return this.registry.getStreamingFormatter(toolName);
 	}
 
-	/**
-	 * Check if a tool is read-only (safe to parallelize)
-	 */
 	isReadOnly(toolName: string): boolean {
 		return this.registry.getEntry(toolName)?.readOnly === true;
 	}
 
-	/**
-	 * Check if a tool exists
-	 */
 	hasTool(toolName: string): boolean {
 		return this.registry.hasTool(toolName);
 	}
 
-	/**
-	 * Check if a tool is an MCP tool and get server info
-	 */
 	getMCPToolInfo(toolName: string): {isMCPTool: boolean; serverName?: string} {
 		if (!this.mcpClient) {
 			return {isMCPTool: false};
@@ -173,83 +243,46 @@ export class ToolManager {
 		return {isMCPTool: false};
 	}
 
-	/**
-	 * Disconnect from MCP servers and remove their tools
-	 */
 	async disconnectMCP(): Promise<void> {
 		if (this.mcpClient) {
-			// Get list of MCP tool names
 			const mcpTools = this.mcpClient.getNativeToolsRegistry();
 			const mcpToolNames = Object.keys(mcpTools);
 
-			// Remove all MCP tools from registry in one operation
 			this.registry.unregisterMany(mcpToolNames);
-
-			// Disconnect from servers
 			await this.mcpClient.disconnect();
 
 			// Reset registry to only static tools
-			this.registry = ToolRegistry.fromRegistries(
-				staticToolRegistry,
-				staticNativeToolsRegistry,
-				staticToolFormatters,
-				staticToolValidators,
-				staticToolStreamingFormatters,
-			);
-
+			this.registry = ToolRegistry.fromToolExports(allToolExports);
 			this.mcpClient = null;
 		}
 
 		getShutdownManager().unregister('mcp-client');
 	}
 
-	/**
-	 * Get a complete tool entry (all metadata)
-	 *
-	 * Returns the full ToolEntry with all components (tool, handler, formatter, validator)
-	 */
 	getToolEntry(toolName: string): ToolEntry | undefined {
 		return this.registry.getEntry(toolName);
 	}
 
-	/**
-	 * Get all registered tool names
-	 */
 	getToolNames(): string[] {
 		return this.registry.getToolNames();
 	}
 
-	/**
-	 * Get total number of registered tools
-	 */
 	getToolCount(): number {
 		return this.registry.getToolCount();
 	}
 
-	/**
-	 * Get connected MCP servers
-	 */
 	getConnectedServers(): string[] {
 		return this.mcpClient?.getConnectedServers() || [];
 	}
 
-	/**
-	 * Get tools for a specific MCP server
-	 */
 	getServerTools(serverName: string): MCPTool[] {
 		return this.mcpClient?.getServerTools(serverName) || [];
 	}
 
-	/**
-	 * Get server information including transport type and URL
-	 */
 	getServerInfo(serverName: string) {
 		return this.mcpClient?.getServerInfo(serverName);
 	}
 
-	/**
-	 * Get the MCP client instance
-	 */
 	getMCPClient() {
 		return this.mcpClient;
 	}

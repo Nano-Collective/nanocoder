@@ -1,7 +1,6 @@
 import {config as loadEnv} from 'dotenv';
 import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'fs';
-import {dirname, join} from 'path';
-import {fileURLToPath} from 'url';
+import {join} from 'path';
 import {substituteEnvVars} from '@/config/env-substitution';
 import {
 	loadAllMCPConfigs,
@@ -500,13 +499,3 @@ export function getColors(): Colors {
 	}
 	return cachedColors;
 }
-
-// Get the package root directory (where this module is installed)
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-// Go up from dist/config to package root, then to source/app/prompts/main-prompt.md
-// This works because source/app/prompts/main-prompt.md is included in the package.json files array
-export const promptPath = join(
-	__dirname,
-	'../../source/app/prompts/main-prompt.md',
-);

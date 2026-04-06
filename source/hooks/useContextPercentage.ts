@@ -1,13 +1,14 @@
 import {useEffect, useRef} from 'react';
 import {getModelContextLimit} from '@/models/index';
 import type {ToolManager} from '@/tools/tool-manager';
-import type {Message} from '@/types/core';
+import type {TuneConfig} from '@/types/config';
+import type {DevelopmentMode, Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
 import {
 	calculateTokenBreakdown,
 	calculateToolDefinitionsTokens,
 } from '@/usage/calculator';
-import {processPromptTemplate} from '@/utils/prompt-processor';
+import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 
 interface UseContextPercentageProps {
 	currentModel: string;
@@ -19,6 +20,8 @@ interface UseContextPercentageProps {
 	contextLimit: number | null;
 	setContextPercentUsed: (value: number | null) => void;
 	setContextLimit: (value: number | null) => void;
+	developmentMode?: DevelopmentMode;
+	tune?: TuneConfig;
 }
 
 export function useContextPercentage({
@@ -31,6 +34,8 @@ export function useContextPercentage({
 	contextLimit,
 	setContextPercentUsed,
 	setContextLimit,
+	developmentMode = 'normal',
+	tune,
 }: UseContextPercentageProps): void {
 	const contextLimitRef = useRef<number | null>(null);
 	const lastModelRef = useRef<string>('');
@@ -71,8 +76,8 @@ export function useContextPercentage({
 			return;
 		}
 
-		// Include system prompt in calculation (same as /usage command)
-		const systemPrompt = processPromptTemplate();
+		// Use the cached prompt which includes XML tool definitions when applicable
+		const systemPrompt = getLastBuiltPrompt();
 		const systemMessage: Message = {
 			role: 'system',
 			content: systemPrompt,
@@ -90,12 +95,15 @@ export function useContextPercentage({
 			},
 		);
 
-		// Include tool definition overhead (same as /usage command)
-		const toolDefTokens = toolManager
-			? calculateToolDefinitionsTokens(
-					Object.keys(toolManager.getToolRegistry()).length,
-				)
-			: 0;
+		// Include tool definition overhead (only when native tool calling is active)
+		// When tools are disabled (XML fallback), definitions are in the system prompt
+		const nativeToolsDisabled = tune?.enabled && tune.disableNativeTools;
+		const toolDefTokens =
+			toolManager && !nativeToolsDisabled
+				? calculateToolDefinitionsTokens(
+						Object.keys(toolManager.getToolRegistry()).length,
+					)
+				: 0;
 
 		const total = breakdown.total + toolDefTokens + streamingTokenCount;
 		const percent = Math.round((total / limit) * 100);
@@ -109,5 +117,6 @@ export function useContextPercentage({
 		toolManager,
 		streamingTokenCount,
 		setContextPercentUsed,
+		tune,
 	]);
 }

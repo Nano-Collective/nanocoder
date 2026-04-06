@@ -305,7 +305,7 @@ const executeSearchFileContents = async (
 
 const searchFileContentsCoreTool = tool({
 	description:
-		'Search for text or code inside files. AUTO-ACCEPTED (no user approval needed). Use this INSTEAD OF bash grep/rg/ag/ack commands. Supports extended regex (e.g., "foo|bar", "func(tion)?"). Returns file:line with matching content. Use to find: function definitions, variable usage, import statements, TODO comments. Case-insensitive by default (use caseSensitive=true for exact matching). Use include to filter by file type (e.g., "*.ts") and path to scope to a directory (e.g., "src/components"). Use wholeWord=true for exact word boundaries. Use contextLines to see surrounding code.',
+		'Search for text or code inside files. Use this INSTEAD OF bash grep/rg/ag/ack commands. Supports extended regex (e.g., "foo|bar", "func(tion)?"). Returns file:line with matching content. Use to find: function definitions, variable usage, import statements, TODO comments. Case-insensitive by default (use caseSensitive=true for exact matching). Use include to filter by file type (e.g., "*.ts") and path to scope to a directory (e.g., "src/components"). Use wholeWord=true for exact word boundaries. Use contextLines to see surrounding code.',
 	inputSchema: jsonSchema<SearchFileContentsArgs>({
 		type: 'object',
 		properties: {

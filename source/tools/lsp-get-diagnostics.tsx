@@ -208,7 +208,7 @@ const getDiagnosticsCoreTool = tool({
 			path: {
 				type: 'string',
 				description:
-					'Optional path to a specific file. If omitted, returns diagnostics for all open documents.',
+					'Path to the file to check. If omitted, returns diagnostics for the entire project.',
 			},
 		},
 		required: [],

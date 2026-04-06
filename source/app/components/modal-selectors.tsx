@@ -5,10 +5,11 @@ import ModelSelector from '@/components/model-selector';
 import ProviderSelector from '@/components/provider-selector';
 import SessionSelector from '@/components/session-selector';
 import type {ActiveMode} from '@/hooks/useAppState';
-import type {CheckpointListItem, LLMClient} from '@/types';
+import type {CheckpointListItem, LLMClient, TuneConfig} from '@/types';
 import {McpWizard} from '@/wizards/mcp-wizard';
 import {ProviderWizard} from '@/wizards/provider-wizard';
 import {SettingsSelector} from './settings-selector';
+import {TuneSelector} from './tune-selector';
 
 export interface ModalSelectorsProps {
 	activeMode: ActiveMode;
@@ -53,6 +54,11 @@ export interface ModalSelectorsProps {
 
 	// Handlers - Settings
 	onSettingsCancel: () => void;
+
+	// Handlers - Model Mode
+	tuneConfig: TuneConfig;
+	onTuneSelect: (config: TuneConfig) => Promise<void>;
+	onTuneCancel: () => void;
 }
 
 /**
@@ -81,6 +87,9 @@ export function ModalSelectors({
 	onSessionSelect,
 	onSessionCancel,
 	onSettingsCancel,
+	tuneConfig,
+	onTuneSelect,
+	onTuneCancel,
 }: ModalSelectorsProps): React.ReactElement | null {
 	if (activeMode === 'model') {
 		return (
@@ -99,6 +108,16 @@ export function ModalSelectors({
 				currentProvider={currentProvider}
 				onProviderSelect={provider => void onProviderSelect(provider)}
 				onCancel={onProviderSelectionCancel}
+			/>
+		);
+	}
+
+	if (activeMode === 'tune') {
+		return (
+			<TuneSelector
+				currentConfig={tuneConfig}
+				onSelect={config => void onTuneSelect(config)}
+				onCancel={onTuneCancel}
 			/>
 		);
 	}

@@ -2,10 +2,15 @@ import React from 'react';
 import {createLLMClient} from '@/client-factory';
 import {ErrorMessage, SuccessMessage} from '@/components/message-box';
 import {reloadAppConfig} from '@/config/index';
-import {loadPreferences, updateLastUsed} from '@/config/preferences';
+import {loadPreferences, saveTune, updateLastUsed} from '@/config/preferences';
 import type {ActiveMode} from '@/hooks/useAppState';
 import {getToolManager} from '@/message-handler';
+import type {TuneConfig} from '@/types/config';
 import {LLMClient, Message} from '@/types/core';
+import {
+	setAutoCompactMode,
+	setAutoCompactThreshold,
+} from '@/utils/auto-compact';
 
 interface UseModeHandlersProps {
 	client: LLMClient | null;
@@ -22,6 +27,7 @@ interface UseModeHandlersProps {
 	reinitializeMCPServers: (
 		toolManager: import('@/tools/tool-manager').ToolManager,
 	) => Promise<void>;
+	setTune: (config: TuneConfig) => void;
 }
 
 export function useModeHandlers({
@@ -37,6 +43,7 @@ export function useModeHandlers({
 	addToChatQueue,
 	getNextComponentKey,
 	reinitializeMCPServers,
+	setTune,
 }: UseModeHandlersProps) {
 	// Generic enter/exit helpers
 	const enterMode = (mode: ActiveMode) => setActiveMode(mode);
@@ -222,6 +229,50 @@ export function useModeHandlers({
 		}
 	};
 
+	// Handle model mode selection
+	const handleTuneSelect = async (config: TuneConfig) => {
+		setTune(config);
+		saveTune(config);
+
+		// Apply/remove auto-compact session overrides
+		if (config.enabled && config.aggressiveCompact) {
+			setAutoCompactThreshold(40);
+			setAutoCompactMode('aggressive');
+		} else {
+			setAutoCompactThreshold(null);
+			setAutoCompactMode(null);
+		}
+
+		// Clear conversation when toggling — tool profiles change what's available
+		setMessages([]);
+		if (client) {
+			await client.clearContext();
+		}
+
+		const parts: string[] = [];
+		if (config.enabled) {
+			parts.push(`profile: ${config.toolProfile}`);
+			if (config.aggressiveCompact) parts.push('aggressive compact');
+			addToChatQueue(
+				<SuccessMessage
+					key={`tune-${getNextComponentKey()}`}
+					message={`Tune enabled (${parts.join(', ')}). Chat history cleared.`}
+					hideBox={true}
+				/>,
+			);
+		} else {
+			addToChatQueue(
+				<SuccessMessage
+					key={`tune-${getNextComponentKey()}`}
+					message="Tune disabled. Chat history cleared."
+					hideBox={true}
+				/>,
+			);
+		}
+
+		exitMode();
+	};
+
 	return {
 		enterMode,
 		exitMode,
@@ -247,5 +298,9 @@ export function useModeHandlers({
 		handleSettingsCancel: () => setIsSettingsMode(false),
 		handleExplorerCancel: exitMode,
 		handleIdeSelectionCancel: exitMode,
+		// Model mode
+		enterTune: () => enterMode('tune'),
+		handleTuneSelect,
+		handleTuneCancel: exitMode,
 	};
 }

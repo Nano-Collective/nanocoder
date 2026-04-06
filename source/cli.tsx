@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Suppress AI SDK warnings (e.g. unsupported features on reasoning models)
+(globalThis as Record<string, unknown>).AI_SDK_LOG_WARNINGS = false;
+
 import {render} from 'ink';
 import {createRequire} from 'module';
 import App from '@/app';

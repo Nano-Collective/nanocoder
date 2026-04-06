@@ -163,12 +163,13 @@ export interface StreamCallbacks {
 }
 
 /**
- * Non-interactive mode overrides for tool approval.
- * When nonInteractiveMode is true, tools in the allowList bypass approval.
+ * Runtime overrides passed through to the AI SDK client.
+ * Combines non-interactive mode, tune settings, and model parameters.
  */
 export interface ModeOverrides {
 	nonInteractiveMode: boolean;
 	nonInteractiveAlwaysAllow: string[];
+	modelParameters?: import('@/types/config').ModelParameters;
 }
 
 export interface LLMClient {

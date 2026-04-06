@@ -4,7 +4,7 @@ import {
 	InfoMessage,
 	SuccessMessage,
 } from '@/components/message-box';
-import {toolRegistry} from '@/tools/index';
+import {getToolManager} from '@/message-handler';
 import {Command} from '@/types/index';
 import {logError, logInfo} from '@/utils/message-queue';
 import {checkForUpdates} from '@/utils/update-checker';
@@ -93,7 +93,12 @@ export const updateCommand: Command = {
 				// Run update command if provided; otherwise show informative message
 				if (updateInfo.updateCommand) {
 					try {
-						const result = await toolRegistry.execute_bash({
+						const executeBash =
+							getToolManager()?.getToolHandler('execute_bash');
+						if (!executeBash) {
+							throw new Error('execute_bash tool not available');
+						}
+						const result = await executeBash({
 							command: updateInfo.updateCommand,
 						});
 

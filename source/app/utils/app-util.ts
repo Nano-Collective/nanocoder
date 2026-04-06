@@ -12,9 +12,9 @@ import {
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
+import {clearAllTasks} from '@/tools/tasks/storage';
 import type {LLMClient} from '@/types/core';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
-
 import {handleCompactCommand} from './handlers/compact-handler';
 import {handleContextMaxCommand} from './handlers/context-max-handler';
 import {
@@ -40,6 +40,7 @@ const SPECIAL_COMMANDS = {
 	CHECKPOINT: 'checkpoint',
 	EXPLORER: 'explorer',
 	IDE: 'ide',
+	TUNE: 'tune',
 } as const;
 
 /** Checkpoint subcommands */
@@ -189,10 +190,11 @@ async function handleSpecialCommand(
 	switch (commandName) {
 		case SPECIAL_COMMANDS.CLEAR:
 			await onClearMessages();
+			await clearAllTasks();
 			onAddToChatQueue(
 				React.createElement(SuccessMessage, {
 					key: `clear-success-${getNextComponentKey()}`,
-					message: 'Chat cleared.',
+					message: 'Chat and tasks cleared.',
 					hideBox: true,
 				}),
 			);
@@ -241,6 +243,11 @@ async function handleSpecialCommand(
 
 		case SPECIAL_COMMANDS.IDE:
 			options.onEnterIdeSelectionMode();
+			onCommandComplete?.();
+			return true;
+
+		case SPECIAL_COMMANDS.TUNE:
+			options.onEnterTune();
 			onCommandComplete?.();
 			return true;
 

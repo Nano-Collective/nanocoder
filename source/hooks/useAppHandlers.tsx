@@ -32,7 +32,7 @@ import type {UpdateInfo} from '@/types/utils';
 import {calculateTokenBreakdown} from '@/usage/calculator';
 import {autoCompactSessionOverrides} from '@/utils/auto-compact';
 import {getLogger} from '@/utils/logging';
-import {processPromptTemplate} from '@/utils/prompt-processor';
+import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 
 interface UseAppHandlersProps {
 	// State
@@ -86,6 +86,7 @@ interface UseAppHandlersProps {
 	enterMcpWizardMode: () => void;
 	enterExplorerMode: () => void;
 	enterIdeSelectionMode: () => void;
+	enterTune: () => void;
 	enterSchedulerMode: () => void;
 
 	// Chat handler
@@ -209,7 +210,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					props.currentModel,
 				);
 				try {
-					const systemPrompt = processPromptTemplate();
+					const systemPrompt = getLastBuiltPrompt();
 					const systemMessage: Message = {
 						role: 'system',
 						content: systemPrompt,
@@ -470,6 +471,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				onEnterMcpWizardMode: props.enterMcpWizardMode,
 				onEnterExplorerMode: props.enterExplorerMode,
 				onEnterIdeSelectionMode: props.enterIdeSelectionMode,
+				onEnterTune: props.enterTune,
 				onEnterSchedulerMode: props.enterSchedulerMode,
 				onEnterCheckpointLoadMode: enterCheckpointLoadMode,
 				onEnterSessionSelectorMode: enterSessionSelectorMode,
@@ -503,6 +505,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.enterMcpWizardMode,
 			props.enterExplorerMode,
 			props.enterIdeSelectionMode,
+			props.enterTune,
 			props.enterSchedulerMode,
 			props.handleChatMessage,
 			props.addToChatQueue,

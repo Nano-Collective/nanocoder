@@ -142,27 +142,18 @@ shutdownManager.register({
 
 // Export configuration utilities
 export {
-	/** @internal */
 	createConfig,
-	/** @internal */
 	getDefaultLogDirectory,
-	/** @internal */
 	getEnvironmentConfig,
-	/** @internal */
 	normalizeLogLevel,
-	/** @internal */
 	validateLogLevel,
 } from './config.js';
 // Export for testing purposes only
 // Export correlation utilities
 export {
-	/** @internal */
 	correlationMiddleware,
-	/** @internal */
 	createCorrelationFromHeaders,
-	/** @internal */
 	extractCorrelationId,
-	/** @internal */
 	formatCorrelationForLog,
 	generateCorrelationId,
 	getCorrelationId,
@@ -173,10 +164,8 @@ export {
 export {
 	calculateMemoryDelta,
 	endMetrics,
-	/** @internal */
 	formatBytes,
 	formatMemoryUsage,
-	/** @internal */
 	globalPerformanceMonitor,
 	startMetrics,
 } from './performance.js';
@@ -193,14 +182,10 @@ export type {Logger, LoggerConfig, LogLevel} from './types.js';
 export {healthChecks} from './health-monitor/index.js';
 // Export log storage for tests
 export {globalLogStorage} from './log-query/index.js';
-// Internal exports that knip should ignore
 export {
-	/** @internal */
 	aiTracker,
 	globalRequestTracker,
-	/** @internal */
 	httpTracker,
-	/** @internal */
 	mcpTracker,
 } from './request-tracker.js';
 

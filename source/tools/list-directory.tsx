@@ -181,7 +181,7 @@ const executeListDirectory = async (
 
 const listDirectoryCoreTool = tool({
 	description:
-		'List directory contents with file sizes. AUTO-ACCEPTED (no user approval needed). Use this INSTEAD OF bash ls/ls -la/ls -R commands. Use recursive=true with maxDepth for nested exploration. Use tree=true for flat paths (easier to parse). Best for: exploring unknown directories, seeing file sizes, understanding project structure. For finding specific files by pattern, use find_files instead.',
+		'List directory contents with file sizes. Use this INSTEAD OF bash ls/ls -la/ls -R commands. Use recursive=true with maxDepth for nested exploration. Use tree=true for flat paths (easier to parse). Best for: exploring unknown directories, seeing file sizes, understanding project structure. For finding specific files by pattern, use find_files instead.',
 	inputSchema: jsonSchema<ListDirectoryArgs>({
 		type: 'object',
 		properties: {
