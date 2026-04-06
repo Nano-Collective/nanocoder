@@ -48,7 +48,7 @@ import {getLSPManager, type LSPInitResult} from '@/lsp/index';
 import {setToolManagerGetter, setToolRegistryGetter} from '@/message-handler';
 import {SubagentExecutor} from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
-import {setAgentToolExecutor} from '@/tools/agent-tool';
+import {setAgentToolExecutor, setAvailableAgentNames} from '@/tools/agent-tool';
 import {clearAllTasks} from '@/tools/tasks';
 import {ToolManager} from '@/tools/tool-manager';
 import type {CustomCommand} from '@/types/commands';
@@ -58,6 +58,7 @@ import {
 	MCPConnectionStatus,
 } from '@/types/core';
 import type {MCPInitResult, UpdateInfo, UserPreferences} from '@/types/index';
+import {setAvailableSubagents} from '@/utils/prompt-processor';
 import {checkForUpdates} from '@/utils/update-checker';
 
 interface UseAppInitializationProps {
@@ -466,9 +467,17 @@ export function useAppInitialization({
 			// Now start with the properly initialized objects (excluding MCP)
 			await start(newToolManager, newCustomCommandLoader, preferences);
 
-			// Initialize subagent loader
+			// Initialize subagent loader and inject into system prompt
 			const subagentLoader = getSubagentLoader();
 			await subagentLoader.initialize();
+
+			const availableAgents = await subagentLoader.listSubagents();
+			const agentSummaries = availableAgents.map(a => ({
+				name: a.name,
+				description: a.description,
+			}));
+			setAvailableSubagents(agentSummaries);
+			setAvailableAgentNames(agentSummaries);
 
 			// Check for updates before showing UI
 			try {

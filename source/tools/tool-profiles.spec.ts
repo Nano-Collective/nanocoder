@@ -17,9 +17,9 @@ test('getToolsForProfile - full profile returns empty array (no filtering)', t =
 	t.deepEqual(result, []);
 });
 
-test('getToolsForProfile - minimal profile returns 7 core tools', t => {
+test('getToolsForProfile - minimal profile returns 8 core tools', t => {
 	const result = getToolsForProfile('minimal');
-	t.deepEqual(result, ['read_file', 'write_file', 'string_replace', 'execute_bash', 'find_files', 'search_file_contents', 'list_directory']);
+	t.deepEqual(result, ['read_file', 'write_file', 'string_replace', 'execute_bash', 'find_files', 'search_file_contents', 'list_directory', 'agent']);
 });
 
 test('getToolsForProfile - minimal profile includes read_file', t => {

@@ -5,12 +5,10 @@
  * This tool is the bridge between the main conversation and subagent execution.
  */
 
-import {Text} from 'ink';
-import React from 'react';
 import type {SubagentExecutor} from '@/subagents/subagent-executor.js';
 import {getSubagentLoader} from '@/subagents/subagent-loader.js';
 import {jsonSchema, tool} from '@/types/core';
-import type {NanocoderToolExport, ToolFormatter} from '@/types/index';
+import type {NanocoderToolExport} from '@/types/index';
 
 interface AgentToolArgs {
 	subagent_type: string;
@@ -19,72 +17,78 @@ interface AgentToolArgs {
 	context?: Record<string, unknown>;
 }
 
-/**
- * Format the arguments and result of the agent tool.
- */
-const formatAgent: ToolFormatter = (args, result) => {
-	const {subagent_type, description} = args as {
-		subagent_type: string;
-		description: string;
-	};
-
-	return (
-		<>
-			<FormattedMessage
-				subagent={subagent_type}
-				description={description}
-				result={result}
-			/>
-		</>
-	);
-};
-
-/**
- * Component to display the formatted agent delegation result.
- */
-interface FormattedMessageProps {
-	subagent: string;
-	description: string;
-	result?: string;
-}
-
-const FormattedMessage: React.FC<FormattedMessageProps> = ({
-	subagent,
-	description,
-	result,
-}) => {
-	return (
-		<>
-			<Text>🤖 Agent: {subagent}</Text>
-			<Text dimColor>Task: {description}</Text>
-			{result && (
-				<>
-					<Text dimColor>Result:</Text>
-					<Text>{result}</Text>
-				</>
-			)}
-		</>
-	);
-};
-
-/**
- * Create the agent delegation tool.
- * This is a factory function that creates the tool definition.
- * The actual executor is set at runtime via setExecutor().
- */
 let executorInstance: SubagentExecutor | null = null;
 
 /**
  * Set the subagent executor instance.
- * This should be called during app initialization.
+ * Called during app initialization.
  */
 export function setAgentToolExecutor(executor: SubagentExecutor): void {
 	executorInstance = executor;
 }
 
 /**
- * Execute the agent delegation.
+ * Cached list of available agent names for the tool description.
  */
+let availableAgentNames =
+	'research (read-only codebase research and exploration)';
+
+/**
+ * Update the agent tool's knowledge of available subagents.
+ * Call after subagent loader initializes or reloads.
+ */
+export function setAvailableAgentNames(
+	agents: Array<{name: string; description: string}>,
+): void {
+	if (agents.length > 0) {
+		availableAgentNames = agents
+			.map(a => `${a.name} (${a.description.slice(0, 60)})`)
+			.join(', ');
+	}
+}
+
+/**
+ * Start agent execution and return a promise.
+ * Like executeBashCommand — starts immediately, doesn't block the caller.
+ */
+export function startAgentExecution(args: AgentToolArgs): {
+	promise: Promise<{content: string; success: boolean; error?: string}>;
+} {
+	if (!executorInstance) {
+		return {
+			promise: Promise.reject(new Error('Subagent executor not initialized')),
+		};
+	}
+
+	const {subagent_type, description, prompt, context} = args;
+	const executor = executorInstance;
+
+	// Wrap in setTimeout(0) to fully detach from the current call stack.
+	// This ensures the caller can set up the live component and Ink can
+	// render before execution begins — matching how spawn() works for bash.
+	const promise = new Promise<{
+		content: string;
+		success: boolean;
+		error?: string;
+	}>(resolve => {
+		setTimeout(async () => {
+			const result = await executor.execute({
+				subagent_type,
+				description,
+				prompt,
+				context,
+			});
+			resolve({
+				content: result.output,
+				success: result.success,
+				error: result.error,
+			});
+		}, 0);
+	});
+
+	return {promise};
+}
+
 async function executeAgent(args: AgentToolArgs): Promise<string> {
 	if (!executorInstance) {
 		throw new Error('Subagent executor not initialized');
@@ -92,7 +96,6 @@ async function executeAgent(args: AgentToolArgs): Promise<string> {
 
 	const {subagent_type, description, prompt, context} = args;
 
-	// Validate that the subagent exists
 	const loader = getSubagentLoader();
 	const agentExists = await loader.hasSubagent(subagent_type);
 	if (!agentExists) {
@@ -105,7 +108,6 @@ async function executeAgent(args: AgentToolArgs): Promise<string> {
 		);
 	}
 
-	// Execute the subagent task
 	const result = await executorInstance.execute({
 		subagent_type,
 		description,
@@ -120,20 +122,17 @@ async function executeAgent(args: AgentToolArgs): Promise<string> {
 	return result.output;
 }
 
-/**
- * Agent tool export.
- * This will be registered in the tool registry.
- */
 const agentCoreTool = tool({
 	description:
-		'Delegate a task to a specialized subagent. Use this when you need to explore the codebase, perform research, or execute a focused task.',
+		'Delegate a task to a specialized subagent. The subagent runs in its own context and returns only its result. Use this to explore the codebase, research, or execute focused tasks without filling your context.',
 	inputSchema: jsonSchema<AgentToolArgs>({
 		type: 'object',
 		properties: {
 			subagent_type: {
 				type: 'string',
-				description:
-					'Which subagent to use. Common options: explore (codebase search), plan (research for planning)',
+				get description() {
+					return `Which subagent to use. Available: ${availableAgentNames}`;
+				},
 			},
 			description: {
 				type: 'string',
@@ -152,7 +151,7 @@ const agentCoreTool = tool({
 		},
 		required: ['subagent_type', 'description'],
 	}),
-	needsApproval: false, // Agent delegation is safe - subagents enforce their own permissions
+	needsApproval: true,
 	execute: async args => {
 		return await executeAgent(args);
 	},
@@ -161,6 +160,5 @@ const agentCoreTool = tool({
 export const agentTool: NanocoderToolExport = {
 	name: 'agent',
 	tool: agentCoreTool,
-	formatter: formatAgent,
-	readOnly: true, // Agent delegation itself is read-only (the subagent may use non-read-only tools)
+	readOnly: false,
 };

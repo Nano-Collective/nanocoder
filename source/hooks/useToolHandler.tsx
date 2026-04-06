@@ -1,10 +1,15 @@
 import React from 'react';
+import AgentProgress from '@/components/agent-progress';
 import BashProgress from '@/components/bash-progress';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
-import {SubagentResult} from '@/components/subagent-result';
 import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
 import {ConversationContext} from '@/hooks/useAppState';
 import {getToolManager, processToolUse} from '@/message-handler';
+import {
+	resetSubagentProgress,
+	subagentProgress,
+} from '@/services/subagent-events';
+import {startAgentExecution} from '@/tools/agent-tool';
 import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
 import {
 	DevelopmentMode,
@@ -43,17 +48,6 @@ interface UseToolHandlerProps {
 	currentProvider?: string;
 	setDevelopmentMode?: (mode: DevelopmentMode) => void;
 	compactToolDisplay?: boolean;
-	// Subagent state
-	activeSubagent: {
-		name: string | null;
-		description: string | null;
-		startTime: number | null;
-	};
-	setActiveSubagent: (subagent: {
-		name: string | null;
-		description: string | null;
-		startTime: number | null;
-	}) => void;
 }
 
 export function useToolHandler({
@@ -77,8 +71,6 @@ export function useToolHandler({
 	currentProvider: _currentProvider,
 	setDevelopmentMode,
 	compactToolDisplay,
-	activeSubagent,
-	setActiveSubagent,
 }: UseToolHandlerProps) {
 	// Continue conversation with tool results - maintains the proper loop
 	const continueConversationWithToolResults = async (
@@ -278,29 +270,6 @@ export function useToolHandler({
 				);
 			}
 
-			// Special handling for agent (subagent delegation) tool
-			if (currentTool.function.name === 'agent') {
-				const parsedArgs = parseToolArguments(currentTool.function.arguments);
-				const subagentType = parsedArgs.subagent_type as string;
-				const description = parsedArgs.description as string;
-
-				// Set active subagent state for UI display
-				setActiveSubagent({
-					name: subagentType,
-					description,
-					startTime: Date.now(),
-				});
-
-				// Show subagent delegation message
-				addToChatQueue(
-					<InfoMessage
-						key={`agent-delegation-${getNextComponentKey()}-${Date.now()}`}
-						message={`Delegating to ${subagentType} agent: ${description}`}
-						hideBox={true}
-					/>,
-				);
-			}
-
 			// Check if tool has a streaming formatter (for real-time progress)
 			const streamingFormatter = toolManager?.getStreamingFormatter(
 				currentTool.function.name,
@@ -360,46 +329,83 @@ export function useToolHandler({
 						/>,
 					);
 				}
-			} else {
-				// Regular tool - use standard flow
-				result = await processToolUse(currentTool);
+			} else if (currentTool.function.name === 'agent') {
+				// Agent tool - mirror the bash pattern: start execution, render live, await
+				const parsedArgs = parseToolArguments(currentTool.function.arguments);
+				const agentName = parsedArgs.subagent_type as string;
+				const agentDesc = parsedArgs.description as string;
 
-				// Special handling for agent tool results
-				if (currentTool.function.name === 'agent') {
-					const parsedArgs = parseToolArguments(currentTool.function.arguments);
+				resetSubagentProgress();
 
-					// Display subagent result with formatted output
-					addToChatQueue(
-						<SubagentResult
-							key={`agent-result-${getNextComponentKey()}-${Date.now()}`}
-							subagentName={activeSubagent.name || 'unknown'}
-							description={parsedArgs.description as string}
-							result={result.content}
-							executionTimeMs={
-								activeSubagent.startTime
-									? Date.now() - activeSubagent.startTime
-									: 0
-							}
-						/>,
-					);
+				// Start execution FIRST (returns immediately with a promise)
+				const {promise} = startAgentExecution(
+					parsedArgs as {
+						subagent_type: string;
+						description: string;
+						prompt?: string;
+						context?: Record<string, unknown>;
+					},
+				);
 
-					// Clear active subagent state
-					setActiveSubagent({
-						name: null,
-						description: null,
-						startTime: null,
-					});
-				} else {
-					// Display the tool result
+				// Set live component AFTER starting (React renders before we block)
+				setLiveComponent(
+					<AgentProgress
+						key={`agent-live-${currentTool.id}-${getNextComponentKey()}-${Date.now()}`}
+						subagentName={agentName}
+						description={agentDesc}
+						isLive={true}
+					/>,
+				);
+
+				// Now await completion — Ink render loop stays free
+				const agentResult = await promise;
+				setLiveComponent(null);
+
+				result = {
+					tool_call_id: currentTool.id,
+					role: 'tool' as const,
+					name: currentTool.function.name,
+					content: agentResult.success
+						? agentResult.content
+						: `Error: ${agentResult.error || 'Subagent execution failed'}`,
+				};
+
+				if (compactToolDisplay) {
 					await displayToolResult(
 						currentTool,
 						result,
 						toolManager,
 						addToChatQueue,
 						getNextComponentKey,
-						compactToolDisplay,
+						true,
+					);
+				} else {
+					addToChatQueue(
+						<AgentProgress
+							key={`agent-complete-${currentTool.id}-${getNextComponentKey()}-${Date.now()}`}
+							subagentName={agentName}
+							description={agentDesc}
+							completedState={{
+								toolCallCount: subagentProgress.toolCallCount,
+								tokenCount: subagentProgress.tokenCount,
+								success: agentResult.success,
+							}}
+						/>,
 					);
 				}
+			} else {
+				// Regular tool - use standard flow
+				result = await processToolUse(currentTool);
+
+				// Display the tool result
+				await displayToolResult(
+					currentTool,
+					result,
+					toolManager,
+					addToChatQueue,
+					getNextComponentKey,
+					compactToolDisplay,
+				);
 			}
 
 			const newResults = [...completedToolResults, result];
@@ -425,12 +431,7 @@ export function useToolHandler({
 				/>,
 			);
 			resetToolConfirmationState();
-			// Clear active subagent state to prevent spinner from hanging
-			setActiveSubagent({
-				name: null,
-				description: null,
-				startTime: null,
-			});
+			setLiveComponent(null);
 		}
 	};
 

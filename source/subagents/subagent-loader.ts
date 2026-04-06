@@ -10,11 +10,26 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type {
-	SubagentConfig,
-	SubagentConfigWithSource,
-	SubagentLoadPriority,
-} from './types.js';
+import {fileURLToPath} from 'node:url';
+import {logError, logWarning} from '@/utils/message-queue';
+import type {SubagentConfigWithSource, SubagentLoadPriority} from './types.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+/**
+ * Resolve the built-in agents directory.
+ * Works from both source (dev) and dist (built) locations.
+ */
+function getBuiltInAgentsDir(): string {
+	// In source: source/subagents/built-in/
+	// In dist: dist/subagents/built-in/ -- but .md files are in source/
+	// Since .md files are not compiled, always reference from source
+	const sourceDir = path.resolve(__dirname, '../../source/subagents/built-in');
+	const localDir = path.resolve(__dirname, './built-in');
+	// Prefer the local dir (works in source), fall back to source dir (works from dist)
+	return localDir.includes('source') ? localDir : sourceDir;
+}
 
 /**
  * SubagentLoader manages loading subagent definitions from multiple sources.
@@ -47,15 +62,11 @@ export class SubagentLoader {
 		}
 
 		// Load built-in subagents first (lowest priority)
-		const builtInAgents = this.getBuiltInSubagents();
+		const builtInDir = getBuiltInAgentsDir();
+		const builtInAgents = await this.loadFromDirectory(builtInDir, 0);
 		for (const config of builtInAgents) {
-			this.cache.set(config.name, {
-				...config,
-				source: {
-					priority: 0, // BuiltIn
-					isBuiltIn: true,
-				},
-			});
+			config.source.isBuiltIn = true;
+			this.cache.set(config.name, config);
 		}
 
 		// Load user-level agents
@@ -65,6 +76,10 @@ export class SubagentLoader {
 			1, // User priority
 		);
 		for (const config of userAgents) {
+			const existing = this.cache.get(config.name);
+			if (existing?.source.isBuiltIn) {
+				logWarning(`User agent '${config.name}' overrides built-in agent`);
+			}
 			this.cache.set(config.name, config);
 		}
 
@@ -75,6 +90,19 @@ export class SubagentLoader {
 			2, // Project priority
 		);
 		for (const config of projectAgents) {
+			const existing = this.cache.get(config.name);
+			if (existing) {
+				const source = existing.source.isBuiltIn ? 'built-in' : 'user';
+				logWarning(`Project agent '${config.name}' overrides ${source} agent`);
+			}
+			// Security: project-level agents cannot escalate to autoAccept
+			if (config.permissionMode === 'autoAccept') {
+				logWarning(
+					`Project-level agent '${config.name}' has permissionMode 'autoAccept' which is not allowed. Downgrading to 'normal'.`,
+				);
+				config.permissionMode = 'normal';
+			}
+
 			this.cache.set(config.name, config);
 		}
 
@@ -212,71 +240,13 @@ export class SubagentLoader {
 					},
 				});
 			} catch (error) {
-				// Log error but continue loading other files
-				console.error('Failed to load agent from:', filePath);
-				console.error('Error:', error);
+				logError(
+					`Failed to load agent from ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+				);
 			}
 		}
 
 		return agents;
-	}
-
-	/**
-	 * Get built-in subagent definitions.
-	 * These are the default agents that ship with Nanocoder.
-	 */
-	private getBuiltInSubagents(): SubagentConfig[] {
-		return [
-			{
-				name: 'explore',
-				description:
-					'Fast, read-only agent for codebase exploration, file discovery, and pattern searching. Use when you need to understand the codebase structure or find specific code patterns.',
-				model: 'inherit',
-				tools: ['Read', 'Grep', 'Glob'],
-				disallowedTools: ['Write', 'Edit', 'string_replace'],
-				permissionMode: 'readOnly',
-				systemPrompt: `You are a codebase exploration specialist. Your role is to:
-
-1. Discover file structure and organization
-2. Search for specific patterns and code
-3. Analyze code dependencies
-4. Identify key files and modules
-
-Focus on speed and breadth. Use quick searches before deep analysis.
-Always report findings in a structured format:
-- Files found (with paths)
-- Patterns discovered
-- Dependencies identified
-- Recommendations for further investigation`,
-			},
-			{
-				name: 'plan',
-				description:
-					'Research agent for gathering context during plan mode. Use when you need to understand the codebase before proposing implementation changes.',
-				model: 'inherit',
-				tools: ['Read', 'Grep', 'Glob'],
-				disallowedTools: ['Write', 'Edit', 'string_replace'],
-				permissionMode: 'readOnly',
-				systemPrompt: `You are a planning and research specialist. Your role is to:
-
-1. Understand existing patterns in the codebase
-2. Identify relevant files and modules
-3. Analyze integration points
-4. Recommend implementation approaches
-
-Focus on accuracy and completeness. Consider:
-- Existing patterns and conventions
-- Test coverage
-- Potential edge cases
-- Backward compatibility
-
-Return findings with:
-- Relevant files (with line numbers where applicable)
-- Existing patterns to follow
-- Potential risks or complications
-- Recommended implementation approach`,
-			},
-		];
 	}
 }
 

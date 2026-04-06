@@ -690,7 +690,7 @@ test('getAvailableToolNames - returns all tools when tune disabled', t => {
 test('getAvailableToolNames - filters to minimal profile', t => {
 	const manager = new ToolManager();
 	const result = manager.getAvailableToolNames({enabled: true, toolProfile: 'minimal', aggressiveCompact: false});
-	t.deepEqual(result, ['read_file', 'write_file', 'string_replace', 'execute_bash', 'find_files', 'search_file_contents', 'list_directory']);
+	t.deepEqual(result, ['read_file', 'write_file', 'string_replace', 'execute_bash', 'find_files', 'search_file_contents', 'list_directory', 'agent']);
 });
 
 test('getAvailableToolNames - full profile returns all minus mode exclusions', t => {
@@ -717,7 +717,7 @@ test('getAvailableToolNames - plan + minimal excludes mutation tools from minima
 	const manager = new ToolManager();
 	const result = manager.getAvailableToolNames({enabled: true, toolProfile: 'minimal', aggressiveCompact: false}, 'plan');
 	// Plan mode excludes write_file, string_replace, execute_bash from minimal
-	t.deepEqual(result, ['read_file', 'find_files', 'search_file_contents', 'list_directory']);
+	t.deepEqual(result, ['read_file', 'find_files', 'search_file_contents', 'list_directory', 'agent']);
 });
 
 // ============================================================================

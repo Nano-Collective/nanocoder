@@ -125,6 +125,104 @@ export async function handleScheduleCreate(
 }
 
 /**
+ * Handles /agents create — creates an agent definition file and prompts the AI to help write it.
+ * Returns true if handled.
+ */
+export async function handleAgentCreate(
+	commandParts: string[],
+	options: MessageSubmissionOptions,
+): Promise<boolean> {
+	if (commandParts[0] !== 'agents' || commandParts[1] !== 'create') {
+		return false;
+	}
+
+	const {
+		onAddToChatQueue,
+		onHandleChatMessage,
+		onCommandComplete,
+		getNextComponentKey,
+	} = options;
+
+	const fileName = commandParts[2];
+
+	if (!fileName) {
+		onAddToChatQueue(
+			React.createElement(ErrorMessage, {
+				key: `agents-create-error-${getNextComponentKey()}`,
+				message:
+					'Usage: /agents create <name>\nExample: /agents create code-reviewer',
+			}),
+		);
+		onCommandComplete?.();
+		return true;
+	}
+
+	const safeName = fileName.endsWith('.md') ? fileName : `${fileName}.md`;
+	const targetDir = join(process.cwd(), '.nanocoder', 'agents');
+	const filePath = join(targetDir, safeName);
+
+	if (existsSync(filePath)) {
+		onAddToChatQueue(
+			React.createElement(ErrorMessage, {
+				key: `agents-create-exists-${getNextComponentKey()}`,
+				message: `Agent file already exists: .nanocoder/agents/${safeName}`,
+			}),
+		);
+		onCommandComplete?.();
+		return true;
+	}
+
+	mkdirSync(targetDir, {recursive: true});
+
+	const agentName = safeName.replace(/\.md$/, '');
+	const template = `---
+name: ${agentName}
+description: TODO - describe when to use this agent
+model: inherit
+permissionMode: normal
+---
+
+TODO - write the system prompt for this agent
+`;
+
+	writeFileSync(filePath, template, 'utf-8');
+
+	onAddToChatQueue(
+		React.createElement(SuccessMessage, {
+			key: `agents-created-${getNextComponentKey()}`,
+			message: `Created agent file: .nanocoder/agents/${safeName}`,
+			hideBox: true,
+		}),
+	);
+
+	await onHandleChatMessage(
+		`I just created a new subagent definition file at .nanocoder/agents/${safeName}. Help me write the content for this agent. Ask me what I want this agent to specialize in, then write the complete markdown file using the write_file tool.
+
+Here is the frontmatter format with all available fields:
+
+---
+name: ${agentName}
+description: When to use this agent (shown to the LLM)
+provider:               # Optional: provider name from agents.config.json (uses parent's if not set)
+model: inherit          # inherit, or a model ID available on the provider
+tools:                  # Optional: restrict to specific tools
+  - read_file
+  - search_file_contents
+  - find_files
+disallowedTools:        # Optional: block specific tools
+  - write_file
+  - string_replace
+permissionMode: normal  # readOnly, normal
+maxTurns: 10            # Optional: max conversation turns
+---
+
+The body after the frontmatter is the system prompt that instructs the agent how to behave. Make it focused and specific to the agent's purpose.`,
+	);
+
+	return true;
+}
+
+/**
  * Handles /commands create — creates the command file and prompts the AI to help write it.
  * Returns true if handled.
  */

@@ -269,74 +269,6 @@ function loadSessionConfig(): AppConfig['sessions'] {
 	return defaults;
 }
 
-// Load subagent configuration with defaults
-function loadSubagentConfig(): NonNullable<AppConfig['subagents']> {
-	const defaults: NonNullable<AppConfig['subagents']> = {
-		enabled: true,
-		autoDelegate: false,
-		maxConcurrent: 1,
-	};
-
-	// Try to load from project-level config first
-	const projectConfigPath = join(process.cwd(), 'agents.config.json');
-	const projectConfig = tryLoadSubagentsFromPath(projectConfigPath, defaults);
-	if (projectConfig) {
-		return projectConfig;
-	}
-
-	// Try global config
-	const configDir = getConfigPath();
-	const globalConfigPath = join(configDir, 'agents.config.json');
-	const globalConfig = tryLoadSubagentsFromPath(globalConfigPath, defaults);
-	if (globalConfig) {
-		return globalConfig;
-	}
-
-	return defaults;
-}
-
-// Try to load subagent config from a specific path
-function tryLoadSubagentsFromPath(
-	configPath: string,
-	defaults: NonNullable<AppConfig['subagents']>,
-): NonNullable<AppConfig['subagents']> | null {
-	if (!existsSync(configPath)) {
-		return null;
-	}
-
-	try {
-		const rawData = readFileSync(configPath, 'utf-8');
-		const config = JSON.parse(rawData);
-		const subagents = config.nanocoder?.subagents;
-		if (subagents && typeof subagents === 'object') {
-			return {
-				enabled:
-					subagents.enabled !== undefined
-						? Boolean(subagents.enabled)
-						: defaults.enabled,
-				autoDelegate:
-					subagents.autoDelegate !== undefined
-						? Boolean(subagents.autoDelegate)
-						: defaults.autoDelegate,
-				maxConcurrent:
-					typeof subagents.maxConcurrent === 'number' &&
-					Number.isInteger(subagents.maxConcurrent) &&
-					subagents.maxConcurrent > 0
-						? Math.max(1, subagents.maxConcurrent)
-						: defaults.maxConcurrent,
-				customAgentsPath:
-					typeof subagents.customAgentsPath === 'string'
-						? subagents.customAgentsPath
-						: defaults.customAgentsPath,
-			};
-		}
-	} catch {
-		// Ignore parsing errors
-	}
-
-	return null;
-}
-
 // Try to load paste config from a specific path
 // Returns the config if found and valid, null otherwise
 function tryLoadPasteFromPath(
@@ -446,9 +378,6 @@ function loadAppConfig(): AppConfig {
 	// Load session configuration
 	const sessions = loadSessionConfig();
 
-	// Load subagent configuration
-	const subagents = loadSubagentConfig();
-
 	// Load paste configuration
 	const paste = loadPasteConfig();
 
@@ -460,7 +389,6 @@ function loadAppConfig(): AppConfig {
 		mcpServers,
 		autoCompact,
 		sessions,
-		subagents,
 		paste,
 		nanocoderTools,
 	};

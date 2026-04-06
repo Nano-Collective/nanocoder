@@ -4,8 +4,19 @@
  * Handles execution of subagent tasks with isolated context and tool filtering.
  */
 
+import {createLLMClient} from '@/client-factory';
+import {
+	subagentProgress,
+	updateSubagentProgress,
+} from '@/services/subagent-events';
 import type {ToolManager} from '@/tools/tool-manager';
-import type {AISDKCoreTool, LLMClient, Message} from '@/types/core';
+import type {
+	AISDKCoreTool,
+	DevelopmentMode,
+	LLMClient,
+	Message,
+} from '@/types/core';
+import {parseToolArguments} from '@/utils/tool-args-parser';
 import {getSubagentLoader} from './subagent-loader.js';
 import type {
 	SubagentConfigWithSource,
@@ -25,29 +36,29 @@ export class SubagentExecutor {
 	private toolManager: ToolManager;
 	private parentClient: LLMClient;
 	private projectRoot: string;
+	private parentMode: DevelopmentMode;
 
-	/**
-	 * Create a new SubagentExecutor.
-	 * @param toolManager - The tool manager for tool access
-	 * @param parentClient - The parent LLM client (for context)
-	 * @param projectRoot - The project root directory
-	 */
 	constructor(
 		toolManager: ToolManager,
 		parentClient: LLMClient,
 		projectRoot: string = process.cwd(),
+		parentMode: DevelopmentMode = 'normal',
 	) {
 		this.toolManager = toolManager;
 		this.parentClient = parentClient;
 		this.projectRoot = projectRoot;
+		this.parentMode = parentMode;
+	}
+
+	/**
+	 * Update the parent development mode (called when mode changes).
+	 */
+	setParentMode(mode: DevelopmentMode): void {
+		this.parentMode = mode;
 	}
 
 	/**
 	 * Execute a subagent task.
-	 * @param task - The task to delegate
-	 * @param signal - Optional abort signal for cancellation
-	 * @param depth - Current recursion depth (internal use)
-	 * @returns The result from the subagent execution
 	 */
 	async execute(
 		task: SubagentTask,
@@ -56,7 +67,6 @@ export class SubagentExecutor {
 	): Promise<SubagentResult> {
 		const startTime = Date.now();
 
-		// Prevent infinite recursion
 		if (depth >= MAX_SUBAGENT_DEPTH) {
 			return {
 				subagentName: task.subagent_type,
@@ -68,11 +78,10 @@ export class SubagentExecutor {
 		}
 
 		try {
-			// Load the subagent configuration
 			const loader = getSubagentLoader(this.projectRoot);
-			const configWithSource = await loader.getSubagent(task.subagent_type);
+			const config = await loader.getSubagent(task.subagent_type);
 
-			if (!configWithSource) {
+			if (!config) {
 				return {
 					subagentName: task.subagent_type,
 					output: '',
@@ -82,26 +91,32 @@ export class SubagentExecutor {
 				};
 			}
 
-			const config = configWithSource;
+			// In plan mode, only allow read-only subagents
+			if (this.parentMode === 'plan' && config.permissionMode !== 'readOnly') {
+				return {
+					subagentName: task.subagent_type,
+					output: '',
+					success: false,
+					error: `Subagent '${config.name}' cannot run in plan mode because it is not read-only. Only subagents with permissionMode: readOnly are allowed in plan mode.`,
+					executionTimeMs: Date.now() - startTime,
+				};
+			}
 
-			// Create isolated context for the subagent
 			const context = this.createSubagentContext(config, task);
-
-			// Get filtered tools for this subagent (excludes agent tool to prevent recursion)
 			const filteredTools = this.filterTools(config);
 
-			// Get client and track original model for restoration
-			const {originalModel} = this.prepareClient(config);
-
-			// Build initial messages
 			const messages: Message[] = [
 				{role: 'system', content: context.systemMessage},
 				...context.initialMessages,
 			];
 
+			// Get the client for this subagent — either a new one for a
+			// different provider, or the parent client with model switching
+			const {client, restoreParent} = await this.prepareClient(config);
+
 			try {
-				// Execute the subagent conversation
 				const output = await this.runSubagentConversation(
+					client,
 					messages,
 					filteredTools,
 					config.maxTurns,
@@ -113,13 +128,11 @@ export class SubagentExecutor {
 					subagentName: config.name,
 					output,
 					success: true,
+					tokensUsed: subagentProgress.tokenCount,
 					executionTimeMs: Date.now() - startTime,
 				};
 			} finally {
-				// Restore original model if we changed it
-				if (originalModel !== null) {
-					this.parentClient.setModel(originalModel);
-				}
+				restoreParent();
 			}
 		} catch (error) {
 			return {
@@ -132,20 +145,10 @@ export class SubagentExecutor {
 		}
 	}
 
-	/**
-	 * Create an isolated context for a subagent.
-	 * @param config - The subagent configuration
-	 * @param task - The task to execute
-	 * @returns The isolated context for the subagent
-	 */
 	private createSubagentContext(
 		config: SubagentConfigWithSource,
 		task: SubagentTask,
 	): SubagentContext {
-		// Build system message from config
-		const systemMessage = config.systemPrompt;
-
-		// Build initial messages with the task description
 		const initialMessages = [
 			{
 				role: 'user' as const,
@@ -153,22 +156,16 @@ export class SubagentExecutor {
 			},
 		];
 
-		// Determine available tools based on config
 		const availableTools = this.getAvailableToolNames(config);
 
 		return {
 			availableTools,
-			systemMessage,
+			systemMessage: config.systemPrompt,
 			initialMessages,
 			permissionMode: config.permissionMode || 'normal',
 		};
 	}
 
-	/**
-	 * Build the prompt for the subagent task.
-	 * @param task - The task to execute
-	 * @returns The formatted task prompt
-	 */
 	private buildTaskPrompt(task: SubagentTask): string {
 		let prompt = `Task: ${task.description}\n`;
 
@@ -183,42 +180,35 @@ export class SubagentExecutor {
 		return prompt;
 	}
 
-	/**
-	 * Get the list of available tool names for a subagent.
-	 * @param config - The subagent configuration
-	 * @returns Array of available tool names
-	 */
 	private getAvailableToolNames(config: SubagentConfigWithSource): string[] {
 		const allTools = Object.keys(this.toolManager.getAllTools());
 
-		// Start with all tools, then filter
 		let available = allTools;
 
-		// Apply explicit allow list if provided
 		if (config.tools && config.tools.length > 0) {
 			available = available.filter(tool => config.tools?.includes(tool));
 		}
 
-		// Remove disallowed tools
 		if (config.disallowedTools && config.disallowedTools.length > 0) {
 			available = available.filter(
 				tool => !config.disallowedTools?.includes(tool),
 			);
 		}
 
+		// Always exclude agent tool to prevent infinite recursion
+		available = available.filter(name => name !== 'agent');
+
 		return available;
 	}
 
 	/**
 	 * Filter tools based on subagent configuration.
-	 * Always excludes the 'agent' tool to prevent infinite recursion.
-	 * @param config - The subagent configuration
-	 * @returns Record of filtered AI SDK tools
+	 * In readOnly mode, only read-only tools are included.
 	 */
 	private filterTools(
 		config: SubagentConfigWithSource,
 	): Record<string, AISDKCoreTool> {
-		const allTools = this.toolManager.getAllTools();
+		const allTools = this.toolManager.getAllToolsWithoutExecute();
 		const availableNames = this.getAvailableToolNames(config);
 
 		const filtered: Record<string, AISDKCoreTool> = {} as Record<
@@ -226,144 +216,208 @@ export class SubagentExecutor {
 			AISDKCoreTool
 		>;
 		for (const name of availableNames) {
-			// Always exclude agent tool to prevent infinite recursion
-			if (name === 'agent') continue;
-			if (name in allTools) {
-				filtered[name] = allTools[name] as AISDKCoreTool;
+			if (!(name in allTools)) continue;
+
+			// In readOnly mode, only include read-only tools in the LLM's tool set
+			if (
+				config.permissionMode === 'readOnly' &&
+				!this.toolManager.isReadOnly(name)
+			) {
+				continue;
 			}
+
+			filtered[name] = allTools[name] as AISDKCoreTool;
 		}
 
 		return filtered;
 	}
 
 	/**
-	 * Prepare the client for subagent execution.
-	 * Sets the model if different from parent, returns original model for restoration.
-	 * @param config - The subagent configuration
-	 * @returns Object containing the original model (null if not changed)
+	 * Prepare the LLM client for subagent execution.
+	 *
+	 * If the agent specifies a `provider`, creates a brand-new client for that
+	 * provider/model combination. This lets subagents use a completely different
+	 * backend (e.g. local Ollama for research, cloud API for the main agent).
+	 *
+	 * If no provider is set, reuses the parent client (switching model if needed).
 	 */
-	private prepareClient(config: SubagentConfigWithSource): {
-		originalModel: string | null;
-	} {
-		// If model is 'inherit' or not specified, use parent client as-is
-		if (config.model === 'inherit' || !config.model) {
-			return {originalModel: null};
+	private async prepareClient(config: SubagentConfigWithSource): Promise<{
+		client: LLMClient;
+		restoreParent: () => void;
+	}> {
+		// Different provider — create a new client entirely
+		if (config.provider) {
+			const model =
+				config.model && config.model !== 'inherit' ? config.model : undefined;
+
+			const {client} = await createLLMClient(config.provider, model);
+			return {client, restoreParent: () => {}};
 		}
 
-		// Save original model for restoration
-		const originalModel = this.parentClient.getCurrentModel();
+		// Same provider, different model
+		if (config.model && config.model !== 'inherit') {
+			const availableModels = await this.parentClient.getAvailableModels();
+			if (!availableModels.includes(config.model)) {
+				throw new Error(
+					`Model '${config.model}' is not available. Configured models: ${availableModels.join(', ')}`,
+				);
+			}
 
-		// Set the model on the parent client
-		this.parentClient.setModel(config.model);
+			const originalModel = this.parentClient.getCurrentModel();
+			this.parentClient.setModel(config.model);
+			return {
+				client: this.parentClient,
+				restoreParent: () => this.parentClient.setModel(originalModel),
+			};
+		}
 
-		return {originalModel};
+		// Inherit everything
+		return {client: this.parentClient, restoreParent: () => {}};
 	}
 
 	/**
 	 * Run the subagent conversation loop.
-	 * @param messages - Initial messages for the conversation
-	 * @param tools - Available tools for the subagent
-	 * @param maxTurns - Maximum number of conversation turns
-	 * @param config - The subagent configuration for permission enforcement
-	 * @param signal - Optional abort signal for cancellation
-	 * @returns The final output from the subagent
 	 */
 	private async runSubagentConversation(
+		client: LLMClient,
 		messages: Message[],
 		tools: Record<string, AISDKCoreTool>,
 		maxTurns: number | undefined,
 		config: SubagentConfigWithSource,
 		signal?: AbortSignal,
 	): Promise<string> {
-		const maxIterations = maxTurns ?? 10; // Default max turns
+		const maxIterations = maxTurns ?? 10;
 		let iterations = 0;
-		let output = '';
+		let totalToolCalls = 0;
+		let totalTokens = 0;
+
+		// Rough token estimate: ~4 chars per token
+		const estimateTokens = (text: string) => Math.ceil(text.length / 4);
+
+		const emitProgress = (
+			status: 'running' | 'tool_call' | 'complete' | 'error',
+			currentTool?: string,
+		) => {
+			updateSubagentProgress({
+				subagentName: config.name,
+				status,
+				currentTool,
+				toolCallCount: totalToolCalls,
+				turnCount: iterations,
+				tokenCount: totalTokens,
+			});
+		};
+
+		emitProgress('running');
 
 		while (iterations < maxIterations) {
 			iterations++;
 
-			// CRITICAL FIX: Do NOT filter out tool messages
-			// The OpenAI-compatible API requires tool results after tool_calls
-			// Passing all messages allows the LLM to see tool execution results
+			// Yield to event loop so Ink can render current state
+			emitProgress('running');
+			await new Promise(resolve => setTimeout(resolve, 50));
 
-			// Get response from LLM
-			const response = await this.parentClient.chat(
+			const response = await client.chat(
 				messages,
 				tools,
 				{
-					onToken: token => {
-						output += token;
+					onToken: () => {
+						totalTokens++;
+						subagentProgress.tokenCount = totalTokens;
 					},
 				},
 				signal,
 			);
 
-			// Check if there were tool calls
+			const responseContent = response.choices[0]?.message.content || '';
+
 			const toolCalls = response.choices[0]?.message.tool_calls;
-			if (toolCalls && toolCalls.length > 0) {
-				// Add assistant message with tool calls
-				messages.push({
-					role: 'assistant',
-					content: response.choices[0].message.content || '',
-					tool_calls: toolCalls,
-				});
-
-				// Execute each tool call
-				for (const toolCall of toolCalls) {
-					const toolName = toolCall.function.name;
-
-					// Permission enforcement: check if tool is allowed in readOnly mode
-					if (config.permissionMode === 'readOnly') {
-						const isReadOnly = this.toolManager.isReadOnly(toolName);
-						if (!isReadOnly) {
-							messages.push({
-								role: 'tool',
-								content: `Error: Tool '${toolName}' is not read-only. Subagent is in read-only mode.`,
-								tool_call_id: toolCall.id,
-								name: toolName,
-							});
-							continue;
-						}
-					}
-
-					const toolHandler = this.toolManager.getToolHandler(toolName);
-
-					if (toolHandler) {
-						try {
-							const result = await toolHandler(toolCall.function.arguments);
-							messages.push({
-								role: 'tool',
-								content: result,
-								tool_call_id: toolCall.id,
-								name: toolName,
-							});
-						} catch (error) {
-							messages.push({
-								role: 'tool',
-								content: `Error: ${error instanceof Error ? error.message : String(error)}`,
-								tool_call_id: toolCall.id,
-								name: toolName,
-							});
-						}
-					} else {
-						messages.push({
-							role: 'tool',
-							content: `Error: Tool '${toolName}' not found`,
-							tool_call_id: toolCall.id,
-							name: toolName,
-						});
-					}
-				}
-
-				// Continue the conversation
-				continue;
+			if (!toolCalls || toolCalls.length === 0) {
+				emitProgress('complete');
+				return responseContent;
 			}
 
-			// No more tool calls, we're done
-			output = response.choices[0].message.content || '';
-			break;
+			// Count tokens from tool call arguments
+			for (const tc of toolCalls) {
+				const argStr =
+					typeof tc.function.arguments === 'string'
+						? tc.function.arguments
+						: JSON.stringify(tc.function.arguments);
+				totalTokens += estimateTokens(argStr);
+			}
+
+			messages.push({
+				role: 'assistant',
+				content: responseContent,
+				tool_calls: toolCalls,
+			});
+
+			// Execute each tool call — yield between each so Ink can render
+			for (const toolCall of toolCalls) {
+				const toolName = toolCall.function.name;
+				totalToolCalls++;
+				emitProgress('tool_call', toolName);
+				await new Promise(resolve => setTimeout(resolve, 50));
+
+				const toolResult = await this.executeToolCall(
+					toolName,
+					toolCall.function.arguments,
+					config,
+					signal,
+				);
+
+				// Count tokens from tool results
+				totalTokens += estimateTokens(toolResult);
+
+				messages.push({
+					role: 'tool',
+					content: toolResult,
+					tool_call_id: toolCall.id,
+					name: toolName,
+				});
+
+				emitProgress('running', toolName);
+				await new Promise(resolve => setTimeout(resolve, 50));
+			}
 		}
 
-		return output;
+		// Hit max iterations
+		for (let i = messages.length - 1; i >= 0; i--) {
+			if (messages[i]?.role === 'assistant' && messages[i]?.content) {
+				return messages[i].content;
+			}
+		}
+		return '';
+	}
+
+	/**
+	 * Execute a single tool call with permission enforcement and argument parsing.
+	 */
+	private async executeToolCall(
+		toolName: string,
+		rawArguments: unknown,
+		config: SubagentConfigWithSource,
+		signal?: AbortSignal,
+	): Promise<string> {
+		if (signal?.aborted) {
+			return 'Error: Execution was cancelled';
+		}
+		if (config.permissionMode === 'readOnly') {
+			if (!this.toolManager.isReadOnly(toolName)) {
+				return `Error: Tool '${toolName}' is not read-only. Subagent is in read-only mode.`;
+			}
+		}
+
+		const toolHandler = this.toolManager.getToolHandler(toolName);
+		if (!toolHandler) {
+			return `Error: Tool '${toolName}' not found`;
+		}
+
+		try {
+			const parsedArgs = parseToolArguments(rawArguments);
+			return await toolHandler(parsedArgs);
+		} catch (error) {
+			return `Error: ${error instanceof Error ? error.message : String(error)}`;
+		}
 	}
 }

@@ -14,6 +14,7 @@ const TOOL_PROFILES: Record<ToolProfile, string[]> = {
 		'find_files',
 		'search_file_contents',
 		'list_directory',
+		'agent',
 	],
 };
 
@@ -26,7 +27,7 @@ export const TOOL_PROFILE_DESCRIPTIONS: Record<ToolProfile, string> = {
 export const TOOL_PROFILE_TOOLTIPS: Record<ToolProfile, string> = {
 	full: 'No filtering. All registered tools including MCP servers.',
 	minimal:
-		'7 core tools (edit, bash, search) with slim prompt and single-tool enforcement. Recommended for small models.',
+		'8 core tools (edit, bash, search, agent) with slim prompt and single-tool enforcement. Recommended for small models.',
 };
 
 /**

@@ -5,8 +5,6 @@ import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
 import {CommandIntegration} from '@/custom-commands/command-integration';
 import {promptHistory} from '@/prompt-history';
-import {AutoDelegator} from '@/subagents/auto-delegate';
-import {getSubagentLoader} from '@/subagents/subagent-loader';
 import type {Message} from '@/types/core';
 import {MessageBuilder} from '@/utils/message-builder';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
@@ -224,34 +222,9 @@ export function useChatHandler({
 			/>,
 		);
 
-		// Determine final message (with auto-delegation prefix if applicable)
-		let finalMessage = message;
-
-		// Auto-delegation: check if message should be delegated to a subagent
-		const config = getAppConfig();
-		if (config?.subagents?.autoDelegate) {
-			try {
-				const loader = getSubagentLoader();
-				const subagentsMap = new Map(
-					(await loader.listSubagents()).map(agent => [agent.name, agent]),
-				);
-				const delegator = new AutoDelegator(subagentsMap);
-				const delegation = delegator.shouldDelegate(message);
-
-				if (delegation.shouldDelegate && delegation.subagent) {
-					// Modify the message to explicitly request delegation
-					// Replace the message rather than appending to avoid duplicates
-					finalMessage = `[Use the ${delegation.subagent} subagent to help with this task] ${message}`;
-				}
-			} catch {
-				// If auto-delegation fails, continue with original message
-				// Don't let delegation errors break the chat flow
-			}
-		}
-
 		// Add user message to conversation history (single addition)
 		const builder = new MessageBuilder(messages);
-		builder.addUserMessage(finalMessage);
+		builder.addUserMessage(message);
 		const updatedMessages = builder.build();
 		setMessages(updatedMessages);
 

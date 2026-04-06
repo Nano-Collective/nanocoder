@@ -84,19 +84,73 @@ test.serial('validateFrontmatter - rejects missing name', t => {
 	}
 });
 
-test.serial('validateFrontmatter - rejects invalid model', t => {
+test.serial('validateFrontmatter - rejects missing description', t => {
 	const frontmatter = {
 		name: 'test',
-		description: 'A test agent',
-		model: 'invalid-model',
 	};
 
 	const result = validateFrontmatter(frontmatter);
 
 	t.false(result.valid);
 	if (!result.valid) {
-		t.regex(result.error, /model must be one of/);
+		t.regex(result.error, /description is required/);
 	}
+});
+
+test.serial('validateFrontmatter - rejects non-array tools', t => {
+	const frontmatter = {
+		name: 'test',
+		description: 'A test agent',
+		tools: 'not-an-array',
+	};
+
+	const result = validateFrontmatter(frontmatter);
+
+	t.false(result.valid);
+	if (!result.valid) {
+		t.regex(result.error, /tools must be an array/);
+	}
+});
+
+test.serial('validateFrontmatter - rejects non-array disallowedTools', t => {
+	const frontmatter = {
+		name: 'test',
+		description: 'A test agent',
+		disallowedTools: 42,
+	};
+
+	const result = validateFrontmatter(frontmatter);
+
+	t.false(result.valid);
+	if (!result.valid) {
+		t.regex(result.error, /disallowedTools must be an array/);
+	}
+});
+
+test.serial('validateFrontmatter - rejects empty model', t => {
+	const frontmatter = {
+		name: 'test',
+		description: 'A test agent',
+		model: '',
+	};
+
+	const result = validateFrontmatter(frontmatter);
+
+	t.false(result.valid);
+	if (!result.valid) {
+		t.regex(result.error, /model must be a non-empty string/);
+	}
+});
+
+test.serial('validateFrontmatter - accepts model ID string', t => {
+	const frontmatter = {
+		name: 'test',
+		description: 'A test agent',
+		model: 'claude-3-5-haiku-20241022',
+	};
+
+	const result = validateFrontmatter(frontmatter);
+	t.deepEqual(result, {valid: true});
 });
 
 test.serial('validateFrontmatter - rejects invalid permissionMode', t => {

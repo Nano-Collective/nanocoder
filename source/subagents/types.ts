@@ -14,16 +14,16 @@ export interface SubagentConfig {
 	name: string;
 	/** Description of when to use this subagent */
 	description: string;
-	/** Model to use ('haiku', 'sonnet', 'opus', or 'inherit' from parent) */
-	model?: 'haiku' | 'sonnet' | 'opus' | 'inherit';
+	/** Provider name from agents.config.json (optional — uses parent's provider if not set) */
+	provider?: string;
+	/** Model ID to use, or 'inherit' to use the parent's current model */
+	model?: string;
 	/** List of allowed tool names (empty = all tools allowed) */
 	tools?: string[];
 	/** List of disallowed tool names */
 	disallowedTools?: string[];
 	/** Permission mode for tool execution */
 	permissionMode?: 'readOnly' | 'normal' | 'autoAccept';
-	/** List of MCP server names to scope access */
-	mcpServers?: string[];
 	/** Maximum number of conversation turns (undefined = unlimited) */
 	maxTurns?: number;
 	/** System prompt / instructions for the subagent */
@@ -123,16 +123,16 @@ export interface SubagentFrontmatter {
 	name: string;
 	/** Description of when to use */
 	description: string;
-	/** Model to use */
-	model?: 'haiku' | 'sonnet' | 'opus' | 'inherit';
+	/** Provider name */
+	provider?: string;
+	/** Model ID to use, or 'inherit' */
+	model?: string;
 	/** Allowed tools */
 	tools?: string[];
 	/** Disallowed tools */
 	disallowedTools?: string[];
 	/** Permission mode */
 	permissionMode?: 'readOnly' | 'normal' | 'autoAccept';
-	/** MCP servers to scope */
-	mcpServers?: string[];
 	/** Max conversation turns */
 	maxTurns?: number;
 }

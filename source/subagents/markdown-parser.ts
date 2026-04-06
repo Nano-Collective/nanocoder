@@ -8,7 +8,9 @@
  * name: my-agent
  * description: Description of when to use
  * model: haiku
- * tools: [Read, Grep]
+ * tools:
+ *   - Read
+ *   - Grep
  * ---
  *
  * You are a specialized agent...
@@ -16,6 +18,7 @@
  */
 
 import * as fs from 'node:fs/promises';
+import {parse as parseYaml} from 'yaml';
 import type {
 	ParsedSubagentFile,
 	SubagentConfig,
@@ -25,9 +28,6 @@ import type {
 
 /**
  * Parse a subagent definition from a markdown file.
- * @param filePath - Path to the markdown file
- * @param priority - Priority level for this config
- * @returns Parsed subagent configuration
  */
 export async function parseSubagentMarkdown(
 	filePath: string,
@@ -40,11 +40,11 @@ export async function parseSubagentMarkdown(
 	const config: SubagentConfig = {
 		name: frontmatter.name,
 		description: frontmatter.description,
+		provider: frontmatter.provider,
 		model: frontmatter.model || 'inherit',
 		tools: frontmatter.tools,
 		disallowedTools: frontmatter.disallowedTools,
 		permissionMode: frontmatter.permissionMode || 'normal',
-		mcpServers: frontmatter.mcpServers,
 		maxTurns: frontmatter.maxTurns,
 		systemPrompt,
 	};
@@ -52,14 +52,12 @@ export async function parseSubagentMarkdown(
 	return {
 		config,
 		filePath,
-		priority: priority ?? 1, // Default to user priority
+		priority: priority ?? 1,
 	};
 }
 
 /**
  * Validate a subagent frontmatter object.
- * @param frontmatter - The frontmatter to validate
- * @returns Valid status with optional error message
  */
 export function validateFrontmatter(
 	frontmatter: Record<string, unknown>,
@@ -82,11 +80,10 @@ export function validateFrontmatter(
 	}
 
 	if (frontmatter.model !== undefined) {
-		const validModels = ['haiku', 'sonnet', 'opus', 'inherit'];
-		if (!validModels.includes(frontmatter.model as string)) {
+		if (typeof frontmatter.model !== 'string' || !frontmatter.model.trim()) {
 			return {
 				valid: false,
-				error: `model must be one of: ${validModels.join(', ')}`,
+				error: 'model must be a non-empty string (a model ID or "inherit")',
 			};
 		}
 	}
@@ -114,16 +111,32 @@ export function validateFrontmatter(
 		}
 	}
 
+	if (frontmatter.tools !== undefined) {
+		if (!Array.isArray(frontmatter.tools)) {
+			return {
+				valid: false,
+				error: 'tools must be an array of strings',
+			};
+		}
+	}
+
+	if (frontmatter.disallowedTools !== undefined) {
+		if (!Array.isArray(frontmatter.disallowedTools)) {
+			return {
+				valid: false,
+				error: 'disallowedTools must be an array of strings',
+			};
+		}
+	}
+
 	return {valid: true};
 }
 
 /**
  * Extract YAML frontmatter from markdown content.
- * @param content - The markdown file content
- * @returns Parsed frontmatter object
  */
 export function extractFrontmatter(content: string): SubagentFrontmatter {
-	const match = content.match(/^---\n(.*?)\n---/s);
+	const match = content.match(/^---\r?\n(.*?)\r?\n---/s);
 
 	if (!match) {
 		throw new Error('No YAML frontmatter found in file');
@@ -132,11 +145,13 @@ export function extractFrontmatter(content: string): SubagentFrontmatter {
 	let frontmatter: Record<string, unknown>;
 
 	try {
-		// Try to parse as YAML
-		// We use a simple YAML parser for now that handles basic types
-		frontmatter = parseSimpleYaml(match[1]);
+		frontmatter = parseYaml(match[1]) as Record<string, unknown>;
 	} catch (error) {
 		throw new Error(`Failed to parse YAML frontmatter: ${error}`);
+	}
+
+	if (!frontmatter || typeof frontmatter !== 'object') {
+		throw new Error('YAML frontmatter must be an object');
 	}
 
 	const validation = validateFrontmatter(frontmatter);
@@ -149,80 +164,11 @@ export function extractFrontmatter(content: string): SubagentFrontmatter {
 
 /**
  * Extract the body content from markdown (after frontmatter).
- * @param content - The markdown file content
- * @returns The body content as the system prompt
  */
 export function extractBody(content: string): string {
-	// Remove frontmatter (with or without trailing newline after closing ---)
-	const withoutFrontmatter = content.replace(/^---\n.*?\n---(?:\n|$)/s, '');
+	const withoutFrontmatter = content.replace(
+		/^---\r?\n.*?\r?\n---(?:\r?\n|$)/s,
+		'',
+	);
 	return withoutFrontmatter.trim();
-}
-
-/**
- * Simple YAML parser for basic frontmatter.
- * Handles strings, numbers, booleans, arrays, and null.
- * This is a simplified parser - for complex YAML, consider using a library.
- */
-function parseSimpleYaml(yamlString: string): Record<string, unknown> {
-	const result: Record<string, unknown> = {};
-	const lines = yamlString.split('\n');
-
-	for (const line of lines) {
-		const trimmed = line.trim();
-		if (!trimmed || trimmed.startsWith('#')) {
-			continue; // Skip empty lines and comments
-		}
-
-		const colonIndex = trimmed.indexOf(':');
-		if (colonIndex === -1) {
-			continue; // Skip malformed lines
-		}
-
-		const key = trimmed.slice(0, colonIndex).trim();
-		const valueStr = trimmed.slice(colonIndex + 1).trim();
-
-		// Parse the value
-		result[key] = parseYamlValue(valueStr);
-	}
-
-	return result;
-}
-
-/**
- * Parse a YAML value string into its JavaScript equivalent.
- */
-function parseYamlValue(value: string): unknown {
-	if (!value) {
-		return null;
-	}
-
-	// Boolean
-	if (value === 'true') return true;
-	if (value === 'false') return false;
-	if (value === 'null' || value === '~') return null;
-
-	// Number
-	if (/^-?\d+$/.test(value)) {
-		return Number.parseInt(value, 10);
-	}
-	if (/^-?\d+\.\d+$/.test(value)) {
-		return Number.parseFloat(value);
-	}
-
-	// Array (e.g., [item1, item2])
-	if (value.startsWith('[') && value.endsWith(']')) {
-		const items = value.slice(1, -1).split(',');
-		return items.map(item => item.trim()).filter(item => item.length > 0);
-	}
-
-	// Quoted string
-	if (
-		(value.startsWith('"') && value.endsWith('"')) ||
-		(value.startsWith("'") && value.endsWith("'"))
-	) {
-		return value.slice(1, -1);
-	}
-
-	// Unquoted string
-	return value;
 }

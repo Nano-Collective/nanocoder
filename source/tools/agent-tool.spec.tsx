@@ -3,7 +3,7 @@
  */
 
 import test from 'ava';
-import {setAgentToolExecutor, agentTool} from './agent-tool.js';
+import {setAgentToolExecutor, startAgentExecution, agentTool} from './agent-tool.js';
 import {SubagentExecutor} from '@/subagents/subagent-executor.js';
 import type {ToolManager} from '@/types/core';
 import type {LLMClient} from '@/types/core';
@@ -36,8 +36,8 @@ const createMockClient = (): LLMClient => ({
 test.serial('agentTool export has correct structure', t => {
 	t.is(agentTool.name, 'agent');
 	t.true(typeof agentTool.tool === 'object');
-	t.true(typeof agentTool.formatter === 'function');
-	t.true(agentTool.readOnly === true);
+	t.is(agentTool.formatter, undefined);
+	t.false(agentTool.readOnly);
 });
 
 test.serial('agentTool tool has execute function', t => {
@@ -52,7 +52,7 @@ test.serial('agentTool tool has description', t => {
 
 test.serial('agentTool has needsApproval property', t => {
 	t.is(typeof agentTool.tool.needsApproval, 'boolean');
-	t.is(agentTool.tool.needsApproval, false);
+	t.is(agentTool.tool.needsApproval, true);
 });
 
 // ============================================================================
@@ -93,7 +93,7 @@ test.serial('tool.execute throws when executor not initialized', async t => {
 	await t.throwsAsync(
 		async () => agentTool.tool.execute(
 			{
-				subagent_type: 'explore',
+				subagent_type: 'research',
 				description: 'Test task',
 			},
 			{
@@ -124,25 +124,41 @@ test.serial('tool.execute throws for non-existent subagent', async t => {
 	);
 });
 
+
 // ============================================================================
-// Formatter Tests
+// startAgentExecution Tests
 // ============================================================================
 
-test.serial('formatter returns a function result', t => {
-	const args = {
-		subagent_type: 'explore',
-		description: 'Find all files',
-	};
-	const result = 'Found 10 files';
+test.serial('startAgentExecution rejects when executor is null', async t => {
+	setAgentToolExecutor(null as unknown as SubagentExecutor);
 
-	const formatted = agentTool.formatter(args, result);
-	t.true(typeof formatted === 'object' || typeof formatted === 'string');
+	const {promise} = startAgentExecution({
+		subagent_type: 'research',
+		description: 'Test',
+	});
+
+	await t.throwsAsync(promise, {message: /not initialized/});
+});
+
+test.serial('startAgentExecution returns promise that resolves', async t => {
+	const executor = new SubagentExecutor(createMockToolManager(), createMockClient());
+	setAgentToolExecutor(executor);
+
+	const {promise} = startAgentExecution({
+		subagent_type: 'non-existent-xyz',
+		description: 'Test',
+	});
+
+	const result = await promise;
+	// Non-existent agent returns success: false
+	t.false(result.success);
+	t.truthy(result.error);
 });
 
 // ============================================================================
 // ReadOnly Tests
 // ============================================================================
 
-test.serial('agentTool is marked as readOnly', t => {
-	t.true(agentTool.readOnly === true);
+test.serial('agentTool is not marked as readOnly', t => {
+	t.false(agentTool.readOnly);
 });
