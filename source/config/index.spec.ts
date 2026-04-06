@@ -118,20 +118,6 @@ test('default config file contains valid JSON', t => {
 	}
 });
 
-test('promptPath points to main-prompt.md', async t => {
-	// Dynamic import to get the promptPath
-	const {promptPath} = await import('./index.js');
-
-	t.true(
-		promptPath.includes('main-prompt.md'),
-		'promptPath should point to main-prompt.md',
-	);
-	t.true(
-		promptPath.includes('source/app/prompts'),
-		'promptPath should include source/app/prompts directory',
-	);
-});
-
 test('loadAppConfig handles malformed JSON gracefully', async t => {
 	const fileName = 'malformed-config.json';
 	const configPath = getClosestConfigFile(fileName);

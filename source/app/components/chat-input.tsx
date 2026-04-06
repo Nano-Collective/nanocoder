@@ -9,7 +9,7 @@ import ToolExecutionIndicator from '@/components/tool-execution-indicator';
 import UserInput from '@/components/user-input';
 import {useTheme} from '@/hooks/useTheme';
 import type {Task} from '@/tools/tasks/types';
-import type {DevelopmentMode, ToolCall} from '@/types';
+import type {DevelopmentMode, ToolCall, TuneConfig} from '@/types';
 import type {PendingQuestion} from '@/utils/question-queue';
 import {LiveCompactCounts} from '@/utils/tool-result-display';
 
@@ -54,6 +54,7 @@ export interface ChatInputProps {
 	onSubmit: (message: string) => Promise<void>;
 	onCancel: () => void;
 	onToggleMode: () => void;
+	tune?: TuneConfig;
 }
 
 /**
@@ -89,6 +90,7 @@ export function ChatInput({
 	onSubmit,
 	onCancel,
 	onToggleMode,
+	tune,
 }: ChatInputProps): React.ReactElement {
 	const {colors} = useTheme();
 
@@ -144,6 +146,7 @@ export function ChatInput({
 					compactToolDisplay={compactToolDisplay}
 					developmentMode={developmentMode}
 					contextPercentUsed={contextPercentUsed}
+					tune={tune}
 				/>
 			) : /* Client Missing */
 			mcpInitialized && !client ? (

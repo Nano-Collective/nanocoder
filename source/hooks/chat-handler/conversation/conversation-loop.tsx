@@ -8,6 +8,8 @@ import {parseToolCalls} from '@/tool-calling/index';
 import {loadTasks} from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
+import {isSingleToolProfile} from '@/tools/tool-profiles';
+import type {TuneConfig} from '@/types/config';
 import type {
 	LLMClient,
 	Message,
@@ -53,6 +55,7 @@ interface ProcessAssistantResponseParams {
 	onSetCompactToolCounts?: (counts: Record<string, number> | null) => void;
 	compactToolCountsRef?: React.MutableRefObject<Record<string, number>>;
 	onSetLiveTaskList?: (tasks: Task[] | null) => void;
+	tune?: TuneConfig;
 }
 
 // Module-level flag: show XML fallback notice only once per process lifetime.
@@ -99,6 +102,8 @@ export const processAssistantResponse = async (
 		onSetCompactToolCounts,
 		compactToolCountsRef,
 		onSetLiveTaskList,
+		tune,
+		developmentMode,
 	} = params;
 
 	const startTime = conversationStartTime ?? Date.now();
@@ -151,18 +156,34 @@ export const processAssistantResponse = async (
 	setStreamingContent('');
 	setTokenCount(0);
 
-	// Build mode overrides for non-interactive mode
-	const modeOverrides: ModeOverrides | undefined = nonInteractiveMode
-		? {
-				nonInteractiveMode: true,
-				nonInteractiveAlwaysAllow: getAppConfig().alwaysAllow ?? [],
-			}
-		: undefined;
+	// Build mode overrides for non-interactive mode and tune settings
+	const modelParameters = tune?.enabled ? tune.modelParameters : undefined;
+	const nonInteractiveAlwaysAllow = nonInteractiveMode
+		? (getAppConfig().alwaysAllow ?? [])
+		: [];
+	const modeOverrides: ModeOverrides | undefined =
+		nonInteractiveMode || modelParameters
+			? {
+					nonInteractiveMode,
+					nonInteractiveAlwaysAllow,
+					modelParameters,
+				}
+			: undefined;
+
+	// Get effective tools — ToolManager is the single authority for
+	// availability (mode + profile filtering) and approval policy
+	const availableNames =
+		toolManager?.getAvailableToolNames(tune, developmentMode) ?? [];
+	const tools = toolManager
+		? toolManager.getEffectiveTools(availableNames, {
+				nonInteractiveAlwaysAllow,
+			})
+		: {};
 
 	let streamedContent = '';
 	const result = await client.chat(
 		[systemMessage, ...messages],
-		toolManager?.getAllToolsWithoutExecute() || {},
+		tools,
 		{
 			onToken: (token: string) => {
 				streamedContent += token;
@@ -248,7 +269,15 @@ export const processAssistantResponse = async (
 	// Combine native tool calls with any parsed from content (XML fallback path)
 	// Native and parsed are mutually exclusive: native comes from tool-calling models,
 	// parsed comes from non-tool-calling models using XML in text
-	const allToolCalls = [...(toolCalls || []), ...parsedToolCalls];
+	let allToolCalls = [...(toolCalls || []), ...parsedToolCalls];
+
+	// Single-tool enforcement: truncate to first tool call
+	// Active when tune profile implies single-tool (e.g. minimal profile)
+	const enforceSingleTool =
+		tune?.enabled && isSingleToolProfile(tune.toolProfile);
+	if (enforceSingleTool && allToolCalls.length > 1) {
+		allToolCalls = allToolCalls.slice(0, 1);
+	}
 
 	// If this is the final response (no tool calls), flush live displays
 	// BEFORE the assistant message so they appear above it

@@ -68,11 +68,14 @@ function formatSingleTool(name: string, tool: AISDKCoreTool): string {
 
 		output += '\n';
 
-		// Add example usage
+		// Add example usage — prefer required params, fall back to any params
+		const exampleParams =
+			required.length > 0
+				? required.slice(0, 2)
+				: Object.keys(properties).slice(0, 2);
 		output += '**Example:**\n```xml\n';
 		output += `<${name}>\n`;
-		for (const paramName of required.slice(0, 2)) {
-			// Show first 2 required params
+		for (const paramName of exampleParams) {
 			output += `<${paramName}>value</${paramName}>\n`;
 		}
 		output += `</${name}>\n`;

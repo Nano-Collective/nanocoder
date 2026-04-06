@@ -31,7 +31,6 @@ import {convertAISDKToolCalls} from '../converters/tool-converter.js';
 import {extractRootError} from '../error-handling/error-extractor.js';
 import {parseAPIError} from '../error-handling/error-parser.js';
 import {isToolSupportError} from '../error-handling/tool-error-detector.js';
-import {formatToolsForPrompt} from '../tools/tool-prompt-formatter.js';
 import {
 	createOnStepFinishHandler,
 	createPrepareStepHandler,
@@ -109,61 +108,19 @@ export async function handleChat(
 
 	return await withNewCorrelationContext(async _context => {
 		try {
-			// Apply non-interactive mode overrides to tool approval
-			// In non-interactive mode, tools in the allowList should bypass needsApproval
-			let effectiveTools = tools;
-			if (
-				modeOverrides?.nonInteractiveMode &&
-				modeOverrides.nonInteractiveAlwaysAllow.length > 0
-			) {
-				const allowSet = new Set(modeOverrides.nonInteractiveAlwaysAllow);
-				effectiveTools = Object.fromEntries(
-					Object.entries(tools).map(([name, toolDef]) => {
-						if (allowSet.has(name)) {
-							// Override needsApproval to false for allowed tools
-							return [
-								name,
-								{...toolDef, needsApproval: false} as AISDKCoreTool,
-							];
-						}
-						return [name, toolDef];
-					}),
-				);
-			}
-
-			// Tools are already in AI SDK format - use directly
+			// Tools arrive with approval policy already resolved by ToolManager.
+			// No approval mutation needed here — chat handler is a pure SDK caller.
 			const aiTools = shouldDisableTools
 				? undefined
-				: Object.keys(effectiveTools).length > 0
-					? effectiveTools
+				: Object.keys(tools).length > 0
+					? tools
 					: undefined;
 
-			// When native tools are disabled but we have tools, inject definitions into system prompt
-			// This allows the model to still use tools via XML format
-			let messagesWithToolPrompt = messages;
-			if (shouldDisableTools && Object.keys(tools).length > 0) {
-				const toolPrompt = formatToolsForPrompt(tools);
-				if (toolPrompt) {
-					// Find and augment the system message with tool definitions
-					messagesWithToolPrompt = messages.map((msg, index) => {
-						if (msg.role === 'system' && index === 0) {
-							return {
-								...msg,
-								content: msg.content + toolPrompt,
-							};
-						}
-						return msg;
-					});
-
-					logger.debug('Injected tool definitions into system prompt', {
-						toolCount: Object.keys(tools).length,
-						promptLength: toolPrompt.length,
-					});
-				}
-			}
+			// XML tool definitions are already included in the system prompt
+			// when native tools are disabled (handled upstream in useChatHandler).
 
 			// Convert messages to AI SDK v5 ModelMessage format
-			const modelMessages = convertToModelMessages(messagesWithToolPrompt);
+			const modelMessages = convertToModelMessages(messages);
 
 			logger.debug('AI SDK request prepared', {
 				messageCount: modelMessages.length,
@@ -182,7 +139,7 @@ export async function handleChat(
 				| Record<string, Record<string, string | boolean>>
 				| undefined;
 			if (providerConfig.sdkProvider === 'chatgpt-codex') {
-				const systemMsg = messagesWithToolPrompt.find(m => m.role === 'system');
+				const systemMsg = messages.find(m => m.role === 'system');
 				providerOptions = {
 					openai: {
 						...(systemMsg ? {instructions: systemMsg.content} : {}),
@@ -202,6 +159,18 @@ export async function handleChat(
 				prepareStep: createPrepareStepHandler(),
 				headers: providerConfig.config.headers,
 				providerOptions,
+				// Model parameters from /tune — passed directly to AI SDK
+				...(modeOverrides?.modelParameters && {
+					temperature: modeOverrides.modelParameters.temperature,
+					topP: modeOverrides.modelParameters.topP,
+					topK: modeOverrides.modelParameters.topK,
+					maxTokens: modeOverrides.modelParameters.maxTokens,
+					frequencyPenalty: modeOverrides.modelParameters.frequencyPenalty,
+					presencePenalty: modeOverrides.modelParameters.presencePenalty,
+					...(modeOverrides.modelParameters.stop && {
+						stopSequences: modeOverrides.modelParameters.stop,
+					}),
+				}),
 			});
 
 			// Stream tokens to the UI in batched chunks to avoid excessive

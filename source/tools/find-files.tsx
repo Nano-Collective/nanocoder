@@ -163,7 +163,7 @@ const executeFindFiles = async (args: FindFilesArgs): Promise<string> => {
 
 const findFilesCoreTool = tool({
 	description:
-		'Find files and directories by path pattern. AUTO-ACCEPTED (no user approval needed). Use this INSTEAD OF bash find/locate/ls commands for file discovery. Examples: "*.tsx" (all .tsx files), "src/**/*.ts" (recursive in src/), "*.{ts,tsx}" (multiple extensions), "package.json" (exact file), "*config*" (files containing "config"), "source/tools/*.ts" (specific directory). Excludes node_modules, .git, dist, build automatically.',
+		'Find files and directories by path pattern. Use this INSTEAD OF bash find/locate/ls commands for file discovery. Examples: "*.tsx" (all .tsx files), "src/**/*.ts" (recursive in src/), "*.{ts,tsx}" (multiple extensions), "package.json" (exact file), "*config*" (files containing "config"). Excludes node_modules, .git, dist, build automatically.',
 	inputSchema: jsonSchema<FindFilesArgs>({
 		type: 'object',
 		properties: {

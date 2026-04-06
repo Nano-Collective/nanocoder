@@ -1,5 +1,6 @@
 import type {
 	AISDKCoreTool,
+	NanocoderToolExport,
 	StreamingFormatter,
 	ToolEntry,
 	ToolFormatter,
@@ -274,6 +275,35 @@ export class ToolRegistry {
 					readOnly: readOnlyFlags?.[name],
 				});
 			}
+		}
+
+		return registry;
+	}
+
+	/**
+	 * Create a new registry directly from NanocoderToolExport array.
+	 * Extracts handlers from tool.execute() and builds ToolEntry objects
+	 * without intermediate map decomposition.
+	 */
+	static fromToolExports(toolExports: NanocoderToolExport[]): ToolRegistry {
+		const registry = new ToolRegistry();
+
+		for (const t of toolExports) {
+			registry.register({
+				name: t.name,
+				// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
+				handler: async (args: any) =>
+					// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
+					await (t.tool as any).execute(args, {
+						toolCallId: 'manual',
+						messages: [],
+					}),
+				tool: t.tool,
+				formatter: t.formatter,
+				validator: t.validator,
+				streamingFormatter: t.streamingFormatter,
+				readOnly: t.readOnly,
+			});
 		}
 
 		return registry;

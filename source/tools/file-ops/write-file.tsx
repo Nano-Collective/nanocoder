@@ -72,8 +72,7 @@ const writeFileCoreTool = tool({
 			},
 			content: {
 				type: 'string', // Guide LLM to send strings
-				description:
-					'The complete content to write to the file. Objects/arrays will be converted to JSON strings for storage.',
+				description: 'The complete content to write to the file.',
 			},
 		},
 		required: ['path', 'content'],

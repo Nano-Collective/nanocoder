@@ -30,7 +30,7 @@ const executeCreateDirectory = async (
 
 const createDirectoryCoreTool = tool({
 	description:
-		'Create a directory, including parent directories if needed. Idempotent — succeeds if the directory already exists. AUTO-ACCEPTED (no user approval needed).',
+		'Create a directory, including parent directories if needed. Idempotent — succeeds if the directory already exists.',
 	inputSchema: jsonSchema<CreateDirectoryArgs>({
 		type: 'object',
 		properties: {

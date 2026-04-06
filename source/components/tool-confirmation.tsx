@@ -4,7 +4,6 @@ import React from 'react';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getToolManager} from '@/message-handler';
-import {toolFormatters} from '@/tools/index';
 import type {ToolCall} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
@@ -79,7 +78,7 @@ export default function ToolConfirmation({
 				}
 			}
 
-			const formatter = toolFormatters[toolCall.function.name];
+			const formatter = toolManager?.getToolFormatter(toolCall.function.name);
 			if (formatter) {
 				setIsLoadingPreview(true);
 				try {

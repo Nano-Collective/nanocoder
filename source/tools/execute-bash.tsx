@@ -67,7 +67,7 @@ const executeExecuteBash = async (args: {command: string}): Promise<string> => {
 
 const executeBashCoreTool = tool({
 	description:
-		'Execute a bash command and return the output (use for running commands)',
+		'Execute a bash command in the working directory. Returns stdout, stderr, and exit code. Commands time out after 2 minutes by default. Use for: running builds, tests, installing packages, git operations not covered by git tools, or any shell command.',
 	inputSchema: jsonSchema<{command: string}>({
 		type: 'object',
 		properties: {
