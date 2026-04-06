@@ -37,6 +37,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/schedule` | Schedule recurring AI tasks (see [Scheduler](scheduler.md)) |
 | `/resume` | Resume a previous chat session (aliases: `/sessions`, `/history`). See [Session Management](session-management.md) |
 | `/explorer` | Interactive file browser to navigate, preview, and select files for context |
+| `/tune` | Configure runtime model behaviour — tool profiles, compaction, native tools, model parameters (see [Tune](tune.md)) |
 | `/ide` | Connect to an IDE for live integration (e.g., VS Code diff previews) |
 
 ## Special Input Syntax

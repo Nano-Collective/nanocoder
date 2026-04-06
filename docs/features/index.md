@@ -228,4 +228,5 @@ Define task prompts as markdown files and schedule them with cron expressions. N
 | [File Explorer](file-explorer.md) | Interactive file browser for context selection |
 | [Scheduler](scheduler.md) | Recurring AI tasks with cron expressions |
 | [VS Code Extension](vscode-extension.md) | Editor integration with live diff previews |
+| [Tune](tune.md) | Runtime model tuning for tool profiles, parameters, and compaction |
 | [Keyboard Shortcuts](keyboard-shortcuts.md) | Complete keyboard shortcut reference |
