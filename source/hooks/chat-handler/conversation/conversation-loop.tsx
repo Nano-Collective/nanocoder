@@ -5,6 +5,8 @@ import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
 import {parseToolCalls} from '@/tool-calling/index';
+import {loadTasks} from '@/tools/tasks/storage';
+import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
 	LLMClient,
@@ -50,6 +52,7 @@ interface ProcessAssistantResponseParams {
 	compactToolDisplayRef?: React.RefObject<boolean>;
 	onSetCompactToolCounts?: (counts: Record<string, number> | null) => void;
 	compactToolCountsRef?: React.MutableRefObject<Record<string, number>>;
+	onSetLiveTaskList?: (tasks: Task[] | null) => void;
 }
 
 // Module-level flag: show XML fallback notice only once per process lifetime.
@@ -95,9 +98,30 @@ export const processAssistantResponse = async (
 		compactToolDisplayRef,
 		onSetCompactToolCounts,
 		compactToolCountsRef,
+		onSetLiveTaskList,
 	} = params;
 
 	const startTime = conversationStartTime ?? Date.now();
+
+	// Helper to flush live task list to the static chat queue
+	const flushLiveTaskList = async () => {
+		if (!onSetLiveTaskList) return;
+		const tasks = await loadTasks();
+		if (tasks.length > 0) {
+			const {TaskListDisplay} = await import('@/components/task-list-display');
+			addToChatQueue(
+				<TaskListDisplay
+					key={`task-list-final-${getNextComponentKey()}`}
+					tasks={tasks}
+					title="Tasks"
+				/>,
+			);
+		}
+		onSetLiveTaskList(null);
+	};
+
+	// Track whether any task tools were executed in this conversation turn
+	let hasLiveTaskUpdates = false;
 
 	// Helper to flush accumulated compact counts to the static chat queue and clear live display
 	const flushCompactCounts = () => {
@@ -226,10 +250,14 @@ export const processAssistantResponse = async (
 	// parsed comes from non-tool-calling models using XML in text
 	const allToolCalls = [...(toolCalls || []), ...parsedToolCalls];
 
-	// If this is the final response (no tool calls), flush compact counts
-	// BEFORE the assistant message so the summary appears above it
+	// If this is the final response (no tool calls), flush live displays
+	// BEFORE the assistant message so they appear above it
 	if (allToolCalls.length === 0) {
 		flushCompactCounts();
+		if (hasLiveTaskUpdates) {
+			await flushLiveTaskList();
+			hasLiveTaskUpdates = false;
+		}
 	}
 
 	// Clear streaming content and add static message in one go so the
@@ -445,6 +473,13 @@ export const processAssistantResponse = async (
 							onSetCompactToolCounts?.({...counts});
 						}
 					},
+					onLiveTaskUpdate: () => {
+						hasLiveTaskUpdates = true;
+						// Load tasks and update live display
+						loadTasks().then(tasks => {
+							onSetLiveTaskList?.(tasks);
+						});
+					},
 				},
 			);
 
@@ -458,6 +493,10 @@ export const processAssistantResponse = async (
 				// If there are also tools needing confirmation, start that flow
 				if (toolsNeedingConfirmation.length > 0) {
 					flushCompactCounts();
+					if (hasLiveTaskUpdates) {
+						await flushLiveTaskList();
+						hasLiveTaskUpdates = false;
+					}
 					onStartToolConfirmationFlow(
 						toolsNeedingConfirmation,
 						updatedMessagesWithTools,
@@ -479,8 +518,12 @@ export const processAssistantResponse = async (
 
 		// Start confirmation flow only for tools that need it
 		if (toolsNeedingConfirmation.length > 0) {
-			// Flush compact counts before entering confirmation or exiting
+			// Flush compact counts and live task list before entering confirmation or exiting
 			flushCompactCounts();
+			if (hasLiveTaskUpdates) {
+				await flushLiveTaskList();
+				hasLiveTaskUpdates = false;
+			}
 
 			// In non-interactive mode, exit when tool approval is required
 			if (nonInteractiveMode) {

@@ -8,6 +8,7 @@ import {parseToolArguments} from '@/utils/tool-args-parser';
 import {
 	ALWAYS_EXPANDED_TOOLS,
 	displayToolResult,
+	LIVE_TASK_TOOLS,
 } from '@/utils/tool-result-display';
 
 /**
@@ -112,6 +113,7 @@ export const executeToolsDirectly = async (
 	options?: {
 		compactDisplay?: boolean;
 		onCompactToolCount?: (toolName: string) => void;
+		onLiveTaskUpdate?: () => void;
 	},
 ): Promise<ToolResult[]> => {
 	// Import processToolUse here to avoid circular dependencies
@@ -168,6 +170,12 @@ export const executeToolsDirectly = async (
 						hideBox={true}
 					/>,
 				);
+			} else if (
+				LIVE_TASK_TOOLS.has(result.name) &&
+				!result.content.startsWith('Error: ')
+			) {
+				// Task tools render in the live area (updating in-place)
+				options?.onLiveTaskUpdate?.();
 			} else if (
 				options?.compactDisplay &&
 				!ALWAYS_EXPANDED_TOOLS.has(result.name)

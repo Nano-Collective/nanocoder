@@ -657,6 +657,7 @@ test('executeToolsDirectly - compact mode always expands task tools', async t =>
 	});
 
 	const compactCounts: string[] = [];
+	let liveTaskUpdateCount = 0;
 
 	const results = await executeToolsDirectly(
 		toolCalls,
@@ -669,14 +670,17 @@ test('executeToolsDirectly - compact mode always expands task tools', async t =>
 			onCompactToolCount: (toolName) => {
 				compactCounts.push(toolName);
 			},
+			onLiveTaskUpdate: () => {
+				liveTaskUpdateCount++;
+			},
 		},
 	);
 
 	t.is(results.length, 5);
-	// Only tool1 should be compacted (counted), task tools should be expanded
+	// Only tool1 should be compacted (counted), task tools go to live display
 	t.deepEqual(compactCounts, ['tool1']);
-	// Task tools should have added to chat queue (expanded display)
-	t.true(addToChatQueueCalls.length >= 4, 'Task tools should be displayed expanded');
+	// Task tools should trigger live task updates instead of adding to chat queue
+	t.is(liveTaskUpdateCount, 4, 'Task tools should trigger live task updates');
 });
 
 test('executeToolsDirectly - compact mode still displays errors in full', async t => {

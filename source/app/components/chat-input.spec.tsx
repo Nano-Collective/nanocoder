@@ -188,3 +188,35 @@ test('ChatInput does not show compact counts when null', t => {
 	t.notRegex(output!, /Read.*files/);
 	unmount();
 });
+
+test('ChatInput shows live task list when liveTaskList provided', t => {
+	const props = createDefaultProps({
+		liveTaskList: [
+			{id: '1', title: 'First task', status: 'completed', createdAt: '', updatedAt: ''},
+			{id: '2', title: 'Second task', status: 'in_progress', createdAt: '', updatedAt: ''},
+			{id: '3', title: 'Third task', status: 'pending', createdAt: '', updatedAt: ''},
+		],
+	});
+
+	const {lastFrame, unmount} = renderWithTheme(<ChatInput {...props} />);
+	const output = lastFrame();
+	t.truthy(output);
+	// Note: marginLeft={-1} in the component cuts off the first character in tests
+	t.regex(output!, /asks/);
+	t.regex(output!, /First task/);
+	t.regex(output!, /Second task/);
+	t.regex(output!, /Third task/);
+	unmount();
+});
+
+test('ChatInput does not show task list when liveTaskList is null', t => {
+	const props = createDefaultProps({
+		liveTaskList: null,
+	});
+
+	const {lastFrame, unmount} = renderWithTheme(<ChatInput {...props} />);
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /Tasks/);
+	unmount();
+});

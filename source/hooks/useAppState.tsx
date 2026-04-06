@@ -5,6 +5,7 @@ import {defaultTheme} from '@/config/themes';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {createTokenizer} from '@/tokenization/index.js';
+import type {Task} from '@/tools/tasks/types';
 import {ToolManager} from '@/tools/tool-manager';
 import type {CheckpointListItem} from '@/types/checkpoint';
 import type {CustomCommand} from '@/types/commands';
@@ -134,6 +135,10 @@ export function useAppState() {
 	// Mutable ref for the compact counts accumulator - shared between
 	// the async conversation loop and the toggle handler
 	const compactToolCountsRef = useRef<Record<string, number>>({});
+
+	// Live task list state - renders in the live area (updating in-place)
+	// instead of appending repeated task lists to the static chat queue
+	const [liveTaskList, setLiveTaskList] = useState<Task[] | null>(null);
 
 	// Question mode state (ask_question tool)
 	const [isQuestionMode, setIsQuestionMode] = useState<boolean>(false);
@@ -313,6 +318,7 @@ export function useAppState() {
 		compactToolDisplayRef,
 		compactToolCounts,
 		compactToolCountsRef,
+		liveTaskList,
 		isQuestionMode,
 		pendingQuestion,
 		developmentMode,
@@ -358,6 +364,7 @@ export function useAppState() {
 		setIsToolExecuting,
 		setCompactToolDisplay,
 		setCompactToolCounts,
+		setLiveTaskList,
 		setIsQuestionMode,
 		setPendingQuestion,
 		setDevelopmentMode,

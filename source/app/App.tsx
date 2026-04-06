@@ -310,10 +310,12 @@ export default function App({
 			appState.setIsConversationComplete(true);
 			appState.setCompactToolCounts(null);
 			appState.compactToolCountsRef.current = {};
+			appState.setLiveTaskList(null);
 		},
 		compactToolDisplayRef: appState.compactToolDisplayRef,
 		onSetCompactToolCounts: appState.setCompactToolCounts,
 		compactToolCountsRef: appState.compactToolCountsRef,
+		onSetLiveTaskList: appState.setLiveTaskList,
 	});
 
 	// Track when streaming starts for tok/s calculation
@@ -826,6 +828,7 @@ export default function App({
 									contextPercentUsed={appState.contextPercentUsed}
 									compactToolCounts={appState.compactToolCounts}
 									compactToolDisplay={appState.compactToolDisplay}
+									liveTaskList={appState.liveTaskList}
 									onToggleCompactDisplay={() => {
 										const expanding = appState.compactToolDisplay;
 										appState.setCompactToolDisplay(!expanding);

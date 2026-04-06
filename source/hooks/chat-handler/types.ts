@@ -1,5 +1,6 @@
 import type React from 'react';
 import type {CustomCommandLoader} from '@/custom-commands/loader';
+import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {LLMClient, Message, ToolCall} from '@/types/core';
 
@@ -29,6 +30,7 @@ export interface UseChatHandlerProps {
 	compactToolDisplayRef?: React.RefObject<boolean>;
 	onSetCompactToolCounts?: (counts: Record<string, number> | null) => void;
 	compactToolCountsRef?: React.MutableRefObject<Record<string, number>>;
+	onSetLiveTaskList?: (tasks: Task[] | null) => void;
 }
 
 export interface ChatHandlerReturn {
