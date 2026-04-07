@@ -252,7 +252,7 @@ function loadSessionConfig(): AppConfig['sessions'] {
 	};
 
 	// Try to load from project-level config first
-	const projectConfigPath = join(process.cwd(), 'agents.config.json');
+	const projectConfigPath = join(process.cwd(), 'nanocoder-preferences.json');
 	const projectConfig = tryLoadSessionsFromPath(projectConfigPath, defaults);
 	if (projectConfig) {
 		return projectConfig;
@@ -260,7 +260,7 @@ function loadSessionConfig(): AppConfig['sessions'] {
 
 	// Try global config
 	const configDir = getConfigPath();
-	const globalConfigPath = join(configDir, 'agents.config.json');
+	const globalConfigPath = join(configDir, 'nanocoder-preferences.json');
 	const globalConfig = tryLoadSessionsFromPath(globalConfigPath, defaults);
 	if (globalConfig) {
 		return globalConfig;
@@ -309,7 +309,7 @@ function loadPasteConfig(): PasteConfig {
 	};
 
 	// Try to load from project-level config first
-	const projectConfigPath = join(process.cwd(), 'agents.config.json');
+	const projectConfigPath = join(process.cwd(), 'nanocoder-preferences.json');
 	const projectConfig = tryLoadPasteFromPath(projectConfigPath, defaults);
 	if (projectConfig) {
 		return projectConfig;
@@ -317,7 +317,7 @@ function loadPasteConfig(): PasteConfig {
 
 	// Try global config
 	const configDir = getConfigPath();
-	const globalConfigPath = join(configDir, 'agents.config.json');
+	const globalConfigPath = join(configDir, 'nanocoder-preferences.json');
 	const globalConfig = tryLoadPasteFromPath(globalConfigPath, defaults);
 	if (globalConfig) {
 		return globalConfig;
