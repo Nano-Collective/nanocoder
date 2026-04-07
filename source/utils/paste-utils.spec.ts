@@ -139,7 +139,7 @@ test('handlePaste preserves existing pasted content', t => {
 
 test('handlePaste respects custom threshold - high threshold prevents placeholder', t => {
 	// Create a config with high threshold (1000)
-	const configPath = join(testDir, 'agents.config.json');
+	const configPath = join(testDir, 'nanocoder-preferences.json');
 	writeFileSync(
 		configPath,
 		JSON.stringify({
@@ -179,7 +179,7 @@ test('handlePaste respects custom threshold - high threshold prevents placeholde
 
 test('handlePaste respects custom threshold - low threshold creates placeholder', t => {
 	// Create a config with low threshold (50)
-	const configPath = join(testDir, 'agents.config.json');
+	const configPath = join(testDir, 'nanocoder-preferences.json');
 	writeFileSync(
 		configPath,
 		JSON.stringify({
