@@ -5,18 +5,25 @@ import SelectInput from 'ink-select-input';
 import {useMemo, useState} from 'react';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
-import {getNanocoderShape, updateNanocoderShape} from '@/config/preferences';
+import {
+	getNanocoderShape,
+	getPasteThreshold,
+	updateNanocoderShape,
+	updatePasteThreshold,
+} from '@/config/preferences';
 import {themes} from '@/config/themes';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useTitleShape} from '@/hooks/useTitleShape';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
+import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 
 type SettingsStep =
 	| 'main'
 	| 'theme'
 	| 'title-shape'
 	| 'nanocoder-shape'
+	| 'paste-threshold'
 	| 'done';
 
 interface SettingsSelectorProps {
@@ -55,6 +62,11 @@ function SettingsMainMenu({
 			label: 'Nanocoder Shape',
 			value: 'nanocoder-shape',
 			description: 'Change welcome banner font',
+		},
+		{
+			label: 'Paste Threshold',
+			value: 'paste-threshold',
+			description: 'Set single-line paste character limit',
 		},
 		{
 			label: 'Done',
@@ -562,6 +574,106 @@ function SettingsNanocoderShapePanel({
 	);
 }
 
+// Paste Threshold settings panel
+function SettingsPasteThresholdPanel({
+	onBack,
+	onCancel,
+}: {
+	onBack: () => void;
+	onCancel: () => void;
+}) {
+	const {boxWidth, isNarrow} = useResponsiveTerminal();
+	const {colors} = useTheme();
+
+	const currentThreshold =
+		getPasteThreshold() ?? DEFAULT_SINGLE_LINE_PASTE_THRESHOLD;
+
+	const thresholdOptions = useMemo(
+		() => [
+			{label: '200', value: 200},
+			{label: '400', value: 400},
+			{label: '600', value: 600},
+			{label: `800 (default)`, value: 800},
+			{label: '1000', value: 1000},
+			{label: '1500', value: 1500},
+			{label: '2000', value: 2000},
+			{label: '5000', value: 5000},
+		],
+		[],
+	);
+
+	const initialIndex = useMemo(() => {
+		const index = thresholdOptions.findIndex(
+			option => option.value === currentThreshold,
+		);
+		return index >= 0 ? index : 3; // default to 800
+	}, [currentThreshold, thresholdOptions]);
+
+	useInput((_, key) => {
+		if (key.escape) {
+			onCancel();
+		}
+		if (key.shift && key.tab) {
+			onBack();
+		}
+	});
+
+	const handleSelect = (item: {label: string; value: number}) => {
+		updatePasteThreshold(item.value);
+		onBack();
+	};
+
+	const title = isNarrow
+		? 'Paste Threshold'
+		: 'Set paste threshold (characters)';
+
+	return (
+		<TitledBoxWithPreferences
+			title={title}
+			width={isNarrow ? '100%' : boxWidth}
+			borderColor={colors.primary}
+			paddingX={2}
+			paddingY={1}
+			flexDirection="column"
+			marginBottom={1}
+		>
+			{!isNarrow && (
+				<Box marginBottom={1}>
+					<Text color={colors.secondary}>
+						Single-line pastes above this limit become placeholders. Current:{' '}
+						{currentThreshold} chars
+					</Text>
+				</Box>
+			)}
+			{isNarrow && (
+				<Text color={colors.secondary} dimColor>
+					Current: {currentThreshold}
+				</Text>
+			)}
+			<SelectInput
+				items={thresholdOptions.map(opt => ({
+					label:
+						opt.value === currentThreshold
+							? isNarrow
+								? `${opt.label} *`
+								: `${opt.label} (current)`
+							: opt.label,
+					value: opt.value,
+				}))}
+				initialIndex={initialIndex}
+				onSelect={handleSelect}
+			/>
+			<Box marginTop={isNarrow ? 0 : 1}>
+				<Text color={colors.secondary} dimColor>
+					{isNarrow
+						? 'Enter/Shift+Tab/Esc'
+						: 'Enter to apply, Shift+Tab to go back, Esc to exit'}
+				</Text>
+			</Box>
+		</TitledBoxWithPreferences>
+	);
+}
+
 // Main settings selector with step navigation
 export function SettingsSelector({onCancel}: SettingsSelectorProps) {
 	const [step, setStep] = useState<SettingsStep>('main');
@@ -586,6 +698,13 @@ export function SettingsSelector({onCancel}: SettingsSelectorProps) {
 		case 'nanocoder-shape':
 			return (
 				<SettingsNanocoderShapePanel
+					onBack={() => setStep('main')}
+					onCancel={onCancel}
+				/>
+			);
+		case 'paste-threshold':
+			return (
+				<SettingsPasteThresholdPanel
 					onBack={() => setStep('main')}
 					onCancel={onCancel}
 				/>

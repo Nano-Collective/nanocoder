@@ -139,6 +139,8 @@ Configure automatic session saving and retention. See [Session Management](../fe
 
 Configure how pasted text is handled in the input. By default, single-line pastes of 800 characters or fewer are inserted directly, while longer or multi-line pastes are collapsed into a `[Paste #N: X chars]` placeholder.
 
+You can change the threshold interactively via `/settings` → **Paste Threshold**, or by editing `nanocoder-preferences.json` directly:
+
 ```json
 {
   "nanocoder": {
@@ -152,6 +154,8 @@ Configure how pasted text is handled in the input. By default, single-line paste
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `singleLineThreshold` | number | `800` | Maximum characters for a single-line paste to be inserted directly. Pastes longer than this (or multi-line pastes) become placeholders. Must be a positive integer. |
+
+This setting is stored in `nanocoder-preferences.json` (see [Preferences](preferences.md) for file locations).
 
 ### Tool Auto-Approval
 

@@ -5,11 +5,13 @@ import test from 'ava';
 import {
 	getLastUsedModel,
 	getNanocoderShape,
+	getPasteThreshold,
 	loadPreferences,
 	resetPreferencesCache,
 	savePreferences,
 	updateLastUsed,
 	updateNanocoderShape,
+	updatePasteThreshold,
 } from './preferences';
 import type {UserPreferences} from '@/types/index';
 
@@ -728,6 +730,324 @@ test.serial('full workflow: update and retrieve nanocoder shape', t => {
 		updateNanocoderShape('grid');
 		const retrieved = getNanocoderShape();
 		t.is(retrieved, 'grid');
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// ============================================================================
+// getPasteThreshold Tests
+// ============================================================================
+
+test.serial('getPasteThreshold returns threshold from nanocoder.paste.singleLineThreshold', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const data = {
+		lastProvider: 'openrouter',
+		nanocoder: {
+			paste: {
+				singleLineThreshold: 1500,
+			},
+		},
+	};
+	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
+
+	try {
+		const result = getPasteThreshold();
+		t.is(result, 1500);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getPasteThreshold returns undefined when nanocoder.paste is missing', t => {
+	const preferencesPath = getTestPreferencesPath();
+	writeFileSync(preferencesPath, JSON.stringify({lastProvider: 'test'}, null, 2), 'utf-8');
+
+	try {
+		const result = getPasteThreshold();
+		t.is(result, undefined);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getPasteThreshold returns undefined when file does not exist', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	const result = getPasteThreshold();
+	t.is(result, undefined);
+});
+
+test.serial('getPasteThreshold returns undefined for non-positive threshold', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const data = {
+		nanocoder: {
+			paste: {
+				singleLineThreshold: -100,
+			},
+		},
+	};
+	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
+
+	try {
+		const result = getPasteThreshold();
+		t.is(result, undefined);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getPasteThreshold returns undefined for zero threshold', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const data = {
+		nanocoder: {
+			paste: {
+				singleLineThreshold: 0,
+			},
+		},
+	};
+	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
+
+	try {
+		const result = getPasteThreshold();
+		t.is(result, undefined);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getPasteThreshold rounds non-integer thresholds', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const data = {
+		nanocoder: {
+			paste: {
+				singleLineThreshold: 1234.7,
+			},
+		},
+	};
+	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
+
+	try {
+		const result = getPasteThreshold();
+		t.is(result, 1235);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getPasteThreshold returns undefined for non-number threshold', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const data = {
+		nanocoder: {
+			paste: {
+				singleLineThreshold: 'not-a-number',
+			},
+		},
+	};
+	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
+
+	try {
+		const result = getPasteThreshold();
+		t.is(result, undefined);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// ============================================================================
+// updatePasteThreshold Tests
+// ============================================================================
+
+test.serial('updatePasteThreshold saves threshold to nanocoder.paste.singleLineThreshold', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updatePasteThreshold(2000);
+
+		t.true(existsSync(preferencesPath));
+
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as Record<string, unknown>;
+		const nanocoder = parsed.nanocoder as Record<string, unknown>;
+		const paste = nanocoder.paste as Record<string, unknown>;
+
+		t.is(paste.singleLineThreshold, 2000);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updatePasteThreshold preserves existing preferences', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const existingData = {
+		lastProvider: 'openrouter',
+		lastModel: 'claude-3-opus',
+		selectedTheme: 'tokyo-night',
+	};
+	writeFileSync(preferencesPath, JSON.stringify(existingData, null, 2), 'utf-8');
+
+	try {
+		updatePasteThreshold(1500);
+
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as Record<string, unknown>;
+
+		t.is(parsed.lastProvider, 'openrouter');
+		t.is(parsed.lastModel, 'claude-3-opus');
+		t.is(parsed.selectedTheme, 'tokyo-night');
+
+		const nanocoder = parsed.nanocoder as Record<string, unknown>;
+		const paste = nanocoder.paste as Record<string, unknown>;
+		t.is(paste.singleLineThreshold, 1500);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updatePasteThreshold preserves existing nanocoder namespace', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const existingData = {
+		nanocoder: {
+			paste: {
+				singleLineThreshold: 800,
+			},
+			otherSetting: true,
+		},
+	};
+	writeFileSync(preferencesPath, JSON.stringify(existingData, null, 2), 'utf-8');
+
+	try {
+		updatePasteThreshold(1000);
+
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as Record<string, unknown>;
+		const nanocoder = parsed.nanocoder as Record<string, unknown>;
+
+		t.is(nanocoder.otherSetting, true);
+
+		const paste = nanocoder.paste as Record<string, unknown>;
+		t.is(paste.singleLineThreshold, 1000);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updatePasteThreshold rounds non-integer values', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updatePasteThreshold(1234.7);
+
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as Record<string, unknown>;
+		const nanocoder = parsed.nanocoder as Record<string, unknown>;
+		const paste = nanocoder.paste as Record<string, unknown>;
+
+		t.is(paste.singleLineThreshold, 1235);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updatePasteThreshold creates file if it does not exist', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updatePasteThreshold(500);
+
+		t.true(existsSync(preferencesPath));
+
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as Record<string, unknown>;
+		const nanocoder = parsed.nanocoder as Record<string, unknown>;
+		const paste = nanocoder.paste as Record<string, unknown>;
+
+		t.is(paste.singleLineThreshold, 500);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// ============================================================================
+// Paste Threshold Integration Tests
+// ============================================================================
+
+test.serial('full workflow: update and retrieve paste threshold', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updatePasteThreshold(2000);
+		const retrieved = getPasteThreshold();
+		t.is(retrieved, 2000);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updatePasteThreshold does not overwrite other preferences saved via savePreferences', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		// Save regular preferences first
+		savePreferences({lastProvider: 'ollama', lastModel: 'llama3'});
+
+		// Then update paste threshold
+		updatePasteThreshold(400);
+
+		// Both should coexist
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as Record<string, unknown>;
+
+		t.is(parsed.lastProvider, 'ollama');
+		t.is(parsed.lastModel, 'llama3');
+
+		const nanocoder = parsed.nanocoder as Record<string, unknown>;
+		const paste = nanocoder.paste as Record<string, unknown>;
+		t.is(paste.singleLineThreshold, 400);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});

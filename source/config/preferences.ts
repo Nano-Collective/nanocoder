@@ -95,3 +95,55 @@ export function saveTune(config: TuneConfig): void {
 	preferences.tune = config;
 	savePreferences(preferences);
 }
+
+/**
+ * Get the paste threshold from the nanocoder.paste.singleLineThreshold
+ * field in the preferences file (same path that loadPasteConfig reads).
+ */
+export function getPasteThreshold(): number | undefined {
+	try {
+		const data = readFileSync(getPreferencesPath(), 'utf-8');
+		const raw = JSON.parse(data) as Record<string, unknown>;
+		const nanocoder = raw.nanocoder as Record<string, unknown> | undefined;
+		const paste = nanocoder?.paste as Record<string, unknown> | undefined;
+		const threshold = paste?.singleLineThreshold;
+		if (typeof threshold === 'number' && threshold > 0) {
+			return Math.round(threshold);
+		}
+	} catch {
+		// File doesn't exist or is invalid — return undefined
+	}
+	return undefined;
+}
+
+/**
+ * Save the paste threshold to nanocoder.paste.singleLineThreshold
+ * in the preferences file (same path that loadPasteConfig reads).
+ */
+export function updatePasteThreshold(threshold: number): void {
+	try {
+		let raw: Record<string, unknown> = {};
+		try {
+			const data = readFileSync(getPreferencesPath(), 'utf-8');
+			raw = JSON.parse(data) as Record<string, unknown>;
+		} catch {
+			// Start fresh if file doesn't exist
+		}
+
+		if (!raw.nanocoder || typeof raw.nanocoder !== 'object') {
+			raw.nanocoder = {};
+		}
+		const nanocoder = raw.nanocoder as Record<string, unknown>;
+
+		if (!nanocoder.paste || typeof nanocoder.paste !== 'object') {
+			nanocoder.paste = {};
+		}
+		const paste = nanocoder.paste as Record<string, unknown>;
+
+		paste.singleLineThreshold = Math.round(threshold);
+
+		writeFileSync(getPreferencesPath(), JSON.stringify(raw, null, 2));
+	} catch (error) {
+		logError(`Failed to save paste threshold: ${String(error)}`);
+	}
+}

@@ -23,7 +23,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/status` | Display current status (CWD, provider, model, theme, available updates, AGENTS setup) |
 | `/tasks` | Manage task list for tracking complex work (see [Task Management](task-management.md)) |
 | `/model-database` | Browse coding models from OpenRouter (searchable, filterable by open/proprietary) |
-| `/settings` | Interactive menu to access Nanocoder theme settings (theme, title-shape, nanocoder-shape) and commands |
+| `/settings` | Interactive menu to access Nanocoder settings (theme, title-shape, nanocoder-shape, paste-threshold) |
 | `/mcp` | Show connected MCP servers and their tools |
 | `/custom-commands` | List all custom commands |
 | `/checkpoint` | Save and restore conversation snapshots (see [Checkpointing](checkpointing.md)) |

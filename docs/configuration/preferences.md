@@ -31,7 +31,27 @@ Preferences follow the same location hierarchy as configuration files:
 | `trustedDirectories` | Directories you've approved through the first-run security disclaimer |
 | `lastUpdateCheck` | Timestamp of the last update check (used to avoid checking too frequently) |
 
-When you restart Nanocoder, it automatically restores your last provider, model, theme, and shape preferences.
+### Paste Configuration
+
+The paste threshold is also stored in the preferences file under the `nanocoder.paste` namespace:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `nanocoder.paste.singleLineThreshold` | number | `800` | Maximum characters for a single-line paste to be inserted directly. Longer or multi-line pastes become `[Paste #N: X chars]` placeholders. |
+
+You can change this via `/settings` → **Paste Threshold**, or by editing the file directly:
+
+```json
+{
+  "nanocoder": {
+    "paste": {
+      "singleLineThreshold": 1500
+    }
+  }
+}
+```
+
+When you restart Nanocoder, it automatically restores your last provider, model, theme, shape, and paste threshold preferences.
 
 ## Manual Management
 
