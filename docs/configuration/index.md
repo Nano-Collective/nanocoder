@@ -165,13 +165,23 @@ Allow specific tools to run without confirmation, even in normal development mod
 {
   "nanocoder": {
     "nanocoderTools": {
-      "alwaysAllow": ["read_file", "find_files"]
+      "alwaysAllow": ["execute_bash", "read_file", "find_files"]
     }
   }
 }
 ```
 
 The `alwaysAllow` array accepts tool names. Tools listed here will execute immediately without prompting for approval.
+
+You can also use the top-level `alwaysAllow` which applies to all tools (including in non-interactive mode):
+
+```json
+{
+  "nanocoder": {
+    "alwaysAllow": ["execute_bash", "read_file"]
+  }
+}
+```
 
 ### Web Search
 
@@ -181,9 +191,11 @@ Brave's free tier includes 2,000 queries per month. [Get an API key here](https:
 
 ```json
 {
-  "nanocoderTools": {
-    "webSearch": {
-      "apiKey": "$BRAVE_SEARCH_API_KEY"
+  "nanocoder": {
+    "nanocoderTools": {
+      "webSearch": {
+        "apiKey": "$BRAVE_SEARCH_API_KEY"
+      }
     }
   }
 }

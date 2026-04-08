@@ -363,6 +363,43 @@ function tryLoadNanocoderToolsFromPath(
 	return null;
 }
 
+function loadAlwaysAllowConfig(): string[] | undefined {
+	// Try project-level config first
+	const projectConfigPath = join(process.cwd(), 'agents.config.json');
+	const projectResult = tryLoadAlwaysAllowFromPath(projectConfigPath);
+	if (projectResult) {
+		return projectResult;
+	}
+
+	// Try global config
+	const configDir = getConfigPath();
+	const globalConfigPath = join(configDir, 'agents.config.json');
+	return tryLoadAlwaysAllowFromPath(globalConfigPath) ?? undefined;
+}
+
+function tryLoadAlwaysAllowFromPath(configPath: string): string[] | null {
+	if (!existsSync(configPath)) {
+		return null;
+	}
+
+	try {
+		const rawData = readFileSync(configPath, 'utf-8');
+		const config = JSON.parse(rawData);
+		const alwaysAllow = config.nanocoder?.alwaysAllow;
+		if (Array.isArray(alwaysAllow)) {
+			return alwaysAllow.filter(
+				(item: unknown): item is string => typeof item === 'string',
+			);
+		}
+	} catch (error) {
+		logError(
+			`Failed to load alwaysAllow config from ${configPath}: ${String(error)}`,
+		);
+	}
+
+	return null;
+}
+
 // Function to load app configuration from agents.config.json if it exists
 function loadAppConfig(): AppConfig {
 	// Load providers from the new hierarchical configuration system
@@ -384,6 +421,9 @@ function loadAppConfig(): AppConfig {
 	// Load nanocoder tools configuration
 	const nanocoderTools = loadNanocoderToolsConfig();
 
+	// Load top-level alwaysAllow (for non-interactive mode and as fallback)
+	const alwaysAllow = loadAlwaysAllowConfig();
+
 	return {
 		providers,
 		mcpServers,
@@ -391,6 +431,7 @@ function loadAppConfig(): AppConfig {
 		sessions,
 		paste,
 		nanocoderTools,
+		alwaysAllow,
 	};
 }
 

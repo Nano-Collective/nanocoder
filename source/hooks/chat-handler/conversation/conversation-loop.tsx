@@ -449,7 +449,14 @@ export const processAssistantResponse = async (
 
 			// Evaluate needsApproval from tool definition
 			let toolNeedsApproval = true;
-			if (toolManager) {
+
+			// In non-interactive mode, check the nonInteractiveAlwaysAllow list
+			if (
+				nonInteractiveMode &&
+				nonInteractiveAlwaysAllow.includes(toolCall.function.name)
+			) {
+				toolNeedsApproval = false;
+			} else if (toolManager) {
 				const toolEntry = toolManager.getToolEntry(toolCall.function.name);
 				if (toolEntry?.tool) {
 					const needsApprovalProp = (

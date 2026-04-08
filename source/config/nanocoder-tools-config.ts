@@ -1,18 +1,30 @@
 import {getAppConfig} from '@/config/index';
 
 /**
- * Check if a nanocoder tool is configured to always be allowed
+ * Check if a nanocoder tool is configured to always be allowed.
+ * Checks both nanocoderTools.alwaysAllow and the top-level alwaysAllow list.
  * @param toolName - The name of the tool to check
- * @returns true if the tool is in the alwaysAllow list, false otherwise
+ * @returns true if the tool is in either alwaysAllow list, false otherwise
  */
 export function isNanocoderToolAlwaysAllowed(toolName: string): boolean {
-	const alwaysAllowList = getAppConfig().nanocoderTools?.alwaysAllow;
+	const config = getAppConfig();
 
-	if (!Array.isArray(alwaysAllowList)) {
-		return false;
+	// Check nanocoderTools.alwaysAllow (primary location)
+	const toolsAlwaysAllow = config.nanocoderTools?.alwaysAllow;
+	if (Array.isArray(toolsAlwaysAllow) && toolsAlwaysAllow.includes(toolName)) {
+		return true;
 	}
 
-	return alwaysAllowList.includes(toolName);
+	// Check top-level alwaysAllow (also applies to interactive mode)
+	const topLevelAlwaysAllow = config.alwaysAllow;
+	if (
+		Array.isArray(topLevelAlwaysAllow) &&
+		topLevelAlwaysAllow.includes(toolName)
+	) {
+		return true;
+	}
+
+	return false;
 }
 
 /**
