@@ -169,12 +169,10 @@ export function SummaryStep({
 								• <Text color={colors.success}>{provider.name}</Text>
 							</Text>
 							{!isNarrow && provider.baseUrl && (
-								<Text dimColor> URL: {provider.baseUrl}</Text>
+								<Text> URL: {provider.baseUrl}</Text>
 							)}
 							{!isNarrow && (
-								<Text dimColor>
-									Models: {provider.models?.join(', ') || 'none'}
-								</Text>
+								<Text>Models: {provider.models?.join(', ') || 'none'}</Text>
 							)}
 						</Box>
 					))
@@ -204,7 +202,7 @@ export function SummaryStep({
 								{!isNarrow && (
 									<>
 										{connectionDetails.map((detail, index) => (
-											<Text key={index} dimColor>
+											<Text key={index}>
 												{detail.label}: {detail.value}
 											</Text>
 										))}

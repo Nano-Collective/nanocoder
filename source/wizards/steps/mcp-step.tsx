@@ -544,7 +544,7 @@ export function McpStep({
 					<Text bold color={colors.primary}>
 						{selectedTemplate.name} Configuration
 					</Text>
-					<Text dimColor>
+					<Text>
 						{' '}
 						(Field {currentFieldIndex + 1}/{selectedTemplate.fields.length})
 					</Text>
@@ -554,10 +554,8 @@ export function McpStep({
 					<Text>
 						{currentField.prompt}
 						{currentField.required && <Text color={colors.error}> *</Text>}
-						{currentField.default && (
-							<Text dimColor> [{currentField.default}]</Text>
-						)}
-						: {currentField.sensitive && '****'}
+						{currentField.default && <Text> [{currentField.default}]</Text>}:{' '}
+						{currentField.sensitive && '****'}
 					</Text>
 				</Box>
 
@@ -568,7 +566,7 @@ export function McpStep({
 							borderColor={colors.secondary}
 							paddingX={1}
 						>
-							<Text>{multilineBuffer || <Text dimColor>(empty)</Text>}</Text>
+							<Text>{multilineBuffer || <Text>(empty)</Text>}</Text>
 						</Box>
 						<Box marginTop={1}>
 							<Text color={colors.secondary}>

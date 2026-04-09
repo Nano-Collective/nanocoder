@@ -66,7 +66,7 @@ export const SchedulerView = React.memo(
 					</Box>
 				)}
 				<Box marginTop={1}>
-					<Text dimColor>Press Escape to exit scheduler mode</Text>
+					<Text>Press Escape to exit scheduler mode</Text>
 				</Box>
 			</Box>
 		);

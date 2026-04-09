@@ -693,7 +693,7 @@ export function ProviderStep({
 					<Text bold color={colors.primary}>
 						{selectedTemplate.name} Configuration
 					</Text>
-					<Text dimColor>
+					<Text>
 						{' '}
 						(Field {currentFieldIndex + 1}/{selectedTemplate.fields.length})
 					</Text>

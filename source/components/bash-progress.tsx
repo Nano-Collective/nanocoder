@@ -110,9 +110,7 @@ export default function BashProgress({
 			{!state.isComplete && state.outputPreview && (
 				<Box flexDirection="column">
 					<Text color={colors.secondary}>Output: </Text>
-					<Text color={colors.text} dimColor>
-						{state.outputPreview}
-					</Text>
+					<Text color={colors.text}>{state.outputPreview}</Text>
 				</Box>
 			)}
 

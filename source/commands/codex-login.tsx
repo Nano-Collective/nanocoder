@@ -108,7 +108,7 @@ export function CodexLogin({
 						Logged in. Credentials saved for "{providerName}".
 					</Text>
 				</Box>
-				<Text dimColor>Press Enter to continue.</Text>
+				<Text>Press Enter to continue.</Text>
 			</Box>
 		);
 	}
@@ -119,7 +119,7 @@ export function CodexLogin({
 				<Box marginBottom={1}>
 					<Text color={colors.error}>{error}</Text>
 				</Box>
-				<Text dimColor>Press Enter to continue.</Text>
+				<Text>Press Enter to continue.</Text>
 			</Box>
 		);
 	}

@@ -320,7 +320,7 @@ export function ProviderWizard({
 								{providers.map((provider, index) => (
 									<Text key={index} color={colors.success}>
 										• {provider.name}
-										<Text dimColor>
+										<Text>
 											{' '}
 											({provider.models.length}{' '}
 											{provider.models.length === 1 ? 'model' : 'models'}
@@ -367,7 +367,7 @@ export function ProviderWizard({
 							</Text>
 						</Box>
 						<Box marginBottom={1}>
-							<Text dimColor>This action cannot be undone.</Text>
+							<Text>This action cannot be undone.</Text>
 						</Box>
 						<SelectInput
 							items={deleteOptions}
@@ -422,7 +422,7 @@ export function ProviderWizard({
 							</Text>
 						</Box>
 						<Box marginBottom={1}>
-							<Text dimColor>Saved to: {providerConfigPath}</Text>
+							<Text>Saved to: {providerConfigPath}</Text>
 						</Box>
 						{needsAuth && (
 							<Box marginBottom={1} flexDirection="column">
@@ -440,7 +440,7 @@ export function ProviderWizard({
 						)}
 						{hasLocal && (
 							<Box marginBottom={1}>
-								<Text dimColor>
+								<Text>
 									Ensure your local{' '}
 									{localProviders.length === 1 ? 'server is' : 'servers are'}{' '}
 									running before use.

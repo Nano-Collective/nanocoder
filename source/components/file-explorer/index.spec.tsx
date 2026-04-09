@@ -133,7 +133,7 @@ test('FileExplorer error state shows error message', t => {
 test('FileExplorer tree view shows navigation help', t => {
 	const TreeViewHelp = () => (
 		<Box marginTop={1}>
-			<Text color="gray" dimColor>
+			<Text color="gray" >
 				Up/Down: navigate | Enter: expand/preview | Space: select | /: search | Esc: done
 			</Text>
 		</Box>
@@ -232,7 +232,7 @@ test('FileExplorer preview mode shows unselected state', t => {
 test('FileExplorer preview mode shows scroll indicator', t => {
 	const ScrollIndicator = ({start, end, total}: {start: number; end: number; total: number}) => (
 		<Box marginTop={1}>
-			<Text color="gray" dimColor>
+			<Text color="gray" >
 				Line {start}-{end} of {total}
 			</Text>
 		</Box>
@@ -248,7 +248,7 @@ test('FileExplorer preview mode shows scroll indicator', t => {
 test('FileExplorer preview mode shows navigation help', t => {
 	const PreviewHelp = () => (
 		<Box marginTop={1}>
-			<Text color="gray" dimColor>
+			<Text color="gray" >
 				Up/Down: scroll | Space: toggle select | Shift+Tab/Esc: back
 			</Text>
 		</Box>
@@ -294,7 +294,7 @@ test('FileExplorer search with no matches shows message', t => {
 test('FileExplorer status bar shows file path', t => {
 	const StatusBar = ({path, size}: {path: string; size: string}) => (
 		<Box>
-			<Text color="white" dimColor>
+			<Text color="white" >
 				{path}
 				<Text> ({size})</Text>
 			</Text>
@@ -312,7 +312,7 @@ test('FileExplorer status bar shows file path', t => {
 test('FileExplorer search help shows correct instructions', t => {
 	const SearchHelp = () => (
 		<Box marginTop={1}>
-			<Text color="gray" dimColor>
+			<Text color="gray" >
 				Type to filter | Backspace: delete | Esc: exit search
 			</Text>
 		</Box>

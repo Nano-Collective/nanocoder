@@ -47,7 +47,7 @@ export default memo(function ToolMessage({
 					)}
 					{messageContent}
 					{isBashMode && (
-						<Text color={colors.secondary} dimColor>
+						<Text color={colors.secondary}>
 							Output truncated to 4k characters to save context
 						</Text>
 					)}
@@ -64,7 +64,7 @@ export default memo(function ToolMessage({
 				>
 					{messageContent}
 					{isBashMode && (
-						<Text color={colors.text} dimColor>
+						<Text color={colors.text}>
 							Output truncated to 4k characters to save context
 						</Text>
 					)}
@@ -81,7 +81,7 @@ export default memo(function ToolMessage({
 				>
 					{messageContent}
 					{isBashMode && (
-						<Text color={colors.tool} dimColor>
+						<Text color={colors.tool}>
 							Output truncated to 4k characters to save context
 						</Text>
 					)}

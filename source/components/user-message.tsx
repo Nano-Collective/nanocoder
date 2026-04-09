@@ -120,9 +120,7 @@ export default memo(function UserMessage({
 				</Box>
 			</Box>
 			<Box marginBottom={2}>
-				<Text color={colors.secondary} dimColor>
-					~{tokens.toLocaleString()} tokens
-				</Text>
+				<Text color={colors.secondary}>~{tokens.toLocaleString()} tokens</Text>
 			</Box>
 		</>
 	);

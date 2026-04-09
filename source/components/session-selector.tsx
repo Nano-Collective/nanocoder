@@ -104,12 +104,12 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 				{hasOtherSessions ? (
 					<>
 						<Text>No sessions for this project.</Text>
-						<Text dimColor>Use /resume --all to see all sessions.</Text>
+						<Text>Use /resume --all to see all sessions.</Text>
 					</>
 				) : (
 					<Text>No saved sessions found.</Text>
 				)}
-				<Text dimColor>Press any key to continue...</Text>
+				<Text>Press any key to continue...</Text>
 			</Box>
 		);
 	}
@@ -150,7 +150,7 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 				/>
 			</Box>
 			<Box marginTop={1}>
-				<Text dimColor>↑/↓ to navigate • Enter to select • Esc to cancel</Text>
+				<Text>↑/↓ to navigate • Enter to select • Esc to cancel</Text>
 			</Box>
 		</Box>
 	);

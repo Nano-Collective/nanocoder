@@ -121,9 +121,7 @@ function SettingsMainMenu({
 					)}
 				/>
 				<Box marginBottom={1}></Box>
-				<Text color={colors.secondary} dimColor>
-					Enter/Esc
-				</Text>
+				<Text color={colors.secondary}>Enter/Esc</Text>
 			</Box>
 		);
 	}
@@ -162,9 +160,7 @@ function SettingsMainMenu({
 				)}
 			/>
 			<Box marginTop={1}>
-				<Text color={colors.secondary} dimColor>
-					Enter to select, Esc to exit
-				</Text>
+				<Text color={colors.secondary}>Enter to select, Esc to exit</Text>
 			</Box>
 		</TitledBoxWithPreferences>
 	);
@@ -240,9 +236,7 @@ function SettingsThemePanel({
 					onHighlight={handleHighlight}
 				/>
 				<Box marginBottom={1}></Box>
-				<Text color={colors.secondary} dimColor>
-					Enter/Shift+Tab/Esc
-				</Text>
+				<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
 			</TitledBoxWithPreferences>
 		);
 	}
@@ -414,9 +408,7 @@ function SettingsTitleShapePanel({
 					onHighlight={handleHighlight}
 				/>
 				<Box marginBottom={1}></Box>
-				<Text color={colors.secondary} dimColor>
-					Enter/Shift+Tab/Esc
-				</Text>
+				<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
 			</TitledBoxWithPreferences>
 		);
 	}
@@ -532,9 +524,7 @@ function SettingsNanocoderShapePanel({
 						onHighlight={handleHighlight}
 					/>
 					<Box marginBottom={1}></Box>
-					<Text color={colors.secondary} dimColor>
-						Enter/Shift+Tab/Esc
-					</Text>
+					<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
 				</TitledBoxWithPreferences>
 			</>
 		);
@@ -646,9 +636,7 @@ function SettingsPasteThresholdPanel({
 				</Box>
 			)}
 			{isNarrow && (
-				<Text color={colors.secondary} dimColor>
-					Current: {currentThreshold}
-				</Text>
+				<Text color={colors.secondary}>Current: {currentThreshold}</Text>
 			)}
 			<SelectInput
 				items={thresholdOptions.map(opt => ({
@@ -664,7 +652,7 @@ function SettingsPasteThresholdPanel({
 				onSelect={handleSelect}
 			/>
 			<Box marginTop={isNarrow ? 0 : 1}>
-				<Text color={colors.secondary} dimColor>
+				<Text color={colors.secondary}>
 					{isNarrow
 						? 'Enter/Shift+Tab/Esc'
 						: 'Enter to apply, Shift+Tab to go back, Esc to exit'}

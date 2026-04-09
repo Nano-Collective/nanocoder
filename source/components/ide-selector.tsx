@@ -34,9 +34,7 @@ export function IdeSelector({onSelect, onCancel}: IdeSelectorProps) {
 				<SelectInput items={items} onSelect={item => onSelect(item.value)} />
 			</Box>
 			<Box marginTop={1}>
-				<Text color={colors.secondary} dimColor>
-					Press Escape to cancel
-				</Text>
+				<Text color={colors.secondary}>Press Escape to cancel</Text>
 			</Box>
 		</Box>
 	);

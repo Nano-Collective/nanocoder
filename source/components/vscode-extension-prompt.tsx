@@ -216,9 +216,7 @@ export function VSCodeExtensionPrompt({
 						/>
 					</Box>
 					<Box marginTop={1}>
-						<Text dimColor>
-							Space/Enter to toggle, select Confirm to proceed
-						</Text>
+						<Text>Space/Enter to toggle, select Confirm to proceed</Text>
 					</Box>
 				</Box>
 			);

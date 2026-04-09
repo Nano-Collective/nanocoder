@@ -43,7 +43,7 @@ export default memo(function StreamingMessage({
 				<Text color={colors.info} bold>
 					<Spinner type="dots" /> {model}
 				</Text>
-				<Text dimColor>
+				<Text>
 					{'  '}~{tokens.toLocaleString()} tokens · {tokPerSec} tok/s
 				</Text>
 			</Box>
@@ -60,7 +60,7 @@ export default memo(function StreamingMessage({
 				borderBottom={false}
 				borderLeftColor={colors.secondary}
 			>
-				{truncated && <Text dimColor>…</Text>}
+				{truncated && <Text>…</Text>}
 				<Text>{displayText}</Text>
 			</Box>
 		</>

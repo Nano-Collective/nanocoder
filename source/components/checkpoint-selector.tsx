@@ -113,7 +113,7 @@ export default function CheckpointSelector({
 					</Box>
 
 					<Box>
-						<Text color={colors.secondary} dimColor>
+						<Text color={colors.secondary}>
 							Press Y/Enter to backup, N to skip, or Esc to cancel
 						</Text>
 					</Box>

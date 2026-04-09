@@ -391,12 +391,10 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 					) : (
 						visiblePreviewLines.map((line, i) => (
 							<Text key={i} wrap="truncate">
-								<Text color={colors.secondary} dimColor>
+								<Text color={colors.secondary}>
 									{String(previewScroll + i + 1).padStart(4, ' ')}
 								</Text>
-								<Text color={colors.secondary} dimColor>
-									{' | '}
-								</Text>
+								<Text color={colors.secondary}>{' | '}</Text>
 								{line}
 							</Text>
 						))
@@ -406,7 +404,7 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 				{/* Scroll indicator */}
 				{preview && (
 					<Box marginTop={1}>
-						<Text color={colors.secondary} dimColor>
+						<Text color={colors.secondary}>
 							Line {previewScroll + 1}-
 							{Math.min(
 								previewScroll + FILE_EXPLORER_VISIBLE_ITEMS,
@@ -419,7 +417,7 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 
 				{/* Help text */}
 				<Box marginTop={1}>
-					<Text color={colors.secondary} dimColor>
+					<Text color={colors.secondary}>
 						Up/Down: scroll | Space: toggle select | Shift+Tab/Esc: back
 					</Text>
 				</Box>
@@ -488,7 +486,7 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 			<Box marginTop={1} flexDirection="column">
 				{selectedNode && (
 					<Box>
-						<Text color={colors.text} dimColor>
+						<Text color={colors.text}>
 							{selectedNode.path}
 							{!selectedNode.isDirectory && selectedNode.size !== undefined && (
 								<Text> ({formatSize(selectedNode.size)})</Text>
@@ -498,7 +496,7 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 				)}
 
 				<Box marginTop={1}>
-					<Text color={colors.secondary} dimColor>
+					<Text color={colors.secondary}>
 						{searchMode
 							? 'Type to filter | Backspace: delete | Esc: exit search'
 							: 'Up/Down: navigate | Enter: expand/preview | Space: select | /: search | Esc: done'}

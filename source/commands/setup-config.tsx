@@ -155,10 +155,7 @@ function SetupConfigResult({
 						<Text color={colors.text}>{option.label}</Text>
 					</Text>
 					<Text color={colors.secondary}> {option.description}</Text>
-					<Text color={colors.secondary} dimColor>
-						{' '}
-						{option.path}
-					</Text>
+					<Text color={colors.secondary}> {option.path}</Text>
 				</Box>
 			))}
 			<Text color={colors.secondary}>

@@ -476,7 +476,7 @@ export default function UserInput({
 	if (disabled) {
 		return (
 			<Box flexDirection="column" paddingY={1} width="100%" marginTop={1}>
-				<Text color={colors.secondary} dimColor>
+				<Text color={colors.secondary}>
 					<Spinner type="dots" /> Press Esc to cancel
 					{onToggleCompactDisplay && (
 						<Text>
@@ -537,9 +537,7 @@ export default function UserInput({
 				</Box>
 
 				{showClearMessage && (
-					<Text color={colors.secondary} dimColor>
-						Press escape again to clear
-					</Text>
+					<Text color={colors.secondary}>Press escape again to clear</Text>
 				)}
 			</Box>
 

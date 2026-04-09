@@ -356,7 +356,7 @@ export function McpWizard({projectDir, onComplete, onCancel}: McpWizardProps) {
 							</Text>
 						</Box>
 						<Box marginBottom={1}>
-							<Text dimColor>This action cannot be undone.</Text>
+							<Text>This action cannot be undone.</Text>
 						</Box>
 						<SelectInput
 							items={deleteOptions}
@@ -391,10 +391,10 @@ export function McpWizard({projectDir, onComplete, onCancel}: McpWizardProps) {
 							</Text>
 						</Box>
 						<Box marginBottom={1}>
-							<Text dimColor>Saved to:</Text>
+							<Text>Saved to:</Text>
 						</Box>
 						<Box marginBottom={1}>
-							<Text dimColor> {mcpConfigPath}</Text>
+							<Text> {mcpConfigPath}</Text>
 						</Box>
 						<Box>
 							<Text color={colors.secondary}>Press Enter to continue</Text>

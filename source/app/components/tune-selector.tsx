@@ -144,9 +144,7 @@ function TuneMainMenu({
 					)}
 				/>
 				<Box marginBottom={1}></Box>
-				<Text color={colors.secondary} dimColor>
-					Enter/Esc
-				</Text>
+				<Text color={colors.secondary}>Enter/Esc</Text>
 			</Box>
 		);
 	}
@@ -179,9 +177,7 @@ function TuneMainMenu({
 				)}
 			/>
 			<Box marginTop={1}>
-				<Text color={colors.secondary} dimColor>
-					Enter to select, Esc to cancel
-				</Text>
+				<Text color={colors.secondary}>Enter to select, Esc to cancel</Text>
 			</Box>
 		</TitledBoxWithPreferences>
 	);
@@ -247,14 +243,12 @@ function ToolProfilePanel({
 					onHighlight={item => setHighlighted(item.value as ToolProfile)}
 				/>
 				<Box marginTop={1} flexDirection="column">
-					<Text color={colors.secondary} dimColor>
+					<Text color={colors.secondary}>
 						{TOOL_PROFILE_TOOLTIPS[highlighted]}
 					</Text>
 				</Box>
 				<Box marginBottom={1}></Box>
-				<Text color={colors.secondary} dimColor>
-					Enter/Shift+Tab/Esc
-				</Text>
+				<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
 			</TitledBoxWithPreferences>
 		);
 	}
@@ -289,7 +283,7 @@ function ToolProfilePanel({
 				)}
 			/>
 			<Box marginTop={1} flexDirection="column">
-				<Text color={colors.secondary} dimColor>
+				<Text color={colors.secondary}>
 					{TOOL_PROFILE_TOOLTIPS[highlighted]}
 				</Text>
 			</Box>
@@ -351,15 +345,13 @@ function PresetPanel({
 				/>
 				{highlightedPreset && (
 					<Box marginTop={1}>
-						<Text color={colors.secondary} dimColor>
+						<Text color={colors.secondary}>
 							{highlightedPreset.description}
 						</Text>
 					</Box>
 				)}
 				<Box marginBottom={1}></Box>
-				<Text color={colors.secondary} dimColor>
-					Enter/Shift+Tab/Esc
-				</Text>
+				<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
 			</TitledBoxWithPreferences>
 		);
 	}
@@ -394,9 +386,7 @@ function PresetPanel({
 			/>
 			{highlightedPreset && (
 				<Box marginTop={1}>
-					<Text color={colors.secondary} dimColor>
-						{highlightedPreset.description}
-					</Text>
+					<Text color={colors.secondary}>{highlightedPreset.description}</Text>
 				</Box>
 			)}
 		</TitledBoxWithPreferences>
@@ -575,15 +565,11 @@ function ParametersPanel({
 				/>
 				{highlightedDef && (
 					<Box marginTop={1}>
-						<Text color={colors.secondary} dimColor>
-							{highlightedDef.tooltip}
-						</Text>
+						<Text color={colors.secondary}>{highlightedDef.tooltip}</Text>
 					</Box>
 				)}
 				<Box marginBottom={1}></Box>
-				<Text color={colors.secondary} dimColor>
-					Enter to cycle/Shift+Tab/Esc
-				</Text>
+				<Text color={colors.secondary}>Enter to cycle/Shift+Tab/Esc</Text>
 			</TitledBoxWithPreferences>
 		);
 	}
@@ -618,9 +604,7 @@ function ParametersPanel({
 			/>
 			{highlightedDef && (
 				<Box marginTop={1}>
-					<Text color={colors.secondary} dimColor>
-						{highlightedDef.tooltip}
-					</Text>
+					<Text color={colors.secondary}>{highlightedDef.tooltip}</Text>
 				</Box>
 			)}
 		</TitledBoxWithPreferences>

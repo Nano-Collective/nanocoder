@@ -77,7 +77,7 @@ function SubagentsList({subagents}: SubagentsListProps) {
 							</Text>
 						</Box>
 						<Box marginLeft={4}>
-							<Text color={colors.secondary} dimColor>
+							<Text color={colors.secondary}>
 								{agent.tools
 									? `${agent.tools.length} tool${agent.tools.length === 1 ? '' : 's'}`
 									: 'all tools'}

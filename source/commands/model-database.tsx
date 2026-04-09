@@ -212,12 +212,10 @@ function ModelDatabaseDisplay({onCancel}: ModelDatabaseDisplayProps) {
 				)}
 
 				<Box marginBottom={1}>
-					<Text color={colors.secondary} dimColor>
-						Data from OpenRouter
-					</Text>
+					<Text color={colors.secondary}>Data from OpenRouter</Text>
 				</Box>
 
-				<Text color={colors.secondary} dimColor>
+				<Text color={colors.secondary}>
 					{searchMode
 						? 'Type to search | Backspace to delete | Up/Down: Navigate | Esc: Exit search'
 						: 'Type to search | Up/Down: Navigate | Tab: Switch tabs | Esc: Close'}
@@ -323,7 +321,7 @@ function ModelsTabView({
 
 			<Box flexDirection="column" marginTop={1}>
 				<Box marginBottom={1}>
-					<Text color={colors.secondary} dimColor>
+					<Text color={colors.secondary}>
 						Model {currentModelIndex + 1} of {currentTabModels.length}
 					</Text>
 				</Box>
@@ -369,7 +367,7 @@ function ModelItem({model, colors}: {model: ModelEntry; colors: Colors}) {
 				<Box flexDirection="column">
 					<Text color={colors.text}>
 						<Text bold>ID: </Text>
-						<Text dimColor>{model.id}</Text>
+						<Text>{model.id}</Text>
 					</Text>
 					<Text color={colors.text}>
 						<Text bold>Author: </Text>
@@ -386,14 +384,14 @@ function ModelItem({model, colors}: {model: ModelEntry; colors: Colors}) {
 					<Text color={colors.text}>
 						<Text bold>Cost: </Text>
 						<Text color={costInfo.color}>{costInfo.label}</Text>
-						<Text dimColor> - {model.costDetails}</Text>
+						<Text> - {model.costDetails}</Text>
 					</Text>
 					<Text color={colors.text}>
 						<Text bold>Tools: </Text>
 						{model.hasToolSupport ? (
 							<Text color={colors.success}>Supported</Text>
 						) : (
-							<Text dimColor>Not supported</Text>
+							<Text>Not supported</Text>
 						)}
 					</Text>
 					<Text color={colors.text}>
