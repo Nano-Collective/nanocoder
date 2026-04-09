@@ -3,12 +3,16 @@ import {useEffect, useReducer} from 'react';
 
 import ToolMessage from '@/components/tool-message';
 import {useTheme} from '@/hooks/useTheme';
-import {subagentProgress} from '@/services/subagent-events';
+import {
+	getSubagentProgress,
+	subagentProgress,
+} from '@/services/subagent-events';
 
 interface AgentProgressProps {
 	subagentName: string;
 	description: string;
 	isLive?: boolean;
+	agentId?: string;
 	completedState?: {
 		toolCallCount: number;
 		tokenCount: number;
@@ -20,6 +24,7 @@ export default function AgentProgress({
 	subagentName,
 	description,
 	isLive = false,
+	agentId,
 	completedState,
 }: AgentProgressProps) {
 	const {colors} = useTheme();
@@ -38,13 +43,14 @@ export default function AgentProgress({
 		return () => clearInterval(interval);
 	}, [isLive, isComplete]);
 
-	// Read current state from the mutable store
+	// Read current state from the correct progress source
+	const progress = agentId ? getSubagentProgress(agentId) : subagentProgress;
 	const toolCallCount = isComplete
 		? completedState.toolCallCount
-		: subagentProgress.toolCallCount;
+		: progress.toolCallCount;
 	const tokenCount = isComplete
 		? completedState.tokenCount
-		: subagentProgress.tokenCount;
+		: progress.tokenCount;
 
 	const dotColor = isComplete
 		? completedState?.success
@@ -98,5 +104,48 @@ export default function AgentProgress({
 
 	return (
 		<ToolMessage message={messageContent} hideBox={true} isLive={isLive} />
+	);
+}
+
+/**
+ * Renders multiple agent progress indicators for parallel execution.
+ * Each agent gets its own row with independent progress tracking.
+ */
+interface MultiAgentProgressProps {
+	agents: Array<{
+		agentId: string;
+		subagentName: string;
+		description: string;
+	}>;
+	isLive?: boolean;
+	completedStates?: Map<
+		string,
+		{
+			toolCallCount: number;
+			tokenCount: number;
+			success: boolean;
+		}
+	>;
+}
+
+export function MultiAgentProgress({
+	agents,
+	isLive = false,
+	completedStates,
+}: MultiAgentProgressProps) {
+	return (
+		<Box flexDirection="column">
+			{agents.map(agent => (
+				<Box key={agent.agentId} marginBottom={1}>
+					<AgentProgress
+						subagentName={agent.subagentName}
+						description={agent.description}
+						isLive={isLive && !completedStates?.has(agent.agentId)}
+						agentId={agent.agentId}
+						completedState={completedStates?.get(agent.agentId)}
+					/>
+				</Box>
+			))}
+		</Box>
 	);
 }

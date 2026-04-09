@@ -364,6 +364,8 @@ export default function App({
 		currentProvider: appState.currentProvider,
 		setDevelopmentMode: appState.setDevelopmentMode,
 		compactToolDisplay: appState.compactToolDisplay,
+		abortController: appState.abortController,
+		setAbortController: appState.setAbortController,
 	});
 
 	// Log when application is fully ready

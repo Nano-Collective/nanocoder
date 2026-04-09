@@ -3,14 +3,16 @@
  *
  * Allows the LLM to delegate tasks to specialized subagents.
  * This tool is the bridge between the main conversation and subagent execution.
+ * Supports parallel execution of multiple agents via unique agentId tracking.
  */
 
+import {randomUUID} from 'node:crypto';
 import type {SubagentExecutor} from '@/subagents/subagent-executor.js';
 import {getSubagentLoader} from '@/subagents/subagent-loader.js';
 import {jsonSchema, tool} from '@/types/core';
 import type {NanocoderToolExport} from '@/types/index';
 
-interface AgentToolArgs {
+export interface AgentToolArgs {
 	subagent_type: string;
 	description: string;
 	prompt?: string;
@@ -48,14 +50,25 @@ export function setAvailableAgentNames(
 }
 
 /**
- * Start agent execution and return a promise.
+ * Start agent execution and return a promise with a unique agent ID.
  * Like executeBashCommand — starts immediately, doesn't block the caller.
+ *
+ * @param args - Agent tool arguments
+ * @param signal - Optional abort signal for cancellation
+ * @returns Object with unique agentId and promise that resolves with the result
  */
-export function startAgentExecution(args: AgentToolArgs): {
+export function startAgentExecution(
+	args: AgentToolArgs,
+	signal?: AbortSignal,
+): {
+	agentId: string;
 	promise: Promise<{content: string; success: boolean; error?: string}>;
 } {
+	const agentId = randomUUID();
+
 	if (!executorInstance) {
 		return {
+			agentId,
 			promise: Promise.reject(new Error('Subagent executor not initialized')),
 		};
 	}
@@ -72,12 +85,17 @@ export function startAgentExecution(args: AgentToolArgs): {
 		error?: string;
 	}>(resolve => {
 		setTimeout(async () => {
-			const result = await executor.execute({
-				subagent_type,
-				description,
-				prompt,
-				context,
-			});
+			const result = await executor.execute(
+				{
+					subagent_type,
+					description,
+					prompt,
+					context,
+				},
+				signal,
+				0,
+				agentId,
+			);
 			resolve({
 				content: result.output,
 				success: result.success,
@@ -86,7 +104,7 @@ export function startAgentExecution(args: AgentToolArgs): {
 		}, 0);
 	});
 
-	return {promise};
+	return {agentId, promise};
 }
 
 async function executeAgent(args: AgentToolArgs): Promise<string> {
@@ -124,7 +142,7 @@ async function executeAgent(args: AgentToolArgs): Promise<string> {
 
 const agentCoreTool = tool({
 	description:
-		'Delegate a task to a specialized subagent. The subagent runs in its own context and returns only its result. Use this to explore the codebase, research, or execute focused tasks without filling your context.',
+		'Delegate a task to a specialized subagent. The subagent runs in its own context and returns only its result. Use this to explore the codebase, research, or execute focused tasks without filling your context. You can call this tool multiple times in a single response — all agent calls will execute in parallel for maximum efficiency.',
 	inputSchema: jsonSchema<AgentToolArgs>({
 		type: 'object',
 		properties: {

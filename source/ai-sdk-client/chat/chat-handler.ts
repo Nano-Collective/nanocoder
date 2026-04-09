@@ -157,6 +157,17 @@ export async function handleChat(
 				stopWhen: stepCountIs(MAX_TOOL_STEPS),
 				onStepFinish: createOnStepFinishHandler(callbacks),
 				prepareStep: createPrepareStepHandler(),
+				onError: ({error}) => {
+					// Catch streaming errors so raw SSE events don't leak to stdout.
+					// The error will still be thrown by the stream and caught by
+					// the outer try-catch for proper formatting.
+					logger.warn('Streaming error received', {
+						error: error instanceof Error ? error.message : String(error),
+						model: currentModel,
+						correlationId,
+						provider: providerConfig.name,
+					});
+				},
 				headers: providerConfig.config.headers,
 				providerOptions,
 				// Model parameters from /tune — passed directly to AI SDK

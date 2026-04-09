@@ -2,12 +2,15 @@
  * Subagent Executor
  *
  * Handles execution of subagent tasks with isolated context and tool filtering.
+ * Supports concurrent execution via unique agentId for progress isolation.
  */
 
 import {createLLMClient} from '@/client-factory';
 import {
+	getSubagentProgress,
 	subagentProgress,
 	updateSubagentProgress,
+	updateSubagentProgressById,
 } from '@/services/subagent-events';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
@@ -27,6 +30,9 @@ import type {
 
 /** Maximum recursion depth for subagent delegation */
 const MAX_SUBAGENT_DEPTH = 2;
+
+/** Maximum number of concurrent subagents */
+export const MAX_CONCURRENT_AGENTS = 5;
 
 /**
  * SubagentExecutor manages the execution of delegated tasks to subagents.
@@ -59,11 +65,19 @@ export class SubagentExecutor {
 
 	/**
 	 * Execute a subagent task.
+	 *
+	 * @param task - The task to execute
+	 * @param signal - Optional abort signal for cancellation
+	 * @param depth - Recursion depth (prevents infinite delegation)
+	 * @param agentId - Optional unique ID for concurrent progress tracking.
+	 *                  When provided, progress is written to the agent-specific
+	 *                  slot in the progress map instead of the global singleton.
 	 */
 	async execute(
 		task: SubagentTask,
 		signal?: AbortSignal,
 		depth = 0,
+		agentId?: string,
 	): Promise<SubagentResult> {
 		const startTime = Date.now();
 
@@ -111,8 +125,13 @@ export class SubagentExecutor {
 			];
 
 			// Get the client for this subagent — either a new one for a
-			// different provider, or the parent client with model switching
-			const {client, restoreParent} = await this.prepareClient(config);
+			// different provider, or the parent client with model switching.
+			// When agentId is set (concurrent mode), always create a new client
+			// for non-inherit models to avoid mutating the shared parent.
+			const {client, restoreParent} = await this.prepareClient(
+				config,
+				!!agentId,
+			);
 
 			try {
 				const output = await this.runSubagentConversation(
@@ -122,13 +141,19 @@ export class SubagentExecutor {
 					config.maxTurns,
 					config,
 					signal,
+					agentId,
 				);
+
+				// Read final token count from the correct progress source
+				const finalTokenCount = agentId
+					? getSubagentProgress(agentId).tokenCount
+					: subagentProgress.tokenCount;
 
 				return {
 					subagentName: config.name,
 					output,
 					success: true,
-					tokensUsed: subagentProgress.tokenCount,
+					tokensUsed: finalTokenCount,
 					executionTimeMs: Date.now() - startTime,
 				};
 			} finally {
@@ -240,8 +265,14 @@ export class SubagentExecutor {
 	 * backend (e.g. local Ollama for research, cloud API for the main agent).
 	 *
 	 * If no provider is set, reuses the parent client (switching model if needed).
+	 *
+	 * @param concurrent - When true, creates a new client instead of mutating
+	 *                     the parent client's model (safe for parallel execution).
 	 */
-	private async prepareClient(config: SubagentConfigWithSource): Promise<{
+	private async prepareClient(
+		config: SubagentConfigWithSource,
+		concurrent = false,
+	): Promise<{
 		client: LLMClient;
 		restoreParent: () => void;
 	}> {
@@ -256,6 +287,13 @@ export class SubagentExecutor {
 
 		// Same provider, different model
 		if (config.model && config.model !== 'inherit') {
+			// In concurrent mode, create a new client to avoid mutating the
+			// shared parent client (which would race with other agents)
+			if (concurrent) {
+				const {client} = await createLLMClient(undefined, config.model);
+				return {client, restoreParent: () => {}};
+			}
+
 			const availableModels = await this.parentClient.getAvailableModels();
 			if (!availableModels.includes(config.model)) {
 				throw new Error(
@@ -277,6 +315,9 @@ export class SubagentExecutor {
 
 	/**
 	 * Run the subagent conversation loop.
+	 *
+	 * @param agentId - When provided, writes progress to the agent-specific
+	 *                  slot instead of the global singleton.
 	 */
 	private async runSubagentConversation(
 		client: LLMClient,
@@ -285,6 +326,7 @@ export class SubagentExecutor {
 		maxTurns: number | undefined,
 		config: SubagentConfigWithSource,
 		signal?: AbortSignal,
+		agentId?: string,
 	): Promise<string> {
 		const maxIterations = maxTurns ?? 10;
 		let iterations = 0;
@@ -298,19 +340,35 @@ export class SubagentExecutor {
 			status: 'running' | 'tool_call' | 'complete' | 'error',
 			currentTool?: string,
 		) => {
-			updateSubagentProgress({
+			const event = {
 				subagentName: config.name,
 				status,
 				currentTool,
 				toolCallCount: totalToolCalls,
 				turnCount: iterations,
 				tokenCount: totalTokens,
-			});
+			};
+
+			if (agentId) {
+				updateSubagentProgressById(agentId, event);
+			} else {
+				updateSubagentProgress(event);
+			}
 		};
 
 		emitProgress('running');
 
+		// Keep a direct reference to the mutable progress object for the
+		// onToken callback (which fires frequently and must be fast).
+		const progressRef = agentId ? getSubagentProgress(agentId) : null;
+
 		while (iterations < maxIterations) {
+			// Check for cancellation before each turn
+			if (signal?.aborted) {
+				emitProgress('error');
+				throw new Error('Aborted');
+			}
+
 			iterations++;
 
 			// Yield to event loop so Ink can render current state
@@ -323,7 +381,16 @@ export class SubagentExecutor {
 				{
 					onToken: () => {
 						totalTokens++;
-						subagentProgress.tokenCount = totalTokens;
+						// Update the live token count directly on the mutable
+						// progress object so the UI polls the latest value.
+						if (agentId) {
+							const progress = progressRef;
+							if (progress) {
+								progress.tokenCount = totalTokens;
+							}
+						} else {
+							subagentProgress.tokenCount = totalTokens;
+						}
 					},
 				},
 				signal,
@@ -354,6 +421,12 @@ export class SubagentExecutor {
 
 			// Execute each tool call — yield between each so Ink can render
 			for (const toolCall of toolCalls) {
+				// Check for cancellation before each tool call
+				if (signal?.aborted) {
+					emitProgress('error');
+					throw new Error('Aborted');
+				}
+
 				const toolName = toolCall.function.name;
 				totalToolCalls++;
 				emitProgress('tool_call', toolName);

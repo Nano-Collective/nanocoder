@@ -234,10 +234,12 @@ export function buildSystemPrompt(
 
 You can delegate focused tasks to specialized subagents using the \`agent\` tool. Each subagent runs in its own isolated context with its own conversation history and returns only its final result to you. This saves your context window and lets subagents focus on specific tasks.
 
+You can call the \`agent\` tool multiple times in a single response. All agent calls will execute in parallel for maximum efficiency. Use this when you have multiple independent research or exploration tasks.
+
 Use subagents when:
 - You need to explore the codebase without filling your context with search results
 - A task requires focused research or investigation that would clutter the main conversation
-- You want to parallelize work conceptually (research while planning)
+- You want to parallelize independent tasks (e.g. researching different parts of the codebase simultaneously)
 
 ### Available subagents:
 

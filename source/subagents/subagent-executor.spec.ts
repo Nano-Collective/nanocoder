@@ -494,3 +494,202 @@ test.serial('filterTools respects disallowedTools from config', async t => {
 	t.true('read_file' in capturedTools, 'non-disallowed tool should be present');
 	t.false('search_file_contents' in capturedTools, 'disallowed tool should be excluded');
 });
+
+// ============================================================================
+// Parallel execution tests
+// ============================================================================
+
+test.serial('concurrent agents with agentId have isolated progress', async t => {
+	const {
+		getSubagentProgress,
+		resetSubagentProgressById,
+		clearAllSubagentProgress,
+	} = await import('@/services/subagent-events.js');
+
+	clearAllSubagentProgress();
+
+	const toolManager = createMockToolManager({
+		read_file: {handler: async () => 'content', readOnly: true},
+	});
+
+	const client1 = createMockClient([{content: 'Result from agent 1'}]);
+	const client2 = createMockClient([{content: 'Result from agent 2'}]);
+
+	const executor1 = new SubagentExecutor(toolManager, client1);
+	const executor2 = new SubagentExecutor(toolManager, client2);
+
+	resetSubagentProgressById('agent-1');
+	resetSubagentProgressById('agent-2');
+
+	const [result1, result2] = await Promise.all([
+		executor1.execute(
+			{subagent_type: 'research', description: 'Task 1'},
+			undefined,
+			0,
+			'agent-1',
+		),
+		executor2.execute(
+			{subagent_type: 'research', description: 'Task 2'},
+			undefined,
+			0,
+			'agent-2',
+		),
+	]);
+
+	t.true(result1.success);
+	t.true(result2.success);
+	t.is(result1.output, 'Result from agent 1');
+	t.is(result2.output, 'Result from agent 2');
+
+	// Progress should be isolated
+	const p1 = getSubagentProgress('agent-1');
+	const p2 = getSubagentProgress('agent-2');
+	t.is(p1.status, 'complete');
+	t.is(p2.status, 'complete');
+
+	clearAllSubagentProgress();
+});
+
+test.serial('error in one parallel agent does not break the other', async t => {
+	const {clearAllSubagentProgress, resetSubagentProgressById} =
+		await import('@/services/subagent-events.js');
+
+	clearAllSubagentProgress();
+
+	const toolManager = createMockToolManager();
+
+	const successClient = createMockClient([{content: 'Success result'}]);
+	const failClient = createMockClient([]);
+	(failClient as any).chat = async () => {
+		throw new Error('LLM provider unavailable');
+	};
+
+	const executor1 = new SubagentExecutor(toolManager, successClient);
+	const executor2 = new SubagentExecutor(toolManager, failClient);
+
+	resetSubagentProgressById('ok-agent');
+	resetSubagentProgressById('fail-agent');
+
+	const [result1, result2] = await Promise.all([
+		executor1.execute(
+			{subagent_type: 'research', description: 'Will succeed'},
+			undefined,
+			0,
+			'ok-agent',
+		),
+		executor2.execute(
+			{subagent_type: 'research', description: 'Will fail'},
+			undefined,
+			0,
+			'fail-agent',
+		),
+	]);
+
+	t.true(result1.success, 'First agent should succeed');
+	t.is(result1.output, 'Success result');
+
+	t.false(result2.success, 'Second agent should fail');
+	t.regex(result2.error || '', /unavailable/);
+
+	clearAllSubagentProgress();
+});
+
+test.serial('prepareClient creates independent client in concurrent mode', async t => {
+	const toolManager = createMockToolManager();
+	const client = createMockClient([{content: 'Done'}]);
+
+	// Track model changes on the parent client
+	const modelChanges: string[] = [];
+	const originalSetModel = client.setModel.bind(client);
+	client.setModel = (model: string) => {
+		modelChanges.push(model);
+		originalSetModel(model);
+	};
+
+	const executor = new SubagentExecutor(toolManager, client);
+
+	// Override to request a specific model
+	const loader = getSubagentLoader();
+	const originalGetSubagent = loader.getSubagent.bind(loader);
+	loader.getSubagent = async (name: string) => {
+		if (name === 'research') {
+			const agent = await originalGetSubagent(name);
+			if (agent) {
+				return {...agent, model: 'different-model'};
+			}
+		}
+		return originalGetSubagent(name);
+	};
+
+	// Execute with agentId (concurrent mode) — should NOT mutate parent client
+	// Note: createLLMClient will fail since there's no real provider,
+	// so the execute will fail, but the point is that setModel is NOT called
+	await executor.execute(
+		{subagent_type: 'research', description: 'Test concurrent client'},
+		undefined,
+		0,
+		'concurrent-agent',
+	);
+
+	loader.getSubagent = originalGetSubagent;
+
+	// In concurrent mode, prepareClient should create a new client
+	// rather than calling setModel on the parent
+	t.is(modelChanges.length, 0, 'Parent client model should not be mutated in concurrent mode');
+});
+
+test.serial('concurrent agents with same type both complete', async t => {
+	const {clearAllSubagentProgress, resetSubagentProgressById} =
+		await import('@/services/subagent-events.js');
+
+	clearAllSubagentProgress();
+
+	const toolManager = createMockToolManager({
+		read_file: {handler: async () => 'file content', readOnly: true},
+	});
+
+	// Both agents use the same type but get different responses
+	const client1 = createMockClient([
+		{
+			content: '',
+			tool_calls: [{id: 'tc1', function: {name: 'read_file', arguments: '{"path": "a.ts"}'}}],
+		},
+		{content: 'Agent 1 found a.ts'},
+	]);
+
+	const client2 = createMockClient([
+		{
+			content: '',
+			tool_calls: [{id: 'tc2', function: {name: 'read_file', arguments: '{"path": "b.ts"}'}}],
+		},
+		{content: 'Agent 2 found b.ts'},
+	]);
+
+	const executor1 = new SubagentExecutor(toolManager, client1);
+	const executor2 = new SubagentExecutor(toolManager, client2);
+
+	resetSubagentProgressById('same-type-1');
+	resetSubagentProgressById('same-type-2');
+
+	const [r1, r2] = await Promise.all([
+		executor1.execute(
+			{subagent_type: 'research', description: 'Find a.ts'},
+			undefined,
+			0,
+			'same-type-1',
+		),
+		executor2.execute(
+			{subagent_type: 'research', description: 'Find b.ts'},
+			undefined,
+			0,
+			'same-type-2',
+		),
+	]);
+
+	t.true(r1.success);
+	t.true(r2.success);
+	t.is(r1.output, 'Agent 1 found a.ts');
+	t.is(r2.output, 'Agent 2 found b.ts');
+
+	clearAllSubagentProgress();
+});
