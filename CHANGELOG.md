@@ -1,3 +1,55 @@
+# 1.25.0
+
+- Added **yolo mode** — a new development mode that auto-accepts every tool without exception, including bash commands and destructive git operations (hard reset, force delete, stash drop/clear). Cycles between normal → auto-accept → yolo → plan via Shift+Tab. The status bar turns red when yolo mode is active.
+
+- Added subagents — isolated child conversations that the LLM can delegate work to. Ships with two built-in agents: **Explore** (read-only codebase investigation) and **Reviewer** (code review with actionable feedback). Subagents are defined as markdown files with YAML frontmatter specifying name, description, model, and allowed tools. User-defined subagents can be placed in `.nanocoder/agents/`. Managed via the `/agents` command (`show`, `create`). Thanks to @brijeshkr for the initial subagent implementation. Closes #414.
+
+- Added concurrent subagent execution. The LLM can launch multiple subagents in parallel, each with independent tool sets and live in-place progress rendering via the `AgentProgress` component.
+
+- Added subagent tool approval matching main agent behaviour. Subagent write tools prompt for approval and bash always prompts unless in `alwaysAllow`. The `agent` tool itself no longer requires approval since internal tools have their own gates.
+
+- Redesigned the system prompt into a modular, composable architecture. The monolithic `main-prompt.md` has been replaced with individual section files under `source/app/prompts/sections/` (identity, core principles, coding practices, file editing, tool rules, diagnostics, task management, etc.). The new `prompt-builder` assembles the prompt dynamically based on the current mode — normal, auto-accept, plan, and scheduler each get a tailored prompt with only the sections and tools relevant to that mode. Includes a `generate-system-prompts` script for offline token counting and prompt inspection.
+
+- Made plan mode useful. Plan mode now enforces read-only tools at the policy level — all mutation tools (write, bash, git commit/push, task management) are blocked, leaving only exploration tools (read, search, find, list, git log/diff/status). The dedicated plan mode system prompt instructs the LLM to investigate thoroughly and produce a structured plan with summary, files to modify, step-by-step approach, dependencies/risks, and open questions — instead of trying to execute changes.
+
+- Added `/tune` command for per-session prompt and tool customization. Includes a tune selector UI (`Ctrl+T`) with tool profiles (full, minimal), a `disableNativeTools` toggle for forcing XML fallback, and aggressive compact mode. Tune state persists for the session and is reflected in the mode indicator.
+
+- Centralized tool policy into `ToolManager` so prompt-time tool filtering and runtime approval use the same source of truth. Extracted `tool-registry.ts` for cleaner separation of tool definitions from policy logic.
+
+- Added ChatGPT Codex as a provider with OAuth device flow authentication (`/codex-login`), streaming response support via a dedicated `StreamingMessage` component, and Codex-specific credential management. Includes provider template and setup wizard integration.
+
+- Migrated `web_search` tool from Brave Search scraping to the official Brave Search API. Now requires a `webSearch.apiKey` in `agents.config.json` under `nanocoderTools`. Removes the `cheerio` scraping dependency.
+
+- Added `/setup-config` command that lists all config files (project and global `agents.config.json`, `.mcp.json`, `nanocoder-preferences.json`) with their paths and opens the selected one in your editor.
+
+- Added configurable paste threshold for single-line paste handling, with tests for the configurable placeholder threshold. The threshold is a user preference in `nanocoder-preferences.json`. Changed the default config file for paste settings from `agents.config.json` to `nanocoder-preferences.json`. Thanks to @grenkoca.
+
+- Added live in-place task list display. Task progress now updates in place instead of appending repeated static lists to the conversation.
+
+- Improved tool output truncation across all tools. Every tool formatter now respects terminal width for cleaner output, including `execute_bash`, file ops, git tools, `search_file_contents`, and `web_search`.
+
+- Redesigned the provider setup wizard with a unified model fetcher that auto-detects API compatibility (OpenAI-compatible, Ollama, Anthropic, Google) and fetches available models from the provider's endpoint. Simplified the provider step UI and added MiniMax and Kimi provider templates.
+
+- Fix: `alwaysAllow` config not being respected for `execute_bash`. Three interconnected bugs prevented it from working: top-level `alwaysAllow` was never loaded from `agents.config.json`, `isNanocoderToolAlwaysAllowed` only checked `nanocoderTools.alwaysAllow` not the top-level list, and `nonInteractiveAlwaysAllow` set `needsApproval` on AI SDK tools but the conversation loop evaluated it from the original registry entries. Closes #431.
+
+- Fix: `dimColor` making text inaccessible to reading on some screens. Closes #440.
+
+- Fix: Tasks now clear when running `/clear` command.
+
+- Fix: Prevent edit flow from resolving MiniMax/Kimi to Anthropic template.
+
+- Fix: Set correct default model for MiniMax provider.
+
+- Fix: `/usage` and context percentage showing stale system prompt length. Added `setLastBuiltPrompt` and fixed `useContextPercentage` overwriting cache.
+
+- Security: Address semgrep security finding in console.error. Thanks to @brijeshkr.
+
+- Security: Fixed vulnerable packages. Thanks to @brijeshkr.
+
+- Dependency updates: `ink` 6.8.0, `@ai-sdk/openai-compatible` 2.0.35, `@ai-sdk/openai` 3.0.50, `@ai-sdk/google` 3.0.58, `@modelcontextprotocol/sdk` 1.29.0, `dotenv` 17.4.0, `sonic-boom` 5.0.0, `diff` 8.0.4, `esbuild` 0.27.4, `eslint` 10.1.0, `knip` 6.0.6.
+
+If there are any problems, feedback or thoughts please drop an issue or message us through Discord! Thank you for using Nanocoder.
+
 # 1.24.1
 
 - Added `--context-max` CLI flag for setting the context limit from the command line, complementing the existing `/context-max` command and `NANOCODER_CONTEXT_LIMIT` env variable.
