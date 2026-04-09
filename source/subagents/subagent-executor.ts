@@ -18,7 +18,9 @@ import type {
 	DevelopmentMode,
 	LLMClient,
 	Message,
+	ToolCall,
 } from '@/types/core';
+import {signalToolApproval} from '@/utils/tool-approval-queue';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {getSubagentLoader} from './subagent-loader.js';
 import type {
@@ -435,6 +437,7 @@ export class SubagentExecutor {
 				const toolResult = await this.executeToolCall(
 					toolName,
 					toolCall.function.arguments,
+					toolCall.id,
 					config,
 					signal,
 				);
@@ -464,11 +467,47 @@ export class SubagentExecutor {
 	}
 
 	/**
-	 * Execute a single tool call with permission enforcement and argument parsing.
+	 * Check if a tool needs user approval.
+	 * Uses the same logic as the main conversation loop.
+	 */
+	private async toolNeedsApproval(
+		toolName: string,
+		rawArguments: unknown,
+	): Promise<boolean> {
+		const toolEntry = this.toolManager.getToolEntry(toolName);
+		if (!toolEntry?.tool) return true; // Unknown tools need approval
+
+		const needsApprovalProp = (
+			toolEntry.tool as unknown as {
+				needsApproval?:
+					| boolean
+					| ((args: unknown) => boolean | Promise<boolean>);
+			}
+		).needsApproval;
+
+		if (typeof needsApprovalProp === 'boolean') {
+			return needsApprovalProp;
+		}
+
+		if (typeof needsApprovalProp === 'function') {
+			try {
+				const parsedArgs = parseToolArguments(rawArguments);
+				return await needsApprovalProp(parsedArgs);
+			} catch {
+				return true;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * Execute a single tool call with permission enforcement, approval, and argument parsing.
 	 */
 	private async executeToolCall(
 		toolName: string,
 		rawArguments: unknown,
+		toolCallId: string,
 		config: SubagentConfigWithSource,
 		signal?: AbortSignal,
 	): Promise<string> {
@@ -484,6 +523,28 @@ export class SubagentExecutor {
 		const toolHandler = this.toolManager.getToolHandler(toolName);
 		if (!toolHandler) {
 			return `Error: Tool '${toolName}' not found`;
+		}
+
+		// Check if this tool needs user approval
+		const needsApproval = await this.toolNeedsApproval(toolName, rawArguments);
+		if (needsApproval) {
+			const parsedArgs = parseToolArguments(rawArguments);
+			const toolCall: ToolCall = {
+				id: toolCallId,
+				function: {
+					name: toolName,
+					arguments: parsedArgs,
+				},
+			};
+
+			const approved = await signalToolApproval({
+				toolCall,
+				subagentName: config.name,
+			});
+
+			if (!approved) {
+				return 'Tool execution was denied by the user.';
+			}
 		}
 
 		try {

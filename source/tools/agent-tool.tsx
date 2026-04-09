@@ -7,8 +7,6 @@
  */
 
 import {randomUUID} from 'node:crypto';
-import {isNanocoderToolAlwaysAllowed} from '@/config/nanocoder-tools-config';
-import {getCurrentMode} from '@/context/mode-context';
 import type {SubagentExecutor} from '@/subagents/subagent-executor.js';
 import {getSubagentLoader} from '@/subagents/subagent-loader.js';
 import {jsonSchema, tool} from '@/types/core';
@@ -171,11 +169,7 @@ const agentCoreTool = tool({
 		},
 		required: ['subagent_type', 'description'],
 	}),
-	needsApproval: () => {
-		if (isNanocoderToolAlwaysAllowed('agent')) return false;
-		const mode = getCurrentMode();
-		return mode !== 'auto-accept' && mode !== 'scheduler';
-	},
+	needsApproval: false,
 	execute: async args => {
 		return await executeAgent(args);
 	},

@@ -3,12 +3,13 @@ import {SubagentExecutor} from './subagent-executor.js';
 import {SubagentLoader, getSubagentLoader} from './subagent-loader.js';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {LLMClient, LLMChatResponse} from '@/types/core';
+import {setGlobalToolApprovalHandler} from '@/utils/tool-approval-queue';
 
 console.log('\nsubagent-executor.spec.ts');
 
 // Helper to create a mock tool manager
 function createMockToolManager(
-	tools: Record<string, {handler: (args: unknown) => Promise<string>; readOnly: boolean}> = {},
+	tools: Record<string, {handler: (args: unknown) => Promise<string>; readOnly: boolean; needsApproval?: boolean}> = {},
 ): ToolManager {
 	return {
 		getAllTools: () => {
@@ -26,6 +27,15 @@ function createMockToolManager(
 			return result;
 		},
 		getToolHandler: (name: string) => tools[name]?.handler,
+		getToolEntry: (name: string) => {
+			const tool = tools[name];
+			if (!tool) return undefined;
+			return {
+				tool: {
+					needsApproval: tool.needsApproval ?? false,
+				},
+			};
+		},
 		isReadOnly: (name: string) => tools[name]?.readOnly ?? false,
 		getToolFormatter: () => undefined,
 		getStreamingFormatter: () => undefined,
@@ -59,10 +69,13 @@ function createMockClient(
 	} as unknown as LLMClient;
 }
 
-// Ensure loader is initialized before tests
+// Ensure loader is initialized before tests and set up auto-approve handler
 test.before(async () => {
 	const loader = getSubagentLoader();
 	await loader.initialize();
+
+	// Auto-approve all tool calls in tests (mirrors auto-accept mode)
+	setGlobalToolApprovalHandler(async () => true);
 });
 
 test.serial('executes a simple task without tool calls', async t => {

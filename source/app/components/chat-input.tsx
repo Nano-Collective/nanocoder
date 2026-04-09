@@ -11,6 +11,7 @@ import {useTheme} from '@/hooks/useTheme';
 import type {Task} from '@/tools/tasks/types';
 import type {DevelopmentMode, ToolCall, TuneConfig} from '@/types';
 import type {PendingQuestion} from '@/utils/question-queue';
+import type {PendingToolApproval} from '@/utils/tool-approval-queue';
 import {LiveCompactCounts} from '@/utils/tool-result-display';
 
 export interface ChatInputProps {
@@ -27,6 +28,10 @@ export interface ChatInputProps {
 	// Question state (ask_question tool)
 	pendingQuestion: PendingQuestion | null;
 	onQuestionAnswer: (answer: string) => void;
+
+	// Subagent tool approval
+	pendingSubagentApproval: PendingToolApproval | null;
+	onSubagentToolApproval: (confirmed: boolean) => void;
 
 	// Client state
 	mcpInitialized: boolean;
@@ -73,6 +78,8 @@ export function ChatInput({
 	currentToolIndex,
 	pendingQuestion,
 	onQuestionAnswer,
+	pendingSubagentApproval,
+	onSubagentToolApproval,
 	mcpInitialized,
 	client,
 	nonInteractivePrompt,
@@ -112,8 +119,15 @@ export function ChatInput({
 
 			{isCancelling && <CancellingIndicator />}
 
-			{/* Tool Confirmation */}
-			{isToolConfirmationMode && pendingToolCalls[currentToolIndex] ? (
+			{/* Subagent Tool Approval — takes priority since subagent is blocked */}
+			{pendingSubagentApproval ? (
+				<ToolConfirmation
+					toolCall={pendingSubagentApproval.toolCall}
+					onConfirm={onSubagentToolApproval}
+					onCancel={() => onSubagentToolApproval(false)}
+				/>
+			) : /* Tool Confirmation */
+			isToolConfirmationMode && pendingToolCalls[currentToolIndex] ? (
 				<ToolConfirmation
 					toolCall={pendingToolCalls[currentToolIndex]}
 					onConfirm={onToolConfirm}

@@ -7,10 +7,10 @@ tools:
   - search_file_contents
   - find_files
   - list_directory
+  - lsp_get_diagnostics
   - git_status
   - git_log
   - git_diff
-  - lsp_get_diagnostics
 permissionMode: readOnly
 maxTurns: 15
 ---
