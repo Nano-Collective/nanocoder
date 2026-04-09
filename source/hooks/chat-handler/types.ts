@@ -32,6 +32,7 @@ export interface UseChatHandlerProps {
 	onSetCompactToolCounts?: (counts: Record<string, number> | null) => void;
 	compactToolCountsRef?: React.MutableRefObject<Record<string, number>>;
 	onSetLiveTaskList?: (tasks: Task[] | null) => void;
+	setLiveComponent?: (component: React.ReactNode) => void;
 	tune?: TuneConfig;
 }
 

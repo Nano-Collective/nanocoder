@@ -348,6 +348,7 @@ export default function App({
 		onSetCompactToolCounts: appState.setCompactToolCounts,
 		compactToolCountsRef: appState.compactToolCountsRef,
 		onSetLiveTaskList: appState.setLiveTaskList,
+		setLiveComponent: appState.setLiveComponent,
 		tune: appState.tune,
 	});
 

@@ -84,7 +84,7 @@ test.serial('agents copy - copies built-in agent to project directory', async t 
 		const {options, components} = createMockOptions();
 
 		const handled = await handleAgentCopy(
-			['agents', 'copy', 'research'],
+			['agents', 'copy', 'explore'],
 			options as any,
 		);
 
@@ -92,12 +92,12 @@ test.serial('agents copy - copies built-in agent to project directory', async t 
 		t.is(components.length, 1);
 
 		// Should have created the file
-		const filePath = join(agentsDir, 'research.md');
-		t.true(existsSync(filePath), 'research.md should exist');
+		const filePath = join(agentsDir, 'explore.md');
+		t.true(existsSync(filePath), 'explore.md should exist');
 
 		// File should contain the agent content
 		const content = readFileSync(filePath, 'utf-8');
-		t.true(content.includes('name: research'), 'Should contain agent name');
+		t.true(content.includes('name: explore'), 'Should contain agent name');
 		t.true(content.includes('read_file'), 'Should contain tool names');
 	} finally {
 		process.chdir(originalCwd);
@@ -115,12 +115,12 @@ test.serial('agents copy - shows error if file already exists', async t => {
 
 		// Pre-create the file
 		mkdirSync(agentsDir, {recursive: true});
-		writeFileSync(join(agentsDir, 'research.md'), 'existing content');
+		writeFileSync(join(agentsDir, 'explore.md'), 'existing content');
 
 		const {options, components} = createMockOptions();
 
 		const handled = await handleAgentCopy(
-			['agents', 'copy', 'research'],
+			['agents', 'copy', 'explore'],
 			options as any,
 		);
 
@@ -130,7 +130,7 @@ test.serial('agents copy - shows error if file already exists', async t => {
 		t.is(el.type.name || (el.type as any).displayName, 'ErrorMessage');
 
 		// Original content should be preserved
-		const content = readFileSync(join(agentsDir, 'research.md'), 'utf-8');
+		const content = readFileSync(join(agentsDir, 'explore.md'), 'utf-8');
 		t.is(content, 'existing content');
 	} finally {
 		process.chdir(originalCwd);

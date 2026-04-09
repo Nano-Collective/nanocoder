@@ -1,6 +1,6 @@
 import React from 'react';
 import type {ConversationStateManager} from '@/app/utils/conversation-state';
-import AgentProgress from '@/components/agent-progress';
+import AgentProgress, {MultiAgentProgress} from '@/components/agent-progress';
 import {ErrorMessage} from '@/components/message-box';
 import {
 	clearAllSubagentProgress,
@@ -134,6 +134,7 @@ const executeAgentBatch = async (
 	addToChatQueue: (component: React.ReactNode) => void,
 	getNextComponentKey: () => number,
 	compactDisplay?: boolean,
+	setLiveComponent?: (component: React.ReactNode) => void,
 ): Promise<
 	Array<{
 		toolCall: ToolCall;
@@ -173,10 +174,43 @@ const executeAgentBatch = async (
 		return {toolCall, agentId, agentName, agentDesc, promise};
 	});
 
+	// Show live progress
+	if (setLiveComponent && agentExecutions.length > 0) {
+		const agentInfos = agentExecutions.map(e => ({
+			agentId: e.agentId,
+			subagentName: e.agentName,
+			description: e.agentDesc,
+		}));
+
+		if (agentExecutions.length === 1) {
+			const e = agentExecutions[0];
+			setLiveComponent(
+				<AgentProgress
+					key={`agent-live-direct-${e.toolCall.id}-${Date.now()}`}
+					subagentName={e.agentName}
+					description={e.agentDesc}
+					agentId={e.agentId}
+					isLive={true}
+				/>,
+			);
+		} else {
+			setLiveComponent(
+				<MultiAgentProgress
+					key={`multi-agent-live-direct-${Date.now()}`}
+					agents={agentInfos}
+					isLive={true}
+				/>,
+			);
+		}
+	}
+
 	// Await all results
 	const settledResults = await Promise.allSettled(
 		agentExecutions.map(e => e.promise),
 	);
+
+	// Clear live progress
+	setLiveComponent?.(null);
 
 	// Build results
 	const results: Array<{toolCall: ToolCall; result: ToolResult}> = [];
@@ -210,7 +244,7 @@ const executeAgentBatch = async (
 
 		results.push({toolCall: e.toolCall, result});
 
-		// Display completed state
+		// Compact: one-liner via displayToolResult. Non-compact: AgentProgress.
 		if (compactDisplay) {
 			await displayToolResult(
 				e.toolCall,
@@ -218,6 +252,7 @@ const executeAgentBatch = async (
 				toolManager,
 				addToChatQueue,
 				getNextComponentKey,
+				true, // force compact — prevents raw output dump
 			);
 		} else {
 			addToChatQueue(
@@ -271,6 +306,7 @@ export const executeToolsDirectly = async (
 		compactDisplay?: boolean;
 		onCompactToolCount?: (toolName: string) => void;
 		onLiveTaskUpdate?: () => void;
+		setLiveComponent?: (component: React.ReactNode) => void;
 	},
 ): Promise<ToolResult[]> => {
 	// Import processToolUse here to avoid circular dependencies
@@ -296,6 +332,7 @@ export const executeToolsDirectly = async (
 				addToChatQueue,
 				getNextComponentKey,
 				options?.compactDisplay,
+				options?.setLiveComponent,
 			);
 
 			// Agent results are already displayed by executeAgentBatch

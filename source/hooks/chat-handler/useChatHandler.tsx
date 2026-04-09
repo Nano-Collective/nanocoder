@@ -39,6 +39,7 @@ export function useChatHandler({
 	onSetCompactToolCounts,
 	compactToolCountsRef,
 	onSetLiveTaskList,
+	setLiveComponent,
 	tune,
 }: UseChatHandlerProps): ChatHandlerReturn {
 	// Conversation state manager for enhanced context
@@ -159,6 +160,7 @@ export function useChatHandler({
 					onSetCompactToolCounts,
 					compactToolCountsRef,
 					onSetLiveTaskList,
+					setLiveComponent,
 					tune,
 				});
 			} catch (error) {
@@ -190,6 +192,7 @@ export function useChatHandler({
 			tune,
 			displayError,
 			resetStreamingState,
+			setLiveComponent,
 		],
 	);
 

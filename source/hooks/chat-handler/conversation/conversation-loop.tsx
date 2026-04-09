@@ -55,6 +55,7 @@ interface ProcessAssistantResponseParams {
 	onSetCompactToolCounts?: (counts: Record<string, number> | null) => void;
 	compactToolCountsRef?: React.MutableRefObject<Record<string, number>>;
 	onSetLiveTaskList?: (tasks: Task[] | null) => void;
+	setLiveComponent?: (component: React.ReactNode) => void;
 	tune?: TuneConfig;
 }
 
@@ -102,6 +103,7 @@ export const processAssistantResponse = async (
 		onSetCompactToolCounts,
 		compactToolCountsRef,
 		onSetLiveTaskList,
+		setLiveComponent,
 		tune,
 		developmentMode,
 	} = params;
@@ -516,6 +518,7 @@ export const processAssistantResponse = async (
 							onSetLiveTaskList?.(tasks);
 						});
 					},
+					setLiveComponent,
 				},
 			);
 

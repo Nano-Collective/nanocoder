@@ -84,13 +84,13 @@ test.serial('executes a simple task without tool calls', async t => {
 	const executor = new SubagentExecutor(toolManager, client);
 
 	const result = await executor.execute({
-		subagent_type: 'research',
+		subagent_type: 'explore',
 		description: 'Find all test files',
 	});
 
 	t.true(result.success);
 	t.is(result.output, 'Here are the results');
-	t.is(result.subagentName, 'research');
+	t.is(result.subagentName, 'explore');
 	t.true(result.executionTimeMs >= 0);
 });
 
@@ -114,7 +114,7 @@ test.serial('respects max recursion depth', async t => {
 	const executor = new SubagentExecutor(toolManager, client);
 
 	const result = await executor.execute(
-		{subagent_type: 'research', description: 'Test'},
+		{subagent_type: 'explore', description: 'Test'},
 		undefined,
 		5, // depth exceeds MAX_SUBAGENT_DEPTH
 	);
@@ -149,7 +149,7 @@ test.serial('executes tool calls and returns final response', async t => {
 	const executor = new SubagentExecutor(toolManager, client);
 
 	const result = await executor.execute({
-		subagent_type: 'research',
+		subagent_type: 'explore',
 		description: 'Read test.ts',
 	});
 
@@ -186,7 +186,7 @@ test.serial('tools needing approval are surfaced via signalToolApproval', async 
 	const executor = new SubagentExecutor(toolManager, client);
 
 	const result = await executor.execute({
-		subagent_type: 'research',
+		subagent_type: 'explore',
 		description: 'Test tool approval',
 	});
 
@@ -220,7 +220,7 @@ test.serial('handles tool execution errors gracefully', async t => {
 	const executor = new SubagentExecutor(toolManager, client);
 
 	const result = await executor.execute({
-		subagent_type: 'research',
+		subagent_type: 'explore',
 		description: 'Test error handling',
 	});
 
@@ -236,7 +236,7 @@ test.serial('restores model after execution', async t => {
 	const originalModel = client.getCurrentModel();
 
 	await executor.execute({
-		subagent_type: 'research', // uses 'inherit' model, no change expected
+		subagent_type: 'explore', // uses 'inherit' model, no change expected
 		description: 'Test',
 	});
 
@@ -259,7 +259,7 @@ test.serial('handles unknown tool calls', async t => {
 	const executor = new SubagentExecutor(toolManager, client);
 
 	const result = await executor.execute({
-		subagent_type: 'research',
+		subagent_type: 'explore',
 		description: 'Test unknown tool',
 	});
 
@@ -302,7 +302,7 @@ test.serial('respects abort signal', async t => {
 	const executor = new SubagentExecutor(toolManager, client);
 
 	const result = await executor.execute(
-		{subagent_type: 'research', description: 'Test abort'},
+		{subagent_type: 'explore', description: 'Test abort'},
 		abortController.signal,
 	);
 
@@ -332,7 +332,7 @@ test.serial('filterTools excludes agent tool from subagent', async t => {
 
 	const executor = new SubagentExecutor(toolManager, client);
 	await executor.execute({
-		subagent_type: 'research',
+		subagent_type: 'explore',
 		description: 'Test agent exclusion',
 	});
 
@@ -350,13 +350,13 @@ test.serial('throws error for unavailable model', async t => {
 	// getAvailableModels returns only test-model-sonnet-v1
 	const executor = new SubagentExecutor(toolManager, client);
 
-	// The research agent uses 'inherit', so we need a custom agent with a bad model.
+	// The explore agent uses 'inherit', so we need a custom agent with a bad model.
 	// We can't easily test this without a custom subagent, so test via the error path:
 	// Override getSubagent to return a config with a bad model
 	const loader = getSubagentLoader();
 	const originalGetSubagent = loader.getSubagent.bind(loader);
 	loader.getSubagent = async (name: string) => {
-		if (name === 'research') {
+		if (name === 'explore') {
 			const agent = await originalGetSubagent(name);
 			if (agent) {
 				return {...agent, model: 'nonexistent-model-xyz'};
@@ -366,7 +366,7 @@ test.serial('throws error for unavailable model', async t => {
 	};
 
 	const result = await executor.execute({
-		subagent_type: 'research',
+		subagent_type: 'explore',
 		description: 'Test bad model',
 	});
 
@@ -402,7 +402,7 @@ test.serial('filterTools respects allowlist from config', async t => {
 	const loader = getSubagentLoader();
 	const originalGetSubagent = loader.getSubagent.bind(loader);
 	loader.getSubagent = async (name: string) => {
-		if (name === 'research') {
+		if (name === 'explore') {
 			const agent = await originalGetSubagent(name);
 			if (agent) {
 				return {...agent, tools: ['read_file']};
@@ -413,7 +413,7 @@ test.serial('filterTools respects allowlist from config', async t => {
 
 	const executor = new SubagentExecutor(toolManager, client);
 	await executor.execute({
-		subagent_type: 'research',
+		subagent_type: 'explore',
 		description: 'Test allowlist',
 	});
 
@@ -443,7 +443,7 @@ test.serial('filterTools respects disallowedTools from config', async t => {
 	const loader = getSubagentLoader();
 	const originalGetSubagent = loader.getSubagent.bind(loader);
 	loader.getSubagent = async (name: string) => {
-		if (name === 'research') {
+		if (name === 'explore') {
 			const agent = await originalGetSubagent(name);
 			if (agent) {
 				return {...agent, tools: undefined, disallowedTools: ['search_file_contents']};
@@ -454,7 +454,7 @@ test.serial('filterTools respects disallowedTools from config', async t => {
 
 	const executor = new SubagentExecutor(toolManager, client);
 	await executor.execute({
-		subagent_type: 'research',
+		subagent_type: 'explore',
 		description: 'Test disallowedTools',
 	});
 
@@ -492,13 +492,13 @@ test.serial('concurrent agents with agentId have isolated progress', async t => 
 
 	const [result1, result2] = await Promise.all([
 		executor1.execute(
-			{subagent_type: 'research', description: 'Task 1'},
+			{subagent_type: 'explore', description: 'Task 1'},
 			undefined,
 			0,
 			'agent-1',
 		),
 		executor2.execute(
-			{subagent_type: 'research', description: 'Task 2'},
+			{subagent_type: 'explore', description: 'Task 2'},
 			undefined,
 			0,
 			'agent-2',
@@ -541,13 +541,13 @@ test.serial('error in one parallel agent does not break the other', async t => {
 
 	const [result1, result2] = await Promise.all([
 		executor1.execute(
-			{subagent_type: 'research', description: 'Will succeed'},
+			{subagent_type: 'explore', description: 'Will succeed'},
 			undefined,
 			0,
 			'ok-agent',
 		),
 		executor2.execute(
-			{subagent_type: 'research', description: 'Will fail'},
+			{subagent_type: 'explore', description: 'Will fail'},
 			undefined,
 			0,
 			'fail-agent',
@@ -581,7 +581,7 @@ test.serial('prepareClient creates independent client in concurrent mode', async
 	const loader = getSubagentLoader();
 	const originalGetSubagent = loader.getSubagent.bind(loader);
 	loader.getSubagent = async (name: string) => {
-		if (name === 'research') {
+		if (name === 'explore') {
 			const agent = await originalGetSubagent(name);
 			if (agent) {
 				return {...agent, model: 'different-model'};
@@ -594,7 +594,7 @@ test.serial('prepareClient creates independent client in concurrent mode', async
 	// Note: createLLMClient will fail since there's no real provider,
 	// so the execute will fail, but the point is that setModel is NOT called
 	await executor.execute(
-		{subagent_type: 'research', description: 'Test concurrent client'},
+		{subagent_type: 'explore', description: 'Test concurrent client'},
 		undefined,
 		0,
 		'concurrent-agent',
@@ -642,13 +642,13 @@ test.serial('concurrent agents with same type both complete', async t => {
 
 	const [r1, r2] = await Promise.all([
 		executor1.execute(
-			{subagent_type: 'research', description: 'Find a.ts'},
+			{subagent_type: 'explore', description: 'Find a.ts'},
 			undefined,
 			0,
 			'same-type-1',
 		),
 		executor2.execute(
-			{subagent_type: 'research', description: 'Find b.ts'},
+			{subagent_type: 'explore', description: 'Find b.ts'},
 			undefined,
 			0,
 			'same-type-2',

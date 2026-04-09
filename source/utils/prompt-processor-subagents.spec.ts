@@ -14,18 +14,18 @@ test.serial('getSubagentDescriptions returns default before any call', t => {
 
 test.serial('setAvailableSubagents formats agent list', t => {
 	setAvailableSubagents([
-		{name: 'research', description: 'Codebase research agent'},
+		{name: 'explore', description: 'Codebase explore agent'},
 		{name: 'reviewer', description: 'Code review agent'},
 	]);
 
 	const result = getSubagentDescriptions();
-	t.true(result.includes('- **research**: Codebase research agent'));
+	t.true(result.includes('- **explore**: Codebase explore agent'));
 	t.true(result.includes('- **reviewer**: Code review agent'));
 });
 
 test.serial('setAvailableSubagents with empty array resets to default', t => {
 	setAvailableSubagents([
-		{name: 'research', description: 'test'},
+		{name: 'explore', description: 'test'},
 	]);
 	t.not(getSubagentDescriptions(), 'No subagents available.');
 
@@ -35,9 +35,9 @@ test.serial('setAvailableSubagents with empty array resets to default', t => {
 
 test.serial('setAvailableSubagents with single agent', t => {
 	setAvailableSubagents([
-		{name: 'research', description: 'Read-only codebase research'},
+		{name: 'explore', description: 'Read-only codebase explore'},
 	]);
 
 	const result = getSubagentDescriptions();
-	t.is(result, '- **research**: Read-only codebase research');
+	t.is(result, '- **explore**: Read-only codebase explore');
 });

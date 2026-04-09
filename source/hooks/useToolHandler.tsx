@@ -1,18 +1,9 @@
 import React, {useRef} from 'react';
-import AgentProgress, {MultiAgentProgress} from '@/components/agent-progress';
 import BashProgress from '@/components/bash-progress';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
 import {ConversationContext} from '@/hooks/useAppState';
 import {getToolManager, processToolUse} from '@/message-handler';
-import {
-	clearAllSubagentProgress,
-	getSubagentProgress,
-	resetSubagentProgressById,
-} from '@/services/subagent-events';
-import {MAX_CONCURRENT_AGENTS} from '@/subagents/subagent-executor';
-import type {AgentToolArgs} from '@/tools/agent-tool';
-import {startAgentExecution} from '@/tools/agent-tool';
 import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
 import {
 	DevelopmentMode,
@@ -76,7 +67,7 @@ export function useToolHandler({
 	currentProvider: _currentProvider,
 	setDevelopmentMode,
 	compactToolDisplay,
-	abortController,
+	abortController: _abortController,
 	setAbortController,
 }: UseToolHandlerProps) {
 	// Ref to hold the abort controller for the current tool execution phase.
@@ -166,180 +157,6 @@ export function useToolHandler({
 		setImmediate(() => {
 			void executeCurrentTool();
 		});
-	};
-
-	/**
-	 * Collect consecutive agent tool calls starting from a given index.
-	 * Returns the batch of agent tool calls and the index after the batch.
-	 */
-	const collectAgentBatch = (
-		startIndex: number,
-	): {batch: ToolCall[]; nextIndex: number} => {
-		const batch: ToolCall[] = [];
-		let i = startIndex;
-		while (i < pendingToolCalls.length) {
-			if (pendingToolCalls[i].function.name === 'agent') {
-				batch.push(pendingToolCalls[i]);
-				i++;
-			} else {
-				break;
-			}
-		}
-		return {batch, nextIndex: i};
-	};
-
-	/**
-	 * Execute multiple agent tools in parallel.
-	 * Shows a multi-agent progress component and awaits all results.
-	 * Enforces MAX_CONCURRENT_AGENTS — excess agents get an error result.
-	 */
-	const executeAgentBatch = async (
-		agentToolCalls: ToolCall[],
-	): Promise<ToolResult[]> => {
-		const signal = toolAbortControllerRef.current?.signal;
-
-		// Enforce concurrency limit — return error results for excess agents
-		const excessResults: ToolResult[] = [];
-		let toExecute = agentToolCalls;
-		if (agentToolCalls.length > MAX_CONCURRENT_AGENTS) {
-			const excess = agentToolCalls.slice(MAX_CONCURRENT_AGENTS);
-			toExecute = agentToolCalls.slice(0, MAX_CONCURRENT_AGENTS);
-			for (const toolCall of excess) {
-				excessResults.push({
-					tool_call_id: toolCall.id,
-					role: 'tool' as const,
-					name: toolCall.function.name,
-					content: `Error: Maximum concurrent agent limit (${MAX_CONCURRENT_AGENTS}) exceeded. Please retry this agent call separately.`,
-				});
-			}
-		}
-
-		// Parse args and start all agents
-		const agentExecutions = toExecute.map(toolCall => {
-			const parsedArgs = parseToolArguments(toolCall.function.arguments);
-			const agentName = parsedArgs.subagent_type as string;
-			const agentDesc = parsedArgs.description as string;
-
-			const {agentId, promise} = startAgentExecution(
-				parsedArgs as unknown as AgentToolArgs,
-				signal,
-			);
-
-			resetSubagentProgressById(agentId);
-
-			return {toolCall, agentId, agentName, agentDesc, promise};
-		});
-
-		// Show multi-agent progress (or single agent if only one)
-		const agentInfos = agentExecutions.map(e => ({
-			agentId: e.agentId,
-			subagentName: e.agentName,
-			description: e.agentDesc,
-		}));
-
-		if (agentExecutions.length === 1) {
-			const e = agentExecutions[0];
-			setLiveComponent(
-				<AgentProgress
-					key={`agent-live-${e.toolCall.id}-${getNextComponentKey()}-${Date.now()}`}
-					subagentName={e.agentName}
-					description={e.agentDesc}
-					agentId={e.agentId}
-					isLive={true}
-				/>,
-			);
-		} else {
-			setLiveComponent(
-				<MultiAgentProgress
-					key={`multi-agent-live-${getNextComponentKey()}-${Date.now()}`}
-					agents={agentInfos}
-					isLive={true}
-				/>,
-			);
-		}
-
-		// Await all results in parallel
-		const settledResults = await Promise.allSettled(
-			agentExecutions.map(e => e.promise),
-		);
-
-		setLiveComponent(null);
-
-		// Build tool results and show completed state
-		const results: ToolResult[] = [];
-
-		for (let i = 0; i < agentExecutions.length; i++) {
-			const e = agentExecutions[i];
-			const settled = settledResults[i];
-
-			const agentResult =
-				settled.status === 'fulfilled'
-					? settled.value
-					: {
-							content: '',
-							success: false,
-							error:
-								settled.reason instanceof Error
-									? settled.reason.message
-									: String(settled.reason),
-						};
-
-			const progress = getSubagentProgress(e.agentId);
-
-			const result: ToolResult = {
-				tool_call_id: e.toolCall.id,
-				role: 'tool' as const,
-				name: e.toolCall.function.name,
-				content: agentResult.success
-					? agentResult.content
-					: `Error: ${agentResult.error || 'Subagent execution failed'}`,
-			};
-
-			results.push(result);
-
-			if (compactToolDisplay) {
-				const toolManager = getToolManager();
-				await displayToolResult(
-					e.toolCall,
-					result,
-					toolManager,
-					addToChatQueue,
-					getNextComponentKey,
-					true,
-				);
-			} else {
-				addToChatQueue(
-					<AgentProgress
-						key={`agent-complete-${e.toolCall.id}-${getNextComponentKey()}-${Date.now()}`}
-						subagentName={e.agentName}
-						description={e.agentDesc}
-						agentId={e.agentId}
-						completedState={{
-							toolCallCount: progress.toolCallCount,
-							tokenCount: progress.tokenCount,
-							success: agentResult.success,
-						}}
-					/>,
-				);
-			}
-		}
-
-		// Clean up progress entries
-		clearAllSubagentProgress();
-
-		// Display errors for excess agents that were rejected
-		for (const excessResult of excessResults) {
-			results.push(excessResult);
-			addToChatQueue(
-				<ErrorMessage
-					key={`agent-excess-${excessResult.tool_call_id}-${getNextComponentKey()}`}
-					message={excessResult.content}
-					hideBox={true}
-				/>,
-			);
-		}
-
-		return results;
 	};
 
 	// Execute the current tool asynchronously
@@ -520,94 +337,6 @@ export function useToolHandler({
 						/>,
 					);
 				}
-			} else if (currentTool.function.name === 'agent') {
-				// Agent tool - check for consecutive agent calls to batch in parallel
-				const {batch, nextIndex} = collectAgentBatch(currentToolIndex);
-
-				if (batch.length > 1) {
-					// Parallel execution of multiple agent tools
-					const batchResults = await executeAgentBatch(batch);
-
-					const newResults = [...completedToolResults, ...batchResults];
-					setCompletedToolResults(newResults);
-
-					// Skip past all batched agent tools
-					if (nextIndex < pendingToolCalls.length) {
-						setCurrentToolIndex(nextIndex);
-						setIsToolExecuting(false);
-						setIsToolConfirmationMode(true);
-					} else {
-						setIsToolExecuting(false);
-						await continueConversationWithToolResults(newResults);
-					}
-					return;
-				}
-
-				// Single agent — execute as before
-				const parsedArgs = parseToolArguments(currentTool.function.arguments);
-				const agentName = parsedArgs.subagent_type as string;
-				const agentDesc = parsedArgs.description as string;
-				const signal = toolAbortControllerRef.current?.signal;
-
-				const {agentId, promise} = startAgentExecution(
-					parsedArgs as unknown as AgentToolArgs,
-					signal,
-				);
-
-				resetSubagentProgressById(agentId);
-
-				// Set live component AFTER starting (React renders before we block)
-				setLiveComponent(
-					<AgentProgress
-						key={`agent-live-${currentTool.id}-${getNextComponentKey()}-${Date.now()}`}
-						subagentName={agentName}
-						description={agentDesc}
-						agentId={agentId}
-						isLive={true}
-					/>,
-				);
-
-				// Now await completion — Ink render loop stays free
-				const agentResult = await promise;
-				setLiveComponent(null);
-
-				const progress = getSubagentProgress(agentId);
-
-				result = {
-					tool_call_id: currentTool.id,
-					role: 'tool' as const,
-					name: currentTool.function.name,
-					content: agentResult.success
-						? agentResult.content
-						: `Error: ${agentResult.error || 'Subagent execution failed'}`,
-				};
-
-				if (compactToolDisplay) {
-					await displayToolResult(
-						currentTool,
-						result,
-						toolManager,
-						addToChatQueue,
-						getNextComponentKey,
-						true,
-					);
-				} else {
-					addToChatQueue(
-						<AgentProgress
-							key={`agent-complete-${currentTool.id}-${getNextComponentKey()}-${Date.now()}`}
-							subagentName={agentName}
-							description={agentDesc}
-							agentId={agentId}
-							completedState={{
-								toolCallCount: progress.toolCallCount,
-								tokenCount: progress.tokenCount,
-								success: agentResult.success,
-							}}
-						/>,
-					);
-				}
-
-				clearAllSubagentProgress();
 			} else {
 				// Regular tool - use standard flow
 				result = await processToolUse(currentTool);

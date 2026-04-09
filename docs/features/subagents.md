@@ -24,14 +24,13 @@ A maximum of 5 agents can run concurrently. Excess calls receive an error and ca
 
 Nanocoder ships with two built-in subagents:
 
-### research
+### explore
 
-A read-only codebase research agent. Use when you need to explore file structure, search for patterns, understand code, or gather context without filling your main conversation with search results.
+A codebase exploration agent. Use when you need to explore file structure, search for patterns, understand code, or gather context without filling your main conversation with search results.
 
 ```
 Tools: read_file, search_file_contents, find_files, list_directory,
        lsp_get_diagnostics, git_status, git_log, git_diff
-Mode:  readOnly
 ```
 
 ### reviewer
@@ -41,7 +40,6 @@ A read-only code review agent. Use to review recent changes, diffs, or specific 
 ```
 Tools: read_file, search_file_contents, find_files, list_directory,
        git_status, git_log, git_diff, lsp_get_diagnostics
-Mode:  readOnly
 ```
 
 ## Creating Custom Subagents
@@ -57,7 +55,7 @@ This creates a template at `.nanocoder/agents/code-reviewer.md` and prompts the 
 ### By Copying a Built-In Agent
 
 ```bash
-/agents copy research
+/agents copy explore
 ```
 
 This copies the full definition of the `research` agent (or any other agent) to `.nanocoder/agents/research.md` so you can customize it. The project-level copy takes priority over the built-in, so your modifications take effect immediately.
@@ -169,7 +167,7 @@ Shows all available subagents with their source (built-in vs custom), model, and
 ### View Agent Details
 
 ```bash
-/agents show research
+/agents show explore
 ```
 
 Displays the full definition of an agent — description, source, provider, model, tools, and system prompt.
@@ -177,7 +175,7 @@ Displays the full definition of an agent — description, source, provider, mode
 ### Copy an Agent for Customization
 
 ```bash
-/agents copy research
+/agents copy explore
 ```
 
 Copies the agent definition to `.nanocoder/agents/<name>.md`. The project-level copy takes priority immediately, so you can edit the file and the changes take effect on the next agent invocation.

@@ -32,8 +32,7 @@ export function setAgentToolExecutor(executor: SubagentExecutor): void {
 /**
  * Cached list of available agent names for the tool description.
  */
-let availableAgentNames =
-	'research (read-only codebase research and exploration)';
+let availableAgentNames = 'explore (codebase exploration and research)';
 
 /**
  * Update the agent tool's knowledge of available subagents.

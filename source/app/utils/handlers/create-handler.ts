@@ -285,7 +285,7 @@ export async function handleAgentCopy(
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
 				key: `agents-copy-error-${getNextComponentKey()}`,
-				message: 'Usage: /agents copy <name>\nExample: /agents copy research',
+				message: 'Usage: /agents copy <name>\nExample: /agents copy explore',
 			}),
 		);
 		onCommandComplete?.();
