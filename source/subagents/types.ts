@@ -22,10 +22,6 @@ export interface SubagentConfig {
 	tools?: string[];
 	/** List of disallowed tool names */
 	disallowedTools?: string[];
-	/** Permission mode for tool execution */
-	permissionMode?: 'readOnly' | 'normal' | 'autoAccept';
-	/** Maximum number of conversation turns (undefined = unlimited) */
-	maxTurns?: number;
 	/** System prompt / instructions for the subagent */
 	systemPrompt: string;
 }
@@ -77,8 +73,6 @@ export interface SubagentContext {
 		role: 'user' | 'assistant' | 'system';
 		content: string;
 	}>;
-	/** Permission mode for this execution */
-	permissionMode: 'readOnly' | 'normal' | 'autoAccept';
 }
 
 /**
@@ -131,10 +125,6 @@ export interface SubagentFrontmatter {
 	tools?: string[];
 	/** Disallowed tools */
 	disallowedTools?: string[];
-	/** Permission mode */
-	permissionMode?: 'readOnly' | 'normal' | 'autoAccept';
-	/** Max conversation turns */
-	maxTurns?: number;
 }
 
 /**

@@ -80,8 +80,6 @@ tools:
   - search_file_contents
   - find_files
   - list_directory
-permissionMode: readOnly
-maxTurns: 10
 ---
 
 You are a code review specialist. When given a file or directory to review:
@@ -102,8 +100,6 @@ You are a code review specialist. When given a file or directory to review:
 | `model` | No | `inherit` | Model ID available on the provider. Use `inherit` to use the parent's current model |
 | `tools` | No | all | Array of tool names to allow. If set, only these tools are available |
 | `disallowedTools` | No | none | Array of tool names to block |
-| `permissionMode` | No | `normal` | `readOnly` (only read tools) or `normal` (all allowed tools) |
-| `maxTurns` | No | `10` | Maximum conversation turns before the subagent stops |
 
 The body after the frontmatter is the system prompt.
 
@@ -122,7 +118,6 @@ tools:
   - search_file_contents
   - find_files
   - list_directory
-permissionMode: readOnly
 ---
 
 You are a codebase research agent. Search and read files to answer questions.
@@ -143,15 +138,15 @@ A project-level agent with the same `name` as a built-in or user-level agent ove
 
 ## Security
 
-- Project-level agents cannot use `permissionMode: autoAccept`. If a project ships an agent definition with `autoAccept`, it is automatically downgraded to `normal` with a warning.
-- The `agent` tool requires user approval before execution (in `normal` mode). In `auto-accept` mode, it runs automatically like any other tool.
-- Subagents in `readOnly` mode can only use tools marked as read-only. Write tools are filtered out of the tool set entirely.
+- Subagent tools respect the same approval rules as the main agent. Write tools and bash commands prompt the user for approval unless they are in the `alwaysAllow` list or the session is in auto-accept mode.
+- The `tools` key in the agent definition controls which tools the subagent can access. Use this to restrict subagents to only the tools they need.
+- The `alwaysAllow` setting in `agents.config.json` applies to tools within subagents, so you can configure which tools run without prompts.
 
 ## Development Modes and Tune Profiles
 
 ### Plan Mode
 
-In plan mode, only subagents with `permissionMode: readOnly` can run. If the main agent tries to delegate to a subagent that has write capabilities, the execution is blocked with an error. All built-in agents are read-only and work in plan mode.
+In plan mode, subagents can run but any write tools they attempt will require user approval (same as the main agent in plan mode). The built-in agents only have read tools configured, so they work seamlessly in plan mode.
 
 ### Scheduler Mode
 

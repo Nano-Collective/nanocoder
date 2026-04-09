@@ -95,14 +95,6 @@ export class SubagentLoader {
 				const source = existing.source.isBuiltIn ? 'built-in' : 'user';
 				logWarning(`Project agent '${config.name}' overrides ${source} agent`);
 			}
-			// Security: project-level agents cannot escalate to autoAccept
-			if (config.permissionMode === 'autoAccept') {
-				logWarning(
-					`Project-level agent '${config.name}' has permissionMode 'autoAccept' which is not allowed. Downgrading to 'normal'.`,
-				);
-				config.permissionMode = 'normal';
-			}
-
 			this.cache.set(config.name, config);
 		}
 

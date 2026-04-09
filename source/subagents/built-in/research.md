@@ -11,8 +11,6 @@ tools:
   - git_status
   - git_log
   - git_diff
-permissionMode: readOnly
-maxTurns: 15
 ---
 
 You are a codebase research agent. Investigate the codebase and return concise, actionable findings. Do not explain your process — just return results.

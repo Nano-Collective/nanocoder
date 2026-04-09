@@ -107,17 +107,6 @@ export class SubagentExecutor {
 				};
 			}
 
-			// In plan mode, only allow read-only subagents
-			if (this.parentMode === 'plan' && config.permissionMode !== 'readOnly') {
-				return {
-					subagentName: task.subagent_type,
-					output: '',
-					success: false,
-					error: `Subagent '${config.name}' cannot run in plan mode because it is not read-only. Only subagents with permissionMode: readOnly are allowed in plan mode.`,
-					executionTimeMs: Date.now() - startTime,
-				};
-			}
-
 			const context = this.createSubagentContext(config, task);
 			const filteredTools = this.filterTools(config);
 
@@ -140,7 +129,6 @@ export class SubagentExecutor {
 					client,
 					messages,
 					filteredTools,
-					config.maxTurns,
 					config,
 					signal,
 					agentId,
@@ -189,7 +177,6 @@ export class SubagentExecutor {
 			availableTools,
 			systemMessage: config.systemPrompt,
 			initialMessages,
-			permissionMode: config.permissionMode || 'normal',
 		};
 	}
 
@@ -230,7 +217,8 @@ export class SubagentExecutor {
 
 	/**
 	 * Filter tools based on subagent configuration.
-	 * In readOnly mode, only read-only tools are included.
+	 * Only includes tools in the allow list (or all if no list specified),
+	 * minus any in the disallow list, and always excludes the agent tool.
 	 */
 	private filterTools(
 		config: SubagentConfigWithSource,
@@ -244,15 +232,6 @@ export class SubagentExecutor {
 		>;
 		for (const name of availableNames) {
 			if (!(name in allTools)) continue;
-
-			// In readOnly mode, only include read-only tools in the LLM's tool set
-			if (
-				config.permissionMode === 'readOnly' &&
-				!this.toolManager.isReadOnly(name)
-			) {
-				continue;
-			}
-
 			filtered[name] = allTools[name] as AISDKCoreTool;
 		}
 
@@ -325,12 +304,10 @@ export class SubagentExecutor {
 		client: LLMClient,
 		messages: Message[],
 		tools: Record<string, AISDKCoreTool>,
-		maxTurns: number | undefined,
 		config: SubagentConfigWithSource,
 		signal?: AbortSignal,
 		agentId?: string,
 	): Promise<string> {
-		const maxIterations = maxTurns ?? 10;
 		let iterations = 0;
 		let totalToolCalls = 0;
 		let totalTokens = 0;
@@ -364,7 +341,7 @@ export class SubagentExecutor {
 		// onToken callback (which fires frequently and must be fast).
 		const progressRef = agentId ? getSubagentProgress(agentId) : null;
 
-		while (iterations < maxIterations) {
+		while (true) {
 			// Check for cancellation before each turn
 			if (signal?.aborted) {
 				emitProgress('error');
@@ -457,12 +434,7 @@ export class SubagentExecutor {
 			}
 		}
 
-		// Hit max iterations
-		for (let i = messages.length - 1; i >= 0; i--) {
-			if (messages[i]?.role === 'assistant' && messages[i]?.content) {
-				return messages[i].content;
-			}
-		}
+		// Unreachable — loop exits via return when model stops calling tools
 		return '';
 	}
 
@@ -513,11 +485,6 @@ export class SubagentExecutor {
 	): Promise<string> {
 		if (signal?.aborted) {
 			return 'Error: Execution was cancelled';
-		}
-		if (config.permissionMode === 'readOnly') {
-			if (!this.toolManager.isReadOnly(toolName)) {
-				return `Error: Tool '${toolName}' is not read-only. Subagent is in read-only mode.`;
-			}
 		}
 
 		const toolHandler = this.toolManager.getToolHandler(toolName);

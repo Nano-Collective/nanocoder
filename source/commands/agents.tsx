@@ -132,10 +132,6 @@ function AgentDetail({agent}: AgentDetailProps) {
 		{label: 'Source', value: sourceLabel},
 		...(agent.provider ? [{label: 'Provider', value: agent.provider}] : []),
 		{label: 'Model', value: agent.model || 'inherit'},
-		{label: 'Permission', value: agent.permissionMode || 'normal'},
-		...(agent.maxTurns
-			? [{label: 'Max turns', value: String(agent.maxTurns)}]
-			: []),
 		{label: 'Tools', value: toolsSummary},
 		...(agent.disallowedTools && agent.disallowedTools.length > 0
 			? [{label: 'Disallowed tools', value: agent.disallowedTools.join(', ')}]

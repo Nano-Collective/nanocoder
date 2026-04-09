@@ -153,36 +153,6 @@ test.serial('validateFrontmatter - accepts model ID string', t => {
 	t.deepEqual(result, {valid: true});
 });
 
-test.serial('validateFrontmatter - rejects invalid permissionMode', t => {
-	const frontmatter = {
-		name: 'test',
-		description: 'A test agent',
-		permissionMode: 'invalid-mode',
-	};
-
-	const result = validateFrontmatter(frontmatter);
-
-	t.false(result.valid);
-	if (!result.valid) {
-		t.regex(result.error, /permissionMode must be one of/);
-	}
-});
-
-test.serial('validateFrontmatter - rejects invalid maxTurns', t => {
-	const frontmatter = {
-		name: 'test',
-		description: 'A test agent',
-		maxTurns: -1,
-	};
-
-	const result = validateFrontmatter(frontmatter);
-
-	t.false(result.valid);
-	if (!result.valid) {
-		t.regex(result.error, /maxTurns must be a positive integer/);
-	}
-});
-
 test.serial('parseSubagentMarkdown - parses complete agent file', async t => {
 	const tmpPath = join(tmpdir(), 'test-agent.md');
 	const content = `---
@@ -191,8 +161,6 @@ description: A test agent for parsing
 model: sonnet
 tools: [Read]
 disallowedTools: [Write]
-permissionMode: readOnly
-maxTurns: 5
 ---
 You are a test agent. Do your best!`;
 
@@ -206,8 +174,6 @@ You are a test agent. Do your best!`;
 		t.is(result.config.model, 'sonnet');
 		t.deepEqual(result.config.tools, ['Read']);
 		t.deepEqual(result.config.disallowedTools, ['Write']);
-		t.is(result.config.permissionMode, 'readOnly');
-		t.is(result.config.maxTurns, 5);
 		t.is(result.config.systemPrompt, 'You are a test agent. Do your best!');
 		t.is(result.filePath, tmpPath);
 		t.is(result.priority, 1); // Default priority

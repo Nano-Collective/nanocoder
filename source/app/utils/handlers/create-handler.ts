@@ -181,7 +181,6 @@ export async function handleAgentCreate(
 name: ${agentName}
 description: TODO - describe when to use this agent
 model: inherit
-permissionMode: normal
 ---
 
 TODO - write the system prompt for this agent
@@ -214,8 +213,6 @@ tools:                  # Optional: restrict to specific tools
 disallowedTools:        # Optional: block specific tools
   - write_file
   - string_replace
-permissionMode: normal  # readOnly, normal
-maxTurns: 10            # Optional: max conversation turns
 ---
 
 The body after the frontmatter is the system prompt that instructs the agent how to behave. Make it focused and specific to the agent's purpose.`,
@@ -250,9 +247,6 @@ function buildAgentMarkdown(agent: SubagentConfigWithSource): string {
 	if (agent.tools && agent.tools.length > 0) frontmatter.tools = agent.tools;
 	if (agent.disallowedTools && agent.disallowedTools.length > 0)
 		frontmatter.disallowedTools = agent.disallowedTools;
-	if (agent.permissionMode) frontmatter.permissionMode = agent.permissionMode;
-	if (agent.maxTurns) frontmatter.maxTurns = agent.maxTurns;
-
 	// Build YAML manually to keep it clean
 	let yaml = '---\n';
 	for (const [key, value] of Object.entries(frontmatter)) {

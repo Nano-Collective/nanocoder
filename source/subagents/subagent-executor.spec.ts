@@ -157,21 +157,27 @@ test.serial('executes tool calls and returns final response', async t => {
 	t.is(result.output, 'Found the file with 100 lines');
 });
 
-test.serial('enforces readOnly mode - rejects write tools', async t => {
+test.serial('tools needing approval are surfaced via signalToolApproval', async t => {
 	const writeHandler = async () => 'written';
 	const toolManager = createMockToolManager({
-		write_file: {handler: writeHandler, readOnly: false},
+		write_file: {handler: writeHandler, readOnly: false, needsApproval: true},
 		read_file: {handler: async () => 'content', readOnly: true},
 	});
 
+	// Track whether approval was requested
+	let approvalRequested = false;
+	const {setGlobalToolApprovalHandler} = await import('@/utils/tool-approval-queue.js');
+	setGlobalToolApprovalHandler(async () => {
+		approvalRequested = true;
+		return true; // Approve
+	});
+
 	const client = createMockClient([
-		// LLM tries to call write_file (shouldn't be in tool set for readOnly agents,
-		// but test the belt-and-suspenders runtime check)
 		{
 			content: '',
 			tool_calls: [{
 				id: 'tc1',
-				function: {name: 'write_file', arguments: '{"path": "x.ts", "content": "bad"}'},
+				function: {name: 'write_file', arguments: '{"path": "x.ts", "content": "hello"}'},
 			}],
 		},
 		{content: 'Done'},
@@ -180,13 +186,15 @@ test.serial('enforces readOnly mode - rejects write tools', async t => {
 	const executor = new SubagentExecutor(toolManager, client);
 
 	const result = await executor.execute({
-		subagent_type: 'research', // explore has readOnly permissionMode
-		description: 'Test readOnly enforcement',
+		subagent_type: 'research',
+		description: 'Test tool approval',
 	});
 
 	t.true(result.success);
-	// The executor should have returned an error for the write_file tool call
-	t.is(result.output, 'Done');
+	t.true(approvalRequested, 'Approval should have been requested for write_file');
+
+	// Restore auto-approve handler for other tests
+	setGlobalToolApprovalHandler(async () => true);
 });
 
 test.serial('handles tool execution errors gracefully', async t => {
@@ -367,58 +375,6 @@ test.serial('throws error for unavailable model', async t => {
 
 	t.false(result.success);
 	t.regex(result.error || '', /not available/);
-});
-
-// ============================================================================
-// Gap #4: maxTurns limit stops the conversation loop
-// ============================================================================
-
-test.serial('stops at maxTurns limit', async t => {
-	const toolManager = createMockToolManager({
-		read_file: {handler: async () => 'content', readOnly: true},
-	});
-
-	// Client always returns tool calls — should be stopped by maxTurns
-	let chatCallCount = 0;
-	const client = createMockClient([]);
-	(client as any).chat = async () => {
-		chatCallCount++;
-		return {
-			choices: [{
-				message: {
-					content: `Turn ${chatCallCount}`,
-					tool_calls: [{
-						id: `tc${chatCallCount}`,
-						function: {name: 'read_file', arguments: '{"path": "x.ts"}'},
-					}],
-				},
-			}],
-		};
-	};
-
-	// Override getSubagent to set maxTurns to 3
-	const loader = getSubagentLoader();
-	const originalGetSubagent = loader.getSubagent.bind(loader);
-	loader.getSubagent = async (name: string) => {
-		if (name === 'research') {
-			const agent = await originalGetSubagent(name);
-			if (agent) {
-				return {...agent, maxTurns: 3};
-			}
-		}
-		return originalGetSubagent(name);
-	};
-
-	const executor = new SubagentExecutor(toolManager, client);
-	const result = await executor.execute({
-		subagent_type: 'research',
-		description: 'Test maxTurns',
-	});
-
-	loader.getSubagent = originalGetSubagent;
-
-	t.true(result.success);
-	t.is(chatCallCount, 3, 'Should stop after 3 turns');
 });
 
 // ============================================================================

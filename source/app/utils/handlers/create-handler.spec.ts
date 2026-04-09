@@ -98,7 +98,6 @@ test.serial('agents copy - copies built-in agent to project directory', async t 
 		// File should contain the agent content
 		const content = readFileSync(filePath, 'utf-8');
 		t.true(content.includes('name: research'), 'Should contain agent name');
-		t.true(content.includes('permissionMode: readOnly'), 'Should contain permission mode');
 		t.true(content.includes('read_file'), 'Should contain tool names');
 	} finally {
 		process.chdir(originalCwd);

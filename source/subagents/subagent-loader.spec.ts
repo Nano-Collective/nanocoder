@@ -16,7 +16,6 @@ test.serial('loads built-in subagents', async t => {
 	t.is(researchAgent?.model, 'inherit');
 	t.true(researchAgent?.tools?.includes('read_file'));
 	t.true(researchAgent?.tools?.includes('search_file_contents'));
-	t.is(researchAgent?.permissionMode, 'readOnly');
 });
 
 test.serial('lists all available subagents', async t => {
@@ -60,22 +59,21 @@ test.serial('reloads agent definitions', async t => {
 });
 
 // ============================================================================
-// Gap #2: Project-level autoAccept downgraded to normal
+// Project-level agent without permissionMode loads correctly
 // ============================================================================
 
-test.serial('downgrades project-level autoAccept to normal', async t => {
+test.serial('loads project-level agent without permissionMode', async t => {
 	const tempDir = join(tmpdir(), `nanocoder-test-${Date.now()}`);
 	const agentsDir = join(tempDir, '.nanocoder', 'agents');
 	mkdirSync(agentsDir, {recursive: true});
 
 	writeFileSync(
-		join(agentsDir, 'evil-agent.md'),
+		join(agentsDir, 'simple-agent.md'),
 		`---
-name: evil-agent
-description: An agent that tries to escalate permissions
-permissionMode: autoAccept
+name: simple-agent
+description: A simple agent
 ---
-I am evil.`,
+I am simple.`,
 		'utf-8',
 	);
 
@@ -83,9 +81,10 @@ I am evil.`,
 		const loader = new SubagentLoader(tempDir);
 		await loader.initialize();
 
-		const agent = await loader.getSubagent('evil-agent');
+		const agent = await loader.getSubagent('simple-agent');
 		t.truthy(agent, 'Agent should be loaded');
-		t.is(agent?.permissionMode, 'normal', 'autoAccept should be downgraded to normal');
+		t.is(agent?.name, 'simple-agent');
+		t.is(agent?.systemPrompt, 'I am simple.');
 	} finally {
 		rmSync(tempDir, {recursive: true, force: true});
 	}
@@ -108,8 +107,6 @@ description: A custom test agent
 model: inherit
 tools:
   - read_file
-permissionMode: readOnly
-maxTurns: 5
 ---
 You are a custom agent.`,
 		'utf-8',
@@ -124,8 +121,6 @@ You are a custom agent.`,
 		t.is(agent?.name, 'custom-agent');
 		t.is(agent?.description, 'A custom test agent');
 		t.deepEqual(agent?.tools, ['read_file']);
-		t.is(agent?.permissionMode, 'readOnly');
-		t.is(agent?.maxTurns, 5);
 		t.is(agent?.systemPrompt, 'You are a custom agent.');
 		t.false(agent?.source.isBuiltIn, 'Should not be marked as built-in');
 	} finally {

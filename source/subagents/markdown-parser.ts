@@ -44,8 +44,6 @@ export async function parseSubagentMarkdown(
 		model: frontmatter.model || 'inherit',
 		tools: frontmatter.tools,
 		disallowedTools: frontmatter.disallowedTools,
-		permissionMode: frontmatter.permissionMode || 'normal',
-		maxTurns: frontmatter.maxTurns,
 		systemPrompt,
 	};
 
@@ -84,29 +82,6 @@ export function validateFrontmatter(
 			return {
 				valid: false,
 				error: 'model must be a non-empty string (a model ID or "inherit")',
-			};
-		}
-	}
-
-	if (frontmatter.permissionMode !== undefined) {
-		const validModes = ['readOnly', 'normal', 'autoAccept'];
-		if (!validModes.includes(frontmatter.permissionMode as string)) {
-			return {
-				valid: false,
-				error: `permissionMode must be one of: ${validModes.join(', ')}`,
-			};
-		}
-	}
-
-	if (frontmatter.maxTurns !== undefined) {
-		if (
-			typeof frontmatter.maxTurns !== 'number' ||
-			frontmatter.maxTurns < 1 ||
-			!Number.isInteger(frontmatter.maxTurns)
-		) {
-			return {
-				valid: false,
-				error: 'maxTurns must be a positive integer',
 			};
 		}
 	}
