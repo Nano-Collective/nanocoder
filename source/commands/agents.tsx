@@ -182,7 +182,7 @@ function AgentDetail({agent}: AgentDetailProps) {
 export const agentsCommand: Command = {
 	name: 'agents',
 	description:
-		'List all available subagents, or show details with /agents show <name>',
+		'List subagents. /agents show <name> for details, /agents copy <name> to customize',
 	handler: async (args: string[]) => {
 		const loader = getSubagentLoader();
 

@@ -1,7 +1,9 @@
-import {existsSync, mkdirSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import React from 'react';
 import {ErrorMessage, SuccessMessage} from '@/components/message-box';
+import {getSubagentLoader} from '@/subagents/subagent-loader';
+import type {SubagentConfigWithSource} from '@/subagents/types';
 import type {MessageSubmissionOptions} from '@/types/index';
 
 /**
@@ -219,6 +221,131 @@ maxTurns: 10            # Optional: max conversation turns
 The body after the frontmatter is the system prompt that instructs the agent how to behave. Make it focused and specific to the agent's purpose.`,
 	);
 
+	return true;
+}
+
+/**
+ * Reconstruct the markdown file content from a SubagentConfigWithSource.
+ * If the agent was loaded from a file, read the original content.
+ * Otherwise, reconstruct from the parsed config.
+ */
+function buildAgentMarkdown(agent: SubagentConfigWithSource): string {
+	// If we have the source file path, read the original content directly
+	if (agent.source.filePath) {
+		try {
+			return readFileSync(agent.source.filePath, 'utf-8');
+		} catch {
+			// Fall through to reconstruction
+		}
+	}
+
+	// Reconstruct from config
+	const frontmatter: Record<string, unknown> = {
+		name: agent.name,
+		description: agent.description,
+	};
+
+	if (agent.provider) frontmatter.provider = agent.provider;
+	frontmatter.model = agent.model || 'inherit';
+	if (agent.tools && agent.tools.length > 0) frontmatter.tools = agent.tools;
+	if (agent.disallowedTools && agent.disallowedTools.length > 0)
+		frontmatter.disallowedTools = agent.disallowedTools;
+	if (agent.permissionMode) frontmatter.permissionMode = agent.permissionMode;
+	if (agent.maxTurns) frontmatter.maxTurns = agent.maxTurns;
+
+	// Build YAML manually to keep it clean
+	let yaml = '---\n';
+	for (const [key, value] of Object.entries(frontmatter)) {
+		if (Array.isArray(value)) {
+			yaml += `${key}:\n`;
+			for (const item of value) {
+				yaml += `  - ${item}\n`;
+			}
+		} else {
+			yaml += `${key}: ${value}\n`;
+		}
+	}
+	yaml += '---\n\n';
+
+	return yaml + agent.systemPrompt + '\n';
+}
+
+/**
+ * Handles /agents copy <name> — copies an agent (including built-in) to
+ * .nanocoder/agents/ so it can be customized.
+ * Returns true if handled.
+ */
+export async function handleAgentCopy(
+	commandParts: string[],
+	options: MessageSubmissionOptions,
+): Promise<boolean> {
+	if (commandParts[0] !== 'agents' || commandParts[1] !== 'copy') {
+		return false;
+	}
+
+	const {onAddToChatQueue, onCommandComplete, getNextComponentKey} = options;
+
+	const agentName = commandParts[2];
+
+	if (!agentName) {
+		onAddToChatQueue(
+			React.createElement(ErrorMessage, {
+				key: `agents-copy-error-${getNextComponentKey()}`,
+				message: 'Usage: /agents copy <name>\nExample: /agents copy research',
+			}),
+		);
+		onCommandComplete?.();
+		return true;
+	}
+
+	const loader = getSubagentLoader();
+	const agent = await loader.getSubagent(agentName);
+
+	if (!agent) {
+		const available = await loader.listSubagents();
+		const names = available.map(a => a.name).join(', ');
+		onAddToChatQueue(
+			React.createElement(ErrorMessage, {
+				key: `agents-copy-notfound-${getNextComponentKey()}`,
+				message: `Agent '${agentName}' not found. Available agents: ${names}`,
+			}),
+		);
+		onCommandComplete?.();
+		return true;
+	}
+
+	const safeName = `${agentName}.md`;
+	const targetDir = join(process.cwd(), '.nanocoder', 'agents');
+	const filePath = join(targetDir, safeName);
+
+	if (existsSync(filePath)) {
+		onAddToChatQueue(
+			React.createElement(ErrorMessage, {
+				key: `agents-copy-exists-${getNextComponentKey()}`,
+				message: `Agent file already exists: .nanocoder/agents/${safeName}\nTo modify it, edit the file directly.`,
+			}),
+		);
+		onCommandComplete?.();
+		return true;
+	}
+
+	mkdirSync(targetDir, {recursive: true});
+
+	const content = buildAgentMarkdown(agent);
+	writeFileSync(filePath, content, 'utf-8');
+
+	onAddToChatQueue(
+		React.createElement(SuccessMessage, {
+			key: `agents-copied-${getNextComponentKey()}`,
+			message: `Copied agent '${agentName}' to .nanocoder/agents/${safeName}\nYou can now modify this file to customize the agent.`,
+			hideBox: true,
+		}),
+	);
+
+	// Reload so the project-level copy takes priority
+	await loader.reload();
+
+	onCommandComplete?.();
 	return true;
 }
 

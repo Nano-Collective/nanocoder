@@ -18,6 +18,7 @@ import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {handleCompactCommand} from './handlers/compact-handler';
 import {handleContextMaxCommand} from './handlers/context-max-handler';
 import {
+	handleAgentCopy,
 	handleAgentCreate,
 	handleCommandCreate,
 	handleScheduleCreate,
@@ -508,6 +509,7 @@ async function handleSlashCommand(
 	if (await handleScheduleCreate(commandParts, options)) return;
 	if (await handleCommandCreate(commandParts, options)) return;
 	if (await handleAgentCreate(commandParts, options)) return;
+	if (await handleAgentCopy(commandParts, options)) return;
 	if (await handleSpecialCommand(commandName, options)) return;
 	if (await handleCheckpointLoad(commandParts, options)) return;
 	if (await handleResumeCommand(commandParts, options)) return;

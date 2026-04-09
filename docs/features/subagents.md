@@ -14,17 +14,33 @@ The main agent has access to an `agent` tool. When it decides a task would benef
 
 You don't need to explicitly ask for a subagent — the main agent decides when delegation is appropriate based on the task.
 
+### Parallel Execution
+
+The main agent can call the `agent` tool multiple times in a single response. All agent calls execute in parallel for maximum efficiency. This is useful for independent research tasks — for example, exploring different parts of the codebase simultaneously.
+
+A maximum of 5 agents can run concurrently. Excess calls receive an error and can be retried.
+
 ## Built-In Subagents
 
-Nanocoder ships with one built-in subagent:
+Nanocoder ships with two built-in subagents:
 
 ### research
 
-A read-only codebase research agent with access to file reading, search, directory listing, diagnostics, and git tools. Use it when you need to explore file structure, search for patterns, understand code, or gather context.
+A read-only codebase research agent. Use when you need to explore file structure, search for patterns, understand code, or gather context without filling your main conversation with search results.
 
 ```
 Tools: read_file, search_file_contents, find_files, list_directory,
        lsp_get_diagnostics, git_status, git_log, git_diff
+Mode:  readOnly
+```
+
+### reviewer
+
+A read-only code review agent. Use to review recent changes, diffs, or specific files for bugs, security issues, style problems, and improvement suggestions.
+
+```
+Tools: read_file, search_file_contents, find_files, list_directory,
+       git_status, git_log, git_diff, lsp_get_diagnostics
 Mode:  readOnly
 ```
 
@@ -37,6 +53,16 @@ Mode:  readOnly
 ```
 
 This creates a template at `.nanocoder/agents/code-reviewer.md` and prompts the AI to help you write the agent definition.
+
+### By Copying a Built-In Agent
+
+```bash
+/agents copy research
+```
+
+This copies the full definition of the `research` agent (or any other agent) to `.nanocoder/agents/research.md` so you can customize it. The project-level copy takes priority over the built-in, so your modifications take effect immediately.
+
+This is the easiest way to tweak a built-in agent — adjust the system prompt, add or remove tools, change the model, etc.
 
 ### Manually
 
@@ -125,7 +151,7 @@ A project-level agent with the same `name` as a built-in or user-level agent ove
 
 ### Plan Mode
 
-In plan mode, only subagents with `permissionMode: readOnly` can run. If the main agent tries to delegate to a subagent that has write capabilities, the execution is blocked with an error. The built-in `research` agent is read-only and works in plan mode.
+In plan mode, only subagents with `permissionMode: readOnly` can run. If the main agent tries to delegate to a subagent that has write capabilities, the execution is blocked with an error. All built-in agents are read-only and work in plan mode.
 
 ### Scheduler Mode
 
@@ -135,7 +161,9 @@ Subagents are not available in scheduler mode. The `agent` tool is excluded beca
 
 The `agent` tool is included in both `full` and `minimal` tune profiles, so subagents are always available regardless of which profile you use. The subagent prompt section in the system prompt is only included when the `agent` tool is active.
 
-## Listing Agents
+## Managing Agents
+
+### List All Agents
 
 ```bash
 /agents
@@ -143,13 +171,29 @@ The `agent` tool is included in both `full` and `minimal` tune profiles, so suba
 
 Shows all available subagents with their source (built-in vs custom), model, and tool count.
 
-## Viewing Agent Details
+### View Agent Details
 
 ```bash
 /agents show research
 ```
 
-Displays the full definition of an agent — description, source, provider, model, tools, and system prompt. Useful for inspecting built-in agents before overriding them with a custom version.
+Displays the full definition of an agent — description, source, provider, model, tools, and system prompt.
+
+### Copy an Agent for Customization
+
+```bash
+/agents copy research
+```
+
+Copies the agent definition to `.nanocoder/agents/<name>.md`. The project-level copy takes priority immediately, so you can edit the file and the changes take effect on the next agent invocation.
+
+### Create a New Agent
+
+```bash
+/agents create my-agent
+```
+
+Creates a template and prompts the AI to help you write the definition.
 
 ## Live Progress
 
@@ -158,4 +202,4 @@ During subagent execution, a progress indicator shows:
 - Number of tool calls made
 - Estimated token count
 
-The progress updates in real-time as the subagent works.
+When multiple agents run in parallel, each agent shows its own progress row. The progress updates in real-time as the agents work.
