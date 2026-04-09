@@ -50,9 +50,9 @@ test.serial('agentTool tool has description', t => {
 	t.true(agentTool.tool.description.length > 0);
 });
 
-test.serial('agentTool has needsApproval property', t => {
+test.serial('agentTool does not require approval', t => {
 	t.is(typeof agentTool.tool.needsApproval, 'boolean');
-	t.is(agentTool.tool.needsApproval, true);
+	t.is(agentTool.tool.needsApproval, false);
 });
 
 // ============================================================================
