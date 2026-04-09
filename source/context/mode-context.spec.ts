@@ -46,12 +46,23 @@ test('mode persists across multiple getCurrentMode calls', t => {
 	setCurrentMode('normal');
 });
 
+test('setCurrentMode updates to yolo mode', t => {
+	setCurrentMode('yolo');
+	t.is(getCurrentMode(), 'yolo');
+
+	// Reset for other tests
+	setCurrentMode('normal');
+});
+
 test('mode can be switched multiple times', t => {
 	setCurrentMode('normal');
 	t.is(getCurrentMode(), 'normal');
 
 	setCurrentMode('auto-accept');
 	t.is(getCurrentMode(), 'auto-accept');
+
+	setCurrentMode('yolo');
+	t.is(getCurrentMode(), 'yolo');
 
 	setCurrentMode('plan');
 	t.is(getCurrentMode(), 'plan');

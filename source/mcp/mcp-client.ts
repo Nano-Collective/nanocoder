@@ -332,7 +332,7 @@ export class MCPClient {
 						}
 
 						const mode = getCurrentMode();
-						return mode !== 'auto-accept'; // true in normal/plan, false in auto-accept
+						return mode !== 'auto-accept' && mode !== 'yolo'; // true in normal/plan, false in auto-accept/yolo
 					},
 					execute: async (input, _options) => {
 						// dynamicTool passes 'input' as unknown, validate at runtime

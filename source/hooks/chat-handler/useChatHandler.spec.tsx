@@ -147,7 +147,7 @@ test('useChatHandler - handles messages with content', t => {
 });
 
 test('useChatHandler - handles different development modes', t => {
-	const modes: Array<'normal' | 'auto-accept' | 'plan'> = ['normal', 'auto-accept', 'plan'];
+	const modes: Array<'normal' | 'auto-accept' | 'yolo' | 'plan'> = ['normal', 'auto-accept', 'yolo', 'plan'];
 
 	for (const mode of modes) {
 		let hookResult: ChatHandlerReturn | null = null;

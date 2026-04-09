@@ -93,7 +93,8 @@ Environment variable substitution: `$VAR`, `${VAR}`, `${VAR:-default}`
 
 ## Development Modes
 
-Three modes (toggle with Shift+Tab during chat):
+Four modes (toggle with Shift+Tab during chat):
 - **normal**: Confirm each tool before execution
-- **auto-accept**: Automatically execute all tools
+- **auto-accept**: Automatically execute most tools (bash and destructive git still prompt)
+- **yolo**: Automatically execute every tool without exception
 - **plan**: Show tool calls but don't execute

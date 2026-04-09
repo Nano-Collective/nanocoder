@@ -136,7 +136,7 @@ A project-level agent with the same `name` as a built-in or user-level agent ove
 
 ## Security
 
-- Subagent tools respect the same approval rules as the main agent. Write tools and bash commands prompt the user for approval unless they are in the `alwaysAllow` list or the session is in auto-accept mode.
+- Subagent tools respect the same approval rules as the main agent. Write tools and bash commands prompt the user for approval unless they are in the `alwaysAllow` list or the session is in auto-accept/yolo mode.
 - The `tools` key in the agent definition controls which tools the subagent can access. Use this to restrict subagents to only the tools they need.
 - The `alwaysAllow` setting in `agents.config.json` applies to tools within subagents, so you can configure which tools run without prompts.
 

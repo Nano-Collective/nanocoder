@@ -188,11 +188,17 @@ export interface LLMClient {
 	getTimeout(): number | undefined;
 }
 
-export type DevelopmentMode = 'normal' | 'auto-accept' | 'plan' | 'scheduler';
+export type DevelopmentMode =
+	| 'normal'
+	| 'auto-accept'
+	| 'yolo'
+	| 'plan'
+	| 'scheduler';
 
 export const DEVELOPMENT_MODE_LABELS: Record<DevelopmentMode, string> = {
 	normal: '▶ normal mode on',
 	'auto-accept': '⏵⏵ auto-accept mode on',
+	yolo: '⏵⏵⏵ yolo mode on',
 	plan: '⏸ plan mode on',
 	scheduler: '⏵⏵ scheduler mode on',
 };
@@ -200,6 +206,7 @@ export const DEVELOPMENT_MODE_LABELS: Record<DevelopmentMode, string> = {
 export const DEVELOPMENT_MODE_LABELS_NARROW: Record<DevelopmentMode, string> = {
 	normal: '▶ normal',
 	'auto-accept': '⏵⏵ auto',
+	yolo: '⏵⏵⏵ yolo',
 	plan: '⏸ plan',
 	scheduler: '⏵⏵ scheduler',
 };

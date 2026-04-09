@@ -184,6 +184,9 @@ const gitResetCoreTool = tool({
 	needsApproval: (args: GitResetInput) => {
 		const mode = getCurrentMode();
 
+		// Yolo mode auto-executes everything
+		if (mode === 'yolo') return false;
+
 		// ALWAYS_APPROVE for hard reset (permanent data loss)
 		if (args.mode === 'hard') {
 			return true;

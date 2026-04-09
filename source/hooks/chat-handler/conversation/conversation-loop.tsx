@@ -40,7 +40,7 @@ interface ProcessAssistantResponseParams {
 	getNextComponentKey: () => number;
 	currentProvider: string;
 	currentModel: string;
-	developmentMode: 'normal' | 'auto-accept' | 'plan' | 'scheduler';
+	developmentMode: 'normal' | 'auto-accept' | 'yolo' | 'plan' | 'scheduler';
 	nonInteractiveMode: boolean;
 	conversationStateManager: React.MutableRefObject<ConversationStateManager>;
 	onStartToolConfirmationFlow: (

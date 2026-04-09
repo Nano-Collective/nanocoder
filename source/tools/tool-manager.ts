@@ -22,6 +22,7 @@ import {getShutdownManager} from '@/utils/shutdown';
 const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 	normal: [],
 	'auto-accept': [],
+	yolo: [],
 	plan: [
 		// No mutation tools — plan mode is read-only exploration
 		'write_file',

@@ -153,9 +153,10 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			// Don't allow toggling out of scheduler mode via Shift+Tab
 			if (currentMode === 'scheduler') return currentMode;
 
-			const modes: Array<'normal' | 'auto-accept' | 'plan'> = [
+			const modes: Array<'normal' | 'auto-accept' | 'yolo' | 'plan'> = [
 				'normal',
 				'auto-accept',
+				'yolo',
 				'plan',
 			];
 			const currentIndex = modes.indexOf(currentMode);

@@ -1,6 +1,6 @@
 ---
 title: "Development Modes"
-description: "Normal, auto-accept, and plan modes for controlling tool execution"
+description: "Normal, auto-accept, yolo, and plan modes for controlling tool execution"
 sidebar_order: 10
 ---
 
@@ -22,13 +22,24 @@ The default mode. Every tool call requires your explicit confirmation before exe
 
 ## Auto-Accept Mode
 
-Automatically accepts and executes all tool calls without confirmation.
+Automatically accepts and executes most tool calls without confirmation. Some high-risk tools like bash commands still require approval.
 
 - Significantly faster for iterative workflows
 - All tool execution results are still displayed — you can see what happened
 - The AI can chain multiple actions without waiting for approval
+- Bash commands and destructive git operations (hard reset, force delete, stash drop/clear) still prompt for confirmation
 
 **When to use:** Tasks you trust the AI to handle — code generation, refactoring well-understood code, running tests, or when you want to step back and let the AI work through a problem.
+
+## Yolo Mode
+
+Automatically accepts and executes **every** tool call without exception — including bash commands and destructive git operations.
+
+- No confirmation prompts at all — everything runs immediately
+- Bash commands, hard resets, force deletes, stash drops — all auto-accepted
+- The status bar turns red to make it clear you're in yolo mode
+
+**When to use:** When you fully trust the AI and want zero interruptions. Use with caution — there are no safety nets other than basic tool validators.
 
 ## Plan Mode
 
@@ -66,7 +77,7 @@ The following are **excluded**: all file mutation tools (`write_file`, `string_r
 Plan mode is designed as the first step of a two-phase workflow:
 
 1. **Plan** — switch to plan mode with **Shift+Tab**, describe your task, and let the AI explore and produce a plan
-2. **Execute** — switch back to normal or auto-accept mode with **Shift+Tab**, then tell the AI to execute the plan
+2. **Execute** — switch back to normal, auto-accept, or yolo mode with **Shift+Tab**, then tell the AI to execute the plan
 
 Your conversation history (including the plan) is preserved when you switch modes, so the AI has full context when it starts executing.
 

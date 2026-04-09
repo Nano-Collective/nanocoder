@@ -243,6 +243,9 @@ const gitBranchCoreTool = tool({
 	needsApproval: (args: GitBranchInput) => {
 		const mode = getCurrentMode();
 
+		// Yolo mode auto-executes everything
+		if (mode === 'yolo') return false;
+
 		// AUTO for list
 		if (!args.create && !args.switch && !args.delete) {
 			return false;

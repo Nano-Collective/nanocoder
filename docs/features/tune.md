@@ -121,7 +121,7 @@ On narrow terminals, this is shortened to just the profile name.
 
 ## Related
 
-- [Development Modes](development-modes.md) — normal, auto-accept, and plan modes
+- [Development Modes](development-modes.md) — normal, auto-accept, yolo, and plan modes
 - [Context Compression](context-compression.md) — how compaction works
 - [Commands Reference](commands.md) — all slash commands
 - [Configuration](../configuration/index.md) — `agents.config.json` reference

@@ -75,7 +75,8 @@ When the AI wants to edit a file, run a command, or perform any action, it uses 
 | Mode | Behaviour | Best For |
 |------|-----------|----------|
 | **Normal** (default) | Confirm each tool before it runs | Unfamiliar codebases, sensitive operations |
-| **Auto-Accept** | Tools execute immediately | Trusted tasks, faster iteration |
+| **Auto-Accept** | Most tools execute immediately; bash and destructive git still prompt | Trusted tasks, faster iteration |
+| **Yolo** | Every tool executes immediately — no exceptions | Zero interruptions, full trust |
 | **Plan** | Tools are shown but never executed | Exploring what the AI would do |
 
 Toggle between modes with **Shift+Tab**. The current mode is shown in the status bar.
@@ -218,7 +219,7 @@ Define task prompts as markdown files and schedule them with cron expressions. N
 | Feature | Description |
 |---------|-------------|
 | [Commands Reference](commands.md) | All slash commands and special input syntax |
-| [Development Modes](development-modes.md) | Normal, auto-accept, and plan modes |
+| [Development Modes](development-modes.md) | Normal, auto-accept, yolo, and plan modes |
 | [Context Compression](context-compression.md) | Managing token usage in long conversations |
 | [Checkpointing](checkpointing.md) | Saving and restoring conversation snapshots |
 | [Session Management](session-management.md) | Automatic session saving and resumption |

@@ -56,6 +56,16 @@ test('DevelopmentModeIndicator renders with plan mode', t => {
 	t.regex(output!, /plan mode on/);
 });
 
+test('DevelopmentModeIndicator renders with yolo mode', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator developmentMode="yolo" colors={mockColors} contextPercentUsed={null} />,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /yolo mode on/);
+});
+
 test('DevelopmentModeIndicator renders with scheduler mode', t => {
 	const {lastFrame} = render(
 		<DevelopmentModeIndicator developmentMode="scheduler" colors={mockColors} contextPercentUsed={null} />,
@@ -79,7 +89,7 @@ test('DevelopmentModeIndicator renders without crashing', t => {
 // ============================================================================
 
 test('DevelopmentModeIndicator accepts all valid development modes', t => {
-	const modes = ['normal', 'auto-accept', 'plan', 'scheduler'] as const;
+	const modes = ['normal', 'auto-accept', 'yolo', 'plan', 'scheduler'] as const;
 
 	for (const mode of modes) {
 		t.notThrows(() => {

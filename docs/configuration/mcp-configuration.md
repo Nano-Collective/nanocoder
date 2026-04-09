@@ -179,7 +179,7 @@ The `alwaysAllow` field specifies MCP tools that execute without confirmation in
 
 - Tools in `alwaysAllow` skip the confirmation prompt in normal mode
 - Tools not listed still require approval
-- In auto-accept mode, all tools run without confirmation regardless
+- In auto-accept and yolo modes, all MCP tools run without confirmation regardless
 - Only auto-approve read-only tools; avoid auto-approving tools that modify files or execute commands
 
 ## Environment Variables

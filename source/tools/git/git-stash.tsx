@@ -264,6 +264,9 @@ const gitStashCoreTool = tool({
 	needsApproval: (args: GitStashInput) => {
 		const mode = getCurrentMode();
 
+		// Yolo mode auto-executes everything
+		if (mode === 'yolo') return false;
+
 		// AUTO for list
 		if (
 			args.list ||

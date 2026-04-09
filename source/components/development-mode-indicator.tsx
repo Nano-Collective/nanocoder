@@ -58,10 +58,12 @@ export const DevelopmentModeIndicator = React.memo(
 					color={
 						developmentMode === 'normal'
 							? colors.secondary
-							: developmentMode === 'auto-accept' ||
-									developmentMode === 'scheduler'
-								? colors.info
-								: colors.warning
+							: developmentMode === 'yolo'
+								? colors.error
+								: developmentMode === 'auto-accept' ||
+										developmentMode === 'scheduler'
+									? colors.info
+									: colors.warning
 					}
 				>
 					<Text bold>{modeLabel}</Text>
