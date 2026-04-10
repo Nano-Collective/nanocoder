@@ -27,7 +27,7 @@ Controls which tools the AI has access to.
 | Profile | Tools | Behaviour |
 |---------|-------|-----------|
 | **full** (default) | All registered tools including MCP servers | No filtering applied |
-| **minimal** | 7 core tools: `read_file`, `write_file`, `string_replace`, `execute_bash`, `find_files`, `search_file_contents`, `list_directory` | Slim prompt and single-tool enforcement enabled automatically |
+| **minimal** | 8 core tools: `read_file`, `write_file`, `string_replace`, `execute_bash`, `find_files`, `search_file_contents`, `list_directory`, `agent` | Slim prompt and single-tool enforcement enabled automatically |
 
 The **minimal** profile is designed for small models (1B-8B parameters) that struggle with large tool sets. It reduces the system prompt size and forces the model to call one tool at a time.
 
@@ -105,9 +105,9 @@ This automatically activates tune with the minimal profile whenever you switch t
 
 Tune works alongside [development modes](development-modes.md):
 
-- **Plan mode + minimal profile** — the model gets 4 read-only exploration tools (`read_file`, `find_files`, `search_file_contents`, `list_directory`), making it practical for small models to plan
-- **Plan mode + full profile** — all read-only tools are available for exploration
-- Mode-excluded tools are filtered on top of the tune profile
+- **Plan mode + minimal profile** — the model gets 4 exploration tools (`read_file`, `find_files`, `search_file_contents`, `list_directory`), making it practical for small models to plan
+- **Plan mode + full profile** — all plan-mode tools are available, including read-only git, diagnostics, web, and interaction tools
+- Mode exclusions are filtered on top of the tune profile
 
 ## Status Bar
 
