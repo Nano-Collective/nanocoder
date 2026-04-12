@@ -116,6 +116,8 @@ refactor.md
 coverage
 
 .nanocoder/tasks.json
+.nanocoder/schedule-runs.json
+.nanocoder/schedules.json
 .generated-prompts/
 
 # Generated quality report (baseline.json is checked in, others are not)
