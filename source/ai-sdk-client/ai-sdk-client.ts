@@ -1,7 +1,10 @@
 import type {OpenAIProvider} from '@ai-sdk/openai';
 import type {LanguageModel} from 'ai';
 import {Agent} from 'undici';
-import {TIMEOUT_SOCKET_DEFAULT_MS} from '@/constants';
+import {
+	TIMEOUT_SOCKET_DEFAULT_MS,
+	TIMEOUT_SOCKET_LOCAL_DEFAULT_MS,
+} from '@/constants';
 import {getModelContextLimit} from '@/models/index.js';
 import type {
 	AIProviderConfig,
@@ -13,6 +16,7 @@ import type {
 	StreamCallbacks,
 } from '@/types/index';
 import {getLogger} from '@/utils/logging';
+import {isLocalURL} from '@/utils/url-utils';
 import {handleChat} from './chat/chat-handler.js';
 import {type AIProvider, createProvider} from './providers/provider-factory.js';
 
@@ -46,10 +50,16 @@ export class AISDKClient implements LLMClient {
 		const {connectionPool} = this.providerConfig;
 		const {requestTimeout, socketTimeout} = this.providerConfig;
 		const effectiveSocketTimeout = socketTimeout ?? requestTimeout;
+		const isLocal =
+			providerConfig.config.baseURL &&
+			isLocalURL(providerConfig.config.baseURL);
+		const defaultTimeout = isLocal
+			? TIMEOUT_SOCKET_LOCAL_DEFAULT_MS
+			: TIMEOUT_SOCKET_DEFAULT_MS;
 		const resolvedSocketTimeout =
 			effectiveSocketTimeout === -1
 				? 0
-				: (effectiveSocketTimeout ?? TIMEOUT_SOCKET_DEFAULT_MS);
+				: (effectiveSocketTimeout ?? defaultTimeout);
 
 		this.undiciAgent = new Agent({
 			connect: {
