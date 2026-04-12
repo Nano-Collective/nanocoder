@@ -46,6 +46,18 @@
 
 - Security: Fixed vulnerable packages. Thanks to @brijeshkr.
 
+- Added `/credits` command showing project contributors (auto-generated from git history via `pnpm run build:credits`) and dependency versions.
+
+- Added desktop notifications for tool confirmations, question prompts, and generation completions. Supports macOS (`terminal-notifier` with osascript fallback), Linux (`notify-send`), and Windows (PowerShell). Configurable per-event in `nanocoder-preferences.json` and in `/settings` with custom messages and optional sound. Includes a "Notifications" settings menu for preference management.
+
+- Added CLI quality metrics framework (`benchmarks/measure.ts`, `benchmarks/report.ts`) tracking correctness, performance (module count, boot time, bundle size), stability (tool/command counts, help text hash), and health (test counts, vulnerabilities).
+
+- Reduced startup time by parallelizing and deferring non-critical initialization. LLM client and subagent init run in parallel on the critical path; update checks, MCP servers, and LSP servers now initialize in the background without blocking chat. Replaced the full Status box with a lightweight one-line `BootSummary` component.
+
+- Fix: Scheduler mode memory leak — chat messages and components now clear before each scheduled job execution, preventing memory accumulation across repeated runs.
+
+- Fix: Updated agent documentation (`AGENTS.md`, `CLAUDE.md`) with current project structure (766 files across 97 directories), added missing directory mappings, removed deprecated references, and documented the lazy-loading command system.
+
 - Dependency updates: `ink` 6.8.0, `@ai-sdk/openai-compatible` 2.0.35, `@ai-sdk/openai` 3.0.50, `@ai-sdk/google` 3.0.58, `@modelcontextprotocol/sdk` 1.29.0, `dotenv` 17.4.0, `sonic-boom` 5.0.0, `diff` 8.0.4, `esbuild` 0.27.4, `eslint` 10.1.0, `knip` 6.0.6.
 
 If there are any problems, feedback or thoughts please drop an issue or message us through Discord! Thank you for using Nanocoder.
