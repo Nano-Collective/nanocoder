@@ -78,6 +78,7 @@ export function parseAPIError(error: unknown): string {
 	}
 
 	const errorMessage = rootError.message;
+	const lowerMessage = errorMessage.toLowerCase();
 
 	// Extract status code and clean message from common error patterns FIRST
 	// This ensures HTTP status codes are properly parsed before falling through
@@ -137,7 +138,23 @@ export function parseAPIError(error: unknown): string {
 	}
 
 	// Handle timeout errors
-	if (errorMessage.includes('timeout') || errorMessage.includes('ETIMEDOUT')) {
+	if (
+		lowerMessage.includes('timeout') ||
+		errorMessage.includes('ETIMEDOUT') ||
+		lowerMessage.includes('und_err_headers_timeout') ||
+		lowerMessage.includes('headers timeout error')
+	) {
+		if (
+			lowerMessage.includes('und_err_headers_timeout') ||
+			lowerMessage.includes('headers timeout error')
+		) {
+			return (
+				'Request timed out while waiting for model response headers. ' +
+				'For slow local models, increase requestTimeout/socketTimeout in your provider config, ' +
+				'or set both to -1 to disable timeouts.'
+			);
+		}
+
 		return 'Request timed out: The model took too long to respond';
 	}
 
