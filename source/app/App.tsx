@@ -634,32 +634,8 @@ export default function App({
 		() =>
 			createStaticComponents({
 				shouldShowWelcome,
-				currentProvider: appState.currentProvider,
-				currentModel: appState.currentModel,
-				currentTheme: appState.currentTheme,
-				updateInfo: appState.updateInfo,
-				mcpServersStatus: appState.mcpServersStatus,
-				lspServersStatus: appState.lspServersStatus,
-				preferencesLoaded: appState.preferencesLoaded,
-				customCommandsCount: appState.customCommandsCount,
-				vscodeMode: effectiveVscodeEnabled,
-				vscodePort: vscodeServer.actualPort,
-				vscodeRequestedPort: vscodeServer.requestedPort,
 			}),
-		[
-			shouldShowWelcome,
-			appState.currentProvider,
-			appState.currentModel,
-			appState.currentTheme,
-			appState.updateInfo,
-			appState.mcpServersStatus,
-			appState.lspServersStatus,
-			appState.preferencesLoaded,
-			appState.customCommandsCount,
-			effectiveVscodeEnabled,
-			vscodeServer.actualPort,
-			vscodeServer.requestedPort,
-		],
+		[shouldShowWelcome],
 	);
 
 	// Handle loading state for directory trust check

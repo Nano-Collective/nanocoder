@@ -10,9 +10,16 @@
 // (~thousand+ modules via Ink + es-toolkit alone) into the fast path,
 // defeating the purpose. Heavy imports live inside `main()` below and are
 // pulled in via dynamic `await import()` only when the app actually boots.
-import {createRequire} from 'node:module';
+import nodeModule from 'node:module';
 
-const require = createRequire(import.meta.url);
+// Enable V8 compile cache (Node 22.8+). After the first run, Node caches
+// bytecode for every module on disk so subsequent launches skip parsing
+// entirely. Degrades gracefully on older Node versions.
+if (typeof nodeModule.enableCompileCache === 'function') {
+	nodeModule.enableCompileCache();
+}
+
+const require = nodeModule.createRequire(import.meta.url);
 const {version} = require('../package.json');
 
 // Parse CLI arguments

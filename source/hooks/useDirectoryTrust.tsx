@@ -1,5 +1,5 @@
 import path from 'path';
-import {useCallback, useEffect, useState} from 'react';
+import {useCallback, useState} from 'react';
 import {loadPreferences, savePreferences} from '@/config/preferences';
 import {logError, logInfo} from '@/utils/message-queue';
 
@@ -8,6 +8,35 @@ interface UseDirectoryTrustReturn {
 	handleConfirmTrust: () => void;
 	isTrustLoading: boolean;
 	isTrustedError: string | null;
+}
+
+/**
+ * Check trust status synchronously. This is pure filesystem work
+ * (readFileSync for preferences) and path comparison — microseconds.
+ * Computing it synchronously in useState avoids a one-frame flash of
+ * the "Checking directory trust..." spinner.
+ */
+function checkTrustSync(directory: string): {
+	trusted: boolean;
+	error: string | null;
+} {
+	try {
+		const preferences = loadPreferences();
+		const trustedDirectories = preferences.trustedDirectories || [];
+		const normalizedDirectory = path.resolve(directory); // nosemgrep
+		const trusted = trustedDirectories.some(
+			trustedDir => path.resolve(trustedDir) === normalizedDirectory, // nosemgrep
+		);
+		return {trusted, error: null};
+	} catch (err) {
+		const errorMessage =
+			err instanceof Error ? err.message : 'Unknown error occurred';
+		logError(`${errorMessage}`);
+		return {
+			trusted: false,
+			error: `Failed to check directory trust status: ${errorMessage}`,
+		};
+	}
 }
 
 /**
@@ -20,40 +49,13 @@ interface UseDirectoryTrustReturn {
 export function useDirectoryTrust(
 	directory: string = process.cwd(),
 ): UseDirectoryTrustReturn {
-	const [isTrusted, setIsTrusted] = useState(false);
-	const [isLoading, setIsLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
-
-	// Check if directory is trusted on mount and when directory changes
-	useEffect(() => {
-		const checkTrustStatus = () => {
-			try {
-				setIsLoading(true);
-				setError(null);
-
-				const preferences = loadPreferences();
-				const trustedDirectories = preferences.trustedDirectories || [];
-
-				// Normalize paths for comparison (resolve any relative path components)
-				const normalizedDirectory = path.resolve(directory); // nosemgrep
-				const isTrustedDir = trustedDirectories.some(
-					trustedDir => path.resolve(trustedDir) === normalizedDirectory, // nosemgrep
-				);
-
-				setIsTrusted(isTrustedDir);
-			} catch (err) {
-				const errorMessage =
-					err instanceof Error ? err.message : 'Unknown error occurred';
-				setError(`Failed to check directory trust status: ${errorMessage}`);
-
-				logError(`${errorMessage}`);
-			} finally {
-				setIsLoading(false);
-			}
-		};
-
-		checkTrustStatus();
-	}, [directory]);
+	// Compute trust status synchronously on first render — the check is
+	// pure sync filesystem + path comparison, so there's no reason to
+	// defer it to a useEffect (which would flash a loading spinner for
+	// one frame before the effect runs).
+	const [initial] = useState(() => checkTrustSync(directory));
+	const [isTrusted, setIsTrusted] = useState(initial.trusted);
+	const [error, setError] = useState<string | null>(initial.error);
 
 	// Handler to confirm trust for the current directory
 	const handleConfirmTrust = useCallback(() => {
@@ -92,7 +94,7 @@ export function useDirectoryTrust(
 	return {
 		isTrusted,
 		handleConfirmTrust,
-		isTrustLoading: isLoading,
+		isTrustLoading: false,
 		isTrustedError: error,
 	};
 }

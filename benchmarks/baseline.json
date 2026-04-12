@@ -29,16 +29,21 @@
 		},
 		"interactive_boot_ms_approx": {
 			"kind": "numeric",
-			"value": 606,
+			"value": 505,
+			"warnOnDecrease": false
+		},
+		"first_render_ms_approx": {
+			"kind": "numeric",
+			"value": 497,
 			"warnOnDecrease": false
 		},
 		"dist_size_bytes": {
 			"kind": "numeric",
-			"value": 3780934
+			"value": 3519956
 		},
 		"dist_file_count": {
 			"kind": "numeric",
-			"value": 1455,
+			"value": 1316,
 			"warnOnDecrease": false
 		}
 	},

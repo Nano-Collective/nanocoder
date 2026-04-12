@@ -634,6 +634,59 @@ function countAuditVulnerabilities(): number {
 	}
 }
 
+/**
+ * Measures time from process spawn to first stdout output — the moment
+ * the user sees *something* on screen. Run without the ESM counting
+ * loader so there's no instrumentation overhead. Takes the median of
+ * `samples` runs.
+ */
+async function measureTimeToFirstRender(samples = 3): Promise<number> {
+	const results: number[] = [];
+
+	for (let i = 0; i < samples; i++) {
+		const result = await new Promise<number>(resolve => {
+			const start = Date.now();
+			const child = spawn('node', [distCli], {
+				stdio: ['ignore', 'pipe', 'pipe'],
+				env: {
+					...process.env,
+					NO_COLOR: '1',
+					FORCE_COLOR: '0',
+					CI: '1',
+					NODE_ENV: 'test',
+				},
+			});
+
+			let resolved = false;
+			const onData = () => {
+				if (!resolved) {
+					resolved = true;
+					const elapsed = Date.now() - start;
+					child.kill('SIGTERM');
+					resolve(elapsed);
+				}
+			};
+
+			child.stdout.once('data', onData);
+			child.stderr.once('data', onData);
+
+			// Safety timeout
+			setTimeout(() => {
+				if (!resolved) {
+					resolved = true;
+					child.kill('SIGKILL');
+					resolve(Date.now() - start);
+				}
+			}, 15000);
+		});
+
+		results.push(result);
+	}
+
+	results.sort((a, b) => a - b);
+	return results[Math.floor(results.length / 2)];
+}
+
 export async function measure(): Promise<Measurements> {
 	if (!fs.existsSync(distCli)) {
 		throw new Error(
@@ -663,6 +716,8 @@ export async function measure(): Promise<Measurements> {
 	const interactiveModuleCount = interactiveRuns[0].moduleCount;
 	const bootSamples = interactiveRuns.map(r => r.bootMs).sort((a, b) => a - b);
 	const interactiveBootMsMedian = bootSamples[1];
+	// Time from spawn to first stdout byte — what the user actually perceives.
+	const firstRenderMs = await measureTimeToFirstRender();
 	const distStats = measureDir(path.join(repoRoot, 'dist'));
 
 	// Stability --------------------------------------------------------------
@@ -753,6 +808,14 @@ export async function measure(): Promise<Measurements> {
 			interactive_boot_ms_approx: {
 				kind: 'numeric',
 				value: interactiveBootMsMedian,
+				warnOnDecrease: false,
+			},
+			// Time from spawn to first stdout byte — what the user sees.
+			// Measured without the ESM loader so there's no instrumentation
+			// overhead. Median of 3 runs.
+			first_render_ms_approx: {
+				kind: 'numeric',
+				value: firstRenderMs,
 				warnOnDecrease: false,
 			},
 			dist_size_bytes: {kind: 'numeric', value: distStats.bytes},

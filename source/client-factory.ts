@@ -12,7 +12,6 @@ import {
 import {getClosestConfigFile} from '@/config/index';
 import {loadAllProviderConfigs} from '@/config/mcp-config-loader';
 import {loadPreferences} from '@/config/preferences';
-import {TIMEOUT_PROVIDER_CONNECTION_MS} from '@/constants';
 import type {AIProviderConfig, LLMClient} from '@/types/index';
 import {isLocalURL} from '@/utils/url-utils';
 
@@ -131,8 +130,8 @@ async function createAISDKClient(
 				continue;
 			}
 
-			// Test provider connection
-			await testProviderConnection(providerConfig);
+			// Validate credentials (sync, no network calls)
+			validateProviderCredentials(providerConfig);
 
 			const client = await AISDKClient.create(providerConfig);
 
@@ -189,38 +188,14 @@ function loadProviderConfigs(): AIProviderConfig[] {
 	}));
 }
 
-async function testProviderConnection(
-	providerConfig: AIProviderConfig,
-): Promise<void> {
-	// Test local servers for connectivity
-	if (
-		providerConfig.config.baseURL &&
-		isLocalURL(providerConfig.config.baseURL)
-	) {
-		try {
-			await fetch(providerConfig.config.baseURL, {
-				signal: AbortSignal.timeout(TIMEOUT_PROVIDER_CONNECTION_MS),
-				headers: providerConfig.config.headers,
-			});
-			// Don't check response.ok as some servers return 404 for root path
-			// We just need to confirm the server responded (not a network error)
-		} catch (error) {
-			// Only throw if it's a network error, not a 404 or other HTTP response
-			if (error instanceof TypeError) {
-				throw new Error(
-					`Server not accessible at ${providerConfig.config.baseURL}`,
-				);
-			}
-			// For AbortError (timeout), also throw
-			if (error instanceof Error && error.name === 'AbortError') {
-				throw new Error(
-					`Server not accessible at ${providerConfig.config.baseURL}`,
-				);
-			}
-			// Other errors (like HTTP errors) mean the server is responding, so pass
-		}
-	}
-	// GitHub Copilot: require stored credential instead of apiKey
+/**
+ * Validate that the provider has the credentials it needs. No network
+ * calls — connectivity is verified on first actual LLM request, where
+ * the error handling already exists. This keeps boot fast and avoids
+ * blocking on local servers (Ollama) or remote APIs that might be slow.
+ */
+function validateProviderCredentials(providerConfig: AIProviderConfig): void {
+	// GitHub Copilot: require stored credential
 	if (providerConfig.sdkProvider === 'github-copilot') {
 		const credential = loadCopilotCredential(providerConfig.name);
 		if (!credential?.oauthToken) {
@@ -229,7 +204,7 @@ async function testProviderConnection(
 		return;
 	}
 
-	// ChatGPT/Codex: require stored credential instead of apiKey
+	// ChatGPT/Codex: require stored credential
 	if (providerConfig.sdkProvider === 'chatgpt-codex') {
 		const credential = loadCodexCredential(providerConfig.name);
 		if (!credential?.accessToken) {
@@ -238,7 +213,7 @@ async function testProviderConnection(
 		return;
 	}
 
-	// Require API key for other hosted providers
+	// Require API key for hosted providers (local servers get a pass)
 	if (
 		!providerConfig.config.apiKey &&
 		!(
