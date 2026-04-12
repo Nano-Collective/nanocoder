@@ -188,4 +188,9 @@ export const lazyCommands: LazyCommand[] = [
 			'List subagents. /agents show <name> for details, /agents copy <name> to customize',
 		load: () => import('@/commands/agents').then(m => m.agentsCommand),
 	},
+	{
+		name: 'credits',
+		description: 'Show project contributors and dependencies',
+		load: () => import('@/commands/credits').then(m => m.creditsCommand),
+	},
 ];

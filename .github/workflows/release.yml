@@ -67,6 +67,9 @@ jobs:
       - name: Install dependencies (including VS Code extension)
         run: pnpm install --frozen-lockfile
 
+      - name: Generate credits
+        run: pnpm run build:credits
+
       - name: Build project
         run: pnpm run build
 

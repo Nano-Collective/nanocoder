@@ -164,6 +164,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Generate credits
+        run: pnpm run build:credits
+
       - name: Build project (required for CLI integration tests)
         run: pnpm build
 
@@ -218,6 +221,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Generate credits
+        run: pnpm run build:credits
 
       - name: Build project
         run: pnpm build

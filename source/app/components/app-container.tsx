@@ -1,4 +1,4 @@
-import {Text} from 'ink';
+import {Box, Text} from 'ink';
 import React from 'react';
 import WelcomeMessage from '@/components/welcome-message';
 import {getClosestConfigFile} from '@/config/index';
@@ -85,11 +85,9 @@ export function createStaticComponents({
 
 	if (currentProvider || currentModel) {
 		components.push(
-			<BootSummary
-				key="boot-summary"
-				provider={currentProvider}
-				model={currentModel}
-			/>,
+			<Box key="boot-summary" flexDirection="column" marginBottom={1}>
+				<BootSummary provider={currentProvider} model={currentModel} />
+			</Box>,
 		);
 	}
 

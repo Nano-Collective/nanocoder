@@ -1,0 +1,25 @@
+# Canonical Name <canonical email> <alternate email>
+# Fixes duplicate contributor entries in git log / credits
+
+Brijesh K R <avtrkrb@gmail.com> <brijesh@tutanota.de>
+
+Deniz Okcu <deniz.okcu@mailbox.org> <1931144+DenizOkcu@users.noreply.github.com>
+Deniz Okcu <deniz.okcu@mailbox.org> <deniz.okcu@innogames.com>
+Deniz Okcu <deniz.okcu@mailbox.org> DenizOkcu <deniz.okcu@mailbox.org>
+
+Jason Schulz <jason@schulz.studio> <you@example.com>
+
+Jim Stenstrom <30080538+JimStenstrom@users.noreply.github.com> JimStenstrom <30080538+JimStenstrom@users.noreply.github.com>
+
+Nassim A. <namar0x0309@pm.me> Nas A. <namar0x0309@pm.me>
+Nassim A. <namar0x0309@pm.me> Nas A. <namar0x0309@users.noreply.github.com>
+Nassim A. <namar0x0309@pm.me> Nas. A <namar0x0309@pm.me>
+
+Nachiketa Pahari <nachiketapahari00@gmail.com> Pahari47 <nachi@PAHARI.localdomain>
+
+Nicola Lamacchia <git@nicola.dev> <2530868+nicolalamacchia@users.noreply.github.com>
+
+Will Lamerton <william.lamerton@gmail.com> <89926355+will-lamerton@users.noreply.github.com>
+
+Yash Saini <115717039+yashksaini-coder@users.noreply.github.com> yashksaini-coder <115717039+yashksaini-coder@users.noreply.github.com>
+Yash Saini <115717039+yashksaini-coder@users.noreply.github.com> yashksaini-coder <yashksaini89@gmail.com>
