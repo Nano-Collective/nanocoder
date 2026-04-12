@@ -19,8 +19,12 @@ A local-first CLI coding agent that brings the power of agentic coding tools lik
 - `docs/` - Documentation
 - `source/` - Source code
 - `.github/assets/` - Static assets
+- `docs/configuration/` - Project files
+- `docs/features/` - Project files
+- `docs/getting-started/` - Project files
 - `source/ai-sdk-client/` - Project files
 - `source/app/` - Application code
+- `source/auth/` - Project files
 - `source/commands/` - Project files
 - `source/components/` - React/UI components
 - `source/config/` - Configuration files
@@ -31,10 +35,6 @@ A local-first CLI coding agent that brings the power of agentic coding tools lik
 - `source/lsp/` - Project files
 - `source/markdown-parser/` - Project files
 - `source/mcp/` - Project files
-- `source/model-database/` - Project files
-- `source/models/` - Data models
-- `source/security/` - Project files
-- `source/services/` - Service layer
 
 ## Key Files
 
@@ -78,10 +78,10 @@ npm run start
 
 **Test Files:**
 - `.nanocoder/commands/test.md`
+- `scripts/test-copilot.sh`
 - `scripts/test.sh`
 - `source/ai-sdk-client/ai-sdk-client.spec.ts`
 - `source/ai-sdk-client/chat/chat-handler.spec.ts`
-- `source/ai-sdk-client/chat/streaming-handler.spec.ts`
 
 ## Existing Project Guidelines
 
@@ -129,7 +129,7 @@ All state lives in `useAppState.tsx`. Other hooks (`useChatHandler`, `useToolHan
 - Consider impact on bundle size when adding dependencies
 - Follow React hooks best practices
 - Consider component reusability when creating new components
-- Project has 563 files across 86 directories
+- Project has 766 files across 97 directories
 - Large codebase: Focus on specific areas when making changes
 - Check build configuration files before making structural changes
 

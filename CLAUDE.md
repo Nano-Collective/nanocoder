@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # Build and run
 pnpm run build          # Compile TypeScript to dist/ with executable permissions
+pnpm run build:credits  # Regenerate contributors.json from git history (CI/release only)
 pnpm run start          # Run the compiled application
 pnpm run dev            # Watch mode compilation (tsc --watch)
 
@@ -47,7 +48,7 @@ Nanocoder is a React-based CLI coding agent built with Ink.js that provides loca
 - `source/commands/` - Built-in slash commands (`/model`, `/provider`, `/clear`, etc.)
 - `source/custom-commands/` - User-defined markdown commands from `.nanocoder/commands/`
 - `source/mcp/` - Model Context Protocol server integration
-- `source/tool-calling/` - Tool call parsers (XML primary, JSON fallback)
+- `source/tool-calling/` - Tool call parsers (XML fallback for non-tool-calling models)
 
 ### State Management Pattern
 
@@ -64,6 +65,10 @@ Tools are registered in `tool-manager.ts` with:
 File editing uses content-based approach:
 - `string_replace`: Primary edit tool - replaces exact content
 - `write_file`: Whole file overwrites
+
+### Command System
+
+Slash commands live in `source/commands/` and are lazy-loaded via `source/commands/lazy-registry.ts`. To add a new command: create the command file exporting a `Command` object (name, description, handler), then add an entry to `lazyCommands` in the registry. Commands return React elements for Ink rendering. Some commands (clear, model, provider, etc.) need app state and are intercepted as "special commands" in `source/app/utils/app-util.ts`.
 
 ### Configuration Resolution Order
 
