@@ -51,7 +51,21 @@ You can change this via `/settings` → **Paste Threshold**, or by editing the f
 }
 ```
 
-When you restart Nanocoder, it automatically restores your last provider, model, theme, shape, and paste threshold preferences.
+### Notification Configuration
+
+Desktop notification preferences are stored under the `nanocoder.notifications` namespace:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `nanocoder.notifications.enabled` | boolean | `false` | Enable desktop notifications |
+| `nanocoder.notifications.sound` | boolean | `false` | Play a sound with notifications |
+| `nanocoder.notifications.events.toolConfirmation` | boolean | `true` | Notify when a tool needs approval |
+| `nanocoder.notifications.events.questionPrompt` | boolean | `true` | Notify when the AI asks a question |
+| `nanocoder.notifications.events.generationComplete` | boolean | `true` | Notify when a response is ready |
+
+You can change these via `/settings` → **Notifications**. See [Desktop Notifications](../features/notifications.md) for full details including platform-specific setup.
+
+When you restart Nanocoder, it automatically restores your last provider, model, theme, shape, paste threshold, and notification preferences.
 
 ## Manual Management
 

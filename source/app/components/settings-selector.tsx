@@ -7,15 +7,19 @@ import type {TitleShape} from '@/components/ui/styled-title';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {
 	getNanocoderShape,
+	getNotificationsPreference,
 	getPasteThreshold,
 	updateNanocoderShape,
+	updateNotificationsPreference,
 	updatePasteThreshold,
 } from '@/config/preferences';
 import {themes} from '@/config/themes';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useTitleShape} from '@/hooks/useTitleShape';
+import type {NotificationsConfig} from '@/types/config';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
+import {setNotificationsConfig} from '@/utils/notifications';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 
 type SettingsStep =
@@ -24,6 +28,7 @@ type SettingsStep =
 	| 'title-shape'
 	| 'nanocoder-shape'
 	| 'paste-threshold'
+	| 'notifications'
 	| 'done';
 
 interface SettingsSelectorProps {
@@ -67,6 +72,11 @@ function SettingsMainMenu({
 			label: 'Paste Threshold',
 			value: 'paste-threshold',
 			description: 'Set single-line paste character limit',
+		},
+		{
+			label: 'Notifications',
+			value: 'notifications',
+			description: 'Desktop notification preferences',
 		},
 		{
 			label: 'Done',
@@ -662,6 +672,126 @@ function SettingsPasteThresholdPanel({
 	);
 }
 
+// Notifications settings panel
+function SettingsNotificationsPanel({
+	onBack,
+	onCancel,
+}: {
+	onBack: () => void;
+	onCancel: () => void;
+}) {
+	const {boxWidth, isNarrow} = useResponsiveTerminal();
+	const {colors} = useTheme();
+
+	const saved = getNotificationsPreference();
+	const [config, setConfig] = useState<NotificationsConfig>(
+		saved ?? {
+			enabled: false,
+			sound: false,
+			events: {
+				toolConfirmation: true,
+				questionPrompt: true,
+				generationComplete: true,
+			},
+		},
+	);
+
+	useInput((_, key) => {
+		if (key.escape) {
+			onCancel();
+		}
+		if (key.shift && key.tab) {
+			onBack();
+		}
+	});
+
+	type ToggleKey =
+		| 'enabled'
+		| 'sound'
+		| 'toolConfirmation'
+		| 'questionPrompt'
+		| 'generationComplete';
+
+	const items: {label: string; value: ToggleKey}[] = useMemo(() => {
+		const isOn = (val: boolean | undefined) => (val ? 'ON' : 'OFF');
+		return [
+			{
+				label: `Notifications: ${isOn(config.enabled)}`,
+				value: 'enabled' as ToggleKey,
+			},
+			{
+				label: `  Sound: ${isOn(config.sound)}`,
+				value: 'sound' as ToggleKey,
+			},
+			{
+				label: `  Tool Confirmation: ${isOn(config.events?.toolConfirmation)}`,
+				value: 'toolConfirmation' as ToggleKey,
+			},
+			{
+				label: `  Question Prompt: ${isOn(config.events?.questionPrompt)}`,
+				value: 'questionPrompt' as ToggleKey,
+			},
+			{
+				label: `  Generation Complete: ${isOn(config.events?.generationComplete)}`,
+				value: 'generationComplete' as ToggleKey,
+			},
+		];
+	}, [config]);
+
+	const handleSelect = (item: {label: string; value: ToggleKey}) => {
+		const next = {...config};
+		if (item.value === 'enabled') {
+			next.enabled = !next.enabled;
+		} else if (item.value === 'sound') {
+			next.sound = !next.sound;
+		} else {
+			next.events = {...next.events, [item.value]: !next.events?.[item.value]};
+		}
+		setConfig(next);
+		updateNotificationsPreference(next);
+		setNotificationsConfig(next);
+	};
+
+	const title = isNarrow ? 'Notifications' : 'Desktop Notifications';
+
+	return (
+		<TitledBoxWithPreferences
+			title={title}
+			width={isNarrow ? '100%' : boxWidth}
+			borderColor={colors.primary}
+			paddingX={2}
+			paddingY={1}
+			flexDirection="column"
+			marginBottom={1}
+		>
+			{!isNarrow && (
+				<Box marginBottom={1}>
+					<Text color={colors.secondary}>
+						Toggle settings with Enter. Shift+Tab to go back, Esc to exit
+					</Text>
+				</Box>
+			)}
+			<SelectInput
+				items={items}
+				onSelect={handleSelect}
+				indicatorComponent={({isSelected}) => (
+					<Text color={isSelected ? colors.primary : colors.text}>
+						{isSelected ? '> ' : '  '}
+					</Text>
+				)}
+				itemComponent={({isSelected, label}) => (
+					<Text color={isSelected ? colors.primary : colors.text}>{label}</Text>
+				)}
+			/>
+			{isNarrow && (
+				<Box marginTop={0}>
+					<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
+				</Box>
+			)}
+		</TitledBoxWithPreferences>
+	);
+}
+
 // Main settings selector with step navigation
 export function SettingsSelector({onCancel}: SettingsSelectorProps) {
 	const [step, setStep] = useState<SettingsStep>('main');
@@ -693,6 +823,13 @@ export function SettingsSelector({onCancel}: SettingsSelectorProps) {
 		case 'paste-threshold':
 			return (
 				<SettingsPasteThresholdPanel
+					onBack={() => setStep('main')}
+					onCancel={onCancel}
+				/>
+			);
+		case 'notifications':
+			return (
+				<SettingsNotificationsPanel
 					onBack={() => setStep('main')}
 					onCancel={onCancel}
 				/>

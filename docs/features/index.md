@@ -230,4 +230,5 @@ Define task prompts as markdown files and schedule them with cron expressions. N
 | [Scheduler](scheduler.md) | Recurring AI tasks with cron expressions |
 | [VS Code Extension](vscode-extension.md) | Editor integration with live diff previews |
 | [Tune](tune.md) | Runtime model tuning for tool profiles, parameters, and compaction |
+| [Desktop Notifications](notifications.md) | Get notified when Nanocoder needs your attention |
 | [Keyboard Shortcuts](keyboard-shortcuts.md) | Complete keyboard shortcut reference |

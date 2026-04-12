@@ -115,7 +115,7 @@ export function useToolHandler({
 			addToChatQueue(
 				<InfoMessage
 					key={`tool-cancelled-${getNextComponentKey()}`}
-					message="Tool execution cancelled by user"
+					message="Tool execution cancelled by user."
 					hideBox={true}
 				/>,
 			);
@@ -390,7 +390,7 @@ export function useToolHandler({
 		addToChatQueue(
 			<InfoMessage
 				key={`tool-cancelled-${getNextComponentKey()}`}
-				message="Tool execution cancelled by user"
+				message="Tool execution cancelled by user."
 				hideBox={true}
 			/>,
 		);

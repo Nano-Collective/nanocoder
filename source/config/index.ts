@@ -7,13 +7,17 @@ import {
 	loadAllProviderConfigs,
 } from '@/config/mcp-config-loader';
 import {getConfigPath} from '@/config/paths';
-import {loadPreferences} from '@/config/preferences';
+import {
+	getNotificationsPreference,
+	loadPreferences,
+} from '@/config/preferences';
 import {defaultTheme, getThemeColors} from '@/config/themes';
 import type {
 	AppConfig,
 	AutoCompactConfig,
 	Colors,
 	CompressionMode,
+	NotificationsConfig,
 	PasteConfig,
 } from '@/types/index';
 import {logError} from '@/utils/message-queue';
@@ -400,6 +404,11 @@ function tryLoadAlwaysAllowFromPath(configPath: string): string[] | null {
 	return null;
 }
 
+// Load notifications configuration from preferences
+function loadNotificationsConfig(): NotificationsConfig | undefined {
+	return getNotificationsPreference();
+}
+
 // Function to load app configuration from agents.config.json if it exists
 function loadAppConfig(): AppConfig {
 	// Load providers from the new hierarchical configuration system
@@ -424,6 +433,9 @@ function loadAppConfig(): AppConfig {
 	// Load top-level alwaysAllow (for non-interactive mode and as fallback)
 	const alwaysAllow = loadAlwaysAllowConfig();
 
+	// Load notifications configuration
+	const notifications = loadNotificationsConfig();
+
 	return {
 		providers,
 		mcpServers,
@@ -432,6 +444,7 @@ function loadAppConfig(): AppConfig {
 		paste,
 		nanocoderTools,
 		alwaysAllow,
+		notifications,
 	};
 }
 

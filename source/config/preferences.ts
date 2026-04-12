@@ -97,6 +97,80 @@ export function saveTune(config: TuneConfig): void {
 }
 
 /**
+ * Get the notifications config from nanocoder.notifications in the preferences file.
+ */
+export function getNotificationsPreference():
+	| import('@/types/config').NotificationsConfig
+	| undefined {
+	try {
+		const data = readFileSync(getPreferencesPath(), 'utf-8');
+		const raw = JSON.parse(data) as Record<string, unknown>;
+		const nanocoder = raw.nanocoder as Record<string, unknown> | undefined;
+		const notifications = nanocoder?.notifications as
+			| Record<string, unknown>
+			| undefined;
+		if (
+			notifications &&
+			typeof notifications === 'object' &&
+			'enabled' in notifications
+		) {
+			return {
+				enabled: Boolean(notifications.enabled),
+				sound:
+					'sound' in notifications ? Boolean(notifications.sound) : undefined,
+				timeout:
+					'timeout' in notifications &&
+					typeof notifications.timeout === 'number'
+						? notifications.timeout
+						: undefined,
+				events:
+					'events' in notifications &&
+					notifications.events &&
+					typeof notifications.events === 'object'
+						? (notifications.events as import('@/types/config').NotificationsConfig['events'])
+						: undefined,
+				customMessages:
+					'customMessages' in notifications &&
+					notifications.customMessages &&
+					typeof notifications.customMessages === 'object'
+						? (notifications.customMessages as import('@/types/config').NotificationsConfig['customMessages'])
+						: undefined,
+			};
+		}
+	} catch {
+		// File doesn't exist or is invalid
+	}
+	return undefined;
+}
+
+/**
+ * Save the notifications config to nanocoder.notifications in the preferences file.
+ */
+export function updateNotificationsPreference(
+	config: import('@/types/config').NotificationsConfig,
+): void {
+	try {
+		let raw: Record<string, unknown> = {};
+		try {
+			const data = readFileSync(getPreferencesPath(), 'utf-8');
+			raw = JSON.parse(data) as Record<string, unknown>;
+		} catch {
+			// Start fresh if file doesn't exist
+		}
+
+		if (!raw.nanocoder || typeof raw.nanocoder !== 'object') {
+			raw.nanocoder = {};
+		}
+		const nanocoder = raw.nanocoder as Record<string, unknown>;
+		nanocoder.notifications = config;
+
+		writeFileSync(getPreferencesPath(), JSON.stringify(raw, null, 2));
+	} catch (error) {
+		logError(`Failed to save notifications config: ${String(error)}`);
+	}
+}
+
+/**
  * Get the paste threshold from the nanocoder.paste.singleLineThreshold
  * field in the preferences file (same path that loadPasteConfig reads).
  */

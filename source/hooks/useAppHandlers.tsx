@@ -18,6 +18,7 @@ import {CheckpointManager} from '@/services/checkpoint-manager';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
 import {createTokenizer} from '@/tokenization/index';
+import type {Task} from '@/tools/tasks/types';
 import type {
 	CheckpointListItem,
 	DevelopmentMode,
@@ -70,6 +71,7 @@ interface UseAppHandlersProps {
 	setCurrentSessionId: (value: string | null) => void;
 	setCurrentProvider: (value: string) => void;
 	setCurrentModel: (value: string) => void;
+	setLiveTaskList: (value: Task[] | null) => void;
 
 	// Callbacks
 	addToChatQueue: (component: React.ReactNode) => void;
@@ -130,6 +132,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			await baseClear();
 			props.setChatComponents([]);
 			props.setCurrentSessionId(null);
+			props.setLiveTaskList(null);
 		},
 		[
 			props.updateMessages,

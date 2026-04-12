@@ -75,6 +75,23 @@ export interface PasteConfig {
 	singleLineThreshold: number;
 }
 
+// Desktop notification configuration
+export interface NotificationsConfig {
+	enabled: boolean;
+	sound?: boolean;
+	timeout?: number;
+	events?: {
+		toolConfirmation?: boolean;
+		questionPrompt?: boolean;
+		generationComplete?: boolean;
+	};
+	customMessages?: {
+		toolConfirmation?: {title: string; message: string};
+		questionPrompt?: {title: string; message: string};
+		generationComplete?: {title: string; message: string};
+	};
+}
+
 export interface AppConfig {
 	// Providers array structure - all OpenAI compatible
 	providers?: {
@@ -124,6 +141,9 @@ export interface AppConfig {
 
 	// Paste handling configuration
 	paste?: PasteConfig;
+
+	// Desktop notification configuration
+	notifications?: NotificationsConfig;
 
 	// Model mode defaults (global)
 	tune?: Partial<TuneConfig>;
