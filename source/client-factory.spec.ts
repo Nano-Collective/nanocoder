@@ -316,7 +316,7 @@ test.serial(
 );
 
 test.serial(
-	'createLLMClient: localhost provider fails when server not accessible',
+	'createLLMClient: localhost provider succeeds even when server not accessible (connectivity deferred)',
 	async t => {
 		// Mock fetch to simulate network error (server not running)
 		globalThis.fetch = createMockFetch(false);
@@ -347,14 +347,16 @@ test.serial(
 		clearAppConfig();
 		reloadAppConfig();
 
-		// Should throw error when localhost provider fails
-		const error = await t.throwsAsync(createLLMClient());
-		t.regex(error.message, /All configured providers failed/);
+		// Connectivity is now deferred to first LLM request, so client creation succeeds
+		const result = await createLLMClient();
+		t.truthy(result);
+		t.truthy(result.client);
+		t.is(result.actualProvider, 'LocalTest');
 	},
 );
 
 test.serial(
-	'createLLMClient: localhost provider fails on timeout',
+	'createLLMClient: localhost provider succeeds even on timeout (connectivity deferred)',
 	async t => {
 		// Mock fetch to simulate timeout
 		globalThis.fetch = createMockFetch(true, 200, true);
@@ -385,9 +387,11 @@ test.serial(
 		clearAppConfig();
 		reloadAppConfig();
 
-		// Should throw error when localhost provider times out
-		const error = await t.throwsAsync(createLLMClient());
-		t.regex(error.message, /All configured providers failed/);
+		// Connectivity is now deferred to first LLM request, so client creation succeeds
+		const result = await createLLMClient();
+		t.truthy(result);
+		t.truthy(result.client);
+		t.is(result.actualProvider, 'LocalTest');
 	},
 );
 
@@ -633,12 +637,12 @@ test.serial(
 );
 
 test.serial(
-	'createLLMClient: throws error when all providers fail',
+	'createLLMClient: succeeds with local providers even when servers not accessible (connectivity deferred)',
 	async t => {
 		// Mock fetch to always fail
 		globalThis.fetch = createMockFetch(false);
 
-		// Create config with two providers
+		// Create config with two local providers
 		const configDir = join(testDir, 'all-fail-test');
 		mkdirSync(configDir, {recursive: true});
 
@@ -669,9 +673,11 @@ test.serial(
 		clearAppConfig();
 		reloadAppConfig();
 
-		// Should throw error when all providers fail
-		const error = await t.throwsAsync(createLLMClient());
-		t.regex(error.message, /All configured providers failed/);
+		// Connectivity is now deferred — local providers pass credential validation
+		const result = await createLLMClient();
+		t.truthy(result);
+		t.truthy(result.client);
+		t.is(result.actualProvider, 'Provider1');
 	},
 );
 
@@ -899,7 +905,7 @@ test.serial(
 );
 
 test.serial(
-	'createLLMClient: 127.0.0.1 provider fails when server not accessible',
+	'createLLMClient: 127.0.0.1 provider succeeds even when server not accessible (connectivity deferred)',
 	async t => {
 		globalThis.fetch = createMockFetch(false);
 
@@ -925,8 +931,11 @@ test.serial(
 		clearAppConfig();
 		reloadAppConfig();
 
-		const error = await t.throwsAsync(createLLMClient());
-		t.regex(error.message, /All configured providers failed/);
+		// Connectivity is now deferred to first LLM request, so client creation succeeds
+		const result = await createLLMClient();
+		t.truthy(result);
+		t.truthy(result.client);
+		t.is(result.actualProvider, 'OllamaIP');
 	},
 );
 

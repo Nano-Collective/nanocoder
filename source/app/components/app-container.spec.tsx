@@ -9,18 +9,12 @@ test('createStaticComponents includes welcome message when shouldShowWelcome is 
 		shouldShowWelcome: true,
 		currentProvider: 'test-provider',
 		currentModel: 'test-model',
-		currentTheme: 'tokyo-night',
-		updateInfo: null,
-		mcpServersStatus: undefined,
-		lspServersStatus: [],
-		preferencesLoaded: true,
-		customCommandsCount: 0,
 	};
 
 	const components = createStaticComponents(props);
-	t.is(components.length, 2); // Welcome + Status
+	t.is(components.length, 2); // Welcome + BootSummary
 	t.is((components[0] as React.ReactElement).key, 'welcome');
-	t.is((components[1] as React.ReactElement).key, 'status');
+	t.is((components[1] as React.ReactElement).key, 'boot-summary');
 
 	// Render and verify the components display correctly
 	const {lastFrame, unmount} = renderWithTheme(<>{components}</>);
@@ -35,17 +29,11 @@ test('createStaticComponents excludes welcome message when shouldShowWelcome is 
 		shouldShowWelcome: false,
 		currentProvider: 'test-provider',
 		currentModel: 'test-model',
-		currentTheme: 'tokyo-night',
-		updateInfo: null,
-		mcpServersStatus: undefined,
-		lspServersStatus: [],
-		preferencesLoaded: true,
-		customCommandsCount: 0,
 	};
 
 	const components = createStaticComponents(props);
-	t.is(components.length, 1); // Only Status
-	t.is((components[0] as React.ReactElement).key, 'status');
+	t.is(components.length, 1); // Only BootSummary
+	t.is((components[0] as React.ReactElement).key, 'boot-summary');
 
 	// Render and verify the components display correctly
 	const {lastFrame, unmount} = renderWithTheme(<>{components}</>);
@@ -56,34 +44,19 @@ test('createStaticComponents excludes welcome message when shouldShowWelcome is 
 	unmount();
 });
 
-test('createStaticComponents always includes status component', t => {
+test('createStaticComponents includes boot summary with provider and model', t => {
 	const props: AppContainerProps = {
 		shouldShowWelcome: false,
 		currentProvider: 'local',
 		currentModel: 'gpt-4',
-		currentTheme: 'dracula',
-		updateInfo: {hasUpdate: true, currentVersion: '1.0.0', latestVersion: '1.1.0'},
-		mcpServersStatus: [],
-		lspServersStatus: [],
-		preferencesLoaded: true,
-		customCommandsCount: 5,
 	};
 
 	const components = createStaticComponents(props);
-	const statusComponent = components.find(
-		c => (c as React.ReactElement).key === 'status',
-	) as React.ReactElement<{
-		provider: string;
-		model: string;
-		theme: string;
-		customCommandsCount: number;
-	}>;
+	const bootSummary = components.find(
+		c => (c as React.ReactElement).key === 'boot-summary',
+	) as React.ReactElement;
 
-	t.truthy(statusComponent);
-	t.is(statusComponent.props.provider, 'local');
-	t.is(statusComponent.props.model, 'gpt-4');
-	t.is(statusComponent.props.theme, 'dracula');
-	t.is(statusComponent.props.customCommandsCount, 5);
+	t.truthy(bootSummary);
 
 	// Render and verify the components display correctly
 	const {lastFrame, unmount} = renderWithTheme(<>{components}</>);
@@ -91,6 +64,16 @@ test('createStaticComponents always includes status component', t => {
 	t.truthy(output);
 	t.regex(output!, /local/); // Provider name
 	t.regex(output!, /gpt-4/); // Model name
-	t.regex(output!, /5.*commands?/i); // Custom commands count
 	unmount();
+});
+
+test('createStaticComponents omits boot summary when no provider or model', t => {
+	const props: AppContainerProps = {
+		shouldShowWelcome: false,
+		currentProvider: '',
+		currentModel: '',
+	};
+
+	const components = createStaticComponents(props);
+	t.is(components.length, 0);
 });
