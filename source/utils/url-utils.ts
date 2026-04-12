@@ -1,4 +1,10 @@
-const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '0.0.0.0', '[::1]']);
+const LOCAL_HOSTNAMES = new Set([
+	'localhost',
+	'127.0.0.1',
+	'0.0.0.0',
+	'[::1]',
+	'::1',
+]);
 
 /**
  * Check if a URL points to a local server.

@@ -144,6 +144,14 @@ test('parseAPIError handles UND_ERR_HEADERS_TIMEOUT with actionable guidance', t
 	t.true(result.includes('requestTimeout/socketTimeout'));
 });
 
+test('parseAPIError handles variant-case headers timeout errors', t => {
+	const error = new Error('und_err_headers_timeout: headers timeout error');
+	const result = parseAPIError(error);
+	t.true(result.includes('waiting for model response headers'));
+	t.true(result.includes('requestTimeout/socketTimeout'));
+	t.true(result.includes('set both to -1'));
+});
+
 test('parseAPIError handles connection errors', t => {
 	const error = new Error('ECONNREFUSED: connection refused');
 	const result = parseAPIError(error);

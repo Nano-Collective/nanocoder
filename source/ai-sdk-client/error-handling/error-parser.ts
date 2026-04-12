@@ -141,12 +141,12 @@ export function parseAPIError(error: unknown): string {
 	if (
 		lowerMessage.includes('timeout') ||
 		errorMessage.includes('ETIMEDOUT') ||
-		errorMessage.includes('UND_ERR_HEADERS_TIMEOUT') ||
-		errorMessage.includes('Headers Timeout Error')
+		lowerMessage.includes('und_err_headers_timeout') ||
+		lowerMessage.includes('headers timeout error')
 	) {
 		if (
-			errorMessage.includes('UND_ERR_HEADERS_TIMEOUT') ||
-			errorMessage.includes('Headers Timeout Error')
+			lowerMessage.includes('und_err_headers_timeout') ||
+			lowerMessage.includes('headers timeout error')
 		) {
 			return (
 				'Request timed out while waiting for model response headers. ' +
