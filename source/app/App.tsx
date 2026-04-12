@@ -567,6 +567,7 @@ export default function App({
 		setCurrentProvider: appState.setCurrentProvider,
 		setCurrentModel: appState.setCurrentModel,
 		addToChatQueue: appState.addToChatQueue,
+		setChatComponents: appState.setChatComponents,
 		setLiveComponent: appState.setLiveComponent,
 		client: appState.client,
 		getMessageTokens: appState.getMessageTokens,
@@ -634,8 +635,10 @@ export default function App({
 		() =>
 			createStaticComponents({
 				shouldShowWelcome,
+				currentProvider: appState.currentProvider,
+				currentModel: appState.currentModel,
 			}),
-		[shouldShowWelcome],
+		[shouldShowWelcome, appState.currentProvider, appState.currentModel],
 	);
 
 	// Handle loading state for directory trust check

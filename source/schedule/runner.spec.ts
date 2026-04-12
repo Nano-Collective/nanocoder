@@ -74,3 +74,38 @@ test.serial('start does nothing when called twice', async t => {
 	t.pass();
 	runner.stop();
 });
+
+// ============================================================================
+// Memory Leak Prevention Tests
+// ============================================================================
+
+test.serial('clearMessages is called before each job to prevent memory leaks', async t => {
+	let clearCount = 0;
+	const callbacks = createMockCallbacks({
+		clearMessages: async () => {
+			clearCount++;
+		},
+		// executeJob will fail on file read, but clearMessages should be called first
+		handleMessageSubmit: async () => {},
+		waitForConversationComplete: async () => {},
+	});
+	const runner = new ScheduleRunner(callbacks);
+	// Manually start so we can enqueue
+	await runner.start().catch(() => {});
+
+	// Enqueue a job — it will fail because schedule file doesn't exist,
+	// but clearMessages should still be called before the error
+	runner.enqueueJob({
+		id: 'test-1',
+		command: 'nonexistent-schedule.md',
+		cron: '0 * * * *',
+		enabled: true,
+		createdAt: new Date().toISOString(),
+	});
+
+	// Give processQueue time to run
+	await new Promise(resolve => setTimeout(resolve, 200));
+	runner.stop();
+
+	t.true(clearCount >= 1, 'clearMessages should be called at least once per job execution');
+});

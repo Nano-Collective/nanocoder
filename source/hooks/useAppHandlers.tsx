@@ -73,6 +73,7 @@ interface UseAppHandlersProps {
 
 	// Callbacks
 	addToChatQueue: (component: React.ReactNode) => void;
+	setChatComponents: (components: React.ReactNode[]) => void;
 	setLiveComponent: (component: React.ReactNode) => void;
 	client: LLMClient | null;
 	getMessageTokens: (message: Message) => number;
@@ -127,9 +128,16 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				props.client,
 			);
 			await baseClear();
+			props.setChatComponents([]);
 			props.setCurrentSessionId(null);
 		},
-		[props.updateMessages, props.client, props.setCurrentSessionId, props],
+		[
+			props.updateMessages,
+			props.client,
+			props.setChatComponents,
+			props.setCurrentSessionId,
+			props,
+		],
 	);
 
 	// Cancel handler

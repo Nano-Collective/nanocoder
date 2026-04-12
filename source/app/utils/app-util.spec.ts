@@ -1,6 +1,6 @@
 import test from 'ava';
 import React from 'react';
-import {handleMessageSubmission, parseContextLimit} from './app-util.js';
+import {createClearMessagesHandler, handleMessageSubmission, parseContextLimit} from './app-util.js';
 import type {MessageSubmissionOptions} from '@/types/index';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
@@ -523,4 +523,33 @@ test.serial('resume command - /resume without --all opens selector in project mo
 	} finally {
 		sessionManager.initialize = origInit;
 	}
+});
+
+// --- createClearMessagesHandler tests ---
+
+test('createClearMessagesHandler - clears messages to empty array', async t => {
+	let capturedMessages: unknown[] | null = null;
+	const setMessages = (messages: unknown[]) => {
+		capturedMessages = messages;
+	};
+	const handler = createClearMessagesHandler(setMessages, null);
+	await handler();
+	t.deepEqual(capturedMessages, [], 'setMessages should be called with empty array');
+});
+
+test('createClearMessagesHandler - calls client.clearContext when client exists', async t => {
+	let contextCleared = false;
+	const mockClient = {
+		clearContext: async () => {
+			contextCleared = true;
+		},
+	};
+	const handler = createClearMessagesHandler(() => {}, mockClient as any);
+	await handler();
+	t.true(contextCleared, 'client.clearContext should be called');
+});
+
+test('createClearMessagesHandler - does not throw when client is null', async t => {
+	const handler = createClearMessagesHandler(() => {}, null);
+	await t.notThrowsAsync(() => handler());
 });
