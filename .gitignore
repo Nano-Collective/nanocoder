@@ -117,4 +117,9 @@ coverage
 
 .nanocoder/tasks.json
 .generated-prompts/
+
+# Generated quality report (baseline.json is checked in, others are not)
+benchmarks/report.json
+benchmarks/explain.json
+benchmarks/.module-*
 .github/issues/docs

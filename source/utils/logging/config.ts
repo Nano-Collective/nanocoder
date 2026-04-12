@@ -37,9 +37,9 @@ export function getDefaultLogDirectory(): string {
 }
 
 /**
- * Create development configuration
+ * Create development configuration (internal).
  */
-export function createDevelopmentConfig(): EnhancedLoggerConfig {
+function createDevelopmentConfig(): EnhancedLoggerConfig {
 	return {
 		level: (process.env.NANOCODER_LOG_LEVEL as LogLevel) || 'debug',
 		destination: String(process.stdout.fd),
@@ -60,7 +60,7 @@ export function createDevelopmentConfig(): EnhancedLoggerConfig {
 }
 
 /**
- * Create production configuration
+ * Create production configuration (internal).
  *
  * In production, we want:
  * - File logging enabled at 'info' level by default (for diagnostics)
@@ -69,7 +69,7 @@ export function createDevelopmentConfig(): EnhancedLoggerConfig {
  * The log level here controls what gets written to files.
  * Console output is suppressed by using file-only transport.
  */
-export function createProductionConfig(): EnhancedLoggerConfig {
+function createProductionConfig(): EnhancedLoggerConfig {
 	// Check if file logging is explicitly disabled
 	const disableFileLogging = process.env.NANOCODER_LOG_DISABLE_FILE === 'true';
 
@@ -125,9 +125,9 @@ export function createProductionConfig(): EnhancedLoggerConfig {
 }
 
 /**
- * Create test configuration
+ * Create test configuration (internal).
  */
-export function createTestConfig(): EnhancedLoggerConfig {
+function createTestConfig(): EnhancedLoggerConfig {
 	return {
 		level: (process.env.LOG_LEVEL as LogLevel) || 'debug', // Changed from 'silent' to 'debug'
 		pretty: false,
@@ -142,13 +142,13 @@ export function createTestConfig(): EnhancedLoggerConfig {
 }
 
 /**
- * Get configuration based on current environment
+ * Get configuration based on current environment (internal).
  *
  * For CLI tools, we default to production (silent) behavior when NODE_ENV is not set.
  * This gives users a clean experience. Developers working on nanocoder itself should
  * explicitly set NODE_ENV=development to see debug logs.
  */
-export function getEnvironmentConfig(): EnhancedLoggerConfig {
+function getEnvironmentConfig(): EnhancedLoggerConfig {
 	const env = process.env.NODE_ENV;
 
 	switch (env) {
@@ -163,9 +163,9 @@ export function getEnvironmentConfig(): EnhancedLoggerConfig {
 }
 
 /**
- * Validate log level
+ * Validate log level (internal).
  */
-export function validateLogLevel(level: string): boolean {
+function validateLogLevel(level: string): boolean {
 	const validLevels = [
 		'fatal',
 		'error',
@@ -180,9 +180,9 @@ export function validateLogLevel(level: string): boolean {
 }
 
 /**
- * Normalize log level string
+ * Normalize log level string (internal).
  */
-export function normalizeLogLevel(level: string): string {
+function normalizeLogLevel(level: string): string {
 	const normalized = level.toLowerCase().trim();
 
 	// Map common aliases

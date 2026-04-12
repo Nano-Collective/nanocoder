@@ -17,14 +17,16 @@ import type {
 	ToolCall,
 } from '@/types/index';
 import {
-	endMetrics,
-	formatMemoryUsage,
 	generateCorrelationId,
 	getCorrelationId,
 	getLogger,
-	startMetrics,
 	withNewCorrelationContext,
 } from '@/utils/logging';
+import {
+	endMetrics,
+	formatMemoryUsage,
+	startMetrics,
+} from '@/utils/logging/performance.js';
 import {getSafeMemory} from '@/utils/logging/safe-process.js';
 import {convertToModelMessages} from '../converters/message-converter.js';
 import {convertAISDKToolCalls} from '../converters/tool-converter.js';

@@ -4,15 +4,12 @@ import {join} from 'path';
 import test from 'ava';
 import pino from 'pino';
 
-import {getDefaultLogDirectory} from './config.js';
 import {
-	withCorrelationContext,
-	createCorrelationContext,
+	withNewCorrelationContext,
 } from './correlation.js';
 // Implementation imports
 import {
 	createLoggerWithTransport,
-	createPinoLogger,
 	getLoggerStats,
 } from './pino-logger.js';
 import type {LoggerConfig} from './types.js';
@@ -243,17 +240,11 @@ test('logger handles correlation context', async t => {
 	const originalCorrelation = process.env.NANOCODER_CORRELATION_ENABLED;
 	process.env.NANOCODER_CORRELATION_ENABLED = 'true';
 
-	// Create and run with correlation context
-	const context = createCorrelationContext(undefined, {
-		user: 'test-user',
-		operation: 'test-operation',
-	});
-
 	// Test with correlation enabled
 	t.notThrows(() => {
-		withCorrelationContext(context, () => {
+		withNewCorrelationContext(() => {
 			logger.info('Message with correlation');
-		});
+		}, undefined, {user: 'test-user', operation: 'test-operation'});
 	}, 'Should handle correlation context');
 
 	// Restore environment
@@ -273,11 +264,9 @@ test('logger handles correlation context with metadata', async t => {
 	const originalCorrelation = process.env.NANOCODER_CORRELATION_ENABLED;
 	process.env.NANOCODER_CORRELATION_ENABLED = 'true';
 
-	const context = createCorrelationContext(undefined, {custom: 'data'});
-
-	withCorrelationContext(context, () => {
+	withNewCorrelationContext(() => {
 		logger.info('Test with metadata');
-	});
+	}, undefined, {custom: 'data'});
 
 	if (originalCorrelation === undefined) {
 		delete process.env.NANOCODER_CORRELATION_ENABLED;
@@ -678,10 +667,8 @@ test('logger handles all switch case levels in logWithContext', async t => {
 	const originalCorrelation = process.env.NANOCODER_CORRELATION_ENABLED;
 	process.env.NANOCODER_CORRELATION_ENABLED = 'true';
 
-	const context = createCorrelationContext(undefined, {test: 'metadata'});
-
 	// Test all log levels through the correlation context path
-	withCorrelationContext(context, () => {
+	withNewCorrelationContext(() => {
 		t.notThrows(() => logger.fatal('Fatal in context'), 'fatal in context');
 		t.notThrows(() => logger.error('Error in context'), 'error in context');
 		t.notThrows(() => logger.warn('Warn in context'), 'warn in context');
@@ -689,7 +676,7 @@ test('logger handles all switch case levels in logWithContext', async t => {
 		t.notThrows(() => logger.http('HTTP in context'), 'http in context');
 		t.notThrows(() => logger.debug('Debug in context'), 'debug in context');
 		t.notThrows(() => logger.trace('Trace in context'), 'trace in context');
-	});
+	}, undefined, {test: 'metadata'});
 
 	if (originalCorrelation === undefined) {
 		delete process.env.NANOCODER_CORRELATION_ENABLED;
@@ -704,10 +691,8 @@ test('logger handles correlation without metadata', async t => {
 	const originalCorrelation = process.env.NANOCODER_CORRELATION_ENABLED;
 	process.env.NANOCODER_CORRELATION_ENABLED = 'true';
 
-	// Create context without metadata
-	const context = createCorrelationContext();
-
-	withCorrelationContext(context, () => {
+	// Run without metadata
+	withNewCorrelationContext(() => {
 		t.notThrows(
 			() => logger.info('Message without metadata'),
 			'Should handle correlation without metadata',
@@ -1043,27 +1028,25 @@ test('createEnvironmentLogger creates log directory if it does not exist', async
 });
 
 test('createPinoLogger directly creates file-based logger', async t => {
-	// Test the actual createPinoLogger function with file transport
-	const logger = createPinoLogger({level: 'info'});
-	createdLoggers.push(logger);
+	// Use createTrackedLogger (sync destination) to avoid async worker threads
+	// that prevent the test process from exiting
+	const logger = createTrackedLogger({level: 'info'});
 
 	t.truthy(logger, 'Should create logger');
 	t.true(logger.isLevelEnabled('info'), 'Should enable info level');
 
-	// Log a message to ensure file transport works
+	// Log a message to ensure transport works
 	logger.info('Direct createPinoLogger test');
 
-	// Verify log directory exists
-	const logDir = getDefaultLogDirectory();
-	t.true(existsSync(logDir), 'Should create log directory');
+	// Verify log directory exists (createTrackedLogger uses testLogDir)
+	t.true(existsSync(testLogDir), 'Should create log directory');
 });
 
 test('createPinoLogger with custom redact configuration', async t => {
-	const logger = createPinoLogger({
+	const logger = createTrackedLogger({
 		level: 'debug',
 		redact: ['password', 'apiKey', 'secret'],
 	});
-	createdLoggers.push(logger);
 
 	t.truthy(logger, 'Should create logger with redaction');
 
@@ -1076,8 +1059,7 @@ test('createPinoLogger with custom redact configuration', async t => {
 });
 
 test('createPinoLogger creates logger with timestamp formatting', async t => {
-	const logger = createPinoLogger({level: 'info'});
-	createdLoggers.push(logger);
+	const logger = createTrackedLogger({level: 'info'});
 
 	t.truthy(logger, 'Should create logger with timestamp');
 
@@ -1086,8 +1068,7 @@ test('createPinoLogger creates logger with timestamp formatting', async t => {
 });
 
 test('createPinoLogger creates logger with level formatters', async t => {
-	const logger = createPinoLogger({level: 'warn'});
-	createdLoggers.push(logger);
+	const logger = createTrackedLogger({level: 'warn'});
 
 	t.truthy(logger, 'Should create logger with level formatters');
 
@@ -1097,8 +1078,7 @@ test('createPinoLogger creates logger with level formatters', async t => {
 });
 
 test('createPinoLogger includes all base metadata fields', async t => {
-	const logger = createPinoLogger({level: 'info'});
-	createdLoggers.push(logger);
+	const logger = createTrackedLogger({level: 'info'});
 
 	// This exercises the base config with pid, platform, arch, service, version, environment, nodeVersion
 	logger.info('Test message with all metadata');
@@ -1110,8 +1090,7 @@ test('createPinoLogger handles missing npm_package_version in base config', asyn
 	const originalVersion = process.env.npm_package_version;
 	delete process.env.npm_package_version;
 
-	const logger = createPinoLogger({level: 'info'});
-	createdLoggers.push(logger);
+	const logger = createTrackedLogger({level: 'info'});
 
 	t.truthy(logger, 'Should create logger with unknown version');
 	logger.info('Message with unknown version');
@@ -1122,8 +1101,7 @@ test('createPinoLogger handles missing npm_package_version in base config', asyn
 });
 
 test('createPinoLogger with trace level', async t => {
-	const logger = createPinoLogger({level: 'trace'});
-	createdLoggers.push(logger);
+	const logger = createTrackedLogger({level: 'trace'});
 
 	t.true(logger.isLevelEnabled('trace'), 'Should enable trace level');
 	logger.trace('Trace level message');
@@ -1131,8 +1109,7 @@ test('createPinoLogger with trace level', async t => {
 
 test('createPinoLogger uses determineTransportConfig for file logging', async t => {
 	// This test ensures determineTransportConfig is called and returns correct config
-	const logger = createPinoLogger({level: 'info'});
-	createdLoggers.push(logger);
+	const logger = createTrackedLogger({level: 'info'});
 
 	// The logger should be created with file transport (not console)
 	t.truthy(logger, 'Should create file-based logger');

@@ -1,10 +1,14 @@
 import React from 'react';
 import {ErrorMessage} from '@/components/message-box';
-import type {Command, Message} from '@/types/index';
+import type {Command, LazyCommand, Message} from '@/types/index';
 import {fuzzyScore} from '@/utils/fuzzy-matching';
 
 class CommandRegistry {
 	private commands = new Map<string, Command>();
+	private lazyEntries = new Map<string, LazyCommand>();
+	// Cached proxy wrappers for lazy commands so `get()` returns a stable
+	// reference across calls and handler resolution only happens once.
+	private lazyProxies = new Map<string, Command>();
 
 	register(command: Command | Command[]): void {
 		if (Array.isArray(command)) {
@@ -14,16 +18,54 @@ class CommandRegistry {
 		this.commands.set(command.name, command);
 	}
 
+	/**
+	 * Register one or more lazy command entries. The command module is not
+	 * loaded until the command is actually executed.
+	 */
+	registerLazy(entry: LazyCommand | LazyCommand[]): void {
+		if (Array.isArray(entry)) {
+			entry.forEach(e => this.registerLazy(e));
+			return;
+		}
+		this.lazyEntries.set(entry.name, entry);
+	}
+
+	private proxyForLazy(entry: LazyCommand): Command {
+		const cached = this.lazyProxies.get(entry.name);
+		if (cached) return cached;
+		let resolved: Command | null = null;
+		const proxy: Command = {
+			name: entry.name,
+			description: entry.description,
+			handler: async (args, messages, metadata) => {
+				if (!resolved) {
+					resolved = await entry.load();
+				}
+				return resolved.handler(args, messages, metadata);
+			},
+		};
+		this.lazyProxies.set(entry.name, proxy);
+		return proxy;
+	}
+
 	get(name: string): Command | undefined {
-		return this.commands.get(name);
+		const eager = this.commands.get(name);
+		if (eager) return eager;
+		const lazy = this.lazyEntries.get(name);
+		if (lazy) return this.proxyForLazy(lazy);
+		return undefined;
 	}
 
 	getAll(): Command[] {
-		return Array.from(this.commands.values());
+		const result: Command[] = Array.from(this.commands.values());
+		for (const entry of this.lazyEntries.values()) {
+			result.push(this.proxyForLazy(entry));
+		}
+		return result;
 	}
 
 	getCompletions(prefix: string): string[] {
-		const commandNames = Array.from(this.commands.keys());
+		const commandNames = [...this.commands.keys(), ...this.lazyEntries.keys()];
 
 		// No prefix: return all commands alphabetically
 		if (!prefix) {

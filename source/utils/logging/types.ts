@@ -22,22 +22,6 @@ export interface LoggerConfig {
 	transport?: unknown;
 }
 
-export interface LogEntry {
-	level: LogLevel;
-	time: string;
-	pid: number;
-	hostname: string;
-	correlationId?: string;
-	nodeVersion?: string;
-	platform?: string;
-	arch?: string;
-	service?: string;
-	version?: string;
-	environment?: string;
-	msg: string;
-	[key: string]: unknown;
-}
-
 // Enhanced logger configuration types
 export interface EnhancedLoggerConfig extends LoggerConfig {
 	options?: EnhancedTransportOptions;
@@ -90,16 +74,7 @@ export interface PiiRedactionRules {
 
 export interface CorrelationContext {
 	id: string;
-	parentId?: string;
 	metadata?: Record<string, unknown>;
-}
-
-export interface CorrelationMetadata {
-	source?: string;
-	version?: string;
-	environment?: string;
-	requestId?: string;
-	[key: string]: unknown;
 }
 
 export interface PerformanceMetrics {
@@ -153,56 +128,4 @@ export interface PinoTransportOptions {
 		append?: boolean;
 		[key: string]: unknown;
 	};
-}
-
-/**
- * Type for console method arguments
- */
-export type ConsoleArgument =
-	| string
-	| number
-	| boolean
-	| null
-	| undefined
-	| Error
-	| Record<string, unknown>
-	| Array<unknown>;
-
-/**
- * Type for console method arguments array
- */
-export type ConsoleArguments = ConsoleArgument[];
-
-/**
- * Typed object for console log data
- */
-export interface ConsoleLogData extends Record<string, unknown> {
-	correlationId: string;
-	source: string;
-	argumentCount?: number;
-	stringArgs?: number;
-	objectArgs?: number;
-	primitiveArgs?: number;
-	objects?: unknown[];
-	errorLikeObjects?: unknown[];
-	moduleName?: string;
-	allArgs?: ConsoleArguments;
-}
-
-/**
- * Type for HTTP request object in correlation tracking
- */
-export interface CorrelationHttpRequest {
-	method?: string;
-	url?: string;
-	headers?: Record<string, string>;
-}
-
-/**
- * Type for HTTP response object in correlation tracking
- */
-export interface CorrelationHttpResponse {
-	statusCode?: number;
-	headers?: Record<string, string>;
-	setHeader?: (name: string, value: string) => void;
 }

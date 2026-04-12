@@ -66,10 +66,6 @@ export const TABLE_COLUMN_MIN_WIDTH = 10;
 export const TOKEN_THRESHOLD_WARNING_PERCENT = 80;
 export const TOKEN_THRESHOLD_CRITICAL_PERCENT = 95;
 
-// === HEAP USAGE THRESHOLDS (decimal - health-monitor) ===
-export const HEAP_USAGE_WARNING_THRESHOLD = 0.8;
-export const HEAP_USAGE_CRITICAL_THRESHOLD = 0.95;
-
 // === OUTPUT TRUNCATION ===
 export const TRUNCATION_OUTPUT_LIMIT = 2000;
 export const TRUNCATION_DESCRIPTION_LENGTH = 100;
@@ -101,20 +97,9 @@ export const BUFFER_FILE_LIST_BYTES = 10 * 1024 * 1024; // 10 MB
 // === FETCH URL ===
 export const MAX_URL_CONTENT_BYTES = 100_000; // ~100 KB
 
-// === HEALTH MONITOR ===
-export const INTERVAL_HEALTH_CHECK_MS = 30_000;
-export const TIMEOUT_HEALTH_CHECK_MS = 5000;
-export const DURATION_AVERAGE_WARNING_MS = 1000;
-export const DURATION_AVERAGE_CRITICAL_MS = 5000;
-export const DURATION_REQUEST_WARNING_MS = 2000;
-export const DURATION_REQUEST_CRITICAL_MS = 10_000;
-export const COOLDOWN_ALERT_MS = 300_000; // 5 minutes
-
 // === LOGGING ===
 export const BUFFER_LOG_BYTES = 65_536; // 64 KB
 export const INTERVAL_LOG_FLUSH_MS = 1000;
-export const MAX_LOG_ENTRIES = 10_000;
-export const MAX_COMPLETED_REQUESTS = 1000;
 
 // === AI SDK ===
 export const MAX_TOOL_STEPS = 10;

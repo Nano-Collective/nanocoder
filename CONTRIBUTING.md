@@ -9,6 +9,7 @@ Thank you for your interest in contributing to Nanocoder! We welcome contributio
 - [Development Setup](#development-setup)
 - [Testing](#testing)
 - [Coding Standards](#coding-standards)
+- [Releasing a New Version](#releasing-a-new-version)
 - [Community and Communication](#community-and-communication)
 
 ## Getting Started
@@ -225,6 +226,67 @@ In addition to automated tests, manual testing is important for CLI interactions
    - Invalid configurations
    - Missing dependencies
 
+### Quality report and benchmarks
+
+The **CLI quality report** measures the built binary (`dist/cli.js`) across four categories — correctness, performance, stability, and health — and compares the numbers against a baseline checked into `benchmarks/baseline.json`. It exists to catch regressions that `test:all` can't see, like a tool disappearing from the registry, `--help` text changing unintentionally, or the startup module graph ballooning.
+
+**When it runs:** only at release time. The release workflow (`.github/workflows/release.yml`) runs `pnpm test:benchmark` as part of cutting a new version. It is intentionally **not** wired into `pnpm test:all` or the PR checks — it's a release gate, not a per-PR gate, because the metrics it tracks are surface-area and boot-cost drift, which only need to be reviewed when a version ships.
+
+You can still run it locally any time you want a drift check:
+
+```bash
+pnpm run build                  # benchmark reads dist/, so build first
+pnpm test:benchmark              # run the report, compare against baseline
+pnpm test:benchmark:update       # MAINTAINERS ONLY — overwrite benchmarks/baseline.json
+pnpm test:benchmark:explain      # diagnostic: show which packages contribute to the module count
+```
+
+The `:explain` mode is the tool to reach for when `help_module_count` or `interactive_module_count` jumped and you want to know *which* package is responsible. It runs the CLI under a diagnostic ESM loader, captures every resolved module URL, and groups them by top-level package. Output lives at `benchmarks/explain.json` for programmatic inspection.
+
+> **Note for contributors:** `pnpm test:benchmark` is fine to run anytime — it's read-only and useful for sanity-checking your own changes. But **`pnpm test:benchmark:update` is reserved for codeowners/maintainers**. The baseline is the shared source of truth for "what is normal", and updating it is a deliberate decision that belongs in the release flow. If your PR surfaces a drift (e.g. you added a tool and `tool_count` is now off), don't update the baseline yourself — flag it in the PR description and a maintainer will update the baseline as part of cutting the next release.
+
+The report writes a machine-readable copy to `benchmarks/report.json` so agents can parse results programmatically.
+
+#### Reading the output
+
+Every metric is compared against the baseline checked into `benchmarks/baseline.json` and assigned one of three statuses:
+
+- **OK** — within tolerance of baseline
+- **WARN** — drifted beyond tolerance but not catastrophic (e.g. module count +25% or a stability count dropped)
+- **FAIL** — hard threshold breached (e.g. module count doubled, or an exact-value correctness check diverged). A FAIL exits non-zero and blocks the release workflow.
+
+The four categories answer:
+
+- **Correctness** — exit codes and error routing behave as expected
+- **Performance** — module-resolution count for `--help`, `--version`, and full interactive boot (deterministic startup proxies) and `dist/` size
+- **Stability** — CLI flag count, tool count, command count, and a hash of `--help` text (detects unintentional surface area drift)
+- **Health** — test file / test case counts, high-severity audit vulnerability count
+
+> **Why module count instead of wall-clock time?** Wall-clock startup timing is flaky on shared CI runners and varies across machines, so the report measures the number of modules Node resolves while booting the CLI instead. That number is identical on every run and every machine, so a jump from 4603 to 5100 is unambiguous signal that a new import path was added.
+
+The report measures three boot paths:
+
+- **`help_module_count`** / **`version_module_count`** — modules resolved when running `node dist/cli.js --help` / `--version`. Measured via `execFileSync`.
+- **`interactive_module_count`** — modules resolved when booting the CLI in interactive mode (no args). The runner spawns the CLI under the counting loader, polls the count file every 100ms, waits until it has been stable for 1.5s (i.e. steady state), then sends SIGTERM. Deterministic because we wait for stability, not a fixed wall-clock window.
+
+Comparing `help_module_count` and `interactive_module_count` is also a useful signal on its own: if they're nearly identical (as they are today), the CLI has no fast path for flag parsing and is paying the full boot cost just to print help text.
+
+#### Adding new metrics
+
+1. Add the measurement to `benchmarks/measure.ts` — there are four `MetricGroup`s (`correctness`, `performance`, `stability`, `health`). Pick the right group and add a new entry.
+2. Numeric metrics default to `warnRatio: 1.25` and `failRatio: 2.0`. Tighten these later once the baseline has stabilized.
+3. Set `warnOnDecrease: true` for count-style metrics where a drop signals accidental deletion (tool count, test count, etc.).
+4. Open a PR with the new metric. A maintainer will run `pnpm test:benchmark:update` to record it in the baseline as part of the merge or the next release — contributors should not update `benchmarks/baseline.json` themselves.
+5. `benchmarks/report.ts` picks new metrics up automatically — no changes required there.
+
+#### Troubleshooting
+
+- **`dist/cli.js not found`** → Run `pnpm run build` before `pnpm test:benchmark`. The benchmark reads the compiled binary directly and doesn't trigger a build itself.
+- **`help_module_count` or `interactive_module_count` jumped** → A new import path was pulled into the startup graph. Check the diff for new imports in `source/cli.tsx` or its transitive dependencies. If the jump is intentional (you deliberately added a dependency), update the baseline.
+- **`interactive_module_count` hit the 20s hard timeout** → Something in interactive boot is continuously resolving modules (never reaching steady state) or the app is hanging on I/O before startup completes. Run `node dist/cli.js` manually and see what it's doing.
+- **`audit_high_vulns` increased** → Check whether it's a new vulnerability or the known pre-existing `minimatch` transitive dep from AVA. Investigate before updating the baseline.
+- **`help_hash` changed unexpectedly** → Something altered `--help` output. Compare against the previous build to confirm it's intentional.
+
 ### Writing Tests
 
 When adding tests:
@@ -308,6 +370,61 @@ Nanocoder uses structured logging based on Pino. See [`docs/pino-logging.md`](do
 - Maintain consistent CLI interface
 - Provide clear feedback to users
 - Handle long-running operations gracefully
+
+## Releasing a New Version
+
+> **Releases are handled exclusively by code owners / maintainers.** Contributors should not bump the version, edit the changelog for a release, or update `benchmarks/baseline.json` — these are all maintainer responsibilities. If your PR is ready to ship and you think a release is warranted, say so in the PR description and a maintainer will pick it up.
+
+Releases follow a simple three-step flow. Do each step in order — skipping the test gate is how broken releases ship.
+
+### Step 1: Ensure all tests pass
+
+Run the full local gate from a clean working tree — standard test suite first, then the release-only CLI quality report:
+
+```bash
+pnpm run test:all      # formatter / typecheck / lint / AVA / knip / audit / semgrep
+pnpm run build         # the benchmark reads dist/, so build first
+pnpm test:benchmark    # CLI quality report (release-time gate)
+```
+
+The benchmark is intentionally **not** part of `pnpm test:all` — it is a release-time gate, not a per-PR one — so you must run it explicitly as part of the release flow. Every check must be green across both commands: OKs across the board, no WARNs, no FAILs.
+
+**If the quality report flags any metrics:**
+
+- **Stability WARNs** (`tool_count`, `command_count`, `cli_flag_count`, `help_hash` drift) — confirm the change is intentional, then run `pnpm test:benchmark:update` and include the baseline diff in the release. A release is exactly the right time to snapshot surface-area changes.
+- **Performance WARNs** (`help_module_count`, `interactive_module_count`, `dist_size_bytes` drift) — investigate before updating. If the increase is the deliberate cost of a feature landing in this release, run `pnpm test:benchmark:update`. If it's unexplained, fix it before cutting the release.
+- **Health WARNs** (`test_file_count`, `test_case_count`, `audit_high_vulns`) — test count dropping is a red flag (tests shouldn't disappear silently); investigate before releasing. Audit count increases should never be waved through — fix the vulnerability or document why it can't be fixed in this release.
+- **Any FAIL** — do not release. FAILs indicate correctness regressions or metrics that doubled against baseline.
+
+Commit the updated `benchmarks/baseline.json` alongside the version bump so reviewers can see what shifted and why.
+
+### Step 2: Update the changelog
+
+Edit `CHANGELOG.md` and add a new entry at the top for the upcoming version. Follow the existing format: `# X.Y.Z` as the header, then a bulleted list of changes. Focus on user-facing impact, not implementation detail.
+
+Each bullet should stand on its own — a user reading the changelog should understand what changed and why it matters without needing to read the diff. Group related changes into single bullets rather than listing every commit.
+
+Include:
+
+- New features and enhancements (what users can now do that they couldn't before)
+- Bug fixes (what was broken)
+- Breaking changes (call these out explicitly at the top)
+- Notable dependency or tooling changes
+- Contributor attribution where relevant (`Thanks to @username.`)
+
+### Step 3: Bump the version
+
+Update `version` in `package.json` following [semver](https://semver.org/):
+
+- **Patch** (`1.24.1` → `1.24.2`) — bug fixes only, no behavior changes
+- **Minor** (`1.24.1` → `1.25.0`) — new features, backwards-compatible
+
+Commit the changelog, version bump, and any baseline updates together:
+
+```bash
+git add CHANGELOG.md package.json benchmarks/baseline.json
+git commit -m "release: vX.Y.Z"
+```
 
 ## Community and Communication
 

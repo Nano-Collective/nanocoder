@@ -10,13 +10,15 @@ import type {MessageType} from '@/types/index';
 import {createErrorInfo} from '@/utils/error-formatter';
 // Import logging utilities with dependency injection pattern
 import {
+	generateCorrelationId,
+	withNewCorrelationContext,
+} from '@/utils/logging';
+import {
 	calculateMemoryDelta,
 	endMetrics,
 	formatMemoryUsage,
-	generateCorrelationId,
 	startMetrics,
-	withNewCorrelationContext,
-} from '@/utils/logging';
+} from '@/utils/logging/performance.js';
 
 // Global message queue function - will be set by App component
 let globalAddToChatQueue: ((component: React.ReactNode) => void) | null = null;

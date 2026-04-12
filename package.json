@@ -47,6 +47,9 @@
 		"test:audit": "pnpm audit --audit-level=high --ignore-unfixable",
 		"audit": "pnpm audit",
 		"test:security": "semgrep scan --config auto --error",
+		"test:benchmark": "tsx benchmarks/report.ts",
+		"test:benchmark:update": "tsx benchmarks/report.ts --update",
+		"test:benchmark:explain": "tsx benchmarks/report.ts --explain",
 		"format": "biome check --write .",
 		"format:check": "biome check .",
 		"build:vscode": "cd plugins/vscode && pnpm run build && pnpm exec vsce package --allow-missing-repository --skip-license --no-dependencies -o ../../assets/nanocoder-vscode.vsix",
@@ -67,7 +70,7 @@
 		"@ai-sdk/openai-compatible": "2.0.35",
 		"@anthropic-ai/tokenizer": "^0.0.4",
 		"@modelcontextprotocol/sdk": "^1.26.0",
-		"@nanocollective/get-md": "^1.0.2",
+		"@nanocollective/get-md": "^1.3.0",
 		"ai": "6.0.116",
 		"chalk": "^5.2.0",
 		"cli-highlight": "^2.1.11",
@@ -168,6 +171,9 @@
 			"tinyexec": ">=1.0.4",
 			"path-to-regexp": ">=8.4.0"
 		},
-		"auditConfig": {}
+		"auditConfig": {},
+		"patchedDependencies": {
+			"ink@6.8.0": "patches/ink@6.8.0.patch"
+		}
 	}
 }

@@ -14,7 +14,8 @@
 		"plugins/**/*",
 		"scripts/fetch-models.js",
 		".husky/**",
-		".github/**"
+		".github/**",
+		"benchmarks/count-loader.mjs"
 	],
 	"ignoreExportsUsedInFile": {
 		"interface": true,

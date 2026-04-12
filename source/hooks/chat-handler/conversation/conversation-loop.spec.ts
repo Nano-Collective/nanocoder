@@ -1,6 +1,19 @@
 import test from 'ava';
+import {resetShutdownManager} from '@/utils/shutdown/shutdown-manager.js';
 import {processAssistantResponse, resetFallbackNotice} from './conversation-loop.js';
 import type {Message, ToolCall, ToolResult} from '@/types/core';
+
+// The ShutdownManager singleton is created as a side effect of transitive
+// imports (via @/utils/logging). Its uncaughtException/unhandledRejection
+// handlers call process.exit(), which AVA intercepts as a fatal error.
+// Reset it so signal handlers are removed during tests.
+test.before(() => {
+	resetShutdownManager();
+});
+
+test.after.always(() => {
+	resetShutdownManager();
+});
 
 // ============================================================================
 // Test Helpers and Mocks

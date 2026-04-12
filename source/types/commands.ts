@@ -15,6 +15,19 @@ export interface Command<T = React.ReactElement | void> {
 	) => Promise<T>;
 }
 
+/**
+ * A slash command registered without eagerly importing its module. The
+ * `load()` thunk is invoked only when the command is first executed, which
+ * keeps the ~31 built-in command modules out of startup. Metadata (name,
+ * description) must be duplicated here so the command picker can render
+ * without triggering the lazy load.
+ */
+export interface LazyCommand {
+	name: string;
+	description: string;
+	load: () => Promise<Command>;
+}
+
 export interface ParsedCommand {
 	isCommand: boolean;
 	command?: string;

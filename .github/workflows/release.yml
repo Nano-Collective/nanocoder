@@ -73,8 +73,23 @@ jobs:
       - name: Build VS Code extension
         run: pnpm run build:vscode
 
-      - name: Run tests
-        run: pnpm test:all
+      - name: Check formatting
+        run: pnpm test:format
+
+      - name: Typecheck
+        run: pnpm test:types
+
+      - name: Lint
+        run: pnpm test:lint
+
+      - name: Run AVA tests
+        run: pnpm test:ava
+
+      - name: Check for unused code
+        run: pnpm test:knip
+
+      - name: Security audit
+        run: pnpm test:audit
 
       - name: Verify build output
         run: |

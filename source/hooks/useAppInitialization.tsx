@@ -1,39 +1,10 @@
 import React, {useEffect} from 'react';
 import {ConfigurationError, createLLMClient} from '@/client-factory';
 import {commandRegistry} from '@/commands';
-import {
-	agentsCommand,
-	checkpointCommand,
-	clearCommand,
-	codexLoginCommand,
-	commandsCommand,
-	compactCommand,
-	contextMaxCommand,
-	copilotLoginCommand,
-	exitCommand,
-	explorerCommand,
-	exportCommand,
-	helpCommand,
-	ideCommand,
-	initCommand,
-	lspCommand,
-	mcpCommand,
-	modelCommand,
-	modelDatabaseCommand,
-	providerCommand,
-	quitCommand,
-	resumeCommand,
-	scheduleCommand,
-	settingsCommand,
-	setupConfigCommand,
-	setupMcpCommand,
-	setupProvidersCommand,
-	statusCommand,
-	tasksCommand,
-	tuneCommand,
-	updateCommand,
-	usageCommand,
-} from '@/commands/index';
+// Built-in commands are registered via a lazy registry so their modules
+// aren't loaded at startup — each command's handler is imported on first
+// invocation. See `source/commands/lazy-registry.ts`.
+import {lazyCommands} from '@/commands/lazy-registry';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import {getAppConfig, reloadAppConfig} from '@/config/index';
 import {
@@ -430,39 +401,7 @@ export function useAppInitialization({
 			// Set up the tool manager getter for commands that need it
 			setToolManagerGetter(() => newToolManager);
 
-			commandRegistry.register([
-				helpCommand,
-				exitCommand,
-				clearCommand,
-				compactCommand,
-				codexLoginCommand,
-				copilotLoginCommand,
-				contextMaxCommand,
-				modelCommand,
-				providerCommand,
-				commandsCommand,
-				lspCommand,
-				mcpCommand,
-				initCommand,
-				explorerCommand,
-				ideCommand,
-				exportCommand,
-				updateCommand,
-				modelDatabaseCommand,
-				statusCommand,
-				setupConfigCommand,
-				setupProvidersCommand,
-				setupMcpCommand,
-				usageCommand,
-				checkpointCommand,
-				quitCommand,
-				resumeCommand,
-				tasksCommand,
-				settingsCommand,
-				tuneCommand,
-				scheduleCommand,
-				agentsCommand,
-			]);
+			commandRegistry.registerLazy(lazyCommands);
 
 			// Now start with the properly initialized objects (excluding MCP)
 			await start(newToolManager, newCustomCommandLoader, preferences);

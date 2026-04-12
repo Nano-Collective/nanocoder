@@ -6,7 +6,7 @@ import type {AIProviderConfig} from '@/types/index';
 import {Agent} from 'undici';
 import {createProvider} from './provider-factory.js';
 
-test('createProvider creates provider with basic config', t => {
+test('createProvider creates provider with basic config', async t => {
 	const config: AIProviderConfig = {
 		name: 'TestProvider',
 		type: 'openai',
@@ -21,13 +21,13 @@ test('createProvider creates provider with basic config', t => {
 	};
 
 	const agent = new Agent();
-	const provider = createProvider(config, agent);
+	const provider = await createProvider(config, agent);
 
 	t.truthy(provider);
 	t.is(typeof provider, 'function');
 });
 
-test('createProvider adds OpenRouter headers for openrouter provider', t => {
+test('createProvider adds OpenRouter headers for openrouter provider', async t => {
 	const config: AIProviderConfig = {
 		name: 'OpenRouter',
 		type: 'openai',
@@ -39,12 +39,12 @@ test('createProvider adds OpenRouter headers for openrouter provider', t => {
 	};
 
 	const agent = new Agent();
-	const provider = createProvider(config, agent);
+	const provider = await createProvider(config, agent);
 
 	t.truthy(provider);
 });
 
-test('createProvider handles provider with no API key', t => {
+test('createProvider handles provider with no API key', async t => {
 	const config: AIProviderConfig = {
 		name: 'TestProvider',
 		type: 'openai',
@@ -58,12 +58,12 @@ test('createProvider handles provider with no API key', t => {
 	};
 
 	const agent = new Agent();
-	const provider = createProvider(config, agent);
+	const provider = await createProvider(config, agent);
 
 	t.truthy(provider);
 });
 
-test('createProvider handles provider with no baseURL', t => {
+test('createProvider handles provider with no baseURL', async t => {
 	const config: AIProviderConfig = {
 		name: 'TestProvider',
 		type: 'openai',
@@ -77,12 +77,12 @@ test('createProvider handles provider with no baseURL', t => {
 	};
 
 	const agent = new Agent();
-	const provider = createProvider(config, agent);
+	const provider = await createProvider(config, agent);
 
 	t.truthy(provider);
 });
 
-test('createProvider handles provider with no custom headers', t => {
+test('createProvider handles provider with no custom headers', async t => {
 	const config: AIProviderConfig = {
 		name: 'TestProvider',
 		type: 'openai',
@@ -94,12 +94,12 @@ test('createProvider handles provider with no custom headers', t => {
 	};
 
 	const agent = new Agent();
-	const provider = createProvider(config, agent);
+	const provider = await createProvider(config, agent);
 
 	t.truthy(provider);
 });
 
-test('createProvider uses @ai-sdk/google when sdkProvider is google', t => {
+test('createProvider uses @ai-sdk/google when sdkProvider is google', async t => {
 	const config: AIProviderConfig = {
 		name: 'Gemini',
 		type: 'openai',
@@ -111,13 +111,13 @@ test('createProvider uses @ai-sdk/google when sdkProvider is google', t => {
 	};
 
 	const agent = new Agent();
-	const provider = createProvider(config, agent);
+	const provider = await createProvider(config, agent);
 
 	t.truthy(provider);
 	t.is(typeof provider, 'function');
 });
 
-test('createProvider uses @ai-sdk/anthropic when sdkProvider is anthropic', t => {
+test('createProvider uses @ai-sdk/anthropic when sdkProvider is anthropic', async t => {
 	const config: AIProviderConfig = {
 		name: 'Anthropic',
 		type: 'openai',
@@ -129,13 +129,13 @@ test('createProvider uses @ai-sdk/anthropic when sdkProvider is anthropic', t =>
 	};
 
 	const agent = new Agent();
-	const provider = createProvider(config, agent);
+	const provider = await createProvider(config, agent);
 
 	t.truthy(provider);
 	t.is(typeof provider, 'function');
 });
 
-test('createProvider anthropic provider works without baseURL', t => {
+test('createProvider anthropic provider works without baseURL', async t => {
 	const config: AIProviderConfig = {
 		name: 'Anthropic',
 		type: 'openai',
@@ -148,12 +148,12 @@ test('createProvider anthropic provider works without baseURL', t => {
 	};
 
 	const agent = new Agent();
-	const provider = createProvider(config, agent);
+	const provider = await createProvider(config, agent);
 
 	t.truthy(provider);
 });
 
-test('createProvider uses openai-compatible by default when sdkProvider not set', t => {
+test('createProvider uses openai-compatible by default when sdkProvider not set', async t => {
 	const config: AIProviderConfig = {
 		name: 'CustomProvider',
 		type: 'openai',
@@ -165,13 +165,13 @@ test('createProvider uses openai-compatible by default when sdkProvider not set'
 	};
 
 	const agent = new Agent();
-	const provider = createProvider(config, agent);
+	const provider = await createProvider(config, agent);
 
 	t.truthy(provider);
 	t.is(typeof provider, 'function');
 });
 
-test('createProvider uses openai-compatible when sdkProvider is explicitly openai-compatible', t => {
+test('createProvider uses openai-compatible when sdkProvider is explicitly openai-compatible', async t => {
 	const config: AIProviderConfig = {
 		name: 'ExplicitOpenAI',
 		type: 'openai',
@@ -184,13 +184,13 @@ test('createProvider uses openai-compatible when sdkProvider is explicitly opena
 	};
 
 	const agent = new Agent();
-	const provider = createProvider(config, agent);
+	const provider = await createProvider(config, agent);
 
 	t.truthy(provider);
 	t.is(typeof provider, 'function');
 });
 
-test('createProvider google provider works without baseURL', t => {
+test('createProvider google provider works without baseURL', async t => {
 	const config: AIProviderConfig = {
 		name: 'Gemini',
 		type: 'openai',
@@ -203,12 +203,12 @@ test('createProvider google provider works without baseURL', t => {
 	};
 
 	const agent = new Agent();
-	const provider = createProvider(config, agent);
+	const provider = await createProvider(config, agent);
 
 	t.truthy(provider);
 });
 
-test.serial('createProvider throws when chatgpt-codex has no stored credential', t => {
+test.serial('createProvider throws when chatgpt-codex has no stored credential', async t => {
 	const config: AIProviderConfig = {
 		name: 'ChatGPT / Codex',
 		type: 'openai',
@@ -227,7 +227,7 @@ test.serial('createProvider throws when chatgpt-codex has no stored credential',
 	process.env.NANOCODER_CONFIG_DIR = tmpDir;
 	try {
 		const agent = new Agent();
-		t.throws(
+		await t.throwsAsync(
 			() => createProvider(config, agent),
 			{message: /No Codex credentials/},
 		);
@@ -241,7 +241,7 @@ test.serial('createProvider throws when chatgpt-codex has no stored credential',
 	}
 });
 
-test.serial('createProvider creates chatgpt-codex provider with stored credential', t => {
+test.serial('createProvider creates chatgpt-codex provider with stored credential', async t => {
 	const config: AIProviderConfig = {
 		name: 'ChatGPT / Codex',
 		type: 'openai',
@@ -274,7 +274,7 @@ test.serial('createProvider creates chatgpt-codex provider with stored credentia
 		);
 
 		const agent = new Agent();
-		const provider = createProvider(config, agent);
+		const provider = await createProvider(config, agent);
 		t.truthy(provider);
 	} finally {
 		if (originalConfigDir !== undefined) {
@@ -286,7 +286,7 @@ test.serial('createProvider creates chatgpt-codex provider with stored credentia
 	}
 });
 
-test.serial('createProvider throws when github-copilot has no stored credential', t => {
+test.serial('createProvider throws when github-copilot has no stored credential', async t => {
 	const config: AIProviderConfig = {
 		name: 'GitHub Copilot',
 		type: 'openai',
@@ -305,7 +305,7 @@ test.serial('createProvider throws when github-copilot has no stored credential'
 	process.env.NANOCODER_CONFIG_DIR = tmpDir;
 	try {
 		const agent = new Agent();
-		t.throws(
+		await t.throwsAsync(
 			() => createProvider(config, agent),
 			{message: /No Copilot credentials/},
 		);

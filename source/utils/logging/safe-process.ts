@@ -1,15 +1,12 @@
 /**
- * Safe process metrics utilities
- * Provides defensive wrappers around process.memoryUsage() and process.cpuUsage()
- * to handle environments where process is polyfilled to null
+ * Defensive wrapper around `process.memoryUsage()` that returns a zero-filled
+ * snapshot if the Node `process` global is unavailable or throws (e.g. under
+ * some runtime polyfills). Used by performance metric helpers that must not
+ * crash the app when observability data can't be collected.
  */
 
 import nodeProcess from 'node:process';
 
-/**
- * Safe memory usage getter with runtime checks
- * Returns fallback values if process.memoryUsage() is unavailable or throws
- */
 export function getSafeMemory(): NodeJS.MemoryUsage {
 	try {
 		if (nodeProcess && typeof nodeProcess.memoryUsage === 'function') {
@@ -19,19 +16,4 @@ export function getSafeMemory(): NodeJS.MemoryUsage {
 		// Ignore any errors during process.memoryUsage()
 	}
 	return {rss: 0, heapTotal: 0, heapUsed: 0, external: 0, arrayBuffers: 0};
-}
-
-/**
- * Safe CPU usage getter with runtime checks
- * Returns fallback values if process.cpuUsage() is unavailable or throws
- */
-export function getSafeCpuUsage(): NodeJS.CpuUsage {
-	try {
-		if (nodeProcess && typeof nodeProcess.cpuUsage === 'function') {
-			return nodeProcess.cpuUsage();
-		}
-	} catch {
-		// Ignore any errors during process.cpuUsage()
-	}
-	return {user: 0, system: 0};
 }

@@ -1,8 +1,27 @@
-import {diffWordsWithSpace} from 'diff';
+import {createRequire} from 'node:module';
 
 export interface DiffSegment {
 	text: string;
 	type: 'unchanged' | 'added' | 'removed';
+}
+
+// The `diff` package is ~30 modules when loaded and is only needed by the
+// string-replace tool's preview formatter, which runs at tool-confirmation
+// time — never at startup. We lazy-load the CJS entry via `createRequire`
+// so the library only hits the module graph the first time the preview
+// actually renders. Must stay sync because React rendering is sync.
+const require = createRequire(import.meta.url);
+
+type DiffChange = {value: string; added?: boolean; removed?: boolean};
+type DiffModule = {
+	diffWordsWithSpace: (oldText: string, newText: string) => DiffChange[];
+};
+let diffLib: DiffModule | null = null;
+function loadDiffLib(): DiffModule {
+	if (!diffLib) {
+		diffLib = require('diff') as DiffModule;
+	}
+	return diffLib;
 }
 
 /**
@@ -13,6 +32,7 @@ export function computeInlineDiff(
 	oldText: string,
 	newText: string,
 ): DiffSegment[] {
+	const {diffWordsWithSpace} = loadDiffLib();
 	const changes = diffWordsWithSpace(oldText, newText);
 	const segments: DiffSegment[] = [];
 

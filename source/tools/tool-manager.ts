@@ -1,5 +1,8 @@
 import {getBraveSearchApiKey} from '@/config/nanocoder-tools-config';
-import {MCPClient} from '@/mcp/mcp-client';
+// Type-only import — the `MCPClient` runtime value is loaded dynamically
+// inside `initializeMCP()` so sessions without MCP servers never pay the
+// cost of the @modelcontextprotocol/sdk import graph.
+import type {MCPClient} from '@/mcp/mcp-client';
 import {allToolExports} from '@/tools/index';
 import {getToolsForProfile} from '@/tools/tool-profiles';
 import {ToolRegistry} from '@/tools/tool-registry';
@@ -74,6 +77,8 @@ export class ToolManager {
 		onProgress?: (result: MCPInitResult) => void,
 	): Promise<MCPInitResult[]> {
 		if (servers && servers.length > 0) {
+			// Dynamic import — only paid for by sessions with configured MCP servers.
+			const {MCPClient} = await import('@/mcp/mcp-client');
 			this.mcpClient = new MCPClient();
 
 			getShutdownManager().register({

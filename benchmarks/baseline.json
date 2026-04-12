@@ -1,0 +1,82 @@
+{
+	"correctness": {
+		"help_exit_code": {
+			"kind": "exact",
+			"value": 0,
+			"expected": 0
+		},
+		"version_exit_code": {
+			"kind": "exact",
+			"value": 0,
+			"expected": 0
+		}
+	},
+	"performance": {
+		"help_module_count": {
+			"kind": "numeric",
+			"value": 3,
+			"warnOnDecrease": false
+		},
+		"version_module_count": {
+			"kind": "numeric",
+			"value": 3,
+			"warnOnDecrease": false
+		},
+		"interactive_module_count": {
+			"kind": "numeric",
+			"value": 507,
+			"warnOnDecrease": false
+		},
+		"interactive_boot_ms_approx": {
+			"kind": "numeric",
+			"value": 606,
+			"warnOnDecrease": false
+		},
+		"dist_size_bytes": {
+			"kind": "numeric",
+			"value": 3780934
+		},
+		"dist_file_count": {
+			"kind": "numeric",
+			"value": 1455,
+			"warnOnDecrease": false
+		}
+	},
+	"stability": {
+		"cli_flag_count": {
+			"kind": "numeric",
+			"value": 9,
+			"warnOnDecrease": true
+		},
+		"tool_count": {
+			"kind": "numeric",
+			"value": 31,
+			"warnOnDecrease": true
+		},
+		"command_count": {
+			"kind": "numeric",
+			"value": 31,
+			"warnOnDecrease": true
+		},
+		"help_hash": {
+			"kind": "hash",
+			"value": "a70476628125"
+		}
+	},
+	"health": {
+		"test_file_count": {
+			"kind": "numeric",
+			"value": 257,
+			"warnOnDecrease": true
+		},
+		"test_case_count": {
+			"kind": "numeric",
+			"value": 5238,
+			"warnOnDecrease": true
+		},
+		"audit_high_vulns": {
+			"kind": "numeric",
+			"value": 1
+		}
+	}
+}

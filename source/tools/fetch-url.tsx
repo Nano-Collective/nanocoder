@@ -1,4 +1,6 @@
-import {convertToMarkdown} from '@nanocollective/get-md';
+// `@nanocollective/get-md` (and its transitive chain: cheerio, turndown,
+// readability, domutils, entities) is loaded lazily inside the handler —
+// only users who actually invoke `fetch_url` pay the cost.
 import {Box, Text} from 'ink';
 import React from 'react';
 
@@ -21,7 +23,10 @@ const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
 	}
 
 	try {
-		// Use get-md to convert URL to LLM-friendly markdown
+		// Use get-md to convert URL to LLM-friendly markdown (lazy import
+		// so the ~100-module HTML-parsing graph only loads when the tool
+		// actually runs).
+		const {convertToMarkdown} = await import('@nanocollective/get-md');
 		const result = await convertToMarkdown(args.url);
 
 		const content = result.markdown;

@@ -1,10 +1,16 @@
 /**
  * Main logging interface with facade pattern for backward compatibility
- * Uses dependency injection pattern to avoid circular dependencies
+ * Uses dependency injection pattern to avoid circular dependencies.
+ *
+ * **Keep this barrel slim.** Previously it statically imported the entire
+ * health-monitor, log-query, request-tracker, and performance subsystems
+ * (~75 modules combined). None of those were used at runtime outside of
+ * their own tests, but every `import {getLogger} from '@/utils/logging'`
+ * was pulling them all into startup. Consumers that actually need those
+ * subsystems should import them from their subpaths directly.
  */
 
 import {getShutdownManager} from '@/utils/shutdown';
-import {globalHealthMonitor} from './health-monitor/core/health-monitor';
 import {loggerProvider} from './logger-provider';
 import type {Logger, LoggerConfig, LogLevel} from './types';
 
@@ -120,16 +126,14 @@ export async function end(): Promise<void> {
 	await loggerProvider.end();
 }
 
-// Register cleanup handlers with ShutdownManager
+// Register cleanup handlers with ShutdownManager.
+//
+// The health-monitor shutdown handler used to be registered here too, which
+// forced a static import of the entire health-monitor subsystem at startup
+// (~75 modules) for something that was never actually used at runtime.
+// health-monitor is now internal-only — if it comes back as a feature,
+// register its shutdown handler wherever it's instantiated.
 const shutdownManager = getShutdownManager();
-
-shutdownManager.register({
-	name: 'health-monitor',
-	priority: 40,
-	handler: async () => {
-		globalHealthMonitor.stop();
-	},
-});
 
 shutdownManager.register({
 	name: 'logger',
@@ -140,65 +144,14 @@ shutdownManager.register({
 	},
 });
 
-// Export configuration utilities
+// Only the correlation helpers that are actually used outside the logging
+// subsystem are re-exported from the barrel. Everything else (config utils,
+// health-monitor, log-query, request-tracker, performance metrics) is
+// available via its own subpath for specialized consumers — but no longer
+// dragged into startup by every `getLogger()` caller.
 export {
-	createConfig,
-	getDefaultLogDirectory,
-	getEnvironmentConfig,
-	normalizeLogLevel,
-	validateLogLevel,
-} from './config.js';
-// Export for testing purposes only
-// Export correlation utilities
-export {
-	correlationMiddleware,
-	createCorrelationFromHeaders,
-	extractCorrelationId,
-	formatCorrelationForLog,
 	generateCorrelationId,
 	getCorrelationId,
 	withNewCorrelationContext,
 } from './correlation.js';
-
-// Export performance utilities
-export {
-	calculateMemoryDelta,
-	endMetrics,
-	formatBytes,
-	formatMemoryUsage,
-	globalPerformanceMonitor,
-	startMetrics,
-} from './performance.js';
-// Re-export all modules for external use
 export type {Logger, LoggerConfig, LogLevel} from './types.js';
-
-// Export transport utilities (used internally only)
-// No exports from transports.js as they are only used internally
-
-// Console facade exports (only used in tests)
-// No exports from console-facade.js as they are only used internally and in tests
-
-// Export request tracking utilities (specific instances used by other modules)
-export {healthChecks} from './health-monitor/index.js';
-// Export log storage for tests
-export {globalLogStorage} from './log-query/index.js';
-export {
-	aiTracker,
-	globalRequestTracker,
-	httpTracker,
-	mcpTracker,
-} from './request-tracker.js';
-
-// RequestTracker is only used internally as default export
-// No export needed here
-
-// Log query exports (not used in main codebase)
-// No exports from log-query.js as they are not used
-
-// Export health monitoring
-export {
-	type HealthCheck,
-	type HealthCheckConfig,
-	type HealthCheckResult,
-	type SystemMetrics,
-} from './health-monitor/index.js';

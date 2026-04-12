@@ -17,7 +17,9 @@ import {handleChat} from './chat/chat-handler.js';
 import {type AIProvider, createProvider} from './providers/provider-factory.js';
 
 export class AISDKClient implements LLMClient {
-	private provider: AIProvider;
+	// Definite-assignment: populated by the async `create()` factory before
+	// the client is handed to callers. The constructor only does sync setup.
+	private provider!: AIProvider;
 	private currentModel: string;
 	private availableModels: string[];
 	private providerConfig: AIProviderConfig;
@@ -61,8 +63,6 @@ export class AISDKClient implements LLMClient {
 			keepAliveMaxTimeout: connectionPool?.cumulativeMaxIdleTimeout,
 		});
 
-		this.provider = createProvider(this.providerConfig, this.undiciAgent);
-
 		// Fetch context size asynchronously (don't block construction)
 		void this.updateContextSize();
 	}
@@ -84,9 +84,15 @@ export class AISDKClient implements LLMClient {
 		}
 	}
 
-	static create(providerConfig: AIProviderConfig): Promise<AISDKClient> {
+	static async create(providerConfig: AIProviderConfig): Promise<AISDKClient> {
 		const client = new AISDKClient(providerConfig);
-		return Promise.resolve(client);
+		// Async provider creation — lazily loads only the SDK package the
+		// configured `sdkProvider` actually needs.
+		client.provider = await createProvider(
+			client.providerConfig,
+			client.undiciAgent,
+		);
+		return client;
 	}
 
 	setModel(model: string): void {

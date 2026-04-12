@@ -21,13 +21,15 @@ import type {
 } from '@/types/index';
 import {jsonSchema} from '@/types/index';
 import {
-	endMetrics,
-	formatMemoryUsage,
 	generateCorrelationId,
 	getLogger,
-	startMetrics,
 	withNewCorrelationContext,
 } from '@/utils/logging';
+import {
+	endMetrics,
+	formatMemoryUsage,
+	startMetrics,
+} from '@/utils/logging/performance.js';
 import {getSafeMemory} from '@/utils/logging/safe-process.js';
 import {ensureString} from '@/utils/type-helpers';
 import {TransportFactory} from './transport-factory.js';

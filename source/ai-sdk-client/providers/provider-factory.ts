@@ -1,13 +1,12 @@
-import {type AnthropicProvider, createAnthropic} from '@ai-sdk/anthropic';
-import {
-	createGoogleGenerativeAI,
-	type GoogleGenerativeAIProvider,
-} from '@ai-sdk/google';
-import {createOpenAI, type OpenAIProvider} from '@ai-sdk/openai';
-import {
-	createOpenAICompatible,
-	type OpenAICompatibleProvider,
-} from '@ai-sdk/openai-compatible';
+// `@ai-sdk/anthropic`, `@ai-sdk/google`, `@ai-sdk/openai`, and
+// `@ai-sdk/openai-compatible` are loaded lazily inside `createProvider`.
+// Importing them statically would load every provider SDK at startup even
+// though only one provider is used per session. Types are erased at compile
+// time via `import type`, so they cost nothing at runtime.
+import type {AnthropicProvider} from '@ai-sdk/anthropic';
+import type {GoogleGenerativeAIProvider} from '@ai-sdk/google';
+import type {OpenAIProvider} from '@ai-sdk/openai';
+import type {OpenAICompatibleProvider} from '@ai-sdk/openai-compatible';
 import {type Agent, fetch as undiciFetch} from 'undici';
 import {getValidCodexToken} from '@/auth/chatgpt-codex';
 import {
@@ -37,11 +36,15 @@ export type AIProvider =
 /**
  * Creates an AI SDK provider based on the sdkProvider configuration.
  * Defaults to 'openai-compatible' if not specified.
+ *
+ * Async because provider SDK packages are loaded lazily — only the one that
+ * matches the caller's `sdkProvider` is imported, so a session that only
+ * uses Anthropic never loads the Google or OpenAI packages.
  */
-export function createProvider(
+export async function createProvider(
 	providerConfig: AIProviderConfig,
 	undiciAgent: Agent,
-): AIProvider {
+): Promise<AIProvider> {
 	const logger = getLogger();
 	const {config, sdkProvider} = providerConfig;
 
@@ -52,6 +55,7 @@ export function createProvider(
 			sdkProvider,
 		});
 
+		const {createAnthropic} = await import('@ai-sdk/anthropic');
 		return createAnthropic({
 			baseURL: config.baseURL || undefined,
 			apiKey: config.apiKey ?? '',
@@ -65,6 +69,7 @@ export function createProvider(
 			sdkProvider,
 		});
 
+		const {createGoogleGenerativeAI} = await import('@ai-sdk/google');
 		return createGoogleGenerativeAI({
 			apiKey: config.apiKey ?? '',
 		});
@@ -130,6 +135,7 @@ export function createProvider(
 			}) as Promise<Response>;
 		};
 
+		const {createOpenAI} = await import('@ai-sdk/openai');
 		return createOpenAI({
 			baseURL,
 			// Empty key — auth is handled entirely by copilotFetch's Authorization header
@@ -210,6 +216,7 @@ export function createProvider(
 			}) as Promise<Response>;
 		};
 
+		const {createOpenAI} = await import('@ai-sdk/openai');
 		return createOpenAI({
 			baseURL,
 			apiKey: '',
@@ -238,6 +245,7 @@ export function createProvider(
 		headers['X-Title'] = 'Nanocoder';
 	}
 
+	const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible');
 	return createOpenAICompatible({
 		name: providerConfig.name,
 		baseURL: config.baseURL ?? '',
