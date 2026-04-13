@@ -54,7 +54,10 @@ stdenv.mkDerivation (finalAttrs: {
         cp -r node_modules $out/lib/nanocoder/
         cp package.json $out/lib/nanocoder/
         cp -r plugins $out/lib/nanocoder/
-        cp -r source $out/lib/nanocoder/
+
+        # Copy static assets not bundled by tsc
+        mkdir -p $out/lib/nanocoder/source/config
+        cp -r source/config $out/lib/nanocoder/source/
 
         # Create wrapper script
         cat > $out/bin/nanocoder <<EOF
