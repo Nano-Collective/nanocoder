@@ -21,4 +21,7 @@ git log --format="%aN" \
   | jq -s '{ contributors: . }' \
   > "$OUT"
 
+# Format to match biome settings (tabs, trailing commas, etc.)
+npx biome format --write "$OUT" 2>/dev/null || true
+
 echo "Generated $OUT with $(jq '.contributors | length' "$OUT") contributors"
