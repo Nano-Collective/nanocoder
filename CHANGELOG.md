@@ -1,3 +1,9 @@
+# 1.25.1
+
+- Removed rogue document from `docs/`
+
+If there are any problems, feedback or thoughts please drop an issue or message us through Discord! Thank you for using Nanocoder.
+
 # 1.25.0
 
 - Added **yolo mode** — a new development mode that auto-accepts every tool without exception, including bash commands and destructive git operations (hard reset, force delete, stash drop/clear). Cycles between normal → auto-accept → yolo → plan via Shift+Tab. The status bar turns red when yolo mode is active.
