@@ -7,7 +7,11 @@ import type {AnthropicProvider} from '@ai-sdk/anthropic';
 import type {GoogleGenerativeAIProvider} from '@ai-sdk/google';
 import type {OpenAIProvider} from '@ai-sdk/openai';
 import type {OpenAICompatibleProvider} from '@ai-sdk/openai-compatible';
-import {type Agent, fetch as undiciFetch} from 'undici';
+import {
+	type Agent,
+	type RequestInit as UndiciRequestInit,
+	fetch as undiciFetch,
+} from 'undici';
 import {getValidCodexToken} from '@/auth/chatgpt-codex';
 import {
 	COPILOT_HEADERS,
@@ -128,7 +132,7 @@ export async function createProvider(
 
 			return undiciFetch(input as string | URL, {
 				method: init?.method,
-				body: init?.body,
+				body: init?.body as UndiciRequestInit['body'],
 				signal: init?.signal,
 				headers,
 				dispatcher: undiciAgent,
@@ -209,7 +213,7 @@ export async function createProvider(
 
 			return undiciFetch(input as string | URL, {
 				method: init?.method,
-				body,
+				body: body as UndiciRequestInit['body'],
 				signal: init?.signal,
 				headers,
 				dispatcher: undiciAgent,
@@ -233,7 +237,7 @@ export async function createProvider(
 		// Type cast to string | URL since undici's fetch accepts these types
 		// Request objects are converted to URL internally by the fetch spec
 		return undiciFetch(url as string | URL, {
-			...options,
+			...(options as UndiciRequestInit),
 			dispatcher: undiciAgent,
 		}) as Promise<Response>;
 	};
