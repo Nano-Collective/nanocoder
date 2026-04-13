@@ -1,7 +1,5 @@
 # 1.25.0
 
-- Added debug logging to 15 silent catch blocks in git utilities that were swallowing errors invisibly. Operational catches now log at debug level for easier diagnosis while boolean probes (e.g. `isGitAvailable`, `branchExists`) remain intentionally silent. Thanks to @ragini-pandey. Closes #452.
-
 - Added **yolo mode** — a new development mode that auto-accepts every tool without exception, including bash commands and destructive git operations (hard reset, force delete, stash drop/clear). Cycles between normal → auto-accept → yolo → plan via Shift+Tab. The status bar turns red when yolo mode is active.
 
 - Added subagents — isolated child conversations that the LLM can delegate work to. Ships with two built-in agents: **Explore** (read-only codebase investigation) and **Reviewer** (code review with actionable feedback). Subagents are defined as markdown files with YAML frontmatter specifying name, description, model, and allowed tools. User-defined subagents can be placed in `.nanocoder/agents/`. Managed via the `/agents` command (`show`, `create`). Thanks to @brijeshkr for the initial subagent implementation. Closes #414.
@@ -43,6 +41,8 @@
 - Fix: Set correct default model for MiniMax provider.
 
 - Fix: `/usage` and context percentage showing stale system prompt length. Added `setLastBuiltPrompt` and fixed `useContextPercentage` overwriting cache.
+
+- Added debug logging to 15 silent catch blocks in git utilities that were swallowing errors invisibly. Operational catches now log at debug level for easier diagnosis while boolean probes (e.g. `isGitAvailable`, `branchExists`) remain intentionally silent. Thanks to @ragini-pandey. Closes #452.
 
 - Security: Address semgrep security finding in console.error. Thanks to @brijeshkr.
 
