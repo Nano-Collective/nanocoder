@@ -17,6 +17,7 @@ export interface Message {
 	tool_calls?: ToolCall[];
 	tool_call_id?: string;
 	name?: string;
+	reasoning?: string;
 }
 
 export interface ToolCall {
@@ -145,6 +146,7 @@ interface LLMMessage {
 	role: 'assistant';
 	content: string;
 	tool_calls?: ToolCall[];
+	reasoning?: string;
 }
 
 export interface LLMChatResponse {

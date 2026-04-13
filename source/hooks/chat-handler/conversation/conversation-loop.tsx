@@ -1,6 +1,7 @@
 import React from 'react';
 import type {ConversationStateManager} from '@/app/utils/conversation-state';
 import AssistantMessage from '@/components/assistant-message';
+import AssistantReasoning from '@/components/assistant-reasoning';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
@@ -203,6 +204,7 @@ export const processAssistantResponse = async (
 	const message = result.choices[0].message;
 	const toolCalls = message.tool_calls || null;
 	const fullContent = message.content || '';
+	const fullReasoning = message.reasoning;
 
 	// Only parse text for XML tool calls on the fallback path (non-tool-calling models).
 	// On the native path, response text is just text - no tool calls are embedded in it.
@@ -295,6 +297,15 @@ export const processAssistantResponse = async (
 	// live StreamingMessage disappears at the same time the static
 	// AssistantMessage appears, avoiding a visual jump.
 	setStreamingContent('');
+	if (fullReasoning) {
+		addToChatQueue(
+			<AssistantReasoning
+				key={`assistant-${getNextComponentKey()}`}
+				reasoning={fullReasoning}
+				model={currentModel}
+			/>,
+		);
+	}
 	if (cleanedContent.trim()) {
 		addToChatQueue(
 			<AssistantMessage

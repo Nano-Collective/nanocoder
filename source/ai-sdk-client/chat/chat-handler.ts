@@ -201,12 +201,16 @@ export async function handleChat(
 			};
 
 			let lastYield = Date.now();
-			for await (const chunk of result.textStream) {
-				if (chunk) {
-					tokenBuffer += chunk;
-					if (!flushTimer) {
-						flushTimer = setTimeout(flushBuffer, FLUSH_INTERVAL_MS);
-					}
+			for await (const chunk of result.fullStream) {
+				switch (chunk.type) {
+					case 'reasoning-delta':
+						break;
+					case 'text-delta':
+						tokenBuffer += chunk.text;
+						if (!flushTimer) {
+							flushTimer = setTimeout(flushBuffer, FLUSH_INTERVAL_MS);
+						}
+						break;
 				}
 				// Periodically yield to the event loop so timers and Ink renders
 				// can run during long streaming responses (e.g. subagent execution)
@@ -224,11 +228,13 @@ export async function handleChat(
 			flushBuffer();
 
 			// After streaming completes, collect final results
-			const [fullText, resolvedToolCalls, resolvedSteps] = await Promise.all([
-				result.text,
-				result.toolCalls,
-				result.steps,
-			]);
+			const [fullText, resolvedToolCalls, resolvedSteps, reasoning] =
+				await Promise.all([
+					result.text,
+					result.toolCalls,
+					result.steps,
+					result.reasoningText,
+				]);
 
 			logger.debug('AI SDK response received', {
 				responseLength: fullText.length,
@@ -270,6 +276,7 @@ export async function handleChat(
 							role: 'assistant',
 							content,
 							tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+							reasoning,
 						},
 					},
 				],
