@@ -6,6 +6,9 @@
  */
 
 import {execSync, spawn} from 'node:child_process';
+import {getLogger} from '@/utils/logging';
+
+const logger = getLogger();
 
 /**
  * File change status from git
@@ -187,7 +190,8 @@ export async function hasUncommittedChanges(): Promise<boolean> {
 	try {
 		const status = await execGit(['status', '--porcelain']);
 		return status.trim().length > 0;
-	} catch {
+	} catch (error) {
+		logger.debug('Failed to check for uncommitted changes', {error});
 		return false;
 	}
 }
@@ -199,7 +203,8 @@ export async function hasStagedChanges(): Promise<boolean> {
 	try {
 		const diff = await execGit(['diff', '--cached', '--name-only']);
 		return diff.trim().length > 0;
-	} catch {
+	} catch (error) {
+		logger.debug('Failed to check for staged changes', {error});
 		return false;
 	}
 }
@@ -244,7 +249,8 @@ export async function isMergeInProgress(): Promise<boolean> {
 export async function getCurrentBranch(): Promise<string> {
 	try {
 		return await execGit(['rev-parse', '--abbrev-ref', 'HEAD']);
-	} catch {
+	} catch (error) {
+		logger.debug('Failed to get current branch', {error});
 		return 'HEAD'; // Detached HEAD state
 	}
 }
@@ -260,7 +266,11 @@ export async function getDefaultBranch(): Promise<string> {
 			'--short',
 		]);
 		return remoteBranch.replace('origin/', '');
-	} catch {
+	} catch (error) {
+		logger.debug(
+			'Failed to resolve origin/HEAD, falling back to branch name detection',
+			{error},
+		);
 		// Fall back to checking if main or master exists
 		try {
 			await execGit(['rev-parse', '--verify', 'main']);
@@ -294,7 +304,8 @@ export async function branchExists(name: string): Promise<boolean> {
 export async function getUpstreamBranch(): Promise<string | null> {
 	try {
 		return await execGit(['rev-parse', '--abbrev-ref', '@{upstream}']);
-	} catch {
+	} catch (error) {
+		logger.debug('Failed to get upstream branch', {error});
 		return null;
 	}
 }
@@ -318,7 +329,8 @@ export async function getAheadBehind(): Promise<{
 		]);
 		const [behind, ahead] = result.split('\t').map(n => parseInt(n, 10) || 0);
 		return {ahead, behind};
-	} catch {
+	} catch (error) {
+		logger.debug('Failed to get ahead/behind counts', {error});
 		return {ahead: 0, behind: 0};
 	}
 }
@@ -356,7 +368,8 @@ export async function getLocalBranches(): Promise<BranchInfo[]> {
 					behind,
 				};
 			});
-	} catch {
+	} catch (error) {
+		logger.debug('Failed to list local branches', {error});
 		return [];
 	}
 }
@@ -370,7 +383,8 @@ export async function getRemoteBranches(): Promise<string[]> {
 		return output
 			.split('\n')
 			.filter(line => line.trim() && !line.includes('HEAD'));
-	} catch {
+	} catch (error) {
+		logger.debug('Failed to list remote branches', {error});
 		return [];
 	}
 }
@@ -388,7 +402,8 @@ export async function getUnpushedCommits(): Promise<CommitInfo[]> {
 		if (!upstream) return [];
 
 		return await getCommits({range: `${upstream}..HEAD`});
-	} catch {
+	} catch (error) {
+		logger.debug('Failed to get unpushed commits', {error});
 		return [];
 	}
 }
@@ -403,7 +418,8 @@ export async function isLastCommitPushed(): Promise<boolean> {
 
 		const {ahead} = await getAheadBehind();
 		return ahead === 0;
-	} catch {
+	} catch (error) {
+		logger.debug('Failed to check if last commit is pushed', {error});
 		return false;
 	}
 }
@@ -446,7 +462,8 @@ export async function getCommits(options: {
 				body: '',
 			};
 		});
-	} catch {
+	} catch (error) {
+		logger.debug('Failed to get commits', {error});
 		return [];
 	}
 }
@@ -564,8 +581,8 @@ export async function getDiffStats(
 				stats.set(path, {additions, deletions});
 			}
 		}
-	} catch {
-		// Ignore errors
+	} catch (error) {
+		logger.debug('Failed to get diff stats', {error});
 	}
 
 	return stats;
@@ -593,7 +610,8 @@ export async function getStashList(): Promise<StashEntry[]> {
 				date: date || '',
 			};
 		});
-	} catch {
+	} catch (error) {
+		logger.debug('Failed to list stashes', {error});
 		return [];
 	}
 }
@@ -606,7 +624,8 @@ export async function getStashCount(): Promise<number> {
 		const output = await execGit(['stash', 'list']);
 		if (!output.trim()) return 0;
 		return output.split('\n').length;
-	} catch {
+	} catch (error) {
+		logger.debug('Failed to get stash count', {error});
 		return 0;
 	}
 }
@@ -622,7 +641,8 @@ export async function remoteExists(name: string): Promise<boolean> {
 	try {
 		const remotes = await execGit(['remote']);
 		return remotes.split('\n').includes(name);
-	} catch {
+	} catch (error) {
+		logger.debug('Failed to check if remote exists', {error});
 		return false;
 	}
 }
