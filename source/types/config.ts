@@ -217,4 +217,6 @@ export interface UserPreferences {
 	titleShape?: TitleShape;
 	nanocoderShape?: NanocoderShape;
 	tune?: TuneConfig;
+	notifications?: NotificationsConfig;
+	paste?: PasteConfig;
 }

@@ -72,7 +72,13 @@ function getConfigOptions(): ConfigOption[] {
 }
 
 function getEditor(): string {
-	return process.env.EDITOR ?? process.env.VISUAL ?? 'vi';
+	if (process.env.EDITOR) return process.env.EDITOR;
+	if (process.env.VISUAL) return process.env.VISUAL;
+
+	// When running inside VS Code's integrated terminal, default to code
+	if (process.env.TERM_PROGRAM === 'vscode') return 'code --wait';
+
+	return 'vi';
 }
 
 function ensureFileExists(filePath: string): void {

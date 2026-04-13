@@ -5,12 +5,14 @@ import test from 'ava';
 import {
 	getLastUsedModel,
 	getNanocoderShape,
+	getNotificationsPreference,
 	getPasteThreshold,
 	loadPreferences,
 	resetPreferencesCache,
 	savePreferences,
 	updateLastUsed,
 	updateNanocoderShape,
+	updateNotificationsPreference,
 	updatePasteThreshold,
 } from './preferences';
 import type {UserPreferences} from '@/types/index';
@@ -741,14 +743,12 @@ test.serial('full workflow: update and retrieve nanocoder shape', t => {
 // getPasteThreshold Tests
 // ============================================================================
 
-test.serial('getPasteThreshold returns threshold from nanocoder.paste.singleLineThreshold', t => {
+test.serial('getPasteThreshold returns threshold from paste.singleLineThreshold', t => {
 	const preferencesPath = getTestPreferencesPath();
-	const data = {
+	const data: UserPreferences = {
 		lastProvider: 'openrouter',
-		nanocoder: {
-			paste: {
-				singleLineThreshold: 1500,
-			},
+		paste: {
+			singleLineThreshold: 1500,
 		},
 	};
 	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
@@ -763,7 +763,7 @@ test.serial('getPasteThreshold returns threshold from nanocoder.paste.singleLine
 	}
 });
 
-test.serial('getPasteThreshold returns undefined when nanocoder.paste is missing', t => {
+test.serial('getPasteThreshold returns undefined when paste is missing', t => {
 	const preferencesPath = getTestPreferencesPath();
 	writeFileSync(preferencesPath, JSON.stringify({lastProvider: 'test'}, null, 2), 'utf-8');
 
@@ -789,11 +789,9 @@ test.serial('getPasteThreshold returns undefined when file does not exist', t =>
 
 test.serial('getPasteThreshold returns undefined for non-positive threshold', t => {
 	const preferencesPath = getTestPreferencesPath();
-	const data = {
-		nanocoder: {
-			paste: {
-				singleLineThreshold: -100,
-			},
+	const data: UserPreferences = {
+		paste: {
+			singleLineThreshold: -100,
 		},
 	};
 	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
@@ -810,11 +808,9 @@ test.serial('getPasteThreshold returns undefined for non-positive threshold', t 
 
 test.serial('getPasteThreshold returns undefined for zero threshold', t => {
 	const preferencesPath = getTestPreferencesPath();
-	const data = {
-		nanocoder: {
-			paste: {
-				singleLineThreshold: 0,
-			},
+	const data: UserPreferences = {
+		paste: {
+			singleLineThreshold: 0,
 		},
 	};
 	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
@@ -832,10 +828,8 @@ test.serial('getPasteThreshold returns undefined for zero threshold', t => {
 test.serial('getPasteThreshold rounds non-integer thresholds', t => {
 	const preferencesPath = getTestPreferencesPath();
 	const data = {
-		nanocoder: {
-			paste: {
-				singleLineThreshold: 1234.7,
-			},
+		paste: {
+			singleLineThreshold: 1234.7,
 		},
 	};
 	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
@@ -853,10 +847,8 @@ test.serial('getPasteThreshold rounds non-integer thresholds', t => {
 test.serial('getPasteThreshold returns undefined for non-number threshold', t => {
 	const preferencesPath = getTestPreferencesPath();
 	const data = {
-		nanocoder: {
-			paste: {
-				singleLineThreshold: 'not-a-number',
-			},
+		paste: {
+			singleLineThreshold: 'not-a-number',
 		},
 	};
 	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
@@ -875,7 +867,7 @@ test.serial('getPasteThreshold returns undefined for non-number threshold', t =>
 // updatePasteThreshold Tests
 // ============================================================================
 
-test.serial('updatePasteThreshold saves threshold to nanocoder.paste.singleLineThreshold', t => {
+test.serial('updatePasteThreshold saves threshold to paste.singleLineThreshold', t => {
 	const preferencesPath = getTestPreferencesPath();
 	if (existsSync(preferencesPath)) {
 		rmSync(preferencesPath, {force: true});
@@ -887,11 +879,9 @@ test.serial('updatePasteThreshold saves threshold to nanocoder.paste.singleLineT
 		t.true(existsSync(preferencesPath));
 
 		const content = readFileSync(preferencesPath, 'utf-8');
-		const parsed = JSON.parse(content) as Record<string, unknown>;
-		const nanocoder = parsed.nanocoder as Record<string, unknown>;
-		const paste = nanocoder.paste as Record<string, unknown>;
+		const parsed = JSON.parse(content) as UserPreferences;
 
-		t.is(paste.singleLineThreshold, 2000);
+		t.is(parsed.paste?.singleLineThreshold, 2000);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});
@@ -901,7 +891,7 @@ test.serial('updatePasteThreshold saves threshold to nanocoder.paste.singleLineT
 
 test.serial('updatePasteThreshold preserves existing preferences', t => {
 	const preferencesPath = getTestPreferencesPath();
-	const existingData = {
+	const existingData: UserPreferences = {
 		lastProvider: 'openrouter',
 		lastModel: 'claude-3-opus',
 		selectedTheme: 'tokyo-night',
@@ -912,15 +902,12 @@ test.serial('updatePasteThreshold preserves existing preferences', t => {
 		updatePasteThreshold(1500);
 
 		const content = readFileSync(preferencesPath, 'utf-8');
-		const parsed = JSON.parse(content) as Record<string, unknown>;
+		const parsed = JSON.parse(content) as UserPreferences;
 
 		t.is(parsed.lastProvider, 'openrouter');
 		t.is(parsed.lastModel, 'claude-3-opus');
 		t.is(parsed.selectedTheme, 'tokyo-night');
-
-		const nanocoder = parsed.nanocoder as Record<string, unknown>;
-		const paste = nanocoder.paste as Record<string, unknown>;
-		t.is(paste.singleLineThreshold, 1500);
+		t.is(parsed.paste?.singleLineThreshold, 1500);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});
@@ -928,14 +915,11 @@ test.serial('updatePasteThreshold preserves existing preferences', t => {
 	}
 });
 
-test.serial('updatePasteThreshold preserves existing nanocoder namespace', t => {
+test.serial('updatePasteThreshold overwrites existing paste threshold', t => {
 	const preferencesPath = getTestPreferencesPath();
-	const existingData = {
-		nanocoder: {
-			paste: {
-				singleLineThreshold: 800,
-			},
-			otherSetting: true,
+	const existingData: UserPreferences = {
+		paste: {
+			singleLineThreshold: 800,
 		},
 	};
 	writeFileSync(preferencesPath, JSON.stringify(existingData, null, 2), 'utf-8');
@@ -944,13 +928,9 @@ test.serial('updatePasteThreshold preserves existing nanocoder namespace', t => 
 		updatePasteThreshold(1000);
 
 		const content = readFileSync(preferencesPath, 'utf-8');
-		const parsed = JSON.parse(content) as Record<string, unknown>;
-		const nanocoder = parsed.nanocoder as Record<string, unknown>;
+		const parsed = JSON.parse(content) as UserPreferences;
 
-		t.is(nanocoder.otherSetting, true);
-
-		const paste = nanocoder.paste as Record<string, unknown>;
-		t.is(paste.singleLineThreshold, 1000);
+		t.is(parsed.paste?.singleLineThreshold, 1000);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});
@@ -968,11 +948,9 @@ test.serial('updatePasteThreshold rounds non-integer values', t => {
 		updatePasteThreshold(1234.7);
 
 		const content = readFileSync(preferencesPath, 'utf-8');
-		const parsed = JSON.parse(content) as Record<string, unknown>;
-		const nanocoder = parsed.nanocoder as Record<string, unknown>;
-		const paste = nanocoder.paste as Record<string, unknown>;
+		const parsed = JSON.parse(content) as UserPreferences;
 
-		t.is(paste.singleLineThreshold, 1235);
+		t.is(parsed.paste?.singleLineThreshold, 1235);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});
@@ -992,11 +970,9 @@ test.serial('updatePasteThreshold creates file if it does not exist', t => {
 		t.true(existsSync(preferencesPath));
 
 		const content = readFileSync(preferencesPath, 'utf-8');
-		const parsed = JSON.parse(content) as Record<string, unknown>;
-		const nanocoder = parsed.nanocoder as Record<string, unknown>;
-		const paste = nanocoder.paste as Record<string, unknown>;
+		const parsed = JSON.parse(content) as UserPreferences;
 
-		t.is(paste.singleLineThreshold, 500);
+		t.is(parsed.paste?.singleLineThreshold, 500);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});
@@ -1040,14 +1016,136 @@ test.serial('updatePasteThreshold does not overwrite other preferences saved via
 
 		// Both should coexist
 		const content = readFileSync(preferencesPath, 'utf-8');
-		const parsed = JSON.parse(content) as Record<string, unknown>;
+		const parsed = JSON.parse(content) as UserPreferences;
 
 		t.is(parsed.lastProvider, 'ollama');
 		t.is(parsed.lastModel, 'llama3');
+		t.is(parsed.paste?.singleLineThreshold, 400);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
 
-		const nanocoder = parsed.nanocoder as Record<string, unknown>;
-		const paste = nanocoder.paste as Record<string, unknown>;
-		t.is(paste.singleLineThreshold, 400);
+// ============================================================================
+// Notification Preferences Tests
+// ============================================================================
+
+test.serial('getNotificationsPreference returns undefined when not set', t => {
+	const preferencesPath = getTestPreferencesPath();
+	writeFileSync(preferencesPath, JSON.stringify({lastProvider: 'test'}, null, 2), 'utf-8');
+
+	try {
+		const result = getNotificationsPreference();
+		t.is(result, undefined);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getNotificationsPreference returns undefined when file does not exist', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	const result = getNotificationsPreference();
+	t.is(result, undefined);
+});
+
+test.serial('getNotificationsPreference returns saved config', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const data: UserPreferences = {
+		notifications: {
+			enabled: true,
+			sound: false,
+			events: {
+				toolConfirmation: true,
+				questionPrompt: true,
+				generationComplete: false,
+			},
+		},
+	};
+	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
+
+	try {
+		const result = getNotificationsPreference();
+		t.truthy(result);
+		t.is(result!.enabled, true);
+		t.is(result!.sound, false);
+		t.is(result!.events?.toolConfirmation, true);
+		t.is(result!.events?.generationComplete, false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateNotificationsPreference saves config at top level', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateNotificationsPreference({enabled: true, sound: true});
+
+		t.true(existsSync(preferencesPath));
+
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as UserPreferences;
+
+		t.is(parsed.notifications?.enabled, true);
+		t.is(parsed.notifications?.sound, true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateNotificationsPreference preserves existing preferences', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const existingData: UserPreferences = {
+		lastProvider: 'openrouter',
+		selectedTheme: 'tokyo-night',
+	};
+	writeFileSync(preferencesPath, JSON.stringify(existingData, null, 2), 'utf-8');
+
+	try {
+		updateNotificationsPreference({enabled: false});
+
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as UserPreferences;
+
+		t.is(parsed.lastProvider, 'openrouter');
+		t.is(parsed.selectedTheme, 'tokyo-night');
+		t.is(parsed.notifications?.enabled, false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('full workflow: update and retrieve notifications', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateNotificationsPreference({enabled: true, sound: false, timeout: 5000});
+		const retrieved = getNotificationsPreference();
+
+		t.truthy(retrieved);
+		t.is(retrieved!.enabled, true);
+		t.is(retrieved!.sound, false);
+		t.is(retrieved!.timeout, 5000);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});

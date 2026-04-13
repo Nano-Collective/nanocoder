@@ -97,127 +97,47 @@ export function saveTune(config: TuneConfig): void {
 }
 
 /**
- * Get the notifications config from nanocoder.notifications in the preferences file.
+ * Get the notifications config from the preferences file.
  */
 export function getNotificationsPreference():
 	| import('@/types/config').NotificationsConfig
 	| undefined {
-	try {
-		const data = readFileSync(getPreferencesPath(), 'utf-8');
-		const raw = JSON.parse(data) as Record<string, unknown>;
-		const nanocoder = raw.nanocoder as Record<string, unknown> | undefined;
-		const notifications = nanocoder?.notifications as
-			| Record<string, unknown>
-			| undefined;
-		if (
-			notifications &&
-			typeof notifications === 'object' &&
-			'enabled' in notifications
-		) {
-			return {
-				enabled: Boolean(notifications.enabled),
-				sound:
-					'sound' in notifications ? Boolean(notifications.sound) : undefined,
-				timeout:
-					'timeout' in notifications &&
-					typeof notifications.timeout === 'number'
-						? notifications.timeout
-						: undefined,
-				events:
-					'events' in notifications &&
-					notifications.events &&
-					typeof notifications.events === 'object'
-						? (notifications.events as import('@/types/config').NotificationsConfig['events'])
-						: undefined,
-				customMessages:
-					'customMessages' in notifications &&
-					notifications.customMessages &&
-					typeof notifications.customMessages === 'object'
-						? (notifications.customMessages as import('@/types/config').NotificationsConfig['customMessages'])
-						: undefined,
-			};
-		}
-	} catch {
-		// File doesn't exist or is invalid
-	}
-	return undefined;
+	const preferences = loadPreferences();
+	return preferences.notifications;
 }
 
 /**
- * Save the notifications config to nanocoder.notifications in the preferences file.
+ * Save the notifications config to the preferences file.
  */
 export function updateNotificationsPreference(
 	config: import('@/types/config').NotificationsConfig,
 ): void {
-	try {
-		let raw: Record<string, unknown> = {};
-		try {
-			const data = readFileSync(getPreferencesPath(), 'utf-8');
-			raw = JSON.parse(data) as Record<string, unknown>;
-		} catch {
-			// Start fresh if file doesn't exist
-		}
-
-		if (!raw.nanocoder || typeof raw.nanocoder !== 'object') {
-			raw.nanocoder = {};
-		}
-		const nanocoder = raw.nanocoder as Record<string, unknown>;
-		nanocoder.notifications = config;
-
-		writeFileSync(getPreferencesPath(), JSON.stringify(raw, null, 2));
-	} catch (error) {
-		logError(`Failed to save notifications config: ${String(error)}`);
-	}
+	const preferences = loadPreferences();
+	preferences.notifications = config;
+	savePreferences(preferences);
 }
 
 /**
- * Get the paste threshold from the nanocoder.paste.singleLineThreshold
- * field in the preferences file (same path that loadPasteConfig reads).
+ * Get the paste threshold from the preferences file.
  */
 export function getPasteThreshold(): number | undefined {
-	try {
-		const data = readFileSync(getPreferencesPath(), 'utf-8');
-		const raw = JSON.parse(data) as Record<string, unknown>;
-		const nanocoder = raw.nanocoder as Record<string, unknown> | undefined;
-		const paste = nanocoder?.paste as Record<string, unknown> | undefined;
-		const threshold = paste?.singleLineThreshold;
-		if (typeof threshold === 'number' && threshold > 0) {
-			return Math.round(threshold);
-		}
-	} catch {
-		// File doesn't exist or is invalid — return undefined
+	const preferences = loadPreferences();
+	const threshold = preferences.paste?.singleLineThreshold;
+	if (typeof threshold === 'number' && threshold > 0) {
+		return Math.round(threshold);
 	}
 	return undefined;
 }
 
 /**
- * Save the paste threshold to nanocoder.paste.singleLineThreshold
- * in the preferences file (same path that loadPasteConfig reads).
+ * Save the paste threshold to the preferences file.
  */
 export function updatePasteThreshold(threshold: number): void {
-	try {
-		let raw: Record<string, unknown> = {};
-		try {
-			const data = readFileSync(getPreferencesPath(), 'utf-8');
-			raw = JSON.parse(data) as Record<string, unknown>;
-		} catch {
-			// Start fresh if file doesn't exist
-		}
-
-		if (!raw.nanocoder || typeof raw.nanocoder !== 'object') {
-			raw.nanocoder = {};
-		}
-		const nanocoder = raw.nanocoder as Record<string, unknown>;
-
-		if (!nanocoder.paste || typeof nanocoder.paste !== 'object') {
-			nanocoder.paste = {};
-		}
-		const paste = nanocoder.paste as Record<string, unknown>;
-
-		paste.singleLineThreshold = Math.round(threshold);
-
-		writeFileSync(getPreferencesPath(), JSON.stringify(raw, null, 2));
-	} catch (error) {
-		logError(`Failed to save paste threshold: ${String(error)}`);
+	const preferences = loadPreferences();
+	if (!preferences.paste) {
+		preferences.paste = {singleLineThreshold: Math.round(threshold)};
+	} else {
+		preferences.paste.singleLineThreshold = Math.round(threshold);
 	}
+	savePreferences(preferences);
 }

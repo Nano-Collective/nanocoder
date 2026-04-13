@@ -115,6 +115,38 @@ test('setup-config with no args shows usage hint', async t => {
 	t.regex(output!, /\/setup-config/);
 });
 
+test('setup-config shows code --wait when TERM_PROGRAM is vscode and EDITOR is unset', async t => {
+	const origEditor = process.env.EDITOR;
+	const origVisual = process.env.VISUAL;
+	const origTermProgram = process.env.TERM_PROGRAM;
+
+	delete process.env.EDITOR;
+	delete process.env.VISUAL;
+	process.env.TERM_PROGRAM = 'vscode';
+
+	try {
+		const result = await setupConfigCommand.handler([], [], {} as any);
+		if (!React.isValidElement(result)) {
+			t.fail('Expected React element');
+			return;
+		}
+
+		const {lastFrame} = render(
+			<MockProviders>{result}</MockProviders>,
+		);
+		const output = lastFrame();
+		t.truthy(output);
+		t.regex(output!, /code --wait/);
+	} finally {
+		if (origEditor !== undefined) process.env.EDITOR = origEditor;
+		else delete process.env.EDITOR;
+		if (origVisual !== undefined) process.env.VISUAL = origVisual;
+		else delete process.env.VISUAL;
+		if (origTermProgram !== undefined) process.env.TERM_PROGRAM = origTermProgram;
+		else delete process.env.TERM_PROGRAM;
+	}
+});
+
 // ============================================================================
 // Invalid Selection Tests
 // ============================================================================
