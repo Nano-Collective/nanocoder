@@ -75,10 +75,10 @@ export async function getAvailableClis(
 		SUPPORTED_CLIS.map(async cli => {
 			try {
 				// Use a short timeout (2s) to avoid hanging on unresponsive executables
-				// execFile avoids shell interpretation, preventing command injection
+				// execFile without shell avoids shell interpretation on all platforms,
+				// preventing command injection. cli is always from SUPPORTED_CLIS allowlist.
 				await execFile(cli, ['--version'], {
 					timeout: 2000,
-					...(isWindows && {shell: 'cmd.exe'}),
 				});
 				return cli;
 			} catch {
@@ -108,11 +108,11 @@ export async function getExtensionStatus(): Promise<VSCodeStatus[]> {
 	return Promise.all(
 		availableClis.map(async cli => {
 			try {
-				// execFile avoids shell interpretation, preventing command injection
+				// execFile without shell avoids shell interpretation on all platforms,
+				// preventing command injection. cli is always from SUPPORTED_CLIS allowlist.
 				const {stdout} = await execFile(cli, ['--list-extensions'], {
 					timeout: 5000,
 					encoding: 'utf-8',
-					...(isWindows && {shell: 'cmd.exe'}),
 				});
 
 				const extensionInstalled = stdout
