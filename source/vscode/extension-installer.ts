@@ -2,14 +2,14 @@
  * VS Code extension installation utilities
  */
 
-import {exec as execAsync, spawn} from 'child_process';
+import {execFile as execFileAsync, spawn} from 'child_process';
 import {existsSync} from 'fs';
 import {dirname, join} from 'path';
 import {platform} from 'process';
 import {fileURLToPath} from 'url';
 import {promisify} from 'util';
 
-const exec = promisify(execAsync);
+const execFile = promisify(execFileAsync);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isWindows = platform === 'win32';
 
@@ -75,7 +75,8 @@ export async function getAvailableClis(
 		SUPPORTED_CLIS.map(async cli => {
 			try {
 				// Use a short timeout (2s) to avoid hanging on unresponsive executables
-				await exec(`${cli} --version`, {
+				// execFile avoids shell interpretation, preventing command injection
+				await execFile(cli, ['--version'], {
 					timeout: 2000,
 					...(isWindows && {shell: 'cmd.exe'}),
 				});
@@ -107,7 +108,8 @@ export async function getExtensionStatus(): Promise<VSCodeStatus[]> {
 	return Promise.all(
 		availableClis.map(async cli => {
 			try {
-				const {stdout} = await exec(`${cli} --list-extensions`, {
+				// execFile avoids shell interpretation, preventing command injection
+				const {stdout} = await execFile(cli, ['--list-extensions'], {
 					timeout: 5000,
 					encoding: 'utf-8',
 					...(isWindows && {shell: 'cmd.exe'}),
