@@ -46,6 +46,8 @@
 
 - Security: Fixed vulnerable packages. Thanks to @brijeshkr.
 
+- Security: Replaced `exec()` with `execFile()` in VS Code extension installer to prevent command injection. Removes shell interpretation from CLI discovery and extension status checks. Thanks to @ragini-pandey.
+
 - Added `/credits` command showing project contributors (auto-generated from git history via `pnpm run build:credits`) and dependency versions.
 
 - Added desktop notifications for tool confirmations, question prompts, and generation completions. Supports macOS (`terminal-notifier` with osascript fallback), Linux (`notify-send`), and Windows (PowerShell). Configurable per-event in `nanocoder-preferences.json` and in `/settings` with custom messages and optional sound. Includes a "Notifications" settings menu for preference management.
