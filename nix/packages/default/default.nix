@@ -57,7 +57,8 @@ stdenv.mkDerivation (finalAttrs: {
 
     # Copy static files not bundled by tsc (loaded at runtime via __dirname)
     install -D source/config/themes.json $out/lib/nanocoder/source/config/themes.json
-    cp -r source/app/prompts $out/lib/nanocoder/source/app/prompts
+    mkdir -p $out/lib/nanocoder/source/app/prompts
+    cp -r source/app/prompts/* $out/lib/nanocoder/source/app/prompts/
 
     # Create wrapper script
     cat > $out/bin/nanocoder <<EOF
