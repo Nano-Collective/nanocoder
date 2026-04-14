@@ -44,29 +44,30 @@ stdenv.mkDerivation (finalAttrs: {
   '';
 
   installPhase = ''
-        runHook preInstall
+    runHook preInstall
 
-        mkdir -p $out/bin
-        mkdir -p $out/lib/nanocoder
+    mkdir -p $out/bin
+    mkdir -p $out/lib/nanocoder
 
-        # Copy built files
-        cp -r dist $out/lib/nanocoder/
-        cp -r node_modules $out/lib/nanocoder/
-        cp package.json $out/lib/nanocoder/
-        cp -r plugins $out/lib/nanocoder/
+    # Copy built files
+    cp -r dist $out/lib/nanocoder/
+    cp -r node_modules $out/lib/nanocoder/
+    cp package.json $out/lib/nanocoder/
+    cp -r plugins $out/lib/nanocoder/
 
-        # Copy static themes.json not bundled by tsc
-        install -D source/config/themes.json $out/lib/nanocoder/source/config/themes.json
+    # Copy static files not bundled by tsc (loaded at runtime via __dirname)
+    install -D source/config/themes.json $out/lib/nanocoder/source/config/themes.json
+    cp -r source/app/prompts $out/lib/nanocoder/source/app/prompts
 
-        # Create wrapper script
-        cat > $out/bin/nanocoder <<EOF
-    #!/usr/bin/env bash
-    NODE_PATH="$out/lib/nanocoder/node_modules" exec ${nodejs}/bin/node "$out/lib/nanocoder/dist/cli.js" "\$@"
-    EOF
+    # Create wrapper script
+    cat > $out/bin/nanocoder <<EOF
+#!/usr/bin/env bash
+NODE_PATH="$out/lib/nanocoder/node_modules" exec ${nodejs}/bin/node "$out/lib/nanocoder/dist/cli.js" "\$@"
+EOF
 
-        chmod +x $out/bin/nanocoder
+    chmod +x $out/bin/nanocoder
 
-        runHook postInstall
+    runHook postInstall
   '';
 
   meta = with lib; {
