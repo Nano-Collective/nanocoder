@@ -1,3 +1,10 @@
+# 1.25.2
+
+- Fixed Nix package: copy `themes.json` and prompt section files into the Nix store so `nix run` no longer crashes at startup
+- Fixed Nix package: corrected wrapper script heredoc indentation that broke the shebang line
+
+If there are any problems, feedback or thoughts please drop an issue or message us through Discord! Thank you for using Nanocoder.
+
 # 1.25.1
 
 - Removed rogue document from `docs/`
