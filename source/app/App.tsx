@@ -13,6 +13,7 @@ import {SuccessMessage} from '@/components/message-box';
 import {SchedulerView} from '@/components/scheduler-view';
 import SecurityDisclaimer from '@/components/security-disclaimer';
 import StreamingMessage from '@/components/streaming-message';
+import StreamingReasoning from '@/components/streaming-reasoning';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {
 	shouldPromptExtensionInstall,
@@ -766,11 +767,9 @@ export default function App({
 									<>
 										{chatHandler.streamingReasoning &&
 											!chatHandler.streamingContent && (
-												<StreamingMessage
+												<StreamingReasoning
 													message={chatHandler.streamingReasoning}
-													model={appState.currentModel}
 													startTime={streamingStartRef.current}
-													reasoning={true}
 												/>
 											)}
 										{/* Reasoning stream is complete when text streaming begins  */}
@@ -786,7 +785,6 @@ export default function App({
 												message={chatHandler.streamingContent}
 												model={appState.currentModel}
 												startTime={streamingStartRef.current}
-												reasoning={false}
 											/>
 										)}
 									</>

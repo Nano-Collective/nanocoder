@@ -5,20 +5,17 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 import {calculateTokens} from '@/utils/token-calculator';
-import {AssistantMessageBox} from './assistant-message';
 
 /**
  * Lightweight streaming message component. Shows the last N lines of
  * plain text to avoid expensive markdown parsing and terminal reflow
  * on every token update. The final AssistantMessage handles full rendering.
  */
-export default memo(function StreamingMessage({
+export default memo(function StreamingReasoning({
 	message,
-	model,
 	startTime,
 }: {
 	message: string;
-	model: string;
 	startTime: number;
 }) {
 	const {colors} = useTheme();
@@ -39,16 +36,23 @@ export default memo(function StreamingMessage({
 	const tokPerSec = elapsedSec > 0.1 ? (tokens / elapsedSec).toFixed(1) : '—';
 
 	return (
-		<>
-			<Box marginBottom={1} marginTop={1}>
-				<Text color={colors.info} bold>
-					<Spinner type="dots" /> {model}
+		<Box flexDirection="column" marginBottom={1}>
+			<Box>
+				<Text color={colors.tool}>
+					{'\u2699'} Thinking
+					<Spinner type="simpleDots" />
 				</Text>
 				<Text>
 					{'  '}~{tokens.toLocaleString()} tokens · {tokPerSec} tok/s
 				</Text>
 			</Box>
-			<AssistantMessageBox truncated={truncated} text={displayText} />
-		</>
+			<Box marginBottom={1}>
+				{truncated && <Text color={colors.secondary}>…</Text>}
+				<Text color={colors.secondary} italic>
+					{displayText}
+				</Text>
+			</Box>
+			<Box></Box>
+		</Box>
 	);
 });
