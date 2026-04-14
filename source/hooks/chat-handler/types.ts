@@ -43,6 +43,7 @@ export interface ChatHandlerReturn {
 		messages: Message[],
 	) => Promise<void>;
 	isGenerating: boolean;
+	streamingReasoning: string;
 	streamingContent: string;
 	tokenCount: number;
 }

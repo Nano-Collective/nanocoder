@@ -191,10 +191,15 @@ export async function handleChat(
 			const FLUSH_INTERVAL_MS = 150;
 			let tokenBuffer = '';
 			let flushTimer: ReturnType<typeof setTimeout> | null = null;
+			let isReasoning = false;
 
 			const flushBuffer = () => {
 				if (tokenBuffer) {
-					callbacks.onToken?.(tokenBuffer);
+					if (isReasoning) {
+						callbacks.onReasoningToken?.(tokenBuffer);
+					} else {
+						callbacks.onToken?.(tokenBuffer);
+					}
 					tokenBuffer = '';
 				}
 				flushTimer = null;
@@ -204,12 +209,29 @@ export async function handleChat(
 			for await (const chunk of result.fullStream) {
 				switch (chunk.type) {
 					case 'reasoning-delta':
-						break;
 					case 'text-delta':
 						tokenBuffer += chunk.text;
 						if (!flushTimer) {
 							flushTimer = setTimeout(flushBuffer, FLUSH_INTERVAL_MS);
 						}
+						break;
+
+					// Determine which stream to write tokens to
+					case 'reasoning-start':
+						isReasoning = true;
+						break;
+					case 'text-start':
+						isReasoning = false;
+						break;
+
+					// Flush remaining tokens in given stream
+					case 'text-end':
+					case 'reasoning-end':
+						if (flushTimer) {
+							clearTimeout(flushTimer);
+						}
+						flushBuffer();
+
 						break;
 				}
 				// Periodically yield to the event loop so timers and Ink renders
@@ -220,12 +242,6 @@ export async function handleChat(
 					await new Promise<void>(resolve => setTimeout(resolve, 0));
 				}
 			}
-
-			// Flush any remaining tokens
-			if (flushTimer) {
-				clearTimeout(flushTimer);
-			}
-			flushBuffer();
 
 			// After streaming completes, collect final results
 			const [fullText, resolvedToolCalls, resolvedSteps, reasoning] =

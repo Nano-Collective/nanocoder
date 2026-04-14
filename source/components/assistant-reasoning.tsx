@@ -7,6 +7,38 @@ import type {AssistantReasoningProps} from '@/types/index';
 import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 import {calculateTokens} from '@/utils/token-calculator';
 
+export function AssistantReasoningBox({
+	text,
+	truncated,
+}: {
+	text: string;
+	truncated?: boolean;
+}) {
+	const {colors} = useTheme();
+	const boxWidth = useTerminalWidth();
+
+	return (
+		<Box
+			flexDirection="column"
+			marginBottom={1}
+			backgroundColor={colors.base}
+			width={boxWidth}
+			padding={1}
+			borderStyle="bold"
+			borderLeft={true}
+			borderRight={false}
+			borderTop={false}
+			borderBottom={false}
+			borderLeftColor={colors.secondary}
+		>
+			{truncated && <Text>…</Text>}
+			<Text color={colors.secondary} italic>
+				{text}
+			</Text>
+		</Box>
+	);
+}
+
 export default memo(function AssistantReasoning({
 	reasoning,
 	model,
@@ -32,31 +64,14 @@ export default memo(function AssistantReasoning({
 
 	return (
 		<>
-			<Box marginBottom={1} marginTop={0}>
+			<Box marginBottom={1} marginTop={1}>
 				<Text color={colors.info} bold>
 					{model}
 				</Text>
 				<Text color={colors.text}>{' is thinking:'}</Text>
 			</Box>
-			<Box
-				flexDirection="column"
-				marginBottom={1}
-				backgroundColor={colors.base}
-				width={boxWidth}
-				padding={1}
-				paddingLeft={2}
-				borderStyle="bold"
-				borderLeft={false}
-				borderRight={false}
-				borderTop={false}
-				borderBottom={false}
-				borderLeftColor={colors.secondary}
-			>
-				<Text color={colors.secondary} italic>
-					{renderedMessage}
-				</Text>
-			</Box>
-			<Box marginBottom={0}>
+			<AssistantReasoningBox text={renderedMessage} />
+			<Box marginBottom={2}>
 				<Text color={colors.secondary}>~{tokens.toLocaleString()} tokens</Text>
 			</Box>
 		</>

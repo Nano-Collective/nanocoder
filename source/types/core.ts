@@ -160,6 +160,7 @@ export interface LLMChatResponse {
 
 export interface StreamCallbacks {
 	onToken?: (token: string) => void;
+	onReasoningToken?: (fullReasoning: string) => void;
 	onToolCall?: (toolCall: ToolCall) => void;
 	onFinish?: () => void;
 }

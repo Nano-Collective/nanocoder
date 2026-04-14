@@ -5,6 +5,8 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 import {calculateTokens} from '@/utils/token-calculator';
+import {AssistantMessageBox} from './assistant-message';
+import {AssistantReasoningBox} from './assistant-reasoning';
 
 /**
  * Lightweight streaming message component. Shows the last N lines of
@@ -15,10 +17,12 @@ export default memo(function StreamingMessage({
 	message,
 	model,
 	startTime,
+	reasoning,
 }: {
 	message: string;
 	model: string;
 	startTime: number;
+	reasoning: boolean;
 }) {
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
@@ -37,6 +41,8 @@ export default memo(function StreamingMessage({
 	const elapsedSec = (Date.now() - startTime) / 1000;
 	const tokPerSec = elapsedSec > 0.1 ? (tokens / elapsedSec).toFixed(1) : '—';
 
+	const BoxStyle = reasoning ? AssistantReasoningBox : AssistantMessageBox;
+
 	return (
 		<>
 			<Box marginBottom={1} marginTop={1}>
@@ -47,22 +53,7 @@ export default memo(function StreamingMessage({
 					{'  '}~{tokens.toLocaleString()} tokens · {tokPerSec} tok/s
 				</Text>
 			</Box>
-			<Box
-				flexDirection="column"
-				marginBottom={1}
-				backgroundColor={colors.base}
-				width={boxWidth}
-				padding={1}
-				borderStyle="bold"
-				borderLeft={true}
-				borderRight={false}
-				borderTop={false}
-				borderBottom={false}
-				borderLeftColor={colors.secondary}
-			>
-				{truncated && <Text>…</Text>}
-				<Text>{displayText}</Text>
-			</Box>
+			<BoxStyle truncated={truncated} text={displayText} />
 		</>
 	);
 });

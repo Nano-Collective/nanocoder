@@ -34,6 +34,7 @@ interface ProcessAssistantResponseParams {
 	abortController: AbortController | null;
 	setAbortController: (controller: AbortController | null) => void;
 	setIsGenerating: (generating: boolean) => void;
+	setStreamingReasoning: (content: string) => void;
 	setStreamingContent: (content: string) => void;
 	setTokenCount: (count: number) => void;
 	setMessages: (messages: Message[]) => void;
@@ -88,6 +89,7 @@ export const processAssistantResponse = async (
 		abortController,
 		setAbortController,
 		setIsGenerating,
+		setStreamingReasoning,
 		setStreamingContent,
 		setTokenCount,
 		setMessages,
@@ -184,6 +186,7 @@ export const processAssistantResponse = async (
 		: {};
 
 	let streamedContent = '';
+	let streamedReasoning = '';
 	const result = await client.chat(
 		[systemMessage, ...messages],
 		tools,
@@ -191,6 +194,10 @@ export const processAssistantResponse = async (
 			onToken: (token: string) => {
 				streamedContent += token;
 				setStreamingContent(streamedContent);
+			},
+			onReasoningToken: (token: string) => {
+				streamedReasoning += token;
+				setStreamingReasoning(streamedReasoning);
 			},
 		},
 		controller.signal,
@@ -297,6 +304,11 @@ export const processAssistantResponse = async (
 	// live StreamingMessage disappears at the same time the static
 	// AssistantMessage appears, avoiding a visual jump.
 	setStreamingContent('');
+	setStreamingReasoning('');
+
+	// Despite reasoning stream typically finishing before text stream,
+	// reasoning is still added to chat queue here to give correct
+	// message order with regards to tool calling
 	if (fullReasoning) {
 		addToChatQueue(
 			<AssistantReasoning
