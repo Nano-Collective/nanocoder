@@ -314,7 +314,7 @@ export const processAssistantResponse = async (
 			<AssistantReasoning
 				key={`assistant-${getNextComponentKey()}`}
 				reasoning={fullReasoning}
-				model={currentModel}
+				compact={compactToolDisplayRef?.current ?? true}
 			/>,
 		);
 	}

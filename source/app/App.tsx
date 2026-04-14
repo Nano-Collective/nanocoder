@@ -770,6 +770,7 @@ export default function App({
 												<StreamingReasoning
 													message={chatHandler.streamingReasoning}
 													startTime={streamingStartRef.current}
+													compact={appState.compactToolDisplay}
 												/>
 											)}
 										{/* Reasoning stream is complete when text streaming begins  */}
@@ -777,7 +778,7 @@ export default function App({
 											chatHandler.streamingContent && (
 												<AssistantReasoning
 													reasoning={chatHandler.streamingReasoning}
-													model={appState.currentModel}
+													compact={appState.compactToolDisplay}
 												/>
 											)}
 										{chatHandler.streamingContent && (

@@ -14,9 +14,11 @@ import {calculateTokens} from '@/utils/token-calculator';
 export default memo(function StreamingReasoning({
 	message,
 	startTime,
+	compact,
 }: {
 	message: string;
 	startTime: number;
+	compact: boolean;
 }) {
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
@@ -42,17 +44,20 @@ export default memo(function StreamingReasoning({
 					{'\u2699'} Thinking
 					<Spinner type="simpleDots" />
 				</Text>
-				<Text>
-					{'  '}~{tokens.toLocaleString()} tokens · {tokPerSec} tok/s
-				</Text>
+				{!compact && (
+					<Text>
+						{'  '}~{tokens.toLocaleString()} tokens · {tokPerSec} tok/s
+					</Text>
+				)}
 			</Box>
-			<Box marginBottom={1}>
-				{truncated && <Text color={colors.secondary}>…</Text>}
-				<Text color={colors.secondary} italic>
-					{displayText}
-				</Text>
-			</Box>
-			<Box></Box>
+			{!compact && (
+				<Box marginBottom={1}>
+					{truncated && <Text color={colors.secondary}>…</Text>}
+					<Text color={colors.secondary} italic>
+						{displayText}
+					</Text>
+				</Box>
+			)}
 		</Box>
 	);
 });
