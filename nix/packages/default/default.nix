@@ -55,9 +55,8 @@ stdenv.mkDerivation (finalAttrs: {
         cp package.json $out/lib/nanocoder/
         cp -r plugins $out/lib/nanocoder/
 
-        # Copy static assets not bundled by tsc
-        mkdir -p $out/lib/nanocoder/source/config
-        cp -r source/config $out/lib/nanocoder/source/
+        # Copy static themes.json not bundled by tsc
+        install -D source/config/themes.json $out/lib/nanocoder/source/config/themes.json
 
         # Create wrapper script
         cat > $out/bin/nanocoder <<EOF
