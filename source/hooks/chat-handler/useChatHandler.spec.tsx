@@ -54,6 +54,7 @@ test('useChatHandler - returns correct interface', t => {
 	t.true('processAssistantResponse' in hookResult!);
 	t.true('isGenerating' in hookResult!);
 	t.true('streamingContent' in hookResult!);
+	t.true('streamingReasoning' in hookResult!);
 	t.true('tokenCount' in hookResult!);
 });
 
@@ -76,6 +77,7 @@ test('useChatHandler - returns correct function types', t => {
 	t.is(typeof hookResult!.processAssistantResponse, 'function');
 	t.is(typeof hookResult!.isGenerating, 'boolean');
 	t.is(typeof hookResult!.streamingContent, 'string');
+	t.is(typeof hookResult!.streamingReasoning, 'string');
 	t.is(typeof hookResult!.tokenCount, 'number');
 });
 
@@ -96,6 +98,7 @@ test('useChatHandler - initial streaming state is correct', t => {
 	t.truthy(hookResult);
 	t.is(hookResult!.isGenerating, false);
 	t.is(hookResult!.streamingContent, '');
+	t.is(hookResult!.streamingReasoning, '');
 	t.is(hookResult!.tokenCount, 0);
 });
 
@@ -312,10 +315,12 @@ test('useChatHandler - streaming state types are correct', t => {
 	const streamingState = {
 		isGenerating: hookResult!.isGenerating,
 		streamingContent: hookResult!.streamingContent,
+		streamingReasoning: hookResult!.streamingReasoning,
 		tokenCount: hookResult!.tokenCount,
 	};
 
 	t.is(typeof streamingState.isGenerating, 'boolean');
 	t.is(typeof streamingState.streamingContent, 'string');
+	t.is(typeof streamingState.streamingReasoning, 'string');
 	t.is(typeof streamingState.tokenCount, 'number');
 });

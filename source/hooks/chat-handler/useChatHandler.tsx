@@ -111,6 +111,7 @@ export function useChatHandler({
 			setAbortController,
 			setIsGenerating,
 			setStreamingContent,
+			setStreamingReasoning,
 			setTokenCount,
 		),
 		[], // Setters are stable and don't need to be in dependencies

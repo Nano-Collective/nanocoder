@@ -159,6 +159,7 @@ export const processAssistantResponse = async (
 	// Use streaming with callbacks
 	setIsGenerating(true);
 	setStreamingContent('');
+	setStreamingReasoning('');
 	setTokenCount(0);
 
 	// Build mode overrides for non-interactive mode and tune settings
@@ -401,6 +402,7 @@ export const processAssistantResponse = async (
 	// Clear streaming content (but don't set isGenerating=false yet —
 	// we may still need to execute tools and recurse)
 	setStreamingContent('');
+	setStreamingReasoning('');
 
 	// Handle error results for non-existent tools
 	if (errorResults.length > 0) {

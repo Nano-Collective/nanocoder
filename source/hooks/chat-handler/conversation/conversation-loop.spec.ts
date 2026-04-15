@@ -2,6 +2,7 @@ import test from 'ava';
 import {resetShutdownManager} from '@/utils/shutdown/shutdown-manager.js';
 import {processAssistantResponse, resetFallbackNotice} from './conversation-loop.js';
 import type {Message, ToolCall, ToolResult} from '@/types/core';
+import { LLMChatResponse } from '../../../types/core.js';
 
 // The ShutdownManager singleton is created as a side effect of transitive
 // imports (via @/utils/logging). Its uncaughtException/unhandledRejection
@@ -21,16 +22,19 @@ test.after.always(() => {
 
 // Mock client that simulates LLM responses
 const createMockClient = (response: {
-	toolCalls?: ToolCall[] | null;
+	toolCalls?: ToolCall[];
 	content?: string;
 	toolsDisabled?: boolean;
+	reasoning?: string
 }) => ({
-	chat: async () => ({
+	chat: async (): Promise<LLMChatResponse> => ({
 		choices: [
 			{
 				message: {
+					role: 'assistant',
 					content: response.content || '',
-					tool_calls: response.toolCalls || null,
+					tool_calls: response.toolCalls,
+					reasoning: response.reasoning
 				},
 			},
 		],
@@ -92,6 +96,7 @@ const createDefaultParams = (overrides = {}) => ({
 	abortController: null,
 	setAbortController: () => {},
 	setIsGenerating: () => {},
+	setStreamingReasoning: () => {},
 	setStreamingContent: () => {},
 	setTokenCount: () => {},
 	setMessages: () => {},
@@ -236,7 +241,7 @@ test.serial('processAssistantResponse - calls onConversationComplete when done',
 		// Mock client to return content with no tool calls
 		client: createMockClient({
 			content: 'Here is my response!',
-			toolCalls: null,
+			toolCalls: undefined,
 		}),
 	});
 
@@ -287,7 +292,7 @@ test.serial('processAssistantResponse - shows XML fallback notice when toolsDisa
 	const params = createDefaultParams({
 		client: createMockClient({
 			content: 'Here is my response!',
-			toolCalls: null,
+			toolCalls: undefined,
 			toolsDisabled: true,
 		}),
 		addToChatQueue: (component: any) => {
@@ -315,7 +320,7 @@ test.serial('processAssistantResponse - shows XML fallback notice only once acro
 	const params = createDefaultParams({
 		client: createMockClient({
 			content: 'First response',
-			toolCalls: null,
+			toolCalls: undefined,
 			toolsDisabled: true,
 		}),
 		addToChatQueue,
@@ -335,7 +340,7 @@ test.serial('processAssistantResponse - shows XML fallback notice only once acro
 	const params2 = createDefaultParams({
 		client: createMockClient({
 			content: 'Second response',
-			toolCalls: null,
+			toolCalls: undefined,
 			toolsDisabled: true,
 		}),
 		addToChatQueue,
@@ -356,7 +361,7 @@ test.serial('processAssistantResponse - does not show XML fallback notice when t
 	const params = createDefaultParams({
 		client: createMockClient({
 			content: 'Here is my response!',
-			toolCalls: null,
+			toolCalls: undefined,
 			toolsDisabled: false,
 		}),
 		addToChatQueue: (component: any) => {
@@ -370,4 +375,54 @@ test.serial('processAssistantResponse - does not show XML fallback notice when t
 		(c: any) => c.props?.message === 'Model does not support native tool calling. Using XML fallback.',
 	);
 	t.falsy(fallbackNotice, 'Should not queue XML fallback notice when toolsDisabled is false');
+});
+
+// ============================================================================
+// Reasoning in Chat Queue Tests
+// ============================================================================
+
+test.serial('processAssistantResponse - no reasoning in chat queue by default', async t => {
+	const queuedComponents: any[] = [];
+	const params = createDefaultParams({
+		client: createMockClient({
+			content: 'Here is my response!',
+			toolCalls: undefined,
+			toolsDisabled: false,
+		}),
+		addToChatQueue: (component: any) => {
+			queuedComponents.push(component);
+		},
+	});
+
+	await processAssistantResponse(params);
+
+	// Checks for reasoning components based on prop name
+	const assistantReasoning = queuedComponents.filter(
+		(c: any) => c.props?.reasoning !== undefined
+	);
+	t.is(assistantReasoning.length, 0, 'Should not render any reasoning component in chat queue by default');
+});
+
+test.serial('processAssistantResponse - renders reasoning in chat queue', async t => {
+	const reasoningMessage = 'Here is my reasoning!' 
+	const queuedComponents: any[] = [];
+	const params = createDefaultParams({
+		client: createMockClient({
+			content: 'Here is my response!',
+			reasoning: reasoningMessage,
+			toolCalls: undefined,
+			toolsDisabled: false,
+		}),
+		addToChatQueue: (component: any) => {
+			queuedComponents.push(component);
+		},
+	});
+
+	await processAssistantResponse(params);
+
+	// Checks for reasoning components based on prop name
+	const assistantReasoning = queuedComponents.filter(
+		(c: any) => c.props?.reasoning === reasoningMessage
+	);
+	t.is(assistantReasoning.length, 1, 'Should render exactly on reasoning component in chat queue');
 });

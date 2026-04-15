@@ -768,7 +768,7 @@ export default function App({
 										{chatHandler.streamingReasoning &&
 											!chatHandler.streamingContent && (
 												<StreamingReasoning
-													message={chatHandler.streamingReasoning}
+													reasoning={chatHandler.streamingReasoning}
 													startTime={streamingStartRef.current}
 													compact={appState.compactToolDisplay}
 												/>
