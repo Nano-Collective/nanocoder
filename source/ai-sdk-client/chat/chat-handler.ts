@@ -254,6 +254,7 @@ export async function handleChat(
 
 			logger.debug('AI SDK response received', {
 				responseLength: fullText.length,
+				reasoningLength: reasoning?.length ?? 0,
 				hasToolCalls: resolvedToolCalls.length > 0,
 				toolCallCount: resolvedToolCalls.length,
 				stepCount: resolvedSteps.length,
@@ -275,6 +276,7 @@ export async function handleChat(
 				model: currentModel,
 				duration: `${finalMetrics.duration.toFixed(2)}ms`,
 				responseLength: content.length,
+				reasoningLength: reasoning?.length ?? 0,
 				toolCallsFound: toolCalls.length,
 				memoryDelta: formatMemoryUsage(
 					finalMetrics.memoryUsage || getSafeMemory(),

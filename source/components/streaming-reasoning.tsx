@@ -7,9 +7,9 @@ import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 import {calculateTokens} from '@/utils/token-calculator';
 
 /**
- * Lightweight streaming message component. Shows the last N lines of
+ * Lightweight streaming reasoning component. Shows the last N lines of
  * plain text to avoid expensive markdown parsing and terminal reflow
- * on every token update. The final AssistantMessage handles full rendering.
+ * on every token update. The final AssistantReasoning handles full rendering.
  */
 export default memo(function StreamingReasoning({
 	reasoning,

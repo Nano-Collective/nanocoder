@@ -773,7 +773,7 @@ export default function App({
 													compact={appState.compactToolDisplay}
 												/>
 											)}
-										{/* Reasoning stream is complete when text streaming begins  */}
+										{/* Reasoning stream is complete when text streaming begins */}
 										{chatHandler.streamingReasoning &&
 											chatHandler.streamingContent && (
 												<AssistantReasoning

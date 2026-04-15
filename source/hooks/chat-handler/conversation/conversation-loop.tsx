@@ -307,10 +307,10 @@ export const processAssistantResponse = async (
 	setStreamingContent('');
 	setStreamingReasoning('');
 
-	// Despite reasoning stream typically finishing before text stream,
-	// reasoning is still added to chat queue here to give correct
-	// message order with regards to tool calling
 	if (fullReasoning) {
+		// Despite reasoning stream typically finishing before text stream,
+		// reasoning is still added to chat queue here to give correct
+		// message order with regards to tool calling
 		addToChatQueue(
 			<AssistantReasoning
 				key={`assistant-${getNextComponentKey()}`}
