@@ -9,7 +9,7 @@ import {calculateTokens} from '@/utils/token-calculator';
 
 export default memo(function AssistantReasoning({
 	reasoning,
-	compact,
+	expand,
 }: AssistantReasoningProps) {
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
@@ -41,7 +41,7 @@ export default memo(function AssistantReasoning({
 	return (
 		<Box flexDirection="column" marginBottom={1}>
 			<Text color={colors.tool}>{'\u2699'} Thinking</Text>
-			{!compact && (
+			{expand && (
 				<>
 					<Box marginBottom={1}>
 						<Text color={colors.secondary} italic>

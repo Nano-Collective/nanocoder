@@ -32,7 +32,7 @@ const MockThemeProvider = ({children}: {children: React.ReactNode}) => {
 test('StreamingReasoning expanded renders with message', t => {
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<StreamingReasoning reasoning="Hello world" compact={false} startTime={Date.now()} />
+			<StreamingReasoning reasoning="Hello world" expand={true} startTime={Date.now()} />
 		</MockThemeProvider>,
 	);
 
@@ -48,7 +48,7 @@ test('StreamingReasoning expanded renders with message', t => {
 test('StreamingReasoning compacted renders without message', t => {
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<StreamingReasoning reasoning="Hello world" compact={true} startTime={Date.now()} />
+			<StreamingReasoning reasoning="Hello world" expand={false} startTime={Date.now()} />
 		</MockThemeProvider>,
 	);
 
@@ -72,7 +72,7 @@ Price: &euro;50`;
 
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<StreamingReasoning reasoning={message} compact={false} startTime={Date.now()} />
+			<StreamingReasoning reasoning={message} expand={true} startTime={Date.now()} />
 		</MockThemeProvider>,
 	);
 
@@ -90,7 +90,7 @@ test('StreamingReasoning truncates long messages', t => {
 
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<StreamingReasoning reasoning={message} compact={false} startTime={Date.now()} />
+			<StreamingReasoning reasoning={message} expand={true} startTime={Date.now()} />
 		</MockThemeProvider>,
 	);
 
@@ -111,7 +111,7 @@ test('StreamingReasoning truncates long messages', t => {
 test('StreamingReasoning renders without crashing with empty message', t => {
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<StreamingReasoning reasoning="" compact={false} startTime={Date.now()} />
+			<StreamingReasoning reasoning="" expand={true} startTime={Date.now()} />
 		</MockThemeProvider>,
 	);
 

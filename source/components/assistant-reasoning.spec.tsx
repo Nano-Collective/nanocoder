@@ -34,7 +34,7 @@ const MockThemeProvider = ({children}: {children: React.ReactNode}) => {
 test('AssistantReasoning expanded renders with message', t => {
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<AssistantReasoning reasoning="Hello world" compact={false} />
+			<AssistantReasoning reasoning="Hello world" expand={true} />
 		</MockThemeProvider>,
 	);
 
@@ -47,7 +47,7 @@ test('AssistantReasoning expanded renders with message', t => {
 test('AssistantReasoning compacted renders without message', t => {
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<AssistantReasoning reasoning="Hello world" compact={true} />
+			<AssistantReasoning reasoning="Hello world" expand={false} />
 		</MockThemeProvider>,
 	);
 
@@ -63,7 +63,7 @@ test('AssistantReasoning compacted renders without message', t => {
 test('AssistantReasoning renders with bold text', t => {
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<AssistantReasoning reasoning="This is **bold** text" compact={false} />
+			<AssistantReasoning reasoning="This is **bold** text" expand={true} />
 		</MockThemeProvider>,
 	);
 
@@ -77,7 +77,7 @@ test('AssistantReasoning renders with inline code', t => {
 		<MockThemeProvider>
 			<AssistantReasoning
 				reasoning="Use `const` for constants"
-				compact={false}
+				expand={true}
 			/>
 		</MockThemeProvider>,
 	);
@@ -93,7 +93,7 @@ test('AssistantReasoning renders with HTML entities', t => {
 		<MockThemeProvider>
 			<AssistantReasoning
 				reasoning="Price: &euro;100&nbsp;only"
-				compact={false}
+				expand={true}
 			/>
 		</MockThemeProvider>,
 	);
@@ -114,7 +114,7 @@ test('AssistantReasoning renders with markdown table', t => {
 
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<AssistantReasoning reasoning={message} compact={false} />
+			<AssistantReasoning reasoning={message} expand={true} />
 		</MockThemeProvider>,
 	);
 
@@ -131,7 +131,7 @@ test('AssistantReasoning renders with markdown table', t => {
 test('AssistantReasoning renders with headings', t => {
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<AssistantReasoning reasoning="# Main Heading" compact={false} />
+			<AssistantReasoning reasoning="# Main Heading" expand={true} />
 		</MockThemeProvider>,
 	);
 
@@ -147,7 +147,7 @@ test('AssistantReasoning renders with lists', t => {
 
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<AssistantReasoning reasoning={message} compact={false} />
+			<AssistantReasoning reasoning={message} expand={true} />
 		</MockThemeProvider>,
 	);
 
@@ -163,7 +163,7 @@ test('AssistantReasoning renders with lists', t => {
 test('AssistantReasoning renders with blockquotes', t => {
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<AssistantReasoning reasoning="> This is a quote" compact={false} />
+			<AssistantReasoning reasoning="> This is a quote" expand={true} />
 		</MockThemeProvider>,
 	);
 
@@ -177,7 +177,7 @@ test('AssistantReasoning renders with links', t => {
 		<MockThemeProvider>
 			<AssistantReasoning
 				reasoning="Check [this link](https://example.com)"
-				compact={false}
+				expand={true}
 			/>
 		</MockThemeProvider>,
 	);
@@ -199,7 +199,7 @@ Price: &euro;50`;
 
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<AssistantReasoning reasoning={message} compact={false} />
+			<AssistantReasoning reasoning={message} expand={true} />
 		</MockThemeProvider>,
 	);
 
@@ -215,7 +215,7 @@ Price: &euro;50`;
 test('AssistantReasoning displays approximate token count', t => {
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<AssistantReasoning reasoning="Hello world" compact={false} />
+			<AssistantReasoning reasoning="Hello world" expand={true} />
 		</MockThemeProvider>,
 	);
 
@@ -227,7 +227,7 @@ test('AssistantReasoning displays approximate token count', t => {
 test('AssistantReasoning renders without crashing with empty message', t => {
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<AssistantReasoning reasoning="" compact={false} />
+			<AssistantReasoning reasoning="" expand={true} />
 		</MockThemeProvider>,
 	);
 

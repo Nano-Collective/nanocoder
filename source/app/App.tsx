@@ -357,6 +357,7 @@ export default function App({
 			appState.compactToolCountsRef.current = {};
 			appState.setLiveTaskList(null);
 		},
+		reasoningExpandedRef: appState.reasoningExpandedRef,
 		compactToolDisplayRef: appState.compactToolDisplayRef,
 		onSetCompactToolCounts: appState.setCompactToolCounts,
 		compactToolCountsRef: appState.compactToolCountsRef,
@@ -770,7 +771,7 @@ export default function App({
 												<StreamingReasoning
 													reasoning={chatHandler.streamingReasoning}
 													startTime={streamingStartRef.current}
-													compact={appState.compactToolDisplay}
+													expand={appState.reasoningExpanded}
 												/>
 											)}
 										{/* Reasoning stream is complete when text streaming begins */}
@@ -778,7 +779,7 @@ export default function App({
 											chatHandler.streamingContent && (
 												<AssistantReasoning
 													reasoning={chatHandler.streamingReasoning}
-													compact={appState.compactToolDisplay}
+													expand={appState.reasoningExpanded}
 												/>
 											)}
 										{chatHandler.streamingContent && (
@@ -920,6 +921,10 @@ export default function App({
 									onSubmit={appHandlers.handleMessageSubmit}
 									onCancel={appHandlers.handleCancel}
 									onToggleMode={appHandlers.handleToggleDevelopmentMode}
+									onToggleReasoningExpanded={() => {
+										const expanding = appState.reasoningExpanded;
+										appState.setReasoningExpanded(!expanding);
+									}}
 									tune={appState.tune}
 								/>
 							)}

@@ -59,6 +59,7 @@ export interface ChatInputProps {
 	onSubmit: (message: string) => Promise<void>;
 	onCancel: () => void;
 	onToggleMode: () => void;
+	onToggleReasoningExpanded: () => void;
 	tune?: TuneConfig;
 }
 
@@ -97,6 +98,7 @@ export function ChatInput({
 	onSubmit,
 	onCancel,
 	onToggleMode,
+	onToggleReasoningExpanded,
 	tune,
 }: ChatInputProps): React.ReactElement {
 	const {colors} = useTheme();
@@ -157,6 +159,7 @@ export function ChatInput({
 					disabled={inputDisabled}
 					onCancel={onCancel}
 					onToggleMode={onToggleMode}
+					onToggleReasoningExpanded={onToggleReasoningExpanded}
 					onToggleCompactDisplay={onToggleCompactDisplay}
 					compactToolDisplay={compactToolDisplay}
 					developmentMode={developmentMode}

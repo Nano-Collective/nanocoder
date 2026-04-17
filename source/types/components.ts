@@ -7,7 +7,7 @@ export interface AssistantMessageProps {
 
 export interface AssistantReasoningProps {
 	reasoning: string;
-	compact: boolean;
+	expand: boolean;
 }
 
 export interface ChatQueueProps {

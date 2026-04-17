@@ -126,6 +126,14 @@ export function useAppState() {
 		useState<boolean>(false);
 	const [isToolExecuting, setIsToolExecuting] = useState<boolean>(false);
 
+	// Set to preference on launch, but can be toggled freely during runtime
+	const [reasoningExpanded, setReasoningExpanded] = useState<boolean>(
+		preferences.reasoningExpanded ?? false,
+	);
+	// Ref to access in async loops
+	const reasoningExpandedRef = useRef(false);
+	reasoningExpandedRef.current = reasoningExpanded;
+
 	// Compact tool display state
 	const [compactToolDisplay, setCompactToolDisplay] = useState<boolean>(true);
 	// Ref keeps current value accessible to long-running async loops
@@ -284,6 +292,8 @@ export function useAppState() {
 		currentProvider,
 		currentTheme,
 		currentTitleShape,
+		reasoningExpanded,
+		reasoningExpandedRef,
 		toolManager,
 		customCommandLoader,
 		customCommandExecutor,
@@ -351,6 +361,7 @@ export function useAppState() {
 		setCurrentProvider,
 		setCurrentTheme,
 		setCurrentTitleShape,
+		setReasoningExpanded,
 		setToolManager,
 		setCustomCommandLoader,
 		setCustomCommandExecutor,

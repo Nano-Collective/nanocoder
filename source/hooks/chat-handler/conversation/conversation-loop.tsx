@@ -53,6 +53,7 @@ interface ProcessAssistantResponseParams {
 	) => void;
 	onConversationComplete?: () => void;
 	conversationStartTime?: number;
+	reasoningExpandedRef?: React.RefObject<boolean>;
 	compactToolDisplayRef?: React.RefObject<boolean>;
 	onSetCompactToolCounts?: (counts: Record<string, number> | null) => void;
 	compactToolCountsRef?: React.MutableRefObject<Record<string, number>>;
@@ -102,6 +103,7 @@ export const processAssistantResponse = async (
 		onStartToolConfirmationFlow,
 		onConversationComplete,
 		conversationStartTime,
+		reasoningExpandedRef,
 		compactToolDisplayRef,
 		onSetCompactToolCounts,
 		compactToolCountsRef,
@@ -315,7 +317,7 @@ export const processAssistantResponse = async (
 			<AssistantReasoning
 				key={`assistant-${getNextComponentKey()}`}
 				reasoning={fullReasoning}
-				compact={compactToolDisplayRef?.current ?? true}
+				expand={reasoningExpandedRef?.current ?? false}
 			/>,
 		);
 	}
