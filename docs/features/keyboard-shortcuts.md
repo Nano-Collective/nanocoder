@@ -68,3 +68,4 @@ When typing `@` for file mentions or `/` for commands, Tab accepts the current s
 |--------|----------|
 | Toggle development mode | Shift+Tab |
 | Toggle compact tool output | Ctrl+O |
+| Toggle expanded reasoning traces | Ctrl+R |
