@@ -47,8 +47,8 @@ Full documentation is available online at **[docs.nanocollective.org](https://do
 - **[Getting Started](docs/getting-started/index.md)** - Installation, setup, and first steps
 - **[Configuration](docs/configuration/index.md)** - AI providers, MCP servers, preferences, logging, timeouts
 - **[Features](docs/features/index.md)** - Custom commands, checkpointing, development modes, task management, and more
-- **[Commands Reference](docs/commands.md)** - Complete list of built-in slash commands
-- **[Keyboard Shortcuts](docs/keyboard-shortcuts.md)** - Full shortcut reference
+- **[Commands Reference](docs/features/commands.md)** - Complete list of built-in slash commands
+- **[Keyboard Shortcuts](docs/features/keyboard-shortcuts.md)** - Full shortcut reference
 - **[Community](docs/community.md)** - Contributing, Discord, and how to help
 
 ## Community
