@@ -65,6 +65,11 @@ const OLLAMA_MODEL_CONTEXT_LIMITS: Record<string, number> = {
 	'gemma:7b': 8192,
 	'gemma2:9b': 8192,
 	'gemma2:27b': 8192,
+	gemma4: 128000,
+	'gemma4:e2b': 128000,
+	'gemma4:e4b': 128000,
+	'gemma4:26b': 256000,
+	'gemma4:31b': 256000,
 
 	// DeepSeek models (base matches wrong model on models.dev)
 	'deepseek-coder': 16000,
