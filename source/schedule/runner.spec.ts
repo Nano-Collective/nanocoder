@@ -141,3 +141,55 @@ test.serial('clearMessages is called before each job to prevent memory leaks', a
 		cleanupTestDir();
 	}
 });
+
+test.serial('executeJob clears performance buffer to prevent undici fetch leak', async t => {
+	setupTestDir();
+	try {
+		// Node's built-in fetch (undici) writes a resource entry per request to
+		// the global performance buffer. Across many scheduled runs this hits
+		// the 1M cap and warns. executeJob clears it in a finally block.
+		performance.clearMarks();
+		performance.clearMeasures();
+		performance.mark('nanocoder-runner-test-mark');
+		performance.measure(
+			'nanocoder-runner-test-measure',
+			'nanocoder-runner-test-mark',
+		);
+		t.true(
+			performance.getEntriesByType('mark').length > 0,
+			'precondition: mark seeded',
+		);
+		t.true(
+			performance.getEntriesByType('measure').length > 0,
+			'precondition: measure seeded',
+		);
+
+		const runner = new ScheduleRunner(createMockCallbacks());
+		await runner.start().catch(() => {});
+
+		// Job fails on missing file, but the finally block still runs.
+		runner.enqueueJob({
+			id: 'perf-buffer-test',
+			command: 'nonexistent-schedule.md',
+			cron: '0 * * * *',
+			enabled: true,
+			createdAt: new Date().toISOString(),
+		});
+
+		await new Promise(resolve => setTimeout(resolve, 200));
+		runner.stop();
+
+		t.is(
+			performance.getEntriesByType('mark').length,
+			0,
+			'marks cleared after job',
+		);
+		t.is(
+			performance.getEntriesByType('measure').length,
+			0,
+			'measures cleared after job',
+		);
+	} finally {
+		cleanupTestDir();
+	}
+});

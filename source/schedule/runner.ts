@@ -174,6 +174,14 @@ export class ScheduleRunner {
 			});
 
 			this.callbacks.onJobError(schedule, errorMsg);
+		} finally {
+			// Node's built-in fetch (undici) writes a resource entry per request
+			// to the global performance buffer and never clears it. Across many
+			// scheduled runs this hits the 1M entry cap and logs a
+			// MaxPerformanceEntryBufferExceededWarning. Clear between jobs.
+			performance.clearResourceTimings();
+			performance.clearMarks();
+			performance.clearMeasures();
 		}
 	}
 }
