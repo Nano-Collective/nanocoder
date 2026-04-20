@@ -5,6 +5,11 @@ export interface AssistantMessageProps {
 	model: string;
 }
 
+export interface AssistantReasoningProps {
+	reasoning: string;
+	expand: boolean;
+}
+
 export interface ChatQueueProps {
 	staticComponents?: ReactNode[];
 	queuedComponents?: ReactNode[];

@@ -18,6 +18,7 @@ export interface Message {
 	tool_calls?: ToolCall[];
 	tool_call_id?: string;
 	name?: string;
+	reasoning?: string;
 }
 
 export interface ToolCall {
@@ -146,6 +147,7 @@ interface LLMMessage {
 	role: 'assistant';
 	content: string;
 	tool_calls?: ToolCall[];
+	reasoning?: string;
 }
 
 export interface LLMChatResponse {
@@ -159,6 +161,7 @@ export interface LLMChatResponse {
 
 export interface StreamCallbacks {
 	onToken?: (token: string) => void;
+	onReasoningToken?: (fullReasoning: string) => void;
 	onToolCall?: (toolCall: ToolCall) => void;
 	onFinish?: () => void;
 }

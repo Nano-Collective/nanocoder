@@ -1,6 +1,7 @@
 import React from 'react';
 import type {ConversationStateManager} from '@/app/utils/conversation-state';
 import AssistantMessage from '@/components/assistant-message';
+import AssistantReasoning from '@/components/assistant-reasoning';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
@@ -33,6 +34,7 @@ interface ProcessAssistantResponseParams {
 	abortController: AbortController | null;
 	setAbortController: (controller: AbortController | null) => void;
 	setIsGenerating: (generating: boolean) => void;
+	setStreamingReasoning: (content: string) => void;
 	setStreamingContent: (content: string) => void;
 	setTokenCount: (count: number) => void;
 	setMessages: (messages: Message[]) => void;
@@ -51,6 +53,7 @@ interface ProcessAssistantResponseParams {
 	) => void;
 	onConversationComplete?: () => void;
 	conversationStartTime?: number;
+	reasoningExpandedRef?: React.RefObject<boolean>;
 	compactToolDisplayRef?: React.RefObject<boolean>;
 	onSetCompactToolCounts?: (counts: Record<string, number> | null) => void;
 	compactToolCountsRef?: React.MutableRefObject<Record<string, number>>;
@@ -87,6 +90,7 @@ export const processAssistantResponse = async (
 		abortController,
 		setAbortController,
 		setIsGenerating,
+		setStreamingReasoning,
 		setStreamingContent,
 		setTokenCount,
 		setMessages,
@@ -99,6 +103,7 @@ export const processAssistantResponse = async (
 		onStartToolConfirmationFlow,
 		onConversationComplete,
 		conversationStartTime,
+		reasoningExpandedRef,
 		compactToolDisplayRef,
 		onSetCompactToolCounts,
 		compactToolCountsRef,
@@ -156,6 +161,7 @@ export const processAssistantResponse = async (
 	// Use streaming with callbacks
 	setIsGenerating(true);
 	setStreamingContent('');
+	setStreamingReasoning('');
 	setTokenCount(0);
 
 	// Build mode overrides for non-interactive mode and tune settings
@@ -183,6 +189,7 @@ export const processAssistantResponse = async (
 		: {};
 
 	let streamedContent = '';
+	let streamedReasoning = '';
 	const result = await client.chat(
 		[systemMessage, ...messages],
 		tools,
@@ -190,6 +197,10 @@ export const processAssistantResponse = async (
 			onToken: (token: string) => {
 				streamedContent += token;
 				setStreamingContent(streamedContent);
+			},
+			onReasoningToken: (token: string) => {
+				streamedReasoning += token;
+				setStreamingReasoning(streamedReasoning);
 			},
 		},
 		controller.signal,
@@ -203,6 +214,7 @@ export const processAssistantResponse = async (
 	const message = result.choices[0].message;
 	const toolCalls = message.tool_calls || null;
 	const fullContent = message.content || '';
+	const fullReasoning = message.reasoning;
 
 	// Only parse text for XML tool calls on the fallback path (non-tool-calling models).
 	// On the native path, response text is just text - no tool calls are embedded in it.
@@ -295,6 +307,20 @@ export const processAssistantResponse = async (
 	// live StreamingMessage disappears at the same time the static
 	// AssistantMessage appears, avoiding a visual jump.
 	setStreamingContent('');
+	setStreamingReasoning('');
+
+	if (fullReasoning) {
+		// Despite reasoning stream typically finishing before text stream,
+		// reasoning is still added to chat queue here to give correct
+		// message order with regards to tool calling
+		addToChatQueue(
+			<AssistantReasoning
+				key={`assistant-${getNextComponentKey()}`}
+				reasoning={fullReasoning}
+				expand={reasoningExpandedRef?.current ?? false}
+			/>,
+		);
+	}
 	if (cleanedContent.trim()) {
 		addToChatQueue(
 			<AssistantMessage
@@ -378,6 +404,7 @@ export const processAssistantResponse = async (
 	// Clear streaming content (but don't set isGenerating=false yet —
 	// we may still need to execute tools and recurse)
 	setStreamingContent('');
+	setStreamingReasoning('');
 
 	// Handle error results for non-existent tools
 	if (errorResults.length > 0) {

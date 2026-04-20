@@ -28,6 +28,7 @@ export interface UseChatHandlerProps {
 		systemMessage: Message,
 	) => void;
 	onConversationComplete?: () => void;
+	reasoningExpandedRef?: React.RefObject<boolean>;
 	compactToolDisplayRef?: React.RefObject<boolean>;
 	onSetCompactToolCounts?: (counts: Record<string, number> | null) => void;
 	compactToolCountsRef?: React.MutableRefObject<Record<string, number>>;
@@ -43,6 +44,7 @@ export interface ChatHandlerReturn {
 		messages: Message[],
 	) => Promise<void>;
 	isGenerating: boolean;
+	streamingReasoning: string;
 	streamingContent: string;
 	tokenCount: number;
 }

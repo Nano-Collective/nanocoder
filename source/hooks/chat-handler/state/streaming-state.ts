@@ -7,6 +7,7 @@ export const createResetStreamingState = (
 	setAbortController: (controller: AbortController | null) => void,
 	setIsGenerating: (generating: boolean) => void,
 	setStreamingContent: (content: string) => void,
+	setStreamingReasoning: (content: string) => void,
 	setTokenCount: (count: number) => void,
 ) => {
 	return () => {
@@ -14,6 +15,7 @@ export const createResetStreamingState = (
 		setAbortController(null);
 		setIsGenerating(false);
 		setStreamingContent('');
+		setStreamingReasoning('');
 		setTokenCount(0);
 	};
 };

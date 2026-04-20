@@ -62,6 +62,7 @@ export function useChatHandler({
 	nonInteractiveMode = false,
 	onStartToolConfirmationFlow,
 	onConversationComplete,
+	reasoningExpandedRef,
 	compactToolDisplayRef,
 	onSetCompactToolCounts,
 	compactToolCountsRef,
@@ -127,6 +128,8 @@ export function useChatHandler({
 	// State for streaming message content
 	const [streamingContent, setStreamingContent] = React.useState<string>('');
 	const [isGenerating, setIsGenerating] = React.useState<boolean>(false);
+	const [streamingReasoning, setStreamingReasoning] =
+		React.useState<string>('');
 	const [tokenCount, setTokenCount] = React.useState<number>(0);
 
 	// Helper to reset all streaming state
@@ -136,6 +139,7 @@ export function useChatHandler({
 			setAbortController,
 			setIsGenerating,
 			setStreamingContent,
+			setStreamingReasoning,
 			setTokenCount,
 		),
 		[], // Setters are stable and don't need to be in dependencies
@@ -170,6 +174,7 @@ export function useChatHandler({
 					abortController,
 					setAbortController,
 					setIsGenerating,
+					setStreamingReasoning,
 					setStreamingContent,
 					setTokenCount,
 					setMessages,
@@ -183,6 +188,7 @@ export function useChatHandler({
 					onStartToolConfirmationFlow,
 					onConversationComplete,
 					conversationStartTime: conversationStartTimeRef.current,
+					reasoningExpandedRef,
 					compactToolDisplayRef,
 					onSetCompactToolCounts,
 					compactToolCountsRef,
@@ -212,6 +218,7 @@ export function useChatHandler({
 			nonInteractiveMode,
 			onStartToolConfirmationFlow,
 			onConversationComplete,
+			reasoningExpandedRef,
 			compactToolDisplayRef,
 			compactToolCountsRef,
 			onSetCompactToolCounts,
@@ -306,6 +313,7 @@ export function useChatHandler({
 		handleChatMessage,
 		processAssistantResponse: processAssistantResponseWithErrorHandling,
 		isGenerating,
+		streamingReasoning,
 		streamingContent,
 		tokenCount,
 	};

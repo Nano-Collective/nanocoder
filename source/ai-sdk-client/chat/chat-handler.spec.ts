@@ -92,6 +92,7 @@ test('ChatHandlerParams accepts messages and tools', t => {
 test('ChatHandlerParams accepts callbacks', t => {
 	const callbacks: StreamCallbacks = {
 		onToken: () => {},
+		onReasoningToken: () => {},
 		onToolCall: () => {},
 		onFinish: () => {},
 	};
@@ -114,6 +115,7 @@ test('ChatHandlerParams accepts callbacks', t => {
 	};
 
 	t.truthy(params.callbacks.onToken);
+	t.truthy(params.callbacks.onReasoningToken);
 	t.truthy(params.callbacks.onToolCall);
 	t.truthy(params.callbacks.onFinish);
 });

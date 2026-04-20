@@ -6,12 +6,14 @@ import {ChatHistory} from '@/app/components/chat-history';
 import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
 import type {AppProps} from '@/app/types';
+import AssistantReasoning from '@/components/assistant-reasoning';
 import {FileExplorer} from '@/components/file-explorer';
 import {IdeSelector} from '@/components/ide-selector';
 import {SuccessMessage} from '@/components/message-box';
 import {SchedulerView} from '@/components/scheduler-view';
 import SecurityDisclaimer from '@/components/security-disclaimer';
 import StreamingMessage from '@/components/streaming-message';
+import StreamingReasoning from '@/components/streaming-reasoning';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {
 	shouldPromptExtensionInstall,
@@ -355,6 +357,7 @@ export default function App({
 			appState.compactToolCountsRef.current = {};
 			appState.setLiveTaskList(null);
 		},
+		reasoningExpandedRef: appState.reasoningExpandedRef,
 		compactToolDisplayRef: appState.compactToolDisplayRef,
 		onSetCompactToolCounts: appState.setCompactToolCounts,
 		compactToolCountsRef: appState.compactToolCountsRef,
@@ -764,12 +767,34 @@ export default function App({
 							queuedComponents={appState.chatComponents}
 							liveComponent={
 								appState.liveComponent ??
-								(chatHandler.isGenerating && chatHandler.streamingContent ? (
-									<StreamingMessage
-										message={chatHandler.streamingContent}
-										model={appState.currentModel}
-										startTime={streamingStartRef.current}
-									/>
+								(chatHandler.isGenerating &&
+								(chatHandler.streamingContent ||
+									chatHandler.streamingReasoning) ? (
+									<>
+										{chatHandler.streamingReasoning &&
+											!chatHandler.streamingContent && (
+												<StreamingReasoning
+													reasoning={chatHandler.streamingReasoning}
+													startTime={streamingStartRef.current}
+													expand={appState.reasoningExpanded}
+												/>
+											)}
+										{/* Reasoning stream is complete when text streaming begins */}
+										{chatHandler.streamingReasoning &&
+											chatHandler.streamingContent && (
+												<AssistantReasoning
+													reasoning={chatHandler.streamingReasoning}
+													expand={appState.reasoningExpanded}
+												/>
+											)}
+										{chatHandler.streamingContent && (
+											<StreamingMessage
+												message={chatHandler.streamingContent}
+												model={appState.currentModel}
+												startTime={streamingStartRef.current}
+											/>
+										)}
+									</>
 								) : null)
 							}
 						/>
@@ -901,6 +926,10 @@ export default function App({
 									onSubmit={appHandlers.handleMessageSubmit}
 									onCancel={appHandlers.handleCancel}
 									onToggleMode={appHandlers.handleToggleDevelopmentMode}
+									onToggleReasoningExpanded={() => {
+										const expanding = appState.reasoningExpanded;
+										appState.setReasoningExpanded(!expanding);
+									}}
 									tune={appState.tune}
 								/>
 							)}

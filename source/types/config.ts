@@ -225,4 +225,5 @@ export interface UserPreferences {
 	tune?: TuneConfig;
 	notifications?: NotificationsConfig;
 	paste?: PasteConfig;
+	reasoningExpanded?: boolean;
 }

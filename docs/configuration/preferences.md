@@ -51,6 +51,24 @@ You can change this via `/settings` → **Paste Threshold**, or by editing the f
 }
 ```
 
+### Reasoning Traces
+
+Expanding reasoning traces can also be configured in the preferences file with the `reasoningExpanded` field:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `reasoningExpanded` | boolean | `false` | When set to true, displays the full reasoning traces of models which support thinking |
+
+You can change this by editing the preferences file directly:
+
+```json
+{
+  "reasoningExpanded": true
+}
+```
+
+Reasoning traces can also be toggled dynamically with the Ctrl+R keyboard shortcut.
+
 ### Notification Configuration
 
 Desktop notification preferences are stored under the `nanocoder.notifications` namespace:
