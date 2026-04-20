@@ -38,7 +38,7 @@ jobs:
           prompt: |
             Read the CHANGELOG.md file and extract the entry for version ${{ inputs.version }}.
 
-            Create a directory called `release-content/` and generate THREE markdown files inside it:
+            Create a directory called `release-content/` and generate FOUR markdown files inside it:
 
             1. `release-content/blog-post.md` - A full blog post (300-500 words) announcing the release.
                - Professional but approachable tone
@@ -55,6 +55,12 @@ jobs:
                - Conversational tone suitable for r/programming or r/commandline
                - Explain what's new and why it matters
                - Include the version number in the title
+
+            4. `release-content/linkedin-post.md` - A LinkedIn post (150-250 words) announcing the release.
+               - Professional and polished tone for a developer and engineering audience
+               - Summarize the most important improvements and their practical impact
+               - Include a clear call to action
+               - Use placeholder {{RELEASE_URL}} for the release link
 
       - name: Upload release content
         uses: actions/upload-artifact@v4
