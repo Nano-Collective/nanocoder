@@ -14,6 +14,33 @@ import {createResetStreamingState} from './state/streaming-state';
 import type {ChatHandlerReturn, UseChatHandlerProps} from './types';
 import {displayError as displayErrorHelper} from './utils/message-helpers';
 
+export function getBaseSystemPrompt(
+	developmentMode: UseChatHandlerProps['developmentMode'],
+	cachedBasePrompt: string | null,
+	toolManager: NonNullable<UseChatHandlerProps['toolManager']>,
+	tune: UseChatHandlerProps['tune'],
+	toolsDisabled: boolean,
+): string {
+	if (developmentMode === 'scheduler') {
+		return buildSystemPrompt(
+			developmentMode,
+			tune,
+			toolManager.getAvailableToolNames(tune, developmentMode),
+			toolsDisabled,
+		);
+	}
+
+	return (
+		cachedBasePrompt ??
+		buildSystemPrompt(
+			developmentMode ?? 'normal',
+			tune,
+			toolManager.getAvailableToolNames(tune, developmentMode ?? 'normal'),
+			toolsDisabled,
+		)
+	);
+}
+
 /**
  * Main chat handler hook that manages LLM conversations and tool execution.
  * Orchestrates streaming responses, tool calls, and conversation state.
@@ -241,15 +268,13 @@ export function useChatHandler({
 		setAbortController(controller);
 
 		try {
-			// Use cached base prompt (stable across turns to preserve KV cache)
-			let systemPrompt =
-				cachedBasePrompt ??
-				buildSystemPrompt(
-					developmentMode,
-					tune,
-					toolManager?.getAvailableToolNames(tune, developmentMode) ?? [],
-					toolsDisabled,
-				);
+			let systemPrompt = getBaseSystemPrompt(
+				developmentMode,
+				cachedBasePrompt,
+				toolManager,
+				tune,
+				toolsDisabled,
+			);
 
 			// Enhance with relevant commands (progressive disclosure)
 			if (commandIntegration) {
