@@ -69,6 +69,7 @@ export function useChatHandler({
 	onSetLiveTaskList,
 	setLiveComponent,
 	tune,
+	subagentsReady,
 }: UseChatHandlerProps): ChatHandlerReturn {
 	// Conversation state manager for enhanced context
 	const conversationStateManager = React.useRef(new ConversationStateManager());
@@ -89,6 +90,7 @@ export function useChatHandler({
 	// This preserves KV cache by keeping the system message stable across turns
 	// When native tools are disabled, XML tool definitions are included in the prompt
 	// so token counting reflects the full system message the model actually sees.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: subagentsReady isn't read in the callback, but flipping it must invalidate the memo so buildSystemPrompt re-reads the module-level subagent cache populated by setAvailableSubagents.
 	const cachedBasePrompt = React.useMemo(() => {
 		if (!toolManager) return null;
 		const availableNames = toolManager.getAvailableToolNames(
@@ -114,7 +116,7 @@ export function useChatHandler({
 		setLastBuiltPrompt(prompt);
 
 		return prompt;
-	}, [developmentMode, tune, toolManager, toolsDisabled]);
+	}, [developmentMode, tune, toolManager, toolsDisabled, subagentsReady]);
 
 	// Track when the current conversation started for elapsed time display
 	const conversationStartTimeRef = React.useRef<number>(Date.now());

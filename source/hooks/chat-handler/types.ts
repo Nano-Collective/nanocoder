@@ -35,6 +35,9 @@ export interface UseChatHandlerProps {
 	onSetLiveTaskList?: (tasks: Task[] | null) => void;
 	setLiveComponent?: (component: React.ReactNode) => void;
 	tune?: TuneConfig;
+	// Flips true after subagent loading completes; used to invalidate the
+	// cached system prompt so it includes the real agent list.
+	subagentsReady?: boolean;
 }
 
 export interface ChatHandlerReturn {

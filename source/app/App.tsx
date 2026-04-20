@@ -364,6 +364,7 @@ export default function App({
 		onSetLiveTaskList: appState.setLiveTaskList,
 		setLiveComponent: appState.setLiveComponent,
 		tune: appState.tune,
+		subagentsReady: appState.subagentsReady,
 	});
 
 	// Desktop notifications on state transitions
@@ -480,6 +481,7 @@ export default function App({
 		setLspServersStatus: appState.setLspServersStatus,
 		setPreferencesLoaded: appState.setPreferencesLoaded,
 		setCustomCommandsCount: appState.setCustomCommandsCount,
+		setSubagentsReady: appState.setSubagentsReady,
 		addToChatQueue: appState.addToChatQueue,
 		getNextComponentKey: appState.getNextComponentKey,
 		customCommandCache: appState.customCommandCache,

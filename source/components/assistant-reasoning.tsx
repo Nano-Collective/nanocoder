@@ -40,7 +40,12 @@ export default memo(function AssistantReasoning({
 
 	return (
 		<Box flexDirection="column" marginBottom={1}>
-			<Text color={colors.tool}>{'\u2699'} Thinking</Text>
+			<Box>
+				<Text color={colors.tool}>{'\u2699'} Thought</Text>
+				{!expand && (
+					<Text color={colors.secondary}>{'  '}ctrl+r to expand</Text>
+				)}
+			</Box>
 			{expand && (
 				<>
 					<Box marginBottom={1}>

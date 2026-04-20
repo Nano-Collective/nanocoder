@@ -44,10 +44,12 @@ export default memo(function StreamingReasoning({
 					{'\u2699'} Thinking
 					<Spinner type="simpleDots" />
 				</Text>
-				{expand && (
+				{expand ? (
 					<Text>
 						{'  '}~{tokens.toLocaleString()} tokens · {tokPerSec} tok/s
 					</Text>
+				) : (
+					<Text color={colors.secondary}>{'  '}ctrl+r to expand</Text>
 				)}
 			</Box>
 			{expand && (

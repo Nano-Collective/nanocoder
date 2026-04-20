@@ -476,7 +476,7 @@ function ParametersPanel({
 	);
 
 	const items = useMemo(() => {
-		const fmtValue = (value: number | string[] | undefined) => {
+		const fmtValue = (value: number | string | string[] | undefined) => {
 			if (value === undefined) return 'default';
 			if (Array.isArray(value)) return value.join(', ');
 			return String(value);

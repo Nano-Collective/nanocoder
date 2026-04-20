@@ -27,6 +27,30 @@ The `sdkProvider: "chatgpt-codex"` field enables the ChatGPT/Codex authenticatio
 2. Run `/codex-login` inside Nanocoder to authenticate via your browser
 3. Credentials are cached locally and refreshed automatically
 
+## Reasoning Traces
+
+GPT-5 and other reasoning models return chain-of-thought only when the Responses API is asked to emit it. Nanocoder sets `reasoningSummary: "auto"` and `reasoningEffort: "medium"` by default for this provider so reasoning shows up in the `⚙ Thinking` block out of the box. Toggle visibility with **Ctrl+R** or set `reasoningExpanded: true` in your preferences.
+
+Override either setting via `tune.modelParameters` in `agents.config.json`:
+
+```json
+{
+	"name": "ChatGPT",
+	"sdkProvider": "chatgpt-codex",
+	"tune": {
+		"modelParameters": {
+			"reasoningEffort": "high",
+			"reasoningSummary": "detailed"
+		}
+	},
+	"config": { "baseURL": "https://chatgpt.com/backend-api/codex" },
+	"models": ["your-model-name"]
+}
+```
+
+- `reasoningEffort`: `"minimal" | "low" | "medium" | "high"` — higher values let the model think longer.
+- `reasoningSummary`: `"auto" | "concise" | "detailed"` — controls how much reasoning text is returned.
+
 ## Notes
 
 - No API key is required — authentication is handled via a browser-based login flow

@@ -195,6 +195,10 @@ export interface ModelParameters {
 	frequencyPenalty?: number;
 	presencePenalty?: number;
 	stop?: string[];
+	// Reasoning controls for OpenAI Responses API models (GPT-5, o-series).
+	// Only applied by providers that speak the Responses API (e.g. chatgpt-codex).
+	reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high';
+	reasoningSummary?: 'auto' | 'concise' | 'detailed';
 }
 
 export interface TuneConfig {

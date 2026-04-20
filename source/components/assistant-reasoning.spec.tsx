@@ -40,7 +40,7 @@ test('AssistantReasoning expanded renders with message', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Thinking/);
+	t.regex(output!, /Thought/);
 	t.regex(output!, /Hello world/);
 });
 
@@ -53,7 +53,7 @@ test('AssistantReasoning compacted renders without message', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Thinking/);
+	t.regex(output!, /Thought/);
 
 	// No token count or message
 	t.notRegex(output!, /Hello world/);
@@ -233,5 +233,5 @@ test('AssistantReasoning renders without crashing with empty message', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Thinking/);
+	t.regex(output!, /Thought/);
 });

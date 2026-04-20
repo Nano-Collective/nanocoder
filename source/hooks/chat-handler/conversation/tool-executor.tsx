@@ -135,6 +135,7 @@ const executeAgentBatch = async (
 	getNextComponentKey: () => number,
 	compactDisplay?: boolean,
 	setLiveComponent?: (component: React.ReactNode) => void,
+	onCompactToolCount?: (toolName: string) => void,
 ): Promise<
 	Array<{
 		toolCall: ToolCall;
@@ -244,16 +245,22 @@ const executeAgentBatch = async (
 
 		results.push({toolCall: e.toolCall, result});
 
-		// Compact: one-liner via displayToolResult. Non-compact: AgentProgress.
+		// Compact: feed into the shared count accumulator so delegated-task
+		// summaries group with other tool counts. Errors are still shown in
+		// full. Non-compact: render the rich AgentProgress card.
 		if (compactDisplay) {
-			await displayToolResult(
-				e.toolCall,
-				result,
-				toolManager,
-				addToChatQueue,
-				getNextComponentKey,
-				true, // force compact — prevents raw output dump
-			);
+			const isError = result.content.startsWith('Error: ');
+			if (isError) {
+				await displayToolResult(
+					e.toolCall,
+					result,
+					toolManager,
+					addToChatQueue,
+					getNextComponentKey,
+				);
+			} else {
+				onCompactToolCount?.(result.name);
+			}
 		} else {
 			addToChatQueue(
 				<AgentProgress
@@ -333,6 +340,7 @@ export const executeToolsDirectly = async (
 				getNextComponentKey,
 				options?.compactDisplay,
 				options?.setLiveComponent,
+				options?.onCompactToolCount,
 			);
 
 			// Agent results are already displayed by executeAgentBatch

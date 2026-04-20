@@ -45,7 +45,6 @@ export default function UserInput({
 	onToggleReasoningExpanded,
 	onToggleCompactDisplay,
 	compactToolDisplay = true,
-
 	developmentMode = 'normal',
 	contextPercentUsed,
 	tune,

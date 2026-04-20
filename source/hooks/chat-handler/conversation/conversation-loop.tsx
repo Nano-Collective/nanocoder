@@ -342,6 +342,7 @@ export const processAssistantResponse = async (
 		role: 'assistant',
 		content: cleanedContent,
 		tool_calls: validToolCalls.length > 0 ? validToolCalls : undefined,
+		reasoning: fullReasoning,
 	};
 
 	const hasValidAssistantMessage =

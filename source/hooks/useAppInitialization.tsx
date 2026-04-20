@@ -50,6 +50,7 @@ interface UseAppInitializationProps {
 	setLspServersStatus: (status: LSPConnectionStatus[]) => void;
 	setPreferencesLoaded: (loaded: boolean) => void;
 	setCustomCommandsCount: (count: number) => void;
+	setSubagentsReady: (ready: boolean) => void;
 	addToChatQueue: (component: React.ReactNode) => void;
 	getNextComponentKey: () => number;
 	customCommandCache: Map<string, CustomCommand>;
@@ -74,6 +75,7 @@ export function useAppInitialization({
 	setLspServersStatus,
 	setPreferencesLoaded,
 	setCustomCommandsCount,
+	setSubagentsReady,
 	addToChatQueue,
 	getNextComponentKey,
 	customCommandCache,
@@ -424,6 +426,7 @@ export function useAppInitialization({
 					}));
 					setAvailableSubagents(agentSummaries);
 					setAvailableAgentNames(agentSummaries);
+					setSubagentsReady(true);
 				}),
 			]);
 

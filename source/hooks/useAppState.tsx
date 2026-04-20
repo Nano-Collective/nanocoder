@@ -128,6 +128,10 @@ export function useAppState() {
 		useState<boolean>(false);
 	const [isToolExecuting, setIsToolExecuting] = useState<boolean>(false);
 
+	// Flipped once subagent loading finishes so the cached system prompt
+	// can rebuild with the real agent list instead of "No subagents available."
+	const [subagentsReady, setSubagentsReady] = useState<boolean>(false);
+
 	// Set to preference on launch, but can be toggled freely during runtime
 	const [reasoningExpanded, setReasoningExpanded] = useState<boolean>(
 		preferences.reasoningExpanded ?? false,
@@ -336,6 +340,7 @@ export function useAppState() {
 		currentSessionId,
 		isToolConfirmationMode,
 		isToolExecuting,
+		subagentsReady,
 		compactToolDisplay,
 		compactToolDisplayRef,
 		compactToolCounts,
@@ -387,6 +392,7 @@ export function useAppState() {
 		setCurrentSessionId,
 		setIsToolConfirmationMode,
 		setIsToolExecuting,
+		setSubagentsReady,
 		setCompactToolDisplay,
 		setCompactToolCounts,
 		setLiveTaskList,

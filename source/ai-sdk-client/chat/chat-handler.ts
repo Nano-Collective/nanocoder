@@ -137,6 +137,8 @@ export async function handleChat(
 			// ChatGPT/Codex backend requires the system message as a top-level
 			// `instructions` field rather than as an input item. Extract it and
 			// pass via providerOptions so the Responses API includes it.
+			// reasoningSummary must be set for GPT-5 to emit human-readable
+			// reasoning text; without it the Thinking block stays empty.
 			let providerOptions:
 				| Record<string, Record<string, string | boolean>>
 				| undefined;
@@ -146,6 +148,10 @@ export async function handleChat(
 					openai: {
 						...(systemMsg ? {instructions: systemMsg.content} : {}),
 						store: false,
+						reasoningEffort:
+							modeOverrides?.modelParameters?.reasoningEffort ?? 'medium',
+						reasoningSummary:
+							modeOverrides?.modelParameters?.reasoningSummary ?? 'auto',
 					},
 				};
 			}
@@ -231,7 +237,7 @@ export async function handleChat(
 							clearTimeout(flushTimer);
 						}
 						flushBuffer();
-
+						isReasoning = false;
 						break;
 				}
 				// Periodically yield to the event loop so timers and Ink renders
@@ -242,6 +248,13 @@ export async function handleChat(
 					await new Promise<void>(resolve => setTimeout(resolve, 0));
 				}
 			}
+
+			// Safety net: flush any tokens still buffered if the stream ended
+			// without emitting a matching text-end / reasoning-end event.
+			if (flushTimer) {
+				clearTimeout(flushTimer);
+			}
+			flushBuffer();
 
 			// After streaming completes, collect final results
 			const [fullText, resolvedToolCalls, resolvedSteps, reasoning] =

@@ -1,8 +1,7 @@
 import test from 'ava';
 import {resetShutdownManager} from '@/utils/shutdown/shutdown-manager.js';
 import {processAssistantResponse, resetFallbackNotice} from './conversation-loop.js';
-import type {Message, ToolCall, ToolResult} from '@/types/core';
-import { LLMChatResponse } from '../../../types/core.js';
+import type {LLMChatResponse, Message, ToolCall, ToolResult} from '@/types/core';
 
 // The ShutdownManager singleton is created as a side effect of transitive
 // imports (via @/utils/logging). Its uncaughtException/unhandledRejection
@@ -424,5 +423,5 @@ test.serial('processAssistantResponse - renders reasoning in chat queue', async 
 	const assistantReasoning = queuedComponents.filter(
 		(c: any) => c.props?.reasoning === reasoningMessage
 	);
-	t.is(assistantReasoning.length, 1, 'Should render exactly on reasoning component in chat queue');
+	t.is(assistantReasoning.length, 1, 'Should render exactly one reasoning component in chat queue');
 });
