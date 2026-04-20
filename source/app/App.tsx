@@ -375,14 +375,6 @@ export default function App({
 		isToolExecuting: appState.isToolExecuting,
 	});
 
-	// Track when streaming starts for tok/s calculation
-	const streamingStartRef = React.useRef<number>(Date.now());
-	const prevIsGenerating = React.useRef(false);
-	if (chatHandler.isGenerating && !prevIsGenerating.current) {
-		streamingStartRef.current = Date.now();
-	}
-	prevIsGenerating.current = chatHandler.isGenerating;
-
 	// Track context window usage percentage
 	useContextPercentage({
 		currentModel: appState.currentModel,
@@ -777,7 +769,6 @@ export default function App({
 											!chatHandler.streamingContent && (
 												<StreamingReasoning
 													reasoning={chatHandler.streamingReasoning}
-													startTime={streamingStartRef.current}
 													expand={appState.reasoningExpanded}
 												/>
 											)}
@@ -793,7 +784,6 @@ export default function App({
 											<StreamingMessage
 												message={chatHandler.streamingContent}
 												model={appState.currentModel}
-												startTime={streamingStartRef.current}
 											/>
 										)}
 									</>

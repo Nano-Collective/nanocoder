@@ -32,7 +32,7 @@ const MockThemeProvider = ({children}: {children: React.ReactNode}) => {
 test('StreamingMessage renders with message', t => {
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<StreamingMessage message="Hello world" model="test-model" startTime={Date.now()} />
+			<StreamingMessage message="Hello world" model="test-model" />
 		</MockThemeProvider>,
 	);
 
@@ -56,7 +56,7 @@ Price: &euro;50`;
 
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<StreamingMessage message={message} model="test-model" startTime={Date.now()} />
+			<StreamingMessage message={message} model="test-model" />
 		</MockThemeProvider>,
 	);
 
@@ -74,7 +74,7 @@ test('StreamingMessage truncates long messages', t => {
 
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<StreamingMessage message={message} model="test-model" startTime={Date.now()} />
+			<StreamingMessage message={message} model="test-model" />
 		</MockThemeProvider>,
 	);
 
@@ -95,7 +95,7 @@ test('StreamingMessage truncates long messages', t => {
 test('StreamingMessage renders without crashing with empty message', t => {
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<StreamingMessage message="" model="test-model" startTime={Date.now()} />
+			<StreamingMessage message="" model="test-model" />
 		</MockThemeProvider>,
 	);
 

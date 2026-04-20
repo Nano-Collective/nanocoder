@@ -1,6 +1,6 @@
 import {Box, Text} from 'ink';
 import Spinner from 'ink-spinner';
-import {memo} from 'react';
+import {memo, useRef} from 'react';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
@@ -13,13 +13,16 @@ import {calculateTokens} from '@/utils/token-calculator';
  */
 export default memo(function StreamingReasoning({
 	reasoning,
-	startTime,
 	expand,
 }: {
 	reasoning: string;
-	startTime: number;
 	expand: boolean;
 }) {
+	// Snapshot the wall clock on first render so tok/s measures streaming
+	// throughput rather than request-send-to-now (which over-counts the
+	// pre-first-token latency for reasoning models).
+	const startRef = useRef<number>(Date.now());
+	const startTime = startRef.current;
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
 	const textWidth = boxWidth - 3;

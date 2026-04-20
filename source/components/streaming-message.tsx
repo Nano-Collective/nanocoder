@@ -1,6 +1,6 @@
 import {Box, Text} from 'ink';
 import Spinner from 'ink-spinner';
-import {memo} from 'react';
+import {memo, useRef} from 'react';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
@@ -15,12 +15,14 @@ import {AssistantMessageBox} from './assistant-message';
 export default memo(function StreamingMessage({
 	message,
 	model,
-	startTime,
 }: {
 	message: string;
 	model: string;
-	startTime: number;
 }) {
+	// Snapshot the wall clock on first render so tok/s measures streaming
+	// throughput rather than request-send-to-now.
+	const startRef = useRef<number>(Date.now());
+	const startTime = startRef.current;
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
 	const textWidth = boxWidth - 3;
