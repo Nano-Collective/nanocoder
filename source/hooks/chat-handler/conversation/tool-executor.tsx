@@ -163,8 +163,8 @@ const executeAgentBatch = async (
 	// Start all agents
 	const agentExecutions = toExecute.map(toolCall => {
 		const parsedArgs = parseToolArguments(toolCall.function.arguments);
-		const agentName = parsedArgs.subagent_type as string;
-		const agentDesc = parsedArgs.description as string;
+		const agentName = (parsedArgs.subagent_type as string) ?? 'agent';
+		const agentDesc = (parsedArgs.description as string) ?? '';
 
 		const {agentId, promise} = startAgentExecution(
 			parsedArgs as unknown as AgentToolArgs,
