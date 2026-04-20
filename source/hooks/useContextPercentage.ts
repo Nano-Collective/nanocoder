@@ -1,7 +1,7 @@
 import {useEffect, useRef} from 'react';
 import {getModelContextLimit} from '@/models/index';
 import type {ToolManager} from '@/tools/tool-manager';
-import type {TuneConfig} from '@/types/config';
+import type {AIProviderConfig, TuneConfig} from '@/types/config';
 import type {DevelopmentMode, Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
 import {
@@ -12,6 +12,8 @@ import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 
 interface UseContextPercentageProps {
 	currentModel: string;
+	currentProvider: string;
+	currentProviderConfig: AIProviderConfig | null;
 	messages: Message[];
 	tokenizer: Tokenizer;
 	getMessageTokens: (message: Message) => number;
@@ -26,6 +28,8 @@ interface UseContextPercentageProps {
 
 export function useContextPercentage({
 	currentModel,
+	currentProvider,
+	currentProviderConfig,
 	messages,
 	tokenizer,
 	getMessageTokens,
@@ -38,23 +42,27 @@ export function useContextPercentage({
 	tune,
 }: UseContextPercentageProps): void {
 	const contextLimitRef = useRef<number | null>(null);
-	const lastModelRef = useRef<string>('');
+	const lastResolvedKeyRef = useRef<string>('');
 
-	// Effect 1: Resolve context limit when model changes
+	// Effect 1: Resolve context limit when model or provider changes
 	useEffect(() => {
 		if (!currentModel) {
 			contextLimitRef.current = null;
+			lastResolvedKeyRef.current = '';
 			setContextLimit(null);
 			setContextPercentUsed(null);
 			return;
 		}
 
-		if (currentModel === lastModelRef.current) return;
-		lastModelRef.current = currentModel;
+		const resolutionKey = `${currentProvider}:${currentModel}`;
+		if (resolutionKey === lastResolvedKeyRef.current) return;
+		lastResolvedKeyRef.current = resolutionKey;
 
 		let cancelled = false;
 
-		void getModelContextLimit(currentModel).then(limit => {
+		void getModelContextLimit(currentModel, {
+			providerConfig: currentProviderConfig ?? undefined,
+		}).then(limit => {
 			if (cancelled) return;
 			contextLimitRef.current = limit;
 			setContextLimit(limit);
@@ -66,7 +74,13 @@ export function useContextPercentage({
 		return () => {
 			cancelled = true;
 		};
-	}, [currentModel, setContextLimit, setContextPercentUsed]);
+	}, [
+		currentModel,
+		currentProvider,
+		currentProviderConfig,
+		setContextLimit,
+		setContextPercentUsed,
+	]);
 
 	// Effect 2: Recalculate percentage when messages, streaming tokens, or context limit change
 	useEffect(() => {

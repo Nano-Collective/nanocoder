@@ -67,6 +67,8 @@ Use dedicated AI SDK packages for native API support, enabled via the `sdkProvid
 | `baseUrl` | API endpoint URL |
 | `apiKey` | API key (optional, not required for local providers or GitHub Copilot) |
 | `models` | Available model list for `/model` command |
+| `contextWindow` | Default context window in tokens for all models on this provider (optional) |
+| `contextWindows` | Per-model context window overrides in tokens, keyed by model name (optional) |
 | `sdkProvider` | AI SDK provider to use (see below, defaults to `openai-compatible`) |
 | `organizationId` | Organization ID for OpenAI (optional) |
 | `disableTools` | Disable tool calling for the entire provider (optional, boolean) |
@@ -74,6 +76,28 @@ Use dedicated AI SDK packages for native API support, enabled via the `sdkProvid
 | `requestTimeout` | Overall request timeout in milliseconds (default: 120,000). Set to `-1` to disable (optional) |
 | `socketTimeout` | Socket-level timeout in milliseconds, uses `requestTimeout` if not set. Set to `-1` to disable (optional) |
 | `connectionPool` | Connection pool settings (optional, see [Timeouts & Connection Pooling](#timeouts--connection-pooling)) |
+
+### Context Window Overrides
+
+`contextWindows` overrides `contextWindow` for exact model matches. Both are used only when no session override has been set with `/context-max` or `--context-max`.
+
+```json
+{
+  "nanocoder": {
+    "providers": [
+      {
+        "name": "Local Ollama",
+        "baseUrl": "http://localhost:11434/v1",
+        "models": ["custom-model"],
+        "contextWindow": 32768,
+        "contextWindows": {
+          "custom-model": 131072
+        }
+      }
+    ]
+  }
+}
+```
 
 ### `sdkProvider` Options
 

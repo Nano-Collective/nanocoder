@@ -39,6 +39,7 @@ interface UseAppHandlersProps {
 	// State
 	messages: Message[];
 	currentProvider: string;
+	currentProviderConfig: import('@/types/config').AIProviderConfig | null;
 	currentModel: string;
 	currentTheme: ThemePreset;
 	abortController: AbortController | null;
@@ -215,7 +216,9 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 		try {
 			// Calculate context usage
-			const contextLimit = await getModelContextLimit(props.currentModel);
+			const contextLimit = await getModelContextLimit(props.currentModel, {
+				providerConfig: props.client?.getProviderConfig(),
+			});
 			if (contextLimit && props.messages.length > 0) {
 				const tokenizer = createTokenizer(
 					props.currentProvider,
@@ -294,6 +297,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			/>,
 		);
 	}, [
+		props.client,
 		props.currentProvider,
 		props.currentModel,
 		props.currentTheme,
@@ -498,6 +502,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				setMessages: props.updateMessages,
 				messages: props.messages,
 				provider: props.currentProvider,
+				providerConfig: props.currentProviderConfig,
+				client: props.client,
 				model: props.currentModel,
 				theme: props.currentTheme,
 				updateInfo: props.updateInfo,
@@ -527,6 +533,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.updateMessages,
 			props.messages,
 			props.currentProvider,
+			props.currentProviderConfig,
 			props.currentModel,
 			props.currentTheme,
 			props.updateInfo,

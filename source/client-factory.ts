@@ -172,6 +172,8 @@ function loadProviderConfigs(): AIProviderConfig[] {
 		name: provider.name,
 		type: 'openai' as const,
 		models: provider.models || [],
+		contextWindow: provider.contextWindow,
+		contextWindows: provider.contextWindows,
 		requestTimeout: provider.requestTimeout,
 		socketTimeout: provider.socketTimeout,
 		connectionPool: provider.connectionPool,

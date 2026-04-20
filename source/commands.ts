@@ -99,6 +99,7 @@ class CommandRegistry {
 			model: string;
 			tokens: number;
 			getMessageTokens: (message: Message) => number;
+			client?: import('@/types/core').LLMClient | null;
 		},
 	): Promise<void | string | React.ReactNode> {
 		const parts = input.trim().split(/\s+/);

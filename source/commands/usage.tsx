@@ -29,9 +29,10 @@ export const usageCommand: Command = {
 			model: string;
 			tokens: number;
 			getMessageTokens: (message: Message) => number;
+			client?: import('@/types/core').LLMClient | null;
 		},
 	) => {
-		const {provider, model, getMessageTokens} = metadata;
+		const {provider, model, getMessageTokens, client} = metadata;
 
 		let tokenizer;
 		let tokenizerName = 'fallback';
@@ -120,7 +121,11 @@ export const usageCommand: Command = {
 
 		// Get context limit: session override takes priority
 		const sessionLimit = getSessionContextLimit();
-		const contextLimit = sessionLimit ?? (await getModelContextLimit(model));
+		const contextLimit =
+			sessionLimit ??
+			(await getModelContextLimit(model, {
+				providerConfig: client?.getProviderConfig(),
+			}));
 
 		return React.createElement(UsageDisplay, {
 			key: `usage-${Date.now()}`,

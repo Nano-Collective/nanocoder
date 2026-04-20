@@ -1,5 +1,6 @@
 import {type Tool as AISDKTool, jsonSchema, tool} from 'ai';
 import React from 'react';
+import type {AIProviderConfig} from '@/types/config';
 
 export {jsonSchema, tool};
 
@@ -177,6 +178,7 @@ export interface LLMClient {
 	setModel(model: string): void;
 	getContextSize(): number;
 	getAvailableModels(): Promise<string[]>;
+	getProviderConfig(): AIProviderConfig;
 	chat(
 		messages: Message[],
 		tools: Record<string, AISDKCoreTool>,

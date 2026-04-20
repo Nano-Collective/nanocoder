@@ -122,7 +122,14 @@ export async function performAutoCompact(
 		contextLimit = sessionLimit;
 	} else {
 		try {
-			contextLimit = await getModelContextLimit(model);
+			contextLimit = await getModelContextLimit(model, {
+				providerConfig: {
+					name: provider,
+					type: 'openai',
+					models: [model],
+					config: {},
+				},
+			});
 		} catch {
 			return null;
 		}

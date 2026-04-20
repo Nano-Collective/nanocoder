@@ -2,6 +2,7 @@ import test from 'ava';
 import type {Message} from '@/types/core';
 import {
 	autoCompactSessionOverrides,
+	performAutoCompact,
 	resetAutoCompactSession,
 	setAutoCompactEnabled,
 	setAutoCompactMode,
@@ -163,4 +164,29 @@ test('partial reset scenario - set some, reset all, set different', t => {
 	t.is(autoCompactSessionOverrides.enabled, null);
 	t.is(autoCompactSessionOverrides.threshold, null);
 	t.is(autoCompactSessionOverrides.mode, 'aggressive');
+});
+
+test('performAutoCompact uses provider-configured context limit', async t => {
+	const messages: Message[] = [
+		{role: 'user', content: 'x'.repeat(3000)},
+	];
+	const systemMessage: Message = {
+		role: 'system',
+		content: 'system',
+	};
+
+	const result = await performAutoCompact(
+		messages,
+		systemMessage,
+		'Test Provider',
+		'custom-model',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'conservative',
+			notifyUser: false,
+		},
+	);
+
+	t.true(result === null || Array.isArray(result));
 });

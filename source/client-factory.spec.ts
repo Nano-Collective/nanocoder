@@ -3,6 +3,7 @@ import {tmpdir} from 'os';
 import {join} from 'path';
 import test from 'ava';
 import {ConfigurationError, createLLMClient} from './client-factory';
+import type {AIProviderConfig} from '@/types/config';
 import {clearAppConfig, reloadAppConfig} from '@/config/index';
 
 console.log('\nclient-factory.spec.ts');
@@ -47,6 +48,12 @@ function createTestConfig(content: object, dir: string = testDir): string {
 	const configPath = join(dir, 'agents.config.json');
 	writeFileSync(configPath, JSON.stringify(content, null, 2));
 	return configPath;
+}
+
+function getClientProviderConfig(client: {providerConfig?: AIProviderConfig}):
+	| AIProviderConfig
+	| undefined {
+	return client.providerConfig;
 }
 
 // Setup and teardown
@@ -1167,5 +1174,48 @@ test.serial(
 		t.truthy(result.client);
 		t.is(result.actualProvider, 'TestProvider');
 		t.is(result.client.getCurrentModel(), 'model1');
+	},
+);
+
+test.serial(
+	'createLLMClient: preserves context window config on provider config',
+	async t => {
+		globalThis.fetch = createMockFetch(true, 200);
+
+		const configDir = join(testDir, 'provider-context-config-test');
+		mkdirSync(configDir, {recursive: true});
+
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'TestProvider',
+							baseUrl: 'http://localhost:8000/v1',
+							models: ['model1'],
+							contextWindow: 32768,
+							contextWindows: {
+								model1: 65536,
+							},
+						},
+					],
+				},
+			},
+			configDir,
+		);
+
+		process.cwd = () => configDir;
+		clearAppConfig();
+		reloadAppConfig();
+
+		const result = await createLLMClient('TestProvider', 'model1');
+		const providerConfig = getClientProviderConfig(
+			result.client as unknown as {providerConfig?: AIProviderConfig},
+		);
+
+		t.truthy(result);
+		t.truthy(providerConfig);
+		t.is(providerConfig?.contextWindow, 32768);
+		t.deepEqual(providerConfig?.contextWindows, {model1: 65536});
 	},
 );

@@ -13,6 +13,7 @@ interface MessageBoxProps {
 	hideTitle?: boolean;
 	hideBox?: boolean;
 	marginBottom?: number;
+	marginTop?: number;
 }
 
 const defaultTitles: Record<MessageType, string> = {
@@ -28,6 +29,7 @@ const MessageBox = memo(function MessageBox({
 	hideTitle = false,
 	hideBox = false,
 	marginBottom = 1,
+	marginTop = 0,
 }: MessageBoxProps) {
 	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
@@ -43,6 +45,7 @@ const MessageBox = memo(function MessageBox({
 					width={boxWidth}
 					flexDirection="column"
 					marginBottom={marginBottom}
+					marginTop={marginTop}
 				>
 					<Text color={color}>{message}</Text>
 				</Box>

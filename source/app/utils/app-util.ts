@@ -452,6 +452,7 @@ async function handleBuiltInCommand(
 		model: options.model,
 		tokens: totalTokens,
 		getMessageTokens: options.getMessageTokens,
+		client: options.client,
 	});
 
 	if (!result) {

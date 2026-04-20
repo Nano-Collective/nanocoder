@@ -382,6 +382,8 @@ export default function App({
 	// Track context window usage percentage
 	useContextPercentage({
 		currentModel: appState.currentModel,
+		currentProvider: appState.currentProvider,
+		currentProviderConfig: appState.currentProviderConfig,
 		messages: appState.messages,
 		tokenizer: appState.tokenizer,
 		getMessageTokens: appState.getMessageTokens,
@@ -463,6 +465,7 @@ export default function App({
 		setClient: appState.setClient,
 		setCurrentModel: appState.setCurrentModel,
 		setCurrentProvider: appState.setCurrentProvider,
+		setCurrentProviderConfig: appState.setCurrentProviderConfig,
 		setToolManager: appState.setToolManager,
 		setCustomCommandLoader: appState.setCustomCommandLoader,
 		setCustomCommandExecutor: appState.setCustomCommandExecutor,
@@ -490,6 +493,7 @@ export default function App({
 		setClient: appState.setClient,
 		setCurrentModel: appState.setCurrentModel,
 		setCurrentProvider: appState.setCurrentProvider,
+		setCurrentProviderConfig: appState.setCurrentProviderConfig,
 		setMessages: appState.updateMessages,
 		setActiveMode: appState.setActiveMode,
 		setIsSettingsMode: appState.setIsSettingsMode,
@@ -562,6 +566,7 @@ export default function App({
 	const appHandlers = useAppHandlers({
 		messages: appState.messages,
 		currentProvider: appState.currentProvider,
+		currentProviderConfig: appState.currentProviderConfig,
 		currentModel: appState.currentModel,
 		currentTheme: appState.currentTheme,
 		abortController: appState.abortController,

@@ -1,5 +1,6 @@
 import test from 'ava';
 import {SubagentExecutor} from './subagent-executor.js';
+import {getModelContextLimit} from '@/models';
 import {SubagentLoader, getSubagentLoader} from './subagent-loader.js';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {LLMClient, LLMChatResponse} from '@/types/core';
@@ -661,4 +662,20 @@ test.serial('concurrent agents with same type both complete', async t => {
 	t.is(r2.output, 'Agent 2 found b.ts');
 
 	clearAllSubagentProgress();
+});
+
+test.serial('subagent model can use provider-scoped context window override', async t => {
+	const limit = await getModelContextLimit('special-subagent-model', {
+		providerConfig: {
+			name: 'Subagent Provider',
+			type: 'openai',
+			models: ['special-subagent-model'],
+			contextWindows: {
+				'special-subagent-model': 131072,
+			},
+			config: {},
+		},
+	});
+
+	t.is(limit, 131072);
 });

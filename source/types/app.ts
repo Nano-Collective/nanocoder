@@ -4,6 +4,7 @@ import {CustomCommandLoader} from '@/custom-commands/loader';
 import type {Session} from '@/session/session-manager';
 import type {CheckpointListItem} from './checkpoint';
 import type {CustomCommand} from './commands';
+import type {AIProviderConfig} from './config';
 import type {Message} from './core';
 import type {UpdateInfo} from './utils';
 
@@ -38,6 +39,8 @@ export interface MessageSubmissionOptions {
 	setMessages: (messages: Message[]) => void;
 	messages: Message[];
 	provider: string;
+	providerConfig: AIProviderConfig | null;
+	client: import('./core').LLMClient | null;
 	model: string;
 	theme: string;
 	updateInfo: UpdateInfo | null;

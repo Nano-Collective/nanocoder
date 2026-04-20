@@ -17,6 +17,10 @@
 				"name": "Local Ollama",
 				"baseUrl": "http://localhost:11434/v1",
 				"models": ["llama3.2", "qwen2.5-coder"],
+				"contextWindow": 32768,
+				"contextWindows": {
+					"qwen2.5-coder": 65536
+				},
 				"disableToolModels": ["deepseek-r1:latest"]
 			},
 			{

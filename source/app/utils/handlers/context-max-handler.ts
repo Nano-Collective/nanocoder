@@ -6,9 +6,8 @@ import {
 } from '@/components/message-box';
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
 import {
-	getModelContextLimit,
-	getSessionContextLimit,
 	resetSessionContextLimit,
+	resolveModelContextLimit,
 	setSessionContextLimit,
 } from '@/models/index';
 import type {MessageSubmissionOptions} from '@/types/index';
@@ -42,8 +41,13 @@ export async function handleContextMaxCommand(
 	commandParts: string[],
 	options: MessageSubmissionOptions,
 ): Promise<boolean> {
-	const {onAddToChatQueue, onCommandComplete, getNextComponentKey, model} =
-		options;
+	const {
+		onAddToChatQueue,
+		onCommandComplete,
+		getNextComponentKey,
+		model,
+		providerConfig,
+	} = options;
 
 	if (commandParts[0] !== 'context-max') {
 		return false;
@@ -90,42 +94,26 @@ export async function handleContextMaxCommand(
 		return true;
 	}
 
-	const sessionLimit = getSessionContextLimit();
-	if (sessionLimit !== null) {
+	const resolved = await resolveModelContextLimit(model, {
+		providerConfig: providerConfig ?? undefined,
+	});
+
+	const sourceLabels = {
+		session: 'session override',
+		'provider-model-config': 'provider model config',
+		'provider-config': 'provider config',
+		env: 'NANOCODER_CONTEXT_LIMIT env',
+		'model-lookup': 'model lookup',
+		unknown: 'unknown',
+	} as const;
+
+	if (resolved.limit !== null) {
 		onAddToChatQueue(
 			React.createElement(InfoMessage, {
 				key: `context-max-info-${getNextComponentKey()}`,
-				message: `Context limit: ${sessionLimit.toLocaleString()} tokens (session override)`,
+				message: `Context limit: ${resolved.limit.toLocaleString()} tokens (${sourceLabels[resolved.source]})`,
 				hideBox: true,
-			}),
-		);
-		setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
-		return true;
-	}
-
-	const envLimit = process.env.NANOCODER_CONTEXT_LIMIT;
-	if (envLimit) {
-		const parsed = Number.parseInt(envLimit, 10);
-		if (!Number.isNaN(parsed) && parsed > 0) {
-			onAddToChatQueue(
-				React.createElement(InfoMessage, {
-					key: `context-max-info-${getNextComponentKey()}`,
-					message: `Context limit: ${parsed.toLocaleString()} tokens (NANOCODER_CONTEXT_LIMIT env)`,
-					hideBox: true,
-				}),
-			);
-			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
-			return true;
-		}
-	}
-
-	const modelLimit = await getModelContextLimit(model);
-	if (modelLimit !== null) {
-		onAddToChatQueue(
-			React.createElement(InfoMessage, {
-				key: `context-max-info-${getNextComponentKey()}`,
-				message: `Context limit: ${modelLimit.toLocaleString()} tokens (model lookup)`,
-				hideBox: true,
+				marginTop: 1,
 			}),
 		);
 	} else {

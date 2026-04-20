@@ -83,7 +83,9 @@ export class AISDKClient implements LLMClient {
 	private async updateContextSize(): Promise<void> {
 		const logger = getLogger();
 		try {
-			const contextSize = await getModelContextLimit(this.currentModel);
+			const contextSize = await getModelContextLimit(this.currentModel, {
+				providerConfig: this.providerConfig,
+			});
 			this.cachedContextSize = contextSize || 0;
 		} catch (error) {
 			logger.debug('Failed to get model context size', {
@@ -123,6 +125,10 @@ export class AISDKClient implements LLMClient {
 
 	getCurrentModel(): string {
 		return this.currentModel;
+	}
+
+	getProviderConfig(): AIProviderConfig {
+		return this.providerConfig;
 	}
 
 	getContextSize(): number {

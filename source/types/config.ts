@@ -14,6 +14,8 @@ export interface AIProviderConfig {
 	name: string;
 	type: string;
 	models: string[];
+	contextWindow?: number;
+	contextWindows?: Record<string, number>;
 	requestTimeout?: number;
 	socketTimeout?: number;
 	maxRetries?: number; // Maximum number of retries for failed requests (default: 2)
@@ -42,6 +44,8 @@ export interface ProviderConfig {
 	baseUrl?: string;
 	apiKey?: string;
 	models: string[];
+	contextWindow?: number;
+	contextWindows?: Record<string, number>;
 	requestTimeout?: number;
 	socketTimeout?: number;
 	maxRetries?: number; // Maximum number of retries for failed requests (default: 2)
@@ -99,6 +103,8 @@ export interface AppConfig {
 		baseUrl?: string;
 		apiKey?: string;
 		models: string[];
+		contextWindow?: number;
+		contextWindows?: Record<string, number>;
 		requestTimeout?: number;
 		socketTimeout?: number;
 		maxRetries?: number; // Maximum number of retries for failed requests (default: 2)

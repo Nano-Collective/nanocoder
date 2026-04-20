@@ -35,7 +35,7 @@ Keep API keys out of version control using environment variables. Variables are 
 | Variable | Description |
 |----------|-------------|
 | `NANOCODER_CONFIG_DIR` | Override the global configuration directory (skips all other config lookups) |
-| `NANOCODER_CONTEXT_LIMIT` | Default context limit (tokens) for models not found on models.dev. Enables auto-compact and `/usage` to work correctly. Can also be set via the `--context-max` CLI flag (which takes priority) |
+| `NANOCODER_CONTEXT_LIMIT` | Default context limit (tokens) used when no session override or provider context config applies and the model is not resolved from models.dev. Enables auto-compact and `/usage` to work correctly. Can also be set via the `--context-max` CLI flag (which takes priority) |
 | `NANOCODER_DATA_DIR` | Override the application data directory for internal data like usage statistics |
 | `NANOCODER_INSTALL_METHOD` | Override installation detection (`npm`, `homebrew`, `nix`, `unknown`) |
 | `NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT` | Graceful shutdown timeout in milliseconds (default: 5000) |
@@ -76,6 +76,19 @@ You can reference environment variables in your configuration files using substi
 Substitution is applied recursively to all string fields in provider and MCP server configurations — any string value can reference environment variables, not just specific fields.
 
 See `.env.example` for setup instructions.
+
+## Context Limit Resolution Order
+
+Nanocoder resolves a model's context limit in this order:
+
+1. Session override from `/context-max` or `--context-max`
+2. Provider `contextWindows[model]` in `agents.config.json`
+3. Provider `contextWindow` in `agents.config.json`
+4. `NANOCODER_CONTEXT_LIMIT`
+5. models.dev metadata
+6. Built-in Ollama fallback map
+
+This lets you persist context limits for unknown or local models without reapplying `/context-max` every session.
 
 ## Application Settings
 

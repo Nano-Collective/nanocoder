@@ -3,6 +3,7 @@ import {
 	getModelContextLimit,
 	getSessionContextLimit,
 	resetSessionContextLimit,
+	resolveModelContextLimit,
 	setSessionContextLimit,
 } from './models-dev-client.js';
 
@@ -336,6 +337,51 @@ test('getModelContextLimit - session override takes priority over env variable',
 	setSessionContextLimit(8192);
 	const limit = await getModelContextLimit('unknown-model-12345');
 	t.is(limit, 8192);
+});
+
+test('getModelContextLimit - provider model config takes priority over env variable', async t => {
+	process.env.NANOCODER_CONTEXT_LIMIT = '32000';
+	const limit = await getModelContextLimit('custom-model', {
+		providerConfig: {
+			name: 'Test Provider',
+			type: 'openai',
+			models: ['custom-model'],
+			contextWindows: {
+				'custom-model': 65536,
+			},
+			config: {},
+		},
+	});
+	t.is(limit, 65536);
+});
+
+test('getModelContextLimit - provider default context window is used when model override is absent', async t => {
+	const limit = await getModelContextLimit('custom-model', {
+		providerConfig: {
+			name: 'Test Provider',
+			type: 'openai',
+			models: ['custom-model'],
+			contextWindow: 24576,
+			config: {},
+		},
+	});
+	t.is(limit, 24576);
+});
+
+test('resolveModelContextLimit - returns provider model config source', async t => {
+	const resolved = await resolveModelContextLimit('custom-model', {
+		providerConfig: {
+			name: 'Test Provider',
+			type: 'openai',
+			models: ['custom-model'],
+			contextWindows: {
+				'custom-model': 65536,
+			},
+			config: {},
+		},
+	});
+	t.is(resolved.limit, 65536);
+	t.is(resolved.source, 'provider-model-config');
 });
 
 test('getModelContextLimit - invalid env variable is ignored', async t => {

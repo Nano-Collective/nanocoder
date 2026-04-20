@@ -34,7 +34,14 @@ export class SessionTracker {
 		tokenizer: Tokenizer,
 	): Promise<CurrentSessionStats> {
 		const breakdown = calculateTokenBreakdown(messages, tokenizer);
-		const contextLimit = await getModelContextLimit(this.model);
+		const contextLimit = await getModelContextLimit(this.model, {
+			providerConfig: {
+				name: this.provider,
+				type: 'openai',
+				models: [this.model],
+				config: {},
+			},
+		});
 		const percentUsed = contextLimit
 			? (breakdown.total / contextLimit) * 100
 			: 0;

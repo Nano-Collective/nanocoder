@@ -36,6 +36,9 @@ interface UseAppInitializationProps {
 	setClient: (client: LLMClient | null) => void;
 	setCurrentModel: (model: string) => void;
 	setCurrentProvider: (provider: string) => void;
+	setCurrentProviderConfig: (
+		providerConfig: import('@/types/config').AIProviderConfig | null,
+	) => void;
 	setToolManager: (manager: ToolManager | null) => void;
 	setCustomCommandLoader: (loader: CustomCommandLoader | null) => void;
 	setCustomCommandExecutor: (executor: CustomCommandExecutor | null) => void;
@@ -59,6 +62,7 @@ export function useAppInitialization({
 	setClient,
 	setCurrentModel,
 	setCurrentProvider,
+	setCurrentProviderConfig,
 	setToolManager,
 	setCustomCommandLoader,
 	setCustomCommandExecutor,
@@ -88,6 +92,7 @@ export function useAppInitialization({
 		);
 		setClient(client);
 		setCurrentProvider(actualProvider);
+		setCurrentProviderConfig(client.getProviderConfig());
 
 		// Use CLI model if provided (already set by createLLMClient), otherwise try last used model
 		let finalModel: string;
@@ -111,6 +116,7 @@ export function useAppInitialization({
 		}
 
 		setCurrentModel(finalModel);
+		setCurrentProviderConfig(client.getProviderConfig());
 
 		// Save the preference - use actualProvider and the model that was actually set
 		updateLastUsed(actualProvider, finalModel);
@@ -377,6 +383,7 @@ export function useAppInitialization({
 		const initializeApp = async () => {
 			setClient(null);
 			setCurrentModel('');
+			setCurrentProviderConfig(null);
 
 			// Clear task list — fire-and-forget, just deletes a JSON file
 			void clearAllTasks();

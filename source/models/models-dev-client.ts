@@ -5,6 +5,7 @@
 
 import {request} from 'undici';
 import {TIMEOUT_HTTP_BODY_MS, TIMEOUT_HTTP_HEADERS_MS} from '@/constants';
+import type {AIProviderConfig, ProviderConfig} from '@/types/config';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
 import {readCache, writeCache} from './models-cache.js';
@@ -359,22 +360,90 @@ export function resetSessionContextLimit(): void {
 	contextLimitSession.reset();
 }
 
+export type ContextLimitSource =
+	| 'session'
+	| 'provider-model-config'
+	| 'provider-config'
+	| 'env'
+	| 'model-lookup'
+	| 'unknown';
+
+export interface ModelContextLimitOptions {
+	providerConfig?: AIProviderConfig | ProviderConfig;
+}
+
+export interface ResolvedContextLimit {
+	limit: number | null;
+	source: ContextLimitSource;
+}
+
+function getProviderConfiguredContextLimit(
+	modelId: string,
+	providerConfig?: AIProviderConfig | ProviderConfig,
+): ResolvedContextLimit | null {
+	if (!providerConfig) {
+		return null;
+	}
+
+	const normalizedModelId = modelId.toLowerCase();
+	const contextWindows = providerConfig.contextWindows;
+	if (contextWindows) {
+		for (const [configuredModel, configuredLimit] of Object.entries(
+			contextWindows,
+		)) {
+			if (
+				configuredModel.toLowerCase() === normalizedModelId &&
+				typeof configuredLimit === 'number' &&
+				configuredLimit > 0
+			) {
+				return {
+					limit: configuredLimit,
+					source: 'provider-model-config',
+				};
+			}
+		}
+	}
+
+	if (
+		typeof providerConfig.contextWindow === 'number' &&
+		providerConfig.contextWindow > 0
+	) {
+		return {
+			limit: providerConfig.contextWindow,
+			source: 'provider-config',
+		};
+	}
+
+	return null;
+}
+
 /**
- * Get context limit for a model
+ * Get context limit for a model.
  * Resolution order:
  * 1. Session override (from /context-max command)
- * 2. NANOCODER_CONTEXT_LIMIT env variable
- * 3. models.dev lookup / hardcoded Ollama defaults
- * 4. null (unknown)
+ * 2. Provider model config override
+ * 3. Provider default context window
+ * 4. NANOCODER_CONTEXT_LIMIT env variable
+ * 5. models.dev lookup / hardcoded Ollama defaults
+ * 6. null (unknown)
  */
-export async function getModelContextLimit(
+export async function resolveModelContextLimit(
 	modelId: string,
-): Promise<number | null> {
+	options: ModelContextLimitOptions = {},
+): Promise<ResolvedContextLimit> {
 	try {
 		// Check session override first (highest priority)
 		const sessionLimit = contextLimitSession.get();
 		if (sessionLimit !== null) {
-			return sessionLimit;
+			return {limit: sessionLimit, source: 'session'};
+		}
+
+		const providerConfiguredLimit = getProviderConfiguredContextLimit(
+			modelId,
+			options.providerConfig,
+		);
+		if (providerConfiguredLimit) {
+			return providerConfiguredLimit;
 		}
 
 		// Check environment variable fallback
@@ -382,14 +451,14 @@ export async function getModelContextLimit(
 		if (envLimit) {
 			const parsed = Number.parseInt(envLimit, 10);
 			if (!Number.isNaN(parsed) && parsed > 0) {
-				return parsed;
+				return {limit: parsed, source: 'env'};
 			}
 		}
 
 		// Strip :cloud or -cloud suffix if present (Ollama cloud models)
 		const normalizedModelId =
 			modelId.endsWith(':cloud') || modelId.endsWith('-cloud')
-				? modelId.slice(0, -6) // Remove ":cloud" or "-cloud"
+				? modelId.slice(0, -6)
 				: modelId;
 
 		// Try models.dev exact ID match first (primary source)
@@ -402,31 +471,35 @@ export async function getModelContextLimit(
 
 		// If found in models.dev, return that
 		if (modelInfo) {
-			return modelInfo.contextLimit;
+			return {limit: modelInfo.contextLimit, source: 'model-lookup'};
 		}
 
 		// Fall back to hardcoded Ollama model defaults (offline fallback)
-		// Try original model ID first (handles entries like "kimi-k2:1t-cloud")
 		const ollamaLimitOriginal = getOllamaFallbackContextLimit(modelId);
 		if (ollamaLimitOriginal) {
-			return ollamaLimitOriginal;
+			return {limit: ollamaLimitOriginal, source: 'model-lookup'};
 		}
 
-		// Try normalized ID (without cloud suffix)
 		const ollamaLimit = getOllamaFallbackContextLimit(normalizedModelId);
 		if (ollamaLimit) {
-			return ollamaLimit;
+			return {limit: ollamaLimit, source: 'model-lookup'};
 		}
 
-		// No context limit found
-		return null;
+		return {limit: null, source: 'unknown'};
 	} catch (error) {
-		// Log error but don't crash - just return null
 		const logger = getLogger();
 		logger.error(
 			{error: formatError(error), modelId},
 			'Error getting model context limit',
 		);
-		return null;
+		return {limit: null, source: 'unknown'};
 	}
+}
+
+export async function getModelContextLimit(
+	modelId: string,
+	options: ModelContextLimitOptions = {},
+): Promise<number | null> {
+	const resolved = await resolveModelContextLimit(modelId, options);
+	return resolved.limit;
 }

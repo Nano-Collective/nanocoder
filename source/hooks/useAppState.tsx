@@ -10,7 +10,7 @@ import type {Task} from '@/tools/tasks/types';
 import {ToolManager} from '@/tools/tool-manager';
 import type {CheckpointListItem} from '@/types/checkpoint';
 import type {CustomCommand} from '@/types/commands';
-import type {TuneConfig} from '@/types/config';
+import type {AIProviderConfig, TuneConfig} from '@/types/config';
 import {
 	DevelopmentMode,
 	LLMClient,
@@ -76,6 +76,8 @@ export function useAppState() {
 	const [currentModel, setCurrentModel] = useState<string>('');
 	const [currentProvider, setCurrentProvider] =
 		useState<string>('openai-compatible');
+	const [currentProviderConfig, setCurrentProviderConfig] =
+		useState<AIProviderConfig | null>(null);
 	const [currentTheme, setCurrentTheme] = useState<ThemePreset>(initialTheme);
 	const [currentTitleShape, setCurrentTitleShape] =
 		useState<TitleShape>(initialTitleShape);
@@ -282,6 +284,7 @@ export function useAppState() {
 		messageTokenCache,
 		currentModel,
 		currentProvider,
+		currentProviderConfig,
 		currentTheme,
 		currentTitleShape,
 		toolManager,
@@ -349,6 +352,7 @@ export function useAppState() {
 		setMessageTokenCache,
 		setCurrentModel,
 		setCurrentProvider,
+		setCurrentProviderConfig,
 		setCurrentTheme,
 		setCurrentTitleShape,
 		setToolManager,

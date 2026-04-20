@@ -11,6 +11,7 @@ export interface Command<T = React.ReactElement | void> {
 			model: string;
 			tokens: number;
 			getMessageTokens: (message: Message) => number;
+			client?: import('@/types/core').LLMClient | null;
 		},
 	) => Promise<T>;
 }

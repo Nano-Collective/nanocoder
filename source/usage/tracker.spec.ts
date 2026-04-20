@@ -443,6 +443,32 @@ test('getCurrentStats handles unknown model with no context limit', async t => {
 	t.is(stats.messageCount, 3);
 });
 
+test('getCurrentStats uses provider-configured context limit for percentage', async t => {
+	const tracker = new SessionTracker('Test Provider', 'qwen2.5-coder');
+	const tokenizer = new MockTokenizer();
+	const messages: Message[] = [
+		{role: 'user', content: 'a'.repeat(400)},
+	];
+
+	const stats = await tracker.getCurrentStats(messages, tokenizer);
+
+	t.is(stats.tokens.total, 100);
+	t.true(stats.contextLimit === null || stats.contextLimit > 0);
+});
+
+test('getCurrentStats respects lower provider-configured limit for Codex-like provider names', async t => {
+	const tracker = new SessionTracker('Codex', 'gpt-5');
+	const tokenizer = new MockTokenizer();
+	const messages: Message[] = [
+		{role: 'user', content: 'a'.repeat(400)},
+	];
+
+	const stats = await tracker.getCurrentStats(messages, tokenizer);
+
+	t.is(stats.tokens.total, 100);
+	t.true(stats.contextLimit === null || stats.contextLimit > 0);
+});
+
 test('multiple sessions tracked correctly', t => {
 	const tokenizer = new MockTokenizer();
 	const messages = createMockMessages();

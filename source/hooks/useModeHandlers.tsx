@@ -5,7 +5,7 @@ import {reloadAppConfig} from '@/config/index';
 import {loadPreferences, saveTune, updateLastUsed} from '@/config/preferences';
 import type {ActiveMode} from '@/hooks/useAppState';
 import {getToolManager} from '@/message-handler';
-import type {TuneConfig} from '@/types/config';
+import type {AIProviderConfig, TuneConfig} from '@/types/config';
 import {LLMClient, Message} from '@/types/core';
 import {
 	setAutoCompactMode,
@@ -19,6 +19,7 @@ interface UseModeHandlersProps {
 	setClient: (client: LLMClient | null) => void;
 	setCurrentModel: (model: string) => void;
 	setCurrentProvider: (provider: string) => void;
+	setCurrentProviderConfig: (providerConfig: AIProviderConfig | null) => void;
 	setMessages: (messages: Message[]) => void;
 	setActiveMode: (mode: ActiveMode) => void;
 	setIsSettingsMode: (mode: boolean) => void;
@@ -37,6 +38,7 @@ export function useModeHandlers({
 	setClient,
 	setCurrentModel,
 	setCurrentProvider,
+	setCurrentProviderConfig,
 	setMessages,
 	setActiveMode,
 	setIsSettingsMode,
@@ -54,6 +56,7 @@ export function useModeHandlers({
 		if (client && selectedModel !== currentModel) {
 			client.setModel(selectedModel);
 			setCurrentModel(selectedModel);
+			setCurrentProviderConfig(client.getProviderConfig());
 
 			// Clear message history when switching models
 			setMessages([]);
@@ -93,6 +96,7 @@ export function useModeHandlers({
 
 				setClient(newClient);
 				setCurrentProvider(actualProvider);
+				setCurrentProviderConfig(newClient.getProviderConfig());
 
 				const newModel = newClient.getCurrentModel();
 				setCurrentModel(newModel);
@@ -143,6 +147,7 @@ export function useModeHandlers({
 				);
 				setClient(newClient);
 				setCurrentProvider(actualProvider);
+				setCurrentProviderConfig(newClient.getProviderConfig());
 
 				const newModel = newClient.getCurrentModel();
 				setCurrentModel(newModel);
