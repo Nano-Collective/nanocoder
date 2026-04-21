@@ -1273,33 +1273,48 @@ test.serial(
 		globalThis.fetch = createMockFetch(true, 200);
 
 		const configDir = join(testDir, 'issue-460-no-provider-test');
+		const preferencesDir = join(configDir, 'preferences');
+		const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
 		mkdirSync(configDir, {recursive: true});
+		mkdirSync(preferencesDir, {recursive: true});
 
-		// Config only has "GitHub Copilot"; lastProvider preference is irrelevant
-		// because we are not passing a provider argument.
-		createTestConfig(
-			{
-				nanocoder: {
-					providers: [
-						{
-							name: 'GitHub Copilot',
-							baseUrl: 'https://api.githubcopilot.com',
-							apiKey: 'dummy-key',
-							models: ['claude-sonnet-4-5'],
-						},
-					],
+		try {
+			// Scope NANOCODER_CONFIG_DIR to a temp dir so loadPreferences() never
+			// reads from or writes to the real user config directory.
+			process.env.NANOCODER_CONFIG_DIR = preferencesDir;
+
+			// Config only has "GitHub Copilot"; lastProvider preference is irrelevant
+			// because we are not passing a provider argument.
+			createTestConfig(
+				{
+					nanocoder: {
+						providers: [
+							{
+								name: 'GitHub Copilot',
+								baseUrl: 'https://api.githubcopilot.com',
+								apiKey: 'dummy-key',
+								models: ['claude-sonnet-4-5'],
+							},
+						],
+					},
 				},
-			},
-			configDir,
-		);
+				configDir,
+			);
 
-		process.cwd = () => configDir;
-		clearAppConfig();
-		reloadAppConfig();
+			process.cwd = () => configDir;
+			clearAppConfig();
+			reloadAppConfig();
 
-		// Must NOT throw - falls back to the first (and only) configured provider.
-		const result = await createLLMClient();
-		t.truthy(result.client);
-		t.is(result.actualProvider, 'GitHub Copilot');
+			// Must NOT throw - falls back to the first (and only) configured provider.
+			const result = await createLLMClient();
+			t.truthy(result.client);
+			t.is(result.actualProvider, 'GitHub Copilot');
+		} finally {
+			if (originalConfigDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+			}
+		}
 	},
 );
