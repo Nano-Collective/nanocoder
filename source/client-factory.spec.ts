@@ -1219,3 +1219,87 @@ test.serial(
 		t.deepEqual(providerConfig?.contextWindows, {model1: 65536});
 	},
 );
+
+// ============================================================================
+// Regression: issue #460 - stale lastProvider causes ConfigurationError
+// ============================================================================
+
+// Passing a stale explicit provider name must throw ConfigurationError so the
+// caller knows it asked for something that does not exist.
+test.serial(
+	'createLLMClient: throws ConfigurationError when explicit provider not in config (issue #460)',
+	async t => {
+		globalThis.fetch = createMockFetch(true, 200);
+
+		const configDir = join(testDir, 'issue-460-explicit-test');
+		mkdirSync(configDir, {recursive: true});
+
+		// Config only has "GitHub Copilot"; simulate a fresh wizard save.
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'GitHub Copilot',
+							baseUrl: 'https://api.githubcopilot.com',
+							apiKey: 'dummy-key',
+							models: ['claude-sonnet-4-5'],
+						},
+					],
+				},
+			},
+			configDir,
+		);
+
+		process.cwd = () => configDir;
+		clearAppConfig();
+		reloadAppConfig();
+
+		// "GitHub Models" is a stale name that is not present in the config.
+		const error = await t.throwsAsync(
+			createLLMClient('GitHub Models'),
+			{instanceOf: ConfigurationError},
+		);
+		t.regex(error.message, /GitHub Models/);
+		t.regex(error.message, /Available providers: GitHub Copilot/);
+	},
+);
+
+// Calling without a provider (the post-wizard path after the fix) must fall
+// through to the first available provider instead of throwing.
+test.serial(
+	'createLLMClient: succeeds without explicit provider even when config changed (issue #460)',
+	async t => {
+		globalThis.fetch = createMockFetch(true, 200);
+
+		const configDir = join(testDir, 'issue-460-no-provider-test');
+		mkdirSync(configDir, {recursive: true});
+
+		// Config only has "GitHub Copilot"; lastProvider preference is irrelevant
+		// because we are not passing a provider argument.
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'GitHub Copilot',
+							baseUrl: 'https://api.githubcopilot.com',
+							apiKey: 'dummy-key',
+							models: ['claude-sonnet-4-5'],
+						},
+					],
+				},
+			},
+			configDir,
+		);
+
+		process.cwd = () => configDir;
+		clearAppConfig();
+		reloadAppConfig();
+
+		// Must NOT throw - falls back to the first (and only) configured provider.
+		const result = await createLLMClient();
+		t.truthy(result.client);
+		t.is(result.actualProvider, 'GitHub Copilot');
+	},
+);
