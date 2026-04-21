@@ -16,6 +16,8 @@ Sometimes you want to browse your project and pick files visually rather than ty
 
 ## Navigation
 
+### Tree View
+
 | Key | Action |
 |-----|--------|
 | Up/Down | Navigate through files and directories |
@@ -24,6 +26,25 @@ Sometimes you want to browse your project and pick files visually rather than ty
 | / | Enter search mode (filters all files including nested) |
 | Backspace | Collapse current directory |
 | Esc | Exit explorer (selected files are added to input) |
+
+### Preview View
+
+| Key | Action |
+|-----|--------|
+| Up/Down | Scroll the file preview |
+| Space | Toggle selection of the previewed file |
+| Shift+Tab | Return to tree view |
+| Esc | Return to tree view |
+
+### Search Mode
+
+| Key | Action |
+|-----|--------|
+| Type | Filter files by name |
+| Up/Down | Navigate filtered results |
+| Enter | Open the selected result |
+| Backspace/Delete | Remove search characters (exits search when empty) |
+| Esc | Exit search mode |
 
 ## Features
 

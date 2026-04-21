@@ -324,6 +324,47 @@ test('UserInput component structure is valid', t => {
 	t.true(output!.length > 0);
 });
 
+test('UserInput inserts a newline on Ctrl+J', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput />
+		</TestWrapper>,
+	);
+
+	stdin.write('a');
+	await new Promise(resolve => setTimeout(resolve, 20));
+	stdin.write('\n');
+	await new Promise(resolve => setTimeout(resolve, 20));
+	stdin.write('b');
+	await new Promise(resolve => setTimeout(resolve, 20));
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /a/);
+	t.regex(output!, /b/);
+	unmount();
+});
+
+test('UserInput does not treat carriage return as a multiline shortcut', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput />
+		</TestWrapper>,
+	);
+
+	stdin.write('a');
+	await new Promise(resolve => setTimeout(resolve, 20));
+	stdin.write('\r');
+	await new Promise(resolve => setTimeout(resolve, 20));
+	stdin.write('b');
+	await new Promise(resolve => setTimeout(resolve, 20));
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /b/);
+	unmount();
+});
+
 // ============================================================================
 // Compact Tool Display Tests
 // ============================================================================

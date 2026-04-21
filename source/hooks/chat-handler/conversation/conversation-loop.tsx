@@ -70,6 +70,17 @@ export const resetFallbackNotice = () => {
 	hasShownFallbackNotice = false;
 };
 
+// Tracks whether the most recently emitted turn contained reasoning. Used by
+// the next flushCompactCounts call to decide whether the summary should be
+// indented (grouping beneath its Thought) or rendered flat (non-thinking
+// models, where there is no Thought to group under).
+let lastTurnHadReasoning = false;
+
+/** Reset the reasoning-grouping flag (for testing). */
+export const resetLastTurnHadReasoning = () => {
+	lastTurnHadReasoning = false;
+};
+
 /**
  * Main conversation loop that processes assistant responses and handles tool calls.
  * This function orchestrates the entire conversation flow including:
@@ -135,7 +146,10 @@ export const processAssistantResponse = async (
 	// Track whether any task tools were executed in this conversation turn
 	let hasLiveTaskUpdates = false;
 
-	// Helper to flush accumulated compact counts to the static chat queue and clear live display
+	// Helper to flush accumulated compact counts to the static chat queue.
+	// Indents the summary when the previous turn emitted reasoning (so the
+	// summary groups beneath that Thought); renders flat otherwise so the
+	// block doesn't look orphaned for non-thinking models.
 	const flushCompactCounts = () => {
 		if (compactToolCountsRef) {
 			const counts = compactToolCountsRef.current;
@@ -144,6 +158,7 @@ export const processAssistantResponse = async (
 					counts,
 					addToChatQueue,
 					getNextComponentKey,
+					{indent: lastTurnHadReasoning},
 				);
 				compactToolCountsRef.current = {};
 			}
@@ -293,23 +308,23 @@ export const processAssistantResponse = async (
 		allToolCalls = allToolCalls.slice(0, 1);
 	}
 
-	// If this is the final response (no tool calls), flush live displays
-	// BEFORE the assistant message so they appear above it
-	if (allToolCalls.length === 0) {
-		flushCompactCounts();
-		if (hasLiveTaskUpdates) {
-			await flushLiveTaskList();
-			hasLiveTaskUpdates = false;
-		}
-	}
-
 	// Clear streaming content and add static message in one go so the
 	// live StreamingMessage disappears at the same time the static
 	// AssistantMessage appears, avoiding a visual jump.
 	setStreamingContent('');
 	setStreamingReasoning('');
 
+	// Flush accumulated compact counts ONLY when this turn emits reasoning.
+	// Consecutive no-reasoning turns let counts accumulate so the summary
+	// combines (e.g. "Made 4 edits" instead of four stacked "Made 1 edit"
+	// boxes). Residual counts are flushed at end of conversation / before
+	// confirmation below.
 	if (fullReasoning) {
+		flushCompactCounts();
+		if (hasLiveTaskUpdates) {
+			await flushLiveTaskList();
+			hasLiveTaskUpdates = false;
+		}
 		// Despite reasoning stream typically finishing before text stream,
 		// reasoning is still added to chat queue here to give correct
 		// message order with regards to tool calling
@@ -320,6 +335,7 @@ export const processAssistantResponse = async (
 				expand={reasoningExpandedRef?.current ?? false}
 			/>,
 		);
+		lastTurnHadReasoning = true;
 	}
 	if (cleanedContent.trim()) {
 		addToChatQueue(
@@ -681,6 +697,14 @@ export const processAssistantResponse = async (
 	}
 
 	if (validToolCalls.length === 0 && cleanedContent.trim()) {
+		// Flush any residual compact counts and task updates from turns that
+		// didn't emit reasoning so they persist in scrollback at conversation end.
+		flushCompactCounts();
+		if (hasLiveTaskUpdates) {
+			await flushLiveTaskList();
+			hasLiveTaskUpdates = false;
+		}
+
 		setIsGenerating(false);
 		const adjective = getRandomAdjective();
 		const elapsed = formatElapsedTime(startTime);

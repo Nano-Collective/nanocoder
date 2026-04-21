@@ -113,15 +113,21 @@ export function displayCompactCountsSummary(
 	counts: Record<string, number>,
 	addToChatQueue: (component: React.ReactNode) => void,
 	getNextComponentKey: () => number,
+	options?: {indent?: boolean},
 ): void {
 	const entries = Object.entries(counts);
 	if (entries.length === 0) return;
 
-	// Wrap all entries in a single Box with marginBottom for consistent spacing
+	// Indent the summary so it visually groups beneath its Thought header.
+	// When no Thought precedes it (non-thinking models), render flat so the
+	// summary doesn't look orphaned. marginBottom keeps spacing between turn
+	// groups.
+	const indent = options?.indent ?? true;
 	addToChatQueue(
 		<Box
 			key={`tool-compact-summary-${getNextComponentKey()}`}
 			flexDirection="column"
+			marginLeft={indent ? 2 : 0}
 			marginBottom={1}
 		>
 			{entries.map(([toolName, count]) => (

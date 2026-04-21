@@ -438,16 +438,17 @@ export default function UserInput({
 		}
 
 		// Handle return keys for multiline input
-		// Support Shift+Enter if the terminal sends it properly
-		if (key.return && key.shift) {
+		// Ctrl+J is the official newline shortcut and reliably sends a literal LF
+		if (
+			(key.ctrl && inputChar === 'j') ||
+			(inputChar === '\n' && !key.return)
+		) {
 			updateInput(input + '\n');
 			return;
 		}
 
-		// VSCode terminal sends Option+Enter as '\r' with key.return === false
-		// Regular Enter in VSCode sends '\r' with key.return === true
-		// So we use key.return to distinguish: false = multiline, true = submit
-		if (inputChar === '\r' && !key.return) {
+		// Support Shift+Enter if the terminal sends it properly
+		if (key.return && key.shift) {
 			updateInput(input + '\n');
 			return;
 		}

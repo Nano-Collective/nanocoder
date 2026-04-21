@@ -6,16 +6,17 @@ sidebar_order: 11
 
 # Keyboard Shortcuts
 
+This page covers the main chat input and common interactive views. Some specialised screens may show additional inline controls.
+
 ## Submitting & Multi-line Input
 
 | Action | Shortcut | Notes |
 |--------|----------|-------|
 | Submit prompt | Enter | |
-| New line | Ctrl+J | Most reliable across terminals |
-| New line | Shift+Enter | Terminal-dependent |
-| New line | Option/Alt+Enter | VS Code integrated terminal |
+| New line | Ctrl+J | Official supported shortcut |
+| New line fallback | Shift+Enter | Terminal-dependent fallback only |
 
-> **Note on multi-line input**: Terminal support for Shift+Enter / Option/Alt+Enter varies across terminals and operating systems. If one doesn't work, use Ctrl+J — it sends a literal newline character and works reliably everywhere.
+> **Note on multi-line input**: Ctrl+J is the only officially supported newline shortcut. Some terminals also send Shift+Enter as a newline, but that behavior is terminal-dependent and should be treated as a fallback only.
 
 ## Cursor Movement
 
@@ -47,7 +48,7 @@ sidebar_order: 11
 | Navigate file suggestions | Up/Down |
 | Exit file autocomplete | Space |
 
-When typing `@` for file mentions or `/` for commands, Tab accepts the current suggestion. If there are multiple matches, Tab shows the completion list.
+When typing `@` for file mentions or `/` for commands, Tab accepts the current suggestion. If there are multiple command matches, the first Tab shows the completion list and pressing Tab again accepts the first result.
 
 ## History & Navigation
 

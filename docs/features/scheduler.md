@@ -102,7 +102,7 @@ Shows execution logs for schedules.
 
 ### `/schedule start`
 
-Enters scheduler mode, where Nanocoder runs in the background and executes scheduled tasks. Press `Ctrl+C` to exit.
+Enters scheduler mode, where Nanocoder runs in the background and executes scheduled tasks. Press `Esc` to exit.
 
 ## Storage
 
