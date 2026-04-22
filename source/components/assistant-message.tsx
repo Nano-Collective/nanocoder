@@ -1,5 +1,6 @@
 import {Box, Text} from 'ink';
 import {memo, useMemo} from 'react';
+import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {parseMarkdown} from '@/markdown-parser/index';
@@ -43,10 +44,11 @@ export default memo(function AssistantMessage({
 }: AssistantMessageProps) {
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
+	const nonInteractive = useNonInteractiveRender();
 	const tokens = calculateTokens(message);
 
 	// Inner text width: outer width minus left border (1) and padding (1 each side)
-	const textWidth = boxWidth - 3;
+	const textWidth = nonInteractive ? boxWidth : boxWidth - 3;
 
 	// Render markdown to terminal-formatted text with theme colors
 	// Pre-wrap to avoid Ink's trim:false leaving leading spaces on wrapped lines
@@ -59,6 +61,16 @@ export default memo(function AssistantMessage({
 			return wrapWithTrimmedContinuations(message.trimEnd(), textWidth);
 		}
 	}, [message, colors, textWidth]);
+
+	// Non-interactive (`run`) mode: plain markdown text, no header/box/token
+	// counter — keeps stdout output close to what a regular CLI would emit.
+	if (nonInteractive) {
+		return (
+			<Box flexDirection="column" marginBottom={1}>
+				<Text>{renderedMessage}</Text>
+			</Box>
+		);
+	}
 
 	return (
 		<>

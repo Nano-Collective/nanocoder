@@ -77,3 +77,46 @@ test('createStaticComponents omits boot summary when no provider or model', t =>
 	const components = createStaticComponents(props);
 	t.is(components.length, 0);
 });
+
+test('createStaticComponents renders boot summary with mode in non-interactive mode', t => {
+	const props: AppContainerProps = {
+		shouldShowWelcome: false,
+		currentProvider: 'test-provider',
+		currentModel: 'test-model',
+		nonInteractiveMode: true,
+		developmentMode: 'yolo',
+	};
+
+	const components = createStaticComponents(props);
+	t.is(components.length, 1);
+	t.is((components[0] as React.ReactElement).key, 'boot-summary');
+
+	const {lastFrame, unmount} = renderWithTheme(<>{components}</>);
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /test-provider/);
+	t.regex(output!, /test-model/);
+	// Mode label (e.g. "⏵⏵⏵ yolo mode on") is surfaced.
+	t.regex(output!, /yolo/);
+	unmount();
+});
+
+test('createStaticComponents omits mode label when interactive', t => {
+	const props: AppContainerProps = {
+		shouldShowWelcome: false,
+		currentProvider: 'test-provider',
+		currentModel: 'test-model',
+		developmentMode: 'yolo',
+	};
+
+	const components = createStaticComponents(props);
+	t.is(components.length, 1);
+
+	const {lastFrame, unmount} = renderWithTheme(<>{components}</>);
+	const output = lastFrame();
+	t.truthy(output);
+	// Interactive mode relies on the live status bar — mode label is not in
+	// the static boot line.
+	t.notRegex(output!, /yolo/);
+	unmount();
+});

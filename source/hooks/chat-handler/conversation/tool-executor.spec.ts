@@ -509,6 +509,47 @@ test('executeToolsDirectly - compact display calls onCompactToolCount instead of
 	t.deepEqual(compactCounts, ['tool1', 'tool1', 'tool2']);
 });
 
+test('executeToolsDirectly - non-interactive compact mode pushes one-liner per tool and skips onCompactToolCount', async t => {
+	const toolCalls: ToolCall[] = [
+		{id: 'call_1', function: {name: 'tool1', arguments: '{}'}},
+		{id: 'call_2', function: {name: 'tool1', arguments: '{}'}},
+		{id: 'call_3', function: {name: 'tool2', arguments: '{}'}},
+	];
+
+	const conversationStateManager = createMockConversationStateManager();
+	const addToChatQueueCalls: unknown[] = [];
+	const addToChatQueue = (component: unknown) => {
+		addToChatQueueCalls.push(component);
+	};
+	const toolManager = createMockToolManager({
+		validatorResult: undefined,
+		shouldFail: false,
+	});
+
+	const compactCounts: Array<string> = [];
+
+	const results = await executeToolsDirectly(
+		toolCalls,
+		toolManager,
+		conversationStateManager as any,
+		addToChatQueue,
+		() => 1,
+		{
+			compactDisplay: true,
+			nonInteractiveMode: true,
+			onCompactToolCount: (toolName) => {
+				compactCounts.push(toolName);
+			},
+		},
+	);
+
+	t.is(results.length, 3);
+	// Non-interactive bypasses the live-tally accumulator.
+	t.is(compactCounts.length, 0);
+	// One compact one-liner pushed per tool, in execution order.
+	t.is(addToChatQueueCalls.length, 3);
+});
+
 test('executeToolsDirectly - handles tool with valid validation', async t => {
 	const toolCalls: ToolCall[] = [
 		{

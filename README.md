@@ -27,7 +27,7 @@ Also available via [Homebrew](docs/getting-started/installation.md#homebrew-maco
 
 ### CLI Flags
 
-Specify provider and model directly:
+Specify provider, model, and starting mode directly:
 
 ```bash
 # Non-interactive mode with specific provider/model
@@ -38,6 +38,10 @@ nanocoder --provider ollama --model llama3.1
 
 # Flags can appear before or after 'run' command
 nanocoder run --provider openrouter "refactor database module"
+
+# Boot directly into a development mode (normal, auto-accept, yolo, plan)
+nanocoder --mode yolo
+nanocoder --mode plan run "audit the auth module"
 ```
 
 ## Documentation

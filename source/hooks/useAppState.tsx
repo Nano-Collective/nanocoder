@@ -56,7 +56,9 @@ export interface ConversationContext {
 	systemMessage: Message;
 }
 
-export function useAppState() {
+export function useAppState(
+	initialDevelopmentMode: DevelopmentMode = 'normal',
+) {
 	// Initialize theme and title shape from preferences
 	const preferences = loadPreferences();
 	const initialTheme = preferences.selectedTheme || defaultTheme;
@@ -163,8 +165,9 @@ export function useAppState() {
 		useState<PendingQuestion | null>(null);
 
 	// Development mode state
-	const [developmentMode, setDevelopmentMode] =
-		useState<DevelopmentMode>('normal');
+	const [developmentMode, setDevelopmentMode] = useState<DevelopmentMode>(
+		initialDevelopmentMode,
+	);
 
 	// Model mode state — resolved from config layers on startup
 	const [tune, setTune] = useState<TuneConfig>(() => {

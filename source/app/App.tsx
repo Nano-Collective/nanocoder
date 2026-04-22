@@ -5,6 +5,7 @@ import {createStaticComponents} from '@/app/components/app-container';
 import {ChatHistory} from '@/app/components/chat-history';
 import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
+import {NonInteractiveShell} from '@/app/components/non-interactive-shell';
 import type {AppProps} from '@/app/types';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {FileExplorer} from '@/components/file-explorer';
@@ -68,7 +69,13 @@ export default function App({
 	nonInteractiveMode = false,
 	cliProvider,
 	cliModel,
+	cliMode,
 }: AppProps) {
+	// Resolve the initial development mode. `--mode` wins; otherwise
+	// non-interactive runs default to auto-accept (previous behavior) and
+	// interactive runs default to normal.
+	const initialDevelopmentMode =
+		cliMode ?? (nonInteractiveMode ? 'auto-accept' : 'normal');
 	// Memoize the logger to prevent recreation on every render
 	const logger = useMemo(() => createPinoLogger(), []);
 
@@ -84,7 +91,7 @@ export default function App({
 	}, [logger, vscodeMode, vscodePort]);
 
 	// Use extracted hooks
-	const appState = useAppState();
+	const appState = useAppState(initialDevelopmentMode);
 	const {exit} = useApp();
 	const {isTrusted, handleConfirmTrust, isTrustLoading, isTrustedError} =
 		useDirectoryTrust();
@@ -625,6 +632,7 @@ export default function App({
 		},
 		setDevelopmentMode: appState.setDevelopmentMode,
 		handleMessageSubmit: appHandlers.handleMessageSubmit,
+		developmentMode: initialDevelopmentMode,
 	});
 
 	// Setup scheduler mode
@@ -652,15 +660,26 @@ export default function App({
 
 	const shouldShowWelcome = shouldRenderWelcome(nonInteractiveMode);
 
-	// Memoize static components
+	// Memoize static components. We pin the run-mode header to the
+	// initial development mode so it never changes during the run — the
+	// boot line represents what the agent *started* under, not a live
+	// indicator.
 	const staticComponents = React.useMemo(
 		() =>
 			createStaticComponents({
 				shouldShowWelcome,
 				currentProvider: appState.currentProvider,
 				currentModel: appState.currentModel,
+				nonInteractiveMode,
+				developmentMode: initialDevelopmentMode,
 			}),
-		[shouldShowWelcome, appState.currentProvider, appState.currentModel],
+		[
+			shouldShowWelcome,
+			appState.currentProvider,
+			appState.currentModel,
+			nonInteractiveMode,
+			initialDevelopmentMode,
+		],
 	);
 
 	// Handle loading state for directory trust check
@@ -748,6 +767,53 @@ export default function App({
 		);
 	}
 
+	const liveComponent =
+		appState.liveComponent ??
+		(chatHandler.isGenerating &&
+		(chatHandler.streamingContent || chatHandler.streamingReasoning) ? (
+			<>
+				{chatHandler.streamingReasoning && !chatHandler.streamingContent && (
+					<StreamingReasoning
+						reasoning={chatHandler.streamingReasoning}
+						expand={appState.reasoningExpanded}
+					/>
+				)}
+				{/* Reasoning stream is complete when text streaming begins */}
+				{chatHandler.streamingReasoning && chatHandler.streamingContent && (
+					<AssistantReasoning
+						reasoning={chatHandler.streamingReasoning}
+						expand={appState.reasoningExpanded}
+					/>
+				)}
+				{chatHandler.streamingContent && (
+					<StreamingMessage
+						message={chatHandler.streamingContent}
+						model={appState.currentModel}
+					/>
+				)}
+			</>
+		) : null);
+
+	// Non-interactive render tree — minimal transcript + one status line,
+	// no interactive affordances.
+	if (nonInteractiveMode) {
+		return (
+			<ThemeContext.Provider value={themeContextValue}>
+				<TitleShapeContext.Provider value={titleShapeContextValue}>
+					<UIStateProvider>
+						<NonInteractiveShell
+							startChat={appState.startChat}
+							staticComponents={staticComponents}
+							queuedComponents={appState.chatComponents}
+							liveComponent={liveComponent}
+							statusMessage={nonInteractiveLoadingMessage}
+						/>
+					</UIStateProvider>
+				</TitleShapeContext.Provider>
+			</ThemeContext.Provider>
+		);
+	}
+
 	// Main application render
 	return (
 		<ThemeContext.Provider value={themeContextValue}>
@@ -759,36 +825,7 @@ export default function App({
 							startChat={appState.startChat}
 							staticComponents={staticComponents}
 							queuedComponents={appState.chatComponents}
-							liveComponent={
-								appState.liveComponent ??
-								(chatHandler.isGenerating &&
-								(chatHandler.streamingContent ||
-									chatHandler.streamingReasoning) ? (
-									<>
-										{chatHandler.streamingReasoning &&
-											!chatHandler.streamingContent && (
-												<StreamingReasoning
-													reasoning={chatHandler.streamingReasoning}
-													expand={appState.reasoningExpanded}
-												/>
-											)}
-										{/* Reasoning stream is complete when text streaming begins */}
-										{chatHandler.streamingReasoning &&
-											chatHandler.streamingContent && (
-												<AssistantReasoning
-													reasoning={chatHandler.streamingReasoning}
-													expand={appState.reasoningExpanded}
-												/>
-											)}
-										{chatHandler.streamingContent && (
-											<StreamingMessage
-												message={chatHandler.streamingContent}
-												model={appState.currentModel}
-											/>
-										)}
-									</>
-								) : null)
-							}
+							liveComponent={liveComponent}
 						/>
 
 						{/* File Explorer - rendered below chat history */}
@@ -880,8 +917,6 @@ export default function App({
 									onQuestionAnswer={handleQuestionAnswer}
 									mcpInitialized={appState.mcpInitialized}
 									client={appState.client}
-									nonInteractivePrompt={nonInteractivePrompt}
-									nonInteractiveLoadingMessage={nonInteractiveLoadingMessage}
 									customCommands={Array.from(
 										appState.customCommandCache.keys(),
 									)}

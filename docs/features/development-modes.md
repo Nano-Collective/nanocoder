@@ -10,6 +10,16 @@ When the AI needs to take an action — editing a file, running a command, searc
 
 Toggle between modes with **Shift+Tab** during a chat session. The current mode is shown in the status bar.
 
+You can also boot directly into a specific mode with `--mode`, which works in both interactive and non-interactive runs:
+
+```bash
+nanocoder --mode yolo                    # interactive, yolo
+nanocoder --mode plan run "audit auth"   # run mode, plan only
+nanocoder --mode=auto-accept             # fused form also works
+```
+
+Accepts `normal`, `auto-accept`, `yolo`, or `plan`. Invalid values exit with an error. When `--mode` is omitted, interactive sessions default to `normal` and `run` mode defaults to `auto-accept`.
+
 ## Normal Mode
 
 The default mode. Every tool call requires your explicit confirmation before execution.

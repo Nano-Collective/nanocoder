@@ -47,12 +47,15 @@ Options:
   --provider       Specify AI provider (must be configured in agents.config.json)
   --model          Specify AI model (must be available for the provider)
   --context-max    Set maximum context length in tokens (supports k/K suffix, e.g. 128k)
+  --mode           Start in a specific development mode (normal, auto-accept, yolo, plan).
+                   Defaults to "normal" for interactive sessions and "auto-accept" for run mode.
   run              Run in non-interactive mode
 
 Examples:
   nanocoder --provider openrouter --model google/gemini-3.1-flash run "analyze src/app.ts"
   nanocoder --provider ollama --model llama3.1 --context-max 128k
-  nanocoder run --provider openrouter "refactor database module"
+  nanocoder --mode yolo run "refactor database module"
+  nanocoder --mode plan
   `);
 	process.exit(0);
 }
@@ -111,6 +114,30 @@ async function main(): Promise<void> {
 		}
 	}
 
+	// Extract --mode if specified. Accept `--mode value` and `--mode=value`.
+	const VALID_MODES = ['normal', 'auto-accept', 'yolo', 'plan'] as const;
+	type CliMode = (typeof VALID_MODES)[number];
+	let cliMode: CliMode | undefined;
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		let rawValue: string | undefined;
+		if (arg === '--mode' && args[i + 1]) {
+			rawValue = args[i + 1];
+		} else if (arg.startsWith('--mode=')) {
+			rawValue = arg.slice('--mode='.length);
+		}
+		if (rawValue === undefined) continue;
+		if ((VALID_MODES as readonly string[]).includes(rawValue)) {
+			cliMode = rawValue as CliMode;
+		} else {
+			console.error(
+				`Invalid --mode value: "${rawValue}". Must be one of: ${VALID_MODES.join(', ')}`,
+			);
+			process.exit(1);
+		}
+		break;
+	}
+
 	// Check for non-interactive mode (run command)
 	let nonInteractivePrompt: string | undefined;
 	const runCommandIndex = args.findIndex(arg => arg === 'run');
@@ -135,6 +162,11 @@ async function main(): Promise<void> {
 			} else if (arg === '--context-max') {
 				i++; // skip this flag and its value
 				continue;
+			} else if (arg === '--mode') {
+				i++; // skip this flag and its value
+				continue;
+			} else if (arg.startsWith('--mode=')) {
+				continue; // skip fused form
 			} else {
 				promptArgs.push(arg);
 			}
@@ -204,6 +236,7 @@ async function main(): Promise<void> {
 				nonInteractiveMode={nonInteractiveMode}
 				cliProvider={cliProvider}
 				cliModel={cliModel}
+				cliMode={cliMode}
 			/>,
 		);
 	}

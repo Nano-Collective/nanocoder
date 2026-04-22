@@ -1,6 +1,7 @@
 import {Box, Text} from 'ink';
 import Spinner from 'ink-spinner';
 import {memo, useRef} from 'react';
+import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
@@ -25,7 +26,8 @@ export default memo(function StreamingMessage({
 	const startTime = startRef.current;
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
-	const textWidth = boxWidth - 3;
+	const nonInteractive = useNonInteractiveRender();
+	const textWidth = nonInteractive ? boxWidth : boxWidth - 3;
 
 	// Only show the tail of the content to keep the render small
 	// and avoid off-screen reflow that causes iTerm2 flickering.
@@ -39,6 +41,18 @@ export default memo(function StreamingMessage({
 	const tokens = calculateTokens(message);
 	const elapsedSec = (Date.now() - startTime) / 1000;
 	const tokPerSec = elapsedSec > 0.1 ? (tokens / elapsedSec).toFixed(1) : '—';
+
+	// Non-interactive (`run`) mode: just the streamed tail, no header/box.
+	// The tail-trim already keeps reflow bounded; the shell's status line
+	// below communicates that work is in progress.
+	if (nonInteractive) {
+		return (
+			<Box flexDirection="column" marginBottom={1}>
+				{truncated && <Text>…</Text>}
+				<Text>{displayText}</Text>
+			</Box>
+		);
+	}
 
 	return (
 		<>

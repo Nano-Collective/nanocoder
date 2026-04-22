@@ -1,6 +1,7 @@
 import {Box, Text} from 'ink';
 import Spinner from 'ink-spinner';
 import {memo, useRef} from 'react';
+import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
@@ -25,6 +26,7 @@ export default memo(function StreamingReasoning({
 	const startTime = startRef.current;
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
+	const nonInteractive = useNonInteractiveRender();
 	const textWidth = boxWidth - 3;
 
 	// Only show the tail of the content to keep the render small
@@ -51,7 +53,7 @@ export default memo(function StreamingReasoning({
 					<Text>
 						{'  '}~{tokens.toLocaleString()} tokens · {tokPerSec} tok/s
 					</Text>
-				) : (
+				) : nonInteractive ? null : (
 					<Text color={colors.secondary}>{'  '}ctrl+r to expand</Text>
 				)}
 			</Box>

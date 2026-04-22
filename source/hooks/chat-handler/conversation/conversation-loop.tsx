@@ -563,6 +563,7 @@ export const processAssistantResponse = async (
 						});
 					},
 					setLiveComponent,
+					nonInteractiveMode,
 				},
 			);
 

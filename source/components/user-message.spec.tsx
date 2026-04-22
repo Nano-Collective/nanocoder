@@ -306,6 +306,23 @@ test('UserMessage displays approximate token count', t => {
 	t.regex(output!, /~\d+ tokens/);
 });
 
+test('UserMessage renders nothing under NonInteractiveRenderContext', async t => {
+	const {NonInteractiveRenderContext} = await import(
+		'../hooks/useNonInteractiveRender'
+	);
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<NonInteractiveRenderContext.Provider value={true}>
+				<UserMessage message="this prompt should not be echoed" />
+			</NonInteractiveRenderContext.Provider>
+		</MockThemeProvider>,
+	);
+
+	const output = lastFrame();
+	// Nothing visible — the user already knows what they typed.
+	t.is((output ?? '').trim(), '');
+});
+
 test('UserMessage handles multiple VS Code context blocks', t => {
 	const message = `Compare these:
 

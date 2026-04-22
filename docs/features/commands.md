@@ -79,4 +79,18 @@ Run Nanocoder without an interactive session for scripting and automation:
 nanocoder run "Add error handling to src/api.ts"
 ```
 
-This submits the prompt in auto-accept mode and exits when complete. Useful for CI pipelines, git hooks, or chaining with other tools.
+This submits the prompt and exits when complete. Useful for CI pipelines, git hooks, or chaining with other tools.
+
+Run mode renders through a dedicated minimal shell: no welcome banner, no boxed "You:" echo, no trailing token counts, no `ctrl+r to expand` hints. Assistant text streams as plain markdown, tools render chronologically as one-liners (e.g. `⚒ Read 1 file`), and a single status line below the transcript shows progress.
+
+By default, `run` uses auto-accept. Override with `--mode` to boot into a different [development mode](development-modes.md):
+
+```bash
+# Plan only — no changes executed
+nanocoder --mode plan run "analyze the auth module"
+
+# No safety rails — auto-accepts every tool including bash
+nanocoder --mode yolo run "update README and push"
+```
+
+If a tool requires approval that the active mode won't grant, nanocoder prints `Tool approval required for: ...` and exits with status code `1`.

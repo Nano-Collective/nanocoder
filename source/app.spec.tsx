@@ -237,3 +237,60 @@ test('Non-interactive mode: CLI parsing without run command', t => {
 
 	t.is(prompt, undefined);
 });
+
+// ============================================================================
+// --mode flag parsing tests
+// ============================================================================
+
+const VALID_MODES = ['normal', 'auto-accept', 'yolo', 'plan'] as const;
+type CliMode = (typeof VALID_MODES)[number];
+
+/**
+ * Mirror of the --mode parser in `source/cli.tsx`. Kept in sync so tests
+ * can exercise the parsing without spinning up the full CLI entry point.
+ */
+function parseModeArg(args: string[]): CliMode | undefined | {error: string} {
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		let rawValue: string | undefined;
+		if (arg === '--mode' && args[i + 1]) {
+			rawValue = args[i + 1];
+		} else if (arg.startsWith('--mode=')) {
+			rawValue = arg.slice('--mode='.length);
+		}
+		if (rawValue === undefined) continue;
+		if ((VALID_MODES as readonly string[]).includes(rawValue)) {
+			return rawValue as CliMode;
+		}
+		return {error: rawValue};
+	}
+	return undefined;
+}
+
+test('--mode: parses space-separated form', t => {
+	t.is(parseModeArg(['--mode', 'yolo']), 'yolo');
+	t.is(parseModeArg(['--mode', 'plan', 'run', 'do a thing']), 'plan');
+});
+
+test('--mode: parses fused form (--mode=value)', t => {
+	t.is(parseModeArg(['--mode=auto-accept']), 'auto-accept');
+	t.is(parseModeArg(['--mode=normal', 'run', 'hello']), 'normal');
+});
+
+test('--mode: returns undefined when flag is absent', t => {
+	t.is(parseModeArg(['run', 'hello']), undefined);
+	t.is(parseModeArg(['--provider', 'openrouter']), undefined);
+});
+
+test('--mode: accepts all four user-facing modes', t => {
+	t.is(parseModeArg(['--mode', 'normal']), 'normal');
+	t.is(parseModeArg(['--mode', 'auto-accept']), 'auto-accept');
+	t.is(parseModeArg(['--mode', 'yolo']), 'yolo');
+	t.is(parseModeArg(['--mode', 'plan']), 'plan');
+});
+
+test('--mode: rejects invalid values (scheduler is not user-facing)', t => {
+	t.deepEqual(parseModeArg(['--mode', 'scheduler']), {error: 'scheduler'});
+	t.deepEqual(parseModeArg(['--mode', 'turbo']), {error: 'turbo'});
+	t.deepEqual(parseModeArg(['--mode=']), {error: ''});
+});

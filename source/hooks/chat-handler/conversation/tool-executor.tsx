@@ -136,6 +136,7 @@ const executeAgentBatch = async (
 	compactDisplay?: boolean,
 	setLiveComponent?: (component: React.ReactNode) => void,
 	onCompactToolCount?: (toolName: string) => void,
+	nonInteractiveMode?: boolean,
 ): Promise<
 	Array<{
 		toolCall: ToolCall;
@@ -248,6 +249,10 @@ const executeAgentBatch = async (
 		// Compact: feed into the shared count accumulator so delegated-task
 		// summaries group with other tool counts. Errors are still shown in
 		// full. Non-compact: render the rich AgentProgress card.
+		//
+		// Non-interactive mode bypasses the live accumulator (nothing renders
+		// it) and pushes a one-liner directly into the static queue so tool
+		// activity appears in chronological order in stdout.
 		if (compactDisplay) {
 			const isError = result.content.startsWith('Error: ');
 			if (isError) {
@@ -257,6 +262,15 @@ const executeAgentBatch = async (
 					toolManager,
 					addToChatQueue,
 					getNextComponentKey,
+				);
+			} else if (nonInteractiveMode) {
+				await displayToolResult(
+					e.toolCall,
+					result,
+					toolManager,
+					addToChatQueue,
+					getNextComponentKey,
+					true,
 				);
 			} else {
 				onCompactToolCount?.(result.name);
@@ -314,6 +328,13 @@ export const executeToolsDirectly = async (
 		onCompactToolCount?: (toolName: string) => void;
 		onLiveTaskUpdate?: () => void;
 		setLiveComponent?: (component: React.ReactNode) => void;
+		/**
+		 * When true, compact tool results push a one-liner directly to the
+		 * static chat queue instead of into the live-tally accumulator
+		 * (which nothing renders in run mode). Keeps tool activity in
+		 * chronological order for stdout.
+		 */
+		nonInteractiveMode?: boolean;
 	},
 ): Promise<ToolResult[]> => {
 	// Import processToolUse here to avoid circular dependencies
@@ -341,6 +362,7 @@ export const executeToolsDirectly = async (
 				options?.compactDisplay,
 				options?.setLiveComponent,
 				options?.onCompactToolCount,
+				options?.nonInteractiveMode,
 			);
 
 			// Agent results are already displayed by executeAgentBatch
@@ -401,7 +423,11 @@ export const executeToolsDirectly = async (
 				!ALWAYS_EXPANDED_TOOLS.has(result.name)
 			) {
 				// In compact mode, signal the count callback for live display
-				// (skip for tools that should always show expanded output)
+				// (skip for tools that should always show expanded output).
+				//
+				// Non-interactive mode has no live tally renderer, so push
+				// per-tool one-liners straight to the static queue to keep
+				// tool activity in chronological order.
 				const isError = result.content.startsWith('Error: ');
 				if (isError) {
 					// Errors always shown in full
@@ -411,6 +437,15 @@ export const executeToolsDirectly = async (
 						toolManager,
 						addToChatQueue,
 						getNextComponentKey,
+					);
+				} else if (options.nonInteractiveMode) {
+					await displayToolResult(
+						toolCall,
+						result,
+						toolManager,
+						addToChatQueue,
+						getNextComponentKey,
+						true,
 					);
 				} else {
 					options.onCompactToolCount?.(result.name);

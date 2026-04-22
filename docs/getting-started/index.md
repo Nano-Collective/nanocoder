@@ -49,6 +49,7 @@ nanocoder -h
 | `--provider` | | Specify AI provider (must be configured in agents.config.json) |
 | `--model` | | Specify AI model (must be available for the provider) |
 | `--context-max` | | Set maximum context length in tokens (supports k/K suffix, e.g. `128k`) |
+| `--mode` | | Start in a specific [development mode](../features/development-modes.md) — `normal`, `auto-accept`, `yolo`, or `plan`. Defaults to `normal` for interactive sessions and `auto-accept` for `run` mode. |
 | `run` | | Run in non-interactive mode |
 
 **Provider/Model Flags:**
@@ -56,6 +57,23 @@ nanocoder -h
 The `--provider` and `--model` flags allow you to specify the AI provider and model directly from the CLI, bypassing the need to use slash commands or edit configuration files. Providers must be pre-configured in your `agents.config.json` file.
 
 If an invalid provider or model is specified, nanocoder will show an error message indicating the issue.
+
+**Mode Flag:**
+
+`--mode` sets the starting [development mode](../features/development-modes.md) for both interactive and non-interactive sessions. Accepts `normal`, `auto-accept`, `yolo`, or `plan` (and the fused `--mode=<value>` form). Invalid values exit with an error.
+
+```bash
+# Interactive, yolo from the start
+nanocoder --mode yolo
+
+# Non-interactive, plan only — produce a plan without executing changes
+nanocoder --mode plan run "analyze the auth module"
+
+# Non-interactive, normal — will exit on the first tool that requires approval
+nanocoder --mode normal run "refactor db module"
+```
+
+If `--mode` is omitted, interactive mode starts in `normal` and `run` mode starts in `auto-accept` (the previous defaults).
 
 ## Interactive Mode
 
@@ -124,8 +142,10 @@ nanocoder run --provider openrouter --model anthropic/claude-sonnet-4-20250514 "
 **Non-interactive mode behavior:**
 
 - Automatically executes the given prompt
-- Runs in auto-accept mode (tools execute without confirmation)
-- Displays all output and tool execution results
+- Defaults to auto-accept (tools execute without confirmation); override with `--mode` (e.g. `--mode yolo` or `--mode plan`)
+- Renders through a dedicated shell — no welcome banner, no boot summary, no boxed user echo, no "ctrl+r to expand" hints. Assistant text prints as plain markdown; a single spinner status line shows progress below the transcript.
+- Tools render chronologically as they run (e.g. `⚒ Read 1 file`) and appear in stdout before the assistant's next response
+- If a tool requires approval that auto-accept won't grant (e.g. bash in `--mode auto-accept`, or any approval-gated tool in `--mode normal`), nanocoder prints `Tool approval required for: ...` and exits with status code `1`
 - Exits automatically when the task is complete
 - Uses specified provider/model if `--provider` and `--model` flags are provided
 - Respects `--context-max` flag or `NANOCODER_CONTEXT_LIMIT` env var for context limit override

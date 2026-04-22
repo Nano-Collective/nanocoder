@@ -89,7 +89,16 @@ For scripting and automation, run Nanocoder without an interactive session:
 nanocoder run "Add error handling to src/api.ts"
 ```
 
-This submits the prompt, auto-accepts all tool calls, and exits when complete. Useful for CI pipelines, git hooks, or chaining with other CLI tools.
+This submits the prompt, auto-accepts tool calls, and exits when complete. Run mode uses a minimal shell (plain-markdown assistant output, chronological tool one-liners, a single status line) so output pipes cleanly into other tools.
+
+Override the default mode with `--mode` — works both interactively and with `run`:
+
+```bash
+nanocoder --mode yolo                      # interactive, no approvals
+nanocoder --mode plan run "audit auth"     # run mode, plan only
+```
+
+See [Commands → Non-Interactive Mode](commands.md#non-interactive-mode) and [Development Modes](development-modes.md) for details.
 
 ## Managing Long Conversations
 

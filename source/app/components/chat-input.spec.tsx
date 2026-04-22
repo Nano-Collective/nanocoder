@@ -18,8 +18,8 @@ function createDefaultProps(
 		onQuestionAnswer: () => {},
 		mcpInitialized: true,
 		client: {},
-		nonInteractivePrompt: undefined,
-		nonInteractiveLoadingMessage: null,
+		pendingSubagentApproval: null,
+		onSubagentToolApproval: () => {},
 		customCommands: [],
 		inputDisabled: false,
 		developmentMode: 'normal',
@@ -29,6 +29,7 @@ function createDefaultProps(
 		onSubmit: async () => {},
 		onCancel: () => {},
 		onToggleMode: () => {},
+		onToggleReasoningExpanded: () => {},
 		...overrides,
 	};
 }
@@ -45,7 +46,6 @@ test('ChatInput shows UserInput when ready for input', t => {
 	const props = createDefaultProps({
 		mcpInitialized: true,
 		client: {},
-		nonInteractivePrompt: undefined,
 		isToolExecuting: false,
 		isToolConfirmationMode: false,
 	});
@@ -66,22 +66,6 @@ test('ChatInput shows loading spinner when not initialized', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /Loading/);
-	unmount();
-});
-
-test('ChatInput shows completion message in non-interactive mode when done', t => {
-	const props = createDefaultProps({
-		nonInteractivePrompt: 'test prompt',
-		nonInteractiveLoadingMessage: null,
-		mcpInitialized: true,
-		client: {},
-	});
-
-	const {lastFrame, unmount} = renderWithTheme(<ChatInput {...props} />);
-	const output = lastFrame();
-	t.truthy(output);
-	// Note: marginLeft={-1} in the component cuts off the first character in tests
-	t.regex(output!, /ompleted.*Exiting/);
 	unmount();
 });
 

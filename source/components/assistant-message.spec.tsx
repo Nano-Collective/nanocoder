@@ -777,6 +777,29 @@ test('AssistantMessage displays approximate token count', t => {
 	t.regex(output!, /~\d+ tokens/);
 });
 
+test('AssistantMessage drops model header and token count under NonInteractiveRenderContext', async t => {
+	const {NonInteractiveRenderContext} = await import(
+		'../hooks/useNonInteractiveRender'
+	);
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<NonInteractiveRenderContext.Provider value={true}>
+				<AssistantMessage
+					message="plain body text"
+					model="very-unique-model-name"
+				/>
+			</NonInteractiveRenderContext.Provider>
+		</MockThemeProvider>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /plain body text/);
+	// Interactive framing (model-name label, trailing token count) is gone.
+	t.notRegex(output!, /very-unique-model-name/);
+	t.notRegex(output!, /~\d+ tokens/);
+});
+
 test('parseMarkdown preserves spacing before bullet lists', t => {
 	const text = `I can assist with tasks such as:
 

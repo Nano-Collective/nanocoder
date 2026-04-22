@@ -37,10 +37,6 @@ export interface ChatInputProps {
 	mcpInitialized: boolean;
 	client: unknown | null;
 
-	// Non-interactive mode
-	nonInteractivePrompt?: string;
-	nonInteractiveLoadingMessage: string | null;
-
 	// Input state
 	customCommands: string[];
 	inputDisabled: boolean;
@@ -64,7 +60,11 @@ export interface ChatInputProps {
 }
 
 /**
- * Chat input component that handles user input and tool interactions.
+ * Interactive chat input. Renders user input, tool confirmation prompts,
+ * question prompts, and in-flight indicators.
+ *
+ * Non-interactive (`run`) mode does not route through this component —
+ * see NonInteractiveShell.
  *
  * Unlike ChatHistory, this component CAN be conditionally mounted/unmounted.
  * It does not contain ink's Static component, so it's safe to hide when
@@ -83,8 +83,6 @@ export function ChatInput({
 	onSubagentToolApproval,
 	mcpInitialized,
 	client,
-	nonInteractivePrompt,
-	nonInteractiveLoadingMessage,
 	customCommands,
 	inputDisabled,
 	developmentMode,
@@ -102,10 +100,6 @@ export function ChatInput({
 	tune,
 }: ChatInputProps): React.ReactElement {
 	const {colors} = useTheme();
-
-	const loadingLabel = nonInteractivePrompt
-		? (nonInteractiveLoadingMessage ?? 'Loading...')
-		: 'Loading...';
 
 	return (
 		<Box flexDirection="column" marginLeft={-1}>
@@ -152,7 +146,7 @@ export function ChatInput({
 					onAnswer={onQuestionAnswer}
 				/>
 			) : /* User Input */
-			mcpInitialized && client && !nonInteractivePrompt ? (
+			mcpInitialized && client ? (
 				<UserInput
 					customCommands={customCommands}
 					onSubmit={msg => void onSubmit(msg)}
@@ -169,13 +163,10 @@ export function ChatInput({
 			) : /* Client Missing */
 			mcpInitialized && !client ? (
 				<></>
-			) : /* Non-Interactive Complete */
-			nonInteractivePrompt && !nonInteractiveLoadingMessage ? (
-				<Text color={colors.secondary}>Completed. Exiting.</Text>
 			) : (
 				/* Loading */
 				<Text color={colors.secondary}>
-					<Spinner type="dots" /> {loadingLabel}
+					<Spinner type="dots" /> Loading...
 				</Text>
 			)}
 		</Box>

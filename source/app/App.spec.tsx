@@ -1,5 +1,5 @@
 import test from 'ava';
-import type {AppProps} from './types';
+import type {AppProps, CliMode} from './types';
 
 test('App types are properly exported', t => {
 	const props: AppProps = {
@@ -19,6 +19,9 @@ test('AppProps accepts all optional parameters', t => {
 		vscodePort: 3000,
 		nonInteractivePrompt: 'test prompt',
 		nonInteractiveMode: true,
+		cliProvider: 'openrouter',
+		cliModel: 'google/gemini-3.1-flash',
+		cliMode: 'yolo',
 	};
 
 	t.truthy(minimalProps);
@@ -27,4 +30,10 @@ test('AppProps accepts all optional parameters', t => {
 	t.is(fullProps.vscodePort, 3000);
 	t.is(fullProps.nonInteractivePrompt, 'test prompt');
 	t.is(fullProps.nonInteractiveMode, true);
+	t.is(fullProps.cliMode, 'yolo');
+});
+
+test('CliMode covers the four user-facing development modes', t => {
+	const modes: CliMode[] = ['normal', 'auto-accept', 'yolo', 'plan'];
+	t.deepEqual(modes, ['normal', 'auto-accept', 'yolo', 'plan']);
 });

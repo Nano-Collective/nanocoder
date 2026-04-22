@@ -1,5 +1,6 @@
 import {Box, Text} from 'ink';
 import {memo} from 'react';
+import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {UserMessageProps} from '@/types/index';
@@ -56,7 +57,14 @@ export default memo(function UserMessage({
 }: UserMessageProps) {
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
+	const nonInteractive = useNonInteractiveRender();
 	const tokens = calculateTokens(tokenContent ?? message);
+
+	// Non-interactive (`run`) mode: the user already knows what prompt they
+	// submitted — echoing it back as a boxed "You:" block is pure noise.
+	if (nonInteractive) {
+		return null;
+	}
 
 	// Inner text width: outer width minus left border (1) and padding (1 each side)
 	const textWidth = boxWidth - 3;

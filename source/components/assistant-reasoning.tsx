@@ -1,5 +1,6 @@
 import {Box, Text} from 'ink';
 import {memo, useMemo} from 'react';
+import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {Colors, parseMarkdown} from '@/markdown-parser/index';
@@ -19,6 +20,7 @@ export default memo(function AssistantReasoning({
 }: AssistantReasoningProps) {
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
+	const nonInteractive = useNonInteractiveRender();
 	const tokens = calculateTokens(reasoning);
 	const effectiveWidth = Math.max(1, boxWidth - EXPANDED_INDENT);
 
@@ -53,7 +55,7 @@ export default memo(function AssistantReasoning({
 		<Box flexDirection="column" marginBottom={1}>
 			<Box>
 				<Text color={colors.tool}>{'\u2699'} Thought</Text>
-				{!expand && (
+				{!expand && !nonInteractive && (
 					<Text color={colors.secondary}>{'  '}ctrl+r to expand</Text>
 				)}
 			</Box>

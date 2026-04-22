@@ -15,6 +15,11 @@ interface UseNonInteractiveModeProps {
 	appState: NonInteractiveModeState;
 	setDevelopmentMode: (mode: DevelopmentMode) => void;
 	handleMessageSubmit: (message: string) => Promise<void>;
+	/**
+	 * Development mode to run under. Defaults to 'auto-accept' (the
+	 * historical behavior for `run`). Set to anything else via `--mode`.
+	 */
+	developmentMode?: DevelopmentMode;
 }
 
 export interface NonInteractiveModeResult {
@@ -71,6 +76,7 @@ export function useNonInteractiveMode({
 	appState,
 	setDevelopmentMode,
 	handleMessageSubmit,
+	developmentMode = 'auto-accept',
 }: UseNonInteractiveModeProps): NonInteractiveModeResult {
 	const [nonInteractiveSubmitted, setNonInteractiveSubmitted] =
 		React.useState(false);
@@ -85,12 +91,12 @@ export function useNonInteractiveMode({
 			!nonInteractiveSubmitted
 		) {
 			setNonInteractiveSubmitted(true);
-			// Set auto-accept mode for non-interactive execution
+			// Apply the requested development mode (default auto-accept).
 			// Sync both React state AND global context synchronously
 			// to prevent race conditions where tools check global context
-			// before the useEffect in App.tsx has a chance to sync it
-			setDevelopmentMode('auto-accept');
-			setCurrentModeContext('auto-accept');
+			// before the useEffect in App.tsx has a chance to sync it.
+			setDevelopmentMode(developmentMode);
+			setCurrentModeContext(developmentMode);
 			// Submit the prompt
 			void handleMessageSubmit(nonInteractivePrompt);
 		}
@@ -102,6 +108,7 @@ export function useNonInteractiveMode({
 		nonInteractiveSubmitted,
 		handleMessageSubmit,
 		setDevelopmentMode,
+		developmentMode,
 	]);
 
 	// Exit when processing is complete
