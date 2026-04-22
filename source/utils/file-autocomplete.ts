@@ -1,12 +1,8 @@
-import {exec} from 'node:child_process';
-import {promisify} from 'node:util';
-import {BUFFER_FILE_LIST_BYTES, CACHE_FILE_LIST_TTL_MS} from '@/constants';
+import {CACHE_FILE_LIST_TTL_MS} from '@/constants';
 import {formatError} from './error-formatter';
+import {walkProjectEntries} from './file-search';
 import {fuzzyScoreFilePath} from './fuzzy-matching';
-import {loadGitignore} from './gitignore-loader';
 import {getLogger} from './logging';
-
-const execAsync = promisify(exec);
 
 interface FileCompletion {
 	path: string; // Relative path from cwd
@@ -34,22 +30,14 @@ async function getAllFiles(cwd: string): Promise<string[]> {
 	}
 
 	try {
-		const ig = loadGitignore(cwd);
+		const allFiles: string[] = [];
+		await walkProjectEntries(cwd, undefined, entry => {
+			if (!entry.isDirectory) {
+				allFiles.push(entry.relativePath.replace(/\\/g, '/'));
+			}
+			return false;
+		});
 
-		// Use find to list all files, excluding common large directories
-		const {stdout} = await execAsync(
-			`find . -type f -not -path "*/node_modules/*" -not -path "*/.git/*" -not -path "*/dist/*" -not -path "*/build/*" -not -path "*/coverage/*" -not -path "*/.next/*" -not -path "*/.nuxt/*" -not -path "*/out/*" -not -path "*/.cache/*"`,
-			{cwd, maxBuffer: BUFFER_FILE_LIST_BYTES},
-		);
-
-		const allFiles = stdout
-			.trim()
-			.split('\n')
-			.filter(Boolean)
-			.map(line => line.replace(/^\.\//, '')) // Remove leading "./"
-			.filter(file => !ig.ignores(file)); // Filter by gitignore
-
-		// Update cache
 		fileListCache = {
 			files: allFiles,
 			timestamp: now,
@@ -57,7 +45,6 @@ async function getAllFiles(cwd: string): Promise<string[]> {
 
 		return allFiles;
 	} catch (error) {
-		// If find fails, return empty array
 		const logger = getLogger();
 		logger.error({error: formatError(error)}, 'Failed to list files');
 		return [];

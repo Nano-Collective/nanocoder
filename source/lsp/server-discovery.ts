@@ -249,7 +249,8 @@ export function isDenoProject(projectRoot: string = process.cwd()): boolean {
 function findCommand(command: string): string | null {
 	// First check PATH
 	try {
-		execFileSync('which', [command], {stdio: 'ignore'});
+		const checkCmd = process.platform === 'win32' ? 'where' : 'which';
+		execFileSync(checkCmd, [command], {stdio: 'ignore'});
 		return command;
 	} catch (error) {
 		// Not in PATH - expected for many servers

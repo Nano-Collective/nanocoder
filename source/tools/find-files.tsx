@@ -1,128 +1,23 @@
-import {execFile} from 'node:child_process';
-import {promisify} from 'node:util';
 import {Box, Text} from 'ink';
 import React from 'react';
 
 import ToolMessage from '@/components/tool-message';
-import {
-	BUFFER_FIND_FILES_BYTES,
-	DEFAULT_FIND_FILES_RESULTS,
-	MAX_FIND_FILES_RESULTS,
-} from '@/constants';
+import {DEFAULT_FIND_FILES_RESULTS, MAX_FIND_FILES_RESULTS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
-import {DEFAULT_IGNORE_DIRS, loadGitignore} from '@/utils/gitignore-loader';
+import {findMatchingPaths} from '@/utils/file-search';
 import {calculateTokens} from '@/utils/token-calculator';
 
-const execFileAsync = promisify(execFile);
-
 /**
- * Find files matching a glob pattern using find command
+ * Find files matching a glob pattern using a cross-platform Node.js traversal
  */
 async function findFilesByPattern(
 	pattern: string,
 	cwd: string,
 	maxResults: number,
 ): Promise<{files: string[]; truncated: boolean}> {
-	try {
-		const ig = loadGitignore(cwd);
-
-		// Build find arguments array to prevent command injection
-		const findArgs: string[] = ['.'];
-
-		if (pattern.includes('{') && pattern.includes('}')) {
-			// Handle brace expansion like *.{ts,tsx}
-			const braceMatch = pattern.match(/\{([^}]+)\}/);
-			if (braceMatch) {
-				const extensions = braceMatch[1].split(',');
-				// Build: ( -name "*.ext1" -o -name "*.ext2" )
-				findArgs.push('(');
-				for (let i = 0; i < extensions.length; i++) {
-					if (i > 0) {
-						findArgs.push('-o');
-					}
-					findArgs.push('-name', `*.${extensions[i].trim()}`);
-				}
-				findArgs.push(')');
-			}
-		} else if (pattern.startsWith('**/')) {
-			// Pattern like **/*.ts - search everywhere
-			const namePattern = pattern.replace('**/', '');
-			findArgs.push('-name', namePattern);
-		} else if (pattern.includes('/**')) {
-			// Pattern like scripts/** or scripts/**/*.ts - search within a directory
-			const parts = pattern.split('/**');
-			const pathPrefix = `./${parts[0]}`;
-			const namePattern = parts[1] ? parts[1].replace(/^\//, '') : '*';
-
-			// Replace the starting '.' with pathPrefix
-			findArgs[0] = pathPrefix;
-
-			if (namePattern !== '*' && namePattern !== '') {
-				findArgs.push('-name', namePattern);
-			}
-		} else if (pattern.includes('/') && pattern.includes('*')) {
-			// Pattern like source/tools/*.ts - has both path and wildcard
-			// Split into directory path and filename pattern
-			const lastSlashIndex = pattern.lastIndexOf('/');
-			const dirPath = pattern.substring(0, lastSlashIndex);
-			const filePattern = pattern.substring(lastSlashIndex + 1);
-
-			// Start search from the directory
-			findArgs[0] = `./${dirPath}`;
-			// Only descend one level (maxdepth 1) to match the specific directory
-			findArgs.push('-maxdepth', '1', '-name', filePattern);
-		} else if (pattern.includes('*')) {
-			// Simple pattern like *.ts
-			findArgs.push('-name', pattern);
-		} else {
-			// Exact path or directory name
-			findArgs.push('-name', pattern);
-		}
-
-		// Add exclusions - dynamically generated from DEFAULT_IGNORE_DIRS
-		const exclusions = DEFAULT_IGNORE_DIRS.map(dir => `*/${dir}/*`);
-
-		for (const exclusion of exclusions) {
-			findArgs.push('-not', '-path', exclusion);
-		}
-
-		// Execute find command with array-based arguments
-		const {stdout} = await execFileAsync('find', findArgs, {
-			cwd,
-			maxBuffer: BUFFER_FIND_FILES_BYTES,
-		});
-
-		const allPaths = stdout
-			.trim()
-			.split('\n')
-			.filter(Boolean)
-			.map(line => line.replace(/^\.\//, ''))
-			.filter(path => path && path !== '.');
-
-		// Filter using gitignore and limit results
-		const paths: string[] = [];
-		for (const path of allPaths) {
-			if (!ig.ignores(path)) {
-				paths.push(path);
-
-				if (paths.length >= maxResults) {
-					break;
-				}
-			}
-		}
-
-		return {
-			files: paths,
-			truncated: allPaths.length >= maxResults || paths.length >= maxResults,
-		};
-	} catch (error: unknown) {
-		if (error instanceof Error && 'code' in error && error.code === 1) {
-			return {files: [], truncated: false};
-		}
-		throw error;
-	}
+	return findMatchingPaths(pattern, cwd, maxResults);
 }
 
 interface FindFilesArgs {

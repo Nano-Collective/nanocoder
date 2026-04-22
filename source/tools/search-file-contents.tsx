@@ -1,238 +1,17 @@
-import {execFile} from 'node:child_process';
 import path from 'node:path';
-import {promisify} from 'node:util';
 import {Box, Text} from 'ink';
 import React from 'react';
 
 import ToolMessage from '@/components/tool-message';
-import {
-	BUFFER_FIND_FILES_BYTES,
-	BUFFER_GREP_MULTIPLIER,
-	DEFAULT_SEARCH_RESULTS,
-	MAX_SEARCH_RESULTS,
-} from '@/constants';
+import {DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
-import {DEFAULT_IGNORE_DIRS, loadGitignore} from '@/utils/gitignore-loader';
+import {searchProjectContents} from '@/utils/file-search';
 import {isValidFilePath} from '@/utils/path-validation';
 import {calculateTokens} from '@/utils/token-calculator';
 
-const execFileAsync = promisify(execFile);
-
-const GREP_TIMEOUT_MS = 30_000;
 const MAX_CONTEXT_LINES = 10;
-
-interface SearchMatch {
-	file: string;
-	line: number;
-	content: string;
-}
-
-/**
- * Search file contents using grep
- */
-async function searchFileContents(
-	query: string,
-	cwd: string,
-	maxResults: number,
-	caseSensitive: boolean,
-	include?: string,
-	searchPath?: string,
-	wholeWord?: boolean,
-	contextLines?: number,
-): Promise<{matches: SearchMatch[]; truncated: boolean}> {
-	try {
-		const ig = loadGitignore(cwd);
-
-		// Build grep arguments array to prevent command injection
-		const grepArgs: string[] = [
-			'-rn', // recursive with line numbers
-			'-E', // extended regex
-			'-I', // skip binary files
-		];
-
-		// Add case sensitivity flag
-		if (!caseSensitive) {
-			grepArgs.push('-i');
-		}
-
-		// Add whole word matching
-		if (wholeWord) {
-			grepArgs.push('-w');
-		}
-
-		// Add context lines
-		const hasContext = contextLines !== undefined && contextLines > 0;
-		if (hasContext) {
-			const clamped = Math.min(contextLines, MAX_CONTEXT_LINES);
-			grepArgs.push('-C', `${clamped}`);
-		}
-
-		// Add include patterns
-		if (include) {
-			// Support brace expansion like "*.{ts,tsx}" → multiple --include args
-			const braceMatch = include.match(/^\*\.\{(.+)\}$/);
-			if (braceMatch) {
-				for (const ext of braceMatch[1].split(',')) {
-					grepArgs.push(`--include=*.${ext.trim()}`);
-				}
-			} else {
-				grepArgs.push(`--include=${include}`);
-			}
-		} else {
-			grepArgs.push('--include=*');
-		}
-
-		// Dynamically add exclusions from DEFAULT_IGNORE_DIRS
-		for (const dir of DEFAULT_IGNORE_DIRS) {
-			grepArgs.push(`--exclude-dir=${dir}`);
-		}
-
-		// Add the search query (no escaping needed with array-based args)
-		grepArgs.push(query);
-
-		// Add search path (scoped directory or cwd)
-		if (searchPath) {
-			grepArgs.push(searchPath);
-		} else {
-			grepArgs.push('.');
-		}
-
-		// Execute grep command with array-based arguments and timeout
-		const {stdout} = await execFileAsync('grep', grepArgs, {
-			cwd,
-			maxBuffer: BUFFER_FIND_FILES_BYTES * BUFFER_GREP_MULTIPLIER,
-			timeout: GREP_TIMEOUT_MS,
-		});
-
-		const matches: SearchMatch[] = [];
-		const cwdPrefix = path.resolve(cwd) + path.sep;
-
-		if (hasContext) {
-			// Context mode: split by group separator (BSD grep default: --)
-			const groups = stdout.trim().split('\n--\n');
-
-			for (const group of groups) {
-				const lines = group.split('\n').filter(Boolean);
-
-				// First pass: find file path and line number from a match line
-				let file = '';
-				let lineNum = 0;
-				for (const l of lines) {
-					const matchLine =
-						l.match(/^\.\/(.+?):(\d+):(.*)$/) || l.match(/^(.+?):(\d+):(.*)$/);
-					if (matchLine) {
-						let filePath = matchLine[1];
-						if (path.isAbsolute(filePath)) {
-							filePath = filePath.startsWith(cwdPrefix)
-								? filePath.slice(cwdPrefix.length)
-								: filePath;
-						}
-						file = filePath;
-						lineNum = parseInt(matchLine[2], 10);
-						break;
-					}
-				}
-
-				if (!file) continue;
-				if (ig.ignores(file)) continue;
-
-				// Second pass: extract content from all lines using known file path
-				const contentLines: string[] = [];
-				for (const l of lines) {
-					const prefix = l.startsWith('./') ? `./${file}` : file;
-					if (l.startsWith(`${prefix}:`)) {
-						const rest = l.slice(prefix.length + 1);
-						const colonIdx = rest.indexOf(':');
-						const num = rest.slice(0, colonIdx);
-						const text = rest.slice(colonIdx + 1);
-						contentLines.push(`${num}: ${text}`);
-					} else if (l.startsWith(`${prefix}-`)) {
-						const rest = l.slice(prefix.length + 1);
-						const dashIdx = rest.indexOf('-');
-						const num = rest.slice(0, dashIdx);
-						const text = rest.slice(dashIdx + 1);
-						contentLines.push(`${num}: ${text}`);
-					}
-				}
-
-				// Higher content limit for context blocks
-				const MAX_CONTEXT_CONTENT_LENGTH = 1500;
-				let content = contentLines.join('\n');
-				if (content.length > MAX_CONTEXT_CONTENT_LENGTH) {
-					content = content.slice(0, MAX_CONTEXT_CONTENT_LENGTH) + '…';
-				}
-
-				matches.push({file, line: lineNum, content});
-				if (matches.length >= maxResults) break;
-			}
-		} else {
-			// Standard mode: parse line-by-line
-			const lines = stdout.trim().split('\n').filter(Boolean);
-
-			for (const line of lines) {
-				// Match both relative (./path) and absolute (/abs/path) grep output
-				const match =
-					line.match(/^\.\/(.+?):(\d+):(.*)$/) ||
-					line.match(/^(.+?):(\d+):(.*)$/);
-				if (match) {
-					// Normalize to relative path from cwd
-					let filePath = match[1];
-					if (path.isAbsolute(filePath)) {
-						filePath = filePath.startsWith(cwdPrefix)
-							? filePath.slice(cwdPrefix.length)
-							: filePath;
-					}
-
-					// Skip files ignored by gitignore
-					if (ig.ignores(filePath)) {
-						continue;
-					}
-
-					// Truncate long lines to prevent token explosion
-					const MAX_CONTENT_LENGTH = 300;
-					let content = match[3].trim();
-					if (content.length > MAX_CONTENT_LENGTH) {
-						content = content.slice(0, MAX_CONTENT_LENGTH) + '…';
-					}
-
-					matches.push({
-						file: filePath,
-						line: parseInt(match[2], 10),
-						content,
-					});
-
-					// Stop once we have enough matches
-					if (matches.length >= maxResults) {
-						break;
-					}
-				}
-			}
-		}
-
-		return {
-			matches,
-			truncated: matches.length >= maxResults,
-		};
-	} catch (error: unknown) {
-		// grep returns exit code 1 when no matches found
-		if (error instanceof Error && 'code' in error && error.code === 1) {
-			return {matches: [], truncated: false};
-		}
-		// Handle timeout
-		if (
-			error instanceof Error &&
-			'killed' in error &&
-			(error as NodeJS.ErrnoException & {killed?: boolean}).killed
-		) {
-			throw new Error(
-				'Search timed out after 30 seconds. Try a more specific query or narrower path.',
-			);
-		}
-		throw error;
-	}
-}
 
 interface SearchFileContentsArgs {
 	query: string;
@@ -272,7 +51,7 @@ const executeSearchFileContents = async (
 	}
 
 	try {
-		const {matches, truncated} = await searchFileContents(
+		const {matches, truncated} = await searchProjectContents(
 			args.query,
 			cwd,
 			maxResults,
@@ -280,7 +59,7 @@ const executeSearchFileContents = async (
 			args.include,
 			searchPath,
 			args.wholeWord,
-			args.contextLines,
+			Math.min(args.contextLines ?? 0, MAX_CONTEXT_LINES),
 		);
 
 		if (matches.length === 0) {
