@@ -611,12 +611,34 @@ export default function App({
 		enterTune: modeHandlers.enterTune,
 		enterSchedulerMode,
 		handleChatMessage: chatHandler.handleChatMessage,
+		dismissActiveEditor: vscodeServer.dismissActiveEditor,
 	});
 
 	// Update the ref so VS Code prompts can be submitted
 	React.useEffect(() => {
 		handleMessageSubmitRef.current = appHandlers.handleMessageSubmit;
 	}, [appHandlers.handleMessageSubmit]);
+
+	// Wrap the message submit so that whatever the user types in the chat
+	// input is augmented with the VS Code active-editor pill. File-focused-only
+	// sends just the filename hint; an active selection inlines the code too.
+	const handleUserSubmit = React.useCallback(
+		(message: string) => {
+			const editor = vscodeServer.activeEditor;
+			let fullPrompt = message;
+			if (editor?.fileName) {
+				const hasSelection =
+					!!editor.selection && editor.startLine && editor.endLine;
+				if (hasSelection) {
+					fullPrompt = `${message}\n\n[@${editor.fileName} (lines ${editor.startLine}-${editor.endLine})]<!--vscode-context-->\n\`\`\`\n${editor.selection}\n\`\`\`<!--/vscode-context-->`;
+				} else {
+					fullPrompt = `${message}\n\n[@${editor.fileName}]`;
+				}
+			}
+			return appHandlers.handleMessageSubmit(fullPrompt);
+		},
+		[vscodeServer.activeEditor, appHandlers.handleMessageSubmit],
+	);
 
 	// Setup non-interactive mode
 	const {nonInteractiveLoadingMessage} = useNonInteractiveMode({
@@ -950,7 +972,9 @@ export default function App({
 									onSubagentToolApproval={handleSubagentToolApproval}
 									onToolConfirm={toolHandler.handleToolConfirmation}
 									onToolCancel={toolHandler.handleToolConfirmationCancel}
-									onSubmit={appHandlers.handleMessageSubmit}
+									onSubmit={handleUserSubmit}
+									activeEditor={vscodeServer.activeEditor}
+									onDismissActiveEditor={vscodeServer.dismissActiveEditor}
 									onCancel={appHandlers.handleCancel}
 									onToggleMode={appHandlers.handleToggleDevelopmentMode}
 									onToggleReasoningExpanded={() => {

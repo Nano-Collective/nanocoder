@@ -45,22 +45,8 @@
 				"command": "nanocoder.startCli",
 				"title": "Start Nanocoder CLI",
 				"category": "Nanocoder"
-			},
-			{
-				"command": "nanocoder.askAboutCode",
-				"title": "Ask Nanocoder about this",
-				"category": "Nanocoder"
 			}
 		],
-		"menus": {
-			"editor/context": [
-				{
-					"command": "nanocoder.askAboutCode",
-					"when": "editorHasSelection",
-					"group": "nanocoder"
-				}
-			]
-		},
 		"configuration": {
 			"title": "Nanocoder",
 			"properties": {

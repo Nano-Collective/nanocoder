@@ -1,6 +1,7 @@
 import test from 'ava';
 import {DEFAULT_PORT, PROTOCOL_VERSION} from './protocol.js';
 import type {
+	ActiveEditorMessage,
 	ApplyChangeMessage,
 	AssistantMessage,
 	ClientMessage,
@@ -323,6 +324,48 @@ test('ContextMessage fields are optional', t => {
 	t.is(message.diagnostics, undefined);
 });
 
+test('ActiveEditorMessage has correct structure with a selection', t => {
+	const message: ActiveEditorMessage = {
+		type: 'active_editor',
+		filePath: '/path/to/App.tsx',
+		fileName: 'App.tsx',
+		selection: 'const x = 1;',
+		startLine: 10,
+		endLine: 15,
+	};
+
+	t.is(message.type, 'active_editor');
+	t.is(message.filePath, '/path/to/App.tsx');
+	t.is(message.fileName, 'App.tsx');
+	t.is(message.selection, 'const x = 1;');
+	t.is(message.startLine, 10);
+	t.is(message.endLine, 15);
+});
+
+test('ActiveEditorMessage can represent a focused file with no selection', t => {
+	const message: ActiveEditorMessage = {
+		type: 'active_editor',
+		filePath: '/path/to/App.tsx',
+		fileName: 'App.tsx',
+	};
+
+	t.is(message.filePath, '/path/to/App.tsx');
+	t.is(message.fileName, 'App.tsx');
+	t.is(message.selection, undefined);
+	t.is(message.startLine, undefined);
+	t.is(message.endLine, undefined);
+});
+
+test('ActiveEditorMessage with no filePath represents a cleared state', t => {
+	const message: ActiveEditorMessage = {
+		type: 'active_editor',
+	};
+
+	t.is(message.type, 'active_editor');
+	t.is(message.filePath, undefined);
+	t.is(message.fileName, undefined);
+});
+
 test('DiagnosticsResponseMessage has correct structure', t => {
 	const diagnostics: DiagnosticInfo[] = [
 		{
@@ -461,7 +504,8 @@ test('ClientMessage type union includes all message types', t => {
 		{type: 'get_status'},
 		{type: 'context'},
 		{type: 'diagnostics_response', diagnostics: []},
+		{type: 'active_editor'},
 	];
 
-	t.is(messages.length, 6);
+	t.is(messages.length, 7);
 });

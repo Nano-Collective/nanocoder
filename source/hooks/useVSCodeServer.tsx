@@ -2,6 +2,7 @@ import {readFile} from 'node:fs/promises';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {DEFAULT_PORT, getVSCodeServer, VSCodeServer} from '@/vscode/index';
 import type {DiagnosticInfo} from '@/vscode/protocol';
+import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 interface UseVSCodeServerProps {
 	enabled: boolean;
@@ -24,6 +25,8 @@ interface UseVSCodeServerReturn {
 	connectionCount: number;
 	actualPort: number | null;
 	requestedPort: number;
+	activeEditor: ActiveEditorState | null;
+	dismissActiveEditor: () => void;
 	sendAssistantMessage: (content: string, isGenerating?: boolean) => void;
 	notifyFileChange: (
 		filePath: string,
@@ -34,6 +37,17 @@ interface UseVSCodeServerReturn {
 	) => string | null;
 	requestDiagnostics: (filePath?: string) => void;
 	updateStatus: () => void;
+}
+
+// Signature that identifies a specific active-editor state for dismissal.
+// If the live state matches this key, we suppress the pill. When VS Code
+// pushes a different state (new file, changed selection), the key differs
+// and the pill reappears. Exported for unit testing.
+export function activeEditorKey(
+	state: ActiveEditorState | null,
+): string | null {
+	if (!state?.filePath) return null;
+	return `${state.filePath}:${state.startLine ?? ''}-${state.endLine ?? ''}`;
 }
 
 /**
@@ -51,6 +65,9 @@ export function useVSCodeServer({
 	const [isConnected, setIsConnected] = useState(false);
 	const [connectionCount, setConnectionCount] = useState(0);
 	const [actualPort, setActualPort] = useState<number | null>(null);
+	const [rawActiveEditor, setRawActiveEditor] =
+		useState<ActiveEditorState | null>(null);
+	const [dismissedKey, setDismissedKey] = useState<string | null>(null);
 
 	// Store callbacks in refs to avoid re-creating server on callback changes
 	const onPromptRef = useRef(onPrompt);
@@ -93,6 +110,9 @@ export function useVSCodeServer({
 				onDiagnosticsResponse: diagnostics => {
 					onDiagnosticsReceivedRef.current?.(diagnostics);
 				},
+				onActiveEditor: state => {
+					setRawActiveEditor(state.filePath ? state : null);
+				},
 				onConnect: () => {
 					setIsConnected(true);
 					setConnectionCount(server.getConnectionCount());
@@ -108,6 +128,10 @@ export function useVSCodeServer({
 					const hasConnections = server.hasConnections();
 					setIsConnected(hasConnections);
 					setConnectionCount(server.getConnectionCount());
+					if (!hasConnections) {
+						setRawActiveEditor(null);
+						setDismissedKey(null);
+					}
 				},
 			});
 
@@ -180,11 +204,24 @@ export function useVSCodeServer({
 		}
 	}, [enabled, currentModel, currentProvider]);
 
+	// Suppress the pill when the live state matches the dismissed key. As
+	// soon as VS Code pushes a different file/selection the key differs and
+	// the pill reappears.
+	const rawKey = activeEditorKey(rawActiveEditor);
+	const activeEditor =
+		rawKey && rawKey === dismissedKey ? null : rawActiveEditor;
+
+	const dismissActiveEditor = useCallback(() => {
+		setDismissedKey(activeEditorKey(rawActiveEditor));
+	}, [rawActiveEditor]);
+
 	return {
 		isConnected,
 		connectionCount,
 		actualPort,
 		requestedPort: port,
+		activeEditor,
+		dismissActiveEditor,
 		sendAssistantMessage,
 		notifyFileChange,
 		requestDiagnostics,

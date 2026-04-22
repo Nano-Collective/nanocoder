@@ -576,6 +576,87 @@ test('VSCodeServer handles client messages - diagnostics_response', async t => {
 	await server.stop();
 });
 
+test('VSCodeServer handles client messages - active_editor with selection', async t => {
+	const port = getNextPort();
+	const server = new VSCodeServer(port);
+
+	const received: Array<{
+		filePath?: string;
+		fileName?: string;
+		selection?: string;
+		startLine?: number;
+		endLine?: number;
+	}> = [];
+	server.onCallbacks({
+		onActiveEditor: state => {
+			received.push(state);
+		},
+	});
+
+	await server.start();
+
+	const client = new WebSocket(`ws://127.0.0.1:${port}`);
+	await new Promise<void>(resolve => {
+		client.on('open', () => resolve());
+	});
+	await new Promise(resolve => setTimeout(resolve, 50));
+
+	client.send(
+		JSON.stringify({
+			type: 'active_editor',
+			filePath: '/path/to/App.tsx',
+			fileName: 'App.tsx',
+			selection: 'const x = 1;',
+			startLine: 10,
+			endLine: 15,
+		}),
+	);
+
+	await new Promise(resolve => setTimeout(resolve, 50));
+
+	t.is(received.length, 1);
+	t.is(received[0].filePath, '/path/to/App.tsx');
+	t.is(received[0].fileName, 'App.tsx');
+	t.is(received[0].selection, 'const x = 1;');
+	t.is(received[0].startLine, 10);
+	t.is(received[0].endLine, 15);
+
+	client.close();
+	await server.stop();
+});
+
+test('VSCodeServer handles client messages - active_editor cleared state', async t => {
+	const port = getNextPort();
+	const server = new VSCodeServer(port);
+
+	const received: Array<{filePath?: string}> = [];
+	server.onCallbacks({
+		onActiveEditor: state => {
+			received.push(state);
+		},
+	});
+
+	await server.start();
+
+	const client = new WebSocket(`ws://127.0.0.1:${port}`);
+	await new Promise<void>(resolve => {
+		client.on('open', () => resolve());
+	});
+	await new Promise(resolve => setTimeout(resolve, 50));
+
+	// A message with no filePath means "no active editor" — the CLI should
+	// treat this as a reset and clear the pill.
+	client.send(JSON.stringify({type: 'active_editor'}));
+
+	await new Promise(resolve => setTimeout(resolve, 50));
+
+	t.is(received.length, 1);
+	t.is(received[0].filePath, undefined);
+
+	client.close();
+	await server.stop();
+});
+
 test('VSCodeServer handles multiple clients', async t => {
 	const port = getNextPort();
 	const server = new VSCodeServer(port);

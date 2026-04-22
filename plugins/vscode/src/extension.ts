@@ -11,11 +11,14 @@ import {
 } from './protocol';
 
 const DEFAULT_PORT = 51820;
+const ACTIVE_EDITOR_DEBOUNCE_MS = 150;
 
 let wsClient: WebSocketClient;
 let diffManager: DiffManager;
 let statusBarItem: vscode.StatusBarItem;
 let outputChannel: vscode.OutputChannel;
+let activeEditorDebounce: NodeJS.Timeout | null = null;
+let lastActiveEditorPayload: string | null = null;
 
 export function activate(context: vscode.ExtensionContext) {
 	outputChannel = vscode.window.createOutputChannel('Nanocoder');
@@ -42,10 +45,17 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('nanocoder.connect', connect),
 		vscode.commands.registerCommand('nanocoder.disconnect', disconnect),
 		vscode.commands.registerCommand('nanocoder.startCli', startCli),
-		// Context menu command
-		vscode.commands.registerCommand('nanocoder.askAboutCode', () =>
-			sendCodeToNanocoder(),
-		),
+	);
+
+	// Push active editor state to the CLI so the input box can show an
+	// "In <file>" pill and auto-attach a selection as context on submit.
+	context.subscriptions.push(
+		vscode.window.onDidChangeActiveTextEditor(() => scheduleActiveEditorSend()),
+		vscode.window.onDidChangeTextEditorSelection(event => {
+			if (event.textEditor === vscode.window.activeTextEditor) {
+				scheduleActiveEditorSend();
+			}
+		}),
 	);
 
 	// Auto-connect if configured
@@ -81,6 +91,7 @@ async function connect(): Promise<void> {
 	if (connected) {
 		updateStatusBar(true);
 		sendWorkspaceContext();
+		sendActiveEditor();
 		vscode.window.showInformationMessage('Connected to Nanocoder CLI');
 	} else {
 		updateStatusBar(false);
@@ -270,87 +281,50 @@ function sendWorkspaceContext(): void {
 	});
 }
 
-// Send selected code to Nanocoder CLI
-function sendCodeToNanocoder(): void {
-	const editor = vscode.window.activeTextEditor;
-	if (!editor) {
-		vscode.window.showWarningMessage('No active editor');
-		return;
+// Debounce rapid selection changes before pushing active editor state
+function scheduleActiveEditorSend(): void {
+	if (activeEditorDebounce) {
+		clearTimeout(activeEditorDebounce);
 	}
-
-	const selection = editor.selection;
-	if (selection.isEmpty) {
-		vscode.window.showWarningMessage('No code selected');
-		return;
-	}
-
-	if (!wsClient.isConnected()) {
-		vscode.window
-			.showWarningMessage(
-				'Not connected to Nanocoder CLI',
-				'Connect',
-				'Start CLI',
-			)
-			.then(choice => {
-				if (choice === 'Connect') {
-					connect().then(() => sendCodeToNanocoder());
-				} else if (choice === 'Start CLI') {
-					startCli();
-				}
-			});
-		return;
-	}
-
-	const selectedText = editor.document.getText(selection);
-	const filePath = editor.document.uri.fsPath;
-	const fileName = path.basename(filePath);
-	const startLine = selection.start.line + 1;
-	const endLine = selection.end.line + 1;
-
-	// Prompt the user for their question
-	vscode.window
-		.showInputBox({
-			prompt: 'What would you like to ask about this code?',
-			placeHolder: 'Enter your question...',
-		})
-		.then(question => {
-			if (question) {
-				// Send just the question - the CLI will format the display and include the code
-				sendPromptWithContext(question, filePath, selectedText, selection, {
-					fileName,
-					startLine,
-					endLine,
-				});
-			}
-		});
+	activeEditorDebounce = setTimeout(() => {
+		activeEditorDebounce = null;
+		sendActiveEditor();
+	}, ACTIVE_EDITOR_DEBOUNCE_MS);
 }
 
-// Helper to send prompt with context
-function sendPromptWithContext(
-	prompt: string,
-	filePath: string,
-	selection: string,
-	selectionRange: vscode.Selection,
-	lineInfo: {fileName: string; startLine: number; endLine: number},
-): void {
-	wsClient.send({
-		type: 'send_prompt',
-		prompt,
-		context: {
-			filePath,
-			selection,
-			fileName: lineInfo.fileName,
-			startLine: lineInfo.startLine,
-			endLine: lineInfo.endLine,
-			cursorPosition: {
-				line: selectionRange.start.line,
-				character: selectionRange.start.character,
-			},
-		},
-	});
+// Push the current active editor + selection to the CLI. When no editor is
+// active or the document isn't a file on disk, clear the CLI-side state.
+function sendActiveEditor(): void {
+	if (!wsClient.isConnected()) {
+		return;
+	}
 
-	vscode.window.showInformationMessage('Sent to Nanocoder CLI');
-	outputChannel.appendLine(
-		`Sent prompt to CLI: ${prompt.substring(0, 100)}...`,
-	);
+	const editor = vscode.window.activeTextEditor;
+	const doc = editor?.document;
+	const isFile = doc?.uri.scheme === 'file';
+
+	const payload = (() => {
+		if (!editor || !doc || !isFile) {
+			return {type: 'active_editor' as const};
+		}
+
+		const selection = editor.selection;
+		const hasSelection = !selection.isEmpty;
+		return {
+			type: 'active_editor' as const,
+			filePath: doc.uri.fsPath,
+			fileName: path.basename(doc.uri.fsPath),
+			selection: hasSelection ? doc.getText(selection) : undefined,
+			startLine: hasSelection ? selection.start.line + 1 : undefined,
+			endLine: hasSelection ? selection.end.line + 1 : undefined,
+		};
+	})();
+
+	const serialized = JSON.stringify(payload);
+	if (serialized === lastActiveEditorPayload) {
+		return;
+	}
+	lastActiveEditorPayload = serialized;
+
+	wsClient.send(payload);
 }

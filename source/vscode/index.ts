@@ -20,6 +20,7 @@ export {
 } from './extension-installer';
 
 export {
+	type ActiveEditorMessage,
 	type ApplyChangeMessage,
 	type AssistantMessage,
 	type ClientMessage,

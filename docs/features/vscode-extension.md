@@ -6,11 +6,11 @@ sidebar_order: 8
 
 # VS Code Extension
 
-If you use VS Code as your editor, the Nanocoder extension bridges it with the CLI. When the AI proposes a file edit, you see a full diff preview in VS Code before approving. You can also right-click selected code to ask questions about it directly.
+If you use VS Code as your editor, the Nanocoder extension bridges it with the CLI. When the AI proposes a file edit, you see a full diff preview in VS Code before approving. Whatever file you have focused — and any selection inside it — is also pushed to the CLI automatically and attached to your next message.
 
 **Key features:**
 
-- **Ask About Code**: Right-click selected code to ask Nanocoder questions directly from VS Code
+- **Active editor context**: The file you're focused on in VS Code is shown as `⊡ In App.tsx` on the status line under the input (next to the mode/ctx indicators) and attached to your next message. Selecting a range of lines switches it to `⊡ App.tsx (L10-25)` and inlines the code too. The filename is truncated with an ellipsis when the terminal is narrow.
 - **Live Diff Preview**: See proposed file changes in VS Code's diff viewer before approving
 - **Diagnostics Sharing**: VS Code's LSP diagnostics are shared with Nanocoder for context
 
@@ -85,24 +85,28 @@ If you prefer to install manually or the automatic installation doesn't work:
 
 4. **Approve or reject changes**: Use the Nanocoder CLI to approve or reject the changes. The diff preview is read-only and for visualization only.
 
-5. **Ask about code**: Select code, right-click, and choose "Ask Nanocoder about this" to send questions about specific code to the CLI.
+5. **Active editor context**: Focus any file in VS Code and a `⊡ In <file>` pill appears on the status line under the Nanocoder input (alongside the mode and context indicators). Highlight a range of lines and the pill becomes `⊡ <file> (L<start>-<end>)`. When you submit, the pill is appended to your message so the AI knows what you're looking at.
 
 6. **Status bar**: The Nanocoder status bar item shows connection status:
    - `$(plug) Nanocoder` - Not connected (click to connect)
    - `$(check) Nanocoder` - Connected to CLI
    - `$(sync~spin) Connecting...` - Connection in progress
 
-## Ask About Code
+## Active Editor Context
 
-The "Ask Nanocoder about this" feature lets you quickly get help with specific code:
+The extension continuously pushes your current editor state to the CLI so Nanocoder always knows what you're looking at:
 
-1. **Select code** in any file
-2. **Right-click** and choose "Ask Nanocoder about this"
-3. **Enter your question** in the input box that appears
-4. The question and code are sent to the Nanocoder CLI
-5. Nanocoder responds with full context of your selected code
+1. **Focus any file** in VS Code — a `⊡ In App.tsx` pill appears on the status line under the Nanocoder input, inline with the mode, tune, and context indicators.
+2. **Highlight lines** to switch the pill to `⊡ App.tsx (L10-25)`. The selected code is captured and inlined into your next message.
+3. **Type your question** and submit. The pill is appended to your message as a highlighted placeholder (`[@App.tsx (lines 10-25)]`) and, if there's a selection, the code is sent to the AI as a hidden code block — kept out of the on-screen chat so it doesn't clutter the display.
+4. **No selection?** Only the filename hint is attached. If the AI needs the full contents it can read the file itself.
+5. **Dismiss the context** in three ways:
+   - Run `/clear` — clears the chat and the pill together.
+   - Press `Esc` twice at the empty input — same effect, without clearing the chat history.
+   - Leave the file in VS Code (focus a terminal or non-file tab, or open a different file) — the pill updates or disappears automatically.
 
-In the CLI, you'll see your question with a highlighted placeholder showing the file and line range (e.g., `[@App.tsx (lines 10-25)]`). The full code is sent to the AI for analysis but kept compact in the display.
+   When you dismiss via `/clear` or double-`Esc`, any new selection or file focus in VS Code brings the pill back — the dismissal only applies to the current file + line range.
+6. **Long filenames** are truncated with an ellipsis so the status line always fits on one row.
 
 ## Configuration
 
@@ -128,12 +132,11 @@ The extension can be configured in VS Code settings (`Cmd+,` / `Ctrl+,`):
 
 Access these commands via the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`):
 
-| Command                                | Description                                    |
-| -------------------------------------- | ---------------------------------------------- |
-| `Nanocoder: Connect to Nanocoder`      | Manually connect to running Nanocoder CLI      |
-| `Nanocoder: Disconnect from Nanocoder` | Disconnect from CLI                            |
-| `Nanocoder: Start Nanocoder CLI`       | Open terminal and start `nanocoder --vscode`   |
-| `Nanocoder: Ask Nanocoder about this`  | Ask about selected code (also in context menu) |
+| Command                                | Description                                  |
+| -------------------------------------- | -------------------------------------------- |
+| `Nanocoder: Connect to Nanocoder`      | Manually connect to running Nanocoder CLI    |
+| `Nanocoder: Disconnect from Nanocoder` | Disconnect from CLI                          |
+| `Nanocoder: Start Nanocoder CLI`       | Open terminal and start `nanocoder --vscode` |
 
 ## Troubleshooting
 

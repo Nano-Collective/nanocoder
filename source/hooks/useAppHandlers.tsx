@@ -95,6 +95,9 @@ interface UseAppHandlersProps {
 
 	// Chat handler
 	handleChatMessage: (message: string) => Promise<void>;
+
+	// VS Code active editor dismissal (dropped on /clear)
+	dismissActiveEditor?: () => void;
 }
 
 export interface AppHandlers {
@@ -134,6 +137,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.setChatComponents([]);
 			props.setCurrentSessionId(null);
 			props.setLiveTaskList(null);
+			props.dismissActiveEditor?.();
 		},
 		[
 			props.updateMessages,

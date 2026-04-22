@@ -3,6 +3,7 @@ import {Text} from 'ink';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {
+	activeEditorKey,
 	createFileChangeFromTool,
 	getVSCodePort,
 	isVSCodeModeEnabled,
@@ -171,6 +172,74 @@ test('createFileChangeFromTool handles large content', async t => {
 });
 
 // ============================================================================
+// activeEditorKey Tests (powers the pill dismissal logic)
+// ============================================================================
+
+test('activeEditorKey returns null for null state', t => {
+	t.is(activeEditorKey(null), null);
+});
+
+test('activeEditorKey returns null when filePath is missing', t => {
+	t.is(activeEditorKey({}), null);
+	t.is(activeEditorKey({fileName: 'orphan.ts'}), null);
+});
+
+test('activeEditorKey returns a key for a focused file without selection', t => {
+	const key = activeEditorKey({
+		filePath: '/src/App.tsx',
+		fileName: 'App.tsx',
+	});
+	t.is(typeof key, 'string');
+	t.truthy(key);
+});
+
+test('activeEditorKey is stable for identical states', t => {
+	const a = activeEditorKey({
+		filePath: '/src/App.tsx',
+		fileName: 'App.tsx',
+		selection: 'const x = 1;',
+		startLine: 10,
+		endLine: 15,
+	});
+	const b = activeEditorKey({
+		filePath: '/src/App.tsx',
+		fileName: 'App.tsx',
+		selection: 'const x = 1;',
+		startLine: 10,
+		endLine: 15,
+	});
+	t.is(a, b);
+});
+
+test('activeEditorKey differs when filePath differs', t => {
+	const a = activeEditorKey({filePath: '/src/a.ts', fileName: 'a.ts'});
+	const b = activeEditorKey({filePath: '/src/b.ts', fileName: 'b.ts'});
+	t.not(a, b);
+});
+
+test('activeEditorKey differs when line range differs', t => {
+	const base = {filePath: '/src/App.tsx', fileName: 'App.tsx'};
+	const a = activeEditorKey({...base, startLine: 10, endLine: 15});
+	const b = activeEditorKey({...base, startLine: 20, endLine: 25});
+	t.not(a, b);
+});
+
+test('activeEditorKey ignores selection text changes within the same line range', t => {
+	// Only fileName + lines form the signature — two different selections that
+	// cover the same lines should produce the same key (dismissing one stays
+	// dismissed if the user tweaks the selection within the same range).
+	const base = {
+		filePath: '/src/App.tsx',
+		fileName: 'App.tsx',
+		startLine: 10,
+		endLine: 15,
+	};
+	const a = activeEditorKey({...base, selection: 'first'});
+	const b = activeEditorKey({...base, selection: 'second'});
+	t.is(a, b);
+});
+
+// ============================================================================
 // Hook Integration Tests (using a test component)
 // ============================================================================
 
@@ -220,6 +289,8 @@ test('UseVSCodeServerReturn interface has expected methods', t => {
 	const mockReturn = {
 		isConnected: false,
 		connectionCount: 0,
+		activeEditor: null as {filePath?: string; fileName?: string} | null,
+		dismissActiveEditor: () => {},
 		sendAssistantMessage: (_content: string, _isGenerating?: boolean) => {},
 		notifyFileChange: (
 			_filePath: string,
@@ -234,6 +305,8 @@ test('UseVSCodeServerReturn interface has expected methods', t => {
 
 	t.is(typeof mockReturn.isConnected, 'boolean');
 	t.is(typeof mockReturn.connectionCount, 'number');
+	t.is(mockReturn.activeEditor, null);
+	t.is(typeof mockReturn.dismissActiveEditor, 'function');
 	t.is(typeof mockReturn.sendAssistantMessage, 'function');
 	t.is(typeof mockReturn.notifyFileChange, 'function');
 	t.is(typeof mockReturn.requestDiagnostics, 'function');

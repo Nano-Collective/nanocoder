@@ -25,6 +25,14 @@ import {
 	StatusMessage,
 } from './protocol';
 
+export interface ActiveEditorState {
+	filePath?: string;
+	fileName?: string;
+	selection?: string;
+	startLine?: number;
+	endLine?: number;
+}
+
 let cachedCliVersion: string | null = null;
 
 async function getCliVersion(): Promise<string> {
@@ -68,6 +76,7 @@ export interface VSCodeServerCallbacks {
 		diagnostics?: DiagnosticInfo[];
 	}) => void;
 	onDiagnosticsResponse?: (diagnostics: DiagnosticInfo[]) => void;
+	onActiveEditor?: (state: ActiveEditorState) => void;
 	onConnect?: () => void;
 	onDisconnect?: () => void;
 }
@@ -418,6 +427,16 @@ export class VSCodeServer {
 
 			case 'diagnostics_response':
 				this.callbacks.onDiagnosticsResponse?.(message.diagnostics);
+				break;
+
+			case 'active_editor':
+				this.callbacks.onActiveEditor?.({
+					filePath: message.filePath,
+					fileName: message.fileName,
+					selection: message.selection,
+					startLine: message.startLine,
+					endLine: message.endLine,
+				});
 				break;
 		}
 	}

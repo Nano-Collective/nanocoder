@@ -24,7 +24,8 @@ export type ClientMessage =
 	| RejectChangeMessage
 	| GetStatusMessage
 	| ContextMessage
-	| DiagnosticsResponseMessage;
+	| DiagnosticsResponseMessage
+	| ActiveEditorMessage;
 
 // File change notification (when nanocoder wants to modify a file)
 export interface FileChangeMessage {
@@ -132,6 +133,18 @@ export interface ContextMessage {
 export interface DiagnosticsResponseMessage {
 	type: 'diagnostics_response';
 	diagnostics: DiagnosticInfo[];
+}
+
+// Active editor state pushed continuously from the extension.
+// `filePath` is cleared (undefined) when no text editor is active.
+// `selection` is populated only when the user has a non-empty selection.
+export interface ActiveEditorMessage {
+	type: 'active_editor';
+	filePath?: string;
+	fileName?: string;
+	selection?: string;
+	startLine?: number;
+	endLine?: number;
 }
 
 export interface DiagnosticInfo {

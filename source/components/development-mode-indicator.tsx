@@ -12,12 +12,14 @@ import {
 	DEVELOPMENT_MODE_LABELS,
 	DEVELOPMENT_MODE_LABELS_NARROW,
 } from '@/types/core';
+import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 interface DevelopmentModeIndicatorProps {
 	developmentMode: DevelopmentMode;
 	colors: ReturnType<typeof useTheme>['colors'];
 	contextPercentUsed: number | null;
 	tune?: TuneConfig;
+	activeEditor?: ActiveEditorState | null;
 }
 
 function getContextColor(
@@ -40,8 +42,9 @@ export const DevelopmentModeIndicator = React.memo(
 		colors,
 		contextPercentUsed,
 		tune,
+		activeEditor,
 	}: DevelopmentModeIndicatorProps) => {
-		const {isNarrow} = useResponsiveTerminal();
+		const {isNarrow, actualWidth, truncate} = useResponsiveTerminal();
 		const modeLabel = isNarrow
 			? DEVELOPMENT_MODE_LABELS_NARROW[developmentMode]
 			: DEVELOPMENT_MODE_LABELS[developmentMode];
@@ -51,6 +54,46 @@ export const DevelopmentModeIndicator = React.memo(
 				? 'tune: ✓'
 				: 'tune: enabled'
 			: '';
+
+		// Truncate the filename so the whole indicator line stays within one
+		// terminal row — the other segments (mode, tune, ctx, prefix, suffix)
+		// keep their budget and we shrink just the filename with an ellipsis.
+		const editorLabel = (() => {
+			if (!activeEditor?.fileName) return null;
+			const hasSelection =
+				!!activeEditor.selection &&
+				!!activeEditor.startLine &&
+				!!activeEditor.endLine;
+			const prefix = hasSelection ? '⊡ ' : '⊡ In ';
+			const suffix = hasSelection
+				? ` (L${activeEditor.startLine}-${activeEditor.endLine})`
+				: '';
+
+			const shiftHint =
+				isNarrow && developmentMode !== 'scheduler'
+					? ' (Shift+Tab to cycle)'
+					: '';
+			const tuneSegment = tuneLabel ? ` · ${tuneLabel}` : '';
+			const ctxSegment =
+				contextPercentUsed !== null ? ` · ctx: ${contextPercentUsed}%` : '';
+
+			const usedWidth =
+				modeLabel.length +
+				shiftHint.length +
+				tuneSegment.length +
+				ctxSegment.length +
+				` · ${prefix}`.length +
+				suffix.length;
+
+			const minFilenameLen = 8;
+			const maxFilenameLen = Math.max(
+				minFilenameLen,
+				actualWidth - usedWidth - 1,
+			);
+			const filename = truncate(activeEditor.fileName, maxFilenameLen);
+
+			return `${prefix}${filename}${suffix}`;
+		})();
 
 		return (
 			<Box marginTop={1}>
@@ -83,6 +126,12 @@ export const DevelopmentModeIndicator = React.memo(
 						<Text color={getContextColor(contextPercentUsed, colors)}>
 							ctx: {contextPercentUsed}%
 						</Text>
+					</>
+				)}
+				{editorLabel && (
+					<>
+						<Text color={colors.secondary}> · </Text>
+						<Text color={colors.info}>{editorLabel}</Text>
 					</>
 				)}
 			</Box>

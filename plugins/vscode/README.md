@@ -4,7 +4,7 @@ VS Code integration for [Nanocoder](https://github.com/Nano-Collective/nanocoder
 
 ## Features
 
-- **Ask About Code**: Right-click on selected code to ask Nanocoder questions about it directly from VS Code
+- **Active editor context**: The file you're focused on (and any selection inside it) is pushed to the CLI automatically and shown as a pill on the status line under the Nanocoder input (next to the mode, tune, and context indicators). The pill is attached to your next message, and long filenames are truncated so the line stays within one terminal row
 - **Live Diff Preview**: See proposed file changes in VS Code's diff viewer before approving them in the CLI
 - **Automatic Connection**: Seamlessly connects to the Nanocoder CLI when running with `--vscode`
 - **Status Bar Integration**: Quick connection status and controls from the VS Code status bar
@@ -100,17 +100,21 @@ nanocoder --vscode --vscode-port 51821
    - Syntax highlighting for the file type
 4. **Approve/reject in CLI**: Use the Nanocoder CLI to approve or reject changes
 
-### Ask About Code (Context Menu)
+### Active Editor Context
 
-Select code in any file and right-click to see "Ask Nanocoder about this". This lets you:
+The extension continuously pushes your current editor state to the CLI so the status line under the input always reflects what you're looking at:
 
-1. Select any code in VS Code
-2. Right-click and choose "Ask Nanocoder about this"
-3. Enter your question in the input box
-4. The question and code context are sent to the Nanocoder CLI
-5. Nanocoder responds in the CLI with full context of your selected code
+1. **Focus any file** — a `⊡ In App.tsx` pill appears on the Nanocoder status line (alongside the mode, tune, and context indicators).
+2. **Select a range** — the pill switches to `⊡ App.tsx (L10-25)` and the selected code is captured for the next message.
+3. **Submit your message** — the pill is appended as a highlighted placeholder (e.g., `[@App.tsx (lines 10-25)]`). When a selection is present, the code is sent as a hidden block so the AI has it without cluttering the chat view.
+4. **No selection?** Only the filename hint is attached. The AI can read the file itself if it needs more.
+5. **Dismiss the context** with any of:
+   - `/clear` — clears chat and pill together.
+   - `Esc` twice at the empty input — drops the pill without clearing chat.
+   - Moving focus away from the file (open another file, a terminal, or a non-file tab) — the pill updates or disappears on its own.
 
-The code reference appears in the CLI as a highlighted placeholder (e.g., `[@App.tsx (lines 10-25)]`) while the full code is sent to the AI for analysis.
+   After a manual dismissal, any new selection or focus change in VS Code brings the pill back.
+6. **Long filenames** are truncated with an ellipsis so the status line always fits on one row.
 
 ### Commands
 
@@ -121,7 +125,6 @@ Access via Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
 | `Nanocoder: Connect to Nanocoder`      | Manually connect to the running CLI          |
 | `Nanocoder: Disconnect from Nanocoder` | Disconnect from the CLI                      |
 | `Nanocoder: Start Nanocoder CLI`       | Open a terminal and run `nanocoder --vscode` |
-| `Nanocoder: Ask Nanocoder about this`  | Ask about selected code (also in context menu) |
 
 ### Status Bar
 
@@ -172,14 +175,15 @@ The extension and CLI communicate via JSON messages over WebSocket:
 
 ### Extension → CLI
 
-| Message Type           | Description                                           |
-| ---------------------- | ----------------------------------------------------- |
-| `send_prompt`          | User question with optional code selection context    |
-| `apply_change`         | User approved a file change                           |
-| `reject_change`        | User rejected a file change                           |
-| `context`              | Workspace info (open files, active file, diagnostics) |
-| `diagnostics_response` | LSP diagnostics data from VS Code                     |
-| `get_status`           | Request current CLI status                            |
+| Message Type           | Description                                                             |
+| ---------------------- | ----------------------------------------------------------------------- |
+| `send_prompt`          | User question with optional code selection context                      |
+| `apply_change`         | User approved a file change                                             |
+| `reject_change`        | User rejected a file change                                             |
+| `context`              | Workspace info (open files, active file, diagnostics)                   |
+| `diagnostics_response` | LSP diagnostics data from VS Code                                       |
+| `active_editor`        | Focused file + optional selection, pushed on focus/selection change     |
+| `get_status`           | Request current CLI status                                              |
 
 ## Troubleshooting
 

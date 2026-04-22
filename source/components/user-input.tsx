@@ -19,6 +19,7 @@ import {
 } from '@/utils/file-autocomplete';
 import {handleFileMention} from '@/utils/file-mention-handler';
 import {assemblePrompt} from '@/utils/prompt-processor';
+import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 interface ChatProps {
 	onSubmit?: (message: string) => void;
@@ -33,6 +34,8 @@ interface ChatProps {
 	developmentMode?: DevelopmentMode; // Current development mode
 	contextPercentUsed?: number | null; // Context window usage percentage
 	tune?: TuneConfig; // Model mode configuration
+	activeEditor?: ActiveEditorState | null; // VS Code active file + optional selection
+	onDismissActiveEditor?: () => void; // Dismiss the active editor pill on clear/escape
 }
 
 export default function UserInput({
@@ -48,6 +51,8 @@ export default function UserInput({
 	developmentMode = 'normal',
 	contextPercentUsed,
 	tune,
+	activeEditor,
+	onDismissActiveEditor,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
 	const {colors} = useTheme();
@@ -272,11 +277,19 @@ export default function UserInput({
 		if (showClearMessage) {
 			resetInput();
 			resetUIState();
+			onDismissActiveEditor?.();
 			focus('user-input');
 		} else {
 			setShowClearMessage(true);
 		}
-	}, [showClearMessage, resetInput, resetUIState, setShowClearMessage, focus]);
+	}, [
+		showClearMessage,
+		resetInput,
+		resetUIState,
+		onDismissActiveEditor,
+		setShowClearMessage,
+		focus,
+	]);
 
 	// History navigation
 	const handleHistoryNavigation = useCallback(
@@ -587,6 +600,7 @@ export default function UserInput({
 				colors={colors}
 				contextPercentUsed={contextPercentUsed ?? null}
 				tune={tune}
+				activeEditor={activeEditor}
 			/>
 		</>
 	);

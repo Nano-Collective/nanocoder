@@ -13,6 +13,7 @@ import type {DevelopmentMode, ToolCall, TuneConfig} from '@/types';
 import type {PendingQuestion} from '@/utils/question-queue';
 import type {PendingToolApproval} from '@/utils/tool-approval-queue';
 import {LiveCompactCounts} from '@/utils/tool-result-display';
+import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 export interface ChatInputProps {
 	// Execution state
@@ -57,6 +58,10 @@ export interface ChatInputProps {
 	onToggleMode: () => void;
 	onToggleReasoningExpanded: () => void;
 	tune?: TuneConfig;
+
+	// VS Code active editor pushed from the extension (filename + optional selection)
+	activeEditor?: ActiveEditorState | null;
+	onDismissActiveEditor?: () => void;
 }
 
 /**
@@ -98,6 +103,8 @@ export function ChatInput({
 	onToggleMode,
 	onToggleReasoningExpanded,
 	tune,
+	activeEditor,
+	onDismissActiveEditor,
 }: ChatInputProps): React.ReactElement {
 	const {colors} = useTheme();
 
@@ -159,6 +166,8 @@ export function ChatInput({
 					developmentMode={developmentMode}
 					contextPercentUsed={contextPercentUsed}
 					tune={tune}
+					activeEditor={activeEditor}
+					onDismissActiveEditor={onDismissActiveEditor}
 				/>
 			) : /* Client Missing */
 			mcpInitialized && !client ? (
