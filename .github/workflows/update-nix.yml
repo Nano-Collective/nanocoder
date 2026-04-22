@@ -43,8 +43,7 @@ jobs:
 
       - name: Update Nix package
         run: |
-          chmod +x scripts/update-nix-version.sh
-          ./scripts/update-nix-version.sh "$VERSION"
+          nix run nixpkgs#nix-update -- --flake default --version "$VERSION" --build
         env:
           VERSION: ${{ inputs.version }}
 
@@ -52,7 +51,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add nix/packages/default/default.nix
+          git add flake.nix
           git commit -m "chore: update nix package to v$VERSION" || echo "No changes to commit"
           git push origin main
         env:
