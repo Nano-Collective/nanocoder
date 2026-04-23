@@ -16,6 +16,7 @@ import type {
 	MCPInitResult,
 	MCPServer,
 	MCPTool,
+	MCPToolInputSchema,
 	Tool,
 	ToolParameterSchema,
 } from '@/types/index';
@@ -140,7 +141,8 @@ export class MCPClient {
 				const tools: MCPTool[] = toolsResult.tools.map(tool => ({
 					name: tool.name,
 					description: tool.description || undefined,
-					inputSchema: tool.inputSchema,
+					// MCP SDK types properties as Record<string, object>; cast to JSONSchema7 at protocol boundary
+					inputSchema: tool.inputSchema as MCPToolInputSchema | undefined,
 					serverName: normalizedServer.name,
 				}));
 
@@ -275,13 +277,7 @@ export class MCPClient {
 			for (const mcpTool of serverTools) {
 				// Convert MCP tool to nanocoder Tool format
 				// Use the original tool name for better model compatibility
-				const schema = mcpTool.inputSchema as
-					| {
-							type?: string;
-							properties?: Record<string, unknown>;
-							required?: string[];
-					  }
-					| undefined;
+				const schema = mcpTool.inputSchema;
 
 				const tool: Tool = {
 					type: 'function',
@@ -325,7 +321,7 @@ export class MCPClient {
 						? `[MCP:${serverName}] ${mcpTool.description}`
 						: `MCP tool from ${serverName}`,
 					inputSchema: jsonSchema<Record<string, unknown>>(
-						(mcpTool.inputSchema as unknown) || {type: 'object'},
+						mcpTool.inputSchema || {type: 'object'},
 					),
 					// Medium risk: MCP tools require approval unless explicitly configured in the server's alwaysAllow list or in auto-accept mode
 					needsApproval: () => {
@@ -452,14 +448,13 @@ export class MCPClient {
 		const sanitizedArgs = {...args};
 
 		if (toolDef?.inputSchema) {
-			const schema = toolDef.inputSchema as {
-				properties?: Record<string, {type?: string}>;
-			};
+			const schema = toolDef.inputSchema;
 			if (schema.properties) {
 				for (const [key, value] of Object.entries(args)) {
 					const propSchema = schema.properties[key];
 					// Only coerce if the schema explicitly demands a string and we have an object
 					if (
+						typeof propSchema === 'object' &&
 						propSchema?.type === 'string' &&
 						typeof value === 'object' &&
 						value !== null
