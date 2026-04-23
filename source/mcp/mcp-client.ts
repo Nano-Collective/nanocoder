@@ -32,7 +32,7 @@ import {
 	startMetrics,
 } from '@/utils/logging/performance.js';
 import {getSafeMemory} from '@/utils/logging/safe-process.js';
-import {ensureString} from '@/utils/type-helpers';
+import {ensureString, isPlainObject} from '@/utils/type-helpers';
 import {TransportFactory} from './transport-factory.js';
 
 export class MCPClient {
@@ -141,8 +141,11 @@ export class MCPClient {
 				const tools: MCPTool[] = toolsResult.tools.map(tool => ({
 					name: tool.name,
 					description: tool.description || undefined,
-					// MCP SDK types properties as Record<string, object>; cast to JSONSchema7 at protocol boundary
-					inputSchema: tool.inputSchema as MCPToolInputSchema | undefined,
+					// MCP SDK types inputSchema as Record<string, object>; validate at protocol boundary
+					// before trusting the shape as JSONSchema7
+					inputSchema: isPlainObject(tool.inputSchema)
+						? (tool.inputSchema as MCPToolInputSchema)
+						: undefined,
 					serverName: normalizedServer.name,
 				}));
 
