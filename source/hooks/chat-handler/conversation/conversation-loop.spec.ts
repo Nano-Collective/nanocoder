@@ -1,7 +1,16 @@
 import test from 'ava';
+import {clearAppConfig} from '@/config/index.js';
 import {resetShutdownManager} from '@/utils/shutdown/shutdown-manager.js';
 import {processAssistantResponse, resetFallbackNotice} from './conversation-loop.js';
 import type {LLMChatResponse, Message, ToolCall, ToolResult} from '@/types/core';
+import {
+	resetAutoCompactSession,
+	setAutoCompactEnabled,
+} from '@/utils/auto-compact.js';
+import {
+	resetSessionContextLimit,
+	setSessionContextLimit,
+} from '@/models/models-dev-client.js';
 
 // The ShutdownManager singleton is created as a side effect of transitive
 // imports (via @/utils/logging). Its uncaughtException/unhandledRejection
@@ -403,7 +412,7 @@ test.serial('processAssistantResponse - no reasoning in chat queue by default', 
 });
 
 test.serial('processAssistantResponse - renders reasoning in chat queue', async t => {
-	const reasoningMessage = 'Here is my reasoning!' 
+	const reasoningMessage = 'Here is my reasoning!';
 	const queuedComponents: any[] = [];
 	const params = createDefaultParams({
 		client: createMockClient({
@@ -424,4 +433,129 @@ test.serial('processAssistantResponse - renders reasoning in chat queue', async 
 		(c: any) => c.props?.reasoning === reasoningMessage
 	);
 	t.is(assistantReasoning.length, 1, 'Should render exactly one reasoning component in chat queue');
+});
+
+// ============================================================================
+// Token Count Reset After Compression Tests
+// ============================================================================
+
+/**
+ * Helper to reset shared state before each auto-compact token-count test.
+ * The FallbackTokenizer uses 4 chars per token; setSessionContextLimit lets
+ * us control the context window so we can deterministically trigger or avoid
+ * compression by adjusting message size vs threshold.
+ */
+function setupAutoCompactTestEnv() {
+	resetAutoCompactSession();
+	setAutoCompactEnabled(true);
+	resetSessionContextLimit();
+	clearAppConfig();
+}
+
+test.serial.beforeEach(() => {
+	setupAutoCompactTestEnv();
+});
+
+test.serial.after.always(() => {
+	setupAutoCompactTestEnv();
+});
+
+test.serial('processAssistantResponse - resets token count after successful auto-compaction', async t => {
+	// Set a small session context limit (100 tokens) with a low threshold (50%).
+	// A large user message will exceed 50% of 100 tokens, triggering compression.
+	// FallbackTokenizer counts ~1 token per 4 chars, so a 300-char message is
+	// ~75 tokens + overhead, well above 50/100 = 50%.
+	setSessionContextLimit(100);
+
+	const tokenCountCalls: number[] = [];
+	const messagesSetCalls: any[][] = [];
+
+	const params = createDefaultParams({
+		client: createMockClient({
+			content: 'Done.',
+			toolCalls: undefined,
+			toolsDisabled: false,
+		}),
+		messages: [{role: 'user', content: 'x'.repeat(300)}],
+		currentProvider: 'openai',
+		currentModel: 'gpt-4',
+		setTokenCount: (count: number) => {
+			tokenCountCalls.push(count);
+		},
+		setMessages: (msgs: any[]) => {
+			messagesSetCalls.push(msgs);
+		},
+		addToChatQueue: () => {},
+	});
+
+	await processAssistantResponse(params);
+
+	// There should be at least two setTokenCount(0) calls:
+	//   1. The initial reset before streaming (line 180 in conversation-loop.tsx)
+	//   2. The post-compression reset (the new line added by this fix)
+	const zeroCalls = tokenCountCalls.filter(v => v === 0);
+	t.true(zeroCalls.length >= 2, `Expected ≥2 calls to setTokenCount(0), got ${zeroCalls.length}`);
+
+	// Verify that setMessages was called with compressed messages (shorter than original)
+	const lastMessagesCall = messagesSetCalls[messagesSetCalls.length - 1];
+	t.truthy(lastMessagesCall, 'setMessages should have been called');
+	t.true(Array.isArray(lastMessagesCall), 'setMessages argument should be an array');
+});
+
+test.serial('processAssistantResponse - does not extra-reset token count when compression returns null', async t => {
+	// Set a large session context limit so the usage percentage stays below threshold.
+	// Compression will NOT trigger, meaning only the initial setTokenCount(0) fires.
+	setSessionContextLimit(999_999);
+
+	const tokenCountCalls: number[] = [];
+
+	const params = createDefaultParams({
+		client: createMockClient({
+			content: 'Done.',
+			toolCalls: undefined,
+			toolsDisabled: false,
+		}),
+		messages: [{role: 'user', content: 'Hello'}],
+		currentProvider: 'openai',
+		currentModel: 'gpt-4',
+		setTokenCount: (count: number) => {
+			tokenCountCalls.push(count);
+		},
+		addToChatQueue: () => {},
+	});
+
+	await processAssistantResponse(params);
+
+	// Only one setTokenCount(0) — the initial streaming reset at line 180.
+	const zeroCalls = tokenCountCalls.filter(v => v === 0);
+	t.is(zeroCalls.length, 1, `Expected exactly 1 call to setTokenCount(0), got ${zeroCalls.length}`);
+});
+
+test.serial('processAssistantResponse - does not extra-reset token count when autoCompact is disabled via session override', async t => {
+	// Even though context limit is tiny, disabling auto-compact should prevent compression.
+	setSessionContextLimit(100);
+	setAutoCompactEnabled(false);
+
+	const tokenCountCalls: number[] = [];
+
+	const params = createDefaultParams({
+		client: createMockClient({
+			content: 'Done.',
+			toolCalls: undefined,
+			toolsDisabled: false,
+		}),
+		messages: [{role: 'user', content: 'x'.repeat(300)}],
+		currentProvider: 'openai',
+		currentModel: 'gpt-4',
+		setTokenCount: (count: number) => {
+			tokenCountCalls.push(count);
+		},
+		addToChatQueue: () => {},
+	});
+
+	await processAssistantResponse(params);
+
+	// Only one setTokenCount(0) — the initial streaming reset at line 180.
+	const zeroCalls = tokenCountCalls.filter(v => v === 0);
+	t.is(zeroCalls.length, 1, `Expected exactly 1 call to setTokenCount(0), got ${zeroCalls.length}`);
 });
