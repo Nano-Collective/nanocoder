@@ -102,9 +102,7 @@ export default function AgentProgress({
 		</Box>
 	);
 
-	return (
-		<ToolMessage message={messageContent} hideBox={true} isLive={isLive} />
-	);
+	return <ToolMessage message={messageContent} hideBox={true} />;
 }
 
 /**
