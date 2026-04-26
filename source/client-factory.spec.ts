@@ -5,6 +5,7 @@ import test from 'ava';
 import {ConfigurationError, createLLMClient} from './client-factory';
 import type {AIProviderConfig} from '@/types/config';
 import {clearAppConfig, reloadAppConfig} from '@/config/index';
+import {resetPreferencesCache} from '@/config/preferences';
 
 console.log('\nclient-factory.spec.ts');
 
@@ -1174,6 +1175,85 @@ test.serial(
 		t.truthy(result.client);
 		t.is(result.actualProvider, 'TestProvider');
 		t.is(result.client.getCurrentModel(), 'model1');
+	},
+);
+
+// Regression for #460: post-config-wizard, preferences.lastProvider may name a
+// provider that no longer exists. createLLMClient() (no args) must fall back
+// to an available provider rather than throw.
+test.serial(
+	'createLLMClient: tolerates stale preferences.lastProvider missing from config',
+	async t => {
+		globalThis.fetch = createMockFetch(true, 200);
+
+		const configDir = join(testDir, 'stale-last-provider-test');
+		mkdirSync(configDir, {recursive: true});
+
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'NewProvider',
+							baseUrl: 'http://localhost:8000/v1',
+							models: ['model1'],
+						},
+					],
+				},
+			},
+			configDir,
+		);
+
+		writeFileSync(
+			join(configDir, 'nanocoder-preferences.json'),
+			JSON.stringify({lastProvider: 'GoneProvider'}, null, 2),
+		);
+
+		process.cwd = () => configDir;
+		clearAppConfig();
+		reloadAppConfig();
+		resetPreferencesCache();
+
+		const result = await createLLMClient();
+
+		t.truthy(result);
+		t.truthy(result.client);
+		t.is(result.actualProvider, 'NewProvider');
+	},
+);
+
+test.serial(
+	'createLLMClient: throws when stale provider is passed explicitly',
+	async t => {
+		globalThis.fetch = createMockFetch(true, 200);
+
+		const configDir = join(testDir, 'explicit-stale-provider-test');
+		mkdirSync(configDir, {recursive: true});
+
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'NewProvider',
+							baseUrl: 'http://localhost:8000/v1',
+							models: ['model1'],
+						},
+					],
+				},
+			},
+			configDir,
+		);
+
+		process.cwd = () => configDir;
+		clearAppConfig();
+		reloadAppConfig();
+
+		const error = await t.throwsAsync(createLLMClient('GoneProvider'), {
+			instanceOf: ConfigurationError,
+		});
+
+		t.true(error.message.includes("Provider 'GoneProvider' not found"));
 	},
 );
 
