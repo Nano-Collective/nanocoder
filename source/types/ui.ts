@@ -63,7 +63,18 @@ export type ThemePreset =
 	| 'palenight'
 	| 'horizon'
 	| 'kanagawa'
-	| 'aurora-borealis';
+	| 'aurora-borealis'
+	| 'high-contrast-dark'
+	| 'high-contrast-light'
+	| 'everforest-dark'
+	| 'everforest-light'
+	| 'vscode-dark-plus'
+	| 'vscode-light-plus'
+	| 'darcula'
+	| 'papercolor-light'
+	| 'papercolor-dark'
+	| 'amber-terminal'
+	| 'poimandres';
 
 export type NanocoderShape =
 	| 'block'

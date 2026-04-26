@@ -6,7 +6,7 @@ import type {Theme, ThemePreset} from '@/types/ui';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Load themes from JSON at startup — keeps 39 theme definitions out of source code.
+// Load themes from JSON at startup — keeps 50 theme definitions out of source code.
 // Path resolves from dist/config/ back to source/config/themes.json (included in package.json files).
 const themesPath = join(__dirname, '../../source/config/themes.json');
 export const themes: Record<ThemePreset, Theme> = JSON.parse(

@@ -783,5 +783,232 @@
 			"diffRemovedText": "#ff006e",
 			"gradientColors": ["#00ff9f", "#00d4ff", "#7b68ee"]
 		}
+	},
+	"high-contrast-dark": {
+		"name": "high-contrast-dark",
+		"displayName": "High Contrast Dark",
+		"themeType": "dark",
+		"colors": {
+			"text": "#ffffff",
+			"base": "#000000",
+			"primary": "#ffff00",
+			"tool": "#00ffff",
+			"success": "#00ff00",
+			"error": "#ff4b4b",
+			"secondary": "#bfbfbf",
+			"info": "#5dade2",
+			"warning": "#ffbf00",
+			"diffAdded": "#003800",
+			"diffRemoved": "#3a0000",
+			"diffAddedText": "#00ff00",
+			"diffRemovedText": "#ff6b6b",
+			"gradientColors": ["#ffff00", "#00ffff", "#ffffff"]
+		}
+	},
+	"high-contrast-light": {
+		"name": "high-contrast-light",
+		"displayName": "High Contrast Light",
+		"themeType": "light",
+		"colors": {
+			"text": "#000000",
+			"base": "#ffffff",
+			"primary": "#0000ee",
+			"tool": "#005a9c",
+			"success": "#006400",
+			"error": "#b00020",
+			"secondary": "#3f3f3f",
+			"info": "#0047ab",
+			"warning": "#8a5a00",
+			"diffAdded": "#d7ffd7",
+			"diffRemoved": "#ffd7d7",
+			"diffAddedText": "#006400",
+			"diffRemovedText": "#b00020",
+			"gradientColors": ["#0000ee", "#005a9c", "#000000"]
+		}
+	},
+	"everforest-dark": {
+		"name": "everforest-dark",
+		"displayName": "Everforest Dark",
+		"themeType": "dark",
+		"colors": {
+			"text": "#d3c6aa",
+			"base": "#2d353b",
+			"primary": "#a7c080",
+			"tool": "#7fbbb3",
+			"success": "#a7c080",
+			"error": "#e67e80",
+			"secondary": "#859289",
+			"info": "#7fbbb3",
+			"warning": "#dbbc7f",
+			"diffAdded": "#343f34",
+			"diffRemoved": "#443333",
+			"diffAddedText": "#a7c080",
+			"diffRemovedText": "#e67e80",
+			"gradientColors": ["#a7c080", "#7fbbb3", "#d699b6"]
+		}
+	},
+	"everforest-light": {
+		"name": "everforest-light",
+		"displayName": "Everforest Light",
+		"themeType": "light",
+		"colors": {
+			"text": "#5c6a72",
+			"base": "#fdf6e3",
+			"primary": "#8da101",
+			"tool": "#35a77c",
+			"success": "#8da101",
+			"error": "#f85552",
+			"secondary": "#939f91",
+			"info": "#3a94c5",
+			"warning": "#dfa000",
+			"diffAdded": "#eef2d5",
+			"diffRemoved": "#f8dfd8",
+			"diffAddedText": "#8da101",
+			"diffRemovedText": "#f85552",
+			"gradientColors": ["#8da101", "#35a77c", "#df69ba"]
+		}
+	},
+	"vscode-dark-plus": {
+		"name": "vscode-dark-plus",
+		"displayName": "VS Code Dark+",
+		"themeType": "dark",
+		"colors": {
+			"text": "#d4d4d4",
+			"base": "#1e1e1e",
+			"primary": "#569cd6",
+			"tool": "#4ec9b0",
+			"success": "#6a9955",
+			"error": "#f44747",
+			"secondary": "#808080",
+			"info": "#9cdcfe",
+			"warning": "#dcdcaa",
+			"diffAdded": "#1f3a24",
+			"diffRemoved": "#3a1f1f",
+			"diffAddedText": "#6a9955",
+			"diffRemovedText": "#f44747"
+		}
+	},
+	"vscode-light-plus": {
+		"name": "vscode-light-plus",
+		"displayName": "VS Code Light+",
+		"themeType": "light",
+		"colors": {
+			"text": "#000000",
+			"base": "#ffffff",
+			"primary": "#0000ff",
+			"tool": "#267f99",
+			"success": "#008000",
+			"error": "#cd3131",
+			"secondary": "#6a737d",
+			"info": "#0451a5",
+			"warning": "#795e26",
+			"diffAdded": "#e6ffed",
+			"diffRemoved": "#ffeef0",
+			"diffAddedText": "#008000",
+			"diffRemovedText": "#cd3131"
+		}
+	},
+	"darcula": {
+		"name": "darcula",
+		"displayName": "Darcula",
+		"themeType": "dark",
+		"colors": {
+			"text": "#a9b7c6",
+			"base": "#2b2b2b",
+			"primary": "#cc7832",
+			"tool": "#6897bb",
+			"success": "#6a8759",
+			"error": "#ff6b68",
+			"secondary": "#808080",
+			"info": "#9876aa",
+			"warning": "#bbb529",
+			"diffAdded": "#294436",
+			"diffRemoved": "#4b2b2b",
+			"diffAddedText": "#6a8759",
+			"diffRemovedText": "#ff6b68",
+			"gradientColors": ["#cc7832", "#6897bb", "#9876aa"]
+		}
+	},
+	"papercolor-light": {
+		"name": "papercolor-light",
+		"displayName": "PaperColor Light",
+		"themeType": "light",
+		"colors": {
+			"text": "#444444",
+			"base": "#eeeeee",
+			"primary": "#005faf",
+			"tool": "#0087af",
+			"success": "#008700",
+			"error": "#af0000",
+			"secondary": "#878787",
+			"info": "#005f87",
+			"warning": "#af5f00",
+			"diffAdded": "#d7ffd7",
+			"diffRemoved": "#ffd7d7",
+			"diffAddedText": "#008700",
+			"diffRemovedText": "#af0000"
+		}
+	},
+	"papercolor-dark": {
+		"name": "papercolor-dark",
+		"displayName": "PaperColor Dark",
+		"themeType": "dark",
+		"colors": {
+			"text": "#d0d0d0",
+			"base": "#1c1c1c",
+			"primary": "#5fafd7",
+			"tool": "#00afaf",
+			"success": "#afdf5f",
+			"error": "#df5f5f",
+			"secondary": "#808080",
+			"info": "#5fafd7",
+			"warning": "#ffaf00",
+			"diffAdded": "#263b26",
+			"diffRemoved": "#3b2626",
+			"diffAddedText": "#afdf5f",
+			"diffRemovedText": "#df5f5f"
+		}
+	},
+	"amber-terminal": {
+		"name": "amber-terminal",
+		"displayName": "Amber Terminal",
+		"themeType": "dark",
+		"colors": {
+			"text": "#ffb000",
+			"base": "#120900",
+			"primary": "#ffb000",
+			"tool": "#ffcc55",
+			"success": "#ffd27a",
+			"error": "#ff7043",
+			"secondary": "#9c6b1f",
+			"info": "#ffc04d",
+			"warning": "#ffe08a",
+			"diffAdded": "#2d2300",
+			"diffRemoved": "#351400",
+			"diffAddedText": "#ffd27a",
+			"diffRemovedText": "#ff7043",
+			"gradientColors": ["#ff8c00", "#ffb000", "#ffe08a"]
+		}
+	},
+	"poimandres": {
+		"name": "poimandres",
+		"displayName": "Poimandres",
+		"themeType": "dark",
+		"colors": {
+			"text": "#a6accd",
+			"base": "#1b1e28",
+			"primary": "#add7ff",
+			"tool": "#5de4c7",
+			"success": "#5de4c7",
+			"error": "#d0679d",
+			"secondary": "#767c9d",
+			"info": "#89ddff",
+			"warning": "#fffac2",
+			"diffAdded": "#1f3d36",
+			"diffRemoved": "#3d1f2d",
+			"diffAddedText": "#5de4c7",
+			"diffRemovedText": "#d0679d",
+			"gradientColors": ["#add7ff", "#5de4c7", "#d0679d"]
+		}
 	}
 }
