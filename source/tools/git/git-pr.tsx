@@ -7,6 +7,7 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 
+import {getCurrentMode} from '@/context/mode-context';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
@@ -270,6 +271,11 @@ const gitPrCoreTool = tool({
 	}),
 	// Approval varies by action
 	needsApproval: (args: GitPrInput) => {
+		const mode = getCurrentMode();
+
+		// Yolo mode auto-executes everything
+		if (mode === 'yolo') return false;
+
 		// ALWAYS_APPROVE for create (user should see title/body)
 		if (args.create) {
 			return true;
