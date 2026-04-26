@@ -412,6 +412,9 @@ export const processAssistantResponse = async (
 			if (compressed) {
 				// Compression was performed, update messages
 				setMessages(compressed);
+				// Reset stale streaming token count to avoid double-counting
+				// with calculateTokenBreakdown which already counts compacted tokens
+				setTokenCount(0);
 			}
 		}
 	} catch (_error) {
