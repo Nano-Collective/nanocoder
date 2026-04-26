@@ -1,6 +1,11 @@
 import test from 'ava';
 import React from 'react';
-import {createClearMessagesHandler, handleMessageSubmission, parseContextLimit} from './app-util.js';
+import {
+	createClearMessagesHandler,
+	handleMessageSubmission,
+	parseContextLimit,
+	parseCustomCommandArgs,
+} from './app-util.js';
 import type {MessageSubmissionOptions} from '@/types/index';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
@@ -48,39 +53,54 @@ test('slash command parsing - handles command with multiple args', t => {
 
 // Test custom command argument extraction
 test('custom command args extraction - with arguments', t => {
-	const message = '/mycommand arg1 arg2 arg3';
-	const commandName = 'mycommand';
-	const args = message
-		.slice(commandName.length + 2)
-		.trim()
-		.split(/\s+/)
-		.filter(arg => arg);
-
-	t.deepEqual(args, ['arg1', 'arg2', 'arg3']);
+	t.deepEqual(parseCustomCommandArgs('arg1 arg2 arg3'), [
+		'arg1',
+		'arg2',
+		'arg3',
+	]);
 });
 
 test('custom command args extraction - no arguments', t => {
-	const message = '/mycommand';
-	const commandName = 'mycommand';
-	const args = message
-		.slice(commandName.length + 2)
-		.trim()
-		.split(/\s+/)
-		.filter(arg => arg);
-
-	t.deepEqual(args, []);
+	t.deepEqual(parseCustomCommandArgs(''), []);
 });
 
 test('custom command args extraction - extra whitespace', t => {
-	const message = '/mycommand   arg1    arg2  ';
-	const commandName = 'mycommand';
-	const args = message
-		.slice(commandName.length + 2)
-		.trim()
-		.split(/\s+/)
-		.filter(arg => arg);
+	t.deepEqual(parseCustomCommandArgs('   arg1    arg2  '), ['arg1', 'arg2']);
+});
 
-	t.deepEqual(args, ['arg1', 'arg2']);
+test('custom command args extraction - double quoted multi-word argument', t => {
+	t.deepEqual(parseCustomCommandArgs('arg1 "multi word arg" arg3'), [
+		'arg1',
+		'multi word arg',
+		'arg3',
+	]);
+});
+
+test('custom command args extraction - single quoted multi-word argument', t => {
+	t.deepEqual(parseCustomCommandArgs("arg1 'multi word arg' arg3"), [
+		'arg1',
+		'multi word arg',
+		'arg3',
+	]);
+});
+
+test('custom command args extraction - backtick quoted multi-word argument', t => {
+	t.deepEqual(parseCustomCommandArgs('arg1 `multi word arg` arg3'), [
+		'arg1',
+		'multi word arg',
+		'arg3',
+	]);
+});
+
+test('custom command args extraction - escaped quote inside quoted argument', t => {
+	t.deepEqual(parseCustomCommandArgs('"say \\"hello\\"" next'), [
+		'say "hello"',
+		'next',
+	]);
+});
+
+test('custom command args extraction - empty quoted argument', t => {
+	t.deepEqual(parseCustomCommandArgs('arg1 "" arg3'), ['arg1', '', 'arg3']);
 });
 
 // Test checkpoint load detection
