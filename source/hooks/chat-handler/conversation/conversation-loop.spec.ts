@@ -6,6 +6,7 @@ import type {LLMChatResponse, Message, ToolCall, ToolResult} from '@/types/core'
 import {
 	resetAutoCompactSession,
 	setAutoCompactEnabled,
+	setAutoCompactThreshold,
 } from '@/utils/auto-compact.js';
 import {
 	resetSessionContextLimit,
@@ -448,6 +449,7 @@ test.serial('processAssistantResponse - renders reasoning in chat queue', async 
 function setupAutoCompactTestEnv() {
 	resetAutoCompactSession();
 	setAutoCompactEnabled(true);
+	setAutoCompactThreshold(50);
 	resetSessionContextLimit();
 	clearAppConfig();
 }
@@ -461,14 +463,21 @@ test.serial.after.always(() => {
 });
 
 test.serial('processAssistantResponse - resets token count after successful auto-compaction', async t => {
-	// Set a small session context limit (100 tokens) with a low threshold (50%).
-	// A large user message will exceed 50% of 100 tokens, triggering compression.
-	// FallbackTokenizer counts ~1 token per 4 chars, so a 300-char message is
-	// ~75 tokens + overhead, well above 50/100 = 50%.
+	// Keep the context limit tiny and threshold explicit so this test does not
+	// depend on local agents.config.json values. The old message is outside the
+	// recent-message window, so auto-compact must actually shorten it.
 	setSessionContextLimit(100);
 
-	const tokenCountCalls: number[] = [];
-	const messagesSetCalls: any[][] = [];
+	const oldVerboseContent = 'old context sentence. '.repeat(120);
+	const originalMessages: Message[] = [
+		{role: 'user', content: oldVerboseContent},
+		{role: 'assistant', content: 'Prior answer'},
+		{role: 'user', content: 'Recent request'},
+	];
+	const events: Array<
+		| {type: 'setMessages'; messages: Message[]}
+		| {type: 'setTokenCount'; count: number}
+	> = [];
 
 	const params = createDefaultParams({
 		client: createMockClient({
@@ -476,30 +485,42 @@ test.serial('processAssistantResponse - resets token count after successful auto
 			toolCalls: undefined,
 			toolsDisabled: false,
 		}),
-		messages: [{role: 'user', content: 'x'.repeat(300)}],
+		messages: originalMessages,
 		currentProvider: 'openai',
 		currentModel: 'gpt-4',
 		setTokenCount: (count: number) => {
-			tokenCountCalls.push(count);
+			events.push({type: 'setTokenCount', count});
 		},
-		setMessages: (msgs: any[]) => {
-			messagesSetCalls.push(msgs);
+		setMessages: (msgs: Message[]) => {
+			events.push({type: 'setMessages', messages: msgs});
 		},
 		addToChatQueue: () => {},
 	});
 
 	await processAssistantResponse(params);
 
-	// There should be at least two setTokenCount(0) calls:
-	//   1. The initial reset before streaming (line 180 in conversation-loop.tsx)
-	//   2. The post-compression reset (the new line added by this fix)
-	const zeroCalls = tokenCountCalls.filter(v => v === 0);
-	t.true(zeroCalls.length >= 2, `Expected ≥2 calls to setTokenCount(0), got ${zeroCalls.length}`);
+	const setMessagesEvents = events.filter(
+		(event): event is {type: 'setMessages'; messages: Message[]} =>
+			event.type === 'setMessages',
+	);
+	const compressedMessages = setMessagesEvents.at(-1)?.messages;
+	t.truthy(compressedMessages, 'setMessages should have been called');
+	t.not(compressedMessages?.[0]?.content, oldVerboseContent);
+	t.true((compressedMessages?.[0]?.content.length ?? 0) < oldVerboseContent.length);
 
-	// Verify that setMessages was called with compressed messages (shorter than original)
-	const lastMessagesCall = messagesSetCalls[messagesSetCalls.length - 1];
-	t.truthy(lastMessagesCall, 'setMessages should have been called');
-	t.true(Array.isArray(lastMessagesCall), 'setMessages argument should be an array');
+	const compressionEventIndex = events.findLastIndex(
+		event => event.type === 'setMessages' && event.messages === compressedMessages,
+	);
+	const resetAfterCompressionIndex = events.findIndex(
+		(event, index) =>
+			index > compressionEventIndex &&
+			event.type === 'setTokenCount' &&
+			event.count === 0,
+	);
+	t.true(
+		resetAfterCompressionIndex > compressionEventIndex,
+		'Expected setTokenCount(0) after compressed messages are set',
+	);
 });
 
 test.serial('processAssistantResponse - does not extra-reset token count when compression returns null', async t => {
