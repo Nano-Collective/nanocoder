@@ -141,10 +141,7 @@ export function useModeHandlers({
 			reloadAppConfig();
 
 			try {
-				const preferences = loadPreferences();
-				const {client: newClient, actualProvider} = await createLLMClient(
-					preferences.lastProvider,
-				);
+				const {client: newClient, actualProvider} = await createLLMClient();
 				setClient(newClient);
 				setCurrentProvider(actualProvider);
 				setCurrentProviderConfig(newClient.getProviderConfig());
