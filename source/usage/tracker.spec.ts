@@ -430,17 +430,27 @@ test('session tracking across provider/model changes', async t => {
 });
 
 test('getCurrentStats handles unknown model with no context limit', async t => {
-	const tracker = new SessionTracker('unknown-provider', 'unknown-model-that-does-not-exist');
-	const tokenizer = new MockTokenizer();
-	const messages = createMockMessages();
+	// Unset NANOCODER_CONTEXT_LIMIT so it doesn't act as a fallback
+	const originalEnv = process.env.NANOCODER_CONTEXT_LIMIT;
+	delete process.env.NANOCODER_CONTEXT_LIMIT;
 
-	const stats = await tracker.getCurrentStats(messages, tokenizer);
+	try {
+		const tracker = new SessionTracker('unknown-provider', 'unknown-model-that-does-not-exist');
+		const tokenizer = new MockTokenizer();
+		const messages = createMockMessages();
 
-	// When context limit is not found, percentUsed should be 0
-	t.is(stats.percentUsed, 0);
-	t.is(stats.provider, 'unknown-provider');
-	t.is(stats.model, 'unknown-model-that-does-not-exist');
-	t.is(stats.messageCount, 3);
+		const stats = await tracker.getCurrentStats(messages, tokenizer);
+
+		// When context limit is not found, percentUsed should be 0
+		t.is(stats.percentUsed, 0);
+		t.is(stats.provider, 'unknown-provider');
+		t.is(stats.model, 'unknown-model-that-does-not-exist');
+		t.is(stats.messageCount, 3);
+	} finally {
+		if (originalEnv !== undefined) {
+			process.env.NANOCODER_CONTEXT_LIMIT = originalEnv;
+		}
+	}
 });
 
 test('getCurrentStats uses provider-configured context limit for percentage', async t => {
