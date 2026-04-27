@@ -2,7 +2,7 @@ import {Box, Text, useInput} from 'ink';
 import BigText from 'ink-big-text';
 import Gradient from 'ink-gradient';
 import SelectInput from 'ink-select-input';
-import {useMemo, useState} from 'react';
+import {type ReactNode, useMemo, useState} from 'react';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {
@@ -12,8 +12,9 @@ import {
 	updateNanocoderShape,
 	updateNotificationsPreference,
 	updatePasteThreshold,
+	updateSelectedTheme,
 } from '@/config/preferences';
-import {themes} from '@/config/themes';
+import {getThemeColors, themes} from '@/config/themes';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useTitleShape} from '@/hooks/useTitleShape';
@@ -176,6 +177,117 @@ function SettingsMainMenu({
 	);
 }
 
+function ThemePreviewMessage({
+	accentColor,
+	baseColor,
+	children,
+	compact = false,
+}: {
+	accentColor: string;
+	baseColor: string;
+	children: ReactNode;
+	compact?: boolean;
+}) {
+	return (
+		<Box
+			flexDirection="column"
+			backgroundColor={baseColor}
+			paddingX={2}
+			paddingY={compact ? 0 : 1}
+			borderStyle="bold"
+			borderLeft={true}
+			borderRight={false}
+			borderTop={false}
+			borderBottom={false}
+			borderLeftColor={accentColor}
+		>
+			{children}
+		</Box>
+	);
+}
+
+function ThemeMiniPreview({
+	colors,
+	compact = false,
+}: {
+	colors: ReturnType<typeof useTheme>['colors'];
+	compact?: boolean;
+}) {
+	return (
+		<Box flexDirection="column">
+			<Box flexDirection="column" marginBottom={compact ? 0 : 1}>
+				<Box marginBottom={1}>
+					<Text color={colors.primary} bold>
+						You:
+					</Text>
+				</Box>
+				<ThemePreviewMessage
+					accentColor={colors.primary}
+					baseColor={colors.base}
+					compact={compact}
+				>
+					<Text color={colors.text}>
+						Refactor this function and show the diff.
+					</Text>
+				</ThemePreviewMessage>
+			</Box>
+
+			<Box flexDirection="column" marginBottom={compact ? 0 : 1}>
+				<Box marginBottom={1}>
+					<Text color={colors.info} bold>
+						Nanocoder:
+					</Text>
+				</Box>
+
+				<ThemePreviewMessage
+					accentColor={colors.secondary}
+					baseColor={colors.base}
+					compact={compact}
+				>
+					<Text color={colors.text}>
+						I'll inspect the file and make a safe change.
+					</Text>
+				</ThemePreviewMessage>
+			</Box>
+
+			<Box flexDirection="column" marginBottom={compact ? 0 : 1}>
+				<Text color={colors.tool}>⚒ read_file source/app.tsx</Text>
+				<Text color={colors.success}>⚒ Completed successfully</Text>
+				{!compact && (
+					<Text color={colors.warning}>
+						⚠ Review generated changes before commit
+					</Text>
+				)}
+			</Box>
+
+			<Box flexDirection="column" marginTop={compact ? 0 : 1}>
+				<Box>
+					<Text color={colors.secondary}>1 </Text>
+					<Text
+						bold
+						underline
+						backgroundColor={colors.diffRemoved}
+						color={colors.diffRemovedText}
+					>
+						- return theme;
+					</Text>
+				</Box>
+				<Box>
+					<Text color={colors.secondary}>2 </Text>
+					<Text
+						bold
+						underline
+						backgroundColor={colors.diffAdded}
+						color={colors.diffAddedText}
+					>
+						+ return formatTheme(theme);
+					</Text>
+				</Box>
+			</Box>
+		</Box>
+	);
+}
+
 // Theme settings panel
 function SettingsThemePanel({
 	onBack,
@@ -185,94 +297,92 @@ function SettingsThemePanel({
 	onCancel: () => void;
 }) {
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
-	const {colors, currentTheme, setCurrentTheme} = useTheme();
+	const {currentTheme, setCurrentTheme} = useTheme();
 	const [originalTheme] = useState(currentTheme);
 
-	useInput((_, key) => {
+	const themeList = Object.values(themes);
+	const [currentIndex, setCurrentIndex] = useState(() => {
+		const index = themeList.findIndex(theme => theme.name === currentTheme);
+		return index >= 0 ? index : 0;
+	});
+
+	// Preview theme is the one being browsed (for UI only)
+	const previewTheme = themeList[currentIndex];
+	// Get the colors for the preview theme
+	const previewColors = getThemeColors(previewTheme.name as ThemePreset);
+
+	useInput((input, key) => {
 		if (key.escape) {
-			setCurrentTheme(originalTheme);
 			onCancel();
 		}
 		if (key.shift && key.tab) {
-			setCurrentTheme(originalTheme);
+			onBack();
+		}
+		if (key.upArrow) {
+			setCurrentIndex(prev => (prev > 0 ? prev - 1 : themeList.length - 1));
+		}
+		if (key.downArrow) {
+			setCurrentIndex(prev => (prev < themeList.length - 1 ? prev + 1 : 0));
+		}
+		if (key.return) {
+			// Only save to preferences on Enter
+			setCurrentTheme(previewTheme.name as ThemePreset);
+			updateSelectedTheme(previewTheme.name as ThemePreset);
 			onBack();
 		}
 	});
 
-	const themeOptions = Object.values(themes).map(theme => ({
-		label: isNarrow
-			? theme.displayName + (theme.name === originalTheme ? ' *' : '')
-			: theme.displayName +
-				' [' +
-				theme.themeType.charAt(0).toUpperCase() +
-				theme.themeType.slice(1) +
-				']' +
-				(theme.name === originalTheme ? ' (current)' : ''),
-		value: theme.name as ThemePreset,
-	}));
-
-	const initialIndex = useMemo(() => {
-		const index = themeOptions.findIndex(
-			option => option.value === originalTheme,
-		);
-		return index >= 0 ? index : 0;
-	}, [originalTheme, themeOptions]);
-
-	const handleSelect = (item: {label: string; value: ThemePreset}) => {
-		setCurrentTheme(item.value);
-		onBack();
-	};
-
-	const handleHighlight = (item: {label: string; value: ThemePreset}) => {
-		setCurrentTheme(item.value);
-	};
+	const themeName = `${previewTheme.displayName} [${
+		currentIndex + 1
+	}/${themeList.length}]`;
+	const isCurrentTheme = previewTheme.name === originalTheme;
 
 	// Narrow terminal: simplified layout
 	if (isNarrow) {
 		return (
 			<TitledBoxWithPreferences
-				title="Themes"
+				title="Theme"
 				width="100%"
-				borderColor={colors.primary}
+				borderColor={previewColors.primary}
 				paddingX={2}
 				paddingY={1}
 				flexDirection="column"
 				marginBottom={1}
 			>
-				<SelectInput
-					items={themeOptions}
-					initialIndex={initialIndex}
-					onSelect={handleSelect}
-					onHighlight={handleHighlight}
-				/>
+				<Text color={previewColors.primary}>
+					{isCurrentTheme ? '* ' : ''}
+					{themeName}
+				</Text>
+				<ThemeMiniPreview colors={previewColors} compact />
 				<Box marginBottom={1}></Box>
-				<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
+				<Text color={previewColors.secondary}>
+					↑↓ navigate · Enter select · Esc exit
+				</Text>
 			</TitledBoxWithPreferences>
 		);
 	}
 
 	return (
 		<TitledBoxWithPreferences
-			title="Choose your theme"
+			title="Theme"
 			width={boxWidth}
-			borderColor={colors.primary}
+			borderColor={previewColors.primary}
 			paddingX={2}
 			paddingY={1}
 			flexDirection="column"
 			marginBottom={1}
 		>
+			<Text color={previewColors.primary} bold>
+				{isCurrentTheme ? '* ' : ''}
+				{themeName}
+			</Text>
 			<Box marginBottom={1}>
-				<Text color={colors.secondary}>
-					Enter to apply, Shift+Tab to go back, Esc to exit
+				<Text color={previewColors.secondary}>
+					↑↓ navigate · Enter apply · Shift+Tab back · Esc exit
 				</Text>
 			</Box>
 
-			<SelectInput
-				items={themeOptions}
-				initialIndex={initialIndex}
-				onSelect={handleSelect}
-				onHighlight={handleHighlight}
-			/>
+			<ThemeMiniPreview colors={previewColors} />
 		</TitledBoxWithPreferences>
 	);
 }
