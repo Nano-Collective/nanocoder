@@ -280,6 +280,25 @@ function helper() {}
 	t.false(output!.includes('function helper'));
 });
 
+test('UserMessage strips VS Code file-metadata context block from display', t => {
+	const message = `yes
+
+[@settings-selector.tsx]<!--vscode-context-->
+File: source/app/components/settings-selector.tsx<!--/vscode-context-->`;
+
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<UserMessage message={message} />
+		</MockThemeProvider>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /\[@settings-selector\.tsx\]/);
+	t.false(output!.includes('<!--vscode-context-->'));
+	t.false(output!.includes('File: source/app/components'));
+});
+
 test('UserMessage handles message without VS Code context normally', t => {
 	const message = 'Regular message without VS Code context';
 

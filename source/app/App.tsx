@@ -1,3 +1,4 @@
+import path from 'node:path';
 import {Box, Text, useApp} from 'ink';
 import Spinner from 'ink-spinner';
 import React, {useEffect, useMemo} from 'react';
@@ -165,6 +166,11 @@ export default function App({
 				// The placeholder tag [@filename] will be highlighted in the UI
 				// The code block is included for the LLM but won't clutter the display
 				fullPrompt = `${prompt}\n\n[@${context.fileName}${lineInfo}]<!--vscode-context-->\n\`\`\`\n${context.selection}\n\`\`\`<!--/vscode-context-->`;
+			} else if (context?.fileName) {
+				const relPath = context.filePath
+					? path.relative(process.cwd(), context.filePath)
+					: context.fileName;
+				fullPrompt = `${prompt}\n\n[@${context.fileName}]<!--vscode-context-->\nFile: ${relPath}<!--/vscode-context-->`;
 			}
 
 			logger.debug('VS Code enhanced prompt prepared', {
@@ -632,7 +638,10 @@ export default function App({
 				if (hasSelection) {
 					fullPrompt = `${message}\n\n[@${editor.fileName} (lines ${editor.startLine}-${editor.endLine})]<!--vscode-context-->\n\`\`\`\n${editor.selection}\n\`\`\`<!--/vscode-context-->`;
 				} else {
-					fullPrompt = `${message}\n\n[@${editor.fileName}]`;
+					const relPath = editor.filePath
+						? path.relative(process.cwd(), editor.filePath)
+						: editor.fileName;
+					fullPrompt = `${message}\n\n[@${editor.fileName}]<!--vscode-context-->\nFile: ${relPath}<!--/vscode-context-->`;
 				}
 			}
 			return appHandlers.handleMessageSubmit(fullPrompt);
