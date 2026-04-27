@@ -375,8 +375,11 @@ export const processAssistantResponse = async (
 		conversationStateManager.current.updateAssistantMessage(assistantMsg);
 	}
 
-	// Build the final messages array
-	const updatedMessages = builder.build();
+	// Build the final messages array. `let` (not const) because auto-compact
+	// below may replace it with the compressed array — downstream tool-result
+	// builders and recursive calls must use the compressed messages, otherwise
+	// compression is silently undone the moment we recurse.
+	let updatedMessages = builder.build();
 
 	// Update messages state once with all changes
 	if (hasValidAssistantMessage) {
@@ -415,6 +418,10 @@ export const processAssistantResponse = async (
 				// Reset stale streaming token count to avoid double-counting
 				// with calculateTokenBreakdown which already counts compacted tokens
 				setTokenCount(0);
+				// Replace the local array so subsequent tool-result builders
+				// and recursive calls see the compressed messages instead of
+				// the pre-compression copy.
+				updatedMessages = compressed;
 			}
 		}
 	} catch (_error) {

@@ -552,6 +552,79 @@ test.serial('processAssistantResponse - does not extra-reset token count when co
 	t.is(zeroCalls.length, 1, `Expected exactly 1 call to setTokenCount(0), got ${zeroCalls.length}`);
 });
 
+test.serial('processAssistantResponse - compressed messages persist when loop recurses (regression: pre-compression array was reused, undoing compression)', async t => {
+	// Reproduce the bug where, after auto-compaction, downstream code paths
+	// (tool execution, error recovery, auto-nudge) rebuilt state from the
+	// PRE-compression local variable, clobbering the compressed messages
+	// state. The empty-response auto-nudge path is the cleanest trigger for
+	// this in a unit test because it exercises a recursive call with the
+	// post-compaction message array.
+	setSessionContextLimit(100);
+
+	const oldVerboseContent = 'old context sentence. '.repeat(120);
+	const originalMessages: Message[] = [
+		{role: 'user', content: oldVerboseContent},
+		{role: 'assistant', content: 'Prior answer'},
+		{role: 'user', content: 'Recent request'},
+	];
+
+	let chatCallCount = 0;
+	const messagesSeenByRecursiveCall: Message[][] = [];
+
+	const trackingClient = {
+		chat: async (msgs: Message[]): Promise<LLMChatResponse> => {
+			chatCallCount += 1;
+			if (chatCallCount === 1) {
+				// First turn: empty response triggers the auto-nudge path
+				// AFTER auto-compaction has happened.
+				return {
+					choices: [
+						{
+							message: {role: 'assistant', content: '', tool_calls: undefined},
+						},
+					],
+					toolsDisabled: false,
+				};
+			}
+			// Second turn (the recursion under test): record the messages so
+			// we can assert they reflect the compressed state, then return a
+			// real reply to terminate the loop.
+			messagesSeenByRecursiveCall.push(msgs);
+			return {
+				choices: [
+					{
+						message: {role: 'assistant', content: 'Done.', tool_calls: undefined},
+					},
+				],
+				toolsDisabled: false,
+			};
+		},
+	};
+
+	const params = createDefaultParams({
+		client: trackingClient,
+		messages: originalMessages,
+		currentProvider: 'openai',
+		currentModel: 'gpt-4',
+		setMessages: () => {},
+		addToChatQueue: () => {},
+	});
+
+	await processAssistantResponse(params);
+
+	t.is(chatCallCount, 2, 'Expected exactly two LLM calls (initial + nudge recursion)');
+	t.is(messagesSeenByRecursiveCall.length, 1, 'Expected to capture one recursive call');
+
+	const recursiveMsgs = messagesSeenByRecursiveCall[0];
+	const firstMessage = recursiveMsgs.find(m => m.role === 'user');
+	t.truthy(firstMessage, 'Expected at least one user message in recursive call');
+	t.not(
+		firstMessage?.content,
+		oldVerboseContent,
+		'Recursive call must use compressed messages, not the pre-compression array',
+	);
+});
+
 test.serial('processAssistantResponse - does not extra-reset token count when autoCompact is disabled via session override', async t => {
 	// Even though context limit is tiny, disabling auto-compact should prevent compression.
 	setSessionContextLimit(100);
