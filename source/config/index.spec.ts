@@ -155,3 +155,189 @@ test('loadAppConfig handles missing file gracefully', async t => {
 		process.chdir(originalCwd);
 	}
 });
+
+// Tests for loadDefaultMode
+const defaultModeTestDir = join(
+	tmpdir(),
+	`nanocoder-default-mode-test-${Date.now()}`,
+);
+
+test.before(() => {
+	mkdirSync(defaultModeTestDir, {recursive: true});
+});
+
+test.after.always(() => {
+	if (existsSync(defaultModeTestDir)) {
+		rmSync(defaultModeTestDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('loadDefaultMode returns undefined when no config exists', async t => {
+	const originalCwd = process.cwd();
+	const originalEnv = process.env.NANOCODER_CONFIG_DIR;
+
+	try {
+		process.chdir(defaultModeTestDir);
+		process.env.NANOCODER_CONFIG_DIR = join(defaultModeTestDir, 'empty-config');
+
+		const {loadDefaultMode: fn} = await import('./index.js');
+		const result = fn();
+		t.is(result, undefined, 'Should return undefined when no config exists');
+	} finally {
+		process.chdir(originalCwd);
+		if (originalEnv !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalEnv;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+});
+
+for (const mode of ['normal', 'auto-accept', 'yolo', 'plan']) {
+	test.serial(
+		`loadDefaultMode accepts valid mode '${mode}' from project config`,
+		async t => {
+			const originalCwd = process.cwd();
+			const originalEnv = process.env.NANOCODER_CONFIG_DIR;
+			const testSubdir = join(defaultModeTestDir, `project-${mode}`);
+			mkdirSync(testSubdir, {recursive: true});
+
+			try {
+				writeFileSync(
+					join(testSubdir, 'agents.config.json'),
+					JSON.stringify({nanocoder: {defaultMode: mode}}),
+					'utf-8',
+				);
+				process.chdir(testSubdir);
+				process.env.NANOCODER_CONFIG_DIR = join(testSubdir, 'nonexistent-global');
+
+				const {loadDefaultMode: fn} = await import('./index.js');
+				t.is(fn(), mode, `Should return '${mode}' from project config`);
+			} finally {
+				process.chdir(originalCwd);
+				if (originalEnv !== undefined) {
+					process.env.NANOCODER_CONFIG_DIR = originalEnv;
+				} else {
+					delete process.env.NANOCODER_CONFIG_DIR;
+				}
+			}
+		},
+	);
+}
+
+test.serial('loadDefaultMode prefers project config over global config', async t => {
+	const originalCwd = process.cwd();
+	const originalEnv = process.env.NANOCODER_CONFIG_DIR;
+	const projectDir = join(defaultModeTestDir, 'project-prefer');
+	const globalDir = join(defaultModeTestDir, 'global-prefer');
+	mkdirSync(projectDir, {recursive: true});
+	mkdirSync(globalDir, {recursive: true});
+
+	try {
+		writeFileSync(
+			join(projectDir, 'agents.config.json'),
+			JSON.stringify({nanocoder: {defaultMode: 'yolo'}}),
+			'utf-8',
+		);
+		writeFileSync(
+			join(globalDir, 'agents.config.json'),
+			JSON.stringify({nanocoder: {defaultMode: 'plan'}}),
+			'utf-8',
+		);
+		process.chdir(projectDir);
+		process.env.NANOCODER_CONFIG_DIR = globalDir;
+
+		const {loadDefaultMode: fn} = await import('./index.js');
+		t.is(fn(), 'yolo', 'Project config should take precedence over global');
+	} finally {
+		process.chdir(originalCwd);
+		if (originalEnv !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalEnv;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+});
+
+test.serial('loadDefaultMode loads from global config when project config is missing', async t => {
+	const originalCwd = process.cwd();
+	const originalEnv = process.env.NANOCODER_CONFIG_DIR;
+	const emptyProjectDir = join(defaultModeTestDir, 'empty-project-global-fallback');
+	const globalDir = join(defaultModeTestDir, 'global-fallback');
+	mkdirSync(emptyProjectDir, {recursive: true});
+	mkdirSync(globalDir, {recursive: true});
+
+	try {
+		writeFileSync(
+			join(globalDir, 'agents.config.json'),
+			JSON.stringify({nanocoder: {defaultMode: 'plan'}}),
+			'utf-8',
+		);
+		process.chdir(emptyProjectDir);
+		process.env.NANOCODER_CONFIG_DIR = globalDir;
+
+		const {loadDefaultMode: fn} = await import('./index.js');
+		t.is(fn(), 'plan', 'Should fall back to global config');
+	} finally {
+		process.chdir(originalCwd);
+		if (originalEnv !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalEnv;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+});
+
+test.serial('loadDefaultMode normalizes case-insensitive values', async t => {
+	const originalCwd = process.cwd();
+	const originalEnv = process.env.NANOCODER_CONFIG_DIR;
+	const testSubdir = join(defaultModeTestDir, 'case-normalize');
+	mkdirSync(testSubdir, {recursive: true});
+
+	try {
+		writeFileSync(
+			join(testSubdir, 'agents.config.json'),
+			JSON.stringify({nanocoder: {defaultMode: 'Yolo'}}),
+			'utf-8',
+		);
+		process.chdir(testSubdir);
+		process.env.NANOCODER_CONFIG_DIR = join(testSubdir, 'nonexistent-global');
+
+		const {loadDefaultMode: fn} = await import('./index.js');
+		t.is(fn(), 'yolo', 'Should normalize uppercase values to lowercase');
+	} finally {
+		process.chdir(originalCwd);
+		if (originalEnv !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalEnv;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+});
+
+test.serial('loadDefaultMode returns undefined for invalid mode values', async t => {
+	const originalCwd = process.cwd();
+	const originalEnv = process.env.NANOCODER_CONFIG_DIR;
+	const testSubdir = join(defaultModeTestDir, 'invalid-mode');
+	mkdirSync(testSubdir, {recursive: true});
+
+	try {
+		writeFileSync(
+			join(testSubdir, 'agents.config.json'),
+			JSON.stringify({nanocoder: {defaultMode: 'invalid-mode'}}),
+			'utf-8',
+		);
+		process.chdir(testSubdir);
+		process.env.NANOCODER_CONFIG_DIR = join(testSubdir, 'nonexistent-global');
+
+		const {loadDefaultMode: fn} = await import('./index.js');
+		t.is(fn(), undefined, 'Should return undefined for unrecognized mode value');
+	} finally {
+		process.chdir(originalCwd);
+		if (originalEnv !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalEnv;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+});
