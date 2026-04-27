@@ -169,7 +169,8 @@
 			"simple-git": ">=3.32.3",
 			"flatted": ">=3.4.2",
 			"tinyexec": ">=1.0.4",
-			"path-to-regexp": ">=8.4.0"
+			"path-to-regexp": ">=8.4.0",
+			"lodash": ">=4.18.0"
 		},
 		"auditConfig": {},
 		"patchedDependencies": {
