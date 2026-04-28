@@ -9,7 +9,7 @@ import {
 	InfoMessage,
 	SuccessMessage,
 } from '@/components/message-box';
-import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
+import {DELAY_COMMAND_COMPLETE_MS, MAX_SESSION_NAME_LENGTH} from '@/constants';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
 import {clearAllTasks} from '@/tools/tasks/storage';
@@ -266,11 +266,11 @@ async function handleSpecialCommand(
 						hideBox: true,
 					}),
 				);
-			} else if (newName.length > 100) {
+			} else if (newName.length > MAX_SESSION_NAME_LENGTH) {
 				onAddToChatQueue(
 					React.createElement(ErrorMessage, {
 						key: `rename-error-${getNextComponentKey()}`,
-						message: 'Session name must be 100 characters or less.',
+						message: `Session name must be ${MAX_SESSION_NAME_LENGTH} characters or less.`,
 						hideBox: true,
 					}),
 				);
