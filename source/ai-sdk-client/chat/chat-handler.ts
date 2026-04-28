@@ -177,7 +177,7 @@ export async function handleChat(
 					const e = error instanceof Error ? error : new Error(String(error));
 					streamingErrors.push(e);
 					logger.warn('Streaming error received', {
-						error: e,
+						error: e.message,
 						model: currentModel,
 						correlationId,
 						provider: providerConfig.name,
@@ -290,7 +290,7 @@ export async function handleChat(
 				hasToolCalls: resolvedToolCalls.length > 0,
 				toolCallCount: resolvedToolCalls.length,
 				stepCount: resolvedSteps.length,
-				finishReason: result.finishReason,
+				finishReason,
 			});
 
 			if (finishReason === 'error' && streamingErrors.length > 0) {
