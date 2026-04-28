@@ -156,6 +156,7 @@ export async function handleChat(
 				};
 			}
 
+			const streamingErrors: Error[] = [];
 			const result = streamText({
 				model,
 				messages: modelMessages,
@@ -166,11 +167,11 @@ export async function handleChat(
 				onStepFinish: createOnStepFinishHandler(callbacks),
 				prepareStep: createPrepareStepHandler(),
 				onError: ({error}) => {
-					// Catch streaming errors so raw SSE events don't leak to stdout.
-					// The error will still be thrown by the stream and caught by
-					// the outer try-catch for proper formatting.
+					// Collect streaming errors so raw SSE events don't leak to stdout.
+					const e = error instanceof Error ? error : new Error(String(error));
+					streamingErrors.push(e);
 					logger.warn('Streaming error received', {
-						error: error instanceof Error ? error.message : String(error),
+						error: e,
 						model: currentModel,
 						correlationId,
 						provider: providerConfig.name,
@@ -257,13 +258,19 @@ export async function handleChat(
 			flushBuffer();
 
 			// After streaming completes, collect final results
-			const [fullText, resolvedToolCalls, resolvedSteps, reasoning] =
-				await Promise.all([
-					result.text,
-					result.toolCalls,
-					result.steps,
-					result.reasoningText,
-				]);
+			const [
+				fullText,
+				resolvedToolCalls,
+				resolvedSteps,
+				reasoning,
+				finishReason,
+			] = await Promise.all([
+				result.text,
+				result.toolCalls,
+				result.steps,
+				result.reasoningText,
+				result.finishReason,
+			]);
 
 			logger.debug('AI SDK response received', {
 				responseLength: fullText.length,
@@ -271,7 +278,12 @@ export async function handleChat(
 				hasToolCalls: resolvedToolCalls.length > 0,
 				toolCallCount: resolvedToolCalls.length,
 				stepCount: resolvedSteps.length,
+				finishReason: result.finishReason,
 			});
+
+			if (finishReason === 'error' && streamingErrors.length > 0) {
+				throw streamingErrors[streamingErrors.length - 1];
+			}
 
 			// Without execute functions on tools, the SDK doesn't auto-execute anything.
 			// All tool calls are returned for us to handle (parallel execution, confirmation, etc.).
