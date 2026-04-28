@@ -108,6 +108,12 @@ export async function handleChat(
 		provider: providerConfig.name,
 	});
 
+	// Accumulate reasoning text outside the try so the catch handler can
+	// include it on the empty-response branch — the conversation loop's
+	// reasoning-aware nudge depends on this for the GPT-5 case where the
+	// SDK throws AI_NoOutputGeneratedError after a reasoning-only stream.
+	let accumulatedReasoning = '';
+
 	return await withNewCorrelationContext(async _context => {
 		try {
 			// Tools arrive with approval policy already resolved by ToolManager.
@@ -215,6 +221,12 @@ export async function handleChat(
 			for await (const chunk of result.fullStream) {
 				switch (chunk.type) {
 					case 'reasoning-delta':
+						accumulatedReasoning += chunk.text;
+						tokenBuffer += chunk.text;
+						if (!flushTimer) {
+							flushTimer = setTimeout(flushBuffer, FLUSH_INTERVAL_MS);
+						}
+						break;
 					case 'text-delta':
 						tokenBuffer += chunk.text;
 						if (!flushTimer) {
@@ -420,10 +432,29 @@ export async function handleChat(
 					if (signal?.aborted) {
 						throw new Error('Operation was cancelled');
 					}
-					// Model returned empty response without cancellation
-					throw new Error(
-						'Model returned empty response. This may indicate the model is not responding correctly or the prompt was unclear.',
-					);
+					// Model returned no output without an underlying API error.
+					// Hand control back to the conversation loop with an empty
+					// response so its empty-turn handling (capped recursion,
+					// reasoning-aware nudge) takes over instead of throwing.
+					logger.warn('Model produced no output; returning empty response', {
+						model: currentModel,
+						correlationId,
+						provider: providerConfig.name,
+						reasoningLength: accumulatedReasoning.length,
+					});
+					callbacks.onFinish?.();
+					return {
+						choices: [
+							{
+								message: {
+									role: 'assistant',
+									content: '',
+									reasoning: accumulatedReasoning || undefined,
+								},
+							},
+						],
+						toolsDisabled: shouldDisableTools,
+					};
 				}
 				// There's a real error underneath, parse it
 				const userMessage = parseAPIError(rootError);

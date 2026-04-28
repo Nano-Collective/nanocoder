@@ -99,6 +99,11 @@ export const INTERVAL_LOG_FLUSH_MS = 1000;
 
 // === AI SDK ===
 export const MAX_TOOL_STEPS = 10;
+// Cap how many consecutive empty assistant turns we'll auto-nudge through
+// before surfacing an error. Some models (notably GPT-5 reasoning models)
+// can produce reasoning-only turns; one or two retries usually clears it,
+// but unbounded recursion would loop forever.
+export const MAX_EMPTY_TURNS = 2;
 
 // === MCP ===
 export const TIMEOUT_MCP_DEFAULT_MS = 30_000;

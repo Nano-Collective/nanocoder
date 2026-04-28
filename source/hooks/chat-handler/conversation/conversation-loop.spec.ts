@@ -220,20 +220,175 @@ test.serial('processAssistantResponse - exits in non-interactive mode when appro
 // Auto-Nudge Tests (lines 469-506)
 // ============================================================================
 
-test.serial('processAssistantResponse - auto-nudges on empty response with recent tool results', async t => {
-	// This test requires:
-	// 1. Mock client.chat() to return empty content with no tool calls
-	// 2. Mock messages array to have a tool result as last message
-	// 3. Verify nudge message is added and function recurses
+test.serial('processAssistantResponse - auto-nudges on empty response without tool results uses generic prompt', async t => {
+	let chatCallCount = 0;
+	const messagesSeenByRecursiveCall: Message[][] = [];
+	const queuedComponents: any[] = [];
 
-	t.pass('Auto-nudge requires proper mock setup');
+	const trackingClient = {
+		chat: async (msgs: Message[]): Promise<LLMChatResponse> => {
+			chatCallCount += 1;
+			if (chatCallCount === 1) {
+				return {
+					choices: [
+						{message: {role: 'assistant', content: '', tool_calls: undefined}},
+					],
+					toolsDisabled: false,
+				};
+			}
+			messagesSeenByRecursiveCall.push(msgs);
+			return {
+				choices: [
+					{message: {role: 'assistant', content: 'Done.', tool_calls: undefined}},
+				],
+				toolsDisabled: false,
+			};
+		},
+	};
+
+	const params = createDefaultParams({
+		client: trackingClient,
+		messages: [{role: 'user', content: 'Hi'}],
+		addToChatQueue: (component: any) => queuedComponents.push(component),
+	});
+
+	await processAssistantResponse(params);
+
+	t.is(chatCallCount, 2, 'Initial empty response should trigger one nudge recursion');
+	const recursive = messagesSeenByRecursiveCall[0];
+	const lastUser = [...recursive].reverse().find(m => m.role === 'user');
+	t.is(lastUser?.content, 'Please continue with the task.');
+
+	// Verify the synthetic nudge is rendered as an InfoMessage (not a fake UserMessage)
+	const nudgeNotice = queuedComponents.find(
+		(c: any) => typeof c.props?.message === 'string' && c.props.message.startsWith('Model returned empty response'),
+	);
+	t.truthy(nudgeNotice, 'Should queue an InfoMessage describing the auto-continue');
 });
 
-test.serial('processAssistantResponse - auto-nudges on empty response without tool results', async t => {
-	// Similar to above but without recent tool results
-	// Should add a "Please continue with the task" nudge instead
+test.serial('processAssistantResponse - auto-nudges on empty response with recent tool results uses summary prompt', async t => {
+	let chatCallCount = 0;
+	const messagesSeenByRecursiveCall: Message[][] = [];
 
-	t.pass('Auto-nudge continuation requires proper mock setup');
+	const trackingClient = {
+		chat: async (msgs: Message[]): Promise<LLMChatResponse> => {
+			chatCallCount += 1;
+			if (chatCallCount === 1) {
+				return {
+					choices: [
+						{message: {role: 'assistant', content: '', tool_calls: undefined}},
+					],
+					toolsDisabled: false,
+				};
+			}
+			messagesSeenByRecursiveCall.push(msgs);
+			return {
+				choices: [
+					{message: {role: 'assistant', content: 'Summary.', tool_calls: undefined}},
+				],
+				toolsDisabled: false,
+			};
+		},
+	};
+
+	const messagesWithToolResult: Message[] = [
+		{role: 'user', content: 'Run a tool'},
+		{role: 'assistant', content: '', tool_calls: [{id: 't1', type: 'function', function: {name: 'list_directory', arguments: '{}'}}]},
+		{role: 'tool', tool_call_id: 't1', name: 'list_directory', content: 'file1\nfile2'},
+	];
+
+	const params = createDefaultParams({
+		client: trackingClient,
+		messages: messagesWithToolResult,
+	});
+
+	await processAssistantResponse(params);
+
+	t.is(chatCallCount, 2);
+	const recursive = messagesSeenByRecursiveCall[0];
+	const lastUser = [...recursive].reverse().find(m => m.role === 'user');
+	t.is(lastUser?.content, 'Please provide a summary or response based on the tool results above.');
+});
+
+test.serial('processAssistantResponse - reasoning-only empty turn uses reasoning-specific nudge', async t => {
+	let chatCallCount = 0;
+	const messagesSeenByRecursiveCall: Message[][] = [];
+
+	const trackingClient = {
+		chat: async (msgs: Message[]): Promise<LLMChatResponse> => {
+			chatCallCount += 1;
+			if (chatCallCount === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: '',
+								tool_calls: undefined,
+								reasoning: 'I considered the options carefully...',
+							},
+						},
+					],
+					toolsDisabled: false,
+				};
+			}
+			messagesSeenByRecursiveCall.push(msgs);
+			return {
+				choices: [
+					{message: {role: 'assistant', content: 'My answer.', tool_calls: undefined}},
+				],
+				toolsDisabled: false,
+			};
+		},
+	};
+
+	const params = createDefaultParams({
+		client: trackingClient,
+		messages: [{role: 'user', content: 'Think then answer'}],
+	});
+
+	await processAssistantResponse(params);
+
+	t.is(chatCallCount, 2);
+	const recursive = messagesSeenByRecursiveCall[0];
+	const lastUser = [...recursive].reverse().find(m => m.role === 'user');
+	t.is(
+		lastUser?.content,
+		'You produced reasoning but no final response. Please provide your answer based on your reasoning above.',
+	);
+});
+
+test.serial('processAssistantResponse - empty-turn cap stops the loop after MAX_EMPTY_TURNS', async t => {
+	let chatCallCount = 0;
+	const queuedComponents: any[] = [];
+
+	const alwaysEmptyClient = {
+		chat: async (): Promise<LLMChatResponse> => {
+			chatCallCount += 1;
+			return {
+				choices: [
+					{message: {role: 'assistant', content: '', tool_calls: undefined}},
+				],
+				toolsDisabled: false,
+			};
+		},
+	};
+
+	const params = createDefaultParams({
+		client: alwaysEmptyClient,
+		messages: [{role: 'user', content: 'Hi'}],
+		addToChatQueue: (component: any) => queuedComponents.push(component),
+	});
+
+	await processAssistantResponse(params);
+
+	// MAX_EMPTY_TURNS = 2 → initial + 2 nudge retries = 3 calls, then give up
+	t.is(chatCallCount, 3, 'Loop should stop after MAX_EMPTY_TURNS+1 chat calls');
+
+	const giveUpMessage = queuedComponents.find(
+		(c: any) => typeof c.props?.message === 'string' && c.props.message.includes('produced no output after'),
+	);
+	t.truthy(giveUpMessage, 'Should queue a give-up ErrorMessage when cap is hit');
 });
 
 // ============================================================================
