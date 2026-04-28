@@ -170,6 +170,27 @@ You can change the threshold interactively via `/settings` → **Paste Threshold
 
 This setting is stored in `nanocoder-preferences.json` (see [Preferences](preferences.md) for file locations).
 
+### Default Development Mode
+
+Set the initial development mode for all new interactive sessions. Without this setting, Nanocoder always starts in **normal** mode. Once a session begins, you can still switch modes at any time using `/mode`.
+
+```json
+{
+  "nanocoder": {
+    "defaultMode": "plan"
+  }
+}
+```
+
+| Value | Description |
+|-------|-------------|
+| `"normal"` | Standard mode — all tool calls require approval |
+| `"auto-accept"` | Semi-automatic — read-only and safe tools auto-run; writes and bash prompts |
+| `"yolo"` | Fully automatic — no confirmations at all |
+| `"plan"` | Read-only exploration mode — only read/search/list tools available |
+
+The `--mode` CLI flag always takes precedence over this config value. Non-interactive runs (`nanocoder run ...`) always default to `auto-accept` regardless of this setting.
+
 ### Tool Auto-Approval
 
 Allow specific tools to run without confirmation, even in normal development mode.

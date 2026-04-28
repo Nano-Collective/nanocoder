@@ -7,7 +7,7 @@ import {ChatHistory} from '@/app/components/chat-history';
 import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
 import {NonInteractiveShell} from '@/app/components/non-interactive-shell';
-import type {AppProps} from '@/app/types';
+import type {AppProps, CliMode} from '@/app/types';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {FileExplorer} from '@/components/file-explorer';
 import {IdeSelector} from '@/components/ide-selector';
@@ -22,7 +22,7 @@ import {
 	VSCodeExtensionPrompt,
 } from '@/components/vscode-extension-prompt';
 import WelcomeMessage from '@/components/welcome-message';
-import {getAppConfig} from '@/config/index';
+import {getAppConfig, loadDefaultMode} from '@/config/index';
 import {updateSelectedTheme} from '@/config/preferences';
 import {getThemeColors} from '@/config/themes';
 import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
@@ -72,11 +72,17 @@ export default function App({
 	cliModel,
 	cliMode,
 }: AppProps) {
-	// Resolve the initial development mode. `--mode` wins; otherwise
-	// non-interactive runs default to auto-accept (previous behavior) and
-	// interactive runs default to normal.
+	// Resolve the initial development mode with this precedence:
+	// 1. --mode CLI flag (highest priority)
+	// 2. Non-interactive (run) mode → auto-accept
+	// 3. defaultMode from agents.config.json
+	// 4. 'normal' (final fallback)
+	const configDefaultMode = loadDefaultMode();
 	const initialDevelopmentMode =
-		cliMode ?? (nonInteractiveMode ? 'auto-accept' : 'normal');
+		cliMode ??
+		(nonInteractiveMode
+			? 'auto-accept'
+			: ((configDefaultMode as CliMode | undefined) ?? 'normal'));
 	// Memoize the logger to prevent recreation on every render
 	const logger = useMemo(() => createPinoLogger(), []);
 
