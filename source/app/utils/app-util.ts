@@ -43,6 +43,7 @@ const SPECIAL_COMMANDS = {
 	EXPLORER: 'explorer',
 	IDE: 'ide',
 	TUNE: 'tune',
+	RENAME: 'rename',
 } as const;
 
 /** Checkpoint subcommands */
@@ -176,6 +177,7 @@ async function handleSpecialCommand(
 ): Promise<boolean> {
 	const {
 		onClearMessages,
+		onRenameSession,
 		onEnterModelSelectionMode,
 		onEnterProviderSelectionMode,
 		onEnterModelDatabaseMode,
@@ -187,6 +189,7 @@ async function handleSpecialCommand(
 		onCommandComplete,
 		onAddToChatQueue,
 		getNextComponentKey,
+		commandArgs,
 	} = options;
 
 	switch (commandName) {
@@ -252,6 +255,38 @@ async function handleSpecialCommand(
 			options.onEnterTune();
 			onCommandComplete?.();
 			return true;
+
+		case SPECIAL_COMMANDS.RENAME: {
+			const newName = commandArgs?.join(' ') || '';
+			if (!newName.trim()) {
+				onAddToChatQueue(
+					React.createElement(ErrorMessage, {
+						key: `rename-error-${getNextComponentKey()}`,
+						message: 'Usage: /rename <session name>',
+						hideBox: true,
+					}),
+				);
+			} else if (newName.length > 100) {
+				onAddToChatQueue(
+					React.createElement(ErrorMessage, {
+						key: `rename-error-${getNextComponentKey()}`,
+						message: 'Session name must be 100 characters or less.',
+						hideBox: true,
+					}),
+				);
+			} else {
+				onRenameSession(newName.trim());
+				onAddToChatQueue(
+					React.createElement(SuccessMessage, {
+						key: `rename-success-${getNextComponentKey()}`,
+						message: `Session renamed to "${newName.trim()}".`,
+						hideBox: true,
+					}),
+				);
+			}
+			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
+			return true;
+		}
 
 		default:
 			return false;

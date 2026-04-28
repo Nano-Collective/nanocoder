@@ -126,6 +126,7 @@ export function useAppState(
 	} | null>(null);
 	const [showAllSessions, setShowAllSessions] = useState<boolean>(false);
 	const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+	const [sessionName, setSessionName] = useState<string>('');
 	const [isToolConfirmationMode, setIsToolConfirmationMode] =
 		useState<boolean>(false);
 	const [isToolExecuting, setIsToolExecuting] = useState<boolean>(false);
@@ -341,6 +342,7 @@ export function useAppState(
 		checkpointLoadData,
 		showAllSessions,
 		currentSessionId,
+		sessionName,
 		isToolConfirmationMode,
 		isToolExecuting,
 		subagentsReady,
@@ -393,6 +395,7 @@ export function useAppState(
 		setCheckpointLoadData,
 		setShowAllSessions,
 		setCurrentSessionId,
+		setSessionName,
 		setIsToolConfirmationMode,
 		setIsToolExecuting,
 		setSubagentsReady,
