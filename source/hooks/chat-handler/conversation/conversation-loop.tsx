@@ -178,6 +178,10 @@ export const processAssistantResponse = async (
 	setStreamingContent('');
 	setStreamingReasoning('');
 	setTokenCount(0);
+	// Drop any prior empty-response retry counter from the live area so the
+	// streaming UI for this turn renders unobstructed. The counter is only
+	// meant to be visible briefly between calls on consecutive empties.
+	setLiveComponent?.(null);
 
 	// Build mode overrides for non-interactive mode and tune settings
 	const modelParameters = tune?.enabled ? tune.modelParameters : undefined;
@@ -675,6 +679,7 @@ export const processAssistantResponse = async (
 		// returning nothing (common with GPT-5 reasoning that exhausts the
 		// token budget on thinking) would loop forever.
 		if (emptyTurnCount >= MAX_EMPTY_TURNS) {
+			setLiveComponent?.(null);
 			flushCompactCounts();
 			if (hasLiveTaskUpdates) {
 				await flushLiveTaskList();
@@ -718,14 +723,18 @@ export const processAssistantResponse = async (
 			content: nudgeContent,
 		};
 
-		// Surface the auto-nudge as an InfoMessage rather than a fake
-		// UserMessage. The user did not type anything; styling it as a
-		// user turn (and lying about the contents with a one-word
-		// "continue") was misleading.
-		addToChatQueue(
+		// Coalesce auto-nudge notices into a single live counter that
+		// updates in place between turns instead of stacking N
+		// InfoMessages in scrollback. The counter is visible briefly
+		// between the empty turn and the next streaming response, then
+		// gets cleared at the top of processAssistantResponse so the
+		// streaming UI for the retry is unobstructed.
+		const attempt = emptyTurnCount + 1;
+		const total = MAX_EMPTY_TURNS + 1;
+		setLiveComponent?.(
 			<InfoMessage
-				key={`auto-continue-${getNextComponentKey()}`}
-				message={`Model returned empty response — auto-continuing: "${nudgeContent}"`}
+				key="auto-continue-counter"
+				message={`Empty response — retry ${attempt}/${total}: "${nudgeContent}"`}
 				hideBox={true}
 			/>,
 		);

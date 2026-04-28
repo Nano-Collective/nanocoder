@@ -223,7 +223,7 @@ test.serial('processAssistantResponse - exits in non-interactive mode when appro
 test.serial('processAssistantResponse - auto-nudges on empty response without tool results uses generic prompt', async t => {
 	let chatCallCount = 0;
 	const messagesSeenByRecursiveCall: Message[][] = [];
-	const queuedComponents: any[] = [];
+	const liveComponents: any[] = [];
 
 	const trackingClient = {
 		chat: async (msgs: Message[]): Promise<LLMChatResponse> => {
@@ -249,7 +249,7 @@ test.serial('processAssistantResponse - auto-nudges on empty response without to
 	const params = createDefaultParams({
 		client: trackingClient,
 		messages: [{role: 'user', content: 'Hi'}],
-		addToChatQueue: (component: any) => queuedComponents.push(component),
+		setLiveComponent: (component: any) => liveComponents.push(component),
 	});
 
 	await processAssistantResponse(params);
@@ -259,11 +259,12 @@ test.serial('processAssistantResponse - auto-nudges on empty response without to
 	const lastUser = [...recursive].reverse().find(m => m.role === 'user');
 	t.is(lastUser?.content, 'Please continue with the task.');
 
-	// Verify the synthetic nudge is rendered as an InfoMessage (not a fake UserMessage)
-	const nudgeNotice = queuedComponents.find(
-		(c: any) => typeof c.props?.message === 'string' && c.props.message.startsWith('Model returned empty response'),
+	// Counter rendered as a live component, not stacked in the static queue.
+	const counter = liveComponents.find(
+		(c: any) => typeof c?.props?.message === 'string' && c.props.message.startsWith('Empty response — retry'),
 	);
-	t.truthy(nudgeNotice, 'Should queue an InfoMessage describing the auto-continue');
+	t.truthy(counter, 'Should set a live retry counter describing the auto-continue');
+	t.regex(counter.props.message, /retry 1\/3/);
 });
 
 test.serial('processAssistantResponse - auto-nudges on empty response with recent tool results uses summary prompt', async t => {
