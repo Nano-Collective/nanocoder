@@ -115,7 +115,7 @@ async function main(): Promise<void> {
 	}
 
 	// Extract --mode if specified. Accept `--mode value` and `--mode=value`.
-	const VALID_MODES = ['normal', 'auto-accept', 'yolo', 'plan'] as const;
+	const {VALID_MODES} = await import('@/app/types');
 	type CliMode = (typeof VALID_MODES)[number];
 	let cliMode: CliMode | undefined;
 	for (let i = 0; i < args.length; i++) {

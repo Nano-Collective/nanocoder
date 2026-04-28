@@ -1,6 +1,7 @@
 import {config as loadEnv} from 'dotenv';
 import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'fs';
 import {join} from 'path';
+import {type CliMode, VALID_MODES} from '@/app/types';
 import {substituteEnvVars} from '@/config/env-substitution';
 import {
 	loadAllMCPConfigs,
@@ -408,11 +409,7 @@ function tryLoadAlwaysAllowFromPath(configPath: string): string[] | null {
 function loadNotificationsConfig(): NotificationsConfig | undefined {
 	return getNotificationsPreference();
 }
-//TODO: This constant is duplicated accross the codebase, consider centralizing it.
-const VALID_MODES = ['normal', 'auto-accept', 'yolo', 'plan'] as const;
-
-// Try to load defaultMode from a specific path
-function tryLoadDefaultModeFromPath(configPath: string): string | null {
+function tryLoadDefaultModeFromPath(configPath: string): CliMode | null {
 	if (!existsSync(configPath)) {
 		return null;
 	}
@@ -424,7 +421,7 @@ function tryLoadDefaultModeFromPath(configPath: string): string | null {
 		if (typeof defaultMode === 'string') {
 			const normalized = defaultMode.toLowerCase().trim();
 			if ((VALID_MODES as readonly string[]).includes(normalized)) {
-				return normalized;
+				return normalized as CliMode;
 			}
 		}
 	} catch (error) {
@@ -436,16 +433,13 @@ function tryLoadDefaultModeFromPath(configPath: string): string | null {
 	return null;
 }
 
-// Load default development mode configuration
-export function loadDefaultMode(): string | undefined {
-	// Try project-level config first
+export function loadDefaultMode(): CliMode | undefined {
 	const projectConfigPath = join(process.cwd(), 'agents.config.json');
 	const projectResult = tryLoadDefaultModeFromPath(projectConfigPath);
 	if (projectResult) {
 		return projectResult;
 	}
 
-	// Try global config
 	const configDir = getConfigPath();
 	const globalConfigPath = join(configDir, 'agents.config.json');
 	return tryLoadDefaultModeFromPath(globalConfigPath) ?? undefined;

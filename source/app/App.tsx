@@ -7,7 +7,7 @@ import {ChatHistory} from '@/app/components/chat-history';
 import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
 import {NonInteractiveShell} from '@/app/components/non-interactive-shell';
-import type {AppProps, CliMode} from '@/app/types';
+import type {AppProps} from '@/app/types';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {FileExplorer} from '@/components/file-explorer';
 import {IdeSelector} from '@/components/ide-selector';
@@ -77,12 +77,14 @@ export default function App({
 	// 2. Non-interactive (run) mode → auto-accept
 	// 3. defaultMode from agents.config.json
 	// 4. 'normal' (final fallback)
-	const configDefaultMode = loadDefaultMode();
-	const initialDevelopmentMode =
-		cliMode ??
-		(nonInteractiveMode
-			? 'auto-accept'
-			: ((configDefaultMode as CliMode | undefined) ?? 'normal'));
+	// Only consumed once by useAppState's initial state — memoized so we
+	// don't re-read agents.config.json on every render.
+	const initialDevelopmentMode = useMemo(
+		() =>
+			cliMode ??
+			(nonInteractiveMode ? 'auto-accept' : (loadDefaultMode() ?? 'normal')),
+		[cliMode, nonInteractiveMode],
+	);
 	// Memoize the logger to prevent recreation on every render
 	const logger = useMemo(() => createPinoLogger(), []);
 

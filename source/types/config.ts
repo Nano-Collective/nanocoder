@@ -163,9 +163,6 @@ export interface AppConfig {
 		retentionDays?: number;
 		directory?: string;
 	};
-
-	// Default development mode for new sessions
-	defaultMode?: 'normal' | 'auto-accept' | 'yolo' | 'plan';
 }
 
 // MCP Server configuration with source tracking
