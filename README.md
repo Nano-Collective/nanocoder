@@ -1,6 +1,6 @@
 # Nanocoder
 
-A local-first CLI coding agent built by the [Nano Collective](https://github.com/Nano-Collective) — a community collective building AI tooling not for profit, but for the community. Everything we build is open, transparent, and driven by the people who use it. AI done right.
+A local-first CLI coding agent built by the [Nano Collective](https://nanocollective.org) — a community collective building AI tooling not for profit, but for the community. Everything we build is open, transparent, and driven by the people who use it.
 
 Nanocoder brings the power of agentic coding tools like Claude Code and Gemini CLI to local models or controlled APIs like OpenRouter. Built with privacy and control in mind, it supports multiple AI providers with tool support for file operations and command execution.
 
@@ -57,8 +57,9 @@ Full documentation is available online at **[docs.nanocollective.org](https://do
 
 ## Community
 
-The Nano Collective is a community collective building AI tooling for the community, not for profit. We'd love your help!
+The Nano Collective is a community collective building AI tooling for the community, not for profit. We'd love your help.
 
-- **Contributing**: See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines
-- **Discord**: [Join our server](https://discord.gg/ktPDV6rekE) to connect with other users and contributors
-- **GitHub**: Open issues or join discussions on our repository
+- **Contribute**: See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+- **The collective**: [nanocollective.org](https://nanocollective.org) · [docs](https://docs.nanocollective.org) · [GitHub](https://github.com/Nano-Collective) · [Discord](https://discord.gg/ktPDV6rekE)
+- **Support the work**: The [Support page](https://docs.nanocollective.org/collective/organisation/support) covers donations and sponsorship.
+- **Paid contribution**: The [Economics Charter](https://docs.nanocollective.org/collective/organisation/economics-charter) sets out how scoped paid bounties work.

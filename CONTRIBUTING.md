@@ -435,10 +435,11 @@ git commit -m "release: vX.Y.Z"
 
 ### Code of Conduct
 
-- Be respectful and inclusive
-- Focus on constructive feedback
-- Help create a welcoming environment for all contributors
-- Remember that everyone is learning and contributing voluntarily
+The Nano Collective's [Code of Conduct](https://docs.nanocollective.org/collective/organisation/community#code-of-conduct) applies to all contributors. Please read it before participating.
+
+### Paid Contribution
+
+Some contribution work is paid via scoped bounties from the Nano Collective community fund. The [Economics Charter](https://docs.nanocollective.org/collective/organisation/economics-charter) sets out how it works — when bounties exist, how scope is agreed before work begins, and how payment is processed via Open Source Collective. Reach out to a maintainer if you want to discuss whether a piece of work could be a bounty.
 
 ### Recognition
 
