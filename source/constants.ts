@@ -31,6 +31,9 @@ export const CACHE_FILE_TTL_MS = 5000;
 export const CACHE_MODELS_EXPIRATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 export const MAX_FILE_READ_RETRIES = 3;
 
+// === SESSION NAMES ===
+export const MAX_SESSION_NAME_LENGTH = 100;
+
 // === LIMITS ===
 export const MAX_CHECKPOINT_FILES = 50;
 export const MAX_FIND_FILES_RESULTS = 100;

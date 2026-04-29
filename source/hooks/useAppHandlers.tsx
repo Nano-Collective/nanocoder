@@ -70,6 +70,7 @@ interface UseAppHandlersProps {
 	) => void;
 	setShowAllSessions: (value: boolean) => void;
 	setCurrentSessionId: (value: string | null) => void;
+	setSessionName: (value: string) => void;
 	setCurrentProvider: (value: string) => void;
 	setCurrentModel: (value: string) => void;
 	setLiveTaskList: (value: Task[] | null) => void;
@@ -478,11 +479,18 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			// Reset conversation completion flag when starting a new message
 			props.setIsConversationComplete(false);
 
+			// Extract command args for slash commands (used by /rename etc.)
+			const commandArgs = message.startsWith('/')
+				? message.slice(1).trim().split(/\s+/).slice(1)
+				: undefined;
+
 			await handleMessageSubmission(message, {
 				customCommandCache: props.customCommandCache,
 				customCommandLoader: props.customCommandLoader,
 				customCommandExecutor: props.customCommandExecutor,
 				onClearMessages: clearMessages,
+				onRenameSession: props.setSessionName,
+				commandArgs,
 				onEnterModelSelectionMode: props.enterModelSelectionMode,
 				onEnterProviderSelectionMode: props.enterProviderSelectionMode,
 				onEnterModelDatabaseMode: props.enterModelDatabaseMode,

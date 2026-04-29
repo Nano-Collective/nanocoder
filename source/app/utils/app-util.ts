@@ -9,7 +9,7 @@ import {
 	InfoMessage,
 	SuccessMessage,
 } from '@/components/message-box';
-import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
+import {DELAY_COMMAND_COMPLETE_MS, MAX_SESSION_NAME_LENGTH} from '@/constants';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
 import {clearAllTasks} from '@/tools/tasks/storage';
@@ -43,6 +43,7 @@ const SPECIAL_COMMANDS = {
 	EXPLORER: 'explorer',
 	IDE: 'ide',
 	TUNE: 'tune',
+	RENAME: 'rename',
 } as const;
 
 /** Checkpoint subcommands */
@@ -239,6 +240,7 @@ async function handleSpecialCommand(
 ): Promise<boolean> {
 	const {
 		onClearMessages,
+		onRenameSession,
 		onEnterModelSelectionMode,
 		onEnterProviderSelectionMode,
 		onEnterModelDatabaseMode,
@@ -250,6 +252,7 @@ async function handleSpecialCommand(
 		onCommandComplete,
 		onAddToChatQueue,
 		getNextComponentKey,
+		commandArgs,
 	} = options;
 
 	switch (commandName) {
@@ -315,6 +318,38 @@ async function handleSpecialCommand(
 			options.onEnterTune();
 			onCommandComplete?.();
 			return true;
+
+		case SPECIAL_COMMANDS.RENAME: {
+			const newName = commandArgs?.join(' ') || '';
+			if (!newName.trim()) {
+				onAddToChatQueue(
+					React.createElement(ErrorMessage, {
+						key: `rename-error-${getNextComponentKey()}`,
+						message: 'Usage: /rename <session name>',
+						hideBox: true,
+					}),
+				);
+			} else if (newName.length > MAX_SESSION_NAME_LENGTH) {
+				onAddToChatQueue(
+					React.createElement(ErrorMessage, {
+						key: `rename-error-${getNextComponentKey()}`,
+						message: `Session name must be ${MAX_SESSION_NAME_LENGTH} characters or less.`,
+						hideBox: true,
+					}),
+				);
+			} else {
+				onRenameSession(newName.trim());
+				onAddToChatQueue(
+					React.createElement(SuccessMessage, {
+						key: `rename-success-${getNextComponentKey()}`,
+						message: `Session renamed to "${newName.trim()}".`,
+						hideBox: true,
+					}),
+				);
+			}
+			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
+			return true;
+		}
 
 		default:
 			return false;

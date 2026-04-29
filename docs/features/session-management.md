@@ -19,6 +19,14 @@ Nanocoder automatically saves your conversations so you can close the terminal a
 
 You can also use the aliases `/sessions` or `/history`.
 
+## Renaming a Session
+
+```bash
+/rename <new name>    # rename the current session
+```
+
+The new name must be non-empty and **100 characters or less**. If the name exceeds this limit, an error message is displayed in chat.
+
 ## What Gets Saved
 
 Each session captures:

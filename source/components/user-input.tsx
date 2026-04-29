@@ -33,6 +33,7 @@ interface ChatProps {
 	compactToolDisplay?: boolean; // Current compact display state
 	developmentMode?: DevelopmentMode; // Current development mode
 	contextPercentUsed?: number | null; // Context window usage percentage
+	sessionName?: string; // Optional session name for display
 	tune?: TuneConfig; // Model mode configuration
 	activeEditor?: ActiveEditorState | null; // VS Code active file + optional selection
 	onDismissActiveEditor?: () => void; // Dismiss the active editor pill on clear/escape
@@ -50,6 +51,7 @@ export default function UserInput({
 	compactToolDisplay = true,
 	developmentMode = 'normal',
 	contextPercentUsed,
+	sessionName,
 	tune,
 	activeEditor,
 	onDismissActiveEditor,
@@ -512,6 +514,7 @@ export default function UserInput({
 					developmentMode={developmentMode}
 					colors={colors}
 					contextPercentUsed={contextPercentUsed ?? null}
+					sessionName={sessionName}
 					tune={tune}
 				/>
 			</Box>
@@ -599,6 +602,7 @@ export default function UserInput({
 				developmentMode={developmentMode}
 				colors={colors}
 				contextPercentUsed={contextPercentUsed ?? null}
+				sessionName={sessionName}
 				tune={tune}
 				activeEditor={activeEditor}
 			/>

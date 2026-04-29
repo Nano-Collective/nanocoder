@@ -18,6 +18,7 @@ interface DevelopmentModeIndicatorProps {
 	developmentMode: DevelopmentMode;
 	colors: ReturnType<typeof useTheme>['colors'];
 	contextPercentUsed: number | null;
+	sessionName?: string;
 	tune?: TuneConfig;
 	activeEditor?: ActiveEditorState | null;
 }
@@ -41,6 +42,7 @@ export const DevelopmentModeIndicator = React.memo(
 		developmentMode,
 		colors,
 		contextPercentUsed,
+		sessionName,
 		tune,
 		activeEditor,
 	}: DevelopmentModeIndicatorProps) => {
@@ -114,6 +116,12 @@ export const DevelopmentModeIndicator = React.memo(
 						<Text> (Shift+Tab to cycle)</Text>
 					)}
 				</Text>
+				{sessionName && (
+					<>
+						<Text color={colors.secondary}> · </Text>
+						<Text color={colors.primary}>{sessionName}</Text>
+					</>
+				)}
 				{tuneLabel && (
 					<>
 						<Text color={colors.secondary}> · </Text>

@@ -155,6 +155,11 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/checkpoint').then(m => m.checkpointCommand),
 	},
 	{
+		name: 'rename',
+		description: 'Rename the current session (/rename <new name>)',
+		load: () => import('@/commands/rename').then(m => m.renameCommand),
+	},
+	{
 		name: 'resume',
 		description:
 			'List and resume previous chat sessions. Aliases: /sessions, /history',

@@ -43,6 +43,7 @@ export interface ChatInputProps {
 	inputDisabled: boolean;
 	developmentMode: DevelopmentMode;
 	contextPercentUsed: number | null;
+	sessionName?: string;
 
 	// Tool display
 	compactToolCounts?: Record<string, number> | null;
@@ -92,6 +93,7 @@ export function ChatInput({
 	inputDisabled,
 	developmentMode,
 	contextPercentUsed,
+	sessionName,
 	compactToolCounts,
 	onToggleCompactDisplay,
 	compactToolDisplay,
@@ -165,6 +167,7 @@ export function ChatInput({
 					compactToolDisplay={compactToolDisplay}
 					developmentMode={developmentMode}
 					contextPercentUsed={contextPercentUsed}
+					sessionName={sessionName}
 					tune={tune}
 					activeEditor={activeEditor}
 					onDismissActiveEditor={onDismissActiveEditor}

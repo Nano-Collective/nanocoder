@@ -606,6 +606,7 @@ export default function App({
 		setCheckpointLoadData: appState.setCheckpointLoadData,
 		setShowAllSessions: appState.setShowAllSessions,
 		setCurrentSessionId: appState.setCurrentSessionId,
+		setSessionName: appState.setSessionName,
 		setCurrentProvider: appState.setCurrentProvider,
 		setCurrentModel: appState.setCurrentModel,
 		setLiveTaskList: appState.setLiveTaskList,
@@ -964,6 +965,7 @@ export default function App({
 									}
 									developmentMode={appState.developmentMode}
 									contextPercentUsed={appState.contextPercentUsed}
+									sessionName={appState.sessionName || undefined}
 									compactToolCounts={appState.compactToolCounts}
 									compactToolDisplay={appState.compactToolDisplay}
 									liveTaskList={appState.liveTaskList}

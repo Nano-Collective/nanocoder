@@ -13,6 +13,8 @@ export interface MessageSubmissionOptions {
 	customCommandLoader: CustomCommandLoader | null;
 	customCommandExecutor: CustomCommandExecutor | null;
 	onClearMessages: () => Promise<void>;
+	onRenameSession: (name: string) => void;
+	commandArgs?: string[];
 	onEnterModelSelectionMode: () => void;
 	onEnterProviderSelectionMode: () => void;
 	onEnterModelDatabaseMode: () => void;
