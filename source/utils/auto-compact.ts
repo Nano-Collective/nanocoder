@@ -163,7 +163,16 @@ export async function performAutoCompact(
 
 		compressionBackup.storeBackup(messages);
 
-		const result = compressMessages(messages, tokenizer, {mode});
+		// Include system message in compression input so compressMessages()
+		// preserves it and only compresses user/assistant/tool messages — matching
+		// the behaviour of manual `/compact`.
+		const result = compressMessages(allMessages, tokenizer, {mode});
+
+		// Filter out system messages from the compressed output (they are re-injected
+		// by the chat handler on each LLM call)
+		const compressedUserMessages = result.compressedMessages.filter(
+			msg => msg.role !== 'system',
+		);
 
 		// Show notification if enabled
 		if (config.notifyUser && onNotify) {
@@ -173,8 +182,8 @@ export async function performAutoCompact(
 			);
 		}
 
-		// Return compressed messages
-		return result.compressedMessages;
+		// Return compressed user messages (without system message)
+		return compressedUserMessages;
 	} finally {
 		// Clean up tokenizer
 		if (tokenizer?.free) {
