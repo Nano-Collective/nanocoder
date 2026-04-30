@@ -235,20 +235,176 @@ test.serial('processAssistantResponse - exits in non-interactive mode when appro
 // Auto-Nudge Tests (lines 469-506)
 // ============================================================================
 
-test.serial('processAssistantResponse - auto-nudges on empty response with recent tool results', async t => {
-	// This test requires:
-	// 1. Mock client.chat() to return empty content with no tool calls
-	// 2. Mock messages array to have a tool result as last message
-	// 3. Verify nudge message is added and function recurses
+test.serial('processAssistantResponse - auto-nudges on empty response without tool results uses generic prompt', async t => {
+	let chatCallCount = 0;
+	const messagesSeenByRecursiveCall: Message[][] = [];
+	const liveComponents: any[] = [];
 
-	t.pass('Auto-nudge requires proper mock setup');
+	const trackingClient = {
+		chat: async (msgs: Message[]): Promise<LLMChatResponse> => {
+			chatCallCount += 1;
+			if (chatCallCount === 1) {
+				return {
+					choices: [
+						{message: {role: 'assistant', content: '', tool_calls: undefined}},
+					],
+					toolsDisabled: false,
+				};
+			}
+			messagesSeenByRecursiveCall.push(msgs);
+			return {
+				choices: [
+					{message: {role: 'assistant', content: 'Done.', tool_calls: undefined}},
+				],
+				toolsDisabled: false,
+			};
+		},
+	};
+
+	const params = createDefaultParams({
+		client: trackingClient,
+		messages: [{role: 'user', content: 'Hi'}],
+		setLiveComponent: (component: any) => liveComponents.push(component),
+	});
+
+	await processAssistantResponse(params);
+
+	t.is(chatCallCount, 2, 'Initial empty response should trigger one nudge recursion');
+	const recursive = messagesSeenByRecursiveCall[0];
+	const lastUser = [...recursive].reverse().find(m => m.role === 'user');
+	t.is(lastUser?.content, 'Please continue with the task.');
+
+	// Counter rendered as a live component, not stacked in the static queue.
+	const counter = liveComponents.find(
+		(c: any) => typeof c?.props?.message === 'string' && c.props.message.startsWith('Empty response — retry'),
+	);
+	t.truthy(counter, 'Should set a live retry counter describing the auto-continue');
+	t.regex(counter.props.message, /retry 1\/3/);
 });
 
-test.serial('processAssistantResponse - auto-nudges on empty response without tool results', async t => {
-	// Similar to above but without recent tool results
-	// Should add a "Please continue with the task" nudge instead
+test.serial('processAssistantResponse - auto-nudges on empty response with recent tool results uses summary prompt', async t => {
+	let chatCallCount = 0;
+	const messagesSeenByRecursiveCall: Message[][] = [];
 
-	t.pass('Auto-nudge continuation requires proper mock setup');
+	const trackingClient = {
+		chat: async (msgs: Message[]): Promise<LLMChatResponse> => {
+			chatCallCount += 1;
+			if (chatCallCount === 1) {
+				return {
+					choices: [
+						{message: {role: 'assistant', content: '', tool_calls: undefined}},
+					],
+					toolsDisabled: false,
+				};
+			}
+			messagesSeenByRecursiveCall.push(msgs);
+			return {
+				choices: [
+					{message: {role: 'assistant', content: 'Summary.', tool_calls: undefined}},
+				],
+				toolsDisabled: false,
+			};
+		},
+	};
+
+	const messagesWithToolResult: Message[] = [
+		{role: 'user', content: 'Run a tool'},
+		{role: 'assistant', content: '', tool_calls: [{id: 't1', type: 'function', function: {name: 'list_directory', arguments: '{}'}}]},
+		{role: 'tool', tool_call_id: 't1', name: 'list_directory', content: 'file1\nfile2'},
+	];
+
+	const params = createDefaultParams({
+		client: trackingClient,
+		messages: messagesWithToolResult,
+	});
+
+	await processAssistantResponse(params);
+
+	t.is(chatCallCount, 2);
+	const recursive = messagesSeenByRecursiveCall[0];
+	const lastUser = [...recursive].reverse().find(m => m.role === 'user');
+	t.is(lastUser?.content, 'Please provide a summary or response based on the tool results above.');
+});
+
+test.serial('processAssistantResponse - reasoning-only empty turn uses reasoning-specific nudge', async t => {
+	let chatCallCount = 0;
+	const messagesSeenByRecursiveCall: Message[][] = [];
+
+	const trackingClient = {
+		chat: async (msgs: Message[]): Promise<LLMChatResponse> => {
+			chatCallCount += 1;
+			if (chatCallCount === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: '',
+								tool_calls: undefined,
+								reasoning: 'I considered the options carefully...',
+							},
+						},
+					],
+					toolsDisabled: false,
+				};
+			}
+			messagesSeenByRecursiveCall.push(msgs);
+			return {
+				choices: [
+					{message: {role: 'assistant', content: 'My answer.', tool_calls: undefined}},
+				],
+				toolsDisabled: false,
+			};
+		},
+	};
+
+	const params = createDefaultParams({
+		client: trackingClient,
+		messages: [{role: 'user', content: 'Think then answer'}],
+	});
+
+	await processAssistantResponse(params);
+
+	t.is(chatCallCount, 2);
+	const recursive = messagesSeenByRecursiveCall[0];
+	const lastUser = [...recursive].reverse().find(m => m.role === 'user');
+	t.is(
+		lastUser?.content,
+		'You produced reasoning but no final response. Please provide your answer based on your reasoning above.',
+	);
+});
+
+test.serial('processAssistantResponse - empty-turn cap stops the loop after MAX_EMPTY_TURNS', async t => {
+	let chatCallCount = 0;
+	const queuedComponents: any[] = [];
+
+	const alwaysEmptyClient = {
+		chat: async (): Promise<LLMChatResponse> => {
+			chatCallCount += 1;
+			return {
+				choices: [
+					{message: {role: 'assistant', content: '', tool_calls: undefined}},
+				],
+				toolsDisabled: false,
+			};
+		},
+	};
+
+	const params = createDefaultParams({
+		client: alwaysEmptyClient,
+		messages: [{role: 'user', content: 'Hi'}],
+		addToChatQueue: (component: any) => queuedComponents.push(component),
+	});
+
+	await processAssistantResponse(params);
+
+	// MAX_EMPTY_TURNS = 2 → initial + 2 nudge retries = 3 calls, then give up
+	t.is(chatCallCount, 3, 'Loop should stop after MAX_EMPTY_TURNS+1 chat calls');
+
+	const giveUpMessage = queuedComponents.find(
+		(c: any) => typeof c.props?.message === 'string' && c.props.message.includes('produced no output after'),
+	);
+	t.truthy(giveUpMessage, 'Should queue a give-up ErrorMessage when cap is hit');
 });
 
 // ============================================================================
@@ -565,6 +721,79 @@ test.serial('processAssistantResponse - does not extra-reset token count when co
 	// Only one setTokenCount(0) — the initial streaming reset at line 180.
 	const zeroCalls = tokenCountCalls.filter(v => v === 0);
 	t.is(zeroCalls.length, 1, `Expected exactly 1 call to setTokenCount(0), got ${zeroCalls.length}`);
+});
+
+test.serial('processAssistantResponse - compressed messages persist when loop recurses (regression: pre-compression array was reused, undoing compression)', async t => {
+	// Reproduce the bug where, after auto-compaction, downstream code paths
+	// (tool execution, error recovery, auto-nudge) rebuilt state from the
+	// PRE-compression local variable, clobbering the compressed messages
+	// state. The empty-response auto-nudge path is the cleanest trigger for
+	// this in a unit test because it exercises a recursive call with the
+	// post-compaction message array.
+	setSessionContextLimit(100);
+
+	const oldVerboseContent = 'old context sentence. '.repeat(120);
+	const originalMessages: Message[] = [
+		{role: 'user', content: oldVerboseContent},
+		{role: 'assistant', content: 'Prior answer'},
+		{role: 'user', content: 'Recent request'},
+	];
+
+	let chatCallCount = 0;
+	const messagesSeenByRecursiveCall: Message[][] = [];
+
+	const trackingClient = {
+		chat: async (msgs: Message[]): Promise<LLMChatResponse> => {
+			chatCallCount += 1;
+			if (chatCallCount === 1) {
+				// First turn: empty response triggers the auto-nudge path
+				// AFTER auto-compaction has happened.
+				return {
+					choices: [
+						{
+							message: {role: 'assistant', content: '', tool_calls: undefined},
+						},
+					],
+					toolsDisabled: false,
+				};
+			}
+			// Second turn (the recursion under test): record the messages so
+			// we can assert they reflect the compressed state, then return a
+			// real reply to terminate the loop.
+			messagesSeenByRecursiveCall.push(msgs);
+			return {
+				choices: [
+					{
+						message: {role: 'assistant', content: 'Done.', tool_calls: undefined},
+					},
+				],
+				toolsDisabled: false,
+			};
+		},
+	};
+
+	const params = createDefaultParams({
+		client: trackingClient,
+		messages: originalMessages,
+		currentProvider: 'openai',
+		currentModel: 'gpt-4',
+		setMessages: () => {},
+		addToChatQueue: () => {},
+	});
+
+	await processAssistantResponse(params);
+
+	t.is(chatCallCount, 2, 'Expected exactly two LLM calls (initial + nudge recursion)');
+	t.is(messagesSeenByRecursiveCall.length, 1, 'Expected to capture one recursive call');
+
+	const recursiveMsgs = messagesSeenByRecursiveCall[0];
+	const firstMessage = recursiveMsgs.find(m => m.role === 'user');
+	t.truthy(firstMessage, 'Expected at least one user message in recursive call');
+	t.not(
+		firstMessage?.content,
+		oldVerboseContent,
+		'Recursive call must use compressed messages, not the pre-compression array',
+	);
 });
 
 test.serial('processAssistantResponse - does not extra-reset token count when autoCompact is disabled via session override', async t => {

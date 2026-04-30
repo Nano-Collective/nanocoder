@@ -22,7 +22,7 @@ import {
 	VSCodeExtensionPrompt,
 } from '@/components/vscode-extension-prompt';
 import WelcomeMessage from '@/components/welcome-message';
-import {getAppConfig} from '@/config/index';
+import {getAppConfig, loadDefaultMode} from '@/config/index';
 import {updateSelectedTheme} from '@/config/preferences';
 import {getThemeColors} from '@/config/themes';
 import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
@@ -72,11 +72,19 @@ export default function App({
 	cliModel,
 	cliMode,
 }: AppProps) {
-	// Resolve the initial development mode. `--mode` wins; otherwise
-	// non-interactive runs default to auto-accept (previous behavior) and
-	// interactive runs default to normal.
-	const initialDevelopmentMode =
-		cliMode ?? (nonInteractiveMode ? 'auto-accept' : 'normal');
+	// Resolve the initial development mode with this precedence:
+	// 1. --mode CLI flag (highest priority)
+	// 2. Non-interactive (run) mode → auto-accept
+	// 3. defaultMode from agents.config.json
+	// 4. 'normal' (final fallback)
+	// Only consumed once by useAppState's initial state — memoized so we
+	// don't re-read agents.config.json on every render.
+	const initialDevelopmentMode = useMemo(
+		() =>
+			cliMode ??
+			(nonInteractiveMode ? 'auto-accept' : (loadDefaultMode() ?? 'normal')),
+		[cliMode, nonInteractiveMode],
+	);
 	// Memoize the logger to prevent recreation on every render
 	const logger = useMemo(() => createPinoLogger(), []);
 

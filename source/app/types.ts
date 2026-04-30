@@ -1,13 +1,18 @@
 import type {DevelopmentMode} from '@/types/core';
 
 /**
- * A user-selectable boot mode for the `--mode` CLI flag. Subset of
- * DevelopmentMode (internal-only `scheduler` is excluded).
+ * Valid user-selectable boot modes. Single source of truth — used by the
+ * `--mode` CLI parser, the `defaultMode` config loader, and tests.
  */
-export type CliMode = Extract<
-	DevelopmentMode,
-	'normal' | 'auto-accept' | 'yolo' | 'plan'
->;
+export const VALID_MODES = ['normal', 'auto-accept', 'yolo', 'plan'] as const;
+
+/**
+ * A user-selectable boot mode for the `--mode` CLI flag. Subset of
+ * DevelopmentMode (internal-only `scheduler` is excluded). The Extract
+ * keeps this in sync with DevelopmentMode — adding a mode there that
+ * isn't listed in VALID_MODES will fail to type-check.
+ */
+export type CliMode = Extract<DevelopmentMode, (typeof VALID_MODES)[number]>;
 
 /**
  * Props for the main App component

@@ -1,4 +1,5 @@
 import test from 'ava';
+import {VALID_MODES} from './app/types';
 import {isNonInteractiveModeComplete, shouldRenderWelcome} from './app/helpers';
 
 // Test non-interactive mode integration
@@ -242,7 +243,6 @@ test('Non-interactive mode: CLI parsing without run command', t => {
 // --mode flag parsing tests
 // ============================================================================
 
-const VALID_MODES = ['normal', 'auto-accept', 'yolo', 'plan'] as const;
 type CliMode = (typeof VALID_MODES)[number];
 
 /**

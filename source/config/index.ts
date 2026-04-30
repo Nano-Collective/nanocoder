@@ -1,6 +1,7 @@
 import {config as loadEnv} from 'dotenv';
 import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'fs';
 import {join} from 'path';
+import {type CliMode, VALID_MODES} from '@/app/types';
 import {substituteEnvVars} from '@/config/env-substitution';
 import {
 	loadAllMCPConfigs,
@@ -407,6 +408,41 @@ function tryLoadAlwaysAllowFromPath(configPath: string): string[] | null {
 // Load notifications configuration from preferences
 function loadNotificationsConfig(): NotificationsConfig | undefined {
 	return getNotificationsPreference();
+}
+function tryLoadDefaultModeFromPath(configPath: string): CliMode | null {
+	if (!existsSync(configPath)) {
+		return null;
+	}
+
+	try {
+		const rawData = readFileSync(configPath, 'utf-8');
+		const config = JSON.parse(rawData);
+		const defaultMode = config.nanocoder?.defaultMode;
+		if (typeof defaultMode === 'string') {
+			const normalized = defaultMode.toLowerCase().trim();
+			if ((VALID_MODES as readonly string[]).includes(normalized)) {
+				return normalized as CliMode;
+			}
+		}
+	} catch (error) {
+		logError(
+			`Failed to load defaultMode config from ${configPath}: ${String(error)}`,
+		);
+	}
+
+	return null;
+}
+
+export function loadDefaultMode(): CliMode | undefined {
+	const projectConfigPath = join(process.cwd(), 'agents.config.json');
+	const projectResult = tryLoadDefaultModeFromPath(projectConfigPath);
+	if (projectResult) {
+		return projectResult;
+	}
+
+	const configDir = getConfigPath();
+	const globalConfigPath = join(configDir, 'agents.config.json');
+	return tryLoadDefaultModeFromPath(globalConfigPath) ?? undefined;
 }
 
 // Function to load app configuration from agents.config.json if it exists

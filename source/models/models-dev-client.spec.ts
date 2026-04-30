@@ -15,6 +15,12 @@ test.beforeEach(() => {
 	delete process.env.NANOCODER_CONTEXT_LIMIT;
 });
 
+// Clean up after each test so downstream test files aren't affected
+test.afterEach(() => {
+	resetSessionContextLimit();
+	delete process.env.NANOCODER_CONTEXT_LIMIT;
+});
+
 /**
  * Tests for models-dev-client.ts
  *
@@ -327,9 +333,17 @@ test('getModelContextLimit - falls through to models.dev when no session overrid
 // ============================================================================
 
 test('getModelContextLimit - env variable used for unknown models', async t => {
+	const saved = process.env.NANOCODER_CONTEXT_LIMIT;
 	process.env.NANOCODER_CONTEXT_LIMIT = '32000';
-	const limit = await getModelContextLimit('unknown-model-12345');
-	t.is(limit, 32000);
+	try {
+		const limit = await getModelContextLimit('unknown-model-12345');
+		t.is(limit, 32000);
+	} finally {
+		delete process.env.NANOCODER_CONTEXT_LIMIT;
+		if (saved !== undefined) {
+			process.env.NANOCODER_CONTEXT_LIMIT = saved;
+		}
+	}
 });
 
 test('getModelContextLimit - session override takes priority over env variable', async t => {

@@ -3,8 +3,8 @@ import type {ConversationStateManager} from '@/app/utils/conversation-state';
 import AssistantMessage from '@/components/assistant-message';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
-import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
+import {MAX_EMPTY_TURNS} from '@/constants';
 import {parseToolCalls} from '@/tool-calling/index';
 import {loadTasks} from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
@@ -60,6 +60,10 @@ interface ProcessAssistantResponseParams {
 	onSetLiveTaskList?: (tasks: Task[] | null) => void;
 	setLiveComponent?: (component: React.ReactNode) => void;
 	tune?: TuneConfig;
+	// Number of consecutive empty assistant turns that have already been
+	// nudged in this loop. The empty-response branch increments and
+	// recurses; every other recursion site resets to 0.
+	emptyTurnCount?: number;
 }
 
 // Module-level flag: show XML fallback notice only once per process lifetime.
@@ -75,11 +79,6 @@ export const resetFallbackNotice = () => {
 // indented (grouping beneath its Thought) or rendered flat (non-thinking
 // models, where there is no Thought to group under).
 let lastTurnHadReasoning = false;
-
-/** Reset the reasoning-grouping flag (for testing). */
-export const resetLastTurnHadReasoning = () => {
-	lastTurnHadReasoning = false;
-};
 
 /**
  * Main conversation loop that processes assistant responses and handles tool calls.
@@ -122,6 +121,7 @@ export const processAssistantResponse = async (
 		setLiveComponent,
 		tune,
 		developmentMode,
+		emptyTurnCount = 0,
 	} = params;
 
 	const startTime = conversationStartTime ?? Date.now();
@@ -178,6 +178,10 @@ export const processAssistantResponse = async (
 	setStreamingContent('');
 	setStreamingReasoning('');
 	setTokenCount(0);
+	// Drop any prior empty-response retry counter from the live area so the
+	// streaming UI for this turn renders unobstructed. The counter is only
+	// meant to be visible briefly between calls on consecutive empties.
+	setLiveComponent?.(null);
 
 	// Build mode overrides for non-interactive mode and tune settings
 	const modelParameters = tune?.enabled ? tune.modelParameters : undefined;
@@ -288,6 +292,7 @@ export const processAssistantResponse = async (
 			...params,
 			messages: updatedMessagesWithError,
 			conversationStartTime: startTime,
+			emptyTurnCount: 0,
 		});
 		return;
 	}
@@ -375,9 +380,10 @@ export const processAssistantResponse = async (
 		conversationStateManager.current.updateAssistantMessage(assistantMsg);
 	}
 
-	// Build the final messages array. Declared as let because it may be
-	// reassigned during this turn (auto-compact, tool results) so downstream
-	// code always builds on the latest version.
+	// Build the final messages array. `let` (not const) because auto-compact
+	// below may replace it with the compressed array — downstream tool-result
+	// builders and recursive calls must use the compressed messages, otherwise
+	// compression is silently undone the moment we recurse.
 	let updatedMessages = builder.build();
 
 	// Update messages state once with all changes
@@ -419,6 +425,10 @@ export const processAssistantResponse = async (
 				// Reset stale streaming token count to avoid double-counting
 				// with calculateTokenBreakdown which already counts compacted tokens
 				setTokenCount(0);
+				// Replace the local array so subsequent tool-result builders
+				// and recursive calls see the compressed messages instead of
+				// the pre-compression copy.
+				updatedMessages = compressed;
 			}
 		}
 	} catch (_error) {
@@ -468,6 +478,7 @@ export const processAssistantResponse = async (
 			...params,
 			messages: updatedMessagesWithError,
 			conversationStartTime: startTime,
+			emptyTurnCount: 0,
 		});
 		return;
 	}
@@ -603,6 +614,7 @@ export const processAssistantResponse = async (
 					...params,
 					messages: updatedMessagesWithTools,
 					conversationStartTime: startTime,
+					emptyTurnCount: 0,
 				});
 				return;
 			}
@@ -666,28 +678,78 @@ export const processAssistantResponse = async (
 	// BUT: if there's ALSO no content, that's likely an error - the model should have said something
 	// Auto-reprompt to help the model continue
 	if (validToolCalls.length === 0 && !cleanedContent.trim()) {
+		// Cap consecutive empty turns. Without this, a model that keeps
+		// returning nothing (common with GPT-5 reasoning that exhausts the
+		// token budget on thinking) would loop forever.
+		if (emptyTurnCount >= MAX_EMPTY_TURNS) {
+			setLiveComponent?.(null);
+			flushCompactCounts();
+			if (hasLiveTaskUpdates) {
+				await flushLiveTaskList();
+				hasLiveTaskUpdates = false;
+			}
+			addToChatQueue(
+				<ErrorMessage
+					key={`empty-response-giveup-${getNextComponentKey()}`}
+					message={`Model produced no output after ${MAX_EMPTY_TURNS + 1} attempts. The model may be exhausting its token budget on reasoning, or the request may have been refused. Try rephrasing, lowering reasoning effort, or switching models.`}
+					hideBox={true}
+				/>,
+			);
+			setIsGenerating(false);
+			if (onConversationComplete) {
+				onConversationComplete();
+			}
+			return;
+		}
+
 		// Check if we just executed tools (updatedMessages should have tool results)
 		const lastMessage = updatedMessages[updatedMessages.length - 1];
 		const hasRecentToolResults = lastMessage?.role === 'tool';
 
-		// Add a continuation message to help the model respond
-		// For recent tool results, ask for a summary; otherwise, ask to continue
-		const nudgeContent = hasRecentToolResults
-			? 'Please provide a summary or response based on the tool results above.'
-			: 'Please continue with the task.';
+		// Pick a nudge that matches the failure mode. A reasoning-only turn
+		// gets a different prompt than a totally silent one — telling the
+		// model "you produced reasoning but no answer" is more actionable
+		// than a generic "continue".
+		let nudgeContent: string;
+		if (fullReasoning && fullReasoning.trim()) {
+			nudgeContent =
+				'You produced reasoning but no final response. Please provide your answer based on your reasoning above.';
+		} else if (hasRecentToolResults) {
+			nudgeContent =
+				'Please provide a summary or response based on the tool results above.';
+		} else {
+			nudgeContent = 'Please continue with the task.';
+		}
 
 		const nudgeMessage: Message = {
 			role: 'user',
 			content: nudgeContent,
 		};
 
-		// Display a "continue" message when the model produced empty text
-		addToChatQueue(
-			<UserMessage
-				key={`auto-continue-${getNextComponentKey()}`}
-				message="continue"
+		// Coalesce auto-nudge notices into a single live counter that
+		// updates in place between turns instead of stacking N
+		// InfoMessages in scrollback. The counter is visible briefly
+		// between the empty turn and the next streaming response, then
+		// gets cleared at the top of processAssistantResponse so the
+		// streaming UI for the retry is unobstructed.
+		const attempt = emptyTurnCount + 1;
+		const total = MAX_EMPTY_TURNS + 1;
+		setLiveComponent?.(
+			<InfoMessage
+				key="auto-continue-counter"
+				message={`Empty response — retry ${attempt}/${total}: "${nudgeContent}"`}
+				hideBox={true}
 			/>,
 		);
+
+		// Lock any live task panel from the prior turn into scrollback so
+		// the next turn's UI starts clean — same pattern as the give-up,
+		// confirmation-flow, and natural-end branches.
+		flushCompactCounts();
+		if (hasLiveTaskUpdates) {
+			await flushLiveTaskList();
+			hasLiveTaskUpdates = false;
+		}
 
 		// Don't include the empty assistantMsg - it would cause API error
 		// "Assistant message must have either content or tool_calls"
@@ -701,6 +763,7 @@ export const processAssistantResponse = async (
 			...params,
 			messages: updatedMessagesWithNudge,
 			conversationStartTime: startTime,
+			emptyTurnCount: emptyTurnCount + 1,
 		});
 		return;
 	}
