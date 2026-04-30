@@ -81,19 +81,6 @@ const createMockToolManager = (config: {
 		}
 		return undefined;
 	},
-	getAvailableToolNames: (_tune: unknown, _mode: string) =>
-		config.tools ?? ['some_tool', 'read_file'],
-	getEffectiveTools: (names: string[]) => {
-		const tools: Record<string, any> = {};
-		for (const name of names) {
-			tools[name] = {
-				name,
-				description: `Mock tool ${name}`,
-				input_schema: {type: 'object', properties: {}},
-			};
-		}
-		return tools;
-	},
 });
 
 // Mock parseToolCalls function - imported from tool-parsing
