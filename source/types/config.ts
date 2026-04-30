@@ -184,7 +184,7 @@ export interface MCPServerConfig {
 }
 
 // Tune configuration for runtime model tuning via /tune command
-export type ToolProfile = 'full' | 'minimal';
+export type ToolProfile = 'full' | 'minimal' | 'nano';
 
 // Model parameters passed directly to AI SDK streamText/generateText
 export interface ModelParameters {
@@ -206,6 +206,9 @@ export interface TuneConfig {
 	toolProfile: ToolProfile;
 	aggressiveCompact: boolean;
 	disableNativeTools?: boolean;
+	// When false, AGENTS.md is not appended to the system prompt. Defaults to true
+	// when undefined to preserve historical behaviour.
+	includeAgentsMd?: boolean;
 	modelParameters?: ModelParameters;
 }
 

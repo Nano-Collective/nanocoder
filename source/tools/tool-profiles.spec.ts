@@ -1,6 +1,7 @@
 import test from 'ava';
 import {
 	getToolsForProfile,
+	isNanoProfile,
 	isSingleToolProfile,
 	TOOL_PROFILE_DESCRIPTIONS,
 	TOOL_PROFILE_TOOLTIPS,
@@ -37,6 +38,24 @@ test('getToolsForProfile - minimal profile includes execute_bash', t => {
 	t.true(result.includes('execute_bash'));
 });
 
+test('getToolsForProfile - nano profile returns 5 core tools', t => {
+	const result = getToolsForProfile('nano');
+	t.deepEqual(result, [
+		'read_file',
+		'string_replace',
+		'write_file',
+		'execute_bash',
+		'search_file_contents',
+	]);
+});
+
+test('getToolsForProfile - nano omits agent, find_files, list_directory', t => {
+	const result = getToolsForProfile('nano');
+	t.false(result.includes('agent'));
+	t.false(result.includes('find_files'));
+	t.false(result.includes('list_directory'));
+});
+
 // ============================================================================
 // isSingleToolProfile
 // ============================================================================
@@ -45,8 +64,25 @@ test('isSingleToolProfile - returns true for minimal', t => {
 	t.true(isSingleToolProfile('minimal'));
 });
 
+test('isSingleToolProfile - returns true for nano', t => {
+	t.true(isSingleToolProfile('nano'));
+});
+
 test('isSingleToolProfile - returns false for full', t => {
 	t.false(isSingleToolProfile('full'));
+});
+
+// ============================================================================
+// isNanoProfile
+// ============================================================================
+
+test('isNanoProfile - returns true for nano', t => {
+	t.true(isNanoProfile('nano'));
+});
+
+test('isNanoProfile - returns false for minimal and full', t => {
+	t.false(isNanoProfile('minimal'));
+	t.false(isNanoProfile('full'));
 });
 
 // ============================================================================
@@ -56,9 +92,11 @@ test('isSingleToolProfile - returns false for full', t => {
 test('TOOL_PROFILE_DESCRIPTIONS - has entries for all profiles', t => {
 	t.truthy(TOOL_PROFILE_DESCRIPTIONS.full);
 	t.truthy(TOOL_PROFILE_DESCRIPTIONS.minimal);
+	t.truthy(TOOL_PROFILE_DESCRIPTIONS.nano);
 });
 
 test('TOOL_PROFILE_TOOLTIPS - has entries for all profiles', t => {
 	t.truthy(TOOL_PROFILE_TOOLTIPS.full);
 	t.truthy(TOOL_PROFILE_TOOLTIPS.minimal);
+	t.truthy(TOOL_PROFILE_TOOLTIPS.nano);
 });

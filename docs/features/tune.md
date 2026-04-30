@@ -28,8 +28,29 @@ Controls which tools the AI has access to.
 |---------|-------|-----------|
 | **full** (default) | All registered tools including MCP servers | No filtering applied |
 | **minimal** | 8 core tools: `read_file`, `write_file`, `string_replace`, `execute_bash`, `find_files`, `search_file_contents`, `list_directory`, `agent` | Slim prompt and single-tool enforcement enabled automatically |
+| **nano** | 5 core tools: `read_file`, `string_replace`, `write_file`, `execute_bash`, `search_file_contents` | Ultra-slim prompt, single-tool enforcement, AGENTS.md omitted by default |
 
 The **minimal** profile is designed for small models (1B-8B parameters) that struggle with large tool sets. It reduces the system prompt size and forces the model to call one tool at a time.
+
+The **nano** profile is designed for the smallest models or low-end hardware running larger models locally. It is strictly more aggressive than `minimal`:
+
+- Drops `find_files`, `list_directory`, and `agent` (subagent delegation).
+- Drops the `CORE PRINCIPLES` and `CODING PRACTICES` prompt sections.
+- Uses shortened `TASK APPROACH`, `FILE OPERATIONS`, `CONSTRAINTS` sections (≤4 lines each).
+- Replaces the verbose `SYSTEM INFORMATION` block with a single-line `## SYSTEM` line.
+- Omits `AGENTS.md` from the system prompt by default (override with the **Include AGENTS.md** toggle).
+
+Together these reduce the system prompt from ~500–700 tokens (`minimal`) to roughly ~150–250 tokens (`nano`), leaving more of the context window for actual work.
+
+### Include AGENTS.md
+
+Toggles whether `AGENTS.md` from the project root is appended to the system prompt.
+
+- Defaults **ON** for `full` and `minimal` profiles (preserves prior behaviour).
+- Defaults **OFF** for the `nano` profile.
+- Can be flipped explicitly per session, persisted via preferences, or pinned in `agents.config.json` via `tune.includeAgentsMd`.
+
+Disabling this is useful on tiny models that get crowded out by long project guidelines.
 
 ### Aggressive Compact
 
@@ -56,12 +77,13 @@ Press **Enter** on a parameter to cycle through values. Select **Reset All to De
 
 ## Presets
 
-Two built-in presets are available via **Load Preset**:
+Three built-in presets are available via **Load Preset**:
 
 | Preset | Settings |
 |--------|----------|
 | **Default** | Resets everything to defaults (tune disabled) |
 | **Small Model** | Minimal tool profile, aggressive compact, temperature 0.7 |
+| **Nano (low-end hardware)** | Nano profile, aggressive compact, AGENTS.md off, temperature 0.4, max tokens 2048 |
 
 Selecting a preset populates the tune form — you can further adjust settings before applying.
 
@@ -106,6 +128,7 @@ This automatically activates tune with the minimal profile whenever you switch t
 Tune works alongside [development modes](development-modes.md):
 
 - **Plan mode + minimal profile** — the model gets 4 exploration tools (`read_file`, `find_files`, `search_file_contents`, `list_directory`), making it practical for small models to plan
+- **Plan mode + nano profile** — the model gets `read_file` and `search_file_contents` for exploration, with the shortened plan-mode prompt
 - **Plan mode + full profile** — all plan-mode tools are available, including read-only git, diagnostics, web, and interaction tools
 - Mode exclusions are filtered on top of the tune profile
 

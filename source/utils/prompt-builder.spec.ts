@@ -1,4 +1,6 @@
 import test from 'ava';
+import {existsSync} from 'fs';
+import {join} from 'path';
 import {
 	buildSystemPrompt,
 	getLastBuiltPrompt,
@@ -36,6 +38,20 @@ const TUNE_FULL: TuneConfig = {
 	toolProfile: 'full',
 	aggressiveCompact: false,
 };
+
+const TUNE_NANO: TuneConfig = {
+	enabled: true,
+	toolProfile: 'nano',
+	aggressiveCompact: true,
+};
+
+const NANO_TOOLS = [
+	'read_file',
+	'string_replace',
+	'write_file',
+	'execute_bash',
+	'search_file_contents',
+];
 
 // ============================================================================
 // buildSystemPrompt — identity and core principles always present
@@ -270,4 +286,110 @@ test('buildSystemPrompt - XML fallback prompt differs from native prompt', t => 
 	// XML version includes XML format instructions
 	t.true(xmlPrompt.includes('does not support native tool calling'));
 	t.false(nativePrompt.includes('does not support native tool calling'));
+});
+
+// ============================================================================
+// buildSystemPrompt — nano profile
+// ============================================================================
+
+test('buildSystemPrompt - nano profile drops core principles', t => {
+	const result = buildSystemPrompt('normal', TUNE_NANO, NANO_TOOLS);
+	t.false(result.includes('CORE PRINCIPLES'));
+});
+
+test('buildSystemPrompt - nano profile drops coding practices', t => {
+	const result = buildSystemPrompt('normal', TUNE_NANO, NANO_TOOLS);
+	t.false(result.includes('CODING PRACTICES'));
+});
+
+test('buildSystemPrompt - nano profile uses slim system info', t => {
+	const result = buildSystemPrompt('normal', TUNE_NANO, NANO_TOOLS);
+	t.false(result.includes('SYSTEM INFORMATION'));
+	t.true(result.includes('## SYSTEM'));
+	t.true(result.includes('CWD:'));
+	t.true(result.includes('Date:'));
+});
+
+test('buildSystemPrompt - nano profile uses shortened task approach', t => {
+	const result = buildSystemPrompt('normal', TUNE_NANO, NANO_TOOLS);
+	t.true(result.includes('TASK APPROACH'));
+	// Standard task approach phrasing should not appear
+	t.false(result.includes('Simple tasks'));
+	t.false(result.includes('Complex tasks'));
+});
+
+test('buildSystemPrompt - nano profile uses shortened file editing', t => {
+	const result = buildSystemPrompt('normal', TUNE_NANO, NANO_TOOLS);
+	t.true(result.includes('FILE OPERATIONS'));
+	// Long-form file-editing.md content should be absent
+	t.false(result.includes('Edit workflow'));
+});
+
+test('buildSystemPrompt - nano profile uses shortened constraints', t => {
+	const result = buildSystemPrompt('normal', TUNE_NANO, NANO_TOOLS);
+	t.true(result.includes('CONSTRAINTS'));
+	// Long-form constraints content should be absent
+	t.false(result.includes('Account for auto-formatting'));
+});
+
+test('buildSystemPrompt - nano profile enforces single-tool', t => {
+	const result = buildSystemPrompt('normal', TUNE_NANO, NANO_TOOLS);
+	t.true(result.includes('Call exactly ONE tool per response'));
+});
+
+test('buildSystemPrompt - nano profile produces smaller prompt than minimal', t => {
+	const minimalPrompt = buildSystemPrompt(
+		'normal',
+		TUNE_MINIMAL,
+		[
+			'read_file',
+			'write_file',
+			'string_replace',
+			'execute_bash',
+			'find_files',
+			'search_file_contents',
+			'list_directory',
+		],
+	);
+	const nanoPrompt = buildSystemPrompt('normal', TUNE_NANO, NANO_TOOLS);
+	t.true(nanoPrompt.length < minimalPrompt.length);
+});
+
+test('buildSystemPrompt - nano profile excludes native-tool-preference', t => {
+	const result = buildSystemPrompt('normal', TUNE_NANO, NANO_TOOLS);
+	t.false(result.includes('Anti-patterns'));
+});
+
+// ============================================================================
+// buildSystemPrompt — includeAgentsMd flag
+// ============================================================================
+
+test('buildSystemPrompt - nano omits AGENTS.md by default', t => {
+	const result = buildSystemPrompt('normal', TUNE_NANO, NANO_TOOLS);
+	t.false(result.includes('Additional Context'));
+});
+
+test('buildSystemPrompt - nano with includeAgentsMd=true appends AGENTS.md when present', t => {
+	// This test only meaningfully runs from a directory containing AGENTS.md
+	// (the project root does). When AGENTS.md is absent it becomes a no-op
+	// and the assertion is skipped.
+	const hasAgents = existsSync(join(process.cwd(), 'AGENTS.md'));
+	const tune: TuneConfig = {...TUNE_NANO, includeAgentsMd: true};
+	const result = buildSystemPrompt('normal', tune, NANO_TOOLS);
+	if (hasAgents) {
+		t.true(result.includes('Additional Context'));
+	} else {
+		t.pass('AGENTS.md not present in cwd; skipped append assertion');
+	}
+});
+
+test('buildSystemPrompt - non-nano with includeAgentsMd=false omits AGENTS.md', t => {
+	const tune: TuneConfig = {
+		enabled: true,
+		toolProfile: 'minimal',
+		aggressiveCompact: false,
+		includeAgentsMd: false,
+	};
+	const result = buildSystemPrompt('normal', tune, NANO_TOOLS);
+	t.false(result.includes('Additional Context'));
 });

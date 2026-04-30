@@ -13,7 +13,7 @@ import {TUNE_DEFAULTS} from '@/types/config';
 
 type Step = 'main' | 'toolProfile' | 'parameters' | 'preset';
 
-const AVAILABLE_PROFILES: ToolProfile[] = ['full', 'minimal'];
+const AVAILABLE_PROFILES: ToolProfile[] = ['full', 'minimal', 'nano'];
 
 interface TuneSelectorProps {
 	currentConfig: TuneConfig;
@@ -27,6 +27,7 @@ type MainAction =
 	| 'toolProfile'
 	| 'aggressiveCompact'
 	| 'disableNativeTools'
+	| 'includeAgentsMd'
 	| 'parameters'
 	| 'apply';
 
@@ -52,6 +53,18 @@ const TUNE_PRESETS: TunePreset[] = [
 			toolProfile: 'minimal',
 			aggressiveCompact: true,
 			modelParameters: {temperature: 0.7},
+		},
+	},
+	{
+		name: 'Nano (low-end hardware)',
+		description:
+			'Strictest budget — 5 tools, ultra-slim prompt, single-tool, aggressive compact, no AGENTS.md. Run bigger models on smaller machines.',
+		config: {
+			enabled: true,
+			toolProfile: 'nano',
+			aggressiveCompact: true,
+			includeAgentsMd: false,
+			modelParameters: {temperature: 0.4, maxTokens: 2048},
 		},
 	},
 ];
@@ -82,6 +95,9 @@ function TuneMainMenu({
 		];
 
 		if (config.enabled) {
+			// includeAgentsMd defaults to false for nano, true otherwise.
+			const agentsMdOn =
+				config.includeAgentsMd ?? config.toolProfile !== 'nano';
 			list.push(
 				{
 					label: `Tool Profile - ${config.toolProfile}`,
@@ -94,6 +110,10 @@ function TuneMainMenu({
 				{
 					label: `Native Tool Calling - ${config.disableNativeTools ? 'OFF (XML fallback)' : 'ON'}`,
 					value: 'disableNativeTools',
+				},
+				{
+					label: `Include AGENTS.md - ${agentsMdOn ? 'ON' : 'OFF'}`,
+					value: 'includeAgentsMd',
 				},
 				{
 					label: `Model Parameters - ${config.modelParameters ? 'configured' : 'defaults'}`,
@@ -645,6 +665,13 @@ export function TuneSelector({
 					...prev,
 					disableNativeTools: !prev.disableNativeTools,
 				}));
+				break;
+			case 'includeAgentsMd':
+				setConfig(prev => {
+					// Determine current effective value (defaults to false for nano, true otherwise).
+					const current = prev.includeAgentsMd ?? prev.toolProfile !== 'nano';
+					return {...prev, includeAgentsMd: !current};
+				});
 				break;
 			case 'parameters':
 				setStep('parameters');

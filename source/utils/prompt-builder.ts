@@ -2,7 +2,7 @@ import {existsSync, readFileSync} from 'fs';
 import {homedir, platform, release} from 'os';
 import {basename, dirname, join, normalize} from 'path';
 import {fileURLToPath} from 'url';
-import {isSingleToolProfile} from '@/tools/tool-profiles';
+import {isNanoProfile, isSingleToolProfile} from '@/tools/tool-profiles';
 import type {TuneConfig} from '@/types/config';
 import {TUNE_DEFAULTS} from '@/types/config';
 import type {DevelopmentMode} from '@/types/core';
@@ -67,7 +67,7 @@ export function setLastBuiltPrompt(prompt: string): void {
 	lastBuiltPrompt = prompt;
 }
 
-function generateSystemInfo(): string {
+function generateSystemInfo(slim = false): string {
 	const now = new Date();
 	const dateStr = now.toISOString().split('T')[0];
 
@@ -90,6 +90,11 @@ function generateSystemInfo(): string {
 				return platform();
 		}
 	};
+
+	if (slim) {
+		return `## SYSTEM
+OS: ${getOSName()} | Shell: ${getDefaultShell()} | CWD: ${process.cwd()} | Date: ${dateStr}`;
+	}
 
 	return `## SYSTEM INFORMATION
 
@@ -151,15 +156,26 @@ export function buildSystemPrompt(
 ): string {
 	const tune = tuneConfig ?? TUNE_DEFAULTS;
 	const singleTool = tune.enabled && isSingleToolProfile(tune.toolProfile);
+	const nano = tune.enabled && isNanoProfile(tune.toolProfile);
 	const toolSet = new Set(availableToolNames);
 	const sections: string[] = [];
 
 	// Always included
 	sections.push(loadSection('identity'));
-	sections.push(loadSection('core-principles'));
 
-	// Mode-specific task approach
-	sections.push(loadSection(`task-approach-${developmentMode}`));
+	// Core principles — dropped under nano (identity + tool rules cover the essentials)
+	if (!nano) {
+		sections.push(loadSection('core-principles'));
+	}
+
+	// Mode-specific task approach (nano variant when active)
+	sections.push(
+		loadSection(
+			nano
+				? `task-approach-nano-${developmentMode}`
+				: `task-approach-${developmentMode}`,
+		),
+	);
 
 	// Tool rules — XML variant when native tool calling is disabled
 	let toolRules = loadSection(toolsDisabled ? 'tool-rules-xml' : 'tool-rules');
@@ -178,11 +194,12 @@ export function buildSystemPrompt(
 		toolSet.has('copy_file') ||
 		toolSet.has('create_directory')
 	) {
-		sections.push(loadSection('file-editing'));
+		sections.push(loadSection(nano ? 'file-editing-nano' : 'file-editing'));
 	}
 
-	// Native tool preference — only if bash AND search/discovery tools are both available
-	if (toolSet.has('execute_bash') && hasNativeSearchTools(toolSet)) {
+	// Native tool preference — only if bash AND search/discovery tools are both available.
+	// Skipped under nano: nano profile has no native search/discovery tools by design.
+	if (!nano && toolSet.has('execute_bash') && hasNativeSearchTools(toolSet)) {
 		sections.push(loadSection('native-tool-preference'));
 	}
 
@@ -222,10 +239,13 @@ export function buildSystemPrompt(
 	}
 
 	// Coding practices and constraints — not needed in plan mode
-	// (plan task approach already covers the relevant guidance)
+	// (plan task approach already covers the relevant guidance).
+	// Under nano, drop coding-practices and use the shortened constraints.
 	if (developmentMode !== 'plan') {
-		sections.push(loadSection('coding-practices'));
-		sections.push(loadSection('constraints'));
+		if (!nano) {
+			sections.push(loadSection('coding-practices'));
+		}
+		sections.push(loadSection(nano ? 'constraints-nano' : 'constraints'));
 	}
 
 	// Subagents — only if the agent tool is available
@@ -239,12 +259,16 @@ ${getSubagentDescriptions()}`;
 		sections.push(subagentInfo);
 	}
 
-	// System info (dynamic)
-	sections.push(generateSystemInfo());
+	// System info (dynamic) — slim variant under nano
+	sections.push(generateSystemInfo(nano));
 
-	// Compose and append AGENTS.md
+	// Compose and (optionally) append AGENTS.md.
+	// Nano omits AGENTS.md by default; users can override via tune.includeAgentsMd.
 	let prompt = sections.filter(Boolean).join('\n\n');
-	prompt = appendAgentsMd(prompt);
+	const includeAgentsMd = tune.includeAgentsMd ?? (nano ? false : true);
+	if (includeAgentsMd) {
+		prompt = appendAgentsMd(prompt);
+	}
 
 	// Cache for token-counting callers that don't have access to the inputs
 	lastBuiltPrompt = prompt;

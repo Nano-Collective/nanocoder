@@ -194,11 +194,15 @@ Make it reusable and well-documented.`;
 export const initCommand: Command = {
 	name: 'init',
 	description:
-		'Initialize nanocoder configuration and analyze project structure. Use --force to regenerate AGENTS.md.',
+		'Initialize nanocoder configuration and analyze project structure. Use --force to regenerate AGENTS.md, --lean to skip CLAUDE.md when generating AGENTS.md.',
 	handler: (args: string[], _messages, _metadata) => {
 		const cwd = process.cwd();
 		const created: string[] = [];
 		const forceRegenerate = args.includes('--force') || args.includes('-f');
+		// --lean: skip Claude-Code-specific source files (CLAUDE.md) when
+		// generating AGENTS.md. Keeps the generated AGENTS.md smaller and
+		// reduces duplication for users who already have CLAUDE.md.
+		const lean = args.includes('--lean');
 
 		try {
 			// Check if already initialized
@@ -227,8 +231,13 @@ export const initCommand: Command = {
 			const analyzer = new ProjectAnalyzer(cwd);
 			const analysis = analyzer.analyze();
 
-			// Extract existing AI configuration files (skip AGENTS.md when force regenerating)
-			const rulesExtractor = new ExistingRulesExtractor(cwd, forceRegenerate);
+			// Extract existing AI configuration files (skip AGENTS.md when force
+			// regenerating; skip CLAUDE.md in lean mode).
+			const rulesExtractor = new ExistingRulesExtractor(
+				cwd,
+				forceRegenerate,
+				lean ? ['CLAUDE.md'] : [],
+			);
 			const existingRules = rulesExtractor.extractExistingRules();
 
 			// Create AGENTS.md based on analysis and existing rules

@@ -209,3 +209,44 @@ test('shows Tune - Enabled when enabled', t => {
 	const output = lastFrame()!;
 	t.true(output.includes('Tune - Enabled'));
 });
+
+// ============================================================================
+// Nano profile + Include AGENTS.md toggle
+// ============================================================================
+
+test('shows nano profile name when selected', t => {
+	const config: TuneConfig = {...ENABLED_CONFIG, toolProfile: 'nano'};
+	const {lastFrame} = renderTuneSelector(config);
+	const output = lastFrame()!;
+	t.true(output.includes('nano'));
+});
+
+test('shows Include AGENTS.md option when enabled', t => {
+	const {lastFrame} = renderTuneSelector(ENABLED_CONFIG);
+	const output = lastFrame()!;
+	t.true(output.includes('Include AGENTS.md'));
+});
+
+test('Include AGENTS.md defaults ON for non-nano profiles', t => {
+	const {lastFrame} = renderTuneSelector(ENABLED_CONFIG);
+	const output = lastFrame()!;
+	t.regex(output, /Include AGENTS\.md.*ON/);
+});
+
+test('Include AGENTS.md defaults OFF for nano profile', t => {
+	const config: TuneConfig = {...ENABLED_CONFIG, toolProfile: 'nano'};
+	const {lastFrame} = renderTuneSelector(config);
+	const output = lastFrame()!;
+	t.regex(output, /Include AGENTS\.md.*OFF/);
+});
+
+test('Include AGENTS.md respects explicit override (false beats nano default-on)', t => {
+	const config: TuneConfig = {
+		...ENABLED_CONFIG,
+		toolProfile: 'minimal',
+		includeAgentsMd: false,
+	};
+	const {lastFrame} = renderTuneSelector(config);
+	const output = lastFrame()!;
+	t.regex(output, /Include AGENTS\.md.*OFF/);
+});
