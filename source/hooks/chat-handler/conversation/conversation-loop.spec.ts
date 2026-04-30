@@ -61,7 +61,6 @@ const createMockToolManager = (config: {
 	getAllTools: () => ({}),
 	getAllToolsWithoutExecute: () => ({}),
 	hasTool: (name: string) => config.tools?.includes(name) || false,
-	isReadOnly: (_name: string) => config.readOnly ?? false,
 	getTool: (name: string) => ({
 		execute: async () => 'Tool executed',
 	}),
