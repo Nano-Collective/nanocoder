@@ -1,4 +1,5 @@
 import test from 'ava';
+import {resetSessionContextLimit, setSessionContextLimit} from '@/models/models-dev-client.js';
 import type {Message} from '@/types/core';
 import {
 	autoCompactSessionOverrides,
@@ -164,6 +165,154 @@ test('partial reset scenario - set some, reset all, set different', t => {
 	t.is(autoCompactSessionOverrides.enabled, null);
 	t.is(autoCompactSessionOverrides.threshold, null);
 	t.is(autoCompactSessionOverrides.mode, 'aggressive');
+});
+
+// ==================== performAutoCompact integration tests ====================
+
+/**
+ * Helper to set up a deterministic auto-compact test environment.
+ * The FallbackTokenizer counts 4 chars per token; by setting session context
+ * limit we control whether the threshold is exceeded.
+ */
+function setupAutoCompactEnv(contextLimit: number) {
+	resetSessionContextLimit();
+	setSessionContextLimit(contextLimit);
+}
+
+test.after.always(() => {
+	resetAutoCompactSession();
+	resetSessionContextLimit();
+});
+
+test('performAutoCompact returns messages without system role when compression triggers', async t => {
+	// Context limit of 100 tokens with a long message will exceed the 50% threshold.
+	setupAutoCompactEnv(100);
+
+	const oldContent = 'old context sentence. '.repeat(60); // ~900 chars ≈ 225 tokens > 50 tokens (50%)
+	const messages: Message[] = [
+		{role: 'user', content: oldContent},
+	];
+	const systemMessage: Message = {
+		role: 'system',
+		content: 'You are a helpful assistant.',
+	};
+
+	const result = await performAutoCompact(
+		messages,
+		systemMessage,
+		'openai',
+		'gpt-4',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			notifyUser: false,
+		},
+	);
+
+	t.truthy(result, 'Should return compressed messages');
+	t.true(Array.isArray(result));
+
+	// The returned array must NOT contain any system messages — they are filtered out
+	// so the chat handler can re-inject them on each LLM call.
+	const hasSystemRole = result!.some(msg => msg.role === 'system');
+	t.false(hasSystemRole, 'Compressed output should not contain system messages');
+});
+
+test('performAutoCompact returns null when below threshold', async t => {
+	// Large context limit means usage stays well below threshold
+	setupAutoCompactEnv(999_999);
+
+	const messages: Message[] = [
+		{role: 'user', content: 'Hello'},
+	];
+	const systemMessage: Message = {
+		role: 'system',
+		content: 'You are a helpful assistant.',
+	};
+
+	const result = await performAutoCompact(
+		messages,
+		systemMessage,
+		'openai',
+		'gpt-4',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			notifyUser: false,
+		},
+	);
+
+	t.is(result, null, 'Should return null when token usage is below threshold');
+});
+
+test('performAutoCompact calls notification callback with reduction info', async t => {
+	setupAutoCompactEnv(100);
+
+	const oldContent = 'old context sentence. '.repeat(60);
+	const messages: Message[] = [{role: 'user', content: oldContent}];
+	const systemMessage: Message = {
+		role: 'system',
+		content: 'You are a helpful assistant.',
+	};
+
+	const notifications: string[] = [];
+	await performAutoCompact(
+		messages,
+		systemMessage,
+		'openai',
+		'gpt-4',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			notifyUser: true,
+		},
+		notification => {
+			notifications.push(notification);
+		},
+	);
+
+	t.is(notifications.length, 1, 'Notification callback should be called once');
+	t.true(
+		notifications[0].includes('auto-compacting'),
+		'Notification should mention auto-compacting',
+	);
+	t.true(
+		notifications[0].includes('% reduction') || notifications[0].includes('tokens →'),
+		'Notification should include token reduction info',
+	);
+});
+
+test('performAutoCompact does not call notification when notifyUser is false', async t => {
+	setupAutoCompactEnv(100);
+
+	const oldContent = 'old context sentence. '.repeat(60);
+	const messages: Message[] = [{role: 'user', content: oldContent}];
+	const systemMessage: Message = {
+		role: 'system',
+		content: 'You are a helpful assistant.',
+	};
+
+	let notificationCalled = false;
+	await performAutoCompact(
+		messages,
+		systemMessage,
+		'openai',
+		'gpt-4',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			notifyUser: false,
+		},
+		() => {
+			notificationCalled = true;
+		},
+	);
+
+	t.false(notificationCalled, 'Notification callback should NOT be called');
 });
 
 test('performAutoCompact uses provider-configured context limit', async t => {

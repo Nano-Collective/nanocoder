@@ -1,7 +1,7 @@
 import test from 'ava';
 import {clearAppConfig} from '@/config/index.js';
 import {resetShutdownManager} from '@/utils/shutdown/shutdown-manager.js';
-import {processAssistantResponse, resetFallbackNotice} from './conversation-loop.js';
+import {processAssistantResponse, resetFallbackNotice, resetLastTurnHadReasoning} from './conversation-loop.js';
 import type {LLMChatResponse, Message, ToolCall, ToolResult} from '@/types/core';
 import {
 	resetAutoCompactSession,
@@ -597,10 +597,8 @@ test.serial('processAssistantResponse - renders reasoning in chat queue', async 
 // ============================================================================
 
 /**
- * Helper to reset shared state before each auto-compact token-count test.
- * The FallbackTokenizer uses 4 chars per token; setSessionContextLimit lets
- * us control the context window so we can deterministically trigger or avoid
- * compression by adjusting message size vs threshold.
+ * Helper to reset all shared/module-level state before tests that exercise
+ * processAssistantResponse end-to-end (auto-compaction, tool flows, nudging).
  */
 function setupAutoCompactTestEnv() {
 	resetAutoCompactSession();
@@ -608,6 +606,8 @@ function setupAutoCompactTestEnv() {
 	setAutoCompactThreshold(50);
 	resetSessionContextLimit();
 	clearAppConfig();
+	resetFallbackNotice();
+	resetLastTurnHadReasoning();
 }
 
 test.serial.beforeEach(() => {
@@ -808,4 +808,263 @@ test.serial('processAssistantResponse - does not extra-reset token count when au
 	// Only one setTokenCount(0) — the initial streaming reset at line 180.
 	const zeroCalls = tokenCountCalls.filter(v => v === 0);
 	t.is(zeroCalls.length, 1, `Expected exactly 1 call to setTokenCount(0), got ${zeroCalls.length}`);
+});
+
+// ============================================================================
+// Auto-Compact State Overwrite Fix Tests (Fix 1)
+// ============================================================================
+
+/**
+ * These tests validate that after auto-compaction the local variable used by
+ * downstream code reflects the compacted messages — NOT the pre-compaction
+ * history. This is the core bug fix on this branch.
+ */
+
+test.serial('processAssistantResponse - final messages are compacted when no tools are present', async t => {
+	// Tiny context limit so compression triggers for any non-trivial message.
+	setSessionContextLimit(100);
+
+	const oldVerboseContent = 'old verbose context sentence. '.repeat(60);
+	// Need at least 3 old messages so some fall outside keepRecent=2 window
+	// after the assistant message is appended (making total ≥ 5).
+	const originalMessages: Message[] = [
+		{role: 'user', content: oldVerboseContent},
+		{role: 'assistant', content: 'Prior answer 1'},
+		{role: 'user', content: 'Another request'},
+	];
+
+	const allSetMessagesCalls: Message[][] = [];
+	const params = createDefaultParams({
+		client: createMockClient({
+			content: 'Short reply.',
+			toolCalls: undefined,
+			toolsDisabled: false,
+		}),
+		messages: originalMessages,
+		currentProvider: 'openai',
+		currentModel: 'gpt-4',
+		setTokenCount: () => {},
+		setMessages: (msgs: Message[]) => {
+			allSetMessagesCalls.push(msgs);
+		},
+		addToChatQueue: () => {},
+	});
+
+	await processAssistantResponse(params);
+
+	t.true(allSetMessagesCalls.length >= 2, 'setMessages should be called at least twice');
+
+	// The LAST call to setMessages is the one that persists as conversation state.
+	// It must NOT contain the full original verbose content — it should have been
+	// compacted by auto-compaction before completion.
+	const finalMessages = allSetMessagesCalls.at(-1)!;
+	const containsOriginalVerbose = finalMessages.some(
+		msg => msg.content === oldVerboseContent,
+	);
+	t.false(
+		containsOriginalVerbose,
+		'Final messages should not contain the original un-compacted verbose message',
+	);
+});
+
+test.serial('processAssistantResponse - tool confirmation flow receives compacted messages after auto-compact', async t => {
+	// Context limit high enough that first turn compresses but second turn doesn't
+	// re-trigger (prevents infinite LLM summarization loop).
+	setSessionContextLimit(200);
+
+	const oldVerboseContent = 'old verbose context sentence. '.repeat(60);
+	// Multiple old messages so some are outside keepRecent=2 window.
+	const originalMessages: Message[] = [
+		{role: 'user', content: oldVerboseContent},
+		{role: 'assistant', content: 'Prior answer'},
+		{role: 'user', content: 'Recent request'},
+	];
+
+	let confirmationFlowMessages: Message[] | undefined;
+
+	const mockToolManager = createMockToolManager({
+		tools: ['some_tool'], // Register so filterValidToolCalls keeps it valid
+		needsApproval: true,  // Force confirmation flow
+	});
+
+	const params = createDefaultParams({
+		client: createMockClient({
+			content: '',
+			toolCalls: [{
+				id: 'call_1',
+				function: {name: 'some_tool', arguments: '{}'},
+			}],
+			toolsDisabled: false,
+		}),
+		messages: originalMessages,
+		toolManager: mockToolManager as any,
+		currentProvider: 'openai',
+		currentModel: 'gpt-4',
+		setTokenCount: () => {},
+		setMessages: () => {},
+		addToChatQueue: () => {},
+		onStartToolConfirmationFlow: (_toolCalls, messages) => {
+			confirmationFlowMessages = messages;
+		},
+	});
+
+	await processAssistantResponse(params);
+
+	t.truthy(
+		confirmationFlowMessages,
+		'onStartToolConfirmationFlow should have been called',
+	);
+
+	// The messages passed to the confirmation flow should NOT contain the full
+	// original verbose content — auto-compaction should have compressed them first.
+	const containsOriginalVerbose = confirmationFlowMessages!.some(
+		msg => msg.content === oldVerboseContent,
+	);
+	t.false(
+		containsOriginalVerbose,
+		'Confirmation flow should receive compacted messages, not original verbose history',
+	);
+});
+
+test.serial('processAssistantResponse - tool execution result appends to compacted messages (not original)', async t => {
+	// Context limit high enough that first turn compresses but subsequent turns don't
+	// re-trigger (prevents infinite LLM summarization loop during recursion).
+	setSessionContextLimit(200);
+
+	const oldVerboseContent = 'old verbose context sentence. '.repeat(60);
+	// Multiple old messages so some are outside keepRecent=2 window.
+	const originalMessages: Message[] = [
+		{role: 'user', content: oldVerboseContent},
+		{role: 'assistant', content: 'Prior answer'},
+		{role: 'user', content: 'Recent request'},
+	];
+
+	const allSetMessagesCalls: Message[][] = [];
+	let callCount = 0;
+
+	// First call returns a tool, second call returns plain text → terminates recursion
+	const mockClient = createMockClient({content: '', toolCalls: [] as any});
+	mockClient.chat = async () => {
+		callCount++;
+		if (callCount === 1) {
+			return {
+				choices: [{message: {role: 'assistant', content: '', tool_calls: [{id: 'call_1', function: {name: 'read_file', arguments: '{}'}}]}}],
+				toolsDisabled: false,
+			};
+		}
+		// Second call — return a terminal response with no tools
+		return {
+			choices: [{message: {role: 'assistant', content: 'Done.'}}],
+			toolsDisabled: false,
+		};
+	};
+
+	// Tool that needs no approval → direct execution path
+	const mockToolManager = createMockToolManager({
+		tools: ['read_file'], // Register so filterValidToolCalls keeps it valid
+		needsApproval: false,
+	});
+
+	const params = createDefaultParams({
+		client: mockClient as any,
+		messages: originalMessages,
+		toolManager: mockToolManager as any,
+		currentProvider: 'openai',
+		currentModel: 'gpt-4',
+		setTokenCount: () => {},
+		setMessages: (msgs: Message[]) => {
+			allSetMessagesCalls.push(msgs);
+		},
+		addToChatQueue: () => {},
+		onConversationComplete: () => {},
+	});
+
+	await processAssistantResponse(params);
+
+	// Find the call that includes tool results (messages with role === 'tool')
+	const toolResultCall = allSetMessagesCalls.find(
+		msgs => msgs.some(m => m.role === 'tool'),
+	);
+	t.truthy(toolResultCall, 'Should have a setMessages call containing tool results');
+
+	// That call should NOT contain the full original verbose content — it was built
+	// on top of compacted messages after auto-compaction reassigned updatedMessages.
+	if (toolResultCall) {
+		const containsOriginalVerbose = toolResultCall.some(
+			msg => msg.content === oldVerboseContent,
+		);
+		t.false(
+			containsOriginalVerbose,
+			'Tool result messages should be appended to compacted history, not original verbose history',
+		);
+	}
+});
+
+test.serial('processAssistantResponse - auto-nudge builds on compacted messages when compression triggered', async t => {
+	// Tiny context limit so compression triggers. The client returns empty content + no tools,
+	// which will trigger the auto-nudge recursion path. We verify the nudge is added to
+	// compacted messages by checking the last setMessages before recursion.
+	setSessionContextLimit(100);
+
+	const oldVerboseContent = 'old verbose context sentence. '.repeat(60);
+	// Multiple old messages so some are outside keepRecent=2 window.
+	const originalMessages: Message[] = [
+		{role: 'user', content: oldVerboseContent},
+		{role: 'assistant', content: 'Prior answer'},
+		{role: 'user', content: 'Recent request'},
+	];
+
+	const allSetMessagesCalls: Message[][] = [];
+	let callCount = 0;
+
+	// First call returns empty (triggers nudge), second call returns text → terminates recursion
+	const mockClient = createMockClient({content: '', toolCalls: undefined, toolsDisabled: false});
+	mockClient.chat = async () => {
+		callCount++;
+		if (callCount === 1) {
+			return {
+				choices: [{message: {role: 'assistant', content: ''}}],
+				toolsDisabled: false,
+			};
+		}
+		// Second call — terminal response
+		return {
+			choices: [{message: {role: 'assistant', content: 'Done.'}}],
+			toolsDisabled: false,
+		};
+	};
+
+	const params = createDefaultParams({
+		client: mockClient as any,
+		messages: originalMessages,
+		currentProvider: 'openai',
+		currentModel: 'gpt-4',
+		setTokenCount: () => {},
+		setMessages: (msgs: Message[]) => {
+			allSetMessagesCalls.push(msgs);
+		},
+		addToChatQueue: () => {},
+		onConversationComplete: () => {},
+	});
+
+	await processAssistantResponse(params);
+
+	// Find the nudge message — it will be a user role with "Please provide/continue"
+	const nudgeCallIndex = allSetMessagesCalls.findIndex(
+		msgs => msgs.some(m => m.role === 'user' && m.content.includes('Please')),
+	);
+	t.true(nudgeCallIndex >= 0, 'Should have a setMessages call containing the nudge');
+
+	if (nudgeCallIndex >= 0) {
+		const nudgeCallMsgs = allSetMessagesCalls[nudgeCallIndex];
+		// The messages array used to build the nudge should NOT contain the full
+		// original verbose content — auto-compaction should have compressed first.
+		const containsOriginalVerbose = nudgeCallMsgs.some(
+			msg => msg.content === oldVerboseContent,
+		);
+		t.false(
+			containsOriginalVerbose,
+			'Auto-nudge should be built on compacted messages, not original verbose history',
+		);
+	}
 });
