@@ -56,7 +56,6 @@ const createMockToolManager = (config: {
 	tools?: string[];
 	validatorResult?: {valid: boolean};
 	needsApproval?: boolean | (() => boolean);
-	readOnly?: boolean;
 }) => ({
 	getAllTools: () => ({}),
 	getAllToolsWithoutExecute: () => ({}),
