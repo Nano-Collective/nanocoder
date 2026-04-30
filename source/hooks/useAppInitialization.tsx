@@ -13,6 +13,7 @@ import {
 	updateLastUsed,
 } from '@/config/preferences';
 import {validateProjectConfigSecurity} from '@/config/validation';
+import {TIMEOUT_OUTPUT_FLUSH_MS} from '@/constants';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getLSPManager, type LSPInitResult} from '@/lsp/index';
@@ -30,6 +31,7 @@ import {
 } from '@/types/core';
 import type {MCPInitResult, UpdateInfo, UserPreferences} from '@/types/index';
 import {setAvailableSubagents} from '@/utils/prompt-processor';
+import {getShutdownManager} from '@/utils/shutdown';
 import {checkForUpdates} from '@/utils/update-checker';
 
 interface UseAppInitializationProps {
@@ -57,6 +59,13 @@ interface UseAppInitializationProps {
 	setActiveMode: (mode: import('@/hooks/useAppState').ActiveMode) => void;
 	cliProvider?: string;
 	cliModel?: string;
+	/**
+	 * When true, init failures (no client) shut down the process with code 1
+	 * instead of leaving the run stuck in "Waiting for MCP servers..." — the
+	 * config wizard and chat queue are interactive-only surfaces that can't
+	 * resolve under `nanocoder run`.
+	 */
+	nonInteractiveMode?: boolean;
 }
 
 export function useAppInitialization({
@@ -82,6 +91,7 @@ export function useAppInitialization({
 	setActiveMode,
 	cliProvider,
 	cliModel,
+	nonInteractiveMode = false,
 }: UseAppInitializationProps) {
 	// Initialize LLM client and model
 	const initializeClient = async (
@@ -333,17 +343,28 @@ export function useAppInitialization({
 					error.isEmptyConfig ||
 					error.message.includes('No providers configured')
 				) {
-					addToChatQueue(
-						<InfoMessage
-							key={`config-error-${getNextComponentKey()}`}
-							message="Configuration needed. Let's set up your providers..."
-							hideBox={true}
-						/>,
-					);
-					// Trigger wizard mode after showing UI
-					setTimeout(() => {
-						setActiveMode('configWizard');
-					}, 100);
+					if (nonInteractiveMode) {
+						// Wizard is interactive-only — exit cleanly under `run`.
+						addToChatQueue(
+							<ErrorMessage
+								key={`config-error-${getNextComponentKey()}`}
+								message="No providers configured. Run nanocoder interactively to set them up."
+								hideBox={true}
+							/>,
+						);
+					} else {
+						addToChatQueue(
+							<InfoMessage
+								key={`config-error-${getNextComponentKey()}`}
+								message="Configuration needed. Let's set up your providers..."
+								hideBox={true}
+							/>,
+						);
+						// Trigger wizard mode after showing UI
+						setTimeout(() => {
+							setActiveMode('configWizard');
+						}, 100);
+					}
 				} else {
 					// Invalid CLI provider/model - show error and don't trigger wizard
 					addToChatQueue(
@@ -363,6 +384,14 @@ export function useAppInitialization({
 						hideBox={true}
 					/>,
 				);
+			}
+			// In non-interactive mode there's no human to recover via /provider
+			// or /model — keep init from blocking on a null client by exiting
+			// once the error has had a chance to flush to stdout.
+			if (nonInteractiveMode) {
+				setTimeout(() => {
+					void getShutdownManager().gracefulShutdown(1);
+				}, TIMEOUT_OUTPUT_FLUSH_MS);
 			}
 			// Leave client as null - the UI will handle this gracefully
 		}

@@ -507,6 +507,7 @@ export default function App({
 		setActiveMode: appState.setActiveMode,
 		cliProvider,
 		cliModel,
+		nonInteractiveMode,
 	});
 
 	// Setup mode handlers
