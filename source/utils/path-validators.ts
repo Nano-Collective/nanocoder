@@ -1,3 +1,4 @@
+import {getCurrentMode} from '@/context/mode-context';
 import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
 
 type ValidationResult = {valid: true} | {valid: false; error: string};
@@ -6,6 +7,10 @@ type ValidationResult = {valid: true} | {valid: false; error: string};
  * Validates a single file path: checks format and project boundary.
  */
 export function validatePath(path: string): ValidationResult {
+	if (getCurrentMode() === 'yolo') {
+		return {valid: true};
+	}
+
 	if (!isValidFilePath(path)) {
 		return {
 			valid: false,
@@ -35,6 +40,10 @@ export function validatePathPair(
 	source: string,
 	destination: string,
 ): ValidationResult {
+	if (getCurrentMode() === 'yolo') {
+		return {valid: true};
+	}
+
 	if (!isValidFilePath(source)) {
 		return {
 			valid: false,

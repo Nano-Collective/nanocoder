@@ -71,6 +71,7 @@ export default function App({
 	cliProvider,
 	cliModel,
 	cliMode,
+	trustDirectory = false,
 }: AppProps) {
 	// Resolve the initial development mode with this precedence:
 	// 1. --mode CLI flag (highest priority)
@@ -104,6 +105,11 @@ export default function App({
 	const {exit} = useApp();
 	const {isTrusted, handleConfirmTrust, isTrustLoading, isTrustedError} =
 		useDirectoryTrust();
+
+	// Ephemeral trust override for non-interactive `--trust-directory` runs.
+	// Bypasses the disclaimer without touching the preferences file.
+	const isEffectivelyTrusted =
+		isTrusted || (nonInteractiveMode && trustDirectory);
 
 	// Sync global mode context whenever development mode changes.
 	// Note: This useEffect serves as a backup synchronization mechanism.
@@ -758,7 +764,7 @@ export default function App({
 	}
 
 	// Show security disclaimer if directory is not trusted
-	if (!isTrusted) {
+	if (!isEffectivelyTrusted) {
 		logger.info('Directory not trusted, showing security disclaimer');
 
 		return (

@@ -1,5 +1,10 @@
 import test from 'ava';
+import {setCurrentMode} from '../context/mode-context';
 import {validatePath, validatePathPair} from './path-validators';
+
+test.afterEach(() => {
+	setCurrentMode('normal');
+});
 
 // validatePath
 
@@ -56,3 +61,20 @@ test('validatePathPair rejects both invalid paths with source error first', t =>
 		t.true(result.error.includes('source path'));
 	}
 });
+
+// yolo mode bypass
+
+test.serial('validatePath bypasses relative-path enforcement in yolo mode', t => {
+	setCurrentMode('yolo');
+	t.deepEqual(validatePath('/etc/passwd'), {valid: true});
+	t.deepEqual(validatePath('../../outside'), {valid: true});
+	t.deepEqual(validatePath('~/file.txt'), {valid: true});
+});
+
+test.serial(
+	'validatePathPair bypasses relative-path enforcement in yolo mode',
+	t => {
+		setCurrentMode('yolo');
+		t.deepEqual(validatePathPair('/etc/a', '/etc/b'), {valid: true});
+	},
+);

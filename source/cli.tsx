@@ -40,22 +40,25 @@ Commands:
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
 
 Options:
-  -v, --version    Show version number
-  -h, --help       Show help
-  --vscode         Run in VS Code mode
-  --vscode-port    Specify VS Code port
-  --provider       Specify AI provider (must be configured in agents.config.json)
-  --model          Specify AI model (must be available for the provider)
-  --context-max    Set maximum context length in tokens (supports k/K suffix, e.g. 128k)
-  --mode           Start in a specific development mode (normal, auto-accept, yolo, plan).
-                   Defaults to "normal" for interactive sessions and "auto-accept" for run mode.
-  run              Run in non-interactive mode
+  -v, --version       Show version number
+  -h, --help          Show help
+  --vscode            Run in VS Code mode
+  --vscode-port       Specify VS Code port
+  --provider          Specify AI provider (must be configured in agents.config.json)
+  --model             Specify AI model (must be available for the provider)
+  --context-max       Set maximum context length in tokens (supports k/K suffix, e.g. 128k)
+  --mode              Start in a specific development mode (normal, auto-accept, yolo, plan).
+                      Defaults to "normal" for interactive sessions and "auto-accept" for run mode.
+  --trust-directory   Skip the first-run directory trust prompt for this run only.
+                      Only valid with the "run" command. Does not modify the preferences file.
+  run                 Run in non-interactive mode
 
 Examples:
   nanocoder --provider openrouter --model google/gemini-3.1-flash run "analyze src/app.ts"
   nanocoder --provider ollama --model llama3.1 --context-max 128k
   nanocoder --mode yolo run "refactor database module"
   nanocoder --mode plan
+  nanocoder --trust-directory run "analyze src/app.ts"
   `);
 	process.exit(0);
 }
@@ -167,6 +170,8 @@ async function main(): Promise<void> {
 				continue;
 			} else if (arg.startsWith('--mode=')) {
 				continue; // skip fused form
+			} else if (arg === '--trust-directory') {
+				continue; // skip this flag
 			} else {
 				promptArgs.push(arg);
 			}
@@ -175,6 +180,16 @@ async function main(): Promise<void> {
 	}
 
 	const nonInteractiveMode = runCommandIndex !== -1;
+
+	// --trust-directory is only respected with `run`. Surface a warning
+	// (rather than silently dropping) if the user passes it interactively.
+	const trustDirectoryRequested = args.includes('--trust-directory');
+	if (trustDirectoryRequested && !nonInteractiveMode) {
+		console.error(
+			'--trust-directory only applies to non-interactive mode (`nanocoder run ...`); ignoring.',
+		);
+	}
+	const trustDirectory = trustDirectoryRequested && nonInteractiveMode;
 
 	// Handle codex/copilot login from CLI (no App)
 	if (args[0] === 'codex' && args[1] === 'login') {
@@ -237,6 +252,7 @@ async function main(): Promise<void> {
 				cliProvider={cliProvider}
 				cliModel={cliModel}
 				cliMode={cliMode}
+				trustDirectory={trustDirectory}
 			/>,
 		);
 	}
