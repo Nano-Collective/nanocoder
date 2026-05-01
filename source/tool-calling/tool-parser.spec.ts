@@ -141,6 +141,81 @@ test('parseToolCalls: preserves identical XML tool calls (no deduplication)', t 
 	}
 });
 
+test('parseToolCalls: parses JSON tool calls from tool_calls arrays', t => {
+	const content = JSON.stringify({
+		tool_calls: [
+			{
+				function: {
+					name: 'read_file',
+					arguments: {path: '/tmp/test.txt'},
+				},
+			},
+		],
+	});
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'read_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, {
+			path: '/tmp/test.txt',
+		});
+		t.is(result.cleanedContent, '');
+	}
+});
+
+test('parseToolCalls: parses JSON tool calls from fenced code blocks', t => {
+	const content = `I'll create that now.\n\n\
+\`\`\`json
+{
+  "name": "write_file",
+  "arguments": {
+    "path": "/tmp/test.txt",
+    "content": "hello"
+  }
+}
+\`\`\`
+\nDone.`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'write_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, {
+			path: '/tmp/test.txt',
+			content: 'hello',
+		});
+		t.regex(result.cleanedContent, /I'll create that now\./);
+		t.regex(result.cleanedContent, /Done\./);
+	}
+});
+
+test('parseToolCalls: normalizes create_file aliases from JSON fallback', t => {
+	const content = JSON.stringify({
+		name: 'create_file',
+		arguments: {
+			file_path: '/tmp/test.txt',
+			contents: 'hello',
+		},
+	});
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'write_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, {
+			path: '/tmp/test.txt',
+			content: 'hello',
+		});
+	}
+});
+
 // Think Tag Tests (models like GLM-4 emit these for chain-of-thought)
 
 test('parseToolCalls: strips complete <think>...</think> tags', t => {
