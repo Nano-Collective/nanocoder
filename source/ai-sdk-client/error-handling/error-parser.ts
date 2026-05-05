@@ -171,8 +171,11 @@ export function parseAPIError(error: unknown): string {
 
 	// Handle context length errors
 	if (
-		errorMessage.includes('context length') ||
-		errorMessage.includes('too many tokens')
+		lowerMessage.includes('context length') ||
+		lowerMessage.includes('too many tokens') ||
+		lowerMessage.includes('available context size') ||
+		lowerMessage.includes('context window') ||
+		(lowerMessage.includes('exceeds') && lowerMessage.includes('context size'))
 	) {
 		return 'Context too large: Please reduce the conversation length or message size';
 	}
