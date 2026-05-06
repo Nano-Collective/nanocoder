@@ -42,6 +42,7 @@ export async function parseSubagentMarkdown(
 		description: frontmatter.description,
 		provider: frontmatter.provider,
 		model: frontmatter.model || 'inherit',
+		contextWindow: frontmatter.contextWindow,
 		tools: frontmatter.tools,
 		disallowedTools: frontmatter.disallowedTools,
 		systemPrompt,
@@ -82,6 +83,19 @@ export function validateFrontmatter(
 			return {
 				valid: false,
 				error: 'model must be a non-empty string (a model ID or "inherit")',
+			};
+		}
+	}
+
+	if (frontmatter.contextWindow !== undefined) {
+		if (
+			typeof frontmatter.contextWindow !== 'number' ||
+			!Number.isFinite(frontmatter.contextWindow) ||
+			frontmatter.contextWindow <= 0
+		) {
+			return {
+				valid: false,
+				error: 'contextWindow must be a positive number',
 			};
 		}
 	}

@@ -18,6 +18,8 @@ export interface SubagentConfig {
 	provider?: string;
 	/** Model ID to use, or 'inherit' to use the parent's current model */
 	model?: string;
+	/** Optional context window override for this subagent, in tokens */
+	contextWindow?: number;
 	/** List of allowed tool names (empty = all tools allowed) */
 	tools?: string[];
 	/** List of disallowed tool names */
@@ -121,6 +123,8 @@ export interface SubagentFrontmatter {
 	provider?: string;
 	/** Model ID to use, or 'inherit' */
 	model?: string;
+	/** Context window override in tokens */
+	contextWindow?: number;
 	/** Allowed tools */
 	tools?: string[];
 	/** Disallowed tools */

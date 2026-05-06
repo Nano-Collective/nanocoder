@@ -266,6 +266,26 @@ export class SubagentExecutor {
 		client: LLMClient;
 		restoreParent: () => void;
 	}> {
+		const requestedContextWindow =
+			typeof config.contextWindow === 'number'
+				? config.contextWindow
+				: undefined;
+		const parentProviderConfig = this.parentClient.getProviderConfig();
+		const targetProvider = config.provider ?? parentProviderConfig.name;
+		const targetModel =
+			config.model && config.model !== 'inherit'
+				? config.model
+				: targetProvider === parentProviderConfig.name
+					? this.parentClient.getCurrentModel()
+					: undefined;
+
+		if (requestedContextWindow) {
+			const {client} = await createLLMClient(targetProvider, targetModel, {
+				contextWindow: requestedContextWindow,
+			});
+			return {client, restoreParent: () => {}};
+		}
+
 		// Different provider — create a new client entirely
 		if (config.provider) {
 			const model =
@@ -280,7 +300,10 @@ export class SubagentExecutor {
 			// In concurrent mode, create a new client to avoid mutating the
 			// shared parent client (which would race with other agents)
 			if (concurrent) {
-				const {client} = await createLLMClient(undefined, config.model);
+				const {client} = await createLLMClient(
+					parentProviderConfig.name,
+					config.model,
+				);
 				return {client, restoreParent: () => {}};
 			}
 

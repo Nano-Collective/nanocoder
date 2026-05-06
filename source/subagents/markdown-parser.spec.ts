@@ -63,6 +63,7 @@ test.serial('validateFrontmatter - accepts valid frontmatter', t => {
 		name: 'test',
 		description: 'A test agent',
 		model: 'haiku',
+		contextWindow: 16384,
 		tools: ['Read'],
 	};
 
@@ -94,6 +95,21 @@ test.serial('validateFrontmatter - rejects missing description', t => {
 	t.false(result.valid);
 	if (!result.valid) {
 		t.regex(result.error, /description is required/);
+	}
+});
+
+test.serial('validateFrontmatter - rejects invalid contextWindow', t => {
+	const frontmatter = {
+		name: 'test',
+		description: 'A test agent',
+		contextWindow: 0,
+	};
+
+	const result = validateFrontmatter(frontmatter);
+
+	t.false(result.valid);
+	if (!result.valid) {
+		t.regex(result.error, /contextWindow must be a positive number/);
 	}
 });
 
@@ -159,6 +175,7 @@ test.serial('parseSubagentMarkdown - parses complete agent file', async t => {
 name: test-agent
 description: A test agent for parsing
 model: sonnet
+contextWindow: 16384
 tools: [Read]
 disallowedTools: [Write]
 ---
@@ -172,6 +189,7 @@ You are a test agent. Do your best!`;
 		t.is(result.config.name, 'test-agent');
 		t.is(result.config.description, 'A test agent for parsing');
 		t.is(result.config.model, 'sonnet');
+		t.is(result.config.contextWindow, 16384);
 		t.deepEqual(result.config.tools, ['Read']);
 		t.deepEqual(result.config.disallowedTools, ['Write']);
 		t.is(result.config.systemPrompt, 'You are a test agent. Do your best!');
