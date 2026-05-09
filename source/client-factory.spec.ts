@@ -1415,3 +1415,44 @@ test.serial(
 		t.deepEqual(providerConfig?.contextWindows, {model1: 65536});
 	},
 );
+
+test.serial(
+	'createLLMClient: applies context window overrides on provider config',
+	async t => {
+		globalThis.fetch = createMockFetch(true, 200);
+
+		const configDir = join(testDir, 'provider-context-override-config-test');
+		mkdirSync(configDir, {recursive: true});
+
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'TestProvider',
+							baseUrl: 'http://localhost:8000/v1',
+							models: ['model1'],
+							contextWindow: 32768,
+						},
+					],
+				},
+			},
+			configDir,
+		);
+
+		process.cwd = () => configDir;
+		clearAppConfig();
+		reloadAppConfig();
+
+		const result = await createLLMClient('TestProvider', 'model1', {
+			contextWindow: 16384,
+		});
+		const providerConfig = getClientProviderConfig(
+			result.client as unknown as {providerConfig?: AIProviderConfig},
+		);
+
+		t.truthy(result);
+		t.truthy(providerConfig);
+		t.is(providerConfig?.contextWindow, 16384);
+	},
+);

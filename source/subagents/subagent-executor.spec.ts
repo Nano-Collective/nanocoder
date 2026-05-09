@@ -65,6 +65,12 @@ function createMockClient(
 		},
 		getAvailableModels: async () => ['test-model-sonnet-v1'],
 		getContextSize: () => 128000,
+		getProviderConfig: () => ({
+			name: 'TestProvider',
+			type: 'openai',
+			models: ['test-model-sonnet-v1'],
+			config: {},
+		}),
 		clearContext: async () => {},
 		getTimeout: () => undefined,
 	} as unknown as LLMClient;

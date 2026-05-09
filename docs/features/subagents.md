@@ -73,6 +73,7 @@ Create a markdown file in `.nanocoder/agents/` (project-level) or `~/.config/nan
 name: code-reviewer
 description: Reviews code for bugs, security issues, and style problems
 model: inherit
+contextWindow: 16384
 tools:
   - read_file
   - search_file_contents
@@ -96,6 +97,7 @@ You are a code review specialist. When given a file or directory to review:
 | `description` | Yes | — | When to use this agent (shown to the LLM) |
 | `provider` | No | parent's | Provider name from `agents.config.json`. Set this to use a different API endpoint (e.g. `ollama` for local models) |
 | `model` | No | `inherit` | Model ID available on the provider. Use `inherit` to use the parent's current model |
+| `contextWindow` | No | provider/model default | Override the subagent's context window in tokens (e.g. `16384`) |
 | `tools` | No | all | Array of tool names to allow. If set, only these tools are available |
 | `disallowedTools` | No | none | Array of tool names to block |
 
@@ -123,6 +125,8 @@ Always use your tools — never guess.
 ```
 
 The `provider` must match a provider name configured in your `agents.config.json`.
+
+If you set `contextWindow`, Nanocoder creates that subagent with its own context limit override. This is useful when a lightweight research agent should run with a smaller local-model context than your main coding agent.
 
 ## Priority and Overrides
 
