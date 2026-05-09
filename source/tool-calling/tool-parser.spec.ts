@@ -1,5 +1,5 @@
 import test from 'ava';
-import {parseToolCalls} from './tool-parser';
+import {dedupeToolCalls, parseToolCalls} from './tool-parser';
 
 console.log(`\ntool-parser.spec.ts`);
 
@@ -119,6 +119,54 @@ test('parseToolCalls: handles empty JSON object', t => {
 	if (result.success) {
 		t.is(result.toolCalls.length, 0);
 	}
+});
+
+
+test('parseToolCalls: parses fenced JSON tool call and strips it from content', t => {
+	const content = `Before
+
+\`\`\`json
+{
+  "name": "read_file",
+  "arguments": {
+    "path": "/tmp/test.txt"
+  }
+}
+\`\`\`
+
+After`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'read_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, {path: '/tmp/test.txt'});
+		t.is(result.cleanedContent, 'Before\n\nAfter');
+	}
+});
+
+test('parseToolCalls: surfaces malformed JSON tool calls for self-correction', t => {
+	const result = parseToolCalls('{"name": "read_file"}');
+
+	t.false(result.success);
+	if (!result.success) {
+		t.regex(result.error, /missing "arguments" field/i);
+	}
+});
+
+test('dedupeToolCalls: removes parsed duplicates after native tool calls', t => {
+	const deduped = dedupeToolCalls([
+		{id: 'native', function: {name: 'read_file', arguments: {path: '/tmp/test.txt'}}},
+		{id: 'parsed', function: {name: 'read_file', arguments: {path: '/tmp/test.txt'}}},
+		{id: 'other', function: {name: 'list_directory', arguments: {path: '/tmp'}}},
+	]);
+
+	t.deepEqual(
+		deduped.map(call => call.id),
+		['native', 'other'],
+	);
 });
 
 test('parseToolCalls: preserves identical XML tool calls (no deduplication)', t => {

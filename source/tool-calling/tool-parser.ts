@@ -1,6 +1,11 @@
 import {XMLToolCallParser} from '@/tool-calling/xml-parser';
 import type {ToolCall} from '@/types/index';
 import {ensureString} from '@/utils/type-helpers';
+import {
+	cleanJSONToolCalls,
+	detectMalformedJSONToolCall,
+	parseJSONToolCalls,
+} from './json-parser';
 
 /**
  * Strip  tags from content (some models output thinking that shouldn't be shown)
@@ -78,7 +83,26 @@ export function parseToolCalls(content: unknown): ParseResult {
 		}
 	}
 
-	// 3. Check for malformed XML patterns (DEFENSIVE: Error second!)
+	// 3. Try targeted JSON fallback for panicked native-tool models
+	const jsonToolCalls = parseJSONToolCalls(strippedContent);
+	if (jsonToolCalls.length > 0) {
+		return {
+			success: true,
+			toolCalls: jsonToolCalls,
+			cleanedContent: cleanJSONToolCalls(strippedContent, jsonToolCalls),
+		};
+	}
+
+	// 4. Check for malformed JSON or XML patterns (DEFENSIVE: Error second!)
+	const jsonMalformed = detectMalformedJSONToolCall(strippedContent);
+	if (jsonMalformed) {
+		return {
+			success: false,
+			error: jsonMalformed.error,
+			examples: jsonMalformed.examples,
+		};
+	}
+
 	const xmlMalformed =
 		XMLToolCallParser.detectMalformedToolCall(strippedContent);
 	if (xmlMalformed) {
@@ -89,10 +113,26 @@ export function parseToolCalls(content: unknown): ParseResult {
 		};
 	}
 
-	// 4. No tool calls found - normalize whitespace in content
+	// 5. No tool calls found - normalize whitespace in content
 	return {
 		success: true,
 		toolCalls: [],
 		cleanedContent: normalizeWhitespace(strippedContent),
 	};
+}
+
+function getToolCallKey(toolCall: ToolCall): string {
+	return `${toolCall.function.name}:${JSON.stringify(toolCall.function.arguments)}`;
+}
+
+export function dedupeToolCalls(toolCalls: ToolCall[]): ToolCall[] {
+	const seen = new Set<string>();
+	return toolCalls.filter(toolCall => {
+		const key = getToolCallKey(toolCall);
+		if (seen.has(key)) {
+			return false;
+		}
+		seen.add(key);
+		return true;
+	});
 }

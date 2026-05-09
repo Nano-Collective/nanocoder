@@ -5,7 +5,11 @@ import AssistantReasoning from '@/components/assistant-reasoning';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import {getAppConfig} from '@/config/index';
 import {MAX_EMPTY_TURNS, MAX_MALFORMED_RETRIES} from '@/constants';
-import {parseToolCalls, stripThinkTags} from '@/tool-calling/index';
+import {
+	dedupeToolCalls,
+	parseToolCalls,
+	stripThinkTags,
+} from '@/tool-calling/index';
 import {loadTasks} from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
@@ -251,11 +255,10 @@ export const processAssistantResponse = async (
 	const fullContent = stripThinkTags(message.content || '');
 	const fullReasoning = message.reasoning;
 
-	// Only parse text for XML tool calls on the fallback path (non-tool-calling models).
-	// On the native path, response text is just text - no tool calls are embedded in it.
-	const parseResult = result.toolsDisabled
-		? parseToolCalls(fullContent)
-		: {success: true as const, toolCalls: [], cleanedContent: fullContent};
+	// Always run the defensive parser over the text stream. Native-tool models can
+	// still echo raw JSON/XML into content, and non-native models still need the
+	// XML/JSON fallback path.
+	const parseResult = parseToolCalls(fullContent);
 
 	// Notify the user once per session when the XML fallback path is active
 	if (result.toolsDisabled && !hasShownFallbackNotice) {
@@ -269,8 +272,7 @@ export const processAssistantResponse = async (
 		);
 	}
 
-	// Check for malformed tool calls and send error back to model for self-correction
-	// (only happens on the XML fallback path)
+	// Check for malformed tool calls and send error back to model for self-correction.
 	if (!parseResult.success) {
 		// Cap malformed-retry recursion. Without this, a model stuck producing
 		// bad XML loops forever, appending two messages per iteration, until
@@ -340,10 +342,12 @@ export const processAssistantResponse = async (
 	const parsedToolCalls = parseResult.toolCalls;
 	const cleanedContent = parseResult.cleanedContent;
 
-	// Combine native tool calls with any parsed from content (XML fallback path)
-	// Native and parsed are mutually exclusive: native comes from tool-calling models,
-	// parsed comes from non-tool-calling models using XML in text
-	let allToolCalls = [...(toolCalls || []), ...parsedToolCalls];
+	// Combine native tool calls with any parsed from content, but keep only the
+	// first exact match so a model that double-emits doesn't execute the same tool twice.
+	let allToolCalls = dedupeToolCalls([
+		...(toolCalls || []),
+		...parsedToolCalls,
+	]);
 
 	// Single-tool enforcement: truncate to first tool call
 	// Active when tune profile implies single-tool (e.g. minimal profile)

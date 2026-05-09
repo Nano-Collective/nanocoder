@@ -172,6 +172,57 @@ test('executes a tool call that does not need approval and recurses to success',
 	t.is(handlerCalls, 1);
 });
 
+
+test('deduplicates ghost-echo JSON on the native path', async t => {
+	const toolCall: ToolCall = {
+		id: 'call-1',
+		function: {name: 'safe_tool', arguments: {path: '/tmp/test.txt'}},
+	};
+	const client = makeFakeClient({
+		responses: [
+			{
+				choices: [
+					{
+						message: {
+							role: 'assistant',
+							content:
+								'```json\n{"name":"safe_tool","arguments":{"path":"/tmp/test.txt"}}\n```',
+							tool_calls: [toolCall],
+						},
+					},
+				],
+			},
+			{
+				choices: [{message: {role: 'assistant', content: 'all done'}}],
+			},
+		],
+	});
+	const toolManager = makeFakeToolManager({
+		knownTools: new Set(['safe_tool']),
+		needsApprovalByName: {safe_tool: false},
+	});
+	let handlerCalls = 0;
+	setToolRegistryGetter(() => ({
+		safe_tool: (async () => {
+			handlerCalls++;
+			return 'tool-output';
+		}) as ToolHandler,
+	}));
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: 'auto-accept',
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+	});
+
+	t.is(outcome.kind, 'success');
+	t.is(handlerCalls, 1);
+});
+
 test('returns tool-approval-required when a tool needs approval and mode is not yolo', async t => {
 	const toolCall: ToolCall = {
 		id: 'call-1',

@@ -1,6 +1,6 @@
 import {processToolUse} from '@/message-handler';
 import {color, write, writeError, writeLine, writeStatus} from '@/plain/writer';
-import {parseToolCalls} from '@/tool-calling/index';
+import {dedupeToolCalls, parseToolCalls} from '@/tool-calling/index';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
 	DevelopmentMode,
@@ -110,19 +110,17 @@ export async function runPlainConversation(
 		const nativeToolCalls = message.tool_calls || [];
 		const fullContent = message.content || '';
 
-		const xmlParse = result.toolsDisabled
-			? parseToolCalls(fullContent)
-			: {success: true as const, toolCalls: [], cleanedContent: fullContent};
+		const xmlParse = parseToolCalls(fullContent);
 
 		if (!xmlParse.success) {
 			writeError(`Malformed tool call: ${xmlParse.error}`);
 			return {kind: 'error', message: xmlParse.error};
 		}
 
-		const allToolCalls: ToolCall[] = [
+		const allToolCalls: ToolCall[] = dedupeToolCalls([
 			...nativeToolCalls,
 			...xmlParse.toolCalls,
-		];
+		]);
 		const cleanedContent = xmlParse.cleanedContent;
 
 		const validToolCalls: ToolCall[] = [];
