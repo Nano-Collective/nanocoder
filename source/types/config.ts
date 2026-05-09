@@ -224,15 +224,35 @@ export interface ModelParameters {
 	reasoningSummary?: 'auto' | 'concise' | 'detailed';
 }
 
+export type ToolMode = 'native' | 'xml' | 'json';
+
 export interface TuneConfig {
 	enabled: boolean;
 	toolProfile: ToolProfile;
 	aggressiveCompact: boolean;
+	// 'native' uses the AI SDK's native tool calling. 'xml' and 'json' inject
+	// tool definitions into the system prompt and parse them out of text.
+	// Use getTuneToolMode() instead of reading this field directly so the
+	// legacy `disableNativeTools` flag still works for old preference files.
+	toolMode?: ToolMode;
+	// @deprecated Use toolMode instead. Kept for backward compatibility with
+	// preferences saved before tri-state mode existed; mapped at read time.
 	disableNativeTools?: boolean;
 	// When false, AGENTS.md is not appended to the system prompt. Defaults to true
 	// when undefined to preserve historical behaviour.
 	includeAgentsMd?: boolean;
 	modelParameters?: ModelParameters;
+}
+
+/**
+ * Resolves the active tool mode from a TuneConfig, applying the back-compat
+ * mapping for legacy `disableNativeTools` flags.
+ */
+export function getTuneToolMode(tune: TuneConfig | undefined): ToolMode {
+	if (!tune?.enabled) return 'native';
+	if (tune.toolMode) return tune.toolMode;
+	if (tune.disableNativeTools) return 'xml';
+	return 'native';
 }
 
 export const TUNE_DEFAULTS: TuneConfig = {

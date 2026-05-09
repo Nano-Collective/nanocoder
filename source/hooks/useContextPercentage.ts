@@ -2,6 +2,7 @@ import {useEffect, useRef} from 'react';
 import {getModelContextLimit} from '@/models/index';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {AIProviderConfig, TuneConfig} from '@/types/config';
+import {getTuneToolMode} from '@/types/config';
 import type {DevelopmentMode, Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
 import {
@@ -110,8 +111,8 @@ export function useContextPercentage({
 		);
 
 		// Include tool definition overhead (only when native tool calling is active)
-		// When tools are disabled (XML fallback), definitions are in the system prompt
-		const nativeToolsDisabled = tune?.enabled && tune.disableNativeTools;
+		// When tools are disabled (XML/JSON fallback), definitions are in the system prompt
+		const nativeToolsDisabled = getTuneToolMode(tune) !== 'native';
 		const toolDefTokens =
 			toolManager && !nativeToolsDisabled
 				? calculateToolDefinitionsTokens(

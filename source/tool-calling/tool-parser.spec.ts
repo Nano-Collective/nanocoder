@@ -234,3 +234,155 @@ The actual response.`;
 		t.regex(result.cleanedContent, /The actual response/);
 	}
 });
+
+// JSON Fallback Tests (open-weights models that emit JSON-shaped tool calls)
+
+test('parseToolCalls: parses fenced ```json tool call', t => {
+	const content = `Here you go:
+
+\`\`\`json
+{"name": "read_file", "arguments": {"path": "/etc/hosts"}}
+\`\`\`
+`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'read_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, {
+			path: '/etc/hosts',
+		});
+		t.notRegex(result.cleanedContent, /```/);
+		t.regex(result.cleanedContent, /Here you go/);
+	}
+});
+
+test('parseToolCalls: parses fenced code block without language hint', t => {
+	const content = `\`\`\`
+{"name": "create_file", "arguments": {"path": "/tmp/x", "content": "hi"}}
+\`\`\``;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'create_file');
+	}
+});
+
+test('parseToolCalls: parses bare inline JSON tool call', t => {
+	const content = `{"name": "read_file", "arguments": {"path": "/file.txt"}}`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'read_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, {
+			path: '/file.txt',
+		});
+	}
+});
+
+test('parseToolCalls: parses multiple JSON tool calls', t => {
+	const content = `
+\`\`\`json
+{"name": "read_file", "arguments": {"path": "/a.txt"}}
+\`\`\`
+
+\`\`\`json
+{"name": "read_file", "arguments": {"path": "/b.txt"}}
+\`\`\`
+`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 2);
+		t.is(result.toolCalls[0].function.name, 'read_file');
+		t.is(result.toolCalls[1].function.name, 'read_file');
+	}
+});
+
+test('parseToolCalls: detects malformed JSON with string arguments', t => {
+	const content = `{"name": "read_file", "arguments": "/file.txt"}`;
+
+	const result = parseToolCalls(content);
+
+	t.false(result.success);
+	if (!result.success) {
+		t.regex(result.error, /"arguments" must be an object/i);
+		t.regex(result.examples, /native tool calling/i);
+	}
+});
+
+test('parseToolCalls: detects malformed JSON with missing arguments field', t => {
+	const content = `{"name": "read_file"}`;
+
+	const result = parseToolCalls(content);
+
+	t.false(result.success);
+	if (!result.success) {
+		t.regex(result.error, /missing "arguments" field/i);
+		t.regex(result.examples, /native tool calling/i);
+	}
+});
+
+test('parseToolCalls: detects malformed JSON with missing name field', t => {
+	const content = `{"arguments": {"path": "/file.txt"}}`;
+
+	const result = parseToolCalls(content);
+
+	t.false(result.success);
+	if (!result.success) {
+		t.regex(result.error, /missing "name" field/i);
+		t.regex(result.examples, /native tool calling/i);
+	}
+});
+
+test('parseToolCalls: prefers XML when XML is unambiguous and JSON is inline', t => {
+	const content = `<read_file>
+  <path>/from-xml.txt</path>
+</read_file>
+
+Also tried: {"name": "read_file", "arguments": {"path": "/from-json.txt"}}`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.deepEqual(result.toolCalls[0].function.arguments, {
+			path: '/from-xml.txt',
+		});
+	}
+});
+
+test('parseToolCalls: does not double-count fenced + inline overlap', t => {
+	const content = `\`\`\`json
+{"name": "read_file", "arguments": {"path": "/x.txt"}}
+\`\`\``;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+	}
+});
+
+test('parseToolCalls: leaves plain prose alone when JSON-shaped text is just discussion', t => {
+	const content = `The user asked about {"name": "read_file"} but I should not call it.`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 0);
+	}
+});

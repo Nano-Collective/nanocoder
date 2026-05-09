@@ -5,7 +5,11 @@ import AssistantReasoning from '@/components/assistant-reasoning';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import {getAppConfig} from '@/config/index';
 import {MAX_EMPTY_TURNS, MAX_MALFORMED_RETRIES} from '@/constants';
-import {parseToolCalls, stripThinkTags} from '@/tool-calling/index';
+import {
+	parseToolCalls,
+	stripEmbeddedToolCallText,
+	stripThinkTags,
+} from '@/tool-calling/index';
 import {loadTasks} from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
@@ -251,11 +255,29 @@ export const processAssistantResponse = async (
 	const fullContent = stripThinkTags(message.content || '');
 	const fullReasoning = message.reasoning;
 
-	// Only parse text for XML tool calls on the fallback path (non-tool-calling models).
-	// On the native path, response text is just text - no tool calls are embedded in it.
-	const parseResult = result.toolsDisabled
-		? parseToolCalls(fullContent)
-		: {success: true as const, toolCalls: [], cleanedContent: fullContent};
+	// Tool extraction is layered:
+	//   - XML fallback path (toolsDisabled): parse text for XML/JSON tool calls.
+	//   - Native path with native tool calls: trust the SDK protocol, but strip
+	//     any echoed XML/JSON tool-call text from the message ("Ghost Echo")
+	//     so it doesn't leak into the UI or conversation history.
+	//   - Native path with NO native tool calls: still parse text for XML/JSON
+	//     tool calls. Open-weights models marketed as native-tool-capable
+	//     sometimes regress and emit text-based tool calls instead. Without
+	//     this fallback the agent stalls. Malformed shapes return success:false
+	//     and feed the existing self-correction loop.
+	const hasNativeToolCalls = !!toolCalls && toolCalls.length > 0;
+	let parseResult: ReturnType<typeof parseToolCalls>;
+	if (result.toolsDisabled) {
+		parseResult = parseToolCalls(fullContent);
+	} else if (hasNativeToolCalls) {
+		parseResult = {
+			success: true as const,
+			toolCalls: [],
+			cleanedContent: stripEmbeddedToolCallText(fullContent),
+		};
+	} else {
+		parseResult = parseToolCalls(fullContent);
+	}
 
 	// Notify the user once per session when the XML fallback path is active
 	if (result.toolsDisabled && !hasShownFallbackNotice) {

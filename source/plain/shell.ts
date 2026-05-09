@@ -1,5 +1,5 @@
 import path from 'node:path';
-import {formatToolsForPrompt} from '@/ai-sdk-client/tools/tool-prompt-formatter';
+import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
 import {getAppConfig} from '@/config/index';
 import {loadPreferences, savePreferences} from '@/config/preferences';
 import {runPlainConversation} from '@/plain/conversation';
@@ -11,6 +11,7 @@ import {
 	writeLine,
 	writeStatus,
 } from '@/plain/writer';
+import {getTuneToolMode} from '@/types/config';
 import type {DevelopmentMode, Message} from '@/types/core';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 import {getShutdownManager} from '@/utils/shutdown';
@@ -57,26 +58,32 @@ export async function runPlainShell(
 	const {client, toolManager, provider, model} = init;
 	writeBoot(provider, model, developmentMode);
 
-	const toolsDisabled = isToolCallingDisabled(provider, model);
+	const tunePrefs = loadPreferences().tune;
+	const tuneToolMode = getTuneToolMode(tunePrefs);
+	const toolsDisabled =
+		tuneToolMode !== 'native' || isToolCallingDisabled(provider, model);
+	const fallbackToolFormat: 'xml' | 'json' =
+		tuneToolMode === 'json' ? 'json' : 'xml';
 	const availableNames = toolManager.getAvailableToolNames(
 		undefined,
 		developmentMode,
 	);
-	let systemContent = buildSystemPrompt(
+	const basePrompt = buildSystemPrompt(
 		developmentMode,
 		undefined,
 		availableNames,
 		toolsDisabled,
 		getAppConfig().systemPrompt,
 	);
-	if (toolsDisabled) {
-		const toolsForPrompt =
-			toolManager.getFilteredToolsWithoutExecute(availableNames);
-		const toolPrompt = formatToolsForPrompt(toolsForPrompt);
-		if (toolPrompt) {
-			systemContent += toolPrompt;
-		}
-	}
+	const toolsForPrompt = toolsDisabled
+		? toolManager.getFilteredToolsWithoutExecute(availableNames)
+		: {};
+	const systemContent = appendToolDefinitionsToPrompt(
+		basePrompt,
+		toolsDisabled,
+		fallbackToolFormat,
+		toolsForPrompt,
+	);
 	setLastBuiltPrompt(systemContent);
 
 	const systemMessage: Message = {role: 'system', content: systemContent};

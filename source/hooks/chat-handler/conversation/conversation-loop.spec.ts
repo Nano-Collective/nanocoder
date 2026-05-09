@@ -420,6 +420,260 @@ test.serial('processAssistantResponse - strips <think> tags on the native path b
 	t.notRegex(lastAssistant!.content as string, /<think>/i, 'History must not contain <think> tags');
 });
 
+test.serial('processAssistantResponse - strips JSON ghost-echo on the native path when tool calls are present', async t => {
+	const queuedComponents: any[] = [];
+	const messagesSetCalls: Message[][] = [];
+
+	// Native path with native tool calls AND the same call echoed in text content
+	// (open-weights "Ghost Echo" failure mode).
+	const ghostEchoClient = {
+		chat: async (): Promise<LLMChatResponse> => ({
+			choices: [
+				{
+					message: {
+						role: 'assistant',
+						content:
+							'I will read the file now.\n\n```json\n{"name": "read_file", "arguments": {"path": "/etc/hosts"}}\n```',
+						tool_calls: [
+							{
+								id: 'call_abc',
+								function: {
+									name: 'read_file',
+									arguments: {path: '/etc/hosts'},
+								},
+							},
+						],
+					},
+				},
+			],
+			toolsDisabled: false,
+		}),
+	};
+
+	const params = createDefaultParams({
+		client: ghostEchoClient,
+		messages: [{role: 'user', content: 'Read /etc/hosts'}],
+		addToChatQueue: (component: any) => queuedComponents.push(component),
+		setMessages: (messages: Message[]) => messagesSetCalls.push(messages),
+	});
+
+	await processAssistantResponse(params);
+
+	// AssistantMessage must contain the prose but NOT the echoed JSON tool call
+	const assistantMessage = queuedComponents.find(
+		(c: any) =>
+			typeof c.props?.message === 'string' &&
+			c.props.message.includes('I will read the file now.'),
+	);
+	t.truthy(assistantMessage, 'Should queue an AssistantMessage with the prose');
+	t.notRegex(
+		assistantMessage.props.message,
+		/"name":\s*"read_file"/i,
+		'AssistantMessage must not contain JSON ghost-echo',
+	);
+	t.notRegex(
+		assistantMessage.props.message,
+		/```/,
+		'AssistantMessage must not contain the json fence',
+	);
+
+	// Conversation history must also be clean — without the strip, every
+	// future turn would re-feed the echoed JSON back into the model.
+	const lastSetMessages = messagesSetCalls[messagesSetCalls.length - 1];
+	const lastAssistant = [...lastSetMessages]
+		.reverse()
+		.find(m => m.role === 'assistant');
+	t.truthy(lastAssistant, 'Should append an assistant message to history');
+	t.notRegex(
+		lastAssistant!.content as string,
+		/"name":\s*"read_file"/i,
+		'History must not contain JSON ghost-echo',
+	);
+});
+
+test.serial('processAssistantResponse - extracts JSON tool call hallucination on native path when no native tool_calls present', async t => {
+	const messagesSetCalls: Message[][] = [];
+
+	// Native path with NO native tool calls. The model emitted a JSON tool
+	// call as text instead — common regression for open-weights models
+	// marketed as native-tool-capable. The fallback parser should catch it
+	// and treat it as a real tool call so the agent doesn't stall.
+	const hallucinatingClient = {
+		chat: async (): Promise<LLMChatResponse> => ({
+			choices: [
+				{
+					message: {
+						role: 'assistant',
+						content:
+							'```json\n{"name": "read_file", "arguments": {"path": "/etc/hosts"}}\n```',
+						tool_calls: undefined,
+					},
+				},
+			],
+			toolsDisabled: false,
+		}),
+	};
+
+	const params = createDefaultParams({
+		client: hallucinatingClient,
+		messages: [{role: 'user', content: 'Read /etc/hosts'}],
+		toolManager: createMockToolManager({tools: ['read_file']}),
+		setMessages: (messages: Message[]) => messagesSetCalls.push(messages),
+	});
+
+	await processAssistantResponse(params);
+
+	// The fallback parser should have extracted the tool call and added it
+	// to the assistant message in conversation history.
+	const lastSetMessages = messagesSetCalls[messagesSetCalls.length - 1];
+	const lastAssistant = [...lastSetMessages]
+		.reverse()
+		.find(m => m.role === 'assistant');
+	t.truthy(lastAssistant, 'Should append assistant message to history');
+	t.truthy(
+		lastAssistant!.tool_calls,
+		'Assistant message should carry extracted tool_calls',
+	);
+	t.is(lastAssistant!.tool_calls!.length, 1);
+	t.is(lastAssistant!.tool_calls![0].function.name, 'read_file');
+});
+
+test.serial('processAssistantResponse - extracts XML tool call hallucination on native path when no native tool_calls present', async t => {
+	const messagesSetCalls: Message[][] = [];
+
+	const xmlHallucinatingClient = {
+		chat: async (): Promise<LLMChatResponse> => ({
+			choices: [
+				{
+					message: {
+						role: 'assistant',
+						content:
+							'<read_file>\n  <path>/etc/hosts</path>\n</read_file>',
+						tool_calls: undefined,
+					},
+				},
+			],
+			toolsDisabled: false,
+		}),
+	};
+
+	const params = createDefaultParams({
+		client: xmlHallucinatingClient,
+		messages: [{role: 'user', content: 'Read /etc/hosts'}],
+		toolManager: createMockToolManager({tools: ['read_file']}),
+		setMessages: (messages: Message[]) => messagesSetCalls.push(messages),
+	});
+
+	await processAssistantResponse(params);
+
+	const lastSetMessages = messagesSetCalls[messagesSetCalls.length - 1];
+	const lastAssistant = [...lastSetMessages]
+		.reverse()
+		.find(m => m.role === 'assistant');
+	t.truthy(lastAssistant, 'Should append assistant message to history');
+	t.truthy(
+		lastAssistant!.tool_calls,
+		'Assistant message should carry extracted tool_calls',
+	);
+	t.is(lastAssistant!.tool_calls!.length, 1);
+	t.is(lastAssistant!.tool_calls![0].function.name, 'read_file');
+});
+
+test.serial('processAssistantResponse - malformed JSON on native path drives self-correction', async t => {
+	let chatCallCount = 0;
+	const queuedComponents: any[] = [];
+
+	// Native path with malformed JSON in text content (missing arguments
+	// field). The fallback parser detects it as malformed; the self-correction
+	// loop should display the error and recurse with the error feedback.
+	// Verifies row 8 of the Post-Fix Reality table on the Native column.
+	const malformedJSONClient = {
+		chat: async (): Promise<LLMChatResponse> => {
+			chatCallCount += 1;
+			return {
+				choices: [
+					{
+						message: {
+							role: 'assistant',
+							content: '{"name": "read_file"}',
+							tool_calls: undefined,
+						},
+					},
+				],
+				toolsDisabled: false,
+			};
+		},
+	};
+
+	const params = createDefaultParams({
+		client: malformedJSONClient,
+		messages: [{role: 'user', content: 'Read /etc/hosts'}],
+		addToChatQueue: (component: any) => queuedComponents.push(component),
+	});
+
+	await processAssistantResponse(params);
+
+	// Self-correction should have fired: the loop recurses with error
+	// feedback, so the client is invoked more than once before hitting the cap.
+	t.true(
+		chatCallCount > 1,
+		`Expected self-correction recursion on native path; chatCallCount=${chatCallCount}`,
+	);
+
+	// The structured malformed-JSON error should have been surfaced to the user.
+	const errorComponent = queuedComponents.find(
+		(c: any) =>
+			typeof c.props?.message === 'string' &&
+			/missing "arguments" field/i.test(c.props.message),
+	);
+	t.truthy(
+		errorComponent,
+		'Should display structured malformed-JSON error to user',
+	);
+});
+
+test.serial('processAssistantResponse - leaves prose without a tool-call shape alone on native path', async t => {
+	const queuedComponents: any[] = [];
+
+	// Native path with no tool calls and content that has no JSON/XML
+	// tool-call shape — should pass through as a regular assistant message.
+	const proseClient = {
+		chat: async (): Promise<LLMChatResponse> => ({
+			choices: [
+				{
+					message: {
+						role: 'assistant',
+						content:
+							'I can help with that. Use the read_file tool — pass it a path and it will return the contents.',
+						tool_calls: undefined,
+					},
+				},
+			],
+			toolsDisabled: false,
+		}),
+	};
+
+	const params = createDefaultParams({
+		client: proseClient,
+		messages: [{role: 'user', content: 'How do I call a tool?'}],
+		addToChatQueue: (component: any) => queuedComponents.push(component),
+	});
+
+	await processAssistantResponse(params);
+
+	const assistantMessage = queuedComponents.find(
+		(c: any) =>
+			typeof c.props?.message === 'string' &&
+			c.props.message.includes('I can help with that'),
+	);
+	t.truthy(assistantMessage, 'Should queue prose AssistantMessage');
+	t.regex(
+		assistantMessage.props.message,
+		/read_file tool/i,
+		'Prose without tool-call shape should pass through unmodified',
+	);
+});
+
 test.serial('processAssistantResponse - malformed-XML cap stops the loop after MAX_MALFORMED_RETRIES', async t => {
 	let chatCallCount = 0;
 	const queuedComponents: any[] = [];

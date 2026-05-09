@@ -1,10 +1,11 @@
 import React from 'react';
-import {formatToolsForPrompt} from '@/ai-sdk-client/tools/tool-prompt-formatter';
+import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
 import {ConversationStateManager} from '@/app/utils/conversation-state';
 import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
 import {CommandIntegration} from '@/custom-commands/command-integration';
 import {promptHistory} from '@/prompt-history';
+import {getTuneToolMode} from '@/types/config';
 import type {Message} from '@/types/core';
 import {MessageBuilder} from '@/utils/message-builder';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
@@ -77,9 +78,15 @@ export function useChatHandler({
 	// Conversation state manager for enhanced context
 	const conversationStateManager = React.useRef(new ConversationStateManager());
 
+	// Resolve the active fallback format when native tools are disabled. When
+	// native is on, this value is unused. The tune override takes priority over
+	// provider-level disables so users can pick the JSON path explicitly even
+	// for providers we'd otherwise mark as XML-only.
+	const tuneToolMode = React.useMemo(() => getTuneToolMode(tune), [tune]);
+
 	// Check if native tool calling is disabled (provider config or tune override)
 	const toolsDisabled = React.useMemo(() => {
-		if (tune?.enabled && tune.disableNativeTools) return true;
+		if (tuneToolMode !== 'native') return true;
 		const config = getAppConfig();
 		const provider = config.providers?.find(p => p.name === currentProvider);
 		if (!provider) return false;
@@ -87,7 +94,13 @@ export function useChatHandler({
 			provider.disableTools === true ||
 			(provider.disableToolModels?.includes(currentModel) ?? false)
 		);
-	}, [currentProvider, currentModel, tune]);
+	}, [currentProvider, currentModel, tuneToolMode]);
+
+	// When native is off, the fallback format is whatever the tune chose; if the
+	// disable came from provider config (and tune is on 'native'), default to XML
+	// to match historical behaviour.
+	const fallbackToolFormat: 'xml' | 'json' =
+		tuneToolMode === 'json' ? 'json' : 'xml';
 
 	// Cache the base system prompt — only rebuild when mode, tune, tools, or toolsDisabled change
 	// This preserves KV cache by keeping the system message stable across turns
@@ -100,7 +113,7 @@ export function useChatHandler({
 			tune,
 			developmentMode,
 		);
-		let prompt = buildSystemPrompt(
+		const basePrompt = buildSystemPrompt(
 			developmentMode,
 			tune,
 			availableNames,
@@ -108,19 +121,28 @@ export function useChatHandler({
 			getAppConfig().systemPrompt,
 		);
 
-		if (toolsDisabled) {
-			const tools = toolManager.getFilteredToolsWithoutExecute(availableNames);
-			const toolPrompt = formatToolsForPrompt(tools);
-			if (toolPrompt) {
-				prompt += toolPrompt;
-			}
-		}
+		const tools = toolsDisabled
+			? toolManager.getFilteredToolsWithoutExecute(availableNames)
+			: {};
+		const prompt = appendToolDefinitionsToPrompt(
+			basePrompt,
+			toolsDisabled,
+			fallbackToolFormat,
+			tools,
+		);
 
 		// Update the cached prompt so /usage and context % see the full prompt
 		setLastBuiltPrompt(prompt);
 
 		return prompt;
-	}, [developmentMode, tune, toolManager, toolsDisabled, subagentsReady]);
+	}, [
+		developmentMode,
+		tune,
+		toolManager,
+		toolsDisabled,
+		fallbackToolFormat,
+		subagentsReady,
+	]);
 
 	// Track when the current conversation started for elapsed time display
 	const conversationStartTimeRef = React.useRef<number>(Date.now());

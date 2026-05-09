@@ -11,6 +11,7 @@ import {getToolManager} from '@/message-handler';
 import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
 import {createTokenizer} from '@/tokenization/index';
 import type {Command} from '@/types/commands';
+import {getTuneToolMode} from '@/types/config';
 import type {Message} from '@/types/core';
 import {
 	calculateTokenBreakdown,
@@ -97,14 +98,14 @@ export const usageCommand: Command = {
 		}
 
 		// Calculate tool definitions tokens (only when native tool calling is active)
-		// When tools are disabled (XML fallback), definitions are in the system prompt instead
+		// When tools are disabled (XML/JSON fallback), definitions are in the system prompt instead
 		const config = getAppConfig();
 		const providerConfig = config.providers?.find(p => p.name === provider);
 		const prefs = loadPreferences();
 		const nativeToolsDisabled =
 			providerConfig?.disableTools === true ||
 			(providerConfig?.disableToolModels?.includes(model) ?? false) ||
-			(prefs.tune?.enabled && prefs.tune.disableNativeTools);
+			getTuneToolMode(prefs.tune) !== 'native';
 
 		const toolDefinitions =
 			toolManager && !nativeToolsDisabled

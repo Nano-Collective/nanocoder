@@ -170,12 +170,39 @@ test('shows Native Tool Calling ON by default', t => {
 	t.regex(output, /Native Tool Calling.*ON/);
 });
 
-test('shows Native Tool Calling OFF with XML fallback', t => {
+test('shows Native Tool Calling OFF with XML fallback (legacy disableNativeTools)', t => {
 	const config: TuneConfig = {...ENABLED_CONFIG, disableNativeTools: true};
 	const {lastFrame} = renderTuneSelector(config);
 	const output = lastFrame()!;
 	t.regex(output, /Native Tool Calling.*OFF/);
 	t.true(output.includes('XML fallback'));
+});
+
+test('shows Native Tool Calling OFF with XML fallback (toolMode)', t => {
+	const config: TuneConfig = {...ENABLED_CONFIG, toolMode: 'xml'};
+	const {lastFrame} = renderTuneSelector(config);
+	const output = lastFrame()!;
+	t.regex(output, /Native Tool Calling.*OFF/);
+	t.true(output.includes('XML fallback'));
+});
+
+test('shows Native Tool Calling OFF with JSON fallback', t => {
+	const config: TuneConfig = {...ENABLED_CONFIG, toolMode: 'json'};
+	const {lastFrame} = renderTuneSelector(config);
+	const output = lastFrame()!;
+	t.regex(output, /Native Tool Calling.*OFF/);
+	t.true(output.includes('JSON fallback'));
+});
+
+test('toolMode takes precedence over legacy disableNativeTools', t => {
+	const config: TuneConfig = {
+		...ENABLED_CONFIG,
+		disableNativeTools: true,
+		toolMode: 'json',
+	};
+	const {lastFrame} = renderTuneSelector(config);
+	const output = lastFrame()!;
+	t.true(output.includes('JSON fallback'));
 });
 
 test('shows Model Parameters defaults when unconfigured', t => {

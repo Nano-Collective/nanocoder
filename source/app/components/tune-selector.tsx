@@ -8,8 +8,13 @@ import {
 	TOOL_PROFILE_DESCRIPTIONS,
 	TOOL_PROFILE_TOOLTIPS,
 } from '@/tools/tool-profiles';
-import type {ModelParameters, ToolProfile, TuneConfig} from '@/types/config';
-import {TUNE_DEFAULTS} from '@/types/config';
+import type {
+	ModelParameters,
+	ToolMode,
+	ToolProfile,
+	TuneConfig,
+} from '@/types/config';
+import {getTuneToolMode, TUNE_DEFAULTS} from '@/types/config';
 
 type Step = 'main' | 'toolProfile' | 'parameters' | 'preset';
 
@@ -26,10 +31,23 @@ type MainAction =
 	| 'preset'
 	| 'toolProfile'
 	| 'aggressiveCompact'
-	| 'disableNativeTools'
+	| 'toolMode'
 	| 'includeAgentsMd'
 	| 'parameters'
 	| 'apply';
+
+const TOOL_MODE_CYCLE: ToolMode[] = ['native', 'xml', 'json'];
+
+function nextToolMode(current: ToolMode): ToolMode {
+	const idx = TOOL_MODE_CYCLE.indexOf(current);
+	return TOOL_MODE_CYCLE[(idx + 1) % TOOL_MODE_CYCLE.length];
+}
+
+function toolModeLabel(mode: ToolMode): string {
+	if (mode === 'native') return 'ON';
+	if (mode === 'xml') return 'OFF (XML fallback)';
+	return 'OFF (JSON fallback)';
+}
 
 // Preset definitions — static configs that populate the tune form
 interface TunePreset {
@@ -108,8 +126,8 @@ function TuneMainMenu({
 					value: 'aggressiveCompact',
 				},
 				{
-					label: `Native Tool Calling - ${config.disableNativeTools ? 'OFF (XML fallback)' : 'ON'}`,
-					value: 'disableNativeTools',
+					label: `Native Tool Calling - ${toolModeLabel(getTuneToolMode(config))}`,
+					value: 'toolMode',
 				},
 				{
 					label: `Include AGENTS.md - ${agentsMdOn ? 'ON' : 'OFF'}`,
@@ -660,11 +678,14 @@ export function TuneSelector({
 					aggressiveCompact: !prev.aggressiveCompact,
 				}));
 				break;
-			case 'disableNativeTools':
-				setConfig(prev => ({
-					...prev,
-					disableNativeTools: !prev.disableNativeTools,
-				}));
+			case 'toolMode':
+				setConfig(prev => {
+					const next = nextToolMode(getTuneToolMode(prev));
+					// Drop the legacy disableNativeTools field once the user has
+					// explicitly cycled — toolMode is now authoritative.
+					const {disableNativeTools: _legacy, ...rest} = prev;
+					return {...rest, toolMode: next};
+				});
 				break;
 			case 'includeAgentsMd':
 				setConfig(prev => {
