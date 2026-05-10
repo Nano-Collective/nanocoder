@@ -71,7 +71,7 @@
 
           pnpmDeps = (fetchPnpmDeps {
             inherit (finalAttrs) pname version src;
-            hash = "sha256-0X2F9BJdaiVhzU6tavw3jVBr3FRmZxpoo/ivTxaWdQY=";
+            hash = "sha256-xyK6cAae/J8Jaq5kV6V7UU/xObJZD76vu9R6Rewplf8=";
             fetcherVersion = 2;
           }).overrideAttrs (old: {
             installPhase = builtins.replaceStrings
