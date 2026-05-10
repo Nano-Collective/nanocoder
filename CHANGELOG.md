@@ -34,7 +34,9 @@
 
 - Removed the in-repo release content generator workflow. Release content is now generated from another repo via ContentForest.
 
-- Bumped CI and devcontainer toolchain to **Node.js 22** + **pnpm latest** across `pr-checks.yml`, `release.yml`, `update-badges.yml`, and `.devcontainer/Dockerfile`. `engines.node` raised to `>=22` and `CONTRIBUTING.md` / `docs/getting-started/installation.md` / `.devcontainer/README.md` updated to match. Fixes the `node:sqlite` `ERR_UNKNOWN_BUILTIN_MODULE` crash hit by pnpm 11 on Node 20 runners.
+- Bumped CI and devcontainer toolchain to **Node.js 22** + **pnpm 11** across `pr-checks.yml`, `release.yml`, `update-badges.yml`, and `.devcontainer/Dockerfile`. `engines.node` raised to `>=22`, with a `packageManager` field (`pnpm@11.x.x`) added to `package.json` so Corepack pins the pnpm version automatically for both contributors and CI — no more drift, no per-workflow `version:` lines. `CONTRIBUTING.md` / `docs/getting-started/installation.md` / `.devcontainer/README.md` updated to match. Fixes the `node:sqlite` `ERR_UNKNOWN_BUILTIN_MODULE` crash hit by pnpm 11 on Node 20 runners.
+
+- Migrated pnpm config from `package.json` to `pnpm-workspace.yaml` for pnpm 11 compatibility: `overrides`, `patchedDependencies`, and the new `allowBuilds` block now live in the workspace file. While migrating, audited and removed all 16 existing version overrides — every one was redundant under current dependency resolution (each transitive resolved to a version already exceeding the override's floor), and removing them left `pnpm audit` output unchanged.
 
 - Major spring-clean refactor across the codebase. Extracted shared `oauth-login` command from the duplicated `codex-login` and `copilot-login` flows; introduced shared `item-selector` component used by `model-selector` and `provider-selector`; centralised `tool-needs-approval` logic; moved AI SDK error-handling specs into a dedicated subdirectory; tightened logging method factory; and trimmed redundant code paths in `conversation-loop`, `subagent-executor`, and the plain shell.
 

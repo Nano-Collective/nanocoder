@@ -38,8 +38,10 @@ Browse our open issues. If you find an unassigned issue you'd like to work on, c
 ### Prerequisites
 
 - Node.js 22+
-- npm or pnpm
+- pnpm (managed via Corepack — see below)
 - Git
+
+> **pnpm version is pinned via Corepack.** The repo's `package.json` declares `"packageManager": "pnpm@11.x.x"`, and Node 22 ships [Corepack](https://nodejs.org/api/corepack.html) which auto-uses that exact pnpm version when you run `pnpm` inside the repo — no manual install needed. If you see `Corepack must be enabled`, run `corepack enable` once. To bump pnpm for the project, run `corepack use pnpm@latest` (this rewrites the `packageManager` field; CI follows automatically).
 
 ### Setup Steps
 

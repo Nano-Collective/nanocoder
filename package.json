@@ -28,6 +28,7 @@
 		"nanocoder": "dist/cli.js"
 	},
 	"type": "module",
+	"packageManager": "pnpm@11.0.9",
 	"engines": {
 		"node": ">=22"
 	},
@@ -156,25 +157,5 @@
 		"functions": 0,
 		"branches": 0,
 		"statements": 0
-	},
-	"pnpm": {
-		"overrides": {
-			"tar": ">=7.5.10",
-			"yaml": ">=2.8.3",
-			"smol-toml": ">=1.6.1",
-			"picomatch@<2.3.2": ">=2.3.2",
-			"picomatch@>=4.0.0 <4.0.4": ">=4.0.4",
-			"@vscode/vsce>minimatch": "^3.0.5",
-			"express-rate-limit": ">=8.2.2",
-			"simple-git": ">=3.32.3",
-			"flatted": ">=3.4.2",
-			"tinyexec": ">=1.0.4",
-			"path-to-regexp": ">=8.4.0",
-			"lodash": ">=4.18.0"
-		},
-		"auditConfig": {},
-		"patchedDependencies": {
-			"ink@6.8.0": "patches/ink@6.8.0.patch"
-		}
 	}
 }
