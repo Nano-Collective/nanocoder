@@ -37,7 +37,7 @@ Browse our open issues. If you find an unassigned issue you'd like to work on, c
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 22+
 - npm or pnpm
 - Git
 
@@ -111,8 +111,8 @@ For a zero-setup, consistent development environment, we recommend using VS Code
 
 The devcontainer comes pre-configured with:
 
-- **Node.js 20.x** - Pre-installed and ready
-- **pnpm 9.x** - Package manager with cached store
+- **Node.js 22.x** - Pre-installed and ready
+- **pnpm latest** - Package manager with cached store
 - **Biome** - Formatter and linter (auto-formats on save)
 - **Zsh + Oh My Zsh** - Enhanced shell experience
 - **VS Code Extensions** - Biome, TypeScript, GitLens pre-installed

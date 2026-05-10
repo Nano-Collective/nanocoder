@@ -93,7 +93,7 @@ If you want to contribute or modify Nanocoder:
 
 **Prerequisites:**
 
-- Node.js 20+
+- Node.js 22+
 - pnpm
 
 **Setup:**

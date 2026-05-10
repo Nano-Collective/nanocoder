@@ -34,6 +34,8 @@
 
 - Removed the in-repo release content generator workflow. Release content is now generated from another repo via ContentForest.
 
+- Bumped CI and devcontainer toolchain to **Node.js 22** + **pnpm latest** across `pr-checks.yml`, `release.yml`, `update-badges.yml`, and `.devcontainer/Dockerfile`. `engines.node` raised to `>=22` and `CONTRIBUTING.md` / `docs/getting-started/installation.md` / `.devcontainer/README.md` updated to match. Fixes the `node:sqlite` `ERR_UNKNOWN_BUILTIN_MODULE` crash hit by pnpm 11 on Node 20 runners.
+
 - Major spring-clean refactor across the codebase. Extracted shared `oauth-login` command from the duplicated `codex-login` and `copilot-login` flows; introduced shared `item-selector` component used by `model-selector` and `provider-selector`; centralised `tool-needs-approval` logic; moved AI SDK error-handling specs into a dedicated subdirectory; tightened logging method factory; and trimmed redundant code paths in `conversation-loop`, `subagent-executor`, and the plain shell.
 
 - Refactored `App.tsx` and added missing test coverage for the app container and chat input components.

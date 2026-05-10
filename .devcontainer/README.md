@@ -50,8 +50,8 @@ A complete, containerized development environment for Nanocoder - the local-firs
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| **Node.js** | 20.x LTS | JavaScript/TypeScript runtime |
-| **pnpm** | 9.x | Fast, disk-efficient package manager |
+| **Node.js** | 22.x LTS | JavaScript/TypeScript runtime |
+| **pnpm** | latest | Fast, disk-efficient package manager |
 | **Biome** | Latest | Fast formatter and linter |
 | **Git** | Latest | Version control |
 | **Zsh** + **Oh My Zsh** | Latest | Enhanced shell experience |
