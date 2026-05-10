@@ -1,6 +1,7 @@
 import test from 'ava';
 import { cleanup, render } from 'ink-testing-library';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import { themes } from '../config/themes';
 import { ThemeContext } from '../hooks/useTheme';
 import StreamingReasoning from './streaming-reasoning';
@@ -94,19 +95,22 @@ test('StreamingReasoning truncates long messages', t => {
 		</MockThemeProvider>,
 	);
 
-	const output = lastFrame();
+	// Strip ANSI: CI sets FORCE_COLOR=1 so ink wraps styled glyphs (like the
+	// truncation `…`) in escape sequences. Without stripping, the regex fails
+	// in CI even though it passes locally where FORCE_COLOR is unset.
+	const output = stripAnsi(lastFrame() ?? '');
 	t.truthy(output);
   // Truncated symbol, on its own line. Box renderer may pad with trailing
   // spaces to fill terminal width, so allow any whitespace before the newline.
-	t.regex(output!, /Thinking/);
-	t.regex(output!, /…[ ]*\n/);
-	t.regex(output!, /line 3[ ]*\n/);
-	t.regex(output!, /line 6[ ]*\n/);
-	t.regex(output!, /line 14[ ]*\n/);
+	t.regex(output, /Thinking/);
+	t.regex(output, /…[ ]*\n/);
+	t.regex(output, /line 3[ ]*\n/);
+	t.regex(output, /line 6[ ]*\n/);
+	t.regex(output, /line 14[ ]*\n/);
 
   // First few lines truncated
-	t.notRegex(output!, /line 0/);
-	t.notRegex(output!, /line 2/);
+	t.notRegex(output, /line 0/);
+	t.notRegex(output, /line 2/);
 })
 
 test('StreamingReasoning renders without crashing with empty message', t => {

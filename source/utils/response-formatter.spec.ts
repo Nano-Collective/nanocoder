@@ -31,8 +31,12 @@ test('normalizeLLMResponse - handles JSON object with tool_calls', async t => {
 
 	t.is(normalized.metadata.detectedFormat, 'json');
 	t.true(normalized.metadata.hasJSONBlocks);
-	// JSON tool call extraction was removed - only XML extraction remains
-	t.is(normalized.toolCalls.length, 0);
+	// JSON tool-call extraction is restored as part of the parseToolCalls
+	// fallback. The serialized response contains a {"name":..., "arguments":...}
+	// substring inside its tool_calls[0].function field, which the JSON
+	// fallback regex matches and extracts.
+	t.is(normalized.toolCalls.length, 1);
+	t.is(normalized.toolCalls[0].function.name, 'write_file');
 });
 
 test('normalizeLLMResponse - handles plain JSON object', async t => {
