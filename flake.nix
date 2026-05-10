@@ -69,23 +69,19 @@
             pkgs.makeBinaryWrapper
           ];
 
+          # fetcherVersion = 3 bundles the deps store into a reproducible
+          # tarball (nixpkgs PR #469950). pnpm 11's loose-file output under
+          # fetcherVersion = 2 produced a different hash on every run, so
+          # the tarball form is required for determinism here.
           pnpmDeps = (fetchPnpmDeps {
             inherit (finalAttrs) pname version src;
-            hash = "sha256-xyK6cAae/J8Jaq5kV6V7UU/xObJZD76vu9R6Rewplf8=";
-            fetcherVersion = 2;
+            hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+            fetcherVersion = 3;
           }).overrideAttrs (old: {
             installPhase = builtins.replaceStrings
               [ "pnpm config set manage-package-manager-versions false" ]
               [ "true # patched for pnpm 11: key no longer allowed globally" ]
               old.installPhase;
-            # pnpm 11 writes a per-project symlink under v11/projects/<hash>
-            # that points back to the build directory (/build/source). After
-            # the build dir is gone, the link dangles and fixupPhase's
-            # noBrokenSymlinks check fails. Drop the directory — it's pnpm
-            # project metadata, not package-store content the build needs.
-            preFixup = (old.preFixup or "") + ''
-              rm -rf $out/v11/projects
-            '';
           });
 
           buildPhase = ''
