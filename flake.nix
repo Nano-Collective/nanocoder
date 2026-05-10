@@ -75,7 +75,7 @@
           # the tarball form is required for determinism here.
           pnpmDeps = (fetchPnpmDeps {
             inherit (finalAttrs) pname version src;
-            hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+            hash = "sha256-mkVkX6CtLWWnKplzr5NF7SyHA36LmICYx3K9clQB+Ns=";
             fetcherVersion = 3;
           }).overrideAttrs (old: {
             installPhase = builtins.replaceStrings
