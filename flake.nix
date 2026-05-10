@@ -59,7 +59,7 @@
             owner = "nano-collective";
             repo = pname;
             rev = "v${version}";
-            sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+            sha256 = "sha256-YRjUb6dNVWEEGgqnCZCOeEbF3QN3/HUgwfCH+X+IbSE=";
           };
 
           nativeBuildInputs = [
