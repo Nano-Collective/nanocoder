@@ -70,18 +70,28 @@
           ];
 
           # fetcherVersion = 3 bundles the deps store into a reproducible
-          # tarball (nixpkgs PR #469950). pnpm 11's loose-file output under
-          # fetcherVersion = 2 produced a different hash on every run, so
-          # the tarball form is required for determinism here.
+          # tarball (nixpkgs PR #469950). Required because pnpm 11's
+          # loose-file output (fetcherVersion = 2) produced a different
+          # hash every run.
+          #
+          # nixpkgs's fetchPnpmDeps fixupPhase hard-codes cleanup paths to
+          # `$storePath/{v3,v10}/{tmp,projects}` — it doesn't yet know about
+          # pnpm 11's `v11/` layout. Without us cleaning v11 in preFixup,
+          # `v11/projects/` (symlinks pointing at `/build/source/<random>`)
+          # and `v11/tmp/` (timestamped temp files) get bundled into the
+          # tarball, defeating reproducibility. Drop them ourselves.
           pnpmDeps = (fetchPnpmDeps {
             inherit (finalAttrs) pname version src;
-            hash = "sha256-mkVkX6CtLWWnKplzr5NF7SyHA36LmICYx3K9clQB+Ns=";
+            hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
             fetcherVersion = 3;
           }).overrideAttrs (old: {
             installPhase = builtins.replaceStrings
               [ "pnpm config set manage-package-manager-versions false" ]
               [ "true # patched for pnpm 11: key no longer allowed globally" ]
               old.installPhase;
+            preFixup = (old.preFixup or "") + ''
+              rm -rf $storePath/v11/tmp $storePath/v11/projects
+            '';
           });
 
           buildPhase = ''
