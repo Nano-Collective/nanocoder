@@ -78,6 +78,14 @@
               [ "pnpm config set manage-package-manager-versions false" ]
               [ "true # patched for pnpm 11: key no longer allowed globally" ]
               old.installPhase;
+            # pnpm 11 writes a per-project symlink under v11/projects/<hash>
+            # that points back to the build directory (/build/source). After
+            # the build dir is gone, the link dangles and fixupPhase's
+            # noBrokenSymlinks check fails. Drop the directory — it's pnpm
+            # project metadata, not package-store content the build needs.
+            preFixup = (old.preFixup or "") + ''
+              rm -rf $out/v11/projects
+            '';
           });
 
           buildPhase = ''
