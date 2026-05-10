@@ -679,6 +679,8 @@ test.serial('processAssistantResponse - malformed-XML cap stops the loop after M
 	const queuedComponents: any[] = [];
 
 	// Always return a malformed-XML pattern that XMLToolCallParser rejects.
+	// Uses the [tool_use: name] format (some GLM-style models emit this)
+	// which has no JSON args to parse and stays in the malformed branch.
 	// Combined with toolsDisabled:true, the real parseToolCalls drives the
 	// loop into the malformed branch on every turn.
 	const alwaysMalformedClient = {
@@ -689,7 +691,7 @@ test.serial('processAssistantResponse - malformed-XML cap stops the loop after M
 					{
 						message: {
 							role: 'assistant',
-							content: '<function=read_file>{"path":"a"}</function>',
+							content: '[tool_use: read_file]',
 							tool_calls: undefined,
 						},
 					},

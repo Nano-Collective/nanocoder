@@ -132,6 +132,66 @@ function parseJSONToolCalls(content: string): {
 	return {toolCalls, cleanedContent};
 }
 
+const FUNCTION_TAG_REGEX = /<function=(\w+)>([\s\S]*?)<\/function>/g;
+
+/**
+ * Parses Llama 3.x-style `<function=name>{json}</function>` tool calls.
+ * Llama 3.1/3.2/3.3 emits this format for zero-shot custom function calling.
+ * The opening tag carries the function name; the body is a JSON object with
+ * the arguments. Skips matches whose body isn't valid JSON so we don't
+ * accidentally consume unrelated text wrapped in similar-looking tags.
+ */
+function parseFunctionTagToolCalls(content: string): {
+	toolCalls: ToolCall[];
+	cleanedContent: string;
+} {
+	const toolCalls: ToolCall[] = [];
+	const matchedRanges: Array<[number, number]> = [];
+	const pattern = new RegExp(FUNCTION_TAG_REGEX);
+
+	let match: RegExpExecArray | null;
+	while ((match = pattern.exec(content)) !== null) {
+		const name = match[1];
+		const body = (match[2] ?? '').trim();
+		if (!name) continue;
+
+		let args: Record<string, unknown> = {};
+		if (body) {
+			try {
+				const parsed = JSON.parse(body);
+				if (
+					parsed === null ||
+					typeof parsed !== 'object' ||
+					Array.isArray(parsed)
+				) {
+					continue;
+				}
+				args = parsed as Record<string, unknown>;
+			} catch {
+				continue;
+			}
+		}
+
+		toolCalls.push({
+			id: `call_${Date.now()}_${toolCalls.length}`,
+			function: {name, arguments: args},
+		});
+		matchedRanges.push([match.index, match.index + match[0].length]);
+	}
+
+	if (toolCalls.length === 0) {
+		return {toolCalls, cleanedContent: content};
+	}
+
+	matchedRanges.sort((a, b) => b[0] - a[0]);
+	let cleanedContent = content;
+	for (const [start, end] of matchedRanges) {
+		cleanedContent = cleanedContent.slice(0, start) + cleanedContent.slice(end);
+	}
+
+	return {toolCalls, cleanedContent};
+}
+
 const JSON_MALFORMED_PATTERNS: Array<{regex: RegExp; error: string}> = [
 	{
 		regex:
@@ -174,7 +234,8 @@ function detectMalformedJSONToolCall(
 export function stripEmbeddedToolCallText(content: unknown): string {
 	const contentStr = ensureString(content);
 	const afterXml = XMLToolCallParser.removeToolCallsFromContent(contentStr);
-	const {cleanedContent} = parseJSONToolCalls(afterXml);
+	const {cleanedContent: afterFnTag} = parseFunctionTagToolCalls(afterXml);
+	const {cleanedContent} = parseJSONToolCalls(afterFnTag);
 	return normalizeWhitespace(cleanedContent);
 }
 
@@ -209,7 +270,17 @@ export function parseToolCalls(content: unknown): ParseResult {
 		}
 	}
 
-	// 3. Try JSON fallback (open-weights models that emit JSON-shaped tool calls)
+	// 3. Try Llama 3.x function-tag fallback: <function=name>{json}</function>
+	const fnTagResult = parseFunctionTagToolCalls(strippedContent);
+	if (fnTagResult.toolCalls.length > 0) {
+		return {
+			success: true,
+			toolCalls: fnTagResult.toolCalls,
+			cleanedContent: normalizeWhitespace(fnTagResult.cleanedContent),
+		};
+	}
+
+	// 4. Try JSON fallback (open-weights models that emit JSON-shaped tool calls)
 	const jsonResult = parseJSONToolCalls(strippedContent);
 	if (jsonResult.toolCalls.length > 0) {
 		return {

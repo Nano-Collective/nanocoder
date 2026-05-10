@@ -256,12 +256,10 @@ export class XMLToolCallParser {
 					'Invalid syntax: [tool_use: name] or [Tool: name] format is not supported',
 			},
 			{
-				// <function=name> syntax
-				regex: /<function=(\w+)>/,
-				error: 'Invalid syntax: <function=name> is not supported',
-			},
-			{
-				// <parameter=name> syntax
+				// <parameter=name> syntax — partial structure from a model that
+				// started building a function-call wrapper but didn't include
+				// JSON args. <function=name>{json}</function> is parsed as a
+				// real Llama 3.x tool call before this branch runs.
 				regex: /<parameter=(\w+)>/,
 				error: 'Invalid syntax: <parameter=name> is not supported',
 			},
@@ -270,12 +268,6 @@ export class XMLToolCallParser {
 				regex: /<parameter=\w+>[\s\S]*?<\/parameter>/,
 				error:
 					'Invalid parameter syntax: parameters must use named tags, not generic <parameter> wrapper',
-			},
-			{
-				// Generic closing </function> when <function=name> was used
-				regex: /<function=\w+>[\s\S]*?<\/function>/,
-				error:
-					'Invalid function syntax: use simple named tags, not <function=name> wrapper',
 			},
 		];
 

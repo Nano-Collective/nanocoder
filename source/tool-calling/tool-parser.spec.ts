@@ -24,7 +24,11 @@ test('parseToolCalls: successfully parses valid XML tool call', t => {
 	}
 });
 
-test('parseToolCalls: detects malformed XML with attribute syntax', t => {
+test('parseToolCalls: detects malformed mixed function/parameter syntax (non-JSON body)', t => {
+	// The outer <function=name> body is XML, not JSON, so the function-tag
+	// parser skips it. The inner <parameter=name> still triggers the
+	// malformed-XML detector — preserves the existing self-correction loop
+	// for models that produce this incomplete shape.
 	const content = `
 <function=read_file>
   <parameter=path>/path/to/file.txt</parameter>
@@ -232,6 +236,69 @@ The actual response.`;
 		t.notRegex(result.cleanedContent, /<think>/i);
 		t.notRegex(result.cleanedContent, /<\/think>/i);
 		t.regex(result.cleanedContent, /The actual response/);
+	}
+});
+
+// Llama 3.x Function-Tag Tests (<function=name>{json}</function>)
+
+test('parseToolCalls: parses Llama 3.x <function=name>{json}</function> tool call', t => {
+	const content = `<function=read_file>{"path": "/etc/hosts"}</function>`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'read_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, {
+			path: '/etc/hosts',
+		});
+	}
+});
+
+test('parseToolCalls: cleans Llama function tags from surrounding prose', t => {
+	const content = `Reading the file now.
+
+<function=read_file>{"path": "/x"}</function>
+
+Done.`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.regex(result.cleanedContent, /Reading the file now/);
+		t.regex(result.cleanedContent, /Done\./);
+		t.notRegex(result.cleanedContent, /<function=/);
+		t.notRegex(result.cleanedContent, /<\/function>/);
+	}
+});
+
+test('parseToolCalls: parses multiple Llama function tags', t => {
+	const content = `<function=read_file>{"path": "/a"}</function>\n<function=read_file>{"path": "/b"}</function>`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 2);
+		t.is(result.toolCalls[0].function.name, 'read_file');
+		t.is(result.toolCalls[1].function.name, 'read_file');
+	}
+});
+
+test('parseToolCalls: skips Llama function tag with non-JSON body', t => {
+	// Body is plain text, not JSON — must not be treated as a tool call.
+	const content = `<function=read_file>just some prose here</function>`;
+
+	const result = parseToolCalls(content);
+
+	// Function-tag parser skips it; XML parser doesn't match either; JSON
+	// fallback finds nothing. Result should be no tool calls (success: true).
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 0);
 	}
 });
 
