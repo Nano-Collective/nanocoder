@@ -44,6 +44,8 @@ A local-first CLI coding agent that brings the power of agentic coding tools lik
 - `pnpm-lock.yaml` - Configuration file
 
 **Documentation:**
+- `docs/**.md`
+- `README.md`
 - `.devcontainer/README.md`
 - `.github/ISSUE_TEMPLATE/bug_report.md`
 - `.github/ISSUE_TEMPLATE/feature_request.md`
@@ -91,6 +93,7 @@ npm run start
 **From CLAUDE.md:**
 # Build and run
 pnpm run build          # Compile TypeScript to dist/ with executable permissions
+pnpm run build:credits  # Regenerate contributors.json from git history (CI/release only)
 pnpm run start          # Run the compiled application
 pnpm run dev            # Watch mode compilation (tsc --watch)
 
@@ -129,7 +132,7 @@ All state lives in `useAppState.tsx`. Other hooks (`useChatHandler`, `useToolHan
 - Consider impact on bundle size when adding dependencies
 - Follow React hooks best practices
 - Consider component reusability when creating new components
-- Project has 766 files across 97 directories
+- Project has 809 files across 93 directories
 - Large codebase: Focus on specific areas when making changes
 - Check build configuration files before making structural changes
 
