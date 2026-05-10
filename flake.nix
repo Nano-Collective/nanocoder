@@ -82,7 +82,7 @@
           # tarball, defeating reproducibility. Drop them ourselves.
           pnpmDeps = (fetchPnpmDeps {
             inherit (finalAttrs) pname version src;
-            hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+            hash = "sha256-odcsIWN5dlquZ+tMqkR1XeJxxNCsg4vEb8M/z9hsd3I=";
             fetcherVersion = 3;
           }).overrideAttrs (old: {
             installPhase = builtins.replaceStrings
