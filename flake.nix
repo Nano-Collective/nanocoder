@@ -21,9 +21,36 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
         pname = "nanocoder";
-        version = "1.25.2";
+        version = "1.26.0";
 
         nodejs = pkgs.nodejs_24;
+
+        # nixpkgs currently ships pnpm 10. The repo's lockfile is generated
+        # by pnpm 11 (new patchedDependencies / overrides format), so older
+        # pnpm bails with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH. Override the
+        # nixpkgs pnpm derivation to the version pinned by package.json's
+        # `packageManager` field.
+        #
+        # Two pnpm 11 incompatibilities also need patching:
+        # 1. The npm tarball ships bin/pnpm.cjs (a Corepack-compat shim)
+        #    without the execute bit. The nixpkgs builder symlinks
+        #    $out/bin/pnpm → pnpm.cjs, so we chmod +x in postInstall.
+        # 2. nixpkgs's fetchPnpmDeps installPhase runs `pnpm config set
+        #    manage-package-manager-versions false` against the global
+        #    config to silence version-mismatch errors. pnpm 11 rejects
+        #    that key globally (only allowed in pnpm-workspace.yaml).
+        #    Since our pnpm version matches `packageManager`, the command
+        #    is unnecessary — we patch it out with a no-op.
+        pnpm = (pkgs.pnpm.override {
+          version = "11.0.9";
+          hash = "sha256-TYTXsOMckFT2Flh5VpgHAAfQO3I4SB4hYaViVXqpCDQ=";
+        }).overrideAttrs (old: {
+          postInstall = (old.postInstall or "") + ''
+            chmod +x $out/libexec/pnpm/bin/pnpm.cjs $out/libexec/pnpm/bin/pnpx.cjs
+          '';
+        });
+        pnpmConfigHook = pkgs.pnpmConfigHook.override { inherit pnpm; };
+        fetchPnpmDeps = pkgs.fetchPnpmDeps.override { inherit pnpm; };
 
         package = pkgs.stdenv.mkDerivation (finalAttrs: {
           inherit pname version;
@@ -32,21 +59,26 @@
             owner = "nano-collective";
             repo = pname;
             rev = "v${version}";
-            sha256 = "sha256-+flJPeLAlLWXw+yX2g7pp3rZFUN6YFFIntztP08cMTY=";
+            sha256 = "sha256-RJrx4nFZXNuAHnYNBQlXI7szrh1Nnar0e/sHwaLtVNw=";
           };
 
           nativeBuildInputs = [
             nodejs
-            pkgs.pnpm
-            pkgs.pnpmConfigHook
+            pnpm
+            pnpmConfigHook
             pkgs.makeBinaryWrapper
           ];
 
-          pnpmDeps = pkgs.fetchPnpmDeps {
+          pnpmDeps = (fetchPnpmDeps {
             inherit (finalAttrs) pname version src;
-            hash = "sha256-GDMLRvEb1RJUcsIrwSTs9aBPYGVga4ZWj/gIX2LXjc0=";
+            hash = pkgs.lib.fakeHash;
             fetcherVersion = 2;
-          };
+          }).overrideAttrs (old: {
+            installPhase = builtins.replaceStrings
+              [ "pnpm config set manage-package-manager-versions false" ]
+              [ "true # patched for pnpm 11: key no longer allowed globally" ]
+              old.installPhase;
+          });
 
           buildPhase = ''
             runHook preBuild

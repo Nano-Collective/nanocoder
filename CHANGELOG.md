@@ -1,3 +1,9 @@
+# 1.26.1
+
+- Bumped `@nanocollective/get-md` to `^1.4.0`, which makes `node-llama-cpp` an optional peer dependency. Drops the entire `node-llama-cpp` transitive — including ~500 MB of platform-specific native binaries (CUDA, Vulkan, Metal, ARM variants) that pnpm fetched eagerly regardless of host — from the install graph and the Nix closure. The `fetch_url` tool (the only consumer of get-md) uses the standard HTML→Markdown path which doesn't need the LLM converter, so there's no functional change.
+
+- Patched `flake.nix` for pnpm 11 compat. Overrides nixpkgs's bundled pnpm (currently 10.x) to pnpm 11.0.9 to match `packageManager`, then handles two pnpm-11-specific quirks: `chmod +x` on `bin/pnpm.cjs` (a Corepack-compat shim shipped without the execute bit by upstream) and a `replaceStrings` patch on `fetchPnpmDeps`'s `installPhase` to skip the now-rejected `pnpm config set manage-package-manager-versions false` global write. Unblocks the `update-nix.yml` workflow that's been failing on `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`.
+
 # 1.26.0
 
 - **BREAKING**: Removed redundant `nanocoderTools.alwaysAllow` setting. It duplicated the top-level `alwaysAllow` with no extra behaviour. Move any entries from `nanocoderTools.alwaysAllow` to the top-level `alwaysAllow` array in `agents.config.json`. The deprecated `agents.config.example.json` has also been removed.
