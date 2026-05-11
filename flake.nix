@@ -80,17 +80,60 @@
           # `v11/projects/` (symlinks pointing at `/build/source/<random>`)
           # and `v11/tmp/` (timestamped temp files) get bundled into the
           # tarball, defeating reproducibility. Drop them ourselves.
+          #
+          # pnpm 11 also writes `v11/index.db`, a SQLite database whose page
+          # layout and header change-counter are insertion-order dependent,
+          # and whose values (msgpackr blobs) contain a `checkedAt` timestamp
+          # field that varies between builds. Three identical CI runs produced
+          # three distinct pnpmDeps hashes before this fix.
+          #
+          # We fix this using pnpm's own @pnpm/store.index module (bundled at
+          # ${pnpm}/libexec/pnpm/node_modules/@pnpm/store.index). We zero every
+          # checkedAt field and re-insert rows in sorted key order so both the
+          # msgpack content and the SQLite B-tree layout are stable.
+          # This mirrors what nixpkgs PR #505103 (pnpm_11: init at 11.0.4) does
+          # via its `pnpm-fixup-state-db` helper — inlined here until that PR
+          # merges into nixpkgs-unstable.
           pnpmDeps = (fetchPnpmDeps {
             inherit (finalAttrs) pname version src;
             hash = "sha256-odcsIWN5dlquZ+tMqkR1XeJxxNCsg4vEb8M/z9hsd3I=";
             fetcherVersion = 3;
           }).overrideAttrs (old: {
+            nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ nodejs ];
             installPhase = builtins.replaceStrings
               [ "pnpm config set manage-package-manager-versions false" ]
               [ "true # patched for pnpm 11: key no longer allowed globally" ]
               old.installPhase;
             preFixup = (old.preFixup or "") + ''
               rm -rf $storePath/v11/tmp $storePath/v11/projects
+
+              # Normalise v11/index.db for reproducibility.
+              # The SQLite B-tree layout depends on insertion order; msgpack
+              # values contain a checkedAt timestamp field. Both make the hash
+              # non-deterministic across runs. Use pnpm's own @pnpm/store.index
+              # module to read, normalise, and re-write in sorted key order.
+              if [ -f "$storePath/v11/index.db" ]; then
+                NODE_PATH="${pnpm}/libexec/pnpm/node_modules" \
+                ${nodejs}/bin/node --input-type=module - "$storePath/v11" <<'NORMALIZE_EOF'
+              import { packForStorage, StoreIndex } from '@pnpm/store.index';
+              const storePath = process.argv[2];
+              const index = new StoreIndex(storePath);
+              const newEntries = [];
+              for (const [key, data] of index.entries()) {
+                const newFiles = new Map();
+                for (const [p, meta] of data.files.entries()) {
+                  newFiles.set(p, { ...meta, checkedAt: 0 });
+                }
+                const packed = packForStorage({ ...data, files: newFiles });
+                const shared = new SharedArrayBuffer(packed.byteLength);
+                new Uint8Array(shared).set(packed);
+                newEntries.push({ key, buffer: shared });
+              }
+              const sorted = newEntries.sort((a, b) => (a.key > b.key ? 1 : -1));
+              index.deleteMany(sorted.map(e => e.key));
+              index.setRawMany(sorted);
+              NORMALIZE_EOF
+              fi
             '';
           });
 
