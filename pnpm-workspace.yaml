@@ -8,10 +8,19 @@ allowBuilds:
   keytar: true
   node-llama-cpp: false
 
-auditConfig: {}
-
 ignoredBuiltDependencies:
   - protobufjs
+
+minimumReleaseAgeExclude:
+  - brace-expansion@1.1.13
+  - hono@4.12.12
+  - '@hono/node-server@1.19.13'
+  - hono@4.12.14
+  - fast-uri@3.1.1
+  - fast-uri@3.1.2
+  - hono@4.12.18
+  - ip-address@10.1.1
+  - hono@4.12.16
 
 onlyBuiltDependencies:
   - '@biomejs/biome'

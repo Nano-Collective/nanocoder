@@ -8,6 +8,7 @@ import {
 	type Colors,
 	decodeHtmlEntities,
 	parseMarkdown,
+	parseMarkdownParts,
 	parseMarkdownTable,
 } from '../markdown-parser/index';
 import AssistantMessage from './assistant-message';
@@ -576,6 +577,68 @@ test('parseMarkdown handles code blocks without language', t => {
 // ============================================================================
 // Edge Case Tests - Things That Should NOT Be Formatted
 // ============================================================================
+
+test('parseMarkdownParts returns single text part for plain text', t => {
+	const parts = parseMarkdownParts('Hello world', mockColors);
+	t.is(parts.length, 1);
+	t.is(parts[0]?.type, 'text');
+	t.true(stripAnsi(parts[0]?.content ?? '').includes('Hello world'));
+});
+
+test('parseMarkdownParts splits fenced code blocks into separate parts', t => {
+	const message = 'Before code\n```javascript\nconst x = 5;\n```\nAfter code';
+	const parts = parseMarkdownParts(message, mockColors);
+	t.true(parts.length >= 3, `expected >=3 parts, got ${parts.length}`);
+	const types = parts.map(p => p.type);
+	t.true(types.includes('text'));
+	t.true(types.includes('code'));
+	const codePart = parts.find(p => p.type === 'code');
+	t.truthy(codePart);
+	t.true(stripAnsi(codePart?.content ?? '').includes('const'));
+});
+
+test('parseMarkdownParts code part does not contain the original fences', t => {
+	const message = '```javascript\nreturn 42;\n```';
+	const parts = parseMarkdownParts(message, mockColors);
+	const codePart = parts.find(p => p.type === 'code');
+	t.truthy(codePart);
+	t.false(codePart?.content.includes('```'));
+});
+
+test('parseMarkdownParts inline code stays in text parts', t => {
+	const message = 'Use `foo()` to call it';
+	const parts = parseMarkdownParts(message, mockColors);
+	// No fenced code blocks → should be a single text part
+	t.is(parts.length, 1);
+	t.is(parts[0]?.type, 'text');
+	t.true(stripAnsi(parts[0]?.content ?? '').includes('foo()'));
+});
+
+// ============================================================================
+// Component rendering: code blocks should appear without ┃ border
+// ============================================================================
+
+test('AssistantMessage renders code blocks without ┃ border', t => {
+	const message = 'Here is some code:\n```javascript\nconst answer = 42;\n```\nDone.';
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<AssistantMessage message={message} model="test-model" />
+		</MockThemeProvider>,
+	);
+
+	const output = stripAnsi(lastFrame() ?? '');
+	// Code content must appear in the output
+	t.true(output.includes('answer'), 'code content should be present');
+	// Every line containing the code identifier must NOT have ┃ in the same line
+	const codeLines = output.split('\n').filter(l => l.includes('answer'));
+	t.true(codeLines.length > 0, 'code lines should exist');
+	for (const line of codeLines) {
+		t.false(line.includes('┃'), `code line should not have ┃ border: ${line}`);
+	}
+	// Text around the code block should still have the border
+	const textLines = output.split('\n').filter(l => l.includes('┃'));
+	t.true(textLines.length > 0, 'text parts should still have ┃ border');
+});
 
 test('parseMarkdown does not create bullet list from hyphen in middle of line', t => {
 	const text = 'The file path is C:\\Users\\John - Documents\\file.txt';
