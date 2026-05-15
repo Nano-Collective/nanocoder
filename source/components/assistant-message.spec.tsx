@@ -588,13 +588,23 @@ test('parseMarkdownParts returns single text part for plain text', t => {
 test('parseMarkdownParts splits fenced code blocks into separate parts', t => {
 	const message = 'Before code\n```javascript\nconst x = 5;\n```\nAfter code';
 	const parts = parseMarkdownParts(message, mockColors);
-	t.true(parts.length >= 3, `expected >=3 parts, got ${parts.length}`);
-	const types = parts.map(p => p.type);
-	t.true(types.includes('text'));
-	t.true(types.includes('code'));
-	const codePart = parts.find(p => p.type === 'code');
-	t.truthy(codePart);
-	t.true(stripAnsi(codePart?.content ?? '').includes('const'));
+	t.is(parts.length, 3);
+	t.is(parts[0]?.type, 'text');
+	t.true(stripAnsi(parts[0]?.content ?? '').includes('Before code'));
+	t.is(parts[1]?.type, 'code');
+	t.true(stripAnsi(parts[1]?.content ?? '').includes('const x = 5;'));
+	t.is(parts[2]?.type, 'text');
+	t.true(stripAnsi(parts[2]?.content ?? '').includes('After code'));
+});
+
+test('parseMarkdownParts keeps indented list continuations as text', t => {
+	const message = '- item\n    continuation text';
+	const parts = parseMarkdownParts(message, mockColors);
+	t.is(parts.length, 1);
+	t.is(parts[0]?.type, 'text');
+	const content = stripAnsi(parts[0]?.content ?? '');
+	t.true(content.includes('• item'));
+	t.true(content.includes('continuation text'));
 });
 
 test('parseMarkdownParts code part does not contain the original fences', t => {

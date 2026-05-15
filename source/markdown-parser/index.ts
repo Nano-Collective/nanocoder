@@ -68,43 +68,6 @@ function _parseMarkdownCore(
 		},
 	);
 
-	result = result.replace(
-		/((?:^|\n)(?:[ ]{4}|\t)[^\n]*(?:\n(?:[ ]{4}|\t)[^\n]*)*)/g,
-		(_match, block: string) => {
-			const lines = block.split('\n').filter(l => l.trim() !== '');
-			const allListItems = lines.every(l =>
-				/^[ \t]*(?:[-*]\s|\d+\.\s)/.test(l),
-			);
-			if (allListItems) return block;
-			try {
-				// Strip the leading 4 spaces / tab from each line
-				const code = block
-					.split('\n')
-					.map(line => line.replace(/^([ ]{4}|\t)/, ''))
-					.join('\n')
-					.trim()
-					.replace(/\t/g, '  ');
-				const highlighted = highlight(code, {
-					language: 'plaintext',
-					theme: 'default',
-				});
-				const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
-				codeBlocks.push(highlighted);
-				return `\n${placeholder}`;
-			} catch {
-				const code = block
-					.split('\n')
-					.map(line => line.replace(/^([ ]{4}|\t)/, ''))
-					.join('\n')
-					.trim();
-				const formatted = chalk.hex(themeColors.tool)(code);
-				const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
-				codeBlocks.push(formatted);
-				return `\n${placeholder}`;
-			}
-		},
-	);
-
 	// Extract inline code (`code`)
 	result = result.replace(/`([^`]+)`/g, (_match, code: string) => {
 		const formatted = chalk.hex(themeColors.tool)(String(code).trim());
