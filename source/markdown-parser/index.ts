@@ -41,9 +41,11 @@ function _parseMarkdownCore(
 
 	// Extract fenced code blocks (```language\ncode\n```) — also handles
 	// the case where there is no language tag and the opening fence is immediately
-	// followed by a newline (``` \n code \n ```).
+	// followed by a newline (``` \n code \n ```). Both fences must sit at the
+	// start of a line so fences nested inside a blockquote (`> \`\`\``) are not
+	// extracted as copyable code.
 	result = result.replace(
-		/```([a-zA-Z0-9\-+#]+)?\n([\s\S]*?)```/g,
+		/^```([a-zA-Z0-9\-+#]+)?\n([\s\S]*?)^```/gm,
 		(_match, lang: string | undefined, code: string) => {
 			try {
 				// Convert tabs to 2 spaces to prevent terminal rendering at 8-space width
@@ -68,8 +70,9 @@ function _parseMarkdownCore(
 		},
 	);
 
-	// Extract inline code (`code`)
-	result = result.replace(/`([^`]+)`/g, (_match, code: string) => {
+	// Extract inline code (`code`) — single-line only, so stray backticks from
+	// unextracted fenced blocks (e.g. inside a blockquote) don't form a span.
+	result = result.replace(/`([^`\n]+)`/g, (_match, code: string) => {
 		const formatted = chalk.hex(themeColors.tool)(String(code).trim());
 		const placeholder = `__INLINE_CODE_${inlineCodes.length}__`;
 		inlineCodes.push(formatted);

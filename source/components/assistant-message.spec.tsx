@@ -5,7 +5,6 @@ import React from 'react';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
 import {
-	type Colors,
 	decodeHtmlEntities,
 	parseMarkdown,
 	parseMarkdownParts,
@@ -595,6 +594,25 @@ test('parseMarkdownParts splits fenced code blocks into separate parts', t => {
 	t.true(stripAnsi(parts[1]?.content ?? '').includes('const x = 5;'));
 	t.is(parts[2]?.type, 'text');
 	t.true(stripAnsi(parts[2]?.content ?? '').includes('After code'));
+});
+
+test('parseMarkdownParts keeps blockquote-wrapped fenced code as text', t => {
+	const message = [
+		'> Run this:',
+		'> ',
+		'> ```bash',
+		'> llama-server -m model.gguf',
+		'> ```',
+		'> ',
+		'> Then configure.',
+	].join('\n');
+	const parts = parseMarkdownParts(message, mockColors);
+	t.is(parts.length, 1);
+	t.is(parts[0]?.type, 'text');
+	const content = stripAnsi(parts[0]?.content ?? '');
+	t.true(content.includes('llama-server -m model.gguf'));
+	t.true(content.includes('Run this:'));
+	t.true(content.includes('Then configure.'));
 });
 
 test('parseMarkdownParts keeps indented list continuations as text', t => {
