@@ -615,6 +615,23 @@ test('parseMarkdownParts keeps blockquote-wrapped fenced code as text', t => {
 	t.true(content.includes('Then configure.'));
 });
 
+test('parseMarkdownParts extracts indented fenced code (e.g. inside a list)', t => {
+	const message = [
+		'- Compute:',
+		'',
+		'    ```ts',
+		'    const visibleItems = filteredModels.slice(scrollStart);',
+		'    ```',
+	].join('\n');
+	const parts = parseMarkdownParts(message, mockColors);
+	const codePart = parts.find(p => p.type === 'code');
+	t.truthy(codePart, 'indented fenced code should be extracted');
+	const code = stripAnsi(codePart?.content ?? '');
+	t.true(code.includes('const visibleItems = filteredModels.slice(scrollStart);'));
+	t.false(code.startsWith('    '), 'leading indentation should be stripped');
+	t.false(code.includes('```'), 'fences should be removed');
+});
+
 test('parseMarkdownParts keeps indented list continuations as text', t => {
 	const message = '- item\n    continuation text';
 	const parts = parseMarkdownParts(message, mockColors);

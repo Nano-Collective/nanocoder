@@ -42,14 +42,24 @@ function _parseMarkdownCore(
 	// Extract fenced code blocks (```language\ncode\n```) — also handles
 	// the case where there is no language tag and the opening fence is immediately
 	// followed by a newline (``` \n code \n ```). Both fences must sit at the
-	// start of a line so fences nested inside a blockquote (`> \`\`\``) are not
-	// extracted as copyable code.
+	// start of a line (after optional spaces/tabs only) so fences nested inside
+	// a blockquote (`> \`\`\``) are not extracted as copyable code. Leading
+	// whitespace on the opening fence is stripped from each content line so
+	// indented fences (e.g. inside a list item) render cleanly.
 	result = result.replace(
-		/^```([a-zA-Z0-9\-+#]+)?\n([\s\S]*?)^```/gm,
-		(_match, lang: string | undefined, code: string) => {
+		/^([ \t]*)```([a-zA-Z0-9\-+#]+)?\n([\s\S]*?)^\1```/gm,
+		(_match, indent: string, lang: string | undefined, code: string) => {
+			const dedented = indent
+				? code
+						.split('\n')
+						.map(line =>
+							line.startsWith(indent) ? line.slice(indent.length) : line,
+						)
+						.join('\n')
+				: code;
 			try {
 				// Convert tabs to 2 spaces to prevent terminal rendering at 8-space width
-				const codeStr = String(code).trim().replace(/\t/g, '  ');
+				const codeStr = dedented.trim().replace(/\t/g, '  ');
 				// Apply syntax highlighting with detected language
 				const highlighted = highlight(codeStr, {
 					language: lang || 'plaintext',
@@ -61,7 +71,7 @@ function _parseMarkdownCore(
 			} catch {
 				// Fallback to plain colored text if highlighting fails
 				const formatted = chalk.hex(themeColors.tool)(
-					String(code).trim().replace(/\t/g, '  '),
+					dedented.trim().replace(/\t/g, '  '),
 				);
 				const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
 				codeBlocks.push(formatted);
