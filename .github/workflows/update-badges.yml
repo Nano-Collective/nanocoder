@@ -136,7 +136,10 @@ jobs:
           git add badges/ README.md
           # Only commit if there are staged changes
           if ! git diff --cached --quiet; then
-            git commit -m "Update status badges [skip ci]" || echo "No changes to commit"
+            # --no-verify: skip husky pre-commit (lint-staged) — this is an
+            # automated badge commit, not human-authored code, and the hook's
+            # pnpm/Node environment has caused silent commit failures in CI.
+            git commit --no-verify -m "Update status badges [skip ci]"
             git push
           else
             echo "No changes to commit"
