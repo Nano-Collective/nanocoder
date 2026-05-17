@@ -184,7 +184,20 @@ export async function handleChat(
 				prepareStep: createPrepareStepHandler(),
 				onError: ({error}) => {
 					// Collect streaming errors so raw SSE events don't leak to stdout.
-					const e = error instanceof Error ? error : new Error(String(error));
+					// AI SDK delivers plain objects here for some providers (e.g.
+					// OpenRouter stream errors), so String() would yield "[object Object]".
+					let e: Error;
+					if (error instanceof Error) {
+						e = error;
+					} else if (typeof error === 'string') {
+						e = new Error(error);
+					} else {
+						try {
+							e = new Error(JSON.stringify(error));
+						} catch {
+							e = new Error(String(error));
+						}
+					}
 					streamingErrors.push(e);
 					logger.warn('Streaming error received', {
 						error: e.message,
@@ -433,6 +446,15 @@ export async function handleChat(
 				error: error instanceof Error ? error.message : error,
 				errorName: error instanceof Error ? error.name : 'Unknown',
 				errorType: error?.constructor?.name || 'Unknown',
+				errorProps:
+					error instanceof Error
+						? Object.fromEntries(
+								Object.getOwnPropertyNames(error)
+									.filter(k => k !== 'stack')
+									// biome-ignore lint/suspicious/noExplicitAny: dynamic error shape
+									.map(k => [k, (error as any)[k]]),
+							)
+						: undefined,
 				correlationId,
 				provider: providerConfig.name,
 				memoryDelta: formatMemoryUsage(

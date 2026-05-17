@@ -296,7 +296,8 @@ test('processToolUse - catches object exceptions', async t => {
 	const result: ToolResult = await processToolUse(toolCall);
 
 	t.true(result.content.startsWith('Error:'));
-	t.true(result.content.includes('[object Object]'));
+	t.true(result.content.includes('Object error'));
+	t.true(result.content.includes('500'));
 });
 
 test('processToolUse - handles malformed JSON arguments in strict mode', async t => {

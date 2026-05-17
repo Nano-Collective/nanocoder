@@ -53,7 +53,17 @@ export function formatError(error: unknown): string {
 	if (error instanceof Error) {
 		return error.message;
 	}
-	return String(error);
+	const stringified = String(error);
+	// String() on a plain object returns "[object Object]", which is useless
+	// to surface to the user. Fall back to JSON so the real shape is visible.
+	if (stringified === '[object Object]') {
+		try {
+			return JSON.stringify(error);
+		} catch {
+			return stringified;
+		}
+	}
+	return stringified;
 }
 
 /**

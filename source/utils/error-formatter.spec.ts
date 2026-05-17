@@ -80,6 +80,13 @@ test('formatError - formats undefined error', t => {
 test('formatError - formats object error', t => {
 	const error = {code: 'ERR_001', message: 'Custom error'};
 	const result = formatError(error);
+	t.is(result, '{"code":"ERR_001","message":"Custom error"}');
+});
+
+test('formatError - falls back to String() for objects with circular refs', t => {
+	const error: Record<string, unknown> = {code: 'ERR_002'};
+	error.self = error;
+	const result = formatError(error);
 	t.is(result, '[object Object]');
 });
 
