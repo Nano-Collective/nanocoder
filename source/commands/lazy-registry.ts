@@ -37,7 +37,7 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'compact',
 		description:
-			'Compress message history to reduce context usage (use --aggressive, --conservative, --preview, --restore, --auto-on, --auto-off, --threshold <n>)',
+			'Compress message history (default LLM summary; use --mechanical, --preview, --restore, --auto-on/off, --threshold <n>, --strategy llm|mechanical)',
 		load: () => import('@/commands/compact').then(m => m.compactCommand),
 	},
 	{

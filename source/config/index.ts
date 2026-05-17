@@ -18,6 +18,7 @@ import type {
 	AutoCompactConfig,
 	Colors,
 	CompressionMode,
+	CompressionStrategy,
 	NotificationsConfig,
 	PasteConfig,
 	SystemPromptConfig,
@@ -127,6 +128,7 @@ function tryLoadAutoCompactFromPath(
 					autoCompact.threshold ?? defaults.threshold,
 				),
 				mode: validateMode(autoCompact.mode ?? defaults.mode),
+				strategy: validateStrategy(autoCompact.strategy ?? defaults.strategy),
 				notifyUser:
 					autoCompact.notifyUser !== undefined
 						? Boolean(autoCompact.notifyUser)
@@ -148,6 +150,7 @@ function loadAutoCompactConfig(): AutoCompactConfig {
 		enabled: true,
 		threshold: 60,
 		mode: 'conservative',
+		strategy: 'llm',
 		notifyUser: true,
 	};
 
@@ -181,6 +184,14 @@ function validateMode(mode: unknown): CompressionMode {
 		return mode;
 	}
 	return 'conservative';
+}
+
+// Validate compression strategy
+function validateStrategy(strategy: unknown): CompressionStrategy {
+	if (strategy === 'llm' || strategy === 'mechanical') {
+		return strategy;
+	}
+	return 'llm';
 }
 
 // Try to load session config from a specific path

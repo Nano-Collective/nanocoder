@@ -1,12 +1,13 @@
 import test from 'ava';
 import {resetSessionContextLimit, setSessionContextLimit} from '@/models/models-dev-client.js';
-import type {Message} from '@/types/core';
+import type {LLMChatResponse, LLMClient, Message} from '@/types/core';
 import {
 	autoCompactSessionOverrides,
 	performAutoCompact,
 	resetAutoCompactSession,
 	setAutoCompactEnabled,
 	setAutoCompactMode,
+	setAutoCompactStrategy,
 	setAutoCompactThreshold,
 } from './auto-compact.js';
 
@@ -313,6 +314,176 @@ test('performAutoCompact does not call notification when notifyUser is false', a
 	);
 
 	t.false(notificationCalled, 'Notification callback should NOT be called');
+});
+
+// ==================== Strategy override + LLM routing ====================
+
+test('setAutoCompactStrategy sets and clears the override', t => {
+	setAutoCompactStrategy('mechanical');
+	t.is(autoCompactSessionOverrides.strategy, 'mechanical');
+
+	setAutoCompactStrategy('llm');
+	t.is(autoCompactSessionOverrides.strategy, 'llm');
+
+	setAutoCompactStrategy(null);
+	t.is(autoCompactSessionOverrides.strategy, null);
+});
+
+function makeStubClient(
+	respond: (messages: Message[]) => string,
+): LLMClient & {calls: number} {
+	let calls = 0;
+	const client: LLMClient & {calls: number} = {
+		get calls() {
+			return calls;
+		},
+		set calls(_) {},
+		getCurrentModel: () => 'stub',
+		setModel: () => {},
+		getContextSize: () => 100_000,
+		getAvailableModels: async () => ['stub'],
+		getProviderConfig: () => ({
+			name: 'stub',
+			type: 'openai' as const,
+			models: ['stub'],
+			config: {},
+		}),
+		chat: async (messages: Message[]): Promise<LLMChatResponse> => {
+			calls++;
+			return {
+				choices: [
+					{message: {role: 'assistant' as const, content: respond(messages)}},
+				],
+			};
+		},
+		clearContext: async () => {},
+		getTimeout: () => undefined,
+	};
+	return client;
+}
+
+test('performAutoCompact uses LLM client when strategy=llm and client provided', async t => {
+	setupAutoCompactEnv(100);
+
+	const oldContent = 'old context sentence. '.repeat(60);
+	const messages: Message[] = [
+		{role: 'user', content: oldContent},
+		{role: 'assistant', content: 'reply'},
+		{role: 'user', content: 'recent'},
+		{role: 'assistant', content: 'recent reply'},
+	];
+	const systemMessage: Message = {role: 'system', content: 'sys'};
+
+	const client = makeStubClient(() => '## Context\ndid stuff');
+
+	const notifications: string[] = [];
+	const result = await performAutoCompact(
+		messages,
+		systemMessage,
+		'openai',
+		'gpt-4',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			strategy: 'llm',
+			notifyUser: true,
+		},
+		n => notifications.push(n),
+		client,
+	);
+
+	t.truthy(result);
+	t.is(client.calls, 1, 'LLM was called once');
+	t.true(
+		notifications.some(n => n.includes('LLM summary')),
+		'notification mentions LLM path',
+	);
+	t.true(
+		result!.some(m => (m.content || '').includes('<conversation-summary>')),
+		'output contains the synthetic summary message',
+	);
+});
+
+test('performAutoCompact skips LLM when strategy=mechanical', async t => {
+	setupAutoCompactEnv(100);
+
+	const messages: Message[] = [
+		{role: 'user', content: 'old '.repeat(400)},
+	];
+	const systemMessage: Message = {role: 'system', content: 'sys'};
+	const client = makeStubClient(() => 'should not be called');
+
+	const result = await performAutoCompact(
+		messages,
+		systemMessage,
+		'openai',
+		'gpt-4',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			strategy: 'mechanical',
+			notifyUser: false,
+		},
+		undefined,
+		client,
+	);
+
+	t.truthy(result);
+	t.is(client.calls, 0, 'LLM not called in mechanical mode');
+});
+
+test('performAutoCompact falls back to mechanical when LLM throws', async t => {
+	setupAutoCompactEnv(100);
+
+	const messages: Message[] = [
+		{role: 'user', content: 'old '.repeat(400)},
+		{role: 'assistant', content: 'reply'},
+		{role: 'user', content: 'recent'},
+		{role: 'assistant', content: 'recent reply'},
+	];
+	const systemMessage: Message = {role: 'system', content: 'sys'};
+	const client: LLMClient = {
+		getCurrentModel: () => 'stub',
+		setModel: () => {},
+		getContextSize: () => 100_000,
+		getAvailableModels: async () => ['stub'],
+		getProviderConfig: () => ({
+			name: 'stub',
+			type: 'openai' as const,
+			models: ['stub'],
+			config: {},
+		}),
+		chat: async () => {
+			throw new Error('boom');
+		},
+		clearContext: async () => {},
+		getTimeout: () => undefined,
+	};
+
+	const result = await performAutoCompact(
+		messages,
+		systemMessage,
+		'openai',
+		'gpt-4',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			strategy: 'llm',
+			notifyUser: false,
+		},
+		undefined,
+		client,
+	);
+
+	// Mechanical path still produces output
+	t.truthy(result);
+	t.false(
+		(result || []).some(m => (m.content || '').includes('<conversation-summary>')),
+		'output is mechanical (no LLM summary marker)',
+	);
 });
 
 test('performAutoCompact uses provider-configured context limit', async t => {

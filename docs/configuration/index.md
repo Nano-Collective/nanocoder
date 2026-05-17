@@ -104,6 +104,7 @@ Automatically compress context when it reaches a percentage of the model's conte
     "autoCompact": {
       "enabled": true,
       "threshold": 60,
+      "strategy": "llm",
       "mode": "conservative",
       "notifyUser": true
     }
@@ -115,10 +116,11 @@ Automatically compress context when it reaches a percentage of the model's conte
 |--------|------|---------|-------------|
 | `enabled` | boolean | `true` | Enable/disable automatic compression |
 | `threshold` | number | `60` | Context usage percentage to trigger compression (50–95) |
-| `mode` | string | `"conservative"` | Compression mode: `"default"`, `"conservative"`, `"aggressive"` |
+| `strategy` | string | `"llm"` | Compaction strategy: `"llm"` (model writes a structured summary) or `"mechanical"` (regex truncation) |
+| `mode` | string | `"conservative"` | Mechanical compression mode: `"default"`, `"conservative"`, `"aggressive"` (ignored when strategy is `"llm"`) |
 | `notifyUser` | boolean | `true` | Show a notification when auto-compact runs |
 
-You can also override these per-session with `/compact --auto-on`, `/compact --auto-off`, and `/compact --threshold <n>`.
+You can also override these per-session with `/compact --auto-on`, `/compact --auto-off`, `/compact --threshold <n>`, and `/compact --strategy llm|mechanical`.
 
 ### Sessions
 

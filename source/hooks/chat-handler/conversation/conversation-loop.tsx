@@ -477,6 +477,7 @@ export const processAssistantResponse = async (
 						}),
 					);
 				},
+				client,
 			);
 
 			if (compressed) {

@@ -69,10 +69,19 @@ export interface ProviderConfig {
 // Auto-compact configuration
 export type CompressionMode = 'default' | 'aggressive' | 'conservative';
 
+// How compaction is performed:
+// - 'llm': call the active model to write a structured summary of the
+//   compressible segment, replacing it with a single synthetic message.
+//   Higher fidelity, costs one extra round-trip.
+// - 'mechanical': hard-truncate each message individually with regex
+//   heuristics. No network call, lower fidelity.
+export type CompressionStrategy = 'llm' | 'mechanical';
+
 export interface AutoCompactConfig {
 	enabled: boolean;
 	threshold: number;
 	mode: CompressionMode;
+	strategy: CompressionStrategy;
 	notifyUser: boolean;
 }
 

@@ -8,9 +8,12 @@ import {createStubCommand} from '@/commands/create-stub-command';
  * that isn't available through the standard command handler interface.
  *
  * Available flags:
- * --aggressive    - Aggressive compression mode (removes more content)
- * --conservative  - Conservative compression mode (preserves more content)
- * --default       - Default balanced compression mode
+ * --llm           - Force LLM-based summarisation for this invocation
+ * --mechanical    - Force mechanical (regex) compression for this invocation
+ * --strategy <s>  - Persist strategy for the session ("llm" or "mechanical")
+ * --aggressive    - Aggressive mechanical compression mode
+ * --conservative  - Conservative mechanical compression mode
+ * --default       - Default balanced mechanical compression mode
  * --preview       - Show compression preview without applying
  * --restore       - Restore messages from pre-compression backup
  * --auto-on       - Enable auto-compact for this session
@@ -19,5 +22,5 @@ import {createStubCommand} from '@/commands/create-stub-command';
  */
 export const compactCommand = createStubCommand(
 	'compact',
-	'Compress message history to reduce context usage (use --aggressive, --conservative, --preview, --restore, --auto-on, --auto-off, --threshold <n>)',
+	'Compress message history (default LLM summary; use --mechanical, --preview, --restore, --auto-on/off, --threshold <n>, --strategy llm|mechanical)',
 );

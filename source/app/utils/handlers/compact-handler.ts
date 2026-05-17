@@ -6,13 +6,15 @@ import {
 } from '@/components/message-box';
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
 import {createTokenizer} from '@/tokenization/index';
-import type {CompressionMode} from '@/types/config';
+import type {CompressionMode, CompressionStrategy} from '@/types/config';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {
 	setAutoCompactEnabled,
+	setAutoCompactStrategy,
 	setAutoCompactThreshold,
 } from '@/utils/auto-compact';
 import {compressionBackup} from '@/utils/compression-backup';
+import {summariseWithLLM} from '@/utils/llm-summariser';
 import {compressMessages} from '@/utils/message-compression';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 
@@ -31,6 +33,8 @@ export async function handleCompactCommand(
 		setMessages,
 		provider,
 		model,
+		client,
+		setIsToolExecuting,
 	} = options;
 
 	if (commandParts[0] !== 'compact') {
@@ -40,6 +44,8 @@ export async function handleCompactCommand(
 	const args = commandParts.slice(1);
 	let mode: CompressionMode = 'default';
 	let preview = false;
+	// Strategy: explicit flag wins; otherwise prefer LLM when a client is available.
+	let strategy: CompressionStrategy | null = null;
 
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
@@ -96,6 +102,33 @@ export async function handleCompactCommand(
 			);
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 			return true;
+		} else if (arg === '--llm') {
+			strategy = 'llm';
+		} else if (arg === '--mechanical') {
+			strategy = 'mechanical';
+		} else if (arg === '--strategy' && i + 1 < args.length) {
+			const next = args[i + 1];
+			if (next === 'llm' || next === 'mechanical') {
+				setAutoCompactStrategy(next);
+				onAddToChatQueue(
+					React.createElement(SuccessMessage, {
+						key: `compact-strategy-${getNextComponentKey()}`,
+						message: `Auto-compact strategy set to ${next} for this session.`,
+						hideBox: true,
+					}),
+				);
+				setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
+				return true;
+			}
+			onAddToChatQueue(
+				React.createElement(ErrorMessage, {
+					key: `compact-strategy-error-${getNextComponentKey()}`,
+					message: 'Strategy must be "llm" or "mechanical".',
+					hideBox: true,
+				}),
+			);
+			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
+			return true;
 		} else if (arg === '--threshold' && i + 1 < args.length) {
 			const thresholdValue = Number.parseFloat(args[i + 1]);
 			if (
@@ -143,19 +176,109 @@ export async function handleCompactCommand(
 		const systemPrompt = getLastBuiltPrompt();
 		const systemMessage: Message = {role: 'system', content: systemPrompt};
 		const allMessages = [systemMessage, ...messages];
+
+		// Resolve strategy: explicit flag > LLM default when a client is available > mechanical.
+		const effectiveStrategy: CompressionStrategy =
+			strategy ?? (client ? 'llm' : 'mechanical');
+
+		const originalTokenCount = allMessages.reduce(
+			(sum, msg) => sum + tokenizer.countTokens(msg),
+			0,
+		);
+
+		let llmResult: Message[] | null = null;
+		if (effectiveStrategy === 'llm' && client) {
+			// Lock input during the LLM round-trip so the user can't submit a
+			// new message while compaction is mid-flight, and emit a status
+			// message in the chat so the user knows it landed.
+			onAddToChatQueue(
+				React.createElement(InfoMessage, {
+					key: `compact-progress-${getNextComponentKey()}`,
+					message:
+						'Compacting context (LLM summary, may take a few seconds)...',
+					hideBox: true,
+				}),
+			);
+			setIsToolExecuting?.(true);
+			try {
+				llmResult = await summariseWithLLM({
+					messages,
+					systemMessage,
+					client,
+					tokenizer,
+				});
+			} finally {
+				setIsToolExecuting?.(false);
+			}
+
+			if (!llmResult) {
+				// LLM either failed, returned empty, or produced a summary larger
+				// than the source. Tell the user why we are about to fall back.
+				onAddToChatQueue(
+					React.createElement(InfoMessage, {
+						key: `compact-fallback-${getNextComponentKey()}`,
+						message:
+							'LLM summary unavailable - falling back to mechanical compaction.',
+						hideBox: true,
+					}),
+				);
+			}
+		}
+
+		if (llmResult) {
+			const compressedTokenCount = [systemMessage, ...llmResult].reduce(
+				(sum, msg) => sum + tokenizer.countTokens(msg),
+				0,
+			);
+			const reductionPercentage =
+				originalTokenCount > 0
+					? ((originalTokenCount - compressedTokenCount) / originalTokenCount) *
+						100
+					: 0;
+
+			if (tokenizer.free) tokenizer.free();
+
+			const summaryMessage = `Context Compacted (LLM summary): ${originalTokenCount.toLocaleString()} tokens → ${compressedTokenCount.toLocaleString()} tokens (${Math.round(reductionPercentage)}% reduction)`;
+
+			if (preview) {
+				onAddToChatQueue(
+					React.createElement(InfoMessage, {
+						key: `compact-preview-${getNextComponentKey()}`,
+						message: `Preview: ${summaryMessage}`,
+						hideBox: true,
+					}),
+				);
+			} else {
+				compressionBackup.storeBackup(messages);
+				setMessages(llmResult);
+				onAddToChatQueue(
+					React.createElement(SuccessMessage, {
+						key: `compact-success-${getNextComponentKey()}`,
+						message: summaryMessage,
+						hideBox: true,
+					}),
+				);
+			}
+			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
+			return true;
+		}
+
+		// Mechanical path (also covers LLM failure / no client)
 		const result = compressMessages(allMessages, tokenizer, {mode});
 
 		if (tokenizer.free) {
 			tokenizer.free();
 		}
 
+		const stats = `${result.preservedInfo.fileModifications} file modifications, ${result.preservedInfo.toolResults} tool results, ${result.preservedInfo.recentMessages} recent messages kept at full detail`;
+
 		if (preview) {
-			const message = `Preview: Context would be compacted: ${result.originalTokenCount.toLocaleString()} tokens → ${result.compressedTokenCount.toLocaleString()} tokens (${Math.round(result.reductionPercentage)}% reduction)\n\nPreserved:\n• ${result.preservedInfo.keyDecisions} key decisions\n• ${result.preservedInfo.fileModifications} file modifications\n• ${result.preservedInfo.toolResults} tool results\n• ${result.preservedInfo.recentMessages} recent messages at full detail`;
+			const message = `Preview: Context would be compacted: ${result.originalTokenCount.toLocaleString()} tokens → ${result.compressedTokenCount.toLocaleString()} tokens (${Math.round(result.reductionPercentage)}% reduction)\n\nPreserved: ${stats}`;
 			onAddToChatQueue(
 				React.createElement(InfoMessage, {
 					key: `compact-preview-${getNextComponentKey()}`,
 					message,
-					hideBox: false,
+					hideBox: true,
 				}),
 			);
 		} else {
@@ -165,12 +288,12 @@ export async function handleCompactCommand(
 			);
 			setMessages(compressedUserMessages);
 
-			const message = `Context Compacted: ${result.originalTokenCount.toLocaleString()} tokens → ${result.compressedTokenCount.toLocaleString()} tokens (${Math.round(result.reductionPercentage)}% reduction)\n\nPreserved:\n• ${result.preservedInfo.keyDecisions} key decisions\n• ${result.preservedInfo.fileModifications} file modifications\n• ${result.preservedInfo.toolResults} tool results\n• ${result.preservedInfo.recentMessages} recent messages at full detail`;
+			const message = `Context Compacted: ${result.originalTokenCount.toLocaleString()} tokens → ${result.compressedTokenCount.toLocaleString()} tokens (${Math.round(result.reductionPercentage)}% reduction)\n\nPreserved: ${stats}`;
 			onAddToChatQueue(
 				React.createElement(SuccessMessage, {
 					key: `compact-success-${getNextComponentKey()}`,
 					message,
-					hideBox: false,
+					hideBox: true,
 				}),
 			);
 		}

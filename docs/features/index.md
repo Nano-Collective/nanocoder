@@ -108,8 +108,8 @@ As your conversation grows, you'll want tools to keep it manageable.
 
 Every message adds to your context window. When it fills up, the AI loses access to earlier messages. [Context compression](context-compression.md) solves this:
 
-- `/compact` — manually compress older messages while preserving recent context and key decisions
-- **Auto-compact** — automatically compresses when context reaches a threshold (configurable in `agents.config.json`)
+- `/compact` — manually compress older messages. Uses an LLM to write a structured summary by default; pass `--mechanical` for a fast regex-based fallback
+- **Auto-compact** — automatically compresses when context reaches a threshold (configurable in `agents.config.json`, including the strategy)
 - `/usage` — see a visual breakdown of your current context utilization
 
 ### Checkpointing
