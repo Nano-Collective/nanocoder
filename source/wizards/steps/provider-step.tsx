@@ -15,6 +15,7 @@ import {
 	type FetchedModel,
 	fetchModels,
 } from '../utils/fetch-models';
+import {ModelSelectionList} from './model-selection-list';
 
 interface ProviderStepProps {
 	onComplete: (providers: ProviderConfig[]) => void;
@@ -493,6 +494,25 @@ export function ProviderStep({
 		}
 	};
 
+	const handleModelSelectionBack = () => {
+		const modelFieldIndex = selectedTemplate?.fields.findIndex(
+			f => f.name === 'model',
+		);
+		const prevIndex =
+			modelFieldIndex !== undefined && modelFieldIndex > 0
+				? modelFieldIndex - 1
+				: 0;
+		setCurrentFieldIndex(prevIndex);
+		const prevField = selectedTemplate?.fields[prevIndex];
+		setCurrentValue(
+			fieldAnswers[prevField?.name || ''] || prevField?.default || '',
+		);
+		setFetchedModels([]);
+		setSelectedModelIds(new Set());
+		setError(null);
+		setMode('field-input');
+	};
+
 	useInput((_input, key) => {
 		// Handle Shift+Tab for going back
 		if (key.shift && key.tab) {
@@ -535,24 +555,6 @@ export function ProviderStep({
 			} else if (mode === 'edit-selection') {
 				// In edit selection, go back to initial choice
 				setMode('select-template-or-custom');
-			} else if (mode === 'model-selection') {
-				// Go back to the field before the model field
-				const modelFieldIndex = selectedTemplate?.fields.findIndex(
-					f => f.name === 'model',
-				);
-				const prevIndex =
-					modelFieldIndex !== undefined && modelFieldIndex > 0
-						? modelFieldIndex - 1
-						: 0;
-				setCurrentFieldIndex(prevIndex);
-				const prevField = selectedTemplate?.fields[prevIndex];
-				setCurrentValue(
-					fieldAnswers[prevField?.name || ''] || prevField?.default || '',
-				);
-				setFetchedModels([]);
-				setSelectedModelIds(new Set());
-				setError(null);
-				setMode('field-input');
 			} else if (mode === 'select-template-or-custom') {
 				// At root level, call parent's onBack
 				if (onBack) {
@@ -573,28 +575,6 @@ export function ProviderStep({
 				setFieldAnswers({});
 				setCurrentValue('');
 				setError(null);
-			}
-		}
-
-		if (mode === 'model-selection') {
-			if (key.escape) {
-				setFetchedModels([]);
-				setSelectedModelIds(new Set());
-				setError(null);
-				// Go back to the field before the model field
-				const modelFieldIndex = selectedTemplate?.fields.findIndex(
-					f => f.name === 'model',
-				);
-				const prevIndex =
-					modelFieldIndex !== undefined && modelFieldIndex > 0
-						? modelFieldIndex - 1
-						: 0;
-				setCurrentFieldIndex(prevIndex);
-				const prevField = selectedTemplate?.fields[prevIndex];
-				setCurrentValue(
-					fieldAnswers[prevField?.name || ''] || prevField?.default || '',
-				);
-				setMode('field-input');
 			}
 		}
 	});
@@ -779,62 +759,18 @@ export function ProviderStep({
 	}
 
 	if (mode === 'model-selection' && selectedTemplate) {
-		const allSelected = selectedModelIds.size === fetchedModels.length;
-		const modelOptions = [
-			{
-				// Show checked when all selected, unchecked when not - matches visual state
-				label: allSelected
-					? '[✓] All selected (toggle to deselect)'
-					: '[ ] Select All',
-				value: '__select_all__',
-			},
-			...fetchedModels.map(m => ({
-				label: `${selectedModelIds.has(m.id) ? '[✓]' : '[ ]'} ${m.name}`,
-				value: m.id,
-			})),
-			{label: 'Done - Continue with selected models', value: '__done__'},
-		];
-
 		return (
-			<Box flexDirection="column">
-				<Box marginBottom={1}>
-					<Text bold color={colors.primary}>
-						{selectedTemplate.name} Configuration
-					</Text>
-				</Box>
-				<Box marginBottom={1}>
-					<Text>Select models to use ({selectedModelIds.size} selected):</Text>
-				</Box>
-				<SelectInput
-					items={modelOptions}
-					onSelect={(item: {value: string}) => {
-						if (item.value === '__done__') {
-							handleModelSelectionComplete();
-						} else if (item.value === '__select_all__') {
-							handleSelectAllModels();
-						} else {
-							handleModelToggle(item.value);
-						}
-					}}
-				/>
-				{error && (
-					<Box marginTop={1}>
-						<Text color={colors.error}>{error}</Text>
-					</Box>
-				)}
-				{isNarrow ? (
-					<Box flexDirection="column" marginTop={1}>
-						<Text color={colors.secondary}>Enter: toggle/continue</Text>
-						<Text color={colors.secondary}>Shift+Tab: go back</Text>
-					</Box>
-				) : (
-					<Box marginTop={1}>
-						<Text color={colors.secondary}>
-							Press Enter to toggle | Shift+Tab to go back
-						</Text>
-					</Box>
-				)}
-			</Box>
+			<ModelSelectionList
+				models={fetchedModels}
+				selectedIds={selectedModelIds}
+				title={`${selectedTemplate.name} Configuration`}
+				error={error}
+				isNarrow={isNarrow}
+				onToggle={handleModelToggle}
+				onSelectAll={handleSelectAllModels}
+				onDone={handleModelSelectionComplete}
+				onBack={handleModelSelectionBack}
+			/>
 		);
 	}
 
