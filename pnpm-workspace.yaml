@@ -8,6 +8,8 @@ allowBuilds:
   keytar: true
   node-llama-cpp: false
 
+auditConfig: {}
+
 ignoredBuiltDependencies:
   - protobufjs
 
