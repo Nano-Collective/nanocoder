@@ -288,23 +288,6 @@ test('deepwiki template: builds correct HTTP config', t => {
 	t.deepEqual(config.tags, ['remote', 'wiki', 'documentation', 'http']);
 });
 
-test('sequential-thinking template: builds correct HTTP config', t => {
-	const template = MCP_TEMPLATES.find(t => t.id === 'sequential-thinking');
-	t.truthy(template);
-
-	const config = template!.buildConfig({});
-
-	t.is(config.name, 'sequential-thinking');
-	t.is(config.transport, 'http');
-	t.is(config.url, 'https://remote.mcpservers.org/sequentialthinking/mcp');
-	t.is(config.timeout, 30000);
-	t.is(
-		config.description,
-		'Dynamic and reflective problem-solving through thought sequences.',
-	);
-	t.deepEqual(config.tags, ['remote', 'reasoning', 'analysis', 'http']);
-});
-
 test('context7 template: builds correct HTTP config', t => {
 	const template = MCP_TEMPLATES.find(t => t.id === 'context7');
 	t.truthy(template);
@@ -320,23 +303,6 @@ test('context7 template: builds correct HTTP config', t => {
 		'Up-to-date code documentation for LLMs and AI code editors.',
 	);
 	t.deepEqual(config.tags, ['remote', 'context', 'information', 'http']);
-});
-
-test('remote-fetch template: builds correct HTTP config', t => {
-	const template = MCP_TEMPLATES.find(t => t.id === 'remote-fetch');
-	t.truthy(template);
-
-	const config = template!.buildConfig({});
-
-	t.is(config.name, 'remote-fetch');
-	t.is(config.transport, 'http');
-	t.is(config.url, 'https://remote.mcpservers.org/fetch/mcp');
-	t.is(config.timeout, 30000);
-	t.is(
-		config.description,
-		'Web content fetching and conversion for efficient LLM usage',
-	);
-	t.deepEqual(config.tags, ['remote', 'http', 'scraping', 'fetch']);
 });
 
 test('github-remote template: builds correct HTTP config with headers', t => {
@@ -362,13 +328,7 @@ test('github-remote template: builds correct HTTP config with headers', t => {
 });
 
 test('remote templates: have no required fields', t => {
-	const remoteTemplates = [
-		'deepwiki',
-		'sequential-thinking',
-		'context7',
-		'remote-fetch',
-		'github-remote',
-	];
+	const remoteTemplates = ['deepwiki', 'context7', 'github-remote'];
 
 	for (const templateId of remoteTemplates) {
 		const template = MCP_TEMPLATES.find(t => t.id === templateId);
@@ -382,6 +342,53 @@ test('remote templates: have no required fields', t => {
 		);
 		t.is(typeof config.name, 'string');
 		t.is(typeof config.transport, 'string');
+	}
+});
+
+// ============================================================================
+// Dead-URL guard
+// ============================================================================
+
+// Hosts that used to operate public MCP endpoints but have since been retired.
+// Re-introducing any of these would silently hand users a broken config from
+// the wizard. Add to this list when a host disappears so the regression is
+// caught at unit-test time instead of in production.
+//
+// History:
+//   - remote.mcpservers.org: DNS-level dead as of ~2026-05-18; site pivoted
+//     from operator to directory.
+const KNOWN_DEAD_HOSTS = ['remote.mcpservers.org'];
+
+test('templates: no field default points at a known-dead host', t => {
+	for (const template of MCP_TEMPLATES) {
+		for (const field of template.fields) {
+			if (!field.default) continue;
+			for (const deadHost of KNOWN_DEAD_HOSTS) {
+				t.false(
+					field.default.includes(deadHost),
+					`Template ${template.id} field "${field.name}" default "${field.default}" hits known-dead host ${deadHost}`,
+				);
+			}
+		}
+	}
+});
+
+test('templates: no buildConfig output URL points at a known-dead host', t => {
+	for (const template of MCP_TEMPLATES) {
+		// Only remote transports produce URLs we care about. stdio templates
+		// don't build a URL, and several require user-supplied answers to
+		// buildConfig — skipping those here avoids needing a fixture map.
+		if (template.transportType !== 'http' && template.transportType !== 'websocket') {
+			continue;
+		}
+		const config = template.buildConfig({});
+		if (!config.url) continue;
+		for (const deadHost of KNOWN_DEAD_HOSTS) {
+			t.false(
+				config.url.includes(deadHost),
+				`Template ${template.id} URL "${config.url}" hits known-dead host ${deadHost}`,
+			);
+		}
 	}
 });
 
@@ -472,13 +479,7 @@ test('local templates: use stdio transport', t => {
 });
 
 test('remote templates: use http transport', t => {
-	const remoteTemplates = [
-		'deepwiki',
-		'sequential-thinking',
-		'context7',
-		'remote-fetch',
-		'github-remote',
-	];
+	const remoteTemplates = ['deepwiki', 'context7', 'github-remote'];
 
 	for (const templateId of remoteTemplates) {
 		const template = MCP_TEMPLATES.find(t => t.id === templateId);

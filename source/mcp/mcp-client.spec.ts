@@ -701,36 +701,40 @@ testOrSkip('MCPClient.connectToServer: connects to remote HTTP MCP server', asyn
 	t.is(client.getServerTools('test-deepwiki').length, 0);
 });
 
-testOrSkip('MCPClient.connectToServer: connects to Remote Fetch HTTP server and fetches content', async t => {
+testOrSkip('MCPClient.connectToServer: connects to context7 HTTP server and executes a tool', async t => {
+	// Pair with the DeepWiki test above so a single host going dark doesn't
+	// nuke all HTTP-transport integration coverage. context7 was picked after
+	// remote.mcpservers.org disappeared at DNS level around mid-May 2026.
 	const client = new MCPClient();
 
 	const server = {
-		name: 'test-remote-fetch',
+		name: 'test-context7',
 		transport: 'http' as const,
-		url: 'https://remote.mcpservers.org/fetch/mcp',
+		url: 'https://mcp.context7.com/mcp',
 	};
 
 	await t.notThrowsAsync(async () => await client.connectToServer(server));
 
-	t.true(client.isServerConnected('test-remote-fetch'));
+	t.true(client.isServerConnected('test-context7'));
 
-	const tools = client.getServerTools('test-remote-fetch');
-	t.true(tools.length > 0, 'Should have loaded tools from Remote Fetch');
+	const tools = client.getServerTools('test-context7');
+	t.true(tools.length > 0, 'Should have loaded tools from context7');
 
-	// Find the fetch tool
-	const fetchTool = tools.find(t => t.name === 'fetch');
-	t.truthy(fetchTool, 'Should have a fetch tool');
+	// context7 exposes a `resolve-library-id` tool that maps a library name
+	// to its Context7-compatible ID. It's the cheapest tool to invoke for a
+	// connectivity smoke test.
+	const resolveTool = tools.find(t => t.name === 'resolve-library-id');
+	t.truthy(resolveTool, 'Should have a resolve-library-id tool');
 
-	// Execute the fetch tool to get Nanocoder's GitHub repo
-	// callTool uses just the tool name, and internally looks up the server
-	const result = await client.callTool('fetch', {
-		url: 'https://github.com/Nano-Collective/nanocoder',
+	const result = await client.callTool('resolve-library-id', {
+		query: 'How do I render JSX in the terminal?',
+		libraryName: 'ink',
 	});
 
-	t.truthy(result, 'Should get a result from fetch tool');
+	t.truthy(result, 'Should get a result from resolve-library-id tool');
 
 	await client.disconnect();
-	t.false(client.isServerConnected('test-remote-fetch'));
+	t.false(client.isServerConnected('test-context7'));
 });
 
 testOrSkip('MCPClient.connectToServers: connects to multiple HTTP servers', async t => {

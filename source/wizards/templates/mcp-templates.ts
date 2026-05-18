@@ -214,39 +214,6 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 		transportType: 'http',
 	},
 	{
-		id: 'sequential-thinking',
-		name: 'Sequential Thinking',
-		description:
-			'Dynamic and reflective problem-solving through thought sequences.',
-		command: '',
-		fields: [
-			{
-				name: 'serverName',
-				prompt: 'Server name',
-				required: true,
-				default: 'sequential-thinking',
-			},
-			{
-				name: 'url',
-				prompt: 'Server URL',
-				required: true,
-				default: 'https://remote.mcpservers.org/sequentialthinking/mcp',
-			},
-		],
-		buildConfig: answers => ({
-			name: answers.serverName || 'sequential-thinking',
-			transport: 'http' as McpTransportType,
-			url:
-				answers.url || 'https://remote.mcpservers.org/sequentialthinking/mcp',
-			description:
-				'Dynamic and reflective problem-solving through thought sequences.',
-			tags: ['remote', 'reasoning', 'analysis', 'http'],
-			timeout: TIMEOUT_MCP_DEFAULT_MS,
-		}),
-		category: 'remote',
-		transportType: 'http',
-	},
-	{
 		id: 'context7',
 		name: 'Context7',
 		description: 'Up-to-date code documentation for LLMs and AI code editors.',
@@ -272,37 +239,6 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 			description:
 				'Up-to-date code documentation for LLMs and AI code editors.',
 			tags: ['remote', 'context', 'information', 'http'],
-			timeout: TIMEOUT_MCP_DEFAULT_MS,
-		}),
-		category: 'remote',
-		transportType: 'http',
-	},
-	{
-		id: 'remote-fetch',
-		name: 'Fetch',
-		description: 'Web content fetching and conversion for efficient LLM usage',
-		command: '',
-		fields: [
-			{
-				name: 'serverName',
-				prompt: 'Server name',
-				required: true,
-				default: 'remote-fetch',
-			},
-			{
-				name: 'url',
-				prompt: 'Server URL',
-				required: true,
-				default: 'https://remote.mcpservers.org/fetch/mcp',
-			},
-		],
-		buildConfig: answers => ({
-			name: answers.serverName || 'remote-fetch',
-			transport: 'http' as McpTransportType,
-			url: answers.url || 'https://remote.mcpservers.org/fetch/mcp',
-			description:
-				'Web content fetching and conversion for efficient LLM usage',
-			tags: ['remote', 'http', 'scraping', 'fetch'],
 			timeout: TIMEOUT_MCP_DEFAULT_MS,
 		}),
 		category: 'remote',
