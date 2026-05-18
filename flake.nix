@@ -25,30 +25,16 @@
 
         nodejs = pkgs.nodejs_24;
 
-        # nixpkgs currently ships pnpm 10. The repo's lockfile is generated
-        # by pnpm 11 (new patchedDependencies / overrides format), so older
-        # pnpm bails with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH. Override the
-        # nixpkgs pnpm derivation to the version pinned by package.json's
-        # `packageManager` field.
+        # nixpkgs ships pnpm 11 as `pnpm_11` (default `pnpm` is still 10).
+        # Its `fetchPnpmDeps` handles most pnpm 11 reproducibility quirks
+        # natively: v11/{tmp,projects} cleanup, JSON checkedAt stripping,
+        # and SQLite v11/index.db row normalisation via `pnpm-fixup-state-db`.
+        # See nixpkgs PR #505103.
         #
-        # Two pnpm 11 incompatibilities also need patching:
-        # 1. The npm tarball ships bin/pnpm.cjs (a Corepack-compat shim)
-        #    without the execute bit. The nixpkgs builder symlinks
-        #    $out/bin/pnpm → pnpm.cjs, so we chmod +x in postInstall.
-        # 2. nixpkgs's fetchPnpmDeps installPhase runs `pnpm config set
-        #    manage-package-manager-versions false` against the global
-        #    config to silence version-mismatch errors. pnpm 11 rejects
-        #    that key globally (only allowed in pnpm-workspace.yaml).
-        #    Since our pnpm version matches `packageManager`, the command
-        #    is unnecessary — we patch it out with a no-op.
-        pnpm = (pkgs.pnpm.override {
-          version = "11.0.9";
-          hash = "sha256-TYTXsOMckFT2Flh5VpgHAAfQO3I4SB4hYaViVXqpCDQ=";
-        }).overrideAttrs (old: {
-          postInstall = (old.postInstall or "") + ''
-            chmod +x $out/libexec/pnpm/bin/pnpm.cjs $out/libexec/pnpm/bin/pnpx.cjs
-          '';
-        });
+        # The remaining pnpmDeps reproducibility fix lives below: see the
+        # comment on `pnpmDeps` for the upstream shell-syntax bug we work
+        # around with env-var derivation attrs.
+        pnpm = pkgs.pnpm_11;
         pnpmConfigHook = pkgs.pnpmConfigHook.override { inherit pnpm; };
         fetchPnpmDeps = pkgs.fetchPnpmDeps.override { inherit pnpm; };
 
@@ -70,28 +56,32 @@
           ];
 
           # fetcherVersion = 3 bundles the deps store into a reproducible
-          # tarball (nixpkgs PR #469950). Required because pnpm 11's
-          # loose-file output (fetcherVersion = 2) produced a different
-          # hash every run.
+          # tarball (nixpkgs PR #469950).
           #
-          # nixpkgs's fetchPnpmDeps fixupPhase hard-codes cleanup paths to
-          # `$storePath/{v3,v10}/{tmp,projects}` — it doesn't yet know about
-          # pnpm 11's `v11/` layout. Without us cleaning v11 in preFixup,
-          # `v11/projects/` (symlinks pointing at `/build/source/<random>`)
-          # and `v11/tmp/` (timestamped temp files) get bundled into the
-          # tarball, defeating reproducibility. Drop them ourselves.
+          # Work around a bug in nixpkgs' fetchPnpmDeps installPhase for
+          # pnpm >= 11: it writes
+          #     export pnpm_config_side_effects_cache false
+          #     export pnpm_config_update_notifier false
+          # which is incorrect shell — `export VAR value` does not assign,
+          # it exports VAR (often empty) and runs `value` as a command.
+          # So both settings end up at their pnpm defaults, and the default
+          # `side-effects-cache=true` makes pnpm record a per-package
+          # `sideEffects` field in v11/index.db whose value depends on the
+          # order in which packages are installed in parallel. The single
+          # row that drifts here is `ink@6.8.0`. Three identical CI runs
+          # produced three distinct pnpmDeps hashes before this fix.
+          #
+          # Setting the values as derivation attributes makes Nix export
+          # them as build env vars before installPhase runs, so the broken
+          # upstream `export X val` lines become idempotent no-ops.
+          # Drop these once nixpkgs fixes the `=` typo.
           pnpmDeps = (fetchPnpmDeps {
             inherit (finalAttrs) pname version src;
-            hash = "sha256-odcsIWN5dlquZ+tMqkR1XeJxxNCsg4vEb8M/z9hsd3I=";
+            hash = "sha256-FuGhPwuSMNRd5ndGS91Y/O6tUW1Sw1DU4OM3yrHEWSc=";
             fetcherVersion = 3;
-          }).overrideAttrs (old: {
-            installPhase = builtins.replaceStrings
-              [ "pnpm config set manage-package-manager-versions false" ]
-              [ "true # patched for pnpm 11: key no longer allowed globally" ]
-              old.installPhase;
-            preFixup = (old.preFixup or "") + ''
-              rm -rf $storePath/v11/tmp $storePath/v11/projects
-            '';
+          }).overrideAttrs (_: {
+            pnpm_config_side_effects_cache = "false";
+            pnpm_config_update_notifier = "false";
           });
 
           buildPhase = ''
