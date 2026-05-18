@@ -10,6 +10,7 @@ import {
 	resolveModelContextLimit,
 	setSessionContextLimit,
 } from '@/models/index';
+import {generateKey} from '@/session/key-generator';
 import type {MessageSubmissionOptions} from '@/types/index';
 
 /**
@@ -41,13 +42,7 @@ export async function handleContextMaxCommand(
 	commandParts: string[],
 	options: MessageSubmissionOptions,
 ): Promise<boolean> {
-	const {
-		onAddToChatQueue,
-		onCommandComplete,
-		getNextComponentKey,
-		model,
-		providerConfig,
-	} = options;
+	const {onAddToChatQueue, onCommandComplete, model, providerConfig} = options;
 
 	if (commandParts[0] !== 'context-max') {
 		return false;
@@ -59,7 +54,7 @@ export async function handleContextMaxCommand(
 		resetSessionContextLimit();
 		onAddToChatQueue(
 			React.createElement(SuccessMessage, {
-				key: `context-max-reset-${getNextComponentKey()}`,
+				key: generateKey('context-max-reset'),
 				message: 'Session context limit override cleared.',
 				hideBox: true,
 			}),
@@ -73,7 +68,7 @@ export async function handleContextMaxCommand(
 		if (limit === null) {
 			onAddToChatQueue(
 				React.createElement(ErrorMessage, {
-					key: `context-max-error-${getNextComponentKey()}`,
+					key: generateKey('context-max-error'),
 					message:
 						'Invalid context limit. Use a positive number, e.g. /context-max 8192 or /context-max 128k',
 				}),
@@ -85,7 +80,7 @@ export async function handleContextMaxCommand(
 		setSessionContextLimit(limit);
 		onAddToChatQueue(
 			React.createElement(SuccessMessage, {
-				key: `context-max-set-${getNextComponentKey()}`,
+				key: generateKey('context-max-set'),
 				message: `Session context limit set to ${limit.toLocaleString()} tokens.`,
 				hideBox: true,
 			}),
@@ -110,7 +105,7 @@ export async function handleContextMaxCommand(
 	if (resolved.limit !== null) {
 		onAddToChatQueue(
 			React.createElement(InfoMessage, {
-				key: `context-max-info-${getNextComponentKey()}`,
+				key: generateKey('context-max-info'),
 				message: `Context limit: ${resolved.limit.toLocaleString()} tokens (${sourceLabels[resolved.source]})`,
 				hideBox: true,
 				marginTop: 1,
@@ -119,7 +114,7 @@ export async function handleContextMaxCommand(
 	} else {
 		onAddToChatQueue(
 			React.createElement(InfoMessage, {
-				key: `context-max-info-${getNextComponentKey()}`,
+				key: generateKey('context-max-info'),
 				message:
 					'Context limit: Unknown. Use /context-max <number> to set one.',
 				hideBox: true,

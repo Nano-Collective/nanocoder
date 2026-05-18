@@ -37,7 +37,6 @@ export interface MessageSubmissionOptions {
 	setLiveComponent: (component: React.ReactNode) => void;
 	setIsToolExecuting: (value: boolean) => void;
 	onCommandComplete?: () => void;
-	getNextComponentKey: () => number;
 	setMessages: (messages: Message[]) => void;
 	messages: Message[];
 	provider: string;

@@ -68,7 +68,6 @@ function setup(overrides: ProbeOverrides = {}) {
 		setCustomCommandsCount: spy<[number]>(),
 		setSubagentsReady: spy<[boolean]>(),
 		addToChatQueue: spy<[React.ReactNode]>(),
-		getNextComponentKey: () => 1,
 		customCommandCache:
 			overrides.customCommandCache ?? new Map<string, CustomCommand>(),
 		setActiveMode: spy<[unknown]>(),

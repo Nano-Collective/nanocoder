@@ -56,7 +56,6 @@ function makeProps(o: Overrides = {}) {
 		setCompactToolCounts: noop,
 		setReasoningExpanded: noop,
 		addToChatQueue: noop,
-		getNextComponentKey: () => 1,
 	};
 
 	return {

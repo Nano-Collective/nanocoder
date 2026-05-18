@@ -12,6 +12,7 @@ import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {parseMarkdown} from '@/markdown-parser/index';
+import {generateKey} from '@/session/key-generator';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import type {SubagentConfigWithSource} from '@/subagents/types';
 import type {Command} from '@/types/index';
@@ -187,12 +188,12 @@ export const agentsCommand: Command = {
 			const agent = await loader.getSubagent(args[1]);
 			if (!agent) {
 				return React.createElement(ErrorMessage, {
-					key: `agents-show-error-${Date.now()}`,
+					key: generateKey('agents-show-error'),
 					message: `Agent '${args[1]}' not found. Run /agents to see available agents.`,
 				});
 			}
 			return React.createElement(AgentDetail, {
-				key: `agents-show-${Date.now()}`,
+				key: generateKey('agents-show'),
 				agent,
 			});
 		}
@@ -208,7 +209,7 @@ export const agentsCommand: Command = {
 		}));
 
 		return React.createElement(SubagentsList, {
-			key: `agents-${Date.now()}`,
+			key: generateKey('agents'),
 			subagents: formatted,
 		});
 	},

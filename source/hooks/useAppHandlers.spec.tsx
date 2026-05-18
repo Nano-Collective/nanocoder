@@ -72,9 +72,6 @@ function makeProps(overrides: ProbeOverrides) {
 	const handleChatMessage = spy<[string]>();
 	const dismissActiveEditor = spy<[]>();
 
-	let key = 0;
-	const getNextComponentKey = () => ++key;
-
 	const baseProps = {
 		messages: overrides.messages ?? [],
 		currentProvider: 'openai-compatible',
@@ -87,7 +84,6 @@ function makeProps(overrides: ProbeOverrides) {
 		lspServersStatus: [],
 		preferencesLoaded: true,
 		customCommandsCount: 0,
-		getNextComponentKey,
 		customCommandCache: new Map<string, CustomCommand>(),
 		customCommandLoader: null,
 		customCommandExecutor: null,

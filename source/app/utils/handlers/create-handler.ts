@@ -2,6 +2,7 @@ import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import React from 'react';
 import {ErrorMessage, SuccessMessage} from '@/components/message-box';
+import {generateKey} from '@/session/key-generator';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import type {SubagentConfigWithSource} from '@/subagents/types';
 import type {MessageSubmissionOptions} from '@/types/index';
@@ -26,7 +27,7 @@ export async function handleScheduleStart(
 	} else {
 		options.onAddToChatQueue(
 			React.createElement(ErrorMessage, {
-				key: `schedule-error-${options.getNextComponentKey()}`,
+				key: generateKey('schedule-error'),
 				message: 'Scheduler mode is not available.',
 			}),
 		);
@@ -47,17 +48,12 @@ async function handleFileCreate(
 	aiPrompt: (safeName: string, commandBaseName: string) => string,
 	options: MessageSubmissionOptions,
 ): Promise<boolean> {
-	const {
-		onAddToChatQueue,
-		onHandleChatMessage,
-		onCommandComplete,
-		getNextComponentKey,
-	} = options;
+	const {onAddToChatQueue, onHandleChatMessage, onCommandComplete} = options;
 
 	if (!fileName) {
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
-				key: `${entityName}-create-error-${getNextComponentKey()}`,
+				key: generateKey(`${entityName}-create-error`),
 				message: `Usage: /${entityName} create <name>\nExample: /${entityName} create ${entityName === 'schedule' ? 'deps-update' : 'review-code'}`,
 			}),
 		);
@@ -72,7 +68,7 @@ async function handleFileCreate(
 	if (existsSync(filePath)) {
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
-				key: `${entityName}-create-exists-${getNextComponentKey()}`,
+				key: generateKey(`${entityName}-create-exists`),
 				message: `${entityName === 'schedule' ? 'Schedule' : 'Command'} file already exists: .nanocoder/${dirName}/${safeName}`,
 			}),
 		);
@@ -92,7 +88,7 @@ description: ${safeName.replace(/\.md$/, '')} ${entityName === 'schedule' ? 'sch
 
 	onAddToChatQueue(
 		React.createElement(SuccessMessage, {
-			key: `${entityName}-created-${getNextComponentKey()}`,
+			key: generateKey(`${entityName}-created`),
 			message: `Created ${entityName} file: .nanocoder/${dirName}/${safeName}`,
 			hideBox: true,
 		}),
@@ -138,19 +134,14 @@ export async function handleAgentCreate(
 		return false;
 	}
 
-	const {
-		onAddToChatQueue,
-		onHandleChatMessage,
-		onCommandComplete,
-		getNextComponentKey,
-	} = options;
+	const {onAddToChatQueue, onHandleChatMessage, onCommandComplete} = options;
 
 	const fileName = commandParts[2];
 
 	if (!fileName) {
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
-				key: `agents-create-error-${getNextComponentKey()}`,
+				key: generateKey('agents-create-error'),
 				message:
 					'Usage: /agents create <name>\nExample: /agents create code-reviewer',
 			}),
@@ -166,7 +157,7 @@ export async function handleAgentCreate(
 	if (existsSync(filePath)) {
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
-				key: `agents-create-exists-${getNextComponentKey()}`,
+				key: generateKey('agents-create-exists'),
 				message: `Agent file already exists: .nanocoder/agents/${safeName}`,
 			}),
 		);
@@ -190,7 +181,7 @@ Write the system prompt that describes this agent's role, the tools it should us
 
 	onAddToChatQueue(
 		React.createElement(SuccessMessage, {
-			key: `agents-created-${getNextComponentKey()}`,
+			key: generateKey('agents-created'),
 			message: `Created agent file: .nanocoder/agents/${safeName}`,
 			hideBox: true,
 		}),
@@ -277,14 +268,14 @@ export async function handleAgentCopy(
 		return false;
 	}
 
-	const {onAddToChatQueue, onCommandComplete, getNextComponentKey} = options;
+	const {onAddToChatQueue, onCommandComplete} = options;
 
 	const agentName = commandParts[2];
 
 	if (!agentName) {
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
-				key: `agents-copy-error-${getNextComponentKey()}`,
+				key: generateKey('agents-copy-error'),
 				message: 'Usage: /agents copy <name>\nExample: /agents copy explore',
 			}),
 		);
@@ -300,7 +291,7 @@ export async function handleAgentCopy(
 		const names = available.map(a => a.name).join(', ');
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
-				key: `agents-copy-notfound-${getNextComponentKey()}`,
+				key: generateKey('agents-copy-notfound'),
 				message: `Agent '${agentName}' not found. Available agents: ${names}`,
 			}),
 		);
@@ -315,7 +306,7 @@ export async function handleAgentCopy(
 	if (existsSync(filePath)) {
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
-				key: `agents-copy-exists-${getNextComponentKey()}`,
+				key: generateKey('agents-copy-exists'),
 				message: `Agent file already exists: .nanocoder/agents/${safeName}\nTo modify it, edit the file directly.`,
 			}),
 		);
@@ -330,7 +321,7 @@ export async function handleAgentCopy(
 
 	onAddToChatQueue(
 		React.createElement(SuccessMessage, {
-			key: `agents-copied-${getNextComponentKey()}`,
+			key: generateKey('agents-copied'),
 			message: `Copied agent '${agentName}' to .nanocoder/agents/${safeName}\nYou can now modify this file to customize the agent.`,
 			hideBox: true,
 		}),

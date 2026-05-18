@@ -5,6 +5,7 @@ import {defaultTheme} from '@/config/themes';
 import {resolveTune} from '@/config/tune';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
+import {generateKey} from '@/session/key-generator';
 import {createTokenizer} from '@/tokenization/index.js';
 import type {Task} from '@/tools/tasks/types';
 import {ToolManager} from '@/tools/tool-manager';
@@ -194,36 +195,18 @@ export function useAppState(
 	const [chatComponents, setChatComponents] = useState<React.ReactNode[]>([]);
 	// Live component that renders outside Static for real-time updates (e.g., BashProgress)
 	const [liveComponent, setLiveComponent] = useState<React.ReactNode>(null);
-	// Use ref for component key counter to avoid stale closure issues
-	// State updates are async/batched, but ref updates are synchronous
-	// This prevents duplicate keys when addToChatQueue is called rapidly
-	const componentKeyCounterRef = useRef(0);
-
-	// Get the next unique component key - synchronous to prevent duplicates
-	const getNextComponentKey = useCallback(() => {
-		componentKeyCounterRef.current += 1;
-		return componentKeyCounterRef.current;
-	}, []);
 
 	// Helper function to add components to the chat queue with stable keys
-	const addToChatQueue = useCallback(
-		(component: React.ReactNode) => {
-			const newCounter = getNextComponentKey();
+	const addToChatQueue = useCallback((component: React.ReactNode) => {
+		let componentWithKey = component;
+		if (React.isValidElement(component) && !component.key) {
+			componentWithKey = React.cloneElement(component, {
+				key: generateKey('chat-component'),
+			});
+		}
 
-			let componentWithKey = component;
-			if (React.isValidElement(component) && !component.key) {
-				componentWithKey = React.cloneElement(component, {
-					key: `chat-component-${newCounter}`,
-				});
-			}
-
-			setChatComponents(prevComponents => [
-				...prevComponents,
-				componentWithKey,
-			]);
-		},
-		[getNextComponentKey],
-	);
+		setChatComponents(prevComponents => [...prevComponents, componentWithKey]);
+	}, []);
 
 	// Create tokenizer based on current provider and model
 	const tokenizer = useMemo<Tokenizer>(() => {
@@ -362,7 +345,6 @@ export function useAppState(
 		completedToolResults,
 		currentConversationContext,
 		chatComponents,
-		getNextComponentKey,
 		tokenizer,
 
 		// Setters

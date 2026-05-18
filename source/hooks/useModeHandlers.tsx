@@ -5,6 +5,7 @@ import {reloadAppConfig} from '@/config/index';
 import {saveTune, updateLastUsed} from '@/config/preferences';
 import type {ActiveMode} from '@/hooks/useAppState';
 import {getToolManager} from '@/message-handler';
+import {generateKey} from '@/session/key-generator';
 import type {AIProviderConfig, TuneConfig} from '@/types/config';
 import {LLMClient, Message} from '@/types/core';
 import {
@@ -24,7 +25,6 @@ interface UseModeHandlersProps {
 	setActiveMode: (mode: ActiveMode) => void;
 	setIsSettingsMode: (mode: boolean) => void;
 	addToChatQueue: (component: React.ReactNode) => void;
-	getNextComponentKey: () => number;
 	reinitializeMCPServers: (
 		toolManager: import('@/tools/tool-manager').ToolManager,
 	) => Promise<void>;
@@ -43,7 +43,6 @@ export function useModeHandlers({
 	setActiveMode,
 	setIsSettingsMode,
 	addToChatQueue,
-	getNextComponentKey,
 	reinitializeMCPServers,
 	setTune,
 }: UseModeHandlersProps) {
@@ -67,7 +66,7 @@ export function useModeHandlers({
 
 			addToChatQueue(
 				<SuccessMessage
-					key={`model-changed-${getNextComponentKey()}`}
+					key={generateKey('model-changed')}
 					message={`Model changed to: ${selectedModel}. Chat history cleared.`}
 					hideBox={true}
 				/>,
@@ -86,7 +85,7 @@ export function useModeHandlers({
 				if (actualProvider !== selectedProvider) {
 					addToChatQueue(
 						<ErrorMessage
-							key={`provider-forced-${getNextComponentKey()}`}
+							key={generateKey('provider-forced')}
 							message={`${selectedProvider} is not available. Please ensure it's properly configured in agents.config.json.`}
 							hideBox={true}
 						/>,
@@ -108,7 +107,7 @@ export function useModeHandlers({
 
 				addToChatQueue(
 					<SuccessMessage
-						key={`provider-changed-${getNextComponentKey()}`}
+						key={generateKey('provider-changed')}
 						message={`Provider changed to: ${actualProvider}, model: ${newModel}. Chat history cleared.`}
 						hideBox={true}
 					/>,
@@ -116,7 +115,7 @@ export function useModeHandlers({
 			} catch (error) {
 				addToChatQueue(
 					<ErrorMessage
-						key={`provider-error-${getNextComponentKey()}`}
+						key={generateKey('provider-error')}
 						message={`Failed to change provider to ${selectedProvider}: ${String(error)}`}
 						hideBox={true}
 					/>,
@@ -132,7 +131,7 @@ export function useModeHandlers({
 		if (configPath) {
 			addToChatQueue(
 				<SuccessMessage
-					key={`config-wizard-complete-${getNextComponentKey()}`}
+					key={generateKey('config-wizard-complete')}
 					message={`Configuration saved to: ${configPath}.`}
 					hideBox={true}
 				/>,
@@ -158,7 +157,7 @@ export function useModeHandlers({
 						await reinitializeMCPServers(toolManager);
 						addToChatQueue(
 							<SuccessMessage
-								key={`mcp-reinit-${getNextComponentKey()}`}
+								key={generateKey('mcp-reinit')}
 								message="MCP servers reinitialized with new configuration."
 								hideBox={true}
 							/>,
@@ -166,7 +165,7 @@ export function useModeHandlers({
 					} catch (mcpError) {
 						addToChatQueue(
 							<ErrorMessage
-								key={`mcp-reinit-error-${getNextComponentKey()}`}
+								key={generateKey('mcp-reinit-error')}
 								message={`Failed to reinitialize MCP servers: ${String(mcpError)}`}
 								hideBox={true}
 							/>,
@@ -176,7 +175,7 @@ export function useModeHandlers({
 
 				addToChatQueue(
 					<SuccessMessage
-						key={`config-init-${getNextComponentKey()}`}
+						key={generateKey('config-init')}
 						message={`Ready! Using provider: ${actualProvider}, model: ${newModel}`}
 						hideBox={true}
 					/>,
@@ -184,7 +183,7 @@ export function useModeHandlers({
 			} catch (error) {
 				addToChatQueue(
 					<ErrorMessage
-						key={`config-init-error-${getNextComponentKey()}`}
+						key={generateKey('config-init-error')}
 						message={`Failed to initialize with new configuration: ${String(error)}`}
 						hideBox={true}
 					/>,
@@ -199,7 +198,7 @@ export function useModeHandlers({
 		if (configPath) {
 			addToChatQueue(
 				<SuccessMessage
-					key={`mcp-wizard-complete-${getNextComponentKey()}`}
+					key={generateKey('mcp-wizard-complete')}
 					message={`MCP configuration saved to: ${configPath}.`}
 					hideBox={true}
 				/>,
@@ -213,7 +212,7 @@ export function useModeHandlers({
 					await reinitializeMCPServers(toolManager);
 					addToChatQueue(
 						<SuccessMessage
-							key={`mcp-reinit-${getNextComponentKey()}`}
+							key={generateKey('mcp-reinit')}
 							message="MCP servers reinitialized with new configuration."
 							hideBox={true}
 						/>,
@@ -221,7 +220,7 @@ export function useModeHandlers({
 				} catch (mcpError) {
 					addToChatQueue(
 						<ErrorMessage
-							key={`mcp-reinit-error-${getNextComponentKey()}`}
+							key={generateKey('mcp-reinit-error')}
 							message={`Failed to reinitialize MCP servers: ${String(mcpError)}`}
 							hideBox={true}
 						/>,
@@ -257,7 +256,7 @@ export function useModeHandlers({
 			if (config.aggressiveCompact) parts.push('aggressive compact');
 			addToChatQueue(
 				<SuccessMessage
-					key={`tune-${getNextComponentKey()}`}
+					key={generateKey('tune')}
 					message={`Tune enabled (${parts.join(', ')}). Chat history cleared.`}
 					hideBox={true}
 				/>,
@@ -265,7 +264,7 @@ export function useModeHandlers({
 		} else {
 			addToChatQueue(
 				<SuccessMessage
-					key={`tune-${getNextComponentKey()}`}
+					key={generateKey('tune')}
 					message="Tune disabled. Chat history cleared."
 					hideBox={true}
 				/>,

@@ -1,6 +1,10 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import {
+	resetKeyGeneratorForTests,
+	setKeyGeneratorSessionId,
+} from '@/session/key-generator';
 import type {Message} from '@/types/core.js';
 import type {Tokenizer} from '@/types/tokenization.js';
 import test from 'ava';
@@ -98,14 +102,16 @@ test('SessionTracker initializes with provider and model', t => {
 	t.truthy(info.startTime);
 });
 
-test('SessionTracker generates unique session IDs', t => {
+test('SessionTracker shares the process-wide key-generator session ID', t => {
+	setKeyGeneratorSessionId('shared-id');
+
 	const tracker1 = new SessionTracker('openai', 'gpt-4');
 	const tracker2 = new SessionTracker('anthropic', 'claude');
 
-	const info1 = tracker1.getSessionInfo();
-	const info2 = tracker2.getSessionInfo();
+	t.is(tracker1.getSessionInfo().id, 'shared-id');
+	t.is(tracker2.getSessionInfo().id, 'shared-id');
 
-	t.not(info1.id, info2.id);
+	resetKeyGeneratorForTests();
 });
 
 test('SessionTracker records start time', t => {
@@ -353,13 +359,12 @@ test('clearCurrentSession is idempotent', t => {
 test('initializeSession replaces existing session', t => {
 	initializeSession('openai', 'gpt-4');
 	const session1 = getCurrentSession();
-	const info1 = session1!.getSessionInfo();
 
 	initializeSession('anthropic', 'claude-3-opus');
 	const session2 = getCurrentSession();
 	const info2 = session2!.getSessionInfo();
 
-	t.not(info1.id, info2.id);
+	t.not(session1, session2);
 	t.is(info2.provider, 'anthropic');
 	t.is(info2.model, 'claude-3-opus');
 });

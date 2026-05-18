@@ -297,9 +297,7 @@ function createResumeTestOptions(overrides: {
 	onResumeSession?: (session: Session) => void;
 	onAddToChatQueue?: (component: React.ReactNode) => void;
 	onCommandComplete?: () => void;
-	getNextComponentKey?: () => number;
 }): MessageSubmissionOptions {
-	let key = 0;
 	return {
 		customCommandCache: new Map(),
 		customCommandLoader: null,
@@ -319,7 +317,6 @@ function createResumeTestOptions(overrides: {
 		onAddToChatQueue: overrides.onAddToChatQueue ?? (() => {}),
 		setLiveComponent: () => {},
 		setIsToolExecuting: () => {},
-		getNextComponentKey: overrides.getNextComponentKey ?? (() => ++key),
 		setMessages: () => {},
 		messages: [],
 		provider: 'test',
@@ -553,7 +550,6 @@ function createRenameTestOptions(overrides: {
 	onCommandComplete?: () => void;
 	commandArgs?: string[];
 }): MessageSubmissionOptions {
-	let key = 0;
 	return {
 		customCommandCache: new Map(),
 		customCommandLoader: null,
@@ -575,7 +571,6 @@ function createRenameTestOptions(overrides: {
 		onAddToChatQueue: overrides.onAddToChatQueue ?? (() => {}),
 		setLiveComponent: () => {},
 		setIsToolExecuting: () => {},
-		getNextComponentKey: () => ++key,
 		setMessages: () => {},
 		messages: [],
 		provider: 'test',

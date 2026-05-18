@@ -5,6 +5,7 @@ import AssistantReasoning from '@/components/assistant-reasoning';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import {getAppConfig} from '@/config/index';
 import {MAX_EMPTY_TURNS, MAX_MALFORMED_RETRIES} from '@/constants';
+import {generateKey} from '@/session/key-generator';
 import {
 	parseToolCalls,
 	stripEmbeddedToolCallText,
@@ -44,7 +45,6 @@ interface ProcessAssistantResponseParams {
 	setTokenCount: (count: number) => void;
 	setMessages: (messages: Message[]) => void;
 	addToChatQueue: (component: React.ReactNode) => void;
-	getNextComponentKey: () => number;
 	currentProvider: string;
 	currentModel: string;
 	developmentMode: 'normal' | 'auto-accept' | 'yolo' | 'plan' | 'scheduler';
@@ -119,7 +119,6 @@ export const processAssistantResponse = async (
 		setTokenCount,
 		setMessages,
 		addToChatQueue,
-		getNextComponentKey,
 		currentProvider,
 		currentModel,
 		nonInteractiveMode,
@@ -149,7 +148,7 @@ export const processAssistantResponse = async (
 			const {TaskListDisplay} = await import('@/components/task-list-display');
 			addToChatQueue(
 				<TaskListDisplay
-					key={`task-list-final-${getNextComponentKey()}`}
+					key={generateKey('task-list-final')}
 					tasks={tasks}
 					title="Tasks"
 				/>,
@@ -169,12 +168,9 @@ export const processAssistantResponse = async (
 		if (compactToolCountsRef) {
 			const counts = compactToolCountsRef.current;
 			if (Object.keys(counts).length > 0) {
-				displayCompactCountsSummary(
-					counts,
-					addToChatQueue,
-					getNextComponentKey,
-					{indent: lastTurnHadReasoning},
-				);
+				displayCompactCountsSummary(counts, addToChatQueue, {
+					indent: lastTurnHadReasoning,
+				});
 				compactToolCountsRef.current = {};
 			}
 		}
@@ -284,7 +280,7 @@ export const processAssistantResponse = async (
 		hasShownFallbackNotice = true;
 		addToChatQueue(
 			<InfoMessage
-				key={`xml-fallback-notice-${getNextComponentKey()}`}
+				key={generateKey('xml-fallback-notice')}
 				message="Model does not support native tool calling. Using XML fallback."
 				hideBox={true}
 			/>,
@@ -305,7 +301,7 @@ export const processAssistantResponse = async (
 			}
 			addToChatQueue(
 				<ErrorMessage
-					key={`malformed-tool-giveup-${getNextComponentKey()}`}
+					key={generateKey('malformed-tool-giveup')}
 					message={`Model produced malformed tool calls ${MAX_MALFORMED_RETRIES + 1} times in a row and cannot self-correct. Try rephrasing the request or switching models.`}
 					hideBox={true}
 				/>,
@@ -322,7 +318,7 @@ export const processAssistantResponse = async (
 		// Display error to user
 		addToChatQueue(
 			<ErrorMessage
-				key={`malformed-tool-${Date.now()}`}
+				key={generateKey('malformed-tool')}
 				message={errorContent}
 				hideBox={true}
 			/>,
@@ -397,7 +393,7 @@ export const processAssistantResponse = async (
 		// message order with regards to tool calling
 		addToChatQueue(
 			<AssistantReasoning
-				key={`assistant-${getNextComponentKey()}`}
+				key={generateKey('assistant')}
 				reasoning={fullReasoning}
 				expand={reasoningExpandedRef?.current ?? false}
 			/>,
@@ -407,7 +403,7 @@ export const processAssistantResponse = async (
 	if (cleanedContent.trim()) {
 		addToChatQueue(
 			<AssistantMessage
-				key={`assistant-${getNextComponentKey()}`}
+				key={generateKey('assistant')}
 				message={cleanedContent}
 				model={currentModel}
 			/>,
@@ -471,7 +467,7 @@ export const processAssistantResponse = async (
 					// Show notification
 					addToChatQueue(
 						React.createElement(InfoMessage, {
-							key: `auto-compact-notification-${getNextComponentKey()}`,
+							key: generateKey('auto-compact-notification'),
 							message: notification,
 							hideBox: true,
 						}),
@@ -509,7 +505,7 @@ export const processAssistantResponse = async (
 		for (const error of errorResults) {
 			addToChatQueue(
 				<ErrorMessage
-					key={`unknown-tool-${error.tool_call_id}-${Date.now()}`}
+					key={generateKey(`unknown-tool-${error.tool_call_id}`)}
 					message={error.content}
 					hideBox={true}
 				/>,
@@ -606,7 +602,6 @@ export const processAssistantResponse = async (
 				toolManager,
 				conversationStateManager,
 				addToChatQueue,
-				getNextComponentKey,
 				{
 					compactDisplay: compactToolDisplayRef?.current,
 					onCompactToolCount: (toolName: string) => {
@@ -683,7 +678,7 @@ export const processAssistantResponse = async (
 				// Add error message to UI
 				addToChatQueue(
 					<ErrorMessage
-						key={`tool-approval-required-${Date.now()}`}
+						key={generateKey('tool-approval-required')}
 						message={errorMsg}
 						hideBox={true}
 					/>,
@@ -734,7 +729,7 @@ export const processAssistantResponse = async (
 			}
 			addToChatQueue(
 				<ErrorMessage
-					key={`empty-response-giveup-${getNextComponentKey()}`}
+					key={generateKey('empty-response-giveup')}
 					message={`Model produced no output after ${MAX_EMPTY_TURNS + 1} attempts. The model may be exhausting its token budget on reasoning, or the request may have been refused. Try rephrasing, lowering reasoning effort, or switching models.`}
 					hideBox={true}
 				/>,
@@ -827,7 +822,7 @@ export const processAssistantResponse = async (
 		const elapsed = formatElapsedTime(startTime);
 		addToChatQueue(
 			<InfoMessage
-				key={`completion-time-${getNextComponentKey()}`}
+				key={generateKey('completion-time')}
 				message={`Worked for a ${adjective} ${elapsed}.`}
 				hideBox={true}
 				marginBottom={2}

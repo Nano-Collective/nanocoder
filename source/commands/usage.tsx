@@ -9,6 +9,7 @@ import {getAppConfig} from '@/config/index';
 import {loadPreferences} from '@/config/preferences';
 import {getToolManager} from '@/message-handler';
 import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
+import {generateKey} from '@/session/key-generator';
 import {createTokenizer} from '@/tokenization/index';
 import type {Command} from '@/types/commands';
 import {getTuneToolMode} from '@/types/config';
@@ -129,7 +130,7 @@ export const usageCommand: Command = {
 			}));
 
 		return React.createElement(UsageDisplay, {
-			key: `usage-${Date.now()}`,
+			key: generateKey('usage'),
 			provider,
 			model,
 			contextLimit,

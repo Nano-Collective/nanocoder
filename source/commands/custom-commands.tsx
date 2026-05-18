@@ -4,6 +4,7 @@ import {InfoMessage} from '@/components/message-box';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {useTheme} from '@/hooks/useTheme';
+import {generateKey} from '@/session/key-generator';
 import type {Command, CustomCommand} from '@/types/index';
 
 interface CustomCommandsProps {
@@ -184,7 +185,7 @@ function showCommandDetails(command: CustomCommand): React.ReactElement {
 	}
 
 	return React.createElement(InfoMessage, {
-		key: `commands-show-${Date.now()}`,
+		key: generateKey('commands-show'),
 		message: output,
 		hideBox: true,
 	});
@@ -205,7 +206,7 @@ export const commandsCommand: Command = {
 			if (!name) {
 				return Promise.resolve(
 					React.createElement(InfoMessage, {
-						key: `commands-${Date.now()}`,
+						key: generateKey('commands'),
 						message: 'Usage: /commands show <command-name>',
 						hideBox: true,
 					}),
@@ -215,7 +216,7 @@ export const commandsCommand: Command = {
 			if (!command) {
 				return Promise.resolve(
 					React.createElement(InfoMessage, {
-						key: `commands-${Date.now()}`,
+						key: generateKey('commands'),
 						message: `Command "${name}" not found. Use /commands to list available commands.`,
 						hideBox: true,
 					}),
@@ -228,7 +229,7 @@ export const commandsCommand: Command = {
 			loader.loadCommands();
 			return Promise.resolve(
 				React.createElement(InfoMessage, {
-					key: `commands-${Date.now()}`,
+					key: generateKey('commands'),
 					message: 'Commands cache refreshed.',
 					hideBox: true,
 				}),
@@ -238,7 +239,7 @@ export const commandsCommand: Command = {
 		if (sub === 'create') {
 			return Promise.resolve(
 				React.createElement(InfoMessage, {
-					key: `commands-${Date.now()}`,
+					key: generateKey('commands'),
 					message:
 						'Usage: /commands create <name>\nExample: /commands create review-code\n\nThis creates a new command file and starts an AI-assisted session to write its content.',
 					hideBox: true,
@@ -250,7 +251,7 @@ export const commandsCommand: Command = {
 
 		return Promise.resolve(
 			React.createElement(CustomCommands, {
-				key: `custom-commands-${Date.now()}`,
+				key: generateKey('custom-commands'),
 				commands: commands,
 			}),
 		);

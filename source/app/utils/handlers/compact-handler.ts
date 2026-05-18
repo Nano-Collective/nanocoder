@@ -5,6 +5,7 @@ import {
 	SuccessMessage,
 } from '@/components/message-box';
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
+import {generateKey} from '@/session/key-generator';
 import {createTokenizer} from '@/tokenization/index';
 import type {CompressionMode, CompressionStrategy} from '@/types/config';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
@@ -28,7 +29,6 @@ export async function handleCompactCommand(
 	const {
 		onAddToChatQueue,
 		onCommandComplete,
-		getNextComponentKey,
 		messages,
 		setMessages,
 		provider,
@@ -63,7 +63,7 @@ export async function handleCompactCommand(
 				setMessages(restored);
 				onAddToChatQueue(
 					React.createElement(SuccessMessage, {
-						key: `compact-restore-${getNextComponentKey()}`,
+						key: generateKey('compact-restore'),
 						message: `Restored ${restored.length} messages from backup.`,
 						hideBox: true,
 					}),
@@ -72,7 +72,7 @@ export async function handleCompactCommand(
 			} else {
 				onAddToChatQueue(
 					React.createElement(ErrorMessage, {
-						key: `compact-restore-error-${getNextComponentKey()}`,
+						key: generateKey('compact-restore-error'),
 						message: 'No backup available to restore.',
 						hideBox: true,
 					}),
@@ -84,7 +84,7 @@ export async function handleCompactCommand(
 			setAutoCompactEnabled(true);
 			onAddToChatQueue(
 				React.createElement(SuccessMessage, {
-					key: `compact-auto-on-${getNextComponentKey()}`,
+					key: generateKey('compact-auto-on'),
 					message: 'Auto-compact enabled for this session.',
 					hideBox: true,
 				}),
@@ -95,7 +95,7 @@ export async function handleCompactCommand(
 			setAutoCompactEnabled(false);
 			onAddToChatQueue(
 				React.createElement(SuccessMessage, {
-					key: `compact-auto-off-${getNextComponentKey()}`,
+					key: generateKey('compact-auto-off'),
 					message: 'Auto-compact disabled for this session.',
 					hideBox: true,
 				}),
@@ -112,7 +112,7 @@ export async function handleCompactCommand(
 				setAutoCompactStrategy(next);
 				onAddToChatQueue(
 					React.createElement(SuccessMessage, {
-						key: `compact-strategy-${getNextComponentKey()}`,
+						key: generateKey('compact-strategy'),
 						message: `Auto-compact strategy set to ${next} for this session.`,
 						hideBox: true,
 					}),
@@ -122,7 +122,7 @@ export async function handleCompactCommand(
 			}
 			onAddToChatQueue(
 				React.createElement(ErrorMessage, {
-					key: `compact-strategy-error-${getNextComponentKey()}`,
+					key: generateKey('compact-strategy-error'),
 					message: 'Strategy must be "llm" or "mechanical".',
 					hideBox: true,
 				}),
@@ -138,7 +138,7 @@ export async function handleCompactCommand(
 			) {
 				onAddToChatQueue(
 					React.createElement(ErrorMessage, {
-						key: `compact-threshold-error-${getNextComponentKey()}`,
+						key: generateKey('compact-threshold-error'),
 						message: 'Threshold must be a number between 50 and 95.',
 						hideBox: true,
 					}),
@@ -149,7 +149,7 @@ export async function handleCompactCommand(
 			setAutoCompactThreshold(Math.round(thresholdValue));
 			onAddToChatQueue(
 				React.createElement(SuccessMessage, {
-					key: `compact-threshold-${getNextComponentKey()}`,
+					key: generateKey('compact-threshold'),
 					message: `Auto-compact threshold set to ${Math.round(thresholdValue)}% for this session.`,
 					hideBox: true,
 				}),
@@ -163,7 +163,7 @@ export async function handleCompactCommand(
 		if (messages.length === 0) {
 			onAddToChatQueue(
 				React.createElement(InfoMessage, {
-					key: `compact-info-${getNextComponentKey()}`,
+					key: generateKey('compact-info'),
 					message: 'No messages to compact.',
 					hideBox: true,
 				}),
@@ -193,7 +193,7 @@ export async function handleCompactCommand(
 			// message in the chat so the user knows it landed.
 			onAddToChatQueue(
 				React.createElement(InfoMessage, {
-					key: `compact-progress-${getNextComponentKey()}`,
+					key: generateKey('compact-progress'),
 					message:
 						'Compacting context (LLM summary, may take a few seconds)...',
 					hideBox: true,
@@ -216,7 +216,7 @@ export async function handleCompactCommand(
 				// than the source. Tell the user why we are about to fall back.
 				onAddToChatQueue(
 					React.createElement(InfoMessage, {
-						key: `compact-fallback-${getNextComponentKey()}`,
+						key: generateKey('compact-fallback'),
 						message:
 							'LLM summary unavailable - falling back to mechanical compaction.',
 						hideBox: true,
@@ -243,7 +243,7 @@ export async function handleCompactCommand(
 			if (preview) {
 				onAddToChatQueue(
 					React.createElement(InfoMessage, {
-						key: `compact-preview-${getNextComponentKey()}`,
+						key: generateKey('compact-preview'),
 						message: `Preview: ${summaryMessage}`,
 						hideBox: true,
 					}),
@@ -253,7 +253,7 @@ export async function handleCompactCommand(
 				setMessages(llmResult);
 				onAddToChatQueue(
 					React.createElement(SuccessMessage, {
-						key: `compact-success-${getNextComponentKey()}`,
+						key: generateKey('compact-success'),
 						message: summaryMessage,
 						hideBox: true,
 					}),
@@ -276,7 +276,7 @@ export async function handleCompactCommand(
 			const message = `Preview: Context would be compacted: ${result.originalTokenCount.toLocaleString()} tokens → ${result.compressedTokenCount.toLocaleString()} tokens (${Math.round(result.reductionPercentage)}% reduction)\n\nPreserved: ${stats}`;
 			onAddToChatQueue(
 				React.createElement(InfoMessage, {
-					key: `compact-preview-${getNextComponentKey()}`,
+					key: generateKey('compact-preview'),
 					message,
 					hideBox: true,
 				}),
@@ -291,7 +291,7 @@ export async function handleCompactCommand(
 			const message = `Context Compacted: ${result.originalTokenCount.toLocaleString()} tokens → ${result.compressedTokenCount.toLocaleString()} tokens (${Math.round(result.reductionPercentage)}% reduction)\n\nPreserved: ${stats}`;
 			onAddToChatQueue(
 				React.createElement(SuccessMessage, {
-					key: `compact-success-${getNextComponentKey()}`,
+					key: generateKey('compact-success'),
 					message,
 					hideBox: true,
 				}),
@@ -303,7 +303,7 @@ export async function handleCompactCommand(
 	} catch (error) {
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
-				key: `compact-error-${getNextComponentKey()}`,
+				key: generateKey('compact-error'),
 				message: `Failed to compact messages: ${error instanceof Error ? error.message : 'Unknown error'}`,
 				hideBox: true,
 			}),

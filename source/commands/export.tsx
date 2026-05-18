@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import React from 'react';
 import {SuccessMessage} from '@/components/message-box';
+import {generateKey} from '@/session/key-generator';
 import {Command, Message} from '@/types/index';
 
 const formatMessageContent = (message: Message) => {
@@ -38,7 +39,9 @@ function Export({filename}: {filename: string}) {
 	return (
 		<SuccessMessage
 			hideBox={true}
-			message={`✔️ Chat exported to ${filename}`}
+			marginTop={1}
+			marginBottom={1}
+			message={`Chat exported to ${filename}`}
 		></SuccessMessage>
 	);
 }
@@ -72,7 +75,7 @@ total_tokens: ${tokens}
 		await fs.writeFile(filepath, frontmatter + markdownContent);
 
 		return React.createElement(Export, {
-			key: `export-${Date.now()}`,
+			key: generateKey('export'),
 			filename,
 		});
 	},

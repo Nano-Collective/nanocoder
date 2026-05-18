@@ -4,6 +4,7 @@ import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
 import {ConversationContext} from '@/hooks/useAppState';
 import {getToolManager, processToolUse} from '@/message-handler';
+import {generateKey} from '@/session/key-generator';
 import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
 import {
 	DevelopmentMode,
@@ -32,7 +33,6 @@ interface UseToolHandlerProps {
 	setMessages: (messages: Message[]) => void;
 	addToChatQueue: (component: React.ReactNode) => void;
 	setLiveComponent: (component: React.ReactNode) => void;
-	getNextComponentKey: () => number;
 	resetToolConfirmationState: () => void;
 	onProcessAssistantResponse: (
 		systemMessage: Message,
@@ -60,7 +60,6 @@ export function useToolHandler({
 	setMessages,
 	addToChatQueue,
 	setLiveComponent,
-	getNextComponentKey,
 	resetToolConfirmationState,
 	onProcessAssistantResponse,
 	client: _client,
@@ -114,7 +113,7 @@ export function useToolHandler({
 			// User cancelled - show message
 			addToChatQueue(
 				<InfoMessage
-					key={`tool-cancelled-${getNextComponentKey()}`}
+					key={generateKey('tool-cancelled')}
 					message="Tool execution cancelled by user."
 					hideBox={true}
 				/>,
@@ -170,7 +169,7 @@ export function useToolHandler({
 			if (mcpInfo.isMCPTool) {
 				addToChatQueue(
 					<InfoMessage
-						key={`mcp-tool-executing-${getNextComponentKey()}-${Date.now()}`}
+						key={generateKey('mcp-tool-executing')}
 						message={`Executing MCP tool "${currentTool.function.name}" from server "${mcpInfo.serverName}"`}
 						hideBox={true}
 					/>,
@@ -199,7 +198,7 @@ export function useToolHandler({
 						// Display the error
 						addToChatQueue(
 							<ErrorMessage
-								key={`tool-validation-error-${getNextComponentKey()}-${Date.now()}`}
+								key={generateKey('tool-validation-error')}
 								message={validationResult.error}
 								hideBox={true}
 							/>,
@@ -236,7 +235,7 @@ export function useToolHandler({
 
 					addToChatQueue(
 						<ErrorMessage
-							key={`tool-validation-error-${getNextComponentKey()}-${Date.now()}`}
+							key={generateKey('tool-validation-error')}
 							message={`Validation error: ${String(validationError)}`}
 							hideBox={true}
 						/>,
@@ -271,7 +270,7 @@ export function useToolHandler({
 
 				addToChatQueue(
 					<InfoMessage
-						key={`mode-switched-${getNextComponentKey()}-${Date.now()}`}
+						key={generateKey('mode-switched')}
 						message={`Development mode switched to: ${requestedMode.toUpperCase()}`}
 						hideBox={true}
 					/>,
@@ -296,7 +295,7 @@ export function useToolHandler({
 				// Set as live component (renders outside Static for real-time updates)
 				setLiveComponent(
 					<BashProgress
-						key={`streaming-tool-${currentTool.id}-${getNextComponentKey()}-${Date.now()}`}
+						key={generateKey(`streaming-tool-${currentTool.id}`)}
 						executionId={executionId}
 						command={commandStr}
 						isLive={true}
@@ -324,13 +323,12 @@ export function useToolHandler({
 						result,
 						toolManager,
 						addToChatQueue,
-						getNextComponentKey,
 						true,
 					);
 				} else {
 					addToChatQueue(
 						<BashProgress
-							key={`streaming-tool-complete-${currentTool.id}-${getNextComponentKey()}-${Date.now()}`}
+							key={generateKey(`streaming-tool-complete-${currentTool.id}`)}
 							executionId={executionId}
 							command={commandStr}
 							completedState={bashResult}
@@ -347,7 +345,6 @@ export function useToolHandler({
 					result,
 					toolManager,
 					addToChatQueue,
-					getNextComponentKey,
 					compactToolDisplay,
 				);
 			}
@@ -370,7 +367,7 @@ export function useToolHandler({
 			setIsToolExecuting(false);
 			addToChatQueue(
 				<ErrorMessage
-					key={`tool-exec-error-${getNextComponentKey()}`}
+					key={generateKey('tool-exec-error')}
 					message={`Tool execution error: ${String(error)}`}
 				/>,
 			);
@@ -389,7 +386,7 @@ export function useToolHandler({
 
 		addToChatQueue(
 			<InfoMessage
-				key={`tool-cancelled-${getNextComponentKey()}`}
+				key={generateKey('tool-cancelled')}
 				message="Tool execution cancelled by user."
 				hideBox={true}
 			/>,

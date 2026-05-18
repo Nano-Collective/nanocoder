@@ -106,7 +106,6 @@ test('executeToolsDirectly - handles validation failure', async t => {
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 
 	t.is(results.length, 1);
@@ -149,7 +148,6 @@ test('executeToolsDirectly - continues after validation failure', async t => {
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 
 	// Both tools should be attempted (validation happens for all first)
@@ -185,7 +183,6 @@ test('executeToolsDirectly - executes tool successfully', async t => {
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 
 	t.is(results.length, 1);
@@ -224,7 +221,6 @@ test('executeToolsDirectly - executes multiple read-only tools in parallel', asy
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 
 	// All three tools should execute
@@ -255,7 +251,6 @@ test('executeToolsDirectly - runs read-only tools concurrently (timing)', async 
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 	const elapsed = Date.now() - start;
 
@@ -285,7 +280,6 @@ test('executeToolsDirectly - preserves result order matching input order', async
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 
 	// Results must be in same order as input tool calls
@@ -316,7 +310,6 @@ test('executeToolsDirectly - runs non-read-only tools sequentially (timing)', as
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 	const elapsed = Date.now() - start;
 
@@ -352,7 +345,6 @@ test('executeToolsDirectly - handles execution error gracefully', async t => {
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 
 	t.is(results.length, 1);
@@ -385,7 +377,6 @@ test('executeToolsDirectly - continues after error with remaining tools', async 
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 
 	// Both tools should be attempted (execution happens for all in parallel)
@@ -407,7 +398,6 @@ test('executeToolsDirectly - returns empty array for no tools', async t => {
 		null,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 
 	t.deepEqual(results, []);
@@ -431,7 +421,6 @@ test('executeToolsDirectly - handles null tool manager', async t => {
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 
 	t.is(results.length, 1);
@@ -459,7 +448,6 @@ test('executeToolsDirectly - handles tool with no validator', async t => {
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 
 	t.is(results.length, 1);
@@ -493,7 +481,6 @@ test('executeToolsDirectly - compact display calls onCompactToolCount instead of
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 		{
 			compactDisplay: true,
 			onCompactToolCount: (toolName) => {
@@ -533,7 +520,6 @@ test('executeToolsDirectly - non-interactive compact mode pushes one-liner per t
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 		{
 			compactDisplay: true,
 			nonInteractiveMode: true,
@@ -574,7 +560,6 @@ test('executeToolsDirectly - handles tool with valid validation', async t => {
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 
 	t.is(results.length, 1);
@@ -605,7 +590,6 @@ test('executeToolsDirectly - groupByReadOnly groups consecutive read-only tools'
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 	const elapsed = Date.now() - start;
 
@@ -636,7 +620,6 @@ test('executeToolsDirectly - onCompactToolCount receives correct tool names', as
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 		{
 			compactDisplay: true,
 			onCompactToolCount: (toolName) => {
@@ -669,7 +652,6 @@ test('executeToolsDirectly - compact mode without onCompactToolCount does not er
 			toolManager,
 			conversationStateManager as any,
 			addToChatQueue,
-			() => 1,
 			{
 				compactDisplay: true,
 				// onCompactToolCount intentionally omitted
@@ -705,7 +687,6 @@ test('executeToolsDirectly - compact mode always expands task tools', async t =>
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 		{
 			compactDisplay: true,
 			onCompactToolCount: (toolName) => {
@@ -746,7 +727,6 @@ test('executeToolsDirectly - compact mode still displays errors in full', async 
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 		{
 			compactDisplay: true,
 			onCompactToolCount: (toolName) => {

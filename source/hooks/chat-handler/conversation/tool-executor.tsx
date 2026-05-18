@@ -7,6 +7,7 @@ import {
 	getSubagentProgress,
 	resetSubagentProgressById,
 } from '@/services/subagent-events';
+import {generateKey} from '@/session/key-generator';
 import {MAX_CONCURRENT_AGENTS} from '@/subagents/subagent-executor';
 import type {AgentToolArgs} from '@/tools/agent-tool';
 import {startAgentExecution} from '@/tools/agent-tool';
@@ -132,7 +133,6 @@ const executeAgentBatch = async (
 	agentToolCalls: ToolCall[],
 	toolManager: ToolManager | null,
 	addToChatQueue: (component: React.ReactNode) => void,
-	getNextComponentKey: () => number,
 	compactDisplay?: boolean,
 	setLiveComponent?: (component: React.ReactNode) => void,
 	onCompactToolCount?: (toolName: string) => void,
@@ -188,7 +188,7 @@ const executeAgentBatch = async (
 			const e = agentExecutions[0];
 			setLiveComponent(
 				<AgentProgress
-					key={`agent-live-direct-${e.toolCall.id}-${Date.now()}`}
+					key={generateKey(`agent-live-direct-${e.toolCall.id}`)}
 					subagentName={e.agentName}
 					description={e.agentDesc}
 					agentId={e.agentId}
@@ -198,7 +198,7 @@ const executeAgentBatch = async (
 		} else {
 			setLiveComponent(
 				<MultiAgentProgress
-					key={`multi-agent-live-direct-${Date.now()}`}
+					key={generateKey('multi-agent-live-direct')}
 					agents={agentInfos}
 					isLive={true}
 				/>,
@@ -261,7 +261,6 @@ const executeAgentBatch = async (
 					result,
 					toolManager,
 					addToChatQueue,
-					getNextComponentKey,
 				);
 			} else if (nonInteractiveMode) {
 				await displayToolResult(
@@ -269,7 +268,6 @@ const executeAgentBatch = async (
 					result,
 					toolManager,
 					addToChatQueue,
-					getNextComponentKey,
 					true,
 				);
 			} else {
@@ -278,7 +276,7 @@ const executeAgentBatch = async (
 		} else {
 			addToChatQueue(
 				<AgentProgress
-					key={`agent-complete-${e.toolCall.id}-${getNextComponentKey()}-${Date.now()}`}
+					key={generateKey(`agent-complete-${e.toolCall.id}`)}
 					subagentName={e.agentName}
 					description={e.agentDesc}
 					agentId={e.agentId}
@@ -299,7 +297,7 @@ const executeAgentBatch = async (
 		results.push(excess);
 		addToChatQueue(
 			<ErrorMessage
-				key={`agent-excess-${excess.toolCall.id}-${getNextComponentKey()}`}
+				key={generateKey(`agent-excess-${excess.toolCall.id}`)}
 				message={excess.result.content}
 				hideBox={true}
 			/>,
@@ -322,7 +320,6 @@ export const executeToolsDirectly = async (
 	toolManager: ToolManager | null,
 	conversationStateManager: React.MutableRefObject<ConversationStateManager>,
 	addToChatQueue: (component: React.ReactNode) => void,
-	getNextComponentKey: () => number,
 	options?: {
 		compactDisplay?: boolean;
 		onCompactToolCount?: (toolName: string) => void;
@@ -358,7 +355,6 @@ export const executeToolsDirectly = async (
 				group,
 				toolManager,
 				addToChatQueue,
-				getNextComponentKey,
 				options?.compactDisplay,
 				options?.setLiveComponent,
 				options?.onCompactToolCount,
@@ -407,7 +403,7 @@ export const executeToolsDirectly = async (
 				// Display validation error (always shown in full)
 				addToChatQueue(
 					<ErrorMessage
-						key={`validation-error-${toolCall.id}-${Date.now()}`}
+						key={generateKey(`validation-error-${toolCall.id}`)}
 						message={validationError}
 						hideBox={true}
 					/>,
@@ -436,7 +432,6 @@ export const executeToolsDirectly = async (
 						result,
 						toolManager,
 						addToChatQueue,
-						getNextComponentKey,
 					);
 				} else if (options.nonInteractiveMode) {
 					await displayToolResult(
@@ -444,7 +439,6 @@ export const executeToolsDirectly = async (
 						result,
 						toolManager,
 						addToChatQueue,
-						getNextComponentKey,
 						true,
 					);
 				} else {
@@ -452,13 +446,7 @@ export const executeToolsDirectly = async (
 				}
 			} else {
 				// Full display mode
-				await displayToolResult(
-					toolCall,
-					result,
-					toolManager,
-					addToChatQueue,
-					getNextComponentKey,
-				);
+				await displayToolResult(toolCall, result, toolManager, addToChatQueue);
 			}
 		}
 	}

@@ -15,6 +15,7 @@ import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getModelContextLimit} from '@/models/index';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {generateKey} from '@/session/key-generator';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
 import {createTokenizer} from '@/tokenization/index';
@@ -48,7 +49,6 @@ interface UseAppHandlersProps {
 	lspServersStatus: LSPConnectionStatus[];
 	preferencesLoaded: boolean;
 	customCommandsCount: number;
-	getNextComponentKey: () => number;
 	customCommandCache: Map<string, CustomCommand>;
 	customCommandLoader: CustomCommandLoader | null;
 	customCommandExecutor: CustomCommandExecutor | null;
@@ -288,7 +288,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 		props.addToChatQueue(
 			<Status
-				key={`status-${props.getNextComponentKey()}`}
+				key={generateKey('status')}
 				provider={props.currentProvider}
 				model={props.currentModel}
 				theme={props.currentTheme}
@@ -314,7 +314,6 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		props.messages,
 		props.getMessageTokens,
 		props.addToChatQueue,
-		props.getNextComponentKey,
 		logger,
 		props,
 	]);
@@ -336,7 +335,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					} catch (error) {
 						props.addToChatQueue(
 							<WarningMessage
-								key={`backup-warning-${props.getNextComponentKey()}`}
+								key={generateKey('backup-warning')}
 								message={`Warning: Failed to create backup: ${
 									error instanceof Error ? error.message : 'Unknown error'
 								}`}
@@ -354,7 +353,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 				props.addToChatQueue(
 					<SuccessMessage
-						key={`restore-success-${props.getNextComponentKey()}`}
+						key={generateKey('restore-success')}
 						message={`✓ Checkpoint '${checkpointName}' restored successfully`}
 						hideBox={true}
 					/>,
@@ -362,7 +361,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			} catch (error) {
 				props.addToChatQueue(
 					<ErrorMessage
-						key={`restore-error-${props.getNextComponentKey()}`}
+						key={generateKey('restore-error')}
 						message={`Failed to restore checkpoint: ${
 							error instanceof Error ? error.message : 'Unknown error'
 						}`}
@@ -381,7 +380,6 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.setActiveMode,
 			props.setCheckpointLoadData,
 			props.addToChatQueue,
-			props.getNextComponentKey,
 			props,
 		],
 	);
@@ -419,7 +417,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.setCurrentSessionId(session.id);
 			props.addToChatQueue(
 				<SuccessMessage
-					key={`resume-success-${Date.now()}`}
+					key={generateKey('resume-success')}
 					message={`Resumed session: ${session.title}`}
 					hideBox={true}
 				/>,
@@ -446,7 +444,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				} else {
 					props.addToChatQueue(
 						<ErrorMessage
-							key={`resume-error-${Date.now()}`}
+							key={generateKey('resume-error')}
 							message="Session not found"
 							hideBox={true}
 						/>,
@@ -456,7 +454,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			} catch (error) {
 				props.addToChatQueue(
 					<ErrorMessage
-						key={`resume-error-${Date.now()}`}
+						key={generateKey('resume-error')}
 						message={`Failed to load session: ${
 							error instanceof Error ? error.message : 'Unknown error'
 						}`}
@@ -521,7 +519,6 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				setLiveComponent: props.setLiveComponent,
 				setIsToolExecuting: props.setIsToolExecuting,
 				onCommandComplete: () => props.setIsConversationComplete(true),
-				getNextComponentKey: props.getNextComponentKey,
 				setMessages: props.updateMessages,
 				messages: props.messages,
 				provider: props.currentProvider,
@@ -552,7 +549,6 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.addToChatQueue,
 			props.setLiveComponent,
 			props.setIsToolExecuting,
-			props.getNextComponentKey,
 			props.updateMessages,
 			props.messages,
 			props.currentProvider,

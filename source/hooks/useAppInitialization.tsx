@@ -18,6 +18,7 @@ import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getLSPManager, type LSPInitResult} from '@/lsp/index';
 import {setToolManagerGetter, setToolRegistryGetter} from '@/message-handler';
+import {generateKey} from '@/session/key-generator';
 import {SubagentExecutor} from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import {setAgentToolExecutor, setAvailableAgentNames} from '@/tools/agent-tool';
@@ -54,7 +55,6 @@ interface UseAppInitializationProps {
 	setCustomCommandsCount: (count: number) => void;
 	setSubagentsReady: (ready: boolean) => void;
 	addToChatQueue: (component: React.ReactNode) => void;
-	getNextComponentKey: () => number;
 	customCommandCache: Map<string, CustomCommand>;
 	setActiveMode: (mode: import('@/hooks/useAppState').ActiveMode) => void;
 	cliProvider?: string;
@@ -86,7 +86,6 @@ export function useAppInitialization({
 	setCustomCommandsCount,
 	setSubagentsReady,
 	addToChatQueue,
-	getNextComponentKey,
 	customCommandCache,
 	setActiveMode,
 	cliProvider,
@@ -347,7 +346,7 @@ export function useAppInitialization({
 						// Wizard is interactive-only — exit cleanly under `run`.
 						addToChatQueue(
 							<ErrorMessage
-								key={`config-error-${getNextComponentKey()}`}
+								key={generateKey('config-error')}
 								message="No providers configured. Run nanocoder interactively to set them up."
 								hideBox={true}
 							/>,
@@ -355,7 +354,7 @@ export function useAppInitialization({
 					} else {
 						addToChatQueue(
 							<InfoMessage
-								key={`config-error-${getNextComponentKey()}`}
+								key={generateKey('config-error')}
 								message="Configuration needed. Let's set up your providers..."
 								hideBox={true}
 							/>,
@@ -369,7 +368,7 @@ export function useAppInitialization({
 					// Invalid CLI provider/model - show error and don't trigger wizard
 					addToChatQueue(
 						<ErrorMessage
-							key={`config-error-${getNextComponentKey()}`}
+							key={generateKey('config-error')}
 							message={error.message}
 							hideBox={true}
 						/>,
@@ -379,7 +378,7 @@ export function useAppInitialization({
 				// Regular error - show simple error message
 				addToChatQueue(
 					<ErrorMessage
-						key={`init-error-${getNextComponentKey()}`}
+						key={generateKey('init-error')}
 						message={`No providers available: ${String(error)}`}
 						hideBox={true}
 					/>,
@@ -401,7 +400,7 @@ export function useAppInitialization({
 		} catch (error) {
 			addToChatQueue(
 				<ErrorMessage
-					key={`commands-error-${getNextComponentKey()}`}
+					key={generateKey('commands-error')}
 					message={`Failed to load custom commands: ${String(error)}`}
 					hideBox={true}
 				/>,

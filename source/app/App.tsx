@@ -42,6 +42,7 @@ import {TitleShapeContext, updateTitleShape} from '@/hooks/useTitleShape';
 import {useToolHandler} from '@/hooks/useToolHandler';
 import {UIStateProvider} from '@/hooks/useUIState';
 import {useVSCodeServer} from '@/hooks/useVSCodeServer';
+import {generateKey} from '@/session/key-generator';
 import type {ThemePreset} from '@/types/ui';
 import {createPinoLogger} from '@/utils/logging/pino-logger';
 import {setGlobalMessageQueue} from '@/utils/message-queue';
@@ -183,7 +184,6 @@ export default function App({
 		currentModel: appState.currentModel,
 		setIsCancelling: appState.setIsCancelling,
 		addToChatQueue: appState.addToChatQueue,
-		getNextComponentKey: appState.getNextComponentKey,
 		abortController: appState.abortController,
 		setAbortController: appState.setAbortController,
 		developmentMode: appState.developmentMode,
@@ -260,7 +260,6 @@ export default function App({
 		setMessages: appState.updateMessages,
 		addToChatQueue: appState.addToChatQueue,
 		setLiveComponent: appState.setLiveComponent,
-		getNextComponentKey: appState.getNextComponentKey,
 		resetToolConfirmationState: appState.resetToolConfirmationState,
 		onProcessAssistantResponse: chatHandler.processAssistantResponse,
 		client: appState.client,
@@ -311,7 +310,6 @@ export default function App({
 		setCustomCommandsCount: appState.setCustomCommandsCount,
 		setSubagentsReady: appState.setSubagentsReady,
 		addToChatQueue: appState.addToChatQueue,
-		getNextComponentKey: appState.getNextComponentKey,
 		customCommandCache: appState.customCommandCache,
 		setActiveMode: appState.setActiveMode,
 		cliProvider,
@@ -332,7 +330,6 @@ export default function App({
 		setActiveMode: appState.setActiveMode,
 		setIsSettingsMode: appState.setIsSettingsMode,
 		addToChatQueue: appState.addToChatQueue,
-		getNextComponentKey: appState.getNextComponentKey,
 		reinitializeMCPServers: appInitialization.reinitializeMCPServers,
 		setTune: appState.setTune,
 	});
@@ -361,7 +358,7 @@ export default function App({
 					} else {
 						appState.addToChatQueue(
 							<SuccessMessage
-								key={`ide-vscode-enabled-${appState.getNextComponentKey()}`}
+								key={generateKey('ide-vscode-enabled')}
 								message="VS Code integration enabled. Starting server..."
 								hideBox={true}
 							/>,
@@ -388,7 +385,7 @@ export default function App({
 		) {
 			appState.addToChatQueue(
 				<SuccessMessage
-					key={`ide-vscode-ready-${appState.getNextComponentKey()}`}
+					key={generateKey('ide-vscode-ready')}
 					message={`VS Code server listening on port ${vscodeServer.actualPort}`}
 					hideBox={true}
 				/>,
@@ -409,7 +406,6 @@ export default function App({
 		lspServersStatus: appState.lspServersStatus,
 		preferencesLoaded: appState.preferencesLoaded,
 		customCommandsCount: appState.customCommandsCount,
-		getNextComponentKey: appState.getNextComponentKey,
 		customCommandCache: appState.customCommandCache,
 		customCommandLoader: appState.customCommandLoader,
 		customCommandExecutor: appState.customCommandExecutor,

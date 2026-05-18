@@ -1,5 +1,6 @@
 import React from 'react';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
+import {generateKey} from '@/session/key-generator';
 import {sessionManager} from '@/session/session-manager';
 import type {MessageSubmissionOptions} from '@/types/index';
 
@@ -30,13 +31,12 @@ export async function handleResumeCommand(
 		onEnterSessionSelectorMode,
 		onResumeSession,
 		onCommandComplete,
-		getNextComponentKey,
 	} = options;
 
 	if (!onEnterSessionSelectorMode || !onResumeSession) {
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
-				key: `resume-error-${getNextComponentKey()}`,
+				key: generateKey('resume-error'),
 				message: 'Session management is not available in this context.',
 				hideBox: true,
 			}),
@@ -54,7 +54,7 @@ export async function handleResumeCommand(
 	} catch (error) {
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
-				key: `resume-error-${getNextComponentKey()}`,
+				key: generateKey('resume-error'),
 				message: `Failed to initialize sessions: ${error instanceof Error ? error.message : 'Unknown error'}`,
 				hideBox: true,
 			}),
@@ -95,7 +95,7 @@ export async function handleResumeCommand(
 		if (!sessionId) {
 			onAddToChatQueue(
 				React.createElement(InfoMessage, {
-					key: `resume-info-${getNextComponentKey()}`,
+					key: generateKey('resume-info'),
 					message: 'No sessions found.',
 					hideBox: true,
 				}),
@@ -110,7 +110,7 @@ export async function handleResumeCommand(
 		} else {
 			onAddToChatQueue(
 				React.createElement(ErrorMessage, {
-					key: `resume-error-${getNextComponentKey()}`,
+					key: generateKey('resume-error'),
 					message: `Session not found: ${sessionId}`,
 					hideBox: true,
 				}),
@@ -119,7 +119,7 @@ export async function handleResumeCommand(
 	} catch (error) {
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
-				key: `resume-error-${getNextComponentKey()}`,
+				key: generateKey('resume-error'),
 				message: `Failed to resume session: ${error instanceof Error ? error.message : 'Unknown error'}`,
 				hideBox: true,
 			}),

@@ -55,9 +55,6 @@ function setup(probe: ProbeProps = {}) {
 	const resetToolConfirmationState = spy<[]>();
 	const onProcessAssistantResponse = spy<[Message, Message[]]>();
 
-	let keyCounter = 0;
-	const getNextComponentKey = () => ++keyCounter;
-
 	let captured: ReturnType<typeof useToolHandler> | null = null;
 
 	function Probe() {
@@ -75,7 +72,6 @@ function setup(probe: ProbeProps = {}) {
 			setMessages,
 			addToChatQueue,
 			setLiveComponent,
-			getNextComponentKey,
 			resetToolConfirmationState,
 			onProcessAssistantResponse: async (sys, msgs) => {
 				onProcessAssistantResponse(sys, msgs);

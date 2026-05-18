@@ -6,6 +6,7 @@ import type {LLMChatResponse, Message, ToolCall, ToolResult} from '@/types/core'
 import {
 	resetAutoCompactSession,
 	setAutoCompactEnabled,
+	setAutoCompactStrategy,
 	setAutoCompactThreshold,
 } from '@/utils/auto-compact.js';
 import {
@@ -124,7 +125,6 @@ const createDefaultParams = (overrides = {}) => ({
 	setTokenCount: () => {},
 	setMessages: () => {},
 	addToChatQueue: () => {},
-	getNextComponentKey: () => 1,
 	currentModel: 'test-model',
 	currentProvider: 'openai',
 	developmentMode: 'normal' as const,
@@ -1075,6 +1075,11 @@ test.serial('processAssistantResponse - compressed messages persist when loop re
 	// this in a unit test because it exercises a recursive call with the
 	// post-compaction message array.
 	setSessionContextLimit(100);
+	// Force mechanical compaction so auto-compact doesn't call client.chat()
+	// for an LLM summary — that would inflate chatCallCount and the first
+	// entry in messagesSeenByRecursiveCall would be the summariser's prompt
+	// rather than the recursive main-loop call this test is checking.
+	setAutoCompactStrategy('mechanical');
 
 	const oldVerboseContent = 'old context sentence. '.repeat(120);
 	const originalMessages: Message[] = [

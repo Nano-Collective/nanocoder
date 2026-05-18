@@ -65,11 +65,7 @@ export function InteractiveApp({
 		if (expanding) {
 			const counts = appState.compactToolCountsRef.current;
 			if (Object.keys(counts).length > 0) {
-				displayCompactCountsSummary(
-					counts,
-					appState.addToChatQueue,
-					appState.getNextComponentKey,
-				);
+				displayCompactCountsSummary(counts, appState.addToChatQueue);
 				appState.compactToolCountsRef.current = {};
 				appState.setCompactToolCounts(null);
 			}

@@ -106,16 +106,6 @@ test('setActiveMode flips the matching derived boolean only', t => {
 	t.is(captured!.activeMode, null);
 });
 
-test('getNextComponentKey returns monotonically increasing values', t => {
-	const {hook} = setup();
-
-	const a = hook.getNextComponentKey();
-	const b = hook.getNextComponentKey();
-	const c = hook.getNextComponentKey();
-
-	t.true(b > a);
-	t.true(c > b);
-});
 
 test('addToChatQueue appends component to chatComponents', t => {
 	const {hook, instance} = setup();
@@ -142,7 +132,7 @@ test('addToChatQueue assigns a key when one is missing', t => {
 	const first = captured!.chatComponents[0] as React.ReactElement;
 	t.truthy(first.key);
 	t.true(typeof first.key === 'string');
-	t.true((first.key as string).startsWith('chat-component-'));
+	t.regex(first.key as string, /^[0-9a-f]+-chat-component-\d+$/);
 });
 
 test('addToChatQueue preserves an existing key', t => {

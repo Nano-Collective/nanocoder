@@ -76,9 +76,6 @@ function setup(probe: ProbeProps = {}) {
 	const reinitializeMCPServers = spy<[unknown]>();
 	const setTune = spy<[TuneConfig]>();
 
-	let keyCounter = 0;
-	const getNextComponentKey = () => ++keyCounter;
-
 	const handlers = useModeHandlers({
 		client: probe.client ?? null,
 		currentModel: probe.currentModel ?? 'current-model',
@@ -91,7 +88,6 @@ function setup(probe: ProbeProps = {}) {
 		setActiveMode,
 		setIsSettingsMode,
 		addToChatQueue,
-		getNextComponentKey,
 		reinitializeMCPServers: async () => {
 			reinitializeMCPServers(undefined);
 		},

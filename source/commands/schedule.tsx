@@ -13,6 +13,7 @@ import {
 	validateCron,
 } from '@/schedule/index';
 import type {Schedule} from '@/schedule/types';
+import {generateKey} from '@/session/key-generator';
 import type {Command} from '@/types/index';
 
 function ScheduleMessage({
@@ -94,7 +95,7 @@ export const scheduleCommand: Command = {
 		if (!subcommand || subcommand === 'list') {
 			const schedules = await loadSchedules();
 			return React.createElement(ScheduleListDisplay, {
-				key: `schedule-list-${Date.now()}`,
+				key: generateKey('schedule-list'),
 				schedules,
 			});
 		}
@@ -106,7 +107,7 @@ export const scheduleCommand: Command = {
 			const cronMatch = rest.match(/^"([^"]+)"\s+(.+)$/);
 			if (!cronMatch) {
 				return React.createElement(ScheduleMessage, {
-					key: `schedule-error-${Date.now()}`,
+					key: generateKey('schedule-error'),
 					message:
 						'Usage: /schedule add "cron expression" command\nExample: /schedule add "0 9 * * MON" deps-update',
 					isError: true,
@@ -125,7 +126,7 @@ export const scheduleCommand: Command = {
 			const cronError = validateCron(cronExpr);
 			if (cronError) {
 				return React.createElement(ScheduleMessage, {
-					key: `schedule-error-${Date.now()}`,
+					key: generateKey('schedule-error'),
 					message: `Invalid cron expression: ${cronError}`,
 					isError: true,
 				});
@@ -140,7 +141,7 @@ export const scheduleCommand: Command = {
 			);
 			if (!existsSync(commandPath)) {
 				return React.createElement(ScheduleMessage, {
-					key: `schedule-error-${Date.now()}`,
+					key: generateKey('schedule-error'),
 					message: `Schedule file not found: .nanocoder/schedules/${commandFile}\nCreate one with: /schedule create ${commandFile.replace(/\.md$/, '')}`,
 					isError: true,
 				});
@@ -161,7 +162,7 @@ export const scheduleCommand: Command = {
 
 			const humanCron = formatCronHuman(cronExpr);
 			return React.createElement(ScheduleMessage, {
-				key: `schedule-added-${Date.now()}`,
+				key: generateKey('schedule-added'),
 				message: `Schedule added: ${schedule.id} — ${commandFile} (${humanCron})`,
 			});
 		}
@@ -169,7 +170,7 @@ export const scheduleCommand: Command = {
 		// Create — intercepted in app-util.ts to trigger AI assistance
 		if (subcommand === 'create') {
 			return React.createElement(ScheduleMessage, {
-				key: `schedule-error-${Date.now()}`,
+				key: generateKey('schedule-error'),
 				message:
 					'Usage: /schedule create <name>\nExample: /schedule create deps-update',
 				isError: true,
@@ -181,7 +182,7 @@ export const scheduleCommand: Command = {
 			const scheduleId = args[1];
 			if (!scheduleId) {
 				return React.createElement(ScheduleMessage, {
-					key: `schedule-error-${Date.now()}`,
+					key: generateKey('schedule-error'),
 					message: 'Usage: /schedule remove <id>',
 					isError: true,
 				});
@@ -191,7 +192,7 @@ export const scheduleCommand: Command = {
 			const index = schedules.findIndex(s => s.id === scheduleId);
 			if (index === -1) {
 				return React.createElement(ScheduleMessage, {
-					key: `schedule-error-${Date.now()}`,
+					key: generateKey('schedule-error'),
 					message: `Schedule not found: ${scheduleId}`,
 					isError: true,
 				});
@@ -201,7 +202,7 @@ export const scheduleCommand: Command = {
 			await saveSchedules(schedules);
 
 			return React.createElement(ScheduleMessage, {
-				key: `schedule-removed-${Date.now()}`,
+				key: generateKey('schedule-removed'),
 				message: `Schedule removed: ${removed?.id} — ${removed?.command}`,
 			});
 		}
@@ -211,7 +212,7 @@ export const scheduleCommand: Command = {
 			// This case is intercepted before reaching the command handler
 			// If we get here, something went wrong
 			return React.createElement(ScheduleMessage, {
-				key: `schedule-error-${Date.now()}`,
+				key: generateKey('schedule-error'),
 				message: 'Scheduler mode could not be started.',
 				isError: true,
 			});
@@ -228,7 +229,7 @@ export const scheduleCommand: Command = {
 
 			if (filtered.length === 0) {
 				return React.createElement(ScheduleMessage, {
-					key: `schedule-logs-${Date.now()}`,
+					key: generateKey('schedule-logs'),
 					message: scheduleId
 						? `No runs found for schedule ${scheduleId}`
 						: 'No schedule runs recorded yet.',
@@ -254,14 +255,14 @@ export const scheduleCommand: Command = {
 				.join('\n');
 
 			return React.createElement(ScheduleMessage, {
-				key: `schedule-logs-${Date.now()}`,
+				key: generateKey('schedule-logs'),
 				message: logLines,
 			});
 		}
 
 		// Unknown subcommand
 		return React.createElement(ScheduleMessage, {
-			key: `schedule-error-${Date.now()}`,
+			key: generateKey('schedule-error'),
 			message:
 				'Unknown subcommand. Available: create, add, list, remove, start, logs',
 			isError: true,

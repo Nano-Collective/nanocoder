@@ -11,6 +11,7 @@ import {
 } from '@/components/message-box';
 import {DELAY_COMMAND_COMPLETE_MS, MAX_SESSION_NAME_LENGTH} from '@/constants';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {generateKey} from '@/session/key-generator';
 import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
 import {clearAllTasks} from '@/tools/tasks/storage';
 import type {LLMClient} from '@/types/core';
@@ -147,7 +148,6 @@ async function handleBashCommand(
 		setLiveComponent,
 		setIsToolExecuting,
 		onCommandComplete,
-		getNextComponentKey,
 		setMessages,
 		messages,
 	} = options;
@@ -159,7 +159,7 @@ async function handleBashCommand(
 
 		setLiveComponent(
 			React.createElement(BashProgress, {
-				key: `bash-progress-live-${getNextComponentKey()}`,
+				key: generateKey('bash-progress-live'),
 				executionId,
 				command: bashCommand,
 				isLive: true,
@@ -171,7 +171,7 @@ async function handleBashCommand(
 		setLiveComponent(null);
 		onAddToChatQueue(
 			React.createElement(BashProgress, {
-				key: `bash-progress-complete-${getNextComponentKey()}`,
+				key: generateKey('bash-progress-complete'),
 				executionId,
 				command: bashCommand,
 				completedState: result,
@@ -191,7 +191,7 @@ async function handleBashCommand(
 		setLiveComponent(null);
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
-				key: `bash-error-${getNextComponentKey()}`,
+				key: generateKey('bash-error'),
 				message: `Error executing command: ${getErrorMessage(error, String(error))}`,
 			}),
 		);
@@ -260,7 +260,6 @@ async function handleSpecialCommand(
 		onShowStatus,
 		onCommandComplete,
 		onAddToChatQueue,
-		getNextComponentKey,
 		commandArgs,
 	} = options;
 
@@ -270,7 +269,7 @@ async function handleSpecialCommand(
 			await clearAllTasks();
 			onAddToChatQueue(
 				React.createElement(SuccessMessage, {
-					key: `clear-success-${getNextComponentKey()}`,
+					key: generateKey('clear-success'),
 					message: 'Chat and tasks cleared.',
 					hideBox: true,
 				}),
@@ -333,7 +332,7 @@ async function handleSpecialCommand(
 			if (!newName.trim()) {
 				onAddToChatQueue(
 					React.createElement(ErrorMessage, {
-						key: `rename-error-${getNextComponentKey()}`,
+						key: generateKey('rename-error'),
 						message: 'Usage: /rename <session name>',
 						hideBox: true,
 					}),
@@ -341,7 +340,7 @@ async function handleSpecialCommand(
 			} else if (newName.length > MAX_SESSION_NAME_LENGTH) {
 				onAddToChatQueue(
 					React.createElement(ErrorMessage, {
-						key: `rename-error-${getNextComponentKey()}`,
+						key: generateKey('rename-error'),
 						message: `Session name must be ${MAX_SESSION_NAME_LENGTH} characters or less.`,
 						hideBox: true,
 					}),
@@ -350,7 +349,7 @@ async function handleSpecialCommand(
 				onRenameSession(newName.trim());
 				onAddToChatQueue(
 					React.createElement(SuccessMessage, {
-						key: `rename-success-${getNextComponentKey()}`,
+						key: generateKey('rename-success'),
 						message: `Session renamed to "${newName.trim()}".`,
 						hideBox: true,
 					}),
@@ -377,7 +376,6 @@ async function handleCheckpointLoad(
 		onAddToChatQueue,
 		onEnterCheckpointLoadMode,
 		onCommandComplete,
-		getNextComponentKey,
 		messages,
 	} = options;
 
@@ -398,7 +396,7 @@ async function handleCheckpointLoad(
 		if (checkpoints.length === 0) {
 			onAddToChatQueue(
 				React.createElement(InfoMessage, {
-					key: `checkpoint-info-${getNextComponentKey()}`,
+					key: generateKey('checkpoint-info'),
 					message:
 						'No checkpoints available. Create one with /checkpoint create [name]',
 					hideBox: true,
@@ -413,7 +411,7 @@ async function handleCheckpointLoad(
 	} catch (error) {
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
-				key: `checkpoint-error-${getNextComponentKey()}`,
+				key: generateKey('checkpoint-error'),
 				message: `Failed to list checkpoints: ${getErrorMessage(error)}`,
 				hideBox: true,
 			}),
@@ -440,7 +438,6 @@ function handleCopilotLogin(
 		setIsToolExecuting,
 		onAddToChatQueue,
 		onCommandComplete,
-		getNextComponentKey,
 	} = options;
 
 	const providerName = commandParts[1]?.trim() || 'GitHub Copilot';
@@ -449,7 +446,7 @@ function handleCopilotLogin(
 
 	setLiveComponent(
 		React.createElement(CopilotLogin, {
-			key: `copilot-login-live-${getNextComponentKey()}`,
+			key: generateKey('copilot-login-live'),
 			providerName,
 			onDone: result => {
 				setLiveComponent(null);
@@ -458,7 +455,7 @@ function handleCopilotLogin(
 				if (result.success) {
 					onAddToChatQueue(
 						React.createElement(SuccessMessage, {
-							key: `copilot-login-done-${getNextComponentKey()}`,
+							key: generateKey('copilot-login-done'),
 							message: `Logged in. Credentials saved for "${providerName}".`,
 							hideBox: true,
 						}),
@@ -466,7 +463,7 @@ function handleCopilotLogin(
 				} else {
 					onAddToChatQueue(
 						React.createElement(ErrorMessage, {
-							key: `copilot-login-error-${getNextComponentKey()}`,
+							key: generateKey('copilot-login-error'),
 							message: result.error ?? 'Login failed.',
 							hideBox: true,
 						}),
@@ -498,7 +495,6 @@ function handleCodexLogin(
 		setIsToolExecuting,
 		onAddToChatQueue,
 		onCommandComplete,
-		getNextComponentKey,
 	} = options;
 
 	const providerName = commandParts[1]?.trim() || 'ChatGPT / Codex';
@@ -507,7 +503,7 @@ function handleCodexLogin(
 
 	setLiveComponent(
 		React.createElement(CodexLogin, {
-			key: `codex-login-live-${getNextComponentKey()}`,
+			key: generateKey('codex-login-live'),
 			providerName,
 			onDone: result => {
 				setLiveComponent(null);
@@ -516,7 +512,7 @@ function handleCodexLogin(
 				if (result.success) {
 					onAddToChatQueue(
 						React.createElement(SuccessMessage, {
-							key: `codex-login-done-${getNextComponentKey()}`,
+							key: generateKey('codex-login-done'),
 							message: `Logged in. Credentials saved for "${providerName}".`,
 							hideBox: true,
 						}),
@@ -524,7 +520,7 @@ function handleCodexLogin(
 				} else {
 					onAddToChatQueue(
 						React.createElement(ErrorMessage, {
-							key: `codex-login-error-${getNextComponentKey()}`,
+							key: generateKey('codex-login-error'),
 							message: result.error ?? 'Login failed.',
 							hideBox: true,
 						}),
@@ -546,8 +542,7 @@ async function handleBuiltInCommand(
 	message: string,
 	options: MessageSubmissionOptions,
 ): Promise<void> {
-	const {onAddToChatQueue, onCommandComplete, getNextComponentKey, messages} =
-		options;
+	const {onAddToChatQueue, onCommandComplete, messages} = options;
 
 	const totalTokens = messages.reduce(
 		(sum, msg) => sum + options.getMessageTokens(msg),
@@ -581,7 +576,7 @@ async function handleBuiltInCommand(
 		queueMicrotask(() => {
 			onAddToChatQueue(
 				React.createElement(InfoMessage, {
-					key: `command-result-${getNextComponentKey()}`,
+					key: generateKey('command-result'),
 					message: result,
 					hideBox: true,
 				}),

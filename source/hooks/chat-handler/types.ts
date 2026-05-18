@@ -16,7 +16,6 @@ export interface UseChatHandlerProps {
 	setIsCancelling: (cancelling: boolean) => void;
 
 	addToChatQueue: (component: React.ReactNode) => void;
-	getNextComponentKey: () => number;
 	abortController: AbortController | null;
 	setAbortController: (controller: AbortController | null) => void;
 	developmentMode?: 'normal' | 'auto-accept' | 'yolo' | 'plan' | 'scheduler';

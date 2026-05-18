@@ -5,6 +5,7 @@ import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
 import {CommandIntegration} from '@/custom-commands/command-integration';
 import {promptHistory} from '@/prompt-history';
+import {generateKey} from '@/session/key-generator';
 import {getTuneToolMode} from '@/types/config';
 import type {Message} from '@/types/core';
 import {MessageBuilder} from '@/utils/message-builder';
@@ -59,7 +60,6 @@ export function useChatHandler({
 	currentModel,
 	setIsCancelling,
 	addToChatQueue,
-	getNextComponentKey,
 	abortController,
 	setAbortController,
 	developmentMode = 'normal',
@@ -176,9 +176,9 @@ export function useChatHandler({
 	// Helper to display errors in chat queue
 	const displayError = React.useCallback(
 		(error: unknown, keyPrefix: string) => {
-			displayErrorHelper(error, keyPrefix, addToChatQueue, getNextComponentKey);
+			displayErrorHelper(error, keyPrefix, addToChatQueue);
 		},
-		[addToChatQueue, getNextComponentKey],
+		[addToChatQueue],
 	);
 
 	// Reset conversation state when messages are cleared
@@ -207,7 +207,6 @@ export function useChatHandler({
 					setTokenCount,
 					setMessages,
 					addToChatQueue,
-					getNextComponentKey,
 					currentProvider,
 					currentModel,
 					developmentMode,
@@ -239,7 +238,6 @@ export function useChatHandler({
 			setAbortController,
 			setMessages,
 			addToChatQueue,
-			getNextComponentKey,
 			currentProvider,
 			currentModel,
 			developmentMode,
@@ -281,7 +279,7 @@ export function useChatHandler({
 		// Pass the full assembled message for accurate token counting
 		addToChatQueue(
 			<UserMessage
-				key={`user-${getNextComponentKey()}`}
+				key={generateKey('user')}
 				message={displayMessage}
 				tokenContent={message}
 			/>,

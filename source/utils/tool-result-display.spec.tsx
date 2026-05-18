@@ -33,17 +33,6 @@ interface ToolMessageProps {
 // Test Helpers
 // ============================================================================
 
-// Helper to create a mock getNextComponentKey function
-// Returns a function that always returns the same value (for simple tests)
-// or can be called with createMockGetNextComponentKey() to get an incrementing counter
-function createMockGetNextComponentKey(startValue = 1): () => number {
-	let counter = startValue;
-	return () => counter++;
-}
-
-// Simple mock that always returns 1 (for tests that don't care about uniqueness)
-const mockGetNextComponentKey = () => 1;
-
 // Helper to create mock tool calls
 function createMockToolCall(
 	id: string,
@@ -120,7 +109,7 @@ test('displayToolResult - displays error message for error result', async t => {
 	);
 	const {addToChatQueue, queue} = createMockAddToChatQueue();
 
-	await displayToolResult(toolCall, result, null, addToChatQueue, mockGetNextComponentKey);
+	await displayToolResult(toolCall, result, null, addToChatQueue);
 
 	t.is(queue.length, 1);
 	t.true(React.isValidElement(queue[0]));
@@ -138,7 +127,7 @@ test('displayToolResult - strips "Error: " prefix from error message', async t =
 	);
 	const {addToChatQueue, queue} = createMockAddToChatQueue();
 
-	await displayToolResult(toolCall, result, null, addToChatQueue, mockGetNextComponentKey);
+	await displayToolResult(toolCall, result, null, addToChatQueue);
 
 	const element = queue[0] as React.ReactElement<ErrorMessageProps>;
 	t.is(element.props.message, 'File not found');
@@ -153,7 +142,7 @@ test('displayToolResult - sets hideBox to true for error message', async t => {
 	);
 	const {addToChatQueue, queue} = createMockAddToChatQueue();
 
-	await displayToolResult(toolCall, result, null, addToChatQueue, mockGetNextComponentKey);
+	await displayToolResult(toolCall, result, null, addToChatQueue);
 
 	const element = queue[0] as React.ReactElement<ErrorMessageProps>;
 	t.is(element.props.hideBox, true);
@@ -168,7 +157,7 @@ test('displayToolResult - returns silently when toolManager is null and no error
 	const result = createMockToolResult('call-1', 'TestTool', 'Success result');
 	const {addToChatQueue, queue} = createMockAddToChatQueue();
 
-	await displayToolResult(toolCall, result, null, addToChatQueue, mockGetNextComponentKey);
+	await displayToolResult(toolCall, result, null, addToChatQueue);
 
 	// With null toolManager and no error, function returns without adding to queue
 	t.is(queue.length, 0);
@@ -195,7 +184,6 @@ test('displayToolResult - uses formatter when available', async t => {
 		result,
 		asMockToolManager(toolManager),
 		addToChatQueue,
-		mockGetNextComponentKey,
 	);
 
 	t.true(formatterCalled);
@@ -215,7 +203,6 @@ test('displayToolResult - displays formatted result as ToolMessage when formatte
 		result,
 		asMockToolManager(toolManager),
 		addToChatQueue,
-		mockGetNextComponentKey,
 	);
 
 	const element = queue[0] as React.ReactElement<ToolMessageProps>;
@@ -238,7 +225,6 @@ test('displayToolResult - clones React element when formatter returns element', 
 		result,
 		asMockToolManager(toolManager),
 		addToChatQueue,
-		mockGetNextComponentKey,
 	);
 
 	t.is(queue.length, 1);
@@ -262,7 +248,6 @@ test('displayToolResult - falls back to raw result when formatter throws', async
 		result,
 		asMockToolManager(toolManager),
 		addToChatQueue,
-		mockGetNextComponentKey,
 	);
 
 	t.is(queue.length, 1);
@@ -288,7 +273,6 @@ test('displayToolResult - displays raw result when no formatter exists', async t
 		result,
 		asMockToolManager(toolManager),
 		addToChatQueue,
-		mockGetNextComponentKey,
 	);
 
 	t.is(queue.length, 1);
@@ -320,7 +304,6 @@ test('displayToolResult - parses string arguments before passing to formatter', 
 		result,
 		asMockToolManager(toolManager),
 		addToChatQueue,
-		mockGetNextComponentKey,
 	);
 
 	t.deepEqual(receivedArgs, {path: '/test'});
@@ -344,7 +327,6 @@ test('displayToolResult - passes object arguments directly to formatter', async 
 		result,
 		asMockToolManager(toolManager),
 		addToChatQueue,
-		mockGetNextComponentKey,
 	);
 
 	t.deepEqual(receivedArgs, args);
@@ -354,31 +336,25 @@ test('displayToolResult - passes object arguments directly to formatter', async 
 // Tests for Key Generation
 // ============================================================================
 
-test('displayToolResult - generates unique keys using getNextComponentKey', async t => {
+test('displayToolResult - generates unique keys for successive calls', async t => {
 	const toolCall = createMockToolCall('call-1', 'TestTool');
 	const result = createMockToolResult('call-1', 'TestTool', 'result');
 	const {addToChatQueue, queue} = createMockAddToChatQueue();
 
 	const toolManager = new MockToolManager();
 
-	// Create a counter function that returns incrementing values
-	let counter = 0;
-	const getNextComponentKey = () => ++counter;
-
-	// Call twice - the function will return different values each time
+	// Each call should produce a unique key from the shared key generator
 	await displayToolResult(
 		toolCall,
 		result,
 		asMockToolManager(toolManager),
 		addToChatQueue,
-		getNextComponentKey,
 	);
 	await displayToolResult(
 		toolCall,
 		result,
 		asMockToolManager(toolManager),
 		addToChatQueue,
-		getNextComponentKey,
 	);
 
 	t.is(queue.length, 2);
@@ -395,27 +371,27 @@ test('displayToolResult - includes tool_call_id in key', async t => {
 	const {addToChatQueue, queue} = createMockAddToChatQueue();
 
 	const toolManager = new MockToolManager();
-	const getNextComponentKey = () => 1; // Same counter, different tool_call_ids
 
 	await displayToolResult(
 		toolCall1,
 		result1,
 		asMockToolManager(toolManager),
 		addToChatQueue,
-		getNextComponentKey,
 	);
 	await displayToolResult(
 		toolCall2,
 		result2,
 		asMockToolManager(toolManager),
 		addToChatQueue,
-		getNextComponentKey,
 	);
 
 	t.is(queue.length, 2);
 	const element1 = queue[0] as React.ReactElement;
 	const element2 = queue[1] as React.ReactElement;
 	t.not(element1.key, element2.key);
+	// The keys should reference different tool call ids
+	t.regex(element1.key as string, /call-1/);
+	t.regex(element2.key as string, /call-2/);
 });
 
 // ============================================================================
@@ -434,7 +410,6 @@ test('displayToolResult - sets hideBox to true for all ToolMessage displays', as
 		result,
 		asMockToolManager(toolManager),
 		addToChatQueue,
-		mockGetNextComponentKey,
 	);
 
 	const element = queue[0] as React.ReactElement<ToolMessageProps>;
@@ -463,7 +438,6 @@ test('displayToolResult - handles complex multi-tool scenario', async t => {
 		createMockToolResult('call-1', 'ReadFile', 'file contents'),
 		asMockToolManager(toolManager),
 		addToChatQueue,
-		mockGetNextComponentKey,
 	);
 
 	await displayToolResult(
@@ -471,7 +445,6 @@ test('displayToolResult - handles complex multi-tool scenario', async t => {
 		createMockToolResult('call-2', 'ExecuteBash', 'file1\nfile2'),
 		asMockToolManager(toolManager),
 		addToChatQueue,
-		mockGetNextComponentKey,
 	);
 
 	await displayToolResult(
@@ -479,7 +452,6 @@ test('displayToolResult - handles complex multi-tool scenario', async t => {
 		createMockToolResult('call-3', 'ToolWithoutFormatter', 'raw output'),
 		asMockToolManager(toolManager),
 		addToChatQueue,
-		mockGetNextComponentKey,
 	);
 
 	t.is(queue.length, 3);
@@ -503,7 +475,6 @@ test('displayToolResult - compact mode adds single compact element to queue', as
 		result,
 		null,
 		addToChatQueue,
-		mockGetNextComponentKey,
 		true, // compact
 	);
 
@@ -525,7 +496,6 @@ test('displayToolResult - compact mode still shows errors in full', async t => {
 		result,
 		null,
 		addToChatQueue,
-		mockGetNextComponentKey,
 		true, // compact
 	);
 
@@ -545,7 +515,6 @@ test('displayCompactCountsSummary - adds single wrapper element for all tool typ
 	displayCompactCountsSummary(
 		{read_file: 5, search_file_contents: 2},
 		addToChatQueue,
-		createMockGetNextComponentKey(),
 	);
 
 	t.is(queue.length, 1);
@@ -557,7 +526,6 @@ test('displayCompactCountsSummary - handles single tool type', t => {
 	displayCompactCountsSummary(
 		{read_file: 3},
 		addToChatQueue,
-		createMockGetNextComponentKey(),
 	);
 
 	t.is(queue.length, 1);
@@ -569,7 +537,6 @@ test('displayCompactCountsSummary - handles empty counts', t => {
 	displayCompactCountsSummary(
 		{},
 		addToChatQueue,
-		createMockGetNextComponentKey(),
 	);
 
 	t.is(queue.length, 0);
@@ -634,7 +601,7 @@ test('displayToolResult compact - read_file shows compact description', t => {
 	const toolCall = createMockToolCall('1', 'read_file', {path: '/test.ts'});
 	const result = createMockToolResult('1', 'read_file', 'file contents');
 
-	displayToolResult(toolCall, result, null, addToChatQueue, mockGetNextComponentKey, true);
+	displayToolResult(toolCall, result, null, addToChatQueue, true);
 
 	t.is(queue.length, 1);
 });
@@ -644,7 +611,7 @@ test('displayToolResult compact - execute_bash shows compact description', t => 
 	const toolCall = createMockToolCall('1', 'execute_bash', {command: 'ls'});
 	const result = createMockToolResult('1', 'execute_bash', 'output');
 
-	displayToolResult(toolCall, result, null, addToChatQueue, mockGetNextComponentKey, true);
+	displayToolResult(toolCall, result, null, addToChatQueue, true);
 
 	t.is(queue.length, 1);
 });
@@ -654,7 +621,7 @@ test('displayToolResult compact - unknown tool uses default description', t => {
 	const toolCall = createMockToolCall('1', 'custom_mcp_tool', {});
 	const result = createMockToolResult('1', 'custom_mcp_tool', 'output');
 
-	displayToolResult(toolCall, result, null, addToChatQueue, mockGetNextComponentKey, true);
+	displayToolResult(toolCall, result, null, addToChatQueue, true);
 
 	t.is(queue.length, 1);
 });

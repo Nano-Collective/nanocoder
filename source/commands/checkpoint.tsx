@@ -7,6 +7,7 @@ import {
 	WarningMessage,
 } from '@/components/message-box';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {generateKey} from '@/session/key-generator';
 import {Command, Message} from '@/types/index';
 import {addToMessageQueue} from '@/utils/message-queue';
 
@@ -71,7 +72,7 @@ async function createCheckpoint(
 
 		if (messages.length === 0) {
 			return React.createElement(WarningMessage, {
-				key: `warning-${Date.now()}`,
+				key: generateKey('warning'),
 				message: 'No messages to checkpoint. Start a conversation first.',
 				hideBox: true,
 			});
@@ -85,7 +86,7 @@ async function createCheckpoint(
 		);
 
 		return React.createElement(SuccessMessage, {
-			key: `success-${Date.now()}`,
+			key: generateKey('success'),
 			message: `Checkpoint '${checkpointMetadata.name}' created successfully
   └─ ${checkpointMetadata.messageCount} messages saved
   └─ ${
@@ -100,7 +101,7 @@ async function createCheckpoint(
 		});
 	} catch (error) {
 		return React.createElement(ErrorMessage, {
-			key: `error-${Date.now()}`,
+			key: generateKey('error'),
 			message: `Failed to create checkpoint: ${
 				error instanceof Error ? error.message : 'Unknown error'
 			}`,
@@ -118,12 +119,12 @@ async function listCheckpoints(): Promise<React.ReactElement> {
 		const checkpoints = await manager.listCheckpoints();
 
 		return React.createElement(CheckpointListDisplay, {
-			key: `list-${Date.now()}`,
+			key: generateKey('list'),
 			checkpoints,
 		});
 	} catch (error) {
 		return React.createElement(ErrorMessage, {
-			key: `error-${Date.now()}`,
+			key: generateKey('error'),
 			message: `Failed to list checkpoints: ${
 				error instanceof Error ? error.message : 'Unknown error'
 			}`,
@@ -147,7 +148,7 @@ async function loadCheckpoint(
 		if (checkpointName) {
 			if (!manager.checkpointExists(checkpointName)) {
 				return React.createElement(ErrorMessage, {
-					key: `error-${Date.now()}`,
+					key: generateKey('error'),
 					message: `Checkpoint '${checkpointName}' does not exist. Use /checkpoint list to see available checkpoints.`,
 					hideBox: true,
 				});
@@ -161,7 +162,7 @@ async function loadCheckpoint(
 
 			return React.createElement(
 				React.Fragment,
-				{key: `load-success-${Date.now()}`},
+				{key: generateKey('load-success')},
 				React.createElement(SuccessMessage, {
 					key: 'success',
 					message: `✓ Checkpoint '${checkpointName}' files restored successfully`,
@@ -184,7 +185,7 @@ async function loadCheckpoint(
 
 		if (checkpoints.length === 0) {
 			return React.createElement(InfoMessage, {
-				key: `info-${Date.now()}`,
+				key: generateKey('info'),
 				message:
 					'No checkpoints available. Create one with /checkpoint create [name]',
 				hideBox: true,
@@ -198,7 +199,7 @@ async function loadCheckpoint(
 		const handleError = (error: Error) => {
 			addToMessageQueue(
 				React.createElement(ErrorMessage, {
-					key: `restore-error-${Date.now()}`,
+					key: generateKey('restore-error'),
 					message: `Failed to restore checkpoint: ${error.message}`,
 					hideBox: true,
 				}),
@@ -206,7 +207,7 @@ async function loadCheckpoint(
 		};
 
 		return React.createElement(CheckpointSelector, {
-			key: `selector-${Date.now()}`,
+			key: generateKey('selector'),
 			checkpoints,
 			currentMessageCount: messages.length,
 			onSelect: (selectedName: string, createBackup: boolean) => {
@@ -224,7 +225,7 @@ async function loadCheckpoint(
 								// Show backup error but continue with restore
 								addToMessageQueue(
 									React.createElement(WarningMessage, {
-										key: `backup-warning-${Date.now()}`,
+										key: generateKey('backup-warning'),
 										message: `Warning: Failed to create backup: ${
 											error instanceof Error ? error.message : 'Unknown error'
 										}`,
@@ -242,7 +243,7 @@ async function loadCheckpoint(
 
 						addToMessageQueue(
 							React.createElement(SuccessMessage, {
-								key: `restore-success-${Date.now()}`,
+								key: generateKey('restore-success'),
 								message: `✓ Checkpoint '${selectedName}' restored successfully`,
 								hideBox: true,
 							}),
@@ -261,7 +262,7 @@ async function loadCheckpoint(
 		});
 	} catch (error) {
 		return React.createElement(ErrorMessage, {
-			key: `error-${Date.now()}`,
+			key: generateKey('error'),
 			message: `Failed to load checkpoint: ${
 				error instanceof Error ? error.message : 'Unknown error'
 			}`,
@@ -277,7 +278,7 @@ async function deleteCheckpoint(args: string[]): Promise<React.ReactElement> {
 	try {
 		if (args.length === 0) {
 			return React.createElement(ErrorMessage, {
-				key: `error-${Date.now()}`,
+				key: generateKey('error'),
 				message:
 					'Please specify a checkpoint name to delete. Usage: /checkpoint delete <name>',
 				hideBox: true,
@@ -289,7 +290,7 @@ async function deleteCheckpoint(args: string[]): Promise<React.ReactElement> {
 
 		if (!manager.checkpointExists(checkpointName)) {
 			return React.createElement(ErrorMessage, {
-				key: `error-${Date.now()}`,
+				key: generateKey('error'),
 				message: `Checkpoint '${checkpointName}' does not exist. Use /checkpoint list to see available checkpoints.`,
 				hideBox: true,
 			});
@@ -300,13 +301,13 @@ async function deleteCheckpoint(args: string[]): Promise<React.ReactElement> {
 
 		// Show success with what was deleted
 		return React.createElement(SuccessMessage, {
-			key: `delete-success-${Date.now()}`,
+			key: generateKey('delete-success'),
 			message: `✓ Checkpoint '${checkpointName}' deleted successfully`,
 			hideBox: true,
 		});
 	} catch (error) {
 		return React.createElement(ErrorMessage, {
-			key: `error-${Date.now()}`,
+			key: generateKey('error'),
 			message: `Failed to delete checkpoint: ${
 				error instanceof Error ? error.message : 'Unknown error'
 			}`,
@@ -352,12 +353,12 @@ export const checkpointCommand: Command = {
 			case '--help':
 			case '-h':
 				return React.createElement(CheckpointHelp, {
-					key: `help-${Date.now()}`,
+					key: generateKey('help'),
 				});
 
 			default:
 				return React.createElement(ErrorMessage, {
-					key: `error-${Date.now()}`,
+					key: generateKey('error'),
 					message: `Unknown checkpoint subcommand: ${subcommand}. Use /checkpoint help for available commands.`,
 					hideBox: true,
 				});

@@ -3,9 +3,8 @@
  * Tracks current session usage
  */
 
-import {randomBytes} from 'node:crypto';
-
 import {getModelContextLimit} from '@/models/index';
+import {getKeyGeneratorSessionId} from '@/session/key-generator';
 import type {Message} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
 import type {CurrentSessionStats, SessionUsage} from '../types/usage';
@@ -19,14 +18,10 @@ export class SessionTracker {
 	private model: string;
 
 	constructor(provider: string, model: string) {
-		this.sessionId = this.generateSessionId();
+		this.sessionId = getKeyGeneratorSessionId();
 		this.startTime = Date.now();
 		this.provider = provider;
 		this.model = model;
-	}
-
-	private generateSessionId(): string {
-		return `${Date.now()}-${randomBytes(8).toString('hex')}`;
 	}
 
 	async getCurrentStats(

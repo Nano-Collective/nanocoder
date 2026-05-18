@@ -22,8 +22,6 @@ function createMockOptions(overrides: Partial<{
 }> = {}) {
 	const components: unknown[] = overrides.components ?? [];
 	const chatMessages: string[] = overrides.chatMessages ?? [];
-	let keyCounter = 0;
-
 	return {
 		options: {
 			onAddToChatQueue: (component: unknown) => {
@@ -33,7 +31,6 @@ function createMockOptions(overrides: Partial<{
 				chatMessages.push(msg);
 			},
 			onCommandComplete: () => {},
-			getNextComponentKey: () => keyCounter++,
 		},
 		components,
 		chatMessages,

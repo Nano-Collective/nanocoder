@@ -6,6 +6,7 @@ import {
 	WarningMessage,
 } from '@/components/message-box';
 import {TIMEOUT_MESSAGE_PROCESSING_MS} from '@/constants';
+import {generateKey} from '@/session/key-generator';
 import type {MessageType} from '@/types/index';
 import {createErrorInfo} from '@/utils/error-formatter';
 // Import logging utilities with dependency injection pattern
@@ -22,7 +23,6 @@ import {
 
 // Global message queue function - will be set by App component
 let globalAddToChatQueue: ((component: React.ReactNode) => void) | null = null;
-let componentKeyCounter = 0;
 
 // Get logger instance to avoid circular dependencies
 import {getLogger} from '@/utils/logging';
@@ -37,12 +37,6 @@ export function setGlobalMessageQueue(
 		hasPreviousQueue: !!globalAddToChatQueue,
 	});
 	globalAddToChatQueue = addToChatQueue;
-}
-
-// Helper function to generate stable keys
-function getNextKey(): string {
-	componentKeyCounter++;
-	return `global-msg-${componentKeyCounter}`;
 }
 
 // Enhanced message metadata for tracking and debugging
@@ -126,7 +120,6 @@ function addTypedMessage(
 			context: options?.context,
 			correlationId,
 			hasGlobalQueue: !!globalAddToChatQueue,
-			messageId: `msg-${componentKeyCounter + 1}`,
 		});
 
 		// Log error details if provided
@@ -175,7 +168,7 @@ function addTypedMessage(
 			return;
 		}
 
-		const key = getNextKey();
+		const key = generateKey('global-msg');
 		let component: React.ReactNode;
 
 		switch (type) {
