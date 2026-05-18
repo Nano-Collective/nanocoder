@@ -1,5 +1,13 @@
 name: Update Nix Package
 
+# Note: pnpm 11 reproducibility relies on two env-var derivation attrs in
+# flake.nix (`pnpm_config_side_effects_cache`, `pnpm_config_update_notifier`)
+# that paper over a missing `=` in upstream nixpkgs'
+# pkgs/build-support/node/fetch-pnpm-deps/default.nix. See the comment on
+# `pnpmDeps` in flake.nix for the verify-and-remove recipe. If this workflow
+# starts failing with a non-deterministic pnpmDeps hash on a clean nixpkgs
+# bump, the upstream fix likely changed something subtle, check there first.
+
 on:
   workflow_dispatch:
     inputs:

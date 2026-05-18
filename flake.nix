@@ -74,7 +74,14 @@
           # Setting the values as derivation attributes makes Nix export
           # them as build env vars before installPhase runs, so the broken
           # upstream `export X val` lines become idempotent no-ops.
-          # Drop these once nixpkgs fixes the `=` typo.
+          #
+          # Verify upstream has fixed the typo before dropping these:
+          #   nix eval --raw nixpkgs#path \
+          #     | xargs -I{} grep -n 'export pnpm_config_' \
+          #         {}/pkgs/build-support/node/fetch-pnpm-deps/default.nix
+          # If those lines show `export X=val` (with `=`), drop these
+          # two attrs and re-run the update-nix workflow to refresh the
+          # pnpmDeps hash.
           pnpmDeps = (fetchPnpmDeps {
             inherit (finalAttrs) pname version src;
             hash = "sha256-FuGhPwuSMNRd5ndGS91Y/O6tUW1Sw1DU4OM3yrHEWSc=";
