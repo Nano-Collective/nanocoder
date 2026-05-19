@@ -295,6 +295,10 @@ async function main(): Promise<void> {
 			trustDirectory,
 		});
 	} else {
+		// Prevent Node's global performance entry buffer from growing without
+		// bound during long Ink sessions. See issue #521.
+		const {installPerfBufferGuard} = await import('@/utils/perf-buffer');
+		installPerfBufferGuard();
 		render(
 			<App
 				vscodeMode={vscodeMode}
