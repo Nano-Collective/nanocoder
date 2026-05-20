@@ -335,6 +335,121 @@ export async function handleAgentCopy(
 }
 
 /**
+ * Handles /tools create — creates a custom-tool definition file and prompts
+ * the AI to help write it. Returns true if handled.
+ */
+export async function handleToolCreate(
+	commandParts: string[],
+	options: MessageSubmissionOptions,
+): Promise<boolean> {
+	if (commandParts[0] !== 'tools' || commandParts[1] !== 'create') {
+		return false;
+	}
+
+	const {onAddToChatQueue, onHandleChatMessage, onCommandComplete} = options;
+	const fileName = commandParts[2];
+
+	if (!fileName) {
+		onAddToChatQueue(
+			React.createElement(ErrorMessage, {
+				key: generateKey('tools-create-error'),
+				message: 'Usage: /tools create <name>\nExample: /tools create k8s-pods',
+			}),
+		);
+		onCommandComplete?.();
+		return true;
+	}
+
+	const safeName = fileName.endsWith('.md') ? fileName : `${fileName}.md`;
+	const targetDir = join(process.cwd(), '.nanocoder', 'tools');
+	const filePath = join(targetDir, safeName);
+
+	if (existsSync(filePath)) {
+		onAddToChatQueue(
+			React.createElement(ErrorMessage, {
+				key: generateKey('tools-create-exists'),
+				message: `Custom tool file already exists: .nanocoder/tools/${safeName}`,
+			}),
+		);
+		onCommandComplete?.();
+		return true;
+	}
+
+	// Tool names must match ^[a-z][a-z0-9_]*$ — convert dashes to underscores
+	// so a filename like "k8s-pods.md" becomes a valid tool name "k8s_pods".
+	const baseName = safeName.replace(/\.md$/, '');
+	const toolName = baseName.replace(/-/g, '_').toLowerCase();
+
+	mkdirSync(targetDir, {recursive: true});
+
+	const template = `---
+name: ${toolName}
+description: A short description of what this tool does (shown to the LLM)
+parameters: {}
+approval: always
+---
+
+# Shell script body. Use {{ param }} to substitute parameters (shell-quoted).
+# Use {{# param }}...{{/ param }} for sections that include only when the
+# parameter is provided.
+
+echo "TODO: replace this body with the command you want to run"
+`;
+
+	writeFileSync(filePath, template, 'utf-8');
+
+	onAddToChatQueue(
+		React.createElement(SuccessMessage, {
+			key: generateKey('tools-created'),
+			message: `Created custom tool file: .nanocoder/tools/${safeName}`,
+			hideBox: true,
+		}),
+	);
+
+	await onHandleChatMessage(
+		`I just created a new custom tool definition file at .nanocoder/tools/${safeName}. Help me write the content for this tool. Ask me what shell command this tool should run, what parameters it needs, and whether it's read-only or mutates state. Then write the complete markdown file using the write_file tool.
+
+Here is the full frontmatter format for custom tools:
+
+---
+name: ${toolName}                     # snake_case, must match ^[a-z][a-z0-9_]*$
+description: Description shown to the LLM   # required
+parameters:                           # optional, default {}
+  param_name:
+    type: string | number | integer | boolean | array
+    description: shown to the LLM
+    required: true | false            # default false
+    default: any                      # used when not provided
+    enum: [a, b, c]                   # restrict values
+    pattern: '^regex$'                # string only
+    minLength: 1                      # string only
+    maxLength: 100                    # string only
+    min: 0                            # number/integer only
+    max: 1000                         # number/integer only
+    items: {type: string}             # array only
+approval: never | always | destructive   # default: always
+read_only: true | false               # default: (approval == never)
+timeout_ms: 30000                     # default 30000, max 300000
+cwd: ./scripts                        # default: project root; supports \${VAR}
+env:                                  # extra env vars; values support \${VAR}
+  FOO: bar
+shell: bash | sh                      # default: bash if available, else sh
+---
+
+The body is a shell script. Use {{ name }} to substitute parameters (values are shell-quoted automatically — safe against injection). Use {{# name }}...{{/ name }} for conditional sections that include only when the param is truthy.
+
+Picking approval:
+- "never" — runs without prompting (only for safe, read-only operations like \`ls\`, \`cat\`, \`git status\`)
+- "always" (default) — always asks the user before running
+- "destructive" — prompts in normal mode, auto-approves in auto-accept/yolo (matches built-in file mutation tools)
+
+Once you know what the user wants, replace the placeholder body with the real shell command and update the frontmatter accordingly.`,
+	);
+
+	return true;
+}
+
+/**
  * Handles /commands create — creates the command file and prompts the AI to help write it.
  * Returns true if handled.
  */

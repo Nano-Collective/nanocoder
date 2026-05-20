@@ -86,6 +86,10 @@ Two execution paths exist: native tool calling (preferred, via AI SDK) and an XM
 
 Slash commands live in `source/commands/` and are lazy-loaded via `source/commands/lazy-registry.ts`. To add a new command: create the command file exporting a `Command` object (name, description, handler), then add an entry to `lazyCommands` in the registry. Commands return React elements for Ink rendering. Some commands (clear, model, provider, etc.) need app state and are intercepted as "special commands" in `source/app/utils/app-util.ts`.
 
+### Custom Tools
+
+File-based tools live in `source/custom-tools/`. `CustomToolLoader` discovers `.md` files in `.nanocoder/tools/` (project) and `~/.config/nanocoder/tools/` (personal, via `getConfigPath()`); project tools shadow personal ones by `name`. Each file's YAML frontmatter declares the schema; `schema-builder.ts` synthesizes both the AI SDK `inputSchema` and a `ToolValidator`. `template.ts` renders the script body with `{{ name }}` and `{{# section }}` placeholders, shell-quoting all substitutions. `handler.ts` spawns the shell with timeout + env/cwd resolution. `build-tool.ts` glues everything into a `ToolEntry`, then `ToolManager.initializeCustomTools()` registers them into the same registry as built-ins and MCP tools — downstream code (`/tools`, subagents, mode filtering) sees them through the unified registry. Mode policy for custom tools lives in `ToolManager.getAvailableToolNames`: plan mode requires `approval=never && read_only=true`, scheduler mode requires `approval=never`.
+
 ### Configuration Resolution Order
 
 1. `agents.config.json` in working directory (project-level)

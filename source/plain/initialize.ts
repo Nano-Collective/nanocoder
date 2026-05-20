@@ -110,6 +110,15 @@ export async function initializePlain(
 		writeStatus(`Failed to load custom commands: ${String(error)}`);
 	}
 
+	try {
+		const {errors} = toolManager.initializeCustomTools();
+		for (const err of errors) {
+			writeStatus(`Custom tool error (${err.file}): ${err.error}`);
+		}
+	} catch (error) {
+		writeStatus(`Failed to load custom tools: ${String(error)}`);
+	}
+
 	await initializeMCP(toolManager);
 
 	return {

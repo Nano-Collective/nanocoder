@@ -198,4 +198,10 @@ export const lazyCommands: LazyCommand[] = [
 		description: 'Show project contributors and dependencies',
 		load: () => import('@/commands/credits').then(m => m.creditsCommand),
 	},
+	{
+		name: 'tools',
+		description:
+			'List available tools (built-in, MCP, custom). Subcommand: create <name>',
+		load: () => import('@/commands/tools').then(m => m.toolsCommand),
+	},
 ];

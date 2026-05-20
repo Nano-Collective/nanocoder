@@ -1,5 +1,5 @@
 import test from 'ava';
-import React from 'react';
+import React, {useEffect, useState} from 'react';
 import {renderWithTheme} from '../test-utils/render-with-theme';
 import type {PendingQuestion} from '../utils/question-queue';
 import QuestionPrompt from './question-prompt';
@@ -131,5 +131,57 @@ test('QuestionPrompt renders with 2 options (minimum)', t => {
 	t.truthy(output);
 	t.regex(output!, /Yes/);
 	t.regex(output!, /No/);
+	unmount();
+});
+
+// Regression: when two ask_user calls fire back-to-back the parent batches
+// pendingQuestion null → new, so QuestionPrompt re-renders with new props
+// instead of unmounting. Internal state (answeredRef, freeform mode/value,
+// SelectInput selected index) must reset so the second question is usable.
+test('QuestionPrompt accepts a new answer when question prop changes without unmount', async t => {
+	const answers: string[] = [];
+	const q1 = createQuestion({
+		question: 'First question',
+		options: ['A1', 'B1'],
+		allowFreeform: false,
+	});
+	const q2 = createQuestion({
+		question: 'Second question',
+		options: ['A2', 'B2'],
+		allowFreeform: false,
+	});
+
+	let swapToQ2: () => void = () => {};
+	function Harness() {
+		const [q, setQ] = useState<PendingQuestion>(q1);
+		useEffect(() => {
+			swapToQ2 = () => setQ(q2);
+		}, []);
+		return <QuestionPrompt question={q} onAnswer={a => answers.push(a)} />;
+	}
+
+	const {stdin, lastFrame, unmount} = renderWithTheme(<Harness />);
+	const tick = () => new Promise(resolve => setTimeout(resolve, 20));
+
+	// Pick the first option for Q1 (Enter on the default selection).
+	stdin.write('\r');
+	await tick();
+	t.deepEqual(answers, ['A1']);
+
+	// Parent now hands us Q2 without unmounting (the batched-update case).
+	swapToQ2();
+	await tick();
+
+	const frame = lastFrame();
+	t.regex(frame!, /Second question/);
+	t.regex(frame!, /A2/);
+	t.regex(frame!, /B2/);
+
+	// Submitting the default selection must produce Q2's answer — not be
+	// silently dropped by a stale answeredRef.
+	stdin.write('\r');
+	await tick();
+	t.deepEqual(answers, ['A1', 'A2']);
+
 	unmount();
 });

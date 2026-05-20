@@ -406,6 +406,27 @@ export function useAppInitialization({
 				/>,
 			);
 		}
+
+		try {
+			const {errors} = toolManager.initializeCustomTools();
+			for (const err of errors) {
+				addToChatQueue(
+					<ErrorMessage
+						key={generateKey('custom-tool-error')}
+						message={`Custom tool error (${err.file}): ${err.error}`}
+						hideBox={true}
+					/>,
+				);
+			}
+		} catch (error) {
+			addToChatQueue(
+				<ErrorMessage
+					key={generateKey('custom-tools-error')}
+					message={`Failed to load custom tools: ${String(error)}`}
+					hideBox={true}
+				/>,
+			);
+		}
 	};
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: Initialization effect should only run once on mount

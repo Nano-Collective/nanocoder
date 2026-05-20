@@ -24,6 +24,7 @@ import {
 	handleCommandCreate,
 	handleScheduleCreate,
 	handleScheduleStart,
+	handleToolCreate,
 } from './handlers/create-handler';
 import {handleResumeCommand} from './handlers/session-handler';
 
@@ -613,6 +614,7 @@ async function handleSlashCommand(
 	if (await handleCommandCreate(commandParts, options)) return;
 	if (await handleAgentCreate(commandParts, options)) return;
 	if (await handleAgentCopy(commandParts, options)) return;
+	if (await handleToolCreate(commandParts, options)) return;
 	if (await handleSpecialCommand(commandName, options)) return;
 	if (await handleCheckpointLoad(commandParts, options)) return;
 	if (await handleResumeCommand(commandParts, options)) return;

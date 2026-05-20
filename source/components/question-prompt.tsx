@@ -26,6 +26,20 @@ export default function QuestionPrompt({
 	const [isFreeformMode, setIsFreeformMode] = useState(false);
 	const [freeformValue, setFreeformValue] = useState('');
 
+	// Reset internal state whenever a new question arrives. When two
+	// ask_user calls fire back-to-back, React batches the null->new state
+	// transition so this component re-renders with new props instead of
+	// unmounting, leaving stale `answeredRef` (which silently blocks
+	// submission) and stale freeform state. The SelectInput `key` below
+	// handles its own internal selected-index reset.
+	const [previousQuestion, setPreviousQuestion] = useState(question);
+	if (question !== previousQuestion) {
+		setPreviousQuestion(question);
+		answeredRef.current = false;
+		setIsFreeformMode(false);
+		setFreeformValue('');
+	}
+
 	// Build option items for SelectInput
 	const items: OptionItem[] = question.options.map(opt => ({
 		label: opt,
@@ -111,7 +125,11 @@ export default function QuestionPrompt({
 				</Box>
 			) : (
 				<Box flexDirection="column">
-					<SelectInput items={items} onSelect={handleSelect} />
+					<SelectInput
+						key={question.question}
+						items={items}
+						onSelect={handleSelect}
+					/>
 					<Box marginTop={1}>
 						<Text color={colors.secondary}>Press Escape to cancel</Text>
 					</Box>

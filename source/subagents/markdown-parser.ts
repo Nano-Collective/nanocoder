@@ -19,6 +19,7 @@
 
 import * as fs from 'node:fs/promises';
 import {parse as parseYaml} from 'yaml';
+import {splitFrontmatter} from '@/utils/frontmatter';
 import type {
 	ParsedSubagentFile,
 	SubagentConfig,
@@ -125,16 +126,15 @@ export function validateFrontmatter(
  * Extract YAML frontmatter from markdown content.
  */
 export function extractFrontmatter(content: string): SubagentFrontmatter {
-	const match = content.match(/^---\r?\n(.*?)\r?\n---/s);
-
-	if (!match) {
+	const {frontmatter: raw, hasFrontmatter} = splitFrontmatter(content);
+	if (!hasFrontmatter) {
 		throw new Error('No YAML frontmatter found in file');
 	}
 
 	let frontmatter: Record<string, unknown>;
 
 	try {
-		frontmatter = parseYaml(match[1]) as Record<string, unknown>;
+		frontmatter = parseYaml(raw) as Record<string, unknown>;
 	} catch (error) {
 		throw new Error(`Failed to parse YAML frontmatter: ${error}`);
 	}
@@ -155,9 +155,5 @@ export function extractFrontmatter(content: string): SubagentFrontmatter {
  * Extract the body content from markdown (after frontmatter).
  */
 export function extractBody(content: string): string {
-	const withoutFrontmatter = content.replace(
-		/^---\r?\n.*?\r?\n---(?:\r?\n|$)/s,
-		'',
-	);
-	return withoutFrontmatter.trim();
+	return splitFrontmatter(content).body;
 }

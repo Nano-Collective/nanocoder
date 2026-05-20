@@ -1,5 +1,7 @@
 import {getAppConfig} from '@/config/index';
 import {getBraveSearchApiKey} from '@/config/nanocoder-tools-config';
+import {buildToolEntry} from '@/custom-tools/build-tool';
+import {CustomToolLoader} from '@/custom-tools/loader';
 // Type-only import — the `MCPClient` runtime value is loaded dynamically
 // inside `initializeMCP()` so sessions without MCP servers never pay the
 // cost of the @modelcontextprotocol/sdk import graph.
@@ -8,6 +10,7 @@ import {allToolExports} from '@/tools/index';
 import {getToolsForProfile} from '@/tools/tool-profiles';
 import {ToolRegistry} from '@/tools/tool-registry';
 import type {TuneConfig} from '@/types/config';
+import type {CustomToolApprovalPolicy} from '@/types/custom-tools';
 import type {
 	AISDKCoreTool,
 	DevelopmentMode,
@@ -54,12 +57,21 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 };
 
 /**
- * Manages both static tools and dynamic MCP tools.
+ * Manages built-in tools, MCP tools, and file-based custom tools.
  * Single authority for tool availability, filtering, and approval policy.
  */
 export class ToolManager {
 	private registry: ToolRegistry;
 	private mcpClient: MCPClient | null = null;
+	private customTools = new Map<
+		string,
+		{
+			approval: CustomToolApprovalPolicy;
+			readOnly: boolean;
+			source: 'personal' | 'project';
+			filePath: string;
+		}
+	>();
 
 	constructor() {
 		this.registry = ToolRegistry.fromToolExports(allToolExports);
@@ -103,6 +115,44 @@ export class ToolManager {
 		return [];
 	}
 
+	/**
+	 * Load file-based custom tools from `.nanocoder/tools/` (project) and
+	 * the personal tools directory. Project tools override personal ones.
+	 * Custom tools whose name collides with a built-in or already-registered
+	 * MCP tool are skipped with an error. Returns a per-tool load summary so
+	 * callers can surface counts/errors at startup.
+	 */
+	initializeCustomTools(projectRoot?: string): {
+		loaded: string[];
+		errors: Array<{file: string; error: string}>;
+	} {
+		const loader = new CustomToolLoader(projectRoot ?? process.cwd());
+		const {tools, errors} = loader.load();
+		const loaded: string[] = [];
+		const collisions: Array<{file: string; error: string}> = [];
+
+		for (const t of tools) {
+			if (this.registry.hasTool(t.metadata.name)) {
+				collisions.push({
+					file: t.filePath,
+					error: `Tool name "${t.metadata.name}" collides with a built-in or MCP tool — skipping.`,
+				});
+				continue;
+			}
+			const entry = buildToolEntry(t, loader.getProjectRoot());
+			this.registry.register(entry);
+			this.customTools.set(t.metadata.name, {
+				approval: t.metadata.approval,
+				readOnly: t.metadata.readOnly,
+				source: t.source,
+				filePath: t.filePath,
+			});
+			loaded.push(t.metadata.name);
+		}
+
+		return {loaded, errors: [...errors, ...collisions]};
+	}
+
 	// =========================================================================
 	// Tool availability — single source of truth
 	// =========================================================================
@@ -131,6 +181,20 @@ export class ToolManager {
 			if (excluded.length > 0) {
 				const excludeSet = new Set(excluded);
 				names = names.filter(n => !excludeSet.has(n));
+			}
+
+			// Custom tools follow the same posture as built-ins but with policy
+			// applied per-tool from their approval/readOnly metadata.
+			if (developmentMode === 'plan' || developmentMode === 'scheduler') {
+				names = names.filter(n => {
+					const meta = this.customTools.get(n);
+					if (!meta) return true;
+					if (developmentMode === 'scheduler') {
+						return meta.approval === 'never';
+					}
+					// plan mode: only read-only tools with no approval are safe
+					return meta.approval === 'never' && meta.readOnly;
+				});
 			}
 		}
 
@@ -242,6 +306,25 @@ export class ToolManager {
 		return this.registry.hasTool(toolName);
 	}
 
+	isCustomTool(toolName: string): boolean {
+		return this.customTools.has(toolName);
+	}
+
+	getCustomToolInfo(toolName: string):
+		| {
+				approval: CustomToolApprovalPolicy;
+				readOnly: boolean;
+				source: 'personal' | 'project';
+				filePath: string;
+		  }
+		| undefined {
+		return this.customTools.get(toolName);
+	}
+
+	getCustomToolNames(): string[] {
+		return Array.from(this.customTools.keys());
+	}
+
 	getMCPToolInfo(toolName: string): {isMCPTool: boolean; serverName?: string} {
 		if (!this.mcpClient) {
 			return {isMCPTool: false};
@@ -270,6 +353,7 @@ export class ToolManager {
 
 			// Reset registry to only static tools
 			this.registry = ToolRegistry.fromToolExports(allToolExports);
+			this.customTools.clear();
 			this.mcpClient = null;
 		}
 

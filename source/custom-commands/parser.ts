@@ -1,5 +1,6 @@
 import {readFileSync} from 'fs';
 import type {CustomCommandMetadata, ParsedCustomCommand} from '@/types/index';
+import {splitFrontmatter} from '@/utils/frontmatter';
 import {logError} from '@/utils/message-queue';
 
 /**
@@ -204,19 +205,16 @@ function mapRawToMetadata(raw: Record<string, unknown>): CustomCommandMetadata {
  */
 export function parseCommandFile(filePath: string): ParsedCustomCommand {
 	const fileContent = readFileSync(filePath, 'utf-8');
+	const split = splitFrontmatter(fileContent);
 
-	// Check for frontmatter
-	const frontmatterRegex = /^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/;
-	const match = fileContent.match(frontmatterRegex);
-
-	if (match && match[1] && match[2]) {
-		// Parse YAML frontmatter
-		const frontmatter = match[1];
-		const content = match[2];
+	// Preserve historical behavior: files with frontmatter but no body fall
+	// through to "entire file is content" so the metadata block isn't silently
+	// hidden from the user.
+	if (split.hasFrontmatter && split.frontmatter && split.body) {
 		let metadata: CustomCommandMetadata = {};
 
 		try {
-			metadata = parseEnhancedFrontmatter(frontmatter);
+			metadata = parseEnhancedFrontmatter(split.frontmatter);
 		} catch (error) {
 			// If parsing fails, treat entire file as content
 			logError(`Failed to parse frontmatter in ${filePath}: ${String(error)}`);
@@ -228,11 +226,11 @@ export function parseCommandFile(filePath: string): ParsedCustomCommand {
 
 		return {
 			metadata,
-			content: content.trim(),
+			content: split.body,
 		};
 	}
 
-	// No frontmatter, entire file is content
+	// No frontmatter (or frontmatter with no body) — entire file is content.
 	return {
 		metadata: {},
 		content: fileContent.trim(),
