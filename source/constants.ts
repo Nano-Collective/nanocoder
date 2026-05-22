@@ -104,6 +104,9 @@ export const MAX_TOOL_STEPS = 10;
 // can produce reasoning-only turns; one or two retries usually clears it,
 // but unbounded recursion would loop forever.
 export const MAX_EMPTY_TURNS = 2;
+// After hitting the empty-turn cap, mechanically compact the context and
+// retry. This many compact-and-retry cycles are allowed before giving up.
+export const MAX_COMPACT_RETRIES = 3;
 // Cap how many consecutive malformed-XML self-correction recursions we'll
 // attempt before surfacing an error. Without this, a model stuck producing
 // bad XML loops async and appends two messages per iteration until Node's
