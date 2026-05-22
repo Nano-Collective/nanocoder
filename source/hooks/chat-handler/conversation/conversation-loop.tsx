@@ -9,6 +9,11 @@ import {
 	MAX_EMPTY_TURNS,
 	MAX_MALFORMED_RETRIES,
 } from '@/constants';
+import {
+	MAX_COMPACT_RETRIES,
+	MAX_EMPTY_TURNS,
+	MAX_MALFORMED_RETRIES,
+} from '@/constants';
 import {generateKey} from '@/session/key-generator';
 import {
 	parseToolCalls,
@@ -95,6 +100,9 @@ interface ProcessAssistantResponseParams {
 	// Number of compact-and-retry cycles attempted after exhausting empty-turn
 	// nudges. Once MAX_COMPACT_RETRIES is reached we surface the error.
 	compactRetryCount?: number;
+	// Number of compact-and-retry cycles attempted after exhausting empty-turn
+	// nudges. Once MAX_COMPACT_RETRIES is reached we surface the error.
+	compactRetryCount?: number;
 }
 
 // Module-level flag: show XML fallback notice only once per process lifetime.
@@ -159,6 +167,7 @@ export const processAssistantResponse = async (
 		developmentModeRef,
 		emptyTurnCount = 0,
 		malformedRetryCount = 0,
+		compactRetryCount = 0,
 		compactRetryCount = 0,
 	} = params;
 
@@ -784,6 +793,59 @@ export const processAssistantResponse = async (
 		// token budget on thinking) would loop forever.
 		if (emptyTurnCount >= MAX_EMPTY_TURNS) {
 			setLiveComponent?.(null);
+			// If we still have compact-and-retry budget, mechanically compress
+			// the context and nudge the model to continue instead of giving up
+			// immediately. This handles the common case where the model is
+			// exhausting its token budget on reasoning.
+			if (compactRetryCount < MAX_COMPACT_RETRIES) {
+				try {
+					const {createTokenizer} = await import('@/tokenization/index');
+					const tokenizer = createTokenizer(currentProvider, currentModel);
+					const systemPrompt = getLastBuiltPrompt();
+					const sysMsg: Message = {role: 'system', content: systemPrompt};
+					const allForCompress = [sysMsg, ...updatedMessages];
+					const result = compressMessages(allForCompress, tokenizer, {
+						mode: 'aggressive',
+					});
+					if (tokenizer.free) tokenizer.free();
+
+					const compressedUser = result.compressedMessages.filter(
+						m => m.role !== 'system',
+					);
+					setMessages(compressedUser);
+
+					addToChatQueue(
+						<InfoMessage
+							key={generateKey('auto-compact-retry')}
+							message={`Context too large — auto-compacted (${Math.round(result.reductionPercentage)}% reduction). Retrying…`}
+							hideBox={true}
+						/>,
+					);
+
+					const retryNudge: Message = {
+						role: 'user',
+						content:
+							'Context has been compacted. Please continue with the task.',
+					};
+					const retryBuilder = new MessageBuilder(compressedUser);
+					retryBuilder.addMessage(retryNudge);
+					const messagesAfterCompact = retryBuilder.build();
+					setMessages(messagesAfterCompact);
+
+					await processAssistantResponse({
+						...params,
+						messages: messagesAfterCompact,
+						conversationStartTime: startTime,
+						emptyTurnCount: 0,
+						malformedRetryCount: 0,
+						compactRetryCount: compactRetryCount + 1,
+					});
+					return;
+				} catch (_err) {
+					// Compression failed — fall through to give-up below
+				}
+			}
+
 			// If we still have compact-and-retry budget, mechanically compress
 			// the context and nudge the model to continue instead of giving up
 			// immediately. This handles the common case where the model is
