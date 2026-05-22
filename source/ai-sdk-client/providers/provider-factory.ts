@@ -29,6 +29,7 @@ import {
 } from '@/config/copilot-credentials';
 import type {AIProviderConfig} from '@/types/index';
 import {getLogger} from '@/utils/logging';
+import {isOpenRouterProvider} from './openrouter.js';
 
 /**
  * Discriminated union pairing each underlying SDK provider with its `kind`.
@@ -271,7 +272,7 @@ export async function createProvider(
 
 	// Add OpenRouter-specific headers for app attribution
 	const headers: Record<string, string> = config.headers ?? {};
-	if (providerConfig.name.toLowerCase() === 'openrouter') {
+	if (isOpenRouterProvider(providerConfig.name)) {
 		headers['HTTP-Referer'] = 'https://github.com/Nano-Collective/nanocoder';
 		headers['X-Title'] = 'Nanocoder';
 	}

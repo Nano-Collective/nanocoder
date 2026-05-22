@@ -193,7 +193,13 @@ async function createAISDKClient(
 	}
 }
 
-function loadProviderConfigs(): AIProviderConfig[] {
+/**
+ * Translate user-facing `ProviderConfig` entries (the shape stored in
+ * `agents.config.json`) into the resolved `AIProviderConfig` shape consumed
+ * by the AI SDK client. Exported so tests can assert the translation —
+ * notably that the `openrouter` block is threaded through cleanly.
+ */
+export function loadProviderConfigs(): AIProviderConfig[] {
 	// Use the new hierarchical provider loading system to get providers from all levels
 	const allProviderConfigs = loadAllProviderConfigs();
 
@@ -211,6 +217,10 @@ function loadProviderConfigs(): AIProviderConfig[] {
 		disableToolModels: provider.disableToolModels,
 		// SDK provider package to use
 		sdkProvider: provider.sdkProvider,
+		// OpenRouter-specific request body fields (provider routing, plugins,
+		// reasoning, etc.). Always-on for the OpenRouter provider — never gated
+		// by tune so users get consistent routing across sessions.
+		openrouter: provider.openrouter,
 		config: {
 			baseURL: provider.baseUrl,
 			apiKey: provider.apiKey || 'dummy-key',

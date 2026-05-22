@@ -1,7 +1,13 @@
 import React from 'react';
 import {createLLMClient} from '@/client-factory';
-import {ErrorMessage, SuccessMessage} from '@/components/message-box';
+import {
+	ErrorMessage,
+	SuccessMessage,
+	WarningMessage,
+} from '@/components/message-box';
 import {reloadAppConfig} from '@/config/index';
+import {formatConfigLintIssue, lintProviderConfig} from '@/config/lint';
+import {loadAllProviderConfigs} from '@/config/mcp-config-loader';
 import {saveTune, updateLastUsed} from '@/config/preferences';
 import type {ActiveMode} from '@/hooks/useAppState';
 import {getToolManager} from '@/message-handler';
@@ -112,6 +118,24 @@ export function useModeHandlers({
 						hideBox={true}
 					/>,
 				);
+
+				// Re-run lint scoped to the newly active provider so any
+				// misconfiguration becomes visible right when it would start
+				// taking effect, rather than getting buried in startup output.
+				const newProviderConfig = loadAllProviderConfigs().find(
+					p => p.name === actualProvider,
+				);
+				if (newProviderConfig) {
+					for (const issue of lintProviderConfig(newProviderConfig)) {
+						addToChatQueue(
+							<WarningMessage
+								key={generateKey(`config-lint-${issue.provider}`)}
+								message={formatConfigLintIssue(issue)}
+								hideBox={true}
+							/>,
+						);
+					}
+				}
 			} catch (error) {
 				addToChatQueue(
 					<ErrorMessage

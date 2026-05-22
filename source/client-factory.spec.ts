@@ -2,7 +2,11 @@ import {existsSync, mkdirSync, rmSync, writeFileSync} from 'fs';
 import {tmpdir} from 'os';
 import {join} from 'path';
 import test from 'ava';
-import {ConfigurationError, createLLMClient} from './client-factory';
+import {
+	ConfigurationError,
+	createLLMClient,
+	loadProviderConfigs,
+} from './client-factory';
 import type {AIProviderConfig} from '@/types/config';
 import {clearAppConfig, reloadAppConfig} from '@/config/index';
 import {resetPreferencesCache} from '@/config/preferences';
@@ -1454,5 +1458,89 @@ test.serial(
 		t.truthy(result);
 		t.truthy(providerConfig);
 		t.is(providerConfig?.contextWindow, 16384);
+	},
+);
+
+// ============================================================================
+// loadProviderConfigs: OpenRouter block threading
+// ============================================================================
+
+test.serial(
+	'loadProviderConfigs threads the openrouter block from ProviderConfig to AIProviderConfig',
+	t => {
+		const originalProviders = process.env.NANOCODER_PROVIDERS;
+
+		try {
+			process.env.NANOCODER_PROVIDERS = JSON.stringify({
+				providers: [
+					{
+						name: 'OpenRouter',
+						baseUrl: 'https://openrouter.ai/api/v1',
+						apiKey: 'test-key',
+						models: ['anthropic/claude-3.5-sonnet'],
+						openrouter: {
+							provider: {sort: 'price', allow_fallbacks: true},
+							reasoning: {effort: 'high'},
+							service_tier: 'flex',
+							plugins: [{id: 'context-compression', engine: 'middle-out'}],
+							models: ['openai/gpt-4o'],
+						},
+					},
+				],
+			});
+
+			const resolved = loadProviderConfigs();
+			const openrouter = resolved.find(p => p.name === 'OpenRouter');
+
+			t.truthy(openrouter, 'OpenRouter provider should be loaded');
+			t.deepEqual(openrouter?.openrouter, {
+				provider: {sort: 'price', allow_fallbacks: true},
+				reasoning: {effort: 'high'},
+				service_tier: 'flex',
+				plugins: [{id: 'context-compression', engine: 'middle-out'}],
+				models: ['openai/gpt-4o'],
+			});
+			// Make sure the baseURL/apiKey translation still works alongside it.
+			t.is(openrouter?.config.baseURL, 'https://openrouter.ai/api/v1');
+			t.is(openrouter?.config.apiKey, 'test-key');
+		} finally {
+			if (originalProviders !== undefined) {
+				process.env.NANOCODER_PROVIDERS = originalProviders;
+			} else {
+				delete process.env.NANOCODER_PROVIDERS;
+			}
+		}
+	},
+);
+
+test.serial(
+	'loadProviderConfigs leaves openrouter undefined when no block is provided',
+	t => {
+		const originalProviders = process.env.NANOCODER_PROVIDERS;
+
+		try {
+			process.env.NANOCODER_PROVIDERS = JSON.stringify({
+				providers: [
+					{
+						name: 'OpenRouter',
+						baseUrl: 'https://openrouter.ai/api/v1',
+						apiKey: 'test-key',
+						models: ['anthropic/claude-3.5-sonnet'],
+					},
+				],
+			});
+
+			const resolved = loadProviderConfigs();
+			const openrouter = resolved.find(p => p.name === 'OpenRouter');
+
+			t.truthy(openrouter);
+			t.is(openrouter?.openrouter, undefined);
+		} finally {
+			if (originalProviders !== undefined) {
+				process.env.NANOCODER_PROVIDERS = originalProviders;
+			} else {
+				delete process.env.NANOCODER_PROVIDERS;
+			}
+		}
 	},
 );

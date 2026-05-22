@@ -168,6 +168,147 @@ test('openrouter template: multiple comma-separated models', t => {
 	]);
 });
 
+test('openrouter template: no openrouter block when optional fields are blank', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'openrouter');
+	const config = template!.buildConfig({
+		providerName: 'OpenRouter',
+		apiKey: 'test-key',
+		model: 'z-ai/glm-4.7',
+		serviceTier: '',
+		reasoningEffort: '',
+		sortBy: '',
+	});
+	t.is(config.openrouter, undefined);
+});
+
+test('openrouter template: populates openrouter block from optional fields', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'openrouter');
+	const config = template!.buildConfig({
+		providerName: 'OpenRouter',
+		apiKey: 'test-key',
+		model: 'z-ai/glm-4.7',
+		serviceTier: 'flex',
+		reasoningEffort: 'high',
+		sortBy: 'price',
+	});
+	t.deepEqual(config.openrouter, {
+		service_tier: 'flex',
+		reasoning: {effort: 'high'},
+		provider: {sort: 'price'},
+	});
+});
+
+test('openrouter template: boolean fields are typed and accepted as "true"/"false"', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'openrouter');
+	const allowFallbacks = template!.fields.find(f => f.name === 'allowFallbacks');
+	const zdr = template!.fields.find(f => f.name === 'zdr');
+
+	t.is(allowFallbacks?.type, 'boolean');
+	t.is(zdr?.type, 'boolean');
+
+	const config = template!.buildConfig({
+		providerName: 'OpenRouter',
+		apiKey: 'k',
+		model: 'x/y',
+		allowFallbacks: 'true',
+		zdr: 'false',
+	});
+	t.deepEqual(config.openrouter, {
+		provider: {allow_fallbacks: true, zdr: false},
+	});
+});
+
+test('openrouter template: boolean fields skipped (blank) emit no entry', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'openrouter');
+	const config = template!.buildConfig({
+		providerName: 'OpenRouter',
+		apiKey: 'k',
+		model: 'x/y',
+		allowFallbacks: '',
+		zdr: '',
+	});
+	t.is(config.openrouter, undefined);
+});
+
+test('openrouter template: array fields parse comma-separated input', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'openrouter');
+	const providerOrder = template!.fields.find(f => f.name === 'providerOrder');
+	const fallbackModels = template!.fields.find(
+		f => f.name === 'fallbackModels',
+	);
+
+	t.is(providerOrder?.type, 'array');
+	t.is(fallbackModels?.type, 'array');
+
+	const config = template!.buildConfig({
+		providerName: 'OpenRouter',
+		apiKey: 'k',
+		model: 'x/y',
+		providerOrder: 'Anthropic, OpenAI ,  ',
+		fallbackModels: 'openai/gpt-4o, anthropic/claude-3.5-sonnet',
+	});
+	t.deepEqual(config.openrouter, {
+		provider: {order: ['Anthropic', 'OpenAI']},
+		models: ['openai/gpt-4o', 'anthropic/claude-3.5-sonnet'],
+	});
+});
+
+test('openrouter template: array fields with only whitespace produce no entry', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'openrouter');
+	const config = template!.buildConfig({
+		providerName: 'OpenRouter',
+		apiKey: 'k',
+		model: 'x/y',
+		providerOrder: ' , , ',
+		fallbackModels: '',
+	});
+	t.is(config.openrouter, undefined);
+});
+
+test('openrouter template: combines string, boolean, and array answers into a single block', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'openrouter');
+	const config = template!.buildConfig({
+		providerName: 'OpenRouter',
+		apiKey: 'k',
+		model: 'x/y',
+		serviceTier: 'flex',
+		reasoningEffort: 'high',
+		sortBy: 'price',
+		providerOrder: 'Anthropic, OpenAI',
+		allowFallbacks: 'true',
+		zdr: 'true',
+		fallbackModels: 'openai/gpt-4o',
+	});
+	t.deepEqual(config.openrouter, {
+		provider: {
+			sort: 'price',
+			allow_fallbacks: true,
+			zdr: true,
+			order: ['Anthropic', 'OpenAI'],
+		},
+		reasoning: {effort: 'high'},
+		service_tier: 'flex',
+		models: ['openai/gpt-4o'],
+	});
+});
+
+test('openrouter template: validators reject invalid optional inputs', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'openrouter');
+	const tier = template!.fields.find(f => f.name === 'serviceTier');
+	const effort = template!.fields.find(f => f.name === 'reasoningEffort');
+	const sort = template!.fields.find(f => f.name === 'sortBy');
+
+	t.is(tier?.validator?.(''), undefined);
+	t.is(tier?.validator?.('flex'), undefined);
+	t.regex(tier?.validator?.('auto') ?? '', /Service tier/);
+
+	t.is(effort?.validator?.('xhigh'), undefined);
+	t.regex(effort?.validator?.('extreme') ?? '', /Reasoning effort/);
+
+	t.is(sort?.validator?.('throughput'), undefined);
+	t.regex(sort?.validator?.('cheapest') ?? '', /Sort must be one of/);
+});
+
 test('openai template: preserves organizationId', t => {
 	const template = PROVIDER_TEMPLATES.find(t => t.id === 'openai');
 	t.truthy(template);

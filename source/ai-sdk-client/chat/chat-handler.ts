@@ -33,10 +33,13 @@ import {convertAISDKToolCalls} from '../converters/tool-converter.js';
 import {extractRootError} from '../error-handling/error-extractor.js';
 import {parseAPIError} from '../error-handling/error-parser.js';
 import {isToolSupportError} from '../error-handling/tool-error-detector.js';
+import {buildProviderOptions} from './provider-options.js';
 import {
 	createOnStepFinishHandler,
 	createPrepareStepHandler,
 } from './streaming-handler.js';
+
+type SDKProviderOptions = Parameters<typeof streamText>[0]['providerOptions'];
 
 export interface ChatHandlerParams {
 	model: LanguageModel;
@@ -150,26 +153,15 @@ export async function handleChat(
 			// Tools with needsApproval: true cause the SDK to stop for approval
 			// stopWhen controls when the tool loop stops (max MAX_TOOL_STEPS steps)
 
-			// ChatGPT/Codex backend requires the system message as a top-level
-			// `instructions` field rather than as an input item. Pass via
-			// providerOptions so the Responses API includes it.
-			// reasoningSummary must be set for GPT-5 to emit human-readable
-			// reasoning text; without it the Thinking block stays empty.
-			let providerOptions:
-				| Record<string, Record<string, string | boolean>>
-				| undefined;
-			if (providerConfig.sdkProvider === 'chatgpt-codex') {
-				providerOptions = {
-					openai: {
-						...(systemContent ? {instructions: systemContent} : {}),
-						store: false,
-						reasoningEffort:
-							modeOverrides?.modelParameters?.reasoningEffort ?? 'medium',
-						reasoningSummary:
-							modeOverrides?.modelParameters?.reasoningSummary ?? 'auto',
-					},
-				};
-			}
+			// Provider-specific request extras (Codex Responses API fields,
+			// OpenRouter provider routing / reasoning / transforms / fallback
+			// models). buildProviderOptions returns undefined when nothing
+			// applies, so the SDK call site doesn't see an empty object.
+			const providerOptions = buildProviderOptions(
+				providerConfig,
+				systemContent,
+				modeOverrides?.modelParameters,
+			);
 
 			const streamingErrors: Error[] = [];
 			const result = streamText({
@@ -207,7 +199,10 @@ export async function handleChat(
 					});
 				},
 				headers: providerConfig.config.headers,
-				providerOptions,
+				// Cast to the SDK's narrower JSON-only type. The values built by
+				// buildProviderOptions are all JSON-serialisable, but TypeScript
+				// can't infer that through our looser internal shape.
+				providerOptions: providerOptions as SDKProviderOptions,
 				// Model parameters from /tune — passed directly to AI SDK
 				...(modeOverrides?.modelParameters && {
 					temperature: modeOverrides.modelParameters.temperature,

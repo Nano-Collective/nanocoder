@@ -2,7 +2,6 @@ import {Box, Text, useInput} from 'ink';
 import SelectInput from 'ink-select-input';
 import Spinner from 'ink-spinner';
 import {useEffect, useRef, useState} from 'react';
-import TextInput from '@/components/text-input';
 import {getColors} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import type {ProviderConfig} from '../../types/config';
@@ -15,6 +14,7 @@ import {
 	type FetchedModel,
 	fetchModels,
 } from '../utils/fetch-models';
+import {FieldInputView} from './field-input-view';
 import {ModelSelectionList} from './model-selection-list';
 
 interface ProviderStepProps {
@@ -245,33 +245,39 @@ export function ProviderStep({
 		}
 	};
 
-	const handleFieldSubmit = () => {
+	// `overrideValue` lets boolean SelectInput pass its chosen value straight
+	// in — the state update for `currentValue` is async, so reading from state
+	// after a SelectInput.onSelect would still see the stale value.
+	const handleFieldSubmit = (overrideValue?: string) => {
 		if (!selectedTemplate) return;
 
 		const currentField = selectedTemplate.fields[currentFieldIndex];
 		if (!currentField) return;
 
+		const submittedValue =
+			overrideValue !== undefined ? overrideValue : currentValue;
+
 		// Validate required fields
-		if (currentField.required && !currentValue.trim()) {
+		if (currentField.required && !submittedValue.trim()) {
 			setError('This field is required');
 			return;
 		}
 
 		// Validate duplicate provider names
-		if (currentField.name === 'providerName' && currentValue.trim()) {
-			const nameLower = currentValue.trim().toLowerCase();
+		if (currentField.name === 'providerName' && submittedValue.trim()) {
+			const nameLower = submittedValue.trim().toLowerCase();
 			const isDuplicate = providers.some(
 				(p, i) => p.name.toLowerCase() === nameLower && i !== editingIndex,
 			);
 			if (isDuplicate) {
-				setError(`A provider named '${currentValue.trim()}' already exists`);
+				setError(`A provider named '${submittedValue.trim()}' already exists`);
 				return;
 			}
 		}
 
 		// Validate with custom validator
-		if (currentField.validator && currentValue.trim()) {
-			const validationError = currentField.validator(currentValue);
+		if (currentField.validator && submittedValue.trim()) {
+			const validationError = currentField.validator(submittedValue);
 			if (validationError) {
 				setError(validationError);
 				return;
@@ -281,7 +287,7 @@ export function ProviderStep({
 		// Save answer
 		const newAnswers = {
 			...fieldAnswers,
-			[currentField.name]: currentValue.trim(),
+			[currentField.name]: submittedValue.trim(),
 		};
 		setFieldAnswers(newAnswers);
 		setError(null);
@@ -565,7 +571,11 @@ export function ProviderStep({
 		}
 
 		if (mode === 'field-input') {
-			if (key.return) {
+			// Boolean fields render a SelectInput which has its own Enter
+			// handler; let it take submission so the chosen value isn't lost
+			// to the global handler reading stale state.
+			const currentField = selectedTemplate?.fields[currentFieldIndex];
+			if (key.return && currentField?.type !== 'boolean') {
 				handleFieldSubmit();
 			} else if (key.escape) {
 				// Go back to template selection
@@ -668,75 +678,19 @@ export function ProviderStep({
 		if (!currentField) return null;
 
 		return (
-			<Box flexDirection="column">
-				<Box marginBottom={1}>
-					<Text bold color={colors.primary}>
-						{selectedTemplate.name} Configuration
-					</Text>
-					<Text>
-						{' '}
-						(Field {currentFieldIndex + 1}/{selectedTemplate.fields.length})
-					</Text>
-				</Box>
-
-				<Box>
-					<Text>
-						{currentField.prompt}
-						{currentField.required && <Text color={colors.error}> *</Text>}:{' '}
-						{currentField.sensitive && '****'}
-					</Text>
-				</Box>
-
-				{!currentField.sensitive && (
-					<Box
-						marginBottom={1}
-						borderStyle="round"
-						borderColor={colors.secondary}
-					>
-						<TextInput
-							key={inputKey}
-							value={currentValue}
-							onChange={setCurrentValue}
-							onSubmit={handleFieldSubmit}
-						/>
-					</Box>
-				)}
-
-				{currentField.sensitive && (
-					<Box
-						marginBottom={1}
-						borderStyle="round"
-						borderColor={colors.secondary}
-					>
-						<TextInput
-							key={inputKey}
-							value={currentValue}
-							onChange={setCurrentValue}
-							onSubmit={handleFieldSubmit}
-							mask="*"
-						/>
-					</Box>
-				)}
-
-				{error && (
-					<Box marginBottom={1}>
-						<Text color={colors.error}>{error}</Text>
-					</Box>
-				)}
-
-				{isNarrow ? (
-					<Box flexDirection="column">
-						<Text color={colors.secondary}>Enter: continue</Text>
-						<Text color={colors.secondary}>Shift+Tab: go back</Text>
-					</Box>
-				) : (
-					<Box>
-						<Text color={colors.secondary}>
-							Press Enter to continue | Shift+Tab to go back
-						</Text>
-					</Box>
-				)}
-			</Box>
+			<FieldInputView
+				templateName={selectedTemplate.name}
+				currentField={currentField}
+				fieldIndex={currentFieldIndex}
+				fieldCount={selectedTemplate.fields.length}
+				currentValue={currentValue}
+				error={error}
+				isNarrow={isNarrow}
+				inputKey={inputKey}
+				colors={colors}
+				onChange={setCurrentValue}
+				onSubmit={handleFieldSubmit}
+			/>
 		);
 	}
 

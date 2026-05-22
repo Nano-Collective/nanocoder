@@ -1,12 +1,36 @@
-import type {ProviderConfig} from '../../types/config';
+import type {OpenRouterParameters, ProviderConfig} from '../../types/config';
+
+/**
+ * Field input type used by the wizard renderer to pick the right widget:
+ *   - 'string'  (default): free-form text input.
+ *   - 'boolean': Yes/No select. Stored as the string literal "true" / "false"
+ *     in the answers map so the rest of the pipeline (Record<string, string>)
+ *     stays uniform.
+ *   - 'array':   free-form text input that the consuming buildConfig parses as
+ *     a comma-separated list. The renderer only adjusts the prompt hint.
+ */
+export type TemplateFieldType = 'string' | 'boolean' | 'array';
 
 export interface TemplateField {
 	name: string;
 	prompt: string;
+	type?: TemplateFieldType; // Defaults to 'string'.
 	default?: string;
 	required?: boolean;
 	sensitive?: boolean; // For API keys, passwords, etc.
 	validator?: (value: string) => string | undefined; // Return error message if invalid
+}
+
+/**
+ * Parse a comma-separated `array` field value into a clean string list.
+ * Centralised so every template uses the same trim/empty-filter behaviour.
+ */
+export function parseArrayField(value: string | undefined): string[] {
+	if (!value) return [];
+	return value
+		.split(',')
+		.map(v => v.trim())
+		.filter(Boolean);
 }
 
 export interface ProviderTemplate {
@@ -33,6 +57,102 @@ const urlValidator = (value: string): string | undefined => {
 		return 'Invalid URL format';
 	}
 };
+
+// The wizard only collects a handful of OpenRouter knobs because TUI prompts
+// are linear strings — the full surface (provider routing, plugins, fallback
+// models, etc.) is documented in the OpenRouter provider docs and edited
+// directly in agents.config.json by power users. The wizard's job is to make
+// the basics discoverable, not to be a config editor.
+const OPENROUTER_SERVICE_TIERS = ['flex', 'priority'] as const;
+const OPENROUTER_REASONING_EFFORTS = [
+	'xhigh',
+	'high',
+	'medium',
+	'low',
+	'minimal',
+	'none',
+] as const;
+const OPENROUTER_SORT_KEYS = ['price', 'throughput', 'latency'] as const;
+
+function openrouterServiceTierValidator(value: string): string | undefined {
+	if (!value) return undefined;
+	if (!OPENROUTER_SERVICE_TIERS.includes(value as never)) {
+		return `Service tier must be one of: ${OPENROUTER_SERVICE_TIERS.join(', ')}`;
+	}
+	return undefined;
+}
+
+function openrouterReasoningEffortValidator(value: string): string | undefined {
+	if (!value) return undefined;
+	if (!OPENROUTER_REASONING_EFFORTS.includes(value as never)) {
+		return `Reasoning effort must be one of: ${OPENROUTER_REASONING_EFFORTS.join(', ')}`;
+	}
+	return undefined;
+}
+
+function openrouterSortValidator(value: string): string | undefined {
+	if (!value) return undefined;
+	if (!OPENROUTER_SORT_KEYS.includes(value as never)) {
+		return `Sort must be one of: ${OPENROUTER_SORT_KEYS.join(', ')}`;
+	}
+	return undefined;
+}
+
+/**
+ * Assemble the `openrouter` block from wizard answers. Returns `undefined`
+ * when the user left every option blank, so the generated config stays clean
+ * (no empty `"openrouter": {}` entry).
+ *
+ * Boolean fields arrive as the strings "true" / "false" because the wizard's
+ * answer map is `Record<string, string>` — we compare against "true" rather
+ * than truthiness so empty / "false" / missing all behave the same.
+ */
+function buildOpenRouterBlock(
+	answers: Record<string, string>,
+): OpenRouterParameters | undefined {
+	const block: OpenRouterParameters = {};
+
+	const provider: NonNullable<OpenRouterParameters['provider']> = {};
+	if (answers.sortBy) {
+		provider.sort = answers.sortBy as 'price' | 'throughput' | 'latency';
+	}
+	if (answers.allowFallbacks === 'true' || answers.allowFallbacks === 'false') {
+		provider.allow_fallbacks = answers.allowFallbacks === 'true';
+	}
+	if (answers.zdr === 'true' || answers.zdr === 'false') {
+		provider.zdr = answers.zdr === 'true';
+	}
+	const order = parseArrayField(answers.providerOrder);
+	if (order.length > 0) {
+		provider.order = order;
+	}
+	if (Object.keys(provider).length > 0) {
+		block.provider = provider;
+	}
+
+	if (answers.reasoningEffort) {
+		block.reasoning = {
+			effort: answers.reasoningEffort as
+				| 'xhigh'
+				| 'high'
+				| 'medium'
+				| 'low'
+				| 'minimal'
+				| 'none',
+		};
+	}
+
+	if (answers.serviceTier) {
+		block.service_tier = answers.serviceTier as 'flex' | 'priority';
+	}
+
+	const fallbackModels = parseArrayField(answers.fallbackModels);
+	if (fallbackModels.length > 0) {
+		block.models = fallbackModels;
+	}
+
+	return Object.keys(block).length > 0 ? block : undefined;
+}
 
 export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 	{
@@ -217,16 +337,69 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 				default: '',
 				required: true,
 			},
+			{
+				name: 'serviceTier',
+				prompt:
+					'Service tier — "flex" (cheaper/slower) or "priority" (faster/pricier). Leave empty for default routing',
+				default: '',
+				validator: openrouterServiceTierValidator,
+			},
+			{
+				name: 'reasoningEffort',
+				prompt:
+					'Reasoning effort — xhigh / high / medium / low / minimal / none. Leave empty if the model does not use reasoning',
+				default: '',
+				validator: openrouterReasoningEffortValidator,
+			},
+			{
+				name: 'sortBy',
+				prompt:
+					'Provider sort — price / throughput / latency. Leave empty for OpenRouter default',
+				default: '',
+				validator: openrouterSortValidator,
+			},
+			{
+				name: 'providerOrder',
+				prompt:
+					'Preferred provider order (comma-separated, e.g. "Anthropic, OpenAI"). Leave empty to let OpenRouter decide',
+				type: 'array',
+				default: '',
+			},
+			{
+				name: 'allowFallbacks',
+				prompt:
+					'Allow OpenRouter to fall back to other providers if your preferred ones fail?',
+				type: 'boolean',
+				default: '',
+			},
+			{
+				name: 'zdr',
+				prompt:
+					'Enforce Zero Data Retention? Restricts routing to providers that contractually do not retain prompt data',
+				type: 'boolean',
+				default: '',
+			},
+			{
+				name: 'fallbackModels',
+				prompt:
+					'Fallback model list (comma-separated, e.g. "openai/gpt-4o, anthropic/claude-3.5-sonnet"). Leave empty for no fallback',
+				type: 'array',
+				default: '',
+			},
 		],
-		buildConfig: answers => ({
-			name: answers.providerName || 'OpenRouter',
-			baseUrl: 'https://openrouter.ai/api/v1',
-			apiKey: answers.apiKey,
-			models: answers.model
-				.split(',')
-				.map(m => m.trim())
-				.filter(Boolean),
-		}),
+		buildConfig: answers => {
+			const config: ProviderConfig = {
+				name: answers.providerName || 'OpenRouter',
+				baseUrl: 'https://openrouter.ai/api/v1',
+				apiKey: answers.apiKey,
+				models: parseArrayField(answers.model),
+			};
+			const openrouter = buildOpenRouterBlock(answers);
+			if (openrouter) {
+				config.openrouter = openrouter;
+			}
+			return config;
+		},
 	},
 	{
 		id: 'openai',

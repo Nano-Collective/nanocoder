@@ -3,6 +3,7 @@ import type {ProviderConfig} from '../types/config.js';
 import type {McpServerConfig} from './templates/mcp-templates.js';
 import {
 	buildConfigObject,
+	buildProviderConfigObject,
 	testProviderConnection,
 	validateConfig,
 } from './validation.js';
@@ -528,4 +529,74 @@ test('buildConfigObject: handles GitHub Copilot provider with sdkProvider github
 	t.is(p.sdkProvider, 'github-copilot');
 	t.is(p.baseUrl, 'https://api.githubcopilot.com');
 	t.deepEqual(p.models, ['gpt-4o', 'claude-3-5-sonnet-20241022']);
+});
+
+// ============================================================================
+// Tests for buildProviderConfigObject — openrouter block round-trip
+// ============================================================================
+
+test('buildProviderConfigObject: preserves the openrouter block on disk', t => {
+	const providers: ProviderConfig[] = [
+		{
+			name: 'OpenRouter',
+			baseUrl: 'https://openrouter.ai/api/v1',
+			apiKey: 'test-key',
+			models: ['anthropic/claude-3.5-sonnet'],
+			openrouter: {
+				service_tier: 'flex',
+				reasoning: {effort: 'high'},
+				provider: {sort: 'price', allow_fallbacks: true},
+				models: ['openai/gpt-4o'],
+			},
+		},
+	];
+
+	const config = buildProviderConfigObject(providers);
+	const p = config.nanocoder.providers[0];
+
+	t.deepEqual(p?.openrouter, {
+		service_tier: 'flex',
+		reasoning: {effort: 'high'},
+		provider: {sort: 'price', allow_fallbacks: true},
+		models: ['openai/gpt-4o'],
+	});
+});
+
+test('buildProviderConfigObject: omits openrouter when undefined', t => {
+	const providers: ProviderConfig[] = [
+		{
+			name: 'OpenRouter',
+			baseUrl: 'https://openrouter.ai/api/v1',
+			apiKey: 'test-key',
+			models: ['anthropic/claude-3.5-sonnet'],
+		},
+	];
+
+	const config = buildProviderConfigObject(providers);
+	const p = config.nanocoder.providers[0];
+
+	t.false('openrouter' in (p ?? {}));
+});
+
+test('buildProviderConfigObject: openrouter block survives wizard buildConfig round-trip', t => {
+	// Mirrors what the wizard does: template.buildConfig produces a
+	// ProviderConfig; buildProviderConfigObject serialises it for disk.
+	// If anything along that chain drops openrouter, this fails — which is
+	// exactly the regression that motivated the test.
+	const fromWizard: ProviderConfig = {
+		name: 'OpenRouter',
+		baseUrl: 'https://openrouter.ai/api/v1',
+		apiKey: 'sk-test',
+		models: ['x/y'],
+		openrouter: {
+			service_tier: 'priority',
+			reasoning: {effort: 'medium'},
+		},
+	};
+
+	const config = buildProviderConfigObject([fromWizard]);
+	const p = config.nanocoder.providers[0];
+
+	t.is(p?.openrouter?.service_tier, 'priority');
+	t.is(p?.openrouter?.reasoning?.effort, 'medium');
 });

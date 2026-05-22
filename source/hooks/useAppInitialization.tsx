@@ -5,8 +5,14 @@ import {commandRegistry} from '@/commands';
 // aren't loaded at startup — each command's handler is imported on first
 // invocation. See `source/commands/lazy-registry.ts`.
 import {lazyCommands} from '@/commands/lazy-registry';
-import {ErrorMessage, InfoMessage} from '@/components/message-box';
+import {
+	ErrorMessage,
+	InfoMessage,
+	WarningMessage,
+} from '@/components/message-box';
 import {getAppConfig, reloadAppConfig} from '@/config/index';
+import {formatConfigLintIssue, lintProviderConfigs} from '@/config/lint';
+import {loadAllProviderConfigs} from '@/config/mcp-config-loader';
 import {
 	getLastUsedModel,
 	loadPreferences,
@@ -97,6 +103,20 @@ export function useAppInitialization({
 		preferredProvider?: string,
 		preferredModel?: string,
 	): Promise<LLMClient | null> => {
+		// Lint provider configs before instantiation so typos and misplaced
+		// blocks surface as warnings in the chat queue, without a box —
+		// matches the existing "no box" convention for inline diagnostics.
+		const lintIssues = lintProviderConfigs(loadAllProviderConfigs());
+		for (const issue of lintIssues) {
+			addToChatQueue(
+				<WarningMessage
+					key={generateKey(`config-lint-${issue.provider}`)}
+					message={formatConfigLintIssue(issue)}
+					hideBox={true}
+				/>,
+			);
+		}
+
 		const {client, actualProvider} = await createLLMClient(
 			preferredProvider,
 			preferredModel,

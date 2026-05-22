@@ -431,9 +431,19 @@ function PresetPanel({
 	);
 }
 
-// Parameter definitions with validation
+// Parameter definitions with validation. The tune UI only exposes scalar
+// numeric parameters today — reasoning, stop, and the openrouter block are
+// configured via agents.config.json rather than the modal.
+type NumericParamKey =
+	| 'temperature'
+	| 'topP'
+	| 'topK'
+	| 'maxTokens'
+	| 'frequencyPenalty'
+	| 'presencePenalty';
+
 const PARAM_DEFS: {
-	key: keyof ModelParameters;
+	key: NumericParamKey;
 	label: string;
 	tooltip: string;
 	min: number;

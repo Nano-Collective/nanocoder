@@ -1,6 +1,10 @@
 import {TIMEOUT_PROVIDER_CONNECTION_MS} from '@/constants';
 import {isLocalURL} from '@/utils/url-utils';
-import type {ProviderConfig, SdkProvider} from '../types/config';
+import type {
+	OpenRouterParameters,
+	ProviderConfig,
+	SdkProvider,
+} from '../types/config';
 import type {McpServerConfig} from './templates/mcp-templates';
 
 interface ValidationResult {
@@ -155,6 +159,7 @@ interface ProviderConfigObject {
 			organizationId?: string;
 			timeout?: number;
 			sdkProvider?: SdkProvider;
+			openrouter?: OpenRouterParameters;
 		}>;
 	};
 }
@@ -185,6 +190,7 @@ export function buildProviderConfigObject(
 					organizationId?: string;
 					timeout?: number;
 					sdkProvider?: SdkProvider;
+					openrouter?: OpenRouterParameters;
 				} = {
 					name: p.name,
 					models: p.models,
@@ -212,6 +218,10 @@ export function buildProviderConfigObject(
 
 				if (p.sdkProvider) {
 					providerConfig.sdkProvider = p.sdkProvider;
+				}
+
+				if (p.openrouter) {
+					providerConfig.openrouter = p.openrouter;
 				}
 
 				return providerConfig;
@@ -291,6 +301,7 @@ export function buildConfigObject(
 					organizationId?: string;
 					timeout?: number;
 					sdkProvider?: SdkProvider;
+					openrouter?: OpenRouterParameters;
 				} = {
 					name: p.name,
 					models: p.models,
@@ -318,6 +329,10 @@ export function buildConfigObject(
 
 				if (p.sdkProvider) {
 					providerConfig.sdkProvider = p.sdkProvider;
+				}
+
+				if (p.openrouter) {
+					providerConfig.openrouter = p.openrouter;
 				}
 
 				return providerConfig;

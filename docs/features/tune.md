@@ -75,6 +75,14 @@ Fine-tune the model's generation parameters:
 
 Press **Enter** on a parameter to cycle through values. Select **Reset All to Defaults** to clear all parameter overrides.
 
+### Provider-specific parameters
+
+Some providers accept additional reasoning controls that are configured through `agents.config.json` rather than the `/tune` modal:
+
+- **`reasoningEffort`** / **`reasoningSummary`** — reasoning controls for OpenAI Responses API models (GPT-5, o-series) via the `chatgpt-codex` provider. `reasoningEffort` is also forwarded to OpenRouter as `reasoning.effort`.
+
+OpenRouter exposes additional always-on request body fields (provider routing, plugins, service tier, fallback models, etc) on the provider config itself — see [OpenRouter request options](../configuration/providers/openrouter.md#openrouter-request-options). Those settings are not tied to tune and apply on every request.
+
 ## Presets
 
 Three built-in presets are available via **Load Preset**:
