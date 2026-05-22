@@ -510,3 +510,64 @@ test('performAutoCompact uses provider-configured context limit', async t => {
 
 	t.true(result === null || Array.isArray(result));
 });
+
+test('performAutoCompact honours contextWindow from the client provider config', async t => {
+	// Regression for issue #525: performAutoCompact previously built a synthetic
+	// providerConfig stub with empty `config: {}`, discarding the user's
+	// `contextWindow`/`contextWindows` settings. For on-prem providers (e.g. Qwen)
+	// with no models.dev entry, that meant the limit fell through to `null` and
+	// compaction never triggered. The fix passes `client.getProviderConfig()` so
+	// the configured window is honoured.
+	resetSessionContextLimit();
+
+	// Long message — at FallbackTokenizer's ~4 chars/token, ~2500 chars ≈ 625 tokens.
+	// With a provider-configured contextWindow of 1000, usage is ~62%, above the
+	// 50% threshold, so compaction must run.
+	const messages: Message[] = [
+		{role: 'user', content: 'on-prem context. '.repeat(150)},
+		{role: 'assistant', content: 'reply'},
+		{role: 'user', content: 'recent'},
+		{role: 'assistant', content: 'recent reply'},
+	];
+	const systemMessage: Message = {role: 'system', content: 'sys'};
+
+	const client: LLMClient = {
+		getCurrentModel: () => 'qwen3-on-prem',
+		setModel: () => {},
+		getContextSize: () => 1000,
+		getAvailableModels: async () => ['qwen3-on-prem'],
+		getProviderConfig: () => ({
+			name: 'qwen-on-prem',
+			type: 'openai' as const,
+			models: ['qwen3-on-prem'],
+			config: {},
+			contextWindow: 1000,
+		}),
+		chat: async () => ({
+			choices: [{message: {role: 'assistant' as const, content: 'stub'}}],
+		}),
+		clearContext: async () => {},
+		getTimeout: () => undefined,
+	};
+
+	const result = await performAutoCompact(
+		messages,
+		systemMessage,
+		'qwen-on-prem',
+		'qwen3-on-prem',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			strategy: 'mechanical',
+			notifyUser: false,
+		},
+		undefined,
+		client,
+	);
+
+	t.truthy(
+		result,
+		'Compaction must trigger when client provider config supplies contextWindow',
+	);
+});

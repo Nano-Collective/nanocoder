@@ -149,12 +149,7 @@ export async function performAutoCompact(
 	} else {
 		try {
 			contextLimit = await getModelContextLimit(model, {
-				providerConfig: {
-					name: provider,
-					type: 'openai',
-					models: [model],
-					config: {},
-				},
+				providerConfig: client?.getProviderConfig(),
 			});
 		} catch {
 			return null;
