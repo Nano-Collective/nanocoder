@@ -141,6 +141,20 @@ export interface ToolEntry {
 	streamingFormatter?: StreamingFormatter; // For real-time progress (before execution)
 	validator?: ToolValidator; // For validation
 	readOnly?: boolean; // Safe to parallelize (no side effects)
+	/**
+	 * Name of the skill that owns this tool, if any. Set by the skill
+	 * registrar for tools that come from a bundle or single-file skill.
+	 * Used together with `scoped` to decide whether `getAllTools()`
+	 * includes the entry in the global result.
+	 */
+	ownerSkill?: string;
+	/**
+	 * When true, the tool is only visible to the subagent inside the same
+	 * skill (matching `ownerSkill`). Default-false single-file skills set
+	 * this off; bundle skills default it on via their
+	 * `tools_visibility: scoped` manifest field.
+	 */
+	scoped?: boolean;
 }
 
 interface LLMMessage {
@@ -198,14 +212,14 @@ export type DevelopmentMode =
 	| 'auto-accept'
 	| 'yolo'
 	| 'plan'
-	| 'scheduler';
+	| 'headless';
 
 export const DEVELOPMENT_MODE_LABELS: Record<DevelopmentMode, string> = {
 	normal: '▶ normal mode on',
 	'auto-accept': '⏵⏵ auto-accept mode on',
 	yolo: '⏵⏵⏵ yolo mode on',
 	plan: '⏸ plan mode on',
-	scheduler: '⏵⏵ scheduler mode on',
+	headless: '⏵⏵ headless mode on',
 };
 
 export const DEVELOPMENT_MODE_LABELS_NARROW: Record<DevelopmentMode, string> = {
@@ -213,7 +227,7 @@ export const DEVELOPMENT_MODE_LABELS_NARROW: Record<DevelopmentMode, string> = {
 	'auto-accept': '⏵⏵ auto',
 	yolo: '⏵⏵⏵ yolo',
 	plan: '⏸ plan',
-	scheduler: '⏵⏵ scheduler',
+	headless: '⏵⏵ headless',
 };
 
 // Connection status types for MCP and LSP servers

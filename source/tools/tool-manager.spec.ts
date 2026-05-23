@@ -695,7 +695,7 @@ test('getAvailableToolNames - filters to minimal profile', t => {
 
 test('getAvailableToolNames - full profile returns all minus mode exclusions', t => {
 	const manager = new ToolManager();
-	const result = manager.getAvailableToolNames({enabled: true, toolProfile: 'full', aggressiveCompact: false}, 'scheduler');
+	const result = manager.getAvailableToolNames({enabled: true, toolProfile: 'full', aggressiveCompact: false}, 'headless');
 	t.false(result.includes('ask_user'));
 	t.true(result.includes('read_file'));
 });
@@ -896,14 +896,14 @@ test('parity - plan mode, no tune', t => {
 	assertPromptRuntimeParity(t, manager, undefined, 'plan', 'plan/no-tune');
 });
 
-test('parity - scheduler mode, no tune', t => {
+test('parity - headless mode, no tune', t => {
 	const manager = new ToolManager();
 	assertPromptRuntimeParity(
 		t,
 		manager,
 		undefined,
-		'scheduler',
-		'scheduler/no-tune',
+		'headless',
+		'headless/no-tune',
 	);
 });
 
@@ -947,14 +947,14 @@ test('parity - plan mode, full profile', t => {
 	assertPromptRuntimeParity(t, manager, tune, 'plan', 'plan/full');
 });
 
-test('parity - scheduler mode, full profile', t => {
+test('parity - headless mode, full profile', t => {
 	const manager = new ToolManager();
 	const tune: TuneConfig = {
 		enabled: true,
 		toolProfile: 'full',
 		aggressiveCompact: false,
 	};
-	assertPromptRuntimeParity(t, manager, tune, 'scheduler', 'scheduler/full');
+	assertPromptRuntimeParity(t, manager, tune, 'headless', 'headless/full');
 });
 
 test('parity - nonInteractiveAlwaysAllow does not change available tool set', t => {

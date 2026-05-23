@@ -22,7 +22,7 @@ A maximum of 5 agents can run concurrently. Excess calls receive an error and ca
 
 ## Built-In Subagents
 
-Nanocoder ships with two built-in subagents:
+Nanocoder ships with one built-in subagent:
 
 ### explore
 
@@ -33,14 +33,7 @@ Tools: read_file, search_file_contents, find_files, list_directory,
        lsp_get_diagnostics, git_status, git_log, git_diff
 ```
 
-### reviewer
-
-A read-only code review agent. Use to review recent changes, diffs, or specific files for bugs, security issues, style problems, and improvement suggestions.
-
-```
-Tools: read_file, search_file_contents, find_files, list_directory,
-       git_status, git_log, git_diff, lsp_get_diagnostics
-```
+Use `/agents create <name>` or `/agents copy explore` to scaffold project-specific agents (e.g. a code reviewer, a test-writer, a security auditor) tailored to your codebase.
 
 ## Creating Custom Subagents
 
@@ -58,7 +51,7 @@ This creates a template at `.nanocoder/agents/code-reviewer.md` and prompts the 
 /agents copy explore
 ```
 
-This copies the full definition of the `research` agent (or any other agent) to `.nanocoder/agents/research.md` so you can customize it. The project-level copy takes priority over the built-in, so your modifications take effect immediately.
+This copies the full definition of the `explore` agent (or any other agent) to `.nanocoder/agents/explore.md` so you can customize it. The project-level copy takes priority over the built-in, so your modifications take effect immediately.
 
 This is the easiest way to tweak a built-in agent — adjust the system prompt, add or remove tools, change the model, etc.
 

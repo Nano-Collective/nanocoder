@@ -137,6 +137,7 @@ export class CustomToolLoader {
 					body: parsed.body,
 					filePath: fullPath,
 					source,
+					subscribe: parsed.subscribe,
 				});
 			} catch (err) {
 				this.errors.push({

@@ -184,7 +184,8 @@ export const lazyCommands: LazyCommand[] = [
 	},
 	{
 		name: 'schedule',
-		description: 'Manage scheduled jobs',
+		description:
+			'List cron-triggered skills (single-file frontmatter + bundle skill.yaml). Read-only - edit the source file to change.',
 		load: () => import('@/commands/schedule').then(m => m.scheduleCommand),
 	},
 	{
@@ -203,5 +204,10 @@ export const lazyCommands: LazyCommand[] = [
 		description:
 			'List available tools (built-in, MCP, custom). Subcommand: create <name>',
 		load: () => import('@/commands/tools').then(m => m.toolsCommand),
+	},
+	{
+		name: 'skills',
+		description: 'List loaded skills. Subcommands: show <name>, create <name>.',
+		load: () => import('@/commands/skills').then(m => m.skillsCommand),
 	},
 ];

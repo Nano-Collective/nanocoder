@@ -8,7 +8,8 @@ import {logInfo} from '@/utils/message-queue';
 export type NotificationEvent =
 	| 'toolConfirmation'
 	| 'questionPrompt'
-	| 'generationComplete';
+	| 'generationComplete'
+	| 'triggeredRunComplete';
 
 const DEFAULT_CONFIG: NotificationsConfig = {
 	enabled: false,
@@ -16,6 +17,7 @@ const DEFAULT_CONFIG: NotificationsConfig = {
 		toolConfirmation: true,
 		questionPrompt: true,
 		generationComplete: true,
+		triggeredRunComplete: true,
 	},
 };
 
@@ -46,6 +48,10 @@ const EVENT_MESSAGES: Record<
 	generationComplete: {
 		title: `Response Ready in ${projectName}`,
 		message: 'Nanocoder has finished generating a response.',
+	},
+	triggeredRunComplete: {
+		title: `Triggered Run Completed in ${projectName}`,
+		message: 'A skill subscription fired and its target finished running.',
 	},
 };
 

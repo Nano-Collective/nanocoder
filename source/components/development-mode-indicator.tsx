@@ -82,7 +82,7 @@ export const DevelopmentModeIndicator = React.memo(
 					: '';
 
 			const shiftHintFull =
-				isNarrow && developmentMode !== 'scheduler'
+				isNarrow && developmentMode !== 'headless'
 					? ' (Shift+Tab to cycle)'
 					: '';
 			const tuneSegment = tuneLabel ? ` · ${tuneLabel}` : '';
@@ -185,7 +185,7 @@ export const DevelopmentModeIndicator = React.memo(
 							: developmentMode === 'yolo'
 								? colors.error
 								: developmentMode === 'auto-accept' ||
-										developmentMode === 'scheduler'
+										developmentMode === 'headless'
 									? colors.info
 									: colors.warning
 					}

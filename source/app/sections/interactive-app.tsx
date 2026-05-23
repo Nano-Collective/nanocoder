@@ -5,12 +5,10 @@ import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
 import {FileExplorer} from '@/components/file-explorer';
 import {IdeSelector} from '@/components/ide-selector';
-import {SchedulerView} from '@/components/scheduler-view';
 import type {useChatHandler} from '@/hooks/chat-handler';
 import type {AppHandlers} from '@/hooks/useAppHandlers';
 import type {useAppState} from '@/hooks/useAppState';
 import type {useModeHandlers} from '@/hooks/useModeHandlers';
-import type {useSchedulerMode} from '@/hooks/useSchedulerMode';
 import type {useToolHandler} from '@/hooks/useToolHandler';
 import type {useVSCodeServer} from '@/hooks/useVSCodeServer';
 import type {PendingToolApproval} from '@/utils/tool-approval-queue';
@@ -22,7 +20,6 @@ interface InteractiveAppProps {
 	toolHandler: ReturnType<typeof useToolHandler>;
 	modeHandlers: ReturnType<typeof useModeHandlers>;
 	appHandlers: AppHandlers;
-	schedulerMode: ReturnType<typeof useSchedulerMode>;
 	vscodeServer: ReturnType<typeof useVSCodeServer>;
 	staticComponents: React.ReactNode[];
 	liveComponent: React.ReactNode;
@@ -31,7 +28,6 @@ interface InteractiveAppProps {
 	handleQuestionAnswer: (answer: string) => void;
 	handleUserSubmit: (message: string) => Promise<void>;
 	handleIdeSelect: (ide: string) => void;
-	exitSchedulerMode: () => void;
 }
 
 /**
@@ -46,7 +42,6 @@ export function InteractiveApp({
 	toolHandler,
 	modeHandlers,
 	appHandlers,
-	schedulerMode,
 	vscodeServer,
 	staticComponents,
 	liveComponent,
@@ -55,7 +50,6 @@ export function InteractiveApp({
 	handleQuestionAnswer,
 	handleUserSubmit,
 	handleIdeSelect,
-	exitSchedulerMode,
 }: InteractiveAppProps): React.ReactElement {
 	const handleToggleCompactDisplay = () => {
 		const expanding = appState.compactToolDisplay;
@@ -79,8 +73,7 @@ export function InteractiveApp({
 	const showModalSelectors =
 		(appState.activeMode !== null &&
 			appState.activeMode !== 'explorer' &&
-			appState.activeMode !== 'ideSelection' &&
-			appState.activeMode !== 'scheduler') ||
+			appState.activeMode !== 'ideSelection') ||
 		appState.isSettingsMode;
 
 	return (
@@ -141,18 +134,6 @@ export function InteractiveApp({
 						onSessionCancel={appHandlers.handleSessionCancel}
 					/>
 				</Box>
-			)}
-
-			{appState.isSchedulerMode && (
-				<SchedulerView
-					activeJobCount={schedulerMode.activeJobCount}
-					queueLength={schedulerMode.queueLength}
-					isProcessing={schedulerMode.isProcessing}
-					currentJobCommand={schedulerMode.currentJobCommand}
-					developmentMode={appState.developmentMode}
-					contextPercentUsed={appState.contextPercentUsed}
-					onExit={exitSchedulerMode}
-				/>
 			)}
 
 			{appState.startChat &&

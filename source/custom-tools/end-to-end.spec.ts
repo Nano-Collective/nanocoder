@@ -132,7 +132,7 @@ rm`,
 	t.true(normalNames.includes('risky_op'));
 });
 
-test.serial('scheduler mode excludes any custom tool needing approval', t => {
+test.serial('headless mode excludes any custom tool needing approval', t => {
 	rmSync(projectToolsDir, {recursive: true, force: true});
 	mkdirSync(projectToolsDir, {recursive: true});
 
@@ -158,12 +158,12 @@ echo ok`,
 	const manager = new ToolManager();
 	manager.initializeCustomTools(projectRoot);
 
-	const schedulerNames = manager.getAvailableToolNames(
+	const headlessNames = manager.getAvailableToolNames(
 		undefined,
-		'scheduler',
+		'headless',
 	);
-	t.true(schedulerNames.includes('auto_safe'));
-	t.false(schedulerNames.includes('needs_prompt'));
+	t.true(headlessNames.includes('auto_safe'));
+	t.false(headlessNames.includes('needs_prompt'));
 });
 
 test.serial(

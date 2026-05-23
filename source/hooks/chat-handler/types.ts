@@ -18,7 +18,7 @@ export interface UseChatHandlerProps {
 	addToChatQueue: (component: React.ReactNode) => void;
 	abortController: AbortController | null;
 	setAbortController: (controller: AbortController | null) => void;
-	developmentMode?: 'normal' | 'auto-accept' | 'yolo' | 'plan' | 'scheduler';
+	developmentMode?: 'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless';
 	nonInteractiveMode?: boolean;
 	onStartToolConfirmationFlow: (
 		toolCalls: ToolCall[],

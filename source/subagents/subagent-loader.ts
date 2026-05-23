@@ -102,6 +102,25 @@ export class SubagentLoader {
 	}
 
 	/**
+	 * Register a subagent config produced outside this loader (e.g. by the
+	 * skill registrar). Returns true on success, false if the name is
+	 * already cached - the caller treats that as a hard collision.
+	 */
+	registerExternal(config: SubagentConfigWithSource): boolean {
+		if (this.cache.has(config.name)) return false;
+		this.cache.set(config.name, config);
+		this.initialized = true;
+		return true;
+	}
+
+	/**
+	 * Remove a previously-registered subagent by name. Returns true if found.
+	 */
+	unregisterExternal(name: string): boolean {
+		return this.cache.delete(name);
+	}
+
+	/**
 	 * Get a specific subagent by name.
 	 * @param name - The subagent name
 	 * @returns The subagent config or null if not found
@@ -230,6 +249,7 @@ export class SubagentLoader {
 						filePath,
 						isBuiltIn: false,
 					},
+					subscribe: parsed.subscribe,
 				});
 			} catch (error) {
 				logError(

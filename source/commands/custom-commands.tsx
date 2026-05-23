@@ -4,6 +4,7 @@ import {InfoMessage} from '@/components/message-box';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {useTheme} from '@/hooks/useTheme';
+import {getCommandLoader} from '@/message-handler';
 import {generateKey} from '@/session/key-generator';
 import type {Command, CustomCommand} from '@/types/index';
 
@@ -196,8 +197,12 @@ export const commandsCommand: Command = {
 	description:
 		'List all custom commands. Subcommands: show <name>, refresh, create <name>',
 	handler: (args: string[]) => {
-		const loader = new CustomCommandLoader();
-		loader.loadCommands();
+		// Prefer the app's shared loader so bundle-registered commands are
+		// visible. Fall back to a fresh disk-scan instance only if no app
+		// loader is registered (e.g. ad-hoc invocations from tests).
+		const shared = getCommandLoader();
+		const loader = shared ?? new CustomCommandLoader();
+		if (!shared) loader.loadCommands();
 
 		const sub = args[0];
 
@@ -226,11 +231,14 @@ export const commandsCommand: Command = {
 		}
 
 		if (sub === 'refresh') {
-			loader.loadCommands();
+			// Note: refresh only re-scans .nanocoder/commands/ on disk. Bundle
+			// skill commands are registered at boot via the skill pipeline -
+			// to pick up new bundle commands, restart nanocoder.
 			return Promise.resolve(
 				React.createElement(InfoMessage, {
 					key: generateKey('commands'),
-					message: 'Commands cache refreshed.',
+					message:
+						'/commands refresh only re-scans flat .nanocoder/commands/. Restart nanocoder to pick up changes to skill bundles.',
 					hideBox: true,
 				}),
 			);

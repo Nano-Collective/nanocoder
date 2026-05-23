@@ -95,103 +95,6 @@ function InitError({message}: {message: string}) {
 	return <ErrorMessage hideBox={true} message={`✗ ${message}`} />;
 }
 
-// Enhanced example commands based on detected project type
-const getExampleCommands = (projectType: string, primaryLanguage: string) => {
-	const baseCommands = {
-		'review.md': `---
-description: Review code and suggest improvements
-aliases: [code-review, cr]
-parameters: [files]
----
-
-Review the code in {{files}} and provide detailed feedback on:
-
-1. Code quality and best practices
-2. Potential bugs or issues
-3. Performance considerations
-4. Readability and maintainability
-5. Security concerns
-
-Provide specific, actionable suggestions for improvement.`,
-
-		'test.md': `---
-description: Generate comprehensive unit tests
-aliases: [unittest, test-gen]
-parameters: [filename]
----
-
-Generate comprehensive unit tests for {{filename}}.
-
-Consider:
-1. Test all public functions and methods
-2. Include edge cases and error scenarios
-3. Use appropriate mocking where needed
-4. Follow existing test framework conventions
-5. Ensure good test coverage
-
-If no filename provided, suggest which files need tests.`,
-	};
-
-	// Add language/framework-specific commands
-	const additionalCommands: {[key: string]: string} = {};
-
-	if (primaryLanguage === 'JavaScript' || primaryLanguage === 'TypeScript') {
-		additionalCommands['refactor.md'] = `---
-description: Refactor JavaScript/TypeScript code
-aliases: [refactor-js, clean]
-parameters: [target]
----
-
-Refactor {{target}} to improve:
-
-1. Code structure and organization
-2. Modern ES6+ syntax usage
-3. Performance optimizations
-4. Type safety (for TypeScript)
-5. Reusability and maintainability
-
-Follow current project conventions and patterns.`;
-	}
-
-	if (primaryLanguage === 'Python') {
-		additionalCommands['optimize.md'] = `---
-description: Optimize Python code for performance
-aliases: [perf, optimize-py]
-parameters: [file]
----
-
-Analyze and optimize {{file}} for:
-
-1. Algorithm efficiency
-2. Memory usage
-3. Pythonic patterns
-4. Performance bottlenecks
-5. Code readability
-
-Follow PEP 8 and project conventions.`;
-	}
-
-	if (projectType.includes('Web')) {
-		additionalCommands['component.md'] = `---
-description: Create a new UI component
-aliases: [comp, ui]
-parameters: [name, type]
----
-
-Create a new {{type}} component named {{name}} that:
-
-1. Follows project component patterns
-2. Includes proper TypeScript types
-3. Has responsive design considerations
-4. Includes basic styling structure
-5. Has proper prop validation
-
-Make it reusable and well-documented.`;
-	}
-
-	return {...baseCommands, ...additionalCommands};
-};
-
 export const initCommand: Command = {
 	name: 'init',
 	description:
@@ -257,30 +160,9 @@ export const initCommand: Command = {
 				}
 			}
 
-			// Create .nanocoder directory structure
 			if (!hasNanocoder) {
 				mkdirSync(nanocoderDir, {recursive: true});
 				created.push('.nanocoder/');
-			}
-
-			const commandsDir = join(nanocoderDir, 'commands');
-			if (!existsSync(commandsDir)) {
-				mkdirSync(commandsDir, {recursive: true});
-				created.push('.nanocoder/commands/');
-			}
-
-			// Create example custom commands based on project analysis
-			const exampleCommands = getExampleCommands(
-				analysis.projectType,
-				analysis.languages.primary?.name || 'Unknown',
-			);
-
-			for (const [filename, content] of Object.entries(exampleCommands)) {
-				const filePath = join(commandsDir, filename);
-				if (!existsSync(filePath)) {
-					writeFileSync(filePath, content);
-					created.push(`.nanocoder/commands/${filename}`);
-				}
 			}
 
 			// Prepare analysis summary for display

@@ -9,7 +9,11 @@ import {
 } from '@/config/preferences';
 import {validateProjectConfigSecurity} from '@/config/validation';
 import {CustomCommandLoader} from '@/custom-commands/loader';
-import {setToolManagerGetter, setToolRegistryGetter} from '@/message-handler';
+import {
+	setCommandLoaderGetter,
+	setToolManagerGetter,
+	setToolRegistryGetter,
+} from '@/message-handler';
 import {writeStatus} from '@/plain/writer';
 import {SubagentExecutor} from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
@@ -49,6 +53,7 @@ export async function initializePlain(
 
 	setToolRegistryGetter(() => toolManager.getToolRegistry());
 	setToolManagerGetter(() => toolManager);
+	setCommandLoaderGetter(() => customCommandLoader);
 	commandRegistry.registerLazy(lazyCommands);
 
 	const preferredProvider = options.cliProvider || preferences.lastProvider;
@@ -95,7 +100,37 @@ export async function initializePlain(
 	setAgentToolExecutor(subagentExecutor);
 
 	const subagentLoader = getSubagentLoader();
-	await subagentLoader.initialize();
+
+	// Unified skill boot: drives the legacy loaders (commands / subagents /
+	// custom tools) and the bundle loader through a single pipeline. Event
+	// sources are not started in plain mode (the daemon owns those).
+	try {
+		const {EventRouter} = await import('@/events/event-router');
+		const {bootSkillPipeline} = await import('@/skills/bootstrap');
+		const router = new EventRouter({dispatch: () => {}});
+		const result = await bootSkillPipeline({
+			projectRoot: process.cwd(),
+			toolManager,
+			commandLoader: customCommandLoader,
+			subagentLoader,
+			eventRouter: router,
+		});
+		for (const err of result.loadErrors) {
+			const where = err.filePath ?? err.bundlePath;
+			writeStatus(`Skill load error (${where}): ${err.message}`);
+		}
+		for (const c of result.registration.collisions) {
+			writeStatus(
+				`Skill collision (${c.skill} ${c.kind}:${c.name}): ${c.message}`,
+			);
+		}
+		for (const warning of result.deprecations) {
+			writeStatus(warning);
+		}
+	} catch (error) {
+		writeStatus(`Failed to boot skill pipeline: ${String(error)}`);
+	}
+
 	const availableAgents = await subagentLoader.listSubagents();
 	const agentSummaries = availableAgents.map(a => ({
 		name: a.name,
@@ -103,21 +138,6 @@ export async function initializePlain(
 	}));
 	setAvailableSubagents(agentSummaries);
 	setAvailableAgentNames(agentSummaries);
-
-	try {
-		customCommandLoader.loadCommands();
-	} catch (error) {
-		writeStatus(`Failed to load custom commands: ${String(error)}`);
-	}
-
-	try {
-		const {errors} = toolManager.initializeCustomTools();
-		for (const err of errors) {
-			writeStatus(`Custom tool error (${err.file}): ${err.error}`);
-		}
-	} catch (error) {
-		writeStatus(`Failed to load custom tools: ${String(error)}`);
-	}
 
 	await initializeMCP(toolManager);
 

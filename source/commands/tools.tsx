@@ -113,15 +113,7 @@ function ToolsView({toolManager}: {toolManager: ToolManager | null}) {
 				</Text>
 			</Box>
 			{custom.length === 0 ? (
-				<>
-					<Text color={colors.secondary}>(none)</Text>
-					<Box marginTop={1}>
-						<Text color={colors.secondary}>
-							Drop a markdown file into{' '}
-							<Text color={colors.primary}>.nanocoder/tools/</Text> to add one.
-						</Text>
-					</Box>
-				</>
+				<Text color={colors.secondary}>(none)</Text>
 			) : (
 				custom.map(t => (
 					<Text key={t.name} color={colors.text}>

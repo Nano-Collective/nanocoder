@@ -8,38 +8,8 @@ import type {SubagentConfigWithSource} from '@/subagents/types';
 import type {MessageSubmissionOptions} from '@/types/index';
 
 /**
- * Handles /schedule start — enters scheduler mode.
- * Returns true if handled.
- */
-export async function handleScheduleStart(
-	commandParts: string[],
-	options: MessageSubmissionOptions,
-): Promise<boolean> {
-	if (commandParts[0] !== 'schedule' || commandParts[1] !== 'start') {
-		return false;
-	}
-
-	const {onEnterSchedulerMode, onCommandComplete} = options;
-
-	if (onEnterSchedulerMode) {
-		onEnterSchedulerMode();
-		onCommandComplete?.();
-	} else {
-		options.onAddToChatQueue(
-			React.createElement(ErrorMessage, {
-				key: generateKey('schedule-error'),
-				message: 'Scheduler mode is not available.',
-			}),
-		);
-		onCommandComplete?.();
-	}
-
-	return true;
-}
-
-/**
- * Creates a markdown file with frontmatter template and asks the AI to help write it.
- * Shared logic for /schedule create and /commands create.
+ * Creates a markdown file with frontmatter template and asks the AI to help
+ * write it. Shared logic for the /<command|tool|agent> create flows.
  */
 async function handleFileCreate(
 	fileName: string | undefined,
@@ -54,7 +24,7 @@ async function handleFileCreate(
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
 				key: generateKey(`${entityName}-create-error`),
-				message: `Usage: /${entityName} create <name>\nExample: /${entityName} create ${entityName === 'schedule' ? 'deps-update' : 'review-code'}`,
+				message: `Usage: /${entityName} create <name>\nExample: /${entityName} create review-code`,
 			}),
 		);
 		onCommandComplete?.();
@@ -69,7 +39,7 @@ async function handleFileCreate(
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
 				key: generateKey(`${entityName}-create-exists`),
-				message: `${entityName === 'schedule' ? 'Schedule' : 'Command'} file already exists: .nanocoder/${dirName}/${safeName}`,
+				message: `Command file already exists: .nanocoder/${dirName}/${safeName}`,
 			}),
 		);
 		onCommandComplete?.();
@@ -79,7 +49,7 @@ async function handleFileCreate(
 	mkdirSync(targetDir, {recursive: true});
 
 	const template = `---
-description: ${safeName.replace(/\.md$/, '')} ${entityName === 'schedule' ? 'scheduled command' : 'custom command'}
+description: ${safeName.replace(/\.md$/, '')} custom command
 ---
 
 `;
@@ -98,28 +68,6 @@ description: ${safeName.replace(/\.md$/, '')} ${entityName === 'schedule' ? 'sch
 	await onHandleChatMessage(aiPrompt(safeName, commandBaseName));
 
 	return true;
-}
-
-/**
- * Handles /schedule create — creates the schedule file and prompts the AI to help write it.
- * Returns true if handled.
- */
-export async function handleScheduleCreate(
-	commandParts: string[],
-	options: MessageSubmissionOptions,
-): Promise<boolean> {
-	if (commandParts[0] !== 'schedule' || commandParts[1] !== 'create') {
-		return false;
-	}
-
-	return handleFileCreate(
-		commandParts[2],
-		'schedules',
-		'schedule',
-		safeName =>
-			`I just created a new schedule command file at .nanocoder/schedules/${safeName}. Help me write the content for this scheduled task. Ask me what I want this scheduled job to do, then write the markdown prompt into the file using the write_file tool. The file should contain a clear prompt that instructs the AI agent what to do when this schedule runs. Keep the YAML frontmatter at the top with the description field.`,
-		options,
-	);
 }
 
 /**
@@ -453,6 +401,233 @@ Once you know what the user wants, replace the placeholder body with the real sh
  * Handles /commands create — creates the command file and prompts the AI to help write it.
  * Returns true if handled.
  */
+/**
+ * Handles `/skills create <name>` — scaffolds a new bundle directory
+ * under `.nanocoder/skills/<name>/`. Single-file skills (one command,
+ * one agent, one tool) continue to use `/agents create`, `/tools create`,
+ * and `/commands create`. The bundle form is for multi-piece features
+ * (subagent + tools + command that ship together).
+ */
+const BUNDLE_NAME_REGEX = /^[a-z][a-z0-9-]*$/;
+
+export async function handleSkillsCreate(
+	commandParts: string[],
+	options: MessageSubmissionOptions,
+): Promise<boolean> {
+	if (commandParts[0] !== 'skills' || commandParts[1] !== 'create') {
+		return false;
+	}
+
+	const {onAddToChatQueue, onHandleChatMessage, onCommandComplete} = options;
+	const name = commandParts[2];
+
+	if (!name) {
+		onAddToChatQueue(
+			React.createElement(ErrorMessage, {
+				key: generateKey('skills-create-error'),
+				message:
+					'Usage: /skills create <name>\nExample: /skills create pr-reviewer\n\nFor single-piece skills, use /commands create, /agents create, or /tools create instead.',
+			}),
+		);
+		onCommandComplete?.();
+		return true;
+	}
+
+	if (!BUNDLE_NAME_REGEX.test(name)) {
+		onAddToChatQueue(
+			React.createElement(ErrorMessage, {
+				key: generateKey('skills-create-invalid-name'),
+				message: `Skill names must match ${BUNDLE_NAME_REGEX} (kebab-case starting with a letter).`,
+			}),
+		);
+		onCommandComplete?.();
+		return true;
+	}
+
+	const bundleRoot = join(process.cwd(), '.nanocoder', 'skills', name);
+	if (existsSync(bundleRoot)) {
+		onAddToChatQueue(
+			React.createElement(ErrorMessage, {
+				key: generateKey('skills-create-exists'),
+				message: `Skill bundle already exists: .nanocoder/skills/${name}/`,
+			}),
+		);
+		onCommandComplete?.();
+		return true;
+	}
+
+	mkdirSync(join(bundleRoot, 'commands'), {recursive: true});
+	mkdirSync(join(bundleRoot, 'agents'), {recursive: true});
+	mkdirSync(join(bundleRoot, 'tools'), {recursive: true});
+	writeFileSync(
+		join(bundleRoot, 'skill.yaml'),
+		`name: ${name}\ndescription: A brief description of what this skill does.\n`,
+		'utf-8',
+	);
+	writeFileSync(
+		join(bundleRoot, 'README.md'),
+		`# ${name}\n\nA new nanocoder skill bundle. Drop \`.md\` files into \`commands/\`, \`agents/\`, or \`tools/\` and run \`/skills show ${name}\` to inspect what loaded.\n`,
+		'utf-8',
+	);
+
+	onAddToChatQueue(
+		React.createElement(SuccessMessage, {
+			key: generateKey('skills-created'),
+			message: `Created skill bundle: .nanocoder/skills/${name}/`,
+			hideBox: true,
+		}),
+	);
+
+	await onHandleChatMessage(buildSkillBundleDesignPrompt(name));
+
+	return true;
+}
+
+/**
+ * The chained prompt that runs after `/skills create <name>` scaffolds an
+ * empty bundle. Embeds the full schema for each member kind so the model
+ * generates files that actually parse the first time, instead of producing
+ * OpenAPI-style or kebab-case shapes the parsers reject.
+ */
+function buildSkillBundleDesignPrompt(name: string): string {
+	return `I just created a new skill bundle at .nanocoder/skills/${name}/. Ask me what this skill should do, then write the members using \`write_file\`. After writing, summarize the resulting tree so I can verify.
+
+# Bundle layout
+
+A bundle is a directory under \`.nanocoder/skills/<name>/\` with:
+
+- \`skill.yaml\` — the manifest (required).
+- \`commands/\`  — **any number** of \`.md\` files become slash commands.
+  Each is auto-namespaced under the bundle name (e.g. \`commands/status.md\`
+  in bundle \`k8s\` invokes as \`/k8s:status\`). Exception: \`commands/<bundleName>.md\`
+  (e.g. \`commands/k8s.md\` in bundle \`k8s\`) keeps the bare name (\`/k8s\`).
+- \`agents/\`    — **at most one** \`.md\` becomes the subagent. The agent IS the bundle's brain;
+  if you want multiple agents, split into multiple skills.
+- \`tools/\`     — **any number** of \`.md\` files become shell-script tools.
+
+The bundle's name comes from the directory name. The skill is loaded as a single unit.
+
+# \`skill.yaml\` schema (required fields marked *)
+
+\`\`\`yaml
+name: ${name}                                 # * kebab-case, matches ^[a-z][a-z0-9-]*$
+description: One-line summary.               # * shown in /skills
+version: 0.1.0                               # optional, free string
+author: you@example.com                      # optional
+tags: [git, ci, review]                      # optional
+
+# Tool visibility. Shorthand 'scoped' / 'global' OR the mapping form.
+# Default: scoped (tools are visible only to this bundle's own subagent).
+tools_visibility: scoped                     # optional; or { default: scoped }
+
+# Event subscriptions (optional). Members of THIS bundle only.
+# Use \`target:\` HERE (manifest), NEVER in a member's frontmatter.
+subscribe:
+  - kind: file.changed
+    target: agent:${name}-agent             # MUST be 'command:<name>' | 'agent:<name>' | 'tool:<name>'
+    paths: ["src/**/*.ts"]                   # relative globs only, no leading '/' or '..'
+    eventKinds: [add, change]                # optional whitelist; default fires on all
+    confirm: true                            # optional; runs target in plan mode
+  - kind: schedule.cron
+    target: command:weekly-report
+    cron: "0 9 * * MON"
+\`\`\`
+
+# \`commands/<name>.md\` schema
+
+\`\`\`markdown
+---
+description: One-line summary.               # required
+aliases: [short, c]                          # optional
+# subscribe: omit target here (implicit self).
+---
+The prompt body the LLM receives when the user runs /<command>.
+\`\`\`
+
+# \`agents/<name>.md\` schema
+
+\`\`\`markdown
+---
+name: ${name}-agent                          # required, must match this file
+description: When to delegate to this agent. # required
+model: inherit                               # optional; usually 'inherit'
+tools:                                       # optional; if set, ONLY these names are visible
+  - tool_one
+  - tool_two
+disallowedTools: []                          # optional
+---
+You are a specialized agent. Describe the role, the tools you should use,
+and any constraints. The body is the system prompt the subagent sees.
+\`\`\`
+
+If \`tools:\` is omitted, the agent automatically gets the bundle's sibling
+tools. Bundle-scoped tools are ALWAYS visible to this subagent (the
+\`tools_visibility: scoped\` setting hides them from \`/tools\` and from the
+main agent, but not from this skill's own subagent).
+
+# \`tools/<name>.md\` schema  (read very carefully)
+
+\`\`\`markdown
+---
+name: my_tool                                # * MUST match ^[a-z][a-z0-9_]*$
+                                             #   - snake_case ONLY, no hyphens, no camelCase
+                                             #   - this name is interpolated into shell; the regex
+                                             #     is part of the injection-safety surface
+description: One-line summary.               # *
+approval: never                              # * 'never' | 'always' | 'destructive'
+                                             #   - never: read-only ops (ls, cat, git status, kubectl get)
+                                             #   - always: prompts the user every time
+                                             #   - destructive: prompts in normal mode, auto in auto-accept/yolo
+read_only: true                              # default: (approval == 'never'); set false for writes
+timeout_ms: 30000                            # default 30000, max 300000
+shell: bash                                  # 'bash' | 'sh'; default bash if available else sh
+cwd: ./scripts                               # optional; default project root; supports \${VAR}
+env:                                         # optional; values support \${VAR}
+  FOO: bar
+
+# Parameters: MUST be a MAPPING (paramName: {definition}).
+# Do NOT use a list-of-objects ([{name, type, ...}]) - that's the OpenAPI
+# shape and is wrong here. The parser will tolerate it but the canonical
+# shape is the mapping below.
+parameters:
+  namespace:
+    type: string                             # 'string' | 'number' | 'integer' | 'boolean' | 'array'
+    description: Kubernetes namespace.
+    required: false                          # default false
+    default: default                         # optional
+    enum: [default, kube-system]             # optional; restrict to listed values
+    pattern: '^[a-z0-9-]+$'                  # string only
+    minLength: 1                             # string only
+    maxLength: 63                            # string only
+    min: 0                                   # number/integer only
+    max: 1000                                # number/integer only
+  items:
+    type: array
+    items: {type: string}                    # required when type is 'array'
+---
+
+# The body is a shell script.
+# Use {{ name }} to substitute a parameter (values are shell-quoted -
+# safe against injection). Use {{# name }}...{{/ name }} for conditional
+# sections that include only when the param is truthy.
+
+kubectl get pods -n {{ namespace }} -o wide
+{{# label }}kubectl get pods -l {{ label }}{{/ label }}
+\`\`\`
+
+# Rules that catch out AI-generated bundles
+
+1. **Tool \`name:\` is snake_case.** Hyphens fail validation. \`k8s_list_pods\` ✓, \`k8s-list-pods\` ✗.
+2. **\`parameters\` is a mapping**, not a list. Don't write \`- name: namespace\\n  type: ...\`.
+3. **No \`target:\` on member frontmatter** in a bundle. Targets live in \`skill.yaml\`.
+4. **Many commands, one agent, many tools.** Multiple \`.md\` files in \`commands/\` are auto-namespaced (\`/bundle:verb\`). Two \`.md\` files in \`agents/\` is an error.
+5. **\`approval: never\`** for read-only operations (\`ls\`, \`cat\`, \`git status\`, \`kubectl get\`, \`gh ...\` queries). Use \`always\` only if the tool mutates state and you want a prompt every run. Use \`destructive\` only for file-mutation-style tools.
+6. **Paths in subscriptions are relative globs.** \`docs/**\`, \`src/**/*.ts\` ✓. \`/etc/...\` ✗, \`../...\` ✗.
+7. **Use \`write_file\` to author each file**, including \`skill.yaml\`. Do not concatenate content into a single file.
+
+Now: ask me what the skill should do, then design it.`;
+}
+
 export async function handleCommandCreate(
 	commandParts: string[],
 	options: MessageSubmissionOptions,

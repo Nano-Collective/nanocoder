@@ -85,9 +85,9 @@ const executeBashCoreTool = tool({
 			return false;
 		}
 
-		// Scheduler and yolo modes auto-execute all tools including bash
+		// Headless and yolo modes auto-execute all tools including bash
 		const mode = getCurrentMode();
-		if (mode === 'scheduler' || mode === 'yolo') return false;
+		if (mode === 'headless' || mode === 'yolo') return false;
 
 		// Even in auto-accept mode, bash commands should require approval for security
 		return true;

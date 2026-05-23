@@ -156,3 +156,58 @@ Provide a summary of commits from the last 24 hours using git log. Group by auth
 - **Keep prompts focused**: Scheduled tasks work best with clear, specific requests
 - **Use absolute paths**: If your prompt references files, use absolute paths since the working directory may vary
 - **Check logs regularly**: Monitor `/schedule logs` to ensure tasks are running successfully
+
+## Migration to skill subscriptions
+
+This `.nanocoder/schedules.json`-based scheduler is **deprecated** in favor of
+the unified skill subscription model. The new model declares cron triggers
+on a command's frontmatter or a bundle manifest, and runs them through the
+per-project daemon.
+
+### Before (legacy)
+
+```json
+// .nanocoder/schedules.json
+[
+  {"cron": "0 9 * * MON", "command": "/weekly-report"}
+]
+```
+
+### After (single-file form)
+
+```markdown
+<!-- .nanocoder/commands/weekly-report.md -->
+---
+description: Monday morning summary.
+subscribe:
+  - kind: schedule.cron
+    cron: "0 9 * * MON"
+---
+
+Summarize last week's commits...
+```
+
+### After (bundle form)
+
+```yaml
+# .nanocoder/skills/reports/skill.yaml
+name: reports
+description: Weekly status reports.
+subscribe:
+  - kind: schedule.cron
+    target: command:weekly-report
+    cron: "0 9 * * MON"
+```
+
+Then start the daemon to make triggers fire:
+
+```bash
+nanocoder daemon start
+```
+
+If `.nanocoder/schedules.json` is present when Nanocoder boots, a loud
+warning points back at this migration guide. The legacy scheduler runner
+still works during the transition window, but new scheduled runs should
+move to the subscription model.
+
+See [Skills](./skills.md) for the full subscription syntax.

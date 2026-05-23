@@ -197,7 +197,9 @@ export class SubagentExecutor {
 	}
 
 	private getAvailableToolNames(config: SubagentConfigWithSource): string[] {
-		const allTools = Object.keys(this.toolManager.getAllTools());
+		const allTools = Object.keys(
+			this.toolManager.getAllTools({forSkill: config.ownerSkill}),
+		);
 
 		let available = allTools;
 
@@ -232,7 +234,9 @@ export class SubagentExecutor {
 	private filterTools(
 		config: SubagentConfigWithSource,
 	): Record<string, AISDKCoreTool> {
-		const allTools = this.toolManager.getAllToolsWithoutExecute();
+		const allTools = this.toolManager.getAllToolsWithoutExecute({
+			forSkill: config.ownerSkill,
+		});
 		const availableNames = this.getAvailableToolNames(config);
 
 		const filtered: Record<string, AISDKCoreTool> = {} as Record<

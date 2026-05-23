@@ -1,4 +1,8 @@
 import {readFileSync} from 'node:fs';
+import {
+	parseSubscribeBlock,
+	SubscribeParseError,
+} from '@/skills/parse-subscribe';
 import type {
 	CustomToolApprovalPolicy,
 	CustomToolMetadata,
@@ -6,6 +10,7 @@ import type {
 	CustomToolParameterType,
 	CustomToolShell,
 } from '@/types/custom-tools';
+import type {SkillTrigger} from '@/types/skills';
 import {parseYamlObject, splitFrontmatter} from '@/utils/frontmatter';
 
 const TOOL_NAME_REGEX = /^[a-z][a-z0-9_]*$/;
@@ -31,6 +36,11 @@ const VALID_SHELLS: ReadonlySet<CustomToolShell> = new Set(['bash', 'sh']);
 export interface ParsedCustomToolFile {
 	metadata: CustomToolMetadata;
 	body: string;
+	/**
+	 * Event subscriptions declared in the file's frontmatter, if any. Target
+	 * is implicit (the tool itself) and resolved by the skill registrar.
+	 */
+	subscribe?: SkillTrigger[];
 }
 
 export class CustomToolParseError extends Error {
@@ -64,7 +74,17 @@ export function parseCustomToolFile(filePath: string): ParsedCustomToolFile {
 		throw new CustomToolParseError('Tool body (shell script) is empty');
 	}
 
-	return {metadata, body: split.body};
+	let subscribe: SkillTrigger[] | undefined;
+	try {
+		subscribe = parseSubscribeBlock(raw.subscribe);
+	} catch (err) {
+		if (err instanceof SubscribeParseError) {
+			throw new CustomToolParseError(err.message);
+		}
+		throw err;
+	}
+
+	return {metadata, body: split.body, subscribe};
 }
 
 function validateMetadata(raw: Record<string, unknown>): CustomToolMetadata {
@@ -105,15 +125,29 @@ function parseParameters(
 	value: unknown,
 ): Record<string, CustomToolParameterDef> {
 	if (value === undefined || value === null) return {};
-	if (typeof value !== 'object' || Array.isArray(value)) {
+
+	// Canonical form: a mapping `{paramName: {type, ...}}`.
+	// Also accept the list-of-objects form `[{name, type, ...}, ...]` that
+	// JSON Schema / OpenAPI use, since AIs reliably produce that shape when
+	// asked to scaffold a tool. The two forms are equivalent; we normalize
+	// to the canonical mapping internally.
+	const normalized = Array.isArray(value)
+		? listToMapping(value)
+		: (value as unknown);
+
+	if (
+		normalized === null ||
+		typeof normalized !== 'object' ||
+		Array.isArray(normalized)
+	) {
 		throw new CustomToolParseError(
-			'"parameters" must be a mapping of name → definition',
+			'"parameters" must be a mapping of name → definition (or a list of {name, type, ...} entries)',
 		);
 	}
 
 	const result: Record<string, CustomToolParameterDef> = {};
 	for (const [paramName, rawDef] of Object.entries(
-		value as Record<string, unknown>,
+		normalized as Record<string, unknown>,
 	)) {
 		if (!TOOL_NAME_REGEX.test(paramName)) {
 			throw new CustomToolParseError(
@@ -131,6 +165,34 @@ function parseParameters(
 		);
 	}
 	return result;
+}
+
+/**
+ * Convert the list-of-objects parameter form (each entry has a `name:`
+ * field plus the rest of the definition) into the canonical mapping
+ * `{paramName: {...}}`. Used to tolerate the OpenAPI / JSON Schema shape
+ * that AI-generated tool stubs often produce.
+ */
+function listToMapping(list: unknown[]): Record<string, unknown> {
+	const out: Record<string, unknown> = {};
+	for (let i = 0; i < list.length; i++) {
+		const entry = list[i];
+		if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+			throw new CustomToolParseError(
+				`parameters[${i}] must be a mapping with at least a "name" and "type"`,
+			);
+		}
+		const obj = entry as Record<string, unknown>;
+		const name = obj.name;
+		if (typeof name !== 'string' || !name) {
+			throw new CustomToolParseError(
+				`parameters[${i}] is missing a "name" field`,
+			);
+		}
+		const {name: _name, ...rest} = obj;
+		out[name] = rest;
+	}
+	return out;
 }
 
 function parseParameterDef(
