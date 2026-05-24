@@ -23,7 +23,7 @@ import type {Subscription} from '@/events/types';
 
 export interface IpcRequest {
 	id: number;
-	method: 'listSubscriptions' | 'ping';
+	method: 'listSubscriptions' | 'ping' | 'shutdown';
 	params?: unknown;
 }
 
@@ -37,6 +37,13 @@ export type IpcMessage = IpcResponse;
 
 export interface IpcHandlers {
 	listSubscriptions(): Subscription[];
+	/**
+	 * Optional - if supplied, the IPC server exposes a `shutdown` method
+	 * that triggers a graceful daemon stop. Lets clients ask the daemon
+	 * to wind down its own event loop without relying on SIGTERM (which
+	 * is force-kill on Windows).
+	 */
+	shutdown?: () => void | Promise<void>;
 }
 
 export class DaemonIpcServer {
@@ -130,6 +137,23 @@ export class DaemonIpcServer {
 				case 'listSubscriptions':
 					this.respond(socket, req.id, this.handlers.listSubscriptions());
 					return;
+				case 'shutdown':
+					if (!this.handlers.shutdown) {
+						this.respond(
+							socket,
+							req.id,
+							undefined,
+							'shutdown method not enabled on this daemon',
+						);
+						return;
+					}
+					// Acknowledge before firing the stop so the client gets a clean
+					// response. The stop callback is fire-and-forget from this
+					// handler's perspective - the daemon process will exit when its
+					// own event loop drains.
+					this.respond(socket, req.id, {accepted: true});
+					void Promise.resolve(this.handlers.shutdown()).catch(() => {});
+					return;
 				default:
 					this.respond(
 						socket,
@@ -208,6 +232,15 @@ export class DaemonIpcClient {
 
 	async ping(): Promise<string> {
 		return (await this.request('ping')) as string;
+	}
+
+	/**
+	 * Ask the daemon to shut down. Returns when the daemon has acknowledged
+	 * the request (not when it has finished stopping). The caller should
+	 * then poll the lockfile / process for actual termination.
+	 */
+	async shutdown(): Promise<{accepted: true}> {
+		return (await this.request('shutdown')) as {accepted: true};
 	}
 
 	private async request(

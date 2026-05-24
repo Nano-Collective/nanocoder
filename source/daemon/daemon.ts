@@ -91,8 +91,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 	const subagentLoader = getSubagentLoader(opts.projectRoot);
 
 	// Layer 2: event plumbing
+	// `stopHandler` is filled in once `stop` is defined below. The IPC handler
+	// captures the holder so a client `shutdown` request can call it without
+	// us needing to declare `stop` before the IPC server (it depends on the
+	// server itself). On Windows, where SIGTERM is force-kill, this is the
+	// only way to get a graceful stop.
+	const stopHandler: {fn: (() => Promise<void>) | null} = {fn: null};
 	const ipcServer = new DaemonIpcServer(getSocketPath(opts.projectRoot), {
 		listSubscriptions: () => router.all(),
+		shutdown: async () => {
+			if (stopHandler.fn) await stopHandler.fn();
+		},
 	});
 
 	const defaultOnActivity: ActivityListener = activity => {
@@ -195,6 +204,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 		})();
 		return stopPromise;
 	};
+	stopHandler.fn = stop;
 
 	// Signal handling lives in the daemon's process entry point
 	// (source/daemon/entry.ts). Registering handlers here too would race

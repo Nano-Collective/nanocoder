@@ -179,10 +179,19 @@ socket path, start time) and an append-only log at
 reaped automatically on the next `daemon start` or `daemon status`.
 
 Auto-start ships for **macOS** (LaunchAgent under
-`~/Library/LaunchAgents/`) and **Linux** (systemd user unit under
-`~/.config/systemd/user/`). Both are namespaced by a short hash of the
-project path so multiple projects each get their own daemon. Windows
-support is manual: run `nanocoder daemon start` after each login.
+`~/Library/LaunchAgents/`), **Linux** (systemd user unit under
+`~/.config/systemd/user/`), and **Windows** (Task Scheduler task
+registered via `schtasks /Create /XML` with an ONLOGON trigger; the XML
+manifest is stored under `%LOCALAPPDATA%\nanocoder\tasks\`). All three
+are namespaced by a short hash of the project path so multiple projects
+each get their own daemon.
+
+The daemon's IPC surface uses an `AF_UNIX` socket at
+`.nanocoder/daemon.sock` on macOS/Linux and a named pipe at
+`\\.\pipe\nanocoder-daemon-<hash>` on Windows. `nanocoder daemon stop`
+prefers an IPC shutdown request (clean drain of the event loop) and
+falls back to `SIGTERM` only if the daemon is unreachable, so stops are
+graceful on Windows too where `SIGTERM` would otherwise be force-kill.
 
 Internally, the daemon runs every triggered subagent in **`headless`**
 mode (no foreground prompts, no `ask_user`, no `agent`). The

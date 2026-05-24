@@ -104,6 +104,53 @@ test.serial('invalid JSON returns {id:0, error:"invalid JSON"}', async t => {
 	}
 });
 
+test.serial('shutdown method calls server-side handler', async t => {
+	const path = await makeSocketPath();
+	let shutdownCalls = 0;
+	const server = new DaemonIpcServer(path, {
+		listSubscriptions: () => [],
+		shutdown: () => {
+			shutdownCalls++;
+		},
+	});
+	await server.start();
+	const client = new DaemonIpcClient(path);
+	await client.connect();
+	try {
+		const ack = await client.shutdown();
+		t.deepEqual(ack, {accepted: true});
+		// Give the deferred shutdown callback a moment to run.
+		await new Promise(r => setTimeout(r, 20));
+		t.is(shutdownCalls, 1);
+	} finally {
+		await client.disconnect();
+		await server.stop();
+		await rm(join(path, '..'), {recursive: true, force: true});
+	}
+});
+
+test.serial(
+	'shutdown method returns error when server has no handler',
+	async t => {
+		const path = await makeSocketPath();
+		const server = new DaemonIpcServer(path, {
+			listSubscriptions: () => [],
+			// no shutdown handler
+		});
+		await server.start();
+		const client = new DaemonIpcClient(path);
+		await client.connect();
+		try {
+			const err = await t.throwsAsync(() => client.shutdown());
+			t.regex(err?.message ?? '', /shutdown method not enabled/);
+		} finally {
+			await client.disconnect();
+			await server.stop();
+			await rm(join(path, '..'), {recursive: true, force: true});
+		}
+	},
+);
+
 test.serial(
 	'client disconnects mid-stream - server stays alive and accepts new connections',
 	async t => {

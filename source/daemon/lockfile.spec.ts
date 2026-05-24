@@ -4,6 +4,7 @@ import {join} from 'node:path';
 import test from 'ava';
 import {
 	getLockfilePath,
+	getSocketPath,
 	isProcessAlive,
 	readLiveLockfile,
 	readLockfile,
@@ -122,4 +123,27 @@ test.serial('readLiveLockfile returns the lock when process is alive', async t =
 	} finally {
 		await rm(root, {recursive: true, force: true});
 	}
+});
+
+test('getSocketPath returns a project-local .sock file on non-Windows', t => {
+	if (process.platform === 'win32') {
+		t.pass('skipped: non-Windows-only assertion');
+		return;
+	}
+	const root = '/tmp/example-proj';
+	const sock = getSocketPath(root);
+	t.is(sock, join(root, '.nanocoder', 'daemon.sock'));
+});
+
+test('getSocketPath returns a named pipe path on Windows', t => {
+	if (process.platform !== 'win32') {
+		t.pass('skipped: Windows-only assertion');
+		return;
+	}
+	const a = getSocketPath('C:\\projects\\alpha');
+	const b = getSocketPath('C:\\projects\\beta');
+	// Named pipe shape: \\.\pipe\nanocoder-daemon-<hash>
+	t.regex(a, /^\\\\\.\\pipe\\nanocoder-daemon-[a-f0-9]{10}$/);
+	t.regex(b, /^\\\\\.\\pipe\\nanocoder-daemon-[a-f0-9]{10}$/);
+	t.not(a, b, 'distinct project roots produce distinct pipes');
 });

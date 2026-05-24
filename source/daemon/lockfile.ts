@@ -12,7 +12,7 @@
  * See `agents/2026-05-20-skills-unification-plan.md` step 19.
  */
 
-import {randomBytes} from 'node:crypto';
+import {createHash, randomBytes} from 'node:crypto';
 import {existsSync, mkdirSync} from 'node:fs';
 import {readFile, rename, unlink, writeFile} from 'node:fs/promises';
 import {dirname, join} from 'node:path';
@@ -28,7 +28,23 @@ export function getLockfilePath(projectRoot: string): string {
 	return join(projectRoot, '.nanocoder', 'daemon.json');
 }
 
+/**
+ * IPC endpoint path. Unix-like: a project-local AF_UNIX socket file. Windows:
+ * a named pipe whose name embeds a hash of the project root so multiple
+ * projects each get their own pipe namespace. The path is stored verbatim
+ * in the lockfile, so clients read it back regardless of platform.
+ */
 export function getSocketPath(projectRoot: string): string {
+	if (process.platform === 'win32') {
+		// Node's net.createServer().listen(path) on Windows requires the
+		// `\\.\pipe\` prefix to bind a named pipe. The hash keeps each
+		// project's pipe in its own slot of the global pipe namespace.
+		const hash = createHash('sha256')
+			.update(projectRoot)
+			.digest('hex')
+			.slice(0, 10);
+		return `\\\\.\\pipe\\nanocoder-daemon-${hash}`;
+	}
 	return join(projectRoot, '.nanocoder', 'daemon.sock');
 }
 

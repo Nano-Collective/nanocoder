@@ -158,27 +158,69 @@ async function stop(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 		return {exitCode: 0, output: 'No daemon is running.'};
 	}
 
-	try {
-		process.kill(live.pid, 'SIGTERM');
-	} catch (err) {
-		return {
-			exitCode: 1,
-			output: `Failed to signal daemon (pid ${live.pid}): ${
-				err instanceof Error ? err.message : String(err)
-			}`,
-		};
+	// Prefer IPC: works on Windows (where SIGTERM is force-kill) and gives
+	// the daemon a chance to drain its event loop cleanly. Falls back to
+	// SIGTERM if IPC can't be reached (older daemon, socket missing, etc).
+	const ipcAccepted = await tryIpcShutdown(live.socketPath);
+
+	if (!ipcAccepted) {
+		try {
+			process.kill(live.pid, 'SIGTERM');
+		} catch (err) {
+			return {
+				exitCode: 1,
+				output: `Failed to stop daemon (pid ${live.pid}): IPC unreachable and SIGTERM failed: ${
+					err instanceof Error ? err.message : String(err)
+				}`,
+			};
+		}
 	}
 
 	// Wait for the daemon to remove its lockfile, then we know it's gone.
 	const removed = await waitForLockfileGone(opts.projectRoot, 5000);
 	if (!removed) {
 		await removeLockfile(opts.projectRoot);
+		const how = ipcAccepted ? 'IPC shutdown' : 'SIGTERM';
 		return {
 			exitCode: 0,
-			output: `Sent SIGTERM to daemon (pid ${live.pid}). Lockfile cleaned up manually.`,
+			output: `Sent ${how} to daemon (pid ${live.pid}). Lockfile cleaned up manually.`,
 		};
 	}
 	return {exitCode: 0, output: `Daemon stopped (was pid ${live.pid}).`};
+}
+
+/**
+ * Best-effort attempt to ask the daemon to shut itself down over IPC.
+ * Returns true if the daemon accepted the request. Any failure (no socket,
+ * timeout, older daemon without the method) returns false so the caller
+ * can fall back to SIGTERM.
+ */
+async function tryIpcShutdown(socketPath: string): Promise<boolean> {
+	const {DaemonIpcClient} = await import('./ipc');
+	const client = new DaemonIpcClient(socketPath);
+	try {
+		await Promise.race([
+			client.connect(),
+			new Promise<never>((_, reject) =>
+				setTimeout(() => reject(new Error('IPC connect timeout')), 1000),
+			),
+		]);
+	} catch {
+		return false;
+	}
+	try {
+		await Promise.race([
+			client.shutdown(),
+			new Promise<never>((_, reject) =>
+				setTimeout(() => reject(new Error('IPC shutdown timeout')), 2000),
+			),
+		]);
+		return true;
+	} catch {
+		return false;
+	} finally {
+		await client.disconnect().catch(() => {});
+	}
 }
 
 async function status(opts: DaemonCliOptions): Promise<DaemonCliResult> {
