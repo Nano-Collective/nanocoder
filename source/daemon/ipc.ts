@@ -78,8 +78,8 @@ export class DaemonIpcServer {
 		}
 		this.server = createServer(socket => this.attachClient(socket));
 		await new Promise<void>((resolve, reject) => {
-			this.server!.once('error', reject);
-			this.server!.listen(this.socketPath, () => resolve());
+			this.server?.once('error', reject);
+			this.server?.listen(this.socketPath, () => resolve());
 		});
 	}
 
@@ -265,7 +265,7 @@ export class DaemonIpcClient {
 		const id = this.nextId++;
 		return new Promise((resolve, reject) => {
 			this.pending.set(id, {resolve, reject});
-			this.socket!.write(
+			this.socket?.write(
 				`${JSON.stringify({id, method, params} satisfies IpcRequest)}\n`,
 			);
 		});

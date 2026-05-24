@@ -620,6 +620,7 @@ export const processAssistantResponse = async (
 					},
 					setLiveComponent,
 					nonInteractiveMode,
+					signal: controller.signal,
 				},
 			);
 

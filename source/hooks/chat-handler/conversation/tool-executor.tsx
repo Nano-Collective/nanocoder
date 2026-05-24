@@ -137,6 +137,7 @@ const executeAgentBatch = async (
 	setLiveComponent?: (component: React.ReactNode) => void,
 	onCompactToolCount?: (toolName: string) => void,
 	nonInteractiveMode?: boolean,
+	signal?: AbortSignal,
 ): Promise<
 	Array<{
 		toolCall: ToolCall;
@@ -170,6 +171,7 @@ const executeAgentBatch = async (
 
 		const {agentId, promise} = startAgentExecution(
 			parsedArgs as unknown as AgentToolArgs,
+			signal,
 		);
 		resetSubagentProgressById(agentId);
 
@@ -284,6 +286,7 @@ const executeAgentBatch = async (
 						toolCallCount: progress.toolCallCount,
 						tokenCount: progress.tokenCount,
 						success: agentResult.success,
+						toolHistory: [...progress.toolHistory],
 					}}
 				/>,
 			);
@@ -332,6 +335,11 @@ export const executeToolsDirectly = async (
 		 * chronological order for stdout.
 		 */
 		nonInteractiveMode?: boolean;
+		/**
+		 * Parent turn's abort signal. Threaded into agent batches so a user
+		 * cancel (escape) propagates into running subagents.
+		 */
+		signal?: AbortSignal;
 	},
 ): Promise<ToolResult[]> => {
 	// Import processToolUse here to avoid circular dependencies
@@ -359,6 +367,7 @@ export const executeToolsDirectly = async (
 				options?.setLiveComponent,
 				options?.onCompactToolCount,
 				options?.nonInteractiveMode,
+				options?.signal,
 			);
 
 			// Agent results are already displayed by executeAgentBatch

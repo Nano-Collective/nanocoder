@@ -15,6 +15,8 @@ export interface SubagentEvent {
 	toolCallCount: number;
 	turnCount: number;
 	tokenCount: number;
+	/** Chronological list of tool names invoked by the subagent. */
+	toolHistory: string[];
 }
 
 /** Map of agent instance ID → progress state for concurrent agents */
@@ -30,6 +32,7 @@ export const subagentProgress: SubagentEvent = {
 	toolCallCount: 0,
 	turnCount: 0,
 	tokenCount: 0,
+	toolHistory: [],
 };
 
 /** Get progress for a specific agent instance */
@@ -42,10 +45,16 @@ export function getAllSubagentProgress(): Map<string, SubagentEvent> {
 	return subagentProgressMap;
 }
 
+/**
+ * Input shape for bulk progress updates. Tool history is appended separately
+ * via {@link appendSubagentTool} so it isn't part of the routine update payload.
+ */
+export type SubagentEventInput = Omit<SubagentEvent, 'toolHistory'>;
+
 /** Update progress for a specific agent instance */
 export function updateSubagentProgressById(
 	agentId: string,
-	event: SubagentEvent,
+	event: SubagentEventInput,
 ): void {
 	const existing = subagentProgressMap.get(agentId);
 	if (existing) {
@@ -56,18 +65,37 @@ export function updateSubagentProgressById(
 		existing.turnCount = event.turnCount;
 		existing.tokenCount = event.tokenCount;
 	} else {
-		subagentProgressMap.set(agentId, {...event});
+		subagentProgressMap.set(agentId, {...event, toolHistory: []});
 	}
 }
 
 /** Update progress — called by the executor (legacy single-agent path) */
-export function updateSubagentProgress(event: SubagentEvent): void {
+export function updateSubagentProgress(event: SubagentEventInput): void {
 	subagentProgress.subagentName = event.subagentName;
 	subagentProgress.status = event.status;
 	subagentProgress.currentTool = event.currentTool;
 	subagentProgress.toolCallCount = event.toolCallCount;
 	subagentProgress.turnCount = event.turnCount;
 	subagentProgress.tokenCount = event.tokenCount;
+}
+
+/**
+ * Append a tool name to the subagent's tool history.
+ * Mutates the existing toolHistory array so polling readers see the update
+ * without needing to re-fetch the progress object.
+ */
+export function appendSubagentTool(
+	agentId: string | undefined,
+	toolName: string,
+): void {
+	if (agentId) {
+		const existing = subagentProgressMap.get(agentId);
+		if (existing) {
+			existing.toolHistory.push(toolName);
+		}
+	} else {
+		subagentProgress.toolHistory.push(toolName);
+	}
 }
 
 /** Reset progress for a specific agent instance */
@@ -78,6 +106,7 @@ export function resetSubagentProgressById(agentId: string): void {
 		toolCallCount: 0,
 		turnCount: 0,
 		tokenCount: 0,
+		toolHistory: [],
 	});
 }
 
@@ -99,4 +128,5 @@ export function resetSubagentProgress(): void {
 	subagentProgress.toolCallCount = 0;
 	subagentProgress.turnCount = 0;
 	subagentProgress.tokenCount = 0;
+	subagentProgress.toolHistory.length = 0;
 }

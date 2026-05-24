@@ -8,6 +8,7 @@
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
 import {
+	appendSubagentTool,
 	getSubagentProgress,
 	subagentProgress,
 	updateSubagentProgress,
@@ -444,6 +445,7 @@ export class SubagentExecutor {
 
 				const toolName = toolCall.function.name;
 				totalToolCalls++;
+				appendSubagentTool(agentId, toolName);
 				emitProgress('tool_call', toolName);
 				await new Promise(resolve => setTimeout(resolve, 50));
 
