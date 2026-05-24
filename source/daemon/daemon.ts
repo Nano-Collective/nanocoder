@@ -131,7 +131,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 	const router = new EventRouter(backpressure);
 
 	// Layer 3: unified skill boot (legacy loaders + bundle loader + registrar)
-	await bootSkillPipeline({
+	const bootResult = await bootSkillPipeline({
 		projectRoot: opts.projectRoot,
 		toolManager,
 		commandLoader,
@@ -139,6 +139,23 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 		eventRouter: router,
 		builtInBundleRoot: opts.builtInBundleRoot,
 	});
+
+	// Surface skill load errors and collisions in the daemon log. Without
+	// this, malformed manifests, duplicate subscriptions, and bad targets
+	// fail silently in headless mode (the TUI path surfaces them via the
+	// chat queue, but the daemon has no chat queue).
+	for (const err of bootResult.loadErrors) {
+		const where = err.filePath ?? err.bundlePath;
+		console.error(`Skill load error (${where}): ${err.message}`);
+	}
+	for (const c of bootResult.registration.collisions) {
+		console.error(
+			`Skill collision (${c.skill} ${c.kind}:${c.name}): ${c.message}`,
+		);
+	}
+	for (const warning of bootResult.deprecations) {
+		console.warn(`Deprecation: ${warning}`);
+	}
 
 	const watcher = new FileWatcherSource(router, {root: opts.projectRoot});
 	const cron = new ScheduleEventSource(router);
