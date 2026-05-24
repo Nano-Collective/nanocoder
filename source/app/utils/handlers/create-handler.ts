@@ -139,29 +139,50 @@ Write the system prompt that describes this agent's role, the tools it should us
 		}),
 	);
 
-	await onHandleChatMessage(
-		`I just created a new subagent definition file at .nanocoder/agents/${safeName}. Help me write the content for this agent. Ask me what I want this agent to specialize in, then write the complete markdown file using the write_file tool.
+	await onHandleChatMessage(buildAgentDesignPrompt(safeName, agentName));
 
-Here is the frontmatter format with all available fields:
+	return true;
+}
 
+/**
+ * The chained prompt that runs after `/agents create <name>` scaffolds an
+ * empty agent file. Same shape as `buildSkillBundleDesignPrompt`: a
+ * conversational opener, a complete frontmatter schema, anti-gotcha rules,
+ * and an explicit "ask me first, then write_file" kickoff.
+ */
+function buildAgentDesignPrompt(safeName: string, agentName: string): string {
+	return `I just created a new subagent definition at .nanocoder/agents/${safeName}. Ask me what I want this agent to specialize in (purpose, when the main agent should delegate to it, what tools it needs), then write the complete file with \`write_file\`. After writing, summarize what you wrote so I can verify.
+
+# \`agents/${safeName}\` schema (required fields marked *)
+
+\`\`\`markdown
 ---
-name: ${agentName}
-description: When to use this agent (shown to the LLM)
-provider:               # Optional: provider name from agents.config.json (uses parent's if not set)
-model: inherit          # inherit, or a model ID available on the provider
-tools:                  # Optional: restrict to specific tools
+name: ${agentName}                    # * snake_case or kebab-case; MUST match the filename
+description: One-line summary.        # * shown to the main agent so it knows when to delegate
+provider:                             # optional; provider name from agents.config.json (inherits parent's if omitted)
+model: inherit                        # optional; 'inherit' or a model ID available on the provider
+tools:                                # optional; if set, ONLY these tool names are visible to the agent
   - read_file
   - search_file_contents
   - find_files
-disallowedTools:        # Optional: block specific tools
+disallowedTools:                      # optional; block specific tools (applied after \`tools:\`)
   - write_file
   - string_replace
+contextWindow: 200000                 # optional; override the model's default context window
 ---
+You are a specialized agent. Describe your role, the tools you should use, and any constraints.
+The body is the system prompt the subagent sees on every invocation.
+\`\`\`
 
-The body after the frontmatter is the system prompt that instructs the agent how to behave. Make it focused and specific to the agent's purpose.`,
-	);
+# Rules that catch out AI-generated agents
 
-	return true;
+1. **\`name:\` matches the filename.** \`docs-agent.md\` → \`name: docs-agent\`. The parser cross-checks.
+2. **\`description:\` is for the main agent, not the user.** It's how the main agent decides when to delegate. Write it as instructions, not marketing.
+3. **\`tools:\` is a whitelist.** If you list any, ONLY those are visible - including read-only essentials. Easier to use \`disallowedTools:\` for blocking specific dangerous tools while keeping the rest.
+4. **No \`subscribe:\` on a single-file agent unless you want it triggered.** If you do add one, omit \`target:\` - the implicit target is the agent itself.
+5. **Use \`write_file\`** to author the file. Do not inline the markdown in chat.
+
+Now: ask me what this agent should specialize in, then design it.`;
 }
 
 /**
@@ -363,47 +384,79 @@ echo "TODO: replace this body with the command you want to run"
 		}),
 	);
 
-	await onHandleChatMessage(
-		`I just created a new custom tool definition file at .nanocoder/tools/${safeName}. Help me write the content for this tool. Ask me what shell command this tool should run, what parameters it needs, and whether it's read-only or mutates state. Then write the complete markdown file using the write_file tool.
-
-Here is the full frontmatter format for custom tools:
-
----
-name: ${toolName}                     # snake_case, must match ^[a-z][a-z0-9_]*$
-description: Description shown to the LLM   # required
-parameters:                           # optional, default {}
-  param_name:
-    type: string | number | integer | boolean | array
-    description: shown to the LLM
-    required: true | false            # default false
-    default: any                      # used when not provided
-    enum: [a, b, c]                   # restrict values
-    pattern: '^regex$'                # string only
-    minLength: 1                      # string only
-    maxLength: 100                    # string only
-    min: 0                            # number/integer only
-    max: 1000                         # number/integer only
-    items: {type: string}             # array only
-approval: never | always | destructive   # default: always
-read_only: true | false               # default: (approval == never)
-timeout_ms: 30000                     # default 30000, max 300000
-cwd: ./scripts                        # default: project root; supports \${VAR}
-env:                                  # extra env vars; values support \${VAR}
-  FOO: bar
-shell: bash | sh                      # default: bash if available, else sh
----
-
-The body is a shell script. Use {{ name }} to substitute parameters (values are shell-quoted automatically — safe against injection). Use {{# name }}...{{/ name }} for conditional sections that include only when the param is truthy.
-
-Picking approval:
-- "never" — runs without prompting (only for safe, read-only operations like \`ls\`, \`cat\`, \`git status\`)
-- "always" (default) — always asks the user before running
-- "destructive" — prompts in normal mode, auto-approves in auto-accept/yolo (matches built-in file mutation tools)
-
-Once you know what the user wants, replace the placeholder body with the real shell command and update the frontmatter accordingly.`,
-	);
+	await onHandleChatMessage(buildToolDesignPrompt(safeName, toolName));
 
 	return true;
+}
+
+/**
+ * The chained prompt that runs after `/tools create <name>` scaffolds an
+ * empty tool file. Same shape as the agent / skill design prompts:
+ * conversational opener, complete schema, anti-gotcha rules, and a
+ * "Now: ask me…" kickoff.
+ */
+function buildToolDesignPrompt(safeName: string, toolName: string): string {
+	return `I just created a new custom tool definition at .nanocoder/tools/${safeName}. Ask me what shell command this tool should run, what parameters it needs, and whether it's read-only or mutates state. Then write the complete file with \`write_file\`. After writing, summarize what you wrote so I can verify.
+
+# \`tools/${safeName}\` schema (required fields marked *)
+
+\`\`\`markdown
+---
+name: ${toolName}                       # * MUST match ^[a-z][a-z0-9_]*$
+                                       #   - snake_case ONLY, no hyphens, no camelCase
+                                       #   - the name is interpolated into shell; the regex
+                                       #     is part of the injection-safety surface
+description: One-line summary.         # * shown to the LLM
+approval: never | always | destructive # * required choice (see picking guide below)
+read_only: true | false                # default: (approval == 'never'); set false for writes
+timeout_ms: 30000                      # default 30000, max 300000
+shell: bash | sh                       # default: bash if available, else sh
+cwd: ./scripts                         # optional; default project root; supports \${VAR}
+env:                                   # optional; values support \${VAR}
+  FOO: bar
+
+# Parameters MUST be a MAPPING (paramName: {definition}).
+# Do NOT use a list-of-objects ([{name, type, ...}]) - that's the OpenAPI shape.
+parameters:
+  namespace:
+    type: string                       # 'string' | 'number' | 'integer' | 'boolean' | 'array'
+    description: Kubernetes namespace.
+    required: false                    # default false
+    default: default                   # optional
+    enum: [default, kube-system]       # optional; restrict to listed values
+    pattern: '^[a-z0-9-]+$'            # string only
+    minLength: 1                       # string only
+    maxLength: 63                      # string only
+    min: 0                             # number/integer only
+    max: 1000                          # number/integer only
+  items:
+    type: array
+    items: {type: string}              # required when type is 'array'
+---
+
+# The body is a shell script.
+# Use {{ name }} to substitute a parameter (values are shell-quoted - safe against injection).
+# Use {{# name }}...{{/ name }} for conditional sections (include only when the param is truthy).
+
+kubectl get pods -n {{ namespace }} -o wide
+{{# label }}kubectl get pods -l {{ label }}{{/ label }}
+\`\`\`
+
+# Picking \`approval\`
+
+- **\`never\`** — runs without prompting. Use for read-only operations: \`ls\`, \`cat\`, \`git status\`, \`kubectl get\`, \`gh pr list\`, etc.
+- **\`always\`** — prompts the user every time. Use when the tool mutates state and you want a confirmation per invocation.
+- **\`destructive\`** — prompts in normal mode, auto-approves in auto-accept/yolo. Use for file-mutation-style tools that should match the built-in \`write_file\` posture.
+
+# Rules that catch out AI-generated tools
+
+1. **\`name:\` is snake_case.** Hyphens fail validation. \`k8s_list_pods\` ✓, \`k8s-list-pods\` ✗.
+2. **\`parameters:\` is a mapping**, not a list. Don't write \`- name: namespace\\n  type: ...\` (OpenAPI shape, wrong here).
+3. **\`approval: never\`** for read-only ops only. If the tool can write, delete, or call a remote API that changes state, use \`destructive\` (or \`always\` if you want a prompt every time).
+4. **Shell-quoted substitution is safe by default.** \`echo "{{ name }}"\` is fine even if \`name\` contains spaces or shell metacharacters - don't add your own escaping.
+5. **Use \`write_file\`** to author the file. Do not inline the markdown in chat.
+
+Now: ask me what this tool should do, then design it.`;
 }
 
 /**
@@ -655,31 +708,53 @@ export async function handleCommandCreate(
 		commandParts[2],
 		'commands',
 		'commands',
-		(safeName, commandBaseName) =>
-			`I just created a new custom command file at .nanocoder/commands/${safeName}. Help me write the content for this command. Ask me what I want this command to do, then write the markdown prompt into the file using the write_file tool. The file should contain a clear prompt that instructs the AI what to do when this command is invoked via /${commandBaseName}. Keep the YAML frontmatter at the top.
-
-Here is an example of the frontmatter format with all available fields:
-
----
-description: Generate unit tests for a file
-aliases: [test, unittest]
-parameters: [filename]
-tags: [testing, quality]
-triggers: [write tests, unit test]
-estimated-tokens: 2000
-resources: true
-category: testing
-version: 1.0.0
-author: user
-examples:
-  - /gen-tests src/utils.ts
-  - /gen-tests lib/parser.ts
-references: [docs/testing-guide.md]
-dependencies: [lint]
----
-Generate comprehensive unit tests for {{filename}}...
-
-All fields are optional except description. Use whichever fields are appropriate for the user's needs. Parameters defined here can be used as {{param}} placeholders in the prompt body.`,
+		buildCommandDesignPrompt,
 		options,
 	);
+}
+
+/**
+ * The chained prompt that runs after `/commands create <name>` scaffolds
+ * an empty command file. Same shape as the agent / tool / skill design
+ * prompts: conversational opener, complete schema, anti-gotcha rules,
+ * "Now: ask me…" kickoff.
+ */
+function buildCommandDesignPrompt(
+	safeName: string,
+	commandBaseName: string,
+): string {
+	return `I just created a new custom command at .nanocoder/commands/${safeName}. Ask me what \`/${commandBaseName}\` should do, what parameters it takes (if any), and whether it should auto-inject on certain keywords. Then write the complete file with \`write_file\`. After writing, summarize what you wrote so I can verify.
+
+# \`commands/${safeName}\` schema (required fields marked *)
+
+\`\`\`markdown
+---
+description: One-line summary.        # * shown in /commands and to the user
+aliases: [short, c]                   # optional; alternate slash names
+parameters: [filename]                # optional; positional args become {{filename}} placeholders
+tags: [testing, quality]              # optional; categorize for /commands grouping
+triggers: [write tests, unit test]    # optional; auto-inject when the user mentions these phrases
+estimated-tokens: 2000                # optional; rough token cost shown in the auto-injectable list
+resources: true                       # optional; expose sibling files in .nanocoder/commands/<name>/resources/
+category: testing                     # optional; free-form group label
+version: 1.0.0                        # optional
+author: you                           # optional
+examples:                             # optional; rendered in /commands show
+  - /${commandBaseName} src/utils.ts
+  - /${commandBaseName} lib/parser.ts
+references: [docs/testing-guide.md]   # optional; pointers shown in /commands show
+---
+The body is the prompt the LLM receives when the user runs /${commandBaseName}.
+Use {{paramName}} placeholders to interpolate positional arguments.
+\`\`\`
+
+# Rules that catch out AI-generated commands
+
+1. **\`description:\` is required.** Everything else is optional.
+2. **Parameters are positional**, not named. \`parameters: [filename, mode]\` means \`/${commandBaseName} foo.ts review\` → \`{{filename}} = foo.ts\`, \`{{mode}} = review\`.
+3. **Don't \`subscribe:\` from a one-off command** unless you want the daemon to fire it on a schedule. If you do, omit \`target:\` - the implicit target is the command itself.
+4. **Body is the prompt**, not surrounding chatter. The model sees the body verbatim with placeholders substituted.
+5. **Use \`write_file\`** to author the file. Do not inline the markdown in chat.
+
+Now: ask me what this command should do, then design it.`;
 }

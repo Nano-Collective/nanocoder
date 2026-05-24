@@ -12,6 +12,7 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 import {InfoMessage} from '@/components/message-box';
+import {InfoField} from '@/components/ui/info-field';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -69,17 +70,32 @@ function SkillsListView({skills}: {skills: Skill[]}) {
 			paddingY={1}
 			flexDirection="column"
 		>
-			{sorted.map(skill => (
-				<Box key={skill.name} flexDirection="column" marginBottom={1}>
-					<Text bold>{skill.name}</Text>
-					<Text color={colors.secondary}>
-						{skill.source.shape} / {skill.source.priority} -{' '}
-						{memberCount(skill)}
-						{skill.subscribe?.length
-							? ` - ${skill.subscribe.length} subscription${skill.subscribe.length === 1 ? '' : 's'}`
-							: ''}
-					</Text>
-					<Text>{skill.description}</Text>
+			{sorted.map((skill, i) => (
+				<Box
+					key={skill.name}
+					flexDirection="column"
+					marginBottom={i < sorted.length - 1 ? 1 : 0}
+				>
+					<Box>
+						<Text color={colors.text} bold>
+							› {skill.name}
+						</Text>
+						<Text color={colors.secondary}>
+							{' '}
+							· {skill.source.shape} / {skill.source.priority}
+						</Text>
+					</Box>
+					<Box marginLeft={4}>
+						<Text color={colors.secondary}>{skill.description}</Text>
+					</Box>
+					<Box marginLeft={4}>
+						<Text color={colors.secondary}>
+							{memberCount(skill)}
+							{skill.subscribe?.length
+								? ` · ${skill.subscribe.length} subscription${skill.subscribe.length === 1 ? '' : 's'}`
+								: ''}
+						</Text>
+					</Box>
 				</Box>
 			))}
 		</TitledBoxWithPreferences>
@@ -90,6 +106,26 @@ function SkillDetailView({skill}: {skill: Skill}) {
 	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
 
+	const fields: Array<{label: string; value: string}> = [
+		{label: 'Source', value: skill.source.rootPath ?? '(unknown)'},
+		{
+			label: 'Shape',
+			value: `${skill.source.shape} / ${skill.source.priority}`,
+		},
+		...(skill.version
+			? [
+					{
+						label: 'Version',
+						value: `${skill.version}${skill.author ? ` (${skill.author})` : ''}`,
+					},
+				]
+			: []),
+		{label: 'Tools visibility', value: skill.toolsVisibility},
+	];
+
+	const hasMembers =
+		!!skill.commands?.length || !!skill.subagent || !!skill.tools?.length;
+
 	return (
 		<TitledBoxWithPreferences
 			title={`Skill: ${skill.name}`}
@@ -98,50 +134,52 @@ function SkillDetailView({skill}: {skill: Skill}) {
 			paddingX={2}
 			paddingY={1}
 			flexDirection="column"
+			marginBottom={1}
 		>
-			<Text>{skill.description}</Text>
-			<Text color={colors.secondary}>
-				Shape: {skill.source.shape}, priority: {skill.source.priority}, root:{' '}
-				{skill.source.rootPath}
-			</Text>
-			{skill.version ? (
-				<Text color={colors.secondary}>
-					Version: {skill.version}
-					{skill.author ? ` (${skill.author})` : ''}
-				</Text>
-			) : null}
-			<Text color={colors.secondary}>
-				Tools visibility: {skill.toolsVisibility}
-			</Text>
+			<Box marginBottom={1}>
+				<Text>{skill.description}</Text>
+			</Box>
 
-			<Box marginTop={1} flexDirection="column">
-				<Text bold>Members</Text>
-				{(skill.commands ?? []).map(c => (
-					<Text key={c.command.fullName}>
-						- command: /{c.command.fullName} ({c.filePath})
-					</Text>
-				))}
-				{skill.subagent ? (
-					<Text>
-						- agent: {skill.subagent.subagent.name} ({skill.subagent.filePath})
-					</Text>
-				) : null}
-				{(skill.tools ?? []).map(t => (
-					<Text key={t.tool.name}>
-						- tool: {t.tool.name} ({t.filePath})
-					</Text>
-				))}
-				{!skill.commands?.length && !skill.subagent && !skill.tools?.length ? (
+			{fields.map(f => (
+				<InfoField key={f.label} label={f.label} value={f.value} />
+			))}
+
+			<Box flexDirection="column" marginBottom={1}>
+				<Text color={colors.primary} bold>
+					Members
+				</Text>
+				{!hasMembers ? (
 					<Text color={colors.secondary}>(no members)</Text>
-				) : null}
+				) : (
+					<>
+						{(skill.commands ?? []).map(c => (
+							<Text key={c.command.fullName} color={colors.secondary}>
+								› command: /{c.command.fullName} ({c.filePath})
+							</Text>
+						))}
+						{skill.subagent ? (
+							<Text color={colors.secondary}>
+								› agent: {skill.subagent.subagent.name} (
+								{skill.subagent.filePath})
+							</Text>
+						) : null}
+						{(skill.tools ?? []).map(t => (
+							<Text key={t.tool.name} color={colors.secondary}>
+								› tool: {t.tool.name} ({t.filePath})
+							</Text>
+						))}
+					</>
+				)}
 			</Box>
 
 			{skill.subscribe?.length ? (
-				<Box marginTop={1} flexDirection="column">
-					<Text bold>Subscriptions</Text>
+				<Box flexDirection="column" marginBottom={1}>
+					<Text color={colors.primary} bold>
+						Subscriptions
+					</Text>
 					{skill.subscribe.map((trig, i) => (
-						<Text key={`${trig.kind}-${i}`}>
-							- {trig.kind} → {trig.target ?? '(self)'}
+						<Text key={`${trig.kind}-${i}`} color={colors.secondary}>
+							› {trig.kind} → {trig.target ?? '(self)'}
 							{trig.confirm ? ' [confirm: plan mode]' : ''}
 						</Text>
 					))}

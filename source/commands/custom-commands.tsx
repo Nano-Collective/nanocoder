@@ -1,8 +1,10 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 import {InfoMessage} from '@/components/message-box';
+import {InfoField} from '@/components/ui/info-field';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {CustomCommandLoader} from '@/custom-commands/loader';
+import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getCommandLoader} from '@/message-handler';
 import {generateKey} from '@/session/key-generator';
@@ -12,25 +14,62 @@ interface CustomCommandsProps {
 	commands: CustomCommand[];
 }
 
-function formatCommand(cmd: CustomCommand): string {
+/** Build the `/name <param> ...` invocation string. Used for the top row
+ * of each command entry. Description and aliases now render on their own
+ * indented secondary lines for visual consistency with `/agents`. */
+function formatCommandHeader(cmd: CustomCommand): string {
 	const parts: string[] = [`/${cmd.fullName}`];
-
 	if (cmd.metadata.parameters && cmd.metadata.parameters.length > 0) {
 		parts.push(cmd.metadata.parameters.map((p: string) => `<${p}>`).join(' '));
 	}
-
-	if (cmd.metadata.description) {
-		parts.push(`- ${cmd.metadata.description}`);
-	}
-
-	if (cmd.metadata.aliases && cmd.metadata.aliases.length > 0) {
-		const aliasNames = cmd.metadata.aliases.map((a: string) =>
-			cmd.namespace ? `${cmd.namespace}:${a}` : a,
-		);
-		parts.push(`(aliases: ${aliasNames.join(', ')})`);
-	}
-
 	return parts.join(' ');
+}
+
+function aliasesLine(cmd: CustomCommand): string | null {
+	if (!cmd.metadata.aliases || cmd.metadata.aliases.length === 0) return null;
+	const names = cmd.metadata.aliases.map((a: string) =>
+		cmd.namespace ? `${cmd.namespace}:${a}` : a,
+	);
+	return `aliases: ${names.join(', ')}`;
+}
+
+/** Single command entry. Matches the visual shape of `/agents` list rows:
+ * bold `› /name` + secondary meta on the header line, then indented
+ * description and any auxiliary lines (aliases, tags, token estimate). */
+function CommandEntry({cmd, isLast}: {cmd: CustomCommand; isLast: boolean}) {
+	const {colors} = useTheme();
+	const aliases = aliasesLine(cmd);
+	const tokenEst = cmd.metadata.estimatedTokens
+		? `~${cmd.metadata.estimatedTokens} tokens`
+		: null;
+	const tags = cmd.metadata.tags?.length
+		? `tags: ${cmd.metadata.tags.map((t: string) => `\`${t}\``).join(', ')}`
+		: null;
+	return (
+		<Box flexDirection="column" marginBottom={isLast ? 0 : 1}>
+			<Box>
+				<Text color={colors.text} bold>
+					› {formatCommandHeader(cmd)}
+				</Text>
+				{tokenEst && <Text color={colors.secondary}> · {tokenEst}</Text>}
+			</Box>
+			{cmd.metadata.description && (
+				<Box marginLeft={4}>
+					<Text color={colors.secondary}>{cmd.metadata.description}</Text>
+				</Box>
+			)}
+			{aliases && (
+				<Box marginLeft={4}>
+					<Text color={colors.secondary}>{aliases}</Text>
+				</Box>
+			)}
+			{tags && (
+				<Box marginLeft={4}>
+					<Text color={colors.secondary}>{tags}</Text>
+				</Box>
+			)}
+		</Box>
+	);
 }
 
 function CustomCommands({commands}: CustomCommandsProps) {
@@ -100,16 +139,17 @@ function CustomCommands({commands}: CustomCommandsProps) {
 					{manualOnly.length > 0 && (
 						<>
 							<Box marginBottom={1}>
-								<Text color={colors.text}>
-									Found {manualOnly.length} custom command
-									{manualOnly.length !== 1 ? 's' : ''}:
+								<Text color={colors.primary} bold>
+									Manual ({manualOnly.length})
 								</Text>
 							</Box>
 
-							{manualOnly.map((cmd, index) => (
-								<Text key={index} color={colors.text}>
-									• {formatCommand(cmd)}
-								</Text>
+							{manualOnly.map((cmd, i) => (
+								<CommandEntry
+									key={cmd.fullName}
+									cmd={cmd}
+									isLast={i === manualOnly.length - 1}
+								/>
 							))}
 						</>
 					)}
@@ -118,32 +158,18 @@ function CustomCommands({commands}: CustomCommandsProps) {
 						<>
 							{manualOnly.length > 0 && <Box marginTop={1} />}
 							<Box marginBottom={1}>
-								<Text color={colors.text} bold>
-									Auto-injectable ({autoInjectable.length}):
+								<Text color={colors.primary} bold>
+									Auto-injectable ({autoInjectable.length})
 								</Text>
 							</Box>
 
-							{autoInjectable.map((cmd, index) => {
-								const tokenEst = cmd.metadata.estimatedTokens
-									? ` (~${cmd.metadata.estimatedTokens} tokens)`
-									: '';
-								return (
-									<Box key={index} flexDirection="column">
-										<Text color={colors.text}>
-											• {formatCommand(cmd)}
-											{tokenEst}
-										</Text>
-										{cmd.metadata.tags?.length && (
-											<Text color={colors.secondary}>
-												{'    '}Tags:{' '}
-												{cmd.metadata.tags
-													.map((t: string) => `\`${t}\``)
-													.join(', ')}
-											</Text>
-										)}
-									</Box>
-								);
-							})}
+							{autoInjectable.map((cmd, i) => (
+								<CommandEntry
+									key={cmd.fullName}
+									cmd={cmd}
+									isLast={i === autoInjectable.length - 1}
+								/>
+							))}
 						</>
 					)}
 				</>
@@ -152,50 +178,95 @@ function CustomCommands({commands}: CustomCommandsProps) {
 	);
 }
 
-function showCommandDetails(command: CustomCommand): React.ReactElement {
-	let output = `${command.fullName}\n`;
-	if (command.metadata.category)
-		output += `Category: ${command.metadata.category}  `;
-	if (command.metadata.version)
-		output += `Version: ${command.metadata.version}  `;
-	if (command.metadata.author) output += `Author: ${command.metadata.author}`;
-	output += '\n';
-	output += `Source: ${command.source ?? 'project'} (${command.path})\n\n`;
-	if (command.metadata.description) {
-		output += `${command.metadata.description}\n\n`;
-	}
-	if (command.metadata.examples?.length) {
-		output += 'Examples:\n';
-		for (const ex of command.metadata.examples) {
-			output += `  - ${ex}\n`;
-		}
-		output += '\n';
-	}
-	if (command.loadedResources?.length) {
-		output += 'Resources:\n';
-		for (const r of command.loadedResources) {
-			output += `  • ${r.name} (${r.type})${r.executable ? ' [executable]' : ''}\n`;
-		}
-		output += '\n';
-	}
-	if (command.metadata.references?.length) {
-		output += `References: ${command.metadata.references.join(', ')}\n\n`;
-	}
-	if (command.lastModified) {
-		output += `Last modified: ${command.lastModified.toLocaleDateString()}`;
-	}
+function CommandDetail({command}: {command: CustomCommand}) {
+	const boxWidth = useTerminalWidth();
+	const {colors} = useTheme();
 
-	return React.createElement(InfoMessage, {
-		key: generateKey('commands-show'),
-		message: output,
-		hideBox: true,
-	});
+	const sourceLabel = command.path
+		? `${command.source ?? 'project'} (${command.path})`
+		: (command.source ?? 'project');
+
+	const fields: Array<{label: string; value: string}> = [
+		{label: 'Source', value: sourceLabel},
+		...(command.metadata.category
+			? [{label: 'Category', value: command.metadata.category}]
+			: []),
+		...(command.metadata.version
+			? [{label: 'Version', value: command.metadata.version}]
+			: []),
+		...(command.metadata.author
+			? [{label: 'Author', value: command.metadata.author}]
+			: []),
+		...(command.metadata.references?.length
+			? [
+					{
+						label: 'References',
+						value: command.metadata.references.join(', '),
+					},
+				]
+			: []),
+		...(command.lastModified
+			? [
+					{
+						label: 'Last modified',
+						value: command.lastModified.toLocaleDateString(),
+					},
+				]
+			: []),
+	];
+
+	return (
+		<TitledBoxWithPreferences
+			title={`Command: /${command.fullName}`}
+			width={boxWidth}
+			borderColor={colors.primary}
+			paddingX={2}
+			paddingY={1}
+			flexDirection="column"
+			marginBottom={1}
+		>
+			{command.metadata.description && (
+				<Box marginBottom={1}>
+					<Text>{command.metadata.description}</Text>
+				</Box>
+			)}
+
+			{fields.map(f => (
+				<InfoField key={f.label} label={f.label} value={f.value} />
+			))}
+
+			{command.metadata.examples?.length ? (
+				<Box flexDirection="column" marginBottom={1}>
+					<Text color={colors.primary} bold>
+						Examples
+					</Text>
+					{command.metadata.examples.map((ex, i) => (
+						<Text key={i} color={colors.secondary}>
+							› {ex}
+						</Text>
+					))}
+				</Box>
+			) : null}
+
+			{command.loadedResources?.length ? (
+				<Box flexDirection="column" marginBottom={1}>
+					<Text color={colors.primary} bold>
+						Resources
+					</Text>
+					{command.loadedResources.map((r, i) => (
+						<Text key={i} color={colors.secondary}>
+							› {r.name} ({r.type}){r.executable ? ' [executable]' : ''}
+						</Text>
+					))}
+				</Box>
+			) : null}
+		</TitledBoxWithPreferences>
+	);
 }
 
 export const commandsCommand: Command = {
 	name: 'custom-commands',
-	description:
-		'List all custom commands. Subcommands: show <name>, refresh, create <name>',
+	description: 'List custom commands. Subcommands: show <name>, create <name>',
 	handler: (args: string[]) => {
 		// Prefer the app's shared loader so bundle-registered commands are
 		// visible. Fall back to a fresh disk-scan instance only if no app
@@ -227,19 +298,10 @@ export const commandsCommand: Command = {
 					}),
 				);
 			}
-			return Promise.resolve(showCommandDetails(command));
-		}
-
-		if (sub === 'refresh') {
-			// Note: refresh only re-scans .nanocoder/commands/ on disk. Bundle
-			// skill commands are registered at boot via the skill pipeline -
-			// to pick up new bundle commands, restart nanocoder.
 			return Promise.resolve(
-				React.createElement(InfoMessage, {
-					key: generateKey('commands'),
-					message:
-						'/commands refresh only re-scans flat .nanocoder/commands/. Restart nanocoder to pick up changes to skill bundles.',
-					hideBox: true,
+				React.createElement(CommandDetail, {
+					key: generateKey('commands-show'),
+					command,
 				}),
 			);
 		}

@@ -117,7 +117,7 @@ function ToolsView({toolManager}: {toolManager: ToolManager | null}) {
 			) : (
 				mcp.map(t => (
 					<Text key={t.name} color={colors.text}>
-						• {t.name}
+						› {t.name}
 						{t.server ? (
 							<Text color={colors.secondary}> ({t.server})</Text>
 						) : null}
@@ -135,7 +135,7 @@ function ToolsView({toolManager}: {toolManager: ToolManager | null}) {
 			) : (
 				custom.map(t => (
 					<Text key={t.name} color={colors.text}>
-						• {t.name}{' '}
+						› {t.name}{' '}
 						<Text color={colors.secondary}>
 							({t.ownerSkill ? `skill:${t.ownerSkill}, ` : ''}
 							{t.source})

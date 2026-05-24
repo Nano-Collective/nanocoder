@@ -70,16 +70,20 @@ test('commands show with nonexistent name shows not found', async t => {
 });
 
 // ============================================================================
-// Refresh Subcommand Tests
+// Refresh subcommand was removed: bundle skills load at boot, so a TUI
+// refresh would only half-work. The handler now treats `refresh` like any
+// unknown subcommand and re-renders the list.
 // ============================================================================
 
-test('commands refresh shows refreshed message', async t => {
+test('commands refresh is no longer a recognized subcommand', async t => {
 	const result = await commandsCommand.handler(['refresh']);
 	t.truthy(result);
 	if (React.isValidElement(result)) {
 		const {lastFrame} = renderWithTheme(result);
 		const output = lastFrame();
-		t.regex(output!, /refreshed/i);
+		t.notRegex(output!, /refreshed/i);
+		// Either renders the list or empty state.
+		t.regex(output!, /Custom Commands|No custom commands/);
 	}
 });
 

@@ -75,7 +75,7 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'commands',
 		description:
-			'List all custom commands. Subcommands: show <name>, refresh, create <name>',
+			'List custom commands. Subcommands: show <name>, create <name>',
 		load: () =>
 			import('@/commands/custom-commands').then(m => m.commandsCommand),
 	},
