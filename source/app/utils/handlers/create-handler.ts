@@ -25,6 +25,7 @@ async function handleFileCreate(
 			React.createElement(ErrorMessage, {
 				key: generateKey(`${entityName}-create-error`),
 				message: `Usage: /${entityName} create <name>\nExample: /${entityName} create review-code`,
+				hideBox: true,
 			}),
 		);
 		onCommandComplete?.();
@@ -40,6 +41,7 @@ async function handleFileCreate(
 			React.createElement(ErrorMessage, {
 				key: generateKey(`${entityName}-create-exists`),
 				message: `Command file already exists: .nanocoder/${dirName}/${safeName}`,
+				hideBox: true,
 			}),
 		);
 		onCommandComplete?.();
@@ -92,6 +94,7 @@ export async function handleAgentCreate(
 				key: generateKey('agents-create-error'),
 				message:
 					'Usage: /agents create <name>\nExample: /agents create code-reviewer',
+				hideBox: true,
 			}),
 		);
 		onCommandComplete?.();
@@ -107,6 +110,7 @@ export async function handleAgentCreate(
 			React.createElement(ErrorMessage, {
 				key: generateKey('agents-create-exists'),
 				message: `Agent file already exists: .nanocoder/agents/${safeName}`,
+				hideBox: true,
 			}),
 		);
 		onCommandComplete?.();
@@ -225,6 +229,7 @@ export async function handleAgentCopy(
 			React.createElement(ErrorMessage, {
 				key: generateKey('agents-copy-error'),
 				message: 'Usage: /agents copy <name>\nExample: /agents copy explore',
+				hideBox: true,
 			}),
 		);
 		onCommandComplete?.();
@@ -241,6 +246,7 @@ export async function handleAgentCopy(
 			React.createElement(ErrorMessage, {
 				key: generateKey('agents-copy-notfound'),
 				message: `Agent '${agentName}' not found. Available agents: ${names}`,
+				hideBox: true,
 			}),
 		);
 		onCommandComplete?.();
@@ -256,6 +262,7 @@ export async function handleAgentCopy(
 			React.createElement(ErrorMessage, {
 				key: generateKey('agents-copy-exists'),
 				message: `Agent file already exists: .nanocoder/agents/${safeName}\nTo modify it, edit the file directly.`,
+				hideBox: true,
 			}),
 		);
 		onCommandComplete?.();
@@ -302,6 +309,7 @@ export async function handleToolCreate(
 			React.createElement(ErrorMessage, {
 				key: generateKey('tools-create-error'),
 				message: 'Usage: /tools create <name>\nExample: /tools create k8s-pods',
+				hideBox: true,
 			}),
 		);
 		onCommandComplete?.();
@@ -317,6 +325,7 @@ export async function handleToolCreate(
 			React.createElement(ErrorMessage, {
 				key: generateKey('tools-create-exists'),
 				message: `Custom tool file already exists: .nanocoder/tools/${safeName}`,
+				hideBox: true,
 			}),
 		);
 		onCommandComplete?.();
@@ -427,6 +436,7 @@ export async function handleSkillsCreate(
 				key: generateKey('skills-create-error'),
 				message:
 					'Usage: /skills create <name>\nExample: /skills create pr-reviewer\n\nFor single-piece skills, use /commands create, /agents create, or /tools create instead.',
+				hideBox: true,
 			}),
 		);
 		onCommandComplete?.();
@@ -438,6 +448,7 @@ export async function handleSkillsCreate(
 			React.createElement(ErrorMessage, {
 				key: generateKey('skills-create-invalid-name'),
 				message: `Skill names must match ${BUNDLE_NAME_REGEX} (kebab-case starting with a letter).`,
+				hideBox: true,
 			}),
 		);
 		onCommandComplete?.();
@@ -450,6 +461,7 @@ export async function handleSkillsCreate(
 			React.createElement(ErrorMessage, {
 				key: generateKey('skills-create-exists'),
 				message: `Skill bundle already exists: .nanocoder/skills/${name}/`,
+				hideBox: true,
 			}),
 		);
 		onCommandComplete?.();

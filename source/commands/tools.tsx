@@ -18,7 +18,7 @@ import {findSkill} from '@/skills/skill-registry';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {Command} from '@/types/index';
 
-interface GroupedTools {
+export interface GroupedTools {
 	builtin: string[];
 	mcp: Array<{name: string; server?: string}>;
 	custom: Array<{
@@ -28,7 +28,7 @@ interface GroupedTools {
 	}>;
 }
 
-function groupTools(toolManager: ToolManager): GroupedTools {
+export function groupTools(toolManager: ToolManager): GroupedTools {
 	const all = toolManager.getToolNames().sort();
 	const builtin: string[] = [];
 	const mcp: Array<{name: string; server?: string}> = [];

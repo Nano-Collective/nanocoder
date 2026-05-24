@@ -71,6 +71,7 @@ export async function handleContextMaxCommand(
 					key: generateKey('context-max-error'),
 					message:
 						'Invalid context limit. Use a positive number, e.g. /context-max 8192 or /context-max 128k',
+					hideBox: true,
 				}),
 			);
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);

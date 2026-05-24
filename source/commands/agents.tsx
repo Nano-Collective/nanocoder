@@ -190,6 +190,7 @@ export const agentsCommand: Command = {
 				return React.createElement(ErrorMessage, {
 					key: generateKey('agents-show-error'),
 					message: `Agent '${args[1]}' not found. Run /agents to see available agents.`,
+					hideBox: true,
 				});
 			}
 			return React.createElement(AgentDetail, {

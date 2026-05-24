@@ -193,6 +193,7 @@ async function handleBashCommand(
 			React.createElement(ErrorMessage, {
 				key: generateKey('bash-error'),
 				message: `Error executing command: ${getErrorMessage(error, String(error))}`,
+				hideBox: true,
 			}),
 		);
 	} finally {
