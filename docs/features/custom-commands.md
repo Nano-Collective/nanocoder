@@ -179,8 +179,12 @@ When using the directory-as-command pattern, files in a `resources/` subdirector
 |---------|-------------|
 | `/commands` | List all custom commands |
 | `/commands show <name>` | Show detailed info about a command |
-| `/commands refresh` | Reload commands from disk |
 | `/commands create <name>` | Create a new command file with AI assistance |
+
+> Custom commands are loaded at boot. To pick up new or edited command
+> files, restart Nanocoder. (Bundle-skill commands declared in
+> `.nanocoder/skills/<name>/commands/` also load at boot; there is no
+> hot-reload.)
 
 ### `/commands create`
 
