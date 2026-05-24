@@ -441,6 +441,18 @@ export function useAppInitialization({
 				eventRouter: router,
 			});
 			refreshCustomCommandCache(newCustomCommandLoader);
+
+			// The critical-path branch above publishes the agent list *before*
+			// bundle skills register their subagents. Re-publish now so the
+			// `agent` tool's parameter description and the system prompt's
+			// subagent block include bundle agents (e.g. k8s_agent).
+			const refreshedAgents = await subagentLoader.listSubagents();
+			const refreshedSummaries = refreshedAgents.map(a => ({
+				name: a.name,
+				description: a.description,
+			}));
+			setAvailableSubagents(refreshedSummaries);
+			setAvailableAgentNames(refreshedSummaries);
 			for (const err of result.loadErrors) {
 				const where = err.filePath ?? err.bundlePath;
 				addToChatQueue(
