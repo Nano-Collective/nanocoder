@@ -6,7 +6,7 @@ import {scheduleCommand} from './schedule';
 void React; // JSX runtime requires React in scope
 
 // ============================================================================
-// Command Definition Tests
+// Command Definition
 // ============================================================================
 
 test('scheduleCommand has correct name', t => {
@@ -23,10 +23,10 @@ test('scheduleCommand has a handler function', t => {
 });
 
 // ============================================================================
-// List Subcommand Tests
+// Default invocation — renders the read-only schedules view
 // ============================================================================
 
-test.serial('schedule list returns a renderable element', async t => {
+test.serial('schedule with no args renders the schedules view', async t => {
 	const result = await scheduleCommand.handler([]);
 	t.truthy(result);
 	t.true(React.isValidElement(result));
@@ -34,168 +34,40 @@ test.serial('schedule list returns a renderable element', async t => {
 		const {lastFrame} = renderWithTheme(result);
 		const output = lastFrame();
 		t.truthy(output);
-		// Should show either empty message or schedules list
-		t.regex(output!, /No schedules configured|Schedules/);
+		t.regex(output!, /Schedules|No cron subscriptions declared/);
 	}
 });
 
-test.serial('schedule list subcommand returns a renderable element', async t => {
+// ============================================================================
+// Any args → usage message (subcommands like `list` and `add` are gone)
+// ============================================================================
+
+test('schedule with any subcommand falls through to usage', async t => {
+	const result = await scheduleCommand.handler(['anything']);
+	t.truthy(result);
+	if (React.isValidElement(result)) {
+		const {lastFrame} = renderWithTheme(result);
+		const output = lastFrame();
+		t.regex(output!, /Usage: \/schedule/);
+		t.notRegex(output!, /\blist\b/);
+		t.notRegex(output!, /\badd\b/);
+	}
+});
+
+test('schedule list is no longer a recognized subcommand', async t => {
 	const result = await scheduleCommand.handler(['list']);
-	t.truthy(result);
-	t.true(React.isValidElement(result));
 	if (React.isValidElement(result)) {
 		const {lastFrame} = renderWithTheme(result);
 		const output = lastFrame();
-		t.truthy(output);
-		t.regex(output!, /No schedules configured|Schedules/);
+		t.regex(output!, /Usage: \/schedule/);
 	}
 });
 
-// ============================================================================
-// Add Subcommand Tests
-// ============================================================================
-
-test('schedule add with no args shows usage', async t => {
-	const result = await scheduleCommand.handler(['add']);
-	t.truthy(result);
+test('schedule add is no longer a recognized subcommand', async t => {
+	const result = await scheduleCommand.handler(['add', '"0 9 * * *"', 'x.md']);
 	if (React.isValidElement(result)) {
 		const {lastFrame} = renderWithTheme(result);
 		const output = lastFrame();
-		t.regex(output!, /Usage/);
-	}
-});
-
-test('schedule add with invalid cron shows error', async t => {
-	const result = await scheduleCommand.handler([
-		'add',
-		'"not valid cron"',
-		'test.md',
-	]);
-	t.truthy(result);
-	if (React.isValidElement(result)) {
-		const {lastFrame} = renderWithTheme(result);
-		const output = lastFrame();
-		t.regex(output!, /Invalid cron expression|Usage/);
-	}
-});
-
-test('schedule add with missing file shows error', async t => {
-	const result = await scheduleCommand.handler([
-		'add',
-		'"0 9 * * *"',
-		'nonexistent-file.md',
-	]);
-	t.truthy(result);
-	if (React.isValidElement(result)) {
-		const {lastFrame} = renderWithTheme(result);
-		const output = lastFrame();
-		t.regex(output!, /not found/i);
-	}
-});
-
-// ============================================================================
-// Remove Subcommand Tests
-// ============================================================================
-
-test('schedule remove with no id shows usage', async t => {
-	const result = await scheduleCommand.handler(['remove']);
-	t.truthy(result);
-	if (React.isValidElement(result)) {
-		const {lastFrame} = renderWithTheme(result);
-		const output = lastFrame();
-		t.regex(output!, /Usage/);
-	}
-});
-
-test('schedule rm alias works', async t => {
-	const result = await scheduleCommand.handler(['rm']);
-	t.truthy(result);
-	if (React.isValidElement(result)) {
-		const {lastFrame} = renderWithTheme(result);
-		const output = lastFrame();
-		t.regex(output!, /Usage/);
-	}
-});
-
-test('schedule remove with non-existent id shows error', async t => {
-	const result = await scheduleCommand.handler(['remove', 'fake-id']);
-	t.truthy(result);
-	if (React.isValidElement(result)) {
-		const {lastFrame} = renderWithTheme(result);
-		const output = lastFrame();
-		t.regex(output!, /not found/i);
-	}
-});
-
-// ============================================================================
-// Create Subcommand Tests
-// ============================================================================
-
-test('schedule create with no name shows usage', async t => {
-	const result = await scheduleCommand.handler(['create']);
-	t.truthy(result);
-	if (React.isValidElement(result)) {
-		const {lastFrame} = renderWithTheme(result);
-		const output = lastFrame();
-		t.regex(output!, /Usage/);
-	}
-});
-
-// ============================================================================
-// Start Subcommand Tests
-// ============================================================================
-
-test('schedule start fallback shows error', async t => {
-	// When not intercepted by app-util.ts, this should show an error
-	const result = await scheduleCommand.handler(['start']);
-	t.truthy(result);
-	if (React.isValidElement(result)) {
-		const {lastFrame} = renderWithTheme(result);
-		const output = lastFrame();
-		t.regex(output!, /could not be started/i);
-	}
-});
-
-// ============================================================================
-// Logs Subcommand Tests
-// ============================================================================
-
-test('schedule logs with no runs shows empty message', async t => {
-	const result = await scheduleCommand.handler(['logs']);
-	t.truthy(result);
-	if (React.isValidElement(result)) {
-		const {lastFrame} = renderWithTheme(result);
-		const output = lastFrame();
-		t.regex(output!, /No schedule runs recorded/i);
-	}
-});
-
-test('schedule logs with schedule id filter shows filtered message', async t => {
-	const result = await scheduleCommand.handler(['logs', 'nonexistent-id']);
-	t.truthy(result);
-	if (React.isValidElement(result)) {
-		const {lastFrame} = renderWithTheme(result);
-		const output = lastFrame();
-		t.regex(output!, /No runs found/i);
-	}
-});
-
-// ============================================================================
-// Unknown Subcommand Tests
-// ============================================================================
-
-test('schedule with unknown subcommand shows error', async t => {
-	const result = await scheduleCommand.handler(['foobar']);
-	t.truthy(result);
-	if (React.isValidElement(result)) {
-		const {lastFrame} = renderWithTheme(result);
-		const output = lastFrame();
-		t.regex(output!, /Unknown subcommand/);
-		t.regex(output!, /create/);
-		t.regex(output!, /add/);
-		t.regex(output!, /list/);
-		t.regex(output!, /remove/);
-		t.regex(output!, /start/);
-		t.regex(output!, /logs/);
+		t.regex(output!, /Usage: \/schedule/);
 	}
 });

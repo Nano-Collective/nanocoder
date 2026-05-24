@@ -99,11 +99,11 @@ export const scheduleCommand: Command = {
 	description:
 		'List cron-triggered skills (single-file frontmatter + bundle skill.yaml). Read-only - edit the source file to change.',
 	handler: async args => {
-		if (args[0] && args[0] !== 'list') {
+		if (args.length > 0) {
 			return React.createElement(InfoMessage, {
 				key: generateKey('schedule'),
 				message:
-					"Usage: /schedule (or /schedule list)\n\nMutations now happen by editing a command's frontmatter `subscribe:` block, or a bundle's `skill.yaml`. See docs/features/skills.md for the new model.",
+					"Usage: /schedule\n\nMutations happen by editing a command's frontmatter `subscribe:` block, or a bundle's `skill.yaml`. See docs.",
 				hideBox: true,
 			});
 		}
