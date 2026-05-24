@@ -1,9 +1,9 @@
+import {createConnection} from 'node:net';
 import {mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import type {Subscription} from '@/events/types';
-import type {TriggeredRunActivity} from '@/skills/dispatcher';
 import {DaemonIpcClient, DaemonIpcServer} from './ipc';
 
 console.log(`\nipc.spec.ts`);
@@ -21,25 +21,6 @@ const SAMPLE_SUB: Subscription = {
 	ownerSkill: 'docs',
 	filter: {paths: ['docs/**']},
 };
-
-function sampleActivity(): TriggeredRunActivity {
-	return {
-		subscription: SAMPLE_SUB,
-		event: {
-			kind: 'file.changed',
-			payload: {file: 'docs/intro.md', eventKind: 'change'},
-			at: 0,
-		},
-		mode: 'headless',
-		result: {
-			subagentName: 'docs',
-			output: 'done',
-			success: true,
-			executionTimeMs: 0,
-		},
-		durationMs: 0,
-	};
-}
 
 test.serial('ping/pong round-trips through the socket', async t => {
 	const path = await makeSocketPath();
@@ -77,55 +58,6 @@ test.serial('listSubscriptions returns server-side list', async t => {
 	}
 });
 
-test.serial('subscribeActivity streams broadcasts to the client', async t => {
-	const path = await makeSocketPath();
-	const server = new DaemonIpcServer(path, {
-		listSubscriptions: () => [],
-	});
-	await server.start();
-	const client = new DaemonIpcClient(path);
-	await client.connect();
-
-	const received: TriggeredRunActivity[] = [];
-	try {
-		await client.subscribeActivity(a => received.push(a));
-		server.broadcastActivity(sampleActivity());
-
-		// Wait briefly for the broadcast to make it through the socket
-		await new Promise(r => setTimeout(r, 50));
-		t.is(received.length, 1);
-		t.is(received[0]?.subscription.id, 'sub-1');
-	} finally {
-		await client.disconnect();
-		await server.stop();
-		await rm(join(path, '..'), {recursive: true, force: true});
-	}
-});
-
-test.serial('multiple subscribed clients all receive broadcasts', async t => {
-	const path = await makeSocketPath();
-	const server = new DaemonIpcServer(path, {
-		listSubscriptions: () => [],
-	});
-	await server.start();
-	const clients = [new DaemonIpcClient(path), new DaemonIpcClient(path)];
-	const events: TriggeredRunActivity[][] = [[], []];
-	try {
-		await clients[0]!.connect();
-		await clients[1]!.connect();
-		await clients[0]!.subscribeActivity(a => events[0]!.push(a));
-		await clients[1]!.subscribeActivity(a => events[1]!.push(a));
-		server.broadcastActivity(sampleActivity());
-		await new Promise(r => setTimeout(r, 50));
-		t.is(events[0]!.length, 1);
-		t.is(events[1]!.length, 1);
-	} finally {
-		for (const c of clients) await c.disconnect();
-		await server.stop();
-		await rm(join(path, '..'), {recursive: true, force: true});
-	}
-});
-
 test.serial('unknown method returns an error response', async t => {
 	const path = await makeSocketPath();
 	const server = new DaemonIpcServer(path, {listSubscriptions: () => []});
@@ -135,9 +67,11 @@ test.serial('unknown method returns an error response', async t => {
 	try {
 		// Sneak past the typed client - send a raw bad request
 		const err = await t.throwsAsync(async () => {
-			await (client as unknown as {
-				request: (method: string) => Promise<unknown>;
-			}).request('nonsense' as never);
+			await (
+				client as unknown as {
+					request: (method: string) => Promise<unknown>;
+				}
+			).request('nonsense' as never);
 		});
 		t.regex(err?.message ?? '', /unknown method/);
 	} finally {
@@ -146,3 +80,66 @@ test.serial('unknown method returns an error response', async t => {
 		await rm(join(path, '..'), {recursive: true, force: true});
 	}
 });
+
+test.serial('invalid JSON returns {id:0, error:"invalid JSON"}', async t => {
+	const path = await makeSocketPath();
+	const server = new DaemonIpcServer(path, {listSubscriptions: () => []});
+	await server.start();
+	try {
+		// Talk to the server with a raw socket so we can send garbage that
+		// won't parse as JSON. The typed client would never produce this.
+		const sock = createConnection(path);
+		sock.setEncoding('utf-8');
+		const got = await new Promise<string>((resolve, reject) => {
+			sock.once('connect', () => sock.write('this is not json\n'));
+			sock.once('data', d => resolve(String(d)));
+			sock.once('error', reject);
+		});
+		t.regex(got, /"error":"invalid JSON"/);
+		t.regex(got, /"id":0/);
+		sock.destroy();
+	} finally {
+		await server.stop();
+		await rm(join(path, '..'), {recursive: true, force: true});
+	}
+});
+
+test.serial(
+	'client disconnects mid-stream - server stays alive and accepts new connections',
+	async t => {
+		const path = await makeSocketPath();
+		const server = new DaemonIpcServer(path, {
+			listSubscriptions: () => [SAMPLE_SUB],
+		});
+		await server.start();
+		try {
+			// First client sends a partial request, then closes the socket
+			// without giving the server a chance to respond.
+			await new Promise<void>(resolve => {
+				const sock = createConnection(path);
+				sock.once('connect', () => {
+					sock.write('{"id":5,"method":"pi');
+					sock.destroy();
+					resolve();
+				});
+			});
+
+			// Give the server a tick to observe the close event.
+			await new Promise(r => setTimeout(r, 50));
+
+			// Second client should be able to connect and round-trip normally.
+			const client = new DaemonIpcClient(path);
+			await client.connect();
+			try {
+				t.is(await client.ping(), 'pong');
+				const subs = await client.listSubscriptions();
+				t.is(subs.length, 1);
+			} finally {
+				await client.disconnect();
+			}
+		} finally {
+			await server.stop();
+			await rm(join(path, '..'), {recursive: true, force: true});
+		}
+	},
+);

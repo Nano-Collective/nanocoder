@@ -6,6 +6,12 @@ sidebar_order: 3
 
 # Subagents
 
+> **A subagent is one kind of skill member.** This page covers the
+> subagent-specific details — system prompts, isolation, parallel
+> execution. For the broader picture (how subagents combine with
+> commands, tools, and event triggers in a single bundle, and how
+> single-file vs bundle skills work), see **[Skills](./skills.md)**.
+
 Subagents are specialized AI agents that the main agent can delegate tasks to. Each subagent runs in its own isolated conversation with its own system prompt, filtered tools, and optionally a different model or provider. Only the final result is returned to the main conversation, keeping your context window clean.
 
 ## How It Works

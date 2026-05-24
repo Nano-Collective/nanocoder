@@ -1,10 +1,22 @@
+---
+title: "Skills"
+description: "The unified extension model: commands, subagents, tools, and event subscriptions in one ergonomic primitive"
+sidebar_order: 1
+---
+
 # Skills
 
-A **skill** is the unit of extension in Nanocoder. Skills come in two
-ergonomic forms - a single `.md` file in `.nanocoder/commands|agents|tools/`
-(the **single-file** form) or a directory under `.nanocoder/skills/`
-containing a `skill.yaml` and any subset of `commands/`, `agents/`,
-`tools/` subdirs (the **bundle** form).
+A **skill** is the unit of extension in Nanocoder — the umbrella that
+unifies [commands](./custom-commands.md), [subagents](./subagents.md),
+and [tools](./custom-tools.md), plus the event subscriptions that fire
+them. If you're adding any kind of custom behaviour to Nanocoder, this
+is the page to start with; the individual command / subagent / tool
+pages drill into the per-member details.
+
+Skills come in two ergonomic forms - a single `.md` file in
+`.nanocoder/commands|agents|tools/` (the **single-file** form) or a
+directory under `.nanocoder/skills/` containing a `skill.yaml` and any
+subset of `commands/`, `agents/`, `tools/` subdirs (the **bundle** form).
 
 Both forms produce the same runtime data model, register into the same
 registries, and surface through the same `/skills` slash command.

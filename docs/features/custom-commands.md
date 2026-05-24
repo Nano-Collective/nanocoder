@@ -6,6 +6,12 @@ sidebar_order: 2
 
 # Custom Commands
 
+> **A custom command is one kind of skill member.** This page covers
+> command-specific details — frontmatter parameters, auto-injection,
+> aliases, namespacing. For the broader picture (bundling a command
+> with a subagent and tools, or adding a cron / file.changed
+> subscription), see **[Skills](./skills.md)**.
+
 If you find yourself typing the same kind of prompt repeatedly — "review this file for bugs", "write tests following our conventions", "check for security issues" — custom commands let you save those prompts as markdown files and invoke them as slash commands.
 
 Each command becomes a `/command` you can run during any session, with support for parameters, aliases, auto-injection based on keywords, and namespace organization.

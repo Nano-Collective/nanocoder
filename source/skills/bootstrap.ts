@@ -70,6 +70,15 @@ export async function bootSkillPipeline(
 
 	try {
 		await opts.subagentLoader.initialize();
+		// Per-file parse errors are collected inside the loader; drain them
+		// so the daemon's log surface (or the TUI's chat queue) can show them.
+		for (const e of opts.subagentLoader.drainLoadErrors()) {
+			loaderErrors.push({
+				bundlePath: opts.projectRoot,
+				filePath: e.filePath,
+				message: e.message,
+			});
+		}
 	} catch (err) {
 		loaderErrors.push({
 			bundlePath: opts.projectRoot,
@@ -96,11 +105,19 @@ export async function bootSkillPipeline(
 	}
 
 	// === Synthesize skill envelopes from the populated registries ===========
-	const flatSkills: Skill[] = [
+	const rawFlatSkills: Skill[] = [
 		...synthesizeCommandSkills(opts.commandLoader),
 		...(await synthesizeSubagentSkills(opts.subagentLoader)),
 		...synthesizeToolSkills(opts.toolManager),
 	];
+
+	// Cross-kind flat-skill name collisions: a command "foo" and a tool "foo"
+	// would both surface in `/skills` under the same name. Detect, report,
+	// and drop the later one. The underlying registries (commands, tools,
+	// agents) are unaffected - those still allow same-name across kinds and
+	// the original member is reachable via `/foo` or the tool invocation.
+	const {kept: flatSkills, collisions: flatNameCollisions} =
+		dedupeFlatSkills(rawFlatSkills);
 
 	// === Subscribe flat-form skill triggers =================================
 	// Members already live in the legacy registries; we only need to wire
@@ -127,6 +144,7 @@ export async function bootSkillPipeline(
 	const registration: RegisterResult = {
 		registered: bundleRegistration.registered,
 		collisions: [
+			...flatNameCollisions,
 			...flatSubscriptions.collisions,
 			...bundleRegistration.collisions,
 		],
@@ -151,6 +169,43 @@ export async function bootSkillPipeline(
 		collisions: registration.collisions,
 	});
 	return result;
+}
+
+/**
+ * Drop cross-kind name collisions among flat-form skills. Two synthesized
+ * skills sharing a `name` would both surface in `/skills` under the same
+ * heading - we keep the first occurrence (commands win over agents over
+ * tools, matching the synthesizer order) and emit a `SkillCollision` for
+ * each duplicate so it lands in the daemon log / chat queue.
+ */
+function dedupeFlatSkills(skills: Skill[]): {
+	kept: Skill[];
+	collisions: SkillCollision[];
+} {
+	const seen = new Map<string, Skill>();
+	const kept: Skill[] = [];
+	const collisions: SkillCollision[] = [];
+	for (const skill of skills) {
+		const first = seen.get(skill.name);
+		if (first) {
+			collisions.push({
+				skill: skill.name,
+				kind: kindOf(skill),
+				name: skill.name,
+				message: `Flat skill "${skill.name}" (${kindOf(skill)}) collides with already-loaded "${first.name}" (${kindOf(first)}). Keeping the first; the new entry is dropped from /skills.`,
+			});
+			continue;
+		}
+		seen.set(skill.name, skill);
+		kept.push(skill);
+	}
+	return {kept, collisions};
+}
+
+function kindOf(skill: Skill): 'command' | 'agent' | 'tool' {
+	if (skill.commands && skill.commands.length > 0) return 'command';
+	if (skill.subagent) return 'agent';
+	return 'tool';
 }
 
 function synthesizeCommandSkills(loader: CustomCommandLoader): Skill[] {

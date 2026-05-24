@@ -35,10 +35,16 @@ export interface FileWatcherOptions {
 	pollingInterval?: number;
 }
 
+// `.nanocoder/` holds the daemon's own state (lockfile, socket, checkpoints,
+// skills, etc.). Watching it creates a feedback loop: triggered runs write
+// checkpoints under .nanocoder/checkpoints/, which fire file.changed events,
+// which trigger more runs. The contents of .nanocoder/ are loaded once at
+// boot - no hot reload - so excluding the whole tree is safe and prevents
+// chokidar from exhausting the FD limit on checkpoint-heavy projects.
 const DEFAULT_IGNORED: Array<string | RegExp> = [
 	/(^|[\\/])\.git([\\/]|$)/,
 	/(^|[\\/])node_modules([\\/]|$)/,
-	/(^|[\\/])\.nanocoder[\\/]daemon\./,
+	/(^|[\\/])\.nanocoder([\\/]|$)/,
 ];
 
 export class FileWatcherSource {

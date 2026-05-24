@@ -696,18 +696,34 @@ test('getAvailableToolNames - filters to minimal profile', t => {
 test('getAvailableToolNames - full profile returns all minus mode exclusions', t => {
 	const manager = new ToolManager();
 	const result = manager.getAvailableToolNames({enabled: true, toolProfile: 'full', aggressiveCompact: false}, 'headless');
+	// Headless mode excludes ask_user (no human to ask) and agent (no nested delegation).
 	t.false(result.includes('ask_user'));
+	t.false(result.includes('agent'));
 	t.true(result.includes('read_file'));
 });
 
 test('getAvailableToolNames - plan mode excludes mutation tools', t => {
 	const manager = new ToolManager();
 	const result = manager.getAvailableToolNames({enabled: true, toolProfile: 'full', aggressiveCompact: false}, 'plan');
-	t.false(result.includes('string_replace'));
+	// File mutators
 	t.false(result.includes('write_file'));
+	t.false(result.includes('string_replace'));
+	t.false(result.includes('delete_file'));
+	t.false(result.includes('move_file'));
+	t.false(result.includes('copy_file'));
+	t.false(result.includes('create_directory'));
+	// Shell
 	t.false(result.includes('execute_bash'));
+	// Git mutators (read-only git tools should still be present)
 	t.false(result.includes('git_commit'));
+	t.false(result.includes('git_add'));
+	t.false(result.includes('git_push'));
+	t.false(result.includes('git_reset'));
+	// Task tools (plan mode produces the plan itself)
 	t.false(result.includes('create_task'));
+	t.false(result.includes('update_task'));
+	t.false(result.includes('delete_task'));
+	t.false(result.includes('list_tasks'));
 	// Read-only tools remain
 	t.true(result.includes('read_file'));
 	t.true(result.includes('find_files'));
@@ -797,6 +813,30 @@ test('getAvailableToolNames - unknown tool names in disabledTools are ignored', 
 	t.false(result.includes('execute_bash'));
 	// No crash, no spurious removals
 	t.true(result.includes('read_file'));
+});
+
+test('getAvailableToolNames - disabledTools removes a bundle-form skill tool', t => {
+	// Bundle skill tools are added to the same registry as built-ins via
+	// registerSkillTool. disabledTools should filter them by name without
+	// caring whether the tool came from a flat .md, a bundle, or built-in.
+	const manager = new ToolManager();
+	manager.registerSkillTool({
+		name: 'k8s_pods',
+		// Minimal `tool` stub - we only need it in the registry for filtering.
+		tool: {description: 'List pods', execute: async () => 'ok'} as never,
+		handler: async () => 'ok',
+		readOnly: true,
+		ownerSkill: 'k8s',
+	});
+
+	const baseline = manager.getAvailableToolNames(undefined, 'normal', []);
+	const disabled = manager.getAvailableToolNames(undefined, 'normal', [
+		'k8s_pods',
+	]);
+
+	t.true(baseline.includes('k8s_pods'), 'baseline should include skill tool');
+	t.false(disabled.includes('k8s_pods'), 'disabled list should remove it');
+	t.is(disabled.length, baseline.length - 1);
 });
 
 // ============================================================================

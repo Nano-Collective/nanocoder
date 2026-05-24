@@ -66,7 +66,11 @@ export function defaultLaunchDaemon(
 	const logFd = openSync(logPath, 'a');
 	const child = spawn(process.execPath, [daemonEntry], {
 		cwd: projectRoot,
-		env: {...process.env, NANOCODER_PROJECT_ROOT: projectRoot},
+		env: {
+			...process.env,
+			NANOCODER_PROJECT_ROOT: projectRoot,
+			NANOCODER_DAEMON_PROCESS: '1',
+		},
 		detached: true,
 		stdio: ['ignore', logFd, logFd],
 	});

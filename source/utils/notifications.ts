@@ -179,5 +179,13 @@ export function sendNotification(event: NotificationEvent): void {
 	const {title, message} =
 		_config.customMessages?.[event] ?? EVENT_MESSAGES[event];
 
+	// Daemon-side observability: the daemon redirects stdout to its log,
+	// so this lets `nanocoder daemon logs` confirm whether a notification
+	// was actually dispatched (vs. silently suppressed by config). In the
+	// TUI, stdout is captured by Ink so this is harmless.
+	if (process.env.NANOCODER_DAEMON_PROCESS) {
+		console.log(`Notification fired: event=${event} title="${title}"`);
+	}
+
 	sendNativeNotification(title, message);
 }

@@ -1,6 +1,0 @@
-name: docs
-description: Docs bundle.
-subscribe:
-  - kind: file.changed
-    target: agent:docs-agent
-    paths: ["/etc/passwd"]

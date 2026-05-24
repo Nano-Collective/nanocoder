@@ -1,11 +1,9 @@
 /**
  * Daemon IPC: a tiny Unix-socket RPC server that lets a TUI ask the
- * running daemon "what subscriptions are active?" and subscribe to a
- * stream of triggered-run activity events.
+ * running daemon "what subscriptions are active?".
  *
  * Protocol: newline-delimited JSON. Each request is one line of
  * `{id, method, params?}`; each response is `{id, result | error}`.
- * Activity broadcasts are `{event: 'activity', payload}` (no id).
  *
  * Kept deliberately small - no msgpack, no schema validation library,
  * no auth. The socket lives inside `.nanocoder/` so it inherits the
@@ -22,11 +20,10 @@ import {
 	type Socket,
 } from 'node:net';
 import type {Subscription} from '@/events/types';
-import type {TriggeredRunActivity} from '@/skills/dispatcher';
 
 export interface IpcRequest {
 	id: number;
-	method: 'listSubscriptions' | 'subscribeActivity' | 'ping';
+	method: 'listSubscriptions' | 'ping';
 	params?: unknown;
 }
 
@@ -36,19 +33,7 @@ export interface IpcResponse {
 	error?: string;
 }
 
-export interface IpcActivityBroadcast {
-	event: 'activity';
-	payload: SerializedActivity;
-}
-
-export type IpcMessage = IpcResponse | IpcActivityBroadcast;
-
-/**
- * Activity wire format. `TriggeredRunActivity` references types (events,
- * subscriptions, results) that all serialize cleanly to JSON, so we just
- * pass it through - this alias documents the contract.
- */
-export type SerializedActivity = TriggeredRunActivity;
+export type IpcMessage = IpcResponse;
 
 export interface IpcHandlers {
 	listSubscriptions(): Subscription[];
@@ -56,7 +41,6 @@ export interface IpcHandlers {
 
 export class DaemonIpcServer {
 	private server: Server | null = null;
-	private readonly activitySubscribers: Set<Socket> = new Set();
 	/** All connected sockets - used to force-close on stop(). */
 	private readonly clients: Set<Socket> = new Set();
 
@@ -92,28 +76,12 @@ export class DaemonIpcServer {
 		// Node's server.close() doesn't remove the path entry.
 		for (const sock of this.clients) sock.destroy();
 		this.clients.clear();
-		this.activitySubscribers.clear();
 		await new Promise<void>(resolve => s.close(() => resolve()));
 		if (existsSync(this.socketPath)) {
 			try {
 				unlinkSync(this.socketPath);
 			} catch {
 				/* best-effort */
-			}
-		}
-	}
-
-	/**
-	 * Broadcast a `TriggeredRunActivity` to every client that subscribed.
-	 * Quiet by design: dead sockets are dropped without raising.
-	 */
-	broadcastActivity(activity: TriggeredRunActivity): void {
-		const line = `${JSON.stringify({event: 'activity', payload: activity} satisfies IpcActivityBroadcast)}\n`;
-		for (const sock of this.activitySubscribers) {
-			try {
-				sock.write(line);
-			} catch {
-				this.activitySubscribers.delete(sock);
 			}
 		}
 	}
@@ -133,11 +101,9 @@ export class DaemonIpcServer {
 			}
 		});
 		socket.on('close', () => {
-			this.activitySubscribers.delete(socket);
 			this.clients.delete(socket);
 		});
 		socket.on('error', () => {
-			this.activitySubscribers.delete(socket);
 			this.clients.delete(socket);
 		});
 	}
@@ -163,10 +129,6 @@ export class DaemonIpcServer {
 					return;
 				case 'listSubscriptions':
 					this.respond(socket, req.id, this.handlers.listSubscriptions());
-					return;
-				case 'subscribeActivity':
-					this.activitySubscribers.add(socket);
-					this.respond(socket, req.id, {subscribed: true});
 					return;
 				default:
 					this.respond(
@@ -203,8 +165,7 @@ export class DaemonIpcServer {
 
 /**
  * Minimal client for the TUI side. Sends a single request and resolves on
- * the matching response. Activity subscription is a separate one-shot
- * `subscribeActivity` followed by streaming reads via `onActivity`.
+ * the matching response.
  */
 export class DaemonIpcClient {
 	private socket: Socket | null = null;
@@ -213,7 +174,6 @@ export class DaemonIpcClient {
 		number,
 		{resolve: (v: unknown) => void; reject: (err: Error) => void}
 	>();
-	private activityListeners: Array<(a: TriggeredRunActivity) => void> = [];
 	private buffer = '';
 
 	constructor(private readonly socketPath: string) {}
@@ -246,13 +206,6 @@ export class DaemonIpcClient {
 		return (await this.request('listSubscriptions')) as Subscription[];
 	}
 
-	async subscribeActivity(
-		listener: (activity: TriggeredRunActivity) => void,
-	): Promise<void> {
-		this.activityListeners.push(listener);
-		await this.request('subscribeActivity');
-	}
-
 	async ping(): Promise<string> {
 		return (await this.request('ping')) as string;
 	}
@@ -278,22 +231,17 @@ export class DaemonIpcClient {
 			const line = this.buffer.slice(0, nl);
 			this.buffer = this.buffer.slice(nl + 1);
 			if (!line.trim()) continue;
-			let parsed: IpcMessage;
+			let parsed: IpcResponse;
 			try {
-				parsed = JSON.parse(line) as IpcMessage;
+				parsed = JSON.parse(line) as IpcResponse;
 			} catch {
 				continue;
 			}
-			if ('event' in parsed && parsed.event === 'activity') {
-				for (const l of this.activityListeners) l(parsed.payload);
-				continue;
-			}
-			const resp = parsed as IpcResponse;
-			const slot = this.pending.get(resp.id);
+			const slot = this.pending.get(parsed.id);
 			if (!slot) continue;
-			this.pending.delete(resp.id);
-			if (resp.error) slot.reject(new Error(resp.error));
-			else slot.resolve(resp.result);
+			this.pending.delete(parsed.id);
+			if (parsed.error) slot.reject(new Error(parsed.error));
+			else slot.resolve(parsed.result);
 		}
 	}
 

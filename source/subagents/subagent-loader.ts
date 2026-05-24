@@ -35,12 +35,24 @@ function getBuiltInAgentsDir(): string {
  * SubagentLoader manages loading subagent definitions from multiple sources.
  * Sources are loaded in priority order (project > user > built-in).
  */
+export interface SubagentLoadError {
+	filePath: string;
+	message: string;
+}
+
 export class SubagentLoader {
 	/** Cache of loaded subagent configs */
 	private cache: Map<string, SubagentConfigWithSource> = new Map();
 
 	/** Whether the cache has been initialized */
 	private initialized = false;
+
+	/**
+	 * Per-file parse / load errors collected during initialize(). Drained by
+	 * bootstrap so the daemon can surface them in its log (the message-queue
+	 * `logError` path only reaches the TUI's chat queue).
+	 */
+	private loadErrors: SubagentLoadError[] = [];
 
 	/** Project root directory */
 	private projectRoot: string;
@@ -165,7 +177,19 @@ export class SubagentLoader {
 	async reload(): Promise<void> {
 		this.cache.clear();
 		this.initialized = false;
+		this.loadErrors = [];
 		await this.initialize();
+	}
+
+	/**
+	 * Drain per-file load errors accumulated during initialize(). The caller
+	 * (typically the boot pipeline) surfaces them through its own error
+	 * channel. Subsequent calls return an empty array until reload().
+	 */
+	drainLoadErrors(): SubagentLoadError[] {
+		const errors = this.loadErrors;
+		this.loadErrors = [];
+		return errors;
 	}
 
 	/**
@@ -252,9 +276,9 @@ export class SubagentLoader {
 					subscribe: parsed.subscribe,
 				});
 			} catch (error) {
-				logError(
-					`Failed to load agent from ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
-				);
+				const message = error instanceof Error ? error.message : String(error);
+				this.loadErrors.push({filePath, message});
+				logError(`Failed to load agent from ${filePath}: ${message}`);
 			}
 		}
 

@@ -77,6 +77,52 @@ test.serial('reports schedules.json deprecation warning when present', async t =
 });
 
 test.serial(
+	'cross-kind flat skill name collision: command "foo" + tool "foo" → reported, first (command) wins',
+	async t => {
+		resetSkillRegistry();
+		const root = await tempProject();
+		try {
+			await mkdir(join(root, '.nanocoder', 'commands'), {recursive: true});
+			await mkdir(join(root, '.nanocoder', 'tools'), {recursive: true});
+			await writeFile(
+				join(root, '.nanocoder', 'commands', 'foo.md'),
+				`---\ndescription: foo command\n---\nbody`,
+				'utf-8',
+			);
+			await writeFile(
+				join(root, '.nanocoder', 'tools', 'foo.md'),
+				`---\nname: foo\ndescription: foo tool\napproval: never\nread_only: true\nparameters: {}\n---\necho hi`,
+				'utf-8',
+			);
+
+			const result = await bootSkillPipeline({
+				projectRoot: root,
+				toolManager: new ToolManager(),
+				commandLoader: new CustomCommandLoader(root),
+				subagentLoader: new SubagentLoader(root),
+				eventRouter: noopRouter(),
+			});
+
+			const fooSkills = result.skills.filter(s => s.name === 'foo');
+			t.is(fooSkills.length, 1, 'exactly one "foo" should appear in /skills');
+			t.truthy(
+				fooSkills[0]?.commands && fooSkills[0].commands.length > 0,
+				'the command flavor wins (first in synthesizer order)',
+			);
+
+			const fooCollisions = result.registration.collisions.filter(
+				c => c.name === 'foo',
+			);
+			t.is(fooCollisions.length, 1, 'a single collision is reported');
+			t.regex(fooCollisions[0]?.message ?? '', /collides with already-loaded/);
+			t.regex(fooCollisions[0]?.message ?? '', /Keeping the first/);
+		} finally {
+			await rm(root, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
 	'flat-dir commands are picked up via the legacy loader and surfaced as skills',
 	async t => {
 		resetSkillRegistry();

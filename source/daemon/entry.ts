@@ -12,12 +12,14 @@
  */
 
 import {createLLMClient} from '@/client-factory';
+import {getAppConfig} from '@/config/index';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import type {Checkpointer} from '@/skills/dispatcher';
 import {SubagentExecutor} from '@/subagents/subagent-executor';
 import type {SubagentResult, SubagentTask} from '@/subagents/types';
 import {ToolManager} from '@/tools/tool-manager';
 import type {DevelopmentMode} from '@/types/core';
+import {setNotificationsConfig} from '@/utils/notifications';
 import {getShutdownManager} from '@/utils/shutdown';
 import {startDaemon} from './daemon';
 
@@ -46,6 +48,14 @@ async function main(): Promise<void> {
 		process.exit(1);
 	});
 
+	// Mirror the TUI's notifications wiring: without this, the daemon's
+	// `sendNotification` calls (from defaultOnActivity etc.) hit the default
+	// `enabled: false` config and never fire, no matter what the user set.
+	const notificationsConfig = getAppConfig().notifications;
+	if (notificationsConfig) {
+		setNotificationsConfig(notificationsConfig);
+	}
+
 	const toolManager = new ToolManager();
 
 	const buildExecutor = (mode: DevelopmentMode) => {
@@ -64,13 +74,23 @@ async function main(): Promise<void> {
 	const checkpointManager = new CheckpointManager(projectRoot);
 	const checkpointer: Checkpointer = {
 		async create(reason: string): Promise<string> {
-			const meta = await checkpointManager.saveCheckpoint(
-				undefined,
-				[],
-				'trigger',
-				reason,
-			);
-			return meta.name;
+			try {
+				const meta = await checkpointManager.saveCheckpoint(
+					undefined,
+					[],
+					'trigger',
+					reason,
+				);
+				return meta.name;
+			} catch (err) {
+				// Log before re-throwing. The dispatcher's catch will swallow
+				// it and proceed with the triggered run (checkpoint failure is
+				// non-fatal), but without this log the failure is silent.
+				console.error(
+					`Checkpoint creation failed (reason="${reason}"): ${err instanceof Error ? err.message : String(err)}`,
+				);
+				throw err;
+			}
 		},
 	};
 

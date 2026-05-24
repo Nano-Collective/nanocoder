@@ -13,8 +13,7 @@
  *   5. Write the lockfile, trap SIGTERM/SIGINT for clean shutdown.
  *
  * The daemon does not draw a TUI - the IPC socket is its surface. The
- * `onActivity` callback fires both the OS notification and (when a TUI is
- * attached) an IPC broadcast.
+ * `onActivity` callback writes a log line and fires the OS notification.
  *
  * See `agents/2026-05-20-skills-unification-plan.md` step 19.
  */
@@ -111,7 +110,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 				`event=${activity.event.kind} subscription=${activity.subscription.id} ` +
 				`duration=${activity.durationMs}ms${checkpoint}${errSuffix}`,
 		);
-		ipcServer.broadcastActivity(activity);
 		sendNotification('triggeredRunComplete');
 	};
 
@@ -127,7 +125,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 		},
 	});
 
-	const backpressure = new BackpressureDispatcher(skillDispatcher);
+	const backpressure = new BackpressureDispatcher(skillDispatcher, {
+		onDrop: (subscription, event) => {
+			console.log(
+				`Dropped event (in-flight run): subscription=${subscription.id} ` +
+					`target=${subscription.target.kind}:${subscription.target.name} ` +
+					`event=${event.kind}`,
+			);
+		},
+	});
 	const router = new EventRouter(backpressure);
 
 	// Layer 3: unified skill boot (legacy loaders + bundle loader + registrar)

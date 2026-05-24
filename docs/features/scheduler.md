@@ -1,176 +1,45 @@
 ---
 title: "Scheduler"
-description: "Schedule recurring AI tasks using cron expressions"
+description: "Recurring tasks are now a skill subscription, not a separate scheduler"
 sidebar_order: 6
 ---
 
 # Scheduled Tasks
 
-Some tasks are worth running regularly — checking for outdated dependencies, summarising recent commits, or scanning for common issues. The scheduler lets you define these as markdown prompts and run them automatically on a cron schedule.
+> **Scheduled tasks are now a skill feature.** The standalone scheduler
+> (`/schedule create`, `/schedule add`, `/schedule start`, the
+> `.nanocoder/schedules.json` file) has been **removed**. Cron-driven
+> runs happen through **[skill subscriptions](./skills.md#event-subscriptions)**
+> executed by the per-project daemon. This page is the migration
+> pointer; everything else lives in [Skills](./skills.md).
 
-Tasks execute in non-interactive mode, so Nanocoder handles everything autonomously and logs the results for you to review.
+## What replaced it
 
-## Quick Start
+The new model attaches a cron trigger directly to a command or a bundle
+manifest. The [per-project daemon](./skills.md#the-daemon) wakes the
+target when the schedule fires.
 
-```bash
-# Create a new scheduled task file
-/schedule create deps-update
+## What `/schedule` does now
 
-# Add a schedule for it
-/schedule add "0 9 * * MON" deps-update
+`/schedule` is **read-only** — it lists the cron subscriptions currently
+loaded from skill frontmatter and bundle manifests so you can see what
+will fire and when. There is no longer a `create`, `add`, `remove`,
+`start`, or `logs` subcommand.
 
-# Start the scheduler
-/schedule start
-```
+To add, remove, or edit a cron trigger, edit the source `.md` or
+`skill.yaml` file directly. Restart the daemon (`nanocoder daemon stop`
+then `nanocoder daemon start`) to pick up the change.
 
-## How It Works
+## Migration
 
-Scheduled tasks are defined as markdown files in `.nanocoder/schedules/`. Each file contains a prompt that instructs the AI what to do when the schedule runs.
+If you previously used `.nanocoder/schedules.json`, move each entry into
+the targeted command's frontmatter, or into a bundle manifest.
 
-When a scheduled task executes, Nanocoder:
-1. Loads the prompt from the schedule file
-2. Runs the AI with that prompt in non-interactive mode
-3. Records the execution result (success/error)
-4. Logs output for later review
-
-## Commands
-
-### `/schedule create <name>`
-
-Creates a new scheduled task file and starts an AI-assisted conversation to help you build the prompt content. The AI will ask what you want the scheduled job to do, then write the markdown prompt into the file for you.
-
-```bash
-/schedule create daily-summary
-```
-
-The `.md` extension is added automatically.
-
-**Schedule file format:**
-
-```markdown
----
-description: Daily standup summary
----
-
-Provide a brief summary of recent changes from git log. Focus on:
-- New features merged
-- Bug fixes
-- Any breaking changes
-```
-
-### `/schedule add "<cron>" <name>`
-
-Adds a schedule for an existing task file.
-
-```bash
-# Run deps-update every Monday at 9am
-/schedule add "0 9 * * MON" deps-update
-
-# Run daily at 8am
-/schedule add "0 8 * * *" daily-standup
-
-# Run every hour
-/schedule add "0 * * * *" hourly-check
-```
-
-The `.md` extension is inferred if not provided.
-
-**Cron format:** `minute hour day-of-month month day-of-week`
-
-| Field | Values |
-|-------|--------|
-| Minute | 0-59 |
-| Hour | 0-23 |
-| Day | 1-31 |
-| Month | 1-12 |
-| Weekday | 0-6 (Sun-Sat) |
-
-### `/schedule list`
-
-Shows all configured schedules with their cron expression and next run time.
-
-### `/schedule remove <id>`
-
-Removes a schedule by its ID (shown in `/schedule list`).
-
-### `/schedule logs [id]`
-
-Shows execution logs for schedules.
-
-- Without ID: Shows logs for all schedules
-- With ID: Shows logs for a specific schedule
-
-### `/schedule start`
-
-Enters scheduler mode, where Nanocoder runs in the background and executes scheduled tasks. Press `Esc` to exit.
-
-## Storage
-
-- **Schedule configurations**: `.nanocoder/schedules.json`
-- **Schedule task files**: `.nanocoder/schedules/*.md`
-- **Execution logs**: `.nanocoder/schedule-runs.json`
-
-Consider adding these to your `.gitignore`:
-
-```gitignore
-.nanocoder/schedules.json
-.nanocoder/schedule-runs.json
-.nanocoder/schedules/
-```
-
-## Examples
-
-### Dependency Update Check
-
-```markdown
----
-description: Check for outdated npm dependencies
----
-
-Run `npm outdated` to check for outdated dependencies. Report any that have updates available but aren't yet in package.json.
-```
-
-### Code Review Reminder
-
-```markdown
----
-description: Check for pending PRs
----
-
-Check if there are any pending pull requests that need review. List the titles and authors of open PRs.
-```
-
-### Daily Summary
-
-```markdown
----
-description: Daily git summary
----
-
-Provide a summary of commits from the last 24 hours using git log. Group by author and highlight any security-related changes.
-```
-
-## Tips
-
-- **Test your prompts first**: Run your prompt manually with `nanocoder run "your prompt"` before scheduling it
-- **Keep prompts focused**: Scheduled tasks work best with clear, specific requests
-- **Use absolute paths**: If your prompt references files, use absolute paths since the working directory may vary
-- **Check logs regularly**: Monitor `/schedule logs` to ensure tasks are running successfully
-
-## Migration to skill subscriptions
-
-This `.nanocoder/schedules.json`-based scheduler is **deprecated** in favor of
-the unified skill subscription model. The new model declares cron triggers
-on a command's frontmatter or a bundle manifest, and runs them through the
-per-project daemon.
-
-### Before (legacy)
+### Before (legacy `schedules.json`)
 
 ```json
 // .nanocoder/schedules.json
-[
-  {"cron": "0 9 * * MON", "command": "/weekly-report"}
-]
+[{"cron": "0 9 * * MON", "command": "/weekly-report"}]
 ```
 
 ### After (single-file form)
@@ -187,7 +56,7 @@ subscribe:
 Summarize last week's commits...
 ```
 
-### After (bundle form)
+### After (bundle manifest)
 
 ```yaml
 # .nanocoder/skills/reports/skill.yaml
@@ -199,15 +68,15 @@ subscribe:
     cron: "0 9 * * MON"
 ```
 
-Then start the daemon to make triggers fire:
+Then start the daemon so subscriptions fire:
 
 ```bash
 nanocoder daemon start
 ```
 
-If `.nanocoder/schedules.json` is present when Nanocoder boots, a loud
-warning points back at this migration guide. The legacy scheduler runner
-still works during the transition window, but new scheduled runs should
-move to the subscription model.
+If `.nanocoder/schedules.json` is still present when Nanocoder boots, a
+loud deprecation warning points at this page. The file itself is no
+longer read.
 
-See [Skills](./skills.md) for the full subscription syntax.
+For the full subscription syntax (paths, eventKinds, confirm, etc.) and
+daemon lifecycle, see **[Skills](./skills.md)**.
