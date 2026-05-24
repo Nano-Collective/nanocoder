@@ -31,7 +31,7 @@ import {
 	type ExecutorFactory,
 	SkillDispatcher,
 } from '@/skills/dispatcher';
-import {SubagentLoader} from '@/subagents/subagent-loader';
+import {getSubagentLoader} from '@/subagents/subagent-loader';
 import {ToolManager} from '@/tools/tool-manager';
 import {sendNotification} from '@/utils/notifications';
 import {DaemonIpcServer} from './ipc';
@@ -85,7 +85,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 	// Layer 1: registries
 	const toolManager = new ToolManager();
 	const commandLoader = new CustomCommandLoader(opts.projectRoot);
-	const subagentLoader = new SubagentLoader(opts.projectRoot);
+	// Use the global singleton: the SubagentExecutor resolves subagents via
+	// getSubagentLoader(projectRoot), so a fresh instance here would diverge
+	// from what the executor sees. Bundle agents land here via the registrar,
+	// and the executor must read from the same instance.
+	const subagentLoader = getSubagentLoader(opts.projectRoot);
 
 	// Layer 2: event plumbing
 	const ipcServer = new DaemonIpcServer(getSocketPath(opts.projectRoot), {
@@ -93,6 +97,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 	});
 
 	const defaultOnActivity: ActivityListener = activity => {
+		const target = `${activity.subscription.target.kind}:${activity.subscription.target.name}`;
+		const status = activity.result.success ? 'ok' : 'error';
+		const checkpoint = activity.checkpointId
+			? ` checkpoint=${activity.checkpointId}`
+			: '';
+		const errSuffix =
+			!activity.result.success && activity.result.error
+				? ` error="${activity.result.error}"`
+				: '';
+		console.log(
+			`Triggered run ${status}: target=${target} mode=${activity.mode} ` +
+				`event=${activity.event.kind} subscription=${activity.subscription.id} ` +
+				`duration=${activity.durationMs}ms${checkpoint}${errSuffix}`,
+		);
 		ipcServer.broadcastActivity(activity);
 		sendNotification('triggeredRunComplete');
 	};
@@ -101,6 +119,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 		buildExecutor: opts.buildExecutor,
 		checkpointer: opts.checkpointer,
 		onActivity: opts.onActivity ?? defaultOnActivity,
+		onUnsupportedTarget: (subscription, reason) => {
+			console.log(
+				`Skipped triggered run: target=${subscription.target.kind}:${subscription.target.name} ` +
+					`subscription=${subscription.id} reason="${reason}"`,
+			);
+		},
 	});
 
 	const backpressure = new BackpressureDispatcher(skillDispatcher);
