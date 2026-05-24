@@ -1,7 +1,7 @@
 import test from 'ava';
 import stripAnsi from 'strip-ansi';
 import { cleanup, render } from 'ink-testing-library';
-import StreamingMessage from './streaming-message'
+import StreamingMessage, {computeStreamingTail} from './streaming-message';
 import { ThemeContext } from '../hooks/useTheme';
 import { themes } from '../config/themes';
 import React from 'react';
@@ -219,6 +219,98 @@ test('StreamingMessage preserves internal newlines', t => {
 	t.true(output.includes('Line 1'));
 	t.true(output.includes('Line 2'));
 	t.true(output.includes('Line 3'));
+});
+
+// ============================================================================
+// Regression tests for #526 — OOM on long streaming responses
+// ============================================================================
+
+const buildLines = (lineCount: number) => {
+	const lines: string[] = [];
+	for (let i = 0; i < lineCount; i++) {
+		lines.push(`line-${i.toString().padStart(6, '0')} word word word word`);
+	}
+	return lines.join('\n');
+};
+
+test('StreamingMessage shows only the tail of a long message', t => {
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<StreamingMessage message={buildLines(500)} model="test-model" />
+		</MockThemeProvider>,
+	);
+
+	const output = stripAnsi(lastFrame() ?? '');
+	t.true(output.includes('line-000499'));
+	t.false(output.includes('line-000000'));
+	t.true(output.includes('…'));
+});
+
+test('StreamingMessage handles a huge streaming message without OOM/slowness', t => {
+	// Regression test for #526: previously the entire growing message was
+	// re-wrapped on every render, producing O(n) per-render allocations that
+	// exhausted the Node.js heap on long (~37k token) responses.
+	const message = buildLines(5000);
+	t.true(message.length > 100_000);
+
+	const {lastFrame, rerender} = render(
+		<MockThemeProvider>
+			<StreamingMessage message={message} model="test-model" />
+		</MockThemeProvider>,
+	);
+	// Simulate streaming flushes appending more content (the chat loop does
+	// this at ~150ms intervals during generation).
+	let current = message;
+	for (let i = 0; i < 20; i++) {
+		current += `\nappended-${i} ${'token '.repeat(20)}`;
+		rerender(
+			<MockThemeProvider>
+				<StreamingMessage message={current} model="test-model" />
+			</MockThemeProvider>,
+		);
+	}
+
+	const output = stripAnsi(lastFrame() ?? '');
+	t.true(output.includes('appended-19'));
+	t.false(output.includes('line-000000'));
+	t.true(output.includes('…'));
+});
+
+test('computeStreamingTail bounds wrap input to a small tail', t => {
+	// Deterministic check that computeStreamingTail (the function that gates
+	// what wrapWithTrimmedContinuations receives) returns a tail whose length
+	// is bounded by tailCharLimit, regardless of how large the full message is.
+	const textWidth = 80;
+	const maxLines = 12;
+	const tailCharLimit = textWidth * maxLines * 4;
+	const hugeMessage = buildLines(5000); // ~150 KB
+
+	const {tail, sliced} = computeStreamingTail(hugeMessage, textWidth, maxLines);
+
+	t.true(sliced, 'expected the message to be sliced');
+	t.true(
+		tail.length <= tailCharLimit,
+		`tail.length ${tail.length} must be ≤ tailCharLimit ${tailCharLimit}`,
+	);
+	// The tail must start at a clean line boundary (no partial leading line).
+	t.regex(tail, /^line-\d{6}/);
+});
+
+test('StreamingMessage tail slice snaps to a line boundary', t => {
+	// When the message is large enough to slice, the slice must start at a
+	// newline boundary so we never render a partial leading line.
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<StreamingMessage message={buildLines(2000)} model="test-model" />
+		</MockThemeProvider>,
+	);
+
+	const output = stripAnsi(lastFrame() ?? '');
+	const visibleLabels = output.match(/line-\d{6}/g) ?? [];
+	t.true(visibleLabels.length > 0);
+	for (const label of visibleLabels) {
+		t.regex(label, /^line-\d{6}$/);
+	}
 });
 
 test.afterEach(() => {
