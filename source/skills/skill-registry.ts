@@ -31,14 +31,6 @@ export function getLoadedSkills(): Skill[] {
 	return state.skills;
 }
 
-export function getLoadErrors(): SkillLoadError[] {
-	return state.loadErrors;
-}
-
-export function getSkillCollisions(): SkillCollision[] {
-	return state.collisions;
-}
-
 export function findSkill(name: string): Skill | undefined {
 	return state.skills.find(s => s.name === name);
 }

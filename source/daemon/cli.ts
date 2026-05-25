@@ -56,7 +56,7 @@ export interface DaemonCliOptions {
  * project root in its environment. Stdio is redirected to the daemon log
  * file.
  */
-export function defaultLaunchDaemon(
+function defaultLaunchDaemon(
 	projectRoot: string,
 	daemonEntry: string,
 ): ChildProcess {

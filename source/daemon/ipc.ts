@@ -33,8 +33,6 @@ export interface IpcResponse {
 	error?: string;
 }
 
-export type IpcMessage = IpcResponse;
-
 export interface IpcHandlers {
 	listSubscriptions(): Subscription[];
 	/**

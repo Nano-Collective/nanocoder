@@ -53,7 +53,7 @@ export interface InstallResult {
 	message: string;
 }
 
-export function platformOf(override?: AutoStartPlatform): AutoStartPlatform {
+function platformOf(override?: AutoStartPlatform): AutoStartPlatform {
 	if (override) return override;
 	if (process.platform === 'darwin') return 'darwin';
 	if (process.platform === 'linux') return 'linux';

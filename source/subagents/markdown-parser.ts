@@ -143,9 +143,7 @@ export function extractFrontmatter(content: string): SubagentFrontmatter {
  * Parse YAML frontmatter as an untyped record. Used by callers that need to
  * read fields outside the subagent schema (e.g. `subscribe:`).
  */
-export function extractRawFrontmatter(
-	content: string,
-): Record<string, unknown> {
+function extractRawFrontmatter(content: string): Record<string, unknown> {
 	const {frontmatter: raw, hasFrontmatter} = splitFrontmatter(content);
 	if (!hasFrontmatter) {
 		throw new Error('No YAML frontmatter found in file');

@@ -156,11 +156,11 @@ export function registerSkills(
 /**
  * Walk a skill's `subscribe[]` and register each entry with the event
  * router. Returns the subscription IDs that were registered plus any
- * per-entry collisions. Used both inside `registerSkills` (for bundles)
- * and from `bootstrap.ts` (for flat-form skills whose members are already
- * in the legacy registries).
+ * per-entry collisions. Used internally by `registerSkills` (for bundles)
+ * and by `registerSkillSubscriptions` (for flat-form skills whose members
+ * already live in the legacy registries).
  */
-export function subscribeSkillTriggers(
+function subscribeSkillTriggers(
 	skill: Skill,
 	eventRouter: EventRouter,
 ): {subscriptionIds: SubscriptionId[]; collisions: SkillCollision[]} {

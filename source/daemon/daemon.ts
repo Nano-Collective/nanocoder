@@ -35,7 +35,6 @@ import {ToolManager} from '@/tools/tool-manager';
 import {sendNotification} from '@/utils/notifications';
 import {DaemonIpcServer} from './ipc';
 import {
-	getLockfilePath,
 	getSocketPath,
 	readLiveLockfile,
 	removeLockfile,
@@ -212,5 +211,3 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 
 	return {stop};
 }
-
-export {getLockfilePath, getSocketPath};

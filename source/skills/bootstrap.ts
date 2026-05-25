@@ -281,31 +281,4 @@ function detectDeprecations(projectRoot: string): string[] {
 	return warnings;
 }
 
-export function summarizeBoot(result: SkillBootResult): string {
-	const parts: string[] = [];
-	if (result.skills.length === 0) {
-		parts.push('No skills found.');
-	} else {
-		const bundle = result.skills.filter(
-			s => s.source.shape === 'bundle',
-		).length;
-		const flat = result.skills.length - bundle;
-		parts.push(
-			`Loaded ${result.skills.length} skills (${flat} flat, ${bundle} bundles).`,
-		);
-	}
-	if (result.loadErrors.length > 0) {
-		parts.push(`${result.loadErrors.length} load errors.`);
-	}
-	if (result.registration.collisions.length > 0) {
-		parts.push(`${result.registration.collisions.length} collisions.`);
-	}
-	if (result.registration.subscriptionIds.length > 0) {
-		parts.push(
-			`${result.registration.subscriptionIds.length} subscriptions registered.`,
-		);
-	}
-	return parts.join(' ');
-}
-
 export type {SkillCollision};
