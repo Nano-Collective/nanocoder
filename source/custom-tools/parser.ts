@@ -251,11 +251,11 @@ function parseParameterDef(
 				`Parameter "${paramName}": pattern is too long (max ${MAX_PATTERN_LENGTH} chars)`,
 			);
 		}
+		// Pattern is from project-owned .md frontmatter, length-capped above,
+		// and compile-validated here. Threat model: user editing their own
+		// config; not attacker-supplied input.
 		try {
 			// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
-			// Pattern is from project-owned .md frontmatter, length-capped above,
-			// and compile-validated here. Threat model: user editing their own
-			// config; not attacker-supplied input.
 			new RegExp(pattern);
 		} catch {
 			throw new CustomToolParseError(
