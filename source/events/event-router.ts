@@ -145,5 +145,10 @@ function globToRegex(pattern: string): RegExp {
 			out += ch;
 		}
 	}
+	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
+	// `out` is built by the escape loop above: every character is either a
+	// literal escaped with `\\`, or one of the fixed substrings `[^/]`, `.*`,
+	// `[^/]*`, `[^/]`. There is no user-supplied raw regex syntax in `out`.
+	// The shape is bounded by the glob length, so ReDoS is not reachable.
 	return new RegExp(`^${out}$`);
 }

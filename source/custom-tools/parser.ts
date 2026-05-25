@@ -16,6 +16,10 @@ import {parseYamlObject, splitFrontmatter} from '@/utils/frontmatter';
 const TOOL_NAME_REGEX = /^[a-z][a-z0-9_]*$/;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 300_000;
+/** Generous cap on user-written validator regex strings. 1KB of regex is
+ * already absurd for parameter validation; anything longer is a copy-paste
+ * accident waiting to be a ReDoS footgun. */
+const MAX_PATTERN_LENGTH = 1024;
 
 const VALID_PARAM_TYPES: ReadonlySet<CustomToolParameterType> = new Set([
 	'string',
@@ -237,7 +241,21 @@ function parseParameterDef(
 	}
 	if (raw.pattern !== undefined) {
 		const pattern = asString(raw.pattern, `parameters.${paramName}.pattern`);
+		// Defence-in-depth against pathological user-written regexes. The
+		// pattern comes from the user's own .nanocoder/tools/*.md frontmatter
+		// (not attacker input), so ReDoS would be self-inflicted - but capping
+		// the length keeps an accidental copy-paste of a huge regex from
+		// stalling the parser.
+		if (pattern.length > MAX_PATTERN_LENGTH) {
+			throw new CustomToolParseError(
+				`Parameter "${paramName}": pattern is too long (max ${MAX_PATTERN_LENGTH} chars)`,
+			);
+		}
 		try {
+			// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
+			// Pattern is from project-owned .md frontmatter, length-capped above,
+			// and compile-validated here. Threat model: user editing their own
+			// config; not attacker-supplied input.
 			new RegExp(pattern);
 		} catch {
 			throw new CustomToolParseError(

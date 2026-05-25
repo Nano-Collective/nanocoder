@@ -31,10 +31,13 @@ async function main(): Promise<void> {
 	try {
 		process.chdir(projectRoot);
 	} catch (err) {
-		console.error(
-			`Failed to chdir into ${projectRoot}:`,
-			err instanceof Error ? err.message : err,
-		);
+		// Build the line ourselves rather than letting console.error consume
+		// `projectRoot` as a util.format template (a `%s` in the path would
+		// otherwise be interpreted as a format specifier against the second
+		// argument). This is cosmetic - the path is from our own spawn env -
+		// but the rewrite costs nothing and silences the format-string warning.
+		const detail = err instanceof Error ? err.message : String(err);
+		console.error(`Failed to chdir into ${projectRoot}: ${detail}`);
 		process.exit(1);
 	}
 
