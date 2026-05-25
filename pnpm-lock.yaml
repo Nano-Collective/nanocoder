@@ -106,7 +106,7 @@ importers:
         version: 10.0.0
       ws:
         specifier: ^8.18.0
-        version: 8.19.0
+        version: 8.20.1
       xdg-basedir:
         specifier: ^5.1.0
         version: 5.1.0
@@ -164,7 +164,7 @@ importers:
     dependencies:
       ws:
         specifier: ^8.16.0
-        version: 8.19.0
+        version: 8.20.1
     devDependencies:
       '@types/node':
         specifier: ^25.0.3
@@ -3597,8 +3597,8 @@ packages:
     resolution: {integrity: sha512-OTIk8iR8/aCRWBqvxrzxR0hgxWpnYBblY1S5hDWBQfk/VFmJwzmJgQFN3WsoUKHISv2eAwe+PpbUzyL1CKTLXg==}
     engines: {node: ^20.17.0 || >=22.9.0}
 
-  ws@8.19.0:
-    resolution: {integrity: sha512-blAT2mjOEIi0ZzruJfIhb3nps74PRWTCz1IjglWEEpQl5XS/UNama6u2/rjFkDDouqr4L67ry+1aGIALViWjDg==}
+  ws@8.20.1:
+    resolution: {integrity: sha512-It4dO0K5v//JtTXuPkfEOaI3uUN87iYPnqo/ZzqCoG3g8uhA66QUMs/SrM0YK7/NAu+r4LMh/9dq2A7k+rHs+w==}
     engines: {node: '>=10.0.0'}
     peerDependencies:
       bufferutil: ^4.0.1
@@ -5808,7 +5808,7 @@ snapshots:
       type-fest: 5.5.0
       widest-line: 6.0.0
       wrap-ansi: 9.0.2
-      ws: 8.19.0
+      ws: 8.20.1
       yoga-layout: 3.2.1
     optionalDependencies:
       '@types/react': 19.2.14
@@ -7129,7 +7129,7 @@ snapshots:
     dependencies:
       signal-exit: 4.1.0
 
-  ws@8.19.0: {}
+  ws@8.20.1: {}
 
   wsl-utils@0.1.0:
     dependencies:
