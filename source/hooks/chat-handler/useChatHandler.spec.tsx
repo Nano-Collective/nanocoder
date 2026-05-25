@@ -352,13 +352,16 @@ test('useChatHandler - streaming state types are correct', t => {
 	t.is(typeof streamingState.tokenCount, 'number');
 });
 
-test('getBaseSystemPrompt - scheduler mode ignores cached prompt', t => {
+test('getBaseSystemPrompt - headless mode ignores cached prompt', t => {
+	// Headless is the daemon's mode for triggered runs - it must rebuild the
+	// system prompt each call so `Current Date:` reflects the trigger time
+	// rather than whatever the interactive TUI cached at boot.
 	const toolManager = {
 		getAvailableToolNames: (_tune: unknown, mode: string) => [`tool-for-${mode}`],
 	} as NonNullable<UseChatHandlerProps['toolManager']>;
 
 	const result = getBaseSystemPrompt(
-		'scheduler',
+		'headless',
 		'cached-prompt',
 		toolManager,
 		undefined,

@@ -77,7 +77,6 @@ test('all derived mode booleans are false when activeMode is null', t => {
 	t.false(hook.isCheckpointLoadMode);
 	t.false(hook.isExplorerMode);
 	t.false(hook.isIdeSelectionMode);
-	t.false(hook.isSchedulerMode);
 	t.false(hook.isSessionSelectorMode);
 	t.false(hook.isTuneActive);
 });

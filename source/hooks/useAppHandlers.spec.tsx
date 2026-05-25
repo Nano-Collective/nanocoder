@@ -208,7 +208,10 @@ test('handleToggleDevelopmentMode cycles through modes via the updater', t => {
 	t.is(updater('plan'), 'normal');
 });
 
-test('handleToggleDevelopmentMode preserves scheduler mode', t => {
+test('handleToggleDevelopmentMode preserves headless mode', t => {
+	// Headless is entered by the daemon for triggered runs, not by the user.
+	// Shift+Tab cycles only through user-facing modes; if `developmentMode`
+	// is somehow `headless` when toggle fires, it should stay there.
 	const {handlers, spies} = setup();
 
 	handlers.handleToggleDevelopmentMode();
@@ -216,7 +219,7 @@ test('handleToggleDevelopmentMode preserves scheduler mode', t => {
 		prev: DevelopmentMode,
 	) => DevelopmentMode;
 
-	t.is(updater('scheduler'), 'scheduler');
+	t.is(updater('headless'), 'headless');
 });
 
 test('handleCheckpointCancel clears active mode and checkpoint data', t => {

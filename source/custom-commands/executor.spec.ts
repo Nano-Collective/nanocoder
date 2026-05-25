@@ -78,12 +78,12 @@ test('execute includes args variable with all arguments', t => {
 	t.true(result.includes('hello world'));
 });
 
-test('execute adds note about custom command', t => {
+test('execute wraps the prompt with the command name', t => {
 	const command = createTestCommand();
 
 	const result = executor.execute(command, []);
 	t.true(result.includes('Executing custom command'));
-	t.true(result.includes('enhance it'));
+	t.true(result.includes('/test'));
 });
 
 test('formatHelp returns command name', t => {

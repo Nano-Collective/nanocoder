@@ -66,14 +66,14 @@ test('DevelopmentModeIndicator renders with yolo mode', t => {
 	t.regex(output!, /yolo mode on/);
 });
 
-test('DevelopmentModeIndicator renders with scheduler mode', t => {
+test('DevelopmentModeIndicator renders with headless mode', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="scheduler" colors={mockColors} contextPercentUsed={null} />,
+		<DevelopmentModeIndicator developmentMode="headless" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /scheduler mode on/);
+	t.regex(output!, /headless mode on/);
 });
 
 test('DevelopmentModeIndicator renders without crashing', t => {
@@ -189,13 +189,13 @@ test('DevelopmentModeIndicator plan mode uses correct label', t => {
 	t.notRegex(output!, /auto-accept mode on/);
 });
 
-test('DevelopmentModeIndicator scheduler mode uses correct label', t => {
+test('DevelopmentModeIndicator headless mode uses correct label', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="scheduler" colors={mockColors} contextPercentUsed={null} />,
+		<DevelopmentModeIndicator developmentMode="headless" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const output = lastFrame();
-	t.regex(output!, /scheduler mode on/);
+	t.regex(output!, /headless mode on/);
 	t.notRegex(output!, /normal mode on/);
 	t.notRegex(output!, /auto-accept mode on/);
 	t.notRegex(output!, /plan mode on/);
