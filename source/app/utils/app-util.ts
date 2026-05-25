@@ -22,8 +22,7 @@ import {
 	handleAgentCopy,
 	handleAgentCreate,
 	handleCommandCreate,
-	handleScheduleCreate,
-	handleScheduleStart,
+	handleSkillsCreate,
 	handleToolCreate,
 } from './handlers/create-handler';
 import {handleResumeCommand} from './handlers/session-handler';
@@ -194,6 +193,7 @@ async function handleBashCommand(
 			React.createElement(ErrorMessage, {
 				key: generateKey('bash-error'),
 				message: `Error executing command: ${getErrorMessage(error, String(error))}`,
+				hideBox: true,
 			}),
 		);
 	} finally {
@@ -609,12 +609,11 @@ async function handleSlashCommand(
 
 	if (await handleCompactCommand(commandParts, options)) return;
 	if (await handleContextMaxCommand(commandParts, options)) return;
-	if (await handleScheduleStart(commandParts, options)) return;
-	if (await handleScheduleCreate(commandParts, options)) return;
 	if (await handleCommandCreate(commandParts, options)) return;
 	if (await handleAgentCreate(commandParts, options)) return;
 	if (await handleAgentCopy(commandParts, options)) return;
 	if (await handleToolCreate(commandParts, options)) return;
+	if (await handleSkillsCreate(commandParts, options)) return;
 	if (await handleSpecialCommand(commandName, options)) return;
 	if (await handleCheckpointLoad(commandParts, options)) return;
 	if (await handleResumeCommand(commandParts, options)) return;

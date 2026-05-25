@@ -31,7 +31,6 @@ export interface MessageSubmissionOptions {
 	onEnterSessionSelectorMode?: (showAll?: boolean) => void;
 	onResumeSession?: (session: Session) => void;
 	onShowStatus: () => void;
-	onEnterSchedulerMode?: () => void;
 	onHandleChatMessage: (message: string) => Promise<void>;
 	onAddToChatQueue: (component: React.ReactNode) => void;
 	setLiveComponent: (component: React.ReactNode) => void;

@@ -63,6 +63,9 @@ Nanocoder is a React-based CLI coding agent built with Ink.js that provides loca
 - `source/lsp/` - Language server client integration
 - `source/wizards/` - Interactive setup flows (config, MCP, providers)
 - `source/plain/` - Non-Ink CLI shell used by `--plain`
+- `source/skills/` - Unified skill primitive: loaders (bundle + flat-dir adapter), manifest parser, frontmatter `subscribe:` parser, registrar that fans members into the existing command / subagent / tool registries, dispatcher for triggered runs
+- `source/events/` - Event router, file watcher source (chokidar), cron source (croner), backpressure (per-subscription concurrency cap + 500ms trailing debounce on `file.changed`)
+- `source/daemon/` - Per-project daemon process: lockfile, Unix-socket IPC server / TUI client, CLI surface (`nanocoder daemon <start|stop|status|logs>`), launchd plist + systemd user unit installers
 
 ### State Management Pattern
 
@@ -104,6 +107,19 @@ Environment variable substitution in config values: `$VAR`, `${VAR}`, `${VAR:-de
 
 `source/client-factory.ts` creates clients via `createLLMClient(provider?)`. Uses Vercel AI SDK (`ai` v6) with `@ai-sdk/openai-compatible` for any OpenAI-compatible API, plus dedicated `@ai-sdk/anthropic` and `@ai-sdk/google` providers. The wrapper logic (streaming, tool calls, error handling, prepareStep, retries) lives in `source/ai-sdk-client/`.
 
+### Skills
+
+A **skill** is the unit of extension. Two ergonomic forms over one primitive:
+
+- **Single-file**: a `.md` in `.nanocoder/commands|agents|tools/`. Filename is the skill name. Optional `subscribe:` block in frontmatter declares event triggers. Backwards-compatible with the legacy flat dirs.
+- **Bundle**: a directory under `.nanocoder/skills/<name>/` containing `skill.yaml` plus optional `commands/`, `agents/`, `tools/` subdirs. Multi-piece features (e.g. a `pr-reviewer` skill with a subagent + tool + command) live in a bundle.
+
+Loaders (`source/skills/bundle-loader.ts`, `source/skills/flat-loader.ts`) read project / personal / built-in locations in priority order. The **registrar** (`source/skills/registrar.ts`) fans each skill's members into the existing `CustomCommandLoader`, `SubagentLoader`, and `ToolManager.registry` - downstream consumers (`/tools`, agent tool, mode filters) keep using their familiar registries.
+
+Bundle tools default to `tools_visibility: scoped`: hidden from the global tool list, visible only to the bundle's own subagent. Single-file tools default to `global`.
+
+**Event triggers**: subscriptions on a member's frontmatter or a manifest's `subscribe:` block. The **per-project daemon** (`source/daemon/`, started by `nanocoder daemon start`) owns file-watch and cron sources. The interactive TUI never starts event sources. `confirm: true` on a subscription dispatches the triggered run in `plan` mode instead of `headless`.
+
 ## Code Style
 
 - **TypeScript strict mode** with `@/*` path alias mapping to `source/*`
@@ -126,4 +142,4 @@ Four user-facing modes (toggle with Shift+Tab during chat):
 - **yolo**: Automatically execute every tool without exception
 - **plan**: Show tool calls but don't execute
 
-There is also an internal **scheduler** mode used by `source/schedule/` for cron-driven runs; it disables interactive tools (`ask_user`, `agent`).
+There is also an internal **headless** mode used by the daemon for every triggered skill run (file.changed, schedule.cron, future kinds). Same posture as the legacy `scheduler` mode it supersedes: no `ask_user`, no foreground confirmations. Per-subscription `confirm: true` opts into `plan` mode instead.

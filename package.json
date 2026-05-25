@@ -74,6 +74,7 @@
 		"@nanocollective/get-md": "^1.4.0",
 		"ai": "6.0.174",
 		"chalk": "^5.2.0",
+		"chokidar": "^5.0.0",
 		"cli-highlight": "^2.1.11",
 		"cli-table3": "^0.6.5",
 		"croner": "^10.0.1",

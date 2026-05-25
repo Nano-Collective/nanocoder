@@ -41,9 +41,6 @@ export class CustomCommandExecutor {
 			fullPrompt += ']';
 		}
 
-		fullPrompt +=
-			'\n\n[Note: If this custom command could be improved, please provide feedback on how to enhance it.]';
-
 		// Execute the prompt as if the user typed it
 		return fullPrompt;
 	}

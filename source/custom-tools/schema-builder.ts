@@ -119,7 +119,11 @@ function checkValue(
 		if (def.maxLength !== undefined && s.length > def.maxLength) {
 			return `⚒ Parameter "${name}" is too long (max ${def.maxLength} chars)`;
 		}
+		// `def.pattern` was length-capped (MAX_PATTERN_LENGTH) and compile-
+		// validated in parser.ts when the tool was loaded. It comes from
+		// project-owned .nanocoder/tools/*.md frontmatter, not attacker input.
 		if (def.pattern !== undefined) {
+			// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
 			const re = new RegExp(def.pattern);
 			if (!re.test(s)) {
 				return `⚒ Parameter "${name}" does not match pattern ${def.pattern}`;

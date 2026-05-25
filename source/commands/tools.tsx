@@ -14,25 +14,43 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getToolManager} from '@/message-handler';
 import {generateKey} from '@/session/key-generator';
+import {findSkill} from '@/skills/skill-registry';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {Command} from '@/types/index';
 
-interface GroupedTools {
+export interface GroupedTools {
 	builtin: string[];
 	mcp: Array<{name: string; server?: string}>;
-	custom: Array<{name: string; source: 'personal' | 'project'}>;
+	custom: Array<{
+		name: string;
+		source: 'personal' | 'project' | 'built-in';
+		ownerSkill?: string;
+	}>;
 }
 
-function groupTools(toolManager: ToolManager): GroupedTools {
+export function groupTools(toolManager: ToolManager): GroupedTools {
 	const all = toolManager.getToolNames().sort();
 	const builtin: string[] = [];
 	const mcp: Array<{name: string; server?: string}> = [];
-	const custom: Array<{name: string; source: 'personal' | 'project'}> = [];
+	const custom: GroupedTools['custom'] = [];
 
 	for (const name of all) {
 		if (toolManager.isCustomTool(name)) {
 			const info = toolManager.getCustomToolInfo(name);
 			custom.push({name, source: info?.source ?? 'project'});
+			continue;
+		}
+		// Bundle-form skill tools: tagged with `ownerSkill` via the registrar.
+		// When their bundle sets `tools_visibility.default: global` they
+		// belong in /tools's Custom group alongside flat-form tools.
+		const ownerSkill = toolManager.getOwnerSkill(name);
+		if (ownerSkill) {
+			const skill = findSkill(ownerSkill);
+			custom.push({
+				name,
+				source: skill?.source.priority ?? 'project',
+				ownerSkill,
+			});
 			continue;
 		}
 		const mcpInfo = toolManager.getMCPToolInfo(name);
@@ -99,7 +117,7 @@ function ToolsView({toolManager}: {toolManager: ToolManager | null}) {
 			) : (
 				mcp.map(t => (
 					<Text key={t.name} color={colors.text}>
-						• {t.name}
+						› {t.name}
 						{t.server ? (
 							<Text color={colors.secondary}> ({t.server})</Text>
 						) : null}
@@ -113,19 +131,15 @@ function ToolsView({toolManager}: {toolManager: ToolManager | null}) {
 				</Text>
 			</Box>
 			{custom.length === 0 ? (
-				<>
-					<Text color={colors.secondary}>(none)</Text>
-					<Box marginTop={1}>
-						<Text color={colors.secondary}>
-							Drop a markdown file into{' '}
-							<Text color={colors.primary}>.nanocoder/tools/</Text> to add one.
-						</Text>
-					</Box>
-				</>
+				<Text color={colors.secondary}>(none)</Text>
 			) : (
 				custom.map(t => (
 					<Text key={t.name} color={colors.text}>
-						• {t.name} <Text color={colors.secondary}>({t.source})</Text>
+						› {t.name}{' '}
+						<Text color={colors.secondary}>
+							({t.ownerSkill ? `skill:${t.ownerSkill}, ` : ''}
+							{t.source})
+						</Text>
 					</Text>
 				))
 			)}

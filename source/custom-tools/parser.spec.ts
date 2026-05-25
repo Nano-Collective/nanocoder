@@ -23,6 +23,47 @@ function writeTool(filename: string, contents: string): string {
 	return path;
 }
 
+test('accepts list-of-objects parameters shape and normalizes to a mapping', t => {
+	const path = writeTool(
+		'list-params.md',
+		`---
+name: list_pods
+description: List pods.
+parameters:
+  - name: namespace
+    type: string
+    description: Kubernetes namespace
+    default: default
+  - name: label
+    type: string
+    required: false
+---
+echo {{ namespace }}`,
+	);
+	const meta = parseCustomToolFile(path).metadata;
+	t.deepEqual(Object.keys(meta.parameters).sort(), ['label', 'namespace']);
+	t.is(meta.parameters.namespace?.type, 'string');
+	t.is(meta.parameters.namespace?.default, 'default');
+	t.is(meta.parameters.label?.type, 'string');
+});
+
+test('rejects list-of-objects parameters missing a name field', t => {
+	const path = writeTool(
+		'bad-list-params.md',
+		`---
+name: bad
+description: bad
+parameters:
+  - type: string
+---
+echo hi`,
+	);
+	const err = t.throws(() => parseCustomToolFile(path), {
+		instanceOf: CustomToolParseError,
+	});
+	t.regex(err?.message ?? '', /missing a "name" field/);
+});
+
 test('parses a minimal valid custom tool', t => {
 	const path = writeTool(
 		'minimal.md',

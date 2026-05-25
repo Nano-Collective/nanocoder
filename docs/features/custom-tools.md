@@ -1,10 +1,16 @@
 ---
 title: "Custom Tools"
 description: "Define your own model-callable tools as markdown files with input schemas, validators, and shell-script bodies"
-sidebar_order: 3
+sidebar_order: 4
 ---
 
 # Custom Tools
+
+> **A custom tool is one kind of skill member.** This page covers
+> tool-specific details — input schemas, validators, approval policy,
+> shell-script bodies. For the broader picture (scoping a tool to one
+> subagent inside a bundle, or wiring tools into a bigger skill), see
+> **[Skills](./skills.md)**.
 
 Custom tools let the model call your own scripts. Drop a markdown file into `.nanocoder/tools/`, declare the parameters it accepts, and write the shell command. The tool shows up alongside built-ins (`read_file`, `execute_bash`, etc.) — the model can call it, you confirm execution, the script runs, and stdout comes back as the result.
 

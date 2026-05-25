@@ -92,7 +92,6 @@ interface UseAppHandlersProps {
 	enterExplorerMode: () => void;
 	enterIdeSelectionMode: () => void;
 	enterTune: () => void;
-	enterSchedulerMode: () => void;
 
 	// Chat handler
 	handleChatMessage: (message: string) => Promise<void>;
@@ -167,8 +166,9 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	// Toggle development mode handler
 	const handleToggleDevelopmentMode = React.useCallback(() => {
 		props.setDevelopmentMode(currentMode => {
-			// Don't allow toggling out of scheduler mode via Shift+Tab
-			if (currentMode === 'scheduler') return currentMode;
+			// Don't allow toggling out of headless via Shift+Tab: it's a
+			// non-interactive mode entered by the daemon, not the user.
+			if (currentMode === 'headless') return currentMode;
 
 			const modes: Array<'normal' | 'auto-accept' | 'yolo' | 'plan'> = [
 				'normal',
@@ -176,7 +176,9 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				'yolo',
 				'plan',
 			];
-			const currentIndex = modes.indexOf(currentMode);
+			const currentIndex = modes.indexOf(
+				currentMode as 'normal' | 'auto-accept' | 'yolo' | 'plan',
+			);
 			const nextIndex = (currentIndex + 1) % modes.length;
 			const nextMode = modes[nextIndex];
 
@@ -509,7 +511,6 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				onEnterExplorerMode: props.enterExplorerMode,
 				onEnterIdeSelectionMode: props.enterIdeSelectionMode,
 				onEnterTune: props.enterTune,
-				onEnterSchedulerMode: props.enterSchedulerMode,
 				onEnterCheckpointLoadMode: enterCheckpointLoadMode,
 				onEnterSessionSelectorMode: enterSessionSelectorMode,
 				onResumeSession: session => applySession(session),
@@ -544,7 +545,6 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.enterExplorerMode,
 			props.enterIdeSelectionMode,
 			props.enterTune,
-			props.enterSchedulerMode,
 			props.handleChatMessage,
 			props.addToChatQueue,
 			props.setLiveComponent,

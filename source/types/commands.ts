@@ -74,9 +74,19 @@ export interface CustomCommand {
 	source?: 'personal' | 'project';
 	lastModified?: Date;
 	loadedResources?: CommandResource[];
+	/**
+	 * Event subscriptions declared in the file's frontmatter, if any.
+	 * Target is implicit (this command). Resolved by the skill registrar.
+	 */
+	subscribe?: import('@/types/skills').SkillTrigger[];
 }
 
 export interface ParsedCustomCommand {
 	metadata: CustomCommandMetadata;
 	content: string;
+	/**
+	 * Event subscriptions declared in the file's frontmatter, if any. Target
+	 * is implicit (the command itself) and resolved by the skill registrar.
+	 */
+	subscribe?: import('@/types/skills').SkillTrigger[];
 }

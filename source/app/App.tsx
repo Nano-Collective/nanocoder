@@ -35,7 +35,6 @@ import {useDirectoryTrust} from '@/hooks/useDirectoryTrust';
 import {useModeHandlers} from '@/hooks/useModeHandlers';
 import {useNonInteractiveMode} from '@/hooks/useNonInteractiveMode';
 import {useNotifications} from '@/hooks/useNotifications';
-import {useSchedulerMode} from '@/hooks/useSchedulerMode';
 import {useSessionAutosave} from '@/hooks/useSessionAutosave';
 import {ThemeContext} from '@/hooks/useTheme';
 import {TitleShapeContext, updateTitleShape} from '@/hooks/useTitleShape';
@@ -334,15 +333,6 @@ export default function App({
 		setTune: appState.setTune,
 	});
 
-	// Scheduler mode enter/exit handlers
-	const enterSchedulerMode = React.useCallback(() => {
-		appState.setActiveMode('scheduler');
-	}, [appState.setActiveMode, appState]);
-
-	const exitSchedulerMode = React.useCallback(() => {
-		appState.setActiveMode(null);
-	}, [appState.setActiveMode, appState]);
-
 	// IDE selection handler
 	const handleIdeSelect = React.useCallback(
 		(ide: string) => {
@@ -436,7 +426,6 @@ export default function App({
 		enterExplorerMode: modeHandlers.enterExplorerMode,
 		enterIdeSelectionMode: modeHandlers.enterIdeSelectionMode,
 		enterTune: modeHandlers.enterTune,
-		enterSchedulerMode,
 		handleChatMessage: chatHandler.handleChatMessage,
 		dismissActiveEditor: vscodeServer.dismissActiveEditor,
 	});
@@ -471,20 +460,6 @@ export default function App({
 		setDevelopmentMode: appState.setDevelopmentMode,
 		handleMessageSubmit: appHandlers.handleMessageSubmit,
 		developmentMode: initialDevelopmentMode,
-	});
-
-	// Setup scheduler mode
-	const schedulerMode = useSchedulerMode({
-		isSchedulerMode: appState.isSchedulerMode,
-		mcpInitialized: appState.mcpInitialized,
-		setDevelopmentMode: appState.setDevelopmentMode,
-		handleMessageSubmit: appHandlers.handleMessageSubmit,
-		clearMessages: appHandlers.clearMessages,
-		isConversationComplete: appState.isConversationComplete,
-		isToolExecuting: appState.isToolExecuting,
-		isToolConfirmationMode: appState.isToolConfirmationMode,
-		messages: appState.messages,
-		addToChatQueue: appState.addToChatQueue,
 	});
 
 	// Setup session autosave
@@ -663,7 +638,6 @@ export default function App({
 						toolHandler={toolHandler}
 						modeHandlers={modeHandlers}
 						appHandlers={appHandlers}
-						schedulerMode={schedulerMode}
 						vscodeServer={vscodeServer}
 						staticComponents={staticComponents}
 						liveComponent={liveComponent}
@@ -672,7 +646,6 @@ export default function App({
 						handleQuestionAnswer={handleQuestionAnswer}
 						handleUserSubmit={handleUserSubmit}
 						handleIdeSelect={handleIdeSelect}
-						exitSchedulerMode={exitSchedulerMode}
 					/>
 				</UIStateProvider>
 			</TitleShapeContext.Provider>

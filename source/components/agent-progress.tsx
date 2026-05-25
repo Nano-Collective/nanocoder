@@ -17,7 +17,27 @@ interface AgentProgressProps {
 		toolCallCount: number;
 		tokenCount: number;
 		success: boolean;
+		toolHistory?: string[];
 	};
+}
+
+/**
+ * Collapse consecutive duplicates into `name (×N)` so a chatty agent that
+ * hammers the same tool stays readable.
+ */
+function groupConsecutive(
+	history: string[],
+): Array<{name: string; count: number}> {
+	const groups: Array<{name: string; count: number}> = [];
+	for (const name of history) {
+		const last = groups[groups.length - 1];
+		if (last && last.name === name) {
+			last.count++;
+		} else {
+			groups.push({name, count: 1});
+		}
+	}
+	return groups;
 }
 
 export default function AgentProgress({
@@ -51,6 +71,13 @@ export default function AgentProgress({
 	const tokenCount = isComplete
 		? completedState.tokenCount
 		: progress.tokenCount;
+	const toolHistory = isComplete
+		? (completedState.toolHistory ?? [])
+		: progress.toolHistory;
+	const allGroups = groupConsecutive(toolHistory);
+	const MAX_VISIBLE_GROUPS = 3;
+	const toolGroups = allGroups.slice(-MAX_VISIBLE_GROUPS);
+	const hiddenEarlierCount = Math.max(0, allGroups.length - toolGroups.length);
 
 	const dotColor = isComplete
 		? completedState?.success
@@ -98,6 +125,22 @@ export default function AgentProgress({
 						</Text>
 					</Box>
 				</>
+			)}
+
+			{toolGroups.length > 0 && (
+				<Box flexDirection="column" marginLeft={2}>
+					{hiddenEarlierCount > 0 && (
+						<Text color={colors.secondary}>
+							↳ + {hiddenEarlierCount} earlier
+						</Text>
+					)}
+					{toolGroups.map((g, i) => (
+						<Text key={`${g.name}-${i}`} color={colors.secondary}>
+							↳ {g.name}
+							{g.count > 1 ? ` (×${g.count})` : ''}
+						</Text>
+					))}
+				</Box>
 			)}
 		</Box>
 	);

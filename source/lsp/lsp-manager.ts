@@ -3,7 +3,7 @@
  * Manages multiple language server connections with auto-discovery and routing
  */
 
-import {EventEmitter} from 'events';
+import {EventEmitter} from 'node:events';
 import {readFile} from 'fs/promises';
 import {extname} from 'path';
 import {fileURLToPath} from 'url';

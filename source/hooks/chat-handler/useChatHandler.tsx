@@ -24,7 +24,7 @@ export function getBaseSystemPrompt(
 	toolsDisabled: boolean,
 ): string {
 	const systemPromptOverride = getAppConfig().systemPrompt;
-	if (developmentMode === 'scheduler') {
+	if (developmentMode === 'headless') {
 		return buildSystemPrompt(
 			developmentMode,
 			tune,

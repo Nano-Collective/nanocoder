@@ -1,6 +1,11 @@
 import {readFileSync} from 'fs';
+import {
+	parseSubscribeBlock,
+	SubscribeParseError,
+} from '@/skills/parse-subscribe';
 import type {CustomCommandMetadata, ParsedCustomCommand} from '@/types/index';
-import {splitFrontmatter} from '@/utils/frontmatter';
+import type {SkillTrigger} from '@/types/skills';
+import {parseYamlObject, splitFrontmatter} from '@/utils/frontmatter';
 import {logError} from '@/utils/message-queue';
 
 /**
@@ -224,9 +229,12 @@ export function parseCommandFile(filePath: string): ParsedCustomCommand {
 			};
 		}
 
+		const subscribe = extractSubscribe(split.frontmatter, filePath);
+
 		return {
 			metadata,
 			content: split.body,
+			subscribe,
 		};
 	}
 
@@ -235,6 +243,30 @@ export function parseCommandFile(filePath: string): ParsedCustomCommand {
 		metadata: {},
 		content: fileContent.trim(),
 	};
+}
+
+/**
+ * The hand-rolled frontmatter parser above does not handle list-of-objects,
+ * which `subscribe:` requires. Do a second pass with the real YAML parser
+ * just to lift the `subscribe:` block out cleanly. On any error, log and
+ * skip — `subscribe:` is optional and a malformed block should not block
+ * the command from loading.
+ */
+function extractSubscribe(
+	frontmatter: string,
+	filePath: string,
+): SkillTrigger[] | undefined {
+	const raw = parseYamlObject(frontmatter);
+	if (!raw || raw.subscribe === undefined) return undefined;
+	try {
+		return parseSubscribeBlock(raw.subscribe);
+	} catch (err) {
+		if (err instanceof SubscribeParseError) {
+			logError(`Invalid subscribe block in ${filePath}: ${err.message}`);
+			return undefined;
+		}
+		throw err;
+	}
 }
 
 /**

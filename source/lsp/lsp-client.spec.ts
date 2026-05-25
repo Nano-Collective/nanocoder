@@ -1,4 +1,4 @@
-import {EventEmitter} from 'events';
+import {EventEmitter} from 'node:events';
 import {Writable} from 'stream';
 import test from 'ava';
 import {LSPClient, type LSPServerConfig} from './lsp-client';

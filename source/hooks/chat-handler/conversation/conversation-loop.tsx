@@ -47,7 +47,7 @@ interface ProcessAssistantResponseParams {
 	addToChatQueue: (component: React.ReactNode) => void;
 	currentProvider: string;
 	currentModel: string;
-	developmentMode: 'normal' | 'auto-accept' | 'yolo' | 'plan' | 'scheduler';
+	developmentMode: 'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless';
 	nonInteractiveMode: boolean;
 	conversationStateManager: React.MutableRefObject<ConversationStateManager>;
 	onStartToolConfirmationFlow: (
@@ -620,6 +620,7 @@ export const processAssistantResponse = async (
 					},
 					setLiveComponent,
 					nonInteractiveMode,
+					signal: controller.signal,
 				},
 			);
 

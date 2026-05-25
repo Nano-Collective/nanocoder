@@ -19,6 +19,8 @@
 
 import * as fs from 'node:fs/promises';
 import {parse as parseYaml} from 'yaml';
+import {parseSubscribeBlock} from '@/skills/parse-subscribe';
+import type {SkillTrigger} from '@/types/skills';
 import {splitFrontmatter} from '@/utils/frontmatter';
 import type {
 	ParsedSubagentFile,
@@ -35,7 +37,8 @@ export async function parseSubagentMarkdown(
 	priority?: SubagentLoadPriority,
 ): Promise<ParsedSubagentFile> {
 	const content = await fs.readFile(filePath, 'utf-8');
-	const frontmatter = extractFrontmatter(content);
+	const raw = extractRawFrontmatter(content);
+	const frontmatter = validateAndCastFrontmatter(raw);
 	const systemPrompt = extractBody(content);
 
 	const config: SubagentConfig = {
@@ -49,10 +52,15 @@ export async function parseSubagentMarkdown(
 		systemPrompt,
 	};
 
+	const subscribe: SkillTrigger[] | undefined = parseSubscribeBlock(
+		raw.subscribe,
+	);
+
 	return {
 		config,
 		filePath,
 		priority: priority ?? 1,
+		subscribe,
 	};
 }
 
@@ -123,16 +131,25 @@ export function validateFrontmatter(
 }
 
 /**
- * Extract YAML frontmatter from markdown content.
+ * Extract YAML frontmatter from markdown content and validate the subagent
+ * fields. Returns the typed `SubagentFrontmatter` (unknown fields like
+ * `subscribe:` are dropped).
  */
 export function extractFrontmatter(content: string): SubagentFrontmatter {
+	return validateAndCastFrontmatter(extractRawFrontmatter(content));
+}
+
+/**
+ * Parse YAML frontmatter as an untyped record. Used by callers that need to
+ * read fields outside the subagent schema (e.g. `subscribe:`).
+ */
+function extractRawFrontmatter(content: string): Record<string, unknown> {
 	const {frontmatter: raw, hasFrontmatter} = splitFrontmatter(content);
 	if (!hasFrontmatter) {
 		throw new Error('No YAML frontmatter found in file');
 	}
 
 	let frontmatter: Record<string, unknown>;
-
 	try {
 		frontmatter = parseYaml(raw) as Record<string, unknown>;
 	} catch (error) {
@@ -143,11 +160,16 @@ export function extractFrontmatter(content: string): SubagentFrontmatter {
 		throw new Error('YAML frontmatter must be an object');
 	}
 
+	return frontmatter;
+}
+
+function validateAndCastFrontmatter(
+	frontmatter: Record<string, unknown>,
+): SubagentFrontmatter {
 	const validation = validateFrontmatter(frontmatter);
 	if (!validation.valid) {
 		throw new Error(`Invalid frontmatter: ${validation.error}`);
 	}
-
 	return frontmatter as unknown as SubagentFrontmatter;
 }
 

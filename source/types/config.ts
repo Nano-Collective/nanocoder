@@ -118,11 +118,13 @@ export interface NotificationsConfig {
 		toolConfirmation?: boolean;
 		questionPrompt?: boolean;
 		generationComplete?: boolean;
+		triggeredRunComplete?: boolean;
 	};
 	customMessages?: {
 		toolConfirmation?: {title: string; message: string};
 		questionPrompt?: {title: string; message: string};
 		generationComplete?: {title: string; message: string};
+		triggeredRunComplete?: {title: string; message: string};
 	};
 }
 

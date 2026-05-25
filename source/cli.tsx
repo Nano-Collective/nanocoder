@@ -31,6 +31,33 @@ if (args.includes('--version') || args.includes('-v')) {
 	process.exit(0);
 }
 
+// Handle `nanocoder daemon <sub>` — fast path, only loads the daemon
+// module graph (no Ink, no providers, no tool registry).
+if (args[0] === 'daemon') {
+	const sub = args[1];
+	const valid = [
+		'start',
+		'stop',
+		'status',
+		'logs',
+		'install',
+		'uninstall',
+	] as const;
+	type DaemonSub = (typeof valid)[number];
+	if (!sub || !(valid as readonly string[]).includes(sub)) {
+		console.error(
+			'Usage: nanocoder daemon <start|stop|status|logs|install|uninstall>',
+		);
+		process.exit(sub ? 1 : 0);
+	}
+	const {runDaemonCli} = await import('@/daemon/cli');
+	const result = await runDaemonCli(sub as DaemonSub, {
+		projectRoot: process.cwd(),
+	});
+	if (result.output) console.log(result.output);
+	process.exit(result.exitCode);
+}
+
 // Handle --help/-h flag — fast path, no heavy imports
 if (args.includes('--help') || args.includes('-h')) {
 	console.log(`
@@ -38,6 +65,8 @@ Usage: nanocoder [options] [command]
 
 Commands:
   copilot login [provider-name]   Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.
+  daemon <subcommand>             Manage the per-project skill daemon.
+                                  Subcommands: start, stop, status, logs, install, uninstall.
 
 Options:
   -v, --version       Show version number

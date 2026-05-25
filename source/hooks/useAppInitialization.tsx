@@ -23,7 +23,11 @@ import {TIMEOUT_OUTPUT_FLUSH_MS} from '@/constants';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getLSPManager, type LSPInitResult} from '@/lsp/index';
-import {setToolManagerGetter, setToolRegistryGetter} from '@/message-handler';
+import {
+	setCommandLoaderGetter,
+	setToolManagerGetter,
+	setToolRegistryGetter,
+} from '@/message-handler';
 import {generateKey} from '@/session/key-generator';
 import {SubagentExecutor} from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
@@ -155,25 +159,28 @@ export function useAppInitialization({
 		return client;
 	};
 
-	// Load and cache custom commands
-	const loadCustomCommands = (loader: CustomCommandLoader) => {
-		loader.loadCommands();
+	// Seed the autocomplete cache from a populated CustomCommandLoader. The
+	// unified bootstrap is responsible for calling loader.loadCommands(); this
+	// helper just reads the result back out for the picker UI.
+	const refreshCustomCommandCache = (loader: CustomCommandLoader) => {
 		const customCommands = loader.getAllCommands() || [];
-
-		// Populate command cache for better performance
 		customCommandCache.clear();
 		for (const command of customCommands) {
 			customCommandCache.set(command.name, command);
-			// Also cache aliases for quick lookup
 			if (command.metadata?.aliases) {
 				for (const alias of command.metadata.aliases) {
 					customCommandCache.set(alias, command);
 				}
 			}
 		}
-
-		// Set the count for display in Status component
 		setCustomCommandsCount(customCommands.length);
+	};
+
+	// Back-compat shim: callers that want to force a reload of the on-disk
+	// command files (e.g. /commands refresh).
+	const loadCustomCommands = (loader: CustomCommandLoader) => {
+		loader.loadCommands();
+		refreshCustomCommandCache(loader);
 	};
 
 	// Initialize MCP servers if configured
@@ -415,25 +422,61 @@ export function useAppInitialization({
 			// Leave client as null - the UI will handle this gracefully
 		}
 
+		// Unified skill boot: runs the legacy loaders (CustomCommandLoader,
+		// SubagentLoader, ToolManager.initializeCustomTools), then layers
+		// bundle-form skills on top via the registrar. /skills sees both
+		// forms; the TUI itself does not host event sources (the daemon does)
+		// so subscriptions register but do not fire here.
 		try {
-			loadCustomCommands(newCustomCommandLoader);
-		} catch (error) {
-			addToChatQueue(
-				<ErrorMessage
-					key={generateKey('commands-error')}
-					message={`Failed to load custom commands: ${String(error)}`}
-					hideBox={true}
-				/>,
-			);
-		}
+			const {EventRouter} = await import('@/events/event-router');
+			const {bootSkillPipeline} = await import('@/skills/bootstrap');
+			const {getSubagentLoader} = await import('@/subagents/subagent-loader');
+			const router = new EventRouter({dispatch: () => {}});
+			const subagentLoader = getSubagentLoader();
+			const result = await bootSkillPipeline({
+				projectRoot: process.cwd(),
+				toolManager,
+				commandLoader: newCustomCommandLoader,
+				subagentLoader,
+				eventRouter: router,
+			});
+			refreshCustomCommandCache(newCustomCommandLoader);
 
-		try {
-			const {errors} = toolManager.initializeCustomTools();
-			for (const err of errors) {
+			// The critical-path branch above publishes the agent list *before*
+			// bundle skills register their subagents. Re-publish now so the
+			// `agent` tool's parameter description and the system prompt's
+			// subagent block include bundle agents (e.g. k8s_agent).
+			const refreshedAgents = await subagentLoader.listSubagents();
+			const refreshedSummaries = refreshedAgents.map(a => ({
+				name: a.name,
+				description: a.description,
+			}));
+			setAvailableSubagents(refreshedSummaries);
+			setAvailableAgentNames(refreshedSummaries);
+			for (const err of result.loadErrors) {
+				const where = err.filePath ?? err.bundlePath;
 				addToChatQueue(
 					<ErrorMessage
-						key={generateKey('custom-tool-error')}
-						message={`Custom tool error (${err.file}): ${err.error}`}
+						key={generateKey('skill-load-error')}
+						message={`Skill load error (${where}): ${err.message}`}
+						hideBox={true}
+					/>,
+				);
+			}
+			for (const c of result.registration.collisions) {
+				addToChatQueue(
+					<ErrorMessage
+						key={generateKey('skill-collision')}
+						message={`Skill collision (${c.skill} ${c.kind}:${c.name}): ${c.message}`}
+						hideBox={true}
+					/>,
+				);
+			}
+			for (const warning of result.deprecations) {
+				addToChatQueue(
+					<ErrorMessage
+						key={generateKey('skill-deprecation')}
+						message={warning}
 						hideBox={true}
 					/>,
 				);
@@ -441,8 +484,8 @@ export function useAppInitialization({
 		} catch (error) {
 			addToChatQueue(
 				<ErrorMessage
-					key={generateKey('custom-tools-error')}
-					message={`Failed to load custom tools: ${String(error)}`}
+					key={generateKey('skill-init-error')}
+					message={`Failed to load skill bundles: ${String(error)}`}
 					hideBox={true}
 				/>,
 			);
@@ -478,6 +521,10 @@ export function useAppInitialization({
 
 			// Set up the tool manager getter for commands that need it
 			setToolManagerGetter(() => newToolManager);
+
+			// Set up the command loader getter so /commands and friends
+			// read from the same instance the bootstrap populates.
+			setCommandLoaderGetter(() => newCustomCommandLoader);
 
 			commandRegistry.registerLazy(lazyCommands);
 

@@ -59,4 +59,9 @@ export interface LoadedCustomTool {
 	body: string;
 	filePath: string;
 	source: 'personal' | 'project';
+	/**
+	 * Event subscriptions declared in the file's frontmatter, if any.
+	 * Carried through the loader so the skill registrar can wire them up.
+	 */
+	subscribe?: import('@/types/skills').SkillTrigger[];
 }

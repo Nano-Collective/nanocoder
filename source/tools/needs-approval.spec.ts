@@ -280,19 +280,21 @@ test('lsp_get_diagnostics never requires approval in plan mode', async t => {
 });
 
 // ============================================================================
-// SCHEDULER MODE: All tools auto-execute
+// HEADLESS MODE: All tools auto-execute. Headless is the daemon-only mode
+// used for triggered skill runs (file.changed, schedule.cron); it has the
+// same approval posture as the legacy `scheduler` mode it superseded.
 // ============================================================================
 
-test('execute_bash does NOT require approval in scheduler mode', async t => {
-	setCurrentMode('scheduler');
+test('execute_bash does NOT require approval in headless mode', async t => {
+	setCurrentMode('headless');
 	const needsApproval = await evaluateNeedsApproval(executeBashTool, {
 		command: 'ls',
 	});
 	t.false(needsApproval);
 });
 
-test('write_file does NOT require approval in scheduler mode', async t => {
-	setCurrentMode('scheduler');
+test('write_file does NOT require approval in headless mode', async t => {
+	setCurrentMode('headless');
 	const needsApproval = await evaluateNeedsApproval(writeFileTool, {
 		path: 'test.txt',
 		content: 'test',
@@ -300,8 +302,8 @@ test('write_file does NOT require approval in scheduler mode', async t => {
 	t.false(needsApproval);
 });
 
-test('string_replace does NOT require approval in scheduler mode', async t => {
-	setCurrentMode('scheduler');
+test('string_replace does NOT require approval in headless mode', async t => {
+	setCurrentMode('headless');
 	const needsApproval = await evaluateNeedsApproval(stringReplaceTool, {
 		path: 'test.txt',
 		old_str: 'old',
@@ -310,16 +312,16 @@ test('string_replace does NOT require approval in scheduler mode', async t => {
 	t.false(needsApproval);
 });
 
-test('delete_file does NOT require approval in scheduler mode', async t => {
-	setCurrentMode('scheduler');
+test('delete_file does NOT require approval in headless mode', async t => {
+	setCurrentMode('headless');
 	const needsApproval = await evaluateNeedsApproval(deleteFileTool, {
 		path: 'test.txt',
 	});
 	t.false(needsApproval);
 });
 
-test('copy_file does NOT require approval in scheduler mode', async t => {
-	setCurrentMode('scheduler');
+test('copy_file does NOT require approval in headless mode', async t => {
+	setCurrentMode('headless');
 	const needsApproval = await evaluateNeedsApproval(copyFileTool, {
 		source: 'a.txt',
 		destination: 'b.txt',
@@ -327,8 +329,8 @@ test('copy_file does NOT require approval in scheduler mode', async t => {
 	t.false(needsApproval);
 });
 
-test('move_file does NOT require approval in scheduler mode', async t => {
-	setCurrentMode('scheduler');
+test('move_file does NOT require approval in headless mode', async t => {
+	setCurrentMode('headless');
 	const needsApproval = await evaluateNeedsApproval(moveFileTool, {
 		source: 'a.txt',
 		destination: 'b.txt',

@@ -705,6 +705,112 @@ test('executeToolsDirectly - compact mode always expands task tools', async t =>
 	t.is(liveTaskUpdateCount, 4, 'Task tools should trigger live task updates');
 });
 
+// ============================================================================
+// Agent batch signal threading
+// (regression: parent's abort signal must reach running subagents)
+// ============================================================================
+
+test.serial(
+	'executeToolsDirectly - threads abort signal into subagent executor',
+	async t => {
+		const {setAgentToolExecutor} = await import('@/tools/agent-tool');
+
+		let received: AbortSignal | undefined;
+		setAgentToolExecutor({
+			execute: async (_task: unknown, signal?: AbortSignal) => {
+				received = signal;
+				return {
+					subagentName: 'fake',
+					output: 'ok',
+					success: true,
+					executionTimeMs: 1,
+				};
+			},
+		} as never);
+
+		const toolCalls: ToolCall[] = [
+			{
+				id: 'call_agent_1',
+				function: {
+					name: 'agent',
+					arguments: JSON.stringify({
+						subagent_type: 'fake',
+						description: 'test',
+					}),
+				},
+			},
+		];
+
+		const controller = new AbortController();
+		await executeToolsDirectly(
+			toolCalls,
+			createMockToolManager() as any,
+			createMockConversationStateManager() as any,
+			() => {},
+			{compactDisplay: true, signal: controller.signal},
+		);
+
+		t.is(received, controller.signal);
+	},
+);
+
+test.serial(
+	'executeToolsDirectly - aborted signal surfaces as agent error result',
+	async t => {
+		const {setAgentToolExecutor} = await import('@/tools/agent-tool');
+
+		setAgentToolExecutor({
+			execute: async (_task: unknown, signal?: AbortSignal) => {
+				if (signal?.aborted) {
+					return {
+						subagentName: 'fake',
+						output: '',
+						success: false,
+						error: 'Aborted',
+						executionTimeMs: 1,
+					};
+				}
+				return {
+					subagentName: 'fake',
+					output: 'ok',
+					success: true,
+					executionTimeMs: 1,
+				};
+			},
+		} as never);
+
+		const controller = new AbortController();
+		controller.abort();
+
+		const toolCalls: ToolCall[] = [
+			{
+				id: 'call_agent_2',
+				function: {
+					name: 'agent',
+					arguments: JSON.stringify({
+						subagent_type: 'fake',
+						description: 'test',
+					}),
+				},
+			},
+		];
+
+		const results = await executeToolsDirectly(
+			toolCalls,
+			createMockToolManager() as any,
+			createMockConversationStateManager() as any,
+			() => {},
+			{compactDisplay: true, signal: controller.signal},
+		);
+
+		t.is(results.length, 1);
+		t.true(
+			results[0].content.includes('Aborted'),
+			`expected 'Aborted' in content, got: ${results[0].content}`,
+		);
+	},
+);
+
 test('executeToolsDirectly - compact mode still displays errors in full', async t => {
 	const toolCalls: ToolCall[] = [
 		{id: 'call_1', function: {name: 'failing_tool', arguments: '{}'}},

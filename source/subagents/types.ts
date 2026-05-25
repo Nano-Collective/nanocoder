@@ -26,6 +26,12 @@ export interface SubagentConfig {
 	disallowedTools?: string[];
 	/** System prompt / instructions for the subagent */
 	systemPrompt: string;
+	/**
+	 * Name of the skill that owns this subagent, if any. Set by the skill
+	 * registrar so the executor can include the bundle's sibling tools in
+	 * the subagent's effective tool list, even when those tools are scoped.
+	 */
+	ownerSkill?: string;
 }
 
 /**
@@ -108,6 +114,11 @@ export interface SubagentSource {
 export interface SubagentConfigWithSource extends SubagentConfig {
 	/** Source information for this config */
 	source: SubagentSource;
+	/**
+	 * Event subscriptions declared in the file's frontmatter, if any.
+	 * Target is implicit (this subagent). Resolved by the skill registrar.
+	 */
+	subscribe?: import('@/types/skills').SkillTrigger[];
 }
 
 /**
@@ -141,4 +152,10 @@ export interface ParsedSubagentFile {
 	filePath: string;
 	/** Priority level */
 	priority: SubagentLoadPriority;
+	/**
+	 * Event subscriptions declared in the file's frontmatter, if any.
+	 * Target is implicit (the subagent itself) and resolved by the skill
+	 * registrar.
+	 */
+	subscribe?: import('@/types/skills').SkillTrigger[];
 }

@@ -217,3 +217,50 @@ test('CheckpointListDisplay handles zero size', t => {
 	const output = lastFrame() || '';
 	t.true(output.includes('test'));
 });
+
+test('CheckpointListDisplay shows trigger reason for trigger checkpoints', t => {
+	const checkpoints = [
+		createMockCheckpoint('trigger-cp', {
+			metadata: {
+				name: 'trigger-cp',
+				timestamp: new Date().toISOString(),
+				messageCount: 0,
+				filesChanged: [],
+				provider: {
+					name: 'trigger',
+					model: 'trigger:file.changed:agent:docs-agent',
+				},
+				description: 'Empty conversation',
+			},
+		}),
+	];
+	const {lastFrame} = renderWithTheme(
+		<CheckpointListDisplay checkpoints={checkpoints} />,
+	);
+
+	const output = lastFrame() || '';
+	t.true(output.includes('trigger-cp'));
+	t.regex(output, /↳ trigger:file\.changed:agent:docs-agent/);
+});
+
+test('CheckpointListDisplay does NOT show trigger reason for user checkpoints', t => {
+	const checkpoints = [
+		createMockCheckpoint('user-cp', {
+			metadata: {
+				name: 'user-cp',
+				timestamp: new Date().toISOString(),
+				messageCount: 5,
+				filesChanged: ['a.ts'],
+				provider: {name: 'OpenAI', model: 'gpt-4'},
+				description: 'Manual checkpoint',
+			},
+		}),
+	];
+	const {lastFrame} = renderWithTheme(
+		<CheckpointListDisplay checkpoints={checkpoints} />,
+	);
+
+	const output = lastFrame() || '';
+	t.true(output.includes('user-cp'));
+	t.notRegex(output, /↳ trigger/);
+});

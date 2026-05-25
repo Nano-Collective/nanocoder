@@ -1,3 +1,4 @@
+import type {CustomCommandLoader} from '@/custom-commands/loader';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {ToolCall, ToolHandler, ToolResult} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
@@ -8,6 +9,11 @@ let toolRegistryGetter: (() => Record<string, ToolHandler>) | null = null;
 
 // This will be set by the App
 let toolManagerGetter: (() => ToolManager | null) | null = null;
+
+// Set by the init paths so slash commands can reach the already-populated
+// CustomCommandLoader (the one bundle skills also registered into) instead
+// of spinning up a fresh instance that only knows about flat .nanocoder/commands/.
+let commandLoaderGetter: (() => CustomCommandLoader | null) | null = null;
 
 export function setToolRegistryGetter(
 	getter: () => Record<string, ToolHandler>,
@@ -21,6 +27,16 @@ export function setToolManagerGetter(getter: () => ToolManager | null) {
 
 export function getToolManager(): ToolManager | null {
 	return toolManagerGetter ? toolManagerGetter() : null;
+}
+
+export function setCommandLoaderGetter(
+	getter: () => CustomCommandLoader | null,
+) {
+	commandLoaderGetter = getter;
+}
+
+export function getCommandLoader(): CustomCommandLoader | null {
+	return commandLoaderGetter ? commandLoaderGetter() : null;
 }
 
 export async function processToolUse(toolCall: ToolCall): Promise<ToolResult> {

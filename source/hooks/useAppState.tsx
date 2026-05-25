@@ -34,7 +34,6 @@ export type ActiveMode =
 	| 'mcpWizard'
 	| 'explorer'
 	| 'ideSelection'
-	| 'scheduler'
 	| 'checkpointLoad'
 	| 'sessionSelector'
 	| 'tune'
@@ -317,7 +316,6 @@ export function useAppState(
 		isCheckpointLoadMode: activeMode === 'checkpointLoad',
 		isExplorerMode: activeMode === 'explorer',
 		isIdeSelectionMode: activeMode === 'ideSelection',
-		isSchedulerMode: activeMode === 'scheduler',
 		isSessionSelectorMode: activeMode === 'sessionSelector',
 		isTuneActive: activeMode === 'tune',
 

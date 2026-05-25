@@ -25,6 +25,15 @@ import type {
 } from '@/types/index';
 import {getShutdownManager} from '@/utils/shutdown';
 
+/**
+ * Filter knob for tool access methods. Default behavior hides scoped
+ * skill tools; pass `forSkill` to opt back in for tools owned by that
+ * skill (typically by its own subagent).
+ */
+export interface ToolVisibilityOptions {
+	forSkill?: string;
+}
+
 // Tools to exclude per development mode
 const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 	normal: [],
@@ -53,7 +62,7 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 		'git_stash',
 		'git_reset',
 	],
-	scheduler: ['ask_user', 'agent'],
+	headless: ['ask_user', 'agent'],
 };
 
 /**
@@ -70,6 +79,7 @@ export class ToolManager {
 			readOnly: boolean;
 			source: 'personal' | 'project';
 			filePath: string;
+			subscribe?: import('@/types/skills').SkillTrigger[];
 		}
 	>();
 
@@ -146,6 +156,7 @@ export class ToolManager {
 				readOnly: t.metadata.readOnly,
 				source: t.source,
 				filePath: t.filePath,
+				subscribe: t.subscribe,
 			});
 			loaded.push(t.metadata.name);
 		}
@@ -185,11 +196,11 @@ export class ToolManager {
 
 			// Custom tools follow the same posture as built-ins but with policy
 			// applied per-tool from their approval/readOnly metadata.
-			if (developmentMode === 'plan' || developmentMode === 'scheduler') {
+			if (developmentMode === 'plan' || developmentMode === 'headless') {
 				names = names.filter(n => {
 					const meta = this.customTools.get(n);
 					if (!meta) return true;
-					if (developmentMode === 'scheduler') {
+					if (developmentMode === 'headless') {
 						return meta.approval === 'never';
 					}
 					// plan mode: only read-only tools with no approval are safe
@@ -244,24 +255,59 @@ export class ToolManager {
 	// Tool access — delegates to ToolRegistry
 	// =========================================================================
 
-	getAllTools(): Record<string, AISDKCoreTool> {
-		return this.registry.getNativeTools();
+	getAllTools(opts?: ToolVisibilityOptions): Record<string, AISDKCoreTool> {
+		return this.applyVisibility(this.registry.getNativeTools(), opts);
 	}
 
-	getAllToolsWithoutExecute(): Record<string, AISDKCoreTool> {
-		return this.registry.getNativeToolsWithoutExecute();
+	getAllToolsWithoutExecute(
+		opts?: ToolVisibilityOptions,
+	): Record<string, AISDKCoreTool> {
+		return this.applyVisibility(
+			this.registry.getNativeToolsWithoutExecute(),
+			opts,
+		);
 	}
 
-	getFilteredTools(allowedToolNames: string[]): Record<string, AISDKCoreTool> {
-		const all = this.registry.getNativeTools();
+	getFilteredTools(
+		allowedToolNames: string[],
+		opts?: ToolVisibilityOptions,
+	): Record<string, AISDKCoreTool> {
+		const all = this.applyVisibility(this.registry.getNativeTools(), opts);
 		return this.filterByNames(all, allowedToolNames);
 	}
 
 	getFilteredToolsWithoutExecute(
 		allowedToolNames: string[],
+		opts?: ToolVisibilityOptions,
 	): Record<string, AISDKCoreTool> {
-		const all = this.registry.getNativeToolsWithoutExecute();
+		const all = this.applyVisibility(
+			this.registry.getNativeToolsWithoutExecute(),
+			opts,
+		);
 		return this.filterByNames(all, allowedToolNames);
+	}
+
+	/**
+	 * Drop scoped tools unless the caller opts in by passing the owning
+	 * skill's name. Tools without `scoped` set (built-ins, MCP, custom
+	 * tools, single-file skill tools) pass through untouched.
+	 */
+	private applyVisibility(
+		tools: Record<string, AISDKCoreTool>,
+		opts?: ToolVisibilityOptions,
+	): Record<string, AISDKCoreTool> {
+		const result: Record<string, AISDKCoreTool> = {};
+		for (const [name, tool] of Object.entries(tools)) {
+			const entry = this.registry.getEntry(name);
+			if (entry?.scoped) {
+				if (entry.ownerSkill && entry.ownerSkill === opts?.forSkill) {
+					result[name] = tool;
+				}
+				continue;
+			}
+			result[name] = tool;
+		}
+		return result;
 	}
 
 	private filterByNames(
@@ -306,6 +352,34 @@ export class ToolManager {
 		return this.registry.hasTool(toolName);
 	}
 
+	/**
+	 * Register a skill-provided tool. Wraps the registry call so the
+	 * registrar doesn't have to reach through `ToolManager` into
+	 * `ToolRegistry`. The entry's `ownerSkill` tag is preserved.
+	 */
+	registerSkillTool(entry: ToolEntry): void {
+		this.registry.register(entry);
+	}
+
+	/**
+	 * Unregister a previously-registered skill-provided tool. Returns true
+	 * if the tool was found and removed.
+	 */
+	unregisterSkillTool(toolName: string): boolean {
+		if (!this.registry.hasTool(toolName)) return false;
+		this.registry.unregister(toolName);
+		return true;
+	}
+
+	/**
+	 * Return the tool entry's `ownerSkill` tag, if any. Used by callers
+	 * (e.g. `/tools`, scoped-visibility filters) to attribute a tool back
+	 * to the skill that registered it.
+	 */
+	getOwnerSkill(toolName: string): string | undefined {
+		return this.registry.getEntry(toolName)?.ownerSkill;
+	}
+
 	isCustomTool(toolName: string): boolean {
 		return this.customTools.has(toolName);
 	}
@@ -316,6 +390,7 @@ export class ToolManager {
 				readOnly: boolean;
 				source: 'personal' | 'project';
 				filePath: string;
+				subscribe?: import('@/types/skills').SkillTrigger[];
 		  }
 		| undefined {
 		return this.customTools.get(toolName);
