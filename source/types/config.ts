@@ -207,6 +207,9 @@ export interface AppConfig {
 		retentionDays?: number;
 		directory?: string;
 	};
+
+	// Local model workflow (Router + Specialist)
+	localModelWorkflow?: LocalModelWorkflowConfig;
 }
 
 // MCP Server configuration with source tracking
@@ -378,6 +381,24 @@ export const TUNE_DEFAULTS: TuneConfig = {
 	toolProfile: 'full',
 	aggressiveCompact: false,
 };
+
+/** Configuration for the Router + Specialist local model workflow. */
+export interface LocalModelWorkflowConfig {
+	/** Explicitly enable/disable the local model workflow.
+	 *  When undefined, activates automatically for local providers. */
+	enabled?: boolean;
+	/** When true (default), auto-activate for detected local providers. */
+	activateForLocalProviders?: boolean;
+	/** Router configuration. */
+	router?: {
+		/** Model to use for intent classification (small fast model recommended). */
+		model?: string;
+		/** Timeout in ms for the classification call. Default: 2000. */
+		timeout?: number;
+		/** Default category when nothing matches. Default: 'chat'. */
+		defaultCategory?: string;
+	};
+}
 
 export interface UserPreferences {
 	lastProvider?: string;

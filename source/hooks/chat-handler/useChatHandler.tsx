@@ -2,12 +2,19 @@ import React from 'react';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
 import {ConversationStateManager} from '@/app/utils/conversation-state';
 import UserMessage from '@/components/user-message';
-import {getAppConfig} from '@/config/index';
+import {getAppConfig, getLocalModelWorkflowConfig} from '@/config/index';
 import {CommandIntegration} from '@/custom-commands/command-integration';
 import {promptHistory} from '@/prompt-history';
+import {
+	CATEGORY_TOOL_SETS,
+	classifyMessage,
+	type SpecialistCategory,
+	shouldActivateRouter,
+} from '@/router';
 import {generateKey} from '@/session/key-generator';
 import {getTuneToolMode} from '@/types/config';
 import type {Message} from '@/types/core';
+import {getLogger} from '@/utils/logging';
 import {MessageBuilder} from '@/utils/message-builder';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 import {assemblePrompt} from '@/utils/prompt-processor';
@@ -22,13 +29,33 @@ export function getBaseSystemPrompt(
 	toolManager: NonNullable<UseChatHandlerProps['toolManager']>,
 	tune: UseChatHandlerProps['tune'],
 	toolsDisabled: boolean,
+	routerOverrideTools?: string[],
 ): string {
 	const systemPromptOverride = getAppConfig().systemPrompt;
+
+	// When the router has classified the message into a specialist
+	// category, use the filtered tool list instead of the full set.
+	const effectiveToolNames =
+		routerOverrideTools ??
+		toolManager.getAvailableToolNames(tune, developmentMode);
+
 	if (developmentMode === 'headless') {
 		return buildSystemPrompt(
 			developmentMode,
 			tune,
-			toolManager.getAvailableToolNames(tune, developmentMode),
+			effectiveToolNames,
+			toolsDisabled,
+			systemPromptOverride,
+		);
+	}
+
+	// When the router provides an override, always rebuild — the cached
+	// prompt was built with the full tool set and would ignore the filter.
+	if (routerOverrideTools !== undefined) {
+		return buildSystemPrompt(
+			developmentMode ?? 'normal',
+			tune,
+			effectiveToolNames,
 			toolsDisabled,
 			systemPromptOverride,
 		);
@@ -39,7 +66,7 @@ export function getBaseSystemPrompt(
 		buildSystemPrompt(
 			developmentMode ?? 'normal',
 			tune,
-			toolManager.getAvailableToolNames(tune, developmentMode ?? 'normal'),
+			effectiveToolNames,
 			toolsDisabled,
 			systemPromptOverride,
 		)
@@ -147,6 +174,12 @@ export function useChatHandler({
 	// Track when the current conversation started for elapsed time display
 	const conversationStartTimeRef = React.useRef<number>(Date.now());
 
+	// Track the previous specialist category for sticky routing.
+	// Resets when messages are cleared.
+	const previousCategoryRef = React.useRef<SpecialistCategory | undefined>(
+		undefined,
+	);
+
 	// Memoize CommandIntegration to avoid recreating on every message
 	const commandIntegration = React.useMemo(() => {
 		if (!toolManager || !customCommandLoader) return null;
@@ -185,12 +218,17 @@ export function useChatHandler({
 	React.useEffect(() => {
 		if (messages.length === 0) {
 			conversationStateManager.current.reset();
+			previousCategoryRef.current = undefined;
 		}
 	}, [messages.length]);
 
 	// Wrapper for processAssistantResponse that includes error handling
 	const processAssistantResponseWithErrorHandling = React.useCallback(
-		async (systemMessage: Message, msgs: Message[]) => {
+		async (
+			systemMessage: Message,
+			msgs: Message[],
+			routerOverrideTools?: string[],
+		) => {
 			if (!client) return;
 
 			try {
@@ -222,6 +260,7 @@ export function useChatHandler({
 					onSetLiveTaskList,
 					setLiveComponent,
 					tune,
+					routerOverrideTools,
 				});
 			} catch (error) {
 				displayError(error, 'chat-error');
@@ -262,6 +301,65 @@ export function useChatHandler({
 
 		// Record conversation start time for elapsed time display
 		conversationStartTimeRef.current = Date.now();
+
+		// ── Router classification for local models ────────────
+		// When a local provider is active, classify the message into a
+		// specialist category and filter the tool set accordingly.
+		let routerOverrideTools: string[] | undefined;
+
+		const workflowConfig = getLocalModelWorkflowConfig();
+		if (
+			shouldActivateRouter(
+				workflowConfig.enabled,
+				workflowConfig.activateForLocalProviders,
+				currentProvider,
+			)
+		) {
+			try {
+				const routerConfig = workflowConfig.router ?? {};
+				// Only use model classification when a dedicated router model
+				// is explicitly configured. Without it, the router would call
+				// the same heavy model for classification — adding latency
+				// for no benefit. Keyword + pre-model tiers are fast and free.
+				const routerModel = routerConfig.model ?? '';
+				const timeout = routerConfig.timeout ?? 2000;
+
+				const result = await classifyMessage(
+					message,
+					previousCategoryRef.current,
+					{
+						model: routerModel,
+						timeout,
+						defaultCategory:
+							(routerConfig.defaultCategory as
+								| SpecialistCategory
+								| undefined) ?? 'chat',
+						categories: {},
+					},
+				);
+
+				previousCategoryRef.current = result.category;
+
+				// 'multi' gets the full tool set
+				const toolSet = CATEGORY_TOOL_SETS[result.category];
+				if (toolSet && toolSet.length > 0) {
+					routerOverrideTools = toolSet;
+				}
+				// 'chat' gets no tools — pure conversation
+				if (result.category === 'chat') {
+					routerOverrideTools = [];
+				}
+
+				getLogger().info('[Router] Classified message', {
+					category: result.category,
+					confidence: result.confidence,
+					snippet: message.slice(0, 80),
+					toolsCount: routerOverrideTools?.length ?? 'all',
+				});
+			} catch {
+				// Router failure is non-fatal — fall through to full tool set
+			}
+		}
 
 		// For display purposes, try to get the placeholder version from history
 		// This preserves the nice placeholder display in chat history
@@ -307,6 +405,7 @@ export function useChatHandler({
 				toolManager,
 				tune,
 				toolsDisabled,
+				routerOverrideTools,
 			);
 
 			// Enhance with relevant commands (progressive disclosure)
@@ -327,6 +426,7 @@ export function useChatHandler({
 			await processAssistantResponseWithErrorHandling(
 				systemMessage,
 				updatedMessages,
+				routerOverrideTools,
 			);
 		} catch (error) {
 			displayError(error, 'chat-error');

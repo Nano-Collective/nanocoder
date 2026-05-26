@@ -19,6 +19,7 @@ import type {
 	Colors,
 	CompressionMode,
 	CompressionStrategy,
+	LocalModelWorkflowConfig,
 	NotificationsConfig,
 	PasteConfig,
 	SystemPromptConfig,
@@ -613,6 +614,15 @@ export function reloadAppConfig(): void {
 // Function to clear the cached app configuration (useful for testing)
 export function clearAppConfig(): void {
 	_appConfig = null;
+}
+
+/**
+ * Get the local model workflow configuration.
+ * Returns a typed object with defaults applied.
+ */
+export function getLocalModelWorkflowConfig(): LocalModelWorkflowConfig {
+	const config = getAppConfig();
+	return config.localModelWorkflow ?? {};
 }
 
 let cachedColors: Colors | null = null;

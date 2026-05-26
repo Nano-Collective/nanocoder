@@ -73,6 +73,10 @@ interface ProcessAssistantResponseParams {
 	// have already happened. The malformed branch increments and recurses;
 	// every other recursion site resets to 0.
 	malformedRetryCount?: number;
+	// Router-filtered tool names. When provided, overrides
+	// toolManager.getAvailableToolNames() so only the specialist's
+	// tool subset is sent to the model.
+	routerOverrideTools?: string[];
 }
 
 // Module-level flag: show XML fallback notice only once per process lifetime.
@@ -136,6 +140,7 @@ export const processAssistantResponse = async (
 		developmentMode,
 		emptyTurnCount = 0,
 		malformedRetryCount = 0,
+		routerOverrideTools,
 	} = params;
 
 	const startTime = conversationStartTime ?? Date.now();
@@ -209,9 +214,13 @@ export const processAssistantResponse = async (
 			: undefined;
 
 	// Get effective tools — ToolManager is the single authority for
-	// availability (mode + profile filtering) and approval policy
+	// availability (mode + profile filtering) and approval policy.
+	// When the router has classified the message into a specialist
+	// category, routerOverrideTools limits the set.
 	const availableNames =
-		toolManager?.getAvailableToolNames(tune, developmentMode) ?? [];
+		routerOverrideTools ??
+		toolManager?.getAvailableToolNames(tune, developmentMode) ??
+		[];
 	const tools = toolManager
 		? toolManager.getEffectiveTools(availableNames, {
 				nonInteractiveAlwaysAllow,
