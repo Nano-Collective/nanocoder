@@ -91,7 +91,7 @@ Nanocoder is the only project in this survey that is **collectively owned, non-p
 
 | Tool | Local models | MCP | Extensibility | Tool calling | Subagents / scheduled |
 |---|---|---|---|---|---|
-| **Nanocoder** | **7 local servers (Ollama, llama.cpp, llama-swap, LM Studio, LocalAI, MLX, vLLM)** | **Client** | **Slash + custom markdown commands, MCP, runtime model tuning** | **Native function calling + XML fallback + JSON fallback (both fallbacks with malformed-output repair)** | **Subagents + cron scheduler** |
+| **Nanocoder** | **7 local servers (Ollama, llama.cpp, llama-swap, LM Studio, LocalAI, MLX, vLLM)** | **Client** | **Slash + custom markdown commands, custom tools, Skills (bundles + flat-file), MCP, LSP, runtime model tuning** | **Native function calling + XML fallback + JSON fallback (both fallbacks with malformed-output repair)** | **Subagents + cron scheduler + event-driven triggers via per-project daemon** |
 | Claude Code | None (cloud only) | Client | Slash commands, Skills, Hooks, Agent SDK | Native | Subagents + Routines (cloud cron) |
 | Codex CLI | Via OpenAI-compatible config | Client | Slash commands, AGENTS.md, Skills, lifecycle hooks | Native | Subagents; no cron |
 | Gemini CLI | Not documented | Client | Custom commands, Extensions, tools, hooks | Native | Subagents; no scheduler |
@@ -100,7 +100,7 @@ Nanocoder is the only project in this survey that is **collectively owned, non-p
 | Crush | Ollama, LM Studio via OpenAI-compatible | Client (stdio / http / sse) | Agent Skills | Native | None built-in |
 | Pi | Ollama, OpenAI-compatible | None (deliberate non-goal) | TypeScript extension API | Native | Explicit non-goal |
 
-Nanocoder is the **only tool in this survey that combines all four** of: deep local-model support, MCP, subagents, and scheduled runs. Claude Code comes closest, but its scheduler is cloud-only and it has no local model story. Codex CLI, Gemini CLI, and OpenCode ship subagents but no local scheduler.
+Nanocoder is the **only tool in this survey that combines all four** of: deep local-model support, MCP, subagents, and scheduled runs. Claude Code comes closest, but its scheduler is cloud-only and it has no local model story. Codex CLI, Gemini CLI, and OpenCode ship subagents but no local scheduler. Nanocoder also goes further on the trigger side: a per-project daemon (`nanocoder daemon start`) owns file-watch and cron sources, so Skills can subscribe to `file.changed` or `schedule.cron` events and run headless without the TUI being open.
 
 ### Workflow features
 
@@ -182,9 +182,11 @@ Nanocoder ships three tool-calling paths: native function calling for modern mod
 
 Aider achieves something analogous with its diff formats. No other tool in this survey ships all three paths plus repair.
 
-### 6. Local scheduler and subagents in the same tool
+### 6. Local scheduler, subagents, and event-driven Skills
 
-A cron-driven scheduler (powered by `croner`) runs agent sessions on a schedule. Subagents delegate focused tasks to isolated contexts. Both are first-class. Among the tools surveyed, only Claude Code ships a comparable scheduler, and it is cloud-only and tied to a paid subscription.
+A cron-driven scheduler (powered by `croner`) runs agent sessions on a schedule. Subagents delegate focused tasks to isolated contexts. **Skills** unify both of the above with file-based extensions: a Skill is either a single `.md` file in `.nanocoder/commands|agents|tools/` or a bundle under `.nanocoder/skills/<name>/` that ships a command, subagent, and scoped tools together. Skills can declare a `subscribe:` block in frontmatter to fire on `file.changed` or `schedule.cron` events.
+
+These triggers are owned by a **per-project daemon** (`nanocoder daemon start`, with launchd plist and systemd user-unit installers shipped in-tree), which runs Skills in a non-interactive `headless` mode independent of the TUI. Among the tools surveyed, only Claude Code ships a comparable scheduler — and it is cloud-only, tied to a paid subscription, and has no event-driven file-watch story.
 
 ### 7. Workflow features usually gated behind paid tools
 
@@ -230,7 +232,7 @@ This is real and worth being clear about.
 
 - **Community size.** OpenCode (~163k stars), Claude Code (~125k), Gemini CLI (~104k), Codex (~84k), Pi (~52k), Aider (~45k), Crush (~24k) all sit above Nanocoder today. Growth and contribution velocity matter more than absolute count, but the gap exists.
 - **Surface breadth.** Claude Code, Codex, and OpenCode ship desktop and / or web surfaces. Nanocoder is TUI plus VS Code plus `--plain`. Enough for most CLI users, not all.
-- **Extension depth.** Pi's TypeScript extension API and Claude Code's Skills / Hooks / Agent SDK go further than Nanocoder's slash-command + MCP combination today.
+- **Extension depth.** Pi's TypeScript extension API is still deeper and more programmable than Nanocoder's file-based Skills + MCP + custom-tools combination. Claude Code's Hooks system (process-level event hooks) also has no direct Nanocoder equivalent; Nanocoder's event story runs through Skill `subscribe:` blocks via the daemon, not arbitrary user-defined shell hooks on the agent lifecycle.
 - **Distribution polish.** Crush's single Go binary is smoother than Node + pnpm. Nanocoder mitigates with Homebrew and Nix Flakes.
 
 Everywhere else, Nanocoder is at parity or ahead.
