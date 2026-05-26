@@ -20,6 +20,8 @@ console.log('\ncustom-tools/end-to-end.spec.ts');
 let projectRoot: string;
 let configDir: string;
 let projectToolsDir: string;
+let prevLcAll: string | undefined;
+let prevLang: string | undefined;
 
 test.before(() => {
 	const root = join(tmpdir(), `nanocoder-custom-tools-e2e-${Date.now()}`);
@@ -29,12 +31,23 @@ test.before(() => {
 	mkdirSync(projectToolsDir, {recursive: true});
 	mkdirSync(join(configDir, 'tools'), {recursive: true});
 	process.env.NANOCODER_CONFIG_DIR = configDir;
+	// CI images often advertise a locale (e.g. en-US.UTF-8) that isn't actually
+	// installed, so bash prints a setlocale warning to stderr on every invocation
+	// and pollutes assertions on exact output. Force a known-present locale.
+	prevLcAll = process.env.LC_ALL;
+	prevLang = process.env.LANG;
+	process.env.LC_ALL = 'C';
+	process.env.LANG = 'C';
 });
 
 test.after.always(() => {
 	delete process.env.NANOCODER_CONFIG_DIR;
 	if (projectRoot)
 		rmSync(join(projectRoot, '..'), {recursive: true, force: true});
+	if (prevLcAll === undefined) delete process.env.LC_ALL;
+	else process.env.LC_ALL = prevLcAll;
+	if (prevLang === undefined) delete process.env.LANG;
+	else process.env.LANG = prevLang;
 });
 
 function writeTool(name: string, contents: string) {

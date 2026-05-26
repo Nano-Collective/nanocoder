@@ -8,14 +8,27 @@ import type {CustomToolMetadata} from '@/types/custom-tools';
 console.log('\ncustom-tools/handler.spec.ts');
 
 let testDir: string;
+let prevLcAll: string | undefined;
+let prevLang: string | undefined;
 
 test.before(() => {
 	testDir = join(tmpdir(), `nanocoder-custom-tools-handler-${Date.now()}`);
 	mkdirSync(testDir, {recursive: true});
+	// CI images often advertise a locale (e.g. en-US.UTF-8) that isn't actually
+	// installed, so bash prints a setlocale warning to stderr on every invocation
+	// and pollutes assertions on exact output. Force a known-present locale.
+	prevLcAll = process.env.LC_ALL;
+	prevLang = process.env.LANG;
+	process.env.LC_ALL = 'C';
+	process.env.LANG = 'C';
 });
 
 test.after.always(() => {
 	if (testDir) rmSync(testDir, {recursive: true, force: true});
+	if (prevLcAll === undefined) delete process.env.LC_ALL;
+	else process.env.LC_ALL = prevLcAll;
+	if (prevLang === undefined) delete process.env.LANG;
+	else process.env.LANG = prevLang;
 });
 
 function meta(extra: Partial<CustomToolMetadata> = {}): CustomToolMetadata {
