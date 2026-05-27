@@ -2,6 +2,9 @@ packages:
   - .
   - plugins/*
 
+overrides:
+  "tmp": "^0.2.6"
+
 allowBuilds:
   '@vscode/vsce-sign': true
   esbuild: true
