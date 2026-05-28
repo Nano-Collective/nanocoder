@@ -6,6 +6,7 @@ import React from 'react';
 
 import ToolMessage from '@/components/tool-message';
 import {
+	EMPTY_FILE_MARKER,
 	FILE_READ_CHUNK_SIZE_LINES,
 	FILE_READ_CHUNKING_HINT_THRESHOLD_LINES,
 	FILE_READ_METADATA_THRESHOLD_LINES,
@@ -98,7 +99,7 @@ const executeReadFile = async (args: {
 		const content = cached.content;
 
 		if (content.length === 0) {
-			return '[file is empty]';
+			return EMPTY_FILE_MARKER;
 		}
 
 		const lines = cached.lines;

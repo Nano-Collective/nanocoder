@@ -4,6 +4,7 @@ import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes';
+import {EMPTY_FILE_MARKER} from '../constants';
 import {ThemeContext} from '../hooks/useTheme';
 import {readFileTool} from './read-file';
 
@@ -658,11 +659,64 @@ test.serial('read_file returns empty marker for empty files', async t => {
 			{toolCallId: 'test', messages: []},
 		);
 
-		t.is(result, '[file is empty]');
+		t.is(result, EMPTY_FILE_MARKER);
 	} finally {
 		rmSync(testDir, {recursive: true, force: true});
 	}
 });
+
+test.serial(
+	'read_file returns empty marker for empty files with line ranges',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-read-empty-ranges-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, 'empty.ts'), '');
+
+			const result = await readFileTool.tool.execute!(
+				{
+					path: join(testDir, 'empty.ts'),
+					start_line: 1,
+					end_line: 10,
+				},
+				{toolCallId: 'test', messages: []},
+			);
+
+			t.is(result, EMPTY_FILE_MARKER);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'read_file metadata_only returns file info for empty files without short-circuiting',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-read-empty-metadata-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, 'empty.ts'), '');
+
+			const result = (await readFileTool.tool.execute!(
+				{
+					path: join(testDir, 'empty.ts'),
+					metadata_only: true,
+				},
+				{toolCallId: 'test', messages: []},
+			)) as string;
+
+			t.true(result.includes('File Information for'));
+			t.true(result.includes('Size: 0 bytes'));
+			t.false(result.includes(EMPTY_FILE_MARKER));
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
 
 // ============================================================================
 // Edge Cases and Stress Tests
