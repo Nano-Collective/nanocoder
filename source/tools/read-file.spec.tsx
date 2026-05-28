@@ -643,7 +643,7 @@ test.serial('read_file throws error for nonexistent file', async t => {
 	);
 });
 
-test.serial('read_file throws error for empty files', async t => {
+test.serial('read_file returns empty marker for empty files', async t => {
 	t.timeout(10000);
 	const testDir = join(process.cwd(), 'test-read-empty-temp');
 
@@ -651,17 +651,14 @@ test.serial('read_file throws error for empty files', async t => {
 		mkdirSync(testDir, {recursive: true});
 		writeFileSync(join(testDir, 'empty.ts'), '');
 
-		await t.throwsAsync(
-			async () => {
-				await readFileTool.tool.execute!(
-					{
-						path: join(testDir, 'empty.ts'),
-					},
-					{toolCallId: 'test', messages: []},
-				);
+		const result = await readFileTool.tool.execute!(
+			{
+				path: join(testDir, 'empty.ts'),
 			},
-			{message: /exists but is empty/},
+			{toolCallId: 'test', messages: []},
 		);
+
+		t.is(result, '[file is empty]');
 	} finally {
 		rmSync(testDir, {recursive: true, force: true});
 	}

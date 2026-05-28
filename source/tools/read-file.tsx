@@ -97,9 +97,8 @@ const executeReadFile = async (args: {
 		const cached = await getCachedFileContent(absPath);
 		const content = cached.content;
 
-		// Check if file is empty (0 tokens)
 		if (content.length === 0) {
-			throw new Error(`File "${args.path}" exists but is empty (0 tokens)`);
+			return '[file is empty]';
 		}
 
 		const lines = cached.lines;
@@ -171,7 +170,6 @@ const executeReadFile = async (args: {
 			throw new Error(`File "${args.path}" does not exist`);
 		}
 
-		// Re-throw other errors (including our empty file error)
 		throw error;
 	}
 };
