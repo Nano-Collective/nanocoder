@@ -718,6 +718,34 @@ test.serial(
 	},
 );
 
+test.serial(
+	'read_file handles file containing only newline (non-empty)',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-read-newline-only-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			// File with single newline character - has content (length === 1)
+			writeFileSync(join(testDir, 'newline.ts'), '\n');
+
+			const result = await readFileTool.tool.execute!(
+				{
+					path: join(testDir, 'newline.ts'),
+				},
+				{toolCallId: 'test', messages: []},
+			);
+
+			// Should NOT return empty marker (content.length === 1, not 0)
+			// File splits into 2 lines ['', ''] and joining returns '\n'
+			t.not(result, EMPTY_FILE_MARKER);
+			t.is(result, '\n');
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
 // ============================================================================
 // Edge Cases and Stress Tests
 // ============================================================================
