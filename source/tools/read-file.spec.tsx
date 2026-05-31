@@ -4,7 +4,7 @@ import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes';
-import {EMPTY_FILE_MARKER} from '../constants';
+import {EMPTY_CONTENT_MARKER} from '../constants';
 import {ThemeContext} from '../hooks/useTheme';
 import {readFileTool} from './read-file';
 
@@ -659,7 +659,7 @@ test.serial('read_file returns empty marker for empty files', async t => {
 			{toolCallId: 'test', messages: []},
 		);
 
-		t.is(result, EMPTY_FILE_MARKER);
+		t.is(result, EMPTY_CONTENT_MARKER);
 	} finally {
 		rmSync(testDir, {recursive: true, force: true});
 	}
@@ -684,7 +684,7 @@ test.serial(
 				{toolCallId: 'test', messages: []},
 			);
 
-			t.is(result, EMPTY_FILE_MARKER);
+			t.is(result, EMPTY_CONTENT_MARKER);
 		} finally {
 			rmSync(testDir, {recursive: true, force: true});
 		}
@@ -711,7 +711,7 @@ test.serial(
 
 			t.true(result.includes('File Information for'));
 			t.true(result.includes('Size: 0 bytes'));
-			t.false(result.includes(EMPTY_FILE_MARKER));
+			t.false(result.includes(EMPTY_CONTENT_MARKER));
 		} finally {
 			rmSync(testDir, {recursive: true, force: true});
 		}
@@ -738,7 +738,7 @@ test.serial(
 
 			// Should NOT return empty marker (content.length === 1, not 0)
 			// File splits into 2 lines ['', ''] and joining returns '\n'
-			t.not(result, EMPTY_FILE_MARKER);
+			t.not(result, EMPTY_CONTENT_MARKER);
 			t.is(result, '\n');
 		} finally {
 			rmSync(testDir, {recursive: true, force: true});
