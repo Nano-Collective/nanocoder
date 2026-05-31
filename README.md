@@ -1,8 +1,8 @@
 # Nanocoder
 
-A local-first CLI coding agent built by the [Nano Collective](https://nanocollective.org) — a community collective building AI tooling not for profit, but for the community. Everything we build is open, transparent, and driven by the people who use it.
+Built by the [Nano Collective](https://nanocollective.org) — a community collective building AI tooling not for profit, but for the community.
 
-Nanocoder brings the power of agentic coding tools like Claude Code and Gemini CLI to local models or controlled APIs like OpenRouter. Built with privacy and control in mind, it supports multiple AI providers with tool support for file operations and command execution.
+Nanocoder brings agentic coding tools like Claude Code and Gemini CLI to the model of your choice — local models via Ollama, or any OpenAI-compatible API such as OpenRouter, Anthropic, and Google. You decide which provider runs your code and where your data goes. Every tool the collective ships aims to be **privacy-respecting**, **local-first**, and **open for all**: no closed-source features, no paid tiers gating the useful parts.
 
 ![Example](./.github/assets/example-preview.gif)
 
@@ -54,6 +54,12 @@ Full documentation is available online at **[docs.nanocollective.org](https://do
 - **[Commands Reference](docs/features/commands.md)** - Complete list of built-in slash commands
 - **[Keyboard Shortcuts](docs/features/keyboard-shortcuts.md)** - Full shortcut reference
 - **[Community](docs/community.md)** - Contributing, Discord, and how to help
+
+## Why a collective
+
+Nanocoder is built by the Nano Collective rather than a company, and that shapes the tool itself. There are no paid tiers, no telemetry quietly shipping your prompts somewhere, and no roadmap steered by what monetises best — the people building it are the people using it. Building in the open as a collective means the harness stays multi-provider on principle: you are never locked to one vendor's model, and the conventions, tests, and release standards are shared across every Nano Collective project so the work stays legible and contributable.
+
+It is also bigger than one tool. The collective is assembling an open ecosystem of AI tooling — see the [other projects](https://nanocollective.org) — and contributors who show up now help shape what that becomes.
 
 ## Community
 
