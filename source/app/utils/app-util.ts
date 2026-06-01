@@ -258,6 +258,27 @@ async function handleSpecialCommand(
 		commandArgs,
 	} = options;
 
+	// Commands that just switch the app into a mode and complete share the
+	// exact same shape, so dispatch them from a table instead of the switch.
+	const enterModeCommands: Record<string, () => void> = {
+		[SPECIAL_COMMANDS.MODEL]: onEnterModelSelectionMode,
+		[SPECIAL_COMMANDS.PROVIDER]: onEnterProviderSelectionMode,
+		[SPECIAL_COMMANDS.MODEL_DATABASE]: onEnterModelDatabaseMode,
+		[SPECIAL_COMMANDS.SETUP_PROVIDERS]: onEnterConfigWizardMode,
+		[SPECIAL_COMMANDS.SETUP_MCP]: onEnterMcpWizardMode,
+		[SPECIAL_COMMANDS.SETTINGS]: onEnterSettingsMode,
+		[SPECIAL_COMMANDS.EXPLORER]: onEnterExplorerMode,
+		[SPECIAL_COMMANDS.IDE]: options.onEnterIdeSelectionMode,
+		[SPECIAL_COMMANDS.TUNE]: options.onEnterTune,
+	};
+
+	const enterMode = enterModeCommands[commandName];
+	if (enterMode) {
+		enterMode();
+		onCommandComplete?.();
+		return true;
+	}
+
 	switch (commandName) {
 		case SPECIAL_COMMANDS.CLEAR:
 			await onClearMessages();
@@ -272,54 +293,9 @@ async function handleSpecialCommand(
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 			return true;
 
-		case SPECIAL_COMMANDS.MODEL:
-			onEnterModelSelectionMode();
-			onCommandComplete?.();
-			return true;
-
-		case SPECIAL_COMMANDS.PROVIDER:
-			onEnterProviderSelectionMode();
-			onCommandComplete?.();
-			return true;
-
-		case SPECIAL_COMMANDS.MODEL_DATABASE:
-			onEnterModelDatabaseMode();
-			onCommandComplete?.();
-			return true;
-
-		case SPECIAL_COMMANDS.SETUP_PROVIDERS:
-			onEnterConfigWizardMode();
-			onCommandComplete?.();
-			return true;
-
-		case SPECIAL_COMMANDS.SETUP_MCP:
-			onEnterMcpWizardMode();
-			onCommandComplete?.();
-			return true;
-
-		case SPECIAL_COMMANDS.SETTINGS:
-			onEnterSettingsMode();
-			onCommandComplete?.();
-			return true;
-
 		case SPECIAL_COMMANDS.STATUS:
 			onShowStatus();
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
-			return true;
-
-		case SPECIAL_COMMANDS.EXPLORER:
-			onEnterExplorerMode();
-			onCommandComplete?.();
-			return true;
-
-		case SPECIAL_COMMANDS.IDE:
-			options.onEnterIdeSelectionMode();
-			onCommandComplete?.();
-			return true;
-
-		case SPECIAL_COMMANDS.TUNE:
-			options.onEnterTune();
-			onCommandComplete?.();
 			return true;
 
 		case SPECIAL_COMMANDS.RENAME: {

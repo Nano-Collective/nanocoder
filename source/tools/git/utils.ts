@@ -114,11 +114,17 @@ export function isGhAvailable(): boolean {
 // ============================================================================
 
 /**
- * Execute a git command and return the output
+ * Spawn a command, collect stdout, and resolve with the trimmed output.
+ * Rejects with stderr (or an exit-code message) on non-zero exit. `label` is
+ * the human-readable command name used in error messages (e.g. 'Git', 'gh').
  */
-export async function execGit(args: string[]): Promise<string> {
+function execProcess(
+	command: string,
+	args: string[],
+	label: string,
+): Promise<string> {
 	return new Promise((resolve, reject) => {
-		const proc = spawn('git', args);
+		const proc = spawn(command, args);
 		let stdout = '';
 		let stderr = '';
 
@@ -135,48 +141,29 @@ export async function execGit(args: string[]): Promise<string> {
 				resolve(stdout.trimEnd());
 			} else {
 				const errorMessage =
-					stderr.trim() || `Git command failed with exit code ${code}`;
+					stderr.trim() || `${label} command failed with exit code ${code}`;
 				reject(new Error(errorMessage));
 			}
 		});
 
 		proc.on('error', error => {
-			reject(new Error(`Failed to execute git: ${error.message}`));
+			reject(new Error(`Failed to execute ${command}: ${error.message}`));
 		});
 	});
+}
+
+/**
+ * Execute a git command and return the output
+ */
+export async function execGit(args: string[]): Promise<string> {
+	return execProcess('git', args, 'Git');
 }
 
 /**
  * Execute a gh CLI command and return the output
  */
 export async function execGh(args: string[]): Promise<string> {
-	return new Promise((resolve, reject) => {
-		const proc = spawn('gh', args);
-		let stdout = '';
-		let stderr = '';
-
-		proc.stdout.on('data', (data: Buffer) => {
-			stdout += data.toString();
-		});
-
-		proc.stderr.on('data', (data: Buffer) => {
-			stderr += data.toString();
-		});
-
-		proc.on('close', (code: number | null) => {
-			if (code === 0) {
-				resolve(stdout.trimEnd());
-			} else {
-				const errorMessage =
-					stderr.trim() || `gh command failed with exit code ${code}`;
-				reject(new Error(errorMessage));
-			}
-		});
-
-		proc.on('error', error => {
-			reject(new Error(`Failed to execute gh: ${error.message}`));
-		});
-	});
+	return execProcess('gh', args, 'gh');
 }
 
 // ============================================================================
