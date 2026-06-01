@@ -1,6 +1,7 @@
 import {Box, Text, useInput} from 'ink';
 import SelectInput from 'ink-select-input';
 import {useMemo, useState} from 'react';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -167,19 +168,9 @@ function TuneMainMenu({
 					Tune
 				</Text>
 				<Text color={colors.text}> </Text>
-				<SelectInput
+				<StyledSelectInput
 					items={items}
 					onSelect={item => onAction(item.value)}
-					indicatorComponent={({isSelected}) => (
-						<Text color={isSelected ? colors.primary : colors.text}>
-							{isSelected ? '> ' : '  '}
-						</Text>
-					)}
-					itemComponent={({isSelected, label}) => (
-						<Text color={isSelected ? colors.primary : colors.text}>
-							{label}
-						</Text>
-					)}
 				/>
 				<Box marginBottom={1}></Box>
 				<Text color={colors.secondary}>Enter/Esc</Text>
@@ -202,17 +193,9 @@ function TuneMainMenu({
 					Configure runtime behavior for different model capabilities:
 				</Text>
 			</Box>
-			<SelectInput
+			<StyledSelectInput
 				items={items}
 				onSelect={item => onAction(item.value)}
-				indicatorComponent={({isSelected}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>
-						{isSelected ? '> ' : '  '}
-					</Text>
-				)}
-				itemComponent={({isSelected, label}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>{label}</Text>
-				)}
 			/>
 			<Box marginTop={1}>
 				<Text color={colors.secondary}>Enter to select, Esc to cancel</Text>
@@ -306,19 +289,11 @@ function ToolProfilePanel({
 					Enter to apply, Shift+Tab to go back, Esc to cancel
 				</Text>
 			</Box>
-			<SelectInput
+			<StyledSelectInput
 				items={items}
 				initialIndex={initialIndex}
 				onSelect={item => onSelect(item.value as ToolProfile)}
 				onHighlight={item => setHighlighted(item.value as ToolProfile)}
-				indicatorComponent={({isSelected}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>
-						{isSelected ? '> ' : '  '}
-					</Text>
-				)}
-				itemComponent={({isSelected, label}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>{label}</Text>
-				)}
 			/>
 			<Box marginTop={1} flexDirection="column">
 				<Text color={colors.secondary}>
@@ -409,18 +384,10 @@ function PresetPanel({
 					Enter to load preset, Shift+Tab to go back, Esc to cancel
 				</Text>
 			</Box>
-			<SelectInput
+			<StyledSelectInput
 				items={items}
 				onSelect={item => onSelect(TUNE_PRESETS[Number(item.value)]?.config)}
 				onHighlight={item => setHighlighted(Number(item.value))}
-				indicatorComponent={({isSelected}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>
-						{isSelected ? '> ' : '  '}
-					</Text>
-				)}
-				itemComponent={({isSelected, label}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>{label}</Text>
-				)}
 			/>
 			{highlightedPreset && (
 				<Box marginTop={1}>
@@ -637,18 +604,10 @@ function ParametersPanel({
 					Enter to cycle values, Shift+Tab to go back, Esc to cancel
 				</Text>
 			</Box>
-			<SelectInput
+			<StyledSelectInput
 				items={items}
 				onSelect={handleSelect}
 				onHighlight={item => setHighlighted(item.value)}
-				indicatorComponent={({isSelected}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>
-						{isSelected ? '> ' : '  '}
-					</Text>
-				)}
-				itemComponent={({isSelected, label}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>{label}</Text>
-				)}
 			/>
 			{highlightedDef && (
 				<Box marginTop={1}>

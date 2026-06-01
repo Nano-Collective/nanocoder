@@ -3,6 +3,7 @@ import BigText from 'ink-big-text';
 import Gradient from 'ink-gradient';
 import SelectInput from 'ink-select-input';
 import {type ReactNode, useMemo, useState} from 'react';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {
@@ -118,7 +119,7 @@ function SettingsMainMenu({
 					Settings
 				</Text>
 				<Text color={colors.text}> </Text>
-				<SelectInput
+				<StyledSelectInput
 					items={items.map(item => ({
 						label: item.label,
 						value: item.value,
@@ -130,16 +131,6 @@ function SettingsMainMenu({
 							onSelect(item.value as SettingsStep);
 						}
 					}}
-					indicatorComponent={({isSelected}) => (
-						<Text color={isSelected ? colors.primary : colors.text}>
-							{isSelected ? '> ' : '  '}
-						</Text>
-					)}
-					itemComponent={({isSelected, label}) => (
-						<Text color={isSelected ? colors.primary : colors.text}>
-							{label}
-						</Text>
-					)}
 				/>
 				<Box marginBottom={1}></Box>
 				<Text color={colors.secondary}>Enter/Esc</Text>
@@ -159,7 +150,7 @@ function SettingsMainMenu({
 			<Box marginBottom={1}>
 				<Text color={colors.secondary}>Select a setting to configure:</Text>
 			</Box>
-			<SelectInput
+			<StyledSelectInput
 				items={items.map(item => ({
 					label: `${item.label} - ${item.description}`,
 					value: item.value,
@@ -171,14 +162,6 @@ function SettingsMainMenu({
 						onSelect(item.value as SettingsStep);
 					}
 				}}
-				indicatorComponent={({isSelected}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>
-						{isSelected ? '> ' : '  '}
-					</Text>
-				)}
-				itemComponent={({isSelected, label}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>{label}</Text>
-				)}
 			/>
 			<Box marginTop={1}>
 				<Text color={colors.secondary}>Enter to select, Esc to exit</Text>
@@ -891,18 +874,7 @@ function SettingsNotificationsPanel({
 					</Text>
 				</Box>
 			)}
-			<SelectInput
-				items={items}
-				onSelect={handleSelect}
-				indicatorComponent={({isSelected}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>
-						{isSelected ? '> ' : '  '}
-					</Text>
-				)}
-				itemComponent={({isSelected, label}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>{label}</Text>
-				)}
-			/>
+			<StyledSelectInput items={items} onSelect={handleSelect} />
 			{isNarrow && (
 				<Box marginTop={0}>
 					<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
@@ -981,18 +953,7 @@ function SettingsDisplayPanel({
 					</Text>
 				</Box>
 			)}
-			<SelectInput
-				items={items}
-				onSelect={handleSelect}
-				indicatorComponent={({isSelected}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>
-						{isSelected ? '> ' : '  '}
-					</Text>
-				)}
-				itemComponent={({isSelected, label}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>{label}</Text>
-				)}
-			/>
+			<StyledSelectInput items={items} onSelect={handleSelect} />
 			{isNarrow && (
 				<Box marginTop={0}>
 					<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
