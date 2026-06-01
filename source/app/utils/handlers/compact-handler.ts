@@ -1,9 +1,5 @@
 import React from 'react';
-import {
-	ErrorMessage,
-	InfoMessage,
-	SuccessMessage,
-} from '@/components/message-box';
+import {InfoMessage, SuccessMessage} from '@/components/message-box';
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
 import {generateKey} from '@/session/key-generator';
 import {createTokenizer} from '@/tokenization/index';
@@ -18,6 +14,7 @@ import {compressionBackup} from '@/utils/compression-backup';
 import {formatError} from '@/utils/error-formatter';
 import {summariseWithLLM} from '@/utils/llm-summariser';
 import {compressMessages} from '@/utils/message-compression';
+import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 
 /**
@@ -63,20 +60,15 @@ export async function handleCompactCommand(
 			if (restored) {
 				setMessages(restored);
 				onAddToChatQueue(
-					React.createElement(SuccessMessage, {
-						key: generateKey('compact-restore'),
-						message: `Restored ${restored.length} messages from backup.`,
-						hideBox: true,
-					}),
+					successMsg(
+						`Restored ${restored.length} messages from backup.`,
+						'compact-restore',
+					),
 				);
 				compressionBackup.clearBackup();
 			} else {
 				onAddToChatQueue(
-					React.createElement(ErrorMessage, {
-						key: generateKey('compact-restore-error'),
-						message: 'No backup available to restore.',
-						hideBox: true,
-					}),
+					errorMsg('No backup available to restore.', 'compact-restore-error'),
 				);
 			}
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
@@ -84,22 +76,17 @@ export async function handleCompactCommand(
 		} else if (arg === '--auto-on') {
 			setAutoCompactEnabled(true);
 			onAddToChatQueue(
-				React.createElement(SuccessMessage, {
-					key: generateKey('compact-auto-on'),
-					message: 'Auto-compact enabled for this session.',
-					hideBox: true,
-				}),
+				successMsg('Auto-compact enabled for this session.', 'compact-auto-on'),
 			);
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 			return true;
 		} else if (arg === '--auto-off') {
 			setAutoCompactEnabled(false);
 			onAddToChatQueue(
-				React.createElement(SuccessMessage, {
-					key: generateKey('compact-auto-off'),
-					message: 'Auto-compact disabled for this session.',
-					hideBox: true,
-				}),
+				successMsg(
+					'Auto-compact disabled for this session.',
+					'compact-auto-off',
+				),
 			);
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 			return true;
@@ -112,21 +99,19 @@ export async function handleCompactCommand(
 			if (next === 'llm' || next === 'mechanical') {
 				setAutoCompactStrategy(next);
 				onAddToChatQueue(
-					React.createElement(SuccessMessage, {
-						key: generateKey('compact-strategy'),
-						message: `Auto-compact strategy set to ${next} for this session.`,
-						hideBox: true,
-					}),
+					successMsg(
+						`Auto-compact strategy set to ${next} for this session.`,
+						'compact-strategy',
+					),
 				);
 				setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 				return true;
 			}
 			onAddToChatQueue(
-				React.createElement(ErrorMessage, {
-					key: generateKey('compact-strategy-error'),
-					message: 'Strategy must be "llm" or "mechanical".',
-					hideBox: true,
-				}),
+				errorMsg(
+					'Strategy must be "llm" or "mechanical".',
+					'compact-strategy-error',
+				),
 			);
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 			return true;
@@ -138,22 +123,20 @@ export async function handleCompactCommand(
 				thresholdValue > 95
 			) {
 				onAddToChatQueue(
-					React.createElement(ErrorMessage, {
-						key: generateKey('compact-threshold-error'),
-						message: 'Threshold must be a number between 50 and 95.',
-						hideBox: true,
-					}),
+					errorMsg(
+						'Threshold must be a number between 50 and 95.',
+						'compact-threshold-error',
+					),
 				);
 				setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 				return true;
 			}
 			setAutoCompactThreshold(Math.round(thresholdValue));
 			onAddToChatQueue(
-				React.createElement(SuccessMessage, {
-					key: generateKey('compact-threshold'),
-					message: `Auto-compact threshold set to ${Math.round(thresholdValue)}% for this session.`,
-					hideBox: true,
-				}),
+				successMsg(
+					`Auto-compact threshold set to ${Math.round(thresholdValue)}% for this session.`,
+					'compact-threshold',
+				),
 			);
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 			return true;
@@ -162,13 +145,7 @@ export async function handleCompactCommand(
 
 	try {
 		if (messages.length === 0) {
-			onAddToChatQueue(
-				React.createElement(InfoMessage, {
-					key: generateKey('compact-info'),
-					message: 'No messages to compact.',
-					hideBox: true,
-				}),
-			);
+			onAddToChatQueue(infoMsg('No messages to compact.', 'compact-info'));
 			onCommandComplete?.();
 			return true;
 		}
@@ -193,12 +170,10 @@ export async function handleCompactCommand(
 			// new message while compaction is mid-flight, and emit a status
 			// message in the chat so the user knows it landed.
 			onAddToChatQueue(
-				React.createElement(InfoMessage, {
-					key: generateKey('compact-progress'),
-					message:
-						'Compacting context (LLM summary, may take a few seconds)...',
-					hideBox: true,
-				}),
+				infoMsg(
+					'Compacting context (LLM summary, may take a few seconds)...',
+					'compact-progress',
+				),
 			);
 			setIsToolExecuting?.(true);
 			try {
@@ -216,12 +191,10 @@ export async function handleCompactCommand(
 				// LLM either failed, returned empty, or produced a summary larger
 				// than the source. Tell the user why we are about to fall back.
 				onAddToChatQueue(
-					React.createElement(InfoMessage, {
-						key: generateKey('compact-fallback'),
-						message:
-							'LLM summary unavailable - falling back to mechanical compaction.',
-						hideBox: true,
-					}),
+					infoMsg(
+						'LLM summary unavailable - falling back to mechanical compaction.',
+						'compact-fallback',
+					),
 				);
 			}
 		}
@@ -243,22 +216,12 @@ export async function handleCompactCommand(
 
 			if (preview) {
 				onAddToChatQueue(
-					React.createElement(InfoMessage, {
-						key: generateKey('compact-preview'),
-						message: `Preview: ${summaryMessage}`,
-						hideBox: true,
-					}),
+					infoMsg(`Preview: ${summaryMessage}`, 'compact-preview'),
 				);
 			} else {
 				compressionBackup.storeBackup(messages);
 				setMessages(llmResult);
-				onAddToChatQueue(
-					React.createElement(SuccessMessage, {
-						key: generateKey('compact-success'),
-						message: summaryMessage,
-						hideBox: true,
-					}),
-				);
+				onAddToChatQueue(successMsg(summaryMessage, 'compact-success'));
 			}
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 			return true;
@@ -303,11 +266,10 @@ export async function handleCompactCommand(
 		return true;
 	} catch (error) {
 		onAddToChatQueue(
-			React.createElement(ErrorMessage, {
-				key: generateKey('compact-error'),
-				message: `Failed to compact messages: ${formatError(error)}`,
-				hideBox: true,
-			}),
+			errorMsg(
+				`Failed to compact messages: ${formatError(error)}`,
+				'compact-error',
+			),
 		);
 		onCommandComplete?.();
 		return true;

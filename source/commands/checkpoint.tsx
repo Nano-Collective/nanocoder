@@ -1,15 +1,16 @@
 import React from 'react';
 import {CheckpointListDisplay} from '@/components/checkpoint-display';
-import {
-	ErrorMessage,
-	InfoMessage,
-	SuccessMessage,
-	WarningMessage,
-} from '@/components/message-box';
+import {InfoMessage, SuccessMessage} from '@/components/message-box';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {generateKey} from '@/session/key-generator';
 import {Command, Message} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
+import {
+	errorMsg,
+	infoMsg,
+	successMsg,
+	warningMsg,
+} from '@/utils/message-factory';
 import {addToMessageQueue} from '@/utils/message-queue';
 
 // Default checkpoint manager instance (lazy-initialized)
@@ -72,11 +73,10 @@ async function createCheckpoint(
 		const name = args.length > 0 ? args.join(' ') : undefined;
 
 		if (messages.length === 0) {
-			return React.createElement(WarningMessage, {
-				key: generateKey('warning'),
-				message: 'No messages to checkpoint. Start a conversation first.',
-				hideBox: true,
-			});
+			return warningMsg(
+				'No messages to checkpoint. Start a conversation first.',
+				'warning',
+			);
 		}
 
 		const checkpointMetadata = await manager.saveCheckpoint(
@@ -86,9 +86,8 @@ async function createCheckpoint(
 			metadata.model,
 		);
 
-		return React.createElement(SuccessMessage, {
-			key: generateKey('success'),
-			message: `Checkpoint '${checkpointMetadata.name}' created successfully
+		return successMsg(
+			`Checkpoint '${checkpointMetadata.name}' created successfully
   └─ ${checkpointMetadata.messageCount} messages saved
   └─ ${
 		checkpointMetadata.filesChanged.length
@@ -98,14 +97,13 @@ async function createCheckpoint(
   └─ Provider: ${checkpointMetadata.provider.name} (${
 		checkpointMetadata.provider.model
 	})`,
-			hideBox: true,
-		});
+			'success',
+		);
 	} catch (error) {
-		return React.createElement(ErrorMessage, {
-			key: generateKey('error'),
-			message: `Failed to create checkpoint: ${formatError(error)}`,
-			hideBox: true,
-		});
+		return errorMsg(
+			`Failed to create checkpoint: ${formatError(error)}`,
+			'error',
+		);
 	}
 }
 
@@ -122,11 +120,10 @@ async function listCheckpoints(): Promise<React.ReactElement> {
 			checkpoints,
 		});
 	} catch (error) {
-		return React.createElement(ErrorMessage, {
-			key: generateKey('error'),
-			message: `Failed to list checkpoints: ${formatError(error)}`,
-			hideBox: true,
-		});
+		return errorMsg(
+			`Failed to list checkpoints: ${formatError(error)}`,
+			'error',
+		);
 	}
 }
 
@@ -144,11 +141,10 @@ async function loadCheckpoint(
 
 		if (checkpointName) {
 			if (!manager.checkpointExists(checkpointName)) {
-				return React.createElement(ErrorMessage, {
-					key: generateKey('error'),
-					message: `Checkpoint '${checkpointName}' does not exist. Use /checkpoint list to see available checkpoints.`,
-					hideBox: true,
-				});
+				return errorMsg(
+					`Checkpoint '${checkpointName}' does not exist. Use /checkpoint list to see available checkpoints.`,
+					'error',
+				);
 			}
 
 			const checkpointData = await manager.loadCheckpoint(checkpointName, {
@@ -181,12 +177,10 @@ async function loadCheckpoint(
 		const checkpoints = await manager.listCheckpoints();
 
 		if (checkpoints.length === 0) {
-			return React.createElement(InfoMessage, {
-				key: generateKey('info'),
-				message:
-					'No checkpoints available. Create one with /checkpoint create [name]',
-				hideBox: true,
-			});
+			return infoMsg(
+				'No checkpoints available. Create one with /checkpoint create [name]',
+				'info',
+			);
 		}
 
 		const CheckpointSelector = (
@@ -195,11 +189,10 @@ async function loadCheckpoint(
 
 		const handleError = (error: Error) => {
 			addToMessageQueue(
-				React.createElement(ErrorMessage, {
-					key: generateKey('restore-error'),
-					message: `Failed to restore checkpoint: ${error.message}`,
-					hideBox: true,
-				}),
+				errorMsg(
+					`Failed to restore checkpoint: ${error.message}`,
+					'restore-error',
+				),
 			);
 		};
 
@@ -221,13 +214,10 @@ async function loadCheckpoint(
 							} catch (error) {
 								// Show backup error but continue with restore
 								addToMessageQueue(
-									React.createElement(WarningMessage, {
-										key: generateKey('backup-warning'),
-										message: `Warning: Failed to create backup: ${formatError(
-											error,
-										)}`,
-										hideBox: true,
-									}),
+									warningMsg(
+										`Warning: Failed to create backup: ${formatError(error)}`,
+										'backup-warning',
+									),
 								);
 							}
 						}
@@ -239,11 +229,10 @@ async function loadCheckpoint(
 						await manager.restoreFiles(checkpointData);
 
 						addToMessageQueue(
-							React.createElement(SuccessMessage, {
-								key: generateKey('restore-success'),
-								message: `✓ Checkpoint '${selectedName}' restored successfully`,
-								hideBox: true,
-							}),
+							successMsg(
+								`✓ Checkpoint '${selectedName}' restored successfully`,
+								'restore-success',
+							),
 						);
 					} catch (error) {
 						handleError(
@@ -258,11 +247,10 @@ async function loadCheckpoint(
 			onError: handleError,
 		});
 	} catch (error) {
-		return React.createElement(ErrorMessage, {
-			key: generateKey('error'),
-			message: `Failed to load checkpoint: ${formatError(error)}`,
-			hideBox: true,
-		});
+		return errorMsg(
+			`Failed to load checkpoint: ${formatError(error)}`,
+			'error',
+		);
 	}
 }
 
@@ -272,40 +260,35 @@ async function loadCheckpoint(
 async function deleteCheckpoint(args: string[]): Promise<React.ReactElement> {
 	try {
 		if (args.length === 0) {
-			return React.createElement(ErrorMessage, {
-				key: generateKey('error'),
-				message:
-					'Please specify a checkpoint name to delete. Usage: /checkpoint delete <name>',
-				hideBox: true,
-			});
+			return errorMsg(
+				'Please specify a checkpoint name to delete. Usage: /checkpoint delete <name>',
+				'error',
+			);
 		}
 
 		const manager = getDefaultCheckpointManager();
 		const checkpointName = args.join(' ');
 
 		if (!manager.checkpointExists(checkpointName)) {
-			return React.createElement(ErrorMessage, {
-				key: generateKey('error'),
-				message: `Checkpoint '${checkpointName}' does not exist. Use /checkpoint list to see available checkpoints.`,
-				hideBox: true,
-			});
+			return errorMsg(
+				`Checkpoint '${checkpointName}' does not exist. Use /checkpoint list to see available checkpoints.`,
+				'error',
+			);
 		}
 
 		// Actually delete the checkpoint
 		await manager.deleteCheckpoint(checkpointName);
 
 		// Show success with what was deleted
-		return React.createElement(SuccessMessage, {
-			key: generateKey('delete-success'),
-			message: `✓ Checkpoint '${checkpointName}' deleted successfully`,
-			hideBox: true,
-		});
+		return successMsg(
+			`✓ Checkpoint '${checkpointName}' deleted successfully`,
+			'delete-success',
+		);
 	} catch (error) {
-		return React.createElement(ErrorMessage, {
-			key: generateKey('error'),
-			message: `Failed to delete checkpoint: ${formatError(error)}`,
-			hideBox: true,
-		});
+		return errorMsg(
+			`Failed to delete checkpoint: ${formatError(error)}`,
+			'error',
+		);
 	}
 }
 
@@ -350,11 +333,10 @@ export const checkpointCommand: Command = {
 				});
 
 			default:
-				return React.createElement(ErrorMessage, {
-					key: generateKey('error'),
-					message: `Unknown checkpoint subcommand: ${subcommand}. Use /checkpoint help for available commands.`,
-					hideBox: true,
-				});
+				return errorMsg(
+					`Unknown checkpoint subcommand: ${subcommand}. Use /checkpoint help for available commands.`,
+					'error',
+				);
 		}
 	},
 };

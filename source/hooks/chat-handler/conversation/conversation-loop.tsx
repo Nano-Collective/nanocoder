@@ -26,6 +26,7 @@ import type {
 import {performAutoCompact} from '@/utils/auto-compact';
 import {formatElapsedTime, getRandomAdjective} from '@/utils/completion-note';
 import {MessageBuilder} from '@/utils/message-builder';
+import {infoMsg} from '@/utils/message-factory';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {toolNeedsApproval} from '@/utils/tool-needs-approval';
 import {displayCompactCountsSummary} from '@/utils/tool-result-display';
@@ -471,13 +472,7 @@ export const processAssistantResponse = async (
 				autoCompactConfig,
 				notification => {
 					// Show notification
-					addToChatQueue(
-						React.createElement(InfoMessage, {
-							key: generateKey('auto-compact-notification'),
-							message: notification,
-							hideBox: true,
-						}),
-					);
+					addToChatQueue(infoMsg(notification, 'auto-compact-notification'));
 				},
 				client,
 			);

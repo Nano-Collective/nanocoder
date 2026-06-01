@@ -1,11 +1,9 @@
 import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
-import React from 'react';
-import {ErrorMessage, SuccessMessage} from '@/components/message-box';
-import {generateKey} from '@/session/key-generator';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import type {SubagentConfigWithSource} from '@/subagents/types';
 import type {MessageSubmissionOptions} from '@/types/index';
+import {errorMsg, successMsg} from '@/utils/message-factory';
 
 /**
  * Per-entity differences for the single-file `/<kind> create <name>` flows.
@@ -43,11 +41,10 @@ async function handleFileCreate(
 
 	if (!fileName) {
 		onAddToChatQueue(
-			React.createElement(ErrorMessage, {
-				key: generateKey(`${entityName}-create-error`),
-				message: `Usage: /${entityName} create <name>\nExample: /${entityName} create ${spec.usageExample}`,
-				hideBox: true,
-			}),
+			errorMsg(
+				`Usage: /${entityName} create <name>\nExample: /${entityName} create ${spec.usageExample}`,
+				`${entityName}-create-error`,
+			),
 		);
 		onCommandComplete?.();
 		return true;
@@ -59,11 +56,10 @@ async function handleFileCreate(
 
 	if (existsSync(filePath)) {
 		onAddToChatQueue(
-			React.createElement(ErrorMessage, {
-				key: generateKey(`${entityName}-create-exists`),
-				message: `${spec.existsNoun} already exists: .nanocoder/${entityName}/${safeName}`,
-				hideBox: true,
-			}),
+			errorMsg(
+				`${spec.existsNoun} already exists: .nanocoder/${entityName}/${safeName}`,
+				`${entityName}-create-exists`,
+			),
 		);
 		onCommandComplete?.();
 		return true;
@@ -77,11 +73,10 @@ async function handleFileCreate(
 	writeFileSync(filePath, spec.template(safeName, derivedName), 'utf-8');
 
 	onAddToChatQueue(
-		React.createElement(SuccessMessage, {
-			key: generateKey(`${entityName}-created`),
-			message: `Created ${spec.createdNoun}: .nanocoder/${entityName}/${safeName}`,
-			hideBox: true,
-		}),
+		successMsg(
+			`Created ${spec.createdNoun}: .nanocoder/${entityName}/${safeName}`,
+			`${entityName}-created`,
+		),
 	);
 
 	await onHandleChatMessage(spec.aiPrompt(safeName, derivedName));
@@ -225,11 +220,10 @@ export async function handleAgentCopy(
 
 	if (!agentName) {
 		onAddToChatQueue(
-			React.createElement(ErrorMessage, {
-				key: generateKey('agents-copy-error'),
-				message: 'Usage: /agents copy <name>\nExample: /agents copy explore',
-				hideBox: true,
-			}),
+			errorMsg(
+				'Usage: /agents copy <name>\nExample: /agents copy explore',
+				'agents-copy-error',
+			),
 		);
 		onCommandComplete?.();
 		return true;
@@ -242,11 +236,10 @@ export async function handleAgentCopy(
 		const available = await loader.listSubagents();
 		const names = available.map(a => a.name).join(', ');
 		onAddToChatQueue(
-			React.createElement(ErrorMessage, {
-				key: generateKey('agents-copy-notfound'),
-				message: `Agent '${agentName}' not found. Available agents: ${names}`,
-				hideBox: true,
-			}),
+			errorMsg(
+				`Agent '${agentName}' not found. Available agents: ${names}`,
+				'agents-copy-notfound',
+			),
 		);
 		onCommandComplete?.();
 		return true;
@@ -258,11 +251,10 @@ export async function handleAgentCopy(
 
 	if (existsSync(filePath)) {
 		onAddToChatQueue(
-			React.createElement(ErrorMessage, {
-				key: generateKey('agents-copy-exists'),
-				message: `Agent file already exists: .nanocoder/agents/${safeName}\nTo modify it, edit the file directly.`,
-				hideBox: true,
-			}),
+			errorMsg(
+				`Agent file already exists: .nanocoder/agents/${safeName}\nTo modify it, edit the file directly.`,
+				'agents-copy-exists',
+			),
 		);
 		onCommandComplete?.();
 		return true;
@@ -274,11 +266,10 @@ export async function handleAgentCopy(
 	writeFileSync(filePath, content, 'utf-8');
 
 	onAddToChatQueue(
-		React.createElement(SuccessMessage, {
-			key: generateKey('agents-copied'),
-			message: `Copied agent '${agentName}' to .nanocoder/agents/${safeName}\nYou can now modify this file to customize the agent.`,
-			hideBox: true,
-		}),
+		successMsg(
+			`Copied agent '${agentName}' to .nanocoder/agents/${safeName}\nYou can now modify this file to customize the agent.`,
+			'agents-copied',
+		),
 	);
 
 	// Reload so the project-level copy takes priority
@@ -426,12 +417,10 @@ export async function handleSkillsCreate(
 
 	if (!name) {
 		onAddToChatQueue(
-			React.createElement(ErrorMessage, {
-				key: generateKey('skills-create-error'),
-				message:
-					'Usage: /skills create <name>\nExample: /skills create pr-reviewer\n\nFor single-piece skills, use /commands create, /agents create, or /tools create instead.',
-				hideBox: true,
-			}),
+			errorMsg(
+				'Usage: /skills create <name>\nExample: /skills create pr-reviewer\n\nFor single-piece skills, use /commands create, /agents create, or /tools create instead.',
+				'skills-create-error',
+			),
 		);
 		onCommandComplete?.();
 		return true;
@@ -439,11 +428,10 @@ export async function handleSkillsCreate(
 
 	if (!BUNDLE_NAME_REGEX.test(name)) {
 		onAddToChatQueue(
-			React.createElement(ErrorMessage, {
-				key: generateKey('skills-create-invalid-name'),
-				message: `Skill names must match ${BUNDLE_NAME_REGEX} (kebab-case starting with a letter).`,
-				hideBox: true,
-			}),
+			errorMsg(
+				`Skill names must match ${BUNDLE_NAME_REGEX} (kebab-case starting with a letter).`,
+				'skills-create-invalid-name',
+			),
 		);
 		onCommandComplete?.();
 		return true;
@@ -452,11 +440,10 @@ export async function handleSkillsCreate(
 	const bundleRoot = join(process.cwd(), '.nanocoder', 'skills', name);
 	if (existsSync(bundleRoot)) {
 		onAddToChatQueue(
-			React.createElement(ErrorMessage, {
-				key: generateKey('skills-create-exists'),
-				message: `Skill bundle already exists: .nanocoder/skills/${name}/`,
-				hideBox: true,
-			}),
+			errorMsg(
+				`Skill bundle already exists: .nanocoder/skills/${name}/`,
+				'skills-create-exists',
+			),
 		);
 		onCommandComplete?.();
 		return true;
@@ -477,11 +464,10 @@ export async function handleSkillsCreate(
 	);
 
 	onAddToChatQueue(
-		React.createElement(SuccessMessage, {
-			key: generateKey('skills-created'),
-			message: `Created skill bundle: .nanocoder/skills/${name}/`,
-			hideBox: true,
-		}),
+		successMsg(
+			`Created skill bundle: .nanocoder/skills/${name}/`,
+			'skills-created',
+		),
 	);
 
 	await onHandleChatMessage(buildSkillBundleDesignPrompt(name));

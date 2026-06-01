@@ -1,6 +1,5 @@
 import {Box, Text} from 'ink';
 import React from 'react';
-import {InfoMessage} from '@/components/message-box';
 import {InfoField} from '@/components/ui/info-field';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {CustomCommandLoader} from '@/custom-commands/loader';
@@ -9,6 +8,7 @@ import {useTheme} from '@/hooks/useTheme';
 import {getCommandLoader} from '@/message-handler';
 import {generateKey} from '@/session/key-generator';
 import type {Command, CustomCommand} from '@/types/index';
+import {infoMsg} from '@/utils/message-factory';
 
 interface CustomCommandsProps {
 	commands: CustomCommand[];
@@ -281,21 +281,16 @@ export const commandsCommand: Command = {
 			const name = args[1] ?? '';
 			if (!name) {
 				return Promise.resolve(
-					React.createElement(InfoMessage, {
-						key: generateKey('commands'),
-						message: 'Usage: /commands show <command-name>',
-						hideBox: true,
-					}),
+					infoMsg('Usage: /commands show <command-name>', 'commands'),
 				);
 			}
 			const command = loader.getCommand(name);
 			if (!command) {
 				return Promise.resolve(
-					React.createElement(InfoMessage, {
-						key: generateKey('commands'),
-						message: `Command "${name}" not found. Use /commands to list available commands.`,
-						hideBox: true,
-					}),
+					infoMsg(
+						`Command "${name}" not found. Use /commands to list available commands.`,
+						'commands',
+					),
 				);
 			}
 			return Promise.resolve(
@@ -308,12 +303,10 @@ export const commandsCommand: Command = {
 
 		if (sub === 'create') {
 			return Promise.resolve(
-				React.createElement(InfoMessage, {
-					key: generateKey('commands'),
-					message:
-						'Usage: /commands create <name>\nExample: /commands create review-code\n\nThis creates a new command file and starts an AI-assisted session to write its content.',
-					hideBox: true,
-				}),
+				infoMsg(
+					'Usage: /commands create <name>\nExample: /commands create review-code\n\nThis creates a new command file and starts an AI-assisted session to write its content.',
+					'commands',
+				),
 			);
 		}
 

@@ -8,7 +8,6 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
-import {InfoMessage} from '@/components/message-box';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -17,6 +16,7 @@ import {generateKey} from '@/session/key-generator';
 import {findSkill} from '@/skills/skill-registry';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {Command} from '@/types/index';
+import {infoMsg} from '@/utils/message-factory';
 
 export interface GroupedTools {
 	builtin: string[];
@@ -157,12 +157,10 @@ export const toolsCommand: Command = {
 		// name (e.g. from a non-app context), show usage rather than a list.
 		if (args[0] === 'create') {
 			return Promise.resolve(
-				React.createElement(InfoMessage, {
-					key: generateKey('tools'),
-					message:
-						'Usage: /tools create <name>\nExample: /tools create k8s-pods\n\nThis creates a new custom tool file under .nanocoder/tools/ and starts an AI-assisted session to write its content.',
-					hideBox: true,
-				}),
+				infoMsg(
+					'Usage: /tools create <name>\nExample: /tools create k8s-pods\n\nThis creates a new custom tool file under .nanocoder/tools/ and starts an AI-assisted session to write its content.',
+					'tools',
+				),
 			);
 		}
 

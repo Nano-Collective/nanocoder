@@ -4,11 +4,6 @@ import {commandRegistry} from '@/commands';
 import {CodexLogin} from '@/commands/codex-login';
 import {CopilotLogin} from '@/commands/copilot-login';
 import BashProgress from '@/components/bash-progress';
-import {
-	ErrorMessage,
-	InfoMessage,
-	SuccessMessage,
-} from '@/components/message-box';
 import {DELAY_COMMAND_COMPLETE_MS, MAX_SESSION_NAME_LENGTH} from '@/constants';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {generateKey} from '@/session/key-generator';
@@ -17,6 +12,7 @@ import {clearAllTasks} from '@/tools/tasks/storage';
 import type {LLMClient} from '@/types/core';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
+import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
 import {handleCompactCommand} from './handlers/compact-handler';
 import {handleContextMaxCommand} from './handlers/context-max-handler';
 import {
@@ -184,11 +180,7 @@ async function handleBashCommand(
 	} catch (error: unknown) {
 		setLiveComponent(null);
 		onAddToChatQueue(
-			React.createElement(ErrorMessage, {
-				key: generateKey('bash-error'),
-				message: `Error executing command: ${formatError(error)}`,
-				hideBox: true,
-			}),
+			errorMsg(`Error executing command: ${formatError(error)}`, 'bash-error'),
 		);
 	} finally {
 		setIsToolExecuting(false);
@@ -283,13 +275,7 @@ async function handleSpecialCommand(
 		case SPECIAL_COMMANDS.CLEAR:
 			await onClearMessages();
 			await clearAllTasks();
-			onAddToChatQueue(
-				React.createElement(SuccessMessage, {
-					key: generateKey('clear-success'),
-					message: 'Chat and tasks cleared.',
-					hideBox: true,
-				}),
-			);
+			onAddToChatQueue(successMsg('Chat and tasks cleared.', 'clear-success'));
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 			return true;
 
@@ -302,28 +288,22 @@ async function handleSpecialCommand(
 			const newName = commandArgs?.join(' ') || '';
 			if (!newName.trim()) {
 				onAddToChatQueue(
-					React.createElement(ErrorMessage, {
-						key: generateKey('rename-error'),
-						message: 'Usage: /rename <session name>',
-						hideBox: true,
-					}),
+					errorMsg('Usage: /rename <session name>', 'rename-error'),
 				);
 			} else if (newName.length > MAX_SESSION_NAME_LENGTH) {
 				onAddToChatQueue(
-					React.createElement(ErrorMessage, {
-						key: generateKey('rename-error'),
-						message: `Session name must be ${MAX_SESSION_NAME_LENGTH} characters or less.`,
-						hideBox: true,
-					}),
+					errorMsg(
+						`Session name must be ${MAX_SESSION_NAME_LENGTH} characters or less.`,
+						'rename-error',
+					),
 				);
 			} else {
 				onRenameSession(newName.trim());
 				onAddToChatQueue(
-					React.createElement(SuccessMessage, {
-						key: generateKey('rename-success'),
-						message: `Session renamed to "${newName.trim()}".`,
-						hideBox: true,
-					}),
+					successMsg(
+						`Session renamed to "${newName.trim()}".`,
+						'rename-success',
+					),
 				);
 			}
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
@@ -366,12 +346,10 @@ async function handleCheckpointLoad(
 
 		if (checkpoints.length === 0) {
 			onAddToChatQueue(
-				React.createElement(InfoMessage, {
-					key: generateKey('checkpoint-info'),
-					message:
-						'No checkpoints available. Create one with /checkpoint create [name]',
-					hideBox: true,
-				}),
+				infoMsg(
+					'No checkpoints available. Create one with /checkpoint create [name]',
+					'checkpoint-info',
+				),
 			);
 			onCommandComplete?.();
 			return true;
@@ -381,11 +359,10 @@ async function handleCheckpointLoad(
 		return true;
 	} catch (error) {
 		onAddToChatQueue(
-			React.createElement(ErrorMessage, {
-				key: generateKey('checkpoint-error'),
-				message: `Failed to list checkpoints: ${formatError(error)}`,
-				hideBox: true,
-			}),
+			errorMsg(
+				`Failed to list checkpoints: ${formatError(error)}`,
+				'checkpoint-error',
+			),
 		);
 		onCommandComplete?.();
 		return true;
@@ -425,19 +402,14 @@ function handleCopilotLogin(
 
 				if (result.success) {
 					onAddToChatQueue(
-						React.createElement(SuccessMessage, {
-							key: generateKey('copilot-login-done'),
-							message: `Logged in. Credentials saved for "${providerName}".`,
-							hideBox: true,
-						}),
+						successMsg(
+							`Logged in. Credentials saved for "${providerName}".`,
+							'copilot-login-done',
+						),
 					);
 				} else {
 					onAddToChatQueue(
-						React.createElement(ErrorMessage, {
-							key: generateKey('copilot-login-error'),
-							message: result.error ?? 'Login failed.',
-							hideBox: true,
-						}),
+						errorMsg(result.error ?? 'Login failed.', 'copilot-login-error'),
 					);
 				}
 
@@ -482,19 +454,14 @@ function handleCodexLogin(
 
 				if (result.success) {
 					onAddToChatQueue(
-						React.createElement(SuccessMessage, {
-							key: generateKey('codex-login-done'),
-							message: `Logged in. Credentials saved for "${providerName}".`,
-							hideBox: true,
-						}),
+						successMsg(
+							`Logged in. Credentials saved for "${providerName}".`,
+							'codex-login-done',
+						),
 					);
 				} else {
 					onAddToChatQueue(
-						React.createElement(ErrorMessage, {
-							key: generateKey('codex-login-error'),
-							message: result.error ?? 'Login failed.',
-							hideBox: true,
-						}),
+						errorMsg(result.error ?? 'Login failed.', 'codex-login-error'),
 					);
 				}
 
@@ -545,13 +512,7 @@ async function handleBuiltInCommand(
 
 	if (typeof result === 'string' && result.trim()) {
 		queueMicrotask(() => {
-			onAddToChatQueue(
-				React.createElement(InfoMessage, {
-					key: generateKey('command-result'),
-					message: result,
-					hideBox: true,
-				}),
-			);
+			onAddToChatQueue(infoMsg(result, 'command-result'));
 		});
 		setTimeout(() => {
 			onCommandComplete?.();

@@ -1,9 +1,5 @@
 import React from 'react';
-import {
-	ErrorMessage,
-	InfoMessage,
-	SuccessMessage,
-} from '@/components/message-box';
+import {InfoMessage} from '@/components/message-box';
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
 import {
 	resetSessionContextLimit,
@@ -12,6 +8,7 @@ import {
 } from '@/models/index';
 import {generateKey} from '@/session/key-generator';
 import type {MessageSubmissionOptions} from '@/types/index';
+import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
 
 /**
  * Parses a context limit value string, supporting k/K suffix.
@@ -53,11 +50,10 @@ export async function handleContextMaxCommand(
 	if (args[0] === '--reset') {
 		resetSessionContextLimit();
 		onAddToChatQueue(
-			React.createElement(SuccessMessage, {
-				key: generateKey('context-max-reset'),
-				message: 'Session context limit override cleared.',
-				hideBox: true,
-			}),
+			successMsg(
+				'Session context limit override cleared.',
+				'context-max-reset',
+			),
 		);
 		setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 		return true;
@@ -67,12 +63,10 @@ export async function handleContextMaxCommand(
 		const limit = parseContextLimit(args[0]);
 		if (limit === null) {
 			onAddToChatQueue(
-				React.createElement(ErrorMessage, {
-					key: generateKey('context-max-error'),
-					message:
-						'Invalid context limit. Use a positive number, e.g. /context-max 8192 or /context-max 128k',
-					hideBox: true,
-				}),
+				errorMsg(
+					'Invalid context limit. Use a positive number, e.g. /context-max 8192 or /context-max 128k',
+					'context-max-error',
+				),
 			);
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 			return true;
@@ -80,11 +74,10 @@ export async function handleContextMaxCommand(
 
 		setSessionContextLimit(limit);
 		onAddToChatQueue(
-			React.createElement(SuccessMessage, {
-				key: generateKey('context-max-set'),
-				message: `Session context limit set to ${limit.toLocaleString()} tokens.`,
-				hideBox: true,
-			}),
+			successMsg(
+				`Session context limit set to ${limit.toLocaleString()} tokens.`,
+				'context-max-set',
+			),
 		);
 		setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 		return true;
@@ -114,12 +107,10 @@ export async function handleContextMaxCommand(
 		);
 	} else {
 		onAddToChatQueue(
-			React.createElement(InfoMessage, {
-				key: generateKey('context-max-info'),
-				message:
-					'Context limit: Unknown. Use /context-max <number> to set one.',
-				hideBox: true,
-			}),
+			infoMsg(
+				'Context limit: Unknown. Use /context-max <number> to set one.',
+				'context-max-info',
+			),
 		);
 	}
 	setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);

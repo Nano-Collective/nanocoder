@@ -9,7 +9,6 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
-import {InfoMessage} from '@/components/message-box';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -17,6 +16,7 @@ import {formatCronHuman} from '@/schedule/cron';
 import {generateKey} from '@/session/key-generator';
 import {getLoadedSkills} from '@/skills/skill-registry';
 import type {Command} from '@/types/index';
+import {infoMsg} from '@/utils/message-factory';
 
 interface CronEntry {
 	skill: string;
@@ -100,12 +100,10 @@ export const scheduleCommand: Command = {
 		'List cron-triggered skills (single-file frontmatter + bundle skill.yaml). Read-only - edit the source file to change.',
 	handler: async args => {
 		if (args.length > 0) {
-			return React.createElement(InfoMessage, {
-				key: generateKey('schedule'),
-				message:
-					"Usage: /schedule\n\nMutations happen by editing a command's frontmatter `subscribe:` block, or a bundle's `skill.yaml`. See docs.",
-				hideBox: true,
-			});
+			return infoMsg(
+				"Usage: /schedule\n\nMutations happen by editing a command's frontmatter `subscribe:` block, or a bundle's `skill.yaml`. See docs.",
+				'schedule',
+			);
 		}
 		return React.createElement(ScheduleView, {
 			key: generateKey('schedule'),

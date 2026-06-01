@@ -11,7 +11,6 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
-import {InfoMessage} from '@/components/message-box';
 import {InfoField} from '@/components/ui/info-field';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
@@ -20,6 +19,7 @@ import {generateKey} from '@/session/key-generator';
 import {findSkill, getLoadedSkills} from '@/skills/skill-registry';
 import type {Command} from '@/types/index';
 import type {Skill} from '@/types/skills';
+import {infoMsg} from '@/utils/message-factory';
 
 function memberCount(skill: Skill): string {
 	const parts: string[] = [];
@@ -198,34 +198,22 @@ export const skillsCommand: Command = {
 			// if the user reached this branch (no name supplied, or non-app
 			// context like /plain mode).
 			return Promise.resolve(
-				React.createElement(InfoMessage, {
-					key: generateKey('skills'),
-					message:
-						'Usage: /skills create <name>\nExample: /skills create pr-reviewer\n\nScaffolds a bundle directory under .nanocoder/skills/<name>/. For single-piece skills, use /commands create, /agents create, or /tools create.',
-					hideBox: true,
-				}),
+				infoMsg(
+					'Usage: /skills create <name>\nExample: /skills create pr-reviewer\n\nScaffolds a bundle directory under .nanocoder/skills/<name>/. For single-piece skills, use /commands create, /agents create, or /tools create.',
+					'skills',
+				),
 			);
 		}
 
 		if (args[0] === 'show') {
 			const name = args[1];
 			if (!name) {
-				return Promise.resolve(
-					React.createElement(InfoMessage, {
-						key: generateKey('skills'),
-						message: 'Usage: /skills show <name>',
-						hideBox: true,
-					}),
-				);
+				return Promise.resolve(infoMsg('Usage: /skills show <name>', 'skills'));
 			}
 			const skill = findSkill(name);
 			if (!skill) {
 				return Promise.resolve(
-					React.createElement(InfoMessage, {
-						key: generateKey('skills'),
-						message: `No skill named "${name}" is loaded.`,
-						hideBox: true,
-					}),
+					infoMsg(`No skill named "${name}" is loaded.`, 'skills'),
 				);
 			}
 			return Promise.resolve(

@@ -7,7 +7,6 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
-import {ErrorMessage} from '@/components/message-box';
 import {InfoField} from '@/components/ui/info-field';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -17,6 +16,7 @@ import {generateKey} from '@/session/key-generator';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import type {SubagentConfigWithSource} from '@/subagents/types';
 import type {Command} from '@/types/index';
+import {errorMsg} from '@/utils/message-factory';
 import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 
 interface SubagentsListProps {
@@ -167,11 +167,10 @@ export const agentsCommand: Command = {
 		if (args[0] === 'show' && args[1]) {
 			const agent = await loader.getSubagent(args[1]);
 			if (!agent) {
-				return React.createElement(ErrorMessage, {
-					key: generateKey('agents-show-error'),
-					message: `Agent '${args[1]}' not found. Run /agents to see available agents.`,
-					hideBox: true,
-				});
+				return errorMsg(
+					`Agent '${args[1]}' not found. Run /agents to see available agents.`,
+					'agents-show-error',
+				);
 			}
 			return React.createElement(AgentDetail, {
 				key: generateKey('agents-show'),

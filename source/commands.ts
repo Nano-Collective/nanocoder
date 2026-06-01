@@ -1,8 +1,7 @@
 import React from 'react';
-import {ErrorMessage} from '@/components/message-box';
-import {generateKey} from '@/session/key-generator';
 import type {Command, LazyCommand, Message} from '@/types/index';
 import {fuzzyScore} from '@/utils/fuzzy-matching';
+import {errorMsg} from '@/utils/message-factory';
 
 class CommandRegistry {
 	private commands = new Map<string, Command>();
@@ -106,22 +105,20 @@ class CommandRegistry {
 		const parts = input.trim().split(/\s+/);
 		const commandName = parts[0];
 		if (!commandName) {
-			return React.createElement(ErrorMessage, {
-				key: generateKey('error'),
-				message: 'Invalid command. Type /help for available commands.',
-				hideBox: true,
-			});
+			return errorMsg(
+				'Invalid command. Type /help for available commands.',
+				'error',
+			);
 		}
 
 		const args = parts.slice(1);
 
 		const command = this.get(commandName);
 		if (!command) {
-			return React.createElement(ErrorMessage, {
-				key: generateKey('error'),
-				message: `Unknown command: ${commandName}. Type /help for available commands.`,
-				hideBox: true,
-			});
+			return errorMsg(
+				`Unknown command: ${commandName}. Type /help for available commands.`,
+				'error',
+			);
 		}
 
 		return await command.handler(args, messages, metadata);
