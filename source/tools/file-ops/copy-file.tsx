@@ -1,11 +1,7 @@
 import {constants} from 'node:fs';
 import {access, copyFile, stat} from 'node:fs/promises';
 import {dirname, resolve} from 'node:path';
-import {Box, Text} from 'ink';
-import React from 'react';
-
-import ToolMessage from '@/components/tool-message';
-import {ThemeContext} from '@/hooks/useTheme';
+import {makeSimpleToolFormatter} from '@/components/simple-tool-formatter';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {invalidateCache} from '@/utils/file-cache';
@@ -50,53 +46,14 @@ const copyFileCoreTool = tool({
 	},
 });
 
-const CopyFileFormatter = React.memo(
-	({args, result}: {args: CopyFileArgs; result?: string}) => {
-		const themeContext = React.useContext(ThemeContext);
-		if (!themeContext) {
-			throw new Error('ThemeContext is required');
-		}
-		const {colors} = themeContext;
-
-		const messageContent = (
-			<Box flexDirection="column">
-				<Text color={colors.tool}>⚒ copy_file</Text>
-
-				<Box>
-					<Text color={colors.secondary}>Source: </Text>
-					<Text wrap="truncate-end" color={colors.text}>
-						{args.source}
-					</Text>
-				</Box>
-
-				<Box>
-					<Text color={colors.secondary}>Destination: </Text>
-					<Text wrap="truncate-end" color={colors.text}>
-						{args.destination}
-					</Text>
-				</Box>
-
-				{result && (
-					<Box>
-						<Text color={colors.secondary}>Result: </Text>
-						<Text wrap="truncate-end" color={colors.text}>
-							{result}
-						</Text>
-					</Box>
-				)}
-			</Box>
-		);
-
-		return <ToolMessage message={messageContent} hideBox={true} />;
-	},
+const copyFileFormatter = makeSimpleToolFormatter<CopyFileArgs>(
+	'copy_file',
+	(args, result) => [
+		{label: 'Source', value: args.source},
+		{label: 'Destination', value: args.destination},
+		{label: 'Result', value: result || undefined},
+	],
 );
-
-const copyFileFormatter = (
-	args: CopyFileArgs,
-	result?: string,
-): React.ReactElement => {
-	return <CopyFileFormatter args={args} result={result} />;
-};
 
 const copyFileValidator = async (
 	args: CopyFileArgs,
