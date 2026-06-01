@@ -74,29 +74,35 @@ const OPENROUTER_REASONING_EFFORTS = [
 ] as const;
 const OPENROUTER_SORT_KEYS = ['price', 'throughput', 'latency'] as const;
 
-function openrouterServiceTierValidator(value: string): string | undefined {
-	if (!value) return undefined;
-	if (!OPENROUTER_SERVICE_TIERS.includes(value as never)) {
-		return `Service tier must be one of: ${OPENROUTER_SERVICE_TIERS.join(', ')}`;
-	}
-	return undefined;
+/**
+ * Build a validator that accepts an empty value (the field is optional) or any
+ * member of `validValues`, and otherwise returns a "must be one of" message.
+ */
+function createEnumValidator(
+	validValues: readonly string[],
+	label: string,
+): (value: string) => string | undefined {
+	return value => {
+		if (!value) return undefined;
+		if (!validValues.includes(value)) {
+			return `${label} must be one of: ${validValues.join(', ')}`;
+		}
+		return undefined;
+	};
 }
 
-function openrouterReasoningEffortValidator(value: string): string | undefined {
-	if (!value) return undefined;
-	if (!OPENROUTER_REASONING_EFFORTS.includes(value as never)) {
-		return `Reasoning effort must be one of: ${OPENROUTER_REASONING_EFFORTS.join(', ')}`;
-	}
-	return undefined;
-}
-
-function openrouterSortValidator(value: string): string | undefined {
-	if (!value) return undefined;
-	if (!OPENROUTER_SORT_KEYS.includes(value as never)) {
-		return `Sort must be one of: ${OPENROUTER_SORT_KEYS.join(', ')}`;
-	}
-	return undefined;
-}
+const openrouterServiceTierValidator = createEnumValidator(
+	OPENROUTER_SERVICE_TIERS,
+	'Service tier',
+);
+const openrouterReasoningEffortValidator = createEnumValidator(
+	OPENROUTER_REASONING_EFFORTS,
+	'Reasoning effort',
+);
+const openrouterSortValidator = createEnumValidator(
+	OPENROUTER_SORT_KEYS,
+	'Sort',
+);
 
 /**
  * Assemble the `openrouter` block from wizard answers. Returns `undefined`
