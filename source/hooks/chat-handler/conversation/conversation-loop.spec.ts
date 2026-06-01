@@ -952,6 +952,59 @@ test.serial('processAssistantResponse - renders reasoning in chat queue', async 
 });
 
 // ============================================================================
+// Compact Tool-Count Summary Tests
+// ============================================================================
+
+test.serial(
+	'processAssistantResponse - combines accumulated compact counts into a single summary on completion',
+	async t => {
+		// Regression: counts accumulated across prior reasoning-only tool turns
+		// (e.g. two execute_bash calls) must flush as ONE combined summary
+		// ("Ran 2 commands"), not stacked "Ran 1 command" lines. The flush
+		// fires on narrative-text completion, not on reasoning.
+		resetLastTurnHadReasoning();
+		const queuedComponents: any[] = [];
+		const compactToolCountsRef = {current: {execute_bash: 2}};
+		const params = createDefaultParams({
+			client: createMockClient({
+				content: 'All done!',
+				reasoning: 'Let me summarise the results.',
+				toolCalls: undefined,
+				toolsDisabled: false,
+			}),
+			addToChatQueue: (component: any) => {
+				queuedComponents.push(component);
+			},
+			compactToolCountsRef,
+			onSetCompactToolCounts: () => {},
+		});
+
+		await processAssistantResponse(params);
+
+		const summaries = queuedComponents.filter((c: any) =>
+			String(c.key).includes('tool-compact-summary'),
+		);
+		t.is(summaries.length, 1, 'Should flush exactly one combined summary box');
+
+		// displayCompactCountsSummary maps entries to CompactToolResult
+		// children, so props.children is always an array.
+		const descriptions = (summaries[0].props.children as any[]).map(
+			(child: any) => child.props.description,
+		);
+		t.deepEqual(
+			descriptions,
+			['Ran 2 commands'],
+			'Two accumulated bash calls combine into "Ran 2 commands"',
+		);
+		t.deepEqual(
+			compactToolCountsRef.current,
+			{},
+			'Accumulator is reset after flushing',
+		);
+	},
+);
+
+// ============================================================================
 // Token Count Reset After Compression Tests
 // ============================================================================
 

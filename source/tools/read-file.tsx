@@ -6,6 +6,7 @@ import React from 'react';
 
 import ToolMessage from '@/components/tool-message';
 import {
+	EMPTY_CONTENT_MARKER,
 	FILE_READ_CHUNK_SIZE_LINES,
 	FILE_READ_CHUNKING_HINT_THRESHOLD_LINES,
 	FILE_READ_METADATA_THRESHOLD_LINES,
@@ -97,9 +98,8 @@ const executeReadFile = async (args: {
 		const cached = await getCachedFileContent(absPath);
 		const content = cached.content;
 
-		// Check if file is empty (0 tokens)
 		if (content.length === 0) {
-			throw new Error(`File "${args.path}" exists but is empty (0 tokens)`);
+			return EMPTY_CONTENT_MARKER;
 		}
 
 		const lines = cached.lines;
@@ -171,7 +171,6 @@ const executeReadFile = async (args: {
 			throw new Error(`File "${args.path}" does not exist`);
 		}
 
-		// Re-throw other errors (including our empty file error)
 		throw error;
 	}
 };

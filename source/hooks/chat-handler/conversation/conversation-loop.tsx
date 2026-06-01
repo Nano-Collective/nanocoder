@@ -377,17 +377,23 @@ export const processAssistantResponse = async (
 	setStreamingContent('');
 	setStreamingReasoning('');
 
-	// Flush accumulated compact counts ONLY when this turn emits reasoning.
-	// Consecutive no-reasoning turns let counts accumulate so the summary
+	// Flush accumulated compact counts ONLY when this turn emits narrative
+	// text — a natural break in a run of tool calls. Reasoning alone does NOT
+	// break the run: thinking models emit reasoning on every turn, and agentic
+	// flows often run one tool per turn, so flushing on reasoning would stack
+	// "Ran 1 command" / "Wrote 1 file" lines instead of combining them.
+	// Letting counts accumulate across reasoning-only turns means the summary
 	// combines (e.g. "Made 4 edits" instead of four stacked "Made 1 edit"
 	// boxes). Residual counts are flushed at end of conversation / before
 	// confirmation below.
-	if (fullReasoning) {
+	if (cleanedContent.trim()) {
 		flushCompactCounts();
 		if (hasLiveTaskUpdates) {
 			await flushLiveTaskList();
 			hasLiveTaskUpdates = false;
 		}
+	}
+	if (fullReasoning) {
 		// Despite reasoning stream typically finishing before text stream,
 		// reasoning is still added to chat queue here to give correct
 		// message order with regards to tool calling
