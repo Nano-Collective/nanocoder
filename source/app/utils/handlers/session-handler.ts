@@ -3,6 +3,7 @@ import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import {generateKey} from '@/session/key-generator';
 import {sessionManager} from '@/session/session-manager';
 import type {MessageSubmissionOptions} from '@/types/index';
+import {formatError} from '@/utils/error-formatter';
 
 const RESUME_COMMANDS = ['resume', 'sessions', 'history'] as const;
 
@@ -55,7 +56,7 @@ export async function handleResumeCommand(
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
 				key: generateKey('resume-error'),
-				message: `Failed to initialize sessions: ${error instanceof Error ? error.message : 'Unknown error'}`,
+				message: `Failed to initialize sessions: ${formatError(error)}`,
 				hideBox: true,
 			}),
 		);
@@ -120,7 +121,7 @@ export async function handleResumeCommand(
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
 				key: generateKey('resume-error'),
-				message: `Failed to resume session: ${error instanceof Error ? error.message : 'Unknown error'}`,
+				message: `Failed to resume session: ${formatError(error)}`,
 				hideBox: true,
 			}),
 		);

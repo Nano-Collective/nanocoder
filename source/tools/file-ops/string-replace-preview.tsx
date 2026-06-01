@@ -2,12 +2,12 @@ import {resolve} from 'node:path';
 import {highlight} from 'cli-highlight';
 import {Box, Text} from 'ink';
 import React from 'react';
-
 import ToolMessage from '@/components/tool-message';
 import {getColors} from '@/config/index';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
 import type {Colors} from '@/types/index';
 import {truncateAnsi} from '@/utils/ansi-truncate';
+import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent} from '@/utils/file-cache';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
 import {areLinesSimlar, computeInlineDiff} from '@/utils/inline-diff';
@@ -404,9 +404,7 @@ export async function formatStringReplacePreview(
 						</Box>
 						<Box>
 							<Text color={themeColors.error}>Error: </Text>
-							<Text color={themeColors.error}>
-								{error instanceof Error ? error.message : String(error)}
-							</Text>
+							<Text color={themeColors.error}>{formatError(error)}</Text>
 						</Box>
 					</Box>
 				}

@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import {getClosestConfigFile} from '@/config/index';
 import {MAX_PROMPT_HISTORY_SIZE} from '@/constants';
+import {formatError} from '@/utils/error-formatter';
 import {logError} from '@/utils/message-queue';
 import type {InputState} from './types/hooks';
 
@@ -71,8 +72,7 @@ export class PromptHistory {
 				);
 			} catch (error) {
 				// Silently fail to avoid disrupting the user experience
-				const errorMessage =
-					error instanceof Error ? error.message : 'Unknown error';
+				const errorMessage = formatError(error);
 				logError(`Failed to save prompt history: ${errorMessage}`);
 			}
 		});

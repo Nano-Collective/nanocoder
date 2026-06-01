@@ -1,5 +1,6 @@
 import {promises as fs} from 'node:fs';
 import {join} from 'node:path';
+import {formatError} from '@/utils/error-formatter';
 
 /**
  * Shallow walk of a directory for `.md` files, with per-file parsing.
@@ -50,7 +51,7 @@ function isSafeEntry(entry: string): boolean {
 }
 
 function errorMessage(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
+	return formatError(err);
 }
 
 export async function loadMdDir<T>(

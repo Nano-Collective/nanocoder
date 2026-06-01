@@ -9,6 +9,7 @@ import {getConfigPath} from '@/config/paths';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {Command} from '@/types/commands';
+import {formatError} from '@/utils/error-formatter';
 
 interface ConfigOption {
 	label: string;
@@ -211,7 +212,7 @@ export const setupConfigCommand: Command = {
 		} catch (error) {
 			return React.createElement(SetupConfigResult, {
 				options,
-				error: `Failed to open editor: ${error instanceof Error ? error.message : String(error)}`,
+				error: `Failed to open editor: ${formatError(error)}`,
 			});
 		}
 	},

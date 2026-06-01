@@ -3,6 +3,7 @@ import {join} from 'node:path';
 import {getConfigPath} from '@/config/paths';
 import {parseCustomToolFile} from '@/custom-tools/parser';
 import type {LoadedCustomTool} from '@/types/custom-tools';
+import {formatError} from '@/utils/error-formatter';
 
 export interface CustomToolLoadError {
 	file: string;
@@ -142,7 +143,7 @@ export class CustomToolLoader {
 			} catch (err) {
 				this.errors.push({
 					file: fullPath,
-					error: err instanceof Error ? err.message : String(err),
+					error: formatError(err),
 				});
 			}
 		}

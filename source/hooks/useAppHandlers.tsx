@@ -33,6 +33,7 @@ import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
 import {calculateTokenBreakdown} from '@/usage/calculator';
 import {autoCompactSessionOverrides} from '@/utils/auto-compact';
+import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 
@@ -338,9 +339,9 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 						props.addToChatQueue(
 							<WarningMessage
 								key={generateKey('backup-warning')}
-								message={`Warning: Failed to create backup: ${
-									error instanceof Error ? error.message : 'Unknown error'
-								}`}
+								message={`Warning: Failed to create backup: ${formatError(
+									error,
+								)}`}
 								hideBox={true}
 							/>,
 						);
@@ -364,9 +365,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				props.addToChatQueue(
 					<ErrorMessage
 						key={generateKey('restore-error')}
-						message={`Failed to restore checkpoint: ${
-							error instanceof Error ? error.message : 'Unknown error'
-						}`}
+						message={`Failed to restore checkpoint: ${formatError(error)}`}
 						hideBox={true}
 					/>,
 				);
@@ -457,9 +456,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				props.addToChatQueue(
 					<ErrorMessage
 						key={generateKey('resume-error')}
-						message={`Failed to load session: ${
-							error instanceof Error ? error.message : 'Unknown error'
-						}`}
+						message={`Failed to load session: ${formatError(error)}`}
 						hideBox={true}
 					/>,
 				);

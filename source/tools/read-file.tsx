@@ -3,7 +3,6 @@ import {access, lstat, readFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
-
 import ToolMessage from '@/components/tool-message';
 import {
 	EMPTY_CONTENT_MARKER,
@@ -15,6 +14,7 @@ import {
 import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent} from '@/utils/file-cache';
 import {getFileType} from '@/utils/file-type-detector';
 import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
@@ -80,8 +80,7 @@ const executeReadFile = async (args: {
 				} catch (error: unknown) {
 					// If we can't read it, mark as not readable
 					output += `Readable: no\n`;
-					const errorMessage =
-						error instanceof Error ? error.message : 'Unknown error';
+					const errorMessage = formatError(error);
 					output += `Note: Could not read file - ${errorMessage}\n`;
 				}
 			} else if (type === 'directory') {
@@ -392,8 +391,7 @@ const readFileValidator = async (args: {
 		const cwd = process.cwd();
 		resolveFilePath(args.path, cwd);
 	} catch (error) {
-		const errorMessage =
-			error instanceof Error ? error.message : 'Unknown error';
+		const errorMessage = formatError(error);
 		return {
 			valid: false,
 			error: `⚒ Path validation failed: ${errorMessage}`,
@@ -467,8 +465,7 @@ const readFileValidator = async (args: {
 				error: `⚒ File "${args.path}" does not exist`,
 			};
 		}
-		const errorMessage =
-			error instanceof Error ? error.message : 'Unknown error';
+		const errorMessage = formatError(error);
 		return {
 			valid: false,
 			error: `⚒ Cannot access file "${args.path}": ${errorMessage}`,

@@ -41,6 +41,7 @@ import type {
 	SkillToolMember,
 	SkillTrigger,
 } from '@/types/skills';
+import {formatError} from '@/utils/error-formatter';
 import {loadMdDir} from '@/utils/load-md-dir';
 
 export interface SkillLoadError {
@@ -452,5 +453,5 @@ function mergeSubscriptions(
 }
 
 function errorMessage(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
+	return formatError(err);
 }

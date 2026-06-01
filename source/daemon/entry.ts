@@ -19,6 +19,7 @@ import {SubagentExecutor} from '@/subagents/subagent-executor';
 import type {SubagentResult, SubagentTask} from '@/subagents/types';
 import {ToolManager} from '@/tools/tool-manager';
 import type {DevelopmentMode} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {setNotificationsConfig} from '@/utils/notifications';
 import {getShutdownManager} from '@/utils/shutdown';
 import {startDaemon} from './daemon';
@@ -36,7 +37,7 @@ async function main(): Promise<void> {
 		// otherwise be interpreted as a format specifier against the second
 		// argument). This is cosmetic - the path is from our own spawn env -
 		// but the rewrite costs nothing and silences the format-string warning.
-		const detail = err instanceof Error ? err.message : String(err);
+		const detail = formatError(err);
 		console.error(`Failed to chdir into ${projectRoot}: ${detail}`);
 		process.exit(1);
 	}
@@ -90,7 +91,7 @@ async function main(): Promise<void> {
 				// it and proceed with the triggered run (checkpoint failure is
 				// non-fatal), but without this log the failure is silent.
 				console.error(
-					`Checkpoint creation failed (reason="${reason}"): ${err instanceof Error ? err.message : String(err)}`,
+					`Checkpoint creation failed (reason="${reason}"): ${formatError(err)}`,
 				);
 				throw err;
 			}

@@ -8,6 +8,7 @@ import {dirname, join} from 'path';
 import {platform} from 'process';
 import {fileURLToPath} from 'url';
 import {promisify} from 'util';
+import {formatError} from '@/utils/error-formatter';
 
 const execFile = promisify(execFileAsync);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -246,9 +247,7 @@ export async function installExtension(targetClis?: string[]): Promise<{
 	} catch (error) {
 		return {
 			success: false,
-			message: `Failed to install extension: ${
-				error instanceof Error ? error.message : String(error)
-			}`,
+			message: `Failed to install extension: ${formatError(error)}`,
 			results: [],
 		};
 	}

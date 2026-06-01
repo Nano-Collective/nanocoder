@@ -11,6 +11,7 @@ import {ExistingRulesExtractor} from '@/init/existing-rules-extractor';
 import {ProjectAnalyzer} from '@/init/project-analyzer';
 import {generateKey} from '@/session/key-generator';
 import {Command} from '@/types/index';
+import {formatError} from '@/utils/error-formatter';
 
 function InitSuccess({
 	created,
@@ -183,8 +184,7 @@ export const initCommand: Command = {
 				}),
 			);
 		} catch (error: unknown) {
-			const errorMessage =
-				error instanceof Error ? error.message : 'Unknown error';
+			const errorMessage = formatError(error);
 			return Promise.resolve(
 				React.createElement(InitError, {
 					key: generateKey('init-error'),

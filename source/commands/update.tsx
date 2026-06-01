@@ -6,6 +6,7 @@ import {
 } from '@/components/message-box';
 import {getToolManager} from '@/message-handler';
 import {Command} from '@/types/index';
+import {formatError} from '@/utils/error-formatter';
 import {logError, logInfo} from '@/utils/message-queue';
 import {checkForUpdates} from '@/utils/update-checker';
 
@@ -118,8 +119,7 @@ export const updateCommand: Command = {
 							hideBox: true,
 						});
 					} catch (err) {
-						const errorMessage =
-							err instanceof Error ? err.message : String(err);
+						const errorMessage = formatError(err);
 						logError(`Failed to execute update command: ${errorMessage}`, true);
 						return React.createElement(ErrorMessage, {
 							message: `Failed to execute update command: ${errorMessage}`,
@@ -150,8 +150,7 @@ export const updateCommand: Command = {
 				});
 			}
 		} catch (error) {
-			const errorMessage =
-				error instanceof Error ? error.message : String(error);
+			const errorMessage = formatError(error);
 			logError(`Failed to update Nanocoder: ${errorMessage}`, true);
 			return React.createElement(ErrorMessage, {
 				message: `Failed to check for updates: ${errorMessage}`,

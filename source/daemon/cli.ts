@@ -16,6 +16,7 @@ import {existsSync, mkdirSync, openSync, statSync} from 'node:fs';
 import {readFile} from 'node:fs/promises';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {formatError} from '@/utils/error-formatter';
 import {
 	getLockfilePath,
 	getSocketPath,
@@ -169,9 +170,9 @@ async function stop(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 		} catch (err) {
 			return {
 				exitCode: 1,
-				output: `Failed to stop daemon (pid ${live.pid}): IPC unreachable and SIGTERM failed: ${
-					err instanceof Error ? err.message : String(err)
-				}`,
+				output: `Failed to stop daemon (pid ${live.pid}): IPC unreachable and SIGTERM failed: ${formatError(
+					err,
+				)}`,
 			};
 		}
 	}

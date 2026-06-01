@@ -6,12 +6,12 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
-
 import {getCurrentMode} from '@/context/mode-context';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {
 	execGit,
 	getStashCount,
@@ -184,7 +184,7 @@ const executeGitStash = async (args: GitStashInput): Promise<string> => {
 
 		return 'Error: No valid action specified.';
 	} catch (error) {
-		const message = error instanceof Error ? error.message : 'Unknown error';
+		const message = formatError(error);
 
 		// Check for merge conflicts
 		if (message.includes('CONFLICT') || message.includes('conflict')) {

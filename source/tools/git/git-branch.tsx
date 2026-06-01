@@ -6,12 +6,12 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
-
 import {getCurrentMode} from '@/context/mode-context';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {
 	branchExists,
 	execGit,
@@ -193,7 +193,7 @@ const executeGitBranch = async (args: GitBranchInput): Promise<string> => {
 
 		return 'Error: No valid action specified.';
 	} catch (error) {
-		return `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+		return `Error: ${formatError(error)}`;
 	}
 };
 

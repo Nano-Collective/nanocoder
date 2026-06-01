@@ -4,13 +4,13 @@ import {dirname, resolve} from 'node:path';
 import {highlight} from 'cli-highlight';
 import {Box, Text} from 'ink';
 import React from 'react';
-
 import ToolMessage from '@/components/tool-message';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {truncateAnsi} from '@/utils/ansi-truncate';
+import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
 import {validatePath} from '@/utils/path-validators';
@@ -244,8 +244,7 @@ const writeFileValidator = async (args: {
 				};
 			}
 		}
-		const errorMessage =
-			error instanceof Error ? error.message : 'Unknown error';
+		const errorMessage = formatError(error);
 		return {
 			valid: false,
 			error: `⚒ Cannot access parent directory "${parentDir}": ${errorMessage}`,

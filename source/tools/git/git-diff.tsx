@@ -6,11 +6,11 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
-
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {execGit, truncateDiff} from './utils';
 
 // ============================================================================
@@ -74,7 +74,7 @@ const executeGitDiff = async (args: GitDiffInput): Promise<string> => {
 
 		return output;
 	} catch (error) {
-		return `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+		return `Error: ${formatError(error)}`;
 	}
 };
 

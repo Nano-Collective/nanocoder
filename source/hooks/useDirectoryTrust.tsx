@@ -1,6 +1,7 @@
 import path from 'path';
 import {useCallback, useState} from 'react';
 import {loadPreferences, savePreferences} from '@/config/preferences';
+import {formatError} from '@/utils/error-formatter';
 import {logError, logInfo} from '@/utils/message-queue';
 
 interface UseDirectoryTrustReturn {
@@ -29,8 +30,7 @@ function checkTrustSync(directory: string): {
 		);
 		return {trusted, error: null};
 	} catch (err) {
-		const errorMessage =
-			err instanceof Error ? err.message : 'Unknown error occurred';
+		const errorMessage = formatError(err);
 		logError(`${errorMessage}`);
 		return {
 			trusted: false,
@@ -83,8 +83,7 @@ export function useDirectoryTrust(
 
 			setIsTrusted(true);
 		} catch (err) {
-			const errorMessage =
-				err instanceof Error ? err.message : 'Unknown error occurred';
+			const errorMessage = formatError(err);
 			setError(`Failed to save directory trust: ${errorMessage}`);
 
 			logError(`${errorMessage}`);

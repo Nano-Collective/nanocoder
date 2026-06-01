@@ -2,10 +2,10 @@ import {constants} from 'node:fs';
 import {access, writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import React from 'react';
-
 import {getColors} from '@/config/index';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {validatePath} from '@/utils/path-validators';
 import {createFileToolApproval} from '@/utils/tool-approval';
@@ -189,7 +189,7 @@ const stringReplaceValidator = async (
 				};
 			}
 		}
-		const errorMessage = error instanceof Error ? error.message : String(error);
+		const errorMessage = formatError(error);
 		return {
 			valid: false,
 			error: `⚒ Cannot access file "${path}": ${errorMessage}`,
@@ -223,7 +223,7 @@ const stringReplaceValidator = async (
 			};
 		}
 	} catch (error) {
-		const errorMessage = error instanceof Error ? error.message : String(error);
+		const errorMessage = formatError(error);
 		return {
 			valid: false,
 			error: `⚒ Error reading file "${path}": ${errorMessage}`,

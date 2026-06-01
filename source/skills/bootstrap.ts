@@ -35,6 +35,7 @@ import type {SubagentLoader} from '@/subagents/subagent-loader';
 import {SubagentLoadPriority} from '@/subagents/types';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {Skill, SkillPriority} from '@/types/skills';
+import {formatError} from '@/utils/error-formatter';
 
 export interface SkillBootResult {
 	skills: Skill[];
@@ -64,7 +65,7 @@ export async function bootSkillPipeline(
 	} catch (err) {
 		loaderErrors.push({
 			bundlePath: opts.projectRoot,
-			message: `Failed to load custom commands: ${err instanceof Error ? err.message : String(err)}`,
+			message: `Failed to load custom commands: ${formatError(err)}`,
 		});
 	}
 
@@ -82,7 +83,7 @@ export async function bootSkillPipeline(
 	} catch (err) {
 		loaderErrors.push({
 			bundlePath: opts.projectRoot,
-			message: `Failed to initialize subagents: ${err instanceof Error ? err.message : String(err)}`,
+			message: `Failed to initialize subagents: ${formatError(err)}`,
 		});
 	}
 
@@ -100,7 +101,7 @@ export async function bootSkillPipeline(
 	} catch (err) {
 		loaderErrors.push({
 			bundlePath: opts.projectRoot,
-			message: `Failed to load custom tools: ${err instanceof Error ? err.message : String(err)}`,
+			message: `Failed to load custom tools: ${formatError(err)}`,
 		});
 	}
 

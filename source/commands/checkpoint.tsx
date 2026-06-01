@@ -9,6 +9,7 @@ import {
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {generateKey} from '@/session/key-generator';
 import {Command, Message} from '@/types/index';
+import {formatError} from '@/utils/error-formatter';
 import {addToMessageQueue} from '@/utils/message-queue';
 
 // Default checkpoint manager instance (lazy-initialized)
@@ -102,9 +103,7 @@ async function createCheckpoint(
 	} catch (error) {
 		return React.createElement(ErrorMessage, {
 			key: generateKey('error'),
-			message: `Failed to create checkpoint: ${
-				error instanceof Error ? error.message : 'Unknown error'
-			}`,
+			message: `Failed to create checkpoint: ${formatError(error)}`,
 			hideBox: true,
 		});
 	}
@@ -125,9 +124,7 @@ async function listCheckpoints(): Promise<React.ReactElement> {
 	} catch (error) {
 		return React.createElement(ErrorMessage, {
 			key: generateKey('error'),
-			message: `Failed to list checkpoints: ${
-				error instanceof Error ? error.message : 'Unknown error'
-			}`,
+			message: `Failed to list checkpoints: ${formatError(error)}`,
 			hideBox: true,
 		});
 	}
@@ -226,9 +223,9 @@ async function loadCheckpoint(
 								addToMessageQueue(
 									React.createElement(WarningMessage, {
 										key: generateKey('backup-warning'),
-										message: `Warning: Failed to create backup: ${
-											error instanceof Error ? error.message : 'Unknown error'
-										}`,
+										message: `Warning: Failed to create backup: ${formatError(
+											error,
+										)}`,
 										hideBox: true,
 									}),
 								);
@@ -263,9 +260,7 @@ async function loadCheckpoint(
 	} catch (error) {
 		return React.createElement(ErrorMessage, {
 			key: generateKey('error'),
-			message: `Failed to load checkpoint: ${
-				error instanceof Error ? error.message : 'Unknown error'
-			}`,
+			message: `Failed to load checkpoint: ${formatError(error)}`,
 			hideBox: true,
 		});
 	}
@@ -308,9 +303,7 @@ async function deleteCheckpoint(args: string[]): Promise<React.ReactElement> {
 	} catch (error) {
 		return React.createElement(ErrorMessage, {
 			key: generateKey('error'),
-			message: `Failed to delete checkpoint: ${
-				error instanceof Error ? error.message : 'Unknown error'
-			}`,
+			message: `Failed to delete checkpoint: ${formatError(error)}`,
 			hideBox: true,
 		});
 	}

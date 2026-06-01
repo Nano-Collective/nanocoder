@@ -2,6 +2,7 @@ import {Box, Text, useInput} from 'ink';
 import Spinner from 'ink-spinner';
 import {useEffect, useState} from 'react';
 import {getColors} from '@/config/index';
+import {formatError} from '@/utils/error-formatter';
 
 type Status = 'starting' | 'visit' | 'polling' | 'done' | 'error';
 
@@ -68,7 +69,7 @@ export function OAuthLogin({
 				}
 			} catch (err) {
 				if (!cancelled) {
-					setError(err instanceof Error ? err.message : String(err));
+					setError(formatError(err));
 					setStatus('error');
 				}
 			}

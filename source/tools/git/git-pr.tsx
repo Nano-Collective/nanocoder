@@ -6,12 +6,12 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
-
 import {getCurrentMode} from '@/context/mode-context';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {
 	type CommitInfo,
 	execGh,
@@ -191,7 +191,7 @@ const executeGitPr = async (args: GitPrInput): Promise<string> => {
 
 		return 'Error: No valid action specified. Use create, view, or list.';
 	} catch (error) {
-		const message = error instanceof Error ? error.message : 'Unknown error';
+		const message = formatError(error);
 
 		// Check for common gh errors
 		if (message.includes('gh auth login')) {

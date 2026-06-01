@@ -8,23 +8,44 @@ import type {SubagentConfigWithSource} from '@/subagents/types';
 import type {MessageSubmissionOptions} from '@/types/index';
 
 /**
- * Creates a markdown file with frontmatter template and asks the AI to help
+ * Per-entity differences for the single-file `/<kind> create <name>` flows.
+ * Everything else (arg validation, existence check, mkdir, write, success
+ * message, chained AI prompt) is shared by `handleFileCreate`.
+ */
+interface FileCreateSpec {
+	/** Subdirectory under `.nanocoder/` and `generateKey`/usage prefix (e.g. 'agents'). */
+	entityName: string;
+	/** Example shown in the usage hint (e.g. 'code-reviewer'). */
+	usageExample: string;
+	/** Capitalised noun for the "already exists" message (e.g. 'Agent file'). */
+	existsNoun: string;
+	/** Noun for the "Created … " success message (e.g. 'agent file'). */
+	createdNoun: string;
+	/** Derive the in-file name from the base filename. Defaults to identity. */
+	deriveName?: (baseName: string) => string;
+	/** Build the file's initial contents from the safe filename + derived name. */
+	template: (safeName: string, derivedName: string) => string;
+	/** The chained prompt asking the AI to fill the scaffold in. */
+	aiPrompt: (safeName: string, derivedName: string) => string;
+}
+
+/**
+ * Creates a markdown file with a frontmatter template and asks the AI to help
  * write it. Shared logic for the /<command|tool|agent> create flows.
  */
 async function handleFileCreate(
 	fileName: string | undefined,
-	dirName: string,
-	entityName: string,
-	aiPrompt: (safeName: string, commandBaseName: string) => string,
+	spec: FileCreateSpec,
 	options: MessageSubmissionOptions,
 ): Promise<boolean> {
 	const {onAddToChatQueue, onHandleChatMessage, onCommandComplete} = options;
+	const {entityName} = spec;
 
 	if (!fileName) {
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
 				key: generateKey(`${entityName}-create-error`),
-				message: `Usage: /${entityName} create <name>\nExample: /${entityName} create review-code`,
+				message: `Usage: /${entityName} create <name>\nExample: /${entityName} create ${spec.usageExample}`,
 				hideBox: true,
 			}),
 		);
@@ -33,14 +54,14 @@ async function handleFileCreate(
 	}
 
 	const safeName = fileName.endsWith('.md') ? fileName : `${fileName}.md`;
-	const targetDir = join(process.cwd(), '.nanocoder', dirName);
+	const targetDir = join(process.cwd(), '.nanocoder', entityName);
 	const filePath = join(targetDir, safeName);
 
 	if (existsSync(filePath)) {
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
 				key: generateKey(`${entityName}-create-exists`),
-				message: `Command file already exists: .nanocoder/${dirName}/${safeName}`,
+				message: `${spec.existsNoun} already exists: .nanocoder/${entityName}/${safeName}`,
 				hideBox: true,
 			}),
 		);
@@ -50,24 +71,20 @@ async function handleFileCreate(
 
 	mkdirSync(targetDir, {recursive: true});
 
-	const template = `---
-description: ${safeName.replace(/\.md$/, '')} custom command
----
+	const baseName = safeName.replace(/\.md$/, '');
+	const derivedName = spec.deriveName ? spec.deriveName(baseName) : baseName;
 
-`;
-
-	writeFileSync(filePath, template, 'utf-8');
+	writeFileSync(filePath, spec.template(safeName, derivedName), 'utf-8');
 
 	onAddToChatQueue(
 		React.createElement(SuccessMessage, {
 			key: generateKey(`${entityName}-created`),
-			message: `Created ${entityName} file: .nanocoder/${dirName}/${safeName}`,
+			message: `Created ${spec.createdNoun}: .nanocoder/${entityName}/${safeName}`,
 			hideBox: true,
 		}),
 	);
 
-	const commandBaseName = safeName.replace(/\.md$/, '');
-	await onHandleChatMessage(aiPrompt(safeName, commandBaseName));
+	await onHandleChatMessage(spec.aiPrompt(safeName, derivedName));
 
 	return true;
 }
@@ -84,64 +101,25 @@ export async function handleAgentCreate(
 		return false;
 	}
 
-	const {onAddToChatQueue, onHandleChatMessage, onCommandComplete} = options;
-
-	const fileName = commandParts[2];
-
-	if (!fileName) {
-		onAddToChatQueue(
-			React.createElement(ErrorMessage, {
-				key: generateKey('agents-create-error'),
-				message:
-					'Usage: /agents create <name>\nExample: /agents create code-reviewer',
-				hideBox: true,
-			}),
-		);
-		onCommandComplete?.();
-		return true;
-	}
-
-	const safeName = fileName.endsWith('.md') ? fileName : `${fileName}.md`;
-	const targetDir = join(process.cwd(), '.nanocoder', 'agents');
-	const filePath = join(targetDir, safeName);
-
-	if (existsSync(filePath)) {
-		onAddToChatQueue(
-			React.createElement(ErrorMessage, {
-				key: generateKey('agents-create-exists'),
-				message: `Agent file already exists: .nanocoder/agents/${safeName}`,
-				hideBox: true,
-			}),
-		);
-		onCommandComplete?.();
-		return true;
-	}
-
-	mkdirSync(targetDir, {recursive: true});
-
-	const agentName = safeName.replace(/\.md$/, '');
-	const template = `---
+	return handleFileCreate(
+		commandParts[2],
+		{
+			entityName: 'agents',
+			usageExample: 'code-reviewer',
+			existsNoun: 'Agent file',
+			createdNoun: 'agent file',
+			template: (_safeName, agentName) => `---
 name: ${agentName}
 description: A brief description of when this agent should be used.
 model: inherit
 ---
 
 Write the system prompt that describes this agent's role, the tools it should use, and any important constraints.
-`;
-
-	writeFileSync(filePath, template, 'utf-8');
-
-	onAddToChatQueue(
-		React.createElement(SuccessMessage, {
-			key: generateKey('agents-created'),
-			message: `Created agent file: .nanocoder/agents/${safeName}`,
-			hideBox: true,
-		}),
+`,
+			aiPrompt: buildAgentDesignPrompt,
+		},
+		options,
 	);
-
-	await onHandleChatMessage(buildAgentDesignPrompt(safeName, agentName));
-
-	return true;
 }
 
 /**
@@ -322,45 +300,18 @@ export async function handleToolCreate(
 		return false;
 	}
 
-	const {onAddToChatQueue, onHandleChatMessage, onCommandComplete} = options;
-	const fileName = commandParts[2];
-
-	if (!fileName) {
-		onAddToChatQueue(
-			React.createElement(ErrorMessage, {
-				key: generateKey('tools-create-error'),
-				message: 'Usage: /tools create <name>\nExample: /tools create k8s-pods',
-				hideBox: true,
-			}),
-		);
-		onCommandComplete?.();
-		return true;
-	}
-
-	const safeName = fileName.endsWith('.md') ? fileName : `${fileName}.md`;
-	const targetDir = join(process.cwd(), '.nanocoder', 'tools');
-	const filePath = join(targetDir, safeName);
-
-	if (existsSync(filePath)) {
-		onAddToChatQueue(
-			React.createElement(ErrorMessage, {
-				key: generateKey('tools-create-exists'),
-				message: `Custom tool file already exists: .nanocoder/tools/${safeName}`,
-				hideBox: true,
-			}),
-		);
-		onCommandComplete?.();
-		return true;
-	}
-
-	// Tool names must match ^[a-z][a-z0-9_]*$ — convert dashes to underscores
-	// so a filename like "k8s-pods.md" becomes a valid tool name "k8s_pods".
-	const baseName = safeName.replace(/\.md$/, '');
-	const toolName = baseName.replace(/-/g, '_').toLowerCase();
-
-	mkdirSync(targetDir, {recursive: true});
-
-	const template = `---
+	return handleFileCreate(
+		commandParts[2],
+		{
+			entityName: 'tools',
+			usageExample: 'k8s-pods',
+			existsNoun: 'Custom tool file',
+			createdNoun: 'custom tool file',
+			// Tool names must match ^[a-z][a-z0-9_]*$ — convert dashes to
+			// underscores so a filename like "k8s-pods.md" becomes a valid
+			// tool name "k8s_pods".
+			deriveName: baseName => baseName.replace(/-/g, '_').toLowerCase(),
+			template: (_safeName, toolName) => `---
 name: ${toolName}
 description: A short description of what this tool does (shown to the LLM)
 parameters: {}
@@ -372,21 +323,11 @@ approval: always
 # parameter is provided.
 
 echo "TODO: replace this body with the command you want to run"
-`;
-
-	writeFileSync(filePath, template, 'utf-8');
-
-	onAddToChatQueue(
-		React.createElement(SuccessMessage, {
-			key: generateKey('tools-created'),
-			message: `Created custom tool file: .nanocoder/tools/${safeName}`,
-			hideBox: true,
-		}),
+`,
+			aiPrompt: buildToolDesignPrompt,
+		},
+		options,
 	);
-
-	await onHandleChatMessage(buildToolDesignPrompt(safeName, toolName));
-
-	return true;
 }
 
 /**
@@ -706,9 +647,18 @@ export async function handleCommandCreate(
 
 	return handleFileCreate(
 		commandParts[2],
-		'commands',
-		'commands',
-		buildCommandDesignPrompt,
+		{
+			entityName: 'commands',
+			usageExample: 'review-code',
+			existsNoun: 'Command file',
+			createdNoun: 'commands file',
+			template: (safeName, _commandBaseName) => `---
+description: ${safeName.replace(/\.md$/, '')} custom command
+---
+
+`,
+			aiPrompt: buildCommandDesignPrompt,
+		},
 		options,
 	);
 }

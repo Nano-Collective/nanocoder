@@ -4,6 +4,7 @@ import {fileURLToPath} from 'url';
 import {loadPreferences, savePreferences} from '@/config/preferences';
 import {TIMEOUT_UPDATE_CHECK_MS} from '@/constants';
 import type {NpmRegistryResponse, UpdateInfo} from '@/types/index';
+import {formatError} from '@/utils/error-formatter';
 import {logError} from '@/utils/message-queue';
 import {detectInstallationMethod} from './installation-detector';
 
@@ -68,7 +69,7 @@ function getCurrentVersion(): string {
 		) as PackageJson;
 		return packageJson.version;
 	} catch (error) {
-		const errorMessage = error instanceof Error ? error.message : String(error);
+		const errorMessage = formatError(error);
 		logError(`Failed to read current version: ${errorMessage}`);
 		return '0.0.0';
 	}
@@ -99,7 +100,7 @@ async function fetchLatestVersion(): Promise<string | null> {
 		const data = (await response.json()) as NpmRegistryResponse;
 		return data.version;
 	} catch (error) {
-		const errorMessage = error instanceof Error ? error.message : String(error);
+		const errorMessage = formatError(error);
 		logError(`Failed to fetch latest version: ${errorMessage}`);
 		return null;
 	}
@@ -168,7 +169,7 @@ export async function checkForUpdates(): Promise<UpdateInfo> {
 			updateMessage: updateDetails.message,
 		};
 	} catch (error) {
-		const errorMessage = error instanceof Error ? error.message : String(error);
+		const errorMessage = formatError(error);
 		logError(`Update check failed: ${errorMessage}`);
 
 		// Still update the timestamp to prevent hammering the API on repeated failures

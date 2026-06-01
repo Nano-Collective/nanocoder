@@ -20,6 +20,7 @@ import {
 	type Socket,
 } from 'node:net';
 import type {Subscription} from '@/events/types';
+import {formatError} from '@/utils/error-formatter';
 
 export interface IpcRequest {
 	id: number;
@@ -161,12 +162,7 @@ export class DaemonIpcServer {
 					);
 			}
 		} catch (err) {
-			this.respond(
-				socket,
-				req.id,
-				undefined,
-				err instanceof Error ? err.message : String(err),
-			);
+			this.respond(socket, req.id, undefined, formatError(err));
 		}
 	}
 

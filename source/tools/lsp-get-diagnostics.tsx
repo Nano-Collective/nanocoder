@@ -3,13 +3,13 @@ import {access} from 'node:fs/promises';
 import {resolve as resolvePath} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
-
 import ToolMessage from '@/components/tool-message';
 import {TIMEOUT_LSP_DIAGNOSTICS_MS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import {DiagnosticSeverity, getLSPManager} from '@/lsp/index';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {type DiagnosticInfo, getVSCodeServer} from '@/vscode/index';
 
 interface GetDiagnosticsArgs {
@@ -305,8 +305,7 @@ const getDiagnosticsValidator = async (
 				error: `Error: File "${args.path}" does not exist. Please verify the file path and try again.`,
 			};
 		}
-		const errorMessage =
-			error instanceof Error ? error.message : 'Unknown error';
+		const errorMessage = formatError(error);
 		return {
 			valid: false,
 			error: `Error: Cannot access file "${args.path}": ${errorMessage}`,

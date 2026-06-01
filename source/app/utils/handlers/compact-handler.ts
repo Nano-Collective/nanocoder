@@ -15,6 +15,7 @@ import {
 	setAutoCompactThreshold,
 } from '@/utils/auto-compact';
 import {compressionBackup} from '@/utils/compression-backup';
+import {formatError} from '@/utils/error-formatter';
 import {summariseWithLLM} from '@/utils/llm-summariser';
 import {compressMessages} from '@/utils/message-compression';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
@@ -304,7 +305,7 @@ export async function handleCompactCommand(
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
 				key: generateKey('compact-error'),
-				message: `Failed to compact messages: ${error instanceof Error ? error.message : 'Unknown error'}`,
+				message: `Failed to compact messages: ${formatError(error)}`,
 				hideBox: true,
 			}),
 		);

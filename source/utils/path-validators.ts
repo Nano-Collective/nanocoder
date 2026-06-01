@@ -1,3 +1,4 @@
+import {formatError} from '@/utils/error-formatter';
 import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
 
 type ValidationResult = {valid: true} | {valid: false; error: string};
@@ -17,8 +18,7 @@ export function validatePath(path: string): ValidationResult {
 		const cwd = process.cwd();
 		resolveFilePath(path, cwd);
 	} catch (error) {
-		const errorMessage =
-			error instanceof Error ? error.message : 'Unknown error';
+		const errorMessage = formatError(error);
 		return {
 			valid: false,
 			error: `⚒ Path validation failed: ${errorMessage}`,
@@ -54,8 +54,7 @@ export function validatePathPair(
 		resolveFilePath(source, cwd);
 		resolveFilePath(destination, cwd);
 	} catch (error) {
-		const errorMessage =
-			error instanceof Error ? error.message : 'Unknown error';
+		const errorMessage = formatError(error);
 		return {
 			valid: false,
 			error: `⚒ Path validation failed: ${errorMessage}`,

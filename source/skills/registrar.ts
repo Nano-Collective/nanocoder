@@ -37,6 +37,7 @@ import type {
 	SkillPriority,
 	SkillTrigger,
 } from '@/types/skills';
+import {formatError} from '@/utils/error-formatter';
 
 export interface SkillCollision {
 	skill: string;
@@ -187,7 +188,7 @@ function subscribeSkillTriggers(
 				skill: skill.name,
 				kind: 'subscription',
 				name: subscription.id,
-				message: err instanceof Error ? err.message : String(err),
+				message: formatError(err),
 			});
 		}
 	});

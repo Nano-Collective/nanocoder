@@ -2,6 +2,7 @@ import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {WebSocketClientTransport} from '@modelcontextprotocol/sdk/client/websocket.js';
+import {formatError} from '@/utils/error-formatter';
 
 // Union type for all supported client transports
 type ClientTransport =
@@ -224,7 +225,7 @@ export class MCPClient {
 					const result: MCPInitResult = {
 						serverName: normalizedServer.name,
 						success: false,
-						error: error instanceof Error ? error.message : String(error),
+						error: formatError(error),
 					};
 
 					this.logger.error('MCP server connection failed in batch', {
@@ -547,8 +548,7 @@ export class MCPClient {
 
 				return 'Tool executed successfully (no output)';
 			} catch (error) {
-				const errorMessage =
-					error instanceof Error ? error.message : 'Unknown error';
+				const errorMessage = formatError(error);
 				const errorName = error instanceof Error ? error.name : 'Unknown';
 
 				const finalMetrics = endMetrics(metrics);
@@ -596,8 +596,7 @@ export class MCPClient {
 					});
 				} catch (error) {
 					failedDisconnections++;
-					const errorMessage =
-						error instanceof Error ? error.message : 'Unknown error';
+					const errorMessage = formatError(error);
 					const errorName = error instanceof Error ? error.name : 'Unknown';
 
 					this.logger.error('Error disconnecting from MCP server', {

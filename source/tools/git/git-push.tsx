@@ -6,11 +6,11 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
-
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {
 	type CommitInfo,
 	execGit,
@@ -115,7 +115,7 @@ const executeGitPush = async (args: GitPushInput): Promise<string> => {
 
 		return lines.join('\n');
 	} catch (error) {
-		return `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+		return `Error: ${formatError(error)}`;
 	}
 };
 

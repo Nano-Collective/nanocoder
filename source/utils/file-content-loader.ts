@@ -1,6 +1,7 @@
 import {readFile, stat} from 'node:fs/promises';
 import {extname, resolve} from 'node:path';
 import {BINARY_FILE_EXTENSIONS, MAX_FILE_TAG_SIZE_BYTES} from '@/constants.js';
+import {formatError} from '@/utils/error-formatter';
 
 interface FileContentResult {
 	success: boolean;
@@ -169,7 +170,7 @@ export async function loadFileContent(
 		const absPath = resolve(filePath);
 		return {
 			success: false,
-			error: error instanceof Error ? error.message : 'Unknown error',
+			error: formatError(error),
 			metadata: {
 				path: filePath,
 				absolutePath: absPath,

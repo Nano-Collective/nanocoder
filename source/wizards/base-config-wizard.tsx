@@ -15,6 +15,7 @@ import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {getColors} from '@/config/index';
 import {getConfigPath} from '@/config/paths';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
+import {formatError} from '@/utils/error-formatter';
 import {logError, logInfo} from '@/utils/message-queue';
 import {type ConfigLocation, LocationStep} from './steps/location-step';
 
@@ -110,14 +111,14 @@ export function BaseConfigWizard<T>({
 					} catch (err) {
 						logError('Failed to load configuration', true, {
 							context: {configPath},
-							error: err instanceof Error ? err.message : String(err),
+							error: formatError(err),
 						});
 					}
 				}
 			} catch (err) {
 				logError('Failed to load existing configuration', true, {
 					context: {configPath},
-					error: err instanceof Error ? err.message : String(err),
+					error: formatError(err),
 				});
 			}
 		});

@@ -181,10 +181,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		buildConfig: answers => ({
 			name: answers.providerName || 'ollama',
 			baseUrl: answers.baseUrl || 'http://localhost:11434/v1',
-			models: answers.model
-				.split(',')
-				.map(m => m.trim())
-				.filter(Boolean),
+			models: parseArrayField(answers.model),
 		}),
 	},
 	{
@@ -213,10 +210,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		buildConfig: answers => ({
 			name: answers.providerName || 'llama-cpp',
 			baseUrl: answers.baseUrl || 'http://localhost:8080/v1',
-			models: answers.model
-				.split(',')
-				.map(m => m.trim())
-				.filter(Boolean),
+			models: parseArrayField(answers.model),
 		}),
 	},
 	{
@@ -245,10 +239,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		buildConfig: answers => ({
 			name: answers.providerName || 'MLX Server',
 			baseUrl: answers.baseUrl || 'http://localhost:8080/v1',
-			models: answers.model
-				.split(',')
-				.map(m => m.trim())
-				.filter(Boolean),
+			models: parseArrayField(answers.model),
 		}),
 	},
 	{
@@ -277,10 +268,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		buildConfig: answers => ({
 			name: answers.providerName || 'LM Studio',
 			baseUrl: answers.baseUrl || 'http://localhost:1234/v1',
-			models: answers.model
-				.split(',')
-				.map(m => m.trim())
-				.filter(Boolean),
+			models: parseArrayField(answers.model),
 		}),
 	},
 	{
@@ -310,10 +298,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			sdkProvider: 'google',
 			baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
 			apiKey: answers.apiKey,
-			models: answers.model
-				.split(',')
-				.map(m => m.trim())
-				.filter(Boolean),
+			models: parseArrayField(answers.model),
 		}),
 	},
 	{
@@ -433,10 +418,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 				name: answers.providerName || 'OpenAI',
 				baseUrl: 'https://api.openai.com/v1',
 				apiKey: answers.apiKey,
-				models: answers.model
-					.split(',')
-					.map(m => m.trim())
-					.filter(Boolean),
+				models: parseArrayField(answers.model),
 			};
 			if (answers.organizationId) {
 				config.organizationId = answers.organizationId;
@@ -471,10 +453,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			sdkProvider: 'anthropic',
 			baseUrl: 'https://api.anthropic.com/v1',
 			apiKey: answers.apiKey,
-			models: answers.model
-				.split(',')
-				.map(m => m.trim())
-				.filter(Boolean),
+			models: parseArrayField(answers.model),
 		}),
 	},
 	{
@@ -503,10 +482,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			name: answers.providerName || 'Mistral AI',
 			baseUrl: 'https://api.mistral.ai/v1',
 			apiKey: answers.apiKey,
-			models: answers.model
-				.split(',')
-				.map(m => m.trim())
-				.filter(Boolean),
+			models: parseArrayField(answers.model),
 		}),
 	},
 	{
@@ -536,10 +512,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			name: answers.providerName || 'Z.ai',
 			baseUrl: 'https://api.z.ai/api/paas/v4/',
 			apiKey: answers.apiKey,
-			models: answers.model
-				.split(',')
-				.map(m => m.trim())
-				.filter(Boolean),
+			models: parseArrayField(answers.model),
 		}),
 	},
 	{
@@ -569,10 +542,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			name: answers.providerName || 'Z.ai Coding Subscription',
 			baseUrl: 'https://api.z.ai/api/coding/paas/v4/',
 			apiKey: answers.apiKey,
-			models: answers.model
-				.split(',')
-				.map(m => m.trim())
-				.filter(Boolean),
+			models: parseArrayField(answers.model),
 		}),
 	},
 	{
@@ -601,10 +571,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			name: answers.providerName || 'GitHub Models',
 			baseUrl: 'https://models.github.ai/inference',
 			apiKey: answers.apiKey,
-			models: answers.model
-				.split(',')
-				.map(m => m.trim())
-				.filter(Boolean),
+			models: parseArrayField(answers.model),
 		}),
 	},
 	{
@@ -626,10 +593,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		buildConfig: answers => ({
 			name: answers.providerName || 'ChatGPT / Codex',
 			baseUrl: 'https://chatgpt.com/backend-api/codex',
-			models: answers.model
-				.split(',')
-				.map(m => m.trim())
-				.filter(Boolean),
+			models: parseArrayField(answers.model),
 			sdkProvider: 'chatgpt-codex',
 		}),
 	},
@@ -652,10 +616,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		buildConfig: answers => ({
 			name: answers.providerName || 'GitHub Copilot',
 			baseUrl: 'https://api.githubcopilot.com',
-			models: answers.model
-				.split(',')
-				.map(m => m.trim())
-				.filter(Boolean),
+			models: parseArrayField(answers.model),
 			sdkProvider: 'github-copilot',
 		}),
 	},
@@ -686,10 +647,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			sdkProvider: 'anthropic',
 			baseUrl: 'https://api.kimi.com/coding/v1',
 			apiKey: answers.apiKey,
-			models: answers.model
-				.split(',')
-				.map(m => m.trim())
-				.filter(Boolean),
+			models: parseArrayField(answers.model),
 		}),
 	},
 	{
@@ -719,10 +677,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			sdkProvider: 'anthropic',
 			baseUrl: 'https://api.minimax.io/anthropic/v1',
 			apiKey: answers.apiKey,
-			models: answers.model
-				.split(',')
-				.map(m => m.trim())
-				.filter(Boolean),
+			models: parseArrayField(answers.model),
 		}),
 	},
 	{
@@ -751,10 +706,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			name: answers.providerName || 'Poe',
 			baseUrl: 'https://api.poe.com/v1',
 			apiKey: answers.apiKey,
-			models: answers.model
-				.split(',')
-				.map(m => m.trim())
-				.filter(Boolean),
+			models: parseArrayField(answers.model),
 		}),
 	},
 	{
@@ -801,10 +753,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			const config: ProviderConfig = {
 				name: answers.providerName,
 				baseUrl: answers.baseUrl,
-				models: answers.model
-					.split(',')
-					.map(m => m.trim())
-					.filter(Boolean),
+				models: parseArrayField(answers.model),
 			};
 			if (answers.apiKey) {
 				config.apiKey = answers.apiKey;

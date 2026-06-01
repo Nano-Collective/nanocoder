@@ -13,6 +13,7 @@ import {
 } from '@/plain/writer';
 import {getTuneToolMode} from '@/types/config';
 import type {DevelopmentMode, Message} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 import {getShutdownManager} from '@/utils/shutdown';
 
@@ -50,7 +51,7 @@ export async function runPlainShell(
 	try {
 		init = await initializePlain({cliProvider, cliModel});
 	} catch (error) {
-		writeError(error instanceof Error ? error.message : String(error));
+		writeError(formatError(error));
 		await shutdown(1);
 		return;
 	}

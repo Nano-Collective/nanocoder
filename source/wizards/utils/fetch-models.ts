@@ -9,6 +9,8 @@
  * - google: GET {baseUrl}/models with x-goog-api-key header
  */
 
+import {formatError} from '@/utils/error-formatter';
+
 export interface FetchedModel {
 	id: string;
 	name: string;
@@ -139,7 +141,7 @@ export async function fetchModels(
 		return {
 			success: false,
 			models: [],
-			error: err instanceof Error ? err.message : 'Unknown error',
+			error: formatError(err),
 		};
 	}
 }

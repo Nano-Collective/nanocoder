@@ -2,6 +2,7 @@ import {useEffect, useRef} from 'react';
 import {getAppConfig} from '@/config/index';
 import {sessionManager} from '@/session/session-manager';
 import type {Message} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {logWarning} from '@/utils/message-queue';
 
 interface UseSessionAutosaveProps {
@@ -51,7 +52,7 @@ export function useSessionAutosave({
 				.then(() => true)
 				.catch(error => {
 					logWarning(
-						`Session autosave disabled: failed to initialize session storage. ${error instanceof Error ? error.message : String(error)}`,
+						`Session autosave disabled: failed to initialize session storage. ${formatError(error)}`,
 					);
 					return false;
 				});

@@ -22,6 +22,7 @@ import type {
 	Message,
 	ToolCall,
 } from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {signalToolApproval} from '@/utils/tool-approval-queue';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {toolNeedsApproval} from '@/utils/tool-needs-approval';
@@ -157,7 +158,7 @@ export class SubagentExecutor {
 				subagentName: task.subagent_type,
 				output: '',
 				success: false,
-				error: error instanceof Error ? error.message : String(error),
+				error: formatError(error),
 				executionTimeMs: Date.now() - startTime,
 			};
 		}
@@ -536,7 +537,7 @@ export class SubagentExecutor {
 			const parsedArgs = parseToolArguments(rawArguments);
 			return await toolHandler(parsedArgs);
 		} catch (error) {
-			return `Error: ${error instanceof Error ? error.message : String(error)}`;
+			return `Error: ${formatError(error)}`;
 		}
 	}
 }

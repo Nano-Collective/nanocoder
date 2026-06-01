@@ -2,11 +2,11 @@ import {lstat, readdir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
-
 import ToolMessage from '@/components/tool-message';
 import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {loadGitignore} from '@/utils/gitignore-loader';
 import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
 import {calculateTokens} from '@/utils/token-calculator';
@@ -173,8 +173,7 @@ const executeListDirectory = async (
 		if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
 			throw new Error(`Directory "${dirPath}" does not exist`);
 		}
-		const errorMessage =
-			error instanceof Error ? error.message : 'Unknown error';
+		const errorMessage = formatError(error);
 		throw new Error(`Failed to list directory: ${errorMessage}`);
 	}
 };

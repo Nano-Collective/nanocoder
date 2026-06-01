@@ -16,6 +16,7 @@ import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
 import {clearAllTasks} from '@/tools/tasks/storage';
 import type {LLMClient} from '@/types/core';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
+import {formatError} from '@/utils/error-formatter';
 import {handleCompactCommand} from './handlers/compact-handler';
 import {handleContextMaxCommand} from './handlers/context-max-handler';
 import {
@@ -130,13 +131,6 @@ export function parseCustomCommandArgs(input: string): string[] {
 }
 
 /**
- * Extracts error message from an unknown error
- */
-function getErrorMessage(error: unknown, fallback = 'Unknown error'): string {
-	return error instanceof Error ? error.message : fallback;
-}
-
-/**
  * Handles bash commands prefixed with !
  */
 async function handleBashCommand(
@@ -192,7 +186,7 @@ async function handleBashCommand(
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
 				key: generateKey('bash-error'),
-				message: `Error executing command: ${getErrorMessage(error, String(error))}`,
+				message: `Error executing command: ${formatError(error)}`,
 				hideBox: true,
 			}),
 		);
@@ -413,7 +407,7 @@ async function handleCheckpointLoad(
 		onAddToChatQueue(
 			React.createElement(ErrorMessage, {
 				key: generateKey('checkpoint-error'),
-				message: `Failed to list checkpoints: ${getErrorMessage(error)}`,
+				message: `Failed to list checkpoints: ${formatError(error)}`,
 				hideBox: true,
 			}),
 		);

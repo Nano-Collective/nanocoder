@@ -13,6 +13,7 @@ import {getClosestConfigFile} from '@/config/index';
 import {loadAllProviderConfigs} from '@/config/mcp-config-loader';
 import {loadPreferences} from '@/config/preferences';
 import type {AIProviderConfig, LLMClient} from '@/types/index';
+import {formatError} from '@/utils/error-formatter';
 import {isLocalURL} from '@/utils/url-utils';
 
 // Custom error class for configuration errors that need special UI handling
@@ -171,8 +172,7 @@ async function createAISDKClient(
 
 			return {client, actualProvider: providerType};
 		} catch (error: unknown) {
-			const errorMessage =
-				error instanceof Error ? error.message : 'Unknown error';
+			const errorMessage = formatError(error);
 			errors.push(`${providerType}: ${errorMessage}`);
 		}
 	}

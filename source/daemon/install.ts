@@ -27,6 +27,7 @@ import {readFile, unlink, writeFile} from 'node:fs/promises';
 import {homedir} from 'node:os';
 import {dirname, join} from 'node:path';
 import {promisify} from 'node:util';
+import {formatError} from '@/utils/error-formatter';
 
 const execFileAsync = promisify(execFile);
 
@@ -257,7 +258,7 @@ export async function installAutoStart(
 				return {
 					platform,
 					written: target,
-					message: `Wrote ${target} but launchctl load failed: ${err instanceof Error ? err.message : String(err)}`,
+					message: `Wrote ${target} but launchctl load failed: ${formatError(err)}`,
 				};
 			}
 		}
@@ -286,7 +287,7 @@ export async function installAutoStart(
 				return {
 					platform,
 					written: target,
-					message: `Wrote ${target} but systemctl enable failed: ${err instanceof Error ? err.message : String(err)}`,
+					message: `Wrote ${target} but systemctl enable failed: ${formatError(err)}`,
 				};
 			}
 		}
@@ -321,7 +322,7 @@ export async function installAutoStart(
 				return {
 					platform,
 					written: target,
-					message: `Wrote ${target} but schtasks /Create failed: ${err instanceof Error ? err.message : String(err)}`,
+					message: `Wrote ${target} but schtasks /Create failed: ${formatError(err)}`,
 				};
 			}
 		}

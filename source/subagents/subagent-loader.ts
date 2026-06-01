@@ -11,6 +11,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {formatError} from '@/utils/error-formatter';
 import {logError, logWarning} from '@/utils/message-queue';
 import type {SubagentConfigWithSource, SubagentLoadPriority} from './types.js';
 
@@ -276,7 +277,7 @@ export class SubagentLoader {
 					subscribe: parsed.subscribe,
 				});
 			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
+				const message = formatError(error);
 				this.loadErrors.push({filePath, message});
 				logError(`Failed to load agent from ${filePath}: ${message}`);
 			}

@@ -7,6 +7,7 @@ import {EventEmitter} from 'node:events';
 import {readFile} from 'fs/promises';
 import {extname} from 'path';
 import {fileURLToPath} from 'url';
+import {formatError} from '@/utils/error-formatter';
 import {getShutdownManager} from '@/utils/shutdown';
 import {LSPClient, LSPServerConfig} from './lsp-client';
 import {
@@ -158,7 +159,7 @@ export class LSPManager extends EventEmitter {
 			return {
 				serverName: config.name,
 				success: false,
-				error: error instanceof Error ? error.message : String(error),
+				error: formatError(error),
 			};
 		}
 	}
