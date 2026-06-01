@@ -48,7 +48,6 @@ import {setGlobalMessageQueue} from '@/utils/message-queue';
 import {setNotificationsConfig} from '@/utils/notifications';
 import {getShutdownManager} from '@/utils/shutdown';
 import {isExtensionInstalled} from '@/vscode/extension-installer';
-import {shouldRenderWelcome} from './helpers';
 
 export default function App({
 	vscodeMode = false,
@@ -471,7 +470,7 @@ export default function App({
 		setCurrentSessionId: appState.setCurrentSessionId,
 	});
 
-	const shouldShowWelcome = shouldRenderWelcome(nonInteractiveMode);
+	const shouldShowWelcome = !nonInteractiveMode;
 
 	// Memoize static components. We pin the run-mode header to the
 	// initial development mode so it never changes during the run — the

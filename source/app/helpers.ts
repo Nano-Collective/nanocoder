@@ -4,13 +4,6 @@ import type {
 } from './types';
 
 /**
- * Helper function to determine if welcome message should be rendered
- */
-export function shouldRenderWelcome(nonInteractiveMode?: boolean): boolean {
-	return !nonInteractiveMode;
-}
-
-/**
  * Helper function to determine if non-interactive mode processing is complete
  */
 export function isNonInteractiveModeComplete(
@@ -20,7 +13,6 @@ export function isNonInteractiveModeComplete(
 ): NonInteractiveCompletionResult {
 	const isComplete =
 		!appState.isToolExecuting && !appState.isToolConfirmationMode;
-	const _hasMessages = appState.messages.length > 0;
 	const hasTimedOut = Date.now() - startTime > maxExecutionTimeMs;
 
 	// Check for error messages in the messages array (only check role, not content)

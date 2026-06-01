@@ -1,15 +1,6 @@
 import test from 'ava';
-import {isNonInteractiveModeComplete, shouldRenderWelcome} from './helpers';
+import {isNonInteractiveModeComplete} from './helpers';
 import type {NonInteractiveModeState} from './types';
-
-test('shouldRenderWelcome returns true when not in non-interactive mode', t => {
-	t.true(shouldRenderWelcome(false));
-	t.true(shouldRenderWelcome(undefined));
-});
-
-test('shouldRenderWelcome returns false when in non-interactive mode', t => {
-	t.false(shouldRenderWelcome(true));
-});
 
 test('isNonInteractiveModeComplete returns timeout when time exceeded', t => {
 	const state: NonInteractiveModeState = {

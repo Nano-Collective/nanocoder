@@ -10,7 +10,7 @@ import {
 } from '@/constants';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-import {databaseEngine} from '@/model-database/database-engine';
+import {modelMatchingEngine} from '@/model-database/model-engine';
 import {Colors, Command, ModelEntry} from '@/types/index';
 
 type TabType = 'latest' | 'open' | 'proprietary';
@@ -127,7 +127,7 @@ function ModelDatabaseDisplay({onCancel}: ModelDatabaseDisplayProps) {
 	useEffect(() => {
 		async function loadModels() {
 			try {
-				const result = await databaseEngine.getDatabasesAsync();
+				const result = await modelMatchingEngine.getModelsAsync();
 
 				setOpenModels(result.openModels);
 				setProprietaryModels(result.proprietaryModels);
