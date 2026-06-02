@@ -97,10 +97,6 @@ export const CACHE_FILE_LIST_TTL_MS = 5000;
 // === FETCH URL ===
 export const MAX_URL_CONTENT_BYTES = 100_000; // ~100 KB
 
-// === LOGGING ===
-export const BUFFER_LOG_BYTES = 65_536; // 64 KB
-export const INTERVAL_LOG_FLUSH_MS = 1000;
-
 // === AI SDK ===
 export const MAX_TOOL_STEPS = 10;
 // Cap how many consecutive empty assistant turns we'll auto-nudge through

@@ -10,11 +10,6 @@ export interface LocalModel {
 }
 
 export type LocalModelsEndpointType = 'ollama' | 'openai-compatible';
-export type CloudModelsEndpointType =
-	| 'anthropic'
-	| 'openai'
-	| 'mistral'
-	| 'github';
 interface OllamaResponse {
 	models: Array<{name: string}>;
 }
