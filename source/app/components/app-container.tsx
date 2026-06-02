@@ -4,7 +4,21 @@ import WelcomeMessage from '@/components/welcome-message';
 import {getClosestConfigFile} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
+import {
+	type GitStatusSummary,
+	getGitStatusSummarySync,
+} from '@/tools/git/utils';
 import {DEVELOPMENT_MODE_LABELS, type DevelopmentMode} from '@/types/core';
+
+/**
+ * Format a {@link GitStatusSummary} for inline display next to the
+ * provider/model/config segment of the boot summary.
+ */
+export function formatGitStatusSummary(status: GitStatusSummary): string {
+	if (status.detached) return `⎇ ${status.branch} (detached)`;
+	if (status.isDefault) return `⎇ ${status.branch} (default)`;
+	return `⎇ ${status.branch}`;
+}
 
 export interface AppContainerProps {
 	shouldShowWelcome: boolean;
@@ -43,8 +57,10 @@ function BootSummary({
 	const homedir = process.env.HOME || process.env.USERPROFILE || '';
 	const shortConfig = homedir ? configPath.replace(homedir, '~') : configPath;
 	const modeLabel = mode ? DEVELOPMENT_MODE_LABELS[mode] : undefined;
+	const gitStatus = getGitStatusSummarySync();
+	const gitLabel = gitStatus ? formatGitStatusSummary(gitStatus) : undefined;
 
-	// Narrow terminals: just provider + model + mode, skip the config path
+	// Narrow terminals: just provider + model + mode + branch, skip the config path
 	if (isNarrow) {
 		if (!provider || !model) return <></>;
 		return (
@@ -58,6 +74,12 @@ function BootSummary({
 					<>
 						<Text color={colors.secondary}> · </Text>
 						<Text color={colors.info}>{modeLabel}</Text>
+					</>
+				)}
+				{gitLabel && (
+					<>
+						<Text color={colors.secondary}> · </Text>
+						<Text color={colors.primary}>{gitLabel}</Text>
 					</>
 				)}
 			</Text>
@@ -81,9 +103,23 @@ function BootSummary({
 					)}
 					<Text color={colors.secondary}> · </Text>
 					<Text color={colors.secondary}>{shortConfig}</Text>
+					{gitLabel && (
+						<>
+							<Text color={colors.secondary}> · </Text>
+							<Text color={colors.primary}>{gitLabel}</Text>
+						</>
+					)}
 				</>
 			) : (
-				<Text color={colors.secondary}>{shortConfig}</Text>
+				<>
+					<Text color={colors.secondary}>{shortConfig}</Text>
+					{gitLabel && (
+						<>
+							<Text color={colors.secondary}> · </Text>
+							<Text color={colors.primary}>{gitLabel}</Text>
+						</>
+					)}
+				</>
 			)}
 		</Text>
 	);

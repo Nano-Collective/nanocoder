@@ -1,7 +1,13 @@
+import {mkdtempSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import React from 'react';
 import {renderWithTheme} from '../../test-utils/render-with-theme';
-import {createStaticComponents} from './app-container';
+import {
+	createStaticComponents,
+	formatGitStatusSummary,
+} from './app-container';
 import type {AppContainerProps} from './app-container';
 
 test('createStaticComponents includes welcome message when shouldShowWelcome is true', t => {
@@ -120,3 +126,105 @@ test('createStaticComponents omits mode label when interactive', t => {
 	t.notRegex(output!, /yolo/);
 	unmount();
 });
+
+// ============================================================================
+// Boot Summary — Git Branch Display
+// ============================================================================
+
+test('formatGitStatusSummary renders feature branch with ⎇ prefix', t => {
+	t.is(
+		formatGitStatusSummary({
+			branch: 'fix/read-file-empty',
+			isDefault: false,
+			detached: false,
+		}),
+		'⎇ fix/read-file-empty',
+	);
+});
+
+test('formatGitStatusSummary marks the default branch', t => {
+	t.is(
+		formatGitStatusSummary({branch: 'main', isDefault: true, detached: false}),
+		'⎇ main (default)',
+	);
+});
+
+test('formatGitStatusSummary marks detached HEAD', t => {
+	t.is(
+		formatGitStatusSummary({
+			branch: 'abc1234',
+			isDefault: false,
+			detached: true,
+		}),
+		'⎇ abc1234 (detached)',
+	);
+});
+
+test.serial(
+	'createStaticComponents boot summary includes git branch when inside a repo',
+	t => {
+		// The repo we're running tests in is itself a git repo, so the
+		// boot summary should pick it up via getGitStatusSummarySync().
+		const props: AppContainerProps = {
+			shouldShowWelcome: false,
+			currentProvider: 'test-provider',
+			currentModel: 'test-model',
+		};
+
+		const components = createStaticComponents(props);
+		const {lastFrame, unmount} = renderWithTheme(<>{components}</>);
+		const output = lastFrame();
+		t.truthy(output);
+		t.regex(output!, /⎇\s+\S+/);
+		unmount();
+	},
+);
+
+test.serial(
+	'createStaticComponents boot summary omits branch when not in a repo',
+	t => {
+		const dir = mkdtempSync(join(tmpdir(), 'nanocoder-boot-test-'));
+		const originalCwd = process.cwd();
+		try {
+			process.chdir(dir);
+			const props: AppContainerProps = {
+				shouldShowWelcome: false,
+				currentProvider: 'test-provider',
+				currentModel: 'test-model',
+			};
+
+			const components = createStaticComponents(props);
+			const {lastFrame, unmount} = renderWithTheme(<>{components}</>);
+			const output = lastFrame();
+			t.truthy(output);
+			t.notRegex(output!, /⎇/);
+			unmount();
+		} finally {
+			process.chdir(originalCwd);
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'createStaticComponents narrow boot summary still includes branch',
+	t => {
+		const originalColumns = process.stdout.columns;
+		process.stdout.columns = 50;
+		try {
+			const props: AppContainerProps = {
+				shouldShowWelcome: false,
+				currentProvider: 'test-provider',
+				currentModel: 'test-model',
+			};
+			const components = createStaticComponents(props);
+			const {lastFrame, unmount} = renderWithTheme(<>{components}</>);
+			const output = lastFrame();
+			t.truthy(output);
+			t.regex(output!, /⎇/);
+			unmount();
+		} finally {
+			process.stdout.columns = originalColumns;
+		}
+	},
+);

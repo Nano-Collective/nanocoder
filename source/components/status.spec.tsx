@@ -754,3 +754,117 @@ test('Status handles very long model names', t => {
 
 	process.stdout.columns = originalColumns;
 });
+
+// ============================================================================
+// Git Branch Line Tests
+// ============================================================================
+
+test('Status shows Git line for a feature branch in normal layout', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 80;
+
+	const {lastFrame} = renderWithTheme(
+		<Status
+			{...defaultProps}
+			gitStatus={{
+				branch: 'fix/read-file-empty',
+				isDefault: false,
+				detached: false,
+			}}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Git:/);
+	t.regex(output!, /fix\/read-file-empty/);
+	t.notRegex(output!, /\(default\)/);
+	t.notRegex(output!, /detached/);
+
+	process.stdout.columns = originalColumns;
+});
+
+test('Status marks default branch in normal layout', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 80;
+
+	const {lastFrame} = renderWithTheme(
+		<Status
+			{...defaultProps}
+			gitStatus={{branch: 'main', isDefault: true, detached: false}}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Git:/);
+	t.regex(output!, /main \(default\)/);
+
+	process.stdout.columns = originalColumns;
+});
+
+test('Status marks detached HEAD in normal layout', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 80;
+
+	const {lastFrame} = renderWithTheme(
+		<Status
+			{...defaultProps}
+			gitStatus={{branch: 'abc1234', isDefault: false, detached: true}}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Git:/);
+	t.regex(output!, /abc1234 \(detached HEAD\)/);
+
+	process.stdout.columns = originalColumns;
+});
+
+test('Status omits Git line when gitStatus is null', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 80;
+
+	const {lastFrame} = renderWithTheme(
+		<Status {...defaultProps} gitStatus={null} />,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /Git:/);
+
+	process.stdout.columns = originalColumns;
+});
+
+test('Status omits Git line when gitStatus is undefined', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 80;
+
+	const {lastFrame} = renderWithTheme(<Status {...defaultProps} />);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /Git:/);
+
+	process.stdout.columns = originalColumns;
+});
+
+test('Status shows Git line in narrow layout', t => {
+	const originalColumns = process.stdout.columns;
+	process.stdout.columns = 50;
+
+	const {lastFrame} = renderWithTheme(
+		<Status
+			{...defaultProps}
+			gitStatus={{branch: 'main', isDefault: true, detached: false}}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Git:/);
+	t.regex(output!, /main/);
+
+	process.stdout.columns = originalColumns;
+});
