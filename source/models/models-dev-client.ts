@@ -9,7 +9,12 @@ import type {AIProviderConfig, ProviderConfig} from '@/types/config';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
 import {readCache, writeCache} from './models-cache.js';
-import type {ModelInfo, ModelsDevDatabase} from './models-types.js';
+import type {
+	ModelInfo,
+	ModelsDevDatabase,
+	ModelsDevModel,
+	ModelsDevProvider,
+} from './models-types.js';
 
 const MODELS_DEV_API_URL = 'https://models.dev/api.json';
 
@@ -186,6 +191,27 @@ async function getModelsData(): Promise<ModelsDevDatabase | null> {
 }
 
 /**
+ * Project a models.dev model + its provider into our ModelInfo shape.
+ */
+function createModelInfo(
+	model: ModelsDevModel,
+	provider: ModelsDevProvider,
+): ModelInfo {
+	return {
+		id: model.id,
+		name: model.name,
+		provider: provider.name,
+		contextLimit: model.limit?.context ?? null,
+		outputLimit: model.limit?.output ?? null,
+		supportsToolCalls: model.tool_call ?? false,
+		cost: {
+			input: model.cost?.input ?? 0,
+			output: model.cost?.output ?? 0,
+		},
+	};
+}
+
+/**
  * Find a model by ID across all providers
  * Returns the model info and provider name
  */
@@ -212,18 +238,7 @@ async function findModelById(modelId: string): Promise<ModelInfo | null> {
 					(bestMatch.contextLimit === null ||
 						contextLimit > bestMatch.contextLimit))
 			) {
-				bestMatch = {
-					id: model.id,
-					name: model.name,
-					provider: provider.name,
-					contextLimit,
-					outputLimit: model.limit?.output ?? null,
-					supportsToolCalls: model.tool_call ?? false,
-					cost: {
-						input: model.cost?.input ?? 0,
-						output: model.cost?.output ?? 0,
-					},
-				};
+				bestMatch = createModelInfo(model, provider);
 			}
 		}
 	}
@@ -270,18 +285,7 @@ async function findModelByName(modelName: string): Promise<ModelInfo | null> {
 
 			// Exact ID match → return immediately
 			if (modelIdLower === lowerName) {
-				return {
-					id: model.id,
-					name: model.name,
-					provider: provider.name,
-					contextLimit: model.limit?.context ?? null,
-					outputLimit: model.limit?.output ?? null,
-					supportsToolCalls: model.tool_call ?? false,
-					cost: {
-						input: model.cost?.input ?? 0,
-						output: model.cost?.output ?? 0,
-					},
-				};
+				return createModelInfo(model, provider);
 			}
 
 			// ID starts with search term → high score
@@ -302,18 +306,7 @@ async function findModelByName(modelName: string): Promise<ModelInfo | null> {
 
 			if (score > bestScore) {
 				bestScore = score;
-				bestMatch = {
-					id: model.id,
-					name: model.name,
-					provider: provider.name,
-					contextLimit: model.limit?.context ?? null,
-					outputLimit: model.limit?.output ?? null,
-					supportsToolCalls: model.tool_call ?? false,
-					cost: {
-						input: model.cost?.input ?? 0,
-						output: model.cost?.output ?? 0,
-					},
-				};
+				bestMatch = createModelInfo(model, provider);
 			}
 		}
 	}

@@ -220,70 +220,31 @@ function addTypedMessage(
 }
 
 // Enhanced convenience functions with additional context
-export function logInfo(
-	message: string,
-	hideBox: boolean = true,
-	options?: {
-		source?: string;
-		// biome-ignore lint/suspicious/noExplicitAny: Dynamic format args
-		context?: Record<string, any>;
-		correlationId?: string;
-	},
-) {
-	addTypedMessage('info', message, hideBox, {
-		...options,
-		source: options?.source || 'logInfo',
-	});
+interface LogOptions {
+	source?: string;
+	// biome-ignore lint/suspicious/noExplicitAny: Dynamic format args
+	context?: Record<string, any>;
+	correlationId?: string;
+	error?: unknown;
 }
 
-export function logError(
-	message: string,
-	hideBox: boolean = true,
-	options?: {
-		source?: string;
-		// biome-ignore lint/suspicious/noExplicitAny: Dynamic format args
-		context?: Record<string, any>;
-		correlationId?: string;
-		error?: unknown;
-	},
-) {
-	addTypedMessage('error', message, hideBox, {
-		...options,
-		source: options?.source || 'logError',
-	});
+/**
+ * Build a typed `log<Level>` convenience function. The default `source` is the
+ * function's own name so log lines stay attributable when callers omit it.
+ */
+function makeLogFn(type: MessageType, defaultSource: string) {
+	return (message: string, hideBox: boolean = true, options?: LogOptions) => {
+		addTypedMessage(type, message, hideBox, {
+			...options,
+			source: options?.source || defaultSource,
+		});
+	};
 }
 
-export function logSuccess(
-	message: string,
-	hideBox: boolean = true,
-	options?: {
-		source?: string;
-		// biome-ignore lint/suspicious/noExplicitAny: Dynamic format args
-		context?: Record<string, any>;
-		correlationId?: string;
-	},
-) {
-	addTypedMessage('success', message, hideBox, {
-		...options,
-		source: options?.source || 'logSuccess',
-	});
-}
-
-export function logWarning(
-	message: string,
-	hideBox: boolean = true,
-	options?: {
-		source?: string;
-		// biome-ignore lint/suspicious/noExplicitAny: Dynamic format args
-		context?: Record<string, any>;
-		correlationId?: string;
-	},
-) {
-	addTypedMessage('warning', message, hideBox, {
-		...options,
-		source: options?.source || 'logWarning',
-	});
-}
+export const logInfo = makeLogFn('info', 'logInfo');
+export const logError = makeLogFn('error', 'logError');
+export const logSuccess = makeLogFn('success', 'logSuccess');
+export const logWarning = makeLogFn('warning', 'logWarning');
 
 // Specialized logging functions for common scenarios
 export function logApiCall(
