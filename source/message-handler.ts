@@ -1,8 +1,8 @@
 import type {CustomCommandLoader} from '@/custom-commands/loader';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {ToolCall, ToolHandler, ToolResult} from '@/types/index';
-import {formatError} from '@/utils/error-formatter';
 import {parseToolArguments} from '@/utils/tool-args-parser';
+import {toolErrorToContent} from '@/utils/tool-validation';
 
 // This will be set by the ChatSession
 let toolRegistryGetter: (() => Record<string, ToolHandler>) | null = null;
@@ -64,20 +64,32 @@ export async function processToolUse(toolCall: ToolCall): Promise<ToolResult> {
 			{strict: true},
 		);
 		const result = await handler(parsedArgs);
+		// Handlers may return a plain string or structured output. Only an
+		// object carrying `llmContent` is treated as structured; anything else
+		// (string, or a legacy undefined) passes through as the content.
+		if (result && typeof result === 'object' && 'llmContent' in result) {
+			return {
+				tool_call_id: toolCall.id,
+				role: 'tool',
+				name: toolCall.function.name,
+				content: result.llmContent,
+				structuredContent: result.structured,
+			};
+		}
 		return {
 			tool_call_id: toolCall.id,
 			role: 'tool',
 			name: toolCall.function.name,
-			content: result,
+			content: result as string,
 		};
 	} catch (error) {
-		// Convert exceptions to error messages that the model can see and correct
-		const errorMessage = `Error: ${formatError(error)}`;
+		// Convert exceptions (including validation failures thrown by the
+		// validated handler) into content the model can see and correct.
 		return {
 			tool_call_id: toolCall.id,
 			role: 'tool',
 			name: toolCall.function.name,
-			content: errorMessage,
+			content: toolErrorToContent(error),
 		};
 	}
 }

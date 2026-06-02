@@ -1,4 +1,4 @@
-import {type Tool as AISDKTool, jsonSchema, tool} from 'ai';
+import {type Tool as AISDKTool, type JSONValue, jsonSchema, tool} from 'ai';
 import React from 'react';
 import type {AIProviderConfig} from '@/types/config';
 
@@ -33,6 +33,10 @@ export interface Message {
 	tool_call_id?: string;
 	name?: string;
 	reasoning?: string;
+	// For tool messages: an optional structured payload sent to the model as a
+	// JSON tool result instead of the plain `content` text. `content` remains
+	// the canonical string for display, persistence, and as the fallback.
+	structuredContent?: JSONValue;
 }
 
 export interface ToolCall {
@@ -47,7 +51,11 @@ export interface ToolResult {
 	tool_call_id: string;
 	role: 'tool';
 	name: string;
+	/** Canonical string output: used for display, persistence, and as the
+	 * fallback model representation when `structuredContent` is absent. */
 	content: string;
+	/** Optional structured payload sent to the model as a JSON tool result. */
+	structuredContent?: JSONValue;
 }
 
 export interface ToolParameterSchema {
@@ -69,9 +77,23 @@ export interface Tool {
 	};
 }
 
+/**
+ * Structured tool output. A tool returns this (instead of a bare string) when
+ * the model benefits from a typed payload it can reason over precisely (e.g.
+ * a diagnostics list). `llmContent` is the equivalent text used for display,
+ * persistence, and as a fallback; `structured` is sent to the model as JSON.
+ */
+export interface StructuredToolOutput {
+	llmContent: string;
+	structured: JSONValue;
+}
+
+/** What a tool's execute/handler may return: a plain string or structured output. */
+export type ToolExecuteResult = string | StructuredToolOutput;
+
 // Tool handlers accept dynamic args from LLM, so any is appropriate here
 // biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required -- Tool arguments are dynamically typed
-export type ToolHandler = (input: any) => Promise<string>;
+export type ToolHandler = (input: any) => Promise<ToolExecuteResult>;
 
 /**
  * Tool formatter type for Ink UI
@@ -88,13 +110,35 @@ export type ToolFormatter = (
 	| Promise<React.ReactElement>;
 
 /**
- * Tool validator type for pre-execution validation
- * Returns validation result with optional error message
+ * Structured detail for a single validation failure. Optional alongside the
+ * human-readable `error` message; when present it gives a self-correcting LLM
+ * field-level specifics (which argument, what was expected, what arrived)
+ * instead of only a freeform sentence.
+ */
+export interface ValidationErrorDetail {
+	/** The offending argument/field name (e.g. "command"). */
+	path?: string;
+	/** What the field should have been (e.g. "string", "non-empty"). */
+	expected?: string;
+	/** What the field actually was (e.g. "undefined", "number"). */
+	received?: string;
+	/** Optional extra explanation for this specific field. */
+	message?: string;
+}
+
+export type ToolValidationResult =
+	| {valid: true}
+	| {valid: false; error: string; details?: ValidationErrorDetail[]};
+
+/**
+ * Tool validator type for pre-execution validation.
+ * Returns a validation result with a human-readable error message and,
+ * optionally, structured per-field details.
  */
 export type ToolValidator = (
 	// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required -- Tool arguments are dynamically typed
 	args: any,
-) => Promise<{valid: true} | {valid: false; error: string}>;
+) => Promise<ToolValidationResult>;
 
 /**
  * Streaming formatter type for tools that need real-time progress updates
@@ -232,7 +276,9 @@ export type DevelopmentMode =
 
 export const DEVELOPMENT_MODE_LABELS: Record<DevelopmentMode, string> = {
 	normal: '▶ normal mode on',
-	'auto-accept': '⏵⏵ auto-accept mode on',
+	// Auto-accept skips confirmation for file edits but still prompts for bash
+	// and destructive git, so the label calls that out to avoid surprise.
+	'auto-accept': '⏵⏵ auto-accept mode on (bash + risky git still prompt)',
 	yolo: '⏵⏵⏵ yolo mode on',
 	plan: '⏸ plan mode on',
 	headless: '⏵⏵ headless mode on',

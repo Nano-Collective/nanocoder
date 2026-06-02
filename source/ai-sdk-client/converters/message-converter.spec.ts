@@ -205,6 +205,27 @@ test('convertToModelMessages converts tool message', t => {
 	t.is(content[0].output?.value, 'Tool result');
 });
 
+test('convertToModelMessages emits a json output for structured tool results', t => {
+	const messages: Message[] = [
+		{
+			role: 'tool',
+			content: 'Diagnostics for x.ts: 1 error',
+			tool_call_id: 'call_456',
+			name: 'lsp_get_diagnostics',
+			structuredContent: {diagnostics: [{file: 'x.ts', severity: 'error'}]},
+		},
+	];
+
+	const result = convertToModelMessages(messages);
+	const content = result[0].content as Array<{
+		output?: {type: string; value: unknown};
+	}>;
+	t.is(content[0].output?.type, 'json');
+	t.deepEqual(content[0].output?.value, {
+		diagnostics: [{file: 'x.ts', severity: 'error'}],
+	});
+});
+
 test('convertToModelMessages handles multiple messages', t => {
 	const messages: Message[] = [
 		{role: 'system', content: 'System'},

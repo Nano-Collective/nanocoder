@@ -35,7 +35,13 @@ export function convertToModelMessages(messages: Message[]): ModelMessage[] {
 		if (msg.role === 'tool') {
 			// Convert to AI SDK tool-result format
 			// AI SDK expects: { role: 'tool', content: [{ type: 'tool-result', toolCallId, toolName, output }] }
-			// where output is { type: 'text', value: string } or { type: 'json', value: JSONValue }
+			// where output is { type: 'text', value: string } or { type: 'json', value: JSONValue }.
+			// Structured tool results travel as JSON so the model can reason over
+			// the typed shape; everything else falls back to the text content.
+			const output =
+				msg.structuredContent !== undefined
+					? ({type: 'json', value: msg.structuredContent} as const)
+					: ({type: 'text', value: msg.content} as const);
 			return {
 				role: 'tool',
 				content: [
@@ -43,10 +49,7 @@ export function convertToModelMessages(messages: Message[]): ModelMessage[] {
 						type: 'tool-result',
 						toolCallId: msg.tool_call_id || '',
 						toolName: msg.name || '',
-						output: {
-							type: 'text',
-							value: msg.content,
-						},
+						output,
 					},
 				],
 			};

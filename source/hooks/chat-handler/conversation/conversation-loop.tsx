@@ -28,7 +28,6 @@ import {performAutoCompact} from '@/utils/auto-compact';
 import {formatElapsedTime, getRandomAdjective} from '@/utils/completion-note';
 import {MessageBuilder} from '@/utils/message-builder';
 import {infoMsg} from '@/utils/message-factory';
-import {parseToolArguments} from '@/utils/tool-args-parser';
 import {displayCompactCountsSummary} from '@/utils/tool-result-display';
 import {filterValidToolCalls} from '../utils/tool-filters';
 import {executeToolsDirectly} from './tool-executor';
@@ -553,24 +552,12 @@ export const processAssistantResponse = async (
 		const toolsToExecuteDirectly: ToolCall[] = [];
 
 		for (const toolCall of validToolCalls) {
-			// Run validators (for XML fallback path, catches parse errors)
-			let validationFailed = false;
-			if (toolCall.function.name === '__xml_validation_error__') {
-				validationFailed = true;
-			} else if (toolManager) {
-				const validator = toolManager.getToolValidator(toolCall.function.name);
-				if (validator) {
-					try {
-						const parsedArgs = parseToolArguments(toolCall.function.arguments);
-						const validationResult = await validator(parsedArgs);
-						if (!validationResult.valid) {
-							validationFailed = true;
-						}
-					} catch {
-						validationFailed = true;
-					}
-				}
-			}
+			// The XML-fallback synthetic error isn't a real tool, so route it
+			// straight to direct execution (where it surfaces as an error
+			// result). Real argument validation now lives in the tool handler
+			// (single source of truth): an invalid call simply fails there.
+			const validationFailed =
+				toolCall.function.name === '__xml_validation_error__';
 
 			// Evaluate approval through the single mode-aware resolver. In
 			// non-interactive mode the alwaysAllow list pre-authorizes tools.

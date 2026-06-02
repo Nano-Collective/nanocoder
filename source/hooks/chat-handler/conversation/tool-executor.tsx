@@ -27,33 +27,15 @@ import {
  */
 const executeOne = async (
 	toolCall: ToolCall,
-	toolManager: ToolManager | null,
 	processToolUse: (toolCall: ToolCall) => Promise<ToolResult>,
 ): Promise<{
 	toolCall: ToolCall;
 	result: ToolResult;
-	validationError?: string;
 }> => {
 	try {
-		// Run validator if available
-		const validator = toolManager?.getToolValidator(toolCall.function.name);
-		if (validator) {
-			const parsedArgs = parseToolArguments(toolCall.function.arguments);
-			const validationResult = await validator(parsedArgs);
-			if (!validationResult.valid) {
-				return {
-					toolCall,
-					result: {
-						tool_call_id: toolCall.id,
-						role: 'tool' as const,
-						name: toolCall.function.name,
-						content: `Validation failed: ${formatError(validationResult.error)}`,
-					},
-					validationError: validationResult.error,
-				};
-			}
-		}
-
+		// Validation runs inside the validated registry handler that
+		// processToolUse invokes, so invalid args come back here as an error
+		// tool-result (the handler never executes).
 		const result = await processToolUse(toolCall);
 		return {toolCall, result};
 	} catch (error) {
@@ -354,7 +336,6 @@ export const executeToolsDirectly = async (
 		let executions: Array<{
 			toolCall: ToolCall;
 			result: ToolResult;
-			validationError?: string;
 		}>;
 
 		if (type === 'agent' && group.length > 0) {
@@ -384,22 +365,18 @@ export const executeToolsDirectly = async (
 		if (type === 'readOnly' && group.length > 1) {
 			// Parallel execution for consecutive read-only tools
 			executions = await Promise.all(
-				group.map(toolCall =>
-					executeOne(toolCall, toolManager, processToolUse),
-				),
+				group.map(toolCall => executeOne(toolCall, processToolUse)),
 			);
 		} else {
 			// Sequential execution for non-parallelizable tools (or single-item groups)
 			executions = [];
 			for (const toolCall of group) {
-				executions.push(
-					await executeOne(toolCall, toolManager, processToolUse),
-				);
+				executions.push(await executeOne(toolCall, processToolUse));
 			}
 		}
 
 		// Display results in order
-		for (const {toolCall, result, validationError} of executions) {
+		for (const {toolCall, result} of executions) {
 			directResults.push(result);
 
 			// Update conversation state
@@ -408,16 +385,7 @@ export const executeToolsDirectly = async (
 				result.content,
 			);
 
-			if (validationError) {
-				// Display validation error (always shown in full)
-				addToChatQueue(
-					<ErrorMessage
-						key={generateKey(`validation-error-${toolCall.id}`)}
-						message={validationError}
-						hideBox={true}
-					/>,
-				);
-			} else if (
+			if (
 				LIVE_TASK_TOOLS.has(result.name) &&
 				!result.content.startsWith('Error: ')
 			) {

@@ -1,19 +1,70 @@
 import {constants} from 'node:fs';
 import {access} from 'node:fs/promises';
 import {resolve as resolvePath} from 'node:path';
+import type {JSONValue} from 'ai';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {TIMEOUT_LSP_DIAGNOSTICS_MS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import {DiagnosticSeverity, getLSPManager} from '@/lsp/index';
-import type {NanocoderToolExport} from '@/types/core';
+import type {NanocoderToolExport, ToolExecuteResult} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {type DiagnosticInfo, getVSCodeServer} from '@/vscode/index';
 
 interface GetDiagnosticsArgs {
 	path?: string;
+}
+
+/**
+ * Structured, model-friendly representation of a single diagnostic. Sent to
+ * the model as JSON (alongside the human-readable text) so it can reason over
+ * exact locations and severities rather than re-parsing a formatted string.
+ */
+type StructuredDiagnostic = {
+	file: string;
+	line: number; // 1-based
+	character: number; // 1-based
+	severity: 'error' | 'warning' | 'info' | 'hint';
+	source?: string;
+	message: string;
+};
+
+function lspSeverity(
+	severity: DiagnosticSeverity | undefined,
+): StructuredDiagnostic['severity'] {
+	switch (severity) {
+		case DiagnosticSeverity.Error:
+			return 'error';
+		case DiagnosticSeverity.Warning:
+			return 'warning';
+		case DiagnosticSeverity.Information:
+			return 'info';
+		default:
+			return 'hint';
+	}
+}
+
+function vscodeSeverity(severity: string): StructuredDiagnostic['severity'] {
+	const s = severity.toLowerCase();
+	if (s === 'error') return 'error';
+	if (s === 'warning') return 'warning';
+	if (s === 'information' || s === 'info') return 'info';
+	return 'hint';
+}
+
+/** Build a structured tool result from the formatted text + diagnostic list. */
+function diagnosticsResult(
+	llmContent: string,
+	diagnostics: StructuredDiagnostic[],
+) {
+	return {
+		llmContent,
+		// JSON-serializable by construction; the cast satisfies the JSONValue
+		// contract without an index signature on the named type.
+		structured: {diagnostics} as unknown as JSONValue,
+	};
 }
 
 // Request diagnostics from VS Code with timeout
@@ -100,7 +151,7 @@ function formatVSCodeDiagnostics(
 // Handler function
 const executeGetDiagnostics = async (
 	args: GetDiagnosticsArgs,
-): Promise<string> => {
+): Promise<ToolExecuteResult> => {
 	// Prefer VS Code diagnostics when connected
 	const server = await getVSCodeServer();
 	const hasConnections = server.hasConnections();
@@ -108,7 +159,19 @@ const executeGetDiagnostics = async (
 	if (hasConnections) {
 		const vscodeDiags = await getVSCodeDiagnostics(args.path);
 		if (vscodeDiags !== null) {
-			return formatVSCodeDiagnostics(vscodeDiags, args.path);
+			const text = formatVSCodeDiagnostics(vscodeDiags, args.path);
+			if (vscodeDiags.length === 0) return text;
+			return diagnosticsResult(
+				text,
+				vscodeDiags.map(d => ({
+					file: d.filePath,
+					line: d.line + 1,
+					character: d.character + 1,
+					severity: vscodeSeverity(d.severity),
+					...(d.source ? {source: d.source} : {}),
+					message: d.message,
+				})),
+			);
 		}
 		// Fall through to LSP if VS Code request failed
 	}
@@ -159,7 +222,17 @@ const executeGetDiagnostics = async (
 			);
 		}
 
-		return lines.join('\n');
+		return diagnosticsResult(
+			lines.join('\n'),
+			diagnostics.map(diag => ({
+				file: args.path as string,
+				line: diag.range.start.line + 1,
+				character: diag.range.start.character + 1,
+				severity: lspSeverity(diag.severity),
+				...(diag.source ? {source: diag.source} : {}),
+				message: diag.message,
+			})),
+		);
 	}
 
 	// Get all diagnostics from all open documents
@@ -170,6 +243,7 @@ const executeGetDiagnostics = async (
 	}
 
 	const lines: string[] = ['Diagnostics from all open documents:', ''];
+	const structured: StructuredDiagnostic[] = [];
 
 	for (const {uri, diagnostics} of allDiagnostics) {
 		// Convert URI to path
@@ -193,10 +267,18 @@ const executeGetDiagnostics = async (
 			lines.push(
 				`  ${severity} at line ${line}:${char}: ${source}${diag.message}`,
 			);
+			structured.push({
+				file: path,
+				line,
+				character: char,
+				severity: lspSeverity(diag.severity),
+				...(diag.source ? {source: diag.source} : {}),
+				message: diag.message,
+			});
 		}
 	}
 
-	return lines.join('\n');
+	return diagnosticsResult(lines.join('\n'), structured);
 };
 
 const getDiagnosticsCoreTool = tool({

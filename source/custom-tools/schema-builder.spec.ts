@@ -42,7 +42,19 @@ test('validator: missing required parameter', async t => {
 	t.deepEqual(result, {
 		valid: false,
 		error: '⚒ Missing required parameter: x',
+		details: [{path: 'x', expected: 'required', received: 'undefined'}],
 	});
+});
+
+test('validator: failures include structured details', async t => {
+	const v = buildValidator(meta({n: {type: 'number'}}));
+	const result = await v({n: 'abc'});
+	t.false(result.valid);
+	if (!result.valid) {
+		t.deepEqual(result.details, [
+			{path: 'n', expected: 'number', received: 'string'},
+		]);
+	}
 });
 
 test('validator: optional parameter omitted is fine', async t => {

@@ -9,6 +9,7 @@ import type {
 } from '@/types/custom-tools';
 import type {ToolApprovalPolicy, ToolEntry} from '@/types/index';
 import {createFileToolApproval} from '@/utils/tool-approval';
+import {withValidation} from '@/utils/tool-validation';
 
 /**
  * Compose a registry-ready `ToolEntry` from a loaded custom tool.
@@ -36,7 +37,8 @@ export function buildToolEntry(
 	return {
 		name: metadata.name,
 		tool: aiSdkTool,
-		handler,
+		// Validate inside the handler so every execution path is covered.
+		handler: withValidation(handler, validator),
 		validator,
 		formatter,
 		readOnly: metadata.readOnly,

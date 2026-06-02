@@ -26,6 +26,7 @@ import type {
 import {formatError} from '@/utils/error-formatter';
 import {signalToolApproval} from '@/utils/tool-approval-queue';
 import {parseToolArguments} from '@/utils/tool-args-parser';
+import {toolErrorToContent} from '@/utils/tool-validation';
 import {getSubagentLoader} from './subagent-loader.js';
 import type {
 	SubagentConfigWithSource,
@@ -537,9 +538,14 @@ export class SubagentExecutor {
 
 		try {
 			const parsedArgs = parseToolArguments(rawArguments);
-			return await toolHandler(parsedArgs);
+			const result = await toolHandler(parsedArgs);
+			// Subagents converse in text, so collapse structured output to its
+			// text representation.
+			return typeof result === 'string' ? result : result.llmContent;
 		} catch (error) {
-			return `Error: ${formatError(error)}`;
+			// Handler validation failures surface here too (the handler is
+			// validated), formatted with any structured detail.
+			return toolErrorToContent(error);
 		}
 	}
 }

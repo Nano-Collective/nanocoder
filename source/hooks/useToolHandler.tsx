@@ -16,6 +16,7 @@ import {MessageBuilder} from '@/utils/message-builder';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {createCancellationResults} from '@/utils/tool-cancellation';
 import {displayToolResult} from '@/utils/tool-result-display';
+import {formatValidationError} from '@/utils/tool-validation';
 import {getVSCodeServerSync} from '@/vscode/index';
 
 interface UseToolHandlerProps {
@@ -174,84 +175,6 @@ export function useToolHandler({
 					/>,
 				);
 			}
-
-			// Run validator if available
-			const validator = toolManager.getToolValidator(currentTool.function.name);
-			if (validator) {
-				try {
-					const parsedArgs = parseToolArguments(currentTool.function.arguments);
-
-					const validationResult = await validator(parsedArgs);
-					if (!validationResult.valid) {
-						// Validation failed - show error and skip execution
-						const errorResult = {
-							tool_call_id: currentTool.id,
-							role: 'tool' as const,
-							name: currentTool.function.name,
-							content: validationResult.error,
-						};
-
-						const newResults = [...completedToolResults, errorResult];
-						setCompletedToolResults(newResults);
-
-						// Display the error
-						addToChatQueue(
-							<ErrorMessage
-								key={generateKey('tool-validation-error')}
-								message={validationResult.error}
-								hideBox={true}
-							/>,
-						);
-
-						// Move to next tool or complete the process
-						if (currentToolIndex + 1 < pendingToolCalls.length) {
-							setCurrentToolIndex(currentToolIndex + 1);
-							// Return to confirmation mode for next tool
-							setIsToolExecuting(false);
-							setIsToolConfirmationMode(true);
-						} else {
-							// All tools processed, continue conversation loop with the results
-							setIsToolExecuting(false);
-							await continueConversationWithToolResults(newResults);
-						}
-						return;
-					}
-				} catch (validationError) {
-					// Validation threw an error - treat as validation failure
-					const errorResult = {
-						tool_call_id: currentTool.id,
-						role: 'tool' as const,
-						name: currentTool.function.name,
-						content: `Validation error: ${
-							validationError instanceof Error
-								? validationError.message
-								: String(validationError)
-						}`,
-					};
-
-					const newResults = [...completedToolResults, errorResult];
-					setCompletedToolResults(newResults);
-
-					addToChatQueue(
-						<ErrorMessage
-							key={generateKey('tool-validation-error')}
-							message={`Validation error: ${String(validationError)}`}
-							hideBox={true}
-						/>,
-					);
-
-					// Move to next tool or complete the process
-					if (currentToolIndex + 1 < pendingToolCalls.length) {
-						setCurrentToolIndex(currentToolIndex + 1);
-						setIsToolExecuting(false);
-						setIsToolConfirmationMode(true);
-					} else {
-						setIsToolExecuting(false);
-						await continueConversationWithToolResults(newResults);
-					}
-					return;
-				}
-			}
 		}
 
 		try {
@@ -281,8 +204,49 @@ export function useToolHandler({
 			let result: ToolResult;
 
 			if (streamingFormatter) {
-				// Streaming tool (e.g., execute_bash) - handle specially
+				// Streaming tool (e.g., execute_bash) - handle specially.
 				const parsedArgs = parseToolArguments(currentTool.function.arguments);
+
+				// The streaming path runs the executor directly rather than the
+				// validated registry handler, so it must validate here. (Every
+				// other path validates inside the handler via withValidation.)
+				const validator = toolManager?.getToolValidator(
+					currentTool.function.name,
+				);
+				const validation = validator
+					? await validator(parsedArgs)
+					: ({valid: true} as const);
+				if (!validation.valid) {
+					setLiveComponent(null);
+					result = {
+						tool_call_id: currentTool.id,
+						role: 'tool' as const,
+						name: currentTool.function.name,
+						content: formatValidationError(
+							validation.error,
+							validation.details,
+						),
+					};
+					await displayToolResult(
+						currentTool,
+						result,
+						toolManager,
+						addToChatQueue,
+						compactToolDisplay,
+					);
+					const newResults = [...completedToolResults, result];
+					setCompletedToolResults(newResults);
+					if (currentToolIndex + 1 < pendingToolCalls.length) {
+						setCurrentToolIndex(currentToolIndex + 1);
+						setIsToolExecuting(false);
+						setIsToolConfirmationMode(true);
+					} else {
+						setIsToolExecuting(false);
+						await continueConversationWithToolResults(newResults);
+					}
+					return;
+				}
+
 				const commandStr = parsedArgs.command as string;
 
 				// Start execution first to get execution ID

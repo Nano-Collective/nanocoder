@@ -99,9 +99,13 @@ export const updateCommand: Command = {
 						if (!executeBash) {
 							throw new Error('execute_bash tool not available');
 						}
-						const result = await executeBash({
+						const rawResult = await executeBash({
 							command: updateInfo.updateCommand,
 						});
+						// execute_bash always returns a string; collapse the
+						// handler's structured-output union for the checks below.
+						const result =
+							typeof rawResult === 'string' ? rawResult : rawResult.llmContent;
 
 						// Check for command failure using multiple strategies
 						if (hasCommandFailed(result)) {

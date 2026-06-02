@@ -7,6 +7,7 @@ import type {ToolCall, ToolResult} from '@/types/core';
 // ============================================================================
 
 import {setToolRegistryGetter} from '@/message-handler';
+import {ToolValidationError} from '@/utils/tool-validation';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -94,24 +95,36 @@ test('executeToolsDirectly - handles validation failure', async t => {
 		addToChatQueueCalls.push(component);
 	};
 
-	const toolManager = createMockToolManager({
-		validatorResult: {
-			valid: false,
-			error: 'Validation failed: path does not exist',
+	const toolManager = createMockToolManager();
+
+	// Validation now lives inside the (validated) registry handler: on failure
+	// it throws a ToolValidationError that processToolUse formats into the
+	// result content. Simulate that handler for this tool.
+	setToolRegistryGetter(() => ({
+		...mockToolHandler,
+		test_tool: async () => {
+			throw new ToolValidationError('path does not exist', [
+				{path: 'path', expected: 'existing file', received: 'invalid'},
+			]);
 		},
-	});
+	}));
 
-	const results = await executeToolsDirectly(
-		toolCalls,
-		toolManager,
-		conversationStateManager as any,
-		addToChatQueue,
-	);
+	try {
+		const results = await executeToolsDirectly(
+			toolCalls,
+			toolManager,
+			conversationStateManager as any,
+			addToChatQueue,
+		);
 
-	t.is(results.length, 1);
-	t.is(results[0].role, 'tool');
-	t.is(results[0].name, 'test_tool');
-	t.true(results[0].content.includes('Validation failed'));
+		t.is(results.length, 1);
+		t.is(results[0].role, 'tool');
+		t.is(results[0].name, 'test_tool');
+		t.true(results[0].content.includes('Validation failed'));
+	} finally {
+		// Restore the shared registry for subsequent tests.
+		setToolRegistryGetter(createMockToolRegistry);
+	}
 });
 
 test('executeToolsDirectly - continues after validation failure', async t => {

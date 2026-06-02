@@ -34,6 +34,7 @@ export class MessageBuilder {
 			content: result.content || '',
 			tool_call_id: result.tool_call_id,
 			name: result.name,
+			structuredContent: result.structuredContent,
 		}));
 		this.messages.push(...toolMessages);
 		return this;

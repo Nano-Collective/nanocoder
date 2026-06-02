@@ -7,6 +7,7 @@ import type {
 	ToolHandler,
 	ToolValidator,
 } from '@/types/index';
+import {withValidation} from '@/utils/tool-validation';
 
 /**
  * Helper class to encapsulate tool registry management
@@ -267,7 +268,7 @@ export class ToolRegistry {
 			if (tool) {
 				registry.register({
 					name,
-					handler,
+					handler: withValidation(handler, validators?.[name]),
 					tool,
 					formatter: formatters?.[name],
 					validator: validators?.[name],
@@ -289,15 +290,16 @@ export class ToolRegistry {
 		const registry = new ToolRegistry();
 
 		for (const t of toolExports) {
+			// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
+			const rawHandler = async (args: any) =>
+				// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
+				await (t.tool as any).execute(args, {
+					toolCallId: 'manual',
+					messages: [],
+				});
 			registry.register({
 				name: t.name,
-				// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
-				handler: async (args: any) =>
-					// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
-					await (t.tool as any).execute(args, {
-						toolCallId: 'manual',
-						messages: [],
-					}),
+				handler: withValidation(rawHandler, t.validator),
 				tool: t.tool,
 				formatter: t.formatter,
 				validator: t.validator,

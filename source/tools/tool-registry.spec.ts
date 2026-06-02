@@ -448,7 +448,7 @@ test('ToolRegistry - fromRegistries applies readOnly flags', t => {
 // fromRegistries Tests
 // ============================================================================
 
-test('ToolRegistry - fromRegistries creates registry from records', t => {
+test('ToolRegistry - fromRegistries creates registry from records', async t => {
 	const handler1: ToolEntry['handler'] = async () => 'test';
 	const handler2: ToolEntry['handler'] = async () => 'test';
 	const formatter1: ToolEntry['formatter'] = (o) => String(o);
@@ -466,7 +466,12 @@ test('ToolRegistry - fromRegistries creates registry from records', t => {
 	t.is(registry.getToolCount(), 2);
 	t.true(registry.hasTool('tool1'));
 	t.true(registry.hasTool('tool2'));
-	t.is(registry.getHandler('tool1'), handler1);
+	// tool1 has a validator, so its handler is wrapped to validate first (not
+	// the same reference) but still produces the handler's output when valid.
+	t.not(registry.getHandler('tool1'), handler1);
+	t.is(await registry.getHandler('tool1')?.({}), 'test');
+	// tool2 has no validator, so its handler is passed through unchanged.
+	t.is(registry.getHandler('tool2'), handler2);
 	t.is(registry.getFormatter('tool1'), formatter1);
 	t.is(registry.getValidator('tool1'), validator1);
 });
