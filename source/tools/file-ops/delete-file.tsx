@@ -38,7 +38,6 @@ const deleteFileCoreTool = tool({
 		},
 		required: ['path'],
 	}),
-	needsApproval: createFileToolApproval('delete_file'),
 	execute: async (args, _options) => {
 		return await executeDeleteFile(args);
 	},
@@ -77,4 +76,5 @@ export const deleteFileTool: NanocoderToolExport = {
 	tool: deleteFileCoreTool,
 	formatter: deleteFileFormatter,
 	validator: deleteFileValidator,
+	approval: createFileToolApproval('delete_file'),
 };

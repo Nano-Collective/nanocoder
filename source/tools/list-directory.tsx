@@ -144,19 +144,19 @@ const executeListDirectory = async (
 				output += `${entry.relativePath}\n`;
 			}
 		} else {
-			// Standard format with icons
+			// Standard format: directories get a trailing "/", symlinks "@" (ls -F style)
 			for (const entry of entries) {
-				const icon =
+				const suffix =
 					entry.type === 'directory'
-						? '📁 '
+						? '/'
 						: entry.type === 'symlink'
-							? '🔗 '
-							: '📄 ';
+							? '@'
+							: '';
 				const displayPath = recursive ? entry.relativePath : entry.name;
 				const sizeStr = entry.size
 					? ` (${entry.size.toLocaleString()} bytes)`
 					: '';
-				output += `${icon}${displayPath}${sizeStr}\n`;
+				output += `${displayPath}${suffix}${sizeStr}\n`;
 			}
 		}
 
@@ -212,8 +212,6 @@ const listDirectoryCoreTool = tool({
 		},
 		required: [],
 	}),
-	// Low risk: read-only operation, never requires approval
-	needsApproval: false,
 	execute: async (args, _options) => {
 		return await executeListDirectory(args);
 	},
@@ -242,13 +240,12 @@ const ListDirectoryFormatter = React.memo(
 		) {
 			const lines = result.split('\n');
 			for (const line of lines) {
-				// Count lines with emojis (standard format) or paths (tree format)
+				// Count entry lines (skip the header, blank lines, and bracketed notes)
+				const trimmed = line.trim();
 				if (
-					line.match(/^[📁🔗📄]/) ||
-					(args.tree &&
-						line.trim() &&
-						!line.startsWith('[') &&
-						!line.startsWith('Directory'))
+					trimmed &&
+					!trimmed.startsWith('[') &&
+					!trimmed.startsWith('Directory')
 				) {
 					entryCount++;
 				}

@@ -40,7 +40,6 @@ const copyFileCoreTool = tool({
 		},
 		required: ['source', 'destination'],
 	}),
-	needsApproval: createFileToolApproval('copy_file'),
 	execute: async (args, _options) => {
 		return await executeCopyFile(args);
 	},
@@ -101,4 +100,5 @@ export const copyFileTool: NanocoderToolExport = {
 	tool: copyFileCoreTool,
 	formatter: copyFileFormatter,
 	validator: copyFileValidator,
+	approval: createFileToolApproval('copy_file'),
 };

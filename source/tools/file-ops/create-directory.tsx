@@ -38,8 +38,6 @@ const createDirectoryCoreTool = tool({
 		},
 		required: ['path'],
 	}),
-	// Low risk: creating directories is non-destructive and idempotent
-	needsApproval: false,
 	execute: async (args, _options) => {
 		return await executeCreateDirectory(args);
 	},
@@ -64,4 +62,6 @@ export const createDirectoryTool: NanocoderToolExport = {
 	tool: createDirectoryCoreTool,
 	formatter: createDirectoryFormatter,
 	validator: createDirectoryValidator,
+	// Low risk: creating directories is non-destructive and idempotent
+	approval: false,
 };

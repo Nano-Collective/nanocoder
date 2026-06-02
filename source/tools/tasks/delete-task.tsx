@@ -85,7 +85,6 @@ const deleteTaskCoreTool = tool({
 		},
 		required: [],
 	}),
-	needsApproval: false,
 	execute: async (args, _options) => {
 		return await executeDeleteTask(args);
 	},
@@ -128,4 +127,6 @@ export const deleteTaskTool: NanocoderToolExport = {
 	tool: deleteTaskCoreTool,
 	formatter: deleteTaskFormatter,
 	validator: deleteTaskValidator,
+	// Task bookkeeping is low risk - never gated.
+	approval: false,
 };

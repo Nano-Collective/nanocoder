@@ -1,6 +1,7 @@
 import {processToolUse} from '@/message-handler';
 import {color, write, writeError, writeLine, writeStatus} from '@/plain/writer';
 import {parseToolCalls} from '@/tool-calling/index';
+import {resolveToolApproval} from '@/tools/approval-policy';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
 	DevelopmentMode,
@@ -10,7 +11,6 @@ import type {
 	ToolCall,
 	ToolResult,
 } from '@/types/core';
-import {toolNeedsApproval} from '@/utils/tool-needs-approval';
 
 export interface RunPlainConversationOptions {
 	client: LLMClient;
@@ -59,9 +59,7 @@ export async function runPlainConversation(
 			undefined,
 			developmentMode,
 		);
-		const tools = toolManager.getEffectiveTools(availableNames, {
-			nonInteractiveAlwaysAllow,
-		});
+		const tools = toolManager.getEffectiveTools(availableNames);
 
 		const modeOverrides: ModeOverrides = {
 			nonInteractiveMode: true,
@@ -171,12 +169,14 @@ export async function runPlainConversation(
 		const toolsNeedingApproval: string[] = [];
 		const toolsToExecute: ToolCall[] = [];
 		for (const toolCall of validToolCalls) {
+			// Approval (including the yolo bypass) is resolved centrally.
 			const needsApproval = await evaluateNeedsApproval(
 				toolCall,
 				toolManager,
 				nonInteractiveAlwaysAllow,
+				developmentMode,
 			);
-			if (needsApproval && developmentMode !== 'yolo') {
+			if (needsApproval) {
 				toolsNeedingApproval.push(toolCall.function.name);
 			} else {
 				toolsToExecute.push(toolCall);
@@ -209,11 +209,13 @@ async function evaluateNeedsApproval(
 	toolCall: ToolCall,
 	toolManager: ToolManager,
 	nonInteractiveAlwaysAllow: string[],
+	mode: DevelopmentMode,
 ): Promise<boolean> {
-	if (nonInteractiveAlwaysAllow.includes(toolCall.function.name)) {
-		return false;
-	}
-
 	const toolEntry = toolManager.getToolEntry(toolCall.function.name);
-	return toolNeedsApproval(toolEntry?.tool, toolCall.function.arguments);
+	return resolveToolApproval(
+		toolCall.function.name,
+		toolEntry,
+		toolCall.function.arguments,
+		{mode, alwaysAllow: nonInteractiveAlwaysAllow},
+	);
 }

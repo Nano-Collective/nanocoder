@@ -115,7 +115,6 @@ const updateTaskCoreTool = tool({
 		},
 		required: ['updates'],
 	}),
-	needsApproval: false,
 	execute: async (args, _options) => {
 		return await executeUpdateTask(args);
 	},
@@ -183,4 +182,6 @@ export const updateTaskTool: NanocoderToolExport = {
 	tool: updateTaskCoreTool,
 	formatter: updateTaskFormatter,
 	validator: updateTaskValidator,
+	// Task bookkeeping is low risk - never gated.
+	approval: false,
 };

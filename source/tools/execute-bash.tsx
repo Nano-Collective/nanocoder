@@ -4,7 +4,6 @@ import React from 'react';
 import BashProgress from '@/components/bash-progress';
 import {isNanocoderToolAlwaysAllowed} from '@/config/nanocoder-tools-config';
 import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
-import {getCurrentMode} from '@/context/mode-context';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
@@ -78,20 +77,6 @@ const executeBashCoreTool = tool({
 		},
 		required: ['command'],
 	}),
-	// High risk: bash commands require approval unless explicitly configured in alwaysAllow
-	needsApproval: () => {
-		// Check if this tool is configured to always be allowed
-		if (isNanocoderToolAlwaysAllowed('execute_bash')) {
-			return false;
-		}
-
-		// Headless and yolo modes auto-execute all tools including bash
-		const mode = getCurrentMode();
-		if (mode === 'headless' || mode === 'yolo') return false;
-
-		// Even in auto-accept mode, bash commands should require approval for security
-		return true;
-	},
 	execute: async (args, _options) => {
 		return await executeExecuteBash(args);
 	},
@@ -183,4 +168,12 @@ export const executeBashTool: NanocoderToolExport = {
 	formatter: executeBashFormatter,
 	streamingFormatter: executeBashStreamingFormatter,
 	validator: executeBashValidator,
+	// High risk: bash always requires approval unless explicitly always-allowed
+	// or in headless mode. Even auto-accept still prompts for bash. (Yolo is
+	// bypassed centrally by resolveToolApproval.)
+	approval: (_args, mode) => {
+		if (isNanocoderToolAlwaysAllowed('execute_bash')) return false;
+		if (mode === 'headless') return false;
+		return true;
+	},
 };

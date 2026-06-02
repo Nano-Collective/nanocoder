@@ -98,8 +98,9 @@ test('list_tasks - has no validator (read-only operation)', t => {
 	t.falsy(listTasksTool.validator);
 });
 
-test('list_tasks - needsApproval is false', t => {
-	t.is(listTasksTool.tool.needsApproval, false);
+test('list_tasks - read-only, no approval by default', t => {
+	t.true(listTasksTool.readOnly);
+	t.is(listTasksTool.approval, undefined);
 });
 
 // ============================================================================

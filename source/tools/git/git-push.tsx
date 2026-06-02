@@ -152,8 +152,6 @@ const gitPushCoreTool = tool({
 		},
 		required: [],
 	}),
-	// ALWAYS_APPROVE - user should see what commits will be pushed
-	needsApproval: () => true,
 	execute: async (args, _options) => {
 		return await executeGitPush(args);
 	},
@@ -308,4 +306,6 @@ export const gitPushTool: NanocoderToolExport = {
 	tool: gitPushCoreTool,
 	formatter,
 	validator,
+	// ALWAYS_APPROVE - user should see what commits will be pushed
+	approval: true,
 };

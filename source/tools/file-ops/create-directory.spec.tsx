@@ -32,7 +32,7 @@ test('create_directory tool has correct name', t => {
 });
 
 test('create_directory does not require approval', t => {
-	t.is(createDirectoryTool.tool.needsApproval, false);
+	t.is(createDirectoryTool.approval, false);
 });
 
 test('create_directory tool has handler function', t => {

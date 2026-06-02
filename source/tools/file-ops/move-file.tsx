@@ -40,7 +40,6 @@ const moveFileCoreTool = tool({
 		},
 		required: ['source', 'destination'],
 	}),
-	needsApproval: createFileToolApproval('move_file'),
 	execute: async (args, _options) => {
 		return await executeMoveFile(args);
 	},
@@ -101,4 +100,5 @@ export const moveFileTool: NanocoderToolExport = {
 	tool: moveFileCoreTool,
 	formatter: moveFileFormatter,
 	validator: moveFileValidator,
+	approval: createFileToolApproval('move_file'),
 };

@@ -6,7 +6,6 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
-import {getCurrentMode} from '@/context/mode-context';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
@@ -117,11 +116,6 @@ const gitAddCoreTool = tool({
 		},
 		required: [],
 	}),
-	// STANDARD - requires approval in normal mode, skipped in auto-accept
-	needsApproval: () => {
-		const mode = getCurrentMode();
-		return mode === 'normal';
-	},
 	execute: async (args, _options) => {
 		return await executeGitAdd(args);
 	},
@@ -206,4 +200,6 @@ export const gitAddTool: NanocoderToolExport = {
 	name: 'git_add' as const,
 	tool: gitAddCoreTool,
 	formatter,
+	// STANDARD - requires approval in normal mode, skipped in auto-accept
+	approval: (_args, mode) => mode === 'normal',
 };

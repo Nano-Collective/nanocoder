@@ -7,15 +7,15 @@ import type {
 	CustomToolApprovalPolicy,
 	LoadedCustomTool,
 } from '@/types/custom-tools';
-import type {ToolEntry} from '@/types/index';
+import type {ToolApprovalPolicy, ToolEntry} from '@/types/index';
 import {createFileToolApproval} from '@/utils/tool-approval';
 
 /**
  * Compose a registry-ready `ToolEntry` from a loaded custom tool.
  *
  * Mirrors how built-in tools are constructed: a `tool()` carrying the JSON
- * schema and a needsApproval policy, plus a synthesized handler, validator,
- * and formatter.
+ * schema, plus a synthesized handler, validator, formatter, and a mode-aware
+ * `approval` policy resolved from the tool's declared approval mode.
  */
 export function buildToolEntry(
 	loaded: LoadedCustomTool,
@@ -28,7 +28,6 @@ export function buildToolEntry(
 	const aiSdkTool = tool({
 		description: metadata.description,
 		inputSchema: jsonSchema(buildJsonSchema(metadata) as JSONSchema7),
-		needsApproval: approvalForPolicy(metadata.name, metadata.approval),
 		execute: async (args, _options) => {
 			return handler(args as Record<string, unknown>);
 		},
@@ -41,13 +40,14 @@ export function buildToolEntry(
 		validator,
 		formatter,
 		readOnly: metadata.readOnly,
+		approval: approvalForPolicy(metadata.name, metadata.approval),
 	};
 }
 
 function approvalForPolicy(
 	name: string,
 	policy: CustomToolApprovalPolicy,
-): boolean | (() => boolean) {
+): ToolApprovalPolicy {
 	switch (policy) {
 		case 'never':
 			return false;

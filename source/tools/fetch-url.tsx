@@ -61,8 +61,6 @@ const fetchUrlCoreTool = tool({
 		},
 		required: ['url'],
 	}),
-	// Low risk: read-only operation, never requires approval
-	needsApproval: false,
 	execute: async (args, _options) => {
 		return await executeFetchUrl(args);
 	},

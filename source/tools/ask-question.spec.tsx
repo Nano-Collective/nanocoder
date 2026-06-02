@@ -35,7 +35,7 @@ test('ask_user tool has correct name', t => {
 });
 
 test('ask_user tool does not require approval', t => {
-	t.false(askQuestionTool.tool.needsApproval);
+	t.is(askQuestionTool.approval, false);
 });
 
 test('ask_user tool has execute function', t => {

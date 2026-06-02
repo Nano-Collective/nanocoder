@@ -62,8 +62,8 @@ test('create_task - has validator', t => {
 	t.truthy(createTaskTool.validator);
 });
 
-test('create_task - needsApproval is false', t => {
-	t.is(createTaskTool.tool.needsApproval, false);
+test('create_task - approval is false', t => {
+	t.is(createTaskTool.approval, false);
 });
 
 // ============================================================================

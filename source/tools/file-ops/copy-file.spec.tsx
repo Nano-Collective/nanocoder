@@ -32,7 +32,7 @@ test('copy_file tool has correct name', t => {
 });
 
 test('copy_file has function-based approval', t => {
-	t.is(typeof copyFileTool.tool.needsApproval, 'function');
+	t.is(typeof copyFileTool.approval, 'function');
 });
 
 test('copy_file tool has handler function', t => {

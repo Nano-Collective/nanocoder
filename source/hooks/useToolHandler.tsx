@@ -1,7 +1,6 @@
 import React, {useRef} from 'react';
 import BashProgress from '@/components/bash-progress';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
-import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
 import {ConversationContext} from '@/hooks/useAppState';
 import {getToolManager, processToolUse} from '@/message-handler';
 import {generateKey} from '@/session/key-generator';
@@ -260,13 +259,10 @@ export function useToolHandler({
 			if (currentTool.function.name === 'switch_mode' && setDevelopmentMode) {
 				const parsedArgs = parseToolArguments(currentTool.function.arguments);
 
-				// Actually switch the mode
-				// Sync both React state AND global context synchronously
-				// to prevent race conditions where tools check global context
-				// before the useEffect in App.tsx has a chance to sync it
+				// Switch the mode via React state - the conversation loop reads
+				// the development mode from state when it next evaluates approvals.
 				const requestedMode = parsedArgs.mode as DevelopmentMode;
 				setDevelopmentMode(requestedMode);
-				setCurrentModeContext(requestedMode);
 
 				addToChatQueue(
 					<InfoMessage

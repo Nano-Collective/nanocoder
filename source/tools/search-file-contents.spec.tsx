@@ -486,7 +486,8 @@ test('search_file_contents tool has correct name', t => {
 });
 
 test('search_file_contents tool does not require confirmation', t => {
-	t.false(searchFileContentsTool.tool.needsApproval);
+	t.true(searchFileContentsTool.readOnly);
+	t.is(searchFileContentsTool.approval, undefined);
 });
 
 test('search_file_contents tool has handler function', t => {

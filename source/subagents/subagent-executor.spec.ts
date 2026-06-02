@@ -32,9 +32,8 @@ function createMockToolManager(
 			const tool = tools[name];
 			if (!tool) return undefined;
 			return {
-				tool: {
-					needsApproval: tool.needsApproval ?? false,
-				},
+				approval: tool.needsApproval ?? false,
+				readOnly: tool.readOnly,
 			};
 		},
 		isReadOnly: (name: string) => tools[name]?.readOnly ?? false,

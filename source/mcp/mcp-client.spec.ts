@@ -1,5 +1,5 @@
 import test from 'ava';
-import {setCurrentMode} from '../context/mode-context';
+import {resolveToolApproval} from '../tools/approval-policy';
 import {MCPClient} from './mcp-client';
 
 // ============================================================================
@@ -507,7 +507,7 @@ test('MCPClient.getNativeToolsRegistry: returns empty object when no servers', t
 	t.is(Object.keys(registry).length, 0);
 });
 
-test('MCPClient.getNativeToolsRegistry: creates tools with needsApproval callback', t => {
+test('MCPClient.getToolEntries: attaches a mode-aware approval policy', t => {
 	const client = new MCPClient();
 
 	(client as any).serverTools.set('test-server', [
@@ -519,13 +519,11 @@ test('MCPClient.getNativeToolsRegistry: creates tools with needsApproval callbac
 		},
 	]);
 
-	const registry = client.getNativeToolsRegistry();
+	const entries = client.getToolEntries();
 
-	t.is(Object.keys(registry).length, 1);
-	t.truthy(registry.test_tool);
-	t.truthy(registry.test_tool.description);
-	t.truthy(registry.test_tool.needsApproval);
-	t.is(typeof registry.test_tool.needsApproval, 'function');
+	t.is(entries.length, 1);
+	t.is(entries[0]?.name, 'test_tool');
+	t.is(typeof entries[0]?.approval, 'function');
 });
 
 test('MCPClient.getNativeToolsRegistry: includes description with server prefix', t => {
@@ -826,12 +824,11 @@ testOrSkip('MCPClient.getNativeToolsRegistry: creates registry from connected HT
 
 	t.truthy(firstTool.description);
 	t.is(typeof firstTool.inputSchema, 'object');
-	t.truthy(firstTool.needsApproval);
-	t.is(typeof firstTool.needsApproval, 'function');
 
-	// Test needsApproval callback
-	const needsApprovalResult = firstTool.needsApproval();
-	t.is(typeof needsApprovalResult, 'boolean');
+	// Approval policy lives on the registry entry, not the native tool.
+	const entries = client.getToolEntries();
+	t.true(entries.length > 0);
+	t.is(typeof entries[0]?.approval, 'function');
 
 	await client.disconnect();
 });
@@ -976,16 +973,14 @@ test('MCPClient: alwaysAllow disables approval prompts', async t => {
 		alwaysAllow: ['safe_tool'],
 	});
 
-	setCurrentMode('normal');
-
-	const registry = client.getNativeToolsRegistry();
-	const tool = registry['safe_tool'];
-
-	t.truthy(tool);
-	const needsApproval =
-		typeof tool?.needsApproval === 'function'
-			? await tool.needsApproval({}, {toolCallId: 'test', messages: []})
-			: tool?.needsApproval ?? true;
+	const entry = client.getToolEntries().find(e => e.name === 'safe_tool');
+	t.truthy(entry);
+	const needsApproval = await resolveToolApproval(
+		'safe_tool',
+		entry,
+		{},
+		{mode: 'normal'},
+	);
 	t.false(needsApproval);
 });
 
@@ -1008,16 +1003,14 @@ test('MCPClient: non-whitelisted tools still require approval', async t => {
 		alwaysAllow: [],
 	});
 
-	setCurrentMode('normal');
-
-	const registry = client.getNativeToolsRegistry();
-	const tool = registry['restricted_tool'];
-
-	t.truthy(tool);
-	const needsApproval =
-		typeof tool?.needsApproval === 'function'
-			? await tool.needsApproval({}, {toolCallId: 'test', messages: []})
-			: tool?.needsApproval ?? false;
+	const entry = client.getToolEntries().find(e => e.name === 'restricted_tool');
+	t.truthy(entry);
+	const needsApproval = await resolveToolApproval(
+		'restricted_tool',
+		entry,
+		{},
+		{mode: 'normal'},
+	);
 	t.true(needsApproval);
 });
 

@@ -64,7 +64,6 @@ const listTasksCoreTool = tool({
 		},
 		required: [],
 	}),
-	needsApproval: false,
 	execute: async (args, _options) => {
 		return await executeListTasks(args);
 	},

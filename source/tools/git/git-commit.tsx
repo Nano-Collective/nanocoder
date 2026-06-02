@@ -162,8 +162,6 @@ const gitCommitCoreTool = tool({
 		},
 		required: ['message'],
 	}),
-	// ALWAYS_APPROVE - user should see the commit message before creation
-	needsApproval: () => true,
 	execute: async (args, _options) => {
 		return await executeGitCommit(args);
 	},
@@ -314,4 +312,6 @@ export const gitCommitTool: NanocoderToolExport = {
 	tool: gitCommitCoreTool,
 	formatter,
 	validator,
+	// ALWAYS_APPROVE - user should see the commit message before creation
+	approval: true,
 };

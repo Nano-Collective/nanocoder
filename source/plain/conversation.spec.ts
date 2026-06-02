@@ -58,8 +58,9 @@ function makeFakeToolManager(opts: FakeToolManagerOptions = {}): ToolManager {
 			if (!known.has(name)) return undefined;
 			return {
 				name,
-				tool: {needsApproval: approvals[name] ?? false} as unknown as AISDKCoreTool,
+				tool: {} as unknown as AISDKCoreTool,
 				handler: (async () => 'ok') as ToolHandler,
+				approval: approvals[name] ?? false,
 			};
 		},
 		getToolValidator: () => undefined,

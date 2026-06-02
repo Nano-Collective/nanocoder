@@ -207,8 +207,6 @@ const readFileCoreTool = tool({
 		},
 		required: ['path'],
 	}),
-	// Low risk: read-only operation, never requires approval
-	needsApproval: false,
 	execute: async (
 		args: {
 			path: string;

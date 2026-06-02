@@ -851,28 +851,15 @@ test('getEffectiveTools - returns filtered tools without execute', t => {
 	t.truthy(tools.read_file);
 });
 
-test('getEffectiveTools - applies nonInteractiveAlwaysAllow override', t => {
+test('getEffectiveTools - returns schema-only tools (execute stripped)', t => {
 	const manager = new ToolManager();
 	const names = manager.getToolNames();
-	const tools = manager.getEffectiveTools(names, {
-		nonInteractiveAlwaysAllow: ['execute_bash'],
-	});
-	// The execute_bash tool should have needsApproval set to false
+	const tools = manager.getEffectiveTools(names);
+	// Tools the model sees have no execute fn - approval is decided separately
+	// by resolveToolApproval, not encoded on these tool objects.
 	const bashTool = tools.execute_bash as any;
-	t.is(bashTool.needsApproval, false);
-});
-
-test('getEffectiveTools - does not override approval for tools not in allow list', t => {
-	const manager = new ToolManager();
-	const names = manager.getToolNames();
-	const toolsBefore = manager.getEffectiveTools(names);
-	const toolsAfter = manager.getEffectiveTools(names, {
-		nonInteractiveAlwaysAllow: ['execute_bash'],
-	});
-	// write_file should not be changed by the allow list override
-	const writeBefore = toolsBefore.write_file as any;
-	const writeAfter = toolsAfter.write_file as any;
-	t.is(writeAfter.needsApproval, writeBefore.needsApproval);
+	t.truthy(bashTool);
+	t.is(bashTool.execute, undefined);
 });
 
 // ============================================================================

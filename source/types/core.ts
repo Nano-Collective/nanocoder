@@ -10,6 +10,20 @@ export {jsonSchema, tool};
 // biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
 export type AISDKCoreTool = AISDKTool<any, any>;
 
+/**
+ * Per-tool approval policy. A `boolean` is a static decision; a function is a
+ * pure decision over the parsed arguments AND the current development mode.
+ *
+ * Mode is passed in explicitly (never read from a global) so the same tool
+ * definition behaves correctly regardless of which execution path evaluates
+ * it. `resolveToolApproval()` in `@/tools/approval-policy` is the single
+ * authority that invokes these.
+ */
+export type ToolApprovalPolicy =
+	| boolean
+	// biome-ignore lint/suspicious/noExplicitAny: tool args are schema-validated per tool
+	| ((args: any, mode: DevelopmentMode) => boolean | Promise<boolean>);
+
 // Current Nanocoder message format (OpenAI-compatible)
 // Note: We maintain this format internally and convert to ModelMessage at AI SDK boundary
 export interface Message {
@@ -117,6 +131,7 @@ export interface NanocoderToolExport {
 	streamingFormatter?: StreamingFormatter; // For real-time progress (before execution)
 	validator?: ToolValidator; // For pre-execution validation
 	readOnly?: boolean; // Safe to parallelize (no side effects)
+	approval?: ToolApprovalPolicy; // Whether the tool needs user approval (mode-aware)
 }
 
 /**
@@ -141,6 +156,7 @@ export interface ToolEntry {
 	streamingFormatter?: StreamingFormatter; // For real-time progress (before execution)
 	validator?: ToolValidator; // For validation
 	readOnly?: boolean; // Safe to parallelize (no side effects)
+	approval?: ToolApprovalPolicy; // Whether the tool needs user approval (mode-aware)
 	/**
 	 * Name of the skill that owns this tool, if any. Set by the skill
 	 * registrar for tools that come from a bundle or single-file skill.

@@ -78,7 +78,6 @@ const createTaskCoreTool = tool({
 		},
 		required: ['tasks'],
 	}),
-	needsApproval: false,
 	execute: async (args, _options) => {
 		return await executeCreateTask(args);
 	},
@@ -132,4 +131,6 @@ export const createTaskTool: NanocoderToolExport = {
 	tool: createTaskCoreTool,
 	formatter: createTaskFormatter,
 	validator: createTaskValidator,
+	// Task bookkeeping is low risk - never gated.
+	approval: false,
 };

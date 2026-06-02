@@ -14,6 +14,7 @@ import {
 	updateSubagentProgress,
 	updateSubagentProgressById,
 } from '@/services/subagent-events';
+import {resolveToolApproval} from '@/tools/approval-policy';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
 	AISDKCoreTool,
@@ -25,7 +26,6 @@ import type {
 import {formatError} from '@/utils/error-formatter';
 import {signalToolApproval} from '@/utils/tool-approval-queue';
 import {parseToolArguments} from '@/utils/tool-args-parser';
-import {toolNeedsApproval} from '@/utils/tool-needs-approval';
 import {getSubagentLoader} from './subagent-loader.js';
 import type {
 	SubagentConfigWithSource,
@@ -486,7 +486,9 @@ export class SubagentExecutor {
 		rawArguments: unknown,
 	): Promise<boolean> {
 		const toolEntry = this.toolManager.getToolEntry(toolName);
-		return toolNeedsApproval(toolEntry?.tool, rawArguments);
+		return resolveToolApproval(toolName, toolEntry, rawArguments, {
+			mode: this.parentMode,
+		});
 	}
 
 	/**

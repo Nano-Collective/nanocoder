@@ -108,8 +108,6 @@ const gitDiffCoreTool = tool({
 		},
 		required: [],
 	}),
-	// AUTO - read-only operation, never needs approval
-	needsApproval: () => false,
 	execute: async (args, _options) => {
 		return await executeGitDiff(args);
 	},

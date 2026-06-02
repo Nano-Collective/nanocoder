@@ -328,7 +328,7 @@ test('execute_bash tool has correct name', t => {
 
 test('execute_bash tool requires confirmation', t => {
 	// Execute bash should require confirmation for security
-	t.not(executeBashTool.tool.needsApproval, false);
+	t.is(typeof executeBashTool.approval, 'function');
 });
 
 test('execute_bash tool has handler function', t => {

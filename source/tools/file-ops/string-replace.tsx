@@ -118,7 +118,6 @@ const stringReplaceCoreTool = tool({
 		},
 		required: ['path', 'old_str', 'new_str'],
 	}),
-	needsApproval: createFileToolApproval('string_replace'),
 	execute: async (args, _options) => {
 		return await executeStringReplace(args);
 	},
@@ -238,4 +237,5 @@ export const stringReplaceTool: NanocoderToolExport = {
 	tool: stringReplaceCoreTool,
 	formatter: stringReplaceFormatter,
 	validator: stringReplaceValidator,
+	approval: createFileToolApproval('string_replace'),
 };

@@ -90,8 +90,8 @@ test('update_task - has validator', t => {
 	t.truthy(updateTaskTool.validator);
 });
 
-test('update_task - needsApproval is false', t => {
-	t.is(updateTaskTool.tool.needsApproval, false);
+test('update_task - approval is false', t => {
+	t.is(updateTaskTool.approval, false);
 });
 
 // ============================================================================

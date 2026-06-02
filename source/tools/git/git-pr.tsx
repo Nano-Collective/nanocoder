@@ -6,7 +6,6 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
-import {getCurrentMode} from '@/context/mode-context';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
@@ -269,21 +268,6 @@ const gitPrCoreTool = tool({
 		},
 		required: [],
 	}),
-	// Approval varies by action
-	needsApproval: (args: GitPrInput) => {
-		const mode = getCurrentMode();
-
-		// Yolo mode auto-executes everything
-		if (mode === 'yolo') return false;
-
-		// ALWAYS_APPROVE for create (user should see title/body)
-		if (args.create) {
-			return true;
-		}
-
-		// AUTO for view and list
-		return false;
-	},
 	execute: async (args, _options) => {
 		return await executeGitPr(args);
 	},
@@ -425,4 +409,7 @@ export const gitPrTool: NanocoderToolExport = {
 	name: 'git_pr' as const,
 	tool: gitPrCoreTool,
 	formatter,
+	// Approval varies by action: create always prompts (user should see
+	// title/body); view/list auto-run.
+	approval: (args: GitPrInput) => Boolean(args.create),
 };

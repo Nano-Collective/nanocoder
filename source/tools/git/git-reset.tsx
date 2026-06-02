@@ -6,7 +6,6 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
-import {getCurrentMode} from '@/context/mode-context';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
@@ -180,21 +179,6 @@ const gitResetCoreTool = tool({
 		},
 		required: ['mode'],
 	}),
-	// Approval varies by mode
-	needsApproval: (args: GitResetInput) => {
-		const mode = getCurrentMode();
-
-		// Yolo mode auto-executes everything
-		if (mode === 'yolo') return false;
-
-		// ALWAYS_APPROVE for hard reset (permanent data loss)
-		if (args.mode === 'hard') {
-			return true;
-		}
-
-		// STANDARD for soft and mixed
-		return mode === 'normal';
-	},
 	execute: async (args, _options) => {
 		return await executeGitReset(args);
 	},
@@ -326,4 +310,10 @@ export const gitResetTool: NanocoderToolExport = {
 	name: 'git_reset' as const,
 	tool: gitResetCoreTool,
 	formatter,
+	// Approval varies by mode: hard reset always prompts (data loss); soft/mixed
+	// prompt only in normal mode.
+	approval: (args: GitResetInput, mode) => {
+		if (args.mode === 'hard') return true;
+		return mode === 'normal';
+	},
 };

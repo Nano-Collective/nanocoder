@@ -149,8 +149,9 @@ export async function handleChat(
 				toolCount: aiTools ? Object.keys(aiTools).length : 0,
 			});
 
-			// Tools with needsApproval: false auto-execute in the SDK's loop
-			// Tools with needsApproval: true cause the SDK to stop for approval
+			// These tools have `execute` stripped, so the SDK never auto-runs
+			// them - it emits the tool call and stops, and our loop decides
+			// approval/execution (see resolveToolApproval).
 			// stopWhen controls when the tool loop stops (max MAX_TOOL_STEPS steps)
 
 			// Provider-specific request extras (Codex Responses API fields,

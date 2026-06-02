@@ -90,8 +90,8 @@ test('delete_task - has validator', t => {
 	t.truthy(deleteTaskTool.validator);
 });
 
-test('delete_task - needsApproval is false', t => {
-	t.is(deleteTaskTool.tool.needsApproval, false);
+test('delete_task - approval is false', t => {
+	t.is(deleteTaskTool.approval, false);
 });
 
 // ============================================================================

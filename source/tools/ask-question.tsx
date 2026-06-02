@@ -53,7 +53,6 @@ const askQuestionCoreTool = tool({
 		},
 		required: ['question', 'options'],
 	}),
-	needsApproval: false,
 	execute: async (args, _options) => {
 		return await executeAskQuestion(args);
 	},
@@ -110,4 +109,6 @@ export const askQuestionTool: NanocoderToolExport = {
 	name: 'ask_user' as const,
 	tool: askQuestionCoreTool,
 	formatter: askQuestionFormatter,
+	// Asking the user a question is itself the interaction - never gated.
+	approval: false,
 };

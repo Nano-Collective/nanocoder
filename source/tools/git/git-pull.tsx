@@ -6,7 +6,6 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
-import {getCurrentMode} from '@/context/mode-context';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
@@ -144,11 +143,6 @@ const gitPullCoreTool = tool({
 		},
 		required: [],
 	}),
-	// STANDARD - requires approval in normal mode, skipped in auto-accept
-	needsApproval: () => {
-		const mode = getCurrentMode();
-		return mode === 'normal';
-	},
 	execute: async (args, _options) => {
 		return await executeGitPull(args);
 	},
@@ -271,4 +265,6 @@ export const gitPullTool: NanocoderToolExport = {
 	name: 'git_pull' as const,
 	tool: gitPullCoreTool,
 	formatter,
+	// STANDARD - requires approval in normal mode, skipped in auto-accept
+	approval: (_args, mode) => mode === 'normal',
 };

@@ -6,7 +6,6 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
-import {getCurrentMode} from '@/context/mode-context';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
@@ -239,26 +238,6 @@ const gitBranchCoreTool = tool({
 		},
 		required: [],
 	}),
-	// Approval varies by action
-	needsApproval: (args: GitBranchInput) => {
-		const mode = getCurrentMode();
-
-		// Yolo mode auto-executes everything
-		if (mode === 'yolo') return false;
-
-		// AUTO for list
-		if (!args.create && !args.switch && !args.delete) {
-			return false;
-		}
-
-		// ALWAYS_APPROVE for force delete
-		if (args.delete && args.force) {
-			return true;
-		}
-
-		// STANDARD for create, switch, normal delete
-		return mode === 'normal';
-	},
 	execute: async (args, _options) => {
 		return await executeGitBranch(args);
 	},
@@ -415,4 +394,11 @@ export const gitBranchTool: NanocoderToolExport = {
 	name: 'git_branch' as const,
 	tool: gitBranchCoreTool,
 	formatter,
+	// Approval varies by action: list auto-runs; force-delete always prompts;
+	// create/switch/normal-delete prompt only in normal mode.
+	approval: (args: GitBranchInput, mode) => {
+		if (!args.create && !args.switch && !args.delete) return false;
+		if (args.delete && args.force) return true;
+		return mode === 'normal';
+	},
 };

@@ -32,7 +32,7 @@ test('move_file tool has correct name', t => {
 });
 
 test('move_file has function-based approval', t => {
-	t.is(typeof moveFileTool.tool.needsApproval, 'function');
+	t.is(typeof moveFileTool.approval, 'function');
 });
 
 test('move_file tool has handler function', t => {

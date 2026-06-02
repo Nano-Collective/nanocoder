@@ -125,8 +125,6 @@ const searchFileContentsCoreTool = tool({
 		},
 		required: ['query'],
 	}),
-	// Low risk: read-only operation, never requires approval
-	needsApproval: false,
 	execute: async (args, _options) => {
 		return await executeSearchFileContents(args);
 	},

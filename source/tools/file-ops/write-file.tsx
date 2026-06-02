@@ -77,7 +77,6 @@ const writeFileCoreTool = tool({
 		},
 		required: ['path', 'content'],
 	}),
-	needsApproval: createFileToolApproval('write_file'),
 	execute: async (args, _options) => {
 		return await executeWriteFile(args);
 	},
@@ -290,4 +289,5 @@ export const writeFileTool: NanocoderToolExport = {
 	tool: writeFileCoreTool,
 	formatter: writeFileFormatter,
 	validator: writeFileValidator,
+	approval: createFileToolApproval('write_file'),
 };

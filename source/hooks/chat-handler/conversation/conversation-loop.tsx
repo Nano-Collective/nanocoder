@@ -11,6 +11,7 @@ import {
 	stripEmbeddedToolCallText,
 	stripThinkTags,
 } from '@/tool-calling/index';
+import {resolveToolApproval} from '@/tools/approval-policy';
 import {loadTasks} from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
@@ -28,7 +29,6 @@ import {formatElapsedTime, getRandomAdjective} from '@/utils/completion-note';
 import {MessageBuilder} from '@/utils/message-builder';
 import {infoMsg} from '@/utils/message-factory';
 import {parseToolArguments} from '@/utils/tool-args-parser';
-import {toolNeedsApproval} from '@/utils/tool-needs-approval';
 import {displayCompactCountsSummary} from '@/utils/tool-result-display';
 import {filterValidToolCalls} from '../utils/tool-filters';
 import {executeToolsDirectly} from './tool-executor';
@@ -224,9 +224,7 @@ export const processAssistantResponse = async (
 	const availableNames =
 		toolManager?.getAvailableToolNames(tune, developmentMode) ?? [];
 	const tools = toolManager
-		? toolManager.getEffectiveTools(availableNames, {
-				nonInteractiveAlwaysAllow,
-			})
+		? toolManager.getEffectiveTools(availableNames)
 		: {};
 
 	let streamedContent = '';
@@ -574,22 +572,20 @@ export const processAssistantResponse = async (
 				}
 			}
 
-			// Evaluate needsApproval from tool definition
-			let needsApproval = true;
-
-			// In non-interactive mode, check the nonInteractiveAlwaysAllow list
-			if (
-				nonInteractiveMode &&
-				nonInteractiveAlwaysAllow.includes(toolCall.function.name)
-			) {
-				needsApproval = false;
-			} else if (toolManager) {
-				const toolEntry = toolManager.getToolEntry(toolCall.function.name);
-				needsApproval = await toolNeedsApproval(
-					toolEntry?.tool,
-					toolCall.function.arguments,
-				);
-			}
+			// Evaluate approval through the single mode-aware resolver. In
+			// non-interactive mode the alwaysAllow list pre-authorizes tools.
+			const toolEntry = toolManager?.getToolEntry(toolCall.function.name);
+			const needsApproval = await resolveToolApproval(
+				toolCall.function.name,
+				toolEntry,
+				toolCall.function.arguments,
+				{
+					mode: developmentMode,
+					alwaysAllow: nonInteractiveMode
+						? nonInteractiveAlwaysAllow
+						: undefined,
+				},
+			);
 
 			if (validationFailed || !needsApproval) {
 				toolsToExecuteDirectly.push(toolCall);

@@ -10,7 +10,6 @@ import {
 } from '@/components/message-box';
 import Status from '@/components/status';
 import {getAppConfig} from '@/config/index';
-import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getModelContextLimit} from '@/models/index';
@@ -189,9 +188,6 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				modeIndex: nextIndex,
 				totalModes: modes.length,
 			});
-
-			// Sync global mode context for tool needsApproval logic
-			setCurrentModeContext(nextMode);
 
 			return nextMode;
 		});

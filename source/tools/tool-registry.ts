@@ -303,6 +303,7 @@ export class ToolRegistry {
 				validator: t.validator,
 				streamingFormatter: t.streamingFormatter,
 				readOnly: t.readOnly,
+				approval: t.approval,
 			});
 		}
 

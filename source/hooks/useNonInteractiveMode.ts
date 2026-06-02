@@ -2,7 +2,6 @@ import React from 'react';
 import {isNonInteractiveModeComplete} from '@/app/helpers';
 import type {NonInteractiveModeState} from '@/app/types';
 import {TIMEOUT_EXECUTION_MAX_MS, TIMEOUT_OUTPUT_FLUSH_MS} from '@/constants';
-import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
 import type {DevelopmentMode, LLMClient} from '@/types';
 import {getLogger} from '@/utils/logging';
 import {getShutdownManager} from '@/utils/shutdown';
@@ -92,11 +91,7 @@ export function useNonInteractiveMode({
 		) {
 			setNonInteractiveSubmitted(true);
 			// Apply the requested development mode (default auto-accept).
-			// Sync both React state AND global context synchronously
-			// to prevent race conditions where tools check global context
-			// before the useEffect in App.tsx has a chance to sync it.
 			setDevelopmentMode(developmentMode);
-			setCurrentModeContext(developmentMode);
 			// Submit the prompt
 			void handleMessageSubmit(nonInteractivePrompt);
 		}

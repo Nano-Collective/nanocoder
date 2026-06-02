@@ -73,9 +73,8 @@ const createMockToolManager = (config: {
 	getToolEntry: (name: string) => {
 		if (config.needsApproval !== undefined) {
 			return {
-				tool: {
-					needsApproval: config.needsApproval,
-				},
+				name,
+				approval: config.needsApproval,
 			};
 		}
 		return undefined;

@@ -25,7 +25,6 @@ import WelcomeMessage from '@/components/welcome-message';
 import {getAppConfig, loadDefaultMode} from '@/config/index';
 import {updateSelectedTheme} from '@/config/preferences';
 import {getThemeColors} from '@/config/themes';
-import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
 import {useChatHandler} from '@/hooks/chat-handler';
 import {useAppHandlers} from '@/hooks/useAppHandlers';
 import {useAppInitialization} from '@/hooks/useAppInitialization';
@@ -85,18 +84,6 @@ export default function App({
 	// Bypasses the disclaimer without touching the preferences file.
 	const isEffectivelyTrusted =
 		isTrusted || (nonInteractiveMode && trustDirectory);
-
-	// Sync global mode context whenever development mode changes.
-	// Note: This useEffect serves as a backup synchronization mechanism.
-	// Primary synchronization happens synchronously at the call sites:
-	// - useNonInteractiveMode.ts: setCurrentModeContext() called with setDevelopmentMode()
-	// - useToolHandler.tsx: setCurrentModeContext() called with setDevelopmentMode()
-	// - useAppHandlers.tsx: setCurrentModeContext() called within handleToggleDevelopmentMode()
-	// This effect ensures the global context stays in sync even if new code paths
-	// are added that update React state without updating the global context.
-	React.useEffect(() => {
-		setCurrentModeContext(appState.developmentMode);
-	}, [appState.developmentMode]);
 
 	// VS Code extension installation prompt state
 	const [showExtensionPrompt, setShowExtensionPrompt] = React.useState(

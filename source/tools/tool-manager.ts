@@ -222,33 +222,16 @@ export class ToolManager {
 	}
 
 	/**
-	 * Get effective tools with non-interactive approval overrides applied.
-	 * Resolves all approval policy in one place so chat-handler doesn't mutate tools.
+	 * Get the tools the model sees for a turn (schemas only, execute stripped).
+	 *
+	 * Approval is NOT encoded here: the SDK never auto-executes these tools, so
+	 * approval is decided entirely by `resolveToolApproval` at the call sites
+	 * (which apply the non-interactive alwaysAllow list and the current mode).
 	 */
 	getEffectiveTools(
 		availableToolNames: string[],
-		options?: {
-			nonInteractiveAlwaysAllow?: string[];
-		},
 	): Record<string, AISDKCoreTool> {
-		const tools = this.getFilteredToolsWithoutExecute(availableToolNames);
-
-		if (
-			options?.nonInteractiveAlwaysAllow &&
-			options.nonInteractiveAlwaysAllow.length > 0
-		) {
-			const allowSet = new Set(options.nonInteractiveAlwaysAllow);
-			return Object.fromEntries(
-				Object.entries(tools).map(([name, toolDef]) => {
-					if (allowSet.has(name)) {
-						return [name, {...toolDef, needsApproval: false} as AISDKCoreTool];
-					}
-					return [name, toolDef];
-				}),
-			);
-		}
-
-		return tools;
+		return this.getFilteredToolsWithoutExecute(availableToolNames);
 	}
 
 	// =========================================================================

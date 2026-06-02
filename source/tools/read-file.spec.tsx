@@ -935,7 +935,9 @@ test('read_file tool has correct name', t => {
 });
 
 test('read_file tool does not require confirmation', t => {
-	t.false(readFileTool.tool.needsApproval);
+	// Read-only tools default to no approval (see resolveToolApproval).
+	t.true(readFileTool.readOnly);
+	t.is(readFileTool.approval, undefined);
 });
 
 test('read_file tool has handler function', t => {

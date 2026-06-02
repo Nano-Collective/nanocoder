@@ -14,8 +14,16 @@ test('returns a function', t => {
 
 test('returned function returns a boolean', t => {
 	const approvalFn = createFileToolApproval('write_file');
-	const result = approvalFn();
+	const result = approvalFn({}, 'normal');
 	t.is(typeof result, 'boolean');
+});
+
+test('returned function is mode-aware', t => {
+	// Yolo is handled centrally by resolveToolApproval, not this policy.
+	const approvalFn = createFileToolApproval('write_file');
+	t.true(approvalFn({}, 'normal'), 'normal mode requires approval');
+	t.false(approvalFn({}, 'auto-accept'), 'auto-accept skips approval');
+	t.false(approvalFn({}, 'headless'), 'headless skips approval');
 });
 
 test('different tool names produce independent functions', t => {
@@ -47,13 +55,15 @@ test.serial('alwaysAllow short-circuits approval for the listed tool', async t =
 		reloadAppConfig();
 
 		const approvalFn = createFileToolApproval('execute_bash');
-		t.false(approvalFn(), 'always-allowed tool should not need approval');
+		t.false(
+			approvalFn({}, 'normal'),
+			'always-allowed tool should not need approval even in normal mode',
+		);
 
 		const other = createFileToolApproval('write_file');
-		// `write_file` isn't in alwaysAllow; result depends on current mode,
-		// but the function shouldn't short-circuit to false through the
-		// alwaysAllow path. We assert it's a boolean (mode-driven outcome).
-		t.is(typeof other(), 'boolean');
+		// `write_file` isn't in alwaysAllow, so in normal mode it still needs
+		// approval (the alwaysAllow path must not short-circuit it).
+		t.true(other({}, 'normal'));
 	} finally {
 		if (originalConfigDir === undefined) {
 			delete process.env.NANOCODER_CONFIG_DIR;

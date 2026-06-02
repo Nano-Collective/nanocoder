@@ -6,7 +6,7 @@ import stripAnsi from 'strip-ansi';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../../config/themes.js';
-import {setCurrentMode} from '../../context/mode-context.js';
+import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {writeFileTool} from './write-file.js';
 
@@ -71,58 +71,30 @@ async function createTestFile(
 // Approval Tests
 // ============================================================================
 
-test('write_file requires approval in normal mode', async t => {
-	setCurrentMode('normal');
-	const needsApproval = writeFileTool.tool.needsApproval;
+const writeArgs = {path: 'test.txt', content: 'test'};
 
-	if (typeof needsApproval === 'function') {
-		const result = await needsApproval(
-			{
-				path: 'test.txt',
-				content: 'test',
-			},
-			{toolCallId: 'test', messages: []},
-		);
-		t.true(result);
-	} else {
-		t.is(needsApproval, true);
-	}
+test('write_file requires approval in normal mode', async t => {
+	t.true(
+		await resolveToolApproval(writeFileTool.name, writeFileTool, writeArgs, {
+			mode: 'normal',
+		}),
+	);
 });
 
 test('write_file does NOT require approval in auto-accept mode', async t => {
-	setCurrentMode('auto-accept');
-	const needsApproval = writeFileTool.tool.needsApproval;
-
-	if (typeof needsApproval === 'function') {
-		const result = await needsApproval(
-			{
-				path: 'test.txt',
-				content: 'test',
-			},
-			{toolCallId: 'test', messages: []},
-		);
-		t.false(result);
-	} else {
-		t.is(needsApproval, false);
-	}
+	t.false(
+		await resolveToolApproval(writeFileTool.name, writeFileTool, writeArgs, {
+			mode: 'auto-accept',
+		}),
+	);
 });
 
 test('write_file requires approval in plan mode', async t => {
-	setCurrentMode('plan');
-	const needsApproval = writeFileTool.tool.needsApproval;
-
-	if (typeof needsApproval === 'function') {
-		const result = await needsApproval(
-			{
-				path: 'test.txt',
-				content: 'test',
-			},
-			{toolCallId: 'test', messages: []},
-		);
-		t.true(result);
-	} else {
-		t.is(needsApproval, true);
-	}
+	t.true(
+		await resolveToolApproval(writeFileTool.name, writeFileTool, writeArgs, {
+			mode: 'plan',
+		}),
+	);
 });
 
 // ============================================================================
@@ -868,10 +840,3 @@ test('write_file formatter: handles object content (regression test)', async t =
 	t.regex(plainOutput, /"test_id":1/);
 });
 
-// ============================================================================
-// Cleanup
-// ============================================================================
-
-test.after(() => {
-	setCurrentMode('normal');
-});

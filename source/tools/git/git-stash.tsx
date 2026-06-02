@@ -6,7 +6,6 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
-import {getCurrentMode} from '@/context/mode-context';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
@@ -260,29 +259,6 @@ const gitStashCoreTool = tool({
 		},
 		required: [],
 	}),
-	// Approval varies by action
-	needsApproval: (args: GitStashInput) => {
-		const mode = getCurrentMode();
-
-		// Yolo mode auto-executes everything
-		if (mode === 'yolo') return false;
-
-		// AUTO for list
-		if (
-			args.list ||
-			(!args.push && !args.pop && !args.apply && !args.drop && !args.clear)
-		) {
-			return false;
-		}
-
-		// ALWAYS_APPROVE for drop and clear (permanent data loss)
-		if (args.drop || args.clear) {
-			return true;
-		}
-
-		// STANDARD for push, pop, apply
-		return mode === 'normal';
-	},
 	execute: async (args, _options) => {
 		return await executeGitStash(args);
 	},
@@ -439,4 +415,16 @@ export const gitStashTool: NanocoderToolExport = {
 	name: 'git_stash' as const,
 	tool: gitStashCoreTool,
 	formatter,
+	// Approval varies by action: list auto-runs; drop/clear always prompt (data
+	// loss); push/pop/apply prompt only in normal mode.
+	approval: (args: GitStashInput, mode) => {
+		if (
+			args.list ||
+			(!args.push && !args.pop && !args.apply && !args.drop && !args.clear)
+		) {
+			return false;
+		}
+		if (args.drop || args.clear) return true;
+		return mode === 'normal';
+	},
 };
