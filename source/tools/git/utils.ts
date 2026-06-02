@@ -6,6 +6,8 @@
  */
 
 import {execSync, spawn} from 'node:child_process';
+import {existsSync, readFileSync} from 'node:fs';
+import {isAbsolute, join} from 'node:path';
 import {getLogger} from '@/utils/logging';
 
 const logger = getLogger();
@@ -107,6 +109,133 @@ export function isGhAvailable(): boolean {
 	} catch {
 		return false;
 	}
+}
+
+// ============================================================================
+// Synchronous Branch Helpers (safe to call from Ink <Static> render path)
+// ============================================================================
+
+/**
+ * Summary of git branch state used by the boot summary and /status panel.
+ */
+export interface GitStatusSummary {
+	branch: string;
+	isDefault: boolean;
+	detached: boolean;
+}
+
+/**
+ * Locate the .git directory for the current working directory by walking up
+ * the filesystem. Returns null when not inside a git repository. Synchronous.
+ *
+ * Also resolves the gitdir indirection used by git worktrees, where `.git`
+ * is a file containing `gitdir: <path>` rather than a directory.
+ */
+function findGitDirSync(startDir: string = process.cwd()): string | null {
+	let dir = startDir;
+	while (true) {
+		const candidate = join(dir, '.git');
+		if (existsSync(candidate)) {
+			try {
+				const stat = readFileSync(candidate, 'utf8');
+				const match = stat.match(/^gitdir:\s*(.+)\s*$/m);
+				if (match) {
+					const resolved = isAbsolute(match[1])
+						? match[1]
+						: join(dir, match[1]);
+					return resolved;
+				}
+			} catch {
+				// Not a file — assume it's the directory itself.
+			}
+			return candidate;
+		}
+		const parent = join(dir, '..');
+		if (parent === dir) return null;
+		dir = parent;
+	}
+}
+
+/**
+ * Read the current branch name synchronously by parsing .git/HEAD.
+ * Returns null when not in a repo or HEAD can't be read.
+ * When HEAD is detached, returns a short SHA prefix.
+ */
+export function getCurrentBranchSync(): {
+	branch: string;
+	detached: boolean;
+} | null {
+	const gitDir = findGitDirSync();
+	if (!gitDir) return null;
+	try {
+		const head = readFileSync(join(gitDir, 'HEAD'), 'utf8').trim();
+		const refMatch = head.match(/^ref:\s*refs\/heads\/(.+)$/);
+		if (refMatch) {
+			return {branch: refMatch[1], detached: false};
+		}
+		// Bare SHA = detached HEAD
+		return {branch: head.slice(0, 7), detached: true};
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Resolve the default branch synchronously. Prefers
+ * `.git/refs/remotes/origin/HEAD` (a symbolic ref); falls back to checking
+ * whether `main` or `master` exists in `.git/refs/heads/` or `packed-refs`.
+ * Returns null when nothing can be resolved.
+ */
+export function getDefaultBranchSync(): string | null {
+	const gitDir = findGitDirSync();
+	if (!gitDir) return null;
+
+	try {
+		const originHead = join(gitDir, 'refs', 'remotes', 'origin', 'HEAD');
+		if (existsSync(originHead)) {
+			const contents = readFileSync(originHead, 'utf8').trim();
+			const match = contents.match(/^ref:\s*refs\/remotes\/origin\/(.+)$/);
+			if (match) return match[1];
+		}
+	} catch {
+		// fall through
+	}
+
+	const headsDir = join(gitDir, 'refs', 'heads');
+	for (const candidate of ['main', 'master']) {
+		if (existsSync(join(headsDir, candidate))) return candidate;
+	}
+
+	try {
+		const packed = join(gitDir, 'packed-refs');
+		if (existsSync(packed)) {
+			const contents = readFileSync(packed, 'utf8');
+			for (const candidate of ['main', 'master']) {
+				if (contents.includes(` refs/heads/${candidate}`)) return candidate;
+			}
+		}
+	} catch {
+		// ignore
+	}
+
+	return null;
+}
+
+/**
+ * Resolve a {@link GitStatusSummary} synchronously. Returns null when not in
+ * a git repository (or when git availability checks fail), so callers can
+ * cleanly omit the surface.
+ */
+export function getGitStatusSummarySync(): GitStatusSummary | null {
+	if (!isInsideGitRepo()) return null;
+	const current = getCurrentBranchSync();
+	if (!current) return null;
+	const defaultBranch = getDefaultBranchSync();
+	return {
+		branch: current.branch,
+		detached: current.detached,
+		isDefault: !current.detached && current.branch === defaultBranch,
+	};
 }
 
 // ============================================================================

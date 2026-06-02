@@ -19,6 +19,13 @@ import {generateKey} from '@/session/key-generator';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
 import {createTokenizer} from '@/tokenization/index';
+import {
+	type GitStatusSummary,
+	getCurrentBranch,
+	getDefaultBranch,
+	isGitAvailable,
+	isInsideGitRepo,
+} from '@/tools/git/utils';
 import type {Task} from '@/tools/tasks/types';
 import type {
 	CheckpointListItem,
@@ -288,6 +295,29 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			// Continue without context usage/auto-compact info
 		}
 
+		// Resolve the current git branch for the /status panel. Async git
+		// helpers are fine here because the panel isn't rendered inside
+		// Ink's <Static>. Failures degrade to omitting the line.
+		let gitStatus: GitStatusSummary | null = null;
+		try {
+			if (isGitAvailable() && isInsideGitRepo()) {
+				const branch = await getCurrentBranch();
+				const detached = branch === 'HEAD';
+				let isDefault = false;
+				if (!detached) {
+					try {
+						const defaultBranch = await getDefaultBranch();
+						isDefault = branch === defaultBranch;
+					} catch {
+						// fall through — leave isDefault false
+					}
+				}
+				gitStatus = {branch, detached, isDefault};
+			}
+		} catch (error) {
+			logger.debug('Failed to resolve git status for /status panel', {error});
+		}
+
 		props.addToChatQueue(
 			<Status
 				key={generateKey('status')}
@@ -301,6 +331,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				customCommandsCount={props.customCommandsCount}
 				contextUsage={contextUsage}
 				autoCompactInfo={autoCompactInfo}
+				gitStatus={gitStatus}
 			/>,
 		);
 	}, [
