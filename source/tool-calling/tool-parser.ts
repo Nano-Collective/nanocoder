@@ -1,3 +1,4 @@
+import {normalizeWhitespace, removeRanges} from '@/tool-calling/whitespace';
 import {XMLToolCallParser} from '@/tool-calling/xml-parser';
 import type {ToolCall} from '@/types/index';
 import {ensureString} from '@/utils/type-helpers';
@@ -13,24 +14,6 @@ export function stripThinkTags(content: string): string {
 			// Strip orphaned/incomplete think tags
 			.replace(/<think>[\s\S]*$/gi, '')
 			.replace(/<\/think>/gi, '')
-	);
-}
-
-/**
- * Normalize whitespace in content to remove excessive blank lines and spacing
- */
-function normalizeWhitespace(content: string): string {
-	return (
-		content
-			// Remove trailing whitespace from each line
-			.replace(/[ \t]+$/gm, '')
-			// Collapse multiple spaces (but not at start of line for indentation)
-			.replace(/([^ \t\n]) {2,}/g, '$1 ')
-			// Remove lines that are only whitespace
-			.replace(/^[ \t]+$/gm, '')
-			// Collapse 3+ consecutive newlines to exactly 2 (one blank line)
-			.replace(/\n{3,}/g, '\n\n')
-			.trim()
 	);
 }
 
@@ -123,13 +106,7 @@ function parseJSONToolCalls(content: string): {
 		return {toolCalls, cleanedContent: content};
 	}
 
-	matchedRanges.sort((a, b) => b[0] - a[0]);
-	let cleanedContent = content;
-	for (const [start, end] of matchedRanges) {
-		cleanedContent = cleanedContent.slice(0, start) + cleanedContent.slice(end);
-	}
-
-	return {toolCalls, cleanedContent};
+	return {toolCalls, cleanedContent: removeRanges(content, matchedRanges)};
 }
 
 const FUNCTION_TAG_REGEX = /<function=(\w+)>([\s\S]*?)<\/function>/g;
@@ -183,13 +160,7 @@ function parseFunctionTagToolCalls(content: string): {
 		return {toolCalls, cleanedContent: content};
 	}
 
-	matchedRanges.sort((a, b) => b[0] - a[0]);
-	let cleanedContent = content;
-	for (const [start, end] of matchedRanges) {
-		cleanedContent = cleanedContent.slice(0, start) + cleanedContent.slice(end);
-	}
-
-	return {toolCalls, cleanedContent};
+	return {toolCalls, cleanedContent: removeRanges(content, matchedRanges)};
 }
 
 const JSON_MALFORMED_PATTERNS: Array<{regex: RegExp; error: string}> = [

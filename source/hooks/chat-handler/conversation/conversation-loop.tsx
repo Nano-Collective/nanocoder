@@ -178,6 +178,16 @@ export const processAssistantResponse = async (
 		onSetCompactToolCounts?.(null);
 	};
 
+	// Flush both the compact-count summary and any pending live task list.
+	// Called at every turn boundary, so it lives in one place.
+	const flushAll = async () => {
+		flushCompactCounts();
+		if (hasLiveTaskUpdates) {
+			await flushLiveTaskList();
+			hasLiveTaskUpdates = false;
+		}
+	};
+
 	// Ensure we have an abort controller for this request
 	let controller = abortController;
 	if (!controller) {
@@ -295,11 +305,7 @@ export const processAssistantResponse = async (
 		// bad XML loops forever, appending two messages per iteration, until
 		// Node's heap exhausts.
 		if (malformedRetryCount >= MAX_MALFORMED_RETRIES) {
-			flushCompactCounts();
-			if (hasLiveTaskUpdates) {
-				await flushLiveTaskList();
-				hasLiveTaskUpdates = false;
-			}
+			await flushAll();
 			addToChatQueue(
 				<ErrorMessage
 					key={generateKey('malformed-tool-giveup')}
@@ -388,11 +394,7 @@ export const processAssistantResponse = async (
 	// boxes). Residual counts are flushed at end of conversation / before
 	// confirmation below.
 	if (cleanedContent.trim()) {
-		flushCompactCounts();
-		if (hasLiveTaskUpdates) {
-			await flushLiveTaskList();
-			hasLiveTaskUpdates = false;
-		}
+		await flushAll();
 	}
 	if (fullReasoning) {
 		// Despite reasoning stream typically finishing before text stream,
@@ -635,11 +637,7 @@ export const processAssistantResponse = async (
 
 				// If there are also tools needing confirmation, start that flow
 				if (toolsNeedingConfirmation.length > 0) {
-					flushCompactCounts();
-					if (hasLiveTaskUpdates) {
-						await flushLiveTaskList();
-						hasLiveTaskUpdates = false;
-					}
+					await flushAll();
 					onStartToolConfirmationFlow(
 						toolsNeedingConfirmation,
 						updatedMessagesWithTools,
@@ -664,11 +662,7 @@ export const processAssistantResponse = async (
 		// Start confirmation flow only for tools that need it
 		if (toolsNeedingConfirmation.length > 0) {
 			// Flush compact counts and live task list before entering confirmation or exiting
-			flushCompactCounts();
-			if (hasLiveTaskUpdates) {
-				await flushLiveTaskList();
-				hasLiveTaskUpdates = false;
-			}
+			await flushAll();
 
 			// In non-interactive mode, exit when tool approval is required
 			if (nonInteractiveMode) {
@@ -724,11 +718,7 @@ export const processAssistantResponse = async (
 		// token budget on thinking) would loop forever.
 		if (emptyTurnCount >= MAX_EMPTY_TURNS) {
 			setLiveComponent?.(null);
-			flushCompactCounts();
-			if (hasLiveTaskUpdates) {
-				await flushLiveTaskList();
-				hasLiveTaskUpdates = false;
-			}
+			await flushAll();
 			addToChatQueue(
 				<ErrorMessage
 					key={generateKey('empty-response-giveup')}
@@ -786,11 +776,7 @@ export const processAssistantResponse = async (
 		// Lock any live task panel from the prior turn into scrollback so
 		// the next turn's UI starts clean — same pattern as the give-up,
 		// confirmation-flow, and natural-end branches.
-		flushCompactCounts();
-		if (hasLiveTaskUpdates) {
-			await flushLiveTaskList();
-			hasLiveTaskUpdates = false;
-		}
+		await flushAll();
 
 		// Don't include the empty assistantMsg - it would cause API error
 		// "Assistant message must have either content or tool_calls"
@@ -813,11 +799,7 @@ export const processAssistantResponse = async (
 	if (validToolCalls.length === 0 && cleanedContent.trim()) {
 		// Flush any residual compact counts and task updates from turns that
 		// didn't emit reasoning so they persist in scrollback at conversation end.
-		flushCompactCounts();
-		if (hasLiveTaskUpdates) {
-			await flushLiveTaskList();
-			hasLiveTaskUpdates = false;
-		}
+		await flushAll();
 
 		setIsGenerating(false);
 		const adjective = getRandomAdjective();
