@@ -10,9 +10,20 @@ import {
 	PATH_LENGTH_NORMAL_TERMINAL,
 } from '@/constants';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
+import type {GitStatusSummary} from '@/tools/git/utils';
 import type {LSPConnectionStatus, MCPConnectionStatus} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
+
+/**
+ * Format a {@link GitStatusSummary} for the /status panel's Git line —
+ * mirrors the boot-summary formatter so both surfaces stay consistent.
+ */
+function formatGitLine(status: GitStatusSummary): string {
+	if (status.detached) return `${status.branch} (detached HEAD)`;
+	if (status.isDefault) return `${status.branch} (default)`;
+	return status.branch;
+}
 
 // Get CWD once at module load time
 const cwd = process.cwd();
@@ -34,6 +45,7 @@ export default memo(function Status({
 	vscodeRequestedPort,
 	contextUsage,
 	autoCompactInfo,
+	gitStatus,
 }: {
 	provider: string;
 	model: string;
@@ -58,6 +70,7 @@ export default memo(function Status({
 		mode: string;
 		hasOverrides: boolean;
 	};
+	gitStatus?: GitStatusSummary | null;
 }) {
 	const {boxWidth, isNarrow, truncatePath} = useResponsiveTerminal();
 	const colors = getThemeColors(theme);
@@ -117,6 +130,12 @@ export default memo(function Status({
 						<Text bold={true}>Theme: </Text>
 						{themes[theme].displayName}
 					</Text>
+					{gitStatus && (
+						<Text color={colors.primary}>
+							<Text bold={true}>Git: </Text>
+							{formatGitLine(gitStatus)}
+						</Text>
+					)}
 					{hasAgentsMd ? (
 						<Text color={colors.secondary} italic>
 							✓ AGENTS.md
@@ -222,6 +241,12 @@ export default memo(function Status({
 						<Text bold={true}>Theme: </Text>
 						{themes[theme].displayName}
 					</Text>
+					{gitStatus && (
+						<Text color={colors.primary}>
+							<Text bold={true}>Git: </Text>
+							{formatGitLine(gitStatus)}
+						</Text>
+					)}
 					{hasAgentsMd ? (
 						<Text color={colors.secondary} italic>
 							<Text>↳ Using AGENTS.md. Project initialized</Text>
