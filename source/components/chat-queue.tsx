@@ -1,5 +1,6 @@
 import {Box, Static} from 'ink';
-import {Fragment, memo, useMemo} from 'react';
+import {memo, useMemo} from 'react';
+import {RenderErrorBoundary} from '@/components/render-error-boundary';
 import type {ChatQueueProps} from '@/types/index';
 
 export default memo(function ChatQueue({
@@ -27,7 +28,9 @@ export default memo(function ChatQueue({
 								? component.key
 								: `static-${index}`;
 
-						return <Fragment key={key}>{component}</Fragment>;
+						return (
+							<RenderErrorBoundary key={key}>{component}</RenderErrorBoundary>
+						);
 					}}
 				</Static>
 			)}

@@ -44,7 +44,9 @@ export function makeSimpleToolFormatter<A>(
 						<Box key={row.label}>
 							<Text color={colors.secondary}>{row.label}: </Text>
 							<Text wrap="truncate-end" color={colors.text}>
-								{row.value}
+								{/* Coerce: rows may carry raw model-arg values that aren't
+								    actually strings; rendering a non-string crashes Ink. */}
+								{typeof row.value === 'string' ? row.value : String(row.value)}
 							</Text>
 						</Box>
 					),

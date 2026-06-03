@@ -1,6 +1,7 @@
 import {Box, Text, useInput} from 'ink';
 import SelectInput from 'ink-select-input';
 import React from 'react';
+import {RenderErrorBoundary} from '@/components/render-error-boundary';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getToolManager} from '@/message-handler';
@@ -148,7 +149,9 @@ export default function ToolConfirmation({
 					<Box marginBottom={1} flexDirection="column">
 						<Box>
 							{React.isValidElement(formatterPreview) ? (
-								formatterPreview
+								<RenderErrorBoundary label={toolCall.function.name}>
+									{formatterPreview}
+								</RenderErrorBoundary>
 							) : (
 								<Text color={colors.text}>{String(formatterPreview)}</Text>
 							)}

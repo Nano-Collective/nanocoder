@@ -5,6 +5,7 @@ import TextInput from '@/components/text-input';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {PendingQuestion} from '@/utils/question-queue';
+import {ensureString} from '@/utils/type-helpers';
 
 interface QuestionPromptProps {
 	question: PendingQuestion;
@@ -40,11 +41,13 @@ export default function QuestionPrompt({
 		setFreeformValue('');
 	}
 
-	// Build option items for SelectInput
-	const items: OptionItem[] = question.options.map(opt => ({
-		label: opt,
-		value: opt,
-	}));
+	// Build option items for SelectInput. The model controls `options`, so it
+	// may not be an array of strings — coerce so a malformed call can't crash.
+	const safeOptions = Array.isArray(question.options) ? question.options : [];
+	const items: OptionItem[] = safeOptions.map(opt => {
+		const label = ensureString(opt);
+		return {label, value: label};
+	});
 
 	if (question.allowFreeform) {
 		items.push({
@@ -104,7 +107,7 @@ export default function QuestionPrompt({
 				<Text color={colors.tool} bold>
 					?
 				</Text>
-				<Text color={colors.text}> {question.question}</Text>
+				<Text color={colors.text}> {ensureString(question.question)}</Text>
 			</Box>
 
 			{isFreeformMode ? (
