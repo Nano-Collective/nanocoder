@@ -192,6 +192,7 @@ export function buildSystemPrompt(
 	availableToolNames: string[],
 	toolsDisabled = false,
 	systemPromptOverride?: SystemPromptConfig,
+	model?: string,
 ): string {
 	const overrideContent = systemPromptOverride
 		? resolveSystemPromptOverride(systemPromptOverride)
@@ -204,8 +205,9 @@ export function buildSystemPrompt(
 	}
 
 	const tune = tuneConfig ?? TUNE_DEFAULTS;
-	const singleTool = tune.enabled && isSingleToolProfile(tune.toolProfile);
-	const nano = tune.enabled && isNanoProfile(tune.toolProfile);
+	const singleTool =
+		tune.enabled && isSingleToolProfile(tune.toolProfile, model);
+	const nano = tune.enabled && isNanoProfile(tune.toolProfile, model);
 	const toolSet = new Set(availableToolNames);
 	const sections: string[] = [];
 
@@ -238,10 +240,7 @@ export function buildSystemPrompt(
 	if (
 		toolSet.has('string_replace') ||
 		toolSet.has('write_file') ||
-		toolSet.has('delete_file') ||
-		toolSet.has('move_file') ||
-		toolSet.has('copy_file') ||
-		toolSet.has('create_directory')
+		toolSet.has('file_op')
 	) {
 		sections.push(loadSection(nano ? 'file-editing-nano' : 'file-editing'));
 	}
@@ -262,8 +261,8 @@ export function buildSystemPrompt(
 		);
 	}
 
-	// Task management — only if create_task is available AND not in plan mode
-	if (toolSet.has('create_task') && developmentMode !== 'plan') {
+	// Task management — only if write_tasks is available AND not in plan mode
+	if (toolSet.has('write_tasks') && developmentMode !== 'plan') {
 		sections.push(loadSection('task-management'));
 	}
 

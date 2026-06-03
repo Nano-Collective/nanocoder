@@ -85,12 +85,16 @@ export default function AgentProgress({
 			: colors.error
 		: colors.secondary;
 
+	// Defensive: callers should pass a string, but a malformed model tool call
+	// can supply a non-string. Coerce so we never render a raw object/array.
+	const safeDescription =
+		typeof description === 'string' ? description : String(description ?? '');
 	const terminalWidth = process.stdout.columns || 80;
 	const maxDescLen = Math.max(terminalWidth - 4, 40);
 	const shortDesc =
-		description.length > maxDescLen
-			? `${description.slice(0, maxDescLen)}...`
-			: description;
+		safeDescription.length > maxDescLen
+			? `${safeDescription.slice(0, maxDescLen)}...`
+			: safeDescription;
 
 	const messageContent = (
 		<Box flexDirection="column">

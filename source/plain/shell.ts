@@ -2,6 +2,7 @@ import path from 'node:path';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
 import {getAppConfig} from '@/config/index';
 import {loadPreferences, savePreferences} from '@/config/preferences';
+import {resolveTune} from '@/config/tune';
 import {runPlainConversation} from '@/plain/conversation';
 import {initializePlain} from '@/plain/initialize';
 import {
@@ -59,22 +60,25 @@ export async function runPlainShell(
 	const {client, toolManager, provider, model} = init;
 	writeBoot(provider, model, developmentMode);
 
-	const tunePrefs = loadPreferences().tune;
-	const tuneToolMode = getTuneToolMode(tunePrefs);
+	const tune = resolveTune(getAppConfig(), undefined, loadPreferences());
+	const tuneToolMode = getTuneToolMode(tune);
 	const toolsDisabled =
 		tuneToolMode !== 'native' || isToolCallingDisabled(provider, model);
 	const fallbackToolFormat: 'xml' | 'json' =
 		tuneToolMode === 'json' ? 'json' : 'xml';
 	const availableNames = toolManager.getAvailableToolNames(
-		undefined,
+		tune,
 		developmentMode,
+		undefined,
+		model,
 	);
 	const basePrompt = buildSystemPrompt(
 		developmentMode,
-		undefined,
+		tune,
 		availableNames,
 		toolsDisabled,
 		getAppConfig().systemPrompt,
+		model,
 	);
 	const toolsForPrompt = toolsDisabled
 		? toolManager.getFilteredTools(availableNames)
@@ -105,6 +109,8 @@ export async function runPlainShell(
 		developmentMode,
 		nonInteractiveAlwaysAllow,
 		abortSignal: abortController.signal,
+		tune,
+		model,
 	});
 	process.off('SIGINT', sigint);
 

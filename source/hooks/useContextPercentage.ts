@@ -42,13 +42,14 @@ export function useContextPercentage({
 	developmentMode = 'normal',
 	tune,
 }: UseContextPercentageProps): void {
-	const contextLimitRef = useRef<number | null>(null);
 	const lastResolvedKeyRef = useRef<string>('');
 
-	// Effect 1: Resolve context limit when model or provider changes
+	// Effect 1: Resolve context limit when model or provider changes. The
+	// resolved limit is published to `contextLimit` (state), which Effect 2
+	// depends on — so the percentage recomputes against the new model's window
+	// as soon as it resolves (not just on the next message).
 	useEffect(() => {
 		if (!currentModel) {
-			contextLimitRef.current = null;
 			lastResolvedKeyRef.current = '';
 			setContextLimit(null);
 			setContextPercentUsed(null);
@@ -65,7 +66,6 @@ export function useContextPercentage({
 			providerConfig: currentProviderConfig ?? undefined,
 		}).then(limit => {
 			if (cancelled) return;
-			contextLimitRef.current = limit;
 			setContextLimit(limit);
 			if (!limit) {
 				setContextPercentUsed(null);
@@ -83,10 +83,12 @@ export function useContextPercentage({
 		setContextPercentUsed,
 	]);
 
-	// Effect 2: Recalculate percentage when messages, streaming tokens, or context limit change
+	// Effect 2: Recalculate percentage. Mirrors the /usage command exactly:
+	// the tool-definition overhead counts only the tools actually exposed to
+	// the model (profile + mode filtered), and the prompt/tools/limit all
+	// re-resolve when the model, mode, tune profile, or window changes.
 	useEffect(() => {
-		const limit = contextLimitRef.current;
-		if (!limit) {
+		if (!contextLimit) {
 			setContextPercentUsed(null);
 			return;
 		}
@@ -110,21 +112,29 @@ export function useContextPercentage({
 			},
 		);
 
-		// Include tool definition overhead (only when native tool calling is active)
-		// When tools are disabled (XML/JSON fallback), definitions are in the system prompt
-		const nativeToolsDisabled = getTuneToolMode(tune) !== 'native';
+		// Tool definition overhead — only when native tool calling is active, and
+		// only for the tools actually exposed (profile + mode filtered). Under
+		// XML/JSON fallback the definitions already live inside the system prompt.
+		const nativeToolsDisabled =
+			currentProviderConfig?.disableTools === true ||
+			(currentProviderConfig?.disableToolModels?.includes(currentModel) ??
+				false) ||
+			getTuneToolMode(tune) !== 'native';
 		const toolDefTokens =
 			toolManager && !nativeToolsDisabled
 				? calculateToolDefinitionsTokens(
-						Object.keys(toolManager.getToolRegistry()).length,
+						toolManager.getAvailableToolNames(
+							tune,
+							developmentMode,
+							undefined,
+							currentModel,
+						).length,
 					)
 				: 0;
 
 		const total = breakdown.total + toolDefTokens + streamingTokenCount;
-		const percent = Math.round((total / limit) * 100);
+		const percent = Math.round((total / contextLimit) * 100);
 		setContextPercentUsed(percent);
-		// contextLimit is included to re-trigger calculation after async limit resolution
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [
 		messages,
 		tokenizer,
@@ -133,5 +143,9 @@ export function useContextPercentage({
 		streamingTokenCount,
 		setContextPercentUsed,
 		tune,
+		developmentMode,
+		currentModel,
+		currentProviderConfig,
+		contextLimit,
 	]);
 }

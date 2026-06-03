@@ -227,8 +227,10 @@ export interface MCPServerConfig {
 	source?: 'project' | 'global' | 'env';
 }
 
-// Tune configuration for runtime model tuning via /tune command
-export type ToolProfile = 'full' | 'minimal' | 'nano';
+// Tune configuration for runtime model tuning via /tune command.
+// 'auto' resolves to one of the concrete profiles based on the active model
+// (see inferToolProfile); the rest are fixed tool subsets.
+export type ToolProfile = 'auto' | 'full' | 'minimal' | 'nano';
 
 // OpenRouter reasoning options. Forwarded into the request body as
 // `reasoning: { ... }`. See https://openrouter.ai/docs/use-cases/reasoning-tokens.
@@ -374,8 +376,11 @@ export function getTuneToolMode(tune: TuneConfig | undefined): ToolMode {
 }
 
 export const TUNE_DEFAULTS: TuneConfig = {
-	enabled: false,
-	toolProfile: 'full',
+	// Auto-profiling is on by default: large/cloud models resolve to 'full'
+	// (no change), while small local models are automatically given the
+	// slimmer 'minimal'/'nano' tool set. Users can override via /tune.
+	enabled: true,
+	toolProfile: 'auto',
 	aggressiveCompact: false,
 };
 

@@ -65,7 +65,7 @@ const executeGitPr = async (args: GitPrInput): Promise<string> => {
 			// Check if upstream is set
 			const upstream = await getUpstreamBranch();
 			if (!upstream) {
-				return 'Error: No upstream branch set. Push your branch first with git_push (setUpstream: true).';
+				return 'Error: No upstream branch set. Push your branch first with execute_bash (e.g. `git push -u origin HEAD`).';
 			}
 
 			// Build gh command

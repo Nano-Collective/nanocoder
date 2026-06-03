@@ -25,7 +25,7 @@ export function TaskListDisplay({
 		return (
 			<Box flexDirection="column" marginY={1}>
 				<Text color={colors.secondary}>
-					No tasks found. Create one with create_task.
+					No tasks found. Create one with write_tasks.
 				</Text>
 			</Box>
 		);

@@ -129,13 +129,13 @@ test('buildSystemPrompt - excludes git section when no git tools', t => {
 	t.false(result.includes('## GIT'));
 });
 
-test('buildSystemPrompt - includes task management when create_task available', t => {
-	const result = buildSystemPrompt('normal', undefined, ['create_task']);
+test('buildSystemPrompt - includes task management when write_tasks available', t => {
+	const result = buildSystemPrompt('normal', undefined, ['write_tasks']);
 	t.true(result.includes('TASK MANAGEMENT'));
 });
 
 test('buildSystemPrompt - excludes task management in plan mode', t => {
-	const result = buildSystemPrompt('plan', undefined, ['create_task', 'read_file']);
+	const result = buildSystemPrompt('plan', undefined, ['write_tasks', 'read_file']);
 	t.false(result.includes('TASK MANAGEMENT'));
 });
 

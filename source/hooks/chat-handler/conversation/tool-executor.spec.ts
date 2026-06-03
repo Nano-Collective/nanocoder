@@ -19,10 +19,7 @@ const mockToolHandler: ToolCall['function']['name'] extends infer T
   tool1: async () => 'Tool 1 executed',
   tool2: async () => 'Tool 2 executed',
   tool3: async () => 'Tool 3 executed',
-  create_task: async () => 'Task created',
-  list_tasks: async () => 'Tasks listed',
-  update_task: async () => 'Task updated',
-  delete_task: async () => 'Task deleted',
+  write_tasks: async () => 'Tasks updated',
   slow_tool1: async () => { await delay(50); return 'Slow tool 1 done'; },
   slow_tool2: async () => { await delay(50); return 'Slow tool 2 done'; },
   slow_tool3: async () => { await delay(50); return 'Slow tool 3 done'; },
@@ -676,10 +673,7 @@ test('executeToolsDirectly - compact mode without onCompactToolCount does not er
 test('executeToolsDirectly - compact mode always expands task tools', async t => {
 	const toolCalls: ToolCall[] = [
 		{id: 'call_1', function: {name: 'tool1', arguments: '{}'}},
-		{id: 'call_2', function: {name: 'create_task', arguments: '{}'}},
-		{id: 'call_3', function: {name: 'list_tasks', arguments: '{}'}},
-		{id: 'call_4', function: {name: 'update_task', arguments: '{}'}},
-		{id: 'call_5', function: {name: 'delete_task', arguments: '{}'}},
+		{id: 'call_2', function: {name: 'write_tasks', arguments: '{}'}},
 	];
 
 	const conversationStateManager = createMockConversationStateManager();
@@ -711,11 +705,11 @@ test('executeToolsDirectly - compact mode always expands task tools', async t =>
 		},
 	);
 
-	t.is(results.length, 5);
-	// Only tool1 should be compacted (counted), task tools go to live display
+	t.is(results.length, 2);
+	// Only tool1 should be compacted (counted); the task tool goes to live display
 	t.deepEqual(compactCounts, ['tool1']);
-	// Task tools should trigger live task updates instead of adding to chat queue
-	t.is(liveTaskUpdateCount, 4, 'Task tools should trigger live task updates');
+	// The task tool should trigger a live task update instead of adding to chat queue
+	t.is(liveTaskUpdateCount, 1, 'Task tool should trigger a live task update');
 });
 
 // ============================================================================

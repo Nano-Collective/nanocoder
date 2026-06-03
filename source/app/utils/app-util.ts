@@ -490,6 +490,8 @@ async function handleBuiltInCommand(
 		tokens: totalTokens,
 		getMessageTokens: options.getMessageTokens,
 		client: options.client,
+		tune: options.tune,
+		developmentMode: options.developmentMode,
 	});
 
 	if (!result) {

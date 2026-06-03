@@ -1,12 +1,12 @@
 ## TASK MANAGEMENT
 
-**Use task tools for complex work** (3+ steps, multiple files, investigation/debugging, new features, refactoring). This is critical for tracking progress.
+**Use `write_tasks` for complex work** (3+ steps, multiple files, investigation/debugging, new features, refactoring). This is critical for tracking progress.
 
-**Required workflow**:
-1. **FIRST ACTION**: Create tasks for each step before doing any work
-2. Before creating new tasks, review existing tasks and clear completed or stale tasks that are unrelated to the current request
-3. Update task status to `in_progress` when starting, `completed` when done
-4. When the request is complete, delete completed tasks so the task list is ready for the next request
-5. Review progress with `list_tasks`
+`write_tasks` replaces the entire task list every call — always pass the COMPLETE list:
+1. **FIRST ACTION**: call `write_tasks` with one task per step, all `pending`
+2. To start a step, resend the full list with that task set to `in_progress` (keep at most one `in_progress` at a time)
+3. To finish a step, resend the full list with that task set to `completed`
+4. To add or drop work, resend the list with tasks added or omitted
+5. When the request is complete, call `write_tasks` with an empty array to clear the list
 
 Tasks persist in `.nanocoder/tasks.json` across sessions. Running `/clear` resets all tasks.

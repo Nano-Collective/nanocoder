@@ -11,6 +11,7 @@ import {loadAllProviderConfigs} from '@/config/mcp-config-loader';
 import {saveTune, updateLastUsed} from '@/config/preferences';
 import type {ActiveMode} from '@/hooks/useAppState';
 import {getToolManager} from '@/message-handler';
+import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
 import {generateKey} from '@/session/key-generator';
 import type {AIProviderConfig, TuneConfig} from '@/types/config';
 import {LLMClient, Message} from '@/types/core';
@@ -28,6 +29,8 @@ interface UseModeHandlersProps {
 	setCurrentProvider: (provider: string) => void;
 	setCurrentProviderConfig: (providerConfig: AIProviderConfig | null) => void;
 	setMessages: (messages: Message[]) => void;
+	messages: Message[];
+	getMessageTokens: (message: Message) => number;
 	setActiveMode: (mode: ActiveMode) => void;
 	setIsSettingsMode: (mode: boolean) => void;
 	addToChatQueue: (component: React.ReactNode) => void;
@@ -46,6 +49,8 @@ export function useModeHandlers({
 	setCurrentProvider,
 	setCurrentProviderConfig,
 	setMessages,
+	messages,
+	getMessageTokens,
 	setActiveMode,
 	setIsSettingsMode,
 	addToChatQueue,
@@ -55,6 +60,36 @@ export function useModeHandlers({
 	// Generic enter/exit helpers
 	const enterMode = (mode: ActiveMode) => setActiveMode(mode);
 	const exitMode = () => setActiveMode(null);
+
+	// Switching models keeps the conversation (messages are model-agnostic and
+	// the client is stateless). The one real risk is downsizing to a model whose
+	// context window can't hold the existing history — surface that as a warning
+	// so the user can /compact rather than silently overflowing the next request.
+	const warnIfHistoryWontFit = async (
+		model: string,
+		providerConfig: AIProviderConfig | null,
+	): Promise<void> => {
+		if (messages.length === 0) return;
+		try {
+			const used = messages.reduce((sum, m) => sum + getMessageTokens(m), 0);
+			const limit =
+				getSessionContextLimit() ??
+				(await getModelContextLimit(model, {
+					providerConfig: providerConfig ?? undefined,
+				}));
+			if (limit && used > limit) {
+				addToChatQueue(
+					<WarningMessage
+						key={generateKey('model-context-overflow')}
+						message={`History (~${used.toLocaleString()} tokens) exceeds ${model}'s ~${limit.toLocaleString()} token window. Run /compact or /clear before continuing.`}
+						hideBox={true}
+					/>,
+				);
+			}
+		} catch {
+			// Best-effort: skip the warning if the model's limit can't be resolved.
+		}
+	};
 
 	// Handle model selection. The model picker lists every model across every
 	// provider, so a selection may also switch the active provider. Staying on
@@ -77,9 +112,7 @@ export function useModeHandlers({
 				setCurrentModel(selectedModel);
 				setCurrentProviderConfig(client.getProviderConfig());
 
-				// Clear message history when switching models
-				setMessages([]);
-				await client.clearContext();
+				// Conversation is kept across model switches (see warnIfHistoryWontFit).
 
 				// Update preferences
 				updateLastUsed(currentProvider, selectedModel);
@@ -87,10 +120,12 @@ export function useModeHandlers({
 				addToChatQueue(
 					<SuccessMessage
 						key={generateKey('model-changed')}
-						message={`Model changed to: ${selectedModel}. Chat history cleared.`}
+						message={`Model changed to: ${selectedModel}.`}
 						hideBox={true}
 					/>,
 				);
+
+				await warnIfHistoryWontFit(selectedModel, client.getProviderConfig());
 			}
 			exitMode();
 			return;
@@ -122,18 +157,19 @@ export function useModeHandlers({
 			const newModel = newClient.getCurrentModel();
 			setCurrentModel(newModel);
 
-			setMessages([]);
-			await newClient.clearContext();
+			// Conversation is kept across provider/model switches.
 
 			updateLastUsed(actualProvider, newModel);
 
 			addToChatQueue(
 				<SuccessMessage
 					key={generateKey('model-changed')}
-					message={`Model changed to: ${newModel} (${actualProvider}). Chat history cleared.`}
+					message={`Model changed to: ${newModel} (${actualProvider}).`}
 					hideBox={true}
 				/>,
 			);
+
+			await warnIfHistoryWontFit(newModel, newClient.getProviderConfig());
 
 			// Re-run lint scoped to the newly active provider so any
 			// misconfiguration becomes visible right when it would start

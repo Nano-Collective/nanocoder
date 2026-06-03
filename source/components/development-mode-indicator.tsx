@@ -6,6 +6,7 @@ import {
 } from '@/constants';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import type {useTheme} from '@/hooks/useTheme';
+import {resolveToolProfile} from '@/tools/tool-profiles';
 import type {TuneConfig} from '@/types/config';
 import type {DevelopmentMode} from '@/types/core';
 import {
@@ -20,6 +21,7 @@ interface DevelopmentModeIndicatorProps {
 	contextPercentUsed: number | null;
 	sessionName?: string;
 	tune?: TuneConfig;
+	currentModel?: string;
 	activeEditor?: ActiveEditorState | null;
 }
 
@@ -44,6 +46,7 @@ export const DevelopmentModeIndicator = React.memo(
 		contextPercentUsed,
 		sessionName,
 		tune,
+		currentModel,
 		activeEditor,
 	}: DevelopmentModeIndicatorProps) => {
 		const {isNarrow, actualWidth, truncate} = useResponsiveTerminal();
@@ -51,11 +54,17 @@ export const DevelopmentModeIndicator = React.memo(
 			? DEVELOPMENT_MODE_LABELS_NARROW[developmentMode]
 			: DEVELOPMENT_MODE_LABELS[developmentMode];
 
-		const tuneLabel = tune?.enabled
-			? isNarrow
-				? 'tune: ✓'
-				: 'tune: enabled'
-			: '';
+		// Show the resolved profile (not the literal 'auto'), so users can see
+		// what auto-profiling picked for the current model. Wide terminals also
+		// flag the '(auto)' origin; narrow ones drop it to save space.
+		const tuneLabel = (() => {
+			if (!tune?.enabled) return '';
+			const resolved = resolveToolProfile(tune.toolProfile, currentModel);
+			if (isNarrow) return `tune: ${resolved}`;
+			return tune.toolProfile === 'auto'
+				? `tune: ${resolved} (auto)`
+				: `tune: ${resolved}`;
+		})();
 
 		// Mode, tune, and ctx never truncate. Session name and the filename
 		// portion of the editor pill share whatever room is left, each

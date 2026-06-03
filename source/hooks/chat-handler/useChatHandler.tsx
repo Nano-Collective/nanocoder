@@ -22,15 +22,22 @@ export function getBaseSystemPrompt(
 	toolManager: NonNullable<UseChatHandlerProps['toolManager']>,
 	tune: UseChatHandlerProps['tune'],
 	toolsDisabled: boolean,
+	model?: string,
 ): string {
 	const systemPromptOverride = getAppConfig().systemPrompt;
 	if (developmentMode === 'headless') {
 		return buildSystemPrompt(
 			developmentMode,
 			tune,
-			toolManager.getAvailableToolNames(tune, developmentMode),
+			toolManager.getAvailableToolNames(
+				tune,
+				developmentMode,
+				undefined,
+				model,
+			),
 			toolsDisabled,
 			systemPromptOverride,
+			model,
 		);
 	}
 
@@ -39,9 +46,15 @@ export function getBaseSystemPrompt(
 		buildSystemPrompt(
 			developmentMode ?? 'normal',
 			tune,
-			toolManager.getAvailableToolNames(tune, developmentMode ?? 'normal'),
+			toolManager.getAvailableToolNames(
+				tune,
+				developmentMode ?? 'normal',
+				undefined,
+				model,
+			),
 			toolsDisabled,
 			systemPromptOverride,
+			model,
 		)
 	);
 }
@@ -112,6 +125,8 @@ export function useChatHandler({
 		const availableNames = toolManager.getAvailableToolNames(
 			tune,
 			developmentMode,
+			undefined,
+			currentModel,
 		);
 		const basePrompt = buildSystemPrompt(
 			developmentMode,
@@ -119,6 +134,7 @@ export function useChatHandler({
 			availableNames,
 			toolsDisabled,
 			getAppConfig().systemPrompt,
+			currentModel,
 		);
 
 		const tools = toolsDisabled
@@ -142,6 +158,7 @@ export function useChatHandler({
 		toolsDisabled,
 		fallbackToolFormat,
 		subagentsReady,
+		currentModel,
 	]);
 
 	// Track when the current conversation started for elapsed time display
@@ -307,6 +324,7 @@ export function useChatHandler({
 				toolManager,
 				tune,
 				toolsDisabled,
+				currentModel,
 			);
 
 			// Enhance with relevant commands (progressive disclosure)

@@ -28,6 +28,7 @@ import type {
 	Message,
 } from '@/types';
 import type {CustomCommand} from '@/types/commands';
+import type {TuneConfig} from '@/types/config';
 import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
 import {calculateTokenBreakdown} from '@/usage/calculator';
@@ -43,6 +44,8 @@ interface UseAppHandlersProps {
 	currentProviderConfig: import('@/types/config').AIProviderConfig | null;
 	currentModel: string;
 	currentTheme: ThemePreset;
+	developmentMode: DevelopmentMode;
+	tune: TuneConfig | undefined;
 	abortController: AbortController | null;
 	updateInfo: UpdateInfo | null;
 	mcpServersStatus: MCPConnectionStatus[] | undefined;
@@ -520,6 +523,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				theme: props.currentTheme,
 				updateInfo: props.updateInfo,
 				getMessageTokens: props.getMessageTokens,
+				tune: props.tune,
+				developmentMode: props.developmentMode,
 			});
 		},
 		[
@@ -547,6 +552,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.currentTheme,
 			props.updateInfo,
 			props.getMessageTokens,
+			props.tune,
+			props.developmentMode,
 			clearMessages,
 			enterCheckpointLoadMode,
 			handleShowStatus,

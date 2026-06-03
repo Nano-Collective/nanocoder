@@ -221,7 +221,12 @@ export const processAssistantResponse = async (
 	// Get effective tools — ToolManager is the single authority for
 	// availability (mode + profile filtering) and approval policy
 	const availableNames =
-		toolManager?.getAvailableToolNames(tune, developmentMode) ?? [];
+		toolManager?.getAvailableToolNames(
+			tune,
+			developmentMode,
+			undefined,
+			currentModel,
+		) ?? [];
 	const tools = toolManager ? toolManager.getFilteredTools(availableNames) : {};
 
 	let streamedContent = '';
@@ -368,7 +373,7 @@ export const processAssistantResponse = async (
 	// Single-tool enforcement: truncate to first tool call
 	// Active when tune profile implies single-tool (e.g. minimal profile)
 	const enforceSingleTool =
-		tune?.enabled && isSingleToolProfile(tune.toolProfile);
+		tune?.enabled && isSingleToolProfile(tune.toolProfile, currentModel);
 	if (enforceSingleTool && allToolCalls.length > 1) {
 		allToolCalls = allToolCalls.slice(0, 1);
 	}

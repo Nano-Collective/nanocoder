@@ -165,6 +165,7 @@ export function InteractiveApp({
 						onToggleMode={appHandlers.handleToggleDevelopmentMode}
 						onToggleReasoningExpanded={handleToggleReasoningExpanded}
 						tune={appState.tune}
+						currentModel={appState.currentModel}
 					/>
 				)}
 		</Box>

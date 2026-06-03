@@ -148,8 +148,14 @@ const executeAgentBatch = async (
 	// Start all agents
 	const agentExecutions = toExecute.map(toolCall => {
 		const parsedArgs = parseToolArguments(toolCall.function.arguments);
-		const agentName = (parsedArgs.subagent_type as string) ?? 'agent';
-		const agentDesc = (parsedArgs.description as string) ?? '';
+		// Coerce, don't assert: a weak model can emit these as objects/numbers,
+		// and a non-string flowing into the progress UI crashes the renderer.
+		const agentName =
+			typeof parsedArgs.subagent_type === 'string'
+				? parsedArgs.subagent_type
+				: 'agent';
+		const agentDesc =
+			typeof parsedArgs.description === 'string' ? parsedArgs.description : '';
 
 		const {agentId, promise} = startAgentExecution(
 			parsedArgs as unknown as AgentToolArgs,

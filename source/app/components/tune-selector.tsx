@@ -19,7 +19,7 @@ import {getTuneToolMode, TUNE_DEFAULTS} from '@/types/config';
 
 type Step = 'main' | 'toolProfile' | 'parameters' | 'preset';
 
-const AVAILABLE_PROFILES: ToolProfile[] = ['full', 'minimal', 'nano'];
+const AVAILABLE_PROFILES: ToolProfile[] = ['auto', 'full', 'minimal', 'nano'];
 
 interface TuneSelectorProps {
 	currentConfig: TuneConfig;

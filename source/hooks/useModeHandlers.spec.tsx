@@ -85,6 +85,8 @@ function setup(probe: ProbeProps = {}) {
 		setCurrentProvider,
 		setCurrentProviderConfig,
 		setMessages,
+		messages: [],
+		getMessageTokens: () => 0,
 		setActiveMode,
 		setIsSettingsMode,
 		addToChatQueue,
@@ -209,7 +211,7 @@ test('handleModelSelect short-circuits when provider and model are unchanged', a
 	t.deepEqual(setActiveMode.calls, [[null]]);
 });
 
-test('handleModelSelect with new model on same provider updates client, clears history, exits mode', async t => {
+test('handleModelSelect with new model on same provider updates client, keeps history, exits mode', async t => {
 	const client = createMockClient('old-model');
 	const {handlers, setCurrentModel, setMessages, setActiveMode, addToChatQueue} =
 		setup({
@@ -222,7 +224,8 @@ test('handleModelSelect with new model on same provider updates client, clears h
 
 	t.is(client.getCurrentModel(), 'new-model');
 	t.deepEqual(setCurrentModel.calls, [['new-model']]);
-	t.deepEqual(setMessages.calls, [[[]]]);
+	// History is preserved across model switches.
+	t.is(setMessages.calls.length, 0);
 	t.is(addToChatQueue.calls.length, 1);
 	t.deepEqual(setActiveMode.calls, [[null]]);
 });

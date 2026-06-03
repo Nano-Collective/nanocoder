@@ -3,9 +3,7 @@ import type {DevelopmentMode, NanocoderToolExport} from '../types/core.js';
 import {resolveToolApproval} from './approval-policy.js';
 import {executeBashTool} from './execute-bash.js';
 import {fetchUrlTool} from './fetch-url.js';
-import {copyFileTool} from './file-ops/copy-file.js';
-import {deleteFileTool} from './file-ops/delete-file.js';
-import {moveFileTool} from './file-ops/move-file.js';
+import {fileOpTool} from './file-ops/file-op.js';
 import {stringReplaceTool} from './file-ops/string-replace.js';
 import {writeFileTool} from './file-ops/write-file.js';
 import {findFilesTool} from './find-files.js';
@@ -182,50 +180,51 @@ test('string_replace does NOT require approval in headless mode', async t => {
 	);
 });
 
-test('delete_file does NOT require approval in headless mode', async t => {
+test('file_op does NOT require approval in headless mode', async t => {
 	t.false(
-		await evaluateNeedsApproval(deleteFileTool, 'headless', {path: 'test.txt'}),
-	);
-});
-
-test('copy_file does NOT require approval in headless mode', async t => {
-	t.false(
-		await evaluateNeedsApproval(copyFileTool, 'headless', {
-			source: 'a.txt',
-			destination: 'b.txt',
+		await evaluateNeedsApproval(fileOpTool, 'headless', {
+			operation: 'delete',
+			path: 'test.txt',
 		}),
 	);
-});
-
-test('move_file does NOT require approval in headless mode', async t => {
 	t.false(
-		await evaluateNeedsApproval(moveFileTool, 'headless', {
-			source: 'a.txt',
+		await evaluateNeedsApproval(fileOpTool, 'headless', {
+			operation: 'move',
+			path: 'a.txt',
 			destination: 'b.txt',
 		}),
 	);
 });
 
 // ============================================================================
-// DELETE FILE: Mode-dependent approval
+// FILE_OP: Mode-dependent approval (delete/move/copy/mkdir share one policy)
 // ============================================================================
 
-test('delete_file requires approval in normal mode', async t => {
+test('file_op requires approval in normal mode', async t => {
 	t.true(
-		await evaluateNeedsApproval(deleteFileTool, 'normal', {path: 'test.txt'}),
-	);
-});
-
-test('delete_file does NOT require approval in auto-accept mode', async t => {
-	t.false(
-		await evaluateNeedsApproval(deleteFileTool, 'auto-accept', {
+		await evaluateNeedsApproval(fileOpTool, 'normal', {
+			operation: 'delete',
 			path: 'test.txt',
 		}),
 	);
 });
 
-test('delete_file requires approval in plan mode', async t => {
-	t.true(await evaluateNeedsApproval(deleteFileTool, 'plan', {path: 'test.txt'}));
+test('file_op does NOT require approval in auto-accept mode', async t => {
+	t.false(
+		await evaluateNeedsApproval(fileOpTool, 'auto-accept', {
+			operation: 'delete',
+			path: 'test.txt',
+		}),
+	);
+});
+
+test('file_op requires approval in plan mode', async t => {
+	t.true(
+		await evaluateNeedsApproval(fileOpTool, 'plan', {
+			operation: 'delete',
+			path: 'test.txt',
+		}),
+	);
 });
 
 // ============================================================================

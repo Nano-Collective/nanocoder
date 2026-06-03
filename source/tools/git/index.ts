@@ -3,20 +3,20 @@
  *
  * Provides git operations for the coding agent.
  * Tools are conditionally registered based on git/gh availability.
+ *
+ * Scope is intentionally narrow: the read-only inspectors (status/diff/log)
+ * plus the staging/commit/PR flow that benefits from structured output and
+ * approval gating. Rarer operations (push, pull, branch, stash, reset) are
+ * left to execute_bash to keep the tool surface small.
  */
 
 import type {NanocoderToolExport} from '@/types/core';
 
 import {gitAddTool} from './git-add';
-import {gitBranchTool} from './git-branch';
 import {gitCommitTool} from './git-commit';
 import {gitDiffTool} from './git-diff';
 import {gitLogTool} from './git-log';
 import {gitPrTool} from './git-pr';
-import {gitPullTool} from './git-pull';
-import {gitPushTool} from './git-push';
-import {gitResetTool} from './git-reset';
-import {gitStashTool} from './git-stash';
 import {gitStatusTool} from './git-status';
 import {isGhAvailable, isGitAvailable, isInsideGitRepo} from './utils';
 
@@ -37,11 +37,6 @@ export function getGitTools(): NanocoderToolExport[] {
 		gitLogTool,
 		gitAddTool,
 		gitCommitTool,
-		gitPushTool,
-		gitPullTool,
-		gitBranchTool,
-		gitStashTool,
-		gitResetTool,
 	];
 
 	// PR tool requires gh CLI

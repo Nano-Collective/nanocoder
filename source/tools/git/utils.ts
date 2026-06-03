@@ -47,28 +47,6 @@ export interface CommitInfo {
 	filesChanged?: number;
 }
 
-/**
- * Branch information
- */
-export interface BranchInfo {
-	name: string;
-	current: boolean;
-	upstream?: string;
-	ahead: number;
-	behind: number;
-	lastCommit?: string;
-}
-
-/**
- * Stash entry
- */
-export interface StashEntry {
-	index: number;
-	message: string;
-	branch: string;
-	date: string;
-}
-
 // ============================================================================
 // Availability Checks (Synchronous - for conditional tool registration)
 // ============================================================================
@@ -171,19 +149,6 @@ export async function execGh(args: string[]): Promise<string> {
 // ============================================================================
 
 /**
- * Check if there are uncommitted changes (staged or unstaged)
- */
-export async function hasUncommittedChanges(): Promise<boolean> {
-	try {
-		const status = await execGit(['status', '--porcelain']);
-		return status.trim().length > 0;
-	} catch (error) {
-		logger.debug('Failed to check for uncommitted changes', {error});
-		return false;
-	}
-}
-
-/**
  * Check if there are staged changes
  */
 export async function hasStagedChanges(): Promise<boolean> {
@@ -274,18 +239,6 @@ export async function getDefaultBranch(): Promise<string> {
 }
 
 /**
- * Check if a branch exists
- */
-export async function branchExists(name: string): Promise<boolean> {
-	try {
-		await execGit(['rev-parse', '--verify', `refs/heads/${name}`]);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-/**
  * Get the upstream branch for the current branch
  */
 export async function getUpstreamBranch(): Promise<string | null> {
@@ -322,78 +275,9 @@ export async function getAheadBehind(): Promise<{
 	}
 }
 
-/**
- * Get list of local branches
- */
-export async function getLocalBranches(): Promise<BranchInfo[]> {
-	try {
-		const output = await execGit([
-			'branch',
-			'--format=%(refname:short)|%(upstream:short)|%(upstream:track,nobracket)|%(HEAD)',
-		]);
-
-		return output
-			.split('\n')
-			.filter(line => line.trim())
-			.map(line => {
-				const [name, upstream, track, head] = line.split('|');
-				let ahead = 0;
-				let behind = 0;
-
-				if (track) {
-					const aheadMatch = track.match(/ahead (\d+)/);
-					const behindMatch = track.match(/behind (\d+)/);
-					if (aheadMatch) ahead = parseInt(aheadMatch[1], 10);
-					if (behindMatch) behind = parseInt(behindMatch[1], 10);
-				}
-
-				return {
-					name: name || '',
-					current: head === '*',
-					upstream: upstream || undefined,
-					ahead,
-					behind,
-				};
-			});
-	} catch (error) {
-		logger.debug('Failed to list local branches', {error});
-		return [];
-	}
-}
-
-/**
- * Get list of remote branches
- */
-export async function getRemoteBranches(): Promise<string[]> {
-	try {
-		const output = await execGit(['branch', '-r', '--format=%(refname:short)']);
-		return output
-			.split('\n')
-			.filter(line => line.trim() && !line.includes('HEAD'));
-	} catch (error) {
-		logger.debug('Failed to list remote branches', {error});
-		return [];
-	}
-}
-
 // ============================================================================
 // Commit Operations
 // ============================================================================
-
-/**
- * Get unpushed commits (commits ahead of upstream)
- */
-export async function getUnpushedCommits(): Promise<CommitInfo[]> {
-	try {
-		const upstream = await getUpstreamBranch();
-		if (!upstream) return [];
-
-		return await getCommits({range: `${upstream}..HEAD`});
-	} catch (error) {
-		logger.debug('Failed to get unpushed commits', {error});
-		return [];
-	}
-}
 
 /**
  * Check if the last commit has been pushed
@@ -580,30 +464,6 @@ export async function getDiffStats(
 // ============================================================================
 
 /**
- * Get list of stashes
- */
-export async function getStashList(): Promise<StashEntry[]> {
-	try {
-		const output = await execGit(['stash', 'list', '--format=%gd|%gs|%cr']);
-		if (!output.trim()) return [];
-
-		return output.split('\n').map((line, index) => {
-			const [ref, message, date] = line.split('|');
-			const branchMatch = message?.match(/WIP on ([^:]+):/);
-			return {
-				index,
-				message: message || ref || `stash@{${index}}`,
-				branch: branchMatch?.[1] || 'unknown',
-				date: date || '',
-			};
-		});
-	} catch (error) {
-		logger.debug('Failed to list stashes', {error});
-		return [];
-	}
-}
-
-/**
  * Get stash count
  */
 export async function getStashCount(): Promise<number> {
@@ -614,23 +474,6 @@ export async function getStashCount(): Promise<number> {
 	} catch (error) {
 		logger.debug('Failed to get stash count', {error});
 		return 0;
-	}
-}
-
-// ============================================================================
-// Remote Operations
-// ============================================================================
-
-/**
- * Check if a remote exists
- */
-export async function remoteExists(name: string): Promise<boolean> {
-	try {
-		const remotes = await execGit(['remote']);
-		return remotes.split('\n').includes(name);
-	} catch (error) {
-		logger.debug('Failed to check if remote exists', {error});
-		return false;
 	}
 }
 

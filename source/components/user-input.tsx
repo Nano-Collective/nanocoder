@@ -35,6 +35,7 @@ interface ChatProps {
 	contextPercentUsed?: number | null; // Context window usage percentage
 	sessionName?: string; // Optional session name for display
 	tune?: TuneConfig; // Model mode configuration
+	currentModel?: string; // Active model id — resolves the 'auto' tune profile for display
 	activeEditor?: ActiveEditorState | null; // VS Code active file + optional selection
 	onDismissActiveEditor?: () => void; // Dismiss the active editor pill on clear/escape
 }
@@ -53,6 +54,7 @@ export default function UserInput({
 	contextPercentUsed,
 	sessionName,
 	tune,
+	currentModel,
 	activeEditor,
 	onDismissActiveEditor,
 }: ChatProps) {
@@ -516,6 +518,7 @@ export default function UserInput({
 					contextPercentUsed={contextPercentUsed ?? null}
 					sessionName={sessionName}
 					tune={tune}
+					currentModel={currentModel}
 				/>
 			</Box>
 		);
@@ -604,6 +607,7 @@ export default function UserInput({
 				contextPercentUsed={contextPercentUsed ?? null}
 				sessionName={sessionName}
 				tune={tune}
+				currentModel={currentModel}
 				activeEditor={activeEditor}
 			/>
 		</>

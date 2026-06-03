@@ -59,6 +59,7 @@ export interface ChatInputProps {
 	onToggleMode: () => void;
 	onToggleReasoningExpanded: () => void;
 	tune?: TuneConfig;
+	currentModel?: string;
 
 	// VS Code active editor pushed from the extension (filename + optional selection)
 	activeEditor?: ActiveEditorState | null;
@@ -105,6 +106,7 @@ export function ChatInput({
 	onToggleMode,
 	onToggleReasoningExpanded,
 	tune,
+	currentModel,
 	activeEditor,
 	onDismissActiveEditor,
 }: ChatInputProps): React.ReactElement {
@@ -169,6 +171,7 @@ export function ChatInput({
 					contextPercentUsed={contextPercentUsed}
 					sessionName={sessionName}
 					tune={tune}
+					currentModel={currentModel}
 					activeEditor={activeEditor}
 					onDismissActiveEditor={onDismissActiveEditor}
 				/>

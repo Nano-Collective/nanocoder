@@ -18,6 +18,66 @@ const mockColors = {
 	base: '#000000',
 };
 
+const TUNE_DEFAULTS_LIKE = {enabled: true, aggressiveCompact: false} as const;
+
+// ============================================================================
+// Tune profile label
+// ============================================================================
+
+test('tune label shows nothing when tune is disabled', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			tune={{...TUNE_DEFAULTS_LIKE, enabled: false, toolProfile: 'auto'}}
+			currentModel="llama3.2:1b"
+		/>,
+	);
+	t.notRegex(lastFrame()!, /tune:/);
+});
+
+test('tune label shows the explicit profile name', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			tune={{...TUNE_DEFAULTS_LIKE, toolProfile: 'nano'}}
+			currentModel="gpt-4o"
+		/>,
+	);
+	const output = lastFrame()!;
+	t.regex(output, /tune: nano/);
+	t.notRegex(output, /auto/);
+});
+
+test('tune label shows resolved profile and (auto) origin for auto on a small model', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			tune={{...TUNE_DEFAULTS_LIKE, toolProfile: 'auto'}}
+			currentModel="llama3.2:1b"
+		/>,
+	);
+	t.regex(lastFrame()!, /tune: nano \(auto\)/);
+});
+
+test('tune label resolves auto to full for cloud/unknown models', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			tune={{...TUNE_DEFAULTS_LIKE, toolProfile: 'auto'}}
+			currentModel="claude-opus-4-8"
+		/>,
+	);
+	t.regex(lastFrame()!, /tune: full \(auto\)/);
+});
+
 // ============================================================================
 // Component Rendering Tests
 // ============================================================================

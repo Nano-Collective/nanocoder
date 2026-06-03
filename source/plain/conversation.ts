@@ -3,6 +3,7 @@ import {color, write, writeError, writeLine, writeStatus} from '@/plain/writer';
 import {parseToolCalls} from '@/tool-calling/index';
 import {resolveToolApproval} from '@/tools/approval-policy';
 import type {ToolManager} from '@/tools/tool-manager';
+import type {TuneConfig} from '@/types/config';
 import type {
 	DevelopmentMode,
 	LLMClient,
@@ -20,6 +21,8 @@ export interface RunPlainConversationOptions {
 	developmentMode: DevelopmentMode;
 	nonInteractiveAlwaysAllow: string[];
 	abortSignal: AbortSignal;
+	tune?: TuneConfig;
+	model?: string;
 }
 
 export type PlainConversationOutcome =
@@ -46,6 +49,8 @@ export async function runPlainConversation(
 		developmentMode,
 		nonInteractiveAlwaysAllow,
 		abortSignal,
+		tune,
+		model,
 	} = options;
 
 	let messages = initialMessages;
@@ -56,8 +61,10 @@ export async function runPlainConversation(
 		}
 
 		const availableNames = toolManager.getAvailableToolNames(
-			undefined,
+			tune,
 			developmentMode,
+			undefined,
+			model,
 		);
 		const tools = toolManager.getFilteredTools(availableNames);
 

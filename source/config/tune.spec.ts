@@ -35,7 +35,7 @@ test('resolveTune - applies app config top-level overrides', t => {
 	const result = resolveTune(appConfig);
 	t.is(result.toolProfile, 'minimal');
 	t.true(result.aggressiveCompact);
-	t.false(result.enabled); // Not set, stays default
+	t.true(result.enabled); // Not set, stays default (auto-profiling on)
 });
 
 test('resolveTune - per-provider overrides app config', t => {

@@ -4,8 +4,8 @@ import {CustomCommandLoader} from '@/custom-commands/loader';
 import type {Session} from '@/session/session-manager';
 import type {CheckpointListItem} from './checkpoint';
 import type {CustomCommand} from './commands';
-import type {AIProviderConfig} from './config';
-import type {Message} from './core';
+import type {AIProviderConfig, TuneConfig} from './config';
+import type {DevelopmentMode, Message} from './core';
 import type {UpdateInfo} from './utils';
 
 export interface MessageSubmissionOptions {
@@ -44,4 +44,6 @@ export interface MessageSubmissionOptions {
 	theme: string;
 	updateInfo: UpdateInfo | null;
 	getMessageTokens: (message: Message) => number;
+	tune?: TuneConfig;
+	developmentMode?: DevelopmentMode;
 }

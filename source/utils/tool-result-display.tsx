@@ -12,23 +12,13 @@ import {parseToolArguments} from '@/utils/tool-args-parser';
  * Tools that should always show expanded (full formatter) output,
  * even when compact display mode is enabled.
  */
-export const ALWAYS_EXPANDED_TOOLS = new Set([
-	'create_task',
-	'list_tasks',
-	'update_task',
-	'delete_task',
-]);
+export const ALWAYS_EXPANDED_TOOLS = new Set(['write_tasks']);
 
 /**
  * Task tools that should render in the live area (updating in-place)
  * instead of appending to the static chat queue each time.
  */
-export const LIVE_TASK_TOOLS = new Set([
-	'create_task',
-	'list_tasks',
-	'update_task',
-	'delete_task',
-]);
+export const LIVE_TASK_TOOLS = new Set(['write_tasks']);
 
 /**
  * Compact tool result display - shows "⚒ toolName  description" in tool color.

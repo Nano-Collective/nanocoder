@@ -7,7 +7,7 @@ import {CustomToolLoader} from '@/custom-tools/loader';
 // cost of the @modelcontextprotocol/sdk import graph.
 import type {MCPClient} from '@/mcp/mcp-client';
 import {allToolExports} from '@/tools/index';
-import {getToolsForProfile} from '@/tools/tool-profiles';
+import {getToolsForProfile, resolveToolProfile} from '@/tools/tool-profiles';
 import {ToolRegistry} from '@/tools/tool-registry';
 import type {TuneConfig} from '@/types/config';
 import type {CustomToolApprovalPolicy} from '@/types/custom-tools';
@@ -43,24 +43,13 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 		// No mutation tools — plan mode is read-only exploration
 		'write_file',
 		'string_replace',
-		'delete_file',
-		'move_file',
-		'copy_file',
-		'create_directory',
+		'file_op',
 		'execute_bash',
-		// No task tools — plan mode produces the plan itself
-		'create_task',
-		'update_task',
-		'delete_task',
-		'list_tasks',
+		// No task tool — plan mode produces the plan itself
+		'write_tasks',
 		// No git mutation tools — keep read-only git tools
 		'git_add',
 		'git_commit',
-		'git_push',
-		'git_pull',
-		'git_branch',
-		'git_stash',
-		'git_reset',
 		'git_pr', // can create PRs — excluded like other git mutators
 	],
 	headless: ['ask_user', 'agent'],
@@ -177,13 +166,17 @@ export class ToolManager {
 		tuneConfig?: TuneConfig,
 		developmentMode?: DevelopmentMode,
 		disabledTools?: string[],
+		model?: string,
 	): string[] {
 		let names = this.getToolNames();
 
-		if (tuneConfig?.enabled && tuneConfig.toolProfile !== 'full') {
-			const profileTools = getToolsForProfile(tuneConfig.toolProfile);
-			if (profileTools.length > 0) {
-				names = profileTools;
+		if (tuneConfig?.enabled) {
+			const profile = resolveToolProfile(tuneConfig.toolProfile, model);
+			if (profile !== 'full') {
+				const profileTools = getToolsForProfile(profile);
+				if (profileTools.length > 0) {
+					names = profileTools;
+				}
 			}
 		}
 

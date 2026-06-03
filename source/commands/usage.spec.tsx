@@ -1,6 +1,9 @@
 import test from 'ava';
 import React from 'react';
 import {renderWithTheme} from '../test-utils/render-with-theme.js';
+import {setToolManagerGetter} from '../message-handler.js';
+import {ToolManager} from '../tools/tool-manager.js';
+import type {TuneConfig} from '../types/config.js';
 import type {Message} from '../types/core.js';
 import {usageCommand} from './usage.js';
 
@@ -478,3 +481,56 @@ test('usage command with custom token counter returning large values', async t =
 	t.truthy(result);
 	t.true(React.isValidElement(result));
 });
+
+// ============================================================================
+// Tune profile sensitivity (regression: /usage must reflect the active profile)
+// ============================================================================
+
+const tuneMeta = (toolProfile: TuneConfig['toolProfile']) => ({
+	provider: 'test-provider',
+	model: 'gpt-4o', // no size hint → 'auto' resolves to full; lets us vary explicitly
+	tokens: 0,
+	getMessageTokens: (m: Message) => Math.ceil((m.content || '').length / 4),
+	tune: {enabled: true, toolProfile, aggressiveCompact: false} as TuneConfig,
+	developmentMode: 'normal' as const,
+});
+
+test.serial(
+	'usage reflects the tune profile in tool definitions and system prompt',
+	async t => {
+		setToolManagerGetter(() => new ToolManager());
+		try {
+			const messages = createMessages();
+
+			const full = (await usageCommand.handler(
+				[],
+				messages,
+				tuneMeta('full'),
+			)) as React.ReactElement;
+			const nano = (await usageCommand.handler(
+				[],
+				messages,
+				tuneMeta('nano'),
+			)) as React.ReactElement;
+
+			const fullBreakdown = full.props.breakdown;
+			const nanoBreakdown = nano.props.breakdown;
+
+			// nano exposes 5 tools vs full's entire registry → fewer definition tokens
+			t.true(
+				nanoBreakdown.toolDefinitions < fullBreakdown.toolDefinitions,
+				`nano (${nanoBreakdown.toolDefinitions}) should be < full (${fullBreakdown.toolDefinitions})`,
+			);
+			t.true(nanoBreakdown.toolDefinitions > 0);
+
+			// nano drops whole prompt sections (git/web/task/diagnostics) and uses
+			// the ultra-slim variants → a smaller system prompt
+			t.true(
+				nanoBreakdown.system < fullBreakdown.system,
+				`nano system (${nanoBreakdown.system}) should be < full system (${fullBreakdown.system})`,
+			);
+		} finally {
+			setToolManagerGetter(() => null);
+		}
+	},
+);
