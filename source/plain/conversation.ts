@@ -59,7 +59,7 @@ export async function runPlainConversation(
 			undefined,
 			developmentMode,
 		);
-		const tools = toolManager.getEffectiveTools(availableNames);
+		const tools = toolManager.getFilteredTools(availableNames);
 
 		const modeOverrides: ModeOverrides = {
 			nonInteractiveMode: true,

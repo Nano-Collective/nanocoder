@@ -222,9 +222,7 @@ export const processAssistantResponse = async (
 	// availability (mode + profile filtering) and approval policy
 	const availableNames =
 		toolManager?.getAvailableToolNames(tune, developmentMode) ?? [];
-	const tools = toolManager
-		? toolManager.getEffectiveTools(availableNames)
-		: {};
+	const tools = toolManager ? toolManager.getFilteredTools(availableNames) : {};
 
 	let streamedContent = '';
 	let streamedReasoning = '';

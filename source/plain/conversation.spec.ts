@@ -52,7 +52,7 @@ function makeFakeToolManager(opts: FakeToolManagerOptions = {}): ToolManager {
 	const approvals = opts.needsApprovalByName ?? {};
 	return {
 		getAvailableToolNames: () => Array.from(known),
-		getEffectiveTools: () => ({}) as Record<string, AISDKCoreTool>,
+		getFilteredTools: () => ({}) as Record<string, AISDKCoreTool>,
 		hasTool: (name: string) => known.has(name),
 		getToolEntry: (name: string): ToolEntry | undefined => {
 			if (!known.has(name)) return undefined;

@@ -57,7 +57,7 @@ const createMockClient = (): LLMClient => ({
 
 const createMockToolManager = () => ({
 	getAvailableToolNames: () => ['read_file'],
-	getFilteredToolsWithoutExecute: () => [],
+	getFilteredTools: () => ({}),
 	getFilteredToolsForProvider: () => ({}),
 }) as NonNullable<UseChatHandlerProps['toolManager']>;
 

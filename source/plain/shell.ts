@@ -77,7 +77,7 @@ export async function runPlainShell(
 		getAppConfig().systemPrompt,
 	);
 	const toolsForPrompt = toolsDisabled
-		? toolManager.getFilteredToolsWithoutExecute(availableNames)
+		? toolManager.getFilteredTools(availableNames)
 		: {};
 	const systemContent = appendToolDefinitionsToPrompt(
 		basePrompt,

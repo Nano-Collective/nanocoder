@@ -122,7 +122,7 @@ export function useChatHandler({
 		);
 
 		const tools = toolsDisabled
-			? toolManager.getFilteredToolsWithoutExecute(availableNames)
+			? toolManager.getFilteredTools(availableNames)
 			: {};
 		const prompt = appendToolDefinitionsToPrompt(
 			basePrompt,

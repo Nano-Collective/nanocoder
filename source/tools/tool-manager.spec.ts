@@ -641,13 +641,14 @@ test('getFilteredTools - returns empty for non-existent tool names', t => {
 	t.is(Object.keys(filtered).length, 0);
 });
 
-test('getFilteredToolsWithoutExecute - returns tools without execute functions', t => {
+test('getFilteredTools - returns tools without execute functions', t => {
 	const manager = new ToolManager();
 	const allNames = manager.getToolNames();
 
 	if (allNames.length > 0) {
-		const filtered = manager.getFilteredToolsWithoutExecute([allNames[0]!]);
+		const filtered = manager.getFilteredTools([allNames[0]!]);
 		t.is(Object.keys(filtered).length, 1);
+		t.is((filtered[allNames[0]!] as {execute?: unknown}).execute, undefined);
 	} else {
 		t.pass('No tools available');
 	}
@@ -840,29 +841,6 @@ test('getAvailableToolNames - disabledTools removes a bundle-form skill tool', t
 });
 
 // ============================================================================
-// getEffectiveTools Tests
-// ============================================================================
-
-test('getEffectiveTools - returns filtered tools without execute', t => {
-	const manager = new ToolManager();
-	const names = ['read_file'];
-	const tools = manager.getEffectiveTools(names);
-	t.is(Object.keys(tools).length, 1);
-	t.truthy(tools.read_file);
-});
-
-test('getEffectiveTools - returns schema-only tools (execute stripped)', t => {
-	const manager = new ToolManager();
-	const names = manager.getToolNames();
-	const tools = manager.getEffectiveTools(names);
-	// Tools the model sees have no execute fn - approval is decided separately
-	// by resolveToolApproval, not encoded on these tool objects.
-	const bashTool = tools.execute_bash as any;
-	t.truthy(bashTool);
-	t.is(bashTool.execute, undefined);
-});
-
-// ============================================================================
 // Prompt/Runtime Parity Tests
 // ============================================================================
 // These tests verify that the tool names used for prompt building and the tool
@@ -875,7 +853,7 @@ import type {DevelopmentMode} from '@/types/core';
 
 /**
  * Helper: given a mode and tune, verify that getAvailableToolNames() and
- * getEffectiveTools() produce the exact same set of tool names.
+ * getFilteredTools() produce the exact same set of tool names.
  */
 function assertPromptRuntimeParity(
 	t: any,
@@ -885,7 +863,7 @@ function assertPromptRuntimeParity(
 	label: string,
 ) {
 	const availableNames = manager.getAvailableToolNames(tune, mode);
-	const effectiveTools = manager.getEffectiveTools(availableNames);
+	const effectiveTools = manager.getFilteredTools(availableNames);
 	const runtimeNames = Object.keys(effectiveTools).sort();
 	const promptNames = [...availableNames].sort();
 
@@ -984,20 +962,19 @@ test('parity - headless mode, full profile', t => {
 	assertPromptRuntimeParity(t, manager, tune, 'headless', 'headless/full');
 });
 
-test('parity - nonInteractiveAlwaysAllow does not change available tool set', t => {
+test('getFilteredTools - returns exactly the requested available tools', t => {
 	const manager = new ToolManager();
 	const availableNames = manager.getAvailableToolNames(undefined, 'normal');
 
-	// With allow list, the set of tools should be identical — only approval changes
-	const toolsWithout = manager.getEffectiveTools(availableNames);
-	const toolsWith = manager.getEffectiveTools(availableNames, {
-		nonInteractiveAlwaysAllow: ['execute_bash', 'write_file'],
-	});
+	// The tool set is purely name/mode-driven; approval (incl. the
+	// nonInteractiveAlwaysAllow list) is resolved separately by
+	// resolveToolApproval and never changes which tools are exposed.
+	const tools = manager.getFilteredTools(availableNames);
 
 	t.deepEqual(
-		Object.keys(toolsWithout).sort(),
-		Object.keys(toolsWith).sort(),
-		'nonInteractiveAlwaysAllow should not add or remove tools',
+		Object.keys(tools).sort(),
+		[...availableNames].sort(),
+		'filtered tools should match the requested names',
 	);
 });
 
@@ -1014,7 +991,7 @@ test('XML fallback - tool definitions add significant length to system prompt', 
 
 	// Simulate what useChatHandler does when toolsDisabled=true
 	const xmlPrompt = buildSystemPrompt('normal', undefined, availableNames, true);
-	const tools = manager.getFilteredToolsWithoutExecute(availableNames);
+	const tools = manager.getFilteredTools(availableNames);
 	const toolDefs = formatToolsForPrompt(tools);
 	const fullXmlPrompt = xmlPrompt + toolDefs;
 
@@ -1033,7 +1010,7 @@ test('XML fallback - tool definitions add significant length to system prompt', 
 test('XML fallback - tool definitions include examples per tool', t => {
 	const manager = new ToolManager();
 	const availableNames = manager.getAvailableToolNames(undefined, 'normal');
-	const tools = manager.getFilteredToolsWithoutExecute(availableNames);
+	const tools = manager.getFilteredTools(availableNames);
 	const defs = formatToolsForPrompt(tools);
 
 	// Should include XML examples

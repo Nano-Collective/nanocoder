@@ -221,53 +221,24 @@ export class ToolManager {
 		return names;
 	}
 
-	/**
-	 * Get the tools the model sees for a turn (schemas only, execute stripped).
-	 *
-	 * Approval is NOT encoded here: the SDK never auto-executes these tools, so
-	 * approval is decided entirely by `resolveToolApproval` at the call sites
-	 * (which apply the non-interactive alwaysAllow list and the current mode).
-	 */
-	getEffectiveTools(
-		availableToolNames: string[],
-	): Record<string, AISDKCoreTool> {
-		return this.getFilteredToolsWithoutExecute(availableToolNames);
-	}
-
 	// =========================================================================
 	// Tool access — delegates to ToolRegistry
+	//
+	// All accessors return execute-stripped AI SDK tool definitions: the SDK
+	// never auto-executes, so the model only ever needs schemas/descriptions.
+	// Execution runs through the registry handler (see getToolHandler), which
+	// validates. Approval is decided separately by `resolveToolApproval`.
 	// =========================================================================
 
 	getAllTools(opts?: ToolVisibilityOptions): Record<string, AISDKCoreTool> {
 		return this.applyVisibility(this.registry.getNativeTools(), opts);
 	}
 
-	getAllToolsWithoutExecute(
-		opts?: ToolVisibilityOptions,
-	): Record<string, AISDKCoreTool> {
-		return this.applyVisibility(
-			this.registry.getNativeToolsWithoutExecute(),
-			opts,
-		);
-	}
-
 	getFilteredTools(
 		allowedToolNames: string[],
 		opts?: ToolVisibilityOptions,
 	): Record<string, AISDKCoreTool> {
-		const all = this.applyVisibility(this.registry.getNativeTools(), opts);
-		return this.filterByNames(all, allowedToolNames);
-	}
-
-	getFilteredToolsWithoutExecute(
-		allowedToolNames: string[],
-		opts?: ToolVisibilityOptions,
-	): Record<string, AISDKCoreTool> {
-		const all = this.applyVisibility(
-			this.registry.getNativeToolsWithoutExecute(),
-			opts,
-		);
-		return this.filterByNames(all, allowedToolNames);
+		return this.filterByNames(this.getAllTools(opts), allowedToolNames);
 	}
 
 	/**

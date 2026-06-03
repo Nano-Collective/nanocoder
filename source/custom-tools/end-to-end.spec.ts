@@ -184,10 +184,9 @@ test.serial(
 	async t => {
 		// SubagentExecutor (source/subagents/subagent-executor.ts) accesses tools
 		// only through these ToolManager methods:
-		//   :200  toolManager.getAllTools()           — to list tool names
-		//   :235  toolManager.getAllToolsWithoutExecute()
-		//   :481  toolManager.getToolEntry(name)      — to check approval policy
-		//   :499  toolManager.getToolHandler(name)    — to execute
+		//   getAllTools()        — to list tool names and build the filtered set
+		//   getToolEntry(name)   — to check approval policy
+		//   getToolHandler(name) — to execute
 		// If a custom tool is registered into ToolManager and shows up via every
 		// one of these surfaces, subagents see it for free. This test pins that
 		// behavior so a future refactor of the registry can't silently regress it.
@@ -214,7 +213,7 @@ echo {{ msg }}`,
 		t.is(errors.length, 0);
 
 		t.truthy(manager.getAllTools().subagent_visible_tool);
-		t.truthy(manager.getAllToolsWithoutExecute().subagent_visible_tool);
+		t.truthy(manager.getAllTools().subagent_visible_tool);
 
 		const entry = manager.getToolEntry('subagent_visible_tool');
 		t.truthy(entry);

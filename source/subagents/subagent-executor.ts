@@ -237,7 +237,7 @@ export class SubagentExecutor {
 	private filterTools(
 		config: SubagentConfigWithSource,
 	): Record<string, AISDKCoreTool> {
-		const allTools = this.toolManager.getAllToolsWithoutExecute({
+		const allTools = this.toolManager.getAllTools({
 			forSkill: config.ownerSkill,
 		});
 		const availableNames = this.getAvailableToolNames(config);

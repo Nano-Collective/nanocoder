@@ -59,7 +59,6 @@ const createMockToolManager = (config: {
 	needsApproval?: boolean | (() => boolean);
 }) => ({
 	getAllTools: () => ({}),
-	getAllToolsWithoutExecute: () => ({}),
 	hasTool: (name: string) => config.tools?.includes(name) || false,
 	getTool: (name: string) => ({
 		execute: async () => 'Tool executed',
@@ -81,7 +80,7 @@ const createMockToolManager = (config: {
 	},
 	getAvailableToolNames: (_tune: unknown, _mode: string) =>
 		config.tools ?? ['some_tool', 'read_file'],
-	getEffectiveTools: (names: string[]) => {
+	getFilteredTools: (names: string[]) => {
 		const tools: Record<string, unknown> = {};
 		for (const name of names) {
 			tools[name] = {

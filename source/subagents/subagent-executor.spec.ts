@@ -20,13 +20,6 @@ function createMockToolManager(
 			}
 			return result;
 		},
-		getAllToolsWithoutExecute: () => {
-			const result: Record<string, unknown> = {};
-			for (const name of Object.keys(tools)) {
-				result[name] = {description: `Mock ${name} tool`};
-			}
-			return result;
-		},
 		getToolHandler: (name: string) => tools[name]?.handler,
 		getToolEntry: (name: string) => {
 			const tool = tools[name];
