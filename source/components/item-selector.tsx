@@ -24,7 +24,7 @@ interface ItemSelectorProps<TValue extends string = string> {
 /**
  * Shared layout for selectors built on `TitledBoxWithPreferences` +
  * `SelectInput` + escape-to-cancel + loading/error states. Used by
- * `model-selector` and `provider-selector`. Selectors with bespoke layout
+ * `model-selector`. Selectors with bespoke layout
  * (e.g. session-selector, checkpoint-selector, ide-selector) do not use this
  * because they extend the pattern with additional state machines or layouts
  * that don't fit a generic shape.

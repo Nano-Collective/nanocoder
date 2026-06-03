@@ -114,7 +114,6 @@ test('returns the expected handler surface', t => {
 	t.is(typeof handlers.enterMode, 'function');
 	t.is(typeof handlers.exitMode, 'function');
 	t.is(typeof handlers.enterModelSelectionMode, 'function');
-	t.is(typeof handlers.enterProviderSelectionMode, 'function');
 	t.is(typeof handlers.enterModelDatabaseMode, 'function');
 	t.is(typeof handlers.enterConfigWizardMode, 'function');
 	t.is(typeof handlers.enterMcpWizardMode, 'function');
@@ -123,7 +122,6 @@ test('returns the expected handler surface', t => {
 	t.is(typeof handlers.enterSettingsMode, 'function');
 	t.is(typeof handlers.enterTune, 'function');
 	t.is(typeof handlers.handleModelSelect, 'function');
-	t.is(typeof handlers.handleProviderSelect, 'function');
 	t.is(typeof handlers.handleConfigWizardComplete, 'function');
 	t.is(typeof handlers.handleMcpWizardComplete, 'function');
 	t.is(typeof handlers.handleTuneSelect, 'function');
@@ -133,9 +131,9 @@ test('enterMode forwards to setActiveMode', t => {
 	const {handlers, setActiveMode} = setup();
 
 	handlers.enterMode('model');
-	handlers.enterMode('provider');
+	handlers.enterMode('modelDatabase');
 
-	t.deepEqual(setActiveMode.calls, [['model'], ['provider']]);
+	t.deepEqual(setActiveMode.calls, [['model'], ['modelDatabase']]);
 });
 
 test('exitMode sets active mode to null', t => {
@@ -150,7 +148,6 @@ test('each enter*Mode helper sets the matching active mode', t => {
 	const {handlers, setActiveMode} = setup();
 
 	handlers.enterModelSelectionMode();
-	handlers.enterProviderSelectionMode();
 	handlers.enterModelDatabaseMode();
 	handlers.enterConfigWizardMode();
 	handlers.enterMcpWizardMode();
@@ -160,7 +157,6 @@ test('each enter*Mode helper sets the matching active mode', t => {
 
 	t.deepEqual(setActiveMode.calls, [
 		['model'],
-		['provider'],
 		['modelDatabase'],
 		['configWizard'],
 		['mcpWizard'],
@@ -183,7 +179,6 @@ test('cancel handlers all return active mode to null', t => {
 	const {handlers, setActiveMode} = setup();
 
 	handlers.handleModelSelectionCancel();
-	handlers.handleProviderSelectionCancel();
 	handlers.handleModelDatabaseCancel();
 	handlers.handleConfigWizardCancel();
 	handlers.handleMcpWizardCancel();
@@ -191,18 +186,22 @@ test('cancel handlers all return active mode to null', t => {
 	handlers.handleIdeSelectionCancel();
 	handlers.handleTuneCancel();
 
-	t.is(setActiveMode.calls.length, 8);
+	t.is(setActiveMode.calls.length, 7);
 	for (const args of setActiveMode.calls) {
 		t.deepEqual(args, [null]);
 	}
 });
 
-test('handleModelSelect short-circuits when model is unchanged', async t => {
+test('handleModelSelect short-circuits when provider and model are unchanged', async t => {
 	const client = createMockClient('current-model');
 	const {handlers, setCurrentModel, setMessages, setActiveMode, addToChatQueue} =
-		setup({client, currentModel: 'current-model'});
+		setup({
+			client,
+			currentProvider: 'current-provider',
+			currentModel: 'current-model',
+		});
 
-	await handlers.handleModelSelect('current-model');
+	await handlers.handleModelSelect('current-provider', 'current-model');
 
 	t.is(setCurrentModel.calls.length, 0);
 	t.is(setMessages.calls.length, 0);
@@ -210,12 +209,16 @@ test('handleModelSelect short-circuits when model is unchanged', async t => {
 	t.deepEqual(setActiveMode.calls, [[null]]);
 });
 
-test('handleModelSelect with new model updates client, clears history, exits mode', async t => {
+test('handleModelSelect with new model on same provider updates client, clears history, exits mode', async t => {
 	const client = createMockClient('old-model');
 	const {handlers, setCurrentModel, setMessages, setActiveMode, addToChatQueue} =
-		setup({client, currentModel: 'old-model'});
+		setup({
+			client,
+			currentProvider: 'current-provider',
+			currentModel: 'old-model',
+		});
 
-	await handlers.handleModelSelect('new-model');
+	await handlers.handleModelSelect('current-provider', 'new-model');
 
 	t.is(client.getCurrentModel(), 'new-model');
 	t.deepEqual(setCurrentModel.calls, [['new-model']]);
@@ -224,27 +227,16 @@ test('handleModelSelect with new model updates client, clears history, exits mod
 	t.deepEqual(setActiveMode.calls, [[null]]);
 });
 
-test('handleModelSelect with no client only exits mode', async t => {
+test('handleModelSelect on same provider with no client only exits mode', async t => {
 	const {handlers, setCurrentModel, setMessages, setActiveMode} = setup({
 		client: null,
+		currentProvider: 'current-provider',
 	});
 
-	await handlers.handleModelSelect('any-model');
+	await handlers.handleModelSelect('current-provider', 'any-model');
 
 	t.is(setCurrentModel.calls.length, 0);
 	t.is(setMessages.calls.length, 0);
-	t.deepEqual(setActiveMode.calls, [[null]]);
-});
-
-test('handleProviderSelect short-circuits when provider is unchanged', async t => {
-	const {handlers, setClient, setMessages, setActiveMode, addToChatQueue} =
-		setup({currentProvider: 'current-provider'});
-
-	await handlers.handleProviderSelect('current-provider');
-
-	t.is(setClient.calls.length, 0);
-	t.is(setMessages.calls.length, 0);
-	t.is(addToChatQueue.calls.length, 0);
 	t.deepEqual(setActiveMode.calls, [[null]]);
 });
 

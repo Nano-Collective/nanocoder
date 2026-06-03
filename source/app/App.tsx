@@ -404,7 +404,6 @@ export default function App({
 		client: appState.client,
 		getMessageTokens: appState.getMessageTokens,
 		enterModelSelectionMode: modeHandlers.enterModelSelectionMode,
-		enterProviderSelectionMode: modeHandlers.enterProviderSelectionMode,
 		enterModelDatabaseMode: modeHandlers.enterModelDatabaseMode,
 		enterConfigWizardMode: modeHandlers.enterConfigWizardMode,
 		enterSettingsMode: modeHandlers.enterSettingsMode,

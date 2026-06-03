@@ -64,13 +64,8 @@ export const lazyCommands: LazyCommand[] = [
 	},
 	{
 		name: 'model',
-		description: 'Select a model for the current provider',
+		description: 'Select a model from any configured provider',
 		load: () => import('@/commands/model').then(m => m.modelCommand),
-	},
-	{
-		name: 'provider',
-		description: 'Switch between AI providers',
-		load: () => import('@/commands/provider').then(m => m.providerCommand),
 	},
 	{
 		name: 'commands',

@@ -40,7 +40,6 @@ export {parseContextLimit} from './handlers/context-max-handler';
 const SPECIAL_COMMANDS = {
 	CLEAR: 'clear',
 	MODEL: 'model',
-	PROVIDER: 'provider',
 	MODEL_DATABASE: 'model-database',
 	SETUP_PROVIDERS: 'setup-providers',
 	SETUP_MCP: 'setup-mcp',
@@ -238,7 +237,6 @@ async function handleSpecialCommand(
 		onClearMessages,
 		onRenameSession,
 		onEnterModelSelectionMode,
-		onEnterProviderSelectionMode,
 		onEnterModelDatabaseMode,
 		onEnterConfigWizardMode,
 		onEnterSettingsMode,
@@ -254,7 +252,6 @@ async function handleSpecialCommand(
 	// exact same shape, so dispatch them from a table instead of the switch.
 	const enterModeCommands: Record<string, () => void> = {
 		[SPECIAL_COMMANDS.MODEL]: onEnterModelSelectionMode,
-		[SPECIAL_COMMANDS.PROVIDER]: onEnterProviderSelectionMode,
 		[SPECIAL_COMMANDS.MODEL_DATABASE]: onEnterModelDatabaseMode,
 		[SPECIAL_COMMANDS.SETUP_PROVIDERS]: onEnterConfigWizardMode,
 		[SPECIAL_COMMANDS.SETUP_MCP]: onEnterMcpWizardMode,

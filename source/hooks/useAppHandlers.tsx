@@ -84,7 +84,6 @@ interface UseAppHandlersProps {
 
 	// Mode handlers
 	enterModelSelectionMode: () => void;
-	enterProviderSelectionMode: () => void;
 	enterModelDatabaseMode: () => void;
 	enterConfigWizardMode: () => void;
 	enterSettingsMode: () => void;
@@ -496,7 +495,6 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				onRenameSession: props.setSessionName,
 				commandArgs,
 				onEnterModelSelectionMode: props.enterModelSelectionMode,
-				onEnterProviderSelectionMode: props.enterProviderSelectionMode,
 				onEnterModelDatabaseMode: props.enterModelDatabaseMode,
 				onEnterConfigWizardMode: props.enterConfigWizardMode,
 				onEnterSettingsMode: props.enterSettingsMode,
@@ -530,7 +528,6 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.customCommandLoader,
 			props.customCommandExecutor,
 			props.enterModelSelectionMode,
-			props.enterProviderSelectionMode,
 			props.enterModelDatabaseMode,
 			props.enterConfigWizardMode,
 			props.enterSettingsMode,

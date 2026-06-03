@@ -28,7 +28,6 @@ import type {PendingQuestion} from '@/utils/question-queue';
 
 export type ActiveMode =
 	| 'model'
-	| 'provider'
 	| 'modelDatabase'
 	| 'configWizard'
 	| 'mcpWizard'
@@ -309,7 +308,6 @@ export function useAppState(
 
 		// Derived mode booleans (read-only convenience)
 		isModelSelectionMode: activeMode === 'model',
-		isProviderSelectionMode: activeMode === 'provider',
 		isModelDatabaseMode: activeMode === 'modelDatabase',
 		isConfigWizardMode: activeMode === 'configWizard',
 		isMcpWizardMode: activeMode === 'mcpWizard',

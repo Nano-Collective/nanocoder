@@ -16,7 +16,6 @@ export interface MessageSubmissionOptions {
 	onRenameSession: (name: string) => void;
 	commandArgs?: string[];
 	onEnterModelSelectionMode: () => void;
-	onEnterProviderSelectionMode: () => void;
 	onEnterModelDatabaseMode: () => void;
 	onEnterConfigWizardMode: () => void;
 	onEnterSettingsMode: () => void;

@@ -107,16 +107,11 @@ export function InteractiveApp({
 						activeMode={appState.activeMode}
 						isSettingsMode={appState.isSettingsMode}
 						showAllSessions={appState.showAllSessions}
-						client={appState.client}
 						currentModel={appState.currentModel}
 						currentProvider={appState.currentProvider}
 						checkpointLoadData={appState.checkpointLoadData}
 						onModelSelect={modeHandlers.handleModelSelect}
 						onModelSelectionCancel={modeHandlers.handleModelSelectionCancel}
-						onProviderSelect={modeHandlers.handleProviderSelect}
-						onProviderSelectionCancel={
-							modeHandlers.handleProviderSelectionCancel
-						}
 						onModelDatabaseCancel={modeHandlers.handleModelDatabaseCancel}
 						onConfigWizardComplete={modeHandlers.handleConfigWizardComplete}
 						onConfigWizardCancel={modeHandlers.handleConfigWizardCancel}

@@ -411,9 +411,9 @@ export function useAppInitialization({
 					/>,
 				);
 			}
-			// In non-interactive mode there's no human to recover via /provider
-			// or /model — keep init from blocking on a null client by exiting
-			// once the error has had a chance to flush to stdout.
+			// In non-interactive mode there's no human to recover via /model —
+			// keep init from blocking on a null client by exiting once the
+			// error has had a chance to flush to stdout.
 			if (nonInteractiveMode) {
 				setTimeout(() => {
 					void getShutdownManager().gracefulShutdown(1);

@@ -56,95 +56,110 @@ export function useModeHandlers({
 	const enterMode = (mode: ActiveMode) => setActiveMode(mode);
 	const exitMode = () => setActiveMode(null);
 
-	// Handle model selection
-	const handleModelSelect = async (selectedModel: string) => {
-		if (client && selectedModel !== currentModel) {
-			client.setModel(selectedModel);
-			setCurrentModel(selectedModel);
-			setCurrentProviderConfig(client.getProviderConfig());
+	// Handle model selection. The model picker lists every model across every
+	// provider, so a selection may also switch the active provider. Staying on
+	// the same provider just swaps the model on the live client; crossing to a
+	// different provider spins up a fresh client (and re-runs config lint).
+	const handleModelSelect = async (
+		selectedProvider: string,
+		selectedModel: string,
+	) => {
+		const sameProvider = selectedProvider === currentProvider;
 
-			// Clear message history when switching models
-			setMessages([]);
-			await client.clearContext();
-
-			// Update preferences
-			updateLastUsed(currentProvider, selectedModel);
-
-			addToChatQueue(
-				<SuccessMessage
-					key={generateKey('model-changed')}
-					message={`Model changed to: ${selectedModel}. Chat history cleared.`}
-					hideBox={true}
-				/>,
-			);
+		if (sameProvider && selectedModel === currentModel) {
+			exitMode();
+			return;
 		}
-		exitMode();
-	};
 
-	// Handle provider selection
-	const handleProviderSelect = async (selectedProvider: string) => {
-		if (selectedProvider !== currentProvider) {
-			try {
-				const {client: newClient, actualProvider} =
-					await createLLMClient(selectedProvider);
+		if (sameProvider) {
+			if (client) {
+				client.setModel(selectedModel);
+				setCurrentModel(selectedModel);
+				setCurrentProviderConfig(client.getProviderConfig());
 
-				if (actualProvider !== selectedProvider) {
-					addToChatQueue(
-						<ErrorMessage
-							key={generateKey('provider-forced')}
-							message={`${selectedProvider} is not available. Please ensure it's properly configured in agents.config.json.`}
-							hideBox={true}
-						/>,
-					);
-					return;
-				}
-
-				setClient(newClient);
-				setCurrentProvider(actualProvider);
-				setCurrentProviderConfig(newClient.getProviderConfig());
-
-				const newModel = newClient.getCurrentModel();
-				setCurrentModel(newModel);
-
+				// Clear message history when switching models
 				setMessages([]);
-				await newClient.clearContext();
+				await client.clearContext();
 
-				updateLastUsed(actualProvider, newModel);
+				// Update preferences
+				updateLastUsed(currentProvider, selectedModel);
 
 				addToChatQueue(
 					<SuccessMessage
-						key={generateKey('provider-changed')}
-						message={`Provider changed to: ${actualProvider}, model: ${newModel}. Chat history cleared.`}
-						hideBox={true}
-					/>,
-				);
-
-				// Re-run lint scoped to the newly active provider so any
-				// misconfiguration becomes visible right when it would start
-				// taking effect, rather than getting buried in startup output.
-				const newProviderConfig = loadAllProviderConfigs().find(
-					p => p.name === actualProvider,
-				);
-				if (newProviderConfig) {
-					for (const issue of lintProviderConfig(newProviderConfig)) {
-						addToChatQueue(
-							<WarningMessage
-								key={generateKey(`config-lint-${issue.provider}`)}
-								message={formatConfigLintIssue(issue)}
-								hideBox={true}
-							/>,
-						);
-					}
-				}
-			} catch (error) {
-				addToChatQueue(
-					<ErrorMessage
-						key={generateKey('provider-error')}
-						message={`Failed to change provider to ${selectedProvider}: ${String(error)}`}
+						key={generateKey('model-changed')}
+						message={`Model changed to: ${selectedModel}. Chat history cleared.`}
 						hideBox={true}
 					/>,
 				);
 			}
+			exitMode();
+			return;
+		}
+
+		// Different provider: create a new client targeting the chosen
+		// provider and model.
+		try {
+			const {client: newClient, actualProvider} = await createLLMClient(
+				selectedProvider,
+				selectedModel,
+			);
+
+			if (actualProvider !== selectedProvider) {
+				addToChatQueue(
+					<ErrorMessage
+						key={generateKey('provider-forced')}
+						message={`${selectedProvider} is not available. Please ensure it's properly configured in agents.config.json.`}
+						hideBox={true}
+					/>,
+				);
+				return;
+			}
+
+			setClient(newClient);
+			setCurrentProvider(actualProvider);
+			setCurrentProviderConfig(newClient.getProviderConfig());
+
+			const newModel = newClient.getCurrentModel();
+			setCurrentModel(newModel);
+
+			setMessages([]);
+			await newClient.clearContext();
+
+			updateLastUsed(actualProvider, newModel);
+
+			addToChatQueue(
+				<SuccessMessage
+					key={generateKey('model-changed')}
+					message={`Model changed to: ${newModel} (${actualProvider}). Chat history cleared.`}
+					hideBox={true}
+				/>,
+			);
+
+			// Re-run lint scoped to the newly active provider so any
+			// misconfiguration becomes visible right when it would start
+			// taking effect, rather than getting buried in startup output.
+			const newProviderConfig = loadAllProviderConfigs().find(
+				p => p.name === actualProvider,
+			);
+			if (newProviderConfig) {
+				for (const issue of lintProviderConfig(newProviderConfig)) {
+					addToChatQueue(
+						<WarningMessage
+							key={generateKey(`config-lint-${issue.provider}`)}
+							message={formatConfigLintIssue(issue)}
+							hideBox={true}
+						/>,
+					);
+				}
+			}
+		} catch (error) {
+			addToChatQueue(
+				<ErrorMessage
+					key={generateKey('provider-error')}
+					message={`Failed to switch to ${selectedProvider}: ${String(error)}`}
+					hideBox={true}
+				/>,
+			);
 		}
 		exitMode();
 	};
@@ -303,7 +318,6 @@ export function useModeHandlers({
 		exitMode,
 		// Convenience enter helpers
 		enterModelSelectionMode: () => enterMode('model'),
-		enterProviderSelectionMode: () => enterMode('provider'),
 		enterModelDatabaseMode: () => enterMode('modelDatabase'),
 		enterConfigWizardMode: () => enterMode('configWizard'),
 		enterMcpWizardMode: () => enterMode('mcpWizard'),
@@ -313,8 +327,6 @@ export function useModeHandlers({
 		// Cancel/complete handlers
 		handleModelSelect,
 		handleModelSelectionCancel: exitMode,
-		handleProviderSelect,
-		handleProviderSelectionCancel: exitMode,
 		handleModelDatabaseCancel: exitMode,
 		handleConfigWizardComplete,
 		handleConfigWizardCancel: exitMode,

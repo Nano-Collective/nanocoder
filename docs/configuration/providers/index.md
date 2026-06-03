@@ -63,7 +63,7 @@ Use dedicated AI SDK packages for native API support, enabled via the `sdkProvid
 
 | Field | Description |
 |-------|-------------|
-| `name` | Display name used in `/provider` command |
+| `name` | Display name shown alongside each model in the `/model` picker |
 | `baseUrl` | API endpoint URL |
 | `apiKey` | API key (optional, not required for local providers or GitHub Copilot) |
 | `caCertPath` | Path to a PEM CA bundle to trust private/self-signed TLS certificates (optional) |

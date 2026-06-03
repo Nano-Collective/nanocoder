@@ -18,8 +18,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/setup-mcp` | Interactive wizard for configuring MCP servers with templates |
 | `/setup-config` | Open a configuration file in your `$EDITOR` (lists project and global config files) |
 | `/clear` | Clear chat history |
-| `/model` | Switch between available models |
-| `/provider` | Switch between configured AI providers |
+| `/model` | Switch between available models from any configured provider |
 | `/status` | Display current status (CWD, provider, model, theme, available updates, AGENTS setup) |
 | `/tasks` | Manage task list for tracking complex work (see [Task Management](task-management.md)) |
 | `/model-database` | Browse coding models from OpenRouter (searchable, filterable by open/proprietary) |

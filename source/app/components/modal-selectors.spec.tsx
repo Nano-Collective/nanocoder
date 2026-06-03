@@ -12,14 +12,11 @@ function createDefaultProps(
 		activeMode: null,
 		isSettingsMode: false,
 		showAllSessions: false,
-		client: null,
 		currentModel: 'test-model',
 		currentProvider: 'test-provider',
 		checkpointLoadData: null,
 		onModelSelect: async () => {},
 		onModelSelectionCancel: () => {},
-		onProviderSelect: async () => {},
-		onProviderSelectionCancel: () => {},
 		onModelDatabaseCancel: () => {},
 		onConfigWizardComplete: async () => {},
 		onConfigWizardCancel: () => {},
@@ -43,19 +40,7 @@ test('ModalSelectors returns null when no mode is active', t => {
 test('ModalSelectors renders ModelSelector when activeMode is model', t => {
 	const props = createDefaultProps({
 		activeMode: 'model',
-		client: {},
 	});
-	const component = ModalSelectors(props);
-	t.truthy(component);
-
-	const {lastFrame, unmount} = renderWithTheme(<>{component}</>);
-	const output = lastFrame();
-	t.truthy(output);
-	unmount();
-});
-
-test('ModalSelectors renders ProviderSelector when activeMode is provider', t => {
-	const props = createDefaultProps({activeMode: 'provider'});
 	const component = ModalSelectors(props);
 	t.truthy(component);
 

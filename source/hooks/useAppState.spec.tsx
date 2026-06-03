@@ -70,7 +70,6 @@ test('respects initialDevelopmentMode argument', t => {
 test('all derived mode booleans are false when activeMode is null', t => {
 	const {hook} = setup();
 	t.false(hook.isModelSelectionMode);
-	t.false(hook.isProviderSelectionMode);
 	t.false(hook.isModelDatabaseMode);
 	t.false(hook.isConfigWizardMode);
 	t.false(hook.isMcpWizardMode);
@@ -88,7 +87,6 @@ test('setActiveMode flips the matching derived boolean only', t => {
 	instance.rerender(<Probe />);
 
 	t.true(captured!.isModelSelectionMode);
-	t.false(captured!.isProviderSelectionMode);
 	t.false(captured!.isMcpWizardMode);
 	t.is(captured!.activeMode, 'model');
 

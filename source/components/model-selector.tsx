@@ -1,71 +1,63 @@
-import {useEffect, useState} from 'react';
+import {useState} from 'react';
 import {
 	ItemSelector,
 	type ItemSelectorOption,
 } from '@/components/item-selector';
-import {LLMClient} from '@/types/core';
+import {loadAllProviderConfigs} from '@/config/mcp-config-loader';
 
 interface ModelSelectorProps {
-	client: LLMClient | null;
+	currentProvider: string;
 	currentModel: string;
-	onModelSelect: (model: string) => void;
+	onModelSelect: (provider: string, model: string) => void;
 	onCancel: () => void;
 }
 
 export default function ModelSelector({
-	client,
+	currentProvider,
 	currentModel,
 	onModelSelect,
 	onCancel,
 }: ModelSelectorProps) {
-	const [models, setModels] = useState<ItemSelectorOption[]>([]);
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
+	// Flat list of every model across every configured provider. The option
+	// value is the entry's index, so a selection maps back to its
+	// (provider, model) pair without encoding a delimiter into the value.
+	const [entries] = useState<{provider: string; model: string}[]>(() =>
+		loadAllProviderConfigs().flatMap(provider =>
+			(provider.models ?? []).map(model => ({
+				provider: provider.name,
+				model,
+			})),
+		),
+	);
 
-	useEffect(() => {
-		const loadModels = async () => {
-			if (!client) {
-				setError('No active client found');
-				setLoading(false);
-				return;
-			}
+	const items: ItemSelectorOption[] = entries.map((entry, index) => ({
+		label: `${entry.model} (${entry.provider})${
+			entry.provider === currentProvider && entry.model === currentModel
+				? ' (current)'
+				: ''
+		}`,
+		value: String(index),
+	}));
 
-			try {
-				const availableModels = await client.getAvailableModels();
-
-				if (availableModels.length === 0) {
-					setError('No models available. Please check your configuration.');
-					setLoading(false);
-					return;
-				}
-
-				setModels(
-					availableModels.map(model => ({
-						label: `${model}${model === currentModel ? ' (current)' : ''}`,
-						value: model,
-					})),
-				);
-				setLoading(false);
-			} catch (err) {
-				setError(`Error accessing models: ${String(err)}`);
-				setLoading(false);
-			}
-		};
-
-		void loadModels();
-	}, [client, currentModel]);
+	const error =
+		entries.length === 0
+			? 'No models available. Please check your configuration.'
+			: null;
 
 	return (
 		<ItemSelector
-			title={loading ? 'Model Selection' : 'Select a Model'}
-			items={models}
-			onSelect={onModelSelect}
+			title="Select a Model"
+			items={items}
+			onSelect={value => {
+				const entry = entries[Number(value)];
+				if (entry) {
+					onModelSelect(entry.provider, entry.model);
+				}
+			}}
 			onCancel={onCancel}
-			loading={loading}
-			loadingMessage="Loading available models..."
 			error={error}
 			errorTitle="Model Selection - Error"
-			errorHint="Make sure your provider is properly configured."
+			errorHint="Make sure your providers are properly configured."
 		/>
 	);
 }

@@ -105,7 +105,7 @@ nanocoder --provider ollama
 nanocoder --provider openrouter --model google/gemini-3.1-flash
 ```
 
-This bypasses the need to use `/provider` or `/model` slash commands on startup.
+This bypasses the need to use the `/model` slash command on startup.
 
 ## Non-Interactive Mode
 

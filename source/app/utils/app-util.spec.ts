@@ -271,7 +271,6 @@ test('ide command parsing - recognized as special command', t => {
 	const SPECIAL_COMMANDS: Record<string, string> = {
 		CLEAR: 'clear',
 		MODEL: 'model',
-		PROVIDER: 'provider',
 		MODEL_DATABASE: 'model-database',
 		SETUP_PROVIDERS: 'setup-providers',
 		SETUP_MCP: 'setup-mcp',
@@ -304,7 +303,6 @@ function createResumeTestOptions(overrides: {
 		customCommandExecutor: null,
 		onClearMessages: async () => {},
 		onEnterModelSelectionMode: () => {},
-		onEnterProviderSelectionMode: () => {},
 		onEnterModelDatabaseMode: () => {},
 		onEnterConfigWizardMode: () => {},
 		onEnterSettingsMode: () => {},
@@ -558,7 +556,6 @@ function createRenameTestOptions(overrides: {
 		onRenameSession: overrides.onRenameSession ?? (() => {}),
 		commandArgs: overrides.commandArgs,
 		onEnterModelSelectionMode: () => {},
-		onEnterProviderSelectionMode: () => {},
 		onEnterModelDatabaseMode: () => {},
 		onEnterConfigWizardMode: () => {},
 		onEnterSettingsMode: () => {},

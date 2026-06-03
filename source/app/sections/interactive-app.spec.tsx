@@ -70,8 +70,6 @@ function makeProps(o: Overrides = {}) {
 			handleIdeSelectionCancel: noop,
 			handleModelSelect: noop,
 			handleModelSelectionCancel: noop,
-			handleProviderSelect: noop,
-			handleProviderSelectionCancel: noop,
 			handleModelDatabaseCancel: noop,
 			handleConfigWizardComplete: noop,
 			handleConfigWizardCancel: noop,
