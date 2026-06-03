@@ -6,7 +6,7 @@ import React from 'react';
 import {renderWithTheme} from '../../test-utils/render-with-theme';
 import {
 	createStaticComponents,
-	formatGitStatusSummary,
+	formatBootSummaryGitLabel,
 } from './app-container';
 import type {AppContainerProps} from './app-container';
 
@@ -131,9 +131,9 @@ test('createStaticComponents omits mode label when interactive', t => {
 // Boot Summary — Git Branch Display
 // ============================================================================
 
-test('formatGitStatusSummary renders feature branch with ⎇ prefix', t => {
+test('formatBootSummaryGitLabel renders feature branch with ⎇ prefix', t => {
 	t.is(
-		formatGitStatusSummary({
+		formatBootSummaryGitLabel({
 			branch: 'fix/read-file-empty',
 			isDefault: false,
 			detached: false,
@@ -142,16 +142,20 @@ test('formatGitStatusSummary renders feature branch with ⎇ prefix', t => {
 	);
 });
 
-test('formatGitStatusSummary marks the default branch', t => {
+test('formatBootSummaryGitLabel marks the default branch', t => {
 	t.is(
-		formatGitStatusSummary({branch: 'main', isDefault: true, detached: false}),
+		formatBootSummaryGitLabel({
+			branch: 'main',
+			isDefault: true,
+			detached: false,
+		}),
 		'⎇ main (default)',
 	);
 });
 
-test('formatGitStatusSummary marks detached HEAD', t => {
+test('formatBootSummaryGitLabel marks detached HEAD', t => {
 	t.is(
-		formatGitStatusSummary({
+		formatBootSummaryGitLabel({
 			branch: 'abc1234',
 			isDefault: false,
 			detached: true,

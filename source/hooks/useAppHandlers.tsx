@@ -21,10 +21,7 @@ import {sessionManager} from '@/session/session-manager';
 import {createTokenizer} from '@/tokenization/index';
 import {
 	type GitStatusSummary,
-	getCurrentBranch,
-	getDefaultBranch,
-	isGitAvailable,
-	isInsideGitRepo,
+	getGitStatusSummarySync,
 } from '@/tools/git/utils';
 import type {Task} from '@/tools/tasks/types';
 import type {
@@ -295,25 +292,13 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			// Continue without context usage/auto-compact info
 		}
 
-		// Resolve the current git branch for the /status panel. Async git
-		// helpers are fine here because the panel isn't rendered inside
-		// Ink's <Static>. Failures degrade to omitting the line.
+		// Resolve the current git branch for the /status panel. The sync
+		// helper reads the .git filesystem directly — same code path as the
+		// boot summary, so the two surfaces can't drift. Failures degrade
+		// to omitting the line.
 		let gitStatus: GitStatusSummary | null = null;
 		try {
-			if (isGitAvailable() && isInsideGitRepo()) {
-				const branch = await getCurrentBranch();
-				const detached = branch === 'HEAD';
-				let isDefault = false;
-				if (!detached) {
-					try {
-						const defaultBranch = await getDefaultBranch();
-						isDefault = branch === defaultBranch;
-					} catch {
-						// fall through — leave isDefault false
-					}
-				}
-				gitStatus = {branch, detached, isDefault};
-			}
+			gitStatus = getGitStatusSummarySync();
 		} catch (error) {
 			logger.debug('Failed to resolve git status for /status panel', {error});
 		}

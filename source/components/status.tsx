@@ -10,19 +10,19 @@ import {
 	PATH_LENGTH_NORMAL_TERMINAL,
 } from '@/constants';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
-import type {GitStatusSummary} from '@/tools/git/utils';
+import {formatGitStatusSummary, type GitStatusSummary} from '@/tools/git/utils';
 import type {LSPConnectionStatus, MCPConnectionStatus} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
 
 /**
- * Format a {@link GitStatusSummary} for the /status panel's Git line —
- * mirrors the boot-summary formatter so both surfaces stay consistent.
+ * Format a {@link GitStatusSummary} for the /status panel's Git line. Uses
+ * the shared formatter in `@/tools/git/utils` so the boot summary and the
+ * /status panel can't drift on wording.
  */
 function formatGitLine(status: GitStatusSummary): string {
-	if (status.detached) return `${status.branch} (detached HEAD)`;
-	if (status.isDefault) return `${status.branch} (default)`;
-	return status.branch;
+	const {branch, marker} = formatGitStatusSummary(status);
+	return marker ? `${branch} (${marker})` : branch;
 }
 
 // Get CWD once at module load time
