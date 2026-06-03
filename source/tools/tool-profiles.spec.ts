@@ -1,4 +1,5 @@
 import test from 'ava';
+import {ToolManager} from './tool-manager.js';
 import {
 	getToolsForProfile,
 	isNanoProfile,
@@ -8,6 +9,24 @@ import {
 } from './tool-profiles.js';
 
 console.log('\ntool-profiles.spec.ts');
+
+// ============================================================================
+// Drift guard: profile entries must name real tools
+// ============================================================================
+// Profiles are hand-maintained string lists. This catches a renamed/removed
+// tool leaving a dangling name behind (which would silently filter nothing).
+
+test('every profile names only registered tools', t => {
+	const registered = new Set(new ToolManager().getToolNames());
+	for (const profile of ['minimal', 'nano'] as const) {
+		for (const name of getToolsForProfile(profile)) {
+			t.true(
+				registered.has(name),
+				`profile "${profile}" references unknown tool "${name}"`,
+			);
+		}
+	}
+});
 
 // ============================================================================
 // getToolsForProfile

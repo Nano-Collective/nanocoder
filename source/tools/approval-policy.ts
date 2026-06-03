@@ -28,14 +28,20 @@ export interface ApprovalTarget {
  * in exactly one place and the development mode is always supplied explicitly
  * (never read from a mutable global).
  *
- * Resolution order:
- *   1. Caller pre-authorization (`alwaysAllow`) -> no approval.
- *   2. Yolo mode -> no approval. Yolo executes every tool without exception
- *      (see CLAUDE.md), so this global invariant lives here once rather than
- *      being re-implemented in each tool's policy.
- *   3. The tool's explicit `approval` policy (boolean or `(args, mode)` fn).
- *   4. Default: `!readOnly` - read-only tools have no side effects so they
- *      never need approval; anything else (or an unknown tool) does.
+ * Resolution order (first match wins; DO NOT reorder):
+ *
+ *   | # | Condition                          | Result            |
+ *   |---|------------------------------------|-------------------|
+ *   | 1 | toolName in ctx.alwaysAllow        | no approval       |
+ *   | 2 | ctx.mode === 'yolo'                | no approval       |
+ *   | 3 | approval is boolean                | that boolean      |
+ *   | 4 | approval is (args, mode) => bool   | call it           |
+ *   | 5 | otherwise (no explicit policy)     | !readOnly         |
+ *
+ *   - #2 is the global "yolo runs everything" invariant - kept here once
+ *     rather than re-implemented in each tool's policy (see CLAUDE.md).
+ *   - #5 means read-only tools default to no approval; anything else (or an
+ *     unknown tool) defaults to requiring it.
  *
  * Fails safe: an unknown tool, or a policy function that throws, requires
  * approval.

@@ -730,6 +730,27 @@ test('getAvailableToolNames - plan mode excludes mutation tools', t => {
 	t.true(result.includes('find_files'));
 });
 
+// Drift guard: MODE_EXCLUDED_TOOLS.plan is a hand-maintained list. This pins
+// the invariant it encodes — every mutating (non-readOnly) built-in is hidden
+// in plan mode — so a newly-added mutating tool can't silently leak in. agent
+// and ask_user are the deliberate non-readOnly exceptions (delegation / asking
+// the user are themselves read-only-ish in plan).
+test('plan mode hides every mutating built-in tool (except agent/ask_user)', t => {
+	const manager = new ToolManager();
+	const allowedNonReadOnly = new Set(['agent', 'ask_user']);
+	const planTools = new Set(manager.getAvailableToolNames(undefined, 'plan'));
+
+	for (const name of manager.getToolNames()) {
+		const isReadOnly = manager.getToolEntry(name)?.readOnly === true;
+		if (!isReadOnly && !allowedNonReadOnly.has(name)) {
+			t.false(
+				planTools.has(name),
+				`${name} mutates but is available in plan mode — add it to MODE_EXCLUDED_TOOLS.plan`,
+			);
+		}
+	}
+});
+
 test('getAvailableToolNames - plan + minimal excludes mutation tools from minimal set', t => {
 	const manager = new ToolManager();
 	const result = manager.getAvailableToolNames({enabled: true, toolProfile: 'minimal', aggressiveCompact: false}, 'plan');
