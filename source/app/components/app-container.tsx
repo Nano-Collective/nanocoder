@@ -5,6 +5,7 @@ import {getClosestConfigFile} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {
+	formatGitStatusSummary,
 	type GitStatusSummary,
 	getGitStatusSummarySync,
 } from '@/tools/git/utils';
@@ -14,10 +15,9 @@ import {DEVELOPMENT_MODE_LABELS, type DevelopmentMode} from '@/types/core';
  * Format a {@link GitStatusSummary} for inline display next to the
  * provider/model/config segment of the boot summary.
  */
-export function formatGitStatusSummary(status: GitStatusSummary): string {
-	if (status.detached) return `⎇ ${status.branch} (detached)`;
-	if (status.isDefault) return `⎇ ${status.branch} (default)`;
-	return `⎇ ${status.branch}`;
+export function formatBootSummaryGitLabel(status: GitStatusSummary): string {
+	const {branch, marker} = formatGitStatusSummary(status);
+	return marker ? `⎇ ${branch} (${marker})` : `⎇ ${branch}`;
 }
 
 export interface AppContainerProps {
@@ -58,7 +58,7 @@ function BootSummary({
 	const shortConfig = homedir ? configPath.replace(homedir, '~') : configPath;
 	const modeLabel = mode ? DEVELOPMENT_MODE_LABELS[mode] : undefined;
 	const gitStatus = getGitStatusSummarySync();
-	const gitLabel = gitStatus ? formatGitStatusSummary(gitStatus) : undefined;
+	const gitLabel = gitStatus ? formatBootSummaryGitLabel(gitStatus) : undefined;
 
 	// Narrow terminals: just provider + model + mode + branch, skip the config path
 	if (isNarrow) {

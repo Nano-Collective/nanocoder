@@ -817,7 +817,7 @@ test('Status marks detached HEAD in normal layout', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /Git:/);
-	t.regex(output!, /abc1234 \(detached HEAD\)/);
+	t.regex(output!, /abc1234 \(detached\)/);
 
 	process.stdout.columns = originalColumns;
 });

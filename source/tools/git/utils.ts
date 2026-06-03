@@ -160,12 +160,15 @@ function findGitDirSync(startDir: string = process.cwd()): string | null {
  * Read the current branch name synchronously by parsing .git/HEAD.
  * Returns null when not in a repo or HEAD can't be read.
  * When HEAD is detached, returns a short SHA prefix.
+ *
+ * `startDir` is exposed for tests that want to point at a fixture directory
+ * without relying on `process.chdir` (which is racy with parallel tests and
+ * fails when `os.tmpdir()` happens to live inside the working tree).
  */
-export function getCurrentBranchSync(): {
-	branch: string;
-	detached: boolean;
-} | null {
-	const gitDir = findGitDirSync();
+export function getCurrentBranchSync(
+	startDir: string = process.cwd(),
+): {branch: string; detached: boolean} | null {
+	const gitDir = findGitDirSync(startDir);
 	if (!gitDir) return null;
 	try {
 		const head = readFileSync(join(gitDir, 'HEAD'), 'utf8').trim();
@@ -182,12 +185,15 @@ export function getCurrentBranchSync(): {
 
 /**
  * Resolve the default branch synchronously. Prefers
- * `.git/refs/remotes/origin/HEAD` (a symbolic ref); falls back to checking
- * whether `main` or `master` exists in `.git/refs/heads/` or `packed-refs`.
- * Returns null when nothing can be resolved.
+ * `.git/refs/remotes/origin/HEAD` (a symbolic ref) — checking both the loose
+ * file and `packed-refs`, since fresh clones often pack origin/HEAD. Falls
+ * back to whether `main` or `master` exists in `.git/refs/heads/` or
+ * `packed-refs`. Returns null when nothing can be resolved.
  */
-export function getDefaultBranchSync(): string | null {
-	const gitDir = findGitDirSync();
+export function getDefaultBranchSync(
+	startDir: string = process.cwd(),
+): string | null {
+	const gitDir = findGitDirSync(startDir);
 	if (!gitDir) return null;
 
 	try {
@@ -201,41 +207,73 @@ export function getDefaultBranchSync(): string | null {
 		// fall through
 	}
 
+	let packedContents: string | null = null;
+	try {
+		const packed = join(gitDir, 'packed-refs');
+		if (existsSync(packed)) {
+			packedContents = readFileSync(packed, 'utf8');
+		}
+	} catch {
+		// ignore
+	}
+
+	// origin/HEAD is often packed (e.g. after a fresh clone).
+	if (packedContents) {
+		const packedOriginHead = packedContents.match(
+			/^#\s*ref:\s*refs\/remotes\/origin\/(.+)$/m,
+		);
+		if (packedOriginHead) return packedOriginHead[1];
+	}
+
 	const headsDir = join(gitDir, 'refs', 'heads');
 	for (const candidate of ['main', 'master']) {
 		if (existsSync(join(headsDir, candidate))) return candidate;
 	}
 
-	try {
-		const packed = join(gitDir, 'packed-refs');
-		if (existsSync(packed)) {
-			const contents = readFileSync(packed, 'utf8');
-			for (const candidate of ['main', 'master']) {
-				if (contents.includes(` refs/heads/${candidate}`)) return candidate;
-			}
+	if (packedContents) {
+		for (const candidate of ['main', 'master']) {
+			if (packedContents.includes(` refs/heads/${candidate}`)) return candidate;
 		}
-	} catch {
-		// ignore
 	}
 
 	return null;
 }
 
 /**
- * Resolve a {@link GitStatusSummary} synchronously. Returns null when not in
- * a git repository (or when git availability checks fail), so callers can
- * cleanly omit the surface.
+ * Resolve a {@link GitStatusSummary} synchronously by reading the `.git`
+ * filesystem directly — no child processes, safe to call from Ink's
+ * `<Static>` render path. Returns null when not in a git repository so
+ * callers can cleanly omit the surface.
+ *
+ * Skips the `isInsideGitRepo()` shell-out: `getCurrentBranchSync` already
+ * returns null whenever no `.git` directory is found, which is the same
+ * signal at zero process-spawn cost.
  */
-export function getGitStatusSummarySync(): GitStatusSummary | null {
-	if (!isInsideGitRepo()) return null;
-	const current = getCurrentBranchSync();
+export function getGitStatusSummarySync(
+	startDir: string = process.cwd(),
+): GitStatusSummary | null {
+	const current = getCurrentBranchSync(startDir);
 	if (!current) return null;
-	const defaultBranch = getDefaultBranchSync();
+	const defaultBranch = getDefaultBranchSync(startDir);
 	return {
 		branch: current.branch,
 		detached: current.detached,
 		isDefault: !current.detached && current.branch === defaultBranch,
 	};
+}
+
+/**
+ * Format a {@link GitStatusSummary} as a short suffix-marker label.
+ * Shared by the boot summary and the `/status` panel so the two surfaces
+ * can't drift on wording.
+ */
+export function formatGitStatusSummary(status: GitStatusSummary): {
+	branch: string;
+	marker: string | null;
+} {
+	if (status.detached) return {branch: status.branch, marker: 'detached'};
+	if (status.isDefault) return {branch: status.branch, marker: 'default'};
+	return {branch: status.branch, marker: null};
 }
 
 // ============================================================================
