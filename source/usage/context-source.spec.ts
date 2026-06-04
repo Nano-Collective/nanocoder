@@ -68,3 +68,49 @@ test('treats a partial snapshot (only inputTokens) as usable API data', t => {
 	t.is(result.source, 'api');
 	t.is(result.percent, 25);
 });
+
+test('uses a reported totalTokens lump sum when input/output are not split', t => {
+	const result = resolveContextUsage({
+		estimatedTotalTokens: 9999,
+		apiSnapshot: {totalTokens: 5000, atMessageCount: 3},
+		currentMessageCount: 3,
+		contextLimit: 20000,
+	});
+	// 5000 / 20000 = 25%, sourced from the reported total.
+	t.is(result.source, 'api');
+	t.is(result.percent, 25);
+});
+
+test('falls back to estimation when only outputTokens is reported (no context anchor)', t => {
+	const result = resolveContextUsage({
+		estimatedTotalTokens: 9000,
+		apiSnapshot: {outputTokens: 300, atMessageCount: 3},
+		currentMessageCount: 3,
+		contextLimit: 20000,
+	});
+	// A lone reply size must not masquerade as the whole context → estimate.
+	t.is(result.source, 'estimate');
+	t.is(result.percent, 45);
+});
+
+test('falls back to estimation when token fields are non-finite (NaN/Infinity)', t => {
+	const result = resolveContextUsage({
+		estimatedTotalTokens: 9000,
+		apiSnapshot: {inputTokens: Number.NaN, atMessageCount: 3},
+		currentMessageCount: 3,
+		contextLimit: 20000,
+	});
+	t.is(result.source, 'estimate');
+	t.is(result.percent, 45);
+});
+
+test('returns 0% estimate when the context limit is not positive', t => {
+	const result = resolveContextUsage({
+		estimatedTotalTokens: 9000,
+		apiSnapshot: fresh,
+		currentMessageCount: 4,
+		contextLimit: 0,
+	});
+	t.is(result.source, 'estimate');
+	t.is(result.percent, 0);
+});

@@ -24,6 +24,7 @@ function createDefaultProps(
 		inputDisabled: false,
 		developmentMode: 'normal',
 		contextPercentUsed: null,
+		contextSource: null,
 		onToolConfirm: async () => {},
 		onToolCancel: () => {},
 		onSubmit: async () => {},

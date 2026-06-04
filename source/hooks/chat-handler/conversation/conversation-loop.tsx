@@ -515,18 +515,18 @@ export const processAssistantResponse = async (
 	// and let estimation recompute against the compressed history.
 	if (setLastApiUsage) {
 		const usage = result.usage;
+		// Store the snapshot when the provider reported any usable token field
+		// (input, output, or a lump-sum total). The indicator decides how to use
+		// it; a non-finite or wholly-empty report is treated as "no usage".
 		const hasReportedUsage =
 			!compactionOccurred &&
 			!!usage &&
-			(usage.inputTokens !== undefined || usage.outputTokens !== undefined);
+			(Number.isFinite(usage.inputTokens) ||
+				Number.isFinite(usage.outputTokens) ||
+				Number.isFinite(usage.totalTokens));
 		setLastApiUsage(
 			hasReportedUsage
-				? {
-						inputTokens: usage.inputTokens,
-						outputTokens: usage.outputTokens,
-						totalTokens: usage.totalTokens,
-						atMessageCount: updatedMessages.length,
-					}
+				? {...usage, atMessageCount: updatedMessages.length}
 				: null,
 		);
 	}
