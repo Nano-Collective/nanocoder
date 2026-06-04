@@ -148,12 +148,18 @@ export async function displayToolResult(
 	addToChatQueue: (component: React.ReactNode) => void,
 	compact?: boolean,
 ): Promise<void> {
-	// Check if this is an error result
-	const isError = result.content.startsWith('Error: ');
+	// Check if this is an error result. Generic failures are prefixed "Error: ";
+	// validation failures (bad arg types, failed per-tool validators) come back
+	// as "⚒ Validation failed: …" — both should render as a red error so the
+	// user sees the same feedback the model gets.
+	const isValidationError = result.content.startsWith('⚒ Validation failed');
+	const isError = result.content.startsWith('Error: ') || isValidationError;
 
 	if (isError) {
 		// Display as error message - always shown in full
-		const errorMessage = result.content.replace(/^Error: /, '');
+		const errorMessage = isValidationError
+			? result.content
+			: result.content.replace(/^Error: /, '');
 		addToChatQueue(
 			<ErrorMessage
 				key={generateKey(`tool-error-${result.tool_call_id}`)}

@@ -118,6 +118,25 @@ test('displayToolResult - displays error message for error result', async t => {
 	t.is(element.type, ErrorMessage);
 });
 
+test('displayToolResult - renders a validation failure as a red error', async t => {
+	const toolCall = createMockToolCall('call-1', 'TestTool');
+	const result = createMockToolResult(
+		'call-1',
+		'TestTool',
+		'⚒ Validation failed: one or more arguments have the wrong type\n  - `path`: expected string, received object',
+	);
+	const {addToChatQueue, queue} = createMockAddToChatQueue();
+
+	await displayToolResult(toolCall, result, null, addToChatQueue);
+
+	t.is(queue.length, 1);
+	const element = queue[0] as React.ReactElement<ErrorMessageProps>;
+	t.is(element.type, ErrorMessage);
+	// Full validation message is preserved (not stripped) so the field detail shows.
+	t.regex(element.props.message, /Validation failed/);
+	t.regex(element.props.message, /expected string, received object/);
+});
+
 test('displayToolResult - strips "Error: " prefix from error message', async t => {
 	const toolCall = createMockToolCall('call-1', 'TestTool');
 	const result = createMockToolResult(
