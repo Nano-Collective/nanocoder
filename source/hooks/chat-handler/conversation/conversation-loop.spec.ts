@@ -469,6 +469,20 @@ test.serial('processAssistantResponse - clears the API usage snapshot when the p
 	t.is(usageCalls.at(-1), null);
 });
 
+test.serial('processAssistantResponse - stores a snapshot when the provider reports only a totalTokens lump sum', async t => {
+	const usageCalls: (ApiUsageSnapshot | null)[] = [];
+
+	const params = createDefaultParams({
+		client: createMockClient({content: 'Hi there', usage: {totalTokens: 1500}}),
+		messages: [{role: 'user', content: 'Hello'}],
+		setLastApiUsage: (usage: ApiUsageSnapshot | null) => usageCalls.push(usage),
+	});
+
+	await processAssistantResponse(params);
+
+	t.deepEqual(usageCalls.at(-1), {totalTokens: 1500, atMessageCount: 2});
+});
+
 test.serial('processAssistantResponse - strips JSON ghost-echo on the native path when tool calls are present', async t => {
 	const queuedComponents: any[] = [];
 	const messagesSetCalls: Message[][] = [];
