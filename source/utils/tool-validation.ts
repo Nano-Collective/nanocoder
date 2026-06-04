@@ -4,6 +4,7 @@ import type {
 	ValidationErrorDetail,
 } from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
+import {validateArgsAgainstSchema} from '@/utils/schema-validate';
 
 /**
  * Thrown by a validated tool handler when its arguments fail validation.
@@ -57,23 +58,41 @@ export function toolErrorToContent(error: unknown): string {
 }
 
 /**
- * Wrap a tool handler so its validator runs immediately before execution.
+ * Wrap a tool handler so type-checking and its validator run immediately
+ * before execution.
  *
  * This is the single place tool validation lives: because every execution
  * path (interactive loop, plain shell, subagents) ultimately invokes the
  * registry handler, validating here means no path can bypass it. On failure
  * the wrapper throws a {@link ToolValidationError}; callers already catch
  * handler exceptions and turn them into an error tool-result.
+ *
+ * When a `schema` is supplied, arguments are first type-checked against it.
+ * A wrong-typed argument (e.g. an object where a string is expected) is
+ * returned to the model as a structured error so it can correct itself and
+ * retry — instead of the bad value reaching execution or the UI.
  */
 export function withValidation(
 	handler: ToolHandler,
 	validator?: ToolValidator,
+	schema?: Parameters<typeof validateArgsAgainstSchema>[1],
 ): ToolHandler {
-	if (!validator) return handler;
+	if (!validator && !schema) return handler;
 	return async (args: unknown) => {
-		const result = await validator(args);
-		if (!result.valid) {
-			throw new ToolValidationError(result.error, result.details);
+		if (schema) {
+			const typeErrors = validateArgsAgainstSchema(args, schema);
+			if (typeErrors.length > 0) {
+				throw new ToolValidationError(
+					'one or more arguments have the wrong type — fix the types and call the tool again',
+					typeErrors,
+				);
+			}
+		}
+		if (validator) {
+			const result = await validator(args);
+			if (!result.valid) {
+				throw new ToolValidationError(result.error, result.details);
+			}
 		}
 		return handler(args);
 	};

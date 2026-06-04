@@ -71,7 +71,7 @@ const askQuestionCoreTool = tool({
 				type: 'array',
 				items: {type: 'string'},
 				description:
-					'2-4 selectable answer options for the user to choose from.',
+					'2-4 selectable answer options for the user to choose from. Each option MUST be a plain string — the exact text shown to the user and returned verbatim when selected. Do not wrap options in objects or use {label, value} pairs.',
 			},
 			allowFreeform: {
 				type: 'boolean',

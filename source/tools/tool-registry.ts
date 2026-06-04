@@ -7,6 +7,7 @@ import type {
 	ToolHandler,
 	ToolValidator,
 } from '@/types/index';
+import {getToolJsonSchema} from '@/utils/schema-validate';
 import {withValidation} from '@/utils/tool-validation';
 
 /**
@@ -265,7 +266,11 @@ export class ToolRegistry {
 				});
 			registry.register({
 				name: t.name,
-				handler: withValidation(rawHandler, t.validator),
+				handler: withValidation(
+					rawHandler,
+					t.validator,
+					getToolJsonSchema(t.tool),
+				),
 				tool: t.tool,
 				formatter: t.formatter,
 				validator: t.validator,

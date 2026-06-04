@@ -41,6 +41,30 @@ test('withValidation throws ToolValidationError and skips the handler on failure
 	]);
 });
 
+test('withValidation type-checks args against the schema before the handler', async t => {
+	let handlerRan = false;
+	const handler: ToolHandler = async () => {
+		handlerRan = true;
+		return 'ran';
+	};
+	const schema = {
+		type: 'object',
+		properties: {path: {type: 'string'}},
+	};
+	const wrapped = withValidation(handler, undefined, schema);
+
+	// Object where a string is expected → rejected before the handler runs.
+	const err = await t.throwsAsync(() => wrapped({path: {nested: true}}), {
+		instanceOf: ToolValidationError,
+	});
+	t.false(handlerRan, 'handler must not run on a type error');
+	t.is(err?.details?.[0]?.path, 'path');
+	t.is(err?.details?.[0]?.received, 'object');
+
+	// Correctly typed args pass straight through.
+	t.is(await wrapped({path: 'src/index.ts'}), 'ran');
+});
+
 test('formatValidationError renders structured details as lines', t => {
 	const out = formatValidationError('bad args', [
 		{path: 'command', expected: 'string', received: 'undefined'},
