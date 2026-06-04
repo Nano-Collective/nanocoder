@@ -273,6 +273,14 @@ export function useAppState(
 	const updateMessages = useCallback((newMessages: Message[]) => {
 		setMessages(newMessages);
 		setDisplayMessages(newMessages);
+		// Any wholesale message change — new turn, /clear, manual /compact,
+		// session resume, checkpoint restore — invalidates the API usage
+		// snapshot, which was captured against the previous messages array.
+		// The chat loop re-establishes it right after via setLastApiUsage; every
+		// other path then correctly falls back to client-side estimation. This
+		// keeps the api-vs-estimate decision robust across all replacement paths
+		// rather than relying on each handler to clear it.
+		setLastApiUsage(null);
 	}, []);
 
 	// Reset tool confirmation state
