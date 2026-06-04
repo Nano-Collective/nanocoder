@@ -13,6 +13,8 @@ import type {CheckpointListItem} from '@/types/checkpoint';
 import type {CustomCommand} from '@/types/commands';
 import type {AIProviderConfig, TuneConfig} from '@/types/config';
 import {
+	ApiUsageSnapshot,
+	ContextSource,
 	DevelopmentMode,
 	LLMClient,
 	LSPConnectionStatus,
@@ -180,6 +182,15 @@ export function useAppState(
 		null,
 	);
 	const [contextLimit, setContextLimit] = useState<number | null>(null);
+	// Whether the displayed context percentage is API-reported or estimated
+	const [contextSource, setContextSource] = useState<ContextSource | null>(
+		null,
+	);
+	// Most recent API-reported usage, tagged with the conversation length at
+	// capture time (see ApiUsageSnapshot). Null when unavailable or stale.
+	const [lastApiUsage, setLastApiUsage] = useState<ApiUsageSnapshot | null>(
+		null,
+	);
 
 	// Tool confirmation state
 	const [pendingToolCalls, setPendingToolCalls] = useState<ToolCall[]>([]);
@@ -338,6 +349,8 @@ export function useAppState(
 		tune,
 		contextPercentUsed,
 		contextLimit,
+		contextSource,
+		lastApiUsage,
 		pendingToolCalls,
 		currentToolIndex,
 		completedToolResults,
@@ -388,6 +401,8 @@ export function useAppState(
 		setTune,
 		setContextPercentUsed,
 		setContextLimit,
+		setContextSource,
+		setLastApiUsage,
 		setPendingToolCalls,
 		setCurrentToolIndex,
 		setCompletedToolResults,

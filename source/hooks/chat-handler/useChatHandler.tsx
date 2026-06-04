@@ -72,6 +72,7 @@ export function useChatHandler({
 	compactToolCountsRef,
 	onSetLiveTaskList,
 	setLiveComponent,
+	setLastApiUsage,
 	tune,
 	subagentsReady,
 }: UseChatHandlerProps): ChatHandlerReturn {
@@ -221,6 +222,7 @@ export function useChatHandler({
 					compactToolCountsRef,
 					onSetLiveTaskList,
 					setLiveComponent,
+					setLastApiUsage,
 					tune,
 				});
 			} catch (error) {
@@ -253,6 +255,7 @@ export function useChatHandler({
 			displayError,
 			resetStreamingState,
 			setLiveComponent,
+			setLastApiUsage,
 		],
 	);
 

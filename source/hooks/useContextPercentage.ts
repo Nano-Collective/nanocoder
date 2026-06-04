@@ -3,12 +3,18 @@ import {getModelContextLimit} from '@/models/index';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {AIProviderConfig, TuneConfig} from '@/types/config';
 import {getTuneToolMode} from '@/types/config';
-import type {DevelopmentMode, Message} from '@/types/core';
+import type {
+	ApiUsageSnapshot,
+	ContextSource,
+	DevelopmentMode,
+	Message,
+} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
 import {
 	calculateTokenBreakdown,
 	calculateToolDefinitionsTokens,
 } from '@/usage/calculator';
+import {resolveContextUsage} from '@/usage/context-source';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 
 interface UseContextPercentageProps {
@@ -21,8 +27,10 @@ interface UseContextPercentageProps {
 	toolManager: ToolManager | null;
 	streamingTokenCount: number;
 	contextLimit: number | null;
+	lastApiUsage: ApiUsageSnapshot | null;
 	setContextPercentUsed: (value: number | null) => void;
 	setContextLimit: (value: number | null) => void;
+	setContextSource: (value: ContextSource | null) => void;
 	developmentMode?: DevelopmentMode;
 	tune?: TuneConfig;
 }
@@ -37,8 +45,10 @@ export function useContextPercentage({
 	toolManager,
 	streamingTokenCount,
 	contextLimit,
+	lastApiUsage,
 	setContextPercentUsed,
 	setContextLimit,
+	setContextSource,
 	developmentMode = 'normal',
 	tune,
 }: UseContextPercentageProps): void {
@@ -52,6 +62,7 @@ export function useContextPercentage({
 			lastResolvedKeyRef.current = '';
 			setContextLimit(null);
 			setContextPercentUsed(null);
+			setContextSource(null);
 			return;
 		}
 
@@ -69,6 +80,7 @@ export function useContextPercentage({
 			setContextLimit(limit);
 			if (!limit) {
 				setContextPercentUsed(null);
+				setContextSource(null);
 			}
 		});
 
@@ -81,6 +93,7 @@ export function useContextPercentage({
 		currentProviderConfig,
 		setContextLimit,
 		setContextPercentUsed,
+		setContextSource,
 	]);
 
 	// Effect 2: Recalculate percentage when messages, streaming tokens, or context limit change
@@ -88,6 +101,7 @@ export function useContextPercentage({
 		const limit = contextLimitRef.current;
 		if (!limit) {
 			setContextPercentUsed(null);
+			setContextSource(null);
 			return;
 		}
 
@@ -121,8 +135,18 @@ export function useContextPercentage({
 				: 0;
 
 		const total = breakdown.total + toolDefTokens + streamingTokenCount;
-		const percent = Math.round((total / limit) * 100);
+
+		// Prefer API-reported usage when it is fresh (the snapshot's message
+		// count still matches the conversation); otherwise fall back to the
+		// estimate computed above so the figure never lags the conversation.
+		const {percent, source} = resolveContextUsage({
+			estimatedTotalTokens: total,
+			apiSnapshot: lastApiUsage,
+			currentMessageCount: messages.length,
+			contextLimit: limit,
+		});
 		setContextPercentUsed(percent);
+		setContextSource(source);
 		// contextLimit is included to re-trigger calculation after async limit resolution
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [
@@ -131,7 +155,9 @@ export function useContextPercentage({
 		getMessageTokens,
 		toolManager,
 		streamingTokenCount,
+		lastApiUsage,
 		setContextPercentUsed,
+		setContextSource,
 		tune,
 	]);
 }

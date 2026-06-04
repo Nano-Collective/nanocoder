@@ -140,7 +140,9 @@ test('DevelopmentModeIndicator shows context percentage when provided', t => {
 	);
 
 	const output = lastFrame();
-	t.regex(output!, /ctx: 42%/);
+	// Marker is optional here (no source given → estimated); see dedicated
+	// API-vs-estimate marker tests below.
+	t.regex(output!, /ctx: ~?42%/);
 });
 
 test('DevelopmentModeIndicator hides context percentage when null', t => {
@@ -150,6 +152,44 @@ test('DevelopmentModeIndicator hides context percentage when null', t => {
 
 	const output = lastFrame();
 	t.notRegex(output!, /ctx:/);
+});
+
+test('DevelopmentModeIndicator shows API-reported context without the ~ marker', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={42}
+			contextSource="api"
+		/>,
+	);
+
+	const output = lastFrame();
+	t.regex(output!, /ctx: 42%/);
+	t.notRegex(output!, /ctx: ~42%/);
+});
+
+test('DevelopmentModeIndicator marks estimated context with a leading ~', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={42}
+			contextSource="estimate"
+		/>,
+	);
+
+	const output = lastFrame();
+	t.regex(output!, /ctx: ~42%/);
+});
+
+test('DevelopmentModeIndicator defaults to the estimate marker when source is omitted', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={42} />,
+	);
+
+	const output = lastFrame();
+	t.regex(output!, /ctx: ~42%/);
 });
 
 test('DevelopmentModeIndicator normal mode uses correct label', t => {
@@ -253,7 +293,7 @@ test('DevelopmentModeIndicator has correct structure', t => {
 	const output = lastFrame();
 	// Should have the mode label and context percentage
 	t.regex(output!, /normal mode on/);
-	t.regex(output!, /ctx: 25%/);
+	t.regex(output!, /ctx: ~?25%/);
 });
 
 test('DevelopmentModeIndicator component can be unmounted', t => {

@@ -215,6 +215,7 @@ export default function App({
 		compactToolCountsRef: appState.compactToolCountsRef,
 		onSetLiveTaskList: appState.setLiveTaskList,
 		setLiveComponent: appState.setLiveComponent,
+		setLastApiUsage: appState.setLastApiUsage,
 		tune: appState.tune,
 		subagentsReady: appState.subagentsReady,
 	});
@@ -238,8 +239,10 @@ export default function App({
 		toolManager: appState.toolManager,
 		streamingTokenCount: chatHandler.tokenCount,
 		contextLimit: appState.contextLimit,
+		lastApiUsage: appState.lastApiUsage,
 		setContextPercentUsed: appState.setContextPercentUsed,
 		setContextLimit: appState.setContextLimit,
+		setContextSource: appState.setContextSource,
 		developmentMode: appState.developmentMode,
 		tune: appState.tune,
 	});
