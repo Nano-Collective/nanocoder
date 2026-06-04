@@ -159,6 +159,22 @@ test('updateMessages updates both messages and displayMessages', t => {
 	t.deepEqual(captured!.displayMessages, msgs);
 });
 
+test('updateMessages invalidates the API usage snapshot', t => {
+	const {hook, instance} = setup();
+
+	hook.setLastApiUsage({inputTokens: 1000, outputTokens: 200, atMessageCount: 2});
+	instance.rerender(<Probe />);
+	t.not(captured!.lastApiUsage, null);
+
+	// Any wholesale message replacement (new turn, /clear, /compact, session
+	// resume, checkpoint restore) must clear the snapshot so the context
+	// indicator falls back to estimation rather than showing a stale API value.
+	captured!.updateMessages([{role: 'user', content: 'hi'} as Message]);
+	instance.rerender(<Probe />);
+
+	t.is(captured!.lastApiUsage, null);
+});
+
 test('resetToolConfirmationState clears all confirmation-related state', t => {
 	const {hook, instance} = setup();
 
