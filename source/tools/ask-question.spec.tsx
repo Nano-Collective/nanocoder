@@ -94,6 +94,27 @@ test('ask_user execute calls signalQuestion and returns answer', async t => {
 	t.is(result, 'PostgreSQL');
 });
 
+// Regression: some models emit options as objects ({value: "..."} / {label:
+// "..."}) instead of strings. They must be normalised to clean strings so the
+// prompt doesn't show JSON blobs and the selected answer isn't a JSON blob.
+test('ask_user execute normalises object-shaped options to strings', async t => {
+	setGlobalQuestionHandler(async q => {
+		t.deepEqual(q.options, ['All cards', 'Only muted icons']);
+		return 'All cards';
+	});
+
+	const result = await askQuestionTool.tool.execute!(
+		{
+			question: 'How to update icons?',
+			// Schema says string[], but a model can send objects — cast for the test.
+			options: [{value: 'All cards'}, {label: 'Only muted icons'}] as unknown as string[],
+		},
+		{toolCallId: 'test', messages: []},
+	);
+
+	t.is(result, 'All cards');
+});
+
 test('ask_user execute respects allowFreeform=false', async t => {
 	setGlobalQuestionHandler(async q => {
 		t.false(q.allowFreeform);

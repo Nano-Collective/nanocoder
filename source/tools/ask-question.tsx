@@ -6,6 +6,7 @@ import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {signalQuestion} from '@/utils/question-queue';
+import {ensureString} from '@/utils/type-helpers';
 
 interface AskQuestionArgs {
 	question: string;
@@ -13,10 +14,31 @@ interface AskQuestionArgs {
 	allowFreeform?: boolean;
 }
 
-const executeAskQuestion = async (args: AskQuestionArgs): Promise<string> => {
-	const {question, options, allowFreeform = true} = args;
+/**
+ * Models sometimes emit `options` as objects (e.g. `{value: "..."}` or
+ * `{label: "..."}`) despite the schema asking for plain strings. Pull the
+ * meaningful text out of common shapes so both the displayed option and the
+ * answer returned to the model are clean strings — not JSON blobs.
+ */
+function toOptionString(opt: unknown): string {
+	if (typeof opt === 'string') return opt;
+	if (opt && typeof opt === 'object') {
+		const o = opt as Record<string, unknown>;
+		for (const key of ['value', 'label', 'text', 'title', 'name']) {
+			if (typeof o[key] === 'string') return o[key] as string;
+		}
+	}
+	return ensureString(opt);
+}
 
-	if (!options || options.length < 2 || options.length > 4) {
+const executeAskQuestion = async (args: AskQuestionArgs): Promise<string> => {
+	const {allowFreeform = true} = args;
+	const question = ensureString(args.question);
+	const options = (Array.isArray(args.options) ? args.options : []).map(
+		toOptionString,
+	);
+
+	if (options.length < 2 || options.length > 4) {
 		return 'Error: ⚒ options must contain 2-4 items.';
 	}
 
@@ -77,7 +99,7 @@ const AskQuestionFormatter = React.memo(
 				<Box flexDirection="column" marginBottom={1}>
 					<Text color={colors.secondary}>Question:</Text>
 					<Box marginLeft={2}>
-						<Text color={colors.text}>{args.question}</Text>
+						<Text color={colors.text}>{ensureString(args.question)}</Text>
 					</Box>
 				</Box>
 				{result && (
