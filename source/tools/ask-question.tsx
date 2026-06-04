@@ -15,17 +15,23 @@ interface AskQuestionArgs {
 }
 
 /**
- * Models sometimes emit `options` as objects (e.g. `{value: "..."}` or
- * `{label: "..."}`) despite the schema asking for plain strings. Pull the
+ * Models sometimes emit `options` as objects (e.g. `{label: "...", value: "id"}`
+ * or `{value: "..."}`) despite the schema asking for plain strings. Pull the
  * meaningful text out of common shapes so both the displayed option and the
- * answer returned to the model are clean strings — not JSON blobs.
+ * answer returned to the model are clean strings — not JSON blobs or opaque ids.
+ *
+ * Human-readable keys are preferred over `value`: when a model sends the
+ * standard `{label, value}` select shape, `value` is usually a machine id
+ * (e.g. "quicklinks_only") and `label` is the text the user should see.
  */
 function toOptionString(opt: unknown): string {
 	if (typeof opt === 'string') return opt;
 	if (opt && typeof opt === 'object') {
 		const o = opt as Record<string, unknown>;
-		for (const key of ['value', 'label', 'text', 'title', 'name']) {
-			if (typeof o[key] === 'string') return o[key] as string;
+		for (const key of ['label', 'text', 'title', 'name', 'value']) {
+			if (typeof o[key] === 'string' && o[key].trim() !== '') {
+				return o[key] as string;
+			}
 		}
 	}
 	return ensureString(opt);

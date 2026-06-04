@@ -115,6 +115,32 @@ test('ask_user execute normalises object-shaped options to strings', async t => 
 	t.is(result, 'All cards');
 });
 
+// The standard {label, value} select shape: the readable label is shown (and
+// returned), not the machine id in `value` (regression: options rendered as
+// "quicklinks_only" etc.).
+test('ask_user execute prefers the readable label over the value id', async t => {
+	setGlobalQuestionHandler(async q => {
+		t.deepEqual(q.options, [
+			'Just the quick-link cards',
+			'All cards → primary blue',
+		]);
+		return q.options[0];
+	});
+
+	const result = await askQuestionTool.tool.execute!(
+		{
+			question: 'Which cards?',
+			options: [
+				{value: 'quicklinks_only', label: 'Just the quick-link cards'},
+				{value: 'all_cards_blue', label: 'All cards → primary blue'},
+			] as unknown as string[],
+		},
+		{toolCallId: 'test', messages: []},
+	);
+
+	t.is(result, 'Just the quick-link cards');
+});
+
 test('ask_user execute respects allowFreeform=false', async t => {
 	setGlobalQuestionHandler(async q => {
 		t.false(q.allowFreeform);
