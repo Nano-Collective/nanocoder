@@ -1,5 +1,4 @@
 import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
 import {useRef, useState} from 'react';
 import TextInput from '@/components/text-input';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
@@ -17,6 +16,8 @@ interface OptionItem {
 	value: string;
 }
 
+const FREEFORM_VALUE = '__freeform__';
+
 export default function QuestionPrompt({
 	question,
 	onAnswer,
@@ -26,23 +27,10 @@ export default function QuestionPrompt({
 	const answeredRef = useRef(false);
 	const [isFreeformMode, setIsFreeformMode] = useState(false);
 	const [freeformValue, setFreeformValue] = useState('');
+	const [selectedIndex, setSelectedIndex] = useState(0);
 
-	// Reset internal state whenever a new question arrives. When two
-	// ask_user calls fire back-to-back, React batches the null->new state
-	// transition so this component re-renders with new props instead of
-	// unmounting, leaving stale `answeredRef` (which silently blocks
-	// submission) and stale freeform state. The SelectInput `key` below
-	// handles its own internal selected-index reset.
-	const [previousQuestion, setPreviousQuestion] = useState(question);
-	if (question !== previousQuestion) {
-		setPreviousQuestion(question);
-		answeredRef.current = false;
-		setIsFreeformMode(false);
-		setFreeformValue('');
-	}
-
-	// Build option items for SelectInput. The model controls `options`, so it
-	// may not be an array of strings — coerce so a malformed call can't crash.
+	// Build option items. The model controls `options`, so it may not be an
+	// array of strings — coerce so a malformed call can't crash.
 	const safeOptions = Array.isArray(question.options) ? question.options : [];
 	const items: OptionItem[] = safeOptions.map(opt => {
 		const label = ensureString(opt);
@@ -50,10 +38,21 @@ export default function QuestionPrompt({
 	});
 
 	if (question.allowFreeform) {
-		items.push({
-			label: 'Type custom answer...',
-			value: '__freeform__',
-		});
+		items.push({label: 'Type a custom answer…', value: FREEFORM_VALUE});
+	}
+
+	// Reset internal state whenever a new question arrives. When two ask_user
+	// calls fire back-to-back, React batches the null->new state transition so
+	// this component re-renders with new props instead of unmounting, leaving
+	// stale state (answeredRef silently blocks submission; selection/freeform
+	// carry over).
+	const [previousQuestion, setPreviousQuestion] = useState(question);
+	if (question !== previousQuestion) {
+		setPreviousQuestion(question);
+		answeredRef.current = false;
+		setIsFreeformMode(false);
+		setFreeformValue('');
+		setSelectedIndex(0);
 	}
 
 	const submitAnswer = (answer: string) => {
@@ -62,8 +61,9 @@ export default function QuestionPrompt({
 		onAnswer(answer);
 	};
 
-	const handleSelect = (item: OptionItem) => {
-		if (item.value === '__freeform__') {
+	const handleSelect = (item: OptionItem | undefined) => {
+		if (!item) return;
+		if (item.value === FREEFORM_VALUE) {
 			setIsFreeformMode(true);
 			return;
 		}
@@ -76,16 +76,28 @@ export default function QuestionPrompt({
 		}
 	};
 
-	// Handle escape to cancel (resolves with decline message)
-	useInput((_input, key) => {
-		if (key.escape) {
-			if (isFreeformMode) {
-				// Go back to option selection
+	useInput((input, key) => {
+		// In freeform mode the TextInput owns typing; only handle Escape (back).
+		if (isFreeformMode) {
+			if (key.escape) {
 				setIsFreeformMode(false);
 				setFreeformValue('');
-			} else {
-				submitAnswer('User declined to answer');
 			}
+			return;
+		}
+
+		if (key.escape) {
+			submitAnswer('User declined to answer');
+			return;
+		}
+		if (items.length === 0) return;
+
+		if (key.upArrow || input === 'k') {
+			setSelectedIndex(i => (i - 1 + items.length) % items.length);
+		} else if (key.downArrow || input === 'j') {
+			setSelectedIndex(i => (i + 1) % items.length);
+		} else if (key.return) {
+			handleSelect(items[selectedIndex]);
 		}
 	});
 
@@ -105,9 +117,9 @@ export default function QuestionPrompt({
 				borderLeftColor={colors.secondary}
 			>
 				<Text color={colors.tool} bold>
-					?
+					?{' '}
 				</Text>
-				<Text color={colors.text}> {ensureString(question.question)}</Text>
+				<Text color={colors.text}>{ensureString(question.question)}</Text>
 			</Box>
 
 			{isFreeformMode ? (
@@ -128,14 +140,37 @@ export default function QuestionPrompt({
 				</Box>
 			) : (
 				<Box flexDirection="column">
-					<SelectInput
-						key={question.question}
-						items={items}
-						onSelect={handleSelect}
-					/>
-					<Box marginTop={1}>
-						<Text color={colors.secondary}>Press Escape to cancel</Text>
-					</Box>
+					{items.map((item, index) => {
+						const isSelected = index === selectedIndex;
+						const isFreeform = item.value === FREEFORM_VALUE;
+						const color = isSelected
+							? colors.primary
+							: isFreeform
+								? colors.secondary
+								: colors.text;
+						return (
+							<Box
+								key={item.value}
+								flexDirection="row"
+								width={boxWidth}
+								marginBottom={1}
+							>
+								<Box flexShrink={0} marginRight={1}>
+									<Text color={colors.primary} bold>
+										{isSelected ? '❯' : ' '}
+									</Text>
+								</Box>
+								<Box flexGrow={1} flexShrink={1}>
+									<Text wrap="wrap" color={color} bold={isSelected}>
+										{item.label}
+									</Text>
+								</Box>
+							</Box>
+						);
+					})}
+					<Text color={colors.secondary}>
+						↑/↓ to move · Enter to select · Esc to cancel
+					</Text>
 				</Box>
 			)}
 		</Box>

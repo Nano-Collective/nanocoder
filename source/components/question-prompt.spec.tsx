@@ -73,7 +73,7 @@ test('QuestionPrompt shows freeform option when allowFreeform is true', t => {
 	);
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Type custom answer/);
+	t.regex(output!, /Type a custom answer/);
 	unmount();
 });
 
@@ -86,17 +86,18 @@ test('QuestionPrompt hides freeform option when allowFreeform is false', t => {
 	);
 	const output = lastFrame();
 	t.truthy(output);
-	t.notRegex(output!, /Type custom answer/);
+	t.notRegex(output!, /Type a custom answer/);
 	unmount();
 });
 
-test('QuestionPrompt shows escape hint', t => {
+test('QuestionPrompt shows navigation and cancel hints', t => {
 	const {lastFrame, unmount} = renderWithTheme(
 		<QuestionPrompt question={createQuestion()} onAnswer={() => {}} />,
 	);
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Escape/);
+	t.regex(output!, /Enter to select/);
+	t.regex(output!, /Esc to cancel/);
 	unmount();
 });
 
