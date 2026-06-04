@@ -7,7 +7,7 @@ import {
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import type {useTheme} from '@/hooks/useTheme';
 import type {TuneConfig} from '@/types/config';
-import type {DevelopmentMode} from '@/types/core';
+import type {ContextSource, DevelopmentMode} from '@/types/core';
 import {
 	DEVELOPMENT_MODE_LABELS,
 	DEVELOPMENT_MODE_LABELS_NARROW,
@@ -18,6 +18,9 @@ interface DevelopmentModeIndicatorProps {
 	developmentMode: DevelopmentMode;
 	colors: ReturnType<typeof useTheme>['colors'];
 	contextPercentUsed: number | null;
+	// Whether contextPercentUsed is API-reported ('api') or client-side
+	// estimated ('estimate'/null). Estimated values render with a leading '~'.
+	contextSource?: ContextSource | null;
 	sessionName?: string;
 	tune?: TuneConfig;
 	activeEditor?: ActiveEditorState | null;
@@ -42,6 +45,7 @@ export const DevelopmentModeIndicator = React.memo(
 		developmentMode,
 		colors,
 		contextPercentUsed,
+		contextSource,
 		sessionName,
 		tune,
 		activeEditor,
@@ -56,6 +60,11 @@ export const DevelopmentModeIndicator = React.memo(
 				? 'tune: ✓'
 				: 'tune: enabled'
 			: '';
+
+		// Estimated context figures render with a leading '~' (≈); API-reported
+		// figures render bare. The marker is a single char so it barely affects
+		// the width budget below, where ctx never truncates.
+		const ctxPrefix = contextSource === 'api' ? '' : '~';
 
 		// Mode, tune, and ctx never truncate. Session name and the filename
 		// portion of the editor pill share whatever room is left, each
@@ -87,7 +96,9 @@ export const DevelopmentModeIndicator = React.memo(
 					: '';
 			const tuneSegment = tuneLabel ? ` · ${tuneLabel}` : '';
 			const ctxSegment =
-				contextPercentUsed !== null ? ` · ctx: ${contextPercentUsed}%` : '';
+				contextPercentUsed !== null
+					? ` · ctx: ${ctxPrefix}${contextPercentUsed}%`
+					: '';
 			const sessionSeparator = sessionName ? ' · ' : '';
 			const editorSeparator = editorFileName ? ' · ' : '';
 
@@ -209,7 +220,8 @@ export const DevelopmentModeIndicator = React.memo(
 					<>
 						<Text color={colors.secondary}> · </Text>
 						<Text color={getContextColor(contextPercentUsed, colors)}>
-							ctx: {contextPercentUsed}%
+							ctx: {ctxPrefix}
+							{contextPercentUsed}%
 						</Text>
 					</>
 				)}

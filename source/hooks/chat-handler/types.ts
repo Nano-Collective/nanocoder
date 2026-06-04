@@ -3,7 +3,12 @@ import type {CustomCommandLoader} from '@/custom-commands/loader';
 import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {TuneConfig} from '@/types/config';
-import type {LLMClient, Message, ToolCall} from '@/types/core';
+import type {
+	ApiUsageSnapshot,
+	LLMClient,
+	Message,
+	ToolCall,
+} from '@/types/core';
 
 export interface UseChatHandlerProps {
 	client: LLMClient | null;
@@ -33,6 +38,9 @@ export interface UseChatHandlerProps {
 	compactToolCountsRef?: React.MutableRefObject<Record<string, number>>;
 	onSetLiveTaskList?: (tasks: Task[] | null) => void;
 	setLiveComponent?: (component: React.ReactNode) => void;
+	// Records the API-reported usage of the latest response for the context
+	// indicator (null clears it, e.g. after auto-compaction).
+	setLastApiUsage?: (usage: ApiUsageSnapshot | null) => void;
 	tune?: TuneConfig;
 	// Flips true after subagent loading completes; used to invalidate the
 	// cached system prompt so it includes the real agent list.
