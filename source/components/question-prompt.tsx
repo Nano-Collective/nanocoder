@@ -116,9 +116,6 @@ export default function QuestionPrompt({
 				borderBottom={false}
 				borderLeftColor={colors.secondary}
 			>
-				<Text color={colors.tool} bold>
-					?{' '}
-				</Text>
 				<Text color={colors.text}>{ensureString(question.question)}</Text>
 			</Box>
 
