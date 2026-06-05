@@ -25,7 +25,7 @@ export interface TemplateField {
  * Parse a comma-separated `array` field value into a clean string list.
  * Centralised so every template uses the same trim/empty-filter behaviour.
  */
-export function parseArrayField(value: string | undefined): string[] {
+function parseArrayField(value: string | undefined): string[] {
 	if (!value) return [];
 	return value
 		.split(',')

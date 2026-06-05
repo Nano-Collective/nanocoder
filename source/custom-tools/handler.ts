@@ -107,7 +107,7 @@ function truncate(text: string): string {
  * LLM can tell success from failure on every call, consistent with
  * `execute_bash`) and split stderr/stdout sections when stderr is present.
  */
-export function formatScriptOutput(
+function formatScriptOutput(
 	code: number | null,
 	stdout: string,
 	stderr: string,
