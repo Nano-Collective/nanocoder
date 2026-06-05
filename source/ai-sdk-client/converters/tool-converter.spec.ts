@@ -1,8 +1,8 @@
 import test from 'ava';
+import {generateToolCallId} from '@/utils/tool-call-id';
 import {
 	convertAISDKToolCall,
 	convertAISDKToolCalls,
-	generateToolCallId,
 	getToolResultOutput,
 } from './tool-converter.js';
 

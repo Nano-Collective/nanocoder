@@ -1,6 +1,8 @@
+import {FORMAT_GUIDANCE_MESSAGE} from '@/tool-calling/format-guidance';
 import {normalizeWhitespace, removeRanges} from '@/tool-calling/whitespace';
 import {XMLToolCallParser} from '@/tool-calling/xml-parser';
 import type {ToolCall} from '@/types/index';
+import {generateToolCallId} from '@/utils/tool-call-id';
 import {ensureString} from '@/utils/type-helpers';
 
 /**
@@ -36,7 +38,7 @@ const JSON_FENCE_REGEX = /```(?:json)?\s*\n?([\s\S]*?)\n?```/gi;
 const JSON_INLINE_REGEX =
 	/\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"arguments"\s*:\s*(\{[\s\S]*?\})\s*\}/g;
 
-function tryParseJSONToolCall(raw: string, index: number): ToolCall | null {
+function tryParseJSONToolCall(raw: string): ToolCall | null {
 	try {
 		const parsed = JSON.parse(raw) as {
 			name?: unknown;
@@ -52,7 +54,7 @@ function tryParseJSONToolCall(raw: string, index: number): ToolCall | null {
 			return null;
 		}
 		return {
-			id: `call_${Date.now()}_${index}`,
+			id: generateToolCallId(),
 			function: {
 				name: parsed.name,
 				arguments: parsed.arguments as Record<string, unknown>,
@@ -80,7 +82,7 @@ function parseJSONToolCalls(content: string): {
 	const fencePattern = new RegExp(JSON_FENCE_REGEX);
 	while ((fenceMatch = fencePattern.exec(content)) !== null) {
 		const inner = (fenceMatch[1] ?? '').trim();
-		const call = tryParseJSONToolCall(inner, toolCalls.length);
+		const call = tryParseJSONToolCall(inner);
 		if (call) {
 			toolCalls.push(call);
 			matchedRanges.push([
@@ -95,7 +97,7 @@ function parseJSONToolCalls(content: string): {
 	while ((inlineMatch = inlinePattern.exec(content)) !== null) {
 		const start = inlineMatch.index;
 		if (matchedRanges.some(([s, e]) => start >= s && start < e)) continue;
-		const call = tryParseJSONToolCall(inlineMatch[0], toolCalls.length);
+		const call = tryParseJSONToolCall(inlineMatch[0]);
 		if (call) {
 			toolCalls.push(call);
 			matchedRanges.push([start, start + inlineMatch[0].length]);
@@ -150,7 +152,7 @@ function parseFunctionTagToolCalls(content: string): {
 		}
 
 		toolCalls.push({
-			id: `call_${Date.now()}_${toolCalls.length}`,
+			id: generateToolCallId(),
 			function: {name, arguments: args},
 		});
 		matchedRanges.push([match.index, match.index + match[0].length]);
@@ -179,15 +181,12 @@ const JSON_MALFORMED_PATTERNS: Array<{regex: RegExp; error: string}> = [
 	},
 ];
 
-const JSON_FORMAT_GUIDANCE =
-	'Please use the native tool calling format provided by the system. The tools are already available to you - call them directly using the function calling interface.';
-
 function detectMalformedJSONToolCall(
 	content: string,
 ): {error: string; examples: string} | null {
 	for (const {regex, error} of JSON_MALFORMED_PATTERNS) {
 		if (regex.test(content)) {
-			return {error, examples: JSON_FORMAT_GUIDANCE};
+			return {error, examples: FORMAT_GUIDANCE_MESSAGE};
 		}
 	}
 	return null;

@@ -285,10 +285,12 @@ test('convertToToolCalls - converts parsed calls to ToolCall format', t => {
 	const result = XMLToolCallParser.convertToToolCalls(parsed);
 
 	t.is(result.length, 2);
-	t.is(result[0].id, 'xml_call_0');
+	// IDs are generated, unique, and collision-resistant (not parse-index based)
+	t.regex(result[0].id, /^tool_\d+_[0-9a-f]+$/);
+	t.regex(result[1].id, /^tool_\d+_[0-9a-f]+$/);
+	t.not(result[0].id, result[1].id);
 	t.is(result[0].function.name, 'read_file');
 	t.deepEqual(result[0].function.arguments, {path: '/test/file.txt'});
-	t.is(result[1].id, 'xml_call_1');
 	t.is(result[1].function.name, 'create_file');
 	t.deepEqual(result[1].function.arguments, {
 		path: '/new.txt',

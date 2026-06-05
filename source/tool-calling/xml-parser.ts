@@ -1,5 +1,7 @@
+import {FORMAT_GUIDANCE_MESSAGE} from '@/tool-calling/format-guidance';
 import {normalizeWhitespace} from '@/tool-calling/whitespace';
 import type {ToolCall} from '@/types/index';
+import {generateToolCallId} from '@/utils/tool-call-id';
 import {ensureString} from '@/utils/type-helpers';
 
 interface ParsedToolCall {
@@ -170,8 +172,8 @@ export class XMLToolCallParser {
 	 * Converts parsed tool calls to the standard ToolCall format
 	 */
 	static convertToToolCalls(parsedCalls: ParsedToolCall[]): ToolCall[] {
-		return parsedCalls.map((call, index) => ({
-			id: `xml_call_${index}`,
+		return parsedCalls.map(call => ({
+			id: generateToolCallId(),
 			function: {
 				name: call.toolName,
 				arguments: call.parameters,
@@ -266,18 +268,11 @@ export class XMLToolCallParser {
 			if (match) {
 				return {
 					error: pattern.error,
-					examples: this.getCorrectFormatExamples(),
+					examples: FORMAT_GUIDANCE_MESSAGE,
 				};
 			}
 		}
 
 		return null;
-	}
-
-	/**
-	 * Generates correct format examples for error messages
-	 */
-	private static getCorrectFormatExamples(): string {
-		return `Please use the native tool calling format provided by the system. The tools are already available to you - call them directly using the function calling interface.`;
 	}
 }
