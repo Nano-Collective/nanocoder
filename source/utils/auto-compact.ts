@@ -6,6 +6,7 @@ import type {Tokenizer} from '@/types/tokenization';
 import {compressionBackup} from './compression-backup';
 import {summariseWithLLM} from './llm-summariser';
 import {compressMessages} from './message-compression';
+import {createSessionOverride} from './session-override';
 
 export interface AutoCompactSessionOverrides {
 	enabled: boolean | null;
@@ -14,78 +15,31 @@ export interface AutoCompactSessionOverrides {
 	strategy: CompressionStrategy | null;
 }
 
-/**
- * Singleton class for managing auto-compact session overrides.
- * Provides encapsulated state management instead of global mutable object.
- */
-class AutoCompactSessionManager {
-	private _enabled: boolean | null = null;
-	private _threshold: number | null = null;
-	private _mode: CompressionMode | null = null;
-	private _strategy: CompressionStrategy | null = null;
+// Session overrides for auto-compact. `threshold` is clamped to 50–95.
+const autoCompactSession = {
+	enabled: createSessionOverride<boolean>(),
+	threshold: createSessionOverride<number>(value =>
+		value !== null ? Math.max(50, Math.min(95, value)) : null,
+	),
+	mode: createSessionOverride<CompressionMode>(),
+	strategy: createSessionOverride<CompressionStrategy>(),
+};
 
-	get enabled(): boolean | null {
-		return this._enabled;
-	}
-
-	get threshold(): number | null {
-		return this._threshold;
-	}
-
-	get mode(): CompressionMode | null {
-		return this._mode;
-	}
-
-	get strategy(): CompressionStrategy | null {
-		return this._strategy;
-	}
-
-	setEnabled(enabled: boolean | null): void {
-		this._enabled = enabled;
-	}
-
-	setThreshold(threshold: number | null): void {
-		if (threshold !== null) {
-			this._threshold = Math.max(50, Math.min(95, threshold));
-		} else {
-			this._threshold = null;
-		}
-	}
-
-	setMode(mode: CompressionMode | null): void {
-		this._mode = mode;
-	}
-
-	setStrategy(strategy: CompressionStrategy | null): void {
-		this._strategy = strategy;
-	}
-
-	reset(): void {
-		this._enabled = null;
-		this._threshold = null;
-		this._mode = null;
-		this._strategy = null;
-	}
-}
-
-// Singleton instance
-const autoCompactSession = new AutoCompactSessionManager();
-
-// Legacy export for backward compatibility
+// Legacy object-style accessor (read by useAppHandlers + performAutoCompact).
 export const autoCompactSessionOverrides: AutoCompactSessionOverrides =
 	new Proxy({} as AutoCompactSessionOverrides, {
 		get(_target, prop) {
-			if (prop === 'enabled') return autoCompactSession.enabled;
-			if (prop === 'threshold') return autoCompactSession.threshold;
-			if (prop === 'mode') return autoCompactSession.mode;
-			if (prop === 'strategy') return autoCompactSession.strategy;
+			if (prop === 'enabled') return autoCompactSession.enabled.get();
+			if (prop === 'threshold') return autoCompactSession.threshold.get();
+			if (prop === 'mode') return autoCompactSession.mode.get();
+			if (prop === 'strategy') return autoCompactSession.strategy.get();
 			return undefined;
 		},
 		set(_target, prop, value) {
-			if (prop === 'enabled') autoCompactSession.setEnabled(value);
-			else if (prop === 'threshold') autoCompactSession.setThreshold(value);
-			else if (prop === 'mode') autoCompactSession.setMode(value);
-			else if (prop === 'strategy') autoCompactSession.setStrategy(value);
+			if (prop === 'enabled') autoCompactSession.enabled.set(value);
+			else if (prop === 'threshold') autoCompactSession.threshold.set(value);
+			else if (prop === 'mode') autoCompactSession.mode.set(value);
+			else if (prop === 'strategy') autoCompactSession.strategy.set(value);
 			return true;
 		},
 	});
@@ -252,27 +206,30 @@ export async function performAutoCompact(
 
 // Set session override for auto-compact enabled state
 export function setAutoCompactEnabled(enabled: boolean | null): void {
-	autoCompactSession.setEnabled(enabled);
+	autoCompactSession.enabled.set(enabled);
 }
 
 // Set session override for auto-compact threshold
 export function setAutoCompactThreshold(threshold: number | null): void {
-	autoCompactSession.setThreshold(threshold);
+	autoCompactSession.threshold.set(threshold);
 }
 
 // Set session override for auto-compact mode
 export function setAutoCompactMode(mode: CompressionMode | null): void {
-	autoCompactSession.setMode(mode);
+	autoCompactSession.mode.set(mode);
 }
 
 // Set session override for auto-compact strategy
 export function setAutoCompactStrategy(
 	strategy: CompressionStrategy | null,
 ): void {
-	autoCompactSession.setStrategy(strategy);
+	autoCompactSession.strategy.set(strategy);
 }
 
 // Reset all session overrides
 export function resetAutoCompactSession(): void {
-	autoCompactSession.reset();
+	autoCompactSession.enabled.reset();
+	autoCompactSession.threshold.reset();
+	autoCompactSession.mode.reset();
+	autoCompactSession.strategy.reset();
 }

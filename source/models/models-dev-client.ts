@@ -8,6 +8,7 @@ import {TIMEOUT_HTTP_BODY_MS, TIMEOUT_HTTP_HEADERS_MS} from '@/constants';
 import type {AIProviderConfig, ProviderConfig} from '@/types/config';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
+import {createSessionOverride} from '@/utils/session-override';
 import {readCache, writeCache} from './models-cache.js';
 import type {
 	ModelInfo,
@@ -315,31 +316,13 @@ async function findModelByName(modelName: string): Promise<ModelInfo | null> {
 }
 
 /**
- * Singleton class for managing session-level context limit overrides.
+ * Session-level context limit override.
  * Allows users to manually set a context limit via /context-max command.
+ * Non-positive values collapse back to null (no override).
  */
-class ContextLimitSessionManager {
-	private _contextLimit: number | null = null;
-
-	get(): number | null {
-		return this._contextLimit;
-	}
-
-	set(limit: number | null): void {
-		if (limit !== null && limit > 0) {
-			this._contextLimit = limit;
-		} else {
-			this._contextLimit = null;
-		}
-	}
-
-	reset(): void {
-		this._contextLimit = null;
-	}
-}
-
-// Singleton instance
-const contextLimitSession = new ContextLimitSessionManager();
+const contextLimitSession = createSessionOverride<number>(limit =>
+	limit !== null && limit > 0 ? limit : null,
+);
 
 export function setSessionContextLimit(limit: number | null): void {
 	contextLimitSession.set(limit);
