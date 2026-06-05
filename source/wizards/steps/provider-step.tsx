@@ -16,6 +16,7 @@ import {
 } from '../utils/fetch-models';
 import {FieldInputView} from './field-input-view';
 import {ModelSelectionList} from './model-selection-list';
+import {useWizardForm} from './use-wizard-form';
 
 interface ProviderStepProps {
 	onComplete: (providers: ProviderConfig[]) => void;
@@ -92,13 +93,21 @@ export function ProviderStep({
 	}, [existingProviders]);
 
 	const [mode, setMode] = useState<Mode>('select-template-or-custom');
-	const [selectedTemplate, setSelectedTemplate] =
-		useState<ProviderTemplate | null>(null);
-	const [currentFieldIndex, setCurrentFieldIndex] = useState(0);
-	const [fieldAnswers, setFieldAnswers] = useState<Record<string, string>>({});
-	const [currentValue, setCurrentValue] = useState('');
-	const [error, setError] = useState<string | null>(null);
-	const [inputKey, setInputKey] = useState(0);
+	const {
+		selectedTemplate,
+		currentFieldIndex,
+		fieldAnswers,
+		setFieldAnswers,
+		currentValue,
+		setCurrentValue,
+		error,
+		setError,
+		inputKey,
+		beginTemplate,
+		loadField,
+		resetForm,
+		bumpInputKey,
+	} = useWizardForm<ProviderTemplate>();
 	const [cameFromCustom, setCameFromCustom] = useState(false);
 	const [editingIndex, setEditingIndex] = useState<number | null>(null);
 	const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
@@ -163,10 +172,7 @@ export function ProviderStep({
 			// Find custom template
 			const customTemplate = PROVIDER_TEMPLATES.find(t => t.id === 'custom');
 			if (customTemplate) {
-				setSelectedTemplate(customTemplate);
-				setCurrentFieldIndex(0);
-				setFieldAnswers({});
-				setCurrentValue('');
+				beginTemplate(customTemplate);
 				setMode('field-input');
 				setCameFromCustom(true);
 			}
@@ -189,11 +195,7 @@ export function ProviderStep({
 		const template = PROVIDER_TEMPLATES.find(t => t.id === item.value);
 		if (template) {
 			setEditingIndex(null); // Not editing
-			setSelectedTemplate(template);
-			setCurrentFieldIndex(0);
-			setFieldAnswers({});
-			setCurrentValue(template.fields[0]?.default || '');
-			setError(null);
+			beginTemplate(template);
 			setMode('field-input');
 			setCameFromCustom(false);
 		}
@@ -222,22 +224,13 @@ export function ProviderStep({
 				const template = findTemplateForProvider(provider);
 
 				if (template) {
-					setSelectedTemplate(template);
-					setCurrentFieldIndex(0);
-
 					const answers: Record<string, string> = {};
 					if (provider.name) answers.providerName = provider.name;
 					if (provider.baseUrl) answers.baseUrl = provider.baseUrl;
 					if (provider.apiKey) answers.apiKey = provider.apiKey;
 					if (provider.models) answers.model = provider.models.join(', ');
 
-					setFieldAnswers(answers);
-					setCurrentValue(
-						answers[template.fields[0]?.name] ||
-							template.fields[0]?.default ||
-							'',
-					);
-					setError(null);
+					beginTemplate(template, answers);
 					setMode('field-input');
 					setCameFromCustom(false);
 				}
@@ -302,8 +295,7 @@ export function ProviderStep({
 				return;
 			}
 
-			setCurrentFieldIndex(currentFieldIndex + 1);
-			setCurrentValue(newAnswers[nextField?.name] || nextField?.default || '');
+			loadField(selectedTemplate, currentFieldIndex + 1, newAnswers);
 		} else {
 			// Validate models array is not empty before building config
 			const modelsValue = newAnswers.model || '';
@@ -332,10 +324,7 @@ export function ProviderStep({
 
 				// Reset and go back to appropriate screen
 				const wasEditing = editingIndex !== null;
-				setSelectedTemplate(null);
-				setCurrentFieldIndex(0);
-				setFieldAnswers({});
-				setCurrentValue('');
+				resetForm();
 				setEditingIndex(null);
 				setMode(
 					wasEditing ? 'select-template-or-custom' : 'template-selection',
@@ -349,15 +338,12 @@ export function ProviderStep({
 	};
 
 	const goToManualModelInput = (answers: Record<string, string>) => {
-		const modelFieldIndex = selectedTemplate?.fields.findIndex(
+		if (!selectedTemplate) return;
+		const modelFieldIndex = selectedTemplate.fields.findIndex(
 			f => f.name === 'model',
 		);
-		if (modelFieldIndex !== undefined && modelFieldIndex >= 0) {
-			setCurrentFieldIndex(modelFieldIndex);
-			const modelField = selectedTemplate?.fields[modelFieldIndex];
-			setCurrentValue(
-				answers[modelField?.name || ''] || modelField?.default || '',
-			);
+		if (modelFieldIndex >= 0) {
+			loadField(selectedTemplate, modelFieldIndex, answers);
 			setMode('field-input');
 		}
 	};
@@ -463,9 +449,7 @@ export function ProviderStep({
 
 		if (modelFieldIndex < selectedTemplate.fields.length - 1) {
 			// There are more fields after model
-			setCurrentFieldIndex(modelFieldIndex + 1);
-			const nextField = selectedTemplate.fields[modelFieldIndex + 1];
-			setCurrentValue(newAnswers[nextField?.name] || nextField?.default || '');
+			loadField(selectedTemplate, modelFieldIndex + 1, newAnswers);
 			setMode('field-input');
 		} else {
 			// Model was the last field - build config
@@ -482,10 +466,7 @@ export function ProviderStep({
 
 				// Reset and go back to appropriate screen
 				const wasEditing = editingIndex !== null;
-				setSelectedTemplate(null);
-				setCurrentFieldIndex(0);
-				setFieldAnswers({});
-				setCurrentValue('');
+				resetForm();
 				setEditingIndex(null);
 				setFetchedModels([]);
 				setSelectedModelIds(new Set());
@@ -501,18 +482,12 @@ export function ProviderStep({
 	};
 
 	const handleModelSelectionBack = () => {
-		const modelFieldIndex = selectedTemplate?.fields.findIndex(
+		if (!selectedTemplate) return;
+		const modelFieldIndex = selectedTemplate.fields.findIndex(
 			f => f.name === 'model',
 		);
-		const prevIndex =
-			modelFieldIndex !== undefined && modelFieldIndex > 0
-				? modelFieldIndex - 1
-				: 0;
-		setCurrentFieldIndex(prevIndex);
-		const prevField = selectedTemplate?.fields[prevIndex];
-		setCurrentValue(
-			fieldAnswers[prevField?.name || ''] || prevField?.default || '',
-		);
+		const prevIndex = modelFieldIndex > 0 ? modelFieldIndex - 1 : 0;
+		loadField(selectedTemplate, prevIndex, fieldAnswers);
 		setFetchedModels([]);
 		setSelectedModelIds(new Set());
 		setError(null);
@@ -526,12 +501,10 @@ export function ProviderStep({
 				// In field input mode, check if we can go back to previous field
 				if (currentFieldIndex > 0) {
 					// Go back to previous field
-					setCurrentFieldIndex(currentFieldIndex - 1);
-					const prevField = selectedTemplate?.fields[currentFieldIndex - 1];
-					setCurrentValue(
-						fieldAnswers[prevField?.name || ''] || prevField?.default || '',
-					);
-					setInputKey(prev => prev + 1); // Force remount to reset cursor position
+					if (selectedTemplate) {
+						loadField(selectedTemplate, currentFieldIndex - 1, fieldAnswers);
+					}
+					bumpInputKey(); // Force remount to reset cursor position
 					setError(null);
 				} else {
 					// At first field, go back based on where we came from
@@ -545,11 +518,7 @@ export function ProviderStep({
 						// Came from template selection, go back there
 						setMode('template-selection');
 					}
-					setSelectedTemplate(null);
-					setCurrentFieldIndex(0);
-					setFieldAnswers({});
-					setCurrentValue('');
-					setError(null);
+					resetForm();
 				}
 			} else if (mode === 'template-selection') {
 				// In template selection, go back to initial choice
@@ -580,11 +549,7 @@ export function ProviderStep({
 			} else if (key.escape) {
 				// Go back to template selection
 				setMode('template-selection');
-				setSelectedTemplate(null);
-				setCurrentFieldIndex(0);
-				setFieldAnswers({});
-				setCurrentValue('');
-				setError(null);
+				resetForm();
 			}
 		}
 	});

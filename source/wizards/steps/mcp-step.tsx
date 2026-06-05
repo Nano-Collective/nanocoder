@@ -10,6 +10,7 @@ import {
 	type McpServerConfig,
 	type McpTemplate,
 } from '../templates/mcp-templates';
+import {useWizardForm} from './use-wizard-form';
 
 interface McpStepProps {
 	onComplete: (mcpServers: Record<string, McpServerConfig>) => void;
@@ -50,15 +51,22 @@ export function McpStep({
 	}, [existingServers]);
 
 	const [mode, setMode] = useState<Mode>('initial-menu');
-	const [selectedTemplate, setSelectedTemplate] = useState<McpTemplate | null>(
-		null,
-	);
-	const [currentFieldIndex, setCurrentFieldIndex] = useState(0);
-	const [fieldAnswers, setFieldAnswers] = useState<Record<string, string>>({});
-	const [currentValue, setCurrentValue] = useState('');
+	const {
+		selectedTemplate,
+		currentFieldIndex,
+		fieldAnswers,
+		setFieldAnswers,
+		currentValue,
+		setCurrentValue,
+		error,
+		setError,
+		inputKey,
+		beginTemplate,
+		loadField,
+		resetForm,
+		bumpInputKey,
+	} = useWizardForm<McpTemplate>();
 	const [multilineBuffer, setMultilineBuffer] = useState('');
-	const [error, setError] = useState<string | null>(null);
-	const [inputKey, setInputKey] = useState(0);
 	const [editingServerName, setEditingServerName] = useState<string | null>(
 		null,
 	);
@@ -156,12 +164,8 @@ export function McpStep({
 			} else {
 				// Template has fields, proceed with normal flow
 				setEditingServerName(null); // Not editing
-				setSelectedTemplate(template);
-				setCurrentFieldIndex(0);
-				setFieldAnswers({});
-				setCurrentValue(template.fields[0]?.default || '');
+				beginTemplate(template);
 				setMultilineBuffer('');
-				setError(null);
 				setMode('field-input');
 			}
 		}
@@ -198,9 +202,6 @@ export function McpStep({
 					MCP_TEMPLATES.find(t => t.id === 'custom');
 
 				if (template) {
-					setSelectedTemplate(template);
-					setCurrentFieldIndex(0);
-
 					// Pre-populate field answers from existing server
 					const answers: Record<string, string> = {};
 
@@ -238,14 +239,8 @@ export function McpStep({
 						}
 					}
 
-					setFieldAnswers(answers);
-					setCurrentValue(
-						answers[template.fields[0]?.name] ||
-							template.fields[0]?.default ||
-							'',
-					);
+					beginTemplate(template, answers);
 					setMultilineBuffer('');
-					setError(null);
 					setMode('field-input');
 				}
 			}
@@ -287,9 +282,7 @@ export function McpStep({
 
 		// Move to next field or complete
 		if (currentFieldIndex < selectedTemplate.fields.length - 1) {
-			setCurrentFieldIndex(currentFieldIndex + 1);
-			const nextField = selectedTemplate.fields[currentFieldIndex + 1];
-			setCurrentValue(newAnswers[nextField?.name] || nextField?.default || '');
+			loadField(selectedTemplate, currentFieldIndex + 1, newAnswers);
 			setMultilineBuffer('');
 		} else {
 			// Build config and add/update server
@@ -308,10 +301,7 @@ export function McpStep({
 				}
 
 				// Reset for next server
-				setSelectedTemplate(null);
-				setCurrentFieldIndex(0);
-				setFieldAnswers({});
-				setCurrentValue('');
+				resetForm();
 				setMultilineBuffer('');
 				setEditingServerName(null);
 				setMode('tabs');
@@ -338,13 +328,11 @@ export function McpStep({
 				// In field input mode, check if we can go back to previous field
 				if (currentFieldIndex > 0) {
 					// Go back to previous field
-					setCurrentFieldIndex(currentFieldIndex - 1);
-					const prevField = selectedTemplate?.fields[currentFieldIndex - 1];
-					setCurrentValue(
-						fieldAnswers[prevField?.name || ''] || prevField?.default || '',
-					);
+					if (selectedTemplate) {
+						loadField(selectedTemplate, currentFieldIndex - 1, fieldAnswers);
+					}
 					setMultilineBuffer('');
-					setInputKey(prev => prev + 1); // Force remount to reset cursor position
+					bumpInputKey(); // Force remount to reset cursor position
 					setError(null);
 				} else {
 					// At first field, go back based on context
@@ -355,12 +343,8 @@ export function McpStep({
 						// Was adding, go back to tabs
 						setMode('tabs');
 					}
-					setSelectedTemplate(null);
-					setCurrentFieldIndex(0);
-					setFieldAnswers({});
-					setCurrentValue('');
+					resetForm();
 					setMultilineBuffer('');
-					setError(null);
 				}
 			} else if (mode === 'edit-or-delete') {
 				// In edit-or-delete, go back to edit selection
@@ -404,12 +388,8 @@ export function McpStep({
 					} else {
 						setMode('tabs');
 					}
-					setSelectedTemplate(null);
-					setCurrentFieldIndex(0);
-					setFieldAnswers({});
-					setCurrentValue('');
+					resetForm();
 					setMultilineBuffer('');
-					setError(null);
 				}
 			}
 		}
