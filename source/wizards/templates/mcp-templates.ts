@@ -35,6 +35,112 @@ export interface McpTemplate {
 	transportType: McpTransportType;
 }
 
+/**
+ * Stdio MCP server (`npx -y <pkg>`) whose only config is a single credential
+ * passed through one environment variable.
+ */
+function envVarStdioTemplate(opts: {
+	id: string;
+	name: string;
+	description: string;
+	packageName: string;
+	field: TemplateField;
+	envKey: string;
+	tags: string[];
+}): McpTemplate {
+	return {
+		id: opts.id,
+		name: opts.name,
+		description: opts.description,
+		command: 'npx',
+		fields: [opts.field],
+		buildConfig: answers => ({
+			name: opts.id,
+			transport: 'stdio' as McpTransportType,
+			command: 'npx',
+			args: ['-y', opts.packageName],
+			env: {[opts.envKey]: answers[opts.field.name]},
+			description: opts.description,
+			tags: opts.tags,
+		}),
+		category: 'local',
+		transportType: 'stdio',
+	};
+}
+
+/**
+ * Stdio MCP server that takes no configuration — a fixed command + args.
+ */
+function simpleStdioTemplate(opts: {
+	id: string;
+	name: string;
+	description: string;
+	command: string;
+	args: string[];
+	tags: string[];
+}): McpTemplate {
+	return {
+		id: opts.id,
+		name: opts.name,
+		description: opts.description,
+		command: opts.command,
+		fields: [],
+		buildConfig: () => ({
+			name: opts.id,
+			transport: 'stdio' as McpTransportType,
+			command: opts.command,
+			args: [...opts.args],
+			description: opts.description,
+			tags: opts.tags,
+		}),
+		category: 'local',
+		transportType: 'stdio',
+	};
+}
+
+/**
+ * Remote HTTP MCP server configured by name + URL (no auth header).
+ */
+function remoteHttpTemplate(opts: {
+	id: string;
+	name: string;
+	description: string;
+	defaultServerName: string;
+	defaultUrl: string;
+	tags: string[];
+}): McpTemplate {
+	return {
+		id: opts.id,
+		name: opts.name,
+		description: opts.description,
+		command: '',
+		fields: [
+			{
+				name: 'serverName',
+				prompt: 'Server name',
+				required: true,
+				default: opts.defaultServerName,
+			},
+			{
+				name: 'url',
+				prompt: 'Server URL',
+				required: true,
+				default: opts.defaultUrl,
+			},
+		],
+		buildConfig: answers => ({
+			name: answers.serverName || opts.defaultServerName,
+			transport: 'http' as McpTransportType,
+			url: answers.url || opts.defaultUrl,
+			description: opts.description,
+			tags: opts.tags,
+			timeout: TIMEOUT_MCP_DEFAULT_MS,
+		}),
+		category: 'remote',
+		transportType: 'http',
+	};
+}
+
 export const MCP_TEMPLATES: McpTemplate[] = [
 	{
 		id: 'filesystem',
@@ -66,87 +172,48 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 		category: 'local',
 		transportType: 'stdio',
 	},
-	{
+	envVarStdioTemplate({
 		id: 'github',
 		name: 'GitHub',
 		description: 'Repository management and operations',
-		command: 'npx',
-		fields: [
-			{
-				name: 'githubToken',
-				prompt: 'GitHub Personal Access Token (scopes: repo, read:org)',
-				required: true,
-				sensitive: true,
-			},
-		],
-		buildConfig: answers => ({
-			name: 'github',
-			transport: 'stdio' as McpTransportType,
-			command: 'npx',
-			args: ['-y', '@modelcontextprotocol/server-github'],
-			env: {
-				GITHUB_PERSONAL_ACCESS_TOKEN: answers.githubToken,
-			},
-			description: 'Repository management and operations',
-			tags: ['github', 'git', 'repository', 'stdio'],
-		}),
-		category: 'local',
-		transportType: 'stdio',
-	},
-	{
+		packageName: '@modelcontextprotocol/server-github',
+		field: {
+			name: 'githubToken',
+			prompt: 'GitHub Personal Access Token (scopes: repo, read:org)',
+			required: true,
+			sensitive: true,
+		},
+		envKey: 'GITHUB_PERSONAL_ACCESS_TOKEN',
+		tags: ['github', 'git', 'repository', 'stdio'],
+	}),
+	envVarStdioTemplate({
 		id: 'postgres',
 		name: 'PostgreSQL',
 		description: 'Database queries and management',
-		command: 'npx',
-		fields: [
-			{
-				name: 'connectionString',
-				prompt: 'Connection string (postgresql://user:pass@host:port/db)',
-				required: true,
-				sensitive: true,
-			},
-		],
-		buildConfig: answers => ({
-			name: 'postgres',
-			transport: 'stdio' as McpTransportType,
-			command: 'npx',
-			args: ['-y', '@modelcontextprotocol/server-postgres'],
-			env: {
-				POSTGRES_CONNECTION_STRING: answers.connectionString,
-			},
-			description: 'Database queries and management',
-			tags: ['database', 'postgres', 'sql'],
-		}),
-		category: 'local',
-		transportType: 'stdio',
-	},
-	{
+		packageName: '@modelcontextprotocol/server-postgres',
+		field: {
+			name: 'connectionString',
+			prompt: 'Connection string (postgresql://user:pass@host:port/db)',
+			required: true,
+			sensitive: true,
+		},
+		envKey: 'POSTGRES_CONNECTION_STRING',
+		tags: ['database', 'postgres', 'sql'],
+	}),
+	envVarStdioTemplate({
 		id: 'brave-search',
 		name: 'Brave Search',
 		description: 'Web search capabilities',
-		command: 'npx',
-		fields: [
-			{
-				name: 'braveApiKey',
-				prompt: 'Brave Search API Key',
-				required: true,
-				sensitive: true,
-			},
-		],
-		buildConfig: answers => ({
-			name: 'brave-search',
-			transport: 'stdio' as McpTransportType,
-			command: 'npx',
-			args: ['-y', '@modelcontextprotocol/server-brave-search'],
-			env: {
-				BRAVE_API_KEY: answers.braveApiKey,
-			},
-			description: 'Web search capabilities',
-			tags: ['search', 'web', 'brave'],
-		}),
-		category: 'local',
-		transportType: 'stdio',
-	},
+		packageName: '@modelcontextprotocol/server-brave-search',
+		field: {
+			name: 'braveApiKey',
+			prompt: 'Brave Search API Key',
+			required: true,
+			sensitive: true,
+		},
+		envKey: 'BRAVE_API_KEY',
+		tags: ['search', 'web', 'brave'],
+	}),
 	{
 		id: 'fetch',
 		name: 'Fetch',
@@ -181,69 +248,23 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 		category: 'local',
 		transportType: 'stdio',
 	},
-	{
+	remoteHttpTemplate({
 		id: 'deepwiki',
 		name: 'DeepWiki',
 		description:
 			'DeepWiki provides up-to-date documentation you can talk to, for every repo in the world.',
-		command: '',
-		fields: [
-			{
-				name: 'serverName',
-				prompt: 'Server name',
-				required: true,
-				default: 'deepwiki',
-			},
-			{
-				name: 'url',
-				prompt: 'Server URL',
-				required: true,
-				default: 'https://mcp.deepwiki.com/mcp',
-			},
-		],
-		buildConfig: answers => ({
-			name: answers.serverName || 'deepwiki',
-			transport: 'http' as McpTransportType,
-			url: answers.url || 'https://mcp.deepwiki.com/mcp',
-			description:
-				'DeepWiki provides up-to-date documentation you can talk to, for every repo in the world.',
-			tags: ['remote', 'wiki', 'documentation', 'http'],
-			timeout: TIMEOUT_MCP_DEFAULT_MS,
-		}),
-		category: 'remote',
-		transportType: 'http',
-	},
-	{
+		defaultServerName: 'deepwiki',
+		defaultUrl: 'https://mcp.deepwiki.com/mcp',
+		tags: ['remote', 'wiki', 'documentation', 'http'],
+	}),
+	remoteHttpTemplate({
 		id: 'context7',
 		name: 'Context7',
 		description: 'Up-to-date code documentation for LLMs and AI code editors.',
-		command: '',
-		fields: [
-			{
-				name: 'serverName',
-				prompt: 'Server name',
-				required: true,
-				default: 'context7',
-			},
-			{
-				name: 'url',
-				prompt: 'Server URL',
-				required: true,
-				default: 'https://mcp.context7.com/mcp',
-			},
-		],
-		buildConfig: answers => ({
-			name: answers.serverName || 'context7',
-			transport: 'http' as McpTransportType,
-			url: answers.url || 'https://mcp.context7.com/mcp',
-			description:
-				'Up-to-date code documentation for LLMs and AI code editors.',
-			tags: ['remote', 'context', 'information', 'http'],
-			timeout: TIMEOUT_MCP_DEFAULT_MS,
-		}),
-		category: 'remote',
-		transportType: 'http',
-	},
+		defaultServerName: 'context7',
+		defaultUrl: 'https://mcp.context7.com/mcp',
+		tags: ['remote', 'context', 'information', 'http'],
+	}),
 	{
 		id: 'github-remote',
 		name: 'GitHub (Remote)',
@@ -313,23 +334,14 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 		category: 'local',
 		transportType: 'stdio',
 	},
-	{
+	simpleStdioTemplate({
 		id: 'playwright',
 		name: 'Playwright',
 		description: 'Playwright MCP server for browser automation',
 		command: 'npx',
-		fields: [],
-		buildConfig: _answers => ({
-			name: 'playwright',
-			transport: 'stdio' as McpTransportType,
-			command: 'npx',
-			args: ['@playwright/mcp@latest'],
-			description: 'Playwright MCP server for browser automation',
-			tags: ['playwright', 'browser', 'automation', 'stdio'],
-		}),
-		category: 'local',
-		transportType: 'stdio',
-	},
+		args: ['@playwright/mcp@latest'],
+		tags: ['playwright', 'browser', 'automation', 'stdio'],
+	}),
 	{
 		id: 'chrome-devtools',
 		name: 'Chrome DevTools',
@@ -358,23 +370,14 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 		category: 'local',
 		transportType: 'stdio',
 	},
-	{
+	simpleStdioTemplate({
 		id: 'duckduckgo',
 		name: 'DuckDuckGo Search',
 		description: 'DuckDuckGo search MCP server',
 		command: 'uvx',
-		fields: [],
-		buildConfig: _answers => ({
-			name: 'duckduckgo',
-			transport: 'stdio' as McpTransportType,
-			command: 'uvx',
-			args: ['duckduckgo-mcp-server'],
-			description: 'DuckDuckGo search MCP server',
-			tags: ['duckduckgo', 'search', 'stdio'],
-		}),
-		category: 'local',
-		transportType: 'stdio',
-	},
+		args: ['duckduckgo-mcp-server'],
+		tags: ['duckduckgo', 'search', 'stdio'],
+	}),
 	{
 		id: 'git',
 		name: 'Git',
@@ -398,23 +401,14 @@ export const MCP_TEMPLATES: McpTemplate[] = [
 		category: 'local',
 		transportType: 'stdio',
 	},
-	{
+	simpleStdioTemplate({
 		id: 'memory',
 		name: 'Memory',
 		description: 'Memory MCP server for persistent storage',
 		command: 'npx',
-		fields: [],
-		buildConfig: _answers => ({
-			name: 'memory',
-			transport: 'stdio' as McpTransportType,
-			command: 'npx',
-			args: ['-y', '@modelcontextprotocol/server-memory'],
-			description: 'Memory MCP server for persistent storage',
-			tags: ['memory', 'storage', 'stdio'],
-		}),
-		category: 'local',
-		transportType: 'stdio',
-	},
+		args: ['-y', '@modelcontextprotocol/server-memory'],
+		tags: ['memory', 'storage', 'stdio'],
+	}),
 	{
 		id: 'custom',
 		name: 'Custom MCP Server',

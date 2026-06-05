@@ -33,9 +33,4 @@ export interface Tokenizer {
 /**
  * Provider types for tokenizer selection
  */
-export type TokenizerProvider =
-	| 'openai'
-	| 'anthropic'
-	| 'llama'
-	| 'fallback'
-	| 'auto';
+export type TokenizerProvider = 'openai' | 'anthropic' | 'llama' | 'fallback';

@@ -92,34 +92,3 @@ export function createTokenizer(
 			return new FallbackTokenizer();
 	}
 }
-
-/**
- * Create a tokenizer with explicit provider
- */
-export function createTokenizerForProvider(
-	provider: TokenizerProvider,
-	modelId?: string,
-): Tokenizer {
-	switch (provider) {
-		case 'openai':
-			return new OpenAITokenizer(modelId);
-
-		case 'anthropic':
-			return new AnthropicTokenizer(modelId);
-
-		case 'llama':
-			return new LlamaTokenizer(modelId);
-
-		case 'auto':
-			// Auto-detect based on model ID if provided
-			if (modelId) {
-				return createTokenizer('', modelId);
-			}
-
-			return new FallbackTokenizer();
-
-		case 'fallback':
-		default:
-			return new FallbackTokenizer();
-	}
-}

@@ -45,7 +45,6 @@ test('returns initial state with sensible defaults', t => {
 
 	t.is(hook.client, null);
 	t.deepEqual(hook.messages, []);
-	t.deepEqual(hook.displayMessages, []);
 	t.is(hook.currentModel, '');
 	t.is(hook.currentProvider, 'openai-compatible');
 	t.is(hook.currentProviderConfig, null);
@@ -69,37 +68,30 @@ test('respects initialDevelopmentMode argument', t => {
 
 test('all derived mode booleans are false when activeMode is null', t => {
 	const {hook} = setup();
-	t.false(hook.isModelSelectionMode);
-	t.false(hook.isModelDatabaseMode);
-	t.false(hook.isConfigWizardMode);
-	t.false(hook.isMcpWizardMode);
-	t.false(hook.isCheckpointLoadMode);
 	t.false(hook.isExplorerMode);
 	t.false(hook.isIdeSelectionMode);
-	t.false(hook.isSessionSelectorMode);
-	t.false(hook.isTuneActive);
 });
 
 test('setActiveMode flips the matching derived boolean only', t => {
 	const {hook, instance} = setup();
 
-	hook.setActiveMode('model');
+	hook.setActiveMode('explorer');
 	instance.rerender(<Probe />);
 
-	t.true(captured!.isModelSelectionMode);
-	t.false(captured!.isMcpWizardMode);
-	t.is(captured!.activeMode, 'model');
+	t.true(captured!.isExplorerMode);
+	t.false(captured!.isIdeSelectionMode);
+	t.is(captured!.activeMode, 'explorer');
 
-	captured!.setActiveMode('mcpWizard');
+	captured!.setActiveMode('ideSelection');
 	instance.rerender(<Probe />);
 
-	t.false(captured!.isModelSelectionMode);
-	t.true(captured!.isMcpWizardMode);
+	t.false(captured!.isExplorerMode);
+	t.true(captured!.isIdeSelectionMode);
 
 	captured!.setActiveMode(null);
 	instance.rerender(<Probe />);
 
-	t.false(captured!.isMcpWizardMode);
+	t.false(captured!.isIdeSelectionMode);
 	t.is(captured!.activeMode, null);
 });
 
@@ -142,7 +134,7 @@ test('addToChatQueue preserves an existing key', t => {
 	t.is(first.key, 'my-key');
 });
 
-test('updateMessages updates both messages and displayMessages', t => {
+test('updateMessages updates messages', t => {
 	const {hook, instance} = setup();
 
 	const msgs: Message[] = [
@@ -154,7 +146,6 @@ test('updateMessages updates both messages and displayMessages', t => {
 	instance.rerender(<Probe />);
 
 	t.deepEqual(captured!.messages, msgs);
-	t.deepEqual(captured!.displayMessages, msgs);
 });
 
 test('resetToolConfirmationState clears all confirmation-related state', t => {
@@ -240,7 +231,6 @@ test('exposes setters for every state slice', t => {
 	const setterNames: Array<keyof typeof hook> = [
 		'setClient',
 		'setMessages',
-		'setDisplayMessages',
 		'setCurrentModel',
 		'setCurrentProvider',
 		'setCurrentProviderConfig',

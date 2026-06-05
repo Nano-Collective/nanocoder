@@ -160,21 +160,33 @@ function buildOpenRouterBlock(
 	return Object.keys(block).length > 0 ? block : undefined;
 }
 
-export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
-	{
-		id: 'ollama',
-		name: 'Ollama',
+/**
+ * Local model server (Ollama, llama.cpp, MLX, LM Studio): provider name +
+ * base URL + models, no API key. `configFallbackName` defaults to the field
+ * default but can differ (Ollama stores lowercase "ollama").
+ */
+function localServerTemplate(opts: {
+	id: string;
+	name: string;
+	defaultProviderName: string;
+	defaultBaseUrl: string;
+	configFallbackName?: string;
+}): ProviderTemplate {
+	const fallbackName = opts.configFallbackName ?? opts.defaultProviderName;
+	return {
+		id: opts.id,
+		name: opts.name,
 		fields: [
 			{
 				name: 'providerName',
 				prompt: 'Provider name',
-				default: 'Ollama',
+				default: opts.defaultProviderName,
 				required: true,
 			},
 			{
 				name: 'baseUrl',
 				prompt: 'Base URL',
-				default: 'http://localhost:11434/v1',
+				default: opts.defaultBaseUrl,
 				validator: urlValidator,
 			},
 			{
@@ -185,128 +197,133 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			},
 		],
 		buildConfig: answers => ({
-			name: answers.providerName || 'ollama',
-			baseUrl: answers.baseUrl || 'http://localhost:11434/v1',
+			name: answers.providerName || fallbackName,
+			baseUrl: answers.baseUrl || opts.defaultBaseUrl,
 			models: parseArrayField(answers.model),
 		}),
-	},
-	{
-		id: 'llama-cpp',
-		name: 'llama.cpp server',
+	};
+}
+
+/**
+ * Hosted provider keyed by an API key: provider name + API key + models, with
+ * a fixed base URL and optional `sdkProvider`.
+ */
+function apiKeyTemplate(opts: {
+	id: string;
+	name: string;
+	baseUrl: string;
+	defaultProviderName?: string;
+	apiKeyPrompt?: string;
+	modelDefault?: string;
+	sdkProvider?: ProviderConfig['sdkProvider'];
+	providerNameRequired?: boolean;
+}): ProviderTemplate {
+	const defaultProviderName = opts.defaultProviderName ?? opts.name;
+	const providerNameField: TemplateField = {
+		name: 'providerName',
+		prompt: 'Provider name',
+		default: defaultProviderName,
+	};
+	if (opts.providerNameRequired) {
+		providerNameField.required = true;
+	}
+	return {
+		id: opts.id,
+		name: opts.name,
 		fields: [
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'llama-cpp',
-				required: true,
-			},
-			{
-				name: 'baseUrl',
-				prompt: 'Base URL',
-				default: 'http://localhost:8080/v1',
-				validator: urlValidator,
-			},
-			{
-				name: 'model',
-				prompt: 'Model name(s) (comma-separated)',
-				default: '',
-				required: true,
-			},
-		],
-		buildConfig: answers => ({
-			name: answers.providerName || 'llama-cpp',
-			baseUrl: answers.baseUrl || 'http://localhost:8080/v1',
-			models: parseArrayField(answers.model),
-		}),
-	},
-	{
-		id: 'mlx-server',
-		name: 'MLX Server',
-		fields: [
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'MLX Server',
-				required: true,
-			},
-			{
-				name: 'baseUrl',
-				prompt: 'Base URL',
-				default: 'http://localhost:8080/v1',
-				validator: urlValidator,
-			},
-			{
-				name: 'model',
-				prompt: 'Model name(s) (comma-separated)',
-				default: '',
-				required: true,
-			},
-		],
-		buildConfig: answers => ({
-			name: answers.providerName || 'MLX Server',
-			baseUrl: answers.baseUrl || 'http://localhost:8080/v1',
-			models: parseArrayField(answers.model),
-		}),
-	},
-	{
-		id: 'lmstudio',
-		name: 'LM Studio',
-		fields: [
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'LM Studio',
-				required: true,
-			},
-			{
-				name: 'baseUrl',
-				prompt: 'Base URL',
-				default: 'http://localhost:1234/v1',
-				validator: urlValidator,
-			},
-			{
-				name: 'model',
-				prompt: 'Model name(s) (comma-separated)',
-				default: '',
-				required: true,
-			},
-		],
-		buildConfig: answers => ({
-			name: answers.providerName || 'LM Studio',
-			baseUrl: answers.baseUrl || 'http://localhost:1234/v1',
-			models: parseArrayField(answers.model),
-		}),
-	},
-	{
-		id: 'gemini',
-		name: 'Google Gemini',
-		fields: [
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'Google Gemini',
-			},
+			providerNameField,
 			{
 				name: 'apiKey',
-				prompt: 'API Key (from https://aistudio.google.com/apikey)',
+				prompt: opts.apiKeyPrompt ?? 'API Key',
 				required: true,
 				sensitive: true,
 			},
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
+				default: opts.modelDefault ?? '',
+				required: true,
+			},
+		],
+		buildConfig: answers => {
+			const config: ProviderConfig = {
+				name: answers.providerName || defaultProviderName,
+				baseUrl: opts.baseUrl,
+				apiKey: answers.apiKey,
+				models: parseArrayField(answers.model),
+			};
+			if (opts.sdkProvider) {
+				config.sdkProvider = opts.sdkProvider;
+			}
+			return config;
+		},
+	};
+}
+
+/**
+ * OAuth/subscription provider (ChatGPT/Codex, GitHub Copilot): provider name +
+ * models only — the token comes from a device-flow login, not a wizard field.
+ */
+function oauthProviderTemplate(opts: {
+	id: string;
+	name: string;
+	baseUrl: string;
+	sdkProvider: ProviderConfig['sdkProvider'];
+}): ProviderTemplate {
+	return {
+		id: opts.id,
+		name: opts.name,
+		fields: [
+			{name: 'providerName', prompt: 'Provider name', default: opts.name},
+			{
+				name: 'model',
+				prompt: 'Model name(s) (comma-separated).',
 				default: '',
 				required: true,
 			},
 		],
 		buildConfig: answers => ({
-			name: answers.providerName || 'Google Gemini',
-			sdkProvider: 'google',
-			baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-			apiKey: answers.apiKey,
+			name: answers.providerName || opts.name,
+			baseUrl: opts.baseUrl,
 			models: parseArrayField(answers.model),
+			sdkProvider: opts.sdkProvider,
 		}),
-	},
+	};
+}
+
+export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
+	localServerTemplate({
+		id: 'ollama',
+		name: 'Ollama',
+		defaultProviderName: 'Ollama',
+		defaultBaseUrl: 'http://localhost:11434/v1',
+		configFallbackName: 'ollama',
+	}),
+	localServerTemplate({
+		id: 'llama-cpp',
+		name: 'llama.cpp server',
+		defaultProviderName: 'llama-cpp',
+		defaultBaseUrl: 'http://localhost:8080/v1',
+	}),
+	localServerTemplate({
+		id: 'mlx-server',
+		name: 'MLX Server',
+		defaultProviderName: 'MLX Server',
+		defaultBaseUrl: 'http://localhost:8080/v1',
+	}),
+	localServerTemplate({
+		id: 'lmstudio',
+		name: 'LM Studio',
+		defaultProviderName: 'LM Studio',
+		defaultBaseUrl: 'http://localhost:1234/v1',
+	}),
+	apiKeyTemplate({
+		id: 'gemini',
+		name: 'Google Gemini',
+		baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+		apiKeyPrompt: 'API Key (from https://aistudio.google.com/apikey)',
+		sdkProvider: 'google',
+	}),
 	{
 		id: 'openrouter',
 		name: 'OpenRouter',
@@ -432,289 +449,68 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			return config;
 		},
 	},
-	{
+	apiKeyTemplate({
 		id: 'anthropic',
 		name: 'Anthropic Claude',
-		fields: [
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'Anthropic Claude',
-			},
-			{
-				name: 'apiKey',
-				prompt: 'API Key',
-				required: true,
-				sensitive: true,
-			},
-			{
-				name: 'model',
-				prompt: 'Model name(s) (comma-separated)',
-				default: '',
-				required: true,
-			},
-		],
-		buildConfig: answers => ({
-			name: answers.providerName || 'Anthropic Claude',
-			sdkProvider: 'anthropic',
-			baseUrl: 'https://api.anthropic.com/v1',
-			apiKey: answers.apiKey,
-			models: parseArrayField(answers.model),
-		}),
-	},
-	{
+		baseUrl: 'https://api.anthropic.com/v1',
+		sdkProvider: 'anthropic',
+	}),
+	apiKeyTemplate({
 		id: 'mistral',
 		name: 'Mistral AI',
-		fields: [
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'Mistral AI',
-			},
-			{
-				name: 'apiKey',
-				prompt: 'API Key',
-				required: true,
-				sensitive: true,
-			},
-			{
-				name: 'model',
-				prompt: 'Model name(s) (comma-separated)',
-				default: '',
-				required: true,
-			},
-		],
-		buildConfig: answers => ({
-			name: answers.providerName || 'Mistral AI',
-			baseUrl: 'https://api.mistral.ai/v1',
-			apiKey: answers.apiKey,
-			models: parseArrayField(answers.model),
-		}),
-	},
-	{
+		baseUrl: 'https://api.mistral.ai/v1',
+	}),
+	apiKeyTemplate({
 		id: 'z-ai',
 		name: 'Z.ai',
-		fields: [
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'Z.ai',
-				required: true,
-			},
-			{
-				name: 'apiKey',
-				prompt: 'API Key',
-				required: true,
-				sensitive: true,
-			},
-			{
-				name: 'model',
-				prompt: 'Model name(s) (comma-separated)',
-				default: '',
-				required: true,
-			},
-		],
-		buildConfig: answers => ({
-			name: answers.providerName || 'Z.ai',
-			baseUrl: 'https://api.z.ai/api/paas/v4/',
-			apiKey: answers.apiKey,
-			models: parseArrayField(answers.model),
-		}),
-	},
-	{
+		baseUrl: 'https://api.z.ai/api/paas/v4/',
+		providerNameRequired: true,
+	}),
+	apiKeyTemplate({
 		id: 'z-ai-coding',
 		name: 'Z.ai Coding Subscription',
-		fields: [
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'Z.ai Coding Subscription',
-				required: true,
-			},
-			{
-				name: 'apiKey',
-				prompt: 'API Key',
-				required: true,
-				sensitive: true,
-			},
-			{
-				name: 'model',
-				prompt: 'Model name(s) (comma-separated)',
-				default: '',
-				required: true,
-			},
-		],
-		buildConfig: answers => ({
-			name: answers.providerName || 'Z.ai Coding Subscription',
-			baseUrl: 'https://api.z.ai/api/coding/paas/v4/',
-			apiKey: answers.apiKey,
-			models: parseArrayField(answers.model),
-		}),
-	},
-	{
+		baseUrl: 'https://api.z.ai/api/coding/paas/v4/',
+		providerNameRequired: true,
+	}),
+	apiKeyTemplate({
 		id: 'github-models',
 		name: 'GitHub Models',
-		fields: [
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'GitHub Models',
-			},
-			{
-				name: 'apiKey',
-				prompt: 'GitHub Token (PAT with models:read scope)',
-				required: true,
-				sensitive: true,
-			},
-			{
-				name: 'model',
-				prompt: 'Model name(s) (comma-separated)',
-				default: '',
-				required: true,
-			},
-		],
-		buildConfig: answers => ({
-			name: answers.providerName || 'GitHub Models',
-			baseUrl: 'https://models.github.ai/inference',
-			apiKey: answers.apiKey,
-			models: parseArrayField(answers.model),
-		}),
-	},
-	{
+		baseUrl: 'https://models.github.ai/inference',
+		apiKeyPrompt: 'GitHub Token (PAT with models:read scope)',
+	}),
+	oauthProviderTemplate({
 		id: 'chatgpt-codex',
 		name: 'ChatGPT / Codex',
-		fields: [
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'ChatGPT / Codex',
-			},
-			{
-				name: 'model',
-				prompt: 'Model name(s) (comma-separated).',
-				default: '',
-				required: true,
-			},
-		],
-		buildConfig: answers => ({
-			name: answers.providerName || 'ChatGPT / Codex',
-			baseUrl: 'https://chatgpt.com/backend-api/codex',
-			models: parseArrayField(answers.model),
-			sdkProvider: 'chatgpt-codex',
-		}),
-	},
-	{
+		baseUrl: 'https://chatgpt.com/backend-api/codex',
+		sdkProvider: 'chatgpt-codex',
+	}),
+	oauthProviderTemplate({
 		id: 'github-copilot',
 		name: 'GitHub Copilot',
-		fields: [
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'GitHub Copilot',
-			},
-			{
-				name: 'model',
-				prompt: 'Model name(s) (comma-separated).',
-				default: '',
-				required: true,
-			},
-		],
-		buildConfig: answers => ({
-			name: answers.providerName || 'GitHub Copilot',
-			baseUrl: 'https://api.githubcopilot.com',
-			models: parseArrayField(answers.model),
-			sdkProvider: 'github-copilot',
-		}),
-	},
-	{
+		baseUrl: 'https://api.githubcopilot.com',
+		sdkProvider: 'github-copilot',
+	}),
+	apiKeyTemplate({
 		id: 'kimi-code',
 		name: 'Kimi Code',
-		fields: [
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'Kimi Code',
-			},
-			{
-				name: 'apiKey',
-				prompt: 'API Key',
-				required: true,
-				sensitive: true,
-			},
-			{
-				name: 'model',
-				prompt: 'Model name(s) (comma-separated)',
-				default: 'kimi-for-coding',
-				required: true,
-			},
-		],
-		buildConfig: answers => ({
-			name: answers.providerName || 'Kimi Code',
-			sdkProvider: 'anthropic',
-			baseUrl: 'https://api.kimi.com/coding/v1',
-			apiKey: answers.apiKey,
-			models: parseArrayField(answers.model),
-		}),
-	},
-	{
+		baseUrl: 'https://api.kimi.com/coding/v1',
+		modelDefault: 'kimi-for-coding',
+		sdkProvider: 'anthropic',
+	}),
+	apiKeyTemplate({
 		id: 'minimax-coding',
 		name: 'MiniMax Coding Plan',
-		fields: [
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'MiniMax Coding',
-			},
-			{
-				name: 'apiKey',
-				prompt: 'API Key',
-				required: true,
-				sensitive: true,
-			},
-			{
-				name: 'model',
-				prompt: 'Model name(s) (comma-separated)',
-				default: 'MiniMax-M2.7',
-				required: true,
-			},
-		],
-		buildConfig: answers => ({
-			name: answers.providerName || 'MiniMax Coding',
-			sdkProvider: 'anthropic',
-			baseUrl: 'https://api.minimax.io/anthropic/v1',
-			apiKey: answers.apiKey,
-			models: parseArrayField(answers.model),
-		}),
-	},
-	{
+		defaultProviderName: 'MiniMax Coding',
+		baseUrl: 'https://api.minimax.io/anthropic/v1',
+		modelDefault: 'MiniMax-M2.7',
+		sdkProvider: 'anthropic',
+	}),
+	apiKeyTemplate({
 		id: 'poe',
 		name: 'Poe',
-		fields: [
-			{
-				name: 'providerName',
-				prompt: 'Provider name',
-				default: 'Poe',
-			},
-			{
-				name: 'apiKey',
-				prompt: 'API Key (from poe.com/api_key)',
-				required: true,
-				sensitive: true,
-			},
-			{
-				name: 'model',
-				prompt: 'Model name(s) (comma-separated)',
-				default: '',
-				required: true,
-			},
-		],
-		buildConfig: answers => ({
-			name: answers.providerName || 'Poe',
-			baseUrl: 'https://api.poe.com/v1',
-			apiKey: answers.apiKey,
-			models: parseArrayField(answers.model),
-		}),
-	},
+		baseUrl: 'https://api.poe.com/v1',
+		apiKeyPrompt: 'API Key (from poe.com/api_key)',
+	}),
 	{
 		id: 'custom',
 		name: 'Custom Provider',

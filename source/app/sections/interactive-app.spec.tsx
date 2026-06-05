@@ -22,7 +22,6 @@ function makeProps(o: Overrides = {}) {
 	const appState = {
 		client: null,
 		messages: [],
-		displayMessages: [],
 		currentModel: 'mock-model',
 		currentProvider: 'mock',
 		startChat: o.startChat ?? false,

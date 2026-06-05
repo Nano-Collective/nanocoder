@@ -65,7 +65,6 @@ export function useAppState(
 
 	const [client, setClient] = useState<LLMClient | null>(null);
 	const [messages, setMessages] = useState<Message[]>([]);
-	const [displayMessages, setDisplayMessages] = useState<Message[]>([]);
 	const [messageTokenCache, setMessageTokenCache] = useState<
 		BoundedMap<string, number>
 	>(
@@ -260,7 +259,6 @@ export function useAppState(
 	// Message updater - no limits, display all messages
 	const updateMessages = useCallback((newMessages: Message[]) => {
 		setMessages(newMessages);
-		setDisplayMessages(newMessages);
 	}, []);
 
 	// Reset tool confirmation state
@@ -277,7 +275,6 @@ export function useAppState(
 		// State
 		client,
 		messages,
-		displayMessages,
 		messageTokenCache,
 		currentModel,
 		currentProvider,
@@ -307,15 +304,8 @@ export function useAppState(
 		setActiveMode,
 
 		// Derived mode booleans (read-only convenience)
-		isModelSelectionMode: activeMode === 'model',
-		isModelDatabaseMode: activeMode === 'modelDatabase',
-		isConfigWizardMode: activeMode === 'configWizard',
-		isMcpWizardMode: activeMode === 'mcpWizard',
-		isCheckpointLoadMode: activeMode === 'checkpointLoad',
 		isExplorerMode: activeMode === 'explorer',
 		isIdeSelectionMode: activeMode === 'ideSelection',
-		isSessionSelectorMode: activeMode === 'sessionSelector',
-		isTuneActive: activeMode === 'tune',
 
 		isVscodeEnabled,
 		checkpointLoadData,
@@ -346,7 +336,6 @@ export function useAppState(
 		// Setters
 		setClient,
 		setMessages,
-		setDisplayMessages,
 		setMessageTokenCache,
 		setCurrentModel,
 		setCurrentProvider,

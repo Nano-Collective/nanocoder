@@ -222,44 +222,6 @@ test('ToolRegistry - getHandlers returns empty object when no tools', t => {
 	t.deepEqual(handlers, {});
 });
 
-test('ToolRegistry - getFormatters returns record of formatters', t => {
-	const registry = new ToolRegistry();
-	const formatter1: ToolEntry['formatter'] = (o) => String(o);
-	const formatter2: ToolEntry['formatter'] = (o) => String(o);
-
-	registry.registerMany([
-		createMockToolEntry({ name: 'tool1', formatter: formatter1 }),
-		createMockToolEntry({ name: 'tool2', formatter: formatter2 }),
-		createMockToolEntry({ name: 'tool3', formatter: undefined })
-	]);
-
-	const formatters = registry.getFormatters();
-
-	t.is(formatters.tool1, formatter1);
-	t.is(formatters.tool2, formatter2);
-	// tool3 has no formatter, so it shouldn't be in the record
-	t.false('tool3' in formatters);
-});
-
-test('ToolRegistry - getValidators returns record of validators', t => {
-	const registry = new ToolRegistry();
-	const validator1: ToolEntry['validator'] = async () => ({ valid: true });
-	const validator2: ToolEntry['validator'] = async () => ({ valid: false, error: 'test error' });
-
-	registry.registerMany([
-		createMockToolEntry({ name: 'tool1', validator: validator1 }),
-		createMockToolEntry({ name: 'tool2', validator: validator2 }),
-		createMockToolEntry({ name: 'tool3', validator: undefined })
-	]);
-
-	const validators = registry.getValidators();
-
-	t.is(validators.tool1, validator1);
-	t.is(validators.tool2, validator2);
-	// tool3 has no validator, so it shouldn't be in the record
-	t.false('tool3' in validators);
-});
-
 test('ToolRegistry - getNativeTools returns record of native tools', t => {
 	const registry = new ToolRegistry();
 	const tool1: ToolEntry['tool'] = { execute: async () => 'test 1' } as any;

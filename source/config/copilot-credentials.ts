@@ -5,16 +5,8 @@
  * (e.g. ~/.config/nanocoder/) so they are not in project config.
  */
 
-import {
-	chmodSync,
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	writeFileSync,
-} from 'fs';
-import {join} from 'path';
 import {clearCopilotTokenCache} from '@/auth/github-copilot';
-import {getConfigPath} from '@/config/paths';
+import {createJsonCredentialStore} from '@/config/json-credential-store';
 
 const FILENAME = 'copilot-credentials.json';
 
@@ -29,41 +21,7 @@ export interface CopilotCredential {
 	enterpriseUrl?: string;
 }
 
-export type CopilotCredentialsStore = Record<string, CopilotCredential>;
-
-function getCredentialsPath(): string {
-	return join(getConfigPath(), FILENAME);
-}
-
-function loadStore(): CopilotCredentialsStore {
-	const path = getCredentialsPath();
-	if (!existsSync(path)) {
-		return {};
-	}
-	try {
-		const raw = readFileSync(path, 'utf-8');
-		const data = JSON.parse(raw) as unknown;
-		if (data !== null && typeof data === 'object' && !Array.isArray(data)) {
-			return data as CopilotCredentialsStore;
-		}
-	} catch {
-		// Invalid or unreadable
-	}
-	return {};
-}
-
-function writeStore(store: CopilotCredentialsStore): void {
-	const dir = getConfigPath();
-	if (!existsSync(dir)) {
-		mkdirSync(dir, {recursive: true});
-	}
-	const filePath = getCredentialsPath();
-	writeFileSync(filePath, JSON.stringify(store, null, 2), {
-		encoding: 'utf-8',
-		mode: 0o600,
-	});
-	chmodSync(filePath, 0o600);
-}
+const credentialStore = createJsonCredentialStore<CopilotCredential>(FILENAME);
 
 /**
  * Get stored Copilot credential for a provider name (e.g. "GitHub Copilot").
@@ -71,7 +29,7 @@ function writeStore(store: CopilotCredentialsStore): void {
 export function loadCopilotCredential(
 	providerName: string,
 ): CopilotCredential | null {
-	const store = loadStore();
+	const store = credentialStore.load();
 	const entry = store[providerName];
 	if (!entry || typeof entry.oauthToken !== 'string') {
 		return null;
@@ -91,19 +49,19 @@ export function saveCopilotCredential(
 	oauthToken: string,
 	enterpriseUrl?: string,
 ): void {
-	const store = loadStore();
+	const store = credentialStore.load();
 	store[providerName] = {oauthToken, enterpriseUrl};
-	writeStore(store);
+	credentialStore.write(store);
 }
 
 /**
  * Remove stored credential for a provider name.
  */
 export function removeCopilotCredential(providerName: string): void {
-	const store = loadStore();
+	const store = credentialStore.load();
 	if (providerName in store) {
 		delete store[providerName];
-		writeStore(store);
+		credentialStore.write(store);
 		clearCopilotTokenCache();
 	}
 }

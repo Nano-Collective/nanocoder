@@ -1,4 +1,9 @@
 import type {AISDKCoreTool} from '@/types/index';
+import {
+	extractToolDescription,
+	extractToolSchema,
+	selectExampleParamNames,
+} from './tool-schema-extract.js';
 
 /**
  * Formats tool definitions for injection into the system prompt
@@ -41,13 +46,13 @@ function formatSingleTool(name: string, tool: AISDKCoreTool): string {
 	let output = `### ${name}\n\n`;
 
 	// Extract description from tool
-	const description = extractDescription(tool);
+	const description = extractToolDescription(tool);
 	if (description) {
 		output += `${description}\n\n`;
 	}
 
 	// Extract and format parameters
-	const schema = extractInputSchema(tool);
+	const schema = extractToolSchema(tool);
 	if (schema && schema.properties) {
 		output += '**Parameters:**\n';
 
@@ -69,10 +74,7 @@ function formatSingleTool(name: string, tool: AISDKCoreTool): string {
 		output += '\n';
 
 		// Add example usage — prefer required params, fall back to any params
-		const exampleParams =
-			required.length > 0
-				? required.slice(0, 2)
-				: Object.keys(properties).slice(0, 2);
+		const exampleParams = selectExampleParamNames(properties, required);
 		output += '**Example:**\n```xml\n';
 		output += `<${name}>\n`;
 		for (const paramName of exampleParams) {
@@ -83,43 +85,4 @@ function formatSingleTool(name: string, tool: AISDKCoreTool): string {
 	}
 
 	return output;
-}
-
-/**
- * Extracts description from AI SDK tool
- */
-function extractDescription(tool: AISDKCoreTool): string | undefined {
-	// AI SDK tools have description at the top level
-	if ('description' in tool && typeof tool.description === 'string') {
-		return tool.description;
-	}
-	return undefined;
-}
-
-/**
- * Extracts input schema from AI SDK tool
- */
-function extractInputSchema(
-	tool: AISDKCoreTool,
-): {properties?: unknown; required?: unknown} | undefined {
-	// AI SDK v6 tools use inputSchema (from jsonSchema())
-	if ('inputSchema' in tool && tool.inputSchema) {
-		const schema = tool.inputSchema as {jsonSchema?: unknown};
-		// jsonSchema() wraps the schema, so we need to unwrap it
-		if (schema.jsonSchema) {
-			return schema.jsonSchema as {properties?: unknown; required?: unknown};
-		}
-		return schema as {properties?: unknown; required?: unknown};
-	}
-
-	// Fallback: check for parameters (older format)
-	if ('parameters' in tool && tool.parameters) {
-		const params = tool.parameters as {jsonSchema?: unknown};
-		if (params.jsonSchema) {
-			return params.jsonSchema as {properties?: unknown; required?: unknown};
-		}
-		return params as {properties?: unknown; required?: unknown};
-	}
-
-	return undefined;
 }

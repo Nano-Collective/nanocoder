@@ -128,34 +128,6 @@ export class ToolRegistry {
 	}
 
 	/**
-	 * Get all formatter entries as a record (compatible with old API)
-	 * @returns Record mapping tool names to formatters
-	 */
-	getFormatters(): Record<string, ToolFormatter> {
-		const formatters: Record<string, ToolFormatter> = {};
-		for (const [name, entry] of this.tools) {
-			if (entry.formatter) {
-				formatters[name] = entry.formatter;
-			}
-		}
-		return formatters;
-	}
-
-	/**
-	 * Get all validator entries as a record (compatible with old API)
-	 * @returns Record mapping tool names to validators
-	 */
-	getValidators(): Record<string, ToolValidator> {
-		const validators: Record<string, ToolValidator> = {};
-		for (const [name, entry] of this.tools) {
-			if (entry.validator) {
-				validators[name] = entry.validator;
-			}
-		}
-		return validators;
-	}
-
-	/**
 	 * Get all native AI SDK tools (schemas + descriptions for the model) with
 	 * their execute functions removed. The SDK never auto-executes: tool calls
 	 * are returned for us to handle (approval, parallel execution, etc.) and

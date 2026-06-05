@@ -101,44 +101,50 @@ export function useToolHandler({
 		await onProcessAssistantResponse(systemMessage, updatedMessagesWithTools);
 	};
 
+	// Cancel all pending tools: close any open VS Code diffs, record
+	// cancellation results so conversation state stays consistent, and reset
+	// to let the user type a new message (the conversation is NOT continued).
+	const cancelPendingTools = () => {
+		// Close all VS Code diffs when user cancels
+		const vscodeServer = getVSCodeServerSync();
+		if (vscodeServer?.hasConnections()) {
+			vscodeServer.closeAllDiffs();
+		}
+
+		addToChatQueue(
+			<InfoMessage
+				key={generateKey('tool-cancelled')}
+				message="Tool execution cancelled by user."
+				hideBox={true}
+			/>,
+		);
+
+		if (!currentConversationContext) {
+			resetToolConfirmationState();
+			return;
+		}
+
+		// Create cancellation results for all pending tools
+		// This is critical to maintain conversation state integrity
+		const cancellationResults = createCancellationResults(pendingToolCalls);
+
+		const {messagesBeforeToolExecution} = currentConversationContext;
+
+		// Build updated messages with cancellation results
+		const builder = new MessageBuilder(messagesBeforeToolExecution);
+		builder.addToolResults(cancellationResults);
+		const updatedMessagesWithCancellation = builder.build();
+		setMessages(updatedMessagesWithCancellation);
+
+		// Reset state to allow user to type a new message
+		// Do NOT continue the conversation - let the user provide instructions
+		resetToolConfirmationState();
+	};
+
 	// Handle tool confirmation
 	const handleToolConfirmation = (confirmed: boolean) => {
 		if (!confirmed) {
-			// User cancelled - close all VS Code diffs
-			const vscodeServer = getVSCodeServerSync();
-			if (vscodeServer?.hasConnections()) {
-				vscodeServer.closeAllDiffs();
-			}
-
-			// User cancelled - show message
-			addToChatQueue(
-				<InfoMessage
-					key={generateKey('tool-cancelled')}
-					message="Tool execution cancelled by user."
-					hideBox={true}
-				/>,
-			);
-
-			if (!currentConversationContext) {
-				resetToolConfirmationState();
-				return;
-			}
-
-			// Create cancellation results for all pending tools
-			// This is critical to maintain conversation state integrity
-			const cancellationResults = createCancellationResults(pendingToolCalls);
-
-			const {messagesBeforeToolExecution} = currentConversationContext;
-
-			// Build updated messages with cancellation results
-			const builder = new MessageBuilder(messagesBeforeToolExecution);
-			builder.addToolResults(cancellationResults);
-			const updatedMessagesWithCancellation = builder.build();
-			setMessages(updatedMessagesWithCancellation);
-
-			// Reset state to allow user to type a new message
-			// Do NOT continue the conversation - let the user provide instructions
-			resetToolConfirmationState();
+			cancelPendingTools();
 			return;
 		}
 
@@ -338,40 +344,7 @@ export function useToolHandler({
 
 	// Handle tool confirmation cancel
 	const handleToolConfirmationCancel = () => {
-		// Close all VS Code diffs when user cancels
-		const vscodeServer = getVSCodeServerSync();
-		if (vscodeServer?.hasConnections()) {
-			vscodeServer.closeAllDiffs();
-		}
-
-		addToChatQueue(
-			<InfoMessage
-				key={generateKey('tool-cancelled')}
-				message="Tool execution cancelled by user."
-				hideBox={true}
-			/>,
-		);
-
-		if (!currentConversationContext) {
-			resetToolConfirmationState();
-			return;
-		}
-
-		// Create cancellation results for all pending tools
-		// This is critical to maintain conversation state integrity
-		const cancellationResults = createCancellationResults(pendingToolCalls);
-
-		const {messagesBeforeToolExecution} = currentConversationContext;
-
-		// Build updated messages with cancellation results
-		const builder = new MessageBuilder(messagesBeforeToolExecution);
-		builder.addToolResults(cancellationResults);
-		const updatedMessagesWithCancellation = builder.build();
-		setMessages(updatedMessagesWithCancellation);
-
-		// Reset state to allow user to type a new message
-		// Do NOT continue the conversation - let the user provide instructions
-		resetToolConfirmationState();
+		cancelPendingTools();
 	};
 
 	// Start tool confirmation flow

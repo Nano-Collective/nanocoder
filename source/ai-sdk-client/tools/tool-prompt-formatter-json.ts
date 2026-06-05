@@ -1,4 +1,9 @@
 import type {AISDKCoreTool} from '@/types/index';
+import {
+	extractToolDescription,
+	extractToolSchema,
+	selectExampleParamNames,
+} from './tool-schema-extract.js';
 
 /**
  * Formats tool definitions for injection into the system prompt as JSON.
@@ -39,12 +44,12 @@ export function formatToolsForJSONPrompt(
 function formatSingleTool(name: string, tool: AISDKCoreTool): string {
 	let output = `### ${name}\n\n`;
 
-	const description = extractDescription(tool);
+	const description = extractToolDescription(tool);
 	if (description) {
 		output += `${description}\n\n`;
 	}
 
-	const schema = extractInputSchema(tool);
+	const schema = extractToolSchema(tool);
 	if (schema) {
 		output += '**Input schema (JSON Schema):**\n';
 		output += '```json\n';
@@ -58,10 +63,7 @@ function formatSingleTool(name: string, tool: AISDKCoreTool): string {
 			>) ?? {};
 		const required = (schema.required as string[]) ?? [];
 
-		const exampleParams =
-			required.length > 0
-				? required.slice(0, 2)
-				: Object.keys(properties).slice(0, 2);
+		const exampleParams = selectExampleParamNames(properties, required);
 
 		if (exampleParams.length > 0) {
 			const exampleArgs: Record<string, string> = {};
@@ -75,33 +77,4 @@ function formatSingleTool(name: string, tool: AISDKCoreTool): string {
 	}
 
 	return output;
-}
-
-function extractDescription(tool: AISDKCoreTool): string | undefined {
-	if ('description' in tool && typeof tool.description === 'string') {
-		return tool.description;
-	}
-	return undefined;
-}
-
-function extractInputSchema(
-	tool: AISDKCoreTool,
-): {properties?: unknown; required?: unknown} | undefined {
-	if ('inputSchema' in tool && tool.inputSchema) {
-		const schema = tool.inputSchema as {jsonSchema?: unknown};
-		if (schema.jsonSchema) {
-			return schema.jsonSchema as {properties?: unknown; required?: unknown};
-		}
-		return schema as {properties?: unknown; required?: unknown};
-	}
-
-	if ('parameters' in tool && tool.parameters) {
-		const params = tool.parameters as {jsonSchema?: unknown};
-		if (params.jsonSchema) {
-			return params.jsonSchema as {properties?: unknown; required?: unknown};
-		}
-		return params as {properties?: unknown; required?: unknown};
-	}
-
-	return undefined;
 }
