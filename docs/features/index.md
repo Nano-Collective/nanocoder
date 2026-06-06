@@ -198,6 +198,14 @@ nanocoder --vscode
 
 Features include live diff previews of proposed changes, right-click "Ask Nanocoder about this" for selected code, and LSP diagnostics sharing.
 
+### ACP (Zed and other editors)
+
+Run Nanocoder as an [Agent Client Protocol server](acp.md) so ACP-compatible editors like Zed can drive it as a native agent — with diffs, tool cards, permission prompts, and model switching rendered in the editor:
+
+```bash
+nanocoder --acp
+```
+
 ### MCP Servers
 
 Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) servers](../configuration/mcp-configuration.md). MCP servers add new tools the AI can use — from database queries to API calls to custom integrations.
@@ -224,6 +232,7 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Task Management](task-management.md) | Tracking multi-step work |
 | [File Explorer](file-explorer.md) | Interactive file browser for context selection |
 | [VS Code Extension](vscode-extension.md) | Editor integration with live diff previews |
+| [ACP](acp.md) | Run as an Agent Client Protocol server for editors like Zed |
 | [Tune](tune.md) | Runtime model tuning for tool profiles, parameters, and compaction |
 | [Desktop Notifications](notifications.md) | Get notified when Nanocoder needs your attention |
 | [Keyboard Shortcuts](keyboard-shortcuts.md) | Complete keyboard shortcut reference |
