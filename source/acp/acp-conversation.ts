@@ -4,7 +4,9 @@ import type {
 	ToolCallStatus,
 } from '@agentclientprotocol/sdk';
 import {requestToolPermission} from '@/acp/acp-permission';
+import {requestUserChoice} from '@/acp/acp-question';
 import type {AcpSession} from '@/acp/acp-session';
+import {type AcpToolCallMeta, buildToolCallMeta} from '@/acp/acp-tool-call';
 import {processToolUse} from '@/message-handler';
 import {parseToolCalls} from '@/tool-calling/index';
 import type {ToolManager} from '@/tools/tool-manager';
@@ -154,8 +156,22 @@ export async function runAcpConversation(
 		// Process tool calls
 		const toolResults: ToolResult[] = [];
 		for (const toolCall of validToolCalls) {
+			// Enrich the call with ACP metadata (kind, file locations, and a diff
+			// for edits) so the client can render rich tool cards and previews.
+			const meta = await buildToolCallMeta(toolCall);
+
 			// Notify client about tool call
-			await emitToolCall(session, conn, toolCall, 'pending');
+			await emitToolCall(session, conn, toolCall, 'pending', meta);
+
+			// ask_user is interactive: instead of executing it, surface the
+			// question's options through the client and feed the choice back as
+			// the tool result. We reuse this call's id (just announced) so the
+			// permission request targets a known tool call.
+			if (toolCall.function.name === 'ask_user') {
+				const answer = await handleAskUser(session, conn, toolCall);
+				toolResults.push(answer);
+				continue;
+			}
 
 			// Check if approval is needed
 			const needsApproval = await evaluateNeedsApproval(
@@ -165,7 +181,12 @@ export async function runAcpConversation(
 			);
 
 			if (needsApproval && developmentMode !== 'yolo') {
-				const permission = await requestToolPermission(session, toolCall, conn);
+				const permission = await requestToolPermission(
+					session,
+					toolCall,
+					conn,
+					meta,
+				);
 
 				if (permission === 'cancelled') {
 					await emitToolCallUpdate(
@@ -226,15 +247,19 @@ async function emitToolCall(
 	conn: AgentSideConnection,
 	toolCall: ToolCall,
 	status: ToolCallStatus,
+	meta: AcpToolCallMeta,
 ): Promise<void> {
 	await conn.sessionUpdate({
 		sessionId: session.sessionId,
 		update: {
 			sessionUpdate: 'tool_call',
 			toolCallId: toolCall.id,
-			title: toolCall.function.name,
+			title: meta.title,
+			kind: meta.kind,
 			rawInput: toolCall.function.arguments,
 			status,
+			content: meta.content.length > 0 ? meta.content : undefined,
+			locations: meta.locations.length > 0 ? meta.locations : undefined,
 		},
 	});
 }
@@ -255,6 +280,74 @@ async function emitToolCallUpdate(
 			rawOutput,
 		},
 	});
+}
+
+async function handleAskUser(
+	session: AcpSession,
+	conn: AgentSideConnection,
+	toolCall: ToolCall,
+): Promise<ToolResult> {
+	const args = toolCall.function.arguments ?? {};
+	const question = typeof args.question === 'string' ? args.question : '';
+	const options = normalizeQuestionOptions(args.options);
+
+	let content: string;
+	if (!question || options.length < 2 || options.length > 4) {
+		content = 'Error: ask_user requires a question and 2-4 string options.';
+		await emitToolCallUpdate(session, conn, toolCall, 'failed', content);
+	} else {
+		await emitToolCallUpdate(session, conn, toolCall, 'in_progress');
+		content = await requestUserChoice(
+			conn,
+			session.sessionId,
+			toolCall.id,
+			question,
+			options,
+		);
+		const status: ToolCallStatus = content.startsWith('Error')
+			? 'failed'
+			: 'completed';
+		await emitToolCallUpdate(session, conn, toolCall, status, content);
+	}
+
+	return {
+		tool_call_id: toolCall.id,
+		role: 'tool',
+		name: toolCall.function.name,
+		content,
+	};
+}
+
+/**
+ * Coerce the model's `options` into display strings. Most models pass an array
+ * of strings, but some send objects (e.g. `{label}`, `{description}`), so we
+ * extract a sensible label rather than dropping them and failing the call.
+ */
+function normalizeQuestionOptions(raw: unknown): string[] {
+	if (!Array.isArray(raw)) {
+		return [];
+	}
+	const result: string[] = [];
+	for (const option of raw) {
+		if (typeof option === 'string') {
+			if (option.length > 0) result.push(option);
+			continue;
+		}
+		if (option && typeof option === 'object') {
+			const record = option as Record<string, unknown>;
+			const label =
+				record.label ??
+				record.name ??
+				record.value ??
+				record.title ??
+				record.description ??
+				record.option;
+			if (typeof label === 'string' && label.length > 0) {
+				result.push(label);
+			}
+		}
+	}
+	return result;
 }
 
 async function evaluateNeedsApproval(

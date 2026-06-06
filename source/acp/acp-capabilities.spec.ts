@@ -15,6 +15,7 @@ console.log('\nacp-capabilities.spec.ts');
 test('getAgentCapabilities - returns session capabilities with close', t => {
 	const caps = getAgentCapabilities();
 	t.deepEqual(caps, {
+		loadSession: true,
 		sessionCapabilities: {
 			close: {},
 		},

@@ -319,7 +319,7 @@ async function main(): Promise<void> {
 		}
 	} else if (acpMode) {
 		const {runAcpServer} = await import('@/acp/acp-server');
-		await runAcpServer({cliProvider, cliModel});
+		await runAcpServer({cliProvider, cliModel, appVersion: version});
 	} else if (plainMode && nonInteractivePrompt) {
 		// Headless, Ink-free path. Note: --plain is currently only valid with
 		// `run`, so we must have a non-empty prompt here.

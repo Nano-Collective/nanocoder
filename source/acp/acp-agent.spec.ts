@@ -1,3 +1,5 @@
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import {AcpAgent} from '@/acp/acp-agent';
 import type {AcpInitContext} from '@/acp/acp-types';
@@ -8,15 +10,28 @@ import {
 
 console.log('\nacp-agent.spec.ts');
 
+// Isolate preferences writes (unstable_setSessionModel persists last-used model).
+process.env.NANOCODER_CONFIG_DIR = join(
+	tmpdir(),
+	`nanocoder-acp-test-${Date.now()}`,
+);
+
 // ============================================================================
 // Test helpers
 // ============================================================================
+
+let mockCurrentModel = 'test-model';
 
 const createMockInitContext = (): AcpInitContext => ({
 	client: {
 		chat: async () => ({
 			choices: [{message: {content: 'Test response'}}],
 		}),
+		getAvailableModels: async () => ['test-model', 'other-model'],
+		getCurrentModel: () => mockCurrentModel,
+		setModel: (model: string) => {
+			mockCurrentModel = model;
+		},
 	} as any,
 	toolManager: {
 		getAvailableToolNames: () => [],
@@ -45,6 +60,7 @@ const createAgent = (): {agent: AcpAgent; conn: any} => {
 };
 
 test.beforeEach(() => {
+	mockCurrentModel = 'test-model';
 	setToolRegistryGetter(() => ({}));
 	setToolManagerGetter(() => null);
 });
@@ -53,30 +69,38 @@ test.beforeEach(() => {
 // initialize()
 // ============================================================================
 
-test('AcpAgent.initialize - returns correct protocol version', async t => {
+test('AcpAgent.initialize - echoes a supported protocol version', async t => {
 	const {agent} = createAgent();
-	const result = await agent.initialize({protocolVersion: '0.11'});
-	t.is(result.protocolVersion, '0.11');
+	const result = await agent.initialize({protocolVersion: 1});
+	t.is(result.protocolVersion, 1);
+});
+
+test('AcpAgent.initialize - clamps a newer protocol version down to ours', async t => {
+	const {agent} = createAgent();
+	const result = await agent.initialize({protocolVersion: 999} as any);
+	// Never claim support for a version newer than the SDK implements.
+	t.true((result.protocolVersion as number) < 999);
 });
 
 test('AcpAgent.initialize - returns agent capabilities', async t => {
 	const {agent} = createAgent();
-	const result = await agent.initialize({protocolVersion: '0.11'});
+	const result = await agent.initialize({protocolVersion: 1});
 	t.truthy(result.agentCapabilities);
 	t.truthy(result.agentCapabilities?.sessionCapabilities?.close);
 });
 
-test('AcpAgent.initialize - returns agent info', async t => {
-	const {agent} = createAgent();
-	const result = await agent.initialize({protocolVersion: '0.11'});
+test('AcpAgent.initialize - returns agent info with provided version', async t => {
+	const conn = createMockConn();
+	const agent = new AcpAgent(createMockInitContext(), conn, '9.9.9');
+	const result = await agent.initialize({protocolVersion: 1});
 	t.is(result.agentInfo?.name, 'nanocoder');
 	t.is(result.agentInfo?.title, 'Nanocoder');
-	t.truthy(result.agentInfo?.version);
+	t.is(result.agentInfo?.version, '9.9.9');
 });
 
 test('AcpAgent.initialize - returns empty auth methods', async t => {
 	const {agent} = createAgent();
-	const result = await agent.initialize({protocolVersion: '0.11'});
+	const result = await agent.initialize({protocolVersion: 1});
 	t.deepEqual(result.authMethods, []);
 });
 
@@ -106,6 +130,106 @@ test('AcpAgent.newSession - returns all available modes', async t => {
 	t.true(modeIds.includes('auto-accept'));
 	t.true(modeIds.includes('yolo'));
 	t.true(modeIds.includes('plan'));
+});
+
+test('AcpAgent.newSession - exposes available models and current model', async t => {
+	const {agent} = createAgent();
+	const result = await agent.newSession({cwd: '/tmp'});
+	t.is(result.models?.currentModelId, 'test-model');
+	const ids = result.models?.availableModels.map((m: any) => m.modelId);
+	t.true(ids?.includes('test-model'));
+	t.true(ids?.includes('other-model'));
+});
+
+// ============================================================================
+// loadSession()
+// ============================================================================
+
+test('AcpAgent.initialize - advertises loadSession capability', async t => {
+	const {agent} = createAgent();
+	const result = await agent.initialize({protocolVersion: 1});
+	t.true(result.agentCapabilities?.loadSession);
+});
+
+test('AcpAgent.loadSession - creates a usable session for an unknown id', async t => {
+	const {agent} = createAgent();
+	const result = await agent.loadSession({
+		sessionId: 'persisted-123',
+		cwd: '/tmp',
+		mcpServers: [],
+	});
+	t.truthy(result.modes);
+	t.truthy(result.models);
+	// The loaded session must accept prompts (no "session not found").
+	const prompt = await agent.prompt({
+		sessionId: 'persisted-123',
+		prompt: [{type: 'text', text: 'hi'}],
+	});
+	t.truthy(prompt.stopReason);
+});
+
+test('AcpAgent.loadSession - replays in-memory history for a known session', async t => {
+	const conn = createMockConn();
+	const updates: any[] = [];
+	conn.sessionUpdate = async (u: any) => {
+		updates.push(u);
+	};
+	const agent = new AcpAgent(createMockInitContext(), conn);
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'remember this'}],
+	});
+
+	updates.length = 0;
+	await agent.loadSession({
+		sessionId: session.sessionId,
+		cwd: '/tmp',
+		mcpServers: [],
+	});
+	const replayed = updates.filter(
+		u => u.update?.sessionUpdate === 'user_message_chunk',
+	);
+	t.true(replayed.some(u => u.update.content.text === 'remember this'));
+});
+
+// ============================================================================
+// unstable_setSessionModel()
+// ============================================================================
+
+test('AcpAgent.unstable_setSessionModel - throws on unknown session', async t => {
+	const {agent} = createAgent();
+	await t.throwsAsync(
+		agent.unstable_setSessionModel({
+			sessionId: 'nonexistent',
+			modelId: 'test-model',
+		}),
+		{message: 'Session not found: nonexistent'},
+	);
+});
+
+test('AcpAgent.unstable_setSessionModel - throws on unknown model', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+	await t.throwsAsync(
+		agent.unstable_setSessionModel({
+			sessionId: session.sessionId,
+			modelId: 'does-not-exist',
+		}),
+		{message: 'Unknown model: does-not-exist'},
+	);
+});
+
+test('AcpAgent.unstable_setSessionModel - switches the client model', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+	const result = await agent.unstable_setSessionModel({
+		sessionId: session.sessionId,
+		modelId: 'other-model',
+	});
+	t.deepEqual(result, {});
+	const after = await agent.newSession({cwd: '/tmp'});
+	t.is(after.models?.currentModelId, 'other-model');
 });
 
 // ============================================================================

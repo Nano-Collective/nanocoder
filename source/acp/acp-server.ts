@@ -10,6 +10,7 @@ const logger = getLogger();
 export interface RunAcpServerOptions {
 	cliProvider?: string;
 	cliModel?: string;
+	appVersion?: string;
 }
 
 export async function runAcpServer(
@@ -61,7 +62,7 @@ export async function runAcpServer(
 	const stream = ndJsonStream(output, input);
 
 	const conn = new AgentSideConnection((connection: AgentSideConnection) => {
-		const agent = new AcpAgent(initContext, connection);
+		const agent = new AcpAgent(initContext, connection, options.appVersion);
 		return agent;
 	}, stream);
 

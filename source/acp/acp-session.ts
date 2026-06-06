@@ -14,6 +14,8 @@ export class AcpSession {
 	systemMessage?: Message;
 	abortController = new AbortController();
 	developmentMode: DevelopmentMode;
+	/** True while a prompt turn is being processed, to reject overlapping prompts. */
+	turnActive = false;
 
 	constructor(options: {
 		sessionId: string;

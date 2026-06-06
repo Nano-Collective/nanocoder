@@ -893,3 +893,96 @@ test('runAcpConversation - parses XML tool calls when toolsDisabled', async t =>
 	t.truthy(toolMsg);
 	t.is(toolMsg?.content, 'Content of /test.txt');
 });
+
+// ============================================================================
+// ask_user (interactive)
+// ============================================================================
+
+test('runAcpConversation - ask_user coerces object options and returns the choice', async t => {
+	const updates: any[] = [];
+	const conn = {
+		sessionUpdate: async (u: any) => {
+			updates.push(u);
+		},
+		// Select whichever option is at index 1.
+		requestPermission: async (p: any) => ({
+			outcome: {outcome: 'selected', optionId: p.options[1].optionId},
+		}),
+	} as unknown as AgentSideConnection;
+
+	const session = createMockSession(conn);
+	const askCall = createMockToolCall(
+		'ask_user',
+		{
+			question: 'Pick one',
+			// Model sends objects rather than plain strings.
+			options: [{description: 'First'}, {description: 'Second'}],
+		},
+		'call-ask',
+	);
+	const {client} = createMockClient([
+		{
+			choices: [{message: {content: '', tool_calls: [askCall]}}],
+			toolsDisabled: false,
+		},
+	]);
+	const toolManager = {
+		getAvailableToolNames: () => ['ask_user'],
+		getEffectiveTools: () => ({}),
+		hasTool: (n: string) => n === 'ask_user',
+		getToolEntry: () => ({tool: {needsApproval: false}}),
+	};
+
+	const result = await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(result.stopReason, 'end_turn');
+	const toolMsg = session.messages.find(
+		(m: any) => m.role === 'tool' && m.name === 'ask_user',
+	);
+	t.is(toolMsg?.content, 'Second');
+});
+
+test('runAcpConversation - ask_user fails cleanly when no usable options', async t => {
+	const conn = {
+		sessionUpdate: async () => {},
+		requestPermission: async () => ({outcome: {outcome: 'cancelled'}}),
+	} as unknown as AgentSideConnection;
+
+	const session = createMockSession(conn);
+	const askCall = createMockToolCall(
+		'ask_user',
+		{question: 'Pick one', options: []},
+		'call-ask',
+	);
+	const {client} = createMockClient([
+		{
+			choices: [{message: {content: '', tool_calls: [askCall]}}],
+			toolsDisabled: false,
+		},
+	]);
+	const toolManager = {
+		getAvailableToolNames: () => ['ask_user'],
+		getEffectiveTools: () => ({}),
+		hasTool: (n: string) => n === 'ask_user',
+		getToolEntry: () => ({tool: {needsApproval: false}}),
+	};
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	const toolMsg = session.messages.find(
+		(m: any) => m.role === 'tool' && m.name === 'ask_user',
+	);
+	t.true(toolMsg?.content.startsWith('Error:'));
+});

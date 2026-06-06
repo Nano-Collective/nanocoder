@@ -4,6 +4,7 @@ import type {
 	ToolCallUpdate,
 } from '@agentclientprotocol/sdk';
 import type {AcpSession} from '@/acp/acp-session';
+import type {AcpToolCallMeta} from '@/acp/acp-tool-call';
 import type {ToolCall} from '@/types/core';
 
 const ALLOW_OPTION: PermissionOption = {
@@ -22,12 +23,16 @@ export async function requestToolPermission(
 	session: AcpSession,
 	toolCall: ToolCall,
 	conn: AgentSideConnection,
+	meta?: AcpToolCallMeta,
 ): Promise<'approved' | 'denied' | 'cancelled'> {
 	const toolCallUpdate: ToolCallUpdate = {
 		toolCallId: toolCall.id,
-		title: toolCall.function.name,
+		title: meta?.title ?? toolCall.function.name,
+		kind: meta?.kind,
 		rawInput: toolCall.function.arguments,
 		status: 'pending',
+		content: meta && meta.content.length > 0 ? meta.content : undefined,
+		locations: meta && meta.locations.length > 0 ? meta.locations : undefined,
 	};
 
 	const response = await conn.requestPermission({
