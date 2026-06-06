@@ -232,3 +232,28 @@ test.serial(
 		}
 	},
 );
+
+test.serial(
+	'createStaticComponents narrow boot summary places branch on its own line',
+	t => {
+		const originalColumns = process.stdout.columns;
+		process.stdout.columns = 50;
+		try {
+			const props: AppContainerProps = {
+				shouldShowWelcome: false,
+				currentProvider: 'test-provider',
+				currentModel: 'test-model',
+			};
+			const components = createStaticComponents(props);
+			const {lastFrame, unmount} = renderWithTheme(<>{components}</>);
+			const output = lastFrame();
+			t.truthy(output);
+			// Branch label sits on a line by itself, separated from the
+			// provider/model line by a newline.
+			t.regex(output!, /test-model[^\n]*\n⎇\s+\S+/);
+			unmount();
+		} finally {
+			process.stdout.columns = originalColumns;
+		}
+	},
+);

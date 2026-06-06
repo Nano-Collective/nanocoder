@@ -60,29 +60,27 @@ function BootSummary({
 	const gitStatus = getGitStatusSummarySync();
 	const gitLabel = gitStatus ? formatBootSummaryGitLabel(gitStatus) : undefined;
 
-	// Narrow terminals: just provider + model + mode + branch, skip the config path
+	// Narrow terminals: provider + model + mode on the first line, with the
+	// branch (when present) underneath so the line doesn't overflow.
 	if (isNarrow) {
 		if (!provider || !model) return <></>;
 		return (
-			<Text>
-				<Text color={colors.success} bold>
-					{provider}
+			<Box flexDirection="column">
+				<Text>
+					<Text color={colors.success} bold>
+						{provider}
+					</Text>
+					<Text color={colors.secondary}> · </Text>
+					<Text color={colors.success}>{model}</Text>
+					{modeLabel && (
+						<>
+							<Text color={colors.secondary}> · </Text>
+							<Text color={colors.info}>{modeLabel}</Text>
+						</>
+					)}
 				</Text>
-				<Text color={colors.secondary}> · </Text>
-				<Text color={colors.success}>{model}</Text>
-				{modeLabel && (
-					<>
-						<Text color={colors.secondary}> · </Text>
-						<Text color={colors.info}>{modeLabel}</Text>
-					</>
-				)}
-				{gitLabel && (
-					<>
-						<Text color={colors.secondary}> · </Text>
-						<Text color={colors.primary}>{gitLabel}</Text>
-					</>
-				)}
-			</Text>
+				{gitLabel && <Text color={colors.primary}>{gitLabel}</Text>}
+			</Box>
 		);
 	}
 

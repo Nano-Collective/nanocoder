@@ -14,6 +14,7 @@ import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getModelContextLimit} from '@/models/index';
+import {bashExecutor} from '@/services/bash-executor';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {generateKey} from '@/session/key-generator';
 import type {Session} from '@/session/session-manager';
@@ -154,15 +155,26 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 	// Cancel handler
 	const handleCancel = React.useCallback(() => {
+		// Kill any in-flight bash commands immediately. The auto-execute (yolo/
+		// headless) path runs bash without mounting the live BashProgress that
+		// owns the escape->cancel handler, so aborting the controller alone would
+		// leave the command running until it finished naturally. Cancelling here
+		// resolves the bash promise right away regardless of execution path.
+		const activeBashIds = bashExecutor.getActiveExecutionIds();
+		for (const id of activeBashIds) {
+			bashExecutor.cancel(id);
+		}
+
 		if (props.abortController) {
 			logger.info('Cancelling current operation', {
 				operation: 'user_cancellation',
 				hasAbortController: !!props.abortController,
+				activeBashExecutions: activeBashIds.length,
 			});
 
 			props.setIsCancelling(true);
 			props.abortController.abort();
-		} else {
+		} else if (activeBashIds.length === 0) {
 			logger.debug('Cancel requested but no active operation to cancel');
 		}
 	}, [props.abortController, props.setIsCancelling, logger, props]);
