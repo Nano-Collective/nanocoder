@@ -18,6 +18,7 @@ import type {ToolManager} from '@/tools/tool-manager';
 import {isSingleToolProfile} from '@/tools/tool-profiles';
 import type {TuneConfig} from '@/types/config';
 import type {
+	ApiUsageSnapshot,
 	LLMClient,
 	Message,
 	ModeOverrides,
@@ -64,6 +65,10 @@ interface ProcessAssistantResponseParams {
 	compactToolCountsRef?: React.MutableRefObject<Record<string, number>>;
 	onSetLiveTaskList?: (tasks: Task[] | null) => void;
 	setLiveComponent?: (component: React.ReactNode) => void;
+	// Records the API-reported usage of the latest response (or null to clear
+	// it, e.g. after auto-compaction) so the context indicator can prefer
+	// API-accurate numbers over client-side estimation.
+	setLastApiUsage?: (usage: ApiUsageSnapshot | null) => void;
 	tune?: TuneConfig;
 	// Number of consecutive empty assistant turns that have already been
 	// nudged in this loop. The empty-response branch increments and
@@ -132,6 +137,7 @@ export const processAssistantResponse = async (
 		compactToolCountsRef,
 		onSetLiveTaskList,
 		setLiveComponent,
+		setLastApiUsage,
 		tune,
 		developmentMode,
 		emptyTurnCount = 0,
@@ -461,6 +467,7 @@ export const processAssistantResponse = async (
 	// Check for auto-compact after messages are updated
 	// Note: This is awaited to prevent race conditions where setMessages(compressed)
 	// could overwrite newer state updates that happen while compression is in progress
+	let compactionOccurred = false;
 	try {
 		const config = getAppConfig();
 		const autoCompactConfig = config.autoCompact;
@@ -491,10 +498,34 @@ export const processAssistantResponse = async (
 				// and recursive calls see the compressed messages instead of
 				// the pre-compression copy.
 				updatedMessages = compressed;
+				compactionOccurred = true;
 			}
 		}
 	} catch (_error) {
 		// Silently fail auto-compact, don't interrupt the conversation
+	}
+
+	// Record the API-reported usage for the context indicator. The snapshot is
+	// keyed to the post-response message count so the indicator can fall back
+	// to estimation once newer messages make it stale. After compaction the
+	// reported usage describes the pre-compaction context, so clear it (null)
+	// and let estimation recompute against the compressed history.
+	if (setLastApiUsage) {
+		const usage = result.usage;
+		// Store the snapshot when the provider reported any usable token field
+		// (input, output, or a lump-sum total). The indicator decides how to use
+		// it; a non-finite or wholly-empty report is treated as "no usage".
+		const hasReportedUsage =
+			!compactionOccurred &&
+			!!usage &&
+			(Number.isFinite(usage.inputTokens) ||
+				Number.isFinite(usage.outputTokens) ||
+				Number.isFinite(usage.totalTokens));
+		setLastApiUsage(
+			hasReportedUsage
+				? {...usage, atMessageCount: updatedMessages.length}
+				: null,
+		);
 	}
 
 	// Clear streaming content (but don't set isGenerating=false yet —

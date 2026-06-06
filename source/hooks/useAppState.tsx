@@ -13,6 +13,8 @@ import type {CheckpointListItem} from '@/types/checkpoint';
 import type {CustomCommand} from '@/types/commands';
 import type {AIProviderConfig, TuneConfig} from '@/types/config';
 import {
+	ApiUsageSnapshot,
+	ContextSource,
 	DevelopmentMode,
 	LLMClient,
 	LSPConnectionStatus,
@@ -178,6 +180,15 @@ export function useAppState(
 		null,
 	);
 	const [contextLimit, setContextLimit] = useState<number | null>(null);
+	// Whether the displayed context percentage is API-reported or estimated
+	const [contextSource, setContextSource] = useState<ContextSource | null>(
+		null,
+	);
+	// Most recent API-reported usage, tagged with the conversation length at
+	// capture time (see ApiUsageSnapshot). Null when unavailable or stale.
+	const [lastApiUsage, setLastApiUsage] = useState<ApiUsageSnapshot | null>(
+		null,
+	);
 
 	// Tool confirmation state
 	const [pendingToolCalls, setPendingToolCalls] = useState<ToolCall[]>([]);
@@ -259,6 +270,14 @@ export function useAppState(
 	// Message updater - no limits, display all messages
 	const updateMessages = useCallback((newMessages: Message[]) => {
 		setMessages(newMessages);
+		// Any wholesale message change — new turn, /clear, manual /compact,
+		// session resume, checkpoint restore — invalidates the API usage
+		// snapshot, which was captured against the previous messages array.
+		// The chat loop re-establishes it right after via setLastApiUsage; every
+		// other path then correctly falls back to client-side estimation. This
+		// keeps the api-vs-estimate decision robust across all replacement paths
+		// rather than relying on each handler to clear it.
+		setLastApiUsage(null);
 	}, []);
 
 	// Reset tool confirmation state
@@ -326,6 +345,8 @@ export function useAppState(
 		tune,
 		contextPercentUsed,
 		contextLimit,
+		contextSource,
+		lastApiUsage,
 		pendingToolCalls,
 		currentToolIndex,
 		completedToolResults,
@@ -375,6 +396,8 @@ export function useAppState(
 		setTune,
 		setContextPercentUsed,
 		setContextLimit,
+		setContextSource,
+		setLastApiUsage,
 		setPendingToolCalls,
 		setCurrentToolIndex,
 		setCompletedToolResults,

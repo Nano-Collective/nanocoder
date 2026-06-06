@@ -50,7 +50,11 @@ export class BashExecutor extends EventEmitter {
 
 		const proc = isWindows
 			? spawn('cmd', ['/c', command])
-			: spawn('sh', ['-c', command]);
+			: // `detached` makes the child a process-group leader so cancel() can
+				// signal the whole tree (e.g. `pnpm test` -> node -> test runner),
+				// not just the `sh` wrapper. Without it a cancelled command's
+				// children keep running in the background.
+				spawn('sh', ['-c', command], {detached: true});
 
 		// Collect output
 		proc.stdout.on('data', (data: Buffer) => {
@@ -126,7 +130,7 @@ export class BashExecutor extends EventEmitter {
 		execution.process.stderr?.destroy();
 		execution.process.stdin?.destroy();
 
-		execution.process.kill('SIGTERM');
+		this.killProcessTree(execution.process);
 		execution.state.isComplete = true;
 		execution.state.error = 'Cancelled by user';
 		this.emit('complete', {...execution.state});
@@ -136,6 +140,35 @@ export class BashExecutor extends EventEmitter {
 
 		this.executions.delete(executionId);
 		return true;
+	}
+
+	/**
+	 * Terminate a spawned command and its descendants.
+	 *
+	 * On Unix the child is spawned `detached`, so it leads its own process
+	 * group; signalling the negative PID reaches the whole group (the command
+	 * plus anything it spawned). Windows has no process groups here, so we fall
+	 * back to killing the single process.
+	 */
+	private killProcessTree(proc: ChildProcess): void {
+		const pid = proc.pid;
+		if (pid === undefined) return;
+
+		if (isWindows) {
+			proc.kill('SIGTERM');
+			return;
+		}
+
+		try {
+			process.kill(-pid, 'SIGTERM');
+		} catch {
+			// Group already gone (or never formed) - fall back to the lone process.
+			try {
+				proc.kill('SIGTERM');
+			} catch {
+				// Process already exited; nothing to terminate.
+			}
+		}
 	}
 
 	getState(executionId: string): BashExecutionState | undefined {

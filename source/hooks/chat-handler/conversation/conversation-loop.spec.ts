@@ -2,7 +2,13 @@ import test from 'ava';
 import {clearAppConfig} from '@/config/index.js';
 import {resetShutdownManager} from '@/utils/shutdown/shutdown-manager.js';
 import {processAssistantResponse, resetFallbackNotice, resetLastTurnHadReasoning} from './conversation-loop.js';
-import type {LLMChatResponse, Message, ToolCall, ToolResult} from '@/types/core';
+import type {
+	ApiUsageSnapshot,
+	LLMChatResponse,
+	Message,
+	ToolCall,
+	ToolResult,
+} from '@/types/core';
 import {
 	resetAutoCompactSession,
 	setAutoCompactEnabled,
@@ -35,7 +41,8 @@ const createMockClient = (response: {
 	toolCalls?: ToolCall[];
 	content?: string;
 	toolsDisabled?: boolean;
-	reasoning?: string
+	reasoning?: string;
+	usage?: {inputTokens?: number; outputTokens?: number; totalTokens?: number};
 }) => ({
 	chat: async (): Promise<LLMChatResponse> => ({
 		choices: [
@@ -49,6 +56,7 @@ const createMockClient = (response: {
 			},
 		],
 		toolsDisabled: response.toolsDisabled ?? false,
+		usage: response.usage,
 	}),
 });
 
@@ -416,6 +424,61 @@ test.serial('processAssistantResponse - strips <think> tags on the native path b
 	const lastAssistant = [...lastSetMessages].reverse().find(m => m.role === 'assistant');
 	t.truthy(lastAssistant, 'Should append an assistant message to history');
 	t.notRegex(lastAssistant!.content as string, /<think>/i, 'History must not contain <think> tags');
+});
+
+// ============================================================================
+// API Usage Snapshot Tests (#381)
+// ============================================================================
+
+test.serial('processAssistantResponse - captures API usage snapshot keyed to the post-response message count', async t => {
+	const usageCalls: (ApiUsageSnapshot | null)[] = [];
+
+	const params = createDefaultParams({
+		client: createMockClient({
+			content: 'Hi there',
+			usage: {inputTokens: 1200, outputTokens: 300, totalTokens: 1500},
+		}),
+		messages: [{role: 'user', content: 'Hello'}],
+		setLastApiUsage: (usage: ApiUsageSnapshot | null) => usageCalls.push(usage),
+	});
+
+	await processAssistantResponse(params);
+
+	// The user message plus the appended assistant reply → 2 messages.
+	t.deepEqual(usageCalls.at(-1), {
+		inputTokens: 1200,
+		outputTokens: 300,
+		totalTokens: 1500,
+		atMessageCount: 2,
+	});
+});
+
+test.serial('processAssistantResponse - clears the API usage snapshot when the provider reports no usage', async t => {
+	const usageCalls: (ApiUsageSnapshot | null)[] = [];
+
+	const params = createDefaultParams({
+		client: createMockClient({content: 'Hi there'}), // no usage reported
+		messages: [{role: 'user', content: 'Hello'}],
+		setLastApiUsage: (usage: ApiUsageSnapshot | null) => usageCalls.push(usage),
+	});
+
+	await processAssistantResponse(params);
+
+	t.is(usageCalls.at(-1), null);
+});
+
+test.serial('processAssistantResponse - stores a snapshot when the provider reports only a totalTokens lump sum', async t => {
+	const usageCalls: (ApiUsageSnapshot | null)[] = [];
+
+	const params = createDefaultParams({
+		client: createMockClient({content: 'Hi there', usage: {totalTokens: 1500}}),
+		messages: [{role: 'user', content: 'Hello'}],
+		setLastApiUsage: (usage: ApiUsageSnapshot | null) => usageCalls.push(usage),
+	});
+
+	await processAssistantResponse(params);
+
+	t.deepEqual(usageCalls.at(-1), {totalTokens: 1500, atMessageCount: 2});
 });
 
 test.serial('processAssistantResponse - strips JSON ghost-echo on the native path when tool calls are present', async t => {

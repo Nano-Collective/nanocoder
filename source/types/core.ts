@@ -224,6 +224,33 @@ interface LLMMessage {
 	reasoning?: string;
 }
 
+/**
+ * Token usage as reported by the provider/API for a single response.
+ * Fields are optional because not every provider reports usage (e.g. some
+ * local models), and OpenRouter only includes detailed usage when the request
+ * opts in via `usage: {include: true}`. Consumers must fall back to client-side
+ * estimation whenever a field is missing.
+ */
+export interface ApiUsage {
+	inputTokens?: number;
+	outputTokens?: number;
+	totalTokens?: number;
+}
+
+/**
+ * API-reported usage captured after a model response, tagged with the
+ * conversation length at capture time. The context indicator treats the
+ * snapshot as authoritative only while the message count is unchanged; once
+ * newer messages arrive it falls back to client-side estimation so the figure
+ * never lags the conversation.
+ */
+export interface ApiUsageSnapshot extends ApiUsage {
+	atMessageCount: number;
+}
+
+/** Whether a displayed context figure came from API usage or estimation. */
+export type ContextSource = 'api' | 'estimate';
+
 export interface LLMChatResponse {
 	choices: Array<{
 		message: LLMMessage;
@@ -231,6 +258,9 @@ export interface LLMChatResponse {
 	// Whether native tools were disabled for this request (XML fallback path)
 	// When true, the conversation loop should parse response text for XML tool calls
 	toolsDisabled?: boolean;
+	// Provider-reported token usage for this response, when available. Used to
+	// show API-accurate context usage in place of client-side estimation.
+	usage?: ApiUsage;
 }
 
 export interface StreamCallbacks {

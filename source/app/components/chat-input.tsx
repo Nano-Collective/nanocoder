@@ -9,7 +9,12 @@ import ToolExecutionIndicator from '@/components/tool-execution-indicator';
 import UserInput from '@/components/user-input';
 import {useTheme} from '@/hooks/useTheme';
 import type {Task} from '@/tools/tasks/types';
-import type {DevelopmentMode, ToolCall, TuneConfig} from '@/types';
+import type {
+	ContextSource,
+	DevelopmentMode,
+	ToolCall,
+	TuneConfig,
+} from '@/types';
 import type {PendingQuestion} from '@/utils/question-queue';
 import type {PendingToolApproval} from '@/utils/tool-approval-queue';
 import {LiveCompactCounts} from '@/utils/tool-result-display';
@@ -43,6 +48,7 @@ export interface ChatInputProps {
 	inputDisabled: boolean;
 	developmentMode: DevelopmentMode;
 	contextPercentUsed: number | null;
+	contextSource: ContextSource | null;
 	sessionName?: string;
 
 	// Tool display
@@ -94,6 +100,7 @@ export function ChatInput({
 	inputDisabled,
 	developmentMode,
 	contextPercentUsed,
+	contextSource,
 	sessionName,
 	compactToolCounts,
 	onToggleCompactDisplay,
@@ -169,6 +176,7 @@ export function ChatInput({
 					compactToolDisplay={compactToolDisplay}
 					developmentMode={developmentMode}
 					contextPercentUsed={contextPercentUsed}
+					contextSource={contextSource}
 					sessionName={sessionName}
 					tune={tune}
 					currentModel={currentModel}

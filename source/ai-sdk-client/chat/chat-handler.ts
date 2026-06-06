@@ -288,19 +288,25 @@ export async function handleChat(
 			}
 			flushBuffer();
 
-			// After streaming completes, collect final results
+			// After streaming completes, collect final results.
+			// `result.usage` is the FINAL step's usage (not `totalUsage`, which
+			// sums across steps): with stopWhen=stepCountIs(MAX_TOOL_STEPS) a
+			// single chat() call may span multiple steps, and the final step's
+			// input+output tokens reflect the actual context window occupancy.
 			const [
 				fullText,
 				resolvedToolCalls,
 				resolvedSteps,
 				reasoning,
 				finishReason,
+				usage,
 			] = await Promise.all([
 				result.text,
 				result.toolCalls,
 				result.steps,
 				result.reasoningText,
 				result.finishReason,
+				result.usage,
 			]);
 
 			logger.debug('AI SDK response received', {
@@ -355,6 +361,11 @@ export async function handleChat(
 					},
 				],
 				toolsDisabled: shouldDisableTools,
+				usage: {
+					inputTokens: usage.inputTokens,
+					outputTokens: usage.outputTokens,
+					totalTokens: usage.totalTokens,
+				},
 			};
 		} catch (error) {
 			// Calculate performance metrics even for errors

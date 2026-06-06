@@ -149,6 +149,7 @@ export function InteractiveApp({
 						inputDisabled={chatHandler.isGenerating || appState.isToolExecuting}
 						developmentMode={appState.developmentMode}
 						contextPercentUsed={appState.contextPercentUsed}
+						contextSource={appState.contextSource}
 						sessionName={appState.sessionName || undefined}
 						compactToolCounts={appState.compactToolCounts}
 						compactToolDisplay={appState.compactToolDisplay}

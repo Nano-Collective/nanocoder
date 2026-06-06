@@ -10,7 +10,7 @@ import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
 import {promptHistory} from '@/prompt-history';
 import type {TuneConfig} from '@/types/config';
-import type {DevelopmentMode} from '@/types/core';
+import type {ContextSource, DevelopmentMode} from '@/types/core';
 import type {InputState} from '@/types/hooks';
 import {Completion} from '@/types/index';
 import {
@@ -33,6 +33,7 @@ interface ChatProps {
 	compactToolDisplay?: boolean; // Current compact display state
 	developmentMode?: DevelopmentMode; // Current development mode
 	contextPercentUsed?: number | null; // Context window usage percentage
+	contextSource?: ContextSource | null; // Whether ctx % is API-reported or estimated
 	sessionName?: string; // Optional session name for display
 	tune?: TuneConfig; // Model mode configuration
 	currentModel?: string; // Active model id — resolves the 'auto' tune profile for display
@@ -52,6 +53,7 @@ export default function UserInput({
 	compactToolDisplay = true,
 	developmentMode = 'normal',
 	contextPercentUsed,
+	contextSource,
 	sessionName,
 	tune,
 	currentModel,
@@ -516,6 +518,7 @@ export default function UserInput({
 					developmentMode={developmentMode}
 					colors={colors}
 					contextPercentUsed={contextPercentUsed ?? null}
+					contextSource={contextSource ?? null}
 					sessionName={sessionName}
 					tune={tune}
 					currentModel={currentModel}
@@ -605,6 +608,7 @@ export default function UserInput({
 				developmentMode={developmentMode}
 				colors={colors}
 				contextPercentUsed={contextPercentUsed ?? null}
+				contextSource={contextSource ?? null}
 				sessionName={sessionName}
 				tune={tune}
 				currentModel={currentModel}
