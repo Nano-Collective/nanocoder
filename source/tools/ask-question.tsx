@@ -6,35 +6,12 @@ import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {signalQuestion} from '@/utils/question-queue';
-import {ensureString} from '@/utils/type-helpers';
+import {ensureString, toOptionString} from '@/utils/type-helpers';
 
 interface AskQuestionArgs {
 	question: string;
 	options: string[];
 	allowFreeform?: boolean;
-}
-
-/**
- * Models sometimes emit `options` as objects (e.g. `{label: "...", value: "id"}`
- * or `{value: "..."}`) despite the schema asking for plain strings. Pull the
- * meaningful text out of common shapes so both the displayed option and the
- * answer returned to the model are clean strings — not JSON blobs or opaque ids.
- *
- * Human-readable keys are preferred over `value`: when a model sends the
- * standard `{label, value}` select shape, `value` is usually a machine id
- * (e.g. "quicklinks_only") and `label` is the text the user should see.
- */
-function toOptionString(opt: unknown): string {
-	if (typeof opt === 'string') return opt;
-	if (opt && typeof opt === 'object') {
-		const o = opt as Record<string, unknown>;
-		for (const key of ['label', 'text', 'title', 'name', 'value']) {
-			if (typeof o[key] === 'string' && o[key].trim() !== '') {
-				return o[key] as string;
-			}
-		}
-	}
-	return ensureString(opt);
 }
 
 const executeAskQuestion = async (args: AskQuestionArgs): Promise<string> => {

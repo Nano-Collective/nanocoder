@@ -12,6 +12,7 @@ import {
 	isPlainObject,
 	isString,
 	isUndefined,
+	toOptionString,
 } from './type-helpers.js';
 
 test('ensureString returns string as-is (for display)', t => {
@@ -112,4 +113,21 @@ test('isNotEmpty returns false for null, undefined, empty string, empty array, e
 	t.false(isNotEmpty(''));
 	t.false(isNotEmpty([]));
 	t.false(isNotEmpty({}));
+});
+
+test('toOptionString returns plain strings unchanged', t => {
+	t.is(toOptionString('Postgres'), 'Postgres');
+});
+
+test('toOptionString prefers human-readable label over machine value', t => {
+	t.is(toOptionString({label: 'Quick links only', value: 'quicklinks_only'}), 'Quick links only');
+});
+
+test('toOptionString extracts description-shaped options', t => {
+	// Real-world case: models emit {description: "..."} for ask_user options.
+	t.is(toOptionString({description: 'Add a Features section'}), 'Add a Features section');
+});
+
+test('toOptionString falls back to JSON for unlabeled objects', t => {
+	t.is(toOptionString({foo: 1}), JSON.stringify({foo: 1}));
 });

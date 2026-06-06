@@ -91,9 +91,9 @@ const createMockClient = (
 
 const createMockToolManager = () => ({
 	getAvailableToolNames: () => ['read_file'],
-	getEffectiveTools: () => ({}),
+	getFilteredTools: () => ({}),
 	hasTool: (_name: string) => false,
-	getToolEntry: () => ({tool: {needsApproval: false}}),
+	getToolEntry: () => ({approval: false}),
 });
 
 // ============================================================================
@@ -357,7 +357,7 @@ test('runAcpConversation - executes tool and emits status updates', async t => {
 	const toolManager = {
 		...createMockToolManager(),
 		hasTool: () => true,
-		getToolEntry: () => ({tool: {needsApproval: false}}),
+		getToolEntry: () => ({approval: false}),
 	};
 
 	// Set up a mock handler for processToolUse
@@ -432,7 +432,7 @@ test('runAcpConversation - marks tool as failed when result starts with Error', 
 	const toolManager = {
 		...createMockToolManager(),
 		hasTool: () => true,
-		getToolEntry: () => ({tool: {needsApproval: false}}),
+		getToolEntry: () => ({approval: false}),
 	};
 
 	// Handler that returns an error string
@@ -497,7 +497,7 @@ test('runAcpConversation - denied permission creates denial result and continues
 	const toolManager = {
 		...createMockToolManager(),
 		hasTool: () => true,
-		getToolEntry: () => ({tool: {needsApproval: true}}),
+		getToolEntry: () => ({approval: true}),
 	};
 
 	let callCount = 0;
@@ -565,7 +565,7 @@ test('runAcpConversation - cancelled permission returns cancelled stop reason', 
 	const toolManager = {
 		...createMockToolManager(),
 		hasTool: () => true,
-		getToolEntry: () => ({tool: {needsApproval: true}}),
+		getToolEntry: () => ({approval: true}),
 	};
 
 	const client = {
@@ -608,7 +608,7 @@ test('runAcpConversation - yolo mode skips permission request', async t => {
 	const toolManager = {
 		...createMockToolManager(),
 		hasTool: () => true,
-		getToolEntry: () => ({tool: {needsApproval: true}}),
+		getToolEntry: () => ({approval: true}),
 	};
 
 	setToolRegistryGetter(() => ({
@@ -665,7 +665,7 @@ test('runAcpConversation - tool in nonInteractiveAlwaysAllow skips approval', as
 	const toolManager = {
 		...createMockToolManager(),
 		hasTool: () => true,
-		getToolEntry: () => ({tool: {needsApproval: true}}),
+		getToolEntry: () => ({approval: true}),
 	};
 
 	setToolRegistryGetter(() => ({
@@ -769,7 +769,7 @@ test('runAcpConversation - handles multi-turn conversation with tool calls', asy
 	const toolManager = {
 		...createMockToolManager(),
 		hasTool: () => true,
-		getToolEntry: () => ({tool: {needsApproval: false}}),
+		getToolEntry: () => ({approval: false}),
 	};
 
 	setToolRegistryGetter(() => ({
@@ -847,7 +847,7 @@ test('runAcpConversation - parses XML tool calls when toolsDisabled', async t =>
 	const toolManager = {
 		...createMockToolManager(),
 		hasTool: () => true,
-		getToolEntry: () => ({tool: {needsApproval: false}}),
+		getToolEntry: () => ({approval: false}),
 	};
 
 	setToolRegistryGetter(() => ({
@@ -928,9 +928,9 @@ test('runAcpConversation - ask_user coerces object options and returns the choic
 	]);
 	const toolManager = {
 		getAvailableToolNames: () => ['ask_user'],
-		getEffectiveTools: () => ({}),
+		getFilteredTools: () => ({}),
 		hasTool: (n: string) => n === 'ask_user',
-		getToolEntry: () => ({tool: {needsApproval: false}}),
+		getToolEntry: () => ({approval: false}),
 	};
 
 	const result = await runAcpConversation({
@@ -968,9 +968,9 @@ test('runAcpConversation - ask_user fails cleanly when no usable options', async
 	]);
 	const toolManager = {
 		getAvailableToolNames: () => ['ask_user'],
-		getEffectiveTools: () => ({}),
+		getFilteredTools: () => ({}),
 		hasTool: (n: string) => n === 'ask_user',
-		getToolEntry: () => ({tool: {needsApproval: false}}),
+		getToolEntry: () => ({approval: false}),
 	};
 
 	await runAcpConversation({

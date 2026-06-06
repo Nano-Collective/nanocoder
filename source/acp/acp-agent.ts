@@ -35,6 +35,7 @@ import type {AcpInitContext} from '@/acp/acp-types';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
 import {getAppConfig} from '@/config/index';
 import {loadPreferences, updateLastUsed} from '@/config/preferences';
+import {resolveTune} from '@/config/tune';
 import {getTuneToolMode} from '@/types/config';
 import {getLogger} from '@/utils/logging';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
@@ -280,26 +281,29 @@ export class AcpAgent implements Agent {
 		const {toolManager} = this.initContext;
 		const {provider, model} = this.initContext;
 
-		const tunePrefs = loadPreferences().tune;
-		const tuneToolMode = getTuneToolMode(tunePrefs);
+		const tune = resolveTune(getAppConfig(), undefined, loadPreferences());
+		const tuneToolMode = getTuneToolMode(tune);
 		const toolsDisabled =
 			tuneToolMode !== 'native' || isToolCallingDisabled(provider, model);
 		const fallbackToolFormat: 'xml' | 'json' =
 			tuneToolMode === 'json' ? 'json' : 'xml';
 
 		const availableNames = toolManager.getAvailableToolNames(
-			undefined,
+			tune,
 			session.developmentMode,
+			undefined,
+			model,
 		);
 		const basePrompt = buildSystemPrompt(
 			session.developmentMode,
-			undefined,
+			tune,
 			availableNames,
 			toolsDisabled,
 			getAppConfig().systemPrompt,
+			model,
 		);
 		const toolsForPrompt = toolsDisabled
-			? toolManager.getFilteredToolsWithoutExecute(availableNames)
+			? toolManager.getFilteredTools(availableNames)
 			: {};
 		const systemContent = appendToolDefinitionsToPrompt(
 			basePrompt,

@@ -9,15 +9,17 @@ import type {AcpSession} from '@/acp/acp-session';
 import {type AcpToolCallMeta, buildToolCallMeta} from '@/acp/acp-tool-call';
 import {processToolUse} from '@/message-handler';
 import {parseToolCalls} from '@/tool-calling/index';
+import {resolveToolApproval} from '@/tools/approval-policy';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
+	DevelopmentMode,
 	LLMClient,
 	ModeOverrides,
 	StreamCallbacks,
 	ToolCall,
 	ToolResult,
 } from '@/types/core';
-import {toolNeedsApproval} from '@/utils/tool-needs-approval';
+import {toOptionString} from '@/utils/type-helpers';
 
 const MAX_TURNS = 50;
 
@@ -47,9 +49,7 @@ export async function runAcpConversation(
 			undefined,
 			developmentMode,
 		);
-		const tools = toolManager.getEffectiveTools(availableNames, {
-			nonInteractiveAlwaysAllow,
-		});
+		const tools = toolManager.getFilteredTools(availableNames);
 
 		const modeOverrides: ModeOverrides = {
 			nonInteractiveMode: true,
@@ -173,14 +173,17 @@ export async function runAcpConversation(
 				continue;
 			}
 
-			// Check if approval is needed
+			// Check if approval is needed. resolveToolApproval is the single
+			// authority shared with the interactive loop and plain shell - it
+			// applies yolo and the alwaysAllow list internally.
 			const needsApproval = await evaluateNeedsApproval(
 				toolCall,
 				toolManager,
 				nonInteractiveAlwaysAllow,
+				developmentMode,
 			);
 
-			if (needsApproval && developmentMode !== 'yolo') {
+			if (needsApproval) {
 				const permission = await requestToolPermission(
 					session,
 					toolCall,
@@ -321,43 +324,27 @@ async function handleAskUser(
 /**
  * Coerce the model's `options` into display strings. Most models pass an array
  * of strings, but some send objects (e.g. `{label}`, `{description}`), so we
- * extract a sensible label rather than dropping them and failing the call.
+ * extract a sensible label - via the same `toOptionString` the ask_user tool
+ * uses - rather than dropping them and failing the call.
  */
 function normalizeQuestionOptions(raw: unknown): string[] {
 	if (!Array.isArray(raw)) {
 		return [];
 	}
-	const result: string[] = [];
-	for (const option of raw) {
-		if (typeof option === 'string') {
-			if (option.length > 0) result.push(option);
-			continue;
-		}
-		if (option && typeof option === 'object') {
-			const record = option as Record<string, unknown>;
-			const label =
-				record.label ??
-				record.name ??
-				record.value ??
-				record.title ??
-				record.description ??
-				record.option;
-			if (typeof label === 'string' && label.length > 0) {
-				result.push(label);
-			}
-		}
-	}
-	return result;
+	return raw.map(toOptionString).filter(option => option.length > 0);
 }
 
 async function evaluateNeedsApproval(
 	toolCall: ToolCall,
 	toolManager: ToolManager,
 	nonInteractiveAlwaysAllow: string[],
+	mode: DevelopmentMode,
 ): Promise<boolean> {
-	if (nonInteractiveAlwaysAllow.includes(toolCall.function.name)) {
-		return false;
-	}
 	const toolEntry = toolManager.getToolEntry(toolCall.function.name);
-	return toolNeedsApproval(toolEntry?.tool, toolCall.function.arguments);
+	return resolveToolApproval(
+		toolCall.function.name,
+		toolEntry,
+		toolCall.function.arguments,
+		{mode, alwaysAllow: nonInteractiveAlwaysAllow},
+	);
 }

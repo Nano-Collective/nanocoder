@@ -35,8 +35,7 @@ const createMockInitContext = (): AcpInitContext => ({
 	} as any,
 	toolManager: {
 		getAvailableToolNames: () => [],
-		getEffectiveTools: () => ({}),
-		getFilteredToolsWithoutExecute: () => ({}),
+		getFilteredTools: () => ({}),
 		hasTool: () => false,
 		getToolEntry: () => undefined,
 	} as any,
