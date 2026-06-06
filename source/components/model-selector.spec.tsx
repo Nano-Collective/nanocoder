@@ -1,185 +1,109 @@
 import ModelSelector from './model-selector.js';
-import type {LLMClient} from '../types/core.js';
 import {renderWithTheme} from '../test-utils/render-with-theme.js';
 import test from 'ava';
 import React from 'react';
 
 console.log('\nmodel-selector.spec.tsx');
 
-// Mock LLM client
-function createMockClient(models: string[]): LLMClient {
-	return {
-		getCurrentModel: () => 'test-model',
-		setModel: () => {},
-		getContextSize: () => 4096,
-		getAvailableModels: async () => models,
-		chat: async () => ({
-			content: 'test response',
-			toolCalls: [],
-			choices: [],
-		}),
-		clearContext: async () => {},
-	};
+interface ProviderFixture {
+	name: string;
+	models: string[];
 }
 
-test('model-selector renders loading state initially', t => {
-	const mockClient = createMockClient(['model1', 'model2']);
-	const onModelSelect = () => {};
-	const onCancel = () => {};
+// Mutating handle shared with the loader via the NANOCODER_PROVIDERS env var.
+// We can't easily mock the module (loadAllProviderConfigs) under AVA 7 +
+// tsx without import.meta.mock on the aliased specifier, so the env var is
+// the supported test seam — the loader reads it on every call.
+const providerState: {current: ProviderFixture[]} = {current: []};
 
-	const {lastFrame} = renderWithTheme(
-		React.createElement(ModelSelector, {
-			client: mockClient,
-			currentModel: 'model1',
-			onModelSelect,
-			onCancel,
-		}),
+function setProviders(providers: ProviderFixture[]): void {
+	providerState.current = providers;
+	process.env.NANOCODER_PROVIDERS = JSON.stringify(
+		providers.map(p => ({name: p.name, models: p.models})),
 	);
+}
 
-	const output = lastFrame();
-	t.truthy(output);
-	t.regex(output!, /Loading available models/i);
+test.beforeEach(() => {
+	setProviders([]);
 });
 
-test('model-selector shows error when client is null', async t => {
-	const onModelSelect = () => {};
-	const onCancel = () => {};
-
-	const {lastFrame} = renderWithTheme(
-		React.createElement(ModelSelector, {
-			client: null,
-			currentModel: 'model1',
-			onModelSelect,
-			onCancel,
-		}),
-	);
-
-	// Wait for async effect
-	await new Promise(resolve => setTimeout(resolve, 100));
-
-	const output = lastFrame();
-	t.truthy(output);
-	t.regex(output!, /No active client found/i);
+test.afterEach(() => {
+	delete process.env.NANOCODER_PROVIDERS;
 });
 
-test('model-selector shows error when getAvailableModels throws', async t => {
-	const errorClient: LLMClient = {
-		getCurrentModel: () => 'test-model',
-		setModel: () => {},
-		getContextSize: () => 4096,
-		getAvailableModels: async () => {
-			throw new Error('Failed to fetch models');
-		},
-		chat: async () => ({
-			content: 'test response',
-			toolCalls: [],
-			choices: [],
-		}),
-		clearContext: async () => {},
-	};
+// ============================================================================
+// Rendering
+// ============================================================================
 
-	const onModelSelect = () => {};
-	const onCancel = () => {};
+test('model-selector renders title', t => {
+	setProviders([{name: 'openai', models: ['gpt-4o', 'gpt-4o-mini']}]);
 
 	const {lastFrame} = renderWithTheme(
-		React.createElement(ModelSelector, {
-			client: errorClient,
-			currentModel: 'model1',
-			onModelSelect,
-			onCancel,
-		}),
+		<ModelSelector
+			currentProvider="openai"
+			currentModel="gpt-4o"
+			onModelSelect={() => {}}
+			onCancel={() => {}}
+		/>,
 	);
-
-	// Wait for async effect
-	await new Promise(resolve => setTimeout(resolve, 100));
-
-	const output = lastFrame();
-	t.truthy(output);
-	t.regex(output!, /Error accessing models/i);
-});
-
-test('model-selector shows error when no models available', async t => {
-	const emptyClient = createMockClient([]);
-	const onModelSelect = () => {};
-	const onCancel = () => {};
-
-	const {lastFrame} = renderWithTheme(
-		React.createElement(ModelSelector, {
-			client: emptyClient,
-			currentModel: 'model1',
-			onModelSelect,
-			onCancel,
-		}),
-	);
-
-	// Wait for async effect
-	await new Promise(resolve => setTimeout(resolve, 100));
-
-	const output = lastFrame();
-	t.truthy(output);
-	t.regex(output!, /No models available/i);
-});
-
-test('model-selector renders model list after loading', async t => {
-	const mockClient = createMockClient(['model1', 'model2', 'model3']);
-	const onModelSelect = () => {};
-	const onCancel = () => {};
-
-	const {lastFrame} = renderWithTheme(
-		React.createElement(ModelSelector, {
-			client: mockClient,
-			currentModel: 'model1',
-			onModelSelect,
-			onCancel,
-		}),
-	);
-
-	// Wait for async effect to complete
-	await new Promise(resolve => setTimeout(resolve, 100));
 
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /Select a Model/i);
 });
 
-test('model-selector marks current model in list', async t => {
-	const mockClient = createMockClient(['model1', 'model2', 'model3']);
-	const onModelSelect = () => {};
-	const onCancel = () => {};
+test('model-selector renders model list after loading', t => {
+	setProviders([
+		{name: 'openai', models: ['model1', 'model2', 'model3']},
+	]);
 
 	const {lastFrame} = renderWithTheme(
-		React.createElement(ModelSelector, {
-			client: mockClient,
-			currentModel: 'model2',
-			onModelSelect,
-			onCancel,
-		}),
+		<ModelSelector
+			currentProvider="openai"
+			currentModel="model1"
+			onModelSelect={() => {}}
+			onCancel={() => {}}
+		/>,
 	);
 
-	// Wait for async effect
-	await new Promise(resolve => setTimeout(resolve, 100));
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Select a Model/i);
+	t.regex(output!, /model1/);
+	t.regex(output!, /model2/);
+	t.regex(output!, /model3/);
+});
+
+test('model-selector marks current model in list', t => {
+	setProviders([
+		{name: 'openai', models: ['model1', 'model2', 'model3']},
+	]);
+
+	const {lastFrame} = renderWithTheme(
+		<ModelSelector
+			currentProvider="openai"
+			currentModel="model2"
+			onModelSelect={() => {}}
+			onCancel={() => {}}
+		/>,
+	);
 
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /model2.*\(current\)/i);
 });
 
-test('model-selector shows cancel instruction', async t => {
-	const mockClient = createMockClient(['model1', 'model2']);
-	const onModelSelect = () => {};
-	const onCancel = () => {};
+test('model-selector shows cancel instruction', t => {
+	setProviders([{name: 'openai', models: ['model1', 'model2']}]);
 
 	const {lastFrame} = renderWithTheme(
-		React.createElement(ModelSelector, {
-			client: mockClient,
-			currentModel: 'model1',
-			onModelSelect,
-			onCancel,
-		}),
+		<ModelSelector
+			currentProvider="openai"
+			currentModel="model1"
+			onModelSelect={() => {}}
+			onCancel={() => {}}
+		/>,
 	);
-
-	// Wait for async effect
-	await new Promise(resolve => setTimeout(resolve, 100));
 
 	const output = lastFrame();
 	t.truthy(output);
@@ -187,272 +111,220 @@ test('model-selector shows cancel instruction', async t => {
 });
 
 test('model-selector component renders without crashing', t => {
-	const mockClient = createMockClient(['model1']);
-	const onModelSelect = () => {};
-	const onCancel = () => {};
+	setProviders([{name: 'openai', models: ['model1']}]);
 
 	const {unmount} = renderWithTheme(
-		React.createElement(ModelSelector, {
-			client: mockClient,
-			currentModel: 'model1',
-			onModelSelect,
-			onCancel,
-		}),
+		<ModelSelector
+			currentProvider="openai"
+			currentModel="model1"
+			onModelSelect={() => {}}
+			onCancel={() => {}}
+		/>,
 	);
 
 	t.notThrows(() => unmount());
 });
 
-test('model-selector handles multiple models', async t => {
-	const manyModels = Array.from({length: 10}, (_, i) => `model-${i + 1}`);
-	const mockClient = createMockClient(manyModels);
-	const onModelSelect = () => {};
-	const onCancel = () => {};
+test('model-selector handles multiple models', t => {
+	setProviders([
+		{name: 'openai', models: Array.from({length: 10}, (_, i) => `model-${i + 1}`)},
+	]);
 
 	const {lastFrame} = renderWithTheme(
-		React.createElement(ModelSelector, {
-			client: mockClient,
-			currentModel: 'model-1',
-			onModelSelect,
-			onCancel,
-		}),
+		<ModelSelector
+			currentProvider="openai"
+			currentModel="model-1"
+			onModelSelect={() => {}}
+			onCancel={() => {}}
+		/>,
 	);
-
-	// Wait for async effect
-	await new Promise(resolve => setTimeout(resolve, 100));
 
 	const output = lastFrame();
 	t.truthy(output);
-	// Should show model selector title
 	t.regex(output!, /Select a Model/i);
 });
 
-test('model-selector error state shows helpful message', async t => {
-	const onModelSelect = () => {};
-	const onCancel = () => {};
-
-	const {lastFrame} = renderWithTheme(
-		React.createElement(ModelSelector, {
-			client: null,
-			currentModel: 'model1',
-			onModelSelect,
-			onCancel,
-		}),
-	);
-
-	// Wait for async effect
-	await new Promise(resolve => setTimeout(resolve, 100));
-
-	const output = lastFrame();
-	t.truthy(output);
-	t.regex(output!, /Make sure your provider is properly configured/i);
-});
-
 test('model-selector accepts valid props', t => {
-	const mockClient = createMockClient(['model1']);
-	const onModelSelect = () => {};
-	const onCancel = () => {};
+	setProviders([{name: 'openai', models: ['model1']}]);
 
 	t.notThrows(() => {
 		renderWithTheme(
-			React.createElement(ModelSelector, {
-				client: mockClient,
-				currentModel: 'model1',
-				onModelSelect,
-				onCancel,
-			}),
+			<ModelSelector
+				currentProvider="openai"
+				currentModel="model1"
+				onModelSelect={() => {}}
+				onCancel={() => {}}
+			/>,
 		);
 	});
 });
 
 // ============================================================================
-// Keyboard Interaction Tests
+// Error/Empty States
+// ============================================================================
+
+test('model-selector shows error when no models available', t => {
+	setProviders([]);
+
+	const {lastFrame} = renderWithTheme(
+		<ModelSelector
+			currentProvider="openai"
+			currentModel="model1"
+			onModelSelect={() => {}}
+			onCancel={() => {}}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /No models available/i);
+	t.regex(output!, /Make sure your providers are properly configured/i);
+});
+
+// ============================================================================
+// Keyboard Interaction
 // ============================================================================
 
 test('model-selector calls onCancel when escape key is pressed', async t => {
-	const mockClient = createMockClient(['model1', 'model2']);
+	setProviders([{name: 'openai', models: ['model1', 'model2']}]);
+
 	let cancelCalled = false;
 	const onCancel = () => {
 		cancelCalled = true;
 	};
-	const onModelSelect = () => {};
 
 	const {stdin} = renderWithTheme(
-		React.createElement(ModelSelector, {
-			client: mockClient,
-			currentModel: 'model1',
-			onModelSelect,
-			onCancel,
-		}),
+		<ModelSelector
+			currentProvider="openai"
+			currentModel="model1"
+			onModelSelect={() => {}}
+			onCancel={onCancel}
+		/>,
 	);
 
-	// Wait for models to load
-	await new Promise(resolve => setTimeout(resolve, 100));
-
-	// Press Escape key
 	stdin.write('\u001B');
-
-	// Give time for the event to be processed
 	await new Promise(resolve => setTimeout(resolve, 50));
 
 	t.true(cancelCalled);
 });
 
-test('model-selector escape key works even before models load', async t => {
-	const mockClient = createMockClient(['model1']);
+test('model-selector escape key works in empty state', async t => {
+	setProviders([]);
+
 	let cancelCalled = false;
 	const onCancel = () => {
 		cancelCalled = true;
 	};
-	const onModelSelect = () => {};
 
 	const {stdin} = renderWithTheme(
-		React.createElement(ModelSelector, {
-			client: mockClient,
-			currentModel: 'model1',
-			onModelSelect,
-			onCancel,
-		}),
+		<ModelSelector
+			currentProvider="openai"
+			currentModel="model1"
+			onModelSelect={() => {}}
+			onCancel={onCancel}
+		/>,
 	);
 
-	// Press Escape immediately (during loading state)
 	stdin.write('\u001B');
-
-	await new Promise(resolve => setTimeout(resolve, 50));
-
-	t.true(cancelCalled);
-});
-
-test('model-selector escape key works in error state', async t => {
-	let cancelCalled = false;
-	const onCancel = () => {
-		cancelCalled = true;
-	};
-	const onModelSelect = () => {};
-
-	const {stdin} = renderWithTheme(
-		React.createElement(ModelSelector, {
-			client: null,
-			currentModel: 'model1',
-			onModelSelect,
-			onCancel,
-		}),
-	);
-
-	// Wait for error state
-	await new Promise(resolve => setTimeout(resolve, 100));
-
-	// Press Escape in error state
-	stdin.write('\u001B');
-
 	await new Promise(resolve => setTimeout(resolve, 50));
 
 	t.true(cancelCalled);
 });
 
 test('model-selector calls onModelSelect when model is selected via Enter key', async t => {
-	const mockClient = createMockClient(['model1', 'model2', 'model3']);
+	setProviders([
+		{name: 'openai', models: ['model1', 'model2', 'model3']},
+	]);
+
+	let selectedProvider = '';
 	let selectedModel = '';
-	const onModelSelect = (model: string) => {
+	const onModelSelect = (provider: string, model: string) => {
+		selectedProvider = provider;
 		selectedModel = model;
 	};
-	const onCancel = () => {};
 
 	const {stdin} = renderWithTheme(
-		React.createElement(ModelSelector, {
-			client: mockClient,
-			currentModel: 'model1',
-			onModelSelect,
-			onCancel,
-		}),
+		<ModelSelector
+			currentProvider="openai"
+			currentModel="model1"
+			onModelSelect={onModelSelect}
+			onCancel={() => {}}
+		/>,
 	);
-
-	// Wait for models to load
-	await new Promise(resolve => setTimeout(resolve, 150));
 
 	// Press Enter to select the default (first) model
 	stdin.write('\r');
-
 	await new Promise(resolve => setTimeout(resolve, 50));
 
-	// Should have selected the first model
+	t.is(selectedProvider, 'openai');
 	t.is(selectedModel, 'model1');
 });
 
 test('model-selector selection works after navigation', async t => {
-	const mockClient = createMockClient(['model1', 'model2', 'model3']);
+	setProviders([
+		{name: 'openai', models: ['model1', 'model2', 'model3']},
+	]);
+
+	let selectedProvider = '';
 	let selectedModel = '';
-	const onModelSelect = (model: string) => {
+	const onModelSelect = (provider: string, model: string) => {
+		selectedProvider = provider;
 		selectedModel = model;
 	};
-	const onCancel = () => {};
 
 	const {stdin} = renderWithTheme(
-		React.createElement(ModelSelector, {
-			client: mockClient,
-			currentModel: 'model1',
-			onModelSelect,
-			onCancel,
-		}),
+		<ModelSelector
+			currentProvider="openai"
+			currentModel="model1"
+			onModelSelect={onModelSelect}
+			onCancel={() => {}}
+		/>,
 	);
-
-	// Wait for models to load
-	await new Promise(resolve => setTimeout(resolve, 150));
 
 	// Navigate down once
 	stdin.write('\u001B[B'); // Down arrow
-
 	await new Promise(resolve => setTimeout(resolve, 50));
 
 	// Press Enter to select
 	stdin.write('\r');
-
 	await new Promise(resolve => setTimeout(resolve, 50));
 
-	// Should have selected the second model
+	t.is(selectedProvider, 'openai');
 	t.is(selectedModel, 'model2');
 });
 
-test('model-selector displays correct model count', async t => {
-	const manyModels = Array.from({length: 5}, (_, i) => `model-${i + 1}`);
-	const mockClient = createMockClient(manyModels);
-	const onModelSelect = () => {};
-	const onCancel = () => {};
+test('model-selector displays correct model count', t => {
+	setProviders([
+		{name: 'openai', models: Array.from({length: 5}, (_, i) => `model-${i + 1}`)},
+	]);
 
 	const {lastFrame} = renderWithTheme(
-		React.createElement(ModelSelector, {
-			client: mockClient,
-			currentModel: 'model-1',
-			onModelSelect,
-			onCancel,
-		}),
+		<ModelSelector
+			currentProvider="openai"
+			currentModel="model-1"
+			onModelSelect={() => {}}
+			onCancel={() => {}}
+		/>,
 	);
-
-	await new Promise(resolve => setTimeout(resolve, 150));
 
 	const output = lastFrame();
 	t.truthy(output);
-	// All models should be present
 	for (let i = 1; i <= 5; i++) {
 		t.regex(output!, new RegExp(`model-${i}`));
 	}
 });
 
-test('model-selector formats current model label correctly', async t => {
-	const mockClient = createMockClient(['alpha', 'beta', 'gamma']);
-	const onModelSelect = () => {};
-	const onCancel = () => {};
+test('model-selector formats current model label correctly', t => {
+	setProviders([{name: 'openai', models: ['alpha', 'beta', 'gamma']}]);
 
 	const {lastFrame} = renderWithTheme(
-		React.createElement(ModelSelector, {
-			client: mockClient,
-			currentModel: 'beta',
-			onModelSelect,
-			onCancel,
-		}),
+		<ModelSelector
+			currentProvider="openai"
+			currentModel="beta"
+			onModelSelect={() => {}}
+			onCancel={() => {}}
+		/>,
 	);
-
-	await new Promise(resolve => setTimeout(resolve, 150));
 
 	const output = lastFrame();
 	t.truthy(output);

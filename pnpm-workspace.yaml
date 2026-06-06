@@ -11,7 +11,7 @@ allowBuilds:
   keytar: true
   node-llama-cpp: false
 
-auditConfig: { ignoreGhsas: null }
+auditConfig: {}
 
 ignoredBuiltDependencies:
   - protobufjs

@@ -145,20 +145,16 @@ test('UserInput calls onSubmit when message is submitted', t => {
 	// This test verifies the component renders with onSubmit callback
 });
 
-test('UserInput calls onCancel when provided', t => {
-	let cancelCalled = false;
-	const handleCancel = () => {
-		cancelCalled = true;
-	};
-
+test('UserInput renders while busy (Escape deferred to global handler)', t => {
+	// When busy, UserInput no longer owns cancellation; the section-level handler
+	// does. UserInput just swallows Escape so it doesn't clear the input.
 	const {lastFrame, unmount} = render(
 		<TestWrapper>
-			<UserInput onCancel={handleCancel} disabled={true} />
+			<UserInput isBusy={true} disabled={true} />
 		</TestWrapper>,
 	);
 
 	t.truthy(lastFrame());
-	// Note: Actual cancel invocation requires ESC key simulation
 	unmount();
 });
 
@@ -223,7 +219,6 @@ test('UserInput renders with all props provided', t => {
 				placeholder="Test"
 				customCommands={['test']}
 				disabled={false}
-				onCancel={() => {}}
 				onToggleMode={() => {}}
 				developmentMode="normal"
 			/>

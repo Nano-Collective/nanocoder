@@ -1,7 +1,9 @@
 import React from 'react';
 import type {ConversationStateManager} from '@/app/utils/conversation-state';
 import AgentProgress, {MultiAgentProgress} from '@/components/agent-progress';
+import BashProgress from '@/components/bash-progress';
 import {ErrorMessage} from '@/components/message-box';
+import type {BashExecutionState} from '@/services/bash-executor';
 import {
 	clearAllSubagentProgress,
 	getSubagentProgress,
@@ -11,6 +13,7 @@ import {generateKey} from '@/session/key-generator';
 import {MAX_CONCURRENT_AGENTS} from '@/subagents/subagent-executor';
 import type {AgentToolArgs} from '@/tools/agent-tool';
 import {startAgentExecution} from '@/tools/agent-tool';
+import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {ToolCall, ToolResult} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -20,6 +23,7 @@ import {
 	displayToolResult,
 	LIVE_TASK_TOOLS,
 } from '@/utils/tool-result-display';
+import {formatValidationError} from '@/utils/tool-validation';
 
 /**
  * Validates and executes a single tool call.
@@ -49,6 +53,68 @@ const executeOne = async (
 			},
 		};
 	}
+};
+
+/**
+ * Execute an execute_bash tool call through the streaming executor, mounting a
+ * live BashProgress so streamed output shows while the command runs — matching
+ * the confirmation path in useToolHandler. The streaming executor runs outside
+ * the validated registry handler, so the per-tool validator runs here.
+ *
+ * Returns the captured BashExecutionState so the caller can render a completed
+ * BashProgress (expanded mode) instead of the command-only formatter.
+ */
+const executeBashStreaming = async (
+	toolCall: ToolCall,
+	toolManager: ToolManager | null,
+	setLiveComponent: (component: React.ReactNode) => void,
+): Promise<{
+	toolCall: ToolCall;
+	result: ToolResult;
+	bashState?: BashExecutionState;
+}> => {
+	const parsedArgs = parseToolArguments(toolCall.function.arguments);
+
+	const validator = toolManager?.getToolValidator(toolCall.function.name);
+	const validation = validator
+		? await validator(parsedArgs)
+		: ({valid: true} as const);
+	if (!validation.valid) {
+		return {
+			toolCall,
+			result: {
+				tool_call_id: toolCall.id,
+				role: 'tool' as const,
+				name: toolCall.function.name,
+				content: formatValidationError(validation.error, validation.details),
+			},
+		};
+	}
+
+	const commandStr = parsedArgs.command as string;
+	const {executionId, promise} = executeBashCommand(commandStr);
+	setLiveComponent(
+		<BashProgress
+			key={generateKey(`direct-bash-${toolCall.id}`)}
+			executionId={executionId}
+			command={commandStr}
+			isLive={true}
+		/>,
+	);
+
+	const bashState = await promise;
+	setLiveComponent(null);
+
+	return {
+		toolCall,
+		result: {
+			tool_call_id: toolCall.id,
+			role: 'tool' as const,
+			name: toolCall.function.name,
+			content: formatBashResultForLLM(bashState),
+		},
+		bashState,
+	};
 };
 
 /** Classification for grouping tool calls */
@@ -342,6 +408,7 @@ export const executeToolsDirectly = async (
 		let executions: Array<{
 			toolCall: ToolCall;
 			result: ToolResult;
+			bashState?: BashExecutionState;
 		}>;
 
 		if (type === 'agent' && group.length > 0) {
@@ -377,12 +444,28 @@ export const executeToolsDirectly = async (
 			// Sequential execution for non-parallelizable tools (or single-item groups)
 			executions = [];
 			for (const toolCall of group) {
-				executions.push(await executeOne(toolCall, processToolUse));
+				// execute_bash streams: mount a live BashProgress so output shows
+				// while the command runs, matching the confirmation path. Falls
+				// back to the standard handler when no live area is available.
+				if (
+					toolCall.function.name === 'execute_bash' &&
+					options?.setLiveComponent
+				) {
+					executions.push(
+						await executeBashStreaming(
+							toolCall,
+							toolManager,
+							options.setLiveComponent,
+						),
+					);
+				} else {
+					executions.push(await executeOne(toolCall, processToolUse));
+				}
 			}
 		}
 
 		// Display results in order
-		for (const {toolCall, result} of executions) {
+		for (const {toolCall, result, bashState} of executions) {
 			directResults.push(result);
 
 			// Update conversation state
@@ -407,7 +490,13 @@ export const executeToolsDirectly = async (
 				// Non-interactive mode has no live tally renderer, so push
 				// per-tool one-liners straight to the static queue to keep
 				// tool activity in chronological order.
-				const isError = result.content.startsWith('Error: ');
+				//
+				// Validation failures (the streaming bash path surfaces them as
+				// "⚒ Validation failed: …") must show in full too, not fold into
+				// the count tally — mirror displayToolResult's own detection.
+				const isError =
+					result.content.startsWith('Error: ') ||
+					result.content.startsWith('⚒ Validation failed');
 				if (isError) {
 					// Errors always shown in full
 					await displayToolResult(
@@ -427,6 +516,17 @@ export const executeToolsDirectly = async (
 				} else {
 					options.onCompactToolCount?.(result.name);
 				}
+			} else if (result.name === 'execute_bash' && bashState) {
+				// Expanded mode: render the completed BashProgress (command +
+				// status + tokens), matching the confirmation path's completed view.
+				addToChatQueue(
+					<BashProgress
+						key={generateKey(`direct-bash-complete-${toolCall.id}`)}
+						executionId={bashState.executionId}
+						command={bashState.command}
+						completedState={bashState}
+					/>,
+				);
 			} else {
 				// Full display mode
 				await displayToolResult(toolCall, result, toolManager, addToChatQueue);

@@ -46,6 +46,9 @@ export interface ChatInputProps {
 	// Input state
 	customCommands: string[];
 	inputDisabled: boolean;
+	// True when in-flight work makes Escape a cancel; lets UserInput defer to
+	// the section-level global cancel handler instead of clearing the input.
+	isBusy: boolean;
 	developmentMode: DevelopmentMode;
 	contextPercentUsed: number | null;
 	contextSource: ContextSource | null;
@@ -61,7 +64,6 @@ export interface ChatInputProps {
 	onToolConfirm: (confirmed: boolean) => void;
 	onToolCancel: () => void;
 	onSubmit: (message: string) => Promise<void>;
-	onCancel: () => void;
 	onToggleMode: () => void;
 	onToggleReasoningExpanded: () => void;
 	tune?: TuneConfig;
@@ -98,6 +100,7 @@ export function ChatInput({
 	client,
 	customCommands,
 	inputDisabled,
+	isBusy,
 	developmentMode,
 	contextPercentUsed,
 	contextSource,
@@ -109,7 +112,6 @@ export function ChatInput({
 	onToolConfirm,
 	onToolCancel,
 	onSubmit,
-	onCancel,
 	onToggleMode,
 	onToggleReasoningExpanded,
 	tune,
@@ -169,7 +171,7 @@ export function ChatInput({
 					customCommands={customCommands}
 					onSubmit={msg => void onSubmit(msg)}
 					disabled={inputDisabled}
-					onCancel={onCancel}
+					isBusy={isBusy}
 					onToggleMode={onToggleMode}
 					onToggleReasoningExpanded={onToggleReasoningExpanded}
 					onToggleCompactDisplay={onToggleCompactDisplay}

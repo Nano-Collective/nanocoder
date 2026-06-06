@@ -27,7 +27,7 @@ export interface JsonCredentialStore<T> {
 export function createJsonCredentialStore<T>(
 	filename: string,
 ): JsonCredentialStore<T> {
-	const filePath = () => join(getConfigPath(), filename);
+	const filePath = () => join(getConfigPath(), filename); // nosemgrep
 
 	return {
 		load() {

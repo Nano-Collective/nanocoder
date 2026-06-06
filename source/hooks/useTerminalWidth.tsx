@@ -49,8 +49,8 @@ export const useResponsiveTerminal = () => {
 
 	// Define breakpoints for terminal sizes
 	const getSize = (width: number): TerminalSize => {
-		if (width < 60) return 'narrow';
-		if (width < 100) return 'normal';
+		if (width < 80) return 'narrow';
+		if (width < 120) return 'normal';
 		return 'wide';
 	};
 

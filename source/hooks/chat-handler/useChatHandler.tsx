@@ -359,6 +359,7 @@ export function useChatHandler({
 	return {
 		handleChatMessage,
 		processAssistantResponse: processAssistantResponseWithErrorHandling,
+		resetStreamingState,
 		isGenerating,
 		streamingReasoning,
 		streamingContent,

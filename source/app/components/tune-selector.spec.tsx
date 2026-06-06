@@ -67,7 +67,10 @@ test('shows Tune title', t => {
 });
 
 test('shows toggle option', t => {
-	const {lastFrame} = renderTuneSelector();
+	const {lastFrame} = renderTuneSelector({
+		...TUNE_DEFAULTS,
+		enabled: false,
+	});
 	const output = lastFrame()!;
 	t.true(output.includes('Disabled'));
 });
@@ -117,25 +120,25 @@ test('shows Model Parameters when enabled', t => {
 // ============================================================================
 
 test('hides Tool Profile when disabled', t => {
-	const {lastFrame} = renderTuneSelector();
+	const {lastFrame} = renderTuneSelector({...TUNE_DEFAULTS, enabled: false});
 	const output = lastFrame()!;
 	t.false(output.includes('Tool Profile'));
 });
 
 test('hides Aggressive Compact when disabled', t => {
-	const {lastFrame} = renderTuneSelector();
+	const {lastFrame} = renderTuneSelector({...TUNE_DEFAULTS, enabled: false});
 	const output = lastFrame()!;
 	t.false(output.includes('Aggressive Compact'));
 });
 
 test('hides Native Tool Calling when disabled', t => {
-	const {lastFrame} = renderTuneSelector();
+	const {lastFrame} = renderTuneSelector({...TUNE_DEFAULTS, enabled: false});
 	const output = lastFrame()!;
 	t.false(output.includes('Native Tool Calling'));
 });
 
 test('hides Model Parameters when disabled', t => {
-	const {lastFrame} = renderTuneSelector();
+	const {lastFrame} = renderTuneSelector({...TUNE_DEFAULTS, enabled: false});
 	const output = lastFrame()!;
 	t.false(output.includes('Model Parameters'));
 });
@@ -226,7 +229,7 @@ test('shows Model Parameters configured when set', t => {
 // ============================================================================
 
 test('shows Tune - Disabled when disabled', t => {
-	const {lastFrame} = renderTuneSelector();
+	const {lastFrame} = renderTuneSelector({...TUNE_DEFAULTS, enabled: false});
 	const output = lastFrame()!;
 	t.true(output.includes('Tune - Disabled'));
 });

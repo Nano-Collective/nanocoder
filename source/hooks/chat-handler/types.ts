@@ -53,6 +53,10 @@ export interface ChatHandlerReturn {
 		systemMessage: Message,
 		messages: Message[],
 	) => Promise<void>;
+	// Resets streaming/cancel state (isCancelling, isGenerating, abort
+	// controller, streamed content). Exposed so the tool handler can tear down
+	// cleanly when the user cancels mid tool-execution.
+	resetStreamingState: () => void;
 	isGenerating: boolean;
 	streamingReasoning: string;
 	streamingContent: string;

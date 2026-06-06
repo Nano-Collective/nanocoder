@@ -2,6 +2,10 @@ import test from 'ava';
 import {cleanup, render} from 'ink-testing-library';
 import React from 'react';
 import type {ConversationContext} from '@/hooks/useAppState';
+import {
+	setToolManagerGetter,
+	setToolRegistryGetter,
+} from '@/message-handler';
 import type {Message, ToolCall, ToolResult} from '@/types/core';
 import {useToolHandler} from './useToolHandler';
 
@@ -54,6 +58,8 @@ function setup(probe: ProbeProps = {}) {
 	const setLiveComponent = spy<[React.ReactNode]>();
 	const resetToolConfirmationState = spy<[]>();
 	const onProcessAssistantResponse = spy<[Message, Message[]]>();
+	const onResetStreamingState = spy<[]>();
+	const setAbortController = spy<[AbortController | null]>();
 
 	let captured: ReturnType<typeof useToolHandler> | null = null;
 
@@ -76,6 +82,8 @@ function setup(probe: ProbeProps = {}) {
 			onProcessAssistantResponse: async (sys, msgs) => {
 				onProcessAssistantResponse(sys, msgs);
 			},
+			onResetStreamingState,
+			setAbortController,
 		});
 		return null;
 	}
@@ -99,6 +107,8 @@ function setup(probe: ProbeProps = {}) {
 		setLiveComponent,
 		resetToolConfirmationState,
 		onProcessAssistantResponse,
+		onResetStreamingState,
+		setAbortController,
 	};
 }
 
@@ -285,4 +295,86 @@ test('continueConversationWithToolResults uses completedToolResults when none pa
 
 	t.is(setMessages.calls.length, 1);
 	t.is(onProcessAssistantResponse.calls.length, 1);
+});
+
+// ----------------------------------------------------------------------------
+// Cancel while a tool is executing (the "Cancelling… never cancels" bug)
+// ----------------------------------------------------------------------------
+
+const flushTool = () =>
+	new Promise(resolve => setTimeout(resolve, 20));
+
+const withFakeTool = async (
+	result: string,
+	body: () => Promise<void>,
+): Promise<void> => {
+	setToolManagerGetter(() => null);
+	setToolRegistryGetter(() => ({
+		noop: (async () => result) as never,
+	}));
+	try {
+		await body();
+	} finally {
+		setToolRegistryGetter(null as never);
+		setToolManagerGetter(null as never);
+	}
+};
+
+test('cancel mid tool-execution interrupts instead of continuing the turn', async t => {
+	const ctx: ConversationContext = {
+		messagesBeforeToolExecution: [{role: 'user', content: 'run it'} as Message],
+		assistantMsg: {role: 'assistant', content: 'using tools'} as Message,
+		systemMessage: {role: 'system', content: 'sys'} as Message,
+	};
+
+	await withFakeTool('done', async () => {
+		const {
+			handlers,
+			onProcessAssistantResponse,
+			onResetStreamingState,
+			setAbortController,
+			setIsToolExecuting,
+		} = setup({
+			pendingToolCalls: [makeToolCall('noop', 't1')],
+			currentConversationContext: ctx,
+		});
+
+		// Confirm runs the tool; it creates the tool-phase abort controller.
+		handlers.handleToolConfirmation(true);
+		const controller = setAbortController.calls.at(-1)?.[0] as AbortController;
+		t.truthy(controller);
+
+		// Simulate the user pressing Escape: handleCancel aborts this controller.
+		controller.abort();
+
+		await flushTool();
+
+		// The turn must NOT continue, and streaming/cancel state must be reset.
+		t.is(onProcessAssistantResponse.calls.length, 0);
+		t.is(onResetStreamingState.calls.length, 1);
+		// isToolExecuting set false during teardown.
+		t.true(setIsToolExecuting.calls.some(c => c[0] === false));
+	});
+});
+
+test('no cancel: tool execution continues the conversation as normal', async t => {
+	const ctx: ConversationContext = {
+		messagesBeforeToolExecution: [{role: 'user', content: 'run it'} as Message],
+		assistantMsg: {role: 'assistant', content: 'using tools'} as Message,
+		systemMessage: {role: 'system', content: 'sys'} as Message,
+	};
+
+	await withFakeTool('done', async () => {
+		const {handlers, onProcessAssistantResponse, onResetStreamingState} = setup({
+			pendingToolCalls: [makeToolCall('noop', 't1')],
+			currentConversationContext: ctx,
+		});
+
+		handlers.handleToolConfirmation(true);
+		// No abort this time.
+		await flushTool();
+
+		t.is(onProcessAssistantResponse.calls.length, 1);
+		t.is(onResetStreamingState.calls.length, 0);
+	});
 });

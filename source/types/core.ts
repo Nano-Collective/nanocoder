@@ -308,7 +308,7 @@ export const DEVELOPMENT_MODE_LABELS: Record<DevelopmentMode, string> = {
 	normal: '▶ normal mode on',
 	// Auto-accept skips confirmation for file edits but still prompts for bash
 	// and destructive git, so the label calls that out to avoid surprise.
-	'auto-accept': '⏵⏵ auto-accept mode on (bash + risky git still prompt)',
+	'auto-accept': '⏵⏵ auto-accept mode on',
 	yolo: '⏵⏵⏵ yolo mode on',
 	plan: '⏸ plan mode on',
 	headless: '⏵⏵ headless mode on',

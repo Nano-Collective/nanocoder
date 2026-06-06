@@ -250,6 +250,7 @@ export default function App({
 		setLiveComponent: appState.setLiveComponent,
 		resetToolConfirmationState: appState.resetToolConfirmationState,
 		onProcessAssistantResponse: chatHandler.processAssistantResponse,
+		onResetStreamingState: chatHandler.resetStreamingState,
 		client: appState.client,
 		currentProvider: appState.currentProvider,
 		setDevelopmentMode: appState.setDevelopmentMode,

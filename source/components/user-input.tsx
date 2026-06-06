@@ -26,7 +26,7 @@ interface ChatProps {
 	placeholder?: string;
 	customCommands?: string[]; // List of custom command names and aliases
 	disabled?: boolean; // Disable input when AI is processing
-	onCancel?: () => void; // Callback when user presses escape while thinking
+	isBusy?: boolean; // True when in-flight work is cancellable; Escape is owned by the global handler, so it must not clear the input
 	onToggleMode?: () => void; // Callback when user presses shift+tab to toggle development mode
 	onToggleReasoningExpanded?: () => void; // Callback when user presses ctrl+r to toggle expanded reasoning traces
 	onToggleCompactDisplay?: () => void; // Callback when user presses ctrl+o to toggle compact tool display
@@ -46,7 +46,7 @@ export default function UserInput({
 	placeholder,
 	customCommands = [],
 	disabled = false,
-	onCancel,
+	isBusy = false,
 	onToggleMode,
 	onToggleReasoningExpanded,
 	onToggleCompactDisplay,
@@ -367,9 +367,11 @@ export default function UserInput({
 	);
 
 	useInput((inputChar, key) => {
-		// Handle escape for cancellation even when disabled
-		if (key.escape && disabled && onCancel) {
-			onCancel();
+		// Cancelling in-flight work is owned by the single section-level Escape
+		// handler (see InteractiveApp), which fires no matter which component is
+		// mounted. Here we only swallow Escape while busy so it doesn't fall
+		// through to the clear-input double-press.
+		if (key.escape && (isBusy || disabled)) {
 			return;
 		}
 

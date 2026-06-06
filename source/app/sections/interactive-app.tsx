@@ -1,4 +1,4 @@
-import {Box} from 'ink';
+import {Box, useInput} from 'ink';
 import React from 'react';
 import {ChatHistory} from '@/app/components/chat-history';
 import {ChatInput} from '@/app/components/chat-input';
@@ -76,6 +76,34 @@ export function InteractiveApp({
 			appState.activeMode !== 'ideSelection') ||
 		appState.isSettingsMode;
 
+	// Whether there is in-flight work that Escape should immediately cancel.
+	// Decision states (tool confirmation, question prompt, subagent approval)
+	// own their own Escape handling and must NOT be hijacked into a generation
+	// abort, so they are excluded here.
+	const cancellable =
+		!appState.isToolConfirmationMode &&
+		!appState.isQuestionMode &&
+		pendingSubagentApproval === null &&
+		(appState.isCancelling ||
+			chatHandler.isGenerating ||
+			appState.isToolExecuting ||
+			appState.abortController !== null);
+
+	// Single, always-mounted authority for Escape -> cancel. Because this lives
+	// at the section level (never swapped out like the ChatInput children), it
+	// fires on the FIRST press no matter what is running: an LLM message, a
+	// regular tool behind ToolExecutionIndicator, a bash command, or a subagent.
+	// `isActive` keeps it dormant when there's nothing to cancel, so idle Escape
+	// still drives the clear-input behaviour in UserInput.
+	useInput(
+		(_input, key) => {
+			if (key.escape) {
+				appHandlers.handleCancel();
+			}
+		},
+		{isActive: cancellable},
+	);
+
 	return (
 		<Box flexDirection="column" padding={1} width="100%">
 			{/* Chat History - ALWAYS rendered to keep Static content stable */}
@@ -147,6 +175,7 @@ export function InteractiveApp({
 						client={appState.client}
 						customCommands={Array.from(appState.customCommandCache.keys())}
 						inputDisabled={chatHandler.isGenerating || appState.isToolExecuting}
+						isBusy={cancellable}
 						developmentMode={appState.developmentMode}
 						contextPercentUsed={appState.contextPercentUsed}
 						contextSource={appState.contextSource}
@@ -162,7 +191,6 @@ export function InteractiveApp({
 						onSubmit={handleUserSubmit}
 						activeEditor={vscodeServer.activeEditor}
 						onDismissActiveEditor={vscodeServer.dismissActiveEditor}
-						onCancel={appHandlers.handleCancel}
 						onToggleMode={appHandlers.handleToggleDevelopmentMode}
 						onToggleReasoningExpanded={handleToggleReasoningExpanded}
 						tune={appState.tune}

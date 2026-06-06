@@ -96,13 +96,11 @@ function ExecuteBashFormatterComponent({
 	return (
 		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
 			<Text color={colors.tool}>⚒ execute_bash</Text>
-			<Box>
-				<Text color={colors.secondary}>Command: </Text>
-				<Box marginLeft={1} flexShrink={1}>
-					<Text wrap="truncate-end" color={colors.primary}>
-						{command}
-					</Text>
-				</Box>
+			<Box flexDirection="column">
+				<Text color={colors.secondary}>Command:</Text>
+				<Text wrap="wrap" color={colors.primary}>
+					{command}
+				</Text>
 			</Box>
 		</Box>
 	);

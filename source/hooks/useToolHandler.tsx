@@ -38,6 +38,10 @@ interface UseToolHandlerProps {
 		systemMessage: Message,
 		messages: Message[],
 	) => Promise<void>;
+	// Tears down streaming/cancel state (isCancelling, isGenerating, abort
+	// controller). Used when the user cancels mid tool-execution so the turn
+	// stops cleanly instead of feeding the cancelled result back to the model.
+	onResetStreamingState?: () => void;
 	client?: LLMClient | null;
 	currentProvider?: string;
 	setDevelopmentMode?: (mode: DevelopmentMode) => void;
@@ -62,6 +66,7 @@ export function useToolHandler({
 	setLiveComponent,
 	resetToolConfirmationState,
 	onProcessAssistantResponse,
+	onResetStreamingState,
 	client: _client,
 	currentProvider: _currentProvider,
 	setDevelopmentMode,
@@ -72,6 +77,33 @@ export function useToolHandler({
 	// Ref to hold the abort controller for the current tool execution phase.
 	// This survives across the setImmediate boundary where the prop would be stale.
 	const toolAbortControllerRef = useRef<AbortController | null>(null);
+
+	// True when the user cancelled (Escape) while the current tool was running.
+	// handleCancel aborts whatever is in appState.abortController, which is the
+	// same controller stored in this ref — so the ref is a reliable, non-stale
+	// signal here even though the abortController prop can lag behind.
+	const wasCancelledMidExecution = () =>
+		toolAbortControllerRef.current?.signal.aborted ?? false;
+
+	// Stop the turn after a mid-execution cancel: clear the live tool display,
+	// show the same "Interrupted by user." notice as a normal abort unwind, and
+	// reset tool + streaming state. We deliberately do NOT continue the
+	// conversation — feeding a cancelled result back would let the model keep
+	// going, which is exactly the "Cancelling… never cancels" bug.
+	const finishInterrupted = () => {
+		setLiveComponent(null);
+		addToChatQueue(
+			<ErrorMessage
+				key={generateKey('tool-interrupted')}
+				message="Interrupted by user."
+				hideBox={true}
+			/>,
+		);
+		resetToolConfirmationState();
+		setIsToolExecuting(false);
+		toolAbortControllerRef.current = null;
+		onResetStreamingState?.();
+	};
 
 	// Continue conversation with tool results - maintains the proper loop
 	const continueConversationWithToolResults = async (
@@ -317,6 +349,13 @@ export function useToolHandler({
 
 			const newResults = [...completedToolResults, result];
 			setCompletedToolResults(newResults);
+
+			// If the user hit Escape while this tool was running, stop here instead
+			// of advancing or continuing the conversation.
+			if (wasCancelledMidExecution()) {
+				finishInterrupted();
+				return;
+			}
 
 			// Move to next tool or complete the process
 			if (currentToolIndex + 1 < pendingToolCalls.length) {

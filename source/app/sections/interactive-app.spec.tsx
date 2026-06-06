@@ -13,6 +13,15 @@ interface Overrides {
 	isSettingsMode?: boolean;
 	startChat?: boolean;
 	activeMode?: string | null;
+	// Cancellation-related knobs
+	isGenerating?: boolean;
+	isToolExecuting?: boolean;
+	isToolConfirmationMode?: boolean;
+	isCancelling?: boolean;
+	abortController?: AbortController | null;
+	pendingToolCalls?: Array<{id: string; function: {name: string; arguments: unknown}}>;
+	pendingSubagentApproval?: unknown;
+	handleCancel?: () => void;
 }
 
 function makeProps(o: Overrides = {}) {
@@ -31,13 +40,14 @@ function makeProps(o: Overrides = {}) {
 		isIdeSelectionMode: o.isIdeSelectionMode ?? false,
 		isSchedulerMode: o.isSchedulerMode ?? false,
 		isSettingsMode: o.isSettingsMode ?? false,
-		isToolConfirmationMode: false,
-		isToolExecuting: false,
+		isToolConfirmationMode: o.isToolConfirmationMode ?? false,
+		isToolExecuting: o.isToolExecuting ?? false,
 		isQuestionMode: false,
-		isCancelling: false,
+		isCancelling: o.isCancelling ?? false,
+		abortController: o.abortController ?? null,
 		showAllSessions: false,
 		checkpointLoadData: null,
-		pendingToolCalls: [],
+		pendingToolCalls: o.pendingToolCalls ?? [],
 		currentToolIndex: 0,
 		pendingQuestion: null,
 		customCommandCache: new Map(),
@@ -59,7 +69,7 @@ function makeProps(o: Overrides = {}) {
 
 	return {
 		appState,
-		chatHandler: {isGenerating: false},
+		chatHandler: {isGenerating: o.isGenerating ?? false},
 		toolHandler: {
 			handleToolConfirmation: noop,
 			handleToolConfirmationCancel: noop,
@@ -83,7 +93,7 @@ function makeProps(o: Overrides = {}) {
 			handleCheckpointCancel: noop,
 			handleSessionSelect: noopAsync,
 			handleSessionCancel: noop,
-			handleCancel: noop,
+			handleCancel: o.handleCancel ?? noop,
 			handleToggleDevelopmentMode: noop,
 		},
 		schedulerMode: {
@@ -98,7 +108,7 @@ function makeProps(o: Overrides = {}) {
 		},
 		staticComponents: [<Text key="static">static-marker</Text>],
 		liveComponent: null,
-		pendingSubagentApproval: null,
+		pendingSubagentApproval: o.pendingSubagentApproval ?? null,
 		handleSubagentToolApproval: noop,
 		handleQuestionAnswer: noop,
 		handleUserSubmit: noopAsync,
@@ -159,6 +169,116 @@ test('renders consistently across two mounts with the same props', t => {
 	const a = renderWithTheme(<InteractiveApp {...props} />);
 	const b = renderWithTheme(<InteractiveApp {...props} />);
 	t.is(a.lastFrame(), b.lastFrame());
+});
+
+// ============================================================================
+// Global Escape -> cancel handler
+// ============================================================================
+
+const pressEscape = async (stdin: {write: (s: string) => void}) => {
+	stdin.write('\u001B');
+	await new Promise(resolve => setTimeout(resolve, 50));
+};
+
+test('Escape cancels in-flight LLM generation on the first press', async t => {
+	let cancelled = 0;
+	const {stdin} = renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				startChat: true,
+				isGenerating: true,
+				handleCancel: () => {
+					cancelled++;
+				},
+			})}
+		/>,
+	);
+
+	await pressEscape(stdin);
+	t.is(cancelled, 1);
+});
+
+test('Escape cancels while a regular tool runs behind ToolExecutionIndicator', async t => {
+	// This is the original bug: ToolExecutionIndicator replaces UserInput and has
+	// no input handler of its own, so the cancel must come from the global handler.
+	let cancelled = 0;
+	const {stdin} = renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				startChat: true,
+				isToolExecuting: true,
+				pendingToolCalls: [
+					{id: 't1', function: {name: 'read_file', arguments: {}}},
+				],
+				handleCancel: () => {
+					cancelled++;
+				},
+			})}
+		/>,
+	);
+
+	await pressEscape(stdin);
+	t.is(cancelled, 1);
+});
+
+test('Escape cancels when only an abort controller is live (state flicker)', async t => {
+	let cancelled = 0;
+	const {stdin} = renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				startChat: true,
+				// Neither generating nor executing, but the turn is still abortable.
+				abortController: new AbortController(),
+				handleCancel: () => {
+					cancelled++;
+				},
+			})}
+		/>,
+	);
+
+	await pressEscape(stdin);
+	t.is(cancelled, 1);
+});
+
+test('Escape does NOT cancel when idle (clear-input owns it)', async t => {
+	let cancelled = 0;
+	const {stdin} = renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				startChat: true,
+				handleCancel: () => {
+					cancelled++;
+				},
+			})}
+		/>,
+	);
+
+	await pressEscape(stdin);
+	t.is(cancelled, 0);
+});
+
+test('Escape does NOT hijack tool confirmation (decline owns it)', async t => {
+	// During confirmation the abort controller may be live, but the global handler
+	// must stay dormant so Escape declines the tool rather than aborting the turn.
+	let cancelled = 0;
+	const {stdin} = renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				startChat: true,
+				isToolConfirmationMode: true,
+				abortController: new AbortController(),
+				pendingToolCalls: [
+					{id: 't1', function: {name: 'write_file', arguments: {}}},
+				],
+				handleCancel: () => {
+					cancelled++;
+				},
+			})}
+		/>,
+	);
+
+	await pressEscape(stdin);
+	t.is(cancelled, 0);
 });
 
 // FileExplorer/IdeSelector start watchers that keep the event loop alive

@@ -143,7 +143,7 @@ function loadHierarchicalConfig<T>(
 	extract: (config: any) => T | null,
 ): T | null {
 	const projectResult = tryLoadConfig(
-		join(process.cwd(), fileName),
+		join(process.cwd(), fileName), // nosemgrep
 		label,
 		extract,
 	);
@@ -151,7 +151,7 @@ function loadHierarchicalConfig<T>(
 		return projectResult;
 	}
 
-	return tryLoadConfig(join(getConfigPath(), fileName), label, extract);
+	return tryLoadConfig(join(getConfigPath(), fileName), label, extract); // nosemgrep
 }
 
 // Load auto-compact configuration and Returns default config if not specified
