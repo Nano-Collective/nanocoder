@@ -83,6 +83,8 @@ Options:
   --plain             Use a lightweight, Ink-free runtime for non-interactive runs.
                       Only valid with the "run" command. Auto-enables in CI / non-TTY.
   --no-plain          Force the Ink runtime even in CI / non-TTY environments.
+  --acp               Run as an ACP (Agent Client Protocol) server for editor integration.
+                      Communicates via JSON-RPC over stdin/stdout.
   run                 Run in non-interactive mode
 
 Examples:
@@ -261,6 +263,9 @@ async function main(): Promise<void> {
 		(!process.stdout.isTTY || ciDetected);
 	const plainMode = plainRequested || plainAuto;
 
+	// --acp: Agent Client Protocol server mode for editor integration
+	const acpMode = args.includes('--acp');
+
 	// Handle codex/copilot login from CLI (no App)
 	if (args[0] === 'codex' && args[1] === 'login') {
 		const providerName = args[2]?.trim() || 'ChatGPT';
@@ -312,6 +317,9 @@ async function main(): Promise<void> {
 			console.error(err instanceof Error ? err.message : err);
 			process.exit(1);
 		}
+	} else if (acpMode) {
+		const {runAcpServer} = await import('@/acp/acp-server');
+		await runAcpServer({cliProvider, cliModel, appVersion: version});
 	} else if (plainMode && nonInteractivePrompt) {
 		// Headless, Ink-free path. Note: --plain is currently only valid with
 		// `run`, so we must have a non-empty prompt here.

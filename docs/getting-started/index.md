@@ -46,6 +46,7 @@ nanocoder -h
 | `--help` | `-h` | Show usage information and available options |
 | `--vscode` | | Run in VS Code mode (for extension) |
 | `--vscode-port` | | Specify VS Code server port |
+| `--acp` | | Run as an [ACP server](../features/acp.md) for editor integration (Zed, etc.) |
 | `--provider` | | Specify AI provider (must be configured in agents.config.json) |
 | `--model` | | Specify AI model (must be available for the provider) |
 | `--context-max` | | Set maximum context length in tokens (supports k/K suffix, e.g. `128k`) |
