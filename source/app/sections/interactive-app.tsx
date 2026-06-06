@@ -12,6 +12,7 @@ import type {useModeHandlers} from '@/hooks/useModeHandlers';
 import type {useToolHandler} from '@/hooks/useToolHandler';
 import type {useVSCodeServer} from '@/hooks/useVSCodeServer';
 import type {PendingToolApproval} from '@/utils/tool-approval-queue';
+import type {PendingToolConfirmation} from '@/utils/tool-confirm-queue';
 import {displayCompactCountsSummary} from '@/utils/tool-result-display';
 
 interface InteractiveAppProps {
@@ -25,6 +26,8 @@ interface InteractiveAppProps {
 	liveComponent: React.ReactNode;
 	pendingSubagentApproval: PendingToolApproval | null;
 	handleSubagentToolApproval: (confirmed: boolean) => void;
+	pendingToolConfirmation: PendingToolConfirmation | null;
+	handleToolConfirmation: (confirmed: boolean) => void;
 	handleQuestionAnswer: (answer: string) => void;
 	handleUserSubmit: (message: string) => Promise<void>;
 	handleIdeSelect: (ide: string) => void;
@@ -47,6 +50,8 @@ export function InteractiveApp({
 	liveComponent,
 	pendingSubagentApproval,
 	handleSubagentToolApproval,
+	pendingToolConfirmation,
+	handleToolConfirmation,
 	handleQuestionAnswer,
 	handleUserSubmit,
 	handleIdeSelect,
@@ -84,6 +89,7 @@ export function InteractiveApp({
 		!appState.isToolConfirmationMode &&
 		!appState.isQuestionMode &&
 		pendingSubagentApproval === null &&
+		pendingToolConfirmation === null &&
 		(appState.isCancelling ||
 			chatHandler.isGenerating ||
 			appState.isToolExecuting ||
@@ -186,6 +192,8 @@ export function InteractiveApp({
 						onToggleCompactDisplay={handleToggleCompactDisplay}
 						pendingSubagentApproval={pendingSubagentApproval}
 						onSubagentToolApproval={handleSubagentToolApproval}
+						pendingToolConfirmation={pendingToolConfirmation}
+						onToolConfirmation={handleToolConfirmation}
 						onToolConfirm={toolHandler.handleToolConfirmation}
 						onToolCancel={toolHandler.handleToolConfirmationCancel}
 						onSubmit={handleUserSubmit}

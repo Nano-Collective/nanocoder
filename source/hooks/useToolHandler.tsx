@@ -4,7 +4,6 @@ import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import {ConversationContext} from '@/hooks/useAppState';
 import {getToolManager, processToolUse} from '@/message-handler';
 import {generateKey} from '@/session/key-generator';
-import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
 import {
 	DevelopmentMode,
 	LLMClient,
@@ -13,10 +12,10 @@ import {
 	ToolResult,
 } from '@/types/core';
 import {MessageBuilder} from '@/utils/message-builder';
+import {runStreamingBashTool} from '@/utils/streaming-bash-tool';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {createCancellationResults} from '@/utils/tool-cancellation';
 import {displayToolResult} from '@/utils/tool-result-display';
-import {formatValidationError} from '@/utils/tool-validation';
 import {getVSCodeServerSync} from '@/vscode/index';
 
 interface UseToolHandlerProps {
@@ -242,95 +241,34 @@ export function useToolHandler({
 			let result: ToolResult;
 
 			if (streamingFormatter) {
-				// Streaming tool (e.g., execute_bash) - handle specially.
-				const parsedArgs = parseToolArguments(currentTool.function.arguments);
-
-				// The streaming path runs the executor directly rather than the
-				// validated registry handler, so it must validate here. (Every
-				// other path validates inside the handler via withValidation.)
-				const validator = toolManager?.getToolValidator(
-					currentTool.function.name,
+				// Streaming tool (e.g., execute_bash): run via the shared streaming
+				// runner so live rendering matches the auto-execute path exactly.
+				const run = await runStreamingBashTool(
+					currentTool,
+					toolManager,
+					setLiveComponent,
+					'streaming-tool',
 				);
-				const validation = validator
-					? await validator(parsedArgs)
-					: ({valid: true} as const);
-				if (!validation.valid) {
-					setLiveComponent(null);
-					result = {
-						tool_call_id: currentTool.id,
-						role: 'tool' as const,
-						name: currentTool.function.name,
-						content: formatValidationError(
-							validation.error,
-							validation.details,
-						),
-					};
+				result = run.result;
+
+				if (run.bashState && !compactToolDisplay) {
+					// Expanded success: render the rich completed BashProgress card.
+					addToChatQueue(
+						<BashProgress
+							key={generateKey(`streaming-tool-complete-${currentTool.id}`)}
+							executionId={run.bashState.executionId}
+							command={run.bashState.command}
+							completedState={run.bashState}
+						/>,
+					);
+				} else {
+					// Compact mode, or a validation failure (no bashState): one-liner.
 					await displayToolResult(
 						currentTool,
 						result,
 						toolManager,
 						addToChatQueue,
 						compactToolDisplay,
-					);
-					const newResults = [...completedToolResults, result];
-					setCompletedToolResults(newResults);
-					if (currentToolIndex + 1 < pendingToolCalls.length) {
-						setCurrentToolIndex(currentToolIndex + 1);
-						setIsToolExecuting(false);
-						setIsToolConfirmationMode(true);
-					} else {
-						setIsToolExecuting(false);
-						await continueConversationWithToolResults(newResults);
-					}
-					return;
-				}
-
-				const commandStr = parsedArgs.command as string;
-
-				// Start execution first to get execution ID
-				const {executionId, promise} = executeBashCommand(commandStr);
-
-				// Set as live component (renders outside Static for real-time updates)
-				setLiveComponent(
-					<BashProgress
-						key={generateKey(`streaming-tool-${currentTool.id}`)}
-						executionId={executionId}
-						command={commandStr}
-						isLive={true}
-					/>,
-				);
-
-				// Wait for execution to complete
-				const bashResult = await promise;
-				const llmContent = formatBashResultForLLM(bashResult);
-
-				result = {
-					tool_call_id: currentTool.id,
-					role: 'tool' as const,
-					name: currentTool.function.name,
-					content: llmContent,
-				};
-
-				// Clear live component and add static completed result to chat queue
-				setLiveComponent(null);
-
-				if (compactToolDisplay) {
-					// In compact mode, use displayToolResult for consistent one-liner display
-					await displayToolResult(
-						currentTool,
-						result,
-						toolManager,
-						addToChatQueue,
-						true,
-					);
-				} else {
-					addToChatQueue(
-						<BashProgress
-							key={generateKey(`streaming-tool-complete-${currentTool.id}`)}
-							executionId={executionId}
-							command={commandStr}
-							completedState={bashResult}
-						/>,
 					);
 				}
 			} else {

@@ -145,6 +145,8 @@ export default function App({
 		handleQuestionAnswer,
 		pendingSubagentApproval,
 		handleSubagentToolApproval,
+		pendingToolConfirmation,
+		handleToolConfirmation,
 	} = useGlobalHandlerQueues({
 		setPendingQuestion: appState.setPendingQuestion,
 		setIsQuestionMode: appState.setIsQuestionMode,
@@ -636,6 +638,8 @@ export default function App({
 						liveComponent={liveComponent}
 						pendingSubagentApproval={pendingSubagentApproval}
 						handleSubagentToolApproval={handleSubagentToolApproval}
+						pendingToolConfirmation={pendingToolConfirmation}
+						handleToolConfirmation={handleToolConfirmation}
 						handleQuestionAnswer={handleQuestionAnswer}
 						handleUserSubmit={handleUserSubmit}
 						handleIdeSelect={handleIdeSelect}

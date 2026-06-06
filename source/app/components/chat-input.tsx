@@ -17,6 +17,7 @@ import type {
 } from '@/types';
 import type {PendingQuestion} from '@/utils/question-queue';
 import type {PendingToolApproval} from '@/utils/tool-approval-queue';
+import type {PendingToolConfirmation} from '@/utils/tool-confirm-queue';
 import {LiveCompactCounts} from '@/utils/tool-result-display';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
@@ -38,6 +39,10 @@ export interface ChatInputProps {
 	// Subagent tool approval
 	pendingSubagentApproval: PendingToolApproval | null;
 	onSubagentToolApproval: (confirmed: boolean) => void;
+
+	// Main agent tool confirmation (the unified inline approval gate)
+	pendingToolConfirmation: PendingToolConfirmation | null;
+	onToolConfirmation: (confirmed: boolean) => void;
 
 	// Client state
 	mcpInitialized: boolean;
@@ -96,6 +101,8 @@ export function ChatInput({
 	onQuestionAnswer,
 	pendingSubagentApproval,
 	onSubagentToolApproval,
+	pendingToolConfirmation,
+	onToolConfirmation,
 	mcpInitialized,
 	client,
 	customCommands,
@@ -142,7 +149,14 @@ export function ChatInput({
 					onConfirm={onSubagentToolApproval}
 					onCancel={() => onSubagentToolApproval(false)}
 				/>
-			) : /* Tool Confirmation */
+			) : /* Main agent tool confirmation (unified inline approval gate) */
+			pendingToolConfirmation ? (
+				<ToolConfirmation
+					toolCall={pendingToolConfirmation.toolCall}
+					onConfirm={onToolConfirmation}
+					onCancel={() => onToolConfirmation(false)}
+				/>
+			) : /* Tool Confirmation (legacy path) */
 			isToolConfirmationMode && pendingToolCalls[currentToolIndex] ? (
 				<ToolConfirmation
 					toolCall={pendingToolCalls[currentToolIndex]}

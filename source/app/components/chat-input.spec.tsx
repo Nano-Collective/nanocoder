@@ -20,6 +20,8 @@ function createDefaultProps(
 		client: {},
 		pendingSubagentApproval: null,
 		onSubagentToolApproval: () => {},
+		pendingToolConfirmation: null,
+		onToolConfirmation: () => {},
 		customCommands: [],
 		inputDisabled: false,
 		isBusy: false,

@@ -9,7 +9,6 @@ console.log(`\ninteractive-app.spec.tsx – ${React.version}`);
 interface Overrides {
 	isExplorerMode?: boolean;
 	isIdeSelectionMode?: boolean;
-	isSchedulerMode?: boolean;
 	isSettingsMode?: boolean;
 	startChat?: boolean;
 	activeMode?: string | null;
@@ -38,7 +37,6 @@ function makeProps(o: Overrides = {}) {
 		activeMode: o.activeMode ?? null,
 		isExplorerMode: o.isExplorerMode ?? false,
 		isIdeSelectionMode: o.isIdeSelectionMode ?? false,
-		isSchedulerMode: o.isSchedulerMode ?? false,
 		isSettingsMode: o.isSettingsMode ?? false,
 		isToolConfirmationMode: o.isToolConfirmationMode ?? false,
 		isToolExecuting: o.isToolExecuting ?? false,
@@ -96,12 +94,6 @@ function makeProps(o: Overrides = {}) {
 			handleCancel: o.handleCancel ?? noop,
 			handleToggleDevelopmentMode: noop,
 		},
-		schedulerMode: {
-			activeJobCount: 0,
-			queueLength: 0,
-			isProcessing: false,
-			currentJobCommand: null,
-		},
 		vscodeServer: {
 			activeEditor: null,
 			dismissActiveEditor: noop,
@@ -110,10 +102,11 @@ function makeProps(o: Overrides = {}) {
 		liveComponent: null,
 		pendingSubagentApproval: o.pendingSubagentApproval ?? null,
 		handleSubagentToolApproval: noop,
+		pendingToolConfirmation: null,
+		handleToolConfirmation: noop,
 		handleQuestionAnswer: noop,
 		handleUserSubmit: noopAsync,
 		handleIdeSelect: noop,
-		exitSchedulerMode: noop,
 	} as never;
 }
 
@@ -148,13 +141,6 @@ test('renders FileExplorer in explorer mode', t => {
 	const output = lastFrame()!;
 	t.truthy(output);
 	t.true(output.length > 0);
-});
-
-test('renders without crashing in scheduler mode', t => {
-	const {lastFrame} = renderWithTheme(
-		<InteractiveApp {...makeProps({isSchedulerMode: true})} />,
-	);
-	t.truthy(lastFrame());
 });
 
 test('renders without crashing in IDE-selection mode', t => {

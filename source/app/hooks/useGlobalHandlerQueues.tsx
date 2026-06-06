@@ -7,6 +7,10 @@ import {
 	type PendingToolApproval,
 	setGlobalToolApprovalHandler,
 } from '@/utils/tool-approval-queue';
+import {
+	type PendingToolConfirmation,
+	setGlobalToolConfirmHandler,
+} from '@/utils/tool-confirm-queue';
 
 interface UseGlobalHandlerQueuesProps {
 	setPendingQuestion: (question: PendingQuestion | null) => void;
@@ -17,6 +21,8 @@ interface GlobalHandlerQueues {
 	handleQuestionAnswer: (answer: string) => void;
 	pendingSubagentApproval: PendingToolApproval | null;
 	handleSubagentToolApproval: (confirmed: boolean) => void;
+	pendingToolConfirmation: PendingToolConfirmation | null;
+	handleToolConfirmation: (confirmed: boolean) => void;
 }
 
 /**
@@ -81,9 +87,36 @@ export function useGlobalHandlerQueues({
 		setPendingSubagentApproval(null);
 	}, []);
 
+	// Main agent tool confirmation: the conversation loop suspends on
+	// signalToolConfirm() until the user approves/declines here.
+	const toolConfirmResolverRef = useRef<((approved: boolean) => void) | null>(
+		null,
+	);
+	const [pendingToolConfirmation, setPendingToolConfirmation] =
+		useState<PendingToolConfirmation | null>(null);
+
+	useEffect(() => {
+		setGlobalToolConfirmHandler((confirmation: PendingToolConfirmation) => {
+			return new Promise<boolean>(resolve => {
+				toolConfirmResolverRef.current = resolve;
+				setPendingToolConfirmation(confirmation);
+			});
+		});
+	}, []);
+
+	const handleToolConfirmation = useCallback((confirmed: boolean) => {
+		if (toolConfirmResolverRef.current) {
+			toolConfirmResolverRef.current(confirmed);
+			toolConfirmResolverRef.current = null;
+		}
+		setPendingToolConfirmation(null);
+	}, []);
+
 	return {
 		handleQuestionAnswer,
 		pendingSubagentApproval,
 		handleSubagentToolApproval,
+		pendingToolConfirmation,
+		handleToolConfirmation,
 	};
 }

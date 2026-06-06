@@ -29,9 +29,16 @@ import {performAutoCompact} from '@/utils/auto-compact';
 import {formatElapsedTime, getRandomAdjective} from '@/utils/completion-note';
 import {MessageBuilder} from '@/utils/message-builder';
 import {infoMsg} from '@/utils/message-factory';
+import {createCancellationResults} from '@/utils/tool-cancellation';
+import {signalToolConfirm} from '@/utils/tool-confirm-queue';
 import {displayCompactCountsSummary} from '@/utils/tool-result-display';
+import {closeAllDiffsInVSCode} from '@/vscode/index';
 import {filterValidToolCalls} from '../utils/tool-filters';
-import {executeToolsDirectly} from './tool-executor';
+import {
+	displayExecutedTool,
+	executeApprovedTool,
+	executeToolsDirectly,
+} from './tool-executor';
 
 interface ProcessAssistantResponseParams {
 	systemMessage: Message;
@@ -128,7 +135,9 @@ export const processAssistantResponse = async (
 		currentModel,
 		nonInteractiveMode,
 		conversationStateManager,
-		onStartToolConfirmationFlow,
+		// Superseded by the inline confirmation gate below; still threaded through
+		// the type until the old confirmation hook is removed.
+		onStartToolConfirmationFlow: _onStartToolConfirmationFlow,
 		onConversationComplete,
 		conversationStartTime,
 		reasoningExpandedRef,
@@ -360,6 +369,7 @@ export const processAssistantResponse = async (
 		// Continue the main conversation loop with error message as context
 		await processAssistantResponse({
 			...params,
+			abortController: controller,
 			messages: updatedMessagesWithError,
 			conversationStartTime: startTime,
 			emptyTurnCount: 0,
@@ -569,6 +579,7 @@ export const processAssistantResponse = async (
 		// Continue the main conversation loop with error messages as context
 		await processAssistantResponse({
 			...params,
+			abortController: controller,
 			messages: updatedMessagesWithError,
 			conversationStartTime: startTime,
 			emptyTurnCount: 0,
@@ -579,150 +590,177 @@ export const processAssistantResponse = async (
 
 	// Handle tool calls if present - this continues the loop
 	if (validToolCalls && validToolCalls.length > 0) {
-		// Both native and XML fallback paths now use the same logic:
-		// the SDK never auto-executes tools (execute is stripped), so we
-		// evaluate needsApproval ourselves and split into direct vs confirmation.
-		const toolsNeedingConfirmation: ToolCall[] = [];
-		const toolsToExecuteDirectly: ToolCall[] = [];
+		// The SDK never auto-executes tools (execute is stripped). We evaluate
+		// needsApproval ourselves, then run every tool through one routine that
+		// gates each call: auto-approved tools execute immediately, the rest
+		// suspend on a confirmation prompt before executing. No second code path.
+		const autoTools: ToolCall[] = [];
+		const confirmTools: ToolCall[] = [];
 
 		for (const toolCall of validToolCalls) {
-			// The XML-fallback synthetic error isn't a real tool, so route it
-			// straight to direct execution (where it surfaces as an error
-			// result). Real argument validation now lives in the tool handler
-			// (single source of truth): an invalid call simply fails there.
+			// The XML-fallback synthetic error isn't a real tool, so treat it as
+			// auto (it surfaces as an error result). Real argument validation
+			// lives in the tool handler (single source of truth).
 			const validationFailed =
 				toolCall.function.name === '__xml_validation_error__';
-
-			// Evaluate approval through the single mode-aware resolver. In
-			// non-interactive mode the alwaysAllow list pre-authorizes tools.
 			const toolEntry = toolManager?.getToolEntry(toolCall.function.name);
-			const needsApproval = await resolveToolApproval(
-				toolCall.function.name,
-				toolEntry,
-				toolCall.function.arguments,
-				{
-					mode: developmentMode,
-					alwaysAllow: nonInteractiveMode
-						? nonInteractiveAlwaysAllow
-						: undefined,
-				},
-			);
+			const needsApproval =
+				!validationFailed &&
+				(await resolveToolApproval(
+					toolCall.function.name,
+					toolEntry,
+					toolCall.function.arguments,
+					{
+						mode: developmentMode,
+						alwaysAllow: nonInteractiveMode
+							? nonInteractiveAlwaysAllow
+							: undefined,
+					},
+				));
 
-			if (validationFailed || !needsApproval) {
-				toolsToExecuteDirectly.push(toolCall);
+			if (needsApproval) {
+				confirmTools.push(toolCall);
 			} else {
-				toolsNeedingConfirmation.push(toolCall);
+				autoTools.push(toolCall);
 			}
 		}
 
-		// Execute tools that don't need confirmation (parallel via Promise.all)
-		if (toolsToExecuteDirectly.length > 0) {
+		// Display/tally options shared by auto and post-approval execution so a
+		// tool renders identically however it was approved.
+		const displayOptions = {
+			compactDisplay: compactToolDisplayRef?.current,
+			onCompactToolCount: (toolName: string) => {
+				if (compactToolCountsRef) {
+					const counts = compactToolCountsRef.current;
+					counts[toolName] = (counts[toolName] ?? 0) + 1;
+					onSetCompactToolCounts?.({...counts});
+				}
+			},
+			onLiveTaskUpdate: () => {
+				hasLiveTaskUpdates = true;
+				loadTasks().then(tasks => {
+					onSetLiveTaskList?.(tasks);
+				});
+			},
+			nonInteractiveMode,
+		};
+
+		const turnResults: ToolResult[] = [];
+
+		// 1) Auto-approved tools execute as a batch (parallelizes consecutive
+		//    read-only / agent runs).
+		if (autoTools.length > 0) {
 			const directResults = await executeToolsDirectly(
-				toolsToExecuteDirectly,
+				autoTools,
 				toolManager,
 				conversationStateManager,
 				addToChatQueue,
-				{
-					compactDisplay: compactToolDisplayRef?.current,
-					onCompactToolCount: (toolName: string) => {
-						if (compactToolCountsRef) {
-							const counts = compactToolCountsRef.current;
-							counts[toolName] = (counts[toolName] ?? 0) + 1;
-							onSetCompactToolCounts?.({...counts});
-						}
-					},
-					onLiveTaskUpdate: () => {
-						hasLiveTaskUpdates = true;
-						// Load tasks and update live display
-						loadTasks().then(tasks => {
-							onSetLiveTaskList?.(tasks);
-						});
-					},
-					setLiveComponent,
-					nonInteractiveMode,
-					signal: controller.signal,
-				},
+				{...displayOptions, setLiveComponent, signal: controller.signal},
 			);
+			turnResults.push(...directResults);
+		}
 
-			if (directResults.length > 0) {
-				// Add tool results to messages
-				const directBuilder = new MessageBuilder(updatedMessages);
-				directBuilder.addToolResults(directResults);
-				const updatedMessagesWithTools = directBuilder.build();
-				setMessages(updatedMessagesWithTools);
-				updatedMessages = updatedMessagesWithTools;
+		// 2) Non-interactive mode can't prompt, so exit when approval is needed.
+		if (confirmTools.length > 0 && nonInteractiveMode) {
+			await flushAll();
+			const toolNames = confirmTools.map(tc => tc.function.name).join(', ');
+			const errorMsg = `Tool approval required for: ${toolNames}. Exiting non-interactive mode`;
+			addToChatQueue(
+				<ErrorMessage
+					key={generateKey('tool-approval-required')}
+					message={errorMsg}
+					hideBox={true}
+				/>,
+			);
+			const builder = new MessageBuilder(updatedMessages);
+			builder.addToolResults(turnResults);
+			builder.addMessage({role: 'assistant', content: errorMsg});
+			setMessages(builder.build());
+			setIsGenerating(false);
+			onConversationComplete?.();
+			return;
+		}
 
-				// If there are also tools needing confirmation, start that flow
-				if (toolsNeedingConfirmation.length > 0) {
-					await flushAll();
-					onStartToolConfirmationFlow(
-						toolsNeedingConfirmation,
-						updatedMessagesWithTools,
-						assistantMsg,
-						systemMessage,
+		// 3) Interactive confirmation: gate each remaining tool, execute on
+		//    approval. A decline cancels the rest and returns control to the user.
+		if (confirmTools.length > 0) {
+			// Flush accumulated auto-exec output before the prompt, and stop the
+			// thinking spinner so the confirmation UI renders cleanly.
+			await flushAll();
+			setIsGenerating(false);
+			const {processToolUse} = await import('@/message-handler');
+
+			for (let i = 0; i < confirmTools.length; i++) {
+				const toolCall = confirmTools[i];
+				const approved = await signalToolConfirm({toolCall});
+
+				if (!approved) {
+					// Close any VS Code diff previews the formatter opened for the
+					// declined tools (the approve path self-closes post-execution).
+					closeAllDiffsInVSCode();
+					// Record cancellation results for this tool and every remaining
+					// one (keeps tool_call/result pairing intact), then stop without
+					// re-prompting the model.
+					turnResults.push(...createCancellationResults(confirmTools.slice(i)));
+					addToChatQueue(
+						<InfoMessage
+							key={generateKey('tool-cancelled')}
+							message="Tool execution cancelled by user."
+							hideBox={true}
+						/>,
 					);
+					const builder = new MessageBuilder(updatedMessages);
+					builder.addToolResults(turnResults);
+					setMessages(builder.build());
 					return;
 				}
 
-				// No confirmation needed - continue conversation loop
-				await processAssistantResponse({
-					...params,
-					messages: updatedMessagesWithTools,
-					conversationStartTime: startTime,
-					emptyTurnCount: 0,
-					malformedRetryCount: 0,
-				});
-				return;
+				// Approved: execute + display through the same primitives the auto
+				// batch uses. isGenerating is true so the live area renders and the
+				// global Escape handler stays armed during execution.
+				setIsGenerating(true);
+				const execution = await executeApprovedTool(
+					toolCall,
+					toolManager,
+					processToolUse,
+					setLiveComponent,
+				);
+				turnResults.push(execution.result);
+				await displayExecutedTool(
+					execution,
+					toolManager,
+					addToChatQueue,
+					conversationStateManager,
+					displayOptions,
+				);
+
+				// Escape during execution: stop prompting further tools; the abort
+				// unwinds on the continuation's next LLM call (same as the auto
+				// path), surfacing as "Interrupted by user.".
+				if (controller.signal.aborted) break;
 			}
 		}
 
-		// Start confirmation flow only for tools that need it
-		if (toolsNeedingConfirmation.length > 0) {
-			// Flush compact counts and live task list before entering confirmation or exiting
-			await flushAll();
-
-			// In non-interactive mode, exit when tool approval is required
-			if (nonInteractiveMode) {
-				const toolNames = toolsNeedingConfirmation
-					.map(tc => tc.function.name)
-					.join(', ');
-				const errorMsg = `Tool approval required for: ${toolNames}. Exiting non-interactive mode`;
-
-				// Add error message to UI
-				addToChatQueue(
-					<ErrorMessage
-						key={generateKey('tool-approval-required')}
-						message={errorMsg}
-						hideBox={true}
-					/>,
-				);
-
-				// Add error to messages array so exit detection can find it
-				const errorMessage: Message = {
-					role: 'assistant',
-					content: errorMsg,
-				};
-				// Use updatedMessages which already includes auto-executed tool results
-				const errorBuilder = new MessageBuilder(updatedMessages);
-				errorBuilder.addMessage(errorMessage);
-				setMessages(errorBuilder.build());
-
-				// Signal completion to trigger exit
-				setIsGenerating(false);
-				if (onConversationComplete) {
-					onConversationComplete();
-				}
-				return;
-			}
-
-			// Hand off to confirmation flow — it manages its own generating state
-			setIsGenerating(false);
-			onStartToolConfirmationFlow(
-				toolsNeedingConfirmation,
-				updatedMessages, // Includes assistant message
-				assistantMsg,
-				systemMessage,
-			);
+		// 4) Feed all results back to the model and continue the loop.
+		if (turnResults.length > 0) {
+			const builder = new MessageBuilder(updatedMessages);
+			builder.addToolResults(turnResults);
+			const nextMessages = builder.build();
+			setMessages(nextMessages);
+			await processAssistantResponse({
+				...params,
+				// Carry the resolved controller forward. params.abortController can
+				// be a stale (often null) closure value, which would make this
+				// continuation mint a brand-new controller — so a cancel that
+				// aborted THIS turn's controller wouldn't stop the next LLM call
+				// ("Cancelling…" with no effect until a second press).
+				abortController: controller,
+				messages: nextMessages,
+				conversationStartTime: startTime,
+				emptyTurnCount: 0,
+				malformedRetryCount: 0,
+			});
+			return;
 		}
 	}
 
@@ -805,6 +843,7 @@ export const processAssistantResponse = async (
 		// Continue the conversation loop with the nudge
 		await processAssistantResponse({
 			...params,
+			abortController: controller,
 			messages: updatedMessagesWithNudge,
 			conversationStartTime: startTime,
 			emptyTurnCount: emptyTurnCount + 1,
