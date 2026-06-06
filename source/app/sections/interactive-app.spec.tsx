@@ -68,10 +68,6 @@ function makeProps(o: Overrides = {}) {
 	return {
 		appState,
 		chatHandler: {isGenerating: o.isGenerating ?? false},
-		toolHandler: {
-			handleToolConfirmation: noop,
-			handleToolConfirmationCancel: noop,
-		},
 		modeHandlers: {
 			handleExplorerCancel: noop,
 			handleIdeSelectionCancel: noop,

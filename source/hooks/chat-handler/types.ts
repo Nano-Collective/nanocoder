@@ -3,12 +3,7 @@ import type {CustomCommandLoader} from '@/custom-commands/loader';
 import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {TuneConfig} from '@/types/config';
-import type {
-	ApiUsageSnapshot,
-	LLMClient,
-	Message,
-	ToolCall,
-} from '@/types/core';
+import type {ApiUsageSnapshot, LLMClient, Message} from '@/types/core';
 
 export interface UseChatHandlerProps {
 	client: LLMClient | null;
@@ -25,12 +20,6 @@ export interface UseChatHandlerProps {
 	setAbortController: (controller: AbortController | null) => void;
 	developmentMode?: 'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless';
 	nonInteractiveMode?: boolean;
-	onStartToolConfirmationFlow: (
-		toolCalls: ToolCall[],
-		updatedMessages: Message[],
-		assistantMsg: Message,
-		systemMessage: Message,
-	) => void;
 	onConversationComplete?: () => void;
 	reasoningExpandedRef?: React.RefObject<boolean>;
 	compactToolDisplayRef?: React.RefObject<boolean>;
@@ -53,10 +42,6 @@ export interface ChatHandlerReturn {
 		systemMessage: Message,
 		messages: Message[],
 	) => Promise<void>;
-	// Resets streaming/cancel state (isCancelling, isGenerating, abort
-	// controller, streamed content). Exposed so the tool handler can tear down
-	// cleanly when the user cancels mid tool-execution.
-	resetStreamingState: () => void;
 	isGenerating: boolean;
 	streamingReasoning: string;
 	streamingContent: string;

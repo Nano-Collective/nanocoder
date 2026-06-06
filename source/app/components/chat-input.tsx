@@ -25,7 +25,6 @@ export interface ChatInputProps {
 	// Execution state
 	isCancelling: boolean;
 	isToolExecuting: boolean;
-	isToolConfirmationMode: boolean;
 	isQuestionMode: boolean;
 
 	// Tool state
@@ -66,8 +65,6 @@ export interface ChatInputProps {
 	liveTaskList?: Task[] | null;
 
 	// Handlers
-	onToolConfirm: (confirmed: boolean) => void;
-	onToolCancel: () => void;
 	onSubmit: (message: string) => Promise<void>;
 	onToggleMode: () => void;
 	onToggleReasoningExpanded: () => void;
@@ -93,7 +90,6 @@ export interface ChatInputProps {
 export function ChatInput({
 	isCancelling,
 	isToolExecuting,
-	isToolConfirmationMode,
 	isQuestionMode,
 	pendingToolCalls,
 	currentToolIndex,
@@ -116,8 +112,6 @@ export function ChatInput({
 	onToggleCompactDisplay,
 	compactToolDisplay,
 	liveTaskList,
-	onToolConfirm,
-	onToolCancel,
 	onSubmit,
 	onToggleMode,
 	onToggleReasoningExpanded,
@@ -155,13 +149,6 @@ export function ChatInput({
 					toolCall={pendingToolConfirmation.toolCall}
 					onConfirm={onToolConfirmation}
 					onCancel={() => onToolConfirmation(false)}
-				/>
-			) : /* Tool Confirmation (legacy path) */
-			isToolConfirmationMode && pendingToolCalls[currentToolIndex] ? (
-				<ToolConfirmation
-					toolCall={pendingToolCalls[currentToolIndex]}
-					onConfirm={onToolConfirm}
-					onCancel={onToolCancel}
 				/>
 			) : /* Tool Execution - skip indicator for streaming tools (they show their own progress) */
 			isToolExecuting &&

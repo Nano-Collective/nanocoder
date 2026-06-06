@@ -58,7 +58,6 @@ test('returns initial state with sensible defaults', t => {
 	t.is(hook.isCancelling, false);
 	t.is(hook.subagentsReady, false);
 	t.deepEqual(hook.pendingToolCalls, []);
-	t.deepEqual(hook.completedToolResults, []);
 });
 
 test('respects initialDevelopmentMode argument', t => {
@@ -162,36 +161,6 @@ test('updateMessages invalidates the API usage snapshot', t => {
 	instance.rerender(<Probe />);
 
 	t.is(captured!.lastApiUsage, null);
-});
-
-test('resetToolConfirmationState clears all confirmation-related state', t => {
-	const {hook, instance} = setup();
-
-	hook.setIsToolConfirmationMode(true);
-	hook.setIsToolExecuting(true);
-	hook.setPendingToolCalls([
-		{
-			id: 't1',
-			type: 'function',
-			function: {name: 'noop', arguments: '{}'},
-		} as never,
-	]);
-	hook.setCurrentToolIndex(2);
-	instance.rerender(<Probe />);
-
-	t.is(captured!.isToolConfirmationMode, true);
-	t.is(captured!.pendingToolCalls.length, 1);
-	t.is(captured!.currentToolIndex, 2);
-
-	captured!.resetToolConfirmationState();
-	instance.rerender(<Probe />);
-
-	t.is(captured!.isToolConfirmationMode, false);
-	t.is(captured!.isToolExecuting, false);
-	t.deepEqual(captured!.pendingToolCalls, []);
-	t.is(captured!.currentToolIndex, 0);
-	t.deepEqual(captured!.completedToolResults, []);
-	t.is(captured!.currentConversationContext, null);
 });
 
 test('reasoningExpandedRef tracks reasoningExpanded state', t => {

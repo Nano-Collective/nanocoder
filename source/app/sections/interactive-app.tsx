@@ -9,7 +9,6 @@ import type {useChatHandler} from '@/hooks/chat-handler';
 import type {AppHandlers} from '@/hooks/useAppHandlers';
 import type {useAppState} from '@/hooks/useAppState';
 import type {useModeHandlers} from '@/hooks/useModeHandlers';
-import type {useToolHandler} from '@/hooks/useToolHandler';
 import type {useVSCodeServer} from '@/hooks/useVSCodeServer';
 import type {PendingToolApproval} from '@/utils/tool-approval-queue';
 import type {PendingToolConfirmation} from '@/utils/tool-confirm-queue';
@@ -18,7 +17,6 @@ import {displayCompactCountsSummary} from '@/utils/tool-result-display';
 interface InteractiveAppProps {
 	appState: ReturnType<typeof useAppState>;
 	chatHandler: ReturnType<typeof useChatHandler>;
-	toolHandler: ReturnType<typeof useToolHandler>;
 	modeHandlers: ReturnType<typeof useModeHandlers>;
 	appHandlers: AppHandlers;
 	vscodeServer: ReturnType<typeof useVSCodeServer>;
@@ -42,7 +40,6 @@ interface InteractiveAppProps {
 export function InteractiveApp({
 	appState,
 	chatHandler,
-	toolHandler,
 	modeHandlers,
 	appHandlers,
 	vscodeServer,
@@ -171,7 +168,6 @@ export function InteractiveApp({
 					<ChatInput
 						isCancelling={appState.isCancelling}
 						isToolExecuting={appState.isToolExecuting}
-						isToolConfirmationMode={appState.isToolConfirmationMode}
 						isQuestionMode={appState.isQuestionMode}
 						pendingToolCalls={appState.pendingToolCalls}
 						currentToolIndex={appState.currentToolIndex}
@@ -194,8 +190,6 @@ export function InteractiveApp({
 						onSubagentToolApproval={handleSubagentToolApproval}
 						pendingToolConfirmation={pendingToolConfirmation}
 						onToolConfirmation={handleToolConfirmation}
-						onToolConfirm={toolHandler.handleToolConfirmation}
-						onToolCancel={toolHandler.handleToolConfirmationCancel}
 						onSubmit={handleUserSubmit}
 						activeEditor={vscodeServer.activeEditor}
 						onDismissActiveEditor={vscodeServer.dismissActiveEditor}

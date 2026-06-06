@@ -19,6 +19,7 @@ import {
 	resetSessionContextLimit,
 	setSessionContextLimit,
 } from '@/models/models-dev-client.js';
+import {setGlobalToolConfirmHandler} from '@/utils/tool-confirm-queue.js';
 
 // The ShutdownManager singleton is created as a side effect of transitive
 // imports (via @/utils/logging). Its uncaughtException/unhandledRejection
@@ -141,7 +142,6 @@ const createDefaultParams = (overrides = {}) => ({
 		updateAfterToolExecution: () => {},
 		},
 	} as any,
-	onStartToolConfirmationFlow: () => {},
 	onConversationComplete: () => {},
 	...overrides,
 });
@@ -1345,7 +1345,7 @@ test.serial('processAssistantResponse - final messages are compacted when no too
 	);
 });
 
-test.serial('processAssistantResponse - tool confirmation flow receives compacted messages after auto-compact', async t => {
+test.serial('processAssistantResponse - confirmation gate operates on compacted messages after auto-compact', async t => {
 	// Context limit high enough that first turn compresses but second turn doesn't
 	// re-trigger (prevents infinite LLM summarization loop).
 	setSessionContextLimit(200);
@@ -1358,11 +1358,15 @@ test.serial('processAssistantResponse - tool confirmation flow receives compacte
 		{role: 'user', content: 'Recent request'},
 	];
 
-	let confirmationFlowMessages: Message[] | undefined;
+	// Decline at the gate so the loop records cancellation results and stops
+	// (no recursion) — giving a deterministic terminal setMessages call to inspect.
+	setGlobalToolConfirmHandler(async () => false);
+
+	const setMessagesCalls: Message[][] = [];
 
 	const mockToolManager = createMockToolManager({
 		tools: ['some_tool'], // Register so filterValidToolCalls keeps it valid
-		needsApproval: true,  // Force confirmation flow
+		needsApproval: true,  // Force the confirmation gate
 	});
 
 	const params = createDefaultParams({
@@ -1378,29 +1382,25 @@ test.serial('processAssistantResponse - tool confirmation flow receives compacte
 		toolManager: mockToolManager as any,
 		currentProvider: 'openai',
 		currentModel: 'gpt-4',
+		nonInteractiveMode: false,
 		setTokenCount: () => {},
-		setMessages: () => {},
+		setMessages: (m: Message[]) => setMessagesCalls.push(m),
 		addToChatQueue: () => {},
-		onStartToolConfirmationFlow: (_toolCalls, messages) => {
-			confirmationFlowMessages = messages;
-		},
 	});
 
 	await processAssistantResponse(params);
 
-	t.truthy(
-		confirmationFlowMessages,
-		'onStartToolConfirmationFlow should have been called',
-	);
-
-	// The messages passed to the confirmation flow should NOT contain the full
-	// original verbose content — auto-compaction should have compressed them first.
-	const containsOriginalVerbose = confirmationFlowMessages!.some(
+	// On decline the loop writes cancellation results onto the (already
+	// auto-compacted) history. That terminal write must not carry the original
+	// verbose content — i.e. the gate operated after compaction.
+	t.true(setMessagesCalls.length > 0, 'setMessages should have been called');
+	const finalMessages = setMessagesCalls.at(-1)!;
+	const containsOriginalVerbose = finalMessages.some(
 		msg => msg.content === oldVerboseContent,
 	);
 	t.false(
 		containsOriginalVerbose,
-		'Confirmation flow should receive compacted messages, not original verbose history',
+		'Confirmation gate should operate on compacted messages, not original verbose history',
 	);
 });
 

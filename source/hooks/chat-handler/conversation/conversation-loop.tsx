@@ -58,12 +58,6 @@ interface ProcessAssistantResponseParams {
 	developmentMode: 'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless';
 	nonInteractiveMode: boolean;
 	conversationStateManager: React.MutableRefObject<ConversationStateManager>;
-	onStartToolConfirmationFlow: (
-		toolCalls: ToolCall[],
-		updatedMessages: Message[],
-		assistantMsg: Message,
-		systemMessage: Message,
-	) => void;
 	onConversationComplete?: () => void;
 	conversationStartTime?: number;
 	reasoningExpandedRef?: React.RefObject<boolean>;
@@ -135,9 +129,6 @@ export const processAssistantResponse = async (
 		currentModel,
 		nonInteractiveMode,
 		conversationStateManager,
-		// Superseded by the inline confirmation gate below; still threaded through
-		// the type until the old confirmation hook is removed.
-		onStartToolConfirmationFlow: _onStartToolConfirmationFlow,
 		onConversationComplete,
 		conversationStartTime,
 		reasoningExpandedRef,

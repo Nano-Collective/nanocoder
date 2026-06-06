@@ -29,7 +29,6 @@ const createMockProps = (overrides?: Partial<UseChatHandlerProps>): UseChatHandl
 	addToChatQueue: () => {},
 	abortController: null,
 	setAbortController: () => {},
-	onStartToolConfirmationFlow: () => {},
 	...overrides,
 });
 
@@ -303,7 +302,6 @@ test('useChatHandler - callbacks are provided', t => {
 	let hookResult: ChatHandlerReturn | null = null;
 
 	const props = createMockProps({
-		onStartToolConfirmationFlow: () => {},
 		onConversationComplete: () => {},
 	});
 
@@ -318,7 +316,6 @@ test('useChatHandler - callbacks are provided', t => {
 
 	t.truthy(hookResult);
 	// The hook should successfully initialize with callbacks
-	t.is(typeof props.onStartToolConfirmationFlow, 'function');
 	t.is(typeof props.onConversationComplete, 'function');
 });
 

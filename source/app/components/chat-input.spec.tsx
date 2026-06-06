@@ -10,7 +10,6 @@ function createDefaultProps(
 	return {
 		isCancelling: false,
 		isToolExecuting: false,
-		isToolConfirmationMode: false,
 		isQuestionMode: false,
 		pendingToolCalls: [],
 		currentToolIndex: 0,
@@ -28,8 +27,6 @@ function createDefaultProps(
 		developmentMode: 'normal',
 		contextPercentUsed: null,
 		contextSource: null,
-		onToolConfirm: async () => {},
-		onToolCancel: () => {},
 		onSubmit: async () => {},
 		onToggleMode: () => {},
 		onToggleReasoningExpanded: () => {},
@@ -50,7 +47,6 @@ test('ChatInput shows UserInput when ready for input', t => {
 		mcpInitialized: true,
 		client: {},
 		isToolExecuting: false,
-		isToolConfirmationMode: false,
 	});
 
 	const {lastFrame, unmount} = renderWithTheme(<ChatInput {...props} />);
@@ -72,16 +68,14 @@ test('ChatInput shows loading spinner when not initialized', t => {
 	unmount();
 });
 
-test('ChatInput shows tool confirmation when in tool confirmation mode', t => {
+test('ChatInput shows tool confirmation when a tool awaits approval', t => {
 	const mockToolCall = {
 		id: 'test-1',
 		function: {name: 'test_tool', arguments: {}},
 	};
 
 	const props = createDefaultProps({
-		isToolConfirmationMode: true,
-		pendingToolCalls: [mockToolCall],
-		currentToolIndex: 0,
+		pendingToolConfirmation: {toolCall: mockToolCall as never},
 	});
 
 	const {lastFrame, unmount} = renderWithTheme(<ChatInput {...props} />);

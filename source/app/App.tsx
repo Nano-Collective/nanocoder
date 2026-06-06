@@ -37,7 +37,6 @@ import {useNotifications} from '@/hooks/useNotifications';
 import {useSessionAutosave} from '@/hooks/useSessionAutosave';
 import {ThemeContext} from '@/hooks/useTheme';
 import {TitleShapeContext, updateTitleShape} from '@/hooks/useTitleShape';
-import {useToolHandler} from '@/hooks/useToolHandler';
 import {UIStateProvider} from '@/hooks/useUIState';
 import {useVSCodeServer} from '@/hooks/useVSCodeServer';
 import {generateKey} from '@/session/key-generator';
@@ -175,22 +174,6 @@ export default function App({
 		setAbortController: appState.setAbortController,
 		developmentMode: appState.developmentMode,
 		nonInteractiveMode,
-		onStartToolConfirmationFlow: (
-			toolCalls,
-			messagesBeforeToolExecution,
-			assistantMsg,
-			systemMessage,
-		) => {
-			appState.setPendingToolCalls(toolCalls);
-			appState.setCurrentToolIndex(0);
-			appState.setCompletedToolResults([]);
-			appState.setCurrentConversationContext({
-				messagesBeforeToolExecution,
-				assistantMsg,
-				systemMessage,
-			});
-			appState.setIsToolConfirmationMode(true);
-		},
 		onConversationComplete: () => {
 			appState.setIsConversationComplete(true);
 			appState.setCompactToolCounts(null);
@@ -208,12 +191,17 @@ export default function App({
 		subagentsReady: appState.subagentsReady,
 	});
 
-	// Desktop notifications on state transitions
+	// Desktop notifications on state transitions. The unified tool flow drives
+	// confirmation through pendingToolConfirmation (not appState.isToolConfirmationMode),
+	// so derive the signal from it — otherwise the "tool needs approval"
+	// notification never fires and "generation complete" misfires when a prompt
+	// appears. Execution runs with isGenerating=true, so isToolExecuting is no
+	// longer a distinct signal here.
 	useNotifications({
-		isToolConfirmationMode: appState.isToolConfirmationMode,
+		isToolConfirmationMode: pendingToolConfirmation !== null,
 		isQuestionMode: appState.isQuestionMode,
 		isGenerating: chatHandler.isGenerating,
-		isToolExecuting: appState.isToolExecuting,
+		isToolExecuting: false,
 	});
 
 	// Track context window usage percentage
@@ -233,32 +221,6 @@ export default function App({
 		setContextSource: appState.setContextSource,
 		developmentMode: appState.developmentMode,
 		tune: appState.tune,
-	});
-
-	// Setup tool handler
-	const toolHandler = useToolHandler({
-		pendingToolCalls: appState.pendingToolCalls,
-		currentToolIndex: appState.currentToolIndex,
-		completedToolResults: appState.completedToolResults,
-		currentConversationContext: appState.currentConversationContext,
-		setPendingToolCalls: appState.setPendingToolCalls,
-		setCurrentToolIndex: appState.setCurrentToolIndex,
-		setCompletedToolResults: appState.setCompletedToolResults,
-		setCurrentConversationContext: appState.setCurrentConversationContext,
-		setIsToolConfirmationMode: appState.setIsToolConfirmationMode,
-		setIsToolExecuting: appState.setIsToolExecuting,
-		setMessages: appState.updateMessages,
-		addToChatQueue: appState.addToChatQueue,
-		setLiveComponent: appState.setLiveComponent,
-		resetToolConfirmationState: appState.resetToolConfirmationState,
-		onProcessAssistantResponse: chatHandler.processAssistantResponse,
-		onResetStreamingState: chatHandler.resetStreamingState,
-		client: appState.client,
-		currentProvider: appState.currentProvider,
-		setDevelopmentMode: appState.setDevelopmentMode,
-		compactToolDisplay: appState.compactToolDisplay,
-		abortController: appState.abortController,
-		setAbortController: appState.setAbortController,
 	});
 
 	// All app-level structured logging lives in this hook so the orchestrator
@@ -630,7 +592,6 @@ export default function App({
 					<InteractiveApp
 						appState={appState}
 						chatHandler={chatHandler}
-						toolHandler={toolHandler}
 						modeHandlers={modeHandlers}
 						appHandlers={appHandlers}
 						vscodeServer={vscodeServer}

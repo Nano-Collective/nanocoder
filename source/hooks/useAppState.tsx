@@ -22,7 +22,7 @@ import {
 	Message,
 	ToolCall,
 } from '@/types/core';
-import type {ToolResult, UpdateInfo} from '@/types/index';
+import type {UpdateInfo} from '@/types/index';
 import type {Tokenizer} from '@/types/tokenization.js';
 import type {ThemePreset} from '@/types/ui';
 import {BoundedMap} from '@/utils/bounded-map';
@@ -39,23 +39,6 @@ export type ActiveMode =
 	| 'sessionSelector'
 	| 'tune'
 	| null;
-
-export interface ConversationContext {
-	/**
-	 * All messages up to (but not including) tool execution.
-	 * Includes user message, auto-executed messages, and assistant message with tool_calls.
-	 */
-	messagesBeforeToolExecution: Message[];
-	/**
-	 * The assistant message that triggered tool execution.
-	 * Included in messagesBeforeToolExecution for reference.
-	 */
-	assistantMsg: Message;
-	/**
-	 * System message for the next turn after tool execution.
-	 */
-	systemMessage: Message;
-}
 
 export function useAppState(
 	initialDevelopmentMode: DevelopmentMode = 'normal',
@@ -193,11 +176,6 @@ export function useAppState(
 	// Tool confirmation state
 	const [pendingToolCalls, setPendingToolCalls] = useState<ToolCall[]>([]);
 	const [currentToolIndex, setCurrentToolIndex] = useState<number>(0);
-	const [completedToolResults, setCompletedToolResults] = useState<
-		ToolResult[]
-	>([]);
-	const [currentConversationContext, setCurrentConversationContext] =
-		useState<ConversationContext | null>(null);
 
 	// Chat queue for components
 	const [chatComponents, setChatComponents] = useState<React.ReactNode[]>([]);
@@ -280,16 +258,6 @@ export function useAppState(
 		setLastApiUsage(null);
 	}, []);
 
-	// Reset tool confirmation state
-	const resetToolConfirmationState = () => {
-		setIsToolConfirmationMode(false);
-		setIsToolExecuting(false);
-		setPendingToolCalls([]);
-		setCurrentToolIndex(0);
-		setCompletedToolResults([]);
-		setCurrentConversationContext(null);
-	};
-
 	return {
 		// State
 		client,
@@ -349,8 +317,6 @@ export function useAppState(
 		lastApiUsage,
 		pendingToolCalls,
 		currentToolIndex,
-		completedToolResults,
-		currentConversationContext,
 		chatComponents,
 		tokenizer,
 
@@ -400,8 +366,6 @@ export function useAppState(
 		setLastApiUsage,
 		setPendingToolCalls,
 		setCurrentToolIndex,
-		setCompletedToolResults,
-		setCurrentConversationContext,
 		setChatComponents,
 		liveComponent,
 		setLiveComponent,
@@ -410,6 +374,5 @@ export function useAppState(
 		addToChatQueue,
 		getMessageTokens,
 		updateMessages,
-		resetToolConfirmationState,
 	};
 }

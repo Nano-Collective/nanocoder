@@ -25,10 +25,10 @@ export interface StreamingBashRun {
  * per-tool validator must run here), mount a live `BashProgress` so output shows
  * while the command runs, await completion, then clear the live component.
  *
- * Shared by both tool-execution paths — the confirmation flow in
- * `useToolHandler` and the auto-execute flow in `tool-executor` — so the live
- * bash rendering behaves identically regardless of how the tool was approved.
- * Callers own how the completed state is displayed (inline vs. deferred tally).
+ * Used by the unified tool-execution routine in `tool-executor` for both
+ * auto-executed and user-approved bash calls, so the live bash rendering
+ * behaves identically regardless of how the tool was approved. Callers own how
+ * the completed state is displayed (inline vs. deferred tally).
  */
 export async function runStreamingBashTool(
 	toolCall: ToolCall,
