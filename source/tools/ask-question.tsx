@@ -22,7 +22,7 @@ const executeAskQuestion = async (args: AskQuestionArgs): Promise<string> => {
 	);
 
 	if (options.length < 2 || options.length > 4) {
-		return 'Error: ⚒ options must contain 2-4 items.';
+		return 'Error: options must contain 2-4 items.';
 	}
 
 	const answer = await signalQuestion({

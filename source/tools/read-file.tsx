@@ -380,7 +380,7 @@ const readFileValidator = async (args: {
 	if (!isValidFilePath(args.path)) {
 		return {
 			valid: false,
-			error: `⚒ Invalid file path: "${args.path}". Path must be relative and within the project directory.`,
+			error: `Invalid file path: "${args.path}". Path must be relative and within the project directory.`,
 		};
 	}
 
@@ -392,7 +392,7 @@ const readFileValidator = async (args: {
 		const errorMessage = formatError(error);
 		return {
 			valid: false,
-			error: `⚒ Path validation failed: ${errorMessage}`,
+			error: `Path validation failed: ${errorMessage}`,
 		};
 	}
 
@@ -405,7 +405,7 @@ const readFileValidator = async (args: {
 		if (args.start_line !== undefined && args.start_line < 1) {
 			return {
 				valid: false,
-				error: '⚒ start_line must be >= 1',
+				error: 'start_line must be >= 1',
 			};
 		}
 
@@ -416,7 +416,7 @@ const readFileValidator = async (args: {
 		) {
 			return {
 				valid: false,
-				error: '⚒ end_line must be >= start_line',
+				error: 'end_line must be >= start_line',
 			};
 		}
 
@@ -444,7 +444,7 @@ const readFileValidator = async (args: {
 				if (line && line.length > MAX_LINE_LENGTH_CHARS) {
 					return {
 						valid: false,
-						error: `⚒ File "${args.path}" contains minified or binary content (line ${i + 1} has ${line.length.toLocaleString()} characters). This file cannot be read as it would consume excessive tokens without providing useful information.`,
+						error: `File "${args.path}" contains minified or binary content (line ${i + 1} has ${line.length.toLocaleString()} characters). This file cannot be read as it would consume excessive tokens without providing useful information.`,
 					};
 				}
 			}
@@ -460,13 +460,13 @@ const readFileValidator = async (args: {
 		) {
 			return {
 				valid: false,
-				error: `⚒ File "${args.path}" does not exist`,
+				error: `File "${args.path}" does not exist`,
 			};
 		}
 		const errorMessage = formatError(error);
 		return {
 			valid: false,
-			error: `⚒ Cannot access file "${args.path}": ${errorMessage}`,
+			error: `Cannot access file "${args.path}": ${errorMessage}`,
 		};
 	}
 };

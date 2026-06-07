@@ -184,14 +184,14 @@ const stringReplaceValidator = async (
 			if (error.code === 'ENOENT') {
 				return {
 					valid: false,
-					error: `⚒ File "${path}" does not exist`,
+					error: `File "${path}" does not exist`,
 				};
 			}
 		}
 		const errorMessage = formatError(error);
 		return {
 			valid: false,
-			error: `⚒ Cannot access file "${path}": ${errorMessage}`,
+			error: `Cannot access file "${path}": ${errorMessage}`,
 		};
 	}
 
@@ -199,7 +199,7 @@ const stringReplaceValidator = async (
 		return {
 			valid: false,
 			error:
-				'⚒ old_str cannot be empty. Provide the exact content to find and replace.',
+				'old_str cannot be empty. Provide the exact content to find and replace.',
 		};
 	}
 
@@ -211,21 +211,21 @@ const stringReplaceValidator = async (
 		if (occurrences === 0) {
 			return {
 				valid: false,
-				error: `⚒ Content not found in file. The file may have changed since you last read it. Suggestion: Read the file again to see current contents.`,
+				error: `Content not found in file. The file may have changed since you last read it. Suggestion: Read the file again to see current contents.`,
 			};
 		}
 
 		if (occurrences > 1) {
 			return {
 				valid: false,
-				error: `⚒ Found ${occurrences} matches for the search string. Please provide more surrounding context to make the match unique.`,
+				error: `Found ${occurrences} matches for the search string. Please provide more surrounding context to make the match unique.`,
 			};
 		}
 	} catch (error) {
 		const errorMessage = formatError(error);
 		return {
 			valid: false,
-			error: `⚒ Error reading file "${path}": ${errorMessage}`,
+			error: `Error reading file "${path}": ${errorMessage}`,
 		};
 	}
 

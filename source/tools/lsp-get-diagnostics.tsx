@@ -382,13 +382,13 @@ const getDiagnosticsValidator = async (
 		) {
 			return {
 				valid: false,
-				error: `Error: File "${args.path}" does not exist. Please verify the file path and try again.`,
+				error: `File "${args.path}" does not exist. Please verify the file path and try again.`,
 			};
 		}
 		const errorMessage = formatError(error);
 		return {
 			valid: false,
-			error: `Error: Cannot access file "${args.path}": ${errorMessage}`,
+			error: `Cannot access file "${args.path}": ${errorMessage}`,
 		};
 	}
 };

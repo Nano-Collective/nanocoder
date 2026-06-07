@@ -201,7 +201,7 @@ export const webSearchValidator = (
 	if (!query) {
 		return Promise.resolve({
 			valid: false,
-			error: '⚒ Search query cannot be empty',
+			error: 'Search query cannot be empty',
 		});
 	}
 
@@ -209,7 +209,7 @@ export const webSearchValidator = (
 	if (query.length > MAX_WEB_SEARCH_QUERY_LENGTH) {
 		return Promise.resolve({
 			valid: false,
-			error: `⚒ Search query is too long (${query.length} characters). Maximum length is ${MAX_WEB_SEARCH_QUERY_LENGTH} characters.`,
+			error: `Search query is too long (${query.length} characters). Maximum length is ${MAX_WEB_SEARCH_QUERY_LENGTH} characters.`,
 		});
 	}
 

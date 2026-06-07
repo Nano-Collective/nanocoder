@@ -111,7 +111,7 @@ const writeTasksValidator = (
 	if (!Array.isArray(args.tasks)) {
 		return Promise.resolve({
 			valid: false,
-			error: '⚒ tasks must be an array (pass an empty array to clear the list)',
+			error: 'Tasks must be an array (pass an empty array to clear the list)',
 		});
 	}
 
@@ -121,14 +121,14 @@ const writeTasksValidator = (
 		if (!title) {
 			return Promise.resolve({
 				valid: false,
-				error: `⚒ Task ${i + 1}: title cannot be empty`,
+				error: `Task ${i + 1}: title cannot be empty`,
 			});
 		}
 
 		if (title.length > 200) {
 			return Promise.resolve({
 				valid: false,
-				error: `⚒ Task ${i + 1}: title is too long (max 200 characters)`,
+				error: `Task ${i + 1}: title is too long (max 200 characters)`,
 			});
 		}
 	}

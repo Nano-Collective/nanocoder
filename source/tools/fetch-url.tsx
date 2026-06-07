@@ -159,7 +159,7 @@ const fetchUrlValidator = (
 		) {
 			return Promise.resolve({
 				valid: false,
-				error: `⚒ Cannot fetch from internal/private network address: ${hostname}`,
+				error: `Cannot fetch from internal/private network address: ${hostname}`,
 			});
 		}
 
@@ -167,7 +167,7 @@ const fetchUrlValidator = (
 	} catch {
 		return Promise.resolve({
 			valid: false,
-			error: `⚒ Invalid URL format: ${args.url}`,
+			error: `Invalid URL format: ${args.url}`,
 		});
 	}
 };

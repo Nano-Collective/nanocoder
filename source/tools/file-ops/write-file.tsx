@@ -239,14 +239,14 @@ const writeFileValidator = async (args: {
 			if (error.code === 'ENOENT') {
 				return {
 					valid: false,
-					error: `⚒ Parent directory does not exist: "${parentDir}"`,
+					error: `Parent directory does not exist: "${parentDir}"`,
 				};
 			}
 		}
 		const errorMessage = formatError(error);
 		return {
 			valid: false,
-			error: `⚒ Cannot access parent directory "${parentDir}": ${errorMessage}`,
+			error: `Cannot access parent directory "${parentDir}": ${errorMessage}`,
 		};
 	}
 
@@ -254,7 +254,7 @@ const writeFileValidator = async (args: {
 	if (args.content === null || args.content === undefined) {
 		return {
 			valid: false,
-			error: `⚒ Invalid content: content cannot be null or undefined.`,
+			error: `Invalid content: content cannot be null or undefined.`,
 		};
 	}
 
@@ -276,7 +276,7 @@ const writeFileValidator = async (args: {
 		if (pattern.test(absPath)) {
 			return {
 				valid: false,
-				error: `⚒ Cannot write files to system directory: "${args.path}"`,
+				error: `Cannot write files to system directory: "${args.path}"`,
 			};
 		}
 	}

@@ -134,7 +134,7 @@ const executeBashValidator = (args: {
 	if (!command) {
 		return Promise.resolve({
 			valid: false,
-			error: '⚒ Command cannot be empty',
+			error: 'Command cannot be empty',
 		});
 	}
 
@@ -152,7 +152,7 @@ const executeBashValidator = (args: {
 		if (pattern.test(command)) {
 			return Promise.resolve({
 				valid: false,
-				error: `⚒ Command contains potentially destructive operation: "${command}". This command is blocked for safety.`,
+				error: `Command contains potentially destructive operation: "${command}". This command is blocked for safety.`,
 			});
 		}
 	}
