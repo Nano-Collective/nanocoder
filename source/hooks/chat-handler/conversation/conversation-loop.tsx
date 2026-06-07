@@ -56,6 +56,13 @@ interface ProcessAssistantResponseParams {
 	currentProvider: string;
 	currentModel: string;
 	developmentMode: 'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless';
+	// Live mode ref, read per tool call so a mid-turn mode switch (e.g. flipping
+	// to yolo while tools execute) is honored immediately. Falls back to the
+	// snapshot `developmentMode` for callers that don't supply a ref (subagents,
+	// plain shell).
+	developmentModeRef?: React.RefObject<
+		'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless'
+	>;
 	nonInteractiveMode: boolean;
 	conversationStateManager: React.MutableRefObject<ConversationStateManager>;
 	onConversationComplete?: () => void;
@@ -140,6 +147,7 @@ export const processAssistantResponse = async (
 		setLastApiUsage,
 		tune,
 		developmentMode,
+		developmentModeRef,
 		emptyTurnCount = 0,
 		malformedRetryCount = 0,
 	} = params;
@@ -602,7 +610,9 @@ export const processAssistantResponse = async (
 					toolEntry,
 					toolCall.function.arguments,
 					{
-						mode: developmentMode,
+						// Prefer the live ref so a mode switch made while this turn's
+						// tools are still executing takes effect on the next call.
+						mode: developmentModeRef?.current ?? developmentMode,
 						alwaysAllow: nonInteractiveMode
 							? nonInteractiveAlwaysAllow
 							: undefined,

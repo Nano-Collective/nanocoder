@@ -173,6 +173,7 @@ export default function App({
 		abortController: appState.abortController,
 		setAbortController: appState.setAbortController,
 		developmentMode: appState.developmentMode,
+		developmentModeRef: appState.developmentModeRef,
 		nonInteractiveMode,
 		onConversationComplete: () => {
 			appState.setIsConversationComplete(true);

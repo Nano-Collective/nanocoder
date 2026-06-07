@@ -152,6 +152,11 @@ export function useAppState(
 	const [developmentMode, setDevelopmentMode] = useState<DevelopmentMode>(
 		initialDevelopmentMode,
 	);
+	// Ref keeps the current mode readable inside long-running async loops so a
+	// mid-turn switch (e.g. flipping to yolo while tools are executing) takes
+	// effect on the next tool call instead of only on the next message.
+	const developmentModeRef = useRef<DevelopmentMode>(initialDevelopmentMode);
+	developmentModeRef.current = developmentMode;
 
 	// Model mode state — resolved from config layers on startup
 	const [tune, setTune] = useState<TuneConfig>(() => {
@@ -310,6 +315,7 @@ export function useAppState(
 		isQuestionMode,
 		pendingQuestion,
 		developmentMode,
+		developmentModeRef,
 		tune,
 		contextPercentUsed,
 		contextLimit,

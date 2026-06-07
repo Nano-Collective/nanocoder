@@ -187,6 +187,18 @@ test('compactToolDisplayRef tracks compactToolDisplay state', t => {
 	t.is(captured!.compactToolDisplayRef.current, false);
 });
 
+test('developmentModeRef tracks developmentMode state', t => {
+	const {hook, instance} = setup();
+
+	t.is(hook.developmentModeRef.current, hook.developmentMode);
+
+	hook.setDevelopmentMode('yolo');
+	instance.rerender(<Probe />);
+
+	t.is(captured!.developmentMode, 'yolo');
+	t.is(captured!.developmentModeRef.current, 'yolo');
+});
+
 test('tokenizer is rebuilt when provider or model changes', t => {
 	const {hook, instance} = setup();
 

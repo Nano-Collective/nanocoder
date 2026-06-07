@@ -19,6 +19,10 @@ export interface UseChatHandlerProps {
 	abortController: AbortController | null;
 	setAbortController: (controller: AbortController | null) => void;
 	developmentMode?: 'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless';
+	// Live mode ref so the conversation loop can read mode changes mid-turn.
+	developmentModeRef?: React.RefObject<
+		'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless'
+	>;
 	nonInteractiveMode?: boolean;
 	onConversationComplete?: () => void;
 	reasoningExpandedRef?: React.RefObject<boolean>;
