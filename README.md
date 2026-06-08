@@ -1,8 +1,8 @@
 # Nanocoder
 
-Built by the [Nano Collective](https://nanocollective.org) — a community collective building AI tooling not for profit, but for the community.
+An open coding agent for your terminal, built by a community collective rather than a company. Bring your own model, keep your code on your machine, and owe nothing to anyone.
 
-Nanocoder brings agentic coding tools like Claude Code and Gemini CLI to the model of your choice — local models via Ollama, or any OpenAI-compatible API such as OpenRouter, Anthropic, and Google. You decide which provider runs your code and where your data goes. Every tool the collective ships aims to be **privacy-respecting**, **local-first**, and **open for all**: no closed-source features, no paid tiers gating the useful parts.
+Built by the [Nano Collective](https://nanocollective.org), a community collective building AI tooling not for profit, but for the community. Nanocoder runs agentic coding on the model of your choice: local models via Ollama, or any OpenAI-compatible API such as OpenRouter, Anthropic, and Google. You decide which provider runs your code and where your data goes. No closed-source features and no paid tiers gating the useful parts: **privacy-respecting**, **local-first**, and **open for all**.
 
 ![Example](./.github/assets/example-preview.gif)
 
