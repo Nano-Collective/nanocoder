@@ -560,6 +560,7 @@ async function handleSlashCommand(
 export async function handleMessageSubmission(
 	message: string,
 	options: MessageSubmissionOptions,
+	displayValue?: string,
 ): Promise<void> {
 	const parsedInput = parseInput(message);
 
@@ -573,7 +574,7 @@ export async function handleMessageSubmission(
 		return;
 	}
 
-	await options.onHandleChatMessage(message);
+	await options.onHandleChatMessage(message, displayValue);
 }
 
 export function createClearMessagesHandler(

@@ -101,7 +101,7 @@ interface UseAppHandlersProps {
 	enterTune: () => void;
 
 	// Chat handler
-	handleChatMessage: (message: string) => Promise<void>;
+	handleChatMessage: (message: string, displayValue?: string) => Promise<void>;
 
 	// VS Code active editor dismissal (dropped on /clear)
 	dismissActiveEditor?: () => void;
@@ -124,7 +124,10 @@ export interface AppHandlers {
 		checkpoints: CheckpointListItem[],
 		currentMessageCount: number,
 	) => void;
-	handleMessageSubmit: (message: string) => Promise<void>;
+	handleMessageSubmit: (
+		message: string,
+		displayValue?: string,
+	) => Promise<void>;
 }
 
 /**
@@ -498,7 +501,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 	// Message submit handler
 	const handleMessageSubmit = React.useCallback(
-		async (message: string) => {
+		async (message: string, displayValue?: string) => {
 			// Reset conversation completion flag when starting a new message
 			props.setIsConversationComplete(false);
 
@@ -518,42 +521,46 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 						.slice(1)
 				: undefined;
 
-			await handleMessageSubmission(message, {
-				customCommandCache: props.customCommandCache,
-				customCommandLoader: props.customCommandLoader,
-				customCommandExecutor: props.customCommandExecutor,
-				onClearMessages: clearMessages,
-				onRenameSession: props.setSessionName,
-				commandArgs,
-				onEnterModelSelectionMode: props.enterModelSelectionMode,
-				onEnterModelDatabaseMode: props.enterModelDatabaseMode,
-				onEnterConfigWizardMode: props.enterConfigWizardMode,
-				onEnterSettingsMode: props.enterSettingsMode,
-				onEnterMcpWizardMode: props.enterMcpWizardMode,
-				onEnterExplorerMode: props.enterExplorerMode,
-				onEnterIdeSelectionMode: props.enterIdeSelectionMode,
-				onEnterTune: props.enterTune,
-				onEnterCheckpointLoadMode: enterCheckpointLoadMode,
-				onEnterSessionSelectorMode: enterSessionSelectorMode,
-				onResumeSession: session => applySession(session),
-				onShowStatus: handleShowStatus,
-				onHandleChatMessage: props.handleChatMessage,
-				onAddToChatQueue: props.addToChatQueue,
-				setLiveComponent: props.setLiveComponent,
-				setIsToolExecuting: props.setIsToolExecuting,
-				onCommandComplete: () => props.setIsConversationComplete(true),
-				setMessages: props.updateMessages,
-				messages: props.messages,
-				provider: props.currentProvider,
-				providerConfig: props.currentProviderConfig,
-				client: props.client,
-				model: props.currentModel,
-				theme: props.currentTheme,
-				updateInfo: props.updateInfo,
-				getMessageTokens: props.getMessageTokens,
-				tune: props.tune,
-				developmentMode: props.developmentMode,
-			});
+			await handleMessageSubmission(
+				message,
+				{
+					customCommandCache: props.customCommandCache,
+					customCommandLoader: props.customCommandLoader,
+					customCommandExecutor: props.customCommandExecutor,
+					onClearMessages: clearMessages,
+					onRenameSession: props.setSessionName,
+					commandArgs,
+					onEnterModelSelectionMode: props.enterModelSelectionMode,
+					onEnterModelDatabaseMode: props.enterModelDatabaseMode,
+					onEnterConfigWizardMode: props.enterConfigWizardMode,
+					onEnterSettingsMode: props.enterSettingsMode,
+					onEnterMcpWizardMode: props.enterMcpWizardMode,
+					onEnterExplorerMode: props.enterExplorerMode,
+					onEnterIdeSelectionMode: props.enterIdeSelectionMode,
+					onEnterTune: props.enterTune,
+					onEnterCheckpointLoadMode: enterCheckpointLoadMode,
+					onEnterSessionSelectorMode: enterSessionSelectorMode,
+					onResumeSession: session => applySession(session),
+					onShowStatus: handleShowStatus,
+					onHandleChatMessage: props.handleChatMessage,
+					onAddToChatQueue: props.addToChatQueue,
+					setLiveComponent: props.setLiveComponent,
+					setIsToolExecuting: props.setIsToolExecuting,
+					onCommandComplete: () => props.setIsConversationComplete(true),
+					setMessages: props.updateMessages,
+					messages: props.messages,
+					provider: props.currentProvider,
+					providerConfig: props.currentProviderConfig,
+					client: props.client,
+					model: props.currentModel,
+					theme: props.currentTheme,
+					updateInfo: props.updateInfo,
+					getMessageTokens: props.getMessageTokens,
+					tune: props.tune,
+					developmentMode: props.developmentMode,
+				},
+				displayValue,
+			);
 		},
 		[
 			props.setIsConversationComplete,

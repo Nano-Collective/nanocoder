@@ -65,7 +65,7 @@ export interface ChatInputProps {
 	liveTaskList?: Task[] | null;
 
 	// Handlers
-	onSubmit: (message: string) => Promise<void>;
+	onSubmit: (message: string, displayValue: string) => Promise<void>;
 	onToggleMode: () => void;
 	onToggleReasoningExpanded: () => void;
 	tune?: TuneConfig;
@@ -170,7 +170,7 @@ export function ChatInput({
 			mcpInitialized && client ? (
 				<UserInput
 					customCommands={customCommands}
-					onSubmit={msg => void onSubmit(msg)}
+					onSubmit={(msg, display) => void onSubmit(msg, display)}
 					disabled={inputDisabled}
 					isBusy={isBusy}
 					onToggleMode={onToggleMode}

@@ -41,7 +41,7 @@ export interface UseChatHandlerProps {
 }
 
 export interface ChatHandlerReturn {
-	handleChatMessage: (message: string) => Promise<void>;
+	handleChatMessage: (message: string, displayValue?: string) => Promise<void>;
 	processAssistantResponse: (
 		systemMessage: Message,
 		messages: Message[],
