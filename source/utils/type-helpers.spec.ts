@@ -128,6 +128,14 @@ test('toOptionString extracts description-shaped options', t => {
 	t.is(toOptionString({description: 'Add a Features section'}), 'Add a Features section');
 });
 
+test('toOptionString unwraps MiniMax M3 $text-shaped options', t => {
+	// MiniMax M3 emits options as {"$text": "..."}; show the text, not JSON.
+	t.is(
+		toOptionString({$text: 'docs/reviews/pr-545-review.md'}),
+		'docs/reviews/pr-545-review.md',
+	);
+});
+
 test('toOptionString falls back to JSON for unlabeled objects', t => {
 	t.is(toOptionString({foo: 1}), JSON.stringify({foo: 1}));
 });
