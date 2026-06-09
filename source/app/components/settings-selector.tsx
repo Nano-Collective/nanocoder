@@ -40,6 +40,8 @@ import {
 } from './settings-menu-types';
 import {SettingsReasoningTracesPanel} from './settings-reasoning-traces';
 import {SettingsSessionsPanel} from './settings-sessions';
+import {SettingsToolApprovalPanel} from './settings-tool-approval';
+import {SettingsWebSearchPanel} from './settings-web-search';
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -1274,13 +1276,20 @@ function SettingsPanelRouter({
 
 	// Providers panels
 	if (category === 'providers') {
-		return (
-			<SettingsPlaceholderPanel
-				panelKey={panelKey}
-				onBack={onBack}
-				onCancel={onCancel}
-			/>
-		);
+		switch (panelKey) {
+			case 'tool-approval':
+				return (
+					<SettingsToolApprovalPanel onBack={onBack} onCancel={onCancel} />
+				);
+			default:
+				return (
+					<SettingsPlaceholderPanel
+						panelKey={panelKey}
+						onBack={onBack}
+						onCancel={onCancel}
+					/>
+				);
+		}
 	}
 
 	// MCP panels
@@ -1296,13 +1305,18 @@ function SettingsPanelRouter({
 
 	// Web Search panels
 	if (category === 'webSearch') {
-		return (
-			<SettingsPlaceholderPanel
-				panelKey={panelKey}
-				onBack={onBack}
-				onCancel={onCancel}
-			/>
-		);
+		switch (panelKey) {
+			case 'api-key':
+				return <SettingsWebSearchPanel onBack={onBack} onCancel={onCancel} />;
+			default:
+				return (
+					<SettingsPlaceholderPanel
+						panelKey={panelKey}
+						onBack={onBack}
+						onCancel={onCancel}
+					/>
+				);
+		}
 	}
 
 	// Advanced panels
