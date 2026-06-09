@@ -563,5 +563,40 @@ Commit this as `docs/settings-menu-map.md` alongside the code changes.
 
 ## UPDATE LOG:
 
+[x] 2025-01-XX — Plan created and approved
+[x] Phase A: Menu Infrastructure & Navigation — Implemented
+    - Created `settings-menu-types.ts` with category definitions, path types, and breadcrumb builder
+    - Created `settings-keep-discard-prompt.tsx` for unsaved changes prompt
+    - Refactored `settings-selector.tsx` with hierarchical navigation (3-level path system)
+    - Added Shift+Tab back-navigation at all levels
+    - Added breadcrumb titles ("Settings · Appearance · Theme")
+    - Added Environment panel with read-only NANOCODER_* env var display (sensitive values masked)
+    - Added placeholder panels for unimplemented settings
+[x] Phase B: Migrate Existing Settings into Categories — Implemented
+    - Theme, Title Shape, Nanocoder Shape → Appearance category
+    - Paste Threshold → Input category
+    - Notifications → Behavior category
+    - All existing panels preserved with full functionality
+[x] Phase C: New Settings — Behavior, Validation — Implemented
+    - Created `config-writer.ts` utility for writing to agents.config.json
+    - Auto-Compact panel (Behavior): toggles + threshold input with range validation (50-95)
+    - Sessions panel (Behavior): toggles + numeric inputs with min-value validation
+    - Default Mode panel (Behavior): select from 4 modes
+    - Reasoning Traces panel (Behavior): simple toggle
+    - Added `getReasoningExpanded()`/`updateReasoningExpanded()` to preferences.ts
+[x] Phase D: Providers, MCPs, Web Search, Advanced — Partially Implemented
+    - Tool Auto-Approval panel (Providers): read-only display of alwaysAllow lists
+    - Web Search panel: API key input with masking
+    - Placeholder panels remain for wizard entry points (configure providers, MCP servers, IDE, tune, config files)
+[x] Phase E: Deprecate Orphan Slash-Commands — Implemented
+    - Updated descriptions for all 7 orphan commands with deprecation banners
+    - Added runtime logWarning for /setup-config
+    - Updated lazy-registry inline descriptions
+    - Updated /settings description to reflect expanded scope
+[x] Phase F: Parameter Audit & Documentation — Implemented
+    - Created `docs/settings-menu-map.md` with complete parameter-to-category mapping
+    - Documented rationale for all excluded parameters
+    - Documented future planned parameters
+
 [ ]
 ...
