@@ -19,13 +19,17 @@ interface UseSessionAutosaveProps {
  * Clears currentSessionId when messages are cleared.
  *
  * Race safety: saves are serialised through a single chained promise stored in
- * saveChainRef. A new save does not start until the previous one resolves, so
- * only one createSession() call can be in-flight per conversation regardless of
- * how many times the effect fires within a single turn.
+ * saveChainRef. A new save does not start until the previous one resolves.
+ * Critically, doSave reads currentSessionIdRef.current AFTER the
+ * initPromiseRef await so it sees the value set by any prior save in the same
+ * chain - not the stale captured value from effect-fire time. This guarantees
+ * at most one createSession() call per conversation even when the effect fires
+ * several times before React flushes any setCurrentSessionId update.
  *
  * Persistence integrity: the full message array is always written to disk.
- * maxMessages bounds only what is sent to the model (enforced at prompt-build
- * time), not what is stored in the session file.
+ * maxMessages bounds only what is sent to the model (enforced in the
+ * conversation loop before the LLM call), not what is stored in the
+ * session file.
  */
 export function useSessionAutosave({
 	messages,
@@ -39,11 +43,15 @@ export function useSessionAutosave({
 	const lastSaveRef = useRef<number>(0);
 
 	// Serialises saves: each new save is chained onto the tail of this promise.
-	// Replacing void saveSession() calls with promise chaining means two rapid
-	// effect invocations cannot both observe currentSessionId === null and both
-	// call createSession() — the second save starts only after the first has
-	// already called setCurrentSessionId().
 	const saveChainRef = useRef<Promise<void>>(Promise.resolve());
+
+	// Live mirror of currentSessionId. doSave reads this ref after the
+	// initPromiseRef await (i.e. at execution time, not effect-fire time) so
+	// it sees the ID written by any prior save in the same chain.
+	const currentSessionIdRef = useRef<string | null>(currentSessionId);
+	useEffect(() => {
+		currentSessionIdRef.current = currentSessionId;
+	}, [currentSessionId]);
 
 	// Clear current session when conversation is cleared
 	useEffect(() => {
@@ -99,13 +107,13 @@ export function useSessionAutosave({
 		const now = Date.now();
 		const timeSinceLastSave = now - lastSaveRef.current;
 
-		// Capture all values needed for this save at the time the effect ran.
-		// The closure must not close over mutable refs that could change before
-		// the chained promise executes.
+		// Capture message content at effect-fire time. Provider/model are also
+		// captured here since they describe this particular save slot.
+		// Note: we do NOT capture currentSessionId here - doSave reads the live
+		// ref at execution time so it sees any ID set by a prior save in the chain.
 		const capturedMessages = messages;
 		const capturedProvider = currentProvider;
 		const capturedModel = currentModel;
-		const capturedSessionId = currentSessionId;
 
 		const doSave = async () => {
 			try {
@@ -113,10 +121,15 @@ export function useSessionAutosave({
 				const initialized = await initPromiseRef.current;
 				if (!initialized) return;
 
+				// Read the live session ID AFTER the await above. Any prior save
+				// in this chain has already called setCurrentSessionId (and updated
+				// currentSessionIdRef.current) by this point, so we correctly take
+				// the update path instead of calling createSession() again.
+				const liveSessionId = currentSessionIdRef.current;
+
 				// Derive a human-readable title from the most recent user message.
-				// Use the full message array — the model-context cap (maxMessages)
-				// is NOT applied here; it is enforced at prompt-build time so that
-				// the full conversation history is always preserved on disk.
+				// The full message array is always written - maxMessages bounds only
+				// what is sent to the model (sliced in the conversation loop).
 				const userMessages = capturedMessages.filter(
 					msg => msg.role === 'user',
 				);
@@ -126,14 +139,8 @@ export function useSessionAutosave({
 						(lastUserMessage.content.length > 50 ? '...' : '')
 					: `Session ${new Date().toLocaleDateString()}`;
 
-				// Re-check capturedSessionId (captured at effect time) to decide
-				// create vs update. Because saves are serialised via saveChainRef,
-				// a prior save in the same chain will already have called
-				// setCurrentSessionId before this closure runs, but React state
-				// updates are async — capturedSessionId reflects what React had at
-				// effect-fire time, which is the correct value for this save slot.
-				if (capturedSessionId) {
-					const session = await sessionManager.readSession(capturedSessionId);
+				if (liveSessionId) {
+					const session = await sessionManager.readSession(liveSessionId);
 					if (session) {
 						// Write the full history — no truncation.
 						session.messages = capturedMessages;
@@ -154,13 +161,16 @@ export function useSessionAutosave({
 							workingDirectory: process.cwd(),
 							messages: capturedMessages,
 						});
+						// Update the ref immediately so any subsequent doSave in this
+						// chain takes the update path, not another createSession().
+						currentSessionIdRef.current = newSession.id;
 						setCurrentSessionId(newSession.id);
 					}
 				} else {
 					// No session yet for this conversation — create one.
-					// Because doSave() runs serially inside saveChainRef, at most
-					// one createSession() call executes per conversation even if the
-					// effect fired several times before this point.
+					// Because doSave() runs serially inside saveChainRef and reads
+					// the live ref, at most one createSession() call executes per
+					// conversation even if the effect fired several times.
 					const newSession = await sessionManager.createSession({
 						title,
 						messageCount: capturedMessages.length,
@@ -169,6 +179,9 @@ export function useSessionAutosave({
 						workingDirectory: process.cwd(),
 						messages: capturedMessages,
 					});
+					// Update the ref immediately so any subsequent doSave in this
+					// chain takes the update path, not another createSession().
+					currentSessionIdRef.current = newSession.id;
 					setCurrentSessionId(newSession.id);
 				}
 
@@ -191,11 +204,5 @@ export function useSessionAutosave({
 			const delay = saveInterval - timeSinceLastSave;
 			timeoutRef.current = setTimeout(schedule, delay);
 		}
-	}, [
-		messages,
-		currentProvider,
-		currentModel,
-		currentSessionId,
-		setCurrentSessionId,
-	]);
+	}, [messages, currentProvider, currentModel, setCurrentSessionId]);
 }
