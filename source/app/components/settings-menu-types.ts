@@ -295,4 +295,6 @@ export interface DirtyState {
 	isDirty: boolean;
 	/** The category where dirty state originated */
 	category: SettingsCategory;
+	/** Human-readable summary of what changed */
+	summary?: string;
 }

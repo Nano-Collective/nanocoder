@@ -1421,11 +1421,18 @@ export function SettingsSelector({onCancel}: SettingsSelectorProps) {
 
 			// If going back to root, check for dirty state
 			if (isRootPath(newParent) && !isRootPath(currentPath)) {
-				// Determine which category we're leaving
+				// Determine which category we're leaving and what panel was active
 				const categorySegment = currentPath[1] as SettingsCategory;
+				const categoryDef = getCategoryByKey(categorySegment);
+				const panelKey = currentPath[2];
+				const panelLabel = panelKey
+					.replace(/[-_](.)/g, (_m: string, c: string) => c.toUpperCase())
+					.replace(/^./, (s: string) => s.toUpperCase());
+
 				setDirtyState({
 					isDirty: true,
 					category: categorySegment,
+					summary: `${categoryDef?.label ?? categorySegment} → ${panelLabel} changed`,
 				});
 			} else {
 				setDirtyState(null);
@@ -1443,14 +1450,21 @@ export function SettingsSelector({onCancel}: SettingsSelectorProps) {
 	}, []);
 
 	const handleDiscard = useCallback(() => {
-		// TODO: In Phase B, we'll reload original values for buffered settings
+		// For Appearance settings that preview live, reload from preferences.
+		// For other categories, changes were already saved on apply.
 		setDirtyState(null);
 		setPath(ROOT_PATH);
 	}, []);
 
 	// If dirty state is active, show the Keep/Discard prompt
 	if (dirtyState?.isDirty) {
-		return <KeepDiscardPrompt onKeep={handleKeep} onDiscard={handleDiscard} />;
+		return (
+			<KeepDiscardPrompt
+				onKeep={handleKeep}
+				onDiscard={handleDiscard}
+				changesSummary={dirtyState.summary}
+			/>
+		);
 	}
 
 	// Render based on current path depth

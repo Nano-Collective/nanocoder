@@ -1,6 +1,6 @@
-import {Box, Text, useInput} from 'ink';
+import {Box, Text} from 'ink';
 import SelectInput from 'ink-select-input';
-import {useMemo, useState} from 'react';
+import {useMemo} from 'react';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -12,37 +12,33 @@ interface KeepDiscardPromptProps {
 	onKeep: () => void;
 	/** Called when user chooses to discard the changes */
 	onDiscard: () => void;
-	/** Optional label describing what changes are pending */
-	changesLabel?: string;
+	/** Description of what changed, shown to the user */
+	changesSummary?: string;
 }
 
 export function KeepDiscardPrompt({
 	onKeep,
 	onDiscard,
-	changesLabel = 'settings',
+	changesSummary,
 }: KeepDiscardPromptProps) {
 	const {colors} = useTheme();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
-	const [selectedIndex, setSelectedIndex] = useState(0);
 
 	const items = useMemo(
 		() => [
-			{label: `Keep ${changesLabel}`, value: 'keep' as Action},
-			{label: `Discard ${changesLabel}`, value: 'discard' as Action},
+			{label: 'Keep changes', value: 'keep' as Action},
+			{label: 'Discard changes', value: 'discard' as Action},
 		],
-		[changesLabel],
+		[],
 	);
 
-	useInput((_, key) => {
-		if (key.return) {
-			const action = items[selectedIndex]?.value;
-			if (action === 'keep') {
-				onKeep();
-			} else if (action === 'discard') {
-				onDiscard();
-			}
+	const handleSelect = (item: {value: Action}) => {
+		if (item.value === 'keep') {
+			onKeep();
+		} else {
+			onDiscard();
 		}
-	});
+	};
 
 	const title = isNarrow ? 'Changes' : 'Unsaved Changes';
 
@@ -58,19 +54,21 @@ export function KeepDiscardPrompt({
 		>
 			{!isNarrow && (
 				<Box marginBottom={1}>
-					<Text color={colors.warning}>
-						You have unsaved changes. What would you like to do?
-					</Text>
+					<Text color={colors.warning}>You have unsaved changes.</Text>
+					{changesSummary && (
+						<Text color={colors.secondary}>{changesSummary}</Text>
+					)}
+					<Text color={colors.warning}>What would you like to do?</Text>
 				</Box>
 			)}
 			{isNarrow && <Text color={colors.warning}>Unsaved changes:</Text>}
+			{isNarrow && changesSummary && (
+				<Text color={colors.secondary}>{changesSummary}</Text>
+			)}
 			<SelectInput
-				items={items.map(item => ({
-					label: item.value === 'keep' ? `✓ ${item.label}` : `✗ ${item.label}`,
-					value: item.value,
-				}))}
+				items={items}
 				initialIndex={0}
-				onHighlight={item => setSelectedIndex(items.indexOf(item))}
+				onSelect={handleSelect}
 				indicatorComponent={({isSelected}) => (
 					<Text color={isSelected ? colors.primary : colors.text}>
 						{isSelected ? '> ' : '  '}
