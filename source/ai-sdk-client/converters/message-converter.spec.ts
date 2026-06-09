@@ -1,6 +1,10 @@
 import test from 'ava';
 import type {Message} from '@/types/index';
-import {convertToModelMessages, isEmptyAssistantMessage} from './message-converter.js';
+import {
+	convertToModelMessages,
+	dropOrphanedToolResults,
+	isEmptyAssistantMessage,
+} from './message-converter.js';
 import type {TestableMessage} from '../types.js';
 
 test('isEmptyAssistantMessage returns false for non-assistant messages', t => {
@@ -180,6 +184,13 @@ test('convertToModelMessages converts empty assistant message to message with em
 test('convertToModelMessages converts tool message', t => {
 	const messages: Message[] = [
 		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{id: 'call_123', function: {name: 'test_tool', arguments: {}}},
+			],
+		},
+		{
 			role: 'tool',
 			content: 'Tool result',
 			tool_call_id: 'call_123',
@@ -188,10 +199,11 @@ test('convertToModelMessages converts tool message', t => {
 	];
 
 	const result = convertToModelMessages(messages);
-	t.is(result.length, 1);
-	t.is(result[0].role, 'tool');
-	t.true(Array.isArray(result[0].content));
-	const content = result[0].content as Array<{
+	t.is(result.length, 2);
+	const toolMsg = result[1];
+	t.is(toolMsg.role, 'tool');
+	t.true(Array.isArray(toolMsg.content));
+	const content = toolMsg.content as Array<{
 		type: string;
 		toolCallId?: string;
 		toolName?: string;
@@ -208,6 +220,13 @@ test('convertToModelMessages converts tool message', t => {
 test('convertToModelMessages emits a json output for structured tool results', t => {
 	const messages: Message[] = [
 		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{id: 'call_456', function: {name: 'lsp_get_diagnostics', arguments: {}}},
+			],
+		},
+		{
 			role: 'tool',
 			content: 'Diagnostics for x.ts: 1 error',
 			tool_call_id: 'call_456',
@@ -217,7 +236,7 @@ test('convertToModelMessages emits a json output for structured tool results', t
 	];
 
 	const result = convertToModelMessages(messages);
-	const content = result[0].content as Array<{
+	const content = result[1].content as Array<{
 		output?: {type: string; value: unknown};
 	}>;
 	t.is(content[0].output?.type, 'json');
@@ -253,4 +272,49 @@ test('convertToModelMessages handles unknown role with fallback', t => {
 	// Should fall back to user role
 	t.is(result[0].role, 'user');
 	t.is(result[0].content, 'Test content');
+});
+
+test('dropOrphanedToolResults removes a tool result with no preceding tool_call', t => {
+	// This is the shape a broken compaction produces: a summary user message
+	// immediately followed by a tool result whose owning assistant was dropped.
+	const messages: Message[] = [
+		{role: 'user', content: '<conversation-summary>...</conversation-summary>'},
+		{role: 'tool', content: 'orphan', tool_call_id: 'call_gone', name: 'edit'},
+		{role: 'user', content: 'Continue'},
+	];
+
+	const result = dropOrphanedToolResults(messages);
+	t.is(result.length, 2);
+	t.false(
+		result.some(m => m.role === 'tool'),
+		'orphaned tool result is dropped',
+	);
+	t.is(result[0].role, 'user');
+	t.is(result[1].content, 'Continue');
+});
+
+test('dropOrphanedToolResults keeps a tool result paired with its assistant', t => {
+	const messages: Message[] = [
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [{id: 'call_1', function: {name: 'edit', arguments: {}}}],
+		},
+		{role: 'tool', content: 'edited', tool_call_id: 'call_1', name: 'edit'},
+	];
+
+	const result = dropOrphanedToolResults(messages);
+	t.is(result.length, 2);
+	t.is(result[1].role, 'tool');
+});
+
+test('dropOrphanedToolResults drops a tool result lacking a tool_call_id', t => {
+	const messages: Message[] = [
+		{role: 'user', content: 'hi'},
+		{role: 'tool', content: 'no id', name: 'edit'},
+	];
+
+	const result = dropOrphanedToolResults(messages);
+	t.is(result.length, 1);
+	t.is(result[0].role, 'user');
 });

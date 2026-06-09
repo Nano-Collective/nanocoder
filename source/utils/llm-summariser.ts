@@ -61,13 +61,26 @@ export async function summariseWithLLM(
 		signal,
 	} = params;
 
+	// Determine where the verbatim "recent" tail begins. Walk the boundary
+	// backward while it would land on a `tool` message: keeping a tool result
+	// while summarising away its owning assistant(tool_calls) turn orphans the
+	// result (a `tool` message whose tool_call_id matches no preceding tool
+	// call). OpenAI-compatible providers reject that sequence — or, worse,
+	// answer with an empty completion — which is the failure this guards.
+	// Moving the boundary back pulls the owning assistant (and its sibling
+	// tool results) into `recent` so the pairing stays intact.
+	let splitIndex = Math.max(0, messages.length - keepRecentMessages);
+	while (splitIndex > 0 && messages[splitIndex]?.role === 'tool') {
+		splitIndex--;
+	}
+
 	const compressible: Message[] = [];
 	const recent: Message[] = [];
 
 	for (let i = 0; i < messages.length; i++) {
 		const msg = messages[i];
 		if (msg.role === 'system') continue;
-		if (i >= messages.length - keepRecentMessages) {
+		if (i >= splitIndex) {
 			recent.push(msg);
 		} else {
 			compressible.push(msg);
