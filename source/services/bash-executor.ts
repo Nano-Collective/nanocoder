@@ -65,14 +65,18 @@ export class BashExecutor extends EventEmitter {
 				spawn('sh', ['-c', command], {detached: true});
 
 		let outputBytes = 0;
+		let outputTruncated = false;
 
 		// Collect output
 		proc.stdout.on('data', (data: Buffer) => {
 			if (outputBytes < BASH_MAX_OUTPUT_BYTES) {
-				const chunk = data.toString();
-				state.fullOutput += chunk;
-				outputBytes += Buffer.byteLength(chunk);
-				if (outputBytes >= BASH_MAX_OUTPUT_BYTES) {
+				const remaining = BASH_MAX_OUTPUT_BYTES - outputBytes;
+				const limitedChunk = data.subarray(0, remaining);
+				state.fullOutput += limitedChunk.toString();
+				outputBytes += limitedChunk.length;
+
+				if (outputBytes >= BASH_MAX_OUTPUT_BYTES && !outputTruncated) {
+					outputTruncated = true;
 					state.fullOutput +=
 						'\n... [Output truncated to prevent memory exhaustion]';
 				}
@@ -85,10 +89,13 @@ export class BashExecutor extends EventEmitter {
 
 		proc.stderr.on('data', (data: Buffer) => {
 			if (outputBytes < BASH_MAX_OUTPUT_BYTES) {
-				const chunk = data.toString();
-				state.stderr += chunk;
-				outputBytes += Buffer.byteLength(chunk);
-				if (outputBytes >= BASH_MAX_OUTPUT_BYTES) {
+				const remaining = BASH_MAX_OUTPUT_BYTES - outputBytes;
+				const limitedChunk = data.subarray(0, remaining);
+				state.stderr += limitedChunk.toString();
+				outputBytes += limitedChunk.length;
+
+				if (outputBytes >= BASH_MAX_OUTPUT_BYTES && !outputTruncated) {
+					outputTruncated = true;
 					state.stderr +=
 						'\n... [Stderr truncated to prevent memory exhaustion]';
 				}
@@ -127,10 +134,11 @@ export class BashExecutor extends EventEmitter {
 					this.cancel(executionId, 'Cancelled via AbortSignal');
 				};
 
+				options.signal.addEventListener('abort', entry.abortListener, {
+					once: true,
+				});
 				if (options.signal.aborted) {
 					process.nextTick(entry.abortListener);
-				} else {
-					options.signal.addEventListener('abort', entry.abortListener);
 				}
 			}
 
