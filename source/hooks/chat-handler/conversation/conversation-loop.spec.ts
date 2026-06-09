@@ -1,5 +1,5 @@
 import test from 'ava';
-import {clearAppConfig} from '@/config/index.js';
+import {clearAppConfig, getAppConfig} from '@/config/index.js';
 import {resetShutdownManager} from '@/utils/shutdown/shutdown-manager.js';
 import {processAssistantResponse, resetFallbackNotice, resetLastTurnHadReasoning} from './conversation-loop.js';
 import type {
@@ -1544,5 +1544,96 @@ test.serial('processAssistantResponse - auto-nudge builds on compacted messages 
 			containsOriginalVerbose,
 			'Auto-nudge should be built on compacted messages, not original verbose history',
 		);
+	}
+});
+
+test.serial('processAssistantResponse - maxMessages caps history sent to the model but preserves system message', async t => {
+	const originalMaxMessages = getAppConfig().sessions?.maxMessages;
+	if (getAppConfig().sessions) {
+		getAppConfig().sessions!.maxMessages = 3;
+	}
+
+	let messagesSentToClient: Message[] = [];
+	const mockClient = {
+		chat: async (msgs: Message[]): Promise<LLMChatResponse> => {
+			messagesSentToClient = msgs;
+			return {
+				choices: [{message: {role: 'assistant', content: 'Capped response'}}],
+				toolsDisabled: false,
+			};
+		},
+	};
+
+	const params = createDefaultParams({
+		client: mockClient as any,
+		systemMessage: {role: 'system', content: 'system-prompt'} as Message,
+		messages: [
+			{role: 'user', content: 'msg 1'},
+			{role: 'assistant', content: 'msg 2'},
+			{role: 'user', content: 'msg 3'},
+			{role: 'assistant', content: 'msg 4'},
+			{role: 'user', content: 'msg 5'},
+		],
+	});
+
+	await processAssistantResponse(params);
+
+	// Should have systemMessage + last 3 messages = 4 messages total
+	t.is(messagesSentToClient.length, 4);
+	t.deepEqual(messagesSentToClient[0], {role: 'system', content: 'system-prompt'});
+	t.deepEqual(messagesSentToClient.slice(1), [
+		{role: 'user', content: 'msg 3'},
+		{role: 'assistant', content: 'msg 4'},
+		{role: 'user', content: 'msg 5'},
+	]);
+
+	if (getAppConfig().sessions && originalMaxMessages !== undefined) {
+		getAppConfig().sessions!.maxMessages = originalMaxMessages;
+	}
+});
+
+test.serial('processAssistantResponse - does not start request on orphaned tool result (tool boundary)', async t => {
+	const originalMaxMessages = getAppConfig().sessions?.maxMessages;
+	if (getAppConfig().sessions) {
+		getAppConfig().sessions!.maxMessages = 2;
+	}
+
+	let messagesSentToClient: Message[] = [];
+	const mockClient = {
+		chat: async (msgs: Message[]): Promise<LLMChatResponse> => {
+			messagesSentToClient = msgs;
+			return {
+				choices: [{message: {role: 'assistant', content: 'Tool boundary response'}}],
+				toolsDisabled: false,
+			};
+		},
+	};
+
+	const params = createDefaultParams({
+		client: mockClient as any,
+		systemMessage: {role: 'system', content: 'system-prompt'} as Message,
+		messages: [
+			{role: 'user', content: 'msg 1'},
+			{role: 'assistant', content: '', tool_calls: [{id: 'call_1', function: {name: 'bash', arguments: {}}}]},
+			{role: 'tool', tool_call_id: 'call_1', name: 'bash', content: 'output'},
+			{role: 'user', content: 'msg 2'},
+		],
+	});
+
+	await processAssistantResponse(params);
+
+	// The last 2 messages starts at index 2 (the tool result).
+	// Because of tool boundary adjustment, it walks back to index 1 (the assistant tool call).
+	// So we should have systemMessage + assistant + tool + user = 4 messages.
+	t.is(messagesSentToClient.length, 4);
+	t.deepEqual(messagesSentToClient[0], {role: 'system', content: 'system-prompt'});
+	t.deepEqual(messagesSentToClient.slice(1), [
+		{role: 'assistant', content: '', tool_calls: [{id: 'call_1', function: {name: 'bash', arguments: {}}}]},
+		{role: 'tool', tool_call_id: 'call_1', name: 'bash', content: 'output'},
+		{role: 'user', content: 'msg 2'},
+	]);
+
+	if (getAppConfig().sessions && originalMaxMessages !== undefined) {
+		getAppConfig().sessions!.maxMessages = originalMaxMessages;
 	}
 });

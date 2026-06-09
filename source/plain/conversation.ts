@@ -1,3 +1,4 @@
+import {getAppConfig} from '@/config/index';
 import {processToolUse} from '@/message-handler';
 import {color, write, writeError, writeLine, writeStatus} from '@/plain/writer';
 import {parseToolCalls} from '@/tool-calling/index';
@@ -12,6 +13,7 @@ import type {
 	ToolCall,
 	ToolResult,
 } from '@/types/core';
+import {capMessagesForModel} from '@/utils/message-capping';
 
 export interface RunPlainConversationOptions {
 	client: LLMClient;
@@ -77,8 +79,12 @@ export async function runPlainConversation(
 		let reasoningPrinted = false;
 		let contentStarted = false;
 
+		const sessionConfig = getAppConfig().sessions;
+		const maxMessages = sessionConfig?.maxMessages ?? 1000;
+		const cappedMessages = capMessagesForModel(messages, maxMessages);
+
 		const result = await client.chat(
-			[systemMessage, ...messages],
+			[systemMessage, ...cappedMessages],
 			tools,
 			{
 				onReasoningToken: (token: string) => {

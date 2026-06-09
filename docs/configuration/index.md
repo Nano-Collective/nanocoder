@@ -146,7 +146,7 @@ Configure automatic session saving and retention. See [Session Management](../fe
 | `autoSave` | boolean | `true` | Enable/disable automatic session saving |
 | `saveInterval` | number | `30000` | Milliseconds between saves (minimum 1000) |
 | `maxSessions` | number | `100` | Maximum sessions to keep (minimum 1) |
-| `maxMessages` | number | `1000` | Maximum messages saved per session — older messages are truncated (minimum 1) |
+| `maxMessages` | number | `1000` | Maximum messages sent to the model in interactive/headless chat (minimum 1). Preserves on-disk history and system messages, capping only the context window. |
 | `retentionDays` | number | `30` | Auto-delete sessions older than this (minimum 1) |
 | `directory` | string | (platform default) | Custom storage directory for session files |
 
