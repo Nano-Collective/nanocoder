@@ -7,7 +7,8 @@ import {Command} from '@/types/index';
 // This export exists for command registration only.
 export const setupProvidersCommand: Command = {
 	name: 'setup-providers',
-	description: 'Launch interactive configuration wizard',
+	description:
+		'[deprecated — use /settings → Providers] Launch interactive configuration wizard',
 	handler: () => {
 		// This handler is never called - the command is intercepted in app-util.ts
 		// and handled via the mode system (onEnterConfigWizardMode)
