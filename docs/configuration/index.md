@@ -104,6 +104,7 @@ Automatically compress context when it reaches a percentage of the model's conte
     "autoCompact": {
       "enabled": true,
       "threshold": 60,
+      "strategy": "llm",
       "mode": "conservative",
       "notifyUser": true
     }
@@ -115,10 +116,11 @@ Automatically compress context when it reaches a percentage of the model's conte
 |--------|------|---------|-------------|
 | `enabled` | boolean | `true` | Enable/disable automatic compression |
 | `threshold` | number | `60` | Context usage percentage to trigger compression (50–95) |
-| `mode` | string | `"conservative"` | Compression mode: `"default"`, `"conservative"`, `"aggressive"` |
+| `strategy` | string | `"llm"` | Compaction strategy: `"llm"` (model writes a structured summary) or `"mechanical"` (regex truncation) |
+| `mode` | string | `"conservative"` | Mechanical compression mode: `"default"`, `"conservative"`, `"aggressive"` (ignored when strategy is `"llm"`) |
 | `notifyUser` | boolean | `true` | Show a notification when auto-compact runs |
 
-You can also override these per-session with `/compact --auto-on`, `/compact --auto-off`, and `/compact --threshold <n>`.
+You can also override these per-session with `/compact --auto-on`, `/compact --auto-off`, `/compact --threshold <n>`, and `/compact --strategy llm|mechanical`.
 
 ### Sessions
 
@@ -144,7 +146,7 @@ Configure automatic session saving and retention. See [Session Management](../fe
 | `autoSave` | boolean | `true` | Enable/disable automatic session saving |
 | `saveInterval` | number | `30000` | Milliseconds between saves (minimum 1000) |
 | `maxSessions` | number | `100` | Maximum sessions to keep (minimum 1) |
-| `maxMessages` | number | `1000` | Maximum messages saved per session — older messages are truncated (minimum 1) |
+| `maxMessages` | number | `1000` | Maximum messages sent to the model in interactive/headless chat (minimum 1). Preserves on-disk history and system messages, capping only the context window. |
 | `retentionDays` | number | `30` | Auto-delete sessions older than this (minimum 1) |
 | `directory` | string | (platform default) | Custom storage directory for session files |
 
@@ -193,29 +195,85 @@ The `--mode` CLI flag always takes precedence over this config value. Non-intera
 
 ### Tool Auto-Approval
 
-Allow specific tools to run without confirmation, even in normal development mode.
+Allow specific tools to run without confirmation, even in normal development mode. The `alwaysAllow` array accepts tool names — listed tools execute immediately without prompting for approval, and the same list also applies to non-interactive runs (`nanocoder run ...`).
 
 ```json
 {
   "nanocoder": {
-    "nanocoderTools": {
-      "alwaysAllow": ["execute_bash", "read_file", "find_files"]
+    "alwaysAllow": ["execute_bash", "read_file", "find_files"]
+  }
+}
+```
+
+### Disabling Tools
+
+Turn off individual tools globally with the top-level `disabledTools` array. Listed tools are filtered out everywhere the model could ask for them — chat, [subagents](../features/subagents.md), and every [`/tune` profile](../features/tune.md). The model is told they don't exist, so it won't try to call them.
+
+```json
+{
+  "nanocoder": {
+    "disabledTools": ["execute_bash", "web_search"]
+  }
+}
+```
+
+Names match the registered tool ids (`read_file`, `write_file`, `string_replace`, `execute_bash`, `web_search`, `fetch_url`, `agent`, etc.). [MCP](mcp-configuration.md) tools follow the same naming as in their server config.
+
+Resolution: project-level `agents.config.json` wins over the global config. The list is layered on top of `/tune` profiles and mode exclusions — if `nano` profile would otherwise expose `read_file`, listing it in `disabledTools` removes it. Subagents respect the global list even if their own `tools` allow-list includes the disabled name.
+
+### Custom System Prompt
+
+Override or extend the built-in system prompt with your own. Useful when running small or context-constrained models where the default prompt consumes too many tokens, or when you want to specialize Nanocoder for a non-coding workflow.
+
+The simplest form replaces the entire built-in prompt with inline content:
+
+```json
+{
+  "nanocoder": {
+    "systemPrompt": {
+      "content": "You are an AI model running on CPU. Be concise."
     }
   }
 }
 ```
 
-The `alwaysAllow` array accepts tool names. Tools listed here will execute immediately without prompting for approval.
-
-You can also use the top-level `alwaysAllow` which applies to all tools (including in non-interactive mode):
+Or load the prompt from a file (path is resolved relative to the working directory unless absolute):
 
 ```json
 {
   "nanocoder": {
-    "alwaysAllow": ["execute_bash", "read_file"]
+    "systemPrompt": {
+      "mode": "replace",
+      "file": "./.nanocoder/system-prompt.md"
+    }
   }
 }
 ```
+
+Use `"mode": "append"` to keep the built-in prompt and add your text at the end:
+
+```json
+{
+  "nanocoder": {
+    "systemPrompt": {
+      "mode": "append",
+      "content": "Always respond in British English."
+    }
+  }
+}
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `mode` | string | `"replace"` | `"replace"` overrides the built-in prompt entirely (no system info, no AGENTS.md). `"append"` adds your content after the built-in prompt. |
+| `content` | string | — | Inline prompt text. Takes priority over `file` if both are set. |
+| `file` | string | — | Path to a markdown/text file containing the prompt. Resolved relative to the working directory if not absolute. |
+
+**Notes:**
+- In `replace` mode, the built-in `## SYSTEM INFORMATION` section and AGENTS.md auto-append are skipped — include them yourself if you need them.
+- Tool definitions are still injected into the prompt for providers that don't support native tool calling. Tool availability is controlled separately via `disabledTools` and `/tune`.
+- If the file can't be read, Nanocoder logs a warning and falls back to the built-in prompt.
+- Project-level `agents.config.json` wins over the global config.
 
 ### Web Search
 

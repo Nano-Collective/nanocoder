@@ -12,6 +12,8 @@ export interface Command<T = React.ReactElement | void> {
 			tokens: number;
 			getMessageTokens: (message: Message) => number;
 			client?: import('@/types/core').LLMClient | null;
+			tune?: import('@/types/config').TuneConfig;
+			developmentMode?: import('@/types/core').DevelopmentMode;
 		},
 	) => Promise<T>;
 }
@@ -74,9 +76,19 @@ export interface CustomCommand {
 	source?: 'personal' | 'project';
 	lastModified?: Date;
 	loadedResources?: CommandResource[];
+	/**
+	 * Event subscriptions declared in the file's frontmatter, if any.
+	 * Target is implicit (this command). Resolved by the skill registrar.
+	 */
+	subscribe?: import('@/types/skills').SkillTrigger[];
 }
 
 export interface ParsedCustomCommand {
 	metadata: CustomCommandMetadata;
 	content: string;
+	/**
+	 * Event subscriptions declared in the file's frontmatter, if any. Target
+	 * is implicit (the command itself) and resolved by the skill registrar.
+	 */
+	subscribe?: import('@/types/skills').SkillTrigger[];
 }

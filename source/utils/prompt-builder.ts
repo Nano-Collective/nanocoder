@@ -1,9 +1,9 @@
 import {existsSync, readFileSync} from 'fs';
 import {homedir, platform, release} from 'os';
-import {basename, dirname, join, normalize} from 'path';
+import {basename, dirname, isAbsolute, join, normalize, resolve} from 'path';
 import {fileURLToPath} from 'url';
-import {isSingleToolProfile} from '@/tools/tool-profiles';
-import type {TuneConfig} from '@/types/config';
+import {isNanoProfile, isSingleToolProfile} from '@/tools/tool-profiles';
+import type {SystemPromptConfig, TuneConfig} from '@/types/config';
 import {TUNE_DEFAULTS} from '@/types/config';
 import type {DevelopmentMode} from '@/types/core';
 import {getLogger} from '@/utils/logging';
@@ -67,7 +67,7 @@ export function setLastBuiltPrompt(prompt: string): void {
 	lastBuiltPrompt = prompt;
 }
 
-function generateSystemInfo(): string {
+function generateSystemInfo(slim = false): string {
 	const now = new Date();
 	const dateStr = now.toISOString().split('T')[0];
 
@@ -90,6 +90,11 @@ function generateSystemInfo(): string {
 				return platform();
 		}
 	};
+
+	if (slim) {
+		return `## SYSTEM
+OS: ${getOSName()} | Shell: ${getDefaultShell()} | CWD: ${process.cwd()} | Date: ${dateStr}`;
+	}
 
 	return `## SYSTEM INFORMATION
 
@@ -138,28 +143,90 @@ function hasAnyGitTool(toolSet: Set<string>): boolean {
 }
 
 /**
+ * Resolve the override content from a SystemPromptConfig: inline content wins
+ * over file. Returns the prompt string, or null if neither is usable.
+ */
+function resolveSystemPromptOverride(
+	override: SystemPromptConfig,
+): string | null {
+	if (override.content !== undefined) {
+		if (override.file !== undefined) {
+			getLogger().warn(
+				'systemPrompt: both `content` and `file` set — using `content`.',
+			);
+		}
+		return override.content;
+	}
+
+	if (override.file !== undefined) {
+		// Path comes from the user's own agents.config.json (trusted config), same model as source/config/index.ts
+		const filePath = isAbsolute(override.file)
+			? override.file
+			: resolve(process.cwd(), override.file); // nosemgrep
+		try {
+			return readFileSync(filePath, 'utf-8');
+		} catch (error) {
+			getLogger().warn(
+				`systemPrompt: failed to read file "${filePath}": ${String(error)}`,
+			);
+			return null;
+		}
+	}
+
+	return null;
+}
+
+/**
  * Build a system prompt dynamically based on development mode, tune config, and available tools.
  *
  * Sections are full quality — the prompt gets smaller only because sections for
  * unavailable tools are excluded entirely, not because content is truncated.
+ *
+ * When `systemPromptOverride` is provided, the user's custom prompt either replaces
+ * the built-in prompt entirely (mode="replace", the default) or is appended to it
+ * (mode="append").
  */
 export function buildSystemPrompt(
 	developmentMode: DevelopmentMode,
 	tuneConfig: TuneConfig | undefined,
 	availableToolNames: string[],
 	toolsDisabled = false,
+	systemPromptOverride?: SystemPromptConfig,
+	model?: string,
 ): string {
+	const overrideContent = systemPromptOverride
+		? resolveSystemPromptOverride(systemPromptOverride)
+		: null;
+	const overrideMode = systemPromptOverride?.mode ?? 'replace';
+
+	if (overrideContent !== null && overrideMode === 'replace') {
+		lastBuiltPrompt = overrideContent;
+		return overrideContent;
+	}
+
 	const tune = tuneConfig ?? TUNE_DEFAULTS;
-	const singleTool = tune.enabled && isSingleToolProfile(tune.toolProfile);
+	const singleTool =
+		tune.enabled && isSingleToolProfile(tune.toolProfile, model);
+	const nano = tune.enabled && isNanoProfile(tune.toolProfile, model);
 	const toolSet = new Set(availableToolNames);
 	const sections: string[] = [];
 
 	// Always included
 	sections.push(loadSection('identity'));
-	sections.push(loadSection('core-principles'));
 
-	// Mode-specific task approach
-	sections.push(loadSection(`task-approach-${developmentMode}`));
+	// Core principles — dropped under nano (identity + tool rules cover the essentials)
+	if (!nano) {
+		sections.push(loadSection('core-principles'));
+	}
+
+	// Mode-specific task approach (nano variant when active)
+	sections.push(
+		loadSection(
+			nano
+				? `task-approach-nano-${developmentMode}`
+				: `task-approach-${developmentMode}`,
+		),
+	);
 
 	// Tool rules — XML variant when native tool calling is disabled
 	let toolRules = loadSection(toolsDisabled ? 'tool-rules-xml' : 'tool-rules');
@@ -173,16 +240,14 @@ export function buildSystemPrompt(
 	if (
 		toolSet.has('string_replace') ||
 		toolSet.has('write_file') ||
-		toolSet.has('delete_file') ||
-		toolSet.has('move_file') ||
-		toolSet.has('copy_file') ||
-		toolSet.has('create_directory')
+		toolSet.has('file_op')
 	) {
-		sections.push(loadSection('file-editing'));
+		sections.push(loadSection(nano ? 'file-editing-nano' : 'file-editing'));
 	}
 
-	// Native tool preference — only if bash AND search/discovery tools are both available
-	if (toolSet.has('execute_bash') && hasNativeSearchTools(toolSet)) {
+	// Native tool preference — only if bash AND search/discovery tools are both available.
+	// Skipped under nano: nano profile has no native search/discovery tools by design.
+	if (!nano && toolSet.has('execute_bash') && hasNativeSearchTools(toolSet)) {
 		sections.push(loadSection('native-tool-preference'));
 	}
 
@@ -196,8 +261,8 @@ export function buildSystemPrompt(
 		);
 	}
 
-	// Task management — only if create_task is available AND not in plan mode
-	if (toolSet.has('create_task') && developmentMode !== 'plan') {
+	// Task management — only if write_tasks is available AND not in plan mode
+	if (toolSet.has('write_tasks') && developmentMode !== 'plan') {
 		sections.push(loadSection('task-management'));
 	}
 
@@ -222,10 +287,13 @@ export function buildSystemPrompt(
 	}
 
 	// Coding practices and constraints — not needed in plan mode
-	// (plan task approach already covers the relevant guidance)
+	// (plan task approach already covers the relevant guidance).
+	// Under nano, drop coding-practices and use the shortened constraints.
 	if (developmentMode !== 'plan') {
-		sections.push(loadSection('coding-practices'));
-		sections.push(loadSection('constraints'));
+		if (!nano) {
+			sections.push(loadSection('coding-practices'));
+		}
+		sections.push(loadSection(nano ? 'constraints-nano' : 'constraints'));
 	}
 
 	// Subagents — only if the agent tool is available
@@ -239,12 +307,21 @@ ${getSubagentDescriptions()}`;
 		sections.push(subagentInfo);
 	}
 
-	// System info (dynamic)
-	sections.push(generateSystemInfo());
+	// System info (dynamic) — slim variant under nano
+	sections.push(generateSystemInfo(nano));
 
-	// Compose and append AGENTS.md
+	// Compose and (optionally) append AGENTS.md.
+	// Nano omits AGENTS.md by default; users can override via tune.includeAgentsMd.
 	let prompt = sections.filter(Boolean).join('\n\n');
-	prompt = appendAgentsMd(prompt);
+	const includeAgentsMd = tune.includeAgentsMd ?? (nano ? false : true);
+	if (includeAgentsMd) {
+		prompt = appendAgentsMd(prompt);
+	}
+
+	// Append-mode user override (replace mode is handled at the top of the function).
+	if (overrideContent !== null && overrideMode === 'append') {
+		prompt = `${prompt}\n\n${overrideContent}`;
+	}
 
 	// Cache for token-counting callers that don't have access to the inputs
 	lastBuiltPrompt = prompt;

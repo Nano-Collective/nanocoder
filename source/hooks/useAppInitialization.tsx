@@ -5,18 +5,30 @@ import {commandRegistry} from '@/commands';
 // aren't loaded at startup — each command's handler is imported on first
 // invocation. See `source/commands/lazy-registry.ts`.
 import {lazyCommands} from '@/commands/lazy-registry';
-import {ErrorMessage, InfoMessage} from '@/components/message-box';
+import {
+	ErrorMessage,
+	InfoMessage,
+	WarningMessage,
+} from '@/components/message-box';
 import {getAppConfig, reloadAppConfig} from '@/config/index';
+import {formatConfigLintIssue, lintProviderConfigs} from '@/config/lint';
+import {loadAllProviderConfigs} from '@/config/mcp-config-loader';
 import {
 	getLastUsedModel,
 	loadPreferences,
 	updateLastUsed,
 } from '@/config/preferences';
 import {validateProjectConfigSecurity} from '@/config/validation';
+import {TIMEOUT_OUTPUT_FLUSH_MS} from '@/constants';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getLSPManager, type LSPInitResult} from '@/lsp/index';
-import {setToolManagerGetter, setToolRegistryGetter} from '@/message-handler';
+import {
+	setCommandLoaderGetter,
+	setToolManagerGetter,
+	setToolRegistryGetter,
+} from '@/message-handler';
+import {generateKey} from '@/session/key-generator';
 import {SubagentExecutor} from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import {setAgentToolExecutor, setAvailableAgentNames} from '@/tools/agent-tool';
@@ -30,6 +42,7 @@ import {
 } from '@/types/core';
 import type {MCPInitResult, UpdateInfo, UserPreferences} from '@/types/index';
 import {setAvailableSubagents} from '@/utils/prompt-processor';
+import {getShutdownManager} from '@/utils/shutdown';
 import {checkForUpdates} from '@/utils/update-checker';
 
 interface UseAppInitializationProps {
@@ -52,11 +65,17 @@ interface UseAppInitializationProps {
 	setCustomCommandsCount: (count: number) => void;
 	setSubagentsReady: (ready: boolean) => void;
 	addToChatQueue: (component: React.ReactNode) => void;
-	getNextComponentKey: () => number;
 	customCommandCache: Map<string, CustomCommand>;
 	setActiveMode: (mode: import('@/hooks/useAppState').ActiveMode) => void;
 	cliProvider?: string;
 	cliModel?: string;
+	/**
+	 * When true, init failures (no client) shut down the process with code 1
+	 * instead of leaving the run stuck in "Waiting for MCP servers..." — the
+	 * config wizard and chat queue are interactive-only surfaces that can't
+	 * resolve under `nanocoder run`.
+	 */
+	nonInteractiveMode?: boolean;
 }
 
 export function useAppInitialization({
@@ -77,17 +96,31 @@ export function useAppInitialization({
 	setCustomCommandsCount,
 	setSubagentsReady,
 	addToChatQueue,
-	getNextComponentKey,
 	customCommandCache,
 	setActiveMode,
 	cliProvider,
 	cliModel,
+	nonInteractiveMode = false,
 }: UseAppInitializationProps) {
 	// Initialize LLM client and model
 	const initializeClient = async (
 		preferredProvider?: string,
 		preferredModel?: string,
 	): Promise<LLMClient | null> => {
+		// Lint provider configs before instantiation so typos and misplaced
+		// blocks surface as warnings in the chat queue, without a box —
+		// matches the existing "no box" convention for inline diagnostics.
+		const lintIssues = lintProviderConfigs(loadAllProviderConfigs());
+		for (const issue of lintIssues) {
+			addToChatQueue(
+				<WarningMessage
+					key={generateKey(`config-lint-${issue.provider}`)}
+					message={formatConfigLintIssue(issue)}
+					hideBox={true}
+				/>,
+			);
+		}
+
 		const {client, actualProvider} = await createLLMClient(
 			preferredProvider,
 			preferredModel,
@@ -126,25 +159,28 @@ export function useAppInitialization({
 		return client;
 	};
 
-	// Load and cache custom commands
-	const loadCustomCommands = (loader: CustomCommandLoader) => {
-		loader.loadCommands();
+	// Seed the autocomplete cache from a populated CustomCommandLoader. The
+	// unified bootstrap is responsible for calling loader.loadCommands(); this
+	// helper just reads the result back out for the picker UI.
+	const refreshCustomCommandCache = (loader: CustomCommandLoader) => {
 		const customCommands = loader.getAllCommands() || [];
-
-		// Populate command cache for better performance
 		customCommandCache.clear();
 		for (const command of customCommands) {
 			customCommandCache.set(command.name, command);
-			// Also cache aliases for quick lookup
 			if (command.metadata?.aliases) {
 				for (const alias of command.metadata.aliases) {
 					customCommandCache.set(alias, command);
 				}
 			}
 		}
-
-		// Set the count for display in Status component
 		setCustomCommandsCount(customCommands.length);
+	};
+
+	// Back-compat shim: callers that want to force a reload of the on-disk
+	// command files (e.g. /commands refresh).
+	const loadCustomCommands = (loader: CustomCommandLoader) => {
+		loader.loadCommands();
+		refreshCustomCommandCache(loader);
 	};
 
 	// Initialize MCP servers if configured
@@ -333,22 +369,33 @@ export function useAppInitialization({
 					error.isEmptyConfig ||
 					error.message.includes('No providers configured')
 				) {
-					addToChatQueue(
-						<InfoMessage
-							key={`config-error-${getNextComponentKey()}`}
-							message="Configuration needed. Let's set up your providers..."
-							hideBox={true}
-						/>,
-					);
-					// Trigger wizard mode after showing UI
-					setTimeout(() => {
-						setActiveMode('configWizard');
-					}, 100);
+					if (nonInteractiveMode) {
+						// Wizard is interactive-only — exit cleanly under `run`.
+						addToChatQueue(
+							<ErrorMessage
+								key={generateKey('config-error')}
+								message="No providers configured. Run nanocoder interactively to set them up."
+								hideBox={true}
+							/>,
+						);
+					} else {
+						addToChatQueue(
+							<InfoMessage
+								key={generateKey('config-error')}
+								message="Configuration needed. Let's set up your providers..."
+								hideBox={true}
+							/>,
+						);
+						// Trigger wizard mode after showing UI
+						setTimeout(() => {
+							setActiveMode('configWizard');
+						}, 100);
+					}
 				} else {
 					// Invalid CLI provider/model - show error and don't trigger wizard
 					addToChatQueue(
 						<ErrorMessage
-							key={`config-error-${getNextComponentKey()}`}
+							key={generateKey('config-error')}
 							message={error.message}
 							hideBox={true}
 						/>,
@@ -358,22 +405,87 @@ export function useAppInitialization({
 				// Regular error - show simple error message
 				addToChatQueue(
 					<ErrorMessage
-						key={`init-error-${getNextComponentKey()}`}
+						key={generateKey('init-error')}
 						message={`No providers available: ${String(error)}`}
 						hideBox={true}
 					/>,
 				);
 			}
+			// In non-interactive mode there's no human to recover via /model —
+			// keep init from blocking on a null client by exiting once the
+			// error has had a chance to flush to stdout.
+			if (nonInteractiveMode) {
+				setTimeout(() => {
+					void getShutdownManager().gracefulShutdown(1);
+				}, TIMEOUT_OUTPUT_FLUSH_MS);
+			}
 			// Leave client as null - the UI will handle this gracefully
 		}
 
+		// Unified skill boot: runs the legacy loaders (CustomCommandLoader,
+		// SubagentLoader, ToolManager.initializeCustomTools), then layers
+		// bundle-form skills on top via the registrar. /skills sees both
+		// forms; the TUI itself does not host event sources (the daemon does)
+		// so subscriptions register but do not fire here.
 		try {
-			loadCustomCommands(newCustomCommandLoader);
+			const {EventRouter} = await import('@/events/event-router');
+			const {bootSkillPipeline} = await import('@/skills/bootstrap');
+			const {getSubagentLoader} = await import('@/subagents/subagent-loader');
+			const router = new EventRouter({dispatch: () => {}});
+			const subagentLoader = getSubagentLoader();
+			const result = await bootSkillPipeline({
+				projectRoot: process.cwd(),
+				toolManager,
+				commandLoader: newCustomCommandLoader,
+				subagentLoader,
+				eventRouter: router,
+			});
+			refreshCustomCommandCache(newCustomCommandLoader);
+
+			// The critical-path branch above publishes the agent list *before*
+			// bundle skills register their subagents. Re-publish now so the
+			// `agent` tool's parameter description and the system prompt's
+			// subagent block include bundle agents (e.g. k8s_agent).
+			const refreshedAgents = await subagentLoader.listSubagents();
+			const refreshedSummaries = refreshedAgents.map(a => ({
+				name: a.name,
+				description: a.description,
+			}));
+			setAvailableSubagents(refreshedSummaries);
+			setAvailableAgentNames(refreshedSummaries);
+			for (const err of result.loadErrors) {
+				const where = err.filePath ?? err.bundlePath;
+				addToChatQueue(
+					<ErrorMessage
+						key={generateKey('skill-load-error')}
+						message={`Skill load error (${where}): ${err.message}`}
+						hideBox={true}
+					/>,
+				);
+			}
+			for (const c of result.registration.collisions) {
+				addToChatQueue(
+					<ErrorMessage
+						key={generateKey('skill-collision')}
+						message={`Skill collision (${c.skill} ${c.kind}:${c.name}): ${c.message}`}
+						hideBox={true}
+					/>,
+				);
+			}
+			for (const warning of result.deprecations) {
+				addToChatQueue(
+					<ErrorMessage
+						key={generateKey('skill-deprecation')}
+						message={warning}
+						hideBox={true}
+					/>,
+				);
+			}
 		} catch (error) {
 			addToChatQueue(
 				<ErrorMessage
-					key={`commands-error-${getNextComponentKey()}`}
-					message={`Failed to load custom commands: ${String(error)}`}
+					key={generateKey('skill-init-error')}
+					message={`Failed to load skill bundles: ${String(error)}`}
 					hideBox={true}
 				/>,
 			);
@@ -409,6 +521,10 @@ export function useAppInitialization({
 
 			// Set up the tool manager getter for commands that need it
 			setToolManagerGetter(() => newToolManager);
+
+			// Set up the command loader getter so /commands and friends
+			// read from the same instance the bootstrap populates.
+			setCommandLoaderGetter(() => newCustomCommandLoader);
 
 			commandRegistry.registerLazy(lazyCommands);
 

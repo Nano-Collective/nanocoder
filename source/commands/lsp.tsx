@@ -4,6 +4,7 @@ import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getLSPManager} from '@/lsp/lsp-manager';
+import {generateKey} from '@/session/key-generator';
 import type {Command} from '@/types/index';
 
 interface LSPProps {
@@ -111,7 +112,7 @@ export const lspCommand: Command = {
 		const status = lspManager.getStatus();
 
 		return React.createElement(LSP, {
-			key: `lsp-${Date.now()}`,
+			key: generateKey('lsp'),
 			status: status,
 		});
 	},

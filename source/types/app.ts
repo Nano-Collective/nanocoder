@@ -4,8 +4,8 @@ import {CustomCommandLoader} from '@/custom-commands/loader';
 import type {Session} from '@/session/session-manager';
 import type {CheckpointListItem} from './checkpoint';
 import type {CustomCommand} from './commands';
-import type {AIProviderConfig} from './config';
-import type {Message} from './core';
+import type {AIProviderConfig, TuneConfig} from './config';
+import type {DevelopmentMode, Message} from './core';
 import type {UpdateInfo} from './utils';
 
 export interface MessageSubmissionOptions {
@@ -13,8 +13,9 @@ export interface MessageSubmissionOptions {
 	customCommandLoader: CustomCommandLoader | null;
 	customCommandExecutor: CustomCommandExecutor | null;
 	onClearMessages: () => Promise<void>;
+	onRenameSession: (name: string) => void;
+	commandArgs?: string[];
 	onEnterModelSelectionMode: () => void;
-	onEnterProviderSelectionMode: () => void;
 	onEnterModelDatabaseMode: () => void;
 	onEnterConfigWizardMode: () => void;
 	onEnterSettingsMode: () => void;
@@ -29,13 +30,14 @@ export interface MessageSubmissionOptions {
 	onEnterSessionSelectorMode?: (showAll?: boolean) => void;
 	onResumeSession?: (session: Session) => void;
 	onShowStatus: () => void;
-	onEnterSchedulerMode?: () => void;
-	onHandleChatMessage: (message: string) => Promise<void>;
+	onHandleChatMessage: (
+		message: string,
+		displayValue?: string,
+	) => Promise<void>;
 	onAddToChatQueue: (component: React.ReactNode) => void;
 	setLiveComponent: (component: React.ReactNode) => void;
 	setIsToolExecuting: (value: boolean) => void;
 	onCommandComplete?: () => void;
-	getNextComponentKey: () => number;
 	setMessages: (messages: Message[]) => void;
 	messages: Message[];
 	provider: string;
@@ -45,4 +47,6 @@ export interface MessageSubmissionOptions {
 	theme: string;
 	updateInfo: UpdateInfo | null;
 	getMessageTokens: (message: Message) => number;
+	tune?: TuneConfig;
+	developmentMode?: DevelopmentMode;
 }

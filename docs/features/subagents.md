@@ -6,6 +6,12 @@ sidebar_order: 3
 
 # Subagents
 
+> **A subagent is one kind of skill member.** This page covers the
+> subagent-specific details — system prompts, isolation, parallel
+> execution. For the broader picture (how subagents combine with
+> commands, tools, and event triggers in a single bundle, and how
+> single-file vs bundle skills work), see **[Skills](./skills.md)**.
+
 Subagents are specialized AI agents that the main agent can delegate tasks to. Each subagent runs in its own isolated conversation with its own system prompt, filtered tools, and optionally a different model or provider. Only the final result is returned to the main conversation, keeping your context window clean.
 
 ## How It Works
@@ -22,7 +28,7 @@ A maximum of 5 agents can run concurrently. Excess calls receive an error and ca
 
 ## Built-In Subagents
 
-Nanocoder ships with two built-in subagents:
+Nanocoder ships with one built-in subagent:
 
 ### explore
 
@@ -33,14 +39,7 @@ Tools: read_file, search_file_contents, find_files, list_directory,
        lsp_get_diagnostics, git_status, git_log, git_diff
 ```
 
-### reviewer
-
-A read-only code review agent. Use to review recent changes, diffs, or specific files for bugs, security issues, style problems, and improvement suggestions.
-
-```
-Tools: read_file, search_file_contents, find_files, list_directory,
-       git_status, git_log, git_diff, lsp_get_diagnostics
-```
+Use `/agents create <name>` or `/agents copy explore` to scaffold project-specific agents (e.g. a code reviewer, a test-writer, a security auditor) tailored to your codebase.
 
 ## Creating Custom Subagents
 
@@ -58,7 +57,7 @@ This creates a template at `.nanocoder/agents/code-reviewer.md` and prompts the 
 /agents copy explore
 ```
 
-This copies the full definition of the `research` agent (or any other agent) to `.nanocoder/agents/research.md` so you can customize it. The project-level copy takes priority over the built-in, so your modifications take effect immediately.
+This copies the full definition of the `explore` agent (or any other agent) to `.nanocoder/agents/explore.md` so you can customize it. The project-level copy takes priority over the built-in, so your modifications take effect immediately.
 
 This is the easiest way to tweak a built-in agent — adjust the system prompt, add or remove tools, change the model, etc.
 
@@ -73,6 +72,7 @@ Create a markdown file in `.nanocoder/agents/` (project-level) or `~/.config/nan
 name: code-reviewer
 description: Reviews code for bugs, security issues, and style problems
 model: inherit
+contextWindow: 16384
 tools:
   - read_file
   - search_file_contents
@@ -96,6 +96,7 @@ You are a code review specialist. When given a file or directory to review:
 | `description` | Yes | — | When to use this agent (shown to the LLM) |
 | `provider` | No | parent's | Provider name from `agents.config.json`. Set this to use a different API endpoint (e.g. `ollama` for local models) |
 | `model` | No | `inherit` | Model ID available on the provider. Use `inherit` to use the parent's current model |
+| `contextWindow` | No | provider/model default | Override the subagent's context window in tokens (e.g. `16384`) |
 | `tools` | No | all | Array of tool names to allow. If set, only these tools are available |
 | `disallowedTools` | No | none | Array of tool names to block |
 
@@ -123,6 +124,8 @@ Always use your tools — never guess.
 ```
 
 The `provider` must match a provider name configured in your `agents.config.json`.
+
+If you set `contextWindow`, Nanocoder creates that subagent with its own context limit override. This is useful when a lightweight research agent should run with a smaller local-model context than your main coding agent.
 
 ## Priority and Overrides
 

@@ -18,6 +18,66 @@ const mockColors = {
 	base: '#000000',
 };
 
+const TUNE_DEFAULTS_LIKE = {enabled: true, aggressiveCompact: false} as const;
+
+// ============================================================================
+// Tune profile label
+// ============================================================================
+
+test('tune label shows nothing when tune is disabled', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			tune={{...TUNE_DEFAULTS_LIKE, enabled: false, toolProfile: 'auto'}}
+			currentModel="llama3.2:1b"
+		/>,
+	);
+	t.notRegex(lastFrame()!, /tune:/);
+});
+
+test('tune label shows the explicit profile name', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			tune={{...TUNE_DEFAULTS_LIKE, toolProfile: 'nano'}}
+			currentModel="gpt-4o"
+		/>,
+	);
+	const output = lastFrame()!;
+	t.regex(output, /tune: nano/);
+	t.notRegex(output, /auto/);
+});
+
+test('tune label shows resolved profile and (auto) origin for auto on a small model', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			tune={{...TUNE_DEFAULTS_LIKE, toolProfile: 'auto'}}
+			currentModel="llama3.2:1b"
+		/>,
+	);
+	t.regex(lastFrame()!, /tune: nano \(auto\)/);
+});
+
+test('tune label resolves auto to full for cloud/unknown models', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			tune={{...TUNE_DEFAULTS_LIKE, toolProfile: 'auto'}}
+			currentModel="claude-opus-4-8"
+		/>,
+	);
+	t.regex(lastFrame()!, /tune: full \(auto\)/);
+});
+
 // ============================================================================
 // Component Rendering Tests
 // ============================================================================
@@ -66,14 +126,14 @@ test('DevelopmentModeIndicator renders with yolo mode', t => {
 	t.regex(output!, /yolo mode on/);
 });
 
-test('DevelopmentModeIndicator renders with scheduler mode', t => {
+test('DevelopmentModeIndicator renders with headless mode', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="scheduler" colors={mockColors} contextPercentUsed={null} />,
+		<DevelopmentModeIndicator developmentMode="headless" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /scheduler mode on/);
+	t.regex(output!, /headless mode on/);
 });
 
 test('DevelopmentModeIndicator renders without crashing', t => {
@@ -140,7 +200,9 @@ test('DevelopmentModeIndicator shows context percentage when provided', t => {
 	);
 
 	const output = lastFrame();
-	t.regex(output!, /ctx: 42%/);
+	// Marker is optional here (no source given → estimated); see dedicated
+	// API-vs-estimate marker tests below.
+	t.regex(output!, /ctx: ~?42%/);
 });
 
 test('DevelopmentModeIndicator hides context percentage when null', t => {
@@ -150,6 +212,44 @@ test('DevelopmentModeIndicator hides context percentage when null', t => {
 
 	const output = lastFrame();
 	t.notRegex(output!, /ctx:/);
+});
+
+test('DevelopmentModeIndicator shows API-reported context without the ~ marker', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={42}
+			contextSource="api"
+		/>,
+	);
+
+	const output = lastFrame();
+	t.regex(output!, /ctx: 42%/);
+	t.notRegex(output!, /ctx: ~42%/);
+});
+
+test('DevelopmentModeIndicator marks estimated context with a leading ~', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={42}
+			contextSource="estimate"
+		/>,
+	);
+
+	const output = lastFrame();
+	t.regex(output!, /ctx: ~42%/);
+});
+
+test('DevelopmentModeIndicator defaults to the estimate marker when source is omitted', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator developmentMode="normal" colors={mockColors} contextPercentUsed={42} />,
+	);
+
+	const output = lastFrame();
+	t.regex(output!, /ctx: ~42%/);
 });
 
 test('DevelopmentModeIndicator normal mode uses correct label', t => {
@@ -189,13 +289,13 @@ test('DevelopmentModeIndicator plan mode uses correct label', t => {
 	t.notRegex(output!, /auto-accept mode on/);
 });
 
-test('DevelopmentModeIndicator scheduler mode uses correct label', t => {
+test('DevelopmentModeIndicator headless mode uses correct label', t => {
 	const {lastFrame} = render(
-		<DevelopmentModeIndicator developmentMode="scheduler" colors={mockColors} contextPercentUsed={null} />,
+		<DevelopmentModeIndicator developmentMode="headless" colors={mockColors} contextPercentUsed={null} />,
 	);
 
 	const output = lastFrame();
-	t.regex(output!, /scheduler mode on/);
+	t.regex(output!, /headless mode on/);
 	t.notRegex(output!, /normal mode on/);
 	t.notRegex(output!, /auto-accept mode on/);
 	t.notRegex(output!, /plan mode on/);
@@ -253,7 +353,7 @@ test('DevelopmentModeIndicator has correct structure', t => {
 	const output = lastFrame();
 	// Should have the mode label and context percentage
 	t.regex(output!, /normal mode on/);
-	t.regex(output!, /ctx: 25%/);
+	t.regex(output!, /ctx: ~?25%/);
 });
 
 test('DevelopmentModeIndicator component can be unmounted', t => {

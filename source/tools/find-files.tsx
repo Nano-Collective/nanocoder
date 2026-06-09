@@ -1,11 +1,11 @@
 import {Box, Text} from 'ink';
 import React from 'react';
-
 import ToolMessage from '@/components/tool-message';
 import {DEFAULT_FIND_FILES_RESULTS, MAX_FIND_FILES_RESULTS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {findMatchingPaths} from '@/utils/file-search';
 import {calculateTokens} from '@/utils/token-calculator';
 
@@ -50,8 +50,7 @@ const executeFindFiles = async (args: FindFilesArgs): Promise<string> => {
 
 		return output;
 	} catch (error: unknown) {
-		const errorMessage =
-			error instanceof Error ? error.message : 'Unknown error';
+		const errorMessage = formatError(error);
 		throw new Error(`File search failed: ${errorMessage}`);
 	}
 };
@@ -75,8 +74,6 @@ const findFilesCoreTool = tool({
 		},
 		required: ['pattern'],
 	}),
-	// Low risk: read-only operation, never requires approval
-	needsApproval: false,
 	execute: async (args, _options) => {
 		return await executeFindFiles(args);
 	},

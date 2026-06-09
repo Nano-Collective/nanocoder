@@ -3,6 +3,7 @@ import {existsSync} from 'fs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import {MAX_CHECKPOINT_FILES} from '@/constants';
+import {formatError} from '@/utils/error-formatter';
 import {loadGitignore} from '@/utils/gitignore-loader';
 import {logWarning} from '@/utils/message-queue';
 
@@ -33,7 +34,7 @@ export class FileSnapshotService {
 				logWarning('Could not capture file', true, {
 					context: {
 						filePath,
-						error: error instanceof Error ? error.message : 'Unknown error',
+						error: formatError(error),
 					},
 				});
 			}
@@ -56,11 +57,7 @@ export class FileSnapshotService {
 				await fs.mkdir(directory, {recursive: true});
 				await fs.writeFile(absolutePath, content, 'utf-8');
 			} catch (error) {
-				errors.push(
-					`Failed to restore ${relativePath}: ${
-						error instanceof Error ? error.message : 'Unknown error'
-					}`,
-				);
+				errors.push(`Failed to restore ${relativePath}: ${formatError(error)}`);
 			}
 		}
 
@@ -200,7 +197,7 @@ export class FileSnapshotService {
 							dirWritable = false;
 							directoryExists = false;
 							errors.push(
-								`Cannot create directory "${directory}": ${mkdirError instanceof Error ? mkdirError.message : 'Unknown error'}`,
+								`Cannot create directory "${directory}": ${formatError(mkdirError)}`,
 							);
 						}
 					} else {
@@ -226,7 +223,7 @@ export class FileSnapshotService {
 					} catch (statError) {
 						dirWritable = false;
 						errors.push(
-							`Directory "${directory}" is not writable: ${statError instanceof Error ? statError.message : 'Unknown error'}`,
+							`Directory "${directory}" is not writable: ${formatError(statError)}`,
 						);
 					}
 				}
@@ -252,13 +249,13 @@ export class FileSnapshotService {
 						}
 					} catch (fileError) {
 						errors.push(
-							`Cannot write to file "${absolutePath}": ${fileError instanceof Error ? fileError.message : 'Unknown error'}`,
+							`Cannot write to file "${absolutePath}": ${formatError(fileError)}`,
 						);
 					}
 				}
 			} catch (error) {
 				errors.push(
-					`Cannot validate path for ${relativePath}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+					`Cannot validate path for ${relativePath}: ${formatError(error)}`,
 				);
 			}
 		}

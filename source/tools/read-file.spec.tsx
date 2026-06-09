@@ -4,6 +4,7 @@ import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes';
+import {EMPTY_CONTENT_MARKER} from '../constants';
 import {ThemeContext} from '../hooks/useTheme';
 import {readFileTool} from './read-file';
 
@@ -643,7 +644,7 @@ test.serial('read_file throws error for nonexistent file', async t => {
 	);
 });
 
-test.serial('read_file throws error for empty files', async t => {
+test.serial('read_file returns empty marker for empty files', async t => {
 	t.timeout(10000);
 	const testDir = join(process.cwd(), 'test-read-empty-temp');
 
@@ -651,21 +652,99 @@ test.serial('read_file throws error for empty files', async t => {
 		mkdirSync(testDir, {recursive: true});
 		writeFileSync(join(testDir, 'empty.ts'), '');
 
-		await t.throwsAsync(
-			async () => {
-				await readFileTool.tool.execute!(
-					{
-						path: join(testDir, 'empty.ts'),
-					},
-					{toolCallId: 'test', messages: []},
-				);
+		const result = await readFileTool.tool.execute!(
+			{
+				path: join(testDir, 'empty.ts'),
 			},
-			{message: /exists but is empty/},
+			{toolCallId: 'test', messages: []},
 		);
+
+		t.is(result, EMPTY_CONTENT_MARKER);
 	} finally {
 		rmSync(testDir, {recursive: true, force: true});
 	}
 });
+
+test.serial(
+	'read_file returns empty marker for empty files with line ranges',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-read-empty-ranges-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, 'empty.ts'), '');
+
+			const result = await readFileTool.tool.execute!(
+				{
+					path: join(testDir, 'empty.ts'),
+					start_line: 1,
+					end_line: 10,
+				},
+				{toolCallId: 'test', messages: []},
+			);
+
+			t.is(result, EMPTY_CONTENT_MARKER);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'read_file metadata_only returns file info for empty files without short-circuiting',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-read-empty-metadata-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, 'empty.ts'), '');
+
+			const result = (await readFileTool.tool.execute!(
+				{
+					path: join(testDir, 'empty.ts'),
+					metadata_only: true,
+				},
+				{toolCallId: 'test', messages: []},
+			)) as string;
+
+			t.true(result.includes('File Information for'));
+			t.true(result.includes('Size: 0 bytes'));
+			t.false(result.includes(EMPTY_CONTENT_MARKER));
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'read_file handles file containing only newline (non-empty)',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-read-newline-only-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			// File with single newline character - has content (length === 1)
+			writeFileSync(join(testDir, 'newline.ts'), '\n');
+
+			const result = await readFileTool.tool.execute!(
+				{
+					path: join(testDir, 'newline.ts'),
+				},
+				{toolCallId: 'test', messages: []},
+			);
+
+			// Should NOT return empty marker (content.length === 1, not 0)
+			// File splits into 2 lines ['', ''] and joining returns '\n'
+			t.not(result, EMPTY_CONTENT_MARKER);
+			t.is(result, '\n');
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
 
 // ============================================================================
 // Edge Cases and Stress Tests
@@ -856,7 +935,9 @@ test('read_file tool has correct name', t => {
 });
 
 test('read_file tool does not require confirmation', t => {
-	t.false(readFileTool.tool.needsApproval);
+	// Read-only tools default to no approval (see resolveToolApproval).
+	t.true(readFileTool.readOnly);
+	t.is(readFileTool.approval, undefined);
 });
 
 test('read_file tool has handler function', t => {

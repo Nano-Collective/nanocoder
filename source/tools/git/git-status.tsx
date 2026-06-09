@@ -6,11 +6,11 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
-
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {
 	execGit,
 	type FileChange,
@@ -219,7 +219,7 @@ const executeGitStatus = async (_args: GitStatusInput): Promise<string> => {
 
 		return lines.join('\n');
 	} catch (error) {
-		return `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+		return `Error: ${formatError(error)}`;
 	}
 };
 
@@ -235,8 +235,6 @@ const gitStatusCoreTool = tool({
 		properties: {},
 		required: [],
 	}),
-	// AUTO - read-only operation, never needs approval
-	needsApproval: () => false,
 	execute: async (args, _options) => {
 		return await executeGitStatus(args);
 	},

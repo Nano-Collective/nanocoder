@@ -39,7 +39,7 @@ test('ListDirectoryFormatter renders with path', t => {
 		return;
 	}
 
-	const element = formatter({path: 'src'}, 'Directory contents for "src":\n\n📁 components\n📄 index.ts');
+	const element = formatter({path: 'src'}, 'Directory contents for "src":\n\ncomponents/\nindex.ts');
 	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
 
 	const output = lastFrame();
@@ -55,7 +55,7 @@ test('ListDirectoryFormatter shows entry count', t => {
 		return;
 	}
 
-	const element = formatter({path: '.'}, 'Directory contents for ".":\n\n📁 src\n📁 test\n📄 package.json\n📄 tsconfig.json');
+	const element = formatter({path: '.'}, 'Directory contents for ".":\n\nsrc/\ntest/\npackage.json\ntsconfig.json');
 	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
 
 	const output = lastFrame();
@@ -71,7 +71,7 @@ test('ListDirectoryFormatter shows recursive info', t => {
 		return;
 	}
 
-	const element = formatter({path: '.', recursive: true, maxDepth: 3}, 'Directory contents for ".":\n\n📁 src\n📄 file.ts\n\n[Recursive: showing entries up to depth 3]');
+	const element = formatter({path: '.', recursive: true, maxDepth: 3}, 'Directory contents for ".":\n\nsrc/\nfile.ts\n\n[Recursive: showing entries up to depth 3]');
 	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
 
 	const output = lastFrame();
@@ -195,8 +195,8 @@ test.serial('list_directory shows files and directories', async t => {
 			{toolCallId: 'test', messages: []},
 		);
 
-		t.true(result.includes('📁') || result.includes('subdir'));
-		t.true(result.includes('📄') || result.includes('file.ts'));
+		t.true(result.includes('subdir'));
+		t.true(result.includes('file.ts'));
 	} finally {
 		process.chdir(originalCwd);
 		rmSync(join(originalCwd, 'test-listdir-mixed-temp'), {recursive: true, force: true});
@@ -479,6 +479,34 @@ test.serial('list_directory tree=true has no emojis', async t => {
 	}
 });
 
+test.serial('list_directory standard format has no emojis', async t => {
+	t.timeout(10000);
+	const originalCwd = process.cwd();
+
+	try {
+		const testDir = join(process.cwd(), 'test-listdir-std-no-emoji-temp');
+		mkdirSync(join(testDir, 'src'), {recursive: true});
+		writeFileSync(join(testDir, 'file.ts'), 'content');
+
+		process.chdir(testDir);
+
+		const result = await listDirectoryTool.tool.execute!(
+			{},
+			{toolCallId: 'test', messages: []},
+		);
+
+		t.false(result.includes('📁'));
+		t.false(result.includes('📄'));
+		t.false(result.includes('🔗'));
+		// Directories are marked with a trailing slash instead
+		t.true(result.includes('src/'));
+		t.true(result.includes('file.ts'));
+	} finally {
+		process.chdir(originalCwd);
+		rmSync(join(originalCwd, 'test-listdir-std-no-emoji-temp'), {recursive: true, force: true});
+	}
+});
+
 // ============================================================================
 // Tests for list_directory Tool Handler - Hidden Files
 // ============================================================================
@@ -570,7 +598,8 @@ test('list_directory tool has correct name', t => {
 });
 
 test('list_directory tool does not require confirmation', t => {
-	t.false(listDirectoryTool.tool.needsApproval);
+	t.true(listDirectoryTool.readOnly);
+	t.is(listDirectoryTool.approval, undefined);
 });
 
 test('list_directory tool has handler function', t => {

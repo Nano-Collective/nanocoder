@@ -1,6 +1,6 @@
 import {Box, Text, useInput} from 'ink';
 import SelectInput from 'ink-select-input';
-import {useMemo, useState} from 'react';
+import {useMemo} from 'react';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {getAppConfig} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -11,8 +11,6 @@ interface SettingsToolApprovalPanelProps {
 	onCancel: () => void;
 }
 
-type ListType = 'topLevel' | 'nanocoderTools';
-
 export function SettingsToolApprovalPanel({
 	onBack,
 	onCancel,
@@ -22,9 +20,6 @@ export function SettingsToolApprovalPanel({
 
 	const appConfig = getAppConfig();
 	const topLevelAllow = appConfig.alwaysAllow ?? [];
-	const nanocoderToolsAllow = appConfig.nanocoderTools?.alwaysAllow ?? [];
-
-	const [activeList] = useState<ListType>('topLevel');
 
 	useInput((_, key) => {
 		if (key.escape) {
@@ -36,28 +31,23 @@ export function SettingsToolApprovalPanel({
 	});
 
 	const items = useMemo(() => {
-		const currentList =
-			activeList === 'topLevel' ? topLevelAllow : nanocoderToolsAllow;
-		const listLabel =
-			activeList === 'topLevel'
-				? 'Top-level alwaysAllow'
-				: 'Nanocoder tools alwaysAllow';
+		const listLabel = 'alwaysAllow';
 
 		const result: {label: string; value: string}[] = [
 			{
-				label: `Viewing: ${listLabel} (${currentList.length} tools)`,
+				label: `Viewing: ${listLabel} (${topLevelAllow.length} tools)`,
 				value: 'info',
 			},
 		];
 
-		for (const tool of currentList) {
+		for (const tool of topLevelAllow) {
 			result.push({
 				label: `  ${tool}`,
 				value: tool,
 			});
 		}
 
-		if (currentList.length === 0) {
+		if (topLevelAllow.length === 0) {
 			result.push({
 				label: '  (no tools configured)',
 				value: 'empty',
@@ -65,7 +55,7 @@ export function SettingsToolApprovalPanel({
 		}
 
 		return result;
-	}, [activeList, topLevelAllow, nanocoderToolsAllow]);
+	}, [topLevelAllow]);
 
 	const handleSelect = (_item: {value: string}) => {
 		// For now, just informational display

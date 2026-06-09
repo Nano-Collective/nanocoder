@@ -1,6 +1,6 @@
 import test from 'ava';
+import {isNonInteractiveModeComplete} from './app/helpers';
 import {VALID_MODES} from './app/types';
-import {isNonInteractiveModeComplete, shouldRenderWelcome} from './app/helpers';
 
 // Test non-interactive mode integration
 // These tests verify that the App component correctly handles non-interactive mode
@@ -8,11 +8,6 @@ import {isNonInteractiveModeComplete, shouldRenderWelcome} from './app/helpers';
 // ============================================================================
 // Non-Interactive Mode Behavior Tests
 // ============================================================================
-
-test('Should omit welcome banner in non-interactive mode', t => {
-	t.false(shouldRenderWelcome(true));
-	t.true(shouldRenderWelcome(false));
-});
 
 test('Non-interactive mode: only exits when run command is used', t => {
 	// The exit logic only triggers when nonInteractivePrompt is truthy.

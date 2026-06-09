@@ -2,10 +2,10 @@ import {constants} from 'node:fs';
 import {access, writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import React from 'react';
-
 import {getColors} from '@/config/index';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {validatePath} from '@/utils/path-validators';
 import {createFileToolApproval} from '@/utils/tool-approval';
@@ -118,7 +118,6 @@ const stringReplaceCoreTool = tool({
 		},
 		required: ['path', 'old_str', 'new_str'],
 	}),
-	needsApproval: createFileToolApproval('string_replace'),
 	execute: async (args, _options) => {
 		return await executeStringReplace(args);
 	},
@@ -185,14 +184,14 @@ const stringReplaceValidator = async (
 			if (error.code === 'ENOENT') {
 				return {
 					valid: false,
-					error: `⚒ File "${path}" does not exist`,
+					error: `File "${path}" does not exist`,
 				};
 			}
 		}
-		const errorMessage = error instanceof Error ? error.message : String(error);
+		const errorMessage = formatError(error);
 		return {
 			valid: false,
-			error: `⚒ Cannot access file "${path}": ${errorMessage}`,
+			error: `Cannot access file "${path}": ${errorMessage}`,
 		};
 	}
 
@@ -200,7 +199,7 @@ const stringReplaceValidator = async (
 		return {
 			valid: false,
 			error:
-				'⚒ old_str cannot be empty. Provide the exact content to find and replace.',
+				'old_str cannot be empty. Provide the exact content to find and replace.',
 		};
 	}
 
@@ -212,21 +211,21 @@ const stringReplaceValidator = async (
 		if (occurrences === 0) {
 			return {
 				valid: false,
-				error: `⚒ Content not found in file. The file may have changed since you last read it. Suggestion: Read the file again to see current contents.`,
+				error: `Content not found in file. The file may have changed since you last read it. Suggestion: Read the file again to see current contents.`,
 			};
 		}
 
 		if (occurrences > 1) {
 			return {
 				valid: false,
-				error: `⚒ Found ${occurrences} matches for the search string. Please provide more surrounding context to make the match unique.`,
+				error: `Found ${occurrences} matches for the search string. Please provide more surrounding context to make the match unique.`,
 			};
 		}
 	} catch (error) {
-		const errorMessage = error instanceof Error ? error.message : String(error);
+		const errorMessage = formatError(error);
 		return {
 			valid: false,
-			error: `⚒ Error reading file "${path}": ${errorMessage}`,
+			error: `Error reading file "${path}": ${errorMessage}`,
 		};
 	}
 
@@ -238,4 +237,5 @@ export const stringReplaceTool: NanocoderToolExport = {
 	tool: stringReplaceCoreTool,
 	formatter: stringReplaceFormatter,
 	validator: stringReplaceValidator,
+	approval: createFileToolApproval('string_replace'),
 };

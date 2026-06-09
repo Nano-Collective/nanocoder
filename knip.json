@@ -8,7 +8,6 @@
 	],
 	"ignoreBinaries": ["vsce", "semgrep"],
 	"ignore": [
-		"nanocoder-dummy-file.ts",
 		"source/utils/message-queue.tsx",
 		"source/vscode/**/*.ts",
 		"plugins/**/*",

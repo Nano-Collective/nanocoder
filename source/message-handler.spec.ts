@@ -150,6 +150,30 @@ test('processToolUse - executes tool successfully with object arguments', async 
 	t.is(result.role, 'tool');
 	t.is(result.name, 'read_file');
 	t.is(result.content, 'File content for /test/file.txt');
+	t.is(result.structuredContent, undefined);
+});
+
+test('processToolUse - carries structured handler output onto the result', async t => {
+	const mockHandler: ToolHandler = async () => ({
+		llmContent: '1 error found',
+		structured: {diagnostics: [{file: 'x.ts', severity: 'error'}]},
+	});
+
+	setToolRegistryGetter(
+		createMockToolRegistry({
+			lsp_get_diagnostics: mockHandler,
+		}),
+	);
+
+	const toolCall = createMockToolCall('lsp_get_diagnostics', {});
+	const result: ToolResult = await processToolUse(toolCall);
+
+	// The text representation becomes `content`; the structured payload is
+	// carried separately for the model.
+	t.is(result.content, '1 error found');
+	t.deepEqual(result.structuredContent, {
+		diagnostics: [{file: 'x.ts', severity: 'error'}],
+	});
 });
 
 test('processToolUse - executes tool successfully with string arguments (JSON parsing)', async t => {
@@ -296,7 +320,8 @@ test('processToolUse - catches object exceptions', async t => {
 	const result: ToolResult = await processToolUse(toolCall);
 
 	t.true(result.content.startsWith('Error:'));
-	t.true(result.content.includes('[object Object]'));
+	t.true(result.content.includes('Object error'));
+	t.true(result.content.includes('500'));
 });
 
 test('processToolUse - handles malformed JSON arguments in strict mode', async t => {

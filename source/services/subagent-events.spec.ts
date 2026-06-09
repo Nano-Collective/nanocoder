@@ -1,5 +1,6 @@
 import test from 'ava';
 import {
+	appendSubagentTool,
 	clearAllSubagentProgress,
 	getAllSubagentProgress,
 	getSubagentProgress,
@@ -196,3 +197,64 @@ test.serial('clearAllSubagentProgress clears the map', t => {
 	const all = getAllSubagentProgress();
 	t.is(all.size, 0);
 });
+
+// ============================================================================
+// Tool history
+// ============================================================================
+
+test.serial(
+	'appendSubagentTool appends to per-agent history in order',
+	t => {
+		clearAllSubagentProgress();
+		resetSubagentProgressById('agent-1');
+
+		appendSubagentTool('agent-1', 'k8s_pods');
+		appendSubagentTool('agent-1', 'k8s_logs');
+		appendSubagentTool('agent-1', 'k8s_pods');
+
+		t.deepEqual(getSubagentProgress('agent-1').toolHistory, [
+			'k8s_pods',
+			'k8s_logs',
+			'k8s_pods',
+		]);
+	},
+);
+
+test.serial(
+	'appendSubagentTool with no agentId falls back to legacy singleton',
+	t => {
+		resetSubagentProgress();
+
+		appendSubagentTool(undefined, 'read_file');
+		appendSubagentTool(undefined, 'write_file');
+
+		t.deepEqual(subagentProgress.toolHistory, ['read_file', 'write_file']);
+	},
+);
+
+test.serial('resetSubagentProgressById clears tool history', t => {
+	clearAllSubagentProgress();
+	resetSubagentProgressById('agent-1');
+	appendSubagentTool('agent-1', 'k8s_pods');
+
+	resetSubagentProgressById('agent-1');
+
+	t.deepEqual(getSubagentProgress('agent-1').toolHistory, []);
+});
+
+test.serial('resetSubagentProgress clears tool history', t => {
+	resetSubagentProgress();
+	appendSubagentTool(undefined, 'read_file');
+
+	resetSubagentProgress();
+
+	t.deepEqual(subagentProgress.toolHistory, []);
+});
+
+test.serial(
+	'appendSubagentTool on a missing agentId is a no-op (does not crash)',
+	t => {
+		clearAllSubagentProgress();
+		t.notThrows(() => appendSubagentTool('does-not-exist', 'noop'));
+	},
+);

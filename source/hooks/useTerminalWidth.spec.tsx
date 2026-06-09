@@ -118,7 +118,7 @@ test('useResponsiveTerminal detects narrow size', t => {
 
 test('useResponsiveTerminal detects normal size', t => {
 	const originalColumns = process.stdout.columns;
-	process.stdout.columns = 80; // Normal terminal
+	process.stdout.columns = 100; // Normal terminal
 
 	let capturedTerminal: ReturnType<typeof useResponsiveTerminal> | null = null;
 
@@ -141,7 +141,7 @@ test('useResponsiveTerminal detects normal size', t => {
 
 test('useResponsiveTerminal detects wide size', t => {
 	const originalColumns = process.stdout.columns;
-	process.stdout.columns = 120; // Wide terminal
+	process.stdout.columns = 140; // Wide terminal
 
 	let capturedTerminal: ReturnType<typeof useResponsiveTerminal> | null = null;
 

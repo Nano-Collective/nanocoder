@@ -285,10 +285,12 @@ test('convertToToolCalls - converts parsed calls to ToolCall format', t => {
 	const result = XMLToolCallParser.convertToToolCalls(parsed);
 
 	t.is(result.length, 2);
-	t.is(result[0].id, 'xml_call_0');
+	// IDs are generated, unique, and collision-resistant (not parse-index based)
+	t.regex(result[0].id, /^tool_\d+_[0-9a-f]+$/);
+	t.regex(result[1].id, /^tool_\d+_[0-9a-f]+$/);
+	t.not(result[0].id, result[1].id);
 	t.is(result[0].function.name, 'read_file');
 	t.deepEqual(result[0].function.arguments, {path: '/test/file.txt'});
-	t.is(result[1].id, 'xml_call_1');
 	t.is(result[1].function.name, 'create_file');
 	t.deepEqual(result[1].function.arguments, {
 		path: '/new.txt',
@@ -466,13 +468,15 @@ test('detectMalformedToolCall - detects [Tool: name] in context', t => {
 	t.true(result!.error.includes('[tool_use: name]'));
 });
 
-test('detectMalformedToolCall - detects <function=name> syntax', t => {
-	const content = '<function=read_file><path>/test.txt</path></function>';
+test('detectMalformedToolCall - returns null for <function=name> (now parsed as Llama 3.x format)', t => {
+	// <function=name>{json}</function> is the Llama 3.x zero-shot custom
+	// function call format. It is parsed as a real tool call by
+	// parseFunctionTagToolCalls in tool-parser.ts and must NOT be flagged
+	// as malformed at the XML layer.
+	const content = '<function=read_file>{"path": "/test.txt"}</function>';
 	const result = XMLToolCallParser.detectMalformedToolCall(content);
 
-	t.truthy(result);
-	t.true(result!.error.includes('<function=name>'));
-	t.true(result!.examples.includes('native tool calling'));
+	t.is(result, null);
 });
 
 test('detectMalformedToolCall - detects <parameter=name> syntax', t => {
@@ -487,14 +491,6 @@ test('detectMalformedToolCall - detects <parameter=name> syntax', t => {
 test('detectMalformedToolCall - detects generic </parameter> closing tag', t => {
 	const content =
 		'<read_file><parameter=path>/test.txt</parameter></read_file>';
-	const result = XMLToolCallParser.detectMalformedToolCall(content);
-
-	t.truthy(result);
-	t.truthy(result!.error);
-});
-
-test('detectMalformedToolCall - detects generic </function> closing tag', t => {
-	const content = '<function=read_file><path>/test.txt</path></function>';
 	const result = XMLToolCallParser.detectMalformedToolCall(content);
 
 	t.truthy(result);
@@ -516,7 +512,7 @@ test('detectMalformedToolCall - returns null for plain text', t => {
 });
 
 test('detectMalformedToolCall - includes helpful examples in error', t => {
-	const content = '<function=test><param>value</param></function>';
+	const content = '<read_file><parameter=path>/test.txt</parameter></read_file>';
 	const result = XMLToolCallParser.detectMalformedToolCall(content);
 
 	t.truthy(result);
@@ -556,7 +552,8 @@ I'll read those files for you.`;
 });
 
 test('full workflow - handles mixed content with malformed detection', t => {
-	const malformedContent = '<function=test><param>value</param></function>';
+	const malformedContent =
+		'<read_file><parameter=path>/test.txt</parameter></read_file>';
 
 	// Should detect malformation
 	const malformed = XMLToolCallParser.detectMalformedToolCall(malformedContent);

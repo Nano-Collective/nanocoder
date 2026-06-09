@@ -13,13 +13,12 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | Command | Description |
 |---------|-------------|
 | `/help` | Show available commands |
-| `/init` | Initialize project with intelligent analysis, create AGENTS.md and configuration files. Use `/init --force` to regenerate AGENTS.md if it already exists |
+| `/init` | Initialize project with intelligent analysis, create AGENTS.md and configuration files. Use `/init --force` to regenerate AGENTS.md if it already exists, or `/init --lean` to skip merging `CLAUDE.md` content into the generated AGENTS.md |
 | `/setup-providers` | Interactive wizard for configuring AI providers with templates |
 | `/setup-mcp` | Interactive wizard for configuring MCP servers with templates |
 | `/setup-config` | Open a configuration file in your `$EDITOR` (lists project and global config files) |
 | `/clear` | Clear chat history |
-| `/model` | Switch between available models |
-| `/provider` | Switch between configured AI providers |
+| `/model` | Switch between available models from any configured provider |
 | `/status` | Display current status (CWD, provider, model, theme, available updates, AGENTS setup) |
 | `/tasks` | Manage task list for tracking complex work (see [Task Management](task-management.md)) |
 | `/model-database` | Browse coding models from OpenRouter (searchable, filterable by open/proprietary) |
@@ -34,8 +33,10 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/update` | Update Nanocoder to the latest version |
 | `/usage` | Get current model context usage visually |
 | `/lsp` | List connected LSP servers |
-| `/schedule` | Schedule recurring AI tasks (see [Scheduler](scheduler.md)) |
+| `/schedule` | Read-only view of cron subscriptions declared by skills (see [Skills → Event subscriptions](skills.md#event-subscriptions)) |
+| `/skills` | List and inspect loaded skills; scaffold new bundle skills with AI assistance (see [Skills](skills.md)) |
 | `/resume` | Resume a previous chat session (aliases: `/sessions`, `/history`). See [Session Management](session-management.md) |
+| `/rename` | Rename the current session. Name must be non-empty and 100 characters or less. See [Session Management](session-management.md) |
 | `/explorer` | Interactive file browser to navigate, preview, and select files for context |
 | `/tune` | Configure runtime model behaviour — tool profiles, compaction, native tools, model parameters (see [Tune](tune.md)) |
 | `/ide` | Connect to an IDE for live integration (e.g., VS Code diff previews) |

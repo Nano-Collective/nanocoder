@@ -1,5 +1,5 @@
 import test from 'ava';
-import {setCurrentMode} from '../context/mode-context';
+import {resolveToolApproval} from '../tools/approval-policy';
 import {MCPClient} from './mcp-client';
 
 // ============================================================================
@@ -64,7 +64,10 @@ const mockTransportFactory = {
 
 console.log(`\nmcp-client.spec.ts`);
 
-// Skip integration tests in CI environments (they require external network access)
+// Skip integration tests in CI. These tests hit real third-party MCP servers
+// (mcp.deepwiki.com, remote.mcpservers.org, mcp.context7.com) — running them in
+// CI would couple our pipeline to those services' uptime. Run them locally to
+// verify HTTP transport against live servers.
 const isCI = process.env.CI === 'true' || process.env.CI === '1';
 const testOrSkip = isCI ? test.skip : test;
 
@@ -504,7 +507,7 @@ test('MCPClient.getNativeToolsRegistry: returns empty object when no servers', t
 	t.is(Object.keys(registry).length, 0);
 });
 
-test('MCPClient.getNativeToolsRegistry: creates tools with needsApproval callback', t => {
+test('MCPClient.getToolEntries: attaches a mode-aware approval policy', t => {
 	const client = new MCPClient();
 
 	(client as any).serverTools.set('test-server', [
@@ -516,13 +519,11 @@ test('MCPClient.getNativeToolsRegistry: creates tools with needsApproval callbac
 		},
 	]);
 
-	const registry = client.getNativeToolsRegistry();
+	const entries = client.getToolEntries();
 
-	t.is(Object.keys(registry).length, 1);
-	t.truthy(registry.test_tool);
-	t.truthy(registry.test_tool.description);
-	t.truthy(registry.test_tool.needsApproval);
-	t.is(typeof registry.test_tool.needsApproval, 'function');
+	t.is(entries.length, 1);
+	t.is(entries[0]?.name, 'test_tool');
+	t.is(typeof entries[0]?.approval, 'function');
 });
 
 test('MCPClient.getNativeToolsRegistry: includes description with server prefix', t => {
@@ -698,36 +699,40 @@ testOrSkip('MCPClient.connectToServer: connects to remote HTTP MCP server', asyn
 	t.is(client.getServerTools('test-deepwiki').length, 0);
 });
 
-testOrSkip('MCPClient.connectToServer: connects to Remote Fetch HTTP server and fetches content', async t => {
+testOrSkip('MCPClient.connectToServer: connects to context7 HTTP server and executes a tool', async t => {
+	// Pair with the DeepWiki test above so a single host going dark doesn't
+	// nuke all HTTP-transport integration coverage. context7 was picked after
+	// remote.mcpservers.org disappeared at DNS level around mid-May 2026.
 	const client = new MCPClient();
 
 	const server = {
-		name: 'test-remote-fetch',
+		name: 'test-context7',
 		transport: 'http' as const,
-		url: 'https://remote.mcpservers.org/fetch/mcp',
+		url: 'https://mcp.context7.com/mcp',
 	};
 
 	await t.notThrowsAsync(async () => await client.connectToServer(server));
 
-	t.true(client.isServerConnected('test-remote-fetch'));
+	t.true(client.isServerConnected('test-context7'));
 
-	const tools = client.getServerTools('test-remote-fetch');
-	t.true(tools.length > 0, 'Should have loaded tools from Remote Fetch');
+	const tools = client.getServerTools('test-context7');
+	t.true(tools.length > 0, 'Should have loaded tools from context7');
 
-	// Find the fetch tool
-	const fetchTool = tools.find(t => t.name === 'fetch');
-	t.truthy(fetchTool, 'Should have a fetch tool');
+	// context7 exposes a `resolve-library-id` tool that maps a library name
+	// to its Context7-compatible ID. It's the cheapest tool to invoke for a
+	// connectivity smoke test.
+	const resolveTool = tools.find(t => t.name === 'resolve-library-id');
+	t.truthy(resolveTool, 'Should have a resolve-library-id tool');
 
-	// Execute the fetch tool to get Nanocoder's GitHub repo
-	// callTool uses just the tool name, and internally looks up the server
-	const result = await client.callTool('fetch', {
-		url: 'https://github.com/Nano-Collective/nanocoder',
+	const result = await client.callTool('resolve-library-id', {
+		query: 'How do I render JSX in the terminal?',
+		libraryName: 'ink',
 	});
 
-	t.truthy(result, 'Should get a result from fetch tool');
+	t.truthy(result, 'Should get a result from resolve-library-id tool');
 
 	await client.disconnect();
-	t.false(client.isServerConnected('test-remote-fetch'));
+	t.false(client.isServerConnected('test-context7'));
 });
 
 testOrSkip('MCPClient.connectToServers: connects to multiple HTTP servers', async t => {
@@ -819,12 +824,11 @@ testOrSkip('MCPClient.getNativeToolsRegistry: creates registry from connected HT
 
 	t.truthy(firstTool.description);
 	t.is(typeof firstTool.inputSchema, 'object');
-	t.truthy(firstTool.needsApproval);
-	t.is(typeof firstTool.needsApproval, 'function');
 
-	// Test needsApproval callback
-	const needsApprovalResult = firstTool.needsApproval();
-	t.is(typeof needsApprovalResult, 'boolean');
+	// Approval policy lives on the registry entry, not the native tool.
+	const entries = client.getToolEntries();
+	t.true(entries.length > 0);
+	t.is(typeof entries[0]?.approval, 'function');
 
 	await client.disconnect();
 });
@@ -969,16 +973,14 @@ test('MCPClient: alwaysAllow disables approval prompts', async t => {
 		alwaysAllow: ['safe_tool'],
 	});
 
-	setCurrentMode('normal');
-
-	const registry = client.getNativeToolsRegistry();
-	const tool = registry['safe_tool'];
-
-	t.truthy(tool);
-	const needsApproval =
-		typeof tool?.needsApproval === 'function'
-			? await tool.needsApproval({}, {toolCallId: 'test', messages: []})
-			: tool?.needsApproval ?? true;
+	const entry = client.getToolEntries().find(e => e.name === 'safe_tool');
+	t.truthy(entry);
+	const needsApproval = await resolveToolApproval(
+		'safe_tool',
+		entry,
+		{},
+		{mode: 'normal'},
+	);
 	t.false(needsApproval);
 });
 
@@ -1001,16 +1003,14 @@ test('MCPClient: non-whitelisted tools still require approval', async t => {
 		alwaysAllow: [],
 	});
 
-	setCurrentMode('normal');
-
-	const registry = client.getNativeToolsRegistry();
-	const tool = registry['restricted_tool'];
-
-	t.truthy(tool);
-	const needsApproval =
-		typeof tool?.needsApproval === 'function'
-			? await tool.needsApproval({}, {toolCallId: 'test', messages: []})
-			: tool?.needsApproval ?? false;
+	const entry = client.getToolEntries().find(e => e.name === 'restricted_tool');
+	t.truthy(entry);
+	const needsApproval = await resolveToolApproval(
+		'restricted_tool',
+		entry,
+		{},
+		{mode: 'normal'},
+	);
 	t.true(needsApproval);
 });
 

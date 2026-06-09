@@ -1,5 +1,5 @@
 import test from 'ava';
-import {APICallError} from 'ai';
+import {APICallError, NoOutputGeneratedError} from 'ai';
 import {parseAPIError} from './error-parser.js';
 
 test('parseAPIError handles non-Error values', t => {
@@ -160,6 +160,30 @@ test('parseAPIError handles connection errors', t => {
 
 test('parseAPIError handles context length errors', t => {
 	const error = new Error('context length exceeded');
+	const result = parseAPIError(error);
+	t.is(
+		result,
+		'Context too large: Please reduce the conversation length or message size',
+	);
+});
+
+test('parseAPIError handles LM Studio available context size errors', t => {
+	const error = new Error(
+		'request (5360 tokens) exceeds the available context size (4096 tokens), try increasing it',
+	);
+	const result = parseAPIError(error);
+	t.is(
+		result,
+		'Context too large: Please reduce the conversation length or message size',
+	);
+});
+
+test('parseAPIError unwraps AI_NoOutputGeneratedError causes before classifying', t => {
+	const error = new NoOutputGeneratedError({
+		cause: new Error(
+			'request (5360 tokens) exceeds the available context size (4096 tokens), try increasing it',
+		),
+	});
 	const result = parseAPIError(error);
 	t.is(
 		result,

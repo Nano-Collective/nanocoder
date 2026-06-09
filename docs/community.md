@@ -6,7 +6,7 @@ sidebar_order: 2
 
 # Community
 
-We're a small community-led team building Nanocoder and would love your help! Whether you're interested in contributing code, documentation, or just being part of our community, there are several ways to get involved.
+Nanocoder is built by the [Nano Collective](/collective) — a community-led group building open-source AI tools for the people who use them, not for profit. Whether you're interested in contributing code, documentation, or just being part of the community, there are several ways to get involved.
 
 ## Contributing Code
 
@@ -31,16 +31,11 @@ Nanocoder could benefit from help all across the board, such as:
 
 All contributions and community participation are welcome!
 
-## Donate
+## Supporting the Project
 
-Nanocoder is built by volunteers and offered freely. If the project has been useful to you, a donation helps us keep it that way. Every contribution — however small — goes directly towards supporting the people who build and maintain Nanocoder, and towards our goal of making quality AI tooling accessible to everyone.
+Nanocoder is built by volunteers and offered freely. If the project has been useful to you and you would like to help sustain it, the Nano Collective accepts donations and sponsorship to fund the cost of running the collective and the community fund that pays bounties to OSS contributors.
 
-We're currently finalising the details of our donation programme. Check back soon, or join us on [Discord](https://discord.gg/ktPDV6rekE) to be the first to know when it's live.
+For donation channels, sponsorship, and the current state of contributor compensation:
 
-## Become a Sponsor
-
-Sponsorship is another way to support the project and the community behind it. Sponsors help us dedicate more time to development, fund contributors fairly for their work, and keep Nanocoder free and open for all.
-
-We're not doing this to turn a profit — the Nano Collective exists to build AI tools for the community, and any funds raised go back into that mission: compensating contributors and making sure great AI tooling isn't locked behind a paywall.
-
-Sponsorship details are coming soon. If you're interested in supporting the project as a sponsor, reach out to us on [Discord](https://discord.gg/ktPDV6rekE) or [GitHub](https://github.com/Nano-Collective/nanocoder).
+- **[Support the Collective](/collective/organisation/support)** — donations, sponsorship, and other ways to help.
+- **[Economics Charter](/collective/organisation/economics-charter)** — how the community fund works and how scoped paid bounties are agreed.

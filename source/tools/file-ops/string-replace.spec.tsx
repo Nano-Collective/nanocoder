@@ -5,7 +5,7 @@ import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../../config/themes.js';
-import {setCurrentMode} from '../../context/mode-context.js';
+import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {stringReplaceTool} from './string-replace.js';
 
@@ -71,61 +71,39 @@ async function createTestFile(
 // Approval Tests
 // ============================================================================
 
-test('string_replace requires approval in normal mode', async t => {
-	setCurrentMode('normal');
-	const needsApproval = stringReplaceTool.tool.needsApproval;
+const replaceArgs = {path: 'test.txt', old_str: 'old', new_str: 'new'};
 
-	if (typeof needsApproval === 'function') {
-		const result = await needsApproval(
-			{
-				path: 'test.txt',
-				old_str: 'old',
-				new_str: 'new',
-			},
-			{toolCallId: 'test', messages: []},
-		);
-		t.true(result);
-	} else {
-		t.is(needsApproval, true);
-	}
+test('string_replace requires approval in normal mode', async t => {
+	t.true(
+		await resolveToolApproval(
+			stringReplaceTool.name,
+			stringReplaceTool,
+			replaceArgs,
+			{mode: 'normal'},
+		),
+	);
 });
 
 test('string_replace does NOT require approval in auto-accept mode', async t => {
-	setCurrentMode('auto-accept');
-	const needsApproval = stringReplaceTool.tool.needsApproval;
-
-	if (typeof needsApproval === 'function') {
-		const result = await needsApproval(
-			{
-				path: 'test.txt',
-				old_str: 'old',
-				new_str: 'new',
-			},
-			{toolCallId: 'test', messages: []},
-		);
-		t.false(result);
-	} else {
-		t.is(needsApproval, false);
-	}
+	t.false(
+		await resolveToolApproval(
+			stringReplaceTool.name,
+			stringReplaceTool,
+			replaceArgs,
+			{mode: 'auto-accept'},
+		),
+	);
 });
 
 test('string_replace requires approval in plan mode', async t => {
-	setCurrentMode('plan');
-	const needsApproval = stringReplaceTool.tool.needsApproval;
-
-	if (typeof needsApproval === 'function') {
-		const result = await needsApproval(
-			{
-				path: 'test.txt',
-				old_str: 'old',
-				new_str: 'new',
-			},
-			{toolCallId: 'test', messages: []},
-		);
-		t.true(result);
-	} else {
-		t.is(needsApproval, true);
-	}
+	t.true(
+		await resolveToolApproval(
+			stringReplaceTool.name,
+			stringReplaceTool,
+			replaceArgs,
+			{mode: 'plan'},
+		),
+	);
 });
 
 // ============================================================================
@@ -926,10 +904,3 @@ test('string_replace formatter: normalizes tabs to 2 spaces', async t => {
 	t.regex(output!, /Path:/);
 });
 
-// ============================================================================
-// Cleanup
-// ============================================================================
-
-test.after(() => {
-	setCurrentMode('normal');
-});

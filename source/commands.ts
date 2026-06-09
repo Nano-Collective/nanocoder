@@ -1,7 +1,7 @@
 import React from 'react';
-import {ErrorMessage} from '@/components/message-box';
 import type {Command, LazyCommand, Message} from '@/types/index';
 import {fuzzyScore} from '@/utils/fuzzy-matching';
+import {errorMsg} from '@/utils/message-factory';
 
 class CommandRegistry {
 	private commands = new Map<string, Command>();
@@ -100,27 +100,27 @@ class CommandRegistry {
 			tokens: number;
 			getMessageTokens: (message: Message) => number;
 			client?: import('@/types/core').LLMClient | null;
+			tune?: import('@/types/config').TuneConfig;
+			developmentMode?: import('@/types/core').DevelopmentMode;
 		},
 	): Promise<void | string | React.ReactNode> {
 		const parts = input.trim().split(/\s+/);
 		const commandName = parts[0];
 		if (!commandName) {
-			return React.createElement(ErrorMessage, {
-				key: `error-${Date.now()}`,
-				message: 'Invalid command. Type /help for available commands.',
-				hideBox: true,
-			});
+			return errorMsg(
+				'Invalid command. Type /help for available commands.',
+				'error',
+			);
 		}
 
 		const args = parts.slice(1);
 
 		const command = this.get(commandName);
 		if (!command) {
-			return React.createElement(ErrorMessage, {
-				key: `error-${Date.now()}`,
-				message: `Unknown command: ${commandName}. Type /help for available commands.`,
-				hideBox: true,
-			});
+			return errorMsg(
+				`Unknown command: ${commandName}. Type /help for available commands.`,
+				'error',
+			);
 		}
 
 		return await command.handler(args, messages, metadata);

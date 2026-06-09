@@ -7,6 +7,7 @@ import type {ToolCall, ToolResult} from '@/types/core';
 // ============================================================================
 
 import {setToolRegistryGetter} from '@/message-handler';
+import {ToolValidationError} from '@/utils/tool-validation';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -18,10 +19,7 @@ const mockToolHandler: ToolCall['function']['name'] extends infer T
   tool1: async () => 'Tool 1 executed',
   tool2: async () => 'Tool 2 executed',
   tool3: async () => 'Tool 3 executed',
-  create_task: async () => 'Task created',
-  list_tasks: async () => 'Tasks listed',
-  update_task: async () => 'Task updated',
-  delete_task: async () => 'Task deleted',
+  write_tasks: async () => 'Tasks updated',
   slow_tool1: async () => { await delay(50); return 'Slow tool 1 done'; },
   slow_tool2: async () => { await delay(50); return 'Slow tool 2 done'; },
   slow_tool3: async () => { await delay(50); return 'Slow tool 3 done'; },
@@ -94,25 +92,36 @@ test('executeToolsDirectly - handles validation failure', async t => {
 		addToChatQueueCalls.push(component);
 	};
 
-	const toolManager = createMockToolManager({
-		validatorResult: {
-			valid: false,
-			error: 'Validation failed: path does not exist',
+	const toolManager = createMockToolManager();
+
+	// Validation now lives inside the (validated) registry handler: on failure
+	// it throws a ToolValidationError that processToolUse formats into the
+	// result content. Simulate that handler for this tool.
+	setToolRegistryGetter(() => ({
+		...mockToolHandler,
+		test_tool: async () => {
+			throw new ToolValidationError('path does not exist', [
+				{path: 'path', expected: 'existing file', received: 'invalid'},
+			]);
 		},
-	});
+	}));
 
-	const results = await executeToolsDirectly(
-		toolCalls,
-		toolManager,
-		conversationStateManager as any,
-		addToChatQueue,
-		() => 1,
-	);
+	try {
+		const results = await executeToolsDirectly(
+			toolCalls,
+			toolManager,
+			conversationStateManager as any,
+			addToChatQueue,
+		);
 
-	t.is(results.length, 1);
-	t.is(results[0].role, 'tool');
-	t.is(results[0].name, 'test_tool');
-	t.true(results[0].content.includes('Validation failed'));
+		t.is(results.length, 1);
+		t.is(results[0].role, 'tool');
+		t.is(results[0].name, 'test_tool');
+		t.true(results[0].content.includes('Validation failed'));
+	} finally {
+		// Restore the shared registry for subsequent tests.
+		setToolRegistryGetter(createMockToolRegistry);
+	}
 });
 
 test('executeToolsDirectly - continues after validation failure', async t => {
@@ -149,7 +158,6 @@ test('executeToolsDirectly - continues after validation failure', async t => {
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 
 	// Both tools should be attempted (validation happens for all first)
@@ -185,7 +193,6 @@ test('executeToolsDirectly - executes tool successfully', async t => {
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 
 	t.is(results.length, 1);
@@ -224,7 +231,6 @@ test('executeToolsDirectly - executes multiple read-only tools in parallel', asy
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 
 	// All three tools should execute
@@ -255,7 +261,6 @@ test('executeToolsDirectly - runs read-only tools concurrently (timing)', async 
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 	const elapsed = Date.now() - start;
 
@@ -285,7 +290,6 @@ test('executeToolsDirectly - preserves result order matching input order', async
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 
 	// Results must be in same order as input tool calls
@@ -316,7 +320,6 @@ test('executeToolsDirectly - runs non-read-only tools sequentially (timing)', as
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 	const elapsed = Date.now() - start;
 
@@ -352,7 +355,6 @@ test('executeToolsDirectly - handles execution error gracefully', async t => {
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 
 	t.is(results.length, 1);
@@ -385,7 +387,6 @@ test('executeToolsDirectly - continues after error with remaining tools', async 
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 
 	// Both tools should be attempted (execution happens for all in parallel)
@@ -407,7 +408,6 @@ test('executeToolsDirectly - returns empty array for no tools', async t => {
 		null,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 
 	t.deepEqual(results, []);
@@ -431,7 +431,6 @@ test('executeToolsDirectly - handles null tool manager', async t => {
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 
 	t.is(results.length, 1);
@@ -459,7 +458,6 @@ test('executeToolsDirectly - handles tool with no validator', async t => {
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 
 	t.is(results.length, 1);
@@ -493,7 +491,6 @@ test('executeToolsDirectly - compact display calls onCompactToolCount instead of
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 		{
 			compactDisplay: true,
 			onCompactToolCount: (toolName) => {
@@ -533,7 +530,6 @@ test('executeToolsDirectly - non-interactive compact mode pushes one-liner per t
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 		{
 			compactDisplay: true,
 			nonInteractiveMode: true,
@@ -574,7 +570,6 @@ test('executeToolsDirectly - handles tool with valid validation', async t => {
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 
 	t.is(results.length, 1);
@@ -605,7 +600,6 @@ test('executeToolsDirectly - groupByReadOnly groups consecutive read-only tools'
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 	);
 	const elapsed = Date.now() - start;
 
@@ -636,7 +630,6 @@ test('executeToolsDirectly - onCompactToolCount receives correct tool names', as
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 		{
 			compactDisplay: true,
 			onCompactToolCount: (toolName) => {
@@ -669,7 +662,6 @@ test('executeToolsDirectly - compact mode without onCompactToolCount does not er
 			toolManager,
 			conversationStateManager as any,
 			addToChatQueue,
-			() => 1,
 			{
 				compactDisplay: true,
 				// onCompactToolCount intentionally omitted
@@ -681,10 +673,7 @@ test('executeToolsDirectly - compact mode without onCompactToolCount does not er
 test('executeToolsDirectly - compact mode always expands task tools', async t => {
 	const toolCalls: ToolCall[] = [
 		{id: 'call_1', function: {name: 'tool1', arguments: '{}'}},
-		{id: 'call_2', function: {name: 'create_task', arguments: '{}'}},
-		{id: 'call_3', function: {name: 'list_tasks', arguments: '{}'}},
-		{id: 'call_4', function: {name: 'update_task', arguments: '{}'}},
-		{id: 'call_5', function: {name: 'delete_task', arguments: '{}'}},
+		{id: 'call_2', function: {name: 'write_tasks', arguments: '{}'}},
 	];
 
 	const conversationStateManager = createMockConversationStateManager();
@@ -705,7 +694,6 @@ test('executeToolsDirectly - compact mode always expands task tools', async t =>
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 		{
 			compactDisplay: true,
 			onCompactToolCount: (toolName) => {
@@ -717,12 +705,118 @@ test('executeToolsDirectly - compact mode always expands task tools', async t =>
 		},
 	);
 
-	t.is(results.length, 5);
-	// Only tool1 should be compacted (counted), task tools go to live display
+	t.is(results.length, 2);
+	// Only tool1 should be compacted (counted); the task tool goes to live display
 	t.deepEqual(compactCounts, ['tool1']);
-	// Task tools should trigger live task updates instead of adding to chat queue
-	t.is(liveTaskUpdateCount, 4, 'Task tools should trigger live task updates');
+	// The task tool should trigger a live task update instead of adding to chat queue
+	t.is(liveTaskUpdateCount, 1, 'Task tool should trigger a live task update');
 });
+
+// ============================================================================
+// Agent batch signal threading
+// (regression: parent's abort signal must reach running subagents)
+// ============================================================================
+
+test.serial(
+	'executeToolsDirectly - threads abort signal into subagent executor',
+	async t => {
+		const {setAgentToolExecutor} = await import('@/tools/agent-tool');
+
+		let received: AbortSignal | undefined;
+		setAgentToolExecutor({
+			execute: async (_task: unknown, signal?: AbortSignal) => {
+				received = signal;
+				return {
+					subagentName: 'fake',
+					output: 'ok',
+					success: true,
+					executionTimeMs: 1,
+				};
+			},
+		} as never);
+
+		const toolCalls: ToolCall[] = [
+			{
+				id: 'call_agent_1',
+				function: {
+					name: 'agent',
+					arguments: JSON.stringify({
+						subagent_type: 'fake',
+						description: 'test',
+					}),
+				},
+			},
+		];
+
+		const controller = new AbortController();
+		await executeToolsDirectly(
+			toolCalls,
+			createMockToolManager() as any,
+			createMockConversationStateManager() as any,
+			() => {},
+			{compactDisplay: true, signal: controller.signal},
+		);
+
+		t.is(received, controller.signal);
+	},
+);
+
+test.serial(
+	'executeToolsDirectly - aborted signal surfaces as agent error result',
+	async t => {
+		const {setAgentToolExecutor} = await import('@/tools/agent-tool');
+
+		setAgentToolExecutor({
+			execute: async (_task: unknown, signal?: AbortSignal) => {
+				if (signal?.aborted) {
+					return {
+						subagentName: 'fake',
+						output: '',
+						success: false,
+						error: 'Aborted',
+						executionTimeMs: 1,
+					};
+				}
+				return {
+					subagentName: 'fake',
+					output: 'ok',
+					success: true,
+					executionTimeMs: 1,
+				};
+			},
+		} as never);
+
+		const controller = new AbortController();
+		controller.abort();
+
+		const toolCalls: ToolCall[] = [
+			{
+				id: 'call_agent_2',
+				function: {
+					name: 'agent',
+					arguments: JSON.stringify({
+						subagent_type: 'fake',
+						description: 'test',
+					}),
+				},
+			},
+		];
+
+		const results = await executeToolsDirectly(
+			toolCalls,
+			createMockToolManager() as any,
+			createMockConversationStateManager() as any,
+			() => {},
+			{compactDisplay: true, signal: controller.signal},
+		);
+
+		t.is(results.length, 1);
+		t.true(
+			results[0].content.includes('Aborted'),
+			`expected 'Aborted' in content, got: ${results[0].content}`,
+		);
+	},
+);
 
 test('executeToolsDirectly - compact mode still displays errors in full', async t => {
 	const toolCalls: ToolCall[] = [
@@ -746,7 +840,6 @@ test('executeToolsDirectly - compact mode still displays errors in full', async 
 		toolManager,
 		conversationStateManager as any,
 		addToChatQueue,
-		() => 1,
 		{
 			compactDisplay: true,
 			onCompactToolCount: (toolName) => {

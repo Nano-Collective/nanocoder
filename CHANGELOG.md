@@ -1,3 +1,165 @@
+# 1.27.0
+
+- Added **Skills**, a unified extension primitive that brings commands, subagents, and tools under a single ergonomic surface. Two forms over one primitive: **single-file** (a `.md` in `.nanocoder/commands|agents|tools/`, fully backwards-compatible with the existing flat dirs) and **bundle** (a directory under `.nanocoder/skills/<name>/` with `skill.yaml` plus optional `commands/`, `agents/`, `tools/` subdirs). Bundles are for multi-piece features that need to ship and version together: a bundle's subagent automatically gets its sibling tools, scoped tools are hidden from the global tool list (default for bundles, opt-in for single-file), and bundle commands auto-namespace (`commands/status.md` in bundle `git` invokes as `/git:status`). New `/skills` slash command lists everything loaded, and bundled members fan out into the existing `CustomCommandLoader`, `SubagentLoader`, and `ToolManager.registry` so downstream consumers keep using their familiar registries. Closes #515.
+
+- Added **event-triggered skill runs** via a new per-project **daemon**. Skill members can declare `subscribe:` blocks in frontmatter (or a bundle manifest) and the daemon wakes them on `file.changed` and `schedule.cron` events. The daemon (`nanocoder daemon <start|stop|status|logs>`) runs as a long-lived background process with a lockfile, Unix-socket IPC, and installers for launchd (macOS) and systemd user units (Linux). The interactive TUI never starts event sources, so file watching and cron only run when you opt in. Triggered runs execute in a new internal **headless** mode (no `ask_user`, no foreground confirmations) which supersedes the legacy `scheduler` mode. Per-subscription `confirm: true` opts into `plan` mode instead. Backpressure caps per-subscription concurrency and trailing-debounces `file.changed` by 500ms so chatty save loops don't pile up.
+
+- Removed the legacy `source/schedule/` module (`runner`, `storage`, `index`, `types`). Schedules are now expressed as `schedule.cron` subscriptions on a skill member and dispatched by the daemon. The old `useSchedulerMode` hook, `scheduler-view` component, and the `.nanocoder/schedules.json` / `.nanocoder/schedules/*.md` storage layout are gone. The `/schedule` command has been trimmed and refocused around the new model. Closes #524.
+
+- Added **Custom Tools**: markdown-defined, model-callable tools that sit between custom commands (prompt injection only) and MCP servers (full external process). Drop a `.md` into `.nanocoder/tools/` (project) or `~/.config/nanocoder/tools/` (personal), declare parameters in YAML frontmatter (with JSON Schema-style `type`, `required`, `pattern`, `maxLength`, etc.), and write a shell command body using `{{ name }}` and `{{# section }}` template placeholders. All substitutions are shell-quoted to prevent injection. Includes `approval` (`always`/`never`) and `read_only` flags that participate in mode policy: plan mode requires `approval=never && read_only=true`, scheduler/headless requires `approval=never`. New `/tools create <name>` scaffolds a template and asks the model to help fill it in. Project tools shadow personal ones by `name`, and they register into the same `ToolManager` registry as built-ins and MCP tools so `/tools`, subagents, and mode filtering see them through a single unified registry. Closes #520.
+
+- Added **LLM-based context compaction** as the default `/compact` strategy. The active model writes a structured markdown summary of the compressible segment (Context / Decisions / Files modified / Tools used / Open questions) using a dedicated summariser prompt, replacing the older messages with one synthetic summary while recent messages are kept verbatim. Higher fidelity than mechanical truncation at the cost of one extra round-trip. New `strategy` field in `autoCompact` config (`llm` default, `mechanical` legacy), new CLI flags (`--llm`, `--mechanical`, `--strategy <name>`), and automatic fallback to mechanical compression on LLM failure (network error, empty response, summary larger than original). Auto-compact uses the same strategy.
+
+- Added **OpenRouter request configuration** via a dedicated `openrouter` block on the provider config. Forwards OpenRouter-specific request body fields (`provider` routing rules, `reasoning`, `plugins`, `models` fallback list, `service_tier`, `route`, `user`, etc.) on every request - always-on transport/routing concerns, not gated by `/tune`. Provider is detected by name (case-insensitive). `tune.modelParameters.reasoningEffort` populates `openrouter.reasoning.effort` when unset; explicit values on the provider config always win. Closes #519.
+
+- Added **config lint** at startup. Surfaces common misconfigurations as warnings before they cause silent failures - e.g. an `openrouter` block on a provider that is not OpenRouter, unknown fields, type mismatches. Includes a full test suite. Closes #523.
+
+- Reworked **OpenRouter model selection** in the provider wizard. Replaced the previous list with a paginated, searchable `ModelSelectionList` (12 visible items, page navigation, multi-select with running counter, select-all, error state). Makes browsing OpenRouter's hundreds of models actually usable from the wizard. Closes #516.
+
+- Added **unified Session Service** for key generation and session infrastructure. Consolidates the various ad-hoc keying strategies scattered across commands, handlers, and tool result display into one place. Touched 50 files across handlers, commands, hooks, and the chat handler, removing duplicated key-derivation logic and shrinking `useAppState` by ~38 lines. Fully closes #229.
+
+- Added the **Nanocoder Battlemap** - a long-form competitive comparison doc covering Nanocoder against Claude Code, OpenAI Codex CLI, Gemini CLI, Aider, OpenCode, Crush, and Pi across twelve axes (license, pricing, local-model support, MCP, extensibility, tool-calling, subagents, surface, plain mode, stars, contributors, telemetry). Honest where Nanocoder leads, honest where it does not. Closes #423.
+
+- Made code blocks **copyable without ASCII artifacts**. Reworked the markdown parser and `AssistantMessage` rendering so fenced code blocks render as plain selectable text without surrounding box borders that previously got copied into the clipboard. Thanks to @aravindinduri.
+
+- Fix: streaming OOM on long responses. `StreamingMessage` was calling `wrapWithTrimmedContinuations()` on the entire growing assistant message on every ~150ms flush, allocating per-line arrays proportional to the full message size. A ~37k-token (~150 KB) response would overwhelm GC and crash the 4 GB Node heap. Now slices the message to a bounded tail (`MAX_LINES * textWidth * 4` chars, snapped to a newline boundary) before wrapping, so per-render work is constant in the visible window rather than linear in total streamed content. Thanks to @abhishekDeshmukh74. Closes #526.
+
+- Fix: performance entry buffer OOM in long sessions. React 19's `react-reconciler` (dev build) calls `performance.measure`/`performance.mark` on every render, and Node's built-in fetch (undici) pushes a resource-timing entry per HTTP request. Both write to the same global buffer, which nanocoder never drained. Over long subagent-heavy sessions the buffer accumulated millions of entries until V8 thrashed in mark-compact GC and crashed with `Ineffective mark-compacts near heap limit`. Fix installs an unref'd 30s interval that calls `performance.clearMarks()` / `performance.clearMeasures()` in the Ink render path. Thanks to @ragini-pandey. Closes #521.
+
+- Fix: auto-compact ignored the per-provider `contextWindow` override. The auto-compact threshold was computed against the model's default context window even when the provider config narrowed it, causing compaction to fire late (or not at all) on providers configured with a smaller usable window. Closes #525.
+
+- Fix: surface real provider errors instead of `[object Object]`. The error parser now extracts meaningful messages from AI SDK errors (status codes, body excerpts, nested `responseBody` fields) before they reach the UI, so model and API failures show up as actionable text instead of an opaque stringified object.
+
+- Fix: removed dead MCP server hosts from the wizard templates. `remote.mcpservers.org` and a handful of other defunct discovery endpoints were still listed in `mcp-templates.ts` and would silently fail when selected. Companion dead-URL guard in `mcp-client` prevents the wizard from surfacing entries it cannot reach.
+
+- Fix: markdown parser regressions in fenced code extraction. Indented fenced code blocks (e.g. inside list items) now extract correctly, fenced blocks nested inside blockquotes are no longer split out (they belong to the quote), and indented list continuations are preserved as list text instead of being misparsed as indented code. Removed indented-code extraction from the shared markdown parser entirely - only fenced blocks split out for copyable rendering.
+
+- Fix: tightened the task management section of the system prompt to reduce over-eager task list creation on small jobs.
+
+- Minor: nudged the system prompt to avoid markdown tables in output. Tables render poorly in the terminal even though the markdown converter supports them, so the model is now steered toward bullet lists or short prose.
+
+- Fix: Nix packaging - reproducible pnpm 11 builds via `pkgs.pnpm_11` now that nixpkgs PR #505103 has landed. Drops the version-override scaffolding, the `chmod +x pnpm.cjs` postInstall hack, and the `manage-package-manager-versions` `replaceStrings` patch from the previous release. Also documents and works around an upstream `fetch-pnpm-deps` shell bug (`export VAR value` without `=`) that caused non-deterministic `v11/index.db` writes when `side-effects-cache` fell back to true. Re-enables the `update-nix.yml` workflow. Closes #511.
+
+- Audit/security: updated `pnpm-workspace.yaml` `auditConfig` and `minimumReleaseAgeExclude` entries to align with the versions resolved in the lockfile, keeping `pnpm audit` output meaningful. Thanks to @aravindinduri.
+
+- Chore: added `FUNDING.yml` linking the repo to Open Collective with a custom URL pointing at the `/sponsor` page.
+
+- Dependency updates: added `chokidar ^5.0.0` for the daemon's file-watcher event source, plus assorted transitive bumps tracked through the lockfile.
+
+If there are any problems, feedback or thoughts please drop an issue or message us through Discord! Thank you for using Nanocoder.
+
+# 1.26.1
+
+- Bumped `@nanocollective/get-md` to `^1.4.0`, which makes `node-llama-cpp` an optional peer dependency. Drops the entire `node-llama-cpp` transitive — including ~500 MB of platform-specific native binaries (CUDA, Vulkan, Metal, ARM variants) that pnpm fetched eagerly regardless of host — from the install graph and the Nix closure. The `fetch_url` tool (the only consumer of get-md) uses the standard HTML→Markdown path which doesn't need the LLM converter, so there's no functional change.
+
+- Patched `flake.nix` for pnpm 11 compat. Overrides nixpkgs's bundled pnpm (currently 10.x) to pnpm 11.0.9 to match `packageManager`, then handles two pnpm-11-specific quirks: `chmod +x` on `bin/pnpm.cjs` (a Corepack-compat shim shipped without the execute bit by upstream) and a `replaceStrings` patch on `fetchPnpmDeps`'s `installPhase` to skip the now-rejected `pnpm config set manage-package-manager-versions false` global write. Unblocks the `update-nix.yml` workflow that's been failing on `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`.
+
+# 1.26.0
+
+- **BREAKING**: Removed redundant `nanocoderTools.alwaysAllow` setting. It duplicated the top-level `alwaysAllow` with no extra behaviour. Move any entries from `nanocoderTools.alwaysAllow` to the top-level `alwaysAllow` array in `agents.config.json`. The deprecated `agents.config.example.json` has also been removed.
+
+- Added **nano mode** — a third tool profile under `/tune` designed for the smallest open-weights models or low-end hardware running larger models locally. Strictly more aggressive than `minimal`: drops `find_files`, `list_directory`, and `agent`; trims `CORE PRINCIPLES` and `CODING PRACTICES`; uses ≤4-line `TASK APPROACH`, `FILE OPERATIONS`, and `CONSTRAINTS` sections; replaces the verbose `SYSTEM INFORMATION` block with a single-line `## SYSTEM` line; and omits `AGENTS.md` from the prompt by default. Brings the system prompt from ~500–700 tokens (`minimal`) down to ~150–250 tokens. Includes a new "Nano (low-end hardware)" preset and an **Include AGENTS.md** toggle.
+
+- Added reasoning trace support. Reasoning content from models (Codex GPT-5, DeepSeek-R1-style, Anthropic extended thinking, etc.) now streams in real time, renders as a collapsible `Thought` block above the response, persists across history, and is included in logs. Toggle expansion with `Ctrl+R`, configure default expansion via the new **Display Settings** panel, and pin per-session via the tune `expandedReasoning` option. `<think>` tags are now stripped on the native tool-calling path so reasoning never leaks into rendered output. Thanks to @Daniel5055. Closes #457.
+
+- Added refined **non-interactive mode**. A new `--plain` flag streams output suitable for CI pipelines, scripts, and pipes — no Ink rendering, no interactive prompts, deterministic exit codes, and proper handling of stdin/stdout. Includes a dedicated `non-interactive-shell` component and full test coverage for the plain transport.
+
+- Reworked **VS Code extension** integration. Removed the "Ask Nanocoder" command in favour of a more natural flow: highlighted text and the currently focused file are automatically pulled into Nanocoder as context. Backed by a rewritten extension protocol, a simplified extension entrypoint, a new `useVSCodeServer` hook, and tighter UI hooks for the development mode indicator and chat input.
+
+- Added `/rename` command for renaming the current chat session. Accessible from the chat input and reflected in the development mode indicator. Thanks to @lordoski.
+
+- Added `defaultMode` config option for interactive sessions. Set a starting mode (`normal`, `auto-accept`, `yolo`, `plan`) in `agents.config.json` instead of always launching in normal mode. Thanks to @lordoski.
+
+- Added **custom system prompt** support via `agents.config.json`. Define a project-level system prompt that replaces or augments the built-in prompt sections, with full validation and prompt-builder integration. Closes #487.
+
+- Added per-provider and per-model **context window overrides** in `agents.config.json` via `contextWindow` and `contextWindows[model]`. New resolution order: session override (`/context-max`, `--context-max`) → provider model override → provider default → `NANOCODER_CONTEXT_LIMIT` → models.dev / Ollama fallback. `/usage`, status bar, auto-compact, and context reporting all use the active provider config consistently. Closes #455.
+
+- Added subagent context window overrides so delegated agents can run with a different context limit than the main session. Thanks to @zerone0x.
+
+- Added `disabledTools` config option in `agents.config.json` to disable specific built-in tools project-wide. Honoured by both the main agent and subagents.
+
+- Added `--trust-directory` CLI flag to bypass the first-run directory trust prompt for automation. Yolo mode now also skips file path validators in line with its "auto-accept everything" semantics.
+
+- Added JSON tool fallback mode for non-tool-calling open-weights models (Qwen, Kimi, GLM). The tune menu now cycles through Native ON / OFF (XML) / OFF (JSON), with `formatToolsForJSONPrompt()` embedding literal JSON Schema and a JSON branch in the tool-call parser. Native path also gains JSON/XML hallucination recovery: `parseToolCalls()` is run against text content when the SDK reports no `tool_calls`, and `stripEmbeddedToolCallText()` removes echoed tool-call text so Ghost Echo no longer leaks into the UI or history. Reference #500.
+
+- Added `<function=...>` format to the tool-call parser for models that emit OpenAI-style function tags.
+
+- Added **Display Settings** panel under `/settings` ("Tool Results and Thinking") with two new toggles: **Show Thinking by default** (Ctrl+R) and **Expand Tool Results by default** (Ctrl+O), persisted to `nanocoder-preferences.json`. Thanks to @cleyesode. Closes #499.
+
+- Added 12+ new themes to the bundled theme set.
+
+- Removed the in-repo release content generator workflow. Release content is now generated from another repo via ContentForest.
+
+- Bumped CI and devcontainer toolchain to **Node.js 22** + **pnpm 11** across `pr-checks.yml`, `release.yml`, `update-badges.yml`, and `.devcontainer/Dockerfile`. `engines.node` raised to `>=22`, with a `packageManager` field (`pnpm@11.x.x`) added to `package.json` so Corepack pins the pnpm version automatically for both contributors and CI — no more drift, no per-workflow `version:` lines. `CONTRIBUTING.md` / `docs/getting-started/installation.md` / `.devcontainer/README.md` updated to match. Fixes the `node:sqlite` `ERR_UNKNOWN_BUILTIN_MODULE` crash hit by pnpm 11 on Node 20 runners.
+
+- Migrated pnpm config from `package.json` to `pnpm-workspace.yaml` for pnpm 11 compatibility: `overrides`, `patchedDependencies`, and the new `allowBuilds` block now live in the workspace file. While migrating, audited and removed all 16 existing version overrides — every one was redundant under current dependency resolution (each transitive resolved to a version already exceeding the override's floor), and removing them left `pnpm audit` output unchanged.
+
+- Major spring-clean refactor across the codebase. Extracted shared `oauth-login` command from the duplicated `codex-login` and `copilot-login` flows; introduced shared `item-selector` component used by `model-selector` and `provider-selector`; centralised `tool-needs-approval` logic; moved AI SDK error-handling specs into a dedicated subdirectory; tightened logging method factory; and trimmed redundant code paths in `conversation-loop`, `subagent-executor`, and the plain shell.
+
+- Refactored `App.tsx` and added missing test coverage for the app container and chat input components.
+
+- Refactored settings theme selector UX. Replaced the scrollable `SelectInput` with arrow-key navigation, real-time theme preview, and a "Theme Name [n/N]" position indicator. Preferences are only persisted on Enter.
+
+- Updated the system prompt to encourage subagent use more proactively for complex multi-step tasks.
+
+- Strip leading and trailing whitespace from assistant messages so blank lines and stray newlines from the model no longer push content around in the UI.
+
+- Fix: Empty model responses now trigger a capped auto-continue instead of crashing or burning tokens forever. Empty-response retry notices are coalesced into a single live counter so the chat history stays readable.
+
+- Fix: Surface context-size failures explicitly instead of silently retrying empty responses. Thanks to @zerone0x. Closes #501.
+
+- Fix: Persist compressed messages across recursive conversation turns. Auto-compact now also resets the streaming token count after compression, with regression coverage to keep it stable. Thanks to @lordoski. Closes #480.
+
+- Fix: Throw stream errors immediately during streaming instead of swallowing them and ending the response cleanly. Thanks to @alexbrjo.
+
+- Fix: Cap malformed-XML retries to prevent OOM when a model gets stuck emitting broken tool-call XML in a tight loop. Reference #500.
+
+- Fix: Stale `lastProvider` after running the config wizard mid-session — the next `/provider` invocation picked up the old value. Includes regression coverage. Thanks to @electricwolfemarshmallowhypertext. Closes #477.
+
+- Fix: Inaccurate tok/s reporting in the streaming status line.
+
+- Fix: File search, content search, and `@mention` autocomplete now work cross-platform. Replaced Unix-only `find`/`grep`/`which` shell-outs with pure Node.js implementations honouring `.gitignore` and `DEFAULT_IGNORE_DIRS`, restored the 30s search timeout via `AbortSignal`, and added Windows path normalisation. Thanks for the cross-platform report (#469).
+
+- Fix: Read file tool description corrected.
+
+- Fix: Type `MCPTool.inputSchema` as `JSONSchema7` instead of `any`, with `isPlainObject` guard at the MCP protocol boundary so malformed server schemas resolve to `undefined` rather than flowing through the system as a trusted type. Thanks to @ragini-pandey. Closes #467.
+
+- Fix: Apply `caCertPath` TLS configuration to Anthropic and Google providers (previously only OpenAI-compatible providers honoured it), with cert path validation. Companion fix for custom CA bundle support across all providers. Thanks to @zerone0x. Closes #491 (#380).
+
+- Fix: Reject ambiguous provider names with case-insensitive duplicates (e.g. both `Ollama` and `ollama` defined). Provider names are now resolved case-insensitively throughout. Thanks to @zerone0x. Closes #488.
+
+- Fix: Quoted custom command arguments (double, single, and backtick) are now parsed as a single parameter so multi-word values survive tokenisation. Closes #478.
+
+- Fix: Missing margin on the live sub-agent progress component.
+
+- Fix: `git_pr` tool still required approval in yolo mode.
+
+- Fix: `bash` mode no longer passes the currently selected file when not relevant.
+
+- Fix: Incorrect passing of system prompt in some chat-handler paths.
+
+- Fix: Default missing `subagent_type` and `description` parameters on the `agent` tool to safe values to prevent a UI crash when the model omits them.
+
+- Fix: Model context limits failed to resolve for `gemma4`.
+
+- Fix: Scheduler — clear the perf buffer between jobs to avoid an undici fetch leak that accumulated across long-lived scheduler sessions. Refresh the base system prompt for each scheduler execution so dynamic system info (current date, etc.) stays fresh.
+
+- Fix: Reasoning trace follow-ups — restore post-loop `flushBuffer` safety net, persist reasoning on `assistantMsg` so it survives in history, default Codex `reasoningSummary=auto` and `reasoningEffort=medium` so GPT-5 reasoning actually renders, and resolve a system-prompt cache race where "No subagents available." was cached before the subagent loader finished.
+
+- Fix: Various test/CI breakages from merges and refactors.
+
+- Fix: Nix packaging — removed the unmaintained `snowfall-lib` dependency and improved overall packaging. Thanks to @PlasmaPower. Closes #459.
+
+- Fix: Homebrew formula — switched the `node` dependency from `node@20` to `node@22` to prevent the `webidl.util.markAsUncloneable is not a function` startup crash. Thanks to @matthiasbolten. Closes #468.
+
+- Fix: Repaired broken documentation references. Thanks to @breca.
+
+- Security: Address Semgrep findings flagged across the codebase.
+
+- Dependency updates: `ai` 6.0.116 → 6.0.174, `@ai-sdk/openai` 3.0.41 → 3.0.53, `@ai-sdk/google` 3.0.53 → 3.0.64, `@ai-sdk/openai-compatible` 2.0.35 → 2.0.41, `undici` 8.0.2 → 8.2.0, `react` 19.2.4 → 19.2.6, `yaml` 2.8.3 → 2.8.4, `dotenv` 17.3.1 → 17.4.2, `@nanocollective/get-md` 1.3.0 → 1.3.1, plus dev-dependency bumps for `@biomejs/biome`, `knip`, `tsc-alias`, `@ava/typescript`, `@vscode/vsce`, `@types/vscode`, `eslint`, and `strip-ansi`.
+
+If there are any problems, feedback or thoughts please drop an issue or message us through Discord! Thank you for using Nanocoder.
+
 # 1.25.2
 
 - Fixed Nix package: copy `themes.json` and prompt section files into the Nix store so `nix run` no longer crashes at startup

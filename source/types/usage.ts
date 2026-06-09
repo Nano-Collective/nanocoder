@@ -43,16 +43,3 @@ export interface UsageData {
 	totalLifetime: number;
 	lastUpdated: number;
 }
-
-/**
- * Current session statistics
- */
-export interface CurrentSessionStats {
-	tokens: TokenBreakdown;
-	messageCount: number;
-	startTime: number;
-	provider: string;
-	model: string;
-	contextLimit: number | null;
-	percentUsed: number;
-}

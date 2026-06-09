@@ -3,9 +3,9 @@ import {access, lstat, readFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
-
 import ToolMessage from '@/components/tool-message';
 import {
+	EMPTY_CONTENT_MARKER,
 	FILE_READ_CHUNK_SIZE_LINES,
 	FILE_READ_CHUNKING_HINT_THRESHOLD_LINES,
 	FILE_READ_METADATA_THRESHOLD_LINES,
@@ -14,6 +14,7 @@ import {
 import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent} from '@/utils/file-cache';
 import {getFileType} from '@/utils/file-type-detector';
 import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
@@ -79,8 +80,7 @@ const executeReadFile = async (args: {
 				} catch (error: unknown) {
 					// If we can't read it, mark as not readable
 					output += `Readable: no\n`;
-					const errorMessage =
-						error instanceof Error ? error.message : 'Unknown error';
+					const errorMessage = formatError(error);
 					output += `Note: Could not read file - ${errorMessage}\n`;
 				}
 			} else if (type === 'directory') {
@@ -97,9 +97,8 @@ const executeReadFile = async (args: {
 		const cached = await getCachedFileContent(absPath);
 		const content = cached.content;
 
-		// Check if file is empty (0 tokens)
 		if (content.length === 0) {
-			throw new Error(`File "${args.path}" exists but is empty (0 tokens)`);
+			return EMPTY_CONTENT_MARKER;
 		}
 
 		const lines = cached.lines;
@@ -171,7 +170,6 @@ const executeReadFile = async (args: {
 			throw new Error(`File "${args.path}" does not exist`);
 		}
 
-		// Re-throw other errors (including our empty file error)
 		throw error;
 	}
 };
@@ -209,8 +207,6 @@ const readFileCoreTool = tool({
 		},
 		required: ['path'],
 	}),
-	// Low risk: read-only operation, never requires approval
-	needsApproval: false,
 	execute: async (
 		args: {
 			path: string;
@@ -384,7 +380,7 @@ const readFileValidator = async (args: {
 	if (!isValidFilePath(args.path)) {
 		return {
 			valid: false,
-			error: `⚒ Invalid file path: "${args.path}". Path must be relative and within the project directory.`,
+			error: `Invalid file path: "${args.path}". Path must be relative and within the project directory.`,
 		};
 	}
 
@@ -393,11 +389,10 @@ const readFileValidator = async (args: {
 		const cwd = process.cwd();
 		resolveFilePath(args.path, cwd);
 	} catch (error) {
-		const errorMessage =
-			error instanceof Error ? error.message : 'Unknown error';
+		const errorMessage = formatError(error);
 		return {
 			valid: false,
-			error: `⚒ Path validation failed: ${errorMessage}`,
+			error: `Path validation failed: ${errorMessage}`,
 		};
 	}
 
@@ -410,7 +405,7 @@ const readFileValidator = async (args: {
 		if (args.start_line !== undefined && args.start_line < 1) {
 			return {
 				valid: false,
-				error: '⚒ start_line must be >= 1',
+				error: 'start_line must be >= 1',
 			};
 		}
 
@@ -421,7 +416,7 @@ const readFileValidator = async (args: {
 		) {
 			return {
 				valid: false,
-				error: '⚒ end_line must be >= start_line',
+				error: 'end_line must be >= start_line',
 			};
 		}
 
@@ -449,7 +444,7 @@ const readFileValidator = async (args: {
 				if (line && line.length > MAX_LINE_LENGTH_CHARS) {
 					return {
 						valid: false,
-						error: `⚒ File "${args.path}" contains minified or binary content (line ${i + 1} has ${line.length.toLocaleString()} characters). This file cannot be read as it would consume excessive tokens without providing useful information.`,
+						error: `File "${args.path}" contains minified or binary content (line ${i + 1} has ${line.length.toLocaleString()} characters). This file cannot be read as it would consume excessive tokens without providing useful information.`,
 					};
 				}
 			}
@@ -465,14 +460,13 @@ const readFileValidator = async (args: {
 		) {
 			return {
 				valid: false,
-				error: `⚒ File "${args.path}" does not exist`,
+				error: `File "${args.path}" does not exist`,
 			};
 		}
-		const errorMessage =
-			error instanceof Error ? error.message : 'Unknown error';
+		const errorMessage = formatError(error);
 		return {
 			valid: false,
-			error: `⚒ Cannot access file "${args.path}": ${errorMessage}`,
+			error: `Cannot access file "${args.path}": ${errorMessage}`,
 		};
 	}
 };

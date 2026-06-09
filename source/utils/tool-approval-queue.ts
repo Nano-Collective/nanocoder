@@ -10,6 +10,7 @@
  */
 
 import type {ToolCall} from '@/types/core';
+import {createGlobalHandlerSlot} from '@/utils/global-handler-slot';
 
 export interface PendingToolApproval {
 	/** The tool call that needs approval */
@@ -18,31 +19,16 @@ export interface PendingToolApproval {
 	subagentName: string;
 }
 
-// The handler set by App.tsx. Returns a Promise<boolean> that resolves
-// to true (approved) or false (denied) when the user responds.
-let globalToolApprovalHandler:
-	| ((approval: PendingToolApproval) => Promise<boolean>)
-	| null = null;
+// No handler — default to denied (safe fallback).
+const approvalSlot = createGlobalHandlerSlot<PendingToolApproval, boolean>(
+	() => false,
+);
 
-/**
- * Called once from App.tsx to wire up the UI handler.
- */
-export function setGlobalToolApprovalHandler(
-	handler: (approval: PendingToolApproval) => Promise<boolean>,
-): void {
-	globalToolApprovalHandler = handler;
-}
+/** Called once from App.tsx to wire up the UI handler. */
+export const setGlobalToolApprovalHandler = approvalSlot.set;
 
 /**
  * Called from the subagent executor when a tool needs user approval.
  * Returns a Promise that resolves to true (approved) or false (denied).
  */
-export async function signalToolApproval(
-	approval: PendingToolApproval,
-): Promise<boolean> {
-	if (!globalToolApprovalHandler) {
-		// No handler — default to denied (safe fallback)
-		return false;
-	}
-	return globalToolApprovalHandler(approval);
-}
+export const signalToolApproval = approvalSlot.signal;

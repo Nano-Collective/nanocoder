@@ -641,13 +641,14 @@ test('getFilteredTools - returns empty for non-existent tool names', t => {
 	t.is(Object.keys(filtered).length, 0);
 });
 
-test('getFilteredToolsWithoutExecute - returns tools without execute functions', t => {
+test('getFilteredTools - returns tools without execute functions', t => {
 	const manager = new ToolManager();
 	const allNames = manager.getToolNames();
 
 	if (allNames.length > 0) {
-		const filtered = manager.getFilteredToolsWithoutExecute([allNames[0]!]);
+		const filtered = manager.getFilteredTools([allNames[0]!]);
 		t.is(Object.keys(filtered).length, 1);
+		t.is((filtered[allNames[0]!] as {execute?: unknown}).execute, undefined);
 	} else {
 		t.pass('No tools available');
 	}
@@ -695,22 +696,59 @@ test('getAvailableToolNames - filters to minimal profile', t => {
 
 test('getAvailableToolNames - full profile returns all minus mode exclusions', t => {
 	const manager = new ToolManager();
-	const result = manager.getAvailableToolNames({enabled: true, toolProfile: 'full', aggressiveCompact: false}, 'scheduler');
+	const result = manager.getAvailableToolNames({enabled: true, toolProfile: 'full', aggressiveCompact: false}, 'headless');
+	// Headless mode excludes ask_user (no human to ask) and agent (no nested delegation).
 	t.false(result.includes('ask_user'));
+	t.false(result.includes('agent'));
 	t.true(result.includes('read_file'));
 });
 
 test('getAvailableToolNames - plan mode excludes mutation tools', t => {
 	const manager = new ToolManager();
 	const result = manager.getAvailableToolNames({enabled: true, toolProfile: 'full', aggressiveCompact: false}, 'plan');
-	t.false(result.includes('string_replace'));
+	// File mutators
 	t.false(result.includes('write_file'));
+	t.false(result.includes('string_replace'));
+	t.false(result.includes('delete_file'));
+	t.false(result.includes('move_file'));
+	t.false(result.includes('copy_file'));
+	t.false(result.includes('create_directory'));
+	// Shell
 	t.false(result.includes('execute_bash'));
+	// Git mutators (read-only git tools should still be present)
 	t.false(result.includes('git_commit'));
+	t.false(result.includes('git_add'));
+	t.false(result.includes('git_push'));
+	t.false(result.includes('git_reset'));
+	// Task tools (plan mode produces the plan itself)
 	t.false(result.includes('create_task'));
+	t.false(result.includes('update_task'));
+	t.false(result.includes('delete_task'));
+	t.false(result.includes('list_tasks'));
 	// Read-only tools remain
 	t.true(result.includes('read_file'));
 	t.true(result.includes('find_files'));
+});
+
+// Drift guard: MODE_EXCLUDED_TOOLS.plan is a hand-maintained list. This pins
+// the invariant it encodes — every mutating (non-readOnly) built-in is hidden
+// in plan mode — so a newly-added mutating tool can't silently leak in. agent
+// and ask_user are the deliberate non-readOnly exceptions (delegation / asking
+// the user are themselves read-only-ish in plan).
+test('plan mode hides every mutating built-in tool (except agent/ask_user)', t => {
+	const manager = new ToolManager();
+	const allowedNonReadOnly = new Set(['agent', 'ask_user']);
+	const planTools = new Set(manager.getAvailableToolNames(undefined, 'plan'));
+
+	for (const name of manager.getToolNames()) {
+		const isReadOnly = manager.getToolEntry(name)?.readOnly === true;
+		if (!isReadOnly && !allowedNonReadOnly.has(name)) {
+			t.false(
+				planTools.has(name),
+				`${name} mutates but is available in plan mode — add it to MODE_EXCLUDED_TOOLS.plan`,
+			);
+		}
+	}
 });
 
 test('getAvailableToolNames - plan + minimal excludes mutation tools from minimal set', t => {
@@ -721,39 +759,106 @@ test('getAvailableToolNames - plan + minimal excludes mutation tools from minima
 });
 
 // ============================================================================
-// getEffectiveTools Tests
+// disabledTools — global opt-out list from agents.config.json
 // ============================================================================
 
-test('getEffectiveTools - returns filtered tools without execute', t => {
+test('getAvailableToolNames - disabledTools removes a single tool', t => {
 	const manager = new ToolManager();
-	const names = ['read_file'];
-	const tools = manager.getEffectiveTools(names);
-	t.is(Object.keys(tools).length, 1);
-	t.truthy(tools.read_file);
+	const baseline = manager.getAvailableToolNames(undefined, 'normal', []);
+	const result = manager.getAvailableToolNames(undefined, 'normal', ['execute_bash']);
+
+	t.true(baseline.includes('execute_bash'));
+	t.false(result.includes('execute_bash'));
+	// Everything else still present
+	t.is(result.length, baseline.length - 1);
 });
 
-test('getEffectiveTools - applies nonInteractiveAlwaysAllow override', t => {
+test('getAvailableToolNames - disabledTools removes multiple tools', t => {
 	const manager = new ToolManager();
-	const names = manager.getToolNames();
-	const tools = manager.getEffectiveTools(names, {
-		nonInteractiveAlwaysAllow: ['execute_bash'],
-	});
-	// The execute_bash tool should have needsApproval set to false
-	const bashTool = tools.execute_bash as any;
-	t.is(bashTool.needsApproval, false);
+	const result = manager.getAvailableToolNames(undefined, 'normal', [
+		'execute_bash',
+		'web_search',
+		'fetch_url',
+	]);
+
+	t.false(result.includes('execute_bash'));
+	t.false(result.includes('web_search'));
+	t.false(result.includes('fetch_url'));
+	t.true(result.includes('read_file'));
 });
 
-test('getEffectiveTools - does not override approval for tools not in allow list', t => {
+test('getAvailableToolNames - disabledTools intersects with minimal profile', t => {
 	const manager = new ToolManager();
-	const names = manager.getToolNames();
-	const toolsBefore = manager.getEffectiveTools(names);
-	const toolsAfter = manager.getEffectiveTools(names, {
-		nonInteractiveAlwaysAllow: ['execute_bash'],
+	const result = manager.getAvailableToolNames(
+		{enabled: true, toolProfile: 'minimal', aggressiveCompact: false},
+		'normal',
+		['execute_bash'],
+	);
+
+	// minimal profile minus execute_bash
+	t.deepEqual(result, [
+		'read_file',
+		'write_file',
+		'string_replace',
+		'find_files',
+		'search_file_contents',
+		'list_directory',
+		'agent',
+	]);
+});
+
+test('getAvailableToolNames - disabledTools layered with plan mode exclusion', t => {
+	const manager = new ToolManager();
+	const result = manager.getAvailableToolNames(undefined, 'plan', ['read_file']);
+
+	// plan already excludes write_file, string_replace, etc.; disabledTools
+	// further trims the read-only set
+	t.false(result.includes('write_file'));
+	t.false(result.includes('read_file'));
+	t.true(result.includes('find_files'));
+});
+
+test('getAvailableToolNames - empty disabledTools is a no-op', t => {
+	const manager = new ToolManager();
+	const baseline = manager.getAvailableToolNames(undefined, 'normal', []);
+	const expected = manager.getToolNames();
+	t.deepEqual(baseline.sort(), [...expected].sort());
+});
+
+test('getAvailableToolNames - unknown tool names in disabledTools are ignored', t => {
+	const manager = new ToolManager();
+	const result = manager.getAvailableToolNames(undefined, 'normal', [
+		'not_a_real_tool',
+		'execute_bash',
+	]);
+
+	t.false(result.includes('execute_bash'));
+	// No crash, no spurious removals
+	t.true(result.includes('read_file'));
+});
+
+test('getAvailableToolNames - disabledTools removes a bundle-form skill tool', t => {
+	// Bundle skill tools are added to the same registry as built-ins via
+	// registerSkillTool. disabledTools should filter them by name without
+	// caring whether the tool came from a flat .md, a bundle, or built-in.
+	const manager = new ToolManager();
+	manager.registerSkillTool({
+		name: 'k8s_pods',
+		// Minimal `tool` stub - we only need it in the registry for filtering.
+		tool: {description: 'List pods', execute: async () => 'ok'} as never,
+		handler: async () => 'ok',
+		readOnly: true,
+		ownerSkill: 'k8s',
 	});
-	// write_file should not be changed by the allow list override
-	const writeBefore = toolsBefore.write_file as any;
-	const writeAfter = toolsAfter.write_file as any;
-	t.is(writeAfter.needsApproval, writeBefore.needsApproval);
+
+	const baseline = manager.getAvailableToolNames(undefined, 'normal', []);
+	const disabled = manager.getAvailableToolNames(undefined, 'normal', [
+		'k8s_pods',
+	]);
+
+	t.true(baseline.includes('k8s_pods'), 'baseline should include skill tool');
+	t.false(disabled.includes('k8s_pods'), 'disabled list should remove it');
+	t.is(disabled.length, baseline.length - 1);
 });
 
 // ============================================================================
@@ -769,7 +874,7 @@ import type {DevelopmentMode} from '@/types/core';
 
 /**
  * Helper: given a mode and tune, verify that getAvailableToolNames() and
- * getEffectiveTools() produce the exact same set of tool names.
+ * getFilteredTools() produce the exact same set of tool names.
  */
 function assertPromptRuntimeParity(
 	t: any,
@@ -779,7 +884,7 @@ function assertPromptRuntimeParity(
 	label: string,
 ) {
 	const availableNames = manager.getAvailableToolNames(tune, mode);
-	const effectiveTools = manager.getEffectiveTools(availableNames);
+	const effectiveTools = manager.getFilteredTools(availableNames);
 	const runtimeNames = Object.keys(effectiveTools).sort();
 	const promptNames = [...availableNames].sort();
 
@@ -817,14 +922,14 @@ test('parity - plan mode, no tune', t => {
 	assertPromptRuntimeParity(t, manager, undefined, 'plan', 'plan/no-tune');
 });
 
-test('parity - scheduler mode, no tune', t => {
+test('parity - headless mode, no tune', t => {
 	const manager = new ToolManager();
 	assertPromptRuntimeParity(
 		t,
 		manager,
 		undefined,
-		'scheduler',
-		'scheduler/no-tune',
+		'headless',
+		'headless/no-tune',
 	);
 });
 
@@ -868,30 +973,29 @@ test('parity - plan mode, full profile', t => {
 	assertPromptRuntimeParity(t, manager, tune, 'plan', 'plan/full');
 });
 
-test('parity - scheduler mode, full profile', t => {
+test('parity - headless mode, full profile', t => {
 	const manager = new ToolManager();
 	const tune: TuneConfig = {
 		enabled: true,
 		toolProfile: 'full',
 		aggressiveCompact: false,
 	};
-	assertPromptRuntimeParity(t, manager, tune, 'scheduler', 'scheduler/full');
+	assertPromptRuntimeParity(t, manager, tune, 'headless', 'headless/full');
 });
 
-test('parity - nonInteractiveAlwaysAllow does not change available tool set', t => {
+test('getFilteredTools - returns exactly the requested available tools', t => {
 	const manager = new ToolManager();
 	const availableNames = manager.getAvailableToolNames(undefined, 'normal');
 
-	// With allow list, the set of tools should be identical — only approval changes
-	const toolsWithout = manager.getEffectiveTools(availableNames);
-	const toolsWith = manager.getEffectiveTools(availableNames, {
-		nonInteractiveAlwaysAllow: ['execute_bash', 'write_file'],
-	});
+	// The tool set is purely name/mode-driven; approval (incl. the
+	// nonInteractiveAlwaysAllow list) is resolved separately by
+	// resolveToolApproval and never changes which tools are exposed.
+	const tools = manager.getFilteredTools(availableNames);
 
 	t.deepEqual(
-		Object.keys(toolsWithout).sort(),
-		Object.keys(toolsWith).sort(),
-		'nonInteractiveAlwaysAllow should not add or remove tools',
+		Object.keys(tools).sort(),
+		[...availableNames].sort(),
+		'filtered tools should match the requested names',
 	);
 });
 
@@ -908,7 +1012,7 @@ test('XML fallback - tool definitions add significant length to system prompt', 
 
 	// Simulate what useChatHandler does when toolsDisabled=true
 	const xmlPrompt = buildSystemPrompt('normal', undefined, availableNames, true);
-	const tools = manager.getFilteredToolsWithoutExecute(availableNames);
+	const tools = manager.getFilteredTools(availableNames);
 	const toolDefs = formatToolsForPrompt(tools);
 	const fullXmlPrompt = xmlPrompt + toolDefs;
 
@@ -927,7 +1031,7 @@ test('XML fallback - tool definitions add significant length to system prompt', 
 test('XML fallback - tool definitions include examples per tool', t => {
 	const manager = new ToolManager();
 	const availableNames = manager.getAvailableToolNames(undefined, 'normal');
-	const tools = manager.getFilteredToolsWithoutExecute(availableNames);
+	const tools = manager.getFilteredTools(availableNames);
 	const defs = formatToolsForPrompt(tools);
 
 	// Should include XML examples

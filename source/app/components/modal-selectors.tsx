@@ -2,10 +2,9 @@ import React from 'react';
 import {ModelDatabaseDisplay} from '@/commands/model-database';
 import CheckpointSelector from '@/components/checkpoint-selector';
 import ModelSelector from '@/components/model-selector';
-import ProviderSelector from '@/components/provider-selector';
 import SessionSelector from '@/components/session-selector';
 import type {ActiveMode} from '@/hooks/useAppState';
-import type {CheckpointListItem, LLMClient, TuneConfig} from '@/types';
+import type {CheckpointListItem, TuneConfig} from '@/types';
 import {McpWizard} from '@/wizards/mcp-wizard';
 import {ProviderWizard} from '@/wizards/provider-wizard';
 import {SettingsSelector} from './settings-selector';
@@ -17,7 +16,6 @@ export interface ModalSelectorsProps {
 	showAllSessions: boolean;
 
 	// Current values
-	client: LLMClient | null;
 	currentModel: string;
 	currentProvider: string;
 	checkpointLoadData: {
@@ -26,12 +24,8 @@ export interface ModalSelectorsProps {
 	} | null;
 
 	// Handlers - Model Selection
-	onModelSelect: (model: string) => Promise<void>;
+	onModelSelect: (provider: string, model: string) => Promise<void>;
 	onModelSelectionCancel: () => void;
-
-	// Handlers - Provider Selection
-	onProviderSelect: (provider: string) => Promise<void>;
-	onProviderSelectionCancel: () => void;
 
 	// Handlers - Model Database
 	onModelDatabaseCancel: () => void;
@@ -69,14 +63,11 @@ export function ModalSelectors({
 	activeMode,
 	isSettingsMode,
 	showAllSessions,
-	client,
 	currentModel,
 	currentProvider,
 	checkpointLoadData,
 	onModelSelect,
 	onModelSelectionCancel,
-	onProviderSelect,
-	onProviderSelectionCancel,
 	onModelDatabaseCancel,
 	onConfigWizardComplete,
 	onConfigWizardCancel,
@@ -94,20 +85,10 @@ export function ModalSelectors({
 	if (activeMode === 'model') {
 		return (
 			<ModelSelector
-				client={client}
-				currentModel={currentModel}
-				onModelSelect={model => void onModelSelect(model)}
-				onCancel={onModelSelectionCancel}
-			/>
-		);
-	}
-
-	if (activeMode === 'provider') {
-		return (
-			<ProviderSelector
 				currentProvider={currentProvider}
-				onProviderSelect={provider => void onProviderSelect(provider)}
-				onCancel={onProviderSelectionCancel}
+				currentModel={currentModel}
+				onModelSelect={(provider, model) => void onModelSelect(provider, model)}
+				onCancel={onModelSelectionCancel}
 			/>
 		);
 	}

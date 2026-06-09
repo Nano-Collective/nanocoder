@@ -10,7 +10,7 @@ import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
 import {promptHistory} from '@/prompt-history';
 import type {TuneConfig} from '@/types/config';
-import type {DevelopmentMode} from '@/types/core';
+import type {ContextSource, DevelopmentMode} from '@/types/core';
 import type {InputState} from '@/types/hooks';
 import {Completion} from '@/types/index';
 import {
@@ -22,18 +22,21 @@ import {assemblePrompt} from '@/utils/prompt-processor';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 interface ChatProps {
-	onSubmit?: (message: string) => void;
+	onSubmit?: (message: string, displayValue: string) => void;
 	placeholder?: string;
 	customCommands?: string[]; // List of custom command names and aliases
 	disabled?: boolean; // Disable input when AI is processing
-	onCancel?: () => void; // Callback when user presses escape while thinking
+	isBusy?: boolean; // True when in-flight work is cancellable; Escape is owned by the global handler, so it must not clear the input
 	onToggleMode?: () => void; // Callback when user presses shift+tab to toggle development mode
 	onToggleReasoningExpanded?: () => void; // Callback when user presses ctrl+r to toggle expanded reasoning traces
 	onToggleCompactDisplay?: () => void; // Callback when user presses ctrl+o to toggle compact tool display
 	compactToolDisplay?: boolean; // Current compact display state
 	developmentMode?: DevelopmentMode; // Current development mode
 	contextPercentUsed?: number | null; // Context window usage percentage
+	contextSource?: ContextSource | null; // Whether ctx % is API-reported or estimated
+	sessionName?: string; // Optional session name for display
 	tune?: TuneConfig; // Model mode configuration
+	currentModel?: string; // Active model id — resolves the 'auto' tune profile for display
 	activeEditor?: ActiveEditorState | null; // VS Code active file + optional selection
 	onDismissActiveEditor?: () => void; // Dismiss the active editor pill on clear/escape
 }
@@ -43,14 +46,17 @@ export default function UserInput({
 	placeholder,
 	customCommands = [],
 	disabled = false,
-	onCancel,
+	isBusy = false,
 	onToggleMode,
 	onToggleReasoningExpanded,
 	onToggleCompactDisplay,
 	compactToolDisplay = true,
 	developmentMode = 'normal',
 	contextPercentUsed,
+	contextSource,
+	sessionName,
 	tune,
+	currentModel,
 	activeEditor,
 	onDismissActiveEditor,
 }: ChatProps) {
@@ -265,7 +271,7 @@ export default function UserInput({
 
 			// Save the InputState to history and send assembled message to AI
 			promptHistory.addPrompt(currentState);
-			onSubmit(fullMessage);
+			onSubmit(fullMessage, currentState.displayValue);
 			resetInput();
 			resetUIState();
 			promptHistory.resetIndex();
@@ -361,9 +367,11 @@ export default function UserInput({
 	);
 
 	useInput((inputChar, key) => {
-		// Handle escape for cancellation even when disabled
-		if (key.escape && disabled && onCancel) {
-			onCancel();
+		// Cancelling in-flight work is owned by the single section-level Escape
+		// handler (see InteractiveApp), which fires no matter which component is
+		// mounted. Here we only swallow Escape while busy so it doesn't fall
+		// through to the clear-input double-press.
+		if (key.escape && (isBusy || disabled)) {
 			return;
 		}
 
@@ -512,7 +520,10 @@ export default function UserInput({
 					developmentMode={developmentMode}
 					colors={colors}
 					contextPercentUsed={contextPercentUsed ?? null}
+					contextSource={contextSource ?? null}
+					sessionName={sessionName}
 					tune={tune}
+					currentModel={currentModel}
 				/>
 			</Box>
 		);
@@ -599,7 +610,10 @@ export default function UserInput({
 				developmentMode={developmentMode}
 				colors={colors}
 				contextPercentUsed={contextPercentUsed ?? null}
+				contextSource={contextSource ?? null}
+				sessionName={sessionName}
 				tune={tune}
+				currentModel={currentModel}
 				activeEditor={activeEditor}
 			/>
 		</>

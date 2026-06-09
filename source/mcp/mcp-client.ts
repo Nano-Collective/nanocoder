@@ -2,6 +2,7 @@ import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {WebSocketClientTransport} from '@modelcontextprotocol/sdk/client/websocket.js';
+import {formatError} from '@/utils/error-formatter';
 
 // Union type for all supported client transports
 type ClientTransport =
@@ -10,7 +11,6 @@ type ClientTransport =
 	| StreamableHTTPClientTransport;
 
 import {dynamicTool} from 'ai';
-import {getCurrentMode} from '@/context/mode-context';
 import type {
 	AISDKCoreTool,
 	MCPInitResult,
@@ -18,6 +18,7 @@ import type {
 	MCPTool,
 	MCPToolInputSchema,
 	Tool,
+	ToolApprovalPolicy,
 	ToolParameterSchema,
 } from '@/types/index';
 import {jsonSchema} from '@/types/index';
@@ -224,7 +225,7 @@ export class MCPClient {
 					const result: MCPInitResult = {
 						serverName: normalizedServer.name,
 						success: false,
-						error: error instanceof Error ? error.message : String(error),
+						error: formatError(error),
 					};
 
 					this.logger.error('MCP server connection failed in batch', {
@@ -318,7 +319,6 @@ export class MCPClient {
 				// dynamicTool is more explicit about unknown types compared to tool()
 				// MCP schemas come from external servers and are not known at compile time
 				const toolName = mcpTool.name;
-				const isAutoApproved = this.isToolAutoApproved(toolName, serverName);
 				const coreTool = dynamicTool({
 					description: mcpTool.description
 						? `[MCP:${serverName}] ${mcpTool.description}`
@@ -326,15 +326,6 @@ export class MCPClient {
 					inputSchema: jsonSchema<Record<string, unknown>>(
 						mcpTool.inputSchema || {type: 'object'},
 					),
-					// Medium risk: MCP tools require approval unless explicitly configured in the server's alwaysAllow list or in auto-accept mode
-					needsApproval: () => {
-						if (isAutoApproved) {
-							return false;
-						}
-
-						const mode = getCurrentMode();
-						return mode !== 'auto-accept' && mode !== 'yolo'; // true in normal/plan, false in auto-accept/yolo
-					},
 					execute: async (input, _options) => {
 						// dynamicTool passes 'input' as unknown, validate at runtime
 						return await this.callTool(
@@ -381,17 +372,19 @@ export class MCPClient {
 		name: string;
 		tool: AISDKCoreTool;
 		handler: (args: Record<string, unknown>) => Promise<string>;
+		approval: ToolApprovalPolicy;
 	}> {
 		const entries: Array<{
 			name: string;
 			tool: AISDKCoreTool;
 			handler: (args: Record<string, unknown>) => Promise<string>;
+			approval: ToolApprovalPolicy;
 		}> = [];
 
 		// Get native tools once to avoid redundant calls
 		const nativeTools = this.getNativeToolsRegistry();
 
-		for (const [, serverTools] of this.serverTools.entries()) {
+		for (const [serverName, serverTools] of this.serverTools.entries()) {
 			for (const mcpTool of serverTools) {
 				const toolName = mcpTool.name;
 
@@ -404,10 +397,19 @@ export class MCPClient {
 						return this.callTool(toolName, args);
 					};
 
+					// Medium risk: MCP tools require approval unless the server's
+					// alwaysAllow list covers them or the mode is auto-accept. (Yolo
+					// is bypassed centrally by resolveToolApproval.)
+					const isAutoApproved = this.isToolAutoApproved(toolName, serverName);
+					const approval: ToolApprovalPolicy = isAutoApproved
+						? false
+						: (_args, mode) => mode !== 'auto-accept';
+
 					entries.push({
 						name: toolName,
 						tool: coreTool,
 						handler,
+						approval,
 					});
 				}
 			}
@@ -547,8 +549,7 @@ export class MCPClient {
 
 				return 'Tool executed successfully (no output)';
 			} catch (error) {
-				const errorMessage =
-					error instanceof Error ? error.message : 'Unknown error';
+				const errorMessage = formatError(error);
 				const errorName = error instanceof Error ? error.name : 'Unknown';
 
 				const finalMetrics = endMetrics(metrics);
@@ -596,8 +597,7 @@ export class MCPClient {
 					});
 				} catch (error) {
 					failedDisconnections++;
-					const errorMessage =
-						error instanceof Error ? error.message : 'Unknown error';
+					const errorMessage = formatError(error);
 					const errorName = error instanceof Error ? error.name : 'Unknown';
 
 					this.logger.error('Error disconnecting from MCP server', {

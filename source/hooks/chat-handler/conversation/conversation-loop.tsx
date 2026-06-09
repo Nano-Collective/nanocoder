@@ -4,14 +4,21 @@ import AssistantMessage from '@/components/assistant-message';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import {getAppConfig} from '@/config/index';
-import {MAX_EMPTY_TURNS} from '@/constants';
-import {parseToolCalls} from '@/tool-calling/index';
+import {MAX_EMPTY_TURNS, MAX_MALFORMED_RETRIES} from '@/constants';
+import {generateKey} from '@/session/key-generator';
+import {
+	parseToolCalls,
+	stripEmbeddedToolCallText,
+	stripThinkTags,
+} from '@/tool-calling/index';
+import {resolveToolApproval} from '@/tools/approval-policy';
 import {loadTasks} from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
 import {isSingleToolProfile} from '@/tools/tool-profiles';
 import type {TuneConfig} from '@/types/config';
 import type {
+	ApiUsageSnapshot,
 	LLMClient,
 	Message,
 	ModeOverrides,
@@ -21,10 +28,18 @@ import type {
 import {performAutoCompact} from '@/utils/auto-compact';
 import {formatElapsedTime, getRandomAdjective} from '@/utils/completion-note';
 import {MessageBuilder} from '@/utils/message-builder';
-import {parseToolArguments} from '@/utils/tool-args-parser';
+import {capMessagesForModel} from '@/utils/message-capping';
+import {infoMsg} from '@/utils/message-factory';
+import {createCancellationResults} from '@/utils/tool-cancellation';
+import {signalToolConfirm} from '@/utils/tool-confirm-queue';
 import {displayCompactCountsSummary} from '@/utils/tool-result-display';
+import {closeAllDiffsInVSCode} from '@/vscode/index';
 import {filterValidToolCalls} from '../utils/tool-filters';
-import {executeToolsDirectly} from './tool-executor';
+import {
+	displayExecutedTool,
+	executeApprovedTool,
+	executeToolsDirectly,
+} from './tool-executor';
 
 interface ProcessAssistantResponseParams {
 	systemMessage: Message;
@@ -39,18 +54,18 @@ interface ProcessAssistantResponseParams {
 	setTokenCount: (count: number) => void;
 	setMessages: (messages: Message[]) => void;
 	addToChatQueue: (component: React.ReactNode) => void;
-	getNextComponentKey: () => number;
 	currentProvider: string;
 	currentModel: string;
-	developmentMode: 'normal' | 'auto-accept' | 'yolo' | 'plan' | 'scheduler';
+	developmentMode: 'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless';
+	// Live mode ref, read per tool call so a mid-turn mode switch (e.g. flipping
+	// to yolo while tools execute) is honored immediately. Falls back to the
+	// snapshot `developmentMode` for callers that don't supply a ref (subagents,
+	// plain shell).
+	developmentModeRef?: React.RefObject<
+		'normal' | 'auto-accept' | 'yolo' | 'plan' | 'headless'
+	>;
 	nonInteractiveMode: boolean;
 	conversationStateManager: React.MutableRefObject<ConversationStateManager>;
-	onStartToolConfirmationFlow: (
-		toolCalls: ToolCall[],
-		updatedMessages: Message[],
-		assistantMsg: Message,
-		systemMessage: Message,
-	) => void;
 	onConversationComplete?: () => void;
 	conversationStartTime?: number;
 	reasoningExpandedRef?: React.RefObject<boolean>;
@@ -59,11 +74,19 @@ interface ProcessAssistantResponseParams {
 	compactToolCountsRef?: React.MutableRefObject<Record<string, number>>;
 	onSetLiveTaskList?: (tasks: Task[] | null) => void;
 	setLiveComponent?: (component: React.ReactNode) => void;
+	// Records the API-reported usage of the latest response (or null to clear
+	// it, e.g. after auto-compaction) so the context indicator can prefer
+	// API-accurate numbers over client-side estimation.
+	setLastApiUsage?: (usage: ApiUsageSnapshot | null) => void;
 	tune?: TuneConfig;
 	// Number of consecutive empty assistant turns that have already been
 	// nudged in this loop. The empty-response branch increments and
 	// recurses; every other recursion site resets to 0.
 	emptyTurnCount?: number;
+	// Number of consecutive malformed-XML self-correction recursions that
+	// have already happened. The malformed branch increments and recurses;
+	// every other recursion site resets to 0.
+	malformedRetryCount?: number;
 }
 
 // Module-level flag: show XML fallback notice only once per process lifetime.
@@ -79,6 +102,11 @@ export const resetFallbackNotice = () => {
 // indented (grouping beneath its Thought) or rendered flat (non-thinking
 // models, where there is no Thought to group under).
 let lastTurnHadReasoning = false;
+
+/** Reset the reasoning-grouping flag (for testing). */
+export const resetLastTurnHadReasoning = () => {
+	lastTurnHadReasoning = false;
+};
 
 /**
  * Main conversation loop that processes assistant responses and handles tool calls.
@@ -105,12 +133,10 @@ export const processAssistantResponse = async (
 		setTokenCount,
 		setMessages,
 		addToChatQueue,
-		getNextComponentKey,
 		currentProvider,
 		currentModel,
 		nonInteractiveMode,
 		conversationStateManager,
-		onStartToolConfirmationFlow,
 		onConversationComplete,
 		conversationStartTime,
 		reasoningExpandedRef,
@@ -119,9 +145,12 @@ export const processAssistantResponse = async (
 		compactToolCountsRef,
 		onSetLiveTaskList,
 		setLiveComponent,
+		setLastApiUsage,
 		tune,
 		developmentMode,
+		developmentModeRef,
 		emptyTurnCount = 0,
+		malformedRetryCount = 0,
 	} = params;
 
 	const startTime = conversationStartTime ?? Date.now();
@@ -134,7 +163,7 @@ export const processAssistantResponse = async (
 			const {TaskListDisplay} = await import('@/components/task-list-display');
 			addToChatQueue(
 				<TaskListDisplay
-					key={`task-list-final-${getNextComponentKey()}`}
+					key={generateKey('task-list-final')}
 					tasks={tasks}
 					title="Tasks"
 				/>,
@@ -154,16 +183,23 @@ export const processAssistantResponse = async (
 		if (compactToolCountsRef) {
 			const counts = compactToolCountsRef.current;
 			if (Object.keys(counts).length > 0) {
-				displayCompactCountsSummary(
-					counts,
-					addToChatQueue,
-					getNextComponentKey,
-					{indent: lastTurnHadReasoning},
-				);
+				displayCompactCountsSummary(counts, addToChatQueue, {
+					indent: lastTurnHadReasoning,
+				});
 				compactToolCountsRef.current = {};
 			}
 		}
 		onSetCompactToolCounts?.(null);
+	};
+
+	// Flush both the compact-count summary and any pending live task list.
+	// Called at every turn boundary, so it lives in one place.
+	const flushAll = async () => {
+		flushCompactCounts();
+		if (hasLiveTaskUpdates) {
+			await flushLiveTaskList();
+			hasLiveTaskUpdates = false;
+		}
 	};
 
 	// Ensure we have an abort controller for this request
@@ -200,17 +236,27 @@ export const processAssistantResponse = async (
 	// Get effective tools — ToolManager is the single authority for
 	// availability (mode + profile filtering) and approval policy
 	const availableNames =
-		toolManager?.getAvailableToolNames(tune, developmentMode) ?? [];
-	const tools = toolManager
-		? toolManager.getEffectiveTools(availableNames, {
-				nonInteractiveAlwaysAllow,
-			})
-		: {};
+		toolManager?.getAvailableToolNames(
+			tune,
+			developmentMode,
+			undefined,
+			currentModel,
+		) ?? [];
+	const tools = toolManager ? toolManager.getFilteredTools(availableNames) : {};
 
 	let streamedContent = '';
 	let streamedReasoning = '';
+
+	// Apply maxMessages cap: limit how many history messages are sent to the
+	// model. This is a model-context concern only - the full history is always
+	// written to disk by useSessionAutosave. The system message is prepended
+	// outside the slice and is never counted against the limit.
+	const sessionConfig = getAppConfig().sessions;
+	const maxMessages = sessionConfig?.maxMessages ?? 1000;
+	const cappedMessages = capMessagesForModel(messages, maxMessages);
+
 	const result = await client.chat(
-		[systemMessage, ...messages],
+		[systemMessage, ...cappedMessages],
 		tools,
 		{
 			onToken: (token: string) => {
@@ -232,21 +278,44 @@ export const processAssistantResponse = async (
 
 	const message = result.choices[0].message;
 	const toolCalls = message.tool_calls || null;
-	const fullContent = message.content || '';
+	// Strip <think> tags unconditionally. Providers that emit reasoning via the
+	// SDK protocol (Anthropic, OpenAI o-series, Ollama with thinking) never put
+	// these in text, so this is a no-op for them. Providers that stream <think>
+	// as raw text (generic OpenAI-compat serving GLM/Kimi/Qwen) would otherwise
+	// leak the tokens into the assistant message and conversation history.
+	const fullContent = stripThinkTags(message.content || '');
 	const fullReasoning = message.reasoning;
 
-	// Only parse text for XML tool calls on the fallback path (non-tool-calling models).
-	// On the native path, response text is just text - no tool calls are embedded in it.
-	const parseResult = result.toolsDisabled
-		? parseToolCalls(fullContent)
-		: {success: true as const, toolCalls: [], cleanedContent: fullContent};
+	// Tool extraction is layered:
+	//   - XML fallback path (toolsDisabled): parse text for XML/JSON tool calls.
+	//   - Native path with native tool calls: trust the SDK protocol, but strip
+	//     any echoed XML/JSON tool-call text from the message ("Ghost Echo")
+	//     so it doesn't leak into the UI or conversation history.
+	//   - Native path with NO native tool calls: still parse text for XML/JSON
+	//     tool calls. Open-weights models marketed as native-tool-capable
+	//     sometimes regress and emit text-based tool calls instead. Without
+	//     this fallback the agent stalls. Malformed shapes return success:false
+	//     and feed the existing self-correction loop.
+	const hasNativeToolCalls = !!toolCalls && toolCalls.length > 0;
+	let parseResult: ReturnType<typeof parseToolCalls>;
+	if (result.toolsDisabled) {
+		parseResult = parseToolCalls(fullContent);
+	} else if (hasNativeToolCalls) {
+		parseResult = {
+			success: true as const,
+			toolCalls: [],
+			cleanedContent: stripEmbeddedToolCallText(fullContent),
+		};
+	} else {
+		parseResult = parseToolCalls(fullContent);
+	}
 
 	// Notify the user once per session when the XML fallback path is active
 	if (result.toolsDisabled && !hasShownFallbackNotice) {
 		hasShownFallbackNotice = true;
 		addToChatQueue(
 			<InfoMessage
-				key={`xml-fallback-notice-${getNextComponentKey()}`}
+				key={generateKey('xml-fallback-notice')}
 				message="Model does not support native tool calling. Using XML fallback."
 				hideBox={true}
 			/>,
@@ -256,12 +325,31 @@ export const processAssistantResponse = async (
 	// Check for malformed tool calls and send error back to model for self-correction
 	// (only happens on the XML fallback path)
 	if (!parseResult.success) {
+		// Cap malformed-retry recursion. Without this, a model stuck producing
+		// bad XML loops forever, appending two messages per iteration, until
+		// Node's heap exhausts.
+		if (malformedRetryCount >= MAX_MALFORMED_RETRIES) {
+			await flushAll();
+			addToChatQueue(
+				<ErrorMessage
+					key={generateKey('malformed-tool-giveup')}
+					message={`Model produced malformed tool calls ${MAX_MALFORMED_RETRIES + 1} times in a row and cannot self-correct. Try rephrasing the request or switching models.`}
+					hideBox={true}
+				/>,
+			);
+			setIsGenerating(false);
+			if (onConversationComplete) {
+				onConversationComplete();
+			}
+			return;
+		}
+
 		const errorContent = `${parseResult.error}\n\n${parseResult.examples}`;
 
 		// Display error to user
 		addToChatQueue(
 			<ErrorMessage
-				key={`malformed-tool-${Date.now()}`}
+				key={generateKey('malformed-tool')}
 				message={errorContent}
 				hideBox={true}
 			/>,
@@ -290,9 +378,11 @@ export const processAssistantResponse = async (
 		// Continue the main conversation loop with error message as context
 		await processAssistantResponse({
 			...params,
+			abortController: controller,
 			messages: updatedMessagesWithError,
 			conversationStartTime: startTime,
 			emptyTurnCount: 0,
+			malformedRetryCount: malformedRetryCount + 1,
 		});
 		return;
 	}
@@ -308,7 +398,7 @@ export const processAssistantResponse = async (
 	// Single-tool enforcement: truncate to first tool call
 	// Active when tune profile implies single-tool (e.g. minimal profile)
 	const enforceSingleTool =
-		tune?.enabled && isSingleToolProfile(tune.toolProfile);
+		tune?.enabled && isSingleToolProfile(tune.toolProfile, currentModel);
 	if (enforceSingleTool && allToolCalls.length > 1) {
 		allToolCalls = allToolCalls.slice(0, 1);
 	}
@@ -319,23 +409,25 @@ export const processAssistantResponse = async (
 	setStreamingContent('');
 	setStreamingReasoning('');
 
-	// Flush accumulated compact counts ONLY when this turn emits reasoning.
-	// Consecutive no-reasoning turns let counts accumulate so the summary
+	// Flush accumulated compact counts ONLY when this turn emits narrative
+	// text — a natural break in a run of tool calls. Reasoning alone does NOT
+	// break the run: thinking models emit reasoning on every turn, and agentic
+	// flows often run one tool per turn, so flushing on reasoning would stack
+	// "Ran 1 command" / "Wrote 1 file" lines instead of combining them.
+	// Letting counts accumulate across reasoning-only turns means the summary
 	// combines (e.g. "Made 4 edits" instead of four stacked "Made 1 edit"
 	// boxes). Residual counts are flushed at end of conversation / before
 	// confirmation below.
+	if (cleanedContent.trim()) {
+		await flushAll();
+	}
 	if (fullReasoning) {
-		flushCompactCounts();
-		if (hasLiveTaskUpdates) {
-			await flushLiveTaskList();
-			hasLiveTaskUpdates = false;
-		}
 		// Despite reasoning stream typically finishing before text stream,
 		// reasoning is still added to chat queue here to give correct
 		// message order with regards to tool calling
 		addToChatQueue(
 			<AssistantReasoning
-				key={`assistant-${getNextComponentKey()}`}
+				key={generateKey('assistant')}
 				reasoning={fullReasoning}
 				expand={reasoningExpandedRef?.current ?? false}
 			/>,
@@ -345,7 +437,7 @@ export const processAssistantResponse = async (
 	if (cleanedContent.trim()) {
 		addToChatQueue(
 			<AssistantMessage
-				key={`assistant-${getNextComponentKey()}`}
+				key={generateKey('assistant')}
 				message={cleanedContent}
 				model={currentModel}
 			/>,
@@ -394,6 +486,7 @@ export const processAssistantResponse = async (
 	// Check for auto-compact after messages are updated
 	// Note: This is awaited to prevent race conditions where setMessages(compressed)
 	// could overwrite newer state updates that happen while compression is in progress
+	let compactionOccurred = false;
 	try {
 		const config = getAppConfig();
 		const autoCompactConfig = config.autoCompact;
@@ -407,19 +500,16 @@ export const processAssistantResponse = async (
 				autoCompactConfig,
 				notification => {
 					// Show notification
-					addToChatQueue(
-						React.createElement(InfoMessage, {
-							key: `auto-compact-notification-${getNextComponentKey()}`,
-							message: notification,
-							hideBox: true,
-						}),
-					);
+					addToChatQueue(infoMsg(notification, 'auto-compact-notification'));
 				},
+				client,
 			);
 
 			if (compressed) {
-				// Compression was performed, update messages
+				// Compression was performed — update both React state AND the local
+				// variable so downstream tool execution builds on compacted messages.
 				setMessages(compressed);
+				updatedMessages = compressed;
 				// Reset stale streaming token count to avoid double-counting
 				// with calculateTokenBreakdown which already counts compacted tokens
 				setTokenCount(0);
@@ -427,10 +517,34 @@ export const processAssistantResponse = async (
 				// and recursive calls see the compressed messages instead of
 				// the pre-compression copy.
 				updatedMessages = compressed;
+				compactionOccurred = true;
 			}
 		}
 	} catch (_error) {
 		// Silently fail auto-compact, don't interrupt the conversation
+	}
+
+	// Record the API-reported usage for the context indicator. The snapshot is
+	// keyed to the post-response message count so the indicator can fall back
+	// to estimation once newer messages make it stale. After compaction the
+	// reported usage describes the pre-compaction context, so clear it (null)
+	// and let estimation recompute against the compressed history.
+	if (setLastApiUsage) {
+		const usage = result.usage;
+		// Store the snapshot when the provider reported any usable token field
+		// (input, output, or a lump-sum total). The indicator decides how to use
+		// it; a non-finite or wholly-empty report is treated as "no usage".
+		const hasReportedUsage =
+			!compactionOccurred &&
+			!!usage &&
+			(Number.isFinite(usage.inputTokens) ||
+				Number.isFinite(usage.outputTokens) ||
+				Number.isFinite(usage.totalTokens));
+		setLastApiUsage(
+			hasReportedUsage
+				? {...usage, atMessageCount: updatedMessages.length}
+				: null,
+		);
 	}
 
 	// Clear streaming content (but don't set isGenerating=false yet —
@@ -444,7 +558,7 @@ export const processAssistantResponse = async (
 		for (const error of errorResults) {
 			addToChatQueue(
 				<ErrorMessage
-					key={`unknown-tool-${error.tool_call_id}-${Date.now()}`}
+					key={generateKey(`unknown-tool-${error.tool_call_id}`)}
 					message={error.content}
 					hideBox={true}
 				/>,
@@ -474,200 +588,190 @@ export const processAssistantResponse = async (
 		// Continue the main conversation loop with error messages as context
 		await processAssistantResponse({
 			...params,
+			abortController: controller,
 			messages: updatedMessagesWithError,
 			conversationStartTime: startTime,
 			emptyTurnCount: 0,
+			malformedRetryCount: 0,
 		});
 		return;
 	}
 
 	// Handle tool calls if present - this continues the loop
 	if (validToolCalls && validToolCalls.length > 0) {
-		// Both native and XML fallback paths now use the same logic:
-		// the SDK never auto-executes tools (execute is stripped), so we
-		// evaluate needsApproval ourselves and split into direct vs confirmation.
-		const toolsNeedingConfirmation: ToolCall[] = [];
-		const toolsToExecuteDirectly: ToolCall[] = [];
+		// The SDK never auto-executes tools (execute is stripped). We evaluate
+		// needsApproval ourselves, then run every tool through one routine that
+		// gates each call: auto-approved tools execute immediately, the rest
+		// suspend on a confirmation prompt before executing. No second code path.
+		const autoTools: ToolCall[] = [];
+		const confirmTools: ToolCall[] = [];
 
 		for (const toolCall of validToolCalls) {
-			// Run validators (for XML fallback path, catches parse errors)
-			let validationFailed = false;
-			if (toolCall.function.name === '__xml_validation_error__') {
-				validationFailed = true;
-			} else if (toolManager) {
-				const validator = toolManager.getToolValidator(toolCall.function.name);
-				if (validator) {
-					try {
-						const parsedArgs = parseToolArguments(toolCall.function.arguments);
-						const validationResult = await validator(parsedArgs);
-						if (!validationResult.valid) {
-							validationFailed = true;
-						}
-					} catch {
-						validationFailed = true;
-					}
-				}
-			}
+			// The XML-fallback synthetic error isn't a real tool, so treat it as
+			// auto (it surfaces as an error result). Real argument validation
+			// lives in the tool handler (single source of truth).
+			const validationFailed =
+				toolCall.function.name === '__xml_validation_error__';
+			const toolEntry = toolManager?.getToolEntry(toolCall.function.name);
+			const needsApproval =
+				!validationFailed &&
+				(await resolveToolApproval(
+					toolCall.function.name,
+					toolEntry,
+					toolCall.function.arguments,
+					{
+						// Prefer the live ref so a mode switch made while this turn's
+						// tools are still executing takes effect on the next call.
+						mode: developmentModeRef?.current ?? developmentMode,
+						alwaysAllow: nonInteractiveMode
+							? nonInteractiveAlwaysAllow
+							: undefined,
+					},
+				));
 
-			// Evaluate needsApproval from tool definition
-			let toolNeedsApproval = true;
-
-			// In non-interactive mode, check the nonInteractiveAlwaysAllow list
-			if (
-				nonInteractiveMode &&
-				nonInteractiveAlwaysAllow.includes(toolCall.function.name)
-			) {
-				toolNeedsApproval = false;
-			} else if (toolManager) {
-				const toolEntry = toolManager.getToolEntry(toolCall.function.name);
-				if (toolEntry?.tool) {
-					const needsApprovalProp = (
-						toolEntry.tool as unknown as {
-							needsApproval?:
-								| boolean
-								| ((args: unknown) => boolean | Promise<boolean>);
-						}
-					).needsApproval;
-					if (typeof needsApprovalProp === 'boolean') {
-						toolNeedsApproval = needsApprovalProp;
-					} else if (typeof needsApprovalProp === 'function') {
-						try {
-							const parsedArgs = parseToolArguments(
-								toolCall.function.arguments,
-							);
-							toolNeedsApproval = await (
-								needsApprovalProp as (
-									args: unknown,
-								) => boolean | Promise<boolean>
-							)(parsedArgs);
-						} catch {
-							toolNeedsApproval = true;
-						}
-					}
-				}
-			}
-
-			if (validationFailed || !toolNeedsApproval) {
-				toolsToExecuteDirectly.push(toolCall);
+			if (needsApproval) {
+				confirmTools.push(toolCall);
 			} else {
-				toolsNeedingConfirmation.push(toolCall);
+				autoTools.push(toolCall);
 			}
 		}
 
-		// Execute tools that don't need confirmation (parallel via Promise.all)
-		if (toolsToExecuteDirectly.length > 0) {
+		// Display/tally options shared by auto and post-approval execution so a
+		// tool renders identically however it was approved.
+		const displayOptions = {
+			compactDisplay: compactToolDisplayRef?.current,
+			onCompactToolCount: (toolName: string) => {
+				if (compactToolCountsRef) {
+					const counts = compactToolCountsRef.current;
+					counts[toolName] = (counts[toolName] ?? 0) + 1;
+					onSetCompactToolCounts?.({...counts});
+				}
+			},
+			onLiveTaskUpdate: () => {
+				hasLiveTaskUpdates = true;
+				loadTasks().then(tasks => {
+					onSetLiveTaskList?.(tasks);
+				});
+			},
+			nonInteractiveMode,
+		};
+
+		const turnResults: ToolResult[] = [];
+
+		// 1) Auto-approved tools execute as a batch (parallelizes consecutive
+		//    read-only / agent runs).
+		if (autoTools.length > 0) {
 			const directResults = await executeToolsDirectly(
-				toolsToExecuteDirectly,
+				autoTools,
 				toolManager,
 				conversationStateManager,
 				addToChatQueue,
-				getNextComponentKey,
-				{
-					compactDisplay: compactToolDisplayRef?.current,
-					onCompactToolCount: (toolName: string) => {
-						if (compactToolCountsRef) {
-							const counts = compactToolCountsRef.current;
-							counts[toolName] = (counts[toolName] ?? 0) + 1;
-							onSetCompactToolCounts?.({...counts});
-						}
-					},
-					onLiveTaskUpdate: () => {
-						hasLiveTaskUpdates = true;
-						// Load tasks and update live display
-						loadTasks().then(tasks => {
-							onSetLiveTaskList?.(tasks);
-						});
-					},
-					setLiveComponent,
-					nonInteractiveMode,
-				},
+				{...displayOptions, setLiveComponent, signal: controller.signal},
 			);
+			turnResults.push(...directResults);
+		}
 
-			if (directResults.length > 0) {
-				// Add tool results to messages
-				const directBuilder = new MessageBuilder(updatedMessages);
-				directBuilder.addToolResults(directResults);
-				const updatedMessagesWithTools = directBuilder.build();
-				setMessages(updatedMessagesWithTools);
+		// 2) Non-interactive mode can't prompt, so exit when approval is needed.
+		if (confirmTools.length > 0 && nonInteractiveMode) {
+			await flushAll();
+			const toolNames = confirmTools.map(tc => tc.function.name).join(', ');
+			const errorMsg = `Tool approval required for: ${toolNames}. Exiting non-interactive mode`;
+			addToChatQueue(
+				<ErrorMessage
+					key={generateKey('tool-approval-required')}
+					message={errorMsg}
+					hideBox={true}
+				/>,
+			);
+			const builder = new MessageBuilder(updatedMessages);
+			builder.addToolResults(turnResults);
+			builder.addMessage({role: 'assistant', content: errorMsg});
+			setMessages(builder.build());
+			setIsGenerating(false);
+			onConversationComplete?.();
+			return;
+		}
 
-				// If there are also tools needing confirmation, start that flow
-				if (toolsNeedingConfirmation.length > 0) {
-					flushCompactCounts();
-					if (hasLiveTaskUpdates) {
-						await flushLiveTaskList();
-						hasLiveTaskUpdates = false;
-					}
-					onStartToolConfirmationFlow(
-						toolsNeedingConfirmation,
-						updatedMessagesWithTools,
-						assistantMsg,
-						systemMessage,
+		// 3) Interactive confirmation: gate each remaining tool, execute on
+		//    approval. A decline cancels the rest and returns control to the user.
+		if (confirmTools.length > 0) {
+			// Flush accumulated auto-exec output before the prompt, and stop the
+			// thinking spinner so the confirmation UI renders cleanly.
+			await flushAll();
+			setIsGenerating(false);
+			const {processToolUse} = await import('@/message-handler');
+
+			for (let i = 0; i < confirmTools.length; i++) {
+				const toolCall = confirmTools[i];
+				const approved = await signalToolConfirm({toolCall});
+
+				if (!approved) {
+					// Close any VS Code diff previews the formatter opened for the
+					// declined tools (the approve path self-closes post-execution).
+					closeAllDiffsInVSCode();
+					// Record cancellation results for this tool and every remaining
+					// one (keeps tool_call/result pairing intact), then stop without
+					// re-prompting the model.
+					turnResults.push(...createCancellationResults(confirmTools.slice(i)));
+					addToChatQueue(
+						<InfoMessage
+							key={generateKey('tool-cancelled')}
+							message="Tool execution cancelled by user."
+							hideBox={true}
+						/>,
 					);
+					const builder = new MessageBuilder(updatedMessages);
+					builder.addToolResults(turnResults);
+					setMessages(builder.build());
 					return;
 				}
 
-				// No confirmation needed - continue conversation loop
-				await processAssistantResponse({
-					...params,
-					messages: updatedMessagesWithTools,
-					conversationStartTime: startTime,
-					emptyTurnCount: 0,
-				});
-				return;
+				// Approved: execute + display through the same primitives the auto
+				// batch uses. isGenerating is true so the live area renders and the
+				// global Escape handler stays armed during execution.
+				setIsGenerating(true);
+				const execution = await executeApprovedTool(
+					toolCall,
+					toolManager,
+					processToolUse,
+					setLiveComponent,
+				);
+				turnResults.push(execution.result);
+				await displayExecutedTool(
+					execution,
+					toolManager,
+					addToChatQueue,
+					conversationStateManager,
+					displayOptions,
+				);
+
+				// Escape during execution: stop prompting further tools; the abort
+				// unwinds on the continuation's next LLM call (same as the auto
+				// path), surfacing as "Interrupted by user.".
+				if (controller.signal.aborted) break;
 			}
 		}
 
-		// Start confirmation flow only for tools that need it
-		if (toolsNeedingConfirmation.length > 0) {
-			// Flush compact counts and live task list before entering confirmation or exiting
-			flushCompactCounts();
-			if (hasLiveTaskUpdates) {
-				await flushLiveTaskList();
-				hasLiveTaskUpdates = false;
-			}
-
-			// In non-interactive mode, exit when tool approval is required
-			if (nonInteractiveMode) {
-				const toolNames = toolsNeedingConfirmation
-					.map(tc => tc.function.name)
-					.join(', ');
-				const errorMsg = `Tool approval required for: ${toolNames}. Exiting non-interactive mode`;
-
-				// Add error message to UI
-				addToChatQueue(
-					<ErrorMessage
-						key={`tool-approval-required-${Date.now()}`}
-						message={errorMsg}
-						hideBox={true}
-					/>,
-				);
-
-				// Add error to messages array so exit detection can find it
-				const errorMessage: Message = {
-					role: 'assistant',
-					content: errorMsg,
-				};
-				// Use updatedMessages which already includes auto-executed tool results
-				const errorBuilder = new MessageBuilder(updatedMessages);
-				errorBuilder.addMessage(errorMessage);
-				setMessages(errorBuilder.build());
-
-				// Signal completion to trigger exit
-				setIsGenerating(false);
-				if (onConversationComplete) {
-					onConversationComplete();
-				}
-				return;
-			}
-
-			// Hand off to confirmation flow — it manages its own generating state
-			setIsGenerating(false);
-			onStartToolConfirmationFlow(
-				toolsNeedingConfirmation,
-				updatedMessages, // Includes assistant message
-				assistantMsg,
-				systemMessage,
-			);
+		// 4) Feed all results back to the model and continue the loop.
+		if (turnResults.length > 0) {
+			const builder = new MessageBuilder(updatedMessages);
+			builder.addToolResults(turnResults);
+			const nextMessages = builder.build();
+			setMessages(nextMessages);
+			await processAssistantResponse({
+				...params,
+				// Carry the resolved controller forward. params.abortController can
+				// be a stale (often null) closure value, which would make this
+				// continuation mint a brand-new controller — so a cancel that
+				// aborted THIS turn's controller wouldn't stop the next LLM call
+				// ("Cancelling…" with no effect until a second press).
+				abortController: controller,
+				messages: nextMessages,
+				conversationStartTime: startTime,
+				emptyTurnCount: 0,
+				malformedRetryCount: 0,
+			});
+			return;
 		}
 	}
 
@@ -680,14 +784,10 @@ export const processAssistantResponse = async (
 		// token budget on thinking) would loop forever.
 		if (emptyTurnCount >= MAX_EMPTY_TURNS) {
 			setLiveComponent?.(null);
-			flushCompactCounts();
-			if (hasLiveTaskUpdates) {
-				await flushLiveTaskList();
-				hasLiveTaskUpdates = false;
-			}
+			await flushAll();
 			addToChatQueue(
 				<ErrorMessage
-					key={`empty-response-giveup-${getNextComponentKey()}`}
+					key={generateKey('empty-response-giveup')}
 					message={`Model produced no output after ${MAX_EMPTY_TURNS + 1} attempts. The model may be exhausting its token budget on reasoning, or the request may have been refused. Try rephrasing, lowering reasoning effort, or switching models.`}
 					hideBox={true}
 				/>,
@@ -742,11 +842,7 @@ export const processAssistantResponse = async (
 		// Lock any live task panel from the prior turn into scrollback so
 		// the next turn's UI starts clean — same pattern as the give-up,
 		// confirmation-flow, and natural-end branches.
-		flushCompactCounts();
-		if (hasLiveTaskUpdates) {
-			await flushLiveTaskList();
-			hasLiveTaskUpdates = false;
-		}
+		await flushAll();
 
 		// Don't include the empty assistantMsg - it would cause API error
 		// "Assistant message must have either content or tool_calls"
@@ -758,9 +854,11 @@ export const processAssistantResponse = async (
 		// Continue the conversation loop with the nudge
 		await processAssistantResponse({
 			...params,
+			abortController: controller,
 			messages: updatedMessagesWithNudge,
 			conversationStartTime: startTime,
 			emptyTurnCount: emptyTurnCount + 1,
+			malformedRetryCount: 0,
 		});
 		return;
 	}
@@ -768,18 +866,14 @@ export const processAssistantResponse = async (
 	if (validToolCalls.length === 0 && cleanedContent.trim()) {
 		// Flush any residual compact counts and task updates from turns that
 		// didn't emit reasoning so they persist in scrollback at conversation end.
-		flushCompactCounts();
-		if (hasLiveTaskUpdates) {
-			await flushLiveTaskList();
-			hasLiveTaskUpdates = false;
-		}
+		await flushAll();
 
 		setIsGenerating(false);
 		const adjective = getRandomAdjective();
 		const elapsed = formatElapsedTime(startTime);
 		addToChatQueue(
 			<InfoMessage
-				key={`completion-time-${getNextComponentKey()}`}
+				key={generateKey('completion-time')}
 				message={`Worked for a ${adjective} ${elapsed}.`}
 				hideBox={true}
 				marginBottom={2}

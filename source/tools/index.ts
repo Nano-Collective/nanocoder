@@ -11,12 +11,7 @@ import {listDirectoryTool} from '@/tools/list-directory';
 import {getDiagnosticsTool} from '@/tools/lsp-get-diagnostics';
 import {readFileTool} from '@/tools/read-file';
 import {searchFileContentsTool} from '@/tools/search-file-contents';
-import {
-	createTaskTool,
-	deleteTaskTool,
-	listTasksTool,
-	updateTaskTool,
-} from '@/tools/tasks';
+import {writeTasksTool} from '@/tools/tasks';
 import {webSearchTool} from '@/tools/web-search';
 import type {NanocoderToolExport} from '@/types/index';
 
@@ -37,11 +32,8 @@ const staticTools: NanocoderToolExport[] = [
 	askQuestionTool,
 	// File operation tools
 	...getFileOpTools(),
-	// Task management tools
-	createTaskTool,
-	listTasksTool,
-	updateTaskTool,
-	deleteTaskTool,
+	// Task management tool
+	writeTasksTool,
 ];
 
 // Conditionally available tools (based on system capabilities)

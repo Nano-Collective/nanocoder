@@ -2,7 +2,11 @@ import {existsSync, mkdirSync, rmSync, writeFileSync} from 'fs';
 import {tmpdir} from 'os';
 import {join} from 'path';
 import test from 'ava';
-import {ConfigurationError, createLLMClient} from './client-factory';
+import {
+	ConfigurationError,
+	createLLMClient,
+	loadProviderConfigs,
+} from './client-factory';
 import type {AIProviderConfig} from '@/types/config';
 import {clearAppConfig, reloadAppConfig} from '@/config/index';
 import {resetPreferencesCache} from '@/config/preferences';
@@ -1017,6 +1021,82 @@ test.serial(
 );
 
 test.serial(
+	'createLLMClient: resolves explicit provider names case-insensitively',
+	async t => {
+		globalThis.fetch = createMockFetch(true, 200);
+
+		const configDir = join(testDir, 'case-insensitive-provider-test');
+		mkdirSync(configDir, {recursive: true});
+
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'Ollama',
+							baseUrl: 'http://localhost:8000/v1',
+							models: ['llama3.1:latest'],
+						},
+					],
+				},
+			},
+			configDir,
+		);
+
+		process.cwd = () => configDir;
+		clearAppConfig();
+		reloadAppConfig();
+
+		const result = await createLLMClient('ollama');
+
+		t.truthy(result);
+		t.is(result.actualProvider, 'Ollama');
+	},
+);
+
+test.serial(
+	'createLLMClient: throws ConfigurationError when provider name is ambiguous (multiple case-insensitive matches)',
+	async t => {
+		globalThis.fetch = createMockFetch(true, 200);
+
+		const configDir = join(testDir, 'ambiguous-provider-test');
+		mkdirSync(configDir, {recursive: true});
+
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'Ollama',
+							baseUrl: 'http://localhost:8000/v1',
+							models: ['llama3.1:latest'],
+						},
+						{
+							name: 'ollama', // deliberately different casing
+							baseUrl: 'http://localhost:9000/v1',
+							models: ['other-model'],
+						},
+					],
+				},
+			},
+			configDir,
+		);
+
+		process.cwd = () => configDir;
+		clearAppConfig();
+		reloadAppConfig();
+
+		const error = await t.throwsAsync(createLLMClient('ollama'), {
+			instanceOf: ConfigurationError,
+		});
+
+		t.true(error.message.includes('ambiguous'));
+		t.true(error.message.includes('Ollama'));
+		t.true(error.message.includes('ollama'));
+	},
+);
+
+test.serial(
 	'createLLMClient: throws ConfigurationError when provider not found',
 	async t => {
 		globalThis.fetch = createMockFetch(true, 200);
@@ -1223,6 +1303,46 @@ test.serial(
 );
 
 test.serial(
+	'createLLMClient: matches preferences.lastProvider case-insensitively',
+	async t => {
+		globalThis.fetch = createMockFetch(true, 200);
+
+		const configDir = join(testDir, 'case-insensitive-last-provider-test');
+		mkdirSync(configDir, {recursive: true});
+
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'Ollama',
+							baseUrl: 'http://localhost:8000/v1',
+							models: ['llama3.1:latest'],
+						},
+					],
+				},
+			},
+			configDir,
+		);
+
+		writeFileSync(
+			join(configDir, 'nanocoder-preferences.json'),
+			JSON.stringify({lastProvider: 'ollama'}, null, 2),
+		);
+
+		process.cwd = () => configDir;
+		clearAppConfig();
+		reloadAppConfig();
+		resetPreferencesCache();
+
+		const result = await createLLMClient();
+
+		t.truthy(result);
+		t.is(result.actualProvider, 'Ollama');
+	},
+);
+
+test.serial(
 	'createLLMClient: throws when stale provider is passed explicitly',
 	async t => {
 		globalThis.fetch = createMockFetch(true, 200);
@@ -1297,5 +1417,130 @@ test.serial(
 		t.truthy(providerConfig);
 		t.is(providerConfig?.contextWindow, 32768);
 		t.deepEqual(providerConfig?.contextWindows, {model1: 65536});
+	},
+);
+
+test.serial(
+	'createLLMClient: applies context window overrides on provider config',
+	async t => {
+		globalThis.fetch = createMockFetch(true, 200);
+
+		const configDir = join(testDir, 'provider-context-override-config-test');
+		mkdirSync(configDir, {recursive: true});
+
+		createTestConfig(
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'TestProvider',
+							baseUrl: 'http://localhost:8000/v1',
+							models: ['model1'],
+							contextWindow: 32768,
+						},
+					],
+				},
+			},
+			configDir,
+		);
+
+		process.cwd = () => configDir;
+		clearAppConfig();
+		reloadAppConfig();
+
+		const result = await createLLMClient('TestProvider', 'model1', {
+			contextWindow: 16384,
+		});
+		const providerConfig = getClientProviderConfig(
+			result.client as unknown as {providerConfig?: AIProviderConfig},
+		);
+
+		t.truthy(result);
+		t.truthy(providerConfig);
+		t.is(providerConfig?.contextWindow, 16384);
+	},
+);
+
+// ============================================================================
+// loadProviderConfigs: OpenRouter block threading
+// ============================================================================
+
+test.serial(
+	'loadProviderConfigs threads the openrouter block from ProviderConfig to AIProviderConfig',
+	t => {
+		const originalProviders = process.env.NANOCODER_PROVIDERS;
+
+		try {
+			process.env.NANOCODER_PROVIDERS = JSON.stringify({
+				providers: [
+					{
+						name: 'OpenRouter',
+						baseUrl: 'https://openrouter.ai/api/v1',
+						apiKey: 'test-key',
+						models: ['anthropic/claude-3.5-sonnet'],
+						openrouter: {
+							provider: {sort: 'price', allow_fallbacks: true},
+							reasoning: {effort: 'high'},
+							service_tier: 'flex',
+							plugins: [{id: 'context-compression', engine: 'middle-out'}],
+							models: ['openai/gpt-4o'],
+						},
+					},
+				],
+			});
+
+			const resolved = loadProviderConfigs();
+			const openrouter = resolved.find(p => p.name === 'OpenRouter');
+
+			t.truthy(openrouter, 'OpenRouter provider should be loaded');
+			t.deepEqual(openrouter?.openrouter, {
+				provider: {sort: 'price', allow_fallbacks: true},
+				reasoning: {effort: 'high'},
+				service_tier: 'flex',
+				plugins: [{id: 'context-compression', engine: 'middle-out'}],
+				models: ['openai/gpt-4o'],
+			});
+			// Make sure the baseURL/apiKey translation still works alongside it.
+			t.is(openrouter?.config.baseURL, 'https://openrouter.ai/api/v1');
+			t.is(openrouter?.config.apiKey, 'test-key');
+		} finally {
+			if (originalProviders !== undefined) {
+				process.env.NANOCODER_PROVIDERS = originalProviders;
+			} else {
+				delete process.env.NANOCODER_PROVIDERS;
+			}
+		}
+	},
+);
+
+test.serial(
+	'loadProviderConfigs leaves openrouter undefined when no block is provided',
+	t => {
+		const originalProviders = process.env.NANOCODER_PROVIDERS;
+
+		try {
+			process.env.NANOCODER_PROVIDERS = JSON.stringify({
+				providers: [
+					{
+						name: 'OpenRouter',
+						baseUrl: 'https://openrouter.ai/api/v1',
+						apiKey: 'test-key',
+						models: ['anthropic/claude-3.5-sonnet'],
+					},
+				],
+			});
+
+			const resolved = loadProviderConfigs();
+			const openrouter = resolved.find(p => p.name === 'OpenRouter');
+
+			t.truthy(openrouter);
+			t.is(openrouter?.openrouter, undefined);
+		} finally {
+			if (originalProviders !== undefined) {
+				process.env.NANOCODER_PROVIDERS = originalProviders;
+			} else {
+				delete process.env.NANOCODER_PROVIDERS;
+			}
+		}
 	},
 );

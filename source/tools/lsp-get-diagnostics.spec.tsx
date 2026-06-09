@@ -111,18 +111,10 @@ test('get_diagnostics formatter: handles empty diagnostics', async t => {
 // Needs Approval Tests
 // ============================================================================
 
-test('get_diagnostics: never requires approval', async t => {
-	const needsApproval = getDiagnosticsTool.tool.needsApproval;
-
-	if (typeof needsApproval === 'function') {
-		const result = await needsApproval(
-			{path: 'test.ts'},
-			{toolCallId: 'test', messages: []},
-		);
-		t.false(result);
-	} else {
-		t.is(needsApproval, false);
-	}
+test('get_diagnostics: never requires approval', t => {
+	// Read-only tools default to no approval (see resolveToolApproval).
+	t.true(getDiagnosticsTool.readOnly);
+	t.is(getDiagnosticsTool.approval, undefined);
 });
 
 // ============================================================================

@@ -12,6 +12,7 @@ import type {
 } from '@/types/checkpoint';
 import type {Message} from '@/types/core';
 import {validateCheckpointName} from '@/utils/checkpoint-utils';
+import {formatError} from '@/utils/error-formatter';
 import {logWarning} from '@/utils/message-queue';
 import {FileSnapshotService} from './file-snapshot';
 
@@ -219,7 +220,7 @@ export class CheckpointManager {
 					logWarning('Could not load file snapshot', true, {
 						context: {
 							relativePath,
-							error: error instanceof Error ? error.message : 'Unknown error',
+							error: formatError(error),
 						},
 					});
 				}
@@ -271,7 +272,7 @@ export class CheckpointManager {
 					logWarning('Could not read checkpoint', true, {
 						context: {
 							checkpointName: entry,
-							error: error instanceof Error ? error.message : 'Unknown error',
+							error: formatError(error),
 						},
 					});
 				}
@@ -286,11 +287,7 @@ export class CheckpointManager {
 
 			return checkpoints;
 		} catch (error) {
-			throw new Error(
-				`Failed to list checkpoints: ${
-					error instanceof Error ? error.message : 'Unknown error'
-				}`,
-			);
+			throw new Error(`Failed to list checkpoints: ${formatError(error)}`);
 		}
 	}
 
@@ -308,9 +305,7 @@ export class CheckpointManager {
 			await fs.rm(checkpointDir, {recursive: true, force: true});
 		} catch (error) {
 			throw new Error(
-				`Failed to delete checkpoint '${name}': ${
-					error instanceof Error ? error.message : 'Unknown error'
-				}`,
+				`Failed to delete checkpoint '${name}': ${formatError(error)}`,
 			);
 		}
 	}
@@ -347,11 +342,7 @@ export class CheckpointManager {
 					errors.push('Invalid metadata structure');
 				}
 			} catch (error) {
-				errors.push(
-					`Invalid metadata.json: ${
-						error instanceof Error ? error.message : 'Unknown error'
-					}`,
-				);
+				errors.push(`Invalid metadata.json: ${formatError(error)}`);
 			}
 		}
 
@@ -374,11 +365,7 @@ export class CheckpointManager {
 					errors.push('Invalid conversation structure');
 				}
 			} catch (error) {
-				errors.push(
-					`Invalid conversation.json: ${
-						error instanceof Error ? error.message : 'Unknown error'
-					}`,
-				);
+				errors.push(`Invalid conversation.json: ${formatError(error)}`);
 			}
 		}
 
@@ -433,7 +420,7 @@ export class CheckpointManager {
 			logWarning('Could not calculate directory size', true, {
 				context: {
 					dirPath,
-					error: error instanceof Error ? error.message : 'Unknown error',
+					error: formatError(error),
 				},
 			});
 		}

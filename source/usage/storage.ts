@@ -7,6 +7,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {getAppDataPath, getConfigPath} from '@/config/paths';
 import {MAX_DAILY_AGGREGATES, MAX_USAGE_SESSIONS} from '@/constants';
+import {formatError} from '@/utils/error-formatter';
 import {logInfo, logWarning} from '@/utils/message-queue';
 import type {DailyAggregate, SessionUsage, UsageData} from '../types/usage';
 
@@ -31,7 +32,10 @@ function getUsageFilePath(): string {
 		return newPath;
 	}
 
-	// Attempt one-time lazy migration from legacy location
+	// LEGACY_MIGRATION_REMOVE_AFTER: 1.27.0
+	// One-time migration of usage data from the old config dir to the app-data dir.
+	// Drop this branch and `getLegacyUsageFilePath` once 1.27.0 has shipped and
+	// any dormant installs have had a chance to update.
 	const legacyPath = getLegacyUsageFilePath();
 	if (legacyPath && fs.existsSync(legacyPath)) {
 		try {
@@ -45,9 +49,9 @@ function getUsageFilePath(): string {
 			} catch (renameError) {
 				// Fallback if rename/move fails: copy then best-effort delete
 				logWarning(
-					`Could not move usage file (${
-						renameError instanceof Error ? renameError.message : 'unknown error'
-					}), copying instead...`,
+					`Could not move usage file (${formatError(
+						renameError,
+					)}), copying instead...`,
 				);
 				fs.copyFileSync(legacyPath, newPath);
 				try {
@@ -64,9 +68,9 @@ function getUsageFilePath(): string {
 		} catch (error) {
 			// On any failure, fall through to using newPath without migration
 			logWarning(
-				`Failed to migrate usage data from ${legacyPath}: ${
-					error instanceof Error ? error.message : 'unknown error'
-				}. Old data remains at legacy location.`,
+				`Failed to migrate usage data from ${legacyPath}: ${formatError(
+					error,
+				)}. Old data remains at legacy location.`,
 			);
 		}
 	}

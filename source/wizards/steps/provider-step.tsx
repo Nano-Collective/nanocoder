@@ -2,7 +2,6 @@ import {Box, Text, useInput} from 'ink';
 import SelectInput from 'ink-select-input';
 import Spinner from 'ink-spinner';
 import {useEffect, useRef, useState} from 'react';
-import TextInput from '@/components/text-input';
 import {getColors} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import type {ProviderConfig} from '../../types/config';
@@ -15,6 +14,9 @@ import {
 	type FetchedModel,
 	fetchModels,
 } from '../utils/fetch-models';
+import {FieldInputView} from './field-input-view';
+import {ModelSelectionList} from './model-selection-list';
+import {useWizardForm} from './use-wizard-form';
 
 interface ProviderStepProps {
 	onComplete: (providers: ProviderConfig[]) => void;
@@ -91,13 +93,21 @@ export function ProviderStep({
 	}, [existingProviders]);
 
 	const [mode, setMode] = useState<Mode>('select-template-or-custom');
-	const [selectedTemplate, setSelectedTemplate] =
-		useState<ProviderTemplate | null>(null);
-	const [currentFieldIndex, setCurrentFieldIndex] = useState(0);
-	const [fieldAnswers, setFieldAnswers] = useState<Record<string, string>>({});
-	const [currentValue, setCurrentValue] = useState('');
-	const [error, setError] = useState<string | null>(null);
-	const [inputKey, setInputKey] = useState(0);
+	const {
+		selectedTemplate,
+		currentFieldIndex,
+		fieldAnswers,
+		setFieldAnswers,
+		currentValue,
+		setCurrentValue,
+		error,
+		setError,
+		inputKey,
+		beginTemplate,
+		loadField,
+		resetForm,
+		bumpInputKey,
+	} = useWizardForm<ProviderTemplate>();
 	const [cameFromCustom, setCameFromCustom] = useState(false);
 	const [editingIndex, setEditingIndex] = useState<number | null>(null);
 	const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
@@ -162,10 +172,7 @@ export function ProviderStep({
 			// Find custom template
 			const customTemplate = PROVIDER_TEMPLATES.find(t => t.id === 'custom');
 			if (customTemplate) {
-				setSelectedTemplate(customTemplate);
-				setCurrentFieldIndex(0);
-				setFieldAnswers({});
-				setCurrentValue('');
+				beginTemplate(customTemplate);
 				setMode('field-input');
 				setCameFromCustom(true);
 			}
@@ -188,11 +195,7 @@ export function ProviderStep({
 		const template = PROVIDER_TEMPLATES.find(t => t.id === item.value);
 		if (template) {
 			setEditingIndex(null); // Not editing
-			setSelectedTemplate(template);
-			setCurrentFieldIndex(0);
-			setFieldAnswers({});
-			setCurrentValue(template.fields[0]?.default || '');
-			setError(null);
+			beginTemplate(template);
 			setMode('field-input');
 			setCameFromCustom(false);
 		}
@@ -221,22 +224,13 @@ export function ProviderStep({
 				const template = findTemplateForProvider(provider);
 
 				if (template) {
-					setSelectedTemplate(template);
-					setCurrentFieldIndex(0);
-
 					const answers: Record<string, string> = {};
 					if (provider.name) answers.providerName = provider.name;
 					if (provider.baseUrl) answers.baseUrl = provider.baseUrl;
 					if (provider.apiKey) answers.apiKey = provider.apiKey;
 					if (provider.models) answers.model = provider.models.join(', ');
 
-					setFieldAnswers(answers);
-					setCurrentValue(
-						answers[template.fields[0]?.name] ||
-							template.fields[0]?.default ||
-							'',
-					);
-					setError(null);
+					beginTemplate(template, answers);
 					setMode('field-input');
 					setCameFromCustom(false);
 				}
@@ -244,33 +238,39 @@ export function ProviderStep({
 		}
 	};
 
-	const handleFieldSubmit = () => {
+	// `overrideValue` lets boolean SelectInput pass its chosen value straight
+	// in — the state update for `currentValue` is async, so reading from state
+	// after a SelectInput.onSelect would still see the stale value.
+	const handleFieldSubmit = (overrideValue?: string) => {
 		if (!selectedTemplate) return;
 
 		const currentField = selectedTemplate.fields[currentFieldIndex];
 		if (!currentField) return;
 
+		const submittedValue =
+			overrideValue !== undefined ? overrideValue : currentValue;
+
 		// Validate required fields
-		if (currentField.required && !currentValue.trim()) {
+		if (currentField.required && !submittedValue.trim()) {
 			setError('This field is required');
 			return;
 		}
 
 		// Validate duplicate provider names
-		if (currentField.name === 'providerName' && currentValue.trim()) {
-			const nameLower = currentValue.trim().toLowerCase();
+		if (currentField.name === 'providerName' && submittedValue.trim()) {
+			const nameLower = submittedValue.trim().toLowerCase();
 			const isDuplicate = providers.some(
 				(p, i) => p.name.toLowerCase() === nameLower && i !== editingIndex,
 			);
 			if (isDuplicate) {
-				setError(`A provider named '${currentValue.trim()}' already exists`);
+				setError(`A provider named '${submittedValue.trim()}' already exists`);
 				return;
 			}
 		}
 
 		// Validate with custom validator
-		if (currentField.validator && currentValue.trim()) {
-			const validationError = currentField.validator(currentValue);
+		if (currentField.validator && submittedValue.trim()) {
+			const validationError = currentField.validator(submittedValue);
 			if (validationError) {
 				setError(validationError);
 				return;
@@ -280,7 +280,7 @@ export function ProviderStep({
 		// Save answer
 		const newAnswers = {
 			...fieldAnswers,
-			[currentField.name]: currentValue.trim(),
+			[currentField.name]: submittedValue.trim(),
 		};
 		setFieldAnswers(newAnswers);
 		setError(null);
@@ -295,8 +295,7 @@ export function ProviderStep({
 				return;
 			}
 
-			setCurrentFieldIndex(currentFieldIndex + 1);
-			setCurrentValue(newAnswers[nextField?.name] || nextField?.default || '');
+			loadField(selectedTemplate, currentFieldIndex + 1, newAnswers);
 		} else {
 			// Validate models array is not empty before building config
 			const modelsValue = newAnswers.model || '';
@@ -325,10 +324,7 @@ export function ProviderStep({
 
 				// Reset and go back to appropriate screen
 				const wasEditing = editingIndex !== null;
-				setSelectedTemplate(null);
-				setCurrentFieldIndex(0);
-				setFieldAnswers({});
-				setCurrentValue('');
+				resetForm();
 				setEditingIndex(null);
 				setMode(
 					wasEditing ? 'select-template-or-custom' : 'template-selection',
@@ -342,15 +338,12 @@ export function ProviderStep({
 	};
 
 	const goToManualModelInput = (answers: Record<string, string>) => {
-		const modelFieldIndex = selectedTemplate?.fields.findIndex(
+		if (!selectedTemplate) return;
+		const modelFieldIndex = selectedTemplate.fields.findIndex(
 			f => f.name === 'model',
 		);
-		if (modelFieldIndex !== undefined && modelFieldIndex >= 0) {
-			setCurrentFieldIndex(modelFieldIndex);
-			const modelField = selectedTemplate?.fields[modelFieldIndex];
-			setCurrentValue(
-				answers[modelField?.name || ''] || modelField?.default || '',
-			);
+		if (modelFieldIndex >= 0) {
+			loadField(selectedTemplate, modelFieldIndex, answers);
 			setMode('field-input');
 		}
 	};
@@ -456,9 +449,7 @@ export function ProviderStep({
 
 		if (modelFieldIndex < selectedTemplate.fields.length - 1) {
 			// There are more fields after model
-			setCurrentFieldIndex(modelFieldIndex + 1);
-			const nextField = selectedTemplate.fields[modelFieldIndex + 1];
-			setCurrentValue(newAnswers[nextField?.name] || nextField?.default || '');
+			loadField(selectedTemplate, modelFieldIndex + 1, newAnswers);
 			setMode('field-input');
 		} else {
 			// Model was the last field - build config
@@ -475,10 +466,7 @@ export function ProviderStep({
 
 				// Reset and go back to appropriate screen
 				const wasEditing = editingIndex !== null;
-				setSelectedTemplate(null);
-				setCurrentFieldIndex(0);
-				setFieldAnswers({});
-				setCurrentValue('');
+				resetForm();
 				setEditingIndex(null);
 				setFetchedModels([]);
 				setSelectedModelIds(new Set());
@@ -493,6 +481,19 @@ export function ProviderStep({
 		}
 	};
 
+	const handleModelSelectionBack = () => {
+		if (!selectedTemplate) return;
+		const modelFieldIndex = selectedTemplate.fields.findIndex(
+			f => f.name === 'model',
+		);
+		const prevIndex = modelFieldIndex > 0 ? modelFieldIndex - 1 : 0;
+		loadField(selectedTemplate, prevIndex, fieldAnswers);
+		setFetchedModels([]);
+		setSelectedModelIds(new Set());
+		setError(null);
+		setMode('field-input');
+	};
+
 	useInput((_input, key) => {
 		// Handle Shift+Tab for going back
 		if (key.shift && key.tab) {
@@ -500,12 +501,10 @@ export function ProviderStep({
 				// In field input mode, check if we can go back to previous field
 				if (currentFieldIndex > 0) {
 					// Go back to previous field
-					setCurrentFieldIndex(currentFieldIndex - 1);
-					const prevField = selectedTemplate?.fields[currentFieldIndex - 1];
-					setCurrentValue(
-						fieldAnswers[prevField?.name || ''] || prevField?.default || '',
-					);
-					setInputKey(prev => prev + 1); // Force remount to reset cursor position
+					if (selectedTemplate) {
+						loadField(selectedTemplate, currentFieldIndex - 1, fieldAnswers);
+					}
+					bumpInputKey(); // Force remount to reset cursor position
 					setError(null);
 				} else {
 					// At first field, go back based on where we came from
@@ -519,11 +518,7 @@ export function ProviderStep({
 						// Came from template selection, go back there
 						setMode('template-selection');
 					}
-					setSelectedTemplate(null);
-					setCurrentFieldIndex(0);
-					setFieldAnswers({});
-					setCurrentValue('');
-					setError(null);
+					resetForm();
 				}
 			} else if (mode === 'template-selection') {
 				// In template selection, go back to initial choice
@@ -535,24 +530,6 @@ export function ProviderStep({
 			} else if (mode === 'edit-selection') {
 				// In edit selection, go back to initial choice
 				setMode('select-template-or-custom');
-			} else if (mode === 'model-selection') {
-				// Go back to the field before the model field
-				const modelFieldIndex = selectedTemplate?.fields.findIndex(
-					f => f.name === 'model',
-				);
-				const prevIndex =
-					modelFieldIndex !== undefined && modelFieldIndex > 0
-						? modelFieldIndex - 1
-						: 0;
-				setCurrentFieldIndex(prevIndex);
-				const prevField = selectedTemplate?.fields[prevIndex];
-				setCurrentValue(
-					fieldAnswers[prevField?.name || ''] || prevField?.default || '',
-				);
-				setFetchedModels([]);
-				setSelectedModelIds(new Set());
-				setError(null);
-				setMode('field-input');
 			} else if (mode === 'select-template-or-custom') {
 				// At root level, call parent's onBack
 				if (onBack) {
@@ -563,38 +540,16 @@ export function ProviderStep({
 		}
 
 		if (mode === 'field-input') {
-			if (key.return) {
+			// Boolean fields render a SelectInput which has its own Enter
+			// handler; let it take submission so the chosen value isn't lost
+			// to the global handler reading stale state.
+			const currentField = selectedTemplate?.fields[currentFieldIndex];
+			if (key.return && currentField?.type !== 'boolean') {
 				handleFieldSubmit();
 			} else if (key.escape) {
 				// Go back to template selection
 				setMode('template-selection');
-				setSelectedTemplate(null);
-				setCurrentFieldIndex(0);
-				setFieldAnswers({});
-				setCurrentValue('');
-				setError(null);
-			}
-		}
-
-		if (mode === 'model-selection') {
-			if (key.escape) {
-				setFetchedModels([]);
-				setSelectedModelIds(new Set());
-				setError(null);
-				// Go back to the field before the model field
-				const modelFieldIndex = selectedTemplate?.fields.findIndex(
-					f => f.name === 'model',
-				);
-				const prevIndex =
-					modelFieldIndex !== undefined && modelFieldIndex > 0
-						? modelFieldIndex - 1
-						: 0;
-				setCurrentFieldIndex(prevIndex);
-				const prevField = selectedTemplate?.fields[prevIndex];
-				setCurrentValue(
-					fieldAnswers[prevField?.name || ''] || prevField?.default || '',
-				);
-				setMode('field-input');
+				resetForm();
 			}
 		}
 	});
@@ -688,75 +643,19 @@ export function ProviderStep({
 		if (!currentField) return null;
 
 		return (
-			<Box flexDirection="column">
-				<Box marginBottom={1}>
-					<Text bold color={colors.primary}>
-						{selectedTemplate.name} Configuration
-					</Text>
-					<Text>
-						{' '}
-						(Field {currentFieldIndex + 1}/{selectedTemplate.fields.length})
-					</Text>
-				</Box>
-
-				<Box>
-					<Text>
-						{currentField.prompt}
-						{currentField.required && <Text color={colors.error}> *</Text>}:{' '}
-						{currentField.sensitive && '****'}
-					</Text>
-				</Box>
-
-				{!currentField.sensitive && (
-					<Box
-						marginBottom={1}
-						borderStyle="round"
-						borderColor={colors.secondary}
-					>
-						<TextInput
-							key={inputKey}
-							value={currentValue}
-							onChange={setCurrentValue}
-							onSubmit={handleFieldSubmit}
-						/>
-					</Box>
-				)}
-
-				{currentField.sensitive && (
-					<Box
-						marginBottom={1}
-						borderStyle="round"
-						borderColor={colors.secondary}
-					>
-						<TextInput
-							key={inputKey}
-							value={currentValue}
-							onChange={setCurrentValue}
-							onSubmit={handleFieldSubmit}
-							mask="*"
-						/>
-					</Box>
-				)}
-
-				{error && (
-					<Box marginBottom={1}>
-						<Text color={colors.error}>{error}</Text>
-					</Box>
-				)}
-
-				{isNarrow ? (
-					<Box flexDirection="column">
-						<Text color={colors.secondary}>Enter: continue</Text>
-						<Text color={colors.secondary}>Shift+Tab: go back</Text>
-					</Box>
-				) : (
-					<Box>
-						<Text color={colors.secondary}>
-							Press Enter to continue | Shift+Tab to go back
-						</Text>
-					</Box>
-				)}
-			</Box>
+			<FieldInputView
+				templateName={selectedTemplate.name}
+				currentField={currentField}
+				fieldIndex={currentFieldIndex}
+				fieldCount={selectedTemplate.fields.length}
+				currentValue={currentValue}
+				error={error}
+				isNarrow={isNarrow}
+				inputKey={inputKey}
+				colors={colors}
+				onChange={setCurrentValue}
+				onSubmit={handleFieldSubmit}
+			/>
 		);
 	}
 
@@ -779,62 +678,18 @@ export function ProviderStep({
 	}
 
 	if (mode === 'model-selection' && selectedTemplate) {
-		const allSelected = selectedModelIds.size === fetchedModels.length;
-		const modelOptions = [
-			{
-				// Show checked when all selected, unchecked when not - matches visual state
-				label: allSelected
-					? '[✓] All selected (toggle to deselect)'
-					: '[ ] Select All',
-				value: '__select_all__',
-			},
-			...fetchedModels.map(m => ({
-				label: `${selectedModelIds.has(m.id) ? '[✓]' : '[ ]'} ${m.name}`,
-				value: m.id,
-			})),
-			{label: 'Done - Continue with selected models', value: '__done__'},
-		];
-
 		return (
-			<Box flexDirection="column">
-				<Box marginBottom={1}>
-					<Text bold color={colors.primary}>
-						{selectedTemplate.name} Configuration
-					</Text>
-				</Box>
-				<Box marginBottom={1}>
-					<Text>Select models to use ({selectedModelIds.size} selected):</Text>
-				</Box>
-				<SelectInput
-					items={modelOptions}
-					onSelect={(item: {value: string}) => {
-						if (item.value === '__done__') {
-							handleModelSelectionComplete();
-						} else if (item.value === '__select_all__') {
-							handleSelectAllModels();
-						} else {
-							handleModelToggle(item.value);
-						}
-					}}
-				/>
-				{error && (
-					<Box marginTop={1}>
-						<Text color={colors.error}>{error}</Text>
-					</Box>
-				)}
-				{isNarrow ? (
-					<Box flexDirection="column" marginTop={1}>
-						<Text color={colors.secondary}>Enter: toggle/continue</Text>
-						<Text color={colors.secondary}>Shift+Tab: go back</Text>
-					</Box>
-				) : (
-					<Box marginTop={1}>
-						<Text color={colors.secondary}>
-							Press Enter to toggle | Shift+Tab to go back
-						</Text>
-					</Box>
-				)}
-			</Box>
+			<ModelSelectionList
+				models={fetchedModels}
+				selectedIds={selectedModelIds}
+				title={`${selectedTemplate.name} Configuration`}
+				error={error}
+				isNarrow={isNarrow}
+				onToggle={handleModelToggle}
+				onSelectAll={handleSelectAllModels}
+				onDone={handleModelSelectionComplete}
+				onBack={handleModelSelectionBack}
+			/>
 		);
 	}
 

@@ -24,33 +24,33 @@
 		},
 		"interactive_module_count": {
 			"kind": "numeric",
-			"value": 509,
+			"value": 527,
 			"warnOnDecrease": false
 		},
 		"interactive_boot_ms_approx": {
 			"kind": "numeric",
-			"value": 606,
+			"value": 504,
 			"warnOnDecrease": false
 		},
 		"first_render_ms_approx": {
 			"kind": "numeric",
-			"value": 611,
+			"value": 454,
 			"warnOnDecrease": false
 		},
 		"dist_size_bytes": {
 			"kind": "numeric",
-			"value": 3560131
+			"value": 3783436
 		},
 		"dist_file_count": {
 			"kind": "numeric",
-			"value": 1329,
+			"value": 1434,
 			"warnOnDecrease": false
 		}
 	},
 	"stability": {
 		"cli_flag_count": {
 			"kind": "numeric",
-			"value": 9,
+			"value": 13,
 			"warnOnDecrease": true
 		},
 		"tool_count": {
@@ -60,28 +60,28 @@
 		},
 		"command_count": {
 			"kind": "numeric",
-			"value": 32,
+			"value": 33,
 			"warnOnDecrease": true
 		},
 		"help_hash": {
 			"kind": "hash",
-			"value": "a70476628125"
+			"value": "656e641d85f3"
 		}
 	},
 	"health": {
 		"test_file_count": {
 			"kind": "numeric",
-			"value": 259,
+			"value": 284,
 			"warnOnDecrease": true
 		},
 		"test_case_count": {
 			"kind": "numeric",
-			"value": 5255,
+			"value": 5637,
 			"warnOnDecrease": true
 		},
 		"audit_high_vulns": {
 			"kind": "numeric",
-			"value": 1
+			"value": 3
 		}
 	}
 }

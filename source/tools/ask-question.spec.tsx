@@ -4,6 +4,10 @@ import React from 'react';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
 import {setGlobalQuestionHandler} from '../utils/question-queue';
+import {
+	getToolJsonSchema,
+	validateArgsAgainstSchema,
+} from '../utils/schema-validate';
 import {askQuestionTool} from './ask-question';
 
 console.log(`\nask-question.spec.tsx – ${React.version}`);
@@ -35,7 +39,7 @@ test('ask_user tool has correct name', t => {
 });
 
 test('ask_user tool does not require approval', t => {
-	t.false(askQuestionTool.tool.needsApproval);
+	t.is(askQuestionTool.approval, false);
 });
 
 test('ask_user tool has execute function', t => {
@@ -44,6 +48,44 @@ test('ask_user tool has execute function', t => {
 
 test('ask_user tool has formatter function', t => {
 	t.is(typeof askQuestionTool.formatter, 'function');
+});
+
+// ============================================================================
+// Tests for Schema Validation
+// ============================================================================
+
+// Regression: the withValidation wrapper type-checks args against the tool's
+// schema BEFORE the handler runs. With options declared as string[], MiniMax M3
+// (which emits {label, value} objects) failed validation and never reached the
+// handler's toOptionString coercion — looping forever on "expected string,
+// received object". The schema must accept object-shaped options too.
+test('ask_user schema accepts object-shaped options without validation errors', t => {
+	const schema = getToolJsonSchema(askQuestionTool.tool);
+	t.truthy(schema);
+
+	const errors = validateArgsAgainstSchema(
+		{
+			question: 'Which cards?',
+			options: [
+				{value: 'quicklinks_only', label: 'Just the quick-link cards'},
+				{value: 'all_cards_blue', label: 'All cards'},
+			],
+		},
+		schema,
+	);
+
+	t.deepEqual(errors, []);
+});
+
+test('ask_user schema still accepts plain string options', t => {
+	const schema = getToolJsonSchema(askQuestionTool.tool);
+
+	const errors = validateArgsAgainstSchema(
+		{question: 'Which database?', options: ['PostgreSQL', 'SQLite']},
+		schema,
+	);
+
+	t.deepEqual(errors, []);
 });
 
 // ============================================================================
@@ -92,6 +134,53 @@ test('ask_user execute calls signalQuestion and returns answer', async t => {
 	);
 
 	t.is(result, 'PostgreSQL');
+});
+
+// Regression: some models emit options as objects ({value: "..."} / {label:
+// "..."}) instead of strings. They must be normalised to clean strings so the
+// prompt doesn't show JSON blobs and the selected answer isn't a JSON blob.
+test('ask_user execute normalises object-shaped options to strings', async t => {
+	setGlobalQuestionHandler(async q => {
+		t.deepEqual(q.options, ['All cards', 'Only muted icons']);
+		return 'All cards';
+	});
+
+	const result = await askQuestionTool.tool.execute!(
+		{
+			question: 'How to update icons?',
+			// Schema says string[], but a model can send objects — cast for the test.
+			options: [{value: 'All cards'}, {label: 'Only muted icons'}] as unknown as string[],
+		},
+		{toolCallId: 'test', messages: []},
+	);
+
+	t.is(result, 'All cards');
+});
+
+// The standard {label, value} select shape: the readable label is shown (and
+// returned), not the machine id in `value` (regression: options rendered as
+// "quicklinks_only" etc.).
+test('ask_user execute prefers the readable label over the value id', async t => {
+	setGlobalQuestionHandler(async q => {
+		t.deepEqual(q.options, [
+			'Just the quick-link cards',
+			'All cards → primary blue',
+		]);
+		return q.options[0];
+	});
+
+	const result = await askQuestionTool.tool.execute!(
+		{
+			question: 'Which cards?',
+			options: [
+				{value: 'quicklinks_only', label: 'Just the quick-link cards'},
+				{value: 'all_cards_blue', label: 'All cards → primary blue'},
+			] as unknown as string[],
+		},
+		{toolCallId: 'test', messages: []},
+	);
+
+	t.is(result, 'Just the quick-link cards');
 });
 
 test('ask_user execute respects allowFreeform=false', async t => {

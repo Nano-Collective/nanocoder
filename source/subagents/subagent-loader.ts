@@ -11,6 +11,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {formatError} from '@/utils/error-formatter';
 import {logError, logWarning} from '@/utils/message-queue';
 import type {SubagentConfigWithSource, SubagentLoadPriority} from './types.js';
 
@@ -35,12 +36,24 @@ function getBuiltInAgentsDir(): string {
  * SubagentLoader manages loading subagent definitions from multiple sources.
  * Sources are loaded in priority order (project > user > built-in).
  */
+export interface SubagentLoadError {
+	filePath: string;
+	message: string;
+}
+
 export class SubagentLoader {
 	/** Cache of loaded subagent configs */
 	private cache: Map<string, SubagentConfigWithSource> = new Map();
 
 	/** Whether the cache has been initialized */
 	private initialized = false;
+
+	/**
+	 * Per-file parse / load errors collected during initialize(). Drained by
+	 * bootstrap so the daemon can surface them in its log (the message-queue
+	 * `logError` path only reaches the TUI's chat queue).
+	 */
+	private loadErrors: SubagentLoadError[] = [];
 
 	/** Project root directory */
 	private projectRoot: string;
@@ -102,6 +115,25 @@ export class SubagentLoader {
 	}
 
 	/**
+	 * Register a subagent config produced outside this loader (e.g. by the
+	 * skill registrar). Returns true on success, false if the name is
+	 * already cached - the caller treats that as a hard collision.
+	 */
+	registerExternal(config: SubagentConfigWithSource): boolean {
+		if (this.cache.has(config.name)) return false;
+		this.cache.set(config.name, config);
+		this.initialized = true;
+		return true;
+	}
+
+	/**
+	 * Remove a previously-registered subagent by name. Returns true if found.
+	 */
+	unregisterExternal(name: string): boolean {
+		return this.cache.delete(name);
+	}
+
+	/**
 	 * Get a specific subagent by name.
 	 * @param name - The subagent name
 	 * @returns The subagent config or null if not found
@@ -146,7 +178,19 @@ export class SubagentLoader {
 	async reload(): Promise<void> {
 		this.cache.clear();
 		this.initialized = false;
+		this.loadErrors = [];
 		await this.initialize();
+	}
+
+	/**
+	 * Drain per-file load errors accumulated during initialize(). The caller
+	 * (typically the boot pipeline) surfaces them through its own error
+	 * channel. Subsequent calls return an empty array until reload().
+	 */
+	drainLoadErrors(): SubagentLoadError[] {
+		const errors = this.loadErrors;
+		this.loadErrors = [];
+		return errors;
 	}
 
 	/**
@@ -230,11 +274,12 @@ export class SubagentLoader {
 						filePath,
 						isBuiltIn: false,
 					},
+					subscribe: parsed.subscribe,
 				});
 			} catch (error) {
-				logError(
-					`Failed to load agent from ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
-				);
+				const message = formatError(error);
+				this.loadErrors.push({filePath, message});
+				logError(`Failed to load agent from ${filePath}: ${message}`);
 			}
 		}
 

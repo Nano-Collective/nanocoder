@@ -29,13 +29,40 @@ import {
 } from '@/config/copilot-credentials';
 import type {AIProviderConfig} from '@/types/index';
 import {getLogger} from '@/utils/logging';
+import {isOpenRouterProvider} from './openrouter.js';
 
-// Union type for supported providers
-export type AIProvider =
-	| OpenAICompatibleProvider<string, string, string, string>
-	| OpenAIProvider
-	| GoogleGenerativeAIProvider
-	| AnthropicProvider;
+/**
+ * Discriminated union pairing each underlying SDK provider with its `kind`.
+ * Lets callers narrow the provider type via `kind` without `as unknown as`
+ * casts. The pairing is enforced by `createProvider`'s return value.
+ */
+export type TaggedProvider =
+	| {kind: 'chatgpt-codex'; provider: OpenAIProvider}
+	| {kind: 'github-copilot'; provider: OpenAIProvider}
+	| {
+			kind: 'openai-compatible';
+			provider: OpenAICompatibleProvider<string, string, string, string>;
+	  }
+	| {kind: 'anthropic'; provider: AnthropicProvider}
+	| {kind: 'google'; provider: GoogleGenerativeAIProvider};
+
+/**
+ * Wraps undici's fetch so requests flow through the shared Agent. The Agent
+ * carries TLS connect options (e.g. caCertPath), so any SDK provider given
+ * this fetch will honor the configured CA bundle — even Anthropic and Google,
+ * which would otherwise use the global fetch and bypass our TLS settings.
+ */
+function createUndiciFetch(undiciAgent: Agent) {
+	return (
+		url: string | URL | Request,
+		options?: RequestInit,
+	): Promise<Response> => {
+		return undiciFetch(url as string | URL, {
+			...(options as UndiciRequestInit),
+			dispatcher: undiciAgent,
+		}) as Promise<Response>;
+	};
+}
 
 /**
  * Creates an AI SDK provider based on the sdkProvider configuration.
@@ -48,7 +75,7 @@ export type AIProvider =
 export async function createProvider(
 	providerConfig: AIProviderConfig,
 	undiciAgent: Agent,
-): Promise<AIProvider> {
+): Promise<TaggedProvider> {
 	const logger = getLogger();
 	const {config, sdkProvider} = providerConfig;
 
@@ -60,11 +87,15 @@ export async function createProvider(
 		});
 
 		const {createAnthropic} = await import('@ai-sdk/anthropic');
-		return createAnthropic({
-			baseURL: config.baseURL || undefined,
-			apiKey: config.apiKey ?? '',
-			headers: config.headers,
-		});
+		return {
+			kind: 'anthropic',
+			provider: createAnthropic({
+				baseURL: config.baseURL || undefined,
+				apiKey: config.apiKey ?? '',
+				headers: config.headers,
+				fetch: createUndiciFetch(undiciAgent),
+			}),
+		};
 	}
 
 	if (sdkProvider === 'google') {
@@ -74,9 +105,13 @@ export async function createProvider(
 		});
 
 		const {createGoogleGenerativeAI} = await import('@ai-sdk/google');
-		return createGoogleGenerativeAI({
-			apiKey: config.apiKey ?? '',
-		});
+		return {
+			kind: 'google',
+			provider: createGoogleGenerativeAI({
+				apiKey: config.apiKey ?? '',
+				fetch: createUndiciFetch(undiciAgent),
+			}),
+		};
 	}
 
 	if (sdkProvider === 'github-copilot') {
@@ -140,13 +175,16 @@ export async function createProvider(
 		};
 
 		const {createOpenAI} = await import('@ai-sdk/openai');
-		return createOpenAI({
-			baseURL,
-			// Empty key — auth is handled entirely by copilotFetch's Authorization header
-			apiKey: '',
-			fetch: copilotFetch,
-			headers: config.headers ?? {},
-		});
+		return {
+			kind: 'github-copilot',
+			provider: createOpenAI({
+				baseURL,
+				// Empty key — auth is handled entirely by copilotFetch's Authorization header
+				apiKey: '',
+				fetch: copilotFetch,
+				headers: config.headers ?? {},
+			}),
+		};
 	}
 
 	if (sdkProvider === 'chatgpt-codex') {
@@ -221,40 +259,33 @@ export async function createProvider(
 		};
 
 		const {createOpenAI} = await import('@ai-sdk/openai');
-		return createOpenAI({
-			baseURL,
-			apiKey: '',
-			fetch: codexFetch,
-			headers: config.headers ?? {},
-		});
+		return {
+			kind: 'chatgpt-codex',
+			provider: createOpenAI({
+				baseURL,
+				apiKey: '',
+				fetch: codexFetch,
+				headers: config.headers ?? {},
+			}),
+		};
 	}
-
-	// Custom fetch using undici
-	const customFetch = (
-		url: string | URL | Request,
-		options?: RequestInit,
-	): Promise<Response> => {
-		// Type cast to string | URL since undici's fetch accepts these types
-		// Request objects are converted to URL internally by the fetch spec
-		return undiciFetch(url as string | URL, {
-			...(options as UndiciRequestInit),
-			dispatcher: undiciAgent,
-		}) as Promise<Response>;
-	};
 
 	// Add OpenRouter-specific headers for app attribution
 	const headers: Record<string, string> = config.headers ?? {};
-	if (providerConfig.name.toLowerCase() === 'openrouter') {
+	if (isOpenRouterProvider(providerConfig.name)) {
 		headers['HTTP-Referer'] = 'https://github.com/Nano-Collective/nanocoder';
 		headers['X-Title'] = 'Nanocoder';
 	}
 
 	const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible');
-	return createOpenAICompatible({
-		name: providerConfig.name,
-		baseURL: config.baseURL ?? '',
-		apiKey: config.apiKey ?? 'dummy-key',
-		fetch: customFetch,
-		headers,
-	});
+	return {
+		kind: 'openai-compatible',
+		provider: createOpenAICompatible({
+			name: providerConfig.name,
+			baseURL: config.baseURL ?? '',
+			apiKey: config.apiKey ?? 'dummy-key',
+			fetch: createUndiciFetch(undiciAgent),
+			headers,
+		}),
+	};
 }

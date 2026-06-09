@@ -1,3 +1,4 @@
+import {randomBytes} from 'node:crypto';
 import React from 'react';
 import {
 	createClearMessagesHandler,
@@ -10,14 +11,19 @@ import {
 } from '@/components/message-box';
 import Status from '@/components/status';
 import {getAppConfig} from '@/config/index';
-import {setCurrentMode as setCurrentModeContext} from '@/context/mode-context';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getModelContextLimit} from '@/models/index';
+import {bashExecutor} from '@/services/bash-executor';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {generateKey, setKeyGeneratorSessionId} from '@/session/key-generator';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
 import {createTokenizer} from '@/tokenization/index';
+import {
+	type GitStatusSummary,
+	getGitStatusSummarySync,
+} from '@/tools/git/utils';
 import type {Task} from '@/tools/tasks/types';
 import type {
 	CheckpointListItem,
@@ -28,10 +34,12 @@ import type {
 	Message,
 } from '@/types';
 import type {CustomCommand} from '@/types/commands';
+import type {TuneConfig} from '@/types/config';
 import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
 import {calculateTokenBreakdown} from '@/usage/calculator';
 import {autoCompactSessionOverrides} from '@/utils/auto-compact';
+import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 
@@ -42,13 +50,14 @@ interface UseAppHandlersProps {
 	currentProviderConfig: import('@/types/config').AIProviderConfig | null;
 	currentModel: string;
 	currentTheme: ThemePreset;
+	developmentMode: DevelopmentMode;
+	tune: TuneConfig | undefined;
 	abortController: AbortController | null;
 	updateInfo: UpdateInfo | null;
 	mcpServersStatus: MCPConnectionStatus[] | undefined;
 	lspServersStatus: LSPConnectionStatus[];
 	preferencesLoaded: boolean;
 	customCommandsCount: number;
-	getNextComponentKey: () => number;
 	customCommandCache: Map<string, CustomCommand>;
 	customCommandLoader: CustomCommandLoader | null;
 	customCommandExecutor: CustomCommandExecutor | null;
@@ -70,6 +79,7 @@ interface UseAppHandlersProps {
 	) => void;
 	setShowAllSessions: (value: boolean) => void;
 	setCurrentSessionId: (value: string | null) => void;
+	setSessionName: (value: string) => void;
 	setCurrentProvider: (value: string) => void;
 	setCurrentModel: (value: string) => void;
 	setLiveTaskList: (value: Task[] | null) => void;
@@ -83,7 +93,6 @@ interface UseAppHandlersProps {
 
 	// Mode handlers
 	enterModelSelectionMode: () => void;
-	enterProviderSelectionMode: () => void;
 	enterModelDatabaseMode: () => void;
 	enterConfigWizardMode: () => void;
 	enterSettingsMode: () => void;
@@ -91,10 +100,9 @@ interface UseAppHandlersProps {
 	enterExplorerMode: () => void;
 	enterIdeSelectionMode: () => void;
 	enterTune: () => void;
-	enterSchedulerMode: () => void;
 
 	// Chat handler
-	handleChatMessage: (message: string) => Promise<void>;
+	handleChatMessage: (message: string, displayValue?: string) => Promise<void>;
 
 	// VS Code active editor dismissal (dropped on /clear)
 	dismissActiveEditor?: () => void;
@@ -117,7 +125,10 @@ export interface AppHandlers {
 		checkpoints: CheckpointListItem[],
 		currentMessageCount: number,
 	) => void;
-	handleMessageSubmit: (message: string) => Promise<void>;
+	handleMessageSubmit: (
+		message: string,
+		displayValue?: string,
+	) => Promise<void>;
 }
 
 /**
@@ -136,6 +147,10 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			await baseClear();
 			props.setChatComponents([]);
 			props.setCurrentSessionId(null);
+			// Reset the key-generator session ID so keys in the new conversation
+			// are not prefixed with the cleared session's ID. A fresh random ID
+			// will be lazily generated on the next generateKey() call.
+			setKeyGeneratorSessionId(randomBytes(4).toString('hex'));
 			props.setLiveTaskList(null);
 			props.dismissActiveEditor?.();
 		},
@@ -150,15 +165,26 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 	// Cancel handler
 	const handleCancel = React.useCallback(() => {
+		// Kill any in-flight bash commands immediately. The auto-execute (yolo/
+		// headless) path runs bash without mounting the live BashProgress that
+		// owns the escape->cancel handler, so aborting the controller alone would
+		// leave the command running until it finished naturally. Cancelling here
+		// resolves the bash promise right away regardless of execution path.
+		const activeBashIds = bashExecutor.getActiveExecutionIds();
+		for (const id of activeBashIds) {
+			bashExecutor.cancel(id);
+		}
+
 		if (props.abortController) {
 			logger.info('Cancelling current operation', {
 				operation: 'user_cancellation',
 				hasAbortController: !!props.abortController,
+				activeBashExecutions: activeBashIds.length,
 			});
 
 			props.setIsCancelling(true);
 			props.abortController.abort();
-		} else {
+		} else if (activeBashIds.length === 0) {
 			logger.debug('Cancel requested but no active operation to cancel');
 		}
 	}, [props.abortController, props.setIsCancelling, logger, props]);
@@ -166,8 +192,9 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	// Toggle development mode handler
 	const handleToggleDevelopmentMode = React.useCallback(() => {
 		props.setDevelopmentMode(currentMode => {
-			// Don't allow toggling out of scheduler mode via Shift+Tab
-			if (currentMode === 'scheduler') return currentMode;
+			// Don't allow toggling out of headless via Shift+Tab: it's a
+			// non-interactive mode entered by the daemon, not the user.
+			if (currentMode === 'headless') return currentMode;
 
 			const modes: Array<'normal' | 'auto-accept' | 'yolo' | 'plan'> = [
 				'normal',
@@ -175,7 +202,9 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				'yolo',
 				'plan',
 			];
-			const currentIndex = modes.indexOf(currentMode);
+			const currentIndex = modes.indexOf(
+				currentMode as 'normal' | 'auto-accept' | 'yolo' | 'plan',
+			);
 			const nextIndex = (currentIndex + 1) % modes.length;
 			const nextMode = modes[nextIndex];
 
@@ -185,9 +214,6 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				modeIndex: nextIndex,
 				totalModes: modes.length,
 			});
-
-			// Sync global mode context for tool needsApproval logic
-			setCurrentModeContext(nextMode);
 
 			return nextMode;
 		});
@@ -285,9 +311,20 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			// Continue without context usage/auto-compact info
 		}
 
+		// Resolve the current git branch for the /status panel. The sync
+		// helper reads the .git filesystem directly — same code path as the
+		// boot summary, so the two surfaces can't drift. Failures degrade
+		// to omitting the line.
+		let gitStatus: GitStatusSummary | null = null;
+		try {
+			gitStatus = getGitStatusSummarySync();
+		} catch (error) {
+			logger.debug('Failed to resolve git status for /status panel', {error});
+		}
+
 		props.addToChatQueue(
 			<Status
-				key={`status-${props.getNextComponentKey()}`}
+				key={generateKey('status')}
 				provider={props.currentProvider}
 				model={props.currentModel}
 				theme={props.currentTheme}
@@ -298,6 +335,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				customCommandsCount={props.customCommandsCount}
 				contextUsage={contextUsage}
 				autoCompactInfo={autoCompactInfo}
+				gitStatus={gitStatus}
 			/>,
 		);
 	}, [
@@ -313,7 +351,6 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		props.messages,
 		props.getMessageTokens,
 		props.addToChatQueue,
-		props.getNextComponentKey,
 		logger,
 		props,
 	]);
@@ -335,10 +372,10 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					} catch (error) {
 						props.addToChatQueue(
 							<WarningMessage
-								key={`backup-warning-${props.getNextComponentKey()}`}
-								message={`Warning: Failed to create backup: ${
-									error instanceof Error ? error.message : 'Unknown error'
-								}`}
+								key={generateKey('backup-warning')}
+								message={`Warning: Failed to create backup: ${formatError(
+									error,
+								)}`}
 								hideBox={true}
 							/>,
 						);
@@ -353,7 +390,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 				props.addToChatQueue(
 					<SuccessMessage
-						key={`restore-success-${props.getNextComponentKey()}`}
+						key={generateKey('restore-success')}
 						message={`✓ Checkpoint '${checkpointName}' restored successfully`}
 						hideBox={true}
 					/>,
@@ -361,10 +398,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			} catch (error) {
 				props.addToChatQueue(
 					<ErrorMessage
-						key={`restore-error-${props.getNextComponentKey()}`}
-						message={`Failed to restore checkpoint: ${
-							error instanceof Error ? error.message : 'Unknown error'
-						}`}
+						key={generateKey('restore-error')}
+						message={`Failed to restore checkpoint: ${formatError(error)}`}
 						hideBox={true}
 					/>,
 				);
@@ -380,7 +415,6 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.setActiveMode,
 			props.setCheckpointLoadData,
 			props.addToChatQueue,
-			props.getNextComponentKey,
 			props,
 		],
 	);
@@ -416,9 +450,10 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.setCurrentProvider(session.provider);
 			props.setCurrentModel(session.model);
 			props.setCurrentSessionId(session.id);
+			setKeyGeneratorSessionId(session.id);
 			props.addToChatQueue(
 				<SuccessMessage
-					key={`resume-success-${Date.now()}`}
+					key={generateKey('resume-success')}
 					message={`Resumed session: ${session.title}`}
 					hideBox={true}
 				/>,
@@ -445,7 +480,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 				} else {
 					props.addToChatQueue(
 						<ErrorMessage
-							key={`resume-error-${Date.now()}`}
+							key={generateKey('resume-error')}
 							message="Session not found"
 							hideBox={true}
 						/>,
@@ -455,10 +490,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			} catch (error) {
 				props.addToChatQueue(
 					<ErrorMessage
-						key={`resume-error-${Date.now()}`}
-						message={`Failed to load session: ${
-							error instanceof Error ? error.message : 'Unknown error'
-						}`}
+						key={generateKey('resume-error')}
+						message={`Failed to load session: ${formatError(error)}`}
 						hideBox={true}
 					/>,
 				);
@@ -474,45 +507,66 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 	// Message submit handler
 	const handleMessageSubmit = React.useCallback(
-		async (message: string) => {
+		async (message: string, displayValue?: string) => {
 			// Reset conversation completion flag when starting a new message
 			props.setIsConversationComplete(false);
 
-			await handleMessageSubmission(message, {
-				customCommandCache: props.customCommandCache,
-				customCommandLoader: props.customCommandLoader,
-				customCommandExecutor: props.customCommandExecutor,
-				onClearMessages: clearMessages,
-				onEnterModelSelectionMode: props.enterModelSelectionMode,
-				onEnterProviderSelectionMode: props.enterProviderSelectionMode,
-				onEnterModelDatabaseMode: props.enterModelDatabaseMode,
-				onEnterConfigWizardMode: props.enterConfigWizardMode,
-				onEnterSettingsMode: props.enterSettingsMode,
-				onEnterMcpWizardMode: props.enterMcpWizardMode,
-				onEnterExplorerMode: props.enterExplorerMode,
-				onEnterIdeSelectionMode: props.enterIdeSelectionMode,
-				onEnterTune: props.enterTune,
-				onEnterSchedulerMode: props.enterSchedulerMode,
-				onEnterCheckpointLoadMode: enterCheckpointLoadMode,
-				onEnterSessionSelectorMode: enterSessionSelectorMode,
-				onResumeSession: session => applySession(session),
-				onShowStatus: handleShowStatus,
-				onHandleChatMessage: props.handleChatMessage,
-				onAddToChatQueue: props.addToChatQueue,
-				setLiveComponent: props.setLiveComponent,
-				setIsToolExecuting: props.setIsToolExecuting,
-				onCommandComplete: () => props.setIsConversationComplete(true),
-				getNextComponentKey: props.getNextComponentKey,
-				setMessages: props.updateMessages,
-				messages: props.messages,
-				provider: props.currentProvider,
-				providerConfig: props.currentProviderConfig,
-				client: props.client,
-				model: props.currentModel,
-				theme: props.currentTheme,
-				updateInfo: props.updateInfo,
-				getMessageTokens: props.getMessageTokens,
-			});
+			// Extract command args for slash commands (used by /rename etc.).
+			// The VS Code editor pill is appended at the end of the message
+			// (\n\n[@…]<!--vscode-context-->…<!--/vscode-context-->); strip it
+			// so it doesn't leak into the parsed args.
+			const commandArgs = message.startsWith('/')
+				? message
+						.replace(
+							/\n\n\[@[^\]]+\]<!--vscode-context-->[\s\S]*?<!--\/vscode-context-->\s*$/,
+							'',
+						)
+						.slice(1)
+						.trim()
+						.split(/\s+/)
+						.slice(1)
+				: undefined;
+
+			await handleMessageSubmission(
+				message,
+				{
+					customCommandCache: props.customCommandCache,
+					customCommandLoader: props.customCommandLoader,
+					customCommandExecutor: props.customCommandExecutor,
+					onClearMessages: clearMessages,
+					onRenameSession: props.setSessionName,
+					commandArgs,
+					onEnterModelSelectionMode: props.enterModelSelectionMode,
+					onEnterModelDatabaseMode: props.enterModelDatabaseMode,
+					onEnterConfigWizardMode: props.enterConfigWizardMode,
+					onEnterSettingsMode: props.enterSettingsMode,
+					onEnterMcpWizardMode: props.enterMcpWizardMode,
+					onEnterExplorerMode: props.enterExplorerMode,
+					onEnterIdeSelectionMode: props.enterIdeSelectionMode,
+					onEnterTune: props.enterTune,
+					onEnterCheckpointLoadMode: enterCheckpointLoadMode,
+					onEnterSessionSelectorMode: enterSessionSelectorMode,
+					onResumeSession: session => applySession(session),
+					onShowStatus: handleShowStatus,
+					onHandleChatMessage: props.handleChatMessage,
+					onAddToChatQueue: props.addToChatQueue,
+					setLiveComponent: props.setLiveComponent,
+					setIsToolExecuting: props.setIsToolExecuting,
+					onCommandComplete: () => props.setIsConversationComplete(true),
+					setMessages: props.updateMessages,
+					messages: props.messages,
+					provider: props.currentProvider,
+					providerConfig: props.currentProviderConfig,
+					client: props.client,
+					model: props.currentModel,
+					theme: props.currentTheme,
+					updateInfo: props.updateInfo,
+					getMessageTokens: props.getMessageTokens,
+					tune: props.tune,
+					developmentMode: props.developmentMode,
+				},
+				displayValue,
+			);
 		},
 		[
 			props.setIsConversationComplete,
@@ -520,7 +574,6 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.customCommandLoader,
 			props.customCommandExecutor,
 			props.enterModelSelectionMode,
-			props.enterProviderSelectionMode,
 			props.enterModelDatabaseMode,
 			props.enterConfigWizardMode,
 			props.enterSettingsMode,
@@ -528,12 +581,10 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.enterExplorerMode,
 			props.enterIdeSelectionMode,
 			props.enterTune,
-			props.enterSchedulerMode,
 			props.handleChatMessage,
 			props.addToChatQueue,
 			props.setLiveComponent,
 			props.setIsToolExecuting,
-			props.getNextComponentKey,
 			props.updateMessages,
 			props.messages,
 			props.currentProvider,
@@ -542,6 +593,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.currentTheme,
 			props.updateInfo,
 			props.getMessageTokens,
+			props.tune,
+			props.developmentMode,
 			clearMessages,
 			enterCheckpointLoadMode,
 			handleShowStatus,

@@ -96,7 +96,7 @@ test('ExecuteBashFormatter handles complex commands', t => {
 	t.regex(output!, /find/);
 });
 
-test('ExecuteBashFormatter truncates long command instead of wrapping', t => {
+test('ExecuteBashFormatter wraps long command instead of truncating', t => {
 	const formatter = executeBashTool.formatter;
 	if (!formatter) {
 		t.fail('Formatter is not defined');
@@ -111,10 +111,12 @@ test('ExecuteBashFormatter truncates long command instead of wrapping', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /execute_bash/);
-	// Should not contain the full end of the command
-	t.false(
-		output!.includes('head -20'),
-		'Long command should be truncated, not fully displayed',
+	// The command wraps onto multiple lines, so the full command - including its
+	// tail - is shown rather than cut off with a truncation ellipsis.
+	t.false(output!.includes('…'), 'Command should wrap, not truncate');
+	t.true(
+		output!.includes('head'),
+		'Tail of the long command should still be displayed',
 	);
 });
 
@@ -328,7 +330,7 @@ test('execute_bash tool has correct name', t => {
 
 test('execute_bash tool requires confirmation', t => {
 	// Execute bash should require confirmation for security
-	t.not(executeBashTool.tool.needsApproval, false);
+	t.is(typeof executeBashTool.approval, 'function');
 });
 
 test('execute_bash tool has handler function', t => {

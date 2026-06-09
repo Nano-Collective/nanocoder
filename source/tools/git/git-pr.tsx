@@ -6,12 +6,11 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
-
-import {getCurrentMode} from '@/context/mode-context';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {
 	type CommitInfo,
 	execGh,
@@ -66,7 +65,7 @@ const executeGitPr = async (args: GitPrInput): Promise<string> => {
 			// Check if upstream is set
 			const upstream = await getUpstreamBranch();
 			if (!upstream) {
-				return 'Error: No upstream branch set. Push your branch first with git_push (setUpstream: true).';
+				return 'Error: No upstream branch set. Push your branch first with execute_bash (e.g. `git push -u origin HEAD`).';
 			}
 
 			// Build gh command
@@ -191,7 +190,7 @@ const executeGitPr = async (args: GitPrInput): Promise<string> => {
 
 		return 'Error: No valid action specified. Use create, view, or list.';
 	} catch (error) {
-		const message = error instanceof Error ? error.message : 'Unknown error';
+		const message = formatError(error);
 
 		// Check for common gh errors
 		if (message.includes('gh auth login')) {
@@ -269,21 +268,6 @@ const gitPrCoreTool = tool({
 		},
 		required: [],
 	}),
-	// Approval varies by action
-	needsApproval: (args: GitPrInput) => {
-		const mode = getCurrentMode();
-
-		// Yolo mode auto-executes everything
-		if (mode === 'yolo') return false;
-
-		// ALWAYS_APPROVE for create (user should see title/body)
-		if (args.create) {
-			return true;
-		}
-
-		// AUTO for view and list
-		return false;
-	},
 	execute: async (args, _options) => {
 		return await executeGitPr(args);
 	},
@@ -425,4 +409,7 @@ export const gitPrTool: NanocoderToolExport = {
 	name: 'git_pr' as const,
 	tool: gitPrCoreTool,
 	formatter,
+	// Approval varies by action: create always prompts (user should see
+	// title/body); view/list auto-run.
+	approval: (args: GitPrInput) => Boolean(args.create),
 };

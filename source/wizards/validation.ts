@@ -1,6 +1,10 @@
 import {TIMEOUT_PROVIDER_CONNECTION_MS} from '@/constants';
 import {isLocalURL} from '@/utils/url-utils';
-import type {ProviderConfig, SdkProvider} from '../types/config';
+import type {
+	OpenRouterParameters,
+	ProviderConfig,
+	SdkProvider,
+} from '../types/config';
 import type {McpServerConfig} from './templates/mcp-templates';
 
 interface ValidationResult {
@@ -151,9 +155,11 @@ interface ProviderConfigObject {
 			models: string[];
 			baseUrl?: string;
 			apiKey?: string;
+			caCertPath?: string;
 			organizationId?: string;
 			timeout?: number;
 			sdkProvider?: SdkProvider;
+			openrouter?: OpenRouterParameters;
 		}>;
 	};
 }
@@ -180,9 +186,11 @@ export function buildProviderConfigObject(
 					models: string[];
 					baseUrl?: string;
 					apiKey?: string;
+					caCertPath?: string;
 					organizationId?: string;
 					timeout?: number;
 					sdkProvider?: SdkProvider;
+					openrouter?: OpenRouterParameters;
 				} = {
 					name: p.name,
 					models: p.models,
@@ -196,6 +204,10 @@ export function buildProviderConfigObject(
 					providerConfig.apiKey = p.apiKey;
 				}
 
+				if (p.caCertPath) {
+					providerConfig.caCertPath = p.caCertPath;
+				}
+
 				if (p.organizationId) {
 					providerConfig.organizationId = p.organizationId;
 				}
@@ -206,6 +218,10 @@ export function buildProviderConfigObject(
 
 				if (p.sdkProvider) {
 					providerConfig.sdkProvider = p.sdkProvider;
+				}
+
+				if (p.openrouter) {
+					providerConfig.openrouter = p.openrouter;
 				}
 
 				return providerConfig;
@@ -251,6 +267,7 @@ export function buildConfigObject(
 			models: string[];
 			baseUrl?: string;
 			apiKey?: string;
+			caCertPath?: string;
 			organizationId?: string;
 			timeout?: number;
 			sdkProvider?: SdkProvider;
@@ -265,6 +282,7 @@ export function buildConfigObject(
 				models: string[];
 				baseUrl?: string;
 				apiKey?: string;
+				caCertPath?: string;
 				organizationId?: string;
 				timeout?: number;
 				sdkProvider?: SdkProvider;
@@ -279,9 +297,11 @@ export function buildConfigObject(
 					models: string[];
 					baseUrl?: string;
 					apiKey?: string;
+					caCertPath?: string;
 					organizationId?: string;
 					timeout?: number;
 					sdkProvider?: SdkProvider;
+					openrouter?: OpenRouterParameters;
 				} = {
 					name: p.name,
 					models: p.models,
@@ -295,6 +315,10 @@ export function buildConfigObject(
 					providerConfig.apiKey = p.apiKey;
 				}
 
+				if (p.caCertPath) {
+					providerConfig.caCertPath = p.caCertPath;
+				}
+
 				if (p.organizationId) {
 					providerConfig.organizationId = p.organizationId;
 				}
@@ -305,6 +329,10 @@ export function buildConfigObject(
 
 				if (p.sdkProvider) {
 					providerConfig.sdkProvider = p.sdkProvider;
+				}
+
+				if (p.openrouter) {
+					providerConfig.openrouter = p.openrouter;
 				}
 
 				return providerConfig;

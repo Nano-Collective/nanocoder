@@ -161,41 +161,10 @@ test('get_diagnostics formatter: handles large result with many diagnostics', as
 // Needs Approval Tests
 // ============================================================================
 
-test('get_diagnostics: never requires approval', async t => {
-	const needsApproval = getDiagnosticsTool.tool.needsApproval;
-
-	if (typeof needsApproval === 'function') {
-		const result = await needsApproval(
-			{path: 'test.ts'},
-			{toolCallId: 'test', messages: []},
-		);
-		t.false(result);
-	} else {
-		t.is(needsApproval, false);
-	}
-});
-
-test('get_diagnostics needsApproval: false for various inputs', async t => {
-	const needsApproval = getDiagnosticsTool.tool.needsApproval;
-
-	const testCases = [
-		{path: 'test.ts'},
-		{path: 'src/file.tsx'},
-		{path: '/absolute/path/file.js'},
-		{},
-	];
-
-	if (typeof needsApproval === 'function') {
-		for (const args of testCases) {
-			const result = await needsApproval(args, {
-				toolCallId: 'test',
-				messages: [],
-			});
-			t.false(result, `Expected false for args: ${JSON.stringify(args)}`);
-		}
-	} else {
-		t.is(needsApproval, false);
-	}
+test('get_diagnostics: never requires approval', t => {
+	// Read-only tools default to no approval (see resolveToolApproval).
+	t.true(getDiagnosticsTool.readOnly);
+	t.is(getDiagnosticsTool.approval, undefined);
 });
 
 // ============================================================================
@@ -588,6 +557,5 @@ test('get_diagnostics: tool has correct schema structure', async t => {
 	t.truthy(tool);
 	t.truthy(tool.description);
 	t.truthy(tool.inputSchema);
-	t.truthy(tool.needsApproval === false);
 	t.truthy(tool.execute);
 });

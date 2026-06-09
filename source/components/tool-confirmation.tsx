@@ -1,13 +1,19 @@
 import {Box, Text, useInput} from 'ink';
 import SelectInput from 'ink-select-input';
 import React from 'react';
+import {RenderErrorBoundary} from '@/components/render-error-boundary';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getToolManager} from '@/message-handler';
 import type {ToolCall} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
+import {
+	getToolJsonSchema,
+	validateArgsAgainstSchema,
+} from '@/utils/schema-validate';
 import {parseToolArguments} from '@/utils/tool-args-parser';
+import {formatValidationError} from '@/utils/tool-validation';
 
 interface ToolConfirmationProps {
 	toolCall: ToolCall;
@@ -46,44 +52,63 @@ export default function ToolConfirmation({
 	// Load formatter preview
 	React.useEffect(() => {
 		const loadPreview = async () => {
-			// Run validator first if available
-			if (toolManager) {
-				const validator = toolManager.getToolValidator(toolCall.function.name);
-				if (validator) {
-					try {
-						// Parse arguments if they're a JSON string
-						const parsedArgs = parseToolArguments(toolCall.function.arguments);
+			if (!toolManager) return;
 
-						const validationResult = await validator(parsedArgs);
-						if (!validationResult.valid) {
-							setValidationError(validationResult.error);
-							setHasValidationError(true);
-							setFormatterPreview(
-								<Text color={colors.error}>{validationResult.error}</Text>,
-							);
-							return;
-						}
-					} catch (error) {
-						const logger = getLogger();
-						logger.error(
-							{error: formatError(error)},
-							'Error running validator',
-						);
-						const errorMsg = `Validation error: ${formatError(error)}`;
-						setValidationError(errorMsg);
+			let parsedArgs: Record<string, unknown> = {};
+			try {
+				parsedArgs = parseToolArguments(toolCall.function.arguments);
+			} catch {
+				// Leave as {} — the schema/validator will surface the real problem.
+			}
+
+			// 1. Schema type-check — the same check the executed handler runs, so a
+			// wrong-typed argument shows red here and is fed back to the model.
+			const schema = getToolJsonSchema(
+				toolManager.getToolEntry(toolCall.function.name)?.tool,
+			);
+			const typeErrors = schema
+				? validateArgsAgainstSchema(parsedArgs, schema)
+				: [];
+			if (typeErrors.length > 0) {
+				const msg = formatValidationError(
+					'one or more arguments have the wrong type — fix the types and call the tool again',
+					typeErrors,
+				);
+				setValidationError(msg);
+				setHasValidationError(true);
+				setFormatterPreview(<Text color={colors.error}>{msg}</Text>);
+				return;
+			}
+
+			// 2. Per-tool validator.
+			const validator = toolManager.getToolValidator(toolCall.function.name);
+			if (validator) {
+				try {
+					const validationResult = await validator(parsedArgs);
+					if (!validationResult.valid) {
+						setValidationError(validationResult.error);
 						setHasValidationError(true);
-						setFormatterPreview(<Text color={colors.error}>{errorMsg}</Text>);
+						setFormatterPreview(
+							<Text color={colors.error}>{validationResult.error}</Text>,
+						);
 						return;
 					}
+				} catch (error) {
+					const logger = getLogger();
+					logger.error({error: formatError(error)}, 'Error running validator');
+					const errorMsg = `Validation error: ${formatError(error)}`;
+					setValidationError(errorMsg);
+					setHasValidationError(true);
+					setFormatterPreview(<Text color={colors.error}>{errorMsg}</Text>);
+					return;
 				}
 			}
 
-			const formatter = toolManager?.getToolFormatter(toolCall.function.name);
+			// 3. Formatter preview.
+			const formatter = toolManager.getToolFormatter(toolCall.function.name);
 			if (formatter) {
 				setIsLoadingPreview(true);
 				try {
-					// Parse arguments if they're a JSON string
-					const parsedArgs = parseToolArguments(toolCall.function.arguments);
 					const preview = await formatter(parsedArgs);
 					setFormatterPreview(preview);
 				} catch (error) {
@@ -148,7 +173,9 @@ export default function ToolConfirmation({
 					<Box marginBottom={1} flexDirection="column">
 						<Box>
 							{React.isValidElement(formatterPreview) ? (
-								formatterPreview
+								<RenderErrorBoundary label={toolCall.function.name}>
+									{formatterPreview}
+								</RenderErrorBoundary>
 							) : (
 								<Text color={colors.text}>{String(formatterPreview)}</Text>
 							)}

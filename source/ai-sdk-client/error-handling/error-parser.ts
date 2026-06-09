@@ -2,10 +2,46 @@ import {APICallError} from 'ai';
 import {extractRootError} from './error-extractor.js';
 
 /**
+ * Last-resort serializer for errors whose .message ended up as the literal
+ * string "[object Object]" because something upstream stringified an object
+ * with template-literal or String() coercion. Pulls enumerable own props
+ * plus known Error fields so the user sees the actual payload.
+ */
+function describeError(error: Error): string {
+	const own: Record<string, unknown> = {};
+	for (const key of Object.getOwnPropertyNames(error)) {
+		if (key === 'stack') continue;
+		// biome-ignore lint/suspicious/noExplicitAny: dynamic error shape
+		own[key] = (error as any)[key];
+	}
+	try {
+		const serialized = JSON.stringify(own);
+		if (serialized && serialized !== '{}') return serialized;
+	} catch {
+		// fall through
+	}
+	return error.message || error.name || 'Unknown error';
+}
+
+/**
  * Parses API errors into user-friendly messages.
  * Exported for testing purposes.
  */
 export function parseAPIError(error: unknown): string {
+	const result = parseAPIErrorInternal(error);
+	// Final safety net: if our user-facing string still contains "[object Object]"
+	// then some upstream Error.message was already a stringified object. Replace
+	// with a structured dump so the real payload is visible.
+	if (result.includes('[object Object]')) {
+		const rootError = extractRootError(error);
+		if (rootError instanceof Error) {
+			return `Provider error: ${describeError(rootError)}`;
+		}
+	}
+	return result;
+}
+
+function parseAPIErrorInternal(error: unknown): string {
 	// First extract the root error from any wrappers
 	const rootError = extractRootError(error);
 
@@ -23,13 +59,17 @@ export function parseAPIError(error: unknown): string {
 		if (rootError.responseBody) {
 			try {
 				const body = JSON.parse(rootError.responseBody) as {
-					error?: {message?: string};
-					message?: string;
+					error?: {message?: unknown};
+					message?: unknown;
 				};
-				if (body.error?.message) {
-					cleanMessage = body.error.message;
-				} else if (body.message) {
-					cleanMessage = body.message;
+				const extracted = body.error?.message ?? body.message;
+				if (extracted !== undefined && extracted !== null) {
+					// Providers occasionally return error.message as an object/array
+					// instead of a string. Coerce so we don't surface "[object Object]".
+					cleanMessage =
+						typeof extracted === 'string'
+							? extracted
+							: JSON.stringify(extracted);
 				}
 			} catch {
 				// If not JSON, try to extract message from the raw response
@@ -171,8 +211,11 @@ export function parseAPIError(error: unknown): string {
 
 	// Handle context length errors
 	if (
-		errorMessage.includes('context length') ||
-		errorMessage.includes('too many tokens')
+		lowerMessage.includes('context length') ||
+		lowerMessage.includes('too many tokens') ||
+		lowerMessage.includes('available context size') ||
+		lowerMessage.includes('context window') ||
+		(lowerMessage.includes('exceeds') && lowerMessage.includes('context size'))
 	) {
 		return 'Context too large: Please reduce the conversation length or message size';
 	}

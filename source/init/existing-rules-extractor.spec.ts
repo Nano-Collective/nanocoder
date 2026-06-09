@@ -973,3 +973,64 @@ Follow project conventions strictly.`,
 		cleanupTestProject(testDir);
 	}
 });
+
+test('extractExistingRules - excludeSources skips named files (lean mode)', t => {
+	const testDir = createTestProject('exclude-claude');
+
+	try {
+		writeFileSync(
+			join(testDir, 'AGENTS.md'),
+			`# AGENTS.md
+
+## Coding Standards
+
+Always use TypeScript. Testing is required for all features.`,
+		);
+
+		writeFileSync(
+			join(testDir, 'CLAUDE.md'),
+			`# CLAUDE.md
+
+## Important Rules
+
+Follow project conventions strictly. Always test changes.`,
+		);
+
+		// Lean mode: exclude CLAUDE.md
+		const extractor = new ExistingRulesExtractor(testDir, false, ['CLAUDE.md']);
+		const rules = extractor.extractExistingRules();
+
+		t.false(rules.some(r => r.source === 'CLAUDE.md'));
+		t.truthy(rules.some(r => r.source === 'AGENTS.md'));
+
+		// Without exclusion, both should be found
+		const baseline = new ExistingRulesExtractor(testDir).extractExistingRules();
+		t.truthy(baseline.some(r => r.source === 'CLAUDE.md'));
+		t.truthy(baseline.some(r => r.source === 'AGENTS.md'));
+	} finally {
+		cleanupTestProject(testDir);
+	}
+});
+
+test('extractExistingRules - excludeSources is case-insensitive', t => {
+	const testDir = createTestProject('exclude-claude-lowercase');
+
+	try {
+		writeFileSync(
+			join(testDir, 'CLAUDE.md'),
+			`# CLAUDE.md
+
+## Rules
+
+Always use TypeScript. Always run tests.`,
+		);
+
+		// Lower-case in excludeSources should still match CLAUDE.md
+		const extractor = new ExistingRulesExtractor(testDir, false, ['claude.md']);
+		const rules = extractor.extractExistingRules();
+
+		t.is(rules.length, 0);
+	} finally {
+		cleanupTestProject(testDir);
+	}
+});

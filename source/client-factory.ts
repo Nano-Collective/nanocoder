@@ -13,6 +13,7 @@ import {getClosestConfigFile} from '@/config/index';
 import {loadAllProviderConfigs} from '@/config/mcp-config-loader';
 import {loadPreferences} from '@/config/preferences';
 import type {AIProviderConfig, LLMClient} from '@/types/index';
+import {formatError} from '@/utils/error-formatter';
 import {isLocalURL} from '@/utils/url-utils';
 
 // Custom error class for configuration errors that need special UI handling
@@ -31,19 +32,25 @@ export class ConfigurationError extends Error {
 export async function createLLMClient(
 	provider?: string,
 	model?: string,
+	overrides?: Partial<
+		Pick<AIProviderConfig, 'contextWindow' | 'contextWindows'>
+	>,
 ): Promise<{client: LLMClient; actualProvider: string}> {
 	// Check if agents.config.json exists
 	const agentsJsonPath = getClosestConfigFile('agents.config.json');
 	const hasConfigFile = existsSync(agentsJsonPath);
 
 	// Use AI SDK - it handles both tool-calling and non-tool-calling models
-	return createAISDKClient(provider, model, hasConfigFile);
+	return createAISDKClient(provider, model, hasConfigFile, overrides);
 }
 
 async function createAISDKClient(
 	requestedProvider?: string,
 	requestedModel?: string,
 	hasConfigFile = true,
+	overrides?: Partial<
+		Pick<AIProviderConfig, 'contextWindow' | 'contextWindows'>
+	>,
 ): Promise<{client: LLMClient; actualProvider: string}> {
 	// Load provider configs
 	const providers = loadProviderConfigs();
@@ -71,20 +78,33 @@ async function createAISDKClient(
 		}
 	}
 
+	const resolveProviderName = (providerName?: string): string | undefined => {
+		if (!providerName) {
+			return undefined;
+		}
+
+		const matches = providers.filter(
+			provider => provider.name.toLowerCase() === providerName.toLowerCase(),
+		);
+
+		if (matches.length > 1) {
+			const availableProviders = providers.map(p => p.name).join(', ');
+			throw new ConfigurationError(
+				`Provider '${providerName}' is ambiguous. Found multiple case-insensitive matches: ${matches.map(m => m.name).join(', ')}. Available providers: ${availableProviders}`,
+				configPath,
+				cwdPath,
+				false,
+			);
+		}
+
+		return matches[0]?.name;
+	};
+
 	// Determine which provider to try first
 	let targetProvider: string;
 	if (requestedProvider) {
-		targetProvider = requestedProvider;
-	} else {
-		// Use preferences or default to first available provider
-		const preferences = loadPreferences();
-		targetProvider = preferences.lastProvider || providers[0].name;
-	}
-
-	// Validate provider exists if specified
-	if (requestedProvider) {
-		const providerConfig = providers.find(p => p.name === requestedProvider);
-		if (!providerConfig) {
+		const resolvedRequestedProvider = resolveProviderName(requestedProvider);
+		if (!resolvedRequestedProvider) {
 			const availableProviders = providers.map(p => p.name).join(', ');
 			throw new ConfigurationError(
 				`Provider '${requestedProvider}' not found in agents.config.json. Available providers: ${availableProviders}`,
@@ -93,6 +113,12 @@ async function createAISDKClient(
 				false,
 			);
 		}
+		targetProvider = resolvedRequestedProvider;
+	} else {
+		// Use preferences or default to first available provider
+		const preferences = loadPreferences();
+		targetProvider =
+			resolveProviderName(preferences.lastProvider) || providers[0].name;
 	}
 
 	// Validate model exists in the target provider's model list if specified
@@ -130,10 +156,14 @@ async function createAISDKClient(
 				continue;
 			}
 
-			// Validate credentials (sync, no network calls)
-			validateProviderCredentials(providerConfig);
+			const effectiveProviderConfig = overrides
+				? {...providerConfig, ...overrides}
+				: providerConfig;
 
-			const client = await AISDKClient.create(providerConfig);
+			// Validate credentials (sync, no network calls)
+			validateProviderCredentials(effectiveProviderConfig);
+
+			const client = await AISDKClient.create(effectiveProviderConfig);
 
 			// Set model if specified
 			if (requestedModel) {
@@ -142,8 +172,7 @@ async function createAISDKClient(
 
 			return {client, actualProvider: providerType};
 		} catch (error: unknown) {
-			const errorMessage =
-				error instanceof Error ? error.message : 'Unknown error';
+			const errorMessage = formatError(error);
 			errors.push(`${providerType}: ${errorMessage}`);
 		}
 	}
@@ -164,7 +193,13 @@ async function createAISDKClient(
 	}
 }
 
-function loadProviderConfigs(): AIProviderConfig[] {
+/**
+ * Translate user-facing `ProviderConfig` entries (the shape stored in
+ * `agents.config.json`) into the resolved `AIProviderConfig` shape consumed
+ * by the AI SDK client. Exported so tests can assert the translation —
+ * notably that the `openrouter` block is threaded through cleanly.
+ */
+export function loadProviderConfigs(): AIProviderConfig[] {
 	// Use the new hierarchical provider loading system to get providers from all levels
 	const allProviderConfigs = loadAllProviderConfigs();
 
@@ -182,9 +217,14 @@ function loadProviderConfigs(): AIProviderConfig[] {
 		disableToolModels: provider.disableToolModels,
 		// SDK provider package to use
 		sdkProvider: provider.sdkProvider,
+		// OpenRouter-specific request body fields (provider routing, plugins,
+		// reasoning, etc.). Always-on for the OpenRouter provider — never gated
+		// by tune so users get consistent routing across sessions.
+		openrouter: provider.openrouter,
 		config: {
 			baseURL: provider.baseUrl,
 			apiKey: provider.apiKey || 'dummy-key',
+			caCertPath: provider.caCertPath,
 			headers: provider.headers ?? {},
 		},
 	}));

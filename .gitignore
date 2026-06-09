@@ -78,6 +78,7 @@ storybook-static
 .tmp/
 tmp/
 temp/
+.test-temp/
 
 # IDE and editor files
 .vscode/
@@ -103,8 +104,6 @@ yarn.lock
 agents.config.json
 .claude
 agents
-component.md
-refactor.md
 
 # Nanocoder checkpoints (user data)
 # These contain conversation snapshots and should not be committed

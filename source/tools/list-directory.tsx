@@ -2,11 +2,11 @@ import {lstat, readdir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
-
 import ToolMessage from '@/components/tool-message';
 import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {loadGitignore} from '@/utils/gitignore-loader';
 import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
 import {calculateTokens} from '@/utils/token-calculator';
@@ -144,19 +144,19 @@ const executeListDirectory = async (
 				output += `${entry.relativePath}\n`;
 			}
 		} else {
-			// Standard format with icons
+			// Standard format: directories get a trailing "/", symlinks "@" (ls -F style)
 			for (const entry of entries) {
-				const icon =
+				const suffix =
 					entry.type === 'directory'
-						? '📁 '
+						? '/'
 						: entry.type === 'symlink'
-							? '🔗 '
-							: '📄 ';
+							? '@'
+							: '';
 				const displayPath = recursive ? entry.relativePath : entry.name;
 				const sizeStr = entry.size
 					? ` (${entry.size.toLocaleString()} bytes)`
 					: '';
-				output += `${icon}${displayPath}${sizeStr}\n`;
+				output += `${displayPath}${suffix}${sizeStr}\n`;
 			}
 		}
 
@@ -173,8 +173,7 @@ const executeListDirectory = async (
 		if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
 			throw new Error(`Directory "${dirPath}" does not exist`);
 		}
-		const errorMessage =
-			error instanceof Error ? error.message : 'Unknown error';
+		const errorMessage = formatError(error);
 		throw new Error(`Failed to list directory: ${errorMessage}`);
 	}
 };
@@ -213,8 +212,6 @@ const listDirectoryCoreTool = tool({
 		},
 		required: [],
 	}),
-	// Low risk: read-only operation, never requires approval
-	needsApproval: false,
 	execute: async (args, _options) => {
 		return await executeListDirectory(args);
 	},
@@ -243,13 +240,12 @@ const ListDirectoryFormatter = React.memo(
 		) {
 			const lines = result.split('\n');
 			for (const line of lines) {
-				// Count lines with emojis (standard format) or paths (tree format)
+				// Count entry lines (skip the header, blank lines, and bracketed notes)
+				const trimmed = line.trim();
 				if (
-					line.match(/^[📁🔗📄]/) ||
-					(args.tree &&
-						line.trim() &&
-						!line.startsWith('[') &&
-						!line.startsWith('Directory'))
+					trimmed &&
+					!trimmed.startsWith('[') &&
+					!trimmed.startsWith('Directory')
 				) {
 					entryCount++;
 				}

@@ -38,8 +38,7 @@ export function getLoggerConfig(): LoggerConfig | null {
 /**
  * Create a child logger with additional context
  */
-// biome-ignore lint/suspicious/noExplicitAny: Dynamic bindings for logger context
-export function createChildLogger(bindings: Record<string, any>): Logger {
+export function createChildLogger(bindings: Record<string, unknown>): Logger {
 	return loggerProvider.createChildLogger(bindings);
 }
 
@@ -54,20 +53,13 @@ export function isLevelEnabled(level: LogLevel): boolean {
  * Convenience methods that match console.log API
  */
 export const log = {
-	// biome-ignore lint/suspicious/noExplicitAny: Variadic arguments for logger methods
-	fatal: (msg: string, ...args: any[]) => getLogger().fatal(msg, ...args),
-	// biome-ignore lint/suspicious/noExplicitAny: Variadic arguments for logger methods
-	error: (msg: string, ...args: any[]) => getLogger().error(msg, ...args),
-	// biome-ignore lint/suspicious/noExplicitAny: Variadic arguments for logger methods
-	warn: (msg: string, ...args: any[]) => getLogger().warn(msg, ...args),
-	// biome-ignore lint/suspicious/noExplicitAny: Variadic arguments for logger methods
-	info: (msg: string, ...args: any[]) => getLogger().info(msg, ...args),
-	// biome-ignore lint/suspicious/noExplicitAny: Variadic arguments for logger methods
-	http: (msg: string, ...args: any[]) => getLogger().http(msg, ...args),
-	// biome-ignore lint/suspicious/noExplicitAny: Variadic arguments for logger methods
-	debug: (msg: string, ...args: any[]) => getLogger().debug(msg, ...args),
-	// biome-ignore lint/suspicious/noExplicitAny: Variadic arguments for logger methods
-	trace: (msg: string, ...args: any[]) => getLogger().trace(msg, ...args),
+	fatal: (msg: string, ...args: unknown[]) => getLogger().fatal(msg, ...args),
+	error: (msg: string, ...args: unknown[]) => getLogger().error(msg, ...args),
+	warn: (msg: string, ...args: unknown[]) => getLogger().warn(msg, ...args),
+	info: (msg: string, ...args: unknown[]) => getLogger().info(msg, ...args),
+	http: (msg: string, ...args: unknown[]) => getLogger().http(msg, ...args),
+	debug: (msg: string, ...args: unknown[]) => getLogger().debug(msg, ...args),
+	trace: (msg: string, ...args: unknown[]) => getLogger().trace(msg, ...args),
 };
 
 /**
@@ -75,32 +67,26 @@ export const log = {
  * This will be gradually replaced with structured logging
  */
 export const console = {
-	// biome-ignore lint/suspicious/noExplicitAny: Variadic arguments for console compatibility
-	log: (...args: any[]) => {
+	log: (...args: unknown[]) => {
 		// For now, use info level for console.log
 		log.info(args.join(' '));
 
-		// TODO: Add deprecation warning in development mode
 		if (process.env.NODE_ENV === 'development') {
 			process.stderr.write(
 				'\x1b[33m[DEPRECATED]\x1b[0m console.log() is deprecated. Use logger.info() instead.\n',
 			);
 		}
 	},
-	// biome-ignore lint/suspicious/noExplicitAny: Variadic arguments for console compatibility
-	error: (...args: any[]) => {
+	error: (...args: unknown[]) => {
 		log.error(args.join(' '));
 	},
-	// biome-ignore lint/suspicious/noExplicitAny: Variadic arguments for console compatibility
-	warn: (...args: any[]) => {
+	warn: (...args: unknown[]) => {
 		log.warn(args.join(' '));
 	},
-	// biome-ignore lint/suspicious/noExplicitAny: Variadic arguments for console compatibility
-	info: (...args: any[]) => {
+	info: (...args: unknown[]) => {
 		log.info(args.join(' '));
 	},
-	// biome-ignore lint/suspicious/noExplicitAny: Variadic arguments for console compatibility
-	debug: (...args: any[]) => {
+	debug: (...args: unknown[]) => {
 		log.debug(args.join(' '));
 	},
 };

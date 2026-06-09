@@ -93,8 +93,10 @@ If you want to contribute or modify Nanocoder:
 
 **Prerequisites:**
 
-- Node.js 20+
-- pnpm
+- Node.js 22+
+- pnpm (managed via Corepack — pinned by the repo's `packageManager` field, no manual install needed)
+
+> Corepack ships with Node 22. If `pnpm` isn't found, run `corepack enable` once. To bump pnpm for the project later, run `corepack use pnpm@latest`.
 
 **Setup:**
 

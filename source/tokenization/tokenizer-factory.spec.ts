@@ -3,10 +3,7 @@
  */
 
 import test from 'ava';
-import {
-	createTokenizer,
-	createTokenizerForProvider,
-} from './tokenizer-factory.js';
+import {createTokenizer} from './tokenizer-factory.js';
 import {AnthropicTokenizer} from './tokenizers/anthropic-tokenizer.js';
 import {FallbackTokenizer} from './tokenizers/fallback-tokenizer.js';
 import {LlamaTokenizer} from './tokenizers/llama-tokenizer.js';
@@ -130,41 +127,5 @@ test('createTokenizer is case insensitive for provider detection', t => {
 
 test('createTokenizer is case insensitive for model detection', t => {
 	const tokenizer = createTokenizer('custom', 'GPT-4-TURBO');
-	t.true(tokenizer instanceof OpenAITokenizer);
-});
-
-// Test createTokenizerForProvider
-test('createTokenizerForProvider creates OpenAI tokenizer', t => {
-	const tokenizer = createTokenizerForProvider('openai', 'gpt-4');
-	t.true(tokenizer instanceof OpenAITokenizer);
-});
-
-test('createTokenizerForProvider creates Anthropic tokenizer', t => {
-	const tokenizer = createTokenizerForProvider('anthropic', 'claude-3');
-	t.true(tokenizer instanceof AnthropicTokenizer);
-});
-
-test('createTokenizerForProvider creates Llama tokenizer', t => {
-	const tokenizer = createTokenizerForProvider('llama', 'llama-3');
-	t.true(tokenizer instanceof LlamaTokenizer);
-});
-
-test('createTokenizerForProvider creates FallbackTokenizer', t => {
-	const tokenizer = createTokenizerForProvider('fallback');
-	t.true(tokenizer instanceof FallbackTokenizer);
-});
-
-test('createTokenizerForProvider handles auto mode with model ID', t => {
-	const tokenizer = createTokenizerForProvider('auto', 'gpt-4');
-	t.true(tokenizer instanceof OpenAITokenizer);
-});
-
-test('createTokenizerForProvider handles auto mode without model ID', t => {
-	const tokenizer = createTokenizerForProvider('auto');
-	t.true(tokenizer instanceof FallbackTokenizer);
-});
-
-test('createTokenizerForProvider works without model ID', t => {
-	const tokenizer = createTokenizerForProvider('openai');
 	t.true(tokenizer instanceof OpenAITokenizer);
 });

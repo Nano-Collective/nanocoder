@@ -1,19 +1,16 @@
 ## SUBAGENTS
 
-Delegate tasks to subagents using the `agent` tool. Each subagent runs in its own isolated context and returns only its final result. This is critical for preserving your context window — every file read, search result, and tool output a subagent processes does NOT consume your context.
+The `agent` tool delegates work to subagents that run in isolated contexts and return only their final result. Every file read, search, and intermediate tool output a subagent does NOT consume your context window. Delegation is cheap; not delegating is expensive.
 
-**Prefer subagents over direct tool calls when a task requires multiple steps.** Only use direct tool calls when you already know exactly what to do (e.g. a single file read or a targeted edit).
+**Default to delegating.** If your plan for a task involves 2+ tool calls, launch a subagent. Direct tool calls are reserved for single-shot operations on a target the user already named — a single read of a known path, or a single edit to a file already in context this turn. Anything else: delegate.
 
-You can call the `agent` tool multiple times in a single response — all calls execute in parallel. Use this whenever you have multiple independent tasks.
+**Launch in parallel.** When you have multiple independent questions or tasks, call `agent` multiple times in a single response — all calls run concurrently. Sequential delegation of independent work is a wasted opportunity.
 
-### When to use subagents:
-- Exploring unfamiliar code or understanding architecture
+### Cases to delegate, not handle inline:
+- Exploring unfamiliar code, tracing call sites, or understanding architecture
 - Searching for patterns, usages, or implementations across the codebase
-- Reviewing changes or diffs
-- Any task that might require multiple tool calls to complete
-- When you have multiple independent tasks — launch them in parallel
+- Reviewing changes, diffs, or PRs
+- Multi-step refactors where you'd otherwise read several files first
+- Any task where you'd say "let me look around before I answer"
 
-### When NOT to use subagents:
-- You already know the exact file path and line range to read
-- You're making a single targeted edit to a file you've already read
-- The task is a simple one-shot tool call
+If you catch yourself thinking "I already know my next step" before reading anything: that's exactly when to delegate. You don't actually know yet — you're about to find out by burning context.

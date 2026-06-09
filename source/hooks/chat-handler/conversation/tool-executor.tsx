@@ -1,18 +1,25 @@
 import React from 'react';
 import type {ConversationStateManager} from '@/app/utils/conversation-state';
 import AgentProgress, {MultiAgentProgress} from '@/components/agent-progress';
+import BashProgress from '@/components/bash-progress';
 import {ErrorMessage} from '@/components/message-box';
+import type {BashExecutionState} from '@/services/bash-executor';
 import {
 	clearAllSubagentProgress,
 	getSubagentProgress,
 	resetSubagentProgressById,
 } from '@/services/subagent-events';
+import {generateKey} from '@/session/key-generator';
 import {MAX_CONCURRENT_AGENTS} from '@/subagents/subagent-executor';
 import type {AgentToolArgs} from '@/tools/agent-tool';
 import {startAgentExecution} from '@/tools/agent-tool';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {ToolCall, ToolResult} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
+import {
+	runStreamingBashTool,
+	type StreamingBashRun,
+} from '@/utils/streaming-bash-tool';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {
 	ALWAYS_EXPANDED_TOOLS,
@@ -26,33 +33,15 @@ import {
  */
 const executeOne = async (
 	toolCall: ToolCall,
-	toolManager: ToolManager | null,
 	processToolUse: (toolCall: ToolCall) => Promise<ToolResult>,
 ): Promise<{
 	toolCall: ToolCall;
 	result: ToolResult;
-	validationError?: string;
 }> => {
 	try {
-		// Run validator if available
-		const validator = toolManager?.getToolValidator(toolCall.function.name);
-		if (validator) {
-			const parsedArgs = parseToolArguments(toolCall.function.arguments);
-			const validationResult = await validator(parsedArgs);
-			if (!validationResult.valid) {
-				return {
-					toolCall,
-					result: {
-						tool_call_id: toolCall.id,
-						role: 'tool' as const,
-						name: toolCall.function.name,
-						content: `Validation failed: ${formatError(validationResult.error)}`,
-					},
-					validationError: validationResult.error,
-				};
-			}
-		}
-
+		// Validation runs inside the validated registry handler that
+		// processToolUse invokes, so invalid args come back here as an error
+		// tool-result (the handler never executes).
 		const result = await processToolUse(toolCall);
 		return {toolCall, result};
 	} catch (error) {
@@ -65,6 +54,119 @@ const executeOne = async (
 				content: `Error: ${formatError(error)}`,
 			},
 		};
+	}
+};
+
+/**
+ * Execute an execute_bash tool call through the shared streaming runner,
+ * mounting a live BashProgress so streamed output shows while the command runs.
+ * Returns the captured BashExecutionState so the caller can render a completed
+ * BashProgress (expanded mode) instead of the command-only formatter.
+ */
+const executeBashStreaming = (
+	toolCall: ToolCall,
+	toolManager: ToolManager | null,
+	setLiveComponent: (component: React.ReactNode) => void,
+): Promise<StreamingBashRun> =>
+	runStreamingBashTool(toolCall, toolManager, setLiveComponent, 'direct-bash');
+
+/** Display + conversation-state options shared by every executed tool. */
+export interface ToolDisplayOptions {
+	compactDisplay?: boolean;
+	onCompactToolCount?: (toolName: string) => void;
+	onLiveTaskUpdate?: () => void;
+	nonInteractiveMode?: boolean;
+}
+
+/**
+ * Execute a single already-approved tool call. execute_bash streams through the
+ * live BashProgress when a live area is available; everything else runs through
+ * the validated registry handler. The single per-tool execution primitive
+ * shared by the auto-execute batch and the (post-approval) confirmation path.
+ */
+export const executeApprovedTool = (
+	toolCall: ToolCall,
+	toolManager: ToolManager | null,
+	processToolUse: (toolCall: ToolCall) => Promise<ToolResult>,
+	setLiveComponent?: (component: React.ReactNode) => void,
+): Promise<StreamingBashRun> => {
+	if (toolCall.function.name === 'execute_bash' && setLiveComponent) {
+		return executeBashStreaming(toolCall, toolManager, setLiveComponent);
+	}
+	return executeOne(toolCall, processToolUse);
+};
+
+/**
+ * Render one executed tool's result and fold it into conversation state. The
+ * single display primitive shared by both execution paths, so compact-tally,
+ * expanded-bash, live-task, and non-interactive rendering behave identically
+ * regardless of whether the tool was auto-executed or user-approved.
+ */
+export const displayExecutedTool = async (
+	execution: StreamingBashRun,
+	toolManager: ToolManager | null,
+	addToChatQueue: (component: React.ReactNode) => void,
+	conversationStateManager: React.MutableRefObject<ConversationStateManager>,
+	options?: ToolDisplayOptions,
+): Promise<void> => {
+	const {toolCall, result, bashState} = execution;
+
+	conversationStateManager.current.updateAfterToolExecution(
+		toolCall,
+		result.content,
+	);
+
+	if (
+		LIVE_TASK_TOOLS.has(result.name) &&
+		!result.content.startsWith('Error: ')
+	) {
+		// Task tools render in the live area (updating in-place)
+		options?.onLiveTaskUpdate?.();
+	} else if (
+		options?.compactDisplay &&
+		!ALWAYS_EXPANDED_TOOLS.has(result.name)
+	) {
+		// In compact mode, signal the count callback for live display
+		// (skip for tools that should always show expanded output).
+		//
+		// Non-interactive mode has no live tally renderer, so push
+		// per-tool one-liners straight to the static queue to keep
+		// tool activity in chronological order.
+		//
+		// Validation failures (the streaming bash path surfaces them as
+		// "⚒ Validation failed: …") must show in full too, not fold into
+		// the count tally — mirror displayToolResult's own detection.
+		const isError =
+			result.content.startsWith('Error: ') ||
+			result.content.startsWith('⚒ Validation failed');
+		if (isError) {
+			// Errors always shown in full
+			await displayToolResult(toolCall, result, toolManager, addToChatQueue);
+		} else if (options.nonInteractiveMode) {
+			await displayToolResult(
+				toolCall,
+				result,
+				toolManager,
+				addToChatQueue,
+				true,
+			);
+		} else {
+			options.onCompactToolCount?.(result.name);
+		}
+	} else if (result.name === 'execute_bash' && bashState) {
+		// Expanded mode: render the completed BashProgress (command +
+		// status + tokens), matching the confirmation path's completed view.
+		addToChatQueue(
+			<BashProgress
+				key={generateKey(`direct-bash-complete-${toolCall.id}`)}
+				executionId={bashState.executionId}
+				command={bashState.command}
+				completedState={bashState}
+			/>,
+		);
+	} else {
+		// Full display mode
+		await displayToolResult(toolCall, result, toolManager, addToChatQueue);
 	}
 };
 
@@ -132,11 +234,11 @@ const executeAgentBatch = async (
 	agentToolCalls: ToolCall[],
 	toolManager: ToolManager | null,
 	addToChatQueue: (component: React.ReactNode) => void,
-	getNextComponentKey: () => number,
 	compactDisplay?: boolean,
 	setLiveComponent?: (component: React.ReactNode) => void,
 	onCompactToolCount?: (toolName: string) => void,
 	nonInteractiveMode?: boolean,
+	signal?: AbortSignal,
 ): Promise<
 	Array<{
 		toolCall: ToolCall;
@@ -165,11 +267,18 @@ const executeAgentBatch = async (
 	// Start all agents
 	const agentExecutions = toExecute.map(toolCall => {
 		const parsedArgs = parseToolArguments(toolCall.function.arguments);
-		const agentName = (parsedArgs.subagent_type as string) ?? 'agent';
-		const agentDesc = (parsedArgs.description as string) ?? '';
+		// Coerce, don't assert: a weak model can emit these as objects/numbers,
+		// and a non-string flowing into the progress UI crashes the renderer.
+		const agentName =
+			typeof parsedArgs.subagent_type === 'string'
+				? parsedArgs.subagent_type
+				: 'agent';
+		const agentDesc =
+			typeof parsedArgs.description === 'string' ? parsedArgs.description : '';
 
 		const {agentId, promise} = startAgentExecution(
 			parsedArgs as unknown as AgentToolArgs,
+			signal,
 		);
 		resetSubagentProgressById(agentId);
 
@@ -188,7 +297,7 @@ const executeAgentBatch = async (
 			const e = agentExecutions[0];
 			setLiveComponent(
 				<AgentProgress
-					key={`agent-live-direct-${e.toolCall.id}-${Date.now()}`}
+					key={generateKey(`agent-live-direct-${e.toolCall.id}`)}
 					subagentName={e.agentName}
 					description={e.agentDesc}
 					agentId={e.agentId}
@@ -198,7 +307,7 @@ const executeAgentBatch = async (
 		} else {
 			setLiveComponent(
 				<MultiAgentProgress
-					key={`multi-agent-live-direct-${Date.now()}`}
+					key={generateKey('multi-agent-live-direct')}
 					agents={agentInfos}
 					isLive={true}
 				/>,
@@ -261,7 +370,6 @@ const executeAgentBatch = async (
 					result,
 					toolManager,
 					addToChatQueue,
-					getNextComponentKey,
 				);
 			} else if (nonInteractiveMode) {
 				await displayToolResult(
@@ -269,7 +377,6 @@ const executeAgentBatch = async (
 					result,
 					toolManager,
 					addToChatQueue,
-					getNextComponentKey,
 					true,
 				);
 			} else {
@@ -278,7 +385,7 @@ const executeAgentBatch = async (
 		} else {
 			addToChatQueue(
 				<AgentProgress
-					key={`agent-complete-${e.toolCall.id}-${getNextComponentKey()}-${Date.now()}`}
+					key={generateKey(`agent-complete-${e.toolCall.id}`)}
 					subagentName={e.agentName}
 					description={e.agentDesc}
 					agentId={e.agentId}
@@ -286,6 +393,7 @@ const executeAgentBatch = async (
 						toolCallCount: progress.toolCallCount,
 						tokenCount: progress.tokenCount,
 						success: agentResult.success,
+						toolHistory: [...progress.toolHistory],
 					}}
 				/>,
 			);
@@ -299,7 +407,7 @@ const executeAgentBatch = async (
 		results.push(excess);
 		addToChatQueue(
 			<ErrorMessage
-				key={`agent-excess-${excess.toolCall.id}-${getNextComponentKey()}`}
+				key={generateKey(`agent-excess-${excess.toolCall.id}`)}
 				message={excess.result.content}
 				hideBox={true}
 			/>,
@@ -322,7 +430,6 @@ export const executeToolsDirectly = async (
 	toolManager: ToolManager | null,
 	conversationStateManager: React.MutableRefObject<ConversationStateManager>,
 	addToChatQueue: (component: React.ReactNode) => void,
-	getNextComponentKey: () => number,
 	options?: {
 		compactDisplay?: boolean;
 		onCompactToolCount?: (toolName: string) => void;
@@ -335,6 +442,11 @@ export const executeToolsDirectly = async (
 		 * chronological order for stdout.
 		 */
 		nonInteractiveMode?: boolean;
+		/**
+		 * Parent turn's abort signal. Threaded into agent batches so a user
+		 * cancel (escape) propagates into running subagents.
+		 */
+		signal?: AbortSignal;
 	},
 ): Promise<ToolResult[]> => {
 	// Import processToolUse here to avoid circular dependencies
@@ -349,7 +461,7 @@ export const executeToolsDirectly = async (
 		let executions: Array<{
 			toolCall: ToolCall;
 			result: ToolResult;
-			validationError?: string;
+			bashState?: BashExecutionState;
 		}>;
 
 		if (type === 'agent' && group.length > 0) {
@@ -358,11 +470,11 @@ export const executeToolsDirectly = async (
 				group,
 				toolManager,
 				addToChatQueue,
-				getNextComponentKey,
 				options?.compactDisplay,
 				options?.setLiveComponent,
 				options?.onCompactToolCount,
 				options?.nonInteractiveMode,
+				options?.signal,
 			);
 
 			// Agent results are already displayed by executeAgentBatch
@@ -379,87 +491,33 @@ export const executeToolsDirectly = async (
 		if (type === 'readOnly' && group.length > 1) {
 			// Parallel execution for consecutive read-only tools
 			executions = await Promise.all(
-				group.map(toolCall =>
-					executeOne(toolCall, toolManager, processToolUse),
-				),
+				group.map(toolCall => executeOne(toolCall, processToolUse)),
 			);
 		} else {
 			// Sequential execution for non-parallelizable tools (or single-item groups)
 			executions = [];
 			for (const toolCall of group) {
 				executions.push(
-					await executeOne(toolCall, toolManager, processToolUse),
+					await executeApprovedTool(
+						toolCall,
+						toolManager,
+						processToolUse,
+						options?.setLiveComponent,
+					),
 				);
 			}
 		}
 
 		// Display results in order
-		for (const {toolCall, result, validationError} of executions) {
-			directResults.push(result);
-
-			// Update conversation state
-			conversationStateManager.current.updateAfterToolExecution(
-				toolCall,
-				result.content,
+		for (const execution of executions) {
+			directResults.push(execution.result);
+			await displayExecutedTool(
+				execution,
+				toolManager,
+				addToChatQueue,
+				conversationStateManager,
+				options,
 			);
-
-			if (validationError) {
-				// Display validation error (always shown in full)
-				addToChatQueue(
-					<ErrorMessage
-						key={`validation-error-${toolCall.id}-${Date.now()}`}
-						message={validationError}
-						hideBox={true}
-					/>,
-				);
-			} else if (
-				LIVE_TASK_TOOLS.has(result.name) &&
-				!result.content.startsWith('Error: ')
-			) {
-				// Task tools render in the live area (updating in-place)
-				options?.onLiveTaskUpdate?.();
-			} else if (
-				options?.compactDisplay &&
-				!ALWAYS_EXPANDED_TOOLS.has(result.name)
-			) {
-				// In compact mode, signal the count callback for live display
-				// (skip for tools that should always show expanded output).
-				//
-				// Non-interactive mode has no live tally renderer, so push
-				// per-tool one-liners straight to the static queue to keep
-				// tool activity in chronological order.
-				const isError = result.content.startsWith('Error: ');
-				if (isError) {
-					// Errors always shown in full
-					await displayToolResult(
-						toolCall,
-						result,
-						toolManager,
-						addToChatQueue,
-						getNextComponentKey,
-					);
-				} else if (options.nonInteractiveMode) {
-					await displayToolResult(
-						toolCall,
-						result,
-						toolManager,
-						addToChatQueue,
-						getNextComponentKey,
-						true,
-					);
-				} else {
-					options.onCompactToolCount?.(result.name);
-				}
-			} else {
-				// Full display mode
-				await displayToolResult(
-					toolCall,
-					result,
-					toolManager,
-					addToChatQueue,
-					getNextComponentKey,
-				);
-			}
 		}
 	}
 

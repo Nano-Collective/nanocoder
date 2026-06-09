@@ -1,6 +1,7 @@
 import {Box} from 'ink';
 import React from 'react';
 import ChatQueue from '@/components/chat-queue';
+import {RenderErrorBoundary} from '@/components/render-error-boundary';
 
 export interface ChatHistoryProps {
 	/** Whether the chat has started (ready to display) */
@@ -40,7 +41,9 @@ export function ChatHistory({
 			{/* Live component renders outside Static for real-time updates */}
 			{liveComponent && (
 				<Box marginLeft={-1} flexDirection="column">
-					{liveComponent}
+					<RenderErrorBoundary label="live">
+						{liveComponent}
+					</RenderErrorBoundary>
 				</Box>
 			)}
 		</Box>

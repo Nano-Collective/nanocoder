@@ -168,7 +168,6 @@ const agentCoreTool = tool({
 		},
 		required: ['subagent_type', 'description'],
 	}),
-	needsApproval: false,
 	execute: async args => {
 		return await executeAgent(args);
 	},
@@ -178,4 +177,7 @@ export const agentTool: NanocoderToolExport = {
 	name: 'agent',
 	tool: agentCoreTool,
 	readOnly: false,
+	// The subagent enforces approval on its own tool calls; the delegating
+	// call itself is not gated.
+	approval: false,
 };

@@ -87,37 +87,49 @@ export function CheckpointListDisplay({
 						</Box>
 
 						{/* Rows */}
-						{checkpoints.map(checkpoint => (
-							<Box key={checkpoint.name} flexDirection="row">
-								<Box width={20}>
-									<Text color={colors.text}>
-										{checkpoint.name.length > 18
-											? checkpoint.name.substring(0, 15) + '...'
-											: checkpoint.name}
-									</Text>
+						{checkpoints.map(checkpoint => {
+							const isTrigger = checkpoint.metadata.provider.name === 'trigger';
+							return (
+								<Box key={checkpoint.name} flexDirection="column">
+									<Box flexDirection="row">
+										<Box width={20}>
+											<Text color={colors.text}>
+												{checkpoint.name.length > 18
+													? checkpoint.name.substring(0, 15) + '...'
+													: checkpoint.name}
+											</Text>
+										</Box>
+										<Box width={15}>
+											<Text color={colors.secondary}>
+												{formatRelativeTime(checkpoint.metadata.timestamp)}
+											</Text>
+										</Box>
+										<Box width={10}>
+											<Text color={colors.text}>
+												{checkpoint.metadata.messageCount}
+											</Text>
+										</Box>
+										<Box width={8}>
+											<Text color={colors.text}>
+												{checkpoint.metadata.filesChanged.length}
+											</Text>
+										</Box>
+										<Box width={8}>
+											<Text color={colors.secondary}>
+												{formatSize(checkpoint.sizeBytes)}
+											</Text>
+										</Box>
+									</Box>
+									{isTrigger && (
+										<Box marginLeft={2}>
+											<Text color={colors.secondary}>
+												↳ {checkpoint.metadata.provider.model}
+											</Text>
+										</Box>
+									)}
 								</Box>
-								<Box width={15}>
-									<Text color={colors.secondary}>
-										{formatRelativeTime(checkpoint.metadata.timestamp)}
-									</Text>
-								</Box>
-								<Box width={10}>
-									<Text color={colors.text}>
-										{checkpoint.metadata.messageCount}
-									</Text>
-								</Box>
-								<Box width={8}>
-									<Text color={colors.text}>
-										{checkpoint.metadata.filesChanged.length}
-									</Text>
-								</Box>
-								<Box width={8}>
-									<Text color={colors.secondary}>
-										{formatSize(checkpoint.sizeBytes)}
-									</Text>
-								</Box>
-							</Box>
-						))}
+							);
+						})}
 					</Box>
 				</Box>
 			</Box>

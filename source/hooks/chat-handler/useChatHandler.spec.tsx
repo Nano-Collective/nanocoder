@@ -27,10 +27,8 @@ const createMockProps = (overrides?: Partial<UseChatHandlerProps>): UseChatHandl
 	currentModel: 'test-model',
 	setIsCancelling: () => {},
 	addToChatQueue: () => {},
-	getNextComponentKey: () => 1,
 	abortController: null,
 	setAbortController: () => {},
-	onStartToolConfirmationFlow: () => {},
 	...overrides,
 });
 
@@ -58,7 +56,7 @@ const createMockClient = (): LLMClient => ({
 
 const createMockToolManager = () => ({
 	getAvailableToolNames: () => ['read_file'],
-	getFilteredToolsWithoutExecute: () => [],
+	getFilteredTools: () => ({}),
 	getFilteredToolsForProvider: () => ({}),
 }) as NonNullable<UseChatHandlerProps['toolManager']>;
 
@@ -304,7 +302,6 @@ test('useChatHandler - callbacks are provided', t => {
 	let hookResult: ChatHandlerReturn | null = null;
 
 	const props = createMockProps({
-		onStartToolConfirmationFlow: () => {},
 		onConversationComplete: () => {},
 	});
 
@@ -319,7 +316,6 @@ test('useChatHandler - callbacks are provided', t => {
 
 	t.truthy(hookResult);
 	// The hook should successfully initialize with callbacks
-	t.is(typeof props.onStartToolConfirmationFlow, 'function');
 	t.is(typeof props.onConversationComplete, 'function');
 });
 
@@ -353,13 +349,16 @@ test('useChatHandler - streaming state types are correct', t => {
 	t.is(typeof streamingState.tokenCount, 'number');
 });
 
-test('getBaseSystemPrompt - scheduler mode ignores cached prompt', t => {
+test('getBaseSystemPrompt - headless mode ignores cached prompt', t => {
+	// Headless is the daemon's mode for triggered runs - it must rebuild the
+	// system prompt each call so `Current Date:` reflects the trigger time
+	// rather than whatever the interactive TUI cached at boot.
 	const toolManager = {
 		getAvailableToolNames: (_tune: unknown, mode: string) => [`tool-for-${mode}`],
 	} as NonNullable<UseChatHandlerProps['toolManager']>;
 
 	const result = getBaseSystemPrompt(
-		'scheduler',
+		'headless',
 		'cached-prompt',
 		toolManager,
 		undefined,

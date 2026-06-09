@@ -67,7 +67,10 @@ test('shows Tune title', t => {
 });
 
 test('shows toggle option', t => {
-	const {lastFrame} = renderTuneSelector();
+	const {lastFrame} = renderTuneSelector({
+		...TUNE_DEFAULTS,
+		enabled: false,
+	});
 	const output = lastFrame()!;
 	t.true(output.includes('Disabled'));
 });
@@ -117,25 +120,25 @@ test('shows Model Parameters when enabled', t => {
 // ============================================================================
 
 test('hides Tool Profile when disabled', t => {
-	const {lastFrame} = renderTuneSelector();
+	const {lastFrame} = renderTuneSelector({...TUNE_DEFAULTS, enabled: false});
 	const output = lastFrame()!;
 	t.false(output.includes('Tool Profile'));
 });
 
 test('hides Aggressive Compact when disabled', t => {
-	const {lastFrame} = renderTuneSelector();
+	const {lastFrame} = renderTuneSelector({...TUNE_DEFAULTS, enabled: false});
 	const output = lastFrame()!;
 	t.false(output.includes('Aggressive Compact'));
 });
 
 test('hides Native Tool Calling when disabled', t => {
-	const {lastFrame} = renderTuneSelector();
+	const {lastFrame} = renderTuneSelector({...TUNE_DEFAULTS, enabled: false});
 	const output = lastFrame()!;
 	t.false(output.includes('Native Tool Calling'));
 });
 
 test('hides Model Parameters when disabled', t => {
-	const {lastFrame} = renderTuneSelector();
+	const {lastFrame} = renderTuneSelector({...TUNE_DEFAULTS, enabled: false});
 	const output = lastFrame()!;
 	t.false(output.includes('Model Parameters'));
 });
@@ -170,12 +173,39 @@ test('shows Native Tool Calling ON by default', t => {
 	t.regex(output, /Native Tool Calling.*ON/);
 });
 
-test('shows Native Tool Calling OFF with XML fallback', t => {
+test('shows Native Tool Calling OFF with XML fallback (legacy disableNativeTools)', t => {
 	const config: TuneConfig = {...ENABLED_CONFIG, disableNativeTools: true};
 	const {lastFrame} = renderTuneSelector(config);
 	const output = lastFrame()!;
 	t.regex(output, /Native Tool Calling.*OFF/);
 	t.true(output.includes('XML fallback'));
+});
+
+test('shows Native Tool Calling OFF with XML fallback (toolMode)', t => {
+	const config: TuneConfig = {...ENABLED_CONFIG, toolMode: 'xml'};
+	const {lastFrame} = renderTuneSelector(config);
+	const output = lastFrame()!;
+	t.regex(output, /Native Tool Calling.*OFF/);
+	t.true(output.includes('XML fallback'));
+});
+
+test('shows Native Tool Calling OFF with JSON fallback', t => {
+	const config: TuneConfig = {...ENABLED_CONFIG, toolMode: 'json'};
+	const {lastFrame} = renderTuneSelector(config);
+	const output = lastFrame()!;
+	t.regex(output, /Native Tool Calling.*OFF/);
+	t.true(output.includes('JSON fallback'));
+});
+
+test('toolMode takes precedence over legacy disableNativeTools', t => {
+	const config: TuneConfig = {
+		...ENABLED_CONFIG,
+		disableNativeTools: true,
+		toolMode: 'json',
+	};
+	const {lastFrame} = renderTuneSelector(config);
+	const output = lastFrame()!;
+	t.true(output.includes('JSON fallback'));
 });
 
 test('shows Model Parameters defaults when unconfigured', t => {
@@ -199,7 +229,7 @@ test('shows Model Parameters configured when set', t => {
 // ============================================================================
 
 test('shows Tune - Disabled when disabled', t => {
-	const {lastFrame} = renderTuneSelector();
+	const {lastFrame} = renderTuneSelector({...TUNE_DEFAULTS, enabled: false});
 	const output = lastFrame()!;
 	t.true(output.includes('Tune - Disabled'));
 });
@@ -208,4 +238,45 @@ test('shows Tune - Enabled when enabled', t => {
 	const {lastFrame} = renderTuneSelector(ENABLED_CONFIG);
 	const output = lastFrame()!;
 	t.true(output.includes('Tune - Enabled'));
+});
+
+// ============================================================================
+// Nano profile + Include AGENTS.md toggle
+// ============================================================================
+
+test('shows nano profile name when selected', t => {
+	const config: TuneConfig = {...ENABLED_CONFIG, toolProfile: 'nano'};
+	const {lastFrame} = renderTuneSelector(config);
+	const output = lastFrame()!;
+	t.true(output.includes('nano'));
+});
+
+test('shows Include AGENTS.md option when enabled', t => {
+	const {lastFrame} = renderTuneSelector(ENABLED_CONFIG);
+	const output = lastFrame()!;
+	t.true(output.includes('Include AGENTS.md'));
+});
+
+test('Include AGENTS.md defaults ON for non-nano profiles', t => {
+	const {lastFrame} = renderTuneSelector(ENABLED_CONFIG);
+	const output = lastFrame()!;
+	t.regex(output, /Include AGENTS\.md.*ON/);
+});
+
+test('Include AGENTS.md defaults OFF for nano profile', t => {
+	const config: TuneConfig = {...ENABLED_CONFIG, toolProfile: 'nano'};
+	const {lastFrame} = renderTuneSelector(config);
+	const output = lastFrame()!;
+	t.regex(output, /Include AGENTS\.md.*OFF/);
+});
+
+test('Include AGENTS.md respects explicit override (false beats nano default-on)', t => {
+	const config: TuneConfig = {
+		...ENABLED_CONFIG,
+		toolProfile: 'minimal',
+		includeAgentsMd: false,
+	};
+	const {lastFrame} = renderTuneSelector(config);
+	const output = lastFrame()!;
+	t.regex(output, /Include AGENTS\.md.*OFF/);
 });

@@ -15,6 +15,7 @@ Any service that exposes an OpenAI-compatible API can be added as a custom provi
 	"name": "My Provider",
 	"baseUrl": "https://my-api.example.com/v1",
 	"apiKey": "optional-api-key",
+	"caCertPath": "/path/to/internal-ca.pem",
 	"models": ["model-name"]
 }
 ```
@@ -27,6 +28,7 @@ Custom providers support all [provider configuration fields](index.md#provider-c
 - `socketTimeout` - Socket-level timeout (use `-1` for no timeout)
 - `disableTools` - Disable tool calling for this provider
 - `disableToolModels` - Disable tool calling for specific models
+- `caCertPath` - Path to a PEM CA bundle for self-signed or privately issued TLS certificates
 
 ## Setup via Wizard
 

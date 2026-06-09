@@ -1,9 +1,6 @@
 import type {NanocoderToolExport} from '@/types/core';
-import {copyFileTool} from './copy-file';
-import {createDirectoryTool} from './create-directory';
-import {deleteFileTool} from './delete-file';
-import {moveFileTool} from './move-file';
+import {fileOpTool} from './file-op';
 
 export function getFileOpTools(): NanocoderToolExport[] {
-	return [deleteFileTool, moveFileTool, createDirectoryTool, copyFileTool];
+	return [fileOpTool];
 }

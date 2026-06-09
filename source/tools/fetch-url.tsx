@@ -3,11 +3,11 @@
 // only users who actually invoke `fetch_url` pay the cost.
 import {Box, Text} from 'ink';
 import React from 'react';
-
 import {DEFAULT_TERMINAL_COLUMNS, MAX_URL_CONTENT_BYTES} from '@/constants';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {calculateTokens} from '@/utils/token-calculator';
 
 interface FetchArgs {
@@ -43,7 +43,7 @@ const executeFetchUrl = async (args: FetchArgs): Promise<string> => {
 
 		return content;
 	} catch (error: unknown) {
-		const message = error instanceof Error ? error.message : 'Unknown error';
+		const message = formatError(error);
 		throw new Error(`Failed to fetch URL: ${message}`);
 	}
 };
@@ -61,8 +61,6 @@ const fetchUrlCoreTool = tool({
 		},
 		required: ['url'],
 	}),
-	// Low risk: read-only operation, never requires approval
-	needsApproval: false,
 	execute: async (args, _options) => {
 		return await executeFetchUrl(args);
 	},
@@ -161,7 +159,7 @@ const fetchUrlValidator = (
 		) {
 			return Promise.resolve({
 				valid: false,
-				error: `⚒ Cannot fetch from internal/private network address: ${hostname}`,
+				error: `Cannot fetch from internal/private network address: ${hostname}`,
 			});
 		}
 
@@ -169,7 +167,7 @@ const fetchUrlValidator = (
 	} catch {
 		return Promise.resolve({
 			valid: false,
-			error: `⚒ Invalid URL format: ${args.url}`,
+			error: `Invalid URL format: ${args.url}`,
 		});
 	}
 };

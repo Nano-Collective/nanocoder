@@ -35,7 +35,7 @@ test('resolveTune - applies app config top-level overrides', t => {
 	const result = resolveTune(appConfig);
 	t.is(result.toolProfile, 'minimal');
 	t.true(result.aggressiveCompact);
-	t.false(result.enabled); // Not set, stays default
+	t.true(result.enabled); // Not set, stays default (auto-profiling on)
 });
 
 test('resolveTune - per-provider overrides app config', t => {
@@ -120,4 +120,40 @@ test('resolveTune - higher layer replaces modelParameters entirely (shallow merg
 	t.is(result.modelParameters?.temperature, 0.7);
 	// maxTokens from app config is lost — shallow merge by design
 	t.is(result.modelParameters?.maxTokens, undefined);
+});
+
+// ============================================================================
+// resolveTune — nano profile and includeAgentsMd
+// ============================================================================
+
+test('resolveTune - accepts nano profile from app config', t => {
+	const appConfig: AppConfig = {
+		tune: {toolProfile: 'nano'},
+	};
+	const result = resolveTune(appConfig);
+	t.is(result.toolProfile, 'nano');
+});
+
+test('resolveTune - includeAgentsMd flows through layers', t => {
+	const appConfig: AppConfig = {
+		tune: {includeAgentsMd: false},
+	};
+	const result = resolveTune(appConfig);
+	t.is(result.includeAgentsMd, false);
+});
+
+test('resolveTune - higher layer overrides includeAgentsMd', t => {
+	const appConfig: AppConfig = {
+		tune: {includeAgentsMd: false},
+	};
+	const prefs: UserPreferences = {
+		tune: {
+			enabled: true,
+			toolProfile: 'full',
+			aggressiveCompact: false,
+			includeAgentsMd: true,
+		},
+	};
+	const result = resolveTune(appConfig, undefined, prefs);
+	t.is(result.includeAgentsMd, true);
 });

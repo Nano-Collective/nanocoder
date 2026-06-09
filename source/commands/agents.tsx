@@ -7,14 +7,16 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
-import {ErrorMessage} from '@/components/message-box';
+import {InfoField} from '@/components/ui/info-field';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {parseMarkdown} from '@/markdown-parser/index';
+import {generateKey} from '@/session/key-generator';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import type {SubagentConfigWithSource} from '@/subagents/types';
 import type {Command} from '@/types/index';
+import {errorMsg} from '@/utils/message-factory';
 import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 
 interface SubagentsListProps {
@@ -94,27 +96,6 @@ interface AgentDetailProps {
 	agent: SubagentConfigWithSource;
 }
 
-function Field({
-	label,
-	value,
-	colors,
-}: {
-	label: string;
-	value: string;
-	colors: ReturnType<typeof useTheme>['colors'];
-}) {
-	return (
-		<Box flexDirection="column" marginBottom={1}>
-			<Text color={colors.primary} bold>
-				{label}
-			</Text>
-			<Text color={colors.secondary} wrap="wrap">
-				{value}
-			</Text>
-		</Box>
-	);
-}
-
 function AgentDetail({agent}: AgentDetailProps) {
 	const {colors} = useTheme();
 	const {boxWidth} = useResponsiveTerminal();
@@ -162,7 +143,7 @@ function AgentDetail({agent}: AgentDetailProps) {
 			</Box>
 
 			{fields.map(f => (
-				<Field key={f.label} label={f.label} value={f.value} colors={colors} />
+				<InfoField key={f.label} label={f.label} value={f.value} />
 			))}
 
 			<Box flexDirection="column" marginBottom={1}>
@@ -186,13 +167,13 @@ export const agentsCommand: Command = {
 		if (args[0] === 'show' && args[1]) {
 			const agent = await loader.getSubagent(args[1]);
 			if (!agent) {
-				return React.createElement(ErrorMessage, {
-					key: `agents-show-error-${Date.now()}`,
-					message: `Agent '${args[1]}' not found. Run /agents to see available agents.`,
-				});
+				return errorMsg(
+					`Agent '${args[1]}' not found. Run /agents to see available agents.`,
+					'agents-show-error',
+				);
 			}
 			return React.createElement(AgentDetail, {
-				key: `agents-show-${Date.now()}`,
+				key: generateKey('agents-show'),
 				agent,
 			});
 		}
@@ -208,7 +189,7 @@ export const agentsCommand: Command = {
 		}));
 
 		return React.createElement(SubagentsList, {
-			key: `agents-${Date.now()}`,
+			key: generateKey('agents'),
 			subagents: formatted,
 		});
 	},

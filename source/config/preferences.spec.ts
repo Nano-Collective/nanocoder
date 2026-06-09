@@ -3,17 +3,21 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {
+	getCompactToolDisplay,
 	getLastUsedModel,
 	getNanocoderShape,
 	getNotificationsPreference,
 	getPasteThreshold,
+	getReasoningExpanded,
 	loadPreferences,
 	resetPreferencesCache,
 	savePreferences,
+	updateCompactToolDisplay,
 	updateLastUsed,
 	updateNanocoderShape,
 	updateNotificationsPreference,
 	updatePasteThreshold,
+	updateReasoningExpanded,
 } from './preferences';
 import type {UserPreferences} from '@/types/index';
 
@@ -1146,6 +1150,334 @@ test.serial('full workflow: update and retrieve notifications', t => {
 		t.is(retrieved!.enabled, true);
 		t.is(retrieved!.sound, false);
 		t.is(retrieved!.timeout, 5000);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// ============================================================================
+// Reasoning Expanded Tests
+// ============================================================================
+
+test.serial('getReasoningExpanded returns false when not set', t => {
+	const preferencesPath = getTestPreferencesPath();
+	writeFileSync(preferencesPath, JSON.stringify({lastProvider: 'test'}, null, 2), 'utf-8');
+
+	try {
+		const result = getReasoningExpanded();
+		t.is(result, false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getReasoningExpanded returns false when file does not exist', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	const result = getReasoningExpanded();
+	t.is(result, false);
+});
+
+test.serial('getReasoningExpanded returns true when set', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const data: UserPreferences = {
+		reasoningExpanded: true,
+	};
+	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
+
+	try {
+		const result = getReasoningExpanded();
+		t.is(result, true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateReasoningExpanded saves false value', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateReasoningExpanded(false);
+
+		t.true(existsSync(preferencesPath));
+
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as UserPreferences;
+
+		t.is(parsed.reasoningExpanded, false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateReasoningExpanded saves true value', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateReasoningExpanded(true);
+
+		t.true(existsSync(preferencesPath));
+
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as UserPreferences;
+
+		t.is(parsed.reasoningExpanded, true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateReasoningExpanded preserves existing preferences', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const existingData: UserPreferences = {
+		lastProvider: 'openrouter',
+		selectedTheme: 'tokyo-night',
+	};
+	writeFileSync(preferencesPath, JSON.stringify(existingData, null, 2), 'utf-8');
+
+	try {
+		updateReasoningExpanded(true);
+
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as UserPreferences;
+
+		t.is(parsed.lastProvider, 'openrouter');
+		t.is(parsed.selectedTheme, 'tokyo-night');
+		t.is(parsed.reasoningExpanded, true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('full workflow: update and retrieve reasoning expanded', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateReasoningExpanded(true);
+		const retrieved = getReasoningExpanded();
+		t.is(retrieved, true);
+
+		updateReasoningExpanded(false);
+		const retrieved2 = getReasoningExpanded();
+		t.is(retrieved2, false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// ============================================================================
+// Compact Tool Display Tests
+// ============================================================================
+
+test.serial('getCompactToolDisplay returns true when not set', t => {
+	const preferencesPath = getTestPreferencesPath();
+	writeFileSync(preferencesPath, JSON.stringify({lastProvider: 'test'}, null, 2), 'utf-8');
+
+	try {
+		const result = getCompactToolDisplay();
+		t.is(result, true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getCompactToolDisplay returns true when file does not exist', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	const result = getCompactToolDisplay();
+	t.is(result, true);
+});
+
+test.serial('getCompactToolDisplay returns false when set', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const data: UserPreferences = {
+		compactToolDisplay: false,
+	};
+	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
+
+	try {
+		const result = getCompactToolDisplay();
+		t.is(result, false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateCompactToolDisplay saves false value', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateCompactToolDisplay(false);
+
+		t.true(existsSync(preferencesPath));
+
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as UserPreferences;
+
+		t.is(parsed.compactToolDisplay, false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateCompactToolDisplay saves true value', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateCompactToolDisplay(true);
+
+		t.true(existsSync(preferencesPath));
+
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as UserPreferences;
+
+		t.is(parsed.compactToolDisplay, true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateCompactToolDisplay preserves existing preferences', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const existingData: UserPreferences = {
+		lastProvider: 'openrouter',
+		reasoningExpanded: true,
+	};
+	writeFileSync(preferencesPath, JSON.stringify(existingData, null, 2), 'utf-8');
+
+	try {
+		updateCompactToolDisplay(false);
+
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as UserPreferences;
+
+		t.is(parsed.lastProvider, 'openrouter');
+		t.is(parsed.reasoningExpanded, true);
+		t.is(parsed.compactToolDisplay, false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('full workflow: update and retrieve compact tool display', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateCompactToolDisplay(false);
+		const retrieved = getCompactToolDisplay();
+		t.is(retrieved, false);
+
+		updateCompactToolDisplay(true);
+		const retrieved2 = getCompactToolDisplay();
+		t.is(retrieved2, true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// ============================================================================
+// Display Settings Integration Tests
+// ============================================================================
+
+test.serial('display settings can be combined with other preferences', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		// Set reasoning expanded
+		updateReasoningExpanded(true);
+		// Set compact tool display
+		updateCompactToolDisplay(false);
+
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as UserPreferences;
+
+		t.is(parsed.reasoningExpanded, true);
+		t.is(parsed.compactToolDisplay, false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('full workflow: update and retrieve all display settings', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		// Set both display settings
+		updateReasoningExpanded(true);
+		updateCompactToolDisplay(false);
+
+		// Retrieve both
+		const reasoningResult = getReasoningExpanded();
+		const compactResult = getCompactToolDisplay();
+
+		t.is(reasoningResult, true);
+		t.is(compactResult, false);
+
+		// Toggle both
+		updateReasoningExpanded(false);
+		updateCompactToolDisplay(true);
+
+		// Verify toggles
+		t.is(getReasoningExpanded(), false);
+		t.is(getCompactToolDisplay(), true);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});

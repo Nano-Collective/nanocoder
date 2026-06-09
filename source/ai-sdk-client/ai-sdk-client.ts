@@ -1,4 +1,3 @@
-import type {OpenAIProvider} from '@ai-sdk/openai';
 import type {LanguageModel} from 'ai';
 import {Agent} from 'undici';
 import {
@@ -18,12 +17,16 @@ import type {
 import {getLogger} from '@/utils/logging';
 import {isLocalURL} from '@/utils/url-utils';
 import {handleChat} from './chat/chat-handler.js';
-import {type AIProvider, createProvider} from './providers/provider-factory.js';
+import {
+	createProvider,
+	type TaggedProvider,
+} from './providers/provider-factory.js';
+import {getTlsConnectOptions} from './tls-config.js';
 
 export class AISDKClient implements LLMClient {
 	// Definite-assignment: populated by the async `create()` factory before
 	// the client is handed to callers. The constructor only does sync setup.
-	private provider!: AIProvider;
+	private provider!: TaggedProvider;
 	private currentModel: string;
 	private availableModels: string[];
 	private providerConfig: AIProviderConfig;
@@ -66,6 +69,7 @@ export class AISDKClient implements LLMClient {
 		this.undiciAgent = new Agent({
 			connect: {
 				timeout: resolvedSocketTimeout,
+				...getTlsConnectOptions(this.providerConfig),
 			},
 			bodyTimeout: resolvedSocketTimeout,
 			headersTimeout: resolvedSocketTimeout,
@@ -153,21 +157,23 @@ export class AISDKClient implements LLMClient {
 		signal?: AbortSignal,
 		modeOverrides?: ModeOverrides,
 	): Promise<LLMChatResponse> {
-		// Get the language model instance from the provider
-		// GitHub Copilot requires routing: GPT-5+ → Responses API, others → Chat Completions
-		// ChatGPT/Codex always uses the Responses API
-		let model: LanguageModel;
-		if (this.providerConfig.sdkProvider === 'chatgpt-codex') {
-			const codex = this.provider as unknown as OpenAIProvider;
-			model = codex.responses(this.currentModel);
-		} else if (this.providerConfig.sdkProvider === 'github-copilot') {
-			const copilot = this.provider as unknown as OpenAIProvider;
-			model = this.currentModel.includes('gpt-5')
-				? copilot.responses(this.currentModel)
-				: copilot.chat(this.currentModel);
-		} else {
-			model = this.provider(this.currentModel) as unknown as LanguageModel;
-		}
+		// Get the language model instance from the tagged provider.
+		// GitHub Copilot requires routing: GPT-5+ → Responses API, others → Chat Completions.
+		// ChatGPT/Codex always uses the Responses API.
+		const model: LanguageModel = (() => {
+			switch (this.provider.kind) {
+				case 'chatgpt-codex':
+					return this.provider.provider.responses(this.currentModel);
+				case 'github-copilot':
+					return this.currentModel.includes('gpt-5')
+						? this.provider.provider.responses(this.currentModel)
+						: this.provider.provider.chat(this.currentModel);
+				case 'openai-compatible':
+				case 'anthropic':
+				case 'google':
+					return this.provider.provider(this.currentModel) as LanguageModel;
+			}
+		})();
 
 		// Delegate to chat handler
 		return await handleChat({

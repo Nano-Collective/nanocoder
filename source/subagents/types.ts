@@ -18,12 +18,20 @@ export interface SubagentConfig {
 	provider?: string;
 	/** Model ID to use, or 'inherit' to use the parent's current model */
 	model?: string;
+	/** Optional context window override for this subagent, in tokens */
+	contextWindow?: number;
 	/** List of allowed tool names (empty = all tools allowed) */
 	tools?: string[];
 	/** List of disallowed tool names */
 	disallowedTools?: string[];
 	/** System prompt / instructions for the subagent */
 	systemPrompt: string;
+	/**
+	 * Name of the skill that owns this subagent, if any. Set by the skill
+	 * registrar so the executor can include the bundle's sibling tools in
+	 * the subagent's effective tool list, even when those tools are scoped.
+	 */
+	ownerSkill?: string;
 }
 
 /**
@@ -106,6 +114,11 @@ export interface SubagentSource {
 export interface SubagentConfigWithSource extends SubagentConfig {
 	/** Source information for this config */
 	source: SubagentSource;
+	/**
+	 * Event subscriptions declared in the file's frontmatter, if any.
+	 * Target is implicit (this subagent). Resolved by the skill registrar.
+	 */
+	subscribe?: import('@/types/skills').SkillTrigger[];
 }
 
 /**
@@ -121,6 +134,8 @@ export interface SubagentFrontmatter {
 	provider?: string;
 	/** Model ID to use, or 'inherit' */
 	model?: string;
+	/** Context window override in tokens */
+	contextWindow?: number;
 	/** Allowed tools */
 	tools?: string[];
 	/** Disallowed tools */
@@ -137,4 +152,10 @@ export interface ParsedSubagentFile {
 	filePath: string;
 	/** Priority level */
 	priority: SubagentLoadPriority;
+	/**
+	 * Event subscriptions declared in the file's frontmatter, if any.
+	 * Target is implicit (the subagent itself) and resolved by the skill
+	 * registrar.
+	 */
+	subscribe?: import('@/types/skills').SkillTrigger[];
 }

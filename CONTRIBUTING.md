@@ -37,9 +37,11 @@ Browse our open issues. If you find an unassigned issue you'd like to work on, c
 
 ### Prerequisites
 
-- Node.js 20+
-- npm or pnpm
+- Node.js 22+
+- pnpm (managed via Corepack — see below)
 - Git
+
+> **pnpm version is pinned via Corepack.** The repo's `package.json` declares `"packageManager": "pnpm@11.x.x"`, and Node 22 ships [Corepack](https://nodejs.org/api/corepack.html) which auto-uses that exact pnpm version when you run `pnpm` inside the repo — no manual install needed. If you see `Corepack must be enabled`, run `corepack enable` once. To bump pnpm for the project, run `corepack use pnpm@latest` (this rewrites the `packageManager` field; CI follows automatically).
 
 ### Setup Steps
 
@@ -111,8 +113,8 @@ For a zero-setup, consistent development environment, we recommend using VS Code
 
 The devcontainer comes pre-configured with:
 
-- **Node.js 20.x** - Pre-installed and ready
-- **pnpm 9.x** - Package manager with cached store
+- **Node.js 22.x** - Pre-installed and ready
+- **pnpm latest** - Package manager with cached store
 - **Biome** - Formatter and linter (auto-formats on save)
 - **Zsh + Oh My Zsh** - Enhanced shell experience
 - **VS Code Extensions** - Biome, TypeScript, GitLens pre-installed
@@ -189,7 +191,7 @@ git commit --no-verify -m "your message"
 All new features and bug fixes should include appropriate tests:
 
 1. **Test Suite**: We use AVA for testing with TypeScript support
-2. **Test Files**: Place test files alongside source code with `.spec.ts` extension (e.g., `source/utils/parser.spec.ts`)
+2. **Test Files**: Place test files alongside source code with `.spec.ts` extension (e.g., `source/utils/parser.spec.ts`). Cross-cutting tests that don't have a single source file (e.g., security tests covering multiple modules) live in topical directories like `source/security/`. Integration tests that spawn the CLI binary use the `cli-integration.spec.ts` naming pattern.
 3. **Running Tests**: Execute the full test suite with:
 
    ```bash
@@ -435,10 +437,11 @@ git commit -m "release: vX.Y.Z"
 
 ### Code of Conduct
 
-- Be respectful and inclusive
-- Focus on constructive feedback
-- Help create a welcoming environment for all contributors
-- Remember that everyone is learning and contributing voluntarily
+The Nano Collective's [Code of Conduct](https://docs.nanocollective.org/collective/organisation/community#code-of-conduct) applies to all contributors. Please read it before participating.
+
+### Paid Contribution
+
+Some contribution work is paid via scoped bounties from the Nano Collective community fund. The [Economics Charter](https://docs.nanocollective.org/collective/organisation/economics-charter) sets out how it works — when bounties exist, how scope is agreed before work begins, and how payment is processed via Open Source Collective. Reach out to a maintainer if you want to discuss whether a piece of work could be a bounty.
 
 ### Recognition
 

@@ -30,49 +30,11 @@ test.afterEach(() => {
 });
 
 test.serial(
-	'isNanocoderToolAlwaysAllowed returns true for tool in nanocoderTools.alwaysAllow',
-	t => {
-		setupConfig({
-			nanocoder: {
-				nanocoderTools: {
-					alwaysAllow: ['execute_bash', 'read_file'],
-				},
-			},
-		});
-		process.chdir(testConfigDir);
-		clearAppConfig();
-
-		t.true(isNanocoderToolAlwaysAllowed('execute_bash'));
-		t.true(isNanocoderToolAlwaysAllowed('read_file'));
-		t.false(isNanocoderToolAlwaysAllowed('write_file'));
-	},
-);
-
-test.serial(
 	'isNanocoderToolAlwaysAllowed returns true for tool in top-level alwaysAllow',
 	t => {
 		setupConfig({
 			nanocoder: {
-				alwaysAllow: ['execute_bash'],
-			},
-		});
-		process.chdir(testConfigDir);
-		clearAppConfig();
-
-		t.true(isNanocoderToolAlwaysAllowed('execute_bash'));
-		t.false(isNanocoderToolAlwaysAllowed('write_file'));
-	},
-);
-
-test.serial(
-	'isNanocoderToolAlwaysAllowed checks both lists',
-	t => {
-		setupConfig({
-			nanocoder: {
-				alwaysAllow: ['execute_bash'],
-				nanocoderTools: {
-					alwaysAllow: ['read_file'],
-				},
+				alwaysAllow: ['execute_bash', 'read_file'],
 			},
 		});
 		process.chdir(testConfigDir);
@@ -81,13 +43,29 @@ test.serial(
 		t.true(isNanocoderToolAlwaysAllowed('execute_bash'));
 		t.true(isNanocoderToolAlwaysAllowed('read_file'));
 		t.false(isNanocoderToolAlwaysAllowed('write_file'));
+	},
+);
+
+test.serial(
+	'isNanocoderToolAlwaysAllowed ignores removed nanocoderTools.alwaysAllow path',
+	t => {
+		setupConfig({
+			nanocoder: {
+				nanocoderTools: {
+					alwaysAllow: ['execute_bash'],
+				},
+			},
+		});
+		process.chdir(testConfigDir);
+		clearAppConfig();
+
+		t.false(isNanocoderToolAlwaysAllowed('execute_bash'));
 	},
 );
 
 test.serial(
 	'isNanocoderToolAlwaysAllowed returns false when no config exists',
 	t => {
-		// Don't set up any config file
 		clearAppConfig();
 
 		t.false(isNanocoderToolAlwaysAllowed('execute_bash'));
@@ -99,9 +77,7 @@ test.serial(
 	t => {
 		setupConfig({
 			nanocoder: {
-				nanocoderTools: {
-					alwaysAllow: 'execute_bash',
-				},
+				alwaysAllow: 'execute_bash',
 			},
 		});
 		process.chdir(testConfigDir);

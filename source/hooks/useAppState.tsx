@@ -5,6 +5,7 @@ import {defaultTheme} from '@/config/themes';
 import {resolveTune} from '@/config/tune';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
+import {generateKey} from '@/session/key-generator';
 import {createTokenizer} from '@/tokenization/index.js';
 import type {Task} from '@/tools/tasks/types';
 import {ToolManager} from '@/tools/tool-manager';
@@ -12,6 +13,8 @@ import type {CheckpointListItem} from '@/types/checkpoint';
 import type {CustomCommand} from '@/types/commands';
 import type {AIProviderConfig, TuneConfig} from '@/types/config';
 import {
+	ApiUsageSnapshot,
+	ContextSource,
 	DevelopmentMode,
 	LLMClient,
 	LSPConnectionStatus,
@@ -19,7 +22,7 @@ import {
 	Message,
 	ToolCall,
 } from '@/types/core';
-import type {ToolResult, UpdateInfo} from '@/types/index';
+import type {UpdateInfo} from '@/types/index';
 import type {Tokenizer} from '@/types/tokenization.js';
 import type {ThemePreset} from '@/types/ui';
 import {BoundedMap} from '@/utils/bounded-map';
@@ -27,34 +30,15 @@ import type {PendingQuestion} from '@/utils/question-queue';
 
 export type ActiveMode =
 	| 'model'
-	| 'provider'
 	| 'modelDatabase'
 	| 'configWizard'
 	| 'mcpWizard'
 	| 'explorer'
 	| 'ideSelection'
-	| 'scheduler'
 	| 'checkpointLoad'
 	| 'sessionSelector'
 	| 'tune'
 	| null;
-
-export interface ConversationContext {
-	/**
-	 * All messages up to (but not including) tool execution.
-	 * Includes user message, auto-executed messages, and assistant message with tool_calls.
-	 */
-	messagesBeforeToolExecution: Message[];
-	/**
-	 * The assistant message that triggered tool execution.
-	 * Included in messagesBeforeToolExecution for reference.
-	 */
-	assistantMsg: Message;
-	/**
-	 * System message for the next turn after tool execution.
-	 */
-	systemMessage: Message;
-}
 
 export function useAppState(
 	initialDevelopmentMode: DevelopmentMode = 'normal',
@@ -66,7 +50,6 @@ export function useAppState(
 
 	const [client, setClient] = useState<LLMClient | null>(null);
 	const [messages, setMessages] = useState<Message[]>([]);
-	const [displayMessages, setDisplayMessages] = useState<Message[]>([]);
 	const [messageTokenCache, setMessageTokenCache] = useState<
 		BoundedMap<string, number>
 	>(
@@ -132,6 +115,7 @@ export function useAppState(
 	} | null>(null);
 	const [showAllSessions, setShowAllSessions] = useState<boolean>(false);
 	const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+	const [sessionName, setSessionName] = useState<string>('');
 	const [isToolConfirmationMode, setIsToolConfirmationMode] =
 		useState<boolean>(false);
 	const [isToolExecuting, setIsToolExecuting] = useState<boolean>(false);
@@ -174,6 +158,11 @@ export function useAppState(
 	const [developmentMode, setDevelopmentMode] = useState<DevelopmentMode>(
 		initialDevelopmentMode,
 	);
+	// Ref keeps the current mode readable inside long-running async loops so a
+	// mid-turn switch (e.g. flipping to yolo while tools are executing) takes
+	// effect on the next tool call instead of only on the next message.
+	const developmentModeRef = useRef<DevelopmentMode>(initialDevelopmentMode);
+	developmentModeRef.current = developmentMode;
 
 	// Model mode state — resolved from config layers on startup
 	const [tune, setTune] = useState<TuneConfig>(() => {
@@ -185,50 +174,36 @@ export function useAppState(
 		null,
 	);
 	const [contextLimit, setContextLimit] = useState<number | null>(null);
+	// Whether the displayed context percentage is API-reported or estimated
+	const [contextSource, setContextSource] = useState<ContextSource | null>(
+		null,
+	);
+	// Most recent API-reported usage, tagged with the conversation length at
+	// capture time (see ApiUsageSnapshot). Null when unavailable or stale.
+	const [lastApiUsage, setLastApiUsage] = useState<ApiUsageSnapshot | null>(
+		null,
+	);
 
 	// Tool confirmation state
 	const [pendingToolCalls, setPendingToolCalls] = useState<ToolCall[]>([]);
 	const [currentToolIndex, setCurrentToolIndex] = useState<number>(0);
-	const [completedToolResults, setCompletedToolResults] = useState<
-		ToolResult[]
-	>([]);
-	const [currentConversationContext, setCurrentConversationContext] =
-		useState<ConversationContext | null>(null);
 
 	// Chat queue for components
 	const [chatComponents, setChatComponents] = useState<React.ReactNode[]>([]);
 	// Live component that renders outside Static for real-time updates (e.g., BashProgress)
 	const [liveComponent, setLiveComponent] = useState<React.ReactNode>(null);
-	// Use ref for component key counter to avoid stale closure issues
-	// State updates are async/batched, but ref updates are synchronous
-	// This prevents duplicate keys when addToChatQueue is called rapidly
-	const componentKeyCounterRef = useRef(0);
-
-	// Get the next unique component key - synchronous to prevent duplicates
-	const getNextComponentKey = useCallback(() => {
-		componentKeyCounterRef.current += 1;
-		return componentKeyCounterRef.current;
-	}, []);
 
 	// Helper function to add components to the chat queue with stable keys
-	const addToChatQueue = useCallback(
-		(component: React.ReactNode) => {
-			const newCounter = getNextComponentKey();
+	const addToChatQueue = useCallback((component: React.ReactNode) => {
+		let componentWithKey = component;
+		if (React.isValidElement(component) && !component.key) {
+			componentWithKey = React.cloneElement(component, {
+				key: generateKey('chat-component'),
+			});
+		}
 
-			let componentWithKey = component;
-			if (React.isValidElement(component) && !component.key) {
-				componentWithKey = React.cloneElement(component, {
-					key: `chat-component-${newCounter}`,
-				});
-			}
-
-			setChatComponents(prevComponents => [
-				...prevComponents,
-				componentWithKey,
-			]);
-		},
-		[getNextComponentKey],
-	);
+		setChatComponents(prevComponents => [...prevComponents, componentWithKey]);
+	}, []);
 
 	// Create tokenizer based on current provider and model
 	const tokenizer = useMemo<Tokenizer>(() => {
@@ -284,24 +259,20 @@ export function useAppState(
 	// Message updater - no limits, display all messages
 	const updateMessages = useCallback((newMessages: Message[]) => {
 		setMessages(newMessages);
-		setDisplayMessages(newMessages);
+		// Any wholesale message change — new turn, /clear, manual /compact,
+		// session resume, checkpoint restore — invalidates the API usage
+		// snapshot, which was captured against the previous messages array.
+		// The chat loop re-establishes it right after via setLastApiUsage; every
+		// other path then correctly falls back to client-side estimation. This
+		// keeps the api-vs-estimate decision robust across all replacement paths
+		// rather than relying on each handler to clear it.
+		setLastApiUsage(null);
 	}, []);
-
-	// Reset tool confirmation state
-	const resetToolConfirmationState = () => {
-		setIsToolConfirmationMode(false);
-		setIsToolExecuting(false);
-		setPendingToolCalls([]);
-		setCurrentToolIndex(0);
-		setCompletedToolResults([]);
-		setCurrentConversationContext(null);
-	};
 
 	return {
 		// State
 		client,
 		messages,
-		displayMessages,
 		messageTokenCache,
 		currentModel,
 		currentProvider,
@@ -332,22 +303,14 @@ export function useAppState(
 		setActiveMode,
 
 		// Derived mode booleans (read-only convenience)
-		isModelSelectionMode: activeMode === 'model',
-		isProviderSelectionMode: activeMode === 'provider',
-		isModelDatabaseMode: activeMode === 'modelDatabase',
-		isConfigWizardMode: activeMode === 'configWizard',
-		isMcpWizardMode: activeMode === 'mcpWizard',
-		isCheckpointLoadMode: activeMode === 'checkpointLoad',
 		isExplorerMode: activeMode === 'explorer',
 		isIdeSelectionMode: activeMode === 'ideSelection',
-		isSchedulerMode: activeMode === 'scheduler',
-		isSessionSelectorMode: activeMode === 'sessionSelector',
-		isTuneActive: activeMode === 'tune',
 
 		isVscodeEnabled,
 		checkpointLoadData,
 		showAllSessions,
 		currentSessionId,
+		sessionName,
 		isToolConfirmationMode,
 		isToolExecuting,
 		subagentsReady,
@@ -359,21 +322,20 @@ export function useAppState(
 		isQuestionMode,
 		pendingQuestion,
 		developmentMode,
+		developmentModeRef,
 		tune,
 		contextPercentUsed,
 		contextLimit,
+		contextSource,
+		lastApiUsage,
 		pendingToolCalls,
 		currentToolIndex,
-		completedToolResults,
-		currentConversationContext,
 		chatComponents,
-		getNextComponentKey,
 		tokenizer,
 
 		// Setters
 		setClient,
 		setMessages,
-		setDisplayMessages,
 		setMessageTokenCache,
 		setCurrentModel,
 		setCurrentProvider,
@@ -401,6 +363,7 @@ export function useAppState(
 		setCheckpointLoadData,
 		setShowAllSessions,
 		setCurrentSessionId,
+		setSessionName,
 		setIsToolConfirmationMode,
 		setIsToolExecuting,
 		setSubagentsReady,
@@ -413,10 +376,10 @@ export function useAppState(
 		setTune,
 		setContextPercentUsed,
 		setContextLimit,
+		setContextSource,
+		setLastApiUsage,
 		setPendingToolCalls,
 		setCurrentToolIndex,
-		setCompletedToolResults,
-		setCurrentConversationContext,
 		setChatComponents,
 		liveComponent,
 		setLiveComponent,
@@ -425,6 +388,5 @@ export function useAppState(
 		addToChatQueue,
 		getMessageTokens,
 		updateMessages,
-		resetToolConfirmationState,
 	};
 }

@@ -1,132 +1,63 @@
-import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
-import {useEffect, useState} from 'react';
-import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
-import {useTerminalWidth} from '@/hooks/useTerminalWidth';
-import {useTheme} from '@/hooks/useTheme';
-import {LLMClient} from '@/types/core';
+import {useState} from 'react';
+import {
+	ItemSelector,
+	type ItemSelectorOption,
+} from '@/components/item-selector';
+import {loadAllProviderConfigs} from '@/config/mcp-config-loader';
 
 interface ModelSelectorProps {
-	client: LLMClient | null;
+	currentProvider: string;
 	currentModel: string;
-	onModelSelect: (model: string) => void;
+	onModelSelect: (provider: string, model: string) => void;
 	onCancel: () => void;
 }
 
-interface ModelOption {
-	label: string;
-	value: string;
-}
-
 export default function ModelSelector({
-	client,
+	currentProvider,
 	currentModel,
 	onModelSelect,
 	onCancel,
 }: ModelSelectorProps) {
-	const boxWidth = useTerminalWidth();
-	const {colors} = useTheme();
-	const [models, setModels] = useState<ModelOption[]>([]);
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
+	// Flat list of every model across every configured provider. The option
+	// value is the entry's index, so a selection maps back to its
+	// (provider, model) pair without encoding a delimiter into the value.
+	const [entries] = useState<{provider: string; model: string}[]>(() =>
+		loadAllProviderConfigs().flatMap(provider =>
+			(provider.models ?? []).map(model => ({
+				provider: provider.name,
+				model,
+			})),
+		),
+	);
 
-	// Handle escape key to cancel
-	useInput((_, key) => {
-		if (key.escape) {
-			onCancel();
-		}
-	});
+	const items: ItemSelectorOption[] = entries.map((entry, index) => ({
+		label: `${entry.model} (${entry.provider})${
+			entry.provider === currentProvider && entry.model === currentModel
+				? ' (current)'
+				: ''
+		}`,
+		value: String(index),
+	}));
 
-	useEffect(() => {
-		const loadModels = async () => {
-			if (!client) {
-				setError('No active client found');
-				setLoading(false);
-				return;
-			}
-
-			try {
-				const availableModels = await client.getAvailableModels();
-
-				if (availableModels.length === 0) {
-					setError('No models available. Please check your configuration.');
-					setLoading(false);
-					return;
-				}
-
-				const modelOptions: ModelOption[] = availableModels.map(model => ({
-					label: `${model}${model === currentModel ? ' (current)' : ''}`,
-					value: model,
-				}));
-
-				setModels(modelOptions);
-				setLoading(false);
-			} catch (err) {
-				setError(`Error accessing models: ${String(err)}`);
-				setLoading(false);
-			}
-		};
-
-		void loadModels();
-	}, [client, currentModel]);
-
-	const handleSelect = (item: ModelOption) => {
-		onModelSelect(item.value);
-	};
-
-	if (loading) {
-		return (
-			<TitledBoxWithPreferences
-				title="Model Selection"
-				width={boxWidth}
-				borderColor={colors.primary}
-				paddingX={2}
-				paddingY={1}
-				marginBottom={1}
-			>
-				<Text color={colors.secondary}>Loading available models...</Text>
-			</TitledBoxWithPreferences>
-		);
-	}
-
-	if (error) {
-		return (
-			<TitledBoxWithPreferences
-				title="Model Selection - Error"
-				width={boxWidth}
-				borderColor={colors.error}
-				paddingX={2}
-				paddingY={1}
-				marginBottom={1}
-			>
-				<Box flexDirection="column">
-					<Text color={colors.error}>{error}</Text>
-					<Text color={colors.secondary}>
-						Make sure your provider is properly configured.
-					</Text>
-					<Box marginTop={1}>
-						<Text color={colors.secondary}>Press Escape to cancel</Text>
-					</Box>
-				</Box>
-			</TitledBoxWithPreferences>
-		);
-	}
+	const error =
+		entries.length === 0
+			? 'No models available. Please check your configuration.'
+			: null;
 
 	return (
-		<TitledBoxWithPreferences
+		<ItemSelector
 			title="Select a Model"
-			width={boxWidth}
-			borderColor={colors.primary}
-			paddingX={2}
-			paddingY={1}
-			marginBottom={1}
-		>
-			<Box flexDirection="column">
-				<SelectInput items={models} onSelect={handleSelect} />
-				<Box marginTop={1}>
-					<Text color={colors.secondary}>Press Escape to cancel</Text>
-				</Box>
-			</Box>
-		</TitledBoxWithPreferences>
+			items={items}
+			onSelect={value => {
+				const entry = entries[Number(value)];
+				if (entry) {
+					onModelSelect(entry.provider, entry.model);
+				}
+			}}
+			onCancel={onCancel}
+			error={error}
+			errorTitle="Model Selection - Error"
+			errorHint="Make sure your providers are properly configured."
+		/>
 	);
 }

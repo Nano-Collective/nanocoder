@@ -7,6 +7,8 @@ import type {
 	ToolHandler,
 	ToolValidator,
 } from '@/types/index';
+import {getToolJsonSchema} from '@/utils/schema-validate';
+import {withValidation} from '@/utils/tool-validation';
 
 /**
  * Helper class to encapsulate tool registry management
@@ -126,75 +128,13 @@ export class ToolRegistry {
 	}
 
 	/**
-	 * Get all formatter entries as a record (compatible with old API)
-	 * @returns Record mapping tool names to formatters
-	 */
-	getFormatters(): Record<string, ToolFormatter> {
-		const formatters: Record<string, ToolFormatter> = {};
-		for (const [name, entry] of this.tools) {
-			if (entry.formatter) {
-				formatters[name] = entry.formatter;
-			}
-		}
-		return formatters;
-	}
-
-	/**
-	 * Get all validator entries as a record (compatible with old API)
-	 * @returns Record mapping tool names to validators
-	 */
-	getValidators(): Record<string, ToolValidator> {
-		const validators: Record<string, ToolValidator> = {};
-		for (const [name, entry] of this.tools) {
-			if (entry.validator) {
-				validators[name] = entry.validator;
-			}
-		}
-		return validators;
-	}
-
-	/**
-	 * Get all native AI SDK tools as a record (compatible with old API)
-	 * Tools with validators get their execute functions wrapped so that
-	 * validation runs before execution in all code paths, including
-	 * AI SDK auto-execution which bypasses external validator checks.
-	 * @returns Record mapping tool names to AISDKCoreTool objects
-	 */
-	getNativeTools(): Record<string, AISDKCoreTool> {
-		const nativeTools: Record<string, AISDKCoreTool> = {};
-		for (const [name, entry] of this.tools) {
-			if (entry.validator && entry.tool.execute) {
-				const originalExecute = entry.tool.execute;
-				const validator = entry.validator;
-				nativeTools[name] = {
-					...entry.tool,
-					execute: async (args: unknown, options: unknown) => {
-						const validationResult = await validator(args);
-						if (!validationResult.valid) {
-							throw new Error(validationResult.error);
-						}
-						return (originalExecute as Function).call(
-							entry.tool,
-							args,
-							options,
-						);
-					},
-				};
-			} else {
-				nativeTools[name] = entry.tool;
-			}
-		}
-		return nativeTools;
-	}
-
-	/**
-	 * Get all native AI SDK tools with execute functions removed.
-	 * The SDK still gets schemas and descriptions for the model,
-	 * but cannot auto-execute anything — tool calls are returned
-	 * for us to handle (parallel execution, confirmation, etc.).
+	 * Get all native AI SDK tools (schemas + descriptions for the model) with
+	 * their execute functions removed. The SDK never auto-executes: tool calls
+	 * are returned for us to handle (approval, parallel execution, etc.) and
+	 * execution always runs through the registry handler (which validates).
 	 * @returns Record mapping tool names to AISDKCoreTool objects without execute
 	 */
-	getNativeToolsWithoutExecute(): Record<string, AISDKCoreTool> {
+	getNativeTools(): Record<string, AISDKCoreTool> {
 		const nativeTools: Record<string, AISDKCoreTool> = {};
 		for (const [name, entry] of this.tools) {
 			const {execute: _, ...toolWithoutExecute} = entry.tool;
@@ -267,7 +207,7 @@ export class ToolRegistry {
 			if (tool) {
 				registry.register({
 					name,
-					handler,
+					handler: withValidation(handler, validators?.[name]),
 					tool,
 					formatter: formatters?.[name],
 					validator: validators?.[name],
@@ -289,20 +229,26 @@ export class ToolRegistry {
 		const registry = new ToolRegistry();
 
 		for (const t of toolExports) {
+			// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
+			const rawHandler = async (args: any) =>
+				// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
+				await (t.tool as any).execute(args, {
+					toolCallId: 'manual',
+					messages: [],
+				});
 			registry.register({
 				name: t.name,
-				// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
-				handler: async (args: any) =>
-					// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
-					await (t.tool as any).execute(args, {
-						toolCallId: 'manual',
-						messages: [],
-					}),
+				handler: withValidation(
+					rawHandler,
+					t.validator,
+					getToolJsonSchema(t.tool),
+				),
 				tool: t.tool,
 				formatter: t.formatter,
 				validator: t.validator,
 				streamingFormatter: t.streamingFormatter,
 				readOnly: t.readOnly,
+				approval: t.approval,
 			});
 		}
 

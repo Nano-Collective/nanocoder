@@ -19,6 +19,9 @@
 
 import * as fs from 'node:fs/promises';
 import {parse as parseYaml} from 'yaml';
+import {parseSubscribeBlock} from '@/skills/parse-subscribe';
+import type {SkillTrigger} from '@/types/skills';
+import {splitFrontmatter} from '@/utils/frontmatter';
 import type {
 	ParsedSubagentFile,
 	SubagentConfig,
@@ -34,7 +37,8 @@ export async function parseSubagentMarkdown(
 	priority?: SubagentLoadPriority,
 ): Promise<ParsedSubagentFile> {
 	const content = await fs.readFile(filePath, 'utf-8');
-	const frontmatter = extractFrontmatter(content);
+	const raw = extractRawFrontmatter(content);
+	const frontmatter = validateAndCastFrontmatter(raw);
 	const systemPrompt = extractBody(content);
 
 	const config: SubagentConfig = {
@@ -42,15 +46,21 @@ export async function parseSubagentMarkdown(
 		description: frontmatter.description,
 		provider: frontmatter.provider,
 		model: frontmatter.model || 'inherit',
+		contextWindow: frontmatter.contextWindow,
 		tools: frontmatter.tools,
 		disallowedTools: frontmatter.disallowedTools,
 		systemPrompt,
 	};
 
+	const subscribe: SkillTrigger[] | undefined = parseSubscribeBlock(
+		raw.subscribe,
+	);
+
 	return {
 		config,
 		filePath,
 		priority: priority ?? 1,
+		subscribe,
 	};
 }
 
@@ -86,6 +96,19 @@ export function validateFrontmatter(
 		}
 	}
 
+	if (frontmatter.contextWindow !== undefined) {
+		if (
+			typeof frontmatter.contextWindow !== 'number' ||
+			!Number.isFinite(frontmatter.contextWindow) ||
+			frontmatter.contextWindow <= 0
+		) {
+			return {
+				valid: false,
+				error: 'contextWindow must be a positive number',
+			};
+		}
+	}
+
 	if (frontmatter.tools !== undefined) {
 		if (!Array.isArray(frontmatter.tools)) {
 			return {
@@ -108,19 +131,27 @@ export function validateFrontmatter(
 }
 
 /**
- * Extract YAML frontmatter from markdown content.
+ * Extract YAML frontmatter from markdown content and validate the subagent
+ * fields. Returns the typed `SubagentFrontmatter` (unknown fields like
+ * `subscribe:` are dropped).
  */
 export function extractFrontmatter(content: string): SubagentFrontmatter {
-	const match = content.match(/^---\r?\n(.*?)\r?\n---/s);
+	return validateAndCastFrontmatter(extractRawFrontmatter(content));
+}
 
-	if (!match) {
+/**
+ * Parse YAML frontmatter as an untyped record. Used by callers that need to
+ * read fields outside the subagent schema (e.g. `subscribe:`).
+ */
+function extractRawFrontmatter(content: string): Record<string, unknown> {
+	const {frontmatter: raw, hasFrontmatter} = splitFrontmatter(content);
+	if (!hasFrontmatter) {
 		throw new Error('No YAML frontmatter found in file');
 	}
 
 	let frontmatter: Record<string, unknown>;
-
 	try {
-		frontmatter = parseYaml(match[1]) as Record<string, unknown>;
+		frontmatter = parseYaml(raw) as Record<string, unknown>;
 	} catch (error) {
 		throw new Error(`Failed to parse YAML frontmatter: ${error}`);
 	}
@@ -129,11 +160,16 @@ export function extractFrontmatter(content: string): SubagentFrontmatter {
 		throw new Error('YAML frontmatter must be an object');
 	}
 
+	return frontmatter;
+}
+
+function validateAndCastFrontmatter(
+	frontmatter: Record<string, unknown>,
+): SubagentFrontmatter {
 	const validation = validateFrontmatter(frontmatter);
 	if (!validation.valid) {
 		throw new Error(`Invalid frontmatter: ${validation.error}`);
 	}
-
 	return frontmatter as unknown as SubagentFrontmatter;
 }
 
@@ -141,9 +177,5 @@ export function extractFrontmatter(content: string): SubagentFrontmatter {
  * Extract the body content from markdown (after frontmatter).
  */
 export function extractBody(content: string): string {
-	const withoutFrontmatter = content.replace(
-		/^---\r?\n.*?\r?\n---(?:\r?\n|$)/s,
-		'',
-	);
-	return withoutFrontmatter.trim();
+	return splitFrontmatter(content).body;
 }

@@ -26,6 +26,8 @@ function parsePrompt(args: string[]): string | undefined {
 			} else if (arg === '--context-max') {
 				i++; // skip this flag and its value
 				continue;
+			} else if (arg === '--plain' || arg === '--no-plain') {
+				continue; // skip this flag
 			} else {
 				promptArgs.push(arg);
 			}
@@ -223,4 +225,103 @@ test('CLI parsing: --context-max with numeric value', t => {
 
 	t.is(contextMaxArgIndex, 0);
 	t.is(args[contextMaxArgIndex + 1], '32000');
+});
+
+// --plain / --no-plain flag tests. The plain-mode resolution rule mirrors
+// the logic in cli.tsx: explicit --plain wins, --no-plain forces Ink, and
+// otherwise it auto-enables for `run` invocations on a non-TTY or in CI.
+function resolvePlainMode(opts: {
+	args: string[];
+	stdoutIsTTY: boolean;
+	env: NodeJS.ProcessEnv;
+}): {plainMode: boolean; vscodeMode: boolean} {
+	const {args, stdoutIsTTY, env} = opts;
+	const nonInteractiveMode = args.includes('run');
+	const vscodeMode = args.includes('--vscode');
+	const plainRequested = args.includes('--plain');
+	const noPlainRequested = args.includes('--no-plain');
+	const ciDetected =
+		env.CI === 'true' ||
+		Boolean(
+			env.GITHUB_ACTIONS ||
+				env.GITLAB_CI ||
+				env.BUILDKITE ||
+				env.CIRCLECI ||
+				env.JENKINS_URL,
+		);
+	const plainAuto =
+		nonInteractiveMode &&
+		!noPlainRequested &&
+		!vscodeMode &&
+		(!stdoutIsTTY || ciDetected);
+	return {plainMode: plainRequested || plainAuto, vscodeMode};
+}
+
+test('plain mode: filters --plain and --no-plain from prompt args', t => {
+	t.is(parsePrompt(['run', 'do', '--plain', 'a', 'thing']), 'do a thing');
+	t.is(parsePrompt(['run', 'do', '--no-plain', 'a', 'thing']), 'do a thing');
+});
+
+test('plain mode: explicit --plain enables it on a TTY without CI', t => {
+	const {plainMode} = resolvePlainMode({
+		args: ['--plain', 'run', 'hi'],
+		stdoutIsTTY: true,
+		env: {},
+	});
+	t.true(plainMode);
+});
+
+test('plain mode: auto-enables for run on a non-TTY', t => {
+	const {plainMode} = resolvePlainMode({
+		args: ['run', 'hi'],
+		stdoutIsTTY: false,
+		env: {},
+	});
+	t.true(plainMode);
+});
+
+test('plain mode: auto-enables for run when CI=true', t => {
+	const {plainMode} = resolvePlainMode({
+		args: ['run', 'hi'],
+		stdoutIsTTY: true,
+		env: {CI: 'true'},
+	});
+	t.true(plainMode);
+});
+
+test('plain mode: auto-enables for run when GITHUB_ACTIONS is set', t => {
+	const {plainMode} = resolvePlainMode({
+		args: ['run', 'hi'],
+		stdoutIsTTY: true,
+		env: {GITHUB_ACTIONS: 'true'},
+	});
+	t.true(plainMode);
+});
+
+test('plain mode: --no-plain wins over auto-detection', t => {
+	const {plainMode} = resolvePlainMode({
+		args: ['--no-plain', 'run', 'hi'],
+		stdoutIsTTY: false,
+		env: {CI: 'true'},
+	});
+	t.false(plainMode);
+});
+
+test('plain mode: stays off for interactive sessions even on a non-TTY', t => {
+	const {plainMode} = resolvePlainMode({
+		args: [],
+		stdoutIsTTY: false,
+		env: {CI: 'true'},
+	});
+	t.false(plainMode);
+});
+
+test('plain mode: --vscode suppresses auto-detection', t => {
+	const {plainMode, vscodeMode} = resolvePlainMode({
+		args: ['--vscode', 'run', 'hi'],
+		stdoutIsTTY: false,
+		env: {CI: 'true'},
+	});
+	t.false(plainMode);
+	t.true(vscodeMode);
 });

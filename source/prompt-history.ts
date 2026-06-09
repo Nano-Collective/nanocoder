@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import {getClosestConfigFile} from '@/config/index';
 import {MAX_PROMPT_HISTORY_SIZE} from '@/constants';
+import {formatError} from '@/utils/error-formatter';
 import {logError} from '@/utils/message-queue';
 import type {InputState} from './types/hooks';
 
@@ -27,13 +28,16 @@ export class PromptHistory {
 				const jsonContent = content.slice(JSON_FORMAT_MARKER.length);
 				this.history = JSON.parse(jsonContent) as InputState[];
 			} else if (content.includes(ENTRY_SEPARATOR)) {
-				// Legacy format with separator - migrate to InputState
+				// LEGACY_MIGRATION_REMOVE_AFTER: 1.27.0
+				// Old format using ENTRY_SEPARATOR. Migrate to InputState on read.
 				const stringEntries = content
 					.split(ENTRY_SEPARATOR)
 					.filter(entry => entry.trim() !== '');
 				this.history = this.migrateStringArrayToInputState(stringEntries);
 			} else {
-				// Very old format - single lines - migrate to InputState
+				// LEGACY_MIGRATION_REMOVE_AFTER: 1.27.0
+				// Very old format using bare newlines. Migrate to InputState on read.
+				// Drop this branch and the ENTRY_SEPARATOR branch above once 1.27.0 ships.
 				const stringEntries = content
 					.split('\n')
 					.filter(line => line.trim() !== '');
@@ -68,8 +72,7 @@ export class PromptHistory {
 				);
 			} catch (error) {
 				// Silently fail to avoid disrupting the user experience
-				const errorMessage =
-					error instanceof Error ? error.message : 'Unknown error';
+				const errorMessage = formatError(error);
 				logError(`Failed to save prompt history: ${errorMessage}`);
 			}
 		});
@@ -137,7 +140,10 @@ export class PromptHistory {
 		}
 	}
 
-	// Legacy methods for backward compatibility
+	// LEGACY_MIGRATION_REMOVE_AFTER: 1.27.0
+	// String-returning variants kept for backward compatibility with older callers.
+	// No production code uses them; they are only exercised by tests. Delete the
+	// three legacy methods below (and their specs) once 1.27.0 ships.
 	getPreviousString(): string | null {
 		const result = this.getPrevious();
 		return result?.displayValue ?? null;
@@ -156,7 +162,6 @@ export class PromptHistory {
 		return [...this.history];
 	}
 
-	// Legacy method for backward compatibility
 	getHistoryStrings(): string[] {
 		return this.history.map(entry => entry.displayValue);
 	}

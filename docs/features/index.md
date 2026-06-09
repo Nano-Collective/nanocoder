@@ -108,8 +108,8 @@ As your conversation grows, you'll want tools to keep it manageable.
 
 Every message adds to your context window. When it fills up, the AI loses access to earlier messages. [Context compression](context-compression.md) solves this:
 
-- `/compact` — manually compress older messages while preserving recent context and key decisions
-- **Auto-compact** — automatically compresses when context reaches a threshold (configurable in `agents.config.json`)
+- `/compact` — manually compress older messages. Uses an LLM to write a structured summary by default; pass `--mechanical` for a fast regex-based fallback
+- **Auto-compact** — automatically compresses when context reaches a threshold (configurable in `agents.config.json`, including the strategy)
 - `/usage` — see a visual breakdown of your current context utilization
 
 ### Checkpointing
@@ -155,19 +155,26 @@ Run `/init` to analyze your project and generate an `AGENTS.md` file — a proje
 
 The `AGENTS.md` file is automatically loaded every session, so the AI always knows how your project works.
 
-### Custom Commands
+### Skills: the unified extension model
 
-[Custom commands](custom-commands.md) let you save reusable prompts as markdown files. Create them in `.nanocoder/commands/`:
-
-```bash
-/commands create review-code
-```
-
-Commands support parameters (`{{filename}}`), aliases, auto-injection based on keywords, and namespace organization via subdirectories. Once created, invoke them like any slash command:
+**[Skills](skills.md)** are the umbrella for everything you can plug into Nanocoder — custom commands, subagents, custom tools, and event-driven triggers all live under one model. A skill is either a single `.md` file (a one-member skill) or a directory under `.nanocoder/skills/<name>/` (a bundle that ships a command + subagent + tools together).
 
 ```bash
-/review-code src/app.ts
+/skills              # list every loaded skill
+/skills show k8s     # inspect a skill (members, subscriptions, source)
+/skills create k8s   # scaffold a new bundle
 ```
+
+For most cases, you'll work at the skill level. The per-primitive pages below cover the member-specific details.
+
+### Skill primitives
+
+These are the kinds of members a skill can contain. Each page covers its primitive's specifics — combining them into a cohesive skill is documented in [Skills](skills.md).
+
+- **[Custom Commands](custom-commands.md)** — reusable prompts invoked as `/command`. Support parameters, aliases, auto-injection, namespacing.
+- **[Subagents](subagents.md)** — specialized AI agents the main agent can delegate to. Isolated context, filtered tools, optionally a different model.
+- **[Custom Tools](custom-tools.md)** — model-callable shell scripts with declared input schemas and approval policy.
+- **Event subscriptions** — cron and `file.changed` triggers that fire skill members through the per-project daemon. See [Skills → Event subscriptions](skills.md#event-subscriptions).
 
 ### File Explorer
 
@@ -191,6 +198,14 @@ nanocoder --vscode
 
 Features include live diff previews of proposed changes, right-click "Ask Nanocoder about this" for selected code, and LSP diagnostics sharing.
 
+### ACP (Zed and other editors)
+
+Run Nanocoder as an [Agent Client Protocol server](acp.md) so ACP-compatible editors like Zed can drive it as a native agent — with diffs, tool cards, permission prompts, and model switching rendered in the editor:
+
+```bash
+nanocoder --acp
+```
+
 ### MCP Servers
 
 Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) servers](../configuration/mcp-configuration.md). MCP servers add new tools the AI can use — from database queries to API calls to custom integrations.
@@ -200,44 +215,24 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 /mcp            # see connected servers and tools
 ```
 
-### Subagents
-
-[Subagents](subagents.md) let the AI delegate focused tasks to specialized agents that run in isolated contexts. Each subagent has its own system prompt, filtered tools, and optionally a different model or provider. Only the result comes back to the main conversation.
-
-```bash
-/agents              # list available subagents
-/agents create my-agent   # create a custom subagent with AI help
-```
-
-Subagents are defined as markdown files in `.nanocoder/agents/`. You can use a local model for cheap research and a cloud model for the main conversation.
-
-### Scheduled Tasks
-
-Automate recurring work with the [scheduler](scheduler.md):
-
-```bash
-/schedule create deps-check
-/schedule add "0 9 * * MON" deps-check
-/schedule start
-```
-
-Define task prompts as markdown files and schedule them with cron expressions. Nanocoder runs them non-interactively and logs the results.
-
 ## Feature Reference
 
 | Feature | Description |
 |---------|-------------|
+| [Skills](skills.md) | **Umbrella** — unified extension model for commands, subagents, tools, and event triggers |
+| [Custom Commands](custom-commands.md) | Reusable AI prompts as markdown files (a kind of skill member) |
+| [Subagents](subagents.md) | Specialized AI agents with isolated context (a kind of skill member) |
+| [Custom Tools](custom-tools.md) | Model-callable shell scripts (a kind of skill member) |
+| [Scheduler](scheduler.md) | Migration pointer — cron triggers are now [skill subscriptions](skills.md#event-subscriptions) |
 | [Commands Reference](commands.md) | All slash commands and special input syntax |
 | [Development Modes](development-modes.md) | Normal, auto-accept, yolo, and plan modes |
 | [Context Compression](context-compression.md) | Managing token usage in long conversations |
 | [Checkpointing](checkpointing.md) | Saving and restoring conversation snapshots |
 | [Session Management](session-management.md) | Automatic session saving and resumption |
 | [Task Management](task-management.md) | Tracking multi-step work |
-| [Custom Commands](custom-commands.md) | Reusable AI prompts as markdown files |
-| [Subagents](subagents.md) | Delegate tasks to specialized AI agents with isolated context |
 | [File Explorer](file-explorer.md) | Interactive file browser for context selection |
-| [Scheduler](scheduler.md) | Recurring AI tasks with cron expressions |
 | [VS Code Extension](vscode-extension.md) | Editor integration with live diff previews |
+| [ACP](acp.md) | Run as an Agent Client Protocol server for editors like Zed |
 | [Tune](tune.md) | Runtime model tuning for tool profiles, parameters, and compaction |
 | [Desktop Notifications](notifications.md) | Get notified when Nanocoder needs your attention |
 | [Keyboard Shortcuts](keyboard-shortcuts.md) | Complete keyboard shortcut reference |

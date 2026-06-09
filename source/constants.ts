@@ -31,6 +31,9 @@ export const CACHE_FILE_TTL_MS = 5000;
 export const CACHE_MODELS_EXPIRATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 export const MAX_FILE_READ_RETRIES = 3;
 
+// === SESSION NAMES ===
+export const MAX_SESSION_NAME_LENGTH = 100;
+
 // === LIMITS ===
 export const MAX_CHECKPOINT_FILES = 50;
 export const MAX_FIND_FILES_RESULTS = 100;
@@ -51,8 +54,18 @@ export const DEFAULT_TERMINAL_COLUMNS = 80;
 export const FILE_READ_METADATA_THRESHOLD_LINES = 300;
 export const FILE_READ_CHUNKING_HINT_THRESHOLD_LINES = 500;
 export const FILE_READ_CHUNK_SIZE_LINES = 250;
+
+// === @-FILE MENTION INLINING (prompt-processor) ===
+// Files at or under this many lines are inlined in full when @-mentioned.
+// Larger files inline only a head preview plus a read_file hint, so a single
+// mention can't flood the conversation (the contents otherwise persist in
+// context on every subsequent turn).
+export const FILE_MENTION_INLINE_MAX_LINES = 250;
+export const FILE_MENTION_PREVIEW_LINES = 40;
+
 export const CHARS_PER_TOKEN_ESTIMATE = 4;
 export const MAX_LINE_LENGTH_CHARS = 10_000; // Lines longer than this are likely minified/binary
+export const EMPTY_CONTENT_MARKER = '[file is empty]';
 
 // === TERMINAL AND UI ===
 export const PATH_LENGTH_NARROW_TERMINAL = 30;
@@ -73,6 +86,8 @@ export const DELAY_COMMAND_COMPLETE_MS = 100;
 // === BASH EXECUTION ===
 export const INTERVAL_BASH_PROGRESS_MS = 500;
 export const BASH_OUTPUT_PREVIEW_LENGTH = 150;
+export const TIMEOUT_BASH_DEFAULT_MS = 120_000;
+export const BASH_MAX_OUTPUT_BYTES = 5 * 1024 * 1024;
 
 // === FILE SCANNER ===
 export const MAX_FILES_TO_SCAN = 1000;
@@ -93,10 +108,6 @@ export const CACHE_FILE_LIST_TTL_MS = 5000;
 // === FETCH URL ===
 export const MAX_URL_CONTENT_BYTES = 100_000; // ~100 KB
 
-// === LOGGING ===
-export const BUFFER_LOG_BYTES = 65_536; // 64 KB
-export const INTERVAL_LOG_FLUSH_MS = 1000;
-
 // === AI SDK ===
 export const MAX_TOOL_STEPS = 10;
 // Cap how many consecutive empty assistant turns we'll auto-nudge through
@@ -104,6 +115,11 @@ export const MAX_TOOL_STEPS = 10;
 // can produce reasoning-only turns; one or two retries usually clears it,
 // but unbounded recursion would loop forever.
 export const MAX_EMPTY_TURNS = 2;
+// Cap how many consecutive malformed-XML self-correction recursions we'll
+// attempt before surfacing an error. Without this, a model stuck producing
+// bad XML loops async and appends two messages per iteration until Node's
+// heap exhausts (~1.4GB).
+export const MAX_MALFORMED_RETRIES = 2;
 
 // === MCP ===
 export const TIMEOUT_MCP_DEFAULT_MS = 30_000;

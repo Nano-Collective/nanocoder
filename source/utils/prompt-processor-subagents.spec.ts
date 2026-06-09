@@ -15,12 +15,12 @@ test.serial('getSubagentDescriptions returns default before any call', t => {
 test.serial('setAvailableSubagents formats agent list', t => {
 	setAvailableSubagents([
 		{name: 'explore', description: 'Codebase explore agent'},
-		{name: 'reviewer', description: 'Code review agent'},
+		{name: 'custom-helper', description: 'A project-specific helper'},
 	]);
 
 	const result = getSubagentDescriptions();
 	t.true(result.includes('- **explore**: Codebase explore agent'));
-	t.true(result.includes('- **reviewer**: Code review agent'));
+	t.true(result.includes('- **custom-helper**: A project-specific helper'));
 });
 
 test.serial('setAvailableSubagents with empty array resets to default', t => {

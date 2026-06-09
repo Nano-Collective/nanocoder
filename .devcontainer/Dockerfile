@@ -8,8 +8,8 @@ LABEL description="Development environment for Nanocoder - local-first AI coding
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive \
-	NODE_VERSION=20 \
-	PNPM_VERSION=9 \
+	NODE_VERSION=22 \
+	PNPM_VERSION=latest \
 	# Nanocoder-specific environment variables
 	NODE_ENV=development \
 	NANOCODER_LOG_LEVEL=debug \
@@ -18,9 +18,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 	LC_ALL=en_US.UTF-8 \
 	LANG=en_US.UTF-8
 
-# Install Node.js 20.x using the NodeSource setup script
-# This ensures we get the exact Node 20.x LTS version
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+# Install Node.js 22.x using the NodeSource setup script
+# This ensures we get the exact Node 22.x LTS version
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
 	apt-get install -y nodejs && \
 	apt-get clean && rm -rf /var/lib/apt/lists/*
 

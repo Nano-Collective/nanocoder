@@ -46,10 +46,12 @@ nanocoder -h
 | `--help` | `-h` | Show usage information and available options |
 | `--vscode` | | Run in VS Code mode (for extension) |
 | `--vscode-port` | | Specify VS Code server port |
+| `--acp` | | Run as an [ACP server](../features/acp.md) for editor integration (Zed, etc.) |
 | `--provider` | | Specify AI provider (must be configured in agents.config.json) |
 | `--model` | | Specify AI model (must be available for the provider) |
 | `--context-max` | | Set maximum context length in tokens (supports k/K suffix, e.g. `128k`) |
 | `--mode` | | Start in a specific [development mode](../features/development-modes.md) — `normal`, `auto-accept`, `yolo`, or `plan`. Defaults to `normal` for interactive sessions and `auto-accept` for `run` mode. |
+| `--trust-directory` | | Skip the first-run directory trust prompt for this run only. Only valid with `run`; ignored (with a warning) in interactive mode. The trust is ephemeral — `trustedDirectories` in your preferences file is not modified. |
 | `run` | | Run in non-interactive mode |
 
 **Provider/Model Flags:**
@@ -104,7 +106,7 @@ nanocoder --provider ollama
 nanocoder --provider openrouter --model google/gemini-3.1-flash
 ```
 
-This bypasses the need to use `/provider` or `/model` slash commands on startup.
+This bypasses the need to use the `/model` slash command on startup.
 
 ## Non-Interactive Mode
 
@@ -149,6 +151,16 @@ nanocoder run --provider openrouter --model anthropic/claude-sonnet-4-20250514 "
 - Exits automatically when the task is complete
 - Uses specified provider/model if `--provider` and `--model` flags are provided
 - Respects `--context-max` flag or `NANOCODER_CONTEXT_LIMIT` env var for context limit override
+
+**Skipping the directory trust prompt:**
+
+The first time Nanocoder runs in a new directory, it shows a security disclaimer asking you to confirm you trust the code in that directory. In CI/CD or scripted contexts there's no one to confirm, so non-interactive runs would hang on the prompt — pass `--trust-directory` to bypass it for that run:
+
+```bash
+nanocoder --trust-directory run "your prompt here"
+```
+
+The override is ephemeral: it does **not** add the directory to `trustedDirectories` in your [preferences file](../configuration/preferences.md), so subsequent interactive sessions will still see the disclaimer. The flag only applies to `run`; using it without `run` prints a warning and is otherwise ignored.
 
 **Error Handling:**
 

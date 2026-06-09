@@ -32,6 +32,9 @@ export class ExistingRulesExtractor {
 	constructor(
 		private projectPath: string,
 		private skipAgentsMd = false,
+		// Additional source filenames to skip (e.g. ['CLAUDE.md'] for "lean" mode).
+		// Compared case-insensitively against the AI_CONFIG_FILES entries.
+		private excludeSources: readonly string[] = [],
 	) {}
 
 	/**
@@ -39,10 +42,16 @@ export class ExistingRulesExtractor {
 	 */
 	public extractExistingRules(): ExistingRules[] {
 		const found: ExistingRules[] = [];
+		const excludeSet = new Set(this.excludeSources.map(s => s.toLowerCase()));
 
 		for (const configFile of ExistingRulesExtractor.AI_CONFIG_FILES) {
 			// Skip AGENTS.md when force regenerating
 			if (this.skipAgentsMd && configFile === 'AGENTS.md') {
+				continue;
+			}
+
+			// Skip explicitly excluded sources (e.g. CLAUDE.md in lean mode)
+			if (excludeSet.has(configFile.toLowerCase())) {
 				continue;
 			}
 

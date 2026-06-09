@@ -6,6 +6,7 @@ import React from 'react';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
+import {generateKey} from '@/session/key-generator';
 import type {Command} from '@/types/index';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -113,7 +114,7 @@ export const creditsCommand: Command = {
 		]);
 
 		return React.createElement(Credits, {
-			key: `credits-${Date.now()}`,
+			key: generateKey('credits'),
 			contributors,
 			dependencies,
 		});

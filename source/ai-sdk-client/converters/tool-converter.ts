@@ -1,12 +1,5 @@
-import {randomBytes} from 'node:crypto';
 import type {ToolCall} from '@/types/index';
-
-/**
- * Generates a unique tool call ID
- */
-export function generateToolCallId(): string {
-	return `tool_${Date.now()}_${randomBytes(8).toString('hex')}`;
-}
+import {generateToolCallId} from '@/utils/tool-call-id';
 
 /**
  * Converts AI SDK tool call format to our ToolCall format

@@ -6,12 +6,15 @@
  */
 
 import {createLLMClient} from '@/client-factory';
+import {getAppConfig} from '@/config/index';
 import {
+	appendSubagentTool,
 	getSubagentProgress,
 	subagentProgress,
 	updateSubagentProgress,
 	updateSubagentProgressById,
 } from '@/services/subagent-events';
+import {resolveToolApproval} from '@/tools/approval-policy';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
 	AISDKCoreTool,
@@ -20,8 +23,10 @@ import type {
 	Message,
 	ToolCall,
 } from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {signalToolApproval} from '@/utils/tool-approval-queue';
 import {parseToolArguments} from '@/utils/tool-args-parser';
+import {toolErrorToContent} from '@/utils/tool-validation';
 import {getSubagentLoader} from './subagent-loader.js';
 import type {
 	SubagentConfigWithSource,
@@ -154,7 +159,7 @@ export class SubagentExecutor {
 				subagentName: task.subagent_type,
 				output: '',
 				success: false,
-				error: error instanceof Error ? error.message : String(error),
+				error: formatError(error),
 				executionTimeMs: Date.now() - startTime,
 			};
 		}
@@ -195,7 +200,9 @@ export class SubagentExecutor {
 	}
 
 	private getAvailableToolNames(config: SubagentConfigWithSource): string[] {
-		const allTools = Object.keys(this.toolManager.getAllTools());
+		const allTools = Object.keys(
+			this.toolManager.getAllTools({forSkill: config.ownerSkill}),
+		);
 
 		let available = allTools;
 
@@ -207,6 +214,13 @@ export class SubagentExecutor {
 			available = available.filter(
 				tool => !config.disallowedTools?.includes(tool),
 			);
+		}
+
+		// Honor the global disabledTools list — applies to subagents too.
+		const globalDisabled = getAppConfig().disabledTools;
+		if (globalDisabled && globalDisabled.length > 0) {
+			const disabledSet = new Set(globalDisabled);
+			available = available.filter(name => !disabledSet.has(name));
 		}
 
 		// Always exclude agent tool to prevent infinite recursion
@@ -223,7 +237,9 @@ export class SubagentExecutor {
 	private filterTools(
 		config: SubagentConfigWithSource,
 	): Record<string, AISDKCoreTool> {
-		const allTools = this.toolManager.getAllToolsWithoutExecute();
+		const allTools = this.toolManager.getAllTools({
+			forSkill: config.ownerSkill,
+		});
 		const availableNames = this.getAvailableToolNames(config);
 
 		const filtered: Record<string, AISDKCoreTool> = {} as Record<
@@ -257,6 +273,26 @@ export class SubagentExecutor {
 		client: LLMClient;
 		restoreParent: () => void;
 	}> {
+		const requestedContextWindow =
+			typeof config.contextWindow === 'number'
+				? config.contextWindow
+				: undefined;
+		const parentProviderConfig = this.parentClient.getProviderConfig();
+		const targetProvider = config.provider ?? parentProviderConfig.name;
+		const targetModel =
+			config.model && config.model !== 'inherit'
+				? config.model
+				: targetProvider === parentProviderConfig.name
+					? this.parentClient.getCurrentModel()
+					: undefined;
+
+		if (requestedContextWindow) {
+			const {client} = await createLLMClient(targetProvider, targetModel, {
+				contextWindow: requestedContextWindow,
+			});
+			return {client, restoreParent: () => {}};
+		}
+
 		// Different provider — create a new client entirely
 		if (config.provider) {
 			const model =
@@ -271,7 +307,10 @@ export class SubagentExecutor {
 			// In concurrent mode, create a new client to avoid mutating the
 			// shared parent client (which would race with other agents)
 			if (concurrent) {
-				const {client} = await createLLMClient(undefined, config.model);
+				const {client} = await createLLMClient(
+					parentProviderConfig.name,
+					config.model,
+				);
 				return {client, restoreParent: () => {}};
 			}
 
@@ -408,6 +447,7 @@ export class SubagentExecutor {
 
 				const toolName = toolCall.function.name;
 				totalToolCalls++;
+				appendSubagentTool(agentId, toolName);
 				emitProgress('tool_call', toolName);
 				await new Promise(resolve => setTimeout(resolve, 50));
 
@@ -442,35 +482,14 @@ export class SubagentExecutor {
 	 * Check if a tool needs user approval.
 	 * Uses the same logic as the main conversation loop.
 	 */
-	private async toolNeedsApproval(
+	private async needsApprovalForTool(
 		toolName: string,
 		rawArguments: unknown,
 	): Promise<boolean> {
 		const toolEntry = this.toolManager.getToolEntry(toolName);
-		if (!toolEntry?.tool) return true; // Unknown tools need approval
-
-		const needsApprovalProp = (
-			toolEntry.tool as unknown as {
-				needsApproval?:
-					| boolean
-					| ((args: unknown) => boolean | Promise<boolean>);
-			}
-		).needsApproval;
-
-		if (typeof needsApprovalProp === 'boolean') {
-			return needsApprovalProp;
-		}
-
-		if (typeof needsApprovalProp === 'function') {
-			try {
-				const parsedArgs = parseToolArguments(rawArguments);
-				return await needsApprovalProp(parsedArgs);
-			} catch {
-				return true;
-			}
-		}
-
-		return true;
+		return resolveToolApproval(toolName, toolEntry, rawArguments, {
+			mode: this.parentMode,
+		});
 	}
 
 	/**
@@ -493,7 +512,10 @@ export class SubagentExecutor {
 		}
 
 		// Check if this tool needs user approval
-		const needsApproval = await this.toolNeedsApproval(toolName, rawArguments);
+		const needsApproval = await this.needsApprovalForTool(
+			toolName,
+			rawArguments,
+		);
 		if (needsApproval) {
 			const parsedArgs = parseToolArguments(rawArguments);
 			const toolCall: ToolCall = {
@@ -516,9 +538,14 @@ export class SubagentExecutor {
 
 		try {
 			const parsedArgs = parseToolArguments(rawArguments);
-			return await toolHandler(parsedArgs);
+			const result = await toolHandler(parsedArgs);
+			// Subagents converse in text, so collapse structured output to its
+			// text representation.
+			return typeof result === 'string' ? result : result.llmContent;
 		} catch (error) {
-			return `Error: ${error instanceof Error ? error.message : String(error)}`;
+			// Handler validation failures surface here too (the handler is
+			// validated), formatted with any structured detail.
+			return toolErrorToContent(error);
 		}
 	}
 }

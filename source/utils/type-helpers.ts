@@ -203,6 +203,44 @@ export function ensureString(value: unknown): string {
 	return String(value);
 }
 
+/**
+ * Coerce a single selectable "option" into clean display text.
+ *
+ * Models sometimes emit option lists as objects (e.g. `{label, value}` or
+ * `{description}`) despite a schema asking for plain strings. Pull the
+ * meaningful text out of common shapes so both the displayed option and any
+ * answer echoed back to the model are clean strings, not JSON blobs or opaque
+ * machine ids.
+ *
+ * Human-readable keys are preferred over `value`: in the standard
+ * `{label, value}` select shape, `value` is usually an id (e.g.
+ * "quicklinks_only") and `label` is what the user should see.
+ *
+ * Shared by the `ask_user` tool and the ACP question handler so both paths
+ * coerce identically.
+ */
+export function toOptionString(option: unknown): string {
+	if (isString(option)) return option;
+	if (isObject(option)) {
+		for (const key of [
+			'label',
+			'text',
+			// MiniMax M3 wraps option text in a `$text` key.
+			'$text',
+			'title',
+			'name',
+			'description',
+			'value',
+		]) {
+			const candidate = option[key];
+			if (typeof candidate === 'string' && candidate.trim() !== '') {
+				return candidate;
+			}
+		}
+	}
+	return ensureString(option);
+}
+
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================

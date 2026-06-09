@@ -4,7 +4,6 @@ import React from 'react';
 import BashProgress from '@/components/bash-progress';
 import {isNanocoderToolAlwaysAllowed} from '@/config/nanocoder-tools-config';
 import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
-import {getCurrentMode} from '@/context/mode-context';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
@@ -18,11 +17,14 @@ import {jsonSchema, tool} from '@/types/core';
  * @param command - The bash command to execute
  * @returns Object containing executionId and promise for the result
  */
-export function executeBashCommand(command: string): {
+export function executeBashCommand(
+	command: string,
+	options?: {timeoutMs?: number; signal?: AbortSignal},
+): {
 	executionId: string;
 	promise: Promise<BashExecutionState>;
 } {
-	return bashExecutor.execute(command);
+	return bashExecutor.execute(command, options);
 }
 
 /**
@@ -59,8 +61,13 @@ export function formatBashResultForLLM(result: BashExecutionState): string {
  * Note: For streaming tools, the tool handler will use executeBashCommand directly
  * and this function serves as a fallback/compatibility layer
  */
-const executeExecuteBash = async (args: {command: string}): Promise<string> => {
-	const {promise} = bashExecutor.execute(args.command);
+const executeExecuteBash = async (
+	args: {command: string},
+	options?: {abortSignal?: AbortSignal},
+): Promise<string> => {
+	const {promise} = bashExecutor.execute(args.command, {
+		signal: options?.abortSignal,
+	});
 	const result = await promise;
 	return formatBashResultForLLM(result);
 };
@@ -78,22 +85,8 @@ const executeBashCoreTool = tool({
 		},
 		required: ['command'],
 	}),
-	// High risk: bash commands require approval unless explicitly configured in nanocoderTools.alwaysAllow
-	needsApproval: () => {
-		// Check if this tool is configured to always be allowed
-		if (isNanocoderToolAlwaysAllowed('execute_bash')) {
-			return false;
-		}
-
-		// Scheduler and yolo modes auto-execute all tools including bash
-		const mode = getCurrentMode();
-		if (mode === 'scheduler' || mode === 'yolo') return false;
-
-		// Even in auto-accept mode, bash commands should require approval for security
-		return true;
-	},
-	execute: async (args, _options) => {
-		return await executeExecuteBash(args);
+	execute: async (args, options) => {
+		return await executeExecuteBash(args, options);
 	},
 });
 
@@ -111,13 +104,11 @@ function ExecuteBashFormatterComponent({
 	return (
 		<Box flexDirection="column" marginBottom={1} width={boxWidth}>
 			<Text color={colors.tool}>⚒ execute_bash</Text>
-			<Box>
-				<Text color={colors.secondary}>Command: </Text>
-				<Box marginLeft={1} flexShrink={1}>
-					<Text wrap="truncate-end" color={colors.primary}>
-						{command}
-					</Text>
-				</Box>
+			<Box flexDirection="column">
+				<Text color={colors.secondary}>Command:</Text>
+				<Text wrap="wrap" color={colors.primary}>
+					{command}
+				</Text>
 			</Box>
 		</Box>
 	);
@@ -151,7 +142,7 @@ const executeBashValidator = (args: {
 	if (!command) {
 		return Promise.resolve({
 			valid: false,
-			error: '⚒ Command cannot be empty',
+			error: 'Command cannot be empty',
 		});
 	}
 
@@ -169,7 +160,7 @@ const executeBashValidator = (args: {
 		if (pattern.test(command)) {
 			return Promise.resolve({
 				valid: false,
-				error: `⚒ Command contains potentially destructive operation: "${command}". This command is blocked for safety.`,
+				error: `Command contains potentially destructive operation: "${command}". This command is blocked for safety.`,
 			});
 		}
 	}
@@ -183,4 +174,12 @@ export const executeBashTool: NanocoderToolExport = {
 	formatter: executeBashFormatter,
 	streamingFormatter: executeBashStreamingFormatter,
 	validator: executeBashValidator,
+	// High risk: bash always requires approval unless explicitly always-allowed
+	// or in headless mode. Even auto-accept still prompts for bash. (Yolo is
+	// bypassed centrally by resolveToolApproval.)
+	approval: (_args, mode) => {
+		if (isNanocoderToolAlwaysAllowed('execute_bash')) return false;
+		if (mode === 'headless') return false;
+		return true;
+	},
 };

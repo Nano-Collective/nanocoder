@@ -6,6 +6,7 @@ import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {signalQuestion} from '@/utils/question-queue';
+import {ensureString, toOptionString} from '@/utils/type-helpers';
 
 interface AskQuestionArgs {
 	question: string;
@@ -14,10 +15,14 @@ interface AskQuestionArgs {
 }
 
 const executeAskQuestion = async (args: AskQuestionArgs): Promise<string> => {
-	const {question, options, allowFreeform = true} = args;
+	const {allowFreeform = true} = args;
+	const question = ensureString(args.question);
+	const options = (Array.isArray(args.options) ? args.options : []).map(
+		toOptionString,
+	);
 
-	if (!options || options.length < 2 || options.length > 4) {
-		return 'Error: ⚒ options must contain 2-4 items.';
+	if (options.length < 2 || options.length > 4) {
+		return 'Error: options must contain 2-4 items.';
 	}
 
 	const answer = await signalQuestion({
@@ -41,9 +46,13 @@ const askQuestionCoreTool = tool({
 			},
 			options: {
 				type: 'array',
-				items: {type: 'string'},
+				// Models like MiniMax M3 emit options as {label, value} objects
+				// despite the description below. The handler coerces them via
+				// toOptionString, so accept objects here too rather than failing
+				// validation before that coercion can run.
+				items: {type: ['string', 'object']},
 				description:
-					'2-4 selectable answer options for the user to choose from.',
+					'2-4 selectable answer options for the user to choose from. Each option MUST be a plain string — the exact text shown to the user and returned verbatim when selected. Do not wrap options in objects or use {label, value} pairs.',
 			},
 			allowFreeform: {
 				type: 'boolean',
@@ -53,7 +62,6 @@ const askQuestionCoreTool = tool({
 		},
 		required: ['question', 'options'],
 	}),
-	needsApproval: false,
 	execute: async (args, _options) => {
 		return await executeAskQuestion(args);
 	},
@@ -78,7 +86,7 @@ const AskQuestionFormatter = React.memo(
 				<Box flexDirection="column" marginBottom={1}>
 					<Text color={colors.secondary}>Question:</Text>
 					<Box marginLeft={2}>
-						<Text color={colors.text}>{args.question}</Text>
+						<Text color={colors.text}>{ensureString(args.question)}</Text>
 					</Box>
 				</Box>
 				{result && (
@@ -110,4 +118,6 @@ export const askQuestionTool: NanocoderToolExport = {
 	name: 'ask_user' as const,
 	tool: askQuestionCoreTool,
 	formatter: askQuestionFormatter,
+	// Asking the user a question is itself the interaction - never gated.
+	approval: false,
 };

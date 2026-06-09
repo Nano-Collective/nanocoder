@@ -9,9 +9,15 @@ import ToolExecutionIndicator from '@/components/tool-execution-indicator';
 import UserInput from '@/components/user-input';
 import {useTheme} from '@/hooks/useTheme';
 import type {Task} from '@/tools/tasks/types';
-import type {DevelopmentMode, ToolCall, TuneConfig} from '@/types';
+import type {
+	ContextSource,
+	DevelopmentMode,
+	ToolCall,
+	TuneConfig,
+} from '@/types';
 import type {PendingQuestion} from '@/utils/question-queue';
 import type {PendingToolApproval} from '@/utils/tool-approval-queue';
+import type {PendingToolConfirmation} from '@/utils/tool-confirm-queue';
 import {LiveCompactCounts} from '@/utils/tool-result-display';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
@@ -19,7 +25,6 @@ export interface ChatInputProps {
 	// Execution state
 	isCancelling: boolean;
 	isToolExecuting: boolean;
-	isToolConfirmationMode: boolean;
 	isQuestionMode: boolean;
 
 	// Tool state
@@ -34,6 +39,10 @@ export interface ChatInputProps {
 	pendingSubagentApproval: PendingToolApproval | null;
 	onSubagentToolApproval: (confirmed: boolean) => void;
 
+	// Main agent tool confirmation (the unified inline approval gate)
+	pendingToolConfirmation: PendingToolConfirmation | null;
+	onToolConfirmation: (confirmed: boolean) => void;
+
 	// Client state
 	mcpInitialized: boolean;
 	client: unknown | null;
@@ -41,8 +50,13 @@ export interface ChatInputProps {
 	// Input state
 	customCommands: string[];
 	inputDisabled: boolean;
+	// True when in-flight work makes Escape a cancel; lets UserInput defer to
+	// the section-level global cancel handler instead of clearing the input.
+	isBusy: boolean;
 	developmentMode: DevelopmentMode;
 	contextPercentUsed: number | null;
+	contextSource: ContextSource | null;
+	sessionName?: string;
 
 	// Tool display
 	compactToolCounts?: Record<string, number> | null;
@@ -51,13 +65,11 @@ export interface ChatInputProps {
 	liveTaskList?: Task[] | null;
 
 	// Handlers
-	onToolConfirm: (confirmed: boolean) => void;
-	onToolCancel: () => void;
-	onSubmit: (message: string) => Promise<void>;
-	onCancel: () => void;
+	onSubmit: (message: string, displayValue: string) => Promise<void>;
 	onToggleMode: () => void;
 	onToggleReasoningExpanded: () => void;
 	tune?: TuneConfig;
+	currentModel?: string;
 
 	// VS Code active editor pushed from the extension (filename + optional selection)
 	activeEditor?: ActiveEditorState | null;
@@ -78,7 +90,6 @@ export interface ChatInputProps {
 export function ChatInput({
 	isCancelling,
 	isToolExecuting,
-	isToolConfirmationMode,
 	isQuestionMode,
 	pendingToolCalls,
 	currentToolIndex,
@@ -86,23 +97,26 @@ export function ChatInput({
 	onQuestionAnswer,
 	pendingSubagentApproval,
 	onSubagentToolApproval,
+	pendingToolConfirmation,
+	onToolConfirmation,
 	mcpInitialized,
 	client,
 	customCommands,
 	inputDisabled,
+	isBusy,
 	developmentMode,
 	contextPercentUsed,
+	contextSource,
+	sessionName,
 	compactToolCounts,
 	onToggleCompactDisplay,
 	compactToolDisplay,
 	liveTaskList,
-	onToolConfirm,
-	onToolCancel,
 	onSubmit,
-	onCancel,
 	onToggleMode,
 	onToggleReasoningExpanded,
 	tune,
+	currentModel,
 	activeEditor,
 	onDismissActiveEditor,
 }: ChatInputProps): React.ReactElement {
@@ -129,12 +143,12 @@ export function ChatInput({
 					onConfirm={onSubagentToolApproval}
 					onCancel={() => onSubagentToolApproval(false)}
 				/>
-			) : /* Tool Confirmation */
-			isToolConfirmationMode && pendingToolCalls[currentToolIndex] ? (
+			) : /* Main agent tool confirmation (unified inline approval gate) */
+			pendingToolConfirmation ? (
 				<ToolConfirmation
-					toolCall={pendingToolCalls[currentToolIndex]}
-					onConfirm={onToolConfirm}
-					onCancel={onToolCancel}
+					toolCall={pendingToolConfirmation.toolCall}
+					onConfirm={onToolConfirmation}
+					onCancel={() => onToolConfirmation(false)}
 				/>
 			) : /* Tool Execution - skip indicator for streaming tools (they show their own progress) */
 			isToolExecuting &&
@@ -156,16 +170,19 @@ export function ChatInput({
 			mcpInitialized && client ? (
 				<UserInput
 					customCommands={customCommands}
-					onSubmit={msg => void onSubmit(msg)}
+					onSubmit={(msg, display) => void onSubmit(msg, display)}
 					disabled={inputDisabled}
-					onCancel={onCancel}
+					isBusy={isBusy}
 					onToggleMode={onToggleMode}
 					onToggleReasoningExpanded={onToggleReasoningExpanded}
 					onToggleCompactDisplay={onToggleCompactDisplay}
 					compactToolDisplay={compactToolDisplay}
 					developmentMode={developmentMode}
 					contextPercentUsed={contextPercentUsed}
+					contextSource={contextSource}
+					sessionName={sessionName}
 					tune={tune}
+					currentModel={currentModel}
 					activeEditor={activeEditor}
 					onDismissActiveEditor={onDismissActiveEditor}
 				/>

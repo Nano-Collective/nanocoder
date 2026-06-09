@@ -24,13 +24,10 @@ function isSafeEntry(entry: string): boolean {
 export class CustomCommandLoader {
 	private commands: Map<string, CustomCommand> = new Map();
 	private aliases: Map<string, string> = new Map(); // alias -> command name
-	private projectRoot: string;
 	private projectCommandsDir: string;
 	private personalCommandsDir: string;
-	private deprecationWarned = false;
 
 	constructor(projectRoot: string = process.cwd()) {
-		this.projectRoot = projectRoot;
 		// nosemgrep
 		this.projectCommandsDir = join(projectRoot, '.nanocoder', 'commands'); // nosemgrep
 		this.personalCommandsDir = join(getConfigPath(), 'commands');
@@ -52,35 +49,6 @@ export class CustomCommandLoader {
 		if (existsSync(this.projectCommandsDir)) {
 			this.scanDirectory(this.projectCommandsDir, undefined, 'project');
 		}
-
-		// Emit deprecation warning for old skills directories
-		this.checkDeprecatedSkillsDirs();
-	}
-
-	/**
-	 * Check for deprecated .nanocoder/skills directories and warn
-	 */
-	private checkDeprecatedSkillsDirs(): void {
-		if (this.deprecationWarned) return;
-
-		const projectSkillsDir = join(this.projectRoot, '.nanocoder', 'skills');
-		const personalSkillsDir = join(getConfigPath(), 'skills');
-		let warned = false;
-
-		if (existsSync(projectSkillsDir)) {
-			logError(
-				'Skills have been merged into commands. Move your SKILL.md files from .nanocoder/skills/ to .nanocoder/commands/ and rename them.',
-			);
-			warned = true;
-		}
-		if (existsSync(personalSkillsDir)) {
-			logError(
-				'Skills have been merged into commands. Move your SKILL.md files from ~/.config/nanocoder/skills/ to ~/.config/nanocoder/commands/ and rename them.',
-			);
-			warned = true;
-		}
-
-		if (warned) this.deprecationWarned = true;
 	}
 
 	/**
@@ -159,6 +127,7 @@ export class CustomCommandLoader {
 					loadedResources && loadedResources.length > 0
 						? loadedResources
 						: undefined,
+				subscribe: parsed.subscribe,
 			};
 
 			// Register main command (project commands override personal with same name)
@@ -221,6 +190,41 @@ export class CustomCommandLoader {
 		}
 
 		return resources;
+	}
+
+	/**
+	 * Register a command produced outside this loader (e.g. by the skill
+	 * registrar). Returns true on success. Returns false if a command with
+	 * the same name is already registered - the caller is expected to treat
+	 * the collision as a hard error.
+	 */
+	registerExternal(command: CustomCommand): boolean {
+		// Key by fullName to stay consistent with the legacy loadCommand path,
+		// which indexes the same Map by `fullName` (so namespaced bundle
+		// commands like `k8s:status` are findable via /k8s:status).
+		const key = command.fullName;
+		if (this.commands.has(key)) return false;
+		this.commands.set(key, command);
+		const aliasPrefix = command.namespace ? `${command.namespace}:` : '';
+		for (const alias of command.metadata.aliases ?? []) {
+			const fullAlias = `${aliasPrefix}${alias}`;
+			if (!this.aliases.has(fullAlias)) this.aliases.set(fullAlias, key);
+		}
+		return true;
+	}
+
+	/**
+	 * Remove a previously-registered command by fullName. Returns true if
+	 * found.
+	 */
+	unregisterExternal(fullName: string): boolean {
+		const cmd = this.commands.get(fullName);
+		if (!cmd) return false;
+		this.commands.delete(fullName);
+		for (const [alias, target] of this.aliases) {
+			if (target === fullName) this.aliases.delete(alias);
+		}
+		return true;
 	}
 
 	/**

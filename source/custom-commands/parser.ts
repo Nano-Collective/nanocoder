@@ -1,5 +1,11 @@
 import {readFileSync} from 'fs';
+import {
+	parseSubscribeBlock,
+	SubscribeParseError,
+} from '@/skills/parse-subscribe';
 import type {CustomCommandMetadata, ParsedCustomCommand} from '@/types/index';
+import type {SkillTrigger} from '@/types/skills';
+import {parseYamlObject, splitFrontmatter} from '@/utils/frontmatter';
 import {logError} from '@/utils/message-queue';
 
 /**
@@ -204,19 +210,16 @@ function mapRawToMetadata(raw: Record<string, unknown>): CustomCommandMetadata {
  */
 export function parseCommandFile(filePath: string): ParsedCustomCommand {
 	const fileContent = readFileSync(filePath, 'utf-8');
+	const split = splitFrontmatter(fileContent);
 
-	// Check for frontmatter
-	const frontmatterRegex = /^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/;
-	const match = fileContent.match(frontmatterRegex);
-
-	if (match && match[1] && match[2]) {
-		// Parse YAML frontmatter
-		const frontmatter = match[1];
-		const content = match[2];
+	// Preserve historical behavior: files with frontmatter but no body fall
+	// through to "entire file is content" so the metadata block isn't silently
+	// hidden from the user.
+	if (split.hasFrontmatter && split.frontmatter && split.body) {
 		let metadata: CustomCommandMetadata = {};
 
 		try {
-			metadata = parseEnhancedFrontmatter(frontmatter);
+			metadata = parseEnhancedFrontmatter(split.frontmatter);
 		} catch (error) {
 			// If parsing fails, treat entire file as content
 			logError(`Failed to parse frontmatter in ${filePath}: ${String(error)}`);
@@ -226,17 +229,44 @@ export function parseCommandFile(filePath: string): ParsedCustomCommand {
 			};
 		}
 
+		const subscribe = extractSubscribe(split.frontmatter, filePath);
+
 		return {
 			metadata,
-			content: content.trim(),
+			content: split.body,
+			subscribe,
 		};
 	}
 
-	// No frontmatter, entire file is content
+	// No frontmatter (or frontmatter with no body) — entire file is content.
 	return {
 		metadata: {},
 		content: fileContent.trim(),
 	};
+}
+
+/**
+ * The hand-rolled frontmatter parser above does not handle list-of-objects,
+ * which `subscribe:` requires. Do a second pass with the real YAML parser
+ * just to lift the `subscribe:` block out cleanly. On any error, log and
+ * skip — `subscribe:` is optional and a malformed block should not block
+ * the command from loading.
+ */
+function extractSubscribe(
+	frontmatter: string,
+	filePath: string,
+): SkillTrigger[] | undefined {
+	const raw = parseYamlObject(frontmatter);
+	if (!raw || raw.subscribe === undefined) return undefined;
+	try {
+		return parseSubscribeBlock(raw.subscribe);
+	} catch (err) {
+		if (err instanceof SubscribeParseError) {
+			logError(`Invalid subscribe block in ${filePath}: ${err.message}`);
+			return undefined;
+		}
+		throw err;
+	}
 }
 
 /**

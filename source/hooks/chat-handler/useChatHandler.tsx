@@ -1,14 +1,14 @@
 import React from 'react';
-import {formatToolsForPrompt} from '@/ai-sdk-client/tools/tool-prompt-formatter';
+import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
 import {ConversationStateManager} from '@/app/utils/conversation-state';
 import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
 import {CommandIntegration} from '@/custom-commands/command-integration';
-import {promptHistory} from '@/prompt-history';
+import {generateKey} from '@/session/key-generator';
+import {getTuneToolMode} from '@/types/config';
 import type {Message} from '@/types/core';
 import {MessageBuilder} from '@/utils/message-builder';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
-import {assemblePrompt} from '@/utils/prompt-processor';
 import {processAssistantResponse} from './conversation/conversation-loop';
 import {createResetStreamingState} from './state/streaming-state';
 import type {ChatHandlerReturn, UseChatHandlerProps} from './types';
@@ -20,13 +20,22 @@ export function getBaseSystemPrompt(
 	toolManager: NonNullable<UseChatHandlerProps['toolManager']>,
 	tune: UseChatHandlerProps['tune'],
 	toolsDisabled: boolean,
+	model?: string,
 ): string {
-	if (developmentMode === 'scheduler') {
+	const systemPromptOverride = getAppConfig().systemPrompt;
+	if (developmentMode === 'headless') {
 		return buildSystemPrompt(
 			developmentMode,
 			tune,
-			toolManager.getAvailableToolNames(tune, developmentMode),
+			toolManager.getAvailableToolNames(
+				tune,
+				developmentMode,
+				undefined,
+				model,
+			),
 			toolsDisabled,
+			systemPromptOverride,
+			model,
 		);
 	}
 
@@ -35,8 +44,15 @@ export function getBaseSystemPrompt(
 		buildSystemPrompt(
 			developmentMode ?? 'normal',
 			tune,
-			toolManager.getAvailableToolNames(tune, developmentMode ?? 'normal'),
+			toolManager.getAvailableToolNames(
+				tune,
+				developmentMode ?? 'normal',
+				undefined,
+				model,
+			),
 			toolsDisabled,
+			systemPromptOverride,
+			model,
 		)
 	);
 }
@@ -55,12 +71,11 @@ export function useChatHandler({
 	currentModel,
 	setIsCancelling,
 	addToChatQueue,
-	getNextComponentKey,
 	abortController,
 	setAbortController,
 	developmentMode = 'normal',
+	developmentModeRef,
 	nonInteractiveMode = false,
-	onStartToolConfirmationFlow,
 	onConversationComplete,
 	reasoningExpandedRef,
 	compactToolDisplayRef,
@@ -68,15 +83,22 @@ export function useChatHandler({
 	compactToolCountsRef,
 	onSetLiveTaskList,
 	setLiveComponent,
+	setLastApiUsage,
 	tune,
 	subagentsReady,
 }: UseChatHandlerProps): ChatHandlerReturn {
 	// Conversation state manager for enhanced context
 	const conversationStateManager = React.useRef(new ConversationStateManager());
 
+	// Resolve the active fallback format when native tools are disabled. When
+	// native is on, this value is unused. The tune override takes priority over
+	// provider-level disables so users can pick the JSON path explicitly even
+	// for providers we'd otherwise mark as XML-only.
+	const tuneToolMode = React.useMemo(() => getTuneToolMode(tune), [tune]);
+
 	// Check if native tool calling is disabled (provider config or tune override)
 	const toolsDisabled = React.useMemo(() => {
-		if (tune?.enabled && tune.disableNativeTools) return true;
+		if (tuneToolMode !== 'native') return true;
 		const config = getAppConfig();
 		const provider = config.providers?.find(p => p.name === currentProvider);
 		if (!provider) return false;
@@ -84,7 +106,13 @@ export function useChatHandler({
 			provider.disableTools === true ||
 			(provider.disableToolModels?.includes(currentModel) ?? false)
 		);
-	}, [currentProvider, currentModel, tune]);
+	}, [currentProvider, currentModel, tuneToolMode]);
+
+	// When native is off, the fallback format is whatever the tune chose; if the
+	// disable came from provider config (and tune is on 'native'), default to XML
+	// to match historical behaviour.
+	const fallbackToolFormat: 'xml' | 'json' =
+		tuneToolMode === 'json' ? 'json' : 'xml';
 
 	// Cache the base system prompt — only rebuild when mode, tune, tools, or toolsDisabled change
 	// This preserves KV cache by keeping the system message stable across turns
@@ -96,27 +124,41 @@ export function useChatHandler({
 		const availableNames = toolManager.getAvailableToolNames(
 			tune,
 			developmentMode,
+			undefined,
+			currentModel,
 		);
-		let prompt = buildSystemPrompt(
+		const basePrompt = buildSystemPrompt(
 			developmentMode,
 			tune,
 			availableNames,
 			toolsDisabled,
+			getAppConfig().systemPrompt,
+			currentModel,
 		);
 
-		if (toolsDisabled) {
-			const tools = toolManager.getFilteredToolsWithoutExecute(availableNames);
-			const toolPrompt = formatToolsForPrompt(tools);
-			if (toolPrompt) {
-				prompt += toolPrompt;
-			}
-		}
+		const tools = toolsDisabled
+			? toolManager.getFilteredTools(availableNames)
+			: {};
+		const prompt = appendToolDefinitionsToPrompt(
+			basePrompt,
+			toolsDisabled,
+			fallbackToolFormat,
+			tools,
+		);
 
 		// Update the cached prompt so /usage and context % see the full prompt
 		setLastBuiltPrompt(prompt);
 
 		return prompt;
-	}, [developmentMode, tune, toolManager, toolsDisabled, subagentsReady]);
+	}, [
+		developmentMode,
+		tune,
+		toolManager,
+		toolsDisabled,
+		fallbackToolFormat,
+		subagentsReady,
+		currentModel,
+	]);
 
 	// Track when the current conversation started for elapsed time display
 	const conversationStartTimeRef = React.useRef<number>(Date.now());
@@ -150,9 +192,9 @@ export function useChatHandler({
 	// Helper to display errors in chat queue
 	const displayError = React.useCallback(
 		(error: unknown, keyPrefix: string) => {
-			displayErrorHelper(error, keyPrefix, addToChatQueue, getNextComponentKey);
+			displayErrorHelper(error, keyPrefix, addToChatQueue);
 		},
-		[addToChatQueue, getNextComponentKey],
+		[addToChatQueue],
 	);
 
 	// Reset conversation state when messages are cleared
@@ -181,13 +223,12 @@ export function useChatHandler({
 					setTokenCount,
 					setMessages,
 					addToChatQueue,
-					getNextComponentKey,
 					currentProvider,
 					currentModel,
 					developmentMode,
+					developmentModeRef,
 					nonInteractiveMode,
 					conversationStateManager,
-					onStartToolConfirmationFlow,
 					onConversationComplete,
 					conversationStartTime: conversationStartTimeRef.current,
 					reasoningExpandedRef,
@@ -196,6 +237,7 @@ export function useChatHandler({
 					compactToolCountsRef,
 					onSetLiveTaskList,
 					setLiveComponent,
+					setLastApiUsage,
 					tune,
 				});
 			} catch (error) {
@@ -213,12 +255,11 @@ export function useChatHandler({
 			setAbortController,
 			setMessages,
 			addToChatQueue,
-			getNextComponentKey,
 			currentProvider,
 			currentModel,
 			developmentMode,
+			developmentModeRef,
 			nonInteractiveMode,
-			onStartToolConfirmationFlow,
 			onConversationComplete,
 			reasoningExpandedRef,
 			compactToolDisplayRef,
@@ -229,33 +270,28 @@ export function useChatHandler({
 			displayError,
 			resetStreamingState,
 			setLiveComponent,
+			setLastApiUsage,
 		],
 	);
 
 	// Handle chat message processing
-	const handleChatMessage = async (message: string) => {
+	const handleChatMessage = async (message: string, displayValue?: string) => {
 		if (!client || !toolManager) return;
 
 		// Record conversation start time for elapsed time display
 		conversationStartTimeRef.current = Date.now();
 
-		// For display purposes, try to get the placeholder version from history
-		// This preserves the nice placeholder display in chat history
-		// Only use history entry if the assembled prompt matches the current message
-		// (VS Code prompts bypass history, so we shouldn't use stale history entries)
-		const history = promptHistory.getHistory();
-		const lastEntry = history[history.length - 1];
-		const assembledFromHistory = lastEntry
-			? assemblePrompt(lastEntry)
-			: undefined;
-		const displayMessage =
-			assembledFromHistory === message ? lastEntry.displayValue : message;
+		// The submit chain hands us the display version (with [@file]
+		// placeholders) alongside the fully assembled message. Use it directly
+		// for the bubble; fall back to the raw message for callers that have no
+		// placeholder view (custom commands, VS Code prompts).
+		const displayMessage = displayValue ?? message;
 
 		// Add user message to chat using display version (with placeholders)
 		// Pass the full assembled message for accurate token counting
 		addToChatQueue(
 			<UserMessage
-				key={`user-${getNextComponentKey()}`}
+				key={generateKey('user')}
 				message={displayMessage}
 				tokenContent={message}
 			/>,
@@ -283,6 +319,7 @@ export function useChatHandler({
 				toolManager,
 				tune,
 				toolsDisabled,
+				currentModel,
 			);
 
 			// Enhance with relevant commands (progressive disclosure)

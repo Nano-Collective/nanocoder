@@ -4,16 +4,8 @@
  * Stored under config path (e.g. ~/.config/nanocoder/) so they are not in project config.
  */
 
-import {
-	chmodSync,
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	writeFileSync,
-} from 'fs';
-import {join} from 'path';
 import type {CodexTokens} from '@/auth/chatgpt-codex';
-import {getConfigPath} from '@/config/paths';
+import {createJsonCredentialStore} from '@/config/json-credential-store';
 
 const FILENAME = 'codex-credentials.json';
 
@@ -29,41 +21,7 @@ export interface CodexCredential {
 	accountId?: string;
 }
 
-export type CodexCredentialsStore = Record<string, CodexCredential>;
-
-function getCredentialsPath(): string {
-	return join(getConfigPath(), FILENAME);
-}
-
-function loadStore(): CodexCredentialsStore {
-	const path = getCredentialsPath();
-	if (!existsSync(path)) {
-		return {};
-	}
-	try {
-		const raw = readFileSync(path, 'utf-8');
-		const data = JSON.parse(raw) as unknown;
-		if (data !== null && typeof data === 'object' && !Array.isArray(data)) {
-			return data as CodexCredentialsStore;
-		}
-	} catch {
-		// Invalid or unreadable
-	}
-	return {};
-}
-
-function writeStore(store: CodexCredentialsStore): void {
-	const dir = getConfigPath();
-	if (!existsSync(dir)) {
-		mkdirSync(dir, {recursive: true});
-	}
-	const filePath = getCredentialsPath();
-	writeFileSync(filePath, JSON.stringify(store, null, 2), {
-		encoding: 'utf-8',
-		mode: 0o600,
-	});
-	chmodSync(filePath, 0o600);
-}
+const credentialStore = createJsonCredentialStore<CodexCredential>(FILENAME);
 
 /**
  * Get stored Codex credential for a provider name (e.g. "ChatGPT").
@@ -71,7 +29,7 @@ function writeStore(store: CodexCredentialsStore): void {
 export function loadCodexCredential(
 	providerName: string,
 ): CodexCredential | null {
-	const store = loadStore();
+	const store = credentialStore.load();
 	const entry = store[providerName];
 	if (!entry || typeof entry.accessToken !== 'string') {
 		return null;
@@ -94,14 +52,14 @@ export function saveCodexCredential(
 	providerName: string,
 	tokens: CodexTokens,
 ): void {
-	const store = loadStore();
+	const store = credentialStore.load();
 	store[providerName] = {
 		accessToken: tokens.accessToken,
 		refreshToken: tokens.refreshToken,
 		expiresAt: tokens.expiresAt,
 		accountId: tokens.accountId,
 	};
-	writeStore(store);
+	credentialStore.write(store);
 }
 
 /**
@@ -111,20 +69,20 @@ export function updateCodexCredential(
 	providerName: string,
 	updates: Partial<CodexCredential>,
 ): void {
-	const store = loadStore();
+	const store = credentialStore.load();
 	const existing = store[providerName];
 	if (!existing) return;
 	store[providerName] = {...existing, ...updates};
-	writeStore(store);
+	credentialStore.write(store);
 }
 
 /**
  * Remove stored credential for a provider name.
  */
 export function removeCodexCredential(providerName: string): void {
-	const store = loadStore();
+	const store = credentialStore.load();
 	if (providerName in store) {
 		delete store[providerName];
-		writeStore(store);
+		credentialStore.write(store);
 	}
 }

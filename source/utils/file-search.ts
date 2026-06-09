@@ -95,9 +95,9 @@ function globToRegExpSource(pattern: string): string {
 function buildGlobRegexes(pattern: string): RegExp[] {
 	const normalizedPattern = normalizePathForMatch(pattern);
 	return expandBraces(normalizedPattern).map(
-		// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
-		// Glob patterns come from the local developer, not untrusted remote input
-		expanded => new RegExp(`^${globToRegExpSource(expanded)}$`),
+		expanded =>
+			// nosemgrep: detect-non-literal-regexp
+			new RegExp(`^${globToRegExpSource(expanded)}$`),
 	);
 }
 
@@ -139,8 +139,7 @@ function buildSearchRegex(
 ): RegExp {
 	const flags = caseSensitive ? 'g' : 'gi';
 	const source = wholeWord ? `\\b(?:${query})\\b` : query;
-	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
-	// Search queries come from the local developer, not untrusted remote input
+	// nosemgrep: detect-non-literal-regexp
 	return new RegExp(source, flags);
 }
 

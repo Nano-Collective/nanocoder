@@ -4,7 +4,21 @@ import WelcomeMessage from '@/components/welcome-message';
 import {getClosestConfigFile} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
+import {
+	formatGitStatusSummary,
+	type GitStatusSummary,
+	getGitStatusSummarySync,
+} from '@/tools/git/utils';
 import {DEVELOPMENT_MODE_LABELS, type DevelopmentMode} from '@/types/core';
+
+/**
+ * Format a {@link GitStatusSummary} for inline display next to the
+ * provider/model/config segment of the boot summary.
+ */
+export function formatBootSummaryGitLabel(status: GitStatusSummary): string {
+	const {branch, marker} = formatGitStatusSummary(status);
+	return marker ? `⎇ ${branch} (${marker})` : `⎇ ${branch}`;
+}
 
 export interface AppContainerProps {
 	shouldShowWelcome: boolean;
@@ -43,24 +57,30 @@ function BootSummary({
 	const homedir = process.env.HOME || process.env.USERPROFILE || '';
 	const shortConfig = homedir ? configPath.replace(homedir, '~') : configPath;
 	const modeLabel = mode ? DEVELOPMENT_MODE_LABELS[mode] : undefined;
+	const gitStatus = getGitStatusSummarySync();
+	const gitLabel = gitStatus ? formatBootSummaryGitLabel(gitStatus) : undefined;
 
-	// Narrow terminals: just provider + model + mode, skip the config path
+	// Narrow terminals: provider + model + mode on the first line, with the
+	// branch (when present) underneath so the line doesn't overflow.
 	if (isNarrow) {
 		if (!provider || !model) return <></>;
 		return (
-			<Text>
-				<Text color={colors.success} bold>
-					{provider}
+			<Box flexDirection="column">
+				<Text>
+					<Text color={colors.success} bold>
+						{provider}
+					</Text>
+					<Text color={colors.secondary}> · </Text>
+					<Text color={colors.success}>{model}</Text>
+					{modeLabel && (
+						<>
+							<Text color={colors.secondary}> · </Text>
+							<Text color={colors.info}>{modeLabel}</Text>
+						</>
+					)}
 				</Text>
-				<Text color={colors.secondary}> · </Text>
-				<Text color={colors.success}>{model}</Text>
-				{modeLabel && (
-					<>
-						<Text color={colors.secondary}> · </Text>
-						<Text color={colors.info}>{modeLabel}</Text>
-					</>
-				)}
-			</Text>
+				{gitLabel && <Text color={colors.primary}>{gitLabel}</Text>}
+			</Box>
 		);
 	}
 
@@ -81,9 +101,23 @@ function BootSummary({
 					)}
 					<Text color={colors.secondary}> · </Text>
 					<Text color={colors.secondary}>{shortConfig}</Text>
+					{gitLabel && (
+						<>
+							<Text color={colors.secondary}> · </Text>
+							<Text color={colors.primary}>{gitLabel}</Text>
+						</>
+					)}
 				</>
 			) : (
-				<Text color={colors.secondary}>{shortConfig}</Text>
+				<>
+					<Text color={colors.secondary}>{shortConfig}</Text>
+					{gitLabel && (
+						<>
+							<Text color={colors.secondary}> · </Text>
+							<Text color={colors.primary}>{gitLabel}</Text>
+						</>
+					)}
+				</>
 			)}
 		</Text>
 	);

@@ -1,12 +1,16 @@
+import {getAppConfig} from '@/config/index';
 import {getBraveSearchApiKey} from '@/config/nanocoder-tools-config';
+import {buildToolEntry} from '@/custom-tools/build-tool';
+import {CustomToolLoader} from '@/custom-tools/loader';
 // Type-only import — the `MCPClient` runtime value is loaded dynamically
 // inside `initializeMCP()` so sessions without MCP servers never pay the
 // cost of the @modelcontextprotocol/sdk import graph.
 import type {MCPClient} from '@/mcp/mcp-client';
 import {allToolExports} from '@/tools/index';
-import {getToolsForProfile} from '@/tools/tool-profiles';
+import {getToolsForProfile, resolveToolProfile} from '@/tools/tool-profiles';
 import {ToolRegistry} from '@/tools/tool-registry';
 import type {TuneConfig} from '@/types/config';
+import type {CustomToolApprovalPolicy} from '@/types/custom-tools';
 import type {
 	AISDKCoreTool,
 	DevelopmentMode,
@@ -21,6 +25,15 @@ import type {
 } from '@/types/index';
 import {getShutdownManager} from '@/utils/shutdown';
 
+/**
+ * Filter knob for tool access methods. Default behavior hides scoped
+ * skill tools; pass `forSkill` to opt back in for tools owned by that
+ * skill (typically by its own subagent).
+ */
+export interface ToolVisibilityOptions {
+	forSkill?: string;
+}
+
 // Tools to exclude per development mode
 const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 	normal: [],
@@ -30,35 +43,35 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 		// No mutation tools — plan mode is read-only exploration
 		'write_file',
 		'string_replace',
-		'delete_file',
-		'move_file',
-		'copy_file',
-		'create_directory',
+		'file_op',
 		'execute_bash',
-		// No task tools — plan mode produces the plan itself
-		'create_task',
-		'update_task',
-		'delete_task',
-		'list_tasks',
+		// No task tool — plan mode produces the plan itself
+		'write_tasks',
 		// No git mutation tools — keep read-only git tools
 		'git_add',
 		'git_commit',
-		'git_push',
-		'git_pull',
-		'git_branch',
-		'git_stash',
-		'git_reset',
+		'git_pr', // can create PRs — excluded like other git mutators
 	],
-	scheduler: ['ask_user', 'agent'],
+	headless: ['ask_user', 'agent'],
 };
 
 /**
- * Manages both static tools and dynamic MCP tools.
+ * Manages built-in tools, MCP tools, and file-based custom tools.
  * Single authority for tool availability, filtering, and approval policy.
  */
 export class ToolManager {
 	private registry: ToolRegistry;
 	private mcpClient: MCPClient | null = null;
+	private customTools = new Map<
+		string,
+		{
+			approval: CustomToolApprovalPolicy;
+			readOnly: boolean;
+			source: 'personal' | 'project';
+			filePath: string;
+			subscribe?: import('@/types/skills').SkillTrigger[];
+		}
+	>();
 
 	constructor() {
 		this.registry = ToolRegistry.fromToolExports(allToolExports);
@@ -102,6 +115,45 @@ export class ToolManager {
 		return [];
 	}
 
+	/**
+	 * Load file-based custom tools from `.nanocoder/tools/` (project) and
+	 * the personal tools directory. Project tools override personal ones.
+	 * Custom tools whose name collides with a built-in or already-registered
+	 * MCP tool are skipped with an error. Returns a per-tool load summary so
+	 * callers can surface counts/errors at startup.
+	 */
+	initializeCustomTools(projectRoot?: string): {
+		loaded: string[];
+		errors: Array<{file: string; error: string}>;
+	} {
+		const loader = new CustomToolLoader(projectRoot ?? process.cwd());
+		const {tools, errors} = loader.load();
+		const loaded: string[] = [];
+		const collisions: Array<{file: string; error: string}> = [];
+
+		for (const t of tools) {
+			if (this.registry.hasTool(t.metadata.name)) {
+				collisions.push({
+					file: t.filePath,
+					error: `Tool name "${t.metadata.name}" collides with a built-in or MCP tool — skipping.`,
+				});
+				continue;
+			}
+			const entry = buildToolEntry(t, loader.getProjectRoot());
+			this.registry.register(entry);
+			this.customTools.set(t.metadata.name, {
+				approval: t.metadata.approval,
+				readOnly: t.metadata.readOnly,
+				source: t.source,
+				filePath: t.filePath,
+				subscribe: t.subscribe,
+			});
+			loaded.push(t.metadata.name);
+		}
+
+		return {loaded, errors: [...errors, ...collisions]};
+	}
+
 	// =========================================================================
 	// Tool availability — single source of truth
 	// =========================================================================
@@ -113,13 +165,18 @@ export class ToolManager {
 	getAvailableToolNames(
 		tuneConfig?: TuneConfig,
 		developmentMode?: DevelopmentMode,
+		disabledTools?: string[],
+		model?: string,
 	): string[] {
 		let names = this.getToolNames();
 
-		if (tuneConfig?.enabled && tuneConfig.toolProfile !== 'full') {
-			const profileTools = getToolsForProfile(tuneConfig.toolProfile);
-			if (profileTools.length > 0) {
-				names = profileTools;
+		if (tuneConfig?.enabled) {
+			const profile = resolveToolProfile(tuneConfig.toolProfile, model);
+			if (profile !== 'full') {
+				const profileTools = getToolsForProfile(profile);
+				if (profileTools.length > 0) {
+					names = profileTools;
+				}
 			}
 		}
 
@@ -130,63 +187,75 @@ export class ToolManager {
 				const excludeSet = new Set(excluded);
 				names = names.filter(n => !excludeSet.has(n));
 			}
+
+			// Custom tools follow the same posture as built-ins but with policy
+			// applied per-tool from their approval/readOnly metadata.
+			if (developmentMode === 'plan' || developmentMode === 'headless') {
+				names = names.filter(n => {
+					const meta = this.customTools.get(n);
+					if (!meta) return true;
+					if (developmentMode === 'headless') {
+						return meta.approval === 'never';
+					}
+					// plan mode: only read-only tools with no approval are safe
+					return meta.approval === 'never' && meta.readOnly;
+				});
+			}
+		}
+
+		// Apply user-configured disable list (intersects with profile + mode).
+		// Defaults to global app config; callers may pass an override (mainly
+		// for tests). This is global policy every caller should observe.
+		const disabled = disabledTools ?? getAppConfig().disabledTools;
+		if (disabled && disabled.length > 0) {
+			const disabledSet = new Set(disabled);
+			names = names.filter(n => !disabledSet.has(n));
 		}
 
 		return names;
 	}
 
-	/**
-	 * Get effective tools with non-interactive approval overrides applied.
-	 * Resolves all approval policy in one place so chat-handler doesn't mutate tools.
-	 */
-	getEffectiveTools(
-		availableToolNames: string[],
-		options?: {
-			nonInteractiveAlwaysAllow?: string[];
-		},
-	): Record<string, AISDKCoreTool> {
-		const tools = this.getFilteredToolsWithoutExecute(availableToolNames);
-
-		if (
-			options?.nonInteractiveAlwaysAllow &&
-			options.nonInteractiveAlwaysAllow.length > 0
-		) {
-			const allowSet = new Set(options.nonInteractiveAlwaysAllow);
-			return Object.fromEntries(
-				Object.entries(tools).map(([name, toolDef]) => {
-					if (allowSet.has(name)) {
-						return [name, {...toolDef, needsApproval: false} as AISDKCoreTool];
-					}
-					return [name, toolDef];
-				}),
-			);
-		}
-
-		return tools;
-	}
-
 	// =========================================================================
 	// Tool access — delegates to ToolRegistry
+	//
+	// All accessors return execute-stripped AI SDK tool definitions: the SDK
+	// never auto-executes, so the model only ever needs schemas/descriptions.
+	// Execution runs through the registry handler (see getToolHandler), which
+	// validates. Approval is decided separately by `resolveToolApproval`.
 	// =========================================================================
 
-	getAllTools(): Record<string, AISDKCoreTool> {
-		return this.registry.getNativeTools();
+	getAllTools(opts?: ToolVisibilityOptions): Record<string, AISDKCoreTool> {
+		return this.applyVisibility(this.registry.getNativeTools(), opts);
 	}
 
-	getAllToolsWithoutExecute(): Record<string, AISDKCoreTool> {
-		return this.registry.getNativeToolsWithoutExecute();
-	}
-
-	getFilteredTools(allowedToolNames: string[]): Record<string, AISDKCoreTool> {
-		const all = this.registry.getNativeTools();
-		return this.filterByNames(all, allowedToolNames);
-	}
-
-	getFilteredToolsWithoutExecute(
+	getFilteredTools(
 		allowedToolNames: string[],
+		opts?: ToolVisibilityOptions,
 	): Record<string, AISDKCoreTool> {
-		const all = this.registry.getNativeToolsWithoutExecute();
-		return this.filterByNames(all, allowedToolNames);
+		return this.filterByNames(this.getAllTools(opts), allowedToolNames);
+	}
+
+	/**
+	 * Drop scoped tools unless the caller opts in by passing the owning
+	 * skill's name. Tools without `scoped` set (built-ins, MCP, custom
+	 * tools, single-file skill tools) pass through untouched.
+	 */
+	private applyVisibility(
+		tools: Record<string, AISDKCoreTool>,
+		opts?: ToolVisibilityOptions,
+	): Record<string, AISDKCoreTool> {
+		const result: Record<string, AISDKCoreTool> = {};
+		for (const [name, tool] of Object.entries(tools)) {
+			const entry = this.registry.getEntry(name);
+			if (entry?.scoped) {
+				if (entry.ownerSkill && entry.ownerSkill === opts?.forSkill) {
+					result[name] = tool;
+				}
+				continue;
+			}
+			result[name] = tool;
+		}
+		return result;
 	}
 
 	private filterByNames(
@@ -231,6 +300,54 @@ export class ToolManager {
 		return this.registry.hasTool(toolName);
 	}
 
+	/**
+	 * Register a skill-provided tool. Wraps the registry call so the
+	 * registrar doesn't have to reach through `ToolManager` into
+	 * `ToolRegistry`. The entry's `ownerSkill` tag is preserved.
+	 */
+	registerSkillTool(entry: ToolEntry): void {
+		this.registry.register(entry);
+	}
+
+	/**
+	 * Unregister a previously-registered skill-provided tool. Returns true
+	 * if the tool was found and removed.
+	 */
+	unregisterSkillTool(toolName: string): boolean {
+		if (!this.registry.hasTool(toolName)) return false;
+		this.registry.unregister(toolName);
+		return true;
+	}
+
+	/**
+	 * Return the tool entry's `ownerSkill` tag, if any. Used by callers
+	 * (e.g. `/tools`, scoped-visibility filters) to attribute a tool back
+	 * to the skill that registered it.
+	 */
+	getOwnerSkill(toolName: string): string | undefined {
+		return this.registry.getEntry(toolName)?.ownerSkill;
+	}
+
+	isCustomTool(toolName: string): boolean {
+		return this.customTools.has(toolName);
+	}
+
+	getCustomToolInfo(toolName: string):
+		| {
+				approval: CustomToolApprovalPolicy;
+				readOnly: boolean;
+				source: 'personal' | 'project';
+				filePath: string;
+				subscribe?: import('@/types/skills').SkillTrigger[];
+		  }
+		| undefined {
+		return this.customTools.get(toolName);
+	}
+
+	getCustomToolNames(): string[] {
+		return Array.from(this.customTools.keys());
+	}
+
 	getMCPToolInfo(toolName: string): {isMCPTool: boolean; serverName?: string} {
 		if (!this.mcpClient) {
 			return {isMCPTool: false};
@@ -259,6 +376,7 @@ export class ToolManager {
 
 			// Reset registry to only static tools
 			this.registry = ToolRegistry.fromToolExports(allToolExports);
+			this.customTools.clear();
 			this.mcpClient = null;
 		}
 

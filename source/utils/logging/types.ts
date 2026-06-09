@@ -84,31 +84,6 @@ export interface PerformanceMetrics {
 	cpuUsage?: NodeJS.CpuUsage;
 }
 
-export interface TransportConfig {
-	target: string;
-	options: {
-		destination?: string;
-		level?: LogLevel;
-		formatters?: Record<string, (data: unknown) => unknown>;
-		redact?: string[];
-		frequency?: string | number;
-		size?: string | number;
-		limit?: {
-			count: number;
-			removeOtherLogFiles?: boolean;
-		};
-		dateFormat?: string;
-		extension?: string;
-		symlink?: boolean;
-		mkdir?: boolean;
-		compress?: boolean;
-		sync?: boolean;
-		minLength?: number;
-		maxLength?: number;
-		periodicFlush?: number;
-	};
-}
-
 /**
  * Environment-specific transport configuration
  */

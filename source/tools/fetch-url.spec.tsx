@@ -205,7 +205,8 @@ test('tool does not require confirmation', t => {
 		t.pass('Skipping test - fetch-url module not available');
 		return;
 	}
-	t.false(fetchUrlTool.tool.needsApproval);
+	t.true(fetchUrlTool.readOnly);
+	t.is(fetchUrlTool.approval, undefined);
 });
 
 test('formatter is a function', t => {

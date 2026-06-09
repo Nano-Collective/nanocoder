@@ -18,8 +18,10 @@ import type {
 	AutoCompactConfig,
 	Colors,
 	CompressionMode,
+	CompressionStrategy,
 	NotificationsConfig,
 	PasteConfig,
+	SystemPromptConfig,
 } from '@/types/index';
 import {logError} from '@/utils/message-queue';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
@@ -102,43 +104,54 @@ function createDefaultConfFile(filePath: string, fileName: string): void {
 	}
 }
 
-// Try to load auto-compact config from a specific path
-// Returns the config if found and valid, null otherwise
-function tryLoadAutoCompactFromPath(
+/**
+ * Read a JSON config file and hand the parsed contents to `extract`. Returns
+ * null when the file is missing, unparseable, or `extract` rejects it. The
+ * `label` only flavours the error log.
+ */
+function tryLoadConfig<T>(
 	configPath: string,
-	defaults: AutoCompactConfig,
-): AutoCompactConfig | null {
+	label: string,
+	// biome-ignore lint/suspicious/noExplicitAny: parsed JSON is dynamically shaped
+	extract: (config: any) => T | null,
+): T | null {
 	if (!existsSync(configPath)) {
 		return null;
 	}
 
 	try {
-		const rawData = readFileSync(configPath, 'utf-8');
-		const config = JSON.parse(rawData);
-		const autoCompact = config.nanocoder?.autoCompact;
-		if (autoCompact && typeof autoCompact === 'object') {
-			return {
-				enabled:
-					autoCompact.enabled !== undefined
-						? Boolean(autoCompact.enabled)
-						: defaults.enabled,
-				threshold: validateThreshold(
-					autoCompact.threshold ?? defaults.threshold,
-				),
-				mode: validateMode(autoCompact.mode ?? defaults.mode),
-				notifyUser:
-					autoCompact.notifyUser !== undefined
-						? Boolean(autoCompact.notifyUser)
-						: defaults.notifyUser,
-			};
-		}
+		const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+		return extract(config);
 	} catch (error) {
 		logError(
-			`Failed to load auto-compact config from ${configPath}: ${String(error)}`,
+			`Failed to load ${label} config from ${configPath}: ${String(error)}`,
 		);
 	}
 
 	return null;
+}
+
+/**
+ * Resolve a config value with project-over-global precedence: try
+ * `<cwd>/<fileName>` first, then `<configDir>/<fileName>`. Returns null when
+ * neither file yields a value.
+ */
+function loadHierarchicalConfig<T>(
+	fileName: string,
+	label: string,
+	// biome-ignore lint/suspicious/noExplicitAny: parsed JSON is dynamically shaped
+	extract: (config: any) => T | null,
+): T | null {
+	const projectResult = tryLoadConfig(
+		join(process.cwd(), fileName), // nosemgrep
+		label,
+		extract,
+	);
+	if (projectResult !== null) {
+		return projectResult;
+	}
+
+	return tryLoadConfig(join(getConfigPath(), fileName), label, extract); // nosemgrep
 }
 
 // Load auto-compact configuration and Returns default config if not specified
@@ -147,25 +160,33 @@ function loadAutoCompactConfig(): AutoCompactConfig {
 		enabled: true,
 		threshold: 60,
 		mode: 'conservative',
+		strategy: 'llm',
 		notifyUser: true,
 	};
 
-	// Try to load from project-level config first
-	const projectConfigPath = join(process.cwd(), 'agents.config.json');
-	const projectConfig = tryLoadAutoCompactFromPath(projectConfigPath, defaults);
-	if (projectConfig) {
-		return projectConfig;
-	}
-
-	// Try global config
-	const configDir = getConfigPath();
-	const globalConfigPath = join(configDir, 'agents.config.json');
-	const globalConfig = tryLoadAutoCompactFromPath(globalConfigPath, defaults);
-	if (globalConfig) {
-		return globalConfig;
-	}
-
-	return defaults;
+	return (
+		loadHierarchicalConfig('agents.config.json', 'auto-compact', config => {
+			const autoCompact = config.nanocoder?.autoCompact;
+			if (autoCompact && typeof autoCompact === 'object') {
+				return {
+					enabled:
+						autoCompact.enabled !== undefined
+							? Boolean(autoCompact.enabled)
+							: defaults.enabled,
+					threshold: validateThreshold(
+						autoCompact.threshold ?? defaults.threshold,
+					),
+					mode: validateMode(autoCompact.mode ?? defaults.mode),
+					strategy: validateStrategy(autoCompact.strategy ?? defaults.strategy),
+					notifyUser:
+						autoCompact.notifyUser !== undefined
+							? Boolean(autoCompact.notifyUser)
+							: defaults.notifyUser,
+				};
+			}
+			return null;
+		}) ?? defaults
+	);
 }
 
 // Validate and clamp threshold to valid range (50-95)
@@ -182,67 +203,12 @@ function validateMode(mode: unknown): CompressionMode {
 	return 'conservative';
 }
 
-// Try to load session config from a specific path
-// Returns the config if found and valid, null otherwise
-function tryLoadSessionsFromPath(
-	configPath: string,
-	defaults: NonNullable<AppConfig['sessions']>,
-): AppConfig['sessions'] | null {
-	if (!existsSync(configPath)) {
-		return null;
+// Validate compression strategy
+function validateStrategy(strategy: unknown): CompressionStrategy {
+	if (strategy === 'llm' || strategy === 'mechanical') {
+		return strategy;
 	}
-
-	try {
-		const rawData = readFileSync(configPath, 'utf-8');
-		const config = JSON.parse(rawData);
-		const sessions = config.nanocoder?.sessions;
-		if (sessions && typeof sessions === 'object') {
-			const normalizeSessionNumber = (
-				value: unknown,
-				min: number,
-				fallback: number,
-			): number => {
-				if (typeof value === 'number' && Number.isFinite(value)) {
-					return Math.max(min, value);
-				}
-				return fallback;
-			};
-
-			return {
-				autoSave:
-					sessions.autoSave !== undefined
-						? Boolean(sessions.autoSave)
-						: defaults.autoSave,
-				saveInterval: normalizeSessionNumber(
-					sessions.saveInterval,
-					1000, // Minimum 1 second
-					defaults.saveInterval ?? 30000,
-				),
-				maxSessions: normalizeSessionNumber(
-					sessions.maxSessions,
-					1,
-					defaults.maxSessions ?? 100,
-				),
-				maxMessages: normalizeSessionNumber(
-					sessions.maxMessages,
-					1,
-					defaults.maxMessages ?? 1000,
-				),
-				retentionDays: normalizeSessionNumber(
-					sessions.retentionDays,
-					1,
-					defaults.retentionDays ?? 30,
-				),
-				directory: sessions.directory || defaults.directory,
-			};
-		}
-	} catch (error) {
-		logError(
-			`Failed to load session config from ${configPath}: ${String(error)}`,
-		);
-	}
-
-	return null;
+	return 'llm';
 }
 
 // Load session configuration and Returns default config if not specified
@@ -256,55 +222,52 @@ function loadSessionConfig(): AppConfig['sessions'] {
 		directory: '',
 	};
 
-	// Try to load from project-level config first
-	const projectConfigPath = join(process.cwd(), 'nanocoder-preferences.json');
-	const projectConfig = tryLoadSessionsFromPath(projectConfigPath, defaults);
-	if (projectConfig) {
-		return projectConfig;
-	}
-
-	// Try global config
-	const configDir = getConfigPath();
-	const globalConfigPath = join(configDir, 'nanocoder-preferences.json');
-	const globalConfig = tryLoadSessionsFromPath(globalConfigPath, defaults);
-	if (globalConfig) {
-		return globalConfig;
-	}
-
-	return defaults;
-}
-
-// Try to load paste config from a specific path
-// Returns the config if found and valid, null otherwise
-function tryLoadPasteFromPath(
-	configPath: string,
-	defaults: PasteConfig,
-): PasteConfig | null {
-	if (!existsSync(configPath)) {
-		return null;
-	}
-
-	try {
-		const rawData = readFileSync(configPath, 'utf-8');
-		const config = JSON.parse(rawData);
-		const paste = config.nanocoder?.paste;
-		if (paste && typeof paste === 'object') {
-			return {
-				singleLineThreshold:
-					typeof paste.singleLineThreshold === 'number' &&
-					Number.isFinite(paste.singleLineThreshold) &&
-					paste.singleLineThreshold > 0
-						? Math.round(paste.singleLineThreshold)
-						: defaults.singleLineThreshold,
-			};
+	const normalizeSessionNumber = (
+		value: unknown,
+		min: number,
+		fallback: number,
+	): number => {
+		if (typeof value === 'number' && Number.isFinite(value)) {
+			return Math.max(min, value);
 		}
-	} catch (error) {
-		logError(
-			`Failed to load paste config from ${configPath}: ${String(error)}`,
-		);
-	}
+		return fallback;
+	};
 
-	return null;
+	return (
+		loadHierarchicalConfig('nanocoder-preferences.json', 'session', config => {
+			const sessions = config.nanocoder?.sessions;
+			if (sessions && typeof sessions === 'object') {
+				return {
+					autoSave:
+						sessions.autoSave !== undefined
+							? Boolean(sessions.autoSave)
+							: defaults.autoSave,
+					saveInterval: normalizeSessionNumber(
+						sessions.saveInterval,
+						1000, // Minimum 1 second
+						defaults.saveInterval ?? 30000,
+					),
+					maxSessions: normalizeSessionNumber(
+						sessions.maxSessions,
+						1,
+						defaults.maxSessions ?? 100,
+					),
+					maxMessages: normalizeSessionNumber(
+						sessions.maxMessages,
+						1,
+						defaults.maxMessages ?? 1000,
+					),
+					retentionDays: normalizeSessionNumber(
+						sessions.retentionDays,
+						1,
+						defaults.retentionDays ?? 30,
+					),
+					directory: sessions.directory || defaults.directory,
+				};
+			}
+			return null;
+		}) ?? defaults
+	);
 }
 
 // Load paste configuration and Returns default config if not specified
@@ -313,136 +276,110 @@ function loadPasteConfig(): PasteConfig {
 		singleLineThreshold: DEFAULT_SINGLE_LINE_PASTE_THRESHOLD,
 	};
 
-	// Try to load from project-level config first
-	const projectConfigPath = join(process.cwd(), 'nanocoder-preferences.json');
-	const projectConfig = tryLoadPasteFromPath(projectConfigPath, defaults);
-	if (projectConfig) {
-		return projectConfig;
-	}
-
-	// Try global config
-	const configDir = getConfigPath();
-	const globalConfigPath = join(configDir, 'nanocoder-preferences.json');
-	const globalConfig = tryLoadPasteFromPath(globalConfigPath, defaults);
-	if (globalConfig) {
-		return globalConfig;
-	}
-
-	return defaults;
+	return (
+		loadHierarchicalConfig('nanocoder-preferences.json', 'paste', config => {
+			const paste = config.nanocoder?.paste;
+			if (paste && typeof paste === 'object') {
+				return {
+					singleLineThreshold:
+						typeof paste.singleLineThreshold === 'number' &&
+						Number.isFinite(paste.singleLineThreshold) &&
+						paste.singleLineThreshold > 0
+							? Math.round(paste.singleLineThreshold)
+							: defaults.singleLineThreshold,
+				};
+			}
+			return null;
+		}) ?? defaults
+	);
 }
 
 function loadNanocoderToolsConfig(): AppConfig['nanocoderTools'] {
-	// Try project-level config first
-	const projectConfigPath = join(process.cwd(), 'agents.config.json');
-	const projectResult = tryLoadNanocoderToolsFromPath(projectConfigPath);
-	if (projectResult) {
-		return projectResult;
-	}
-
-	// Try global config
-	const configDir = getConfigPath();
-	const globalConfigPath = join(configDir, 'agents.config.json');
-	return tryLoadNanocoderToolsFromPath(globalConfigPath) ?? undefined;
-}
-
-function tryLoadNanocoderToolsFromPath(
-	configPath: string,
-): AppConfig['nanocoderTools'] | null {
-	if (!existsSync(configPath)) {
-		return null;
-	}
-
-	try {
-		const rawData = readFileSync(configPath, 'utf-8');
-		const config = JSON.parse(rawData);
-		const nanocoderTools = config.nanocoder?.nanocoderTools;
-		if (nanocoderTools && typeof nanocoderTools === 'object') {
-			return substituteEnvVars(nanocoderTools);
-		}
-	} catch (error) {
-		logError(
-			`Failed to load nanocoderTools config from ${configPath}: ${String(error)}`,
-		);
-	}
-
-	return null;
+	return (
+		loadHierarchicalConfig('agents.config.json', 'nanocoderTools', config => {
+			const nanocoderTools = config.nanocoder?.nanocoderTools;
+			if (nanocoderTools && typeof nanocoderTools === 'object') {
+				return substituteEnvVars(nanocoderTools);
+			}
+			return null;
+		}) ?? undefined
+	);
 }
 
 function loadAlwaysAllowConfig(): string[] | undefined {
-	// Try project-level config first
-	const projectConfigPath = join(process.cwd(), 'agents.config.json');
-	const projectResult = tryLoadAlwaysAllowFromPath(projectConfigPath);
-	if (projectResult) {
-		return projectResult;
-	}
-
-	// Try global config
-	const configDir = getConfigPath();
-	const globalConfigPath = join(configDir, 'agents.config.json');
-	return tryLoadAlwaysAllowFromPath(globalConfigPath) ?? undefined;
+	return (
+		loadHierarchicalConfig('agents.config.json', 'alwaysAllow', config => {
+			const alwaysAllow = config.nanocoder?.alwaysAllow;
+			if (Array.isArray(alwaysAllow)) {
+				return alwaysAllow.filter(
+					(item: unknown): item is string => typeof item === 'string',
+				);
+			}
+			return null;
+		}) ?? undefined
+	);
 }
 
-function tryLoadAlwaysAllowFromPath(configPath: string): string[] | null {
-	if (!existsSync(configPath)) {
-		return null;
-	}
+function loadDisabledToolsConfig(): string[] | undefined {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'disabledTools', config => {
+			const disabledTools = config.nanocoder?.disabledTools;
+			if (Array.isArray(disabledTools)) {
+				return disabledTools.filter(
+					(item: unknown): item is string => typeof item === 'string',
+				);
+			}
+			return null;
+		}) ?? undefined
+	);
+}
 
-	try {
-		const rawData = readFileSync(configPath, 'utf-8');
-		const config = JSON.parse(rawData);
-		const alwaysAllow = config.nanocoder?.alwaysAllow;
-		if (Array.isArray(alwaysAllow)) {
-			return alwaysAllow.filter(
-				(item: unknown): item is string => typeof item === 'string',
-			);
-		}
-	} catch (error) {
-		logError(
-			`Failed to load alwaysAllow config from ${configPath}: ${String(error)}`,
-		);
-	}
+function loadSystemPromptConfig(): SystemPromptConfig | undefined {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'systemPrompt', config => {
+			const systemPrompt = config.nanocoder?.systemPrompt;
+			if (!systemPrompt || typeof systemPrompt !== 'object') {
+				return null;
+			}
 
-	return null;
+			const result: SystemPromptConfig = {};
+			if (systemPrompt.mode === 'replace' || systemPrompt.mode === 'append') {
+				result.mode = systemPrompt.mode;
+			}
+			if (typeof systemPrompt.content === 'string') {
+				result.content = systemPrompt.content;
+			}
+			if (typeof systemPrompt.file === 'string') {
+				result.file = systemPrompt.file;
+			}
+
+			if (result.content === undefined && result.file === undefined) {
+				return null;
+			}
+
+			return result;
+		}) ?? undefined
+	);
 }
 
 // Load notifications configuration from preferences
 function loadNotificationsConfig(): NotificationsConfig | undefined {
 	return getNotificationsPreference();
 }
-function tryLoadDefaultModeFromPath(configPath: string): CliMode | null {
-	if (!existsSync(configPath)) {
-		return null;
-	}
-
-	try {
-		const rawData = readFileSync(configPath, 'utf-8');
-		const config = JSON.parse(rawData);
-		const defaultMode = config.nanocoder?.defaultMode;
-		if (typeof defaultMode === 'string') {
-			const normalized = defaultMode.toLowerCase().trim();
-			if ((VALID_MODES as readonly string[]).includes(normalized)) {
-				return normalized as CliMode;
-			}
-		}
-	} catch (error) {
-		logError(
-			`Failed to load defaultMode config from ${configPath}: ${String(error)}`,
-		);
-	}
-
-	return null;
-}
 
 export function loadDefaultMode(): CliMode | undefined {
-	const projectConfigPath = join(process.cwd(), 'agents.config.json');
-	const projectResult = tryLoadDefaultModeFromPath(projectConfigPath);
-	if (projectResult) {
-		return projectResult;
-	}
-
-	const configDir = getConfigPath();
-	const globalConfigPath = join(configDir, 'agents.config.json');
-	return tryLoadDefaultModeFromPath(globalConfigPath) ?? undefined;
+	return (
+		loadHierarchicalConfig('agents.config.json', 'defaultMode', config => {
+			const defaultMode = config.nanocoder?.defaultMode;
+			if (typeof defaultMode === 'string') {
+				const normalized = defaultMode.toLowerCase().trim();
+				if ((VALID_MODES as readonly string[]).includes(normalized)) {
+					return normalized as CliMode;
+				}
+			}
+			return null;
+		}) ?? undefined
+	);
 }
 
 // Function to load app configuration from agents.config.json if it exists
@@ -469,6 +406,12 @@ function loadAppConfig(): AppConfig {
 	// Load top-level alwaysAllow (for non-interactive mode and as fallback)
 	const alwaysAllow = loadAlwaysAllowConfig();
 
+	// Load top-level disabledTools (filtered out of every tool-availability path)
+	const disabledTools = loadDisabledToolsConfig();
+
+	// Load custom system prompt override
+	const systemPrompt = loadSystemPromptConfig();
+
 	// Load notifications configuration
 	const notifications = loadNotificationsConfig();
 
@@ -480,6 +423,8 @@ function loadAppConfig(): AppConfig {
 		paste,
 		nanocoderTools,
 		alwaysAllow,
+		disabledTools,
+		systemPrompt,
 		notifications,
 	};
 }

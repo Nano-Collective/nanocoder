@@ -10,9 +10,9 @@
 - `execute_bash("grep -r 'TODO' .")` → Use `search_file_contents("TODO")`
 - `execute_bash("cat package.json")` → Use `read_file("package.json")`
 - `execute_bash("ls -la src/")` → Use `list_directory("src")`
-- `execute_bash("rm file.ts")` → Use `delete_file("file.ts")`
-- `execute_bash("mv old.ts new.ts")` → Use `move_file`
-- `execute_bash("cp a.ts b.ts")` → Use `copy_file`
-- `execute_bash("mkdir -p src/utils")` → Use `create_directory("src/utils")`
+- `execute_bash("rm file.ts")` → Use `file_op(operation: "delete", path: "file.ts")`
+- `execute_bash("mv old.ts new.ts")` → Use `file_op(operation: "move", ...)`
+- `execute_bash("cp a.ts b.ts")` → Use `file_op(operation: "copy", ...)`
+- `execute_bash("mkdir -p src/utils")` → Use `file_op(operation: "mkdir", path: "src/utils")`
 
 **When to use bash**: Reserve `execute_bash` for builds, tests, dependency installs, dev servers, and operations not covered by other tools.

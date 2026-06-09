@@ -8,8 +8,14 @@ import {TIMEOUT_HTTP_BODY_MS, TIMEOUT_HTTP_HEADERS_MS} from '@/constants';
 import type {AIProviderConfig, ProviderConfig} from '@/types/config';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
+import {createSessionOverride} from '@/utils/session-override';
 import {readCache, writeCache} from './models-cache.js';
-import type {ModelInfo, ModelsDevDatabase} from './models-types.js';
+import type {
+	ModelInfo,
+	ModelsDevDatabase,
+	ModelsDevModel,
+	ModelsDevProvider,
+} from './models-types.js';
 
 const MODELS_DEV_API_URL = 'https://models.dev/api.json';
 
@@ -186,6 +192,27 @@ async function getModelsData(): Promise<ModelsDevDatabase | null> {
 }
 
 /**
+ * Project a models.dev model + its provider into our ModelInfo shape.
+ */
+function createModelInfo(
+	model: ModelsDevModel,
+	provider: ModelsDevProvider,
+): ModelInfo {
+	return {
+		id: model.id,
+		name: model.name,
+		provider: provider.name,
+		contextLimit: model.limit?.context ?? null,
+		outputLimit: model.limit?.output ?? null,
+		supportsToolCalls: model.tool_call ?? false,
+		cost: {
+			input: model.cost?.input ?? 0,
+			output: model.cost?.output ?? 0,
+		},
+	};
+}
+
+/**
  * Find a model by ID across all providers
  * Returns the model info and provider name
  */
@@ -212,18 +239,7 @@ async function findModelById(modelId: string): Promise<ModelInfo | null> {
 					(bestMatch.contextLimit === null ||
 						contextLimit > bestMatch.contextLimit))
 			) {
-				bestMatch = {
-					id: model.id,
-					name: model.name,
-					provider: provider.name,
-					contextLimit,
-					outputLimit: model.limit?.output ?? null,
-					supportsToolCalls: model.tool_call ?? false,
-					cost: {
-						input: model.cost?.input ?? 0,
-						output: model.cost?.output ?? 0,
-					},
-				};
+				bestMatch = createModelInfo(model, provider);
 			}
 		}
 	}
@@ -270,18 +286,7 @@ async function findModelByName(modelName: string): Promise<ModelInfo | null> {
 
 			// Exact ID match → return immediately
 			if (modelIdLower === lowerName) {
-				return {
-					id: model.id,
-					name: model.name,
-					provider: provider.name,
-					contextLimit: model.limit?.context ?? null,
-					outputLimit: model.limit?.output ?? null,
-					supportsToolCalls: model.tool_call ?? false,
-					cost: {
-						input: model.cost?.input ?? 0,
-						output: model.cost?.output ?? 0,
-					},
-				};
+				return createModelInfo(model, provider);
 			}
 
 			// ID starts with search term → high score
@@ -302,18 +307,7 @@ async function findModelByName(modelName: string): Promise<ModelInfo | null> {
 
 			if (score > bestScore) {
 				bestScore = score;
-				bestMatch = {
-					id: model.id,
-					name: model.name,
-					provider: provider.name,
-					contextLimit: model.limit?.context ?? null,
-					outputLimit: model.limit?.output ?? null,
-					supportsToolCalls: model.tool_call ?? false,
-					cost: {
-						input: model.cost?.input ?? 0,
-						output: model.cost?.output ?? 0,
-					},
-				};
+				bestMatch = createModelInfo(model, provider);
 			}
 		}
 	}
@@ -322,31 +316,13 @@ async function findModelByName(modelName: string): Promise<ModelInfo | null> {
 }
 
 /**
- * Singleton class for managing session-level context limit overrides.
+ * Session-level context limit override.
  * Allows users to manually set a context limit via /context-max command.
+ * Non-positive values collapse back to null (no override).
  */
-class ContextLimitSessionManager {
-	private _contextLimit: number | null = null;
-
-	get(): number | null {
-		return this._contextLimit;
-	}
-
-	set(limit: number | null): void {
-		if (limit !== null && limit > 0) {
-			this._contextLimit = limit;
-		} else {
-			this._contextLimit = null;
-		}
-	}
-
-	reset(): void {
-		this._contextLimit = null;
-	}
-}
-
-// Singleton instance
-const contextLimitSession = new ContextLimitSessionManager();
+const contextLimitSession = createSessionOverride<number>(limit =>
+	limit !== null && limit > 0 ? limit : null,
+);
 
 export function setSessionContextLimit(limit: number | null): void {
 	contextLimitSession.set(limit);

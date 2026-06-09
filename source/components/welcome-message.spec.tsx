@@ -17,7 +17,7 @@ const packageJson = JSON.parse(
 const VERSION = packageJson.version;
 
 // ============================================================================
-// Narrow Terminal Tests (width < 60)
+// Narrow Terminal Tests (width < 80)
 // ============================================================================
 
 test('WelcomeMessage renders compact layout for narrow terminal', t => {
@@ -80,7 +80,7 @@ test('WelcomeMessage has bordered box in narrow layout', t => {
 });
 
 // ============================================================================
-// Normal Terminal Tests (60 <= width < 100)
+// Normal Terminal Tests (80 <= width < 120)
 // ============================================================================
 
 test('WelcomeMessage renders full layout for normal terminal', t => {
@@ -141,7 +141,7 @@ test('WelcomeMessage shows help command for normal terminal', t => {
 });
 
 // ============================================================================
-// Wide Terminal Tests (width >= 100)
+// Wide Terminal Tests (width >= 120)
 // ============================================================================
 
 test('WelcomeMessage renders full layout for wide terminal', t => {
@@ -217,29 +217,29 @@ test('WelcomeMessage displays gradient text', t => {
 // Edge Cases
 // ============================================================================
 
-test('WelcomeMessage handles boundary at width 60', t => {
+test('WelcomeMessage handles boundary at width 80', t => {
 	const originalColumns = process.stdout.columns;
-	process.stdout.columns = 60; // Boundary between narrow and normal
+	process.stdout.columns = 80; // Boundary between narrow and normal
 
 	const {lastFrame} = renderWithTheme(<WelcomeMessage />);
 
 	const output = lastFrame();
 	t.truthy(output);
-	// At width 60, should be normal, not narrow
+	// At width 80, should be normal, not narrow
 	t.regex(output!, /Nanocoder/); // Full logo for normal
 
 	process.stdout.columns = originalColumns;
 });
 
-test('WelcomeMessage handles boundary at width 100', t => {
+test('WelcomeMessage handles boundary at width 120', t => {
 	const originalColumns = process.stdout.columns;
-	process.stdout.columns = 100; // Boundary between normal and wide
+	process.stdout.columns = 120; // Boundary between normal and wide
 
 	const {lastFrame} = renderWithTheme(<WelcomeMessage />);
 
 	const output = lastFrame();
 	t.truthy(output);
-	// At width 100, should be wide
+	// At width 120, should be wide
 	t.regex(output!, /as you would with another engineer/); // Wide tip
 
 	process.stdout.columns = originalColumns;

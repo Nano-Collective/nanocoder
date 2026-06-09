@@ -26,6 +26,7 @@ const DEFAULT_CONFIG: AutoCompactConfig = {
 	enabled: true,
 	threshold: 60,
 	mode: 'conservative',
+	strategy: 'mechanical',
 	notifyUser: true,
 };
 

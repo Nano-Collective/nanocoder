@@ -1,11 +1,13 @@
 import test from 'ava';
-import type {Message} from '@/types/core';
+import {resetSessionContextLimit, setSessionContextLimit} from '@/models/models-dev-client.js';
+import type {LLMChatResponse, LLMClient, Message} from '@/types/core';
 import {
 	autoCompactSessionOverrides,
 	performAutoCompact,
 	resetAutoCompactSession,
 	setAutoCompactEnabled,
 	setAutoCompactMode,
+	setAutoCompactStrategy,
 	setAutoCompactThreshold,
 } from './auto-compact.js';
 
@@ -166,6 +168,324 @@ test('partial reset scenario - set some, reset all, set different', t => {
 	t.is(autoCompactSessionOverrides.mode, 'aggressive');
 });
 
+// ==================== performAutoCompact integration tests ====================
+
+/**
+ * Helper to set up a deterministic auto-compact test environment.
+ * The FallbackTokenizer counts 4 chars per token; by setting session context
+ * limit we control whether the threshold is exceeded.
+ */
+function setupAutoCompactEnv(contextLimit: number) {
+	resetSessionContextLimit();
+	setSessionContextLimit(contextLimit);
+}
+
+test.after.always(() => {
+	resetAutoCompactSession();
+	resetSessionContextLimit();
+});
+
+test('performAutoCompact returns messages without system role when compression triggers', async t => {
+	// Context limit of 100 tokens with a long message will exceed the 50% threshold.
+	setupAutoCompactEnv(100);
+
+	const oldContent = 'old context sentence. '.repeat(60); // ~900 chars ≈ 225 tokens > 50 tokens (50%)
+	const messages: Message[] = [
+		{role: 'user', content: oldContent},
+	];
+	const systemMessage: Message = {
+		role: 'system',
+		content: 'You are a helpful assistant.',
+	};
+
+	const result = await performAutoCompact(
+		messages,
+		systemMessage,
+		'openai',
+		'gpt-4',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			notifyUser: false,
+		},
+	);
+
+	t.truthy(result, 'Should return compressed messages');
+	t.true(Array.isArray(result));
+
+	// The returned array must NOT contain any system messages — they are filtered out
+	// so the chat handler can re-inject them on each LLM call.
+	const hasSystemRole = result!.some(msg => msg.role === 'system');
+	t.false(hasSystemRole, 'Compressed output should not contain system messages');
+});
+
+test('performAutoCompact returns null when below threshold', async t => {
+	// Large context limit means usage stays well below threshold
+	setupAutoCompactEnv(999_999);
+
+	const messages: Message[] = [
+		{role: 'user', content: 'Hello'},
+	];
+	const systemMessage: Message = {
+		role: 'system',
+		content: 'You are a helpful assistant.',
+	};
+
+	const result = await performAutoCompact(
+		messages,
+		systemMessage,
+		'openai',
+		'gpt-4',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			notifyUser: false,
+		},
+	);
+
+	t.is(result, null, 'Should return null when token usage is below threshold');
+});
+
+test('performAutoCompact calls notification callback with reduction info', async t => {
+	setupAutoCompactEnv(100);
+
+	const oldContent = 'old context sentence. '.repeat(60);
+	const messages: Message[] = [{role: 'user', content: oldContent}];
+	const systemMessage: Message = {
+		role: 'system',
+		content: 'You are a helpful assistant.',
+	};
+
+	const notifications: string[] = [];
+	await performAutoCompact(
+		messages,
+		systemMessage,
+		'openai',
+		'gpt-4',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			notifyUser: true,
+		},
+		notification => {
+			notifications.push(notification);
+		},
+	);
+
+	t.is(notifications.length, 1, 'Notification callback should be called once');
+	t.true(
+		notifications[0].includes('auto-compacting'),
+		'Notification should mention auto-compacting',
+	);
+	t.true(
+		notifications[0].includes('% reduction') || notifications[0].includes('tokens →'),
+		'Notification should include token reduction info',
+	);
+});
+
+test('performAutoCompact does not call notification when notifyUser is false', async t => {
+	setupAutoCompactEnv(100);
+
+	const oldContent = 'old context sentence. '.repeat(60);
+	const messages: Message[] = [{role: 'user', content: oldContent}];
+	const systemMessage: Message = {
+		role: 'system',
+		content: 'You are a helpful assistant.',
+	};
+
+	let notificationCalled = false;
+	await performAutoCompact(
+		messages,
+		systemMessage,
+		'openai',
+		'gpt-4',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			notifyUser: false,
+		},
+		() => {
+			notificationCalled = true;
+		},
+	);
+
+	t.false(notificationCalled, 'Notification callback should NOT be called');
+});
+
+// ==================== Strategy override + LLM routing ====================
+
+test('setAutoCompactStrategy sets and clears the override', t => {
+	setAutoCompactStrategy('mechanical');
+	t.is(autoCompactSessionOverrides.strategy, 'mechanical');
+
+	setAutoCompactStrategy('llm');
+	t.is(autoCompactSessionOverrides.strategy, 'llm');
+
+	setAutoCompactStrategy(null);
+	t.is(autoCompactSessionOverrides.strategy, null);
+});
+
+function makeStubClient(
+	respond: (messages: Message[]) => string,
+): LLMClient & {calls: number} {
+	let calls = 0;
+	const client: LLMClient & {calls: number} = {
+		get calls() {
+			return calls;
+		},
+		set calls(_) {},
+		getCurrentModel: () => 'stub',
+		setModel: () => {},
+		getContextSize: () => 100_000,
+		getAvailableModels: async () => ['stub'],
+		getProviderConfig: () => ({
+			name: 'stub',
+			type: 'openai' as const,
+			models: ['stub'],
+			config: {},
+		}),
+		chat: async (messages: Message[]): Promise<LLMChatResponse> => {
+			calls++;
+			return {
+				choices: [
+					{message: {role: 'assistant' as const, content: respond(messages)}},
+				],
+			};
+		},
+		clearContext: async () => {},
+		getTimeout: () => undefined,
+	};
+	return client;
+}
+
+test('performAutoCompact uses LLM client when strategy=llm and client provided', async t => {
+	setupAutoCompactEnv(100);
+
+	const oldContent = 'old context sentence. '.repeat(60);
+	const messages: Message[] = [
+		{role: 'user', content: oldContent},
+		{role: 'assistant', content: 'reply'},
+		{role: 'user', content: 'recent'},
+		{role: 'assistant', content: 'recent reply'},
+	];
+	const systemMessage: Message = {role: 'system', content: 'sys'};
+
+	const client = makeStubClient(() => '## Context\ndid stuff');
+
+	const notifications: string[] = [];
+	const result = await performAutoCompact(
+		messages,
+		systemMessage,
+		'openai',
+		'gpt-4',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			strategy: 'llm',
+			notifyUser: true,
+		},
+		n => notifications.push(n),
+		client,
+	);
+
+	t.truthy(result);
+	t.is(client.calls, 1, 'LLM was called once');
+	t.true(
+		notifications.some(n => n.includes('LLM summary')),
+		'notification mentions LLM path',
+	);
+	t.true(
+		result!.some(m => (m.content || '').includes('<conversation-summary>')),
+		'output contains the synthetic summary message',
+	);
+});
+
+test('performAutoCompact skips LLM when strategy=mechanical', async t => {
+	setupAutoCompactEnv(100);
+
+	const messages: Message[] = [
+		{role: 'user', content: 'old '.repeat(400)},
+	];
+	const systemMessage: Message = {role: 'system', content: 'sys'};
+	const client = makeStubClient(() => 'should not be called');
+
+	const result = await performAutoCompact(
+		messages,
+		systemMessage,
+		'openai',
+		'gpt-4',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			strategy: 'mechanical',
+			notifyUser: false,
+		},
+		undefined,
+		client,
+	);
+
+	t.truthy(result);
+	t.is(client.calls, 0, 'LLM not called in mechanical mode');
+});
+
+test('performAutoCompact falls back to mechanical when LLM throws', async t => {
+	setupAutoCompactEnv(100);
+
+	const messages: Message[] = [
+		{role: 'user', content: 'old '.repeat(400)},
+		{role: 'assistant', content: 'reply'},
+		{role: 'user', content: 'recent'},
+		{role: 'assistant', content: 'recent reply'},
+	];
+	const systemMessage: Message = {role: 'system', content: 'sys'};
+	const client: LLMClient = {
+		getCurrentModel: () => 'stub',
+		setModel: () => {},
+		getContextSize: () => 100_000,
+		getAvailableModels: async () => ['stub'],
+		getProviderConfig: () => ({
+			name: 'stub',
+			type: 'openai' as const,
+			models: ['stub'],
+			config: {},
+		}),
+		chat: async () => {
+			throw new Error('boom');
+		},
+		clearContext: async () => {},
+		getTimeout: () => undefined,
+	};
+
+	const result = await performAutoCompact(
+		messages,
+		systemMessage,
+		'openai',
+		'gpt-4',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			strategy: 'llm',
+			notifyUser: false,
+		},
+		undefined,
+		client,
+	);
+
+	// Mechanical path still produces output
+	t.truthy(result);
+	t.false(
+		(result || []).some(m => (m.content || '').includes('<conversation-summary>')),
+		'output is mechanical (no LLM summary marker)',
+	);
+});
+
 test('performAutoCompact uses provider-configured context limit', async t => {
 	const messages: Message[] = [
 		{role: 'user', content: 'x'.repeat(3000)},
@@ -189,4 +509,65 @@ test('performAutoCompact uses provider-configured context limit', async t => {
 	);
 
 	t.true(result === null || Array.isArray(result));
+});
+
+test('performAutoCompact honours contextWindow from the client provider config', async t => {
+	// Regression for issue #525: performAutoCompact previously built a synthetic
+	// providerConfig stub with empty `config: {}`, discarding the user's
+	// `contextWindow`/`contextWindows` settings. For on-prem providers (e.g. Qwen)
+	// with no models.dev entry, that meant the limit fell through to `null` and
+	// compaction never triggered. The fix passes `client.getProviderConfig()` so
+	// the configured window is honoured.
+	resetSessionContextLimit();
+
+	// Long message — at FallbackTokenizer's ~4 chars/token, ~2500 chars ≈ 625 tokens.
+	// With a provider-configured contextWindow of 1000, usage is ~62%, above the
+	// 50% threshold, so compaction must run.
+	const messages: Message[] = [
+		{role: 'user', content: 'on-prem context. '.repeat(150)},
+		{role: 'assistant', content: 'reply'},
+		{role: 'user', content: 'recent'},
+		{role: 'assistant', content: 'recent reply'},
+	];
+	const systemMessage: Message = {role: 'system', content: 'sys'};
+
+	const client: LLMClient = {
+		getCurrentModel: () => 'qwen3-on-prem',
+		setModel: () => {},
+		getContextSize: () => 1000,
+		getAvailableModels: async () => ['qwen3-on-prem'],
+		getProviderConfig: () => ({
+			name: 'qwen-on-prem',
+			type: 'openai' as const,
+			models: ['qwen3-on-prem'],
+			config: {},
+			contextWindow: 1000,
+		}),
+		chat: async () => ({
+			choices: [{message: {role: 'assistant' as const, content: 'stub'}}],
+		}),
+		clearContext: async () => {},
+		getTimeout: () => undefined,
+	};
+
+	const result = await performAutoCompact(
+		messages,
+		systemMessage,
+		'qwen-on-prem',
+		'qwen3-on-prem',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			strategy: 'mechanical',
+			notifyUser: false,
+		},
+		undefined,
+		client,
+	);
+
+	t.truthy(
+		result,
+		'Compaction must trigger when client provider config supplies contextWindow',
+	);
 });

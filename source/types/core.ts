@@ -1,4 +1,4 @@
-import {type Tool as AISDKTool, jsonSchema, tool} from 'ai';
+import {type Tool as AISDKTool, type JSONValue, jsonSchema, tool} from 'ai';
 import React from 'react';
 import type {AIProviderConfig} from '@/types/config';
 
@@ -10,6 +10,20 @@ export {jsonSchema, tool};
 // biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
 export type AISDKCoreTool = AISDKTool<any, any>;
 
+/**
+ * Per-tool approval policy. A `boolean` is a static decision; a function is a
+ * pure decision over the parsed arguments AND the current development mode.
+ *
+ * Mode is passed in explicitly (never read from a global) so the same tool
+ * definition behaves correctly regardless of which execution path evaluates
+ * it. `resolveToolApproval()` in `@/tools/approval-policy` is the single
+ * authority that invokes these.
+ */
+export type ToolApprovalPolicy =
+	| boolean
+	// biome-ignore lint/suspicious/noExplicitAny: tool args are schema-validated per tool
+	| ((args: any, mode: DevelopmentMode) => boolean | Promise<boolean>);
+
 // Current Nanocoder message format (OpenAI-compatible)
 // Note: We maintain this format internally and convert to ModelMessage at AI SDK boundary
 export interface Message {
@@ -19,6 +33,10 @@ export interface Message {
 	tool_call_id?: string;
 	name?: string;
 	reasoning?: string;
+	// For tool messages: an optional structured payload sent to the model as a
+	// JSON tool result instead of the plain `content` text. `content` remains
+	// the canonical string for display, persistence, and as the fallback.
+	structuredContent?: JSONValue;
 }
 
 export interface ToolCall {
@@ -33,7 +51,11 @@ export interface ToolResult {
 	tool_call_id: string;
 	role: 'tool';
 	name: string;
+	/** Canonical string output: used for display, persistence, and as the
+	 * fallback model representation when `structuredContent` is absent. */
 	content: string;
+	/** Optional structured payload sent to the model as a JSON tool result. */
+	structuredContent?: JSONValue;
 }
 
 export interface ToolParameterSchema {
@@ -55,9 +77,23 @@ export interface Tool {
 	};
 }
 
+/**
+ * Structured tool output. A tool returns this (instead of a bare string) when
+ * the model benefits from a typed payload it can reason over precisely (e.g.
+ * a diagnostics list). `llmContent` is the equivalent text used for display,
+ * persistence, and as a fallback; `structured` is sent to the model as JSON.
+ */
+export interface StructuredToolOutput {
+	llmContent: string;
+	structured: JSONValue;
+}
+
+/** What a tool's execute/handler may return: a plain string or structured output. */
+export type ToolExecuteResult = string | StructuredToolOutput;
+
 // Tool handlers accept dynamic args from LLM, so any is appropriate here
 // biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required -- Tool arguments are dynamically typed
-export type ToolHandler = (input: any) => Promise<string>;
+export type ToolHandler = (input: any) => Promise<ToolExecuteResult>;
 
 /**
  * Tool formatter type for Ink UI
@@ -74,13 +110,35 @@ export type ToolFormatter = (
 	| Promise<React.ReactElement>;
 
 /**
- * Tool validator type for pre-execution validation
- * Returns validation result with optional error message
+ * Structured detail for a single validation failure. Optional alongside the
+ * human-readable `error` message; when present it gives a self-correcting LLM
+ * field-level specifics (which argument, what was expected, what arrived)
+ * instead of only a freeform sentence.
+ */
+export interface ValidationErrorDetail {
+	/** The offending argument/field name (e.g. "command"). */
+	path?: string;
+	/** What the field should have been (e.g. "string", "non-empty"). */
+	expected?: string;
+	/** What the field actually was (e.g. "undefined", "number"). */
+	received?: string;
+	/** Optional extra explanation for this specific field. */
+	message?: string;
+}
+
+export type ToolValidationResult =
+	| {valid: true}
+	| {valid: false; error: string; details?: ValidationErrorDetail[]};
+
+/**
+ * Tool validator type for pre-execution validation.
+ * Returns a validation result with a human-readable error message and,
+ * optionally, structured per-field details.
  */
 export type ToolValidator = (
 	// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required -- Tool arguments are dynamically typed
 	args: any,
-) => Promise<{valid: true} | {valid: false; error: string}>;
+) => Promise<ToolValidationResult>;
 
 /**
  * Streaming formatter type for tools that need real-time progress updates
@@ -117,6 +175,7 @@ export interface NanocoderToolExport {
 	streamingFormatter?: StreamingFormatter; // For real-time progress (before execution)
 	validator?: ToolValidator; // For pre-execution validation
 	readOnly?: boolean; // Safe to parallelize (no side effects)
+	approval?: ToolApprovalPolicy; // Whether the tool needs user approval (mode-aware)
 }
 
 /**
@@ -141,6 +200,21 @@ export interface ToolEntry {
 	streamingFormatter?: StreamingFormatter; // For real-time progress (before execution)
 	validator?: ToolValidator; // For validation
 	readOnly?: boolean; // Safe to parallelize (no side effects)
+	approval?: ToolApprovalPolicy; // Whether the tool needs user approval (mode-aware)
+	/**
+	 * Name of the skill that owns this tool, if any. Set by the skill
+	 * registrar for tools that come from a bundle or single-file skill.
+	 * Used together with `scoped` to decide whether `getAllTools()`
+	 * includes the entry in the global result.
+	 */
+	ownerSkill?: string;
+	/**
+	 * When true, the tool is only visible to the subagent inside the same
+	 * skill (matching `ownerSkill`). Default-false single-file skills set
+	 * this off; bundle skills default it on via their
+	 * `tools_visibility: scoped` manifest field.
+	 */
+	scoped?: boolean;
 }
 
 interface LLMMessage {
@@ -150,6 +224,33 @@ interface LLMMessage {
 	reasoning?: string;
 }
 
+/**
+ * Token usage as reported by the provider/API for a single response.
+ * Fields are optional because not every provider reports usage (e.g. some
+ * local models), and OpenRouter only includes detailed usage when the request
+ * opts in via `usage: {include: true}`. Consumers must fall back to client-side
+ * estimation whenever a field is missing.
+ */
+export interface ApiUsage {
+	inputTokens?: number;
+	outputTokens?: number;
+	totalTokens?: number;
+}
+
+/**
+ * API-reported usage captured after a model response, tagged with the
+ * conversation length at capture time. The context indicator treats the
+ * snapshot as authoritative only while the message count is unchanged; once
+ * newer messages arrive it falls back to client-side estimation so the figure
+ * never lags the conversation.
+ */
+export interface ApiUsageSnapshot extends ApiUsage {
+	atMessageCount: number;
+}
+
+/** Whether a displayed context figure came from API usage or estimation. */
+export type ContextSource = 'api' | 'estimate';
+
 export interface LLMChatResponse {
 	choices: Array<{
 		message: LLMMessage;
@@ -157,6 +258,9 @@ export interface LLMChatResponse {
 	// Whether native tools were disabled for this request (XML fallback path)
 	// When true, the conversation loop should parse response text for XML tool calls
 	toolsDisabled?: boolean;
+	// Provider-reported token usage for this response, when available. Used to
+	// show API-accurate context usage in place of client-side estimation.
+	usage?: ApiUsage;
 }
 
 export interface StreamCallbacks {
@@ -198,14 +302,16 @@ export type DevelopmentMode =
 	| 'auto-accept'
 	| 'yolo'
 	| 'plan'
-	| 'scheduler';
+	| 'headless';
 
 export const DEVELOPMENT_MODE_LABELS: Record<DevelopmentMode, string> = {
 	normal: '▶ normal mode on',
+	// Auto-accept skips confirmation for file edits but still prompts for bash
+	// and destructive git, so the label calls that out to avoid surprise.
 	'auto-accept': '⏵⏵ auto-accept mode on',
 	yolo: '⏵⏵⏵ yolo mode on',
 	plan: '⏸ plan mode on',
-	scheduler: '⏵⏵ scheduler mode on',
+	headless: '⏵⏵ headless mode on',
 };
 
 export const DEVELOPMENT_MODE_LABELS_NARROW: Record<DevelopmentMode, string> = {
@@ -213,7 +319,7 @@ export const DEVELOPMENT_MODE_LABELS_NARROW: Record<DevelopmentMode, string> = {
 	'auto-accept': '⏵⏵ auto',
 	yolo: '⏵⏵⏵ yolo',
 	plan: '⏸ plan',
-	scheduler: '⏵⏵ scheduler',
+	headless: '⏵⏵ headless',
 };
 
 // Connection status types for MCP and LSP servers

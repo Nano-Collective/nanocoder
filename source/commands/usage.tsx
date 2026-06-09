@@ -4,19 +4,22 @@
  */
 
 import React from 'react';
+import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
 import {UsageDisplay} from '@/components/usage/usage-display';
 import {getAppConfig} from '@/config/index';
-import {loadPreferences} from '@/config/preferences';
 import {getToolManager} from '@/message-handler';
 import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
+import {generateKey} from '@/session/key-generator';
 import {createTokenizer} from '@/tokenization/index';
 import type {Command} from '@/types/commands';
-import type {Message} from '@/types/core';
+import type {TuneConfig} from '@/types/config';
+import {getTuneToolMode} from '@/types/config';
+import type {DevelopmentMode, Message} from '@/types/core';
 import {
 	calculateTokenBreakdown,
 	calculateToolDefinitionsTokens,
 } from '@/usage/calculator';
-import {getLastBuiltPrompt} from '@/utils/prompt-builder';
+import {buildSystemPrompt, getLastBuiltPrompt} from '@/utils/prompt-builder';
 
 export const usageCommand: Command = {
 	name: 'usage',
@@ -30,9 +33,14 @@ export const usageCommand: Command = {
 			tokens: number;
 			getMessageTokens: (message: Message) => number;
 			client?: import('@/types/core').LLMClient | null;
+			tune?: TuneConfig;
+			developmentMode?: DevelopmentMode;
 		},
 	) => {
 		const {provider, model, getMessageTokens, client} = metadata;
+		const tune = metadata.tune;
+		const developmentMode: DevelopmentMode =
+			metadata.developmentMode ?? 'normal';
 
 		let tokenizer;
 		let tokenizerName = 'fallback';
@@ -54,9 +62,51 @@ export const usageCommand: Command = {
 			tokenizerName = 'fallback (error)';
 		}
 
-		// Generate the system prompt to include in token calculation
+		// Build the system prompt + tool list fresh from the live tune/mode/model
+		// so the breakdown reflects the active /tune profile (the cached prompt
+		// can lag a just-applied profile change). When native tool calling is
+		// off, tool definitions live inside the prompt, so we mirror that
+		// injection exactly as the chat handler does.
 		const toolManager = getToolManager();
-		const systemPrompt = getLastBuiltPrompt();
+
+		const config = getAppConfig();
+		const providerConfig = config.providers?.find(p => p.name === provider);
+		const nativeToolsDisabled =
+			providerConfig?.disableTools === true ||
+			(providerConfig?.disableToolModels?.includes(model) ?? false) ||
+			getTuneToolMode(tune) !== 'native';
+
+		const availableNames =
+			toolManager?.getAvailableToolNames(
+				tune,
+				developmentMode,
+				undefined,
+				model,
+			) ?? [];
+
+		let systemPrompt: string;
+		if (toolManager) {
+			systemPrompt = buildSystemPrompt(
+				developmentMode,
+				tune,
+				availableNames,
+				nativeToolsDisabled,
+				config.systemPrompt,
+				model,
+			);
+			if (nativeToolsDisabled) {
+				const fallbackToolFormat: 'xml' | 'json' =
+					getTuneToolMode(tune) === 'json' ? 'json' : 'xml';
+				systemPrompt = appendToolDefinitionsToPrompt(
+					systemPrompt,
+					true,
+					fallbackToolFormat,
+					toolManager.getFilteredTools(availableNames),
+				);
+			}
+		} else {
+			systemPrompt = getLastBuiltPrompt();
+		}
 
 		// Create system message to include in token calculation
 		const systemMessage: Message = {
@@ -96,22 +146,13 @@ export const usageCommand: Command = {
 			tokenizer.free();
 		}
 
-		// Calculate tool definitions tokens (only when native tool calling is active)
-		// When tools are disabled (XML fallback), definitions are in the system prompt instead
-		const config = getAppConfig();
-		const providerConfig = config.providers?.find(p => p.name === provider);
-		const prefs = loadPreferences();
-		const nativeToolsDisabled =
-			providerConfig?.disableTools === true ||
-			(providerConfig?.disableToolModels?.includes(model) ?? false) ||
-			(prefs.tune?.enabled && prefs.tune.disableNativeTools);
-
-		const toolDefinitions =
-			toolManager && !nativeToolsDisabled
-				? calculateToolDefinitionsTokens(
-						Object.keys(toolManager.getToolRegistry()).length,
-					)
-				: 0;
+		// Tool definitions tokens count only the tools actually exposed to the
+		// model (profile + mode filtered), and only when native tool calling is
+		// active — under XML/JSON fallback the definitions are already counted
+		// inside the system prompt above.
+		const toolDefinitions = nativeToolsDisabled
+			? 0
+			: calculateToolDefinitionsTokens(availableNames.length);
 
 		const breakdown = {
 			...baseBreakdown,
@@ -128,7 +169,7 @@ export const usageCommand: Command = {
 			}));
 
 		return React.createElement(UsageDisplay, {
-			key: `usage-${Date.now()}`,
+			key: generateKey('usage'),
 			provider,
 			model,
 			contextLimit,

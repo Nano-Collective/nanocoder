@@ -4,7 +4,6 @@ import {handleContextMaxCommand} from './context-max-handler.js';
 import type {MessageSubmissionOptions} from '@/types';
 
 function createOptions(overrides: Partial<MessageSubmissionOptions> = {}): MessageSubmissionOptions {
-	let key = 0;
 	return {
 		customCommandCache: new Map(),
 		customCommandLoader: null,
@@ -25,7 +24,6 @@ function createOptions(overrides: Partial<MessageSubmissionOptions> = {}): Messa
 		onAddToChatQueue: () => {},
 		setLiveComponent: () => {},
 		setIsToolExecuting: () => {},
-		getNextComponentKey: () => ++key,
 		setMessages: () => {},
 		messages: [],
 		provider: 'Test Provider',

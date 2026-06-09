@@ -1,11 +1,14 @@
 import test from 'ava';
+import {existsSync, mkdtempSync, rmSync, writeFileSync} from 'fs';
+import {tmpdir} from 'os';
+import {join} from 'path';
 import {
 	buildSystemPrompt,
 	getLastBuiltPrompt,
 	resetSectionCache,
 	setLastBuiltPrompt,
 } from './prompt-builder.js';
-import type {TuneConfig} from '@/types/config';
+import type {SystemPromptConfig, TuneConfig} from '@/types/config';
 import {TUNE_DEFAULTS} from '@/types/config';
 
 console.log('\nprompt-builder.spec.ts');
@@ -36,6 +39,20 @@ const TUNE_FULL: TuneConfig = {
 	toolProfile: 'full',
 	aggressiveCompact: false,
 };
+
+const TUNE_NANO: TuneConfig = {
+	enabled: true,
+	toolProfile: 'nano',
+	aggressiveCompact: true,
+};
+
+const NANO_TOOLS = [
+	'read_file',
+	'string_replace',
+	'write_file',
+	'execute_bash',
+	'search_file_contents',
+];
 
 // ============================================================================
 // buildSystemPrompt — identity and core principles always present
@@ -112,13 +129,13 @@ test('buildSystemPrompt - excludes git section when no git tools', t => {
 	t.false(result.includes('## GIT'));
 });
 
-test('buildSystemPrompt - includes task management when create_task available', t => {
-	const result = buildSystemPrompt('normal', undefined, ['create_task']);
+test('buildSystemPrompt - includes task management when write_tasks available', t => {
+	const result = buildSystemPrompt('normal', undefined, ['write_tasks']);
 	t.true(result.includes('TASK MANAGEMENT'));
 });
 
 test('buildSystemPrompt - excludes task management in plan mode', t => {
-	const result = buildSystemPrompt('plan', undefined, ['create_task', 'read_file']);
+	const result = buildSystemPrompt('plan', undefined, ['write_tasks', 'read_file']);
 	t.false(result.includes('TASK MANAGEMENT'));
 });
 
@@ -270,4 +287,242 @@ test('buildSystemPrompt - XML fallback prompt differs from native prompt', t => 
 	// XML version includes XML format instructions
 	t.true(xmlPrompt.includes('does not support native tool calling'));
 	t.false(nativePrompt.includes('does not support native tool calling'));
+});
+
+// ============================================================================
+// buildSystemPrompt — nano profile
+// ============================================================================
+
+test('buildSystemPrompt - nano profile drops core principles', t => {
+	const result = buildSystemPrompt('normal', TUNE_NANO, NANO_TOOLS);
+	t.false(result.includes('CORE PRINCIPLES'));
+});
+
+test('buildSystemPrompt - nano profile drops coding practices', t => {
+	const result = buildSystemPrompt('normal', TUNE_NANO, NANO_TOOLS);
+	t.false(result.includes('CODING PRACTICES'));
+});
+
+test('buildSystemPrompt - nano profile uses slim system info', t => {
+	const result = buildSystemPrompt('normal', TUNE_NANO, NANO_TOOLS);
+	t.false(result.includes('SYSTEM INFORMATION'));
+	t.true(result.includes('## SYSTEM'));
+	t.true(result.includes('CWD:'));
+	t.true(result.includes('Date:'));
+});
+
+test('buildSystemPrompt - nano profile uses shortened task approach', t => {
+	const result = buildSystemPrompt('normal', TUNE_NANO, NANO_TOOLS);
+	t.true(result.includes('TASK APPROACH'));
+	// Standard task approach phrasing should not appear
+	t.false(result.includes('Simple tasks'));
+	t.false(result.includes('Complex tasks'));
+});
+
+test('buildSystemPrompt - nano profile uses shortened file editing', t => {
+	const result = buildSystemPrompt('normal', TUNE_NANO, NANO_TOOLS);
+	t.true(result.includes('FILE OPERATIONS'));
+	// Long-form file-editing.md content should be absent
+	t.false(result.includes('Edit workflow'));
+});
+
+test('buildSystemPrompt - nano profile uses shortened constraints', t => {
+	const result = buildSystemPrompt('normal', TUNE_NANO, NANO_TOOLS);
+	t.true(result.includes('CONSTRAINTS'));
+	// Long-form constraints content should be absent
+	t.false(result.includes('Account for auto-formatting'));
+});
+
+test('buildSystemPrompt - nano profile enforces single-tool', t => {
+	const result = buildSystemPrompt('normal', TUNE_NANO, NANO_TOOLS);
+	t.true(result.includes('Call exactly ONE tool per response'));
+});
+
+test('buildSystemPrompt - nano profile produces smaller prompt than minimal', t => {
+	const minimalPrompt = buildSystemPrompt(
+		'normal',
+		TUNE_MINIMAL,
+		[
+			'read_file',
+			'write_file',
+			'string_replace',
+			'execute_bash',
+			'find_files',
+			'search_file_contents',
+			'list_directory',
+		],
+	);
+	const nanoPrompt = buildSystemPrompt('normal', TUNE_NANO, NANO_TOOLS);
+	t.true(nanoPrompt.length < minimalPrompt.length);
+});
+
+test('buildSystemPrompt - nano profile excludes native-tool-preference', t => {
+	const result = buildSystemPrompt('normal', TUNE_NANO, NANO_TOOLS);
+	t.false(result.includes('Anti-patterns'));
+});
+
+// ============================================================================
+// buildSystemPrompt — includeAgentsMd flag
+// ============================================================================
+
+test('buildSystemPrompt - nano omits AGENTS.md by default', t => {
+	const result = buildSystemPrompt('normal', TUNE_NANO, NANO_TOOLS);
+	t.false(result.includes('Additional Context'));
+});
+
+test('buildSystemPrompt - nano with includeAgentsMd=true appends AGENTS.md when present', t => {
+	// This test only meaningfully runs from a directory containing AGENTS.md
+	// (the project root does). When AGENTS.md is absent it becomes a no-op
+	// and the assertion is skipped.
+	const hasAgents = existsSync(join(process.cwd(), 'AGENTS.md'));
+	const tune: TuneConfig = {...TUNE_NANO, includeAgentsMd: true};
+	const result = buildSystemPrompt('normal', tune, NANO_TOOLS);
+	if (hasAgents) {
+		t.true(result.includes('Additional Context'));
+	} else {
+		t.pass('AGENTS.md not present in cwd; skipped append assertion');
+	}
+});
+
+test('buildSystemPrompt - non-nano with includeAgentsMd=false omits AGENTS.md', t => {
+	const tune: TuneConfig = {
+		enabled: true,
+		toolProfile: 'minimal',
+		aggressiveCompact: false,
+		includeAgentsMd: false,
+	};
+	const result = buildSystemPrompt('normal', tune, NANO_TOOLS);
+	t.false(result.includes('Additional Context'));
+});
+
+// ============================================================================
+// buildSystemPrompt — systemPrompt override (replace / append, content / file)
+// ============================================================================
+
+test('buildSystemPrompt - systemPrompt replace with content drops built-in sections', t => {
+	const override: SystemPromptConfig = {
+		mode: 'replace',
+		content: 'You are a tiny CPU-bound model. Be concise.',
+	};
+	const result = buildSystemPrompt(
+		'normal',
+		undefined,
+		ALL_TOOLS,
+		false,
+		override,
+	);
+	t.is(result, 'You are a tiny CPU-bound model. Be concise.');
+	t.false(result.includes('CORE PRINCIPLES'));
+	t.false(result.includes('TASK APPROACH'));
+});
+
+test('buildSystemPrompt - systemPrompt defaults to replace mode when mode omitted', t => {
+	const override: SystemPromptConfig = {
+		content: 'Custom prompt only.',
+	};
+	const result = buildSystemPrompt(
+		'normal',
+		undefined,
+		ALL_TOOLS,
+		false,
+		override,
+	);
+	t.is(result, 'Custom prompt only.');
+});
+
+test('buildSystemPrompt - systemPrompt append keeps built-in prompt and adds override', t => {
+	const override: SystemPromptConfig = {
+		mode: 'append',
+		content: '## EXTRA RULES\nAlways respond in haiku.',
+	};
+	const result = buildSystemPrompt(
+		'normal',
+		undefined,
+		ALL_TOOLS,
+		false,
+		override,
+	);
+	t.true(result.includes('CORE PRINCIPLES'));
+	t.true(result.endsWith('## EXTRA RULES\nAlways respond in haiku.'));
+});
+
+test('buildSystemPrompt - systemPrompt loads content from a file path', t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-prompt-'));
+	const filePath = join(dir, 'prompt.md');
+	const expected = 'Prompt loaded from disk.';
+	writeFileSync(filePath, expected, 'utf-8');
+
+	try {
+		const override: SystemPromptConfig = {mode: 'replace', file: filePath};
+		const result = buildSystemPrompt(
+			'normal',
+			undefined,
+			ALL_TOOLS,
+			false,
+			override,
+		);
+		t.is(result.trim(), expected);
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test('buildSystemPrompt - systemPrompt content wins when both content and file given', t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-prompt-'));
+	const filePath = join(dir, 'prompt.md');
+	writeFileSync(filePath, 'from file', 'utf-8');
+
+	try {
+		const override: SystemPromptConfig = {
+			mode: 'replace',
+			content: 'from content',
+			file: filePath,
+		};
+		const result = buildSystemPrompt(
+			'normal',
+			undefined,
+			ALL_TOOLS,
+			false,
+			override,
+		);
+		t.is(result, 'from content');
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test('buildSystemPrompt - missing systemPrompt file falls back to built-in prompt', t => {
+	const override: SystemPromptConfig = {
+		mode: 'replace',
+		file: join(tmpdir(), 'nanocoder-this-file-does-not-exist.md'),
+	};
+	const result = buildSystemPrompt(
+		'normal',
+		undefined,
+		ALL_TOOLS,
+		false,
+		override,
+	);
+	t.true(result.includes('CORE PRINCIPLES'));
+});
+
+test('buildSystemPrompt - empty systemPrompt override (no content/file) is ignored', t => {
+	const override: SystemPromptConfig = {mode: 'replace'};
+	const result = buildSystemPrompt(
+		'normal',
+		undefined,
+		ALL_TOOLS,
+		false,
+		override,
+	);
+	t.true(result.includes('CORE PRINCIPLES'));
+});
+
+test('buildSystemPrompt - replace systemPrompt updates getLastBuiltPrompt cache', t => {
+	const override: SystemPromptConfig = {
+		mode: 'replace',
+		content: 'cached override prompt',
+	};
+	buildSystemPrompt('normal', undefined, ALL_TOOLS, false, override);
+	t.is(getLastBuiltPrompt(), 'cached override prompt');
 });

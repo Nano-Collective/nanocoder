@@ -29,6 +29,12 @@ export interface AppProps {
 	 * default initial mode for both interactive and non-interactive runs.
 	 */
 	cliMode?: CliMode;
+	/**
+	 * Skip the first-run directory trust prompt for this run only. Honored
+	 * only when `nonInteractiveMode` is true; ignored otherwise. The trust
+	 * is ephemeral — preferences are not modified.
+	 */
+	trustDirectory?: boolean;
 }
 
 /**

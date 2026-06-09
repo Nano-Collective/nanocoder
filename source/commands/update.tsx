@@ -6,6 +6,7 @@ import {
 } from '@/components/message-box';
 import {getToolManager} from '@/message-handler';
 import {Command} from '@/types/index';
+import {formatError} from '@/utils/error-formatter';
 import {logError, logInfo} from '@/utils/message-queue';
 import {checkForUpdates} from '@/utils/update-checker';
 
@@ -98,9 +99,13 @@ export const updateCommand: Command = {
 						if (!executeBash) {
 							throw new Error('execute_bash tool not available');
 						}
-						const result = await executeBash({
+						const rawResult = await executeBash({
 							command: updateInfo.updateCommand,
 						});
+						// execute_bash always returns a string; collapse the
+						// handler's structured-output union for the checks below.
+						const result =
+							typeof rawResult === 'string' ? rawResult : rawResult.llmContent;
 
 						// Check for command failure using multiple strategies
 						if (hasCommandFailed(result)) {
@@ -118,8 +123,7 @@ export const updateCommand: Command = {
 							hideBox: true,
 						});
 					} catch (err) {
-						const errorMessage =
-							err instanceof Error ? err.message : String(err);
+						const errorMessage = formatError(err);
 						logError(`Failed to execute update command: ${errorMessage}`, true);
 						return React.createElement(ErrorMessage, {
 							message: `Failed to execute update command: ${errorMessage}`,
@@ -150,8 +154,7 @@ export const updateCommand: Command = {
 				});
 			}
 		} catch (error) {
-			const errorMessage =
-				error instanceof Error ? error.message : String(error);
+			const errorMessage = formatError(error);
 			logError(`Failed to update Nanocoder: ${errorMessage}`, true);
 			return React.createElement(ErrorMessage, {
 				message: `Failed to check for updates: ${errorMessage}`,

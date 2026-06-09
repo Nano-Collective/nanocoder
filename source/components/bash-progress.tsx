@@ -1,4 +1,4 @@
-import {Box, Text, useInput} from 'ink';
+import {Box, Text} from 'ink';
 import {useEffect, useState} from 'react';
 
 import ToolMessage from '@/components/tool-message';
@@ -66,12 +66,10 @@ export default function BashProgress({
 		};
 	}, [executionId, completedState]);
 
-	// Handle escape key to cancel execution (only if not in static mode)
-	useInput((_input, key) => {
-		if (key.escape && !state.isComplete && !completedState) {
-			bashExecutor.cancel(executionId);
-		}
-	});
+	// Escape-to-cancel for a running bash command is owned by the single
+	// section-level handler in InteractiveApp. execute_bash is the only entry
+	// point for bash and it always sets isToolExecuting + an abort controller,
+	// so the global handler reliably tears this command down via handleCancel.
 
 	// Determine dot color
 	let dotColor = colors.secondary;
@@ -92,13 +90,11 @@ export default function BashProgress({
 		<Box flexDirection="column">
 			<Text color={colors.tool}>⚒ execute_bash</Text>
 
-			<Box>
-				<Text color={colors.secondary}>Command: </Text>
-				<Box marginLeft={1} flexShrink={1}>
-					<Text wrap="truncate-end" color={colors.primary}>
-						{command}
-					</Text>
-				</Box>
+			<Box flexDirection="column">
+				<Text color={colors.secondary}>Command:</Text>
+				<Text wrap="wrap" color={colors.primary}>
+					{command}
+				</Text>
 			</Box>
 			{state.isComplete && (
 				<Box>

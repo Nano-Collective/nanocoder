@@ -315,6 +315,121 @@ test.serial('loadDefaultMode normalizes case-insensitive values', async t => {
 	}
 });
 
+// Tests for systemPrompt config loading
+const systemPromptTestDir = join(
+	tmpdir(),
+	`nanocoder-system-prompt-test-${Date.now()}`,
+);
+
+test.before(() => {
+	mkdirSync(systemPromptTestDir, {recursive: true});
+});
+
+test.after.always(() => {
+	if (existsSync(systemPromptTestDir)) {
+		rmSync(systemPromptTestDir, {recursive: true, force: true});
+	}
+});
+
+async function withSystemPromptConfig(
+	subdir: string,
+	configBody: unknown,
+	assertion: (systemPrompt: unknown) => void,
+): Promise<void> {
+	const originalCwd = process.cwd();
+	const originalEnv = process.env.NANOCODER_CONFIG_DIR;
+	const testSubdir = join(systemPromptTestDir, subdir);
+	mkdirSync(testSubdir, {recursive: true});
+
+	try {
+		writeFileSync(
+			join(testSubdir, 'agents.config.json'),
+			JSON.stringify(configBody),
+			'utf-8',
+		);
+		process.chdir(testSubdir);
+		process.env.NANOCODER_CONFIG_DIR = join(testSubdir, 'nonexistent-global');
+
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+		reload();
+		assertion(getAppConfig().systemPrompt);
+	} finally {
+		process.chdir(originalCwd);
+		if (originalEnv !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalEnv;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+}
+
+test.serial('loadSystemPromptConfig returns undefined when not configured', async t => {
+	await withSystemPromptConfig(
+		'system-prompt-empty',
+		{nanocoder: {}},
+		systemPrompt => {
+			t.is(systemPrompt, undefined);
+		},
+	);
+});
+
+test.serial('loadSystemPromptConfig loads inline content', async t => {
+	await withSystemPromptConfig(
+		'system-prompt-inline',
+		{
+			nanocoder: {
+				systemPrompt: {mode: 'replace', content: 'Be concise.'},
+			},
+		},
+		systemPrompt => {
+			t.deepEqual(systemPrompt, {mode: 'replace', content: 'Be concise.'});
+		},
+	);
+});
+
+test.serial('loadSystemPromptConfig loads file path', async t => {
+	await withSystemPromptConfig(
+		'system-prompt-file',
+		{
+			nanocoder: {
+				systemPrompt: {mode: 'append', file: './prompt.md'},
+			},
+		},
+		systemPrompt => {
+			t.deepEqual(systemPrompt, {mode: 'append', file: './prompt.md'});
+		},
+	);
+});
+
+test.serial('loadSystemPromptConfig ignores invalid mode value', async t => {
+	await withSystemPromptConfig(
+		'system-prompt-bad-mode',
+		{
+			nanocoder: {
+				systemPrompt: {mode: 'merge', content: 'X'},
+			},
+		},
+		systemPrompt => {
+			// mode dropped, but content kept
+			t.deepEqual(systemPrompt, {content: 'X'});
+		},
+	);
+});
+
+test.serial('loadSystemPromptConfig returns undefined when neither content nor file set', async t => {
+	await withSystemPromptConfig(
+		'system-prompt-empty-fields',
+		{
+			nanocoder: {
+				systemPrompt: {mode: 'replace'},
+			},
+		},
+		systemPrompt => {
+			t.is(systemPrompt, undefined);
+		},
+	);
+});
+
 test.serial('loadDefaultMode returns undefined for invalid mode values', async t => {
 	const originalCwd = process.cwd();
 	const originalEnv = process.env.NANOCODER_CONFIG_DIR;

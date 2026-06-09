@@ -145,20 +145,16 @@ test('UserInput calls onSubmit when message is submitted', t => {
 	// This test verifies the component renders with onSubmit callback
 });
 
-test('UserInput calls onCancel when provided', t => {
-	let cancelCalled = false;
-	const handleCancel = () => {
-		cancelCalled = true;
-	};
-
+test('UserInput renders while busy (Escape deferred to global handler)', t => {
+	// When busy, UserInput no longer owns cancellation; the section-level handler
+	// does. UserInput just swallows Escape so it doesn't clear the input.
 	const {lastFrame, unmount} = render(
 		<TestWrapper>
-			<UserInput onCancel={handleCancel} disabled={true} />
+			<UserInput isBusy={true} disabled={true} />
 		</TestWrapper>,
 	);
 
 	t.truthy(lastFrame());
-	// Note: Actual cancel invocation requires ESC key simulation
 	unmount();
 });
 
@@ -223,7 +219,6 @@ test('UserInput renders with all props provided', t => {
 				placeholder="Test"
 				customCommands={['test']}
 				disabled={false}
-				onCancel={() => {}}
 				onToggleMode={() => {}}
 				developmentMode="normal"
 			/>
@@ -322,27 +317,6 @@ test('UserInput component structure is valid', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.true(output!.length > 0);
-});
-
-test('UserInput inserts a newline on Ctrl+J', async t => {
-	const {stdin, lastFrame, unmount} = render(
-		<TestWrapper>
-			<UserInput />
-		</TestWrapper>,
-	);
-
-	stdin.write('a');
-	await new Promise(resolve => setTimeout(resolve, 20));
-	stdin.write('\n');
-	await new Promise(resolve => setTimeout(resolve, 20));
-	stdin.write('b');
-	await new Promise(resolve => setTimeout(resolve, 20));
-
-	const output = lastFrame();
-	t.truthy(output);
-	t.regex(output!, /a/);
-	t.regex(output!, /b/);
-	unmount();
 });
 
 test('UserInput does not treat carriage return as a multiline shortcut', async t => {

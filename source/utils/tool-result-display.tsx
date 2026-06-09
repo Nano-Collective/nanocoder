@@ -3,6 +3,7 @@ import React from 'react';
 import {ErrorMessage} from '@/components/message-box';
 import ToolMessage from '@/components/tool-message';
 import {useTheme} from '@/hooks/useTheme';
+import {generateKey} from '@/session/key-generator';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {ToolCall, ToolResult} from '@/types/index';
 import {parseToolArguments} from '@/utils/tool-args-parser';
@@ -11,23 +12,13 @@ import {parseToolArguments} from '@/utils/tool-args-parser';
  * Tools that should always show expanded (full formatter) output,
  * even when compact display mode is enabled.
  */
-export const ALWAYS_EXPANDED_TOOLS = new Set([
-	'create_task',
-	'list_tasks',
-	'update_task',
-	'delete_task',
-]);
+export const ALWAYS_EXPANDED_TOOLS = new Set(['write_tasks']);
 
 /**
  * Task tools that should render in the live area (updating in-place)
  * instead of appending to the static chat queue each time.
  */
-export const LIVE_TASK_TOOLS = new Set([
-	'create_task',
-	'list_tasks',
-	'update_task',
-	'delete_task',
-]);
+export const LIVE_TASK_TOOLS = new Set(['write_tasks']);
 
 /**
  * Compact tool result display - shows "⚒ toolName  description" in tool color.
@@ -112,7 +103,6 @@ export function LiveCompactCounts({counts}: {counts: Record<string, number>}) {
 export function displayCompactCountsSummary(
 	counts: Record<string, number>,
 	addToChatQueue: (component: React.ReactNode) => void,
-	getNextComponentKey: () => number,
 	options?: {indent?: boolean},
 ): void {
 	const entries = Object.entries(counts);
@@ -125,7 +115,7 @@ export function displayCompactCountsSummary(
 	const indent = options?.indent ?? true;
 	addToChatQueue(
 		<Box
-			key={`tool-compact-summary-${getNextComponentKey()}`}
+			key={generateKey('tool-compact-summary')}
 			flexDirection="column"
 			marginLeft={indent ? 2 : 0}
 			marginBottom={1}
@@ -149,7 +139,6 @@ export function displayCompactCountsSummary(
  * @param result - The result from tool execution
  * @param toolManager - The tool manager instance (for formatters)
  * @param addToChatQueue - Function to add components to chat queue
- * @param getNextComponentKey - Function to generate unique React keys
  * @param compact - When true, show one-liner instead of full formatter output
  */
 export async function displayToolResult(
@@ -157,20 +146,23 @@ export async function displayToolResult(
 	result: ToolResult,
 	toolManager: ToolManager | null,
 	addToChatQueue: (component: React.ReactNode) => void,
-	getNextComponentKey: () => number,
 	compact?: boolean,
 ): Promise<void> {
-	// Check if this is an error result
-	const isError = result.content.startsWith('Error: ');
+	// Check if this is an error result. Generic failures are prefixed "Error: ";
+	// validation failures (bad arg types, failed per-tool validators) come back
+	// as "⚒ Validation failed: …" — both should render as a red error so the
+	// user sees the same feedback the model gets.
+	const isValidationError = result.content.startsWith('⚒ Validation failed');
+	const isError = result.content.startsWith('Error: ') || isValidationError;
 
 	if (isError) {
 		// Display as error message - always shown in full
-		const errorMessage = result.content.replace(/^Error: /, '');
+		const errorMessage = isValidationError
+			? result.content
+			: result.content.replace(/^Error: /, '');
 		addToChatQueue(
 			<ErrorMessage
-				key={`tool-error-${
-					result.tool_call_id
-				}-${getNextComponentKey()}-${Date.now()}`}
+				key={generateKey(`tool-error-${result.tool_call_id}`)}
 				message={errorMessage}
 				hideBox={true}
 			/>,
@@ -184,7 +176,7 @@ export async function displayToolResult(
 		const description = getGroupedCompactDescription(result.name, 1);
 		addToChatQueue(
 			<CompactToolResult
-				key={`tool-compact-${result.tool_call_id}-${getNextComponentKey()}`}
+				key={generateKey(`tool-compact-${result.tool_call_id}`)}
 				toolName={result.name}
 				description={description}
 			/>,
@@ -202,17 +194,13 @@ export async function displayToolResult(
 				if (React.isValidElement(formattedResult)) {
 					addToChatQueue(
 						React.cloneElement(formattedResult, {
-							key: `tool-result-${
-								result.tool_call_id
-							}-${getNextComponentKey()}-${Date.now()}`,
+							key: generateKey(`tool-result-${result.tool_call_id}`),
 						}),
 					);
 				} else {
 					addToChatQueue(
 						<ToolMessage
-							key={`tool-result-${
-								result.tool_call_id
-							}-${getNextComponentKey()}-${Date.now()}`}
+							key={generateKey(`tool-result-${result.tool_call_id}`)}
 							title={`⚒ ${result.name}`}
 							message={String(formattedResult)}
 							hideBox={true}
@@ -223,7 +211,7 @@ export async function displayToolResult(
 				// If formatter fails, show raw result
 				addToChatQueue(
 					<ToolMessage
-						key={`tool-result-${result.tool_call_id}-${getNextComponentKey()}`}
+						key={generateKey(`tool-result-${result.tool_call_id}`)}
 						title={`⚒ ${result.name}`}
 						message={result.content}
 						hideBox={true}
@@ -234,7 +222,7 @@ export async function displayToolResult(
 			// No formatter, show raw result
 			addToChatQueue(
 				<ToolMessage
-					key={`tool-result-${result.tool_call_id}-${getNextComponentKey()}`}
+					key={generateKey(`tool-result-${result.tool_call_id}`)}
 					title={`⚒ ${result.name}`}
 					message={result.content}
 					hideBox={true}

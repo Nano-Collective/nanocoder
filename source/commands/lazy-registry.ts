@@ -37,7 +37,7 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'compact',
 		description:
-			'Compress message history to reduce context usage (use --aggressive, --conservative, --preview, --restore, --auto-on, --auto-off, --threshold <n>)',
+			'Compress message history (default LLM summary; use --mechanical, --preview, --restore, --auto-on/off, --threshold <n>, --strategy llm|mechanical)',
 		load: () => import('@/commands/compact').then(m => m.compactCommand),
 	},
 	{
@@ -64,18 +64,13 @@ export const lazyCommands: LazyCommand[] = [
 	},
 	{
 		name: 'model',
-		description: 'Select a model for the current provider',
+		description: 'Select a model from any configured provider',
 		load: () => import('@/commands/model').then(m => m.modelCommand),
-	},
-	{
-		name: 'provider',
-		description: 'Switch between AI providers',
-		load: () => import('@/commands/provider').then(m => m.providerCommand),
 	},
 	{
 		name: 'commands',
 		description:
-			'List all custom commands. Subcommands: show <name>, refresh, create <name>',
+			'List custom commands. Subcommands: show <name>, create <name>',
 		load: () =>
 			import('@/commands/custom-commands').then(m => m.commandsCommand),
 	},
@@ -158,6 +153,11 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/checkpoint').then(m => m.checkpointCommand),
 	},
 	{
+		name: 'rename',
+		description: 'Rename the current session (/rename <new name>)',
+		load: () => import('@/commands/rename').then(m => m.renameCommand),
+	},
+	{
 		name: 'resume',
 		description:
 			'List and resume previous chat sessions. Aliases: /sessions, /history',
@@ -182,7 +182,8 @@ export const lazyCommands: LazyCommand[] = [
 	},
 	{
 		name: 'schedule',
-		description: 'Manage scheduled jobs',
+		description:
+			'List cron-triggered skills (single-file frontmatter + bundle skill.yaml). Read-only - edit the source file to change.',
 		load: () => import('@/commands/schedule').then(m => m.scheduleCommand),
 	},
 	{
@@ -195,5 +196,16 @@ export const lazyCommands: LazyCommand[] = [
 		name: 'credits',
 		description: 'Show project contributors and dependencies',
 		load: () => import('@/commands/credits').then(m => m.creditsCommand),
+	},
+	{
+		name: 'tools',
+		description:
+			'List available tools (built-in, MCP, custom). Subcommand: create <name>',
+		load: () => import('@/commands/tools').then(m => m.toolsCommand),
+	},
+	{
+		name: 'skills',
+		description: 'List loaded skills. Subcommands: show <name>, create <name>.',
+		load: () => import('@/commands/skills').then(m => m.skillsCommand),
 	},
 ];

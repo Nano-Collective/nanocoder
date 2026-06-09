@@ -20,21 +20,13 @@ function createMockToolManager(
 			}
 			return result;
 		},
-		getAllToolsWithoutExecute: () => {
-			const result: Record<string, unknown> = {};
-			for (const name of Object.keys(tools)) {
-				result[name] = {description: `Mock ${name} tool`};
-			}
-			return result;
-		},
 		getToolHandler: (name: string) => tools[name]?.handler,
 		getToolEntry: (name: string) => {
 			const tool = tools[name];
 			if (!tool) return undefined;
 			return {
-				tool: {
-					needsApproval: tool.needsApproval ?? false,
-				},
+				approval: tool.needsApproval ?? false,
+				readOnly: tool.readOnly,
 			};
 		},
 		isReadOnly: (name: string) => tools[name]?.readOnly ?? false,
@@ -65,6 +57,12 @@ function createMockClient(
 		},
 		getAvailableModels: async () => ['test-model-sonnet-v1'],
 		getContextSize: () => 128000,
+		getProviderConfig: () => ({
+			name: 'TestProvider',
+			type: 'openai',
+			models: ['test-model-sonnet-v1'],
+			config: {},
+		}),
 		clearContext: async () => {},
 		getTimeout: () => undefined,
 	} as unknown as LLMClient;
@@ -663,6 +661,68 @@ test.serial('concurrent agents with same type both complete', async t => {
 
 	clearAllSubagentProgress();
 });
+
+test.serial(
+	'appends each tool name to progress.toolHistory in invocation order',
+	async t => {
+		const {
+			resetSubagentProgressById,
+			getSubagentProgress,
+			clearAllSubagentProgress,
+		} = await import('@/services/subagent-events');
+
+		clearAllSubagentProgress();
+		resetSubagentProgressById('hist-agent');
+
+		const toolManager = createMockToolManager({
+			read_file: {handler: async () => 'content', readOnly: true},
+			find_files: {handler: async () => 'files', readOnly: true},
+		});
+
+		const client = createMockClient([
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 'tc1',
+						function: {name: 'read_file', arguments: '{"path":"a.ts"}'},
+					},
+				],
+			},
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 'tc2',
+						function: {name: 'find_files', arguments: '{"pattern":"*.ts"}'},
+					},
+					{
+						id: 'tc3',
+						function: {name: 'read_file', arguments: '{"path":"b.ts"}'},
+					},
+				],
+			},
+			{content: 'done'},
+		]);
+
+		const executor = new SubagentExecutor(toolManager, client);
+		const result = await executor.execute(
+			{subagent_type: 'explore', description: 'walk files'},
+			undefined,
+			0,
+			'hist-agent',
+		);
+
+		t.true(result.success);
+		t.deepEqual(getSubagentProgress('hist-agent').toolHistory, [
+			'read_file',
+			'find_files',
+			'read_file',
+		]);
+
+		clearAllSubagentProgress();
+	},
+);
 
 test.serial('subagent model can use provider-scoped context window override', async t => {
 	const limit = await getModelContextLimit('special-subagent-model', {

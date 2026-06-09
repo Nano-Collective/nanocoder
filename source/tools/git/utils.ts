@@ -6,6 +6,8 @@
  */
 
 import {execSync, spawn} from 'node:child_process';
+import {existsSync, readFileSync} from 'node:fs';
+import {isAbsolute, join} from 'node:path';
 import {getLogger} from '@/utils/logging';
 
 const logger = getLogger();
@@ -45,28 +47,6 @@ export interface CommitInfo {
 	subject: string;
 	body: string;
 	filesChanged?: number;
-}
-
-/**
- * Branch information
- */
-export interface BranchInfo {
-	name: string;
-	current: boolean;
-	upstream?: string;
-	ahead: number;
-	behind: number;
-	lastCommit?: string;
-}
-
-/**
- * Stash entry
- */
-export interface StashEntry {
-	index: number;
-	message: string;
-	branch: string;
-	date: string;
 }
 
 // ============================================================================
@@ -110,15 +90,186 @@ export function isGhAvailable(): boolean {
 }
 
 // ============================================================================
+// Synchronous Branch Helpers (safe to call from Ink <Static> render path)
+// ============================================================================
+
+/**
+ * Summary of git branch state used by the boot summary and /status panel.
+ */
+export interface GitStatusSummary {
+	branch: string;
+	isDefault: boolean;
+	detached: boolean;
+}
+
+/**
+ * Locate the .git directory for the current working directory by walking up
+ * the filesystem. Returns null when not inside a git repository. Synchronous.
+ *
+ * Also resolves the gitdir indirection used by git worktrees, where `.git`
+ * is a file containing `gitdir: <path>` rather than a directory.
+ */
+function findGitDirSync(startDir: string = process.cwd()): string | null {
+	let dir = startDir;
+	while (true) {
+		const candidate = join(dir, '.git');
+		if (existsSync(candidate)) {
+			try {
+				const stat = readFileSync(candidate, 'utf8');
+				const match = stat.match(/^gitdir:\s*(.+)\s*$/m);
+				if (match) {
+					const resolved = isAbsolute(match[1])
+						? match[1]
+						: join(dir, match[1]);
+					return resolved;
+				}
+			} catch {
+				// Not a file — assume it's the directory itself.
+			}
+			return candidate;
+		}
+		const parent = join(dir, '..');
+		if (parent === dir) return null;
+		dir = parent;
+	}
+}
+
+/**
+ * Read the current branch name synchronously by parsing .git/HEAD.
+ * Returns null when not in a repo or HEAD can't be read.
+ * When HEAD is detached, returns a short SHA prefix.
+ *
+ * `startDir` is exposed for tests that want to point at a fixture directory
+ * without relying on `process.chdir` (which is racy with parallel tests and
+ * fails when `os.tmpdir()` happens to live inside the working tree).
+ */
+export function getCurrentBranchSync(
+	startDir: string = process.cwd(),
+): {branch: string; detached: boolean} | null {
+	const gitDir = findGitDirSync(startDir);
+	if (!gitDir) return null;
+	try {
+		const head = readFileSync(join(gitDir, 'HEAD'), 'utf8').trim();
+		const refMatch = head.match(/^ref:\s*refs\/heads\/(.+)$/);
+		if (refMatch) {
+			return {branch: refMatch[1], detached: false};
+		}
+		// Bare SHA = detached HEAD
+		return {branch: head.slice(0, 7), detached: true};
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Resolve the default branch synchronously. Prefers
+ * `.git/refs/remotes/origin/HEAD` (a symbolic ref) — checking both the loose
+ * file and `packed-refs`, since fresh clones often pack origin/HEAD. Falls
+ * back to whether `main` or `master` exists in `.git/refs/heads/` or
+ * `packed-refs`. Returns null when nothing can be resolved.
+ */
+export function getDefaultBranchSync(
+	startDir: string = process.cwd(),
+): string | null {
+	const gitDir = findGitDirSync(startDir);
+	if (!gitDir) return null;
+
+	try {
+		const originHead = join(gitDir, 'refs', 'remotes', 'origin', 'HEAD');
+		if (existsSync(originHead)) {
+			const contents = readFileSync(originHead, 'utf8').trim();
+			const match = contents.match(/^ref:\s*refs\/remotes\/origin\/(.+)$/);
+			if (match) return match[1];
+		}
+	} catch {
+		// fall through
+	}
+
+	let packedContents: string | null = null;
+	try {
+		const packed = join(gitDir, 'packed-refs');
+		if (existsSync(packed)) {
+			packedContents = readFileSync(packed, 'utf8');
+		}
+	} catch {
+		// ignore
+	}
+
+	// origin/HEAD is often packed (e.g. after a fresh clone).
+	if (packedContents) {
+		const packedOriginHead = packedContents.match(
+			/^#\s*ref:\s*refs\/remotes\/origin\/(.+)$/m,
+		);
+		if (packedOriginHead) return packedOriginHead[1];
+	}
+
+	const headsDir = join(gitDir, 'refs', 'heads');
+	for (const candidate of ['main', 'master']) {
+		if (existsSync(join(headsDir, candidate))) return candidate;
+	}
+
+	if (packedContents) {
+		for (const candidate of ['main', 'master']) {
+			if (packedContents.includes(` refs/heads/${candidate}`)) return candidate;
+		}
+	}
+
+	return null;
+}
+
+/**
+ * Resolve a {@link GitStatusSummary} synchronously by reading the `.git`
+ * filesystem directly — no child processes, safe to call from Ink's
+ * `<Static>` render path. Returns null when not in a git repository so
+ * callers can cleanly omit the surface.
+ *
+ * Skips the `isInsideGitRepo()` shell-out: `getCurrentBranchSync` already
+ * returns null whenever no `.git` directory is found, which is the same
+ * signal at zero process-spawn cost.
+ */
+export function getGitStatusSummarySync(
+	startDir: string = process.cwd(),
+): GitStatusSummary | null {
+	const current = getCurrentBranchSync(startDir);
+	if (!current) return null;
+	const defaultBranch = getDefaultBranchSync(startDir);
+	return {
+		branch: current.branch,
+		detached: current.detached,
+		isDefault: !current.detached && current.branch === defaultBranch,
+	};
+}
+
+/**
+ * Format a {@link GitStatusSummary} as a short suffix-marker label.
+ * Shared by the boot summary and the `/status` panel so the two surfaces
+ * can't drift on wording.
+ */
+export function formatGitStatusSummary(status: GitStatusSummary): {
+	branch: string;
+	marker: string | null;
+} {
+	if (status.detached) return {branch: status.branch, marker: 'detached'};
+	if (status.isDefault) return {branch: status.branch, marker: 'default'};
+	return {branch: status.branch, marker: null};
+}
+
+// ============================================================================
 // Git Command Execution
 // ============================================================================
 
 /**
- * Execute a git command and return the output
+ * Spawn a command, collect stdout, and resolve with the trimmed output.
+ * Rejects with stderr (or an exit-code message) on non-zero exit. `label` is
+ * the human-readable command name used in error messages (e.g. 'Git', 'gh').
  */
-export async function execGit(args: string[]): Promise<string> {
+function execProcess(
+	command: string,
+	args: string[],
+	label: string,
+): Promise<string> {
 	return new Promise((resolve, reject) => {
-		const proc = spawn('git', args);
+		const proc = spawn(command, args);
 		let stdout = '';
 		let stderr = '';
 
@@ -135,66 +286,34 @@ export async function execGit(args: string[]): Promise<string> {
 				resolve(stdout.trimEnd());
 			} else {
 				const errorMessage =
-					stderr.trim() || `Git command failed with exit code ${code}`;
+					stderr.trim() || `${label} command failed with exit code ${code}`;
 				reject(new Error(errorMessage));
 			}
 		});
 
 		proc.on('error', error => {
-			reject(new Error(`Failed to execute git: ${error.message}`));
+			reject(new Error(`Failed to execute ${command}: ${error.message}`));
 		});
 	});
+}
+
+/**
+ * Execute a git command and return the output
+ */
+export async function execGit(args: string[]): Promise<string> {
+	return execProcess('git', args, 'Git');
 }
 
 /**
  * Execute a gh CLI command and return the output
  */
 export async function execGh(args: string[]): Promise<string> {
-	return new Promise((resolve, reject) => {
-		const proc = spawn('gh', args);
-		let stdout = '';
-		let stderr = '';
-
-		proc.stdout.on('data', (data: Buffer) => {
-			stdout += data.toString();
-		});
-
-		proc.stderr.on('data', (data: Buffer) => {
-			stderr += data.toString();
-		});
-
-		proc.on('close', (code: number | null) => {
-			if (code === 0) {
-				resolve(stdout.trimEnd());
-			} else {
-				const errorMessage =
-					stderr.trim() || `gh command failed with exit code ${code}`;
-				reject(new Error(errorMessage));
-			}
-		});
-
-		proc.on('error', error => {
-			reject(new Error(`Failed to execute gh: ${error.message}`));
-		});
-	});
+	return execProcess('gh', args, 'gh');
 }
 
 // ============================================================================
 // Repository State Checks
 // ============================================================================
-
-/**
- * Check if there are uncommitted changes (staged or unstaged)
- */
-export async function hasUncommittedChanges(): Promise<boolean> {
-	try {
-		const status = await execGit(['status', '--porcelain']);
-		return status.trim().length > 0;
-	} catch (error) {
-		logger.debug('Failed to check for uncommitted changes', {error});
-		return false;
-	}
-}
 
 /**
  * Check if there are staged changes
@@ -287,18 +406,6 @@ export async function getDefaultBranch(): Promise<string> {
 }
 
 /**
- * Check if a branch exists
- */
-export async function branchExists(name: string): Promise<boolean> {
-	try {
-		await execGit(['rev-parse', '--verify', `refs/heads/${name}`]);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-/**
  * Get the upstream branch for the current branch
  */
 export async function getUpstreamBranch(): Promise<string | null> {
@@ -335,78 +442,9 @@ export async function getAheadBehind(): Promise<{
 	}
 }
 
-/**
- * Get list of local branches
- */
-export async function getLocalBranches(): Promise<BranchInfo[]> {
-	try {
-		const output = await execGit([
-			'branch',
-			'--format=%(refname:short)|%(upstream:short)|%(upstream:track,nobracket)|%(HEAD)',
-		]);
-
-		return output
-			.split('\n')
-			.filter(line => line.trim())
-			.map(line => {
-				const [name, upstream, track, head] = line.split('|');
-				let ahead = 0;
-				let behind = 0;
-
-				if (track) {
-					const aheadMatch = track.match(/ahead (\d+)/);
-					const behindMatch = track.match(/behind (\d+)/);
-					if (aheadMatch) ahead = parseInt(aheadMatch[1], 10);
-					if (behindMatch) behind = parseInt(behindMatch[1], 10);
-				}
-
-				return {
-					name: name || '',
-					current: head === '*',
-					upstream: upstream || undefined,
-					ahead,
-					behind,
-				};
-			});
-	} catch (error) {
-		logger.debug('Failed to list local branches', {error});
-		return [];
-	}
-}
-
-/**
- * Get list of remote branches
- */
-export async function getRemoteBranches(): Promise<string[]> {
-	try {
-		const output = await execGit(['branch', '-r', '--format=%(refname:short)']);
-		return output
-			.split('\n')
-			.filter(line => line.trim() && !line.includes('HEAD'));
-	} catch (error) {
-		logger.debug('Failed to list remote branches', {error});
-		return [];
-	}
-}
-
 // ============================================================================
 // Commit Operations
 // ============================================================================
-
-/**
- * Get unpushed commits (commits ahead of upstream)
- */
-export async function getUnpushedCommits(): Promise<CommitInfo[]> {
-	try {
-		const upstream = await getUpstreamBranch();
-		if (!upstream) return [];
-
-		return await getCommits({range: `${upstream}..HEAD`});
-	} catch (error) {
-		logger.debug('Failed to get unpushed commits', {error});
-		return [];
-	}
-}
 
 /**
  * Check if the last commit has been pushed
@@ -593,30 +631,6 @@ export async function getDiffStats(
 // ============================================================================
 
 /**
- * Get list of stashes
- */
-export async function getStashList(): Promise<StashEntry[]> {
-	try {
-		const output = await execGit(['stash', 'list', '--format=%gd|%gs|%cr']);
-		if (!output.trim()) return [];
-
-		return output.split('\n').map((line, index) => {
-			const [ref, message, date] = line.split('|');
-			const branchMatch = message?.match(/WIP on ([^:]+):/);
-			return {
-				index,
-				message: message || ref || `stash@{${index}}`,
-				branch: branchMatch?.[1] || 'unknown',
-				date: date || '',
-			};
-		});
-	} catch (error) {
-		logger.debug('Failed to list stashes', {error});
-		return [];
-	}
-}
-
-/**
  * Get stash count
  */
 export async function getStashCount(): Promise<number> {
@@ -627,23 +641,6 @@ export async function getStashCount(): Promise<number> {
 	} catch (error) {
 		logger.debug('Failed to get stash count', {error});
 		return 0;
-	}
-}
-
-// ============================================================================
-// Remote Operations
-// ============================================================================
-
-/**
- * Check if a remote exists
- */
-export async function remoteExists(name: string): Promise<boolean> {
-	try {
-		const remotes = await execGit(['remote']);
-		return remotes.split('\n').includes(name);
-	} catch (error) {
-		logger.debug('Failed to check if remote exists', {error});
-		return false;
 	}
 }
 

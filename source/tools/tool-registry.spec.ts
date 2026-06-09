@@ -222,44 +222,6 @@ test('ToolRegistry - getHandlers returns empty object when no tools', t => {
 	t.deepEqual(handlers, {});
 });
 
-test('ToolRegistry - getFormatters returns record of formatters', t => {
-	const registry = new ToolRegistry();
-	const formatter1: ToolEntry['formatter'] = (o) => String(o);
-	const formatter2: ToolEntry['formatter'] = (o) => String(o);
-
-	registry.registerMany([
-		createMockToolEntry({ name: 'tool1', formatter: formatter1 }),
-		createMockToolEntry({ name: 'tool2', formatter: formatter2 }),
-		createMockToolEntry({ name: 'tool3', formatter: undefined })
-	]);
-
-	const formatters = registry.getFormatters();
-
-	t.is(formatters.tool1, formatter1);
-	t.is(formatters.tool2, formatter2);
-	// tool3 has no formatter, so it shouldn't be in the record
-	t.false('tool3' in formatters);
-});
-
-test('ToolRegistry - getValidators returns record of validators', t => {
-	const registry = new ToolRegistry();
-	const validator1: ToolEntry['validator'] = async () => ({ valid: true });
-	const validator2: ToolEntry['validator'] = async () => ({ valid: false, error: 'test error' });
-
-	registry.registerMany([
-		createMockToolEntry({ name: 'tool1', validator: validator1 }),
-		createMockToolEntry({ name: 'tool2', validator: validator2 }),
-		createMockToolEntry({ name: 'tool3', validator: undefined })
-	]);
-
-	const validators = registry.getValidators();
-
-	t.is(validators.tool1, validator1);
-	t.is(validators.tool2, validator2);
-	// tool3 has no validator, so it shouldn't be in the record
-	t.false('tool3' in validators);
-});
-
 test('ToolRegistry - getNativeTools returns record of native tools', t => {
 	const registry = new ToolRegistry();
 	const tool1: ToolEntry['tool'] = { execute: async () => 'test 1' } as any;
@@ -277,29 +239,21 @@ test('ToolRegistry - getNativeTools returns record of native tools', t => {
 	t.is(Object.keys(nativeTools).length, 2);
 });
 
-test('ToolRegistry - getNativeTools returns unwrapped tools when no validator', t => {
+test('ToolRegistry - getNativeTools strips execute (model never auto-runs)', t => {
 	const registry = new ToolRegistry();
-	const tool1: ToolEntry['tool'] = { execute: async () => 'test 1' } as any;
+	const tool1: ToolEntry['tool'] = {
+		description: 'd',
+		execute: async () => 'test 1',
+	} as any;
 
-	registry.register(createMockToolEntry({ name: 'tool1', tool: tool1, validator: undefined }));
+	registry.register(createMockToolEntry({ name: 'tool1', tool: tool1 }));
 
 	const nativeTools = registry.getNativeTools();
 
-	t.is(nativeTools.tool1, tool1);
-});
-
-test('ToolRegistry - getNativeTools wraps execute with validator', async t => {
-	const registry = new ToolRegistry();
-	const tool1: ToolEntry['tool'] = { execute: async () => 'test result' } as any;
-	const rejectValidator = async () => ({ valid: false as const, error: 'path not allowed' });
-
-	registry.register(createMockToolEntry({ name: 'tool1', tool: tool1, validator: rejectValidator }));
-
-	const nativeTools = registry.getNativeTools();
-
-	await t.throwsAsync(() => nativeTools.tool1.execute!({} as any, {} as any), {
-		message: 'path not allowed',
-	});
+	// The model-facing tool keeps its schema/description but has no execute fn;
+	// execution always runs through the registry handler (which validates).
+	t.is((nativeTools.tool1 as { execute?: unknown }).execute, undefined);
+	t.is((nativeTools.tool1 as { description?: string }).description, 'd');
 });
 
 test('ToolRegistry - getAllEntries returns array of all entries', t => {
@@ -448,7 +402,7 @@ test('ToolRegistry - fromRegistries applies readOnly flags', t => {
 // fromRegistries Tests
 // ============================================================================
 
-test('ToolRegistry - fromRegistries creates registry from records', t => {
+test('ToolRegistry - fromRegistries creates registry from records', async t => {
 	const handler1: ToolEntry['handler'] = async () => 'test';
 	const handler2: ToolEntry['handler'] = async () => 'test';
 	const formatter1: ToolEntry['formatter'] = (o) => String(o);
@@ -466,7 +420,12 @@ test('ToolRegistry - fromRegistries creates registry from records', t => {
 	t.is(registry.getToolCount(), 2);
 	t.true(registry.hasTool('tool1'));
 	t.true(registry.hasTool('tool2'));
-	t.is(registry.getHandler('tool1'), handler1);
+	// tool1 has a validator, so its handler is wrapped to validate first (not
+	// the same reference) but still produces the handler's output when valid.
+	t.not(registry.getHandler('tool1'), handler1);
+	t.is(await registry.getHandler('tool1')?.({}), 'test');
+	// tool2 has no validator, so its handler is passed through unchanged.
+	t.is(registry.getHandler('tool2'), handler2);
 	t.is(registry.getFormatter('tool1'), formatter1);
 	t.is(registry.getValidator('tool1'), validator1);
 });

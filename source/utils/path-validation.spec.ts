@@ -1,6 +1,14 @@
+import {
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import {isValidFilePath, resolveFilePath} from './path-validation';
-import {join} from 'node:path';
 
 // Test suite for isValidFilePath
 test('isValidFilePath: accepts simple relative paths', (t) => {
@@ -203,5 +211,60 @@ test('security: ensures resolveFilePath maintains project boundaries', (t) => {
 		t.throws(() => resolveFilePath(vector, cwd), {
 			message: /Invalid file path/,
 		});
+	}
+});
+
+// Symlink-aware containment (requires a real filesystem)
+test.serial('security: rejects an in-project symlink whose target escapes', t => {
+	const base = mkdtempSync(join(tmpdir(), 'pathval-'));
+	try {
+		const project = join(base, 'project');
+		const outside = join(base, 'outside');
+		mkdirSync(project);
+		mkdirSync(outside);
+		writeFileSync(join(outside, 'secret.txt'), 'secret');
+		// A symlink inside the project that points outside it.
+		symlinkSync(outside, join(project, 'link'));
+
+		// Lexically `link/secret.txt` looks contained, but its real target is
+		// outside the project — must be rejected.
+		t.throws(() => resolveFilePath('link/secret.txt', project), {
+			message: /escapes project directory via symlink/,
+		});
+		// Writing through the symlinked directory directly is also rejected.
+		t.throws(() => resolveFilePath('link/new.txt', project), {
+			message: /escapes project directory via symlink/,
+		});
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+test.serial('security: allows an in-project symlink that stays inside', t => {
+	const base = mkdtempSync(join(tmpdir(), 'pathval-'));
+	try {
+		const project = join(base, 'project');
+		mkdirSync(join(project, 'real'), {recursive: true});
+		symlinkSync(join(project, 'real'), join(project, 'link'));
+
+		// link -> project/real, which is inside the project: allowed.
+		const resolved = resolveFilePath('link/ok.txt', project);
+		t.is(resolved, join(project, 'link/ok.txt'));
+	} finally {
+		rmSync(base, {recursive: true, force: true});
+	}
+});
+
+test.serial('resolveFilePath: resolves real files within a real project root', t => {
+	const base = mkdtempSync(join(tmpdir(), 'pathval-'));
+	try {
+		mkdirSync(join(base, 'src'), {recursive: true});
+		writeFileSync(join(base, 'src', 'app.ts'), '');
+		const resolved = resolveFilePath('src/app.ts', base);
+		// Returned path is the lexical absolute path (symlinks are resolved only
+		// for the containment check, not for the returned value).
+		t.is(resolved, join(base, 'src/app.ts'));
+	} finally {
+		rmSync(base, {recursive: true, force: true});
 	}
 });

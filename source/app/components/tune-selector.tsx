@@ -1,6 +1,7 @@
 import {Box, Text, useInput} from 'ink';
 import SelectInput from 'ink-select-input';
 import {useMemo, useState} from 'react';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -8,12 +9,17 @@ import {
 	TOOL_PROFILE_DESCRIPTIONS,
 	TOOL_PROFILE_TOOLTIPS,
 } from '@/tools/tool-profiles';
-import type {ModelParameters, ToolProfile, TuneConfig} from '@/types/config';
-import {TUNE_DEFAULTS} from '@/types/config';
+import type {
+	ModelParameters,
+	ToolMode,
+	ToolProfile,
+	TuneConfig,
+} from '@/types/config';
+import {getTuneToolMode, TUNE_DEFAULTS} from '@/types/config';
 
 type Step = 'main' | 'toolProfile' | 'parameters' | 'preset';
 
-const AVAILABLE_PROFILES: ToolProfile[] = ['full', 'minimal'];
+const AVAILABLE_PROFILES: ToolProfile[] = ['auto', 'full', 'minimal', 'nano'];
 
 interface TuneSelectorProps {
 	currentConfig: TuneConfig;
@@ -26,9 +32,23 @@ type MainAction =
 	| 'preset'
 	| 'toolProfile'
 	| 'aggressiveCompact'
-	| 'disableNativeTools'
+	| 'toolMode'
+	| 'includeAgentsMd'
 	| 'parameters'
 	| 'apply';
+
+const TOOL_MODE_CYCLE: ToolMode[] = ['native', 'xml', 'json'];
+
+function nextToolMode(current: ToolMode): ToolMode {
+	const idx = TOOL_MODE_CYCLE.indexOf(current);
+	return TOOL_MODE_CYCLE[(idx + 1) % TOOL_MODE_CYCLE.length];
+}
+
+function toolModeLabel(mode: ToolMode): string {
+	if (mode === 'native') return 'ON';
+	if (mode === 'xml') return 'OFF (XML fallback)';
+	return 'OFF (JSON fallback)';
+}
 
 // Preset definitions — static configs that populate the tune form
 interface TunePreset {
@@ -52,6 +72,18 @@ const TUNE_PRESETS: TunePreset[] = [
 			toolProfile: 'minimal',
 			aggressiveCompact: true,
 			modelParameters: {temperature: 0.7},
+		},
+	},
+	{
+		name: 'Nano (low-end hardware)',
+		description:
+			'Strictest budget — 5 tools, ultra-slim prompt, single-tool, aggressive compact, no AGENTS.md. Run bigger models on smaller machines.',
+		config: {
+			enabled: true,
+			toolProfile: 'nano',
+			aggressiveCompact: true,
+			includeAgentsMd: false,
+			modelParameters: {temperature: 0.4, maxTokens: 2048},
 		},
 	},
 ];
@@ -82,6 +114,9 @@ function TuneMainMenu({
 		];
 
 		if (config.enabled) {
+			// includeAgentsMd defaults to false for nano, true otherwise.
+			const agentsMdOn =
+				config.includeAgentsMd ?? config.toolProfile !== 'nano';
 			list.push(
 				{
 					label: `Tool Profile - ${config.toolProfile}`,
@@ -92,8 +127,12 @@ function TuneMainMenu({
 					value: 'aggressiveCompact',
 				},
 				{
-					label: `Native Tool Calling - ${config.disableNativeTools ? 'OFF (XML fallback)' : 'ON'}`,
-					value: 'disableNativeTools',
+					label: `Native Tool Calling - ${toolModeLabel(getTuneToolMode(config))}`,
+					value: 'toolMode',
+				},
+				{
+					label: `Include AGENTS.md - ${agentsMdOn ? 'ON' : 'OFF'}`,
+					value: 'includeAgentsMd',
 				},
 				{
 					label: `Model Parameters - ${config.modelParameters ? 'configured' : 'defaults'}`,
@@ -129,19 +168,9 @@ function TuneMainMenu({
 					Tune
 				</Text>
 				<Text color={colors.text}> </Text>
-				<SelectInput
+				<StyledSelectInput
 					items={items}
 					onSelect={item => onAction(item.value)}
-					indicatorComponent={({isSelected}) => (
-						<Text color={isSelected ? colors.primary : colors.text}>
-							{isSelected ? '> ' : '  '}
-						</Text>
-					)}
-					itemComponent={({isSelected, label}) => (
-						<Text color={isSelected ? colors.primary : colors.text}>
-							{label}
-						</Text>
-					)}
 				/>
 				<Box marginBottom={1}></Box>
 				<Text color={colors.secondary}>Enter/Esc</Text>
@@ -164,17 +193,9 @@ function TuneMainMenu({
 					Configure runtime behavior for different model capabilities:
 				</Text>
 			</Box>
-			<SelectInput
+			<StyledSelectInput
 				items={items}
 				onSelect={item => onAction(item.value)}
-				indicatorComponent={({isSelected}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>
-						{isSelected ? '> ' : '  '}
-					</Text>
-				)}
-				itemComponent={({isSelected, label}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>{label}</Text>
-				)}
 			/>
 			<Box marginTop={1}>
 				<Text color={colors.secondary}>Enter to select, Esc to cancel</Text>
@@ -268,19 +289,11 @@ function ToolProfilePanel({
 					Enter to apply, Shift+Tab to go back, Esc to cancel
 				</Text>
 			</Box>
-			<SelectInput
+			<StyledSelectInput
 				items={items}
 				initialIndex={initialIndex}
 				onSelect={item => onSelect(item.value as ToolProfile)}
 				onHighlight={item => setHighlighted(item.value as ToolProfile)}
-				indicatorComponent={({isSelected}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>
-						{isSelected ? '> ' : '  '}
-					</Text>
-				)}
-				itemComponent={({isSelected, label}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>{label}</Text>
-				)}
 			/>
 			<Box marginTop={1} flexDirection="column">
 				<Text color={colors.secondary}>
@@ -371,18 +384,10 @@ function PresetPanel({
 					Enter to load preset, Shift+Tab to go back, Esc to cancel
 				</Text>
 			</Box>
-			<SelectInput
+			<StyledSelectInput
 				items={items}
 				onSelect={item => onSelect(TUNE_PRESETS[Number(item.value)]?.config)}
 				onHighlight={item => setHighlighted(Number(item.value))}
-				indicatorComponent={({isSelected}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>
-						{isSelected ? '> ' : '  '}
-					</Text>
-				)}
-				itemComponent={({isSelected, label}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>{label}</Text>
-				)}
 			/>
 			{highlightedPreset && (
 				<Box marginTop={1}>
@@ -393,9 +398,19 @@ function PresetPanel({
 	);
 }
 
-// Parameter definitions with validation
+// Parameter definitions with validation. The tune UI only exposes scalar
+// numeric parameters today — reasoning, stop, and the openrouter block are
+// configured via agents.config.json rather than the modal.
+type NumericParamKey =
+	| 'temperature'
+	| 'topP'
+	| 'topK'
+	| 'maxTokens'
+	| 'frequencyPenalty'
+	| 'presencePenalty';
+
 const PARAM_DEFS: {
-	key: keyof ModelParameters;
+	key: NumericParamKey;
 	label: string;
 	tooltip: string;
 	min: number;
@@ -589,18 +604,10 @@ function ParametersPanel({
 					Enter to cycle values, Shift+Tab to go back, Esc to cancel
 				</Text>
 			</Box>
-			<SelectInput
+			<StyledSelectInput
 				items={items}
 				onSelect={handleSelect}
 				onHighlight={item => setHighlighted(item.value)}
-				indicatorComponent={({isSelected}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>
-						{isSelected ? '> ' : '  '}
-					</Text>
-				)}
-				itemComponent={({isSelected, label}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>{label}</Text>
-				)}
 			/>
 			{highlightedDef && (
 				<Box marginTop={1}>
@@ -640,11 +647,21 @@ export function TuneSelector({
 					aggressiveCompact: !prev.aggressiveCompact,
 				}));
 				break;
-			case 'disableNativeTools':
-				setConfig(prev => ({
-					...prev,
-					disableNativeTools: !prev.disableNativeTools,
-				}));
+			case 'toolMode':
+				setConfig(prev => {
+					const next = nextToolMode(getTuneToolMode(prev));
+					// Drop the legacy disableNativeTools field once the user has
+					// explicitly cycled — toolMode is now authoritative.
+					const {disableNativeTools: _legacy, ...rest} = prev;
+					return {...rest, toolMode: next};
+				});
+				break;
+			case 'includeAgentsMd':
+				setConfig(prev => {
+					// Determine current effective value (defaults to false for nano, true otherwise).
+					const current = prev.includeAgentsMd ?? prev.toolProfile !== 'nano';
+					return {...prev, includeAgentsMd: !current};
+				});
 				break;
 			case 'parameters':
 				setStep('parameters');

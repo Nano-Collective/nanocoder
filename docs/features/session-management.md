@@ -19,6 +19,14 @@ Nanocoder automatically saves your conversations so you can close the terminal a
 
 You can also use the aliases `/sessions` or `/history`.
 
+## Renaming a Session
+
+```bash
+/rename <new name>    # rename the current session
+```
+
+The new name must be non-empty and **100 characters or less**. If the name exceeds this limit, an error message is displayed in chat.
+
 ## What Gets Saved
 
 Each session captures:
@@ -66,6 +74,6 @@ Customize session behaviour in your `agents.config.json`:
 | `autoSave` | `true` | Enable/disable automatic saving |
 | `saveInterval` | `30000` | Milliseconds between saves (minimum 1000) |
 | `maxSessions` | `100` | Maximum sessions to keep (minimum 1) |
-| `maxMessages` | `1000` | Maximum messages saved per session — older messages are truncated (minimum 1) |
+| `maxMessages` | `1000` | Maximum messages sent to the model (context window capping) — on-disk history is NOT truncated (minimum 1) |
 | `retentionDays` | `30` | Auto-delete sessions older than this (minimum 1) |
 | `directory` | (platform default) | Custom storage directory |

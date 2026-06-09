@@ -1,7 +1,7 @@
-import React from 'react';
-import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import {sessionManager} from '@/session/session-manager';
 import type {MessageSubmissionOptions} from '@/types/index';
+import {formatError} from '@/utils/error-formatter';
+import {errorMsg, infoMsg} from '@/utils/message-factory';
 
 const RESUME_COMMANDS = ['resume', 'sessions', 'history'] as const;
 
@@ -30,16 +30,14 @@ export async function handleResumeCommand(
 		onEnterSessionSelectorMode,
 		onResumeSession,
 		onCommandComplete,
-		getNextComponentKey,
 	} = options;
 
 	if (!onEnterSessionSelectorMode || !onResumeSession) {
 		onAddToChatQueue(
-			React.createElement(ErrorMessage, {
-				key: `resume-error-${getNextComponentKey()}`,
-				message: 'Session management is not available in this context.',
-				hideBox: true,
-			}),
+			errorMsg(
+				'Session management is not available in this context.',
+				'resume-error',
+			),
 		);
 		onCommandComplete?.();
 		return true;
@@ -53,11 +51,10 @@ export async function handleResumeCommand(
 		await sessionManager.initialize();
 	} catch (error) {
 		onAddToChatQueue(
-			React.createElement(ErrorMessage, {
-				key: `resume-error-${getNextComponentKey()}`,
-				message: `Failed to initialize sessions: ${error instanceof Error ? error.message : 'Unknown error'}`,
-				hideBox: true,
-			}),
+			errorMsg(
+				`Failed to initialize sessions: ${formatError(error)}`,
+				'resume-error',
+			),
 		);
 		onCommandComplete?.();
 		return true;
@@ -93,13 +90,7 @@ export async function handleResumeCommand(
 		}
 
 		if (!sessionId) {
-			onAddToChatQueue(
-				React.createElement(InfoMessage, {
-					key: `resume-info-${getNextComponentKey()}`,
-					message: 'No sessions found.',
-					hideBox: true,
-				}),
-			);
+			onAddToChatQueue(infoMsg('No sessions found.', 'resume-info'));
 			onCommandComplete?.();
 			return true;
 		}
@@ -109,20 +100,15 @@ export async function handleResumeCommand(
 			onResumeSession(session);
 		} else {
 			onAddToChatQueue(
-				React.createElement(ErrorMessage, {
-					key: `resume-error-${getNextComponentKey()}`,
-					message: `Session not found: ${sessionId}`,
-					hideBox: true,
-				}),
+				errorMsg(`Session not found: ${sessionId}`, 'resume-error'),
 			);
 		}
 	} catch (error) {
 		onAddToChatQueue(
-			React.createElement(ErrorMessage, {
-				key: `resume-error-${getNextComponentKey()}`,
-				message: `Failed to resume session: ${error instanceof Error ? error.message : 'Unknown error'}`,
-				hideBox: true,
-			}),
+			errorMsg(
+				`Failed to resume session: ${formatError(error)}`,
+				'resume-error',
+			),
 		);
 	}
 

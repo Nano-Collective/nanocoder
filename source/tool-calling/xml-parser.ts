@@ -1,4 +1,7 @@
+import {FORMAT_GUIDANCE_MESSAGE} from '@/tool-calling/format-guidance';
+import {normalizeWhitespace} from '@/tool-calling/whitespace';
 import type {ToolCall} from '@/types/index';
+import {generateToolCallId} from '@/utils/tool-call-id';
 import {ensureString} from '@/utils/type-helpers';
 
 interface ParsedToolCall {
@@ -169,8 +172,8 @@ export class XMLToolCallParser {
 	 * Converts parsed tool calls to the standard ToolCall format
 	 */
 	static convertToToolCalls(parsedCalls: ParsedToolCall[]): ToolCall[] {
-		return parsedCalls.map((call, index) => ({
-			id: `xml_call_${index}`,
+		return parsedCalls.map(call => ({
+			id: generateToolCallId(),
 			function: {
 				name: call.toolName,
 				arguments: call.parameters,
@@ -212,18 +215,7 @@ export class XMLToolCallParser {
 		cleanedContent = cleanedContent.replace(/<\/?tool_call>/g, '');
 
 		// Clean up whitespace artifacts left by removed tool calls
-		cleanedContent = cleanedContent
-			// Remove trailing whitespace from each line
-			.replace(/[ \t]+$/gm, '')
-			// Collapse multiple spaces (but not at start of line for indentation)
-			.replace(/([^ \t\n]) {2,}/g, '$1 ')
-			// Remove lines that are only whitespace
-			.replace(/^[ \t]+$/gm, '')
-			// Collapse 2+ consecutive blank lines to a single blank line
-			.replace(/\n{3,}/g, '\n\n')
-			.trim();
-
-		return cleanedContent;
+		return normalizeWhitespace(cleanedContent);
 	}
 
 	/**
@@ -256,12 +248,10 @@ export class XMLToolCallParser {
 					'Invalid syntax: [tool_use: name] or [Tool: name] format is not supported',
 			},
 			{
-				// <function=name> syntax
-				regex: /<function=(\w+)>/,
-				error: 'Invalid syntax: <function=name> is not supported',
-			},
-			{
-				// <parameter=name> syntax
+				// <parameter=name> syntax — partial structure from a model that
+				// started building a function-call wrapper but didn't include
+				// JSON args. <function=name>{json}</function> is parsed as a
+				// real Llama 3.x tool call before this branch runs.
 				regex: /<parameter=(\w+)>/,
 				error: 'Invalid syntax: <parameter=name> is not supported',
 			},
@@ -271,12 +261,6 @@ export class XMLToolCallParser {
 				error:
 					'Invalid parameter syntax: parameters must use named tags, not generic <parameter> wrapper',
 			},
-			{
-				// Generic closing </function> when <function=name> was used
-				regex: /<function=\w+>[\s\S]*?<\/function>/,
-				error:
-					'Invalid function syntax: use simple named tags, not <function=name> wrapper',
-			},
 		];
 
 		for (const pattern of patterns) {
@@ -284,18 +268,11 @@ export class XMLToolCallParser {
 			if (match) {
 				return {
 					error: pattern.error,
-					examples: this.getCorrectFormatExamples(),
+					examples: FORMAT_GUIDANCE_MESSAGE,
 				};
 			}
 		}
 
 		return null;
-	}
-
-	/**
-	 * Generates correct format examples for error messages
-	 */
-	private static getCorrectFormatExamples(): string {
-		return `Please use the native tool calling format provided by the system. The tools are already available to you - call them directly using the function calling interface.`;
 	}
 }

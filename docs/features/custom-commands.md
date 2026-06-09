@@ -6,6 +6,12 @@ sidebar_order: 2
 
 # Custom Commands
 
+> **A custom command is one kind of skill member.** This page covers
+> command-specific details — frontmatter parameters, auto-injection,
+> aliases, namespacing. For the broader picture (bundling a command
+> with a subagent and tools, or adding a cron / file.changed
+> subscription), see **[Skills](./skills.md)**.
+
 If you find yourself typing the same kind of prompt repeatedly — "review this file for bugs", "write tests following our conventions", "check for security issues" — custom commands let you save those prompts as markdown files and invoke them as slash commands.
 
 Each command becomes a `/command` you can run during any session, with support for parameters, aliases, auto-injection based on keywords, and namespace organization.
@@ -173,8 +179,12 @@ When using the directory-as-command pattern, files in a `resources/` subdirector
 |---------|-------------|
 | `/commands` | List all custom commands |
 | `/commands show <name>` | Show detailed info about a command |
-| `/commands refresh` | Reload commands from disk |
 | `/commands create <name>` | Create a new command file with AI assistance |
+
+> Custom commands are loaded at boot. To pick up new or edited command
+> files, restart Nanocoder. (Bundle-skill commands declared in
+> `.nanocoder/skills/<name>/commands/` also load at boot; there is no
+> hot-reload.)
 
 ### `/commands create`
 

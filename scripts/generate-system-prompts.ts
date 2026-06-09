@@ -85,9 +85,9 @@ function buildFullPrompt(v: Variant): string {
 
 	// Build the base system prompt using the real builder
 	const tuneConfig: TuneConfig | undefined =
-		v.profile === 'minimal'
-			? {enabled: true, toolProfile: 'minimal', aggressiveCompact: false}
-			: undefined;
+		v.profile === 'full'
+			? undefined
+			: {enabled: true, toolProfile: v.profile, aggressiveCompact: false};
 	let prompt = buildSystemPrompt(
 		v.mode,
 		tuneConfig,
@@ -116,7 +116,7 @@ function buildFullPrompt(v: Variant): string {
 	return prompt;
 }
 
-// Define variants: 2 profiles × 4 modes × 2 tool modes = 16 variants
+// Define variants: 3 profiles × 4 modes × 2 tool modes = 24 variants
 const variants: Variant[] = [
 	// Native tool calling
 	{name: 'full-normal', mode: 'normal', profile: 'full'},
@@ -127,6 +127,10 @@ const variants: Variant[] = [
 	{name: 'minimal-auto-accept', mode: 'auto-accept', profile: 'minimal'},
 	{name: 'minimal-plan', mode: 'plan', profile: 'minimal'},
 	{name: 'minimal-scheduler', mode: 'scheduler', profile: 'minimal'},
+	{name: 'nano-normal', mode: 'normal', profile: 'nano'},
+	{name: 'nano-auto-accept', mode: 'auto-accept', profile: 'nano'},
+	{name: 'nano-plan', mode: 'plan', profile: 'nano'},
+	{name: 'nano-scheduler', mode: 'scheduler', profile: 'nano'},
 
 	// XML fallback
 	{
@@ -170,6 +174,25 @@ const variants: Variant[] = [
 		name: 'minimal-scheduler-xml',
 		mode: 'scheduler',
 		profile: 'minimal',
+		toolsDisabled: true,
+	},
+	{
+		name: 'nano-normal-xml',
+		mode: 'normal',
+		profile: 'nano',
+		toolsDisabled: true,
+	},
+	{
+		name: 'nano-auto-accept-xml',
+		mode: 'auto-accept',
+		profile: 'nano',
+		toolsDisabled: true,
+	},
+	{name: 'nano-plan-xml', mode: 'plan', profile: 'nano', toolsDisabled: true},
+	{
+		name: 'nano-scheduler-xml',
+		mode: 'scheduler',
+		profile: 'nano',
 		toolsDisabled: true,
 	},
 ];

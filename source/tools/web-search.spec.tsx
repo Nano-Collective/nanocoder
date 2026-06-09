@@ -167,7 +167,8 @@ test('web search tool does not require approval', t => {
 		return;
 	}
 
-	t.false(webSearchTool.tool.needsApproval);
+	t.true(webSearchTool.readOnly);
+	t.is(webSearchTool.approval, undefined);
 });
 
 test('web search tool has description referencing Brave Search API', t => {

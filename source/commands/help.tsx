@@ -7,6 +7,7 @@ import {commandRegistry} from '@/commands';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
+import {generateKey} from '@/session/key-generator';
 import {Command} from '@/types/index';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -113,7 +114,7 @@ export const helpCommand: Command = {
 		const version = await getPackageVersion();
 
 		return React.createElement(Help, {
-			key: `help-${Date.now()}`,
+			key: generateKey('help'),
 			version,
 			commands: commands,
 		});

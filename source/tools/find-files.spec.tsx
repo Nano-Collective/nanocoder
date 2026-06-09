@@ -524,7 +524,8 @@ test('find_files tool has correct name', t => {
 });
 
 test('find_files tool does not require confirmation', t => {
-	t.false(findFilesTool.tool.needsApproval);
+	t.true(findFilesTool.readOnly);
+	t.is(findFilesTool.approval, undefined);
 });
 
 test('find_files tool has handler function', t => {

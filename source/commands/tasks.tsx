@@ -2,6 +2,7 @@ import {Box, Text} from 'ink';
 import React from 'react';
 import {TaskListDisplay} from '@/components/task-list-display';
 import {useTheme} from '@/hooks/useTheme';
+import {generateKey} from '@/session/key-generator';
 import {
 	clearAllTasks,
 	generateTaskId,
@@ -46,7 +47,7 @@ export const tasksCommand: Command = {
 		if (!subcommand) {
 			const tasks = await loadTasks();
 			return React.createElement(TasksDisplay, {
-				key: `tasks-list-${Date.now()}`,
+				key: generateKey('tasks-list'),
 				tasks,
 			});
 		}
@@ -55,7 +56,7 @@ export const tasksCommand: Command = {
 		if (subcommand === 'add') {
 			if (!rest.trim()) {
 				return React.createElement(TaskMessage, {
-					key: `tasks-error-${Date.now()}`,
+					key: generateKey('tasks-error'),
 					message: 'Usage: /tasks add <title>',
 					isError: true,
 				});
@@ -74,7 +75,7 @@ export const tasksCommand: Command = {
 			await saveTasks(tasks);
 
 			return React.createElement(TasksDisplay, {
-				key: `tasks-added-${Date.now()}`,
+				key: generateKey('tasks-added'),
 				tasks,
 				message: `Added: ${newTask.title}`,
 			});
@@ -84,7 +85,7 @@ export const tasksCommand: Command = {
 		if (subcommand === 'remove' || subcommand === 'rm') {
 			if (!rest.trim()) {
 				return React.createElement(TaskMessage, {
-					key: `tasks-error-${Date.now()}`,
+					key: generateKey('tasks-error'),
 					message: 'Usage: /tasks remove <number>',
 					isError: true,
 				});
@@ -93,7 +94,7 @@ export const tasksCommand: Command = {
 			const taskNumber = parseInt(rest.trim(), 10);
 			if (isNaN(taskNumber) || taskNumber < 1) {
 				return React.createElement(TaskMessage, {
-					key: `tasks-error-${Date.now()}`,
+					key: generateKey('tasks-error'),
 					message: 'Please provide a valid task number (e.g., /tasks remove 1)',
 					isError: true,
 				});
@@ -104,7 +105,7 @@ export const tasksCommand: Command = {
 
 			if (taskIndex >= tasks.length) {
 				return React.createElement(TaskMessage, {
-					key: `tasks-error-${Date.now()}`,
+					key: generateKey('tasks-error'),
 					message: `Task ${taskNumber} not found. You have ${tasks.length} task(s).`,
 					isError: true,
 				});
@@ -114,7 +115,7 @@ export const tasksCommand: Command = {
 			await saveTasks(tasks);
 
 			return React.createElement(TasksDisplay, {
-				key: `tasks-removed-${Date.now()}`,
+				key: generateKey('tasks-removed'),
 				tasks,
 				message: `Removed: ${removed.title}`,
 			});
@@ -124,7 +125,7 @@ export const tasksCommand: Command = {
 		if (subcommand === 'clear') {
 			await clearAllTasks();
 			return React.createElement(TasksDisplay, {
-				key: `tasks-cleared-${Date.now()}`,
+				key: generateKey('tasks-cleared'),
 				tasks: [],
 				message: 'All tasks cleared',
 			});
@@ -145,7 +146,7 @@ export const tasksCommand: Command = {
 		await saveTasks(tasks);
 
 		return React.createElement(TasksDisplay, {
-			key: `tasks-added-${Date.now()}`,
+			key: generateKey('tasks-added'),
 			tasks,
 			message: `Added: ${newTask.title}`,
 		});

@@ -47,3 +47,13 @@ test('SettingsSelector top-level menu shows navigation hints', t => {
 	t.truthy(output!.includes('Enter') || output!.includes('Esc'));
 	unmount();
 });
+
+test('SettingsSelector main menu shows Behavior category', t => {
+	const {lastFrame, unmount} = renderWithTheme(
+		<SettingsSelector onCancel={() => {}} />,
+	);
+	const output = lastFrame();
+	t.truthy(output);
+	t.truthy(output!.includes('Behavior'));
+	unmount();
+});

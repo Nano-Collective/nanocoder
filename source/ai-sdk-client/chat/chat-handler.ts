@@ -33,10 +33,13 @@ import {convertAISDKToolCalls} from '../converters/tool-converter.js';
 import {extractRootError} from '../error-handling/error-extractor.js';
 import {parseAPIError} from '../error-handling/error-parser.js';
 import {isToolSupportError} from '../error-handling/tool-error-detector.js';
+import {buildProviderOptions} from './provider-options.js';
 import {
 	createOnStepFinishHandler,
 	createPrepareStepHandler,
 } from './streaming-handler.js';
+
+type SDKProviderOptions = Parameters<typeof streamText>[0]['providerOptions'];
 
 export interface ChatHandlerParams {
 	model: LanguageModel;
@@ -127,44 +130,44 @@ export async function handleChat(
 			// XML tool definitions are already included in the system prompt
 			// when native tools are disabled (handled upstream in useChatHandler).
 
+			// AI SDK v6 wants the system prompt via the top-level `system` option
+			// rather than as a system-role entry in `messages` (it warns otherwise
+			// to discourage prompt-injection-prone patterns). Extract it here.
+			const systemContent = messages
+				.filter(m => m.role === 'system')
+				.map(m => m.content)
+				.join('\n\n');
+			const nonSystemMessages = messages.filter(m => m.role !== 'system');
+
 			// Convert messages to AI SDK v5 ModelMessage format
-			const modelMessages = convertToModelMessages(messages);
+			const modelMessages = convertToModelMessages(nonSystemMessages);
 
 			logger.debug('AI SDK request prepared', {
 				messageCount: modelMessages.length,
+				hasSystem: systemContent.length > 0,
 				hasTools: !!aiTools,
 				toolCount: aiTools ? Object.keys(aiTools).length : 0,
 			});
 
-			// Tools with needsApproval: false auto-execute in the SDK's loop
-			// Tools with needsApproval: true cause the SDK to stop for approval
+			// These tools have `execute` stripped, so the SDK never auto-runs
+			// them - it emits the tool call and stops, and our loop decides
+			// approval/execution (see resolveToolApproval).
 			// stopWhen controls when the tool loop stops (max MAX_TOOL_STEPS steps)
 
-			// ChatGPT/Codex backend requires the system message as a top-level
-			// `instructions` field rather than as an input item. Extract it and
-			// pass via providerOptions so the Responses API includes it.
-			// reasoningSummary must be set for GPT-5 to emit human-readable
-			// reasoning text; without it the Thinking block stays empty.
-			let providerOptions:
-				| Record<string, Record<string, string | boolean>>
-				| undefined;
-			if (providerConfig.sdkProvider === 'chatgpt-codex') {
-				const systemMsg = messages.find(m => m.role === 'system');
-				providerOptions = {
-					openai: {
-						...(systemMsg ? {instructions: systemMsg.content} : {}),
-						store: false,
-						reasoningEffort:
-							modeOverrides?.modelParameters?.reasoningEffort ?? 'medium',
-						reasoningSummary:
-							modeOverrides?.modelParameters?.reasoningSummary ?? 'auto',
-					},
-				};
-			}
+			// Provider-specific request extras (Codex Responses API fields,
+			// OpenRouter provider routing / reasoning / transforms / fallback
+			// models). buildProviderOptions returns undefined when nothing
+			// applies, so the SDK call site doesn't see an empty object.
+			const providerOptions = buildProviderOptions(
+				providerConfig,
+				systemContent,
+				modeOverrides?.modelParameters,
+			);
 
 			const streamingErrors: Error[] = [];
 			const result = streamText({
 				model,
+				...(systemContent ? {system: systemContent} : {}),
 				messages: modelMessages,
 				tools: aiTools,
 				abortSignal: signal,
@@ -174,7 +177,20 @@ export async function handleChat(
 				prepareStep: createPrepareStepHandler(),
 				onError: ({error}) => {
 					// Collect streaming errors so raw SSE events don't leak to stdout.
-					const e = error instanceof Error ? error : new Error(String(error));
+					// AI SDK delivers plain objects here for some providers (e.g.
+					// OpenRouter stream errors), so String() would yield "[object Object]".
+					let e: Error;
+					if (error instanceof Error) {
+						e = error;
+					} else if (typeof error === 'string') {
+						e = new Error(error);
+					} else {
+						try {
+							e = new Error(JSON.stringify(error));
+						} catch {
+							e = new Error(String(error));
+						}
+					}
 					streamingErrors.push(e);
 					logger.warn('Streaming error received', {
 						error: e.message,
@@ -184,7 +200,10 @@ export async function handleChat(
 					});
 				},
 				headers: providerConfig.config.headers,
-				providerOptions,
+				// Cast to the SDK's narrower JSON-only type. The values built by
+				// buildProviderOptions are all JSON-serialisable, but TypeScript
+				// can't infer that through our looser internal shape.
+				providerOptions: providerOptions as SDKProviderOptions,
 				// Model parameters from /tune — passed directly to AI SDK
 				...(modeOverrides?.modelParameters && {
 					temperature: modeOverrides.modelParameters.temperature,
@@ -269,19 +288,25 @@ export async function handleChat(
 			}
 			flushBuffer();
 
-			// After streaming completes, collect final results
+			// After streaming completes, collect final results.
+			// `result.usage` is the FINAL step's usage (not `totalUsage`, which
+			// sums across steps): with stopWhen=stepCountIs(MAX_TOOL_STEPS) a
+			// single chat() call may span multiple steps, and the final step's
+			// input+output tokens reflect the actual context window occupancy.
 			const [
 				fullText,
 				resolvedToolCalls,
 				resolvedSteps,
 				reasoning,
 				finishReason,
+				usage,
 			] = await Promise.all([
 				result.text,
 				result.toolCalls,
 				result.steps,
 				result.reasoningText,
 				result.finishReason,
+				result.usage,
 			]);
 
 			logger.debug('AI SDK response received', {
@@ -336,6 +361,11 @@ export async function handleChat(
 					},
 				],
 				toolsDisabled: shouldDisableTools,
+				usage: {
+					inputTokens: usage.inputTokens,
+					outputTokens: usage.outputTokens,
+					totalTokens: usage.totalTokens,
+				},
 			};
 		} catch (error) {
 			// Calculate performance metrics even for errors
@@ -423,6 +453,15 @@ export async function handleChat(
 				error: error instanceof Error ? error.message : error,
 				errorName: error instanceof Error ? error.name : 'Unknown',
 				errorType: error?.constructor?.name || 'Unknown',
+				errorProps:
+					error instanceof Error
+						? Object.fromEntries(
+								Object.getOwnPropertyNames(error)
+									.filter(k => k !== 'stack')
+									// biome-ignore lint/suspicious/noExplicitAny: dynamic error shape
+									.map(k => [k, (error as any)[k]]),
+							)
+						: undefined,
 				correlationId,
 				provider: providerConfig.name,
 				memoryDelta: formatMemoryUsage(

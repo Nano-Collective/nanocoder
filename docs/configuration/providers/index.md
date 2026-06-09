@@ -63,9 +63,10 @@ Use dedicated AI SDK packages for native API support, enabled via the `sdkProvid
 
 | Field | Description |
 |-------|-------------|
-| `name` | Display name used in `/provider` command |
+| `name` | Display name shown alongside each model in the `/model` picker |
 | `baseUrl` | API endpoint URL |
 | `apiKey` | API key (optional, not required for local providers or GitHub Copilot) |
+| `caCertPath` | Path to a PEM CA bundle to trust private/self-signed TLS certificates (optional) |
 | `models` | Available model list for `/model` command |
 | `contextWindow` | Default context window in tokens for all models on this provider (optional) |
 | `contextWindows` | Per-model context window overrides in tokens, keyed by model name (optional) |

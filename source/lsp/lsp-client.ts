@@ -3,8 +3,8 @@
  * Manages connections to language servers via JSON-RPC over stdio
  */
 
+import {EventEmitter} from 'node:events';
 import {ChildProcess, spawn} from 'child_process';
-import {EventEmitter} from 'events';
 import {createChildLogger} from '@/utils/logging';
 import {
 	CodeAction,

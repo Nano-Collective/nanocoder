@@ -5,9 +5,9 @@ import React from 'react';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
 import {
-	type Colors,
 	decodeHtmlEntities,
 	parseMarkdown,
+	parseMarkdownParts,
 	parseMarkdownTable,
 } from '../markdown-parser/index';
 import AssistantMessage from './assistant-message';
@@ -577,6 +577,114 @@ test('parseMarkdown handles code blocks without language', t => {
 // Edge Case Tests - Things That Should NOT Be Formatted
 // ============================================================================
 
+test('parseMarkdownParts returns single text part for plain text', t => {
+	const parts = parseMarkdownParts('Hello world', mockColors);
+	t.is(parts.length, 1);
+	t.is(parts[0]?.type, 'text');
+	t.true(stripAnsi(parts[0]?.content ?? '').includes('Hello world'));
+});
+
+test('parseMarkdownParts splits fenced code blocks into separate parts', t => {
+	const message = 'Before code\n```javascript\nconst x = 5;\n```\nAfter code';
+	const parts = parseMarkdownParts(message, mockColors);
+	t.is(parts.length, 3);
+	t.is(parts[0]?.type, 'text');
+	t.true(stripAnsi(parts[0]?.content ?? '').includes('Before code'));
+	t.is(parts[1]?.type, 'code');
+	t.true(stripAnsi(parts[1]?.content ?? '').includes('const x = 5;'));
+	t.is(parts[2]?.type, 'text');
+	t.true(stripAnsi(parts[2]?.content ?? '').includes('After code'));
+});
+
+test('parseMarkdownParts keeps blockquote-wrapped fenced code as text', t => {
+	const message = [
+		'> Run this:',
+		'> ',
+		'> ```bash',
+		'> llama-server -m model.gguf',
+		'> ```',
+		'> ',
+		'> Then configure.',
+	].join('\n');
+	const parts = parseMarkdownParts(message, mockColors);
+	t.is(parts.length, 1);
+	t.is(parts[0]?.type, 'text');
+	const content = stripAnsi(parts[0]?.content ?? '');
+	t.true(content.includes('llama-server -m model.gguf'));
+	t.true(content.includes('Run this:'));
+	t.true(content.includes('Then configure.'));
+});
+
+test('parseMarkdownParts extracts indented fenced code (e.g. inside a list)', t => {
+	const message = [
+		'- Compute:',
+		'',
+		'    ```ts',
+		'    const visibleItems = filteredModels.slice(scrollStart);',
+		'    ```',
+	].join('\n');
+	const parts = parseMarkdownParts(message, mockColors);
+	const codePart = parts.find(p => p.type === 'code');
+	t.truthy(codePart, 'indented fenced code should be extracted');
+	const code = stripAnsi(codePart?.content ?? '');
+	t.true(code.includes('const visibleItems = filteredModels.slice(scrollStart);'));
+	t.false(code.startsWith('    '), 'leading indentation should be stripped');
+	t.false(code.includes('```'), 'fences should be removed');
+});
+
+test('parseMarkdownParts keeps indented list continuations as text', t => {
+	const message = '- item\n    continuation text';
+	const parts = parseMarkdownParts(message, mockColors);
+	t.is(parts.length, 1);
+	t.is(parts[0]?.type, 'text');
+	const content = stripAnsi(parts[0]?.content ?? '');
+	t.true(content.includes('• item'));
+	t.true(content.includes('continuation text'));
+});
+
+test('parseMarkdownParts code part does not contain the original fences', t => {
+	const message = '```javascript\nreturn 42;\n```';
+	const parts = parseMarkdownParts(message, mockColors);
+	const codePart = parts.find(p => p.type === 'code');
+	t.truthy(codePart);
+	t.false(codePart?.content.includes('```'));
+});
+
+test('parseMarkdownParts inline code stays in text parts', t => {
+	const message = 'Use `foo()` to call it';
+	const parts = parseMarkdownParts(message, mockColors);
+	// No fenced code blocks → should be a single text part
+	t.is(parts.length, 1);
+	t.is(parts[0]?.type, 'text');
+	t.true(stripAnsi(parts[0]?.content ?? '').includes('foo()'));
+});
+
+// ============================================================================
+// Component rendering: code blocks should appear without ┃ border
+// ============================================================================
+
+test('AssistantMessage renders code blocks without ┃ border', t => {
+	const message = 'Here is some code:\n```javascript\nconst answer = 42;\n```\nDone.';
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<AssistantMessage message={message} model="test-model" />
+		</MockThemeProvider>,
+	);
+
+	const output = stripAnsi(lastFrame() ?? '');
+	// Code content must appear in the output
+	t.true(output.includes('answer'), 'code content should be present');
+	// Every line containing the code identifier must NOT have ┃ in the same line
+	const codeLines = output.split('\n').filter(l => l.includes('answer'));
+	t.true(codeLines.length > 0, 'code lines should exist');
+	for (const line of codeLines) {
+		t.false(line.includes('┃'), `code line should not have ┃ border: ${line}`);
+	}
+	// Text around the code block should still have the border
+	const textLines = output.split('\n').filter(l => l.includes('┃'));
+	t.true(textLines.length > 0, 'text parts should still have ┃ border');
+});
+
 test('parseMarkdown does not create bullet list from hyphen in middle of line', t => {
 	const text = 'The file path is C:\\Users\\John - Documents\\file.txt';
 	const result = parseMarkdown(text, mockColors);
@@ -831,4 +939,131 @@ Let me know what you'd like to work on.`;
 		firstBulletIndex - suchAsIndex >= 2,
 		'Should have blank line before list',
 	);
+});
+
+// ============================================================================
+// Whitespace Trimming Tests
+// ============================================================================
+
+test('AssistantMessage strips leading newlines', t => {
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<AssistantMessage message="\n\nHello world" model="test-model" />
+		</MockThemeProvider>,
+	);
+
+	const raw = lastFrame() ?? '';
+	const output = stripAnsi(raw);
+	// The message "Hello world" should appear in the output
+	t.true(output.includes('Hello world'));
+	// The content inside the box should not start with newlines
+	// Check the box content line
+	const contentMatch = output.match(/┃\s*(.+)/);
+	if (contentMatch) {
+		t.false(
+			contentMatch[1].startsWith('\n'),
+			'Box content should not start with newline',
+		);
+	}
+});
+
+test('AssistantMessage strips trailing newlines', t => {
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<AssistantMessage message="Hello world\n\n" model="test-model" />
+		</MockThemeProvider>,
+	);
+
+	const output = stripAnsi(lastFrame() ?? '');
+	// The message should appear
+	t.true(output.includes('Hello world'));
+	// The box should not have trailing newlines
+});
+
+test('AssistantMessage strips leading and trailing newlines', t => {
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<AssistantMessage
+				message="\n\n\nContent\n\n\n"
+				model="test-model"
+			/>
+		</MockThemeProvider>,
+	);
+
+	const output = stripAnsi(lastFrame() ?? '');
+	// Should have the trimmed content
+	t.true(output.includes('Content'));
+	// Content should not start with newlines
+	const contentMatch = output.match(/┃\s*(.+)/);
+	if (contentMatch) {
+		t.false(
+			contentMatch[1].startsWith('\n'),
+			'Box content should not start with newline',
+		);
+	}
+});
+
+test('AssistantMessage strips carriage return characters', t => {
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<AssistantMessage message="\r\n\r\nHello\r\n\r\n" model="test-model" />
+		</MockThemeProvider>,
+	);
+
+	const output = stripAnsi(lastFrame() ?? '');
+	// Should have the message without CR/LF issues
+	t.true(output.includes('Hello'));
+	// Content should not start with \r or \n
+	const contentMatch = output.match(/┃\s*(.+)/);
+	if (contentMatch) {
+		t.false(
+			contentMatch[1].startsWith('\r'),
+			'Box content should not start with \\r',
+		);
+		t.false(
+			contentMatch[1].startsWith('\n'),
+			'Box content should not start with \\n',
+		);
+	}
+});
+
+test('AssistantMessage strips whitespace-only content to empty', t => {
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<AssistantMessage message="   \n\n   " model="test-model" />
+		</MockThemeProvider>,
+	);
+
+	const output = stripAnsi(lastFrame() ?? '');
+	// JSX attribute treats "\n" as literal backslash-n, so input is
+	// `   \n\n   ` (3 spaces + literal `\n\n` + 3 spaces). After trim, only
+	// the literal `\n\n` should remain — the input's surrounding 3-space
+	// runs must be gone. The box adds 1-char padding plus may pad lines to
+	// terminal width with trailing spaces; strip only `┃` and trim trailing
+	// width-padding before asserting the leading 3-space prefix is gone.
+	t.true(output.includes('test-model:'));
+	const boxContent = output
+		.split('\n')
+		.filter(l => l.includes('┃'))
+		.map(l => l.replace(/^.*?┃/, '').trimEnd());
+	t.true(
+		boxContent.every(l => !l.startsWith('   ') && !l.endsWith('   ')),
+		`Trim should strip surrounding spaces, got: ${JSON.stringify(boxContent)}`,
+	);
+});
+
+test('AssistantMessage preserves internal newlines', t => {
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<AssistantMessage
+				message="Line 1\nLine 2\nLine 3"
+				model="test-model"
+			/>
+		</MockThemeProvider>,
+	);
+
+	const output = stripAnsi(lastFrame() ?? '');
+	t.true(output.includes('Line 1'));
+	t.true(output.includes('Line 2'));
+	t.true(output.includes('Line 3'));
 });

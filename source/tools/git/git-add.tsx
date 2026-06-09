@@ -6,12 +6,11 @@
 
 import {Box, Text} from 'ink';
 import React from 'react';
-
-import {getCurrentMode} from '@/context/mode-context';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {formatError} from '@/utils/error-formatter';
 import {execGit, formatStatusChar, getDiffStats, parseGitStatus} from './utils';
 
 // ============================================================================
@@ -87,7 +86,7 @@ const executeGitAdd = async (args: GitAddInput): Promise<string> => {
 
 		return lines.join('\n');
 	} catch (error) {
-		return `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+		return `Error: ${formatError(error)}`;
 	}
 };
 
@@ -117,11 +116,6 @@ const gitAddCoreTool = tool({
 		},
 		required: [],
 	}),
-	// STANDARD - requires approval in normal mode, skipped in auto-accept
-	needsApproval: () => {
-		const mode = getCurrentMode();
-		return mode === 'normal';
-	},
 	execute: async (args, _options) => {
 		return await executeGitAdd(args);
 	},
@@ -206,4 +200,6 @@ export const gitAddTool: NanocoderToolExport = {
 	name: 'git_add' as const,
 	tool: gitAddCoreTool,
 	formatter,
+	// STANDARD - requires approval in normal mode, skipped in auto-accept
+	approval: (_args, mode) => mode === 'normal',
 };
