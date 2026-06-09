@@ -77,6 +77,8 @@ export const DELAY_COMMAND_COMPLETE_MS = 100;
 // === BASH EXECUTION ===
 export const INTERVAL_BASH_PROGRESS_MS = 500;
 export const BASH_OUTPUT_PREVIEW_LENGTH = 150;
+export const TIMEOUT_BASH_DEFAULT_MS = 120_000;
+export const BASH_MAX_OUTPUT_BYTES = 5 * 1024 * 1024;
 
 // === FILE SCANNER ===
 export const MAX_FILES_TO_SCAN = 1000;
