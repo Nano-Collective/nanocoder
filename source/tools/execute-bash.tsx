@@ -17,11 +17,14 @@ import {jsonSchema, tool} from '@/types/core';
  * @param command - The bash command to execute
  * @returns Object containing executionId and promise for the result
  */
-export function executeBashCommand(command: string): {
+export function executeBashCommand(
+	command: string,
+	options?: {timeoutMs?: number; signal?: AbortSignal},
+): {
 	executionId: string;
 	promise: Promise<BashExecutionState>;
 } {
-	return bashExecutor.execute(command);
+	return bashExecutor.execute(command, options);
 }
 
 /**
@@ -58,8 +61,13 @@ export function formatBashResultForLLM(result: BashExecutionState): string {
  * Note: For streaming tools, the tool handler will use executeBashCommand directly
  * and this function serves as a fallback/compatibility layer
  */
-const executeExecuteBash = async (args: {command: string}): Promise<string> => {
-	const {promise} = bashExecutor.execute(args.command);
+const executeExecuteBash = async (
+	args: {command: string},
+	options?: {abortSignal?: AbortSignal},
+): Promise<string> => {
+	const {promise} = bashExecutor.execute(args.command, {
+		signal: options?.abortSignal,
+	});
 	const result = await promise;
 	return formatBashResultForLLM(result);
 };
@@ -77,8 +85,8 @@ const executeBashCoreTool = tool({
 		},
 		required: ['command'],
 	}),
-	execute: async (args, _options) => {
-		return await executeExecuteBash(args);
+	execute: async (args, options) => {
+		return await executeExecuteBash(args, options);
 	},
 });
 

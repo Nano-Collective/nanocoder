@@ -4,8 +4,10 @@ import {EventEmitter} from 'node:events';
 import {platform} from 'node:process';
 
 import {
+	BASH_MAX_OUTPUT_BYTES,
 	BASH_OUTPUT_PREVIEW_LENGTH,
 	INTERVAL_BASH_PROGRESS_MS,
+	TIMEOUT_BASH_DEFAULT_MS,
 } from '@/constants';
 
 const isWindows = platform === 'win32';
@@ -26,12 +28,18 @@ interface ExecutionEntry {
 	process: ChildProcess;
 	intervalId: NodeJS.Timeout;
 	resolve: (state: BashExecutionState) => void;
+	timeoutId?: NodeJS.Timeout;
+	signal?: AbortSignal;
+	abortListener?: () => void;
 }
 
 export class BashExecutor extends EventEmitter {
 	private executions = new Map<string, ExecutionEntry>();
 
-	execute(command: string): {
+	execute(
+		command: string,
+		options?: {timeoutMs?: number; signal?: AbortSignal},
+	): {
 		executionId: string;
 		promise: Promise<BashExecutionState>;
 	} {
@@ -56,9 +64,19 @@ export class BashExecutor extends EventEmitter {
 				// children keep running in the background.
 				spawn('sh', ['-c', command], {detached: true});
 
+		let outputBytes = 0;
+
 		// Collect output
 		proc.stdout.on('data', (data: Buffer) => {
-			state.fullOutput += data.toString();
+			if (outputBytes < BASH_MAX_OUTPUT_BYTES) {
+				const chunk = data.toString();
+				state.fullOutput += chunk;
+				outputBytes += Buffer.byteLength(chunk);
+				if (outputBytes >= BASH_MAX_OUTPUT_BYTES) {
+					state.fullOutput +=
+						'\n... [Output truncated to prevent memory exhaustion]';
+				}
+			}
 			state.outputPreview = state.fullOutput.slice(-BASH_OUTPUT_PREVIEW_LENGTH);
 			// Emit progress immediately when output is received
 			// This ensures fast commands still show streaming output
@@ -66,7 +84,15 @@ export class BashExecutor extends EventEmitter {
 		});
 
 		proc.stderr.on('data', (data: Buffer) => {
-			state.stderr += data.toString();
+			if (outputBytes < BASH_MAX_OUTPUT_BYTES) {
+				const chunk = data.toString();
+				state.stderr += chunk;
+				outputBytes += Buffer.byteLength(chunk);
+				if (outputBytes >= BASH_MAX_OUTPUT_BYTES) {
+					state.stderr +=
+						'\n... [Stderr truncated to prevent memory exhaustion]';
+				}
+			}
 			// Emit progress immediately when stderr is received
 			this.emit('progress', {...state});
 		});
@@ -80,15 +106,42 @@ export class BashExecutor extends EventEmitter {
 		intervalId.unref();
 
 		const promise = new Promise<BashExecutionState>((resolve, _reject) => {
-			// Store resolve function so cancel() can resolve the promise
-			this.executions.set(executionId, {
+			const entry: ExecutionEntry = {
 				state,
 				process: proc,
 				intervalId,
 				resolve,
-			});
+				signal: options?.signal,
+			};
+
+			const ms = options?.timeoutMs ?? TIMEOUT_BASH_DEFAULT_MS;
+			if (ms > 0) {
+				entry.timeoutId = setTimeout(() => {
+					this.cancel(executionId, `Command timed out after ${ms}ms`);
+				}, ms);
+				entry.timeoutId.unref();
+			}
+
+			if (options?.signal) {
+				entry.abortListener = () => {
+					this.cancel(executionId, 'Cancelled via AbortSignal');
+				};
+
+				if (options.signal.aborted) {
+					process.nextTick(entry.abortListener);
+				} else {
+					options.signal.addEventListener('abort', entry.abortListener);
+				}
+			}
+
+			this.executions.set(executionId, entry);
 
 			proc.on('close', (code: number | null) => {
+				if (entry.timeoutId) clearTimeout(entry.timeoutId);
+				if (entry.signal && entry.abortListener) {
+					entry.signal.removeEventListener('abort', entry.abortListener);
+				}
+
 				// Only process if not already handled by cancel()
 				if (!this.executions.has(executionId)) return;
 
@@ -101,6 +154,11 @@ export class BashExecutor extends EventEmitter {
 			});
 
 			proc.on('error', (error: Error) => {
+				if (entry.timeoutId) clearTimeout(entry.timeoutId);
+				if (entry.signal && entry.abortListener) {
+					entry.signal.removeEventListener('abort', entry.abortListener);
+				}
+
 				// Only process if not already handled by cancel()
 				if (!this.executions.has(executionId)) return;
 
@@ -119,11 +177,15 @@ export class BashExecutor extends EventEmitter {
 		return {executionId, promise};
 	}
 
-	cancel(executionId: string): boolean {
+	cancel(executionId: string, reason = 'Cancelled by user'): boolean {
 		const execution = this.executions.get(executionId);
 		if (!execution) return false;
 
 		clearInterval(execution.intervalId);
+		if (execution.timeoutId) clearTimeout(execution.timeoutId);
+		if (execution.signal && execution.abortListener) {
+			execution.signal.removeEventListener('abort', execution.abortListener);
+		}
 
 		// Destroy stdio streams to prevent them from keeping the event loop alive
 		execution.process.stdout?.destroy();
@@ -132,7 +194,7 @@ export class BashExecutor extends EventEmitter {
 
 		this.killProcessTree(execution.process);
 		execution.state.isComplete = true;
-		execution.state.error = 'Cancelled by user';
+		execution.state.error = reason;
 		this.emit('complete', {...execution.state});
 
 		// Resolve the promise with the cancelled state
