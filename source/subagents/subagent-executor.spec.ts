@@ -739,3 +739,51 @@ test.serial('subagent model can use provider-scoped context window override', as
 
 	t.is(limit, 131072);
 });
+
+test('mode resolver overrides the static parentMode and is read live', async t => {
+	const toolManager = createMockToolManager({
+		execute_bash: {handler: async () => 'ok', readOnly: false, needsApproval: true},
+	});
+	const client = createMockClient([]);
+	// Static parent mode is 'normal' (the buggy default), but a live resolver
+	// is wired - it must win, and changing it must take effect immediately.
+	const executor = new SubagentExecutor(
+		toolManager,
+		client,
+		process.cwd(),
+		'normal',
+	);
+	let mode: 'normal' | 'yolo' = 'yolo';
+	executor.setModeResolver(() => mode);
+
+	const needsApproval = (name: string) =>
+		(executor as unknown as {
+			needsApprovalForTool: (n: string, a: unknown) => Promise<boolean>;
+		}).needsApprovalForTool(name, {});
+
+	// yolo -> no approval, even though parentMode is 'normal'.
+	t.false(await needsApproval('execute_bash'));
+
+	// Flip the live source (simulating a mid-run switch) -> next check honors it.
+	mode = 'normal';
+	t.true(await needsApproval('execute_bash'));
+});
+
+test('without a resolver, approval falls back to the static parentMode', async t => {
+	const toolManager = createMockToolManager({
+		execute_bash: {handler: async () => 'ok', readOnly: false, needsApproval: true},
+	});
+	const client = createMockClient([]);
+	const executor = new SubagentExecutor(
+		toolManager,
+		client,
+		process.cwd(),
+		'yolo',
+	);
+
+	const needsApproval = (executor as unknown as {
+		needsApprovalForTool: (n: string, a: unknown) => Promise<boolean>;
+	}).needsApprovalForTool('execute_bash', {});
+
+	t.false(await needsApproval);
+});

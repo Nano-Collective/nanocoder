@@ -11,6 +11,7 @@ import {listDirectoryTool} from '@/tools/list-directory';
 import {getDiagnosticsTool} from '@/tools/lsp-get-diagnostics';
 import {readFileTool} from '@/tools/read-file';
 import {searchFileContentsTool} from '@/tools/search-file-contents';
+import {checkSkillTool} from '@/tools/skill-check';
 import {writeTasksTool} from '@/tools/tasks';
 import {webSearchTool} from '@/tools/web-search';
 import type {NanocoderToolExport} from '@/types/index';
@@ -34,6 +35,8 @@ const staticTools: NanocoderToolExport[] = [
 	...getFileOpTools(),
 	// Task management tool
 	writeTasksTool,
+	// Skill authoring linter
+	checkSkillTool,
 ];
 
 // Conditionally available tools (based on system capabilities)

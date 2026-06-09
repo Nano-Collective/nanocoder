@@ -96,6 +96,35 @@ export class BundleLoader {
 		return {skills: [...byName.values()], errors};
 	}
 
+	/**
+	 * Parse and validate a single bundle directory without scanning the
+	 * priority layers. Used by the skill linter (`/skills check`, the
+	 * `check_skill` tool) to validate a bundle straight from disk - including
+	 * files written in the current session that the boot-time registry hasn't
+	 * picked up yet. Returns the same `{skill, errors}` shape `loadBundle`
+	 * produces; `skill` is null only when `skill.yaml` is missing or its
+	 * manifest fails to parse.
+	 */
+	async checkBundle(
+		bundlePath: string,
+	): Promise<{skill: Skill | null; errors: SkillLoadError[]}> {
+		const manifestPath = join(bundlePath, 'skill.yaml');
+		if (!existsSync(manifestPath)) {
+			return {
+				skill: null,
+				errors: [
+					{
+						bundlePath,
+						filePath: manifestPath,
+						message:
+							'No skill.yaml found - a bundle must contain a skill.yaml manifest at its root.',
+					},
+				],
+			};
+		}
+		return this.loadBundle(bundlePath, manifestPath, 'project');
+	}
+
 	private async scanLayer(
 		root: string,
 		priority: SkillPriority,

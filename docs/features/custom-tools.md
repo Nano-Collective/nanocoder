@@ -114,6 +114,7 @@ The body is a shell script with two placeholder forms:
 
 - **`{{ name }}`** — substitutes `args[name]`, shell-quoted. Arrays expand to space-separated quoted tokens.
 - **`{{# name }}…{{/ name }}`** — section: included only when `args[name]` is truthy (non-empty string, non-empty array, non-zero number, `true`, etc.). Nested sections are supported.
+- **`{{^ name }}…{{/ name }}`** — inverted section: included only when `args[name]` is falsy/empty (the complement of `{{# name }}`).
 
 All substituted values are wrapped in POSIX single quotes and any embedded single quotes are escaped. This blocks shell injection through parameter values:
 
