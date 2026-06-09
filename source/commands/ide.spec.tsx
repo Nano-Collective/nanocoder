@@ -11,7 +11,8 @@ test('ideCommand has correct name', t => {
 test('ideCommand has a description', t => {
 	t.truthy(ideCommand.description);
 	t.is(typeof ideCommand.description, 'string');
-	t.is(ideCommand.description, 'Connect to an IDE');
+	t.true(ideCommand.description.includes('Connect to an IDE'));
+	t.true(ideCommand.description.includes('deprecated'));
 });
 
 test('ideCommand has a handler function', t => {
