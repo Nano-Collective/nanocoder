@@ -12,7 +12,7 @@ import type {
 import type {Tokenizer} from '@/types/tokenization';
 import {
 	calculateTokenBreakdown,
-	calculateToolDefinitionsTokens,
+	calculateToolDefinitionsTokensFromDefs,
 } from '@/usage/calculator';
 import {resolveContextUsage} from '@/usage/context-source';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
@@ -136,13 +136,16 @@ export function useContextPercentage({
 			getTuneToolMode(tune) !== 'native';
 		const toolDefTokens =
 			toolManager && !nativeToolsDisabled
-				? calculateToolDefinitionsTokens(
-						toolManager.getAvailableToolNames(
-							tune,
-							developmentMode,
-							undefined,
-							currentModel,
-						).length,
+				? calculateToolDefinitionsTokensFromDefs(
+						toolManager.getFilteredTools(
+							toolManager.getAvailableToolNames(
+								tune,
+								developmentMode,
+								undefined,
+								currentModel,
+							),
+						),
+						tokenizer,
 					)
 				: 0;
 

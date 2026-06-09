@@ -1,8 +1,14 @@
-import {type Tool as AISDKTool, type JSONValue, jsonSchema, tool} from 'ai';
+import {
+	type Tool as AISDKTool,
+	asSchema,
+	type JSONValue,
+	jsonSchema,
+	tool,
+} from 'ai';
 import React from 'react';
 import type {AIProviderConfig} from '@/types/config';
 
-export {jsonSchema, tool};
+export {asSchema, jsonSchema, tool};
 
 // Type for AI SDK tools (return type of tool() function)
 // Tool<PARAMETERS, RESULT> is AI SDK's actual tool type

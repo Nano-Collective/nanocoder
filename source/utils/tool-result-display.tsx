@@ -39,6 +39,21 @@ function CompactToolResult({
 }
 
 /**
+ * Compact tool error display - shows "\u2692 toolName failed." in error red.
+ * Used in compact display mode so failures don't dump the full verbose
+ * error; the model still receives the full error in conversation history,
+ * so this only trims what the user sees.
+ */
+function CompactToolError({toolName}: {toolName: string}) {
+	const {colors} = useTheme();
+	return (
+		<Text color={colors.error}>
+			{'\u2692'} {toolName} failed.
+		</Text>
+	);
+}
+
+/**
  * Generate a compact grouped description for N calls of the same tool.
  * Always uses count-based phrasing for consistency.
  */
@@ -156,7 +171,21 @@ export async function displayToolResult(
 	const isError = result.content.startsWith('Error: ') || isValidationError;
 
 	if (isError) {
-		// Display as error message - always shown in full
+		// Compact mode: condense failures to a short red one-liner
+		// ("⚒ write_file failed.") instead of the full error output.
+		// The model still receives the full error in conversation history,
+		// so this only trims the user-facing display.
+		if (compact && !ALWAYS_EXPANDED_TOOLS.has(result.name)) {
+			addToChatQueue(
+				<CompactToolError
+					key={generateKey(`tool-error-compact-${result.tool_call_id}`)}
+					toolName={result.name}
+				/>,
+			);
+			return;
+		}
+
+		// Display as error message - shown in full
 		const errorMessage = isValidationError
 			? result.content
 			: result.content.replace(/^Error: /, '');

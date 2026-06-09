@@ -205,7 +205,8 @@ export const lazyCommands: LazyCommand[] = [
 	},
 	{
 		name: 'skills',
-		description: 'List loaded skills. Subcommands: show <name>, create <name>.',
+		description:
+			'List loaded skills. Subcommands: show <name>, create <name>, check <name>.',
 		load: () => import('@/commands/skills').then(m => m.skillsCommand),
 	},
 ];

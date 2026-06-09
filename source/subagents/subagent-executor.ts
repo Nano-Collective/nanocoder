@@ -50,6 +50,15 @@ export class SubagentExecutor {
 	private parentClient: LLMClient;
 	private projectRoot: string;
 	private parentMode: DevelopmentMode;
+	/**
+	 * Live source for the current development mode, read on every tool-approval
+	 * check. When set (the interactive app wires it to the same ref the main
+	 * loop uses), it takes precedence over the static `parentMode` so the
+	 * subagent honors the mode at spawn time AND a switch made while it is mid
+	 * execution (e.g. flipping to yolo). Falls back to `parentMode` for callers
+	 * that don't supply a resolver (plain shell, tests).
+	 */
+	private modeResolver?: () => DevelopmentMode;
 
 	constructor(
 		toolManager: ToolManager,
@@ -68,6 +77,20 @@ export class SubagentExecutor {
 	 */
 	setParentMode(mode: DevelopmentMode): void {
 		this.parentMode = mode;
+	}
+
+	/**
+	 * Provide a live getter for the current development mode. Read per tool
+	 * call, so mode changes take effect immediately - including while a
+	 * subagent is already running.
+	 */
+	setModeResolver(resolver: () => DevelopmentMode): void {
+		this.modeResolver = resolver;
+	}
+
+	/** The mode in effect right now: live resolver if set, else the snapshot. */
+	private currentMode(): DevelopmentMode {
+		return this.modeResolver ? this.modeResolver() : this.parentMode;
 	}
 
 	/**
@@ -488,7 +511,7 @@ export class SubagentExecutor {
 	): Promise<boolean> {
 		const toolEntry = this.toolManager.getToolEntry(toolName);
 		return resolveToolApproval(toolName, toolEntry, rawArguments, {
-			mode: this.parentMode,
+			mode: this.currentMode(),
 		});
 	}
 

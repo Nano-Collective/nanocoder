@@ -16,6 +16,7 @@ import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {generateKey} from '@/session/key-generator';
+import {checkSkillBundle, type SkillCheckReport} from '@/skills/check';
 import {findSkill, getLoadedSkills} from '@/skills/skill-registry';
 import type {Command} from '@/types/index';
 import type {Skill} from '@/types/skills';
@@ -189,10 +190,77 @@ function SkillDetailView({skill}: {skill: Skill}) {
 	);
 }
 
+function SkillCheckView({report}: {report: SkillCheckReport}) {
+	const boxWidth = useTerminalWidth();
+	const {colors} = useTheme();
+
+	const errorCount = report.issues.filter(i => i.severity === 'error').length;
+	const warningCount = report.issues.filter(
+		i => i.severity === 'warning',
+	).length;
+
+	const headline = report.ok
+		? `PASS · ${report.memberSummary}`
+		: !report.found
+			? 'FAIL · not found'
+			: `FAIL · ${errorCount} error${errorCount === 1 ? '' : 's'}${warningCount ? `, ${warningCount} warning${warningCount === 1 ? '' : 's'}` : ''}`;
+
+	return (
+		<Box width={boxWidth} marginBottom={1} flexDirection="column">
+			<Box marginBottom={report.issues.length > 0 ? 1 : 0}>
+				<Text color={report.ok ? colors.success : colors.error} bold>
+					{headline}
+				</Text>
+				<Text color={colors.secondary}> · {report.bundlePath}</Text>
+			</Box>
+
+			{report.issues.map((issue, i) => (
+				<Box key={`${issue.severity}-${i}`} flexDirection="column">
+					<Box marginBottom={1}>
+						<Text
+							color={issue.severity === 'error' ? colors.error : colors.warning}
+						>
+							{issue.severity === 'error' ? '✗ ' : '! '}{' '}
+						</Text>
+						<Text color={colors.text}>{issue.message}</Text>
+					</Box>
+					{issue.filePath ? (
+						<Box marginLeft={2}>
+							<Text color={colors.secondary}>{issue.filePath}</Text>
+						</Box>
+					) : null}
+				</Box>
+			))}
+
+			{report.ok && report.issues.length === 0 ? (
+				<Text color={colors.secondary}>
+					No problems found. Restart nanocoder to load it.
+				</Text>
+			) : null}
+		</Box>
+	);
+}
+
 export const skillsCommand: Command = {
 	name: 'skills',
-	description: 'List loaded skills. Subcommands: show <name>, create <name>.',
-	handler: (args, _messages, _metadata) => {
+	description:
+		'List loaded skills. Subcommands: show <name>, create <name>, check <name>.',
+	handler: async (args, _messages, _metadata) => {
+		if (args[0] === 'check') {
+			const name = args[1];
+			if (!name) {
+				return infoMsg(
+					'Usage: /skills check <name>\nExample: /skills check pr-reviewer',
+					'skills',
+				);
+			}
+			const report = await checkSkillBundle(process.cwd(), name);
+			return React.createElement(SkillCheckView, {
+				report,
+				key: generateKey('skills'),
+			});
+		}
+
 		if (args[0] === 'create') {
 			// `create` is intercepted in app-util.ts before dispatch. Show usage
 			// if the user reached this branch (no name supplied, or non-app

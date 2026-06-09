@@ -118,6 +118,7 @@ coverage
 .nanocoder/schedule-runs.json
 .nanocoder/schedules.json
 .generated-prompts/
+.nanocoder/skills
 
 # Generated quality report (baseline.json is checked in, others are not)
 benchmarks/report.json

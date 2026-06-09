@@ -369,6 +369,7 @@ parameters:
 # The body is a shell script.
 # Use {{ name }} to substitute a parameter (values are shell-quoted - safe against injection).
 # Use {{# name }}...{{/ name }} for conditional sections (include only when the param is truthy).
+# Use {{^ name }}...{{/ name }} for inverted sections (include only when the param is falsy/empty).
 
 kubectl get pods -n {{ namespace }} -o wide
 {{# label }}kubectl get pods -l {{ label }}{{/ label }}
@@ -482,7 +483,7 @@ export async function handleSkillsCreate(
  * OpenAPI-style or kebab-case shapes the parsers reject.
  */
 function buildSkillBundleDesignPrompt(name: string): string {
-	return `I just created a new skill bundle at .nanocoder/skills/${name}/. Ask me what this skill should do, then write the members using \`write_file\`. After writing, summarize the resulting tree so I can verify.
+	return `I just created a new skill bundle at .nanocoder/skills/${name}/. Ask me what this skill should do, then write the members using \`write_file\`. After writing, verify the bundle with the \`check_skill\` tool (see "Verify before you finish" below), fix anything it flags, then summarize the resulting tree so I can verify.
 
 # Bundle layout
 
@@ -531,10 +532,28 @@ subscribe:
 ---
 description: One-line summary.               # required
 aliases: [short, c]                          # optional
+parameters: [pr_number, "issue_number="]     # optional; POSITIONAL list of names
 # subscribe: omit target here (implicit self).
 ---
-The prompt body the LLM receives when the user runs /<command>.
+Reviewing PR #{{ pr_number }}{{# issue_number }}, linked to issue #{{ issue_number }}{{/ issue_number }}.
 \`\`\`
+
+**Command parameters are a flat list of names**, NOT the tool parameter
+format. \`parameters: [pr_number, issue_number]\` is correct. A typed mapping
+(\`pr_number:\\n  type: string\\n  required: true\`) is the *tool* schema and is
+silently ignored in a command - the placeholders then render as undeclared.
+
+Arguments fill the names positionally, and all are optional (an omitted one
+substitutes empty). To make optionality clean:
+
+- **Default value**: \`"base=origin/main"\` - an omitted arg substitutes the
+  default instead of empty. (Quote the entry in YAML when it contains \`=\` or \`/\`.)
+- **Conditional text**: \`{{# name }}…{{/ name }}\` includes the block only when
+  the arg was given; \`{{^ name }}…{{/ name }}\` only when it was omitted. Use
+  this so an omitted arg drops a whole clause instead of leaving "issue #.".
+
+Every \`{{ name }}\` (and section name) must be a declared parameter or a
+built-in (\`cwd\`, \`command\`, \`args\`).
 
 # \`agents/<name>.md\` schema
 
@@ -601,7 +620,9 @@ parameters:
 # The body is a shell script.
 # Use {{ name }} to substitute a parameter (values are shell-quoted -
 # safe against injection). Use {{# name }}...{{/ name }} for conditional
-# sections that include only when the param is truthy.
+# sections that include only when the param is truthy, and
+# {{^ name }}...{{/ name }} for inverted sections that include only when it
+# is falsy/empty. Every {{ name }} must be a declared parameter.
 
 kubectl get pods -n {{ namespace }} -o wide
 {{# label }}kubectl get pods -l {{ label }}{{/ label }}
@@ -616,6 +637,10 @@ kubectl get pods -n {{ namespace }} -o wide
 5. **\`approval: never\`** for read-only operations (\`ls\`, \`cat\`, \`git status\`, \`kubectl get\`, \`gh ...\` queries). Use \`always\` only if the tool mutates state and you want a prompt every run. Use \`destructive\` only for file-mutation-style tools.
 6. **Paths in subscriptions are relative globs.** \`docs/**\`, \`src/**/*.ts\` ✓. \`/etc/...\` ✗, \`../...\` ✗.
 7. **Use \`write_file\` to author each file**, including \`skill.yaml\`. Do not concatenate content into a single file.
+
+# Verify before you finish
+
+After writing all files, call the \`check_skill\` tool with \`name: ${name}\`. It re-parses the bundle from disk with the same parsers the loader uses, so a PASS means the skill will load. If it reports FAIL, read each error (they name the file and the exact problem - e.g. a kebab-case tool name, a list-shaped \`parameters\` block, a \`subscribe.target\` that doesn't resolve), fix the offending file with \`write_file\`, and call \`check_skill\` again. Repeat until it reports PASS, and address warnings where they make sense. Only summarize the bundle for me once the check passes.
 
 Now: ask me what the skill should do, then design it.`;
 }
@@ -667,7 +692,7 @@ function buildCommandDesignPrompt(
 ---
 description: One-line summary.        # * shown in /commands and to the user
 aliases: [short, c]                   # optional; alternate slash names
-parameters: [filename]                # optional; positional args become {{filename}} placeholders
+parameters: [filename, "mode=review"] # optional; positional names; "name=default" makes one optional
 tags: [testing, quality]              # optional; categorize for /commands grouping
 triggers: [write tests, unit test]    # optional; auto-inject when the user mentions these phrases
 estimated-tokens: 2000                # optional; rough token cost shown in the auto-injectable list
@@ -681,16 +706,18 @@ examples:                             # optional; rendered in /commands show
 references: [docs/testing-guide.md]   # optional; pointers shown in /commands show
 ---
 The body is the prompt the LLM receives when the user runs /${commandBaseName}.
-Use {{paramName}} placeholders to interpolate positional arguments.
+Use {{ filename }} to interpolate an argument, and
+{{# mode }}…{{/ mode }} to include text only when that argument was given.
 \`\`\`
 
 # Rules that catch out AI-generated commands
 
 1. **\`description:\` is required.** Everything else is optional.
 2. **Parameters are positional**, not named. \`parameters: [filename, mode]\` means \`/${commandBaseName} foo.ts review\` → \`{{filename}} = foo.ts\`, \`{{mode}} = review\`.
-3. **Don't \`subscribe:\` from a one-off command** unless you want the daemon to fire it on a schedule. If you do, omit \`target:\` - the implicit target is the command itself.
-4. **Body is the prompt**, not surrounding chatter. The model sees the body verbatim with placeholders substituted.
-5. **Use \`write_file\`** to author the file. Do not inline the markdown in chat.
+3. **All arguments are optional.** An omitted one substitutes empty. Use \`"name=default"\` to substitute a default instead, and \`{{# name }}…{{/ name }}\` / \`{{^ name }}…{{/ name }}\` sections to include or drop text based on whether the arg was given.
+4. **Don't \`subscribe:\` from a one-off command** unless you want the daemon to fire it on a schedule. If you do, omit \`target:\` - the implicit target is the command itself.
+5. **Body is the prompt**, not surrounding chatter. The model sees the body verbatim with placeholders substituted.
+6. **Use \`write_file\`** to author the file. Do not inline the markdown in chat.
 
 Now: ask me what this command should do, then design it.`;
 }

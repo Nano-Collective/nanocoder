@@ -137,6 +137,65 @@ test('displayToolResult - renders a validation failure as a red error', async t 
 	t.regex(element.props.message, /expected string, received object/);
 });
 
+test('displayToolResult - compact mode condenses an error to a one-liner', async t => {
+	const toolCall = createMockToolCall('call-1', 'write_file');
+	const result = createMockToolResult(
+		'call-1',
+		'write_file',
+		'Error: Something went wrong with a very long verbose explanation',
+	);
+	const {addToChatQueue, queue} = createMockAddToChatQueue();
+
+	await displayToolResult(toolCall, result, null, addToChatQueue, true);
+
+	t.is(queue.length, 1);
+	const {lastFrame, unmount} = renderWithTheme(
+		queue[0] as React.ReactElement,
+	);
+	const output = lastFrame();
+	t.regex(output!, /write_file failed\./);
+	t.notRegex(output!, /verbose explanation/);
+	unmount();
+});
+
+test('displayToolResult - compact mode condenses a validation failure too', async t => {
+	const toolCall = createMockToolCall('call-1', 'write_file');
+	const result = createMockToolResult(
+		'call-1',
+		'write_file',
+		'⚒ Validation failed: Invalid file path: "/abs/path". Path must be relative.',
+	);
+	const {addToChatQueue, queue} = createMockAddToChatQueue();
+
+	await displayToolResult(toolCall, result, null, addToChatQueue, true);
+
+	t.is(queue.length, 1);
+	const {lastFrame, unmount} = renderWithTheme(
+		queue[0] as React.ReactElement,
+	);
+	const output = lastFrame();
+	t.regex(output!, /write_file failed\./);
+	t.notRegex(output!, /Invalid file path/);
+	unmount();
+});
+
+test('displayToolResult - non-compact error still shows full message', async t => {
+	const toolCall = createMockToolCall('call-1', 'write_file');
+	const result = createMockToolResult(
+		'call-1',
+		'write_file',
+		'Error: Something went wrong with a very long verbose explanation',
+	);
+	const {addToChatQueue, queue} = createMockAddToChatQueue();
+
+	await displayToolResult(toolCall, result, null, addToChatQueue);
+
+	t.is(queue.length, 1);
+	const element = queue[0] as React.ReactElement<ErrorMessageProps>;
+	t.is(element.type, ErrorMessage);
+	t.regex(element.props.message, /verbose explanation/);
+});
+
 test('displayToolResult - strips "Error: " prefix from error message', async t => {
 	const toolCall = createMockToolCall('call-1', 'TestTool');
 	const result = createMockToolResult(
@@ -501,7 +560,7 @@ test('displayToolResult - compact mode adds single compact element to queue', as
 	t.true(React.isValidElement(queue[0]));
 });
 
-test('displayToolResult - compact mode still shows errors in full', async t => {
+test('displayToolResult - compact mode condenses errors to a one-liner', async t => {
 	const toolCall = createMockToolCall('call-1', 'read_file');
 	const result = createMockToolResult(
 		'call-1',
@@ -519,9 +578,13 @@ test('displayToolResult - compact mode still shows errors in full', async t => {
 	);
 
 	t.is(queue.length, 1);
-	const element = queue[0] as React.ReactElement<ErrorMessageProps>;
-	t.is(element.type, ErrorMessage);
-	t.is(element.props.message, 'File not found');
+	const {lastFrame, unmount} = renderWithTheme(
+		queue[0] as React.ReactElement,
+	);
+	const output = lastFrame();
+	t.regex(output!, /read_file failed\./);
+	t.notRegex(output!, /File not found/);
+	unmount();
 });
 
 // ============================================================================

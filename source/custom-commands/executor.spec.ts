@@ -86,6 +86,59 @@ test('execute wraps the prompt with the command name', t => {
 	t.true(result.includes('/test'));
 });
 
+test('execute falls back to a parameter default when the arg is omitted', t => {
+	const command = createTestCommand({
+		content: 'Diff against {{base}}.',
+		metadata: {parameters: ['base=origin/main']},
+	});
+
+	t.true(executor.execute(command, []).includes('Diff against origin/main.'));
+	t.true(
+		executor.execute(command, ['feature']).includes('Diff against feature.'),
+	);
+});
+
+test('execute keeps a section when its parameter is provided', t => {
+	const command = createTestCommand({
+		content: 'PR #{{pr}}{{# issue }} linked to #{{issue}}{{/ issue }}.',
+		metadata: {parameters: ['pr', 'issue']},
+	});
+
+	const result = executor.execute(command, ['123', '45']);
+	t.true(result.includes('PR #123 linked to #45.'));
+});
+
+test('execute drops a section when its parameter is omitted', t => {
+	const command = createTestCommand({
+		content: 'PR #{{pr}}{{# issue }} linked to #{{issue}}{{/ issue }}.',
+		metadata: {parameters: ['pr', 'issue']},
+	});
+
+	const result = executor.execute(command, ['123']);
+	t.true(result.includes('PR #123.'));
+	t.false(result.includes('linked to'));
+});
+
+test('execute supports inverted sections for an omitted parameter', t => {
+	const command = createTestCommand({
+		content: '{{^ issue }}No issue linked.{{/ issue }}{{# issue }}Issue #{{issue}}.{{/ issue }}',
+		metadata: {parameters: ['pr', 'issue']},
+	});
+
+	t.true(executor.execute(command, ['123']).includes('No issue linked.'));
+	t.true(executor.execute(command, ['123', '45']).includes('Issue #45.'));
+});
+
+test('formatHelp shows defaulted parameters as optional', t => {
+	const command = createTestCommand({
+		metadata: {parameters: ['pr_number', 'base=origin/main']},
+	});
+
+	const result = executor.formatHelp(command);
+	t.true(result.includes('<pr_number>'));
+	t.true(result.includes('[base=origin/main]'));
+});
+
 test('formatHelp returns command name', t => {
 	const command = createTestCommand();
 

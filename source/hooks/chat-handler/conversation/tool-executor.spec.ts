@@ -818,7 +818,7 @@ test.serial(
 	},
 );
 
-test('executeToolsDirectly - compact mode still displays errors in full', async t => {
+test('executeToolsDirectly - compact mode renders errors instead of counting them', async t => {
 	const toolCalls: ToolCall[] = [
 		{id: 'call_1', function: {name: 'failing_tool', arguments: '{}'}},
 	];
@@ -850,7 +850,7 @@ test('executeToolsDirectly - compact mode still displays errors in full', async 
 
 	t.is(results.length, 1);
 	t.true(results[0].content.includes('Error:'));
-	// Error results should be displayed in full (added to chat queue), not counted
+	// Error results render as a condensed one-liner (added to chat queue), not counted
 	t.true(addToChatQueueCalls.length > 0);
 	t.is(compactCounts.length, 0);
 });

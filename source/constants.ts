@@ -99,6 +99,10 @@ export const MAX_SECONDARY_LANGUAGES = 3;
 
 // === USAGE CALCULATOR ===
 export const TOKENS_PER_TOOL_ESTIMATE = 150;
+// Per-tool JSON envelope the provider wraps each definition in (the `name`,
+// `description`, `input_schema`/`parameters` keys and surrounding braces) that
+// isn't part of the serialized name/description/schema we tokenize directly.
+export const TOKENS_PER_TOOL_FRAMING = 12;
 export const USAGE_SUCCESS_THRESHOLD_PERCENT = 70;
 export const USAGE_ERROR_THRESHOLD_PERCENT = 90;
 

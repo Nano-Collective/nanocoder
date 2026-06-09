@@ -89,3 +89,18 @@ test('renderBody nested sections', t => {
 	t.is(renderBody(tpl, {a: true, b: false}), 'A');
 	t.is(renderBody(tpl, {a: false, b: true}), '');
 });
+
+test('renderBody inverted section: included only when falsy', t => {
+	const tpl = `{{^ flag }}off{{/ flag }}`;
+	t.is(renderBody(tpl, {flag: false}), 'off');
+	t.is(renderBody(tpl, {}), 'off');
+	t.is(renderBody(tpl, {flag: ''}), 'off');
+	t.is(renderBody(tpl, {flag: true}), '');
+	t.is(renderBody(tpl, {flag: 'x'}), '');
+});
+
+test('renderBody positive and inverted sections on the same var', t => {
+	const tpl = `{{# json }}A {{ id }}{{/ json }}{{^ json }}B {{ id }}{{/ json }}`;
+	t.is(renderBody(tpl, {id: '1', json: true}), "A '1'");
+	t.is(renderBody(tpl, {id: '1', json: false}), "B '1'");
+});
