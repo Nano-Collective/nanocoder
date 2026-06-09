@@ -206,3 +206,55 @@ test('summariseWithLLM passes a transcript that preserves tool calls and names',
 	t.regex(lastUserPrompt, /all 42 tests passed/);
 	t.regex(lastUserPrompt, /please run tests/);
 });
+
+test('summariseWithLLM never starts the recent tail with an orphaned tool result', async t => {
+	const tokenizer = makeTokenizer();
+	const client = makeClient(() => '## Context\nok');
+
+	// A multi-tool-call assistant turn produces 1 assistant + 2 tool messages.
+	// With keepRecentMessages=2 the naive last-2 slice would keep [tool, tool]
+	// and summarise the owning assistant away, orphaning both results. Leading
+	// filler keeps the compressible segment large enough to beat the
+	// summary-not-smaller-than-original guard.
+	const messages: Message[] = [
+		{role: 'user', content: 'a'.repeat(2000)},
+		{role: 'assistant', content: 'b'.repeat(2000)},
+		{role: 'user', content: 'do the thing'},
+		{
+			role: 'assistant',
+			content: 'working',
+			tool_calls: [
+				{id: 'call_A', type: 'function', function: {name: 'edit', arguments: '{}'}},
+				{id: 'call_B', type: 'function', function: {name: 'read', arguments: '{}'}},
+			],
+		},
+		{role: 'tool', name: 'edit', tool_call_id: 'call_A', content: 'edited'},
+		{role: 'tool', name: 'read', tool_call_id: 'call_B', content: 'contents'},
+	];
+
+	const result = await summariseWithLLM({
+		messages,
+		systemMessage,
+		client,
+		tokenizer,
+		keepRecentMessages: 2,
+	});
+
+	t.truthy(result);
+	// The boundary is walked back to include the owning assistant, so the tail
+	// is [assistant(tool_calls), tool, tool] — never a tool with no parent.
+	t.is(result![0].role, 'user', 'first message is the summary');
+	t.not(
+		result![1].role,
+		'tool',
+		'recent tail must not begin with an orphaned tool result',
+	);
+	const firstTool = result!.findIndex(m => m.role === 'tool');
+	const owningAssistant = result!.findIndex(
+		m => m.role === 'assistant' && m.tool_calls?.length,
+	);
+	t.true(
+		owningAssistant !== -1 && owningAssistant < firstTool,
+		'every kept tool result is preceded by its owning assistant(tool_calls)',
+	);
+});

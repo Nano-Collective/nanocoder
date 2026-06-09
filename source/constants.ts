@@ -54,6 +54,15 @@ export const DEFAULT_TERMINAL_COLUMNS = 80;
 export const FILE_READ_METADATA_THRESHOLD_LINES = 300;
 export const FILE_READ_CHUNKING_HINT_THRESHOLD_LINES = 500;
 export const FILE_READ_CHUNK_SIZE_LINES = 250;
+
+// === @-FILE MENTION INLINING (prompt-processor) ===
+// Files at or under this many lines are inlined in full when @-mentioned.
+// Larger files inline only a head preview plus a read_file hint, so a single
+// mention can't flood the conversation (the contents otherwise persist in
+// context on every subsequent turn).
+export const FILE_MENTION_INLINE_MAX_LINES = 250;
+export const FILE_MENTION_PREVIEW_LINES = 40;
+
 export const CHARS_PER_TOKEN_ESTIMATE = 4;
 export const MAX_LINE_LENGTH_CHARS = 10_000; // Lines longer than this are likely minified/binary
 export const EMPTY_CONTENT_MARKER = '[file is empty]';
@@ -77,6 +86,8 @@ export const DELAY_COMMAND_COMPLETE_MS = 100;
 // === BASH EXECUTION ===
 export const INTERVAL_BASH_PROGRESS_MS = 500;
 export const BASH_OUTPUT_PREVIEW_LENGTH = 150;
+export const TIMEOUT_BASH_DEFAULT_MS = 120_000;
+export const BASH_MAX_OUTPUT_BYTES = 5 * 1024 * 1024;
 
 // === FILE SCANNER ===
 export const MAX_FILES_TO_SCAN = 1000;
@@ -88,6 +99,10 @@ export const MAX_SECONDARY_LANGUAGES = 3;
 
 // === USAGE CALCULATOR ===
 export const TOKENS_PER_TOOL_ESTIMATE = 150;
+// Per-tool JSON envelope the provider wraps each definition in (the `name`,
+// `description`, `input_schema`/`parameters` keys and surrounding braces) that
+// isn't part of the serialized name/description/schema we tokenize directly.
+export const TOKENS_PER_TOOL_FRAMING = 12;
 export const USAGE_SUCCESS_THRESHOLD_PERCENT = 70;
 export const USAGE_ERROR_THRESHOLD_PERCENT = 90;
 

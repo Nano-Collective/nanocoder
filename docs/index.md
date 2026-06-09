@@ -6,9 +6,9 @@ sidebar_order: 1
 
 # Nanocoder
 
-Built by the [Nano Collective](https://nanocollective.org) — a community collective building AI tooling not for profit, but for the community.
+An open coding agent for your terminal, built by a community collective rather than a company. Bring your own model, keep your code on your machine, and owe nothing to anyone.
 
-Nanocoder brings agentic coding tools like Claude Code and Gemini CLI to the model of your choice — local models via Ollama, or any OpenAI-compatible API such as OpenRouter, Anthropic, and Google. You decide which provider runs your code and where your data goes.
+Built by the [Nano Collective](https://nanocollective.org), a community collective building AI tooling not for profit, but for the community. Nanocoder runs agentic coding on the model of your choice: local models via Ollama, or any OpenAI-compatible API such as OpenRouter, Anthropic, and Google. You decide which provider runs your code and where your data goes.
 
 ## What is Nanocoder?
 
@@ -16,7 +16,7 @@ Nanocoder is a CLI coding agent with tool support for file operations and comman
 
 ## How is this different to OpenCode?
 
-This comes down to philosophy. OpenCode is a great tool, but it's owned and managed by a venture-backed company that restricts community and open-source involvement to the outskirts. With Nanocoder, the focus is on building a true community-led project where anyone can contribute openly and directly. We believe AI is too powerful to be in the hands of big corporations and everyone should have access to it.
+This comes down to philosophy. Nanocoder is built as a true community-led project, owned by the Nano Collective rather than a company: no investor return to deliver, no paid tier, and no roadmap steered by what monetizes best. Anyone can contribute openly and directly, and the people building it are the people using it. OpenCode is a genuinely good tool, but it is venture-backed, and that ultimately shapes where a project's incentives point. We believe AI is too powerful to sit only in the hands of big corporations, and that everyone should have access to it.
 
 We also strongly believe in the "local-first" approach, where your data, models, and processing stay on your machine whenever possible to ensure maximum privacy and user control. Beyond that, we're actively pushing to develop advancements and frameworks for small, local models to be effective at coding locally.
 

@@ -1,3 +1,8 @@
+import {isAbsolute, relative} from 'node:path';
+import {
+	FILE_MENTION_INLINE_MAX_LINES,
+	FILE_MENTION_PREVIEW_LINES,
+} from '@/constants';
 import type {InputState} from '../types/hooks';
 import {PlaceholderType} from '../types/hooks';
 
@@ -52,13 +57,31 @@ export function assemblePrompt(inputState: InputState): string {
 					break;
 				}
 				case PlaceholderType.FILE: {
-					// Format file content with header for LLM context
+					// Format file content with header for LLM context. Large files
+					// inline only a head preview plus a read_file hint so a single
+					// @-mention can't flood the conversation; small files inline whole.
 					const fileName =
 						placeholderContent.filePath.split('/').pop() ||
 						placeholderContent.filePath;
-					const header = `=== File: ${fileName} ===`;
-					const footer = '='.repeat(header.length);
-					replacementContent = `${header}\n${placeholderContent.content}\n${footer}`;
+					const lines = placeholderContent.content.split('\n');
+					const totalLines = lines.length;
+
+					if (totalLines > FILE_MENTION_INLINE_MAX_LINES) {
+						const previewBody = lines
+							.slice(0, FILE_MENTION_PREVIEW_LINES)
+							.join('\n');
+						const remaining = totalLines - FILE_MENTION_PREVIEW_LINES;
+						const relPath = isAbsolute(placeholderContent.filePath)
+							? relative(process.cwd(), placeholderContent.filePath)
+							: placeholderContent.filePath;
+						const header = `=== File: ${fileName} (${totalLines} lines, showing first ${FILE_MENTION_PREVIEW_LINES}) ===`;
+						const footer = `=== ${remaining} more lines, use read_file('${relPath}') for the full file ===`;
+						replacementContent = `${header}\n${previewBody}\n${footer}`;
+					} else {
+						const header = `=== File: ${fileName} ===`;
+						const footer = '='.repeat(header.length);
+						replacementContent = `${header}\n${placeholderContent.content}\n${footer}`;
+					}
 					break;
 				}
 				default: {

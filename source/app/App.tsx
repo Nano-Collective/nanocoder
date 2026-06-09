@@ -269,6 +269,7 @@ export default function App({
 		cliProvider,
 		cliModel,
 		nonInteractiveMode,
+		developmentModeRef: appState.developmentModeRef,
 	});
 
 	// Setup mode handlers

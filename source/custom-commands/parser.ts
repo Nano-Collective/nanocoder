@@ -270,6 +270,26 @@ function extractSubscribe(
 }
 
 /**
+ * Parse a single `parameters:` entry. An entry is a positional name, with an
+ * optional inline default after `=`:
+ *
+ *   "pr_number"            -> {name: 'pr_number', defaultValue: ''}
+ *   "base=origin/main"     -> {name: 'base', defaultValue: 'origin/main'}
+ *
+ * The default is everything after the first `=`, so values may themselves
+ * contain `=`. A defaulted parameter is the optional form: omit the argument
+ * and the default is substituted instead of an empty string.
+ */
+export function parseCommandParameterSpec(spec: string): {
+	name: string;
+	defaultValue: string;
+} {
+	const eq = spec.indexOf('=');
+	if (eq === -1) return {name: spec.trim(), defaultValue: ''};
+	return {name: spec.slice(0, eq).trim(), defaultValue: spec.slice(eq + 1)};
+}
+
+/**
  * Replace template variables in command content
  */
 export function substituteTemplateVariables(

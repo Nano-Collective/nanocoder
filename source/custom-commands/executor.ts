@@ -1,5 +1,9 @@
-import {substituteTemplateVariables} from '@/custom-commands/parser';
+import {
+	parseCommandParameterSpec,
+	substituteTemplateVariables,
+} from '@/custom-commands/parser';
 import type {CustomCommand} from '@/types/index';
+import {expandSections} from '@/utils/template-sections';
 
 export class CustomCommandExecutor {
 	/**
@@ -10,9 +14,13 @@ export class CustomCommandExecutor {
 		const variables: Record<string, string> = {};
 
 		if (command.metadata.parameters && command.metadata.parameters.length > 0) {
-			// Map arguments to parameters
-			command.metadata.parameters.forEach((param: string, index: number) => {
-				variables[param] = args[index] || '';
+			// Map arguments to parameters positionally. A missing (or empty)
+			// argument falls back to the parameter's inline default, if any.
+			command.metadata.parameters.forEach((spec: string, index: number) => {
+				const {name, defaultValue} = parseCommandParameterSpec(spec);
+				const provided = args[index];
+				variables[name] =
+					provided !== undefined && provided !== '' ? provided : defaultValue;
 			});
 
 			// Also provide all args as a single variable
@@ -23,11 +31,13 @@ export class CustomCommandExecutor {
 		variables['cwd'] = process.cwd();
 		variables['command'] = command.fullName;
 
-		// Substitute variables in the command content
-		const promptContent = substituteTemplateVariables(
+		// Expand optional sections first so the body can drop clauses tied to an
+		// omitted argument, then substitute the remaining {{ name }} variables.
+		const sectioned = expandSections(
 			command.content,
-			variables,
+			name => (variables[name]?.length ?? 0) > 0,
 		);
+		const promptContent = substituteTemplateVariables(sectioned, variables);
 
 		// Build the full prompt
 		let fullPrompt = `[Executing custom command: /${command.fullName}]\n\n${promptContent}`;
@@ -53,7 +63,14 @@ export class CustomCommandExecutor {
 
 		if (command.metadata.parameters && command.metadata.parameters.length > 0) {
 			parts.push(
-				command.metadata.parameters.map((p: string) => `<${p}>`).join(' '),
+				command.metadata.parameters
+					.map((spec: string) => {
+						const {name, defaultValue} = parseCommandParameterSpec(spec);
+						// Conventional usage notation: <name> expected, [name=default]
+						// optional with a fallback.
+						return defaultValue ? `[${name}=${defaultValue}]` : `<${name}>`;
+					})
+					.join(' '),
 			);
 		}
 

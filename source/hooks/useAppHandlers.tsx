@@ -1,3 +1,4 @@
+import {randomBytes} from 'node:crypto';
 import React from 'react';
 import {
 	createClearMessagesHandler,
@@ -15,7 +16,7 @@ import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getModelContextLimit} from '@/models/index';
 import {bashExecutor} from '@/services/bash-executor';
 import {CheckpointManager} from '@/services/checkpoint-manager';
-import {generateKey} from '@/session/key-generator';
+import {generateKey, setKeyGeneratorSessionId} from '@/session/key-generator';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
 import {createTokenizer} from '@/tokenization/index';
@@ -101,7 +102,7 @@ interface UseAppHandlersProps {
 	enterTune: () => void;
 
 	// Chat handler
-	handleChatMessage: (message: string) => Promise<void>;
+	handleChatMessage: (message: string, displayValue?: string) => Promise<void>;
 
 	// VS Code active editor dismissal (dropped on /clear)
 	dismissActiveEditor?: () => void;
@@ -124,7 +125,10 @@ export interface AppHandlers {
 		checkpoints: CheckpointListItem[],
 		currentMessageCount: number,
 	) => void;
-	handleMessageSubmit: (message: string) => Promise<void>;
+	handleMessageSubmit: (
+		message: string,
+		displayValue?: string,
+	) => Promise<void>;
 }
 
 /**
@@ -143,6 +147,10 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			await baseClear();
 			props.setChatComponents([]);
 			props.setCurrentSessionId(null);
+			// Reset the key-generator session ID so keys in the new conversation
+			// are not prefixed with the cleared session's ID. A fresh random ID
+			// will be lazily generated on the next generateKey() call.
+			setKeyGeneratorSessionId(randomBytes(4).toString('hex'));
 			props.setLiveTaskList(null);
 			props.dismissActiveEditor?.();
 		},
@@ -442,6 +450,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.setCurrentProvider(session.provider);
 			props.setCurrentModel(session.model);
 			props.setCurrentSessionId(session.id);
+			setKeyGeneratorSessionId(session.id);
 			props.addToChatQueue(
 				<SuccessMessage
 					key={generateKey('resume-success')}
@@ -498,7 +507,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 	// Message submit handler
 	const handleMessageSubmit = React.useCallback(
-		async (message: string) => {
+		async (message: string, displayValue?: string) => {
 			// Reset conversation completion flag when starting a new message
 			props.setIsConversationComplete(false);
 
@@ -518,42 +527,46 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 						.slice(1)
 				: undefined;
 
-			await handleMessageSubmission(message, {
-				customCommandCache: props.customCommandCache,
-				customCommandLoader: props.customCommandLoader,
-				customCommandExecutor: props.customCommandExecutor,
-				onClearMessages: clearMessages,
-				onRenameSession: props.setSessionName,
-				commandArgs,
-				onEnterModelSelectionMode: props.enterModelSelectionMode,
-				onEnterModelDatabaseMode: props.enterModelDatabaseMode,
-				onEnterConfigWizardMode: props.enterConfigWizardMode,
-				onEnterSettingsMode: props.enterSettingsMode,
-				onEnterMcpWizardMode: props.enterMcpWizardMode,
-				onEnterExplorerMode: props.enterExplorerMode,
-				onEnterIdeSelectionMode: props.enterIdeSelectionMode,
-				onEnterTune: props.enterTune,
-				onEnterCheckpointLoadMode: enterCheckpointLoadMode,
-				onEnterSessionSelectorMode: enterSessionSelectorMode,
-				onResumeSession: session => applySession(session),
-				onShowStatus: handleShowStatus,
-				onHandleChatMessage: props.handleChatMessage,
-				onAddToChatQueue: props.addToChatQueue,
-				setLiveComponent: props.setLiveComponent,
-				setIsToolExecuting: props.setIsToolExecuting,
-				onCommandComplete: () => props.setIsConversationComplete(true),
-				setMessages: props.updateMessages,
-				messages: props.messages,
-				provider: props.currentProvider,
-				providerConfig: props.currentProviderConfig,
-				client: props.client,
-				model: props.currentModel,
-				theme: props.currentTheme,
-				updateInfo: props.updateInfo,
-				getMessageTokens: props.getMessageTokens,
-				tune: props.tune,
-				developmentMode: props.developmentMode,
-			});
+			await handleMessageSubmission(
+				message,
+				{
+					customCommandCache: props.customCommandCache,
+					customCommandLoader: props.customCommandLoader,
+					customCommandExecutor: props.customCommandExecutor,
+					onClearMessages: clearMessages,
+					onRenameSession: props.setSessionName,
+					commandArgs,
+					onEnterModelSelectionMode: props.enterModelSelectionMode,
+					onEnterModelDatabaseMode: props.enterModelDatabaseMode,
+					onEnterConfigWizardMode: props.enterConfigWizardMode,
+					onEnterSettingsMode: props.enterSettingsMode,
+					onEnterMcpWizardMode: props.enterMcpWizardMode,
+					onEnterExplorerMode: props.enterExplorerMode,
+					onEnterIdeSelectionMode: props.enterIdeSelectionMode,
+					onEnterTune: props.enterTune,
+					onEnterCheckpointLoadMode: enterCheckpointLoadMode,
+					onEnterSessionSelectorMode: enterSessionSelectorMode,
+					onResumeSession: session => applySession(session),
+					onShowStatus: handleShowStatus,
+					onHandleChatMessage: props.handleChatMessage,
+					onAddToChatQueue: props.addToChatQueue,
+					setLiveComponent: props.setLiveComponent,
+					setIsToolExecuting: props.setIsToolExecuting,
+					onCommandComplete: () => props.setIsConversationComplete(true),
+					setMessages: props.updateMessages,
+					messages: props.messages,
+					provider: props.currentProvider,
+					providerConfig: props.currentProviderConfig,
+					client: props.client,
+					model: props.currentModel,
+					theme: props.currentTheme,
+					updateInfo: props.updateInfo,
+					getMessageTokens: props.getMessageTokens,
+					tune: props.tune,
+					developmentMode: props.developmentMode,
+				},
+				displayValue,
+			);
 		},
 		[
 			props.setIsConversationComplete,

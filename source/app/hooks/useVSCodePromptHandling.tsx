@@ -144,13 +144,25 @@ export function useUserSubmit({
 	handleMessageSubmit,
 	activeEditor,
 }: {
-	handleMessageSubmit: (message: string) => Promise<void>;
+	handleMessageSubmit: (
+		message: string,
+		displayValue?: string,
+	) => Promise<void>;
 	activeEditor: ActiveEditorState | null;
-}): (message: string) => Promise<void> {
+}): (message: string, displayValue: string) => Promise<void> {
 	return useCallback(
-		(message: string) => {
+		(message: string, displayValue: string) => {
+			// Append the editor pill to both copies: `message` (sent to the LLM,
+			// with @-mentions already expanded) and `displayValue` (the bubble,
+			// with @-mentions kept as [@file] placeholders). Keeping them in sync
+			// is what stops the placeholder display from falling back to the raw
+			// expanded message.
 			const fullPrompt = buildPromptWithActiveEditor(message, activeEditor);
-			return handleMessageSubmit(fullPrompt);
+			const fullDisplay = buildPromptWithActiveEditor(
+				displayValue,
+				activeEditor,
+			);
+			return handleMessageSubmit(fullPrompt, fullDisplay);
 		},
 		[activeEditor, handleMessageSubmit],
 	);

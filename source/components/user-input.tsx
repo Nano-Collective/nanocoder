@@ -22,7 +22,7 @@ import {assemblePrompt} from '@/utils/prompt-processor';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 interface ChatProps {
-	onSubmit?: (message: string) => void;
+	onSubmit?: (message: string, displayValue: string) => void;
 	placeholder?: string;
 	customCommands?: string[]; // List of custom command names and aliases
 	disabled?: boolean; // Disable input when AI is processing
@@ -271,7 +271,7 @@ export default function UserInput({
 
 			// Save the InputState to history and send assembled message to AI
 			promptHistory.addPrompt(currentState);
-			onSubmit(fullMessage);
+			onSubmit(fullMessage, currentState.displayValue);
 			resetInput();
 			resetUIState();
 			promptHistory.resetIndex();

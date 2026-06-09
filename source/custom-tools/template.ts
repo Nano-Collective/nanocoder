@@ -6,6 +6,9 @@
  *   {{# name }}…{{/ name }}   — section: included only when `args[name]` is
  *                                truthy. Inside the section, `{{ name }}`
  *                                expands to the (still shell-quoted) value.
+ *   {{^ name }}…{{/ name }}   — inverted section: included only when
+ *                                `args[name]` is falsy/empty (the complement
+ *                                of `{{# name }}`).
  *
  * All scalar values are passed through `shellQuote()` which wraps the value
  * in single quotes and escapes embedded single quotes. Arrays are joined into
@@ -14,6 +17,8 @@
  * Substitution happens *before* the body is handed to the shell, so the
  * shell sees a complete, safe command line.
  */
+
+import {expandSections} from '@/utils/template-sections';
 
 /**
  * Wrap a string in POSIX-safe single quotes.
@@ -70,29 +75,8 @@ export function renderBody(
 	body: string,
 	args: Record<string, unknown>,
 ): string {
-	const afterSections = expandSections(body, args);
+	const afterSections = expandSections(body, name => isTruthyArg(args[name]));
 	return expandSubstitutions(afterSections, args);
-}
-
-function expandSections(body: string, args: Record<string, unknown>): string {
-	// Match `{{# name }}...{{/ name }}` where the closing tag matches the
-	// opening tag. `[\s\S]` so the body can span newlines. Non-greedy so
-	// adjacent sections don't merge.
-	const sectionRegex =
-		/\{\{#\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}([\s\S]*?)\{\{\/\s*\1\s*\}\}/g;
-
-	// Apply repeatedly so nested sections collapse from inside-out.
-	let prev: string;
-	let next = body;
-	let safety = 0;
-	do {
-		prev = next;
-		next = prev.replace(sectionRegex, (_match, name: string, inner: string) => {
-			return isTruthyArg(args[name]) ? expandSections(inner, args) : '';
-		});
-		safety++;
-	} while (next !== prev && safety < 16);
-	return next;
 }
 
 function expandSubstitutions(

@@ -225,6 +225,8 @@ export function toOptionString(option: unknown): string {
 		for (const key of [
 			'label',
 			'text',
+			// MiniMax M3 wraps option text in a `$text` key.
+			'$text',
 			'title',
 			'name',
 			'description',

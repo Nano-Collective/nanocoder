@@ -27,7 +27,7 @@ interface InteractiveAppProps {
 	pendingToolConfirmation: PendingToolConfirmation | null;
 	handleToolConfirmation: (confirmed: boolean) => void;
 	handleQuestionAnswer: (answer: string) => void;
-	handleUserSubmit: (message: string) => Promise<void>;
+	handleUserSubmit: (message: string, displayValue: string) => Promise<void>;
 	handleIdeSelect: (ide: string) => void;
 }
 

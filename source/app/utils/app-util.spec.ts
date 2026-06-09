@@ -328,6 +328,42 @@ function createResumeTestOptions(overrides: {
 	};
 }
 
+test.serial('chat message - forwards displayValue to onHandleChatMessage so the bubble keeps [@file] placeholders', async t => {
+	// Regression: an @-mentioned file used to dump its full contents into the
+	// chat bubble whenever the message was transformed downstream (e.g. the
+	// VS Code editor pill), because the display version was reconstructed via a
+	// brittle string-equality check. The display version is now threaded
+	// explicitly, so the bubble renders [@file] while the LLM gets the contents.
+	let received: {message?: string; displayValue?: string} = {};
+	const options = createResumeTestOptions({});
+	options.onHandleChatMessage = async (message, displayValue) => {
+		received = {message, displayValue};
+	};
+
+	const assembled = '=== File: app.tsx ===\nfull file contents here\n=====================';
+	await handleMessageSubmission(assembled, options, '[@app.tsx]');
+
+	t.is(received.message, assembled, 'LLM receives the fully expanded file contents');
+	t.is(
+		received.displayValue,
+		'[@app.tsx]',
+		'bubble receives the placeholder, not the expanded contents',
+	);
+});
+
+test.serial('chat message - displayValue is optional (callers without a placeholder view)', async t => {
+	let received: {message?: string; displayValue?: string} = {};
+	const options = createResumeTestOptions({});
+	options.onHandleChatMessage = async (message, displayValue) => {
+		received = {message, displayValue};
+	};
+
+	await handleMessageSubmission('plain message', options);
+
+	t.is(received.message, 'plain message');
+	t.is(received.displayValue, undefined);
+});
+
 test.serial('resume command - /resume with no args enters session selector mode', async t => {
 	let selectorCalled = false;
 	const origInit = sessionManager.initialize.bind(sessionManager);

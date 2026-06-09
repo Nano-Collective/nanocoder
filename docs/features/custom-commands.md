@@ -91,7 +91,7 @@ dependencies: [other-command]
 |-------|------|-------------|
 | `description` | string | Shown in `/commands` list and `/commands show` |
 | `aliases` | string[] | Alternative names to invoke the command |
-| `parameters` | string[] | Named placeholders, usable as `{{param}}` in the body |
+| `parameters` | string[] | Positional placeholder names, usable as `{{param}}` in the body. `name=default` makes one optional (see [Optional arguments](#optional-arguments)) |
 | `tags` | string[] | Keywords for auto-injection when the user's message matches |
 | `triggers` | string[] | Phrases that auto-inject this command into context |
 | `estimated-tokens` | number | Token budget hint, shown in `/commands` list for auto-injectable commands |
@@ -138,6 +138,45 @@ Built-in variables are always available:
 - `{{cwd}}` - Current working directory
 - `{{command}}` - The command name
 - `{{args}}` - All arguments as a single string
+
+### Optional arguments
+
+Every positional argument is optional - if the user omits one, its placeholder
+substitutes an empty string. Two features make that clean:
+
+**Default values.** Add `=default` to a parameter name; an omitted argument
+substitutes the default instead of empty. Quote the entry in YAML when the
+value contains `=` or `/`.
+
+```yaml
+---
+parameters: [pr_number, "base=origin/main"]
+---
+
+Diff PR #{{pr_number}} against {{base}}.
+```
+
+```bash
+/diff 123            # Diff PR #123 against origin/main.
+/diff 123 develop    # Diff PR #123 against develop.
+```
+
+**Conditional sections.** Use `{{# name }}…{{/ name }}` to include a block only
+when the argument was provided, and `{{^ name }}…{{/ name }}` for the inverse.
+This drops a whole clause for an omitted argument instead of leaving a dangling
+fragment.
+
+```yaml
+---
+parameters: [pr_number, "issue_number="]
+---
+
+Review PR #{{pr_number}}{{# issue_number }}, linked to issue #{{issue_number}}{{/ issue_number }}.
+{{^ issue_number }}No linked issue was given - review the diff on its own merits.{{/ issue_number }}
+```
+
+In `/commands` help, defaulted parameters show as `[name=default]` and the rest
+as `<name>`.
 
 ## Auto-Injection
 

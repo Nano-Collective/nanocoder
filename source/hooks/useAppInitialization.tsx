@@ -70,6 +70,12 @@ interface UseAppInitializationProps {
 	cliProvider?: string;
 	cliModel?: string;
 	/**
+	 * Live development-mode ref (same one the main loop reads). Wired into the
+	 * SubagentExecutor so subagent tool approvals honor the current mode,
+	 * including a switch made while a subagent is running.
+	 */
+	developmentModeRef?: React.RefObject<import('@/types/index').DevelopmentMode>;
+	/**
 	 * When true, init failures (no client) shut down the process with code 1
 	 * instead of leaving the run stuck in "Waiting for MCP servers..." — the
 	 * config wizard and chat queue are interactive-only surfaces that can't
@@ -101,6 +107,7 @@ export function useAppInitialization({
 	cliProvider,
 	cliModel,
 	nonInteractiveMode = false,
+	developmentModeRef,
 }: UseAppInitializationProps) {
 	// Initialize LLM client and model
 	const initializeClient = async (
@@ -359,6 +366,13 @@ export function useAppInitialization({
 			// Create and initialize the SubagentExecutor if client was successfully created
 			if (client) {
 				const executor = new SubagentExecutor(toolManager, client);
+				// Read the live development mode per tool call so subagents honor
+				// the current mode (and mid-run switches), matching the main loop.
+				if (developmentModeRef) {
+					executor.setModeResolver(
+						() => developmentModeRef.current ?? 'normal',
+					);
+				}
 				setAgentToolExecutor(executor);
 			}
 		} catch (error) {

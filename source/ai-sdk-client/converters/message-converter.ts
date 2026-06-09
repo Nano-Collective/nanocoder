@@ -26,12 +26,44 @@ export function isEmptyAssistantMessage(message: TestableMessage): boolean {
 }
 
 /**
+ * Drop tool-result messages whose tool_call_id matches no tool_call in a
+ * preceding assistant message. Orphaned tool results arise when history
+ * compaction summarises an assistant(tool_calls) turn but keeps its tool
+ * results verbatim; OpenAI-compatible providers reject the dangling result
+ * (or return an empty completion). This is a defensive net for any path that
+ * can orphan a result — the primary fix lives in the compaction slicer.
+ *
+ * Exported for testing.
+ */
+export function dropOrphanedToolResults(messages: Message[]): Message[] {
+	const seenToolCallIds = new Set<string>();
+	const result: Message[] = [];
+	for (const msg of messages) {
+		if (msg.role === 'tool') {
+			if (msg.tool_call_id && seenToolCallIds.has(msg.tool_call_id)) {
+				result.push(msg);
+			}
+			// else: orphaned tool result with no matching prior tool_call — drop.
+			continue;
+		}
+		if (msg.role === 'assistant' && msg.tool_calls) {
+			for (const toolCall of msg.tool_calls) {
+				if (toolCall.id) seenToolCallIds.add(toolCall.id);
+			}
+		}
+		result.push(msg);
+	}
+	return result;
+}
+
+/**
  * Convert our Message format to AI SDK v6 ModelMessage format
  *
  * Tool messages: Converted to AI SDK tool-result format with proper structure.
+ * Orphaned tool results are dropped first (see dropOrphanedToolResults).
  */
 export function convertToModelMessages(messages: Message[]): ModelMessage[] {
-	return messages.map((msg): ModelMessage => {
+	return dropOrphanedToolResults(messages).map((msg): ModelMessage => {
 		if (msg.role === 'tool') {
 			// Convert to AI SDK tool-result format
 			// AI SDK expects: { role: 'tool', content: [{ type: 'tool-result', toolCallId, toolName, output }] }

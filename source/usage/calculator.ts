@@ -5,10 +5,12 @@
 
 import {
 	TOKENS_PER_TOOL_ESTIMATE,
+	TOKENS_PER_TOOL_FRAMING,
 	USAGE_ERROR_THRESHOLD_PERCENT,
 	USAGE_SUCCESS_THRESHOLD_PERCENT,
 } from '@/constants';
-import type {Message} from '@/types/core';
+import type {AISDKCoreTool, Message} from '@/types/core';
+import {asSchema} from '@/types/core';
 import type {Tokenizer} from '@/types/tokenization';
 import type {TokenBreakdown} from '../types/usage';
 
@@ -72,13 +74,55 @@ export function calculateTokenBreakdown(
 }
 
 /**
- * Calculate tool definitions token count
- * This estimates the tokens used by tool definitions sent to the model
+ * Estimate tokens for the native tool definitions actually sent to the model.
+ *
+ * A flat per-tool constant is wildly inaccurate because real schemas vary by an
+ * order of magnitude — a tiny tool with one string param versus an MCP tool with
+ * a deeply nested schema and long field descriptions. Here we serialize each
+ * tool's name, description and JSON input schema and tokenize that, which tracks
+ * the real prompt far more closely and shrinks the gap between the streaming
+ * estimate and the provider-reported count.
+ *
+ * Any tool whose JSON schema can't be resolved synchronously (a promise-backed
+ * `FlexibleSchema`) falls back to the flat per-tool constant so the figure is
+ * never worse than the old behaviour for that tool.
  */
-export function calculateToolDefinitionsTokens(toolCount: number): number {
-	// Rough estimate: each tool definition is about TOKENS_PER_TOOL_ESTIMATE tokens
-	// This includes name, description, parameters schema
-	return toolCount * TOKENS_PER_TOOL_ESTIMATE;
+export function calculateToolDefinitionsTokensFromDefs(
+	tools: Record<string, AISDKCoreTool>,
+	tokenizer: Tokenizer,
+): number {
+	let total = 0;
+
+	for (const [name, toolDef] of Object.entries(tools)) {
+		let serialized = name;
+		if (typeof toolDef.description === 'string') {
+			serialized += `\n${toolDef.description}`;
+		}
+
+		let schemaResolved = false;
+		if (toolDef.inputSchema) {
+			try {
+				const schema = asSchema(toolDef.inputSchema).jsonSchema;
+				// `jsonSchema` is `JSONSchema7 | PromiseLike<JSONSchema7>`; only the
+				// synchronous object can be serialized here.
+				const isThenable =
+					typeof (schema as {then?: unknown})?.then === 'function';
+				if (schema && !isThenable) {
+					serialized += `\n${JSON.stringify(schema)}`;
+					schemaResolved = true;
+				}
+			} catch {
+				// Unresolvable schema — fall back to the flat constant below.
+			}
+		}
+
+		total += tokenizer.encode(serialized) + TOKENS_PER_TOOL_FRAMING;
+		if (!schemaResolved) {
+			total += TOKENS_PER_TOOL_ESTIMATE;
+		}
+	}
+
+	return total;
 }
 
 /**

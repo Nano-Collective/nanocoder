@@ -46,7 +46,11 @@ const askQuestionCoreTool = tool({
 			},
 			options: {
 				type: 'array',
-				items: {type: 'string'},
+				// Models like MiniMax M3 emit options as {label, value} objects
+				// despite the description below. The handler coerces them via
+				// toOptionString, so accept objects here too rather than failing
+				// validation before that coercion can run.
+				items: {type: ['string', 'object']},
 				description:
 					'2-4 selectable answer options for the user to choose from. Each option MUST be a plain string — the exact text shown to the user and returned verbatim when selected. Do not wrap options in objects or use {label, value} pairs.',
 			},
