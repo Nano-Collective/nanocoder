@@ -8,10 +8,12 @@ import {getAppConfig} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {AppConfig} from '@/types/config';
+import type {ChangeDiff} from './settings-keep-discard-prompt';
 
 interface SettingsSessionsPanelProps {
 	onBack: () => void;
 	onCancel: () => void;
+	onChanged?: (diff: ChangeDiff) => void;
 }
 
 const DEFAULT_SESSIONS: NonNullable<AppConfig['sessions']> = {
@@ -26,6 +28,7 @@ const DEFAULT_SESSIONS: NonNullable<AppConfig['sessions']> = {
 export function SettingsSessionsPanel({
 	onBack,
 	onCancel,
+	onChanged,
 }: SettingsSessionsPanelProps) {
 	const {colors} = useTheme();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
@@ -86,6 +89,11 @@ export function SettingsSessionsPanel({
 			const next = {...config, autoSave: !config.autoSave};
 			setConfig(next);
 			updateConfigNestedValue('sessions', 'autoSave', next.autoSave);
+			onChanged?.({
+				setting: 'Auto-Save',
+				oldValue: config.autoSave ? 'ON' : 'OFF',
+				newValue: next.autoSave ? 'ON' : 'OFF',
+			});
 		} else {
 			// Open text input for numeric/path fields
 			setEditField(item.value);
@@ -128,10 +136,26 @@ export function SettingsSessionsPanel({
 			const next = {...config, [editField]: num};
 			setConfig(next);
 			updateConfigNestedValue('sessions', editField, num);
+			const fieldNames: Record<string, string> = {
+				saveInterval: 'Save Interval',
+				maxSessions: 'Max Sessions',
+				maxMessages: 'Max Messages',
+				retentionDays: 'Retention Days',
+			};
+			onChanged?.({
+				setting: fieldNames[editField] ?? editField,
+				oldValue: String(config[editField]),
+				newValue: String(num),
+			});
 		} else if (editField === 'directory') {
 			const next = {...config, directory: trimmed};
 			setConfig(next);
 			updateConfigNestedValue('sessions', 'directory', trimmed);
+			onChanged?.({
+				setting: 'Session Directory',
+				oldValue: config.directory || '(default)',
+				newValue: trimmed || '(default)',
+			});
 		}
 
 		setEditField(null);

@@ -7,19 +7,28 @@ import {useTheme} from '@/hooks/useTheme';
 
 type Action = 'keep' | 'discard';
 
+export interface ChangeDiff {
+	/** Human-readable setting name */
+	setting: string;
+	/** Previous value as a short string */
+	oldValue: string;
+	/** New value as a short string */
+	newValue: string;
+}
+
 interface KeepDiscardPromptProps {
 	/** Called when user chooses to keep the changes */
 	onKeep: () => void;
 	/** Called when user chooses to discard the changes */
 	onDiscard: () => void;
-	/** Description of what changed, shown to the user */
-	changesSummary?: string;
+	/** List of changed settings with old/new values */
+	changes?: ChangeDiff[];
 }
 
 export function KeepDiscardPrompt({
 	onKeep,
 	onDiscard,
-	changesSummary,
+	changes,
 }: KeepDiscardPromptProps) {
 	const {colors} = useTheme();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
@@ -53,17 +62,39 @@ export function KeepDiscardPrompt({
 			marginBottom={1}
 		>
 			{!isNarrow && (
-				<Box marginBottom={1}>
-					<Text color={colors.warning}>You have unsaved changes.</Text>
-					{changesSummary && (
-						<Text color={colors.secondary}>{changesSummary}</Text>
+				<>
+					<Box marginBottom={1}>
+						<Text color={colors.warning}>You have unsaved changes.</Text>
+					</Box>
+					{changes && changes.length > 0 && (
+						<Box marginBottom={1}>
+							{changes.map((c, i) => (
+								<Box key={i}>
+									<Text color={colors.secondary}>{c.setting}</Text>
+									<Text color={colors.text}> : </Text>
+									<Text color={colors.secondary}>{c.oldValue}</Text>
+									<Text color={colors.secondary}> → </Text>
+									<Text color={colors.primary}>{c.newValue}</Text>
+								</Box>
+							))}
+						</Box>
 					)}
-					<Text color={colors.warning}>What would you like to do?</Text>
-				</Box>
+					<Box marginBottom={1}>
+						<Text color={colors.warning}>What would you like to do?</Text>
+					</Box>
+				</>
 			)}
-			{isNarrow && <Text color={colors.warning}>Unsaved changes:</Text>}
-			{isNarrow && changesSummary && (
-				<Text color={colors.secondary}>{changesSummary}</Text>
+			{isNarrow && (
+				<>
+					<Text color={colors.warning}>Unsaved changes:</Text>
+					{changes &&
+						changes.length > 0 &&
+						changes.map((c, i) => (
+							<Text key={i} color={colors.secondary}>
+								{c.setting}: {c.oldValue} → {c.newValue}
+							</Text>
+						))}
+				</>
 			)}
 			<SelectInput
 				items={items}

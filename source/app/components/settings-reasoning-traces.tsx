@@ -8,15 +8,18 @@ import {
 } from '@/config/preferences';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
+import type {ChangeDiff} from './settings-keep-discard-prompt';
 
 interface SettingsReasoningTracesPanelProps {
 	onBack: () => void;
 	onCancel: () => void;
+	onChanged?: (diff: ChangeDiff) => void;
 }
 
 export function SettingsReasoningTracesPanel({
 	onBack,
 	onCancel,
+	onChanged,
 }: SettingsReasoningTracesPanelProps) {
 	const {colors} = useTheme();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
@@ -48,6 +51,11 @@ export function SettingsReasoningTracesPanel({
 
 	const handleSelect = () => {
 		const next = !enabled;
+		onChanged?.({
+			setting: 'Reasoning Traces',
+			oldValue: enabled ? 'Expanded' : 'Collapsed',
+			newValue: next ? 'Expanded' : 'Collapsed',
+		});
 		setEnabled(next);
 		updateReasoningExpanded(next);
 	};

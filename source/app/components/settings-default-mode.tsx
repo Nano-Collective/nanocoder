@@ -7,6 +7,7 @@ import {updateConfigValue} from '@/config/config-writer';
 import {loadDefaultMode} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
+import type {ChangeDiff} from './settings-keep-discard-prompt';
 
 const MODE_DESCRIPTIONS: Record<string, string> = {
 	normal: 'Standard — all tool calls require approval',
@@ -18,11 +19,13 @@ const MODE_DESCRIPTIONS: Record<string, string> = {
 interface SettingsDefaultModePanelProps {
 	onBack: () => void;
 	onCancel: () => void;
+	onChanged?: (diff: ChangeDiff) => void;
 }
 
 export function SettingsDefaultModePanel({
 	onBack,
 	onCancel,
+	onChanged,
 }: SettingsDefaultModePanelProps) {
 	const {colors} = useTheme();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
@@ -59,6 +62,11 @@ export function SettingsDefaultModePanel({
 
 	const handleSelect = (item: {value: string}) => {
 		const mode = item.value as CliMode;
+		onChanged?.({
+			setting: 'Default Mode',
+			oldValue: currentMode ?? 'normal',
+			newValue: mode,
+		});
 		setSelectedMode(mode);
 		updateConfigValue('defaultMode', mode);
 		onBack();

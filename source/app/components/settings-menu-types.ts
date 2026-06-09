@@ -1,3 +1,5 @@
+import type {ChangeDiff} from './settings-keep-discard-prompt';
+
 /**
  * Shared types, constants, and menu definitions for the hierarchical settings system.
  */
@@ -295,6 +297,6 @@ export interface DirtyState {
 	isDirty: boolean;
 	/** The category where dirty state originated */
 	category: SettingsCategory;
-	/** Human-readable summary of what changed */
-	summary?: string;
+	/** Detailed list of changed settings with old/new values */
+	changes: ChangeDiff[];
 }

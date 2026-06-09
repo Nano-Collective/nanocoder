@@ -6,15 +6,18 @@ import {updateConfigNestedValue} from '@/config/config-writer';
 import {getAppConfig} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
+import type {ChangeDiff} from './settings-keep-discard-prompt';
 
 interface SettingsWebSearchPanelProps {
 	onBack: () => void;
 	onCancel: () => void;
+	onChanged?: (diff: ChangeDiff) => void;
 }
 
 export function SettingsWebSearchPanel({
 	onBack,
 	onCancel,
+	onChanged,
 }: SettingsWebSearchPanelProps) {
 	const {colors} = useTheme();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
@@ -44,6 +47,11 @@ export function SettingsWebSearchPanel({
 		if (trimmed) {
 			updateConfigNestedValue('nanocoderTools', 'webSearch', {
 				apiKey: trimmed,
+			});
+			onChanged?.({
+				setting: 'Web Search API Key',
+				oldValue: hasApiKey ? '(set)' : '(not set)',
+				newValue: '(set)',
 			});
 			setSaved(true);
 			setTimeout(() => {

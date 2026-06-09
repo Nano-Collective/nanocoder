@@ -2,7 +2,7 @@ import {Box, Text, useInput} from 'ink';
 import BigText from 'ink-big-text';
 import Gradient from 'ink-gradient';
 import SelectInput from 'ink-select-input';
-import {type ReactNode, useCallback, useMemo, useState} from 'react';
+import {type ReactNode, useCallback, useMemo, useRef, useState} from 'react';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {
@@ -24,6 +24,7 @@ import {setNotificationsConfig} from '@/utils/notifications';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 import {SettingsAutoCompactPanel} from './settings-auto-compact';
 import {SettingsDefaultModePanel} from './settings-default-mode';
+import type {ChangeDiff} from './settings-keep-discard-prompt';
 import {KeepDiscardPrompt} from './settings-keep-discard-prompt';
 import {
 	buildBreadcrumbTitle,
@@ -558,9 +559,11 @@ function ThemeMiniPreview({
 function SettingsThemePanel({
 	onBack,
 	onCancel,
+	onChanged,
 }: {
 	onBack: () => void;
 	onCancel: () => void;
+	onChanged?: (diff: ChangeDiff) => void;
 }) {
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
 	const {currentTheme, setCurrentTheme} = useTheme();
@@ -589,6 +592,11 @@ function SettingsThemePanel({
 			setCurrentIndex(prev => (prev < themeList.length - 1 ? prev + 1 : 0));
 		}
 		if (key.return) {
+			onChanged?.({
+				setting: 'Theme',
+				oldValue: originalTheme,
+				newValue: previewTheme.name,
+			});
 			setCurrentTheme(previewTheme.name as ThemePreset);
 			updateSelectedTheme(previewTheme.name as ThemePreset);
 			onBack();
@@ -654,9 +662,11 @@ function SettingsThemePanel({
 function SettingsTitleShapePanel({
 	onBack,
 	onCancel,
+	onChanged,
 }: {
 	onBack: () => void;
 	onCancel: () => void;
+	onChanged?: (diff: ChangeDiff) => void;
 }) {
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
 	const {colors} = useTheme();
@@ -764,6 +774,11 @@ function SettingsTitleShapePanel({
 	}, [originalShape, shapeOptions]);
 
 	const handleSelect = (item: {label: string; value: TitleShape}) => {
+		onChanged?.({
+			setting: 'Title Shape',
+			oldValue: originalShape,
+			newValue: item.value,
+		});
 		setCurrentTitleShape(item.value);
 		onBack();
 	};
@@ -826,9 +841,11 @@ function SettingsTitleShapePanel({
 function SettingsNanocoderShapePanel({
 	onBack,
 	onCancel,
+	onChanged,
 }: {
 	onBack: () => void;
 	onCancel: () => void;
+	onChanged?: (diff: ChangeDiff) => void;
 }) {
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
 	const {colors} = useTheme();
@@ -874,6 +891,11 @@ function SettingsNanocoderShapePanel({
 	}, [originalShape, shapeOptions]);
 
 	const handleSelect = (item: {label: string; value: NanocoderShape}) => {
+		onChanged?.({
+			setting: 'Nanocoder Shape',
+			oldValue: originalShape,
+			newValue: item.value,
+		});
 		updateNanocoderShape(item.value);
 		onBack();
 	};
@@ -951,9 +973,11 @@ function SettingsNanocoderShapePanel({
 function SettingsPasteThresholdPanel({
 	onBack,
 	onCancel,
+	onChanged,
 }: {
 	onBack: () => void;
 	onCancel: () => void;
+	onChanged?: (diff: ChangeDiff) => void;
 }) {
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
 	const {colors} = useTheme();
@@ -992,6 +1016,11 @@ function SettingsPasteThresholdPanel({
 	});
 
 	const handleSelect = (item: {label: string; value: number}) => {
+		onChanged?.({
+			setting: 'Paste Threshold',
+			oldValue: String(currentThreshold),
+			newValue: String(item.value),
+		});
 		updatePasteThreshold(item.value);
 		onBack();
 	};
@@ -1065,9 +1094,11 @@ function SettingsPasteThresholdPanel({
 function SettingsNotificationsPanel({
 	onBack,
 	onCancel,
+	onChanged,
 }: {
 	onBack: () => void;
 	onCancel: () => void;
+	onChanged?: (diff: ChangeDiff) => void;
 }) {
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
 	const {colors} = useTheme();
@@ -1128,6 +1159,7 @@ function SettingsNotificationsPanel({
 	}, [config]);
 
 	const handleSelect = (item: {label: string; value: ToggleKey}) => {
+		const prev = {...config};
 		const next = {...config};
 		if (item.value === 'enabled') {
 			next.enabled = !next.enabled;
@@ -1139,6 +1171,24 @@ function SettingsNotificationsPanel({
 		setConfig(next);
 		updateNotificationsPreference(next);
 		setNotificationsConfig(next);
+
+		// Report the change
+		const settingName =
+			item.value === 'enabled'
+				? 'Notifications'
+				: item.value === 'sound'
+					? 'Notification Sound'
+					: `Notification: ${item.value}`;
+		const getVal = (cfg: NotificationsConfig, key: ToggleKey) => {
+			if (key === 'enabled') return String(cfg.enabled);
+			if (key === 'sound') return String(cfg.sound);
+			return String(cfg.events?.[key]);
+		};
+		onChanged?.({
+			setting: settingName,
+			oldValue: getVal(prev, item.value),
+			newValue: getVal(next, item.value),
+		});
 	};
 
 	if (isNarrow) {
@@ -1214,6 +1264,7 @@ function SettingsPanelRouter({
 	onNavigate,
 	onBack,
 	onCancel,
+	onChanged,
 }: {
 	category: SettingsCategory;
 	panelKey: string;
@@ -1221,17 +1272,34 @@ function SettingsPanelRouter({
 	onNavigate: (path: SettingsPath) => void;
 	onBack: () => void;
 	onCancel: () => void;
+	onChanged?: (diff: ChangeDiff) => void;
 }) {
 	// Appearance panels
 	if (category === 'appearance') {
 		switch (panelKey) {
 			case 'theme':
-				return <SettingsThemePanel onBack={onBack} onCancel={onCancel} />;
+				return (
+					<SettingsThemePanel
+						onBack={onBack}
+						onCancel={onCancel}
+						onChanged={onChanged}
+					/>
+				);
 			case 'title-shape':
-				return <SettingsTitleShapePanel onBack={onBack} onCancel={onCancel} />;
+				return (
+					<SettingsTitleShapePanel
+						onBack={onBack}
+						onCancel={onCancel}
+						onChanged={onChanged}
+					/>
+				);
 			case 'nanocoder-shape':
 				return (
-					<SettingsNanocoderShapePanel onBack={onBack} onCancel={onCancel} />
+					<SettingsNanocoderShapePanel
+						onBack={onBack}
+						onCancel={onCancel}
+						onChanged={onChanged}
+					/>
 				);
 		}
 	}
@@ -1241,7 +1309,11 @@ function SettingsPanelRouter({
 		switch (panelKey) {
 			case 'paste-threshold':
 				return (
-					<SettingsPasteThresholdPanel onBack={onBack} onCancel={onCancel} />
+					<SettingsPasteThresholdPanel
+						onBack={onBack}
+						onCancel={onCancel}
+						onChanged={onChanged}
+					/>
 				);
 		}
 	}
@@ -1251,17 +1323,43 @@ function SettingsPanelRouter({
 		switch (panelKey) {
 			case 'notifications':
 				return (
-					<SettingsNotificationsPanel onBack={onBack} onCancel={onCancel} />
+					<SettingsNotificationsPanel
+						onBack={onBack}
+						onCancel={onCancel}
+						onChanged={onChanged}
+					/>
 				);
 			case 'auto-compact':
-				return <SettingsAutoCompactPanel onBack={onBack} onCancel={onCancel} />;
+				return (
+					<SettingsAutoCompactPanel
+						onBack={onBack}
+						onCancel={onCancel}
+						onChanged={onChanged}
+					/>
+				);
 			case 'sessions':
-				return <SettingsSessionsPanel onBack={onBack} onCancel={onCancel} />;
+				return (
+					<SettingsSessionsPanel
+						onBack={onBack}
+						onCancel={onCancel}
+						onChanged={onChanged}
+					/>
+				);
 			case 'default-mode':
-				return <SettingsDefaultModePanel onBack={onBack} onCancel={onCancel} />;
+				return (
+					<SettingsDefaultModePanel
+						onBack={onBack}
+						onCancel={onCancel}
+						onChanged={onChanged}
+					/>
+				);
 			case 'reasoning-traces':
 				return (
-					<SettingsReasoningTracesPanel onBack={onBack} onCancel={onCancel} />
+					<SettingsReasoningTracesPanel
+						onBack={onBack}
+						onCancel={onCancel}
+						onChanged={onChanged}
+					/>
 				);
 			default:
 				return (
@@ -1307,7 +1405,13 @@ function SettingsPanelRouter({
 	if (category === 'webSearch') {
 		switch (panelKey) {
 			case 'api-key':
-				return <SettingsWebSearchPanel onBack={onBack} onCancel={onCancel} />;
+				return (
+					<SettingsWebSearchPanel
+						onBack={onBack}
+						onCancel={onCancel}
+						onChanged={onChanged}
+					/>
+				);
 			default:
 				return (
 					<SettingsPlaceholderPanel
@@ -1408,6 +1512,13 @@ function SettingsPlaceholderPanel({
 export function SettingsSelector({onCancel}: SettingsSelectorProps) {
 	const [path, setPath] = useState<SettingsPath>(ROOT_PATH);
 	const [dirtyState, setDirtyState] = useState<DirtyState | null>(null);
+	// Accumulates change diffs as panels report them
+	const changesRef = useRef<ChangeDiff[]>([]);
+
+	// Callback for panels to report a change
+	const reportChange = useCallback((diff: ChangeDiff) => {
+		changesRef.current.push(diff);
+	}, []);
 
 	// Navigate to a new path
 	const navigate = useCallback((newPath: SettingsPath) => {
@@ -1421,23 +1532,16 @@ export function SettingsSelector({onCancel}: SettingsSelectorProps) {
 
 			// If going back to root, check for dirty state
 			if (isRootPath(newParent) && !isRootPath(currentPath)) {
-				// Determine which category we're leaving and what panel was active
 				const categorySegment = currentPath[1] as SettingsCategory;
-				const categoryDef = getCategoryByKey(categorySegment);
-				const panelKey = currentPath[2];
-				const panelLabel = panelKey
-					? panelKey
-							.replace(/[-_](.)/g, (_m: string, c: string) => c.toUpperCase())
-							.replace(/^./, (s: string) => s.toUpperCase())
-					: (categoryDef?.label ?? categorySegment);
+				const changes = changesRef.current;
 
-				setDirtyState({
-					isDirty: true,
-					category: categorySegment,
-					summary: panelKey
-						? `${categoryDef?.label ?? categorySegment} → ${panelLabel} changed`
-						: `${categoryDef?.label ?? categorySegment} changed`,
-				});
+				if (changes.length > 0) {
+					setDirtyState({
+						isDirty: true,
+						category: categorySegment,
+						changes: [...changes],
+					});
+				}
 			} else {
 				setDirtyState(null);
 			}
@@ -1449,6 +1553,7 @@ export function SettingsSelector({onCancel}: SettingsSelectorProps) {
 	// Handle Keep/Discard
 	const handleKeep = useCallback(() => {
 		// Changes are already persisted by individual panels
+		changesRef.current = [];
 		setDirtyState(null);
 		setPath(ROOT_PATH);
 	}, []);
@@ -1456,6 +1561,7 @@ export function SettingsSelector({onCancel}: SettingsSelectorProps) {
 	const handleDiscard = useCallback(() => {
 		// For Appearance settings that preview live, reload from preferences.
 		// For other categories, changes were already saved on apply.
+		changesRef.current = [];
 		setDirtyState(null);
 		setPath(ROOT_PATH);
 	}, []);
@@ -1466,7 +1572,7 @@ export function SettingsSelector({onCancel}: SettingsSelectorProps) {
 			<KeepDiscardPrompt
 				onKeep={handleKeep}
 				onDiscard={handleDiscard}
-				changesSummary={dirtyState.summary}
+				changes={dirtyState.changes}
 			/>
 		);
 	}
@@ -1502,6 +1608,7 @@ export function SettingsSelector({onCancel}: SettingsSelectorProps) {
 				onNavigate={navigate}
 				onBack={goBack}
 				onCancel={onCancel}
+				onChanged={reportChange}
 			/>
 		);
 	}

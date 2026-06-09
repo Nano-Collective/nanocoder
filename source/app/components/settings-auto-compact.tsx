@@ -8,10 +8,12 @@ import {getAppConfig} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {AutoCompactConfig, CompressionMode} from '@/types/config';
+import type {ChangeDiff} from './settings-keep-discard-prompt';
 
 interface SettingsAutoCompactPanelProps {
 	onBack: () => void;
 	onCancel: () => void;
+	onChanged?: (diff: ChangeDiff) => void;
 }
 
 const MODE_OPTIONS: {label: string; value: CompressionMode}[] = [
@@ -30,6 +32,7 @@ const DEFAULT_CONFIG: AutoCompactConfig = {
 export function SettingsAutoCompactPanel({
 	onBack,
 	onCancel,
+	onChanged,
 }: SettingsAutoCompactPanelProps) {
 	const {colors} = useTheme();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
@@ -88,11 +91,21 @@ export function SettingsAutoCompactPanel({
 			const next = {...config, mode: nextMode};
 			setConfig(next);
 			updateConfigNestedValue('autoCompact', 'mode', nextMode);
+			onChanged?.({
+				setting: 'Auto-Compact Mode',
+				oldValue: config.mode,
+				newValue: nextMode,
+			});
 		} else if (item.value === 'enabled' || item.value === 'notifyUser') {
 			const key = item.value as 'enabled' | 'notifyUser';
 			const next = {...config, [key]: !config[key]};
 			setConfig(next);
 			updateConfigNestedValue('autoCompact', key, next[key]);
+			onChanged?.({
+				setting: key === 'enabled' ? 'Auto-Compact' : 'Auto-Compact Notify',
+				oldValue: String(config[key]),
+				newValue: String(next[key]),
+			});
 		}
 	};
 
@@ -110,6 +123,11 @@ export function SettingsAutoCompactPanel({
 		const next = {...config, threshold: num};
 		setConfig(next);
 		updateConfigNestedValue('autoCompact', 'threshold', num);
+		onChanged?.({
+			setting: 'Auto-Compact Threshold',
+			oldValue: String(config.threshold),
+			newValue: String(num),
+		});
 		setEditField(null);
 	};
 
