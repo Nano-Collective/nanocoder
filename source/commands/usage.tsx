@@ -17,7 +17,7 @@ import {getTuneToolMode} from '@/types/config';
 import type {DevelopmentMode, Message} from '@/types/core';
 import {
 	calculateTokenBreakdown,
-	calculateToolDefinitionsTokens,
+	calculateToolDefinitionsTokensFromDefs,
 } from '@/usage/calculator';
 import {buildSystemPrompt, getLastBuiltPrompt} from '@/utils/prompt-builder';
 
@@ -141,18 +141,23 @@ export const usageCommand: Command = {
 			},
 		);
 
+		// Tool definitions tokens count only the tools actually exposed to the
+		// model (profile + mode filtered), and only when native tool calling is
+		// active — under XML/JSON fallback the definitions are already counted
+		// inside the system prompt above. Serialize the real definitions so the
+		// estimate tracks the provider-reported count.
+		const toolDefinitions =
+			nativeToolsDisabled || !toolManager
+				? 0
+				: calculateToolDefinitionsTokensFromDefs(
+						toolManager.getFilteredTools(availableNames),
+						tokenizer,
+					);
+
 		// Clean up tokenizer resources
 		if (tokenizer.free) {
 			tokenizer.free();
 		}
-
-		// Tool definitions tokens count only the tools actually exposed to the
-		// model (profile + mode filtered), and only when native tool calling is
-		// active — under XML/JSON fallback the definitions are already counted
-		// inside the system prompt above.
-		const toolDefinitions = nativeToolsDisabled
-			? 0
-			: calculateToolDefinitionsTokens(availableNames.length);
 
 		const breakdown = {
 			...baseBreakdown,

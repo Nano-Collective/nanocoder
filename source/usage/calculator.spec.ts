@@ -1,9 +1,11 @@
 import type {Message} from '@/types/core.js';
 import type {Tokenizer} from '@/types/tokenization.js';
 import test from 'ava';
+import {TOKENS_PER_TOOL_ESTIMATE, TOKENS_PER_TOOL_FRAMING} from '@/constants';
+import {jsonSchema, tool} from '@/types/core.js';
 import {
 	calculateTokenBreakdown,
-	calculateToolDefinitionsTokens,
+	calculateToolDefinitionsTokensFromDefs,
 	formatTokenCount,
 	getUsageStatusColor,
 } from './calculator.js';
@@ -189,36 +191,86 @@ test('calculateTokenBreakdown calculates correct total', t => {
 });
 
 // ============================================================================
-// calculateToolDefinitionsTokens Tests
+// calculateToolDefinitionsTokensFromDefs Tests
 // ============================================================================
 
-test('calculateToolDefinitionsTokens returns 0 for no tools', t => {
-	const tokens = calculateToolDefinitionsTokens(0);
+test('calculateToolDefinitionsTokensFromDefs returns 0 for no tools', t => {
+	const tokens = calculateToolDefinitionsTokensFromDefs({}, new MockTokenizer());
 	t.is(tokens, 0);
 });
 
-test('calculateToolDefinitionsTokens returns 150 for one tool', t => {
-	const tokens = calculateToolDefinitionsTokens(1);
-	t.is(tokens, 150);
+test('calculateToolDefinitionsTokensFromDefs tokenizes name + description + schema', t => {
+	const tokenizer = new MockTokenizer();
+	const tools = {
+		read_file: tool({
+			description: 'Read file contents.',
+			inputSchema: jsonSchema<{path: string}>({
+				type: 'object',
+				properties: {path: {type: 'string', description: 'The path.'}},
+				required: ['path'],
+			}),
+		}),
+	};
+
+	const tokens = calculateToolDefinitionsTokensFromDefs(tools, tokenizer);
+
+	const schema = {
+		type: 'object',
+		properties: {path: {type: 'string', description: 'The path.'}},
+		required: ['path'],
+	};
+	const serialized = `read_file\nRead file contents.\n${JSON.stringify(schema)}`;
+	const expected = tokenizer.encode(serialized) + TOKENS_PER_TOOL_FRAMING;
+	t.is(tokens, expected);
 });
 
-test('calculateToolDefinitionsTokens returns 300 for two tools', t => {
-	const tokens = calculateToolDefinitionsTokens(2);
-	t.is(tokens, 300);
+test('calculateToolDefinitionsTokensFromDefs sums across multiple tools', t => {
+	const tokenizer = new MockTokenizer();
+	const tools = {
+		a: tool({
+			description: 'Tool A.',
+			inputSchema: jsonSchema<Record<string, never>>({type: 'object'}),
+		}),
+		b: tool({
+			description: 'Tool B does something much longer than tool A does.',
+			inputSchema: jsonSchema<Record<string, never>>({type: 'object'}),
+		}),
+	};
+
+	const onlyA = calculateToolDefinitionsTokensFromDefs(
+		{a: tools.a},
+		tokenizer,
+	);
+	const onlyB = calculateToolDefinitionsTokensFromDefs(
+		{b: tools.b},
+		tokenizer,
+	);
+	const both = calculateToolDefinitionsTokensFromDefs(tools, tokenizer);
+
+	// Reflects real per-tool size — the bigger description costs more.
+	t.true(onlyB > onlyA);
+	t.is(both, onlyA + onlyB);
 });
 
-test('calculateToolDefinitionsTokens scales linearly', t => {
-	const tokens5 = calculateToolDefinitionsTokens(5);
-	const tokens10 = calculateToolDefinitionsTokens(10);
+test('calculateToolDefinitionsTokensFromDefs falls back to flat estimate for a promise-backed schema', t => {
+	const tokenizer = new MockTokenizer();
+	const tools = {
+		async_tool: tool({
+			description: 'X',
+			inputSchema: jsonSchema<Record<string, never>>(() =>
+				Promise.resolve({type: 'object'}),
+			),
+		}),
+	};
 
-	t.is(tokens5, 750);
-	t.is(tokens10, 1500);
-	t.is(tokens10, tokens5 * 2);
-});
+	const tokens = calculateToolDefinitionsTokensFromDefs(tools, tokenizer);
 
-test('calculateToolDefinitionsTokens handles large number of tools', t => {
-	const tokens = calculateToolDefinitionsTokens(100);
-	t.is(tokens, 15000);
+	// description-only serialization plus framing plus the flat fallback constant
+	const expected =
+		tokenizer.encode('async_tool\nX') +
+		TOKENS_PER_TOOL_FRAMING +
+		TOKENS_PER_TOOL_ESTIMATE;
+	t.is(tokens, expected);
 });
 
 // ============================================================================
