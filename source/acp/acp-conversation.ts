@@ -7,6 +7,7 @@ import {requestToolPermission} from '@/acp/acp-permission';
 import {requestUserChoice} from '@/acp/acp-question';
 import type {AcpSession} from '@/acp/acp-session';
 import {type AcpToolCallMeta, buildToolCallMeta} from '@/acp/acp-tool-call';
+import {getAppConfig} from '@/config/index';
 import {processToolUse} from '@/message-handler';
 import {parseToolCalls} from '@/tool-calling/index';
 import {resolveToolApproval} from '@/tools/approval-policy';
@@ -19,6 +20,7 @@ import type {
 	ToolCall,
 	ToolResult,
 } from '@/types/core';
+import {capMessagesForModel} from '@/utils/message-capping';
 import {toOptionString} from '@/utils/type-helpers';
 
 const MAX_TURNS = 50;
@@ -85,8 +87,12 @@ export async function runAcpConversation(
 			return {stopReason: 'end_turn'};
 		}
 
+		const sessionConfig = getAppConfig().sessions;
+		const maxMessages = sessionConfig?.maxMessages ?? 1000;
+		const cappedMessages = capMessagesForModel(messages, maxMessages);
+
 		const result = await client.chat(
-			[systemMessage, ...messages],
+			[systemMessage, ...cappedMessages],
 			tools,
 			callbacks,
 			abortController.signal,

@@ -1,3 +1,4 @@
+import {randomBytes} from 'node:crypto';
 import React from 'react';
 import {
 	createClearMessagesHandler,
@@ -15,7 +16,7 @@ import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getModelContextLimit} from '@/models/index';
 import {bashExecutor} from '@/services/bash-executor';
 import {CheckpointManager} from '@/services/checkpoint-manager';
-import {generateKey} from '@/session/key-generator';
+import {generateKey, setKeyGeneratorSessionId} from '@/session/key-generator';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
 import {createTokenizer} from '@/tokenization/index';
@@ -146,6 +147,10 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			await baseClear();
 			props.setChatComponents([]);
 			props.setCurrentSessionId(null);
+			// Reset the key-generator session ID so keys in the new conversation
+			// are not prefixed with the cleared session's ID. A fresh random ID
+			// will be lazily generated on the next generateKey() call.
+			setKeyGeneratorSessionId(randomBytes(4).toString('hex'));
 			props.setLiveTaskList(null);
 			props.dismissActiveEditor?.();
 		},
@@ -445,6 +450,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.setCurrentProvider(session.provider);
 			props.setCurrentModel(session.model);
 			props.setCurrentSessionId(session.id);
+			setKeyGeneratorSessionId(session.id);
 			props.addToChatQueue(
 				<SuccessMessage
 					key={generateKey('resume-success')}

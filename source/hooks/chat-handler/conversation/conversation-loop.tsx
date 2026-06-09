@@ -28,6 +28,7 @@ import type {
 import {performAutoCompact} from '@/utils/auto-compact';
 import {formatElapsedTime, getRandomAdjective} from '@/utils/completion-note';
 import {MessageBuilder} from '@/utils/message-builder';
+import {capMessagesForModel} from '@/utils/message-capping';
 import {infoMsg} from '@/utils/message-factory';
 import {createCancellationResults} from '@/utils/tool-cancellation';
 import {signalToolConfirm} from '@/utils/tool-confirm-queue';
@@ -245,8 +246,17 @@ export const processAssistantResponse = async (
 
 	let streamedContent = '';
 	let streamedReasoning = '';
+
+	// Apply maxMessages cap: limit how many history messages are sent to the
+	// model. This is a model-context concern only - the full history is always
+	// written to disk by useSessionAutosave. The system message is prepended
+	// outside the slice and is never counted against the limit.
+	const sessionConfig = getAppConfig().sessions;
+	const maxMessages = sessionConfig?.maxMessages ?? 1000;
+	const cappedMessages = capMessagesForModel(messages, maxMessages);
+
 	const result = await client.chat(
-		[systemMessage, ...messages],
+		[systemMessage, ...cappedMessages],
 		tools,
 		{
 			onToken: (token: string) => {
