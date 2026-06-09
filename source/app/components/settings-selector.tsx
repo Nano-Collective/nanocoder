@@ -1426,13 +1426,17 @@ export function SettingsSelector({onCancel}: SettingsSelectorProps) {
 				const categoryDef = getCategoryByKey(categorySegment);
 				const panelKey = currentPath[2];
 				const panelLabel = panelKey
-					.replace(/[-_](.)/g, (_m: string, c: string) => c.toUpperCase())
-					.replace(/^./, (s: string) => s.toUpperCase());
+					? panelKey
+							.replace(/[-_](.)/g, (_m: string, c: string) => c.toUpperCase())
+							.replace(/^./, (s: string) => s.toUpperCase())
+					: (categoryDef?.label ?? categorySegment);
 
 				setDirtyState({
 					isDirty: true,
 					category: categorySegment,
-					summary: `${categoryDef?.label ?? categorySegment} → ${panelLabel} changed`,
+					summary: panelKey
+						? `${categoryDef?.label ?? categorySegment} → ${panelLabel} changed`
+						: `${categoryDef?.label ?? categorySegment} changed`,
 				});
 			} else {
 				setDirtyState(null);
