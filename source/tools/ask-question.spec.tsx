@@ -4,6 +4,10 @@ import React from 'react';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
 import {setGlobalQuestionHandler} from '../utils/question-queue';
+import {
+	getToolJsonSchema,
+	validateArgsAgainstSchema,
+} from '../utils/schema-validate';
 import {askQuestionTool} from './ask-question';
 
 console.log(`\nask-question.spec.tsx – ${React.version}`);
@@ -44,6 +48,44 @@ test('ask_user tool has execute function', t => {
 
 test('ask_user tool has formatter function', t => {
 	t.is(typeof askQuestionTool.formatter, 'function');
+});
+
+// ============================================================================
+// Tests for Schema Validation
+// ============================================================================
+
+// Regression: the withValidation wrapper type-checks args against the tool's
+// schema BEFORE the handler runs. With options declared as string[], MiniMax M3
+// (which emits {label, value} objects) failed validation and never reached the
+// handler's toOptionString coercion — looping forever on "expected string,
+// received object". The schema must accept object-shaped options too.
+test('ask_user schema accepts object-shaped options without validation errors', t => {
+	const schema = getToolJsonSchema(askQuestionTool.tool);
+	t.truthy(schema);
+
+	const errors = validateArgsAgainstSchema(
+		{
+			question: 'Which cards?',
+			options: [
+				{value: 'quicklinks_only', label: 'Just the quick-link cards'},
+				{value: 'all_cards_blue', label: 'All cards'},
+			],
+		},
+		schema,
+	);
+
+	t.deepEqual(errors, []);
+});
+
+test('ask_user schema still accepts plain string options', t => {
+	const schema = getToolJsonSchema(askQuestionTool.tool);
+
+	const errors = validateArgsAgainstSchema(
+		{question: 'Which database?', options: ['PostgreSQL', 'SQLite']},
+		schema,
+	);
+
+	t.deepEqual(errors, []);
 });
 
 // ============================================================================
