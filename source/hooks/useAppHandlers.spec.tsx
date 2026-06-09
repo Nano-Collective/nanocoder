@@ -8,6 +8,11 @@ import type {CustomCommand} from '@/types/commands';
 import type {AppHandlers} from './useAppHandlers';
 import {useAppHandlers} from './useAppHandlers';
 
+import {
+	getKeyGeneratorSessionId,
+	setKeyGeneratorSessionId,
+} from '@/session/key-generator';
+
 console.log('\nuseAppHandlers.spec.tsx');
 
 interface CallSpy<T extends unknown[] = unknown[]> {
@@ -270,4 +275,19 @@ test('enterSessionSelectorMode forwards showAll=true when requested', t => {
 
 	t.deepEqual(spies.setShowAllSessions.calls, [[true]]);
 	t.deepEqual(spies.setActiveMode.calls, [['sessionSelector']]);
+});
+
+test('clearMessages resets key generator session ID', async t => {
+	const {handlers} = setup({
+		messages: [{role: 'user', content: 'test'}],
+	});
+
+	setKeyGeneratorSessionId('old-session-id-prefix');
+	t.is(getKeyGeneratorSessionId(), 'old-session-id-prefix');
+
+	await handlers.clearMessages();
+
+	const newId = getKeyGeneratorSessionId();
+	t.not(newId, 'old-session-id-prefix');
+	t.regex(newId, /^[0-9a-f]{8}$/);
 });
