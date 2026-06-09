@@ -141,3 +141,20 @@ export function updatePasteThreshold(threshold: number): void {
 	}
 	savePreferences(preferences);
 }
+
+/**
+ * Get the reasoningExpanded preference from the preferences file.
+ */
+export function getReasoningExpanded(): boolean | undefined {
+	const preferences = loadPreferences();
+	return preferences.reasoningExpanded;
+}
+
+/**
+ * Save the reasoningExpanded preference to the preferences file.
+ */
+export function updateReasoningExpanded(expanded: boolean): void {
+	const preferences = loadPreferences();
+	preferences.reasoningExpanded = expanded;
+	savePreferences(preferences);
+}

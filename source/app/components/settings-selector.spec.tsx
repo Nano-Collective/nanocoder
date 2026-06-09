@@ -9,7 +9,7 @@ test('SettingsSelector renders without crashing', t => {
 	unmount();
 });
 
-test('SettingsSelector main menu shows settings options', t => {
+test('SettingsSelector top-level menu shows "Settings" title', t => {
 	const {lastFrame, unmount} = renderWithTheme(
 		<SettingsSelector onCancel={() => {}} />,
 	);
@@ -19,17 +19,25 @@ test('SettingsSelector main menu shows settings options', t => {
 	unmount();
 });
 
-test('SettingsSelector main menu shows Theme option', t => {
+test('SettingsSelector top-level menu shows category labels', t => {
 	const {lastFrame, unmount} = renderWithTheme(
 		<SettingsSelector onCancel={() => {}} />,
 	);
 	const output = lastFrame();
 	t.truthy(output);
-	t.truthy(output!.includes('Theme'));
+	// Check that key categories appear
+	t.truthy(output!.includes('Appearance'));
+	t.truthy(output!.includes('Input'));
+	t.truthy(output!.includes('Behavior'));
+	t.truthy(output!.includes('Providers'));
+	t.truthy(output!.includes('MCPs'));
+	t.truthy(output!.includes('Web Search'));
+	t.truthy(output!.includes('Environment'));
+	t.truthy(output!.includes('Advanced'));
 	unmount();
 });
 
-test('SettingsSelector main menu shows navigation hints', t => {
+test('SettingsSelector top-level menu shows navigation hints', t => {
 	const {lastFrame, unmount} = renderWithTheme(
 		<SettingsSelector onCancel={() => {}} />,
 	);

@@ -2,7 +2,7 @@ import {Box, Text, useInput} from 'ink';
 import BigText from 'ink-big-text';
 import Gradient from 'ink-gradient';
 import SelectInput from 'ink-select-input';
-import {type ReactNode, useMemo, useState} from 'react';
+import {type ReactNode, useCallback, useMemo, useState} from 'react';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {
@@ -22,69 +22,42 @@ import type {NotificationsConfig} from '@/types/config';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
 import {setNotificationsConfig} from '@/utils/notifications';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
+import {SettingsAutoCompactPanel} from './settings-auto-compact';
+import {SettingsDefaultModePanel} from './settings-default-mode';
+import {KeepDiscardPrompt} from './settings-keep-discard-prompt';
+import {
+	buildBreadcrumbTitle,
+	CATEGORIES,
+	childPath,
+	type DirtyState,
+	getCategoryByKey,
+	getItemsForCategory,
+	isRootPath,
+	parentPath,
+	ROOT_PATH,
+	type SettingsCategory,
+	type SettingsPath,
+} from './settings-menu-types';
+import {SettingsReasoningTracesPanel} from './settings-reasoning-traces';
+import {SettingsSessionsPanel} from './settings-sessions';
 
-type SettingsStep =
-	| 'main'
-	| 'theme'
-	| 'title-shape'
-	| 'nanocoder-shape'
-	| 'paste-threshold'
-	| 'notifications'
-	| 'done';
+// ─── Props ───────────────────────────────────────────────────────────────────
 
 interface SettingsSelectorProps {
 	onCancel: () => void;
 }
 
-interface MainMenuItem {
-	label: string;
-	value: SettingsStep;
-	description: string;
-}
+// ─── Top-Level Settings Menu ─────────────────────────────────────────────────
 
-// Main settings menu
-function SettingsMainMenu({
-	onSelect,
+function SettingsTopLevelMenu({
+	onNavigate,
 	onCancel,
 }: {
-	onSelect: (step: SettingsStep) => void;
+	onNavigate: (path: SettingsPath) => void;
 	onCancel: () => void;
 }) {
 	const {colors} = useTheme();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
-
-	const items: MainMenuItem[] = [
-		{
-			label: 'Theme',
-			value: 'theme',
-			description: 'Change color scheme',
-		},
-		{
-			label: 'Title Shape',
-			value: 'title-shape',
-			description: 'Customize box title styles',
-		},
-		{
-			label: 'Nanocoder Shape',
-			value: 'nanocoder-shape',
-			description: 'Change welcome banner font',
-		},
-		{
-			label: 'Paste Threshold',
-			value: 'paste-threshold',
-			description: 'Set single-line paste character limit',
-		},
-		{
-			label: 'Notifications',
-			value: 'notifications',
-			description: 'Desktop notification preferences',
-		},
-		{
-			label: 'Done',
-			value: 'done',
-			description: 'Exit settings',
-		},
-	];
 
 	useInput((_input, key) => {
 		if (key.escape) {
@@ -92,7 +65,10 @@ function SettingsMainMenu({
 		}
 	});
 
-	// Narrow terminal: simplified layout (matches Status component pattern)
+	const handleSelect = (item: {value: SettingsCategory}) => {
+		onNavigate(childPath(ROOT_PATH, item.value));
+	};
+
 	if (isNarrow) {
 		return (
 			<Box
@@ -109,17 +85,11 @@ function SettingsMainMenu({
 				</Text>
 				<Text color={colors.text}> </Text>
 				<SelectInput
-					items={items.map(item => ({
-						label: item.label,
-						value: item.value,
+					items={CATEGORIES.map(cat => ({
+						label: cat.label,
+						value: cat.key,
 					}))}
-					onSelect={item => {
-						if (item.value === 'done') {
-							onCancel();
-						} else {
-							onSelect(item.value as SettingsStep);
-						}
-					}}
+					onSelect={handleSelect}
 					indicatorComponent={({isSelected}) => (
 						<Text color={isSelected ? colors.primary : colors.text}>
 							{isSelected ? '> ' : '  '}
@@ -132,7 +102,7 @@ function SettingsMainMenu({
 					)}
 				/>
 				<Box marginBottom={1}></Box>
-				<Text color={colors.secondary}>Enter/Esc</Text>
+				<Text color={colors.secondary}>Enter to select · Esc to exit</Text>
 			</Box>
 		);
 	}
@@ -147,20 +117,14 @@ function SettingsMainMenu({
 			flexDirection="column"
 		>
 			<Box marginBottom={1}>
-				<Text color={colors.secondary}>Select a setting to configure:</Text>
+				<Text color={colors.secondary}>Select a category:</Text>
 			</Box>
 			<SelectInput
-				items={items.map(item => ({
-					label: `${item.label} - ${item.description}`,
-					value: item.value,
+				items={CATEGORIES.map(cat => ({
+					label: `${cat.label} — ${cat.description}`,
+					value: cat.key,
 				}))}
-				onSelect={item => {
-					if (item.value === 'done') {
-						onCancel();
-					} else {
-						onSelect(item.value as SettingsStep);
-					}
-				}}
+				onSelect={handleSelect}
 				indicatorComponent={({isSelected}) => (
 					<Text color={isSelected ? colors.primary : colors.text}>
 						{isSelected ? '> ' : '  '}
@@ -176,6 +140,305 @@ function SettingsMainMenu({
 		</TitledBoxWithPreferences>
 	);
 }
+
+// ─── Category Sub-Menu ───────────────────────────────────────────────────────
+
+function SettingsCategoryMenu({
+	category,
+	path,
+	onNavigate,
+	onBack,
+	onCancel,
+}: {
+	category: SettingsCategory;
+	path: SettingsPath;
+	onNavigate: (path: SettingsPath) => void;
+	onBack: () => void;
+	onCancel: () => void;
+}) {
+	const {colors} = useTheme();
+	const {boxWidth, isNarrow} = useResponsiveTerminal();
+	const categoryDef = getCategoryByKey(category);
+	const items = getItemsForCategory(category);
+
+	useInput((_, key) => {
+		if (key.escape) {
+			onCancel();
+		}
+		if (key.shift && key.tab) {
+			onBack();
+		}
+	});
+
+	// If the category has no items (e.g. environment), render the direct panel
+	if (items.length === 0) {
+		// Navigate directly to the category panel
+		return (
+			<SettingsCategoryPanel
+				category={category}
+				path={path}
+				onNavigate={onNavigate}
+				onBack={onBack}
+				onCancel={onCancel}
+			/>
+		);
+	}
+
+	const handleSelect = (item: {value: string}) => {
+		onNavigate(childPath(path, item.value));
+	};
+
+	const breadcrumb = buildBreadcrumbTitle(path);
+
+	if (isNarrow) {
+		return (
+			<Box
+				flexDirection="column"
+				marginBottom={1}
+				borderStyle="round"
+				borderColor={colors.primary}
+				paddingY={1}
+				paddingX={2}
+				width="100%"
+			>
+				<Text color={colors.primary} bold>
+					{breadcrumb}
+				</Text>
+				<Text color={colors.text}> </Text>
+				<SelectInput
+					items={items.map(item => ({
+						label: item.label,
+						value: item.key,
+					}))}
+					onSelect={handleSelect}
+					indicatorComponent={({isSelected}) => (
+						<Text color={isSelected ? colors.primary : colors.text}>
+							{isSelected ? '> ' : '  '}
+						</Text>
+					)}
+					itemComponent={({isSelected, label}) => (
+						<Text color={isSelected ? colors.primary : colors.text}>
+							{label}
+						</Text>
+					)}
+				/>
+				<Box marginBottom={1}></Box>
+				<Text color={colors.secondary}>
+					Enter to select · Shift+Tab back · Esc to exit
+				</Text>
+			</Box>
+		);
+	}
+
+	return (
+		<TitledBoxWithPreferences
+			title={breadcrumb}
+			width={boxWidth}
+			borderColor={colors.primary}
+			paddingX={1}
+			paddingY={1}
+			flexDirection="column"
+		>
+			{categoryDef?.warning && (
+				<Box marginBottom={1}>
+					<Text color={colors.warning} bold>
+						⚠ {categoryDef.warning}
+					</Text>
+				</Box>
+			)}
+			<Box marginBottom={1}>
+				<Text color={colors.secondary}>Select a setting to configure:</Text>
+			</Box>
+			<SelectInput
+				items={items.map(item => ({
+					label: `${item.label} — ${item.description}`,
+					value: item.key,
+				}))}
+				onSelect={handleSelect}
+				indicatorComponent={({isSelected}) => (
+					<Text color={isSelected ? colors.primary : colors.text}>
+						{isSelected ? '> ' : '  '}
+					</Text>
+				)}
+				itemComponent={({isSelected, label}) => (
+					<Text color={isSelected ? colors.primary : colors.text}>{label}</Text>
+				)}
+			/>
+			<Box marginTop={1}>
+				<Text color={colors.secondary}>
+					Enter to select, Shift+Tab to go back, Esc to exit
+				</Text>
+			</Box>
+		</TitledBoxWithPreferences>
+	);
+}
+
+// ─── Category Panel Router ───────────────────────────────────────────────────
+// For categories that render directly (no sub-items), or as a placeholder
+// until individual panels are implemented.
+
+function SettingsCategoryPanel({
+	category,
+	path,
+	onNavigate,
+	onBack,
+	onCancel,
+}: {
+	category: SettingsCategory;
+	path: SettingsPath;
+	onNavigate: (path: SettingsPath) => void;
+	onBack: () => void;
+	onCancel: () => void;
+}) {
+	// For now, environment renders directly; others fall through to item panels
+	if (category === 'environment') {
+		return <SettingsEnvironmentPanel onBack={onBack} onCancel={onCancel} />;
+	}
+
+	// Fallback: shouldn't happen for categories with items
+	const {colors} = useTheme();
+	const {boxWidth, isNarrow} = useResponsiveTerminal();
+	const breadcrumb = buildBreadcrumbTitle(path);
+
+	return (
+		<TitledBoxWithPreferences
+			title={breadcrumb}
+			width={isNarrow ? '100%' : boxWidth}
+			borderColor={colors.primary}
+			paddingX={2}
+			paddingY={1}
+			flexDirection="column"
+			marginBottom={1}
+		>
+			<Text color={colors.secondary}>
+				No settings available in this category yet.
+			</Text>
+			<Box marginTop={1}>
+				<Text color={colors.secondary}>Shift+Tab to go back, Esc to exit</Text>
+			</Box>
+		</TitledBoxWithPreferences>
+	);
+}
+
+// ─── Environment Panel (Read-Only) ───────────────────────────────────────────
+
+function SettingsEnvironmentPanel({
+	onBack,
+	onCancel,
+}: {
+	onBack: () => void;
+	onCancel: () => void;
+}) {
+	const {colors} = useTheme();
+	const {boxWidth, isNarrow} = useResponsiveTerminal();
+
+	const envVars = useMemo(() => {
+		const nanocoderVars: {key: string; value: string; masked: boolean}[] = [];
+		const sensitivePatterns = ['KEY', 'TOKEN', 'SECRET', 'PASSWORD', 'AUTH'];
+
+		for (const [key, value] of Object.entries(process.env)) {
+			if (key.startsWith('NANOCODER_') && typeof value === 'string') {
+				const isSensitive = sensitivePatterns.some(pattern =>
+					key.toUpperCase().includes(pattern),
+				);
+				nanocoderVars.push({
+					key,
+					value: isSensitive ? value.replace(/./g, '•') : value,
+					masked: isSensitive,
+				});
+			}
+		}
+		nanocoderVars.sort((a, b) => a.key.localeCompare(b.key));
+		return nanocoderVars;
+	}, []);
+
+	useInput((_, key) => {
+		if (key.escape) {
+			onCancel();
+		}
+		if (key.shift && key.tab) {
+			onBack();
+		}
+	});
+
+	const title = isNarrow ? 'Environment' : 'Settings · Environment';
+
+	if (isNarrow) {
+		return (
+			<Box
+				flexDirection="column"
+				marginBottom={1}
+				borderStyle="round"
+				borderColor={colors.primary}
+				paddingY={1}
+				paddingX={2}
+				width="100%"
+			>
+				<Text color={colors.primary} bold>
+					{title}
+				</Text>
+				<Text color={colors.secondary}>
+					Read-only · {envVars.length} variables
+				</Text>
+				{envVars.length === 0 && (
+					<Text color={colors.text}>No NANOCODER_* env vars detected.</Text>
+				)}
+				{envVars.map(({key, value, masked}) => (
+					<Box key={key}>
+						<Text color={colors.tool} bold>
+							{key}
+						</Text>
+						<Text color={colors.text}> = </Text>
+						<Text color={masked ? colors.warning : colors.text}>
+							{value || '(empty)'}
+						</Text>
+					</Box>
+				))}
+				<Box marginBottom={1}></Box>
+				<Text color={colors.secondary}>Shift+Tab back · Esc to exit</Text>
+			</Box>
+		);
+	}
+
+	return (
+		<TitledBoxWithPreferences
+			title={title}
+			width={boxWidth}
+			borderColor={colors.primary}
+			paddingX={2}
+			paddingY={1}
+			flexDirection="column"
+			marginBottom={1}
+		>
+			<Box marginBottom={1}>
+				<Text color={colors.secondary}>
+					Active NANOCODER_* environment variables (read-only). {envVars.length}{' '}
+					variable{envVars.length !== 1 ? 's' : ''} detected.
+				</Text>
+			</Box>
+			{envVars.length === 0 && (
+				<Text color={colors.text}>No NANOCODER_* env vars detected.</Text>
+			)}
+			{envVars.map(({key, value, masked}) => (
+				<Box key={key} flexDirection="row">
+					<Text color={colors.tool} bold>
+						{key}
+					</Text>
+					<Text color={colors.text}> = </Text>
+					<Text color={masked ? colors.warning : colors.text}>
+						{value || '(empty)'}
+					</Text>
+					{masked && <Text color={colors.secondary}> (masked)</Text>}
+				</Box>
+			))}
+			<Box marginTop={1}>
+				<Text color={colors.secondary}>Shift+Tab to go back, Esc to exit</Text>
+			</Box>
+		</TitledBoxWithPreferences>
+	);
+}
+
+// ─── Theme Preview Components ────────────────────────────────────────────────
 
 function ThemePreviewMessage({
 	accentColor,
@@ -288,7 +551,8 @@ function ThemeMiniPreview({
 	);
 }
 
-// Theme settings panel
+// ─── Theme Settings Panel ────────────────────────────────────────────────────
+
 function SettingsThemePanel({
 	onBack,
 	onCancel,
@@ -306,9 +570,7 @@ function SettingsThemePanel({
 		return index >= 0 ? index : 0;
 	});
 
-	// Preview theme is the one being browsed (for UI only)
 	const previewTheme = themeList[currentIndex];
-	// Get the colors for the preview theme
 	const previewColors = getThemeColors(previewTheme.name as ThemePreset);
 
 	useInput((input, key) => {
@@ -325,7 +587,6 @@ function SettingsThemePanel({
 			setCurrentIndex(prev => (prev < themeList.length - 1 ? prev + 1 : 0));
 		}
 		if (key.return) {
-			// Only save to preferences on Enter
 			setCurrentTheme(previewTheme.name as ThemePreset);
 			updateSelectedTheme(previewTheme.name as ThemePreset);
 			onBack();
@@ -337,11 +598,10 @@ function SettingsThemePanel({
 	}/${themeList.length}]`;
 	const isCurrentTheme = previewTheme.name === originalTheme;
 
-	// Narrow terminal: simplified layout
 	if (isNarrow) {
 		return (
 			<TitledBoxWithPreferences
-				title="Theme"
+				title="Settings · Theme"
 				width="100%"
 				borderColor={previewColors.primary}
 				paddingX={2}
@@ -364,7 +624,7 @@ function SettingsThemePanel({
 
 	return (
 		<TitledBoxWithPreferences
-			title="Theme"
+			title="Settings · Theme"
 			width={boxWidth}
 			borderColor={previewColors.primary}
 			paddingX={2}
@@ -387,7 +647,8 @@ function SettingsThemePanel({
 	);
 }
 
-// Title Shape settings panel
+// ─── Title Shape Settings Panel ──────────────────────────────────────────────
+
 function SettingsTitleShapePanel({
 	onBack,
 	onCancel,
@@ -509,11 +770,10 @@ function SettingsTitleShapePanel({
 		setCurrentTitleShape(item.value);
 	};
 
-	// Narrow terminal: use TitledBoxWithPreferences to preview shape changes
 	if (isNarrow) {
 		return (
 			<TitledBoxWithPreferences
-				title="Title Shapes"
+				title="Settings · Title Shape"
 				width="100%"
 				borderColor={colors.primary}
 				paddingX={2}
@@ -535,7 +795,7 @@ function SettingsTitleShapePanel({
 
 	return (
 		<TitledBoxWithPreferences
-			title="Choose your title shape"
+			title="Settings · Title Shape"
 			width={boxWidth}
 			borderColor={colors.primary}
 			paddingX={2}
@@ -559,7 +819,8 @@ function SettingsTitleShapePanel({
 	);
 }
 
-// Nanocoder Shape settings panel
+// ─── Nanocoder Shape Settings Panel ──────────────────────────────────────────
+
 function SettingsNanocoderShapePanel({
 	onBack,
 	onCancel,
@@ -621,7 +882,6 @@ function SettingsNanocoderShapePanel({
 
 	const displayText = isNarrow ? 'NC' : 'Nanocoder';
 
-	// Narrow terminal: simplified layout with BigText outside box
 	if (isNarrow) {
 		return (
 			<>
@@ -629,7 +889,7 @@ function SettingsNanocoderShapePanel({
 					<BigText text={displayText} font={previewShape} />
 				</Gradient>
 				<TitledBoxWithPreferences
-					title="Nanocoder Shape"
+					title="Settings · Nanocoder Shape"
 					width="100%"
 					borderColor={colors.primary}
 					paddingX={2}
@@ -659,7 +919,7 @@ function SettingsNanocoderShapePanel({
 			</Box>
 
 			<TitledBoxWithPreferences
-				title="Choose your branding style"
+				title="Settings · Nanocoder Shape"
 				width={boxWidth}
 				borderColor={colors.primary}
 				paddingX={2}
@@ -684,7 +944,8 @@ function SettingsNanocoderShapePanel({
 	);
 }
 
-// Paste Threshold settings panel
+// ─── Paste Threshold Settings Panel ──────────────────────────────────────────
+
 function SettingsPasteThresholdPanel({
 	onBack,
 	onCancel,
@@ -716,7 +977,7 @@ function SettingsPasteThresholdPanel({
 		const index = thresholdOptions.findIndex(
 			option => option.value === currentThreshold,
 		);
-		return index >= 0 ? index : 3; // default to 800
+		return index >= 0 ? index : 3;
 	}, [currentThreshold, thresholdOptions]);
 
 	useInput((_, key) => {
@@ -733,56 +994,72 @@ function SettingsPasteThresholdPanel({
 		onBack();
 	};
 
-	const title = isNarrow
-		? 'Paste Threshold'
-		: 'Set paste threshold (characters)';
+	if (isNarrow) {
+		return (
+			<TitledBoxWithPreferences
+				title="Settings · Paste Threshold"
+				width="100%"
+				borderColor={colors.primary}
+				paddingX={2}
+				paddingY={1}
+				flexDirection="column"
+				marginBottom={1}
+			>
+				<Text color={colors.secondary}>Current: {currentThreshold}</Text>
+				<SelectInput
+					items={thresholdOptions.map(opt => ({
+						label:
+							opt.value === currentThreshold ? `${opt.label} *` : opt.label,
+						value: opt.value,
+					}))}
+					initialIndex={initialIndex}
+					onSelect={handleSelect}
+				/>
+				<Box marginTop={0}>
+					<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
+				</Box>
+			</TitledBoxWithPreferences>
+		);
+	}
 
 	return (
 		<TitledBoxWithPreferences
-			title={title}
-			width={isNarrow ? '100%' : boxWidth}
+			title="Settings · Paste Threshold"
+			width={boxWidth}
 			borderColor={colors.primary}
 			paddingX={2}
 			paddingY={1}
 			flexDirection="column"
 			marginBottom={1}
 		>
-			{!isNarrow && (
-				<Box marginBottom={1}>
-					<Text color={colors.secondary}>
-						Single-line pastes above this limit become placeholders. Current:{' '}
-						{currentThreshold} chars
-					</Text>
-				</Box>
-			)}
-			{isNarrow && (
-				<Text color={colors.secondary}>Current: {currentThreshold}</Text>
-			)}
+			<Box marginBottom={1}>
+				<Text color={colors.secondary}>
+					Single-line pastes above this limit become placeholders. Current:{' '}
+					{currentThreshold} chars
+				</Text>
+			</Box>
 			<SelectInput
 				items={thresholdOptions.map(opt => ({
 					label:
 						opt.value === currentThreshold
-							? isNarrow
-								? `${opt.label} *`
-								: `${opt.label} (current)`
+							? `${opt.label} (current)`
 							: opt.label,
 					value: opt.value,
 				}))}
 				initialIndex={initialIndex}
 				onSelect={handleSelect}
 			/>
-			<Box marginTop={isNarrow ? 0 : 1}>
+			<Box marginTop={1}>
 				<Text color={colors.secondary}>
-					{isNarrow
-						? 'Enter/Shift+Tab/Esc'
-						: 'Enter to apply, Shift+Tab to go back, Esc to exit'}
+					Enter to apply, Shift+Tab to go back, Esc to exit
 				</Text>
 			</Box>
 		</TitledBoxWithPreferences>
 	);
 }
 
-// Notifications settings panel
+// ─── Notifications Settings Panel ────────────────────────────────────────────
+
 function SettingsNotificationsPanel({
 	onBack,
 	onCancel,
@@ -862,25 +1139,53 @@ function SettingsNotificationsPanel({
 		setNotificationsConfig(next);
 	};
 
-	const title = isNarrow ? 'Notifications' : 'Desktop Notifications';
+	if (isNarrow) {
+		return (
+			<TitledBoxWithPreferences
+				title="Settings · Notifications"
+				width="100%"
+				borderColor={colors.primary}
+				paddingX={2}
+				paddingY={1}
+				flexDirection="column"
+				marginBottom={1}
+			>
+				<SelectInput
+					items={items}
+					onSelect={handleSelect}
+					indicatorComponent={({isSelected}) => (
+						<Text color={isSelected ? colors.primary : colors.text}>
+							{isSelected ? '> ' : '  '}
+						</Text>
+					)}
+					itemComponent={({isSelected, label}) => (
+						<Text color={isSelected ? colors.primary : colors.text}>
+							{label}
+						</Text>
+					)}
+				/>
+				<Box marginTop={0}>
+					<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
+				</Box>
+			</TitledBoxWithPreferences>
+		);
+	}
 
 	return (
 		<TitledBoxWithPreferences
-			title={title}
-			width={isNarrow ? '100%' : boxWidth}
+			title="Settings · Notifications"
+			width={boxWidth}
 			borderColor={colors.primary}
 			paddingX={2}
 			paddingY={1}
 			flexDirection="column"
 			marginBottom={1}
 		>
-			{!isNarrow && (
-				<Box marginBottom={1}>
-					<Text color={colors.secondary}>
-						Toggle settings with Enter. Shift+Tab to go back, Esc to exit
-					</Text>
-				</Box>
-			)}
+			<Box marginBottom={1}>
+				<Text color={colors.secondary}>
+					Toggle settings with Enter. Shift+Tab to go back, Esc to exit
+				</Text>
+			</Box>
 			<SelectInput
 				items={items}
 				onSelect={handleSelect}
@@ -893,56 +1198,282 @@ function SettingsNotificationsPanel({
 					<Text color={isSelected ? colors.primary : colors.text}>{label}</Text>
 				)}
 			/>
-			{isNarrow && (
-				<Box marginTop={0}>
-					<Text color={colors.secondary}>Enter/Shift+Tab/Esc</Text>
-				</Box>
-			)}
 		</TitledBoxWithPreferences>
 	);
 }
 
-// Main settings selector with step navigation
-export function SettingsSelector({onCancel}: SettingsSelectorProps) {
-	const [step, setStep] = useState<SettingsStep>('main');
+// ─── Panel Router ────────────────────────────────────────────────────────────
+// Routes a leaf-level path segment to the correct panel component.
 
-	switch (step) {
-		case 'main':
-			return <SettingsMainMenu onSelect={setStep} onCancel={onCancel} />;
-		case 'theme':
-			return (
-				<SettingsThemePanel
-					onBack={() => setStep('main')}
-					onCancel={onCancel}
-				/>
-			);
-		case 'title-shape':
-			return (
-				<SettingsTitleShapePanel
-					onBack={() => setStep('main')}
-					onCancel={onCancel}
-				/>
-			);
-		case 'nanocoder-shape':
-			return (
-				<SettingsNanocoderShapePanel
-					onBack={() => setStep('main')}
-					onCancel={onCancel}
-				/>
-			);
-		case 'paste-threshold':
-			return (
-				<SettingsPasteThresholdPanel
-					onBack={() => setStep('main')}
-					onCancel={onCancel}
-				/>
-			);
-		case 'notifications':
-			return (
-				<SettingsNotificationsPanel
-					onBack={() => setStep('main')}
-					onCancel={onCancel}
-				/>
-			);
+function SettingsPanelRouter({
+	category,
+	panelKey,
+	path,
+	onNavigate,
+	onBack,
+	onCancel,
+}: {
+	category: SettingsCategory;
+	panelKey: string;
+	path: SettingsPath;
+	onNavigate: (path: SettingsPath) => void;
+	onBack: () => void;
+	onCancel: () => void;
+}) {
+	// Appearance panels
+	if (category === 'appearance') {
+		switch (panelKey) {
+			case 'theme':
+				return <SettingsThemePanel onBack={onBack} onCancel={onCancel} />;
+			case 'title-shape':
+				return <SettingsTitleShapePanel onBack={onBack} onCancel={onCancel} />;
+			case 'nanocoder-shape':
+				return (
+					<SettingsNanocoderShapePanel onBack={onBack} onCancel={onCancel} />
+				);
+		}
 	}
+
+	// Input panels
+	if (category === 'input') {
+		switch (panelKey) {
+			case 'paste-threshold':
+				return (
+					<SettingsPasteThresholdPanel onBack={onBack} onCancel={onCancel} />
+				);
+		}
+	}
+
+	// Behavior panels
+	if (category === 'behavior') {
+		switch (panelKey) {
+			case 'notifications':
+				return (
+					<SettingsNotificationsPanel onBack={onBack} onCancel={onCancel} />
+				);
+			case 'auto-compact':
+				return <SettingsAutoCompactPanel onBack={onBack} onCancel={onCancel} />;
+			case 'sessions':
+				return <SettingsSessionsPanel onBack={onBack} onCancel={onCancel} />;
+			case 'default-mode':
+				return <SettingsDefaultModePanel onBack={onBack} onCancel={onCancel} />;
+			case 'reasoning-traces':
+				return (
+					<SettingsReasoningTracesPanel onBack={onBack} onCancel={onCancel} />
+				);
+			default:
+				return (
+					<SettingsPlaceholderPanel
+						panelKey={panelKey}
+						onBack={onBack}
+						onCancel={onCancel}
+					/>
+				);
+		}
+	}
+
+	// Providers panels
+	if (category === 'providers') {
+		return (
+			<SettingsPlaceholderPanel
+				panelKey={panelKey}
+				onBack={onBack}
+				onCancel={onCancel}
+			/>
+		);
+	}
+
+	// MCP panels
+	if (category === 'mcp') {
+		return (
+			<SettingsPlaceholderPanel
+				panelKey={panelKey}
+				onBack={onBack}
+				onCancel={onCancel}
+			/>
+		);
+	}
+
+	// Web Search panels
+	if (category === 'webSearch') {
+		return (
+			<SettingsPlaceholderPanel
+				panelKey={panelKey}
+				onBack={onBack}
+				onCancel={onCancel}
+			/>
+		);
+	}
+
+	// Advanced panels
+	if (category === 'advanced') {
+		return (
+			<SettingsPlaceholderPanel
+				panelKey={panelKey}
+				onBack={onBack}
+				onCancel={onCancel}
+			/>
+		);
+	}
+
+	// Fallback
+	return (
+		<SettingsPlaceholderPanel
+			panelKey={panelKey}
+			onBack={onBack}
+			onCancel={onCancel}
+		/>
+	);
+}
+
+// ─── Placeholder Panel ───────────────────────────────────────────────────────
+
+function SettingsPlaceholderPanel({
+	panelKey,
+	onBack,
+	onCancel,
+}: {
+	panelKey: string;
+	onBack: () => void;
+	onCancel: () => void;
+}) {
+	const {colors} = useTheme();
+	const {boxWidth, isNarrow} = useResponsiveTerminal();
+
+	const label = panelKey
+		.replace(/[-_](.)/g, (_m, c) => c.toUpperCase())
+		.replace(/^./, s => s.toUpperCase());
+
+	useInput((_, key) => {
+		if (key.escape) onCancel();
+		if (key.shift && key.tab) onBack();
+	});
+
+	if (isNarrow) {
+		return (
+			<TitledBoxWithPreferences
+				title={`${label}`}
+				width="100%"
+				borderColor={colors.primary}
+				paddingX={2}
+				paddingY={1}
+				flexDirection="column"
+				marginBottom={1}
+			>
+				<Text color={colors.secondary}>
+					Coming soon — this setting is not yet implemented.
+				</Text>
+				<Box marginBottom={1}></Box>
+				<Text color={colors.secondary}>Shift+Tab back · Esc to exit</Text>
+			</TitledBoxWithPreferences>
+		);
+	}
+
+	return (
+		<TitledBoxWithPreferences
+			title={`${label}`}
+			width={boxWidth}
+			borderColor={colors.primary}
+			paddingX={2}
+			paddingY={1}
+			flexDirection="column"
+			marginBottom={1}
+		>
+			<Text color={colors.secondary}>
+				Coming soon — this setting is not yet implemented.
+			</Text>
+			<Box marginTop={1}>
+				<Text color={colors.secondary}>Shift+Tab to go back, Esc to exit</Text>
+			</Box>
+		</TitledBoxWithPreferences>
+	);
+}
+
+// ─── Main Settings Selector ──────────────────────────────────────────────────
+
+export function SettingsSelector({onCancel}: SettingsSelectorProps) {
+	const [path, setPath] = useState<SettingsPath>(ROOT_PATH);
+	const [dirtyState, setDirtyState] = useState<DirtyState | null>(null);
+
+	// Navigate to a new path
+	const navigate = useCallback((newPath: SettingsPath) => {
+		setPath(newPath);
+	}, []);
+
+	// Go back one level
+	const goBack = useCallback(() => {
+		setPath(currentPath => {
+			const newParent = parentPath(currentPath);
+
+			// If going back to root, check for dirty state
+			if (isRootPath(newParent) && !isRootPath(currentPath)) {
+				// Determine which category we're leaving
+				const categorySegment = currentPath[1] as SettingsCategory;
+				setDirtyState({
+					isDirty: true,
+					category: categorySegment,
+				});
+			} else {
+				setDirtyState(null);
+			}
+
+			return newParent;
+		});
+	}, []);
+
+	// Handle Keep/Discard
+	const handleKeep = useCallback(() => {
+		// Changes are already persisted by individual panels
+		setDirtyState(null);
+		setPath(ROOT_PATH);
+	}, []);
+
+	const handleDiscard = useCallback(() => {
+		// TODO: In Phase B, we'll reload original values for buffered settings
+		setDirtyState(null);
+		setPath(ROOT_PATH);
+	}, []);
+
+	// If dirty state is active, show the Keep/Discard prompt
+	if (dirtyState?.isDirty) {
+		return <KeepDiscardPrompt onKeep={handleKeep} onDiscard={handleDiscard} />;
+	}
+
+	// Render based on current path depth
+	if (isRootPath(path)) {
+		return <SettingsTopLevelMenu onNavigate={navigate} onCancel={onCancel} />;
+	}
+
+	// Category level (depth 2): ['settings', 'appearance']
+	if (path.length === 2) {
+		const category = path[1] as SettingsCategory;
+		return (
+			<SettingsCategoryMenu
+				category={category}
+				path={path}
+				onNavigate={navigate}
+				onBack={goBack}
+				onCancel={onCancel}
+			/>
+		);
+	}
+
+	// Panel level (depth 3): ['settings', 'appearance', 'theme']
+	if (path.length === 3) {
+		const category = path[1] as SettingsCategory;
+		const panelKey = path[2];
+		return (
+			<SettingsPanelRouter
+				category={category}
+				panelKey={panelKey}
+				path={path}
+				onNavigate={navigate}
+				onBack={goBack}
+				onCancel={onCancel}
+			/>
+		);
+	}
+
+	// Fallback — shouldn't happen
+	return <SettingsTopLevelMenu onNavigate={navigate} onCancel={onCancel} />;
 }
