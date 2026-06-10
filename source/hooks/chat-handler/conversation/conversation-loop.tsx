@@ -802,6 +802,9 @@ export const processAssistantResponse = async (
 				try {
 					const {createTokenizer} = await import('@/tokenization/index');
 					const tokenizer = createTokenizer(currentProvider, currentModel);
+					// Note: compression uses the cached prompt from getLastBuiltPrompt()
+					// while the recursive LLM call sends params.systemMessage. These are
+					// identical in the main loop but could diverge for subagent callers.
 					const systemPrompt = getLastBuiltPrompt();
 					const sysMsg: Message = {role: 'system', content: systemPrompt};
 					const allForCompress = [sysMsg, ...updatedMessages];
@@ -813,7 +816,6 @@ export const processAssistantResponse = async (
 					const compressedUser = result.compressedMessages.filter(
 						m => m.role !== 'system',
 					);
-					setMessages(compressedUser);
 
 					addToChatQueue(
 						<InfoMessage
@@ -842,61 +844,12 @@ export const processAssistantResponse = async (
 						compactRetryCount: compactRetryCount + 1,
 					});
 					return;
-				} catch (_err) {
-					// Compression failed — fall through to give-up below
-				}
-			}
-
-			// If we still have compact-and-retry budget, mechanically compress
-			// the context and nudge the model to continue instead of giving up
-			// immediately. This handles the common case where the model is
-			// exhausting its token budget on reasoning.
-			if (compactRetryCount < MAX_COMPACT_RETRIES) {
-				try {
-					const {createTokenizer} = await import('@/tokenization/index');
-					const tokenizer = createTokenizer(currentProvider, currentModel);
-					const systemPrompt = getLastBuiltPrompt();
-					const sysMsg: Message = {role: 'system', content: systemPrompt};
-					const allForCompress = [sysMsg, ...updatedMessages];
-					const result = compressMessages(allForCompress, tokenizer, {
-						mode: 'aggressive',
-					});
-					if (tokenizer.free) tokenizer.free();
-
-					const compressedUser = result.compressedMessages.filter(
-						m => m.role !== 'system',
+				} catch (err) {
+					const {getLogger} = await import('@/utils/logging');
+					getLogger().warn(
+						{err, compactRetryCount},
+						'force-compact failed; falling through',
 					);
-					setMessages(compressedUser);
-
-					addToChatQueue(
-						<InfoMessage
-							key={generateKey('auto-compact-retry')}
-							message={`Context too large — auto-compacted (${Math.round(result.reductionPercentage)}% reduction). Retrying…`}
-							hideBox={true}
-						/>,
-					);
-
-					const retryNudge: Message = {
-						role: 'user',
-						content:
-							'Context has been compacted. Please continue with the task.',
-					};
-					const retryBuilder = new MessageBuilder(compressedUser);
-					retryBuilder.addMessage(retryNudge);
-					const messagesAfterCompact = retryBuilder.build();
-					setMessages(messagesAfterCompact);
-
-					await processAssistantResponse({
-						...params,
-						messages: messagesAfterCompact,
-						conversationStartTime: startTime,
-						emptyTurnCount: 0,
-						malformedRetryCount: 0,
-						compactRetryCount: compactRetryCount + 1,
-					});
-					return;
-				} catch (_err) {
-					// Compression failed — fall through to give-up below
 				}
 			}
 
