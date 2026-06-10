@@ -9,11 +9,6 @@ import {
 	MAX_EMPTY_TURNS,
 	MAX_MALFORMED_RETRIES,
 } from '@/constants';
-import {
-	MAX_COMPACT_RETRIES,
-	MAX_EMPTY_TURNS,
-	MAX_MALFORMED_RETRIES,
-} from '@/constants';
 import {generateKey} from '@/session/key-generator';
 import {
 	parseToolCalls,
@@ -37,10 +32,10 @@ import type {
 import {performAutoCompact} from '@/utils/auto-compact';
 import {formatElapsedTime, getRandomAdjective} from '@/utils/completion-note';
 import {MessageBuilder} from '@/utils/message-builder';
-import {compressMessages} from '@/utils/message-compression';
-import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 import {capMessagesForModel} from '@/utils/message-capping';
+import {compressMessages} from '@/utils/message-compression';
 import {infoMsg} from '@/utils/message-factory';
+import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 import {createCancellationResults} from '@/utils/tool-cancellation';
 import {signalToolConfirm} from '@/utils/tool-confirm-queue';
 import {displayCompactCountsSummary} from '@/utils/tool-result-display';
@@ -98,9 +93,6 @@ interface ProcessAssistantResponseParams {
 	// have already happened. The malformed branch increments and recurses;
 	// every other recursion site resets to 0.
 	malformedRetryCount?: number;
-	// Number of compact-and-retry cycles attempted after exhausting empty-turn
-	// nudges. Once MAX_COMPACT_RETRIES is reached we surface the error.
-	compactRetryCount?: number;
 	// Number of compact-and-retry cycles attempted after exhausting empty-turn
 	// nudges. Once MAX_COMPACT_RETRIES is reached we surface the error.
 	compactRetryCount?: number;
@@ -168,7 +160,6 @@ export const processAssistantResponse = async (
 		developmentModeRef,
 		emptyTurnCount = 0,
 		malformedRetryCount = 0,
-		compactRetryCount = 0,
 		compactRetryCount = 0,
 	} = params;
 
