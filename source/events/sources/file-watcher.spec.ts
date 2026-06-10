@@ -190,3 +190,45 @@ test.serial('stop releases the watcher and stops emitting', async t => {
 		await rm(dir, {recursive: true, force: true});
 	}
 });
+test.serial('closes the underlying watcher if initialization fails', async t => {
+	
+	const chokidar = require('chokidar');
+	const originalWatch = chokidar.watch;
+
+	let closeCalled = false;
+
+	chokidar.watch = () => {
+		const fakeWatcher = {
+			on: () => fakeWatcher,
+			once: (event: string, callback: (...args: any[]) => void) => {
+				if (event === 'error') {
+				
+					setImmediate(() => callback(new Error('Simulated startup failure')));
+				}
+				return fakeWatcher;
+			},
+			close: async () => {
+				closeCalled = true;
+			},
+		};
+		return fakeWatcher;
+	};
+
+	const {router} = captureRouter();
+	const source = new FileWatcherSource(router, {
+		root: '.',
+	});
+
+	try {
+	
+		await source.start();
+		t.fail('source.start() should have thrown an error on startup failure');
+	} catch (error: any) {
+		t.is(error.message, 'Simulated startup failure');
+		
+		t.true(closeCalled, 'Expected watcher.close() to be called on error cleanup path');
+	} finally {
+	
+		chokidar.watch = originalWatch;
+	}
+});
