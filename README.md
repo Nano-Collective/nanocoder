@@ -61,6 +61,25 @@ Nanocoder is built by the Nano Collective rather than a company, and that shapes
 
 It is also bigger than one tool. The collective is assembling an open ecosystem of AI tooling — see the [other projects](https://nanocollective.org) — and contributors who show up now help shape what that becomes.
 
+## Sponsors
+
+Nanocoder is built not for profit, but for the community, and that work is funded by sponsors. [Become one](https://nanocollective.org/sponsor).
+
+### [Atlas Cloud](https://www.atlascloud.ai/console/coding-plan)
+
+<p>
+  <a href="https://www.atlascloud.ai/console/coding-plan" title="Atlas Cloud">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://nanocollective.org/sponsors/atlas-cloud-white.png">
+      <img alt="Atlas Cloud" height="40" src="https://nanocollective.org/sponsors/atlas-cloud-black.png">
+    </picture>
+  </a>
+</p>
+
+> Atlas Cloud is a full-modal AI inference platform that gives developers a single AI API to access video generation, image generation, and LLM APIs. Instead of managing multiple vendor integrations, you connect once and get unified access to 300+ curated models across all modalities.
+
+Check out [Atlas Cloud's new coding plan promotion](https://www.atlascloud.ai/console/coding-plan) for more budget-friendly API access.
+
 ## Community
 
 The Nano Collective is a community collective building AI tooling for the community, not for profit. We'd love your help.

@@ -511,6 +511,12 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		baseUrl: 'https://api.poe.com/v1',
 		apiKeyPrompt: 'API Key (from poe.com/api_key)',
 	}),
+	apiKeyTemplate({
+		id: 'atlas-cloud',
+		name: 'Atlas Cloud',
+		baseUrl: 'https://api.atlascloud.ai/v1',
+		apiKeyPrompt: 'API Key (from atlascloud.ai/developer)',
+	}),
 	{
 		id: 'custom',
 		name: 'Custom Provider',
