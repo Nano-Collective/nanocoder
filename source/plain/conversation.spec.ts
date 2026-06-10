@@ -1,4 +1,5 @@
 import test from 'ava';
+import {reloadAppConfig} from '@/config/index';
 import {setToolManagerGetter, setToolRegistryGetter} from '@/message-handler';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
@@ -52,7 +53,13 @@ function makeFakeToolManager(opts: FakeToolManagerOptions = {}): ToolManager {
 	const approvals = opts.needsApprovalByName ?? {};
 	return {
 		getAvailableToolNames: () => Array.from(known),
-		getFilteredTools: () => ({}) as Record<string, AISDKCoreTool>,
+		getFilteredTools: () => {
+			const filtered: Record<string, AISDKCoreTool> = {};
+			for (const name of known) {
+				filtered[name] = {} as AISDKCoreTool;
+			}
+			return filtered;
+		},
 		hasTool: (name: string) => known.has(name),
 		getToolEntry: (name: string): ToolEntry | undefined => {
 			if (!known.has(name)) return undefined;
@@ -367,3 +374,169 @@ test('aborted signal short-circuits with an error outcome', async t => {
 
 	t.is(outcome.kind, 'error');
 });
+
+// --- Turn ceiling + graceful final-turn wrap-up ---
+
+interface RecordedCall {
+	messages: Message[];
+	tools: Record<string, AISDKCoreTool>;
+}
+
+function makeRecordingClient(
+	responses: Array<Partial<LLMChatResponse>>,
+	calls: RecordedCall[],
+): LLMClient {
+	let callIndex = 0;
+	return {
+		getCurrentModel: () => 'fake-model',
+		setModel: () => undefined,
+		getContextSize: () => 100_000,
+		getAvailableModels: async () => ['fake-model'],
+		getProviderConfig: () => ({}) as never,
+		clearContext: async () => undefined,
+		getTimeout: () => undefined,
+		chat: async (
+			messages: Message[],
+			tools: Record<string, AISDKCoreTool>,
+		) => {
+			calls.push({messages, tools});
+			const partial = responses[callIndex++];
+			if (!partial) {
+				throw new Error('RecordingClient ran out of canned responses');
+			}
+			return {
+				choices: partial.choices ?? [
+					{message: {role: 'assistant', content: ''}},
+				],
+				toolsDisabled: partial.toolsDisabled,
+			} as LLMChatResponse;
+		},
+	} as unknown as LLMClient;
+}
+
+test.afterEach.always(() => {
+	delete process.env.NANOCODER_MAX_TURNS;
+	reloadAppConfig();
+});
+
+test.serial(
+	'forces a tool-free final answer on the configured last turn instead of erroring',
+	async t => {
+		process.env.NANOCODER_MAX_TURNS = '2';
+		reloadAppConfig();
+
+		const loopingCall: ToolCall = {
+			id: 'call-1',
+			function: {name: 'safe_tool', arguments: {}},
+		};
+		const calls: RecordedCall[] = [];
+		const client = makeRecordingClient(
+			[
+				// Turn 0: model keeps calling a tool, so the loop would continue.
+				{
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: '',
+								tool_calls: [loopingCall],
+							},
+						},
+					],
+				},
+				// Turn 1 (final): tools are stripped, model produces a final answer.
+				{choices: [{message: {role: 'assistant', content: 'final answer'}}]},
+			],
+			calls,
+		);
+		const toolManager = makeFakeToolManager({
+			knownTools: new Set(['safe_tool']),
+			needsApprovalByName: {safe_tool: false},
+		});
+		setToolRegistryGetter(() => ({
+			safe_tool: (async () => 'tool-output') as ToolHandler,
+		}));
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: 'auto-accept',
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		// Ends cleanly with the final answer rather than the post-loop error.
+		t.is(outcome.kind, 'success');
+		t.is(calls.length, 2);
+
+		// Non-final turn sees real tools.
+		t.true('safe_tool' in calls[0].tools);
+
+		// Final turn strips tools and injects the wrap-up instruction as the
+		// last message (without persisting it for the earlier turn).
+		t.deepEqual(calls[1].tools, {});
+		const lastMessage = calls[1].messages[calls[1].messages.length - 1];
+		t.is(lastMessage.role, 'user');
+		t.regex(String(lastMessage.content), /do not call any more tools/i);
+		const firstTurnHasNotice = calls[0].messages.some(m =>
+			/do not call any more tools/i.test(String(m.content)),
+		);
+		t.false(firstTurnHasNotice);
+	},
+);
+
+test.serial(
+	'ignores XML tool calls on the final turn so the fallback path also finalizes',
+	async t => {
+		process.env.NANOCODER_MAX_TURNS = '1';
+		reloadAppConfig();
+
+		const calls: RecordedCall[] = [];
+		const client = makeRecordingClient(
+			[
+				// Single (final) turn: an XML-fallback response that still emits a
+				// tool call in text. It must be treated as content, not executed.
+				{
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content:
+									'Here is my answer.\n<tool_call>{"name":"safe_tool","arguments":{}}</tool_call>',
+							},
+						},
+					],
+					toolsDisabled: true,
+				},
+			],
+			calls,
+		);
+		const toolManager = makeFakeToolManager({
+			knownTools: new Set(['safe_tool']),
+			needsApprovalByName: {safe_tool: false},
+		});
+		let handlerCalls = 0;
+		setToolRegistryGetter(() => ({
+			safe_tool: (async () => {
+				handlerCalls++;
+				return 'tool-output';
+			}) as ToolHandler,
+		}));
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: 'auto-accept',
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, 'success');
+		t.is(handlerCalls, 0, 'final-turn XML tool call must not execute');
+		t.is(calls.length, 1);
+	},
+);
