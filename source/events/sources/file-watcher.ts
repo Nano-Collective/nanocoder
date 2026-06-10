@@ -55,7 +55,7 @@ export class FileWatcherSource {
 		private readonly options: FileWatcherOptions,
 	) {}
 
-	async start(): Promise<void> {
+async start(): Promise<void> {
 		if (this.watcher) return;
 
 		const watcher = watch('.', {
@@ -72,12 +72,19 @@ export class FileWatcherSource {
 		watcher.on('change', file => this.emit(file, 'change'));
 		watcher.on('unlink', file => this.emit(file, 'unlink'));
 
-		await new Promise<void>((resolve, reject) => {
-			watcher.once('ready', () => resolve());
-			watcher.once('error', reject);
-		});
+		try {
+			await new Promise<void>((resolve, reject) => {
+				watcher.once('ready', () => resolve());
+				watcher.once('error', reject);
+			});
 
-		this.watcher = watcher;
+			this.watcher = watcher;
+		} catch (error) {
+			// Clean up the active chokidar instance if startup fails 
+			// before throwing the error out of the start lifecycle.
+			await watcher.close();
+			throw error;
+		}
 	}
 
 	async stop(): Promise<void> {
