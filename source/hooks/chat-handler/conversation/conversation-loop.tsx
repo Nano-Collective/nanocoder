@@ -735,6 +735,7 @@ export const processAssistantResponse = async (
 					toolManager,
 					processToolUse,
 					setLiveComponent,
+					controller.signal,
 				);
 				turnResults.push(execution.result);
 				await displayExecutedTool(

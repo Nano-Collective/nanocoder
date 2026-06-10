@@ -67,8 +67,15 @@ const executeBashStreaming = (
 	toolCall: ToolCall,
 	toolManager: ToolManager | null,
 	setLiveComponent: (component: React.ReactNode) => void,
+	signal?: AbortSignal,
 ): Promise<StreamingBashRun> =>
-	runStreamingBashTool(toolCall, toolManager, setLiveComponent, 'direct-bash');
+	runStreamingBashTool(
+		toolCall,
+		toolManager,
+		setLiveComponent,
+		'direct-bash',
+		signal,
+	);
 
 /** Display + conversation-state options shared by every executed tool. */
 export interface ToolDisplayOptions {
@@ -89,9 +96,15 @@ export const executeApprovedTool = (
 	toolManager: ToolManager | null,
 	processToolUse: (toolCall: ToolCall) => Promise<ToolResult>,
 	setLiveComponent?: (component: React.ReactNode) => void,
+	signal?: AbortSignal,
 ): Promise<StreamingBashRun> => {
 	if (toolCall.function.name === 'execute_bash' && setLiveComponent) {
-		return executeBashStreaming(toolCall, toolManager, setLiveComponent);
+		return executeBashStreaming(
+			toolCall,
+			toolManager,
+			setLiveComponent,
+			signal,
+		);
 	}
 	return executeOne(toolCall, processToolUse);
 };
@@ -511,6 +524,7 @@ export const executeToolsDirectly = async (
 						toolManager,
 						processToolUse,
 						options?.setLiveComponent,
+						options?.signal,
 					),
 				);
 			}
