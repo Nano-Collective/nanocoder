@@ -512,6 +512,11 @@ export const processAssistantResponse = async (
 					addToChatQueue(infoMsg(notification, 'auto-compact-notification'));
 				},
 				client,
+				// Native tool definitions occupy context out-of-band. Pass them so
+				// the gate matches the ctx% indicator; under XML/JSON fallback they
+				// already live inside systemMessage, so pass nothing to avoid
+				// double-counting.
+				result.toolsDisabled ? undefined : tools,
 			);
 
 			if (compressed) {

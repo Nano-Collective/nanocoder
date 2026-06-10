@@ -250,17 +250,40 @@ export function useAppState(
 		[messageTokenCache, tokenizer, currentModel],
 	);
 
+	// Tracks the messages array last written through updateMessages so we can
+	// tell an in-conversation append from a wholesale replacement. All external
+	// mutations go through updateMessages, so this never drifts from state.
+	const prevMessagesRef = useRef<Message[]>([]);
+
 	// Message updater - no limits, display all messages
 	const updateMessages = useCallback((newMessages: Message[]) => {
+		// Preserve the API usage snapshot across appends within the same
+		// conversation (new user message, streamed reply, tool results) so the
+		// context indicator keeps anchoring on the provider-reported total and
+		// only estimates the fresh tail — otherwise the figure drops to the full
+		// client-side estimate the instant a new message is added, then jumps back
+		// up once the next response lands.
+		//
+		// An append keeps the prior messages as a prefix: same-or-greater length
+		// with an unchanged opening message. Anything else — shrunk (/clear,
+		// /compact) or a different first message (session resume, checkpoint
+		// restore) — is a wholesale swap, so the snapshot no longer describes a
+		// prefix of the conversation and must be dropped. (The chat loop
+		// re-establishes a fresh snapshot via setLastApiUsage after each response.)
+		const prev = prevMessagesRef.current;
+		const first = newMessages[0];
+		const prevFirst = prev[0];
+		const isAppendInSameConversation =
+			first !== undefined &&
+			prevFirst !== undefined &&
+			newMessages.length >= prev.length &&
+			first.role === prevFirst.role &&
+			first.content === prevFirst.content;
+		if (!isAppendInSameConversation) {
+			setLastApiUsage(null);
+		}
+		prevMessagesRef.current = newMessages;
 		setMessages(newMessages);
-		// Any wholesale message change — new turn, /clear, manual /compact,
-		// session resume, checkpoint restore — invalidates the API usage
-		// snapshot, which was captured against the previous messages array.
-		// The chat loop re-establishes it right after via setLastApiUsage; every
-		// other path then correctly falls back to client-side estimation. This
-		// keeps the api-vs-estimate decision robust across all replacement paths
-		// rather than relying on each handler to clear it.
-		setLastApiUsage(null);
 	}, []);
 
 	return {
