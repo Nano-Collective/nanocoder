@@ -6,7 +6,15 @@
 		"sonic-boom",
 		"lint-staged"
 	],
-	"ignoreBinaries": ["vsce", "semgrep"],
+	"ignoreBinaries": [
+		"vsce",
+		"semgrep",
+		"which",
+		"gh",
+		"osascript",
+		"notify-send",
+		"powershell"
+	],
 	"ignore": [
 		"source/utils/message-queue.tsx",
 		"source/vscode/**/*.ts",
