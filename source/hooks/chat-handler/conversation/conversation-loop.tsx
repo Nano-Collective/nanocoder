@@ -4,7 +4,11 @@ import AssistantMessage from '@/components/assistant-message';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import {getAppConfig} from '@/config/index';
-import {MAX_EMPTY_TURNS, MAX_MALFORMED_RETRIES} from '@/constants';
+import {
+	MAX_COMPACT_RETRIES,
+	MAX_EMPTY_TURNS,
+	MAX_MALFORMED_RETRIES,
+} from '@/constants';
 import {generateKey} from '@/session/key-generator';
 import {
 	parseToolCalls,
@@ -29,7 +33,9 @@ import {performAutoCompact} from '@/utils/auto-compact';
 import {formatElapsedTime, getRandomAdjective} from '@/utils/completion-note';
 import {MessageBuilder} from '@/utils/message-builder';
 import {capMessagesForModel} from '@/utils/message-capping';
+import {compressMessages} from '@/utils/message-compression';
 import {infoMsg} from '@/utils/message-factory';
+import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 import {createCancellationResults} from '@/utils/tool-cancellation';
 import {signalToolConfirm} from '@/utils/tool-confirm-queue';
 import {displayCompactCountsSummary} from '@/utils/tool-result-display';
@@ -87,6 +93,9 @@ interface ProcessAssistantResponseParams {
 	// have already happened. The malformed branch increments and recurses;
 	// every other recursion site resets to 0.
 	malformedRetryCount?: number;
+	// Number of compact-and-retry cycles attempted after exhausting empty-turn
+	// nudges. Once MAX_COMPACT_RETRIES is reached we surface the error.
+	compactRetryCount?: number;
 }
 
 // Module-level flag: show XML fallback notice only once per process lifetime.
@@ -151,6 +160,7 @@ export const processAssistantResponse = async (
 		developmentModeRef,
 		emptyTurnCount = 0,
 		malformedRetryCount = 0,
+		compactRetryCount = 0,
 	} = params;
 
 	const startTime = conversationStartTime ?? Date.now();
@@ -784,11 +794,72 @@ export const processAssistantResponse = async (
 		// token budget on thinking) would loop forever.
 		if (emptyTurnCount >= MAX_EMPTY_TURNS) {
 			setLiveComponent?.(null);
+			// If we still have compact-and-retry budget, mechanically compress
+			// the context and nudge the model to continue instead of giving up
+			// immediately. This handles the common case where the model is
+			// exhausting its token budget on reasoning.
+			if (compactRetryCount < MAX_COMPACT_RETRIES) {
+				try {
+					const {createTokenizer} = await import('@/tokenization/index');
+					const tokenizer = createTokenizer(currentProvider, currentModel);
+					// Note: compression uses the cached prompt from getLastBuiltPrompt()
+					// while the recursive LLM call sends params.systemMessage. These are
+					// identical in the main loop but could diverge for subagent callers.
+					const systemPrompt = getLastBuiltPrompt();
+					const sysMsg: Message = {role: 'system', content: systemPrompt};
+					const allForCompress = [sysMsg, ...updatedMessages];
+					const result = compressMessages(allForCompress, tokenizer, {
+						mode: 'aggressive',
+					});
+					if (tokenizer.free) tokenizer.free();
+
+					const compressedUser = result.compressedMessages.filter(
+						m => m.role !== 'system',
+					);
+
+					addToChatQueue(
+						<InfoMessage
+							key={generateKey('auto-compact-retry')}
+							message={`Context too large — auto-compacted (${Math.round(result.reductionPercentage)}% reduction). Retrying…`}
+							hideBox={true}
+						/>,
+					);
+
+					const retryNudge: Message = {
+						role: 'user',
+						content:
+							'Context has been compacted. Please continue with the task.',
+					};
+					const retryBuilder = new MessageBuilder(compressedUser);
+					retryBuilder.addMessage(retryNudge);
+					const messagesAfterCompact = retryBuilder.build();
+					setMessages(messagesAfterCompact);
+
+					await processAssistantResponse({
+						...params,
+						messages: messagesAfterCompact,
+						conversationStartTime: startTime,
+						emptyTurnCount: 0,
+						malformedRetryCount: 0,
+						compactRetryCount: compactRetryCount + 1,
+					});
+					return;
+				} catch (err) {
+					const {getLogger} = await import('@/utils/logging');
+					getLogger().warn(
+						{err, compactRetryCount},
+						'force-compact failed; falling through',
+					);
+				}
+			}
+
 			await flushAll();
+
+			// Exhausted all retries (nudges + compact-and-retry cycles)
 			addToChatQueue(
 				<ErrorMessage
 					key={generateKey('empty-response-giveup')}
-					message={`Model produced no output after ${MAX_EMPTY_TURNS + 1} attempts. The model may be exhausting its token budget on reasoning, or the request may have been refused. Try rephrasing, lowering reasoning effort, or switching models.`}
+					message={`Model produced no output after ${MAX_EMPTY_TURNS + 1 + compactRetryCount} attempts. The model may be exhausting its token budget on reasoning, or the request may have been refused. Try rephrasing, lowering reasoning effort, or switching models.`}
 					hideBox={true}
 				/>,
 			);
