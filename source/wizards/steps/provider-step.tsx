@@ -393,8 +393,20 @@ export function ProviderStep({
 				setMode('model-selection');
 				return;
 			}
-		} catch {
-			// Silent failure
+
+			// Discovery returned a non-success result — surface the reason
+			if (result.error) {
+				setError(
+					`Model discovery failed: ${result.error}. Enter model name(s) manually.`,
+				);
+			}
+		} catch (err) {
+			if (!isMountedRef.current) return;
+			const message =
+				err instanceof Error ? err.message : 'Unknown error';
+			setError(
+				`Model discovery failed: ${message}. Enter model name(s) manually.`,
+			);
 		}
 
 		if (!isMountedRef.current) return;
