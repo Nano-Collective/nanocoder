@@ -149,7 +149,7 @@ export function BaseConfigWizard<T>({
 	};
 
 	const handleLocationComplete = (location: ConfigLocation) => {
-		const baseDir = location === 'project' ? process.cwd() : getConfigPath();
+		const baseDir = location === 'project' ? projectDir : getConfigPath();
 		setConfigPath(join(baseDir, configFileName));
 		setStep('configure');
 	};
@@ -195,7 +195,7 @@ export function BaseConfigWizard<T>({
 	const openInEditor = () => {
 		try {
 			// Skip writing when config is corrupted — open the existing
-			
+
 			if (!configCorrupted) {
 				writeConfigToDisk(items);
 			}

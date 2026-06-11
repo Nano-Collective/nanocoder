@@ -1,4 +1,5 @@
-import {existsSync, mkdirSync, unlinkSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {Box, Text} from 'ink';
@@ -155,8 +156,12 @@ test('renders consistently across multiple mounts with the same props', t => {
 });
 
 test.serial('displays an error when the configuration file contains invalid JSON', async t => {
-	const configFileName = `.bad-${Date.now()}.json`;
-	const configPath = join(process.cwd(), configFileName);
+	const testDir = join(tmpdir(), `nanocoder-wizard-test-corrupt-${Date.now()}`);
+	mkdirSync(testDir, {recursive: true});
+	t.teardown(() => rmSync(testDir, {recursive: true, force: true}));
+
+	const configFileName = '.bad.json';
+	const configPath = join(testDir, configFileName);
 	writeFileSync(configPath, '{ this is bad json }', 'utf-8');
 
 	const {lastFrame, stdin} = renderWithTheme(
@@ -172,7 +177,7 @@ test.serial('displays an error when the configuration file contains invalid JSON
 			hasItems={items => items.entries.length > 0}
 			renderConfigureStep={noopRenderConfigure}
 			renderSummaryItems={noopRenderSummary}
-			projectDir={process.cwd()}
+			projectDir={testDir}
 			onComplete={() => {}}
 		/>,
 	);
@@ -186,15 +191,15 @@ test.serial('displays an error when the configuration file contains invalid JSON
 
 	const output = lastFrame()!;
 	t.regex(output, /Configuration file has invalid JSON and cannot be loaded/);
-
-	try {
-		unlinkSync(configPath);
-	} catch {}
 });
 
 test.serial('blocks saving corrupted config', async t => {
-	const configFileName = `.bad-save-${Date.now()}.json`;
-	const configPath = join(process.cwd(), configFileName);
+	const testDir = join(tmpdir(), `nanocoder-wizard-test-save-${Date.now()}`);
+	mkdirSync(testDir, {recursive: true});
+	t.teardown(() => rmSync(testDir, {recursive: true, force: true}));
+
+	const configFileName = '.bad-save.json';
+	const configPath = join(testDir, configFileName);
 	writeFileSync(configPath, '{ invalid }', 'utf-8');
 
 	const {lastFrame, stdin} = renderWithTheme(
@@ -213,7 +218,7 @@ test.serial('blocks saving corrupted config', async t => {
 				return <></>;
 			}}
 			renderSummaryItems={noopRenderSummary}
-			projectDir={process.cwd()}
+			projectDir={testDir}
 			onComplete={() => {}}
 		/>,
 	);
@@ -226,15 +231,15 @@ test.serial('blocks saving corrupted config', async t => {
 
 	const output = lastFrame()!;
 	t.regex(output, /Cannot save: the existing configuration file contains invalid/);
-	
-	try {
-		unlinkSync(configPath);
-	} catch {}
 });
 
 test.serial('deleting corrupted config clears corruption state', async t => {
-	const configFileName = `.bad-del-${Date.now()}.json`;
-	const configPath = join(process.cwd(), configFileName);
+	const testDir = join(tmpdir(), `nanocoder-wizard-test-del-${Date.now()}`);
+	mkdirSync(testDir, {recursive: true});
+	t.teardown(() => rmSync(testDir, {recursive: true, force: true}));
+
+	const configFileName = '.bad-del.json';
+	const configPath = join(testDir, configFileName);
 	writeFileSync(configPath, '{ invalid }', 'utf-8');
 	let completedPath = '';
 
@@ -254,7 +259,7 @@ test.serial('deleting corrupted config clears corruption state', async t => {
 				return <></>;
 			}}
 			renderSummaryItems={noopRenderSummary}
-			projectDir={process.cwd()}
+			projectDir={testDir}
 			onComplete={(path) => { completedPath = path; }}
 		/>,
 	);
