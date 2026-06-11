@@ -135,7 +135,7 @@ export const displayExecutedTool = async (
 		//
 		// Failures (generic "Error: …" or the streaming bash path's
 		// "⚒ Validation failed: …") don't fold into the count tally; they
-		// render as a condensed red one-liner ("⚒ write_file failed.")
+		// render as a condensed red one-liner ("⚒ write_file failed")
 		// instead of the full error. The model still receives the full
 		// error in conversation history — mirror displayToolResult's detection.
 		const isError =
