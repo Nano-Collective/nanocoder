@@ -191,44 +191,29 @@ test.serial('stop releases the watcher and stops emitting', async t => {
 	}
 });
 test.serial('closes the underlying watcher if initialization fails', async t => {
-	
-	const chokidar = require('chokidar');
-	const originalWatch = chokidar.watch;
+  let closeCalled = false;
 
-	let closeCalled = false;
 
-	chokidar.watch = () => {
-		const fakeWatcher = {
-			on: () => fakeWatcher,
-			once: (event: string, callback: (...args: any[]) => void) => {
-				if (event === 'error') {
-				
-					setImmediate(() => callback(new Error('Simulated startup failure')));
-				}
-				return fakeWatcher;
-			},
-			close: async () => {
-				closeCalled = true;
-			},
-		};
-		return fakeWatcher;
-	};
+  const fakeWatcher = {
+    on:   (_e: string, _cb: unknown) => fakeWatcher,
+    once: (event: string, callback: (...args: unknown[]) => void) => {
+      if (event === 'error') {
+        setImmediate(() => callback(new Error('Simulated startup failure')));
+      }
+      return fakeWatcher;
+    },
+    close: async () => { closeCalled = true; },
+  } as unknown as import('chokidar').FSWatcher;
 
-	const {router} = captureRouter();
-	const source = new FileWatcherSource(router, {
-		root: '.',
-	});
+  const fakeWatch = () => fakeWatcher;
 
-	try {
-	
-		await source.start();
-		t.fail('source.start() should have thrown an error on startup failure');
-	} catch (error: any) {
-		t.is(error.message, 'Simulated startup failure');
-		
-		t.true(closeCalled, 'Expected watcher.close() to be called on error cleanup path');
-	} finally {
-	
-		chokidar.watch = originalWatch;
-	}
+  const {router} = captureRouter();
+  const source = new FileWatcherSource(router, {
+    root: '.',
+    _watchFn: fakeWatch as unknown as typeof watch,
+  });
+
+  const err = await t.throwsAsync(() => source.start(), {message: 'Simulated startup failure'});
+  t.is(err?.message, 'Simulated startup failure');
+  t.true(closeCalled, 'watcher.close() must be called on startup error');
 });

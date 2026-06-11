@@ -17,6 +17,7 @@
 import {type FSWatcher, watch} from 'chokidar';
 import type {EventRouter} from '@/events/event-router';
 import type {FileChangeEventKind} from '@/types/skills';
+import { relative, isAbsolute } from 'node:path';
 
 export interface FileWatcherOptions {
 	/** Directory the watcher treats as root; emitted paths are relative. */
@@ -33,6 +34,7 @@ export interface FileWatcherOptions {
 	usePolling?: boolean;
 	/** Polling interval in ms when `usePolling` is true. Defaults to 50. */
 	pollingInterval?: number;
+	  _watchFn?: typeof watch;
 }
 
 // `.nanocoder/` holds the daemon's own state (lockfile, socket, checkpoints,
@@ -48,61 +50,72 @@ const DEFAULT_IGNORED: Array<string | RegExp> = [
 ];
 
 export class FileWatcherSource {
-	private watcher: FSWatcher | null = null;
+    private watcher: FSWatcher | null = null;
 
-	constructor(
-		private readonly router: EventRouter,
-		private readonly options: FileWatcherOptions,
-	) {}
+    constructor(
+        private readonly router: EventRouter,
+        private readonly options: FileWatcherOptions,
+    ) {}
 
-async start(): Promise<void> {
-		if (this.watcher) return;
+    async start(): Promise<void> {
+        if (this.watcher) return;
 
-		const watcher = watch('.', {
-			cwd: this.options.root,
-			ignored: this.options.ignored ?? DEFAULT_IGNORED,
-			ignoreInitial: true,
-			persistent: true,
-			usePolling: this.options.usePolling ?? false,
-			interval: this.options.pollingInterval ?? 50,
-			binaryInterval: this.options.pollingInterval ?? 50,
-		});
+        const watchFn = this.options._watchFn ?? watch;
+        
+      
+        const rootDir = this.options.root;
+        const ignored = this.options.ignored ?? DEFAULT_IGNORED;
 
-		watcher.on('add', file => this.emit(file, 'add'));
-		watcher.on('change', file => this.emit(file, 'change'));
-		watcher.on('unlink', file => this.emit(file, 'unlink'));
+        const watcher = watchFn(rootDir, {
+            ignored,
+            persistent: true,
+            ignoreInitial: true, 
+            usePolling: this.options.usePolling ?? false,
+            interval: this.options.pollingInterval ?? 50,
+        });
 
-		try {
-			await new Promise<void>((resolve, reject) => {
-				watcher.once('ready', () => resolve());
-				watcher.once('error', reject);
-			});
+        watcher.on('add', file => this.emit(file, 'add'));
+        watcher.on('change', file => this.emit(file, 'change'));
+        watcher.on('unlink', file => this.emit(file, 'unlink'));
 
-			this.watcher = watcher;
-		} catch (error) {
-			// Clean up the active chokidar instance if startup fails 
-			// before throwing the error out of the start lifecycle.
-			await watcher.close();
-			throw error;
-		}
-	}
+        try {
+            await new Promise<void>((resolve, reject) => {
+                watcher.once('ready', () => resolve());
+                watcher.once('error', reject);
+            });
 
-	async stop(): Promise<void> {
-		if (!this.watcher) return;
-		const w = this.watcher;
-		this.watcher = null;
-		await w.close();
-	}
+            this.watcher = watcher;
+        } catch (error) {
+           
+            await watcher.close();
+            throw error;
+        }
+    }
 
-	private emit(file: string, eventKind: FileChangeEventKind): void {
-		// Fire-and-forget: chokidar callbacks are sync, but the router's emit
-		// is async (it awaits dispatcher.dispatch). We don't await here -
-		// chokidar would back up on a slow dispatcher otherwise. The router's
-		// dispatcher should impose its own backpressure (step 11).
-		void this.router.emit({
-			kind: 'file.changed',
-			payload: {file, eventKind},
-			at: Date.now(),
-		});
-	}
+    async stop(): Promise<void> {
+        if (!this.watcher) return;
+        const w = this.watcher;
+        this.watcher = null;
+        await w.close();
+    }
+
+    private emit(file: string, eventKind: FileChangeEventKind): void {
+    
+        let relativePath = file;
+        if (isAbsolute(file)) {
+            relativePath = relative(this.options.root, file);
+        } else if (file.startsWith(this.options.root)) {
+           
+            relativePath = relative(this.options.root, file);
+        }
+
+        
+        relativePath = relativePath.replace(/\\/g, '/');
+
+        void this.router.emit({
+            kind: 'file.changed',
+            payload: { file: relativePath, eventKind },
+            at: Date.now(),
+        });
+    }
 }
