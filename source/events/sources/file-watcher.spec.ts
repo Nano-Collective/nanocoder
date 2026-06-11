@@ -190,30 +190,30 @@ test.serial('stop releases the watcher and stops emitting', async t => {
 		await rm(dir, {recursive: true, force: true});
 	}
 });
+
 test.serial('closes the underlying watcher if initialization fails', async t => {
-  let closeCalled = false;
+    let closeCalled = false;
 
+    type WatchFn = typeof import('chokidar').watch;  // ← avoids importing watch itself
 
-  const fakeWatcher = {
-    on:   (_e: string, _cb: unknown) => fakeWatcher,
-    once: (event: string, callback: (...args: unknown[]) => void) => {
-      if (event === 'error') {
-        setImmediate(() => callback(new Error('Simulated startup failure')));
-      }
-      return fakeWatcher;
-    },
-    close: async () => { closeCalled = true; },
-  } as unknown as import('chokidar').FSWatcher;
+    const fakeWatcher = {
+        on:   (_e: string, _cb: unknown) => fakeWatcher,
+        once: (event: string, callback: (...args: unknown[]) => void) => {
+            if (event === 'error') {
+                setImmediate(() => callback(new Error('Simulated startup failure')));
+            }
+            return fakeWatcher;
+        },
+        close: async () => { closeCalled = true; },
+    } as unknown as import('chokidar').FSWatcher;
 
-  const fakeWatch = () => fakeWatcher;
+    const {router} = captureRouter();
+    const source = new FileWatcherSource(router, {
+        root: '.',
+        _watchFn: (() => fakeWatcher) as unknown as WatchFn,
+    });
 
-  const {router} = captureRouter();
-  const source = new FileWatcherSource(router, {
-    root: '.',
-    _watchFn: fakeWatch as unknown as typeof watch,
-  });
-
-  const err = await t.throwsAsync(() => source.start(), {message: 'Simulated startup failure'});
-  t.is(err?.message, 'Simulated startup failure');
-  t.true(closeCalled, 'watcher.close() must be called on startup error');
+    const err = await t.throwsAsync(() => source.start());
+    t.is(err?.message, 'Simulated startup failure');
+    t.true(closeCalled, 'watcher.close() must be called on startup error');
 });
