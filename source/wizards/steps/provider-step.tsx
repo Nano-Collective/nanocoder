@@ -41,6 +41,8 @@ interface TemplateOption {
 	value: string;
 }
 
+const DONE_SHORTCUT_KEY = 'd';
+
 /**
  * Find the best matching template for an existing provider config.
  * Match by id, name, or baseUrl — then fall back to custom.
@@ -507,7 +509,9 @@ export function ProviderStep({
 		if (
 			mode === 'template-selection' &&
 			providers.length > 0 &&
-			input.toLowerCase() === 'd' &&
+			typeof input === 'string' &&
+			input.length > 0 &&
+			input.toLowerCase() === DONE_SHORTCUT_KEY &&
 			!key.ctrl &&
 			!key.meta
 		) {
@@ -619,7 +623,7 @@ export function ProviderStep({
 				{providers.length > 0 && (
 					<Box marginTop={1}>
 						<Text color={colors.success}>
-							Done is always available: press d
+							Done is always available: press {DONE_SHORTCUT_KEY}
 						</Text>
 					</Box>
 				)}
