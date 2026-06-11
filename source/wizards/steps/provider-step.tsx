@@ -337,13 +337,23 @@ export function ProviderStep({
 		}
 	};
 
-	const goToManualModelInput = (answers: Record<string, string>) => {
+	const goToManualModelInput = (
+		answers: Record<string, string>,
+		errorMsg?: string,
+	) => {
 		if (!selectedTemplate) return;
 		const modelFieldIndex = selectedTemplate.fields.findIndex(
 			f => f.name === 'model',
 		);
 		if (modelFieldIndex >= 0) {
 			loadField(selectedTemplate, modelFieldIndex, answers);
+			if (errorMsg) {
+				setError(
+					`Model discovery failed:\n${errorMsg}\n\nEnter model name(s) manually.`,
+				);
+			} else {
+				setError(null);
+			}
 			setMode('field-input');
 		}
 	};
@@ -393,12 +403,17 @@ export function ProviderStep({
 				setMode('model-selection');
 				return;
 			}
-		} catch {
-			// Silent failure
-		}
 
-		if (!isMountedRef.current) return;
-		goToManualModelInput(answers);
+			if (!isMountedRef.current) return;
+			const errorMessage = result.error || 'No models returned from provider';
+			goToManualModelInput(answers, errorMessage);
+			return;
+		} catch (err) {
+			if (!isMountedRef.current) return;
+			const errorMessage = err instanceof Error ? err.message : String(err);
+			goToManualModelInput(answers, errorMessage);
+			return;
+		}
 	};
 
 	const handleModelToggle = (modelId: string) => {
@@ -689,6 +704,7 @@ export function ProviderStep({
 				onSelectAll={handleSelectAllModels}
 				onDone={handleModelSelectionComplete}
 				onBack={handleModelSelectionBack}
+				onManualEntry={() => goToManualModelInput(fieldAnswers)}
 			/>
 		);
 	}

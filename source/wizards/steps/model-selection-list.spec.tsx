@@ -20,6 +20,7 @@ function renderList({
 	onSelectAll = () => {},
 	onDone = () => {},
 	onBack = () => {},
+	onManualEntry = () => {},
 }: {
 	models?: FetchedModel[];
 	selectedIds?: Set<string>;
@@ -28,6 +29,7 @@ function renderList({
 	onSelectAll?: () => void;
 	onDone?: () => void;
 	onBack?: () => void;
+	onManualEntry?: () => void;
 } = {}) {
 	return renderWithTheme(
 		<ModelSelectionList
@@ -40,6 +42,7 @@ function renderList({
 			onSelectAll={onSelectAll}
 			onDone={onDone}
 			onBack={onBack}
+			onManualEntry={onManualEntry}
 		/>,
 	);
 }
@@ -185,5 +188,20 @@ test('renders error for empty selection', t => {
 	});
 
 	t.regex(lastFrame() || '', /Please select at least one model/);
+	unmount();
+});
+
+test('m triggers manual entry callback', async t => {
+	let manualEntryCalls = 0;
+	const {stdin, unmount} = renderList({
+		onManualEntry: () => {
+			manualEntryCalls += 1;
+		},
+	});
+
+	stdin.write('m');
+	await wait();
+
+	t.is(manualEntryCalls, 1);
 	unmount();
 });

@@ -731,3 +731,43 @@ test('findTemplateForProvider: ChatGPT resolves to chatgpt-codex by baseUrl', t 
 	t.truthy(template);
 	t.is(template!.id, 'chatgpt-codex');
 });
+
+const wait = async (ms = 50) => new Promise(resolve => setTimeout(resolve, ms));
+
+test.serial('model discovery failure surfaces error message', async t => {
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async () => {
+		throw new Error('Simulated network failure');
+	};
+
+	try {
+		const {stdin, lastFrame, unmount} = render(
+			<ProviderStep onComplete={() => {}} />
+		);
+
+		// Initial menu: Select "Choose from common templates" -> press enter
+		stdin.write('\r');
+		await wait(100);
+
+		// Template selection menu: First item is "Ollama" -> press enter
+		stdin.write('\r');
+		await wait(100);
+
+		// Field: Provider Name -> press enter
+		stdin.write('\r');
+		await wait(100);
+
+		// Field: Base URL -> press enter. This triggers fetchModels which will fail.
+		stdin.write('\r');
+		await wait(200); 
+
+		const output = lastFrame() || '';
+		t.regex(output, /Model discovery failed:/);
+		t.regex(output, /Simulated network failure/);
+		t.regex(output, /Enter model name\(s\) manually\./);
+
+		unmount();
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
