@@ -1,3 +1,5 @@
+import {existsSync, mkdirSync, unlinkSync, writeFileSync} from 'node:fs';
+import {join} from 'node:path';
 import test from 'ava';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -150,4 +152,42 @@ test('renders consistently across multiple mounts with the same props', t => {
 	const b = renderWithTheme(<BaseConfigWizard<FakeItems> {...props} />);
 
 	t.is(a.lastFrame(), b.lastFrame());
+});
+
+test.serial('displays an error when the configuration file contains invalid JSON', async t => {
+	const configFileName = `.bad-${Date.now()}.json`;
+	const configPath = join(process.cwd(), configFileName);
+	writeFileSync(configPath, '{ this is bad json }', 'utf-8');
+
+	const {lastFrame, stdin} = renderWithTheme(
+		<BaseConfigWizard<FakeItems>
+			title="Title"
+			focusId="corrupt-wizard"
+			configFileName={configFileName}
+			initialItems={{entries: []}}
+			parseConfig={() => {
+				throw new Error('Parse error');
+			}}
+			buildConfig={items => items}
+			hasItems={items => items.entries.length > 0}
+			renderConfigureStep={noopRenderConfigure}
+			renderSummaryItems={noopRenderSummary}
+			projectDir={process.cwd()}
+			onComplete={() => {}}
+		/>,
+	);
+
+	// It will default to "existing config" since the file exists
+	// We send "Enter" to select "Edit this configuration"
+	stdin.write('\r');
+
+	// Wait for the async useEffect file read
+	await new Promise(r => setTimeout(r, 100));
+
+	const output = lastFrame()!;
+	t.regex(output, /Configuration file has invalid JSON and cannot be loaded/);
+
+	try {
+		unlinkSync(configPath);
+	} catch {}
 });
