@@ -191,3 +191,82 @@ test.serial('displays an error when the configuration file contains invalid JSON
 		unlinkSync(configPath);
 	} catch {}
 });
+
+test.serial('blocks saving corrupted config', async t => {
+	const configFileName = `.bad-save-${Date.now()}.json`;
+	const configPath = join(process.cwd(), configFileName);
+	writeFileSync(configPath, '{ invalid }', 'utf-8');
+
+	const {lastFrame, stdin} = renderWithTheme(
+		<BaseConfigWizard<FakeItems>
+			title="Title"
+			focusId="corrupt-save-wizard"
+			configFileName={configFileName}
+			initialItems={{entries: []}}
+			parseConfig={() => {
+				throw new Error('Parse error');
+			}}
+			buildConfig={items => items}
+			hasItems={items => items.entries.length > 0}
+			renderConfigureStep={({onComplete}) => {
+				setTimeout(() => onComplete({entries: [{name: 'new'}]}), 10);
+				return <></>;
+			}}
+			renderSummaryItems={noopRenderSummary}
+			projectDir={process.cwd()}
+			onComplete={() => {}}
+		/>,
+	);
+
+	stdin.write('\r');
+	await new Promise(r => setTimeout(r, 100));
+
+	stdin.write('\r');
+	await new Promise(r => setTimeout(r, 50));
+
+	const output = lastFrame()!;
+	t.regex(output, /Cannot save: the existing configuration file contains invalid/);
+	
+	try {
+		unlinkSync(configPath);
+	} catch {}
+});
+
+test.serial('deleting corrupted config clears corruption state', async t => {
+	const configFileName = `.bad-del-${Date.now()}.json`;
+	const configPath = join(process.cwd(), configFileName);
+	writeFileSync(configPath, '{ invalid }', 'utf-8');
+	let completedPath = '';
+
+	const {lastFrame, stdin} = renderWithTheme(
+		<BaseConfigWizard<FakeItems>
+			title="Title"
+			focusId="corrupt-del-wizard"
+			configFileName={configFileName}
+			initialItems={{entries: []}}
+			parseConfig={() => {
+				throw new Error('Parse error');
+			}}
+			buildConfig={items => items}
+			hasItems={items => items.entries.length > 0}
+			renderConfigureStep={({onDelete}) => {
+				setTimeout(() => onDelete?.(), 10);
+				return <></>;
+			}}
+			renderSummaryItems={noopRenderSummary}
+			projectDir={process.cwd()}
+			onComplete={(path) => { completedPath = path; }}
+		/>,
+	);
+
+	stdin.write('\r');
+	await new Promise(r => setTimeout(r, 100));
+
+	stdin.write('\r');
+	await new Promise(r => setTimeout(r, 50));
+
+	t.false(existsSync(configPath));
+	t.is(completedPath, configPath);
+});
+
+
