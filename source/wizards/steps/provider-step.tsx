@@ -155,13 +155,11 @@ export function ProviderStep({
 					{label: 'Add custom provider manually', value: 'custom'},
 				];
 
-	const getTemplateOptions = (): TemplateOption[] => [
-		...PROVIDER_TEMPLATES.map(template => ({
+	const getTemplateOptions = (): TemplateOption[] =>
+		PROVIDER_TEMPLATES.map(template => ({
 			label: template.name,
 			value: template.id,
-		})),
-		...(providers.length > 0 ? [{label: 'Done & Save', value: 'done'}] : []),
-	];
+		}));
 
 	const editOptions: TemplateOption[] = providers.map((provider, index) => ({
 		label: provider.name,
@@ -190,11 +188,6 @@ export function ProviderStep({
 	};
 
 	const handleTemplateSelect = (item: TemplateOption) => {
-		if (item.value === 'done') {
-			onComplete(providers);
-			return;
-		}
-
 		// Adding new provider
 		const template = PROVIDER_TEMPLATES.find(t => t.id === item.value);
 		if (template) {
@@ -509,7 +502,19 @@ export function ProviderStep({
 		setMode('field-input');
 	};
 
-	useInput((_input, key) => {
+	useInput((input, key) => {
+		// "Done & Save" shortcut
+		if (
+			mode === 'template-selection' &&
+			providers.length > 0 &&
+			input.toLowerCase() === 'd' &&
+			!key.ctrl &&
+			!key.meta
+		) {
+			onComplete(providers);
+			return;
+		}
+
 		// Handle Shift+Tab for going back
 		if (key.shift && key.tab) {
 			if (mode === 'field-input') {
@@ -611,6 +616,13 @@ export function ProviderStep({
 					items={getTemplateOptions()}
 					onSelect={(item: TemplateOption) => handleTemplateSelect(item)}
 				/>
+				{providers.length > 0 && (
+					<Box marginTop={1}>
+						<Text color={colors.success}>
+							Done is always available: press d
+						</Text>
+					</Box>
+				)}
 			</Box>
 		);
 	}
