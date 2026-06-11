@@ -151,11 +151,25 @@ export function useContextPercentage({
 
 		const total = breakdown.total + toolDefTokens + streamingTokenCount;
 
-		// Prefer API-reported usage when it is fresh (the snapshot's message
-		// count still matches the conversation); otherwise fall back to the
-		// estimate computed above so the figure never lags the conversation.
+		// Estimate of only the messages appended since the API snapshot was taken,
+		// plus the in-flight streaming reply. The API total already accounts for
+		// the system prompt, tool definitions and history up to `atMessageCount`,
+		// so the anchor must add nothing but this fresh tail. Guard the slice
+		// against a snapshot whose count overtook the conversation (stale across a
+		// clear/compaction) — `resolveContextUsage` ignores that snapshot anyway.
+		const apiAtCount = lastApiUsage?.atMessageCount ?? null;
+		let tailTokens = streamingTokenCount;
+		if (apiAtCount !== null && apiAtCount <= messages.length) {
+			for (let i = apiAtCount; i < messages.length; i++) {
+				tailTokens += getMessageTokens(messages[i]);
+			}
+		}
+
+		// Anchor on API-reported usage and estimate only the fresh tail; fall back
+		// to the full client-side estimate when there's no usable snapshot.
 		const {percent, source} = resolveContextUsage({
 			estimatedTotalTokens: total,
+			estimatedTailTokens: tailTokens,
 			apiSnapshot: lastApiUsage,
 			currentMessageCount: messages.length,
 			contextLimit,

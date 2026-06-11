@@ -147,17 +147,57 @@ test('updateMessages updates messages', t => {
 	t.deepEqual(captured!.messages, msgs);
 });
 
-test('updateMessages invalidates the API usage snapshot', t => {
+test('updateMessages preserves the API usage snapshot across an in-conversation append', t => {
 	const {hook, instance} = setup();
 
+	// Establish a conversation, then capture a snapshot against it.
+	const opening: Message = {role: 'user', content: 'first question'} as Message;
+	hook.updateMessages([opening, {role: 'assistant', content: 'answer'} as Message]);
 	hook.setLastApiUsage({inputTokens: 1000, outputTokens: 200, atMessageCount: 2});
 	instance.rerender(<Probe />);
 	t.not(captured!.lastApiUsage, null);
 
-	// Any wholesale message replacement (new turn, /clear, /compact, session
-	// resume, checkpoint restore) must clear the snapshot so the context
-	// indicator falls back to estimation rather than showing a stale API value.
-	captured!.updateMessages([{role: 'user', content: 'hi'} as Message]);
+	// Appending a new user message keeps the prior messages as a prefix, so the
+	// snapshot must survive — the indicator anchors on it and estimates the tail.
+	captured!.updateMessages([
+		opening,
+		{role: 'assistant', content: 'answer'} as Message,
+		{role: 'user', content: 'follow-up'} as Message,
+	]);
+	instance.rerender(<Probe />);
+
+	t.not(captured!.lastApiUsage, null);
+});
+
+test('updateMessages invalidates the snapshot on a wholesale replacement (different first message)', t => {
+	const {hook, instance} = setup();
+
+	hook.updateMessages([{role: 'user', content: 'old conversation'} as Message]);
+	hook.setLastApiUsage({inputTokens: 1000, outputTokens: 200, atMessageCount: 1});
+	instance.rerender(<Probe />);
+	t.not(captured!.lastApiUsage, null);
+
+	// A swap to a different conversation (resume / checkpoint restore) changes the
+	// opening message, so the snapshot no longer describes a prefix and is dropped.
+	captured!.updateMessages([{role: 'user', content: 'a different session'} as Message]);
+	instance.rerender(<Probe />);
+
+	t.is(captured!.lastApiUsage, null);
+});
+
+test('updateMessages invalidates the snapshot when the history shrinks (/clear, /compact)', t => {
+	const {hook, instance} = setup();
+
+	hook.updateMessages([
+		{role: 'user', content: 'q'} as Message,
+		{role: 'assistant', content: 'a'} as Message,
+	]);
+	hook.setLastApiUsage({inputTokens: 1000, outputTokens: 200, atMessageCount: 2});
+	instance.rerender(<Probe />);
+	t.not(captured!.lastApiUsage, null);
+
+	// /clear empties the array — shorter than before → snapshot dropped.
+	captured!.updateMessages([]);
 	instance.rerender(<Probe />);
 
 	t.is(captured!.lastApiUsage, null);

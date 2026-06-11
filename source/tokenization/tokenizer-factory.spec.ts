@@ -5,7 +5,7 @@
 import test from 'ava';
 import {createTokenizer} from './tokenizer-factory.js';
 import {AnthropicTokenizer} from './tokenizers/anthropic-tokenizer.js';
-import {FallbackTokenizer} from './tokenizers/fallback-tokenizer.js';
+import {GenericTokenizer} from './tokenizers/generic-tokenizer.js';
 import {LlamaTokenizer} from './tokenizers/llama-tokenizer.js';
 import {OpenAITokenizer} from './tokenizers/openai-tokenizer.js';
 
@@ -101,9 +101,12 @@ test('createTokenizer detects Llama from local provider', t => {
 });
 
 // Test createTokenizer with fallback
-test('createTokenizer returns FallbackTokenizer for unknown provider', t => {
+test('createTokenizer returns GenericTokenizer for unknown provider', t => {
 	const tokenizer = createTokenizer('unknown', 'unknown-model');
-	t.true(tokenizer instanceof FallbackTokenizer);
+	t.true(tokenizer instanceof GenericTokenizer);
+	if (tokenizer.free) {
+		tokenizer.free();
+	}
 });
 
 // Test cloud suffix stripping

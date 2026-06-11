@@ -17,6 +17,7 @@ import {getModelContextLimit} from '@/models/index';
 import {bashExecutor} from '@/services/bash-executor';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {generateKey, setKeyGeneratorSessionId} from '@/session/key-generator';
+import {buildSessionHistoryComponents} from '@/session/session-history-renderer';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
 import {createTokenizer} from '@/tokenization/index';
@@ -451,6 +452,15 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.setCurrentModel(session.model);
 			props.setCurrentSessionId(session.id);
 			setKeyGeneratorSessionId(session.id);
+			// Replay the persisted conversation into scrollback so the user can see
+			// what they resumed (prompts, assistant replies, tool activity) instead
+			// of an empty screen with only a success line.
+			for (const component of buildSessionHistoryComponents(
+				session.messages,
+				session.model,
+			)) {
+				props.addToChatQueue(component);
+			}
 			props.addToChatQueue(
 				<SuccessMessage
 					key={generateKey('resume-success')}

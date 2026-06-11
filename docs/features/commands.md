@@ -30,6 +30,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/context-max` | Set maximum context length for the current session, or inspect the resolved context source. Also available as `--context-max` CLI flag |
 | `/exit` | Exit the application |
 | `/export` | Export current session to markdown file |
+| `/copy` | Copy the last assistant response to the system clipboard |
 | `/update` | Update Nanocoder to the latest version |
 | `/usage` | Get current model context usage visually |
 | `/lsp` | List connected LSP servers |

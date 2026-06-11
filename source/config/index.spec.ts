@@ -456,3 +456,121 @@ test.serial('loadDefaultMode returns undefined for invalid mode values', async t
 		}
 	}
 });
+
+const headlessTestDir = join(tmpdir(), `nanocoder-headless-test-${Date.now()}`);
+
+test.before(() => {
+	mkdirSync(headlessTestDir, {recursive: true});
+});
+
+test.after.always(() => {
+	if (existsSync(headlessTestDir)) {
+		rmSync(headlessTestDir, {recursive: true, force: true});
+	}
+});
+
+async function withHeadlessConfig(
+	subdir: string,
+	configBody: unknown,
+	envMaxTurns: string | undefined,
+	assertion: (
+		headless: {maxTurns?: number} | undefined,
+		fallback: number,
+	) => void,
+): Promise<void> {
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const originalMaxTurns = process.env.NANOCODER_MAX_TURNS;
+	const testSubdir = join(headlessTestDir, subdir);
+	mkdirSync(testSubdir, {recursive: true});
+
+	try {
+		writeFileSync(
+			join(testSubdir, 'agents.config.json'),
+			JSON.stringify(configBody),
+			'utf-8',
+		);
+		process.chdir(testSubdir);
+		process.env.NANOCODER_CONFIG_DIR = join(testSubdir, 'nonexistent-global');
+		if (envMaxTurns !== undefined) {
+			process.env.NANOCODER_MAX_TURNS = envMaxTurns;
+		} else {
+			delete process.env.NANOCODER_MAX_TURNS;
+		}
+
+		const {
+			reloadAppConfig: reload,
+			getAppConfig,
+			DEFAULT_HEADLESS_MAX_TURNS,
+		} = await import('./index.js');
+		reload();
+		assertion(getAppConfig().headless, DEFAULT_HEADLESS_MAX_TURNS);
+	} finally {
+		process.chdir(originalCwd);
+		if (originalConfigDir !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+		if (originalMaxTurns !== undefined) {
+			process.env.NANOCODER_MAX_TURNS = originalMaxTurns;
+		} else {
+			delete process.env.NANOCODER_MAX_TURNS;
+		}
+	}
+}
+
+test.serial('headless maxTurns defaults when not configured', async t => {
+	await withHeadlessConfig(
+		'headless-default',
+		{nanocoder: {}},
+		undefined,
+		(headless, fallback) => {
+			t.is(headless?.maxTurns, fallback);
+		},
+	);
+});
+
+test.serial('headless maxTurns loads from config', async t => {
+	await withHeadlessConfig(
+		'headless-config',
+		{nanocoder: {headless: {maxTurns: 500}}},
+		undefined,
+		headless => {
+			t.is(headless?.maxTurns, 500);
+		},
+	);
+});
+
+test.serial('headless maxTurns env var overrides config', async t => {
+	await withHeadlessConfig(
+		'headless-env-override',
+		{nanocoder: {headless: {maxTurns: 500}}},
+		'42',
+		headless => {
+			t.is(headless?.maxTurns, 42);
+		},
+	);
+});
+
+test.serial('headless maxTurns clamps config to at least 1', async t => {
+	await withHeadlessConfig(
+		'headless-clamp',
+		{nanocoder: {headless: {maxTurns: 0}}},
+		undefined,
+		headless => {
+			t.is(headless?.maxTurns, 1);
+		},
+	);
+});
+
+test.serial('headless maxTurns ignores invalid env var', async t => {
+	await withHeadlessConfig(
+		'headless-bad-env',
+		{nanocoder: {headless: {maxTurns: 500}}},
+		'not-a-number',
+		headless => {
+			t.is(headless?.maxTurns, 500);
+		},
+	);
+});

@@ -207,6 +207,12 @@ export interface AppConfig {
 		retentionDays?: number;
 		directory?: string;
 	};
+
+	// Headless / non-interactive conversation limits (--plain and ACP loops)
+	headless?: {
+		// Maximum LLM turns before the loop forces a final, tool-free answer.
+		maxTurns?: number;
+	};
 }
 
 // MCP Server configuration with source tracking

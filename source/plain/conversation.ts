@@ -1,4 +1,4 @@
-import {getAppConfig} from '@/config/index';
+import {DEFAULT_HEADLESS_MAX_TURNS, getAppConfig} from '@/config/index';
 import {processToolUse} from '@/message-handler';
 import {color, write, writeError, writeLine, writeStatus} from '@/plain/writer';
 import {parseToolCalls} from '@/tool-calling/index';
@@ -32,13 +32,23 @@ export type PlainConversationOutcome =
 	| {kind: 'tool-approval-required'; toolNames: string[]}
 	| {kind: 'error'; message: string};
 
-const MAX_TURNS = 50;
+// On the last allowed turn we strip tools and inject this so the model
+// finalizes cleanly instead of the loop bailing out with a hard error and
+// discarding the work it has already done.
+const FINAL_TURN_INSTRUCTION =
+	'You have reached the maximum number of tool-execution turns for this run. ' +
+	'Do not call any more tools. Produce your final answer now using only the ' +
+	'information you already have.';
 
 /**
  * Headless conversation loop. Streams assistant text to stdout, runs tools
  * via processToolUse, and recurses until the model produces a content-only
  * response or hits a tool that needs human approval (which exits early in
  * plain mode — there's no interactive prompt).
+ *
+ * The turn ceiling guards against a wedged model looping unbounded in an
+ * unattended run. It defaults to DEFAULT_HEADLESS_MAX_TURNS and is overridable
+ * via the NANOCODER_MAX_TURNS env var or `nanocoder.headless.maxTurns` config.
  */
 export async function runPlainConversation(
 	options: RunPlainConversationOptions,
@@ -57,10 +67,17 @@ export async function runPlainConversation(
 
 	let messages = initialMessages;
 
-	for (let turn = 0; turn < MAX_TURNS; turn++) {
+	const maxTurns =
+		getAppConfig().headless?.maxTurns ?? DEFAULT_HEADLESS_MAX_TURNS;
+
+	for (let turn = 0; turn < maxTurns; turn++) {
 		if (abortSignal.aborted) {
 			return {kind: 'error', message: 'Aborted'};
 		}
+
+		// On the final turn, force a tool-free wrap-up so we end with a usable
+		// answer rather than the post-loop error.
+		const finalTurn = turn === maxTurns - 1;
 
 		const availableNames = toolManager.getAvailableToolNames(
 			tune,
@@ -68,7 +85,7 @@ export async function runPlainConversation(
 			undefined,
 			model,
 		);
-		const tools = toolManager.getFilteredTools(availableNames);
+		const tools = finalTurn ? {} : toolManager.getFilteredTools(availableNames);
 
 		const modeOverrides: ModeOverrides = {
 			nonInteractiveMode: true,
@@ -83,8 +100,12 @@ export async function runPlainConversation(
 		const maxMessages = sessionConfig?.maxMessages ?? 1000;
 		const cappedMessages = capMessagesForModel(messages, maxMessages);
 
+		const finalTurnNotice: Message[] = finalTurn
+			? [{role: 'user', content: FINAL_TURN_INSTRUCTION}]
+			: [];
+
 		const result = await client.chat(
-			[systemMessage, ...cappedMessages],
+			[systemMessage, ...cappedMessages, ...finalTurnNotice],
 			tools,
 			{
 				onReasoningToken: (token: string) => {
@@ -121,9 +142,10 @@ export async function runPlainConversation(
 		const nativeToolCalls = message.tool_calls || [];
 		const fullContent = message.content || '';
 
-		const xmlParse = result.toolsDisabled
-			? parseToolCalls(fullContent)
-			: {success: true as const, toolCalls: [], cleanedContent: fullContent};
+		const xmlParse =
+			result.toolsDisabled && !finalTurn
+				? parseToolCalls(fullContent)
+				: {success: true as const, toolCalls: [], cleanedContent: fullContent};
 
 		if (!xmlParse.success) {
 			writeError(`Malformed tool call: ${xmlParse.error}`);
@@ -212,9 +234,12 @@ export async function runPlainConversation(
 		messages = [...messages, ...toolResults];
 	}
 
+	// Defensive fallback: the final turn forces a tool-free answer above, so the
+	// loop normally returns from inside. Reaching here means even that produced
+	// no usable result.
 	return {
 		kind: 'error',
-		message: `Conversation exceeded ${MAX_TURNS} turns`,
+		message: `Conversation exceeded ${maxTurns} turns without a final answer`,
 	};
 }
 
