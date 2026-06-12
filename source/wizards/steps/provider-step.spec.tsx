@@ -736,34 +736,99 @@ test('findTemplateForProvider: ChatGPT resolves to chatgpt-codex by baseUrl', t 
 // Tests for fetchModels error handling 
 // ============================================================================
 
+const wait = async (ms = 50) => new Promise(resolve => setTimeout(resolve, ms));
+
+const waitForText = async (
+	getLastFrame: () => string | undefined,
+	regex: RegExp,
+	timeoutMs = 2000
+) => {
+	const start = Date.now();
+	while (Date.now() - start < timeoutMs) {
+		const frame = getLastFrame() || '';
+		if (regex.test(frame)) {
+			return frame;
+		}
+		await wait(10);
+	}
+	throw new Error(`Timeout waiting for text matching: ${regex}\nLast frame: ${getLastFrame()}`);
+};
+
+test.serial('model discovery failure surfaces error message', async t => {
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async () => {
+		throw new Error('Simulated network failure');
+	};
+
+	try {
+		const {stdin, lastFrame, unmount} = render(
+			<ProviderStep onComplete={() => {}} />
+		);
+
+		// Initial menu: Select "Choose from common templates" -> press enter
+		await wait(50);
+		stdin.write('\r');
+		await waitForText(lastFrame, /Choose a provider template/);
+
+		// Template selection menu: First item is "Ollama" -> press enter
+		await wait(50);
+		stdin.write('\r');
+		await waitForText(lastFrame, /Provider name/i);
+
+		// Field: Provider Name -> press enter
+		await wait(50);
+		stdin.write('\r');
+		await waitForText(lastFrame, /Base URL/i);
+
+		// Field: Base URL -> press enter. This triggers fetchModels which will fail.
+		await wait(50);
+		stdin.write('\r');
+
+		const output = await waitForText(lastFrame, /Model discovery failed:/);
+		t.regex(output, /Simulated network failure/);
+		t.regex(output, /Enter model name\(s\) manually\./);
+
+		unmount();
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
 test.serial('ProviderStep surfaces fetchModels errors', async t => {
-	const originalFetch = global.fetch;
-	global.fetch = async () =>
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async () =>
 		({
 			ok: false,
 			status: 401,
 			statusText: 'Unauthorized',
-		}) as Response;
+			text: async () => 'Unauthorized Error',
+			json: async () => ({error: 'Unauthorized'})
+		}) as unknown as Response;
 
 	try {
-		const {lastFrame, stdin} = render(<ProviderStep onComplete={() => {}} />);
+		const {lastFrame, stdin, unmount} = render(<ProviderStep onComplete={() => {}} />);
 
+		await wait(50);
 		stdin.write('\r');
-		await new Promise(r => setTimeout(r, 50));
+		await waitForText(lastFrame, /Choose a provider template/);
 
+		await wait(50);
 		stdin.write('\r');
-		await new Promise(r => setTimeout(r, 50));
+		await waitForText(lastFrame, /Provider name/i);
 
+		await wait(50);
 		stdin.write('\r');
-		await new Promise(r => setTimeout(r, 50));
+		await waitForText(lastFrame, /Base URL/i);
 
+		await wait(50);
 		stdin.write('\r');
-		await new Promise(r => setTimeout(r, 150));
-
-		const output = lastFrame();
+		const output = await waitForText(lastFrame, /Server returned 401: Unauthorized/);
+		
 		t.truthy(output);
-		t.regex(output!, /Server returned 401: Unauthorized/);
+		t.regex(output, /Server returned 401: Unauthorized/);
+
+		unmount();
 	} finally {
-		global.fetch = originalFetch;
+		globalThis.fetch = originalFetch;
 	}
 });
