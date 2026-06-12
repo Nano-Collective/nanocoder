@@ -404,6 +404,7 @@ export function ProviderStep({
 			if (result.success && result.models.length > 0) {
 				setFetchedModels(result.models);
 				setSelectedModelIds(new Set());
+				setError(null);
 				setMode('model-selection');
 				return;
 			}
