@@ -314,7 +314,7 @@ function loadPasteConfig(): PasteConfig {
 
 	return (
 		loadHierarchicalConfig('nanocoder-preferences.json', 'paste', config => {
-			const paste = config.nanocoder?.paste;
+			const paste = config.paste;
 			if (paste && typeof paste === 'object') {
 				return {
 					singleLineThreshold:
