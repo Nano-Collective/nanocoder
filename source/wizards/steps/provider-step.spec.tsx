@@ -783,22 +783,24 @@ test.serial('ProviderStep surfaces fetchModels errors', async t => {
 			ok: false,
 			status: 401,
 			statusText: 'Unauthorized',
-		}) as Response;
+			text: async () => 'Unauthorized Error',
+			json: async () => ({error: 'Unauthorized'})
+		}) as unknown as Response;
 
 	try {
 		const {lastFrame, stdin} = render(<ProviderStep onComplete={() => {}} />);
 
 		stdin.write('\r');
-		await wait(50);
+		await wait(100);
 
 		stdin.write('\r');
-		await wait(50);
+		await wait(100);
 
 		stdin.write('\r');
-		await wait(50);
+		await wait(100);
 
 		stdin.write('\r');
-		await wait(150);
+		await wait(300);
 
 		const output = lastFrame();
 		t.truthy(output);
