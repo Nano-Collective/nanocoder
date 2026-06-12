@@ -1023,8 +1023,8 @@ function SettingsPasteThresholdPanel({
 			setting: 'Paste Threshold',
 			oldValue: String(currentThreshold),
 			newValue: String(item.value),
+			persist: () => updatePasteThreshold(item.value),
 		});
-		updatePasteThreshold(item.value);
 		onBack();
 	};
 
@@ -1172,7 +1172,6 @@ function SettingsNotificationsPanel({
 			next.events = {...next.events, [item.value]: !next.events?.[item.value]};
 		}
 		setConfig(next);
-		updateNotificationsPreference(next);
 		setNotificationsConfig(next);
 
 		// Report the change
@@ -1191,6 +1190,8 @@ function SettingsNotificationsPanel({
 			setting: settingName,
 			oldValue: getVal(prev, item.value),
 			newValue: getVal(next, item.value),
+			persist: () => updateNotificationsPreference(next),
+			revert: () => setNotificationsConfig(prev),
 		});
 	};
 
