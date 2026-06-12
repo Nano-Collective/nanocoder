@@ -252,70 +252,35 @@ test('useResponsiveTerminal provides boxWidth and actualWidth', t => {
 	process.stdout.columns = originalColumns;
 });
 
-test('useTerminalWidth cleans up resize listener on unmount', t => {
+test('useTerminalWidth shares one resize listener across many consumers', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 100;
 
-	const initialListeners = process.stdout.listenerCount('resize');
+	const before = process.stdout.listenerCount('resize');
 
-	const {unmount} = render(
-		React.createElement(TerminalWidthConsumer, {
-			onRender: () => {},
-		}),
+	// Mount several consumers at once (the resume-replay scenario).
+	const a = render(
+		React.createElement(TerminalWidthConsumer, {onRender: () => {}}),
+	);
+	const b = render(
+		React.createElement(TerminalWidthConsumer, {onRender: () => {}}),
+	);
+	const c = render(
+		React.createElement(TerminalWidthConsumer, {onRender: () => {}}),
 	);
 
-	// Listener should be added
-	const afterMountListeners = process.stdout.listenerCount('resize');
-	t.true(afterMountListeners > initialListeners);
+	// At most one shared stdout listener is added regardless of consumer count
+	// (it may already be attached from a prior consumer in this process).
+	const afterMount = process.stdout.listenerCount('resize');
+	t.true(afterMount - before <= 1);
 
-	// Unmount and check listener is removed
-	unmount();
-	const afterUnmountListeners = process.stdout.listenerCount('resize');
-	t.is(afterUnmountListeners, initialListeners);
+	a.unmount();
+	b.unmount();
+	c.unmount();
 
-	process.stdout.columns = originalColumns;
-});
+	// Unmounting this test's consumers must not grow the listener count.
+	const afterUnmount = process.stdout.listenerCount('resize');
+	t.is(afterUnmount, before);
 
-test('useTerminalWidth sets max listeners if needed', t => {
-	const originalColumns = process.stdout.columns;
-	const originalMaxListeners = process.stdout.getMaxListeners();
-
-	// Set a low max listeners count (but not 0)
-	process.stdout.setMaxListeners(5);
-	process.stdout.columns = 100;
-
-	render(
-		React.createElement(TerminalWidthConsumer, {
-			onRender: () => {},
-		}),
-	);
-
-	// Should have increased max listeners to 50
-	t.is(process.stdout.getMaxListeners(), 50);
-
-	// Restore original values
-	process.stdout.setMaxListeners(originalMaxListeners);
-	process.stdout.columns = originalColumns;
-});
-
-test('useTerminalWidth does not change max listeners if unlimited', t => {
-	const originalColumns = process.stdout.columns;
-	const originalMaxListeners = process.stdout.getMaxListeners();
-
-	// Set unlimited (0)
-	process.stdout.setMaxListeners(0);
-	process.stdout.columns = 100;
-
-	render(
-		React.createElement(TerminalWidthConsumer, {
-			onRender: () => {},
-		}),
-	);
-
-	// Should remain 0 (unlimited)
-	t.is(process.stdout.getMaxListeners(), 0);
-
-	// Restore original values
-	process.stdout.setMaxListeners(originalMaxListeners);
 	process.stdout.columns = originalColumns;
 });

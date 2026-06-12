@@ -1,3 +1,6 @@
+import {existsSync, mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -151,3 +154,124 @@ test('renders consistently across multiple mounts with the same props', t => {
 
 	t.is(a.lastFrame(), b.lastFrame());
 });
+
+test.serial('displays an error when the configuration file contains invalid JSON', async t => {
+	const testDir = join(tmpdir(), `nanocoder-wizard-test-corrupt-${Date.now()}`);
+	mkdirSync(testDir, {recursive: true});
+	t.teardown(() => rmSync(testDir, {recursive: true, force: true}));
+
+	const configFileName = '.bad.json';
+	const configPath = join(testDir, configFileName);
+	writeFileSync(configPath, '{ this is bad json }', 'utf-8');
+
+	const {lastFrame, stdin} = renderWithTheme(
+		<BaseConfigWizard<FakeItems>
+			title="Title"
+			focusId="corrupt-wizard"
+			configFileName={configFileName}
+			initialItems={{entries: []}}
+			parseConfig={() => {
+				throw new Error('Parse error');
+			}}
+			buildConfig={items => items}
+			hasItems={items => items.entries.length > 0}
+			renderConfigureStep={noopRenderConfigure}
+			renderSummaryItems={noopRenderSummary}
+			projectDir={testDir}
+			onComplete={() => {}}
+		/>,
+	);
+
+	// It will default to "existing config" since the file exists
+	// We send "Enter" to select "Edit this configuration"
+	stdin.write('\r');
+
+	// Wait for the async useEffect file read
+	await new Promise(r => setTimeout(r, 100));
+
+	const output = lastFrame()!;
+	t.regex(output, /Configuration file has invalid JSON and cannot be loaded/);
+});
+
+test.serial('blocks saving corrupted config', async t => {
+	const testDir = join(tmpdir(), `nanocoder-wizard-test-save-${Date.now()}`);
+	mkdirSync(testDir, {recursive: true});
+	t.teardown(() => rmSync(testDir, {recursive: true, force: true}));
+
+	const configFileName = '.bad-save.json';
+	const configPath = join(testDir, configFileName);
+	writeFileSync(configPath, '{ invalid }', 'utf-8');
+
+	const {lastFrame, stdin} = renderWithTheme(
+		<BaseConfigWizard<FakeItems>
+			title="Title"
+			focusId="corrupt-save-wizard"
+			configFileName={configFileName}
+			initialItems={{entries: []}}
+			parseConfig={() => {
+				throw new Error('Parse error');
+			}}
+			buildConfig={items => items}
+			hasItems={items => items.entries.length > 0}
+			renderConfigureStep={({onComplete}) => {
+				setTimeout(() => onComplete({entries: [{name: 'new'}]}), 10);
+				return <></>;
+			}}
+			renderSummaryItems={noopRenderSummary}
+			projectDir={testDir}
+			onComplete={() => {}}
+		/>,
+	);
+
+	stdin.write('\r');
+	await new Promise(r => setTimeout(r, 100));
+
+	stdin.write('\r');
+	await new Promise(r => setTimeout(r, 50));
+
+	const output = lastFrame()!;
+	t.regex(output, /Cannot save: the existing configuration file contains invalid/);
+});
+
+test.serial('deleting corrupted config clears corruption state', async t => {
+	const testDir = join(tmpdir(), `nanocoder-wizard-test-del-${Date.now()}`);
+	mkdirSync(testDir, {recursive: true});
+	t.teardown(() => rmSync(testDir, {recursive: true, force: true}));
+
+	const configFileName = '.bad-del.json';
+	const configPath = join(testDir, configFileName);
+	writeFileSync(configPath, '{ invalid }', 'utf-8');
+	let completedPath = '';
+
+	const {lastFrame, stdin} = renderWithTheme(
+		<BaseConfigWizard<FakeItems>
+			title="Title"
+			focusId="corrupt-del-wizard"
+			configFileName={configFileName}
+			initialItems={{entries: []}}
+			parseConfig={() => {
+				throw new Error('Parse error');
+			}}
+			buildConfig={items => items}
+			hasItems={items => items.entries.length > 0}
+			renderConfigureStep={({onDelete}) => {
+				setTimeout(() => onDelete?.(), 10);
+				return <></>;
+			}}
+			renderSummaryItems={noopRenderSummary}
+			projectDir={testDir}
+			onComplete={(path) => { completedPath = path; }}
+		/>,
+	);
+
+	stdin.write('\r');
+	await new Promise(r => setTimeout(r, 100));
+
+	stdin.write('\r');
+	await new Promise(r => setTimeout(r, 50));
+
+	t.false(existsSync(configPath));
+	t.is(completedPath, configPath);
+});
+
+

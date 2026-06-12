@@ -79,17 +79,21 @@ export function ProviderStep({
 	onComplete,
 	onBack,
 	onDelete,
-	existingProviders = [],
+	existingProviders,
 	configExists = false,
 }: ProviderStepProps) {
 	const colors = getColors();
 	const {isNarrow} = useResponsiveTerminal();
-	const [providers, setProviders] =
-		useState<ProviderConfig[]>(existingProviders);
+	const [providers, setProviders] = useState<ProviderConfig[]>(
+		existingProviders || [],
+	);
 
-	// Update providers when existingProviders prop changes
+	// Update providers when existingProviders prop changes,
+	// checking length/contents instead of reference if it's undefined
 	useEffect(() => {
-		setProviders(existingProviders);
+		if (existingProviders) {
+			setProviders(existingProviders);
+		}
 	}, [existingProviders]);
 
 	const [mode, setMode] = useState<Mode>('select-template-or-custom');

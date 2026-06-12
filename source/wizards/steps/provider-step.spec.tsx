@@ -732,6 +732,10 @@ test('findTemplateForProvider: ChatGPT resolves to chatgpt-codex by baseUrl', t 
 	t.is(template!.id, 'chatgpt-codex');
 });
 
+// ============================================================================
+// Tests for fetchModels error handling 
+// ============================================================================
+
 const wait = async (ms = 50) => new Promise(resolve => setTimeout(resolve, ms));
 
 test.serial('model discovery failure surfaces error message', async t => {
@@ -767,6 +771,38 @@ test.serial('model discovery failure surfaces error message', async t => {
 		t.regex(output, /Enter model name\(s\) manually\./);
 
 		unmount();
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
+test.serial('ProviderStep surfaces fetchModels errors', async t => {
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async () =>
+		({
+			ok: false,
+			status: 401,
+			statusText: 'Unauthorized',
+		}) as Response;
+
+	try {
+		const {lastFrame, stdin} = render(<ProviderStep onComplete={() => {}} />);
+
+		stdin.write('\r');
+		await wait(50);
+
+		stdin.write('\r');
+		await wait(50);
+
+		stdin.write('\r');
+		await wait(50);
+
+		stdin.write('\r');
+		await wait(150);
+
+		const output = lastFrame();
+		t.truthy(output);
+		t.regex(output!, /Server returned 401: Unauthorized/);
 	} finally {
 		globalThis.fetch = originalFetch;
 	}

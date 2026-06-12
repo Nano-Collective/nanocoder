@@ -70,9 +70,11 @@ export const DevelopmentModeIndicator = React.memo(
 				: `tune: ${resolved}`;
 		})();
 
-		// Estimated context figures render with a leading '~' (≈); API-reported
-		// figures render bare. The marker is a single char so it barely affects
-		// the width budget below, where ctx never truncates.
+		// Figures with any client-side estimation ('estimate', or 'api+estimate'
+		// where the estimated tail moved the number) render with a leading '~'
+		// (≈); fully API-reported figures render bare. The marker is a single
+		// char so it barely affects the width budget below, where ctx never
+		// truncates.
 		const ctxPrefix = contextSource === 'api' ? '' : '~';
 
 		// Mode, tune, and ctx never truncate. Session name and the filename

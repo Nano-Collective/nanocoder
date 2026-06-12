@@ -94,6 +94,7 @@ export function BaseConfigWizard<T>({
 	const [configPath, setConfigPath] = useState('');
 	const [items, setItems] = useState<T>(initialItems);
 	const [error, setError] = useState<string | null>(null);
+	const [configCorrupted, setConfigCorrupted] = useState(false);
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
 
 	useFocus({autoFocus: true, id: focusId});
@@ -108,11 +109,18 @@ export function BaseConfigWizard<T>({
 						const content = readFileSync(configPath, 'utf-8');
 						const raw = JSON.parse(content) as unknown;
 						setItems(parseConfig(raw));
+						setConfigCorrupted(false);
 					} catch (err) {
 						logError('Failed to load configuration', true, {
 							context: {configPath},
 							error: formatError(err),
 						});
+						setConfigCorrupted(true);
+						setError(
+							`Configuration file has invalid JSON and cannot be loaded. ` +
+								`Fix the syntax error or delete the file before proceeding. ` +
+								`File: ${configPath}`,
+						);
 					}
 				}
 			} catch (err) {
@@ -126,6 +134,12 @@ export function BaseConfigWizard<T>({
 
 	const writeConfigToDisk = (data: T): void => {
 		if (!hasItems(data)) return;
+		if (configCorrupted) {
+			throw new Error(
+				'Cannot save: the existing configuration file contains invalid JSON. ' +
+					'Fix the syntax error or delete the file before saving.',
+			);
+		}
 		const config = buildConfig(data);
 		const configDir = dirname(configPath);
 		if (!existsSync(configDir)) {
@@ -135,7 +149,7 @@ export function BaseConfigWizard<T>({
 	};
 
 	const handleLocationComplete = (location: ConfigLocation) => {
-		const baseDir = location === 'project' ? process.cwd() : getConfigPath();
+		const baseDir = location === 'project' ? projectDir : getConfigPath();
 		setConfigPath(join(baseDir, configFileName));
 		setStep('configure');
 	};
@@ -167,6 +181,8 @@ export function BaseConfigWizard<T>({
 				unlinkSync(configPath);
 				logInfo(`Deleted configuration file: ${configPath}`);
 			}
+			setConfigCorrupted(false);
+			setError(null);
 			onComplete(configPath);
 		} catch (err) {
 			setError(
@@ -178,7 +194,11 @@ export function BaseConfigWizard<T>({
 
 	const openInEditor = () => {
 		try {
-			writeConfigToDisk(items);
+			// Skip writing when config is corrupted — open the existing
+
+			if (!configCorrupted) {
+				writeConfigToDisk(items);
+			}
 
 			const editor = detectEditor();
 
@@ -196,6 +216,7 @@ export function BaseConfigWizard<T>({
 						const editedContent = readFileSync(configPath, 'utf-8');
 						const editedRaw = JSON.parse(editedContent) as unknown;
 						setItems(parseConfig(editedRaw));
+						setConfigCorrupted(false);
 					} catch (parseErr) {
 						setError(
 							parseErr instanceof Error

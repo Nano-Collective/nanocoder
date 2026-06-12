@@ -30,6 +30,7 @@ import {formatElapsedTime, getRandomAdjective} from '@/utils/completion-note';
 import {MessageBuilder} from '@/utils/message-builder';
 import {capMessagesForModel} from '@/utils/message-capping';
 import {infoMsg} from '@/utils/message-factory';
+import {calculateTokens} from '@/utils/token-calculator';
 import {createCancellationResults} from '@/utils/tool-cancellation';
 import {signalToolConfirm} from '@/utils/tool-confirm-queue';
 import {displayCompactCountsSummary} from '@/utils/tool-result-display';
@@ -262,6 +263,10 @@ export const processAssistantResponse = async (
 			onToken: (token: string) => {
 				streamedContent += token;
 				setStreamingContent(streamedContent);
+				// Feed the in-flight reply into the context-usage estimate so the
+				// `~%` indicator climbs as the model writes, instead of only
+				// stepping up once the finished message is committed to history.
+				setTokenCount(calculateTokens(streamedContent));
 			},
 			onReasoningToken: (token: string) => {
 				streamedReasoning += token;
@@ -408,6 +413,10 @@ export const processAssistantResponse = async (
 	// AssistantMessage appears, avoiding a visual jump.
 	setStreamingContent('');
 	setStreamingReasoning('');
+	// The reply is about to be committed to history (counted by
+	// calculateTokenBreakdown). Drop the in-flight streaming estimate so the
+	// context-usage figure doesn't count this turn's text twice.
+	setTokenCount(0);
 
 	// Flush accumulated compact counts ONLY when this turn emits narrative
 	// text — a natural break in a run of tool calls. Reasoning alone does NOT
@@ -503,6 +512,11 @@ export const processAssistantResponse = async (
 					addToChatQueue(infoMsg(notification, 'auto-compact-notification'));
 				},
 				client,
+				// Native tool definitions occupy context out-of-band. Pass them so
+				// the gate matches the ctx% indicator; under XML/JSON fallback they
+				// already live inside systemMessage, so pass nothing to avoid
+				// double-counting.
+				result.toolsDisabled ? undefined : tools,
 			);
 
 			if (compressed) {
@@ -735,6 +749,7 @@ export const processAssistantResponse = async (
 					toolManager,
 					processToolUse,
 					setLiveComponent,
+					controller.signal,
 				);
 				turnResults.push(execution.result);
 				await displayExecutedTool(
