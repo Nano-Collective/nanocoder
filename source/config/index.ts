@@ -234,7 +234,7 @@ function loadSessionConfig(): AppConfig['sessions'] {
 	};
 
 	return (
-		loadHierarchicalConfig('nanocoder-preferences.json', 'session', config => {
+		loadHierarchicalConfig('agents.config.json', 'session', config => {
 			const sessions = config.nanocoder?.sessions;
 			if (sessions && typeof sessions === 'object') {
 				return {

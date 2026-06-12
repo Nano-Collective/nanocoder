@@ -1,4 +1,12 @@
-import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'fs';
+import {randomUUID} from 'crypto';
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	unlinkSync,
+	writeFileSync,
+} from 'fs';
 import {dirname, join} from 'path';
 import {getConfigPath} from '@/config/paths';
 import {logError} from '@/utils/message-queue';
@@ -37,7 +45,7 @@ export function updateConfigValue<K extends string, V>(
 		if (!existsSync(dir)) {
 			mkdirSync(dir, {recursive: true});
 		}
-		writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+		atomicWriteFileSync(configPath, JSON.stringify(config, null, 2));
 	} catch (error) {
 		logError(`Failed to write config update: ${String(error)}`);
 	}
@@ -129,7 +137,7 @@ export function updateConfigNestedValue<K extends string, V>(
 		if (!existsSync(dir)) {
 			mkdirSync(dir, {recursive: true});
 		}
-		writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+		atomicWriteFileSync(configPath, JSON.stringify(config, null, 2));
 	} catch (error) {
 		logError(`Failed to write nested config update: ${String(error)}`);
 	}
@@ -167,9 +175,22 @@ export function updateConfigObject<
 		if (!existsSync(dir)) {
 			mkdirSync(dir, {recursive: true});
 		}
-		writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+		atomicWriteFileSync(configPath, JSON.stringify(config, null, 2));
 	} catch (error) {
 		logError(`Failed to write config object update: ${String(error)}`);
+	}
+}
+
+function atomicWriteFileSync(filePath: string, data: string): void {
+	const tmpPath = `${filePath}.${randomUUID()}.tmp`;
+	try {
+		writeFileSync(tmpPath, data, 'utf-8');
+		renameSync(tmpPath, filePath);
+	} catch (error) {
+		try {
+			unlinkSync(tmpPath);
+		} catch {}
+		throw error;
 	}
 }
 
