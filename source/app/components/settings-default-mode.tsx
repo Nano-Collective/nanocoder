@@ -66,9 +66,9 @@ export function SettingsDefaultModePanel({
 			setting: 'Default Mode',
 			oldValue: currentMode ?? 'normal',
 			newValue: mode,
+			persist: () => updateConfigValue('defaultMode', mode),
 		});
 		setSelectedMode(mode);
-		updateConfigValue('defaultMode', mode);
 		onBack();
 	};
 

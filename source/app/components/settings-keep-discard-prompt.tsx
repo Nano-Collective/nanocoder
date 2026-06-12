@@ -14,6 +14,17 @@ export interface ChangeDiff {
 	oldValue: string;
 	/** New value as a short string */
 	newValue: string;
+	/**
+	 * Called by handleKeep to flush a deferred disk write.
+	 * Used by pure-config panels that defer persistence until confirmed.
+	 */
+	persist?: () => void;
+	/**
+	 * Called by handleDiscard to undo an already-applied change.
+	 * Used by context-integrated panels (Theme, Title Shape) where the
+	 * context setter writes to disk immediately and cannot be deferred.
+	 */
+	revert?: () => void;
 }
 
 interface KeepDiscardPromptProps {

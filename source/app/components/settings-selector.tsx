@@ -592,13 +592,15 @@ function SettingsThemePanel({
 			setCurrentIndex(prev => (prev < themeList.length - 1 ? prev + 1 : 0));
 		}
 		if (key.return) {
+			const newTheme = previewTheme.name as ThemePreset;
 			onChanged?.({
 				setting: 'Theme',
 				oldValue: originalTheme,
 				newValue: previewTheme.name,
+				revert: () => setCurrentTheme(originalTheme as ThemePreset),
 			});
-			setCurrentTheme(previewTheme.name as ThemePreset);
-			updateSelectedTheme(previewTheme.name as ThemePreset);
+			setCurrentTheme(newTheme);
+			updateSelectedTheme(newTheme);
 			onBack();
 		}
 	});
@@ -778,6 +780,7 @@ function SettingsTitleShapePanel({
 			setting: 'Title Shape',
 			oldValue: originalShape,
 			newValue: item.value,
+			revert: () => setCurrentTitleShape(originalShape),
 		});
 		setCurrentTitleShape(item.value);
 		onBack();
@@ -895,8 +898,8 @@ function SettingsNanocoderShapePanel({
 			setting: 'Nanocoder Shape',
 			oldValue: originalShape,
 			newValue: item.value,
+			persist: () => updateNanocoderShape(item.value),
 		});
-		updateNanocoderShape(item.value);
 		onBack();
 	};
 
@@ -1552,15 +1555,19 @@ export function SettingsSelector({onCancel}: SettingsSelectorProps) {
 
 	// Handle Keep/Discard
 	const handleKeep = useCallback(() => {
-		// Changes are already persisted by individual panels
+		for (const diff of changesRef.current) {
+			diff.persist?.();
+		}
 		changesRef.current = [];
 		setDirtyState(null);
 		setPath(ROOT_PATH);
 	}, []);
 
 	const handleDiscard = useCallback(() => {
-		// For Appearance settings that preview live, reload from preferences.
-		// For other categories, changes were already saved on apply.
+		const changes = [...changesRef.current].reverse();
+		for (const diff of changes) {
+			diff.revert?.();
+		}
 		changesRef.current = [];
 		setDirtyState(null);
 		setPath(ROOT_PATH);

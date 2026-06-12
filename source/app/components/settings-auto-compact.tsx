@@ -91,21 +91,21 @@ export function SettingsAutoCompactPanel({
 				MODE_OPTIONS[(currentIdx + 1) % MODE_OPTIONS.length].value;
 			const next = {...config, mode: nextMode};
 			setConfig(next);
-			updateConfigNestedValue('autoCompact', 'mode', nextMode);
 			onChanged?.({
 				setting: 'Auto-Compact Mode',
 				oldValue: config.mode,
 				newValue: nextMode,
+				persist: () => updateConfigNestedValue('autoCompact', 'mode', nextMode),
 			});
 		} else if (item.value === 'enabled' || item.value === 'notifyUser') {
 			const key = item.value as 'enabled' | 'notifyUser';
 			const next = {...config, [key]: !config[key]};
 			setConfig(next);
-			updateConfigNestedValue('autoCompact', key, next[key]);
 			onChanged?.({
 				setting: key === 'enabled' ? 'Auto-Compact' : 'Auto-Compact Notify',
 				oldValue: String(config[key]),
 				newValue: String(next[key]),
+				persist: () => updateConfigNestedValue('autoCompact', key, next[key]),
 			});
 		}
 	};
@@ -123,11 +123,11 @@ export function SettingsAutoCompactPanel({
 		setError(null);
 		const next = {...config, threshold: num};
 		setConfig(next);
-		updateConfigNestedValue('autoCompact', 'threshold', num);
 		onChanged?.({
 			setting: 'Auto-Compact Threshold',
 			oldValue: String(config.threshold),
 			newValue: String(num),
+			persist: () => updateConfigNestedValue('autoCompact', 'threshold', num),
 		});
 		setEditField(null);
 	};

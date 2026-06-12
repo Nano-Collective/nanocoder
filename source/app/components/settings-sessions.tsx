@@ -88,11 +88,12 @@ export function SettingsSessionsPanel({
 		if (item.value === 'autoSave') {
 			const next = {...config, autoSave: !config.autoSave};
 			setConfig(next);
-			updateConfigNestedValue('sessions', 'autoSave', next.autoSave);
 			onChanged?.({
 				setting: 'Auto-Save',
 				oldValue: config.autoSave ? 'ON' : 'OFF',
 				newValue: next.autoSave ? 'ON' : 'OFF',
+				persist: () =>
+					updateConfigNestedValue('sessions', 'autoSave', next.autoSave),
 			});
 		} else {
 			// Open text input for numeric/path fields
@@ -133,9 +134,9 @@ export function SettingsSessionsPanel({
 				return;
 			}
 
-			const next = {...config, [editField]: num};
+			const capturedField = editField;
+			const next = {...config, [capturedField]: num};
 			setConfig(next);
-			updateConfigNestedValue('sessions', editField, num);
 			const fieldNames: Record<string, string> = {
 				saveInterval: 'Save Interval',
 				maxSessions: 'Max Sessions',
@@ -143,18 +144,20 @@ export function SettingsSessionsPanel({
 				retentionDays: 'Retention Days',
 			};
 			onChanged?.({
-				setting: fieldNames[editField] ?? editField,
-				oldValue: String(config[editField]),
+				setting: fieldNames[capturedField] ?? capturedField,
+				oldValue: String(config[capturedField as keyof typeof config]),
 				newValue: String(num),
+				persist: () => updateConfigNestedValue('sessions', capturedField, num),
 			});
 		} else if (editField === 'directory') {
 			const next = {...config, directory: trimmed};
 			setConfig(next);
-			updateConfigNestedValue('sessions', 'directory', trimmed);
 			onChanged?.({
 				setting: 'Session Directory',
 				oldValue: config.directory || '(default)',
 				newValue: trimmed || '(default)',
+				persist: () =>
+					updateConfigNestedValue('sessions', 'directory', trimmed),
 			});
 		}
 

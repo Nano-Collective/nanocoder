@@ -55,9 +55,9 @@ export function SettingsReasoningTracesPanel({
 			setting: 'Reasoning Traces',
 			oldValue: enabled ? 'Expanded' : 'Collapsed',
 			newValue: next ? 'Expanded' : 'Collapsed',
+			persist: () => updateReasoningExpanded(next),
 		});
 		setEnabled(next);
-		updateReasoningExpanded(next);
 	};
 
 	if (isNarrow) {

@@ -45,13 +45,14 @@ export function SettingsWebSearchPanel({
 	const handleSave = (value: string) => {
 		const trimmed = value.trim();
 		if (trimmed) {
-			updateConfigNestedValue('nanocoderTools', 'webSearch', {
-				apiKey: trimmed,
-			});
 			onChanged?.({
 				setting: 'Web Search API Key',
 				oldValue: hasApiKey ? '(set)' : '(not set)',
 				newValue: '(set)',
+				persist: () =>
+					updateConfigNestedValue('nanocoderTools', 'webSearch', {
+						apiKey: trimmed,
+					}),
 			});
 			setSaved(true);
 			setTimeout(() => {
