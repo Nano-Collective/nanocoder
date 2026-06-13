@@ -183,7 +183,9 @@ export function ModelSelectionList({
 								bold={isHighlighted}
 							>
 								{isHighlighted ? '❯' : ' '} {isSelected ? '[✓]' : '[ ]'}{' '}
-								{model.id}
+								{model.name === model.id
+									? model.id
+									: `${model.name} — ${model.id}`}
 							</Text>
 						);
 					})
