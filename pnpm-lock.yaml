@@ -130,8 +130,8 @@ importers:
         specifier: ^2.3.10
         version: 2.4.16
       '@types/node':
-        specifier: ^25.0.3
-        version: 25.9.1
+        specifier: ^25.9.3
+        version: 25.9.3
       '@types/react':
         specifier: ^19.0.0
         version: 19.2.17
@@ -176,8 +176,8 @@ importers:
         version: 8.21.0
     devDependencies:
       '@types/node':
-        specifier: ^25.0.3
-        version: 25.9.1
+        specifier: ^25.9.3
+        version: 25.9.3
       '@types/vscode':
         specifier: ^1.85.0
         version: 1.120.0
@@ -1033,8 +1033,8 @@ packages:
   '@types/node@18.19.130':
     resolution: {integrity: sha512-GRaXQx6jGfL8sKfaIDD6OupbIHBr9jv7Jnaml9tB7l4v068PAOXqfcujMMo5PhbIs6ggR1XODELqahT2R8v0fg==}
 
-  '@types/node@25.9.1':
-    resolution: {integrity: sha512-xfrlY7UD5rMJk3ZVJP8BNzS28J36YJg+xp+LPXV1TdWxr8uMH5A860QNxYDGQe/ylDSgjxE52Q9VnO7p75tJxg==}
+  '@types/node@25.9.3':
+    resolution: {integrity: sha512-603BddQMv3pUcr4U2dhujk83N2tTDVr/34wII2B6bJy6g+8WD6yUb11jszNs0gdi4PesVWl7ABt8nYMVpnLUcg==}
 
   '@types/normalize-package-data@2.4.4':
     resolution: {integrity: sha512-37i+OaWTh9qeK4LSHPsyRC7NahnGotNuZvjLSgcPzblpHB3rrCJxAOgI5gCdKm7coonsaX1Of0ILiTcnZjbfxA==}
@@ -4257,7 +4257,7 @@ snapshots:
     dependencies:
       undici-types: 5.26.5
 
-  '@types/node@25.9.1':
+  '@types/node@25.9.3':
     dependencies:
       undici-types: 7.24.6
 
@@ -4275,7 +4275,7 @@ snapshots:
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 25.9.1
+      '@types/node': 25.9.3
 
   '@typespec/ts-http-runtime@0.3.6':
     dependencies:
