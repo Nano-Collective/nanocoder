@@ -94,8 +94,8 @@ test('slash enters search mode and typing filters models', async t => {
 	const output = lastFrame() || '';
 	t.regex(output, /Search models: claude/);
 	t.regex(output, /1-1\/1 models \| filter: claude/);
-	t.regex(output, /anthropic\/claude-sonnet-4/);
-	t.notRegex(output, /Claude Sonnet 4/);
+	t.regex(output, /Claude Sonnet 4 — anthropic\/claude-sonnet-4/);
+	t.notRegex(output, /GPT-4o/);
 	t.notRegex(output, /openai\/gpt-4o/);
 	t.notRegex(output, /google\/gemini-pro/);
 
@@ -188,6 +188,19 @@ test('renders error for empty selection', t => {
 	});
 
 	t.regex(lastFrame() || '', /Please select at least one model/);
+	unmount();
+});
+
+test('shows friendly model names alongside ids when available', t => {
+	const models: FetchedModel[] = [
+		{id: 'openai/gpt-4o', name: 'GPT-4o'},
+		{id: 'ollama/qwen3', name: 'ollama/qwen3'},
+	];
+	const {lastFrame, unmount} = renderList({models});
+
+	t.regex(lastFrame() || '', /GPT-4o — openai\/gpt-4o/);
+	t.regex(lastFrame() || '', /ollama\/qwen3/);
+
 	unmount();
 });
 
