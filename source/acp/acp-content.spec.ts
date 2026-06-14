@@ -3,7 +3,10 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import test from 'ava';
-import {acpContentToUserText} from '@/acp/acp-content';
+import {
+	acpContentToUserMessage,
+	acpContentToUserText,
+} from '@/acp/acp-content';
 
 console.log('\nacp-content.spec.ts');
 
@@ -34,11 +37,30 @@ test('acpContentToUserText - preserves exact text content', async t => {
 	t.is(result, specialText);
 });
 
-test('acpContentToUserText - notes unsupported image attachments instead of dropping', async t => {
-	const result = await acpContentToUserText([
+test('acpContentToUserMessage - extracts supported image blocks as attachments', async t => {
+	const result = await acpContentToUserMessage([
+		{type: 'text', text: 'look at this'},
 		{type: 'image', data: 'abc', mimeType: 'image/png'} as any,
 	]);
-	t.true(result.includes('image'));
+	t.is(result.text, 'look at this');
+	t.deepEqual(result.images, [
+		{data: 'abc', mediaType: 'image/png', source: 'acp'},
+	]);
+});
+
+test('acpContentToUserMessage - notes unsupported image media types instead of sending', async t => {
+	const result = await acpContentToUserMessage([
+		{type: 'image', data: 'abc', mimeType: 'image/tiff'} as any,
+	]);
+	t.is(result.images.length, 0);
+	t.true(result.text.toLowerCase().includes('omitted'));
+});
+
+test('acpContentToUserText - still notes audio attachments instead of dropping', async t => {
+	const result = await acpContentToUserText([
+		{type: 'audio', data: 'abc', mimeType: 'audio/wav'} as any,
+	]);
+	t.true(result.includes('audio'));
 	t.true(result.toLowerCase().includes('omitted'));
 });
 

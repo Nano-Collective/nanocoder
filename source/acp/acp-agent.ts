@@ -28,7 +28,7 @@ import {
 	getAvailableModes,
 	negotiateProtocolVersion,
 } from '@/acp/acp-capabilities';
-import {acpContentToUserText} from '@/acp/acp-content';
+import {acpContentToUserMessage} from '@/acp/acp-content';
 import {runAcpConversation} from '@/acp/acp-conversation';
 import {AcpSession} from '@/acp/acp-session';
 import type {AcpInitContext} from '@/acp/acp-types';
@@ -126,16 +126,26 @@ export class AcpAgent implements Agent {
 			);
 		}
 
-		const userText = await acpContentToUserText(params.prompt, {
-			conn: this.conn,
-			sessionId: params.sessionId,
-			canReadTextFile: this.clientCapabilities?.fs?.readTextFile ?? false,
-		});
+		const {text: userText, images} = await acpContentToUserMessage(
+			params.prompt,
+			{
+				conn: this.conn,
+				sessionId: params.sessionId,
+				canReadTextFile: this.clientCapabilities?.fs?.readTextFile ?? false,
+			},
+		);
 		logger.info(
-			`ACP prompt: session=${params.sessionId} text=${userText.slice(0, 100)}`,
+			`ACP prompt: session=${params.sessionId} text=${userText.slice(0, 100)} images=${images.length}`,
 		);
 
-		session.messages = [...session.messages, {role: 'user', content: userText}];
+		session.messages = [
+			...session.messages,
+			{
+				role: 'user',
+				content: userText,
+				...(images.length > 0 ? {images} : {}),
+			},
+		];
 
 		const config = getAppConfig();
 		const nonInteractiveAlwaysAllow = config.alwaysAllow ?? [];

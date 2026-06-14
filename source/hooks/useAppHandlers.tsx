@@ -29,6 +29,7 @@ import type {Task} from '@/tools/tasks/types';
 import type {
 	CheckpointListItem,
 	DevelopmentMode,
+	ImageAttachment,
 	LLMClient,
 	LSPConnectionStatus,
 	MCPConnectionStatus,
@@ -129,6 +130,7 @@ export interface AppHandlers {
 	handleMessageSubmit: (
 		message: string,
 		displayValue?: string,
+		images?: ImageAttachment[],
 	) => Promise<void>;
 }
 
@@ -517,7 +519,11 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 	// Message submit handler
 	const handleMessageSubmit = React.useCallback(
-		async (message: string, displayValue?: string) => {
+		async (
+			message: string,
+			displayValue?: string,
+			images?: ImageAttachment[],
+		) => {
 			// Reset conversation completion flag when starting a new message
 			props.setIsConversationComplete(false);
 
@@ -576,6 +582,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					developmentMode: props.developmentMode,
 				},
 				displayValue,
+				images,
 			);
 		},
 		[

@@ -12,6 +12,7 @@ import type {Task} from '@/tools/tasks/types';
 import type {
 	ContextSource,
 	DevelopmentMode,
+	ImageAttachment,
 	ToolCall,
 	TuneConfig,
 } from '@/types';
@@ -65,11 +66,17 @@ export interface ChatInputProps {
 	liveTaskList?: Task[] | null;
 
 	// Handlers
-	onSubmit: (message: string, displayValue: string) => Promise<void>;
+	onSubmit: (
+		message: string,
+		displayValue: string,
+		images?: ImageAttachment[],
+	) => Promise<void>;
 	onToggleMode: () => void;
 	onToggleReasoningExpanded: () => void;
 	tune?: TuneConfig;
 	currentModel?: string;
+	// Whether the active model can accept image input; drives the paste warning.
+	visionSupported?: boolean;
 
 	// VS Code active editor pushed from the extension (filename + optional selection)
 	activeEditor?: ActiveEditorState | null;
@@ -117,6 +124,7 @@ export function ChatInput({
 	onToggleReasoningExpanded,
 	tune,
 	currentModel,
+	visionSupported,
 	activeEditor,
 	onDismissActiveEditor,
 }: ChatInputProps): React.ReactElement {
@@ -170,7 +178,9 @@ export function ChatInput({
 			mcpInitialized && client ? (
 				<UserInput
 					customCommands={customCommands}
-					onSubmit={(msg, display) => void onSubmit(msg, display)}
+					onSubmit={(msg, display, images) =>
+						void onSubmit(msg, display, images)
+					}
 					disabled={inputDisabled}
 					isBusy={isBusy}
 					onToggleMode={onToggleMode}
@@ -183,6 +193,7 @@ export function ChatInput({
 					sessionName={sessionName}
 					tune={tune}
 					currentModel={currentModel}
+					visionSupported={visionSupported}
 					activeEditor={activeEditor}
 					onDismissActiveEditor={onDismissActiveEditor}
 				/>

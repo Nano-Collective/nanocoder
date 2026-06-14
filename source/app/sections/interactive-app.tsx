@@ -1,5 +1,6 @@
 import {Box, useInput} from 'ink';
 import React from 'react';
+import {modelSupportsVision} from '@/ai-sdk-client/vision-support';
 import {ChatHistory} from '@/app/components/chat-history';
 import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
@@ -10,6 +11,7 @@ import type {AppHandlers} from '@/hooks/useAppHandlers';
 import type {useAppState} from '@/hooks/useAppState';
 import type {useModeHandlers} from '@/hooks/useModeHandlers';
 import type {useVSCodeServer} from '@/hooks/useVSCodeServer';
+import type {ImageAttachment} from '@/types/core';
 import type {PendingToolApproval} from '@/utils/tool-approval-queue';
 import type {PendingToolConfirmation} from '@/utils/tool-confirm-queue';
 import {displayCompactCountsSummary} from '@/utils/tool-result-display';
@@ -27,7 +29,11 @@ interface InteractiveAppProps {
 	pendingToolConfirmation: PendingToolConfirmation | null;
 	handleToolConfirmation: (confirmed: boolean) => void;
 	handleQuestionAnswer: (answer: string) => void;
-	handleUserSubmit: (message: string, displayValue: string) => Promise<void>;
+	handleUserSubmit: (
+		message: string,
+		displayValue: string,
+		images?: ImageAttachment[],
+	) => Promise<void>;
 	handleIdeSelect: (ide: string) => void;
 }
 
@@ -71,6 +77,15 @@ export function InteractiveApp({
 	const handleToggleReasoningExpanded = () => {
 		appState.setReasoningExpanded(!appState.reasoningExpanded);
 	};
+
+	// Best-effort: does the active model accept images? Defaults to true when no
+	// client is ready so we never warn spuriously before init completes.
+	const visionSupported = appState.client
+		? modelSupportsVision(
+				appState.client.getProviderConfig().sdkProvider,
+				appState.currentModel,
+			)
+		: true;
 
 	const showModalSelectors =
 		(appState.activeMode !== null &&
@@ -197,6 +212,7 @@ export function InteractiveApp({
 						onToggleReasoningExpanded={handleToggleReasoningExpanded}
 						tune={appState.tune}
 						currentModel={appState.currentModel}
+						visionSupported={visionSupported}
 					/>
 				)}
 		</Box>

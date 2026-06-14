@@ -6,9 +6,18 @@ import type {
 	EmbeddedResource,
 	ResourceLink,
 } from '@agentclientprotocol/sdk';
+import type {ImageAttachment} from '@/types/core';
 import {getLogger} from '@/utils/logging';
 
 const logger = getLogger();
+
+/** Image media types the providers accept; others are noted rather than sent. */
+const SUPPORTED_IMAGE_MEDIA_TYPES = new Set([
+	'image/png',
+	'image/jpeg',
+	'image/gif',
+	'image/webp',
+]);
 
 export interface AcpContentContext {
 	conn: AgentSideConnection;
@@ -17,21 +26,28 @@ export interface AcpContentContext {
 	canReadTextFile: boolean;
 }
 
+/** A resolved ACP prompt: model-visible text plus any image attachments. */
+export interface AcpUserMessage {
+	text: string;
+	images: ImageAttachment[];
+}
+
 /**
- * Convert a prompt's content blocks into the plain text the model receives.
+ * Convert a prompt's content blocks into the user message the model receives.
  *
  * Text blocks are concatenated directly (preserving the client's own
- * splitting). Non-text blocks - embedded resources and `@`-mentioned file
- * links - are resolved into readable sections appended after the prompt text so
- * the model can actually see tagged files. Attachments we cannot process
- * (images, audio) are noted rather than silently dropped.
+ * splitting). Embedded resources and `@`-mentioned file links are resolved into
+ * readable sections appended after the prompt text. Image blocks are collected
+ * as multimodal attachments; audio (and unsupported image types) are noted
+ * rather than silently dropped.
  */
-export async function acpContentToUserText(
+export async function acpContentToUserMessage(
 	prompt: ContentBlock[],
 	ctx?: AcpContentContext,
-): Promise<string> {
+): Promise<AcpUserMessage> {
 	let text = '';
 	const sections: string[] = [];
+	const images: ImageAttachment[] = [];
 
 	for (const block of prompt) {
 		switch (block.type) {
@@ -44,10 +60,22 @@ export async function acpContentToUserText(
 			case 'resource_link':
 				sections.push(await renderResourceLink(block, ctx));
 				break;
-			case 'image':
+			case 'image': {
+				const image = toImageAttachment(block);
+				if (image) {
+					images.push(image);
+				} else {
+					sections.push(
+						`[Attached image omitted: unsupported media type ${
+							'mimeType' in block ? block.mimeType : 'unknown'
+						}]`,
+					);
+				}
+				break;
+			}
 			case 'audio':
 				sections.push(
-					`[Attached ${block.type} omitted: nanocoder cannot process ${block.type} content over ACP yet]`,
+					`[Attached audio omitted: nanocoder cannot process audio content over ACP yet]`,
 				);
 				break;
 			default:
@@ -55,11 +83,35 @@ export async function acpContentToUserText(
 		}
 	}
 
-	if (sections.length === 0) {
-		return text;
-	}
+	const resolvedText =
+		sections.length === 0
+			? text
+			: [text, ...sections].filter(part => part.length > 0).join('\n\n');
 
-	return [text, ...sections].filter(part => part.length > 0).join('\n\n');
+	return {text: resolvedText, images};
+}
+
+/**
+ * Text-only view of {@link acpContentToUserMessage}, kept for callers and tests
+ * that only need the model-visible prose.
+ */
+export async function acpContentToUserText(
+	prompt: ContentBlock[],
+	ctx?: AcpContentContext,
+): Promise<string> {
+	return (await acpContentToUserMessage(prompt, ctx)).text;
+}
+
+/** Build an image attachment from an ACP image block, or null if unusable. */
+function toImageAttachment(block: {
+	data?: string;
+	mimeType?: string;
+}): ImageAttachment | null {
+	const {data, mimeType} = block;
+	if (!data || !mimeType || !SUPPORTED_IMAGE_MEDIA_TYPES.has(mimeType)) {
+		return null;
+	}
+	return {data, mediaType: mimeType, source: 'acp'};
 }
 
 function renderEmbeddedResource(block: EmbeddedResource): string {
