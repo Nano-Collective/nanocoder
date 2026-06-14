@@ -54,6 +54,7 @@ function parseLineWithPlaceholders(line: string) {
 export default memo(function UserMessage({
 	message,
 	tokenContent,
+	imageCount = 0,
 }: UserMessageProps) {
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
@@ -127,6 +128,13 @@ export default memo(function UserMessage({
 					})}
 				</Box>
 			</Box>
+			{imageCount > 0 && (
+				<Box marginBottom={1}>
+					<Text color={colors.info}>
+						🖼 {imageCount} image{imageCount === 1 ? '' : 's'} attached
+					</Text>
+				</Box>
+			)}
 			<Box marginBottom={2}>
 				<Text color={colors.secondary}>~{tokens.toLocaleString()} tokens</Text>
 			</Box>

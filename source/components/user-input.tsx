@@ -3,26 +3,42 @@ import Spinner from 'ink-spinner';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {commandRegistry} from '@/commands';
 import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
+import {WarningMessage} from '@/components/message-box';
 import TextInput from '@/components/text-input';
 import {useInputState} from '@/hooks/useInputState';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
 import {promptHistory} from '@/prompt-history';
+import {generateKey} from '@/session/key-generator';
 import type {TuneConfig} from '@/types/config';
-import type {ContextSource, DevelopmentMode} from '@/types/core';
+import type {
+	ContextSource,
+	DevelopmentMode,
+	ImageAttachment,
+} from '@/types/core';
 import type {InputState} from '@/types/hooks';
 import {Completion} from '@/types/index';
+import {
+	extractImageReferences,
+	readClipboardImage,
+	readImageFile,
+} from '@/utils/clipboard-image';
 import {
 	getCurrentFileMention,
 	getFileCompletions,
 } from '@/utils/file-autocomplete';
 import {handleFileMention} from '@/utils/file-mention-handler';
+import {addToMessageQueue} from '@/utils/message-queue';
 import {assemblePrompt} from '@/utils/prompt-processor';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 interface ChatProps {
-	onSubmit?: (message: string, displayValue: string) => void;
+	onSubmit?: (
+		message: string,
+		displayValue: string,
+		images?: ImageAttachment[],
+	) => void;
 	placeholder?: string;
 	customCommands?: string[]; // List of custom command names and aliases
 	disabled?: boolean; // Disable input when AI is processing
@@ -39,6 +55,7 @@ interface ChatProps {
 	currentModel?: string; // Active model id — resolves the 'auto' tune profile for display
 	activeEditor?: ActiveEditorState | null; // VS Code active file + optional selection
 	onDismissActiveEditor?: () => void; // Dismiss the active editor pill on clear/escape
+	visionSupported?: boolean; // Whether the active model accepts image input; drives paste warning
 }
 
 export default function UserInput({
@@ -59,6 +76,7 @@ export default function UserInput({
 	currentModel,
 	activeEditor,
 	onDismissActiveEditor,
+	visionSupported,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
 	const {colors} = useTheme();
@@ -77,6 +95,8 @@ export default function UserInput({
 		Array<{path: string; score: number}>
 	>([]);
 	const [selectedFileIndex, setSelectedFileIndex] = useState(0);
+	// Pending image attachments sent with the next submitted message.
+	const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
 
 	const {
 		input,
@@ -263,26 +283,80 @@ export default function UserInput({
 		setInputState,
 	]);
 
+	// Attach an image to the pending message, warning once if the active model
+	// likely cannot see it (we still attach — the heuristic can be wrong, and
+	// silently dropping it is worse than an over-cautious heads-up).
+	const attachImage = useCallback(
+		(image: ImageAttachment) => {
+			setAttachments(prev => [...prev, image]);
+			if (visionSupported === false) {
+				addToMessageQueue(
+					<WarningMessage
+						key={generateKey('vision-warn')}
+						message="The active model may not support image input. The image will still be sent; switch models with /model if it is ignored."
+					/>,
+				);
+			}
+		},
+		[visionSupported],
+	);
+
 	// Handle form submission
 	const handleSubmit = useCallback(() => {
-		if (input.trim() && onSubmit) {
-			// Assemble the full prompt by replacing placeholders with content
-			const fullMessage = assemblePrompt(currentState);
+		if (!onSubmit) return;
 
-			// Save the InputState to history and send assembled message to AI
-			promptHistory.addPrompt(currentState);
-			onSubmit(fullMessage, currentState.displayValue);
-			resetInput();
-			resetUIState();
-			promptHistory.resetIndex();
+		let images = attachments;
+		let assembled = assemblePrompt(currentState);
+		let display = currentState.displayValue;
+
+		// Image file paths the user typed, pasted, or dragged into the terminal
+		// (often quoted, mixed in with prose) become attachments and are stripped
+		// from the message text rather than sent as literal paths.
+		const {text: cleanedAssembled, paths} = extractImageReferences(assembled);
+		if (paths.length > 0) {
+			const dropped = paths
+				.map(readImageFile)
+				.filter((img): img is ImageAttachment => img !== null);
+			if (dropped.length > 0) {
+				if (visionSupported === false) {
+					addToMessageQueue(
+						<WarningMessage
+							key={generateKey('vision-warn')}
+							message="The active model may not support image input. The image will still be sent; switch models with /model if it is ignored."
+						/>,
+					);
+				}
+				images = [...attachments, ...dropped];
+				assembled = cleanedAssembled;
+				display = extractImageReferences(display).text;
+			}
 		}
-	}, [input, onSubmit, resetInput, resetUIState, currentState]);
+
+		// Nothing to send: no text and no attachments.
+		if (!assembled.trim() && images.length === 0) return;
+
+		// Save the InputState to history and send assembled message to AI
+		promptHistory.addPrompt(currentState);
+		onSubmit(assembled, display, images.length > 0 ? images : undefined);
+		resetInput();
+		resetUIState();
+		setAttachments([]);
+		promptHistory.resetIndex();
+	}, [
+		attachments,
+		onSubmit,
+		resetInput,
+		resetUIState,
+		currentState,
+		visionSupported,
+	]);
 
 	// Handle escape key logic
 	const handleEscape = useCallback(() => {
 		if (showClearMessage) {
 			resetInput();
 			resetUIState();
+			setAttachments([]);
 			onDismissActiveEditor?.();
 			focus('user-input');
 		} else {
@@ -395,6 +469,23 @@ export default function UserInput({
 
 		// Block all other input when disabled
 		if (disabled) {
+			return;
+		}
+
+		// Ctrl+V: pull an image off the system clipboard as an attachment.
+		// Terminal paste of regular text arrives as a bracketed paste, not as
+		// Ctrl+V, so this binding is free to mean "paste image".
+		if (key.ctrl && inputChar === 'v') {
+			const image = readClipboardImage();
+			if (image) {
+				attachImage(image);
+			}
+			return;
+		}
+
+		// Ctrl+X: drop the most recently added image attachment.
+		if (key.ctrl && inputChar === 'x') {
+			setAttachments(prev => prev.slice(0, -1));
 			return;
 		}
 
@@ -573,6 +664,17 @@ export default function UserInput({
 					<Text color={colors.secondary}>Press escape again to clear</Text>
 				)}
 			</Box>
+
+			{attachments.length > 0 && (
+				<Box marginTop={1}>
+					<Text color={colors.info}>
+						{attachments
+							.map((img, i) => `[image #${i + 1}: ${img.source ?? 'image'}]`)
+							.join(' ')}
+					</Text>
+					<Text color={colors.secondary}> · ctrl-x remove last</Text>
+				</Box>
+			)}
 
 			{showCompletions && completions.length > 0 && (
 				<Box flexDirection="column" marginTop={1}>
