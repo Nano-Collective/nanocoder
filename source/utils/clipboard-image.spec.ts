@@ -51,7 +51,9 @@ test('extractImagePathFromText resolves an existing image path', t => {
 test('extractImagePathFromText handles backslash-escaped spaces', t => {
 	const file = join(dir, 'my shot.png');
 	writeFileSync(file, PNG_BYTES);
-	const escaped = file.replace(/ /g, '\\ ');
+	// Shell-style escaping: escape backslashes first, then spaces, so a path
+	// that already contains a backslash is encoded completely (not partially).
+	const escaped = file.replace(/\\/g, '\\\\').replace(/ /g, '\\ ');
 	t.is(extractImagePathFromText(escaped), file);
 });
 
