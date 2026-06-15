@@ -1,6 +1,7 @@
 import test from 'ava';
 import {resetSessionContextLimit, setSessionContextLimit} from '@/models/models-dev-client.js';
 import type {LLMChatResponse, LLMClient, Message} from '@/types/core';
+import {jsonSchema, tool} from '@/types/core';
 import {
 	autoCompactSessionOverrides,
 	performAutoCompact,
@@ -246,6 +247,67 @@ test('performAutoCompact returns null when below threshold', async t => {
 	);
 
 	t.is(result, null, 'Should return null when token usage is below threshold');
+});
+
+test('performAutoCompact counts native tool definitions toward the gate (fires when messages alone would not)', async t => {
+	// 1000-token window, 50% threshold → needs ≥500 tokens. The message + system
+	// prompt alone stay well under, so only the tool definitions can trip it.
+	setupAutoCompactEnv(1000);
+
+	const messages: Message[] = [
+		{role: 'user', content: 'Tell me a story. '.repeat(10)}, // ~170 chars ≈ 43 tokens
+	];
+	const systemMessage: Message = {
+		role: 'system',
+		content: 'You are a helpful assistant.',
+	};
+	// A fat tool definition built from distinct words so it tokenizes to many
+	// thousands of tokens under *any* tokenizer (avoids the BPE run-merging that
+	// repeated chars would trigger). Far above the 500-token gate on its own,
+	// while the message + system prompt stay far below it.
+	const bigDescription = Array.from(
+		{length: 2000},
+		(_, i) => `param${i}`,
+	).join(' ');
+	const nativeTools = {
+		big_tool: tool({
+			description: bigDescription,
+			inputSchema: jsonSchema<Record<string, never>>({type: 'object'}),
+		}),
+	};
+
+	const config = {
+		enabled: true,
+		threshold: 50,
+		mode: 'default' as const,
+		notifyUser: false,
+	};
+
+	const provider = 'custom';
+	const model = 'generic-model';
+
+	// Without the tool definitions the conversation is far below threshold.
+	const withoutTools = await performAutoCompact(
+		messages,
+		systemMessage,
+		provider,
+		model,
+		config,
+	);
+	t.is(withoutTools, null, 'messages alone must stay below the threshold');
+
+	// Passing the native tool definitions pushes usage over the threshold.
+	const withTools = await performAutoCompact(
+		messages,
+		systemMessage,
+		provider,
+		model,
+		config,
+		undefined,
+		undefined,
+		nativeTools,
+	);
+	t.truthy(withTools, 'tool-definition tokens should push usage past the gate');
 });
 
 test('performAutoCompact calls notification callback with reduction info', async t => {

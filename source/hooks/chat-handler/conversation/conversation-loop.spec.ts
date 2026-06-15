@@ -1527,9 +1527,11 @@ test.serial('processAssistantResponse - does not extra-reset token count when co
 
 	await processAssistantResponse(params);
 
-	// Only one setTokenCount(0) — the initial streaming reset at line 180.
+	// Two setTokenCount(0) calls in the no-compression path: the initial
+	// streaming reset before the LLM call, and the flush reset when the streamed
+	// reply is committed to history. The compaction-specific reset must NOT fire.
 	const zeroCalls = tokenCountCalls.filter(v => v === 0);
-	t.is(zeroCalls.length, 1, `Expected exactly 1 call to setTokenCount(0), got ${zeroCalls.length}`);
+	t.is(zeroCalls.length, 2, `Expected exactly 2 calls to setTokenCount(0), got ${zeroCalls.length}`);
 });
 
 test.serial('processAssistantResponse - compressed messages persist when loop recurses (regression: pre-compression array was reused, undoing compression)', async t => {
@@ -1634,9 +1636,11 @@ test.serial('processAssistantResponse - does not extra-reset token count when au
 
 	await processAssistantResponse(params);
 
-	// Only one setTokenCount(0) — the initial streaming reset at line 180.
+	// Two setTokenCount(0) calls in the no-compression path: the initial
+	// streaming reset before the LLM call, and the flush reset when the streamed
+	// reply is committed to history. The compaction-specific reset must NOT fire.
 	const zeroCalls = tokenCountCalls.filter(v => v === 0);
-	t.is(zeroCalls.length, 1, `Expected exactly 1 call to setTokenCount(0), got ${zeroCalls.length}`);
+	t.is(zeroCalls.length, 2, `Expected exactly 2 calls to setTokenCount(0), got ${zeroCalls.length}`);
 });
 
 // ============================================================================

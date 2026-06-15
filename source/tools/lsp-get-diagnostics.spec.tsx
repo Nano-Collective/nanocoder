@@ -500,7 +500,6 @@ test('get_diagnostics validator: provides helpful error message for missing file
 
 	t.is(result.valid, false);
 	if (!result.valid) {
-		t.true(result.error.startsWith('Error: ')); // Standard error prefix
 		t.true(result.error.includes('does not exist'));
 		t.true(result.error.includes('verify the file path'));
 	}

@@ -7,33 +7,50 @@ type TerminalSize = 'narrow' | 'normal' | 'wide';
 const calculateBoxWidth = (columns: number) =>
 	Math.max(Math.min(columns - 4, 120), 40);
 
+const computeWidth = () =>
+	calculateBoxWidth(process.stdout.columns || DEFAULT_TERMINAL_COLUMNS);
+
+// A single shared 'resize' listener fans out to every useTerminalWidth
+// consumer. Each hook instance used to attach its own stdout listener, so a
+// long conversation — or a resumed session replaying many messages at once —
+// would exceed the EventEmitter max-listener limit and log a
+// MaxListenersExceededWarning. One listener, many subscribers, no leak and no
+// need to raise the limit.
+const subscribers = new Set<(width: number) => void>();
+let sharedListener: (() => void) | null = null;
+
+function subscribe(onChange: (width: number) => void): () => void {
+	subscribers.add(onChange);
+
+	if (!sharedListener) {
+		sharedListener = () => {
+			const newWidth = computeWidth();
+			for (const notify of subscribers) {
+				notify(newWidth);
+			}
+		};
+		process.stdout.on('resize', sharedListener);
+	}
+
+	return () => {
+		subscribers.delete(onChange);
+		// Detach the shared listener once nothing is listening anymore.
+		if (subscribers.size === 0 && sharedListener) {
+			process.stdout.off('resize', sharedListener);
+			sharedListener = null;
+		}
+	};
+}
+
 export const useTerminalWidth = () => {
-	const [boxWidth, setBoxWidth] = useState(() =>
-		calculateBoxWidth(process.stdout.columns || DEFAULT_TERMINAL_COLUMNS),
-	);
+	const [boxWidth, setBoxWidth] = useState(computeWidth);
 
 	useEffect(() => {
-		const handleResize = () => {
-			const newWidth = calculateBoxWidth(
-				process.stdout.columns || DEFAULT_TERMINAL_COLUMNS,
-			);
-			// Only update if width actually changed
-			setBoxWidth(prevWidth => (prevWidth !== newWidth ? newWidth : prevWidth));
-		};
-
-		// Increase max listeners if needed (many components use this hook simultaneously)
-		const currentMax = process.stdout.getMaxListeners();
-		if (currentMax !== 0 && currentMax < 50) {
-			// 0 means unlimited, otherwise ensure we have enough headroom
-			process.stdout.setMaxListeners(50);
-		}
-
-		// Listen for terminal resize events
-		process.stdout.on('resize', handleResize);
-
-		return () => {
-			process.stdout.off('resize', handleResize);
-		};
+		// Reconcile any resize that happened between initial render and mount,
+		// then track future resizes via the shared listener. setState is a no-op
+		// when the width is unchanged, so this won't cause an extra render.
+		setBoxWidth(computeWidth());
+		return subscribe(setBoxWidth);
 	}, []);
 
 	return boxWidth;

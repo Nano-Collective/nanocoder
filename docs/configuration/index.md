@@ -39,6 +39,7 @@ Keep API keys out of version control using environment variables. Variables are 
 | `NANOCODER_DATA_DIR` | Override the application data directory for internal data like usage statistics |
 | `NANOCODER_INSTALL_METHOD` | Override installation detection (`npm`, `homebrew`, `nix`, `unknown`) |
 | `NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT` | Graceful shutdown timeout in milliseconds (default: 5000) |
+| `NANOCODER_MAX_TURNS` | Maximum LLM turns for headless runs (`--plain` and ACP). Overrides `nanocoder.headless.maxTurns`; default 200. See [Headless](#headless) |
 
 ### Provider & MCP Overrides
 
@@ -149,6 +150,28 @@ Configure automatic session saving and retention. See [Session Management](../fe
 | `maxMessages` | number | `1000` | Maximum messages sent to the model in interactive/headless chat (minimum 1). Preserves on-disk history and system messages, capping only the context window. |
 | `retentionDays` | number | `30` | Auto-delete sessions older than this (minimum 1) |
 | `directory` | string | (platform default) | Custom storage directory for session files |
+
+### Headless
+
+Limits for non-interactive runs — the `--plain` shell (used in CI and non-TTY environments) and the ACP loop. There is no human to stop a wedged model in these runs, so the conversation loop caps the number of LLM turns.
+
+When the cap is reached, the loop does **not** error out and discard work. On the final turn it strips all tools and asks the model to produce its answer using only the information it already has, so the run ends with a usable result.
+
+```json
+{
+  "nanocoder": {
+    "headless": {
+      "maxTurns": 200
+    }
+  }
+}
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `maxTurns` | number | `200` | Maximum LLM turns before the loop forces a final, tool-free answer (minimum 1). Raise it for long iterative jobs; the `NANOCODER_MAX_TURNS` env var takes precedence over this setting. |
+
+One turn is a single LLM response plus its batch of tool executions. The default of 200 is high enough for long iterative jobs to finish while still bounding cost and wall-clock time for an unattended run that gets stuck.
 
 ### Paste Handling
 

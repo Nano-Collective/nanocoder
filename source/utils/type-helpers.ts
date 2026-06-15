@@ -230,6 +230,7 @@ export function toOptionString(option: unknown): string {
 			'title',
 			'name',
 			'description',
+			'content',
 			'value',
 		]) {
 			const candidate = option[key];

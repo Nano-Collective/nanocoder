@@ -7,7 +7,7 @@ import {requestToolPermission} from '@/acp/acp-permission';
 import {requestUserChoice} from '@/acp/acp-question';
 import type {AcpSession} from '@/acp/acp-session';
 import {type AcpToolCallMeta, buildToolCallMeta} from '@/acp/acp-tool-call';
-import {getAppConfig} from '@/config/index';
+import {DEFAULT_HEADLESS_MAX_TURNS, getAppConfig} from '@/config/index';
 import {processToolUse} from '@/message-handler';
 import {parseToolCalls} from '@/tool-calling/index';
 import {resolveToolApproval} from '@/tools/approval-policy';
@@ -15,6 +15,7 @@ import type {ToolManager} from '@/tools/tool-manager';
 import type {
 	DevelopmentMode,
 	LLMClient,
+	Message,
 	ModeOverrides,
 	StreamCallbacks,
 	ToolCall,
@@ -23,7 +24,12 @@ import type {
 import {capMessagesForModel} from '@/utils/message-capping';
 import {toOptionString} from '@/utils/type-helpers';
 
-const MAX_TURNS = 50;
+// On the last allowed turn we strip tools and inject this so the model
+// finalizes cleanly instead of stopping mid-task at the turn ceiling.
+const FINAL_TURN_INSTRUCTION =
+	'You have reached the maximum number of tool-execution turns for this run. ' +
+	'Do not call any more tools. Produce your final answer now using only the ' +
+	'information you already have.';
 
 export interface RunAcpConversationOptions {
 	session: AcpSession;
@@ -42,16 +48,23 @@ export async function runAcpConversation(
 
 	let messages = session.messages;
 
-	for (let turn = 0; turn < MAX_TURNS; turn++) {
+	const maxTurns =
+		getAppConfig().headless?.maxTurns ?? DEFAULT_HEADLESS_MAX_TURNS;
+
+	for (let turn = 0; turn < maxTurns; turn++) {
 		if (abortController.signal.aborted) {
 			return {stopReason: 'cancelled'};
 		}
+
+		// On the final turn, force a tool-free wrap-up so we end with an answer
+		// rather than stopping mid-task at the ceiling.
+		const finalTurn = turn === maxTurns - 1;
 
 		const availableNames = toolManager.getAvailableToolNames(
 			undefined,
 			developmentMode,
 		);
-		const tools = toolManager.getFilteredTools(availableNames);
+		const tools = finalTurn ? {} : toolManager.getFilteredTools(availableNames);
 
 		const modeOverrides: ModeOverrides = {
 			nonInteractiveMode: true,
@@ -91,8 +104,12 @@ export async function runAcpConversation(
 		const maxMessages = sessionConfig?.maxMessages ?? 1000;
 		const cappedMessages = capMessagesForModel(messages, maxMessages);
 
+		const finalTurnNotice: Message[] = finalTurn
+			? [{role: 'user', content: FINAL_TURN_INSTRUCTION}]
+			: [];
+
 		const result = await client.chat(
-			[systemMessage, ...cappedMessages],
+			[systemMessage, ...cappedMessages, ...finalTurnNotice],
 			tools,
 			callbacks,
 			abortController.signal,
@@ -107,9 +124,10 @@ export async function runAcpConversation(
 		const nativeToolCalls = message.tool_calls || [];
 		const fullContent = message.content || '';
 
-		const xmlParse = result.toolsDisabled
-			? parseToolCalls(fullContent)
-			: {success: true as const, toolCalls: [], cleanedContent: fullContent};
+		const xmlParse =
+			result.toolsDisabled && !finalTurn
+				? parseToolCalls(fullContent)
+				: {success: true as const, toolCalls: [], cleanedContent: fullContent};
 
 		if (!xmlParse.success) {
 			return {stopReason: 'end_turn'};

@@ -35,24 +35,40 @@ function apiContextTokens(usage: ApiUsage): number | undefined {
 }
 
 /**
- * Decide the context-usage percentage and whether it is API-reported or
- * estimated.
+ * Decide the context-usage percentage and its provenance.
  *
- * API usage is preferred only while it is "fresh" — no new messages have been
- * appended since it was captured (`atMessageCount` still matches the current
- * conversation length) and it carries a usable numerator. Otherwise we fall
- * back to the live client-side estimate so the figure never lags the
- * conversation (e.g. right after the user types a new message, before the next
- * response refreshes the snapshot).
+ * The provider-reported total is the ground truth for everything it covers
+ * (system prompt + tool definitions + history up to the snapshot). Rather than
+ * discarding it the moment a new message arrives, we *anchor* on it and add a
+ * client-side estimate of only the messages appended since (`estimatedTailTokens`,
+ * which the caller also folds the in-flight streaming count into). That keeps the
+ * accurate base for the bulk of the context and estimates only the small, fresh
+ * tail — so the figure tracks the API closely turn to turn instead of swinging
+ * between a 100%-API and a 100%-estimate number.
+ *
+ * Fallbacks:
+ * - No usable snapshot, or one captured against a *longer* conversation than we
+ *   currently have (e.g. just after a clear) → the full client-side estimate.
+ * - A snapshot whose `atMessageCount` matches the conversation needs no tail.
+ *
+ * The tail only flips the source to `api+estimate` (and thus shows the `~`
+ * marker) when it actually moves the rounded percentage; a just-typed short
+ * message that rounds away stays labelled `api`.
  */
 export function resolveContextUsage(params: {
 	estimatedTotalTokens: number;
+	estimatedTailTokens: number;
 	apiSnapshot: ApiUsageSnapshot | null;
 	currentMessageCount: number;
 	contextLimit: number;
 }): ContextUsageResult {
-	const {estimatedTotalTokens, apiSnapshot, currentMessageCount, contextLimit} =
-		params;
+	const {
+		estimatedTotalTokens,
+		estimatedTailTokens,
+		apiSnapshot,
+		currentMessageCount,
+		contextLimit,
+	} = params;
 
 	// Guard the exported helper against a zero/invalid limit; callers normally
 	// pass a positive limit (the hook bails when it can't resolve one).
@@ -60,16 +76,21 @@ export function resolveContextUsage(params: {
 		return {percent: 0, source: 'estimate'};
 	}
 
+	// The snapshot is only an anchor when it carries a usable numerator AND
+	// describes a prefix of the current conversation (its message count hasn't
+	// overtaken ours — which would mean it belongs to a since-cleared/compacted
+	// history and must not be trusted).
 	const apiTotal =
-		apiSnapshot !== null && apiSnapshot.atMessageCount === currentMessageCount
+		apiSnapshot !== null && apiSnapshot.atMessageCount <= currentMessageCount
 			? apiContextTokens(apiSnapshot)
 			: undefined;
 
 	if (apiTotal !== undefined) {
-		return {
-			percent: Math.round((apiTotal / contextLimit) * 100),
-			source: 'api',
-		};
+		const apiPercent = Math.round((apiTotal / contextLimit) * 100);
+		const total = apiTotal + Math.max(0, estimatedTailTokens);
+		const percent = Math.round((total / contextLimit) * 100);
+		// Only call it estimated when the tail actually changed what's shown.
+		return {percent, source: percent > apiPercent ? 'api+estimate' : 'api'};
 	}
 
 	return {
