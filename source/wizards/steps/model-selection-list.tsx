@@ -176,14 +176,17 @@ export function ModelSelectionList({
 						const actualIndex = scrollStart + index;
 						const isHighlighted = actualIndex === highlightedIndex;
 						const isSelected = selectedIds.has(model.id);
+						const label =
+							model.name !== model.id
+								? `${model.name} — ${model.id}`
+								: model.id;
 						return (
 							<Text
 								key={model.id}
 								color={isHighlighted ? colors.primary : colors.text}
 								bold={isHighlighted}
 							>
-								{isHighlighted ? '❯' : ' '} {isSelected ? '[✓]' : '[ ]'}{' '}
-								{model.id}
+								{isHighlighted ? '❯' : ' '} {isSelected ? '[✓]' : '[ ]'} {label}
 							</Text>
 						);
 					})
