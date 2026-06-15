@@ -234,7 +234,7 @@ function loadSessionConfig(): AppConfig['sessions'] {
 	};
 
 	return (
-		loadHierarchicalConfig('nanocoder-preferences.json', 'session', config => {
+		loadHierarchicalConfig('agents.config.json', 'session', config => {
 			const sessions = config.nanocoder?.sessions;
 			if (sessions && typeof sessions === 'object') {
 				return {
@@ -314,7 +314,7 @@ function loadPasteConfig(): PasteConfig {
 
 	return (
 		loadHierarchicalConfig('nanocoder-preferences.json', 'paste', config => {
-			const paste = config.nanocoder?.paste;
+			const paste = config.paste;
 			if (paste && typeof paste === 'object') {
 				return {
 					singleLineThreshold:

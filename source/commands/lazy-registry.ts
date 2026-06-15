@@ -43,14 +43,14 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'codex-login',
 		description:
-			'Log in to ChatGPT/Codex (device flow). Saves credentials for the "ChatGPT" provider.',
+			'[deprecated — use /settings → Providers] Log in to ChatGPT/Codex (device flow). Saves credentials for the "ChatGPT" provider.',
 		load: () =>
 			import('@/commands/codex-login-command').then(m => m.codexLoginCommand),
 	},
 	{
 		name: 'copilot-login',
 		description:
-			'Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.',
+			'[deprecated — use /settings → Providers] Log in to GitHub Copilot (device flow). Saves credentials for the "GitHub Copilot" provider.',
 		load: () =>
 			import('@/commands/copilot-login-command').then(
 				m => m.copilotLoginCommand,
@@ -102,7 +102,7 @@ export const lazyCommands: LazyCommand[] = [
 	},
 	{
 		name: 'ide',
-		description: 'Connect to an IDE',
+		description: '[deprecated — use /settings → Advanced] Connect to an IDE',
 		load: () => import('@/commands/ide').then(m => m.ideCommand),
 	},
 	{
@@ -128,19 +128,22 @@ export const lazyCommands: LazyCommand[] = [
 	},
 	{
 		name: 'setup-config',
-		description: 'Open a configuration file in your editor',
+		description:
+			'[deprecated — use /settings → Advanced] Open a configuration file in your editor',
 		load: () =>
 			import('@/commands/setup-config').then(m => m.setupConfigCommand),
 	},
 	{
 		name: 'setup-providers',
-		description: 'Launch interactive configuration wizard',
+		description:
+			'[deprecated — use /settings → Providers] Launch interactive configuration wizard',
 		load: () =>
 			import('@/commands/setup-providers').then(m => m.setupProvidersCommand),
 	},
 	{
 		name: 'setup-mcp',
-		description: 'Launch interactive MCP server configuration wizard',
+		description:
+			'[deprecated — use /settings → MCPs] Launch interactive MCP server configuration wizard',
 		load: () => import('@/commands/setup-mcp').then(m => m.setupMcpCommand),
 	},
 	{
@@ -173,13 +176,13 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'settings',
 		description:
-			'Configure UI settings (theme, shapes, branding, paste threshold)',
+			'Configure nanocoder settings (appearance, behavior, providers, MCPs, and more)',
 		load: () => import('@/commands/settings').then(m => m.settingsCommand),
 	},
 	{
 		name: 'tune',
 		description:
-			'Tune model settings (parameters, tool profiles, prompt, compaction)',
+			'[deprecated — use /settings → Advanced] Tune model settings (parameters, tool profiles, prompt, compaction)',
 		load: () => import('@/commands/tune').then(m => m.tuneCommand),
 	},
 	{

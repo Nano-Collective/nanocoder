@@ -10,6 +10,7 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {Command} from '@/types/commands';
 import {formatError} from '@/utils/error-formatter';
+import {logWarning} from '@/utils/message-queue';
 
 interface ConfigOption {
 	label: string;
@@ -175,8 +176,12 @@ function SetupConfigResult({
 
 export const setupConfigCommand: Command = {
 	name: 'setup-config',
-	description: 'Open a configuration file in your editor',
+	description:
+		'[deprecated — use /settings → Advanced → Edit Config Files] Open a configuration file in your editor',
 	handler: async (args: string[]) => {
+		logWarning(
+			'/setup-config is deprecated. Use /settings → Advanced → Edit Config Files instead.',
+		);
 		const options = getConfigOptions();
 
 		if (args.length === 0) {

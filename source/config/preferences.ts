@@ -1,4 +1,5 @@
-import {readFileSync, writeFileSync} from 'fs';
+import {randomUUID} from 'crypto';
+import {readFileSync, renameSync, unlinkSync, writeFileSync} from 'fs';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {getClosestConfigFile} from '@/config/index';
 import type {TuneConfig} from '@/types/config';
@@ -35,9 +36,25 @@ export function loadPreferences(): UserPreferences {
 	return {};
 }
 
+function atomicWriteFileSync(filePath: string, data: string): void {
+	const tmpPath = `${filePath}.${randomUUID()}.tmp`;
+	try {
+		writeFileSync(tmpPath, data, 'utf-8');
+		renameSync(tmpPath, filePath);
+	} catch (error) {
+		try {
+			unlinkSync(tmpPath);
+		} catch {}
+		throw error;
+	}
+}
+
 export function savePreferences(preferences: UserPreferences): void {
 	try {
-		writeFileSync(getPreferencesPath(), JSON.stringify(preferences, null, 2));
+		atomicWriteFileSync(
+			getPreferencesPath(),
+			JSON.stringify(preferences, null, 2),
+		);
 	} catch (error) {
 		logError(`Failed to save preferences: ${String(error)}`);
 	}

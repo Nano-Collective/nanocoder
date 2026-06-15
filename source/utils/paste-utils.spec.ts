@@ -13,14 +13,24 @@ import {clearAppConfig, reloadAppConfig} from '../config';
 console.log(`\npaste-utils.spec.ts`);
 
 const testDir = join(tmpdir(), `nanocoder-paste-test-${Date.now()}`);
+let originalConfigDir: string | undefined;
 
 test.before(() => {
 	mkdirSync(testDir, {recursive: true});
+	// Isolate from the user's real nanocoder-preferences.json so tests
+	// see default config values rather than personal paste threshold overrides.
+	originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	process.env.NANOCODER_CONFIG_DIR = testDir;
 });
 
 test.after.always(() => {
 	if (existsSync(testDir)) {
 		rmSync(testDir, {recursive: true, force: true});
+	}
+	if (originalConfigDir === undefined) {
+		delete process.env.NANOCODER_CONFIG_DIR;
+	} else {
+		process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
 	}
 });
 
@@ -143,10 +153,8 @@ test('handlePaste respects custom threshold - high threshold prevents placeholde
 	writeFileSync(
 		configPath,
 		JSON.stringify({
-			nanocoder: {
-				paste: {
-					singleLineThreshold: 1000,
-				},
+			paste: {
+				singleLineThreshold: 1000,
 			},
 		}),
 		'utf-8',
@@ -183,10 +191,8 @@ test('handlePaste respects custom threshold - low threshold creates placeholder'
 	writeFileSync(
 		configPath,
 		JSON.stringify({
-			nanocoder: {
-				paste: {
-					singleLineThreshold: 50,
-				},
+			paste: {
+				singleLineThreshold: 50,
 			},
 		}),
 		'utf-8',

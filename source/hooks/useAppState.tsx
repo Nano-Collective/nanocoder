@@ -95,6 +95,12 @@ export function useAppState(
 	const [isConversationComplete, setIsConversationComplete] =
 		useState<boolean>(false);
 	const [isSettingsMode, setIsSettingsMode] = useState<boolean>(false);
+	// When a wizard replaces the settings view (e.g. ProviderWizard, Tune),
+	// this stores the category + step to return to after the wizard exits.
+	const [settingsReturnPath, setSettingsReturnPath] = useState<{
+		category: string;
+		step: string;
+	} | null>(null);
 
 	// Cancellation state
 	const [abortController, setAbortController] =
@@ -312,6 +318,7 @@ export function useAppState(
 		isCancelling,
 		isConversationComplete,
 		isSettingsMode,
+		settingsReturnPath,
 		abortController,
 
 		// Unified mode state
@@ -373,6 +380,7 @@ export function useAppState(
 		setIsCancelling,
 		setIsConversationComplete,
 		setIsSettingsMode,
+		setSettingsReturnPath,
 		setAbortController,
 		setIsVscodeEnabled,
 		setCheckpointLoadData,

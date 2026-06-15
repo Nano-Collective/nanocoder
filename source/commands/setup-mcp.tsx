@@ -13,6 +13,11 @@ import {Command} from '@/types/index';
  */
 export const setupMcpCommand: Command = {
 	name: 'setup-mcp',
-	description: 'Launch interactive MCP server configuration wizard',
-	handler: () => Promise.resolve(React.createElement(Text, {}, '')),
+	description:
+		'[deprecated — use /settings → MCPs] Launch interactive MCP server configuration wizard',
+	handler: () => {
+		// This handler is never called - the command is intercepted in app-util.ts
+		// and handled via the mode system (onEnterMcpWizardMode)
+		return Promise.resolve(React.createElement(Text, {}, ''));
+	},
 };
