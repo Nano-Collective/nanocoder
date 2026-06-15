@@ -218,3 +218,15 @@ test('renders model name alongside id when available', t => {
 
 	unmount();
 });
+
+test('truncates long model labels with an ellipsis', t => {
+	const longId = `provider/${'x'.repeat(300)}`;
+	const models: FetchedModel[] = [{id: longId, name: longId}];
+	const {lastFrame, unmount} = renderList({models});
+	const output = lastFrame() || '';
+
+	t.regex(output, /…/);
+	t.notRegex(output, new RegExp(longId.replace(/\//g, '\\/')));
+
+	unmount();
+});

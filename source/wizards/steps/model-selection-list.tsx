@@ -179,6 +179,7 @@ export function ModelSelectionList({
 						return (
 							<Text
 								key={model.id}
+								wrap="truncate-end"
 								color={isHighlighted ? colors.primary : colors.text}
 								bold={isHighlighted}
 							>
