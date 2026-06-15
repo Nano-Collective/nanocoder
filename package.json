@@ -113,7 +113,7 @@
 		"husky": "^9.1.7",
 		"ink-testing-library": "^4.0.0",
 		"knip": "^6.0.0",
-		"lint-staged": "^16.3.3",
+		"lint-staged": "^17.0.7",
 		"strip-ansi": "^7.1.2",
 		"tsc-alias": "^1.8.16",
 		"tsx": "^4.20.6",
