@@ -94,10 +94,9 @@ test('slash enters search mode and typing filters models', async t => {
 	const output = lastFrame() || '';
 	t.regex(output, /Search models: claude/);
 	t.regex(output, /1-1\/1 models \| filter: claude/);
-	t.regex(output, /anthropic\/claude-sonnet-4/);
-	t.notRegex(output, /Claude Sonnet 4/);
-	t.notRegex(output, /openai\/gpt-4o/);
-	t.notRegex(output, /google\/gemini-pro/);
+	t.regex(output, /Claude Sonnet 4 — anthropic\/claude-sonnet-4/);
+	t.notRegex(output, /GPT-4o — openai\/gpt-4o/);
+	t.notRegex(output, /Gemini Pro — google\/gemini-pro/);
 
 	unmount();
 });
@@ -203,5 +202,19 @@ test('m triggers manual entry callback', async t => {
 	await wait();
 
 	t.is(manualEntryCalls, 1);
+	unmount();
+});
+
+test('renders model name alongside id when available', t => {
+	const models: FetchedModel[] = [
+		{id: 'openai/gpt-4o', name: 'GPT-4o'},
+		{id: 'ollama/llama3.1', name: 'ollama/llama3.1'},
+	];
+	const {lastFrame, unmount} = renderList({models});
+	const output = lastFrame() || '';
+
+	t.regex(output, /GPT-4o — openai\/gpt-4o/);
+	t.regex(output, /ollama\/llama3\.1/);
+
 	unmount();
 });
