@@ -80,7 +80,7 @@
 		"lint": "eslint src --ext ts"
 	},
 	"devDependencies": {
-		"@types/node": "^25.0.3",
+		"@types/node": "^25.9.3",
 		"@types/vscode": "^1.85.0",
 		"@types/ws": "^8.5.10",
 		"@vscode/vsce": "^3.9.1",
