@@ -116,6 +116,7 @@ export async function handleChat(
 	// reasoning-aware nudge depends on this for the GPT-5 case where the
 	// SDK throws AI_NoOutputGeneratedError after a reasoning-only stream.
 	let accumulatedReasoning = '';
+	let accumulatedText = '';
 
 	return await withNewCorrelationContext(async _context => {
 		try {
@@ -248,6 +249,7 @@ export async function handleChat(
 						}
 						break;
 					case 'text-delta':
+						accumulatedText += chunk.text;
 						tokenBuffer += chunk.text;
 						if (!flushTimer) {
 							flushTimer = setTimeout(flushBuffer, FLUSH_INTERVAL_MS);
@@ -329,7 +331,7 @@ export async function handleChat(
 					? convertAISDKToolCalls(resolvedToolCalls)
 					: [];
 
-			const content = fullText;
+			const content = fullText || accumulatedText;
 
 			// Calculate performance metrics
 			const finalMetrics = endMetrics(metrics);
@@ -487,19 +489,23 @@ export async function handleChat(
 					// Hand control back to the conversation loop with an empty
 					// response so its empty-turn handling (capped recursion,
 					// reasoning-aware nudge) takes over instead of throwing.
-					logger.warn('Model produced no output; returning empty response', {
-						model: currentModel,
-						correlationId,
-						provider: providerConfig.name,
-						reasoningLength: accumulatedReasoning.length,
-					});
+					logger.warn(
+						'Model produced no output; returning streamed fallback response',
+						{
+							model: currentModel,
+							correlationId,
+							provider: providerConfig.name,
+							responseLength: accumulatedText.length,
+							reasoningLength: accumulatedReasoning.length,
+						},
+					);
 					callbacks.onFinish?.();
 					return {
 						choices: [
 							{
 								message: {
 									role: 'assistant',
-									content: '',
+									content: accumulatedText,
 									reasoning: accumulatedReasoning || undefined,
 								},
 							},

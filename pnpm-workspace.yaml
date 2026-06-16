@@ -29,4 +29,5 @@ onlyBuiltDependencies:
   - keytar
 
 patchedDependencies:
+  '@ai-sdk/openai@3.0.71': patches/@ai-sdk__openai@3.0.71.patch
   ink@6.8.0: patches/ink@6.8.0.patch
