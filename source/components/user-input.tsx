@@ -95,10 +95,12 @@ export default function UserInput({
 		showCompletions,
 		completions,
 		pendingFileMentions,
+		selectedCompletionIndex,
 		setShowClearMessage,
 		setShowCompletions,
 		setCompletions,
 		setPendingFileMentions,
+		setSelectedCompletionIndex,
 		resetUIState,
 	} = uiState;
 
@@ -208,11 +210,19 @@ export default function UserInput({
 		if (commandCompletions.length > 0) {
 			setCompletions(commandCompletions);
 			setShowCompletions(true);
+			setSelectedCompletionIndex(0);
 		} else if (showCompletions) {
 			setCompletions([]);
 			setShowCompletions(false);
+			setSelectedCompletionIndex(-1);
 		}
-	}, [commandCompletions, showCompletions, setCompletions, setShowCompletions]);
+	}, [
+		commandCompletions,
+		showCompletions,
+		setCompletions,
+		setShowCompletions,
+		setSelectedCompletionIndex,
+	]);
 
 	// Helper functions
 
@@ -414,6 +424,10 @@ export default function UserInput({
 
 			// Command completion - use pre-calculated commandCompletions
 			if (input.startsWith('/')) {
+				// Don't auto-complete on Tab when completions list is visible - use Enter to select
+				if (showCompletions && completions.length > 0) {
+					return;
+				}
 				if (commandCompletions.length === 1) {
 					// Auto-complete when there's exactly one match
 					const completion = commandCompletions[0];
@@ -425,22 +439,9 @@ export default function UserInput({
 					});
 					setTextInputKey(prev => prev + 1);
 				} else if (commandCompletions.length > 1) {
-					// If completions are already showing, autocomplete to the first result
-					if (showCompletions && completions.length > 0) {
-						const completion = completions[0];
-						const completedText = `/${completion.name}`;
-						// Use setInputState to bypass paste detection for autocomplete
-						setInputState({
-							displayValue: completedText,
-							placeholderContent: currentState.placeholderContent,
-						});
-						setShowCompletions(false);
-						setTextInputKey(prev => prev + 1);
-					} else {
-						// Show completions when there are multiple matches
-						setCompletions(commandCompletions);
-						setShowCompletions(true);
-					}
+					// Show completions when there are multiple matches
+					setCompletions(commandCompletions);
+					setShowCompletions(true);
 				}
 				return;
 			}
@@ -474,12 +475,39 @@ export default function UserInput({
 			return;
 		}
 
+		// Handle Enter to select completion
+		if (
+			key.return &&
+			!key.shift &&
+			showCompletions &&
+			completions.length > 0 &&
+			selectedCompletionIndex >= 0
+		) {
+			const selected = completions[selectedCompletionIndex];
+			const completedText = `/${selected.name}`;
+			setInputState({
+				displayValue: completedText,
+				placeholderContent: {},
+			});
+			setShowCompletions(false);
+			setSelectedCompletionIndex(-1);
+			setTextInputKey(prev => prev + 1);
+			return;
+		}
+
 		// Handle navigation
 		if (key.upArrow) {
 			// File autocomplete navigation takes priority
 			if (isFileAutocompleteMode && fileCompletions.length > 0) {
 				setSelectedFileIndex(prev =>
 					prev > 0 ? prev - 1 : fileCompletions.length - 1,
+				);
+				return;
+			}
+			// Command completion navigation takes priority over history
+			if (showCompletions && completions.length > 0) {
+				setSelectedCompletionIndex(prev =>
+					prev > 0 ? prev - 1 : completions.length - 1,
 				);
 				return;
 			}
@@ -492,6 +520,13 @@ export default function UserInput({
 			if (isFileAutocompleteMode && fileCompletions.length > 0) {
 				setSelectedFileIndex(prev =>
 					prev < fileCompletions.length - 1 ? prev + 1 : 0,
+				);
+				return;
+			}
+			// Command completion navigation takes priority over history
+			if (showCompletions && completions.length > 0) {
+				setSelectedCompletionIndex(prev =>
+					prev < completions.length - 1 ? prev + 1 : 0,
 				);
 				return;
 			}
@@ -577,14 +612,24 @@ export default function UserInput({
 			{showCompletions && completions.length > 0 && (
 				<Box flexDirection="column" marginTop={1}>
 					<Text color={colors.secondary}>Available commands:</Text>
-					{completions.map((completion, index) => (
-						<Text
-							key={index}
-							color={completion.isCustom ? colors.info : colors.primary}
-						>
-							/{completion.name}
-						</Text>
-					))}
+					{completions.map((completion, index) => {
+						const isSelected = index === selectedCompletionIndex;
+						return (
+							<Text
+								key={index}
+								color={
+									isSelected
+										? colors.info
+										: completion.isCustom
+											? colors.info
+											: colors.primary
+								}
+								bold={isSelected}
+							>
+								{isSelected ? '▸ ' : '  '}/{completion.name}
+							</Text>
+						);
+					})}
 				</Box>
 			)}
 			{isFileAutocompleteMode && fileCompletions.length > 0 && (
