@@ -1521,6 +1521,8 @@ export function SettingsSelector({onCancel}: SettingsSelectorProps) {
 
 	// Callback for panels to report a change
 	const reportChange = useCallback((diff: ChangeDiff) => {
+		// Only record if the value actually changed
+		if (diff.oldValue === diff.newValue) return;
 		changesRef.current.push(diff);
 	}, []);
 
