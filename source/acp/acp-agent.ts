@@ -9,15 +9,14 @@ import type {
 	InitializeResponse,
 	LoadSessionRequest,
 	LoadSessionResponse,
-	ModelInfo,
 	NewSessionRequest,
 	NewSessionResponse,
 	PromptRequest,
 	PromptResponse,
-	SessionModelState,
+	SessionConfigOption,
 	SessionModeState,
-	SetSessionModelRequest,
-	SetSessionModelResponse,
+	SetSessionConfigOptionRequest,
+	SetSessionConfigOptionResponse,
 	SetSessionModeRequest,
 	SetSessionModeResponse,
 } from '@agentclientprotocol/sdk';
@@ -41,6 +40,9 @@ import {getLogger} from '@/utils/logging';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 
 const logger = getLogger();
+
+// Stable id for the model selector config option (category `model`).
+const MODEL_CONFIG_ID = 'model';
 
 export class AcpAgent implements Agent {
 	private sessions = new Map<string, AcpSession>();
@@ -88,7 +90,7 @@ export class AcpAgent implements Agent {
 		return {
 			sessionId,
 			modes: this.buildModeState(session),
-			models: await this.buildModelState(),
+			configOptions: await this.buildConfigOptions(),
 		};
 	}
 
@@ -108,7 +110,7 @@ export class AcpAgent implements Agent {
 
 		return {
 			modes: this.buildModeState(session),
-			models: await this.buildModelState(),
+			configOptions: await this.buildConfigOptions(),
 		};
 	}
 
@@ -181,30 +183,41 @@ export class AcpAgent implements Agent {
 		return {};
 	}
 
-	async unstable_setSessionModel(
-		params: SetSessionModelRequest,
-	): Promise<SetSessionModelResponse> {
+	async setSessionConfigOption(
+		params: SetSessionConfigOptionRequest,
+	): Promise<SetSessionConfigOptionResponse> {
 		const session = this.sessions.get(params.sessionId);
 		if (!session) {
 			throw new Error(`Session not found: ${params.sessionId}`);
 		}
 
+		if (params.configId !== MODEL_CONFIG_ID) {
+			throw new Error(`Unknown config option: ${params.configId}`);
+		}
+
+		// The model selector is a string-valued select; reject the boolean shape
+		// the request union also permits.
+		const modelId = params.value;
+		if (typeof modelId !== 'string') {
+			throw new Error(`Invalid model value: ${String(modelId)}`);
+		}
+
 		const {client, provider} = this.initContext;
 		const available = await client.getAvailableModels();
-		if (!available.includes(params.modelId)) {
-			throw new Error(`Unknown model: ${params.modelId}`);
+		if (!available.includes(modelId)) {
+			throw new Error(`Unknown model: ${modelId}`);
 		}
 
 		// Note: the LLM client is shared across all sessions, so the selected
 		// model is effectively process-global. This matches single-session ACP
 		// usage (Zed); a future multi-session client would see one shared model.
-		client.setModel(params.modelId);
-		updateLastUsed(provider, params.modelId);
+		client.setModel(modelId);
+		updateLastUsed(provider, modelId);
 		logger.info(
-			`ACP setSessionModel: session=${params.sessionId} model=${params.modelId}`,
+			`ACP setSessionConfigOption: session=${params.sessionId} configId=${params.configId} value=${modelId}`,
 		);
 
-		return {};
+		return {configOptions: await this.buildConfigOptions()};
 	}
 
 	async authenticate(
@@ -258,23 +271,31 @@ export class AcpAgent implements Agent {
 		}
 	}
 
-	private async buildModelState(): Promise<SessionModelState> {
+	// 0.25.0 folded model selection into the generic session-config system: a
+	// single "select" option in the `model` category, switched via
+	// setSessionConfigOption rather than the removed unstable_setSessionModel.
+	private async buildConfigOptions(): Promise<SessionConfigOption[]> {
 		const {client} = this.initContext;
 		const available = await client.getAvailableModels();
 		const currentModelId = client.getCurrentModel();
 
-		const availableModels: ModelInfo[] = available.map(id => ({
-			modelId: id,
-			name: id,
-		}));
-
+		const modelIds = [...available];
 		// Ensure the active model is always present in the list so clients can
 		// render the current selection even if it is not in the provider's list.
 		if (!available.includes(currentModelId) && currentModelId.length > 0) {
-			availableModels.unshift({modelId: currentModelId, name: currentModelId});
+			modelIds.unshift(currentModelId);
 		}
 
-		return {availableModels, currentModelId};
+		return [
+			{
+				type: 'select',
+				id: MODEL_CONFIG_ID,
+				name: 'Model',
+				category: 'model',
+				currentValue: currentModelId,
+				options: modelIds.map(id => ({name: id, value: id})),
+			},
+		];
 	}
 
 	private buildSystemPromptForSession(session: AcpSession): void {
