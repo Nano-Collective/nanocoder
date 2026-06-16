@@ -32,7 +32,7 @@ function fileSub(id: string, paths?: string[]): Subscription {
 
 async function waitFor(
 	predicate: () => boolean,
-	timeoutMs = 5000,
+	timeoutMs = 2000,
 	intervalMs = 25,
 ): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
@@ -97,8 +97,6 @@ test.serial('paths emitted are relative to the watch root', async t => {
 	const dir = await mkdtemp(join(tmpdir(), 'fw-spec-rel-'));
 	const sub = join(dir, 'src', 'inner');
 	await mkdir(sub, {recursive: true});
-	const file = join(sub, 'leaf.ts');
-	await writeFile(file, 'before');
 
 	const {router, events} = captureRouter();
 	router.subscribe(fileSub('s1'));
@@ -110,7 +108,7 @@ test.serial('paths emitted are relative to the watch root', async t => {
 	await source.start();
 
 	try {
-		await writeFile(file, 'after');
+		await writeFile(join(sub, 'leaf.ts'), 'x');
 		await waitFor(() =>
 			events.some(
 				e =>
@@ -136,30 +134,18 @@ test.serial('subscriptions with paths filter narrow down events', async t => {
 	const dir = await mkdtemp(join(tmpdir(), 'fw-spec-paths-'));
 	const {router, events} = captureRouter();
 	router.subscribe(fileSub('s1', ['docs/**']));
-	const callbacks: Record<string, Array<(file: string) => void>> = {};
-	type WatchFn = typeof import('chokidar').watch;
-	const fakeWatcher = {
-		on: (event: string, callback: (file: string) => void) => {
-			callbacks[event] = [...(callbacks[event] ?? []), callback];
-			return fakeWatcher;
-		},
-		once: (event: string, callback: () => void) => {
-			if (event === 'ready') {
-				setImmediate(callback);
-			}
-			return fakeWatcher;
-		},
-		close: async () => {},
-	} as unknown as import('chokidar').FSWatcher;
 	const source = new FileWatcherSource(router, {
 		root: dir,
-		_watchFn: (() => fakeWatcher) as unknown as WatchFn,
+		usePolling: true,
+		pollingInterval: 50,
 	});
 	await source.start();
 
 	try {
-		callbacks.add?.forEach(callback => callback('docs/a.md'));
-		callbacks.add?.forEach(callback => callback('src/a.ts'));
+		await mkdir(join(dir, 'docs'));
+		await mkdir(join(dir, 'src'));
+		await writeFile(join(dir, 'docs', 'a.md'), 'docs');
+		await writeFile(join(dir, 'src', 'a.ts'), 'src');
 
 		// Wait for at least one event to come through
 		await waitFor(() => events.length > 0);
@@ -206,28 +192,26 @@ test.serial('stop releases the watcher and stops emitting', async t => {
 });
 
 test.serial('closes the underlying watcher if initialization fails', async t => {
-	let closeCalled = false;
+    let closeCalled = false;
 
-	type WatchFn = typeof import('chokidar').watch; // avoids importing watch itself
+    type WatchFn = typeof import('chokidar').watch;  // ← avoids importing watch itself
 
-	const fakeWatcher = {
-		on: (_e: string, _cb: unknown) => fakeWatcher,
-		once: (event: string, callback: (...args: unknown[]) => void) => {
-			if (event === 'error') {
-				setImmediate(() => callback(new Error('Simulated startup failure')));
-			}
-			return fakeWatcher;
-		},
-		close: async () => {
-			closeCalled = true;
-		},
-	} as unknown as import('chokidar').FSWatcher;
+    const fakeWatcher = {
+        on:   (_e: string, _cb: unknown) => fakeWatcher,
+        once: (event: string, callback: (...args: unknown[]) => void) => {
+            if (event === 'error') {
+                setImmediate(() => callback(new Error('Simulated startup failure')));
+            }
+            return fakeWatcher;
+        },
+        close: async () => { closeCalled = true; },
+    } as unknown as import('chokidar').FSWatcher;
 
-	const {router} = captureRouter();
-	const source = new FileWatcherSource(router, {
-		root: '.',
-		_watchFn: (() => fakeWatcher) as unknown as WatchFn,
-	});
+    const {router} = captureRouter();
+    const source = new FileWatcherSource(router, {
+        root: '.',
+        _watchFn: (() => fakeWatcher) as unknown as WatchFn,
+    });
 
     const err = await t.throwsAsync(() => source.start());
     t.is(err?.message, 'Simulated startup failure');

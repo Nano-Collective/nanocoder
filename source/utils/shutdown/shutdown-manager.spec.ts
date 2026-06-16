@@ -245,7 +245,6 @@ test.serial('programmatic timeoutMs takes priority over env var', (t) => {
 	process.env.NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT = '5000';
 	const manager = new ShutdownManager({timeoutMs: 15000});
 	t.is(manager['timeoutMs'], 15000);
-	manager.reset();
 
 	process.env.NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT = originalEnv ?? '';
 });
