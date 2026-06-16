@@ -81,14 +81,19 @@ export class ShutdownManager {
 			}
 		})();
 
+		let timeoutId: ReturnType<typeof setTimeout> | undefined;
 		const timeoutPromise = new Promise<void>(resolve => {
-			setTimeout(() => {
+			timeoutId = setTimeout(() => {
 				logger.warn('Shutdown timeout reached, forcing exit');
 				resolve();
 			}, this.timeoutMs);
+			timeoutId.unref?.();
 		});
 
 		await Promise.race([shutdownPromise, timeoutPromise]);
+		if (timeoutId) {
+			clearTimeout(timeoutId);
+		}
 
 		process.exit(exitCode);
 	}

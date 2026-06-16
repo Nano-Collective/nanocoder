@@ -48,7 +48,7 @@ function CompactToolError({toolName}: {toolName: string}) {
 	const {colors} = useTheme();
 	return (
 		<Text color={colors.error}>
-			{'\u2692'} {toolName} failed
+			{'\u2692'} {toolName} failed.
 		</Text>
 	);
 }
