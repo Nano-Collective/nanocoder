@@ -78,7 +78,7 @@ export function KeepDiscardPrompt({
 						<Text color={colors.warning}>You have unsaved changes.</Text>
 					</Box>
 					{changes && changes.length > 0 && (
-						<Box marginBottom={1}>
+						<Box flexDirection="column" marginBottom={1}>
 							{changes.map((c, i) => (
 								<Box key={i}>
 									<Text color={colors.secondary}>{c.setting}</Text>
