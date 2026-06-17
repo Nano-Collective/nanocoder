@@ -127,6 +127,11 @@ export const MAX_COMPACT_RETRIES = 1;
 // bad XML loops async and appends two messages per iteration until Node's
 // heap exhausts (~1.4GB).
 export const MAX_MALFORMED_RETRIES = 2;
+// Cap how many times the model may emit the exact same tool call(s) on
+// consecutive turns. Small models can get stuck re-issuing an identical failing
+// call forever; once the same signature repeats this many times in a row we
+// stop and surface an actionable error instead of looping.
+export const MAX_REPEATED_TOOL_CALLS = 3;
 
 // === MCP ===
 export const TIMEOUT_MCP_DEFAULT_MS = 30_000;

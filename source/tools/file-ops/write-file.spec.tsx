@@ -9,6 +9,7 @@ import {themes} from '../../config/themes.js';
 import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {writeFileTool} from './write-file.js';
+import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
 
 // ============================================================================
 // Test Helpers
@@ -36,6 +37,8 @@ let testDir: string;
 // Create a temporary directory before each test
 test.beforeEach(async () => {
 	testDir = await mkdtemp(join(tmpdir(), 'write-file-test-'));
+	// Read-before-overwrite state is process-global; reset between serial tests.
+	clearReadTracker();
 });
 
 // Clean up temporary directory after each test
@@ -233,6 +236,57 @@ test('write_file validator: accepts valid path', async t => {
 		const result = await writeFileTool.validator({
 			path: 'valid.txt',
 			content: 'test',
+		});
+
+		t.true(result.valid);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test('write_file validator: rejects overwriting an existing unread file', async t => {
+	// File exists on disk but has not been read this session.
+	await writeFile(join(testDir, 'existing.txt'), 'original\n', 'utf-8');
+
+	if (!writeFileTool.validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+
+		const result = await writeFileTool.validator({
+			path: 'existing.txt',
+			content: 'replacement',
+		});
+
+		t.false(result.valid);
+		if (!result.valid) {
+			t.true(result.error.includes('already exists'));
+		}
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test('write_file validator: allows overwriting an existing file after it is read', async t => {
+	await writeFile(join(testDir, 'existing.txt'), 'original\n', 'utf-8');
+
+	if (!writeFileTool.validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		markFileSeen('existing.txt');
+
+		const result = await writeFileTool.validator({
+			path: 'existing.txt',
+			content: 'replacement',
 		});
 
 		t.true(result.valid);
