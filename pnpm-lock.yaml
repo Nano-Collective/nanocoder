@@ -8,6 +8,7 @@ overrides:
   tmp: '>=0.2.6'
 
 patchedDependencies:
+  '@ai-sdk/openai@3.0.71': df300a5d22aecda3490a73885c5d63e34d4cd056d26fc5ba202ea4121d46adbf
   ink@6.8.0: ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f
 
 importers:
@@ -25,7 +26,7 @@ importers:
         version: 3.0.80(zod@4.4.3)
       '@ai-sdk/openai':
         specifier: ^3.0.71
-        version: 3.0.71(zod@4.4.3)
+        version: 3.0.71(patch_hash=df300a5d22aecda3490a73885c5d63e34d4cd056d26fc5ba202ea4121d46adbf)(zod@4.4.3)
       '@ai-sdk/openai-compatible':
         specifier: 2.0.41
         version: 2.0.41(zod@4.4.3)
@@ -3744,7 +3745,7 @@ snapshots:
       '@ai-sdk/provider-utils': 4.0.23(zod@4.4.3)
       zod: 4.4.3
 
-  '@ai-sdk/openai@3.0.71(zod@4.4.3)':
+  '@ai-sdk/openai@3.0.71(patch_hash=df300a5d22aecda3490a73885c5d63e34d4cd056d26fc5ba202ea4121d46adbf)(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 3.0.10
       '@ai-sdk/provider-utils': 4.0.29(zod@4.4.3)
