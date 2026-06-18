@@ -66,6 +66,7 @@ export default function UserInput({
 	const uiState = useUIStateContext();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
 	const [textInputKey, setTextInputKey] = useState(0);
+	const completionJustSelectedRef = useRef(false);
 	// Store the full InputState draft when starting history navigation, so it can be restored
 	const savedDraftRef = useRef<InputState>({
 		displayValue: '',
@@ -207,6 +208,10 @@ export default function UserInput({
 
 	// Update UI state for command completions
 	useEffect(() => {
+		if (completionJustSelectedRef.current) {
+			completionJustSelectedRef.current = false;
+			return;
+		}
 		if (commandCompletions.length > 0) {
 			setCompletions(commandCompletions);
 			setShowCompletions(true);
@@ -485,6 +490,7 @@ export default function UserInput({
 		) {
 			const selected = completions[selectedCompletionIndex];
 			const completedText = `/${selected.name}`;
+			completionJustSelectedRef.current = true;
 			setInputState({
 				displayValue: completedText,
 				placeholderContent: {},
@@ -492,6 +498,12 @@ export default function UserInput({
 			setShowCompletions(false);
 			setSelectedCompletionIndex(-1);
 			setTextInputKey(prev => prev + 1);
+			return;
+		}
+
+		// Handle Enter to submit (fallthrough - if completion handler didn't return)
+		if (key.return && !key.shift) {
+			handleSubmit();
 			return;
 		}
 
@@ -598,9 +610,11 @@ export default function UserInput({
 						value={input}
 						onChange={updateInput}
 						onSubmit={handleSubmit}
+						onEnter={handleSubmit}
 						placeholder="/ commands, ! bash, ↑/↓ history"
 						focus={isFocused}
 						wrapWidth={boxWidth - 3}
+						handleEnter={false}
 					/>
 				</Box>
 
