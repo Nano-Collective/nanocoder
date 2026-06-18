@@ -159,8 +159,9 @@ export async function handleChat(
 			// OpenRouter provider routing / reasoning / transforms / fallback
 			// models). buildProviderOptions returns undefined when nothing
 			// applies, so the SDK call site doesn't see an empty object.
-			const providerOptions = buildProviderOptions(
+			const providerOptions = await buildProviderOptions(
 				providerConfig,
+				currentModel,
 				systemContent,
 				modeOverrides?.modelParameters,
 			);

@@ -34,6 +34,15 @@ By default, Ollama uses a 2048 token context window which is too small for agent
 OLLAMA_NUM_CTX=32768 ollama serve
 ```
 
+Nanocoder also forwards its resolved context limit to Ollama as `options.num_ctx` on each request. That means these settings flow through automatically:
+
+- `/context-max` or `--context-max`
+- provider-level `contextWindow`
+- per-model `contextWindows`
+- subagent `contextWindow`
+
+Use the Ollama server default (`OLLAMA_NUM_CTX`) as your baseline ceiling, then tighten individual Nanocoder sessions or models with the settings above when you want smaller/faster contexts.
+
 Or set it permanently in your environment.
 
 ### Signs of an Insufficient Context Limit

@@ -1,3 +1,4 @@
+import {getModelContextLimit} from '@/models/models-dev-client.js';
 import type {AIProviderConfig, ModelParameters} from '@/types/index';
 import {isOpenRouterProvider} from '../providers/openrouter.js';
 
@@ -33,11 +34,12 @@ export type ProviderOptions = Record<string, Record<string, unknown>>;
  * Returns `undefined` when no provider-specific options apply, so the SDK
  * call site can spread it without producing an empty `providerOptions: {}`.
  */
-export function buildProviderOptions(
+export async function buildProviderOptions(
 	providerConfig: AIProviderConfig,
+	currentModel: string,
 	systemContent: string,
 	modelParameters: ModelParameters | undefined,
-): ProviderOptions | undefined {
+): Promise<ProviderOptions | undefined> {
 	if (providerConfig.sdkProvider === 'chatgpt-codex') {
 		return {
 			openai: {
@@ -86,7 +88,30 @@ export function buildProviderOptions(
 		return {openrouter: payload};
 	}
 
+	if (isOllamaProvider(providerConfig)) {
+		const contextLimit = await getModelContextLimit(currentModel, {
+			providerConfig,
+		});
+
+		if (contextLimit && contextLimit > 0) {
+			return {
+				[providerConfig.name]: {
+					options: {
+						num_ctx: contextLimit,
+					},
+				},
+			};
+		}
+	}
+
 	return undefined;
+}
+
+function isOllamaProvider(providerConfig: AIProviderConfig): boolean {
+	const providerName = providerConfig.name.toLowerCase();
+	const baseURL = providerConfig.config.baseURL?.toLowerCase() ?? '';
+
+	return providerName === 'ollama' || baseURL.includes('11434');
 }
 
 /**

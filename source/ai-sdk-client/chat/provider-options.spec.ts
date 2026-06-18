@@ -24,25 +24,40 @@ function withOpenRouter(
 	return makeProvider({openrouter, ...overrides});
 }
 
-test('returns undefined when no provider-specific options apply', t => {
-	const result = buildProviderOptions(
-		makeProvider({name: 'Ollama', type: 'ollama'}),
+test('returns Ollama num_ctx provider options when a context limit is resolved', async t => {
+	const result = await buildProviderOptions(
+		makeProvider({
+			name: 'Ollama',
+			config: {baseURL: 'http://localhost:11434/v1', apiKey: 'test-key'},
+			contextWindow: 32768,
+		}),
+		'llama3.1',
 		'system prompt',
 		undefined,
+	);
+	t.deepEqual(result, {
+		Ollama: {
+			options: {
+				num_ctx: 32768,
+			},
+		},
+	});
+});
+
+test('returns undefined for OpenRouter with no openrouter config and no reasoning shortcut', async t => {
+	const result = await buildProviderOptions(
+		makeProvider(),
+		'x-ai/grok-4',
+		'system prompt',
+		{temperature: 0.7},
 	);
 	t.is(result, undefined);
 });
 
-test('returns undefined for OpenRouter with no openrouter config and no reasoning shortcut', t => {
-	const result = buildProviderOptions(makeProvider(), 'system prompt', {
-		temperature: 0.7,
-	});
-	t.is(result, undefined);
-});
-
-test('chatgpt-codex always returns providerOptions.openai with defaults', t => {
-	const result = buildProviderOptions(
+test('chatgpt-codex always returns providerOptions.openai with defaults', async t => {
+	const result = await buildProviderOptions(
 		makeProvider({name: 'codex', sdkProvider: 'chatgpt-codex'}),
+		'gpt-5',
 		'hello system',
 		undefined,
 	);
@@ -56,9 +71,10 @@ test('chatgpt-codex always returns providerOptions.openai with defaults', t => {
 	});
 });
 
-test('chatgpt-codex honours overridden reasoningEffort and reasoningSummary', t => {
-	const result = buildProviderOptions(
+test('chatgpt-codex honours overridden reasoningEffort and reasoningSummary', async t => {
+	const result = await buildProviderOptions(
 		makeProvider({name: 'codex', sdkProvider: 'chatgpt-codex'}),
+		'gpt-5',
 		'hello',
 		{reasoningEffort: 'high', reasoningSummary: 'detailed'},
 	);
@@ -72,7 +88,7 @@ test('chatgpt-codex honours overridden reasoningEffort and reasoningSummary', t 
 	});
 });
 
-test('OpenRouter forwards provider routing block', t => {
+test('OpenRouter forwards provider routing block', async t => {
 	const provider = withOpenRouter({
 		provider: {
 			order: ['Anthropic', 'OpenAI'],
@@ -80,7 +96,7 @@ test('OpenRouter forwards provider routing block', t => {
 			sort: 'price',
 		},
 	});
-	const result = buildProviderOptions(provider, '', undefined);
+	const result = await buildProviderOptions(provider, 'x-ai/grok-4', '', undefined);
 	t.deepEqual(result, {
 		openrouter: {
 			provider: {
@@ -92,11 +108,11 @@ test('OpenRouter forwards provider routing block', t => {
 	});
 });
 
-test('OpenRouter accepts object-form sort for cross-model partitioning', t => {
+test('OpenRouter accepts object-form sort for cross-model partitioning', async t => {
 	const provider = withOpenRouter({
 		provider: {sort: {by: 'price', partition: 'model'}},
 	});
-	const result = buildProviderOptions(provider, '', undefined);
+	const result = await buildProviderOptions(provider, 'x-ai/grok-4', '', undefined);
 	t.deepEqual(result, {
 		openrouter: {
 			provider: {sort: {by: 'price', partition: 'model'}},
@@ -104,12 +120,12 @@ test('OpenRouter accepts object-form sort for cross-model partitioning', t => {
 	});
 });
 
-test('OpenRouter forwards plugins and fallback models list', t => {
+test('OpenRouter forwards plugins and fallback models list', async t => {
 	const provider = withOpenRouter({
 		plugins: [{id: 'context-compression', engine: 'middle-out'}],
 		models: ['anthropic/claude-3.5-sonnet', 'openai/gpt-4o'],
 	});
-	const result = buildProviderOptions(provider, '', undefined);
+	const result = await buildProviderOptions(provider, 'x-ai/grok-4', '', undefined);
 	t.deepEqual(result, {
 		openrouter: {
 			plugins: [{id: 'context-compression', engine: 'middle-out'}],
@@ -118,31 +134,31 @@ test('OpenRouter forwards plugins and fallback models list', t => {
 	});
 });
 
-test('OpenRouter forwards service_tier=flex', t => {
+test('OpenRouter forwards service_tier=flex', async t => {
 	const provider = withOpenRouter({service_tier: 'flex'});
-	const result = buildProviderOptions(provider, '', undefined);
+	const result = await buildProviderOptions(provider, 'x-ai/grok-4', '', undefined);
 	t.deepEqual(result, {openrouter: {service_tier: 'flex'}});
 });
 
-test('OpenRouter forwards service_tier=priority', t => {
+test('OpenRouter forwards service_tier=priority', async t => {
 	const provider = withOpenRouter({service_tier: 'priority'});
-	const result = buildProviderOptions(provider, '', undefined);
+	const result = await buildProviderOptions(provider, 'x-ai/grok-4', '', undefined);
 	t.deepEqual(result, {openrouter: {service_tier: 'priority'}});
 });
 
-test('OpenRouter forwards route and user', t => {
+test('OpenRouter forwards route and user', async t => {
 	const provider = withOpenRouter({route: 'fallback', user: 'user-123'});
-	const result = buildProviderOptions(provider, '', undefined);
+	const result = await buildProviderOptions(provider, 'x-ai/grok-4', '', undefined);
 	t.deepEqual(result, {
 		openrouter: {route: 'fallback', user: 'user-123'},
 	});
 });
 
-test('OpenRouter forwards extended reasoning block with xhigh and exclude', t => {
+test('OpenRouter forwards extended reasoning block with xhigh and exclude', async t => {
 	const provider = withOpenRouter({
 		reasoning: {effort: 'xhigh', max_tokens: 12000, exclude: false},
 	});
-	const result = buildProviderOptions(provider, '', undefined);
+	const result = await buildProviderOptions(provider, 'x-ai/grok-4', '', undefined);
 	t.deepEqual(result, {
 		openrouter: {
 			reasoning: {effort: 'xhigh', max_tokens: 12000, exclude: false},
@@ -150,25 +166,25 @@ test('OpenRouter forwards extended reasoning block with xhigh and exclude', t =>
 	});
 });
 
-test('OpenRouter maps tune-level reasoningEffort to reasoning.effort', t => {
-	const result = buildProviderOptions(makeProvider(), '', {
+test('OpenRouter maps tune-level reasoningEffort to reasoning.effort', async t => {
+	const result = await buildProviderOptions(makeProvider(), 'x-ai/grok-4', '', {
 		reasoningEffort: 'high',
 	});
 	t.deepEqual(result, {openrouter: {reasoning: {effort: 'high'}}});
 });
 
-test('OpenRouter passes minimal reasoningEffort straight through', t => {
-	const result = buildProviderOptions(makeProvider(), '', {
+test('OpenRouter passes minimal reasoningEffort straight through', async t => {
+	const result = await buildProviderOptions(makeProvider(), 'x-ai/grok-4', '', {
 		reasoningEffort: 'minimal',
 	});
 	t.deepEqual(result, {openrouter: {reasoning: {effort: 'minimal'}}});
 });
 
-test('OpenRouter merges tune shortcut effort with provider-config reasoning block', t => {
+test('OpenRouter merges tune shortcut effort with provider-config reasoning block', async t => {
 	const provider = withOpenRouter({
 		reasoning: {max_tokens: 8000, exclude: true},
 	});
-	const result = buildProviderOptions(provider, '', {
+	const result = await buildProviderOptions(provider, 'x-ai/grok-4', '', {
 		reasoningEffort: 'medium',
 	});
 	t.deepEqual(result, {
@@ -178,15 +194,15 @@ test('OpenRouter merges tune shortcut effort with provider-config reasoning bloc
 	});
 });
 
-test('provider-config reasoning.effort wins over tune shortcut', t => {
+test('provider-config reasoning.effort wins over tune shortcut', async t => {
 	const provider = withOpenRouter({reasoning: {effort: 'high'}});
-	const result = buildProviderOptions(provider, '', {
+	const result = await buildProviderOptions(provider, 'x-ai/grok-4', '', {
 		reasoningEffort: 'low',
 	});
 	t.deepEqual(result, {openrouter: {reasoning: {effort: 'high'}}});
 });
 
-test('OpenRouter routing extras (zdr, max_price, latency thresholds) flow through', t => {
+test('OpenRouter routing extras (zdr, max_price, latency thresholds) flow through', async t => {
 	const provider = withOpenRouter({
 		provider: {
 			zdr: true,
@@ -196,7 +212,7 @@ test('OpenRouter routing extras (zdr, max_price, latency thresholds) flow throug
 			preferred_max_latency: 2000,
 		},
 	});
-	const result = buildProviderOptions(provider, '', undefined);
+	const result = await buildProviderOptions(provider, 'x-ai/grok-4', '', undefined);
 	t.deepEqual(result, {
 		openrouter: {
 			provider: {
@@ -210,23 +226,23 @@ test('OpenRouter routing extras (zdr, max_price, latency thresholds) flow throug
 	});
 });
 
-test('OpenRouter detection is case-insensitive on provider name', t => {
+test('OpenRouter detection is case-insensitive on provider name', async t => {
 	const provider = withOpenRouter(
 		{service_tier: 'flex'},
 		{name: 'openrouter'},
 	);
-	const result = buildProviderOptions(provider, '', undefined);
+	const result = await buildProviderOptions(provider, 'x-ai/grok-4', '', undefined);
 	t.deepEqual(result, {openrouter: {service_tier: 'flex'}});
 });
 
-test('OpenRouter combines provider, reasoning, plugins, models, service_tier', t => {
+test('OpenRouter combines provider, reasoning, plugins, models, service_tier', async t => {
 	const provider = withOpenRouter({
 		provider: {sort: 'throughput'},
 		plugins: [{id: 'web'}],
 		models: ['openai/gpt-4o'],
 		service_tier: 'flex',
 	});
-	const result = buildProviderOptions(provider, '', {reasoningEffort: 'high'});
+	const result = await buildProviderOptions(provider, 'x-ai/grok-4', '', {reasoningEffort: 'high'});
 	t.deepEqual(result, {
 		openrouter: {
 			provider: {sort: 'throughput'},
@@ -238,18 +254,18 @@ test('OpenRouter combines provider, reasoning, plugins, models, service_tier', t
 	});
 });
 
-test('OpenRouter ignores chatgpt-codex-only fields without dropping requests', t => {
-	const result = buildProviderOptions(makeProvider(), '', {
+test('OpenRouter ignores chatgpt-codex-only fields without dropping requests', async t => {
+	const result = await buildProviderOptions(makeProvider(), 'x-ai/grok-4', '', {
 		reasoningSummary: 'detailed',
 	});
 	t.is(result, undefined);
 });
 
-test('OpenRouter forwards extraBody pass-through fields', t => {
+test('OpenRouter forwards extraBody pass-through fields', async t => {
 	const provider = withOpenRouter({
 		extraBody: {usage: {include: true}, debug: {echo_upstream_body: true}},
 	});
-	const result = buildProviderOptions(provider, '', undefined);
+	const result = await buildProviderOptions(provider, 'x-ai/grok-4', '', undefined);
 	t.deepEqual(result, {
 		openrouter: {
 			usage: {include: true},
@@ -258,21 +274,21 @@ test('OpenRouter forwards extraBody pass-through fields', t => {
 	});
 });
 
-test('OpenRouter extraBody is overridden by typed fields on key collision', t => {
+test('OpenRouter extraBody is overridden by typed fields on key collision', async t => {
 	const provider = withOpenRouter({
 		service_tier: 'flex',
 		extraBody: {service_tier: 'priority', custom: 'kept'},
 	});
-	const result = buildProviderOptions(provider, '', undefined);
+	const result = await buildProviderOptions(provider, 'x-ai/grok-4', '', undefined);
 	t.deepEqual(result, {
 		openrouter: {service_tier: 'flex', custom: 'kept'},
 	});
 });
 
-test('OpenRouter extraBody alone is enough to emit providerOptions', t => {
+test('OpenRouter extraBody alone is enough to emit providerOptions', async t => {
 	const provider = withOpenRouter({
 		extraBody: {experimental_flag: true},
 	});
-	const result = buildProviderOptions(provider, '', undefined);
+	const result = await buildProviderOptions(provider, 'x-ai/grok-4', '', undefined);
 	t.deepEqual(result, {openrouter: {experimental_flag: true}});
 });

@@ -125,7 +125,7 @@ Always use your tools — never guess.
 
 The `provider` must match a provider name configured in your `agents.config.json`.
 
-If you set `contextWindow`, Nanocoder creates that subagent with its own context limit override. This is useful when a lightweight research agent should run with a smaller local-model context than your main coding agent.
+If you set `contextWindow`, Nanocoder creates that subagent with its own context limit override. This is useful when a lightweight research agent should run with a smaller local-model context than your main coding agent. For Ollama providers, this override is also forwarded to the API request as `options.num_ctx`, so the smaller limit affects the actual model runtime too.
 
 ## Priority and Overrides
 
