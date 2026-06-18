@@ -631,7 +631,13 @@ export default function UserInput({
 						return (
 							<Text
 								key={index}
-								color={isSelected ? colors.info : colors.primary}
+								color={
+									isSelected
+										? colors.info
+										: completion.isCustom
+											? colors.info
+											: colors.primary
+								}
 								bold={isSelected}
 							>
 								{isSelected ? '▸ ' : '  '}/{completion.name}
