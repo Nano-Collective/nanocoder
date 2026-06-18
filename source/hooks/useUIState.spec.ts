@@ -38,9 +38,11 @@ test('UIStateProvider provides initial state', t => {
 	t.is(capturedState!.showClearMessage, false);
 	t.is(capturedState!.showCompletions, false);
 	t.deepEqual(capturedState!.completions, []);
+	t.is(capturedState!.selectedCompletionIndex, 0);
 	t.is(typeof capturedState!.setShowClearMessage, 'function');
 	t.is(typeof capturedState!.setShowCompletions, 'function');
 	t.is(typeof capturedState!.setCompletions, 'function');
+	t.is(typeof capturedState!.setSelectedCompletionIndex, 'function');
 	t.is(typeof capturedState!.resetUIState, 'function');
 });
 
@@ -173,6 +175,7 @@ test('resetUIState resets all state to initial values', t => {
 		{name: 'test1', isCustom: false},
 		{name: 'test2', isCustom: true},
 	]);
+	capturedState!.setSelectedCompletionIndex(1);
 
 	rerender(
 		React.createElement(
@@ -189,6 +192,7 @@ test('resetUIState resets all state to initial values', t => {
 	t.is(capturedState!.showClearMessage, true);
 	t.is(capturedState!.showCompletions, true);
 	t.is(capturedState!.completions.length, 2);
+	t.is(capturedState!.selectedCompletionIndex, 1);
 
 	// Reset the state
 	capturedState!.resetUIState();
@@ -207,6 +211,7 @@ test('resetUIState resets all state to initial values', t => {
 	t.is(capturedState!.showClearMessage, false);
 	t.is(capturedState!.showCompletions, false);
 	t.deepEqual(capturedState!.completions, []);
+	t.is(capturedState!.selectedCompletionIndex, 0);
 });
 
 test('UIStateProvider state updates are independent across renders', t => {

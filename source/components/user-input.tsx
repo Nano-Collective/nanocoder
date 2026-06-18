@@ -94,10 +94,12 @@ export default function UserInput({
 		showClearMessage,
 		showCompletions,
 		completions,
+		selectedCompletionIndex,
 		pendingFileMentions,
 		setShowClearMessage,
 		setShowCompletions,
 		setCompletions,
+		setSelectedCompletionIndex,
 		setPendingFileMentions,
 		resetUIState,
 	} = uiState;
@@ -208,11 +210,19 @@ export default function UserInput({
 		if (commandCompletions.length > 0) {
 			setCompletions(commandCompletions);
 			setShowCompletions(true);
+			setSelectedCompletionIndex(0);
 		} else if (showCompletions) {
 			setCompletions([]);
 			setShowCompletions(false);
+			setSelectedCompletionIndex(0);
 		}
-	}, [commandCompletions, showCompletions, setCompletions, setShowCompletions]);
+	}, [
+		commandCompletions,
+		showCompletions,
+		setCompletions,
+		setSelectedCompletionIndex,
+		setShowCompletions,
+	]);
 
 	// Helper functions
 
@@ -261,6 +271,30 @@ export default function UserInput({
 		input,
 		currentState,
 		setInputState,
+	]);
+
+	const handleCommandSelection = useCallback(() => {
+		if (!showCompletions || completions.length === 0) {
+			return false;
+		}
+
+		const completion = completions[selectedCompletionIndex] ?? completions[0];
+		setInputState({
+			displayValue: `/${completion.name}`,
+			placeholderContent: currentState.placeholderContent,
+		});
+		setShowCompletions(false);
+		setSelectedCompletionIndex(0);
+		setTextInputKey(prev => prev + 1);
+		return true;
+	}, [
+		showCompletions,
+		completions,
+		selectedCompletionIndex,
+		setInputState,
+		currentState.placeholderContent,
+		setShowCompletions,
+		setSelectedCompletionIndex,
 	]);
 
 	// Handle form submission
@@ -400,6 +434,11 @@ export default function UserInput({
 
 		// Handle special keys
 		if (key.escape) {
+			if (showCompletions) {
+				setShowCompletions(false);
+				setSelectedCompletionIndex(0);
+				return;
+			}
 			handleEscape();
 			return;
 		}
@@ -446,6 +485,10 @@ export default function UserInput({
 			}
 		}
 
+		if (key.return && showCompletions && completions.length > 0) {
+			if (handleCommandSelection()) return;
+		}
+
 		// Space exits file autocomplete mode
 		if (inputChar === ' ' && isFileAutocompleteMode) {
 			setIsFileAutocompleteMode(false);
@@ -476,6 +519,13 @@ export default function UserInput({
 
 		// Handle navigation
 		if (key.upArrow) {
+			if (showCompletions && completions.length > 0) {
+				setSelectedCompletionIndex(prev =>
+					prev > 0 ? prev - 1 : completions.length - 1,
+				);
+				return;
+			}
+
 			// File autocomplete navigation takes priority
 			if (isFileAutocompleteMode && fileCompletions.length > 0) {
 				setSelectedFileIndex(prev =>
@@ -488,6 +538,13 @@ export default function UserInput({
 		}
 
 		if (key.downArrow) {
+			if (showCompletions && completions.length > 0) {
+				setSelectedCompletionIndex(prev =>
+					prev < completions.length - 1 ? prev + 1 : 0,
+				);
+				return;
+			}
+
 			// File autocomplete navigation takes priority
 			if (isFileAutocompleteMode && fileCompletions.length > 0) {
 				setSelectedFileIndex(prev =>
@@ -580,9 +637,17 @@ export default function UserInput({
 					{completions.map((completion, index) => (
 						<Text
 							key={index}
-							color={completion.isCustom ? colors.info : colors.primary}
+							color={
+								index === selectedCompletionIndex
+									? colors.info
+									: completion.isCustom
+										? colors.info
+										: colors.primary
+							}
+							bold={index === selectedCompletionIndex}
 						>
-							/{completion.name}
+							{index === selectedCompletionIndex ? '▸ ' : '  '}/
+							{completion.name}
 						</Text>
 					))}
 				</Box>
