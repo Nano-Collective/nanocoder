@@ -19,8 +19,8 @@ importers:
         specifier: ^0.25.0
         version: 0.25.0(zod@4.4.3)
       '@ai-sdk/anthropic':
-        specifier: ^3.0.58
-        version: 3.0.81(zod@4.4.3)
+        specifier: ^3.0.85
+        version: 3.0.85(zod@4.4.3)
       '@ai-sdk/google':
         specifier: ^3.0.43
         version: 3.0.80(zod@4.4.3)
@@ -38,7 +38,7 @@ importers:
         version: 1.29.0(zod@4.4.3)
       '@nanocollective/get-md':
         specifier: ^1.4.0
-        version: 1.5.0(@ai-sdk/anthropic@3.0.81(zod@4.4.3))(@ai-sdk/google@3.0.80(zod@4.4.3))(@ai-sdk/openai-compatible@2.0.41(zod@4.4.3))(ai@6.0.193(zod@4.4.3))
+        version: 1.5.0(@ai-sdk/anthropic@3.0.85(zod@4.4.3))(@ai-sdk/google@3.0.80(zod@4.4.3))(@ai-sdk/openai-compatible@2.0.41(zod@4.4.3))(ai@6.0.193(zod@4.4.3))
       ai:
         specifier: 6.0.193
         version: 6.0.193(zod@4.4.3)
@@ -205,8 +205,8 @@ packages:
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
 
-  '@ai-sdk/anthropic@3.0.81':
-    resolution: {integrity: sha512-B1JDd9Ugq9R5AgIaW3674lhGCMMYJcPUxnrZh8fzbGojgg4QvHFRv6eZahGQAUsmGHbcf74G9bdSBDLWQGY2GA==}
+  '@ai-sdk/anthropic@3.0.85':
+    resolution: {integrity: sha512-fNeDB644l5wbRNQU0FnI+F7UTtOenMnPtACfMPUJaS2zJfuBlseEa1TMg+otHkETZgaJB+6Na51NQEv0+m7czw==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -249,6 +249,12 @@ packages:
 
   '@ai-sdk/provider-utils@4.0.29':
     resolution: {integrity: sha512-uhukHaCBvqkwBHkT8C2PrnqKTCoLn3pdHXqtcR9I8ErH+flbzgW4o7VHSNIup9LRu+WBvZIZDQLsx6rwl2tiOA==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/provider-utils@4.0.30':
+    resolution: {integrity: sha512-VO7I+vPffqI5sMnPoUq5DCSqKIgQIk/naJWRdQVpz2ma2zoprC/lqiJiUEl2s6DfvTD76TbhD3q39ROjlA6rGw==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -3720,10 +3726,10 @@ snapshots:
     dependencies:
       zod: 4.4.3
 
-  '@ai-sdk/anthropic@3.0.81(zod@4.4.3)':
+  '@ai-sdk/anthropic@3.0.85(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 3.0.10
-      '@ai-sdk/provider-utils': 4.0.27(zod@4.4.3)
+      '@ai-sdk/provider-utils': 4.0.30(zod@4.4.3)
       zod: 4.4.3
 
   '@ai-sdk/gateway@3.0.121(zod@4.4.3)':
@@ -3766,6 +3772,13 @@ snapshots:
       zod: 4.4.3
 
   '@ai-sdk/provider-utils@4.0.29(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.10
+      '@standard-schema/spec': 1.1.0
+      eventsource-parser: 3.1.0
+      zod: 4.4.3
+
+  '@ai-sdk/provider-utils@4.0.30(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 3.0.10
       '@standard-schema/spec': 1.1.0
@@ -4207,7 +4220,7 @@ snapshots:
 
   '@mozilla/readability@0.6.0': {}
 
-  '@nanocollective/get-md@1.5.0(@ai-sdk/anthropic@3.0.81(zod@4.4.3))(@ai-sdk/google@3.0.80(zod@4.4.3))(@ai-sdk/openai-compatible@2.0.41(zod@4.4.3))(ai@6.0.193(zod@4.4.3))':
+  '@nanocollective/get-md@1.5.0(@ai-sdk/anthropic@3.0.85(zod@4.4.3))(@ai-sdk/google@3.0.80(zod@4.4.3))(@ai-sdk/openai-compatible@2.0.41(zod@4.4.3))(ai@6.0.193(zod@4.4.3))':
     dependencies:
       '@mozilla/readability': 0.6.0
       cheerio: 1.2.0
@@ -4217,7 +4230,7 @@ snapshots:
       turndown: 7.2.4
       turndown-plugin-gfm: 1.0.2
     optionalDependencies:
-      '@ai-sdk/anthropic': 3.0.81(zod@4.4.3)
+      '@ai-sdk/anthropic': 3.0.85(zod@4.4.3)
       '@ai-sdk/google': 3.0.80(zod@4.4.3)
       '@ai-sdk/openai-compatible': 2.0.41(zod@4.4.3)
       ai: 6.0.193(zod@4.4.3)
