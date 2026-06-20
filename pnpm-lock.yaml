@@ -180,8 +180,8 @@ importers:
         specifier: ^25.9.3
         version: 25.9.3
       '@types/vscode':
-        specifier: ^1.85.0
-        version: 1.120.0
+        specifier: ^1.125.0
+        version: 1.125.0
       '@types/ws':
         specifier: ^8.5.10
         version: 8.18.1
@@ -1217,8 +1217,8 @@ packages:
   '@types/tinycolor2@1.4.6':
     resolution: {integrity: sha512-iEN8J0BoMnsWBqjVbWH/c0G0Hh7O21lpR2/+PrvAVgWdzL7eexIFm4JN/Wn10PTcmNdtS6U67r499mlWMXOxNw==}
 
-  '@types/vscode@1.120.0':
-    resolution: {integrity: sha512-feaT4Rst+FkTch5zz/ZbNCxoIvo55YU80Be2kiL7OJcod4+CUYf2lUBPdIJzozNnSEMq1VRTGrWEcCGFB3fBmA==}
+  '@types/vscode@1.125.0':
+    resolution: {integrity: sha512-0icm/ZQAaism87P0ekHqi4/Ju9du+Tm0RUW+y7vqRsxY2cY0FNRX1nAnaW7nT6npPt2tfHiheZ55Zm9UhqonFA==}
 
   '@types/ws@8.18.1':
     resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
@@ -4537,7 +4537,7 @@ snapshots:
 
   '@types/tinycolor2@1.4.6': {}
 
-  '@types/vscode@1.120.0': {}
+  '@types/vscode@1.125.0': {}
 
   '@types/ws@8.18.1':
     dependencies:
