@@ -540,6 +540,38 @@ export default function UserInput({
 					Bash mode
 				</Text>
 			)}
+
+			{showCompletions && completions.length > 0 && (
+				<Box flexDirection="column" marginTop={1}>
+					<Text color={colors.secondary}>Available commands:</Text>
+					{completions.map((completion, index) => (
+						<Text
+							key={index}
+							color={completion.isCustom ? colors.info : colors.primary}
+						>
+							/{completion.name}
+						</Text>
+					))}
+				</Box>
+			)}
+			{isFileAutocompleteMode && fileCompletions.length > 0 && (
+				<Box flexDirection="column" marginTop={1}>
+					<Text color={colors.secondary}>
+						File suggestions (↑/↓ to navigate, Tab to select):
+					</Text>
+					{fileCompletions.slice(0, 5).map((file, index) => (
+						<Text
+							key={index}
+							color={index === selectedFileIndex ? colors.info : colors.primary}
+							bold={index === selectedFileIndex}
+						>
+							{index === selectedFileIndex ? '▸ ' : '  '}
+							{file.path}
+						</Text>
+					))}
+				</Box>
+			)}
+
 			<Box
 				flexDirection="column"
 				marginTop={1}
@@ -573,37 +605,6 @@ export default function UserInput({
 					<Text color={colors.secondary}>Press escape again to clear</Text>
 				)}
 			</Box>
-
-			{showCompletions && completions.length > 0 && (
-				<Box flexDirection="column" marginTop={1}>
-					<Text color={colors.secondary}>Available commands:</Text>
-					{completions.map((completion, index) => (
-						<Text
-							key={index}
-							color={completion.isCustom ? colors.info : colors.primary}
-						>
-							/{completion.name}
-						</Text>
-					))}
-				</Box>
-			)}
-			{isFileAutocompleteMode && fileCompletions.length > 0 && (
-				<Box flexDirection="column" marginTop={1}>
-					<Text color={colors.secondary}>
-						File suggestions (↑/↓ to navigate, Tab to select):
-					</Text>
-					{fileCompletions.slice(0, 5).map((file, index) => (
-						<Text
-							key={index}
-							color={index === selectedFileIndex ? colors.info : colors.primary}
-							bold={index === selectedFileIndex}
-						>
-							{index === selectedFileIndex ? '▸ ' : '  '}
-							{file.path}
-						</Text>
-					))}
-				</Box>
-			)}
 
 			{/* Development mode indicator - always visible */}
 			<DevelopmentModeIndicator
