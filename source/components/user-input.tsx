@@ -590,41 +590,6 @@ export default function UserInput({
 					Bash mode
 				</Text>
 			)}
-			<Box
-				flexDirection="column"
-				marginTop={1}
-				backgroundColor={colors.base}
-				width={boxWidth}
-				padding={1}
-				borderStyle="bold"
-				borderLeft={true}
-				borderRight={false}
-				borderTop={false}
-				borderBottom={false}
-				borderLeftColor={isBashMode ? colors.tool : colors.primary}
-			>
-				{/* Input row */}
-				<Box>
-					{input.length === 0 && (
-						<Text color={isBashMode ? colors.tool : textColor}>{'>'} </Text>
-					)}
-					<TextInput
-						key={textInputKey}
-						value={input}
-						onChange={updateInput}
-						onSubmit={handleSubmit}
-						onEnter={handleSubmit}
-						placeholder="/ commands, ! bash, ↑/↓ history"
-						focus={effectiveFocus}
-						wrapWidth={boxWidth - 3}
-						handleEnter={false}
-					/>
-				</Box>
-
-				{showClearMessage && (
-					<Text color={colors.secondary}>Press escape again to clear</Text>
-				)}
-			</Box>
 
 			{showCompletions && completions.length > 0 && (
 				<Box flexDirection="column" marginTop={1}>
@@ -666,6 +631,42 @@ export default function UserInput({
 					))}
 				</Box>
 			)}
+
+			<Box
+				flexDirection="column"
+				marginTop={1}
+				backgroundColor={colors.base}
+				width={boxWidth}
+				padding={1}
+				borderStyle="bold"
+				borderLeft={true}
+				borderRight={false}
+				borderTop={false}
+				borderBottom={false}
+				borderLeftColor={isBashMode ? colors.tool : colors.primary}
+			>
+				{/* Input row */}
+				<Box>
+					{input.length === 0 && (
+						<Text color={isBashMode ? colors.tool : textColor}>{'>'} </Text>
+					)}
+					<TextInput
+						key={textInputKey}
+						value={input}
+						onChange={updateInput}
+						onSubmit={handleSubmit}
+						onEnter={handleSubmit}
+						placeholder="/ commands, ! bash, ↑/↓ history"
+						focus={effectiveFocus}
+						wrapWidth={boxWidth - 3}
+						handleEnter={false}
+					/>
+				</Box>
+
+				{showClearMessage && (
+					<Text color={colors.secondary}>Press escape again to clear</Text>
+				)}
+			</Box>
 
 			{/* Development mode indicator - always visible */}
 			<DevelopmentModeIndicator
