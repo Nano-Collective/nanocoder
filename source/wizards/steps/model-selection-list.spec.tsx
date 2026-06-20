@@ -1,5 +1,6 @@
 import test from 'ava';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import {renderWithTheme} from '@/test-utils/render-with-theme';
 import type {FetchedModel} from '../utils/fetch-models';
 import {ModelSelectionList} from './model-selection-list';
@@ -91,7 +92,9 @@ test('slash enters search mode and typing filters models', async t => {
 	}
 	await wait();
 
-	const output = lastFrame() || '';
+	// Strip ANSI so color codes (present when CI forces color) don't split the
+	// "Search models: " label from the typed query in the matched text.
+	const output = stripAnsi(lastFrame() || '');
 	t.regex(output, /Search models: claude/);
 	t.regex(output, /1-1\/1 models \| filter: claude/);
 	t.regex(output, /Claude Sonnet 4 — anthropic\/claude-sonnet-4/);
@@ -152,7 +155,7 @@ test('d in search mode updates the query instead of completing', async t => {
 	await wait();
 
 	t.is(doneCalls, 0);
-	t.regex(lastFrame() || '', /Search models: d/);
+	t.regex(stripAnsi(lastFrame() || ''), /Search models: d/);
 	unmount();
 });
 
