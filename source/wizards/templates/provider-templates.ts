@@ -409,6 +409,13 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			return config;
 		},
 	},
+	apiKeyTemplate({
+		id: 'requesty',
+		name: 'Requesty',
+		baseUrl: 'https://router.requesty.ai/v1',
+		apiKeyPrompt: 'API Key (from https://app.requesty.ai/api-keys)',
+		modelDefault: 'openai/gpt-4o-mini',
+	}),
 	{
 		id: 'openai',
 		name: 'OpenAI',
