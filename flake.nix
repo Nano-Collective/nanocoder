@@ -21,7 +21,7 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
         pname = "nanocoder";
-        version = "1.27.0";
+        version = "1.28.0";
 
         nodejs = pkgs.nodejs_24;
 
@@ -45,7 +45,7 @@
             owner = "nano-collective";
             repo = pname;
             rev = "v${version}";
-            sha256 = "sha256-3Bi0in4mvy8wJPSgCaPwhULoAv0rC0x8j0hIPUT4wqk=";
+            sha256 = "sha256-hs6Do1ObudylPe398ZxwZX3S4fHvcPhTHShf9ZcHe1E=";
           };
 
           nativeBuildInputs = [
@@ -84,7 +84,7 @@
           # pnpmDeps hash.
           pnpmDeps = (fetchPnpmDeps {
             inherit (finalAttrs) pname version src;
-            hash = "sha256-EX2aB5+e+bOI/q27nwTnbZd3SNOMyh4829ykKNIOeZ0=";
+            hash = "sha256-ZJn7pK/tufjhlEaKNI8lbRB3l+FHl+5qAXJoE+raSPM=";
             fetcherVersion = 3;
           }).overrideAttrs (_: {
             pnpm_config_side_effects_cache = "false";
