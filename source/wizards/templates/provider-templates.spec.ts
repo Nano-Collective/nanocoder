@@ -451,6 +451,42 @@ test('atlas-cloud template: uses default provider name when empty', t => {
 	t.is(config.name, 'Atlas Cloud');
 });
 
+test('requesty template: sets baseUrl, default model, and parses models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'requesty');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'Requesty',
+		apiKey: 'test-key',
+		model: 'openai/gpt-4o-mini, anthropic/claude-3.5-sonnet',
+	});
+
+	t.is(config.name, 'Requesty');
+	t.is(config.baseUrl, 'https://router.requesty.ai/v1');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, [
+		'openai/gpt-4o-mini',
+		'anthropic/claude-3.5-sonnet',
+	]);
+});
+
+test('requesty template: uses default provider name and model default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'requesty');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'openai/gpt-4o-mini');
+
+	const config = template!.buildConfig({
+		providerName: '',
+		apiKey: 'test-key',
+		model: 'openai/gpt-4o-mini',
+	});
+
+	t.is(config.name, 'Requesty');
+});
+
 // ============================================================================
 // Tests for template ID vs sdkProvider collision prevention
 // Providers that use sdkProvider: 'anthropic' (like MiniMax, Kimi) must not

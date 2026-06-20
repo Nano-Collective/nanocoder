@@ -80,7 +80,7 @@ let messageStats: MessageQueueStats = {
 // Add a React component directly to the queue
 export function addToMessageQueue(component: React.ReactNode) {
 	if (!globalAddToChatQueue) {
-		console.log('[message-queue] Queue not available, component not added');
+		logger.warn('[message-queue] Queue not available, component not added');
 		return;
 	}
 	globalAddToChatQueue(component);
