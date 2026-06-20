@@ -12,7 +12,9 @@ export type Props = {
 	readonly value: string;
 	readonly onChange: (value: string) => void;
 	readonly onSubmit?: (value: string) => void;
+	readonly onEnter?: (value: string) => void;
 	readonly wrapWidth?: number;
+	readonly handleEnter?: boolean;
 };
 
 function TextInput({
@@ -24,7 +26,9 @@ function TextInput({
 	showCursor = true,
 	onChange,
 	onSubmit,
+	onEnter,
 	wrapWidth,
+	handleEnter = true,
 }: Props) {
 	const [state, setState] = useState({
 		cursorOffset: (originalValue || '').length,
@@ -94,10 +98,14 @@ function TextInput({
 			}
 
 			if (key.return) {
-				if (onSubmit) {
-					onSubmit(originalValue);
+				if (handleEnter && onEnter) {
+					onEnter(originalValue);
+					return;
 				}
-
+				if (handleEnter && onSubmit) {
+					onSubmit(originalValue);
+					return;
+				}
 				return;
 			}
 
