@@ -1,5 +1,5 @@
 import {UIStateProvider, useUIStateContext} from './useUIState.js';
-import type {Completion} from '../types/index.js';
+import type {Completion} from '../types/components.js';
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
@@ -38,9 +38,11 @@ test('UIStateProvider provides initial state', t => {
 	t.is(capturedState!.showClearMessage, false);
 	t.is(capturedState!.showCompletions, false);
 	t.deepEqual(capturedState!.completions, []);
+	t.is(capturedState!.selectedCompletionIndex, -1);
 	t.is(typeof capturedState!.setShowClearMessage, 'function');
 	t.is(typeof capturedState!.setShowCompletions, 'function');
 	t.is(typeof capturedState!.setCompletions, 'function');
+	t.is(typeof capturedState!.setSelectedCompletionIndex, 'function');
 	t.is(typeof capturedState!.resetUIState, 'function');
 });
 
@@ -151,6 +153,40 @@ test('UIStateProvider allows updating completions', t => {
 	t.deepEqual(capturedState!.completions, testCompletions);
 });
 
+test('UIStateProvider allows updating selectedCompletionIndex', t => {
+	let capturedState: ReturnType<typeof useUIStateContext> | null = null;
+
+	const {rerender} = render(
+		React.createElement(
+			UIStateProvider,
+			null,
+			React.createElement(TestConsumer, {
+				onRender: state => {
+					capturedState = state;
+				},
+			}),
+		),
+	);
+
+	t.is(capturedState!.selectedCompletionIndex, -1);
+
+	// Update the state
+	capturedState!.setSelectedCompletionIndex(2);
+	rerender(
+		React.createElement(
+			UIStateProvider,
+			null,
+			React.createElement(TestConsumer, {
+				onRender: state => {
+					capturedState = state;
+				},
+			}),
+		),
+	);
+
+	t.is(capturedState!.selectedCompletionIndex, 2);
+});
+
 test('resetUIState resets all state to initial values', t => {
 	let capturedState: ReturnType<typeof useUIStateContext> | null = null;
 
@@ -173,6 +209,7 @@ test('resetUIState resets all state to initial values', t => {
 		{name: 'test1', isCustom: false},
 		{name: 'test2', isCustom: true},
 	]);
+	capturedState!.setSelectedCompletionIndex(1);
 
 	rerender(
 		React.createElement(
@@ -189,6 +226,7 @@ test('resetUIState resets all state to initial values', t => {
 	t.is(capturedState!.showClearMessage, true);
 	t.is(capturedState!.showCompletions, true);
 	t.is(capturedState!.completions.length, 2);
+	t.is(capturedState!.selectedCompletionIndex, 1);
 
 	// Reset the state
 	capturedState!.resetUIState();
@@ -207,6 +245,7 @@ test('resetUIState resets all state to initial values', t => {
 	t.is(capturedState!.showClearMessage, false);
 	t.is(capturedState!.showCompletions, false);
 	t.deepEqual(capturedState!.completions, []);
+	t.is(capturedState!.selectedCompletionIndex, -1);
 });
 
 test('UIStateProvider state updates are independent across renders', t => {

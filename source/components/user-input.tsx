@@ -39,6 +39,7 @@ interface ChatProps {
 	currentModel?: string; // Active model id — resolves the 'auto' tune profile for display
 	activeEditor?: ActiveEditorState | null; // VS Code active file + optional selection
 	onDismissActiveEditor?: () => void; // Dismiss the active editor pill on clear/escape
+	forceFocus?: boolean; // Force focus for testing (bypasses useFocus)
 }
 
 export default function UserInput({
@@ -59,13 +60,16 @@ export default function UserInput({
 	currentModel,
 	activeEditor,
 	onDismissActiveEditor,
+	forceFocus = false,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
+	const effectiveFocus = forceFocus || isFocused;
 	const {colors} = useTheme();
 	const inputState = useInputState();
 	const uiState = useUIStateContext();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
 	const [textInputKey, setTextInputKey] = useState(0);
+	const completionJustSelectedRef = useRef(false);
 	// Store the full InputState draft when starting history navigation, so it can be restored
 	const savedDraftRef = useRef<InputState>({
 		displayValue: '',
@@ -95,10 +99,12 @@ export default function UserInput({
 		showCompletions,
 		completions,
 		pendingFileMentions,
+		selectedCompletionIndex,
 		setShowClearMessage,
 		setShowCompletions,
 		setCompletions,
 		setPendingFileMentions,
+		setSelectedCompletionIndex,
 		resetUIState,
 	} = uiState;
 
@@ -205,14 +211,26 @@ export default function UserInput({
 
 	// Update UI state for command completions
 	useEffect(() => {
+		if (completionJustSelectedRef.current) {
+			completionJustSelectedRef.current = false;
+			return;
+		}
 		if (commandCompletions.length > 0) {
 			setCompletions(commandCompletions);
 			setShowCompletions(true);
+			setSelectedCompletionIndex(0);
 		} else if (showCompletions) {
 			setCompletions([]);
 			setShowCompletions(false);
+			setSelectedCompletionIndex(-1);
 		}
-	}, [commandCompletions, showCompletions, setCompletions, setShowCompletions]);
+	}, [
+		commandCompletions,
+		showCompletions,
+		setCompletions,
+		setShowCompletions,
+		setSelectedCompletionIndex,
+	]);
 
 	// Helper functions
 
@@ -414,6 +432,10 @@ export default function UserInput({
 
 			// Command completion - use pre-calculated commandCompletions
 			if (input.startsWith('/')) {
+				// Don't auto-complete on Tab when completions list is visible - use Enter to select
+				if (showCompletions && completions.length > 0) {
+					return;
+				}
 				if (commandCompletions.length === 1) {
 					// Auto-complete when there's exactly one match
 					const completion = commandCompletions[0];
@@ -425,22 +447,9 @@ export default function UserInput({
 					});
 					setTextInputKey(prev => prev + 1);
 				} else if (commandCompletions.length > 1) {
-					// If completions are already showing, autocomplete to the first result
-					if (showCompletions && completions.length > 0) {
-						const completion = completions[0];
-						const completedText = `/${completion.name}`;
-						// Use setInputState to bypass paste detection for autocomplete
-						setInputState({
-							displayValue: completedText,
-							placeholderContent: currentState.placeholderContent,
-						});
-						setShowCompletions(false);
-						setTextInputKey(prev => prev + 1);
-					} else {
-						// Show completions when there are multiple matches
-						setCompletions(commandCompletions);
-						setShowCompletions(true);
-					}
+					// Show completions when there are multiple matches
+					setCompletions(commandCompletions);
+					setShowCompletions(true);
 				}
 				return;
 			}
@@ -474,12 +483,46 @@ export default function UserInput({
 			return;
 		}
 
+		// Handle Enter to select completion
+		if (
+			key.return &&
+			!key.shift &&
+			showCompletions &&
+			completions.length > 0 &&
+			selectedCompletionIndex >= 0
+		) {
+			const selected = completions[selectedCompletionIndex];
+			const completedText = `/${selected.name}`;
+			completionJustSelectedRef.current = true;
+			setInputState({
+				displayValue: completedText,
+				placeholderContent: {},
+			});
+			setShowCompletions(false);
+			setSelectedCompletionIndex(-1);
+			setTextInputKey(prev => prev + 1);
+			return;
+		}
+
+		// Handle Enter to submit (fallthrough - if completion handler didn't return)
+		if (key.return && !key.shift) {
+			handleSubmit();
+			return;
+		}
+
 		// Handle navigation
 		if (key.upArrow) {
 			// File autocomplete navigation takes priority
 			if (isFileAutocompleteMode && fileCompletions.length > 0) {
 				setSelectedFileIndex(prev =>
 					prev > 0 ? prev - 1 : fileCompletions.length - 1,
+				);
+				return;
+			}
+			// Command completion navigation takes priority over history
+			if (showCompletions && completions.length > 0) {
+				setSelectedCompletionIndex(prev =>
+					prev > 0 ? prev - 1 : completions.length - 1,
 				);
 				return;
 			}
@@ -492,6 +535,13 @@ export default function UserInput({
 			if (isFileAutocompleteMode && fileCompletions.length > 0) {
 				setSelectedFileIndex(prev =>
 					prev < fileCompletions.length - 1 ? prev + 1 : 0,
+				);
+				return;
+			}
+			// Command completion navigation takes priority over history
+			if (showCompletions && completions.length > 0) {
+				setSelectedCompletionIndex(prev =>
+					prev < completions.length - 1 ? prev + 1 : 0,
 				);
 				return;
 			}
@@ -544,14 +594,24 @@ export default function UserInput({
 			{showCompletions && completions.length > 0 && (
 				<Box flexDirection="column" marginTop={1}>
 					<Text color={colors.secondary}>Available commands:</Text>
-					{completions.map((completion, index) => (
-						<Text
-							key={index}
-							color={completion.isCustom ? colors.info : colors.primary}
-						>
-							/{completion.name}
-						</Text>
-					))}
+					{completions.map((completion, index) => {
+						const isSelected = index === selectedCompletionIndex;
+						return (
+							<Text
+								key={index}
+								color={
+									isSelected
+										? colors.info
+										: completion.isCustom
+											? colors.info
+											: colors.primary
+								}
+								bold={isSelected}
+							>
+								{isSelected ? '▸ ' : '  '}/{completion.name}
+							</Text>
+						);
+					})}
 				</Box>
 			)}
 			{isFileAutocompleteMode && fileCompletions.length > 0 && (
@@ -595,9 +655,11 @@ export default function UserInput({
 						value={input}
 						onChange={updateInput}
 						onSubmit={handleSubmit}
+						onEnter={handleSubmit}
 						placeholder="/ commands, ! bash, ↑/↓ history"
-						focus={isFocused}
+						focus={effectiveFocus}
 						wrapWidth={boxWidth - 3}
+						handleEnter={false}
 					/>
 				</Box>
 
