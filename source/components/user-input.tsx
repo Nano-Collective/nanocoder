@@ -39,6 +39,7 @@ interface ChatProps {
 	currentModel?: string; // Active model id — resolves the 'auto' tune profile for display
 	activeEditor?: ActiveEditorState | null; // VS Code active file + optional selection
 	onDismissActiveEditor?: () => void; // Dismiss the active editor pill on clear/escape
+	forceFocus?: boolean; // Force focus for testing (bypasses useFocus)
 }
 
 export default function UserInput({
@@ -59,8 +60,10 @@ export default function UserInput({
 	currentModel,
 	activeEditor,
 	onDismissActiveEditor,
+	forceFocus = false,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
+	const effectiveFocus = forceFocus || isFocused;
 	const {colors} = useTheme();
 	const inputState = useInputState();
 	const uiState = useUIStateContext();
@@ -612,7 +615,7 @@ export default function UserInput({
 						onSubmit={handleSubmit}
 						onEnter={handleSubmit}
 						placeholder="/ commands, ! bash, ↑/↓ history"
-						focus={isFocused}
+						focus={effectiveFocus}
 						wrapWidth={boxWidth - 3}
 						handleEnter={false}
 					/>

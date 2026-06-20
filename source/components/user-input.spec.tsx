@@ -28,6 +28,9 @@ const TestWrapper = ({children}: {children: React.ReactNode}) => (
 	</MockThemeProvider>
 );
 
+// Helper for async tests that need proper context and more time
+const wait = async (ms = 200) => new Promise(resolve => setTimeout(resolve, ms));
+
 // ============================================================================
 // Component Rendering Tests
 // ============================================================================
@@ -394,30 +397,90 @@ test('UserInput does not show ctrl-o hint when onToggleCompactDisplay is not pro
 // Command Completion Navigation Tests
 // ============================================================================
 
-test('UserInput renders command completions with first item auto-selected', t => {
-	const customCommands = ['custom-cmd'];
-	const {lastFrame} = render(
+// Test commands to ensure completions appear in test environment
+const TEST_COMMANDS = ['test-clear', 'test-help', 'test-exit'];
+
+test('arrow key navigation updates the selected completion', async t => {
+	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
-			<UserInput customCommands={customCommands} />
+			<UserInput forceFocus={true} customCommands={TEST_COMMANDS} />
 		</TestWrapper>,
 	);
 
-	const output = lastFrame();
-	t.truthy(output);
-	// The component should render completions when input starts with /
-	// First item should be highlighted with ▸ prefix
+	stdin.write('/');
+	await wait();
+
+	const beforeNav = lastFrame()!;
+	t.regex(beforeNav, /Available commands:/);
+	t.regex(beforeNav, /▸ \//);
+
+	stdin.write('\u001B[B');
+	await wait();
+
+	const afterDown = lastFrame()!;
+	t.regex(afterDown, /Available commands:/);
+	t.notRegex(afterDown, /^.*▸ \/.*\n.*▸ \//s);
+
+	unmount();
 });
 
-test('UserInput highlights selected completion with arrow prefix and bold', t => {
-	const customCommands = ['command-one', 'command-two'];
-	const {lastFrame} = render(
+test('Enter selects the highlighted completion and populates the input', async t => {
+	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
-			<UserInput customCommands={customCommands} />
+			<UserInput forceFocus={true} customCommands={TEST_COMMANDS} />
 		</TestWrapper>,
 	);
 
-	const output = lastFrame();
-	t.truthy(output);
-	// Selected completion should have ▸ prefix and be bold
-	// This is verified by the component structure
+	stdin.write('/');
+	await wait();
+
+	t.regex(lastFrame()!, /Available commands:/);
+
+	stdin.write('\r');
+	await wait();
+
+	const afterEnter = lastFrame()!;
+	t.notRegex(afterEnter, /Available commands:/);
+	t.regex(afterEnter, /\/\w+/);
+
+	unmount();
+});
+
+test('completion menu dismissal/reset after selection or escape', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} customCommands={TEST_COMMANDS} />
+		</TestWrapper>,
+	);
+
+	stdin.write('/');
+	await wait();
+
+	t.regex(lastFrame()!, /Available commands:/);
+
+	stdin.write('\r');
+	await wait();
+
+	t.notRegex(lastFrame()!, /Available commands:/);
+
+	// After Enter selects, input has the command - press Escape TWICE to clear it
+	stdin.write('\u001B');
+	await wait();
+	stdin.write('\u001B');
+	await wait();
+
+	stdin.write('/');
+	await wait();
+
+	t.regex(lastFrame()!, /Available commands:/);
+
+	stdin.write('\u001B');
+	await wait();
+	stdin.write('\u001B');
+	await wait();
+
+	const afterEsc = lastFrame()!;
+	t.notRegex(afterEsc, /Available commands:/);
+
+	unmount();
 });
