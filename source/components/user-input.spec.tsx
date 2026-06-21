@@ -393,7 +393,7 @@ test('UserInput does not show ctrl-o hint when onToggleCompactDisplay is not pro
 	unmount();
 });
 
-<<<<<<< HEAD
+
 // ============================================================================
 // Command Completion Navigation Tests
 // ============================================================================
@@ -485,7 +485,7 @@ test('completion menu dismissal/reset after selection or escape', async t => {
 
 	unmount();
 });
-=======
+
 test('UserInput renders completions text when typing /', async t => {
 	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
@@ -572,4 +572,4 @@ test('UserInput does not show completions when input is empty', t => {
 });
 
 
->>>>>>> 9d48b592 (fix(ui): prevent chat from aggressively scrolling to bottom on slash command)
+
