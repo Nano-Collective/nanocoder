@@ -10,7 +10,7 @@ import {
 
 console.log('\nacp-agent.spec.ts');
 
-// Isolate preferences writes (unstable_setSessionModel persists last-used model).
+// Isolate preferences writes (setSessionConfigOption persists last-used model).
 process.env.NANOCODER_CONFIG_DIR = join(
 	tmpdir(),
 	`nanocoder-acp-test-${Date.now()}`,
@@ -134,8 +134,11 @@ test('AcpAgent.newSession - returns all available modes', async t => {
 test('AcpAgent.newSession - exposes available models and current model', async t => {
 	const {agent} = createAgent();
 	const result = await agent.newSession({cwd: '/tmp'});
-	t.is(result.models?.currentModelId, 'test-model');
-	const ids = result.models?.availableModels.map((m: any) => m.modelId);
+	const modelOption = result.configOptions?.find(
+		(o: any) => o.category === 'model',
+	) as any;
+	t.is(modelOption?.currentValue, 'test-model');
+	const ids = modelOption?.options.map((o: any) => o.value);
 	t.true(ids?.includes('test-model'));
 	t.true(ids?.includes('other-model'));
 });
@@ -158,7 +161,7 @@ test('AcpAgent.loadSession - creates a usable session for an unknown id', async 
 		mcpServers: [],
 	});
 	t.truthy(result.modes);
-	t.truthy(result.models);
+	t.truthy(result.configOptions);
 	// The loaded session must accept prompts (no "session not found").
 	const prompt = await agent.prompt({
 		sessionId: 'persisted-123',
@@ -193,42 +196,64 @@ test('AcpAgent.loadSession - replays in-memory history for a known session', asy
 });
 
 // ============================================================================
-// unstable_setSessionModel()
+// setSessionConfigOption()
 // ============================================================================
 
-test('AcpAgent.unstable_setSessionModel - throws on unknown session', async t => {
+test('AcpAgent.setSessionConfigOption - throws on unknown session', async t => {
 	const {agent} = createAgent();
 	await t.throwsAsync(
-		agent.unstable_setSessionModel({
+		agent.setSessionConfigOption({
 			sessionId: 'nonexistent',
-			modelId: 'test-model',
+			configId: 'model',
+			value: 'test-model',
 		}),
 		{message: 'Session not found: nonexistent'},
 	);
 });
 
-test('AcpAgent.unstable_setSessionModel - throws on unknown model', async t => {
+test('AcpAgent.setSessionConfigOption - throws on unknown config option', async t => {
 	const {agent} = createAgent();
 	const session = await agent.newSession({cwd: '/tmp'});
 	await t.throwsAsync(
-		agent.unstable_setSessionModel({
+		agent.setSessionConfigOption({
 			sessionId: session.sessionId,
-			modelId: 'does-not-exist',
+			configId: 'does-not-exist',
+			value: 'test-model',
+		}),
+		{message: 'Unknown config option: does-not-exist'},
+	);
+});
+
+test('AcpAgent.setSessionConfigOption - throws on unknown model', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+	await t.throwsAsync(
+		agent.setSessionConfigOption({
+			sessionId: session.sessionId,
+			configId: 'model',
+			value: 'does-not-exist',
 		}),
 		{message: 'Unknown model: does-not-exist'},
 	);
 });
 
-test('AcpAgent.unstable_setSessionModel - switches the client model', async t => {
+test('AcpAgent.setSessionConfigOption - switches the client model', async t => {
 	const {agent} = createAgent();
 	const session = await agent.newSession({cwd: '/tmp'});
-	const result = await agent.unstable_setSessionModel({
+	const result = await agent.setSessionConfigOption({
 		sessionId: session.sessionId,
-		modelId: 'other-model',
+		configId: 'model',
+		value: 'other-model',
 	});
-	t.deepEqual(result, {});
+	const modelOption = result.configOptions.find(
+		(o: any) => o.category === 'model',
+	) as any;
+	t.is(modelOption?.currentValue, 'other-model');
 	const after = await agent.newSession({cwd: '/tmp'});
-	t.is(after.models?.currentModelId, 'other-model');
+	const afterOption = after.configOptions?.find(
+		(o: any) => o.category === 'model',
+	) as any;
+	t.is(afterOption?.currentValue, 'other-model');
 });
 
 // ============================================================================

@@ -1,7 +1,7 @@
 {
 	"name": "@nanocollective/nanocoder",
 	"main": "dist/cli.js",
-	"version": "1.27.0",
+	"version": "1.28.0",
 	"description": "An open coding agent for your terminal, built by a community collective rather than a company. Bring your own model, keep your code on your machine, and owe nothing to anyone.",
 	"keywords": [
 		"cli",
@@ -65,11 +65,11 @@
 		"assets/nanocoder-vscode.vsix"
 	],
 	"dependencies": {
-		"@agentclientprotocol/sdk": "^0.22.1",
-		"@ai-sdk/anthropic": "^3.0.58",
+		"@agentclientprotocol/sdk": "^0.25.0",
+		"@ai-sdk/anthropic": "^3.0.85",
 		"@ai-sdk/google": "^3.0.43",
-		"@ai-sdk/openai": "^3.0.41",
-		"@ai-sdk/openai-compatible": "2.0.41",
+		"@ai-sdk/openai": "^3.0.71",
+		"@ai-sdk/openai-compatible": "2.0.51",
 		"@anthropic-ai/tokenizer": "^0.0.4",
 		"@modelcontextprotocol/sdk": "^1.26.0",
 		"@nanocollective/get-md": "^1.4.0",
@@ -96,7 +96,7 @@
 		"react": "^19.0.0",
 		"sonic-boom": "^5.0.0",
 		"tiktoken": "^1.0.22",
-		"undici": "^8.0.2",
+		"undici": "^8.5.0",
 		"wrap-ansi": "^10.0.0",
 		"ws": "^8.18.0",
 		"xdg-basedir": "^5.1.0",
@@ -104,8 +104,8 @@
 	},
 	"devDependencies": {
 		"@ava/typescript": "^7.0.0",
-		"@biomejs/biome": "^2.3.10",
-		"@types/node": "^25.0.3",
+		"@biomejs/biome": "^2.5.0",
+		"@types/node": "^25.9.3",
 		"@types/react": "^19.0.0",
 		"@types/ws": "^8.18.1",
 		"ava": "^7.0.0",
@@ -113,7 +113,7 @@
 		"husky": "^9.1.7",
 		"ink-testing-library": "^4.0.0",
 		"knip": "^6.0.0",
-		"lint-staged": "^16.3.3",
+		"lint-staged": "^17.0.7",
 		"strip-ansi": "^7.1.2",
 		"tsc-alias": "^1.8.16",
 		"tsx": "^4.20.6",

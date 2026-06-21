@@ -1,5 +1,6 @@
 import test from 'ava';
 import React from 'react';
+import {getLogger} from './logging';
 import {
 	addToMessageQueue,
 	checkMessageQueueHealth,
@@ -33,6 +34,28 @@ function spy<T extends unknown[] = unknown[]>(): CallSpy<T> {
 test.beforeEach(() => {
 	resetMessageQueueStats();
 });
+
+test.serial(
+	'addToMessageQueue logs a warning when no queue has been registered yet',
+	t => {
+		const logger = getLogger();
+		const warn = spy<[string | object, ...unknown[]]>();
+		const originalWarn = logger.warn;
+		logger.warn = warn as typeof logger.warn;
+
+		try {
+			addToMessageQueue(React.createElement('div'));
+		} finally {
+			logger.warn = originalWarn;
+		}
+
+		t.is(warn.calls.length, 1);
+		t.is(
+			warn.calls[0][0],
+			'[message-queue] Queue not available, component not added',
+		);
+	},
+);
 
 test.serial('addToMessageQueue is a no-op when no queue is registered', t => {
 	setGlobalMessageQueue(() => {});

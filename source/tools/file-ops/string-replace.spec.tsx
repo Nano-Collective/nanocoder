@@ -8,6 +8,7 @@ import {themes} from '../../config/themes.js';
 import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {stringReplaceTool} from './string-replace.js';
+import {clearReadTracker, markFileSeen} from '../../utils/read-tracker.js';
 
 // ============================================================================
 // Test Helpers
@@ -35,6 +36,9 @@ let testDir: string;
 // Create a temporary directory before each test
 test.beforeEach(async () => {
 	testDir = await mkdtemp(join(tmpdir(), 'string-replace-test-'));
+	// Read-before-edit state is process-global; reset it between serial tests
+	// so a file "seen" by one test can't authorize an edit in another.
+	clearReadTracker();
 });
 
 // Clean up temporary directory after each test
@@ -349,6 +353,7 @@ test('string_replace validator: accepts valid input', async t => {
 	const originalCwd = process.cwd();
 	try {
 		process.chdir(testDir);
+		markFileSeen('test.txt');
 
 		const result = await stringReplaceTool.validator({
 			path: 'test.txt',
@@ -425,6 +430,7 @@ test('string_replace validator: rejects when content not found', async t => {
 	const originalCwd = process.cwd();
 	try {
 		process.chdir(testDir);
+		markFileSeen('test.txt');
 
 		const result = await stringReplaceTool.validator({
 			path: 'test.txt',
@@ -455,6 +461,7 @@ test('string_replace validator: rejects when multiple matches found', async t =>
 	const originalCwd = process.cwd();
 	try {
 		process.chdir(testDir);
+		markFileSeen('test.txt');
 
 		const result = await stringReplaceTool.validator({
 			path: 'test.txt',
@@ -466,6 +473,60 @@ test('string_replace validator: rejects when multiple matches found', async t =>
 		if (!result.valid) {
 			t.true(result.error.includes('Found 2 matches'));
 		}
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test('string_replace validator: rejects editing a file not read this session', async t => {
+	await createTestFile('test.txt', 'Hello World\n');
+
+	if (!stringReplaceTool.validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		// Note: no markFileSeen — the file has not been read this session.
+
+		const result = await stringReplaceTool.validator({
+			path: 'test.txt',
+			old_str: 'Hello',
+			new_str: 'Hi',
+		});
+
+		t.false(result.valid);
+		if (!result.valid) {
+			t.true(result.error.includes('must read'));
+		}
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test('string_replace validator: allows editing after the file is read', async t => {
+	await createTestFile('test.txt', 'Hello World\n');
+
+	if (!stringReplaceTool.validator) {
+		t.fail('Validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		// Simulate a prior read_file call against this file.
+		markFileSeen('test.txt');
+
+		const result = await stringReplaceTool.validator({
+			path: 'test.txt',
+			old_str: 'Hello',
+			new_str: 'Hi',
+		});
+
+		t.true(result.valid);
 	} finally {
 		process.chdir(originalCwd);
 	}

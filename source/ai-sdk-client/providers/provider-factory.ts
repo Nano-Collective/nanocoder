@@ -30,6 +30,7 @@ import {
 import type {AIProviderConfig} from '@/types/index';
 import {getLogger} from '@/utils/logging';
 import {isOpenRouterProvider} from './openrouter.js';
+import {isRequestyProvider} from './requesty.js';
 
 /**
  * Discriminated union pairing each underlying SDK provider with its `kind`.
@@ -273,6 +274,13 @@ export async function createProvider(
 	// Add OpenRouter-specific headers for app attribution
 	const headers: Record<string, string> = config.headers ?? {};
 	if (isOpenRouterProvider(providerConfig.name)) {
+		headers['HTTP-Referer'] = 'https://github.com/Nano-Collective/nanocoder';
+		headers['X-Title'] = 'Nanocoder';
+	}
+
+	// Requesty (https://requesty.ai) is an OpenAI-compatible router and uses
+	// the same app-attribution headers as OpenRouter.
+	if (isRequestyProvider(providerConfig.name)) {
 		headers['HTTP-Referer'] = 'https://github.com/Nano-Collective/nanocoder';
 		headers['X-Title'] = 'Nanocoder';
 	}

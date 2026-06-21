@@ -119,11 +119,19 @@ export const MAX_TOOL_STEPS = 10;
 // can produce reasoning-only turns; one or two retries usually clears it,
 // but unbounded recursion would loop forever.
 export const MAX_EMPTY_TURNS = 2;
+// After hitting the empty-turn cap, mechanically compact the context and
+// retry. This many compact-and-retry cycles are allowed before giving up.
+export const MAX_COMPACT_RETRIES = 1;
 // Cap how many consecutive malformed-XML self-correction recursions we'll
 // attempt before surfacing an error. Without this, a model stuck producing
 // bad XML loops async and appends two messages per iteration until Node's
 // heap exhausts (~1.4GB).
 export const MAX_MALFORMED_RETRIES = 2;
+// Cap how many times the model may emit the exact same tool call(s) on
+// consecutive turns. Small models can get stuck re-issuing an identical failing
+// call forever; once the same signature repeats this many times in a row we
+// stop and surface an actionable error instead of looping.
+export const MAX_REPEATED_TOOL_CALLS = 3;
 
 // === MCP ===
 export const TIMEOUT_MCP_DEFAULT_MS = 30_000;

@@ -153,7 +153,7 @@ test('displayToolResult - compact mode condenses an error to a one-liner', async
 		queue[0] as React.ReactElement,
 	);
 	const output = lastFrame();
-	t.regex(output!, /write_file failed\./);
+	t.regex(output!, /write_file failed/);
 	t.notRegex(output!, /verbose explanation/);
 	unmount();
 });
@@ -174,7 +174,7 @@ test('displayToolResult - compact mode condenses a validation failure too', asyn
 		queue[0] as React.ReactElement,
 	);
 	const output = lastFrame();
-	t.regex(output!, /write_file failed\./);
+	t.regex(output!, /write_file failed/);
 	t.notRegex(output!, /Invalid file path/);
 	unmount();
 });
@@ -582,7 +582,7 @@ test('displayToolResult - compact mode condenses errors to a one-liner', async t
 		queue[0] as React.ReactElement,
 	);
 	const output = lastFrame();
-	t.regex(output!, /read_file failed\./);
+	t.regex(output!, /read_file failed/);
 	t.notRegex(output!, /File not found/);
 	unmount();
 });

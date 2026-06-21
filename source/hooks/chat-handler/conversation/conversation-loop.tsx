@@ -4,7 +4,12 @@ import AssistantMessage from '@/components/assistant-message';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import {getAppConfig} from '@/config/index';
-import {MAX_EMPTY_TURNS, MAX_MALFORMED_RETRIES} from '@/constants';
+import {
+	MAX_COMPACT_RETRIES,
+	MAX_EMPTY_TURNS,
+	MAX_MALFORMED_RETRIES,
+	MAX_REPEATED_TOOL_CALLS,
+} from '@/constants';
 import {generateKey} from '@/session/key-generator';
 import {
 	parseToolCalls,
@@ -29,13 +34,16 @@ import {performAutoCompact} from '@/utils/auto-compact';
 import {formatElapsedTime, getRandomAdjective} from '@/utils/completion-note';
 import {MessageBuilder} from '@/utils/message-builder';
 import {capMessagesForModel} from '@/utils/message-capping';
+import {compressMessages} from '@/utils/message-compression';
 import {infoMsg} from '@/utils/message-factory';
+import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 import {calculateTokens} from '@/utils/token-calculator';
 import {createCancellationResults} from '@/utils/tool-cancellation';
 import {signalToolConfirm} from '@/utils/tool-confirm-queue';
 import {displayCompactCountsSummary} from '@/utils/tool-result-display';
 import {closeAllDiffsInVSCode} from '@/vscode/index';
 import {filterValidToolCalls} from '../utils/tool-filters';
+import {computeToolCallSignature} from '../utils/tool-signature';
 import {
 	displayExecutedTool,
 	executeApprovedTool,
@@ -88,6 +96,16 @@ interface ProcessAssistantResponseParams {
 	// have already happened. The malformed branch increments and recurses;
 	// every other recursion site resets to 0.
 	malformedRetryCount?: number;
+	// Number of compact-and-retry cycles attempted after exhausting empty-turn
+	// nudges. Once MAX_COMPACT_RETRIES is reached we surface the error.
+	compactRetryCount?: number;
+	// Signature of the tool call(s) executed on the immediately preceding turn.
+	// Used to detect an identical-call loop. The tool-execution continuation
+	// threads it forward; every other recursion site resets it to undefined.
+	lastToolSignature?: string;
+	// How many consecutive turns have emitted the same tool-call signature.
+	// Reaching MAX_REPEATED_TOOL_CALLS stops the loop with an actionable error.
+	repeatedToolCallCount?: number;
 }
 
 // Module-level flag: show XML fallback notice only once per process lifetime.
@@ -152,6 +170,9 @@ export const processAssistantResponse = async (
 		developmentModeRef,
 		emptyTurnCount = 0,
 		malformedRetryCount = 0,
+		compactRetryCount = 0,
+		lastToolSignature,
+		repeatedToolCallCount = 0,
 	} = params;
 
 	const startTime = conversationStartTime ?? Date.now();
@@ -388,6 +409,8 @@ export const processAssistantResponse = async (
 			conversationStartTime: startTime,
 			emptyTurnCount: 0,
 			malformedRetryCount: malformedRetryCount + 1,
+			lastToolSignature: undefined,
+			repeatedToolCallCount: 0,
 		});
 		return;
 	}
@@ -568,12 +591,14 @@ export const processAssistantResponse = async (
 
 	// Handle error results for non-existent tools
 	if (errorResults.length > 0) {
-		// Display error messages to user
+		// Show the user a concise notice. The full recovery hint (including the
+		// list of available tools) lives in error.content and is sent to the
+		// MODEL via addToolResults below — it would be noise in the chat.
 		for (const error of errorResults) {
 			addToChatQueue(
 				<ErrorMessage
 					key={generateKey(`unknown-tool-${error.tool_call_id}`)}
-					message={error.content}
+					message={`Model called an unavailable tool ("${error.name}") — asking it to retry with a valid tool.`}
 					hideBox={true}
 				/>,
 			);
@@ -607,12 +632,47 @@ export const processAssistantResponse = async (
 			conversationStartTime: startTime,
 			emptyTurnCount: 0,
 			malformedRetryCount: 0,
+			lastToolSignature: undefined,
+			repeatedToolCallCount: 0,
 		});
 		return;
 	}
 
 	// Handle tool calls if present - this continues the loop
 	if (validToolCalls && validToolCalls.length > 0) {
+		// Loop detection: if the model re-issues the exact same tool call(s) it
+		// made last turn, it is almost certainly stuck (a small model re-running
+		// an identical failing command, or repeatedly reading the same file).
+		// Count consecutive identical signatures and stop once the cap is hit so
+		// we surface an actionable error instead of looping until abort.
+		const currentToolSignature = computeToolCallSignature(validToolCalls);
+		const currentRepeatedCount =
+			currentToolSignature && currentToolSignature === lastToolSignature
+				? repeatedToolCallCount + 1
+				: 1;
+
+		if (currentRepeatedCount >= MAX_REPEATED_TOOL_CALLS) {
+			await flushAll();
+			// Keep the AI SDK's 1:1 tool-call/result mapping intact: the assistant
+			// message with these tool_calls is already in history, so pair each
+			// with a cancellation result before stopping.
+			const loopBuilder = new MessageBuilder(updatedMessages);
+			loopBuilder.addToolResults(createCancellationResults(validToolCalls));
+			setMessages(loopBuilder.build());
+			addToChatQueue(
+				<ErrorMessage
+					key={generateKey('tool-loop-detected')}
+					message={`Model repeated the same tool call ${MAX_REPEATED_TOOL_CALLS} times in a row without making progress — stopping to avoid a loop. Try rephrasing the request, breaking it into smaller steps, or switching models.`}
+					hideBox={true}
+				/>,
+			);
+			setIsGenerating(false);
+			if (onConversationComplete) {
+				onConversationComplete();
+			}
+			return;
+		}
+
 		// The SDK never auto-executes tools (execute is stripped). We evaluate
 		// needsApproval ourselves, then run every tool through one routine that
 		// gates each call: auto-approved tools execute immediately, the rest
@@ -785,6 +845,8 @@ export const processAssistantResponse = async (
 				conversationStartTime: startTime,
 				emptyTurnCount: 0,
 				malformedRetryCount: 0,
+				lastToolSignature: currentToolSignature,
+				repeatedToolCallCount: currentRepeatedCount,
 			});
 			return;
 		}
@@ -799,11 +861,67 @@ export const processAssistantResponse = async (
 		// token budget on thinking) would loop forever.
 		if (emptyTurnCount >= MAX_EMPTY_TURNS) {
 			setLiveComponent?.(null);
+			// If we still have compact-and-retry budget, mechanically compress
+			// the context and nudge the model to continue instead of giving up
+			// immediately. This handles the common case where the model is
+			// exhausting its token budget on reasoning.
+			if (compactRetryCount < MAX_COMPACT_RETRIES) {
+				try {
+					const {createTokenizer} = await import('@/tokenization/index');
+					const tokenizer = createTokenizer(currentProvider, currentModel);
+					const systemPrompt = getLastBuiltPrompt();
+					const sysMsg: Message = {role: 'system', content: systemPrompt};
+					const allForCompress = [sysMsg, ...updatedMessages];
+					const result = compressMessages(allForCompress, tokenizer, {
+						mode: 'aggressive',
+					});
+					if (tokenizer.free) tokenizer.free();
+
+					const compressedUser = result.compressedMessages.filter(
+						m => m.role !== 'system',
+					);
+					setMessages(compressedUser);
+
+					addToChatQueue(
+						<InfoMessage
+							key={generateKey('auto-compact-retry')}
+							message={`Context too large — auto-compacted (${Math.round(result.reductionPercentage)}% reduction). Retrying…`}
+							hideBox={true}
+						/>,
+					);
+
+					const retryNudge: Message = {
+						role: 'user',
+						content:
+							'Context has been compacted. Please continue with the task.',
+					};
+					const retryBuilder = new MessageBuilder(compressedUser);
+					retryBuilder.addMessage(retryNudge);
+					const messagesAfterCompact = retryBuilder.build();
+					setMessages(messagesAfterCompact);
+
+					await processAssistantResponse({
+						...params,
+						messages: messagesAfterCompact,
+						conversationStartTime: startTime,
+						emptyTurnCount: 0,
+						malformedRetryCount: 0,
+						compactRetryCount: compactRetryCount + 1,
+						lastToolSignature: undefined,
+						repeatedToolCallCount: 0,
+					});
+					return;
+				} catch (_err) {
+					// Compression failed — fall through to give-up below
+				}
+			}
+
 			await flushAll();
+			// Exhausted all retries (nudges + compact-and-retry cycles)
 			addToChatQueue(
 				<ErrorMessage
 					key={generateKey('empty-response-giveup')}
-					message={`Model produced no output after ${MAX_EMPTY_TURNS + 1} attempts. The model may be exhausting its token budget on reasoning, or the request may have been refused. Try rephrasing, lowering reasoning effort, or switching models.`}
+					message={`Model produced no output after ${MAX_EMPTY_TURNS + 1 + compactRetryCount} attempts. The model may be exhausting its token budget on reasoning, or the request may have been refused. Try rephrasing, lowering reasoning effort, or switching models.`}
 					hideBox={true}
 				/>,
 			);
@@ -874,6 +992,8 @@ export const processAssistantResponse = async (
 			conversationStartTime: startTime,
 			emptyTurnCount: emptyTurnCount + 1,
 			malformedRetryCount: 0,
+			lastToolSignature: undefined,
+			repeatedToolCallCount: 0,
 		});
 		return;
 	}

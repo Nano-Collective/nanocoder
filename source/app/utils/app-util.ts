@@ -13,6 +13,7 @@ import type {ImageAttachment, LLMClient} from '@/types/core';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
 import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
+import {clearReadTracker} from '@/utils/read-tracker';
 import {handleCompactCommand} from './handlers/compact-handler';
 import {handleContextMaxCommand} from './handlers/context-max-handler';
 import {
@@ -584,6 +585,9 @@ export function createClearMessagesHandler(
 ) {
 	return async () => {
 		setMessages([]);
+		// Drop read-before-edit history so a stale "seen" from the prior
+		// conversation can't authorize a blind edit/overwrite after /clear.
+		clearReadTracker();
 		if (client) {
 			await client.clearContext();
 		}

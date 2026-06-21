@@ -29,11 +29,18 @@ export const filterValidToolCalls = (
 
 		// Filter out tool calls for tools that don't exist
 		if (toolManager && !toolManager.hasTool(toolCall.function.name)) {
+			// Listing the valid tool names gives small models a concrete recovery
+			// target instead of leaving them to re-guess the same wrong name.
+			const available = toolManager.getToolNames?.() ?? [];
+			const availableHint =
+				available.length > 0
+					? ` Available tools are: ${available.join(', ')}.`
+					: '';
 			errorResults.push({
 				tool_call_id: toolCall.id,
 				role: 'tool' as const,
 				name: toolCall.function.name,
-				content: `This tool does not exist. Please use only the tools that are available in the system.`,
+				content: `The tool "${toolCall.function.name}" does not exist. Use only the tools that are available in the system.${availableHint}`,
 			});
 			continue;
 		}

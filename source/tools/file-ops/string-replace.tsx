@@ -8,6 +8,7 @@ import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {validatePath} from '@/utils/path-validators';
+import {hasSeenFile, markFileSeen} from '@/utils/read-tracker';
 import {createFileToolApproval} from '@/utils/tool-approval';
 import {
 	closeDiffInVSCode,
@@ -55,6 +56,9 @@ const executeStringReplace = async (
 	const newContent = fileContent.replace(old_str, new_str);
 	await writeFile(absPath, newContent, 'utf-8');
 	invalidateCache(absPath);
+	// The model now knows the file's current contents, so a follow-up edit is
+	// not blind.
+	markFileSeen(absPath);
 
 	const beforeLines = fileContent.split('\n');
 	const oldStrLines = old_str.split('\n');
@@ -200,6 +204,16 @@ const stringReplaceValidator = async (
 			valid: false,
 			error:
 				'old_str cannot be empty. Provide the exact content to find and replace.',
+		};
+	}
+
+	// Read-before-edit: refuse to edit a file the model has not actually seen
+	// this session. Editing blind is the dominant source of mismatched old_str
+	// on small models; forcing a Read first makes old_str match exactly.
+	if (!hasSeenFile(absPath)) {
+		return {
+			valid: false,
+			error: `You must read "${path}" before editing it. Call read_file on it first, then retry string_replace with old_str copied exactly from the file.`,
 		};
 	}
 

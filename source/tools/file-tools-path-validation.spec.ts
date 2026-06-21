@@ -1,10 +1,11 @@
 import test from 'ava';
 import {mkdir, rm, writeFile as fsWriteFile} from 'node:fs/promises';
-import {join} from 'node:path';
+import {join, resolve} from 'node:path';
 import {tmpdir} from 'node:os';
 import {writeFileTool} from './file-ops/write-file.js';
 import {stringReplaceTool} from './file-ops/string-replace.js';
 import {readFileTool} from './read-file.js';
+import {markFileSeen} from '../utils/read-tracker.js';
 
 // ============================================================================
 // Test Setup
@@ -282,6 +283,10 @@ test('string_replace validator: accepts valid relative paths', async (t) => {
 		// Create a test file
 		const testFile = join(testDir, 'test.txt');
 		await fsWriteFile(testFile, 'old content', 'utf-8');
+
+		// The validator enforces read-before-edit: mark the file as seen using
+		// the same resolved path it computes internally (resolve(path) from cwd).
+		markFileSeen(resolve('test.txt'));
 
 		const result = await validator({
 			path: 'test.txt',
