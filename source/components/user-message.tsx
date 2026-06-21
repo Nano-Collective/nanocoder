@@ -131,7 +131,7 @@ export default memo(function UserMessage({
 			{imageCount > 0 && (
 				<Box marginBottom={1}>
 					<Text color={colors.info}>
-						🖼 {imageCount} image{imageCount === 1 ? '' : 's'} attached
+						■ {imageCount} image{imageCount === 1 ? '' : 's'} attached
 					</Text>
 				</Box>
 			)}

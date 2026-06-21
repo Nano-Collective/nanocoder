@@ -1,6 +1,5 @@
 import {Box, useInput} from 'ink';
 import React from 'react';
-import {modelSupportsVision} from '@/ai-sdk-client/vision-support';
 import {ChatHistory} from '@/app/components/chat-history';
 import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
@@ -77,15 +76,6 @@ export function InteractiveApp({
 	const handleToggleReasoningExpanded = () => {
 		appState.setReasoningExpanded(!appState.reasoningExpanded);
 	};
-
-	// Best-effort: does the active model accept images? Defaults to true when no
-	// client is ready so we never warn spuriously before init completes.
-	const visionSupported = appState.client
-		? modelSupportsVision(
-				appState.client.getProviderConfig().sdkProvider,
-				appState.currentModel,
-			)
-		: true;
 
 	const showModalSelectors =
 		(appState.activeMode !== null &&
@@ -212,7 +202,6 @@ export function InteractiveApp({
 						onToggleReasoningExpanded={handleToggleReasoningExpanded}
 						tune={appState.tune}
 						currentModel={appState.currentModel}
-						visionSupported={visionSupported}
 					/>
 				)}
 		</Box>

@@ -3,14 +3,12 @@ import Spinner from 'ink-spinner';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {commandRegistry} from '@/commands';
 import {DevelopmentModeIndicator} from '@/components/development-mode-indicator';
-import {WarningMessage} from '@/components/message-box';
 import TextInput from '@/components/text-input';
 import {useInputState} from '@/hooks/useInputState';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
 import {promptHistory} from '@/prompt-history';
-import {generateKey} from '@/session/key-generator';
 import type {TuneConfig} from '@/types/config';
 import type {
 	ContextSource,
@@ -29,7 +27,6 @@ import {
 	getFileCompletions,
 } from '@/utils/file-autocomplete';
 import {handleFileMention} from '@/utils/file-mention-handler';
-import {addToMessageQueue} from '@/utils/message-queue';
 import {assemblePrompt} from '@/utils/prompt-processor';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
@@ -55,7 +52,6 @@ interface ChatProps {
 	currentModel?: string; // Active model id — resolves the 'auto' tune profile for display
 	activeEditor?: ActiveEditorState | null; // VS Code active file + optional selection
 	onDismissActiveEditor?: () => void; // Dismiss the active editor pill on clear/escape
-	visionSupported?: boolean; // Whether the active model accepts image input; drives paste warning
 }
 
 export default function UserInput({
@@ -76,7 +72,6 @@ export default function UserInput({
 	currentModel,
 	activeEditor,
 	onDismissActiveEditor,
-	visionSupported,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
 	const {colors} = useTheme();
@@ -283,23 +278,12 @@ export default function UserInput({
 		setInputState,
 	]);
 
-	// Attach an image to the pending message, warning once if the active model
-	// likely cannot see it (we still attach — the heuristic can be wrong, and
-	// silently dropping it is worse than an over-cautious heads-up).
-	const attachImage = useCallback(
-		(image: ImageAttachment) => {
-			setAttachments(prev => [...prev, image]);
-			if (visionSupported === false) {
-				addToMessageQueue(
-					<WarningMessage
-						key={generateKey('vision-warn')}
-						message="The active model may not support image input. The image will still be sent; switch models with /model if it is ignored."
-					/>,
-				);
-			}
-		},
-		[visionSupported],
-	);
+	// Attach an image to the pending message. We never gate on a model-capability
+	// heuristic here: if the model can't see images it will say so or error, which
+	// is clearer than an over-cautious warning on every attach.
+	const attachImage = useCallback((image: ImageAttachment) => {
+		setAttachments(prev => [...prev, image]);
+	}, []);
 
 	// Handle form submission
 	const handleSubmit = useCallback(() => {
@@ -318,14 +302,6 @@ export default function UserInput({
 				.map(readImageFile)
 				.filter((img): img is ImageAttachment => img !== null);
 			if (dropped.length > 0) {
-				if (visionSupported === false) {
-					addToMessageQueue(
-						<WarningMessage
-							key={generateKey('vision-warn')}
-							message="The active model may not support image input. The image will still be sent; switch models with /model if it is ignored."
-						/>,
-					);
-				}
 				images = [...attachments, ...dropped];
 				assembled = cleanedAssembled;
 				display = extractImageReferences(display).text;
@@ -342,14 +318,7 @@ export default function UserInput({
 		resetUIState();
 		setAttachments([]);
 		promptHistory.resetIndex();
-	}, [
-		attachments,
-		onSubmit,
-		resetInput,
-		resetUIState,
-		currentState,
-		visionSupported,
-	]);
+	}, [attachments, onSubmit, resetInput, resetUIState, currentState]);
 
 	// Handle escape key logic
 	const handleEscape = useCallback(() => {

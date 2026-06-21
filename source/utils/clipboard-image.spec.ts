@@ -99,6 +99,25 @@ test('extractImageReferences pulls an unquoted path token out of prose', t => {
 	t.is(text, 'look at please');
 });
 
+test('extractImageReferences pulls an unquoted escaped-space path out of prose', t => {
+	// macOS terminals drop dragged paths in unquoted with spaces backslash-escaped.
+	const file = join(dir, 'dragged shot.png');
+	writeFileSync(file, PNG_BYTES);
+	const escaped = file.replace(/\\/g, '\\\\').replace(/ /g, '\\ ');
+	const {text, paths} = extractImageReferences(`describe ${escaped} please`);
+	t.deepEqual(paths, [file]);
+	t.is(text, 'describe please');
+});
+
+test('extractImageReferences leaves remote image URLs untouched', t => {
+	const {text, paths} = extractImageReferences(
+		'see https://example.com/chart.png for details',
+	);
+	t.deepEqual(paths, []);
+	t.is(text, 'see https://example.com/chart.png for details');
+	t.is(extractImagePathFromText('https://example.com/a.png'), undefined);
+});
+
 test('extractImageReferences leaves non-image and missing paths in place', t => {
 	const {text, paths} = extractImageReferences(
 		'see /tmp/missing.png and notes.txt',

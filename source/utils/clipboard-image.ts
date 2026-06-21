@@ -43,6 +43,10 @@ function resolveImagePath(raw: string): string | undefined {
 	let candidate = raw.trim();
 	if (!candidate) return undefined;
 
+	// Remote URLs that happen to end in an image extension are not local files;
+	// bail before touching the filesystem so message parsing never stats them.
+	if (/^https?:\/\//i.test(candidate)) return undefined;
+
 	// Strip a single layer of surrounding quotes.
 	if (
 		(candidate.startsWith('"') && candidate.endsWith('"')) ||
@@ -110,9 +114,14 @@ export function extractImageReferences(text: string): {
 		},
 	);
 
-	// Unquoted, whitespace-delimited tokens ending in an image extension.
+	// Unquoted tokens ending in an image extension. macOS terminals drop a
+	// dragged file in unquoted with spaces backslash-escaped (`\ `), so the
+	// token can legitimately contain `\ ` sequences as well as non-whitespace.
 	result = result.replace(
-		new RegExp(`(^|\\s)((?:file://)?\\S+\\.${imageExt})(?=\\s|$)`, 'gi'),
+		new RegExp(
+			`(^|\\s)((?:file://)?(?:\\\\ |\\S)+\\.${imageExt})(?=\\s|$)`,
+			'gi',
+		),
 		(match, lead, token) => {
 			const resolved = resolveImagePath(token);
 			if (resolved) {
@@ -218,6 +227,12 @@ function readClipboardImageMac(): ImageAttachment | null {
 	});
 
 	try {
+		if (isCommandMissing(result.error)) {
+			logger.debug(
+				'Clipboard image paste unavailable: `osascript` not found on PATH',
+			);
+			return null;
+		}
 		if (result.status !== 0 || !result.stdout?.includes('OK')) {
 			return null;
 		}
@@ -230,19 +245,30 @@ function readClipboardImageMac(): ImageAttachment | null {
 
 function readClipboardImageLinux(): ImageAttachment | null {
 	// Wayland first, then X11. Both stream raw PNG bytes to stdout.
-	for (const [cmd, args] of [
+	const tools = [
 		['wl-paste', ['--type', 'image/png']],
 		['xclip', ['-selection', 'clipboard', '-t', 'image/png', '-o']],
-	] as const) {
+	] as const;
+	const missing: string[] = [];
+	for (const [cmd, args] of tools) {
 		const result = spawnSync(cmd, args, {
 			timeout: 3000,
 			maxBuffer: MAX_IMAGE_BYTES,
 		});
+		if (isCommandMissing(result.error)) {
+			missing.push(cmd);
+			continue;
+		}
 		if (result.error || result.status !== 0) continue;
 		const stdout = result.stdout;
 		if (Buffer.isBuffer(stdout) && stdout.length > 0) {
 			return toAttachment(stdout, 'image/png');
 		}
+	}
+	if (missing.length === tools.length) {
+		logger.debug(
+			`Clipboard image paste unavailable: install ${missing.join(' or ')} to enable it`,
+		);
 	}
 	return null;
 }
@@ -260,12 +286,23 @@ function readClipboardImageWindows(): ImageAttachment | null {
 		['-NoProfile', '-NonInteractive', '-Command', script],
 		{timeout: 3000, maxBuffer: MAX_IMAGE_BYTES},
 	);
+	if (isCommandMissing(result.error)) {
+		logger.debug(
+			'Clipboard image paste unavailable: `powershell` not found on PATH',
+		);
+		return null;
+	}
 	if (result.error || result.status !== 0) return null;
 	const stdout = result.stdout;
 	if (Buffer.isBuffer(stdout) && stdout.length > 0) {
 		return toAttachment(stdout, 'image/png');
 	}
 	return null;
+}
+
+/** True when a spawnSync error means the executable is not installed/on PATH. */
+function isCommandMissing(error: Error | undefined): boolean {
+	return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
 }
 
 function safeUnlink(path: string): void {

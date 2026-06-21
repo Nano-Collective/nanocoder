@@ -75,8 +75,6 @@ export interface ChatInputProps {
 	onToggleReasoningExpanded: () => void;
 	tune?: TuneConfig;
 	currentModel?: string;
-	// Whether the active model can accept image input; drives the paste warning.
-	visionSupported?: boolean;
 
 	// VS Code active editor pushed from the extension (filename + optional selection)
 	activeEditor?: ActiveEditorState | null;
@@ -124,7 +122,6 @@ export function ChatInput({
 	onToggleReasoningExpanded,
 	tune,
 	currentModel,
-	visionSupported,
 	activeEditor,
 	onDismissActiveEditor,
 }: ChatInputProps): React.ReactElement {
@@ -193,7 +190,6 @@ export function ChatInput({
 					sessionName={sessionName}
 					tune={tune}
 					currentModel={currentModel}
-					visionSupported={visionSupported}
 					activeEditor={activeEditor}
 					onDismissActiveEditor={onDismissActiveEditor}
 				/>
