@@ -40,6 +40,8 @@ Create a `.mcp.json` file in your project root:
 
 Use `/mcp` to view connected servers and their tools. Use `/setup-mcp` for interactive setup.
 
+> **Tool visibility note:** Connected MCP servers may be hidden from the model by the current `/tune` tool profile. MCP tools are available to the model only when the resolved profile is `full`; the default `auto` profile switches small local models to `minimal` or `nano`, which intentionally filters MCP tools to keep the prompt small. If `/mcp` shows a server but the model cannot call its tools, run `/tune` and set **Tool Profile** to **full** (or switch to a larger/cloud model so `auto` resolves to `full`).
+
 ## Config File Locations
 
 | Location | File | Purpose |
