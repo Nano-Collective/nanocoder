@@ -41,6 +41,10 @@ Prefix any command with **`!`** to run it directly in your shell without leaving
 !npm test
 ```
 
+### Attaching Images
+
+Press **Ctrl+V** to paste an image from your clipboard, or drag an image file into the terminal, to send it to a vision-capable model. Pending attachments show above the input box; **Ctrl+X** removes the last one. See [Image Attachments](image-attachments.md) for supported formats and platform requirements.
+
 ### Keyboard Shortcuts
 
 These are the shortcuts you'll use constantly:
@@ -231,6 +235,7 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Session Management](session-management.md) | Automatic session saving and resumption |
 | [Task Management](task-management.md) | Tracking multi-step work |
 | [File Explorer](file-explorer.md) | Interactive file browser for context selection |
+| [Image Attachments](image-attachments.md) | Send screenshots and images to vision-capable models |
 | [VS Code Extension](vscode-extension.md) | Editor integration with live diff previews |
 | [ACP](acp.md) | Run as an Agent Client Protocol server for editors like Zed |
 | [Tune](tune.md) | Runtime model tuning for tool profiles, parameters, and compaction |

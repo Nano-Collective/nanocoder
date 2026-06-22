@@ -1,5 +1,6 @@
 import path from 'node:path';
 import {useCallback, useMemo, useRef} from 'react';
+import type {ImageAttachment} from '@/types/core';
 import {generateCorrelationId} from '@/utils/logging';
 import type {Logger} from '@/utils/logging/types';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
@@ -147,11 +148,16 @@ export function useUserSubmit({
 	handleMessageSubmit: (
 		message: string,
 		displayValue?: string,
+		images?: ImageAttachment[],
 	) => Promise<void>;
 	activeEditor: ActiveEditorState | null;
-}): (message: string, displayValue?: string) => Promise<void> {
+}): (
+	message: string,
+	displayValue?: string,
+	images?: ImageAttachment[],
+) => Promise<void> {
 	return useCallback(
-		(message: string, displayValue?: string) => {
+		(message: string, displayValue?: string, images?: ImageAttachment[]) => {
 			// Append the editor pill to both copies: `message` (sent to the LLM,
 			// with @-mentions already expanded) and `displayValue` (the bubble,
 			// with @-mentions kept as [@file] placeholders). Keeping them in sync
@@ -161,7 +167,7 @@ export function useUserSubmit({
 			const fullDisplay = displayValue
 				? buildPromptWithActiveEditor(displayValue, activeEditor)
 				: undefined;
-			return handleMessageSubmit(fullPrompt, fullDisplay);
+			return handleMessageSubmit(fullPrompt, fullDisplay, images);
 		},
 		[activeEditor, handleMessageSubmit],
 	);

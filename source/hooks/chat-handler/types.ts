@@ -3,7 +3,12 @@ import type {CustomCommandLoader} from '@/custom-commands/loader';
 import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {TuneConfig} from '@/types/config';
-import type {ApiUsageSnapshot, LLMClient, Message} from '@/types/core';
+import type {
+	ApiUsageSnapshot,
+	ImageAttachment,
+	LLMClient,
+	Message,
+} from '@/types/core';
 
 export interface UseChatHandlerProps {
 	client: LLMClient | null;
@@ -41,7 +46,11 @@ export interface UseChatHandlerProps {
 }
 
 export interface ChatHandlerReturn {
-	handleChatMessage: (message: string, displayValue?: string) => Promise<void>;
+	handleChatMessage: (
+		message: string,
+		displayValue?: string,
+		images?: ImageAttachment[],
+	) => Promise<void>;
 	processAssistantResponse: (
 		systemMessage: Message,
 		messages: Message[],

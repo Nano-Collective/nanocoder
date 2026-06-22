@@ -9,7 +9,7 @@ import {CheckpointManager} from '@/services/checkpoint-manager';
 import {generateKey} from '@/session/key-generator';
 import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
 import {clearAllTasks} from '@/tools/tasks/storage';
-import type {LLMClient} from '@/types/core';
+import type {ImageAttachment, LLMClient} from '@/types/core';
 import type {Message, MessageSubmissionOptions} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
 import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
@@ -562,6 +562,7 @@ export async function handleMessageSubmission(
 	message: string,
 	options: MessageSubmissionOptions,
 	displayValue?: string,
+	images?: ImageAttachment[],
 ): Promise<void> {
 	const parsedInput = parseInput(message);
 
@@ -575,7 +576,7 @@ export async function handleMessageSubmission(
 		return;
 	}
 
-	await options.onHandleChatMessage(message, displayValue);
+	await options.onHandleChatMessage(message, displayValue, images);
 }
 
 export function createClearMessagesHandler(
