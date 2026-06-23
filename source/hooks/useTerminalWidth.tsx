@@ -5,7 +5,7 @@ type TerminalSize = 'narrow' | 'normal' | 'wide';
 
 // Calculate box width (leave some padding and ensure minimum width)
 const calculateBoxWidth = (columns: number) =>
-	Math.max(Math.min(columns - 4, 120), 40);
+	Math.max(Math.min(columns - 4, 1024), 40);
 
 const computeWidth = () =>
 	calculateBoxWidth(process.stdout.columns || DEFAULT_TERMINAL_COLUMNS);
