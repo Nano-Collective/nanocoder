@@ -6,7 +6,7 @@ import {getAppConfig} from '@/config/index';
 import {CommandIntegration} from '@/custom-commands/command-integration';
 import {generateKey} from '@/session/key-generator';
 import {getTuneToolMode} from '@/types/config';
-import type {Message} from '@/types/core';
+import type {ImageAttachment, Message} from '@/types/core';
 import {MessageBuilder} from '@/utils/message-builder';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 import {processAssistantResponse} from './conversation/conversation-loop';
@@ -275,7 +275,11 @@ export function useChatHandler({
 	);
 
 	// Handle chat message processing
-	const handleChatMessage = async (message: string, displayValue?: string) => {
+	const handleChatMessage = async (
+		message: string,
+		displayValue?: string,
+		images?: ImageAttachment[],
+	) => {
 		if (!client || !toolManager) return;
 
 		// Record conversation start time for elapsed time display
@@ -294,12 +298,13 @@ export function useChatHandler({
 				key={generateKey('user')}
 				message={displayMessage}
 				tokenContent={message}
+				imageCount={images?.length ?? 0}
 			/>,
 		);
 
 		// Add user message to conversation history (single addition)
 		const builder = new MessageBuilder(messages);
-		builder.addUserMessage(message);
+		builder.addUserMessage(message, images);
 		const updatedMessages = builder.build();
 		setMessages(updatedMessages);
 

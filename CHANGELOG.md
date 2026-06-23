@@ -58,6 +58,8 @@
 
 - Large **refactor and dead-code sweep**: unified tool-call ID generation, extracted a shared `useWizardForm` hook, consolidated session-override managers, added message-factory helpers, deduped config loaders / git exec / command dispatch / conversation-loop flush, extracted `StyledSelectInput` and `makeSimpleToolFormatter`, and deleted several dead modules and orphaned exports (including `fetch-local-models` orphaned by an earlier removal).
 
+- Added **image attachments on user messages**. Paste an image from the clipboard with **Ctrl+V** (via `osascript` on macOS, `wl-paste`/`xclip` on Linux, PowerShell on Windows), drag an image file into the terminal, or type a path — quoted, unquoted, and macOS backslash-escaped paths are all recognised, and `http(s)` URLs are left untouched. Attachments (PNG/JPEG/GIF/WebP, ≤10 MB) show above the input box and **Ctrl+X** removes the last one; references are stripped from the text and sent as image parts to vision-capable models. A missing clipboard tool now logs a debug breadcrumb instead of silently no-op'ing. Thanks to @ragini-pandey. Closes #572.
+
 - Updated the **Nanocoder Battlemap** competitive comparison and refreshed the README and docs.
 
 - Dependency updates: `ai` 6.0.174 -> 6.0.193, `@ai-sdk/openai`, `@ai-sdk/openai-compatible`, `@ai-sdk/anthropic`, `@agentclientprotocol/sdk` 0.22.1 -> 0.25.0, `undici`, `esbuild`, `@biomejs/biome` 2.5.0, `lint-staged` 17, `@types/node`, `@types/vscode`, and other transitive bumps tracked through the lockfile. Added `clipboardy ^5.3.1` for `/copy`.

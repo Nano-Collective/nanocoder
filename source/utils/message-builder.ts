@@ -1,4 +1,4 @@
-import type {Message, ToolResult} from '@/types/core';
+import type {ImageAttachment, Message, ToolResult} from '@/types/core';
 
 /**
  * Builder pattern for constructing message arrays.
@@ -41,12 +41,13 @@ export class MessageBuilder {
 	}
 
 	/**
-	 * Add a user message.
+	 * Add a user message, optionally with image attachments for multimodal turns.
 	 */
-	addUserMessage(content: string): this {
+	addUserMessage(content: string, images?: ImageAttachment[]): this {
 		this.messages.push({
 			role: 'user',
 			content,
+			...(images && images.length > 0 ? {images} : {}),
 		});
 		return this;
 	}

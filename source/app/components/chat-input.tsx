@@ -12,6 +12,7 @@ import type {Task} from '@/tools/tasks/types';
 import type {
 	ContextSource,
 	DevelopmentMode,
+	ImageAttachment,
 	ToolCall,
 	TuneConfig,
 } from '@/types';
@@ -65,7 +66,11 @@ export interface ChatInputProps {
 	liveTaskList?: Task[] | null;
 
 	// Handlers
-	onSubmit: (message: string, displayValue: string) => Promise<void>;
+	onSubmit: (
+		message: string,
+		displayValue: string,
+		images?: ImageAttachment[],
+	) => Promise<void>;
 	onToggleMode: () => void;
 	onToggleReasoningExpanded: () => void;
 	tune?: TuneConfig;
@@ -170,7 +175,9 @@ export function ChatInput({
 			mcpInitialized && client ? (
 				<UserInput
 					customCommands={customCommands}
-					onSubmit={(msg, display) => void onSubmit(msg, display)}
+					onSubmit={(msg, display, images) =>
+						void onSubmit(msg, display, images)
+					}
 					disabled={inputDisabled}
 					isBusy={isBusy}
 					onToggleMode={onToggleMode}

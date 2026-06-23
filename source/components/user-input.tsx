@@ -10,9 +10,18 @@ import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
 import {promptHistory} from '@/prompt-history';
 import type {TuneConfig} from '@/types/config';
-import type {ContextSource, DevelopmentMode} from '@/types/core';
+import type {
+	ContextSource,
+	DevelopmentMode,
+	ImageAttachment,
+} from '@/types/core';
 import type {InputState} from '@/types/hooks';
 import {Completion} from '@/types/index';
+import {
+	extractImageReferences,
+	readClipboardImage,
+	readImageFile,
+} from '@/utils/clipboard-image';
 import {
 	getCurrentFileMention,
 	getFileCompletions,
@@ -22,7 +31,11 @@ import {assemblePrompt} from '@/utils/prompt-processor';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 interface ChatProps {
-	onSubmit?: (message: string, displayValue: string) => void;
+	onSubmit?: (
+		message: string,
+		displayValue: string,
+		images?: ImageAttachment[],
+	) => void;
 	placeholder?: string;
 	customCommands?: string[]; // List of custom command names and aliases
 	disabled?: boolean; // Disable input when AI is processing
@@ -81,6 +94,8 @@ export default function UserInput({
 		Array<{path: string; score: number}>
 	>([]);
 	const [selectedFileIndex, setSelectedFileIndex] = useState(0);
+	// Pending image attachments sent with the next submitted message.
+	const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
 
 	const {
 		input,
@@ -289,26 +304,54 @@ export default function UserInput({
 		setInputState,
 	]);
 
+	// Attach an image to the pending message. We never gate on a model-capability
+	// heuristic here: if the model can't see images it will say so or error, which
+	// is clearer than an over-cautious warning on every attach.
+	const attachImage = useCallback((image: ImageAttachment) => {
+		setAttachments(prev => [...prev, image]);
+	}, []);
+
 	// Handle form submission
 	const handleSubmit = useCallback(() => {
-		if (input.trim() && onSubmit) {
-			// Assemble the full prompt by replacing placeholders with content
-			const fullMessage = assemblePrompt(currentState);
+		if (!onSubmit) return;
 
-			// Save the InputState to history and send assembled message to AI
-			promptHistory.addPrompt(currentState);
-			onSubmit(fullMessage, currentState.displayValue);
-			resetInput();
-			resetUIState();
-			promptHistory.resetIndex();
+		let images = attachments;
+		let assembled = assemblePrompt(currentState);
+		let display = currentState.displayValue;
+
+		// Image file paths the user typed, pasted, or dragged into the terminal
+		// (often quoted, mixed in with prose) become attachments and are stripped
+		// from the message text rather than sent as literal paths.
+		const {text: cleanedAssembled, paths} = extractImageReferences(assembled);
+		if (paths.length > 0) {
+			const dropped = paths
+				.map(readImageFile)
+				.filter((img): img is ImageAttachment => img !== null);
+			if (dropped.length > 0) {
+				images = [...attachments, ...dropped];
+				assembled = cleanedAssembled;
+				display = extractImageReferences(display).text;
+			}
 		}
-	}, [input, onSubmit, resetInput, resetUIState, currentState]);
+
+		// Nothing to send: no text and no attachments.
+		if (!assembled.trim() && images.length === 0) return;
+
+		// Save the InputState to history and send assembled message to AI
+		promptHistory.addPrompt(currentState);
+		onSubmit(assembled, display, images.length > 0 ? images : undefined);
+		resetInput();
+		resetUIState();
+		setAttachments([]);
+		promptHistory.resetIndex();
+	}, [attachments, onSubmit, resetInput, resetUIState, currentState]);
 
 	// Handle escape key logic
 	const handleEscape = useCallback(() => {
 		if (showClearMessage) {
 			resetInput();
 			resetUIState();
+			setAttachments([]);
 			onDismissActiveEditor?.();
 			focus('user-input');
 		} else {
@@ -421,6 +464,23 @@ export default function UserInput({
 
 		// Block all other input when disabled
 		if (disabled) {
+			return;
+		}
+
+		// Ctrl+V: pull an image off the system clipboard as an attachment.
+		// Terminal paste of regular text arrives as a bracketed paste, not as
+		// Ctrl+V, so this binding is free to mean "paste image".
+		if (key.ctrl && inputChar === 'v') {
+			const image = readClipboardImage();
+			if (image) {
+				attachImage(image);
+			}
+			return;
+		}
+
+		// Ctrl+X: drop the most recently added image attachment.
+		if (key.ctrl && inputChar === 'x') {
+			setAttachments(prev => prev.slice(0, -1));
 			return;
 		}
 
@@ -675,6 +735,17 @@ export default function UserInput({
 					<Text color={colors.secondary}>Press escape again to clear</Text>
 				)}
 			</Box>
+
+			{attachments.length > 0 && (
+				<Box marginTop={1}>
+					<Text color={colors.info}>
+						{attachments
+							.map((img, i) => `[image #${i + 1}: ${img.source ?? 'image'}]`)
+							.join(' ')}
+					</Text>
+					<Text color={colors.secondary}> · ctrl-x remove last</Text>
+				</Box>
+			)}
 
 			{/* Development mode indicator - always visible */}
 			<DevelopmentModeIndicator
