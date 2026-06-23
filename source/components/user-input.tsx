@@ -190,6 +190,14 @@ export default function UserInput({
 			return [];
 		}
 
+		// Once the user types a space, they're entering arguments for the
+		// command (e.g. `/model gpt-4`). Stop offering completions so Enter
+		// submits the command-with-args instead of selecting a completion and
+		// dropping everything after the command name.
+		if (input.slice(1).includes(' ')) {
+			return [];
+		}
+
 		const commandPrefix = input.slice(1).split(' ')[0];
 
 		const builtInCompletions = commandRegistry.getCompletions(commandPrefix);
