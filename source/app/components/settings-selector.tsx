@@ -24,6 +24,7 @@ import {setNotificationsConfig} from '@/utils/notifications';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 import {SettingsAutoCompactPanel} from './settings-auto-compact';
 import {SettingsDefaultModePanel} from './settings-default-mode';
+import {SettingsJsonEditorPanel} from './settings-json-editor';
 import type {ChangeDiff} from './settings-keep-discard-prompt';
 import {KeepDiscardPrompt} from './settings-keep-discard-prompt';
 import {
@@ -1379,6 +1380,16 @@ function SettingsPanelRouter({
 	// Providers panels
 	if (category === 'providers') {
 		switch (panelKey) {
+			case 'configure-providers':
+				return (
+					<SettingsJsonEditorPanel
+						configFileName="nanocoder-config.json"
+						title="Configure Providers"
+						onBack={onBack}
+						onCancel={onCancel}
+						onChanged={onChanged}
+					/>
+				);
 			case 'tool-approval':
 				return (
 					<SettingsToolApprovalPanel onBack={onBack} onCancel={onCancel} />
@@ -1396,13 +1407,27 @@ function SettingsPanelRouter({
 
 	// MCP panels
 	if (category === 'mcp') {
-		return (
-			<SettingsPlaceholderPanel
-				panelKey={panelKey}
-				onBack={onBack}
-				onCancel={onCancel}
-			/>
-		);
+		switch (panelKey) {
+			case 'configure-mcp':
+				return (
+					<SettingsJsonEditorPanel
+						configFileName="mcp.json"
+						title="Configure MCP Servers"
+						initialPath={['mcpServers']}
+						onBack={onBack}
+						onCancel={onCancel}
+						onChanged={onChanged}
+					/>
+				);
+			default:
+				return (
+					<SettingsPlaceholderPanel
+						panelKey={panelKey}
+						onBack={onBack}
+						onCancel={onCancel}
+					/>
+				);
+		}
 	}
 
 	// Web Search panels
@@ -1429,13 +1454,37 @@ function SettingsPanelRouter({
 
 	// Advanced panels
 	if (category === 'advanced') {
-		return (
-			<SettingsPlaceholderPanel
-				panelKey={panelKey}
-				onBack={onBack}
-				onCancel={onCancel}
-			/>
-		);
+		switch (panelKey) {
+			case 'edit-config':
+				return (
+					<SettingsJsonEditorPanel
+						configFileName="nanocoder-config.json"
+						title="Edit Config"
+						onBack={onBack}
+						onCancel={onCancel}
+						onChanged={onChanged}
+					/>
+				);
+			case 'tune':
+				return (
+					<SettingsJsonEditorPanel
+						configFileName="nanocoder-preferences.json"
+						title="Tune Model"
+						initialPath={['tune']}
+						onBack={onBack}
+						onCancel={onCancel}
+						onChanged={onChanged}
+					/>
+				);
+			default:
+				return (
+					<SettingsPlaceholderPanel
+						panelKey={panelKey}
+						onBack={onBack}
+						onCancel={onCancel}
+					/>
+				);
+		}
 	}
 
 	// Fallback
