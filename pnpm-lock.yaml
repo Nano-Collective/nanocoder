@@ -86,6 +86,9 @@ importers:
       ink-tab:
         specifier: ^5.2.0
         version: 5.2.0(@types/react@19.2.17)(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.2.17)(react@19.2.7))(react@19.2.7)
+      ink-text-input:
+        specifier: ^6.0.0
+        version: 6.0.0(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.2.17)(react@19.2.7))(react@19.2.7)
       llama-tokenizer-js:
         specifier: ^1.2.2
         version: 1.2.2
@@ -2298,6 +2301,13 @@ packages:
     peerDependenciesMeta:
       '@types/react':
         optional: true
+
+  ink-text-input@6.0.0:
+    resolution: {integrity: sha512-Fw64n7Yha5deb1rHY137zHTAbSTNelUKuB5Kkk2HACXEtwIHBCf9OH2tP/LQ9fRYTl1F0dZgbW0zPnZk6FA9Lw==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      ink: '>=5'
+      react: '>=18'
 
   ink@6.8.0:
     resolution: {integrity: sha512-sbl1RdLOgkO9isK42WCZlJCFN9hb++sX9dsklOvfd1YQ3bQ2AiFu12Q6tFlr0HvEUvzraJntQCCpfEoUe9DSzA==}
@@ -5762,6 +5772,13 @@ snapshots:
   ink-testing-library@4.0.0(@types/react@19.2.17):
     optionalDependencies:
       '@types/react': 19.2.17
+
+  ink-text-input@6.0.0(ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.2.17)(react@19.2.7))(react@19.2.7):
+    dependencies:
+      chalk: 5.6.2
+      ink: 6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.2.17)(react@19.2.7)
+      react: 19.2.7
+      type-fest: 4.41.0
 
   ink@6.8.0(patch_hash=ae5bd7c6d28e6a9440188c3c07fc7a83597933b06090aaa44830f65f3d103b5f)(@types/react@19.2.17)(react@19.2.7):
     dependencies:
