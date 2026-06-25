@@ -7,6 +7,15 @@ import type {Skill} from '@/types/skills';
 
 console.log('\npromote.spec.ts');
 
+async function pathExists(path: string): Promise<boolean> {
+	try {
+		await access(path);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 function bundleSkill(name: string, rootPath: string, priority: Skill['source']['priority']): Skill {
 	return {
 		name,
@@ -79,7 +88,7 @@ test.serial('promote - copies a project bundle to the global config dir', async 
 	t.true('plan' in planned);
 	if (!('plan' in planned)) return;
 
-	const result = await applyPromotion(planned.plan, false);
+	const result = await applyPromotion(planned.plan, {});
 	t.true(result.ok);
 
 	const dest = join(dir, 'config', 'skills', 'foo', 'skill.yaml');
@@ -103,16 +112,38 @@ test.serial('promote - refuses to overwrite an existing destination without forc
 		return;
 	}
 
-	const blocked = await applyPromotion(planned.plan, false);
+	const blocked = await applyPromotion(planned.plan, {});
 	t.true(blocked.destExists);
 	t.false(blocked.ok);
 	// Original untouched.
 	t.true((await readFile(join(dest, 'skill.yaml'), 'utf8')).includes('old'));
 
 	// With force it overwrites.
-	const forced = await applyPromotion(planned.plan, true);
+	const forced = await applyPromotion(planned.plan, {force: true});
 	t.true(forced.ok);
 	t.true((await readFile(join(dest, 'skill.yaml'), 'utf8')).includes('new'));
+});
+
+test.serial('promote --move - copies then removes the source', async t => {
+	const src = join(dir, 'project', '.nanocoder', 'skills', 'foo');
+	await mkdir(src, {recursive: true});
+	await writeFile(join(src, 'skill.yaml'), 'name: foo\ndescription: x\n');
+
+	const skill = bundleSkill('foo', src, 'project');
+	const planned = planPromotion(skill, 'promote', join(dir, 'project'));
+	if (!('plan' in planned)) {
+		t.fail('expected a plan');
+		return;
+	}
+
+	const result = await applyPromotion(planned.plan, {move: true});
+	t.true(result.ok);
+	t.true(result.moved);
+
+	// Destination has it, source is gone.
+	const dest = join(dir, 'config', 'skills', 'foo', 'skill.yaml');
+	t.true((await readFile(dest, 'utf8')).includes('name: foo'));
+	t.false(await pathExists(src));
 });
 
 test.serial('demote - copies a single-file command into the project flat dir', async t => {
@@ -125,7 +156,7 @@ test.serial('demote - copies a single-file command into the project flat dir', a
 	t.true('plan' in planned);
 	if (!('plan' in planned)) return;
 
-	const result = await applyPromotion(planned.plan, false);
+	const result = await applyPromotion(planned.plan, {});
 	t.true(result.ok);
 
 	const dest = join(dir, 'project', '.nanocoder', 'commands', 'greet.md');

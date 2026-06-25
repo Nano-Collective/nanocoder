@@ -15,7 +15,7 @@
  * See `/skills promote` / `/skills demote` in `source/commands/skills.tsx`.
  */
 
-import {access, cp, mkdir} from 'node:fs/promises';
+import {access, cp, mkdir, rm} from 'node:fs/promises';
 import {basename, dirname, join} from 'node:path';
 import {getConfigPath} from '@/config/paths';
 import type {Skill} from '@/types/skills';
@@ -108,28 +108,44 @@ async function exists(path: string): Promise<boolean> {
 	}
 }
 
+export interface ApplyOptions {
+	/** Overwrite an existing destination instead of refusing. */
+	force?: boolean;
+	/** Remove the source after a successful copy (move instead of copy). */
+	move?: boolean;
+}
+
 export interface ApplyResult {
 	ok: boolean;
 	/** True when the destination already exists and `force` was not set. */
 	destExists?: boolean;
+	/** True when the source was removed (a `move`). */
+	moved?: boolean;
 	error?: string;
 }
 
 /**
  * Execute a plan. Refuses to overwrite an existing destination unless
  * `force` is true, so a promoted skill never clobbers a different copy at
- * the target level by accident.
+ * the target level by accident. When `move` is set, the source is removed
+ * after the copy succeeds, leaving only the destination copy.
  */
 export async function applyPromotion(
 	plan: PromotionPlan,
-	force: boolean,
+	opts: ApplyOptions = {},
 ): Promise<ApplyResult> {
-	if (!force && (await exists(plan.dest))) {
+	if (!opts.force && (await exists(plan.dest))) {
 		return {ok: false, destExists: true};
 	}
 	try {
 		await mkdir(dirname(plan.dest), {recursive: true});
 		await cp(plan.source, plan.dest, {recursive: true, force: true});
+		// Only unlink the source once the copy has landed, and never when
+		// source and dest resolve to the same path (defensive; levels differ).
+		if (opts.move && plan.source !== plan.dest) {
+			await rm(plan.source, {recursive: true, force: true});
+			return {ok: true, moved: true};
+		}
 		return {ok: true};
 	} catch (err) {
 		return {

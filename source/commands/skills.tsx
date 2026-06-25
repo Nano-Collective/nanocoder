@@ -255,11 +255,12 @@ async function handlePromotion(direction: PromoteDirection, args: string[]) {
 	const verb = direction; // 'promote' | 'demote'
 	const positional = args.filter(a => !a.startsWith('--'));
 	const force = args.includes('--force');
+	const move = args.includes('--move');
 	const name = positional[1];
 
 	if (!name) {
 		return infoMsg(
-			`Usage: /skills ${verb} <name> [--force]\nExample: /skills ${verb} pr-reviewer`,
+			`Usage: /skills ${verb} <name> [--force] [--move]\nExample: /skills ${verb} pr-reviewer\n\n--move removes the original after copying (default is copy, leaving both).`,
 			'skills',
 		);
 	}
@@ -275,10 +276,10 @@ async function handlePromotion(direction: PromoteDirection, args: string[]) {
 	}
 	const {plan} = planned;
 
-	const result = await applyPromotion(plan, force);
+	const result = await applyPromotion(plan, {force, move});
 	if (result.destExists) {
 		return warningMsg(
-			`A skill already exists at ${plan.dest}.\nRe-run with --force to overwrite it:\n  /skills ${verb} ${name} --force`,
+			`A skill already exists at ${plan.dest}.\nRe-run with --force to overwrite it:\n  /skills ${verb} ${name} --force${move ? ' --move' : ''}`,
 			'skills',
 		);
 	}
@@ -289,8 +290,14 @@ async function handlePromotion(direction: PromoteDirection, args: string[]) {
 		);
 	}
 
+	const action = result.moved
+		? `Moved "${name}"`
+		: `${verb === 'promote' ? 'Promoted' : 'Demoted'} "${name}"`;
+	const trailer = result.moved
+		? '\nRemoved the original. Restart nanocoder to load it.'
+		: '\nRestart nanocoder to load it.';
 	return successMsg(
-		`${verb === 'promote' ? 'Promoted' : 'Demoted'} "${name}" (${plan.fromLevel} → ${plan.toLevel}).\n  ${plan.source}\n  → ${plan.dest}\nRestart nanocoder to load it.`,
+		`${action} (${plan.fromLevel} → ${plan.toLevel}).\n  ${plan.source}\n  → ${plan.dest}${trailer}`,
 		'skills',
 	);
 }
