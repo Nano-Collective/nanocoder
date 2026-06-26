@@ -118,6 +118,13 @@ export async function handleChat(
 	let accumulatedReasoning = '';
 	let accumulatedText = '';
 
+	// Hoisted outside the try so the catch handler can inspect errors the SDK
+	// reported via streamText's onError callback. A connectivity failure is
+	// surfaced here AND then re-thrown by the SDK as AI_NoOutputGeneratedError
+	// with no `cause`; without consulting this array the catch can't tell a
+	// network failure apart from a genuine empty model turn.
+	const streamingErrors: Error[] = [];
+
 	return await withNewCorrelationContext(async _context => {
 		try {
 			// Tools arrive with approval policy already resolved by ToolManager.
@@ -165,7 +172,6 @@ export async function handleChat(
 				modeOverrides?.modelParameters,
 			);
 
-			const streamingErrors: Error[] = [];
 			const result = streamText({
 				model,
 				...(systemContent ? {system: systemContent} : {}),
@@ -484,6 +490,19 @@ export async function handleChat(
 					// No underlying error - check if user actually cancelled
 					if (signal?.aborted) {
 						throw new Error('Operation was cancelled');
+					}
+					// The SDK frequently re-throws transport failures (no internet,
+					// DNS/connection errors) as AI_NoOutputGeneratedError WITHOUT a
+					// `cause`, so extractRootError can't recover them. But streamText's
+					// onError callback already captured the real error here. Surface it
+					// instead of returning an empty turn, otherwise the conversation
+					// loop mistakes the network failure for context exhaustion and
+					// prints a misleading "Context too large" auto-compact message.
+					if (streamingErrors.length > 0) {
+						const userMessage = parseAPIError(
+							streamingErrors[streamingErrors.length - 1],
+						);
+						throw new Error(userMessage);
 					}
 					// Model returned no output without an underlying API error.
 					// Hand control back to the conversation loop with an empty

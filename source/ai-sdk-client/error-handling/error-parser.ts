@@ -203,8 +203,12 @@ function parseAPIErrorInternal(error: unknown): string {
 		errorMessage.includes('ECONNREFUSED') ||
 		errorMessage.includes('ECONNRESET') ||
 		errorMessage.includes('ENOTFOUND') ||
+		errorMessage.includes('EAI_AGAIN') ||
 		errorMessage.includes('connect ETIMEDOUT') ||
-		errorMessage.includes('Failed to fetch')
+		lowerMessage.includes('failed to fetch') ||
+		lowerMessage.includes('fetch failed') ||
+		lowerMessage.includes('network error') ||
+		lowerMessage.includes('getaddrinfo')
 	) {
 		return 'Connection failed: Unable to reach the model server';
 	}
