@@ -18,10 +18,9 @@
  */
 
 import * as fs from 'node:fs/promises';
-import {parse as parseYaml} from 'yaml';
 import {parseSubscribeBlock} from '@/skills/parse-subscribe';
 import type {SkillTrigger} from '@/types/skills';
-import {splitFrontmatter} from '@/utils/frontmatter';
+import {parseYamlObject, splitFrontmatter} from '@/utils/frontmatter';
 import type {
 	ParsedSubagentFile,
 	SubagentConfig,
@@ -149,14 +148,12 @@ function extractRawFrontmatter(content: string): Record<string, unknown> {
 		throw new Error('No YAML frontmatter found in file');
 	}
 
-	let frontmatter: Record<string, unknown>;
-	try {
-		frontmatter = parseYaml(raw) as Record<string, unknown>;
-	} catch (error) {
-		throw new Error(`Failed to parse YAML frontmatter: ${error}`);
-	}
-
-	if (!frontmatter || typeof frontmatter !== 'object') {
+	// `parseYamlObject` returns `{}` for an empty frontmatter block, which lets
+	// empty frontmatter fall through to schema validation and produce a clear
+	// "name is required" error rather than a misleading parse failure. It
+	// returns `null` only for genuinely invalid YAML or non-object values.
+	const frontmatter = parseYamlObject(raw);
+	if (!frontmatter) {
 		throw new Error('YAML frontmatter must be an object');
 	}
 

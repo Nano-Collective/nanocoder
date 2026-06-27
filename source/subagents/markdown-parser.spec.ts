@@ -37,6 +37,43 @@ test.serial('extractFrontmatter - throws on missing frontmatter', t => {
 	);
 });
 
+test.serial(
+	'extractFrontmatter - empty frontmatter block surfaces a validation error',
+	t => {
+		// An empty `---\n---` block should be treated as an empty object so it
+		// flows through to schema validation, producing a clear "name is
+		// required" error rather than a misleading "must be an object" parse
+		// failure.
+		const content = `---
+---
+You are a subagent without metadata.`;
+
+		t.throws(() => extractFrontmatter(content), {
+			message: /name is required/,
+		});
+	},
+);
+
+test.serial(
+	'parseSubagentMarkdown - empty frontmatter block surfaces a validation error',
+	async t => {
+		const tmpPath = join(tmpdir(), 'empty-frontmatter-agent.md');
+		const content = `---
+---
+You are a subagent without metadata.`;
+
+		await writeFile(tmpPath, content, 'utf-8');
+
+		try {
+			await t.throwsAsync(() => parseSubagentMarkdown(tmpPath), {
+				message: /name is required/,
+			});
+		} finally {
+			await unlink(tmpPath);
+		}
+	},
+);
+
 test.serial('extractBody - extracts body content', t => {
 	const content = `---
 name: test
