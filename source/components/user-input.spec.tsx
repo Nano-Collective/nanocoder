@@ -3,7 +3,7 @@ import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
-import {UIStateProvider} from '../hooks/useUIState';
+import {UIStateProvider, useUIStateContext} from '../hooks/useUIState';
 import UserInput from './user-input';
 
 console.log(`\nuser-input.spec.tsx – ${React.version}`);
@@ -393,6 +393,7 @@ test('UserInput does not show ctrl-o hint when onToggleCompactDisplay is not pro
 	unmount();
 });
 
+
 // ============================================================================
 // Command Completion Navigation Tests
 // ============================================================================
@@ -509,3 +510,91 @@ test('completion menu dismissal/reset after selection or escape', async t => {
 
 	unmount();
 });
+
+test('UserInput renders completions text when typing /', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput customCommands={['help', 'model']} />
+		</TestWrapper>
+	);
+
+	await new Promise(resolve => setTimeout(resolve, 50));
+	stdin.write('/');
+	await new Promise(resolve => setTimeout(resolve, 150));
+
+	const output = lastFrame()!;
+	t.truthy(output);
+	t.regex(output, /Available commands:/);
+	unmount();
+});
+
+test('UserInput renders completions BEFORE the mode indicator (inside the input box)', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput developmentMode="normal" customCommands={['help', 'model']} />
+		</TestWrapper>
+	);
+
+	await new Promise(resolve => setTimeout(resolve, 50));
+	stdin.write('/');
+	await new Promise(resolve => setTimeout(resolve, 150));
+
+	const output = lastFrame()!;
+	t.truthy(output);
+
+	const completionsIdx = output.indexOf('Available commands:');
+	const modeIdx = output.indexOf('normal mode');
+	t.true(completionsIdx > -1, 'Completions text should be present');
+	t.true(modeIdx > -1, 'Mode indicator should be present');
+	t.true(
+		completionsIdx < modeIdx,
+		'Completions must render before the mode indicator (inside the bordered input box)',
+	);
+	unmount();
+});
+
+test('UserInput completions appear on a line above the mode indicator', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput developmentMode="normal" customCommands={['help', 'model']} />
+		</TestWrapper>
+	);
+
+	await new Promise(resolve => setTimeout(resolve, 50));
+	stdin.write('/');
+	await new Promise(resolve => setTimeout(resolve, 150));
+
+	const output = lastFrame()!;
+	const lines = output.split('\n');
+
+	let completionLine = -1;
+	let modeLine = -1;
+	for (let i = 0; i < lines.length; i++) {
+		if (lines[i].includes('Available commands:')) completionLine = i;
+		if (lines[i].includes('normal mode')) modeLine = i;
+	}
+
+	t.true(completionLine > -1, 'Should find completions line');
+	t.true(modeLine > -1, 'Should find mode indicator line');
+	t.true(
+		completionLine < modeLine,
+		`Completions (line ${completionLine}) must be above mode indicator (line ${modeLine})`,
+	);
+	unmount();
+});
+
+test('UserInput does not show completions when input is empty', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput />
+		</TestWrapper>
+	);
+
+	const output = lastFrame()!;
+	t.truthy(output);
+	t.notRegex(output, /Available commands:/);
+	unmount();
+});
+
+
+

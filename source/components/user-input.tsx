@@ -659,47 +659,6 @@ export default function UserInput({
 				</Text>
 			)}
 
-			{showCompletions && completions.length > 0 && (
-				<Box flexDirection="column" marginTop={1}>
-					<Text color={colors.secondary}>Available commands:</Text>
-					{completions.map((completion, index) => {
-						const isSelected = index === selectedCompletionIndex;
-						return (
-							<Text
-								key={index}
-								color={
-									isSelected
-										? colors.info
-										: completion.isCustom
-											? colors.info
-											: colors.primary
-								}
-								bold={isSelected}
-							>
-								{isSelected ? '▸ ' : '  '}/{completion.name}
-							</Text>
-						);
-					})}
-				</Box>
-			)}
-			{isFileAutocompleteMode && fileCompletions.length > 0 && (
-				<Box flexDirection="column" marginTop={1}>
-					<Text color={colors.secondary}>
-						File suggestions (↑/↓ to navigate, Tab to select):
-					</Text>
-					{fileCompletions.slice(0, 5).map((file, index) => (
-						<Text
-							key={index}
-							color={index === selectedFileIndex ? colors.info : colors.primary}
-							bold={index === selectedFileIndex}
-						>
-							{index === selectedFileIndex ? '▸ ' : '  '}
-							{file.path}
-						</Text>
-					))}
-				</Box>
-			)}
-
 			<Box
 				flexDirection="column"
 				marginTop={1}
@@ -734,6 +693,49 @@ export default function UserInput({
 				{showClearMessage && (
 					<Text color={colors.secondary}>Press escape again to clear</Text>
 				)}
+
+				{showCompletions && completions.length > 0 && (
+					<Box flexDirection="column" marginTop={1}>
+						<Text color={colors.secondary}>Available commands:</Text>
+						{completions.map((completion, index) => {
+							const isSelected = index === selectedCompletionIndex;
+							return (
+								<Text
+									key={index}
+									color={
+										isSelected
+											? colors.info
+											: completion.isCustom
+												? colors.info
+												: colors.primary
+									}
+									bold={isSelected}
+								>
+									{isSelected ? '▸ ' : '  '}/{completion.name}
+								</Text>
+							);
+						})}
+					</Box>
+				)}
+				{isFileAutocompleteMode && fileCompletions.length > 0 && (
+					<Box flexDirection="column" marginTop={1}>
+						<Text color={colors.secondary}>
+							File suggestions (↑/↓ to navigate, Tab to select):
+						</Text>
+						{fileCompletions.slice(0, 5).map((file, index) => (
+							<Text
+								key={index}
+								color={
+									index === selectedFileIndex ? colors.info : colors.primary
+								}
+								bold={index === selectedFileIndex}
+							>
+								{index === selectedFileIndex ? '▸ ' : '  '}
+								{file.path}
+							</Text>
+						))}
+					</Box>
+				)}
 			</Box>
 
 			{attachments.length > 0 && (
@@ -746,7 +748,6 @@ export default function UserInput({
 					<Text color={colors.secondary}> · ctrl-x remove last</Text>
 				</Box>
 			)}
-
 			{/* Development mode indicator - always visible */}
 			<DevelopmentModeIndicator
 				developmentMode={developmentMode}
