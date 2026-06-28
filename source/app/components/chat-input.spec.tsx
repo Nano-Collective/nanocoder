@@ -102,6 +102,48 @@ test('ChatInput shows tool execution indicator when executing', t => {
 	unmount();
 });
 
+test('ChatInput keeps UserInput visible while a tool is executing', t => {
+	const mockToolCall = {
+		id: 'test-1',
+		function: {name: 'test_tool', arguments: {}},
+	};
+
+	const props = createDefaultProps({
+		isToolExecuting: true,
+		isBusy: true,
+		inputDisabled: true,
+		pendingToolCalls: [mockToolCall],
+		currentToolIndex: 0,
+	});
+
+	const {lastFrame, unmount} = renderWithTheme(<ChatInput {...props} />);
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /hat would you like me to help with\?/);
+	t.regex(output!, /Press Esc to cancel/);
+	unmount();
+});
+
+test('ChatInput keeps modal decision states ahead of busy input', t => {
+	const mockToolCall = {
+		id: 'test-1',
+		function: {name: 'test_tool', arguments: {}},
+	};
+
+	const props = createDefaultProps({
+		isToolExecuting: true,
+		isBusy: true,
+		inputDisabled: true,
+		pendingToolConfirmation: {toolCall: mockToolCall as never},
+	});
+
+	const {lastFrame, unmount} = renderWithTheme(<ChatInput {...props} />);
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /What would you like me to help with\?/);
+	unmount();
+});
+
 test('ChatInput shows cancelling indicator when cancelling', t => {
 	const props = createDefaultProps({
 		isCancelling: true,

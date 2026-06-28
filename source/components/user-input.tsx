@@ -8,6 +8,10 @@ import {useInputState} from '@/hooks/useInputState';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
+import type {
+	QueuedUserMessage,
+	UserMessageQueueDraft,
+} from '@/hooks/useUserMessageQueue';
 import {promptHistory} from '@/prompt-history';
 import type {TuneConfig} from '@/types/config';
 import type {
@@ -36,6 +40,9 @@ interface ChatProps {
 		displayValue: string,
 		images?: ImageAttachment[],
 	) => void;
+	onQueueMessage?: (message: UserMessageQueueDraft) => void;
+	queuedMessages?: QueuedUserMessage[];
+	onRemoveQueuedMessage?: (id: string) => void;
 	placeholder?: string;
 	customCommands?: string[]; // List of custom command names and aliases
 	disabled?: boolean; // Disable input when AI is processing
@@ -57,6 +64,9 @@ interface ChatProps {
 
 export default function UserInput({
 	onSubmit,
+	onQueueMessage,
+	queuedMessages = [],
+	onRemoveQueuedMessage,
 	placeholder,
 	customCommands = [],
 	disabled = false,
@@ -94,6 +104,7 @@ export default function UserInput({
 		Array<{path: string; score: number}>
 	>([]);
 	const [selectedFileIndex, setSelectedFileIndex] = useState(0);
+	const [selectedQueuedIndex, setSelectedQueuedIndex] = useState(-1);
 	// Pending image attachments sent with the next submitted message.
 	const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
 
@@ -133,6 +144,17 @@ export default function UserInput({
 	useEffect(() => {
 		void promptHistory.loadHistory();
 	}, []);
+
+	useEffect(() => {
+		if (queuedMessages.length === 0) {
+			setSelectedQueuedIndex(-1);
+			return;
+		}
+
+		setSelectedQueuedIndex(index =>
+			index >= queuedMessages.length ? queuedMessages.length - 1 : index,
+		);
+	}, [queuedMessages.length]);
 
 	// Consume pending file mentions from explorer and insert into input
 	// Properly attach files by calling handleFileMention for each
@@ -313,7 +335,7 @@ export default function UserInput({
 
 	// Handle form submission
 	const handleSubmit = useCallback(() => {
-		if (!onSubmit) return;
+		if (!onSubmit && !onQueueMessage) return;
 
 		let images = attachments;
 		let assembled = assemblePrompt(currentState);
@@ -337,14 +359,46 @@ export default function UserInput({
 		// Nothing to send: no text and no attachments.
 		if (!assembled.trim() && images.length === 0) return;
 
+		const inputStateForHistory: InputState = {
+			displayValue: currentState.displayValue,
+			placeholderContent: {...currentState.placeholderContent},
+		};
+
+		if (isBusy && !assembled.trim().startsWith('/') && onQueueMessage) {
+			promptHistory.addPrompt(inputStateForHistory);
+			onQueueMessage({
+				message: assembled,
+				displayValue: display,
+				images: images.length > 0 ? images : undefined,
+				inputState: inputStateForHistory,
+			});
+			resetInput();
+			resetUIState();
+			setAttachments([]);
+			promptHistory.resetIndex();
+			setSelectedQueuedIndex(-1);
+			return;
+		}
+
+		if (!onSubmit) return;
+
 		// Save the InputState to history and send assembled message to AI
-		promptHistory.addPrompt(currentState);
+		promptHistory.addPrompt(inputStateForHistory);
 		onSubmit(assembled, display, images.length > 0 ? images : undefined);
 		resetInput();
 		resetUIState();
 		setAttachments([]);
 		promptHistory.resetIndex();
-	}, [attachments, onSubmit, resetInput, resetUIState, currentState]);
+		setSelectedQueuedIndex(-1);
+	}, [
+		attachments,
+		onSubmit,
+		onQueueMessage,
+		resetInput,
+		resetUIState,
+		currentState,
+		isBusy,
+	]);
 
 	// Handle escape key logic
 	const handleEscape = useCallback(() => {
@@ -435,6 +489,80 @@ export default function UserInput({
 		],
 	);
 
+	const handleQueueNavigation = useCallback(
+		(direction: 'up' | 'down') => {
+			if (!isBusy || input.length > 0 || queuedMessages.length === 0) {
+				return false;
+			}
+
+			setSelectedQueuedIndex(index => {
+				if (direction === 'down') {
+					return index < 0 || index >= queuedMessages.length - 1
+						? 0
+						: index + 1;
+				}
+
+				return index <= 0 ? queuedMessages.length - 1 : index - 1;
+			});
+			return true;
+		},
+		[isBusy, input.length, queuedMessages.length],
+	);
+
+	const loadSelectedQueuedMessage = useCallback(() => {
+		if (
+			!isBusy ||
+			input.length > 0 ||
+			selectedQueuedIndex < 0 ||
+			selectedQueuedIndex >= queuedMessages.length
+		) {
+			return false;
+		}
+
+		const queuedMessage = queuedMessages[selectedQueuedIndex];
+		setInputState(
+			queuedMessage.inputState ?? {
+				displayValue: queuedMessage.displayValue,
+				placeholderContent: {},
+			},
+		);
+		setAttachments(queuedMessage.images ?? []);
+		onRemoveQueuedMessage?.(queuedMessage.id);
+		setSelectedQueuedIndex(-1);
+		setTextInputKey(prev => prev + 1);
+		return true;
+	}, [
+		isBusy,
+		input.length,
+		selectedQueuedIndex,
+		queuedMessages,
+		setInputState,
+		onRemoveQueuedMessage,
+	]);
+
+	const removeSelectedQueuedMessage = useCallback(() => {
+		if (
+			!isBusy ||
+			input.length > 0 ||
+			selectedQueuedIndex < 0 ||
+			selectedQueuedIndex >= queuedMessages.length
+		) {
+			return false;
+		}
+
+		onRemoveQueuedMessage?.(queuedMessages[selectedQueuedIndex].id);
+		setSelectedQueuedIndex(index =>
+			index >= queuedMessages.length - 1 ? queuedMessages.length - 2 : index,
+		);
+		return true;
+	}, [
+		isBusy,
+		input.length,
+		selectedQueuedIndex,
+		queuedMessages,
+		onRemoveQueuedMessage,
+	]);
+
 	useInput((inputChar, key) => {
 		// Cancelling in-flight work is owned by the single section-level Escape
 		// handler (see InteractiveApp), which fires no matter which component is
@@ -459,6 +587,10 @@ export default function UserInput({
 		// Handle ctrl+r to toggle expanded reasoning traces (always available)
 		if (key.ctrl && inputChar === 'r' && onToggleReasoningExpanded) {
 			onToggleReasoningExpanded();
+			return;
+		}
+
+		if (key.ctrl && key.delete && removeSelectedQueuedMessage()) {
 			return;
 		}
 
@@ -574,6 +706,9 @@ export default function UserInput({
 
 		// Handle Enter to submit (fallthrough - if completion handler didn't return)
 		if (key.return && !key.shift) {
+			if (loadSelectedQueuedMessage()) {
+				return;
+			}
 			handleSubmit();
 			return;
 		}
@@ -592,6 +727,9 @@ export default function UserInput({
 				setSelectedCompletionIndex(prev =>
 					prev > 0 ? prev - 1 : completions.length - 1,
 				);
+				return;
+			}
+			if (handleQueueNavigation('up')) {
 				return;
 			}
 			handleHistoryNavigation('up');
@@ -613,12 +751,28 @@ export default function UserInput({
 				);
 				return;
 			}
+			if (handleQueueNavigation('down')) {
+				return;
+			}
 			handleHistoryNavigation('down');
 			return;
 		}
 	});
 
 	const textColor = disabled || !input ? colors.secondary : colors.primary;
+	const formatQueuedMessage = (message: QueuedUserMessage) => {
+		const imageSuffix =
+			message.images && message.images.length > 0
+				? ` (${message.images.length} image${message.images.length === 1 ? '' : 's'})`
+				: '';
+		const maxLength = Math.max(20, boxWidth - imageSuffix.length - 6);
+		const singleLine = message.displayValue.replace(/\s+/g, ' ').trim();
+		const text =
+			singleLine.length > maxLength
+				? `${singleLine.slice(0, Math.max(0, maxLength - 1))}…`
+				: singleLine;
+		return `${text}${imageSuffix}`;
+	};
 
 	// When disabled, show minimal UI to avoid cluttering the screen
 	if (disabled) {
@@ -735,6 +889,38 @@ export default function UserInput({
 							</Text>
 						))}
 					</Box>
+				)}
+				{queuedMessages.length > 0 && (
+					<Box flexDirection="column" marginTop={1}>
+						<Text color={colors.secondary}>
+							Queued messages (↑/↓ select, Enter edit, Ctrl+Delete remove):
+						</Text>
+						{queuedMessages.map((message, index) => {
+							const isSelected = index === selectedQueuedIndex;
+							return (
+								<Text
+									key={message.id}
+									color={isSelected ? colors.info : colors.primary}
+									bold={isSelected}
+								>
+									{isSelected ? '▸ ' : '  '}
+									{formatQueuedMessage(message)}
+								</Text>
+							);
+						})}
+					</Box>
+				)}
+				{isBusy && (
+					<Text color={colors.secondary}>
+						<Spinner type="dots" /> Press Esc to cancel
+						{onToggleCompactDisplay && (
+							<Text>
+								{' '}
+								· ctrl-o {compactToolDisplay ? 'expand' : 'compact'}{' '}
+								{isNarrow ? '' : 'tool results'}
+							</Text>
+						)}
+					</Text>
 				)}
 			</Box>
 

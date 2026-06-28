@@ -102,6 +102,16 @@ function makeProps(o: Overrides = {}) {
 		handleToolConfirmation: noop,
 		handleQuestionAnswer: noop,
 		handleUserSubmit: noopAsync,
+		userMessageQueue: {
+			queuedMessages: [],
+			enqueueMessage: () => ({
+				id: 'queued-test',
+				message: '',
+				displayValue: '',
+			}),
+			removeMessage: noop,
+			drainNextMessage: () => false,
+		},
 		handleIdeSelect: noop,
 	} as never;
 }
