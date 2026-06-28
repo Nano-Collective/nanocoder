@@ -31,6 +31,27 @@ const TestWrapper = ({children}: {children: React.ReactNode}) => (
 // Helper for async tests that need proper context and more time
 const wait = async (ms = 200) => new Promise(resolve => setTimeout(resolve, ms));
 
+const waitForCondition = async (
+	condition: () => boolean,
+	timeoutMs = 1000,
+) => {
+	const startedAt = Date.now();
+
+	while (Date.now() - startedAt < timeoutMs) {
+		if (condition()) return;
+		await wait(25);
+	}
+
+	throw new Error(`Timed out after ${timeoutMs}ms waiting for condition`);
+};
+
+const waitForFrame = async (
+	lastFrame: () => string | undefined,
+	pattern: RegExp,
+) => {
+	await waitForCondition(() => pattern.test(lastFrame() ?? ''));
+};
+
 // ============================================================================
 // Component Rendering Tests
 // ============================================================================
@@ -158,6 +179,64 @@ test('UserInput renders while busy (Escape deferred to global handler)', t => {
 	);
 
 	t.truthy(lastFrame());
+	unmount();
+});
+
+test('UserInput reports and restores submitted drafts with attachments', async t => {
+	let submittedMessage = '';
+	let submittedDraft:
+		| Parameters<
+				NonNullable<React.ComponentProps<typeof UserInput>['onSubmittedDraft']>
+		  >[0]
+		| null = null;
+
+	const restoreDraft = {
+		id: 1,
+		inputState: {
+			displayValue: 'edit this request',
+			placeholderContent: {},
+		},
+		attachments: [{data: 'abc', mediaType: 'image/png'}],
+	};
+
+	const {stdin, lastFrame, rerender, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+				onSubmittedDraft={draft => {
+					submittedDraft = draft;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('original');
+	await waitForFrame(lastFrame, /original/);
+	stdin.write('\r');
+	await waitForCondition(() => submittedMessage === 'original');
+	await waitForCondition(() => !/original/.test(lastFrame() ?? ''));
+
+	t.is(submittedDraft?.inputState.displayValue, 'original');
+	t.deepEqual(submittedDraft?.inputState.placeholderContent, {});
+	t.deepEqual(submittedDraft?.attachments, []);
+
+	rerender(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+				restoreSubmittedDraft={restoreDraft}
+			/>
+		</TestWrapper>,
+	);
+	await waitForFrame(lastFrame, /edit this request/);
+
+	t.regex(lastFrame()!, /\[image #1: image\]/);
 	unmount();
 });
 
@@ -595,6 +674,4 @@ test('UserInput does not show completions when input is empty', t => {
 	t.notRegex(output, /Available commands:/);
 	unmount();
 });
-
-
 

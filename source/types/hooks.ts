@@ -1,3 +1,5 @@
+import type {ImageAttachment} from '@/types/core';
+
 // Enum for all supported placeholder types - ensures type safety
 export enum PlaceholderType {
 	PASTE = 'paste',
@@ -47,4 +49,13 @@ export interface InputState {
 	// A dictionary holding the full content and metadata for each placeholder.
 	// The key is the ID from the placeholder.
 	placeholderContent: Record<string, PlaceholderContent>;
+}
+
+export interface SubmittedInputDraft {
+	inputState: InputState;
+	attachments: ImageAttachment[];
+}
+
+export interface RestoredInputDraft extends SubmittedInputDraft {
+	id: number;
 }

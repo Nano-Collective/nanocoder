@@ -16,6 +16,7 @@ import type {
 	ToolCall,
 	TuneConfig,
 } from '@/types';
+import type {RestoredInputDraft, SubmittedInputDraft} from '@/types/hooks';
 import type {PendingQuestion} from '@/utils/question-queue';
 import type {PendingToolApproval} from '@/utils/tool-approval-queue';
 import type {PendingToolConfirmation} from '@/utils/tool-confirm-queue';
@@ -51,6 +52,8 @@ export interface ChatInputProps {
 	// Input state
 	customCommands: string[];
 	inputDisabled: boolean;
+	onSubmittedDraft?: (draft: SubmittedInputDraft) => void;
+	restoreSubmittedDraft?: RestoredInputDraft | null;
 	// True when in-flight work makes Escape a cancel; lets UserInput defer to
 	// the section-level global cancel handler instead of clearing the input.
 	isBusy: boolean;
@@ -108,6 +111,8 @@ export function ChatInput({
 	client,
 	customCommands,
 	inputDisabled,
+	onSubmittedDraft,
+	restoreSubmittedDraft,
 	isBusy,
 	developmentMode,
 	contextPercentUsed,
@@ -179,6 +184,8 @@ export function ChatInput({
 						void onSubmit(msg, display, images)
 					}
 					disabled={inputDisabled}
+					onSubmittedDraft={onSubmittedDraft}
+					restoreSubmittedDraft={restoreSubmittedDraft}
 					isBusy={isBusy}
 					onToggleMode={onToggleMode}
 					onToggleReasoningExpanded={onToggleReasoningExpanded}

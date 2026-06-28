@@ -6,12 +6,27 @@ import type {ChatQueueProps} from '@/types/index';
 export default memo(function ChatQueue({
 	staticComponents = [],
 	queuedComponents = [],
+	renderLastQueuedComponentLive = false,
 }: ChatQueueProps) {
+	const {staticQueuedComponents, liveQueuedComponents} = useMemo(() => {
+		if (!renderLastQueuedComponentLive) {
+			return {
+				staticQueuedComponents: queuedComponents,
+				liveQueuedComponents: [],
+			};
+		}
+
+		return {
+			staticQueuedComponents: queuedComponents.slice(0, -1),
+			liveQueuedComponents: queuedComponents.slice(-1),
+		};
+	}, [queuedComponents, renderLastQueuedComponentLive]);
+
 	// Move ALL messages to static - prevents any re-renders
 	// All messages are now immutable once rendered
 	const allStaticComponents = useMemo(
-		() => [...staticComponents, ...queuedComponents],
-		[staticComponents, queuedComponents],
+		() => [...staticComponents, ...staticQueuedComponents],
+		[staticComponents, staticQueuedComponents],
 	);
 
 	return (
@@ -34,6 +49,17 @@ export default memo(function ChatQueue({
 					}}
 				</Static>
 			)}
+			{liveQueuedComponents.map((component, index) => {
+				const key =
+					component &&
+					typeof component === 'object' &&
+					'key' in component &&
+					component.key
+						? component.key
+						: `live-${index}`;
+
+				return <RenderErrorBoundary key={key}>{component}</RenderErrorBoundary>;
+			})}
 		</Box>
 	);
 });
