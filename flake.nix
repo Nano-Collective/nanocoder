@@ -21,7 +21,7 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
         pname = "nanocoder";
-        version = "1.28.0";
+        version = "1.28.1";
 
         nodejs = pkgs.nodejs_24;
 
@@ -45,7 +45,7 @@
             owner = "nano-collective";
             repo = pname;
             rev = "v${version}";
-            sha256 = "sha256-hs6Do1ObudylPe398ZxwZX3S4fHvcPhTHShf9ZcHe1E=";
+            sha256 = "sha256-yQy+SBYvBB9x6EiriewQ1/SnHg7S3c395yNaTQdv2ic=";
           };
 
           nativeBuildInputs = [
