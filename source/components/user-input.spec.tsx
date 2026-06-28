@@ -31,6 +31,34 @@ const TestWrapper = ({children}: {children: React.ReactNode}) => (
 // Helper for async tests that need proper context and more time
 const wait = async (ms = 200) => new Promise(resolve => setTimeout(resolve, ms));
 
+const waitForCondition = async (
+	condition: () => boolean,
+	timeoutMs = 1000,
+) => {
+	const startedAt = Date.now();
+
+	while (Date.now() - startedAt < timeoutMs) {
+		if (condition()) {
+			return;
+		}
+
+		await wait(25);
+	}
+
+	throw new Error(`Timed out after ${timeoutMs}ms waiting for condition`);
+};
+
+const waitForFrame = async (
+	lastFrame: () => string | undefined,
+	pattern: RegExp,
+	timeoutMs = 1000,
+) => {
+	await waitForCondition(
+		() => pattern.test(lastFrame() ?? ''),
+		timeoutMs,
+	);
+};
+
 // ============================================================================
 // Component Rendering Tests
 // ============================================================================
@@ -183,9 +211,10 @@ test('UserInput queues submitted messages while busy', async t => {
 	);
 
 	stdin.write('queued while busy');
-	await wait(50);
+	await waitForFrame(lastFrame, /queued while busy/);
 	stdin.write('\r');
-	await wait(50);
+	await waitForCondition(() => queuedMessage === 'queued while busy');
+	await waitForCondition(() => !/queued while busy/.test(lastFrame() ?? ''));
 
 	t.is(submittedMessage, '');
 	t.is(queuedMessage, 'queued while busy');
@@ -198,7 +227,7 @@ test('UserInput submits slash commands immediately while busy', async t => {
 	let submittedMessage = '';
 	let queuedMessage = '';
 
-	const {stdin, unmount} = render(
+	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput
 				forceFocus={true}
@@ -214,9 +243,9 @@ test('UserInput submits slash commands immediately while busy', async t => {
 	);
 
 	stdin.write('/help');
-	await wait(50);
+	await waitForFrame(lastFrame, /\/help/);
 	stdin.write('\r');
-	await wait(50);
+	await waitForCondition(() => submittedMessage === '/help');
 
 	t.is(submittedMessage, '/help');
 	t.is(queuedMessage, '');
