@@ -26,4 +26,5 @@ export interface ToolExecutionIndicatorProps {
 export interface UserMessageProps {
 	message: string;
 	tokenContent?: string; // Full assembled content for accurate token counting
+	imageCount?: number; // Number of image attachments sent with this message
 }

@@ -192,7 +192,7 @@ function lintMemberBodies(
 			// which the command parser drops. Detect it from the raw frontmatter
 			// so the lint can name the exact mistake instead of just "undeclared".
 			const parametersMalformed =
-				frontmatterHasKey(commandMember.filePath, 'parameters') &&
+				frontmatterHasParametersKey(commandMember.filePath) &&
 				!Array.isArray(parsed.metadata.parameters);
 			// Strip any `=default` so the lint compares against bare names.
 			const declaredNames = (parsed.metadata.parameters ?? []).map(
@@ -210,12 +210,16 @@ function lintMemberBodies(
 	return issues;
 }
 
+// Matches a top-level `parameters:` key in YAML frontmatter (hardcoded to
+// avoid building a RegExp from a variable).
+const PARAMETERS_KEY_RE = /^[ \t]*parameters[ \t]*:/m;
+
 /**
- * Whether the file's YAML frontmatter declares `key:` at the top level.
+ * Whether the file's YAML frontmatter declares `parameters:` at the top level.
  * Used to tell "author omitted parameters" apart from "author wrote
  * parameters in a shape the parser dropped".
  */
-function frontmatterHasKey(filePath: string, key: string): boolean {
+function frontmatterHasParametersKey(filePath: string): boolean {
 	let content: string;
 	try {
 		content = readFileSync(filePath, 'utf-8');
@@ -225,8 +229,7 @@ function frontmatterHasKey(filePath: string, key: string): boolean {
 	const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
 	if (!match) return false;
 	const frontmatter = match[1] ?? '';
-	const keyRe = new RegExp(`^[ \\t]*${key}[ \\t]*:`, 'm');
-	return keyRe.test(frontmatter);
+	return PARAMETERS_KEY_RE.test(frontmatter);
 }
 
 function formatMemberSummary(

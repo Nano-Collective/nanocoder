@@ -136,6 +136,21 @@ test('toOptionString unwraps MiniMax M3 $text-shaped options', t => {
 	);
 });
 
+test('toOptionString extracts content-shaped options', t => {
+	// Real-world case: models emit {content: "..."} for ask_user options.
+	t.is(
+		toOptionString({content: 'Internal NC use case is the primary v1 target.'}),
+		'Internal NC use case is the primary v1 target.',
+	);
+});
+
+test('toOptionString uses the lone key when value is empty (label-as-key shape)', t => {
+	t.is(
+		toOptionString({'Playfair Display - elegant, high-contrast, editorial': ''}),
+		'Playfair Display - elegant, high-contrast, editorial',
+	);
+});
+
 test('toOptionString falls back to JSON for unlabeled objects', t => {
 	t.is(toOptionString({foo: 1}), JSON.stringify({foo: 1}));
 });

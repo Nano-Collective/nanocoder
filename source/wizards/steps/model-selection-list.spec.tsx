@@ -1,5 +1,6 @@
 import test from 'ava';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import {renderWithTheme} from '@/test-utils/render-with-theme';
 import type {FetchedModel} from '../utils/fetch-models';
 import {ModelSelectionList} from './model-selection-list';
@@ -20,6 +21,7 @@ function renderList({
 	onSelectAll = () => {},
 	onDone = () => {},
 	onBack = () => {},
+	onManualEntry = () => {},
 }: {
 	models?: FetchedModel[];
 	selectedIds?: Set<string>;
@@ -28,6 +30,7 @@ function renderList({
 	onSelectAll?: () => void;
 	onDone?: () => void;
 	onBack?: () => void;
+	onManualEntry?: () => void;
 } = {}) {
 	return renderWithTheme(
 		<ModelSelectionList
@@ -40,6 +43,7 @@ function renderList({
 			onSelectAll={onSelectAll}
 			onDone={onDone}
 			onBack={onBack}
+			onManualEntry={onManualEntry}
 		/>,
 	);
 }
@@ -88,13 +92,14 @@ test('slash enters search mode and typing filters models', async t => {
 	}
 	await wait();
 
-	const output = lastFrame() || '';
+	// Strip ANSI so color codes (present when CI forces color) don't split the
+	// "Search models: " label from the typed query in the matched text.
+	const output = stripAnsi(lastFrame() || '');
 	t.regex(output, /Search models: claude/);
 	t.regex(output, /1-1\/1 models \| filter: claude/);
-	t.regex(output, /anthropic\/claude-sonnet-4/);
-	t.notRegex(output, /Claude Sonnet 4/);
-	t.notRegex(output, /openai\/gpt-4o/);
-	t.notRegex(output, /google\/gemini-pro/);
+	t.regex(output, /Claude Sonnet 4 — anthropic\/claude-sonnet-4/);
+	t.notRegex(output, /GPT-4o — openai\/gpt-4o/);
+	t.notRegex(output, /Gemini Pro — google\/gemini-pro/);
 
 	unmount();
 });
@@ -150,7 +155,7 @@ test('d in search mode updates the query instead of completing', async t => {
 	await wait();
 
 	t.is(doneCalls, 0);
-	t.regex(lastFrame() || '', /Search models: d/);
+	t.regex(stripAnsi(lastFrame() || ''), /Search models: d/);
 	unmount();
 });
 
@@ -185,5 +190,46 @@ test('renders error for empty selection', t => {
 	});
 
 	t.regex(lastFrame() || '', /Please select at least one model/);
+	unmount();
+});
+
+test('m triggers manual entry callback', async t => {
+	let manualEntryCalls = 0;
+	const {stdin, unmount} = renderList({
+		onManualEntry: () => {
+			manualEntryCalls += 1;
+		},
+	});
+
+	stdin.write('m');
+	await wait();
+
+	t.is(manualEntryCalls, 1);
+	unmount();
+});
+
+test('renders model name alongside id when available', t => {
+	const models: FetchedModel[] = [
+		{id: 'openai/gpt-4o', name: 'GPT-4o'},
+		{id: 'ollama/llama3.1', name: 'ollama/llama3.1'},
+	];
+	const {lastFrame, unmount} = renderList({models});
+	const output = lastFrame() || '';
+
+	t.regex(output, /GPT-4o — openai\/gpt-4o/);
+	t.regex(output, /ollama\/llama3\.1/);
+
+	unmount();
+});
+
+test('truncates long model labels with an ellipsis', t => {
+	const longId = `provider/${'x'.repeat(300)}`;
+	const models: FetchedModel[] = [{id: longId, name: longId}];
+	const {lastFrame, unmount} = renderList({models});
+	const output = lastFrame() || '';
+
+	t.regex(output, /…/);
+	t.notRegex(output, new RegExp(longId.replace(/\//g, '\\/')));
+
 	unmount();
 });

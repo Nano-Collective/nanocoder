@@ -67,8 +67,15 @@ const executeBashStreaming = (
 	toolCall: ToolCall,
 	toolManager: ToolManager | null,
 	setLiveComponent: (component: React.ReactNode) => void,
+	signal?: AbortSignal,
 ): Promise<StreamingBashRun> =>
-	runStreamingBashTool(toolCall, toolManager, setLiveComponent, 'direct-bash');
+	runStreamingBashTool(
+		toolCall,
+		toolManager,
+		setLiveComponent,
+		'direct-bash',
+		signal,
+	);
 
 /** Display + conversation-state options shared by every executed tool. */
 export interface ToolDisplayOptions {
@@ -89,9 +96,15 @@ export const executeApprovedTool = (
 	toolManager: ToolManager | null,
 	processToolUse: (toolCall: ToolCall) => Promise<ToolResult>,
 	setLiveComponent?: (component: React.ReactNode) => void,
+	signal?: AbortSignal,
 ): Promise<StreamingBashRun> => {
 	if (toolCall.function.name === 'execute_bash' && setLiveComponent) {
-		return executeBashStreaming(toolCall, toolManager, setLiveComponent);
+		return executeBashStreaming(
+			toolCall,
+			toolManager,
+			setLiveComponent,
+			signal,
+		);
 	}
 	return executeOne(toolCall, processToolUse);
 };
@@ -135,7 +148,7 @@ export const displayExecutedTool = async (
 		//
 		// Failures (generic "Error: …" or the streaming bash path's
 		// "⚒ Validation failed: …") don't fold into the count tally; they
-		// render as a condensed red one-liner ("⚒ write_file failed.")
+		// render as a condensed red one-liner ("⚒ write_file failed")
 		// instead of the full error. The model still receives the full
 		// error in conversation history — mirror displayToolResult's detection.
 		const isError =
@@ -511,6 +524,7 @@ export const executeToolsDirectly = async (
 						toolManager,
 						processToolUse,
 						options?.setLiveComponent,
+						options?.signal,
 					),
 				);
 			}

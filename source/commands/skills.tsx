@@ -17,10 +17,20 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {generateKey} from '@/session/key-generator';
 import {checkSkillBundle, type SkillCheckReport} from '@/skills/check';
+import {
+	applyPromotion,
+	type PromoteDirection,
+	planPromotion,
+} from '@/skills/promote';
 import {findSkill, getLoadedSkills} from '@/skills/skill-registry';
 import type {Command} from '@/types/index';
 import type {Skill} from '@/types/skills';
-import {infoMsg} from '@/utils/message-factory';
+import {
+	errorMsg,
+	infoMsg,
+	successMsg,
+	warningMsg,
+} from '@/utils/message-factory';
 
 function memberCount(skill: Skill): string {
 	const parts: string[] = [];
@@ -241,11 +251,66 @@ function SkillCheckView({report}: {report: SkillCheckReport}) {
 	);
 }
 
+async function handlePromotion(direction: PromoteDirection, args: string[]) {
+	const verb = direction; // 'promote' | 'demote'
+	const positional = args.filter(a => !a.startsWith('--'));
+	const force = args.includes('--force');
+	const move = args.includes('--move');
+	const name = positional[1];
+
+	if (!name) {
+		return infoMsg(
+			`Usage: /skills ${verb} <name> [--force] [--move]\nExample: /skills ${verb} pr-reviewer\n\n--move removes the original after copying (default is copy, leaving both).`,
+			'skills',
+		);
+	}
+
+	const skill = findSkill(name);
+	if (!skill) {
+		return errorMsg(`No skill named "${name}" is loaded.`, 'skills');
+	}
+
+	const planned = planPromotion(skill, direction, process.cwd());
+	if ('error' in planned) {
+		return infoMsg(planned.error, 'skills');
+	}
+	const {plan} = planned;
+
+	const result = await applyPromotion(plan, {force, move});
+	if (result.destExists) {
+		return warningMsg(
+			`A skill already exists at ${plan.dest}.\nRe-run with --force to overwrite it:\n  /skills ${verb} ${name} --force${move ? ' --move' : ''}`,
+			'skills',
+		);
+	}
+	if (!result.ok) {
+		return errorMsg(
+			`Failed to ${verb} "${name}": ${result.error ?? 'unknown error'}`,
+			'skills',
+		);
+	}
+
+	const action = result.moved
+		? `Moved "${name}"`
+		: `${verb === 'promote' ? 'Promoted' : 'Demoted'} "${name}"`;
+	const trailer = result.moved
+		? '\nRemoved the original. Restart nanocoder to load it.'
+		: '\nRestart nanocoder to load it.';
+	return successMsg(
+		`${action} (${plan.fromLevel} → ${plan.toLevel}).\n  ${plan.source}\n  → ${plan.dest}${trailer}`,
+		'skills',
+	);
+}
+
 export const skillsCommand: Command = {
 	name: 'skills',
 	description:
-		'List loaded skills. Subcommands: show <name>, create <name>, check <name>.',
+		'List loaded skills. Subcommands: show <name>, create <name>, check <name>, promote <name>, demote <name>.',
 	handler: async (args, _messages, _metadata) => {
+		if (args[0] === 'promote' || args[0] === 'demote') {
+			return handlePromotion(args[0], args);
+		}
+
 		if (args[0] === 'check') {
 			const name = args[1];
 			if (!name) {

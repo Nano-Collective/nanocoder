@@ -270,6 +270,42 @@ function loadSessionConfig(): AppConfig['sessions'] {
 	);
 }
 
+// Default ceiling on LLM turns for headless (--plain / ACP) conversations.
+// High enough that legitimate long iterative jobs finish, low enough that a
+// wedged model in CI can't run unbounded. Override via the NANOCODER_MAX_TURNS
+// env var or `nanocoder.headless.maxTurns` in agents.config.json.
+export const DEFAULT_HEADLESS_MAX_TURNS = 200;
+
+// Load headless conversation limits. Env var wins (handy for CI), then
+// agents.config.json, then the default.
+function loadHeadlessConfig(): AppConfig['headless'] {
+	const defaults: NonNullable<AppConfig['headless']> = {
+		maxTurns: DEFAULT_HEADLESS_MAX_TURNS,
+	};
+
+	const envValue = process.env['NANOCODER_MAX_TURNS'];
+	if (envValue !== undefined && envValue.trim() !== '') {
+		const parsed = Number.parseInt(envValue, 10);
+		if (Number.isFinite(parsed) && parsed >= 1) {
+			return {maxTurns: parsed};
+		}
+	}
+
+	return (
+		loadHierarchicalConfig('agents.config.json', 'headless', config => {
+			const headless = config.nanocoder?.headless;
+			if (headless && typeof headless === 'object') {
+				const value = headless.maxTurns;
+				if (typeof value === 'number' && Number.isFinite(value)) {
+					return {maxTurns: Math.max(1, Math.round(value))};
+				}
+				return defaults;
+			}
+			return null;
+		}) ?? defaults
+	);
+}
+
 // Load paste configuration and Returns default config if not specified
 function loadPasteConfig(): PasteConfig {
 	const defaults: PasteConfig = {
@@ -397,6 +433,9 @@ function loadAppConfig(): AppConfig {
 	// Load session configuration
 	const sessions = loadSessionConfig();
 
+	// Load headless conversation limits
+	const headless = loadHeadlessConfig();
+
 	// Load paste configuration
 	const paste = loadPasteConfig();
 
@@ -420,6 +459,7 @@ function loadAppConfig(): AppConfig {
 		mcpServers,
 		autoCompact,
 		sessions,
+		headless,
 		paste,
 		nanocoderTools,
 		alwaysAllow,

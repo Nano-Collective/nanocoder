@@ -409,6 +409,13 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			return config;
 		},
 	},
+	apiKeyTemplate({
+		id: 'requesty',
+		name: 'Requesty',
+		baseUrl: 'https://router.requesty.ai/v1',
+		apiKeyPrompt: 'API Key (from https://app.requesty.ai/api-keys)',
+		modelDefault: 'openai/gpt-4o-mini',
+	}),
 	{
 		id: 'openai',
 		name: 'OpenAI',
@@ -510,6 +517,12 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		name: 'Poe',
 		baseUrl: 'https://api.poe.com/v1',
 		apiKeyPrompt: 'API Key (from poe.com/api_key)',
+	}),
+	apiKeyTemplate({
+		id: 'atlas-cloud',
+		name: 'Atlas Cloud',
+		baseUrl: 'https://api.atlascloud.ai/v1',
+		apiKeyPrompt: 'API Key (from atlascloud.ai/developer)',
 	}),
 	{
 		id: 'custom',

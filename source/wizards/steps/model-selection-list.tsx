@@ -16,6 +16,7 @@ interface ModelSelectionListProps {
 	onSelectAll: () => void;
 	onDone: () => void;
 	onBack: () => void;
+	onManualEntry: () => void;
 }
 
 export function ModelSelectionList({
@@ -28,6 +29,7 @@ export function ModelSelectionList({
 	onSelectAll,
 	onDone,
 	onBack,
+	onManualEntry,
 }: ModelSelectionListProps) {
 	const colors = getColors();
 	const [selectedIndex, setSelectedIndex] = useState(0);
@@ -130,6 +132,8 @@ export function ModelSelectionList({
 			onSelectAll();
 		} else if (input === 'd') {
 			onDone();
+		} else if (input === 'm') {
+			onManualEntry();
 		}
 	});
 
@@ -175,11 +179,14 @@ export function ModelSelectionList({
 						return (
 							<Text
 								key={model.id}
+								wrap="truncate-end"
 								color={isHighlighted ? colors.primary : colors.text}
 								bold={isHighlighted}
 							>
 								{isHighlighted ? '❯' : ' '} {isSelected ? '[✓]' : '[ ]'}{' '}
-								{model.id}
+								{model.name === model.id
+									? model.id
+									: `${model.name} — ${model.id}`}
 							</Text>
 						);
 					})
@@ -200,14 +207,16 @@ export function ModelSelectionList({
 				<Box flexDirection="column" marginTop={1}>
 					<Text color={colors.secondary}>↑/↓: navigate</Text>
 					<Text color={colors.secondary}>Enter/Space: toggle</Text>
-					<Text color={colors.secondary}>/: search | a: all | d: done</Text>
+					<Text color={colors.secondary}>
+						/: search | a: all | d: done | m: manual
+					</Text>
 					<Text color={colors.secondary}>Esc/Shift+Tab: back</Text>
 				</Box>
 			) : (
 				<Box marginTop={1}>
 					<Text color={colors.secondary}>
 						Up/Down: navigate | Enter/Space: toggle | /: search | a: select all
-						| d: done | Esc/Shift+Tab: back
+						| d: done | m: manual entry | Esc/Shift+Tab: back
 					</Text>
 				</Box>
 			)}

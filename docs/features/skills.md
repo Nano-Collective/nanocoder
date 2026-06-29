@@ -204,6 +204,9 @@ mode instead.
 /skills                 list every loaded skill
 /skills show k8s        details for one skill (members, subscriptions, source)
 /skills create k8s      scaffold a new bundle at .nanocoder/skills/k8s/
+/skills check k8s       validate a bundle without loading it
+/skills promote k8s     copy a project skill up to the global level
+/skills demote k8s      copy a global skill down into this project
 ```
 
 `/skills create` only scaffolds **bundles**. For single-file skills, use
@@ -218,6 +221,40 @@ the existing creators:
 Each of those drops a stub file in the right flat dir and chains into an
 AI-assisted design conversation so the model can help fill in the
 frontmatter and body.
+
+## Sharing skills across repos
+
+Skills load from three levels, highest priority first:
+
+- **project** - `.nanocoder/skills/` (and the flat `commands|agents|tools/`
+  dirs) in the working directory. Scoped to this repo, committed with it.
+- **personal / global** - the same layout under your platform config dir
+  (`~/.config/nanocoder/` on Linux, `~/Library/Preferences/nanocoder/` on
+  macOS, or `$NANOCODER_CONFIG_DIR`). Available in every repo on the machine.
+- **built-in** - shipped with nanocoder.
+
+A project skill shadows a personal one of the same name, which shadows a
+built-in. To reuse a skill you wrote in one repo everywhere, move it up a
+level; to vendor a global or built-in skill into a repo so teammates get it,
+move it down:
+
+```
+/skills promote pr-review          copy project -> global, keep both
+/skills promote pr-review --move    move project -> global, remove the original
+/skills demote pr-review           copy global -> project, keep both
+/skills demote pr-review --move     move global -> project, remove the original
+```
+
+Notes:
+
+- Both default to **copy**, leaving the original in place. After a copy you
+  have the skill at both levels and the higher-priority one wins on the next
+  load. Pass `--move` to remove the source instead.
+- The copy refuses to overwrite an existing skill at the destination. Re-run
+  with `--force` to replace it.
+- `promote` only works on a project skill; `demote` works on a global or
+  built-in skill (demoting a built-in vendors a copy you can then edit).
+- Both write to disk only. Restart nanocoder for the new copy to load.
 
 ## Migration from `schedules.json`
 

@@ -20,11 +20,15 @@ export interface FrontmatterSplit {
  * `hasFrontmatter` is false.
  */
 export function splitFrontmatter(fileContent: string): FrontmatterSplit {
-	const frontmatterRegex = /^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?([\s\S]*)$/;
+	// The frontmatter group is optional (`(?:…)?`) so an empty block —
+	// `---\n---\n` with no lines between the delimiters — is still recognised
+	// rather than leaking the literal `---` markers into the body.
+	const frontmatterRegex =
+		/^---\s*\r?\n(?:([\s\S]*?)\r?\n)?---\s*\r?\n?([\s\S]*)$/;
 	const match = fileContent.match(frontmatterRegex);
-	if (match && match[1] !== undefined && match[2] !== undefined) {
+	if (match && match[2] !== undefined) {
 		return {
-			frontmatter: match[1],
+			frontmatter: match[1] ?? '',
 			body: match[2].trim(),
 			hasFrontmatter: true,
 		};

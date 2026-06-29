@@ -5,7 +5,7 @@
 
 import type {Tokenizer, TokenizerProvider} from '../types/tokenization.js';
 import {AnthropicTokenizer} from './tokenizers/anthropic-tokenizer.js';
-import {FallbackTokenizer} from './tokenizers/fallback-tokenizer.js';
+import {GenericTokenizer} from './tokenizers/generic-tokenizer.js';
 import {LlamaTokenizer} from './tokenizers/llama-tokenizer.js';
 import {OpenAITokenizer} from './tokenizers/openai-tokenizer.js';
 
@@ -89,6 +89,9 @@ export function createTokenizer(
 
 		case 'fallback':
 		default:
-			return new FallbackTokenizer();
+			// Unknown provider/model: a real BPE encoding (o200k_base) is a much
+			// better proxy than char/4, and it self-degrades to char/4 when
+			// tiktoken can't load.
+			return new GenericTokenizer();
 	}
 }

@@ -30,6 +30,20 @@ export type ToolApprovalPolicy =
 	// biome-ignore lint/suspicious/noExplicitAny: tool args are schema-validated per tool
 	| ((args: any, mode: DevelopmentMode) => boolean | Promise<boolean>);
 
+/**
+ * A visual attachment carried on a user message (e.g. a pasted screenshot or
+ * an `@`-mentioned image file). Stored as base64 so it survives session
+ * persistence; converted to an AI SDK image part at the provider boundary.
+ */
+export interface ImageAttachment {
+	/** Base64-encoded image bytes (no `data:` URI prefix). */
+	data: string;
+	/** IANA media type, e.g. `image/png` or `image/jpeg`. */
+	mediaType: string;
+	/** Optional human-readable source label (file name or `clipboard`). */
+	source?: string;
+}
+
 // Current Nanocoder message format (OpenAI-compatible)
 // Note: We maintain this format internally and convert to ModelMessage at AI SDK boundary
 export interface Message {
@@ -43,6 +57,9 @@ export interface Message {
 	// JSON tool result instead of the plain `content` text. `content` remains
 	// the canonical string for display, persistence, and as the fallback.
 	structuredContent?: JSONValue;
+	// For user messages: image attachments sent to the model as multimodal
+	// content parts alongside `content`. Empty/undefined for text-only turns.
+	images?: ImageAttachment[];
 }
 
 export interface ToolCall {
@@ -254,8 +271,15 @@ export interface ApiUsageSnapshot extends ApiUsage {
 	atMessageCount: number;
 }
 
-/** Whether a displayed context figure came from API usage or estimation. */
-export type ContextSource = 'api' | 'estimate';
+/**
+ * Provenance of a displayed context figure:
+ * - `api`: fully provider-reported (the snapshot covers the whole conversation,
+ *   or the estimated tail is too small to move the rounded percentage).
+ * - `api+estimate`: anchored on the provider-reported total, with a client-side
+ *   estimate added for the messages appended since the snapshot.
+ * - `estimate`: fully client-side (no usable API report yet).
+ */
+export type ContextSource = 'api' | 'api+estimate' | 'estimate';
 
 export interface LLMChatResponse {
 	choices: Array<{

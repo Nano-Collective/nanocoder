@@ -10,9 +10,18 @@ import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
 import {promptHistory} from '@/prompt-history';
 import type {TuneConfig} from '@/types/config';
-import type {ContextSource, DevelopmentMode} from '@/types/core';
+import type {
+	ContextSource,
+	DevelopmentMode,
+	ImageAttachment,
+} from '@/types/core';
 import type {InputState} from '@/types/hooks';
 import {Completion} from '@/types/index';
+import {
+	extractImageReferences,
+	readClipboardImage,
+	readImageFile,
+} from '@/utils/clipboard-image';
 import {
 	getCurrentFileMention,
 	getFileCompletions,
@@ -22,7 +31,11 @@ import {assemblePrompt} from '@/utils/prompt-processor';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 interface ChatProps {
-	onSubmit?: (message: string, displayValue: string) => void;
+	onSubmit?: (
+		message: string,
+		displayValue: string,
+		images?: ImageAttachment[],
+	) => void;
 	placeholder?: string;
 	customCommands?: string[]; // List of custom command names and aliases
 	disabled?: boolean; // Disable input when AI is processing
@@ -39,6 +52,7 @@ interface ChatProps {
 	currentModel?: string; // Active model id — resolves the 'auto' tune profile for display
 	activeEditor?: ActiveEditorState | null; // VS Code active file + optional selection
 	onDismissActiveEditor?: () => void; // Dismiss the active editor pill on clear/escape
+	forceFocus?: boolean; // Force focus for testing (bypasses useFocus)
 }
 
 export default function UserInput({
@@ -59,13 +73,16 @@ export default function UserInput({
 	currentModel,
 	activeEditor,
 	onDismissActiveEditor,
+	forceFocus = false,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
+	const effectiveFocus = forceFocus || isFocused;
 	const {colors} = useTheme();
 	const inputState = useInputState();
 	const uiState = useUIStateContext();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
 	const [textInputKey, setTextInputKey] = useState(0);
+	const completionJustSelectedRef = useRef(false);
 	// Store the full InputState draft when starting history navigation, so it can be restored
 	const savedDraftRef = useRef<InputState>({
 		displayValue: '',
@@ -77,6 +94,8 @@ export default function UserInput({
 		Array<{path: string; score: number}>
 	>([]);
 	const [selectedFileIndex, setSelectedFileIndex] = useState(0);
+	// Pending image attachments sent with the next submitted message.
+	const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
 
 	const {
 		input,
@@ -95,10 +114,12 @@ export default function UserInput({
 		showCompletions,
 		completions,
 		pendingFileMentions,
+		selectedCompletionIndex,
 		setShowClearMessage,
 		setShowCompletions,
 		setCompletions,
 		setPendingFileMentions,
+		setSelectedCompletionIndex,
 		resetUIState,
 	} = uiState;
 
@@ -184,6 +205,14 @@ export default function UserInput({
 			return [];
 		}
 
+		// Once the user types a space, they're entering arguments for the
+		// command (e.g. `/model gpt-4`). Stop offering completions so Enter
+		// submits the command-with-args instead of selecting a completion and
+		// dropping everything after the command name.
+		if (input.slice(1).includes(' ')) {
+			return [];
+		}
+
 		const commandPrefix = input.slice(1).split(' ')[0];
 
 		const builtInCompletions = commandRegistry.getCompletions(commandPrefix);
@@ -205,14 +234,26 @@ export default function UserInput({
 
 	// Update UI state for command completions
 	useEffect(() => {
+		if (completionJustSelectedRef.current) {
+			completionJustSelectedRef.current = false;
+			return;
+		}
 		if (commandCompletions.length > 0) {
 			setCompletions(commandCompletions);
 			setShowCompletions(true);
+			setSelectedCompletionIndex(0);
 		} else if (showCompletions) {
 			setCompletions([]);
 			setShowCompletions(false);
+			setSelectedCompletionIndex(-1);
 		}
-	}, [commandCompletions, showCompletions, setCompletions, setShowCompletions]);
+	}, [
+		commandCompletions,
+		showCompletions,
+		setCompletions,
+		setShowCompletions,
+		setSelectedCompletionIndex,
+	]);
 
 	// Helper functions
 
@@ -263,26 +304,54 @@ export default function UserInput({
 		setInputState,
 	]);
 
+	// Attach an image to the pending message. We never gate on a model-capability
+	// heuristic here: if the model can't see images it will say so or error, which
+	// is clearer than an over-cautious warning on every attach.
+	const attachImage = useCallback((image: ImageAttachment) => {
+		setAttachments(prev => [...prev, image]);
+	}, []);
+
 	// Handle form submission
 	const handleSubmit = useCallback(() => {
-		if (input.trim() && onSubmit) {
-			// Assemble the full prompt by replacing placeholders with content
-			const fullMessage = assemblePrompt(currentState);
+		if (!onSubmit) return;
 
-			// Save the InputState to history and send assembled message to AI
-			promptHistory.addPrompt(currentState);
-			onSubmit(fullMessage, currentState.displayValue);
-			resetInput();
-			resetUIState();
-			promptHistory.resetIndex();
+		let images = attachments;
+		let assembled = assemblePrompt(currentState);
+		let display = currentState.displayValue;
+
+		// Image file paths the user typed, pasted, or dragged into the terminal
+		// (often quoted, mixed in with prose) become attachments and are stripped
+		// from the message text rather than sent as literal paths.
+		const {text: cleanedAssembled, paths} = extractImageReferences(assembled);
+		if (paths.length > 0) {
+			const dropped = paths
+				.map(readImageFile)
+				.filter((img): img is ImageAttachment => img !== null);
+			if (dropped.length > 0) {
+				images = [...attachments, ...dropped];
+				assembled = cleanedAssembled;
+				display = extractImageReferences(display).text;
+			}
 		}
-	}, [input, onSubmit, resetInput, resetUIState, currentState]);
+
+		// Nothing to send: no text and no attachments.
+		if (!assembled.trim() && images.length === 0) return;
+
+		// Save the InputState to history and send assembled message to AI
+		promptHistory.addPrompt(currentState);
+		onSubmit(assembled, display, images.length > 0 ? images : undefined);
+		resetInput();
+		resetUIState();
+		setAttachments([]);
+		promptHistory.resetIndex();
+	}, [attachments, onSubmit, resetInput, resetUIState, currentState]);
 
 	// Handle escape key logic
 	const handleEscape = useCallback(() => {
 		if (showClearMessage) {
 			resetInput();
 			resetUIState();
+			setAttachments([]);
 			onDismissActiveEditor?.();
 			focus('user-input');
 		} else {
@@ -398,6 +467,23 @@ export default function UserInput({
 			return;
 		}
 
+		// Ctrl+V: pull an image off the system clipboard as an attachment.
+		// Terminal paste of regular text arrives as a bracketed paste, not as
+		// Ctrl+V, so this binding is free to mean "paste image".
+		if (key.ctrl && inputChar === 'v') {
+			const image = readClipboardImage();
+			if (image) {
+				attachImage(image);
+			}
+			return;
+		}
+
+		// Ctrl+X: drop the most recently added image attachment.
+		if (key.ctrl && inputChar === 'x') {
+			setAttachments(prev => prev.slice(0, -1));
+			return;
+		}
+
 		// Handle special keys
 		if (key.escape) {
 			handleEscape();
@@ -414,6 +500,10 @@ export default function UserInput({
 
 			// Command completion - use pre-calculated commandCompletions
 			if (input.startsWith('/')) {
+				// Don't auto-complete on Tab when completions list is visible - use Enter to select
+				if (showCompletions && completions.length > 0) {
+					return;
+				}
 				if (commandCompletions.length === 1) {
 					// Auto-complete when there's exactly one match
 					const completion = commandCompletions[0];
@@ -425,22 +515,9 @@ export default function UserInput({
 					});
 					setTextInputKey(prev => prev + 1);
 				} else if (commandCompletions.length > 1) {
-					// If completions are already showing, autocomplete to the first result
-					if (showCompletions && completions.length > 0) {
-						const completion = completions[0];
-						const completedText = `/${completion.name}`;
-						// Use setInputState to bypass paste detection for autocomplete
-						setInputState({
-							displayValue: completedText,
-							placeholderContent: currentState.placeholderContent,
-						});
-						setShowCompletions(false);
-						setTextInputKey(prev => prev + 1);
-					} else {
-						// Show completions when there are multiple matches
-						setCompletions(commandCompletions);
-						setShowCompletions(true);
-					}
+					// Show completions when there are multiple matches
+					setCompletions(commandCompletions);
+					setShowCompletions(true);
 				}
 				return;
 			}
@@ -474,12 +551,46 @@ export default function UserInput({
 			return;
 		}
 
+		// Handle Enter to select completion
+		if (
+			key.return &&
+			!key.shift &&
+			showCompletions &&
+			completions.length > 0 &&
+			selectedCompletionIndex >= 0
+		) {
+			const selected = completions[selectedCompletionIndex];
+			const completedText = `/${selected.name}`;
+			completionJustSelectedRef.current = true;
+			setInputState({
+				displayValue: completedText,
+				placeholderContent: {},
+			});
+			setShowCompletions(false);
+			setSelectedCompletionIndex(-1);
+			setTextInputKey(prev => prev + 1);
+			return;
+		}
+
+		// Handle Enter to submit (fallthrough - if completion handler didn't return)
+		if (key.return && !key.shift) {
+			handleSubmit();
+			return;
+		}
+
 		// Handle navigation
 		if (key.upArrow) {
 			// File autocomplete navigation takes priority
 			if (isFileAutocompleteMode && fileCompletions.length > 0) {
 				setSelectedFileIndex(prev =>
 					prev > 0 ? prev - 1 : fileCompletions.length - 1,
+				);
+				return;
+			}
+			// Command completion navigation takes priority over history
+			if (showCompletions && completions.length > 0) {
+				setSelectedCompletionIndex(prev =>
+					prev > 0 ? prev - 1 : completions.length - 1,
 				);
 				return;
 			}
@@ -492,6 +603,13 @@ export default function UserInput({
 			if (isFileAutocompleteMode && fileCompletions.length > 0) {
 				setSelectedFileIndex(prev =>
 					prev < fileCompletions.length - 1 ? prev + 1 : 0,
+				);
+				return;
+			}
+			// Command completion navigation takes priority over history
+			if (showCompletions && completions.length > 0) {
+				setSelectedCompletionIndex(prev =>
+					prev < completions.length - 1 ? prev + 1 : 0,
 				);
 				return;
 			}
@@ -540,6 +658,7 @@ export default function UserInput({
 					Bash mode
 				</Text>
 			)}
+
 			<Box
 				flexDirection="column"
 				marginTop={1}
@@ -563,48 +682,72 @@ export default function UserInput({
 						value={input}
 						onChange={updateInput}
 						onSubmit={handleSubmit}
+						onEnter={handleSubmit}
 						placeholder="/ commands, ! bash, ↑/↓ history"
-						focus={isFocused}
+						focus={effectiveFocus}
 						wrapWidth={boxWidth - 3}
+						handleEnter={false}
 					/>
 				</Box>
 
 				{showClearMessage && (
 					<Text color={colors.secondary}>Press escape again to clear</Text>
 				)}
+
+				{showCompletions && completions.length > 0 && (
+					<Box flexDirection="column" marginTop={1}>
+						<Text color={colors.secondary}>Available commands:</Text>
+						{completions.map((completion, index) => {
+							const isSelected = index === selectedCompletionIndex;
+							return (
+								<Text
+									key={index}
+									color={
+										isSelected
+											? colors.info
+											: completion.isCustom
+												? colors.info
+												: colors.primary
+									}
+									bold={isSelected}
+								>
+									{isSelected ? '▸ ' : '  '}/{completion.name}
+								</Text>
+							);
+						})}
+					</Box>
+				)}
+				{isFileAutocompleteMode && fileCompletions.length > 0 && (
+					<Box flexDirection="column" marginTop={1}>
+						<Text color={colors.secondary}>
+							File suggestions (↑/↓ to navigate, Tab to select):
+						</Text>
+						{fileCompletions.slice(0, 5).map((file, index) => (
+							<Text
+								key={index}
+								color={
+									index === selectedFileIndex ? colors.info : colors.primary
+								}
+								bold={index === selectedFileIndex}
+							>
+								{index === selectedFileIndex ? '▸ ' : '  '}
+								{file.path}
+							</Text>
+						))}
+					</Box>
+				)}
 			</Box>
 
-			{showCompletions && completions.length > 0 && (
-				<Box flexDirection="column" marginTop={1}>
-					<Text color={colors.secondary}>Available commands:</Text>
-					{completions.map((completion, index) => (
-						<Text
-							key={index}
-							color={completion.isCustom ? colors.info : colors.primary}
-						>
-							/{completion.name}
-						</Text>
-					))}
-				</Box>
-			)}
-			{isFileAutocompleteMode && fileCompletions.length > 0 && (
-				<Box flexDirection="column" marginTop={1}>
-					<Text color={colors.secondary}>
-						File suggestions (↑/↓ to navigate, Tab to select):
+			{attachments.length > 0 && (
+				<Box marginTop={1}>
+					<Text color={colors.info}>
+						{attachments
+							.map((img, i) => `[image #${i + 1}: ${img.source ?? 'image'}]`)
+							.join(' ')}
 					</Text>
-					{fileCompletions.slice(0, 5).map((file, index) => (
-						<Text
-							key={index}
-							color={index === selectedFileIndex ? colors.info : colors.primary}
-							bold={index === selectedFileIndex}
-						>
-							{index === selectedFileIndex ? '▸ ' : '  '}
-							{file.path}
-						</Text>
-					))}
+					<Text color={colors.secondary}> · ctrl-x remove last</Text>
 				</Box>
 			)}
-
 			{/* Development mode indicator - always visible */}
 			<DevelopmentModeIndicator
 				developmentMode={developmentMode}

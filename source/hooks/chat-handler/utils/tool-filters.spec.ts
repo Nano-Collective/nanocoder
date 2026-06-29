@@ -63,6 +63,7 @@ test('filterValidToolCalls - creates error for non-existent tools', t => {
 
 	const mockToolManager = {
 		hasTool: (name: string) => name === 'existing_tool',
+		getToolNames: () => ['existing_tool', 'read_file'],
 	} as unknown as ToolManager;
 
 	const {validToolCalls, errorResults} = filterValidToolCalls(
@@ -75,6 +76,9 @@ test('filterValidToolCalls - creates error for non-existent tools', t => {
 	t.is(errorResults[0].tool_call_id, 'call_1');
 	t.is(errorResults[0].name, 'nonexistent_tool');
 	t.true(errorResults[0].content.includes('does not exist'));
+	// The recovery hint lists the available tools.
+	t.true(errorResults[0].content.includes('existing_tool'));
+	t.true(errorResults[0].content.includes('read_file'));
 });
 
 test('filterValidToolCalls - allows duplicate IDs through', t => {

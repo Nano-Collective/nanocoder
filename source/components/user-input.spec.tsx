@@ -3,7 +3,7 @@ import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
-import {UIStateProvider} from '../hooks/useUIState';
+import {UIStateProvider, useUIStateContext} from '../hooks/useUIState';
 import UserInput from './user-input';
 
 console.log(`\nuser-input.spec.tsx – ${React.version}`);
@@ -27,6 +27,9 @@ const TestWrapper = ({children}: {children: React.ReactNode}) => (
 		<UIStateProvider>{children}</UIStateProvider>
 	</MockThemeProvider>
 );
+
+// Helper for async tests that need proper context and more time
+const wait = async (ms = 200) => new Promise(resolve => setTimeout(resolve, ms));
 
 // ============================================================================
 // Component Rendering Tests
@@ -389,3 +392,209 @@ test('UserInput does not show ctrl-o hint when onToggleCompactDisplay is not pro
 	t.notRegex(output!, /ctrl-o/);
 	unmount();
 });
+
+
+// ============================================================================
+// Command Completion Navigation Tests
+// ============================================================================
+
+// Test commands to ensure completions appear in test environment
+const TEST_COMMANDS = ['test-clear', 'test-help', 'test-exit'];
+
+test('arrow key navigation updates the selected completion', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} customCommands={TEST_COMMANDS} />
+		</TestWrapper>,
+	);
+
+	stdin.write('/');
+	await wait();
+
+	const beforeNav = lastFrame()!;
+	t.regex(beforeNav, /Available commands:/);
+	t.regex(beforeNav, /▸ \//);
+
+	stdin.write('\u001B[B');
+	await wait();
+
+	const afterDown = lastFrame()!;
+	t.regex(afterDown, /Available commands:/);
+	t.notRegex(afterDown, /^.*▸ \/.*\n.*▸ \//s);
+
+	unmount();
+});
+
+test('Enter selects the highlighted completion and populates the input', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} customCommands={TEST_COMMANDS} />
+		</TestWrapper>,
+	);
+
+	stdin.write('/');
+	await wait();
+
+	t.regex(lastFrame()!, /Available commands:/);
+
+	stdin.write('\r');
+	await wait();
+
+	const afterEnter = lastFrame()!;
+	t.notRegex(afterEnter, /Available commands:/);
+	t.regex(afterEnter, /\/\w+/);
+
+	unmount();
+});
+
+test('typing a space after a command hides completions so args submit', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} customCommands={TEST_COMMANDS} />
+		</TestWrapper>,
+	);
+
+	stdin.write('/test-help');
+	await wait();
+
+	// While still typing the command name, completions are visible
+	t.regex(lastFrame()!, /Available commands:/);
+
+	// Once a space is typed, the user is entering arguments - completions hide
+	// so Enter submits the full `/test-help arg` instead of selecting `/test-help`
+	stdin.write(' arg');
+	await wait();
+
+	const afterArg = lastFrame()!;
+	t.notRegex(afterArg, /Available commands:/);
+	t.regex(afterArg, /\/test-help arg/);
+
+	unmount();
+});
+
+test('completion menu dismissal/reset after selection or escape', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} customCommands={TEST_COMMANDS} />
+		</TestWrapper>,
+	);
+
+	stdin.write('/');
+	await wait();
+
+	t.regex(lastFrame()!, /Available commands:/);
+
+	stdin.write('\r');
+	await wait();
+
+	t.notRegex(lastFrame()!, /Available commands:/);
+
+	// After Enter selects, input has the command - press Escape TWICE to clear it
+	stdin.write('\u001B');
+	await wait();
+	stdin.write('\u001B');
+	await wait();
+
+	stdin.write('/');
+	await wait();
+
+	t.regex(lastFrame()!, /Available commands:/);
+
+	stdin.write('\u001B');
+	await wait();
+	stdin.write('\u001B');
+	await wait();
+
+	const afterEsc = lastFrame()!;
+	t.notRegex(afterEsc, /Available commands:/);
+
+	unmount();
+});
+
+test('UserInput renders completions text when typing /', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput customCommands={['help', 'model']} />
+		</TestWrapper>
+	);
+
+	await new Promise(resolve => setTimeout(resolve, 50));
+	stdin.write('/');
+	await new Promise(resolve => setTimeout(resolve, 150));
+
+	const output = lastFrame()!;
+	t.truthy(output);
+	t.regex(output, /Available commands:/);
+	unmount();
+});
+
+test('UserInput renders completions BEFORE the mode indicator (inside the input box)', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput developmentMode="normal" customCommands={['help', 'model']} />
+		</TestWrapper>
+	);
+
+	await new Promise(resolve => setTimeout(resolve, 50));
+	stdin.write('/');
+	await new Promise(resolve => setTimeout(resolve, 150));
+
+	const output = lastFrame()!;
+	t.truthy(output);
+
+	const completionsIdx = output.indexOf('Available commands:');
+	const modeIdx = output.indexOf('normal mode');
+	t.true(completionsIdx > -1, 'Completions text should be present');
+	t.true(modeIdx > -1, 'Mode indicator should be present');
+	t.true(
+		completionsIdx < modeIdx,
+		'Completions must render before the mode indicator (inside the bordered input box)',
+	);
+	unmount();
+});
+
+test('UserInput completions appear on a line above the mode indicator', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput developmentMode="normal" customCommands={['help', 'model']} />
+		</TestWrapper>
+	);
+
+	await new Promise(resolve => setTimeout(resolve, 50));
+	stdin.write('/');
+	await new Promise(resolve => setTimeout(resolve, 150));
+
+	const output = lastFrame()!;
+	const lines = output.split('\n');
+
+	let completionLine = -1;
+	let modeLine = -1;
+	for (let i = 0; i < lines.length; i++) {
+		if (lines[i].includes('Available commands:')) completionLine = i;
+		if (lines[i].includes('normal mode')) modeLine = i;
+	}
+
+	t.true(completionLine > -1, 'Should find completions line');
+	t.true(modeLine > -1, 'Should find mode indicator line');
+	t.true(
+		completionLine < modeLine,
+		`Completions (line ${completionLine}) must be above mode indicator (line ${modeLine})`,
+	);
+	unmount();
+});
+
+test('UserInput does not show completions when input is empty', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput />
+		</TestWrapper>
+	);
+
+	const output = lastFrame()!;
+	t.truthy(output);
+	t.notRegex(output, /Available commands:/);
+	unmount();
+});
+
+
+

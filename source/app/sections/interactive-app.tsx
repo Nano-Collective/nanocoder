@@ -10,6 +10,7 @@ import type {AppHandlers} from '@/hooks/useAppHandlers';
 import type {useAppState} from '@/hooks/useAppState';
 import type {useModeHandlers} from '@/hooks/useModeHandlers';
 import type {useVSCodeServer} from '@/hooks/useVSCodeServer';
+import type {ImageAttachment} from '@/types/core';
 import type {PendingToolApproval} from '@/utils/tool-approval-queue';
 import type {PendingToolConfirmation} from '@/utils/tool-confirm-queue';
 import {displayCompactCountsSummary} from '@/utils/tool-result-display';
@@ -27,7 +28,11 @@ interface InteractiveAppProps {
 	pendingToolConfirmation: PendingToolConfirmation | null;
 	handleToolConfirmation: (confirmed: boolean) => void;
 	handleQuestionAnswer: (answer: string) => void;
-	handleUserSubmit: (message: string, displayValue: string) => Promise<void>;
+	handleUserSubmit: (
+		message: string,
+		displayValue: string,
+		images?: ImageAttachment[],
+	) => Promise<void>;
 	handleIdeSelect: (ide: string) => void;
 }
 

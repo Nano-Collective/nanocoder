@@ -1,4 +1,11 @@
-import type {AssistantContent, ModelMessage, TextPart, ToolCallPart} from 'ai';
+import type {
+	AssistantContent,
+	ImagePart,
+	ModelMessage,
+	TextPart,
+	ToolCallPart,
+	UserContent,
+} from 'ai';
 import type {Message} from '@/types/index';
 import type {TestableMessage} from '../types.js';
 
@@ -95,6 +102,27 @@ export function convertToModelMessages(messages: Message[]): ModelMessage[] {
 		}
 
 		if (msg.role === 'user') {
+			// Multimodal turn: emit the text alongside one image part per
+			// attachment. Image bytes travel as a data URL, which the Anthropic,
+			// Google, and OpenAI-compatible providers all accept.
+			if (msg.images && msg.images.length > 0) {
+				const content: UserContent = [];
+				if (msg.content) {
+					content.push({type: 'text', text: msg.content} as TextPart);
+				}
+				for (const image of msg.images) {
+					content.push({
+						type: 'image',
+						image: `data:${image.mediaType};base64,${image.data}`,
+						mediaType: image.mediaType,
+					} as ImagePart);
+				}
+				return {
+					role: 'user',
+					content,
+				};
+			}
+
 			return {
 				role: 'user',
 				content: msg.content,

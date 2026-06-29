@@ -64,7 +64,7 @@ Twelve axes grouped into four buckets:
 
 Nanocoder's provider list is the broadest of any community-led project here:
 
-- **Native cloud**: Anthropic, ChatGPT / Codex, Google Gemini, GitHub Copilot, GitHub Models, Kimi Code, MiniMax Coding, Mistral, OpenAI, OpenRouter, Poe, Z.ai, Z.ai Coding
+- **Native cloud**: Anthropic, Atlas Cloud, ChatGPT / Codex, Google Gemini, GitHub Copilot, GitHub Models, Kimi Code, MiniMax Coding, Mistral, OpenAI, OpenRouter, Poe, Requesty, Z.ai, Z.ai Coding
 - **Local**: Ollama, llama.cpp, llama-swap, LM Studio, LocalAI, MLX Server, vLLM
 - **Custom**: any OpenAI-compatible endpoint
 
@@ -124,7 +124,7 @@ Runtime model tuning at this scope (changing tool profiles, compaction strategy,
 
 | Tool | Interface | Plain / non-TTY |
 |---|---|---|
-| **Nanocoder** | TUI (Ink), VS Code extension with live diffs, `--plain` shell | Yes (`--plain`, `run` subcommand) |
+| **Nanocoder** | TUI (Ink), VS Code extension with live diffs, ACP agent for editor integration, `--plain` shell | Yes (`--plain`, `run` subcommand) |
 | Claude Code | TUI, VS Code, Cursor, JetBrains, Desktop, Web, iOS, Slack | Yes (`claude -p`) |
 | Codex CLI | Rust TUI, IDE extensions, Desktop, Web | Yes (`codex exec`) |
 | Gemini CLI | TUI, VS Code companion, ACP IDE integration | Yes (`-p` with JSON output) |
@@ -196,6 +196,10 @@ Checkpointing (snapshot and restore conversation state), context compression (ma
 
 The companion VS Code extension shows live diff previews of agent edits in the editor while the conversation runs in the terminal. Among OSS peers, Gemini CLI's VS Code companion ships a comparable native diff viewer; OpenCode's official extension does not (only a third-party extension does).
 
+### 9. Editor interoperability via ACP
+
+Nanocoder runs as an [Agent Client Protocol](https://agentclientprotocol.com) agent (`nanocoder --acp`), exposing its conversation, tool-calling, and permission flows over the protocol so any ACP-compatible editor (Zed and others) can drive it directly. This is the same standard Gemini CLI uses for its IDE integration, so Nanocoder plugs into that ecosystem rather than needing a bespoke extension per editor. Among the tools surveyed, Nanocoder and Gemini CLI are the two that speak ACP.
+
 ## Per-tool notes
 
 ### Claude Code
@@ -231,7 +235,7 @@ Deliberately minimalist: four built-in tools, a system prompt under ~1,000 token
 This is real and worth being clear about.
 
 - **Community size.** OpenCode (~163k stars), Claude Code (~125k), Gemini CLI (~104k), Codex (~84k), Pi (~52k), Aider (~45k), Crush (~24k) all sit above Nanocoder today. Growth and contribution velocity matter more than absolute count, but the gap exists.
-- **Surface breadth.** Claude Code, Codex, and OpenCode ship desktop and / or web surfaces. Nanocoder is TUI plus VS Code plus `--plain`. Enough for most CLI users, not all.
+- **Surface breadth.** Claude Code, Codex, and OpenCode ship desktop and / or web surfaces. Nanocoder is TUI plus VS Code plus ACP plus `--plain`. Enough for most CLI users, not all.
 - **Extension depth.** Pi's TypeScript extension API is still deeper and more programmable than Nanocoder's file-based Skills + MCP + custom-tools combination. Claude Code's Hooks system (process-level event hooks) also has no direct Nanocoder equivalent; Nanocoder's event story runs through Skill `subscribe:` blocks via the daemon, not arbitrary user-defined shell hooks on the agent lifecycle.
 - **Distribution polish.** Crush's single Go binary is smoother than Node + pnpm. Nanocoder mitigates with Homebrew and Nix Flakes.
 

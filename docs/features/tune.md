@@ -26,11 +26,16 @@ Controls which tools the AI has access to.
 
 | Profile | Tools | Behaviour |
 |---------|-------|-----------|
-| **full** (default) | All registered tools including MCP servers | No filtering applied |
+| **auto** (default) | Resolves to `full`, `minimal`, or `nano` from the active model id | Cloud/unknown models get `full`; models up to 15B parameters get a reduced profile automatically |
+| **full** | All registered tools including MCP servers | No filtering applied |
 | **minimal** | 8 core tools: `read_file`, `write_file`, `string_replace`, `execute_bash`, `find_files`, `search_file_contents`, `list_directory`, `agent` | Slim prompt and single-tool enforcement enabled automatically |
 | **nano** | 5 core tools: `read_file`, `string_replace`, `write_file`, `execute_bash`, `search_file_contents` | Ultra-slim prompt, single-tool enforcement, AGENTS.md omitted by default |
 
-The **minimal** profile is designed for small models (1B-8B parameters) that struggle with large tool sets. It reduces the system prompt size and forces the model to call one tool at a time.
+The **auto** profile is the default. It keeps the full tool surface for cloud models and model ids with no size hint, resolves models up to 15B parameters to `minimal`, and resolves models up to 4B parameters to `nano`. The status bar shows the resolved profile, for example `tune: minimal (auto)`.
+
+> **Why don't I see my MCP tools?** MCP tools are only exposed in the resolved `full` profile. If you connect an MCP server but the model cannot see its tools, open `/tune` and either switch the tool profile to **full** or use a larger/cloud model so `auto` resolves to `full`. `/mcp` still shows connected servers even when the current tool profile filters their tools out of the model prompt.
+
+The **minimal** profile is designed for small models (1B-15B parameters) that struggle with large tool sets. It reduces the system prompt size and forces the model to call one tool at a time.
 
 The **nano** profile is designed for the smallest models or low-end hardware running larger models locally. It is strictly more aggressive than `minimal`:
 

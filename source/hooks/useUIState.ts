@@ -5,17 +5,19 @@ import React, {
 	useMemo,
 	useState,
 } from 'react';
-import {Completion} from '@/types/index';
+import {Completion} from '@/types/components';
 
 type UIState = {
 	showClearMessage: boolean;
 	showCompletions: boolean;
 	completions: Completion[];
 	pendingFileMentions: string[];
+	selectedCompletionIndex: number;
 	setShowClearMessage: React.Dispatch<React.SetStateAction<boolean>>;
 	setShowCompletions: React.Dispatch<React.SetStateAction<boolean>>;
 	setCompletions: React.Dispatch<React.SetStateAction<Completion[]>>;
 	setPendingFileMentions: React.Dispatch<React.SetStateAction<string[]>>;
+	setSelectedCompletionIndex: React.Dispatch<React.SetStateAction<number>>;
 	resetUIState: () => void;
 };
 
@@ -27,12 +29,14 @@ function useUIState(): UIState {
 	const [showCompletions, setShowCompletions] = useState(false);
 	const [completions, setCompletions] = useState<Completion[]>([]);
 	const [pendingFileMentions, setPendingFileMentions] = useState<string[]>([]);
+	const [selectedCompletionIndex, setSelectedCompletionIndex] = useState(-1);
 
 	const resetUIState = useCallback(() => {
 		setShowClearMessage(false);
 		setShowCompletions(false);
 		setCompletions([]);
 		setPendingFileMentions([]);
+		setSelectedCompletionIndex(-1);
 	}, []);
 
 	return useMemo(
@@ -41,10 +45,12 @@ function useUIState(): UIState {
 			showCompletions,
 			completions,
 			pendingFileMentions,
+			selectedCompletionIndex,
 			setShowClearMessage,
 			setShowCompletions,
 			setCompletions,
 			setPendingFileMentions,
+			setSelectedCompletionIndex,
 			resetUIState,
 		}),
 		[
@@ -52,6 +58,7 @@ function useUIState(): UIState {
 			showCompletions,
 			completions,
 			pendingFileMentions,
+			selectedCompletionIndex,
 			resetUIState,
 		],
 	);

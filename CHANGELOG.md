@@ -1,3 +1,93 @@
+# 1.28.1
+
+- Added **image attachments on user messages**. Paste an image from the clipboard with **Ctrl+V** (via `osascript` on macOS, `wl-paste`/`xclip` on Linux, PowerShell on Windows), drag an image file into the terminal, or type a path - quoted, unquoted, and macOS backslash-escaped paths are all recognised, and `http(s)` URLs are left untouched. Attachments (PNG/JPEG/GIF/WebP, up to 10 MB) show above the input box and **Ctrl+X** removes the last one; references are stripped from the text and sent as image parts to vision-capable models. A missing clipboard tool now logs a debug breadcrumb instead of silently no-op'ing. Thanks to @ragini-pandey. Closes #572.
+
+- Added **skill promotion and demotion**. Skills can now be promoted and demoted between project and personal scope, with a `--move` flag to relocate rather than copy the skill files.
+
+- Fix: **slash commands now run with their arguments**. Once a space is typed after a slash command, the completion menu hides so Enter submits the full command with its arguments instead of selecting a completion and dropping everything after the command name.
+
+- Fix: **the chat view no longer snaps to the bottom when a slash command completion menu opens**. The completion and file-suggestion menus now render inside the bounded input layout, so the container expands without disrupting the window height calculation that previously forced the history to scroll in smaller terminals. Thanks to @Dhirenderchoudhary. Closes #581.
+
+- Fix: **empty frontmatter blocks are recognised** instead of leaking `---` markers into the body or throwing. `splitFrontmatter` now matches an empty block, and `extractRawFrontmatter` uses the shared `parseYamlObject` helper so an empty subagent frontmatter flows through to validation and surfaces a clear `name is required` error. Thanks to @Fadhlan. Closes #592.
+
+- Fix: **`ask_user` unwraps label-as-key option objects**, so options expressed as a `{ label: value }` map render as readable choices.
+
+- Fix: **surface real network errors instead of mislabeling them as context overflow**. A failed request from a network error is no longer misreported as exceeding the context window.
+
+- Fix: **size MoE models by total parameter count, not active count**, when auto-resolving the tool profile, so mixture-of-experts models get the correct tune.
+
+- Fix: **number formatting on the `/copy` command** output.
+
+- Docs: clarified **MCP tool profile visibility** and documented the image-attachments feature. Thanks to @zerone0x. Closes #593.
+
+If there are any problems, feedback or thoughts please drop an issue or message us through Discord! Thank you for using Nanocoder.
+
+# 1.28.0
+
+- Added **Agent Client Protocol (ACP) support**. Nanocoder can now run as an ACP agent (`nanocoder --acp`), exposing its conversation, tool-calling, and permission flows over the protocol so it can be driven by ACP-compatible editors and clients (Zed and others). New `source/acp/` module covers the agent, server, session, conversation loop, content conversion, capability negotiation, and permission handling. Thanks to @Avtrkrb. Closes #529. Follow-up work added the missing ACP docs, kept the parallel tool-execution loop in sync with the plain shell, and made `NANOCODER_MAX_TURNS` configurable (with a raised default) so long ACP and plain-mode runs are not cut short.
+
+- Consolidated the **built-in tool surface from 33 tools down to 19** and added **automatic tool profiling**. Tasks collapse from four tools into a single TodoWrite-style `write_tasks` (replace-whole-list, no IDs for the model to juggle); file ops merge delete/move/copy/create_directory into one `file_op`; git shrinks from eleven tools to six (status/diff/log/add/commit/pr) with rarer operations going through `execute_bash`. A new `auto` tune profile - now the default - infers `full`/`minimal`/`nano` from the model's parameter count, so small local models automatically get the slim tool set and prompt while large/cloud models are unchanged. The resolved profile re-resolves live on model switch and is surfaced in the input indicator (e.g. `tune: nano (auto)`). `/usage` and the context indicator now rebuild from the live tune/mode/model with the profile-filtered tool count, so usage and context reporting are trustworthy. Roughly 6.3k lines removed.
+
+- Added **structured tool results and single-source validation**. Tool arguments are now type-checked against each tool's JSON schema at the execution boundary (`schema-validate.ts`), so malformed model output returns a clear field-level error the model can self-correct from, instead of being coerced at the render layer. Validation runs through the single `withValidation` seam shared by both the native and XML-fallback execution paths, ahead of any per-tool validator. Approval policy is likewise centralised and the old global mode context removed, so the current development mode (including a mid-run switch) is honoured consistently across the main loop and subagents.
+
+- Added **session resume with full history replay**. Resuming a saved session now replays the message and tool-call history into the chat view via a new `session-history-renderer`, so you pick up exactly where you left off with the conversation visible rather than an empty screen. Companion fixes resolved an autosave race, history-truncation, and resume edge cases, with regression coverage. Thanks to @akramcodez. Closes #545.
+
+- Added the **`/copy` command** to copy the most recent assistant response to the system clipboard. Cross-platform via `clipboardy` (pbcopy / xclip / clip.exe), with a clear warning when there is no assistant message and a surfaced error when the clipboard write fails.
+
+- Added **read-before-edit guards and tool-call loop detection for local models**. `string_replace` and `write_file` now require the file to have been read first, and a tool-signature tracker detects a model repeating the same tool call in a tight loop. Both make smaller local models materially safer to run unattended.
+
+- Added a **skill linter** (`/skills check <name>` and a `check_skill` tool) that validates a bundle from disk with the same parsers the loader uses, so a PASS means it will load. It is wired into `/skills create` so the model verifies and self-corrects what it generates, and it lints member template bodies (unsupported mustache tags, unbalanced or unclosed sections, placeholders referencing undeclared parameters), not just frontmatter. Also added **optional command arguments**: inline defaults (`name=default`) and conditional sections (`{{# name }}`, `{{^ name }}`) in command bodies, plus inverted-section support in custom-tool templates via a shared section engine. Fixed subagents ignoring the development mode (the executor captured `normal` once at startup and never updated it).
+
+- Added **Atlas Cloud** as a first-class provider and sponsor, with a wizard onboarding template and a dedicated provider docs page.
+
+- Added the **Requesty** provider (https://requesty.ai) as a first-class OpenAI-compatible provider, mirroring the OpenRouter integration with a name matcher, app-attribution headers, a wizard onboarding template, and docs. Thanks to @Thibaultjaigu. Closes #589.
+
+- Added **API-reported context usage** with an estimate fallback. The `ctx: NN%` indicator now reflects provider-accurate token counts when the model reports them (captured from the final step's `usage`, not the tool-loop-summed `totalUsage`), falling back to client-side estimation otherwise. Estimated figures are marked with a leading `~` (`ctx: ~42%`); API-reported figures render bare. Thanks to @JimStenstrom. Refs #381. Follow-up work anchored the API figure across turns, counted real tool definitions in the auto-compact gate, and added a tiktoken-based generic fallback tokenizer for more accurate counts on models without a native tokenizer.
+
+- Added **git branch display** in the boot summary and `/status` panel, with a narrower-terminal-friendly rendering. Thanks to @ragini-pandey. Closes #539.
+
+- Reworked **provider model discovery UX** in the wizard, surfacing real discovery errors instead of silently falling back, and showing model names in the selection list with long labels truncated by ellipsis. Thanks to @akramcodez and @Dhirenderchoudhary. Closes #554.
+
+- Added **arrow-key navigation and highlighting for slash-command completion**. The completion menu now navigates with the arrow keys, with the double-submit-on-select bug fixed (TextInput ignores Enter; UserInput handles select-then-submit behind a guard flag) and `customCompletion` restored. Thanks to @rakshith1928. Closes #578.
+
+- Added a **force-compact-and-retry fallback**. When the LLM server rejects a request for exceeding its context window, nanocoder now compacts and nudges the conversation to continue instead of failing outright. Thanks to @lordoski. Closes #546.
+
+- Added **timeout, output limits, and abort support** to the bash executor, with regression tests covering the executor lifecycle. Thanks to @akramcodez. Closes #547.
+
+- Custom display: **failed tool results condense to a one-liner in compact mode**. Generic `Error:` / `Validation failed:` results now render as a short red line (e.g. `write_file failed.`) in compact display mode, while the model still receives the full error in history and non-compact mode still shows it in full.
+
+- Improved **`ask_user` prompt rendering**: dropped the leading `?` from the header, fixed spacing and the hanging indent, added arrow-key navigation, and normalised object-shaped options to readable strings (preferring a label over a value id).
+
+- Improved **`@`-file-mention handling**: mention placeholders are kept in the chat instead of being expanded inline, and large-file inlining is capped to avoid blowing up the prompt.
+
+- Fix: **Copilot GPT-5 reasoning streams** are now handled correctly via an `@ai-sdk/openai` patch and chat-handler changes, so reasoning content streams properly instead of breaking the response. Thanks to @EntropyParadigm. Closes #577.
+
+- Fix: **propagate `AbortSignal` to streaming bash execution**, so cancelling a turn actually stops a long-running streamed command. Thanks to @Dhirenderchoudhary. Closes #550.
+
+- Fix: **prevent silent overwrite of corrupted config files**. A corrupted `agents.config.json` no longer gets silently clobbered; the wizard now honours the `projectDir` prop for config-path resolution and the infinite render loop on the `existingProviders` default param is resolved, all with regression coverage. Thanks to @Dhirenderchoudhary. Closes #551, #552.
+
+- Fix: **`read_file` returns an empty marker instead of throwing on empty files**, including range and metadata-only reads, with the `EMPTY_FILE_MARKER` constant extracted (later renamed `EMPTY_CONTENT_MARKER`) and tests for files containing only a newline. Thanks to @ragini-pandey. Closes #530.
+
+- Fix: **prevent orphaned tool results from breaking LLM compaction**. A tool-aware boundary in the converter and summariser stops a recent-tail slice from splitting a tool-call group, which previously produced empty model output after compaction.
+
+- Fix: **`/` key no longer scrolls the chat view to the bottom**. Thanks to @itsishant. Closes #590.
+
+- Fix: **close the chokidar watcher if daemon startup throws**, and move the daemon stop-handler setup before resources start so a failed lockfile write calls `stop()` and cleans up. Thanks to @OMEE-Y and @rakshith1928. Closes #553, #557.
+
+- Fix: replaced a stray `console.log` in `message-queue.tsx` with the structured logger. Thanks to @A-S-Manoj. Closes #588.
+
+- Fix: added subagent context window overrides so delegated agents can run with a different context limit than the main session, and resolve provider names case-insensitively with custom CA bundle support for provider TLS. Thanks to @zerone0x.
+
+- Added a `tmp >=0.2.6` override to resolve a path-traversal advisory in a transitive dependency. Thanks to @ragini-pandey.
+
+- Large **refactor and dead-code sweep**: unified tool-call ID generation, extracted a shared `useWizardForm` hook, consolidated session-override managers, added message-factory helpers, deduped config loaders / git exec / command dispatch / conversation-loop flush, extracted `StyledSelectInput` and `makeSimpleToolFormatter`, and deleted several dead modules and orphaned exports (including `fetch-local-models` orphaned by an earlier removal).
+
+- Updated the **Nanocoder Battlemap** competitive comparison and refreshed the README and docs.
+
+- Dependency updates: `ai` 6.0.174 -> 6.0.193, `@ai-sdk/openai`, `@ai-sdk/openai-compatible`, `@ai-sdk/anthropic`, `@agentclientprotocol/sdk` 0.22.1 -> 0.25.0, `undici`, `esbuild`, `@biomejs/biome` 2.5.0, `lint-staged` 17, `@types/node`, `@types/vscode`, and other transitive bumps tracked through the lockfile. Added `clipboardy ^5.3.1` for `/copy`.
+
+If there are any problems, feedback or thoughts please drop an issue or message us through Discord! Thank you for using Nanocoder.
+
 # 1.27.0
 
 - Added **Skills**, a unified extension primitive that brings commands, subagents, and tools under a single ergonomic surface. Two forms over one primitive: **single-file** (a `.md` in `.nanocoder/commands|agents|tools/`, fully backwards-compatible with the existing flat dirs) and **bundle** (a directory under `.nanocoder/skills/<name>/` with `skill.yaml` plus optional `commands/`, `agents/`, `tools/` subdirs). Bundles are for multi-piece features that need to ship and version together: a bundle's subagent automatically gets its sibling tools, scoped tools are hidden from the global tool list (default for bundles, opt-in for single-file), and bundle commands auto-namespace (`commands/status.md` in bundle `git` invokes as `/git:status`). New `/skills` slash command lists everything loaded, and bundled members fan out into the existing `CustomCommandLoader`, `SubagentLoader`, and `ToolManager.registry` so downstream consumers keep using their familiar registries. Closes #515.

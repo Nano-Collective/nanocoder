@@ -58,11 +58,14 @@ function modelParamsBillions(model: string): number | null {
 		return 0.5; // treat any sub-billion model as tiny
 	}
 
-	// Billions suffix — take the last match (model tags put the size last).
+	// Billions suffix — take the largest match. A model's capability tracks its
+	// largest declared parameter count, so for MoE ids like "qwen3-30b-a3b"
+	// (30B total, 3B active) we want the 30B total, not the trailing active
+	// count. For single-size tags like "qwen2.5-coder:32b" there is only one
+	// match, so this is equivalent to taking it directly.
 	const billions = [...lower.matchAll(/(\d+(?:\.\d+)?)\s*b\b(?![a-z])/g)];
 	if (billions.length > 0) {
-		const last = billions[billions.length - 1];
-		return parseFloat(last[1]);
+		return Math.max(...billions.map(m => parseFloat(m[1])));
 	}
 
 	return null;
