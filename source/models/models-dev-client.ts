@@ -479,3 +479,28 @@ export async function getModelContextLimit(
 	const resolved = await resolveModelContextLimit(modelId, options);
 	return resolved.limit;
 }
+
+/**
+ * Get pricing for a model in USD per 1M tokens.
+ * Returns { input, output } from the cached models.dev database,
+ * or null when the model isn't found (local model, no pricing data).
+ */
+export async function getModelPricing(
+	modelId: string,
+): Promise<ModelInfo['cost'] | null> {
+	try {
+		let modelInfo = await findModelById(modelId);
+
+		if (!modelInfo) {
+			modelInfo = await findModelByName(modelId);
+		}
+
+		if (modelInfo) {
+			return modelInfo.cost;
+		}
+
+		return null;
+	} catch {
+		return null;
+	}
+}
