@@ -64,10 +64,14 @@ function createDevelopmentConfig(): EnhancedLoggerConfig {
  *
  * In production, we want:
  * - File logging enabled at 'info' level by default (for diagnostics)
- * - Console/UI output silent (to avoid polluting the user interface)
+ * - Console/UI output silent by default
  *
- * The log level here controls what gets written to files.
- * Console output is suppressed by using file-only transport.
+ * The log level here controls what gets written to the log file.
+ * Console verbosity is governed separately, via getDefaultLogLevel() /
+ * getEnvironmentConfig() (NANOCODER_LOG_LEVEL opt-in) — not by this function.
+ * pino-logger.ts's createEnvironmentLogger() always writes through a
+ * file-only pino.destination() and never reads destination/target/options
+ * from this config, so those fields would be inert here.
  */
 function createProductionConfig(): EnhancedLoggerConfig {
 	// Check if file logging is explicitly disabled
@@ -87,41 +91,11 @@ function createProductionConfig(): EnhancedLoggerConfig {
 		serialize: true,
 	};
 
-	// If file logging is disabled, only use stdout (for UI)
 	if (disableFileLogging) {
-		return {
-			...baseConfig,
-			destination: String(process.stdout.fd),
-			target: 'pino-pretty',
-			options: {
-				colorize: false, // No colors in production
-				translateTime: 'HH:MM:ss Z',
-				ignore: 'pid,hostname',
-				levelFirst: true,
-				messageFormat: '{level} - {msg}',
-				singleLine: true, // Compact for UI
-			},
-		};
+		return baseConfig;
 	}
 
-	// Otherwise use stdout for UI with optional file logging
-	// This ensures UI works while still allowing file persistence when needed
-	return {
-		...baseConfig,
-		// Always output to stdout for UI compatibility
-		destination: String(process.stdout.fd),
-		target: 'pino-pretty',
-		options: {
-			colorize: false, // No colors in production
-			translateTime: 'HH:MM:ss Z',
-			ignore: 'pid,hostname', // Reduce UI clutter
-			levelFirst: false,
-			messageFormat: '{msg}',
-			singleLine: true, // Compact for UI
-		},
-		// Note: File logging will be handled by the multi-transport system in transports.ts
-		// when NANOCODER_LOG_TO_FILE=true is set
-	};
+	return baseConfig;
 }
 
 /**
@@ -149,17 +123,17 @@ function createTestConfig(): EnhancedLoggerConfig {
  * explicitly set NODE_ENV=development to see debug logs.
  */
 function getEnvironmentConfig(): EnhancedLoggerConfig {
-	const env = process.env.NODE_ENV;
-
-	switch (env) {
-		case 'development':
-			return createDevelopmentConfig();
-		case 'test':
-			return createTestConfig();
-		default:
-			// Default to production (silent) for normal CLI usage
-			return createProductionConfig();
+	if (process.env.NODE_ENV === 'test') {
+		return createTestConfig();
 	}
+
+	// Pretty/verbose console output is explicit opt-in via NANOCODER_LOG_LEVEL,
+	// not implicit based on NODE_ENV. This avoids polluting user output in production.
+	if (process.env.NANOCODER_LOG_LEVEL) {
+		return createDevelopmentConfig();
+	}
+
+	return createProductionConfig();
 }
 
 /**
