@@ -35,6 +35,7 @@ import type {
 	MCPConnectionStatus,
 	Message,
 } from '@/types';
+import type {ApiUsageSnapshot} from '@/types/core';
 import type {CustomCommand} from '@/types/commands';
 import type {TuneConfig} from '@/types/config';
 import type {ThemePreset} from '@/types/ui';
@@ -105,6 +106,7 @@ interface UseAppHandlersProps {
 
 	// Chat handler
 	handleChatMessage: (message: string, displayValue?: string) => Promise<void>;
+	lastApiUsage?: ApiUsageSnapshot | null;
 
 	// VS Code active editor dismissal (dropped on /clear)
 	dismissActiveEditor?: () => void;
@@ -578,9 +580,10 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					theme: props.currentTheme,
 					updateInfo: props.updateInfo,
 					getMessageTokens: props.getMessageTokens,
-					tune: props.tune,
-					developmentMode: props.developmentMode,
-				},
+tune: props.tune,
+						developmentMode: props.developmentMode,
+						lastApiUsage: props.lastApiUsage,
+					},
 				displayValue,
 				images,
 			);
@@ -612,6 +615,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.getMessageTokens,
 			props.tune,
 			props.developmentMode,
+			props.lastApiUsage,
 			clearMessages,
 			enterCheckpointLoadMode,
 			handleShowStatus,

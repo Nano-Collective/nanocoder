@@ -350,6 +350,7 @@ export default function App({
 		currentTheme: appState.currentTheme,
 		developmentMode: appState.developmentMode,
 		tune: appState.tune,
+		lastApiUsage: appState.lastApiUsage,
 		abortController: appState.abortController,
 		updateInfo: appState.updateInfo,
 		mcpServersStatus: appState.mcpServersStatus,

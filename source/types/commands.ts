@@ -1,4 +1,4 @@
-import {Message} from '@/types/core';
+import type {ApiUsageSnapshot, Message} from '@/types/core';
 
 export interface Command<T = React.ReactElement | void> {
 	name: string;
@@ -14,6 +14,7 @@ export interface Command<T = React.ReactElement | void> {
 			client?: import('@/types/core').LLMClient | null;
 			tune?: import('@/types/config').TuneConfig;
 			developmentMode?: import('@/types/core').DevelopmentMode;
+			lastApiUsage?: ApiUsageSnapshot | null;
 		},
 	) => Promise<T>;
 }

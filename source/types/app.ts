@@ -6,6 +6,7 @@ import type {CheckpointListItem} from './checkpoint';
 import type {CustomCommand} from './commands';
 import type {AIProviderConfig, TuneConfig} from './config';
 import type {DevelopmentMode, ImageAttachment, Message} from './core';
+import type {ApiUsageSnapshot} from './core';
 import type {UpdateInfo} from './utils';
 
 export interface MessageSubmissionOptions {
@@ -50,4 +51,5 @@ export interface MessageSubmissionOptions {
 	getMessageTokens: (message: Message) => number;
 	tune?: TuneConfig;
 	developmentMode?: DevelopmentMode;
+	lastApiUsage?: ApiUsageSnapshot | null;
 }

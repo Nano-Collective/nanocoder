@@ -14,7 +14,7 @@ import {createTokenizer} from '@/tokenization/index';
 import type {Command} from '@/types/commands';
 import type {TuneConfig} from '@/types/config';
 import {getTuneToolMode} from '@/types/config';
-import type {DevelopmentMode, Message} from '@/types/core';
+import type {ApiUsageSnapshot, DevelopmentMode, Message} from '@/types/core';
 import type {CostBreakdown} from '@/types/usage';
 import {
 	calculateTokenBreakdown,
@@ -36,6 +36,7 @@ export const usageCommand: Command = {
 			client?: import('@/types/core').LLMClient | null;
 			tune?: TuneConfig;
 			developmentMode?: DevelopmentMode;
+			lastApiUsage?: ApiUsageSnapshot | null;
 		},
 	) => {
 		const {provider, model, getMessageTokens, client} = metadata;
@@ -179,15 +180,33 @@ export const usageCommand: Command = {
 		try {
 			const pricing = await getModelPricing(model);
 			if (pricing) {
-				const costPerToken = pricing.input / 1_000_000;
-				const currentContextCost = costPerToken * breakdown.total;
+				// Use ApiUsage snapshot for input/output split when fresh
+				const snapshot = metadata.lastApiUsage;
+				const isSnapshotFresh =
+					snapshot && snapshot.atMessageCount >= messages.length;
 
-				// Cumulative: sum getMessageTokens for all messages
+				let currentContextCost: number;
+				if (
+					isSnapshotFresh &&
+					snapshot.inputTokens != null &&
+					snapshot.outputTokens != null
+				) {
+					currentContextCost =
+						(pricing.input * snapshot.inputTokens +
+							pricing.output * snapshot.outputTokens) /
+						1_000_000;
+				} else {
+					currentContextCost =
+						(pricing.input * breakdown.total) / 1_000_000;
+				}
+
+				// Cumulative: sum getMessageTokens for all messages (always input-only)
 				const cumulativeTokens = messages.reduce(
 					(sum, msg) => sum + getMessageTokens(msg),
 					0,
 				);
-				const cumulativeSessionCost = costPerToken * cumulativeTokens;
+				const cumulativeSessionCost =
+					(pricing.input * cumulativeTokens) / 1_000_000;
 
 				cost = {
 					currentContext: currentContextCost,

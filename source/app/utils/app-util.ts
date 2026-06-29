@@ -478,7 +478,7 @@ async function handleBuiltInCommand(
 	message: string,
 	options: MessageSubmissionOptions,
 ): Promise<void> {
-	const {onAddToChatQueue, onCommandComplete, messages} = options;
+	const {onAddToChatQueue, onCommandComplete, messages, lastApiUsage} = options;
 
 	const totalTokens = messages.reduce(
 		(sum, msg) => sum + options.getMessageTokens(msg),
@@ -493,6 +493,7 @@ async function handleBuiltInCommand(
 		client: options.client,
 		tune: options.tune,
 		developmentMode: options.developmentMode,
+		lastApiUsage,
 	});
 
 	if (!result) {
