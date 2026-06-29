@@ -11,6 +11,11 @@ import type {CostBreakdown, TokenBreakdown} from '@/types/usage.js';
 import {formatTokenCount, getUsageStatusColor} from '@/usage/calculator.js';
 import {ProgressBar} from './progress-bar.js';
 
+function formatCost(cost: number): string {
+	if (!Number.isFinite(cost)) return '—';
+	return cost >= 1 ? `$${cost.toFixed(2)}` : `$${cost.toFixed(4)}`;
+}
+
 interface UsageDisplayProps {
 	provider: string;
 	model: string;
@@ -265,6 +270,50 @@ export function UsageDisplay({
 					Tokenizer: <Text color={colors.text}>{tokenizerName}</Text>
 				</Text>
 			</Box>
+
+			{/* Estimated Cost */}
+			{cost && (
+				<>
+					<Box marginTop={1} marginBottom={1}>
+						<Text color={colors.primary} bold>
+							Estimated Cost
+						</Text>
+					</Box>
+					<Box>
+						<Text color={colors.secondary}>
+							Current Context:{' '}
+							<Text color={colors.text}>
+								{formatCost(cost.currentContext)}
+							</Text>
+						</Text>
+					</Box>
+					<Box>
+						<Text color={colors.secondary}>
+							Cumulative Session:{' '}
+							<Text color={colors.text}>
+								{formatCost(cost.cumulativeSession)}
+							</Text>
+						</Text>
+					</Box>
+					{cost.perProvider && Object.keys(cost.perProvider).length > 1 && (
+						<Box flexDirection="column" marginTop={1}>
+							<Text color={colors.secondary} bold>
+								Per-Provider:
+							</Text>
+							{Object.entries(cost.perProvider).map(([prov, val]) => (
+								<Box key={prov} marginLeft={2}>
+									<Text color={colors.secondary}>
+										{prov}:{' '}
+										<Text color={colors.text}>
+											{formatCost(val)}
+										</Text>
+									</Text>
+								</Box>
+							))}
+						</Box>
+					)}
+				</>
+			)}
 
 			{/* Recent Activity */}
 			<Box marginTop={1} marginBottom={1}>
