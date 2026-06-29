@@ -18,6 +18,7 @@ import {formatError} from '@/utils/error-formatter';
 import {getCachedFileContent} from '@/utils/file-cache';
 import {getFileType} from '@/utils/file-type-detector';
 import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
+import {markFileSeen} from '@/utils/read-tracker';
 import {calculateTokens} from '@/utils/token-calculator';
 
 const executeReadFile = async (args: {
@@ -98,6 +99,8 @@ const executeReadFile = async (args: {
 		const content = cached.content;
 
 		if (content.length === 0) {
+			// An empty file has been seen in full; allow edits/overwrites against it.
+			markFileSeen(absPath);
 			return EMPTY_CONTENT_MARKER;
 		}
 
@@ -156,6 +159,10 @@ const executeReadFile = async (args: {
 
 		// Extract the lines to return
 		const linesToReturn = lines.slice(startLine - 1, endLine);
+
+		// Content (full file or an explicit range) has been returned to the model,
+		// so it has now "seen" this file for read-before-edit purposes.
+		markFileSeen(absPath);
 
 		// Return content without line numbers for clean content-based editing
 		return linesToReturn.join('\n');

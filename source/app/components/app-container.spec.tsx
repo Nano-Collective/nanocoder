@@ -3,6 +3,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import {renderWithTheme} from '../../test-utils/render-with-theme';
 import {
 	createStaticComponents,
@@ -249,8 +250,9 @@ test.serial(
 			const output = lastFrame();
 			t.truthy(output);
 			// Branch label sits on a line by itself, separated from the
-			// provider/model line by a newline.
-			t.regex(output!, /test-model[^\n]*\n⎇\s+\S+/);
+			// provider/model line by a newline. Strip ANSI so color codes
+			// (present when CI forces color) don't break the adjacency match.
+			t.regex(stripAnsi(output!), /test-model[^\n]*\n⎇\s+\S+/);
 			unmount();
 		} finally {
 			process.stdout.columns = originalColumns;

@@ -74,6 +74,34 @@ test('parseAPIError - handles connection refused', t => {
 	t.is(result, 'Connection failed: Unable to reach the model server');
 });
 
+test('parseAPIError - handles offline undici fetch failure', t => {
+	// What `fetch()` throws when there is no internet: a TypeError whose
+	// message is "fetch failed" with the real DNS/connection error on .cause.
+	const error = new TypeError('fetch failed', {
+		cause: new Error('getaddrinfo ENOTFOUND api.openai.com'),
+	});
+
+	const result = parseAPIError(error);
+
+	t.is(result, 'Connection failed: Unable to reach the model server');
+});
+
+test('parseAPIError - handles offline fetch failure without a cause', t => {
+	const error = new TypeError('fetch failed');
+
+	const result = parseAPIError(error);
+
+	t.is(result, 'Connection failed: Unable to reach the model server');
+});
+
+test('parseAPIError - handles DNS EAI_AGAIN error', t => {
+	const error = new Error('getaddrinfo EAI_AGAIN api.openai.com');
+
+	const result = parseAPIError(error);
+
+	t.is(result, 'Connection failed: Unable to reach the model server');
+});
+
 test('parseAPIError - handles timeout error', t => {
 	const error = new Error('Request timeout: ETIMEDOUT');
 

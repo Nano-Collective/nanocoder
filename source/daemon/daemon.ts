@@ -179,16 +179,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 		cron.register(sub.filter.cron);
 	}
 
-	await watcher.start();
-	await ipcServer.start();
-
-	await writeLockfile({
-		pid: process.pid,
-		socketPath: getSocketPath(opts.projectRoot),
-		startedAt: Date.now(),
-		projectRoot: opts.projectRoot,
-	});
-
 	let stopPromise: Promise<void> | null = null;
 	const stop = (): Promise<void> => {
 		// Idempotent: subsequent callers get the in-flight Promise so they
@@ -204,6 +194,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<DaemonHandle> {
 		return stopPromise;
 	};
 	stopHandler.fn = stop;
+
+	await watcher.start();
+	await ipcServer.start();
+
+	try {
+		await writeLockfile({
+			pid: process.pid,
+			socketPath: getSocketPath(opts.projectRoot),
+			startedAt: Date.now(),
+			projectRoot: opts.projectRoot,
+		});
+	} catch (err) {
+		await stop();
+		throw err;
+	}
 
 	// Signal handling lives in the daemon's process entry point
 	// (source/daemon/entry.ts). Registering handlers here too would race

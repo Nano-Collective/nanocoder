@@ -130,6 +130,16 @@ test('inferToolProfile - large models resolve to full', t => {
 	t.is(inferToolProfile('llama3.3:70b'), 'full');
 });
 
+test('inferToolProfile - MoE ids size by total params, not active count', t => {
+	// "30B-A3B" = 30B total, 3B active. Capability tracks the 30B total, so
+	// these must resolve to full — not nano based on the trailing active count.
+	t.is(inferToolProfile('qwen3-30b-a3b'), 'full');
+	t.is(inferToolProfile('qwen3:30b-a3b'), 'full');
+	t.is(inferToolProfile('Qwen3-30B-A3B'), 'full');
+	t.is(inferToolProfile('qwen3-30b-a3b-instruct'), 'full');
+	t.is(inferToolProfile('Qwen3-235B-A22B'), 'full');
+});
+
 test('inferToolProfile - cloud/unknown models default to full', t => {
 	t.is(inferToolProfile('claude-opus-4-8'), 'full');
 	t.is(inferToolProfile('gpt-4o'), 'full');

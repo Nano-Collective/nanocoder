@@ -45,6 +45,24 @@ test('createProvider adds OpenRouter headers for openrouter provider', async t =
 	t.truthy(provider);
 });
 
+test('createProvider adds Requesty headers for requesty provider', async t => {
+	const config: AIProviderConfig = {
+		name: 'Requesty',
+		type: 'openai',
+		models: ['openai/gpt-4o-mini'],
+		config: {
+			baseURL: 'https://router.requesty.ai/v1',
+			apiKey: 'test-key',
+		},
+	};
+
+	const agent = new Agent();
+	const provider = await createProvider(config, agent);
+
+	t.truthy(provider);
+	t.is(provider.kind, 'openai-compatible');
+});
+
 test('createProvider handles provider with no API key', async t => {
 	const config: AIProviderConfig = {
 		name: 'TestProvider',

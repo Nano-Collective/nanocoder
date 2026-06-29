@@ -15,6 +15,7 @@ import {getCachedFileContent, invalidateCache} from '@/utils/file-cache';
 import {normalizeIndentation} from '@/utils/indentation-normalizer';
 import {validatePath} from '@/utils/path-validators';
 import {getLanguageFromExtension} from '@/utils/programming-language-helper';
+import {hasSeenFile, markFileSeen} from '@/utils/read-tracker';
 import {calculateTokens} from '@/utils/token-calculator';
 import {createFileToolApproval} from '@/utils/tool-approval';
 import {ensureString} from '@/utils/type-helpers';
@@ -39,6 +40,9 @@ const executeWriteFile = async (args: {
 
 	// Invalidate cache after write
 	invalidateCache(absPath);
+	// The file's contents are now known to the model (it just wrote them), so a
+	// follow-up edit or rewrite is not blind.
+	markFileSeen(absPath);
 
 	// Read back to verify and show actual content
 	const actualContent = await readFile(absPath, 'utf-8');
@@ -255,6 +259,18 @@ const writeFileValidator = async (args: {
 		return {
 			valid: false,
 			error: `Invalid content: content cannot be null or undefined.`,
+		};
+	}
+
+	// Read-before-overwrite: refuse to clobber an existing file the model has
+	// not seen this session. Creating new files is always allowed; rewriting a
+	// file the model has already read (or previously written) is allowed. This
+	// preserves the legitimate read-then-rewrite path while blocking blind
+	// overwrites that would destroy contents the model never looked at.
+	if (existsSync(absPath) && !hasSeenFile(absPath)) {
+		return {
+			valid: false,
+			error: `"${args.path}" already exists and you have not read it this session. Call read_file on it first (so you don't discard existing content), then retry. For small changes, prefer string_replace over a full overwrite.`,
 		};
 	}
 

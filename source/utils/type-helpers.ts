@@ -230,11 +230,28 @@ export function toOptionString(option: unknown): string {
 			'title',
 			'name',
 			'description',
+			'content',
 			'value',
 		]) {
 			const candidate = option[key];
 			if (typeof candidate === 'string' && candidate.trim() !== '') {
 				return candidate;
+			}
+		}
+		// Some models emit each option as a single-entry map where the KEY is
+		// the display text and the value is empty, e.g.
+		// `{"Playfair Display - elegant, high-contrast, editorial": ""}`. None
+		// of the known keys match, so fall back to the lone key as the label.
+		// Guarded on an empty value so genuinely-keyed objects like `{foo: 1}`
+		// still serialize to JSON.
+		const entries = Object.entries(option);
+		if (entries.length === 1) {
+			const [key, value] = entries[0];
+			if (
+				key.trim() !== '' &&
+				(value === '' || value === null || value === undefined)
+			) {
+				return key;
 			}
 		}
 	}

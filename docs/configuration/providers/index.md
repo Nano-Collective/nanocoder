@@ -37,10 +37,12 @@ Run on your machine, typically no API key required.
 Hosted services using the OpenAI-compatible API format.
 
 - [OpenRouter](openrouter.md) - Unified API for multiple AI providers
+- [Requesty](requesty.md) - OpenAI-compatible LLM router for multiple AI providers
 - [OpenAI](openai.md) - GPT models via OpenAI's API
 - [Mistral AI](mistral.md) - Mistral and Codestral models
 - [GitHub Models](github-models.md) - AI models via GitHub's marketplace
 - [Poe](poe.md) - Access multiple AI models through Poe
+- [Atlas Cloud](atlas-cloud.md) - Aggregates 300+ models behind one OpenAI-compatible endpoint
 - [Z.ai](z-ai.md) - GLM models from Zhipu AI
 - [Z.ai Coding](z-ai-coding.md) - Z.ai coding subscription plan
 

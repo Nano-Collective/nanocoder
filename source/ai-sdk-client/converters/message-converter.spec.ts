@@ -84,6 +84,48 @@ test('convertToModelMessages converts user message', t => {
 	t.is(result[0].content, 'Hello');
 });
 
+test('convertToModelMessages emits image parts for a user message with attachments', t => {
+	const messages: Message[] = [
+		{
+			role: 'user',
+			content: 'what is in this screenshot?',
+			images: [{data: 'BASE64DATA', mediaType: 'image/png'}],
+		},
+	];
+
+	const result = convertToModelMessages(messages);
+	t.is(result.length, 1);
+	t.is(result[0].role, 'user');
+	const content = result[0].content as Array<Record<string, unknown>>;
+	t.true(Array.isArray(content));
+	t.is(content[0].type, 'text');
+	t.is(content[0].text, 'what is in this screenshot?');
+	t.is(content[1].type, 'image');
+	t.is(content[1].image, 'data:image/png;base64,BASE64DATA');
+	t.is(content[1].mediaType, 'image/png');
+});
+
+test('convertToModelMessages keeps image-only user messages without a text part', t => {
+	const messages: Message[] = [
+		{
+			role: 'user',
+			content: '',
+			images: [{data: 'IMG', mediaType: 'image/jpeg'}],
+		},
+	];
+
+	const result = convertToModelMessages(messages);
+	const content = result[0].content as Array<Record<string, unknown>>;
+	t.is(content.length, 1);
+	t.is(content[0].type, 'image');
+});
+
+test('convertToModelMessages leaves text-only user messages as plain strings', t => {
+	const messages: Message[] = [{role: 'user', content: 'plain text'}];
+	const result = convertToModelMessages(messages);
+	t.is(result[0].content, 'plain text');
+});
+
 test('convertToModelMessages converts assistant message with text', t => {
 	const messages: Message[] = [
 		{

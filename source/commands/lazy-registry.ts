@@ -63,6 +63,11 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/context-max').then(m => m.contextMaxCommand),
 	},
 	{
+		name: 'copy',
+		description: 'Copy the last assistant response to the clipboard',
+		load: () => import('@/commands/copy').then(m => m.copyCommand),
+	},
+	{
 		name: 'model',
 		description: 'Select a model from any configured provider',
 		load: () => import('@/commands/model').then(m => m.modelCommand),
@@ -203,7 +208,7 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'skills',
 		description:
-			'List loaded skills. Subcommands: show <name>, create <name>, check <name>.',
+			'List loaded skills. Subcommands: show <name>, create <name>, check <name>, promote <name>, demote <name>.',
 		load: () => import('@/commands/skills').then(m => m.skillsCommand),
 	},
 ];

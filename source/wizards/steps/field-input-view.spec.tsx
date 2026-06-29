@@ -1,6 +1,7 @@
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import type {TemplateField} from '../templates/provider-templates';
 import {
 	FieldInputView,
@@ -104,7 +105,9 @@ test('boolean field highlights No when currentValue is "false"', t => {
 		currentValue: 'false',
 	});
 
-	const output = lastFrame() || '';
+	// Strip ANSI: color codes end in `m`, which would defeat the \bNo\b word
+	// boundary when CI forces color and renders the highlighted option in color.
+	const output = stripAnsi(lastFrame() || '');
 	const lines = output.split('\n');
 	const noLineIndex = lines.findIndex(
 		l => /\bNo\b/.test(l) && !l.includes('Yes'),

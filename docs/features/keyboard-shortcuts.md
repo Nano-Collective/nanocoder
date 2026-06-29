@@ -50,6 +50,15 @@ This page covers the main chat input and common interactive views. Some speciali
 
 When typing `@` for file mentions or `/` for commands, Tab accepts the current suggestion. If there are multiple command matches, the first Tab shows the completion list and pressing Tab again accepts the first result.
 
+## Image Attachments
+
+| Action | Shortcut |
+|--------|----------|
+| Paste image from clipboard | Ctrl+V |
+| Remove last attached image | Ctrl+X |
+
+Ctrl+V pulls an image off the system clipboard and adds it as an attachment. You can also attach an image by typing, pasting, or dragging an image file path into the input — quoted, unquoted, and macOS backslash-escaped paths (e.g. `Screenshot\ 2026.png`) are all recognised. Attachments appear above the input box as `[image #1: …]`; Ctrl+X drops the most recently added one. See [Image Attachments](image-attachments.md) for the full feature, including supported formats and platform requirements.
+
 ## History & Navigation
 
 | Action | Shortcut |

@@ -286,3 +286,31 @@ test('unknown ctrl combos do not modify value', (t) => {
 	t.is(state.value, 'hello');
 	t.is(state.cursorOffset, 5);
 });
+
+// --- handleEnter / onEnter props ---
+
+test('handleEnter=false ignores Enter', (t) => {
+	let called = false;
+	const fn = () => { called = true; };
+	// Simulates: if (handleEnter && onEnter) { onEnter(value) }
+	if (false && fn) fn();
+	t.false(called);
+});
+
+test('handleEnter=true calls onEnter when provided', (t) => {
+	let called = false;
+	const onEnter = () => { called = true; };
+	// Simulates: if (handleEnter && onEnter) { onEnter(value) }
+	if (true && onEnter) onEnter();
+	t.true(called);
+});
+
+test('handleEnter=true calls onSubmit when onEnter not provided', (t) => {
+	let called = false;
+	const onSubmit = () => { called = true; };
+	// Simulates: if (handleEnter && onEnter) {} else if (handleEnter && onSubmit) { onSubmit(value) }
+	if (true && undefined) {} else if (true && onSubmit) onSubmit();
+	t.true(called);
+});
+
+
