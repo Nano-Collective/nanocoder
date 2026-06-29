@@ -7,7 +7,7 @@ import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {Message} from '@/types/core.js';
-import type {TokenBreakdown} from '@/types/usage.js';
+import type {CostBreakdown, TokenBreakdown} from '@/types/usage.js';
 import {formatTokenCount, getUsageStatusColor} from '@/usage/calculator.js';
 import {ProgressBar} from './progress-bar.js';
 
@@ -20,6 +20,7 @@ interface UsageDisplayProps {
 	messages: Message[];
 	tokenizerName: string;
 	getMessageTokens: (message: Message) => number;
+	cost?: CostBreakdown;
 }
 
 export function UsageDisplay({
@@ -31,6 +32,7 @@ export function UsageDisplay({
 	messages,
 	tokenizerName,
 	getMessageTokens,
+	cost,
 }: UsageDisplayProps) {
 	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();

@@ -8,13 +8,14 @@ import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt
 import {UsageDisplay} from '@/components/usage/usage-display';
 import {getAppConfig} from '@/config/index';
 import {getToolManager} from '@/message-handler';
-import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
+import {getModelContextLimit, getModelPricing, getSessionContextLimit} from '@/models/index';
 import {generateKey} from '@/session/key-generator';
 import {createTokenizer} from '@/tokenization/index';
 import type {Command} from '@/types/commands';
 import type {TuneConfig} from '@/types/config';
 import {getTuneToolMode} from '@/types/config';
 import type {DevelopmentMode, Message} from '@/types/core';
+import type {CostBreakdown} from '@/types/usage';
 import {
 	calculateTokenBreakdown,
 	calculateToolDefinitionsTokensFromDefs,
@@ -173,6 +174,30 @@ export const usageCommand: Command = {
 				providerConfig: client?.getProviderConfig(),
 			}));
 
+		// Fetch pricing and compute cost (best-effort: null when unavailable)
+		let cost: CostBreakdown | undefined;
+		try {
+			const pricing = await getModelPricing(model);
+			if (pricing) {
+				const costPerToken = pricing.input / 1_000_000;
+				const currentContextCost = costPerToken * breakdown.total;
+
+				// Cumulative: sum getMessageTokens for all messages
+				const cumulativeTokens = messages.reduce(
+					(sum, msg) => sum + getMessageTokens(msg),
+					0,
+				);
+				const cumulativeSessionCost = costPerToken * cumulativeTokens;
+
+				cost = {
+					currentContext: currentContextCost,
+					cumulativeSession: cumulativeSessionCost,
+				};
+			}
+		} catch {
+			// Best-effort: no pricing available — display will show "—"
+		}
+
 		return React.createElement(UsageDisplay, {
 			key: generateKey('usage'),
 			provider,
@@ -183,6 +208,7 @@ export const usageCommand: Command = {
 			messages,
 			tokenizerName,
 			getMessageTokens,
+			cost,
 		});
 	},
 };
