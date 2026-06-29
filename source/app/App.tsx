@@ -385,6 +385,7 @@ export default function App({
 		enterExplorerMode: modeHandlers.enterExplorerMode,
 		enterIdeSelectionMode: modeHandlers.enterIdeSelectionMode,
 		enterTune: modeHandlers.enterTune,
+		handleModelSelect: modeHandlers.handleModelSelect,
 		handleChatMessage: chatHandler.handleChatMessage,
 		dismissActiveEditor: vscodeServer.dismissActiveEditor,
 	});

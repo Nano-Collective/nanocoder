@@ -166,6 +166,12 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/resume').then(m => m.resumeCommand),
 	},
 	{
+		name: 'retry',
+		description:
+			'Re-run the last user turn (use --model <id> to switch models first)',
+		load: () => import('@/commands/retry').then(m => m.retryCommand),
+	},
+	{
 		name: 'tasks',
 		description: 'Manage your task list',
 		load: () => import('@/commands/tasks').then(m => m.tasksCommand),

@@ -103,7 +103,7 @@ export function useModeHandlers({
 
 		if (sameProvider && selectedModel === currentModel) {
 			exitMode();
-			return;
+			return true;
 		}
 
 		if (sameProvider) {
@@ -126,9 +126,11 @@ export function useModeHandlers({
 				);
 
 				await warnIfHistoryWontFit(selectedModel, client.getProviderConfig());
+				exitMode();
+				return true;
 			}
 			exitMode();
-			return;
+			return false;
 		}
 
 		// Different provider: create a new client targeting the chosen
@@ -147,7 +149,7 @@ export function useModeHandlers({
 						hideBox={true}
 					/>,
 				);
-				return;
+				return false;
 			}
 
 			setClient(newClient);
@@ -188,6 +190,7 @@ export function useModeHandlers({
 					);
 				}
 			}
+			return true;
 		} catch (error) {
 			addToChatQueue(
 				<ErrorMessage
@@ -196,8 +199,10 @@ export function useModeHandlers({
 					hideBox={true}
 				/>,
 			);
+			return false;
+		} finally {
+			exitMode();
 		}
-		exitMode();
 	};
 
 	// Handle config wizard complete - reinitializes client and MCP servers

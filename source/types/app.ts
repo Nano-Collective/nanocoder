@@ -35,6 +35,7 @@ export interface MessageSubmissionOptions {
 		displayValue?: string,
 		images?: ImageAttachment[],
 	) => Promise<void>;
+	onSwitchModel?: (provider: string, model: string) => Promise<boolean>;
 	onAddToChatQueue: (component: React.ReactNode) => void;
 	setLiveComponent: (component: React.ReactNode) => void;
 	setIsToolExecuting: (value: boolean) => void;

@@ -6,6 +6,7 @@ import {
 	parseContextLimit,
 	parseCustomCommandArgs,
 } from './app-util.js';
+import {lazyCommands} from '@/commands/lazy-registry';
 import type {MessageSubmissionOptions} from '@/types/index';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
@@ -362,6 +363,131 @@ test.serial('chat message - displayValue is optional (callers without a placehol
 
 	t.is(received.message, 'plain message');
 	t.is(received.displayValue, undefined);
+});
+
+test.serial('retry command - /retry without a prior user turn shows an error', async t => {
+	let queued: React.ReactNode = null;
+	let submitted = false;
+	let completed = false;
+	const options = createResumeTestOptions({
+		onAddToChatQueue: node => {
+			queued = node;
+		},
+		onCommandComplete: () => {
+			completed = true;
+		},
+	});
+	options.onHandleChatMessage = async () => {
+		submitted = true;
+	};
+
+	await handleMessageSubmission('/retry', options);
+
+	t.false(submitted);
+	t.true(completed);
+	t.true(
+		React.isValidElement(queued) &&
+			String((queued.props as {message?: string}).message).includes(
+				'No user message to retry',
+			),
+	);
+});
+
+test.serial('retry command - /retry re-submits the last user message', async t => {
+	const submitted: Array<{message: string; displayValue?: string}> = [];
+	const options = createResumeTestOptions({
+		onCommandComplete: () => {},
+	});
+	options.messages = [
+		{role: 'user', content: 'first request'},
+		{role: 'assistant', content: 'first response'},
+		{role: 'user', content: 'retry this one'},
+		{role: 'assistant', content: 'second response'},
+	];
+	options.onHandleChatMessage = async (message, displayValue) => {
+		submitted.push({message, displayValue});
+	};
+
+	await handleMessageSubmission('/retry', options);
+
+	t.deepEqual(submitted, [
+		{message: 'retry this one', displayValue: 'retry this one'},
+	]);
+});
+
+test.serial('retry command - /retry --model switches model before re-submit', async t => {
+	const events: string[] = [];
+	const options = createResumeTestOptions({
+		onCommandComplete: () => {},
+	});
+	options.messages = [{role: 'user', content: 'try another model'}];
+	options.onSwitchModel = async (provider, model) => {
+		events.push(`switch:${provider}:${model}`);
+		return true;
+	};
+	options.onHandleChatMessage = async message => {
+		events.push(`submit:${message}`);
+	};
+
+	await handleMessageSubmission('/retry --model "model with spaces"', options);
+
+	t.deepEqual(events, [
+		'switch:test:model with spaces',
+		'submit:try another model',
+	]);
+});
+
+test.serial('retry command - /retry --provider switches provider and model before re-submit', async t => {
+	const events: string[] = [];
+	const options = createResumeTestOptions({
+		onCommandComplete: () => {},
+	});
+	options.messages = [{role: 'user', content: 'cross provider'}];
+	options.onSwitchModel = async (provider, model) => {
+		events.push(`switch:${provider}:${model}`);
+		return true;
+	};
+	options.onHandleChatMessage = async message => {
+		events.push(`submit:${message}`);
+	};
+
+	await handleMessageSubmission(
+		'/retry --provider openrouter --model qwen/code',
+		options,
+	);
+
+	t.deepEqual(events, ['switch:openrouter:qwen/code', 'submit:cross provider']);
+});
+
+test.serial('retry command - failed model switch does not re-submit', async t => {
+	const events: string[] = [];
+	const options = createResumeTestOptions({
+		onCommandComplete: () => {
+			events.push('complete');
+		},
+	});
+	options.messages = [{role: 'user', content: 'do not retry on old model'}];
+	options.onSwitchModel = async (provider, model) => {
+		events.push(`switch:${provider}:${model}`);
+		return false;
+	};
+	options.onHandleChatMessage = async message => {
+		events.push(`submit:${message}`);
+	};
+
+	await handleMessageSubmission('/retry --model unavailable-model', options);
+
+	t.deepEqual(events, ['switch:test:unavailable-model', 'complete']);
+});
+
+test('retry command - lazy registry exposes /retry', t => {
+	const retry = lazyCommands.find(command => command.name === 'retry');
+
+	t.truthy(retry);
+	t.is(
+		retry?.description,
+		'Re-run the last user turn (use --model <id> to switch models first)',
+	);
 });
 
 test.serial('resume command - /resume with no args enters session selector mode', async t => {
