@@ -24,6 +24,7 @@ export interface RunPlainShellOptions {
 	cliProvider?: string;
 	cliModel?: string;
 	trustDirectory: boolean;
+	outputFormat: 'text' | 'json';
 }
 
 /**
@@ -32,19 +33,39 @@ export interface RunPlainShellOptions {
  * and the conversation loop streams to stdout via plain process.stdout.
  *
  * Exit codes:
- *   0  conversation completed naturally
- *   1  initialization or generation error
- *   2  tool approval was required (matches the Ink `run` behavior in
- *      `useNonInteractiveMode`)
+ * 0  conversation completed naturally
+ * 1  initialization or generation error
+ * 2  tool approval was required (matches the Ink `run` behavior in
+ * `useNonInteractiveMode`)
  */
 export async function runPlainShell(
 	options: RunPlainShellOptions,
 ): Promise<void> {
-	const {prompt, developmentMode, cliProvider, cliModel, trustDirectory} =
+	const {prompt, developmentMode, cliProvider, cliModel, trustDirectory, outputFormat} =
 		options;
 
+	const isJson = outputFormat === 'json';
+
 	if (!ensureDirectoryTrust(trustDirectory)) {
-		await shutdown(1);
+		if (isJson) {
+			const cwd = path.resolve(process.cwd());
+			emitJsonReport({
+				kind: 'error',
+				exitCode: 1,
+				finalText: '',
+				reasoning: null,
+				toolCalls: [],
+				filesChanged: [],
+				message: `Directory ${cwd} is not trusted. Pass --trust-directory or set NANOCODER_TRUST_DIRECTORY=1 to bypass the disclaimer for this run.`,
+			});
+		} else {
+			const cwd = path.resolve(process.cwd());
+			writeError(
+				`Directory ${cwd} is not trusted. Pass --trust-directory or set ` +
+					`NANOCODER_TRUST_DIRECTORY=1 to bypass the disclaimer for this run.`,
+			);
+		}
+		await getShutdownManager().gracefulShutdown(1);
 		return;
 	}
 
@@ -52,12 +73,27 @@ export async function runPlainShell(
 	try {
 		init = await initializePlain({cliProvider, cliModel});
 	} catch (error) {
-		writeError(formatError(error));
-		await shutdown(1);
+		const formattedErr = formatError(error);
+		if (isJson) {
+			emitJsonReport({
+				kind: 'error',
+				exitCode: 1,
+				finalText: '',
+				reasoning: null,
+				toolCalls: [],
+				filesChanged: [],
+				message: formattedErr,
+			});
+		} else {
+			writeError(formattedErr);
+		}
+		await getShutdownManager().gracefulShutdown(1);
 		return;
 	}
 
 	const {client, toolManager, provider, model} = init;
+	
+	// Traditional status writes go to stderr via plain/writer, leaving stdout clean
 	writeBoot(provider, model, developmentMode);
 
 	const tune = resolveTune(getAppConfig(), undefined, loadPreferences());
@@ -100,7 +136,10 @@ export async function runPlainShell(
 
 	const nonInteractiveAlwaysAllow = getAppConfig().alwaysAllow ?? [];
 
-	writeLine();
+	if (!isJson) {
+		writeLine();
+	}
+
 	const outcome = await runPlainConversation({
 		client,
 		toolManager,
@@ -111,8 +150,45 @@ export async function runPlainShell(
 		abortSignal: abortController.signal,
 		tune,
 		model,
+		outputFormat,
 	});
 	process.off('SIGINT', sigint);
+
+	if (isJson) {
+		const exitCode = outcome.kind === 'success' ? 0 : outcome.kind === 'error' ? 1 : 2;
+		
+		const mutatingTools = ['write_to_file', 'create_file', 'string_replace', 'edit_file'];
+		const filesChangedSet = new Set<string>();
+
+		const formattedToolCalls = (outcome.toolCalls || []).map(tc => {
+			if (mutatingTools.includes(tc.name)) {
+				const filePath = tc.arguments?.path || tc.arguments?.file_path;
+				if (typeof filePath === 'string') {
+					filesChangedSet.add(filePath);
+				}
+			}
+			return {
+				name: tc.name,
+				arguments: tc.arguments || {},
+				result: tc.result ?? null,
+				error: tc.error ?? null,
+			};
+		});
+
+		emitJsonReport({
+			kind: outcome.kind,
+			exitCode,
+			finalText: outcome.finalText || '',
+			reasoning: outcome.reasoning || null,
+			toolCalls: formattedToolCalls,
+			filesChanged: Array.from(filesChangedSet),
+			...(outcome.kind === 'error' && { message: outcome.message }),
+			...(outcome.kind === 'tool-approval-required' && { toolNames: outcome.toolNames }),
+		});
+		
+		await getShutdownManager().gracefulShutdown(exitCode);
+		return;
+	}
 
 	switch (outcome.kind) {
 		case 'success':
@@ -157,11 +233,11 @@ function ensureDirectoryTrust(trustDirectoryFlag: boolean): boolean {
 		return true;
 	}
 
-	writeError(
-		`Directory ${cwd} is not trusted. Pass --trust-directory or set ` +
-			`NANOCODER_TRUST_DIRECTORY=1 to bypass the disclaimer for this run.`,
-	);
 	return false;
+}
+
+function emitJsonReport(report: unknown): void {
+	process.stdout.write(JSON.stringify(report, null, 2) + '\n');
 }
 
 async function shutdown(code: number): Promise<void> {

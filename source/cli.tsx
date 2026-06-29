@@ -83,6 +83,9 @@ Options:
   --plain             Use a lightweight, Ink-free runtime for non-interactive runs.
                       Only valid with the "run" command. Auto-enables in CI / non-TTY.
   --no-plain          Force the Ink runtime even in CI / non-TTY environments.
+  --json              Output execution results as a single well-formed JSON object to stdout.
+                      Only valid with the "run" command.
+  --output-format     Specify stdout format ('text' or 'json'). Synonym for --json.
   --acp               Run as an ACP (Agent Client Protocol) server for editor integration.
                       Communicates via JSON-RPC over stdin/stdout.
   run                 Run in non-interactive mode
@@ -94,6 +97,7 @@ Examples:
   nanocoder --mode plan
   nanocoder --trust-directory run "analyze src/app.ts"
   nanocoder --plain run "summarize README.md"
+  nanocoder --plain --json run "summarize README.md" | jq .finalText
   `);
 	process.exit(0);
 }
@@ -176,6 +180,33 @@ async function main(): Promise<void> {
 		break;
 	}
 
+	// Extract --json or --output-format json. Accept spaced and fused formats.
+	let outputFormat: 'text' | 'json' = 'text';
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		if (arg === '--json') {
+			outputFormat = 'json';
+			break;
+		} else if (arg === '--output-format' && args[i + 1]) {
+			if (args[i + 1] === 'json') {
+				outputFormat = 'json';
+			} else if (args[i + 1] !== 'text') {
+				console.error(`Invalid --output-format value: "${args[i + 1]}". Must be 'text' or 'json'.`);
+				process.exit(1);
+			}
+			break;
+		} else if (arg.startsWith('--output-format=')) {
+			const rawValue = arg.slice('--output-format='.length);
+			if (rawValue === 'json') {
+				outputFormat = 'json';
+			} else if (rawValue !== 'text') {
+				console.error(`Invalid --output-format value: "${rawValue}". Must be 'text' or 'json'.`);
+				process.exit(1);
+			}
+			break;
+		}
+	}
+
 	// Check for non-interactive mode (run command)
 	let nonInteractivePrompt: string | undefined;
 	const runCommandIndex = args.findIndex(arg => arg === 'run');
@@ -205,6 +236,13 @@ async function main(): Promise<void> {
 				continue;
 			} else if (arg.startsWith('--mode=')) {
 				continue; // skip fused form
+			} else if (arg === '--json') {
+				continue; // skip this flag
+			} else if (arg === '--output-format') {
+				i++; // skip this flag and its value
+				continue;
+			} else if (arg.startsWith('--output-format=')) {
+				continue; // skip fused form
 			} else if (arg === '--trust-directory') {
 				continue; // skip this flag
 			} else if (arg === '--plain' || arg === '--no-plain') {
@@ -217,6 +255,12 @@ async function main(): Promise<void> {
 	}
 
 	const nonInteractiveMode = runCommandIndex !== -1;
+
+	// Validate execution constraints for --json rules
+	if (outputFormat === 'json' && !nonInteractiveMode) {
+		console.error("Error: --json can only be used with the 'run' command.");
+		process.exit(1);
+	}
 
 	// --trust-directory is only respected with `run`. Surface a warning
 	// (rather than silently dropping) if the user passes it interactively.
@@ -247,6 +291,13 @@ async function main(): Promise<void> {
 		console.error('Cannot combine --plain with --vscode.');
 		process.exit(1);
 	}
+
+	// Enforce exclusive stdout protocol constraints
+	if (outputFormat === 'json' && vscodeMode) {
+		console.error('Error: --json cannot be combined with --vscode.');
+		process.exit(1);
+	}
+
 	const ciDetected =
 		process.env.CI === 'true' ||
 		Boolean(
@@ -265,6 +316,11 @@ async function main(): Promise<void> {
 
 	// --acp: Agent Client Protocol server mode for editor integration
 	const acpMode = args.includes('--acp');
+
+	if (outputFormat === 'json' && acpMode) {
+		console.error('Error: --json cannot be combined with --acp.');
+		process.exit(1);
+	}
 
 	// Handle codex/copilot login from CLI (no App)
 	if (args[0] === 'codex' && args[1] === 'login') {
@@ -330,6 +386,7 @@ async function main(): Promise<void> {
 			cliProvider,
 			cliModel,
 			trustDirectory,
+			outputFormat,
 		});
 	} else {
 		// Prevent Node's global performance entry buffer from growing without
