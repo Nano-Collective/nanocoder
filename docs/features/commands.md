@@ -31,6 +31,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/exit` | Exit the application |
 | `/export` | Export current session to markdown file |
 | `/copy` | Copy the last assistant response to the system clipboard |
+| `/doctor` | Show environment health report for bug reports |
 | `/update` | Update Nanocoder to the latest version |
 | `/usage` | Get current model context usage visually |
 | `/lsp` | List connected LSP servers |

@@ -68,6 +68,11 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/copy').then(m => m.copyCommand),
 	},
 	{
+		name: 'doctor',
+		description: 'Show environment health report for bug reports',
+		load: () => import('@/commands/doctor').then(m => m.doctorCommand),
+	},
+	{
 		name: 'model',
 		description: 'Select a model from any configured provider',
 		load: () => import('@/commands/model').then(m => m.modelCommand),
