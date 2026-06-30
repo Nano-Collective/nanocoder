@@ -38,8 +38,10 @@ import {useSessionAutosave} from '@/hooks/useSessionAutosave';
 import {ThemeContext} from '@/hooks/useTheme';
 import {TitleShapeContext, updateTitleShape} from '@/hooks/useTitleShape';
 import {UIStateProvider} from '@/hooks/useUIState';
+import {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import {useVSCodeServer} from '@/hooks/useVSCodeServer';
 import {generateKey} from '@/session/key-generator';
+import type {ImageAttachment} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
 import {createPinoLogger} from '@/utils/logging/pino-logger';
 import {setGlobalMessageQueue} from '@/utils/message-queue';
@@ -75,6 +77,15 @@ export default function App({
 
 	// Use extracted hooks
 	const appState = useAppState(initialDevelopmentMode);
+	const userMessageQueue = useUserMessageQueue();
+	const queuedUserSubmitRef = React.useRef<
+		| ((
+				message: string,
+				displayValue: string,
+				images?: ImageAttachment[],
+		  ) => Promise<void>)
+		| null
+	>(null);
 	const {exit} = useApp();
 	const {isTrusted, handleConfirmTrust, isTrustLoading, isTrustedError} =
 		useDirectoryTrust();
@@ -159,6 +170,28 @@ export default function App({
 		}
 	}, []);
 
+	const drainQueuedUserMessage = React.useCallback(() => {
+		queueMicrotask(() => {
+			void userMessageQueue.drainNextMessage(async message => {
+				const submitQueuedMessage = queuedUserSubmitRef.current;
+				if (!submitQueuedMessage || !appState.client || !appState.toolManager) {
+					return false;
+				}
+
+				await submitQueuedMessage(
+					message.message,
+					message.displayValue,
+					message.images,
+				);
+				return true;
+			});
+		});
+	}, [
+		appState.client,
+		appState.toolManager,
+		userMessageQueue.drainNextMessage,
+	]);
+
 	// Setup chat handler
 	const chatHandler = useChatHandler({
 		client: appState.client,
@@ -180,6 +213,7 @@ export default function App({
 			appState.setCompactToolCounts(null);
 			appState.compactToolCountsRef.current = {};
 			appState.setLiveTaskList(null);
+			drainQueuedUserMessage();
 		},
 		reasoningExpandedRef: appState.reasoningExpandedRef,
 		compactToolDisplayRef: appState.compactToolDisplayRef,
@@ -405,6 +439,10 @@ export default function App({
 		activeEditor: vscodeServer.activeEditor,
 	});
 
+	React.useEffect(() => {
+		queuedUserSubmitRef.current = handleUserSubmit;
+	}, [handleUserSubmit]);
+
 	// Setup non-interactive mode
 	const {nonInteractiveLoadingMessage} = useNonInteractiveMode({
 		nonInteractivePrompt,
@@ -606,6 +644,7 @@ export default function App({
 						handleToolConfirmation={handleToolConfirmation}
 						handleQuestionAnswer={handleQuestionAnswer}
 						handleUserSubmit={handleUserSubmit}
+						userMessageQueue={userMessageQueue}
 						handleIdeSelect={handleIdeSelect}
 					/>
 				</UIStateProvider>
