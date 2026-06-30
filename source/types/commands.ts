@@ -1,4 +1,4 @@
-import type {ApiUsageSnapshot, Message} from '@/types/core';
+import type {ApiCallRecord, ApiUsageSnapshot, Message} from '@/types/core';
 
 export interface Command<T = React.ReactElement | void> {
 	name: string;
@@ -15,6 +15,7 @@ export interface Command<T = React.ReactElement | void> {
 			tune?: import('@/types/config').TuneConfig;
 			developmentMode?: import('@/types/core').DevelopmentMode;
 			lastApiUsage?: ApiUsageSnapshot | null;
+			apiCallHistory?: ApiCallRecord[];
 		},
 	) => Promise<T>;
 }

@@ -103,6 +103,7 @@ class CommandRegistry {
 			tune?: import('@/types/config').TuneConfig;
 			developmentMode?: import('@/types/core').DevelopmentMode;
 			lastApiUsage?: import('@/types/core').ApiUsageSnapshot | null;
+			apiCallHistory?: import('@/types/core').ApiCallRecord[];
 		},
 	): Promise<void | string | React.ReactNode> {
 		const parts = input.trim().split(/\s+/);

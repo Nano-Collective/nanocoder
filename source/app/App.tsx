@@ -188,6 +188,8 @@ export default function App({
 		onSetLiveTaskList: appState.setLiveTaskList,
 		setLiveComponent: appState.setLiveComponent,
 		setLastApiUsage: appState.setLastApiUsage,
+		onApiCallComplete: (record) =>
+			appState.setApiCallHistory(prev => [...prev, record]),
 		tune: appState.tune,
 		subagentsReady: appState.subagentsReady,
 	});
@@ -351,6 +353,7 @@ export default function App({
 		developmentMode: appState.developmentMode,
 		tune: appState.tune,
 		lastApiUsage: appState.lastApiUsage,
+		apiCallHistory: appState.apiCallHistory,
 		abortController: appState.abortController,
 		updateInfo: appState.updateInfo,
 		mcpServersStatus: appState.mcpServersStatus,
