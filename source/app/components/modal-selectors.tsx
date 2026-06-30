@@ -24,7 +24,7 @@ export interface ModalSelectorsProps {
 	} | null;
 
 	// Handlers - Model Selection
-	onModelSelect: (provider: string, model: string) => Promise<void>;
+	onModelSelect: (provider: string, model: string) => Promise<unknown>;
 	onModelSelectionCancel: () => void;
 
 	// Handlers - Model Database
