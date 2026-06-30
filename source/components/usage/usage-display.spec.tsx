@@ -2,7 +2,7 @@ import test from 'ava';
 import React from 'react';
 import {renderWithTheme} from '../../test-utils/render-with-theme.js';
 import type {Message} from '../../types/core.js';
-import type {TokenBreakdown} from '../../types/usage.js';
+import type {TokenBreakdown, CostBreakdown} from '../../types/usage.js';
 import {UsageDisplay} from './usage-display.js';
 
 console.log(`\nusage-display.spec.tsx – ${React.version}`);
@@ -696,7 +696,7 @@ test('UsageDisplay calculates correct percentages for categories', t => {
 	t.regex(output!, /7%.*200/); // Tool definitions: ~7%
 });
 
-test('UsageDisplay handles zero tokens in a category', t => {
+	test('UsageDisplay handles zero tokens in a category', t => {
 	const breakdown: TokenBreakdown = {
 		system: 1000,
 		userMessages: 0,
@@ -722,4 +722,113 @@ test('UsageDisplay handles zero tokens in a category', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /0%.*0\)/); // Categories with 0 tokens should show 0%
+});
+
+// ============================================================================
+// Cost Estimation Display Tests (PLAN.md)
+// ============================================================================
+
+test('UsageDisplay shows formatted USD for a priced cost breakdown', t => {
+	const cost: CostBreakdown = {
+		currentContext: 0.0027,
+		cumulativeSession: 1.23,
+	};
+
+	const {lastFrame} = renderWithTheme(
+		<UsageDisplay
+			provider="openai"
+			model="gpt-4"
+			contextLimit={8000}
+			currentTokens={2800}
+			breakdown={createMockBreakdown()}
+			messages={createMockMessages()}
+			tokenizerName="cl100k_base"
+			getMessageTokens={mockGetMessageTokens}
+			cost={cost}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Estimated Cost/);
+	t.regex(output!, /\$0\.0027/);
+	t.regex(output!, /\$1\.23/);
+});
+
+test('UsageDisplay shows em dash placeholder when cost values are NaN', t => {
+	const cost: CostBreakdown = {
+		currentContext: NaN,
+		cumulativeSession: NaN,
+	};
+
+	const {lastFrame} = renderWithTheme(
+		<UsageDisplay
+			provider="ollama"
+			model="llama3.2:3b"
+			contextLimit={8000}
+			currentTokens={2800}
+			breakdown={createMockBreakdown()}
+			messages={createMockMessages()}
+			tokenizerName="cl100k_base"
+			getMessageTokens={mockGetMessageTokens}
+			cost={cost}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Estimated Cost/);
+	t.regex(output!, /Current Context:.*—/);
+	t.regex(output!, /Cumulative Session:.*—/);
+});
+
+test('UsageDisplay shows per-provider subtotals when multiple providers', t => {
+	const cost: CostBreakdown = {
+		currentContext: 0.005,
+		cumulativeSession: 0.012,
+		perProvider: {
+			openai: 0.008,
+			ollama: 0.004,
+		},
+	};
+
+	const {lastFrame} = renderWithTheme(
+		<UsageDisplay
+			provider="openai"
+			model="gpt-4o"
+			contextLimit={8000}
+			currentTokens={2800}
+			breakdown={createMockBreakdown()}
+			messages={createMockMessages()}
+			tokenizerName="cl100k_base"
+			getMessageTokens={mockGetMessageTokens}
+			cost={cost}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Estimated Cost/);
+	t.regex(output!, /Per-Provider:/);
+	t.regex(output!, /openai:.*\$0\.008/);
+	t.regex(output!, /ollama:.*\$0\.004/);
+});
+
+test('UsageDisplay does not render cost section when cost prop is undefined', t => {
+	const {lastFrame} = renderWithTheme(
+		<UsageDisplay
+			provider="openai"
+			model="gpt-4"
+			contextLimit={8000}
+			currentTokens={2800}
+			breakdown={createMockBreakdown()}
+			messages={createMockMessages()}
+			tokenizerName="cl100k_base"
+			getMessageTokens={mockGetMessageTokens}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /Estimated Cost/);
 });
