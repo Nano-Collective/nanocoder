@@ -124,6 +124,47 @@ test('useUserMessageQueue drains messages in FIFO order', async t => {
 	result.unmount();
 });
 
+test('useUserMessageQueue removes a draining message before dispatch resolves', async t => {
+	const result = await renderHook();
+	const sent: string[] = [];
+	let resolveFirstDispatch!: () => void;
+	const firstDispatchFinished = new Promise<void>(resolve => {
+		resolveFirstDispatch = resolve;
+	});
+
+	result.hook.enqueueMessage({message: 'first', displayValue: 'First'});
+	result.hook.enqueueMessage({message: 'second', displayValue: 'Second'});
+
+	await new Promise(resolve => setTimeout(resolve, 20));
+
+	const firstDrain = result.hook.drainNextMessage(async message => {
+		sent.push(message.message);
+		await firstDispatchFinished;
+		return true;
+	});
+
+	await new Promise(resolve => setTimeout(resolve, 20));
+
+	t.deepEqual(
+		result.hook.queuedMessages.map(message => message.message),
+		['second'],
+	);
+
+	const secondDrain = await result.hook.drainNextMessage(message => {
+		sent.push(message.message);
+		return true;
+	});
+
+	resolveFirstDispatch();
+
+	t.true(await firstDrain);
+	t.true(secondDrain);
+	await new Promise(resolve => setTimeout(resolve, 20));
+	t.deepEqual(sent, ['first', 'second']);
+	t.is(result.hook.queuedMessages.length, 0);
+	result.unmount();
+});
+
 test('useUserMessageQueue keeps message queued when dispatch cannot run', async t => {
 	const result = await renderHook();
 

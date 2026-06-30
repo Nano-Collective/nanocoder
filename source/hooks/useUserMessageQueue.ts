@@ -50,14 +50,17 @@ export function useUserMessageQueue() {
 			const [nextMessage, ...remainingMessages] = queuedMessagesRef.current;
 			if (!nextMessage) return false;
 
+			setQueue(remainingMessages);
+
 			try {
-				if (!(await dispatch(nextMessage))) return false;
+				if (await dispatch(nextMessage)) return true;
 			} catch {
-				return false;
+				// If dispatch never started cleanly, put the message back at the
+				// front so it can be retried after the next turn.
 			}
 
-			setQueue(remainingMessages);
-			return true;
+			setQueue([nextMessage, ...queuedMessagesRef.current]);
+			return false;
 		},
 		[setQueue],
 	);
