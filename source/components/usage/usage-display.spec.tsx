@@ -604,9 +604,9 @@ test('UsageDisplay handles very large token counts', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	// Should format large numbers with commas
-	t.regex(output!, /100,000/);
-	t.regex(output!, /200,000/);
+	// Should format large numbers with commas (locale-independent)
+	t.regex(output!, /1(?:00,000|,00,000)/);
+	t.regex(output!, /2(?:00,000|,00,000)/);
 });
 
 test('UsageDisplay handles single message', t => {

@@ -566,7 +566,7 @@ test('usage command shows placeholder for a model without pricing', async t => {
 	t.regex(output!, /Cumulative Session:.*—/);
 });
 
-test('usage command aggregates costs across a multi-provider session', async t => {
+test('usage command shows per-provider breakdown for multi-provider history', async t => {
 	const messages = createMessages();
 	const metadata = {
 		...createMockMetadata('openai', 'gpt-4o'),
@@ -593,8 +593,39 @@ test('usage command aggregates costs across a multi-provider session', async t =
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Estimated Cost/);
-	t.regex(output!, /\$/);
+	t.regex(output!, /Per-Provider:/);
+	t.regex(output!, /openai:.*\$/);
+	t.regex(output!, /ollama:.*\$/);
+});
+
+test('usage command hides per-provider for single-provider history', async t => {
+	const messages = createMessages();
+	const metadata = {
+		...createMockMetadata('openai', 'gpt-4o'),
+		apiCallHistory: [
+			{
+				provider: 'openai',
+				model: 'gpt-4o',
+				inputTokens: 500,
+				outputTokens: 200,
+				timestamp: Date.now(),
+			},
+			{
+				provider: 'openai',
+				model: 'gpt-4o',
+				inputTokens: 300,
+				outputTokens: 100,
+				timestamp: Date.now(),
+			},
+		] satisfies ApiCallRecord[],
+	};
+
+	const result = await usageCommand.handler([], messages, metadata);
+	const {lastFrame} = renderWithTheme(result);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /Per-Provider:/);
 });
 
 test('usage command keeps token display unchanged when pricing is missing', async t => {
