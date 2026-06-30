@@ -20,6 +20,7 @@ import type {
 	ToolCall,
 	TuneConfig,
 } from '@/types';
+import type {RestoredInputDraft, SubmittedInputDraft} from '@/types/hooks';
 import type {PendingQuestion} from '@/utils/question-queue';
 import type {PendingToolApproval} from '@/utils/tool-approval-queue';
 import type {PendingToolConfirmation} from '@/utils/tool-confirm-queue';
@@ -55,6 +56,8 @@ export interface ChatInputProps {
 	// Input state
 	customCommands: string[];
 	inputDisabled: boolean;
+	onSubmittedDraft?: (draft: SubmittedInputDraft) => void;
+	restoreSubmittedDraft?: RestoredInputDraft | null;
 	queuedMessages?: QueuedUserMessage[];
 	onQueueMessage?: (message: UserMessageQueueDraft) => void;
 	onRemoveQueuedMessage?: (id: string) => void;
@@ -115,6 +118,8 @@ export function ChatInput({
 	client,
 	customCommands,
 	inputDisabled,
+	onSubmittedDraft,
+	restoreSubmittedDraft,
 	queuedMessages = [],
 	onQueueMessage,
 	onRemoveQueuedMessage,
@@ -192,6 +197,8 @@ export function ChatInput({
 					onSubmit={(msg, display, images) =>
 						void onSubmit(msg, display, images)
 					}
+					onSubmittedDraft={onSubmittedDraft}
+					restoreSubmittedDraft={restoreSubmittedDraft}
 					onQueueMessage={onQueueMessage}
 					queuedMessages={queuedMessages}
 					onRemoveQueuedMessage={onRemoveQueuedMessage}

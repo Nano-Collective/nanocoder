@@ -19,7 +19,11 @@ import type {
 	DevelopmentMode,
 	ImageAttachment,
 } from '@/types/core';
-import type {InputState} from '@/types/hooks';
+import type {
+	InputState,
+	RestoredInputDraft,
+	SubmittedInputDraft,
+} from '@/types/hooks';
 import {Completion} from '@/types/index';
 import {
 	extractImageReferences,
@@ -60,6 +64,8 @@ interface ChatProps {
 	activeEditor?: ActiveEditorState | null; // VS Code active file + optional selection
 	onDismissActiveEditor?: () => void; // Dismiss the active editor pill on clear/escape
 	forceFocus?: boolean; // Force focus for testing (bypasses useFocus)
+	onSubmittedDraft?: (draft: SubmittedInputDraft) => void;
+	restoreSubmittedDraft?: RestoredInputDraft | null;
 }
 
 export default function UserInput({
@@ -84,6 +90,8 @@ export default function UserInput({
 	activeEditor,
 	onDismissActiveEditor,
 	forceFocus = false,
+	onSubmittedDraft,
+	restoreSubmittedDraft = null,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
 	const effectiveFocus = forceFocus || isFocused;
@@ -107,6 +115,7 @@ export default function UserInput({
 	const [selectedQueuedIndex, setSelectedQueuedIndex] = useState(-1);
 	// Pending image attachments sent with the next submitted message.
 	const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+	const lastRestoredDraftIdRef = useRef<number | null>(null);
 
 	const {
 		input,
@@ -144,6 +153,28 @@ export default function UserInput({
 	useEffect(() => {
 		void promptHistory.loadHistory();
 	}, []);
+
+	useEffect(() => {
+		if (
+			!restoreSubmittedDraft ||
+			lastRestoredDraftIdRef.current === restoreSubmittedDraft.id
+		) {
+			return;
+		}
+
+		lastRestoredDraftIdRef.current = restoreSubmittedDraft.id;
+		setInputState({
+			displayValue: restoreSubmittedDraft.inputState.displayValue,
+			placeholderContent: {
+				...restoreSubmittedDraft.inputState.placeholderContent,
+			},
+		});
+		setAttachments([...restoreSubmittedDraft.attachments]);
+		resetUIState();
+		promptHistory.resetIndex();
+		setTextInputKey(prev => prev + 1);
+		focus('user-input');
+	}, [restoreSubmittedDraft, setInputState, resetUIState, focus]);
 
 	useEffect(() => {
 		if (queuedMessages.length === 0) {
@@ -384,6 +415,10 @@ export default function UserInput({
 
 		// Save the InputState to history and send assembled message to AI
 		promptHistory.addPrompt(inputStateForHistory);
+		onSubmittedDraft?.({
+			inputState: inputStateForHistory,
+			attachments: images,
+		});
 		onSubmit(assembled, display, images.length > 0 ? images : undefined);
 		resetInput();
 		resetUIState();
@@ -398,6 +433,7 @@ export default function UserInput({
 		resetUIState,
 		currentState,
 		isBusy,
+		onSubmittedDraft,
 	]);
 
 	// Handle escape key logic

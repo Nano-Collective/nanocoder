@@ -189,6 +189,64 @@ test('UserInput renders while busy (Escape deferred to global handler)', t => {
 	unmount();
 });
 
+test('UserInput reports and restores submitted drafts with attachments', async t => {
+	let submittedMessage = '';
+	let submittedDraft:
+		| Parameters<
+				NonNullable<React.ComponentProps<typeof UserInput>['onSubmittedDraft']>
+		  >[0]
+		| null = null;
+
+	const restoreDraft = {
+		id: 1,
+		inputState: {
+			displayValue: 'edit this request',
+			placeholderContent: {},
+		},
+		attachments: [{data: 'abc', mediaType: 'image/png'}],
+	};
+
+	const {stdin, lastFrame, rerender, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+				onSubmittedDraft={draft => {
+					submittedDraft = draft;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('original');
+	await waitForFrame(lastFrame, /original/);
+	stdin.write('\r');
+	await waitForCondition(() => submittedMessage === 'original');
+	await waitForCondition(() => !/original/.test(lastFrame() ?? ''));
+
+	t.is(submittedDraft?.inputState.displayValue, 'original');
+	t.deepEqual(submittedDraft?.inputState.placeholderContent, {});
+	t.deepEqual(submittedDraft?.attachments, []);
+
+	rerender(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+				restoreSubmittedDraft={restoreDraft}
+			/>
+		</TestWrapper>,
+	);
+	await waitForFrame(lastFrame, /edit this request/);
+
+	t.regex(lastFrame()!, /\[image #1: image\]/);
+	unmount();
+});
+
 test('UserInput queues submitted messages while busy', async t => {
 	let submittedMessage = '';
 	let queuedMessage = '';
@@ -372,6 +430,7 @@ test('UserInput removes selected queued message with Ctrl+Delete', async t => {
 
 	t.is(removedId, 'queued-1');
 	t.notRegex(lastFrame()!, /first queued/);
+
 	unmount();
 });
 
@@ -809,3 +868,5 @@ test('UserInput does not show completions when input is empty', t => {
 	t.notRegex(output, /Available commands:/);
 	unmount();
 });
+
+
