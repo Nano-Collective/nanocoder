@@ -4,7 +4,7 @@ import {renderWithTheme} from '../test-utils/render-with-theme.js';
 import {setToolManagerGetter} from '../message-handler.js';
 import {ToolManager} from '../tools/tool-manager.js';
 import type {TuneConfig} from '../types/config.js';
-import type {Message} from '../types/core.js';
+import type {ApiCallRecord, Message} from '../types/core.js';
 import {usageCommand} from './usage.js';
 
 console.log(`\nusage.spec.tsx – ${React.version}`);
@@ -534,3 +534,83 @@ test.serial(
 		}
 	},
 );
+
+// ============================================================================
+// Cost Estimation Tests
+// ============================================================================
+
+test('usage command shows Estimated Cost for a priced model', async t => {
+	const messages = createMessages();
+	const metadata = {...createMockMetadata('openai', 'gpt-4o')};
+
+	const result = await usageCommand.handler([], messages, metadata);
+	const {lastFrame} = renderWithTheme(result);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Estimated Cost/);
+	t.regex(output!, /\$/);
+});
+
+test('usage command shows placeholder for a model without pricing', async t => {
+	const messages = createMessages();
+	const metadata = {...createMockMetadata('ollama', 'llama3.2:3b')};
+
+	const result = await usageCommand.handler([], messages, metadata);
+	const {lastFrame} = renderWithTheme(result);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Estimated Cost/);
+	t.regex(output!, /Current Context:.*—/);
+	t.regex(output!, /Cumulative Session:.*—/);
+});
+
+test('usage command aggregates costs across a multi-provider session', async t => {
+	const messages = createMessages();
+	const metadata = {
+		...createMockMetadata('openai', 'gpt-4o'),
+		apiCallHistory: [
+			{
+				provider: 'openai',
+				model: 'gpt-4o',
+				inputTokens: 500,
+				outputTokens: 200,
+				timestamp: Date.now(),
+			},
+			{
+				provider: 'ollama',
+				model: 'llama3.2:3b',
+				inputTokens: 1000,
+				outputTokens: 500,
+				timestamp: Date.now(),
+			},
+		] satisfies ApiCallRecord[],
+	};
+
+	const result = await usageCommand.handler([], messages, metadata);
+	const {lastFrame} = renderWithTheme(result);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Estimated Cost/);
+	t.regex(output!, /\$/);
+});
+
+test('usage command keeps token display unchanged when pricing is missing', async t => {
+	const messages = createMessages();
+	const metadata = {...createMockMetadata('openai', 'unknown-model-12345')};
+
+	const result = await usageCommand.handler([], messages, metadata);
+	const {lastFrame} = renderWithTheme(result);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Estimated Cost/);
+	t.regex(output!, /—/);
+	t.regex(output!, /Context Usage/);
+	t.regex(output!, /Overall Usage/);
+	t.regex(output!, /Breakdown by Category/);
+	t.regex(output!, /Model Information/);
+	t.regex(output!, /Recent Activity/);
+});

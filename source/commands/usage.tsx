@@ -176,8 +176,11 @@ export const usageCommand: Command = {
 				providerConfig: client?.getProviderConfig(),
 			}));
 
-		// Fetch pricing and compute cost (best-effort: null when unavailable)
-		let cost: CostBreakdown | undefined;
+		// Fetch pricing and compute cost (best-effort: show '—' when unavailable)
+		let cost: CostBreakdown = {
+			currentContext: NaN,
+			cumulativeSession: NaN,
+		};
 		try {
 			const pricing = await getModelPricing(model);
 			if (pricing) {
@@ -235,7 +238,7 @@ export const usageCommand: Command = {
 				};
 			}
 		} catch {
-			// Best-effort: no pricing available — display will show "—"
+			// Best-effort: already initialized to NaN — display will show "—"
 		}
 
 		return React.createElement(UsageDisplay, {
