@@ -38,7 +38,10 @@ const waitForCondition = async (
 	const startedAt = Date.now();
 
 	while (Date.now() - startedAt < timeoutMs) {
-		if (condition()) return;
+		if (condition()) {
+			return;
+		}
+
 		await wait(25);
 	}
 
@@ -48,8 +51,12 @@ const waitForCondition = async (
 const waitForFrame = async (
 	lastFrame: () => string | undefined,
 	pattern: RegExp,
+	timeoutMs = 1000,
 ) => {
-	await waitForCondition(() => pattern.test(lastFrame() ?? ''));
+	await waitForCondition(
+		() => pattern.test(lastFrame() ?? ''),
+		timeoutMs,
+	);
 };
 
 // ============================================================================
@@ -237,6 +244,193 @@ test('UserInput reports and restores submitted drafts with attachments', async t
 	await waitForFrame(lastFrame, /edit this request/);
 
 	t.regex(lastFrame()!, /\[image #1: image\]/);
+	unmount();
+});
+
+test('UserInput queues submitted messages while busy', async t => {
+	let submittedMessage = '';
+	let queuedMessage = '';
+	let queuedDisplay = '';
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				isBusy={true}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+				onQueueMessage={message => {
+					queuedMessage = message.message;
+					queuedDisplay = message.displayValue;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('queued while busy');
+	await waitForFrame(lastFrame, /queued while busy/);
+	stdin.write('\r');
+	await waitForCondition(() => queuedMessage === 'queued while busy');
+	await waitForCondition(() => !/queued while busy/.test(lastFrame() ?? ''));
+
+	t.is(submittedMessage, '');
+	t.is(queuedMessage, 'queued while busy');
+	t.is(queuedDisplay, 'queued while busy');
+	t.notRegex(lastFrame()!, /queued while busy/);
+	unmount();
+});
+
+test('UserInput submits slash commands immediately while busy', async t => {
+	let submittedMessage = '';
+	let queuedMessage = '';
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				isBusy={true}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+				onQueueMessage={message => {
+					queuedMessage = message.message;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('/help');
+	await waitForFrame(lastFrame, /\/help/);
+	stdin.write('\r');
+	await waitForCondition(() => submittedMessage === '/help');
+
+	t.is(submittedMessage, '/help');
+	t.is(queuedMessage, '');
+	unmount();
+});
+
+test('UserInput renders queued messages while busy', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				isBusy={true}
+				queuedMessages={[
+					{
+						id: 'queued-1',
+						message: 'first full message',
+						displayValue: 'first queued message',
+					},
+					{
+						id: 'queued-2',
+						message: 'second full message',
+						displayValue: 'second queued message',
+						images: [{data: 'abc', mediaType: 'image/png'}],
+					},
+				]}
+			/>
+		</TestWrapper>,
+	);
+
+	const output = lastFrame()!;
+	t.regex(output, /Queued messages/);
+	t.regex(output, /first queued message/);
+	t.regex(output, /second queued message/);
+	t.regex(output, /1 image/);
+	unmount();
+});
+
+test('UserInput navigates queued messages while busy with empty input', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				isBusy={true}
+				queuedMessages={[
+					{id: 'queued-1', message: 'first', displayValue: 'first queued'},
+					{id: 'queued-2', message: 'second', displayValue: 'second queued'},
+				]}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('\u001B[B');
+	await wait(50);
+
+	const output = lastFrame()!;
+	t.regex(output, /▸ first queued/);
+	t.notRegex(output, /▸ second queued/);
+	unmount();
+});
+
+test('UserInput loads selected queued message for editing', async t => {
+	let removedId = '';
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				isBusy={true}
+				queuedMessages={[
+					{id: 'queued-1', message: 'first', displayValue: 'first queued'},
+					{id: 'queued-2', message: 'second', displayValue: 'second queued'},
+				]}
+				onRemoveQueuedMessage={id => {
+					removedId = id;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('\u001B[B');
+	await wait(50);
+	stdin.write('\u001B[B');
+	await wait(50);
+	stdin.write('\r');
+	await wait(50);
+
+	t.is(removedId, 'queued-2');
+	t.regex(lastFrame()!, /second queued/);
+	unmount();
+});
+
+test('UserInput removes selected queued message with Ctrl+Delete', async t => {
+	let removedId = '';
+	const QueueHarness = () => {
+		const [messages, setMessages] = React.useState([
+			{id: 'queued-1', message: 'first', displayValue: 'first queued'},
+			{id: 'queued-2', message: 'second', displayValue: 'second queued'},
+		]);
+
+		return (
+			<UserInput
+				forceFocus={true}
+				isBusy={true}
+				queuedMessages={messages}
+				onRemoveQueuedMessage={id => {
+					removedId = id;
+					setMessages(current =>
+						current.filter(message => message.id !== id),
+					);
+				}}
+			/>
+		);
+	};
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<QueueHarness />
+		</TestWrapper>,
+	);
+
+	stdin.write('\u001B[B');
+	await wait(50);
+	stdin.write('\u001B[3;5~');
+	await wait(50);
+
+	t.is(removedId, 'queued-1');
+	t.notRegex(lastFrame()!, /first queued/);
+
 	unmount();
 });
 
@@ -674,4 +868,5 @@ test('UserInput does not show completions when input is empty', t => {
 	t.notRegex(output, /Available commands:/);
 	unmount();
 });
+
 

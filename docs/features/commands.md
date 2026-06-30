@@ -31,12 +31,14 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/exit` | Exit the application |
 | `/export` | Export current session to markdown file |
 | `/copy` | Copy the last assistant response to the system clipboard |
+| `/doctor` | Show environment health report for bug reports |
 | `/update` | Update Nanocoder to the latest version |
 | `/usage` | Get current model context usage visually |
 | `/lsp` | List connected LSP servers |
 | `/schedule` | Read-only view of cron subscriptions declared by skills (see [Skills → Event subscriptions](skills.md#event-subscriptions)) |
 | `/skills` | List and inspect loaded skills; scaffold new bundle skills with AI assistance (see [Skills](skills.md)) |
 | `/resume` | Resume a previous chat session (aliases: `/sessions`, `/history`). See [Session Management](session-management.md) |
+| `/retry` | Re-run the last user turn. Use `/retry --model <id>` or `/retry --provider <name> --model <id>` to switch models first |
 | `/rename` | Rename the current session. Name must be non-empty and 100 characters or less. See [Session Management](session-management.md) |
 | `/explorer` | Interactive file browser to navigate, preview, and select files for context |
 | `/tune` | Configure runtime model behaviour — tool profiles, compaction, native tools, model parameters (see [Tune](tune.md)) |

@@ -4,6 +4,7 @@ import {render} from 'ink-testing-library';
 import {getBaseSystemPrompt, useChatHandler} from './useChatHandler';
 import type {UseChatHandlerProps, ChatHandlerReturn} from './types';
 import type {LLMClient, Message} from '../../types/core';
+import {useUserMessageQueue} from '../useUserMessageQueue';
 
 // Test component that uses the hook and exposes results
 function TestHookComponent(props: UseChatHandlerProps & {onResult?: (result: ChatHandlerReturn) => void}) {
@@ -59,6 +60,23 @@ const createMockToolManager = () => ({
 	getFilteredTools: () => ({}),
 	getFilteredToolsForProvider: () => ({}),
 }) as NonNullable<UseChatHandlerProps['toolManager']>;
+
+const waitForCondition = async (
+	condition: () => boolean,
+	timeoutMs = 1000,
+) => {
+	const startedAt = Date.now();
+
+	while (Date.now() - startedAt < timeoutMs) {
+		if (condition()) {
+			return;
+		}
+
+		await new Promise(resolve => setTimeout(resolve, 25));
+	}
+
+	throw new Error(`Timed out after ${timeoutMs}ms waiting for condition`);
+};
 
 test('useChatHandler - returns correct interface', t => {
 	let hookResult: ChatHandlerReturn | null = null;
@@ -317,6 +335,85 @@ test('useChatHandler - callbacks are provided', t => {
 	t.truthy(hookResult);
 	// The hook should successfully initialize with callbacks
 	t.is(typeof props.onConversationComplete, 'function');
+});
+
+test('useChatHandler - drains queued message when setup fails before conversation loop', async t => {
+	type QueueDrainHarnessResult = {
+		chatHandler: ChatHandlerReturn;
+		messageQueue: ReturnType<typeof useUserMessageQueue>;
+		drainedMessages: string[];
+	};
+
+	let hookResult: QueueDrainHarnessResult | null = null;
+	const throwingToolManager = {
+		...createMockToolManager(),
+		getToolNames: () => {
+			throw new Error('command prompt failed');
+		},
+	} as NonNullable<UseChatHandlerProps['toolManager']>;
+	const customCommandLoader = {
+		findRelevantCommands: () => [],
+	} as unknown as NonNullable<UseChatHandlerProps['customCommandLoader']>;
+
+	function QueueDrainHarness({
+		onResult,
+	}: {
+		onResult: (result: QueueDrainHarnessResult) => void;
+	}) {
+		const messageQueue = useUserMessageQueue();
+		const drainedMessagesRef = React.useRef<string[]>([]);
+		const chatHandler = useChatHandler(
+			createMockProps({
+				client: createMockClient(),
+				toolManager: throwingToolManager,
+				customCommandLoader,
+				onConversationComplete: () => {
+					void messageQueue.drainNextMessage(message => {
+						drainedMessagesRef.current.push(message.message);
+						return true;
+					});
+				},
+			}),
+		);
+
+		React.useEffect(() => {
+			onResult({
+				chatHandler,
+				messageQueue,
+				drainedMessages: drainedMessagesRef.current,
+			});
+		}, [chatHandler, messageQueue, onResult]);
+
+		return <></>;
+	}
+
+	const rendered = render(
+		<QueueDrainHarness
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+
+	await waitForCondition(() => hookResult !== null);
+
+	hookResult!.messageQueue.enqueueMessage({
+		message: 'queued after failure',
+		displayValue: 'Queued after failure',
+	});
+
+	await waitForCondition(() => hookResult!.messageQueue.queuedMessages.length === 1);
+
+	await hookResult!.chatHandler.handleChatMessage('current turn');
+
+	await waitForCondition(
+		() => hookResult!.drainedMessages[0] === 'queued after failure',
+	);
+	await waitForCondition(() => hookResult!.messageQueue.queuedMessages.length === 0);
+
+	t.deepEqual(hookResult!.drainedMessages, ['queued after failure']);
+	t.is(hookResult!.messageQueue.queuedMessages.length, 0);
+	rendered.unmount();
 });
 
 test('useChatHandler - streaming state types are correct', t => {

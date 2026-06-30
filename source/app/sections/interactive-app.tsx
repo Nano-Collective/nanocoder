@@ -9,6 +9,7 @@ import type {useChatHandler} from '@/hooks/chat-handler';
 import type {AppHandlers} from '@/hooks/useAppHandlers';
 import type {useAppState} from '@/hooks/useAppState';
 import type {useModeHandlers} from '@/hooks/useModeHandlers';
+import type {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import type {useVSCodeServer} from '@/hooks/useVSCodeServer';
 import type {ImageAttachment} from '@/types/core';
 import type {RestoredInputDraft, SubmittedInputDraft} from '@/types/hooks';
@@ -34,6 +35,7 @@ interface InteractiveAppProps {
 		displayValue: string,
 		images?: ImageAttachment[],
 	) => Promise<void>;
+	userMessageQueue: ReturnType<typeof useUserMessageQueue>;
 	handleIdeSelect: (ide: string) => void;
 }
 
@@ -57,6 +59,7 @@ export function InteractiveApp({
 	handleToolConfirmation,
 	handleQuestionAnswer,
 	handleUserSubmit,
+	userMessageQueue,
 	handleIdeSelect,
 }: InteractiveAppProps): React.ReactElement {
 	const nextRestoredDraftIdRef = React.useRef(1);
@@ -260,9 +263,12 @@ export function InteractiveApp({
 						mcpInitialized={appState.mcpInitialized}
 						client={appState.client}
 						customCommands={Array.from(appState.customCommandCache.keys())}
-						inputDisabled={chatHandler.isGenerating || appState.isToolExecuting}
+						inputDisabled={false}
 						onSubmittedDraft={handleSubmittedDraft}
 						restoreSubmittedDraft={restoredDraft}
+						queuedMessages={userMessageQueue.queuedMessages}
+						onQueueMessage={userMessageQueue.enqueueMessage}
+						onRemoveQueuedMessage={userMessageQueue.removeMessage}
 						isBusy={cancellable}
 						developmentMode={appState.developmentMode}
 						contextPercentUsed={appState.contextPercentUsed}

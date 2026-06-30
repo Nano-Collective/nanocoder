@@ -68,6 +68,11 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/copy').then(m => m.copyCommand),
 	},
 	{
+		name: 'doctor',
+		description: 'Show environment health report for bug reports',
+		load: () => import('@/commands/doctor').then(m => m.doctorCommand),
+	},
+	{
 		name: 'model',
 		description: 'Select a model from any configured provider',
 		load: () => import('@/commands/model').then(m => m.modelCommand),
@@ -164,6 +169,12 @@ export const lazyCommands: LazyCommand[] = [
 		description:
 			'List and resume previous chat sessions. Aliases: /sessions, /history',
 		load: () => import('@/commands/resume').then(m => m.resumeCommand),
+	},
+	{
+		name: 'retry',
+		description:
+			'Re-run the last user turn (use --model <id> to switch models first)',
+		load: () => import('@/commands/retry').then(m => m.retryCommand),
 	},
 	{
 		name: 'tasks',

@@ -53,15 +53,55 @@ export type TaggedProvider =
  * this fetch will honor the configured CA bundle — even Anthropic and Google,
  * which would otherwise use the global fetch and bypass our TLS settings.
  */
-function createUndiciFetch(undiciAgent: Agent) {
-	return (
+export function createUndiciFetch(undiciAgent: Agent) {
+	return async (
 		url: string | URL | Request,
 		options?: RequestInit,
 	): Promise<Response> => {
-		return undiciFetch(url as string | URL, {
+		const response = await undiciFetch(url as string | URL, {
 			...(options as UndiciRequestInit),
 			dispatcher: undiciAgent,
-		}) as Promise<Response>;
+		});
+
+		const contentType = response.headers.get('content-type') || '';
+		if (response.body && contentType.includes('text/event-stream')) {
+			const decoder = new TextDecoder('utf-8');
+			const encoder = new TextEncoder();
+			let buffer = '';
+
+			const transform = new TransformStream({
+				transform(chunk, controller) {
+					buffer += decoder.decode(chunk, {stream: true});
+
+					if (buffer.includes('data:  [DONE]')) {
+						buffer = buffer.replace(/data:\s\s\[DONE\]/g, 'data: [DONE]');
+					}
+
+					if (buffer.length > 13) {
+						const toEnqueue = buffer.slice(0, -13);
+						buffer = buffer.slice(-13);
+						controller.enqueue(encoder.encode(toEnqueue));
+					}
+				},
+				flush(controller) {
+					buffer += decoder.decode();
+					if (buffer.includes('data:  [DONE]')) {
+						buffer = buffer.replace(/data:\s\s\[DONE\]/g, 'data: [DONE]');
+					}
+					if (buffer.length > 0) {
+						controller.enqueue(encoder.encode(buffer));
+					}
+				},
+			});
+
+			return new Response(response.body.pipeThrough(transform), {
+				status: response.status,
+				statusText: response.statusText,
+				headers: response.headers,
+			}) as unknown as Response;
+		}
+
+		return response as unknown as Response;
 	};
 }
 
