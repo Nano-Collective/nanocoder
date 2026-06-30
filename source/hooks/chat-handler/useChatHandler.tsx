@@ -84,6 +84,7 @@ export function useChatHandler({
 	onSetLiveTaskList,
 	setLiveComponent,
 	setLastApiUsage,
+	onApiCallComplete,
 	tune,
 	subagentsReady,
 }: UseChatHandlerProps): ChatHandlerReturn {
@@ -238,6 +239,7 @@ export function useChatHandler({
 					onSetLiveTaskList,
 					setLiveComponent,
 					setLastApiUsage,
+					onApiCallComplete,
 					tune,
 				});
 			} catch (error) {
@@ -271,6 +273,7 @@ export function useChatHandler({
 			resetStreamingState,
 			setLiveComponent,
 			setLastApiUsage,
+			onApiCallComplete,
 		],
 	);
 
