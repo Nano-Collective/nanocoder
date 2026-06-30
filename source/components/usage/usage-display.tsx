@@ -295,7 +295,7 @@ export function UsageDisplay({
 							</Text>
 						</Text>
 					</Box>
-					{cost.perProvider && Object.keys(cost.perProvider).length > 1 && (
+					{cost.perProvider && (
 						<Box flexDirection="column" marginTop={1}>
 							<Text color={colors.secondary} bold>
 								Per-Provider:
