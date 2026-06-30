@@ -4,11 +4,11 @@ import {
 	type JSONValue,
 	jsonSchema,
 	tool,
-} from 'ai';
-import React from 'react';
-import type {AIProviderConfig} from '@/types/config';
+} from "ai";
+import React from "react";
+import type { AIProviderConfig } from "@/types/config";
 
-export {asSchema, jsonSchema, tool};
+export { asSchema, jsonSchema, tool };
 
 // Type for AI SDK tools (return type of tool() function)
 // Tool<PARAMETERS, RESULT> is AI SDK's actual tool type
@@ -47,7 +47,7 @@ export interface ImageAttachment {
 // Current Nanocoder message format (OpenAI-compatible)
 // Note: We maintain this format internally and convert to ModelMessage at AI SDK boundary
 export interface Message {
-	role: 'user' | 'assistant' | 'system' | 'tool';
+	role: "user" | "assistant" | "system" | "tool";
 	content: string;
 	tool_calls?: ToolCall[];
 	tool_call_id?: string;
@@ -72,13 +72,22 @@ export interface ToolCall {
 
 export interface ToolResult {
 	tool_call_id: string;
-	role: 'tool';
+	role: "tool";
 	name: string;
 	/** Canonical string output: used for display, persistence, and as the
 	 * fallback model representation when `structuredContent` is absent. */
 	content: string;
 	/** Optional structured payload sent to the model as a JSON tool result. */
 	structuredContent?: JSONValue;
+	/**
+	 * True when `content` represents a tool execution failure (handler threw,
+	 * argument parsing failed, or the tool name was unrecognized) rather than
+	 * a normal result. `content` is still sent back to the model unchanged
+	 * either way — this flag exists purely so callers building telemetry/logs
+	 * (e.g. the `--json` headless report) can distinguish a failed call from
+	 * a successful one without re-parsing the content string.
+	 */
+	isError?: boolean;
 }
 
 export interface ToolParameterSchema {
@@ -88,12 +97,12 @@ export interface ToolParameterSchema {
 }
 
 export interface Tool {
-	type: 'function';
+	type: "function";
 	function: {
 		name: string;
 		description: string;
 		parameters: {
-			type: 'object';
+			type: "object";
 			properties: Record<string, ToolParameterSchema>;
 			required: string[];
 		};
@@ -150,8 +159,8 @@ export interface ValidationErrorDetail {
 }
 
 export type ToolValidationResult =
-	| {valid: true}
-	| {valid: false; error: string; details?: ValidationErrorDetail[]};
+	| { valid: true }
+	| { valid: false; error: string; details?: ValidationErrorDetail[] };
 
 /**
  * Tool validator type for pre-execution validation.
@@ -241,7 +250,7 @@ export interface ToolEntry {
 }
 
 interface LLMMessage {
-	role: 'assistant';
+	role: "assistant";
 	content: string;
 	tool_calls?: ToolCall[];
 	reasoning?: string;
@@ -279,7 +288,7 @@ export interface ApiUsageSnapshot extends ApiUsage {
  *   estimate added for the messages appended since the snapshot.
  * - `estimate`: fully client-side (no usable API report yet).
  */
-export type ContextSource = 'api' | 'api+estimate' | 'estimate';
+export type ContextSource = "api" | "api+estimate" | "estimate";
 
 export interface LLMChatResponse {
 	choices: Array<{
@@ -307,7 +316,7 @@ export interface StreamCallbacks {
 export interface ModeOverrides {
 	nonInteractiveMode: boolean;
 	nonInteractiveAlwaysAllow: string[];
-	modelParameters?: import('@/types/config').ModelParameters;
+	modelParameters?: import("@/types/config").ModelParameters;
 }
 
 export interface LLMClient {
@@ -328,32 +337,32 @@ export interface LLMClient {
 }
 
 export type DevelopmentMode =
-	| 'normal'
-	| 'auto-accept'
-	| 'yolo'
-	| 'plan'
-	| 'headless';
+	| "normal"
+	| "auto-accept"
+	| "yolo"
+	| "plan"
+	| "headless";
 
 export const DEVELOPMENT_MODE_LABELS: Record<DevelopmentMode, string> = {
-	normal: '▶ normal mode on',
+	normal: "▶ normal mode on",
 	// Auto-accept skips confirmation for file edits but still prompts for bash
 	// and destructive git, so the label calls that out to avoid surprise.
-	'auto-accept': '⏵⏵ auto-accept mode on',
-	yolo: '⏵⏵⏵ yolo mode on',
-	plan: '⏸ plan mode on',
-	headless: '⏵⏵ headless mode on',
+	"auto-accept": "⏵⏵ auto-accept mode on",
+	yolo: "⏵⏵⏵ yolo mode on",
+	plan: "⏸ plan mode on",
+	headless: "⏵⏵ headless mode on",
 };
 
 export const DEVELOPMENT_MODE_LABELS_NARROW: Record<DevelopmentMode, string> = {
-	normal: '▶ normal',
-	'auto-accept': '⏵⏵ auto',
-	yolo: '⏵⏵⏵ yolo',
-	plan: '⏸ plan',
-	headless: '⏵⏵ headless',
+	normal: "▶ normal",
+	"auto-accept": "⏵⏵ auto",
+	yolo: "⏵⏵⏵ yolo",
+	plan: "⏸ plan",
+	headless: "⏵⏵ headless",
 };
 
 // Connection status types for MCP and LSP servers
-export type ConnectionStatus = 'connected' | 'failed' | 'pending';
+export type ConnectionStatus = "connected" | "failed" | "pending";
 
 export interface MCPConnectionStatus {
 	name: string;
