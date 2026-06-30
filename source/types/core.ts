@@ -6,9 +6,9 @@ import {
 	tool,
 } from 'ai';
 import React from 'react';
-import type { AIProviderConfig } from '@/types/config';
+import type {AIProviderConfig} from '@/types/config';
 
-export { asSchema, jsonSchema, tool };
+export {asSchema, jsonSchema, tool};
 
 // Type for AI SDK tools (return type of tool() function)
 // Tool<PARAMETERS, RESULT> is AI SDK's actual tool type
@@ -102,8 +102,8 @@ export interface ValidationErrorDetail {
 }
 
 export type ToolValidationResult =
-	| { valid: true }
-	| { valid: false; error: string; details?: ValidationErrorDetail[] };
+	| {valid: true}
+	| {valid: false; error: string; details?: ValidationErrorDetail[]};
 
 export type ToolValidator = (
 	// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required -- Tool arguments are dynamically typed

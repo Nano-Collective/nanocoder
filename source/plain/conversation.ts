@@ -1,16 +1,10 @@
-import { DEFAULT_HEADLESS_MAX_TURNS, getAppConfig } from "@/config/index";
-import { processToolUse } from "@/message-handler";
-import {
-	color,
-	write,
-	writeError,
-	writeLine,
-	writeStatus,
-} from "@/plain/writer";
-import { parseToolCalls } from "@/tool-calling/index";
-import { resolveToolApproval } from "@/tools/approval-policy";
-import type { ToolManager } from "@/tools/tool-manager";
-import type { TuneConfig } from "@/types/config";
+import {DEFAULT_HEADLESS_MAX_TURNS, getAppConfig} from '@/config/index';
+import {processToolUse} from '@/message-handler';
+import {color, write, writeError, writeLine, writeStatus} from '@/plain/writer';
+import {parseToolCalls} from '@/tool-calling/index';
+import {resolveToolApproval} from '@/tools/approval-policy';
+import type {ToolManager} from '@/tools/tool-manager';
+import type {TuneConfig} from '@/types/config';
 import type {
 	DevelopmentMode,
 	LLMClient,
@@ -18,8 +12,8 @@ import type {
 	ModeOverrides,
 	ToolCall,
 	ToolResult,
-} from "@/types/core";
-import { capMessagesForModel } from "@/utils/message-capping";
+} from '@/types/core';
+import {capMessagesForModel} from '@/utils/message-capping';
 
 export interface ToolCallLog {
 	name: string;
@@ -38,25 +32,25 @@ export interface RunPlainConversationOptions {
 	abortSignal: AbortSignal;
 	tune?: TuneConfig;
 	model?: string;
-	outputFormat?: "text" | "json";
+	outputFormat?: 'text' | 'json';
 }
 
 export type PlainConversationOutcome =
 	| {
-			kind: "success";
+			kind: 'success';
 			finalText: string;
 			reasoning: string | null;
 			toolCalls: ToolCallLog[];
 	  }
 	| {
-			kind: "tool-approval-required";
+			kind: 'tool-approval-required';
 			toolNames: string[];
 			finalText: string;
 			reasoning: string | null;
 			toolCalls: ToolCallLog[];
 	  }
 	| {
-			kind: "error";
+			kind: 'error';
 			message: string;
 			finalText: string;
 			reasoning: string | null;
@@ -67,9 +61,9 @@ export type PlainConversationOutcome =
 // finalizes cleanly instead of the loop bailing out with a hard error and
 // discarding the work it has already done.
 const FINAL_TURN_INSTRUCTION =
-	"You have reached the maximum number of tool-execution turns for this run. " +
-	"Do not call any more tools. Produce your final answer now using only the " +
-	"information you already have.";
+	'You have reached the maximum number of tool-execution turns for this run. ' +
+	'Do not call any more tools. Produce your final answer now using only the ' +
+	'information you already have.';
 
 /**
  * Headless conversation loop. Streams assistant text to stdout, runs tools
@@ -94,14 +88,14 @@ export async function runPlainConversation(
 		abortSignal,
 		tune,
 		model,
-		outputFormat = "text",
+		outputFormat = 'text',
 	} = options;
 
-	const isJson = outputFormat === "json";
+	const isJson = outputFormat === 'json';
 
 	let messages = initialMessages;
-	let accumulatedFinalText = "";
-	let accumulatedReasoning = "";
+	let accumulatedFinalText = '';
+	let accumulatedReasoning = '';
 	const toolCallsLog: ToolCallLog[] = [];
 
 	const maxTurns =
@@ -110,8 +104,8 @@ export async function runPlainConversation(
 	for (let turn = 0; turn < maxTurns; turn++) {
 		if (abortSignal.aborted) {
 			return {
-				kind: "error",
-				message: "Aborted",
+				kind: 'error',
+				message: 'Aborted',
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
@@ -135,7 +129,7 @@ export async function runPlainConversation(
 			nonInteractiveAlwaysAllow,
 		};
 
-		let streamedReasoning = "";
+		let streamedReasoning = '';
 		let reasoningPrinted = false;
 		let contentStarted = false;
 
@@ -144,7 +138,7 @@ export async function runPlainConversation(
 		const cappedMessages = capMessagesForModel(messages, maxMessages);
 
 		const finalTurnNotice: Message[] = finalTurn
-			? [{ role: "user", content: FINAL_TURN_INSTRUCTION }]
+			? [{role: 'user', content: FINAL_TURN_INSTRUCTION}]
 			: [];
 
 		const result = await client.chat(
@@ -157,9 +151,9 @@ export async function runPlainConversation(
 					if (!isJson) {
 						if (!reasoningPrinted) {
 							reasoningPrinted = true;
-							write(color("gray", "> "));
+							write(color('gray', '> '));
 						}
-						write(color("gray", token));
+						write(color('gray', token));
 					}
 				},
 				onToken: (token: string) => {
@@ -185,8 +179,8 @@ export async function runPlainConversation(
 
 		if (!result || !result.choices || result.choices.length === 0) {
 			return {
-				kind: "error",
-				message: "No response received from model",
+				kind: 'error',
+				message: 'No response received from model',
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
@@ -195,7 +189,7 @@ export async function runPlainConversation(
 
 		const message = result.choices[0].message;
 		const nativeToolCalls = message.tool_calls || [];
-		const fullContent = message.content || "";
+		const fullContent = message.content || '';
 
 		const xmlParse =
 			result.toolsDisabled && !finalTurn
@@ -211,7 +205,7 @@ export async function runPlainConversation(
 				writeError(`Malformed tool call: ${xmlParse.error}`);
 			}
 			return {
-				kind: "error",
+				kind: 'error',
 				message: xmlParse.error,
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
@@ -229,13 +223,13 @@ export async function runPlainConversation(
 		const errorResults: ToolResult[] = [];
 		for (const toolCall of allToolCalls) {
 			if (
-				toolCall.function.name === "__xml_validation_error__" ||
+				toolCall.function.name === '__xml_validation_error__' ||
 				!toolManager.hasTool(toolCall.function.name)
 			) {
 				const errorMsg = `Unknown tool: ${toolCall.function.name}`;
 				errorResults.push({
 					tool_call_id: toolCall.id,
-					role: "tool",
+					role: 'tool',
 					name: toolCall.function.name,
 					content: errorMsg,
 					isError: true,
@@ -254,7 +248,7 @@ export async function runPlainConversation(
 		messages = [
 			...messages,
 			{
-				role: "assistant",
+				role: 'assistant',
 				content: cleanedContent,
 				tool_calls: validToolCalls.length > 0 ? validToolCalls : undefined,
 				reasoning: streamedReasoning || undefined,
@@ -269,15 +263,15 @@ export async function runPlainConversation(
 		if (validToolCalls.length === 0) {
 			if (!cleanedContent.trim()) {
 				return {
-					kind: "error",
-					message: "Model returned an empty response with no tool calls",
+					kind: 'error',
+					message: 'Model returned an empty response with no tool calls',
 					finalText: accumulatedFinalText,
 					reasoning: accumulatedReasoning || null,
 					toolCalls: toolCallsLog,
 				};
 			}
 			return {
-				kind: "success",
+				kind: 'success',
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
@@ -303,7 +297,7 @@ export async function runPlainConversation(
 
 		if (toolsNeedingApproval.length > 0) {
 			return {
-				kind: "tool-approval-required",
+				kind: 'tool-approval-required',
 				toolNames: toolsNeedingApproval,
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
@@ -321,7 +315,7 @@ export async function runPlainConversation(
 			toolResults.push(toolResult);
 
 			const contentStr = toolResult.content
-				? typeof toolResult.content === "string"
+				? typeof toolResult.content === 'string'
 					? toolResult.content
 					: JSON.stringify(toolResult.content)
 				: null;
@@ -353,7 +347,7 @@ export async function runPlainConversation(
 	// loop normally returns from inside. Reaching here means even that produced
 	// no usable result.
 	return {
-		kind: "error",
+		kind: 'error',
 		message: `Conversation exceeded ${maxTurns} turns without a final answer`,
 		finalText: accumulatedFinalText,
 		reasoning: accumulatedReasoning || null,
@@ -372,6 +366,6 @@ async function evaluateNeedsApproval(
 		toolCall.function.name,
 		toolEntry,
 		toolCall.function.arguments,
-		{ mode, alwaysAllow: nonInteractiveAlwaysAllow },
+		{mode, alwaysAllow: nonInteractiveAlwaysAllow},
 	);
 }
