@@ -65,17 +65,31 @@ export function createUndiciFetch(undiciAgent: Agent) {
 
 		const contentType = response.headers.get('content-type') || '';
 		if (response.body && contentType.includes('text/event-stream')) {
+			const decoder = new TextDecoder('utf-8');
+			const encoder = new TextEncoder();
+			let buffer = '';
+
 			const transform = new TransformStream({
 				transform(chunk, controller) {
-					const str = new TextDecoder().decode(chunk);
-					if (str.includes('data:  [DONE]')) {
-						controller.enqueue(
-							new TextEncoder().encode(
-								str.replace(/data:\s+\[DONE\]/g, 'data: [DONE]'),
-							),
-						);
-					} else {
-						controller.enqueue(chunk);
+					buffer += decoder.decode(chunk, {stream: true});
+
+					if (buffer.includes('data:  [DONE]')) {
+						buffer = buffer.replace(/data:\s\s\[DONE\]/g, 'data: [DONE]');
+					}
+
+					if (buffer.length > 13) {
+						const toEnqueue = buffer.slice(0, -13);
+						buffer = buffer.slice(-13);
+						controller.enqueue(encoder.encode(toEnqueue));
+					}
+				},
+				flush(controller) {
+					buffer += decoder.decode();
+					if (buffer.includes('data:  [DONE]')) {
+						buffer = buffer.replace(/data:\s\s\[DONE\]/g, 'data: [DONE]');
+					}
+					if (buffer.length > 0) {
+						controller.enqueue(encoder.encode(buffer));
 					}
 				},
 			});
