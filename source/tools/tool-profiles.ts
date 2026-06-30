@@ -21,7 +21,7 @@ const TOOL_PROFILES: Record<ConcreteProfile, string[]> = {
 	],
 	nano: [
 		'read_file',
-		'string_replace',
+		'diff_edit',
 		'write_file',
 		'execute_bash',
 		'search_file_contents',
@@ -33,7 +33,7 @@ export const TOOL_PROFILE_DESCRIPTIONS: Record<ToolProfile, string> = {
 	full: 'All tools including MCP',
 	minimal:
 		'Core editing, bash, and exploration tools — slim prompt, single-tool mode enabled automatically',
-	nano: 'Strictest budget — 5 tools, ultra-slim prompt. For low-end hardware running larger models.',
+	nano: 'Strictest budget — 5 tools, diff-block editing, ultra-slim prompt. For low-end hardware running tiny models.',
 };
 
 export const TOOL_PROFILE_TOOLTIPS: Record<ToolProfile, string> = {
@@ -41,7 +41,7 @@ export const TOOL_PROFILE_TOOLTIPS: Record<ToolProfile, string> = {
 	full: 'No filtering. All registered tools including MCP servers.',
 	minimal:
 		'8 core tools (edit, bash, search, agent) with slim prompt and single-tool enforcement. Recommended for small models.',
-	nano: '5 tools (read, edit, write, bash, search) with an ultra-slim prompt and single-tool enforcement. AGENTS.md is omitted from the system prompt by default. Recommended for tiny models or low-end hardware.',
+	nano: '5 tools (read, diff edit, write, bash, search) with an ultra-slim prompt and single-tool enforcement. AGENTS.md is omitted from the system prompt by default. Recommended for tiny models or low-end hardware.',
 };
 
 /**
