@@ -394,7 +394,35 @@ test('UserInput loads selected queued message for editing', async t => {
 	unmount();
 });
 
-test('UserInput removes selected queued message with Ctrl+Delete', async t => {
+test('UserInput up arrow returns from the first queued message to the input', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				isBusy={true}
+				queuedMessages={[
+					{id: 'queued-1', message: 'first', displayValue: 'first queued'},
+					{id: 'queued-2', message: 'second', displayValue: 'second queued'},
+				]}
+			/>
+		</TestWrapper>,
+	);
+
+	// Enter the queue, then step back up to the input.
+	stdin.write('\u001B[B');
+	await wait(50);
+	t.regex(lastFrame()!, /▸ first queued/);
+
+	stdin.write('\u001B[A');
+	await wait(50);
+
+	const output = lastFrame()!;
+	t.notRegex(output, /▸ first queued/);
+	t.notRegex(output, /▸ second queued/);
+	unmount();
+});
+
+test('UserInput removes selected queued message with Delete', async t => {
 	let removedId = '';
 	const QueueHarness = () => {
 		const [messages, setMessages] = React.useState([

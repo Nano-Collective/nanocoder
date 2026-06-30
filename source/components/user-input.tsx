@@ -187,6 +187,18 @@ export default function UserInput({
 		);
 	}, [queuedMessages.length]);
 
+	// When in-flight work ends, reclaim focus so the cursor returns and the user
+	// can type right away. Focus can be dropped mid-turn (e.g. an interstitial
+	// tool-confirmation prompt unmounts the input), and useFocus autoFocus only
+	// fires on mount, so we restore it on the busy -> idle edge.
+	const wasBusyRef = useRef(isBusy);
+	useEffect(() => {
+		if (wasBusyRef.current && !isBusy && !disabled) {
+			focus('user-input');
+		}
+		wasBusyRef.current = isBusy;
+	}, [isBusy, disabled, focus]);
+
 	// Consume pending file mentions from explorer and insert into input
 	// Properly attach files by calling handleFileMention for each
 	useEffect(() => {
@@ -531,18 +543,26 @@ export default function UserInput({
 				return false;
 			}
 
-			setSelectedQueuedIndex(index => {
-				if (direction === 'down') {
-					return index < 0 || index >= queuedMessages.length - 1
-						? 0
-						: index + 1;
+			if (direction === 'up') {
+				// At the input (-1) there's nothing above the queue, so let the press
+				// fall through to history navigation. From the first queued item, step
+				// back up to the input.
+				if (selectedQueuedIndex < 0) {
+					return false;
 				}
+				setSelectedQueuedIndex(selectedQueuedIndex - 1);
+				return true;
+			}
 
-				return index <= 0 ? queuedMessages.length - 1 : index - 1;
-			});
+			// Down enters the queue from the input, then walks toward the last item
+			// and stops there (no wrap-around).
+			if (selectedQueuedIndex >= queuedMessages.length - 1) {
+				return selectedQueuedIndex >= 0;
+			}
+			setSelectedQueuedIndex(selectedQueuedIndex + 1);
 			return true;
 		},
-		[isBusy, input.length, queuedMessages.length],
+		[isBusy, input.length, queuedMessages.length, selectedQueuedIndex],
 	);
 
 	const loadSelectedQueuedMessage = useCallback(() => {
@@ -626,7 +646,10 @@ export default function UserInput({
 			return;
 		}
 
-		if (key.ctrl && key.delete && removeSelectedQueuedMessage()) {
+		// Delete/Backspace removes the highlighted queued message. Safe to bind
+		// bare: removeSelectedQueuedMessage no-ops unless a queued item is selected
+		// and the input is empty, so normal backspace-to-edit still falls through.
+		if ((key.delete || key.backspace) && removeSelectedQueuedMessage()) {
 			return;
 		}
 
@@ -929,7 +952,7 @@ export default function UserInput({
 				{queuedMessages.length > 0 && (
 					<Box flexDirection="column" marginTop={1}>
 						<Text color={colors.secondary}>
-							Queued messages (↑/↓ select, Enter edit, Ctrl+Delete remove):
+							Queued messages (↑/↓ select, Enter edit, Del remove):
 						</Text>
 						{queuedMessages.map((message, index) => {
 							const isSelected = index === selectedQueuedIndex;
@@ -947,16 +970,18 @@ export default function UserInput({
 					</Box>
 				)}
 				{isBusy && (
-					<Text color={colors.secondary}>
-						<Spinner type="dots" /> Press Esc to cancel
-						{onToggleCompactDisplay && (
-							<Text>
-								{' '}
-								· ctrl-o {compactToolDisplay ? 'expand' : 'compact'}{' '}
-								{isNarrow ? '' : 'tool results'}
-							</Text>
-						)}
-					</Text>
+					<Box marginTop={1}>
+						<Text color={colors.secondary}>
+							Press Esc to cancel
+							{onToggleCompactDisplay && (
+								<Text>
+									{' '}
+									· ctrl-o {compactToolDisplay ? 'expand' : 'compact'}{' '}
+									{isNarrow ? '' : 'tool results'}
+								</Text>
+							)}
+						</Text>
+					</Box>
 				)}
 			</Box>
 

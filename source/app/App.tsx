@@ -171,7 +171,14 @@ export default function App({
 	}, []);
 
 	const drainQueuedUserMessage = React.useCallback(() => {
-		queueMicrotask(() => {
+		// Defer to a macrotask, not a microtask. `onConversationComplete` fires
+		// deep inside the finishing turn's await chain, so a microtask drain would
+		// start the next turn BEFORE that turn's `resetStreamingState()` finally
+		// runs — and the stale reset would then wipe the new turn's abortController
+		// and isGenerating, leaving the busy indicator (and Escape-to-cancel) dead.
+		// A timeout runs after those continuations, so the drained turn keeps its
+		// busy state.
+		setTimeout(() => {
 			void userMessageQueue.drainNextMessage(async message => {
 				const submitQueuedMessage = queuedUserSubmitRef.current;
 				if (!submitQueuedMessage || !appState.client || !appState.toolManager) {
@@ -185,7 +192,7 @@ export default function App({
 				);
 				return true;
 			});
-		});
+		}, 0);
 	}, [
 		appState.client,
 		appState.toolManager,
