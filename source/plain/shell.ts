@@ -25,7 +25,32 @@ export interface RunPlainShellOptions {
 	cliModel?: string;
 	trustDirectory: boolean;
 	outputFormat: "text" | "json";
+	/**
+	 * Injectable seams for testing. Each defaults to the real implementation,
+	 * so production call sites never need to pass this. Mirrors the pattern
+	 * `runPlainConversation` already uses for `client`/`toolManager` — here
+	 * the seams are the module-level singletons (`initializePlain`,
+	 * `getShutdownManager`, preference I/O) that `runPlainShell` otherwise
+	 * calls directly and that a unit test has no other way to intercept.
+	 */
+	deps?: Partial<RunPlainShellDeps>;
 }
+
+export interface RunPlainShellDeps {
+	initializePlain: typeof initializePlain;
+	runPlainConversation: typeof runPlainConversation;
+	getShutdownManager: typeof getShutdownManager;
+	loadPreferences: typeof loadPreferences;
+	savePreferences: typeof savePreferences;
+}
+
+const defaultDeps: RunPlainShellDeps = {
+	initializePlain,
+	runPlainConversation,
+	getShutdownManager,
+	loadPreferences,
+	savePreferences,
+};
 
 /**
  * Headless equivalent of `nanocoder run "..."`. Skips Ink entirely:
@@ -50,9 +75,11 @@ export async function runPlainShell(
 		outputFormat,
 	} = options;
 
+	const deps: RunPlainShellDeps = { ...defaultDeps, ...options.deps };
+
 	const isJson = outputFormat === "json";
 
-	if (!ensureDirectoryTrust(trustDirectory)) {
+	if (!ensureDirectoryTrust(trustDirectory, deps)) {
 		if (isJson) {
 			const cwd = path.resolve(process.cwd());
 			emitJsonReport({
@@ -71,13 +98,13 @@ export async function runPlainShell(
 					`NANOCODER_TRUST_DIRECTORY=1 to bypass the disclaimer for this run.`,
 			);
 		}
-		await getShutdownManager().gracefulShutdown(1);
+		await deps.getShutdownManager().gracefulShutdown(1);
 		return;
 	}
 
 	let init;
 	try {
-		init = await initializePlain({ cliProvider, cliModel });
+		init = await deps.initializePlain({ cliProvider, cliModel });
 	} catch (error) {
 		const formattedErr = formatError(error);
 		if (isJson) {
@@ -93,7 +120,7 @@ export async function runPlainShell(
 		} else {
 			writeError(formattedErr);
 		}
-		await getShutdownManager().gracefulShutdown(1);
+		await deps.getShutdownManager().gracefulShutdown(1);
 		return;
 	}
 
@@ -102,7 +129,7 @@ export async function runPlainShell(
 	// Traditional status writes go to stderr via plain/writer, leaving stdout clean
 	writeBoot(provider, model, developmentMode);
 
-	const tune = resolveTune(getAppConfig(), undefined, loadPreferences());
+	const tune = resolveTune(getAppConfig(), undefined, deps.loadPreferences());
 	const tuneToolMode = getTuneToolMode(tune);
 	const toolsDisabled =
 		tuneToolMode !== "native" || isToolCallingDisabled(provider, model);
@@ -146,7 +173,7 @@ export async function runPlainShell(
 		writeLine();
 	}
 
-	const outcome = await runPlainConversation({
+	const outcome = await deps.runPlainConversation({
 		client,
 		toolManager,
 		systemMessage,
@@ -200,13 +227,13 @@ export async function runPlainShell(
 			}),
 		});
 
-		await getShutdownManager().gracefulShutdown(exitCode);
+		await deps.getShutdownManager().gracefulShutdown(exitCode);
 		return;
 	}
 
 	switch (outcome.kind) {
 		case "success":
-			await shutdown(0);
+			await shutdown(0, deps);
 			return;
 		case "tool-approval-required":
 			writeError(
@@ -214,11 +241,11 @@ export async function runPlainShell(
 					`Re-run with --mode auto-accept or --mode yolo, or add the tools to ` +
 					`agents.config.json "alwaysAllow".`,
 			);
-			await shutdown(2);
+			await shutdown(2, deps);
 			return;
 		case "error":
 			writeError(outcome.message);
-			await shutdown(1);
+			await shutdown(1, deps);
 			return;
 	}
 }
@@ -230,10 +257,13 @@ function isToolCallingDisabled(provider: string, model: string): boolean {
 	return providerConfig.disableToolModels?.includes(model) ?? false;
 }
 
-function ensureDirectoryTrust(trustDirectoryFlag: boolean): boolean {
+function ensureDirectoryTrust(
+	trustDirectoryFlag: boolean,
+	deps: RunPlainShellDeps,
+): boolean {
 	if (trustDirectoryFlag) return true;
 	const cwd = path.resolve(process.cwd());
-	const preferences = loadPreferences();
+	const preferences = deps.loadPreferences();
 	const trusted = (preferences.trustedDirectories ?? []).some(
 		(dir) => path.resolve(dir) === cwd,
 	);
@@ -242,7 +272,7 @@ function ensureDirectoryTrust(trustDirectoryFlag: boolean): boolean {
 	if (process.env.NANOCODER_TRUST_DIRECTORY === "1") {
 		const updated = preferences.trustedDirectories ?? [];
 		updated.push(cwd);
-		savePreferences({ ...preferences, trustedDirectories: updated });
+		deps.savePreferences({ ...preferences, trustedDirectories: updated });
 		writeStatus(`Marked ${cwd} as trusted (NANOCODER_TRUST_DIRECTORY=1).`);
 		return true;
 	}
@@ -254,10 +284,10 @@ function emitJsonReport(report: unknown): void {
 	process.stdout.write(JSON.stringify(report, null, 2) + "\n");
 }
 
-async function shutdown(code: number): Promise<void> {
+async function shutdown(code: number, deps: RunPlainShellDeps): Promise<void> {
 	if (code === 0) {
 		writeLine();
 		writeStatus(color("green", "done"));
 	}
-	await getShutdownManager().gracefulShutdown(code);
+	await deps.getShutdownManager().gracefulShutdown(code);
 }
