@@ -53,15 +53,41 @@ export type TaggedProvider =
  * this fetch will honor the configured CA bundle — even Anthropic and Google,
  * which would otherwise use the global fetch and bypass our TLS settings.
  */
-function createUndiciFetch(undiciAgent: Agent) {
-	return (
+export function createUndiciFetch(undiciAgent: Agent) {
+	return async (
 		url: string | URL | Request,
 		options?: RequestInit,
 	): Promise<Response> => {
-		return undiciFetch(url as string | URL, {
+		const response = await undiciFetch(url as string | URL, {
 			...(options as UndiciRequestInit),
 			dispatcher: undiciAgent,
-		}) as Promise<Response>;
+		});
+
+		const contentType = response.headers.get('content-type') || '';
+		if (response.body && contentType.includes('text/event-stream')) {
+			const transform = new TransformStream({
+				transform(chunk, controller) {
+					const str = new TextDecoder().decode(chunk);
+					if (str.includes('data:  [DONE]')) {
+						controller.enqueue(
+							new TextEncoder().encode(
+								str.replace(/data:\s+\[DONE\]/g, 'data: [DONE]'),
+							),
+						);
+					} else {
+						controller.enqueue(chunk);
+					}
+				},
+			});
+
+			return new Response(response.body.pipeThrough(transform), {
+				status: response.status,
+				statusText: response.statusText,
+				headers: response.headers,
+			}) as unknown as Response;
+		}
+
+		return response as unknown as Response;
 	};
 }
 

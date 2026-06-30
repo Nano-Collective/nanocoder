@@ -3,8 +3,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type {AIProviderConfig} from '@/types/index';
-import {Agent} from 'undici';
-import {createProvider} from './provider-factory.js';
+import {Agent, MockAgent} from 'undici';
+import {createProvider, createUndiciFetch} from './provider-factory.js';
 
 test('createProvider creates provider with basic config', async t => {
 	const config: AIProviderConfig = {
@@ -397,4 +397,25 @@ test.serial('createProvider throws when github-copilot has no stored credential'
 		}
 		fs.rmSync(tmpDir, {recursive: true, force: true});
 	}
+});
+
+test('createUndiciFetch patches double spaces in SSE data: [DONE]', async t => {
+	const mockAgent = new MockAgent();
+	mockAgent.disableNetConnect();
+	
+	const mockPool = mockAgent.get('https://api.atlascloud.ai');
+	mockPool.intercept({
+		path: '/v1/chat/completions',
+		method: 'POST'
+	}).reply(200, 'data:  [DONE]', {
+		headers: { 'content-type': 'text/event-stream' }
+	});
+
+	const fetchFn = createUndiciFetch(mockAgent as unknown as Agent);
+	const response = await fetchFn('https://api.atlascloud.ai/v1/chat/completions', {
+		method: 'POST'
+	});
+	
+	const text = await response.text();
+	t.is(text, 'data: [DONE]');
 });
