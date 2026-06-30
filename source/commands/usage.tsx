@@ -37,6 +37,7 @@ export const usageCommand: Command = {
 			tune?: TuneConfig;
 			developmentMode?: DevelopmentMode;
 			lastApiUsage?: ApiUsageSnapshot | null;
+			apiCallHistory?: import('@/types/core').ApiCallRecord[];
 		},
 	) => {
 		const {provider, model, getMessageTokens, client} = metadata;
@@ -180,7 +181,7 @@ export const usageCommand: Command = {
 		try {
 			const pricing = await getModelPricing(model);
 			if (pricing) {
-				// Use ApiUsage snapshot for input/output split when fresh
+				// ---- Current-context cost (same as Phase 2) ----
 				const snapshot = metadata.lastApiUsage;
 				const isSnapshotFresh =
 					snapshot && snapshot.atMessageCount >= messages.length;
@@ -200,17 +201,37 @@ export const usageCommand: Command = {
 						(pricing.input * breakdown.total) / 1_000_000;
 				}
 
-				// Cumulative: sum getMessageTokens for all messages (always input-only)
-				const cumulativeTokens = messages.reduce(
-					(sum, msg) => sum + getMessageTokens(msg),
-					0,
-				);
-				const cumulativeSessionCost =
-					(pricing.input * cumulativeTokens) / 1_000_000;
+				// ---- Cumulative session + per-provider (from history) ----
+				const history = metadata.apiCallHistory ?? [];
+				let cumulativeSession = 0;
+				const perProvider: Record<string, number> = {};
+				const pricingCache = new Map<string, typeof pricing>();
+
+				for (const record of history) {
+					const recordPricing = pricingCache.get(record.model)
+						?? await getModelPricing(record.model)
+						?? pricing;
+
+					pricingCache.set(record.model, recordPricing);
+
+					const inputTokens = record.inputTokens ?? 0;
+					const outputTokens = record.outputTokens ?? 0;
+					const callCost =
+						(recordPricing.input * inputTokens +
+							recordPricing.output * outputTokens) /
+						1_000_000;
+
+					cumulativeSession += callCost;
+					perProvider[record.provider] =
+						(perProvider[record.provider] ?? 0) + callCost;
+				}
 
 				cost = {
 					currentContext: currentContextCost,
-					cumulativeSession: cumulativeSessionCost,
+					cumulativeSession: history.length === 0 ? NaN : cumulativeSession,
+					perProvider: Object.keys(perProvider).length > 1
+						? perProvider
+						: undefined,
 				};
 			}
 		} catch {
