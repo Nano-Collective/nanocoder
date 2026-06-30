@@ -1,8 +1,9 @@
-import type { CustomCommandLoader } from "@/custom-commands/loader";
-import type { ToolManager } from "@/tools/tool-manager";
-import type { ToolCall, ToolHandler, ToolResult } from "@/types/index";
-import { parseToolArguments } from "@/utils/tool-args-parser";
-import { toolErrorToContent } from "@/utils/tool-validation";
+import type { CustomCommandLoader } from '@/custom-commands/loader';
+import type { ToolManager } from '@/tools/tool-manager';
+import type { ToolCall, ToolHandler, ToolResult } from '@/types/index';
+import { parseToolArguments } from '@/utils/tool-args-parser';
+import { toolErrorToContent } from '@/utils/tool-validation';
+
 
 // This will be set by the ChatSession
 let toolRegistryGetter: (() => Record<string, ToolHandler>) | null = null;

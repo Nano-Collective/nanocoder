@@ -4,9 +4,9 @@ import {
 	type JSONValue,
 	jsonSchema,
 	tool,
-} from "ai";
-import React from "react";
-import type { AIProviderConfig } from "@/types/config";
+} from 'ai';
+import React from 'react';
+import type { AIProviderConfig } from '@/types/config';
 
 export { asSchema, jsonSchema, tool };
 
@@ -16,49 +16,25 @@ export { asSchema, jsonSchema, tool };
 // biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
 export type AISDKCoreTool = AISDKTool<any, any>;
 
-/**
- * Per-tool approval policy. A `boolean` is a static decision; a function is a
- * pure decision over the parsed arguments AND the current development mode.
- *
- * Mode is passed in explicitly (never read from a global) so the same tool
- * definition behaves correctly regardless of which execution path evaluates
- * it. `resolveToolApproval()` in `@/tools/approval-policy` is the single
- * authority that invokes these.
- */
 export type ToolApprovalPolicy =
 	| boolean
 	// biome-ignore lint/suspicious/noExplicitAny: tool args are schema-validated per tool
 	| ((args: any, mode: DevelopmentMode) => boolean | Promise<boolean>);
 
-/**
- * A visual attachment carried on a user message (e.g. a pasted screenshot or
- * an `@`-mentioned image file). Stored as base64 so it survives session
- * persistence; converted to an AI SDK image part at the provider boundary.
- */
 export interface ImageAttachment {
-	/** Base64-encoded image bytes (no `data:` URI prefix). */
 	data: string;
-	/** IANA media type, e.g. `image/png` or `image/jpeg`. */
 	mediaType: string;
-	/** Optional human-readable source label (file name or `clipboard`). */
 	source?: string;
 }
 
-// Current Nanocoder message format (OpenAI-compatible)
-// Note: We maintain this format internally and convert to ModelMessage at AI SDK boundary
 export interface Message {
-	role: "user" | "assistant" | "system" | "tool";
+	role: 'user' | 'assistant' | 'system' | 'tool';
 	content: string;
 	tool_calls?: ToolCall[];
 	tool_call_id?: string;
 	name?: string;
 	reasoning?: string;
-	// For tool messages: an optional structured payload sent to the model as a
-	// JSON tool result instead of the plain `content` text. `content` remains
-	// the canonical string for display, persistence, and as the fallback.
 	structuredContent?: JSONValue;
-	// For user messages: image attachments sent to the model as multimodal
-	// content parts alongside `content`. Empty/undefined for text-only turns.
 	images?: ImageAttachment[];
 }
 
@@ -72,21 +48,10 @@ export interface ToolCall {
 
 export interface ToolResult {
 	tool_call_id: string;
-	role: "tool";
+	role: 'tool';
 	name: string;
-	/** Canonical string output: used for display, persistence, and as the
-	 * fallback model representation when `structuredContent` is absent. */
 	content: string;
-	/** Optional structured payload sent to the model as a JSON tool result. */
 	structuredContent?: JSONValue;
-	/**
-	 * True when `content` represents a tool execution failure (handler threw,
-	 * argument parsing failed, or the tool name was unrecognized) rather than
-	 * a normal result. `content` is still sent back to the model unchanged
-	 * either way — this flag exists purely so callers building telemetry/logs
-	 * (e.g. the `--json` headless report) can distinguish a failed call from
-	 * a successful one without re-parsing the content string.
-	 */
 	isError?: boolean;
 }
 
@@ -97,40 +62,28 @@ export interface ToolParameterSchema {
 }
 
 export interface Tool {
-	type: "function";
+	type: 'function';
 	function: {
 		name: string;
 		description: string;
 		parameters: {
-			type: "object";
+			type: 'object';
 			properties: Record<string, ToolParameterSchema>;
 			required: string[];
 		};
 	};
 }
 
-/**
- * Structured tool output. A tool returns this (instead of a bare string) when
- * the model benefits from a typed payload it can reason over precisely (e.g.
- * a diagnostics list). `llmContent` is the equivalent text used for display,
- * persistence, and as a fallback; `structured` is sent to the model as JSON.
- */
 export interface StructuredToolOutput {
 	llmContent: string;
 	structured: JSONValue;
 }
 
-/** What a tool's execute/handler may return: a plain string or structured output. */
 export type ToolExecuteResult = string | StructuredToolOutput;
 
-// Tool handlers accept dynamic args from LLM, so any is appropriate here
 // biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required -- Tool arguments are dynamically typed
 export type ToolHandler = (input: any) => Promise<ToolExecuteResult>;
 
-/**
- * Tool formatter type for Ink UI
- * Formats tool arguments and results for display in the CLI
- */
 export type ToolFormatter = (
 	// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required -- Tool arguments are dynamically typed
 	args: any,
@@ -141,20 +94,10 @@ export type ToolFormatter = (
 	| React.ReactElement
 	| Promise<React.ReactElement>;
 
-/**
- * Structured detail for a single validation failure. Optional alongside the
- * human-readable `error` message; when present it gives a self-correcting LLM
- * field-level specifics (which argument, what was expected, what arrived)
- * instead of only a freeform sentence.
- */
 export interface ValidationErrorDetail {
-	/** The offending argument/field name (e.g. "command"). */
 	path?: string;
-	/** What the field should have been (e.g. "string", "non-empty"). */
 	expected?: string;
-	/** What the field actually was (e.g. "undefined", "number"). */
 	received?: string;
-	/** Optional extra explanation for this specific field. */
 	message?: string;
 }
 
@@ -162,143 +105,64 @@ export type ToolValidationResult =
 	| { valid: true }
 	| { valid: false; error: string; details?: ValidationErrorDetail[] };
 
-/**
- * Tool validator type for pre-execution validation.
- * Returns a validation result with a human-readable error message and,
- * optionally, structured per-field details.
- */
 export type ToolValidator = (
 	// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required -- Tool arguments are dynamically typed
 	args: any,
 ) => Promise<ToolValidationResult>;
 
-/**
- * Streaming formatter type for tools that need real-time progress updates
- * Called BEFORE execution to set up the progress component
- * The component updates itself via event subscription (e.g., EventEmitter)
- *
- * @param args - Tool arguments
- * @param executionId - Unique ID for tracking this execution
- * @returns React element that will self-update during execution
- */
 export type StreamingFormatter = (
 	// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required -- Tool arguments are dynamically typed
 	args: any,
 	executionId: string,
 ) => React.ReactElement;
 
-/**
- * Nanocoder tool export structure
- *
- * This is what individual tool files export (e.g., read-file.tsx, execute-bash.tsx).
- * The handler is extracted from tool.execute() in tools/index.ts to avoid duplication.
- *
- * Structure:
- * - name: Tool name as const for type safety
- * - tool: Native AI SDK v6 CoreTool with execute() function
- * - formatter: Optional React component for rich CLI UI display
- * - streamingFormatter: Optional formatter for real-time progress (called before execution)
- * - validator: Optional pre-execution validation function
- */
 export interface NanocoderToolExport {
 	name: string;
-	tool: AISDKCoreTool; // AI SDK v6 tool with execute()
-	formatter?: ToolFormatter; // For UI display (after execution)
-	streamingFormatter?: StreamingFormatter; // For real-time progress (before execution)
-	validator?: ToolValidator; // For pre-execution validation
-	readOnly?: boolean; // Safe to parallelize (no side effects)
-	approval?: ToolApprovalPolicy; // Whether the tool needs user approval (mode-aware)
+	tool: AISDKCoreTool;
+	formatter?: ToolFormatter;
+	streamingFormatter?: StreamingFormatter;
+	validator?: ToolValidator;
+	readOnly?: boolean;
+	approval?: ToolApprovalPolicy;
 }
 
-/**
- * Internal tool entry used by ToolRegistry
- *
- * This is the complete tool entry including the handler extracted from tool.execute().
- * Used internally by ToolRegistry and ToolManager for unified tool management.
- *
- * Structure:
- * - name: Tool name for registry lookup
- * - tool: Native AI SDK CoreTool (for passing to AI SDK)
- * - handler: Extracted execute function (for human-in-the-loop execution)
- * - formatter: Optional React component for rich CLI UI display
- * - streamingFormatter: Optional formatter for real-time progress (called before execution)
- * - validator: Optional pre-execution validation function
- */
 export interface ToolEntry {
 	name: string;
-	tool: AISDKCoreTool; // For AI SDK
-	handler: ToolHandler; // For execution (extracted from tool.execute)
-	formatter?: ToolFormatter; // For UI (React component, after execution)
-	streamingFormatter?: StreamingFormatter; // For real-time progress (before execution)
-	validator?: ToolValidator; // For validation
-	readOnly?: boolean; // Safe to parallelize (no side effects)
-	approval?: ToolApprovalPolicy; // Whether the tool needs user approval (mode-aware)
-	/**
-	 * Name of the skill that owns this tool, if any. Set by the skill
-	 * registrar for tools that come from a bundle or single-file skill.
-	 * Used together with `scoped` to decide whether `getAllTools()`
-	 * includes the entry in the global result.
-	 */
+	tool: AISDKCoreTool;
+	handler: ToolHandler;
+	formatter?: ToolFormatter;
+	streamingFormatter?: StreamingFormatter;
+	validator?: ToolValidator;
+	readOnly?: boolean;
+	approval?: ToolApprovalPolicy;
 	ownerSkill?: string;
-	/**
-	 * When true, the tool is only visible to the subagent inside the same
-	 * skill (matching `ownerSkill`). Default-false single-file skills set
-	 * this off; bundle skills default it on via their
-	 * `tools_visibility: scoped` manifest field.
-	 */
 	scoped?: boolean;
 }
 
 interface LLMMessage {
-	role: "assistant";
+	role: 'assistant';
 	content: string;
 	tool_calls?: ToolCall[];
 	reasoning?: string;
 }
 
-/**
- * Token usage as reported by the provider/API for a single response.
- * Fields are optional because not every provider reports usage (e.g. some
- * local models), and OpenRouter only includes detailed usage when the request
- * opts in via `usage: {include: true}`. Consumers must fall back to client-side
- * estimation whenever a field is missing.
- */
 export interface ApiUsage {
 	inputTokens?: number;
 	outputTokens?: number;
 	totalTokens?: number;
 }
 
-/**
- * API-reported usage captured after a model response, tagged with the
- * conversation length at capture time. The context indicator treats the
- * snapshot as authoritative only while the message count is unchanged; once
- * newer messages arrive it falls back to client-side estimation so the figure
- * never lags the conversation.
- */
 export interface ApiUsageSnapshot extends ApiUsage {
 	atMessageCount: number;
 }
 
-/**
- * Provenance of a displayed context figure:
- * - `api`: fully provider-reported (the snapshot covers the whole conversation,
- *   or the estimated tail is too small to move the rounded percentage).
- * - `api+estimate`: anchored on the provider-reported total, with a client-side
- *   estimate added for the messages appended since the snapshot.
- * - `estimate`: fully client-side (no usable API report yet).
- */
-export type ContextSource = "api" | "api+estimate" | "estimate";
+export type ContextSource = 'api' | 'api+estimate' | 'estimate';
 
 export interface LLMChatResponse {
 	choices: Array<{
 		message: LLMMessage;
 	}>;
-	// Whether native tools were disabled for this request (XML fallback path)
-	// When true, the conversation loop should parse response text for XML tool calls
 	toolsDisabled?: boolean;
-	// Provider-reported token usage for this response, when available. Used to
-	// show API-accurate context usage in place of client-side estimation.
 	usage?: ApiUsage;
 }
 
@@ -309,14 +173,10 @@ export interface StreamCallbacks {
 	onFinish?: () => void;
 }
 
-/**
- * Runtime overrides passed through to the AI SDK client.
- * Combines non-interactive mode, tune settings, and model parameters.
- */
 export interface ModeOverrides {
 	nonInteractiveMode: boolean;
 	nonInteractiveAlwaysAllow: string[];
-	modelParameters?: import("@/types/config").ModelParameters;
+	modelParameters?: import('@/types/config').ModelParameters;
 }
 
 export interface LLMClient {
@@ -337,32 +197,29 @@ export interface LLMClient {
 }
 
 export type DevelopmentMode =
-	| "normal"
-	| "auto-accept"
-	| "yolo"
-	| "plan"
-	| "headless";
+	| 'normal'
+	| 'auto-accept'
+	| 'yolo'
+	| 'plan'
+	| 'headless';
 
 export const DEVELOPMENT_MODE_LABELS: Record<DevelopmentMode, string> = {
-	normal: "▶ normal mode on",
-	// Auto-accept skips confirmation for file edits but still prompts for bash
-	// and destructive git, so the label calls that out to avoid surprise.
-	"auto-accept": "⏵⏵ auto-accept mode on",
-	yolo: "⏵⏵⏵ yolo mode on",
-	plan: "⏸ plan mode on",
-	headless: "⏵⏵ headless mode on",
+	normal: '▶ normal mode on',
+	'auto-accept': '⏵⏵ auto-accept mode on',
+	yolo: '⏵⏵⏵ yolo mode on',
+	plan: '⏸ plan mode on',
+	headless: '⏵⏵ headless mode on',
 };
 
 export const DEVELOPMENT_MODE_LABELS_NARROW: Record<DevelopmentMode, string> = {
-	normal: "▶ normal",
-	"auto-accept": "⏵⏵ auto",
-	yolo: "⏵⏵⏵ yolo",
-	plan: "⏸ plan",
-	headless: "⏵⏵ headless",
+	normal: '▶ normal',
+	'auto-accept': '⏵⏵ auto',
+	yolo: '⏵⏵⏵ yolo',
+	plan: '⏸ plan',
+	headless: '⏵⏵ headless',
 };
 
-// Connection status types for MCP and LSP servers
-export type ConnectionStatus = "connected" | "failed" | "pending";
+export type ConnectionStatus = 'connected' | 'failed' | 'pending';
 
 export interface MCPConnectionStatus {
 	name: string;
