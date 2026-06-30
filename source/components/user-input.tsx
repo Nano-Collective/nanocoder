@@ -98,7 +98,7 @@ export default function UserInput({
 	const {colors} = useTheme();
 	const inputState = useInputState();
 	const uiState = useUIStateContext();
-	const {boxWidth, isNarrow} = useResponsiveTerminal();
+	const {boxWidth, isNarrow, actualWidth, truncate} = useResponsiveTerminal();
 	const [textInputKey, setTextInputKey] = useState(0);
 	const completionJustSelectedRef = useRef(false);
 	// Store the full InputState draft when starting history navigation, so it can be restored
@@ -824,12 +824,13 @@ export default function UserInput({
 			message.images && message.images.length > 0
 				? ` (${message.images.length} image${message.images.length === 1 ? '' : 's'})`
 				: '';
-		const maxLength = Math.max(20, boxWidth - imageSuffix.length - 6);
 		const singleLine = message.displayValue.replace(/\s+/g, ' ').trim();
-		const text =
-			singleLine.length > maxLength
-				? `${singleLine.slice(0, Math.max(0, maxLength - 1))}…`
-				: singleLine;
+		// Truncate against the true terminal width like tool result rows do, not
+		// boxWidth (which floors at 40 and would overflow narrow terminals). The
+		// overhead covers the box border + padding (2), the '▸ '/'  ' marker (2),
+		// and a right-edge safety margin.
+		const maxLength = Math.max(8, actualWidth - imageSuffix.length - 6);
+		const text = truncate(singleLine, maxLength);
 		return `${text}${imageSuffix}`;
 	};
 

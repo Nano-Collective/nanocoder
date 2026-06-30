@@ -340,6 +340,46 @@ test('UserInput renders queued messages while busy', t => {
 	unmount();
 });
 
+test('UserInput truncates long queued messages on narrow terminals', t => {
+	const originalColumns = process.stdout.columns;
+	// Force a narrow terminal so width-based truncation must kick in.
+	Object.defineProperty(process.stdout, 'columns', {
+		value: 40,
+		configurable: true,
+	});
+
+	try {
+		const longMessage =
+			'this is a very long queued message that should be truncated because it far exceeds the narrow terminal width available';
+		const {lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput
+					forceFocus={true}
+					isBusy={true}
+					queuedMessages={[
+						{id: 'queued-1', message: longMessage, displayValue: longMessage},
+					]}
+				/>
+			</TestWrapper>,
+		);
+
+		const output = lastFrame() ?? '';
+		// Truncated with the shared ellipsis, and the tail is dropped.
+		t.regex(output, /\.\.\./);
+		t.notRegex(output, /terminal width available/);
+		// Every rendered line fits within the terminal width.
+		for (const line of output.split('\n')) {
+			t.true(line.length <= 40);
+		}
+		unmount();
+	} finally {
+		Object.defineProperty(process.stdout, 'columns', {
+			value: originalColumns,
+			configurable: true,
+		});
+	}
+});
+
 test('UserInput navigates queued messages while busy with empty input', async t => {
 	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
