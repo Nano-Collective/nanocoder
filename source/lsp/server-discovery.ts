@@ -252,9 +252,9 @@ function findCommand(command: string): string | null {
 		const checkCmd = process.platform === 'win32' ? 'where' : 'which';
 		execFileSync(checkCmd, [command], {stdio: 'ignore'});
 		return command;
-	} catch (error) {
+	} catch {
 		// Not in PATH - expected for many servers
-		logger.debug({command, err: error}, 'Command not in PATH');
+		logger.trace({command}, 'Command not in PATH');
 	}
 
 	// Check local node_modules/.bin
@@ -282,8 +282,8 @@ function verifyServer(checkCommand: string): boolean {
 			timeout: TIMEOUT_LSP_VERIFICATION_MS,
 		});
 		return true;
-	} catch (error) {
-		logger.debug({checkCommand, err: error}, 'Server verification failed');
+	} catch {
+		logger.trace({checkCommand}, 'Server verification failed');
 		return false;
 	}
 }
@@ -424,6 +424,11 @@ export async function discoverLanguageServers(
 			coveredLanguages.add(lang);
 		}
 	}
+
+	logger.debug(
+		{found: discovered.length, total: orderedServers.length},
+		`${discovered.length} of ${orderedServers.length} known language servers discovered`,
+	);
 
 	return discovered;
 }

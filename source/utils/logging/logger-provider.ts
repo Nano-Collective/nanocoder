@@ -194,13 +194,6 @@ export class LoggerProvider {
 		const envLevel = process.env.NANOCODER_LOG_LEVEL as LogLevel;
 		if (envLevel) return envLevel;
 
-		const isTest = process.env.NODE_ENV === 'test';
-		const isDev = process.env.NODE_ENV === 'development';
-
-		if (isTest) return 'silent';
-		if (isDev) return 'debug';
-		// Production fallback logger: silent (outputs to console, not file)
-		// The real pino logger will use 'info' once loaded
 		return 'silent';
 	}
 
