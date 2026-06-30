@@ -3,6 +3,7 @@ import type {DevelopmentMode, NanocoderToolExport} from '../types/core.js';
 import {resolveToolApproval} from './approval-policy.js';
 import {executeBashTool} from './execute-bash.js';
 import {fetchUrlTool} from './fetch-url.js';
+import {diffEditTool} from './file-ops/diff-edit.js';
 import {fileOpTool} from './file-ops/file-op.js';
 import {stringReplaceTool} from './file-ops/string-replace.js';
 import {writeFileTool} from './file-ops/write-file.js';
@@ -109,6 +110,33 @@ test('string_replace requires approval in plan mode', async t => {
 	);
 });
 
+test('diff_edit requires approval in normal mode', async t => {
+	t.true(
+		await evaluateNeedsApproval(diffEditTool, 'normal', {
+			path: 'test.txt',
+			diff: '<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE',
+		}),
+	);
+});
+
+test('diff_edit does NOT require approval in auto-accept mode', async t => {
+	t.false(
+		await evaluateNeedsApproval(diffEditTool, 'auto-accept', {
+			path: 'test.txt',
+			diff: '<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE',
+		}),
+	);
+});
+
+test('diff_edit requires approval in plan mode', async t => {
+	t.true(
+		await evaluateNeedsApproval(diffEditTool, 'plan', {
+			path: 'test.txt',
+			diff: '<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE',
+		}),
+	);
+});
+
 // ============================================================================
 // LOW RISK: Read-Only Tools (never require approval, via !readOnly default)
 // ============================================================================
@@ -176,6 +204,15 @@ test('string_replace does NOT require approval in headless mode', async t => {
 			path: 'test.txt',
 			old_str: 'old',
 			new_str: 'new',
+		}),
+	);
+});
+
+test('diff_edit does NOT require approval in headless mode', async t => {
+	t.false(
+		await evaluateNeedsApproval(diffEditTool, 'headless', {
+			path: 'test.txt',
+			diff: '<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE',
 		}),
 	);
 });

@@ -59,19 +59,20 @@ test('getToolsForProfile - minimal profile includes execute_bash', t => {
 	t.true(result.includes('execute_bash'));
 });
 
-test('getToolsForProfile - nano profile returns 5 core tools', t => {
+test('getToolsForProfile - nano profile returns 5 core tools with diff_edit', t => {
 	const result = getToolsForProfile('nano');
 	t.deepEqual(result, [
 		'read_file',
-		'string_replace',
+		'diff_edit',
 		'write_file',
 		'execute_bash',
 		'search_file_contents',
 	]);
 });
 
-test('getToolsForProfile - nano omits agent, find_files, list_directory', t => {
+test('getToolsForProfile - nano omits exact replace and broader exploration tools', t => {
 	const result = getToolsForProfile('nano');
+	t.false(result.includes('string_replace'));
 	t.false(result.includes('agent'));
 	t.false(result.includes('find_files'));
 	t.false(result.includes('list_directory'));
