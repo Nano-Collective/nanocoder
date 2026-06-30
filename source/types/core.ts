@@ -272,6 +272,21 @@ export interface ApiUsageSnapshot extends ApiUsage {
 }
 
 /**
+ * Per-call usage record accumulated across a session. Each entry corresponds
+ * to one API (model) invocation and carries the provider/model active at the
+ * time, so the /usage command can compute accurate per-provider costs from
+ * real provider-reported token counts rather than client-side estimates.
+ */
+export interface ApiCallRecord {
+	provider: string;
+	model: string;
+	inputTokens?: number;
+	outputTokens?: number;
+	totalTokens?: number;
+	timestamp: number;
+}
+
+/**
  * Provenance of a displayed context figure:
  * - `api`: fully provider-reported (the snapshot covers the whole conversation,
  *   or the estimated tail is too small to move the rounded percentage).
