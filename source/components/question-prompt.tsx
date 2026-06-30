@@ -55,10 +55,24 @@ export default function QuestionPrompt({
 		setSelectedIndex(0);
 	}
 
+	// Fix stale closures in useInput by keeping a ref to the latest state
+	const stateRef = useRef({
+		items,
+		selectedIndex,
+		isFreeformMode,
+		onAnswer,
+	});
+	stateRef.current = {
+		items,
+		selectedIndex,
+		isFreeformMode,
+		onAnswer,
+	};
+
 	const submitAnswer = (answer: string) => {
 		if (answeredRef.current) return;
 		answeredRef.current = true;
-		onAnswer(answer);
+		stateRef.current.onAnswer(answer);
 	};
 
 	const handleSelect = (item: OptionItem | undefined) => {
@@ -77,8 +91,9 @@ export default function QuestionPrompt({
 	};
 
 	useInput((input, key) => {
+		const state = stateRef.current;
 		// In freeform mode the TextInput owns typing; only handle Escape (back).
-		if (isFreeformMode) {
+		if (state.isFreeformMode) {
 			if (key.escape) {
 				setIsFreeformMode(false);
 				setFreeformValue('');
@@ -90,14 +105,14 @@ export default function QuestionPrompt({
 			submitAnswer('User declined to answer');
 			return;
 		}
-		if (items.length === 0) return;
+		if (state.items.length === 0) return;
 
 		if (key.upArrow || input === 'k') {
-			setSelectedIndex(i => (i - 1 + items.length) % items.length);
+			setSelectedIndex(i => (i - 1 + state.items.length) % state.items.length);
 		} else if (key.downArrow || input === 'j') {
-			setSelectedIndex(i => (i + 1) % items.length);
+			setSelectedIndex(i => (i + 1) % state.items.length);
 		} else if (key.return) {
-			handleSelect(items[selectedIndex]);
+			handleSelect(state.items[state.selectedIndex]);
 		}
 	});
 
