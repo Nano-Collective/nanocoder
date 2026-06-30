@@ -213,7 +213,7 @@ export const usageCommand: Command = {
 				for (const record of history) {
 					const recordPricing = pricingCache.get(record.model)
 						?? await getModelPricing(record.model)
-						?? pricing;
+						?? {input: NaN, output: NaN};
 
 					pricingCache.set(record.model, recordPricing);
 

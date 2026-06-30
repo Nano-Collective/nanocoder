@@ -595,7 +595,7 @@ test('usage command shows per-provider breakdown for multi-provider history', as
 	t.truthy(output);
 	t.regex(output!, /Per-Provider:/);
 	t.regex(output!, /openai:.*\$/);
-	t.regex(output!, /ollama:.*\$/);
+	t.regex(output!, /ollama:.*—/);
 });
 
 test('usage command hides per-provider for single-provider history', async t => {
