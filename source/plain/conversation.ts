@@ -238,6 +238,7 @@ export async function runPlainConversation(
 					role: "tool",
 					name: toolCall.function.name,
 					content: errorMsg,
+					isError: true,
 				});
 				toolCallsLog.push({
 					name: toolCall.function.name,
@@ -316,23 +317,26 @@ export async function runPlainConversation(
 				writeStatus(`tool: ${toolCall.function.name}`);
 			}
 
-			let resultStr: string | null = null;
-			let errorStr: string | null = null;
-
 			const toolResult = await processToolUse(toolCall);
 			toolResults.push(toolResult);
 
-			if (toolResult.content) {
-				if (typeof toolResult.content === "string") {
-					resultStr = toolResult.content;
-				} else {
-					resultStr = JSON.stringify(toolResult.content);
-				}
-			}
+			const contentStr = toolResult.content
+				? typeof toolResult.content === "string"
+					? toolResult.content
+					: JSON.stringify(toolResult.content)
+				: null;
 
-			// If the platform abstraction flags execution errors, propagate them to log telemetry
-			if ((toolResult as any).error) {
-				errorStr = (toolResult as any).error;
+			// processToolUse signals failure via `isError`, not a separate
+			// `.error` field — the failure message itself still lives in
+			// `content` (it has to, since that's what gets sent back to the
+			// model as the tool message). `isError` just tells us how to
+			// bucket it for the JSON telemetry report.
+			let resultStr: string | null = null;
+			let errorStr: string | null = null;
+			if (toolResult.isError) {
+				errorStr = contentStr;
+			} else {
+				resultStr = contentStr;
 			}
 
 			toolCallsLog.push({
