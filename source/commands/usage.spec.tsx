@@ -645,3 +645,49 @@ test('usage command keeps token display unchanged when pricing is missing', asyn
 	t.regex(output!, /Model Information/);
 	t.regex(output!, /Recent Activity/);
 });
+
+test('usage command computes cost from totalTokens-only history entries', async t => {
+	const messages = createMessages();
+	const metadata = {
+		...createMockMetadata('openai', 'gpt-4o'),
+		apiCallHistory: [
+			{
+				provider: 'openai',
+				model: 'gpt-4o',
+				totalTokens: 1400,
+				timestamp: Date.now(),
+			},
+		] satisfies ApiCallRecord[],
+	};
+
+	const result = await usageCommand.handler([], messages, metadata);
+	const {lastFrame} = renderWithTheme(result);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Cumulative Session:.*\$/);
+	t.notRegex(output!, /Cumulative Session:.*—/);
+});
+
+test('usage command computes cost from partial inputTokens-only history entries', async t => {
+	const messages = createMessages();
+	const metadata = {
+		...createMockMetadata('openai', 'gpt-4o'),
+		apiCallHistory: [
+			{
+				provider: 'openai',
+				model: 'gpt-4o',
+				inputTokens: 500,
+				timestamp: Date.now(),
+			},
+		] satisfies ApiCallRecord[],
+	};
+
+	const result = await usageCommand.handler([], messages, metadata);
+	const {lastFrame} = renderWithTheme(result);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Cumulative Session:.*\$/);
+	t.notRegex(output!, /Cumulative Session:.*—/);
+});
