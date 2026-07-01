@@ -44,6 +44,7 @@ import {displayCompactCountsSummary} from '@/utils/tool-result-display';
 import {closeAllDiffsInVSCode} from '@/vscode/index';
 import {filterValidToolCalls} from '../utils/tool-filters';
 import {computeToolCallSignature} from '../utils/tool-signature';
+import {buildAutoDiagnosticsMessage} from './auto-diagnostics';
 import {
 	displayExecutedTool,
 	executeApprovedTool,
@@ -829,8 +830,20 @@ export const processAssistantResponse = async (
 
 		// 4) Feed all results back to the model and continue the loop.
 		if (turnResults.length > 0) {
+			let autoDiagnosticsMessage: Message | null = null;
+			if (availableNames.includes('lsp_get_diagnostics')) {
+				const {processToolUse} = await import('@/message-handler');
+				autoDiagnosticsMessage = await buildAutoDiagnosticsMessage(
+					validToolCalls,
+					turnResults,
+					processToolUse,
+				);
+			}
 			const builder = new MessageBuilder(updatedMessages);
 			builder.addToolResults(turnResults);
+			if (autoDiagnosticsMessage) {
+				builder.addMessage(autoDiagnosticsMessage);
+			}
 			const nextMessages = builder.build();
 			setMessages(nextMessages);
 			await processAssistantResponse({
