@@ -696,7 +696,7 @@ test('UsageDisplay calculates correct percentages for categories', t => {
 	t.regex(output!, /7%.*200/); // Tool definitions: ~7%
 });
 
-	test('UsageDisplay handles zero tokens in a category', t => {
+test('UsageDisplay handles zero tokens in a category', t => {
 	const breakdown: TokenBreakdown = {
 		system: 1000,
 		userMessages: 0,
