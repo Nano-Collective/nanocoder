@@ -223,20 +223,28 @@ export const usageCommand: Command = {
 				for (const [model, p] of pricings) pricingCache.set(model, p);
 
 				for (const record of history) {
-					const recordPricing = pricingCache.get(record.model) ?? {input: NaN, output: NaN};
+					const recordPricing = pricingCache.get(record.model) ?? {
+						input: NaN,
+						output: NaN,
+					};
 
-					const inputTokens = record.inputTokens ?? 0;
-					const outputTokens = record.outputTokens ?? 0;
+					const knownInputCost =
+						record.inputTokens != null
+							? (recordPricing.input * record.inputTokens) / 1_000_000
+							: 0;
+					const knownOutputCost =
+						record.outputTokens != null
+							? (recordPricing.output * record.outputTokens) / 1_000_000
+							: 0;
+
 					const callCost =
 						record.inputTokens != null && record.outputTokens != null
-							? (recordPricing.input * inputTokens +
-									recordPricing.output * outputTokens) /
-								1_000_000
+							? knownInputCost + knownOutputCost
 							: record.totalTokens != null
 								? (((recordPricing.input + recordPricing.output) / 2) *
 										record.totalTokens) /
 									1_000_000
-								: 0;
+								: knownInputCost + knownOutputCost;
 
 					cumulativeSession += callCost;
 					perProvider[record.provider] =
