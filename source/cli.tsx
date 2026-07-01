@@ -102,6 +102,11 @@ Examples:
 	process.exit(0);
 }
 
+// Validate output format value to prevent injection
+function isValidOutputFormat(value: unknown): value is 'text' | 'json' {
+	return value === 'text' || value === 'json';
+}
+
 async function main(): Promise<void> {
 	// Dynamic imports so the fast-path flag handlers above never pay for them.
 	const [
@@ -128,18 +133,36 @@ async function main(): Promise<void> {
 		}
 	}
 
-	// Extract --provider if specified
+	// Extract --provider if specified — validate against allowlist pattern
 	let cliProvider: string | undefined;
 	const providerArgIndex = args.findIndex(arg => arg === '--provider');
 	if (providerArgIndex !== -1 && args[providerArgIndex + 1]) {
-		cliProvider = args[providerArgIndex + 1];
+		// Allow alphanumeric, hyphen, underscore only to prevent injection
+		const value = args[providerArgIndex + 1];
+		if (/^[a-zA-Z0-9_-]+$/.test(value)) {
+			cliProvider = value;
+		} else {
+			console.error(
+				`Invalid --provider value: "${value}". Provider name must contain only alphanumeric characters, hyphens, and underscores.`,
+			);
+			process.exit(1);
+		}
 	}
 
-	// Extract --model if specified
+	// Extract --model if specified — validate against allowlist pattern
 	let cliModel: string | undefined;
 	const modelArgIndex = args.findIndex(arg => arg === '--model');
 	if (modelArgIndex !== -1 && args[modelArgIndex + 1]) {
-		cliModel = args[modelArgIndex + 1];
+		// Allow alphanumeric, hyphen, underscore, dot, slash for model names like "claude-3.5-sonnet"
+		const value = args[modelArgIndex + 1];
+		if (/^[a-zA-Z0-9_/.:-]+$/.test(value)) {
+			cliModel = value;
+		} else {
+			console.error(
+				`Invalid --model value: "${value}". Model name must contain only alphanumeric characters, hyphens, underscores, dots, and slashes.`,
+			);
+			process.exit(1);
+		}
 	}
 
 	// Extract --context-max if specified
@@ -188,25 +211,24 @@ async function main(): Promise<void> {
 			outputFormat = 'json';
 			break;
 		} else if (arg === '--output-format' && args[i + 1]) {
-			if (args[i + 1] === 'json') {
-				outputFormat = 'json';
-			} else if (args[i + 1] !== 'text') {
+			const value = args[i + 1];
+			if (!isValidOutputFormat(value)) {
 				console.error(
-					`Invalid --output-format value: "${args[i + 1]}". Must be 'text' or 'json'.`,
+					`Invalid --output-format value: "${value}". Must be 'text' or 'json'.`,
 				);
 				process.exit(1);
 			}
+			outputFormat = value;
 			break;
 		} else if (arg.startsWith('--output-format=')) {
 			const rawValue = arg.slice('--output-format='.length);
-			if (rawValue === 'json') {
-				outputFormat = 'json';
-			} else if (rawValue !== 'text') {
+			if (!isValidOutputFormat(rawValue)) {
 				console.error(
 					`Invalid --output-format value: "${rawValue}". Must be 'text' or 'json'.`,
 				);
 				process.exit(1);
 			}
+			outputFormat = rawValue;
 			break;
 		}
 	}

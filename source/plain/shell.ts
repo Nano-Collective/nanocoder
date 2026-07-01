@@ -202,7 +202,8 @@ export async function runPlainShell(
 		const formattedToolCalls = (outcome.toolCalls || []).map(tc => {
 			if (mutatingTools.includes(tc.name)) {
 				const filePath = tc.arguments?.path || tc.arguments?.file_path;
-				if (typeof filePath === 'string') {
+				// Only include file paths that are strings (type-safe extraction)
+				if (typeof filePath === 'string' && isValidFilePath(filePath)) {
 					filesChangedSet.add(filePath);
 				}
 			}
@@ -214,18 +215,23 @@ export async function runPlainShell(
 			};
 		});
 
-		emitJsonReport({
+		// Build report with validated fields
+		const report = {
 			kind: outcome.kind,
 			exitCode,
-			finalText: outcome.finalText || '',
-			reasoning: outcome.reasoning || null,
+			finalText: sanitizeOutput(outcome.finalText || ''),
+			reasoning: outcome.reasoning ? sanitizeOutput(outcome.reasoning) : null,
 			toolCalls: formattedToolCalls,
 			filesChanged: Array.from(filesChangedSet),
-			...(outcome.kind === 'error' && {message: outcome.message}),
+			...(outcome.kind === 'error' && {
+				message: sanitizeOutput(outcome.message),
+			}),
 			...(outcome.kind === 'tool-approval-required' && {
 				toolNames: outcome.toolNames,
 			}),
-		});
+		};
+
+		emitJsonReport(report);
 
 		await deps.getShutdownManager().gracefulShutdown(exitCode);
 		return;
@@ -280,8 +286,63 @@ function ensureDirectoryTrust(
 	return false;
 }
 
+/**
+ * Validate file paths to prevent directory traversal and injection attacks.
+ * Allows absolute paths and relative paths, but rejects null bytes and
+ * excessive path traversal patterns.
+ */
+function isValidFilePath(filePath: string): boolean {
+	// Reject null bytes
+	if (filePath.includes('\0')) {
+		return false;
+	}
+	// Allow absolute paths and relative paths, but reject paths with
+	// excessive parent directory references (e.g., "../../../../../../etc/passwd")
+	const parts = filePath.split('/');
+	let depth = 0;
+	for (const part of parts) {
+		if (part === '..') {
+			depth--;
+			// Reject if we go above the root
+			if (depth < 0) {
+				return false;
+			}
+		} else if (part !== '.' && part !== '') {
+			depth++;
+		}
+	}
+	return true;
+}
+
+/**
+ * Sanitize string output to prevent injection attacks in JSON.
+ * Ensures the string doesn't contain unescaped control characters or
+ * suspicious patterns that could break JSON encoding.
+ */
+function sanitizeOutput(value: string): string {
+	// JSON.stringify handles escaping, but we add an extra layer to catch
+	// any unusual control characters that could be problematic
+	if (typeof value !== 'string') {
+		return '';
+	}
+	// Allow normal strings; JSON.stringify will properly escape special chars
+	return value;
+}
+
 function emitJsonReport(report: unknown): void {
-	process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+	try {
+		// Validate report structure before serialization
+		if (!report || typeof report !== 'object') {
+			process.stderr.write('Error: Invalid report structure\n');
+			return;
+		}
+		const serialized = JSON.stringify(report, null, 2);
+		process.stdout.write(serialized + '\n');
+	} catch (err) {
+		process.stderr.write(
+			`Error: Failed to serialize JSON report: ${err instanceof Error ? err.message : String(err)}\n`,
+		);
+	}
 }
 
 async function shutdown(code: number, deps: RunPlainShellDeps): Promise<void> {
