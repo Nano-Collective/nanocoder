@@ -8,7 +8,11 @@ import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt
 import {UsageDisplay} from '@/components/usage/usage-display';
 import {getAppConfig} from '@/config/index';
 import {getToolManager} from '@/message-handler';
-import {getModelContextLimit, getModelPricing, getSessionContextLimit} from '@/models/index';
+import {
+	getModelContextLimit,
+	getModelPricing,
+	getSessionContextLimit,
+} from '@/models/index';
 import {generateKey} from '@/session/key-generator';
 import {createTokenizer} from '@/tokenization/index';
 import type {Command} from '@/types/commands';
@@ -200,8 +204,7 @@ export const usageCommand: Command = {
 							pricing.output * snapshot.outputTokens) /
 						1_000_000;
 				} else {
-					currentContextCost =
-						(pricing.input * breakdown.total) / 1_000_000;
+					currentContextCost = (pricing.input * breakdown.total) / 1_000_000;
 				}
 
 				// ---- Cumulative session + per-provider (from history) ----
@@ -211,18 +214,23 @@ export const usageCommand: Command = {
 				const pricingCache = new Map<string, typeof pricing>();
 
 				for (const record of history) {
-					const recordPricing = pricingCache.get(record.model)
-						?? await getModelPricing(record.model)
-						?? {input: NaN, output: NaN};
+					const recordPricing = pricingCache.get(record.model) ??
+						(await getModelPricing(record.model)) ?? {input: NaN, output: NaN};
 
 					pricingCache.set(record.model, recordPricing);
 
 					const inputTokens = record.inputTokens ?? 0;
 					const outputTokens = record.outputTokens ?? 0;
 					const callCost =
-						(recordPricing.input * inputTokens +
-							recordPricing.output * outputTokens) /
-						1_000_000;
+						record.inputTokens != null && record.outputTokens != null
+							? (recordPricing.input * inputTokens +
+									recordPricing.output * outputTokens) /
+								1_000_000
+							: record.totalTokens != null
+								? (((recordPricing.input + recordPricing.output) / 2) *
+										record.totalTokens) /
+									1_000_000
+								: 0;
 
 					cumulativeSession += callCost;
 					perProvider[record.provider] =
@@ -232,9 +240,8 @@ export const usageCommand: Command = {
 				cost = {
 					currentContext: currentContextCost,
 					cumulativeSession: history.length === 0 ? NaN : cumulativeSession,
-					perProvider: Object.keys(perProvider).length > 1
-						? perProvider
-						: undefined,
+					perProvider:
+						Object.keys(perProvider).length > 1 ? perProvider : undefined,
 				};
 			}
 		} catch {

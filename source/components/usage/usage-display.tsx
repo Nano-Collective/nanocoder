@@ -282,9 +282,7 @@ export function UsageDisplay({
 					<Box>
 						<Text color={colors.secondary}>
 							Current Context:{' '}
-							<Text color={colors.text}>
-								{formatCost(cost.currentContext)}
-							</Text>
+							<Text color={colors.text}>{formatCost(cost.currentContext)}</Text>
 						</Text>
 					</Box>
 					<Box>
@@ -303,10 +301,7 @@ export function UsageDisplay({
 							{Object.entries(cost.perProvider).map(([prov, val]) => (
 								<Box key={prov} marginLeft={2}>
 									<Text color={colors.secondary}>
-										{prov}:{' '}
-										<Text color={colors.text}>
-											{formatCost(val)}
-										</Text>
+										{prov}: <Text color={colors.text}>{formatCost(val)}</Text>
 									</Text>
 								</Box>
 							))}

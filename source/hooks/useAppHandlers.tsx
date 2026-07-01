@@ -35,9 +35,9 @@ import type {
 	MCPConnectionStatus,
 	Message,
 } from '@/types';
-import type {ApiCallRecord, ApiUsageSnapshot} from '@/types/core';
 import type {CustomCommand} from '@/types/commands';
 import type {TuneConfig} from '@/types/config';
+import type {ApiCallRecord, ApiUsageSnapshot} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
 import {calculateTokenBreakdown} from '@/usage/calculator';
@@ -585,7 +585,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					developmentMode: props.developmentMode,
 					lastApiUsage: props.lastApiUsage,
 					apiCallHistory: props.apiCallHistory,
-					},
+				},
 				displayValue,
 				images,
 			);
