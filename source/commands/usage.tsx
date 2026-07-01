@@ -213,11 +213,17 @@ export const usageCommand: Command = {
 				const perProvider: Record<string, number> = {};
 				const pricingCache = new Map<string, typeof pricing>();
 
-				for (const record of history) {
-					const recordPricing = pricingCache.get(record.model) ??
-						(await getModelPricing(record.model)) ?? {input: NaN, output: NaN};
+				const uniqueModels = [...new Set(history.map(r => r.model))];
+				const pricings = await Promise.all(
+					uniqueModels.map(async model => {
+						const p = await getModelPricing(model);
+						return [model, p ?? {input: NaN, output: NaN}] as const;
+					}),
+				);
+				for (const [model, p] of pricings) pricingCache.set(model, p);
 
-					pricingCache.set(record.model, recordPricing);
+				for (const record of history) {
+					const recordPricing = pricingCache.get(record.model) ?? {input: NaN, output: NaN};
 
 					const inputTokens = record.inputTokens ?? 0;
 					const outputTokens = record.outputTokens ?? 0;
