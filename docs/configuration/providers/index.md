@@ -27,6 +27,7 @@ Run on your machine, typically no API key required.
 - [Ollama](ollama.md) - Popular local model runner
 - [llama.cpp](llama-cpp.md) - High-performance inference server
 - [LM Studio](lm-studio.md) - Desktop app for running local models
+- [Atomic Chat](atomic-chat.md) - Desktop app with OpenAI-compatible local API
 - [MLX Server](mlx-server.md) - Apple Silicon optimized inference
 - [vLLM](vllm.md) - High-throughput serving engine
 - [LocalAI](localai.md) - OpenAI-compatible local API
