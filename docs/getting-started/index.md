@@ -49,6 +49,7 @@ nanocoder -h
 | `--acp` | | Run as an [ACP server](../features/acp.md) for editor integration (Zed, etc.) |
 | `--provider` | | Specify AI provider (must be configured in agents.config.json) |
 | `--model` | | Specify AI model (must be available for the provider) |
+| `--json` | |Emit a single structured JSON object to `stdout` on completion instead of streamed text. Requires `run`; incompatible with `--acp` and `--vscode`|
 | `--context-max` | | Set maximum context length in tokens (supports k/K suffix, e.g. `128k`) |
 | `--mode` | | Start in a specific [development mode](../features/development-modes.md) — `normal`, `auto-accept`, `yolo`, or `plan`. Defaults to `normal` for interactive sessions and `auto-accept` for `run` mode. |
 | `--trust-directory` | | Skip the first-run directory trust prompt for this run only. Only valid with `run`; ignored (with a warning) in interactive mode. The trust is ephemeral — `trustedDirectories` in your preferences file is not modified. |

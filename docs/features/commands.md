@@ -98,3 +98,47 @@ nanocoder --mode yolo run "update README and push"
 ```
 
 If a tool requires approval that the active mode won't grant, nanocoder prints `Tool approval required for: ...` and exits with status code `1`.
+### JSON Output
+
+For CI pipelines, scripting, and tool chaining, pass `--json` (alias `--output-format json`) alongside `run` to get a single structured JSON object on `stdout` instead of streamed markdown:
+
+```bash
+nanocoder --plain --json run "Add error handling to src/api.ts"
+```
+
+With `--json` set, all human-readable output — boot banners, streamed tokens, tool one-liners, status lines — is suppressed from `stdout`. Anything nanocoder would otherwise print is instead routed to `stderr`, so `stdout` stays clean for piping:
+
+```bash
+nanocoder --plain --json run "refactor the auth module" | jq .finalText
+```
+
+`--json` requires `run` and is incompatible with `--acp` and `--vscode` — combining them exits with an error before the session starts.
+
+#### Output Shape
+
+The emitted object looks like:
+
+```json
+{
+  "outcome": "success",
+  "finalText": "...",
+  "reasoning": "...",
+  "toolCalls": [
+    {
+      "name": "edit_file",
+      "arguments": { "path": "src/api.ts" },
+      "result": "...",
+      "error": null
+    }
+  ],
+  "modifiedFiles": ["src/api.ts"]
+}
+```
+
+- `outcome` — `"success"`, `"tool-approval-required"`, or `"error"`, matching the underlying conversation result
+- `finalText` — the model's final response text
+- `reasoning` — accumulated reasoning/thinking content, or `null` if the model didn't emit any
+- `toolCalls` — every tool call made during the run, each with its arguments and either a `result` or an `error` (never both)
+- `modifiedFiles` — deduplicated list of file paths touched by file-mutating tools (`write_to_file`, `create_file`, `string_replace`, `edit_file`)
+
+On error (e.g. an untrusted workspace directory, or the turn limit being hit without a final answer), `outcome` is `"error"` and the object still includes whatever `toolCalls` were captured before the failure, so partial progress isn't silently dropped.
