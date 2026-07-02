@@ -368,10 +368,8 @@ test('UserInput truncates long queued messages on narrow terminals', t => {
 		t.regex(output, /\.\.\./);
 		t.notRegex(output, /terminal width available/);
 		// Every rendered line fits within the terminal width.
-		// Strip ANSI escape codes before measuring — color codes inflate byte length.
-		const ansiRegex = /\u001b\[[0-9;]*m/g;
 		for (const line of output.split('\n')) {
-			t.true(line.replace(ansiRegex, '').length <= 40);
+			t.true(line.length <= 40);
 		}
 		unmount();
 	} finally {
