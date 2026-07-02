@@ -8,6 +8,10 @@ import {useInputState} from '@/hooks/useInputState';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {useUIStateContext} from '@/hooks/useUIState';
+import type {
+	QueuedUserMessage,
+	UserMessageQueueDraft,
+} from '@/hooks/useUserMessageQueue';
 import {promptHistory} from '@/prompt-history';
 import type {TuneConfig} from '@/types/config';
 import type {
@@ -15,7 +19,11 @@ import type {
 	DevelopmentMode,
 	ImageAttachment,
 } from '@/types/core';
-import type {InputState} from '@/types/hooks';
+import type {
+	InputState,
+	RestoredInputDraft,
+	SubmittedInputDraft,
+} from '@/types/hooks';
 import {Completion} from '@/types/index';
 import {
 	extractImageReferences,
@@ -36,6 +44,9 @@ interface ChatProps {
 		displayValue: string,
 		images?: ImageAttachment[],
 	) => void;
+	onQueueMessage?: (message: UserMessageQueueDraft) => void;
+	queuedMessages?: QueuedUserMessage[];
+	onRemoveQueuedMessage?: (id: string) => void;
 	placeholder?: string;
 	customCommands?: string[]; // List of custom command names and aliases
 	disabled?: boolean; // Disable input when AI is processing
@@ -53,10 +64,15 @@ interface ChatProps {
 	activeEditor?: ActiveEditorState | null; // VS Code active file + optional selection
 	onDismissActiveEditor?: () => void; // Dismiss the active editor pill on clear/escape
 	forceFocus?: boolean; // Force focus for testing (bypasses useFocus)
+	onSubmittedDraft?: (draft: SubmittedInputDraft) => void;
+	restoreSubmittedDraft?: RestoredInputDraft | null;
 }
 
 export default function UserInput({
 	onSubmit,
+	onQueueMessage,
+	queuedMessages = [],
+	onRemoveQueuedMessage,
 	placeholder,
 	customCommands = [],
 	disabled = false,
@@ -74,13 +90,15 @@ export default function UserInput({
 	activeEditor,
 	onDismissActiveEditor,
 	forceFocus = false,
+	onSubmittedDraft,
+	restoreSubmittedDraft = null,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
 	const effectiveFocus = forceFocus || isFocused;
 	const {colors} = useTheme();
 	const inputState = useInputState();
 	const uiState = useUIStateContext();
-	const {boxWidth, isNarrow} = useResponsiveTerminal();
+	const {boxWidth, isNarrow, actualWidth, truncate} = useResponsiveTerminal();
 	const [textInputKey, setTextInputKey] = useState(0);
 	const completionJustSelectedRef = useRef(false);
 	// Store the full InputState draft when starting history navigation, so it can be restored
@@ -94,8 +112,10 @@ export default function UserInput({
 		Array<{path: string; score: number}>
 	>([]);
 	const [selectedFileIndex, setSelectedFileIndex] = useState(0);
+	const [selectedQueuedIndex, setSelectedQueuedIndex] = useState(-1);
 	// Pending image attachments sent with the next submitted message.
 	const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+	const lastRestoredDraftIdRef = useRef<number | null>(null);
 
 	const {
 		input,
@@ -133,6 +153,51 @@ export default function UserInput({
 	useEffect(() => {
 		void promptHistory.loadHistory();
 	}, []);
+
+	useEffect(() => {
+		if (
+			!restoreSubmittedDraft ||
+			lastRestoredDraftIdRef.current === restoreSubmittedDraft.id
+		) {
+			return;
+		}
+
+		lastRestoredDraftIdRef.current = restoreSubmittedDraft.id;
+		setInputState({
+			displayValue: restoreSubmittedDraft.inputState.displayValue,
+			placeholderContent: {
+				...restoreSubmittedDraft.inputState.placeholderContent,
+			},
+		});
+		setAttachments([...restoreSubmittedDraft.attachments]);
+		resetUIState();
+		promptHistory.resetIndex();
+		setTextInputKey(prev => prev + 1);
+		focus('user-input');
+	}, [restoreSubmittedDraft, setInputState, resetUIState, focus]);
+
+	useEffect(() => {
+		if (queuedMessages.length === 0) {
+			setSelectedQueuedIndex(-1);
+			return;
+		}
+
+		setSelectedQueuedIndex(index =>
+			index >= queuedMessages.length ? queuedMessages.length - 1 : index,
+		);
+	}, [queuedMessages.length]);
+
+	// When in-flight work ends, reclaim focus so the cursor returns and the user
+	// can type right away. Focus can be dropped mid-turn (e.g. an interstitial
+	// tool-confirmation prompt unmounts the input), and useFocus autoFocus only
+	// fires on mount, so we restore it on the busy -> idle edge.
+	const wasBusyRef = useRef(isBusy);
+	useEffect(() => {
+		if (wasBusyRef.current && !isBusy && !disabled) {
+			focus('user-input');
+		}
+		wasBusyRef.current = isBusy;
+	}, [isBusy, disabled, focus]);
 
 	// Consume pending file mentions from explorer and insert into input
 	// Properly attach files by calling handleFileMention for each
@@ -313,7 +378,7 @@ export default function UserInput({
 
 	// Handle form submission
 	const handleSubmit = useCallback(() => {
-		if (!onSubmit) return;
+		if (!onSubmit && !onQueueMessage) return;
 
 		let images = attachments;
 		let assembled = assemblePrompt(currentState);
@@ -337,14 +402,51 @@ export default function UserInput({
 		// Nothing to send: no text and no attachments.
 		if (!assembled.trim() && images.length === 0) return;
 
+		const inputStateForHistory: InputState = {
+			displayValue: currentState.displayValue,
+			placeholderContent: {...currentState.placeholderContent},
+		};
+
+		if (isBusy && !assembled.trim().startsWith('/') && onQueueMessage) {
+			promptHistory.addPrompt(inputStateForHistory);
+			onQueueMessage({
+				message: assembled,
+				displayValue: display,
+				images: images.length > 0 ? images : undefined,
+				inputState: inputStateForHistory,
+			});
+			resetInput();
+			resetUIState();
+			setAttachments([]);
+			promptHistory.resetIndex();
+			setSelectedQueuedIndex(-1);
+			return;
+		}
+
+		if (!onSubmit) return;
+
 		// Save the InputState to history and send assembled message to AI
-		promptHistory.addPrompt(currentState);
+		promptHistory.addPrompt(inputStateForHistory);
+		onSubmittedDraft?.({
+			inputState: inputStateForHistory,
+			attachments: images,
+		});
 		onSubmit(assembled, display, images.length > 0 ? images : undefined);
 		resetInput();
 		resetUIState();
 		setAttachments([]);
 		promptHistory.resetIndex();
-	}, [attachments, onSubmit, resetInput, resetUIState, currentState]);
+		setSelectedQueuedIndex(-1);
+	}, [
+		attachments,
+		onSubmit,
+		onQueueMessage,
+		resetInput,
+		resetUIState,
+		currentState,
+		isBusy,
+		onSubmittedDraft,
+	]);
 
 	// Handle escape key logic
 	const handleEscape = useCallback(() => {
@@ -435,6 +537,88 @@ export default function UserInput({
 		],
 	);
 
+	const handleQueueNavigation = useCallback(
+		(direction: 'up' | 'down') => {
+			if (!isBusy || input.length > 0 || queuedMessages.length === 0) {
+				return false;
+			}
+
+			if (direction === 'up') {
+				// At the input (-1) there's nothing above the queue, so let the press
+				// fall through to history navigation. From the first queued item, step
+				// back up to the input.
+				if (selectedQueuedIndex < 0) {
+					return false;
+				}
+				setSelectedQueuedIndex(selectedQueuedIndex - 1);
+				return true;
+			}
+
+			// Down enters the queue from the input, then walks toward the last item
+			// and stops there (no wrap-around).
+			if (selectedQueuedIndex >= queuedMessages.length - 1) {
+				return selectedQueuedIndex >= 0;
+			}
+			setSelectedQueuedIndex(selectedQueuedIndex + 1);
+			return true;
+		},
+		[isBusy, input.length, queuedMessages.length, selectedQueuedIndex],
+	);
+
+	const loadSelectedQueuedMessage = useCallback(() => {
+		if (
+			!isBusy ||
+			input.length > 0 ||
+			selectedQueuedIndex < 0 ||
+			selectedQueuedIndex >= queuedMessages.length
+		) {
+			return false;
+		}
+
+		const queuedMessage = queuedMessages[selectedQueuedIndex];
+		setInputState(
+			queuedMessage.inputState ?? {
+				displayValue: queuedMessage.displayValue,
+				placeholderContent: {},
+			},
+		);
+		setAttachments(queuedMessage.images ?? []);
+		onRemoveQueuedMessage?.(queuedMessage.id);
+		setSelectedQueuedIndex(-1);
+		setTextInputKey(prev => prev + 1);
+		return true;
+	}, [
+		isBusy,
+		input.length,
+		selectedQueuedIndex,
+		queuedMessages,
+		setInputState,
+		onRemoveQueuedMessage,
+	]);
+
+	const removeSelectedQueuedMessage = useCallback(() => {
+		if (
+			!isBusy ||
+			input.length > 0 ||
+			selectedQueuedIndex < 0 ||
+			selectedQueuedIndex >= queuedMessages.length
+		) {
+			return false;
+		}
+
+		onRemoveQueuedMessage?.(queuedMessages[selectedQueuedIndex].id);
+		setSelectedQueuedIndex(index =>
+			index >= queuedMessages.length - 1 ? queuedMessages.length - 2 : index,
+		);
+		return true;
+	}, [
+		isBusy,
+		input.length,
+		selectedQueuedIndex,
+		queuedMessages,
+		onRemoveQueuedMessage,
+	]);
+
 	useInput((inputChar, key) => {
 		// Cancelling in-flight work is owned by the single section-level Escape
 		// handler (see InteractiveApp), which fires no matter which component is
@@ -459,6 +643,13 @@ export default function UserInput({
 		// Handle ctrl+r to toggle expanded reasoning traces (always available)
 		if (key.ctrl && inputChar === 'r' && onToggleReasoningExpanded) {
 			onToggleReasoningExpanded();
+			return;
+		}
+
+		// Delete/Backspace removes the highlighted queued message. Safe to bind
+		// bare: removeSelectedQueuedMessage no-ops unless a queued item is selected
+		// and the input is empty, so normal backspace-to-edit still falls through.
+		if ((key.delete || key.backspace) && removeSelectedQueuedMessage()) {
 			return;
 		}
 
@@ -574,6 +765,9 @@ export default function UserInput({
 
 		// Handle Enter to submit (fallthrough - if completion handler didn't return)
 		if (key.return && !key.shift) {
+			if (loadSelectedQueuedMessage()) {
+				return;
+			}
 			handleSubmit();
 			return;
 		}
@@ -592,6 +786,9 @@ export default function UserInput({
 				setSelectedCompletionIndex(prev =>
 					prev > 0 ? prev - 1 : completions.length - 1,
 				);
+				return;
+			}
+			if (handleQueueNavigation('up')) {
 				return;
 			}
 			handleHistoryNavigation('up');
@@ -613,12 +810,29 @@ export default function UserInput({
 				);
 				return;
 			}
+			if (handleQueueNavigation('down')) {
+				return;
+			}
 			handleHistoryNavigation('down');
 			return;
 		}
 	});
 
 	const textColor = disabled || !input ? colors.secondary : colors.primary;
+	const formatQueuedMessage = (message: QueuedUserMessage) => {
+		const imageSuffix =
+			message.images && message.images.length > 0
+				? ` (${message.images.length} image${message.images.length === 1 ? '' : 's'})`
+				: '';
+		const singleLine = message.displayValue.replace(/\s+/g, ' ').trim();
+		// Truncate against the true terminal width like tool result rows do, not
+		// boxWidth (which floors at 40 and would overflow narrow terminals). The
+		// overhead covers the box border + padding (2), the '▸ '/'  ' marker (2),
+		// and a right-edge safety margin.
+		const maxLength = Math.max(8, actualWidth - imageSuffix.length - 6);
+		const text = truncate(singleLine, maxLength);
+		return `${text}${imageSuffix}`;
+	};
 
 	// When disabled, show minimal UI to avoid cluttering the screen
 	if (disabled) {
@@ -734,6 +948,40 @@ export default function UserInput({
 								{file.path}
 							</Text>
 						))}
+					</Box>
+				)}
+				{queuedMessages.length > 0 && (
+					<Box flexDirection="column" marginTop={1}>
+						<Text color={colors.secondary}>
+							Queued messages (↑/↓ select, Enter edit, Del remove):
+						</Text>
+						{queuedMessages.map((message, index) => {
+							const isSelected = index === selectedQueuedIndex;
+							return (
+								<Text
+									key={message.id}
+									color={isSelected ? colors.info : colors.primary}
+									bold={isSelected}
+								>
+									{isSelected ? '▸ ' : '  '}
+									{formatQueuedMessage(message)}
+								</Text>
+							);
+						})}
+					</Box>
+				)}
+				{isBusy && (
+					<Box marginTop={1}>
+						<Text color={colors.secondary}>
+							Press Esc to cancel
+							{onToggleCompactDisplay && (
+								<Text>
+									{' '}
+									· ctrl-o {compactToolDisplay ? 'expand' : 'compact'}{' '}
+									{isNarrow ? '' : 'tool results'}
+								</Text>
+							)}
+						</Text>
 					</Box>
 				)}
 			</Box>

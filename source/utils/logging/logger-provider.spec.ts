@@ -178,6 +178,7 @@ test('createDefaultConfig handles environments correctly', t => {
 
 	// Test development environment
 	process.env.NODE_ENV = 'development';
+	process.env.NANOCODER_LOG_LEVEL = 'debug';
 	provider.reset();
 	const devLogger = provider.initializeLogger();
 	const devConfig = provider.getLoggerConfig();
@@ -193,6 +194,7 @@ test('createDefaultConfig handles environments correctly', t => {
 	// Once the real pino logger loads asynchronously, it will use 'info' from config.ts.
 	// This test runs synchronously, so it sees the fallback config.
 	process.env.NODE_ENV = 'production';
+	delete process.env.NANOCODER_LOG_LEVEL;
 	provider.reset();
 	const prodLogger = provider.initializeLogger();
 	const prodConfig = provider.getLoggerConfig();

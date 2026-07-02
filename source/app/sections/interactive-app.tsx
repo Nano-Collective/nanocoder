@@ -9,8 +9,10 @@ import type {useChatHandler} from '@/hooks/chat-handler';
 import type {AppHandlers} from '@/hooks/useAppHandlers';
 import type {useAppState} from '@/hooks/useAppState';
 import type {useModeHandlers} from '@/hooks/useModeHandlers';
+import type {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import type {useVSCodeServer} from '@/hooks/useVSCodeServer';
 import type {ImageAttachment} from '@/types/core';
+import type {RestoredInputDraft, SubmittedInputDraft} from '@/types/hooks';
 import type {PendingToolApproval} from '@/utils/tool-approval-queue';
 import type {PendingToolConfirmation} from '@/utils/tool-confirm-queue';
 import {displayCompactCountsSummary} from '@/utils/tool-result-display';
@@ -33,6 +35,7 @@ interface InteractiveAppProps {
 		displayValue: string,
 		images?: ImageAttachment[],
 	) => Promise<void>;
+	userMessageQueue: ReturnType<typeof useUserMessageQueue>;
 	handleIdeSelect: (ide: string) => void;
 }
 
@@ -56,8 +59,15 @@ export function InteractiveApp({
 	handleToolConfirmation,
 	handleQuestionAnswer,
 	handleUserSubmit,
+	userMessageQueue,
 	handleIdeSelect,
 }: InteractiveAppProps): React.ReactElement {
+	const nextRestoredDraftIdRef = React.useRef(1);
+	const [submittedDraft, setSubmittedDraft] =
+		React.useState<SubmittedInputDraft | null>(null);
+	const [restoredDraft, setRestoredDraft] =
+		React.useState<RestoredInputDraft | null>(null);
+
 	const handleToggleCompactDisplay = () => {
 		const expanding = appState.compactToolDisplay;
 		appState.setCompactToolDisplay(!expanding);
@@ -97,6 +107,72 @@ export function InteractiveApp({
 			appState.isToolExecuting ||
 			appState.abortController !== null);
 
+	const recallableSubmittedDraft =
+		cancellable &&
+		chatHandler.isGenerating &&
+		chatHandler.streamingContent === '' &&
+		!appState.isToolExecuting &&
+		submittedDraft !== null;
+
+	React.useEffect(() => {
+		if (!submittedDraft) return;
+
+		if (!cancellable || chatHandler.streamingContent !== '') {
+			setSubmittedDraft(null);
+		}
+	}, [cancellable, chatHandler.streamingContent, submittedDraft]);
+
+	const handleSubmittedDraft = React.useCallback(
+		(draft: SubmittedInputDraft) => {
+			setSubmittedDraft({
+				inputState: {
+					displayValue: draft.inputState.displayValue,
+					placeholderContent: {...draft.inputState.placeholderContent},
+				},
+				attachments: [...draft.attachments],
+			});
+		},
+		[],
+	);
+
+	const handleRecallSubmittedDraft = React.useCallback(() => {
+		if (!submittedDraft) {
+			appHandlers.handleCancel();
+			return;
+		}
+
+		appHandlers.handleCancel();
+
+		if (appState.messages[appState.messages.length - 1]?.role === 'user') {
+			appState.updateMessages(appState.messages.slice(0, -1));
+
+			if (appState.chatComponents.length > 0) {
+				appState.setChatComponents(appState.chatComponents.slice(0, -1));
+			}
+		}
+
+		appState.setIsCancelling(false);
+		appState.setAbortController(null);
+		setRestoredDraft({
+			id: nextRestoredDraftIdRef.current++,
+			inputState: {
+				displayValue: submittedDraft.inputState.displayValue,
+				placeholderContent: {...submittedDraft.inputState.placeholderContent},
+			},
+			attachments: [...submittedDraft.attachments],
+		});
+		setSubmittedDraft(null);
+	}, [
+		appHandlers,
+		appState.messages,
+		appState.updateMessages,
+		appState.chatComponents,
+		appState.setChatComponents,
+		appState.setIsCancelling,
+		appState.setAbortController,
+		submittedDraft,
+	]);
+
 	// Single, always-mounted authority for Escape -> cancel. Because this lives
 	// at the section level (never swapped out like the ChatInput children), it
 	// fires on the FIRST press no matter what is running: an LLM message, a
@@ -106,6 +182,11 @@ export function InteractiveApp({
 	useInput(
 		(_input, key) => {
 			if (key.escape) {
+				if (recallableSubmittedDraft) {
+					handleRecallSubmittedDraft();
+					return;
+				}
+
 				appHandlers.handleCancel();
 			}
 		},
@@ -120,6 +201,7 @@ export function InteractiveApp({
 				staticComponents={staticComponents}
 				queuedComponents={appState.chatComponents}
 				liveComponent={liveComponent}
+				renderLastQueuedComponentLive={recallableSubmittedDraft}
 			/>
 
 			{appState.isExplorerMode && (
@@ -181,7 +263,12 @@ export function InteractiveApp({
 						mcpInitialized={appState.mcpInitialized}
 						client={appState.client}
 						customCommands={Array.from(appState.customCommandCache.keys())}
-						inputDisabled={chatHandler.isGenerating || appState.isToolExecuting}
+						inputDisabled={false}
+						onSubmittedDraft={handleSubmittedDraft}
+						restoreSubmittedDraft={restoredDraft}
+						queuedMessages={userMessageQueue.queuedMessages}
+						onQueueMessage={userMessageQueue.enqueueMessage}
+						onRemoveQueuedMessage={userMessageQueue.removeMessage}
 						isBusy={cancellable}
 						developmentMode={appState.developmentMode}
 						contextPercentUsed={appState.contextPercentUsed}

@@ -1,7 +1,7 @@
 {
 	"name": "@nanocollective/nanocoder",
 	"main": "dist/cli.js",
-	"version": "1.28.0",
+	"version": "1.28.1",
 	"description": "An open coding agent for your terminal, built by a community collective rather than a company. Bring your own model, keep your code on your machine, and owe nothing to anyone.",
 	"keywords": [
 		"cli",

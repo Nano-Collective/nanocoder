@@ -103,6 +103,7 @@ interface UseAppHandlersProps {
 	enterExplorerMode: () => void;
 	enterIdeSelectionMode: () => void;
 	enterTune: () => void;
+	handleModelSelect: (provider: string, model: string) => Promise<boolean>;
 
 	// Chat handler
 	handleChatMessage: (message: string, displayValue?: string) => Promise<void>;
@@ -568,6 +569,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					onResumeSession: session => applySession(session),
 					onShowStatus: handleShowStatus,
 					onHandleChatMessage: props.handleChatMessage,
+					onSwitchModel: props.handleModelSelect,
 					onAddToChatQueue: props.addToChatQueue,
 					setLiveComponent: props.setLiveComponent,
 					setIsToolExecuting: props.setIsToolExecuting,

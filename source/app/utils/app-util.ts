@@ -23,6 +23,7 @@ import {
 	handleSkillsCreate,
 	handleToolCreate,
 } from './handlers/create-handler';
+import {handleRetryCommand} from './handlers/retry-handler';
 import {handleResumeCommand} from './handlers/session-handler';
 
 // Re-export for consumers that import parseContextLimit from here
@@ -555,7 +556,18 @@ async function handleSlashCommand(
 	if (await handleSkillsCreate(commandParts, options)) return;
 	if (await handleSpecialCommand(commandName, options)) return;
 	if (await handleCheckpointLoad(commandParts, options)) return;
+	// Stateful handlers that replay or resume chat flow live alongside each other.
 	if (await handleResumeCommand(commandParts, options)) return;
+	if (
+		await handleRetryCommand(
+			[
+				commandName,
+				...parseCustomCommandArgs(message.slice(commandName.length + 2)),
+			],
+			options,
+		)
+	)
+		return;
 	if (handleCopilotLogin(commandParts, options)) return;
 	if (handleCodexLogin(commandParts, options)) return;
 

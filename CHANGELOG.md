@@ -1,3 +1,27 @@
+# 1.28.1
+
+- Added **image attachments on user messages**. Paste an image from the clipboard with **Ctrl+V** (via `osascript` on macOS, `wl-paste`/`xclip` on Linux, PowerShell on Windows), drag an image file into the terminal, or type a path - quoted, unquoted, and macOS backslash-escaped paths are all recognised, and `http(s)` URLs are left untouched. Attachments (PNG/JPEG/GIF/WebP, up to 10 MB) show above the input box and **Ctrl+X** removes the last one; references are stripped from the text and sent as image parts to vision-capable models. A missing clipboard tool now logs a debug breadcrumb instead of silently no-op'ing. Thanks to @ragini-pandey. Closes #572.
+
+- Added **skill promotion and demotion**. Skills can now be promoted and demoted between project and personal scope, with a `--move` flag to relocate rather than copy the skill files.
+
+- Fix: **slash commands now run with their arguments**. Once a space is typed after a slash command, the completion menu hides so Enter submits the full command with its arguments instead of selecting a completion and dropping everything after the command name.
+
+- Fix: **the chat view no longer snaps to the bottom when a slash command completion menu opens**. The completion and file-suggestion menus now render inside the bounded input layout, so the container expands without disrupting the window height calculation that previously forced the history to scroll in smaller terminals. Thanks to @Dhirenderchoudhary. Closes #581.
+
+- Fix: **empty frontmatter blocks are recognised** instead of leaking `---` markers into the body or throwing. `splitFrontmatter` now matches an empty block, and `extractRawFrontmatter` uses the shared `parseYamlObject` helper so an empty subagent frontmatter flows through to validation and surfaces a clear `name is required` error. Thanks to @Fadhlan. Closes #592.
+
+- Fix: **`ask_user` unwraps label-as-key option objects**, so options expressed as a `{ label: value }` map render as readable choices.
+
+- Fix: **surface real network errors instead of mislabeling them as context overflow**. A failed request from a network error is no longer misreported as exceeding the context window.
+
+- Fix: **size MoE models by total parameter count, not active count**, when auto-resolving the tool profile, so mixture-of-experts models get the correct tune.
+
+- Fix: **number formatting on the `/copy` command** output.
+
+- Docs: clarified **MCP tool profile visibility** and documented the image-attachments feature. Thanks to @zerone0x. Closes #593.
+
+If there are any problems, feedback or thoughts please drop an issue or message us through Discord! Thank you for using Nanocoder.
+
 # 1.28.0
 
 - Added **Agent Client Protocol (ACP) support**. Nanocoder can now run as an ACP agent (`nanocoder --acp`), exposing its conversation, tool-calling, and permission flows over the protocol so it can be driven by ACP-compatible editors and clients (Zed and others). New `source/acp/` module covers the agent, server, session, conversation loop, content conversion, capability negotiation, and permission handling. Thanks to @Avtrkrb. Closes #529. Follow-up work added the missing ACP docs, kept the parallel tool-execution loop in sync with the plain shell, and made `NANOCODER_MAX_TURNS` configurable (with a raised default) so long ACP and plain-mode runs are not cut short.
@@ -57,8 +81,6 @@
 - Added a `tmp >=0.2.6` override to resolve a path-traversal advisory in a transitive dependency. Thanks to @ragini-pandey.
 
 - Large **refactor and dead-code sweep**: unified tool-call ID generation, extracted a shared `useWizardForm` hook, consolidated session-override managers, added message-factory helpers, deduped config loaders / git exec / command dispatch / conversation-loop flush, extracted `StyledSelectInput` and `makeSimpleToolFormatter`, and deleted several dead modules and orphaned exports (including `fetch-local-models` orphaned by an earlier removal).
-
-- Added **image attachments on user messages**. Paste an image from the clipboard with **Ctrl+V** (via `osascript` on macOS, `wl-paste`/`xclip` on Linux, PowerShell on Windows), drag an image file into the terminal, or type a path — quoted, unquoted, and macOS backslash-escaped paths are all recognised, and `http(s)` URLs are left untouched. Attachments (PNG/JPEG/GIF/WebP, ≤10 MB) show above the input box and **Ctrl+X** removes the last one; references are stripped from the text and sent as image parts to vision-capable models. A missing clipboard tool now logs a debug breadcrumb instead of silently no-op'ing. Thanks to @ragini-pandey. Closes #572.
 
 - Updated the **Nanocoder Battlemap** competitive comparison and refreshed the README and docs.
 

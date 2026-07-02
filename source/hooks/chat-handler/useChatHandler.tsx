@@ -351,6 +351,7 @@ export function useChatHandler({
 			);
 		} catch (error) {
 			displayError(error, 'chat-error');
+			onConversationComplete?.();
 		} finally {
 			resetStreamingState();
 		}

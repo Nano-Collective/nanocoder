@@ -1,6 +1,7 @@
 import test from 'ava';
 import {Text} from 'ink';
 import React from 'react';
+import type {Message} from '@/types';
 import {renderWithTheme} from '../../test-utils/render-with-theme.js';
 import {InteractiveApp} from './interactive-app.js';
 
@@ -21,6 +22,14 @@ interface Overrides {
 	pendingToolCalls?: Array<{id: string; function: {name: string; arguments: unknown}}>;
 	pendingSubagentApproval?: unknown;
 	handleCancel?: () => void;
+	streamingContent?: string;
+	messages?: Message[];
+	updateMessages?: (messages: Message[]) => void;
+	chatComponents?: React.ReactNode[];
+	setChatComponents?: (components: React.ReactNode[]) => void;
+	setIsCancelling?: (value: boolean) => void;
+	setAbortController?: (controller: AbortController | null) => void;
+	client?: unknown;
 }
 
 function makeProps(o: Overrides = {}) {
@@ -28,8 +37,8 @@ function makeProps(o: Overrides = {}) {
 	const noopAsync = async () => {};
 
 	const appState = {
-		client: null,
-		messages: [],
+		client: o.client ?? null,
+		messages: o.messages ?? [],
 		currentModel: 'mock-model',
 		currentProvider: 'mock',
 		startChat: o.startChat ?? false,
@@ -57,17 +66,24 @@ function makeProps(o: Overrides = {}) {
 		liveTaskList: null,
 		tune: {enabled: false, toolProfile: 'minimal', aggressiveCompact: false},
 		reasoningExpanded: false,
-		chatComponents: [],
+		chatComponents: o.chatComponents ?? [],
 		compactToolCountsRef: {current: {}},
 		setCompactToolDisplay: noop,
 		setCompactToolCounts: noop,
 		setReasoningExpanded: noop,
 		addToChatQueue: noop,
+		updateMessages: o.updateMessages ?? noop,
+		setChatComponents: o.setChatComponents ?? noop,
+		setIsCancelling: o.setIsCancelling ?? noop,
+		setAbortController: o.setAbortController ?? noop,
 	};
 
 	return {
 		appState,
-		chatHandler: {isGenerating: o.isGenerating ?? false},
+		chatHandler: {
+			isGenerating: o.isGenerating ?? false,
+			streamingContent: o.streamingContent ?? '',
+		},
 		modeHandlers: {
 			handleExplorerCancel: noop,
 			handleIdeSelectionCancel: noop,
@@ -102,6 +118,16 @@ function makeProps(o: Overrides = {}) {
 		handleToolConfirmation: noop,
 		handleQuestionAnswer: noop,
 		handleUserSubmit: noopAsync,
+		userMessageQueue: {
+			queuedMessages: [],
+			enqueueMessage: () => ({
+				id: 'queued-test',
+				message: '',
+				displayValue: '',
+			}),
+			removeMessage: noop,
+			drainNextMessage: () => false,
+		},
 		handleIdeSelect: noop,
 	} as never;
 }
@@ -162,6 +188,23 @@ const pressEscape = async (stdin: {write: (s: string) => void}) => {
 	await new Promise(resolve => setTimeout(resolve, 50));
 };
 
+const waitForCondition = async (
+	condition: () => boolean,
+	timeoutMs = 1000,
+) => {
+	const startedAt = Date.now();
+
+	while (Date.now() - startedAt < timeoutMs) {
+		if (condition()) {
+			return;
+		}
+
+		await new Promise(resolve => setTimeout(resolve, 25));
+	}
+
+	throw new Error(`Timed out after ${timeoutMs}ms waiting for condition`);
+};
+
 test('Escape cancels in-flight LLM generation on the first press', async t => {
 	let cancelled = 0;
 	const {stdin} = renderWithTheme(
@@ -220,6 +263,184 @@ test('Escape cancels when only an abort controller is live (state flicker)', asy
 
 	await pressEscape(stdin);
 	t.is(cancelled, 1);
+});
+
+test('Escape recalls an in-flight user message before assistant streaming starts', async t => {
+	let cancelled = 0;
+	let latestMessages: Message[] = [];
+	let latestAbortController: AbortController | null = null;
+	let latestIsCancelling = true;
+
+	const RecallHarness = () => {
+		const [isGenerating, setIsGenerating] = React.useState(false);
+		const [messages, setMessages] = React.useState<Message[]>([]);
+		const [chatComponents, setChatComponents] = React.useState<
+			React.ReactNode[]
+		>([]);
+		const [abortController, setAbortController] =
+			React.useState<AbortController | null>(null);
+		const [isCancelling, setIsCancelling] = React.useState(false);
+
+		latestMessages = messages;
+		latestAbortController = abortController;
+		latestIsCancelling = isCancelling;
+
+		return (
+			<InteractiveApp
+				{...makeProps({
+					startChat: true,
+					client: {},
+					isGenerating,
+					abortController,
+					messages,
+					chatComponents,
+					updateMessages: setMessages,
+					setChatComponents,
+					setIsCancelling,
+					setAbortController,
+					handleCancel: () => {
+						cancelled++;
+						abortController?.abort();
+						setIsGenerating(false);
+						setIsCancelling(true);
+					},
+				})}
+				handleUserSubmit={async message => {
+					const controller = new AbortController();
+					setMessages([{role: 'user', content: message}]);
+					setChatComponents([<Text key="user">submitted bubble: {message}</Text>]);
+					setAbortController(controller);
+					setIsGenerating(true);
+				}}
+			/>
+		);
+	};
+
+	const {stdin, lastFrame} = renderWithTheme(<RecallHarness />);
+
+	stdin.write('fix the typo');
+	await waitForCondition(() => /fix the typo/.test(lastFrame() ?? ''));
+	stdin.write('\r');
+	await waitForCondition(() => latestMessages.length === 1);
+
+	await pressEscape(stdin);
+	await waitForCondition(() => /fix the typo/.test(lastFrame() ?? ''));
+
+	t.is(cancelled, 1);
+	t.deepEqual(latestMessages, []);
+	t.notRegex(lastFrame() ?? '', /submitted bubble: fix the typo/);
+	t.is(latestAbortController, null);
+	t.is(latestIsCancelling, false);
+});
+
+test('Escape recall does not remove a non-user chat component', async t => {
+	let latestMessages: Message[] = [];
+	let latestChatComponents: React.ReactNode[] = [];
+
+	const RecallHarness = () => {
+		const [isGenerating, setIsGenerating] = React.useState(false);
+		const [messages, setMessages] = React.useState<Message[]>([]);
+		const [chatComponents, setChatComponents] = React.useState<
+			React.ReactNode[]
+		>([]);
+		const [abortController, setAbortController] =
+			React.useState<AbortController | null>(null);
+
+		latestMessages = messages;
+		latestChatComponents = chatComponents;
+
+		return (
+			<InteractiveApp
+				{...makeProps({
+					startChat: true,
+					client: {},
+					isGenerating,
+					abortController,
+					messages,
+					chatComponents,
+					updateMessages: setMessages,
+					setChatComponents,
+					setAbortController,
+					handleCancel: () => {
+						abortController?.abort();
+					},
+				})}
+				handleUserSubmit={async () => {
+					setMessages([{role: 'assistant', content: 'custom command result'}]);
+					setChatComponents([
+						<Text key="custom-command">custom command result</Text>,
+					]);
+					setAbortController(new AbortController());
+					setIsGenerating(true);
+				}}
+			/>
+		);
+	};
+
+	const {stdin, lastFrame} = renderWithTheme(<RecallHarness />);
+
+	stdin.write('recall me');
+	await waitForCondition(() => /recall me/.test(lastFrame() ?? ''));
+	stdin.write('\r');
+	await waitForCondition(() => latestChatComponents.length === 1);
+
+	await pressEscape(stdin);
+
+	t.deepEqual(latestMessages, [
+		{role: 'assistant', content: 'custom command result'},
+	]);
+	t.is(latestChatComponents.length, 1);
+	t.regex(lastFrame() ?? '', /custom command result/);
+});
+
+test('Escape keeps existing cancel behavior after assistant streaming starts', async t => {
+	let cancelled = 0;
+	let latestMessages: Message[] = [];
+
+	const StreamingHarness = () => {
+		const [isGenerating, setIsGenerating] = React.useState(false);
+		const [messages, setMessages] = React.useState<Message[]>([]);
+		const [abortController, setAbortController] =
+			React.useState<AbortController | null>(null);
+
+		latestMessages = messages;
+
+		return (
+			<InteractiveApp
+				{...makeProps({
+					startChat: true,
+					client: {},
+					isGenerating,
+					streamingContent: isGenerating ? 'partial response' : '',
+					abortController,
+					messages,
+					updateMessages: setMessages,
+					setAbortController,
+					handleCancel: () => {
+						cancelled++;
+						abortController?.abort();
+					},
+				})}
+				handleUserSubmit={async message => {
+					setMessages([{role: 'user', content: message}]);
+					setAbortController(new AbortController());
+					setIsGenerating(true);
+				}}
+			/>
+		);
+	};
+
+	const {stdin, lastFrame} = renderWithTheme(<StreamingHarness />);
+
+	stdin.write('fix the typo');
+	await waitForCondition(() => /fix the typo/.test(lastFrame() ?? ''));
+	stdin.write('\r');
+	await waitForCondition(() => latestMessages.length === 1);
+
+	await pressEscape(stdin);
+
+	t.is(cancelled, 1);
+	t.is(latestMessages.length, 1);
 });
 
 test('Escape does NOT cancel when idle (clear-input owns it)', async t => {

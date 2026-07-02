@@ -35,7 +35,7 @@ export const copyCommand: Command = {
 		}
 
 		return successMsg(
-			`Copied last response to clipboard (${content.length} chars)`,
+			`Copied last response to clipboard (${content.length.toLocaleString()} characters)`,
 			'copy',
 		);
 	},

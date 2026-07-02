@@ -8,6 +8,10 @@ import ToolConfirmation from '@/components/tool-confirmation';
 import ToolExecutionIndicator from '@/components/tool-execution-indicator';
 import UserInput from '@/components/user-input';
 import {useTheme} from '@/hooks/useTheme';
+import type {
+	QueuedUserMessage,
+	UserMessageQueueDraft,
+} from '@/hooks/useUserMessageQueue';
 import type {Task} from '@/tools/tasks/types';
 import type {
 	ContextSource,
@@ -16,6 +20,7 @@ import type {
 	ToolCall,
 	TuneConfig,
 } from '@/types';
+import type {RestoredInputDraft, SubmittedInputDraft} from '@/types/hooks';
 import type {PendingQuestion} from '@/utils/question-queue';
 import type {PendingToolApproval} from '@/utils/tool-approval-queue';
 import type {PendingToolConfirmation} from '@/utils/tool-confirm-queue';
@@ -51,6 +56,11 @@ export interface ChatInputProps {
 	// Input state
 	customCommands: string[];
 	inputDisabled: boolean;
+	onSubmittedDraft?: (draft: SubmittedInputDraft) => void;
+	restoreSubmittedDraft?: RestoredInputDraft | null;
+	queuedMessages?: QueuedUserMessage[];
+	onQueueMessage?: (message: UserMessageQueueDraft) => void;
+	onRemoveQueuedMessage?: (id: string) => void;
 	// True when in-flight work makes Escape a cancel; lets UserInput defer to
 	// the section-level global cancel handler instead of clearing the input.
 	isBusy: boolean;
@@ -108,6 +118,11 @@ export function ChatInput({
 	client,
 	customCommands,
 	inputDisabled,
+	onSubmittedDraft,
+	restoreSubmittedDraft,
+	queuedMessages = [],
+	onQueueMessage,
+	onRemoveQueuedMessage,
 	isBusy,
 	developmentMode,
 	contextPercentUsed,
@@ -126,6 +141,12 @@ export function ChatInput({
 	onDismissActiveEditor,
 }: ChatInputProps): React.ReactElement {
 	const {colors} = useTheme();
+	const activeToolCall = pendingToolCalls[currentToolIndex];
+	const showToolExecutionIndicator =
+		isToolExecuting &&
+		activeToolCall &&
+		activeToolCall.function.name !== 'execute_bash' &&
+		activeToolCall.function.name !== 'agent';
 
 	return (
 		<Box flexDirection="column" marginLeft={-1}>
@@ -141,6 +162,14 @@ export function ChatInput({
 
 			{isCancelling && <CancellingIndicator />}
 
+			{showToolExecutionIndicator && (
+				<ToolExecutionIndicator
+					toolName={activeToolCall.function.name}
+					currentIndex={currentToolIndex}
+					totalTools={pendingToolCalls.length}
+				/>
+			)}
+
 			{/* Subagent Tool Approval — takes priority since subagent is blocked */}
 			{pendingSubagentApproval ? (
 				<ToolConfirmation
@@ -155,16 +184,6 @@ export function ChatInput({
 					onConfirm={onToolConfirmation}
 					onCancel={() => onToolConfirmation(false)}
 				/>
-			) : /* Tool Execution - skip indicator for streaming tools (they show their own progress) */
-			isToolExecuting &&
-				pendingToolCalls[currentToolIndex] &&
-				pendingToolCalls[currentToolIndex].function.name !== 'execute_bash' &&
-				pendingToolCalls[currentToolIndex].function.name !== 'agent' ? (
-				<ToolExecutionIndicator
-					toolName={pendingToolCalls[currentToolIndex].function.name}
-					currentIndex={currentToolIndex}
-					totalTools={pendingToolCalls.length}
-				/>
 			) : /* Question Prompt (ask_question tool) */
 			isQuestionMode && pendingQuestion ? (
 				<QuestionPrompt
@@ -178,7 +197,12 @@ export function ChatInput({
 					onSubmit={(msg, display, images) =>
 						void onSubmit(msg, display, images)
 					}
-					disabled={inputDisabled}
+					onSubmittedDraft={onSubmittedDraft}
+					restoreSubmittedDraft={restoreSubmittedDraft}
+					onQueueMessage={onQueueMessage}
+					queuedMessages={queuedMessages}
+					onRemoveQueuedMessage={onRemoveQueuedMessage}
+					disabled={inputDisabled && !isBusy}
 					isBusy={isBusy}
 					onToggleMode={onToggleMode}
 					onToggleReasoningExpanded={onToggleReasoningExpanded}

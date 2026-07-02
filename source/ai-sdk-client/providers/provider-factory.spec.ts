@@ -3,8 +3,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type {AIProviderConfig} from '@/types/index';
-import {Agent} from 'undici';
-import {createProvider} from './provider-factory.js';
+import {Agent, MockAgent} from 'undici';
+import {createProvider, createUndiciFetch} from './provider-factory.js';
 
 test('createProvider creates provider with basic config', async t => {
 	const config: AIProviderConfig = {
@@ -397,4 +397,84 @@ test.serial('createProvider throws when github-copilot has no stored credential'
 		}
 		fs.rmSync(tmpDir, {recursive: true, force: true});
 	}
+});
+
+test('createUndiciFetch patches double spaces in SSE data: [DONE]', async t => {
+	const mockAgent = new MockAgent();
+	mockAgent.disableNetConnect();
+
+	const mockPool = mockAgent.get('https://api.atlascloud.ai');
+	mockPool.intercept({
+		path: '/v1/chat/completions',
+		method: 'POST',
+	}).reply(200, 'data:  [DONE]', {
+		headers: {'content-type': 'text/event-stream'},
+	});
+
+	const fetchFn = createUndiciFetch(mockAgent as unknown as Agent);
+	const response = await fetchFn('https://api.atlascloud.ai/v1/chat/completions', {
+		method: 'POST',
+	});
+
+	const text = await response.text();
+	t.is(text, 'data: [DONE]');
+});
+
+test('createUndiciFetch patches double spaces when data: [DONE] is split across chunks', async t => {
+	const http = await import('node:http');
+	const server = http.createServer((req, res) => {
+		res.writeHead(200, {'Content-Type': 'text/event-stream'});
+		res.write('data:');
+		setTimeout(() => {
+			res.write('  ');
+			setTimeout(() => {
+				res.end('[DONE]');
+			}, 10);
+		}, 10);
+	});
+
+	await new Promise<void>((resolve) => server.listen(0, resolve));
+	const port = (server.address() as any).port;
+
+	const agent = new Agent();
+	const fetchFn = createUndiciFetch(agent);
+	const response = await fetchFn(`http://localhost:${port}/v1/chat/completions`, {
+		method: 'POST',
+	});
+
+	const text = await response.text();
+	server.close();
+	t.is(text, 'data: [DONE]');
+});
+
+test('createUndiciFetch does not corrupt multi-byte characters split across chunks', async t => {
+	const http = await import('node:http');
+	const emojiBytes = new TextEncoder().encode('👋');
+	const firstHalf = emojiBytes.subarray(0, 2);
+	const secondHalf = emojiBytes.subarray(2, 4);
+
+	const server = http.createServer((req, res) => {
+		res.writeHead(200, {'Content-Type': 'text/event-stream'});
+		res.write('data: ');
+		res.write(firstHalf);
+		setTimeout(() => {
+			res.write(secondHalf);
+			setTimeout(() => {
+				res.end('\n\ndata:  [DONE]');
+			}, 10);
+		}, 10);
+	});
+
+	await new Promise<void>((resolve) => server.listen(0, resolve));
+	const port = (server.address() as any).port;
+
+	const agent = new Agent();
+	const fetchFn = createUndiciFetch(agent);
+	const response = await fetchFn(`http://localhost:${port}/v1/chat/completions`, {
+		method: 'POST',
+	});
+
+	const text = await response.text();
+	server.close();
+	t.is(text, 'data: 👋\n\ndata: [DONE]');
 });
