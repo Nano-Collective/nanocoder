@@ -38,6 +38,8 @@ import {handleFileMention} from '@/utils/file-mention-handler';
 import {assemblePrompt} from '@/utils/prompt-processor';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
+const MAX_COMMAND_COMPLETION_ROWS = 10;
+
 interface ChatProps {
 	onSubmit?: (
 		message: string,
@@ -833,6 +835,21 @@ export default function UserInput({
 		const text = truncate(singleLine, maxLength);
 		return `${text}${imageSuffix}`;
 	};
+	const commandCompletionWindow = useMemo(() => {
+		if (completions.length <= MAX_COMMAND_COMPLETION_ROWS) {
+			return {start: 0, end: completions.length, items: completions};
+		}
+
+		const selectedIndex =
+			selectedCompletionIndex >= 0 ? selectedCompletionIndex : 0;
+		const centeredStart =
+			selectedIndex - Math.floor(MAX_COMMAND_COMPLETION_ROWS / 2);
+		const maxStart = completions.length - MAX_COMMAND_COMPLETION_ROWS;
+		const start = Math.min(Math.max(centeredStart, 0), maxStart);
+		const end = start + MAX_COMMAND_COMPLETION_ROWS;
+
+		return {start, end, items: completions.slice(start, end)};
+	}, [completions, selectedCompletionIndex]);
 
 	// When disabled, show minimal UI to avoid cluttering the screen
 	if (disabled) {
@@ -911,11 +928,12 @@ export default function UserInput({
 				{showCompletions && completions.length > 0 && (
 					<Box flexDirection="column" marginTop={1}>
 						<Text color={colors.secondary}>Available commands:</Text>
-						{completions.map((completion, index) => {
-							const isSelected = index === selectedCompletionIndex;
+						{commandCompletionWindow.items.map((completion, index) => {
+							const completionIndex = commandCompletionWindow.start + index;
+							const isSelected = completionIndex === selectedCompletionIndex;
 							return (
 								<Text
-									key={index}
+									key={`${completion.isCustom ? 'custom' : 'built-in'}-${completion.name}`}
 									color={
 										isSelected
 											? colors.info
@@ -929,6 +947,12 @@ export default function UserInput({
 								</Text>
 							);
 						})}
+						{completions.length > MAX_COMMAND_COMPLETION_ROWS && (
+							<Text color={colors.secondary}>
+								Showing {commandCompletionWindow.start + 1}-
+								{commandCompletionWindow.end} of {completions.length}
+							</Text>
+						)}
 					</Box>
 				)}
 				{isFileAutocompleteMode && fileCompletions.length > 0 && (
