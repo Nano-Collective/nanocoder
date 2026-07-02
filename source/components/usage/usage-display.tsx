@@ -12,7 +12,7 @@ import {formatTokenCount, getUsageStatusColor} from '@/usage/calculator.js';
 import {ProgressBar} from './progress-bar.js';
 
 function formatCost(cost: number): string {
-	if (!Number.isFinite(cost) || cost === 0) return '—';
+	if (!Number.isFinite(cost)) return '—';
 	return cost >= 1 ? `$${cost.toFixed(2)}` : `$${cost.toFixed(4)}`;
 }
 
