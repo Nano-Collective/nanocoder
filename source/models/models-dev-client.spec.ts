@@ -1,6 +1,7 @@
 import test from 'ava';
 import {
 	getModelContextLimit,
+	getModelPricing,
 	getSessionContextLimit,
 	resetSessionContextLimit,
 	resolveModelContextLimit,
@@ -420,4 +421,49 @@ test('getModelContextLimit - empty env variable is ignored', async t => {
 	process.env.NANOCODER_CONTEXT_LIMIT = '';
 	const limit = await getModelContextLimit('unknown-model-12345');
 	t.is(limit, null);
+});
+
+// ============================================================================
+// getModelPricing Tests
+// ============================================================================
+
+test('getModelPricing - returns pricing for gpt-4o (models.dev)', async t => {
+	const pricing = await getModelPricing('gpt-4o');
+	t.truthy(pricing);
+	t.true(typeof pricing!.input === 'number');
+	t.true(typeof pricing!.output === 'number');
+	t.true(pricing!.input >= 0);
+	t.true(pricing!.output >= 0);
+});
+
+test('getModelPricing - returns pricing for claude-3-opus (models.dev)', async t => {
+	const pricing = await getModelPricing('claude-3-opus');
+	t.truthy(pricing);
+	t.true(typeof pricing!.input === 'number');
+	t.true(typeof pricing!.output === 'number');
+	t.true(pricing!.input >= 0);
+	t.true(pricing!.output >= 0);
+});
+
+test('getModelPricing - returns null for unknown model', async t => {
+	const pricing = await getModelPricing('unknown-model-12345');
+	t.is(pricing, null);
+});
+
+test('getModelPricing - returns null for empty string', async t => {
+	const pricing = await getModelPricing('');
+	t.is(pricing, null);
+});
+
+test('getModelPricing - returns null for local Ollama model not on models.dev', async t => {
+	const pricing = await getModelPricing('llama3.2:3b');
+	t.is(pricing, null);
+});
+
+test('getModelPricing - returns consistent pricing on repeated calls', async t => {
+	const pricing1 = await getModelPricing('gpt-4o');
+	const pricing2 = await getModelPricing('gpt-4o');
+
+	t.deepEqual(pricing2, pricing1);
+	t.truthy(pricing2);
 });

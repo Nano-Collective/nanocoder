@@ -23,6 +23,7 @@ import type {ToolManager} from '@/tools/tool-manager';
 import {isSingleToolProfile} from '@/tools/tool-profiles';
 import type {TuneConfig} from '@/types/config';
 import type {
+	ApiCallRecord,
 	ApiUsageSnapshot,
 	LLMClient,
 	Message,
@@ -87,6 +88,10 @@ interface ProcessAssistantResponseParams {
 	// it, e.g. after auto-compaction) so the context indicator can prefer
 	// API-accurate numbers over client-side estimation.
 	setLastApiUsage?: (usage: ApiUsageSnapshot | null) => void;
+	// Pushes a per-call record after each successful API response so the
+	// /usage command can compute accurate per-provider costs from real
+	// provider-reported token counts rather than client-side estimates.
+	onApiCallComplete?: (record: ApiCallRecord) => void;
 	tune?: TuneConfig;
 	// Number of consecutive empty assistant turns that have already been
 	// nudged in this loop. The empty-response branch increments and
@@ -165,6 +170,7 @@ export const processAssistantResponse = async (
 		onSetLiveTaskList,
 		setLiveComponent,
 		setLastApiUsage,
+		onApiCallComplete,
 		tune,
 		developmentMode,
 		developmentModeRef,
@@ -582,6 +588,18 @@ export const processAssistantResponse = async (
 				? {...usage, atMessageCount: updatedMessages.length}
 				: null,
 		);
+
+		// Record a per-call history entry for session cost tracking
+		if (onApiCallComplete && hasReportedUsage) {
+			onApiCallComplete({
+				provider: currentProvider,
+				model: currentModel,
+				inputTokens: usage.inputTokens,
+				outputTokens: usage.outputTokens,
+				totalTokens: usage.totalTokens,
+				timestamp: Date.now(),
+			});
+		}
 	}
 
 	// Clear streaming content (but don't set isGenerating=false yet —

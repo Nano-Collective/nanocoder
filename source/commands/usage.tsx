@@ -8,13 +8,18 @@ import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt
 import {UsageDisplay} from '@/components/usage/usage-display';
 import {getAppConfig} from '@/config/index';
 import {getToolManager} from '@/message-handler';
-import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
+import {
+	getModelContextLimit,
+	getModelPricing,
+	getSessionContextLimit,
+} from '@/models/index';
 import {generateKey} from '@/session/key-generator';
 import {createTokenizer} from '@/tokenization/index';
 import type {Command} from '@/types/commands';
 import type {TuneConfig} from '@/types/config';
 import {getTuneToolMode} from '@/types/config';
-import type {DevelopmentMode, Message} from '@/types/core';
+import type {ApiUsageSnapshot, DevelopmentMode, Message} from '@/types/core';
+import type {CostBreakdown} from '@/types/usage';
 import {
 	calculateTokenBreakdown,
 	calculateToolDefinitionsTokensFromDefs,
@@ -35,6 +40,8 @@ export const usageCommand: Command = {
 			client?: import('@/types/core').LLMClient | null;
 			tune?: TuneConfig;
 			developmentMode?: DevelopmentMode;
+			lastApiUsage?: ApiUsageSnapshot | null;
+			apiCallHistory?: import('@/types/core').ApiCallRecord[];
 		},
 	) => {
 		const {provider, model, getMessageTokens, client} = metadata;
@@ -173,6 +180,88 @@ export const usageCommand: Command = {
 				providerConfig: client?.getProviderConfig(),
 			}));
 
+		// Fetch pricing and compute cost (best-effort: show '—' when unavailable)
+		let cost: CostBreakdown = {
+			currentContext: NaN,
+			cumulativeSession: NaN,
+		};
+		try {
+			const pricing = await getModelPricing(model);
+			if (pricing) {
+				// ---- Current-context cost (same as Phase 2) ----
+				const snapshot = metadata.lastApiUsage;
+				const isSnapshotFresh =
+					snapshot && snapshot.atMessageCount >= messages.length;
+
+				let currentContextCost: number;
+				if (
+					isSnapshotFresh &&
+					snapshot.inputTokens != null &&
+					snapshot.outputTokens != null
+				) {
+					currentContextCost =
+						(pricing.input * snapshot.inputTokens +
+							pricing.output * snapshot.outputTokens) /
+						1_000_000;
+				} else {
+					currentContextCost = (pricing.input * breakdown.total) / 1_000_000;
+				}
+
+				// ---- Cumulative session + per-provider (from history) ----
+				const history = metadata.apiCallHistory ?? [];
+				let cumulativeSession = 0;
+				const perProvider: Record<string, number> = {};
+				const pricingCache = new Map<string, typeof pricing>();
+
+				const uniqueModels = [...new Set(history.map(r => r.model))];
+				const pricings = await Promise.all(
+					uniqueModels.map(async model => {
+						const p = await getModelPricing(model);
+						return [model, p ?? {input: NaN, output: NaN}] as const;
+					}),
+				);
+				for (const [model, p] of pricings) pricingCache.set(model, p);
+
+				for (const record of history) {
+					const recordPricing = pricingCache.get(record.model) ?? {
+						input: NaN,
+						output: NaN,
+					};
+
+					const knownInputCost =
+						record.inputTokens != null
+							? (recordPricing.input * record.inputTokens) / 1_000_000
+							: 0;
+					const knownOutputCost =
+						record.outputTokens != null
+							? (recordPricing.output * record.outputTokens) / 1_000_000
+							: 0;
+
+					const callCost =
+						record.inputTokens != null && record.outputTokens != null
+							? knownInputCost + knownOutputCost
+							: record.totalTokens != null
+								? (((recordPricing.input + recordPricing.output) / 2) *
+										record.totalTokens) /
+									1_000_000
+								: knownInputCost + knownOutputCost;
+
+					cumulativeSession += callCost;
+					perProvider[record.provider] =
+						(perProvider[record.provider] ?? 0) + callCost;
+				}
+
+				cost = {
+					currentContext: currentContextCost,
+					cumulativeSession: history.length === 0 ? NaN : cumulativeSession,
+					perProvider:
+						Object.keys(perProvider).length > 1 ? perProvider : undefined,
+				};
+			}
+		} catch {
+			// Best-effort: already initialized to NaN — display will show "—"
+		}
+
 		return React.createElement(UsageDisplay, {
 			key: generateKey('usage'),
 			provider,
@@ -183,6 +272,7 @@ export const usageCommand: Command = {
 			messages,
 			tokenizerName,
 			getMessageTokens,
+			cost,
 		});
 	},
 };

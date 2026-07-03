@@ -156,6 +156,29 @@ export interface ApiUsageSnapshot extends ApiUsage {
 	atMessageCount: number;
 }
 
+/**
+ * Per-call usage record accumulated across a session. Each entry corresponds
+ * to one API (model) invocation and carries the provider/model active at the
+ * time, so the /usage command can compute accurate per-provider costs from
+ * real provider-reported token counts rather than client-side estimates.
+ */
+export interface ApiCallRecord {
+	provider: string;
+	model: string;
+	inputTokens?: number;
+	outputTokens?: number;
+	totalTokens?: number;
+	timestamp: number;
+}
+
+/**
+ * Provenance of a displayed context figure:
+ * - `api`: fully provider-reported (the snapshot covers the whole conversation,
+ *   or the estimated tail is too small to move the rounded percentage).
+ * - `api+estimate`: anchored on the provider-reported total, with a client-side
+ *   estimate added for the messages appended since the snapshot.
+ * - `estimate`: fully client-side (no usable API report yet).
+ */
 export type ContextSource = 'api' | 'api+estimate' | 'estimate';
 
 export interface LLMChatResponse {

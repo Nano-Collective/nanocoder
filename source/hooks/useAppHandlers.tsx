@@ -37,6 +37,7 @@ import type {
 } from '@/types';
 import type {CustomCommand} from '@/types/commands';
 import type {TuneConfig} from '@/types/config';
+import type {ApiCallRecord, ApiUsageSnapshot} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
 import type {UpdateInfo} from '@/types/utils';
 import {calculateTokenBreakdown} from '@/usage/calculator';
@@ -106,6 +107,8 @@ interface UseAppHandlersProps {
 
 	// Chat handler
 	handleChatMessage: (message: string, displayValue?: string) => Promise<void>;
+	lastApiUsage?: ApiUsageSnapshot | null;
+	apiCallHistory?: ApiCallRecord[];
 
 	// VS Code active editor dismissal (dropped on /clear)
 	dismissActiveEditor?: () => void;
@@ -582,6 +585,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					getMessageTokens: props.getMessageTokens,
 					tune: props.tune,
 					developmentMode: props.developmentMode,
+					lastApiUsage: props.lastApiUsage,
+					apiCallHistory: props.apiCallHistory,
 				},
 				displayValue,
 				images,
@@ -614,6 +619,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.getMessageTokens,
 			props.tune,
 			props.developmentMode,
+			props.lastApiUsage,
+			props.apiCallHistory,
 			clearMessages,
 			enterCheckpointLoadMode,
 			handleShowStatus,

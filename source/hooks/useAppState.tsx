@@ -13,6 +13,7 @@ import type {CheckpointListItem} from '@/types/checkpoint';
 import type {CustomCommand} from '@/types/commands';
 import type {AIProviderConfig, TuneConfig} from '@/types/config';
 import {
+	ApiCallRecord,
 	ApiUsageSnapshot,
 	ContextSource,
 	DevelopmentMode,
@@ -177,6 +178,11 @@ export function useAppState(
 	const [lastApiUsage, setLastApiUsage] = useState<ApiUsageSnapshot | null>(
 		null,
 	);
+
+	// Per-call usage history accumulated across the session. Each entry
+	// carries the provider/model active at that API call, so the /usage
+	// command can compute accurate per-provider costs from real token counts.
+	const [apiCallHistory, setApiCallHistory] = useState<ApiCallRecord[]>([]);
 
 	// Tool confirmation state
 	const [pendingToolCalls, setPendingToolCalls] = useState<ToolCall[]>([]);
@@ -344,6 +350,7 @@ export function useAppState(
 		contextLimit,
 		contextSource,
 		lastApiUsage,
+		apiCallHistory,
 		pendingToolCalls,
 		currentToolIndex,
 		chatComponents,
@@ -393,6 +400,7 @@ export function useAppState(
 		setContextLimit,
 		setContextSource,
 		setLastApiUsage,
+		setApiCallHistory,
 		setPendingToolCalls,
 		setCurrentToolIndex,
 		setChatComponents,

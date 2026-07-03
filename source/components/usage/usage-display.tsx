@@ -7,9 +7,14 @@ import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {Message} from '@/types/core.js';
-import type {TokenBreakdown} from '@/types/usage.js';
+import type {CostBreakdown, TokenBreakdown} from '@/types/usage.js';
 import {formatTokenCount, getUsageStatusColor} from '@/usage/calculator.js';
 import {ProgressBar} from './progress-bar.js';
+
+function formatCost(cost: number): string {
+	if (!Number.isFinite(cost)) return '—';
+	return cost >= 1 ? `$${cost.toFixed(2)}` : `$${cost.toFixed(4)}`;
+}
 
 interface UsageDisplayProps {
 	provider: string;
@@ -20,6 +25,7 @@ interface UsageDisplayProps {
 	messages: Message[];
 	tokenizerName: string;
 	getMessageTokens: (message: Message) => number;
+	cost?: CostBreakdown;
 }
 
 export function UsageDisplay({
@@ -31,6 +37,7 @@ export function UsageDisplay({
 	messages,
 	tokenizerName,
 	getMessageTokens,
+	cost,
 }: UsageDisplayProps) {
 	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
@@ -263,6 +270,45 @@ export function UsageDisplay({
 					Tokenizer: <Text color={colors.text}>{tokenizerName}</Text>
 				</Text>
 			</Box>
+
+			{/* Estimated Cost */}
+			{cost && (
+				<>
+					<Box marginTop={1} marginBottom={1}>
+						<Text color={colors.primary} bold>
+							Estimated Cost
+						</Text>
+					</Box>
+					<Box>
+						<Text color={colors.secondary}>
+							Current Context:{' '}
+							<Text color={colors.text}>{formatCost(cost.currentContext)}</Text>
+						</Text>
+					</Box>
+					<Box>
+						<Text color={colors.secondary}>
+							Cumulative Session:{' '}
+							<Text color={colors.text}>
+								{formatCost(cost.cumulativeSession)}
+							</Text>
+						</Text>
+					</Box>
+					{cost.perProvider && (
+						<Box flexDirection="column" marginTop={1}>
+							<Text color={colors.secondary} bold>
+								Per-Provider:
+							</Text>
+							{Object.entries(cost.perProvider).map(([prov, val]) => (
+								<Box key={prov} marginLeft={2}>
+									<Text color={colors.secondary}>
+										{prov}: <Text color={colors.text}>{formatCost(val)}</Text>
+									</Text>
+								</Box>
+							))}
+						</Box>
+					)}
+				</>
+			)}
 
 			{/* Recent Activity */}
 			<Box marginTop={1} marginBottom={1}>
