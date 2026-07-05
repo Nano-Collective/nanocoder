@@ -1,0 +1,223 @@
+name: Stale PR Escalation
+
+# Three-stage escalation for PRs where the author has gone quiet but a
+# codeowner has already engaged:
+#   Stage 1 (author idle >= 7d, codeowner active more recently): nudge comment
+#   Stage 2 (nudged >= 7d ago, still no author activity):        final warning
+#   Stage 3 (warned >= 7d ago, still no author activity):        close the PR
+# Any new activity from the author at any stage resets the cycle.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Log intended actions without commenting/labelling/closing'
+        type: boolean
+        default: true
+  schedule:
+    - cron: '0 9 * * *' # Daily at 09:00 UTC
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+env:
+  IDLE_DAYS: '7' # Days of author silence before each stage fires
+  NUDGE_LABEL: 'stale:nudged'
+  WARN_LABEL: 'stale:final-warning'
+  OPT_OUT_LABEL: 'no-stale' # PRs with this label are never touched
+  DRY_RUN: 'true' # Log intended actions without commenting/labelling/closing
+
+jobs:
+  escalate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (for CODEOWNERS)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/CODEOWNERS
+          sparse-checkout-cone-mode: false
+
+      - name: Process open pull requests
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const {owner, repo} = context.repo;
+
+            const IDLE_MS = Number(process.env.IDLE_DAYS) * 24 * 60 * 60 * 1000;
+            const NUDGE_LABEL = process.env.NUDGE_LABEL;
+            const WARN_LABEL = process.env.WARN_LABEL;
+            const OPT_OUT_LABEL = process.env.OPT_OUT_LABEL;
+            const now = Date.now();
+
+            // Dry run: the workflow_dispatch input wins if provided, otherwise
+            // fall back to the DRY_RUN env default. Scheduled runs use the env.
+            const DRY_RUN = (context.payload.inputs?.dry_run ?? process.env.DRY_RUN) !== 'false'
+              && (context.payload.inputs?.dry_run ?? process.env.DRY_RUN) !== false;
+            if (DRY_RUN) core.warning('DRY RUN: no comments, labels, or closures will be made.');
+
+            // --- Mutating actions, gated by DRY_RUN ---
+            const comment = async (issue_number, body, tag) => {
+              if (DRY_RUN) { core.info(`[dry-run] #${issue_number}: would comment (${tag})`); return; }
+              await github.rest.issues.createComment({owner, repo, issue_number, body});
+            };
+            const addLabel = async (issue_number, name) => {
+              if (DRY_RUN) { core.info(`[dry-run] #${issue_number}: would add label ${name}`); return; }
+              await github.rest.issues.addLabels({owner, repo, issue_number, labels: [name]});
+            };
+            const removeLabelSafe = async (issue_number, name) => {
+              if (DRY_RUN) { core.info(`[dry-run] #${issue_number}: would remove label ${name}`); return; }
+              await github.rest.issues.removeLabel({owner, repo, issue_number, name}).catch(() => {});
+            };
+            const closePr = async (pull_number) => {
+              if (DRY_RUN) { core.info(`[dry-run] #${pull_number}: would close PR`); return; }
+              await github.rest.pulls.update({owner, repo, pull_number, state: 'closed'});
+            };
+
+            // --- Parse CODEOWNERS into a set of individual owner logins ---
+            // Teams (containing a slash, e.g. @org/team) are skipped since we
+            // can't cheaply resolve team membership here.
+            const owners = new Set();
+            try {
+              const text = fs.readFileSync('.github/CODEOWNERS', 'utf8');
+              for (const raw of text.split('\n')) {
+                const line = raw.replace(/#.*$/, '').trim();
+                if (!line) continue;
+                for (const tok of line.split(/\s+/)) {
+                  if (tok.startsWith('@') && !tok.includes('/')) {
+                    owners.add(tok.slice(1).toLowerCase());
+                  }
+                }
+              }
+            } catch (e) {
+              core.warning(`Could not read CODEOWNERS: ${e.message}`);
+            }
+            core.info(`Codeowners: ${[...owners].join(', ') || '(none)'}`);
+            if (owners.size === 0) {
+              core.warning('No codeowners parsed; nothing to escalate.');
+              return;
+            }
+
+            const isOwner = (login) => login && owners.has(login.toLowerCase());
+
+            const prs = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open', per_page: 100,
+            });
+
+            for (const pr of prs) {
+              const n = pr.number;
+              if (pr.draft) { core.info(`#${n}: draft, skipping`); continue; }
+
+              const labels = new Set(pr.labels.map((l) => l.name));
+              if (labels.has(OPT_OUT_LABEL)) {
+                core.info(`#${n}: opted out via ${OPT_OUT_LABEL}, skipping`);
+                continue;
+              }
+
+              const author = (pr.user?.login || '').toLowerCase();
+
+              // --- Gather timestamped activity from all relevant sources ---
+              const [commits, issueComments, reviewComments, reviews] = await Promise.all([
+                github.paginate(github.rest.pulls.listCommits, {owner, repo, pull_number: n, per_page: 100}),
+                github.paginate(github.rest.issues.listComments, {owner, repo, issue_number: n, per_page: 100}),
+                github.paginate(github.rest.pulls.listReviewComments, {owner, repo, pull_number: n, per_page: 100}),
+                github.paginate(github.rest.pulls.listReviews, {owner, repo, pull_number: n, per_page: 100}),
+              ]);
+
+              const events = [];
+              const push = (login, ts) => {
+                if (login && ts) events.push({login: login.toLowerCase(), ts: new Date(ts).getTime()});
+              };
+              // PR creation counts as author activity baseline.
+              push(author, pr.created_at);
+              for (const c of commits) push(c.author?.login, c.commit?.author?.date);
+              for (const c of issueComments) push(c.user?.login, c.created_at);
+              for (const c of reviewComments) push(c.user?.login, c.created_at);
+              for (const r of reviews) push(r.user?.login, r.submitted_at);
+
+              let lastAuthor = 0;
+              let lastOwner = 0; // codeowner activity that is NOT the author
+              for (const ev of events) {
+                if (ev.login === author) lastAuthor = Math.max(lastAuthor, ev.ts);
+                else if (owners.has(ev.login)) lastOwner = Math.max(lastOwner, ev.ts);
+              }
+
+              const authorIdleMs = now - lastAuthor;
+
+              // Helper: when was a given label most recently applied?
+              const labelAppliedAt = async (name) => {
+                const timeline = await github.paginate(
+                  github.rest.issues.listEventsForTimeline,
+                  {owner, repo, issue_number: n, per_page: 100},
+                );
+                let ts = 0;
+                for (const ev of timeline) {
+                  if (ev.event === 'labeled' && ev.label?.name === name && ev.created_at) {
+                    ts = Math.max(ts, new Date(ev.created_at).getTime());
+                  }
+                }
+                return ts;
+              };
+
+              const resetLabels = async (why) => {
+                for (const name of [NUDGE_LABEL, WARN_LABEL]) {
+                  if (labels.has(name)) await removeLabelSafe(n, name);
+                }
+                core.info(`#${n}: reset (${why})`);
+              };
+
+              // ---------------- Stage 3: final warning already sent ----------------
+              if (labels.has(WARN_LABEL)) {
+                const appliedAt = await labelAppliedAt(WARN_LABEL);
+                if (lastAuthor > appliedAt) { await resetLabels('author active after warning'); continue; }
+                if (now - appliedAt >= IDLE_MS) {
+                  await comment(n, [
+                    `Closing this PR for now since there hasn't been any activity from @${pr.user.login} `,
+                    `after the earlier heads-up.`,
+                    ``,
+                    `No worries at all - this isn't a rejection. If you'd like to pick it back up, `,
+                    `just push a new commit or leave a comment and reopen it. Thanks for the contribution!`,
+                  ].join(''), 'close');
+                  await closePr(n);
+                  core.info(`#${n}: closed`);
+                }
+                continue;
+              }
+
+              // ---------------- Stage 2: nudged, escalate to warning ----------------
+              if (labels.has(NUDGE_LABEL)) {
+                const appliedAt = await labelAppliedAt(NUDGE_LABEL);
+                if (lastAuthor > appliedAt) { await resetLabels('author active after nudge'); continue; }
+                if (now - appliedAt >= IDLE_MS) {
+                  await comment(n, [
+                    `Hi @${pr.user.login}, just a heads-up that this PR still has outstanding items `,
+                    `and hasn't seen any activity in a while.`,
+                    ``,
+                    `If we don't hear back within about a week, we'll close it to keep the queue tidy. `,
+                    `You can always reopen it later. Happy to help if anything is blocking you - just say the word.`,
+                  ].join('\n'), 'warn');
+                  await removeLabelSafe(n, NUDGE_LABEL);
+                  await addLabel(n, WARN_LABEL);
+                  core.info(`#${n}: escalated to final warning`);
+                }
+                continue;
+              }
+
+              // ---------------- Stage 1: first nudge ----------------
+              // Fire only when the author has been idle long enough AND a
+              // codeowner engaged more recently than the author's last activity.
+              if (authorIdleMs >= IDLE_MS && lastOwner > lastAuthor) {
+                await comment(n, [
+                  `Hi @${pr.user.login}, thanks for this PR! It looks like a codeowner has left feedback `,
+                  `or review activity and there are still some outstanding items to wrap up.`,
+                  ``,
+                  `Whenever you get a chance, could you take a look at the open comments? `,
+                  `If anything is unclear or you'd like a hand, just reply here and we'll help you get it across the line.`,
+                ].join('\n'), 'nudge');
+                await addLabel(n, NUDGE_LABEL);
+                core.info(`#${n}: nudged (author idle ${Math.floor(authorIdleMs / 86400000)}d)`);
+              }
+            }
