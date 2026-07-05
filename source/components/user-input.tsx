@@ -881,9 +881,11 @@ export default function UserInput({
 	return (
 		<>
 			{!isBashMode ? (
-				<Text color={colors.primary} bold>
-					What would you like me to help with?
-				</Text>
+				<Box marginTop={1}>
+					<Text color={colors.primary} bold>
+						What would you like me to help with?
+					</Text>
+				</Box>
 			) : (
 				<Text color={colors.tool} bold>
 					Bash mode
@@ -997,7 +999,7 @@ export default function UserInput({
 				{isBusy && (
 					<Box marginTop={1}>
 						<Text color={colors.secondary}>
-							Press Esc to cancel
+							<Spinner type="dots" /> Press Esc to cancel
 							{onToggleCompactDisplay && (
 								<Text>
 									{' '}
