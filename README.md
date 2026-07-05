@@ -18,6 +18,14 @@ Built by the [Nano Collective](https://nanocollective.org), a community collecti
 ![Stars](https://github.com/Nano-Collective/nanocoder/raw/main/badges/stars.svg)
 ![Forks](https://github.com/Nano-Collective/nanocoder/raw/main/badges/forks.svg)
 
+<a href="https://www.star-history.com/#Nano-Collective/nanocoder&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Nano-Collective/nanocoder&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Nano-Collective/nanocoder&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Nano-Collective/nanocoder&type=Date" />
+ </picture>
+</a>
+
 ## Quick Start
 
 ```bash
