@@ -69,7 +69,7 @@
 		"@ai-sdk/anthropic": "^3.0.85",
 		"@ai-sdk/google": "^4.0.8",
 		"@ai-sdk/openai": "^3.0.71",
-		"@ai-sdk/openai-compatible": "2.0.51",
+		"@ai-sdk/openai-compatible": "3.0.5",
 		"@anthropic-ai/tokenizer": "^0.0.4",
 		"@modelcontextprotocol/sdk": "^1.26.0",
 		"@nanocollective/get-md": "^1.4.0",

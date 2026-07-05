@@ -28,8 +28,8 @@ importers:
         specifier: ^3.0.71
         version: 3.0.71(patch_hash=df300a5d22aecda3490a73885c5d63e34d4cd056d26fc5ba202ea4121d46adbf)(zod@4.4.3)
       '@ai-sdk/openai-compatible':
-        specifier: 2.0.51
-        version: 2.0.51(zod@4.4.3)
+        specifier: 3.0.5
+        version: 3.0.5(zod@4.4.3)
       '@anthropic-ai/tokenizer':
         specifier: ^0.0.4
         version: 0.0.4
@@ -38,7 +38,7 @@ importers:
         version: 1.29.0(zod@4.4.3)
       '@nanocollective/get-md':
         specifier: ^1.4.0
-        version: 1.5.0(@ai-sdk/anthropic@3.0.85(zod@4.4.3))(@ai-sdk/google@4.0.8(zod@4.4.3))(@ai-sdk/openai-compatible@2.0.51(zod@4.4.3))(ai@6.0.193(zod@4.4.3))
+        version: 1.5.0(@ai-sdk/anthropic@3.0.85(zod@4.4.3))(@ai-sdk/google@4.0.8(zod@4.4.3))(@ai-sdk/openai-compatible@3.0.5(zod@4.4.3))(ai@6.0.193(zod@4.4.3))
       ai:
         specifier: 6.0.193
         version: 6.0.193(zod@4.4.3)
@@ -223,9 +223,9 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/openai-compatible@2.0.51':
-    resolution: {integrity: sha512-A6qfyaVs4lxmRxRux6U3ViOa8mMbsSd0OaHghpei2MpiBT6791J4zFH5MN7kaW1tLfQ246rSC2DVTMOavsycjQ==}
-    engines: {node: '>=18'}
+  '@ai-sdk/openai-compatible@3.0.5':
+    resolution: {integrity: sha512-4UtDxT6Ga7U225o5fBEgtCFZHba4/iTDXRqMrU62yEfTrFks4o+F4jt0D3OWmUasR9LPFzLy0KnEITxFDtc89g==}
+    engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
@@ -3758,10 +3758,10 @@ snapshots:
       '@ai-sdk/provider-utils': 5.0.5(zod@4.4.3)
       zod: 4.4.3
 
-  '@ai-sdk/openai-compatible@2.0.51(zod@4.4.3)':
+  '@ai-sdk/openai-compatible@3.0.5(zod@4.4.3)':
     dependencies:
-      '@ai-sdk/provider': 3.0.10
-      '@ai-sdk/provider-utils': 4.0.30(zod@4.4.3)
+      '@ai-sdk/provider': 4.0.2
+      '@ai-sdk/provider-utils': 5.0.5(zod@4.4.3)
       zod: 4.4.3
 
   '@ai-sdk/openai@3.0.71(patch_hash=df300a5d22aecda3490a73885c5d63e34d4cd056d26fc5ba202ea4121d46adbf)(zod@4.4.3)':
@@ -4245,7 +4245,7 @@ snapshots:
 
   '@mozilla/readability@0.6.0': {}
 
-  '@nanocollective/get-md@1.5.0(@ai-sdk/anthropic@3.0.85(zod@4.4.3))(@ai-sdk/google@4.0.8(zod@4.4.3))(@ai-sdk/openai-compatible@2.0.51(zod@4.4.3))(ai@6.0.193(zod@4.4.3))':
+  '@nanocollective/get-md@1.5.0(@ai-sdk/anthropic@3.0.85(zod@4.4.3))(@ai-sdk/google@4.0.8(zod@4.4.3))(@ai-sdk/openai-compatible@3.0.5(zod@4.4.3))(ai@6.0.193(zod@4.4.3))':
     dependencies:
       '@mozilla/readability': 0.6.0
       cheerio: 1.2.0
@@ -4257,7 +4257,7 @@ snapshots:
     optionalDependencies:
       '@ai-sdk/anthropic': 3.0.85(zod@4.4.3)
       '@ai-sdk/google': 4.0.8(zod@4.4.3)
-      '@ai-sdk/openai-compatible': 2.0.51(zod@4.4.3)
+      '@ai-sdk/openai-compatible': 3.0.5(zod@4.4.3)
       ai: 6.0.193(zod@4.4.3)
 
   '@napi-rs/wasm-runtime@1.1.6(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.0)':
