@@ -110,9 +110,18 @@ function countOccurrences(content: string, search: string): number {
 }
 
 function validateBlocks(fileContent: string, blocks: DiffEditBlock[]): void {
+	const seenSearchBlocks = new Set<string>();
+
 	blocks.forEach((block, index) => {
-		const occurrences = countOccurrences(fileContent, block.search);
 		const blockNumber = index + 1;
+		if (seenSearchBlocks.has(block.search)) {
+			throw new Error(
+				`Search block ${blockNumber} duplicates an earlier search block. Each SEARCH block must target a distinct original file range.`,
+			);
+		}
+		seenSearchBlocks.add(block.search);
+
+		const occurrences = countOccurrences(fileContent, block.search);
 
 		if (occurrences === 0) {
 			throw new Error(
@@ -178,7 +187,7 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 
 const diffEditCoreTool = tool({
 	description:
-		'Apply one or more SEARCH/REPLACE edit blocks to a file. Use this for weak local models when exact string_replace arguments are hard to produce. Every SEARCH block must match the file exactly once. Format: <<<<<<< SEARCH, old content, =======, new content, >>>>>>> REPLACE.',
+		'Apply one or more SEARCH/REPLACE edit blocks to a file. Use this for weak local models when exact string_replace arguments are hard to produce. Every SEARCH block must match the file exactly once. Format: <<<<<<< SEARCH, old content, =======, new content, >>>>>>> REPLACE. Do not wrap the diff in a markdown code fence.',
 	inputSchema: jsonSchema<DiffEditArgs>({
 		type: 'object',
 		properties: {
@@ -189,7 +198,7 @@ const diffEditCoreTool = tool({
 			diff: {
 				type: 'string',
 				description:
-					'One or more SEARCH/REPLACE blocks using <<<<<<< SEARCH, =======, and >>>>>>> REPLACE markers.',
+					'One or more SEARCH/REPLACE blocks using <<<<<<< SEARCH, =======, and >>>>>>> REPLACE markers. Do not wrap the diff in markdown code fences or backticks.',
 			},
 		},
 		required: ['path', 'diff'],
@@ -212,13 +221,16 @@ function DiffEditPreview({
 	}
 	const {colors} = themeContext;
 
-	let blocks: DiffEditBlock[] = [];
-	let parseError: string | null = null;
-	try {
-		blocks = parseDiffEditBlocks(args.diff);
-	} catch (error) {
-		parseError = formatError(error);
-	}
+	const {blocks, parseError} = React.useMemo<{
+		blocks: DiffEditBlock[];
+		parseError: string | null;
+	}>(() => {
+		try {
+			return {blocks: parseDiffEditBlocks(args.diff), parseError: null};
+		} catch (error) {
+			return {blocks: [], parseError: formatError(error)};
+		}
+	}, [args.diff]);
 
 	const messageContent = (
 		<Box flexDirection="column">
@@ -272,6 +284,10 @@ const diffEditFormatter = async (
 			);
 
 			if (changeId) {
+				const previousChangeId = vscodeChangeIds.get(absPath);
+				if (previousChangeId) {
+					closeDiffInVSCode(previousChangeId);
+				}
 				vscodeChangeIds.set(absPath, changeId);
 			}
 		} catch {
