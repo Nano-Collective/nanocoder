@@ -27,7 +27,7 @@ env:
   NUDGE_LABEL: 'stale:nudged'
   WARN_LABEL: 'stale:final-warning'
   OPT_OUT_LABEL: 'no-stale' # PRs with this label are never touched
-  DRY_RUN: 'true' # Log intended actions without commenting/labelling/closing
+  DRY_RUN: 'false' # Set 'true' to log intended actions without commenting/labelling/closing
 
 jobs:
   escalate:
