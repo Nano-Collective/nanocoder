@@ -869,6 +869,44 @@ test('UserInput renders completions text when typing /', async t => {
 	unmount();
 });
 
+test('UserInput windows long slash completion lists', async t => {
+	const commands = Array.from(
+		{length: 14},
+		(_, index) => `zz-window-${String(index).padStart(2, '0')}`,
+	);
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} customCommands={commands} />
+		</TestWrapper>,
+	);
+
+	stdin.write('/zz');
+	await wait();
+
+	const firstFrame = lastFrame()!;
+	const firstVisibleCommands = firstFrame
+		.split('\n')
+		.filter(line => /\/zz-window-\d{2}/.test(line));
+
+	t.is(firstVisibleCommands.length, 10);
+	t.regex(firstFrame, /\/zz-window-00/);
+	t.regex(firstFrame, /\/zz-window-09/);
+	t.notRegex(firstFrame, /\/zz-window-10/);
+	t.regex(firstFrame, /Showing 1-10 of 14/);
+
+	for (let i = 0; i < 11; i++) {
+		stdin.write('\u001B[B');
+		await wait(25);
+	}
+
+	const laterFrame = lastFrame()!;
+	t.notRegex(laterFrame, /\/zz-window-00/);
+	t.regex(laterFrame, /▸ \/zz-window-11/);
+	t.regex(laterFrame, /Showing 5-14 of 14/);
+
+	unmount();
+});
+
 test('UserInput renders completions BEFORE the mode indicator (inside the input box)', async t => {
 	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
@@ -936,5 +974,4 @@ test('UserInput does not show completions when input is empty', t => {
 	t.notRegex(output, /Available commands:/);
 	unmount();
 });
-
 
