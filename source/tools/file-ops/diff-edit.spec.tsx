@@ -152,6 +152,37 @@ test('diff_edit applies multiple blocks atomically', async t => {
 	t.regex(result, /Successfully applied 2 diff blocks/);
 });
 
+test('diff_edit rejects duplicate search blocks and leaves file unchanged', async t => {
+	const filePath = await createTestFile('test.ts', 'alpha\n');
+
+	await t.throwsAsync(
+		async () => {
+			await executeDiffEdit({
+				path: filePath,
+				diff: [diffBlock('alpha', 'alphaX'), diffBlock('alpha', 'beta')].join(
+					'\n',
+				),
+			});
+		},
+		{message: /Search block 2 duplicates an earlier search block/},
+	);
+
+	t.is(await readFile(filePath, 'utf-8'), 'alpha\n');
+});
+
+test('diff_edit returns updated file contents for the model', async t => {
+	const filePath = await createTestFile('test.ts', 'alpha\n');
+
+	const result = await executeDiffEdit({
+		path: filePath,
+		diff: diffBlock('alpha', 'beta'),
+	});
+
+	t.regex(result, /Successfully applied 1 diff block/);
+	t.regex(result, /Updated file contents:/);
+	t.regex(result, /1: beta/);
+});
+
 test('diff_edit rejects missing search content and leaves file unchanged', async t => {
 	const filePath = await createTestFile('test.ts', 'alpha\ngamma\n');
 
@@ -247,4 +278,11 @@ test('diff_edit formatter renders a preview', async t => {
 	t.regex(lastFrame()!, /test\.ts/);
 	t.regex(lastFrame()!, /const oldValue/);
 	t.regex(lastFrame()!, /const newValue/);
+});
+
+test('diff_edit description tells models not to wrap diff in code fences', t => {
+	t.regex(
+		diffEditTool.tool.description,
+		/do not wrap.*code fence|code fence.*do not wrap/i,
+	);
 });
