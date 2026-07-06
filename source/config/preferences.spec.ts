@@ -18,6 +18,8 @@ import {
 	updateNotificationsPreference,
 	updatePasteThreshold,
 	updateReasoningExpanded,
+	getPrivacyPreference,
+	updatePrivacyPreference,
 } from './preferences';
 import type {UserPreferences} from '@/types/index';
 
@@ -1478,6 +1480,82 @@ test.serial('full workflow: update and retrieve all display settings', t => {
 		// Verify toggles
 		t.is(getReasoningExpanded(), false);
 		t.is(getCompactToolDisplay(), true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// ============================================================================
+// Privacy Settings Tests
+// ============================================================================
+
+test.serial('getPrivacyPreference returns false when not set', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const preferences: UserPreferences = {};
+	writeFileSync(preferencesPath, JSON.stringify(preferences), 'utf-8');
+
+	try {
+		const result = getPrivacyPreference();
+		t.is(result, false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getPrivacyPreference returns true when set', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const preferences: UserPreferences = {enablePromptScrubbing: true};
+	writeFileSync(preferencesPath, JSON.stringify(preferences), 'utf-8');
+
+	try {
+		const result = getPrivacyPreference();
+		t.is(result, true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updatePrivacyPreference saves the preference correctly', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updatePrivacyPreference(true);
+
+		t.true(existsSync(preferencesPath));
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as UserPreferences;
+
+		t.is(parsed.enablePromptScrubbing, true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('full workflow: update and retrieve privacy preference', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updatePrivacyPreference(true);
+		const retrieved = getPrivacyPreference();
+		t.is(retrieved, true);
+
+		updatePrivacyPreference(false);
+		const retrieved2 = getPrivacyPreference();
+		t.is(retrieved2, false);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});

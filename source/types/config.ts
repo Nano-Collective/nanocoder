@@ -406,4 +406,5 @@ export interface UserPreferences {
 	paste?: PasteConfig;
 	reasoningExpanded?: boolean;
 	compactToolDisplay?: boolean;
+	enablePromptScrubbing?: boolean;
 }

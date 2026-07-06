@@ -175,3 +175,20 @@ export function updateCompactToolDisplay(value: boolean): void {
 	preferences.compactToolDisplay = value;
 	savePreferences(preferences);
 }
+
+/**
+ * Get the privacy scrubbing preference from preferences
+ */
+export function getPrivacyPreference(): boolean {
+	const preferences = loadPreferences();
+	return preferences.enablePromptScrubbing ?? false;
+}
+
+/**
+ * Save the privacy scrubbing preference
+ */
+export function updatePrivacyPreference(value: boolean): void {
+	const preferences = loadPreferences();
+	preferences.enablePromptScrubbing = value;
+	savePreferences(preferences);
+}
