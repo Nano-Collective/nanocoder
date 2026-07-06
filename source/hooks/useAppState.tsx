@@ -190,8 +190,12 @@ export function useAppState(
 
 	// Chat queue for components
 	const [chatComponents, setChatComponents] = useState<React.ReactNode[]>([]);
-	// Live component that renders outside Static for real-time updates (e.g., BashProgress)
+	// Live component state - renders over top of the static chat queue
+	// Used for loading indicators, live task progress, etc.
 	const [liveComponent, setLiveComponent] = useState<React.ReactNode>(null);
+
+	// Prompt Scrubbing Session
+	const privacySessionIdRef = useRef<string>(generateKey('privacy-session'));
 
 	// Helper function to add components to the chat queue with stable keys
 	const addToChatQueue = useCallback((component: React.ReactNode) => {
@@ -406,6 +410,7 @@ export function useAppState(
 		setChatComponents,
 		liveComponent,
 		setLiveComponent,
+		privacySessionIdRef,
 
 		// Utilities
 		addToChatQueue,

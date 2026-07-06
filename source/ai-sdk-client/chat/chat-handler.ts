@@ -50,8 +50,10 @@ export interface ChatHandlerParams {
 	callbacks: StreamCallbacks;
 	signal?: AbortSignal;
 	maxRetries: number;
-	skipTools?: boolean; // Track if we're retrying without tools
+	skipTools?: boolean;
 	modeOverrides?: ModeOverrides;
+	privacySessionIdRef?: import('react').MutableRefObject<string>;
+	privacyEnabled?: boolean;
 }
 
 /**
@@ -71,6 +73,8 @@ export async function handleChat(
 		maxRetries,
 		skipTools = false,
 		modeOverrides,
+		privacySessionIdRef,
+		privacyEnabled,
 	} = params;
 	const logger = getLogger();
 
@@ -147,8 +151,26 @@ export async function handleChat(
 				.join('\n\n');
 			const nonSystemMessages = messages.filter(m => m.role !== 'system');
 
+			// Scrub prompts if privacy scrubbing is enabled
+			let finalSystemContent = systemContent;
+			let finalNonSystemMessages = nonSystemMessages;
+			if (privacyEnabled && privacySessionIdRef) {
+				const {scrub} = await import('@nanocollective/prompt-scrub');
+				finalSystemContent = scrub({
+					content: systemContent,
+					sessionId: privacySessionIdRef.current,
+				}).scrubbedContent as string;
+				finalNonSystemMessages = nonSystemMessages.map(m => ({
+					...m,
+					content: scrub({
+						content: m.content,
+						sessionId: privacySessionIdRef.current,
+					}).scrubbedContent as string,
+				}));
+			}
+
 			// Convert messages to AI SDK v5 ModelMessage format
-			const modelMessages = convertToModelMessages(nonSystemMessages);
+			const modelMessages = convertToModelMessages(finalNonSystemMessages);
 
 			logger.debug('AI SDK request prepared', {
 				messageCount: modelMessages.length,
@@ -174,7 +196,7 @@ export async function handleChat(
 
 			const result = streamText({
 				model,
-				...(systemContent ? {system: systemContent} : {}),
+				...(finalSystemContent ? {system: finalSystemContent} : {}),
 				messages: modelMessages,
 				tools: aiTools,
 				abortSignal: signal,

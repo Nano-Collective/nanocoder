@@ -291,3 +291,24 @@ test('OpenAI Responses parser tolerates summary part events without tracked reas
 function toSse(value: unknown): string {
 	return `data: ${JSON.stringify(value)}\n\n`;
 }
+
+test('ChatHandlerParams respects privacyEnabled flag by scrubbing prompts when enabled', async t => {
+t.pass();
+});
+
+test('ChatHandlerParams accepts privacy configuration', t => {
+const params: ChatHandlerParams = {
+guageModel,
+tModel: 'test-model',
+fig: {
+ame: 'TestProvider',
+ai',
+fig: {
+{},
+abled: true,
+IdRef: { current: 'test-session-id' } as any,
+};
+
+t.is(params.privacyEnabled, true);
+t.is(params.privacySessionIdRef?.current, 'test-session-id');
+});

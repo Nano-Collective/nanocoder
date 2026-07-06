@@ -200,6 +200,8 @@ export interface ModeOverrides {
 	nonInteractiveMode: boolean;
 	nonInteractiveAlwaysAllow: string[];
 	modelParameters?: import('@/types/config').ModelParameters;
+	privacySessionIdRef?: import('react').MutableRefObject<string>;
+	privacyEnabled?: boolean;
 }
 
 export interface LLMClient {
