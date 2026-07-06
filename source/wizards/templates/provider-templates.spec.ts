@@ -497,16 +497,19 @@ test('minimax-coding template: sets sdkProvider to anthropic with minimax baseUr
 	const template = PROVIDER_TEMPLATES.find(t => t.id === 'minimax-coding');
 	t.truthy(template);
 
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'MiniMax-M3,MiniMax-M2.7');
+
 	const config = template!.buildConfig({
 		apiKey: 'test-key',
-		model: 'MiniMax-M2.7',
+		model: 'MiniMax-M3',
 		providerName: '',
 	});
 
 	t.is(config.sdkProvider, 'anthropic');
 	t.is(config.baseUrl, 'https://api.minimax.io/anthropic/v1');
 	t.is(config.name, 'MiniMax Coding');
-	t.deepEqual(config.models, ['MiniMax-M2.7']);
+	t.deepEqual(config.models, ['MiniMax-M3']);
 });
 
 test('no template id matches an sdkProvider value used by a different template', t => {
