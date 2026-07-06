@@ -770,6 +770,10 @@ export const processAssistantResponse = async (
 				conversationStateManager,
 				addToChatQueue,
 				{...displayOptions, setLiveComponent, signal: controller.signal},
+				{
+					privacyEnabled: params.privacyEnabled ?? false,
+					privacySessionIdRef: params.privacySessionIdRef ?? null,
+				},
 			);
 			turnResults.push(...directResults);
 		}
@@ -839,6 +843,10 @@ export const processAssistantResponse = async (
 					processToolUse,
 					setLiveComponent,
 					controller.signal,
+					{
+						privacyEnabled: params.privacyEnabled ?? false,
+						privacySessionIdRef: params.privacySessionIdRef ?? null,
+					},
 				);
 				turnResults.push(execution.result);
 				await displayExecutedTool(
