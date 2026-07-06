@@ -509,7 +509,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		name: 'MiniMax Coding Plan',
 		defaultProviderName: 'MiniMax Coding',
 		baseUrl: 'https://api.minimax.io/anthropic/v1',
-		modelDefault: 'MiniMax-M2.7',
+		modelDefault: 'MiniMax-M3,MiniMax-M2.7',
 		sdkProvider: 'anthropic',
 	}),
 	apiKeyTemplate({
