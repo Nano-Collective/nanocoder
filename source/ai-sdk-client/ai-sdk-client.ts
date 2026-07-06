@@ -186,6 +186,9 @@ export class AISDKClient implements LLMClient {
 			signal,
 			maxRetries: this.maxRetries,
 			modeOverrides,
+			privacySessionIdRef: modeOverrides?.privacySessionIdRef,
+			privacyEnabled: modeOverrides?.privacyEnabled,
+			onPrivacyEvent: callbacks.onPrivacyEvent,
 		});
 	}
 

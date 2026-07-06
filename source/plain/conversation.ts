@@ -17,7 +17,7 @@ import {capMessagesForModel} from '@/utils/message-capping';
 
 export interface ToolCallLog {
 	name: string;
-	arguments: Record<string, any>;
+	arguments: Record<string, unknown>;
 	result: string | null;
 	error: string | null;
 }
