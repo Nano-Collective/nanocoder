@@ -222,4 +222,10 @@ export const lazyCommands: LazyCommand[] = [
 			'List loaded skills. Subcommands: show <name>, create <name>, check <name>, promote <name>, demote <name>.',
 		load: () => import('@/commands/skills').then(m => m.skillsCommand),
 	},
+	{
+		name: 'privacy',
+		description:
+			'Inspect what the prompt scrubber will remove from your prompts',
+		load: () => import('@/commands/privacy').then(m => m.privacyCommand),
+	},
 ];

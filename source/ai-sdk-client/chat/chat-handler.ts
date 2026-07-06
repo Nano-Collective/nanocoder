@@ -52,8 +52,9 @@ export interface ChatHandlerParams {
 	maxRetries: number;
 	skipTools?: boolean;
 	modeOverrides?: ModeOverrides;
-	privacySessionIdRef?: import('react').MutableRefObject<string>;
+	privacySessionIdRef?: React.MutableRefObject<string>;
 	privacyEnabled?: boolean;
+	onPrivacyEvent?: (scrubbedDelta: number) => void;
 }
 
 /**
@@ -75,6 +76,7 @@ export async function handleChat(
 		modeOverrides,
 		privacySessionIdRef,
 		privacyEnabled,
+		onPrivacyEvent,
 	} = params;
 	const logger = getLogger();
 
@@ -156,6 +158,13 @@ export async function handleChat(
 			let finalNonSystemMessages = nonSystemMessages;
 			if (privacyEnabled && privacySessionIdRef) {
 				const {scrub} = await import('@nanocollective/prompt-scrub');
+				const {SessionManager} = await import(
+					'@nanocollective/prompt-scrub/dist/session/session-manager.js'
+				);
+				const prevCount = Object.keys(
+					new SessionManager(privacySessionIdRef.current).getMap(),
+				).length;
+
 				finalSystemContent = scrub({
 					content: systemContent,
 					sessionId: privacySessionIdRef.current,
@@ -167,6 +176,14 @@ export async function handleChat(
 						sessionId: privacySessionIdRef.current,
 					}).scrubbedContent as string,
 				}));
+
+				const newCount = Object.keys(
+					new SessionManager(privacySessionIdRef.current).getMap(),
+				).length;
+				const delta = newCount - prevCount;
+				if (delta > 0 && onPrivacyEvent) {
+					onPrivacyEvent(delta);
+				}
 			}
 
 			// Convert messages to AI SDK v5 ModelMessage format

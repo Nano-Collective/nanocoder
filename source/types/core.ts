@@ -194,6 +194,7 @@ export interface StreamCallbacks {
 	onReasoningToken?: (token: string) => void;
 	onToolCall?: (toolCall: ToolCall) => void;
 	onFinish?: () => void;
+	onPrivacyEvent?: (scrubbedDelta: number) => void;
 }
 
 export interface ModeOverrides {

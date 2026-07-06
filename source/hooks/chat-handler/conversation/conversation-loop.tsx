@@ -95,6 +95,7 @@ interface ProcessAssistantResponseParams {
 	tune?: TuneConfig;
 	privacySessionIdRef?: React.MutableRefObject<string>;
 	privacyEnabled?: boolean;
+	onPrivacyEvent?: (scrubbedDelta: number) => void;
 	// Number of consecutive empty assistant turns that have already been
 	// nudged in this loop. The empty-response branch increments and
 	// recurses; every other recursion site resets to 0.
@@ -183,6 +184,7 @@ export const processAssistantResponse = async (
 		repeatedToolCallCount = 0,
 		privacySessionIdRef,
 		privacyEnabled = false,
+		onPrivacyEvent,
 	} = params;
 
 	const startTime = conversationStartTime ?? Date.now();
@@ -268,6 +270,7 @@ export const processAssistantResponse = async (
 			: {
 					nonInteractiveMode: false,
 					nonInteractiveAlwaysAllow: [],
+					modelParameters,
 					privacySessionIdRef,
 					privacyEnabled,
 				};
@@ -310,6 +313,7 @@ export const processAssistantResponse = async (
 				streamedReasoning += token;
 				setStreamingReasoning(streamedReasoning);
 			},
+			onPrivacyEvent,
 		},
 		controller.signal,
 		modeOverrides,
