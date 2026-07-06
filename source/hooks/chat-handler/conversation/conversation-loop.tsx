@@ -93,6 +93,8 @@ interface ProcessAssistantResponseParams {
 	// provider-reported token counts rather than client-side estimates.
 	onApiCallComplete?: (record: ApiCallRecord) => void;
 	tune?: TuneConfig;
+	privacySessionIdRef?: React.MutableRefObject<string>;
+	privacyEnabled?: boolean;
 	// Number of consecutive empty assistant turns that have already been
 	// nudged in this loop. The empty-response branch increments and
 	// recurses; every other recursion site resets to 0.
@@ -179,6 +181,8 @@ export const processAssistantResponse = async (
 		compactRetryCount = 0,
 		lastToolSignature,
 		repeatedToolCallCount = 0,
+		privacySessionIdRef,
+		privacyEnabled = false,
 	} = params;
 
 	const startTime = conversationStartTime ?? Date.now();
@@ -258,8 +262,15 @@ export const processAssistantResponse = async (
 					nonInteractiveMode,
 					nonInteractiveAlwaysAllow,
 					modelParameters,
+					privacySessionIdRef,
+					privacyEnabled,
 				}
-			: undefined;
+			: {
+					nonInteractiveMode: false,
+					nonInteractiveAlwaysAllow: [],
+					privacySessionIdRef,
+					privacyEnabled,
+				};
 
 	// Get effective tools — ToolManager is the single authority for
 	// availability (mode + profile filtering) and approval policy
