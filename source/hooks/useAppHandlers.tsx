@@ -13,6 +13,11 @@ import Status from '@/components/status';
 import {getAppConfig} from '@/config/index';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
+import type {PlanReviewState} from '@/hooks/useAppState';
+import {
+	formatClarificationContext,
+	runClarification,
+} from '@/hooks/usePlanClarification';
 import {getModelContextLimit} from '@/models/index';
 import {bashExecutor} from '@/services/bash-executor';
 import {CheckpointManager} from '@/services/checkpoint-manager';
@@ -86,6 +91,7 @@ interface UseAppHandlersProps {
 	setCurrentProvider: (value: string) => void;
 	setCurrentModel: (value: string) => void;
 	setLiveTaskList: (value: Task[] | null) => void;
+	setPlanReviewState: (value: PlanReviewState | null) => void;
 
 	// Callbacks
 	addToChatQueue: (component: React.ReactNode) => void;
@@ -544,11 +550,56 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 						.slice(1)
 						.trim()
 						.split(/\s+/)
-						.slice(1)
 				: undefined;
 
+			// ----------------------------------------------------------------------
+			// PLAN MODE: Pre-flight Clarification
+			// ----------------------------------------------------------------------
+			let finalMessage = message;
+
+			if (props.developmentMode === 'plan' && !finalMessage.startsWith('/')) {
+				const clarification = await runClarification(
+					finalMessage,
+					props.developmentMode,
+				);
+
+				if (clarification.asked.length > 0) {
+					// Suspend execution and show PlanReviewPrompt
+					const action = await new Promise<
+						'proceed' | 'modify' | 'askMore' | 'dismiss'
+					>(resolve => {
+						props.setPlanReviewState({
+							answers: clarification,
+							resolve,
+						});
+					});
+
+					props.setPlanReviewState(null);
+
+					if (action === 'dismiss') {
+						props.setIsCancelling(false);
+						props.setIsConversationComplete(true);
+						return;
+					}
+
+					if (action === 'modify') {
+						// Let the caller (chat-input) restore the draft via its own callback.
+						// We just abort the submission here.
+						props.setIsCancelling(false);
+						props.setIsConversationComplete(true);
+						return;
+					}
+
+					// For 'proceed' or 'askMore', we append the context and continue
+					const context = formatClarificationContext(clarification);
+					if (context) {
+						finalMessage = `${finalMessage}\n\n${context}`;
+					}
+				}
+			}
+
 			await handleMessageSubmission(
-				message,
+				finalMessage,
 				{
 					customCommandCache: props.customCommandCache,
 					customCommandLoader: props.customCommandLoader,
@@ -594,6 +645,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		},
 		[
 			props.setIsConversationComplete,
+			props.setPlanReviewState,
 			props.customCommandCache,
 			props.customCommandLoader,
 			props.customCommandExecutor,

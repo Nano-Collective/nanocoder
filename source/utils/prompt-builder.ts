@@ -283,7 +283,14 @@ export function buildSystemPrompt(
 
 	// Asking questions — only if ask_user is available
 	if (toolSet.has('ask_user')) {
-		sections.push(loadSection('asking-questions'));
+		// Plan mode gets stronger upfront-questioning guidance
+		sections.push(
+			loadSection(
+				developmentMode === 'plan'
+					? 'asking-questions-plan'
+					: 'asking-questions',
+			),
+		);
 	}
 
 	// Coding practices and constraints — not needed in plan mode

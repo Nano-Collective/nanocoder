@@ -100,21 +100,21 @@ test('ask_user execute returns error for fewer than 2 options', async t => {
 		{toolCallId: 'test', messages: []},
 	);
 
-	t.regex(result, /Error.*2-4/);
+	t.regex(result, /Error.*2-6/);
 });
 
-test('ask_user execute returns error for more than 4 options', async t => {
+test('ask_user execute returns error for more than 6 options', async t => {
 	setGlobalQuestionHandler(async _q => 'should not be called');
 
 	const result = await askQuestionTool.tool.execute!(
 		{
 			question: 'Pick one',
-			options: ['A', 'B', 'C', 'D', 'E'],
+			options: ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
 		},
 		{toolCallId: 'test', messages: []},
 	);
 
-	t.regex(result, /Error.*2-4/);
+	t.regex(result, /Error.*2-6/);
 });
 
 test('ask_user execute calls signalQuestion and returns answer', async t => {

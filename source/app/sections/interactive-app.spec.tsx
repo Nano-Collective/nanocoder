@@ -57,6 +57,7 @@ function makeProps(o: Overrides = {}) {
 		pendingToolCalls: o.pendingToolCalls ?? [],
 		currentToolIndex: 0,
 		pendingQuestion: null,
+		planReviewState: null,
 		customCommandCache: new Map(),
 		developmentMode: 'normal',
 		contextPercentUsed: null,

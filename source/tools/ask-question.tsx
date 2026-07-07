@@ -5,30 +5,64 @@ import ToolMessage from '@/components/tool-message';
 import {ThemeContext} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import type {QuestionOptionMeta, QuestionType} from '@/utils/question-queue';
 import {signalQuestion} from '@/utils/question-queue';
 import {ensureString, toOptionString} from '@/utils/type-helpers';
 
+interface RichOption {
+	label: string;
+	description?: string;
+	pros?: string[];
+	cons?: string[];
+}
+
 interface AskQuestionArgs {
 	question: string;
-	options: string[];
+	options: Array<string | RichOption>;
 	allowFreeform?: boolean;
+	/** Optional type badge: 'ambiguity' | 'decision' | 'confirmation' */
+	questionType?: QuestionType;
 }
 
 const executeAskQuestion = async (args: AskQuestionArgs): Promise<string> => {
-	const {allowFreeform = true} = args;
+	const {allowFreeform = true, questionType} = args;
 	const question = ensureString(args.question);
-	const options = (Array.isArray(args.options) ? args.options : []).map(
-		toOptionString,
-	);
+	const rawOptions = Array.isArray(args.options) ? args.options : [];
 
-	if (options.length < 2 || options.length > 4) {
-		return 'Error: options must contain 2-4 items.';
+	// Build flat string labels (always) and rich metadata (when available)
+	const options: string[] = [];
+	const optionMeta: QuestionOptionMeta[] = [];
+	let hasRichMeta = false;
+
+	for (const opt of rawOptions) {
+		if (typeof opt === 'object' && opt !== null && 'label' in opt) {
+			const rich = opt as RichOption;
+			const label = ensureString(rich.label);
+			options.push(label);
+			optionMeta.push({
+				label,
+				description: rich.description,
+				pros: rich.pros,
+				cons: rich.cons,
+			});
+			hasRichMeta = true;
+		} else {
+			const label = toOptionString(opt);
+			options.push(label);
+			optionMeta.push({label});
+		}
+	}
+
+	if (options.length < 2 || options.length > 6) {
+		return 'Error: options must contain 2-6 items.';
 	}
 
 	const answer = await signalQuestion({
 		question,
 		options,
 		allowFreeform,
+		questionType,
+		optionMeta: hasRichMeta ? optionMeta : undefined,
 	});
 
 	return answer;
@@ -46,18 +80,22 @@ const askQuestionCoreTool = tool({
 			},
 			options: {
 				type: 'array',
-				// Models like MiniMax M3 emit options as {label, value} objects
-				// despite the description below. The handler coerces them via
-				// toOptionString, so accept objects here too rather than failing
-				// validation before that coercion can run.
+				// Accept plain strings or rich objects {label, description, pros, cons}.
+				// Rich objects are used by plan mode for architectural decision questions.
 				items: {type: ['string', 'object']},
 				description:
-					'2-4 selectable answer options for the user to choose from. Each option MUST be a plain string — the exact text shown to the user and returned verbatim when selected. Do not wrap options in objects or use {label, value} pairs.',
+					'2-6 selectable answer options. Each option can be a plain string or a rich object {label, description?, pros?, cons?} for architectural decision questions in plan mode.',
 			},
 			allowFreeform: {
 				type: 'boolean',
 				description:
 					'If true (default), adds a "Type custom answer..." option so the user can provide their own response.',
+			},
+			questionType: {
+				type: 'string',
+				enum: ['ambiguity', 'decision', 'confirmation'],
+				description:
+					'Optional. Classifies the question for visual display: ambiguity (❓), decision (🔧), confirmation (✋).',
 			},
 		},
 		required: ['question', 'options'],

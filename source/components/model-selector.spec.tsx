@@ -25,10 +25,12 @@ function setProviders(providers: ProviderFixture[]): void {
 
 test.beforeEach(() => {
 	setProviders([]);
+	process.env.NANOCODER_IGNORE_PROJECT_CONFIG = '1';
 });
 
 test.afterEach(() => {
 	delete process.env.NANOCODER_PROVIDERS;
+	delete process.env.NANOCODER_IGNORE_PROJECT_CONFIG;
 });
 
 // ============================================================================

@@ -3,7 +3,7 @@ import {useRef, useState} from 'react';
 import TextInput from '@/components/text-input';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-import type {PendingQuestion} from '@/utils/question-queue';
+import type {PendingQuestion, QuestionOptionMeta} from '@/utils/question-queue';
 import {ensureString} from '@/utils/type-helpers';
 
 interface QuestionPromptProps {
@@ -14,7 +14,14 @@ interface QuestionPromptProps {
 interface OptionItem {
 	label: string;
 	value: string;
+	meta?: QuestionOptionMeta;
 }
+
+const TYPE_BADGE: Record<string, string> = {
+	ambiguity: '❓',
+	decision: '🔧',
+	confirmation: '✋',
+};
 
 const FREEFORM_VALUE = '__freeform__';
 
@@ -32,9 +39,9 @@ export default function QuestionPrompt({
 	// Build option items. The model controls `options`, so it may not be an
 	// array of strings — coerce so a malformed call can't crash.
 	const safeOptions = Array.isArray(question.options) ? question.options : [];
-	const items: OptionItem[] = safeOptions.map(opt => {
+	const items: OptionItem[] = safeOptions.map((opt, i) => {
 		const label = ensureString(opt);
-		return {label, value: label};
+		return {label, value: label, meta: question.optionMeta?.[i]};
 	});
 
 	if (question.allowFreeform) {
@@ -131,6 +138,11 @@ export default function QuestionPrompt({
 				borderBottom={false}
 				borderLeftColor={colors.secondary}
 			>
+				{question.questionType && (
+					<Text color={colors.secondary}>
+						{TYPE_BADGE[question.questionType]}{' '}
+					</Text>
+				)}
 				<Text color={colors.text}>{ensureString(question.question)}</Text>
 			</Box>
 
@@ -160,23 +172,46 @@ export default function QuestionPrompt({
 							: isFreeform
 								? colors.secondary
 								: colors.text;
+						const meta = item.meta;
 						return (
 							<Box
 								key={item.value}
-								flexDirection="row"
+								flexDirection="column"
 								width={boxWidth}
 								marginBottom={1}
 							>
-								<Box flexShrink={0} marginRight={1}>
-									<Text color={colors.primary} bold>
-										{isSelected ? '❯' : ' '}
-									</Text>
+								<Box flexDirection="row">
+									<Box flexShrink={0} marginRight={1}>
+										<Text color={colors.primary} bold>
+											{isSelected ? '❯' : ' '}
+										</Text>
+									</Box>
+									<Box flexGrow={1} flexShrink={1}>
+										<Text wrap="wrap" color={color} bold={isSelected}>
+											{item.label}
+										</Text>
+										{meta?.description && (
+											<Text wrap="wrap" color={colors.secondary}>
+												{' — '}
+												{meta.description}
+											</Text>
+										)}
+									</Box>
 								</Box>
-								<Box flexGrow={1} flexShrink={1}>
-									<Text wrap="wrap" color={color} bold={isSelected}>
-										{item.label}
-									</Text>
-								</Box>
+								{isSelected && meta?.pros && meta.pros.length > 0 && (
+									<Box flexDirection="column" marginLeft={2}>
+										{meta.pros.map(pro => (
+											<Text key={pro} color="green">
+												+ {pro}
+											</Text>
+										))}
+										{meta.cons?.map(con => (
+											<Text key={con} color="red">
+												- {con}
+											</Text>
+										))}
+									</Box>
+								)}
 							</Box>
 						);
 					})}

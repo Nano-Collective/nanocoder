@@ -417,6 +417,7 @@ export default function App({
 		setCurrentProvider: appState.setCurrentProvider,
 		setCurrentModel: appState.setCurrentModel,
 		setLiveTaskList: appState.setLiveTaskList,
+		setPlanReviewState: appState.setPlanReviewState,
 		addToChatQueue: appState.addToChatQueue,
 		setChatComponents: appState.setChatComponents,
 		setLiveComponent: appState.setLiveComponent,

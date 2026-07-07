@@ -194,6 +194,20 @@ test('buildSystemPrompt - plan mode excludes constraints', t => {
 	t.false(result.includes('## CONSTRAINTS'));
 });
 
+test('buildSystemPrompt - plan mode uses plan-specific asking-questions section', t => {
+	const result = buildSystemPrompt('plan', undefined, ['ask_user']);
+	// Plan mode section includes "Ask before you explore" instruction
+	t.true(result.includes('Ask before you explore'));
+	t.true(result.includes('ASKING QUESTIONS'));
+});
+
+test('buildSystemPrompt - normal mode uses standard asking-questions section', t => {
+	const result = buildSystemPrompt('normal', undefined, ['ask_user']);
+	t.true(result.includes('ASKING QUESTIONS'));
+	// Normal mode does NOT include the plan-specific pre-flight instruction
+	t.false(result.includes('Ask before you explore'));
+});
+
 // ============================================================================
 // buildSystemPrompt — single-tool enforcement
 // ============================================================================
@@ -256,10 +270,16 @@ test('buildSystemPrompt - minimal profile produces smaller prompt than full', t 
 	t.true(minimalPrompt.length < fullPrompt.length);
 });
 
-test('buildSystemPrompt - plan mode produces smaller prompt than normal', t => {
-	const normalPrompt = buildSystemPrompt('normal', undefined, ALL_TOOLS);
+test('buildSystemPrompt - plan mode excludes coding practices and constraints (reducing size vs full normal)', t => {
+	// Plan mode drops CODING PRACTICES (~595B) and CONSTRAINTS (~560B)
+	// compared to normal mode — verify those heavyweight sections are absent.
 	const planPrompt = buildSystemPrompt('plan', undefined, ALL_TOOLS);
-	t.true(planPrompt.length < normalPrompt.length);
+	t.false(planPrompt.includes('CODING PRACTICES'));
+	t.false(planPrompt.includes('## CONSTRAINTS'));
+	// Normal mode includes both
+	const normalPrompt = buildSystemPrompt('normal', undefined, ALL_TOOLS);
+	t.true(normalPrompt.includes('CODING PRACTICES'));
+	t.true(normalPrompt.includes('## CONSTRAINTS'));
 });
 
 // ============================================================================

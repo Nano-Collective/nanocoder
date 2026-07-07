@@ -289,6 +289,20 @@ export function InteractiveApp({
 						onToggleReasoningExpanded={handleToggleReasoningExpanded}
 						tune={appState.tune}
 						currentModel={appState.currentModel}
+						isPlanReviewPending={appState.planReviewState !== null}
+						onPlanReviewProceed={() =>
+							appState.planReviewState?.resolve('proceed')
+						}
+						onPlanReviewModify={() => {
+							appState.planReviewState?.resolve('modify');
+							handleRecallSubmittedDraft();
+						}}
+						onPlanReviewAskMore={() =>
+							appState.planReviewState?.resolve('askMore')
+						}
+						onPlanReviewDismiss={() =>
+							appState.planReviewState?.resolve('dismiss')
+						}
 					/>
 				)}
 		</Box>
