@@ -1,12 +1,12 @@
 import test from 'ava';
-import {cleanup, render} from 'ink-testing-library';
+import { cleanup, render } from 'ink-testing-library';
 import React from 'react';
-import type {CheckpointListItem} from '@/types/checkpoint';
-import type {AIProviderConfig} from '@/types/config';
-import type {DevelopmentMode, LLMClient, Message} from '@/types/core';
-import type {CustomCommand} from '@/types/commands';
-import type {AppHandlers} from './useAppHandlers';
-import {useAppHandlers} from './useAppHandlers';
+import type { CheckpointListItem } from '@/types/checkpoint';
+import type { AIProviderConfig } from '@/types/config';
+import type { DevelopmentMode, LLMClient, Message } from '@/types/core';
+import type { CustomCommand } from '@/types/commands';
+import type { AppHandlers } from './useAppHandlers';
+import { useAppHandlers } from './useAppHandlers';
 
 import {
 	getKeyGeneratorSessionId,
@@ -49,9 +49,9 @@ function makeProps(overrides: ProbeOverrides) {
 	const setCheckpointLoadData = spy<
 		[
 			| {
-					checkpoints: CheckpointListItem[];
-					currentMessageCount: number;
-			  }
+				checkpoints: CheckpointListItem[];
+				currentMessageCount: number;
+			}
 			| null,
 		]
 	>();
@@ -75,6 +75,7 @@ function makeProps(overrides: ProbeOverrides) {
 	const enterSchedulerMode = spy<[]>();
 	const handleChatMessage = spy<[string]>();
 	const dismissActiveEditor = spy<[]>();
+	const handleModelSelect = spy<[string, string, boolean?]>();
 
 	const baseProps = {
 		messages: overrides.messages ?? [],
@@ -122,6 +123,10 @@ function makeProps(overrides: ProbeOverrides) {
 			handleChatMessage(m);
 		},
 		dismissActiveEditor: () => dismissActiveEditor(),
+		developmentMode: overrides.developmentMode ?? 'normal',
+		handleModelSelect: async (provider: string, model: string, isProgrammatic?: boolean) => {
+			handleModelSelect(provider, model, isProgrammatic);
+		},
 	};
 
 	return {
@@ -139,13 +144,14 @@ function makeProps(overrides: ProbeOverrides) {
 			setChatComponents,
 			addToChatQueue,
 			dismissActiveEditor,
+			handleModelSelect,
 		},
 	};
 }
 
 function setup(overrides: ProbeOverrides = {}) {
 	captured = null;
-	const {props, spies} = makeProps(overrides);
+	const { props, spies } = makeProps(overrides);
 
 	function Probe() {
 		captured = useAppHandlers(props as never);
@@ -154,7 +160,7 @@ function setup(overrides: ProbeOverrides = {}) {
 
 	const instance = render(<Probe />);
 	if (!captured) throw new Error('useAppHandlers did not initialize');
-	return {handlers: captured as AppHandlers, instance, spies};
+	return { handlers: captured as AppHandlers, instance, spies };
 }
 
 test.afterEach(() => {
@@ -163,7 +169,7 @@ test.afterEach(() => {
 });
 
 test('returns the expected handler surface', t => {
-	const {handlers} = setup();
+	const { handlers } = setup();
 
 	t.is(typeof handlers.clearMessages, 'function');
 	t.is(typeof handlers.handleCancel, 'function');
@@ -179,7 +185,7 @@ test('returns the expected handler surface', t => {
 });
 
 test('handleCancel without an abort controller is a no-op', t => {
-	const {handlers, spies} = setup({abortController: null});
+	const { handlers, spies } = setup({ abortController: null });
 
 	handlers.handleCancel();
 
@@ -188,7 +194,7 @@ test('handleCancel without an abort controller is a no-op', t => {
 
 test('handleCancel aborts the controller and sets cancelling=true', t => {
 	const controller = new AbortController();
-	const {handlers, spies} = setup({abortController: controller});
+	const { handlers, spies } = setup({ abortController: controller });
 
 	handlers.handleCancel();
 
@@ -196,37 +202,49 @@ test('handleCancel aborts the controller and sets cancelling=true', t => {
 	t.true(controller.signal.aborted);
 });
 
-test('handleToggleDevelopmentMode cycles through modes via the updater', t => {
-	const {handlers, spies} = setup();
+test('handleToggleDevelopmentMode cycles through modes', t => {
+	const { handlers, spies } = setup({ developmentMode: 'normal' });
+	handlers.handleToggleDevelopmentMode();
+	t.deepEqual(spies.setDevelopmentMode.calls, [['auto-accept']]);
+
+	const { handlers: h2, spies: s2 } = setup({ developmentMode: 'auto-accept' });
+	h2.handleToggleDevelopmentMode();
+	t.deepEqual(s2.setDevelopmentMode.calls, [['yolo']]);
+
+	const { handlers: h3, spies: s3 } = setup({ developmentMode: 'yolo' });
+	h3.handleToggleDevelopmentMode();
+	t.deepEqual(s3.setDevelopmentMode.calls, [['plan']]);
+
+	const { handlers: h4, spies: s4 } = setup({ developmentMode: 'plan' });
+	h4.handleToggleDevelopmentMode();
+	t.deepEqual(s4.setDevelopmentMode.calls, [['normal']]);
+});
+
+test('handleToggleDevelopmentMode calls handleModelSelect on mode switch', async t => {
+	const { handlers, spies } = setup({ developmentMode: 'normal' });
 
 	handlers.handleToggleDevelopmentMode();
-	t.is(spies.setDevelopmentMode.calls.length, 1);
 
-	const updater = spies.setDevelopmentMode.calls[0]![0] as (
-		prev: DevelopmentMode,
-	) => DevelopmentMode;
-	t.is(updater('normal'), 'auto-accept');
-	t.is(updater('auto-accept'), 'yolo');
-	t.is(updater('yolo'), 'plan');
-	t.is(updater('plan'), 'normal');
+	// Wait a tick for the async void function to run
+	await new Promise(resolve => setTimeout(resolve, 0));
+
+	t.is(spies.handleModelSelect.calls.length, 1);
+	// We expect the third argument (isProgrammatic) to be true
+	t.is(spies.handleModelSelect.calls[0]![2], true);
 });
 
 test('handleToggleDevelopmentMode preserves headless mode', t => {
 	// Headless is entered by the daemon for triggered runs, not by the user.
 	// Shift+Tab cycles only through user-facing modes; if `developmentMode`
 	// is somehow `headless` when toggle fires, it should stay there.
-	const {handlers, spies} = setup();
+	const { handlers, spies } = setup({ developmentMode: 'headless' });
 
 	handlers.handleToggleDevelopmentMode();
-	const updater = spies.setDevelopmentMode.calls[0]![0] as (
-		prev: DevelopmentMode,
-	) => DevelopmentMode;
-
-	t.is(updater('headless'), 'headless');
+	t.is(spies.setDevelopmentMode.calls.length, 0);
 });
 
 test('handleCheckpointCancel clears active mode and checkpoint data', t => {
-	const {handlers, spies} = setup();
+	const { handlers, spies } = setup();
 
 	handlers.handleCheckpointCancel();
 
@@ -235,7 +253,7 @@ test('handleCheckpointCancel clears active mode and checkpoint data', t => {
 });
 
 test('handleSessionCancel clears active mode', t => {
-	const {handlers, spies} = setup();
+	const { handlers, spies } = setup();
 
 	handlers.handleSessionCancel();
 
@@ -243,10 +261,10 @@ test('handleSessionCancel clears active mode', t => {
 });
 
 test('enterCheckpointLoadMode sets data then activates the mode', t => {
-	const {handlers, spies} = setup();
+	const { handlers, spies } = setup();
 
 	const checkpoints = [
-		{name: 'cp1', timestamp: 0, messageCount: 0} as unknown as CheckpointListItem,
+		{ name: 'cp1', timestamp: 0, messageCount: 0 } as unknown as CheckpointListItem,
 	];
 
 	handlers.enterCheckpointLoadMode(checkpoints, 5);
@@ -260,7 +278,7 @@ test('enterCheckpointLoadMode sets data then activates the mode', t => {
 });
 
 test('enterSessionSelectorMode defaults showAll to false', t => {
-	const {handlers, spies} = setup();
+	const { handlers, spies } = setup();
 
 	handlers.enterSessionSelectorMode();
 
@@ -269,7 +287,7 @@ test('enterSessionSelectorMode defaults showAll to false', t => {
 });
 
 test('enterSessionSelectorMode forwards showAll=true when requested', t => {
-	const {handlers, spies} = setup();
+	const { handlers, spies } = setup();
 
 	handlers.enterSessionSelectorMode(true);
 
@@ -278,8 +296,8 @@ test('enterSessionSelectorMode forwards showAll=true when requested', t => {
 });
 
 test('clearMessages resets key generator session ID', async t => {
-	const {handlers} = setup({
-		messages: [{role: 'user', content: 'test'}],
+	const { handlers } = setup({
+		messages: [{ role: 'user', content: 'test' }],
 	});
 
 	setKeyGeneratorSessionId('old-session-id-prefix');

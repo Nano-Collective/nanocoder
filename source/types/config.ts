@@ -1,4 +1,5 @@
 import type {TitleShape} from '@/components/ui/styled-title';
+import type {DevelopmentMode} from '@/types/core';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
 
 // Supported AI SDK provider packages
@@ -128,6 +129,11 @@ export interface NotificationsConfig {
 	};
 }
 
+export interface ModeProviderConfig {
+	provider: string;
+	model: string;
+}
+
 export interface AppConfig {
 	// Providers array structure - all OpenAI compatible
 	providers?: {
@@ -155,6 +161,8 @@ export interface AppConfig {
 		openrouter?: OpenRouterParameters;
 		[key: string]: unknown; // Allow additional provider-specific config
 	}[];
+
+	modeProviders?: Partial<Record<DevelopmentMode, ModeProviderConfig>>;
 
 	mcpServers?: MCPServerConfig[];
 

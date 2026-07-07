@@ -98,6 +98,7 @@ export function useModeHandlers({
 	const handleModelSelect = async (
 		selectedProvider: string,
 		selectedModel: string,
+		isProgrammatic: boolean = false,
 	) => {
 		const sameProvider = selectedProvider === currentProvider;
 
@@ -114,16 +115,18 @@ export function useModeHandlers({
 
 				// Conversation is kept across model switches (see warnIfHistoryWontFit).
 
-				// Update preferences
-				updateLastUsed(currentProvider, selectedModel);
+				if (!isProgrammatic) {
+					// Update preferences
+					updateLastUsed(currentProvider, selectedModel);
 
-				addToChatQueue(
-					<SuccessMessage
-						key={generateKey('model-changed')}
-						message={`Model changed to: ${selectedModel}.`}
-						hideBox={true}
-					/>,
-				);
+					addToChatQueue(
+						<SuccessMessage
+							key={generateKey('model-changed')}
+							message={`Model changed to: ${selectedModel}.`}
+							hideBox={true}
+						/>,
+					);
+				}
 
 				await warnIfHistoryWontFit(selectedModel, client.getProviderConfig());
 				exitMode();
@@ -161,15 +164,17 @@ export function useModeHandlers({
 
 			// Conversation is kept across provider/model switches.
 
-			updateLastUsed(actualProvider, newModel);
+			if (!isProgrammatic) {
+				updateLastUsed(actualProvider, newModel);
 
-			addToChatQueue(
-				<SuccessMessage
-					key={generateKey('model-changed')}
-					message={`Model changed to: ${newModel} (${actualProvider}).`}
-					hideBox={true}
-				/>,
-			);
+				addToChatQueue(
+					<SuccessMessage
+						key={generateKey('model-changed')}
+						message={`Model changed to: ${newModel} (${actualProvider}).`}
+						hideBox={true}
+					/>,
+				);
+			}
 
 			await warnIfHistoryWontFit(newModel, newClient.getProviderConfig());
 
