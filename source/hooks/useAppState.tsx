@@ -195,7 +195,7 @@ export function useAppState(
 	const [liveComponent, setLiveComponent] = useState<React.ReactNode>(null);
 
 	// Prompt Scrubbing Session
-	const privacySessionIdRef = useRef<string>(generateKey('privacy-session'));
+	const privacySessionMapRef = useRef<Record<string, string>>({});
 
 	// Helper function to add components to the chat queue with stable keys
 	const addToChatQueue = useCallback((component: React.ReactNode) => {
@@ -410,7 +410,7 @@ export function useAppState(
 		setChatComponents,
 		liveComponent,
 		setLiveComponent,
-		privacySessionIdRef,
+		privacySessionMapRef,
 
 		// Utilities
 		addToChatQueue,

@@ -93,7 +93,7 @@ interface ProcessAssistantResponseParams {
 	// provider-reported token counts rather than client-side estimates.
 	onApiCallComplete?: (record: ApiCallRecord) => void;
 	tune?: TuneConfig;
-	privacySessionIdRef?: React.MutableRefObject<string>;
+	privacySessionMapRef?: React.MutableRefObject<Record<string, string>>;
 	privacyEnabled?: boolean;
 	onPrivacyEvent?: (scrubbedDelta: number) => void;
 	// Number of consecutive empty assistant turns that have already been
@@ -182,7 +182,7 @@ export const processAssistantResponse = async (
 		compactRetryCount = 0,
 		lastToolSignature,
 		repeatedToolCallCount = 0,
-		privacySessionIdRef,
+		privacySessionMapRef,
 		privacyEnabled = false,
 		onPrivacyEvent,
 	} = params;
@@ -264,14 +264,14 @@ export const processAssistantResponse = async (
 					nonInteractiveMode,
 					nonInteractiveAlwaysAllow,
 					modelParameters,
-					privacySessionIdRef,
+					privacySessionMapRef,
 					privacyEnabled,
 				}
 			: {
 					nonInteractiveMode: false,
 					nonInteractiveAlwaysAllow: [],
 					modelParameters,
-					privacySessionIdRef,
+					privacySessionMapRef,
 					privacyEnabled,
 				};
 
@@ -774,10 +774,6 @@ export const processAssistantResponse = async (
 				conversationStateManager,
 				addToChatQueue,
 				{...displayOptions, setLiveComponent, signal: controller.signal},
-				{
-					privacyEnabled: params.privacyEnabled ?? false,
-					privacySessionIdRef: params.privacySessionIdRef ?? null,
-				},
 			);
 			turnResults.push(...directResults);
 		}
@@ -847,10 +843,6 @@ export const processAssistantResponse = async (
 					processToolUse,
 					setLiveComponent,
 					controller.signal,
-					{
-						privacyEnabled: params.privacyEnabled ?? false,
-						privacySessionIdRef: params.privacySessionIdRef ?? null,
-					},
 				);
 				turnResults.push(execution.result);
 				await displayExecutedTool(

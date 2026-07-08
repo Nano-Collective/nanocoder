@@ -201,7 +201,9 @@ export interface ModeOverrides {
 	nonInteractiveMode: boolean;
 	nonInteractiveAlwaysAllow: string[];
 	modelParameters?: import('@/types/config').ModelParameters;
-	privacySessionIdRef?: import('react').MutableRefObject<string>;
+	privacySessionMapRef?: import('react').MutableRefObject<
+		Record<string, string>
+	>;
 	privacyEnabled?: boolean;
 }
 

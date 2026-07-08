@@ -1,8 +1,8 @@
 import {scrub} from '@nanocollective/prompt-scrub';
-import {SessionManager} from '@nanocollective/prompt-scrub/dist/session/session-manager.js';
+
 import {Box, Text} from 'ink';
 import {useTheme} from '@/hooks/useTheme';
-import {generateKey} from '@/session/key-generator';
+
 import type {Command} from '@/types/index';
 import {errorMsg, infoMsg} from '@/utils/message-factory';
 
@@ -26,26 +26,25 @@ export const privacyCommand: Command = {
 				return errorMsg('Please provide text to inspect.', 'privacy');
 			}
 
-			const tempSessionId = generateKey('inspect');
-
-			// Scrub the input
+			// Scrub the input using a stateless map
 			const result = scrub({
 				content: text,
-				sessionId: tempSessionId,
-			});
+				sessionMap: {},
+				options: {disabledDetectors: ['PathDetector', 'UrlDetector']},
+			} as import('@nanocollective/prompt-scrub').ScrubRequest & {
+				sessionMap: Record<string, string>;
+			}) as import('@nanocollective/prompt-scrub').ScrubResult & {
+				sessionMap: Record<string, string>;
+			};
 
 			// Collect the replacements map
-			const session = new SessionManager(tempSessionId);
-			const map = session.getMap();
+			const map = result.sessionMap || {};
 			const replacements = Object.entries(map).map(
 				([placeholder, original]) => ({
 					placeholder,
-					original,
+					original: original as string,
 				}),
 			);
-
-			// Clean up the temporary session
-			session.destroy();
 
 			if (replacements.length === 0) {
 				return infoMsg(

@@ -1,7 +1,5 @@
-import {rehydrate} from '@nanocollective/prompt-scrub';
 import {Box, Text} from 'ink';
 import {memo, useMemo} from 'react';
-import {usePrivacyContext} from '@/context/privacy-context';
 import {useNonInteractiveRender} from '@/hooks/useNonInteractiveRender';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -48,26 +46,11 @@ export default memo(function AssistantMessage({
 	const boxWidth = useTerminalWidth();
 	const nonInteractive = useNonInteractiveRender();
 	const tokens = calculateTokens(message);
-	const {privacyEnabled, privacySessionIdRef} = usePrivacyContext();
 
 	// Inner text width: outer width minus left border (1) and padding (1 each side)
 	const textWidth = nonInteractive ? boxWidth : boxWidth - 3;
 
-	// Rehydrate the message if privacy scrubbing is enabled
-	const displayMessage = useMemo(() => {
-		if (privacyEnabled && privacySessionIdRef?.current) {
-			try {
-				const result = rehydrate({
-					content: message,
-					sessionId: privacySessionIdRef.current,
-				});
-				return result.content as string;
-			} catch (_e) {
-				return message;
-			}
-		}
-		return message;
-	}, [message, privacyEnabled, privacySessionIdRef]);
+	const displayMessage = message;
 
 	// Render markdown into segments: text parts (rendered inside the bordered box)
 	// and code parts (rendered without a border so they can be copied cleanly).

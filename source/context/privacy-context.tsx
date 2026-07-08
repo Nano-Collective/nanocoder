@@ -2,12 +2,12 @@ import React, {createContext, useContext} from 'react';
 
 export interface PrivacyContextType {
 	privacyEnabled: boolean;
-	privacySessionIdRef: React.MutableRefObject<string> | null;
+	privacySessionMapRef: React.MutableRefObject<Record<string, string>> | null;
 }
 
 export const PrivacyContext = createContext<PrivacyContextType>({
 	privacyEnabled: false,
-	privacySessionIdRef: null,
+	privacySessionMapRef: null,
 });
 
 export function usePrivacyContext() {

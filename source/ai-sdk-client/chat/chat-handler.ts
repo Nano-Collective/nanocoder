@@ -1,3 +1,7 @@
+import type {
+	RehydrateRequest,
+	ScrubRequest,
+} from '@nanocollective/prompt-scrub';
 import type {LanguageModel} from 'ai';
 import {
 	InvalidToolInputError,
@@ -52,7 +56,7 @@ export interface ChatHandlerParams {
 	maxRetries: number;
 	skipTools?: boolean;
 	modeOverrides?: ModeOverrides;
-	privacySessionIdRef?: React.MutableRefObject<string>;
+	privacySessionMapRef?: React.MutableRefObject<Record<string, string>>;
 	privacyEnabled?: boolean;
 	onPrivacyEvent?: (scrubbedDelta: number) => void;
 }
@@ -74,7 +78,7 @@ export async function handleChat(
 		maxRetries,
 		skipTools = false,
 		modeOverrides,
-		privacySessionIdRef,
+		privacySessionMapRef,
 		privacyEnabled,
 		onPrivacyEvent,
 	} = params;
@@ -156,30 +160,32 @@ export async function handleChat(
 			// Scrub prompts if privacy scrubbing is enabled
 			let finalSystemContent = systemContent;
 			let finalNonSystemMessages = nonSystemMessages;
-			if (privacyEnabled && privacySessionIdRef) {
+			if (privacyEnabled && privacySessionMapRef) {
 				const {scrub} = await import('@nanocollective/prompt-scrub');
-				const {SessionManager} = await import(
-					'@nanocollective/prompt-scrub/dist/session/session-manager.js'
-				);
-				const prevCount = Object.keys(
-					new SessionManager(privacySessionIdRef.current).getMap(),
-				).length;
+
+				const prevCount = Object.keys(privacySessionMapRef.current).length;
 
 				finalSystemContent = scrub({
 					content: systemContent,
-					sessionId: privacySessionIdRef.current,
-				}).scrubbedContent as string;
-				finalNonSystemMessages = nonSystemMessages.map(m => ({
-					...m,
-					content: scrub({
-						content: m.content,
-						sessionId: privacySessionIdRef.current,
-					}).scrubbedContent as string,
-				}));
+					sessionMap: privacySessionMapRef.current,
+					options: {disabledDetectors: ['PathDetector', 'UrlDetector']},
+				} as ScrubRequest & {sessionMap: Record<string, string>})
+					.scrubbedContent as string;
 
-				const newCount = Object.keys(
-					new SessionManager(privacySessionIdRef.current).getMap(),
-				).length;
+				finalNonSystemMessages = nonSystemMessages.map(m => {
+					if (m.role === 'tool') return m;
+					return {
+						...m,
+						content: scrub({
+							content: m.content,
+							sessionMap: privacySessionMapRef.current,
+							options: {disabledDetectors: ['PathDetector', 'UrlDetector']},
+						} as ScrubRequest & {sessionMap: Record<string, string>})
+							.scrubbedContent as string,
+					};
+				});
+
+				const newCount = Object.keys(privacySessionMapRef.current).length;
 				const delta = newCount - prevCount;
 				if (delta > 0 && onPrivacyEvent) {
 					onPrivacyEvent(delta);
@@ -378,6 +384,71 @@ export async function handleChat(
 
 			const content = fullText || accumulatedText;
 
+			let finalContent = content;
+			let finalReasoning = reasoning;
+			let finalToolCalls = toolCalls;
+
+			if (privacyEnabled && privacySessionMapRef) {
+				const {rehydrate} = await import('@nanocollective/prompt-scrub');
+
+				if (finalContent) {
+					const result = rehydrate({
+						content: finalContent,
+						sessionMap: privacySessionMapRef.current,
+					} as RehydrateRequest & {sessionMap: Record<string, string>});
+					finalContent = result.content as string;
+					if (result.warnings && result.warnings.length > 0) {
+						logger.warn('Prompt-scrub rehydration warnings (content)', {
+							warnings: result.warnings,
+						});
+					}
+				}
+
+				if (finalReasoning) {
+					const result = rehydrate({
+						content: finalReasoning,
+						sessionMap: privacySessionMapRef.current,
+					} as RehydrateRequest & {sessionMap: Record<string, string>});
+					finalReasoning = result.content as string;
+					if (result.warnings && result.warnings.length > 0) {
+						logger.warn('Prompt-scrub rehydration warnings (reasoning)', {
+							warnings: result.warnings,
+						});
+					}
+				}
+
+				if (finalToolCalls.length > 0) {
+					finalToolCalls = finalToolCalls.map(tc => {
+						try {
+							const argsStr = JSON.stringify(tc.function.arguments);
+							const result = rehydrate({
+								content: argsStr,
+								sessionMap: privacySessionMapRef.current,
+							} as RehydrateRequest & {sessionMap: Record<string, string>});
+							if (result.warnings && result.warnings.length > 0) {
+								logger.warn('Prompt-scrub rehydration warnings (tool args)', {
+									toolName: tc.function.name,
+									warnings: result.warnings,
+								});
+							}
+							return {
+								...tc,
+								function: {
+									...tc.function,
+									arguments: JSON.parse(result.content as string),
+								},
+							};
+						} catch (e) {
+							logger.error('Failed to rehydrate tool call', {
+								toolName: tc.function.name,
+								error: e,
+							});
+							return tc;
+						}
+					});
+				}
+			}
+
 			// Calculate performance metrics
 			const finalMetrics = endMetrics(metrics);
 
@@ -401,9 +472,10 @@ export async function handleChat(
 					{
 						message: {
 							role: 'assistant',
-							content,
-							tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
-							reasoning,
+							content: finalContent,
+							tool_calls:
+								finalToolCalls.length > 0 ? finalToolCalls : undefined,
+							reasoning: finalReasoning,
 						},
 					},
 				],
