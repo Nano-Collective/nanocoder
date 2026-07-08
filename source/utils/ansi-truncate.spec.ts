@@ -1,5 +1,13 @@
+import {readFileSync} from 'node:fs';
 import test from 'ava';
 import {truncateAnsi} from './ansi-truncate';
+
+test('does not require strip-ansi at runtime', t => {
+	const source = readFileSync(new URL('./ansi-truncate.ts', import.meta.url), 'utf8');
+
+	t.false(/\bfrom\s+['"]strip-ansi['"]/.test(source));
+	t.false(/\bimport\s*\(\s*['"]strip-ansi['"]\s*\)/.test(source));
+});
 
 test('returns original string if within maxWidth', t => {
 	t.is(truncateAnsi('hello', 10), 'hello');
