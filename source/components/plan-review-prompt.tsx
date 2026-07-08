@@ -3,9 +3,9 @@
  *
  * Rendered after the AI finishes generating a plan in Plan Mode.
  * Gives the user three clear actions:
- *   [p] Proceed   — switch to normal mode and re-submit the same message
+ *   [p] Proceed   — switch to normal mode and execute the plan
  *   [m] Modify    — stay in plan mode, let the user refine their request
- *   [a] Ask More  — re-enter clarification with additional questions
+ *   [a] Ask More  — ask additional clarifying questions
  *   [Esc] Dismiss — close the prompt, do nothing
  */
 import {Box, Text, useInput} from 'ink';
@@ -13,11 +13,11 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 
 export interface PlanReviewPromptProps {
-	/** Switch to normal mode and re-submit the last message for execution. */
+	/** Switch to normal mode and execute the plan. */
 	onProceed: () => void;
 	/** Stay in plan mode so the user can refine the prompt. */
 	onModify: () => void;
-	/** Re-run the clarification phase with additional context. */
+	/** Ask additional clarifying questions. */
 	onAskMore: () => void;
 	/** Dismiss the prompt without any action. */
 	onDismiss: () => void;
@@ -73,7 +73,7 @@ export default function PlanReviewPrompt({
 						Proceed
 					</Text>
 					<Text color={colors.secondary}>
-						{' — switch to normal mode and implement the plan'}
+						{' — switch to normal mode and execute the plan'}
 					</Text>
 				</Box>
 				<Box marginBottom={0}>
@@ -95,7 +95,7 @@ export default function PlanReviewPrompt({
 						Ask more
 					</Text>
 					<Text color={colors.secondary}>
-						{' — answer additional clarifying questions'}
+						{' — ask additional clarifying questions'}
 					</Text>
 				</Box>
 				<Box>

@@ -5,6 +5,7 @@ import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
 import {FileExplorer} from '@/components/file-explorer';
 import {IdeSelector} from '@/components/ide-selector';
+import PlanReviewPrompt from '@/components/plan-review-prompt';
 import type {useChatHandler} from '@/hooks/chat-handler';
 import type {AppHandlers} from '@/hooks/useAppHandlers';
 import type {useAppState} from '@/hooks/useAppState';
@@ -92,6 +93,30 @@ export function InteractiveApp({
 			appState.activeMode !== 'explorer' &&
 			appState.activeMode !== 'ideSelection') ||
 		appState.isSettingsMode;
+
+	// Show the plan review bar when the current plan-mode turn has just completed.
+	React.useEffect(() => {
+		if (
+			appState.isConversationComplete &&
+			appState.developmentMode === 'plan' &&
+			!appState.planReviewState
+		) {
+			// Capture the last user message so Proceed can include it as context.
+			const lastUserMsg = [...appState.messages]
+				.reverse()
+				.find(m => m.role === 'user');
+			const originalMessage =
+				typeof lastUserMsg?.content === 'string' ? lastUserMsg.content : '';
+			appState.setPlanReviewState({show: true, originalMessage});
+		}
+	}, [
+		appState.isConversationComplete,
+		appState.developmentMode,
+		appState.planReviewState,
+		appState.messages,
+		appState.setPlanReviewState,
+		appState,
+	]);
 
 	// Whether there is in-flight work that Escape should immediately cancel.
 	// Decision states (tool confirmation, question prompt, subagent approval)
@@ -204,6 +229,19 @@ export function InteractiveApp({
 				renderLastQueuedComponentLive={recallableSubmittedDraft}
 			/>
 
+			{appState.planReviewState?.show && (
+				<PlanReviewPrompt
+					onProceed={() =>
+						void appHandlers.handlePlanProceed(
+							appState.planReviewState?.originalMessage ?? '',
+						)
+					}
+					onAskMore={() => void appHandlers.handlePlanAskMore()}
+					onModify={appHandlers.handlePlanModify}
+					onDismiss={appHandlers.handlePlanModify}
+				/>
+			)}
+
 			{appState.isExplorerMode && (
 				<Box marginLeft={-1} flexDirection="column">
 					<FileExplorer onClose={modeHandlers.handleExplorerCancel} />
@@ -289,20 +327,6 @@ export function InteractiveApp({
 						onToggleReasoningExpanded={handleToggleReasoningExpanded}
 						tune={appState.tune}
 						currentModel={appState.currentModel}
-						isPlanReviewPending={appState.planReviewState !== null}
-						onPlanReviewProceed={() =>
-							appState.planReviewState?.resolve('proceed')
-						}
-						onPlanReviewModify={() => {
-							appState.planReviewState?.resolve('modify');
-							handleRecallSubmittedDraft();
-						}}
-						onPlanReviewAskMore={() =>
-							appState.planReviewState?.resolve('askMore')
-						}
-						onPlanReviewDismiss={() =>
-							appState.planReviewState?.resolve('dismiss')
-						}
 					/>
 				)}
 		</Box>

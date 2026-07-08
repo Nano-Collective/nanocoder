@@ -29,13 +29,6 @@ import type {ThemePreset} from '@/types/ui';
 import {BoundedMap} from '@/utils/bounded-map';
 import type {PendingQuestion} from '@/utils/question-queue';
 
-import type {PlanClarificationAnswers} from './usePlanClarification';
-
-export interface PlanReviewState {
-	answers: PlanClarificationAnswers;
-	resolve: (action: 'proceed' | 'modify' | 'askMore' | 'dismiss') => void;
-}
-
 export type ActiveMode =
 	| 'model'
 	| 'modelDatabase'
@@ -103,8 +96,12 @@ export function useAppState(
 	const [isConversationComplete, setIsConversationComplete] =
 		useState<boolean>(false);
 	const [isSettingsMode, setIsSettingsMode] = useState<boolean>(false);
-	const [planReviewState, setPlanReviewState] =
-		useState<PlanReviewState | null>(null);
+
+	// Plan review state (post-plan-generation action bar)
+	const [planReviewState, setPlanReviewState] = useState<{
+		show: boolean;
+		originalMessage: string;
+	} | null>(null);
 
 	// Cancellation state
 	const [abortController, setAbortController] =

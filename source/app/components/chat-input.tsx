@@ -2,7 +2,6 @@ import {Box, Text} from 'ink';
 import Spinner from 'ink-spinner';
 import React from 'react';
 import CancellingIndicator from '@/components/cancelling-indicator';
-import PlanReviewPrompt from '@/components/plan-review-prompt';
 import QuestionPrompt from '@/components/question-prompt';
 import {TaskListDisplay} from '@/components/task-list-display';
 import ToolConfirmation from '@/components/tool-confirmation';
@@ -49,13 +48,6 @@ export interface ChatInputProps {
 	// Main agent tool confirmation (the unified inline approval gate)
 	pendingToolConfirmation: PendingToolConfirmation | null;
 	onToolConfirmation: (confirmed: boolean) => void;
-
-	// Plan review
-	isPlanReviewPending?: boolean;
-	onPlanReviewProceed?: () => void;
-	onPlanReviewModify?: () => void;
-	onPlanReviewAskMore?: () => void;
-	onPlanReviewDismiss?: () => void;
 
 	// Client state
 	mcpInitialized: boolean;
@@ -147,11 +139,6 @@ export function ChatInput({
 	currentModel,
 	activeEditor,
 	onDismissActiveEditor,
-	isPlanReviewPending,
-	onPlanReviewProceed,
-	onPlanReviewModify,
-	onPlanReviewAskMore,
-	onPlanReviewDismiss,
 }: ChatInputProps): React.ReactElement {
 	const {colors} = useTheme();
 	const activeToolCall = pendingToolCalls[currentToolIndex];
@@ -202,18 +189,6 @@ export function ChatInput({
 				<QuestionPrompt
 					question={pendingQuestion}
 					onAnswer={onQuestionAnswer}
-				/>
-			) : /* Plan Review Prompt */
-			isPlanReviewPending &&
-				onPlanReviewProceed &&
-				onPlanReviewModify &&
-				onPlanReviewAskMore &&
-				onPlanReviewDismiss ? (
-				<PlanReviewPrompt
-					onProceed={onPlanReviewProceed}
-					onModify={onPlanReviewModify}
-					onAskMore={onPlanReviewAskMore}
-					onDismiss={onPlanReviewDismiss}
 				/>
 			) : /* User Input */
 			mcpInitialized && client ? (

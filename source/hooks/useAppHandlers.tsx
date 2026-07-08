@@ -13,11 +13,6 @@ import Status from '@/components/status';
 import {getAppConfig} from '@/config/index';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
-import type {PlanReviewState} from '@/hooks/useAppState';
-import {
-	formatClarificationContext,
-	runClarification,
-} from '@/hooks/usePlanClarification';
 import {getModelContextLimit} from '@/models/index';
 import {bashExecutor} from '@/services/bash-executor';
 import {CheckpointManager} from '@/services/checkpoint-manager';
@@ -91,7 +86,9 @@ interface UseAppHandlersProps {
 	setCurrentProvider: (value: string) => void;
 	setCurrentModel: (value: string) => void;
 	setLiveTaskList: (value: Task[] | null) => void;
-	setPlanReviewState: (value: PlanReviewState | null) => void;
+	setPlanReviewState: (
+		value: {show: boolean; originalMessage: string} | null,
+	) => void;
 
 	// Callbacks
 	addToChatQueue: (component: React.ReactNode) => void;
@@ -142,6 +139,10 @@ export interface AppHandlers {
 		displayValue?: string,
 		images?: ImageAttachment[],
 	) => Promise<void>;
+	// Plan review action bar
+	handlePlanProceed: (originalMessage: string) => Promise<void>;
+	handlePlanAskMore: () => Promise<void>;
+	handlePlanModify: () => void;
 }
 
 /**
@@ -527,6 +528,40 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		props.setActiveMode(null);
 	}, [props.setActiveMode, props]);
 
+	// Plan review action bar handlers
+	const handlePlanProceed = React.useCallback(
+		async (originalMessage: string) => {
+			// Hide the review bar
+			props.setPlanReviewState(null);
+			// Switch to normal mode so the model will execute rather than plan
+			props.setDevelopmentMode('normal');
+			// Dispatch a synthetic message so the model acts on the plan it just wrote
+			await props.handleChatMessage(
+				`proceed with the plan above${originalMessage ? ` for: ${originalMessage}` : ''}`,
+			);
+		},
+		[
+			props.setPlanReviewState,
+			props.setDevelopmentMode,
+			props.handleChatMessage,
+			props,
+		],
+	);
+
+	const handlePlanAskMore = React.useCallback(async () => {
+		// Hide the review bar
+		props.setPlanReviewState(null);
+		// Stay in plan mode and ask the model to ask additional questions
+		await props.handleChatMessage(
+			'please ask me any additional clarifying questions before proceeding',
+		);
+	}, [props.setPlanReviewState, props.handleChatMessage, props]);
+
+	const handlePlanModify = React.useCallback(() => {
+		// Just dismiss the bar — the user will edit and re-submit
+		props.setPlanReviewState(null);
+	}, [props.setPlanReviewState, props]);
+
 	// Message submit handler
 	const handleMessageSubmit = React.useCallback(
 		async (
@@ -552,54 +587,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 						.split(/\s+/)
 				: undefined;
 
-			// ----------------------------------------------------------------------
-			// PLAN MODE: Pre-flight Clarification
-			// ----------------------------------------------------------------------
-			let finalMessage = message;
-
-			if (props.developmentMode === 'plan' && !finalMessage.startsWith('/')) {
-				const clarification = await runClarification(
-					finalMessage,
-					props.developmentMode,
-				);
-
-				if (clarification.asked.length > 0) {
-					// Suspend execution and show PlanReviewPrompt
-					const action = await new Promise<
-						'proceed' | 'modify' | 'askMore' | 'dismiss'
-					>(resolve => {
-						props.setPlanReviewState({
-							answers: clarification,
-							resolve,
-						});
-					});
-
-					props.setPlanReviewState(null);
-
-					if (action === 'dismiss') {
-						props.setIsCancelling(false);
-						props.setIsConversationComplete(true);
-						return;
-					}
-
-					if (action === 'modify') {
-						// Let the caller (chat-input) restore the draft via its own callback.
-						// We just abort the submission here.
-						props.setIsCancelling(false);
-						props.setIsConversationComplete(true);
-						return;
-					}
-
-					// For 'proceed' or 'askMore', we append the context and continue
-					const context = formatClarificationContext(clarification);
-					if (context) {
-						finalMessage = `${finalMessage}\n\n${context}`;
-					}
-				}
-			}
-
 			await handleMessageSubmission(
-				finalMessage,
+				message,
 				{
 					customCommandCache: props.customCommandCache,
 					customCommandLoader: props.customCommandLoader,
@@ -645,7 +634,6 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		},
 		[
 			props.setIsConversationComplete,
-			props.setPlanReviewState,
 			props.customCommandCache,
 			props.customCommandLoader,
 			props.customCommandExecutor,
@@ -694,5 +682,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		handleSessionSelect,
 		handleSessionCancel,
 		handleMessageSubmit,
+		handlePlanProceed,
+		handlePlanAskMore,
+		handlePlanModify,
 	};
 }
