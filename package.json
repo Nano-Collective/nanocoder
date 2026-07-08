@@ -73,7 +73,7 @@
 		"@anthropic-ai/tokenizer": "^0.0.4",
 		"@modelcontextprotocol/sdk": "^1.26.0",
 		"@nanocollective/get-md": "^1.4.0",
-		"@nanocollective/prompt-scrub": "file:../prompt-scrubber",
+		"@nanocollective/prompt-scrub": "^1.0.1",
 		"ai": "6.0.193",
 		"chalk": "^5.2.0",
 		"chokidar": "^5.0.0",

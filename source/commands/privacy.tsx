@@ -31,11 +31,7 @@ export const privacyCommand: Command = {
 				content: text,
 				sessionMap: {},
 				options: {disabledDetectors: ['PathDetector', 'UrlDetector']},
-			} as import('@nanocollective/prompt-scrub').ScrubRequest & {
-				sessionMap: Record<string, string>;
-			}) as import('@nanocollective/prompt-scrub').ScrubResult & {
-				sessionMap: Record<string, string>;
-			};
+			});
 
 			// Collect the replacements map
 			const map = result.sessionMap || {};

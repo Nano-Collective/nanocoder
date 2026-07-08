@@ -1,7 +1,3 @@
-import type {
-	RehydrateRequest,
-	ScrubRequest,
-} from '@nanocollective/prompt-scrub';
 import type {LanguageModel} from 'ai';
 import {
 	InvalidToolInputError,
@@ -169,8 +165,7 @@ export async function handleChat(
 					content: systemContent,
 					sessionMap: privacySessionMapRef.current,
 					options: {disabledDetectors: ['PathDetector', 'UrlDetector']},
-				} as ScrubRequest & {sessionMap: Record<string, string>})
-					.scrubbedContent as string;
+				}).scrubbedContent as string;
 
 				finalNonSystemMessages = nonSystemMessages.map(m => {
 					if (m.role === 'tool') return m;
@@ -180,8 +175,7 @@ export async function handleChat(
 							content: m.content,
 							sessionMap: privacySessionMapRef.current,
 							options: {disabledDetectors: ['PathDetector', 'UrlDetector']},
-						} as ScrubRequest & {sessionMap: Record<string, string>})
-							.scrubbedContent as string,
+						}).scrubbedContent as string,
 					};
 				});
 
@@ -395,7 +389,7 @@ export async function handleChat(
 					const result = rehydrate({
 						content: finalContent,
 						sessionMap: privacySessionMapRef.current,
-					} as RehydrateRequest & {sessionMap: Record<string, string>});
+					});
 					finalContent = result.content as string;
 					if (result.warnings && result.warnings.length > 0) {
 						logger.warn('Prompt-scrub rehydration warnings (content)', {
@@ -408,7 +402,7 @@ export async function handleChat(
 					const result = rehydrate({
 						content: finalReasoning,
 						sessionMap: privacySessionMapRef.current,
-					} as RehydrateRequest & {sessionMap: Record<string, string>});
+					});
 					finalReasoning = result.content as string;
 					if (result.warnings && result.warnings.length > 0) {
 						logger.warn('Prompt-scrub rehydration warnings (reasoning)', {
@@ -424,7 +418,7 @@ export async function handleChat(
 							const result = rehydrate({
 								content: argsStr,
 								sessionMap: privacySessionMapRef.current,
-							} as RehydrateRequest & {sessionMap: Record<string, string>});
+							});
 							if (result.warnings && result.warnings.length > 0) {
 								logger.warn('Prompt-scrub rehydration warnings (tool args)', {
 									toolName: tc.function.name,

@@ -250,9 +250,11 @@ export function useChatHandler({
 					privacySessionMapRef,
 					privacyEnabled,
 					onPrivacyEvent: (count: number) => {
+						// `count` is the number of NEW identifiers scrubbed on this turn
+						// (the per-turn delta), not a session running total.
 						addToChatQueue(
 							infoMsg(
-								`🔒 Privacy active: ${count} sensitive identifiers scrubbed this session`,
+								`Privacy active: scrubbed ${count} new identifier${count === 1 ? '' : 's'}`,
 								'privacy',
 							),
 						);
