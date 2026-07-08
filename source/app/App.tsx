@@ -234,7 +234,7 @@ export default function App({
 			appState.setApiCallHistory(prev => [...prev, record]),
 		tune: appState.tune,
 		subagentsReady: appState.subagentsReady,
-		privacySessionIdRef: appState.privacySessionIdRef,
+		privacySessionMapRef: appState.privacySessionMapRef,
 		privacyEnabled: getPrivacyPreference(),
 	});
 
@@ -647,7 +647,7 @@ export default function App({
 					<PrivacyContext.Provider
 						value={{
 							privacyEnabled: getPrivacyPreference(),
-							privacySessionIdRef: appState.privacySessionIdRef,
+							privacySessionMapRef: appState.privacySessionMapRef,
 						}}
 					>
 						<InteractiveApp

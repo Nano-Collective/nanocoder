@@ -1,4 +1,3 @@
-import {rehydrate} from '@nanocollective/prompt-scrub';
 import React from 'react';
 import type {ConversationStateManager} from '@/app/utils/conversation-state';
 import AgentProgress, {MultiAgentProgress} from '@/components/agent-progress';
@@ -28,40 +27,6 @@ import {
 	LIVE_TASK_TOOLS,
 } from '@/utils/tool-result-display';
 
-export interface PrivacyOptions {
-	privacyEnabled: boolean;
-	privacySessionIdRef: React.MutableRefObject<string> | null;
-}
-
-const rehydrateToolCall = (
-	toolCall: ToolCall,
-	privacyOptions?: PrivacyOptions,
-): ToolCall => {
-	if (
-		privacyOptions?.privacyEnabled &&
-		privacyOptions?.privacySessionIdRef?.current
-	) {
-		try {
-			const argsString = JSON.stringify(toolCall.function.arguments);
-			const result = rehydrate({
-				content: argsString,
-				sessionId: privacyOptions.privacySessionIdRef.current,
-			});
-			return {
-				...toolCall,
-				function: {
-					...toolCall.function,
-					arguments: JSON.parse(result.content as string),
-				},
-			};
-		} catch (_e) {
-			// fallback to original if parsing/rehydration fails
-			return toolCall;
-		}
-	}
-	return toolCall;
-};
-
 /**
  * Validates and executes a single tool call.
  * Returns the tool call paired with its result for sequential post-processing.
@@ -69,14 +34,12 @@ const rehydrateToolCall = (
 const executeOne = async (
 	toolCall: ToolCall,
 	processToolUse: (toolCall: ToolCall) => Promise<ToolResult>,
-	privacyOptions?: PrivacyOptions,
 ): Promise<{
 	toolCall: ToolCall;
 	result: ToolResult;
 }> => {
 	try {
-		const callToExecute = rehydrateToolCall(toolCall, privacyOptions);
-		const result = await processToolUse(callToExecute);
+		const result = await processToolUse(toolCall);
 		return {toolCall, result};
 	} catch (error) {
 		return {
@@ -102,11 +65,9 @@ const executeBashStreaming = async (
 	toolManager: ToolManager | null,
 	setLiveComponent: (component: React.ReactNode) => void,
 	signal?: AbortSignal,
-	privacyOptions?: PrivacyOptions,
 ): Promise<StreamingBashRun> => {
-	const callToExecute = rehydrateToolCall(toolCall, privacyOptions);
 	const execution = await runStreamingBashTool(
-		callToExecute,
+		toolCall,
 		toolManager,
 		setLiveComponent,
 		'direct-bash',
@@ -135,7 +96,6 @@ export const executeApprovedTool = (
 	processToolUse: (toolCall: ToolCall) => Promise<ToolResult>,
 	setLiveComponent?: (component: React.ReactNode) => void,
 	signal?: AbortSignal,
-	privacyOptions?: PrivacyOptions,
 ): Promise<StreamingBashRun | {toolCall: ToolCall; result: ToolResult}> => {
 	if (toolCall.function.name === 'execute_bash' && setLiveComponent) {
 		return executeBashStreaming(
@@ -143,10 +103,9 @@ export const executeApprovedTool = (
 			toolManager,
 			setLiveComponent,
 			signal,
-			privacyOptions,
 		);
 	}
-	return executeOne(toolCall, processToolUse, privacyOptions);
+	return executeOne(toolCall, processToolUse);
 };
 
 /**
@@ -300,7 +259,6 @@ const executeAgentBatch = async (
 	onCompactToolCount?: (toolName: string) => void,
 	nonInteractiveMode?: boolean,
 	signal?: AbortSignal,
-	privacyOptions?: PrivacyOptions,
 ): Promise<
 	Array<{
 		toolCall: ToolCall;
@@ -328,8 +286,7 @@ const executeAgentBatch = async (
 
 	// Start all agents
 	const agentExecutions = toExecute.map(toolCall => {
-		const callToExecute = rehydrateToolCall(toolCall, privacyOptions);
-		const parsedArgs = parseToolArguments(callToExecute.function.arguments);
+		const parsedArgs = parseToolArguments(toolCall.function.arguments);
 		// Coerce, don't assert: a weak model can emit these as objects/numbers,
 		// and a non-string flowing into the progress UI crashes the renderer.
 		const agentName =
@@ -511,7 +468,6 @@ export const executeToolsDirectly = async (
 		 */
 		signal?: AbortSignal;
 	},
-	privacyOptions?: PrivacyOptions,
 ): Promise<ToolResult[]> => {
 	// Import processToolUse here to avoid circular dependencies
 	const {processToolUse} = await import('@/message-handler');
@@ -541,7 +497,6 @@ export const executeToolsDirectly = async (
 				options?.onCompactToolCount,
 				options?.nonInteractiveMode,
 				options?.signal,
-				privacyOptions,
 			);
 
 			// Agent results are already displayed by executeAgentBatch
@@ -558,9 +513,7 @@ export const executeToolsDirectly = async (
 		if (type === 'readOnly' && group.length > 1) {
 			// Parallel execution for consecutive read-only tools
 			executions = await Promise.all(
-				group.map(toolCall =>
-					executeOne(toolCall, processToolUse, privacyOptions),
-				),
+				group.map(toolCall => executeOne(toolCall, processToolUse)),
 			);
 		} else {
 			// Sequential execution for non-parallelizable tools (or single-item groups)
@@ -573,7 +526,6 @@ export const executeToolsDirectly = async (
 						processToolUse,
 						options?.setLiveComponent,
 						options?.signal,
-						privacyOptions,
 					),
 				);
 			}

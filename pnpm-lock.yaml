@@ -40,8 +40,8 @@ importers:
         specifier: ^1.4.0
         version: 1.5.0(@ai-sdk/anthropic@3.0.85(zod@4.4.3))(@ai-sdk/google@4.0.8(zod@4.4.3))(@ai-sdk/openai-compatible@3.0.5(zod@4.4.3))(ai@6.0.193(zod@4.4.3))
       '@nanocollective/prompt-scrub':
-        specifier: ^1.0.0
-        version: 1.0.0
+        specifier: file:../prompt-scrubber
+        version: file:../prompt-scrubber
       ai:
         specifier: 6.0.193
         version: 6.0.193(zod@4.4.3)
@@ -849,8 +849,8 @@ packages:
       node-llama-cpp:
         optional: true
 
-  '@nanocollective/prompt-scrub@1.0.0':
-    resolution: {integrity: sha512-qaNQXKraKOBJzXoYBqGBNt96eCCX3jZXJdfksM97IoIitqDmfUCpS0M7oXYzD2wfaxH1NtFtHUWcPoMJ2uNS7g==}
+  '@nanocollective/prompt-scrub@file:../prompt-scrubber':
+    resolution: {directory: ../prompt-scrubber, type: directory}
     engines: {node: '>=22'}
     hasBin: true
 
@@ -4272,7 +4272,7 @@ snapshots:
       '@ai-sdk/openai-compatible': 3.0.5(zod@4.4.3)
       ai: 6.0.193(zod@4.4.3)
 
-  '@nanocollective/prompt-scrub@1.0.0':
+  '@nanocollective/prompt-scrub@file:../prompt-scrubber':
     dependencies:
       commander: 15.0.0
 

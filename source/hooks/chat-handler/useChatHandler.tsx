@@ -88,7 +88,7 @@ export function useChatHandler({
 	onApiCallComplete,
 	tune,
 	subagentsReady,
-	privacySessionIdRef,
+	privacySessionMapRef,
 	privacyEnabled,
 }: UseChatHandlerProps): ChatHandlerReturn {
 	// Conversation state manager for enhanced context
@@ -205,11 +205,11 @@ export function useChatHandler({
 	React.useEffect(() => {
 		if (messages.length === 0) {
 			conversationStateManager.current.reset();
-			if (privacySessionIdRef) {
-				privacySessionIdRef.current = generateKey('privacy-session');
+			if (privacySessionMapRef) {
+				privacySessionMapRef.current = {};
 			}
 		}
-	}, [messages.length, privacySessionIdRef]);
+	}, [messages.length, privacySessionMapRef]);
 
 	// Wrapper for processAssistantResponse that includes error handling
 	const processAssistantResponseWithErrorHandling = React.useCallback(
@@ -247,7 +247,7 @@ export function useChatHandler({
 					setLastApiUsage,
 					onApiCallComplete,
 					tune,
-					privacySessionIdRef,
+					privacySessionMapRef,
 					privacyEnabled,
 					onPrivacyEvent: (count: number) => {
 						addToChatQueue(
@@ -290,7 +290,7 @@ export function useChatHandler({
 			setLiveComponent,
 			setLastApiUsage,
 			onApiCallComplete,
-			privacySessionIdRef,
+			privacySessionMapRef,
 			privacyEnabled,
 		],
 	);
