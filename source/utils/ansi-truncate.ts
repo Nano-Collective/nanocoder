@@ -1,11 +1,11 @@
-import stripAnsi from 'strip-ansi';
+import {stripVTControlCharacters} from 'node:util';
 
 /**
  * Truncate a string containing ANSI escape codes to fit a given visual width.
  * Preserves ANSI formatting while counting only visible characters.
  */
 export function truncateAnsi(str: string, maxWidth: number): string {
-	const plainText = stripAnsi(str);
+	const plainText = stripVTControlCharacters(str);
 	if (plainText.length <= maxWidth) return str;
 
 	let visibleCount = 0;
