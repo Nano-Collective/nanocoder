@@ -233,30 +233,53 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		const modeConfig = config.modeProviders?.[nextMode];
 
 		void (async () => {
+			let targetProvider: string | undefined;
+			let targetModel: string | undefined;
+
 			if (modeConfig) {
-				await props.handleModelSelect(
-					modeConfig.provider,
-					modeConfig.model,
-					true,
-				);
+				targetProvider = modeConfig.provider;
+				targetModel = modeConfig.model;
 			} else {
 				// Restore the user's currently configured default provider/model (stored in preferences)
 				const preferences = loadPreferences();
-				const targetProvider =
+				targetProvider =
 					preferences.lastProvider ||
 					config.providers?.[0]?.name ||
 					'openai-compatible';
-				const targetModel =
+				targetModel =
 					preferences.providerModels?.[targetProvider] ||
 					preferences.lastModel ||
 					config.providers?.find(p => p.name === targetProvider)?.models[0] ||
 					'';
-
-				if (targetProvider && targetModel) {
-					await props.handleModelSelect(targetProvider, targetModel, true);
-				}
 			}
-		})();
+
+			if (targetProvider && targetModel) {
+				if (
+					targetProvider === props.currentProvider &&
+					targetModel === props.currentModel
+				) {
+					return;
+				}
+
+				// Show a subtle toast when entering a mode that enforces a specific model,
+				// since programmatic switches suppress the default "Model changed to..." toast.
+				if (modeConfig) {
+					props.addToChatQueue(
+						<SuccessMessage
+							key={generateKey('mode-model-override')}
+							message={`[${nextMode} mode → ${targetModel}]`}
+							hideBox={true}
+						/>,
+					);
+				}
+
+				await props.handleModelSelect(targetProvider, targetModel, true);
+			}
+		})().catch(error => {
+			logger.error('Failed to switch model on mode toggle', {
+				error: error instanceof Error ? error.message : String(error),
+			});
+		});
 	}, [
 		props.developmentMode,
 		props.setDevelopmentMode,

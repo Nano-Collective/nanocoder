@@ -579,7 +579,7 @@ test.serial('headless maxTurns ignores invalid env var', async t => {
 async function withModeProvidersConfig(
 	testName: string,
 	configData: Record<string, unknown>,
-	assertionFn: (modeProviders: any) => void,
+	assertionFn: (modeProviders: unknown) => void,
 ) {
 	const {tmpdir} = await import('os');
 	const {join} = await import('path');
@@ -606,7 +606,7 @@ async function withModeProvidersConfig(
 		const fullConfig = {
 			...configData,
 			nanocoder: {
-				...(configData.nanocoder as any || {}),
+				...(configData.nanocoder as Record<string, unknown> || {}),
 				providers,
 			}
 		};

@@ -12,6 +12,8 @@ import {
 	getKeyGeneratorSessionId,
 	setKeyGeneratorSessionId,
 } from '@/session/key-generator';
+import {clearAppConfig} from '@/config/index';
+import {resetPreferencesCache} from '@/config/preferences';
 
 console.log('\nuseAppHandlers.spec.tsx');
 
@@ -220,17 +222,94 @@ test('handleToggleDevelopmentMode cycles through modes', t => {
 	t.deepEqual(s4.setDevelopmentMode.calls, [['normal']]);
 });
 
-test('handleToggleDevelopmentMode calls handleModelSelect on mode switch', async t => {
-	const { handlers, spies } = setup({ developmentMode: 'normal' });
+async function withMockConfig(
+	config: any,
+	preferences: any,
+	fn: () => Promise<void>
+) {
+	const {tmpdir} = await import('os');
+	const {join} = await import('path');
+	const {mkdirSync, writeFileSync, rmSync} = await import('fs');
+	
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const originalCwd = process.cwd();
+	const testDir = join(tmpdir(), `nanocoder-apphandlers-test-${Date.now()}-${Math.random()}`);
+	mkdirSync(testDir, {recursive: true});
 
-	handlers.handleToggleDevelopmentMode();
+	try {
+		writeFileSync(join(testDir, 'agents.config.json'), JSON.stringify(config));
+		writeFileSync(join(testDir, 'nanocoder-preferences.json'), JSON.stringify(preferences));
+		process.env.NANOCODER_CONFIG_DIR = testDir;
+		process.chdir(testDir);
+		clearAppConfig();
+		resetPreferencesCache();
+		
+		await fn();
+	} finally {
+		if (originalConfigDir) {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+		process.chdir(originalCwd);
+		clearAppConfig();
+		resetPreferencesCache();
+		rmSync(testDir, {recursive: true, force: true});
+	}
+}
 
-	// Wait a tick for the async void function to run
-	await new Promise(resolve => setTimeout(resolve, 0));
+test.serial('handleToggleDevelopmentMode calls handleModelSelect using modeProviders if configured', async t => {
+	const config = {
+		nanocoder: {
+			providers: [
+				{name: 'test-provider', models: ['model-1']}
+			],
+			modeProviders: {
+				'auto-accept': {provider: 'test-provider', model: 'model-1'}
+			}
+		}
+	};
+	
+	await withMockConfig(config, {}, async () => {
+		const {handlers, spies} = setup({developmentMode: 'normal'});
+		handlers.handleToggleDevelopmentMode();
+		
+		// Wait a tick for the async void function to run
+		await new Promise(resolve => setTimeout(resolve, 0));
+		
+		t.is(spies.handleModelSelect.calls.length, 1);
+		t.is(spies.handleModelSelect.calls[0]![0], 'test-provider');
+		t.is(spies.handleModelSelect.calls[0]![1], 'model-1');
+		t.is(spies.handleModelSelect.calls[0]![2], true);
+	});
+});
 
-	t.is(spies.handleModelSelect.calls.length, 1);
-	// We expect the third argument (isProgrammatic) to be true
-	t.is(spies.handleModelSelect.calls[0]![2], true);
+test.serial('handleToggleDevelopmentMode uses fallback if modeProviders is not configured', async t => {
+	const config = {
+		nanocoder: {
+			providers: [
+				{name: 'fallback-provider', models: ['fallback-model']}
+			]
+		}
+	};
+	
+	const prefs = {
+		lastProvider: 'fallback-provider',
+		lastModel: 'fallback-model',
+	};
+	
+	await withMockConfig(config, prefs, async () => {
+		const {handlers, spies} = setup({developmentMode: 'normal'});
+		handlers.handleToggleDevelopmentMode();
+		
+		// Wait a tick for the async void function to run
+		await new Promise(resolve => setTimeout(resolve, 0));
+		
+		t.is(spies.handleModelSelect.calls.length, 1);
+		t.is(spies.handleModelSelect.calls[0]![0], 'fallback-provider');
+		t.is(spies.handleModelSelect.calls[0]![1], 'fallback-model');
+		t.is(spies.handleModelSelect.calls[0]![2], true);
+	});
 });
 
 test('handleToggleDevelopmentMode preserves headless mode', t => {

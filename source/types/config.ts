@@ -132,6 +132,7 @@ export interface NotificationsConfig {
 export interface ModeProviderConfig {
 	provider: string;
 	model: string;
+	temperature?: number;
 }
 
 export interface AppConfig {

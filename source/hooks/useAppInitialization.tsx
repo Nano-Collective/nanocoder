@@ -366,7 +366,7 @@ export function useAppInitialization({
 			const modeConfig = config.modeProviders?.[currentMode];
 
 			// Use CLI provider/model if provided, otherwise mode-specific, otherwise preferences
-			const isProgrammatic = !cliProvider && !!modeConfig;
+			const isProgrammatic = !(cliProvider || cliModel) && !!modeConfig;
 			const provider =
 				cliProvider || modeConfig?.provider || preferences.lastProvider;
 			const model = cliModel || modeConfig?.model || undefined;

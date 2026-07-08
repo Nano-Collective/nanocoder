@@ -407,13 +407,22 @@ function loadModeProvidersConfig(
 	return (
 		loadHierarchicalConfig('agents.config.json', 'modeProviders', config => {
 			const modeProviders = config.nanocoder?.modeProviders;
-			if (!modeProviders || typeof modeProviders !== 'object') {
+			if (
+				!modeProviders ||
+				typeof modeProviders !== 'object' ||
+				Array.isArray(modeProviders)
+			) {
 				return null;
 			}
 
 			const result: Partial<Record<DevelopmentMode, ModeProviderConfig>> = {};
 
 			for (const [mode, config] of Object.entries(modeProviders)) {
+				if (!(VALID_MODES as readonly string[]).includes(mode)) {
+					logError(`Invalid modeProviders config: unknown mode '${mode}'.`);
+					continue;
+				}
+
 				// Typecast to unknown first, then check object structure
 				const typedConfig = config as Record<string, unknown>;
 				if (!typedConfig || typeof typedConfig !== 'object') continue;
@@ -455,6 +464,9 @@ function loadModeProvidersConfig(
 				result[mode as DevelopmentMode] = {
 					provider: matchedProvider.name,
 					model: modelName,
+					...(typeof typedConfig.temperature === 'number'
+						? {temperature: typedConfig.temperature}
+						: {}),
 				};
 			}
 
