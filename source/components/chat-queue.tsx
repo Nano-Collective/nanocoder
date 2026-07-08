@@ -49,17 +49,31 @@ export default memo(function ChatQueue({
 					}}
 				</Static>
 			)}
-			{liveQueuedComponents.map((component, index) => {
-				const key =
-					component &&
-					typeof component === 'object' &&
-					'key' in component &&
-					component.key
-						? component.key
-						: `live-${index}`;
+			{/*
+			 * Live-queued components render in the normal flex layout, which is
+			 * inset by the parent's padding={1}. Ink's <Static> above renders
+			 * outside that layout (flush at column 0), so without this
+			 * compensating marginLeft={-1} these messages sit one column to the
+			 * right of the static queue. Keep in sync with ChatHistory's
+			 * liveComponent wrapper.
+			 */}
+			{liveQueuedComponents.length > 0 && (
+				<Box marginLeft={-1} flexDirection="column">
+					{liveQueuedComponents.map((component, index) => {
+						const key =
+							component &&
+							typeof component === 'object' &&
+							'key' in component &&
+							component.key
+								? component.key
+								: `live-${index}`;
 
-				return <RenderErrorBoundary key={key}>{component}</RenderErrorBoundary>;
-			})}
+						return (
+							<RenderErrorBoundary key={key}>{component}</RenderErrorBoundary>
+						);
+					})}
+				</Box>
+			)}
 		</Box>
 	);
 });

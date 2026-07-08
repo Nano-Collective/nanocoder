@@ -47,6 +47,8 @@ export interface UseChatHandlerProps {
 	// Flips true after subagent loading completes; used to invalidate the
 	// cached system prompt so it includes the real agent list.
 	subagentsReady?: boolean;
+	privacySessionMapRef?: React.MutableRefObject<Record<string, string>>;
+	privacyEnabled?: boolean;
 }
 
 export interface ChatHandlerReturn {

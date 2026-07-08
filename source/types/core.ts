@@ -194,12 +194,17 @@ export interface StreamCallbacks {
 	onReasoningToken?: (token: string) => void;
 	onToolCall?: (toolCall: ToolCall) => void;
 	onFinish?: () => void;
+	onPrivacyEvent?: (scrubbedDelta: number) => void;
 }
 
 export interface ModeOverrides {
 	nonInteractiveMode: boolean;
 	nonInteractiveAlwaysAllow: string[];
 	modelParameters?: import('@/types/config').ModelParameters;
+	privacySessionMapRef?: import('react').MutableRefObject<
+		Record<string, string>
+	>;
+	privacyEnabled?: boolean;
 }
 
 export interface LLMClient {

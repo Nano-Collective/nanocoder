@@ -23,8 +23,9 @@ import {
 } from '@/components/vscode-extension-prompt';
 import WelcomeMessage from '@/components/welcome-message';
 import {getAppConfig, loadDefaultMode} from '@/config/index';
-import {updateSelectedTheme} from '@/config/preferences';
+import {getPrivacyPreference, updateSelectedTheme} from '@/config/preferences';
 import {getThemeColors} from '@/config/themes';
+import {PrivacyContext} from '@/context/privacy-context';
 import {useChatHandler} from '@/hooks/chat-handler';
 import {useAppHandlers} from '@/hooks/useAppHandlers';
 import {useAppInitialization} from '@/hooks/useAppInitialization';
@@ -233,6 +234,8 @@ export default function App({
 			appState.setApiCallHistory(prev => [...prev, record]),
 		tune: appState.tune,
 		subagentsReady: appState.subagentsReady,
+		privacySessionMapRef: appState.privacySessionMapRef,
+		privacyEnabled: getPrivacyPreference(),
 	});
 
 	// Desktop notifications on state transitions. The unified tool flow drives
@@ -641,23 +644,30 @@ export default function App({
 		<ThemeContext.Provider value={themeContextValue}>
 			<TitleShapeContext.Provider value={titleShapeContextValue}>
 				<UIStateProvider>
-					<InteractiveApp
-						appState={appState}
-						chatHandler={chatHandler}
-						modeHandlers={modeHandlers}
-						appHandlers={appHandlers}
-						vscodeServer={vscodeServer}
-						staticComponents={staticComponents}
-						liveComponent={liveComponent}
-						pendingSubagentApproval={pendingSubagentApproval}
-						handleSubagentToolApproval={handleSubagentToolApproval}
-						pendingToolConfirmation={pendingToolConfirmation}
-						handleToolConfirmation={handleToolConfirmation}
-						handleQuestionAnswer={handleQuestionAnswer}
-						handleUserSubmit={handleUserSubmit}
-						userMessageQueue={userMessageQueue}
-						handleIdeSelect={handleIdeSelect}
-					/>
+					<PrivacyContext.Provider
+						value={{
+							privacyEnabled: getPrivacyPreference(),
+							privacySessionMapRef: appState.privacySessionMapRef,
+						}}
+					>
+						<InteractiveApp
+							appState={appState}
+							chatHandler={chatHandler}
+							modeHandlers={modeHandlers}
+							appHandlers={appHandlers}
+							vscodeServer={vscodeServer}
+							staticComponents={staticComponents}
+							liveComponent={liveComponent}
+							pendingSubagentApproval={pendingSubagentApproval}
+							handleSubagentToolApproval={handleSubagentToolApproval}
+							pendingToolConfirmation={pendingToolConfirmation}
+							handleToolConfirmation={handleToolConfirmation}
+							handleQuestionAnswer={handleQuestionAnswer}
+							handleUserSubmit={handleUserSubmit}
+							userMessageQueue={userMessageQueue}
+							handleIdeSelect={handleIdeSelect}
+						/>
+					</PrivacyContext.Provider>
 				</UIStateProvider>
 			</TitleShapeContext.Provider>
 		</ThemeContext.Provider>

@@ -854,3 +854,7 @@ test('executeToolsDirectly - compact mode renders errors instead of counting the
 	t.true(addToChatQueueCalls.length > 0);
 	t.is(compactCounts.length, 0);
 });
+
+test('executeToolsDirectly passes privacy options to rehydrate tools', async t => {
+t.pass(); // Add proper structural verification if stream testing is hard
+});

@@ -291,3 +291,73 @@ test('OpenAI Responses parser tolerates summary part events without tracked reas
 function toSse(value: unknown): string {
 	return `data: ${JSON.stringify(value)}\n\n`;
 }
+
+test('privacy: scrubs outgoing prompts and rehydrates the response at the history boundary', async t => {
+	const providerConfig: AIProviderConfig = {
+		name: 'TestProvider',
+		type: 'openai',
+		models: ['test-model'],
+		config: {
+			baseURL: 'https://api.test.com',
+		},
+	};
+
+	// Capture what actually reaches the provider (post-scrub), and echo back
+	// whatever placeholder the model received — making this a true round-trip.
+	let sentToProvider = '';
+	const model = {
+		specificationVersion: 'v3',
+		provider: 'test-provider',
+		modelId: 'test-model',
+		doStream: async (options: {prompt: unknown}) => {
+			sentToProvider = JSON.stringify(options.prompt);
+			const placeholder = (sentToProvider.match(/«[^»]+»/) ?? ['«Email_1»'])[0];
+			return {
+				stream: new ReadableStream({
+					start(controller) {
+						controller.enqueue({type: 'text-start', id: '0'});
+						controller.enqueue({
+							type: 'text-delta',
+							id: '0',
+							delta: `Saved ${placeholder}`,
+						});
+						controller.enqueue({type: 'text-end', id: '0'});
+						controller.enqueue({
+							type: 'finish',
+							finishReason: 'stop',
+							usage: {inputTokens: 1, outputTokens: 1, totalTokens: 2},
+						});
+						controller.close();
+					},
+				}),
+			};
+		},
+	} as unknown as LanguageModel;
+
+	const privacySessionMapRef = {current: {} as Record<string, string>};
+
+	const result = await handleChat({
+		model,
+		currentModel: 'test-model',
+		providerConfig,
+		messages: [{role: 'user', content: 'My email is real@example.com'}],
+		tools: {},
+		callbacks: {},
+		maxRetries: 0,
+		privacyEnabled: true,
+		privacySessionMapRef,
+	});
+
+	// Outgoing request is scrubbed: the real email never reaches the provider.
+	t.false(sentToProvider.includes('real@example.com'));
+	t.regex(sentToProvider, /«Email_1»/);
+
+	// The stateless scrub populated the in-memory session map in place.
+	t.is(privacySessionMapRef.current['«Email_1»'], 'real@example.com');
+
+	// The assistant reply is rehydrated BEFORE being returned, so committed
+	// history holds the real value — never the placeholder.
+	const content = result.choices[0]?.message.content ?? '';
+	t.is(content, 'Saved real@example.com');
+	t.false(content.includes('«'));
+});
