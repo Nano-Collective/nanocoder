@@ -125,6 +125,8 @@ if (args.includes('--web') || args.includes('--gui')) {
 	});
 
 	await new Promise<void>(() => {});
+}
+
 // Validate output format value to prevent injection
 function isValidOutputFormat(value: unknown): value is 'text' | 'json' {
 	return value === 'text' || value === 'json';
