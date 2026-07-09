@@ -11,11 +11,13 @@ import {
 	getNanocoderShape,
 	getNotificationsPreference,
 	getPasteThreshold,
+	getPrivacyPreference,
 	getReasoningExpanded,
 	updateCompactToolDisplay,
 	updateNanocoderShape,
 	updateNotificationsPreference,
 	updatePasteThreshold,
+	updatePrivacyPreference,
 	updateReasoningExpanded,
 	updateSelectedTheme,
 } from '@/config/preferences';
@@ -36,6 +38,7 @@ type SettingsStep =
 	| 'paste-threshold'
 	| 'notifications'
 	| 'display-settings'
+	| 'privacy'
 	| 'done';
 
 interface SettingsSelectorProps {
@@ -89,6 +92,11 @@ function SettingsMainMenu({
 			label: 'Tool Results and Thinking',
 			value: 'display-settings',
 			description: 'Set defaults for model thoughts and tool results',
+		},
+		{
+			label: 'Privacy',
+			value: 'privacy',
+			description: 'Manage prompt scrubbing and sensitive data',
 		},
 		{
 			label: 'Done',
@@ -1012,5 +1020,86 @@ export function SettingsSelector({onCancel}: SettingsSelectorProps) {
 					onCancel={onCancel}
 				/>
 			);
+		case 'privacy':
+			return (
+				<SettingsPrivacyPanel
+					onBack={() => setStep('main')}
+					onCancel={onCancel}
+				/>
+			);
 	}
+}
+
+// Privacy settings panel
+function SettingsPrivacyPanel({
+	onBack,
+	onCancel,
+}: {
+	onBack: () => void;
+	onCancel: () => void;
+}) {
+	const {boxWidth, isNarrow} = useResponsiveTerminal();
+	const {colors} = useTheme();
+
+	const [enabled, setEnabled] = useState(getPrivacyPreference());
+
+	useInput((_, key) => {
+		if (key.escape) {
+			onCancel();
+		}
+		if (key.shift && key.tab) {
+			onBack();
+		}
+	});
+
+	const items = useMemo(() => {
+		return [
+			{
+				label: `Prompt Scrubbing: ${enabled ? 'ON' : 'OFF'}`,
+				value: 'toggle',
+			},
+		];
+	}, [enabled]);
+
+	const handleSelect = () => {
+		const next = !enabled;
+		setEnabled(next);
+		updatePrivacyPreference(next);
+	};
+
+	const title = isNarrow ? 'Privacy' : 'Privacy Settings';
+
+	return (
+		<TitledBoxWithPreferences
+			title={title}
+			width={isNarrow ? '100%' : boxWidth}
+			borderColor={colors.primary}
+			paddingX={2}
+			paddingY={1}
+			flexDirection="column"
+			marginBottom={1}
+		>
+			{!isNarrow && (
+				<Box marginBottom={1}>
+					<Text color={colors.secondary}>
+						Toggle settings with Enter. Shift+Tab to go back, Esc to exit
+					</Text>
+				</Box>
+			)}
+
+			<Box marginBottom={1}>
+				<Text color={colors.warning}>
+					Prompt Scrubbing removes sensitive identifiers before sending prompts
+					to cloud providers. This improves privacy but does not guarantee
+					semantic anonymity.
+				</Text>
+			</Box>
+
+			<StyledSelectInput items={items} onSelect={handleSelect} />
+
+			<Box marginTop={1}>
+				<Text color={colors.secondary}>Enter/Esc</Text>
+			</Box>
+		</TitledBoxWithPreferences>
+	);
 }

@@ -15,6 +15,13 @@ import type {
 } from '@/types/core';
 import {capMessagesForModel} from '@/utils/message-capping';
 
+export interface ToolCallLog {
+	name: string;
+	arguments: Record<string, unknown>;
+	result: string | null;
+	error: string | null;
+}
+
 export interface RunPlainConversationOptions {
 	client: LLMClient;
 	toolManager: ToolManager;
@@ -25,12 +32,30 @@ export interface RunPlainConversationOptions {
 	abortSignal: AbortSignal;
 	tune?: TuneConfig;
 	model?: string;
+	outputFormat?: 'text' | 'json';
 }
 
 export type PlainConversationOutcome =
-	| {kind: 'success'}
-	| {kind: 'tool-approval-required'; toolNames: string[]}
-	| {kind: 'error'; message: string};
+	| {
+			kind: 'success';
+			finalText: string;
+			reasoning: string | null;
+			toolCalls: ToolCallLog[];
+	  }
+	| {
+			kind: 'tool-approval-required';
+			toolNames: string[];
+			finalText: string;
+			reasoning: string | null;
+			toolCalls: ToolCallLog[];
+	  }
+	| {
+			kind: 'error';
+			message: string;
+			finalText: string;
+			reasoning: string | null;
+			toolCalls: ToolCallLog[];
+	  };
 
 // On the last allowed turn we strip tools and inject this so the model
 // finalizes cleanly instead of the loop bailing out with a hard error and
@@ -63,16 +88,28 @@ export async function runPlainConversation(
 		abortSignal,
 		tune,
 		model,
+		outputFormat = 'text',
 	} = options;
 
+	const isJson = outputFormat === 'json';
+
 	let messages = initialMessages;
+	let accumulatedFinalText = '';
+	let accumulatedReasoning = '';
+	const toolCallsLog: ToolCallLog[] = [];
 
 	const maxTurns =
 		getAppConfig().headless?.maxTurns ?? DEFAULT_HEADLESS_MAX_TURNS;
 
 	for (let turn = 0; turn < maxTurns; turn++) {
 		if (abortSignal.aborted) {
-			return {kind: 'error', message: 'Aborted'};
+			return {
+				kind: 'error',
+				message: 'Aborted',
+				finalText: accumulatedFinalText,
+				reasoning: accumulatedReasoning || null,
+				toolCalls: toolCallsLog,
+			};
 		}
 
 		// On the final turn, force a tool-free wrap-up so we end with a usable
@@ -110,32 +147,44 @@ export async function runPlainConversation(
 			{
 				onReasoningToken: (token: string) => {
 					streamedReasoning += token;
-					if (!reasoningPrinted) {
-						reasoningPrinted = true;
-						write(color('gray', '> '));
+					accumulatedReasoning += token;
+					if (!isJson) {
+						if (!reasoningPrinted) {
+							reasoningPrinted = true;
+							write(color('gray', '> '));
+						}
+						write(color('gray', token));
 					}
-					write(color('gray', token));
 				},
 				onToken: (token: string) => {
-					if (reasoningPrinted && !contentStarted) {
-						writeLine();
+					accumulatedFinalText += token;
+					if (!isJson) {
+						if (reasoningPrinted && !contentStarted) {
+							writeLine();
+						}
+						if (!contentStarted) {
+							contentStarted = true;
+						}
+						write(token);
 					}
-					if (!contentStarted) {
-						contentStarted = true;
-					}
-					write(token);
 				},
 			},
 			abortSignal,
 			modeOverrides,
 		);
 
-		if (reasoningPrinted || contentStarted) {
+		if (!isJson && (reasoningPrinted || contentStarted)) {
 			writeLine();
 		}
 
 		if (!result || !result.choices || result.choices.length === 0) {
-			return {kind: 'error', message: 'No response received from model'};
+			return {
+				kind: 'error',
+				message: 'No response received from model',
+				finalText: accumulatedFinalText,
+				reasoning: accumulatedReasoning || null,
+				toolCalls: toolCallsLog,
+			};
 		}
 
 		const message = result.choices[0].message;
@@ -145,11 +194,23 @@ export async function runPlainConversation(
 		const xmlParse =
 			result.toolsDisabled && !finalTurn
 				? parseToolCalls(fullContent)
-				: {success: true as const, toolCalls: [], cleanedContent: fullContent};
+				: {
+						success: true as const,
+						toolCalls: [],
+						cleanedContent: fullContent,
+					};
 
 		if (!xmlParse.success) {
-			writeError(`Malformed tool call: ${xmlParse.error}`);
-			return {kind: 'error', message: xmlParse.error};
+			if (!isJson) {
+				writeError(`Malformed tool call: ${xmlParse.error}`);
+			}
+			return {
+				kind: 'error',
+				message: xmlParse.error,
+				finalText: accumulatedFinalText,
+				reasoning: accumulatedReasoning || null,
+				toolCalls: toolCallsLog,
+			};
 		}
 
 		const allToolCalls: ToolCall[] = [
@@ -165,11 +226,19 @@ export async function runPlainConversation(
 				toolCall.function.name === '__xml_validation_error__' ||
 				!toolManager.hasTool(toolCall.function.name)
 			) {
+				const errorMsg = `Unknown tool: ${toolCall.function.name}`;
 				errorResults.push({
 					tool_call_id: toolCall.id,
 					role: 'tool',
 					name: toolCall.function.name,
-					content: `Unknown tool: ${toolCall.function.name}`,
+					content: errorMsg,
+					isError: true,
+				});
+				toolCallsLog.push({
+					name: toolCall.function.name,
+					arguments: toolCall.function.arguments || {},
+					result: null,
+					error: errorMsg,
 				});
 				continue;
 			}
@@ -196,9 +265,17 @@ export async function runPlainConversation(
 				return {
 					kind: 'error',
 					message: 'Model returned an empty response with no tool calls',
+					finalText: accumulatedFinalText,
+					reasoning: accumulatedReasoning || null,
+					toolCalls: toolCallsLog,
 				};
 			}
-			return {kind: 'success'};
+			return {
+				kind: 'success',
+				finalText: accumulatedFinalText,
+				reasoning: accumulatedReasoning || null,
+				toolCalls: toolCallsLog,
+			};
 		}
 
 		const toolsNeedingApproval: string[] = [];
@@ -222,14 +299,46 @@ export async function runPlainConversation(
 			return {
 				kind: 'tool-approval-required',
 				toolNames: toolsNeedingApproval,
+				finalText: accumulatedFinalText,
+				reasoning: accumulatedReasoning || null,
+				toolCalls: toolCallsLog,
 			};
 		}
 
 		const toolResults: ToolResult[] = [];
 		for (const toolCall of toolsToExecute) {
-			writeStatus(`tool: ${toolCall.function.name}`);
+			if (!isJson) {
+				writeStatus(`tool: ${toolCall.function.name}`);
+			}
+
 			const toolResult = await processToolUse(toolCall);
 			toolResults.push(toolResult);
+
+			const contentStr = toolResult.content
+				? typeof toolResult.content === 'string'
+					? toolResult.content
+					: JSON.stringify(toolResult.content)
+				: null;
+
+			// processToolUse signals failure via `isError`, not a separate
+			// `.error` field — the failure message itself still lives in
+			// `content` (it has to, since that's what gets sent back to the
+			// model as the tool message). `isError` just tells us how to
+			// bucket it for the JSON telemetry report.
+			let resultStr: string | null = null;
+			let errorStr: string | null = null;
+			if (toolResult.isError) {
+				errorStr = contentStr;
+			} else {
+				resultStr = contentStr;
+			}
+
+			toolCallsLog.push({
+				name: toolCall.function.name,
+				arguments: toolCall.function.arguments || {},
+				result: resultStr,
+				error: errorStr,
+			});
 		}
 		messages = [...messages, ...toolResults];
 	}
@@ -240,6 +349,9 @@ export async function runPlainConversation(
 	return {
 		kind: 'error',
 		message: `Conversation exceeded ${maxTurns} turns without a final answer`,
+		finalText: accumulatedFinalText,
+		reasoning: accumulatedReasoning || null,
+		toolCalls: toolCallsLog,
 	};
 }
 

@@ -12,6 +12,7 @@ export interface ChatHistoryProps {
 	queuedComponents: React.ReactNode[];
 	/** Live component that renders outside Static (for real-time updates) */
 	liveComponent?: React.ReactNode;
+	renderLastQueuedComponentLive?: boolean;
 }
 
 /**
@@ -29,6 +30,7 @@ export function ChatHistory({
 	staticComponents,
 	queuedComponents,
 	liveComponent,
+	renderLastQueuedComponentLive,
 }: ChatHistoryProps): React.ReactElement {
 	return (
 		<Box flexGrow={1} flexDirection="column" minHeight={0}>
@@ -36,6 +38,7 @@ export function ChatHistory({
 				<ChatQueue
 					staticComponents={staticComponents}
 					queuedComponents={queuedComponents}
+					renderLastQueuedComponentLive={renderLastQueuedComponentLive}
 				/>
 			)}
 			{/* Live component renders outside Static for real-time updates */}

@@ -39,9 +39,6 @@ const executeOne = async (
 	result: ToolResult;
 }> => {
 	try {
-		// Validation runs inside the validated registry handler that
-		// processToolUse invokes, so invalid args come back here as an error
-		// tool-result (the handler never executes).
 		const result = await processToolUse(toolCall);
 		return {toolCall, result};
 	} catch (error) {
@@ -63,19 +60,21 @@ const executeOne = async (
  * Returns the captured BashExecutionState so the caller can render a completed
  * BashProgress (expanded mode) instead of the command-only formatter.
  */
-const executeBashStreaming = (
+const executeBashStreaming = async (
 	toolCall: ToolCall,
 	toolManager: ToolManager | null,
 	setLiveComponent: (component: React.ReactNode) => void,
 	signal?: AbortSignal,
-): Promise<StreamingBashRun> =>
-	runStreamingBashTool(
+): Promise<StreamingBashRun> => {
+	const execution = await runStreamingBashTool(
 		toolCall,
 		toolManager,
 		setLiveComponent,
 		'direct-bash',
 		signal,
 	);
+	return {...execution, toolCall};
+};
 
 /** Display + conversation-state options shared by every executed tool. */
 export interface ToolDisplayOptions {
@@ -97,7 +96,7 @@ export const executeApprovedTool = (
 	processToolUse: (toolCall: ToolCall) => Promise<ToolResult>,
 	setLiveComponent?: (component: React.ReactNode) => void,
 	signal?: AbortSignal,
-): Promise<StreamingBashRun> => {
+): Promise<StreamingBashRun | {toolCall: ToolCall; result: ToolResult}> => {
 	if (toolCall.function.name === 'execute_bash' && setLiveComponent) {
 		return executeBashStreaming(
 			toolCall,
@@ -487,6 +486,8 @@ export const executeToolsDirectly = async (
 
 		if (type === 'agent' && group.length > 0) {
 			// Parallel execution for consecutive agent tools
+			// Note: The promise resolves with the raw agent result. We return the
+			// ORIGINAL toolCall (with placeholders) to preserve history.
 			const agentResults = await executeAgentBatch(
 				group,
 				toolManager,

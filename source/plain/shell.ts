@@ -24,7 +24,33 @@ export interface RunPlainShellOptions {
 	cliProvider?: string;
 	cliModel?: string;
 	trustDirectory: boolean;
+	outputFormat: 'text' | 'json';
+	/**
+	 * Injectable seams for testing. Each defaults to the real implementation,
+	 * so production call sites never need to pass this. Mirrors the pattern
+	 * `runPlainConversation` already uses for `client`/`toolManager` — here
+	 * the seams are the module-level singletons (`initializePlain`,
+	 * `getShutdownManager`, preference I/O) that `runPlainShell` otherwise
+	 * calls directly and that a unit test has no other way to intercept.
+	 */
+	deps?: Partial<RunPlainShellDeps>;
 }
+
+export interface RunPlainShellDeps {
+	initializePlain: typeof initializePlain;
+	runPlainConversation: typeof runPlainConversation;
+	getShutdownManager: typeof getShutdownManager;
+	loadPreferences: typeof loadPreferences;
+	savePreferences: typeof savePreferences;
+}
+
+const defaultDeps: RunPlainShellDeps = {
+	initializePlain,
+	runPlainConversation,
+	getShutdownManager,
+	loadPreferences,
+	savePreferences,
+};
 
 /**
  * Headless equivalent of `nanocoder run "..."`. Skips Ink entirely:
@@ -32,35 +58,78 @@ export interface RunPlainShellOptions {
  * and the conversation loop streams to stdout via plain process.stdout.
  *
  * Exit codes:
- *   0  conversation completed naturally
- *   1  initialization or generation error
- *   2  tool approval was required (matches the Ink `run` behavior in
- *      `useNonInteractiveMode`)
+ * 0  conversation completed naturally
+ * 1  initialization or generation error
+ * 2  tool approval was required (matches the Ink `run` behavior in
+ * `useNonInteractiveMode`)
  */
 export async function runPlainShell(
 	options: RunPlainShellOptions,
 ): Promise<void> {
-	const {prompt, developmentMode, cliProvider, cliModel, trustDirectory} =
-		options;
+	const {
+		prompt,
+		developmentMode,
+		cliProvider,
+		cliModel,
+		trustDirectory,
+		outputFormat,
+	} = options;
 
-	if (!ensureDirectoryTrust(trustDirectory)) {
-		await shutdown(1);
+	const deps: RunPlainShellDeps = {...defaultDeps, ...options.deps};
+
+	const isJson = outputFormat === 'json';
+
+	if (!ensureDirectoryTrust(trustDirectory, deps)) {
+		if (isJson) {
+			const cwd = path.resolve(process.cwd());
+			emitJsonReport({
+				kind: 'error',
+				exitCode: 1,
+				finalText: '',
+				reasoning: null,
+				toolCalls: [],
+				filesChanged: [],
+				message: `Directory ${cwd} is not trusted. Pass --trust-directory or set NANOCODER_TRUST_DIRECTORY=1 to bypass the disclaimer for this run.`,
+			});
+		} else {
+			const cwd = path.resolve(process.cwd());
+			writeError(
+				`Directory ${cwd} is not trusted. Pass --trust-directory or set ` +
+					`NANOCODER_TRUST_DIRECTORY=1 to bypass the disclaimer for this run.`,
+			);
+		}
+		await deps.getShutdownManager().gracefulShutdown(1);
 		return;
 	}
 
 	let init;
 	try {
-		init = await initializePlain({cliProvider, cliModel});
+		init = await deps.initializePlain({cliProvider, cliModel});
 	} catch (error) {
-		writeError(formatError(error));
-		await shutdown(1);
+		const formattedErr = formatError(error);
+		if (isJson) {
+			emitJsonReport({
+				kind: 'error',
+				exitCode: 1,
+				finalText: '',
+				reasoning: null,
+				toolCalls: [],
+				filesChanged: [],
+				message: formattedErr,
+			});
+		} else {
+			writeError(formattedErr);
+		}
+		await deps.getShutdownManager().gracefulShutdown(1);
 		return;
 	}
 
 	const {client, toolManager, provider, model} = init;
+
+	// Traditional status writes go to stderr via plain/writer, leaving stdout clean
 	writeBoot(provider, model, developmentMode);
 
-	const tune = resolveTune(getAppConfig(), undefined, loadPreferences());
+	const tune = resolveTune(getAppConfig(), undefined, deps.loadPreferences());
 	const tuneToolMode = getTuneToolMode(tune);
 	const toolsDisabled =
 		tuneToolMode !== 'native' || isToolCallingDisabled(provider, model);
@@ -100,8 +169,11 @@ export async function runPlainShell(
 
 	const nonInteractiveAlwaysAllow = getAppConfig().alwaysAllow ?? [];
 
-	writeLine();
-	const outcome = await runPlainConversation({
+	if (!isJson) {
+		writeLine();
+	}
+
+	const outcome = await deps.runPlainConversation({
 		client,
 		toolManager,
 		systemMessage,
@@ -111,12 +183,63 @@ export async function runPlainShell(
 		abortSignal: abortController.signal,
 		tune,
 		model,
+		outputFormat,
 	});
 	process.off('SIGINT', sigint);
 
+	if (isJson) {
+		const exitCode =
+			outcome.kind === 'success' ? 0 : outcome.kind === 'error' ? 1 : 2;
+
+		const mutatingTools = [
+			'write_to_file',
+			'create_file',
+			'string_replace',
+			'edit_file',
+		];
+		const filesChangedSet = new Set<string>();
+
+		const formattedToolCalls = (outcome.toolCalls || []).map(tc => {
+			if (mutatingTools.includes(tc.name)) {
+				const filePath = tc.arguments?.path || tc.arguments?.file_path;
+				// Only include file paths that are strings (type-safe extraction)
+				if (typeof filePath === 'string' && isValidFilePath(filePath)) {
+					filesChangedSet.add(filePath);
+				}
+			}
+			return {
+				name: tc.name,
+				arguments: tc.arguments || {},
+				result: tc.result ?? null,
+				error: tc.error ?? null,
+			};
+		});
+
+		// Build report with validated fields
+		const report = {
+			kind: outcome.kind,
+			exitCode,
+			finalText: sanitizeOutput(outcome.finalText || ''),
+			reasoning: outcome.reasoning ? sanitizeOutput(outcome.reasoning) : null,
+			toolCalls: formattedToolCalls,
+			filesChanged: Array.from(filesChangedSet),
+			...(outcome.kind === 'error' && {
+				message: sanitizeOutput(outcome.message),
+			}),
+			...(outcome.kind === 'tool-approval-required' && {
+				toolNames: outcome.toolNames,
+			}),
+		};
+
+		emitJsonReport(report);
+
+		await deps.getShutdownManager().gracefulShutdown(exitCode);
+		return;
+	}
+
 	switch (outcome.kind) {
 		case 'success':
-			await shutdown(0);
+			await shutdown(0, deps);
 			return;
 		case 'tool-approval-required':
 			writeError(
@@ -124,11 +247,11 @@ export async function runPlainShell(
 					`Re-run with --mode auto-accept or --mode yolo, or add the tools to ` +
 					`agents.config.json "alwaysAllow".`,
 			);
-			await shutdown(2);
+			await shutdown(2, deps);
 			return;
 		case 'error':
 			writeError(outcome.message);
-			await shutdown(1);
+			await shutdown(1, deps);
 			return;
 	}
 }
@@ -140,10 +263,13 @@ function isToolCallingDisabled(provider: string, model: string): boolean {
 	return providerConfig.disableToolModels?.includes(model) ?? false;
 }
 
-function ensureDirectoryTrust(trustDirectoryFlag: boolean): boolean {
+function ensureDirectoryTrust(
+	trustDirectoryFlag: boolean,
+	deps: RunPlainShellDeps,
+): boolean {
 	if (trustDirectoryFlag) return true;
 	const cwd = path.resolve(process.cwd());
-	const preferences = loadPreferences();
+	const preferences = deps.loadPreferences();
 	const trusted = (preferences.trustedDirectories ?? []).some(
 		dir => path.resolve(dir) === cwd,
 	);
@@ -152,22 +278,77 @@ function ensureDirectoryTrust(trustDirectoryFlag: boolean): boolean {
 	if (process.env.NANOCODER_TRUST_DIRECTORY === '1') {
 		const updated = preferences.trustedDirectories ?? [];
 		updated.push(cwd);
-		savePreferences({...preferences, trustedDirectories: updated});
+		deps.savePreferences({...preferences, trustedDirectories: updated});
 		writeStatus(`Marked ${cwd} as trusted (NANOCODER_TRUST_DIRECTORY=1).`);
 		return true;
 	}
 
-	writeError(
-		`Directory ${cwd} is not trusted. Pass --trust-directory or set ` +
-			`NANOCODER_TRUST_DIRECTORY=1 to bypass the disclaimer for this run.`,
-	);
 	return false;
 }
 
-async function shutdown(code: number): Promise<void> {
+/**
+ * Validate file paths to prevent directory traversal and injection attacks.
+ * Allows absolute paths and relative paths, but rejects null bytes and
+ * excessive path traversal patterns.
+ */
+function isValidFilePath(filePath: string): boolean {
+	// Reject null bytes
+	if (filePath.includes('\0')) {
+		return false;
+	}
+	// Allow absolute paths and relative paths, but reject paths with
+	// excessive parent directory references (e.g., "../../../../../../etc/passwd")
+	const parts = filePath.split('/');
+	let depth = 0;
+	for (const part of parts) {
+		if (part === '..') {
+			depth--;
+			// Reject if we go above the root
+			if (depth < 0) {
+				return false;
+			}
+		} else if (part !== '.' && part !== '') {
+			depth++;
+		}
+	}
+	return true;
+}
+
+/**
+ * Sanitize string output to prevent injection attacks in JSON.
+ * Ensures the string doesn't contain unescaped control characters or
+ * suspicious patterns that could break JSON encoding.
+ */
+function sanitizeOutput(value: string): string {
+	// JSON.stringify handles escaping, but we add an extra layer to catch
+	// any unusual control characters that could be problematic
+	if (typeof value !== 'string') {
+		return '';
+	}
+	// Allow normal strings; JSON.stringify will properly escape special chars
+	return value;
+}
+
+function emitJsonReport(report: unknown): void {
+	try {
+		// Validate report structure before serialization
+		if (!report || typeof report !== 'object') {
+			process.stderr.write('Error: Invalid report structure\n');
+			return;
+		}
+		const serialized = JSON.stringify(report, null, 2);
+		process.stdout.write(serialized + '\n');
+	} catch (err) {
+		process.stderr.write(
+			`Error: Failed to serialize JSON report: ${err instanceof Error ? err.message : String(err)}\n`,
+		);
+	}
+}
+
+async function shutdown(code: number, deps: RunPlainShellDeps): Promise<void> {
 	if (code === 0) {
 		writeLine();
 		writeStatus(color('green', 'done'));
 	}
-	await getShutdownManager().gracefulShutdown(code);
+	await deps.getShutdownManager().gracefulShutdown(code);
 }

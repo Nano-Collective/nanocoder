@@ -50,6 +50,8 @@ export default memo(function AssistantMessage({
 	// Inner text width: outer width minus left border (1) and padding (1 each side)
 	const textWidth = nonInteractive ? boxWidth : boxWidth - 3;
 
+	const displayMessage = message;
+
 	// Render markdown into segments: text parts (rendered inside the bordered box)
 	// and code parts (rendered without a border so they can be copied cleanly).
 	// For non-interactive mode we join all parts back into a flat string.
@@ -57,7 +59,7 @@ export default memo(function AssistantMessage({
 	// wrapped lines. trim() removes leading/trailing whitespace.
 	const renderedParts = useMemo(() => {
 		try {
-			const parts = parseMarkdownParts(message, colors, textWidth);
+			const parts = parseMarkdownParts(displayMessage, colors, textWidth);
 			return parts
 				.map(part => {
 					if (part.type === 'text') {
@@ -77,11 +79,14 @@ export default memo(function AssistantMessage({
 			return [
 				{
 					type: 'text' as const,
-					content: wrapWithTrimmedContinuations(message.trim(), textWidth),
+					content: wrapWithTrimmedContinuations(
+						displayMessage.trim(),
+						textWidth,
+					),
 				},
 			];
 		}
-	}, [message, colors, textWidth]);
+	}, [displayMessage, colors, textWidth]);
 
 	// Non-interactive (`run`) mode: plain markdown text, no header/box/token
 	// counter — keeps stdout output close to what a regular CLI would emit.

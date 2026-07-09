@@ -23,8 +23,9 @@ import {
 } from '@/components/vscode-extension-prompt';
 import WelcomeMessage from '@/components/welcome-message';
 import {getAppConfig, loadDefaultMode} from '@/config/index';
-import {updateSelectedTheme} from '@/config/preferences';
+import {getPrivacyPreference, updateSelectedTheme} from '@/config/preferences';
 import {getThemeColors} from '@/config/themes';
+import {PrivacyContext} from '@/context/privacy-context';
 import {useChatHandler} from '@/hooks/chat-handler';
 import {useAppHandlers} from '@/hooks/useAppHandlers';
 import {useAppInitialization} from '@/hooks/useAppInitialization';
@@ -171,7 +172,14 @@ export default function App({
 	}, []);
 
 	const drainQueuedUserMessage = React.useCallback(() => {
-		queueMicrotask(() => {
+		// Defer to a macrotask, not a microtask. `onConversationComplete` fires
+		// deep inside the finishing turn's await chain, so a microtask drain would
+		// start the next turn BEFORE that turn's `resetStreamingState()` finally
+		// runs — and the stale reset would then wipe the new turn's abortController
+		// and isGenerating, leaving the busy indicator (and Escape-to-cancel) dead.
+		// A timeout runs after those continuations, so the drained turn keeps its
+		// busy state.
+		setTimeout(() => {
 			void userMessageQueue.drainNextMessage(async message => {
 				const submitQueuedMessage = queuedUserSubmitRef.current;
 				if (!submitQueuedMessage || !appState.client || !appState.toolManager) {
@@ -185,7 +193,7 @@ export default function App({
 				);
 				return true;
 			});
-		});
+		}, 0);
 	}, [
 		appState.client,
 		appState.toolManager,
@@ -222,8 +230,12 @@ export default function App({
 		onSetLiveTaskList: appState.setLiveTaskList,
 		setLiveComponent: appState.setLiveComponent,
 		setLastApiUsage: appState.setLastApiUsage,
+		onApiCallComplete: record =>
+			appState.setApiCallHistory(prev => [...prev, record]),
 		tune: appState.tune,
 		subagentsReady: appState.subagentsReady,
+		privacySessionMapRef: appState.privacySessionMapRef,
+		privacyEnabled: getPrivacyPreference(),
 	});
 
 	// Desktop notifications on state transitions. The unified tool flow drives
@@ -384,6 +396,8 @@ export default function App({
 		currentTheme: appState.currentTheme,
 		developmentMode: appState.developmentMode,
 		tune: appState.tune,
+		lastApiUsage: appState.lastApiUsage,
+		apiCallHistory: appState.apiCallHistory,
 		abortController: appState.abortController,
 		updateInfo: appState.updateInfo,
 		mcpServersStatus: appState.mcpServersStatus,
@@ -630,23 +644,30 @@ export default function App({
 		<ThemeContext.Provider value={themeContextValue}>
 			<TitleShapeContext.Provider value={titleShapeContextValue}>
 				<UIStateProvider>
-					<InteractiveApp
-						appState={appState}
-						chatHandler={chatHandler}
-						modeHandlers={modeHandlers}
-						appHandlers={appHandlers}
-						vscodeServer={vscodeServer}
-						staticComponents={staticComponents}
-						liveComponent={liveComponent}
-						pendingSubagentApproval={pendingSubagentApproval}
-						handleSubagentToolApproval={handleSubagentToolApproval}
-						pendingToolConfirmation={pendingToolConfirmation}
-						handleToolConfirmation={handleToolConfirmation}
-						handleQuestionAnswer={handleQuestionAnswer}
-						handleUserSubmit={handleUserSubmit}
-						userMessageQueue={userMessageQueue}
-						handleIdeSelect={handleIdeSelect}
-					/>
+					<PrivacyContext.Provider
+						value={{
+							privacyEnabled: getPrivacyPreference(),
+							privacySessionMapRef: appState.privacySessionMapRef,
+						}}
+					>
+						<InteractiveApp
+							appState={appState}
+							chatHandler={chatHandler}
+							modeHandlers={modeHandlers}
+							appHandlers={appHandlers}
+							vscodeServer={vscodeServer}
+							staticComponents={staticComponents}
+							liveComponent={liveComponent}
+							pendingSubagentApproval={pendingSubagentApproval}
+							handleSubagentToolApproval={handleSubagentToolApproval}
+							pendingToolConfirmation={pendingToolConfirmation}
+							handleToolConfirmation={handleToolConfirmation}
+							handleQuestionAnswer={handleQuestionAnswer}
+							handleUserSubmit={handleUserSubmit}
+							userMessageQueue={userMessageQueue}
+							handleIdeSelect={handleIdeSelect}
+						/>
+					</PrivacyContext.Provider>
 				</UIStateProvider>
 			</TitleShapeContext.Provider>
 		</ThemeContext.Provider>

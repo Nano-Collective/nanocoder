@@ -33,7 +33,10 @@ const wait = async (ms = 200) => new Promise(resolve => setTimeout(resolve, ms))
 
 const waitForCondition = async (
 	condition: () => boolean,
-	timeoutMs = 1000,
+	// Generous ceiling: these polls resolve as soon as the condition holds, so a
+	// higher deadline only matters when the file's concurrent tests starve each
+	// other under load - which is exactly when the old 1000ms budget flaked.
+	timeoutMs = 3000,
 ) => {
 	const startedAt = Date.now();
 
@@ -51,7 +54,7 @@ const waitForCondition = async (
 const waitForFrame = async (
 	lastFrame: () => string | undefined,
 	pattern: RegExp,
-	timeoutMs = 1000,
+	timeoutMs = 3000,
 ) => {
 	await waitForCondition(
 		() => pattern.test(lastFrame() ?? ''),
@@ -189,6 +192,64 @@ test('UserInput renders while busy (Escape deferred to global handler)', t => {
 	unmount();
 });
 
+test('UserInput reports and restores submitted drafts with attachments', async t => {
+	let submittedMessage = '';
+	let submittedDraft:
+		| Parameters<
+				NonNullable<React.ComponentProps<typeof UserInput>['onSubmittedDraft']>
+		  >[0]
+		| null = null;
+
+	const restoreDraft = {
+		id: 1,
+		inputState: {
+			displayValue: 'edit this request',
+			placeholderContent: {},
+		},
+		attachments: [{data: 'abc', mediaType: 'image/png'}],
+	};
+
+	const {stdin, lastFrame, rerender, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+				onSubmittedDraft={draft => {
+					submittedDraft = draft;
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('original');
+	await waitForFrame(lastFrame, /original/);
+	stdin.write('\r');
+	await waitForCondition(() => submittedMessage === 'original');
+	await waitForCondition(() => !/original/.test(lastFrame() ?? ''));
+
+	t.is(submittedDraft?.inputState.displayValue, 'original');
+	t.deepEqual(submittedDraft?.inputState.placeholderContent, {});
+	t.deepEqual(submittedDraft?.attachments, []);
+
+	rerender(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				onSubmit={message => {
+					submittedMessage = message;
+				}}
+				restoreSubmittedDraft={restoreDraft}
+			/>
+		</TestWrapper>,
+	);
+	await waitForFrame(lastFrame, /edit this request/);
+
+	t.regex(lastFrame()!, /\[image #1: image\]/);
+	unmount();
+});
+
 test('UserInput queues submitted messages while busy', async t => {
 	let submittedMessage = '';
 	let queuedMessage = '';
@@ -282,6 +343,53 @@ test('UserInput renders queued messages while busy', t => {
 	unmount();
 });
 
+// Serial: this test mutates the global process.stdout.columns. Run alone so the
+// narrowed width can't leak into a concurrently-rendering sibling test.
+test.serial('UserInput truncates long queued messages on narrow terminals', t => {
+	const originalColumns = process.stdout.columns;
+	// Force a narrow terminal so width-based truncation must kick in.
+	Object.defineProperty(process.stdout, 'columns', {
+		value: 40,
+		configurable: true,
+	});
+
+	try {
+		const longMessage =
+			'this is a very long queued message that should be truncated because it far exceeds the narrow terminal width available';
+		const {lastFrame, unmount} = render(
+			<TestWrapper>
+				<UserInput
+					forceFocus={true}
+					isBusy={true}
+					queuedMessages={[
+						{id: 'queued-1', message: longMessage, displayValue: longMessage},
+					]}
+				/>
+			</TestWrapper>,
+		);
+
+		const output = lastFrame() ?? '';
+		// Truncated with the shared ellipsis, and the tail is dropped.
+		t.regex(output, /\.\.\./);
+		t.notRegex(output, /terminal width available/);
+		// The queued-message line itself fits within the terminal width. Scope to
+		// that line rather than every rendered line: the component truncates the
+		// message deterministically, whereas the decorative section header relies
+		// on Ink's ambient wrapping, which can flake under deferred re-layout.
+		const messageLine = output
+			.split('\n')
+			.find(line => line.includes('this is a very long'));
+		t.truthy(messageLine);
+		t.true((messageLine ?? '').length <= 40);
+		unmount();
+	} finally {
+		Object.defineProperty(process.stdout, 'columns', {
+			value: originalColumns,
+			configurable: true,
+		});
+	}
+});
+
 test('UserInput navigates queued messages while busy with empty input', async t => {
 	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
@@ -336,7 +444,35 @@ test('UserInput loads selected queued message for editing', async t => {
 	unmount();
 });
 
-test('UserInput removes selected queued message with Ctrl+Delete', async t => {
+test('UserInput up arrow returns from the first queued message to the input', async t => {
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				isBusy={true}
+				queuedMessages={[
+					{id: 'queued-1', message: 'first', displayValue: 'first queued'},
+					{id: 'queued-2', message: 'second', displayValue: 'second queued'},
+				]}
+			/>
+		</TestWrapper>,
+	);
+
+	// Enter the queue, then step back up to the input.
+	stdin.write('\u001B[B');
+	await wait(50);
+	t.regex(lastFrame()!, /▸ first queued/);
+
+	stdin.write('\u001B[A');
+	await wait(50);
+
+	const output = lastFrame()!;
+	t.notRegex(output, /▸ first queued/);
+	t.notRegex(output, /▸ second queued/);
+	unmount();
+});
+
+test('UserInput removes selected queued message with Delete', async t => {
 	let removedId = '';
 	const QueueHarness = () => {
 		const [messages, setMessages] = React.useState([
@@ -372,6 +508,7 @@ test('UserInput removes selected queued message with Ctrl+Delete', async t => {
 
 	t.is(removedId, 'queued-1');
 	t.notRegex(lastFrame()!, /first queued/);
+
 	unmount();
 });
 
@@ -742,6 +879,44 @@ test('UserInput renders completions text when typing /', async t => {
 	unmount();
 });
 
+test('UserInput windows long slash completion lists', async t => {
+	const commands = Array.from(
+		{length: 14},
+		(_, index) => `zz-window-${String(index).padStart(2, '0')}`,
+	);
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} customCommands={commands} />
+		</TestWrapper>,
+	);
+
+	stdin.write('/zz');
+	await wait();
+
+	const firstFrame = lastFrame()!;
+	const firstVisibleCommands = firstFrame
+		.split('\n')
+		.filter(line => /\/zz-window-\d{2}/.test(line));
+
+	t.is(firstVisibleCommands.length, 10);
+	t.regex(firstFrame, /\/zz-window-00/);
+	t.regex(firstFrame, /\/zz-window-09/);
+	t.notRegex(firstFrame, /\/zz-window-10/);
+	t.regex(firstFrame, /Showing 1-10 of 14/);
+
+	for (let i = 0; i < 11; i++) {
+		stdin.write('\u001B[B');
+		await wait(25);
+	}
+
+	const laterFrame = lastFrame()!;
+	t.notRegex(laterFrame, /\/zz-window-00/);
+	t.regex(laterFrame, /▸ \/zz-window-11/);
+	t.regex(laterFrame, /Showing 5-14 of 14/);
+
+	unmount();
+});
+
 test('UserInput renders completions BEFORE the mode indicator (inside the input box)', async t => {
 	const {stdin, lastFrame, unmount} = render(
 		<TestWrapper>
@@ -809,3 +984,4 @@ test('UserInput does not show completions when input is empty', t => {
 	t.notRegex(output, /Available commands:/);
 	unmount();
 });
+

@@ -13,6 +13,7 @@ import type {CheckpointListItem} from '@/types/checkpoint';
 import type {CustomCommand} from '@/types/commands';
 import type {AIProviderConfig, TuneConfig} from '@/types/config';
 import {
+	ApiCallRecord,
 	ApiUsageSnapshot,
 	ContextSource,
 	DevelopmentMode,
@@ -178,14 +179,23 @@ export function useAppState(
 		null,
 	);
 
+	// Per-call usage history accumulated across the session. Each entry
+	// carries the provider/model active at that API call, so the /usage
+	// command can compute accurate per-provider costs from real token counts.
+	const [apiCallHistory, setApiCallHistory] = useState<ApiCallRecord[]>([]);
+
 	// Tool confirmation state
 	const [pendingToolCalls, setPendingToolCalls] = useState<ToolCall[]>([]);
 	const [currentToolIndex, setCurrentToolIndex] = useState<number>(0);
 
 	// Chat queue for components
 	const [chatComponents, setChatComponents] = useState<React.ReactNode[]>([]);
-	// Live component that renders outside Static for real-time updates (e.g., BashProgress)
+	// Live component state - renders over top of the static chat queue
+	// Used for loading indicators, live task progress, etc.
 	const [liveComponent, setLiveComponent] = useState<React.ReactNode>(null);
+
+	// Prompt Scrubbing Session
+	const privacySessionMapRef = useRef<Record<string, string>>({});
 
 	// Helper function to add components to the chat queue with stable keys
 	const addToChatQueue = useCallback((component: React.ReactNode) => {
@@ -344,6 +354,7 @@ export function useAppState(
 		contextLimit,
 		contextSource,
 		lastApiUsage,
+		apiCallHistory,
 		pendingToolCalls,
 		currentToolIndex,
 		chatComponents,
@@ -393,11 +404,13 @@ export function useAppState(
 		setContextLimit,
 		setContextSource,
 		setLastApiUsage,
+		setApiCallHistory,
 		setPendingToolCalls,
 		setCurrentToolIndex,
 		setChatComponents,
 		liveComponent,
 		setLiveComponent,
+		privacySessionMapRef,
 
 		// Utilities
 		addToChatQueue,

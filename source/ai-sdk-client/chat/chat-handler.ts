@@ -50,8 +50,11 @@ export interface ChatHandlerParams {
 	callbacks: StreamCallbacks;
 	signal?: AbortSignal;
 	maxRetries: number;
-	skipTools?: boolean; // Track if we're retrying without tools
+	skipTools?: boolean;
 	modeOverrides?: ModeOverrides;
+	privacySessionMapRef?: React.MutableRefObject<Record<string, string>>;
+	privacyEnabled?: boolean;
+	onPrivacyEvent?: (scrubbedDelta: number) => void;
 }
 
 /**
@@ -71,6 +74,9 @@ export async function handleChat(
 		maxRetries,
 		skipTools = false,
 		modeOverrides,
+		privacySessionMapRef,
+		privacyEnabled,
+		onPrivacyEvent,
 	} = params;
 	const logger = getLogger();
 
@@ -147,8 +153,41 @@ export async function handleChat(
 				.join('\n\n');
 			const nonSystemMessages = messages.filter(m => m.role !== 'system');
 
+			// Scrub prompts if privacy scrubbing is enabled
+			let finalSystemContent = systemContent;
+			let finalNonSystemMessages = nonSystemMessages;
+			if (privacyEnabled && privacySessionMapRef) {
+				const {scrub} = await import('@nanocollective/prompt-scrub');
+
+				const prevCount = Object.keys(privacySessionMapRef.current).length;
+
+				finalSystemContent = scrub({
+					content: systemContent,
+					sessionMap: privacySessionMapRef.current,
+					options: {disabledDetectors: ['PathDetector', 'UrlDetector']},
+				}).scrubbedContent as string;
+
+				finalNonSystemMessages = nonSystemMessages.map(m => {
+					if (m.role === 'tool') return m;
+					return {
+						...m,
+						content: scrub({
+							content: m.content,
+							sessionMap: privacySessionMapRef.current,
+							options: {disabledDetectors: ['PathDetector', 'UrlDetector']},
+						}).scrubbedContent as string,
+					};
+				});
+
+				const newCount = Object.keys(privacySessionMapRef.current).length;
+				const delta = newCount - prevCount;
+				if (delta > 0 && onPrivacyEvent) {
+					onPrivacyEvent(delta);
+				}
+			}
+
 			// Convert messages to AI SDK v5 ModelMessage format
-			const modelMessages = convertToModelMessages(nonSystemMessages);
+			const modelMessages = convertToModelMessages(finalNonSystemMessages);
 
 			logger.debug('AI SDK request prepared', {
 				messageCount: modelMessages.length,
@@ -174,7 +213,7 @@ export async function handleChat(
 
 			const result = streamText({
 				model,
-				...(systemContent ? {system: systemContent} : {}),
+				...(finalSystemContent ? {system: finalSystemContent} : {}),
 				messages: modelMessages,
 				tools: aiTools,
 				abortSignal: signal,
@@ -339,6 +378,71 @@ export async function handleChat(
 
 			const content = fullText || accumulatedText;
 
+			let finalContent = content;
+			let finalReasoning = reasoning;
+			let finalToolCalls = toolCalls;
+
+			if (privacyEnabled && privacySessionMapRef) {
+				const {rehydrate} = await import('@nanocollective/prompt-scrub');
+
+				if (finalContent) {
+					const result = rehydrate({
+						content: finalContent,
+						sessionMap: privacySessionMapRef.current,
+					});
+					finalContent = result.content as string;
+					if (result.warnings && result.warnings.length > 0) {
+						logger.warn('Prompt-scrub rehydration warnings (content)', {
+							warnings: result.warnings,
+						});
+					}
+				}
+
+				if (finalReasoning) {
+					const result = rehydrate({
+						content: finalReasoning,
+						sessionMap: privacySessionMapRef.current,
+					});
+					finalReasoning = result.content as string;
+					if (result.warnings && result.warnings.length > 0) {
+						logger.warn('Prompt-scrub rehydration warnings (reasoning)', {
+							warnings: result.warnings,
+						});
+					}
+				}
+
+				if (finalToolCalls.length > 0) {
+					finalToolCalls = finalToolCalls.map(tc => {
+						try {
+							const argsStr = JSON.stringify(tc.function.arguments);
+							const result = rehydrate({
+								content: argsStr,
+								sessionMap: privacySessionMapRef.current,
+							});
+							if (result.warnings && result.warnings.length > 0) {
+								logger.warn('Prompt-scrub rehydration warnings (tool args)', {
+									toolName: tc.function.name,
+									warnings: result.warnings,
+								});
+							}
+							return {
+								...tc,
+								function: {
+									...tc.function,
+									arguments: JSON.parse(result.content as string),
+								},
+							};
+						} catch (e) {
+							logger.error('Failed to rehydrate tool call', {
+								toolName: tc.function.name,
+								error: e,
+							});
+							return tc;
+						}
+					});
+				}
+			}
+
 			// Calculate performance metrics
 			const finalMetrics = endMetrics(metrics);
 
@@ -362,9 +466,10 @@ export async function handleChat(
 					{
 						message: {
 							role: 'assistant',
-							content,
-							tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
-							reasoning,
+							content: finalContent,
+							tool_calls:
+								finalToolCalls.length > 0 ? finalToolCalls : undefined,
+							reasoning: finalReasoning,
 						},
 					},
 				],

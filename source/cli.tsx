@@ -84,6 +84,9 @@ Options:
   --plain             Use a lightweight, Ink-free runtime for non-interactive runs.
                       Only valid with the "run" command. Auto-enables in CI / non-TTY.
   --no-plain          Force the Ink runtime even in CI / non-TTY environments.
+  --json              Output execution results as a single well-formed JSON object to stdout.
+                      Only valid with the "run" command.
+  --output-format     Specify stdout format ('text' or 'json'). Synonym for --json.
   --acp               Run as an ACP (Agent Client Protocol) server for editor integration.
                       Communicates via JSON-RPC over stdin/stdout.
   run                 Run in non-interactive mode
@@ -97,6 +100,7 @@ Examples:
   nanocoder --mode plan
   nanocoder --trust-directory run "analyze src/app.ts"
   nanocoder --plain run "summarize README.md"
+  nanocoder --plain --json run "summarize README.md" | jq .finalText
   `);
 	process.exit(0);
 }
@@ -121,6 +125,9 @@ if (args.includes('--web') || args.includes('--gui')) {
 	});
 
 	await new Promise<void>(() => {});
+// Validate output format value to prevent injection
+function isValidOutputFormat(value: unknown): value is 'text' | 'json' {
+	return value === 'text' || value === 'json';
 }
 
 async function main(): Promise<void> {
@@ -149,18 +156,36 @@ async function main(): Promise<void> {
 		}
 	}
 
-	// Extract --provider if specified
+	// Extract --provider if specified — validate against allowlist pattern
 	let cliProvider: string | undefined;
 	const providerArgIndex = args.findIndex(arg => arg === '--provider');
 	if (providerArgIndex !== -1 && args[providerArgIndex + 1]) {
-		cliProvider = args[providerArgIndex + 1];
+		// Allow alphanumeric, hyphen, underscore only to prevent injection
+		const value = args[providerArgIndex + 1];
+		if (/^[a-zA-Z0-9_-]+$/.test(value)) {
+			cliProvider = value;
+		} else {
+			console.error(
+				`Invalid --provider value: "${value}". Provider name must contain only alphanumeric characters, hyphens, and underscores.`,
+			);
+			process.exit(1);
+		}
 	}
 
-	// Extract --model if specified
+	// Extract --model if specified — validate against allowlist pattern
 	let cliModel: string | undefined;
 	const modelArgIndex = args.findIndex(arg => arg === '--model');
 	if (modelArgIndex !== -1 && args[modelArgIndex + 1]) {
-		cliModel = args[modelArgIndex + 1];
+		// Allow alphanumeric, hyphen, underscore, dot, slash for model names like "claude-3.5-sonnet"
+		const value = args[modelArgIndex + 1];
+		if (/^[a-zA-Z0-9_/.:-]+$/.test(value)) {
+			cliModel = value;
+		} else {
+			console.error(
+				`Invalid --model value: "${value}". Model name must contain only alphanumeric characters, hyphens, underscores, dots, and slashes.`,
+			);
+			process.exit(1);
+		}
 	}
 
 	// Extract --context-max if specified
@@ -201,6 +226,36 @@ async function main(): Promise<void> {
 		break;
 	}
 
+	// Extract --json or --output-format json. Accept spaced and fused formats.
+	let outputFormat: 'text' | 'json' = 'text';
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		if (arg === '--json') {
+			outputFormat = 'json';
+			break;
+		} else if (arg === '--output-format' && args[i + 1]) {
+			const value = args[i + 1];
+			if (!isValidOutputFormat(value)) {
+				console.error(
+					`Invalid --output-format value: "${value}". Must be 'text' or 'json'.`,
+				);
+				process.exit(1);
+			}
+			outputFormat = value;
+			break;
+		} else if (arg.startsWith('--output-format=')) {
+			const rawValue = arg.slice('--output-format='.length);
+			if (!isValidOutputFormat(rawValue)) {
+				console.error(
+					`Invalid --output-format value: "${rawValue}". Must be 'text' or 'json'.`,
+				);
+				process.exit(1);
+			}
+			outputFormat = rawValue;
+			break;
+		}
+	}
+
 	// Check for non-interactive mode (run command)
 	let nonInteractivePrompt: string | undefined;
 	const runCommandIndex = args.findIndex(arg => arg === 'run');
@@ -230,6 +285,13 @@ async function main(): Promise<void> {
 				continue;
 			} else if (arg.startsWith('--mode=')) {
 				continue; // skip fused form
+			} else if (arg === '--json') {
+				continue; // skip this flag
+			} else if (arg === '--output-format') {
+				i++; // skip this flag and its value
+				continue;
+			} else if (arg.startsWith('--output-format=')) {
+				continue; // skip fused form
 			} else if (arg === '--trust-directory') {
 				continue; // skip this flag
 			} else if (arg === '--plain' || arg === '--no-plain') {
@@ -244,6 +306,12 @@ async function main(): Promise<void> {
 	}
 
 	const nonInteractiveMode = runCommandIndex !== -1;
+
+	// Validate execution constraints for --json rules
+	if (outputFormat === 'json' && !nonInteractiveMode) {
+		console.error("Error: --json can only be used with the 'run' command.");
+		process.exit(1);
+	}
 
 	// --trust-directory is only respected with `run`. Surface a warning
 	// (rather than silently dropping) if the user passes it interactively.
@@ -274,6 +342,13 @@ async function main(): Promise<void> {
 		console.error('Cannot combine --plain with --vscode.');
 		process.exit(1);
 	}
+
+	// Enforce exclusive stdout protocol constraints
+	if (outputFormat === 'json' && vscodeMode) {
+		console.error('Error: --json cannot be combined with --vscode.');
+		process.exit(1);
+	}
+
 	const ciDetected =
 		process.env.CI === 'true' ||
 		Boolean(
@@ -292,6 +367,11 @@ async function main(): Promise<void> {
 
 	// --acp: Agent Client Protocol server mode for editor integration
 	const acpMode = args.includes('--acp');
+
+	if (outputFormat === 'json' && acpMode) {
+		console.error('Error: --json cannot be combined with --acp.');
+		process.exit(1);
+	}
 
 	// Handle codex/copilot login from CLI (no App)
 	if (args[0] === 'codex' && args[1] === 'login') {
@@ -357,6 +437,7 @@ async function main(): Promise<void> {
 			cliProvider,
 			cliModel,
 			trustDirectory,
+			outputFormat,
 		});
 	} else {
 		// Prevent Node's global performance entry buffer from growing without

@@ -2,6 +2,7 @@ import test from 'ava';
 import {mkdir, rm, writeFile as fsWriteFile} from 'node:fs/promises';
 import {join, resolve} from 'node:path';
 import {tmpdir} from 'node:os';
+import {diffEditTool} from './file-ops/diff-edit.js';
 import {writeFileTool} from './file-ops/write-file.js';
 import {stringReplaceTool} from './file-ops/string-replace.js';
 import {readFileTool} from './read-file.js';
@@ -301,6 +302,126 @@ test('string_replace validator: accepts valid relative paths', async (t) => {
 });
 
 // ============================================================================
+// diff_edit Validator Tests
+// ============================================================================
+
+const diffEditSample = '<<<<<<< SEARCH\nold content\n=======\nnew content\n>>>>>>> REPLACE';
+
+test('diff_edit validator: rejects directory traversal attempts', async (t) => {
+	const validator = diffEditTool.validator;
+	if (!validator) {
+		t.fail('diff_edit validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+
+	try {
+		process.chdir(testDir);
+
+		const result1 = await validator({
+			path: '../etc/passwd',
+			diff: diffEditSample,
+		});
+		t.false(result1.valid, 'Should reject ../ path');
+		if (!result1.valid) {
+			t.regex(result1.error, /Invalid file path/i);
+		}
+
+		const result2 = await validator({
+			path: '../../secret.txt',
+			diff: diffEditSample,
+		});
+		t.false(result2.valid, 'Should reject ../../ path');
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test('diff_edit validator: rejects absolute paths', async (t) => {
+	const validator = diffEditTool.validator;
+	if (!validator) {
+		t.fail('diff_edit validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+
+	try {
+		process.chdir(testDir);
+
+		const result1 = await validator({
+			path: '/etc/passwd',
+			diff: diffEditSample,
+		});
+		t.false(result1.valid, 'Should reject Unix absolute path');
+		if (!result1.valid) {
+			t.regex(result1.error, /Invalid file path/i);
+		}
+
+		const result2 = await validator({
+			path: 'C:\\Windows\\System32',
+			diff: diffEditSample,
+		});
+		t.false(result2.valid, 'Should reject Windows absolute path');
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test('diff_edit validator: rejects null byte injection', async (t) => {
+	const validator = diffEditTool.validator;
+	if (!validator) {
+		t.fail('diff_edit validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+
+	try {
+		process.chdir(testDir);
+
+		const result = await validator({
+			path: 'file\0.txt',
+			diff: diffEditSample,
+		});
+		t.false(result.valid, 'Should reject null byte in path');
+		if (!result.valid) {
+			t.regex(result.error, /Invalid file path/i);
+		}
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test('diff_edit validator: accepts valid relative paths', async (t) => {
+	const validator = diffEditTool.validator;
+	if (!validator) {
+		t.fail('diff_edit validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+
+	try {
+		process.chdir(testDir);
+
+		const testFile = join(testDir, 'test.txt');
+		await fsWriteFile(testFile, 'old content', 'utf-8');
+		markFileSeen(resolve('test.txt'));
+
+		const result = await validator({
+			path: 'test.txt',
+			diff: diffEditSample,
+		});
+
+		t.true(result.valid, 'Should accept valid relative path');
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+// ============================================================================
 // read_file Validator Tests
 // ============================================================================
 
@@ -452,6 +573,18 @@ test('all tools: consistently reject common attack vectors', async (t) => {
 				t.false(
 					replaceResult.valid,
 					`string_replace should reject: ${vector}`,
+				);
+			}
+
+			// Test diff_edit
+			if (diffEditTool.validator) {
+				const diffResult = await diffEditTool.validator({
+					path: vector,
+					diff: diffEditSample,
+				});
+				t.false(
+					diffResult.valid,
+					`diff_edit should reject: ${vector}`,
 				);
 			}
 

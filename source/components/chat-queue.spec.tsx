@@ -58,6 +58,31 @@ test('ChatQueue merges static and queued components', t => {
 	t.truthy(output);
 });
 
+test('ChatQueue can render the last queued component outside Static', t => {
+	const {lastFrame, rerender} = render(
+		<ChatQueue
+			queuedComponents={[
+				<Box key="frozen">Frozen queued message</Box>,
+				<Box key="live">Recallable queued message</Box>,
+			]}
+			renderLastQueuedComponentLive
+		/>,
+	);
+
+	t.regex(lastFrame() ?? '', /Frozen queued message/);
+	t.regex(lastFrame() ?? '', /Recallable queued message/);
+
+	rerender(
+		<ChatQueue
+			queuedComponents={[<Box key="frozen">Frozen queued message</Box>]}
+			renderLastQueuedComponentLive
+		/>,
+	);
+
+	t.regex(lastFrame() ?? '', /Frozen queued message/);
+	t.notRegex(lastFrame() ?? '', /Recallable queued message/);
+});
+
 test('ChatQueue component can be unmounted', t => {
 	const {unmount} = render(<ChatQueue staticComponents={[]} queuedComponents={[]} />);
 

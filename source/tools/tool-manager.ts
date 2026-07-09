@@ -43,6 +43,7 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 		// No mutation tools — plan mode is read-only exploration
 		'write_file',
 		'string_replace',
+		'diff_edit',
 		'file_op',
 		'execute_bash',
 		// No task tool — plan mode produces the plan itself

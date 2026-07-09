@@ -13,6 +13,7 @@ export interface AssistantReasoningProps {
 export interface ChatQueueProps {
 	staticComponents?: ReactNode[];
 	queuedComponents?: ReactNode[];
+	renderLastQueuedComponentLive?: boolean;
 }
 
 export type Completion = {name: string; isCustom: boolean};

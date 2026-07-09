@@ -84,12 +84,16 @@ export async function processToolUse(toolCall: ToolCall): Promise<ToolResult> {
 		};
 	} catch (error) {
 		// Convert exceptions (including validation failures thrown by the
-		// validated handler) into content the model can see and correct.
+		// validated handler, and argument-parsing failures above) into
+		// content the model can see and correct. `isError: true` lets callers
+		// building telemetry/logs (e.g. the `--json` headless report) tell
+		// this apart from a normal result without re-parsing `content`.
 		return {
 			tool_call_id: toolCall.id,
 			role: 'tool',
 			name: toolCall.function.name,
 			content: toolErrorToContent(error),
+			isError: true,
 		};
 	}
 }

@@ -16,7 +16,7 @@ sidebar_order: 24
 	"sdkProvider": "anthropic",
 	"baseUrl": "https://api.minimax.io/anthropic/v1",
 	"apiKey": "your-minimax-api-key",
-	"models": ["your-model-name"]
+	"models": ["MiniMax-M3", "MiniMax-M2.7"]
 }
 ```
 

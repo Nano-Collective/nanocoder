@@ -8,6 +8,7 @@ import {generateKey} from '@/session/key-generator';
 import {getTuneToolMode} from '@/types/config';
 import type {ImageAttachment, Message} from '@/types/core';
 import {MessageBuilder} from '@/utils/message-builder';
+import {infoMsg} from '@/utils/message-factory';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
 import {processAssistantResponse} from './conversation/conversation-loop';
 import {createResetStreamingState} from './state/streaming-state';
@@ -84,8 +85,11 @@ export function useChatHandler({
 	onSetLiveTaskList,
 	setLiveComponent,
 	setLastApiUsage,
+	onApiCallComplete,
 	tune,
 	subagentsReady,
+	privacySessionMapRef,
+	privacyEnabled,
 }: UseChatHandlerProps): ChatHandlerReturn {
 	// Conversation state manager for enhanced context
 	const conversationStateManager = React.useRef(new ConversationStateManager());
@@ -201,8 +205,11 @@ export function useChatHandler({
 	React.useEffect(() => {
 		if (messages.length === 0) {
 			conversationStateManager.current.reset();
+			if (privacySessionMapRef) {
+				privacySessionMapRef.current = {};
+			}
 		}
-	}, [messages.length]);
+	}, [messages.length, privacySessionMapRef]);
 
 	// Wrapper for processAssistantResponse that includes error handling
 	const processAssistantResponseWithErrorHandling = React.useCallback(
@@ -238,7 +245,20 @@ export function useChatHandler({
 					onSetLiveTaskList,
 					setLiveComponent,
 					setLastApiUsage,
+					onApiCallComplete,
 					tune,
+					privacySessionMapRef,
+					privacyEnabled,
+					onPrivacyEvent: (count: number) => {
+						// `count` is the number of NEW identifiers scrubbed on this turn
+						// (the per-turn delta), not a session running total.
+						addToChatQueue(
+							infoMsg(
+								`Privacy active: scrubbed ${count} new identifier${count === 1 ? '' : 's'}`,
+								'privacy',
+							),
+						);
+					},
 				});
 			} catch (error) {
 				displayError(error, 'chat-error');
@@ -271,6 +291,9 @@ export function useChatHandler({
 			resetStreamingState,
 			setLiveComponent,
 			setLastApiUsage,
+			onApiCallComplete,
+			privacySessionMapRef,
+			privacyEnabled,
 		],
 	);
 

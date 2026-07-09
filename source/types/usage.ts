@@ -11,6 +11,15 @@ export interface TokenBreakdown {
 }
 
 /**
+ * Estimated cost breakdown in USD
+ */
+export interface CostBreakdown {
+	currentContext: number; // Cost of current context window
+	cumulativeSession: number; // Session total spend
+	perProvider?: Record<string, number>; // Per-provider subtotals
+}
+
+/**
  * Session usage data
  */
 export interface SessionUsage {

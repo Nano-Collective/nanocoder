@@ -19,7 +19,11 @@ import type {
 	DevelopmentMode,
 	ImageAttachment,
 } from '@/types/core';
-import type {InputState} from '@/types/hooks';
+import type {
+	InputState,
+	RestoredInputDraft,
+	SubmittedInputDraft,
+} from '@/types/hooks';
 import {Completion} from '@/types/index';
 import {
 	extractImageReferences,
@@ -33,6 +37,8 @@ import {
 import {handleFileMention} from '@/utils/file-mention-handler';
 import {assemblePrompt} from '@/utils/prompt-processor';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
+
+const MAX_COMMAND_COMPLETION_ROWS = 10;
 
 interface ChatProps {
 	onSubmit?: (
@@ -60,6 +66,8 @@ interface ChatProps {
 	activeEditor?: ActiveEditorState | null; // VS Code active file + optional selection
 	onDismissActiveEditor?: () => void; // Dismiss the active editor pill on clear/escape
 	forceFocus?: boolean; // Force focus for testing (bypasses useFocus)
+	onSubmittedDraft?: (draft: SubmittedInputDraft) => void;
+	restoreSubmittedDraft?: RestoredInputDraft | null;
 }
 
 export default function UserInput({
@@ -84,13 +92,15 @@ export default function UserInput({
 	activeEditor,
 	onDismissActiveEditor,
 	forceFocus = false,
+	onSubmittedDraft,
+	restoreSubmittedDraft = null,
 }: ChatProps) {
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
 	const effectiveFocus = forceFocus || isFocused;
 	const {colors} = useTheme();
 	const inputState = useInputState();
 	const uiState = useUIStateContext();
-	const {boxWidth, isNarrow} = useResponsiveTerminal();
+	const {boxWidth, isNarrow, actualWidth, truncate} = useResponsiveTerminal();
 	const [textInputKey, setTextInputKey] = useState(0);
 	const completionJustSelectedRef = useRef(false);
 	// Store the full InputState draft when starting history navigation, so it can be restored
@@ -107,6 +117,7 @@ export default function UserInput({
 	const [selectedQueuedIndex, setSelectedQueuedIndex] = useState(-1);
 	// Pending image attachments sent with the next submitted message.
 	const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+	const lastRestoredDraftIdRef = useRef<number | null>(null);
 
 	const {
 		input,
@@ -146,6 +157,28 @@ export default function UserInput({
 	}, []);
 
 	useEffect(() => {
+		if (
+			!restoreSubmittedDraft ||
+			lastRestoredDraftIdRef.current === restoreSubmittedDraft.id
+		) {
+			return;
+		}
+
+		lastRestoredDraftIdRef.current = restoreSubmittedDraft.id;
+		setInputState({
+			displayValue: restoreSubmittedDraft.inputState.displayValue,
+			placeholderContent: {
+				...restoreSubmittedDraft.inputState.placeholderContent,
+			},
+		});
+		setAttachments([...restoreSubmittedDraft.attachments]);
+		resetUIState();
+		promptHistory.resetIndex();
+		setTextInputKey(prev => prev + 1);
+		focus('user-input');
+	}, [restoreSubmittedDraft, setInputState, resetUIState, focus]);
+
+	useEffect(() => {
 		if (queuedMessages.length === 0) {
 			setSelectedQueuedIndex(-1);
 			return;
@@ -155,6 +188,18 @@ export default function UserInput({
 			index >= queuedMessages.length ? queuedMessages.length - 1 : index,
 		);
 	}, [queuedMessages.length]);
+
+	// When in-flight work ends, reclaim focus so the cursor returns and the user
+	// can type right away. Focus can be dropped mid-turn (e.g. an interstitial
+	// tool-confirmation prompt unmounts the input), and useFocus autoFocus only
+	// fires on mount, so we restore it on the busy -> idle edge.
+	const wasBusyRef = useRef(isBusy);
+	useEffect(() => {
+		if (wasBusyRef.current && !isBusy && !disabled) {
+			focus('user-input');
+		}
+		wasBusyRef.current = isBusy;
+	}, [isBusy, disabled, focus]);
 
 	// Consume pending file mentions from explorer and insert into input
 	// Properly attach files by calling handleFileMention for each
@@ -384,6 +429,10 @@ export default function UserInput({
 
 		// Save the InputState to history and send assembled message to AI
 		promptHistory.addPrompt(inputStateForHistory);
+		onSubmittedDraft?.({
+			inputState: inputStateForHistory,
+			attachments: images,
+		});
 		onSubmit(assembled, display, images.length > 0 ? images : undefined);
 		resetInput();
 		resetUIState();
@@ -398,6 +447,7 @@ export default function UserInput({
 		resetUIState,
 		currentState,
 		isBusy,
+		onSubmittedDraft,
 	]);
 
 	// Handle escape key logic
@@ -495,18 +545,26 @@ export default function UserInput({
 				return false;
 			}
 
-			setSelectedQueuedIndex(index => {
-				if (direction === 'down') {
-					return index < 0 || index >= queuedMessages.length - 1
-						? 0
-						: index + 1;
+			if (direction === 'up') {
+				// At the input (-1) there's nothing above the queue, so let the press
+				// fall through to history navigation. From the first queued item, step
+				// back up to the input.
+				if (selectedQueuedIndex < 0) {
+					return false;
 				}
+				setSelectedQueuedIndex(selectedQueuedIndex - 1);
+				return true;
+			}
 
-				return index <= 0 ? queuedMessages.length - 1 : index - 1;
-			});
+			// Down enters the queue from the input, then walks toward the last item
+			// and stops there (no wrap-around).
+			if (selectedQueuedIndex >= queuedMessages.length - 1) {
+				return selectedQueuedIndex >= 0;
+			}
+			setSelectedQueuedIndex(selectedQueuedIndex + 1);
 			return true;
 		},
-		[isBusy, input.length, queuedMessages.length],
+		[isBusy, input.length, queuedMessages.length, selectedQueuedIndex],
 	);
 
 	const loadSelectedQueuedMessage = useCallback(() => {
@@ -590,7 +648,10 @@ export default function UserInput({
 			return;
 		}
 
-		if (key.ctrl && key.delete && removeSelectedQueuedMessage()) {
+		// Delete/Backspace removes the highlighted queued message. Safe to bind
+		// bare: removeSelectedQueuedMessage no-ops unless a queued item is selected
+		// and the input is empty, so normal backspace-to-edit still falls through.
+		if ((key.delete || key.backspace) && removeSelectedQueuedMessage()) {
 			return;
 		}
 
@@ -765,14 +826,30 @@ export default function UserInput({
 			message.images && message.images.length > 0
 				? ` (${message.images.length} image${message.images.length === 1 ? '' : 's'})`
 				: '';
-		const maxLength = Math.max(20, boxWidth - imageSuffix.length - 6);
 		const singleLine = message.displayValue.replace(/\s+/g, ' ').trim();
-		const text =
-			singleLine.length > maxLength
-				? `${singleLine.slice(0, Math.max(0, maxLength - 1))}…`
-				: singleLine;
+		// Truncate against the true terminal width like tool result rows do, not
+		// boxWidth (which floors at 40 and would overflow narrow terminals). The
+		// overhead covers the box border + padding (2), the '▸ '/'  ' marker (2),
+		// and a right-edge safety margin.
+		const maxLength = Math.max(8, actualWidth - imageSuffix.length - 6);
+		const text = truncate(singleLine, maxLength);
 		return `${text}${imageSuffix}`;
 	};
+	const commandCompletionWindow = useMemo(() => {
+		if (completions.length <= MAX_COMMAND_COMPLETION_ROWS) {
+			return {start: 0, end: completions.length, items: completions};
+		}
+
+		const selectedIndex =
+			selectedCompletionIndex >= 0 ? selectedCompletionIndex : 0;
+		const centeredStart =
+			selectedIndex - Math.floor(MAX_COMMAND_COMPLETION_ROWS / 2);
+		const maxStart = completions.length - MAX_COMMAND_COMPLETION_ROWS;
+		const start = Math.min(Math.max(centeredStart, 0), maxStart);
+		const end = start + MAX_COMMAND_COMPLETION_ROWS;
+
+		return {start, end, items: completions.slice(start, end)};
+	}, [completions, selectedCompletionIndex]);
 
 	// When disabled, show minimal UI to avoid cluttering the screen
 	if (disabled) {
@@ -804,9 +881,11 @@ export default function UserInput({
 	return (
 		<>
 			{!isBashMode ? (
-				<Text color={colors.primary} bold>
-					What would you like me to help with?
-				</Text>
+				<Box marginTop={1}>
+					<Text color={colors.primary} bold>
+						What would you like me to help with?
+					</Text>
+				</Box>
 			) : (
 				<Text color={colors.tool} bold>
 					Bash mode
@@ -851,11 +930,12 @@ export default function UserInput({
 				{showCompletions && completions.length > 0 && (
 					<Box flexDirection="column" marginTop={1}>
 						<Text color={colors.secondary}>Available commands:</Text>
-						{completions.map((completion, index) => {
-							const isSelected = index === selectedCompletionIndex;
+						{commandCompletionWindow.items.map((completion, index) => {
+							const completionIndex = commandCompletionWindow.start + index;
+							const isSelected = completionIndex === selectedCompletionIndex;
 							return (
 								<Text
-									key={index}
+									key={`${completion.isCustom ? 'custom' : 'built-in'}-${completion.name}`}
 									color={
 										isSelected
 											? colors.info
@@ -869,6 +949,12 @@ export default function UserInput({
 								</Text>
 							);
 						})}
+						{completions.length > MAX_COMMAND_COMPLETION_ROWS && (
+							<Text color={colors.secondary}>
+								Showing {commandCompletionWindow.start + 1}-
+								{commandCompletionWindow.end} of {completions.length}
+							</Text>
+						)}
 					</Box>
 				)}
 				{isFileAutocompleteMode && fileCompletions.length > 0 && (
@@ -893,7 +979,7 @@ export default function UserInput({
 				{queuedMessages.length > 0 && (
 					<Box flexDirection="column" marginTop={1}>
 						<Text color={colors.secondary}>
-							Queued messages (↑/↓ select, Enter edit, Ctrl+Delete remove):
+							Queued messages (↑/↓ select, Enter edit, Del remove):
 						</Text>
 						{queuedMessages.map((message, index) => {
 							const isSelected = index === selectedQueuedIndex;
@@ -911,16 +997,18 @@ export default function UserInput({
 					</Box>
 				)}
 				{isBusy && (
-					<Text color={colors.secondary}>
-						<Spinner type="dots" /> Press Esc to cancel
-						{onToggleCompactDisplay && (
-							<Text>
-								{' '}
-								· ctrl-o {compactToolDisplay ? 'expand' : 'compact'}{' '}
-								{isNarrow ? '' : 'tool results'}
-							</Text>
-						)}
-					</Text>
+					<Box marginTop={1}>
+						<Text color={colors.secondary}>
+							<Spinner type="dots" /> Press Esc to cancel
+							{onToggleCompactDisplay && (
+								<Text>
+									{' '}
+									· ctrl-o {compactToolDisplay ? 'expand' : 'compact'}{' '}
+									{isNarrow ? '' : 'tool results'}
+								</Text>
+							)}
+						</Text>
+					</Box>
 				)}
 			</Box>
 

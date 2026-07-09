@@ -23,6 +23,7 @@ import type {ToolManager} from '@/tools/tool-manager';
 import {isSingleToolProfile} from '@/tools/tool-profiles';
 import type {TuneConfig} from '@/types/config';
 import type {
+	ApiCallRecord,
 	ApiUsageSnapshot,
 	LLMClient,
 	Message,
@@ -44,6 +45,7 @@ import {displayCompactCountsSummary} from '@/utils/tool-result-display';
 import {closeAllDiffsInVSCode} from '@/vscode/index';
 import {filterValidToolCalls} from '../utils/tool-filters';
 import {computeToolCallSignature} from '../utils/tool-signature';
+import {buildAutoDiagnosticsMessage} from './auto-diagnostics';
 import {
 	displayExecutedTool,
 	executeApprovedTool,
@@ -87,7 +89,14 @@ interface ProcessAssistantResponseParams {
 	// it, e.g. after auto-compaction) so the context indicator can prefer
 	// API-accurate numbers over client-side estimation.
 	setLastApiUsage?: (usage: ApiUsageSnapshot | null) => void;
+	// Pushes a per-call record after each successful API response so the
+	// /usage command can compute accurate per-provider costs from real
+	// provider-reported token counts rather than client-side estimates.
+	onApiCallComplete?: (record: ApiCallRecord) => void;
 	tune?: TuneConfig;
+	privacySessionMapRef?: React.MutableRefObject<Record<string, string>>;
+	privacyEnabled?: boolean;
+	onPrivacyEvent?: (scrubbedDelta: number) => void;
 	// Number of consecutive empty assistant turns that have already been
 	// nudged in this loop. The empty-response branch increments and
 	// recurses; every other recursion site resets to 0.
@@ -165,6 +174,7 @@ export const processAssistantResponse = async (
 		onSetLiveTaskList,
 		setLiveComponent,
 		setLastApiUsage,
+		onApiCallComplete,
 		tune,
 		developmentMode,
 		developmentModeRef,
@@ -173,6 +183,9 @@ export const processAssistantResponse = async (
 		compactRetryCount = 0,
 		lastToolSignature,
 		repeatedToolCallCount = 0,
+		privacySessionMapRef,
+		privacyEnabled = false,
+		onPrivacyEvent,
 	} = params;
 
 	const startTime = conversationStartTime ?? Date.now();
@@ -252,8 +265,16 @@ export const processAssistantResponse = async (
 					nonInteractiveMode,
 					nonInteractiveAlwaysAllow,
 					modelParameters,
+					privacySessionMapRef,
+					privacyEnabled,
 				}
-			: undefined;
+			: {
+					nonInteractiveMode: false,
+					nonInteractiveAlwaysAllow: [],
+					modelParameters,
+					privacySessionMapRef,
+					privacyEnabled,
+				};
 
 	// Get effective tools — ToolManager is the single authority for
 	// availability (mode + profile filtering) and approval policy
@@ -293,6 +314,7 @@ export const processAssistantResponse = async (
 				streamedReasoning += token;
 				setStreamingReasoning(streamedReasoning);
 			},
+			onPrivacyEvent,
 		},
 		controller.signal,
 		modeOverrides,
@@ -582,6 +604,18 @@ export const processAssistantResponse = async (
 				? {...usage, atMessageCount: updatedMessages.length}
 				: null,
 		);
+
+		// Record a per-call history entry for session cost tracking
+		if (onApiCallComplete && hasReportedUsage) {
+			onApiCallComplete({
+				provider: currentProvider,
+				model: currentModel,
+				inputTokens: usage.inputTokens,
+				outputTokens: usage.outputTokens,
+				totalTokens: usage.totalTokens,
+				timestamp: Date.now(),
+			});
+		}
 	}
 
 	// Clear streaming content (but don't set isGenerating=false yet —
@@ -829,8 +863,20 @@ export const processAssistantResponse = async (
 
 		// 4) Feed all results back to the model and continue the loop.
 		if (turnResults.length > 0) {
+			let autoDiagnosticsMessage: Message | null = null;
+			if (availableNames.includes('lsp_get_diagnostics')) {
+				const {processToolUse} = await import('@/message-handler');
+				autoDiagnosticsMessage = await buildAutoDiagnosticsMessage(
+					validToolCalls,
+					turnResults,
+					processToolUse,
+				);
+			}
 			const builder = new MessageBuilder(updatedMessages);
 			builder.addToolResults(turnResults);
+			if (autoDiagnosticsMessage) {
+				builder.addMessage(autoDiagnosticsMessage);
+			}
 			const nextMessages = builder.build();
 			setMessages(nextMessages);
 			await processAssistantResponse({
