@@ -1,4 +1,4 @@
-import React, {createContext} from 'react';
+import React, {createContext, useContext} from 'react';
 
 export interface PrivacyContextType {
 	privacyEnabled: boolean;
@@ -9,3 +9,7 @@ export const PrivacyContext = createContext<PrivacyContextType>({
 	privacyEnabled: false,
 	privacySessionMapRef: null,
 });
+
+export function usePrivacyContext() {
+	return useContext(PrivacyContext);
+}
