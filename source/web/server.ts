@@ -20,7 +20,7 @@ export interface LocalWebServer {
 
 const DEFAULT_HOST = '127.0.0.1';
 
-export function createLocalWebToken(): string {
+function createLocalWebToken(): string {
 	return randomBytes(32).toString('hex');
 }
 
@@ -92,10 +92,11 @@ function openUrl(url: string): void {
 	const command =
 		platform === 'darwin' ? 'open' : platform === 'win32' ? 'cmd' : 'xdg-open';
 	const args = platform === 'win32' ? ['/c', 'start', '', url] : [url];
+	// The URL is generated locally from host/port/token and is passed without a shell.
 	const child = spawn(command, args, {
 		detached: true,
 		stdio: 'ignore',
-	});
+	}); // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
 	child.on('error', () => {});
 	child.unref();
 }
