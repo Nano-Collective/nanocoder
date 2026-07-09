@@ -34,14 +34,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: main
           fetch-depth: 0
           token: ${{ secrets.PAT_TOKEN }}
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v26
+        uses: cachix/install-nix-action@8887e596b4ee1134dae06b98d573bd674693f47c
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |

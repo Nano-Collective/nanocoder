@@ -4,6 +4,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
     ignore:
       # Managed via pnpm overrides in package.json
       - dependency-name: "jws"
