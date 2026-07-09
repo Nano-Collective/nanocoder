@@ -1,6 +1,7 @@
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
 import {UIStateProvider, useUIStateContext} from '../hooks/useUIState';
@@ -380,7 +381,7 @@ test.serial('UserInput truncates long queued messages on narrow terminals', t =>
 			.split('\n')
 			.find(line => line.includes('this is a very long'));
 		t.truthy(messageLine);
-		t.true((messageLine ?? '').length <= 40);
+		t.true(stripAnsi(messageLine ?? '').length <= 40);
 		unmount();
 	} finally {
 		Object.defineProperty(process.stdout, 'columns', {
