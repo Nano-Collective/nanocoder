@@ -32,7 +32,7 @@ function fileSub(id: string, paths?: string[]): Subscription {
 
 async function waitFor(
 	predicate: () => boolean,
-	timeoutMs = 5000,
+	timeoutMs = 2000,
 	intervalMs = 25,
 ): Promise<void> {
 	const deadline = Date.now() + timeoutMs;

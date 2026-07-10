@@ -226,9 +226,7 @@ function loadEnvMCPConfigs(): MCPServerWithSource[] {
  * This mirrors the approach used for MCP servers to support hierarchical loading
  */
 export function loadAllProviderConfigs(): ProviderConfig[] {
-	const projectProviders = process.env.NANOCODER_IGNORE_PROJECT_CONFIG
-		? []
-		: loadProjectProviderConfigs();
+	const projectProviders = loadProjectProviderConfigs();
 	// Skip loading global providers in test environment to allow test isolation
 	const globalProviders =
 		process.env.NODE_ENV === 'test' ? [] : loadGlobalProviderConfigs();

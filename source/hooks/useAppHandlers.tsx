@@ -585,6 +585,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 						.slice(1)
 						.trim()
 						.split(/\s+/)
+						.slice(1)
 				: undefined;
 
 			await handleMessageSubmission(

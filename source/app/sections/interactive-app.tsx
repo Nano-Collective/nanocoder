@@ -69,6 +69,10 @@ export function InteractiveApp({
 	const [restoredDraft, setRestoredDraft] =
 		React.useState<RestoredInputDraft | null>(null);
 
+	// Gate: track whether we have already shown the bar for the current
+	// completed turn, so Modify/Dismiss can't trigger an immediate re-show.
+	const planReviewShownRef = React.useRef(false);
+
 	const handleToggleCompactDisplay = () => {
 		const expanding = appState.compactToolDisplay;
 		appState.setCompactToolDisplay(!expanding);
@@ -95,16 +99,27 @@ export function InteractiveApp({
 		appState.isSettingsMode;
 
 	// Show the plan review bar when the current plan-mode turn has just completed.
+	// planReviewShownRef gates the effect so it fires once per completed turn;
+	// Modify/Dismiss only null planReviewState — without the gate the effect would
+	// immediately re-fire and bring the bar straight back.
 	React.useEffect(() => {
 		if (
 			appState.isConversationComplete &&
 			appState.developmentMode === 'plan' &&
-			!appState.planReviewState
+			!appState.planReviewState &&
+			!planReviewShownRef.current
 		) {
+			planReviewShownRef.current = true;
 			// Capture the last user message so Proceed can include it as context.
+			// Ignore the synthetic "Ask More" message so we don't pollute the context.
 			const lastUserMsg = [...appState.messages]
 				.reverse()
-				.find(m => m.role === 'user');
+				.find(
+					m =>
+						m.role === 'user' &&
+						m.content !==
+							'please ask me any additional clarifying questions before proceeding',
+				);
 			const originalMessage =
 				typeof lastUserMsg?.content === 'string' ? lastUserMsg.content : '';
 			appState.setPlanReviewState({show: true, originalMessage});
@@ -117,6 +132,14 @@ export function InteractiveApp({
 		appState.setPlanReviewState,
 		appState,
 	]);
+
+	// Reset the per-turn gate when the conversation starts a new turn so the
+	// bar can appear again after the next plan completes.
+	React.useEffect(() => {
+		if (!appState.isConversationComplete) {
+			planReviewShownRef.current = false;
+		}
+	}, [appState.isConversationComplete]);
 
 	// Whether there is in-flight work that Escape should immediately cancel.
 	// Decision states (tool confirmation, question prompt, subagent approval)
@@ -289,7 +312,8 @@ export function InteractiveApp({
 
 			{appState.startChat &&
 				appState.activeMode === null &&
-				!appState.isSettingsMode && (
+				!appState.isSettingsMode &&
+				!appState.planReviewState?.show && (
 					<ChatInput
 						isCancelling={appState.isCancelling}
 						isToolExecuting={appState.isToolExecuting}
