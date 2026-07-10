@@ -464,9 +464,6 @@ function loadModeProvidersConfig(
 				result[mode as DevelopmentMode] = {
 					provider: matchedProvider.name,
 					model: modelName,
-					...(typeof typedConfig.temperature === 'number'
-						? {temperature: typedConfig.temperature}
-						: {}),
 				};
 			}
 

@@ -129,10 +129,12 @@ export interface NotificationsConfig {
 	};
 }
 
+// Note: temperature is intentionally excluded from this interface.
+// It cannot be applied during a mode switch without proper integration into
+// the tune/ModelParameters pipeline (tune.ts). Tracked as a follow-up.
 export interface ModeProviderConfig {
 	provider: string;
 	model: string;
-	temperature?: number;
 }
 
 export interface AppConfig {

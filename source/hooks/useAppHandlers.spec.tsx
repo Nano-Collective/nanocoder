@@ -1,12 +1,12 @@
 import test from 'ava';
-import { cleanup, render } from 'ink-testing-library';
+import {cleanup, render} from 'ink-testing-library';
 import React from 'react';
-import type { CheckpointListItem } from '@/types/checkpoint';
-import type { AIProviderConfig } from '@/types/config';
-import type { DevelopmentMode, LLMClient, Message } from '@/types/core';
-import type { CustomCommand } from '@/types/commands';
-import type { AppHandlers } from './useAppHandlers';
-import { useAppHandlers } from './useAppHandlers';
+import type {CheckpointListItem} from '@/types/checkpoint';
+import type {AIProviderConfig} from '@/types/config';
+import type {DevelopmentMode, LLMClient, Message} from '@/types/core';
+import type {CustomCommand} from '@/types/commands';
+import type {AppHandlers} from './useAppHandlers';
+import {useAppHandlers} from './useAppHandlers';
 
 import {
 	getKeyGeneratorSessionId,
@@ -51,9 +51,9 @@ function makeProps(overrides: ProbeOverrides) {
 	const setCheckpointLoadData = spy<
 		[
 			| {
-				checkpoints: CheckpointListItem[];
-				currentMessageCount: number;
-			}
+					checkpoints: CheckpointListItem[];
+					currentMessageCount: number;
+			  }
 			| null,
 		]
 	>();
@@ -153,7 +153,7 @@ function makeProps(overrides: ProbeOverrides) {
 
 function setup(overrides: ProbeOverrides = {}) {
 	captured = null;
-	const { props, spies } = makeProps(overrides);
+	const {props, spies} = makeProps(overrides);
 
 	function Probe() {
 		captured = useAppHandlers(props as never);
@@ -162,7 +162,7 @@ function setup(overrides: ProbeOverrides = {}) {
 
 	const instance = render(<Probe />);
 	if (!captured) throw new Error('useAppHandlers did not initialize');
-	return { handlers: captured as AppHandlers, instance, spies };
+	return {handlers: captured as AppHandlers, instance, spies};
 }
 
 test.afterEach(() => {
@@ -171,7 +171,7 @@ test.afterEach(() => {
 });
 
 test('returns the expected handler surface', t => {
-	const { handlers } = setup();
+	const {handlers} = setup();
 
 	t.is(typeof handlers.clearMessages, 'function');
 	t.is(typeof handlers.handleCancel, 'function');

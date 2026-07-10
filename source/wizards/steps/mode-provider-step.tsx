@@ -2,7 +2,6 @@ import {Box, Text, useInput} from 'ink';
 import SelectInput from 'ink-select-input';
 import {useState} from 'react';
 import {VALID_MODES} from '@/app/types';
-import TextInput from '@/components/text-input';
 import {getColors} from '@/config/index';
 import type {ModeProviderConfig, ProviderConfig} from '../../types/config';
 import type {DevelopmentMode} from '../../types/core';
@@ -16,11 +15,7 @@ interface ModeProviderStepProps {
 	onBack: () => void;
 }
 
-type Mode =
-	| 'select-mode'
-	| 'select-provider'
-	| 'select-model'
-	| 'enter-temperature';
+type Mode = 'select-mode' | 'select-provider' | 'select-model';
 type SelectModeValue = DevelopmentMode | 'done' | 'clear';
 type SelectProviderValue = string | 'clear';
 
@@ -41,8 +36,6 @@ export function ModeProviderStep({
 		useState<DevelopmentMode | null>(null);
 	const [selectedProvider, setSelectedProvider] =
 		useState<ProviderConfig | null>(null);
-	const [selectedModel, setSelectedModel] = useState<string | null>(null);
-	const [temperatureStr, setTemperatureStr] = useState<string>('');
 
 	useInput((input, key) => {
 		if (key.escape || (input === 'b' && key.ctrl)) {
@@ -52,8 +45,6 @@ export function ModeProviderStep({
 				setMode('select-mode');
 			} else if (mode === 'select-model') {
 				setMode('select-provider');
-			} else if (mode === 'enter-temperature') {
-				setMode('select-model');
 			}
 		}
 	});
@@ -137,12 +128,15 @@ export function ModeProviderStep({
 								if (provider.models.length > 0) {
 									setMode('select-model');
 								} else {
-									setSelectedModel('default');
-									setTemperatureStr(
-										modeProviders[selectedDevMode!]?.temperature?.toString() ||
-											'',
-									);
-									setMode('enter-temperature');
+									// Provider allows any model - use 'default' as placeholder
+									setModeProviders(prev => ({
+										...prev,
+										[selectedDevMode!]: {
+											provider: provider.name,
+											model: 'default',
+										},
+									}));
+									setMode('select-mode');
 								}
 							}
 						}
@@ -167,48 +161,16 @@ export function ModeProviderStep({
 				<SelectInput
 					items={items}
 					onSelect={item => {
-						setSelectedModel(item.value);
-						setTemperatureStr(
-							modeProviders[selectedDevMode!]?.temperature?.toString() || '',
-						);
-						setMode('enter-temperature');
+						setModeProviders(prev => ({
+							...prev,
+							[selectedDevMode!]: {
+								provider: selectedProvider!.name,
+								model: item.value,
+							},
+						}));
+						setMode('select-mode');
 					}}
 				/>
-			</Box>
-		);
-	}
-
-	if (mode === 'enter-temperature') {
-		return (
-			<Box flexDirection="column" gap={1}>
-				<Text color={colors.primary}>
-					Temperature for {selectedDevMode} (optional, 0.0 to 2.0)
-				</Text>
-				<Box borderStyle="round" borderColor={colors.secondary}>
-					<TextInput
-						value={temperatureStr}
-						onChange={setTemperatureStr}
-						onSubmit={() => {
-							const temp = temperatureStr?.trim()
-								? parseFloat(temperatureStr)
-								: undefined;
-							setModeProviders(prev => ({
-								...prev,
-								[selectedDevMode!]: {
-									provider: selectedProvider!.name,
-									model: selectedModel!,
-									...(temp !== undefined && !isNaN(temp)
-										? {temperature: temp}
-										: {}),
-								},
-							}));
-							setMode('select-mode');
-						}}
-					/>
-				</Box>
-				<Text color={colors.secondary}>
-					Press Enter to save, or Esc to go back
-				</Text>
 			</Box>
 		);
 	}
