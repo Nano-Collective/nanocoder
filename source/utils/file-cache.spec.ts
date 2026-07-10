@@ -307,3 +307,42 @@ test('getCachedFileContent - handles rapid sequential modifications', async t =>
 		await cleanupTempDir(tempDir);
 	}
 });
+
+// ============================================================================
+// Tests for Binary File Conversion (PDF/DOCX)
+// ============================================================================
+
+test('getCachedFileContent - throws descriptive error for corrupt PDF', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = join(tempDir, 'test.pdf');
+		// Write a dummy PDF signature
+		await writeFile(filePath, '%PDF-1.4\n%Fake PDF content');
+
+		// The real get-md will fail on a fake PDF and throw an error.
+		await t.throwsAsync(
+			async () => getCachedFileContent(filePath),
+			{message: /Failed to extract text from document/}
+		);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test('getCachedFileContent - throws descriptive error for corrupt DOCX', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = join(tempDir, 'test.docx');
+		// Write a dummy ZIP signature for DOCX
+		await writeFile(filePath, 'PK\x03\x04\nFake DOCX content');
+
+		// The real get-md will fail on a corrupt/fake zip and throw an error.
+		// We expect the file-cache to catch this and throw a descriptive error.
+		await t.throwsAsync(
+			async () => getCachedFileContent(filePath),
+			{message: /Failed to extract text from document/}
+		);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});

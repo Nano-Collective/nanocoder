@@ -101,6 +101,8 @@ export async function getCachedFileContent(
 	}
 }
 
+import {extname} from 'node:path';
+
 /**
  * Read file from disk and cache it.
  * Verifies mtime didn't change during read to prevent race conditions.
@@ -115,7 +117,8 @@ async function readAndCacheFile(
 	// Get mtime before reading (or use known mtime from caller)
 	const mtimeBefore = knownMtime ?? (await stat(absPath)).mtimeMs;
 
-	const content = await readFile(absPath, 'utf-8');
+	// Read as Buffer to support both text and binary formats
+	const buffer = await readFile(absPath);
 
 	// Verify mtime didn't change during read
 	const mtimeAfter = (await stat(absPath)).mtimeMs;
@@ -127,6 +130,24 @@ async function readAndCacheFile(
 		}
 		// File changed during read, retry with fresh timestamp
 		return readAndCacheFile(absPath, Date.now(), undefined, retryCount + 1);
+	}
+
+	let content: string;
+	const ext = extname(absPath).toLowerCase();
+
+	if (ext === '.pdf' || ext === '.docx') {
+		try {
+			const {convertToMarkdown} = await import('@nanocollective/get-md');
+			// biome-ignore lint/suspicious/noExplicitAny: buffer types mismatch between get-md and native
+			const result = await convertToMarkdown(buffer as any);
+			content = result.markdown;
+		} catch (error) {
+			const errorMessage =
+				error instanceof Error ? error.message : String(error);
+			throw new Error(`Failed to extract text from document: ${errorMessage}`);
+		}
+	} else {
+		content = buffer.toString('utf-8');
 	}
 
 	const cachedFile: CachedFile = {

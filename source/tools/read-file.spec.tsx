@@ -1031,3 +1031,101 @@ test.serial('read_file metadata_only shows last modified time', async t => {
 		rmSync(testDir, {recursive: true, force: true});
 	}
 });
+
+test.serial('read_file metadata_only shows converted binary encoding for PDF', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-meta-pdf');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		const pdfContent = `%PDF-1.1
+%\xA5\xB1\xEB
+1 0 obj
+  << /Type /Catalog
+     /Pages 2 0 R
+  >>
+endobj
+2 0 obj
+  << /Type /Pages
+     /Kids [3 0 R]
+     /Count 1
+     /MediaBox [0 0 300 144]
+  >>
+endobj
+3 0 obj
+  <<  /Type /Page
+      /Parent 2 0 R
+      /Resources
+       << /Font
+           << /F1
+               << /Type /Font
+                  /Subtype /Type1
+                  /BaseFont /Times-Roman
+               >>
+           >>
+       >>
+      /Contents 4 0 R
+  >>
+endobj
+4 0 obj
+  << /Length 55 >>
+stream
+  BT
+    /F1 18 Tf
+    0 0 Td
+    (Hello World) Tj
+  ET
+endstream
+endobj
+xref
+0 5
+0000000000 65535 f 
+0000000018 00000 n 
+0000000077 00000 n 
+0000000178 00000 n 
+0000000457 00000 n 
+trailer
+  <<  /Root 1 0 R
+      /Size 5
+  >>
+startxref
+565
+%%EOF`;
+		writeFileSync(join(testDir, 'test.pdf'), pdfContent);
+
+		const result = (await readFileTool.tool.execute!(
+			{
+				path: join(testDir, 'test.pdf'),
+				metadata_only: true,
+			},
+			{toolCallId: 'test', messages: []},
+		)) as string;
+
+		t.regex(result, /Encoding: Binary \(Converted to Markdown\)/);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('read_file metadata_only shows converted binary encoding for DOCX', async t => {
+	t.timeout(10000);
+	const testDir = join(process.cwd(), 'test-meta-docx');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		const docxBase64 = 'UEsDBBQAAAAAAOtT6lzMVIwQnAEAAJwBAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbDw/eG1sIHZlcnNpb249IjEuMCIgZW5jb2Rpbmc9IlVURi04Ij8+PFR5cGVzIHhtbG5zPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvcGFja2FnZS8yMDA2L2NvbnRlbnQtdHlwZXMiPjxEZWZhdWx0IEV4dGVuc2lvbj0icmVscyIgQ29udGVudFR5cGU9ImFwcGxpY2F0aW9uL3ZuZC5vcGVueG1sZm9ybWF0cy1wYWNrYWdlLnJlbGF0aW9uc2hpcHMreG1sIi8+PERlZmF1bHQgRXh0ZW5zaW9uPSJ4bWwiIENvbnRlbnRUeXBlPSJhcHBsaWNhdGlvbi94bWwiLz48T3ZlcnJpZGUgUGFydE5hbWU9Ii93b3JkL2RvY3VtZW50LnhtbCIgQ29udGVudFR5cGU9ImFwcGxpY2F0aW9uL3ZuZC5vcGVueG1sZm9ybWF0cy1vZmZpY2Vkb2N1bWVudC53b3JkcHJvY2Vzc2luZ21sLmRvY3VtZW50Lm1haW4reG1sIi8+PC9UeXBlcz5QSwMEFAAAAAAA61PqXDZX3twYAQAAGAEAAAsAAABfcmVscy8ucmVsczw/eG1sIHZlcnNpb249IjEuMCIgZW5jb2Rpbmc9IlVURi04Ij8+PFJlbGF0aW9uc2hpcHMgeG1sbnM9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy9wYWNrYWdlLzIwMDYvcmVsYXRpb25zaGlwcyI+PFJlbGF0aW9uc2hpcCBJZD0icklkMSIgVHlwZT0iaHR0cDovL3NjaGVtYXMub3BlbnhtbGZvcm1hdHMub3JnL29mZmljZURvY3VtZW50LzIwMDYvcmVsYXRpb25zaGlwcy9vZmZpY2VEb2N1bWVudCIgVGFyZ2V0PSJ3b3JkL2RvY3VtZW50LnhtbCIvPjwvUmVsYXRpb25zaGlwcz5QSwMEFAAAAAAA61PqXKOp4qS9AAAAvQAAABEAAAB3b3JkL2RvY3VtZW50LnhtbDw/eG1sIHZlcnNpb249IjEuMCIgZW5jb2Rpbmc9IlVURi04Ij8+PHc6ZG9jdW1lbnQgeG1sbnM6dz0iaHR0cDovL3NjaGVtYXMub3BlbnhtbGZvcm1hdHMub3JnL3dvcmRwcm9jZXNzaW5nbWwvMjAwNi9tYWluIj48dzpib2R5Pjx3OnA+PHc6cj48dzp0PkhlbGxvPC93OnQ+PC93OnI+PC93OnA+PC93OmJvZHk+PC93OmRvY3VtZW50PlBLAQIUAxQAAAAAAOtT6lzMVIwQnAEAAJwBAAATAAAAAAAAAAAAAACAAQAAAABbQ29udGVudF9UeXBlc10ueG1sUEsBAhQDFAAAAAAA61PqXDZX3twYAQAAGAEAAAsAAAAAAAAAAAAAAIABzQEAAF9yZWxzLy5yZWxzUEsBAhQDFAAAAAAA61PqXKOp4qS9AAAAvQAAABEAAAAAAAAAAAAAAIABDgMAAHdvcmQvZG9jdW1lbnQueG1sUEsFBgAAAAADAAMAuQAAAPoDAAAAAA==';
+		writeFileSync(join(testDir, 'test.docx'), Buffer.from(docxBase64, 'base64'));
+
+		const result = (await readFileTool.tool.execute!(
+			{
+				path: join(testDir, 'test.docx'),
+				metadata_only: true,
+			},
+			{toolCallId: 'test', messages: []},
+		)) as string;
+
+		t.regex(result, /Encoding: Binary \(Converted to Markdown\)/);
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});

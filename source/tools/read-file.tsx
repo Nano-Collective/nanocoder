@@ -72,9 +72,16 @@ const executeReadFile = async (args: {
 					// Detect likely encoding (simple heuristic)
 					let encoding = 'UTF-8';
 					try {
-						// Try to read as UTF-8
-						await readFile(absPath, 'utf-8');
-					} catch {
+						if (
+							absPath.toLowerCase().endsWith('.pdf') ||
+							absPath.toLowerCase().endsWith('.docx')
+						) {
+							encoding = 'Binary (Converted to Markdown)';
+						} else {
+							// Try to read as UTF-8
+							await readFile(absPath, 'utf-8');
+						}
+					} catch (_error: unknown) {
 						encoding = 'Binary/Unknown';
 					}
 					output += `Encoding: ${encoding}\n`;
