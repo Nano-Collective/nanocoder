@@ -25,6 +25,7 @@ import type {
 	PasteConfig,
 	ProviderConfig,
 	SystemPromptConfig,
+	TuneConfig,
 } from '@/types/index';
 import {logError} from '@/utils/message-queue';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
@@ -189,6 +190,19 @@ function loadAutoCompactConfig(): AutoCompactConfig {
 			}
 			return null;
 		}) ?? defaults
+	);
+}
+
+// Load tune configuration from agents.config.json if it exists
+function loadTuneConfig(): Partial<TuneConfig> | undefined {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'tune', config => {
+			const tune = config.nanocoder?.tune;
+			if (tune && typeof tune === 'object') {
+				return tune as Partial<TuneConfig>;
+			}
+			return null;
+		}) ?? undefined
 	);
 }
 
@@ -530,6 +544,8 @@ function loadAppConfig(): AppConfig {
 
 	// Load mode providers configuration
 	const modeProviders = loadModeProvidersConfig(providers);
+	// Load tune configuration (model mode defaults from agents.config.json)
+	const tune = loadTuneConfig();
 
 	return {
 		providers,
@@ -544,6 +560,7 @@ function loadAppConfig(): AppConfig {
 		systemPrompt,
 		notifications,
 		modeProviders,
+		tune,
 	};
 }
 

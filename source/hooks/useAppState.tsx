@@ -1,6 +1,7 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {loadPreferences} from '@/config/preferences';
+import {getAppConfig} from '@/config/index';
 import {defaultTheme} from '@/config/themes';
 import {resolveTune} from '@/config/tune';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
@@ -176,7 +177,7 @@ export function useAppState(
 
 	// Model mode state — resolved from config layers on startup
 	const [tune, setTune] = useState<TuneConfig>(() => {
-		return resolveTune(undefined, undefined, preferences);
+		return resolveTune(getAppConfig(), undefined, preferences);
 	});
 
 	// Context usage state
