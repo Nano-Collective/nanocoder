@@ -89,6 +89,7 @@ interface UseAppHandlersProps {
 	setPlanReviewState: (
 		value: {show: boolean; originalMessage: string} | null,
 	) => void;
+	setPendingPlanProceed: (value: boolean) => void;
 
 	// Callbacks
 	addToChatQueue: (component: React.ReactNode) => void;
@@ -140,7 +141,7 @@ export interface AppHandlers {
 		images?: ImageAttachment[],
 	) => Promise<void>;
 	// Plan review action bar
-	handlePlanProceed: (originalMessage: string) => Promise<void>;
+	handlePlanProceed: () => void;
 	handlePlanAskMore: () => Promise<void>;
 	handlePlanModify: () => void;
 }
@@ -529,24 +530,23 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	}, [props.setActiveMode, props]);
 
 	// Plan review action bar handlers
-	const handlePlanProceed = React.useCallback(
-		async (originalMessage: string) => {
-			// Hide the review bar
-			props.setPlanReviewState(null);
-			// Switch to normal mode so the model will execute rather than plan
-			props.setDevelopmentMode('normal');
-			// Dispatch a synthetic message so the model acts on the plan it just wrote
-			await props.handleChatMessage(
-				`proceed with the plan above${originalMessage ? ` for: ${originalMessage}` : ''}`,
-			);
-		},
-		[
-			props.setPlanReviewState,
-			props.setDevelopmentMode,
-			props.handleChatMessage,
-			props,
-		],
-	);
+	const handlePlanProceed = React.useCallback(() => {
+		// Hide the review bar and switch to normal mode. The actual "implement the
+		// plan" message is dispatched by an effect once developmentMode has settled
+		// to 'normal' (see InteractiveApp) — dispatching here would run the turn
+		// with the stale plan-mode system prompt and tools. We deliberately do NOT
+		// echo the user's last message: the plan is already in the conversation, and
+		// after a Modify/clarify round the last message is a follow-up question, not
+		// the original request.
+		props.setPlanReviewState(null);
+		props.setDevelopmentMode('normal');
+		props.setPendingPlanProceed(true);
+	}, [
+		props.setPlanReviewState,
+		props.setDevelopmentMode,
+		props.setPendingPlanProceed,
+		props,
+	]);
 
 	const handlePlanAskMore = React.useCallback(async () => {
 		// Hide the review bar

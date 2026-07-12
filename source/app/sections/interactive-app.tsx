@@ -69,10 +69,6 @@ export function InteractiveApp({
 	const [restoredDraft, setRestoredDraft] =
 		React.useState<RestoredInputDraft | null>(null);
 
-	// Gate: track whether we have already shown the bar for the current
-	// completed turn, so Modify/Dismiss can't trigger an immediate re-show.
-	const planReviewShownRef = React.useRef(false);
-
 	const handleToggleCompactDisplay = () => {
 		const expanding = appState.compactToolDisplay;
 		appState.setCompactToolDisplay(!expanding);
@@ -98,48 +94,47 @@ export function InteractiveApp({
 			appState.activeMode !== 'ideSelection') ||
 		appState.isSettingsMode;
 
-	// Show the plan review bar when the current plan-mode turn has just completed.
-	// planReviewShownRef gates the effect so it fires once per completed turn;
-	// Modify/Dismiss only null planReviewState — without the gate the effect would
-	// immediately re-fire and bring the bar straight back.
+	// Show the plan review bar when the chat handler signals that a turn which
+	// STARTED in plan mode ran to completion uninterrupted (planTurnCompleted).
+	// Consuming this explicit one-shot signal — rather than inferring from
+	// isConversationComplete + the current mode — is what makes it correct: the
+	// user can toggle modes or interrupt a running turn, and only the chat
+	// handler knows whether a plan was actually produced.
 	React.useEffect(() => {
-		if (
-			appState.isConversationComplete &&
-			appState.developmentMode === 'plan' &&
-			!appState.planReviewState &&
-			!planReviewShownRef.current
-		) {
-			planReviewShownRef.current = true;
-			// Capture the last user message so Proceed can include it as context.
-			// Ignore the synthetic "Ask More" message so we don't pollute the context.
-			const lastUserMsg = [...appState.messages]
-				.reverse()
-				.find(
-					m =>
-						m.role === 'user' &&
-						m.content !==
-							'please ask me any additional clarifying questions before proceeding',
-				);
-			const originalMessage =
-				typeof lastUserMsg?.content === 'string' ? lastUserMsg.content : '';
-			appState.setPlanReviewState({show: true, originalMessage});
-		}
+		if (!appState.planTurnCompleted) return;
+		appState.setPlanTurnCompleted(false);
+
+		// Already showing (shouldn't normally happen) — nothing to do.
+		if (appState.planReviewState) return;
+
+		appState.setPlanReviewState({show: true, originalMessage: ''});
 	}, [
-		appState.isConversationComplete,
-		appState.developmentMode,
+		appState.planTurnCompleted,
 		appState.planReviewState,
-		appState.messages,
+		appState.setPlanTurnCompleted,
 		appState.setPlanReviewState,
 		appState,
 	]);
 
-	// Reset the per-turn gate when the conversation starts a new turn so the
-	// bar can appear again after the next plan completes.
+	// Proceed: once the mode switch to 'normal' (triggered by handlePlanProceed)
+	// has propagated, dispatch the "implement the plan" message. Deferring to this
+	// effect is essential — dispatching inside the handler would run the turn with
+	// the stale plan-mode system prompt and tools, so the model would refuse to
+	// edit. The plan is already in the conversation, so no request text is echoed.
 	React.useEffect(() => {
-		if (!appState.isConversationComplete) {
-			planReviewShownRef.current = false;
-		}
-	}, [appState.isConversationComplete]);
+		if (!appState.pendingPlanProceed) return;
+		if (appState.developmentMode !== 'normal') return;
+		appState.setPendingPlanProceed(false);
+		void appHandlers.handleMessageSubmit(
+			'The plan above is approved. Proceed with implementing it now.',
+		);
+	}, [
+		appState.pendingPlanProceed,
+		appState.developmentMode,
+		appState.setPendingPlanProceed,
+		appHandlers.handleMessageSubmit,
+		appState,
+	]);
 
 	// Whether there is in-flight work that Escape should immediately cancel.
 	// Decision states (tool confirmation, question prompt, subagent approval)
@@ -254,11 +249,7 @@ export function InteractiveApp({
 
 			{appState.planReviewState?.show && (
 				<PlanReviewPrompt
-					onProceed={() =>
-						void appHandlers.handlePlanProceed(
-							appState.planReviewState?.originalMessage ?? '',
-						)
-					}
+					onProceed={appHandlers.handlePlanProceed}
 					onAskMore={() => void appHandlers.handlePlanAskMore()}
 					onModify={appHandlers.handlePlanModify}
 					onDismiss={appHandlers.handlePlanModify}

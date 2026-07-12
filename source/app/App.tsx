@@ -223,6 +223,11 @@ export default function App({
 			appState.setLiveTaskList(null);
 			drainQueuedUserMessage();
 		},
+		// A turn that started in plan mode finished uninterrupted — a plan was
+		// produced. Flag it so the interactive UI can show the plan review bar.
+		onPlanTurnComplete: () => {
+			appState.setPlanTurnCompleted(true);
+		},
 		reasoningExpandedRef: appState.reasoningExpandedRef,
 		compactToolDisplayRef: appState.compactToolDisplayRef,
 		onSetCompactToolCounts: appState.setCompactToolCounts,
@@ -421,6 +426,7 @@ export default function App({
 		setCurrentModel: appState.setCurrentModel,
 		setLiveTaskList: appState.setLiveTaskList,
 		setPlanReviewState: appState.setPlanReviewState,
+		setPendingPlanProceed: appState.setPendingPlanProceed,
 		addToChatQueue: appState.addToChatQueue,
 		setChatComponents: appState.setChatComponents,
 		setLiveComponent: appState.setLiveComponent,

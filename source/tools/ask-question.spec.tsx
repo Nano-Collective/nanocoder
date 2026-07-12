@@ -219,6 +219,59 @@ test('ask_user execute defaults allowFreeform to true', async t => {
 });
 
 // ============================================================================
+// Tests for rich-option metadata normalisation
+// ============================================================================
+
+// Regression: models emit pros/cons as a bare string ("Scalable") instead of a
+// list. That reached the renderer and crashed it (`meta.pros.map is not a
+// function`). The tool must normalise a string into a one-item array.
+test('ask_user normalises pros/cons given as bare strings into arrays', async t => {
+	let captured: unknown;
+	setGlobalQuestionHandler(async q => {
+		captured = q.optionMeta;
+		return 'JWT';
+	});
+
+	await askQuestionTool.tool.execute!(
+		{
+			question: 'Which auth?',
+			options: [
+				{label: 'JWT', description: 'Stateless', pros: 'Scalable', cons: 'Revocation'},
+				{label: 'Session'},
+			],
+		} as never,
+		{toolCallId: 'test', messages: []},
+	);
+
+	const meta = captured as Array<{pros?: string[]; cons?: string[]}>;
+	t.deepEqual(meta[0].pros, ['Scalable']);
+	t.deepEqual(meta[0].cons, ['Revocation']);
+});
+
+test('ask_user keeps array pros/cons and drops non-list junk', async t => {
+	let captured: unknown;
+	setGlobalQuestionHandler(async q => {
+		captured = q.optionMeta;
+		return 'A';
+	});
+
+	await askQuestionTool.tool.execute!(
+		{
+			question: 'Pick',
+			options: [
+				{label: 'A', pros: ['Fast', 'Simple'], cons: 42},
+				{label: 'B'},
+			],
+		} as never,
+		{toolCallId: 'test', messages: []},
+	);
+
+	const meta = captured as Array<{pros?: string[]; cons?: string[]}>;
+	t.deepEqual(meta[0].pros, ['Fast', 'Simple']);
+	t.is(meta[0].cons, undefined);
+});
+
+// ============================================================================
 // Tests for Formatter
 // ============================================================================
 

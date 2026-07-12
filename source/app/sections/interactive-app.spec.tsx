@@ -35,6 +35,11 @@ interface Overrides {
 	setPlanReviewState?: (v: {show: boolean; originalMessage: string} | null) => void;
 	isConversationComplete?: boolean;
 	developmentMode?: string;
+	planTurnCompleted?: boolean;
+	setPlanTurnCompleted?: (v: boolean) => void;
+	pendingPlanProceed?: boolean;
+	setPendingPlanProceed?: (v: boolean) => void;
+	handleMessageSubmit?: (message: string) => Promise<void>;
 }
 
 function makeProps(o: Overrides = {}) {
@@ -64,6 +69,10 @@ function makeProps(o: Overrides = {}) {
 		pendingQuestion: null,
 		planReviewState: o.planReviewState ?? null,
 		setPlanReviewState: o.setPlanReviewState ?? noop,
+		planTurnCompleted: o.planTurnCompleted ?? false,
+		setPlanTurnCompleted: o.setPlanTurnCompleted ?? noop,
+		pendingPlanProceed: o.pendingPlanProceed ?? false,
+		setPendingPlanProceed: o.setPendingPlanProceed ?? noop,
 		isConversationComplete: o.isConversationComplete ?? false,
 		developmentMode: o.developmentMode ?? 'normal',
 		customCommandCache: new Map(),
@@ -113,6 +122,10 @@ function makeProps(o: Overrides = {}) {
 			handleSessionCancel: noop,
 			handleCancel: o.handleCancel ?? noop,
 			handleToggleDevelopmentMode: noop,
+			handleMessageSubmit: o.handleMessageSubmit ?? noopAsync,
+			handlePlanProceed: noop,
+			handlePlanAskMore: noopAsync,
+			handlePlanModify: noop,
 		},
 		vscodeServer: {
 			activeEditor: null,
@@ -190,6 +203,10 @@ test('renders consistently across two mounts with the same props', t => {
 // ============================================================================
 // Global Escape -> cancel handler
 // ============================================================================
+
+// Lets mount effects (plan review signal / proceed dispatch) run and settle.
+const tickInteractive = () =>
+	new Promise(resolve => setTimeout(resolve, 30));
 
 const pressEscape = async (stdin: {write: (s: string) => void}) => {
 	stdin.write('\u001B');
@@ -507,29 +524,91 @@ test('plan review bar is shown when planReviewState.show is true', t => {
 	t.regex(lastFrame()!, /Plan ready/);
 });
 
-test('plan review bar does not re-appear after handlePlanModify (dismiss loop guard)', t => {
-	// Simulates: isConversationComplete=true in plan mode but the bar was
-	// already shown (planReviewShownRef=true). The bar should NOT pop back.
-	let setPlanCalls = 0;
-	const {lastFrame} = renderWithTheme(
+test('plan review bar shows when the planTurnCompleted signal fires', async t => {
+	let shown: {show: boolean; originalMessage: string} | null = null;
+	let resetToFalse = false;
+	renderWithTheme(
 		<InteractiveApp
 			{...makeProps({
-				// planReviewState is null (Modify just cleared it), but the turn
-				// is still complete in plan mode.
+				planTurnCompleted: true,
 				planReviewState: null,
-				setPlanReviewState: () => {
-					setPlanCalls++;
+				setPlanReviewState: v => {
+					shown = v;
 				},
-				isConversationComplete: true,
-				developmentMode: 'plan',
+				setPlanTurnCompleted: v => {
+					if (v === false) resetToFalse = true;
+				},
 			})}
 		/>,
 	);
-	// The bar should not be in the output (it was dismissed).
-	t.notRegex(lastFrame()!, /Plan ready/);
-	// setPlanReviewState should have been called at most once (to show it
-	// for the first time), never in a loop.
-	t.true(setPlanCalls <= 1);
+	await tickInteractive();
+	t.deepEqual(shown, {show: true, originalMessage: ''});
+	// The one-shot signal must be reset after consumption.
+	t.true(resetToFalse);
+});
+
+// Regression: the bar used to be inferred from (isConversationComplete + current
+// mode). Switching into plan mode while a prior turn was already complete popped
+// it up with no plan behind it. It must now ONLY show on the explicit signal.
+test('plan review bar does NOT show from idle completion in plan mode (no signal)', async t => {
+	let setPlanCalls = 0;
+	renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				planTurnCompleted: false, // no signal — just idle-complete in plan mode
+				planReviewState: null,
+				isConversationComplete: true,
+				developmentMode: 'plan',
+				setPlanReviewState: () => {
+					setPlanCalls++;
+				},
+			})}
+		/>,
+	);
+	await tickInteractive();
+	t.is(setPlanCalls, 0);
+});
+
+// Proceed defers the "implement" dispatch until the mode switch to normal has
+// propagated, so the executing turn runs with normal-mode tools/prompt.
+test('Proceed dispatches the implement message once mode is normal', async t => {
+	const submitted: string[] = [];
+	let pendingReset = false;
+	renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				pendingPlanProceed: true,
+				developmentMode: 'normal',
+				setPendingPlanProceed: v => {
+					if (v === false) pendingReset = true;
+				},
+				handleMessageSubmit: async m => {
+					submitted.push(m);
+				},
+			})}
+		/>,
+	);
+	await tickInteractive();
+	t.is(submitted.length, 1);
+	t.regex(submitted[0], /approved.*implement/i);
+	t.true(pendingReset);
+});
+
+test('Proceed does NOT dispatch while still in plan mode', async t => {
+	const submitted: string[] = [];
+	renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				pendingPlanProceed: true,
+				developmentMode: 'plan',
+				handleMessageSubmit: async m => {
+					submitted.push(m);
+				},
+			})}
+		/>,
+	);
+	await tickInteractive();
+	t.is(submitted.length, 0);
 });
 
 test('ChatInput is NOT rendered while plan review bar is showing', t => {

@@ -102,6 +102,15 @@ export function useAppState(
 		show: boolean;
 		originalMessage: string;
 	} | null>(null);
+	// One-shot signal: set true by the chat handler when a turn that started in
+	// plan mode completes uninterrupted. The interactive UI consumes it to show
+	// the plan review bar (reading the latest messages), then resets it.
+	const [planTurnCompleted, setPlanTurnCompleted] = useState<boolean>(false);
+	// One-shot signal: set true when the user hits Proceed on the plan review bar.
+	// The dispatch of the "implement the plan" message is deferred to an effect
+	// that waits for developmentMode to become 'normal', so the executing turn
+	// runs with normal-mode tools/prompt instead of the stale plan-mode closures.
+	const [pendingPlanProceed, setPendingPlanProceed] = useState<boolean>(false);
 
 	// Cancellation state
 	const [abortController, setAbortController] =
@@ -329,6 +338,8 @@ export function useAppState(
 		isConversationComplete,
 		isSettingsMode,
 		planReviewState,
+		planTurnCompleted,
+		pendingPlanProceed,
 		abortController,
 
 		// Unified mode state
@@ -392,6 +403,8 @@ export function useAppState(
 		setIsConversationComplete,
 		setIsSettingsMode,
 		setPlanReviewState,
+		setPlanTurnCompleted,
+		setPendingPlanProceed,
 		setAbortController,
 		setIsVscodeEnabled,
 		setCheckpointLoadData,

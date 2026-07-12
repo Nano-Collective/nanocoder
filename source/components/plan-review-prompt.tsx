@@ -1,14 +1,20 @@
 /**
  * PlanReviewPrompt — post-plan-generation action bar (Issue #96)
  *
- * Rendered after the AI finishes generating a plan in Plan Mode.
- * Gives the user three clear actions:
- *   [p] Proceed   — switch to normal mode and execute the plan
- *   [m] Modify    — stay in plan mode, let the user refine their request
- *   [a] Ask More  — ask additional clarifying questions
- *   [Esc] Dismiss — close the prompt, do nothing
+ * Rendered after the AI finishes generating a plan in Plan Mode. Uses the same
+ * up/down/Enter SelectInput pattern as the rest of the app (tool confirmation,
+ * selectors) so it stays readable on narrow terminals instead of wrapping a row
+ * of hotkey labels. The highlighted action's description is shown below the
+ * list; Escape dismisses.
+ *
+ *   Proceed  — switch to normal mode and execute the plan
+ *   Modify   — stay in plan mode, let the user refine their request
+ *   Ask more — ask additional clarifying questions
+ *   [Esc]    — dismiss the prompt, do nothing
  */
 import {Box, Text, useInput} from 'ink';
+import SelectInput from 'ink-select-input';
+import {useState} from 'react';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 
@@ -23,6 +29,32 @@ export interface PlanReviewPromptProps {
 	onDismiss: () => void;
 }
 
+type PlanAction = 'proceed' | 'modify' | 'askMore';
+
+interface PlanOption {
+	label: string;
+	value: PlanAction;
+	description: string;
+}
+
+const OPTIONS: PlanOption[] = [
+	{
+		label: 'Proceed',
+		value: 'proceed',
+		description: 'Switch to normal mode and execute the plan',
+	},
+	{
+		label: 'Modify',
+		value: 'modify',
+		description: 'Refine your request and re-plan',
+	},
+	{
+		label: 'Ask more',
+		value: 'askMore',
+		description: 'Answer additional clarifying questions',
+	},
+];
+
 export default function PlanReviewPrompt({
 	onProceed,
 	onModify,
@@ -31,18 +63,27 @@ export default function PlanReviewPrompt({
 }: PlanReviewPromptProps) {
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
+	const [highlighted, setHighlighted] = useState<PlanAction>('proceed');
 
-	useInput((input, key) => {
-		if (input === 'p' || input === 'P') {
-			onProceed();
-		} else if (input === 'm' || input === 'M') {
-			onModify();
-		} else if (input === 'a' || input === 'A') {
-			onAskMore();
-		} else if (key.escape) {
+	// SelectInput owns up/down/Enter. We only handle Escape (dismiss).
+	useInput((_input, key) => {
+		if (key.escape) {
 			onDismiss();
 		}
 	});
+
+	const handleSelect = (item: {value: PlanAction}) => {
+		if (item.value === 'proceed') {
+			onProceed();
+		} else if (item.value === 'modify') {
+			onModify();
+		} else {
+			onAskMore();
+		}
+	};
+
+	const activeDescription =
+		OPTIONS.find(o => o.value === highlighted)?.description ?? '';
 
 	return (
 		<Box
@@ -64,43 +105,23 @@ export default function PlanReviewPrompt({
 				</Text>
 				<Text color={colors.secondary}>What would you like to do?</Text>
 			</Box>
-			<Box flexDirection="column" marginLeft={1}>
-				<Box marginBottom={0}>
-					<Text color={colors.primary} bold>
-						{'[p]'}{' '}
-					</Text>
-					<Text color={colors.text} bold>
-						Proceed
-					</Text>
-					<Text color={colors.secondary}>
-						{' — switch to normal mode and execute the plan'}
-					</Text>
-				</Box>
-				<Box marginBottom={0}>
-					<Text color={colors.primary} bold>
-						{'[m]'}{' '}
-					</Text>
-					<Text color={colors.text} bold>
-						Modify
-					</Text>
-					<Text color={colors.secondary}>
-						{' — refine your request and re-plan'}
-					</Text>
-				</Box>
-				<Box marginBottom={0}>
-					<Text color={colors.primary} bold>
-						{'[a]'}{' '}
-					</Text>
-					<Text color={colors.text} bold>
-						Ask more
-					</Text>
-					<Text color={colors.secondary}>
-						{' — ask additional clarifying questions'}
-					</Text>
-				</Box>
-				<Box>
-					<Text color={colors.secondary}>{'[Esc] Dismiss'}</Text>
-				</Box>
+
+			<SelectInput
+				items={OPTIONS}
+				onSelect={handleSelect}
+				onHighlight={item => setHighlighted(item.value)}
+			/>
+
+			<Box marginTop={1}>
+				<Text color={colors.secondary} italic wrap="wrap">
+					{activeDescription}
+				</Text>
+			</Box>
+
+			<Box marginTop={1}>
+				<Text color={colors.secondary}>
+					↑/↓ to move · Enter to select · Esc to dismiss
+				</Text>
 			</Box>
 		</Box>
 	);

@@ -39,11 +39,22 @@ const executeAskQuestion = async (args: AskQuestionArgs): Promise<string> => {
 			const rich = opt as RichOption;
 			const label = ensureString(rich.label);
 			options.push(label);
+			// Normalise model-supplied fields: pros/cons must be string arrays and
+			// description a string. Models sometimes emit a bare string (or other
+			// shapes), which would otherwise crash the renderer (.map on a string).
+			const toStringArray = (v: unknown): string[] | undefined => {
+				if (Array.isArray(v)) return v.map(ensureString);
+				if (typeof v === 'string' && v.trim()) return [v];
+				return undefined;
+			};
 			optionMeta.push({
 				label,
-				description: rich.description,
-				pros: rich.pros,
-				cons: rich.cons,
+				description:
+					rich.description === undefined
+						? undefined
+						: ensureString(rich.description),
+				pros: toStringArray(rich.pros),
+				cons: toStringArray(rich.cons),
 			});
 			hasRichMeta = true;
 		} else {

@@ -57,6 +57,7 @@ const createMockClient = (): LLMClient => ({
 
 const createMockToolManager = () => ({
 	getAvailableToolNames: () => ['read_file'],
+	getToolNames: () => ['read_file'],
 	getFilteredTools: () => ({}),
 	getFilteredToolsForProvider: () => ({}),
 }) as NonNullable<UseChatHandlerProps['toolManager']>;
@@ -414,6 +415,66 @@ test('useChatHandler - drains queued message when setup fails before conversatio
 	t.deepEqual(hookResult!.drainedMessages, ['queued after failure']);
 	t.is(hookResult!.messageQueue.queuedMessages.length, 0);
 	rendered.unmount();
+});
+
+test('useChatHandler - fires onPlanTurnComplete when a plan-mode turn completes', async t => {
+	let planComplete = 0;
+	let hookResult: ChatHandlerReturn | null = null;
+	const customCommandLoader = {
+		findRelevantCommands: () => [],
+	} as unknown as NonNullable<UseChatHandlerProps['customCommandLoader']>;
+
+	render(
+		<TestHookComponent
+			{...createMockProps({
+				client: createMockClient(),
+				toolManager: createMockToolManager(),
+				customCommandLoader,
+				developmentMode: 'plan',
+				onPlanTurnComplete: () => {
+					planComplete++;
+				},
+			})}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+
+	await waitForCondition(() => hookResult !== null);
+	await hookResult!.handleChatMessage('make a plan');
+	t.is(planComplete, 1);
+});
+
+// The signal must be scoped to plan mode — a normal-mode turn completing must
+// NOT surface the plan review bar (this is the fix for the mode-inference race).
+test('useChatHandler - does NOT fire onPlanTurnComplete for a normal-mode turn', async t => {
+	let planComplete = 0;
+	let hookResult: ChatHandlerReturn | null = null;
+	const customCommandLoader = {
+		findRelevantCommands: () => [],
+	} as unknown as NonNullable<UseChatHandlerProps['customCommandLoader']>;
+
+	render(
+		<TestHookComponent
+			{...createMockProps({
+				client: createMockClient(),
+				toolManager: createMockToolManager(),
+				customCommandLoader,
+				developmentMode: 'normal',
+				onPlanTurnComplete: () => {
+					planComplete++;
+				},
+			})}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+
+	await waitForCondition(() => hookResult !== null);
+	await hookResult!.handleChatMessage('do a thing');
+	t.is(planComplete, 0);
 });
 
 test('useChatHandler - streaming state types are correct', t => {

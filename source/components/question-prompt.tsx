@@ -1,7 +1,7 @@
 import {Box, Text, useInput} from 'ink';
 import {useRef, useState} from 'react';
 import TextInput from '@/components/text-input';
-import {useTerminalWidth} from '@/hooks/useTerminalWidth';
+import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {PendingQuestion, QuestionOptionMeta} from '@/utils/question-queue';
 import {ensureString} from '@/utils/type-helpers';
@@ -30,7 +30,9 @@ export default function QuestionPrompt({
 	onAnswer,
 }: QuestionPromptProps) {
 	const {colors} = useTheme();
-	const boxWidth = useTerminalWidth();
+	// On narrow terminals the inline label/description row splits into two
+	// cramped columns that both wrap. Stack them vertically instead.
+	const {boxWidth, isNarrow} = useResponsiveTerminal();
 	const answeredRef = useRef(false);
 	const [isFreeformMode, setIsFreeformMode] = useState(false);
 	const [freeformValue, setFreeformValue] = useState('');
@@ -173,6 +175,18 @@ export default function QuestionPrompt({
 								? colors.secondary
 								: colors.text;
 						const meta = item.meta;
+						// The model controls optionMeta, so pros/cons may arrive as a
+						// string (or anything) rather than an array. Coerce defensively
+						// so a malformed call can't crash the render (.map on a string).
+						const description = meta?.description
+							? ensureString(meta.description)
+							: '';
+						const pros = Array.isArray(meta?.pros)
+							? meta.pros.map(ensureString)
+							: [];
+						const cons = Array.isArray(meta?.cons)
+							? meta.cons.map(ensureString)
+							: [];
 						return (
 							<Box
 								key={item.value}
@@ -186,26 +200,29 @@ export default function QuestionPrompt({
 											{isSelected ? '❯' : ' '}
 										</Text>
 									</Box>
-									<Box flexGrow={1} flexShrink={1}>
+									<Box
+										flexGrow={1}
+										flexShrink={1}
+										flexDirection={isNarrow ? 'column' : 'row'}
+									>
 										<Text wrap="wrap" color={color} bold={isSelected}>
 											{item.label}
 										</Text>
-										{meta?.description && (
-											<Text wrap="wrap" color={colors.secondary}>
-												{' — '}
-												{meta.description}
+										{description && (
+											<Text wrap="wrap" italic color={colors.secondary}>
+												{isNarrow ? description : ` — ${description}`}
 											</Text>
 										)}
 									</Box>
 								</Box>
-								{isSelected && meta?.pros && meta.pros.length > 0 && (
+								{isSelected && (pros.length > 0 || cons.length > 0) && (
 									<Box flexDirection="column" marginLeft={2}>
-										{meta.pros.map(pro => (
+										{pros.map(pro => (
 											<Text key={pro} color="green">
 												+ {pro}
 											</Text>
 										))}
-										{meta.cons?.map(con => (
+										{cons.map(con => (
 											<Text key={con} color="red">
 												- {con}
 											</Text>

@@ -78,6 +78,7 @@ export function useChatHandler({
 	developmentModeRef,
 	nonInteractiveMode = false,
 	onConversationComplete,
+	onPlanTurnComplete,
 	reasoningExpandedRef,
 	compactToolDisplayRef,
 	onSetCompactToolCounts,
@@ -369,6 +370,16 @@ export function useChatHandler({
 				systemMessage,
 				updatedMessages,
 			);
+
+			// If this turn STARTED in plan mode (closure value, captured at submit
+			// time) and ran to completion without being interrupted, a plan was
+			// actually produced — signal the plan review bar. Deciding here, with
+			// the start mode and the abort signal both in hand, avoids the race
+			// where toggling modes mid-generation makes an unrelated completing turn
+			// look like a finished plan.
+			if (developmentMode === 'plan' && !controller.signal.aborted) {
+				onPlanTurnComplete?.();
+			}
 		} catch (error) {
 			displayError(error, 'chat-error');
 			onConversationComplete?.();
