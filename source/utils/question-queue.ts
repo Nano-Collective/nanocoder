@@ -3,10 +3,23 @@
 
 import {createGlobalHandlerSlot} from '@/utils/global-handler-slot';
 
+/** Discriminates the visual style and badge of a question. */
+export type QuestionType = 'ambiguity' | 'decision' | 'confirmation';
+
+/** Rich metadata for a single option (used for pros/cons display). */
+export interface QuestionOptionMeta {
+	label: string;
+	description?: string;
+	pros?: string[];
+	cons?: string[];
+}
+
 export interface PendingQuestion {
 	question: string;
 	options: string[];
 	allowFreeform: boolean;
+	questionType?: QuestionType;
+	optionMeta?: QuestionOptionMeta[];
 }
 
 const questionSlot = createGlobalHandlerSlot<PendingQuestion, string>(

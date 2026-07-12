@@ -30,6 +30,11 @@ interface Overrides {
 	setIsCancelling?: (value: boolean) => void;
 	setAbortController?: (controller: AbortController | null) => void;
 	client?: unknown;
+	// Plan review knobs
+	planReviewState?: {show: boolean; originalMessage: string} | null;
+	setPlanReviewState?: (v: {show: boolean; originalMessage: string} | null) => void;
+	isConversationComplete?: boolean;
+	developmentMode?: string;
 }
 
 function makeProps(o: Overrides = {}) {
@@ -57,8 +62,11 @@ function makeProps(o: Overrides = {}) {
 		pendingToolCalls: o.pendingToolCalls ?? [],
 		currentToolIndex: 0,
 		pendingQuestion: null,
+		planReviewState: o.planReviewState ?? null,
+		setPlanReviewState: o.setPlanReviewState ?? noop,
+		isConversationComplete: o.isConversationComplete ?? false,
+		developmentMode: o.developmentMode ?? 'normal',
 		customCommandCache: new Map(),
-		developmentMode: 'normal',
 		contextPercentUsed: null,
 		sessionName: '',
 		compactToolCounts: null,
@@ -482,6 +490,63 @@ test('Escape does NOT hijack tool confirmation (decline owns it)', async t => {
 
 	await pressEscape(stdin);
 	t.is(cancelled, 0);
+});
+
+// ============================================================================
+// Plan review bar
+// ============================================================================
+
+test('plan review bar is shown when planReviewState.show is true', t => {
+	const {lastFrame} = renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				planReviewState: {show: true, originalMessage: 'add auth'},
+			})}
+		/>,
+	);
+	t.regex(lastFrame()!, /Plan ready/);
+});
+
+test('plan review bar does not re-appear after handlePlanModify (dismiss loop guard)', t => {
+	// Simulates: isConversationComplete=true in plan mode but the bar was
+	// already shown (planReviewShownRef=true). The bar should NOT pop back.
+	let setPlanCalls = 0;
+	const {lastFrame} = renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				// planReviewState is null (Modify just cleared it), but the turn
+				// is still complete in plan mode.
+				planReviewState: null,
+				setPlanReviewState: () => {
+					setPlanCalls++;
+				},
+				isConversationComplete: true,
+				developmentMode: 'plan',
+			})}
+		/>,
+	);
+	// The bar should not be in the output (it was dismissed).
+	t.notRegex(lastFrame()!, /Plan ready/);
+	// setPlanReviewState should have been called at most once (to show it
+	// for the first time), never in a loop.
+	t.true(setPlanCalls <= 1);
+});
+
+test('ChatInput is NOT rendered while plan review bar is showing', t => {
+	const {lastFrame} = renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				startChat: true,
+				planReviewState: {show: true, originalMessage: 'add auth'},
+			})}
+		/>,
+	);
+	const output = lastFrame()!;
+	// Plan bar is present.
+	t.regex(output, /Plan ready/);
+	// The ChatInput prompt line should be absent — both inputs must not be
+	// active at the same time (double-input blocker).
+	t.notRegex(output, /What now\?/);
 });
 
 // FileExplorer/IdeSelector start watchers that keep the event loop alive

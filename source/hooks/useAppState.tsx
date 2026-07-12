@@ -97,6 +97,12 @@ export function useAppState(
 		useState<boolean>(false);
 	const [isSettingsMode, setIsSettingsMode] = useState<boolean>(false);
 
+	// Plan review state (post-plan-generation action bar)
+	const [planReviewState, setPlanReviewState] = useState<{
+		show: boolean;
+		originalMessage: string;
+	} | null>(null);
+
 	// Cancellation state
 	const [abortController, setAbortController] =
 		useState<AbortController | null>(null);
@@ -322,6 +328,7 @@ export function useAppState(
 		isCancelling,
 		isConversationComplete,
 		isSettingsMode,
+		planReviewState,
 		abortController,
 
 		// Unified mode state
@@ -384,6 +391,7 @@ export function useAppState(
 		setIsCancelling,
 		setIsConversationComplete,
 		setIsSettingsMode,
+		setPlanReviewState,
 		setAbortController,
 		setIsVscodeEnabled,
 		setCheckpointLoadData,
