@@ -1,10 +1,12 @@
 import {TIMEOUT_PROVIDER_CONNECTION_MS} from '@/constants';
 import {isLocalURL} from '@/utils/url-utils';
 import type {
+	ModeProviderConfig,
 	OpenRouterParameters,
 	ProviderConfig,
 	SdkProvider,
 } from '../types/config';
+import type {DevelopmentMode} from '../types/core';
 import type {McpServerConfig} from './templates/mcp-templates';
 
 interface ValidationResult {
@@ -161,7 +163,13 @@ interface ProviderConfigObject {
 			sdkProvider?: SdkProvider;
 			openrouter?: OpenRouterParameters;
 		}>;
+		modeProviders?: Partial<Record<DevelopmentMode, ModeProviderConfig>>;
 	};
+}
+
+export interface ProviderWizardState {
+	providers: ProviderConfig[];
+	modeProviders?: Partial<Record<DevelopmentMode, ModeProviderConfig>>;
 }
 
 /**
@@ -176,11 +184,11 @@ interface McpConfigObject {
  * Builds the provider configuration object for agents.config.json
  */
 export function buildProviderConfigObject(
-	providers: ProviderConfig[],
+	state: ProviderWizardState,
 ): ProviderConfigObject {
 	const config: ProviderConfigObject = {
 		nanocoder: {
-			providers: providers.map(p => {
+			providers: state.providers.map(p => {
 				const providerConfig: {
 					name: string;
 					models: string[];
@@ -228,6 +236,10 @@ export function buildProviderConfigObject(
 			}),
 		},
 	};
+
+	if (state.modeProviders && Object.keys(state.modeProviders).length > 0) {
+		config.nanocoder.modeProviders = state.modeProviders;
+	}
 
 	return config;
 }

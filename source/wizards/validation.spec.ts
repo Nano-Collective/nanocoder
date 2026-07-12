@@ -551,7 +551,7 @@ test('buildProviderConfigObject: preserves the openrouter block on disk', t => {
 		},
 	];
 
-	const config = buildProviderConfigObject(providers);
+	const config = buildProviderConfigObject({providers, modeProviders: {}});
 	const p = config.nanocoder.providers[0];
 
 	t.deepEqual(p?.openrouter, {
@@ -572,7 +572,7 @@ test('buildProviderConfigObject: omits openrouter when undefined', t => {
 		},
 	];
 
-	const config = buildProviderConfigObject(providers);
+	const config = buildProviderConfigObject({providers, modeProviders: {}});
 	const p = config.nanocoder.providers[0];
 
 	t.false('openrouter' in (p ?? {}));
@@ -594,7 +594,7 @@ test('buildProviderConfigObject: openrouter block survives wizard buildConfig ro
 		},
 	};
 
-	const config = buildProviderConfigObject([fromWizard]);
+	const config = buildProviderConfigObject({providers: [fromWizard], modeProviders: {}});
 	const p = config.nanocoder.providers[0];
 
 	t.is(p?.openrouter?.service_tier, 'priority');

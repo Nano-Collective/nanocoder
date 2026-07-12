@@ -11,6 +11,7 @@ import {
 } from '@/components/message-box';
 import Status from '@/components/status';
 import {getAppConfig} from '@/config/index';
+import {loadPreferences} from '@/config/preferences';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getModelContextLimit} from '@/models/index';
@@ -107,7 +108,11 @@ interface UseAppHandlersProps {
 	enterExplorerMode: () => void;
 	enterIdeSelectionMode: () => void;
 	enterTune: () => void;
-	handleModelSelect: (provider: string, model: string) => Promise<boolean>;
+	handleModelSelect: (
+		provider: string,
+		model: string,
+		isProgrammatic?: boolean,
+	) => Promise<boolean>;
 
 	// Chat handler
 	handleChatMessage: (message: string, displayValue?: string) => Promise<void>;
@@ -206,33 +211,90 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 	// Toggle development mode handler
 	const handleToggleDevelopmentMode = React.useCallback(() => {
-		props.setDevelopmentMode(currentMode => {
-			// Don't allow toggling out of headless via Shift+Tab: it's a
-			// non-interactive mode entered by the daemon, not the user.
-			if (currentMode === 'headless') return currentMode;
+		// Don't allow toggling out of headless via Shift+Tab: it's a
+		// non-interactive mode entered by the daemon, not the user.
+		if (props.developmentMode === 'headless') return;
 
-			const modes: Array<'normal' | 'auto-accept' | 'yolo' | 'plan'> = [
-				'normal',
-				'auto-accept',
-				'yolo',
-				'plan',
-			];
-			const currentIndex = modes.indexOf(
-				currentMode as 'normal' | 'auto-accept' | 'yolo' | 'plan',
-			);
-			const nextIndex = (currentIndex + 1) % modes.length;
-			const nextMode = modes[nextIndex];
+		const modes: Array<'normal' | 'auto-accept' | 'yolo' | 'plan'> = [
+			'normal',
+			'auto-accept',
+			'yolo',
+			'plan',
+		];
+		const currentIndex = modes.indexOf(
+			props.developmentMode as 'normal' | 'auto-accept' | 'yolo' | 'plan',
+		);
+		const nextIndex = (currentIndex + 1) % modes.length;
+		const nextMode = modes[nextIndex];
 
-			logger.info('Development mode toggled', {
-				previousMode: currentMode,
-				nextMode,
-				modeIndex: nextIndex,
-				totalModes: modes.length,
-			});
-
-			return nextMode;
+		logger.info('Development mode toggled', {
+			previousMode: props.developmentMode,
+			nextMode,
+			modeIndex: nextIndex,
+			totalModes: modes.length,
 		});
-	}, [props.setDevelopmentMode, logger, props]);
+
+		props.setDevelopmentMode(nextMode);
+
+		// Handle mode-specific provider switching
+		const config = getAppConfig();
+		const modeConfig = config.modeProviders?.[nextMode];
+
+		void (async () => {
+			let targetProvider: string | undefined;
+			let targetModel: string | undefined;
+
+			if (modeConfig) {
+				targetProvider = modeConfig.provider;
+				targetModel = modeConfig.model;
+			} else {
+				// Restore the user's currently configured default provider/model (stored in preferences)
+				const preferences = loadPreferences();
+				targetProvider =
+					preferences.lastProvider ||
+					config.providers?.[0]?.name ||
+					'openai-compatible';
+				targetModel =
+					preferences.providerModels?.[targetProvider] ||
+					preferences.lastModel ||
+					config.providers?.find(p => p.name === targetProvider)?.models[0] ||
+					'';
+			}
+
+			if (targetProvider && targetModel) {
+				if (
+					targetProvider === props.currentProvider &&
+					targetModel === props.currentModel
+				) {
+					return;
+				}
+
+				// Show a subtle toast when entering a mode that enforces a specific model,
+				// since programmatic switches suppress the default "Model changed to..." toast.
+				if (modeConfig) {
+					props.addToChatQueue(
+						<SuccessMessage
+							key={generateKey('mode-model-override')}
+							message={`[${nextMode} mode → ${targetModel}]`}
+							hideBox={true}
+						/>,
+					);
+				}
+
+				await props.handleModelSelect(targetProvider, targetModel, true);
+			}
+		})().catch(error => {
+			logger.error('Failed to switch model on mode toggle', {
+				error: error instanceof Error ? error.message : String(error),
+			});
+		});
+	}, [
+		props.developmentMode,
+		props.setDevelopmentMode,
+		props.handleModelSelect,
+		logger,
+		props,
+	]);
 
 	// Show status handler
 	const handleShowStatus = React.useCallback(async () => {

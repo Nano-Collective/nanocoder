@@ -19,8 +19,11 @@ import type {
 	Colors,
 	CompressionMode,
 	CompressionStrategy,
+	DevelopmentMode,
+	ModeProviderConfig,
 	NotificationsConfig,
 	PasteConfig,
+	ProviderConfig,
 	SystemPromptConfig,
 } from '@/types/index';
 import {logError} from '@/utils/message-queue';
@@ -398,6 +401,77 @@ function loadSystemPromptConfig(): SystemPromptConfig | undefined {
 	);
 }
 
+function loadModeProvidersConfig(
+	providers: ProviderConfig[],
+): Partial<Record<DevelopmentMode, ModeProviderConfig>> | undefined {
+	return (
+		loadHierarchicalConfig('agents.config.json', 'modeProviders', config => {
+			const modeProviders = config.nanocoder?.modeProviders;
+			if (
+				!modeProviders ||
+				typeof modeProviders !== 'object' ||
+				Array.isArray(modeProviders)
+			) {
+				return null;
+			}
+
+			const result: Partial<Record<DevelopmentMode, ModeProviderConfig>> = {};
+
+			for (const [mode, config] of Object.entries(modeProviders)) {
+				if (!(VALID_MODES as readonly string[]).includes(mode)) {
+					logError(`Invalid modeProviders config: unknown mode '${mode}'.`);
+					continue;
+				}
+
+				// Typecast to unknown first, then check object structure
+				const typedConfig = config as Record<string, unknown>;
+				if (!typedConfig || typeof typedConfig !== 'object') continue;
+
+				const providerName =
+					typeof typedConfig.provider === 'string'
+						? typedConfig.provider
+						: undefined;
+				const modelName =
+					typeof typedConfig.model === 'string' ? typedConfig.model : undefined;
+
+				if (!providerName || !modelName) {
+					logError(
+						`Invalid modeProviders config for mode '${mode}': missing provider or model string.`,
+					);
+					continue;
+				}
+
+				const matchedProvider = providers.find(
+					p => p.name.toLowerCase() === providerName.toLowerCase(),
+				);
+				if (!matchedProvider) {
+					logError(
+						`Invalid modeProviders config for mode '${mode}': provider '${providerName}' not found in configured providers.`,
+					);
+					continue;
+				}
+
+				if (
+					matchedProvider.models.length > 0 &&
+					!matchedProvider.models.includes(modelName)
+				) {
+					logError(
+						`Invalid modeProviders config for mode '${mode}': model '${modelName}' not found in models for provider '${matchedProvider.name}'.`,
+					);
+					continue;
+				}
+
+				result[mode as DevelopmentMode] = {
+					provider: matchedProvider.name,
+					model: modelName,
+				};
+			}
+
+			return Object.keys(result).length > 0 ? result : null;
+		}) ?? undefined
+	);
+}
+
 // Load notifications configuration from preferences
 function loadNotificationsConfig(): NotificationsConfig | undefined {
 	return getNotificationsPreference();
@@ -454,6 +528,9 @@ function loadAppConfig(): AppConfig {
 	// Load notifications configuration
 	const notifications = loadNotificationsConfig();
 
+	// Load mode providers configuration
+	const modeProviders = loadModeProvidersConfig(providers);
+
 	return {
 		providers,
 		mcpServers,
@@ -466,6 +543,7 @@ function loadAppConfig(): AppConfig {
 		disabledTools,
 		systemPrompt,
 		notifications,
+		modeProviders,
 	};
 }
 

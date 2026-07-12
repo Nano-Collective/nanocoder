@@ -574,3 +574,172 @@ test.serial('headless maxTurns ignores invalid env var', async t => {
 		},
 	);
 });
+
+// Tests for modeProviders
+async function withModeProvidersConfig(
+	testName: string,
+	configData: Record<string, unknown>,
+	assertionFn: (modeProviders: unknown) => void,
+) {
+	const {tmpdir} = await import('os');
+	const {join} = await import('path');
+	const {mkdirSync, writeFileSync, rmSync} = await import('fs');
+	
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const testDir = join(tmpdir(), `nanocoder-modeproviders-test-${Date.now()}-${testName}`);
+	mkdirSync(testDir, {recursive: true});
+
+	try {
+		// Define some valid providers to test against
+		const providers = [
+			{
+				name: 'TestProvider1',
+				models: ['model1', 'model2'],
+			},
+			{
+				name: 'TestProvider2',
+				models: [],
+			}
+		];
+		
+		const fullConfig = {
+			...configData,
+			nanocoder: {
+				...(configData.nanocoder as Record<string, unknown> || {}),
+				providers,
+			}
+		};
+
+		writeFileSync(
+			join(testDir, 'agents.config.json'),
+			JSON.stringify(fullConfig),
+			'utf-8',
+		);
+		process.chdir(testDir);
+		process.env.NANOCODER_CONFIG_DIR = testDir;
+
+		const {
+			reloadAppConfig: reload,
+			getAppConfig,
+		} = await import('./index.js');
+		
+		reload();
+		assertionFn(getAppConfig().modeProviders);
+	} finally {
+		process.chdir(originalCwd);
+		if (originalConfigDir !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+		rmSync(testDir, {recursive: true, force: true});
+	}
+}
+
+test.serial('modeProviders loads valid config', async t => {
+	await withModeProvidersConfig(
+		'valid',
+		{
+			nanocoder: {
+				modeProviders: {
+					plan: {
+						provider: 'TestProvider1',
+						model: 'model1'
+					}
+				}
+			}
+		},
+		modeProviders => {
+			t.deepEqual(modeProviders, {
+				plan: {
+					provider: 'TestProvider1',
+					model: 'model1'
+				}
+			});
+		}
+	);
+});
+
+test.serial('modeProviders ignores missing provider or model string', async t => {
+	await withModeProvidersConfig(
+		'missing-fields',
+		{
+			nanocoder: {
+				modeProviders: {
+					plan: {
+						provider: 'TestProvider1'
+					},
+					yolo: {
+						model: 'model1'
+					}
+				}
+			}
+		},
+		modeProviders => {
+			t.is(modeProviders, undefined);
+		}
+	);
+});
+
+test.serial('modeProviders ignores unknown provider', async t => {
+	await withModeProvidersConfig(
+		'unknown-provider',
+		{
+			nanocoder: {
+				modeProviders: {
+					plan: {
+						provider: 'UnknownProvider',
+						model: 'model1'
+					}
+				}
+			}
+		},
+		modeProviders => {
+			t.is(modeProviders, undefined);
+		}
+	);
+});
+
+test.serial('modeProviders ignores unknown model for provider', async t => {
+	await withModeProvidersConfig(
+		'unknown-model',
+		{
+			nanocoder: {
+				modeProviders: {
+					plan: {
+						provider: 'TestProvider1',
+						model: 'unknown-model'
+					}
+				}
+			}
+		},
+		modeProviders => {
+			t.is(modeProviders, undefined);
+		}
+	);
+});
+
+test.serial('modeProviders accepts model if provider has empty models list', async t => {
+	await withModeProvidersConfig(
+		'empty-models-list',
+		{
+			nanocoder: {
+				modeProviders: {
+					plan: {
+						provider: 'TestProvider2',
+						model: 'any-model'
+					}
+				}
+			}
+		},
+		modeProviders => {
+			t.deepEqual(modeProviders, {
+				plan: {
+					provider: 'TestProvider2',
+					model: 'any-model'
+				}
+			});
+		}
+	);
+});
