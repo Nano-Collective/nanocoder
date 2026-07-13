@@ -20,6 +20,8 @@ test('SemanticMemoryManager stores and reloads repo-scoped memories', async t =>
 	});
 
 	t.is(memory.content, 'Use the existing auth adapter pattern for Clerk changes.');
+	t.is(memory.category, 'project');
+	t.regex(memory.timestamp, /^\d{4}-\d{2}-\d{2}T/);
 	t.is(memory.sourceSessionId, 'session-1');
 
 	const reloaded = new SemanticMemoryManager({memoryDir: dir, cwd});
@@ -39,6 +41,21 @@ test('SemanticMemoryManager keeps different repositories isolated', async t => {
 
 	const repoBManager = new SemanticMemoryManager({memoryDir: dir, cwd: repoB});
 	t.deepEqual(await repoBManager.listMemories(), []);
+});
+
+test('SemanticMemoryManager stores memory category', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+	const memory = await manager.addMemory({
+		content: 'Follow the existing provider abstraction.',
+		category: 'architecture',
+	});
+
+	t.is(memory.category, 'architecture');
+	t.deepEqual(await manager.listMemories(), [memory]);
 });
 
 test('SemanticMemoryManager deletes and clears memories', async t => {

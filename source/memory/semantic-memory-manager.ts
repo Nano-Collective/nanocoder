@@ -10,12 +10,14 @@ const execFileAsync = promisify(execFile);
 export interface SemanticMemory {
 	id: string;
 	content: string;
-	createdAt: string;
+	category: string;
+	timestamp: string;
 	sourceSessionId?: string;
 }
 
 export interface CreateMemoryInput {
 	content: string;
+	category?: string;
 	sourceSessionId?: string;
 }
 
@@ -33,7 +35,8 @@ function isSemanticMemory(value: unknown): value is SemanticMemory {
 	return (
 		typeof value.id === 'string' &&
 		typeof value.content === 'string' &&
-		typeof value.createdAt === 'string' &&
+		typeof value.category === 'string' &&
+		typeof value.timestamp === 'string' &&
 		(value.sourceSessionId === undefined ||
 			typeof value.sourceSessionId === 'string')
 	);
@@ -83,10 +86,12 @@ export class SemanticMemoryManager {
 			throw new Error('Memory content cannot be empty');
 		}
 
+		const category = input.category?.trim() || 'project';
 		const memory: SemanticMemory = {
 			id: crypto.randomUUID(),
 			content,
-			createdAt: new Date().toISOString(),
+			category,
+			timestamp: new Date().toISOString(),
 			...(input.sourceSessionId
 				? {sourceSessionId: input.sourceSessionId}
 				: {}),
@@ -151,7 +156,7 @@ export class SemanticMemoryManager {
 			.filter(result => result.score > 0)
 			.sort((a, b) => {
 				if (a.score !== b.score) return b.score - a.score;
-				return b.memory.createdAt.localeCompare(a.memory.createdAt);
+				return b.memory.timestamp.localeCompare(a.memory.timestamp);
 			})
 			.slice(0, limit)
 			.map(result => result.memory);
