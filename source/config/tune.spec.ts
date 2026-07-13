@@ -104,7 +104,7 @@ test('resolveTune - merges model parameters from config', t => {
 	t.is(result.modelParameters?.temperature, 0.5);
 });
 
-test('resolveTune - higher layer replaces modelParameters entirely (shallow merge)', t => {
+test('resolveTune - app config overrides preferences for modelParameters (shallow merge)', t => {
 	const appConfig: AppConfig = {
 		tune: {modelParameters: {temperature: 0.5, maxTokens: 4096}},
 	};
@@ -117,9 +117,10 @@ test('resolveTune - higher layer replaces modelParameters entirely (shallow merg
 		},
 	};
 	const result = resolveTune(appConfig, undefined, prefs);
-	t.is(result.modelParameters?.temperature, 0.7);
-	// maxTokens from app config is lost — shallow merge by design
-	t.is(result.modelParameters?.maxTokens, undefined);
+	// AppConfig (agents.config.json) overrides preferences
+	t.is(result.modelParameters?.temperature, 0.5);
+	// maxTokens from app config is kept — shallow merge by design
+	t.is(result.modelParameters?.maxTokens, 4096);
 });
 
 // ============================================================================
@@ -142,7 +143,7 @@ test('resolveTune - includeAgentsMd flows through layers', t => {
 	t.is(result.includeAgentsMd, false);
 });
 
-test('resolveTune - higher layer overrides includeAgentsMd', t => {
+test('resolveTune - app config overrides preferences for includeAgentsMd', t => {
 	const appConfig: AppConfig = {
 		tune: {includeAgentsMd: false},
 	};
@@ -155,5 +156,6 @@ test('resolveTune - higher layer overrides includeAgentsMd', t => {
 		},
 	};
 	const result = resolveTune(appConfig, undefined, prefs);
-	t.is(result.includeAgentsMd, true);
+	// AppConfig (agents.config.json) overrides preferences
+	t.is(result.includeAgentsMd, false);
 });
