@@ -3,6 +3,9 @@ import {tmpdir} from 'os';
 import {join} from 'path';
 import test from 'ava';
 import {confDirMap, getClosestConfigFile, reloadAppConfig} from './index';
+import {resolveTune} from './tune';
+
+type AppConfig = ReturnType<typeof import('./index.js').getAppConfig>;
 
 console.log(`\nindex.spec.ts`);
 
@@ -627,12 +630,6 @@ async function withModeProvidersConfig(
 		reload();
 		assertionFn(getAppConfig().modeProviders);
 	} finally {
-		process.chdir(originalCwd);
-		if (originalConfigDir !== undefined) {
-			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
-		} else {
-			delete process.env.NANOCODER_CONFIG_DIR;
-		}
 		rmSync(testDir, {recursive: true, force: true});
 	}
 }
@@ -743,3 +740,89 @@ test.serial('modeProviders accepts model if provider has empty models list', asy
 		}
 	);
 });
+
+// Tests for tune (nanocoder.tune)
+const tuneTestDir = join(tmpdir(), `nanocoder-tune-test-${Date.now()}`);
+
+test.before(() => {
+	mkdirSync(tuneTestDir, {recursive: true});
+});
+
+test.after.always(() => {
+	if (existsSync(tuneTestDir)) {
+		rmSync(tuneTestDir, {recursive: true, force: true});
+	}
+});
+
+async function withTuneConfig(
+	subdir: string,
+	configBody: unknown,
+	assertion: (appConfig: AppConfig) => void,
+): Promise<void> {
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const testSubdir = join(tuneTestDir, subdir);
+	mkdirSync(testSubdir, {recursive: true});
+
+	try {
+		writeFileSync(
+			join(testSubdir, 'agents.config.json'),
+			JSON.stringify(configBody),
+			'utf-8',
+		);
+		process.chdir(testSubdir);
+		process.env.NANOCODER_CONFIG_DIR = join(testSubdir, 'nonexistent-global');
+
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+		reload();
+		assertion(getAppConfig());
+	} finally {
+		process.chdir(originalCwd);
+		if (originalConfigDir !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+}
+
+test.serial(
+	'loadAppConfig reads nanocoder.tune.includeAgentsMd from agents.config.json',
+	async t => {
+		await withTuneConfig(
+			'tune-include-agents-md',
+			{nanocoder: {tune: {includeAgentsMd: false}}},
+			appConfig => {
+				t.is(appConfig.tune?.includeAgentsMd, false);
+			},
+		);
+	},
+);
+
+test.serial(
+	'resolveTune applies project tune end-to-end through getAppConfig()',
+	async t => {
+		await withTuneConfig(
+			'tune-resolve-e2e',
+			{nanocoder: {tune: {includeAgentsMd: false}}},
+			appConfig => {
+				const resolved = resolveTune(appConfig, undefined, {});
+				// agents.config.json tune flows through and is not overridden by empty preferences
+				t.is(resolved.includeAgentsMd, false);
+			},
+		);
+	},
+);
+
+test.serial(
+	'loadAppConfig returns no tune when agents.config.json omits it',
+	async t => {
+		await withTuneConfig(
+			'tune-absent',
+			{nanocoder: {}},
+			appConfig => {
+				t.is(appConfig.tune, undefined);
+			},
+		);
+	},
+);
