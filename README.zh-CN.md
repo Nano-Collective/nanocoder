@@ -2,7 +2,8 @@
 
 [English](README.md)
 
-一个纯终端驱动的开源编程 Agent，由社区共建，不受商业公司控制。模型随心选，代码留在本地，告别平台绑定。
+
+一个纯终端驱动的开源编程 Agent，由社区共建，不受商业公司控制。模型随意选，代码留在本地，告别平台绑定。
 
 Nanocoder 由非盈利性 AI 开发者社区 [Nano Collective](https://nanocollective.org) 打造。它能通过你指定的模型来实现 Agentic Coding（智能体编程）：既能用 Ollama 跑本地模型，也能接入 OpenRouter、Anthropic、Google 以及各类兼容 OpenAI 格式的 API。谁来处理你的代码？数据发到哪？全由你自己说了算。这里没有闭源黑盒，也没有把关键能力锁在付费墙后面：**尊重隐私**、**本地优先**、**面向所有人免费开放**。
 
@@ -27,7 +28,7 @@ nanocoder
 
 如果你使用 macOS/Linux，也可以通过 [Homebrew](docs/getting-started/installation.md#homebrew-macoslinux) 或 [Nix Flakes](docs/getting-started/installation.md#nix-flakes) 安装。
 
-### CLI 参数玩法
+### CLI 参数用法
 
 你可以通过命令行直接指定 Provider、模型以及启动模式：
 
@@ -59,7 +60,7 @@ nanocoder --mode plan run "audit the auth module"
 
 ## 为什么选择社区驱动
 
-Nanocoder 由社区集体而非商业公司打造，这直接决定了它的纯粹性。这里没有付费墙，没有在后台偷偷上传你 Prompt 的遥测，也没有被 KPI 和商业变现绑架的更新路线图。开发它的人，正是每天在真实工作中使用它的人。
+Nanocoder 由社区集体而非商业公司打造，直接决定了它的安全性。这里没有付费墙，没有在后台偷偷上传你 Prompt 的遥测，也没有被 KPI 和商业变现绑架的更新路线图。开发它的人，正是每天在真实工作中使用它的人。
 
 以社区形式开源共建，意味着 Nanocoder 会坚持中立：你不会被某一家大厂的模型生态绑死；同时，Nano Collective 旗下的所有项目都共享同一套代码规范、测试标准和发布流程，这让代码库保持清晰、易读，也对开源贡献者更友好。
 
