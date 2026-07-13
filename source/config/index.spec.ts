@@ -2,7 +2,7 @@ import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'fs';
 import {tmpdir} from 'os';
 import {join} from 'path';
 import test from 'ava';
-import {confDirMap, getClosestConfigFile, reloadAppConfig} from './index';
+import {clearAppConfig, confDirMap, getClosestConfigFile, reloadAppConfig} from './index';
 import {resolveTune} from './tune';
 
 type AppConfig = ReturnType<typeof import('./index.js').getAppConfig>;
@@ -783,6 +783,7 @@ async function withTuneConfig(
 		reload();
 		assertion(getAppConfig());
 	} finally {
+		clearAppConfig();
 		process.chdir(originalCwd);
 		if (originalConfigDir !== undefined) {
 			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
