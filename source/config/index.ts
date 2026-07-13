@@ -544,7 +544,7 @@ function loadAppConfig(): AppConfig {
 
 	// Load mode providers configuration
 	const modeProviders = loadModeProvidersConfig(providers);
-	// Load tune configuration (model mode defaults from agents.config.json)
+	// Load project-level tune defaults from agents.config.json
 	const tune = loadTuneConfig();
 
 	return {
