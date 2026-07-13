@@ -1,6 +1,7 @@
 # Nanocoder
 
 [简体中文](README.zh-CN.md)
+[繁體中文](README.zh-TW.md)
 
 An open coding agent for your terminal, built by a community collective rather than a company. Bring your own model, keep your code on your machine, and owe nothing to anyone.
 
