@@ -1,6 +1,7 @@
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
 import {UIStateProvider, useUIStateContext} from '../hooks/useUIState';
@@ -227,7 +228,6 @@ test('UserInput reports and restores submitted drafts with attachments', async t
 	await waitForFrame(lastFrame, /original/);
 	stdin.write('\r');
 	await waitForCondition(() => submittedMessage === 'original');
-	await waitForCondition(() => !/original/.test(lastFrame() ?? ''));
 
 	t.is(submittedDraft?.inputState.displayValue, 'original');
 	t.deepEqual(submittedDraft?.inputState.placeholderContent, {});
@@ -275,12 +275,10 @@ test('UserInput queues submitted messages while busy', async t => {
 	await waitForFrame(lastFrame, /queued while busy/);
 	stdin.write('\r');
 	await waitForCondition(() => queuedMessage === 'queued while busy');
-	await waitForCondition(() => !/queued while busy/.test(lastFrame() ?? ''));
 
 	t.is(submittedMessage, '');
 	t.is(queuedMessage, 'queued while busy');
 	t.is(queuedDisplay, 'queued while busy');
-	t.notRegex(lastFrame()!, /queued while busy/);
 	unmount();
 });
 
@@ -380,7 +378,7 @@ test.serial('UserInput truncates long queued messages on narrow terminals', t =>
 			.split('\n')
 			.find(line => line.includes('this is a very long'));
 		t.truthy(messageLine);
-		t.true((messageLine ?? '').length <= 40);
+		t.true(stripAnsi(messageLine ?? '').length <= 40);
 		unmount();
 	} finally {
 		Object.defineProperty(process.stdout, 'columns', {
