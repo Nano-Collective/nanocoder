@@ -1,7 +1,7 @@
 # Nanocoder
 
 [English](README.md)
-
+[简体中文](README.zh-CN.md)
 
 一個純終端驅動的開源程式設計 Agent，由社群共同打造，不受商業公司控制。模型隨意選擇，程式碼留在本地，告別平台綁定。
 
