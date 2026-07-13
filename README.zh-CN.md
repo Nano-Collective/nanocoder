@@ -1,7 +1,6 @@
 # Nanocoder
 
 [English](README.md)
-
 [繁體中文](README.zh-TW.md)
 
 一个纯终端驱动的开源编程 Agent，由社区共建，不受商业公司控制。模型随意选，代码留在本地，告别平台绑定。
