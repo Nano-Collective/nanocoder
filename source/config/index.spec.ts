@@ -630,6 +630,12 @@ async function withModeProvidersConfig(
 		reload();
 		assertionFn(getAppConfig().modeProviders);
 	} finally {
+		process.chdir(originalCwd);
+		if (originalConfigDir !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
 		rmSync(testDir, {recursive: true, force: true});
 	}
 }
