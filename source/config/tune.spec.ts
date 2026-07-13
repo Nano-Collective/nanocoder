@@ -38,7 +38,7 @@ test('resolveTune - applies app config top-level overrides', t => {
 	t.true(result.enabled); // Not set, stays default (auto-profiling on)
 });
 
-test('resolveTune - per-provider overrides app config', t => {
+test('resolveTune - app config overrides per-provider', t => {
 	const appConfig: AppConfig = {
 		tune: {toolProfile: 'minimal'},
 	};
@@ -50,7 +50,8 @@ test('resolveTune - per-provider overrides app config', t => {
 		config: {},
 	} as AIProviderConfig;
 	const result = resolveTune(appConfig, providerConfig);
-	t.is(result.toolProfile, 'full'); // Provider wins
+	// AppConfig (agents.config.json) outranks per-provider config
+	t.is(result.toolProfile, 'minimal');
 });
 
 test('resolveTune - preferences override provider config', t => {
