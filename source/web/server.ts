@@ -1,6 +1,15 @@
 import {spawn} from 'node:child_process';
 import {randomBytes} from 'node:crypto';
 import {createServer, type Server} from 'node:http';
+import type {Duplex} from 'node:stream';
+import {WebSocket, WebSocketServer} from 'ws';
+import {
+	parseWebClientEvent,
+	serializeWebServerEvent,
+	WEB_PROTOCOL_VERSION,
+	type WebClientEvent,
+	type WebServerEvent,
+} from './protocol.js';
 
 export interface LocalWebServerOptions {
 	host?: string;
@@ -15,6 +24,8 @@ export interface LocalWebServer {
 	port: number;
 	token: string;
 	url: string;
+	eventsUrl: string;
+	broadcastEvent: (event: WebServerEvent) => void;
 	close: () => Promise<void>;
 }
 
@@ -55,6 +66,39 @@ export async function startLocalWebServer(
 		response.writeHead(200, {'content-type': 'text/html; charset=utf-8'});
 		response.end(renderPlaceholderPage());
 	});
+	const webSocketServer = new WebSocketServer({noServer: true});
+	const connectedClients = new Set<WebSocket>();
+
+	server.on('upgrade', (request, socket, head) => {
+		const requestUrl = new URL(request.url ?? '/', `http://${host}`);
+		if (
+			requestUrl.pathname !== '/events' ||
+			requestUrl.searchParams.get('token') !== token
+		) {
+			rejectWebSocketUpgrade(socket);
+			return;
+		}
+
+		webSocketServer.handleUpgrade(request, socket, head, clientSocket => {
+			webSocketServer.emit('connection', clientSocket, request);
+		});
+	});
+
+	webSocketServer.on('connection', clientSocket => {
+		connectedClients.add(clientSocket);
+		sendServerEvent(clientSocket, {
+			type: 'ready',
+			protocolVersion: WEB_PROTOCOL_VERSION,
+		});
+
+		clientSocket.on('message', message => {
+			handleClientMessage(clientSocket, message.toString());
+		});
+
+		clientSocket.on('close', () => {
+			connectedClients.delete(clientSocket);
+		});
+	});
 
 	await new Promise<void>((resolve, reject) => {
 		server.once('error', reject);
@@ -72,6 +116,9 @@ export async function startLocalWebServer(
 
 	const port = address.port;
 	const url = `http://${host}:${port}/?token=${token}`;
+	// Local-only WebSocket paired with the localhost HTTP page; using wss:// here
+	// would require local TLS certificate setup that this server does not provide.
+	const eventsUrl = `ws://${host}:${port}/events?token=${token}`; // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
 
 	if (options.openBrowser !== false) {
 		openUrl(url);
@@ -83,8 +130,57 @@ export async function startLocalWebServer(
 		port,
 		token,
 		url,
-		close: () => closeServer(server),
+		eventsUrl,
+		broadcastEvent: event => {
+			for (const clientSocket of connectedClients) {
+				sendServerEvent(clientSocket, event);
+			}
+		},
+		close: () =>
+			closeWebServerWithClients(server, webSocketServer, connectedClients),
 	};
+}
+
+function handleClientMessage(
+	clientSocket: WebSocket,
+	rawMessage: string,
+): void {
+	let event: WebClientEvent;
+	try {
+		event = parseWebClientEvent(rawMessage);
+	} catch (error) {
+		sendServerEvent(clientSocket, {
+			type: 'error',
+			message: error instanceof Error ? error.message : 'Invalid web event.',
+		});
+		return;
+	}
+
+	if (event.type === 'hello') {
+		sendServerEvent(clientSocket, {
+			type: 'ready',
+			protocolVersion: WEB_PROTOCOL_VERSION,
+		});
+		return;
+	}
+
+	sendServerEvent(clientSocket, {
+		type: 'ack',
+		id: event.id,
+	});
+}
+
+function sendServerEvent(clientSocket: WebSocket, event: WebServerEvent): void {
+	if (clientSocket.readyState !== WebSocket.OPEN) {
+		return;
+	}
+
+	clientSocket.send(serializeWebServerEvent(event));
+}
+
+function rejectWebSocketUpgrade(socket: Duplex): void {
+	socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+	socket.destroy();
 }
 
 function openUrl(url: string): void {
@@ -111,6 +207,25 @@ async function closeServer(server: Server): Promise<void> {
 			resolve();
 		});
 	});
+}
+
+async function closeWebServerWithClients(
+	server: Server,
+	webSocketServer: WebSocketServer,
+	connectedClients: Set<WebSocket>,
+): Promise<void> {
+	for (const clientSocket of connectedClients) {
+		clientSocket.close();
+	}
+	connectedClients.clear();
+
+	await new Promise<void>(resolve => {
+		webSocketServer.close(() => {
+			resolve();
+		});
+	});
+
+	await closeServer(server);
 }
 
 function renderPlaceholderPage(): string {
@@ -173,15 +288,63 @@ function renderPlaceholderPage(): string {
 			color: #8f96a3;
 			font-size: 14px;
 		}
+		.events {
+			margin-top: 24px;
+			padding: 14px 16px;
+			border: 1px solid rgba(255, 255, 255, 0.12);
+			border-radius: 8px;
+			background: rgba(255, 255, 255, 0.04);
+			color: #b9c0cc;
+			font-size: 15px;
+			line-height: 1.6;
+		}
 	</style>
 </head>
 <body>
 	<main>
-		<div class="status">Local session ready</div>
+		<div class="status" id="connection-status">Local session starting</div>
 		<h1>Nanocoder web mode</h1>
 		<p>Your browser connection is live. Keep the terminal open for chat, tool approvals, and agent output while the full workspace view is being wired into this page.</p>
+		<div class="events" id="event-log">Preparing the local event channel...</div>
 		<p class="note">This page is served only from your machine and requires the private URL token.</p>
 	</main>
+	<script>
+		const statusElement = document.querySelector('#connection-status');
+		const logElement = document.querySelector('#event-log');
+		const token = new URLSearchParams(window.location.search).get('token');
+		const eventsUrl = new URL('/events', window.location.href);
+		eventsUrl.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+		eventsUrl.searchParams.set('token', token ?? '');
+
+		function setStatus(text) {
+			statusElement.textContent = text;
+		}
+
+		function setEventMessage(text) {
+			logElement.textContent = text;
+		}
+
+		const socket = new WebSocket(eventsUrl);
+		socket.addEventListener('open', () => {
+			setStatus('Local session connected');
+		});
+		socket.addEventListener('message', event => {
+			try {
+				const message = JSON.parse(event.data);
+				if (message.type === 'ready') {
+					setEventMessage('Event channel is ready. Chat UI wiring comes next.');
+					return;
+				}
+			} catch {}
+			setEventMessage('Received a local session update.');
+		});
+		socket.addEventListener('close', () => {
+			setStatus('Local session disconnected');
+		});
+		socket.addEventListener('error', () => {
+			setStatus('Local session connection failed');
+		});
+	</script>
 </body>
 </html>`;
 }
