@@ -1,6 +1,6 @@
 {
 	"compilerOptions": {
-		"module": "Node16",
+		"module": "ESNext",
 		"target": "ES2022",
 		"lib": ["ES2022"],
 		"sourceMap": true,
@@ -10,7 +10,7 @@
 		"esModuleInterop": true,
 		"skipLibCheck": true,
 		"forceConsistentCasingInFileNames": true,
-		"moduleResolution": "Node16",
+		"moduleResolution": "Bundler",
 		"resolveJsonModule": true
 	},
 	"include": ["src/**/*"],
