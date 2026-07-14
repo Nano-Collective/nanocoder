@@ -1,7 +1,7 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import type {TitleShape} from '@/components/ui/styled-title';
-import {loadPreferences} from '@/config/preferences';
 import {getAppConfig} from '@/config/index';
+import {loadPreferences} from '@/config/preferences';
 import {defaultTheme} from '@/config/themes';
 import {resolveTune} from '@/config/tune';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
