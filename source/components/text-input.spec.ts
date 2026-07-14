@@ -12,20 +12,20 @@ interface TextInputState {
 	cursorOffset: number;
 }
 
-// Simulate Ctrl+W: backward-kill-word
+// Simulate Ctrl+W: backward-kill-word (newlines are word boundaries)
 function backwardKillWord(state: TextInputState): TextInputState {
 	const {value, cursorOffset} = state;
 	if (cursorOffset <= 0) return state;
 
 	let i = cursorOffset;
 
-	// Skip whitespace immediately before cursor
-	while (i > 0 && value[i - 1] === ' ') {
+	// Skip whitespace (spaces + newlines) immediately before cursor
+	while (i > 0 && (value[i - 1] === ' ' || value[i - 1] === '\n')) {
 		i--;
 	}
 
-	// Delete back to next whitespace or start
-	while (i > 0 && value[i - 1] !== ' ') {
+	// Delete back to next whitespace/newline or start
+	while (i > 0 && value[i - 1] !== ' ' && value[i - 1] !== '\n') {
 		i--;
 	}
 
@@ -273,6 +273,99 @@ test('backspace at start does nothing', (t) => {
 	const result = backspace({value: 'hello', cursorOffset: 0});
 	t.is(result.value, 'hello');
 	t.is(result.cursorOffset, 0);
+});
+
+// --- Ctrl+Left / Ctrl+Right (word-jump) ---
+
+function moveToPrevWord(value: string, offset: number): number {
+	let i = offset;
+	// Skip whitespace (spaces + newlines) backward, then word backward
+	while (i > 0 && (value[i - 1] === ' ' || value[i - 1] === '\n')) i--;
+	while (i > 0 && value[i - 1] !== ' ' && value[i - 1] !== '\n') i--;
+	return i;
+}
+
+function moveToNextWord(value: string, offset: number): number {
+	let i = offset;
+	// Skip word forward, then whitespace (spaces + newlines) forward
+	while (i < value.length && value[i] !== ' ' && value[i] !== '\n') i++;
+	while (i < value.length && (value[i] === ' ' || value[i] === '\n')) i++;
+	return i;
+}
+
+test('Ctrl+Left jumps to start of previous word', (t) => {
+	t.is(moveToPrevWord('hello world', 11), 6);
+});
+
+test('Ctrl+Left from middle of word jumps to word start', (t) => {
+	t.is(moveToPrevWord('hello world', 8), 6);
+});
+
+test('Ctrl+Left at start stays at start', (t) => {
+	t.is(moveToPrevWord('hello', 0), 0);
+});
+
+test('Ctrl+Left skips multiple spaces', (t) => {
+	// Skips word backward from 'r' to 'w' start — lands at word start, not before whitespace
+	t.is(moveToPrevWord('hello   world', 10), 8);
+});
+
+test('Ctrl+Right jumps to start of next word', (t) => {
+	t.is(moveToNextWord('hello world', 0), 6);
+});
+
+test('Ctrl+Right from start of second word jumps to its end', (t) => {
+	t.is(moveToNextWord('hello world', 6), 11);
+});
+
+test('Ctrl+Right at end stays at end', (t) => {
+	t.is(moveToNextWord('hello', 5), 5);
+});
+
+test('Ctrl+Right skips spaces before next word', (t) => {
+	// From pos 5 (space), skips word (none), then skips spaces to 'w'
+	t.is(moveToNextWord('hello   world', 5), 8);
+});
+
+// --- Ctrl+Left / Ctrl+Right with newlines (multiline word-jump) ---
+
+test('Ctrl+Left crosses newline to previous line', (t) => {
+	// From start of "foo" after newline, crosses newline to "world" on line 1
+	t.is(moveToPrevWord('hello world\nfoo bar', 12), 6);
+});
+
+test('Ctrl+Left from word on line 2 jumps to start of that word', (t) => {
+	// From end of "bar" on line 2, jumps to start of "bar"
+	t.is(moveToPrevWord('hello world\nfoo bar', 19), 16);
+});
+
+test('Ctrl+Left from start of second word on line 2 jumps to first word', (t) => {
+	// From start of "bar", skips space, jumps to start of "foo"
+	t.is(moveToPrevWord('hello world\nfoo bar', 16), 12);
+});
+
+test('Ctrl+Right from end of line 1 crosses newline to start of next word', (t) => {
+	// From newline, skips to start of "foo"
+	t.is(moveToNextWord('hello world\nfoo bar', 11), 12);
+});
+
+test('Ctrl+Right from start of "foo" jumps to start of next word', (t) => {
+	t.is(moveToNextWord('hello world\nfoo bar', 12), 16);
+});
+
+test('Ctrl+Left on blank line crosses to previous line', (t) => {
+	// After newline at end, crosses newline to start of "hello"
+	t.is(moveToPrevWord('hello\n', 6), 0);
+});
+
+test('Ctrl+Right from before newline crosses to next word', (t) => {
+	// From "d" in "world", crosses newline to start of "foo"
+	t.is(moveToNextWord('hello world\nfoo', 10), 12);
+});
+
+test('Ctrl+Left with multiple newlines crosses one line at a time', (t) => {
+	// From start of "ccc", crosses newline to start of "bbb"
+	t.is(moveToPrevWord('aaa\nbbb\nccc', 8), 4);
 });
 
 // --- Unknown ctrl combos should not insert characters ---
