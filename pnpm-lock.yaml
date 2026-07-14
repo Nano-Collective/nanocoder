@@ -175,6 +175,9 @@ importers:
 
   plugins/vscode:
     dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: ^0.25.0
+        version: 0.25.0(zod@4.4.3)
       ws:
         specifier: ^8.16.0
         version: 8.21.0
