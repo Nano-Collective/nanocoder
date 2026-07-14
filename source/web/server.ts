@@ -116,7 +116,9 @@ export async function startLocalWebServer(
 
 	const port = address.port;
 	const url = `http://${host}:${port}/?token=${token}`;
-	const eventsUrl = `ws://${host}:${port}/events?token=${token}`;
+	// Local-only WebSocket paired with the localhost HTTP page; using wss:// here
+	// would require local TLS certificate setup that this server does not provide.
+	const eventsUrl = `ws://${host}:${port}/events?token=${token}`; // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
 
 	if (options.openBrowser !== false) {
 		openUrl(url);
