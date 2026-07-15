@@ -1,3 +1,4 @@
+import type {Session} from '@/session/session-manager';
 import type {DevelopmentMode} from '@/types/core';
 
 /**
@@ -42,6 +43,17 @@ export interface AppProps {
 	 * the terminal's native scrollback.
 	 */
 	altScreenActive?: boolean;
+	/**
+	 * A session resolved by `cli.tsx` from `--continue`/`--resume <id>` before
+	 * render. Applied once on mount via the same `applySession` path used by
+	 * `/resume` (see App.tsx).
+	 */
+	initialSession?: Session;
+	/**
+	 * Set when `--resume` was passed with no id: opens the session picker
+	 * (activeMode `'sessionSelector'`) as soon as the app mounts.
+	 */
+	openSessionSelectorOnStart?: boolean;
 }
 
 /**

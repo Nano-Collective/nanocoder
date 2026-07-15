@@ -1,3 +1,4 @@
+import {resolveSession} from '@/session/resolve-session';
 import {sessionManager} from '@/session/session-manager';
 import type {MessageSubmissionOptions} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
@@ -68,41 +69,21 @@ export async function handleResumeCommand(
 
 	const sessionIdOrSpecial = args[0];
 	try {
-		const listOptions = showAll ? undefined : {workingDirectory: process.cwd()};
-		const sessions = await sessionManager.listSessions(listOptions);
-		const sorted = [...sessions].sort(
-			(a, b) =>
-				new Date(b.lastAccessedAt).getTime() -
-				new Date(a.lastAccessedAt).getTime(),
-		);
+		const result = await resolveSession(sessionIdOrSpecial, process.cwd(), {
+			all: showAll,
+		});
 
-		let sessionId: string | null = null;
-
-		if (sessionIdOrSpecial.toLowerCase() === 'last') {
-			if (sorted.length > 0) sessionId = sorted[0].id;
-		} else {
-			const index = Number.parseInt(sessionIdOrSpecial, 10);
-			if (!Number.isNaN(index) && index >= 1 && index <= sorted.length) {
-				sessionId = sorted[index - 1].id;
-			} else {
-				sessionId = sessionIdOrSpecial;
-			}
-		}
-
-		if (!sessionId) {
-			onAddToChatQueue(infoMsg('No sessions found.', 'resume-info'));
+		if (!result.ok) {
+			const msg =
+				result.reason === 'empty'
+					? infoMsg(result.message, 'resume-info')
+					: errorMsg(result.message, 'resume-error');
+			onAddToChatQueue(msg);
 			onCommandComplete?.();
 			return true;
 		}
 
-		const session = await sessionManager.loadSession(sessionId);
-		if (session) {
-			onResumeSession(session);
-		} else {
-			onAddToChatQueue(
-				errorMsg(`Session not found: ${sessionId}`, 'resume-error'),
-			);
-		}
+		onResumeSession(result.session);
 	} catch (error) {
 		onAddToChatQueue(
 			errorMsg(
