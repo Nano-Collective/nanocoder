@@ -1,7 +1,11 @@
 import chalk from 'chalk';
 import {Text, useInput} from 'ink';
 import {useEffect, useRef, useState} from 'react';
-import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
+import {
+	getVisualLineSegments,
+	moveCursorToVisualLine,
+	wrapWithTrimmedContinuations,
+} from '@/utils/text-wrapping';
 
 export type Props = {
 	readonly placeholder?: string;
@@ -119,47 +123,30 @@ function TextInput({
 				return;
 			}
 
-			// Multiline: Up/Down navigate between lines instead of history
+			// Multiline: Up/Down navigate between visual lines instead of history.
+			// Visual lines include soft-wrapped rows — a single long line with no
+			// \n that wraps at wrapWidth is still multiline for navigation.
 			if (key.upArrow || key.downArrow) {
 				const val = originalValueRef.current;
 				const cur = cursorOffsetRef.current;
-				if (!showCursor || !val.includes('\n')) {
+				if (!showCursor) {
 					return;
 				}
 
-				const lines = val.split('\n');
-				let pos = 0;
-				let currentLine = 0;
-				for (let l = 0; l < lines.length; l++) {
-					if (pos + lines[l].length >= cur) {
-						currentLine = l;
-						break;
-					}
-					pos += lines[l].length + 1;
+				const segments = getVisualLineSegments(val, wrapWidth);
+				if (segments.length <= 1) {
+					// Single visual line — parent's useInput handles history
+					return;
 				}
-				const col = cur - pos;
 
-				if (key.upArrow && currentLine > 0) {
-					// Navigate to previous line
-					const prevLen = lines[currentLine - 1].length;
-					const newCol = Math.min(col, prevLen);
-					let newPos = 0;
-					for (let l = 0; l < currentLine - 1; l++)
-						newPos += lines[l].length + 1;
-					cursorOffsetRef.current = newPos + newCol;
-					setState(s => ({...s, cursorOffset: newPos + newCol}));
-				} else if (key.downArrow && currentLine < lines.length - 1) {
-					// Navigate to next line
-					const newCol = Math.min(col, lines[currentLine + 1].length);
-					const newPos = pos + lines[currentLine].length + 1;
-					cursorOffsetRef.current = newPos + newCol;
-					setState(s => ({...s, cursorOffset: newPos + newCol}));
-				} else if (key.upArrow) {
-					// On first line — history up
-					onEdgeArrow?.('up');
-				} else if (key.downArrow) {
-					// On last line — history down
-					onEdgeArrow?.('down');
+				const direction = key.upArrow ? 'up' : 'down';
+				const next = moveCursorToVisualLine(segments, cur, direction);
+				if (next === null) {
+					// First/last visual line — hand off to history navigation
+					onEdgeArrow?.(direction);
+				} else {
+					cursorOffsetRef.current = next;
+					setState(s => ({...s, cursorOffset: next}));
 				}
 				return;
 			}

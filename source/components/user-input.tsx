@@ -36,6 +36,7 @@ import {
 } from '@/utils/file-autocomplete';
 import {handleFileMention} from '@/utils/file-mention-handler';
 import {assemblePrompt} from '@/utils/prompt-processor';
+import {getVisualLineSegments} from '@/utils/text-wrapping';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 const MAX_COMMAND_COMPLETION_ROWS = 10;
@@ -101,6 +102,9 @@ export default function UserInput({
 	const inputState = useInputState();
 	const uiState = useUIStateContext();
 	const {boxWidth, isNarrow, actualWidth, truncate} = useResponsiveTerminal();
+	// Must match the wrapWidth passed to TextInput below — both sides use it to
+	// decide whether Up/Down means line navigation or history.
+	const inputWrapWidth = boxWidth - 3;
 	const [textInputKey, setTextInputKey] = useState(0);
 	const completionJustSelectedRef = useRef(false);
 	// Store the full InputState draft when starting history navigation, so it can be restored
@@ -776,8 +780,9 @@ export default function UserInput({
 
 		// Handle navigation
 		if (key.upArrow) {
-			// In multiline mode, Up/Down navigate lines — let TextInput handle it
-			if (input.includes('\n')) return;
+			// In multiline mode (real \n or soft-wrapped visual lines), Up/Down
+			// navigate lines — let TextInput handle it
+			if (getVisualLineSegments(input, inputWrapWidth).length > 1) return;
 			// File autocomplete navigation takes priority
 			if (isFileAutocompleteMode && fileCompletions.length > 0) {
 				setSelectedFileIndex(prev =>
@@ -800,8 +805,9 @@ export default function UserInput({
 		}
 
 		if (key.downArrow) {
-			// In multiline mode, Up/Down navigate lines — let TextInput handle it
-			if (input.includes('\n')) return;
+			// In multiline mode (real \n or soft-wrapped visual lines), Up/Down
+			// navigate lines — let TextInput handle it
+			if (getVisualLineSegments(input, inputWrapWidth).length > 1) return;
 			// File autocomplete navigation takes priority
 			if (isFileAutocompleteMode && fileCompletions.length > 0) {
 				setSelectedFileIndex(prev =>
@@ -923,7 +929,7 @@ export default function UserInput({
 						onEnter={handleSubmit}
 						placeholder="/ commands, ! bash, ↑/↓ history"
 						focus={effectiveFocus}
-						wrapWidth={boxWidth - 3}
+						wrapWidth={inputWrapWidth}
 						handleEnter={false}
 					/>
 				</Box>

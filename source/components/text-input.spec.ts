@@ -1,4 +1,8 @@
 import test from 'ava';
+import {
+	getVisualLineSegments,
+	moveCursorToVisualLine,
+} from '../utils/text-wrapping';
 
 /**
  * Tests for readline keybind logic in the custom TextInput component.
@@ -396,6 +400,123 @@ test('handleEnter=true calls onEnter when provided', (t) => {
 	// Simulates: if (handleEnter && onEnter) { onEnter(value) }
 	if (true && onEnter) onEnter();
 	t.true(called);
+});
+
+// --- Up/Down over text-wrapped prompts (no \n, soft-wrapped visual lines) ---
+
+/**
+ * Mirrors the useInput up/down block in text-input.tsx:
+ * - single visual line → passthrough (parent handles history)
+ * - first/last visual line edge → history handoff (onEdgeArrow)
+ * - otherwise → cursor moves one visual line
+ */
+function pressVerticalArrow(
+	value: string,
+	cursorOffset: number,
+	direction: 'up' | 'down',
+	wrapWidth?: number,
+):
+	| {type: 'passthrough'}
+	| {type: 'history'; direction: 'up' | 'down'}
+	| {type: 'move'; cursorOffset: number} {
+	const segments = getVisualLineSegments(value, wrapWidth);
+	if (segments.length <= 1) {
+		return {type: 'passthrough'};
+	}
+	const next = moveCursorToVisualLine(segments, cursorOffset, direction);
+	if (next === null) {
+		return {type: 'history', direction};
+	}
+	return {type: 'move', cursorOffset: next};
+}
+
+// A single-line prompt with no \n that text-wraps into ~4 visual rows
+// (the reported iTerm2 scenario) — 'word0 word1 ... word19'
+const LONG_PROMPT = Array.from({length: 20}, (_, i) => `word${i}`).join(' ');
+const WRAP_WIDTH = 40;
+
+test('long wrapped prompt is multiple visual lines despite having no newline', (t) => {
+	t.false(LONG_PROMPT.includes('\n'));
+	const segments = getVisualLineSegments(LONG_PROMPT, WRAP_WIDTH);
+	t.true(segments.length >= 3);
+});
+
+test('Down on first visual row of wrapped prompt moves cursor, not history', (t) => {
+	const result = pressVerticalArrow(LONG_PROMPT, 0, 'down', WRAP_WIDTH);
+	t.is(result.type, 'move');
+});
+
+test('Up from a middle visual row of wrapped prompt moves cursor up one row', (t) => {
+	const segments = getVisualLineSegments(LONG_PROMPT, WRAP_WIDTH);
+	const secondRowStart = segments[1].start;
+	const result = pressVerticalArrow(
+		LONG_PROMPT,
+		secondRowStart,
+		'up',
+		WRAP_WIDTH,
+	);
+	t.is(result.type, 'move');
+	if (result.type === 'move') {
+		t.true(result.cursorOffset < secondRowStart);
+		t.true(result.cursorOffset >= segments[0].start);
+	}
+});
+
+test('Up on first visual row of wrapped prompt hands off to history', (t) => {
+	const result = pressVerticalArrow(LONG_PROMPT, 3, 'up', WRAP_WIDTH);
+	t.deepEqual(result, {type: 'history', direction: 'up'});
+});
+
+test('Down on last visual row of wrapped prompt hands off to history', (t) => {
+	const result = pressVerticalArrow(
+		LONG_PROMPT,
+		LONG_PROMPT.length,
+		'down',
+		WRAP_WIDTH,
+	);
+	t.deepEqual(result, {type: 'history', direction: 'down'});
+});
+
+test('Down through every visual row of wrapped prompt reaches the last row', (t) => {
+	const segments = getVisualLineSegments(LONG_PROMPT, WRAP_WIDTH);
+	let offset = 0;
+	let moves = 0;
+	for (;;) {
+		const result = pressVerticalArrow(LONG_PROMPT, offset, 'down', WRAP_WIDTH);
+		if (result.type !== 'move') break;
+		offset = result.cursorOffset;
+		moves++;
+	}
+	t.is(moves, segments.length - 1);
+	const last = segments[segments.length - 1];
+	t.true(offset >= last.start && offset <= last.start + last.length);
+});
+
+test('short single-line prompt passes through so parent handles history', (t) => {
+	t.deepEqual(pressVerticalArrow('hi there', 4, 'up', WRAP_WIDTH), {
+		type: 'passthrough',
+	});
+	t.deepEqual(pressVerticalArrow('hi there', 4, 'down', WRAP_WIDTH), {
+		type: 'passthrough',
+	});
+});
+
+test('prompt exactly at wrap width stays single visual line', (t) => {
+	const exact = 'a'.repeat(WRAP_WIDTH);
+	t.deepEqual(pressVerticalArrow(exact, 10, 'up', WRAP_WIDTH), {
+		type: 'passthrough',
+	});
+});
+
+test('wrapped prompt with real newlines mixes both kinds of visual lines', (t) => {
+	// First logical line wraps into 2+ rows, second is short
+	const value = `${'x'.repeat(WRAP_WIDTH + 10)}\nshort`;
+	const segments = getVisualLineSegments(value, WRAP_WIDTH);
+	t.true(segments.length >= 3);
+	// Down from the wrapped tail lands on 'short'
+	const tailRow = segments[segments.length - 2];
+	const result = pressVerticalArrow(value, tailRow.start, 'down', WRAP_WIDTH);
+	t.is(result.type, 'move');
 });
 
 test('handleEnter=true calls onSubmit when onEnter not provided', (t) => {
