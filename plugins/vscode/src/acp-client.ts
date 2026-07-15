@@ -9,6 +9,8 @@ export class NanocoderAcpClient {
 	public connection: ClientSideConnection | null = null;
 	private outputChannel: vscode.OutputChannel;
 	private stateManager: AcpStateManager;
+	private _sessionId?: string;
+	public onSessionUpdate?: (update: any) => void;
 
 	constructor(outputChannel: vscode.OutputChannel, stateManager: AcpStateManager) {
 		this.outputChannel = outputChannel;
@@ -50,6 +52,44 @@ export class NanocoderAcpClient {
 		} catch (error) {
 			this.outputChannel.appendLine(`ACP Initialize failed: ${error}`);
 			return false;
+		}
+	}
+
+	async getOrCreateSession(cwd: string): Promise<string | undefined> {
+		if (this._sessionId) return this._sessionId;
+		if (!this.connection) return undefined;
+
+		try {
+			const result = await this.connection.newSession({ cwd, mcpServers: [] });
+			this._sessionId = result.sessionId;
+			return this._sessionId;
+		} catch (error) {
+			this.outputChannel.appendLine(`Failed to create session: ${error}`);
+			return undefined;
+		}
+	}
+
+	async prompt(text: string): Promise<void> {
+		if (!this.connection || !this._sessionId) return;
+		try {
+			await this.connection.prompt({
+				sessionId: this._sessionId,
+				prompt: [{ type: 'text', text }]
+			});
+		} catch (error) {
+			this.outputChannel.appendLine(`Prompt failed: ${error}`);
+			vscode.window.showErrorMessage(`Nanocoder prompt failed: ${error}`);
+		}
+	}
+
+	async cancel(): Promise<void> {
+		if (!this.connection || !this._sessionId) return;
+		try {
+			await this.connection.cancel({
+				sessionId: this._sessionId
+			});
+		} catch (error) {
+			this.outputChannel.appendLine(`Cancel failed: ${error}`);
 		}
 	}
 

@@ -81,9 +81,16 @@ export class AcpProcessManager {
 
 		const stream = ndJsonStream(output, input);
 		const connection = new ClientSideConnection((conn) => ({
-			// Implement Client interface methods if needed later
+			sessionUpdate: async (params: any) => {
+				if (this.acpClient?.onSessionUpdate) {
+					this.acpClient.onSessionUpdate(params);
+				}
+			},
+			requestPermission: async (params: any) => {
+				// To be implemented in Phase 4
+				return { outcome: 'denied' } as any; 
+			}
 		} as any), stream);
-		
 		this.acpClient.setConnection(connection);
 		const initialized = await this.acpClient.initializeHandshake();
 		

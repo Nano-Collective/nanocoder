@@ -28,8 +28,8 @@ importers:
         specifier: ^3.0.71
         version: 3.0.71(patch_hash=df300a5d22aecda3490a73885c5d63e34d4cd056d26fc5ba202ea4121d46adbf)(zod@4.4.3)
       '@ai-sdk/openai-compatible':
-        specifier: 3.0.5
-        version: 3.0.5(zod@4.4.3)
+        specifier: ^2.0.0
+        version: 2.0.58(zod@4.4.3)
       '@anthropic-ai/tokenizer':
         specifier: ^0.0.4
         version: 0.0.4
@@ -38,7 +38,7 @@ importers:
         version: 1.29.0(zod@4.4.3)
       '@nanocollective/get-md':
         specifier: ^1.6.0
-        version: 1.6.0(@ai-sdk/anthropic@3.0.85(zod@4.4.3))(@ai-sdk/google@4.0.8(zod@4.4.3))(@ai-sdk/openai-compatible@3.0.5(zod@4.4.3))(ai@6.0.193(zod@4.4.3))
+        version: 1.6.0(@ai-sdk/anthropic@3.0.85(zod@4.4.3))(@ai-sdk/google@4.0.8(zod@4.4.3))(@ai-sdk/openai-compatible@2.0.58(zod@4.4.3))(ai@6.0.193(zod@4.4.3))
       '@nanocollective/prompt-scrub':
         specifier: ^1.0.1
         version: 1.0.1
@@ -229,9 +229,9 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/openai-compatible@3.0.5':
-    resolution: {integrity: sha512-4UtDxT6Ga7U225o5fBEgtCFZHba4/iTDXRqMrU62yEfTrFks4o+F4jt0D3OWmUasR9LPFzLy0KnEITxFDtc89g==}
-    engines: {node: '>=22'}
+  '@ai-sdk/openai-compatible@2.0.58':
+    resolution: {integrity: sha512-0SXA0xVt18F4ki7ttVshqaM0oLXSB475ACOU0/2RK3OZS3UYqrmKF+DJwYBYUZmqCq2nZ2vkNZEXpWP2wfGsrQ==}
+    engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
@@ -259,6 +259,12 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
+  '@ai-sdk/provider-utils@4.0.37':
+    resolution: {integrity: sha512-VG4tpVXCuzm21U9xjg05BCMZnjZOazC72+MxBkLAa7hCKsnqNt542GYWUUqwmHSczJwgbSXN8UvaNgSerUaKdw==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
   '@ai-sdk/provider-utils@5.0.5':
     resolution: {integrity: sha512-oI0t3dvCoqWNV1I8o1Rybi2DXDvHES5r/TrwtJW90tuFLVepgJlftPxrcjh8vaSvjqC2diTuA2vXyjKAyHJm4A==}
     engines: {node: '>=22'}
@@ -267,6 +273,10 @@ packages:
 
   '@ai-sdk/provider@3.0.10':
     resolution: {integrity: sha512-Q3BZ27qfpYqnCYGvE3vt+Qi6LGOF9R5Nmzn+9JoM1lCRsD9mYaIhfJLkSunN48nfGXJ6n+XNV0J/XVpqGQl7Dw==}
+    engines: {node: '>=18'}
+
+  '@ai-sdk/provider@3.0.13':
+    resolution: {integrity: sha512-ZPtVYt5QIJzOta1kdUiDuCx4HhFkvNPv/rvmZ2b1iXwybYjJsCnNYR4PAw4kW7rgVfDARvHXcU64efWuqNp6bw==}
     engines: {node: '>=18'}
 
   '@ai-sdk/provider@4.0.2':
@@ -3855,10 +3865,10 @@ snapshots:
       '@ai-sdk/provider-utils': 5.0.5(zod@4.4.3)
       zod: 4.4.3
 
-  '@ai-sdk/openai-compatible@3.0.5(zod@4.4.3)':
+  '@ai-sdk/openai-compatible@2.0.58(zod@4.4.3)':
     dependencies:
-      '@ai-sdk/provider': 4.0.2
-      '@ai-sdk/provider-utils': 5.0.5(zod@4.4.3)
+      '@ai-sdk/provider': 3.0.13
+      '@ai-sdk/provider-utils': 4.0.37(zod@4.4.3)
       zod: 4.4.3
 
   '@ai-sdk/openai@3.0.71(patch_hash=df300a5d22aecda3490a73885c5d63e34d4cd056d26fc5ba202ea4121d46adbf)(zod@4.4.3)':
@@ -3888,6 +3898,13 @@ snapshots:
       eventsource-parser: 3.1.0
       zod: 4.4.3
 
+  '@ai-sdk/provider-utils@4.0.37(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.13
+      '@standard-schema/spec': 1.1.0
+      eventsource-parser: 3.1.0
+      zod: 4.4.3
+
   '@ai-sdk/provider-utils@5.0.5(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 4.0.2
@@ -3897,6 +3914,10 @@ snapshots:
       zod: 4.4.3
 
   '@ai-sdk/provider@3.0.10':
+    dependencies:
+      json-schema: 0.4.0
+
+  '@ai-sdk/provider@3.0.13':
     dependencies:
       json-schema: 0.4.0
 
@@ -4342,7 +4363,7 @@ snapshots:
 
   '@mozilla/readability@0.6.0': {}
 
-  '@nanocollective/get-md@1.6.0(@ai-sdk/anthropic@3.0.85(zod@4.4.3))(@ai-sdk/google@4.0.8(zod@4.4.3))(@ai-sdk/openai-compatible@3.0.5(zod@4.4.3))(ai@6.0.193(zod@4.4.3))':
+  '@nanocollective/get-md@1.6.0(@ai-sdk/anthropic@3.0.85(zod@4.4.3))(@ai-sdk/google@4.0.8(zod@4.4.3))(@ai-sdk/openai-compatible@2.0.58(zod@4.4.3))(ai@6.0.193(zod@4.4.3))':
     dependencies:
       '@mozilla/readability': 0.6.0
       cheerio: 1.2.0
@@ -4357,7 +4378,7 @@ snapshots:
     optionalDependencies:
       '@ai-sdk/anthropic': 3.0.85(zod@4.4.3)
       '@ai-sdk/google': 4.0.8(zod@4.4.3)
-      '@ai-sdk/openai-compatible': 3.0.5(zod@4.4.3)
+      '@ai-sdk/openai-compatible': 2.0.58(zod@4.4.3)
       ai: 6.0.193(zod@4.4.3)
 
   '@nanocollective/prompt-scrub@1.0.1':

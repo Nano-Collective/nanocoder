@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { WebviewToExtensionMessage, ExtensionToWebviewMessage } from './webview-protocol';
 
+import { NanocoderAcpClient } from './acp-client';
+
 export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'nanocoder.chatView';
 
@@ -8,8 +10,17 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
-		private readonly _outputChannel: vscode.OutputChannel
-	) { }
+		private readonly _outputChannel: vscode.OutputChannel,
+		private readonly _acpClient: NanocoderAcpClient
+	) { 
+		// Listen for session updates from ACP
+		this._acpClient.onSessionUpdate = (update: any) => {
+			this.postMessage({
+				type: 'acpUpdate',
+				update
+			} as any);
+		};
+	}
 
 	public resolveWebviewView(
 		webviewView: vscode.WebviewView,
@@ -35,11 +46,11 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 						break;
 					case 'submitMessage':
 						this._outputChannel.appendLine(`[Webview] User submitted: ${message.text}`);
-						// In Phase 3, we'll route this to ACP client prompt()
+						this._handlePrompt(message.text);
 						break;
 					case 'cancel':
 						this._outputChannel.appendLine('[Webview] User cancelled operation.');
-						// In Phase 3, we'll route this to ACP client cancel()
+						this._acpClient.cancel();
 						break;
 				}
 			}
@@ -49,6 +60,34 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 	public postMessage(message: ExtensionToWebviewMessage) {
 		if (this._view) {
 			this._view.webview.postMessage(message);
+		}
+	}
+
+	private async _handlePrompt(text: string) {
+		try {
+			// Make sure we have a session
+			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+			const cwd = workspaceFolder?.uri.fsPath || process.cwd();
+			
+			const sessionId = await this._acpClient.getOrCreateSession(cwd);
+			if (!sessionId) {
+				vscode.window.showErrorMessage('Nanocoder: Failed to create ACP session.');
+				return;
+			}
+			
+			// Let the webview know we started thinking
+			this.postMessage({
+				type: 'acpUpdate',
+				update: {
+					type: 'agent_thought_chunk',
+					content: '' // Webview can use this as a trigger to show a loading state if desired
+				}
+			} as any);
+
+			await this._acpClient.prompt(text);
+		} catch (error) {
+			this._outputChannel.appendLine(`Prompt execution error: ${error}`);
+			vscode.window.showErrorMessage(`Nanocoder Prompt error: ${error}`);
 		}
 	}
 
