@@ -177,6 +177,11 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/retry').then(m => m.retryCommand),
 	},
 	{
+		name: 'remember',
+		description: 'Save a durable project memory',
+		load: () => import('@/commands/remember').then(m => m.rememberCommand),
+	},
+	{
 		name: 'tasks',
 		description: 'Manage your task list',
 		load: () => import('@/commands/tasks').then(m => m.tasksCommand),
