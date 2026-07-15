@@ -53,7 +53,7 @@ export function activate(context: vscode.ExtensionContext) {
 	statusBarItem.show();
 
 	// Register Webview Provider
-	const chatProvider = new ChatWebviewProvider(context.extensionUri, outputChannel, acpClient);
+	const chatProvider = new ChatWebviewProvider(context.extensionUri, outputChannel, acpClient, diffManager);
 	context.subscriptions.push(
 		vscode.window.registerWebviewViewProvider(ChatWebviewProvider.viewType, chatProvider)
 	);

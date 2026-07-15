@@ -11,6 +11,9 @@ export class NanocoderAcpClient {
 	private stateManager: AcpStateManager;
 	private _sessionId?: string;
 	public onSessionUpdate?: (update: any) => void;
+	public onPermissionRequested?: (toolCallId: string, toolCall: any) => void;
+
+	private pendingPermissions = new Map<string, (response: any) => void>();
 
 	constructor(outputChannel: vscode.OutputChannel, stateManager: AcpStateManager) {
 		this.outputChannel = outputChannel;
@@ -19,6 +22,31 @@ export class NanocoderAcpClient {
 
 	setConnection(conn: ClientSideConnection) {
 		this.connection = conn;
+	}
+
+	async handlePermissionRequest(params: any): Promise<any> {
+		const toolCall = params.toolCall;
+		const toolCallId = toolCall.toolCallId;
+		
+		return new Promise<any>((resolve) => {
+			this.pendingPermissions.set(toolCallId, resolve);
+			if (this.onPermissionRequested) {
+				this.onPermissionRequested(toolCallId, toolCall);
+			}
+		});
+	}
+
+	resolvePermission(toolCallId: string, allow: boolean) {
+		const resolver = this.pendingPermissions.get(toolCallId);
+		if (resolver) {
+			resolver({
+				outcome: {
+					outcome: 'selected',
+					optionId: allow ? 'allow' : 'deny',
+				}
+			});
+			this.pendingPermissions.delete(toolCallId);
+		}
 	}
 
 	async initializeHandshake(): Promise<boolean> {

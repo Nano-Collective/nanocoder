@@ -87,8 +87,7 @@ export class AcpProcessManager {
 				}
 			},
 			requestPermission: async (params: any) => {
-				// To be implemented in Phase 4
-				return { outcome: 'denied' } as any; 
+				return this.acpClient.handlePermissionRequest(params);
 			}
 		} as any), stream);
 		this.acpClient.setConnection(connection);
