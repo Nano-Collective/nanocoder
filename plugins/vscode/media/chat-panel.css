@@ -86,3 +86,73 @@ textarea {
 textarea:focus {
 	border-color: var(--input-focus-border);
 }
+
+/* Tool Cards */
+.tool-card {
+	margin-top: 12px;
+	margin-bottom: 12px;
+	border: 1px solid var(--vscode-widget-border);
+	border-radius: 4px;
+	background-color: var(--vscode-editorWidget-background);
+	overflow: hidden;
+}
+
+.tool-header {
+	padding: 8px 12px;
+	display: flex;
+	align-items: center;
+	background-color: var(--vscode-editorWidget-border);
+	border-bottom: 1px solid var(--vscode-widget-border);
+	gap: 8px;
+}
+
+.tool-title {
+	font-family: var(--vscode-editor-font-family);
+	font-size: 0.9em;
+	font-weight: 600;
+	word-break: break-all;
+}
+
+.tool-body {
+	padding: 8px 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.tool-diff-link {
+	color: var(--vscode-textLink-foreground);
+	text-decoration: none;
+	font-size: 0.9em;
+}
+
+.tool-diff-link:hover {
+	text-decoration: underline;
+}
+
+.tool-actions {
+	display: flex;
+	gap: 8px;
+	margin-top: 8px;
+}
+
+.tool-btn {
+	padding: 4px 12px;
+	border: none;
+	border-radius: 2px;
+	cursor: pointer;
+	font-size: 0.9em;
+	color: var(--vscode-button-foreground);
+}
+
+.tool-btn.approve-btn {
+	background-color: var(--vscode-button-background);
+}
+
+.tool-btn.approve-btn:hover {
+	background-color: var(--vscode-button-hoverBackground);
+}
+
+.tool-btn.deny-btn {
+	background-color: var(--vscode-errorForeground);
+}

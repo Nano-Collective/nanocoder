@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { WebviewToExtensionMessage, ExtensionToWebviewMessage } from './webview-protocol';
 
 import { NanocoderAcpClient } from './acp-client';
+import { DiffManager } from './diff-manager';
 
 export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'nanocoder.chatView';
@@ -11,15 +12,44 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
 		private readonly _outputChannel: vscode.OutputChannel,
-		private readonly _acpClient: NanocoderAcpClient
+		private readonly _acpClient: NanocoderAcpClient,
+		private readonly _diffManager: DiffManager
 	) { 
 		// Listen for session updates from ACP
 		this._acpClient.onSessionUpdate = (update: any) => {
+			this.handleDiffs(update);
 			this.postMessage({
 				type: 'acpUpdate',
 				update
 			} as any);
 		};
+
+		this._acpClient.onPermissionRequested = (toolCallId: string, toolCall: any) => {
+			this.handleDiffs(toolCall);
+			this.postMessage({
+				type: 'permissionRequested',
+				toolCallId,
+				toolCall
+			} as any);
+		};
+	}
+
+	private handleDiffs(update: any) {
+		if (update?.content && Array.isArray(update.content)) {
+			for (const block of update.content) {
+				if (block.type === 'diff' && block.path) {
+					this._diffManager.addPendingChange({
+						type: 'file_change',
+						id: update.toolCallId || block.path, // fallback id
+						filePath: block.path,
+						originalContent: block.before || '',
+						newContent: block.after || '',
+						toolName: update.title || update.name || 'edit',
+						toolArgs: update.rawInput || {}
+					});
+				}
+			}
+		}
 	}
 
 	public resolveWebviewView(
@@ -51,6 +81,18 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 					case 'cancel':
 						this._outputChannel.appendLine('[Webview] User cancelled operation.');
 						this._acpClient.cancel();
+						break;
+					case 'approveTool':
+						this._outputChannel.appendLine(`[Webview] User approved tool: ${message.toolCallId}`);
+						this._acpClient.resolvePermission(message.toolCallId, true);
+						break;
+					case 'denyTool':
+						this._outputChannel.appendLine(`[Webview] User denied tool: ${message.toolCallId}`);
+						this._acpClient.resolvePermission(message.toolCallId, false);
+						break;
+					case 'showDiff':
+						this._outputChannel.appendLine(`[Webview] User requested to see diff for: ${message.toolCallId}`);
+						this._diffManager.showDiff(message.toolCallId);
 						break;
 				}
 			}

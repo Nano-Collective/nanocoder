@@ -32,12 +32,38 @@ export interface ExtensionMessageAcpUpdate {
 	update: any; // schema.SessionNotification or custom internal payload
 }
 
+export interface ExtensionMessageToolStarted {
+	type: 'toolStarted';
+	toolCall: any;
+}
+
+export interface ExtensionMessageToolUpdated {
+	type: 'toolUpdated';
+	update: any;
+}
+
+export interface ExtensionMessageToolCompleted {
+	type: 'toolCompleted';
+	toolCallId: string;
+	result: any;
+}
+
+export interface ExtensionMessagePermissionRequested {
+	type: 'permissionRequested';
+	toolCallId: string;
+	toolCall: any;
+}
+
 export type ExtensionToWebviewMessage =
 	| ExtensionMessageAppendMessage
 	| ExtensionMessageAppendThought
 	| ExtensionMessageStateUpdate
 	| ExtensionMessageClear
-	| ExtensionMessageAcpUpdate;
+	| ExtensionMessageAcpUpdate
+	| ExtensionMessageToolStarted
+	| ExtensionMessageToolUpdated
+	| ExtensionMessageToolCompleted
+	| ExtensionMessagePermissionRequested;
 
 
 // ---------------------------------------------------------
@@ -57,7 +83,25 @@ export interface WebviewMessageCancel {
 	type: 'cancel';
 }
 
+export interface WebviewMessageApproveTool {
+	type: 'approveTool';
+	toolCallId: string;
+}
+
+export interface WebviewMessageDenyTool {
+	type: 'denyTool';
+	toolCallId: string;
+}
+
+export interface WebviewMessageShowDiff {
+	type: 'showDiff';
+	toolCallId: string;
+}
+
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
 	| WebviewMessageSubmitMessage
-	| WebviewMessageCancel;
+	| WebviewMessageCancel
+	| WebviewMessageApproveTool
+	| WebviewMessageDenyTool
+	| WebviewMessageShowDiff;
