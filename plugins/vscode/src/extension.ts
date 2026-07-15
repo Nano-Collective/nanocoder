@@ -12,6 +12,7 @@ import {
 import {AcpStateManager, ACPStatus} from './acp-state';
 import {NanocoderAcpClient} from './acp-client';
 import {AcpProcessManager} from './acp-process-manager';
+import {ChatWebviewProvider} from './chat-webview-provider';
 
 const DEFAULT_PORT = 51820;
 const ACTIVE_EDITOR_DEBOUNCE_MS = 150;
@@ -50,6 +51,12 @@ export function activate(context: vscode.ExtensionContext) {
 	statusBarItem.command = 'nanocoder.connect';
 	updateStatusBar(false);
 	statusBarItem.show();
+
+	// Register Webview Provider
+	const chatProvider = new ChatWebviewProvider(context.extensionUri, outputChannel);
+	context.subscriptions.push(
+		vscode.window.registerWebviewViewProvider(ChatWebviewProvider.viewType, chatProvider)
+	);
 
 	// Handle messages from CLI
 	wsClient.onMessage((message: ServerMessage) => handleServerMessage(message));
