@@ -123,8 +123,8 @@
 			}
 		} else if (update.sessionUpdate === 'agent_thought_chunk') {
 			// Treat thoughts as chunks for now (we can prefix them with "🤔 " or style them later)
-			if (update.content) {
-				appendChunk(update.content);
+			if (update.content && update.content.text) {
+				appendChunk(update.content.text);
 			}
 		}
 	}

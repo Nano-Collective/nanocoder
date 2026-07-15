@@ -74,7 +74,7 @@ export class NanocoderAcpClient {
 		try {
 			await this.connection.prompt({
 				sessionId: this._sessionId,
-				prompt: text as any // The backend AcpAgent parses this (acpContentToUserMessage accepts string or PromptBlock)
+				prompt: [{ type: 'text', text }]
 			});
 		} catch (error) {
 			this.outputChannel.appendLine(`Prompt failed: ${error}`);
