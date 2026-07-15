@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<!--
+		Use a content security policy to only allow loading styles from our extension directory,
+		and only allow scripts that have a specific nonce.
+	-->
+	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; script-src 'nonce-{{nonce}}';">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<link href="{{styleUri}}" rel="stylesheet">
+	<title>Nanocoder Chat</title>
+</head>
+<body>
+	<div class="chat-container">
+		<div id="messages-container" class="messages">
+			<!-- Messages will be injected here -->
+			<div class="welcome-message">
+				Hi! I'm Nanocoder. How can I help you today?
+			</div>
+		</div>
+		<div class="input-area">
+			<textarea id="chat-input" rows="1" placeholder="Ask Nanocoder..."></textarea>
+		</div>
+	</div>
+	<script nonce="{{nonce}}" src="{{scriptUri}}"></script>
+</body>
+</html>

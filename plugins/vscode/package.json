@@ -30,6 +30,25 @@
 	"main": "./dist/extension.js",
 	"icon": "media/icon.png",
 	"contributes": {
+		"viewsContainers": {
+			"activitybar": [
+				{
+					"id": "nanocoder-sidebar",
+					"title": "Nanocoder",
+					"icon": "media/icon.svg"
+				}
+			]
+		},
+		"views": {
+			"nanocoder-sidebar": [
+				{
+					"type": "webview",
+					"id": "nanocoder.chatView",
+					"name": "Chat",
+					"icon": "media/icon.svg"
+				}
+			]
+		},
 		"commands": [
 			{
 				"command": "nanocoder.connect",
