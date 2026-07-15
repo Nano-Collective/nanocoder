@@ -129,6 +129,12 @@ export class TransportFactory {
 			env: server.env
 				? ({...process.env, ...server.env} as Record<string, string>)
 				: undefined,
+			// Default 'inherit' lets server children write straight to the
+			// user's terminal — including crash dumps that land AFTER
+			// nanocoder exits (e.g. an EPIPE stack trace when a server dies
+			// writing to the closed pipe during shutdown). Pipe it instead;
+			// mcp-client drains it into the logger.
+			stderr: 'pipe',
 		});
 	}
 

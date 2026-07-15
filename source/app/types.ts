@@ -35,6 +35,13 @@ export interface AppProps {
 	 * is ephemeral — preferences are not modified.
 	 */
 	trustDirectory?: boolean;
+	/**
+	 * Whether cli.tsx put the terminal on the alternate screen buffer for
+	 * this run. Drives the fullscreen (fixed-height, in-app scroll) layout;
+	 * when false the interactive UI renders inline with Ink's Static and
+	 * the terminal's native scrollback.
+	 */
+	altScreenActive?: boolean;
 }
 
 /**

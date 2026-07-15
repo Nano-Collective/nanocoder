@@ -274,7 +274,8 @@ async function handleSpecialCommand(
 		case SPECIAL_COMMANDS.CLEAR:
 			await onClearMessages();
 			await clearAllTasks();
-			onAddToChatQueue(successMsg('Chat and tasks cleared.', 'clear-success'));
+			// Increment clear counter to force re-render of static components
+			options.onClearCounterIncrement?.();
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 			return true;
 

@@ -127,6 +127,23 @@ export class MCPClient {
 
 				await client.connect(transport);
 
+				// Stdio transports are created with stderr:'pipe' (see
+				// TransportFactory) so server children can't write to the
+				// user's terminal. Drain the pipe into the logger — an
+				// unconsumed pipe would fill up and block the child.
+				if ('stderr' in transport && transport.stderr) {
+					const serverName = normalizedServer.name;
+					transport.stderr.on('data', (chunk: Buffer) => {
+						const text = chunk.toString('utf8').trimEnd();
+						if (text) {
+							this.logger.debug(`MCP server stderr [${serverName}]`, {
+								serverName,
+								stderr: text,
+							});
+						}
+					});
+				}
+
 				this.logger.info('MCP server connected successfully', {
 					serverName: normalizedServer.name,
 					transport: normalizedServer.transport,

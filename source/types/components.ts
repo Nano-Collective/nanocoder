@@ -14,6 +14,13 @@ export interface ChatQueueProps {
 	staticComponents?: ReactNode[];
 	queuedComponents?: ReactNode[];
 	renderLastQueuedComponentLive?: boolean;
+	clearKey?: string;
+	/**
+	 * Render everything in regular flow instead of Ink's Static. Used by the
+	 * fullscreen (alternate-screen) layout, where Static has no scrollback
+	 * to print into. Only a bounded tail of components is rendered.
+	 */
+	disableStatic?: boolean;
 }
 
 export type Completion = {name: string; isCustom: boolean};
