@@ -27,11 +27,17 @@ export interface ExtensionMessageClear {
 	type: 'clear';
 }
 
+export interface ExtensionMessageAcpUpdate {
+	type: 'acpUpdate';
+	update: any; // schema.SessionNotification or custom internal payload
+}
+
 export type ExtensionToWebviewMessage =
 	| ExtensionMessageAppendMessage
 	| ExtensionMessageAppendThought
 	| ExtensionMessageStateUpdate
-	| ExtensionMessageClear;
+	| ExtensionMessageClear
+	| ExtensionMessageAcpUpdate;
 
 
 // ---------------------------------------------------------
