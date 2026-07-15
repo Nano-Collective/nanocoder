@@ -1,4 +1,8 @@
 import test from 'ava';
+import {
+	getVisualLineSegments,
+	moveCursorToVisualLine,
+} from '../utils/text-wrapping';
 
 /**
  * Tests for readline keybind logic in the custom TextInput component.
@@ -12,20 +16,20 @@ interface TextInputState {
 	cursorOffset: number;
 }
 
-// Simulate Ctrl+W: backward-kill-word
+// Simulate Ctrl+W: backward-kill-word (newlines are word boundaries)
 function backwardKillWord(state: TextInputState): TextInputState {
 	const {value, cursorOffset} = state;
 	if (cursorOffset <= 0) return state;
 
 	let i = cursorOffset;
 
-	// Skip whitespace immediately before cursor
-	while (i > 0 && value[i - 1] === ' ') {
+	// Skip whitespace (spaces + newlines) immediately before cursor
+	while (i > 0 && (value[i - 1] === ' ' || value[i - 1] === '\n')) {
 		i--;
 	}
 
-	// Delete back to next whitespace or start
-	while (i > 0 && value[i - 1] !== ' ') {
+	// Delete back to next whitespace/newline or start
+	while (i > 0 && value[i - 1] !== ' ' && value[i - 1] !== '\n') {
 		i--;
 	}
 
@@ -275,6 +279,99 @@ test('backspace at start does nothing', (t) => {
 	t.is(result.cursorOffset, 0);
 });
 
+// --- Ctrl+Left / Ctrl+Right (word-jump) ---
+
+function moveToPrevWord(value: string, offset: number): number {
+	let i = offset;
+	// Skip whitespace (spaces + newlines) backward, then word backward
+	while (i > 0 && (value[i - 1] === ' ' || value[i - 1] === '\n')) i--;
+	while (i > 0 && value[i - 1] !== ' ' && value[i - 1] !== '\n') i--;
+	return i;
+}
+
+function moveToNextWord(value: string, offset: number): number {
+	let i = offset;
+	// Skip word forward, then whitespace (spaces + newlines) forward
+	while (i < value.length && value[i] !== ' ' && value[i] !== '\n') i++;
+	while (i < value.length && (value[i] === ' ' || value[i] === '\n')) i++;
+	return i;
+}
+
+test('Ctrl+Left jumps to start of previous word', (t) => {
+	t.is(moveToPrevWord('hello world', 11), 6);
+});
+
+test('Ctrl+Left from middle of word jumps to word start', (t) => {
+	t.is(moveToPrevWord('hello world', 8), 6);
+});
+
+test('Ctrl+Left at start stays at start', (t) => {
+	t.is(moveToPrevWord('hello', 0), 0);
+});
+
+test('Ctrl+Left skips multiple spaces', (t) => {
+	// Skips word backward from 'r' to 'w' start — lands at word start, not before whitespace
+	t.is(moveToPrevWord('hello   world', 10), 8);
+});
+
+test('Ctrl+Right jumps to start of next word', (t) => {
+	t.is(moveToNextWord('hello world', 0), 6);
+});
+
+test('Ctrl+Right from start of second word jumps to its end', (t) => {
+	t.is(moveToNextWord('hello world', 6), 11);
+});
+
+test('Ctrl+Right at end stays at end', (t) => {
+	t.is(moveToNextWord('hello', 5), 5);
+});
+
+test('Ctrl+Right skips spaces before next word', (t) => {
+	// From pos 5 (space), skips word (none), then skips spaces to 'w'
+	t.is(moveToNextWord('hello   world', 5), 8);
+});
+
+// --- Ctrl+Left / Ctrl+Right with newlines (multiline word-jump) ---
+
+test('Ctrl+Left crosses newline to previous line', (t) => {
+	// From start of "foo" after newline, crosses newline to "world" on line 1
+	t.is(moveToPrevWord('hello world\nfoo bar', 12), 6);
+});
+
+test('Ctrl+Left from word on line 2 jumps to start of that word', (t) => {
+	// From end of "bar" on line 2, jumps to start of "bar"
+	t.is(moveToPrevWord('hello world\nfoo bar', 19), 16);
+});
+
+test('Ctrl+Left from start of second word on line 2 jumps to first word', (t) => {
+	// From start of "bar", skips space, jumps to start of "foo"
+	t.is(moveToPrevWord('hello world\nfoo bar', 16), 12);
+});
+
+test('Ctrl+Right from end of line 1 crosses newline to start of next word', (t) => {
+	// From newline, skips to start of "foo"
+	t.is(moveToNextWord('hello world\nfoo bar', 11), 12);
+});
+
+test('Ctrl+Right from start of "foo" jumps to start of next word', (t) => {
+	t.is(moveToNextWord('hello world\nfoo bar', 12), 16);
+});
+
+test('Ctrl+Left on blank line crosses to previous line', (t) => {
+	// After newline at end, crosses newline to start of "hello"
+	t.is(moveToPrevWord('hello\n', 6), 0);
+});
+
+test('Ctrl+Right from before newline crosses to next word', (t) => {
+	// From "d" in "world", crosses newline to start of "foo"
+	t.is(moveToNextWord('hello world\nfoo', 10), 12);
+});
+
+test('Ctrl+Left with multiple newlines crosses one line at a time', (t) => {
+	// From start of "ccc", crosses newline to start of "bbb"
+	t.is(moveToPrevWord('aaa\nbbb\nccc', 8), 4);
+});
+
 // --- Unknown ctrl combos should not insert characters ---
 
 test('unknown ctrl combos do not modify value', (t) => {
@@ -303,6 +400,123 @@ test('handleEnter=true calls onEnter when provided', (t) => {
 	// Simulates: if (handleEnter && onEnter) { onEnter(value) }
 	if (true && onEnter) onEnter();
 	t.true(called);
+});
+
+// --- Up/Down over text-wrapped prompts (no \n, soft-wrapped visual lines) ---
+
+/**
+ * Mirrors the useInput up/down block in text-input.tsx:
+ * - single visual line → passthrough (parent handles history)
+ * - first/last visual line edge → history handoff (onEdgeArrow)
+ * - otherwise → cursor moves one visual line
+ */
+function pressVerticalArrow(
+	value: string,
+	cursorOffset: number,
+	direction: 'up' | 'down',
+	wrapWidth?: number,
+):
+	| {type: 'passthrough'}
+	| {type: 'history'; direction: 'up' | 'down'}
+	| {type: 'move'; cursorOffset: number} {
+	const segments = getVisualLineSegments(value, wrapWidth);
+	if (segments.length <= 1) {
+		return {type: 'passthrough'};
+	}
+	const next = moveCursorToVisualLine(segments, cursorOffset, direction);
+	if (next === null) {
+		return {type: 'history', direction};
+	}
+	return {type: 'move', cursorOffset: next};
+}
+
+// A single-line prompt with no \n that text-wraps into ~4 visual rows
+// (the reported iTerm2 scenario) — 'word0 word1 ... word19'
+const LONG_PROMPT = Array.from({length: 20}, (_, i) => `word${i}`).join(' ');
+const WRAP_WIDTH = 40;
+
+test('long wrapped prompt is multiple visual lines despite having no newline', (t) => {
+	t.false(LONG_PROMPT.includes('\n'));
+	const segments = getVisualLineSegments(LONG_PROMPT, WRAP_WIDTH);
+	t.true(segments.length >= 3);
+});
+
+test('Down on first visual row of wrapped prompt moves cursor, not history', (t) => {
+	const result = pressVerticalArrow(LONG_PROMPT, 0, 'down', WRAP_WIDTH);
+	t.is(result.type, 'move');
+});
+
+test('Up from a middle visual row of wrapped prompt moves cursor up one row', (t) => {
+	const segments = getVisualLineSegments(LONG_PROMPT, WRAP_WIDTH);
+	const secondRowStart = segments[1].start;
+	const result = pressVerticalArrow(
+		LONG_PROMPT,
+		secondRowStart,
+		'up',
+		WRAP_WIDTH,
+	);
+	t.is(result.type, 'move');
+	if (result.type === 'move') {
+		t.true(result.cursorOffset < secondRowStart);
+		t.true(result.cursorOffset >= segments[0].start);
+	}
+});
+
+test('Up on first visual row of wrapped prompt hands off to history', (t) => {
+	const result = pressVerticalArrow(LONG_PROMPT, 3, 'up', WRAP_WIDTH);
+	t.deepEqual(result, {type: 'history', direction: 'up'});
+});
+
+test('Down on last visual row of wrapped prompt hands off to history', (t) => {
+	const result = pressVerticalArrow(
+		LONG_PROMPT,
+		LONG_PROMPT.length,
+		'down',
+		WRAP_WIDTH,
+	);
+	t.deepEqual(result, {type: 'history', direction: 'down'});
+});
+
+test('Down through every visual row of wrapped prompt reaches the last row', (t) => {
+	const segments = getVisualLineSegments(LONG_PROMPT, WRAP_WIDTH);
+	let offset = 0;
+	let moves = 0;
+	for (;;) {
+		const result = pressVerticalArrow(LONG_PROMPT, offset, 'down', WRAP_WIDTH);
+		if (result.type !== 'move') break;
+		offset = result.cursorOffset;
+		moves++;
+	}
+	t.is(moves, segments.length - 1);
+	const last = segments[segments.length - 1];
+	t.true(offset >= last.start && offset <= last.start + last.length);
+});
+
+test('short single-line prompt passes through so parent handles history', (t) => {
+	t.deepEqual(pressVerticalArrow('hi there', 4, 'up', WRAP_WIDTH), {
+		type: 'passthrough',
+	});
+	t.deepEqual(pressVerticalArrow('hi there', 4, 'down', WRAP_WIDTH), {
+		type: 'passthrough',
+	});
+});
+
+test('prompt exactly at wrap width stays single visual line', (t) => {
+	const exact = 'a'.repeat(WRAP_WIDTH);
+	t.deepEqual(pressVerticalArrow(exact, 10, 'up', WRAP_WIDTH), {
+		type: 'passthrough',
+	});
+});
+
+test('wrapped prompt with real newlines mixes both kinds of visual lines', (t) => {
+	// First logical line wraps into 2+ rows, second is short
+	const value = `${'x'.repeat(WRAP_WIDTH + 10)}\nshort`;
+	const segments = getVisualLineSegments(value, WRAP_WIDTH);
+	t.true(segments.length >= 3);
+	// Down from the wrapped tail lands on 'short'
+	const tailRow = segments[segments.length - 2];
+	const result = pressVerticalArrow(value, tailRow.start, 'down', WRAP_WIDTH);
+	t.is(result.type, 'move');
 });
 
 test('handleEnter=true calls onSubmit when onEnter not provided', (t) => {
