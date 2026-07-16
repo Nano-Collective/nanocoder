@@ -3,6 +3,7 @@ import {randomBytes} from 'node:crypto';
 import {createServer, type Server} from 'node:http';
 import type {Duplex} from 'node:stream';
 import {WebSocket, WebSocketServer} from 'ws';
+import {nanocoderLogoSvg, renderWebModePage} from './page.js';
 import {
 	parseWebClientEvent,
 	serializeWebServerEvent,
@@ -16,6 +17,7 @@ export interface LocalWebServerOptions {
 	port?: number;
 	token?: string;
 	openBrowser?: boolean;
+	onClientEvent?: (event: WebClientEvent) => void | Promise<void>;
 }
 
 export interface LocalWebServer {
@@ -30,7 +32,6 @@ export interface LocalWebServer {
 }
 
 const DEFAULT_HOST = '127.0.0.1';
-
 function createLocalWebToken(): string {
 	return randomBytes(32).toString('hex');
 }
@@ -51,6 +52,15 @@ export async function startLocalWebServer(
 			return;
 		}
 
+		if (requestUrl.pathname === '/assets/nanocoder-icon.svg') {
+			response.writeHead(200, {
+				'cache-control': 'public, max-age=3600',
+				'content-type': 'image/svg+xml; charset=utf-8',
+			});
+			response.end(nanocoderLogoSvg);
+			return;
+		}
+
 		if (requestUrl.pathname !== '/' && requestUrl.pathname !== '/index.html') {
 			response.writeHead(404, {'content-type': 'text/plain; charset=utf-8'});
 			response.end('Not found');
@@ -64,7 +74,7 @@ export async function startLocalWebServer(
 		}
 
 		response.writeHead(200, {'content-type': 'text/html; charset=utf-8'});
-		response.end(renderPlaceholderPage());
+		response.end(renderWebModePage());
 	});
 	const webSocketServer = new WebSocketServer({noServer: true});
 	const connectedClients = new Set<WebSocket>();
@@ -92,7 +102,11 @@ export async function startLocalWebServer(
 		});
 
 		clientSocket.on('message', message => {
-			handleClientMessage(clientSocket, message.toString());
+			void handleClientMessage(
+				clientSocket,
+				message.toString(),
+				options.onClientEvent,
+			);
 		});
 
 		clientSocket.on('close', () => {
@@ -141,10 +155,11 @@ export async function startLocalWebServer(
 	};
 }
 
-function handleClientMessage(
+async function handleClientMessage(
 	clientSocket: WebSocket,
 	rawMessage: string,
-): void {
+	onClientEvent: LocalWebServerOptions['onClientEvent'],
+): Promise<void> {
 	let event: WebClientEvent;
 	try {
 		event = parseWebClientEvent(rawMessage);
@@ -160,6 +175,19 @@ function handleClientMessage(
 		sendServerEvent(clientSocket, {
 			type: 'ready',
 			protocolVersion: WEB_PROTOCOL_VERSION,
+		});
+		return;
+	}
+
+	try {
+		await onClientEvent?.(event);
+	} catch (error) {
+		sendServerEvent(clientSocket, {
+			type: 'error',
+			message:
+				error instanceof Error
+					? error.message
+					: 'Unable to handle browser event.',
 		});
 		return;
 	}
@@ -226,125 +254,4 @@ async function closeWebServerWithClients(
 	});
 
 	await closeServer(server);
-}
-
-function renderPlaceholderPage(): string {
-	return `<!doctype html>
-<html lang="en">
-<head>
-	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Nanocoder Web Mode</title>
-	<style>
-		:root {
-			color-scheme: light dark;
-			font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-			background: #111315;
-			color: #f7f7f2;
-		}
-		body {
-			margin: 0;
-			min-height: 100vh;
-			display: grid;
-			place-items: center;
-			background:
-				radial-gradient(circle at 20% 20%, rgba(99, 102, 241, 0.16), transparent 28rem),
-				linear-gradient(135deg, #111315 0%, #191b1f 100%);
-		}
-		main {
-			width: min(680px, calc(100vw - 48px));
-		}
-		.status {
-			display: inline-flex;
-			align-items: center;
-			gap: 8px;
-			margin-bottom: 18px;
-			color: #b8f3d4;
-			font-size: 14px;
-			font-weight: 600;
-		}
-		.status::before {
-			content: "";
-			width: 9px;
-			height: 9px;
-			border-radius: 999px;
-			background: #55d98d;
-			box-shadow: 0 0 0 5px rgba(85, 217, 141, 0.14);
-		}
-		h1 {
-			font-size: clamp(36px, 8vw, 68px);
-			line-height: 1.1;
-			letter-spacing: 0;
-			margin: 0 0 18px;
-		}
-		p {
-			color: #c9ccd3;
-			font-size: 18px;
-			line-height: 1.6;
-			margin: 0;
-		}
-		.note {
-			margin-top: 28px;
-			color: #8f96a3;
-			font-size: 14px;
-		}
-		.events {
-			margin-top: 24px;
-			padding: 14px 16px;
-			border: 1px solid rgba(255, 255, 255, 0.12);
-			border-radius: 8px;
-			background: rgba(255, 255, 255, 0.04);
-			color: #b9c0cc;
-			font-size: 15px;
-			line-height: 1.6;
-		}
-	</style>
-</head>
-<body>
-	<main>
-		<div class="status" id="connection-status">Local session starting</div>
-		<h1>Nanocoder web mode</h1>
-		<p>Your browser connection is live. Keep the terminal open for chat, tool approvals, and agent output while the full workspace view is being wired into this page.</p>
-		<div class="events" id="event-log">Preparing the local event channel...</div>
-		<p class="note">This page is served only from your machine and requires the private URL token.</p>
-	</main>
-	<script>
-		const statusElement = document.querySelector('#connection-status');
-		const logElement = document.querySelector('#event-log');
-		const token = new URLSearchParams(window.location.search).get('token');
-		const eventsUrl = new URL('/events', window.location.href);
-		eventsUrl.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-		eventsUrl.searchParams.set('token', token ?? '');
-
-		function setStatus(text) {
-			statusElement.textContent = text;
-		}
-
-		function setEventMessage(text) {
-			logElement.textContent = text;
-		}
-
-		const socket = new WebSocket(eventsUrl);
-		socket.addEventListener('open', () => {
-			setStatus('Local session connected');
-		});
-		socket.addEventListener('message', event => {
-			try {
-				const message = JSON.parse(event.data);
-				if (message.type === 'ready') {
-					setEventMessage('Event channel is ready. Chat UI wiring comes next.');
-					return;
-				}
-			} catch {}
-			setEventMessage('Received a local session update.');
-		});
-		socket.addEventListener('close', () => {
-			setStatus('Local session disconnected');
-		});
-		socket.addEventListener('error', () => {
-			setStatus('Local session connection failed');
-		});
-	</script>
-</body>
-</html>`;
 }
