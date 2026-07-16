@@ -34,13 +34,14 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		};
 	}
 
-	private handleDiffs(update: any) {
+	private handleDiffs(payload: any) {
+		const update = payload?.update || payload;
 		if (update?.content && Array.isArray(update.content)) {
 			for (const block of update.content) {
 				if (block.type === 'diff' && block.path) {
 					this._diffManager.addPendingChange({
 						type: 'file_change',
-						id: update.toolCallId || block.path, // fallback id
+						id: payload.toolCallId || block.path, // fallback id
 						filePath: block.path,
 						originalContent: block.before || '',
 						newContent: block.after || '',
@@ -94,6 +95,18 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 						this._outputChannel.appendLine(`[Webview] User requested to see diff for: ${message.toolCallId}`);
 						this._diffManager.showDiff(message.toolCallId);
 						break;
+					case 'proceedPlan':
+						this._outputChannel.appendLine('[Webview] User clicked Proceed on plan.');
+						this._acpClient.proceedPlan();
+						break;
+					case 'modifyPlan':
+						this._outputChannel.appendLine('[Webview] User clicked Modify on plan.');
+						this._acpClient.modifyPlan();
+						break;
+					case 'cancelPlan':
+						this._outputChannel.appendLine('[Webview] User clicked Cancel on plan review.');
+						this._acpClient.cancelPlan();
+						break;
 				}
 			}
 		);
@@ -107,6 +120,20 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 
 	private async _handlePrompt(text: string) {
 		try {
+			if (this._acpClient.hasPendingPermissions()) {
+				vscode.window.showWarningMessage('Nanocoder: Please approve or deny the pending tool before sending a new message.');
+				return;
+			}
+
+			// DEBUG: Test the plan review UI without needing the backend
+			if (text.trim() === '!testplan') {
+				this.postMessage({
+					type: 'showPlanReview',
+					description: 'This is a test plan description. The agent proposes creating a new React component and a corresponding CSS file.'
+				} as any);
+				return;
+			}
+
 			// Make sure we have a session
 			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
 			const cwd = workspaceFolder?.uri.fsPath || process.cwd();

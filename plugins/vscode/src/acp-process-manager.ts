@@ -34,7 +34,12 @@ export class AcpProcessManager {
 
 		this.outputChannel.appendLine(`Starting ACP process: ${cliPath} --acp`);
 		
-		this.childProcess = cp.spawn(cliPath, ['--acp'], { shell: false });
+		if (cliPath.startsWith('node ')) {
+			const scriptPath = cliPath.substring(5);
+			this.childProcess = cp.spawn('node', [scriptPath, '--acp'], { shell: false });
+		} else {
+			this.childProcess = cp.spawn(cliPath, ['--acp'], { shell: false });
+		}
 
 		if (!this.childProcess.stdout || !this.childProcess.stdin) {
 			this.outputChannel.appendLine('Failed to attach to child process stdio.');

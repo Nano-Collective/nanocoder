@@ -45,6 +45,7 @@ html, body {
 .message {
 	line-height: 1.5;
 	word-wrap: break-word;
+	flex-shrink: 0;
 }
 
 .message.user {
@@ -95,6 +96,7 @@ textarea:focus {
 	border-radius: 4px;
 	background-color: var(--vscode-editorWidget-background);
 	overflow: hidden;
+	flex-shrink: 0;
 }
 
 .tool-header {
@@ -155,4 +157,79 @@ textarea:focus {
 
 .tool-btn.deny-btn {
 	background-color: var(--vscode-errorForeground);
+}
+
+/* Plan Review Card */
+.plan-review-card {
+	margin-top: 16px;
+	margin-bottom: 16px;
+	border: 1px solid var(--vscode-widget-border);
+	border-radius: 4px;
+	background-color: var(--vscode-editorWidget-background);
+	overflow: hidden;
+	flex-shrink: 0;
+}
+
+.plan-header {
+	padding: 12px;
+	display: flex;
+	align-items: center;
+	background-color: var(--vscode-editorWidget-border);
+	border-bottom: 1px solid var(--vscode-widget-border);
+	gap: 8px;
+	font-family: var(--vscode-editor-font-family);
+	font-weight: 600;
+}
+
+.plan-body {
+	padding: 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.plan-description {
+	font-size: 0.9em;
+	opacity: 0.9;
+}
+
+.plan-actions {
+	display: flex;
+	gap: 8px;
+}
+
+.plan-btn {
+	padding: 6px 16px;
+	border: none;
+	border-radius: 2px;
+	cursor: pointer;
+	font-size: 0.9em;
+	color: var(--vscode-button-foreground);
+}
+
+.plan-btn.proceed-btn {
+	background-color: var(--vscode-button-background);
+}
+
+.plan-btn.proceed-btn:hover {
+	background-color: var(--vscode-button-hoverBackground);
+}
+
+.plan-btn.modify-btn {
+	background-color: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+}
+
+.plan-btn.modify-btn:hover {
+	background-color: var(--vscode-button-secondaryHoverBackground);
+}
+
+.plan-btn.cancel-btn {
+	background-color: transparent;
+	border: 1px solid var(--vscode-button-secondaryBackground);
+	color: var(--vscode-foreground);
+}
+
+.plan-btn.cancel-btn:hover {
+	background-color: var(--vscode-button-secondaryHoverBackground);
 }

@@ -63,7 +63,8 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageToolStarted
 	| ExtensionMessageToolUpdated
 	| ExtensionMessageToolCompleted
-	| ExtensionMessagePermissionRequested;
+	| ExtensionMessagePermissionRequested
+	| ExtensionMessageShowPlanReview;
 
 
 // ---------------------------------------------------------
@@ -98,10 +99,30 @@ export interface WebviewMessageShowDiff {
 	toolCallId: string;
 }
 
+export interface WebviewMessageProceedPlan {
+	type: 'proceedPlan';
+}
+
+export interface WebviewMessageModifyPlan {
+	type: 'modifyPlan';
+}
+
+export interface WebviewMessageCancelPlan {
+	type: 'cancelPlan';
+}
+
+export interface ExtensionMessageShowPlanReview {
+	type: 'showPlanReview';
+	description?: string;
+}
+
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
 	| WebviewMessageSubmitMessage
 	| WebviewMessageCancel
 	| WebviewMessageApproveTool
 	| WebviewMessageDenyTool
-	| WebviewMessageShowDiff;
+	| WebviewMessageShowDiff
+	| WebviewMessageProceedPlan
+	| WebviewMessageModifyPlan
+	| WebviewMessageCancelPlan;

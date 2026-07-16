@@ -1,18 +1,37 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
 
+import * as fs from 'fs';
+import * as path from 'path';
+
 export async function findCliPath(): Promise<string | null> {
+	// 1. Check for a custom configured path
+	const config = vscode.workspace.getConfiguration('nanocoder');
+	const customPath = config.get<string>('cliPath');
+	if (customPath && fs.existsSync(customPath)) {
+		return customPath;
+	}
+
+	// 2. Local development fallback: if we're in the nanocoder workspace
+	const workspaceFolders = vscode.workspace.workspaceFolders;
+	if (workspaceFolders) {
+		for (const folder of workspaceFolders) {
+			const localCliPath = path.join(folder.uri.fsPath, 'dist', 'cli.js');
+			if (fs.existsSync(localCliPath)) {
+				// Use node to run the local JS file
+				return `node ${localCliPath}`;
+			}
+		}
+	}
+
+	// 3. Fallback to global PATH
 	return new Promise((resolve) => {
-		// Attempt to run `nanocoder --version` to see if it exists in PATH
 		const command = process.platform === 'win32' ? 'where.exe nanocoder' : 'which nanocoder';
 		
 		cp.exec(command, (error, stdout) => {
 			if (error || !stdout.trim()) {
-				// We can try to fall back to typical global install paths if we want,
-				// but 'nanocoder' should be in the PATH if installed properly.
 				resolve(null);
 			} else {
-				// Get the first result if there are multiple (more common on Windows)
 				const lines = stdout.trim().split('\n');
 				resolve(lines[0].trim());
 			}
