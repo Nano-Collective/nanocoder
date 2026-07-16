@@ -4,6 +4,8 @@
 
 	const messagesContainer = document.getElementById('messages-container');
 	const chatInput = document.getElementById('chat-input');
+	const modeSelector = document.getElementById('mode-selector');
+	const modelSelector = document.getElementById('model-selector');
 	
 	let currentTurnEl = null;
 	let currentTextEl = null;
@@ -116,8 +118,43 @@
 			case 'showPlanReview':
 				handlePlanReview(message);
 				break;
+			case 'syncState':
+				handleSyncState(message);
+				break;
 		}
 	});
+
+	modeSelector.addEventListener('change', () => {
+		vscode.postMessage({ type: 'setMode', mode: modeSelector.value });
+	});
+
+	modelSelector.addEventListener('change', () => {
+		vscode.postMessage({ type: 'setModel', model: modelSelector.value });
+	});
+
+	function handleSyncState(message) {
+		// Update Mode Selector
+		modeSelector.innerHTML = '';
+		message.availableModes.forEach(mode => {
+			const option = document.createElement('option');
+			option.value = mode;
+			option.textContent = mode;
+			modeSelector.appendChild(option);
+		});
+		modeSelector.value = message.mode;
+		modeSelector.disabled = false;
+
+		// Update Model Selector
+		modelSelector.innerHTML = '';
+		message.availableModels.forEach(model => {
+			const option = document.createElement('option');
+			option.value = model;
+			option.textContent = model;
+			modelSelector.appendChild(option);
+		});
+		modelSelector.value = message.model;
+		modelSelector.disabled = false;
+	}
 
 	function handleAcpUpdate(payload) {
 		if (!payload || !payload.update) return;

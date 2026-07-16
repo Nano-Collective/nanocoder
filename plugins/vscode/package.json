@@ -88,6 +88,18 @@
 					"type": "boolean",
 					"default": true,
 					"description": "Show diff preview before applying file changes"
+				},
+				"nanocoder.mode": {
+					"type": "string",
+					"default": "auto-accept",
+					"scope": "resource",
+					"description": "The current operating mode for the Nanocoder assistant (e.g. chat, auto-accept)"
+				},
+				"nanocoder.model": {
+					"type": "string",
+					"default": "google/gemini-3.5-flash",
+					"scope": "machine",
+					"description": "The AI model to use for Nanocoder sessions"
 				}
 			}
 		}

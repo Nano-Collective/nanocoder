@@ -26,6 +26,31 @@ html, body {
 	height: 100%;
 }
 
+.chat-header {
+	display: flex;
+	gap: 8px;
+	padding: 8px var(--container-padding);
+	border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+	background-color: var(--vscode-editor-background);
+}
+
+.header-dropdown {
+	flex: 1;
+	background-color: var(--vscode-dropdown-background);
+	color: var(--vscode-dropdown-foreground);
+	border: 1px solid var(--vscode-dropdown-border, transparent);
+	padding: 4px;
+	border-radius: 2px;
+	font-family: var(--font-family);
+	font-size: 0.9em;
+	outline: none;
+	width: 50%;
+}
+
+.header-dropdown:focus {
+	border-color: var(--vscode-focusBorder);
+}
+
 .messages {
 	flex: 1;
 	overflow-y: auto;
