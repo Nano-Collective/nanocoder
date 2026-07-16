@@ -12,20 +12,44 @@ export class NanocoderAcpClient {
 	private _sessionId?: string;
 	public onSessionUpdate?: (update: any) => void;
 	public onPermissionRequested?: (toolCallId: string, toolCall: any) => void;
+	public onStateSync?: (state: any) => void;
+	public onConnectionReady?: () => void;
+
+	public currentMode?: string;
+	public availableModes: string[] = [];
+	public currentModel?: string;
+	public availableModels: string[] = [];
 
 	private pendingPermissions = new Map<string, (response: any) => void>();
 
 	constructor(outputChannel: vscode.OutputChannel, stateManager: AcpStateManager) {
 		this.outputChannel = outputChannel;
 		this.stateManager = stateManager;
+
+		// Settings Bridge: Listen for configuration changes
+		vscode.workspace.onDidChangeConfiguration((e) => {
+			if (e.affectsConfiguration('nanocoder.mode')) {
+				const newMode = vscode.workspace.getConfiguration('nanocoder').get<string>('mode');
+				if (newMode && newMode !== this.currentMode) {
+					this.setSessionMode(newMode, false);
+				}
+			}
+			if (e.affectsConfiguration('nanocoder.model')) {
+				const newModel = vscode.workspace.getConfiguration('nanocoder').get<string>('model');
+				if (newModel && newModel !== this.currentModel) {
+					this.setSessionModel(newModel, false);
+				}
+			}
+		});
 	}
 
 	hasPendingPermissions(): boolean {
 		return this.pendingPermissions.size > 0;
 	}
 
-	setConnection(conn: ClientSideConnection) {
-		this.connection = conn;
+	setConnection(connection: ClientSideConnection): void {
+		this.connection = connection;
+		this._sessionId = undefined; // Clear any stale session to force re-creation
 	}
 
 	async handlePermissionRequest(params: any): Promise<any> {
@@ -80,6 +104,9 @@ export class NanocoderAcpClient {
 
 			// Complete handshake
 			this.stateManager.setStatus(ACPStatus.Connected);
+			if (this.onConnectionReady) {
+				this.onConnectionReady();
+			}
 			return true;
 		} catch (error) {
 			this.outputChannel.appendLine(`ACP Initialize failed: ${error}`);
@@ -88,16 +115,103 @@ export class NanocoderAcpClient {
 	}
 
 	async getOrCreateSession(cwd: string): Promise<string | undefined> {
-		if (this._sessionId) return this._sessionId;
+		if (this._sessionId) {
+			this.notifyStateSync();
+			return this._sessionId;
+		}
 		if (!this.connection) return undefined;
 
 		try {
+			// Get VS Code settings for initial preferences
+			const config = vscode.workspace.getConfiguration('nanocoder');
+			const initialMode = config.get<string>('mode') || 'auto-accept';
+			const initialModel = config.get<string>('model') || 'google/gemini-3.5-flash';
+
 			const result = await this.connection.newSession({ cwd, mcpServers: [] });
 			this._sessionId = result.sessionId;
+			
+			// Parse modes and configOptions
+			if (result.modes) {
+				this.currentMode = result.modes.currentModeId;
+				this.availableModes = result.modes.availableModes.map((m: any) => m.id);
+			}
+			
+			if (result.configOptions) {
+				const modelOpt = result.configOptions.find((o: any) => o.id === 'model') as any;
+				if (modelOpt) {
+					this.currentModel = modelOpt.currentValue;
+					
+					// modelOpt.options is either Array<Option> or Array<Group>. We assume Option here for simplicity.
+					// If it's a flat array of Options, they have a 'value'.
+					this.availableModels = (modelOpt.options || []).map((opt: any) => opt.value || opt);
+				}
+			}
+
+			// Force initial preferences if they differ
+			if (this.currentMode && this.currentMode !== initialMode && this.availableModes.includes(initialMode)) {
+				await this.setSessionMode(initialMode, false);
+			}
+			if (this.currentModel && this.currentModel !== initialModel && this.availableModels.includes(initialModel)) {
+				await this.setSessionModel(initialModel, false);
+			}
+
+			this.notifyStateSync();
+
 			return this._sessionId;
 		} catch (error) {
 			this.outputChannel.appendLine(`Failed to create session: ${error}`);
 			return undefined;
+		}
+	}
+
+	notifyStateSync() {
+		if (this.onStateSync && this.currentMode && this.currentModel) {
+			this.onStateSync({
+				mode: this.currentMode,
+				availableModes: this.availableModes,
+				model: this.currentModel,
+				availableModels: this.availableModels
+			});
+		}
+	}
+
+	async setSessionMode(modeId: string, persist = true): Promise<void> {
+		if (!this.connection || !this._sessionId) return;
+		try {
+			await this.connection.setSessionMode({
+				sessionId: this._sessionId,
+				modeId
+			});
+			this.currentMode = modeId;
+			this.notifyStateSync();
+
+			if (persist) {
+				const config = vscode.workspace.getConfiguration('nanocoder');
+				// User setting scope
+				await config.update('mode', modeId, vscode.ConfigurationTarget.Global);
+			}
+		} catch (error) {
+			this.outputChannel.appendLine(`Failed to set mode: ${error}`);
+		}
+	}
+
+	async setSessionModel(modelId: string, persist = true): Promise<void> {
+		if (!this.connection || !this._sessionId) return;
+		try {
+			const result = await this.connection.setSessionConfigOption({
+				sessionId: this._sessionId,
+				configId: 'model',
+				value: modelId
+			});
+			this.currentModel = modelId;
+			this.notifyStateSync();
+
+			if (persist) {
+				const config = vscode.workspace.getConfiguration('nanocoder');
+				await config.update('model', modelId, vscode.ConfigurationTarget.Global);
+			}
+		} catch (error) {
+			this.outputChannel.appendLine(`Failed to set model: ${error}`);
 		}
 	}
 

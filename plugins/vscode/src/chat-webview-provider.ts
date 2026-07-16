@@ -8,6 +8,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'nanocoder.chatView';
 
 	private _view?: vscode.WebviewView;
+	private _isWebviewReady = false;
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
@@ -31,6 +32,17 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				toolCallId,
 				toolCall
 			} as any);
+		};
+
+		this._acpClient.onStateSync = (state: any) => {
+			this.postMessage({
+				type: 'syncState',
+				...state
+			} as any);
+		};
+
+		this._acpClient.onConnectionReady = () => {
+			this._initializeSessionIfReady();
 		};
 	}
 
@@ -74,6 +86,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				switch (message.type) {
 					case 'ready':
 						this._outputChannel.appendLine('[Webview] Chat shell is ready.');
+						this._isWebviewReady = true;
+						this._initializeSessionIfReady();
 						break;
 					case 'submitMessage':
 						this._outputChannel.appendLine(`[Webview] User submitted: ${message.text}`);
@@ -107,6 +121,16 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 						this._outputChannel.appendLine('[Webview] User clicked Cancel on plan review.');
 						this._acpClient.cancelPlan();
 						break;
+					case 'setMode':
+						this._outputChannel.appendLine(`[Webview] User selected mode: ${message.mode}`);
+						this._acpClient.setSessionMode(message.mode);
+						break;
+					case 'setModel':
+						this._outputChannel.appendLine(`[Webview] User selected model: ${message.model}`);
+						this._acpClient.setSessionModel(message.model).then(() => {
+							vscode.window.showInformationMessage(`Nanocoder: Model switched to ${message.model}`);
+						});
+						break;
 				}
 			}
 		);
@@ -115,6 +139,22 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 	public postMessage(message: ExtensionToWebviewMessage) {
 		if (this._view) {
 			this._view.webview.postMessage(message);
+		}
+	}
+
+	private async _initializeSessionIfReady() {
+		if (!this._isWebviewReady || !this._acpClient.connection) {
+			return;
+		}
+		try {
+			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+			const cwd = workspaceFolder?.uri.fsPath || process.cwd();
+			const sessionId = await this._acpClient.getOrCreateSession(cwd);
+			if (sessionId) {
+				this._outputChannel.appendLine(`[Extension] Session initialized automatically: ${sessionId}`);
+			}
+		} catch (error) {
+			this._outputChannel.appendLine(`Failed to initialize session on ready: ${error}`);
 		}
 	}
 
