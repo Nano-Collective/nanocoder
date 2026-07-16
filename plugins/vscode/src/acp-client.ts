@@ -20,6 +20,10 @@ export class NanocoderAcpClient {
 		this.stateManager = stateManager;
 	}
 
+	hasPendingPermissions(): boolean {
+		return this.pendingPermissions.size > 0;
+	}
+
 	setConnection(conn: ClientSideConnection) {
 		this.connection = conn;
 	}
@@ -126,5 +130,19 @@ export class NanocoderAcpClient {
 		// it's likely compatible with the basic initialize(). If we need stricter checks,
 		// we can parse the x.y.z format here.
 		return false; 
+	}
+
+	async proceedPlan(): Promise<void> {
+		this.outputChannel.appendLine('ACP: proceedPlan requested. (TODO: Forward plan approval to server)');
+		// TODO: Implement the correct ACP interaction for Proceed in Plan Mode.
+	}
+
+	async modifyPlan(): Promise<void> {
+		this.outputChannel.appendLine('ACP: modifyPlan requested. (TODO: Forward refinement to server)');
+	}
+
+	async cancelPlan(): Promise<void> {
+		this.outputChannel.appendLine('ACP: cancelPlan requested.');
+		this.cancel();
 	}
 }

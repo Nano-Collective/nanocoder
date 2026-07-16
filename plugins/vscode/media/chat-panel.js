@@ -113,6 +113,9 @@
 			case 'permissionRequested':
 				handlePermissionRequested(message.toolCallId, message.toolCall);
 				break;
+			case 'showPlanReview':
+				handlePlanReview(message);
+				break;
 		}
 	});
 
@@ -243,6 +246,67 @@
 		actionsDiv.appendChild(denyBtn);
 		
 		card.appendChild(actionsDiv);
+		scrollToBottom();
+	}
+
+	function handlePlanReview(message) {
+		// Remove any existing plan review card
+		const existing = document.getElementById('plan-review-card');
+		if (existing) existing.remove();
+
+		const card = document.createElement('div');
+		card.className = 'plan-review-card';
+		card.id = 'plan-review-card';
+
+		const header = document.createElement('div');
+		header.className = 'plan-header';
+		header.textContent = '📋 Plan Review';
+
+		const body = document.createElement('div');
+		body.className = 'plan-body';
+
+		const desc = document.createElement('div');
+		desc.className = 'plan-description';
+		desc.textContent = message.description || 'The agent has generated an implementation plan. How would you like to proceed?';
+
+		const actionsDiv = document.createElement('div');
+		actionsDiv.className = 'plan-actions';
+
+		const proceedBtn = document.createElement('button');
+		proceedBtn.className = 'plan-btn proceed-btn';
+		proceedBtn.textContent = 'Proceed';
+		proceedBtn.onclick = () => {
+			vscode.postMessage({ type: 'proceedPlan' });
+			card.remove();
+		};
+
+		const modifyBtn = document.createElement('button');
+		modifyBtn.className = 'plan-btn modify-btn';
+		modifyBtn.textContent = 'Modify';
+		modifyBtn.onclick = () => {
+			vscode.postMessage({ type: 'modifyPlan' });
+			card.remove();
+		};
+
+		const cancelBtn = document.createElement('button');
+		cancelBtn.className = 'plan-btn cancel-btn';
+		cancelBtn.textContent = 'Cancel';
+		cancelBtn.onclick = () => {
+			vscode.postMessage({ type: 'cancelPlan' });
+			card.remove();
+		};
+
+		actionsDiv.appendChild(proceedBtn);
+		actionsDiv.appendChild(modifyBtn);
+		actionsDiv.appendChild(cancelBtn);
+
+		body.appendChild(desc);
+		body.appendChild(actionsDiv);
+
+		card.appendChild(header);
+		card.appendChild(body);
+
+		messagesContainer.appendChild(card);
 		scrollToBottom();
 	}
 
