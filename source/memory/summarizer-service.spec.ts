@@ -32,7 +32,12 @@ test('SummarizerService stores a manual memory', async t => {
 });
 
 test('SummarizerService rejects empty manual memory content', async t => {
-	const service = new SummarizerService();
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const service = new SummarizerService(
+		new SemanticMemoryManager({memoryDir: dir, cwd}),
+	);
 
 	await t.throwsAsync(service.remember({content: '   '}), {
 		message: 'Memory content cannot be empty',

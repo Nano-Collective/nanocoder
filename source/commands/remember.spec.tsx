@@ -21,7 +21,10 @@ class FakeSummarizerService extends SummarizerService {
 		sourceSessionId?: string;
 	};
 
-	constructor(private readonly memory: SemanticMemory) {
+	constructor(
+		private readonly memory: SemanticMemory,
+		private readonly error?: Error,
+	) {
 		super();
 	}
 
@@ -31,6 +34,7 @@ class FakeSummarizerService extends SummarizerService {
 		sourceSessionId?: string;
 	}): Promise<SemanticMemory> {
 		this.rememberedInput = input;
+		if (this.error) throw this.error;
 		return this.memory;
 	}
 }
@@ -101,6 +105,28 @@ test('remember command forwards explicit category', async t => {
 		content: 'Keep generated files out of review.',
 		category: 'coding-style',
 	});
+});
+
+test('remember command reports save failures', async t => {
+	const service = new FakeSummarizerService(
+		{
+			id: 'memory-1',
+			content: 'Use the existing auth adapter.',
+			category: 'architecture',
+			timestamp: '2026-07-15T00:00:00.000Z',
+		},
+		new Error('disk full'),
+	);
+	const command = createRememberCommand({summarizerService: service});
+
+	const result = await command.handler(
+		['Use', 'the', 'existing', 'auth', 'adapter.'],
+		[],
+		testMetadata,
+	);
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+
+	t.true((lastFrame() ?? '').includes('Failed to save memory: disk full'));
 });
 
 test('lazy registry exposes /remember', t => {
