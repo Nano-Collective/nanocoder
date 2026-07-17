@@ -53,6 +53,8 @@ nanocoder -h
 | `--context-max` | | Set maximum context length in tokens (supports k/K suffix, e.g. `128k`) |
 | `--mode` | | Start in a specific [development mode](../features/development-modes.md) — `normal`, `auto-accept`, `yolo`, or `plan`. Defaults to `normal` for interactive sessions and `auto-accept` for `run` mode. |
 | `--trust-directory` | | Skip the first-run directory trust prompt for this run only. Only valid with `run`; ignored (with a warning) in interactive mode. The trust is ephemeral — `trustedDirectories` in your preferences file is not modified. |
+| `--alt-screen` | | Start in fullscreen mode: a fixed-height layout on the alternate screen buffer with in-app scrolling. Overrides the `alternateScreen` preference for this run. |
+| `--no-alt-screen` | | Force inline mode (the default), even if `alternateScreen: true` is set in your preferences file. |
 | `run` | | Run in non-interactive mode |
 
 **Provider/Model Flags:**
