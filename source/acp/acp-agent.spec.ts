@@ -268,6 +268,30 @@ test('AcpAgent.prompt - throws on unknown session', async t => {
 	);
 });
 
+
+test('AcpAgent.prompt - propagates API errors cleanly', async t => {
+	const {agent} = createAgent();
+	
+	// Mock the client to throw an API error
+	agent['initContext'].client.chat = async () => {
+		throw new Error('RequestError: Internal error (500)');
+	};
+	
+	const session = agent.registerSession('session-1', {
+		conn: agent['conn'],
+		sessionId: 'session-1',
+		canReadTextFile: false,
+	});
+	
+	const error = await t.throwsAsync(
+		() => agent.prompt({sessionId: 'session-1', prompt: [{type: 'text', text: 'crash please'}]}),
+		{message: /RequestError/}
+	);
+	
+	// Ensure turnActive is reset even on error
+	t.false(session.turnActive);
+});
+
 test('AcpAgent.prompt - returns response for valid session', async t => {
 	const {agent} = createAgent();
 	const session = await agent.newSession({cwd: '/tmp'});

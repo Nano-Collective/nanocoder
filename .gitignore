@@ -125,3 +125,6 @@ benchmarks/report.json
 benchmarks/explain.json
 benchmarks/.module-*
 .github/issues/docs
+
+# Auto-generated CSS
+plugins/vscode/media/chat-panel.css
