@@ -13,6 +13,31 @@ html, body {
   font-size: var(--vscode-font-size);
 }
 
+/* Custom VS Code-native Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--vscode-scrollbarSlider-background);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--vscode-scrollbarSlider-hoverBackground);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:active {
+  background: var(--vscode-scrollbarSlider-activeBackground);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
 /* Basic Markdown styling since Tailwind resets all headings, lists, and bold text */
 .markdown-body p {
   margin-bottom: 0.75em;
@@ -49,6 +74,7 @@ html, body {
   padding: 0.75em;
   border-radius: 4px;
   overflow-x: auto;
+  max-width: 100%;
   margin-bottom: 0.75em;
 }
 .markdown-body pre code {

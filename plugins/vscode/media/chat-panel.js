@@ -6,6 +6,16 @@
 	const chatInput = document.getElementById('chat-input');
 	const modeSelector = document.getElementById('mode-selector');
 	const modelSelector = document.getElementById('model-selector');
+	function toggleHistoryView() {
+		isHistoryView = !isHistoryView;
+		if (isHistoryView) {
+			document.getElementById('chat-view').classList.add('hidden');
+			document.getElementById('history-view').classList.remove('hidden');
+		} else {
+			document.getElementById('chat-view').classList.remove('hidden');
+			document.getElementById('history-view').classList.add('hidden');
+		}
+	}
 	const historyBtn = document.getElementById('history-btn');
 	const chatView = document.getElementById('chat-view');
 	const historyView = document.getElementById('history-view');
@@ -22,6 +32,7 @@
 	let isHistoryView = false;
 	let isProcessing = false;
 	let currentAggregator = null;
+	let currentThoughtBox = null;
 
 	// Premium SVG Icons (Feather Icons)
 	const ICONS = {
@@ -105,7 +116,7 @@
 		if (welcome) welcome.remove();
 
 		const msgEl = document.createElement('div');
-		msgEl.className = 'leading-relaxed break-words shrink-0 ' + 
+		msgEl.className = 'leading-relaxed break-words shrink-0 min-w-0 ' + 
 			(role === 'user' 
 				? 'self-end bg-vscode-button-bg text-vscode-button-fg px-3 py-2 rounded-lg max-w-[85%]' 
 				: 'self-start max-w-full');
@@ -139,7 +150,7 @@
 		if (!currentTurnEl || !currentTextEl) {
 			// First chunk for this turn
 			const msgEl = document.createElement('div');
-			msgEl.className = 'message agent';
+			msgEl.className = 'message agent min-w-0';
 			
 			const textContainer = document.createElement('div');
 			textContainer.className = 'markdown-body leading-relaxed break-words';
@@ -185,10 +196,14 @@
 		messagesContainer.scrollTop = messagesContainer.scrollHeight;
 	}
 
-	// Handle messages sent from the extension to the webview
+	// Handle messages from extension
 	window.addEventListener('message', event => {
 		const message = event.data;
+		
 		switch (message.type) {
+			case 'toggleHistory':
+				toggleHistoryView();
+				break;
 			case 'appendMessage':
 				appendMessage(message.content, 'agent');
 				break;
@@ -198,6 +213,10 @@
 				currentTurnEl = null;
 				currentTextEl = null;
 				currentTurnText = '';
+				if (currentThoughtBox) {
+					clearInterval(currentThoughtBox.timer);
+					currentThoughtBox = null;
+				}
 				setProcessing(false);
 				break;
 			case 'acpUpdate':
@@ -349,19 +368,115 @@
 		const update = payload.update ? payload.update : payload;
 		
 		if (update.sessionUpdate === 'agent_message_chunk') {
+			if (currentThoughtBox) {
+				currentThoughtBox.finish();
+				currentThoughtBox = null;
+			}
 			if (update.content && update.content.text) {
 				appendChunk(update.content.text);
 			}
 		} else if (update.sessionUpdate === 'agent_thought_chunk') {
-			// Treat thoughts as chunks for now (we can prefix them with "🤔 " or style them later)
+			if (!currentThoughtBox) {
+				currentThoughtBox = new ThoughtAggregator();
+			}
 			if (update.content && update.content.text) {
-				appendChunk(update.content.text);
+				currentThoughtBox.append(update.content.text);
 			}
 		} else if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
+			if (currentThoughtBox) {
+				currentThoughtBox.finish();
+				currentThoughtBox = null;
+			}
 			handleToolCallUpdate(update);
 		} else if (update.sessionUpdate === 'prompt_response' || update.sessionUpdate === 'done') {
+			if (currentThoughtBox) {
+				currentThoughtBox.finish();
+				currentThoughtBox = null;
+			}
 			// Turn is complete — restore the send button
 			setProcessing(false);
+		}
+	}
+
+	class ThoughtAggregator {
+		constructor() {
+			this.el = document.createElement('div');
+			this.el.className = 'my-2 flex flex-col shrink-0';
+			
+			this.header = document.createElement('div');
+			this.header.className = 'flex items-center gap-1.5 cursor-pointer text-vscode-descriptionForeground hover:text-vscode-fg transition-colors select-none w-fit';
+			this.header.onclick = () => this.toggle();
+			
+			this.title = document.createElement('span');
+			this.title.className = 'font-vscode text-[0.85em] font-medium';
+			this.title.textContent = 'Thinking...';
+			
+			this.chevron = document.createElement('span');
+			this.chevron.className = 'flex items-center justify-center opacity-70';
+			this.chevron.innerHTML = ICONS.chevron;
+			this.chevron.style.transform = 'rotate(0deg)'; // open by default
+			
+			this.header.appendChild(this.title);
+			this.header.appendChild(this.chevron);
+			this.el.appendChild(this.header);
+			
+			this.body = document.createElement('div');
+			this.body.className = 'mt-2 pl-3 border-l-[3px] border-vscode-widget-border text-vscode-descriptionForeground markdown-body opacity-90 text-[0.95em]';
+			this.el.appendChild(this.body);
+			
+			this.isOpen = true;
+			this.startTime = Date.now();
+			this.text = '';
+			this.renderFrame = null;
+			
+			this.timer = setInterval(() => this.updateTimer(), 1000);
+			
+			messagesContainer.appendChild(this.el);
+			scrollToBottom();
+		}
+		
+		updateTimer() {
+			const seconds = Math.floor((Date.now() - this.startTime) / 1000);
+			this.title.textContent = `Thinking for ${seconds}s`;
+		}
+		
+		toggle(force) {
+			this.isOpen = force !== undefined ? force : !this.isOpen;
+			this.body.style.display = this.isOpen ? 'block' : 'none';
+			
+			const svg = this.chevron.querySelector('svg');
+			if (svg) {
+				svg.style.transform = this.isOpen ? 'rotate(0deg)' : 'rotate(-90deg)';
+			}
+		}
+		
+		append(chunk) {
+			this.text += chunk;
+			if (typeof marked !== 'undefined') {
+				if (!this.renderFrame) {
+					this.renderFrame = requestAnimationFrame(() => {
+						this.body.innerHTML = marked.parse(this.text);
+						this.renderFrame = null;
+						scrollToBottom();
+					});
+				}
+			} else {
+				this.body.textContent = this.text;
+				scrollToBottom();
+			}
+		}
+		
+		finish() {
+			clearInterval(this.timer);
+			if (this.renderFrame) {
+				cancelAnimationFrame(this.renderFrame);
+				this.renderFrame = null;
+				if (typeof marked !== 'undefined') {
+					this.body.innerHTML = marked.parse(this.text);
+				}
+			}
+			this.updateTimer();
+			this.toggle(false); // Auto-shrink when done!
 		}
 	}
 

@@ -65,6 +65,12 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
+	public toggleHistory() {
+		if (this._view) {
+			this._view.webview.postMessage({ type: 'toggleHistory' });
+		}
+	}
+
 	public resolveWebviewView(
 		webviewView: vscode.WebviewView,
 		context: vscode.WebviewViewResolveContext,
