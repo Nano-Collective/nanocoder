@@ -4,6 +4,7 @@ import {ConversationStateManager} from '@/app/utils/conversation-state';
 import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
 import {CommandIntegration} from '@/custom-commands/command-integration';
+import {appendRelevantProjectContext} from '@/memory/project-context';
 import {generateKey} from '@/session/key-generator';
 import {getTuneToolMode} from '@/types/config';
 import type {ImageAttachment, Message} from '@/types/core';
@@ -357,6 +358,8 @@ export function useChatHandler({
 					message,
 				);
 			}
+
+			systemPrompt = await appendRelevantProjectContext(systemPrompt, message);
 
 			// Create stream request
 			const systemMessage: Message = {
