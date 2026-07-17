@@ -3,6 +3,7 @@ import SelectInput from 'ink-select-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
+import {FilterableSelectList} from '@/components/filterable-select-list';
 
 export interface ItemSelectorOption<TValue extends string = string> {
 	label: string;
@@ -19,6 +20,9 @@ interface ItemSelectorProps<TValue extends string = string> {
 	error?: string | null;
 	errorTitle?: string;
 	errorHint?: string;
+	searchable?: boolean;
+	visibleCount?: number;
+	initialSelectedValue?: string;
 }
 
 /**
@@ -39,15 +43,25 @@ export function ItemSelector<TValue extends string = string>({
 	error,
 	errorTitle,
 	errorHint,
+	searchable = false,
+	visibleCount,
+	initialSelectedValue,
 }: ItemSelectorProps<TValue>) {
 	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
 
-	useInput((_, key) => {
-		if (key.escape) {
-			onCancel();
-		}
-	});
+	// Single owner for Escape during loading/error branches, where
+	// FilterableSelectList is not mounted. Dormant during the normal
+	// searchable path (isActive=false) so it can't double-fire with the
+	// child's own Escape handler (Ink useInput is broadcast).
+	useInput(
+		(_, key) => {
+			if (key.escape) {
+				onCancel();
+			}
+		},
+		{isActive: !searchable || loading || error != null},
+	);
 
 	if (loading) {
 		return (
@@ -95,12 +109,26 @@ export function ItemSelector<TValue extends string = string>({
 			marginBottom={1}
 		>
 			<Box flexDirection="column">
-				<SelectInput
-					items={items}
-					onSelect={item => onSelect(item.value as TValue)}
-				/>
+				{searchable ? (
+					<FilterableSelectList
+						items={items}
+						visibleCount={visibleCount}
+						initialSelectedValue={initialSelectedValue}
+						onSelect={value => onSelect(value as TValue)}
+						onCancel={onCancel}
+					/>
+				) : (
+					<SelectInput
+						items={items}
+						onSelect={item => onSelect(item.value as TValue)}
+					/>
+				)}
 				<Box marginTop={1}>
-					<Text color={colors.secondary}>Press Escape to cancel</Text>
+					<Text color={colors.secondary}>
+						{searchable
+							? 'Type to filter · ↑↓ navigate · Enter select · Esc cancel'
+							: 'Press Escape to cancel'}
+					</Text>
 				</Box>
 			</Box>
 		</TitledBoxWithPreferences>
