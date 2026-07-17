@@ -188,6 +188,27 @@ export class AcpAgent implements Agent {
 				conn: this.conn,
 				nonInteractiveAlwaysAllow,
 			});
+		} catch (error) {
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			logger.error(`Error during ACP prompt: ${errorMsg}`);
+
+			// Relay the error to the chat UI so the user sees it inline
+			const formattedError = `\n\n> ❌ **Error:** An issue occurred while communicating with the AI provider (${errorMsg}). Please try again.\n`;
+
+			this.conn.sessionUpdate({
+				sessionId: params.sessionId,
+				update: {
+					sessionUpdate: 'agent_message_chunk',
+					content: {type: 'text', text: formattedError},
+				},
+			});
+
+			session.messages.push({
+				role: 'assistant',
+				content: formattedError,
+			});
+
+			throw error;
 		} finally {
 			session.turnActive = false;
 		}

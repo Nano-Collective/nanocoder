@@ -16,20 +16,35 @@
 	
 	let currentTurnEl = null;
 	let currentTextEl = null;
+	let currentTurnText = '';
+	let renderFrame = null;
 	let sessionsData = [];
 	let isHistoryView = false;
 	let isProcessing = false;
+	let currentAggregator = null;
+
+	// Premium SVG Icons (Feather Icons)
+	const ICONS = {
+		trash: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>`,
+		pending: `<svg class="animate-spin" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line></svg>`,
+		success: `<svg class="text-[#89d185]" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`,
+		error: `<svg class="text-[#f14c4c]" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`,
+		cancelled: `<svg class="text-[#cccccc] opacity-80" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line></svg>`,
+		clipboard: `<svg class="mr-1.5" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>`,
+		chevron: `<svg class="transition-transform duration-200" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`
+	};
 
 	// --- Send / Stop toggle logic ---
 	function setProcessing(active) {
 		isProcessing = active;
-		if (iconSend) iconSend.style.display = active ? 'none' : '';
-		if (iconStop) iconStop.style.display = active ? '' : 'none';
+		if (!active) {
+			if (currentAggregator) currentAggregator.close();
+			currentAggregator = null;
+		}
 		if (sendStopBtn) {
 			sendStopBtn.title = active ? 'Stop (cancel)' : 'Send (Enter)';
 			sendStopBtn.classList.toggle('is-processing', active);
 		}
-		chatInput.disabled = active;
 	}
 
 	if (sendStopBtn) {
@@ -59,7 +74,7 @@
 
 	function submitMessage() {
 		const text = chatInput.value.trim();
-		if (!text || isProcessing) return;
+		if (!text) return;
 
 		// Send message to extension host
 		vscode.postMessage({
@@ -71,15 +86,17 @@
 		chatInput.value = '';
 		chatInput.style.height = 'auto';
 
-		// Switch to processing state
-		setProcessing(true);
-
 		// Optimistically append user message 
 		appendMessage(text, 'user');
-		
-		// Reset turn elements so agent starts a fresh block
-		currentTurnEl = null;
-		currentTextEl = null;
+
+		if (!isProcessing) {
+			// Switch to processing state
+			setProcessing(true);
+			
+			// Reset turn elements so agent starts a fresh block
+			currentTurnEl = null;
+			currentTextEl = null;
+		}
 	}
 
 	function appendMessage(content, role) {
@@ -88,10 +105,21 @@
 		if (welcome) welcome.remove();
 
 		const msgEl = document.createElement('div');
-		msgEl.className = `message ${role}`;
+		msgEl.className = 'leading-relaxed break-words shrink-0 ' + 
+			(role === 'user' 
+				? 'self-end bg-vscode-button-bg text-vscode-button-fg px-3 py-2 rounded-lg max-w-[85%]' 
+				: 'self-start max-w-full');
 		
 		const textContainer = document.createElement('div');
-		textContainer.textContent = content; // Phase 3: plain text for now, but incrementally updateable
+		textContainer.className = 'markdown-body';
+		
+		// If it's the user, we just render it directly (or we could use marked for them too)
+		// Usually users prefer raw text, but let's render markdown for both just in case.
+		if (typeof marked !== 'undefined') {
+			textContainer.innerHTML = marked.parse(content);
+		} else {
+			textContainer.textContent = content;
+		} // Phase 3: plain text for now, but incrementally updateable
 		msgEl.appendChild(textContainer);
 
 		messagesContainer.appendChild(msgEl);
@@ -114,7 +142,14 @@
 			msgEl.className = 'message agent';
 			
 			const textContainer = document.createElement('div');
-			textContainer.textContent = textChunk;
+			textContainer.className = 'markdown-body leading-relaxed break-words';
+			currentTurnText = textChunk;
+			
+			if (typeof marked !== 'undefined') {
+				textContainer.innerHTML = marked.parse(currentTurnText);
+			} else {
+				textContainer.textContent = currentTurnText;
+			}
 			
 			msgEl.appendChild(textContainer);
 			messagesContainer.appendChild(msgEl);
@@ -123,10 +158,27 @@
 			currentTextEl = textContainer;
 		} else {
 			// Append to existing turn
-			currentTextEl.textContent += textChunk;
+			currentTurnText += textChunk;
+			
+			if (typeof marked !== 'undefined') {
+				if (!renderFrame) {
+					renderFrame = requestAnimationFrame(() => {
+						if (currentTextEl) {
+							currentTextEl.innerHTML = marked.parse(currentTurnText);
+						}
+						renderFrame = null;
+						scrollToBottom();
+					});
+				}
+			} else {
+				currentTextEl.textContent += textChunk; // Fallback
+				scrollToBottom();
+			}
 		}
 		
-		scrollToBottom();
+		if (typeof marked === 'undefined') {
+			scrollToBottom();
+		}
 	}
 
 	function scrollToBottom() {
@@ -141,9 +193,11 @@
 				appendMessage(message.content, 'agent');
 				break;
 			case 'clear':
+				if (renderFrame) { cancelAnimationFrame(renderFrame); renderFrame = null; }
 				messagesContainer.innerHTML = '';
 				currentTurnEl = null;
 				currentTextEl = null;
+				currentTurnText = '';
 				setProcessing(false);
 				break;
 			case 'acpUpdate':
@@ -188,7 +242,7 @@
 		if (chatView) chatView.style.display = '';
 		if (historyView) historyView.style.display = 'none';
 		if (historyBtn) historyBtn.title = 'History';
-		if (historyBtn) historyBtn.textContent = '🕐';
+		if (historyBtn) historyBtn.classList.remove('is-history-open');
 	}
 
 	function showHistoryView() {
@@ -196,7 +250,7 @@
 		if (chatView) chatView.style.display = 'none';
 		if (historyView) historyView.style.display = '';
 		if (historyBtn) historyBtn.title = 'Back to chat';
-		if (historyBtn) historyBtn.textContent = '✕';
+		if (historyBtn) historyBtn.classList.add('is-history-open');
 		// Always refresh the list when opening history
 		vscode.postMessage({ type: 'listSessions' });
 		renderSessions();
@@ -208,7 +262,7 @@
 
 		if (sessionsData.length === 0) {
 			const empty = document.createElement('div');
-			empty.className = 'history-empty';
+			empty.className = 'px-4 py-5 opacity-50 text-[0.9em] text-center';
 			empty.textContent = 'No previous sessions found.';
 			historyList.appendChild(empty);
 			return;
@@ -228,19 +282,19 @@
 			if (sessions.length === 0) return;
 
 			const groupEl = document.createElement('div');
-			groupEl.className = 'history-group';
+			groupEl.className = 'mb-1';
 
 			const groupHeader = document.createElement('div');
-			groupHeader.className = 'history-group-header';
+			groupHeader.className = 'px-4 py-1.5 text-[0.78em] font-semibold uppercase tracking-[0.06em] opacity-50';
 			groupHeader.textContent = groupName;
 			groupEl.appendChild(groupHeader);
 
 			sessions.forEach(session => {
 				const itemEl = document.createElement('div');
-				itemEl.className = 'history-item';
+				itemEl.className = 'flex items-center px-4 py-1.5 cursor-pointer gap-2 rounded mx-1 transition-colors hover:bg-vscode-list-hover group';
 
 				const labelEl = document.createElement('span');
-				labelEl.className = 'history-item-label';
+				labelEl.className = 'flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[0.9em]';
 				labelEl.textContent = session.label;
 				labelEl.title = session.cwd;
 				labelEl.onclick = () => {
@@ -249,9 +303,9 @@
 				};
 
 				const deleteBtn = document.createElement('button');
-				deleteBtn.className = 'history-delete-btn';
-				deleteBtn.title = 'Delete session';
-				deleteBtn.textContent = '🗑';
+				deleteBtn.className = 'bg-transparent border-none cursor-pointer text-vscode-fg opacity-0 group-hover:opacity-100 transition-opacity p-1 flex items-center justify-center hover:bg-vscode-toolbarHover rounded';
+				deleteBtn.title = 'Delete Session';
+				deleteBtn.innerHTML = ICONS.trash;
 				deleteBtn.onclick = (e) => {
 					e.stopPropagation();
 					vscode.postMessage({ type: 'deleteSession', sessionId: session.sessionId });
@@ -291,8 +345,8 @@
 	}
 
 	function handleAcpUpdate(payload) {
-		if (!payload || !payload.update) return;
-		const update = payload.update;
+		if (!payload) return;
+		const update = payload.update ? payload.update : payload;
 		
 		if (update.sessionUpdate === 'agent_message_chunk') {
 			if (update.content && update.content.text) {
@@ -311,82 +365,189 @@
 		}
 	}
 
+	class ToolAggregator {
+		constructor() {
+			this.el = document.createElement('div');
+			this.el.className = 'my-3 border border-vscode-widget-border rounded bg-vscode-widget-bg overflow-hidden shrink-0 tool-aggregator';
+			
+			this.header = document.createElement('div');
+			this.header.className = 'px-3 py-2 flex items-center bg-vscode-widget-header border-b border-vscode-widget-border gap-2 cursor-pointer select-none';
+			this.header.onclick = () => this.toggle();
+			
+			this.title = document.createElement('span');
+			this.title.className = 'font-vscode text-[0.9em] opacity-80';
+			this.title.textContent = 'Exploring...';
+			
+			this.chevron = document.createElement('span');
+			this.chevron.className = 'ml-auto flex items-center justify-center';
+			this.chevron.innerHTML = ICONS.chevron;
+			
+			this.header.appendChild(this.title);
+			this.header.appendChild(this.chevron);
+			this.el.appendChild(this.header);
+			
+			this.body = document.createElement('div');
+			this.body.className = 'flex flex-col';
+			this.el.appendChild(this.body);
+			
+			this.isOpen = true;
+			this.toolCount = 0;
+			this.toolItems = new Map();
+			
+			messagesContainer.appendChild(this.el);
+		}
+		
+		toggle() {
+			this.isOpen = !this.isOpen;
+			this.body.style.display = this.isOpen ? '' : 'none';
+			
+			const svg = this.chevron.querySelector('svg');
+			if (svg) {
+				svg.style.transform = this.isOpen ? 'rotate(0deg)' : 'rotate(-90deg)';
+			}
+		}
+		
+		close() {
+			this.toggle(false);
+		}
+		
+		updateTitle() {
+			this.title.textContent = `Exploring ${this.toolCount} tools...`;
+		}
+		
+		addOrUpdateTool(toolCallId, update) {
+			let item = this.toolItems.get(toolCallId);
+			if (!item) {
+				this.toolCount++;
+				this.updateTitle();
+				
+				item = document.createElement('div');
+				item.className = 'px-3 py-1.5 border-t border-vscode-widget-border flex items-center gap-2 text-[0.85em] font-vscode first:border-t-0';
+				item.id = `tool-card-${toolCallId}`; // So permissions can find it
+				
+				const status = document.createElement('span');
+				status.className = 'ml-auto flex items-center justify-center';
+				status.innerHTML = ICONS.pending;
+				
+				const label = document.createElement('span');
+				label.className = 'truncate flex-1';
+				label.textContent = update.title || update.name || 'Tool Call';
+				
+				item.appendChild(status);
+				item.appendChild(label);
+				this.body.appendChild(item);
+				this.toolItems.set(toolCallId, item);
+			} else {
+				const statusEl = item.querySelector('.ml-auto');
+				if (statusEl) {
+					if (update.status === 'success' || update.status === 'completed') statusEl.innerHTML = ICONS.success;
+					else if (update.status === 'error') statusEl.innerHTML = ICONS.error;
+					else if (update.status === 'cancelled' || update.status === 'denied') statusEl.innerHTML = ICONS.cancelled;
+				}
+			}
+			scrollToBottom();
+		}
+	}
+
 	function handleToolCallUpdate(update) {
 		const toolCallId = update.toolCallId || (update.toolCall && update.toolCall.toolCallId);
 		if (!toolCallId) return;
 
-		let card = document.getElementById(`tool-card-${toolCallId}`);
-		if (!card) {
-			card = createToolCard(toolCallId, update);
-			messagesContainer.appendChild(card);
-			scrollToBottom();
+		const toolName = update.name || (update.toolCall && update.toolCall.name) || '';
+		const isMutating = ['replace_file_content', 'multi_replace_file_content', 'write_to_file', 'write_file'].includes(toolName);
+
+		if (isMutating) {
+			let card = document.getElementById(`tool-card-${toolCallId}`);
+			if (!card) {
+				card = createEditCard(toolCallId, update);
+				messagesContainer.appendChild(card);
+				scrollToBottom();
+			} else {
+				updateEditCard(card, update);
+			}
 		} else {
-			updateToolCard(card, update);
+			if (!currentAggregator) {
+				currentAggregator = new ToolAggregator();
+			}
+			currentAggregator.addOrUpdateTool(toolCallId, update);
 		}
 	}
+	
+	function extractFileName(title) {
+		if (!title) return 'File';
+		const parts = title.split('/');
+		let last = parts[parts.length - 1];
+		last = last.split('\\').pop();
+		return last.replace(/['"]+$/g, '').trim();
+	}
+	
+	function getFileColor(filename) {
+		const ext = filename.split('.').pop().toLowerCase();
+		if (['ts', 'tsx'].includes(ext)) return 'text-[#3178C6]';
+		if (['js', 'jsx'].includes(ext)) return 'text-[#F1E05A]';
+		if (['css', 'scss'].includes(ext)) return 'text-[#563D7C]';
+		if (['json'].includes(ext)) return 'text-[#CB3837]';
+		if (['html'].includes(ext)) return 'text-[#E34F26]';
+		return 'text-vscode-symbolIcon-fileForeground';
+	}
 
-	function createToolCard(toolCallId, update) {
+	function createEditCard(toolCallId, update) {
 		const card = document.createElement('div');
-		card.className = 'tool-card';
+		card.className = 'my-2 flex items-center justify-between px-3 py-2 border border-vscode-widget-border rounded bg-vscode-editor-bg cursor-pointer hover:bg-vscode-list-hover group tool-card';
 		card.id = `tool-card-${toolCallId}`;
+		card.onclick = () => vscode.postMessage({ type: 'showDiff', toolCallId });
 		
-		const header = document.createElement('div');
-		header.className = 'tool-header';
-		
-		const title = document.createElement('span');
-		title.className = 'tool-title';
-		title.textContent = update.title || update.name || 'Tool Call';
+		const left = document.createElement('div');
+		left.className = 'flex items-center gap-2 font-vscode text-[0.9em]';
 		
 		const status = document.createElement('span');
-		status.className = 'tool-status pending';
-		status.textContent = '⏳';
+		status.className = 'ml-auto flex items-center justify-center';
+		status.innerHTML = ICONS.pending;
 		
-		header.appendChild(status);
-		header.appendChild(title);
-		card.appendChild(header);
+		const label = document.createElement('span');
+		label.className = 'flex items-center gap-1.5';
 		
-		const body = document.createElement('div');
-		body.className = 'tool-body';
+		const filename = extractFileName(update.title || update.name);
+		const fileColor = getFileColor(filename);
 		
-		// Add diff link if there's a diff content
-		if (update.content && Array.isArray(update.content)) {
-			const hasDiff = update.content.some(c => c.type === 'diff');
-			if (hasDiff) {
-				const diffLink = document.createElement('a');
-				diffLink.href = '#';
-				diffLink.className = 'tool-diff-link';
-				diffLink.textContent = 'View Changes';
-				diffLink.onclick = (e) => {
-					e.preventDefault();
-					vscode.postMessage({ type: 'showDiff', toolCallId });
-				};
-				body.appendChild(diffLink);
-			}
-		}
-
-		card.appendChild(body);
+		const actionText = document.createElement('span');
+		actionText.textContent = 'Edited';
+		actionText.className = 'opacity-80';
+		
+		const nameText = document.createElement('span');
+		nameText.className = `font-semibold ${fileColor}`;
+		nameText.textContent = filename;
+		
+		label.appendChild(actionText);
+		label.appendChild(nameText);
+		
+		left.appendChild(status);
+		left.appendChild(label);
+		card.appendChild(left);
+		
+		const right = document.createElement('div');
+		right.className = 'flex items-center gap-2';
+		
+		const hoverBtn = document.createElement('span');
+		hoverBtn.className = 'opacity-0 group-hover:opacity-100 transition-opacity bg-vscode-button-secondary text-vscode-fg px-2 py-0.5 rounded text-[0.85em]';
+		hoverBtn.textContent = 'Open Diff';
+		
+		right.appendChild(hoverBtn);
+		card.appendChild(right);
+		
 		return card;
 	}
 
-	function updateToolCard(card, update) {
-		const statusEl = card.querySelector('.tool-status');
-		const bodyEl = card.querySelector('.tool-body');
-		
-		if (update.status) {
-			statusEl.className = `tool-status ${update.status}`;
-			if (update.status === 'success' || update.status === 'completed') {
-				statusEl.textContent = '✅';
-				const actions = card.querySelector('.tool-actions');
-				if (actions) actions.remove();
-			} else if (update.status === 'error') {
-				statusEl.textContent = '❌';
-				const actions = card.querySelector('.tool-actions');
-				if (actions) actions.remove();
-			} else if (update.status === 'cancelled' || update.status === 'denied') {
-				statusEl.textContent = '🚫';
-				const actions = card.querySelector('.tool-actions');
-				if (actions) actions.remove();
-			}
+	function updateEditCard(el, update) {
+		const statusEl = el.querySelector('.ml-auto');
+		if (statusEl) {
+			if (update.status === 'success' || update.status === 'completed') statusEl.innerHTML = ICONS.success;
+			else if (update.status === 'error') statusEl.innerHTML = ICONS.error;
+			else if (update.status === 'cancelled' || update.status === 'denied') statusEl.innerHTML = ICONS.cancelled;
+		}	
+		if (update.status === 'success' || update.status === 'completed' || update.status === 'error' || update.status === 'cancelled' || update.status === 'denied') {
+			const actions = el.querySelector('.tool-actions');
+			if (actions) actions.remove();
 		}
 	}
 
@@ -398,10 +559,10 @@
 		if (card.querySelector('.tool-actions')) return;
 
 		const actionsDiv = document.createElement('div');
-		actionsDiv.className = 'tool-actions';
+		actionsDiv.className = 'px-3 py-2 bg-vscode-widget-header border-t border-vscode-widget-border flex justify-end gap-2 tool-actions';
 		
 		const approveBtn = document.createElement('button');
-		approveBtn.className = 'tool-btn approve-btn';
+		approveBtn.className = 'border-none rounded px-3 py-1.5 cursor-pointer font-vscode text-[0.9em] transition-colors bg-vscode-button-bg text-vscode-button-fg hover:bg-vscode-button-hover';
 		approveBtn.textContent = 'Approve';
 		approveBtn.onclick = () => {
 			vscode.postMessage({ type: 'approveTool', toolCallId });
@@ -409,7 +570,7 @@
 		};
 		
 		const denyBtn = document.createElement('button');
-		denyBtn.className = 'tool-btn deny-btn';
+		denyBtn.className = 'bg-transparent border border-vscode-button-secondary text-vscode-fg hover:bg-vscode-button-secondaryHover rounded px-3 py-1.5 cursor-pointer font-vscode text-[0.9em] transition-colors';
 		denyBtn.textContent = 'Deny';
 		denyBtn.onclick = () => {
 			vscode.postMessage({ type: 'denyTool', toolCallId });
@@ -429,25 +590,25 @@
 		if (existing) existing.remove();
 
 		const card = document.createElement('div');
-		card.className = 'plan-review-card';
+		card.className = 'my-4 border-2 border-vscode-button-bg rounded bg-vscode-widget-bg overflow-hidden shrink-0 shadow-md';
 		card.id = 'plan-review-card';
 
 		const header = document.createElement('div');
-		header.className = 'plan-header';
-		header.textContent = '📋 Plan Review';
+		header.className = 'font-vscode font-semibold mb-3 flex items-center px-3 py-2 bg-vscode-button-bg text-vscode-button-fg text-[0.95em]';
+		header.innerHTML = ICONS.clipboard + ' Plan Review';
 
 		const body = document.createElement('div');
-		body.className = 'plan-body';
+		body.className = 'px-3 py-3 flex flex-col gap-3';
 
 		const desc = document.createElement('div');
-		desc.className = 'plan-description';
+		desc.className = 'text-[0.9em] leading-relaxed opacity-90';
 		desc.textContent = message.description || 'The agent has generated an implementation plan. How would you like to proceed?';
 
 		const actionsDiv = document.createElement('div');
-		actionsDiv.className = 'plan-actions';
+		actionsDiv.className = 'flex flex-col gap-2';
 
 		const proceedBtn = document.createElement('button');
-		proceedBtn.className = 'plan-btn proceed-btn';
+		proceedBtn.className = 'border-none rounded px-3 py-1.5 cursor-pointer font-vscode text-[0.95em] transition-colors text-center w-full bg-vscode-button-bg text-vscode-button-fg hover:bg-vscode-button-hover font-semibold';
 		proceedBtn.textContent = 'Proceed';
 		proceedBtn.onclick = () => {
 			vscode.postMessage({ type: 'proceedPlan' });
@@ -455,7 +616,7 @@
 		};
 
 		const modifyBtn = document.createElement('button');
-		modifyBtn.className = 'plan-btn modify-btn';
+		modifyBtn.className = 'border-none rounded px-3 py-1.5 cursor-pointer font-vscode text-[0.95em] transition-colors text-center w-full bg-vscode-button-secondary text-vscode-fg hover:bg-vscode-button-secondaryHover';
 		modifyBtn.textContent = 'Modify';
 		modifyBtn.onclick = () => {
 			vscode.postMessage({ type: 'modifyPlan' });
@@ -463,7 +624,7 @@
 		};
 
 		const cancelBtn = document.createElement('button');
-		cancelBtn.className = 'plan-btn cancel-btn';
+		cancelBtn.className = 'bg-transparent border border-vscode-button-secondary rounded px-3 py-1.5 cursor-pointer font-vscode text-[0.95em] transition-colors text-center w-full text-vscode-fg hover:bg-vscode-button-secondaryHover';
 		cancelBtn.textContent = 'Cancel';
 		cancelBtn.onclick = () => {
 			vscode.postMessage({ type: 'cancelPlan' });

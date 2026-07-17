@@ -12,46 +12,60 @@
 	<title>Nanocoder Chat</title>
 </head>
 <body>
-	<div class="chat-container">
-		<div class="chat-header">
-			<select id="mode-selector" class="header-dropdown" disabled>
+	<div class="flex flex-col h-full bg-vscode-bg text-vscode-fg">
+		<div class="flex gap-2 p-2 px-4 border-b border-vscode-border bg-vscode-bg shrink-0">
+			<select id="mode-selector" class="flex-1 bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-dropdown-border p-1 rounded-sm font-vscode text-[0.9em] outline-none w-1/2 focus:border-vscode-input-focus disabled:opacity-50" disabled>
 				<option value="">Loading modes...</option>
 			</select>
-			<select id="model-selector" class="header-dropdown" disabled>
+			<select id="model-selector" class="flex-1 bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-dropdown-border p-1 rounded-sm font-vscode text-[0.9em] outline-none w-1/2 focus:border-vscode-input-focus disabled:opacity-50" disabled>
 				<option value="">Loading models...</option>
 			</select>
-			<button id="history-btn" class="header-icon-btn" title="History">🕐</button>
+			<button id="history-btn" class="group bg-transparent border-none cursor-pointer px-1.5 py-1 rounded text-[1em] text-vscode-fg shrink-0 opacity-70 transition-all hover:opacity-100 hover:bg-vscode-toolbarHover flex items-center justify-center" title="History">
+				<!-- History Arrow Icon -->
+				<svg id="icon-history" class="block group-[.is-history-open]:hidden" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+					<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+					<path d="M3 3v5h5"/>
+					<path d="M12 7v5l4 2"/>
+				</svg>
+				<!-- Close Icon -->
+				<svg id="icon-history-close" class="hidden group-[.is-history-open]:block" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+					<line x1="18" y1="6" x2="6" y2="18"></line>
+					<line x1="6" y1="6" x2="18" y2="18"></line>
+				</svg>
+			</button>
 		</div>
-		<div id="chat-view">
-			<div id="messages-container" class="messages">
+		
+		<div id="chat-view" class="flex flex-col flex-1 overflow-hidden">
+			<div id="messages-container" class="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
 				<!-- Messages will be injected here -->
-				<div class="welcome-message">
+				<div class="welcome-message p-3 italic opacity-80 text-center">
 					Hi! I'm Nanocoder. How can I help you today?
 				</div>
 			</div>
-			<div class="input-area">
-				<textarea id="chat-input" rows="1" placeholder="Ask Nanocoder..."></textarea>
-				<button id="send-stop-btn" class="send-stop-btn" title="Send (Enter)">
-					<!-- FiSend icon (react-icons/fi) — shown when idle -->
-					<svg id="icon-send" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
-						<line x1="22" y1="2" x2="11" y2="13"/>
-						<polygon points="22 2 15 22 11 13 2 9 22 2"/>
-					</svg>
-					<!-- FiStopCircle icon (react-icons/fi) — shown while processing -->
-					<svg id="icon-stop" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="display:none">
-						<circle cx="12" cy="12" r="10"/>
-						<rect x="9" y="9" width="6" height="6"/>
-					</svg>
-				</button>
-			</div>
 		</div>
-		<div id="history-view" style="display:none">
-			<div class="history-header">
-				<span class="history-title">Session History</span>
+
+		<div id="history-view" class="flex flex-col flex-1 overflow-hidden" style="display:none">
+			<div class="pt-2.5 pb-1.5 px-4 border-b border-vscode-border shrink-0">
+				<span class="font-semibold text-[0.9em] uppercase tracking-[0.04em] opacity-70">Session History</span>
 			</div>
-			<div id="history-list" class="history-list"></div>
+			<div id="history-list" class="flex-1 overflow-y-auto py-1.5"></div>
 		</div>
-	</div>
+
+		<div class="p-4 bg-vscode-bg border-t border-vscode-border flex gap-2 items-end shrink-0">
+			<textarea id="chat-input" rows="1" placeholder="Describe what to build..." class="flex-1 min-h-[32px] max-h-[200px] p-2 box-border border border-vscode-input-border bg-vscode-input-bg text-vscode-input-fg font-vscode text-inherit resize-none rounded-sm outline-none focus:border-vscode-input-focus"></textarea>
+			<button id="send-stop-btn" class="group bg-[#007acc] text-white border-none rounded w-8 h-8 flex items-center justify-center cursor-pointer shrink-0 transition-colors hover:bg-[#005a9e]" title="Send (Enter)">
+				<!-- FiSend icon (react-icons/fi) — shown when idle -->
+				<svg id="icon-send" class="block group-[.is-processing]:hidden" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+					<line x1="22" y1="2" x2="11" y2="13"/>
+					<polygon points="22 2 15 22 11 13 2 9 22 2"/>
+				</svg>
+				<!-- FiStopCircle icon (react-icons/fi) — shown while processing -->
+				<svg id="icon-stop" class="hidden group-[.is-processing]:block" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+					<rect x="7" y="7" width="10" height="10" fill="currentColor"/>
+				</svg>
+			</button>
+		</div>
+	<script nonce="{{nonce}}" src="{{markedUri}}"></script>
 	<script nonce="{{nonce}}" src="{{scriptUri}}"></script>
 </body>
 </html>
