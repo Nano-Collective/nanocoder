@@ -13,30 +13,8 @@
 </head>
 <body>
 	<div class="flex flex-col h-full bg-vscode-bg text-vscode-fg">
-		<div class="flex gap-2 p-2 px-4 border-b border-vscode-border bg-vscode-bg shrink-0">
-			<select id="mode-selector" class="flex-1 bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-dropdown-border p-1 rounded-sm font-vscode text-[0.9em] outline-none w-1/2 focus:border-vscode-input-focus disabled:opacity-50" disabled>
-				<option value="">Loading modes...</option>
-			</select>
-			<select id="model-selector" class="flex-1 bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-dropdown-border p-1 rounded-sm font-vscode text-[0.9em] outline-none w-1/2 focus:border-vscode-input-focus disabled:opacity-50" disabled>
-				<option value="">Loading models...</option>
-			</select>
-			<button id="history-btn" class="group bg-transparent border-none cursor-pointer px-1.5 py-1 rounded text-[1em] text-vscode-fg shrink-0 opacity-70 transition-all hover:opacity-100 hover:bg-vscode-toolbarHover flex items-center justify-center" title="History">
-				<!-- History Arrow Icon -->
-				<svg id="icon-history" class="block group-[.is-history-open]:hidden" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
-					<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-					<path d="M3 3v5h5"/>
-					<path d="M12 7v5l4 2"/>
-				</svg>
-				<!-- Close Icon -->
-				<svg id="icon-history-close" class="hidden group-[.is-history-open]:block" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
-					<line x1="18" y1="6" x2="6" y2="18"></line>
-					<line x1="6" y1="6" x2="18" y2="18"></line>
-				</svg>
-			</button>
-		</div>
-		
 		<div id="chat-view" class="flex flex-col flex-1 overflow-hidden">
-			<div id="messages-container" class="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
+			<div id="messages-container" class="flex-1 overflow-y-auto overflow-x-hidden p-4 flex flex-col gap-3">
 				<!-- Messages will be injected here -->
 				<div class="welcome-message p-3 italic opacity-80 text-center">
 					Hi! I'm Nanocoder. How can I help you today?
@@ -51,19 +29,36 @@
 			<div id="history-list" class="flex-1 overflow-y-auto py-1.5"></div>
 		</div>
 
-		<div class="p-4 bg-vscode-bg border-t border-vscode-border flex gap-2 items-end shrink-0">
-			<textarea id="chat-input" rows="1" placeholder="Describe what to build..." class="flex-1 min-h-[32px] max-h-[200px] p-2 box-border border border-vscode-input-border bg-vscode-input-bg text-vscode-input-fg font-vscode text-inherit resize-none rounded-sm outline-none focus:border-vscode-input-focus"></textarea>
-			<button id="send-stop-btn" class="group bg-[#007acc] text-white border-none rounded w-8 h-8 flex items-center justify-center cursor-pointer shrink-0 transition-colors hover:bg-[#005a9e]" title="Send (Enter)">
-				<!-- FiSend icon (react-icons/fi) — shown when idle -->
-				<svg id="icon-send" class="block group-[.is-processing]:hidden" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
-					<line x1="22" y1="2" x2="11" y2="13"/>
-					<polygon points="22 2 15 22 11 13 2 9 22 2"/>
-				</svg>
-				<!-- FiStopCircle icon (react-icons/fi) — shown while processing -->
-				<svg id="icon-stop" class="hidden group-[.is-processing]:block" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
-					<rect x="7" y="7" width="10" height="10" fill="currentColor"/>
-				</svg>
-			</button>
+		<div class="p-4 pt-2 bg-vscode-bg shrink-0">
+			<div class="flex flex-col bg-vscode-input-bg border border-vscode-input-border rounded-2xl focus-within:border-vscode-input-focus transition-colors shadow-sm">
+				<textarea id="chat-input" rows="1" placeholder="Ask Nanocoder... @ to mention, / for actions" class="w-full min-h-[44px] max-h-[250px] p-3 px-4 pb-2 bg-transparent text-vscode-input-fg font-vscode text-[0.95em] resize-none outline-none border-none"></textarea>
+				
+				<div class="flex items-center justify-between px-3 pb-2 pt-1">
+					<div class="flex gap-1 items-center flex-1 overflow-hidden">
+						<button class="bg-transparent border-none text-vscode-fg opacity-50 hover:opacity-100 cursor-pointer p-1.5 rounded-full hover:bg-vscode-toolbarHover transition-all flex items-center justify-center shrink-0">
+							<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+						</button>
+						<select id="model-selector" class="bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[45%] truncate" disabled>
+							<option value="">Loading models...</option>
+						</select>
+						<select id="mode-selector" class="bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[35%] truncate" disabled>
+							<option value="">Loading modes...</option>
+						</select>
+					</div>
+					
+					<button id="send-stop-btn" class="group bg-[#007acc] text-white border-none rounded-full w-8 h-8 flex items-center justify-center cursor-pointer shrink-0 transition-all hover:bg-[#005a9e] hover:scale-105 ml-2" title="Send (Enter)">
+						<!-- FiSend icon (react-icons/fi) — shown when idle -->
+						<svg id="icon-send" class="block group-[.is-processing]:hidden mr-[2px] mt-[1px]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
+							<line x1="22" y1="2" x2="11" y2="13"/>
+							<polygon points="22 2 15 22 11 13 2 9 22 2"/>
+						</svg>
+						<!-- FiStopCircle icon (react-icons/fi) — shown while processing -->
+						<svg id="icon-stop" class="hidden group-[.is-processing]:block" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
+							<rect x="7" y="7" width="10" height="10" fill="currentColor"/>
+						</svg>
+					</button>
+				</div>
+			</div>
 		</div>
 	<script nonce="{{nonce}}" src="{{markedUri}}"></script>
 	<script nonce="{{nonce}}" src="{{scriptUri}}"></script>

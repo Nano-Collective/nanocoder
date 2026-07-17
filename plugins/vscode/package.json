@@ -64,8 +64,23 @@
 				"command": "nanocoder.startCli",
 				"title": "Start Nanocoder CLI",
 				"category": "Nanocoder"
+			},
+			{
+				"command": "nanocoder.toggleHistory",
+				"title": "View Session History",
+				"category": "Nanocoder",
+				"icon": "$(history)"
 			}
 		],
+		"menus": {
+			"view/title": [
+				{
+					"command": "nanocoder.toggleHistory",
+					"when": "view == nanocoder.chatView",
+					"group": "navigation"
+				}
+			]
+		},
 		"configuration": {
 			"title": "Nanocoder",
 			"properties": {

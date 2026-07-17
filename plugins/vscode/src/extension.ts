@@ -58,6 +58,13 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.window.registerWebviewViewProvider(ChatWebviewProvider.viewType, chatProvider)
 	);
 
+	// Register Title Bar Action
+	context.subscriptions.push(
+		vscode.commands.registerCommand('nanocoder.toggleHistory', () => {
+			chatProvider.toggleHistory();
+		})
+	);
+
 	// Handle messages from CLI
 	wsClient.onMessage((message: ServerMessage) => handleServerMessage(message));
 
