@@ -81,6 +81,7 @@ const OLLAMA_MODEL_CONTEXT_LIMITS: Record<string, number> = {
 	// DeepSeek models (base matches wrong model on models.dev)
 	'deepseek-coder': 16000,
 	'deepseek-coder-v2': 128000,
+	'deepseek-v3.1': 128000,
 
 	// Phi models (not on models.dev)
 	phi3: 128000,
@@ -88,7 +89,11 @@ const OLLAMA_MODEL_CONTEXT_LIMITS: Record<string, number> = {
 	'phi3:medium': 128000,
 
 	// Moonshot AI models (kimi-for-coding is a provider, not a model ID)
+	'kimi-k2': 128000,
 	'kimi-for-coding': 256000,
+
+	// Mistral cloud aliases
+	'devstral-small-2': 128000,
 };
 
 /**
