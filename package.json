@@ -51,6 +51,8 @@
 		"test:benchmark": "tsx benchmarks/report.ts",
 		"test:benchmark:update": "tsx benchmarks/report.ts --update",
 		"test:benchmark:explain": "tsx benchmarks/report.ts --explain",
+		"changeset": "changeset",
+		"changeset:version": "changeset version && node scripts/normalize-changelog.js",
 		"format": "biome check --write .",
 		"format:check": "biome check .",
 		"build:vscode": "cd plugins/vscode && pnpm run build && pnpm exec vsce package --allow-missing-repository --skip-license --no-dependencies -o ../../assets/nanocoder-vscode.vsix",
@@ -106,6 +108,7 @@
 	"devDependencies": {
 		"@ava/typescript": "^7.0.0",
 		"@biomejs/biome": "^2.5.0",
+		"@changesets/cli": "^2.31.0",
 		"@types/node": "^25.9.3",
 		"@types/react": "^19.0.0",
 		"@types/ws": "^8.18.1",

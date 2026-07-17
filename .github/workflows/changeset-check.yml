@@ -1,0 +1,87 @@
+name: Changeset Check
+
+# Friendly, NON-BLOCKING nudge: if a pull request changes source but adds no
+# changeset, leave a single comment explaining how to add one. If a changeset is
+# later added, the comment is removed. This never fails the build - it only
+# keeps the release-notes pipeline fed.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  changeset-check:
+    runs-on: ubuntu-latest
+    # Skip the automated "Version Packages" PR - it never needs a changeset.
+    if: github.head_ref != 'changeset-release/main'
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Detect a changeset in this PR
+        id: detect
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Only consider real changeset entries (*.md), not README.md/config.json.
+          ADDED=$(git diff --name-only --diff-filter=A "$BASE_SHA" "$HEAD_SHA" \
+            | { grep -E '^\.changeset/.+\.md$' || true; } \
+            | { grep -v -E '^\.changeset/README\.md$' || true; })
+          if [ -n "$ADDED" ]; then
+            echo "has-changeset=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-changeset=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Comment if missing (or clean up if present)
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const marker = '<!-- changeset-check -->';
+            const hasChangeset = ${{ steps.detect.outputs.has-changeset }};
+            const {owner, repo} = context.repo;
+            const issue_number = context.issue.number;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+
+            if (hasChangeset) {
+              if (existing) {
+                await github.rest.issues.deleteComment({owner, repo, comment_id: existing.id});
+              }
+              return;
+            }
+
+            const body = [
+              marker,
+              "### No changeset found",
+              "",
+              "This PR does not add a changeset, so it will not appear in the changelog or trigger a release.",
+              "",
+              "If the change is user-facing, add one:",
+              "",
+              "```bash",
+              "pnpm changeset",
+              "```",
+              "",
+              "Pick a bump (patch / minor / major) and write the changelog entry in our usual voice (\"Added **X**... Thanks to @you. Closes #123.\"), then commit the generated `.changeset/*.md` file.",
+              "",
+              "If this PR is docs-only or a chore that needs no release note, you can ignore this - or run `pnpm changeset --empty` to record that intentionally.",
+            ].join("\n");
+
+            if (existing) {
+              await github.rest.issues.updateComment({owner, repo, comment_id: existing.id, body});
+            } else {
+              await github.rest.issues.createComment({owner, repo, issue_number, body});
+            }

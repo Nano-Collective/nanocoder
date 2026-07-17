@@ -1,3 +1,5 @@
+# @nanocollective/nanocoder
+
 # 1.28.1
 
 - Added **image attachments on user messages**. Paste an image from the clipboard with **Ctrl+V** (via `osascript` on macOS, `wl-paste`/`xclip` on Linux, PowerShell on Windows), drag an image file into the terminal, or type a path - quoted, unquoted, and macOS backslash-escaped paths are all recognised, and `http(s)` URLs are left untouched. Attachments (PNG/JPEG/GIF/WebP, up to 10 MB) show above the input box and **Ctrl+X** removes the last one; references are stripped from the text and sent as image parts to vision-capable models. A missing clipboard tool now logs a debug breadcrumb instead of silently no-op'ing. Thanks to @ragini-pandey. Closes #572.
