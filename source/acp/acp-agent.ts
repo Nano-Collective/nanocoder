@@ -5,14 +5,23 @@ import type {
 	AuthenticateResponse,
 	CancelNotification,
 	ClientCapabilities,
+	DeleteSessionRequest,
+	DeleteSessionResponse,
+	DidFocusDocumentNotification,
 	InitializeRequest,
 	InitializeResponse,
+	ListProvidersRequest,
+	ListProvidersResponse,
+	ListSessionsRequest,
+	ListSessionsResponse,
 	LoadSessionRequest,
 	LoadSessionResponse,
 	NewSessionRequest,
 	NewSessionResponse,
 	PromptRequest,
 	PromptResponse,
+	ResumeSessionRequest,
+	ResumeSessionResponse,
 	SessionConfigOption,
 	SessionModeState,
 	SetSessionConfigOptionRequest,
@@ -35,6 +44,7 @@ import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt
 import {getAppConfig} from '@/config/index';
 import {loadPreferences, updateLastUsed} from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
+import {sessionManager} from '@/session/session-manager';
 import {getTuneToolMode} from '@/types/config';
 import {getLogger} from '@/utils/logging';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
@@ -96,16 +106,23 @@ export class AcpAgent implements Agent {
 
 	async loadSession(params: LoadSessionRequest): Promise<LoadSessionResponse> {
 		const existing = this.sessions.get(params.sessionId);
-		const session =
-			existing ?? this.registerSession(params.sessionId, params.cwd);
+		let session = existing;
+
+		if (!session) {
+			// Try loading from disk first so history persists across process restarts.
+			await sessionManager.initialize();
+			const persisted = await sessionManager.loadSession(params.sessionId);
+			session = this.registerSession(params.sessionId, params.cwd);
+			if (persisted) {
+				session.messages = persisted.messages;
+			}
+		}
+
 		logger.info(
 			`ACP loadSession: ${params.sessionId} cwd=${params.cwd} restored=${Boolean(existing)}`,
 		);
 
-		// Replay whatever history we hold so the client can rebuild the thread.
-		// Note: sessions are in-memory, so history only survives within a single
-		// agent process - a reload after restart yields an empty but usable
-		// session rather than an error.
+		// Replay history so the client can rebuild the thread.
 		await this.replaySessionHistory(session);
 
 		return {
@@ -140,11 +157,21 @@ export class AcpAgent implements Agent {
 			`ACP prompt: session=${params.sessionId} text=${userText.slice(0, 100)} images=${images.length}`,
 		);
 
+		// Prepend active workspace context (e.g. the file focused in VS Code) so
+		// the model always knows what the user is looking at.
+		let contextualUserText = userText;
+		if (session.activeFile) {
+			const selectionPart = session.activeSelection
+				? `\n\nSelected text:\n\`\`\`\n${session.activeSelection}\n\`\`\``
+				: '';
+			contextualUserText = `[Active file: ${session.activeFile}${selectionPart}]\n\n${userText}`;
+		}
+
 		session.messages = [
 			...session.messages,
 			{
 				role: 'user',
-				content: userText,
+				content: contextualUserText,
 				...(images.length > 0 ? {images} : {}),
 			},
 		];
@@ -228,6 +255,88 @@ export class AcpAgent implements Agent {
 		);
 
 		return {configOptions: await this.buildConfigOptions()};
+	}
+
+	async listSessions(
+		params: ListSessionsRequest,
+	): Promise<ListSessionsResponse> {
+		await sessionManager.initialize();
+		const sessions = await sessionManager.listSessions(
+			params.cwd ? {workingDirectory: params.cwd} : undefined,
+		);
+		logger.info(`ACP listSessions: found=${sessions.length}`);
+		return {
+			sessions: sessions.map(s => ({
+				sessionId: s.id,
+				cwd: s.workingDirectory,
+				title: s.title,
+			})),
+		};
+	}
+
+	async deleteSession(
+		params: DeleteSessionRequest,
+	): Promise<DeleteSessionResponse> {
+		await sessionManager.initialize();
+		await sessionManager.deleteSession(params.sessionId);
+		// Evict from in-memory map if present
+		this.sessions.delete(params.sessionId);
+		logger.info(`ACP deleteSession: ${params.sessionId}`);
+		return {};
+	}
+
+	async resumeSession(
+		params: ResumeSessionRequest,
+	): Promise<ResumeSessionResponse> {
+		await sessionManager.initialize();
+		const persisted = await sessionManager.loadSession(params.sessionId);
+		if (!persisted) {
+			throw new Error(`Session not found on disk: ${params.sessionId}`);
+		}
+
+		// Evict any stale in-memory session first
+		this.sessions.delete(params.sessionId);
+		const session = this.registerSession(
+			params.sessionId,
+			persisted.workingDirectory,
+		);
+		session.messages = persisted.messages;
+		logger.info(
+			`ACP resumeSession: ${params.sessionId} messages=${persisted.messages.length}`,
+		);
+
+		// Replay history so the client rebuilds the thread view.
+		await this.replaySessionHistory(session);
+
+		return {
+			modes: this.buildModeState(session),
+			configOptions: await this.buildConfigOptions(),
+		};
+	}
+
+	async unstable_listProviders(
+		_params: ListProvidersRequest,
+	): Promise<ListProvidersResponse> {
+		const config = getAppConfig();
+		const providers = (config.providers ?? []).map(p => ({
+			id: p.name,
+			required: false,
+			supported: ['openai' as const],
+		}));
+		return {providers};
+	}
+
+	async unstable_didFocusDocument(
+		params: DidFocusDocumentNotification,
+	): Promise<void> {
+		const session = this.sessions.get(params.sessionId);
+		if (!session) return;
+		session.activeFile = params.uri;
+		// Store the cursor line as a lightweight context hint.
+		session.activeSelection = `line ${params.position.line}`;
+		logger.info(
+			`ACP didFocusDocument: session=${params.sessionId} uri=${params.uri}`,
+		);
 	}
 
 	async authenticate(

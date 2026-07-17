@@ -16,6 +16,10 @@ export class AcpSession {
 	developmentMode: DevelopmentMode;
 	/** True while a prompt turn is being processed, to reject overlapping prompts. */
 	turnActive = false;
+	/** URI of the file currently focused in the editor client (e.g. VS Code). */
+	activeFile?: string;
+	/** Currently selected text in the editor client, if any. */
+	activeSelection?: string;
 
 	constructor(options: {
 		sessionId: string;

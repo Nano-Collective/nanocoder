@@ -41,6 +41,26 @@ export class NanocoderAcpClient {
 				}
 			}
 		});
+
+		// Workspace context: notify the backend when the user switches active file.
+		vscode.window.onDidChangeActiveTextEditor((editor) => {
+			if (editor && this.connection && this._sessionId) {
+				const uri = editor.document.uri.toString();
+				const cursorPos = editor.selection.active;
+				const visibleRange = editor.visibleRanges[0];
+				const range = visibleRange ?? new vscode.Range(cursorPos, cursorPos);
+				this.connection.unstable_didFocusDocument({
+					sessionId: this._sessionId,
+					uri,
+					version: editor.document.version,
+					position: { line: cursorPos.line, character: cursorPos.character },
+					visibleRange: {
+						start: { line: range.start.line, character: range.start.character },
+						end: { line: range.end.line, character: range.end.character },
+					},
+				}).catch(() => { /* best-effort */ });
+			}
+		});
 	}
 
 	hasPendingPermissions(): boolean {
@@ -244,6 +264,42 @@ export class NanocoderAcpClient {
 		// it's likely compatible with the basic initialize(). If we need stricter checks,
 		// we can parse the x.y.z format here.
 		return false; 
+	}
+
+	async listSessions(): Promise<Array<{sessionId: string; cwd: string; title?: string | null}>> {
+		if (!this.connection) return [];
+		try {
+			const result = await this.connection.listSessions({});
+			return result.sessions.map((s: any) => ({
+				sessionId: s.sessionId,
+				cwd: s.cwd,
+				title: s.title,
+			}));
+		} catch (error) {
+			this.outputChannel.appendLine(`listSessions failed: ${error}`);
+			return [];
+		}
+	}
+
+	async deleteSession(sessionId: string): Promise<void> {
+		if (!this.connection) return;
+		try {
+			await this.connection.deleteSession({sessionId});
+		} catch (error) {
+			this.outputChannel.appendLine(`deleteSession failed: ${error}`);
+			vscode.window.showErrorMessage(`Failed to delete session: ${error}`);
+		}
+	}
+
+	async resumeSession(sessionId: string): Promise<void> {
+		if (!this.connection) return;
+		try {
+			this._sessionId = sessionId;
+			await this.connection.resumeSession({sessionId, cwd: ''});
+		} catch (error) {
+			this.outputChannel.appendLine(`resumeSession failed: ${error}`);
+			vscode.window.showErrorMessage(`Failed to resume session: ${error}`);
+		}
 	}
 
 	async proceedPlan(): Promise<void> {

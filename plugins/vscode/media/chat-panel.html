@@ -20,15 +20,36 @@
 			<select id="model-selector" class="header-dropdown" disabled>
 				<option value="">Loading models...</option>
 			</select>
+			<button id="history-btn" class="header-icon-btn" title="History">🕐</button>
 		</div>
-		<div id="messages-container" class="messages">
-			<!-- Messages will be injected here -->
-			<div class="welcome-message">
-				Hi! I'm Nanocoder. How can I help you today?
+		<div id="chat-view">
+			<div id="messages-container" class="messages">
+				<!-- Messages will be injected here -->
+				<div class="welcome-message">
+					Hi! I'm Nanocoder. How can I help you today?
+				</div>
+			</div>
+			<div class="input-area">
+				<textarea id="chat-input" rows="1" placeholder="Ask Nanocoder..."></textarea>
+				<button id="send-stop-btn" class="send-stop-btn" title="Send (Enter)">
+					<!-- FiSend icon (react-icons/fi) — shown when idle -->
+					<svg id="icon-send" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+						<line x1="22" y1="2" x2="11" y2="13"/>
+						<polygon points="22 2 15 22 11 13 2 9 22 2"/>
+					</svg>
+					<!-- FiStopCircle icon (react-icons/fi) — shown while processing -->
+					<svg id="icon-stop" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="display:none">
+						<circle cx="12" cy="12" r="10"/>
+						<rect x="9" y="9" width="6" height="6"/>
+					</svg>
+				</button>
 			</div>
 		</div>
-		<div class="input-area">
-			<textarea id="chat-input" rows="1" placeholder="Ask Nanocoder..."></textarea>
+		<div id="history-view" style="display:none">
+			<div class="history-header">
+				<span class="history-title">Session History</span>
+			</div>
+			<div id="history-list" class="history-list"></div>
 		</div>
 	</div>
 	<script nonce="{{nonce}}" src="{{scriptUri}}"></script>
