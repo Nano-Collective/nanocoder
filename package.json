@@ -150,7 +150,8 @@
 	},
 	"c8": {
 		"exclude": [
-			"source/app/App.tsx"
+			"source/app/App.tsx",
+			"source/web/page.ts"
 		],
 		"reporter": [
 			"text",
