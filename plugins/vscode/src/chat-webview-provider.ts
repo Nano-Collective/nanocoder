@@ -131,6 +131,20 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 							vscode.window.showInformationMessage(`Nanocoder: Model switched to ${message.model}`);
 						});
 						break;
+					case 'listSessions':
+						this._broadcastSessions();
+						break;
+					case 'resumeSession':
+						this._outputChannel.appendLine(`[Webview] User resumed session: ${message.sessionId}`);
+						this.postMessage({type: 'clear'});
+						this._acpClient.resumeSession(message.sessionId);
+						break;
+					case 'deleteSession':
+						this._outputChannel.appendLine(`[Webview] User deleted session: ${message.sessionId}`);
+						this._acpClient.deleteSession(message.sessionId).then(() => {
+							this._broadcastSessions();
+						});
+						break;
 				}
 			}
 		);
@@ -152,10 +166,17 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 			const sessionId = await this._acpClient.getOrCreateSession(cwd);
 			if (sessionId) {
 				this._outputChannel.appendLine(`[Extension] Session initialized automatically: ${sessionId}`);
+				// Broadcast session list to populate History tab
+				await this._broadcastSessions();
 			}
 		} catch (error) {
 			this._outputChannel.appendLine(`Failed to initialize session on ready: ${error}`);
 		}
+	}
+
+	private async _broadcastSessions() {
+		const sessions = await this._acpClient.listSessions();
+		this.postMessage({type: 'updateSessions', sessions});
 	}
 
 	private async _handlePrompt(text: string) {
@@ -194,9 +215,13 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 			} as any);
 
 			await this._acpClient.prompt(text);
+			// Signal turn completion so the Webview can flip back to the send button
+			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}} as any);
 		} catch (error) {
 			this._outputChannel.appendLine(`Prompt execution error: ${error}`);
 			vscode.window.showErrorMessage(`Nanocoder Prompt error: ${error}`);
+			// Always reset the button even on error
+			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}} as any);
 		}
 	}
 

@@ -6,9 +6,42 @@
 	const chatInput = document.getElementById('chat-input');
 	const modeSelector = document.getElementById('mode-selector');
 	const modelSelector = document.getElementById('model-selector');
+	const historyBtn = document.getElementById('history-btn');
+	const chatView = document.getElementById('chat-view');
+	const historyView = document.getElementById('history-view');
+	const historyList = document.getElementById('history-list');
+	const sendStopBtn = document.getElementById('send-stop-btn');
+	const iconSend = document.getElementById('icon-send');
+	const iconStop = document.getElementById('icon-stop');
 	
 	let currentTurnEl = null;
 	let currentTextEl = null;
+	let sessionsData = [];
+	let isHistoryView = false;
+	let isProcessing = false;
+
+	// --- Send / Stop toggle logic ---
+	function setProcessing(active) {
+		isProcessing = active;
+		if (iconSend) iconSend.style.display = active ? 'none' : '';
+		if (iconStop) iconStop.style.display = active ? '' : 'none';
+		if (sendStopBtn) {
+			sendStopBtn.title = active ? 'Stop (cancel)' : 'Send (Enter)';
+			sendStopBtn.classList.toggle('is-processing', active);
+		}
+		chatInput.disabled = active;
+	}
+
+	if (sendStopBtn) {
+		sendStopBtn.addEventListener('click', () => {
+			if (isProcessing) {
+				vscode.postMessage({ type: 'cancel' });
+				setProcessing(false);
+			} else {
+				submitMessage();
+			}
+		});
+	}
 
 	// Auto-resize textarea
 	chatInput.addEventListener('input', function() {
@@ -26,7 +59,7 @@
 
 	function submitMessage() {
 		const text = chatInput.value.trim();
-		if (!text) return;
+		if (!text || isProcessing) return;
 
 		// Send message to extension host
 		vscode.postMessage({
@@ -37,6 +70,9 @@
 		// Clear input
 		chatInput.value = '';
 		chatInput.style.height = 'auto';
+
+		// Switch to processing state
+		setProcessing(true);
 
 		// Optimistically append user message 
 		appendMessage(text, 'user');
@@ -108,6 +144,7 @@
 				messagesContainer.innerHTML = '';
 				currentTurnEl = null;
 				currentTextEl = null;
+				setProcessing(false);
 				break;
 			case 'acpUpdate':
 				handleAcpUpdate(message.update);
@@ -121,6 +158,10 @@
 			case 'syncState':
 				handleSyncState(message);
 				break;
+			case 'updateSessions':
+				sessionsData = message.sessions || [];
+				if (isHistoryView) renderSessions();
+				break;
 		}
 	});
 
@@ -131,6 +172,99 @@
 	modelSelector.addEventListener('change', () => {
 		vscode.postMessage({ type: 'setModel', model: modelSelector.value });
 	});
+
+	if (historyBtn) {
+		historyBtn.addEventListener('click', () => {
+			if (isHistoryView) {
+				showChatView();
+			} else {
+				showHistoryView();
+			}
+		});
+	}
+
+	function showChatView() {
+		isHistoryView = false;
+		if (chatView) chatView.style.display = '';
+		if (historyView) historyView.style.display = 'none';
+		if (historyBtn) historyBtn.title = 'History';
+		if (historyBtn) historyBtn.textContent = '🕐';
+	}
+
+	function showHistoryView() {
+		isHistoryView = true;
+		if (chatView) chatView.style.display = 'none';
+		if (historyView) historyView.style.display = '';
+		if (historyBtn) historyBtn.title = 'Back to chat';
+		if (historyBtn) historyBtn.textContent = '✕';
+		// Always refresh the list when opening history
+		vscode.postMessage({ type: 'listSessions' });
+		renderSessions();
+	}
+
+	function renderSessions() {
+		if (!historyList) return;
+		historyList.innerHTML = '';
+
+		if (sessionsData.length === 0) {
+			const empty = document.createElement('div');
+			empty.className = 'history-empty';
+			empty.textContent = 'No previous sessions found.';
+			historyList.appendChild(empty);
+			return;
+		}
+
+		// Group sessions by date
+		const now = new Date();
+		const groups = { 'Today': [], 'Yesterday': [], 'Last 7 Days': [], 'Older': [] };
+
+		sessionsData.forEach(session => {
+			const label = session.title || session.cwd || session.sessionId.slice(0, 8);
+			const item = { ...session, label };
+			groups['Older'].push(item); // Simplified: metadata doesn't include createdAt yet
+		});
+
+		Object.entries(groups).forEach(([groupName, sessions]) => {
+			if (sessions.length === 0) return;
+
+			const groupEl = document.createElement('div');
+			groupEl.className = 'history-group';
+
+			const groupHeader = document.createElement('div');
+			groupHeader.className = 'history-group-header';
+			groupHeader.textContent = groupName;
+			groupEl.appendChild(groupHeader);
+
+			sessions.forEach(session => {
+				const itemEl = document.createElement('div');
+				itemEl.className = 'history-item';
+
+				const labelEl = document.createElement('span');
+				labelEl.className = 'history-item-label';
+				labelEl.textContent = session.label;
+				labelEl.title = session.cwd;
+				labelEl.onclick = () => {
+					showChatView();
+					vscode.postMessage({ type: 'resumeSession', sessionId: session.sessionId });
+				};
+
+				const deleteBtn = document.createElement('button');
+				deleteBtn.className = 'history-delete-btn';
+				deleteBtn.title = 'Delete session';
+				deleteBtn.textContent = '🗑';
+				deleteBtn.onclick = (e) => {
+					e.stopPropagation();
+					vscode.postMessage({ type: 'deleteSession', sessionId: session.sessionId });
+				};
+
+				itemEl.appendChild(labelEl);
+				itemEl.appendChild(deleteBtn);
+				groupEl.appendChild(itemEl);
+			});
+
+			historyList.appendChild(groupEl);
+		});
+	}
 
 	function handleSyncState(message) {
 		// Update Mode Selector
@@ -171,6 +305,9 @@
 			}
 		} else if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
 			handleToolCallUpdate(update);
+		} else if (update.sessionUpdate === 'prompt_response' || update.sessionUpdate === 'done') {
+			// Turn is complete — restore the send button
+			setProcessing(false);
 		}
 	}
 

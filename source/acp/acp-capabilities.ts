@@ -18,8 +18,12 @@ const MODE_MAP: Record<SessionModeId, DevelopmentMode> = {
 export function getAgentCapabilities(): AgentCapabilities {
 	return {
 		loadSession: true,
+		providers: {},
 		sessionCapabilities: {
 			close: {},
+			list: {},
+			delete: {},
+			resume: {},
 		},
 	};
 }

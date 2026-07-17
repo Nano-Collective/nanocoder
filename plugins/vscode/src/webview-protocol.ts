@@ -67,6 +67,15 @@ export interface ExtensionMessageSyncState {
 	availableModels: string[];
 }
 
+export interface ExtensionMessageUpdateSessions {
+	type: 'updateSessions';
+	sessions: Array<{
+		sessionId: string;
+		cwd: string;
+		title?: string | null;
+	}>;
+}
+
 export type ExtensionToWebviewMessage =
 	| ExtensionMessageAppendMessage
 	| ExtensionMessageAppendThought
@@ -78,7 +87,8 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageToolCompleted
 	| ExtensionMessagePermissionRequested
 	| ExtensionMessageShowPlanReview
-	| ExtensionMessageSyncState;
+	| ExtensionMessageSyncState
+	| ExtensionMessageUpdateSessions;
 
 
 // ---------------------------------------------------------
@@ -140,6 +150,20 @@ export interface WebviewMessageSetModel {
 	model: string;
 }
 
+export interface WebviewMessageListSessions {
+	type: 'listSessions';
+}
+
+export interface WebviewMessageResumeSession {
+	type: 'resumeSession';
+	sessionId: string;
+}
+
+export interface WebviewMessageDeleteSession {
+	type: 'deleteSession';
+	sessionId: string;
+}
+
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
 	| WebviewMessageSubmitMessage
@@ -151,4 +175,7 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageModifyPlan
 	| WebviewMessageCancelPlan
 	| WebviewMessageSetMode
-	| WebviewMessageSetModel;
+	| WebviewMessageSetModel
+	| WebviewMessageListSessions
+	| WebviewMessageResumeSession
+	| WebviewMessageDeleteSession;
