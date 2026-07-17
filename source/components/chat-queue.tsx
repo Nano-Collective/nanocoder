@@ -67,7 +67,7 @@ export default memo(function ChatQueue({
 					</RenderErrorBoundary>
 				))}
 				{liveQueuedComponents.length > 0 && (
-					<Box marginLeft={-1} flexDirection="column">
+					<Box flexDirection="column">
 						{liveQueuedComponents.map((component, index) => (
 							<RenderErrorBoundary
 								key={componentKey(component, `live-${index}`)}

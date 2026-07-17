@@ -159,7 +159,10 @@ export const ChatHistory = React.memo(function ChatHistory({
 			{startChat && <ChatQueue {...chatQueueProps} />}
 
 			{liveComponent && (
-				<Box marginLeft={-1} flexDirection="column">
+				// Inline: Static renders at column 0, so live content shifts -1 to
+				// match. Fullscreen: viewport already starts at column 1 (Static
+				// disabled), so no compensation is needed.
+				<Box marginLeft={fullscreen ? 0 : -1} flexDirection="column">
 					<RenderErrorBoundary label="live">
 						{liveComponent}
 					</RenderErrorBoundary>
