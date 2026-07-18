@@ -10,7 +10,7 @@ import {dirname, join} from 'node:path';
 import {Box, Text, useFocus, useInput} from 'ink';
 import SelectInput from 'ink-select-input';
 import Spinner from 'ink-spinner';
-import React, {useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {getColors} from '@/config/index';
 import {getConfigPath} from '@/config/paths';
@@ -99,38 +99,47 @@ export function BaseConfigWizard<T>({
 
 	useFocus({autoFocus: true, id: focusId});
 
-	useEffect(() => {
-		if (!configPath) return;
-
-		void Promise.resolve().then(() => {
+	// Loads the existing config at `path` into wizard state. MUST run before
+	// entering the configure step: its child steps capture `items` in useState
+	// initializers at mount, so a load that lands after mount is silently
+	// ignored — and a later save would then REPLACE the file with only the
+	// newly-added entries, destroying the user's existing ones.
+	const loadExistingConfig = useCallback(
+		(path: string) => {
 			try {
-				if (existsSync(configPath)) {
+				if (existsSync(path)) {
 					try {
-						const content = readFileSync(configPath, 'utf-8');
+						const content = readFileSync(path, 'utf-8');
 						const raw = JSON.parse(content) as unknown;
 						setItems(parseConfig(raw));
 						setConfigCorrupted(false);
 					} catch (err) {
 						logError('Failed to load configuration', true, {
-							context: {configPath},
+							context: {configPath: path},
 							error: formatError(err),
 						});
 						setConfigCorrupted(true);
 						setError(
 							`Configuration file has invalid JSON and cannot be loaded. ` +
 								`Fix the syntax error or delete the file before proceeding. ` +
-								`File: ${configPath}`,
+								`File: ${path}`,
 						);
 					}
 				}
 			} catch (err) {
 				logError('Failed to load existing configuration', true, {
-					context: {configPath},
+					context: {configPath: path},
 					error: formatError(err),
 				});
 			}
-		});
-	}, [configPath, parseConfig]);
+		},
+		[parseConfig],
+	);
+
+	useEffect(() => {
+		if (!configPath) return;
+		loadExistingConfig(configPath);
+	}, [configPath, loadExistingConfig]);
 
 	const writeConfigToDisk = (data: T): void => {
 		if (!hasItems(data)) return;
@@ -150,7 +159,11 @@ export function BaseConfigWizard<T>({
 
 	const handleLocationComplete = (location: ConfigLocation) => {
 		const baseDir = location === 'project' ? projectDir : getConfigPath();
-		setConfigPath(join(baseDir, configFileName));
+		const nextPath = join(baseDir, configFileName);
+		setConfigPath(nextPath);
+		// Synchronous load before the configure step mounts — see
+		// loadExistingConfig for why deferring this loses existing entries.
+		loadExistingConfig(nextPath);
 		setStep('configure');
 	};
 
