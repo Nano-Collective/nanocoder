@@ -55,6 +55,8 @@ nanocoder -h
 | `--trust-directory` | | Skip the first-run directory trust prompt for this run only. Only valid with `run`; ignored (with a warning) in interactive mode. The trust is ephemeral — `trustedDirectories` in your preferences file is not modified. |
 | `--alt-screen` | | Start in fullscreen mode: a fixed-height layout on the alternate screen buffer with in-app scrolling. Overrides the `alternateScreen` preference for this run. |
 | `--no-alt-screen` | | Force inline mode (the default), even if `alternateScreen: true` is set in your preferences file. |
+| `--continue` | `-c` | Resume the most recent [saved session](../features/session-management.md) for the current directory; starts a fresh session if none exists. Interactive only — errors with `run`. Mutually exclusive with `--resume`. |
+| `--resume [id]` | `-r` | Resume a [saved session](../features/session-management.md) by session ID, 1-based list index, or `last`. With no ID, opens the session picker at startup. Errors if the session is not found. Interactive only — errors with `run`. |
 | `run` | | Run in non-interactive mode |
 
 **Provider/Model Flags:**

@@ -37,7 +37,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/lsp` | List connected LSP servers |
 | `/schedule` | Read-only view of cron subscriptions declared by skills (see [Skills → Event subscriptions](skills.md#event-subscriptions)) |
 | `/skills` | List and inspect loaded skills; scaffold new bundle skills with AI assistance (see [Skills](skills.md)) |
-| `/resume` | Resume a previous chat session (aliases: `/sessions`, `/history`). See [Session Management](session-management.md) |
+| `/resume` | Resume a previous chat session (aliases: `/sessions`, `/history`). Also available at launch via the `--resume`/`--continue` CLI flags. See [Session Management](session-management.md) |
 | `/retry` | Re-run the last user turn. Use `/retry --model <id>` or `/retry --provider <name> --model <id>` to switch models first |
 | `/rename` | Rename the current session. Name must be non-empty and 100 characters or less. See [Session Management](session-management.md) |
 | `/explorer` | Interactive file browser to navigate, preview, and select files for context |
