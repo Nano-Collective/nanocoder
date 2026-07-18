@@ -22,6 +22,7 @@ import {validateProjectConfigSecurity} from '@/config/validation';
 import {TIMEOUT_OUTPUT_FLUSH_MS} from '@/constants';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
+import {resolveStartupProvider} from '@/hooks/startup-provider';
 import {getLSPManager, type LSPInitResult} from '@/lsp/index';
 import {
 	setCommandLoaderGetter,
@@ -367,29 +368,27 @@ export function useAppInitialization({
 
 			// Use CLI provider/model if provided, otherwise mode-specific, otherwise preferences
 			const isProgrammatic = !(cliProvider || cliModel) && !!modeConfig;
-			let provider =
-				cliProvider || modeConfig?.provider || preferences.lastProvider;
 			// A saved/mode provider can go stale (renamed or removed from
 			// agents.config.json). Passing it through would make createLLMClient
 			// throw and strand the app on an error screen with no client. Fall
 			// back to the default-provider path with a warning instead. An
 			// explicit --provider CLI arg stays strict: the user asked for that
 			// provider by name, so a hard error is the honest response.
-			if (!cliProvider && provider) {
-				const staleName = provider;
-				const known = loadAllProviderConfigs().some(
-					p => p.name.toLowerCase() === staleName.toLowerCase(),
+			const configuredNames = loadAllProviderConfigs().map(p => p.name);
+			const {provider, staleName} = resolveStartupProvider(
+				cliProvider,
+				modeConfig?.provider,
+				preferences.lastProvider,
+				configuredNames,
+			);
+			if (staleName) {
+				addToChatQueue(
+					<WarningMessage
+						key={generateKey('stale-provider')}
+						message={`Saved provider '${staleName}' is not in agents.config.json — falling back to the first configured provider.`}
+						hideBox={true}
+					/>,
 				);
-				if (!known) {
-					addToChatQueue(
-						<WarningMessage
-							key={generateKey('stale-provider')}
-							message={`Saved provider '${staleName}' is not in agents.config.json — falling back to the first configured provider.`}
-							hideBox={true}
-						/>,
-					);
-					provider = undefined;
-				}
 			}
 			const model = cliModel || modeConfig?.model || undefined;
 			const client = await initializeClient(provider, model, isProgrammatic);
