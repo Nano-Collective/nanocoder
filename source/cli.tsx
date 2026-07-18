@@ -84,6 +84,11 @@ Options:
   --plain             Use a lightweight, Ink-free runtime for non-interactive runs.
                       Only valid with the "run" command. Auto-enables in CI / non-TTY.
   --no-plain          Force the Ink runtime even in CI / non-TTY environments.
+  --alt-screen        Fullscreen TUI on the alternate screen buffer with in-app
+                      scrolling (mouse wheel / PgUp / PgDn). Persistent version:
+                      "alternateScreen": true in preferences.json.
+  --no-alt-screen     Force the default inline mode (main screen, chat history in
+                      the terminal's native scrollback), overriding the preference.
   --json              Output execution results as a single well-formed JSON object to stdout.
                       Only valid with the "run" command.
   --output-format     Specify stdout format ('text' or 'json'). Synonym for --json.
@@ -298,6 +303,8 @@ async function main(): Promise<void> {
 				continue; // skip this flag
 			} else if (arg === '--plain' || arg === '--no-plain') {
 				continue; // skip this flag
+			} else if (arg === '--no-alt-screen' || arg === '--alt-screen') {
+				continue; // skip this flag
 			} else if (arg === '--web' || arg === '--gui') {
 				continue; // skip this flag
 			} else {
@@ -446,7 +453,82 @@ async function main(): Promise<void> {
 		// bound during long Ink sessions. See issue #521.
 		const {installPerfBufferGuard} = await import('@/utils/perf-buffer');
 		installPerfBufferGuard();
-		render(
+
+		// Switch to alternate screen buffer (like vim/less/htop) for the
+		// interactive TUI only. Run mode (`nanocoder run …`) prints a
+		// transcript the user needs to keep after exit — the alt screen
+		// would discard it when restoring the original buffer.
+		// Screen mode: inline (main screen + native scrollback) by DEFAULT —
+		// the terminal's own scrollbar, wheel, and search work there.
+		// Fullscreen (alt screen + in-app scroll) is opt-in via --alt-screen
+		// or the alternateScreen:true preference; --no-alt-screen forces
+		// inline regardless of the preference.
+		const {loadPreferences} = await import('@/config/preferences');
+		const altScreenAllowed =
+			!args.includes('--no-alt-screen') &&
+			(args.includes('--alt-screen') ||
+				loadPreferences().alternateScreen === true);
+		const useAltScreen =
+			process.stdout.isTTY && !nonInteractiveMode && altScreenAllowed;
+		let inkStdin: NodeJS.ReadStream | undefined;
+		let stopInputForwarding: (() => void) | undefined;
+		if (useAltScreen) {
+			process.stdout.write('\x1B[?1049h'); // Enter alternate screen
+			// SGR mouse reporting so wheel scrolling reaches the app. The alt
+			// screen has no native scrollback, so the terminal's own wheel /
+			// scrollbar can't work — the app must receive wheel events itself.
+			// (Text selection needs Shift+drag while mouse reporting is on.)
+			process.stdout.write('\x1B[?1000h\x1B[?1006h');
+
+			// Wipe the screen on resize BEFORE Ink repaints (this listener is
+			// registered first, so it runs first). When the terminal GROWS,
+			// Ink's diff path only erases the old smaller frame and rewrites
+			// from a misaligned cursor, leaving stale rows on screen. A clear
+			// + home makes the next full-frame paint land on a clean buffer.
+			process.stdout.on('resize', () => {
+				process.stdout.write('\x1B[2J\x1B[H');
+			});
+
+			// Ink must never see the raw mouse sequences (its keypress parser
+			// would leak them into the chat input as text), so it reads from a
+			// filtered proxy stream: mouse reports are stripped, wheel ticks
+			// are re-emitted on the wheelEvents bus for the chat viewport.
+			const {PassThrough} = await import('node:stream');
+			const {stripMouseSequences, wheelEvents} = await import(
+				'@/utils/terminal-mouse'
+			);
+			const filtered = new PassThrough();
+			let carry = '';
+			const forwardInput = (chunk: Buffer | string) => {
+				const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+				const result = stripMouseSequences(text, carry);
+				carry = result.carry;
+				for (const direction of result.wheel) {
+					wheelEvents.emit('wheel', direction);
+				}
+				if (result.clean) {
+					filtered.write(result.clean);
+				}
+			};
+			process.stdin.on('data', forwardInput);
+			stopInputForwarding = () => {
+				process.stdin.off('data', forwardInput);
+				process.stdin.pause();
+			};
+			// TTY facade: Ink checks isTTY for raw-mode support and calls
+			// setRawMode/ref/unref — delegate those to the real stdin.
+			inkStdin = Object.assign(filtered, {
+				isTTY: true,
+				setRawMode: (mode: boolean) => {
+					process.stdin.setRawMode?.(mode);
+					return inkStdin;
+				},
+				ref: () => process.stdin.ref(),
+				unref: () => process.stdin.unref(),
+			}) as unknown as NodeJS.ReadStream;
+		}
+
+		const result = render(
 			<App
 				vscodeMode={vscodeMode}
 				vscodePort={vscodePort}
@@ -456,8 +538,54 @@ async function main(): Promise<void> {
 				cliModel={cliModel}
 				cliMode={cliMode}
 				trustDirectory={trustDirectory}
+				altScreenActive={useAltScreen}
 			/>,
+			{
+				// Ctrl+C is handled inside App (routed through the shutdown
+				// manager) so the exit-render handler below can paint the
+				// farewell frame before the process dies.
+				exitOnCtrlC: false,
+				...(inkStdin ? {stdin: inkStdin} : {}),
+			},
 		);
+
+		let terminalRestored = false;
+		const restoreTerminal = () => {
+			if (terminalRestored) return;
+			terminalRestored = true;
+			stopInputForwarding?.();
+			if (useAltScreen) {
+				// Mouse reporting off, then back to the main screen buffer.
+				process.stdout.write('\x1B[?1006l\x1B[?1000l\x1B[?1049l');
+			}
+		};
+
+		// On ANY graceful shutdown (Ctrl+C, /exit, fatal error): erase the
+		// live Ink region (input box, status lines — the Static transcript
+		// stays in the terminal), stop Ink from repainting, restore the
+		// screen mode, and leave a simple farewell. clear() BEFORE unmount()
+		// is deliberate: clear syncs the erased frame as current so
+		// unmount's final render skips rewriting it, and unmount prevents
+		// any late React state update (e.g. /exit's Goodbye message) from
+		// repainting over the farewell. Priority 0 = runs before other
+		// teardown.
+		const {getShutdownManager} = await import('@/utils/shutdown');
+		getShutdownManager().register({
+			name: 'tui-exit-render',
+			priority: 0,
+			handler: async () => {
+				result.clear();
+				result.unmount();
+				restoreTerminal();
+				process.stdout.write('Exiting...\n');
+			},
+		});
+
+		// Fallback restore for exit paths that bypass the shutdown manager
+		// (idempotent — the shutdown handler above usually runs first).
+		result.waitUntilExit().then(() => {
+			restoreTerminal();
+		});
 	}
 }
 

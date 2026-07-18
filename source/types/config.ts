@@ -418,4 +418,13 @@ export interface UserPreferences {
 	reasoningExpanded?: boolean;
 	compactToolDisplay?: boolean;
 	enablePromptScrubbing?: boolean;
+	/**
+	 * Interactive TUI screen mode. true (default): fullscreen on the
+	 * alternate screen buffer with in-app scrolling (wheel / PgUp / PgDn).
+	 * false: inline mode on the main screen — finished messages print into
+	 * the terminal's native scrollback, so the terminal's own scrollbar,
+	 * wheel, and search work, but the TUI cannot clip or re-layout old
+	 * content. Also switchable per-run with the --no-alt-screen flag.
+	 */
+	alternateScreen?: boolean;
 }
