@@ -336,10 +336,7 @@ test('model-selector formats current model label correctly', t => {
 });
 
 // ============================================================================
-// ModelSelector wires the searchable list. Filtering, scrolling, and the
-// empty state live in filterable-select-list.spec.tsx — here we only verify
-// ModelSelector's own job: mapping (provider, model) -> initialSelectedValue
-// and mapping a selected value back to (provider, model).
+// Searchable wiring
 // ============================================================================
 
 test('model-selector highlights current model as the preselected row', t => {
