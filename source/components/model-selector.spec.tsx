@@ -93,7 +93,7 @@ test('model-selector marks current model in list', t => {
 	t.regex(output!, /model2.*\(current\)/i);
 });
 
-test('model-selector shows cancel instruction', t => {
+test('model-selector shows search hint when searchable', t => {
 	setProviders([{name: 'openai', models: ['model1', 'model2']}]);
 
 	const {lastFrame} = renderWithTheme(
@@ -107,7 +107,7 @@ test('model-selector shows cancel instruction', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Press Escape to cancel/i);
+	t.regex(output!, /Type to filter · .* · Enter select · Esc cancel/i);
 });
 
 test('model-selector component renders without crashing', t => {
@@ -333,4 +333,135 @@ test('model-selector formats current model label correctly', t => {
 	// Other models should not be marked as current
 	t.notRegex(output!, /alpha.*\(current\)/i);
 	t.notRegex(output!, /gamma.*\(current\)/i);
+});
+
+// ============================================================================
+// Task 4: searchable FilterableSelectList behavior
+// ============================================================================
+
+test('model-selector highlights current model as the preselected row', t => {
+	setProviders([
+		{name: 'openai', models: ['model1', 'model2', 'model3']},
+	]);
+
+	const {lastFrame} = renderWithTheme(
+		<ModelSelector
+			currentProvider="openai"
+			currentModel="model2"
+			onModelSelect={() => {}}
+			onCancel={() => {}}
+		/>,
+	);
+
+	const out = lastFrame()!;
+	t.regex(out, /model2.*\(current\)/i);
+	// search affordance present (searchable is on)
+	t.regex(out, /Type to filter/);
+});
+
+test('model-selector typing filters the list', async t => {
+	setProviders([
+		{name: 'openai', models: ['gpt-4o', 'gpt-4o-mini', 'llama3']},
+	]);
+
+	const {lastFrame, stdin, unmount} = renderWithTheme(
+		<ModelSelector
+			currentProvider="openai"
+			currentModel="gpt-4o"
+			onModelSelect={() => {}}
+			onCancel={() => {}}
+		/>,
+	);
+
+	stdin.write('gpt');
+	await new Promise(resolve => setTimeout(resolve, 50));
+
+	const out = lastFrame()!;
+	t.regex(out, /gpt-4o/);
+	t.regex(out, /gpt-4o-mini/);
+	t.notRegex(out, /llama3/);
+	unmount();
+});
+
+test('model-selector long list keeps highlight in a 12-row window', async t => {
+	setProviders([
+		{name: 'openai', models: Array.from({length: 30}, (_, i) => `model-${i + 1}`)},
+	]);
+
+	const {lastFrame, stdin, unmount} = renderWithTheme(
+		<ModelSelector
+			currentProvider="openai"
+			currentModel="model-1"
+			onModelSelect={() => {}}
+			onCancel={() => {}}
+		/>,
+	);
+
+	for (let i = 0; i < 15; i++) stdin.write('\u001B[B');
+	await new Promise(resolve => setTimeout(resolve, 50));
+
+	const out = lastFrame()!;
+	// After 15 downs from index 0 the highlight is at 15; window is
+	// slice(9, 21): model-10 .. model-21 (12 rows). Names use the
+	// `model-` prefix (not `m-`) so substring overlap (m-1 in m-10) can't
+	// inflate the count.
+	t.regex(out, /model-10/);
+	t.regex(out, /model-21/);
+	t.notRegex(out, /model-9/);
+	t.notRegex(out, /model-22/);
+	t.regex(out, /Type to filter/);
+	unmount();
+});
+
+test('model-selector Enter on filtered result selects correct provider/model', async t => {
+	setProviders([
+		{name: 'openai', models: ['gpt-4o', 'gpt-4o-mini']},
+		{name: 'ollama', models: ['llama3']},
+	]);
+
+	let selProvider = '';
+	let selModel = '';
+	const onModelSelect = (provider: string, model: string) => {
+		selProvider = provider;
+		selModel = model;
+	};
+
+	const {stdin, unmount} = renderWithTheme(
+		<ModelSelector
+			currentProvider="openai"
+			currentModel="gpt-4o"
+			onModelSelect={onModelSelect}
+			onCancel={() => {}}
+		/>,
+	);
+
+	stdin.write('llama');
+	await new Promise(resolve => setTimeout(resolve, 50));
+	stdin.write('\r');
+	await new Promise(resolve => setTimeout(resolve, 50));
+
+	t.is(selProvider, 'ollama');
+	t.is(selModel, 'llama3');
+	unmount();
+});
+
+test('model-selector no-match shows empty state', async t => {
+	setProviders([
+		{name: 'openai', models: ['gpt-4o']},
+	]);
+
+	const {lastFrame, stdin, unmount} = renderWithTheme(
+		<ModelSelector
+			currentProvider="openai"
+			currentModel="gpt-4o"
+			onModelSelect={() => {}}
+			onCancel={() => {}}
+		/>,
+	);
+
+	stdin.write('zzzzz');
+	await new Promise(resolve => setTimeout(resolve, 50));
+
+	t.regex(lastFrame()!, /No models matching "zzzzz"/);
+	unmount();
 });
