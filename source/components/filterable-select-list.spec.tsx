@@ -303,3 +303,23 @@ test('Erase back to a query that includes current highlight keeps highlight valu
 		}, 50);
 	});
 });
+
+test('Escape calls onCancel', async t => {
+	let cancelled = false;
+	const {stdin, unmount} = renderWithTheme(
+		<FilterableSelectList
+			items={[
+				{label: 'alpha (a)', value: '0'},
+				{label: 'beta (b)', value: '1'},
+			]}
+			onSelect={() => {}}
+			onCancel={() => {
+				cancelled = true;
+			}}
+		/>,
+	);
+	stdin.write('\u001B'); // escape
+	await new Promise(resolve => setTimeout(resolve, 50));
+	t.true(cancelled);
+	unmount();
+});

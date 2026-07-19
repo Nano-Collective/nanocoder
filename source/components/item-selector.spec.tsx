@@ -90,3 +90,22 @@ test('ItemSelector does not double-fire onCancel in searchable normal path', asy
 	t.is(calls, 1);
 	unmount();
 });
+
+test('ItemSelector fires onCancel on Escape during loading branch', async t => {
+	let cancelled = false;
+	const {stdin} = renderWithTheme(
+		<ItemSelector
+			title="Select"
+			items={items}
+			searchable
+			loading
+			onSelect={() => {}}
+			onCancel={() => {
+				cancelled = true;
+			}}
+		/>,
+	);
+	stdin.write('\u001B'); // escape
+	await new Promise(resolve => setTimeout(resolve, 50));
+	t.true(cancelled);
+});
