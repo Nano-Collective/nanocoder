@@ -336,7 +336,10 @@ test('model-selector formats current model label correctly', t => {
 });
 
 // ============================================================================
-// Task 4: searchable FilterableSelectList behavior
+// ModelSelector wires the searchable list. Filtering, scrolling, and the
+// empty state live in filterable-select-list.spec.tsx — here we only verify
+// ModelSelector's own job: mapping (provider, model) -> initialSelectedValue
+// and mapping a selected value back to (provider, model).
 // ============================================================================
 
 test('model-selector highlights current model as the preselected row', t => {
@@ -357,60 +360,6 @@ test('model-selector highlights current model as the preselected row', t => {
 	t.regex(out, /model2.*\(current\)/i);
 	// search affordance present (searchable is on)
 	t.regex(out, /Type to filter/);
-});
-
-test('model-selector typing filters the list', async t => {
-	setProviders([
-		{name: 'openai', models: ['gpt-4o', 'gpt-4o-mini', 'llama3']},
-	]);
-
-	const {lastFrame, stdin, unmount} = renderWithTheme(
-		<ModelSelector
-			currentProvider="openai"
-			currentModel="gpt-4o"
-			onModelSelect={() => {}}
-			onCancel={() => {}}
-		/>,
-	);
-
-	stdin.write('gpt');
-	await new Promise(resolve => setTimeout(resolve, 50));
-
-	const out = lastFrame()!;
-	t.regex(out, /gpt-4o/);
-	t.regex(out, /gpt-4o-mini/);
-	t.notRegex(out, /llama3/);
-	unmount();
-});
-
-test('model-selector long list keeps highlight in a 12-row window', async t => {
-	setProviders([
-		{name: 'openai', models: Array.from({length: 30}, (_, i) => `model-${i + 1}`)},
-	]);
-
-	const {lastFrame, stdin, unmount} = renderWithTheme(
-		<ModelSelector
-			currentProvider="openai"
-			currentModel="model-1"
-			onModelSelect={() => {}}
-			onCancel={() => {}}
-		/>,
-	);
-
-	for (let i = 0; i < 15; i++) stdin.write('\u001B[B');
-	await new Promise(resolve => setTimeout(resolve, 50));
-
-	const out = lastFrame()!;
-	// After 15 downs from index 0 the highlight is at 15; window is
-	// slice(9, 21): model-10 .. model-21 (12 rows). Names use the
-	// `model-` prefix (not `m-`) so substring overlap (m-1 in m-10) can't
-	// inflate the count.
-	t.regex(out, /model-10/);
-	t.regex(out, /model-21/);
-	t.notRegex(out, /model-9/);
-	t.notRegex(out, /model-22/);
-	t.regex(out, /Type to filter/);
-	unmount();
 });
 
 test('model-selector Enter on filtered result selects correct provider/model', async t => {
@@ -445,23 +394,25 @@ test('model-selector Enter on filtered result selects correct provider/model', a
 	unmount();
 });
 
-test('model-selector no-match shows empty state', async t => {
+// Verifies the `else undefined` fallback in initialSelectedValue: a current
+// model that isn't in the list must NOT preselect anything (index stays 0).
+test('model-selector does not preselect when current model is missing', t => {
 	setProviders([
-		{name: 'openai', models: ['gpt-4o']},
+		{name: 'openai', models: ['model1', 'model2', 'model3']},
 	]);
 
-	const {lastFrame, stdin, unmount} = renderWithTheme(
+	const {lastFrame} = renderWithTheme(
 		<ModelSelector
 			currentProvider="openai"
-			currentModel="gpt-4o"
+			currentModel="modelX"
 			onModelSelect={() => {}}
 			onCancel={() => {}}
 		/>,
 	);
 
-	stdin.write('zzzzz');
-	await new Promise(resolve => setTimeout(resolve, 50));
-
-	t.regex(lastFrame()!, /No models matching "zzzzz"/);
-	unmount();
+	const out = lastFrame()!;
+	// No entry is marked (current): the missing model produces no match.
+	t.notRegex(out, /\(current\)/i);
+	// Still renders the searchable list normally.
+	t.regex(out, /Type to filter/);
 });
