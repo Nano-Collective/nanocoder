@@ -29,10 +29,12 @@ export function FilterableSelectList<TValue extends string = string>({
 	const {colors} = useTheme();
 	const {stdout} = useStdout();
 	// Height-aware clamp. If the terminal is too short, shrink the
-	// window so box + search row + hint row still fit. Falls back to the
-	// default on normal terminals (>= 16 rows).
-	const effectiveVisibleCount = stdout?.columns
-		? Math.max(1, Math.min(visibleCount, (stdout.rows ?? 24) - OVERHEAD_ROWS))
+	// window so box + search row + hint row still fit. Guard on rows
+	// (terminal height); when height is unknown (no TTY), fall back to the
+	// default window. Falls back to the default on normal terminals
+	// (>= 16 rows).
+	const effectiveVisibleCount = stdout?.rows
+		? Math.max(1, Math.min(visibleCount, stdout.rows - OVERHEAD_ROWS))
 		: visibleCount;
 	const initialIndex = Math.max(
 		0,

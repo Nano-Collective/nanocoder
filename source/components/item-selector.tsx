@@ -22,7 +22,7 @@ interface ItemSelectorProps<TValue extends string = string> {
 	errorHint?: string;
 	searchable?: boolean;
 	visibleCount?: number;
-	initialSelectedValue?: string;
+	initialSelectedValue?: TValue;
 }
 
 /**
