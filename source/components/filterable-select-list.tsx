@@ -1,9 +1,9 @@
 // source/components/filterable-select-list.tsx
 import {Box, Text, useInput, useStdout} from 'ink';
-import {useState, useMemo} from 'react';
+import {useMemo, useState} from 'react';
+import type {ItemSelectorOption} from '@/components/item-selector';
 import {useTheme} from '@/hooks/useTheme';
 import {fuzzyScore} from '@/utils/fuzzy-matching';
-import type {ItemSelectorOption} from '@/components/item-selector';
 
 const DEFAULT_VISIBLE_COUNT = 12;
 // Ceiling: even at 12 rows we need room for the box border (2) + search
@@ -63,7 +63,10 @@ export function FilterableSelectList<TValue extends string = string>({
 			filteredItems.length - effectiveVisibleCount,
 		),
 	);
-	const visibleItems = filteredItems.slice(scrollStart, scrollStart + effectiveVisibleCount);
+	const visibleItems = filteredItems.slice(
+		scrollStart,
+		scrollStart + effectiveVisibleCount,
+	);
 
 	useInput((input, key) => {
 		if (key.escape) {
@@ -91,7 +94,9 @@ export function FilterableSelectList<TValue extends string = string>({
 			return;
 		}
 		if (key.pageDown) {
-			setHighlightedIndex(prev => Math.min(maxIndex, prev + effectiveVisibleCount));
+			setHighlightedIndex(prev =>
+				Math.min(maxIndex, prev + effectiveVisibleCount),
+			);
 			return;
 		}
 		if (key.return) {
@@ -104,7 +109,18 @@ export function FilterableSelectList<TValue extends string = string>({
 			setHighlightedIndex(0);
 			return;
 		}
-		if (input && input.length >= 1 && !key.ctrl && !key.meta && !key.upArrow && !key.downArrow && !key.return && !key.escape && !key.backspace && !key.delete) {
+		if (
+			input &&
+			input.length >= 1 &&
+			!key.ctrl &&
+			!key.meta &&
+			!key.upArrow &&
+			!key.downArrow &&
+			!key.return &&
+			!key.escape &&
+			!key.backspace &&
+			!key.delete
+		) {
 			setQuery(prev => prev + input);
 			setHighlightedIndex(0);
 		}

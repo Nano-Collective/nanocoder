@@ -1,9 +1,9 @@
 import {Box, Text, useInput} from 'ink';
 import SelectInput from 'ink-select-input';
+import {FilterableSelectList} from '@/components/filterable-select-list';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-import {FilterableSelectList} from '@/components/filterable-select-list';
 
 export interface ItemSelectorOption<TValue extends string = string> {
 	label: string;
