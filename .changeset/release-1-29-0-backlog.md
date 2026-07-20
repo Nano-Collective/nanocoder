@@ -2,8 +2,6 @@
 "@nanocollective/nanocoder": minor
 ---
 
-- Added a **local web mode** that runs Nanocoder's chat in the browser. It landed across three phases: a local web entrypoint, a web-mode event layer, and a browser chat shell. Thanks to @Dhirenderchoudhary.
-
 - Added **privacy-aware prompt scrubbing**. A new `PrivacyContext` scrubs sensitive content from prompts before they leave your machine, with tool-argument rehydration and privacy session support, a `/privacy` command to inspect what is being scrubbed, and automated scrubbing telemetry notifications. Thanks to @akramcodez.
 
 - Added an **interactive questions system for plan mode**, so the agent can ask structured questions while planning instead of guessing. Thanks to @akramcodez. Closes #96.
