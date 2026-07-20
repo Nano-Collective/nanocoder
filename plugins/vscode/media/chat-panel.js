@@ -4,8 +4,86 @@
 
 	const messagesContainer = document.getElementById('messages-container');
 	const chatInput = document.getElementById('chat-input');
-	const modeSelector = document.getElementById('mode-selector');
-	const modelSelector = document.getElementById('model-selector');
+
+	let modelDropdown, modeDropdown;
+
+	function initDropdowns() {
+		class CustomDropdown {
+			constructor(triggerId, dropdownId, labelId, onChange) {
+				this.trigger = document.getElementById(triggerId);
+				this.dropdown = document.getElementById(dropdownId);
+				this.label = document.getElementById(labelId);
+				this.onChange = onChange;
+				this.value = '';
+
+				this.trigger.addEventListener('click', (e) => {
+					e.stopPropagation();
+					this.toggle();
+				});
+			}
+
+			toggle() {
+				const isHidden = this.dropdown.classList.contains('hidden');
+				// Close all dropdowns
+				document.getElementById('model-dropdown').classList.add('hidden');
+				document.getElementById('mode-dropdown').classList.add('hidden');
+
+				if (isHidden) {
+					this.dropdown.classList.remove('hidden');
+				}
+			}
+
+			setOptions(options, selectedValue) {
+				this.dropdown.innerHTML = '';
+				this.trigger.disabled = options.length === 0;
+
+				options.forEach(opt => {
+					const item = document.createElement('div');
+					item.className = 'px-3 py-1.5 cursor-pointer hover:bg-vscode-list-hover text-[0.9em] transition-colors';
+					if (opt === selectedValue) {
+						item.classList.add('bg-vscode-list-active', 'text-vscode-list-activeFg');
+					} else {
+						item.classList.add('text-vscode-dropdown-foreground');
+					}
+					item.textContent = opt;
+					item.addEventListener('click', (e) => {
+						e.stopPropagation();
+						this.setValue(opt);
+						this.dropdown.classList.add('hidden');
+						this.onChange(opt);
+					});
+					this.dropdown.appendChild(item);
+				});
+
+				this.setValue(selectedValue || (options.length > 0 ? options[0] : ''));
+			}
+
+			setValue(value) {
+				this.value = value;
+				// Clean up the label for better display
+				let displayValue = value;
+				if (displayValue.includes('/')) {
+					displayValue = displayValue.split('/').pop();
+				}
+				this.label.textContent = displayValue || 'Loading...';
+			}
+		}
+
+		modeDropdown = new CustomDropdown('mode-trigger', 'mode-dropdown', 'mode-trigger-label', (val) => {
+			vscode.postMessage({ type: 'setMode', mode: val });
+		});
+
+		modelDropdown = new CustomDropdown('model-trigger', 'model-dropdown', 'model-trigger-label', (val) => {
+			vscode.postMessage({ type: 'setModel', model: val });
+		});
+
+		document.addEventListener('click', () => {
+			document.getElementById('model-dropdown').classList.add('hidden');
+			document.getElementById('mode-dropdown').classList.add('hidden');
+		});
+	}
+
+	initDropdowns();
 	function toggleHistoryView() {
 		isHistoryView = !isHistoryView;
 		if (isHistoryView) {
@@ -23,7 +101,7 @@
 	const sendStopBtn = document.getElementById('send-stop-btn');
 	const iconSend = document.getElementById('icon-send');
 	const iconStop = document.getElementById('icon-stop');
-	
+
 	let currentTurnEl = null;
 	let currentTextEl = null;
 	let currentTurnText = '';
@@ -49,7 +127,10 @@
 	function setProcessing(active) {
 		isProcessing = active;
 		if (!active) {
-			if (currentAggregator) currentAggregator.close();
+			if (currentAggregator) {
+				currentAggregator.cancelPending();
+				currentAggregator.close();
+			}
 			currentAggregator = null;
 		}
 		if (sendStopBtn) {
@@ -70,7 +151,7 @@
 	}
 
 	// Auto-resize textarea
-	chatInput.addEventListener('input', function() {
+	chatInput.addEventListener('input', function () {
 		this.style.height = 'auto';
 		this.style.height = (this.scrollHeight) + 'px';
 	});
@@ -103,7 +184,7 @@
 		if (!isProcessing) {
 			// Switch to processing state
 			setProcessing(true);
-			
+
 			// Reset turn elements so agent starts a fresh block
 			currentTurnEl = null;
 			currentTextEl = null;
@@ -116,14 +197,14 @@
 		if (welcome) welcome.remove();
 
 		const msgEl = document.createElement('div');
-		msgEl.className = 'leading-relaxed break-words shrink-0 min-w-0 ' + 
-			(role === 'user' 
-				? 'self-end bg-vscode-button-bg text-vscode-button-fg px-3 py-2 rounded-lg max-w-[85%]' 
+		msgEl.className = 'leading-snug break-words shrink-0 min-w-0 ' +
+			(role === 'user'
+				? 'self-end bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-border px-3 py-2 rounded-lg max-w-[85%]'
 				: 'self-start max-w-full');
-		
+
 		const textContainer = document.createElement('div');
 		textContainer.className = 'markdown-body';
-		
+
 		// If it's the user, we just render it directly (or we could use marked for them too)
 		// Usually users prefer raw text, but let's render markdown for both just in case.
 		if (typeof marked !== 'undefined') {
@@ -135,7 +216,7 @@
 
 		messagesContainer.appendChild(msgEl);
 		scrollToBottom();
-		
+
 		if (role === 'agent') {
 			currentTurnEl = msgEl;
 			currentTextEl = textContainer;
@@ -151,42 +232,43 @@
 			// First chunk for this turn
 			const msgEl = document.createElement('div');
 			msgEl.className = 'message agent min-w-0';
-			
+
 			const textContainer = document.createElement('div');
-			textContainer.className = 'markdown-body leading-relaxed break-words';
+			textContainer.className = 'markdown-body leading-snug break-words';
 			currentTurnText = textChunk;
-			
+
 			if (typeof marked !== 'undefined') {
 				textContainer.innerHTML = marked.parse(currentTurnText);
 			} else {
 				textContainer.textContent = currentTurnText;
 			}
-			
+
 			msgEl.appendChild(textContainer);
 			messagesContainer.appendChild(msgEl);
-			
+
 			currentTurnEl = msgEl;
 			currentTextEl = textContainer;
 		} else {
 			// Append to existing turn
 			currentTurnText += textChunk;
-			
+
 			if (typeof marked !== 'undefined') {
 				if (!renderFrame) {
-					renderFrame = requestAnimationFrame(() => {
+					renderFrame = true;
+					setTimeout(() => {
 						if (currentTextEl) {
 							currentTextEl.innerHTML = marked.parse(currentTurnText);
 						}
-						renderFrame = null;
+						renderFrame = false;
 						scrollToBottom();
-					});
+					}, 50); // 50ms throttle (20 updates/sec max) for smoother rendering
 				}
 			} else {
 				currentTextEl.textContent += textChunk; // Fallback
 				scrollToBottom();
 			}
 		}
-		
+
 		if (typeof marked === 'undefined') {
 			scrollToBottom();
 		}
@@ -199,7 +281,7 @@
 	// Handle messages from extension
 	window.addEventListener('message', event => {
 		const message = event.data;
-		
+
 		switch (message.type) {
 			case 'toggleHistory':
 				toggleHistoryView();
@@ -236,14 +318,6 @@
 				if (isHistoryView) renderSessions();
 				break;
 		}
-	});
-
-	modeSelector.addEventListener('change', () => {
-		vscode.postMessage({ type: 'setMode', mode: modeSelector.value });
-	});
-
-	modelSelector.addEventListener('change', () => {
-		vscode.postMessage({ type: 'setModel', model: modelSelector.value });
 	});
 
 	if (historyBtn) {
@@ -340,33 +414,14 @@
 	}
 
 	function handleSyncState(message) {
-		// Update Mode Selector
-		modeSelector.innerHTML = '';
-		message.availableModes.forEach(mode => {
-			const option = document.createElement('option');
-			option.value = mode;
-			option.textContent = mode;
-			modeSelector.appendChild(option);
-		});
-		modeSelector.value = message.mode;
-		modeSelector.disabled = false;
-
-		// Update Model Selector
-		modelSelector.innerHTML = '';
-		message.availableModels.forEach(model => {
-			const option = document.createElement('option');
-			option.value = model;
-			option.textContent = model;
-			modelSelector.appendChild(option);
-		});
-		modelSelector.value = message.model;
-		modelSelector.disabled = false;
+		if (modeDropdown) modeDropdown.setOptions(message.availableModes, message.mode);
+		if (modelDropdown) modelDropdown.setOptions(message.availableModels, message.model);
 	}
 
 	function handleAcpUpdate(payload) {
 		if (!payload) return;
 		const update = payload.update ? payload.update : payload;
-		
+
 		if (update.sessionUpdate === 'agent_message_chunk') {
 			if (currentThoughtBox) {
 				currentThoughtBox.finish();
@@ -402,80 +457,81 @@
 		constructor() {
 			this.el = document.createElement('div');
 			this.el.className = 'my-2 flex flex-col shrink-0';
-			
+
 			this.header = document.createElement('div');
-			this.header.className = 'flex items-center gap-1.5 cursor-pointer text-vscode-descriptionForeground hover:text-vscode-fg transition-colors select-none w-fit';
+			this.header.className = 'flex items-center gap-1.5 cursor-pointer opacity-70 text-vscode-fg hover:opacity-100 transition-opacity select-none w-fit';
 			this.header.onclick = () => this.toggle();
-			
+
 			this.title = document.createElement('span');
 			this.title.className = 'font-vscode text-[0.85em] font-medium';
 			this.title.textContent = 'Thinking...';
-			
+
 			this.chevron = document.createElement('span');
 			this.chevron.className = 'flex items-center justify-center opacity-70';
 			this.chevron.innerHTML = ICONS.chevron;
 			this.chevron.style.transform = 'rotate(0deg)'; // open by default
-			
+
 			this.header.appendChild(this.title);
 			this.header.appendChild(this.chevron);
 			this.el.appendChild(this.header);
-			
+
 			this.body = document.createElement('div');
-			this.body.className = 'mt-2 pl-3 border-l-[3px] border-vscode-widget-border text-vscode-descriptionForeground markdown-body opacity-90 text-[0.95em]';
+			this.body.className = 'mt-2 pl-3 border-l-[3px] border-vscode-border opacity-70 text-vscode-fg markdown-body text-[0.95em]';
 			this.el.appendChild(this.body);
-			
+
 			this.isOpen = true;
 			this.startTime = Date.now();
 			this.text = '';
 			this.renderFrame = null;
-			
+
 			this.timer = setInterval(() => this.updateTimer(), 1000);
-			
+
 			messagesContainer.appendChild(this.el);
 			scrollToBottom();
 		}
-		
+
 		updateTimer() {
 			const seconds = Math.floor((Date.now() - this.startTime) / 1000);
 			this.title.textContent = `Thinking for ${seconds}s`;
 		}
-		
+
 		toggle(force) {
 			this.isOpen = force !== undefined ? force : !this.isOpen;
 			this.body.style.display = this.isOpen ? 'block' : 'none';
-			
+
 			const svg = this.chevron.querySelector('svg');
 			if (svg) {
 				svg.style.transform = this.isOpen ? 'rotate(0deg)' : 'rotate(-90deg)';
 			}
 		}
-		
+
 		append(chunk) {
 			this.text += chunk;
 			if (typeof marked !== 'undefined') {
 				if (!this.renderFrame) {
-					this.renderFrame = requestAnimationFrame(() => {
+					this.renderFrame = true;
+					setTimeout(() => {
 						this.body.innerHTML = marked.parse(this.text);
-						this.renderFrame = null;
+						this.renderFrame = false;
 						scrollToBottom();
-					});
+					}, 50);
 				}
 			} else {
 				this.body.textContent = this.text;
 				scrollToBottom();
 			}
 		}
-		
+
 		finish() {
 			clearInterval(this.timer);
 			if (this.renderFrame) {
-				cancelAnimationFrame(this.renderFrame);
-				this.renderFrame = null;
+				this.renderFrame = false;
 				if (typeof marked !== 'undefined') {
 					this.body.innerHTML = marked.parse(this.text);
 				}
 			}
-			this.updateTimer();
+			const seconds = Math.floor((Date.now() - this.startTime) / 1000);
+			this.title.textContent = `Thought for ${seconds}s`;
 			this.toggle(false); // Auto-shrink when done!
 		}
 	}
@@ -484,70 +540,79 @@
 		constructor() {
 			this.el = document.createElement('div');
 			this.el.className = 'my-3 border border-vscode-widget-border rounded bg-vscode-widget-bg overflow-hidden shrink-0 tool-aggregator';
-			
+
 			this.header = document.createElement('div');
 			this.header.className = 'px-3 py-2 flex items-center bg-vscode-widget-header border-b border-vscode-widget-border gap-2 cursor-pointer select-none';
 			this.header.onclick = () => this.toggle();
-			
+
 			this.title = document.createElement('span');
 			this.title.className = 'font-vscode text-[0.9em] opacity-80';
 			this.title.textContent = 'Exploring...';
-			
+
 			this.chevron = document.createElement('span');
 			this.chevron.className = 'ml-auto flex items-center justify-center';
 			this.chevron.innerHTML = ICONS.chevron;
-			
+
 			this.header.appendChild(this.title);
 			this.header.appendChild(this.chevron);
 			this.el.appendChild(this.header);
-			
+
 			this.body = document.createElement('div');
 			this.body.className = 'flex flex-col';
 			this.el.appendChild(this.body);
-			
+
 			this.isOpen = true;
 			this.toolCount = 0;
 			this.toolItems = new Map();
-			
+
 			messagesContainer.appendChild(this.el);
 		}
-		
+
 		toggle() {
 			this.isOpen = !this.isOpen;
 			this.body.style.display = this.isOpen ? '' : 'none';
-			
+
 			const svg = this.chevron.querySelector('svg');
 			if (svg) {
 				svg.style.transform = this.isOpen ? 'rotate(0deg)' : 'rotate(-90deg)';
 			}
 		}
-		
+
 		close() {
 			this.toggle(false);
 		}
-		
+
+		cancelPending() {
+			for (const [id, item] of this.toolItems.entries()) {
+				const statusEl = item.querySelector('.ml-auto');
+				if (statusEl && statusEl.innerHTML.includes('animate-spin')) {
+					statusEl.innerHTML = ICONS.cancelled;
+				}
+			}
+		}
+
 		updateTitle() {
 			this.title.textContent = `Exploring ${this.toolCount} tools...`;
 		}
-		
+
 		addOrUpdateTool(toolCallId, update) {
 			let item = this.toolItems.get(toolCallId);
 			if (!item) {
 				this.toolCount++;
 				this.updateTitle();
-				
+
 				item = document.createElement('div');
 				item.className = 'px-3 py-1.5 border-t border-vscode-widget-border flex items-center gap-2 text-[0.85em] font-vscode first:border-t-0';
 				item.id = `tool-card-${toolCallId}`; // So permissions can find it
-				
+
 				const status = document.createElement('span');
 				status.className = 'ml-auto flex items-center justify-center';
 				status.innerHTML = ICONS.pending;
-				
+
 				const label = document.createElement('span');
 				label.className = 'truncate flex-1';
 				label.textContent = update.title || update.name || 'Tool Call';
-				
+
 				item.appendChild(status);
 				item.appendChild(label);
 				this.body.appendChild(item);
@@ -587,7 +652,7 @@
 			currentAggregator.addOrUpdateTool(toolCallId, update);
 		}
 	}
-	
+
 	function extractFileName(title) {
 		if (!title) return 'File';
 		const parts = title.split('/');
@@ -595,7 +660,7 @@
 		last = last.split('\\').pop();
 		return last.replace(/['"]+$/g, '').trim();
 	}
-	
+
 	function getFileColor(filename) {
 		const ext = filename.split('.').pop().toLowerCase();
 		if (['ts', 'tsx'].includes(ext)) return 'text-[#3178C6]';
@@ -611,45 +676,45 @@
 		card.className = 'my-2 flex items-center justify-between px-3 py-2 border border-vscode-widget-border rounded bg-vscode-editor-bg cursor-pointer hover:bg-vscode-list-hover group tool-card';
 		card.id = `tool-card-${toolCallId}`;
 		card.onclick = () => vscode.postMessage({ type: 'showDiff', toolCallId });
-		
+
 		const left = document.createElement('div');
 		left.className = 'flex items-center gap-2 font-vscode text-[0.9em]';
-		
+
 		const status = document.createElement('span');
 		status.className = 'ml-auto flex items-center justify-center';
 		status.innerHTML = ICONS.pending;
-		
+
 		const label = document.createElement('span');
 		label.className = 'flex items-center gap-1.5';
-		
+
 		const filename = extractFileName(update.title || update.name);
 		const fileColor = getFileColor(filename);
-		
+
 		const actionText = document.createElement('span');
 		actionText.textContent = 'Edited';
 		actionText.className = 'opacity-80';
-		
+
 		const nameText = document.createElement('span');
 		nameText.className = `font-semibold ${fileColor}`;
 		nameText.textContent = filename;
-		
+
 		label.appendChild(actionText);
 		label.appendChild(nameText);
-		
+
 		left.appendChild(status);
 		left.appendChild(label);
 		card.appendChild(left);
-		
+
 		const right = document.createElement('div');
 		right.className = 'flex items-center gap-2';
-		
+
 		const hoverBtn = document.createElement('span');
 		hoverBtn.className = 'opacity-0 group-hover:opacity-100 transition-opacity bg-vscode-button-secondary text-vscode-fg px-2 py-0.5 rounded text-[0.85em]';
 		hoverBtn.textContent = 'Open Diff';
-		
+
 		right.appendChild(hoverBtn);
 		card.appendChild(right);
-		
+
 		return card;
 	}
 
@@ -659,7 +724,7 @@
 			if (update.status === 'success' || update.status === 'completed') statusEl.innerHTML = ICONS.success;
 			else if (update.status === 'error') statusEl.innerHTML = ICONS.error;
 			else if (update.status === 'cancelled' || update.status === 'denied') statusEl.innerHTML = ICONS.cancelled;
-		}	
+		}
 		if (update.status === 'success' || update.status === 'completed' || update.status === 'error' || update.status === 'cancelled' || update.status === 'denied') {
 			const actions = el.querySelector('.tool-actions');
 			if (actions) actions.remove();
@@ -669,13 +734,13 @@
 	function handlePermissionRequested(toolCallId, toolCall) {
 		const card = document.getElementById(`tool-card-${toolCallId}`);
 		if (!card) return;
-		
+
 		// Check if actions already exist
 		if (card.querySelector('.tool-actions')) return;
 
 		const actionsDiv = document.createElement('div');
 		actionsDiv.className = 'px-3 py-2 bg-vscode-widget-header border-t border-vscode-widget-border flex justify-end gap-2 tool-actions';
-		
+
 		const approveBtn = document.createElement('button');
 		approveBtn.className = 'border-none rounded px-3 py-1.5 cursor-pointer font-vscode text-[0.9em] transition-colors bg-vscode-button-bg text-vscode-button-fg hover:bg-vscode-button-hover';
 		approveBtn.textContent = 'Approve';
@@ -683,7 +748,7 @@
 			vscode.postMessage({ type: 'approveTool', toolCallId });
 			actionsDiv.remove();
 		};
-		
+
 		const denyBtn = document.createElement('button');
 		denyBtn.className = 'bg-transparent border border-vscode-button-secondary text-vscode-fg hover:bg-vscode-button-secondaryHover rounded px-3 py-1.5 cursor-pointer font-vscode text-[0.9em] transition-colors';
 		denyBtn.textContent = 'Deny';
@@ -691,10 +756,10 @@
 			vscode.postMessage({ type: 'denyTool', toolCallId });
 			actionsDiv.remove();
 		};
-		
+
 		actionsDiv.appendChild(approveBtn);
 		actionsDiv.appendChild(denyBtn);
-		
+
 		card.appendChild(actionsDiv);
 		scrollToBottom();
 	}
@@ -716,7 +781,7 @@
 		body.className = 'px-3 py-3 flex flex-col gap-3';
 
 		const desc = document.createElement('div');
-		desc.className = 'text-[0.9em] leading-relaxed opacity-90';
+		desc.className = 'text-[0.9em] leading-snug opacity-90';
 		desc.textContent = message.description || 'The agent has generated an implementation plan. How would you like to proceed?';
 
 		const actionsDiv = document.createElement('div');

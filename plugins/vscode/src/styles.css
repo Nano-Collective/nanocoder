@@ -38,9 +38,20 @@ html, body {
   background-clip: padding-box;
 }
 
+/* Style native selects to blend with VS Code themes */
+select {
+  background-color: var(--vscode-dropdown-background);
+  color: var(--vscode-dropdown-foreground);
+  border: 1px solid var(--vscode-dropdown-border, transparent);
+}
+select option {
+  background-color: var(--vscode-dropdown-background);
+  color: var(--vscode-dropdown-foreground);
+}
+
 /* Basic Markdown styling since Tailwind resets all headings, lists, and bold text */
 .markdown-body p {
-  margin-bottom: 0.75em;
+  margin-bottom: 0.5em;
   margin-top: 0;
 }
 .markdown-body p:last-child {
