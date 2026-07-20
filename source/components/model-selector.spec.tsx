@@ -93,7 +93,7 @@ test('model-selector marks current model in list', t => {
 	t.regex(output!, /model2.*\(current\)/i);
 });
 
-test('model-selector shows cancel instruction', t => {
+test('model-selector shows search hint when searchable', t => {
 	setProviders([{name: 'openai', models: ['model1', 'model2']}]);
 
 	const {lastFrame} = renderWithTheme(
@@ -107,7 +107,7 @@ test('model-selector shows cancel instruction', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Press Escape to cancel/i);
+	t.regex(output!, /Type to filter · .* · Enter select · Esc cancel/i);
 });
 
 test('model-selector component renders without crashing', t => {
@@ -333,4 +333,83 @@ test('model-selector formats current model label correctly', t => {
 	// Other models should not be marked as current
 	t.notRegex(output!, /alpha.*\(current\)/i);
 	t.notRegex(output!, /gamma.*\(current\)/i);
+});
+
+// ============================================================================
+// Searchable wiring
+// ============================================================================
+
+test('model-selector highlights current model as the preselected row', t => {
+	setProviders([
+		{name: 'openai', models: ['model1', 'model2', 'model3']},
+	]);
+
+	const {lastFrame} = renderWithTheme(
+		<ModelSelector
+			currentProvider="openai"
+			currentModel="model2"
+			onModelSelect={() => {}}
+			onCancel={() => {}}
+		/>,
+	);
+
+	const out = lastFrame()!;
+	t.regex(out, /model2.*\(current\)/i);
+	// search affordance present (searchable is on)
+	t.regex(out, /Type to filter/);
+});
+
+test('model-selector Enter on filtered result selects correct provider/model', async t => {
+	setProviders([
+		{name: 'openai', models: ['gpt-4o', 'gpt-4o-mini']},
+		{name: 'ollama', models: ['llama3']},
+	]);
+
+	let selProvider = '';
+	let selModel = '';
+	const onModelSelect = (provider: string, model: string) => {
+		selProvider = provider;
+		selModel = model;
+	};
+
+	const {stdin, unmount} = renderWithTheme(
+		<ModelSelector
+			currentProvider="openai"
+			currentModel="gpt-4o"
+			onModelSelect={onModelSelect}
+			onCancel={() => {}}
+		/>,
+	);
+
+	stdin.write('llama');
+	await new Promise(resolve => setTimeout(resolve, 50));
+	stdin.write('\r');
+	await new Promise(resolve => setTimeout(resolve, 50));
+
+	t.is(selProvider, 'ollama');
+	t.is(selModel, 'llama3');
+	unmount();
+});
+
+// Verifies the `else undefined` fallback in initialSelectedValue: a current
+// model that isn't in the list must NOT preselect anything (index stays 0).
+test('model-selector does not preselect when current model is missing', t => {
+	setProviders([
+		{name: 'openai', models: ['model1', 'model2', 'model3']},
+	]);
+
+	const {lastFrame} = renderWithTheme(
+		<ModelSelector
+			currentProvider="openai"
+			currentModel="modelX"
+			onModelSelect={() => {}}
+			onCancel={() => {}}
+		/>,
+	);
+
+	const out = lastFrame()!;
+	// No entry is marked (current): the missing model produces no match.
+	t.notRegex(out, /\(current\)/i);
+	// Still renders the searchable list normally.
+	t.regex(out, /Type to filter/);
 });
