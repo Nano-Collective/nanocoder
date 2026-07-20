@@ -416,6 +416,67 @@ test('useChatHandler - drains queued message when setup fails before conversatio
 	rendered.unmount();
 });
 
+test('useChatHandler - injects project context from memory finder', async t => {
+	let hookResult: ChatHandlerReturn | null = null;
+	let sentMessages: Message[] = [];
+	const client: LLMClient = {
+		...createMockClient(),
+		chat: async (messages, _tools, callbacks) => {
+			sentMessages = messages;
+			callbacks.onFinish?.();
+			return {
+				choices: [
+					{
+						message: {
+							role: 'assistant',
+							content: 'ok',
+						},
+					},
+				],
+			};
+		},
+	};
+
+	const props = createMockProps({
+		client,
+		toolManager: createMockToolManager(),
+		memoryFinder: {
+			findRelevantMemories: async (query, limit) => {
+				t.is(query, 'refactor auth');
+				t.is(limit, 8);
+				return [
+					{
+						id: 'memory-1',
+						content: 'Auth uses Clerk and avoids middleware.',
+						category: 'architecture',
+						timestamp: '2026-07-17T00:00:00.000Z',
+					},
+				];
+			},
+		},
+	});
+
+	const rendered = render(
+		<TestHookComponent
+			{...props}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+
+	await waitForCondition(() => hookResult !== null);
+	await hookResult!.handleChatMessage('refactor auth');
+
+	t.true(sentMessages[0].content.includes('## Project Context'));
+	t.true(
+		sentMessages[0].content.includes(
+			'- Auth uses Clerk and avoids middleware.',
+		),
+	);
+	rendered.unmount();
+});
+
 test('useChatHandler - streaming state types are correct', t => {
 	let hookResult: ChatHandlerReturn | null = null;
 

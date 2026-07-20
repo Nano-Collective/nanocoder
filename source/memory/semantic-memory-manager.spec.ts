@@ -93,6 +93,26 @@ test('SemanticMemoryManager returns relevant memories before unrelated ones', as
 	]);
 });
 
+test('SemanticMemoryManager includes category matches in relevance ranking', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+
+	const architecture = await manager.addMemory({
+		content: 'Use the service layer for persistence changes.',
+		category: 'architecture',
+	});
+	await manager.addMemory({
+		content: 'Release notes are generated from contributor history.',
+		category: 'workflow',
+	});
+
+	t.deepEqual(await manager.findRelevantMemories('architecture', 3), [
+		architecture,
+	]);
+});
+
 test('SemanticMemoryManager rejects empty memory content', async t => {
 	const dir = await createTempDir();
 	const cwd = path.join(dir, 'repo');

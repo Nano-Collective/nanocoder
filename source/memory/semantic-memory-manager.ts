@@ -147,9 +147,11 @@ export class SemanticMemoryManager {
 		return (await this.listMemories())
 			.map(memory => {
 				const memoryTerms = tokenize(memory.content);
+				const categoryTerms = tokenize(memory.category);
 				let score = 0;
 				for (const term of queryTerms) {
 					if (memoryTerms.has(term)) score++;
+					if (categoryTerms.has(term)) score++;
 				}
 				return {memory, score};
 			})

@@ -1,16 +1,40 @@
 import type {SemanticMemory} from './semantic-memory-manager';
 import {SemanticMemoryManager} from './semantic-memory-manager';
 
-type MemoryFinder = Pick<SemanticMemoryManager, 'findRelevantMemories'>;
+export type MemoryFinder = Pick<SemanticMemoryManager, 'findRelevantMemories'>;
 
-const PROJECT_CONTEXT_LIMIT = 3;
+export interface ProjectContextOptions {
+	memoryLimit?: number;
+	tokenBudget?: number;
+}
 
-export function formatProjectContext(memories: SemanticMemory[]): string {
+const DEFAULT_MEMORY_LIMIT = 8;
+const DEFAULT_TOKEN_BUDGET = 240;
+
+function estimateTokens(value: string): number {
+	return Math.ceil(value.length / 4);
+}
+
+export function formatProjectContext(
+	memories: SemanticMemory[],
+	options: ProjectContextOptions = {},
+): string {
 	if (memories.length === 0) return '';
 
-	const bullets = memories.map(
-		memory => `- ${memory.content.replaceAll(/\s+/gu, ' ').trim()}`,
-	);
+	const tokenBudget = options.tokenBudget ?? DEFAULT_TOKEN_BUDGET;
+	const bullets: string[] = [];
+	let usedTokens = estimateTokens('## Project Context\n\n');
+
+	for (const memory of memories) {
+		const bullet = `- ${memory.content.replaceAll(/\s+/gu, ' ').trim()}`;
+		const bulletTokens = estimateTokens(`${bullet}\n`);
+		if (usedTokens + bulletTokens > tokenBudget) continue;
+
+		bullets.push(bullet);
+		usedTokens += bulletTokens;
+	}
+
+	if (bullets.length === 0) return '';
 
 	return `## Project Context\n\n${bullets.join('\n')}`;
 }
@@ -18,8 +42,9 @@ export function formatProjectContext(memories: SemanticMemory[]): string {
 export function appendProjectContext(
 	systemPrompt: string,
 	memories: SemanticMemory[],
+	options?: ProjectContextOptions,
 ): string {
-	const projectContext = formatProjectContext(memories);
+	const projectContext = formatProjectContext(memories, options);
 	if (!projectContext) return systemPrompt;
 
 	return `${systemPrompt}\n\n${projectContext}`;
@@ -29,11 +54,16 @@ export async function appendRelevantProjectContext(
 	systemPrompt: string,
 	query: string,
 	memoryFinder: MemoryFinder = new SemanticMemoryManager(),
+	options: ProjectContextOptions = {},
 ): Promise<string> {
 	try {
 		return appendProjectContext(
 			systemPrompt,
-			await memoryFinder.findRelevantMemories(query, PROJECT_CONTEXT_LIMIT),
+			await memoryFinder.findRelevantMemories(
+				query,
+				options.memoryLimit ?? DEFAULT_MEMORY_LIMIT,
+			),
+			options,
 		);
 	} catch {
 		return systemPrompt;
