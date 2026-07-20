@@ -138,6 +138,10 @@ Nanocoder [automatically saves your sessions](session-management.md) so you can 
 /resume last    # jump back into the most recent one
 ```
 
+```bash
+nanocoder --continue    # or resume from your shell at launch
+```
+
 Sessions are saved every 30 seconds by default and kept for 30 days.
 
 ## Tracking Complex Work

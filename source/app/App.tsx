@@ -60,6 +60,8 @@ export default function App({
 	cliMode,
 	trustDirectory = false,
 	altScreenActive = false,
+	initialSession,
+	openSessionSelectorOnStart = false,
 }: AppProps) {
 	// Resolve the initial development mode with this precedence:
 	// 1. --mode CLI flag (highest priority)
@@ -487,6 +489,25 @@ export default function App({
 		handleChatMessage: chatHandler.handleChatMessage,
 		dismissActiveEditor: vscodeServer.dismissActiveEditor,
 	});
+
+	// Apply a session resolved by cli.tsx from --continue/--resume <id> (or open
+	// the picker for a bare --resume), once on mount. Reuses the exact same
+	// applySession path as the in-app /resume command so messages, provider,
+	// model, sessionId, key-generator reseed, and scrollback replay all stay
+	// in sync. Guarded by a ref (not an empty dep array) so a re-render before
+	// the effect fires — e.g. from the vscode-prompt-dispatcher bind above —
+	// can't apply it twice.
+	const startupSessionAppliedRef = React.useRef(false);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: startup-only effect, guarded by the ref above
+	React.useEffect(() => {
+		if (startupSessionAppliedRef.current) return;
+		startupSessionAppliedRef.current = true;
+		if (initialSession) {
+			appHandlers.applySession(initialSession);
+		} else if (openSessionSelectorOnStart) {
+			appState.setActiveMode('sessionSelector');
+		}
+	}, []);
 
 	// Bind the chat-input submit handler into the VS Code prompt dispatcher
 	// now that appHandlers exists. The dispatcher was created earlier (before

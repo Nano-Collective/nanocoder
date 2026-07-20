@@ -94,6 +94,11 @@ Options:
   --output-format     Specify stdout format ('text' or 'json'). Synonym for --json.
   --acp               Run as an ACP (Agent Client Protocol) server for editor integration.
                       Communicates via JSON-RPC over stdin/stdout.
+  -c, --continue      Resume the most recent session for the current directory, silently.
+                      Starts a fresh session if none exists. Interactive mode only.
+  -r, --resume [id]   Resume a session by id or 1-based list index (e.g. "last", "2",
+                      or a session uuid). With no id, opens the session picker at
+                      startup. Mutually exclusive with --continue. Interactive mode only.
   run                 Run in non-interactive mode
 
 Examples:
@@ -106,6 +111,9 @@ Examples:
   nanocoder --trust-directory run "analyze src/app.ts"
   nanocoder --plain run "summarize README.md"
   nanocoder --plain --json run "summarize README.md" | jq .finalText
+  nanocoder --continue
+  nanocoder --resume last
+  nanocoder --resume
   `);
 	process.exit(0);
 }
@@ -316,6 +324,36 @@ async function main(): Promise<void> {
 
 	const nonInteractiveMode = runCommandIndex !== -1;
 
+	// --continue/-c and --resume/-r: session resume flags for the interactive
+	// TUI only (mirrors Claude Code's -c/-r). Mutually exclusive.
+	const continueRequested = args.includes('--continue') || args.includes('-c');
+	const resumeFlagIndex = args.findIndex(
+		arg => arg === '--resume' || arg === '-r',
+	);
+	const resumeRequested = resumeFlagIndex !== -1;
+
+	if (continueRequested && resumeRequested) {
+		console.error('Cannot pass both --continue and --resume.');
+		process.exit(1);
+	}
+
+	// A bare --resume (no id) opens the session picker at startup. Only treat
+	// the next token as an id/index if it isn't another flag or `run`.
+	let resumeArg: string | undefined;
+	if (resumeRequested) {
+		const next = args[resumeFlagIndex + 1];
+		if (next && !next.startsWith('-') && next !== 'run') {
+			resumeArg = next;
+		}
+	}
+
+	if ((continueRequested || resumeRequested) && nonInteractiveMode) {
+		console.error(
+			'--continue/-c and --resume/-r are only supported for the interactive session (not with `run`).',
+		);
+		process.exit(1);
+	}
+
 	// Validate execution constraints for --json rules
 	if (outputFormat === 'json' && !nonInteractiveMode) {
 		console.error("Error: --json can only be used with the 'run' command.");
@@ -454,6 +492,45 @@ async function main(): Promise<void> {
 		const {installPerfBufferGuard} = await import('@/utils/perf-buffer');
 		installPerfBufferGuard();
 
+		// Resolve --continue/--resume <id> into a Session BEFORE rendering, so
+		// the app can apply it on first mount (see App's initialSession prop).
+		// A bare --resume (no id) instead opens the picker at startup — no
+		// resolution needed here.
+		let initialSession: import('@/session/session-manager').Session | undefined;
+		const openSessionSelectorOnStart = resumeRequested && !resumeArg;
+		if (continueRequested || resumeRequested) {
+			const {sessionManager} = await import('@/session/session-manager');
+			try {
+				await sessionManager.initialize();
+			} catch (error) {
+				console.error(
+					`Failed to initialize sessions: ${error instanceof Error ? error.message : error}`,
+				);
+				process.exit(1);
+			}
+		}
+		if (continueRequested || (resumeRequested && resumeArg)) {
+			const {resolveSession} = await import('@/session/resolve-session');
+
+			if (continueRequested) {
+				const outcome = await resolveSession('last', process.cwd());
+				if (outcome.ok) {
+					initialSession = outcome.session;
+				} else {
+					console.log(
+						'No previous session found for this directory — starting fresh.',
+					);
+				}
+			} else {
+				const outcome = await resolveSession(resumeArg, process.cwd());
+				if (!outcome.ok) {
+					console.error(outcome.message);
+					process.exit(1);
+				}
+				initialSession = outcome.session;
+			}
+		}
+
 		// Switch to alternate screen buffer (like vim/less/htop) for the
 		// interactive TUI only. Run mode (`nanocoder run …`) prints a
 		// transcript the user needs to keep after exit — the alt screen
@@ -539,6 +616,8 @@ async function main(): Promise<void> {
 				cliMode={cliMode}
 				trustDirectory={trustDirectory}
 				altScreenActive={useAltScreen}
+				initialSession={initialSession}
+				openSessionSelectorOnStart={openSessionSelectorOnStart}
 			/>,
 			{
 				// Ctrl+C is handled inside App (routed through the shutdown

@@ -19,6 +19,19 @@ Nanocoder automatically saves your conversations so you can close the terminal a
 
 You can also use the aliases `/sessions` or `/history`.
 
+### From the Command Line
+
+You can resume a session directly at launch instead of using a slash command:
+
+```bash
+nanocoder --continue      # resume the most recent session for this directory (-c)
+nanocoder --resume        # open the session picker at startup (-r)
+nanocoder --resume last   # jump straight into the most recent session
+nanocoder --resume {id}   # resume a specific session by ID or list index
+```
+
+`--continue` silently starts a fresh session if no previous session exists for the current directory, while `--resume` exits with an error if the requested session is not found. The two flags are mutually exclusive, and both are interactive-only — they cannot be combined with `run`. See the [CLI Options Reference](../getting-started/index.md#cli-options) for the full flag list.
+
 ## Renaming a Session
 
 ```bash
