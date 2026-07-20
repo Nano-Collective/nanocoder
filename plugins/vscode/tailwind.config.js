@@ -23,9 +23,12 @@ module.exports = {
           border: 'var(--vscode-panel-border, rgba(128,128,128,0.2))',
           list: {
             hover: 'var(--vscode-list-hoverBackground)',
+            active: 'var(--vscode-list-activeSelectionBackground)',
+            activeFg: 'var(--vscode-list-activeSelectionForeground)',
             error: 'var(--vscode-list-errorForeground, #f44747)'
           },
           error: 'var(--vscode-editorError-foreground, #f48771)',
+          focusBorder: 'var(--vscode-focusBorder)',
           dropdown: {
             bg: 'var(--vscode-dropdown-background)',
             fg: 'var(--vscode-dropdown-foreground)',

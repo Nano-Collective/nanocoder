@@ -16,13 +16,10 @@
 		<div id="chat-view" class="flex flex-col flex-1 overflow-hidden">
 			<div id="messages-container" class="flex-1 overflow-y-auto overflow-x-hidden p-4 flex flex-col gap-3">
 				<!-- Messages will be injected here -->
-				<div class="welcome-message p-3 italic opacity-80 text-center">
-					Hi! I'm Nanocoder. How can I help you today?
-				</div>
 			</div>
 		</div>
 
-		<div id="history-view" class="flex flex-col flex-1 overflow-hidden" style="display:none">
+		<div id="history-view" class="flex flex-col flex-1 overflow-hidden hidden">
 			<div class="pt-2.5 pb-1.5 px-4 border-b border-vscode-border shrink-0">
 				<span class="font-semibold text-[0.9em] uppercase tracking-[0.04em] opacity-70">Session History</span>
 			</div>
@@ -30,23 +27,29 @@
 		</div>
 
 		<div class="p-4 pt-2 bg-vscode-bg shrink-0">
-			<div class="flex flex-col bg-vscode-input-bg border border-vscode-input-border rounded-2xl focus-within:border-vscode-input-focus transition-colors shadow-sm">
-				<textarea id="chat-input" rows="1" placeholder="Ask Nanocoder... @ to mention, / for actions" class="w-full min-h-[44px] max-h-[250px] p-3 px-4 pb-2 bg-transparent text-vscode-input-fg font-vscode text-[0.95em] resize-none outline-none border-none"></textarea>
+			<div class="flex flex-col bg-vscode-input-bg border border-vscode-input-border rounded-2xl focus-within:border-vscode-input-focus transition-colors shadow-sm relative">
+				<textarea id="chat-input" rows="1" placeholder="Ask Nanocoder anything..." class="w-full min-h-[44px] max-h-[250px] p-3 px-4 pb-2 bg-transparent text-vscode-input-fg font-vscode text-[0.95em] resize-none outline-none border-none"></textarea>
 				
-				<div class="flex items-center justify-between px-3 pb-2 pt-1">
-					<div class="flex gap-1 items-center flex-1 overflow-hidden">
+				<div class="flex items-center justify-between px-3 pb-2 pt-1 relative">
+					<div class="flex gap-1 items-center flex-1 min-w-0">
 						<button class="bg-transparent border-none text-vscode-fg opacity-50 hover:opacity-100 cursor-pointer p-1.5 rounded-full hover:bg-vscode-toolbarHover transition-all flex items-center justify-center shrink-0">
 							<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 						</button>
-						<select id="model-selector" class="bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[45%] truncate" disabled>
-							<option value="">Loading models...</option>
-						</select>
-						<select id="mode-selector" class="bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[35%] truncate" disabled>
-							<option value="">Loading modes...</option>
-						</select>
+						
+						<!-- Custom Model Dropdown Trigger -->
+						<button id="model-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[45%] shrink min-w-0" disabled>
+							<span id="model-trigger-label" class="truncate">Loading models...</span>
+							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="6 9 12 15 18 9"></polyline></svg>
+						</button>
+
+						<!-- Custom Mode Dropdown Trigger -->
+						<button id="mode-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[35%] shrink min-w-0" disabled>
+							<span id="mode-trigger-label" class="truncate">Loading modes...</span>
+							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="6 9 12 15 18 9"></polyline></svg>
+						</button>
 					</div>
 					
-					<button id="send-stop-btn" class="group bg-[#007acc] text-white border-none rounded-full w-8 h-8 flex items-center justify-center cursor-pointer shrink-0 transition-all hover:bg-[#005a9e] hover:scale-105 ml-2" title="Send (Enter)">
+					<button id="send-stop-btn" class="group bg-[#007acc] [&.is-processing]:bg-[#f14c4c] [&.is-processing]:hover:bg-[#d13a3a] text-white border-none rounded-full w-8 h-8 flex items-center justify-center cursor-pointer shrink-0 transition-all hover:bg-[#005a9e] hover:scale-105 ml-2" title="Send (Enter)">
 						<!-- FiSend icon (react-icons/fi) — shown when idle -->
 						<svg id="icon-send" class="block group-[.is-processing]:hidden mr-[2px] mt-[1px]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
 							<line x1="22" y1="2" x2="11" y2="13"/>
@@ -58,6 +61,10 @@
 						</svg>
 					</button>
 				</div>
+				
+				<!-- Dropdown Menus (Full Width) -->
+				<div id="model-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
+				<div id="mode-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
 			</div>
 		</div>
 	<script nonce="{{nonce}}" src="{{markedUri}}"></script>
