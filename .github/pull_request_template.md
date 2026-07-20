@@ -9,6 +9,12 @@ Brief description of what this PR does
 - [ ] Breaking change
 - [ ] Documentation update
 
+## Changeset
+
+- [ ] Added a changeset (`pnpm changeset`) describing this change for the changelog
+
+Docs-only or internal chores need no changeset (or run `pnpm changeset --empty` to note that intentionally).
+
 ## Testing
 
 ### Automated Tests
