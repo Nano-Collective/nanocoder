@@ -15,14 +15,14 @@ async function getReleaseLine(changeset) {
 	const summary = (changeset.summary || '').trim();
 	if (!summary) return '';
 
-	// Preserve multi-line entries: first line becomes the bullet, continuation
-	// lines are indented so they stay part of the same list item.
-	const [first, ...rest] = summary.split('\n');
-	const continuation = rest
-		.map(line => (line.trim() === '' ? '' : `  ${line.trimEnd()}`))
-		.join('\n');
+	// Pass the author's markdown through faithfully. If they already wrote one or
+	// more markdown list items (the usual case, and how a consolidated entry with
+	// several bullets is written), emit it verbatim. Otherwise treat the whole
+	// summary as a single bullet.
+	const isMarkdownList = /^\s*[-*]\s/.test(summary);
+	const body = isMarkdownList ? summary : `- ${summary}`;
 
-	return `\n- ${first.trimEnd()}${continuation ? `\n${continuation}` : ''}`;
+	return `\n${body}`;
 }
 
 async function getDependencyReleaseLine() {
