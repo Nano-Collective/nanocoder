@@ -10,6 +10,8 @@ import type {useChatHandler} from '@/hooks/chat-handler';
 import type {AppHandlers} from '@/hooks/useAppHandlers';
 import type {useAppState} from '@/hooks/useAppState';
 import type {useModeHandlers} from '@/hooks/useModeHandlers';
+import {useTerminalRows} from '@/hooks/useTerminalWidth';
+import {UIStateProvider} from '@/hooks/useUIState';
 import type {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import type {useVSCodeServer} from '@/hooks/useVSCodeServer';
 import type {ImageAttachment} from '@/types/core';
@@ -38,6 +40,13 @@ interface InteractiveAppProps {
 	) => Promise<void>;
 	userMessageQueue: ReturnType<typeof useUserMessageQueue>;
 	handleIdeSelect: (ide: string) => void;
+	clearKey?: string;
+	/**
+	 * Whether the terminal is on the alternate screen buffer (set by
+	 * cli.tsx). Drives the fullscreen fixed-height layout; false renders
+	 * the inline Static-based flow with native scrollback.
+	 */
+	altScreenActive?: boolean;
 }
 
 /**
@@ -62,6 +71,8 @@ export function InteractiveApp({
 	handleUserSubmit,
 	userMessageQueue,
 	handleIdeSelect,
+	clearKey,
+	altScreenActive = false,
 }: InteractiveAppProps): React.ReactElement {
 	const nextRestoredDraftIdRef = React.useRef(1);
 	const [submittedDraft, setSubmittedDraft] =
@@ -236,114 +247,146 @@ export function InteractiveApp({
 		{isActive: cancellable},
 	);
 
+	// Fullscreen layout if and only if cli.tsx put us on the alternate
+	// screen. Inline mode (--no-alt-screen / alternateScreen:false pref),
+	// test renderers, and piped stdout all use the classic flow layout
+	// with Static + native scrollback.
+	const fullscreen = altScreenActive;
+	const terminalRows = useTerminalRows();
+
 	return (
-		<Box flexDirection="column" padding={1} width="100%">
-			{/* Chat History - ALWAYS rendered to keep Static content stable */}
+		// Fullscreen layout on the alternate screen buffer: the root Box is
+		// pinned to the exact terminal height so the frame can never exceed
+		// the viewport. The chat area (ChatHistory) flexes and clips at the
+		// top; everything below it (modals, status line, input) keeps its
+		// natural height, so Yoga shrinks the chat area to make room — the
+		// input can never be pushed off-screen.
+		<Box
+			flexDirection="column"
+			padding={1}
+			width="100%"
+			height={fullscreen ? terminalRows : undefined}
+		>
+			{/* Chat area — fullscreen bottom-anchored viewport */}
 			<ChatHistory
 				startChat={appState.startChat}
 				staticComponents={staticComponents}
 				queuedComponents={appState.chatComponents}
 				liveComponent={liveComponent}
 				renderLastQueuedComponentLive={recallableSubmittedDraft}
+				clearKey={clearKey}
+				fullscreen={fullscreen}
+				scrollActive={
+					!showModalSelectors &&
+					!appState.isExplorerMode &&
+					!appState.isIdeSelectionMode
+				}
 			/>
 
-			{appState.planReviewState?.show && (
-				<PlanReviewPrompt
-					onProceed={appHandlers.handlePlanProceed}
-					onAskMore={() => void appHandlers.handlePlanAskMore()}
-					onModify={appHandlers.handlePlanModify}
-					onDismiss={appHandlers.handlePlanModify}
-				/>
-			)}
-
-			{appState.isExplorerMode && (
-				<Box marginLeft={-1} flexDirection="column">
-					<FileExplorer onClose={modeHandlers.handleExplorerCancel} />
-				</Box>
-			)}
-
-			{appState.isIdeSelectionMode && (
-				<Box marginLeft={-1} flexDirection="column">
-					<IdeSelector
-						onSelect={handleIdeSelect}
-						onCancel={modeHandlers.handleIdeSelectionCancel}
-					/>
-				</Box>
-			)}
-
-			{showModalSelectors && (
-				<Box marginLeft={-1} flexDirection="column">
-					<ModalSelectors
-						activeMode={appState.activeMode}
-						isSettingsMode={appState.isSettingsMode}
-						showAllSessions={appState.showAllSessions}
-						currentModel={appState.currentModel}
-						currentProvider={appState.currentProvider}
-						checkpointLoadData={appState.checkpointLoadData}
-						onModelSelect={modeHandlers.handleModelSelect}
-						onModelSelectionCancel={modeHandlers.handleModelSelectionCancel}
-						onModelDatabaseCancel={modeHandlers.handleModelDatabaseCancel}
-						onConfigWizardComplete={modeHandlers.handleConfigWizardComplete}
-						onConfigWizardCancel={modeHandlers.handleConfigWizardCancel}
-						onMcpWizardComplete={modeHandlers.handleMcpWizardComplete}
-						onMcpWizardCancel={modeHandlers.handleMcpWizardCancel}
-						onSettingsCancel={modeHandlers.handleSettingsCancel}
-						tuneConfig={appState.tune}
-						onTuneSelect={modeHandlers.handleTuneSelect}
-						onTuneCancel={modeHandlers.handleTuneCancel}
-						onCheckpointSelect={appHandlers.handleCheckpointSelect}
-						onCheckpointCancel={appHandlers.handleCheckpointCancel}
-						onSessionSelect={sessionId =>
-							void appHandlers.handleSessionSelect(sessionId)
-						}
-						onSessionCancel={appHandlers.handleSessionCancel}
-					/>
-				</Box>
-			)}
-
-			{appState.startChat &&
-				appState.activeMode === null &&
-				!appState.isSettingsMode &&
-				!appState.planReviewState?.show && (
-					<ChatInput
-						isCancelling={appState.isCancelling}
-						isToolExecuting={appState.isToolExecuting}
-						isQuestionMode={appState.isQuestionMode}
-						pendingToolCalls={appState.pendingToolCalls}
-						currentToolIndex={appState.currentToolIndex}
-						pendingQuestion={appState.pendingQuestion}
-						onQuestionAnswer={handleQuestionAnswer}
-						mcpInitialized={appState.mcpInitialized}
-						client={appState.client}
-						customCommands={Array.from(appState.customCommandCache.keys())}
-						inputDisabled={false}
-						onSubmittedDraft={handleSubmittedDraft}
-						restoreSubmittedDraft={restoredDraft}
-						queuedMessages={userMessageQueue.queuedMessages}
-						onQueueMessage={userMessageQueue.enqueueMessage}
-						onRemoveQueuedMessage={userMessageQueue.removeMessage}
-						isBusy={cancellable}
-						developmentMode={appState.developmentMode}
-						contextPercentUsed={appState.contextPercentUsed}
-						contextSource={appState.contextSource}
-						sessionName={appState.sessionName || undefined}
-						compactToolCounts={appState.compactToolCounts}
-						compactToolDisplay={appState.compactToolDisplay}
-						liveTaskList={appState.liveTaskList}
-						onToggleCompactDisplay={handleToggleCompactDisplay}
-						pendingSubagentApproval={pendingSubagentApproval}
-						onSubagentToolApproval={handleSubagentToolApproval}
-						pendingToolConfirmation={pendingToolConfirmation}
-						onToolConfirmation={handleToolConfirmation}
-						onSubmit={handleUserSubmit}
-						activeEditor={vscodeServer.activeEditor}
-						onDismissActiveEditor={vscodeServer.dismissActiveEditor}
-						onToggleMode={appHandlers.handleToggleDevelopmentMode}
-						onToggleReasoningExpanded={handleToggleReasoningExpanded}
-						tune={appState.tune}
-						currentModel={appState.currentModel}
+			{/* Footer: modals, input. flexShrink=0 so the chat viewport above
+			    absorbs ALL vertical shrink — without it Yoga crushes the
+			    input box when the transcript is tall. */}
+			<Box flexDirection="column" flexShrink={0}>
+				{appState.planReviewState?.show && (
+					<PlanReviewPrompt
+						onProceed={appHandlers.handlePlanProceed}
+						onAskMore={() => void appHandlers.handlePlanAskMore()}
+						onModify={appHandlers.handlePlanModify}
+						onDismiss={appHandlers.handlePlanModify}
 					/>
 				)}
+
+				{appState.isExplorerMode && (
+					<Box marginLeft={-1} flexDirection="column">
+						<FileExplorer onClose={modeHandlers.handleExplorerCancel} />
+					</Box>
+				)}
+
+				{appState.isIdeSelectionMode && (
+					<Box marginLeft={-1} flexDirection="column">
+						<IdeSelector
+							onSelect={handleIdeSelect}
+							onCancel={modeHandlers.handleIdeSelectionCancel}
+						/>
+					</Box>
+				)}
+
+				{showModalSelectors && (
+					<Box marginLeft={-1} flexDirection="column">
+						<ModalSelectors
+							activeMode={appState.activeMode}
+							isSettingsMode={appState.isSettingsMode}
+							showAllSessions={appState.showAllSessions}
+							currentModel={appState.currentModel}
+							currentProvider={appState.currentProvider}
+							checkpointLoadData={appState.checkpointLoadData}
+							onModelSelect={modeHandlers.handleModelSelect}
+							onModelSelectionCancel={modeHandlers.handleModelSelectionCancel}
+							onModelDatabaseCancel={modeHandlers.handleModelDatabaseCancel}
+							onConfigWizardComplete={modeHandlers.handleConfigWizardComplete}
+							onConfigWizardCancel={modeHandlers.handleConfigWizardCancel}
+							onMcpWizardComplete={modeHandlers.handleMcpWizardComplete}
+							onMcpWizardCancel={modeHandlers.handleMcpWizardCancel}
+							onSettingsCancel={modeHandlers.handleSettingsCancel}
+							tuneConfig={appState.tune}
+							onTuneSelect={modeHandlers.handleTuneSelect}
+							onTuneCancel={modeHandlers.handleTuneCancel}
+							onCheckpointSelect={appHandlers.handleCheckpointSelect}
+							onCheckpointCancel={appHandlers.handleCheckpointCancel}
+							onSessionSelect={sessionId =>
+								void appHandlers.handleSessionSelect(sessionId)
+							}
+							onSessionCancel={appHandlers.handleSessionCancel}
+						/>
+					</Box>
+				)}
+
+				{appState.startChat &&
+					appState.activeMode === null &&
+					!appState.isSettingsMode &&
+					!appState.planReviewState?.show && (
+						<UIStateProvider>
+							<ChatInput
+								isCancelling={appState.isCancelling}
+								isToolExecuting={appState.isToolExecuting}
+								isQuestionMode={appState.isQuestionMode}
+								pendingToolCalls={appState.pendingToolCalls}
+								currentToolIndex={appState.currentToolIndex}
+								pendingQuestion={appState.pendingQuestion}
+								onQuestionAnswer={handleQuestionAnswer}
+								mcpInitialized={appState.mcpInitialized}
+								client={appState.client}
+								customCommands={Array.from(appState.customCommandCache.keys())}
+								inputDisabled={false}
+								onSubmittedDraft={handleSubmittedDraft}
+								restoreSubmittedDraft={restoredDraft}
+								queuedMessages={userMessageQueue.queuedMessages}
+								onQueueMessage={userMessageQueue.enqueueMessage}
+								onRemoveQueuedMessage={userMessageQueue.removeMessage}
+								isBusy={cancellable}
+								developmentMode={appState.developmentMode}
+								contextPercentUsed={appState.contextPercentUsed}
+								contextSource={appState.contextSource}
+								sessionName={appState.sessionName || undefined}
+								compactToolCounts={appState.compactToolCounts}
+								compactToolDisplay={appState.compactToolDisplay}
+								liveTaskList={appState.liveTaskList}
+								onToggleCompactDisplay={handleToggleCompactDisplay}
+								pendingSubagentApproval={pendingSubagentApproval}
+								onSubagentToolApproval={handleSubagentToolApproval}
+								pendingToolConfirmation={pendingToolConfirmation}
+								onToolConfirmation={handleToolConfirmation}
+								onSubmit={handleUserSubmit}
+								activeEditor={vscodeServer.activeEditor}
+								onDismissActiveEditor={vscodeServer.dismissActiveEditor}
+								onToggleMode={appHandlers.handleToggleDevelopmentMode}
+								onToggleReasoningExpanded={handleToggleReasoningExpanded}
+								tune={appState.tune}
+								currentModel={appState.currentModel}
+							/>
+						</UIStateProvider>
+					)}
+			</Box>
 		</Box>
 	);
 }

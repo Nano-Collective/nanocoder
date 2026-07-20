@@ -66,6 +66,9 @@ interface UseAppHandlersProps {
 	customCommandLoader: CustomCommandLoader | null;
 	customCommandExecutor: CustomCommandExecutor | null;
 
+	// Callbacks
+	onClearCounterIncrement?: () => void;
+
 	// State setters
 	updateMessages: (newMessages: Message[]) => void;
 	setIsCancelling: (value: boolean) => void;
@@ -657,6 +660,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					customCommandLoader: props.customCommandLoader,
 					customCommandExecutor: props.customCommandExecutor,
 					onClearMessages: clearMessages,
+					onClearCounterIncrement: props.onClearCounterIncrement,
 					onRenameSession: props.setSessionName,
 					commandArgs,
 					onEnterModelSelectionMode: props.enterModelSelectionMode,

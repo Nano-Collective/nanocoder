@@ -451,6 +451,49 @@ test('atlas-cloud template: uses default provider name when empty', t => {
 	t.is(config.name, 'Atlas Cloud');
 });
 
+test('together template: sets baseUrl and parses models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'together');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'Together AI',
+		apiKey: 'test-key',
+		model: 'deepseek-ai/DeepSeek-V3, meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8',
+	});
+
+	t.is(config.name, 'Together AI');
+	t.is(config.baseUrl, 'https://api.together.ai/v1');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, [
+		'deepseek-ai/DeepSeek-V3',
+		'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8',
+	]);
+});
+
+test('together template: uses default provider name when empty', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'together');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: '',
+		apiKey: 'test-key',
+		model: 'deepseek-ai/DeepSeek-V3',
+	});
+
+	t.is(config.name, 'Together AI');
+});
+
+test('together template: apiKey field is required and sensitive', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'together');
+	t.truthy(template);
+
+	const apiKeyField = template!.fields.find(f => f.name === 'apiKey');
+	t.truthy(apiKeyField);
+	t.is(apiKeyField?.required, true);
+	t.is(apiKeyField?.sensitive, true);
+});
+
 test('requesty template: sets baseUrl, default model, and parses models', t => {
 	const template = PROVIDER_TEMPLATES.find(t => t.id === 'requesty');
 	t.truthy(template);

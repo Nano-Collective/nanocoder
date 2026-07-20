@@ -39,8 +39,9 @@ Hosted services using the OpenAI-compatible API format.
 
 - [OpenRouter](openrouter.md) - Unified API for multiple AI providers
 - [Requesty](requesty.md) - OpenAI-compatible LLM router for multiple AI providers
+- [Together AI](together.md) - Fast inference for open-source models with OpenAI-compatible API
 - [OpenAI](openai.md) - GPT models via OpenAI's API
-- [Mistral AI](mistral.md) - Mistral and Codestral models
+- [Mistral AI](mistral.md) - Mistral models
 - [GitHub Models](github-models.md) - AI models via GitHub's marketplace
 - [Poe](poe.md) - Access multiple AI models through Poe
 - [Atlas Cloud](atlas-cloud.md) - Aggregates 300+ models behind one OpenAI-compatible endpoint

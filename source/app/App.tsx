@@ -1,4 +1,4 @@
-import {Box, Text, useApp} from 'ink';
+import {Box, Text, useApp, useInput} from 'ink';
 import Spinner from 'ink-spinner';
 import React, {useMemo} from 'react';
 import {createStaticComponents} from '@/app/components/app-container';
@@ -59,6 +59,7 @@ export default function App({
 	cliModel,
 	cliMode,
 	trustDirectory = false,
+	altScreenActive = false,
 }: AppProps) {
 	// Resolve the initial development mode with this precedence:
 	// 1. --mode CLI flag (highest priority)
@@ -103,10 +104,35 @@ export default function App({
 	const [extensionPromptComplete, setExtensionPromptComplete] =
 		React.useState(false);
 
+	// Conversation ID to force re-render of all content on /clear
+	const [conversationId, setConversationId] = React.useState(() =>
+		crypto.randomUUID(),
+	);
+
+	// Track whether we should show welcome (reset on /clear to clear banner)
+	const [showWelcome, setShowWelcome] = React.useState(true);
+
+	// Exit WITHOUT unmounting Ink first: the shutdown manager's
+	// 'tui-exit-render' handler (cli.tsx) erases the live region and prints
+	// the farewell — ink's clear() only works while still mounted. A second
+	// Ctrl+C while shutdown is in flight force-quits immediately.
+	const isExitingRef = React.useRef(false);
 	const handleExit = () => {
-		exit();
+		if (isExitingRef.current) {
+			exit();
+			process.exit(0);
+		}
+		isExitingRef.current = true;
 		void getShutdownManager().gracefulShutdown(0);
 	};
+
+	// Ink's built-in exitOnCtrlC is disabled (cli.tsx) so Ctrl+C can run
+	// the same graceful path as /exit instead of abandoning the last frame.
+	useInput((input, key) => {
+		if (key.ctrl && input === 'c') {
+			handleExit();
+		}
+	});
 
 	// VS Code → chat plumbing. The dispatcher is created up front because
 	// useVSCodeServer needs `onPrompt` immediately, and `handleUserSubmit`
@@ -123,24 +149,30 @@ export default function App({
 		onPrompt: vscodePromptDispatcher.handleVSCodePrompt,
 	});
 
-	// Create theme context value
-	const themeContextValue = {
-		currentTheme: appState.currentTheme,
-		colors: getThemeColors(appState.currentTheme),
-		setCurrentTheme: (theme: ThemePreset) => {
-			appState.setCurrentTheme(theme);
-			updateSelectedTheme(theme);
-		},
-	};
+	// Create theme context value (memoized to prevent unnecessary re-renders)
+	const themeContextValue = React.useMemo(
+		() => ({
+			currentTheme: appState.currentTheme,
+			colors: getThemeColors(appState.currentTheme),
+			setCurrentTheme: (theme: ThemePreset) => {
+				appState.setCurrentTheme(theme);
+				updateSelectedTheme(theme);
+			},
+		}),
+		[appState.currentTheme, appState.setCurrentTheme],
+	);
 
-	// Create title shape context value
-	const titleShapeContextValue = {
-		currentTitleShape: appState.currentTitleShape,
-		setCurrentTitleShape: (shape: TitleShape) => {
-			appState.setCurrentTitleShape(shape);
-			updateTitleShape(shape);
-		},
-	};
+	// Create title shape context value (memoized to prevent unnecessary re-renders)
+	const titleShapeContextValue = React.useMemo(
+		() => ({
+			currentTitleShape: appState.currentTitleShape,
+			setCurrentTitleShape: (shape: TitleShape) => {
+				appState.setCurrentTitleShape(shape);
+				updateTitleShape(shape);
+			},
+		}),
+		[appState.currentTitleShape, appState.setCurrentTitleShape],
+	);
 
 	// Initialize global message queue on component mount
 	React.useEffect(() => {
@@ -412,6 +444,17 @@ export default function App({
 		customCommandCache: appState.customCommandCache,
 		customCommandLoader: appState.customCommandLoader,
 		customCommandExecutor: appState.customCommandExecutor,
+		onClearCounterIncrement: () => {
+			// Inline mode: /clear must wipe the real terminal (screen +
+			// native scrollback + home) like Claude Code's classic renderer,
+			// otherwise the old transcript stays above the fresh banner. The
+			// fullscreen path repaints its whole fixed-height frame anyway.
+			if (!altScreenActive && process.stdout.isTTY) {
+				process.stdout.write('\x1B[2J\x1B[3J\x1B[H');
+			}
+			setConversationId(crypto.randomUUID());
+			setShowWelcome(true);
+		},
 		updateMessages: appState.updateMessages,
 		setIsCancelling: appState.setIsCancelling,
 		setDevelopmentMode: appState.setDevelopmentMode,
@@ -490,29 +533,21 @@ export default function App({
 		setCurrentSessionId: appState.setCurrentSessionId,
 	});
 
-	const shouldShowWelcome = !nonInteractiveMode;
-
 	// Memoize static components. We pin the run-mode header to the
 	// initial development mode so it never changes during the run — the
 	// boot line represents what the agent *started* under, not a live
 	// indicator.
-	const staticComponents = React.useMemo(
-		() =>
-			createStaticComponents({
-				shouldShowWelcome,
-				currentProvider: appState.currentProvider,
-				currentModel: appState.currentModel,
-				nonInteractiveMode,
-				developmentMode: initialDevelopmentMode,
-			}),
-		[
-			shouldShowWelcome,
-			appState.currentProvider,
-			appState.currentModel,
+	const initialProvider = React.useRef(appState.currentProvider);
+	const initialModel = React.useRef(appState.currentModel);
+	const staticComponents = React.useMemo(() => {
+		return createStaticComponents({
+			shouldShowWelcome: showWelcome && !nonInteractiveMode,
+			currentProvider: initialProvider.current,
+			currentModel: initialModel.current,
 			nonInteractiveMode,
-			initialDevelopmentMode,
-		],
-	);
+			developmentMode: initialDevelopmentMode,
+		});
+	}, [showWelcome, nonInteractiveMode, initialDevelopmentMode]);
 
 	// Handle loading state for directory trust check
 	if (isTrustLoading) {
@@ -650,32 +685,32 @@ export default function App({
 	return (
 		<ThemeContext.Provider value={themeContextValue}>
 			<TitleShapeContext.Provider value={titleShapeContextValue}>
-				<UIStateProvider>
-					<PrivacyContext.Provider
-						value={{
-							privacyEnabled: getPrivacyPreference(),
-							privacySessionMapRef: appState.privacySessionMapRef,
-						}}
-					>
-						<InteractiveApp
-							appState={appState}
-							chatHandler={chatHandler}
-							modeHandlers={modeHandlers}
-							appHandlers={appHandlers}
-							vscodeServer={vscodeServer}
-							staticComponents={staticComponents}
-							liveComponent={liveComponent}
-							pendingSubagentApproval={pendingSubagentApproval}
-							handleSubagentToolApproval={handleSubagentToolApproval}
-							pendingToolConfirmation={pendingToolConfirmation}
-							handleToolConfirmation={handleToolConfirmation}
-							handleQuestionAnswer={handleQuestionAnswer}
-							handleUserSubmit={handleUserSubmit}
-							userMessageQueue={userMessageQueue}
-							handleIdeSelect={handleIdeSelect}
-						/>
-					</PrivacyContext.Provider>
-				</UIStateProvider>
+				<PrivacyContext.Provider
+					value={{
+						privacyEnabled: getPrivacyPreference(),
+						privacySessionMapRef: appState.privacySessionMapRef,
+					}}
+				>
+					<InteractiveApp
+						altScreenActive={altScreenActive}
+						appState={appState}
+						chatHandler={chatHandler}
+						modeHandlers={modeHandlers}
+						appHandlers={appHandlers}
+						vscodeServer={vscodeServer}
+						staticComponents={staticComponents}
+						clearKey={conversationId}
+						liveComponent={liveComponent}
+						pendingSubagentApproval={pendingSubagentApproval}
+						handleSubagentToolApproval={handleSubagentToolApproval}
+						pendingToolConfirmation={pendingToolConfirmation}
+						handleToolConfirmation={handleToolConfirmation}
+						handleQuestionAnswer={handleQuestionAnswer}
+						handleUserSubmit={handleUserSubmit}
+						userMessageQueue={userMessageQueue}
+						handleIdeSelect={handleIdeSelect}
+					/>
+				</PrivacyContext.Provider>
 			</TitleShapeContext.Provider>
 		</ThemeContext.Provider>
 	);

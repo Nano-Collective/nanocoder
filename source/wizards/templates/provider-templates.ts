@@ -524,6 +524,12 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		baseUrl: 'https://api.atlascloud.ai/v1',
 		apiKeyPrompt: 'API Key (from atlascloud.ai/developer)',
 	}),
+	apiKeyTemplate({
+		id: 'together',
+		name: 'Together AI',
+		baseUrl: 'https://api.together.ai/v1',
+		apiKeyPrompt: 'API Key (from api.together.ai/settings/api-keys)',
+	}),
 	{
 		id: 'custom',
 		name: 'Custom Provider',

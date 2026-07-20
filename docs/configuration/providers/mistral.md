@@ -6,7 +6,7 @@ sidebar_order: 12
 
 # Mistral AI
 
-[Mistral AI](https://mistral.ai) provides high-performance language models including Codestral for code generation.
+[Mistral AI](https://mistral.ai) provides high-performance language models.
 
 ## Configuration
 
