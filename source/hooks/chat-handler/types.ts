@@ -1,5 +1,9 @@
 import type React from 'react';
 import type {CustomCommandLoader} from '@/custom-commands/loader';
+import type {
+	MemoryFinder,
+	ProjectContextOptions,
+} from '@/memory/project-context';
 import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {TuneConfig} from '@/types/config';
@@ -49,6 +53,8 @@ export interface UseChatHandlerProps {
 	subagentsReady?: boolean;
 	privacySessionMapRef?: React.MutableRefObject<Record<string, string>>;
 	privacyEnabled?: boolean;
+	memoryFinder?: MemoryFinder;
+	projectContextOptions?: ProjectContextOptions;
 }
 
 export interface ChatHandlerReturn {
