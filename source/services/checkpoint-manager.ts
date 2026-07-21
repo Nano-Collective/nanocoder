@@ -53,11 +53,22 @@ export class CheckpointManager {
 	}
 
 	/**
-	 * Get the directory path for a specific checkpoint
+	 * Get the directory path for a specific checkpoint.
+	 *
+	 * Every read/mutate method routes through here, so this is the single
+	 * place that guards against a name escaping the checkpoints directory
+	 * (e.g. `../../etc`). The name is validated for unsafe characters and the
+	 * resolved path is checked to stay inside checkpointsDir.
 	 */
-	// nosemgrep
 	private getCheckpointDir(name: string): string {
-		return path.join(this.checkpointsDir, name); // nosemgrep
+		this.validateName(name);
+		const dir = path.join(this.checkpointsDir, name);
+		const base = path.resolve(this.checkpointsDir);
+		const resolved = path.resolve(dir);
+		if (resolved !== base && !resolved.startsWith(base + path.sep)) {
+			throw new Error(`Invalid checkpoint name: '${name}'`);
+		}
+		return dir;
 	}
 
 	/**
