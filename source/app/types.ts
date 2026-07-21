@@ -1,5 +1,6 @@
 import type {Session} from '@/session/session-manager';
 import type {DevelopmentMode} from '@/types/core';
+import type {WebRuntimeBridge} from '@/web/runtime-bridge';
 
 /**
  * Valid user-selectable boot modes. Single source of truth — used by the
@@ -54,6 +55,11 @@ export interface AppProps {
 	 * (activeMode `'sessionSelector'`) as soon as the app mounts.
 	 */
 	openSessionSelectorOnStart?: boolean;
+	/**
+	 * Optional bridge for the localhost browser surface. The normal terminal
+	 * runtime remains the owner of providers, tools, and conversation state.
+	 */
+	webRuntimeBridge?: WebRuntimeBridge;
 }
 
 /**

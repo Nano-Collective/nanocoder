@@ -62,6 +62,7 @@ export default function App({
 	altScreenActive = false,
 	initialSession,
 	openSessionSelectorOnStart = false,
+	webRuntimeBridge,
 }: AppProps) {
 	// Resolve the initial development mode with this precedence:
 	// 1. --mode CLI flag (highest priority)
@@ -255,7 +256,11 @@ export default function App({
 			appState.setCompactToolCounts(null);
 			appState.compactToolCountsRef.current = {};
 			appState.setLiveTaskList(null);
+			webRuntimeBridge?.completeTurn();
 			drainQueuedUserMessage();
+		},
+		onError: error => {
+			webRuntimeBridge?.failTurn(error);
 		},
 		// A turn that started in plan mode finished uninterrupted — a plan was
 		// produced. Flag it so the interactive UI can show the plan review bar.
@@ -489,6 +494,47 @@ export default function App({
 		handleChatMessage: chatHandler.handleChatMessage,
 		dismissActiveEditor: vscodeServer.dismissActiveEditor,
 	});
+	const webRuntimeStateRef = React.useRef({
+		isGenerating: chatHandler.isGenerating,
+		submitMessage: appHandlers.handleMessageSubmit,
+		cancel: appHandlers.handleCancel,
+	});
+	webRuntimeStateRef.current = {
+		isGenerating: chatHandler.isGenerating,
+		submitMessage: appHandlers.handleMessageSubmit,
+		cancel: appHandlers.handleCancel,
+	};
+
+	React.useEffect(() => {
+		if (
+			!webRuntimeBridge ||
+			!isEffectivelyTrusted ||
+			!appState.client ||
+			!appState.toolManager
+		) {
+			return;
+		}
+
+		return webRuntimeBridge.bindRuntimeHandlers({
+			submitMessage: message => {
+				if (webRuntimeStateRef.current.isGenerating) {
+					throw new Error('Nanocoder is already processing a turn.');
+				}
+
+				return webRuntimeStateRef.current.submitMessage(message);
+			},
+			cancel: () => webRuntimeStateRef.current.cancel(),
+		});
+	}, [
+		webRuntimeBridge,
+		isEffectivelyTrusted,
+		appState.client,
+		appState.toolManager,
+	]);
+
+	React.useEffect(() => {
+		webRuntimeBridge?.publishAssistantContent(chatHandler.streamingContent);
+	}, [webRuntimeBridge, chatHandler.streamingContent]);
 
 	// Apply a session resolved by cli.tsx from --continue/--resume <id> (or open
 	// the picker for a bare --resume), once on mount. Reuses the exact same

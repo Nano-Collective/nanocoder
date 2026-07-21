@@ -338,6 +338,43 @@ test('useChatHandler - callbacks are provided', t => {
 	t.is(typeof props.onConversationComplete, 'function');
 });
 
+test('useChatHandler - reports setup failures through the error observer', async t => {
+	let hookResult: ChatHandlerReturn | null = null;
+	const observedErrors: unknown[] = [];
+	const throwingToolManager = {
+		...createMockToolManager(),
+		getToolNames: () => {
+			throw new Error('command prompt failed');
+		},
+	} as NonNullable<UseChatHandlerProps['toolManager']>;
+	const customCommandLoader = {
+		findRelevantCommands: () => [],
+	} as unknown as NonNullable<UseChatHandlerProps['customCommandLoader']>;
+
+	const rendered = render(
+		<TestHookComponent
+			{...createMockProps({
+				client: createMockClient(),
+				toolManager: throwingToolManager,
+				customCommandLoader,
+				onError: error => {
+					observedErrors.push(error);
+				},
+			})}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+
+	await waitForCondition(() => hookResult !== null);
+	await hookResult!.handleChatMessage('current turn');
+
+	t.is(observedErrors.length, 1);
+	t.is((observedErrors[0] as Error).message, 'command prompt failed');
+	rendered.unmount();
+});
+
 test('useChatHandler - drains queued message when setup fails before conversation loop', async t => {
 	type QueueDrainHarnessResult = {
 		chatHandler: ChatHandlerReturn;

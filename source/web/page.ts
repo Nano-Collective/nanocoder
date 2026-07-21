@@ -269,18 +269,80 @@ export function renderWebModePage(): string {
 			background: rgba(245, 242, 235, 0.055);
 			color: #f5f2eb;
 			line-height: 1.5;
-			white-space: pre-wrap;
 			overflow-wrap: anywhere;
 			box-shadow: 0 12px 40px rgba(0, 0, 0, 0.14);
 		}
+		.message:not(.assistant) .message-content {
+			white-space: pre-wrap;
+		}
 		.message.user {
 			align-self: flex-end;
+			width: auto;
+			max-width: min(680px, 85%);
+			border-radius: 16px 16px 4px 16px;
 			background: #f5f2eb;
 			color: #17151d;
 		}
 		.message.assistant {
 			align-self: flex-start;
-			background: rgba(245, 242, 235, 0.08);
+			width: min(820px, 100%);
+			padding: 4px 0 18px;
+			border: 0;
+			background: transparent;
+			box-shadow: none;
+		}
+		.markdown {
+			font-size: 15px;
+			line-height: 1.7;
+		}
+		.markdown > :first-child {
+			margin-top: 0;
+		}
+		.markdown > :last-child {
+			margin-bottom: 0;
+		}
+		.markdown h1,
+		.markdown h2,
+		.markdown h3 {
+			margin: 24px 0 10px;
+			color: var(--tn-text);
+			font-size: 18px;
+			line-height: 1.35;
+		}
+		.markdown p,
+		.markdown ul,
+		.markdown ol,
+		.markdown pre {
+			margin: 0 0 14px;
+		}
+		.markdown p,
+		.markdown li {
+			color: inherit;
+		}
+		.markdown ul,
+		.markdown ol {
+			padding-left: 24px;
+		}
+		.markdown li + li {
+			margin-top: 5px;
+		}
+		.markdown code {
+			border-radius: 4px;
+			background: rgba(125, 207, 255, 0.1);
+			padding: 2px 5px;
+			font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+			font-size: 0.9em;
+		}
+		.markdown pre {
+			overflow-x: auto;
+			border: 1px solid var(--tn-border);
+			border-radius: 8px;
+			background: #12131c;
+			padding: 14px 16px;
+		}
+		.markdown pre code {
+			background: transparent;
+			padding: 0;
 		}
 		.message.system {
 			align-self: center;
@@ -458,6 +520,13 @@ export function renderWebModePage(): string {
 		.send-button:not(:disabled):hover {
 			transform: translateY(-1px);
 			background: #6ee7a1;
+		}
+		.send-button.is-cancel {
+			background: #ff7675;
+			color: #08090b;
+		}
+		.send-button.is-cancel:not(:disabled):hover {
+			background: #ff9493;
 		}
 		.send-button:disabled,
 		textarea:disabled {
@@ -646,10 +715,12 @@ export function renderWebModePage(): string {
 			border-color: var(--tn-border);
 			background: rgba(36, 40, 59, 0.82);
 		}
-		.message.assistant,
 		.message.system,
 		.mode-pill {
 			background: rgba(36, 40, 59, 0.72);
+		}
+		.message.assistant {
+			background: transparent;
 		}
 		.message.system {
 			color: var(--tn-text);
@@ -735,7 +806,7 @@ export function renderWebModePage(): string {
 				</div>
 				<div class="composer-meta">
 					<div class="model-pill">Nanocoder local session</div>
-					<p class="note">Enter sends. Shift+Enter creates a new line.</p>
+					<p class="note" id="composerNote">Enter sends. Shift+Enter creates a new line.</p>
 				</div>
 			</form>
 		</main>
@@ -752,6 +823,7 @@ export function renderWebModePage(): string {
 			const sessionMenuButton = document.querySelector('#sessionMenuButton');
 			const historyButton = document.querySelector('#historyButton');
 			const settingsButton = document.querySelector('#settingsButton');
+			const composerNote = document.querySelector('#composerNote');
 			const threadSearchInput = document.querySelector('#threadSearchInput');
 			const threadButtons = Array.from(document.querySelectorAll('.thread-item'));
 			const token = new URLSearchParams(window.location.search).get('token');
@@ -775,6 +847,8 @@ export function renderWebModePage(): string {
 			];
 			let messageCounter = 0;
 			let storedMessages = [];
+			let activeTurnId = null;
+			let isConnected = false;
 
 		function setStatus(text, state) {
 			statusElement.textContent = text;
@@ -782,8 +856,26 @@ export function renderWebModePage(): string {
 		}
 
 			function setComposerEnabled(isEnabled) {
-				messageInput.disabled = !isEnabled;
+				isConnected = isEnabled;
+				messageInput.disabled = !isEnabled || activeTurnId !== null;
 				sendButton.disabled = !isEnabled;
+			}
+
+			function setActiveTurn(id) {
+				activeTurnId = id;
+				const isActive = id !== null;
+				messageInput.disabled = !isConnected || isActive;
+				sendButton.disabled = !isConnected;
+				sendButton.classList.toggle('is-cancel', isActive);
+				sendButton.textContent = isActive ? '■' : '↑';
+				sendButton.setAttribute(
+					'aria-label',
+					isActive ? 'Cancel response' : 'Send message',
+				);
+				composerNote.textContent = isActive
+					? 'Nanocoder is working. Use the stop button to cancel.'
+					: 'Enter sends. Shift+Enter creates a new line.';
+				newChatButton.disabled = isActive;
 			}
 
 			function readStoredMessages() {
@@ -859,13 +951,116 @@ export function renderWebModePage(): string {
 			emptyState.hidden = true;
 		}
 
+		function appendInlineMarkdown(element, text) {
+			const inlineCodeMarker = String.fromCharCode(96);
+			let remainingText = text;
+
+			while (remainingText) {
+				const strongIndex = remainingText.indexOf('**');
+				const codeIndex = remainingText.indexOf(inlineCodeMarker);
+				const markerIndexes = [strongIndex, codeIndex].filter(index => index >= 0);
+
+				if (markerIndexes.length === 0) {
+					element.append(document.createTextNode(remainingText));
+					return;
+				}
+
+				const markerIndex = Math.min(...markerIndexes);
+				if (markerIndex > 0) {
+					element.append(document.createTextNode(remainingText.slice(0, markerIndex)));
+					remainingText = remainingText.slice(markerIndex);
+				}
+
+				const marker = remainingText.startsWith('**') ? '**' : inlineCodeMarker;
+				const closingIndex = remainingText.indexOf(marker, marker.length);
+				if (closingIndex < 0) {
+					element.append(document.createTextNode(remainingText));
+					return;
+				}
+
+				const inlineElement = document.createElement(marker === '**' ? 'strong' : 'code');
+				inlineElement.textContent = remainingText.slice(marker.length, closingIndex);
+				element.append(inlineElement);
+				remainingText = remainingText.slice(closingIndex + marker.length);
+			}
+		}
+
+		function renderAssistantText(element, text) {
+			element.replaceChildren();
+			const codeFence = String.fromCharCode(96).repeat(3);
+			let codeElement = null;
+			let listElement = null;
+
+			for (const line of text.split('\\n')) {
+				if (line.trim().startsWith(codeFence)) {
+					if (codeElement) {
+						codeElement = null;
+					} else {
+						const preElement = document.createElement('pre');
+						codeElement = document.createElement('code');
+						preElement.append(codeElement);
+						element.append(preElement);
+					}
+					listElement = null;
+					continue;
+				}
+
+				if (codeElement) {
+					codeElement.textContent += (codeElement.textContent ? '\\n' : '') + line;
+					continue;
+				}
+
+				if (!line.trim()) {
+					listElement = null;
+					continue;
+				}
+
+				const headingMatch = /^(#{1,3})\\s+(.*)$/.exec(line);
+				const unorderedMatch = /^[-*]\\s+(.*)$/.exec(line);
+				const orderedMatch = /^\\d+\\.\\s+(.*)$/.exec(line);
+
+				if (headingMatch) {
+					const headingElement = document.createElement('h' + headingMatch[1].length);
+					appendInlineMarkdown(headingElement, headingMatch[2]);
+					element.append(headingElement);
+					listElement = null;
+					continue;
+				}
+
+				const listMatch = unorderedMatch ?? orderedMatch;
+				if (listMatch) {
+					const listTag = unorderedMatch ? 'UL' : 'OL';
+					if (!listElement || listElement.tagName !== listTag) {
+						listElement = document.createElement(listTag.toLowerCase());
+						element.append(listElement);
+					}
+					const itemElement = document.createElement('li');
+					appendInlineMarkdown(itemElement, listMatch[1]);
+					listElement.append(itemElement);
+					continue;
+				}
+
+				const paragraphElement = document.createElement('p');
+				appendInlineMarkdown(paragraphElement, line);
+				element.append(paragraphElement);
+				listElement = null;
+			}
+		}
+
 			function appendMessage(role, text, metaText, shouldStore = true) {
 				hideEmptyState();
 				const messageElement = document.createElement('div');
 				messageElement.className = 'message ' + role;
-			const textElement = document.createElement('div');
-			textElement.textContent = text;
-			messageElement.append(textElement);
+				const textElement = document.createElement('div');
+				textElement.className = 'message-content';
+				if (role === 'assistant') {
+					textElement.classList.add('markdown');
+					textElement.dataset.rawText = text;
+					renderAssistantText(textElement, text);
+				} else {
+					textElement.textContent = text;
+				}
+				messageElement.append(textElement);
 
 			if (metaText) {
 				const metaElement = document.createElement('div');
@@ -934,12 +1129,14 @@ export function renderWebModePage(): string {
 		function appendAssistantDelta(id, text) {
 			let messageElement = assistantMessages.get(id);
 			if (!messageElement) {
-				messageElement = appendMessage('assistant', '', 'Assistant output');
+				messageElement = appendMessage('assistant', '');
 				assistantMessages.set(id, messageElement);
 			}
 
 			const textElement = messageElement.firstElementChild;
-			textElement.textContent += text;
+			const nextText = (textElement.dataset.rawText ?? '') + text;
+			textElement.dataset.rawText = nextText;
+			renderAssistantText(textElement, nextText);
 			messageList.scrollTop = messageList.scrollHeight;
 		}
 
@@ -999,11 +1196,15 @@ export function renderWebModePage(): string {
 			}
 
 			if (message.type === 'turn_completed') {
-				appendMessage('system', 'Turn completed', message.id);
+				if (message.id === activeTurnId) {
+					setActiveTurn(null);
+					messageInput.focus();
+				}
 				return;
 			}
 
 			if (message.type === 'error') {
+				setActiveTurn(null);
 				appendMessage('system error', message.message);
 				return;
 			}
@@ -1012,6 +1213,10 @@ export function renderWebModePage(): string {
 			}
 
 			function submitUserMessage(text) {
+				if (activeTurnId) {
+					return;
+				}
+
 				const trimmedText = text.trim();
 				if (!trimmedText) {
 					return;
@@ -1021,10 +1226,12 @@ export function renderWebModePage(): string {
 				const messageElement = appendMessage('user', trimmedText, 'Sending...');
 				pendingMessages.set(id, messageElement);
 				messageInput.value = '';
+				setActiveTurn(id);
 
 				if (!sendClientEvent({type: 'user_message', id, text: trimmedText})) {
 					updateMessageMeta(messageElement, 'Not sent');
 					pendingMessages.delete(id);
+					setActiveTurn(null);
 				}
 			}
 
@@ -1059,11 +1266,13 @@ export function renderWebModePage(): string {
 			}
 		});
 		socket.addEventListener('close', () => {
+			setActiveTurn(null);
 			setStatus('Disconnected', 'disconnected');
 			setComposerEnabled(false);
 			setEmptyState('Disconnected', 'Restart nanocoder --web to open a fresh local session.');
 		});
 		socket.addEventListener('error', () => {
+			setActiveTurn(null);
 			setStatus('Connection failed', 'failed');
 			setComposerEnabled(false);
 			setEmptyState('Connection failed', 'The browser could not reach the local Nanocoder server.');
@@ -1071,6 +1280,13 @@ export function renderWebModePage(): string {
 
 			messageForm.addEventListener('submit', event => {
 				event.preventDefault();
+				if (activeTurnId) {
+					sendClientEvent({type: 'cancel', id: activeTurnId});
+					sendButton.disabled = true;
+					composerNote.textContent = 'Cancelling the active Nanocoder turn...';
+					return;
+				}
+
 				submitUserMessage(messageInput.value);
 			});
 
