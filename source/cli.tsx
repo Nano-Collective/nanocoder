@@ -71,7 +71,6 @@ Commands:
 Options:
   -v, --version       Show version number
   -h, --help          Show help
-  --web, --gui        Start local browser-based web mode
   --vscode            Run in VS Code mode
   --vscode-port       Specify VS Code port
   --provider          Specify AI provider (must be configured in agents.config.json)
@@ -104,8 +103,6 @@ Options:
 Examples:
   nanocoder --provider openrouter --model google/gemini-3.1-flash run "analyze src/app.ts"
   nanocoder --provider ollama --model llama3.1 --context-max 128k
-  nanocoder --web
-  nanocoder --gui
   nanocoder --mode yolo run "refactor database module"
   nanocoder --mode plan
   nanocoder --trust-directory run "analyze src/app.ts"
@@ -116,28 +113,6 @@ Examples:
   nanocoder --resume
   `);
 	process.exit(0);
-}
-
-if (args.includes('--web') || args.includes('--gui')) {
-	const {startLocalWebServer} = await import('@/web/server');
-	const webServer = await startLocalWebServer();
-
-	console.log('Nanocoder web mode started.');
-	console.log(`Local URL: ${webServer.url}`);
-	console.log('Press Ctrl+C to stop.');
-
-	const shutdown = async () => {
-		await webServer.close();
-		process.exit(0);
-	};
-	process.once('SIGINT', () => {
-		void shutdown();
-	});
-	process.once('SIGTERM', () => {
-		void shutdown();
-	});
-
-	await new Promise<void>(() => {});
 }
 
 // Validate output format value to prevent injection
@@ -312,8 +287,6 @@ async function main(): Promise<void> {
 			} else if (arg === '--plain' || arg === '--no-plain') {
 				continue; // skip this flag
 			} else if (arg === '--no-alt-screen' || arg === '--alt-screen') {
-				continue; // skip this flag
-			} else if (arg === '--web' || arg === '--gui') {
 				continue; // skip this flag
 			} else {
 				promptArgs.push(arg);

@@ -28,8 +28,6 @@ function parsePrompt(args: string[]): string | undefined {
 				continue;
 			} else if (arg === '--plain' || arg === '--no-plain') {
 				continue; // skip this flag
-			} else if (arg === '--web' || arg === '--gui') {
-				continue; // skip this flag
 			} else {
 				promptArgs.push(arg);
 			}
@@ -160,25 +158,6 @@ test('CLI parsing: detects -h flag', t => {
 	const hasHelpFlag = args.includes('--help') || args.includes('-h');
 
 	t.true(hasHelpFlag);
-});
-
-test('CLI parsing: detects --web flag', t => {
-	const args = ['--web'];
-	const hasWebModeFlag = args.includes('--web') || args.includes('--gui');
-
-	t.true(hasWebModeFlag);
-});
-
-test('CLI parsing: detects --gui flag', t => {
-	const args = ['--gui'];
-	const hasWebModeFlag = args.includes('--web') || args.includes('--gui');
-
-	t.true(hasWebModeFlag);
-});
-
-test('CLI parsing: filters --web and --gui from prompt args', t => {
-	t.is(parsePrompt(['run', 'do', '--web', 'a', 'thing']), 'do a thing');
-	t.is(parsePrompt(['run', 'do', '--gui', 'a', 'thing']), 'do a thing');
 });
 
 test('CLI parsing: version flag takes precedence over other arguments', t => {
