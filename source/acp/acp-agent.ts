@@ -97,6 +97,9 @@ export class AcpAgent implements Agent {
 
 		const session = this.registerSession(sessionId, params.cwd);
 
+		await sessionManager.initialize();
+		await this.saveAcpSessionToDisk(session);
+
 		return {
 			sessionId,
 			modes: this.buildModeState(session),
@@ -211,6 +214,9 @@ export class AcpAgent implements Agent {
 			throw error;
 		} finally {
 			session.turnActive = false;
+			await this.saveAcpSessionToDisk(session).catch(err => {
+				logger.error(`Failed to save ACP session ${session.sessionId}: ${err}`);
+			});
 		}
 	}
 
@@ -475,6 +481,51 @@ export class AcpAgent implements Agent {
 		setLastBuiltPrompt(systemContent);
 
 		session.systemMessage = {role: 'system', content: systemContent};
+	}
+
+	private async saveAcpSessionToDisk(session: AcpSession): Promise<void> {
+		try {
+			// First, see if it already exists to preserve createdAt/title
+			let existingSession = undefined;
+			try {
+				existingSession = await sessionManager.loadSession(session.sessionId);
+			} catch (_e) {
+				// Ignore if it doesn't exist yet
+			}
+
+			const timestamp = new Date().toISOString();
+			const config = getAppConfig();
+
+			// We only want user/assistant messages for the title generation/saving
+			const saveableMessages = session.messages.filter(
+				m => m.role === 'user' || m.role === 'assistant',
+			);
+
+			// Simple title generation if it's new
+			let title = existingSession?.title;
+			if (!title || title === 'New Session') {
+				const firstUserMessage = saveableMessages.find(m => m.role === 'user');
+				if (firstUserMessage && typeof firstUserMessage.content === 'string') {
+					title = firstUserMessage.content.split('\n')[0].substring(0, 50);
+				} else {
+					title = 'New Session';
+				}
+			}
+
+			await sessionManager.saveSession({
+				id: session.sessionId,
+				title,
+				createdAt: existingSession?.createdAt || timestamp,
+				lastAccessedAt: timestamp,
+				messageCount: saveableMessages.length,
+				provider: config.providers?.[0]?.name || 'openai',
+				model: config.providers?.[0]?.models?.[0] || 'gpt-4o',
+				workingDirectory: session.cwd,
+				messages: session.messages, // We save the raw AcpSession messages
+			});
+		} catch (error) {
+			logger.error(`Failed to save session to disk: ${error}`);
+		}
 	}
 }
 

@@ -55,8 +55,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 						type: 'file_change',
 						id: payload.toolCallId || block.path, // fallback id
 						filePath: block.path,
-						originalContent: block.before || '',
-						newContent: block.after || '',
+						originalContent: block.oldText || '',
+						newContent: block.newText || '',
 						toolName: update.title || update.name || 'edit',
 						toolArgs: update.rawInput || {}
 					});
@@ -192,14 +192,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				return;
 			}
 
-			// DEBUG: Test the plan review UI without needing the backend
-			if (text.trim() === '!testplan') {
-				this.postMessage({
-					type: 'showPlanReview',
-					description: 'This is a test plan description. The agent proposes creating a new React component and a corresponding CSS file.'
-				} as any);
-				return;
-			}
+
 
 			// Make sure we have a session
 			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];

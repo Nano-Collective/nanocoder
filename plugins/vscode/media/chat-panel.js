@@ -307,9 +307,7 @@
 			case 'permissionRequested':
 				handlePermissionRequested(message.toolCallId, message.toolCall);
 				break;
-			case 'showPlanReview':
-				handlePlanReview(message);
-				break;
+
 			case 'syncState':
 				handleSyncState(message);
 				break;
@@ -761,67 +759,6 @@
 		actionsDiv.appendChild(denyBtn);
 
 		card.appendChild(actionsDiv);
-		scrollToBottom();
-	}
-
-	function handlePlanReview(message) {
-		// Remove any existing plan review card
-		const existing = document.getElementById('plan-review-card');
-		if (existing) existing.remove();
-
-		const card = document.createElement('div');
-		card.className = 'my-4 border-2 border-vscode-button-bg rounded bg-vscode-widget-bg overflow-hidden shrink-0 shadow-md';
-		card.id = 'plan-review-card';
-
-		const header = document.createElement('div');
-		header.className = 'font-vscode font-semibold mb-3 flex items-center px-3 py-2 bg-vscode-button-bg text-vscode-button-fg text-[0.95em]';
-		header.innerHTML = ICONS.clipboard + ' Plan Review';
-
-		const body = document.createElement('div');
-		body.className = 'px-3 py-3 flex flex-col gap-3';
-
-		const desc = document.createElement('div');
-		desc.className = 'text-[0.9em] leading-snug opacity-90';
-		desc.textContent = message.description || 'The agent has generated an implementation plan. How would you like to proceed?';
-
-		const actionsDiv = document.createElement('div');
-		actionsDiv.className = 'flex flex-col gap-2';
-
-		const proceedBtn = document.createElement('button');
-		proceedBtn.className = 'border-none rounded px-3 py-1.5 cursor-pointer font-vscode text-[0.95em] transition-colors text-center w-full bg-vscode-button-bg text-vscode-button-fg hover:bg-vscode-button-hover font-semibold';
-		proceedBtn.textContent = 'Proceed';
-		proceedBtn.onclick = () => {
-			vscode.postMessage({ type: 'proceedPlan' });
-			card.remove();
-		};
-
-		const modifyBtn = document.createElement('button');
-		modifyBtn.className = 'border-none rounded px-3 py-1.5 cursor-pointer font-vscode text-[0.95em] transition-colors text-center w-full bg-vscode-button-secondary text-vscode-fg hover:bg-vscode-button-secondaryHover';
-		modifyBtn.textContent = 'Modify';
-		modifyBtn.onclick = () => {
-			vscode.postMessage({ type: 'modifyPlan' });
-			card.remove();
-		};
-
-		const cancelBtn = document.createElement('button');
-		cancelBtn.className = 'bg-transparent border border-vscode-button-secondary rounded px-3 py-1.5 cursor-pointer font-vscode text-[0.95em] transition-colors text-center w-full text-vscode-fg hover:bg-vscode-button-secondaryHover';
-		cancelBtn.textContent = 'Cancel';
-		cancelBtn.onclick = () => {
-			vscode.postMessage({ type: 'cancelPlan' });
-			card.remove();
-		};
-
-		actionsDiv.appendChild(proceedBtn);
-		actionsDiv.appendChild(modifyBtn);
-		actionsDiv.appendChild(cancelBtn);
-
-		body.appendChild(desc);
-		body.appendChild(actionsDiv);
-
-		card.appendChild(header);
-		card.appendChild(body);
-
-		messagesContainer.appendChild(card);
 		scrollToBottom();
 	}
 
