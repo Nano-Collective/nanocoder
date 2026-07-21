@@ -192,3 +192,21 @@ export function updatePrivacyPreference(value: boolean): void {
 	preferences.enablePromptScrubbing = value;
 	savePreferences(preferences);
 }
+
+/**
+ * Get the alternate-screen (fullscreen) preference. Also settable via
+ * --alt-screen/--no-alt-screen at launch; this is the persisted default.
+ */
+export function getAlternateScreen(): boolean {
+	const preferences = loadPreferences();
+	return preferences.alternateScreen ?? false;
+}
+
+/**
+ * Save the alternate-screen preference
+ */
+export function updateAlternateScreen(value: boolean): void {
+	const preferences = loadPreferences();
+	preferences.alternateScreen = value;
+	savePreferences(preferences);
+}

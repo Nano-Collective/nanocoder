@@ -7,7 +7,7 @@ import type {ActiveMode} from '@/hooks/useAppState';
 import type {CheckpointListItem, TuneConfig} from '@/types';
 import {McpWizard} from '@/wizards/mcp-wizard';
 import {ProviderWizard} from '@/wizards/provider-wizard';
-import {SettingsSelector} from './settings-selector';
+import {SettingsSelector} from './settings-tabs';
 import {TuneSelector} from './tune-selector';
 
 export interface ModalSelectorsProps {

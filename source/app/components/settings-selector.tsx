@@ -30,152 +30,23 @@ import type {NanocoderShape, ThemePreset} from '@/types/ui';
 import {setNotificationsConfig} from '@/utils/notifications';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 
-type SettingsStep =
-	| 'main'
+/**
+ * The set of "managed" settings panels: preserved full-featured sub-UIs that
+ * the tabbed Settings dialog (`settings-tabs.tsx`) opens in place of the old
+ * top-level menu. `main`/`done` no longer exist as panel states — the tab
+ * dialog's own list/header modes replace them.
+ */
+export type ManagedSettingsPanel =
 	| 'theme'
 	| 'title-shape'
 	| 'nanocoder-shape'
 	| 'paste-threshold'
 	| 'notifications'
 	| 'display-settings'
-	| 'privacy'
-	| 'done';
+	| 'privacy';
 
-interface SettingsSelectorProps {
+export interface SettingsSelectorProps {
 	onCancel: () => void;
-}
-
-interface MainMenuItem {
-	label: string;
-	value: SettingsStep;
-	description: string;
-}
-
-// Main settings menu
-function SettingsMainMenu({
-	onSelect,
-	onCancel,
-}: {
-	onSelect: (step: SettingsStep) => void;
-	onCancel: () => void;
-}) {
-	const {colors} = useTheme();
-	const {boxWidth, isNarrow} = useResponsiveTerminal();
-
-	const items: MainMenuItem[] = [
-		{
-			label: 'Theme',
-			value: 'theme',
-			description: 'Change color scheme',
-		},
-		{
-			label: 'Title Shape',
-			value: 'title-shape',
-			description: 'Customize box title styles',
-		},
-		{
-			label: 'Nanocoder Shape',
-			value: 'nanocoder-shape',
-			description: 'Change welcome banner font',
-		},
-		{
-			label: 'Paste Threshold',
-			value: 'paste-threshold',
-			description: 'Set single-line paste character limit',
-		},
-		{
-			label: 'Notifications',
-			value: 'notifications',
-			description: 'Desktop notification preferences',
-		},
-		{
-			label: 'Tool Results and Thinking',
-			value: 'display-settings',
-			description: 'Set defaults for model thoughts and tool results',
-		},
-		{
-			label: 'Privacy',
-			value: 'privacy',
-			description: 'Manage prompt scrubbing and sensitive data',
-		},
-		{
-			label: 'Done',
-			value: 'done',
-			description: 'Exit settings',
-		},
-	];
-
-	useInput((_input, key) => {
-		if (key.escape) {
-			onCancel();
-		}
-	});
-
-	// Narrow terminal: simplified layout (matches Status component pattern)
-	if (isNarrow) {
-		return (
-			<Box
-				flexDirection="column"
-				marginBottom={1}
-				borderStyle="round"
-				borderColor={colors.primary}
-				paddingY={1}
-				paddingX={2}
-				width="100%"
-			>
-				<Text color={colors.primary} bold>
-					Settings
-				</Text>
-				<Text color={colors.text}> </Text>
-				<StyledSelectInput
-					items={items.map(item => ({
-						label: item.label,
-						value: item.value,
-					}))}
-					onSelect={item => {
-						if (item.value === 'done') {
-							onCancel();
-						} else {
-							onSelect(item.value as SettingsStep);
-						}
-					}}
-				/>
-				<Box marginBottom={1}></Box>
-				<Text color={colors.secondary}>Enter/Esc</Text>
-			</Box>
-		);
-	}
-
-	return (
-		<TitledBoxWithPreferences
-			title="Settings"
-			width={boxWidth}
-			borderColor={colors.primary}
-			paddingX={1}
-			paddingY={1}
-			flexDirection="column"
-		>
-			<Box marginBottom={1}>
-				<Text color={colors.secondary}>Select a setting to configure:</Text>
-			</Box>
-			<StyledSelectInput
-				items={items.map(item => ({
-					label: `${item.label} - ${item.description}`,
-					value: item.value,
-				}))}
-				onSelect={item => {
-					if (item.value === 'done') {
-						onCancel();
-					} else {
-						onSelect(item.value as SettingsStep);
-					}
-				}}
-			/>
-			<Box marginTop={1}>
-				<Text color={colors.secondary}>Enter to select, Esc to exit</Text>
-			</Box>
-		</TitledBoxWithPreferences>
-	);
 }
 
 function ThemePreviewMessage({
@@ -290,7 +161,7 @@ function ThemeMiniPreview({
 }
 
 // Theme settings panel
-function SettingsThemePanel({
+export function SettingsThemePanel({
 	onBack,
 	onCancel,
 }: {
@@ -389,7 +260,7 @@ function SettingsThemePanel({
 }
 
 // Title Shape settings panel
-function SettingsTitleShapePanel({
+export function SettingsTitleShapePanel({
 	onBack,
 	onCancel,
 }: {
@@ -561,7 +432,7 @@ function SettingsTitleShapePanel({
 }
 
 // Nanocoder Shape settings panel
-function SettingsNanocoderShapePanel({
+export function SettingsNanocoderShapePanel({
 	onBack,
 	onCancel,
 }: {
@@ -686,7 +557,7 @@ function SettingsNanocoderShapePanel({
 }
 
 // Paste Threshold settings panel
-function SettingsPasteThresholdPanel({
+export function SettingsPasteThresholdPanel({
 	onBack,
 	onCancel,
 }: {
@@ -784,7 +655,7 @@ function SettingsPasteThresholdPanel({
 }
 
 // Notifications settings panel
-function SettingsNotificationsPanel({
+export function SettingsNotificationsPanel({
 	onBack,
 	onCancel,
 }: {
@@ -893,7 +764,7 @@ function SettingsNotificationsPanel({
 }
 
 // Display settings panel
-function SettingsDisplayPanel({
+export function SettingsDisplayPanel({
 	onBack,
 	onCancel,
 }: {
@@ -971,67 +842,8 @@ function SettingsDisplayPanel({
 	);
 }
 
-// Main settings selector with step navigation
-export function SettingsSelector({onCancel}: SettingsSelectorProps) {
-	const [step, setStep] = useState<SettingsStep>('main');
-
-	switch (step) {
-		case 'main':
-			return <SettingsMainMenu onSelect={setStep} onCancel={onCancel} />;
-		case 'theme':
-			return (
-				<SettingsThemePanel
-					onBack={() => setStep('main')}
-					onCancel={onCancel}
-				/>
-			);
-		case 'title-shape':
-			return (
-				<SettingsTitleShapePanel
-					onBack={() => setStep('main')}
-					onCancel={onCancel}
-				/>
-			);
-		case 'nanocoder-shape':
-			return (
-				<SettingsNanocoderShapePanel
-					onBack={() => setStep('main')}
-					onCancel={onCancel}
-				/>
-			);
-		case 'paste-threshold':
-			return (
-				<SettingsPasteThresholdPanel
-					onBack={() => setStep('main')}
-					onCancel={onCancel}
-				/>
-			);
-		case 'notifications':
-			return (
-				<SettingsNotificationsPanel
-					onBack={() => setStep('main')}
-					onCancel={onCancel}
-				/>
-			);
-		case 'display-settings':
-			return (
-				<SettingsDisplayPanel
-					onBack={() => setStep('main')}
-					onCancel={onCancel}
-				/>
-			);
-		case 'privacy':
-			return (
-				<SettingsPrivacyPanel
-					onBack={() => setStep('main')}
-					onCancel={onCancel}
-				/>
-			);
-	}
-}
-
 // Privacy settings panel
-function SettingsPrivacyPanel({
+export function SettingsPrivacyPanel({
 	onBack,
 	onCancel,
 }: {
