@@ -333,11 +333,19 @@ function scheduleActiveEditorSend(): void {
 // Push the current active editor + selection to the CLI. When no editor is
 // active or the document isn't a file on disk, clear the CLI-side state.
 function sendActiveEditor(): void {
+	const editor = vscode.window.activeTextEditor;
+	
+	// 1. Notify the local ACP GUI backend
+	if (acpClient) {
+		acpClient.notifyActiveEditorChanged(editor);
+	}
+
+	// 2. Notify the legacy CLI WebSocket backend
+	// The WebSocket Companion handles editor synchronization for the interactive CLI 'nanocoder'
 	if (!wsClient.isConnected()) {
 		return;
 	}
 
-	const editor = vscode.window.activeTextEditor;
 	const doc = editor?.document;
 	const isFile = doc?.uri.scheme === 'file';
 

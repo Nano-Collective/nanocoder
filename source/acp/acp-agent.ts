@@ -359,8 +359,6 @@ export class AcpAgent implements Agent {
 		const session = this.sessions.get(params.sessionId);
 		if (!session) return;
 		session.activeFile = params.uri;
-		// Store the cursor line as a lightweight context hint.
-		session.activeSelection = `line ${params.position.line}`;
 		logger.info(
 			`ACP didFocusDocument: session=${params.sessionId} uri=${params.uri}`,
 		);
