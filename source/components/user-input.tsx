@@ -311,8 +311,15 @@ export default function UserInput({
 		}
 		if (commandCompletions.length > 0) {
 			setCompletions(commandCompletions);
-			setShowCompletions(true);
-			setSelectedCompletionIndex(0);
+			if (showCompletions) {
+				setSelectedCompletionIndex(prev =>
+					prev >= commandCompletions.length
+						? commandCompletions.length - 1
+						: prev < 0
+							? 0
+							: prev,
+				);
+			}
 		} else if (showCompletions) {
 			setCompletions([]);
 			setShowCompletions(false);
@@ -456,6 +463,16 @@ export default function UserInput({
 
 	// Handle escape key logic
 	const handleEscape = useCallback(() => {
+		if (showCompletions) {
+			setShowCompletions(false);
+			setSelectedCompletionIndex(-1);
+			return;
+		}
+		if (isFileAutocompleteMode) {
+			setIsFileAutocompleteMode(false);
+			setFileCompletions([]);
+			return;
+		}
 		if (showClearMessage) {
 			resetInput();
 			resetUIState();
@@ -466,7 +483,11 @@ export default function UserInput({
 			setShowClearMessage(true);
 		}
 	}, [
+		showCompletions,
+		isFileAutocompleteMode,
 		showClearMessage,
+		setShowCompletions,
+		setSelectedCompletionIndex,
 		resetInput,
 		resetUIState,
 		onDismissActiveEditor,
@@ -715,6 +736,7 @@ export default function UserInput({
 					// Show completions when there are multiple matches
 					setCompletions(commandCompletions);
 					setShowCompletions(true);
+					setSelectedCompletionIndex(0);
 				}
 				return;
 			}
