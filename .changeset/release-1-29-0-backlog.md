@@ -12,6 +12,10 @@
 
 - Added **multiline cursor navigation and word-jump** in the input box. Thanks to @llupRisinglll.
 
+- Added **`--resume` / `--continue` CLI session flags**. `--continue` (`-c`) resumes the most recent session for the current directory, and `--resume [id]` (`-r`) resumes a session by id, list index, or `last`, with a bare `--resume` opening the session picker at startup. Thanks to @llupRisinglll.
+
+- Added a **fuzzy search filter to the `/model` picker**, with a capped, centered scrolling window so large model catalogs no longer overflow the terminal and the current model is preselected. Thanks to @rakshith1928. Closes #683.
+
 - Added **PDF and DOCX support to `read_file`** via get-md, so those documents can be read directly. Thanks to @akramcodez.
 
 - Added a **`doctor` diagnostic command** that checks your setup and reports common configuration problems. Thanks to @Dhirenderchoudhary. Closes #609.
