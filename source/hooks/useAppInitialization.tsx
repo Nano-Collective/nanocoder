@@ -22,6 +22,7 @@ import {validateProjectConfigSecurity} from '@/config/validation';
 import {TIMEOUT_OUTPUT_FLUSH_MS} from '@/constants';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
+import {resolveStartupProvider} from '@/hooks/startup-provider';
 import {getLSPManager, type LSPInitResult} from '@/lsp/index';
 import {
 	setCommandLoaderGetter,
@@ -367,8 +368,28 @@ export function useAppInitialization({
 
 			// Use CLI provider/model if provided, otherwise mode-specific, otherwise preferences
 			const isProgrammatic = !(cliProvider || cliModel) && !!modeConfig;
-			const provider =
-				cliProvider || modeConfig?.provider || preferences.lastProvider;
+			// A saved/mode provider can go stale (renamed or removed from
+			// agents.config.json). Passing it through would make createLLMClient
+			// throw and strand the app on an error screen with no client. Fall
+			// back to the default-provider path with a warning instead. An
+			// explicit --provider CLI arg stays strict: the user asked for that
+			// provider by name, so a hard error is the honest response.
+			const configuredNames = loadAllProviderConfigs().map(p => p.name);
+			const {provider, staleName} = resolveStartupProvider(
+				cliProvider,
+				modeConfig?.provider,
+				preferences.lastProvider,
+				configuredNames,
+			);
+			if (staleName) {
+				addToChatQueue(
+					<WarningMessage
+						key={generateKey('stale-provider')}
+						message={`Saved provider '${staleName}' is not in agents.config.json — falling back to the first configured provider.`}
+						hideBox={true}
+					/>,
+				);
+			}
 			const model = cliModel || modeConfig?.model || undefined;
 			const client = await initializeClient(provider, model, isProgrammatic);
 
@@ -423,6 +444,26 @@ export function useAppInitialization({
 							hideBox={true}
 						/>,
 					);
+				}
+			} else if (
+				error instanceof Error &&
+				error.message.includes('All configured providers failed')
+			) {
+				// Every configured provider failed to initialize. Without a
+				// client the app is unusable, so surface the per-provider
+				// errors and open the provider wizard — the user has to fix
+				// or re-enter a provider either way.
+				addToChatQueue(
+					<ErrorMessage
+						key={generateKey('init-error')}
+						message={error.message}
+						hideBox={true}
+					/>,
+				);
+				if (!nonInteractiveMode) {
+					setTimeout(() => {
+						setActiveMode('configWizard');
+					}, 100);
 				}
 			} else {
 				// Regular error - show simple error message
