@@ -2,6 +2,7 @@ import test from 'ava';
 import {
 	appendProjectContext,
 	appendRelevantProjectContext,
+	appendRelevantProjectContextWithCount,
 	formatProjectContext,
 } from './project-context.js';
 import type {SemanticMemory} from './semantic-memory-manager.js';
@@ -82,6 +83,22 @@ test('appendRelevantProjectContext appends relevant memories', async t => {
 	});
 
 	t.is(prompt, 'base prompt\n\n## Project Context\n\n- Auth uses Clerk.');
+});
+
+test('appendRelevantProjectContextWithCount reports injected memory count', async t => {
+	const result = await appendRelevantProjectContextWithCount(
+		'base prompt',
+		'auth',
+		{
+			findRelevantMemories: async () => [
+				memory('Auth uses Clerk.'),
+				memory('Use adapters.'),
+			],
+		},
+	);
+
+	t.is(result.memoryCount, 2);
+	t.true(result.systemPrompt.includes('## Project Context'));
 });
 
 test('appendRelevantProjectContext passes configured memory limit', async t => {

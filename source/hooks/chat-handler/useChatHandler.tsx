@@ -4,7 +4,7 @@ import {ConversationStateManager} from '@/app/utils/conversation-state';
 import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
 import {CommandIntegration} from '@/custom-commands/command-integration';
-import {appendRelevantProjectContext} from '@/memory/project-context';
+import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {generateKey} from '@/session/key-generator';
 import {getTuneToolMode} from '@/types/config';
@@ -367,13 +367,22 @@ export function useChatHandler({
 				);
 			}
 
-			systemPrompt = await appendRelevantProjectContext(
+			const projectContext = await appendRelevantProjectContextWithCount(
 				systemPrompt,
 				message,
 				projectMemoryFinder,
 				projectContextOptions,
 			);
+			systemPrompt = projectContext.systemPrompt;
 			setLastBuiltPrompt(systemPrompt);
+			if (projectContext.memoryCount > 0) {
+				addToChatQueue(
+					infoMsg(
+						`Recalling ${projectContext.memoryCount} project memor${projectContext.memoryCount === 1 ? 'y' : 'ies'}...`,
+						'memory-recall',
+					),
+				);
+			}
 
 			// Create stream request
 			const systemMessage: Message = {

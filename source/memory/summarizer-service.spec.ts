@@ -5,6 +5,7 @@ import test from 'ava';
 import {SemanticMemoryManager} from './semantic-memory-manager.js';
 import {
 	inferMemoryCategory,
+	type MemoryProposal,
 	SummarizerService,
 	toCamelCaseCategory,
 } from './summarizer-service.js';
@@ -79,4 +80,87 @@ test('toCamelCaseCategory normalizes category names', t => {
 	t.is(toCamelCaseCategory('coding style'), 'codingStyle');
 	t.is(toCamelCaseCategory('BUG-FIX'), 'bugFix');
 	t.is(toCamelCaseCategory(''), 'project');
+});
+
+test('SummarizerService proposes durable memories from messages', t => {
+	const service = new SummarizerService();
+
+	t.deepEqual(
+		service.proposeMemoriesFromMessages([
+			{
+				role: 'system',
+				content: 'You are Nanocoder.',
+			},
+			{
+				role: 'user',
+				content: 'Use the existing provider abstraction for model changes.',
+			},
+			{
+				role: 'assistant',
+				content: 'Fixed the queued input regression by restoring drafts.',
+			},
+			{
+				role: 'tool',
+				content: 'command output',
+				tool_call_id: 'tool-1',
+				name: 'execute_bash',
+			},
+		]),
+		[
+			{
+				content: 'Use the existing provider abstraction for model changes.',
+				category: 'architecture',
+			},
+			{
+				content: 'Fixed the queued input regression by restoring drafts.',
+				category: 'bugFix',
+			},
+		] satisfies MemoryProposal[],
+	);
+});
+
+test('SummarizerService dedupes proposed memories', t => {
+	const service = new SummarizerService();
+
+	t.deepEqual(
+		service.proposeMemoriesFromMessages([
+			{
+				role: 'user',
+				content: 'Refactor the storage path later.',
+			},
+			{
+				role: 'assistant',
+				content: 'Refactor the storage path later.',
+			},
+		]),
+		[
+			{
+				content: 'Refactor the storage path later.',
+				category: 'refactor',
+			},
+		],
+	);
+});
+
+test('SummarizerService proposals do not save memories automatically', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+	const service = new SummarizerService(manager);
+
+	const proposals = service.proposeMemoriesFromMessages([
+		{
+			role: 'user',
+			content: 'TODO delete obsolete project memory later.',
+		},
+	]);
+
+	t.deepEqual(proposals, [
+		{
+			content: 'TODO delete obsolete project memory later.',
+			category: 'todo',
+		},
+	]);
+	t.deepEqual(await manager.listMemories(), []);
 });
