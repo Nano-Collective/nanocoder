@@ -77,8 +77,8 @@ export function activate(context: vscode.ExtensionContext) {
 			outputChannel.appendLine('Manually restarting ACP process...');
 			acpProcessManager.dispose();
 			
-			acpStateManager = new AcpStateManager();
-			acpClient = new NanocoderAcpClient(outputChannel, acpStateManager);
+			// DO NOT recreate acpStateManager or acpClient, as the ChatWebviewProvider
+			// is permanently bound to the original instances.
 			acpProcessManager = new AcpProcessManager(outputChannel, acpStateManager, acpClient);
 			acpProcessManager.start();
 		})
