@@ -3,7 +3,7 @@ import {ClientSideConnection} from '@agentclientprotocol/sdk';
 import {AcpStateManager, ACPStatus} from './acp-state';
 
 // We expect at least the version of the CLI where ACP was introduced
-const MINIMUM_CLI_VERSION = '0.4.0'; // Example baseline
+const MINIMUM_CLI_VERSION = '0.4.0';
 
 export class NanocoderAcpClient {
 	public connection: ClientSideConnection | null = null;
@@ -42,25 +42,25 @@ export class NanocoderAcpClient {
 			}
 		});
 
-		// Workspace context: notify the backend when the user switches active file.
-		vscode.window.onDidChangeActiveTextEditor((editor) => {
-			if (editor && this.connection && this._sessionId) {
-				const uri = editor.document.uri.toString();
-				const cursorPos = editor.selection.active;
-				const visibleRange = editor.visibleRanges[0];
-				const range = visibleRange ?? new vscode.Range(cursorPos, cursorPos);
-				this.connection.unstable_didFocusDocument({
-					sessionId: this._sessionId,
-					uri,
-					version: editor.document.version,
-					position: { line: cursorPos.line, character: cursorPos.character },
-					visibleRange: {
-						start: { line: range.start.line, character: range.start.character },
-						end: { line: range.end.line, character: range.end.character },
-					},
-				}).catch(() => { /* best-effort */ });
-			}
-		});
+	}
+
+	notifyActiveEditorChanged(editor: vscode.TextEditor | undefined) {
+		if (editor && this.connection && this._sessionId) {
+			const uri = editor.document.uri.toString();
+			const cursorPos = editor.selection.active;
+			const visibleRange = editor.visibleRanges[0];
+			const range = visibleRange ?? new vscode.Range(cursorPos, cursorPos);
+			this.connection.unstable_didFocusDocument({
+				sessionId: this._sessionId,
+				uri,
+				version: editor.document.version,
+				position: { line: cursorPos.line, character: cursorPos.character },
+				visibleRange: {
+					start: { line: range.start.line, character: range.start.character },
+					end: { line: range.end.line, character: range.end.character },
+				},
+			}).catch(() => { /* best-effort */ });
+		}
 	}
 
 	hasPendingPermissions(): boolean {
@@ -161,9 +161,16 @@ export class NanocoderAcpClient {
 				if (modelOpt) {
 					this.currentModel = modelOpt.currentValue;
 					
-					// modelOpt.options is either Array<Option> or Array<Group>. We assume Option here for simplicity.
-					// If it's a flat array of Options, they have a 'value'.
-					this.availableModels = (modelOpt.options || []).map((opt: any) => opt.value || opt);
+					this.availableModels = [];
+					for (const opt of modelOpt.options || []) {
+						if (opt.options && Array.isArray(opt.options)) {
+							// It's a group
+							this.availableModels.push(...opt.options.map((o: any) => o.value || o));
+						} else {
+							// It's a flat option
+							this.availableModels.push(opt.value || opt);
+						}
+					}
 				}
 			}
 
@@ -185,7 +192,7 @@ export class NanocoderAcpClient {
 	}
 
 	notifyStateSync() {
-		if (this.onStateSync && this.currentMode && this.currentModel) {
+		if (this.onStateSync && (this.currentMode || this.currentModel)) {
 			this.onStateSync({
 				mode: this.currentMode,
 				availableModes: this.availableModes,
@@ -260,9 +267,14 @@ export class NanocoderAcpClient {
 	}
 
 	private isVersionIncompatible(serverVersion: string): boolean {
-		// A simple semver check could go here. For now, if they have an ACP-capable CLI,
-		// it's likely compatible with the basic initialize(). If we need stricter checks,
-		// we can parse the x.y.z format here.
+		const parseVersion = (v: string) => v.split('.').map(n => parseInt(n, 10) || 0);
+		const [sMajor, sMinor, sPatch] = parseVersion(serverVersion);
+		const [rMajor, rMinor, rPatch] = parseVersion(MINIMUM_CLI_VERSION);
+
+		if (sMajor < rMajor) return true;
+		if (sMajor === rMajor && sMinor < rMinor) return true;
+		if (sMajor === rMajor && sMinor === rMinor && sPatch < rPatch) return true;
+		
 		return false; 
 	}
 
