@@ -105,7 +105,7 @@
 	let currentTurnEl = null;
 	let currentTextEl = null;
 	let currentTurnText = '';
-	let renderFrame = null;
+	let renderTimeout = null;
 	let sessionsData = [];
 	let isHistoryView = false;
 	let isProcessing = false;
@@ -253,13 +253,12 @@
 			currentTurnText += textChunk;
 
 			if (typeof marked !== 'undefined') {
-				if (!renderFrame) {
-					renderFrame = true;
-					setTimeout(() => {
+				if (!renderTimeout) {
+					renderTimeout = setTimeout(() => {
 						if (currentTextEl) {
 							currentTextEl.innerHTML = marked.parse(currentTurnText);
 						}
-						renderFrame = false;
+						renderTimeout = null;
 						scrollToBottom();
 					}, 50); // 50ms throttle (20 updates/sec max) for smoother rendering
 				}
@@ -290,7 +289,7 @@
 				appendMessage(message.content, 'agent');
 				break;
 			case 'clear':
-				if (renderFrame) { cancelAnimationFrame(renderFrame); renderFrame = null; }
+				if (renderTimeout) { clearTimeout(renderTimeout); renderTimeout = null; }
 				messagesContainer.innerHTML = '';
 				currentTurnEl = null;
 				currentTextEl = null;
@@ -480,7 +479,7 @@
 			this.isOpen = true;
 			this.startTime = Date.now();
 			this.text = '';
-			this.renderFrame = null;
+			this.renderTimeout = null;
 
 			this.timer = setInterval(() => this.updateTimer(), 1000);
 
@@ -506,11 +505,10 @@
 		append(chunk) {
 			this.text += chunk;
 			if (typeof marked !== 'undefined') {
-				if (!this.renderFrame) {
-					this.renderFrame = true;
-					setTimeout(() => {
+				if (!this.renderTimeout) {
+					this.renderTimeout = setTimeout(() => {
 						this.body.innerHTML = marked.parse(this.text);
-						this.renderFrame = false;
+						this.renderTimeout = null;
 						scrollToBottom();
 					}, 50);
 				}
@@ -522,11 +520,12 @@
 
 		finish() {
 			clearInterval(this.timer);
-			if (this.renderFrame) {
-				this.renderFrame = false;
-				if (typeof marked !== 'undefined') {
-					this.body.innerHTML = marked.parse(this.text);
-				}
+			if (this.renderTimeout) {
+				clearTimeout(this.renderTimeout);
+				this.renderTimeout = null;
+			}
+			if (typeof marked !== 'undefined') {
+				this.body.innerHTML = marked.parse(this.text);
 			}
 			const seconds = Math.floor((Date.now() - this.startTime) / 1000);
 			this.title.textContent = `Thought for ${seconds}s`;

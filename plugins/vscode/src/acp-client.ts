@@ -5,14 +5,21 @@ import {AcpStateManager, ACPStatus} from './acp-state';
 // We expect at least the version of the CLI where ACP was introduced
 const MINIMUM_CLI_VERSION = '0.4.0';
 
+export interface StateSyncPayload {
+	mode?: string;
+	availableModes: string[];
+	model?: string;
+	availableModels: string[];
+}
+
 export class NanocoderAcpClient {
 	public connection: ClientSideConnection | null = null;
 	private outputChannel: vscode.OutputChannel;
 	private stateManager: AcpStateManager;
 	private _sessionId?: string;
-	public onSessionUpdate?: (update: any) => void;
-	public onPermissionRequested?: (toolCallId: string, toolCall: any) => void;
-	public onStateSync?: (state: any) => void;
+	public onSessionUpdate?: (update: unknown) => void;
+	public onPermissionRequested?: (toolCallId: string, toolCall: unknown) => void;
+	public onStateSync?: (state: StateSyncPayload) => void;
 	public onConnectionReady?: () => void;
 
 	public currentMode?: string;
@@ -20,7 +27,7 @@ export class NanocoderAcpClient {
 	public currentModel?: string;
 	public availableModels: string[] = [];
 
-	private pendingPermissions = new Map<string, (response: any) => void>();
+	private pendingPermissions = new Map<string, (response: unknown) => void>();
 
 	constructor(outputChannel: vscode.OutputChannel, stateManager: AcpStateManager) {
 		this.outputChannel = outputChannel;
@@ -72,11 +79,11 @@ export class NanocoderAcpClient {
 		this._sessionId = undefined; // Clear any stale session to force re-creation
 	}
 
-	async handlePermissionRequest(params: any): Promise<any> {
+	async handlePermissionRequest(params: any): Promise<unknown> {
 		const toolCall = params.toolCall;
 		const toolCallId = toolCall.toolCallId;
 		
-		return new Promise<any>((resolve) => {
+		return new Promise<unknown>((resolve) => {
 			this.pendingPermissions.set(toolCallId, resolve);
 			if (this.onPermissionRequested) {
 				this.onPermissionRequested(toolCallId, toolCall);
@@ -101,11 +108,14 @@ export class NanocoderAcpClient {
 		if (!this.connection) return false;
 
 		try {
+			const ext = vscode.extensions.getExtension('nanocollective.nanocoder-vscode');
+			const version = ext?.packageJSON?.version || '0.3.0';
+
 			// Perform ACP initialize handshake
 			const initResult = await this.connection.initialize({
 				clientInfo: {
 					name: 'Nanocoder VS Code Extension',
-					version: '0.1.0',
+					version: version,
 				},
 				protocolVersion: 1,
 				clientCapabilities: {},
@@ -145,7 +155,7 @@ export class NanocoderAcpClient {
 			// Get VS Code settings for initial preferences
 			const config = vscode.workspace.getConfiguration('nanocoder');
 			const initialMode = config.get<string>('mode') || 'auto-accept';
-			const initialModel = config.get<string>('model') || 'google/gemini-3.5-flash';
+			const initialModel = config.get<string>('model');
 
 			const result = await this.connection.newSession({ cwd, mcpServers: [] });
 			this._sessionId = result.sessionId;
@@ -178,7 +188,7 @@ export class NanocoderAcpClient {
 			if (this.currentMode && this.currentMode !== initialMode && this.availableModes.includes(initialMode)) {
 				await this.setSessionMode(initialMode, false);
 			}
-			if (this.currentModel && this.currentModel !== initialModel && this.availableModels.includes(initialModel)) {
+			if (initialModel && this.currentModel && this.currentModel !== initialModel && this.availableModels.includes(initialModel)) {
 				await this.setSessionModel(initialModel, false);
 			}
 
@@ -307,7 +317,9 @@ export class NanocoderAcpClient {
 		if (!this.connection) return;
 		try {
 			this._sessionId = sessionId;
-			await this.connection.resumeSession({sessionId, cwd: ''});
+			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+			const cwd = workspaceFolder?.uri.fsPath || process.cwd();
+			await this.connection.resumeSession({sessionId, cwd});
 		} catch (error) {
 			this.outputChannel.appendLine(`resumeSession failed: ${error}`);
 			vscode.window.showErrorMessage(`Failed to resume session: ${error}`);

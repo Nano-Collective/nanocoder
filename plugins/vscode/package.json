@@ -112,7 +112,6 @@
 				},
 				"nanocoder.model": {
 					"type": "string",
-					"default": "google/gemini-3.5-flash",
 					"scope": "machine",
 					"description": "The AI model to use for Nanocoder sessions"
 				}
