@@ -78,6 +78,7 @@ export function useChatHandler({
 	developmentModeRef,
 	nonInteractiveMode = false,
 	onConversationComplete,
+	onError,
 	onPlanTurnComplete,
 	reasoningExpandedRef,
 	compactToolDisplayRef,
@@ -262,6 +263,7 @@ export function useChatHandler({
 					},
 				});
 			} catch (error) {
+				onError?.(error);
 				displayError(error, 'chat-error');
 				// Signal completion on error to avoid hanging in non-interactive mode
 				onConversationComplete?.();
@@ -282,6 +284,7 @@ export function useChatHandler({
 			developmentModeRef,
 			nonInteractiveMode,
 			onConversationComplete,
+			onError,
 			reasoningExpandedRef,
 			compactToolDisplayRef,
 			compactToolCountsRef,
@@ -381,6 +384,7 @@ export function useChatHandler({
 				onPlanTurnComplete?.();
 			}
 		} catch (error) {
+			onError?.(error);
 			displayError(error, 'chat-error');
 			onConversationComplete?.();
 		} finally {

@@ -41,3 +41,24 @@ test('web mode messages layer does not block empty-state prompt clicks', t => {
 	t.true(page.includes('.empty-state {'));
 	t.true(page.includes('z-index: 2;'));
 });
+
+test('web mode composer sends cancellation for the active runtime turn', t => {
+	const page = renderWebModePage();
+
+	t.true(page.includes('let activeTurnId = null'));
+	t.true(page.includes("sendClientEvent({type: 'cancel', id: activeTurnId})"));
+	t.true(page.includes("sendButton.classList.toggle('is-cancel', isActive)"));
+	t.true(page.includes("isActive ? 'Cancel response' : 'Send message'"));
+	t.true(page.includes('Nanocoder is working. Use the stop button to cancel.'));
+	t.false(page.includes("appendMessage('system', 'Turn completed'"));
+});
+
+test('web mode renders streamed assistant output as safe markdown', t => {
+	const page = renderWebModePage();
+
+	t.true(page.includes('function renderAssistantText(element, text)'));
+	t.true(page.includes("document.createElement('pre')"));
+	t.true(page.includes("document.createElement('li')"));
+	t.true(page.includes('textElement.dataset.rawText = nextText'));
+	t.false(page.includes("appendMessage('assistant', '', 'Assistant output')"));
+});

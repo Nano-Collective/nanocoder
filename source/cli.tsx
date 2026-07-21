@@ -11,6 +11,7 @@
 // defeating the purpose. Heavy imports live inside `main()` below and are
 // pulled in via dynamic `await import()` only when the app actually boots.
 import nodeModule from 'node:module';
+import type {WebRuntimeBridge} from '@/web/runtime-bridge';
 
 // Enable V8 compile cache (Node 22.8+). After the first run, Node caches
 // bytecode for every module on disk so subsequent launches skip parsing
@@ -24,6 +25,7 @@ const {version} = require('../package.json');
 
 // Parse CLI arguments
 const args = process.argv.slice(2);
+const webMode = args.includes('--web') || args.includes('--gui');
 
 // Handle --version/-v flag — fast path, no heavy imports
 if (args.includes('--version') || args.includes('-v')) {
@@ -116,28 +118,6 @@ Examples:
   nanocoder --resume
   `);
 	process.exit(0);
-}
-
-if (args.includes('--web') || args.includes('--gui')) {
-	const {startLocalWebServer} = await import('@/web/server');
-	const webServer = await startLocalWebServer();
-
-	console.log('Nanocoder web mode started.');
-	console.log(`Local URL: ${webServer.url}`);
-	console.log('Press Ctrl+C to stop.');
-
-	const shutdown = async () => {
-		await webServer.close();
-		process.exit(0);
-	};
-	process.once('SIGINT', () => {
-		void shutdown();
-	});
-	process.once('SIGTERM', () => {
-		void shutdown();
-	});
-
-	await new Promise<void>(() => {});
 }
 
 // Validate output format value to prevent injection
@@ -605,6 +585,38 @@ async function main(): Promise<void> {
 			}) as unknown as NodeJS.ReadStream;
 		}
 
+		let webRuntimeBridge: WebRuntimeBridge | undefined;
+		if (webMode) {
+			const [
+				{createWebRuntimeBridge},
+				{startLocalWebServer},
+				{getShutdownManager},
+			] = await Promise.all([
+				import('@/web/runtime-bridge'),
+				import('@/web/server'),
+				import('@/utils/shutdown'),
+			]);
+			let broadcastEvent: Parameters<typeof createWebRuntimeBridge>[0] =
+				() => {};
+			webRuntimeBridge = createWebRuntimeBridge(event => {
+				broadcastEvent(event);
+			});
+			const webServer = await startLocalWebServer({
+				onClientEvent: webRuntimeBridge.handleClientEvent,
+			});
+			broadcastEvent = webServer.broadcastEvent;
+
+			getShutdownManager().register({
+				name: 'web-server',
+				priority: 10,
+				handler: webServer.close,
+			});
+
+			console.log('Nanocoder web mode started.');
+			console.log(`Local URL: ${webServer.url}`);
+			console.log('Press Ctrl+C to stop.');
+		}
+
 		const result = render(
 			<App
 				vscodeMode={vscodeMode}
@@ -618,6 +630,7 @@ async function main(): Promise<void> {
 				altScreenActive={useAltScreen}
 				initialSession={initialSession}
 				openSessionSelectorOnStart={openSessionSelectorOnStart}
+				webRuntimeBridge={webRuntimeBridge}
 			/>,
 			{
 				// Ctrl+C is handled inside App (routed through the shutdown
