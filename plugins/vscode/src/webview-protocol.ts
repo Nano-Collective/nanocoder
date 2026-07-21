@@ -135,10 +135,7 @@ export interface WebviewMessageCancelPlan {
 	type: 'cancelPlan';
 }
 
-export interface ExtensionMessageShowPlanReview {
-	type: 'showPlanReview';
-	description?: string;
-}
+
 
 export interface WebviewMessageSetMode {
 	type: 'setMode';

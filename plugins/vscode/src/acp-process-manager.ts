@@ -110,9 +110,9 @@ export class AcpProcessManager {
 		if (this.isDisposed || this.stateManager.status === ACPStatus.VersionMismatch) return;
 
 		if (this.retryCount < this.maxRetries) {
+			const delay = this.retryCount === 0 ? 0 : Math.min(1000 * Math.pow(2, this.retryCount - 1), 10000); // Immediate first retry, then backoff
 			this.retryCount++;
 			this.stateManager.setStatus(ACPStatus.Restarting);
-			const delay = Math.min(1000 * Math.pow(2, this.retryCount), 10000); // Exponential backoff max 10s
 			this.outputChannel.appendLine(`ACP process crashed. Restarting in ${delay}ms (attempt ${this.retryCount}/${this.maxRetries})`);
 			
 			setTimeout(() => {

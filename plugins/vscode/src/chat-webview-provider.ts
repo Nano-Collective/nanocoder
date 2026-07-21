@@ -22,7 +22,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 			this.postMessage({
 				type: 'acpUpdate',
 				update
-			} as any);
+			});
 		};
 
 		this._acpClient.onPermissionRequested = (toolCallId: string, toolCall: any) => {
@@ -31,14 +31,14 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				type: 'permissionRequested',
 				toolCallId,
 				toolCall
-			} as any);
+			});
 		};
 
 		this._acpClient.onStateSync = (state: any) => {
 			this.postMessage({
 				type: 'syncState',
 				...state
-			} as any);
+			});
 		};
 
 		this._acpClient.onConnectionReady = () => {
@@ -211,16 +211,16 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 					type: 'agent_thought_chunk',
 					content: '' // Webview can use this as a trigger to show a loading state if desired
 				}
-			} as any);
+			});
 
 			await this._acpClient.prompt(text);
 			// Signal turn completion so the Webview can flip back to the send button
-			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}} as any);
+			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}});
 		} catch (error) {
 			this._outputChannel.appendLine(`Prompt execution error: ${error}`);
 			vscode.window.showErrorMessage(`Nanocoder Prompt error: ${error}`);
 			// Always reset the button even on error
-			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}} as any);
+			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}});
 		}
 	}
 
