@@ -92,14 +92,21 @@ export function extractImagePathFromText(text: string): string | undefined {
  * file in as its path — quoted when it contains spaces — usually mixed in with
  * the user's own prose ("describe '<path>'"). This finds those path tokens,
  * resolves the ones that are real image files, and returns both the resolved
- * paths and the message text with those tokens removed.
+ * paths and the message text with those tokens replaced by `[Image #N]`
+ * placeholders (mirroring the `[Paste #N]` convention). `startIndex` offsets
+ * the numbering past attachments that have no textual token, e.g. clipboard
+ * images pasted with Ctrl+V.
  */
-export function extractImageReferences(text: string): {
+export function extractImageReferences(
+	text: string,
+	startIndex = 0,
+): {
 	text: string;
 	paths: string[];
 } {
 	const paths: string[] = [];
 	const imageExt = '(?:png|jpe?g|gif|webp)';
+	const placeholder = () => `[Image #${startIndex + paths.length}]`;
 
 	// Quoted tokens first — the terminal wraps paths containing spaces in quotes.
 	let result = text.replace(
@@ -108,7 +115,7 @@ export function extractImageReferences(text: string): {
 			const resolved = resolveImagePath(inner);
 			if (resolved) {
 				paths.push(resolved);
-				return '';
+				return placeholder();
 			}
 			return match;
 		},
@@ -126,7 +133,7 @@ export function extractImageReferences(text: string): {
 			const resolved = resolveImagePath(token);
 			if (resolved) {
 				paths.push(resolved);
-				return lead;
+				return lead + placeholder();
 			}
 			return match;
 		},

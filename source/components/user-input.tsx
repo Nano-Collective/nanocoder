@@ -398,9 +398,13 @@ export default function UserInput({
 		let display = currentState.displayValue;
 
 		// Image file paths the user typed, pasted, or dragged into the terminal
-		// (often quoted, mixed in with prose) become attachments and are stripped
-		// from the message text rather than sent as literal paths.
-		const {text: cleanedAssembled, paths} = extractImageReferences(assembled);
+		// (often quoted, mixed in with prose) become attachments; the literal
+		// path in the message text is replaced with an `[Image #N]` placeholder,
+		// numbered after any attachments already added via Ctrl+V.
+		const {text: cleanedAssembled, paths} = extractImageReferences(
+			assembled,
+			attachments.length,
+		);
 		if (paths.length > 0) {
 			const dropped = paths
 				.map(readImageFile)
@@ -408,7 +412,7 @@ export default function UserInput({
 			if (dropped.length > 0) {
 				images = [...attachments, ...dropped];
 				assembled = cleanedAssembled;
-				display = extractImageReferences(display).text;
+				display = extractImageReferences(display, attachments.length).text;
 			}
 		}
 
