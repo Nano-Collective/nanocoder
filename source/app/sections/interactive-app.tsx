@@ -383,6 +383,7 @@ export function InteractiveApp({
 								onToggleReasoningExpanded={handleToggleReasoningExpanded}
 								tune={appState.tune}
 								currentModel={appState.currentModel}
+								fullscreen={fullscreen}
 							/>
 						</UIStateProvider>
 					)}

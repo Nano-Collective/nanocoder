@@ -159,9 +159,11 @@ export const ChatHistory = React.memo(function ChatHistory({
 			{startChat && <ChatQueue {...chatQueueProps} />}
 
 			{liveComponent && (
-				// Inline: Static renders at column 0, so live content shifts -1 to
-				// match. Fullscreen: viewport already starts at column 1 (Static
-				// disabled), so no compensation is needed.
+				// Inline: the live component sits below the absolutely-positioned
+				// <Static>, so it pulls back -1 to share that left edge. Fullscreen:
+				// it renders inside the overflow="hidden" scroll viewport, so it must
+				// stay at the padded column — a negative margin would push it left of
+				// the clip window and Ink would cut off its first character.
 				<Box marginLeft={fullscreen ? 0 : -1} flexDirection="column">
 					<RenderErrorBoundary label="live">
 						{liveComponent}
