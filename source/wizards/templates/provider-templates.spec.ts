@@ -621,3 +621,25 @@ test('anthropic, minimax, and kimi templates set expected sdkProvider values', t
 		'anthropic',
 	);
 });
+
+test('thesean template: sets sdkProvider to anthropic with thesean baseUrl', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'thesean');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'ship-like/claude-opus-4-8');
+
+	const config = template!.buildConfig({
+		apiKey: 'test-key',
+		model: 'ship-like/claude-opus-4-8,ship-like/claude-sonnet-5',
+		providerName: '',
+	});
+
+	t.is(config.sdkProvider, 'anthropic');
+	t.is(config.baseUrl, 'https://api.thesean.ai');
+	t.is(config.name, 'Thesean AI');
+	t.deepEqual(config.models, [
+		'ship-like/claude-opus-4-8',
+		'ship-like/claude-sonnet-5',
+	]);
+});

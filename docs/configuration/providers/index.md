@@ -58,6 +58,7 @@ Use dedicated AI SDK packages for native API support, enabled via the `sdkProvid
 - [ChatGPT / Codex](chatgpt-codex.md) - ChatGPT Codex with browser login
 - [Kimi Code](kimi-code.md) - Kimi's Anthropic-compatible coding API
 - [MiniMax Coding](minimax.md) - MiniMax Anthropic-compatible API
+- [Thesean AI](thesean.md) - Inference-time optimized Claude and GPT models
 
 ## Other
 
@@ -110,7 +111,7 @@ Use dedicated AI SDK packages for native API support, enabled via the `sdkProvid
 |-------|-------------|
 | `openai-compatible` | Default. Works with any OpenAI-compatible API |
 | `google` | Native Google Gemini support via `@ai-sdk/google` |
-| `anthropic` | Native Anthropic support via `@ai-sdk/anthropic`. Also used by Kimi Code and MiniMax |
+| `anthropic` | Native Anthropic support via `@ai-sdk/anthropic`. Also used by Kimi Code, MiniMax, and Thesean AI |
 | `github-copilot` | GitHub Copilot with device OAuth authentication |
 
 ## Environment Variable Overrides

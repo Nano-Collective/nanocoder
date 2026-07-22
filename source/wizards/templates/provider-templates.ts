@@ -513,6 +513,14 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		sdkProvider: 'anthropic',
 	}),
 	apiKeyTemplate({
+		id: 'thesean',
+		name: 'Thesean AI',
+		baseUrl: 'https://api.thesean.ai',
+		apiKeyPrompt: 'API Key (from https://app.thesean.ai/)',
+		modelDefault: 'ship-like/claude-opus-4-8',
+		sdkProvider: 'anthropic',
+	}),
+	apiKeyTemplate({
 		id: 'poe',
 		name: 'Poe',
 		baseUrl: 'https://api.poe.com/v1',
