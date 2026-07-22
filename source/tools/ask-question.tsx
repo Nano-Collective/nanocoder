@@ -106,7 +106,7 @@ const askQuestionCoreTool = tool({
 				type: 'string',
 				enum: ['ambiguity', 'decision', 'confirmation'],
 				description:
-					'Optional. Classifies the question for visual display: ambiguity (❓), decision (🔧), confirmation (✋).',
+					'Optional. Classifies the question: ambiguity, decision, or confirmation.',
 			},
 		},
 		required: ['question', 'options'],
