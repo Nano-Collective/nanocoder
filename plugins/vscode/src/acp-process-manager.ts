@@ -1,19 +1,21 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
+import * as os from 'os';
 import {ClientSideConnection, ndJsonStream} from '@agentclientprotocol/sdk';
 import {AcpStateManager, ACPStatus} from './acp-state';
 import {NanocoderAcpClient} from './acp-client';
-import {findCliPath, promptInstallCli} from './cli-discovery';
+import {findCliPath, promptInstallCli, resolveSpawnEnv} from './cli-discovery';
 
 export class AcpProcessManager {
 	private childProcess: cp.ChildProcess | null = null;
 	private outputChannel: vscode.OutputChannel;
 	private stateManager: AcpStateManager;
 	private acpClient: NanocoderAcpClient;
-	
+
 	private retryCount = 0;
 	private maxRetries = 5;
 	private isDisposed = false;
+	private lastStderr = '';
 
 	constructor(outputChannel: vscode.OutputChannel, stateManager: AcpStateManager, acpClient: NanocoderAcpClient) {
 		this.outputChannel = outputChannel;
@@ -33,12 +35,19 @@ export class AcpProcessManager {
 		}
 
 		this.outputChannel.appendLine(`Starting ACP process: ${cliPath} --acp`);
-		
+
+		// Spawn with the login shell's PATH so the CLI's `#!/usr/bin/env node`
+		// shebang (and the dev-fallback `node`) resolve the same node the user
+		// gets in a terminal, not launchd's - which may be an older install.
+		// Run in the workspace folder: the extension host's own cwd is `/`,
+		// which is unwritable and crashes the CLI's startup (.nanocoder dir).
+		const env = await resolveSpawnEnv();
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
 		if (cliPath.startsWith('node ')) {
 			const scriptPath = cliPath.substring(5);
-			this.childProcess = cp.spawn('node', [scriptPath, '--acp'], { shell: false });
+			this.childProcess = cp.spawn('node', [scriptPath, '--acp'], { shell: false, env, cwd });
 		} else {
-			this.childProcess = cp.spawn(cliPath, ['--acp'], { shell: false });
+			this.childProcess = cp.spawn(cliPath, ['--acp'], { shell: false, env, cwd });
 		}
 
 		if (!this.childProcess.stdout || !this.childProcess.stdin) {
@@ -47,21 +56,31 @@ export class AcpProcessManager {
 			return;
 		}
 
-		// Log stderr from the CLI for debugging
+		// Log stderr from the CLI for debugging; keep a tail for error dialogs
 		this.childProcess.stderr?.on('data', (data) => {
-			this.outputChannel.append(`[CLI stderr] ${data.toString()}`);
+			const text = data.toString();
+			this.outputChannel.append(`[CLI stderr] ${text}`);
+			this.lastStderr = (this.lastStderr + text).slice(-500);
 		});
 
-		this.childProcess.on('error', (err) => {
-			this.outputChannel.appendLine(`ACP process error: ${err.message}`);
+		// A single child can fail in several ways (spawn error, exit, failed
+		// handshake) - count it as one crash so retries aren't double-burned.
+		const child = this.childProcess;
+		let crashReported = false;
+		const reportCrash = () => {
+			if (crashReported || this.isDisposed) return;
+			crashReported = true;
 			this.handleCrash();
+		};
+
+		child.on('error', (err) => {
+			this.outputChannel.appendLine(`ACP process error: ${err.message}`);
+			reportCrash();
 		});
 
-		this.childProcess.on('exit', (code, signal) => {
+		child.on('exit', (code, signal) => {
 			this.outputChannel.appendLine(`ACP process exited with code ${code} signal ${signal}`);
-			if (!this.isDisposed) {
-				this.handleCrash();
-			}
+			reportCrash();
 		});
 
 		// Create Web Streams from Node.js streams
@@ -101,8 +120,10 @@ export class AcpProcessManager {
 		if (initialized) {
 			this.retryCount = 0; // Reset retries on successful connection
 		} else if (this.stateManager.status !== ACPStatus.VersionMismatch) {
-			// If it failed to initialize but not due to a version mismatch, treat as crash
-			this.handleCrash();
+			// Failed handshake: kill the child (it may still be alive) and
+			// count one crash - the exit event is absorbed by reportCrash's guard.
+			child.kill();
+			reportCrash();
 		}
 	}
 
@@ -121,7 +142,10 @@ export class AcpProcessManager {
 		} else {
 			this.stateManager.setStatus(ACPStatus.Disconnected);
 			this.outputChannel.appendLine('Max retries reached. ACP process will not restart automatically.');
-			vscode.window.showErrorMessage('Nanocoder CLI crashed repeatedly and could not be restarted. Please check the output logs.');
+			const lastError = this.lastStderr.trim().split('\n').pop();
+			vscode.window.showErrorMessage(
+				`Nanocoder CLI crashed repeatedly and could not be restarted.${lastError ? ` Last error: ${lastError}` : ''} See the Nanocoder output channel for details.`
+			);
 		}
 	}
 
