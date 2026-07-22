@@ -115,18 +115,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 						this._outputChannel.appendLine(`[Webview] User requested to see diff for: ${message.toolCallId}`);
 						this._diffManager.showDiff(message.toolCallId);
 						break;
-					case 'proceedPlan':
-						this._outputChannel.appendLine('[Webview] User clicked Proceed on plan.');
-						this._acpClient.proceedPlan();
-						break;
-					case 'modifyPlan':
-						this._outputChannel.appendLine('[Webview] User clicked Modify on plan.');
-						this._acpClient.modifyPlan();
-						break;
-					case 'cancelPlan':
-						this._outputChannel.appendLine('[Webview] User clicked Cancel on plan review.');
-						this._acpClient.cancelPlan();
-						break;
+
 					case 'setMode':
 						this._outputChannel.appendLine(`[Webview] User selected mode: ${message.mode}`);
 						this._acpClient.setSessionMode(message.mode);
