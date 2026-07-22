@@ -107,12 +107,21 @@ export default function AgentProgress({
 			</Box>
 
 			{!isComplete && (
-				<Box>
-					<Text color={colors.secondary}>
-						{toolCallCount > 0 ? `${toolCallCount} tool calls` : ''}
-						{toolCallCount > 0 && tokenCount > 0 ? ' · ' : ''}
-						{tokenCount > 0 ? `~${tokenCount.toLocaleString()} tokens` : ''}
-					</Text>
+				<Box flexDirection="column">
+					<Box>
+						<Text color={colors.secondary}>
+							{toolCallCount > 0 ? `${toolCallCount} tool calls` : ''}
+							{toolCallCount > 0 && tokenCount > 0 ? ' · ' : ''}
+							{tokenCount > 0 ? `~${tokenCount.toLocaleString()} tokens` : ''}
+						</Text>
+					</Box>
+					{agentId && (
+						<Box>
+							<Text color={colors.secondary} italic>
+								Press Ctrl+S to attach to session
+							</Text>
+						</Box>
+					)}
 				</Box>
 			)}
 

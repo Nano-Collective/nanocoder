@@ -135,6 +135,9 @@ export function useAppState(
 	// can rebuild with the real agent list instead of "No subagents available."
 	const [subagentsReady, setSubagentsReady] = useState<boolean>(false);
 
+	// Track which subagent (if any) the user is currently attached to for interactive debugging
+	const [attachedAgentId, setAttachedAgentId] = useState<string | null>(null);
+
 	// Set to preference on launch, but can be toggled freely during runtime
 	const [reasoningExpanded, setReasoningExpanded] = useState<boolean>(
 		preferences.reasoningExpanded ?? false,
@@ -378,6 +381,7 @@ export function useAppState(
 		currentToolIndex,
 		chatComponents,
 		tokenizer,
+		attachedAgentId,
 
 		// Setters
 		setClient,
@@ -433,6 +437,7 @@ export function useAppState(
 		liveComponent,
 		setLiveComponent,
 		privacySessionMapRef,
+		setAttachedAgentId,
 
 		// Utilities
 		addToChatQueue,
