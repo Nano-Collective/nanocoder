@@ -3,7 +3,7 @@
 
 import {createGlobalHandlerSlot} from '@/utils/global-handler-slot';
 
-/** Discriminates the visual style and badge of a question. */
+/** Classifies a question: ambiguity, decision, or confirmation. */
 export type QuestionType = 'ambiguity' | 'decision' | 'confirmation';
 
 /** Rich metadata for a single option (used for pros/cons display). */
