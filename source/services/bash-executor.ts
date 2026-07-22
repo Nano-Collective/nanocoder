@@ -1,6 +1,9 @@
 import {type ChildProcess, spawn} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {EventEmitter} from 'node:events';
+import {existsSync, readFileSync, unlinkSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {platform} from 'node:process';
 
 import {
@@ -9,6 +12,7 @@ import {
 	INTERVAL_BASH_PROGRESS_MS,
 	TIMEOUT_BASH_DEFAULT_MS,
 } from '@/constants';
+import {getSafeSessionCwd, setSessionCwd} from './session-cwd.js';
 
 const isWindows = platform === 'win32';
 
@@ -31,6 +35,7 @@ interface ExecutionEntry {
 	timeoutId?: NodeJS.Timeout;
 	signal?: AbortSignal;
 	abortListener?: () => void;
+	cwdCaptureFile?: string;
 }
 
 export class BashExecutor extends EventEmitter {
@@ -56,13 +61,45 @@ export class BashExecutor extends EventEmitter {
 			error: null,
 		};
 
+		// Share the session cwd so bash and the file tools agree on relative paths.
+		const cwd = getSafeSessionCwd();
+
+		// Capture the shell's final dir to a temp file (not stdout, keeping output
+		// clean) so `cd` persists to later commands and the file tools. Unix only.
+		const cwdCaptureFile = isWindows
+			? undefined
+			: join(tmpdir(), `nanocoder-cwd-${executionId}`);
+		const spawnCommand =
+			cwdCaptureFile === undefined
+				? command
+				: `${command}\n__nc_ec=$?\ncommand pwd -P > '${cwdCaptureFile}' 2>/dev/null\nexit $__nc_ec`;
+
 		const proc = isWindows
-			? spawn('cmd', ['/c', command])
+			? spawn('cmd', ['/c', command], {cwd})
 			: // `detached` makes the child a process-group leader so cancel() can
 				// signal the whole tree (e.g. `pnpm test` -> node -> test runner),
 				// not just the `sh` wrapper. Without it a cancelled command's
 				// children keep running in the background.
-				spawn('sh', ['-c', command], {detached: true});
+				spawn('sh', ['-c', spawnCommand], {cwd, detached: true});
+
+		// Best-effort: a missed capture just leaves the cwd where it was.
+		const applyCapturedCwd = () => {
+			if (!cwdCaptureFile) return;
+			try {
+				if (existsSync(cwdCaptureFile)) {
+					const captured = readFileSync(cwdCaptureFile, 'utf8').trim();
+					if (captured) setSessionCwd(captured);
+				}
+			} catch {
+				// Non-fatal: leave the session cwd where it was.
+			} finally {
+				try {
+					if (existsSync(cwdCaptureFile)) unlinkSync(cwdCaptureFile);
+				} catch {
+					// best-effort cleanup
+				}
+			}
+		};
 
 		let outputBytes = 0;
 		let outputTruncated = false;
@@ -119,6 +156,7 @@ export class BashExecutor extends EventEmitter {
 				intervalId,
 				resolve,
 				signal: options?.signal,
+				cwdCaptureFile,
 			};
 
 			const ms = options?.timeoutMs ?? TIMEOUT_BASH_DEFAULT_MS;
@@ -153,6 +191,8 @@ export class BashExecutor extends EventEmitter {
 				// Only process if not already handled by cancel()
 				if (!this.executions.has(executionId)) return;
 
+				// Persist `cd` only on a real completion, not a cancel/timeout.
+				applyCapturedCwd();
 				clearInterval(intervalId);
 				state.isComplete = true;
 				state.exitCode = code;
@@ -170,6 +210,7 @@ export class BashExecutor extends EventEmitter {
 				// Only process if not already handled by cancel()
 				if (!this.executions.has(executionId)) return;
 
+				applyCapturedCwd();
 				clearInterval(intervalId);
 				state.isComplete = true;
 				state.error = error.message;
@@ -201,6 +242,16 @@ export class BashExecutor extends EventEmitter {
 		execution.process.stdin?.destroy();
 
 		this.killProcessTree(execution.process);
+		// Drop the cwd temp file; a killed command must not move the session cwd.
+		if (execution.cwdCaptureFile) {
+			try {
+				if (existsSync(execution.cwdCaptureFile)) {
+					unlinkSync(execution.cwdCaptureFile);
+				}
+			} catch {
+				// best-effort cleanup
+			}
+		}
 		execution.state.isComplete = true;
 		execution.state.error = reason;
 		this.emit('complete', {...execution.state});
