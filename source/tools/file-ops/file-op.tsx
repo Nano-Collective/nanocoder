@@ -2,6 +2,7 @@ import {constants, existsSync} from 'node:fs';
 import {access, copyFile, mkdir, rename, rm, stat} from 'node:fs/promises';
 import {dirname, resolve} from 'node:path';
 import {makeSimpleToolFormatter} from '@/components/simple-tool-formatter';
+import {getSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {invalidateCache} from '@/utils/file-cache';
@@ -22,7 +23,7 @@ const executeFileOp = async (args: FileOpArgs): Promise<string> => {
 	const {operation} = args;
 
 	if (operation === 'mkdir') {
-		const absPath = resolve(args.path as string);
+		const absPath = resolve(getSessionCwd(), args.path as string);
 		const alreadyExists = existsSync(absPath);
 		await mkdir(absPath, {recursive: true});
 		return alreadyExists
@@ -31,7 +32,7 @@ const executeFileOp = async (args: FileOpArgs): Promise<string> => {
 	}
 
 	if (operation === 'delete') {
-		const absPath = resolve(args.path as string);
+		const absPath = resolve(getSessionCwd(), args.path as string);
 		const fileStat = await stat(absPath);
 		if (fileStat.isDirectory()) {
 			return `Error: "${args.path}" is a directory. Use execute_bash with rm -r for directory removal.`;
@@ -42,8 +43,8 @@ const executeFileOp = async (args: FileOpArgs): Promise<string> => {
 	}
 
 	// move | copy
-	const srcAbsPath = resolve(args.path as string);
-	const destAbsPath = resolve(args.destination as string);
+	const srcAbsPath = resolve(getSessionCwd(), args.path as string);
+	const destAbsPath = resolve(getSessionCwd(), args.destination as string);
 
 	if (operation === 'move') {
 		await rename(srcAbsPath, destAbsPath);
@@ -126,7 +127,7 @@ const fileOpValidator = async (
 		const pathResult = validatePath(args.path);
 		if (!pathResult.valid) return pathResult;
 
-		const absPath = resolve(args.path);
+		const absPath = resolve(getSessionCwd(), args.path);
 		try {
 			await access(absPath, constants.F_OK);
 		} catch {
@@ -147,7 +148,7 @@ const fileOpValidator = async (
 	const pairResult = validatePathPair(args.path, args.destination);
 	if (!pairResult.valid) return pairResult;
 
-	const srcAbsPath = resolve(args.path);
+	const srcAbsPath = resolve(getSessionCwd(), args.path);
 	try {
 		await access(srcAbsPath, constants.F_OK);
 	} catch {
@@ -165,7 +166,7 @@ const fileOpValidator = async (
 		};
 	}
 
-	const parentDir = dirname(resolve(args.destination));
+	const parentDir = dirname(resolve(getSessionCwd(), args.destination));
 	try {
 		await access(parentDir, constants.F_OK);
 	} catch {

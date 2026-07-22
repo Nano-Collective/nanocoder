@@ -1,3 +1,4 @@
+import {getSessionCwd} from '@/services/session-cwd';
 import {formatError} from '@/utils/error-formatter';
 import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
 
@@ -15,7 +16,7 @@ export function validatePath(path: string): ValidationResult {
 	}
 
 	try {
-		const cwd = process.cwd();
+		const cwd = getSessionCwd();
 		resolveFilePath(path, cwd);
 	} catch (error) {
 		const errorMessage = formatError(error);
@@ -50,7 +51,7 @@ export function validatePathPair(
 	}
 
 	try {
-		const cwd = process.cwd();
+		const cwd = getSessionCwd();
 		resolveFilePath(source, cwd);
 		resolveFilePath(destination, cwd);
 	} catch (error) {

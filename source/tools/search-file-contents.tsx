@@ -4,6 +4,7 @@ import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
+import {getSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -31,7 +32,7 @@ const executeSearchFileContents = async (
 		return 'Error: Search query cannot be empty';
 	}
 
-	const cwd = process.cwd();
+	const cwd = getSessionCwd();
 	const maxResults = Math.min(
 		args.maxResults || DEFAULT_SEARCH_RESULTS,
 		MAX_SEARCH_RESULTS,
