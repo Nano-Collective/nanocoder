@@ -45,7 +45,9 @@ export interface PlainInitOptions {
 export async function initializePlain(
 	options: PlainInitOptions = {},
 ): Promise<PlainInitResult> {
-	void clearAllTasks();
+	// Fire-and-forget; must not crash the process when cwd is unwritable
+	// (e.g. ACP spawned by an editor with cwd=/)
+	clearAllTasks().catch(() => {});
 
 	const toolManager = new ToolManager();
 	const customCommandLoader = new CustomCommandLoader();
