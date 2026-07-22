@@ -8,6 +8,11 @@ export interface ProjectContextOptions {
 	tokenBudget?: number;
 }
 
+export interface ProjectContextResult {
+	systemPrompt: string;
+	memoryCount: number;
+}
+
 const DEFAULT_MEMORY_LIMIT = 8;
 const DEFAULT_TOKEN_BUDGET = 240;
 
@@ -19,7 +24,14 @@ export function formatProjectContext(
 	memories: SemanticMemory[],
 	options: ProjectContextOptions = {},
 ): string {
-	if (memories.length === 0) return '';
+	return formatProjectContextWithCount(memories, options).content;
+}
+
+function formatProjectContextWithCount(
+	memories: SemanticMemory[],
+	options: ProjectContextOptions = {},
+): {content: string; memoryCount: number} {
+	if (memories.length === 0) return {content: '', memoryCount: 0};
 
 	const tokenBudget = options.tokenBudget ?? DEFAULT_TOKEN_BUDGET;
 	const bullets: string[] = [];
@@ -34,9 +46,12 @@ export function formatProjectContext(
 		usedTokens += bulletTokens;
 	}
 
-	if (bullets.length === 0) return '';
+	if (bullets.length === 0) return {content: '', memoryCount: 0};
 
-	return `## Project Context\n\n${bullets.join('\n')}`;
+	return {
+		content: `## Project Context\n\n${bullets.join('\n')}`,
+		memoryCount: bullets.length,
+	};
 }
 
 export function appendProjectContext(
@@ -44,7 +59,10 @@ export function appendProjectContext(
 	memories: SemanticMemory[],
 	options?: ProjectContextOptions,
 ): string {
-	const projectContext = formatProjectContext(memories, options);
+	const projectContext = formatProjectContextWithCount(
+		memories,
+		options,
+	).content;
 	if (!projectContext) return systemPrompt;
 
 	return `${systemPrompt}\n\n${projectContext}`;
@@ -56,16 +74,38 @@ export async function appendRelevantProjectContext(
 	memoryFinder: MemoryFinder = new SemanticMemoryManager(),
 	options: ProjectContextOptions = {},
 ): Promise<string> {
-	try {
-		return appendProjectContext(
+	return (
+		await appendRelevantProjectContextWithCount(
 			systemPrompt,
+			query,
+			memoryFinder,
+			options,
+		)
+	).systemPrompt;
+}
+
+export async function appendRelevantProjectContextWithCount(
+	systemPrompt: string,
+	query: string,
+	memoryFinder: MemoryFinder = new SemanticMemoryManager(),
+	options: ProjectContextOptions = {},
+): Promise<ProjectContextResult> {
+	try {
+		const projectContext = formatProjectContextWithCount(
 			await memoryFinder.findRelevantMemories(
 				query,
 				options.memoryLimit ?? DEFAULT_MEMORY_LIMIT,
 			),
 			options,
 		);
+
+		if (!projectContext.content) return {systemPrompt, memoryCount: 0};
+
+		return {
+			systemPrompt: `${systemPrompt}\n\n${projectContext.content}`,
+			memoryCount: projectContext.memoryCount,
+		};
 	} catch {
-		return systemPrompt;
+		return {systemPrompt, memoryCount: 0};
 	}
 }

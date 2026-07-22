@@ -1,3 +1,4 @@
+import type {Message} from '@/types/core';
 import {
 	type SemanticMemory,
 	SemanticMemoryManager,
@@ -7,6 +8,11 @@ export interface RememberMemoryInput {
 	content: string;
 	category?: string;
 	sourceSessionId?: string;
+}
+
+export interface MemoryProposal {
+	content: string;
+	category: string;
 }
 
 const CATEGORY_RULES: Array<{category: string; pattern: RegExp}> = [
@@ -50,6 +56,26 @@ export class SummarizerService {
 			sourceSessionId: input.sourceSessionId,
 		});
 	}
+
+	proposeMemoriesFromMessages(messages: Message[]): MemoryProposal[] {
+		const proposals = new Map<string, MemoryProposal>();
+
+		for (const message of messages) {
+			if (message.role !== 'user' && message.role !== 'assistant') continue;
+
+			for (const candidate of splitMemoryCandidates(message.content)) {
+				const category = inferMemoryCategory(candidate);
+				if (category === 'project') continue;
+
+				const key = candidate.toLowerCase();
+				if (!proposals.has(key)) {
+					proposals.set(key, {content: candidate, category});
+				}
+			}
+		}
+
+		return [...proposals.values()];
+	}
 }
 
 export function inferMemoryCategory(content: string): string {
@@ -74,4 +100,11 @@ export function toCamelCaseCategory(value: string): string {
 			index === 0 ? part : `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`,
 		)
 		.join('');
+}
+
+function splitMemoryCandidates(content: string): string[] {
+	return content
+		.split(/\n+/u)
+		.map(part => part.trim())
+		.filter(part => part.length >= 12 && part.length <= 300);
 }

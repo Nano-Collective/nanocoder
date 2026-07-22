@@ -419,6 +419,7 @@ test('useChatHandler - drains queued message when setup fails before conversatio
 test('useChatHandler - injects project context from memory finder', async t => {
 	let hookResult: ChatHandlerReturn | null = null;
 	let sentMessages: Message[] = [];
+	const queuedComponents: React.ReactNode[] = [];
 	const client: LLMClient = {
 		...createMockClient(),
 		chat: async (messages, _tools, callbacks) => {
@@ -440,6 +441,9 @@ test('useChatHandler - injects project context from memory finder', async t => {
 	const props = createMockProps({
 		client,
 		toolManager: createMockToolManager(),
+		addToChatQueue: component => {
+			queuedComponents.push(component);
+		},
 		memoryFinder: {
 			findRelevantMemories: async (query, limit) => {
 				t.is(query, 'refactor auth');
@@ -472,6 +476,13 @@ test('useChatHandler - injects project context from memory finder', async t => {
 	t.true(
 		sentMessages[0].content.includes(
 			'- Auth uses Clerk and avoids middleware.',
+		),
+	);
+	t.true(
+		queuedComponents.some(
+			component =>
+				React.isValidElement(component) &&
+				component.props.message === 'Recalling 1 project memory...',
 		),
 	);
 	rendered.unmount();
