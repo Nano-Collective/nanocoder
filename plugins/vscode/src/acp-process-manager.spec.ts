@@ -9,7 +9,6 @@ test('AcpProcessManager - restart logic and retry backoff', (t) => {
 	const stateManager = new AcpStateManager();
 	const acpClient = { 
 		connection: null,
-		rebindClient: () => {},
 		initializeHandshake: async () => true,
 		dispose: () => {}
 	} as any as NanocoderAcpClient;

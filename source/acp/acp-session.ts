@@ -18,8 +18,6 @@ export class AcpSession {
 	turnActive = false;
 	/** URI of the file currently focused in the editor client (e.g. VS Code). */
 	activeFile?: string;
-	/** Currently selected text in the editor client, if any. */
-	activeSelection?: string;
 
 	constructor(options: {
 		sessionId: string;

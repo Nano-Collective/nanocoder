@@ -326,17 +326,4 @@ export class NanocoderAcpClient {
 		}
 	}
 
-	async proceedPlan(): Promise<void> {
-		this.outputChannel.appendLine('ACP: proceedPlan requested. (TODO: Forward plan approval to server)');
-		// TODO: Implement the correct ACP interaction for Proceed in Plan Mode.
-	}
-
-	async modifyPlan(): Promise<void> {
-		this.outputChannel.appendLine('ACP: modifyPlan requested. (TODO: Forward refinement to server)');
-	}
-
-	async cancelPlan(): Promise<void> {
-		this.outputChannel.appendLine('ACP: cancelPlan requested.');
-		this.cancel();
-	}
 }

@@ -164,10 +164,7 @@ export class AcpAgent implements Agent {
 		// the model always knows what the user is looking at.
 		let contextualUserText = userText;
 		if (session.activeFile) {
-			const selectionPart = session.activeSelection
-				? `\n\nSelected text:\n\`\`\`\n${session.activeSelection}\n\`\`\``
-				: '';
-			contextualUserText = `[Active file: ${session.activeFile}${selectionPart}]\n\n${userText}`;
+			contextualUserText = `[Active file: ${session.activeFile}]\n\n${userText}`;
 		}
 
 		session.messages = [
@@ -492,12 +489,15 @@ export class AcpAgent implements Agent {
 			}
 
 			const timestamp = new Date().toISOString();
-			const config = getAppConfig();
 
 			// We only want user/assistant messages for the title generation/saving
 			const saveableMessages = session.messages.filter(
 				m => m.role === 'user' || m.role === 'assistant',
 			);
+
+			if (saveableMessages.length === 0) {
+				return;
+			}
 
 			// Simple title generation if it's new
 			let title = existingSession?.title;
@@ -516,10 +516,18 @@ export class AcpAgent implements Agent {
 				createdAt: existingSession?.createdAt || timestamp,
 				lastAccessedAt: timestamp,
 				messageCount: saveableMessages.length,
-				provider: config.providers?.[0]?.name || 'openai',
-				model: config.providers?.[0]?.models?.[0] || 'gpt-4o',
+				provider: this.initContext.client.getProviderConfig().name || 'openai',
+				model: this.initContext.client.getCurrentModel() || 'gpt-4o',
 				workingDirectory: session.cwd,
-				messages: session.messages, // We save the raw AcpSession messages
+				messages: session.messages.map(m => {
+					if (m.role === 'user' && typeof m.content === 'string') {
+						return {
+							...m,
+							content: m.content.replace(/^\[Active file: [^\]]+\]\n\n/, ''),
+						};
+					}
+					return m;
+				}), // We save the raw AcpSession messages with UI prefix stripped
 			});
 		} catch (error) {
 			logger.error(`Failed to save session to disk: ${error}`);

@@ -54,10 +54,7 @@ export interface ExtensionMessagePermissionRequested {
 	toolCall: any;
 }
 
-export interface ExtensionMessageShowPlanReview {
-	type: 'showPlanReview';
-	description?: string;
-}
+
 
 export interface ExtensionMessageSyncState {
 	type: 'syncState';
@@ -86,7 +83,6 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageToolUpdated
 	| ExtensionMessageToolCompleted
 	| ExtensionMessagePermissionRequested
-	| ExtensionMessageShowPlanReview
 	| ExtensionMessageSyncState
 	| ExtensionMessageUpdateSessions;
 
@@ -123,18 +119,6 @@ export interface WebviewMessageShowDiff {
 	toolCallId: string;
 }
 
-export interface WebviewMessageProceedPlan {
-	type: 'proceedPlan';
-}
-
-export interface WebviewMessageModifyPlan {
-	type: 'modifyPlan';
-}
-
-export interface WebviewMessageCancelPlan {
-	type: 'cancelPlan';
-}
-
 
 
 export interface WebviewMessageSetMode {
@@ -168,9 +152,6 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageApproveTool
 	| WebviewMessageDenyTool
 	| WebviewMessageShowDiff
-	| WebviewMessageProceedPlan
-	| WebviewMessageModifyPlan
-	| WebviewMessageCancelPlan
 	| WebviewMessageSetMode
 	| WebviewMessageSetModel
 	| WebviewMessageListSessions

@@ -137,7 +137,6 @@
 		"files": [
 			"source/**/*.spec.ts",
 			"source/**/*.spec.tsx",
-			"plugins/vscode/src/**/*.spec.ts",
 			"!source/**/*-helpers.ts",
 			"!source/**/test-helpers.ts"
 		],
