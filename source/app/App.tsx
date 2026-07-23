@@ -136,13 +136,29 @@ export default function App({
 		if (key.ctrl && input === 'c') {
 			handleExit();
 		}
-		if (key.ctrl && input === 's' && !appState.attachedAgentId) {
+		if (key.ctrl && input === 's') {
 			const progresses = Array.from(getAllSubagentProgress().entries());
-			const running = progresses.find(
-				([_, p]) => p.status !== 'complete' && p.status !== 'error',
-			);
-			if (running) {
-				appState.setAttachedAgentId(running[0]);
+			const runningAgents = progresses
+				.filter(([_, p]) => p.status !== 'complete' && p.status !== 'error')
+				.map(([id]) => id);
+
+			if (runningAgents.length === 0) {
+				if (appState.attachedAgentId) {
+					appState.setAttachedAgentId(null);
+				}
+			} else {
+				if (!appState.attachedAgentId) {
+					appState.setAttachedAgentId(runningAgents[0]);
+				} else {
+					const currentIndex = runningAgents.indexOf(appState.attachedAgentId);
+					if (currentIndex !== -1 && runningAgents.length > 1) {
+						appState.setAttachedAgentId(
+							runningAgents[(currentIndex + 1) % runningAgents.length],
+						);
+					} else if (currentIndex === -1) {
+						appState.setAttachedAgentId(runningAgents[0]);
+					}
+				}
 			}
 		}
 	});

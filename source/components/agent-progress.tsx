@@ -118,7 +118,7 @@ export default function AgentProgress({
 					{agentId && (
 						<Box>
 							<Text color={colors.secondary} italic>
-								Press Ctrl+S to attach to session
+								Press Ctrl+S to attach/cycle sessions
 							</Text>
 						</Box>
 					)}

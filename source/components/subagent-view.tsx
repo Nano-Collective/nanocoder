@@ -124,7 +124,11 @@ export function SubagentView({
 					disableStatic={altScreenActive}
 					renderLastQueuedComponentLive={false}
 				/>
-				{liveComponent && <Box paddingX={1}>{liveComponent}</Box>}
+				{liveComponent && (
+					<Box paddingX={1} flexDirection="column">
+						{liveComponent}
+					</Box>
+				)}
 			</Box>
 		</Box>
 	);
