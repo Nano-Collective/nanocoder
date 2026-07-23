@@ -311,15 +311,15 @@ export default function UserInput({
 		}
 		if (commandCompletions.length > 0) {
 			setCompletions(commandCompletions);
-			if (showCompletions) {
-				setSelectedCompletionIndex(prev =>
-					prev >= commandCompletions.length
-						? commandCompletions.length - 1
-						: prev < 0
-							? 0
-							: prev,
-				);
-			}
+			// Show the menu as soon as completions exist (typing `/`), not only on Tab.
+			setShowCompletions(true);
+			setSelectedCompletionIndex(prev =>
+				prev >= commandCompletions.length
+					? commandCompletions.length - 1
+					: prev < 0
+						? 0
+						: prev,
+			);
 		} else if (showCompletions) {
 			setCompletions([]);
 			setShowCompletions(false);
@@ -722,8 +722,23 @@ export default function UserInput({
 
 			// Command completion - use pre-calculated commandCompletions
 			if (input.startsWith('/')) {
-				// Don't auto-complete on Tab when completions list is visible - use Enter to select
+				// Tab selects the highlighted suggestion when the menu is open. #696 made
+				// completion Tab-triggered, but that often failed to render the menu
+				// (especially in alt-screen); show-on-`/` + Tab-to-select is more reliable.
 				if (showCompletions && completions.length > 0) {
+					const selected =
+						completions[
+							selectedCompletionIndex >= 0 ? selectedCompletionIndex : 0
+						];
+					const completedText = `/${selected.name}`;
+					completionJustSelectedRef.current = true;
+					setInputState({
+						displayValue: completedText,
+						placeholderContent: {},
+					});
+					setShowCompletions(false);
+					setSelectedCompletionIndex(-1);
+					setTextInputKey(prev => prev + 1);
 					return;
 				}
 				if (commandCompletions.length === 1) {
