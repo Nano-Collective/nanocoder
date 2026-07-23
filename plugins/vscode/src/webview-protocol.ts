@@ -52,6 +52,7 @@ export interface ExtensionMessagePermissionRequested {
 	type: 'permissionRequested';
 	toolCallId: string;
 	toolCall: any;
+	options?: any[];
 }
 
 
@@ -62,6 +63,8 @@ export interface ExtensionMessageSyncState {
 	availableModes: string[];
 	model: string;
 	availableModels: string[];
+	provider: string;
+	availableProviders: string[];
 }
 
 export interface ExtensionMessageUpdateSessions {
@@ -114,6 +117,12 @@ export interface WebviewMessageDenyTool {
 	toolCallId: string;
 }
 
+export interface WebviewMessageResolveTool {
+	type: 'resolveTool';
+	toolCallId: string;
+	optionId: string;
+}
+
 export interface WebviewMessageShowDiff {
 	type: 'showDiff';
 	toolCallId: string;
@@ -129,6 +138,11 @@ export interface WebviewMessageSetMode {
 export interface WebviewMessageSetModel {
 	type: 'setModel';
 	model: string;
+}
+
+export interface WebviewMessageSetProvider {
+	type: 'setProvider';
+	provider: string;
 }
 
 export interface WebviewMessageListSessions {
@@ -151,9 +165,11 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageCancel
 	| WebviewMessageApproveTool
 	| WebviewMessageDenyTool
+	| WebviewMessageResolveTool
 	| WebviewMessageShowDiff
 	| WebviewMessageSetMode
 	| WebviewMessageSetModel
+	| WebviewMessageSetProvider
 	| WebviewMessageListSessions
 	| WebviewMessageResumeSession
 	| WebviewMessageDeleteSession;

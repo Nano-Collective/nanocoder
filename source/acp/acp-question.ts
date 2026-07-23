@@ -44,11 +44,12 @@ export async function requestUserChoice(
 		});
 
 		if (response.outcome.outcome === 'selected') {
-			const index = Number(
-				response.outcome.optionId.slice(OPTION_PREFIX.length),
-			);
-			if (Number.isInteger(index) && index >= 0 && index < options.length) {
-				return options[index];
+			const optionId = response.outcome.optionId;
+			if (optionId.startsWith(OPTION_PREFIX)) {
+				const index = Number(optionId.slice(OPTION_PREFIX.length));
+				if (Number.isInteger(index) && index >= 0 && index < options.length) {
+					return options[index];
+				}
 			}
 		}
 

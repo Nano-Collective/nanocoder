@@ -4,17 +4,19 @@ VS Code integration for [Nanocoder](https://github.com/Nano-Collective/nanocoder
 
 ## Features
 
-- **Active editor context**: The file you're focused on (and any selection inside it) is pushed to the CLI automatically and shown as a pill on the status line under the Nanocoder input (next to the mode, tune, and context indicators). The pill is attached to your next message, and long filenames are truncated so the line stays within one terminal row
-- **Live Diff Preview**: See proposed file changes in VS Code's diff viewer before approving them in the CLI
-- **Automatic Connection**: Seamlessly connects to the Nanocoder CLI when running with `--vscode`
-- **Status Bar Integration**: Quick connection status and controls from the VS Code status bar
-- **Diagnostics Sharing**: VS Code's LSP diagnostics (errors, warnings) are shared with Nanocoder for context
+- **Native Sidebar Chat UI (New)**: A fully native VS Code Webview chat interface that streams responses, runs subagents, displays inline tool approvals, handles context aggregation, and provides command completion.
+- **Provider & Model Switching**: Change your LLM provider or model on the fly directly from the VS Code sidebar header.
+- **Configuration Management**: New `Nanocoder: Open Configuration` command to quickly access your `agents.config.json`.
+- **Live Subagent Progress**: Observe your subagents' active tasks and token usage directly inside the chat interface.
+- **Legacy Companion Mode**: The original WebSocket-based companion mode is now opt-in via VS Code settings. Allows diff previewing and editor context sharing from an external terminal.
 
 ## Installation
 
 ### Automatic Installation (Recommended)
 
-When you run Nanocoder with the `--vscode` flag for the first time, it will prompt you to install the extension automatically:
+When you open the Nanocoder sidebar in VS Code for the first time, it will automatically prompt you to install the extension if it is missing.
+
+Alternatively, you can manually trigger installation via the CLI:
 
 ```bash
 nanocoder --vscode

@@ -24,7 +24,10 @@ export class AcpProcessManager {
 	async start(): Promise<void> {
 		this.stateManager.setStatus(ACPStatus.Connecting);
 
-		const cliPath = await findCliPath();
+		const config = vscode.workspace.getConfiguration('nanocoder');
+		const configuredCliPath = config.get<string>('cliPath');
+		const cliPath = configuredCliPath || await findCliPath();
+
 		if (!cliPath) {
 			this.stateManager.setStatus(ACPStatus.CliMissing);
 			this.outputChannel.appendLine('Nanocoder CLI not found in PATH.');
@@ -34,11 +37,14 @@ export class AcpProcessManager {
 
 		this.outputChannel.appendLine(`Starting ACP process: ${cliPath} --acp`);
 		
+		const cwdSetting = config.get<string>('cwd') || (vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd());
+		const spawnOptions: cp.SpawnOptions = { shell: false, cwd: cwdSetting };
+
 		if (cliPath.startsWith('node ')) {
 			const scriptPath = cliPath.substring(5);
-			this.childProcess = cp.spawn('node', [scriptPath, '--acp'], { shell: false });
+			this.childProcess = cp.spawn('node', [scriptPath, '--acp'], spawnOptions);
 		} else {
-			this.childProcess = cp.spawn(cliPath, ['--acp'], { shell: false });
+			this.childProcess = cp.spawn(cliPath, ['--acp'], spawnOptions);
 		}
 
 		if (!this.childProcess.stdout || !this.childProcess.stdin) {

@@ -70,6 +70,11 @@
 				"title": "View Session History",
 				"category": "Nanocoder",
 				"icon": "$(history)"
+			},
+			{
+				"command": "nanocoder.openConfig",
+				"title": "Open Configuration",
+				"category": "Nanocoder"
 			}
 		],
 		"menus": {
@@ -91,8 +96,8 @@
 				},
 				"nanocoder.autoConnect": {
 					"type": "boolean",
-					"default": true,
-					"description": "Automatically connect to Nanocoder CLI on startup"
+					"default": false,
+					"description": "Automatically connect to Nanocoder CLI on startup (legacy WebSocket companion)"
 				},
 				"nanocoder.autoStartCli": {
 					"type": "boolean",
@@ -114,6 +119,16 @@
 					"type": "string",
 					"scope": "machine",
 					"description": "The AI model to use for Nanocoder sessions"
+				},
+				"nanocoder.cliPath": {
+					"type": "string",
+					"scope": "machine",
+					"description": "Absolute path to the nanocoder CLI executable. If empty, uses the globally installed nanocoder."
+				},
+				"nanocoder.cwd": {
+					"type": "string",
+					"scope": "resource",
+					"description": "Working directory for the Nanocoder CLI. Defaults to the current VS Code workspace root."
 				}
 			}
 		}

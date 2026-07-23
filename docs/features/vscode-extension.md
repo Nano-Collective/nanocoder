@@ -6,13 +6,15 @@ sidebar_order: 8
 
 # VS Code Extension
 
-If you use VS Code as your editor, the Nanocoder extension bridges it with the CLI. When the AI proposes a file edit, you see a full diff preview in VS Code before approving. Whatever file you have focused — and any selection inside it — is also pushed to the CLI automatically and attached to your next message.
+The Nanocoder VS Code extension provides a fully native Sidebar Chat interface powered by the Agent Client Protocol (ACP). It seamlessly integrates your local-first AI workflow directly into your IDE.
 
 **Key features:**
 
-- **Active editor context**: The file you're focused on in VS Code is shown as `⊡ In App.tsx` on the status line under the input (next to the mode/ctx indicators) and attached to your next message. Selecting a range of lines switches it to `⊡ App.tsx (L10-25)` and inlines the code too. The filename is truncated with an ellipsis when the terminal is narrow.
-- **Live Diff Preview**: See proposed file changes in VS Code's diff viewer before approving
-- **Diagnostics Sharing**: VS Code's LSP diagnostics are shared with Nanocoder for context
+- **Native Sidebar Chat UI (New)**: A webview-based chat interface that streams responses, runs subagents, displays inline tool approvals, handles context aggregation, and provides command completion.
+- **Provider & Model Switching**: Change your LLM provider or model on the fly directly from the VS Code sidebar header.
+- **Live Subagent Progress**: Observe your subagents' active tasks and token usage directly inside the chat interface.
+- **Configuration Management**: New `Nanocoder: Open Configuration` command to quickly access your `agents.config.json`.
+- **Legacy Companion Mode**: The original WebSocket-based companion mode is now opt-in via VS Code settings. Allows diff previewing and editor context sharing from an external terminal.
 
 ## Installation
 
@@ -20,7 +22,9 @@ There are two ways to install the VS Code extension:
 
 ### Automatic Installation (Recommended)
 
-When you run Nanocoder with the `--vscode` flag for the first time, it will automatically prompt you to install the extension:
+When you open the Nanocoder sidebar in VS Code for the first time, it will automatically prompt you to install the extension if it is missing.
+
+Alternatively, you can manually trigger installation via the CLI:
 
 ```bash
 nanocoder --vscode

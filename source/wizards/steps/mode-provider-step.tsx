@@ -147,7 +147,7 @@ export function ModeProviderStep({
 	}
 
 	if (mode === 'select-model') {
-		const items = selectedProvider!.models.map(m => ({
+		const items = selectedProvider?.models.map(m => ({
 			label: m,
 			value: m,
 		}));
@@ -155,7 +155,7 @@ export function ModeProviderStep({
 		return (
 			<Box flexDirection="column" gap={1}>
 				<Text color={colors.primary}>
-					Select Model for {selectedDevMode} ({selectedProvider!.name})
+					Select Model for {selectedDevMode} ({selectedProvider?.name})
 				</Text>
 				<Text color={colors.secondary}>(Esc to go back)</Text>
 				<SelectInput
@@ -164,7 +164,7 @@ export function ModeProviderStep({
 						setModeProviders(prev => ({
 							...prev,
 							[selectedDevMode!]: {
-								provider: selectedProvider!.name,
+								provider: selectedProvider?.name,
 								model: item.value,
 							},
 						}));

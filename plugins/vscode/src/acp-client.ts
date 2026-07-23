@@ -10,6 +10,8 @@ export interface StateSyncPayload {
 	availableModes: string[];
 	model?: string;
 	availableModels: string[];
+	provider?: string;
+	availableProviders: string[];
 }
 
 export class NanocoderAcpClient {
@@ -18,7 +20,7 @@ export class NanocoderAcpClient {
 	private stateManager: AcpStateManager;
 	private _sessionId?: string;
 	public onSessionUpdate?: (update: unknown) => void;
-	public onPermissionRequested?: (toolCallId: string, toolCall: unknown) => void;
+	public onPermissionRequested?: (toolCallId: string, toolCall: unknown, options?: any[]) => void;
 	public onStateSync?: (state: StateSyncPayload) => void;
 	public onConnectionReady?: () => void;
 
@@ -26,6 +28,8 @@ export class NanocoderAcpClient {
 	public availableModes: string[] = [];
 	public currentModel?: string;
 	public availableModels: string[] = [];
+	public currentProvider?: string;
+	public availableProviders: string[] = [];
 
 	private pendingPermissions = new Map<string, (response: unknown) => void>();
 
@@ -86,18 +90,18 @@ export class NanocoderAcpClient {
 		return new Promise<unknown>((resolve) => {
 			this.pendingPermissions.set(toolCallId, resolve);
 			if (this.onPermissionRequested) {
-				this.onPermissionRequested(toolCallId, toolCall);
+				this.onPermissionRequested(toolCallId, toolCall, params.options);
 			}
 		});
 	}
 
-	resolvePermission(toolCallId: string, allow: boolean) {
+	resolvePermission(toolCallId: string, allowOrOptionId: boolean | string) {
 		const resolver = this.pendingPermissions.get(toolCallId);
 		if (resolver) {
 			resolver({
 				outcome: {
 					outcome: 'selected',
-					optionId: allow ? 'allow' : 'deny',
+					optionId: typeof allowOrOptionId === 'string' ? allowOrOptionId : (allowOrOptionId ? 'allow' : 'deny'),
 				}
 			});
 			this.pendingPermissions.delete(toolCallId);
@@ -182,6 +186,11 @@ export class NanocoderAcpClient {
 						}
 					}
 				}
+				const providerOpt = result.configOptions.find((o: any) => o.id === 'provider') as any;
+				if (providerOpt) {
+					this.currentProvider = providerOpt.currentValue;
+					this.availableProviders = providerOpt.options ? providerOpt.options.map((o: any) => o.value || o) : [];
+				}
 			}
 
 			// Force initial preferences if they differ
@@ -202,12 +211,14 @@ export class NanocoderAcpClient {
 	}
 
 	notifyStateSync() {
-		if (this.onStateSync && (this.currentMode || this.currentModel)) {
+		if (this.onStateSync && (this.currentMode || this.currentModel || this.currentProvider)) {
 			this.onStateSync({
 				mode: this.currentMode,
 				availableModes: this.availableModes,
 				model: this.currentModel,
-				availableModels: this.availableModels
+				availableModels: this.availableModels,
+				provider: this.currentProvider,
+				availableProviders: this.availableProviders
 			});
 		}
 	}
@@ -229,6 +240,21 @@ export class NanocoderAcpClient {
 			}
 		} catch (error) {
 			this.outputChannel.appendLine(`Failed to set mode: ${error}`);
+		}
+	}
+
+	async setSessionProvider(providerId: string, persist = true): Promise<void> {
+		if (!this.connection || !this._sessionId) return;
+		try {
+			await this.connection.setSessionConfigOption({
+				sessionId: this._sessionId,
+				configId: 'provider',
+				value: providerId
+			});
+			this.currentProvider = providerId;
+			this.notifyStateSync();
+		} catch (error) {
+			this.outputChannel.appendLine(`Failed to set provider: ${error}`);
 		}
 	}
 
