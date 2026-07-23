@@ -107,6 +107,14 @@ export default function UserInput({
 	const inputWrapWidth = boxWidth - 3;
 	const [textInputKey, setTextInputKey] = useState(0);
 	const completionJustSelectedRef = useRef(false);
+	// Input value for which the user dismissed the completion menu with Escape,
+	// so the auto-show effect doesn't immediately re-open it until they type more.
+	const dismissedForInputRef = useRef<string | null>(null);
+	// True while the current input came from history navigation (↑/↓), not typing.
+	// A recalled `/command` must NOT auto-open the suggestion menu — otherwise the
+	// menu captures ↑/↓ and history navigation is blocked. Cleared on any keystroke
+	// so editing the recalled command surfaces suggestions again.
+	const inputFromHistoryRef = useRef(false);
 	// Store the full InputState draft when starting history navigation, so it can be restored
 	const savedDraftRef = useRef<InputState>({
 		displayValue: '',
@@ -311,21 +319,29 @@ export default function UserInput({
 		}
 		if (commandCompletions.length > 0) {
 			setCompletions(commandCompletions);
-			if (showCompletions) {
-				setSelectedCompletionIndex(prev =>
-					prev >= commandCompletions.length
-						? commandCompletions.length - 1
-						: prev < 0
-							? 0
-							: prev,
-				);
+			// Show the menu as soon as completions exist (typing `/`), not only on
+			// Tab — unless the user dismissed it with Escape for this exact input,
+			// or the input was recalled from history (keep ↑/↓ free to navigate).
+			if (
+				!inputFromHistoryRef.current &&
+				dismissedForInputRef.current !== input
+			) {
+				setShowCompletions(true);
 			}
+			setSelectedCompletionIndex(prev =>
+				prev >= commandCompletions.length
+					? commandCompletions.length - 1
+					: prev < 0
+						? 0
+						: prev,
+			);
 		} else if (showCompletions) {
 			setCompletions([]);
 			setShowCompletions(false);
 			setSelectedCompletionIndex(-1);
 		}
 	}, [
+		input,
 		commandCompletions,
 		showCompletions,
 		setCompletions,
@@ -470,6 +486,7 @@ export default function UserInput({
 		if (showCompletions) {
 			setShowCompletions(false);
 			setSelectedCompletionIndex(-1);
+			dismissedForInputRef.current = input;
 			return;
 		}
 		if (isFileAutocompleteMode) {
@@ -487,6 +504,7 @@ export default function UserInput({
 			setShowClearMessage(true);
 		}
 	}, [
+		input,
 		showCompletions,
 		isFileAutocompleteMode,
 		showClearMessage,
@@ -504,6 +522,10 @@ export default function UserInput({
 		(direction: 'up' | 'down') => {
 			const history = promptHistory.getHistory();
 			if (history.length === 0) return;
+
+			// This value is being recalled, not typed — suppress the auto-show so a
+			// recalled `/command` doesn't hijack ↑/↓ from further history navigation.
+			inputFromHistoryRef.current = true;
 
 			if (direction === 'up') {
 				if (historyIndex === -1) {
@@ -566,6 +588,16 @@ export default function UserInput({
 			setOriginalInput,
 			setInputState,
 		],
+	);
+
+	// Any keystroke means the user is composing, not navigating — re-enable the
+	// auto-show so editing a recalled command surfaces suggestions again.
+	const handleInputChange = useCallback(
+		(value: string) => {
+			inputFromHistoryRef.current = false;
+			updateInput(value);
+		},
+		[updateInput],
 	);
 
 	const handleQueueNavigation = useCallback(
@@ -722,8 +754,23 @@ export default function UserInput({
 
 			// Command completion - use pre-calculated commandCompletions
 			if (input.startsWith('/')) {
-				// Don't auto-complete on Tab when completions list is visible - use Enter to select
+				// Tab selects the highlighted suggestion when the menu is open. #696 made
+				// completion Tab-triggered, but that often failed to render the menu
+				// (especially in alt-screen); show-on-`/` + Tab-to-select is more reliable.
 				if (showCompletions && completions.length > 0) {
+					const selected =
+						completions[
+							selectedCompletionIndex >= 0 ? selectedCompletionIndex : 0
+						];
+					const completedText = `/${selected.name}`;
+					completionJustSelectedRef.current = true;
+					setInputState({
+						displayValue: completedText,
+						placeholderContent: {},
+					});
+					setShowCompletions(false);
+					setSelectedCompletionIndex(-1);
+					setTextInputKey(prev => prev + 1);
 					return;
 				}
 				if (commandCompletions.length === 1) {
@@ -949,7 +996,7 @@ export default function UserInput({
 					<TextInput
 						key={textInputKey}
 						value={input}
-						onChange={updateInput}
+						onChange={handleInputChange}
 						onEdgeArrow={handleHistoryNavigation}
 						onSubmit={handleSubmit}
 						onEnter={handleSubmit}
