@@ -67,10 +67,18 @@ export function isValidFilePath(
 		return false;
 	}
 
-	// Absolute paths (Unix or Windows-drive) are accepted only when a containment
-	// root is known and they resolve inside it — weak models routinely pass
-	// absolute paths. resolveFilePath still runs the authoritative symlink check.
-	if (path.isAbsolute(filePath) || /^[A-Za-z]:[/\\]/.test(filePath)) {
+	// Windows-drive paths (`C:\`, `D:\`) are absolute only on Windows. On POSIX
+	// `path.resolve` would fold them into the cwd and they'd masquerade as an
+	// in-project relative path — reject them unless this platform actually treats
+	// them as absolute (Windows, where the containment check below still applies).
+	if (/^[A-Za-z]:[/\\]/.test(filePath) && !path.isAbsolute(filePath)) {
+		return false;
+	}
+
+	// Absolute paths are accepted only when a containment root is known and they
+	// resolve inside it — weak models routinely pass absolute paths.
+	// resolveFilePath still runs the authoritative symlink check.
+	if (path.isAbsolute(filePath)) {
 		if (!containmentRoot) {
 			return false;
 		}
