@@ -4,7 +4,7 @@ import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {ThemeContext} from '@/hooks/useTheme';
-import {getSessionCwd} from '@/services/session-cwd';
+import {getProjectRoot, getSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -37,14 +37,15 @@ const executeListDirectory = async (
 	const showHiddenFiles = args.showHiddenFiles ?? false;
 
 	// Validate path
-	if (!isValidFilePath(dirPath)) {
+	const cwd = getSessionCwd();
+	const root = getProjectRoot();
+	if (!isValidFilePath(dirPath, root)) {
 		throw new Error(
-			`⚒ Invalid path. Path must be relative and within the project directory.`,
+			`⚒ Invalid path. Path must be within the project directory.`,
 		);
 	}
 
-	const cwd = getSessionCwd();
-	const resolvedPath = resolveFilePath(dirPath, cwd);
+	const resolvedPath = resolveFilePath(dirPath, cwd, root);
 	const ig = loadGitignore(cwd);
 
 	try {

@@ -12,7 +12,7 @@ import {
 	MAX_LINE_LENGTH_CHARS,
 } from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
-import {getSessionCwd} from '@/services/session-cwd';
+import {getProjectRoot, getSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -392,17 +392,18 @@ const readFileValidator = async (args: {
 	metadata_only?: boolean;
 }): Promise<{valid: true} | {valid: false; error: string}> => {
 	// Validate path boundary first to prevent directory traversal
-	if (!isValidFilePath(args.path)) {
+	const cwd = getSessionCwd();
+	const root = getProjectRoot();
+	if (!isValidFilePath(args.path, root)) {
 		return {
 			valid: false,
-			error: `Invalid file path: "${args.path}". Path must be relative and within the project directory.`,
+			error: `Invalid file path: "${args.path}". Path must be within the project directory.`,
 		};
 	}
 
 	// Verify the resolved path stays within project boundaries
 	try {
-		const cwd = getSessionCwd();
-		resolveFilePath(args.path, cwd);
+		resolveFilePath(args.path, cwd, root);
 	} catch (error) {
 		const errorMessage = formatError(error);
 		return {

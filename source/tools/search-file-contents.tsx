@@ -4,7 +4,7 @@ import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
-import {getSessionCwd} from '@/services/session-cwd';
+import {getProjectRoot, getSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -39,14 +39,18 @@ const executeSearchFileContents = async (
 	);
 	const caseSensitive = args.caseSensitive || false;
 
-	// Validate and resolve search path if provided
+	// Validate and resolve search path if provided. Resolve relative to the
+	// session cwd, but bound containment to the project root so an absolute
+	// in-project path (e.g. the workspace root) is not rejected once the shell
+	// has `cd`-ed into a subdir.
+	const root = getProjectRoot();
 	let searchPath: string | undefined;
 	if (args.path) {
-		if (!isValidFilePath(args.path)) {
+		if (!isValidFilePath(args.path, root)) {
 			return `Error: Invalid path "${args.path}"`;
 		}
 		searchPath = path.resolve(cwd, args.path);
-		if (!searchPath.startsWith(path.resolve(cwd))) {
+		if (searchPath !== root && !searchPath.startsWith(root + path.sep)) {
 			return `Error: Path escapes project directory: ${args.path}`;
 		}
 	}

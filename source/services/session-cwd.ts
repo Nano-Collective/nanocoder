@@ -13,6 +13,25 @@ export function getSessionCwd(): string {
 	return sessionCwd ?? process.cwd();
 }
 
+// The containment boundary for the file tools: the project root (launch dir).
+// The session cwd moves DEEPER as `cd` descends; the boundary must NOT shrink
+// with it, or a tool can no longer reach the project root (or a sibling
+// worktree) once the shell is inside a subdir — the failure that rejected a
+// `list_directory` of the workspace root after a `cd` into a worktree. Nothing
+// process.chdir()s during a session (the daemon sets it once at entry), so the
+// live process.cwd() is the launch dir; `projectRoot` lets tests (or an explicit
+// startup call) pin it when the session cwd is not under the launch dir.
+let projectRoot: string | null = null;
+
+export function getProjectRoot(): string {
+	return projectRoot ?? resolve(process.cwd());
+}
+
+export function setProjectRoot(dir: string): void {
+	const trimmed = dir.trim();
+	if (trimmed) projectRoot = resolve(trimmed);
+}
+
 export function setSessionCwd(dir: string): void {
 	const trimmed = dir.trim();
 	if (!trimmed) return;
@@ -38,4 +57,5 @@ export function getSafeSessionCwd(): string {
 // Test helper.
 export function resetSessionCwd(): void {
 	sessionCwd = null;
+	projectRoot = null;
 }
