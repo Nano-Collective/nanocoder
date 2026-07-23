@@ -522,8 +522,9 @@ export function useAppInitialization({
 			setCurrentModel('');
 			setCurrentProviderConfig(null);
 
-			// Clear task list — fire-and-forget, just deletes a JSON file
-			void clearAllTasks();
+			// Clear task list — fire-and-forget, just deletes a JSON file;
+			// swallow failures so an unwritable cwd can't crash the process
+			clearAllTasks().catch(() => {});
 
 			const newToolManager = new ToolManager();
 			const newCustomCommandLoader = new CustomCommandLoader();
