@@ -107,9 +107,9 @@ export default function UserInput({
 	const inputWrapWidth = boxWidth - 3;
 	const [textInputKey, setTextInputKey] = useState(0);
 	const completionJustSelectedRef = useRef(false);
-	// Escape-dismissed guard: re-armed on the next input change so the auto-show
-	// effect doesn't immediately re-open a menu the user just dismissed.
-	const completionsDismissedRef = useRef(false);
+	// Input value for which the user dismissed the completion menu with Escape,
+	// so the auto-show effect doesn't immediately re-open it until they type more.
+	const dismissedForInputRef = useRef<string | null>(null);
 	// Store the full InputState draft when starting history navigation, so it can be restored
 	const savedDraftRef = useRef<InputState>({
 		displayValue: '',
@@ -306,12 +306,6 @@ export default function UserInput({
 		] as Completion[];
 	}, [input, isCommandMode, isFileAutocompleteMode, customCommands]);
 
-	// Re-arm auto-show on every input change, so an Escape-dismiss lasts only
-	// until the next keystroke.
-	useEffect(() => {
-		completionsDismissedRef.current = false;
-	}, [input]);
-
 	// Update UI state for command completions
 	useEffect(() => {
 		if (completionJustSelectedRef.current) {
@@ -321,8 +315,8 @@ export default function UserInput({
 		if (commandCompletions.length > 0) {
 			setCompletions(commandCompletions);
 			// Show the menu as soon as completions exist (typing `/`), not only on
-			// Tab — unless the user just dismissed it with Escape for this input.
-			if (!completionsDismissedRef.current) {
+			// Tab — unless the user dismissed it with Escape for this exact input.
+			if (dismissedForInputRef.current !== input) {
 				setShowCompletions(true);
 			}
 			setSelectedCompletionIndex(prev =>
@@ -338,6 +332,7 @@ export default function UserInput({
 			setSelectedCompletionIndex(-1);
 		}
 	}, [
+		input,
 		commandCompletions,
 		showCompletions,
 		setCompletions,
@@ -482,7 +477,7 @@ export default function UserInput({
 		if (showCompletions) {
 			setShowCompletions(false);
 			setSelectedCompletionIndex(-1);
-			completionsDismissedRef.current = true;
+			dismissedForInputRef.current = input;
 			return;
 		}
 		if (isFileAutocompleteMode) {
@@ -500,6 +495,7 @@ export default function UserInput({
 			setShowClearMessage(true);
 		}
 	}, [
+		input,
 		showCompletions,
 		isFileAutocompleteMode,
 		showClearMessage,
