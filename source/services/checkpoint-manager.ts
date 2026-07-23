@@ -62,9 +62,9 @@ export class CheckpointManager {
 	 */
 	private getCheckpointDir(name: string): string {
 		this.validateName(name);
-		const dir = path.join(this.checkpointsDir, name);
-		const base = path.resolve(this.checkpointsDir);
-		const resolved = path.resolve(dir);
+		const dir = path.join(this.checkpointsDir, name); // nosemgrep
+		const base = path.resolve(this.checkpointsDir); // nosemgrep
+		const resolved = path.resolve(dir); // nosemgrep
 		if (resolved !== base && !resolved.startsWith(base + path.sep)) {
 			throw new Error(`Invalid checkpoint name: '${name}'`);
 		}
