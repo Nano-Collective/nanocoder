@@ -1,5 +1,76 @@
 # @nanocollective/nanocoder
 
+# 1.29.0
+
+- Added **privacy-aware prompt scrubbing**. A new `PrivacyContext` scrubs sensitive content from prompts before they leave your machine, with tool-argument rehydration and privacy session support, a `/privacy` command to inspect what is being scrubbed, and automated scrubbing telemetry notifications. Thanks to @akramcodez.
+
+- Added an **interactive questions system for plan mode**, so the agent can ask structured questions while planning instead of guessing. Thanks to @akramcodez. Closes #96.
+
+- Added **mode-specific provider and model configuration**, so each development mode can use its own provider and model. Thanks to @akramcodez. Closes #277.
+
+- Added **dual TUI screen modes**, with a more reliable `/clear` and graceful exit handling. Thanks to @llupRisinglll.
+
+- Added **multiline cursor navigation and word-jump** in the input box. Thanks to @llupRisinglll.
+
+- Added **`--resume` / `--continue` CLI session flags**. `--continue` (`-c`) resumes the most recent session for the current directory, and `--resume [id]` (`-r`) resumes a session by id, list index, or `last`, with a bare `--resume` opening the session picker at startup. Thanks to @llupRisinglll.
+
+- Added a **fuzzy search filter to the `/model` picker**, with a capped, centered scrolling window so large model catalogs no longer overflow the terminal and the current model is preselected. Thanks to @rakshith1928. Closes #683.
+
+- Added **PDF and DOCX support to `read_file`** via get-md, so those documents can be read directly. Thanks to @akramcodez.
+
+- Added a **`doctor` diagnostic command** that checks your setup and reports common configuration problems. Thanks to @Dhirenderchoudhary. Closes #609.
+
+- Added a **`retry` command** to re-run the last user turn. Thanks to @Dhirenderchoudhary. Closes #608.
+
+- Added **message queueing while the agent is busy** so you can type ahead. Queued messages can be recalled before streaming, are truncated properly on narrow terminals, and no longer double-dispatch. Thanks to @Dhirenderchoudhary. Closes #597, #598.
+
+- Added **estimated dollar cost tracking to `/usage`**, with a per-provider cost breakdown and a cumulative per-call cost history. Thanks to @rakshith1928. Closes #602.
+
+- Added a **`--json` output flag** to the non-interactive plain run path. Thanks to @OMEE-Y.
+
+- Added a **`diff_edit` tool for nano-profile models**. Thanks to @Dhirenderchoudhary. Closes #604.
+
+- Added **automatic diagnostics after file edits**, surfacing errors introduced by an edit right away. Thanks to @2409324124. Closes #538.
+
+- Added the **foundation for semantic memory** (storage layer and initial wiring), groundwork for upcoming memory features. Thanks to @Dhirenderchoudhary.
+
+- Reworked the client to a **stateless API with history-boundary rehydration**, improving conversation reliability. Thanks to @akramcodez.
+
+- Added a **Together AI provider template and docs**, and **MiniMax Coding now defaults to MiniMax-M3**. Thanks to @octo-patch. Added **Atomic Chat local provider configuration docs**. Thanks to @yanalialiuk.
+
+- Fix: **`nanocoder.tune` loading and configuration precedence** from `agents.config.json` now resolve correctly. Thanks to @rakshith1928. Closes #648.
+
+- Fix: **patch malformed SSE termination strings from providers**, preventing stream parsing errors. Thanks to @akramcodez. Closes #614.
+
+- Fix: **bound slash command completions** so the menu no longer overflows. Thanks to @2409324124. Closes #624.
+
+- Fix: **decouple console log verbosity from `NODE_ENV`** and quiet noisy LSP discovery logs. Thanks to @A-S-Manoj. Closes #606.
+
+- Fix: **removed the `strip-ansi` runtime dependency**. Thanks to @2409324124. Closes #643.
+
+- Docs: added a **Simplified Chinese README** and **Traditional Chinese** translations, with fixes to the Simplified Chinese copy, plus a star-history chart. Thanks to @2409324124, @jason1015-coder, and @zerone0x.
+
+- Updated dependencies: `@ai-sdk/google`, `@ai-sdk/openai-compatible`, `undici`, `diff`, and `knip`.
+
+- The **VS Code extension** saw major work this cycle (ACP process manager and handshake, a chat sidebar webview with tool-permission and diff UI, session persistence, and Tailwind styling). It is versioned separately from the CLI. Thanks to @akramcodez and @Dhirenderchoudhary.
+
+- Added a tabbed `/settings` dialog with searchable categories, so settings are easier to scan and filter from the TUI. Thanks to @llupRisinglll. Closes #471.
+
+- Fixed static vs. live content misalignment in `--alt-screen` (fullscreen) mode. The chat transcript and the input/tools footer now share the same left column, so assistant messages, tool results, and the input line up cleanly. The fix moves the footer out to the transcript's padded column rather than pushing the transcript into the scroll viewport's clip window (which was clipping the first character of each line).
+
+- **Removed emoji badges from the `ask_user` tool**. Questions no longer render a question-type emoji next to the prompt, and the tool schema no longer advertises them to the model.
+- **`ask_user` now always shows the answer**. The tool result renders the full Question/Answer block even in compact tool display mode, instead of folding into the tool tally and hiding what was answered.
+
+- **Image attachments now leave an `[Image #N]` placeholder in the message**. Dragged or typed image paths are no longer silently stripped from the user message - each becomes a numbered `[Image #N]` placeholder (mirroring the `[Paste #N]` convention), numbered after any images already attached via Ctrl+V, and highlighted in the chat history like `[@file]` mentions.
+
+- Fixed provider configuration loading so existing providers are preserved and startup falls back to a working provider instead of freezing. Thanks to @llupRisinglll.
+
+- -adding **typing svg in README.md showing "Meet Nanocoder" and "your private, local first ai coding assistant"** Thanks to @jason1015-coder.
+
+- Added **Thesean AI as a provider template**. The `/setup-providers` wizard now includes Thesean's Ship endpoint with Anthropic-compatible Claude models (`ship-like/claude-opus-4-8`, `ship-like/claude-sonnet-5`, `ship-like/claude-haiku-4-5`), plus a new docs page covering configuration and available models.
+
+If there are any problems, feedback or thoughts please drop an issue or message us through Discord! Thank you for using Nanocoder.
+
 # 1.28.1
 
 - Added **image attachments on user messages**. Paste an image from the clipboard with **Ctrl+V** (via `osascript` on macOS, `wl-paste`/`xclip` on Linux, PowerShell on Windows), drag an image file into the terminal, or type a path - quoted, unquoted, and macOS backslash-escaped paths are all recognised, and `http(s)` URLs are left untouched. Attachments (PNG/JPEG/GIF/WebP, up to 10 MB) show above the input box and **Ctrl+X** removes the last one; references are stripped from the text and sent as image parts to vision-capable models. A missing clipboard tool now logs a debug breadcrumb instead of silently no-op'ing. Thanks to @ragini-pandey. Closes #572.
