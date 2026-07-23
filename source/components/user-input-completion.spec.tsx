@@ -5,6 +5,7 @@ import stripAnsi from 'strip-ansi';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
 import {UIStateProvider} from '../hooks/useUIState';
+import {promptHistory} from '../prompt-history';
 import UserInput from './user-input';
 
 console.log('\nuser-input-completion.spec.tsx');
@@ -37,6 +38,7 @@ const waitForFrame = async (
 };
 
 const DOWN = '\u001B[B';
+const UP = '\u001B[A';
 const TAB = '\t';
 
 // Regression: upstream #696 made the command menu Tab-triggered, and it often
@@ -68,5 +70,41 @@ test('Tab selects the highlighted suggestion when the menu is open', async t => 
 	stdin.write(TAB); // select the highlighted one
 	await waitForFrame(lastFrame, /\/zzbeta/);
 	t.regex(stripAnsi(lastFrame() ?? ''), /\/zzbeta/);
+	unmount();
+});
+
+// Regression (reviewer feedback on #701): auto-showing the menu on `/` must NOT
+// fire when the input was RECALLED from history — otherwise the open menu
+// captures the arrow keys and blocks further history navigation. A recalled
+// `/command` stays quiet until the user types into it.
+test('a command recalled from history does not auto-open the menu until typed', async t => {
+	// Seed the most-recent history entry as a partial command that matches BOTH
+	// custom commands. If the menu opened, `zzbeta` (a menu-only string, never in
+	// the `/zz` input) would appear in the frame.
+	promptHistory.addPrompt('/zz');
+
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput forceFocus={true} customCommands={['zzalpha', 'zzbeta']} />
+		</TestWrapper>,
+	);
+
+	stdin.write(UP); // recall `/zz` from history
+	await waitForFrame(lastFrame, /\/zz/);
+	await wait(300); // give any (unwanted) auto-show time to render
+	t.notRegex(
+		stripAnsi(lastFrame() ?? ''),
+		/zzbeta/,
+		'menu stays closed for a history-recalled command',
+	);
+
+	stdin.write('a'); // typing re-enables the menu -> `/zza` matches zzalpha
+	await waitForFrame(lastFrame, /zzalpha/);
+	t.regex(
+		stripAnsi(lastFrame() ?? ''),
+		/zzalpha/,
+		'typing into the recalled command surfaces suggestions again',
+	);
+
 	unmount();
 });

@@ -110,6 +110,11 @@ export default function UserInput({
 	// Input value for which the user dismissed the completion menu with Escape,
 	// so the auto-show effect doesn't immediately re-open it until they type more.
 	const dismissedForInputRef = useRef<string | null>(null);
+	// True while the current input came from history navigation (↑/↓), not typing.
+	// A recalled `/command` must NOT auto-open the suggestion menu — otherwise the
+	// menu captures ↑/↓ and history navigation is blocked. Cleared on any keystroke
+	// so editing the recalled command surfaces suggestions again.
+	const inputFromHistoryRef = useRef(false);
 	// Store the full InputState draft when starting history navigation, so it can be restored
 	const savedDraftRef = useRef<InputState>({
 		displayValue: '',
@@ -315,8 +320,12 @@ export default function UserInput({
 		if (commandCompletions.length > 0) {
 			setCompletions(commandCompletions);
 			// Show the menu as soon as completions exist (typing `/`), not only on
-			// Tab — unless the user dismissed it with Escape for this exact input.
-			if (dismissedForInputRef.current !== input) {
+			// Tab — unless the user dismissed it with Escape for this exact input,
+			// or the input was recalled from history (keep ↑/↓ free to navigate).
+			if (
+				!inputFromHistoryRef.current &&
+				dismissedForInputRef.current !== input
+			) {
 				setShowCompletions(true);
 			}
 			setSelectedCompletionIndex(prev =>
@@ -514,6 +523,10 @@ export default function UserInput({
 			const history = promptHistory.getHistory();
 			if (history.length === 0) return;
 
+			// This value is being recalled, not typed — suppress the auto-show so a
+			// recalled `/command` doesn't hijack ↑/↓ from further history navigation.
+			inputFromHistoryRef.current = true;
+
 			if (direction === 'up') {
 				if (historyIndex === -1) {
 					// Save the full current state before starting navigation
@@ -575,6 +588,16 @@ export default function UserInput({
 			setOriginalInput,
 			setInputState,
 		],
+	);
+
+	// Any keystroke means the user is composing, not navigating — re-enable the
+	// auto-show so editing a recalled command surfaces suggestions again.
+	const handleInputChange = useCallback(
+		(value: string) => {
+			inputFromHistoryRef.current = false;
+			updateInput(value);
+		},
+		[updateInput],
 	);
 
 	const handleQueueNavigation = useCallback(
@@ -973,7 +996,7 @@ export default function UserInput({
 					<TextInput
 						key={textInputKey}
 						value={input}
-						onChange={updateInput}
+						onChange={handleInputChange}
 						onEdgeArrow={handleHistoryNavigation}
 						onSubmit={handleSubmit}
 						onEnter={handleSubmit}
