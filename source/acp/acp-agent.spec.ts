@@ -135,7 +135,7 @@ test('AcpAgent.newSession - exposes available models and current model', async t
 	const {agent} = createAgent();
 	const result = await agent.newSession({cwd: '/tmp'});
 	const modelOption = result.configOptions?.find(
-		(o: any) => o.category === 'model',
+		(o: any) => o.id === 'model',
 	) as any;
 	t.is(modelOption?.currentValue, 'test-model');
 	const ids = modelOption?.options.map((o: any) => o.value);
@@ -246,12 +246,12 @@ test('AcpAgent.setSessionConfigOption - switches the client model', async t => {
 		value: 'other-model',
 	});
 	const modelOption = result.configOptions.find(
-		(o: any) => o.category === 'model',
+		(o: any) => o.id === 'model',
 	) as any;
 	t.is(modelOption?.currentValue, 'other-model');
 	const after = await agent.newSession({cwd: '/tmp'});
 	const afterOption = after.configOptions?.find(
-		(o: any) => o.category === 'model',
+		(o: any) => o.id === 'model',
 	) as any;
 	t.is(afterOption?.currentValue, 'other-model');
 });

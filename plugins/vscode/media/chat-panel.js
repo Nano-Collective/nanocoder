@@ -5,7 +5,7 @@
 	const messagesContainer = document.getElementById('messages-container');
 	const chatInput = document.getElementById('chat-input');
 
-	let modelDropdown, modeDropdown;
+	let modelDropdown, modeDropdown, providerDropdown;
 
 	function initDropdowns() {
 		class CustomDropdown {
@@ -25,6 +25,7 @@
 			toggle() {
 				const isHidden = this.dropdown.classList.contains('hidden');
 				// Close all dropdowns
+				document.getElementById('provider-dropdown').classList.add('hidden');
 				document.getElementById('model-dropdown').classList.add('hidden');
 				document.getElementById('mode-dropdown').classList.add('hidden');
 
@@ -73,11 +74,16 @@
 			vscode.postMessage({ type: 'setMode', mode: val });
 		});
 
+		providerDropdown = new CustomDropdown('provider-trigger', 'provider-dropdown', 'provider-trigger-label', (val) => {
+			vscode.postMessage({ type: 'setProvider', provider: val });
+		});
+
 		modelDropdown = new CustomDropdown('model-trigger', 'model-dropdown', 'model-trigger-label', (val) => {
 			vscode.postMessage({ type: 'setModel', model: val });
 		});
 
 		document.addEventListener('click', () => {
+			document.getElementById('provider-dropdown').classList.add('hidden');
 			document.getElementById('model-dropdown').classList.add('hidden');
 			document.getElementById('mode-dropdown').classList.add('hidden');
 		});
@@ -304,7 +310,7 @@
 				handleAcpUpdate(message.update);
 				break;
 			case 'permissionRequested':
-				handlePermissionRequested(message.toolCallId, message.toolCall);
+				handlePermissionRequested(message.toolCallId, message.toolCall, message.options);
 				break;
 
 			case 'syncState':
@@ -411,6 +417,7 @@
 	}
 
 	function handleSyncState(message) {
+		if (providerDropdown) providerDropdown.setOptions(message.availableProviders || [], message.provider);
 		if (modeDropdown) modeDropdown.setOptions(message.availableModes, message.mode);
 		if (modelDropdown) modelDropdown.setOptions(message.availableModels, message.model);
 	}
@@ -615,6 +622,10 @@
 				this.body.appendChild(item);
 				this.toolItems.set(toolCallId, item);
 			} else {
+				if (update.title) {
+					const labelEl = item.querySelector('.truncate.flex-1');
+					if (labelEl) labelEl.textContent = update.title;
+				}
 				const statusEl = item.querySelector('.ml-auto');
 				if (statusEl) {
 					if (update.status === 'success' || update.status === 'completed') statusEl.innerHTML = ICONS.success;
@@ -728,7 +739,7 @@
 		}
 	}
 
-	function handlePermissionRequested(toolCallId, toolCall) {
+	function handlePermissionRequested(toolCallId, toolCall, options) {
 		const card = document.getElementById(`tool-card-${toolCallId}`);
 		if (!card) return;
 
@@ -738,24 +749,37 @@
 		const actionsDiv = document.createElement('div');
 		actionsDiv.className = 'px-3 py-2 bg-vscode-widget-header border-t border-vscode-widget-border flex justify-end gap-2 tool-actions';
 
-		const approveBtn = document.createElement('button');
-		approveBtn.className = 'border-none rounded px-3 py-1.5 cursor-pointer font-vscode text-[0.9em] transition-colors bg-vscode-button-bg text-vscode-button-fg hover:bg-vscode-button-hover';
-		approveBtn.textContent = 'Approve';
-		approveBtn.onclick = () => {
-			vscode.postMessage({ type: 'approveTool', toolCallId });
-			actionsDiv.remove();
-		};
+		if (options && Array.isArray(options) && options.length > 0) {
+			for (const opt of options) {
+				const btn = document.createElement('button');
+				btn.className = 'bg-transparent border border-vscode-button-secondary text-vscode-fg hover:bg-vscode-button-secondaryHover rounded px-3 py-1.5 cursor-pointer font-vscode text-[0.9em] transition-colors';
+				btn.textContent = opt.name;
+				btn.onclick = () => {
+					vscode.postMessage({ type: 'resolveTool', toolCallId, optionId: opt.optionId });
+					actionsDiv.remove();
+				};
+				actionsDiv.appendChild(btn);
+			}
+		} else {
+			const approveBtn = document.createElement('button');
+			approveBtn.className = 'border-none rounded px-3 py-1.5 cursor-pointer font-vscode text-[0.9em] transition-colors bg-vscode-button-bg text-vscode-button-fg hover:bg-vscode-button-hover';
+			approveBtn.textContent = 'Approve';
+			approveBtn.onclick = () => {
+				vscode.postMessage({ type: 'approveTool', toolCallId });
+				actionsDiv.remove();
+			};
 
-		const denyBtn = document.createElement('button');
-		denyBtn.className = 'bg-transparent border border-vscode-button-secondary text-vscode-fg hover:bg-vscode-button-secondaryHover rounded px-3 py-1.5 cursor-pointer font-vscode text-[0.9em] transition-colors';
-		denyBtn.textContent = 'Deny';
-		denyBtn.onclick = () => {
-			vscode.postMessage({ type: 'denyTool', toolCallId });
-			actionsDiv.remove();
-		};
+			const denyBtn = document.createElement('button');
+			denyBtn.className = 'bg-transparent border border-vscode-button-secondary text-vscode-fg hover:bg-vscode-button-secondaryHover rounded px-3 py-1.5 cursor-pointer font-vscode text-[0.9em] transition-colors';
+			denyBtn.textContent = 'Deny';
+			denyBtn.onclick = () => {
+				vscode.postMessage({ type: 'denyTool', toolCallId });
+				actionsDiv.remove();
+			};
 
-		actionsDiv.appendChild(approveBtn);
-		actionsDiv.appendChild(denyBtn);
+			actionsDiv.appendChild(approveBtn);
+			actionsDiv.appendChild(denyBtn);
+		}
 
 		card.appendChild(actionsDiv);
 		scrollToBottom();

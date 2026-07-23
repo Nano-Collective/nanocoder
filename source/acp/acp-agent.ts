@@ -41,6 +41,7 @@ import {runAcpConversation} from '@/acp/acp-conversation';
 import {AcpSession} from '@/acp/acp-session';
 import type {AcpInitContext} from '@/acp/acp-types';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
+import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
 import {loadPreferences, updateLastUsed} from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
@@ -99,6 +100,21 @@ export class AcpAgent implements Agent {
 
 		await sessionManager.initialize();
 		await this.saveAcpSessionToDisk(session);
+
+		// Emit available slash commands
+		const availableCommands = (
+			this.initContext.customCommandLoader?.getAllCommands() || []
+		).map(c => ({
+			name: `/${c.fullName}`,
+			description: c.metadata.description || '',
+		}));
+		this.conn.sessionUpdate({
+			sessionId,
+			update: {
+				sessionUpdate: 'available_commands_update',
+				availableCommands,
+			} as any,
+		});
 
 		return {
 			sessionId,
@@ -163,8 +179,37 @@ export class AcpAgent implements Agent {
 		// Prepend active workspace context (e.g. the file focused in VS Code) so
 		// the model always knows what the user is looking at.
 		let contextualUserText = userText;
+
+		// Slash command interception
+		const trimmedUserText = userText.trim();
+		if (trimmedUserText.startsWith('/')) {
+			const commandName = trimmedUserText.split(/\s+/)[0].substring(1);
+			const command =
+				this.initContext.customCommandLoader?.getCommand(commandName);
+
+			if (command) {
+				const commandInstruction = `### ${command.fullName}\n\n${command.content}`;
+				contextualUserText = `${contextualUserText}\n\n## Included Command Instructions\n\n${commandInstruction}\n\nPlease follow these instructions for the user's request above.`;
+			} else {
+				const errorMsg = `Unrecognized slash command: \`/${commandName}\`. Use the command menu to see available commands.`;
+				session.messages = [
+					...session.messages,
+					{role: 'user', content: contextualUserText},
+					{role: 'assistant', content: errorMsg},
+				];
+				this.conn.sessionUpdate({
+					sessionId: params.sessionId,
+					update: {
+						sessionUpdate: 'agent_message_chunk',
+						content: {type: 'text', text: errorMsg},
+					},
+				});
+				return {stopReason: 'end_turn'};
+			}
+		}
+
 		if (session.activeFile) {
-			contextualUserText = `[Active file: ${session.activeFile}]\n\n${userText}`;
+			contextualUserText = `[Active file: ${session.activeFile}]\n\n${contextualUserText}`;
 		}
 
 		session.messages = [
@@ -252,6 +297,36 @@ export class AcpAgent implements Agent {
 			throw new Error(`Session not found: ${params.sessionId}`);
 		}
 
+		if (params.configId === 'provider') {
+			const providerId = params.value;
+			if (typeof providerId !== 'string') {
+				throw new Error(`Invalid provider value: ${String(providerId)}`);
+			}
+			const config = getAppConfig();
+			const validProviders = (config.providers ?? []).map(p => p.name);
+			if (!validProviders.includes(providerId)) {
+				throw new Error(`Unknown provider: ${providerId}`);
+			}
+
+			this.initContext.provider = providerId;
+			const {client: newClient} = await createLLMClient(providerId);
+			this.initContext.client = newClient;
+
+			const availableModels = await newClient.getAvailableModels();
+			if (availableModels.includes(this.initContext.model)) {
+				newClient.setModel(this.initContext.model);
+			} else if (availableModels.length > 0) {
+				this.initContext.model = availableModels[0];
+				newClient.setModel(availableModels[0]);
+			}
+			updateLastUsed(providerId, this.initContext.model);
+
+			logger.info(
+				`ACP setSessionConfigOption: session=${params.sessionId} configId=${params.configId} value=${providerId}`,
+			);
+			return {configOptions: await this.buildConfigOptions()};
+		}
+
 		if (params.configId !== MODEL_CONFIG_ID) {
 			throw new Error(`Unknown config option: ${params.configId}`);
 		}
@@ -273,6 +348,7 @@ export class AcpAgent implements Agent {
 		// model is effectively process-global. This matches single-session ACP
 		// usage (Zed); a future multi-session client would see one shared model.
 		client.setModel(modelId);
+		this.initContext.model = modelId;
 		updateLastUsed(provider, modelId);
 		logger.info(
 			`ACP setSessionConfigOption: session=${params.sessionId} configId=${params.configId} value=${modelId}`,
@@ -427,7 +503,28 @@ export class AcpAgent implements Agent {
 			modelIds.unshift(currentModelId);
 		}
 
+		const config = getAppConfig();
+		const providerNames = (config.providers ?? []).map(p => p.name);
+		const currentProvider =
+			this.initContext.provider || client.getProviderConfig().name || 'openai';
+
+		const providerIds = [...providerNames];
+		if (
+			!providerNames.includes(currentProvider) &&
+			currentProvider.length > 0
+		) {
+			providerIds.unshift(currentProvider);
+		}
+
 		return [
+			{
+				type: 'select',
+				id: 'provider',
+				name: 'Provider',
+				category: 'model',
+				currentValue: currentProvider,
+				options: providerIds.map(id => ({name: id, value: id})),
+			},
 			{
 				type: 'select',
 				id: MODEL_CONFIG_ID,

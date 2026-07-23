@@ -26,7 +26,10 @@ export class AcpProcessManager {
 	async start(): Promise<void> {
 		this.stateManager.setStatus(ACPStatus.Connecting);
 
-		const cliPath = await findCliPath();
+		const config = vscode.workspace.getConfiguration('nanocoder');
+		const configuredCliPath = config.get<string>('cliPath');
+		const cliPath = configuredCliPath || await findCliPath();
+
 		if (!cliPath) {
 			this.stateManager.setStatus(ACPStatus.CliMissing);
 			this.outputChannel.appendLine('Nanocoder CLI not found in PATH.');
@@ -35,19 +38,22 @@ export class AcpProcessManager {
 		}
 
 		this.outputChannel.appendLine(`Starting ACP process: ${cliPath} --acp`);
-
 		// Spawn with the login shell's PATH so the CLI's `#!/usr/bin/env node`
 		// shebang (and the dev-fallback `node`) resolve the same node the user
 		// gets in a terminal, not launchd's - which may be an older install.
 		// Run in the workspace folder: the extension host's own cwd is `/`,
 		// which is unwritable and crashes the CLI's startup (.nanocoder dir).
 		const env = await resolveSpawnEnv();
-		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
+		
+		// Fallbacks: configured cwd -> workspace folder -> user homedir -> process cwd
+		const cwdSetting = config.get<string>('cwd') || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir() || process.cwd();
+		const spawnOptions: cp.SpawnOptions = { shell: false, env, cwd: cwdSetting };
+
 		if (cliPath.startsWith('node ')) {
 			const scriptPath = cliPath.substring(5);
-			this.childProcess = cp.spawn('node', [scriptPath, '--acp'], { shell: false, env, cwd });
+			this.childProcess = cp.spawn('node', [scriptPath, '--acp'], spawnOptions);
 		} else {
-			this.childProcess = cp.spawn(cliPath, ['--acp'], { shell: false, env, cwd });
+			this.childProcess = cp.spawn(cliPath, ['--acp'], spawnOptions);
 		}
 
 		if (!this.childProcess.stdout || !this.childProcess.stdin) {

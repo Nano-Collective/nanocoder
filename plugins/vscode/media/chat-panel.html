@@ -33,14 +33,20 @@
 				<div class="flex items-center justify-between px-3 pb-2 pt-1 relative">
 					<div class="flex gap-1 items-center flex-1 min-w-0">
 
+						<!-- Custom Provider Dropdown Trigger -->
+						<button id="provider-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[30%] shrink min-w-0" disabled>
+							<span id="provider-trigger-label" class="truncate">Provider...</span>
+							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="6 9 12 15 18 9"></polyline></svg>
+						</button>
+
 						<!-- Custom Model Dropdown Trigger -->
-						<button id="model-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[45%] shrink min-w-0" disabled>
+						<button id="model-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[40%] shrink min-w-0" disabled>
 							<span id="model-trigger-label" class="truncate">Loading models...</span>
 							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="6 9 12 15 18 9"></polyline></svg>
 						</button>
 
 						<!-- Custom Mode Dropdown Trigger -->
-						<button id="mode-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[35%] shrink min-w-0" disabled>
+						<button id="mode-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[30%] shrink min-w-0" disabled>
 							<span id="mode-trigger-label" class="truncate">Loading modes...</span>
 							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="6 9 12 15 18 9"></polyline></svg>
 						</button>
@@ -60,6 +66,7 @@
 				</div>
 				
 				<!-- Dropdown Menus (Full Width) -->
+				<div id="provider-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
 				<div id="model-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
 				<div id="mode-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
 			</div>

@@ -25,12 +25,13 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 			});
 		};
 
-		this._acpClient.onPermissionRequested = (toolCallId: string, toolCall: any) => {
+		this._acpClient.onPermissionRequested = (toolCallId: string, toolCall: any, options?: any[]) => {
 			this.handleDiffs(toolCall);
 			this.postMessage({
 				type: 'permissionRequested',
 				toolCallId,
-				toolCall
+				toolCall,
+				options
 			});
 		};
 
@@ -110,6 +111,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 					case 'denyTool':
 						this._outputChannel.appendLine(`[Webview] User denied tool: ${message.toolCallId}`);
 						this._acpClient.resolvePermission(message.toolCallId, false);
+						break;
+					case 'resolveTool':
+						this._outputChannel.appendLine(`[Webview] User resolved tool: ${message.toolCallId} with option: ${message.optionId}`);
+						this._acpClient.resolvePermission(message.toolCallId, message.optionId);
 						break;
 					case 'showDiff':
 						this._outputChannel.appendLine(`[Webview] User requested to see diff for: ${message.toolCallId}`);

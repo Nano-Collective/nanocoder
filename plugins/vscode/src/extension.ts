@@ -81,6 +81,17 @@ export function activate(context: vscode.ExtensionContext) {
 			// is permanently bound to the original instances.
 			acpProcessManager = new AcpProcessManager(outputChannel, acpStateManager, acpClient);
 			acpProcessManager.start();
+		}),
+		vscode.commands.registerCommand('nanocoder.openConfig', async () => {
+			const config = vscode.workspace.getConfiguration('nanocoder');
+			const cwdSetting = config.get<string>('cwd') || (vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd());
+			const configPath = path.join(cwdSetting, 'agents.config.json');
+			try {
+				const doc = await vscode.workspace.openTextDocument(configPath);
+				await vscode.window.showTextDocument(doc);
+			} catch (err) {
+				vscode.window.showErrorMessage(`Could not open configuration at ${configPath}. Ensure the file exists.`);
+			}
 		})
 	);
 

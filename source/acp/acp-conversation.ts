@@ -9,6 +9,7 @@ import type {AcpSession} from '@/acp/acp-session';
 import {type AcpToolCallMeta, buildToolCallMeta} from '@/acp/acp-tool-call';
 import {DEFAULT_HEADLESS_MAX_TURNS, getAppConfig} from '@/config/index';
 import {processToolUse} from '@/message-handler';
+import {getSubagentProgress} from '@/services/subagent-events';
 import {parseToolCalls} from '@/tool-calling/index';
 import {resolveToolApproval} from '@/tools/approval-policy';
 import type {ToolManager} from '@/tools/tool-manager';
@@ -247,7 +248,42 @@ export async function runAcpConversation(
 
 			// Execute tool
 			await emitToolCallUpdate(session, conn, toolCall, 'in_progress');
+
+			let pollInterval: ReturnType<typeof setInterval> | null = null;
+			if (
+				toolCall.function.name === 'invoke_subagent' ||
+				toolCall.function.name === 'browser_subagent'
+			) {
+				let agentId = '';
+				try {
+					const args = toolCall.function.arguments as Record<string, unknown>;
+					agentId = (args.ReusedSubagentId || args.TaskName || '') as string;
+				} catch (_e) {}
+
+				pollInterval = setInterval(async () => {
+					const progress = getSubagentProgress(agentId);
+					if (progress && progress.toolCallCount > 0) {
+						const tokens = Math.round(progress.tokenCount / 1000);
+						const lastTool =
+							progress.toolHistory.length > 0
+								? progress.toolHistory[progress.toolHistory.length - 1]
+								: '';
+						const title = `${progress.subagentName || 'subagent'} • ${progress.toolCallCount} tools ${lastTool ? `• ${lastTool}` : ''} • ${tokens}k tokens`;
+
+						await emitToolCallUpdate(
+							session,
+							conn,
+							toolCall,
+							'in_progress',
+							undefined,
+							title,
+						);
+					}
+				}, 1500);
+			}
+
 			const toolResult = await processToolUse(toolCall);
+			if (pollInterval) clearInterval(pollInterval);
 
 			const status: ToolCallStatus = toolResult.content.startsWith('Error')
 				? 'failed'
@@ -297,6 +333,7 @@ async function emitToolCallUpdate(
 	toolCall: ToolCall,
 	status: ToolCallStatus,
 	rawOutput?: unknown,
+	title?: string,
 ): Promise<void> {
 	await conn.sessionUpdate({
 		sessionId: session.sessionId,
@@ -305,6 +342,7 @@ async function emitToolCallUpdate(
 			toolCallId: toolCall.id,
 			status,
 			rawOutput,
+			title,
 		},
 	});
 }
