@@ -3,6 +3,7 @@ import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {DEFAULT_FIND_FILES_RESULTS, MAX_FIND_FILES_RESULTS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
+import {getSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -26,7 +27,7 @@ interface FindFilesArgs {
 }
 
 const executeFindFiles = async (args: FindFilesArgs): Promise<string> => {
-	const cwd = process.cwd();
+	const cwd = getSessionCwd();
 	const maxResults = Math.min(
 		args.maxResults || DEFAULT_FIND_FILES_RESULTS,
 		MAX_FIND_FILES_RESULTS,

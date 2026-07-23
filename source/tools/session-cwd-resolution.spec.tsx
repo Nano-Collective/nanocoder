@@ -3,6 +3,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {resetSessionCwd, setSessionCwd} from '@/services/session-cwd';
+import {findFilesTool} from './find-files';
 import {readFileTool} from './read-file';
 
 console.log('\ntools/session-cwd-resolution.spec.tsx');
@@ -34,6 +35,22 @@ test.serial('read_file validator accepts a relative path under the session cwd',
 		setSessionCwd(dir);
 		const res = await readFileTool.validator!({path: 'note.txt'});
 		t.true(res.valid);
+	} finally {
+		resetSessionCwd();
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test.serial('find_files resolves the glob search root against the session cwd', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nc-find-'));
+	try {
+		writeFileSync(join(dir, 'widget.ts'), 'export const x = 1;\n');
+		setSessionCwd(dir);
+		const result = await findFilesTool.tool.execute!(
+			{pattern: '*.ts'},
+			{toolCallId: 't', messages: []},
+		);
+		t.regex(result, /widget\.ts/);
 	} finally {
 		resetSessionCwd();
 		rmSync(dir, {recursive: true, force: true});
