@@ -1,10 +1,10 @@
 import {lstat, readdir} from 'node:fs/promises';
-import {join} from 'node:path';
+import {join, relative} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {ThemeContext} from '@/hooks/useTheme';
-import {getProjectRoot, getSessionCwd} from '@/services/session-cwd';
+import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -37,7 +37,7 @@ const executeListDirectory = async (
 	const showHiddenFiles = args.showHiddenFiles ?? false;
 
 	// Validate path
-	const cwd = getSessionCwd();
+	const cwd = getSafeSessionCwd();
 	const root = getProjectRoot();
 	if (!isValidFilePath(dirPath, root)) {
 		throw new Error(
@@ -46,7 +46,9 @@ const executeListDirectory = async (
 	}
 
 	const resolvedPath = resolveFilePath(dirPath, cwd, root);
-	const ig = loadGitignore(cwd);
+	// Load from the project root so root-level rules still apply after a `cd`
+	// into a subdir; entries are matched root-relative below.
+	const ig = loadGitignore(root);
 
 	try {
 		const entries: DirectoryEntry[] = [];
@@ -71,9 +73,11 @@ const executeListDirectory = async (
 						continue;
 					}
 
-					// Check if this item should be ignored using gitignore patterns
-					const itemPath = relativeTo ? join(relativeTo, item.name) : item.name;
-					if (ig.ignores(itemPath)) {
+					const fullPath = join(currentPath, item.name);
+
+					// Check if this item should be ignored using gitignore patterns.
+					// Match root-relative so the project-root .gitignore applies.
+					if (ig.ignores(relative(root, fullPath))) {
 						continue;
 					}
 
@@ -84,7 +88,6 @@ const executeListDirectory = async (
 						type = 'directory';
 					}
 
-					const fullPath = join(currentPath, item.name);
 					const relativePath = join(relativeTo, item.name);
 
 					// Only get stats for files (to get size)
