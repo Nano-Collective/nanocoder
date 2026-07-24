@@ -17,6 +17,8 @@ import {useTheme} from '@/hooks/useTheme';
 import {useTitleShape} from '@/hooks/useTitleShape';
 import {fuzzyScore} from '@/utils/fuzzy-matching';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
+import {McpWizard} from '@/wizards/mcp-wizard';
+import {ProviderWizard} from '@/wizards/provider-wizard';
 import {SettingsJsonConfigPanel} from './settings-json-config';
 import type {
 	ManagedSettingsPanel,
@@ -169,22 +171,22 @@ function buildRowsForTab(
 				{
 					kind: 'managed',
 					id: 'providers-config',
-					label: 'Providers',
-					value: `${getAppConfig().providers?.length ?? 0}`,
+					label: 'Configure Providers',
+					value: `${getAppConfig().providers?.length ?? 0} configured`,
 					panel: 'providers-config',
 				},
 				{
 					kind: 'managed',
 					id: 'mcp-config',
-					label: 'MCP Servers',
-					value: `${getAppConfig().mcpServers?.length ?? 0}`,
+					label: 'Configure MCP Servers',
+					value: `${getAppConfig().mcpServers?.length ?? 0} configured`,
 					panel: 'mcp-config',
 				},
 				{
 					kind: 'managed',
 					id: 'json-config',
-					label: 'Config (JSON)',
-					value: 'edit',
+					label: 'Edit Config Files',
+					value: 'agents.config.json',
 					panel: 'json-config',
 				},
 			];
@@ -291,19 +293,17 @@ function renderManagedPanel(
 			return <SettingsWebSearchPanel onBack={onBack} onCancel={onBack} />;
 		case 'providers-config':
 			return (
-				<SettingsJsonConfigPanel
-					title="Providers (agents.config.json)"
-					initialPath={['nanocoder', 'providers']}
-					onBack={onBack}
+				<ProviderWizard
+					projectDir={process.cwd()}
+					onComplete={onBack}
 					onCancel={onBack}
 				/>
 			);
 		case 'mcp-config':
 			return (
-				<SettingsJsonConfigPanel
-					configFileName=".mcp.json"
-					title="MCP Servers (.mcp.json)"
-					onBack={onBack}
+				<McpWizard
+					projectDir={process.cwd()}
+					onComplete={onBack}
 					onCancel={onBack}
 				/>
 			);
