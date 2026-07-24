@@ -171,26 +171,7 @@ export class NanocoderAcpClient {
 			}
 			
 			if (result.configOptions) {
-				const modelOpt = result.configOptions.find((o: any) => o.id === 'model') as any;
-				if (modelOpt) {
-					this.currentModel = modelOpt.currentValue;
-					
-					this.availableModels = [];
-					for (const opt of modelOpt.options || []) {
-						if (opt.options && Array.isArray(opt.options)) {
-							// It's a group
-							this.availableModels.push(...opt.options.map((o: any) => o.value || o));
-						} else {
-							// It's a flat option
-							this.availableModels.push(opt.value || opt);
-						}
-					}
-				}
-				const providerOpt = result.configOptions.find((o: any) => o.id === 'provider') as any;
-				if (providerOpt) {
-					this.currentProvider = providerOpt.currentValue;
-					this.availableProviders = providerOpt.options ? providerOpt.options.map((o: any) => o.value || o) : [];
-				}
+				this._parseConfigOptions(result.configOptions);
 			}
 
 			// Force initial preferences if they differ
@@ -246,12 +227,18 @@ export class NanocoderAcpClient {
 	async setSessionProvider(providerId: string, persist = true): Promise<void> {
 		if (!this.connection || !this._sessionId) return;
 		try {
-			await this.connection.setSessionConfigOption({
+			const result = await this.connection.setSessionConfigOption({
 				sessionId: this._sessionId,
 				configId: 'provider',
 				value: providerId
 			});
-			this.currentProvider = providerId;
+			// Parse the response — server returns updated model list for the new provider
+			if (result?.configOptions) {
+				this._parseConfigOptions(result.configOptions);
+			} else {
+				// Fallback: at minimum update the current provider
+				this.currentProvider = providerId;
+			}
 			this.notifyStateSync();
 		} catch (error) {
 			this.outputChannel.appendLine(`Failed to set provider: ${error}`);
@@ -266,7 +253,12 @@ export class NanocoderAcpClient {
 				configId: 'model',
 				value: modelId
 			});
-			this.currentModel = modelId;
+			// Parse the response to get the authoritative current model back from server
+			if (result?.configOptions) {
+				this._parseConfigOptions(result.configOptions);
+			} else {
+				this.currentModel = modelId;
+			}
 			this.notifyStateSync();
 
 			if (persist) {
@@ -276,6 +268,11 @@ export class NanocoderAcpClient {
 		} catch (error) {
 			this.outputChannel.appendLine(`Failed to set model: ${error}`);
 		}
+	}
+
+	/** Start a new conversation by clearing the cached session ID. */
+	newChat(): void {
+		this._sessionId = undefined;
 	}
 
 	async prompt(text: string): Promise<void> {
@@ -299,6 +296,31 @@ export class NanocoderAcpClient {
 			});
 		} catch (error) {
 			this.outputChannel.appendLine(`Cancel failed: ${error}`);
+		}
+	}
+
+	/** Parse configOptions array from any ACP response and update local state. */
+	private _parseConfigOptions(configOptions: any[]): void {
+		const modelOpt = configOptions.find((o: any) => o.id === 'model') as any;
+		if (modelOpt) {
+			this.currentModel = modelOpt.currentValue;
+			this.availableModels = [];
+			for (const opt of modelOpt.options || []) {
+				if (opt.options && Array.isArray(opt.options)) {
+					// Grouped options (e.g. provider > models)
+					this.availableModels.push(...opt.options.map((o: any) => o.value || o));
+				} else {
+					// Flat option
+					this.availableModels.push(opt.value || opt);
+				}
+			}
+		}
+		const providerOpt = configOptions.find((o: any) => o.id === 'provider') as any;
+		if (providerOpt) {
+			this.currentProvider = providerOpt.currentValue;
+			this.availableProviders = providerOpt.options
+				? providerOpt.options.map((o: any) => o.value || o)
+				: [];
 		}
 	}
 

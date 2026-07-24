@@ -75,14 +75,25 @@
 				"command": "nanocoder.openConfig",
 				"title": "Open Configuration",
 				"category": "Nanocoder"
+			},
+			{
+				"command": "nanocoder.newChat",
+				"title": "New Chat",
+				"category": "Nanocoder",
+				"icon": "$(add)"
 			}
 		],
 		"menus": {
 			"view/title": [
 				{
+					"command": "nanocoder.newChat",
+					"when": "view == nanocoder.chatView",
+					"group": "navigation@1"
+				},
+				{
 					"command": "nanocoder.toggleHistory",
 					"when": "view == nanocoder.chatView",
-					"group": "navigation"
+					"group": "navigation@2"
 				}
 			]
 		},

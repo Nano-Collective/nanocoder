@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import * as os from 'os';
+import {existsSync} from 'node:fs';
 import {ClientSideConnection, ndJsonStream} from '@agentclientprotocol/sdk';
 import {AcpStateManager, ACPStatus} from './acp-state';
 import {NanocoderAcpClient} from './acp-client';
@@ -28,7 +29,19 @@ export class AcpProcessManager {
 
 		const config = vscode.workspace.getConfiguration('nanocoder');
 		const configuredCliPath = config.get<string>('cliPath');
-		const cliPath = configuredCliPath || await findCliPath();
+		let cliPath: string | undefined;
+		if (configuredCliPath) {
+			if (existsSync(configuredCliPath)) {
+				cliPath = configuredCliPath;
+			} else {
+				this.outputChannel.appendLine(
+					`WARNING: nanocoder.cliPath "${configuredCliPath}" does not exist. Falling back to PATH discovery.`
+				);
+				cliPath = (await findCliPath()) ?? undefined;
+			}
+		} else {
+			cliPath = (await findCliPath()) ?? undefined;
+		}
 
 		if (!cliPath) {
 			this.stateManager.setStatus(ACPStatus.CliMissing);

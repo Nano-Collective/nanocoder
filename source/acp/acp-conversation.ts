@@ -9,7 +9,7 @@ import type {AcpSession} from '@/acp/acp-session';
 import {type AcpToolCallMeta, buildToolCallMeta} from '@/acp/acp-tool-call';
 import {DEFAULT_HEADLESS_MAX_TURNS, getAppConfig} from '@/config/index';
 import {processToolUse} from '@/message-handler';
-import {getSubagentProgress} from '@/services/subagent-events';
+import {getAllSubagentProgress} from '@/services/subagent-events';
 import {parseToolCalls} from '@/tool-calling/index';
 import {resolveToolApproval} from '@/tools/approval-policy';
 import type {ToolManager} from '@/tools/tool-manager';
@@ -193,7 +193,12 @@ export async function runAcpConversation(
 			// the tool result. We reuse this call's id (just announced) so the
 			// permission request targets a known tool call.
 			if (toolCall.function.name === 'ask_user') {
-				const answer = await handleAskUser(session, conn, toolCall);
+				const answer = await handleAskUser(
+					session,
+					conn,
+					toolCall,
+					abortController.signal,
+				);
 				toolResults.push(answer);
 				continue;
 			}
@@ -214,6 +219,7 @@ export async function runAcpConversation(
 					toolCall,
 					conn,
 					meta,
+					abortController.signal,
 				);
 
 				if (permission === 'cancelled') {
@@ -250,26 +256,35 @@ export async function runAcpConversation(
 			await emitToolCallUpdate(session, conn, toolCall, 'in_progress');
 
 			let pollInterval: ReturnType<typeof setInterval> | null = null;
-			if (
-				toolCall.function.name === 'invoke_subagent' ||
-				toolCall.function.name === 'browser_subagent'
-			) {
-				let agentId = '';
-				try {
-					const args = toolCall.function.arguments as Record<string, unknown>;
-					agentId = (args.ReusedSubagentId || args.TaskName || '') as string;
-				} catch (_e) {}
-
+			let isPolling = true;
+			if (toolCall.function.name === 'agent') {
 				pollInterval = setInterval(async () => {
-					const progress = getSubagentProgress(agentId);
-					if (progress && progress.toolCallCount > 0) {
-						const tokens = Math.round(progress.tokenCount / 1000);
-						const lastTool =
-							progress.toolHistory.length > 0
-								? progress.toolHistory[progress.toolHistory.length - 1]
-								: '';
-						const title = `${progress.subagentName || 'subagent'} • ${progress.toolCallCount} tools ${lastTool ? `• ${lastTool}` : ''} • ${tokens}k tokens`;
+					if (!isPolling) return;
+					// agentId is a randomUUID() internal to the executor — not in args.
+					// Poll all active agents and pick the most active running one.
+					const allProgress = getAllSubagentProgress();
+					let best: any = null;
+					for (const prog of allProgress.values()) {
+						if (!best || prog.tokenCount > best.tokenCount) {
+							best = prog;
+						}
+					}
 
+					if (best) {
+						const tokens = Math.floor(best.tokenCount / 1000);
+						const lastTool =
+							best.toolHistory.length > 0
+								? best.toolHistory[best.toolHistory.length - 1]
+								: '';
+
+						let title = `${best.subagentName || 'agent'} • ${tokens}k tokens`;
+						if (best.toolCallCount > 0) {
+							title += ` • ${best.toolCallCount} tools${lastTool ? ` (${lastTool})` : ''}`;
+						} else {
+							title += ` • thinking...`;
+						}
+
+						if (!isPolling) return;
 						await emitToolCallUpdate(
 							session,
 							conn,
@@ -282,7 +297,10 @@ export async function runAcpConversation(
 				}, 1500);
 			}
 
-			const toolResult = await processToolUse(toolCall);
+			const toolResult = await processToolUse(toolCall, {
+				abortSignal: abortController.signal,
+			});
+			isPolling = false;
 			if (pollInterval) clearInterval(pollInterval);
 
 			const status: ToolCallStatus = toolResult.content.startsWith('Error')
@@ -351,6 +369,7 @@ async function handleAskUser(
 	session: AcpSession,
 	conn: AgentSideConnection,
 	toolCall: ToolCall,
+	abortSignal?: AbortSignal,
 ): Promise<ToolResult> {
 	const args = toolCall.function.arguments ?? {};
 	const question = typeof args.question === 'string' ? args.question : '';
@@ -368,6 +387,7 @@ async function handleAskUser(
 			toolCall.id,
 			question,
 			options,
+			abortSignal,
 		);
 		const status: ToolCallStatus = content.startsWith('Error')
 			? 'failed'
