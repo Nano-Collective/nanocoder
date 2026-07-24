@@ -1,3 +1,4 @@
+import {getProjectRoot, getSessionCwd} from '@/services/session-cwd';
 import {formatError} from '@/utils/error-formatter';
 import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
 
@@ -7,16 +8,17 @@ type ValidationResult = {valid: true} | {valid: false; error: string};
  * Validates a single file path: checks format and project boundary.
  */
 export function validatePath(path: string): ValidationResult {
-	if (!isValidFilePath(path)) {
+	const cwd = getSessionCwd();
+	const root = getProjectRoot();
+	if (!isValidFilePath(path, root)) {
 		return {
 			valid: false,
-			error: `⚒ Invalid file path. Path must be relative and within the project directory.`,
+			error: `⚒ Invalid file path. Path must be within the project directory.`,
 		};
 	}
 
 	try {
-		const cwd = process.cwd();
-		resolveFilePath(path, cwd);
+		resolveFilePath(path, cwd, root);
 	} catch (error) {
 		const errorMessage = formatError(error);
 		return {
@@ -35,24 +37,25 @@ export function validatePathPair(
 	source: string,
 	destination: string,
 ): ValidationResult {
-	if (!isValidFilePath(source)) {
+	const cwd = getSessionCwd();
+	const root = getProjectRoot();
+	if (!isValidFilePath(source, root)) {
 		return {
 			valid: false,
-			error: `⚒ Invalid source path. Path must be relative and within the project directory.`,
+			error: `⚒ Invalid source path. Path must be within the project directory.`,
 		};
 	}
 
-	if (!isValidFilePath(destination)) {
+	if (!isValidFilePath(destination, root)) {
 		return {
 			valid: false,
-			error: `⚒ Invalid destination path. Path must be relative and within the project directory.`,
+			error: `⚒ Invalid destination path. Path must be within the project directory.`,
 		};
 	}
 
 	try {
-		const cwd = process.cwd();
-		resolveFilePath(source, cwd);
-		resolveFilePath(destination, cwd);
+		resolveFilePath(source, cwd, root);
+		resolveFilePath(destination, cwd, root);
 	} catch (error) {
 		const errorMessage = formatError(error);
 		return {

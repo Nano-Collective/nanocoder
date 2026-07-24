@@ -4,6 +4,11 @@ import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
+import {
+	getContainedSessionCwd,
+	getProjectRoot,
+	getSessionCwd,
+} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -31,29 +36,37 @@ const executeSearchFileContents = async (
 		return 'Error: Search query cannot be empty';
 	}
 
-	const cwd = process.cwd();
+	const cwd = getSessionCwd();
 	const maxResults = Math.min(
 		args.maxResults || DEFAULT_SEARCH_RESULTS,
 		MAX_SEARCH_RESULTS,
 	);
 	const caseSensitive = args.caseSensitive || false;
 
-	// Validate and resolve search path if provided
+	// Validate and resolve search path if provided. Resolve relative to the
+	// session cwd, but bound containment to the project root so an absolute
+	// in-project path (e.g. the workspace root) is not rejected once the shell
+	// has `cd`-ed into a subdir.
+	const root = getProjectRoot();
 	let searchPath: string | undefined;
 	if (args.path) {
-		if (!isValidFilePath(args.path)) {
+		if (!isValidFilePath(args.path, root)) {
 			return `Error: Invalid path "${args.path}"`;
 		}
 		searchPath = path.resolve(cwd, args.path);
-		if (!searchPath.startsWith(path.resolve(cwd))) {
+		if (searchPath !== root && !searchPath.startsWith(root + path.sep)) {
 			return `Error: Path escapes project directory: ${args.path}`;
 		}
 	}
 
+	// Default search root when no path is given: clamp to the project so a `cd`
+	// outside it (e.g. `cd /etc`) can't grep the whole filesystem.
+	const searchRoot = getContainedSessionCwd();
+
 	try {
 		const {matches, truncated} = await searchProjectContents(
 			args.query,
-			cwd,
+			searchRoot,
 			maxResults,
 			caseSensitive,
 			args.include,

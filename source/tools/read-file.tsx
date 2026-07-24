@@ -12,6 +12,7 @@ import {
 	MAX_LINE_LENGTH_CHARS,
 } from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
+import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -27,7 +28,7 @@ const executeReadFile = async (args: {
 	end_line?: number;
 	metadata_only?: boolean;
 }): Promise<string> => {
-	const absPath = resolve(args.path);
+	const absPath = resolve(getSafeSessionCwd(), args.path);
 
 	try {
 		// Handle explicit metadata_only request
@@ -340,7 +341,7 @@ const readFileFormatter = async (
 	try {
 		const path = args.path || args.file_path;
 		if (path && typeof path === 'string') {
-			const absPath = resolve(path);
+			const absPath = resolve(getSafeSessionCwd(), path);
 			const cached = await getCachedFileContent(absPath);
 			const content = cached.content;
 			const lines = cached.lines;
@@ -391,17 +392,18 @@ const readFileValidator = async (args: {
 	metadata_only?: boolean;
 }): Promise<{valid: true} | {valid: false; error: string}> => {
 	// Validate path boundary first to prevent directory traversal
-	if (!isValidFilePath(args.path)) {
+	const cwd = getSafeSessionCwd();
+	const root = getProjectRoot();
+	if (!isValidFilePath(args.path, root)) {
 		return {
 			valid: false,
-			error: `Invalid file path: "${args.path}". Path must be relative and within the project directory.`,
+			error: `Invalid file path: "${args.path}". Path must be within the project directory.`,
 		};
 	}
 
 	// Verify the resolved path stays within project boundaries
 	try {
-		const cwd = process.cwd();
-		resolveFilePath(args.path, cwd);
+		resolveFilePath(args.path, cwd, root);
 	} catch (error) {
 		const errorMessage = formatError(error);
 		return {
@@ -410,7 +412,7 @@ const readFileValidator = async (args: {
 		};
 	}
 
-	const absPath = resolve(args.path);
+	const absPath = resolve(getSafeSessionCwd(), args.path);
 
 	try {
 		await access(absPath, constants.F_OK);

@@ -5,6 +5,7 @@ import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {ThemeContext} from '@/hooks/useTheme';
+import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -169,7 +170,7 @@ function formatUpdatedFileContext(content: string): string {
 
 const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	const {path, diff} = args;
-	const absPath = resolve(path);
+	const absPath = resolve(getSafeSessionCwd(), path);
 	const blocks = parseDiffEditBlocks(diff);
 	const cached = await getCachedFileContent(absPath);
 	const fileContent = cached.content;
@@ -266,7 +267,7 @@ const diffEditFormatter = async (
 	args: DiffEditArgs,
 	result?: string,
 ): Promise<React.ReactElement> => {
-	const absPath = resolve(args.path);
+	const absPath = resolve(getSafeSessionCwd(), args.path);
 
 	if (result === undefined && isVSCodeConnected()) {
 		try {
@@ -317,7 +318,7 @@ const diffEditValidator = async (
 		return {valid: false, error: formatError(error)};
 	}
 
-	const absPath = resolve(args.path);
+	const absPath = resolve(getSafeSessionCwd(), args.path);
 	try {
 		await access(absPath, constants.F_OK);
 	} catch (error) {

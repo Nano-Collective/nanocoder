@@ -268,3 +268,29 @@ test.serial('resolveFilePath: resolves real files within a real project root', t
 		rmSync(base, {recursive: true, force: true});
 	}
 });
+
+test.serial('resolveFilePath: containmentRoot lets a deep session cwd still reach the project root (sim regression)', t => {
+	const root = mkdtempSync(join(tmpdir(), 'pathval-root-'));
+	try {
+		// Model cd-ed deep into a worktree subdir; the session cwd is now here.
+		const deepCwd = join(root, '.claude', 'worktrees', 'wt', 'kserp');
+		mkdirSync(deepCwd, {recursive: true});
+		writeFileSync(join(root, 'README.md'), '');
+
+		// Before the fix, containment used the (deep) session cwd, so listing the
+		// project root — an ANCESTOR — threw "escapes project directory". With the
+		// project root as containmentRoot it resolves fine.
+		t.is(resolveFilePath(root, deepCwd, root), root);
+		t.is(
+			resolveFilePath('README.md', root, root),
+			join(root, 'README.md'),
+			'a relative path against the root resolves under it',
+		);
+
+		// Containment is still enforced against the root: a true escape throws.
+		t.throws(() => resolveFilePath('/etc/passwd', deepCwd, root));
+		t.throws(() => resolveFilePath('../outside', root, root));
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
