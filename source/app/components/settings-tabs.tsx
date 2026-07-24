@@ -3,13 +3,14 @@ import {Box, Text, useInput} from 'ink';
 import type {ReactElement} from 'react';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {StyledTitle} from '@/components/ui/styled-title';
-import {getAppConfig} from '@/config/index';
+import {getAppConfig, loadDefaultMode} from '@/config/index';
 import {
 	getAlternateScreen,
 	getNanocoderShape,
 	getNotificationsPreference,
 	getPasteThreshold,
 	getPrivacyPreference,
+	getReasoningExpanded,
 	updateAlternateScreen,
 } from '@/config/preferences';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -19,7 +20,9 @@ import {fuzzyScore} from '@/utils/fuzzy-matching';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 import {McpWizard} from '@/wizards/mcp-wizard';
 import {ProviderWizard} from '@/wizards/provider-wizard';
+import {SettingsDefaultModePanel} from './settings-default-mode';
 import {SettingsJsonConfigPanel} from './settings-json-config';
+import {SettingsReasoningTracesPanel} from './settings-reasoning-traces';
 import type {
 	ManagedSettingsPanel,
 	SettingsSelectorProps,
@@ -149,6 +152,13 @@ function buildRowsForTab(
 					value: 'configure',
 					panel: 'display-settings',
 				},
+				{
+					kind: 'managed',
+					id: 'reasoning-traces',
+					label: 'Reasoning Traces',
+					value: getReasoningExpanded() ? 'expanded' : 'collapsed',
+					panel: 'reasoning-traces',
+				},
 			];
 		case 'advanced':
 			return [
@@ -158,6 +168,13 @@ function buildRowsForTab(
 					label: 'Privacy',
 					value: getPrivacyPreference() ? 'on' : 'off',
 					panel: 'privacy',
+				},
+				{
+					kind: 'managed',
+					id: 'default-mode',
+					label: 'Default Mode',
+					value: loadDefaultMode() ?? 'normal',
+					panel: 'default-mode',
 				},
 				{
 					kind: 'managed',
@@ -291,6 +308,10 @@ function renderManagedPanel(
 			return <SettingsJsonConfigPanel onBack={onBack} onCancel={onBack} />;
 		case 'web-search':
 			return <SettingsWebSearchPanel onBack={onBack} onCancel={onBack} />;
+		case 'default-mode':
+			return <SettingsDefaultModePanel onBack={onBack} onCancel={onBack} />;
+		case 'reasoning-traces':
+			return <SettingsReasoningTracesPanel onBack={onBack} onCancel={onBack} />;
 		case 'providers-config':
 			return (
 				<ProviderWizard
