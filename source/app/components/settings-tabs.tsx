@@ -29,6 +29,7 @@ import {
 	SettingsThemePanel,
 	SettingsTitleShapePanel,
 } from './settings-selector';
+import {SettingsJsonConfigPanel} from './settings-json-config';
 
 /**
  * Tab categories are our own settings, grouped for browsability — not the
@@ -154,6 +155,13 @@ function buildRowsForTab(
 					value: getPrivacyPreference() ? 'on' : 'off',
 					panel: 'privacy',
 				},
+				{
+					kind: 'managed',
+					id: 'json-config',
+					label: 'Config (JSON)',
+					value: 'view',
+					panel: 'json-config',
+				},
 			];
 	}
 }
@@ -252,6 +260,8 @@ function renderManagedPanel(
 			return <SettingsDisplayPanel onBack={onBack} onCancel={onBack} />;
 		case 'privacy':
 			return <SettingsPrivacyPanel onBack={onBack} onCancel={onBack} />;
+		case 'json-config':
+			return <SettingsJsonConfigPanel onBack={onBack} onCancel={onBack} />;
 	}
 }
 
