@@ -32,36 +32,6 @@ export function updateConfigValue<K extends string, V>(
 }
 
 /**
- * Reads a specific value from the global agents.config.json under `nanocoder`.
- */
-export function getConfigValue<T = unknown>(
-	nanocoderKey: string,
-): T | undefined {
-	const config = readConfigObject(getGlobalConfigPath());
-	if (!config) return undefined;
-	return (config.nanocoder as Record<string, unknown>)?.[nanocoderKey] as
-		| T
-		| undefined;
-}
-
-/**
- * Reads a nested value: getConfigNestedValue('autoCompact', 'threshold') reads
- * nanocoder.autoCompact.threshold.
- */
-export function getConfigNestedValue<T = unknown>(
-	parentKey: string,
-	childKey: string,
-): T | undefined {
-	const config = readConfigObject(getGlobalConfigPath());
-	if (!config) return undefined;
-	const parent = (config.nanocoder as Record<string, unknown>)?.[parentKey];
-	if (parent && typeof parent === 'object') {
-		return (parent as Record<string, unknown>)?.[childKey] as T | undefined;
-	}
-	return undefined;
-}
-
-/**
  * Updates a nested value: updateConfigNestedValue('autoCompact', 'threshold', 75).
  */
 export function updateConfigNestedValue<K extends string, V>(
@@ -82,24 +52,6 @@ export function updateConfigNestedValue<K extends string, V>(
 	}
 	(nanocoder[parentKey] as Record<string, unknown>)[childKey] = value;
 	writeConfigObject(configPath, config, 'nested update');
-}
-
-/**
- * Replaces an entire nested object: updateConfigObject('autoCompact', {...}).
- */
-export function updateConfigObject<
-	K extends string,
-	V extends Record<string, unknown>,
->(parentKey: K, value: V): void {
-	const configPath = getGlobalConfigPath();
-	const config = readConfigObject(configPath);
-	if (!config) return;
-
-	if (!config.nanocoder || typeof config.nanocoder !== 'object') {
-		config.nanocoder = {};
-	}
-	(config.nanocoder as Record<string, unknown>)[parentKey] = value;
-	writeConfigObject(configPath, config, 'object update');
 }
 
 /**
