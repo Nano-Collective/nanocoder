@@ -1,6 +1,6 @@
 import {Box, Text, useInput} from 'ink';
-import TextInput from '@/components/text-input';
 import {type ReactNode, useCallback, useEffect, useMemo, useState} from 'react';
+import TextInput from '@/components/text-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -297,6 +297,25 @@ export function JsonViewer({
 			return;
 		}
 
+		// Boolean editing: pick the value with arrow keys / space instead of typing.
+		if (editMode === 'edit' && currentRow?.kind === 'boolean') {
+			if (
+				key.leftArrow ||
+				key.rightArrow ||
+				key.upArrow ||
+				key.downArrow ||
+				input === ' '
+			) {
+				setEditValue(v => (v === 'true' ? 'false' : 'true'));
+				return;
+			}
+			if (key.return) {
+				commitEdit();
+				return;
+			}
+			return;
+		}
+
 		// If in edit mode, let TextInput handle input
 		if (editMode !== 'browse') return;
 
@@ -412,7 +431,16 @@ export function JsonViewer({
 								</Text>
 
 								{/* Highlighted row gets inverse */}
-								{isHighlighted ? (
+								{globalIndex === cursorIndex && editMode === 'edit' ? (
+									<EditRow
+										row={row}
+										indent={indentStr.repeat(row.indent)}
+										colors={colors}
+										editValue={editValue}
+										setEditValue={setEditValue}
+										onSubmit={commitEdit}
+									/>
+								) : isHighlighted ? (
 									<Text
 										color={colors.base}
 										backgroundColor={colors.primary}
@@ -424,17 +452,15 @@ export function JsonViewer({
 									<Text>{renderRowContent(row, indentStr, colors, false)}</Text>
 								)}
 
-								{/* Edit input overlay */}
-								{globalIndex === cursorIndex && editMode !== 'browse' && (
+								{/* Add-key overlay: entering a new "key": value pair. */}
+								{globalIndex === cursorIndex && editMode === 'add-key' && (
 									<Box>
 										<Text color={colors.warning}>
 											{' '}
 											<TextInput
 												value={editValue}
 												onChange={setEditValue}
-												onSubmit={
-													editMode === 'add-key' ? commitAdd : commitEdit
-												}
+												onSubmit={commitAdd}
 												focus
 											/>
 										</Text>
@@ -468,6 +494,77 @@ export function JsonViewer({
 }
 
 // ─── Render Helpers ──────────────────────────────────────────────────────────
+
+/**
+ * In-place editor for the row under the cursor: the input sits where the value
+ * was (inside the quotes for strings, so the cursor lands on the text), and
+ * booleans are picked with the arrow keys instead of typed.
+ */
+function EditRow({
+	row,
+	indent,
+	colors,
+	editValue,
+	setEditValue,
+	onSubmit,
+}: {
+	row: JsonFlatRow;
+	indent: string;
+	colors: Colors;
+	editValue: string;
+	setEditValue: (value: string) => void;
+	onSubmit: () => void;
+}): ReactNode {
+	const input = (
+		<TextInput
+			value={editValue}
+			onChange={setEditValue}
+			onSubmit={onSubmit}
+			focus
+		/>
+	);
+
+	let editor: ReactNode;
+	if (row.kind === 'boolean') {
+		editor = (
+			<Text>
+				<Text
+					color={editValue === 'true' ? colors.primary : colors.secondary}
+					bold={editValue === 'true'}
+				>
+					true
+				</Text>
+				<Text color={colors.secondary}> </Text>
+				<Text
+					color={editValue === 'false' ? colors.primary : colors.secondary}
+					bold={editValue === 'false'}
+				>
+					false
+				</Text>
+				<Text color={colors.secondary}> ←/→ to change</Text>
+			</Text>
+		);
+	} else if (row.kind === 'string') {
+		editor = <Text color={colors.warning}>"{input}"</Text>;
+	} else {
+		editor = <Text color={colors.warning}>{input}</Text>;
+	}
+
+	return (
+		<Box>
+			<Text color={colors.text}>{indent}</Text>
+			{row.key !== undefined && (
+				<Text>
+					<Text color={colors.primary} bold>
+						"{row.key}"
+					</Text>
+					<Text color={colors.secondary}>: </Text>
+				</Text>
+			)}
+			{editor}
+		</Box>
+	);
+}
 
 function renderRowContent(
 	row: JsonFlatRow,
