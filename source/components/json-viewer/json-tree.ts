@@ -203,7 +203,8 @@ function flattenNode(
 				trailing,
 			});
 		} else {
-			// Open bracket row
+			// Open bracket row. No trailing comma here — the sibling comma belongs
+			// on the CLOSE bracket row below, not after an opening `{`/`[`.
 			rows.push({
 				path,
 				pathSegments: [...pathSegments],
@@ -215,7 +216,7 @@ function flattenNode(
 				isCollapsed: false,
 				hiddenCount: 0,
 				lineNumber: nextLine(),
-				trailing,
+				trailing: '',
 			});
 
 			// Children
