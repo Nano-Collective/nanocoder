@@ -25,6 +25,11 @@ export interface ExtensionMessageStateUpdate {
 
 export interface ExtensionMessageClear {
 	type: 'clear';
+	isLoading?: boolean;
+}
+
+export interface ExtensionMessageSessionLoaded {
+	type: 'sessionLoaded';
 }
 
 export interface ExtensionMessageAcpUpdate {
@@ -87,7 +92,8 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageToolCompleted
 	| ExtensionMessagePermissionRequested
 	| ExtensionMessageSyncState
-	| ExtensionMessageUpdateSessions;
+	| ExtensionMessageUpdateSessions
+	| ExtensionMessageSessionLoaded;
 
 
 // ---------------------------------------------------------

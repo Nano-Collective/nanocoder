@@ -184,27 +184,96 @@ export class AcpAgent implements Agent {
 		const trimmedUserText = userText.trim();
 		if (trimmedUserText.startsWith('/')) {
 			const commandName = trimmedUserText.split(/\s+/)[0].substring(1);
-			const command =
-				this.initContext.customCommandLoader?.getCommand(commandName);
 
-			if (command) {
-				const commandInstruction = `### ${command.fullName}\n\n${command.content}`;
-				contextualUserText = `${contextualUserText}\n\n## Included Command Instructions\n\n${commandInstruction}\n\nPlease follow these instructions for the user's request above.`;
-			} else {
-				const errorMsg = `Unrecognized slash command: \`/${commandName}\`. Use the command menu to see available commands.`;
-				session.messages = [
-					...session.messages,
-					{role: 'user', content: contextualUserText},
-					{role: 'assistant', content: errorMsg},
-				];
-				this.conn.sessionUpdate({
-					sessionId: params.sessionId,
-					update: {
-						sessionUpdate: 'agent_message_chunk',
-						content: {type: 'text', text: errorMsg},
-					},
-				});
-				return {stopReason: 'end_turn'};
+			// If the 'command name' contains a slash, it's likely a file path (e.g. /home/user/file.ts)
+			// not a slash command. Skip command interception.
+			if (!commandName.includes('/')) {
+				const command =
+					this.initContext.customCommandLoader?.getCommand(commandName);
+
+				if (command) {
+					// Custom user-defined command — expand its instructions into the prompt
+					const commandInstruction = `### ${command.fullName}\n\n${command.content}`;
+					contextualUserText = `${contextualUserText}\n\n## Included Command Instructions\n\n${commandInstruction}\n\nPlease follow these instructions for the user's request above.`;
+				} else {
+					// Check for built-in commands that have special ACP handling
+					const sendBuiltinReply = (msg: string) => {
+						session.messages = [
+							...session.messages,
+							{role: 'user', content: contextualUserText},
+							{role: 'assistant', content: msg},
+						];
+						this.conn.sessionUpdate({
+							sessionId: params.sessionId,
+							update: {
+								sessionUpdate: 'agent_message_chunk',
+								content: {type: 'text', text: msg},
+							},
+						});
+						return {stopReason: 'end_turn' as const};
+					};
+
+					if (commandName === 'clear') {
+						// Clear the conversation history
+						session.messages = [];
+						const msg = 'Conversation cleared.';
+						this.conn.sessionUpdate({
+							sessionId: params.sessionId,
+							update: {
+								sessionUpdate: 'agent_message_chunk',
+								content: {type: 'text', text: msg},
+							},
+						});
+						return {stopReason: 'end_turn'};
+					}
+
+					if (commandName === 'help') {
+						const customCmds =
+							this.initContext.customCommandLoader?.getAllCommands() ?? [];
+						const customList =
+							customCmds.length > 0
+								? customCmds
+										.map(
+											c =>
+												`- \`/${c.fullName}\` — ${c.metadata.description || 'custom command'}`,
+										)
+										.join('\n')
+								: '';
+						const msg = [
+							'**Available slash commands in VS Code GUI:**',
+							'',
+							'- `/clear` — Clear the current conversation',
+							'- `/help` — Show this help message',
+							'',
+							'**Not available in VS Code GUI** (CLI-only):',
+							'- `/init`, `/theme`, `/context-max`, `/compact`, `/usage`, and other interactive commands',
+							'',
+							customList ? `**Your custom commands:**\n${customList}` : '',
+						]
+							.filter(Boolean)
+							.join('\n');
+						return sendBuiltinReply(msg);
+					}
+
+					if (
+						[
+							'init',
+							'theme',
+							'compact',
+							'context-max',
+							'usage',
+							'model',
+							'settings',
+						].includes(commandName)
+					) {
+						const msg = `The \`/${commandName}\` command is only available in the interactive CLI (\`nanocoder\` in a terminal). It is not supported in the VS Code GUI.`;
+						return sendBuiltinReply(msg);
+					}
+
+					// Truly unrecognized command
+					const errorMsg = `Unrecognized slash command: \`/${commandName}\`. Type \`/help\` to see available commands.`;
+					return sendBuiltinReply(errorMsg);
+				}
 			}
 		}
 
@@ -238,7 +307,7 @@ export class AcpAgent implements Agent {
 			logger.error(`Error during ACP prompt: ${errorMsg}`);
 
 			// Relay the error to the chat UI so the user sees it inline
-			const formattedError = `\n\n> ❌ **Error:** An issue occurred while communicating with the AI provider (${errorMsg}). Please try again.\n`;
+			const formattedError = `\n\n**Error:** ${errorMsg}\n`;
 
 			this.conn.sessionUpdate({
 				sessionId: params.sessionId,
@@ -465,25 +534,50 @@ export class AcpAgent implements Agent {
 
 	private async replaySessionHistory(session: AcpSession): Promise<void> {
 		for (const message of session.messages) {
-			if (typeof message.content !== 'string' || message.content.length === 0) {
-				continue;
-			}
 			if (message.role === 'user') {
-				await this.conn.sessionUpdate({
-					sessionId: session.sessionId,
-					update: {
-						sessionUpdate: 'user_message_chunk',
-						content: {type: 'text', text: message.content},
-					},
-				});
+				if (typeof message.content === 'string' && message.content.length > 0) {
+					await this.conn.sessionUpdate({
+						sessionId: session.sessionId,
+						update: {
+							sessionUpdate: 'user_message_chunk',
+							content: {type: 'text', text: message.content},
+						},
+					});
+				}
 			} else if (message.role === 'assistant') {
-				await this.conn.sessionUpdate({
-					sessionId: session.sessionId,
-					update: {
-						sessionUpdate: 'agent_message_chunk',
-						content: {type: 'text', text: message.content},
-					},
-				});
+				if (message.reasoning && message.reasoning.length > 0) {
+					await this.conn.sessionUpdate({
+						sessionId: session.sessionId,
+						update: {
+							sessionUpdate: 'agent_thought_chunk',
+							content: {type: 'text', text: message.reasoning},
+						},
+					});
+				}
+				if (typeof message.content === 'string' && message.content.length > 0) {
+					await this.conn.sessionUpdate({
+						sessionId: session.sessionId,
+						update: {
+							sessionUpdate: 'agent_message_chunk',
+							content: {type: 'text', text: message.content},
+						},
+					});
+				}
+				if (message.tool_calls && message.tool_calls.length > 0) {
+					for (const tc of message.tool_calls) {
+						await this.conn.sessionUpdate({
+							sessionId: session.sessionId,
+							update: {
+								// Replay tool calls as already completed
+								sessionUpdate: 'tool_call',
+								toolCallId: tc.id,
+								title: tc.function.name,
+								rawInput: tc.function.arguments,
+								status: 'completed',
+							},
+						});
+					}
+				}
 			}
 		}
 	}

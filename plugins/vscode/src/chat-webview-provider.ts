@@ -86,6 +86,11 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 			]
 		};
 
+		// Preserve the webview DOM when user switches to another sidebar view.
+		// Without this, VS Code destroys and recreates the webview every switch,
+		// wiping the transcript even though the ACP session is still alive.
+		// NOTE: retainContextWhenHidden is set on registerWebviewViewProvider in extension.ts.
+
 		webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
 		webviewView.webview.onDidReceiveMessage(
@@ -125,6 +130,12 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 						this._outputChannel.appendLine(`[Webview] User selected mode: ${message.mode}`);
 						this._acpClient.setSessionMode(message.mode);
 						break;
+					case 'setProvider':
+						this._outputChannel.appendLine(`[Webview] User selected provider: ${message.provider}`);
+						this._acpClient.setSessionProvider(message.provider).then(() => {
+							vscode.window.showInformationMessage(`Nanocoder: Provider switched to ${message.provider}`);
+						});
+						break;
 					case 'setModel':
 						this._outputChannel.appendLine(`[Webview] User selected model: ${message.model}`);
 						this._acpClient.setSessionModel(message.model).then(() => {
@@ -136,8 +147,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 						break;
 					case 'resumeSession':
 						this._outputChannel.appendLine(`[Webview] User resumed session: ${message.sessionId}`);
-						this.postMessage({type: 'clear'});
-						this._acpClient.resumeSession(message.sessionId);
+						this.postMessage({type: 'clear', isLoading: true});
+						this._acpClient.resumeSession(message.sessionId).finally(() => {
+							this.postMessage({type: 'sessionLoaded'});
+						});
 						break;
 					case 'deleteSession':
 						this._outputChannel.appendLine(`[Webview] User deleted session: ${message.sessionId}`);

@@ -95,18 +95,24 @@
 		if (isHistoryView) {
 			document.getElementById('chat-view').classList.add('hidden');
 			document.getElementById('history-view').classList.remove('hidden');
+			// Fetch sessions from extension host and render immediately
+			vscode.postMessage({ type: 'listSessions' });
+			renderSessions();
 		} else {
-			document.getElementById('chat-view').classList.remove('hidden');
-			document.getElementById('history-view').classList.add('hidden');
+			showChatView();
 		}
 	}
-	const historyBtn = document.getElementById('history-btn');
-	const chatView = document.getElementById('chat-view');
-	const historyView = document.getElementById('history-view');
-	const historyList = document.getElementById('history-list');
+
+	function showChatView() {
+		isHistoryView = false;
+		document.getElementById('chat-view').classList.remove('hidden');
+		document.getElementById('history-view').classList.add('hidden');
+	}
+
 	const sendStopBtn = document.getElementById('send-stop-btn');
 	const iconSend = document.getElementById('icon-send');
 	const iconStop = document.getElementById('icon-stop');
+	const historyList = document.getElementById('history-list');
 
 	let currentTurnEl = null;
 	let currentTextEl = null;
@@ -133,8 +139,16 @@
 	function setProcessing(active) {
 		isProcessing = active;
 		if (!active) {
+			// Globally cancel any stuck spinners across all tool cards, 
+			// in case multiple aggregators were created in the same session
+			const allSpinners = document.querySelectorAll('.tool-status');
+			allSpinners.forEach(statusEl => {
+				if (statusEl.innerHTML.includes('animate-spin')) {
+					statusEl.innerHTML = ICONS.cancelled;
+				}
+			});
+
 			if (currentAggregator) {
-				currentAggregator.cancelPending();
 				currentAggregator.close();
 			}
 			currentAggregator = null;
@@ -198,9 +212,11 @@
 	}
 
 	function appendMessage(content, role) {
-		// Remove welcome message if present
+		// Remove welcome message and loader if present
 		const welcome = document.querySelector('.welcome-message');
 		if (welcome) welcome.remove();
+		const loader = document.getElementById('session-loader');
+		if (loader) loader.remove();
 
 		const msgEl = document.createElement('div');
 		msgEl.className = 'leading-snug break-words shrink-0 min-w-0 ' +
@@ -230,9 +246,11 @@
 	}
 
 	function appendChunk(textChunk) {
-		// Remove welcome message if present
+		// Remove welcome message and loader if present
 		const welcome = document.querySelector('.welcome-message');
 		if (welcome) welcome.remove();
+		const loader = document.getElementById('session-loader');
+		if (loader) loader.remove();
 
 		if (!currentTurnEl || !currentTextEl) {
 			// First chunk for this turn
@@ -254,6 +272,7 @@
 
 			currentTurnEl = msgEl;
 			currentTextEl = textContainer;
+			scrollToBottom();
 		} else {
 			// Append to existing turn
 			currentTurnText += textChunk;
@@ -296,7 +315,11 @@
 				break;
 			case 'clear':
 				if (renderTimeout) { clearTimeout(renderTimeout); renderTimeout = null; }
-				messagesContainer.innerHTML = '';
+				if (message.isLoading) {
+					messagesContainer.innerHTML = `<div id="session-loader" class="flex flex-col items-center justify-center h-full opacity-50 mt-10">${ICONS.pending}<div class="mt-2 text-xs">Loading session...</div></div>`;
+				} else {
+					messagesContainer.innerHTML = '';
+				}
 				currentTurnEl = null;
 				currentTextEl = null;
 				currentTurnText = '';
@@ -305,6 +328,11 @@
 					currentThoughtBox = null;
 				}
 				setProcessing(false);
+				break;
+			case 'sessionLoaded':
+				const loader = document.getElementById('session-loader');
+				if (loader) loader.remove();
+				scrollToBottom();
 				break;
 			case 'acpUpdate':
 				handleAcpUpdate(message.update);
@@ -318,39 +346,12 @@
 				break;
 			case 'updateSessions':
 				sessionsData = message.sessions || [];
-				if (isHistoryView) renderSessions();
+				renderSessions(); // Always update so list is ready when history opens
 				break;
 		}
 	});
 
-	if (historyBtn) {
-		historyBtn.addEventListener('click', () => {
-			if (isHistoryView) {
-				showChatView();
-			} else {
-				showHistoryView();
-			}
-		});
-	}
 
-	function showChatView() {
-		isHistoryView = false;
-		if (chatView) chatView.style.display = '';
-		if (historyView) historyView.style.display = 'none';
-		if (historyBtn) historyBtn.title = 'History';
-		if (historyBtn) historyBtn.classList.remove('is-history-open');
-	}
-
-	function showHistoryView() {
-		isHistoryView = true;
-		if (chatView) chatView.style.display = 'none';
-		if (historyView) historyView.style.display = '';
-		if (historyBtn) historyBtn.title = 'Back to chat';
-		if (historyBtn) historyBtn.classList.add('is-history-open');
-		// Always refresh the list when opening history
-		vscode.postMessage({ type: 'listSessions' });
-		renderSessions();
-	}
 
 	function renderSessions() {
 		if (!historyList) return;
@@ -368,7 +369,7 @@
 		const now = new Date();
 		const groups = { 'Today': [], 'Yesterday': [], 'Last 7 Days': [], 'Older': [] };
 
-		sessionsData.forEach(session => {
+		sessionsData.slice().reverse().forEach(session => {
 			const label = session.title || session.cwd || session.sessionId.slice(0, 8);
 			const item = { ...session, label };
 			groups['Older'].push(item); // Simplified: metadata doesn't include createdAt yet
@@ -380,10 +381,12 @@
 			const groupEl = document.createElement('div');
 			groupEl.className = 'mb-1';
 
-			const groupHeader = document.createElement('div');
-			groupHeader.className = 'px-4 py-1.5 text-[0.78em] font-semibold uppercase tracking-[0.06em] opacity-50';
-			groupHeader.textContent = groupName;
-			groupEl.appendChild(groupHeader);
+			if (groupName !== 'Older') {
+				const groupHeader = document.createElement('div');
+				groupHeader.className = 'px-4 py-1.5 text-[0.78em] font-semibold uppercase tracking-[0.06em] opacity-50';
+				groupHeader.textContent = groupName;
+				groupEl.appendChild(groupHeader);
+			}
 
 			sessions.forEach(session => {
 				const itemEl = document.createElement('div');
@@ -426,7 +429,14 @@
 		if (!payload) return;
 		const update = payload.update ? payload.update : payload;
 
-		if (update.sessionUpdate === 'agent_message_chunk') {
+		if (update.sessionUpdate === 'user_message_chunk') {
+			if (update.content && update.content.text) {
+				appendMessage(update.content.text, 'user');
+				currentTurnEl = null;
+				currentTextEl = null;
+				currentTurnText = '';
+			}
+		} else if (update.sessionUpdate === 'agent_message_chunk') {
 			if (currentThoughtBox) {
 				currentThoughtBox.finish();
 				currentThoughtBox = null;
@@ -588,7 +598,7 @@
 
 		cancelPending() {
 			for (const [id, item] of this.toolItems.entries()) {
-				const statusEl = item.querySelector('.ml-auto');
+				const statusEl = item.querySelector('.tool-status');
 				if (statusEl && statusEl.innerHTML.includes('animate-spin')) {
 					statusEl.innerHTML = ICONS.cancelled;
 				}
@@ -606,33 +616,51 @@
 				this.updateTitle();
 
 				item = document.createElement('div');
-				item.className = 'px-3 py-1.5 border-t border-vscode-widget-border flex items-center gap-2 text-[0.85em] font-vscode first:border-t-0';
+				item.className = 'px-3 py-1.5 border-t border-vscode-widget-border flex flex-col gap-2 text-[0.85em] font-vscode first:border-t-0';
 				item.id = `tool-card-${toolCallId}`; // So permissions can find it
 
+				const headerRow = document.createElement('div');
+				headerRow.className = 'flex items-start gap-2 w-full';
+
 				const status = document.createElement('span');
-				status.className = 'ml-auto flex items-center justify-center';
+				status.className = 'tool-status flex items-center justify-center mt-0.5 shrink-0';
 				status.innerHTML = ICONS.pending;
 
 				const label = document.createElement('span');
-				label.className = 'truncate flex-1';
+				label.className = 'tool-label flex-1 break-words leading-relaxed';
 				label.textContent = update.title || update.name || 'Tool Call';
 
-				item.appendChild(status);
-				item.appendChild(label);
+				headerRow.appendChild(status);
+				headerRow.appendChild(label);
+				item.appendChild(headerRow);
+				
 				this.body.appendChild(item);
 				this.toolItems.set(toolCallId, item);
+
 			} else {
 				if (update.title) {
-					const labelEl = item.querySelector('.truncate.flex-1');
+					const labelEl = item.querySelector('.tool-label');
 					if (labelEl) labelEl.textContent = update.title;
 				}
-				const statusEl = item.querySelector('.ml-auto');
-				if (statusEl) {
-					if (update.status === 'success' || update.status === 'completed') statusEl.innerHTML = ICONS.success;
-					else if (update.status === 'error') statusEl.innerHTML = ICONS.error;
-					else if (update.status === 'cancelled' || update.status === 'denied') statusEl.innerHTML = ICONS.cancelled;
+			}
+
+			const statusEl = item.querySelector('.tool-status');
+			if (statusEl) {
+				if (update.status === 'success' || update.status === 'completed') {
+					statusEl.innerHTML = ICONS.success;
+				} else if (
+					update.status === 'cancelled' ||
+					update.status === 'denied' ||
+					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && (update.rawOutput.includes('AbortError') || update.rawOutput.includes('cancelled')))
+				) {
+					statusEl.innerHTML = ICONS.cancelled;
+				} else if (update.status === 'error' || update.status === 'failed') {
+					statusEl.innerHTML = ICONS.error;
+				} else {
+					statusEl.innerHTML = ICONS.pending;
 				}
 			}
+
 			scrollToBottom();
 		}
 	}
@@ -747,20 +775,31 @@
 		if (card.querySelector('.tool-actions')) return;
 
 		const actionsDiv = document.createElement('div');
-		actionsDiv.className = 'px-3 py-2 bg-vscode-widget-header border-t border-vscode-widget-border flex justify-end gap-2 tool-actions';
+		actionsDiv.className = 'tool-actions';
 
 		if (options && Array.isArray(options) && options.length > 0) {
+			// This is an ask_user prompt — render a proper question card
+			actionsDiv.className = 'tool-actions px-3 py-3 bg-vscode-widget-header border-t border-vscode-widget-border flex flex-col gap-2';
+
+
+			// Stacked full-width buttons, one per option
+			const btnGroup = document.createElement('div');
+			btnGroup.className = 'flex flex-col gap-1.5 w-full';
 			for (const opt of options) {
 				const btn = document.createElement('button');
-				btn.className = 'bg-transparent border border-vscode-button-secondary text-vscode-fg hover:bg-vscode-button-secondaryHover rounded px-3 py-1.5 cursor-pointer font-vscode text-[0.9em] transition-colors';
+				btn.className = 'w-full text-left bg-transparent border border-vscode-button-secondary text-vscode-fg hover:bg-vscode-button-secondaryHover rounded px-3 py-1.5 cursor-pointer font-vscode text-[0.9em] transition-colors';
 				btn.textContent = opt.name;
 				btn.onclick = () => {
 					vscode.postMessage({ type: 'resolveTool', toolCallId, optionId: opt.optionId });
 					actionsDiv.remove();
 				};
-				actionsDiv.appendChild(btn);
+				btnGroup.appendChild(btn);
 			}
+			actionsDiv.appendChild(btnGroup);
 		} else {
+			// Standard tool approval — Approve / Deny side by side
+			actionsDiv.className = 'px-3 py-2 bg-vscode-widget-header border-t border-vscode-widget-border flex justify-end gap-2 tool-actions';
+
 			const approveBtn = document.createElement('button');
 			approveBtn.className = 'border-none rounded px-3 py-1.5 cursor-pointer font-vscode text-[0.9em] transition-colors bg-vscode-button-bg text-vscode-button-fg hover:bg-vscode-button-hover';
 			approveBtn.textContent = 'Approve';
@@ -784,6 +823,7 @@
 		card.appendChild(actionsDiv);
 		scrollToBottom();
 	}
+
 
 	// Notify extension that webview is ready
 	vscode.postMessage({ type: 'ready' });

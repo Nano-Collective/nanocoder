@@ -55,7 +55,11 @@ export function activate(context: vscode.ExtensionContext) {
 	// Register Webview Provider
 	const chatProvider = new ChatWebviewProvider(context.extensionUri, outputChannel, acpClient, diffManager);
 	context.subscriptions.push(
-		vscode.window.registerWebviewViewProvider(ChatWebviewProvider.viewType, chatProvider)
+		vscode.window.registerWebviewViewProvider(ChatWebviewProvider.viewType, chatProvider, {
+			// Preserve DOM when user switches to Explorer/SCM/etc. and back.
+			// Without this VS Code destroys the webview on hide, wiping the transcript.
+			webviewOptions: {retainContextWhenHidden: true},
+		})
 	);
 
 	// Register Title Bar Action
@@ -92,7 +96,12 @@ export function activate(context: vscode.ExtensionContext) {
 			} catch (err) {
 				vscode.window.showErrorMessage(`Could not open configuration at ${configPath}. Ensure the file exists.`);
 			}
-		})
+		}),
+		vscode.commands.registerCommand('nanocoder.newChat', () => {
+			acpClient.newChat();
+			chatProvider.postMessage({type: 'clear'});
+			outputChannel.appendLine('[Extension] New chat started — session cleared.');
+		}),
 	);
 
 	// Push active editor state to the CLI so the input box can show an
