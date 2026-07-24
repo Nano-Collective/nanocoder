@@ -168,6 +168,20 @@ function buildRowsForTab(
 				},
 				{
 					kind: 'managed',
+					id: 'providers-config',
+					label: 'Providers',
+					value: `${getAppConfig().providers?.length ?? 0}`,
+					panel: 'providers-config',
+				},
+				{
+					kind: 'managed',
+					id: 'mcp-config',
+					label: 'MCP Servers',
+					value: `${getAppConfig().mcpServers?.length ?? 0}`,
+					panel: 'mcp-config',
+				},
+				{
+					kind: 'managed',
 					id: 'json-config',
 					label: 'Config (JSON)',
 					value: 'edit',
@@ -275,6 +289,24 @@ function renderManagedPanel(
 			return <SettingsJsonConfigPanel onBack={onBack} onCancel={onBack} />;
 		case 'web-search':
 			return <SettingsWebSearchPanel onBack={onBack} onCancel={onBack} />;
+		case 'providers-config':
+			return (
+				<SettingsJsonConfigPanel
+					title="Providers (agents.config.json)"
+					initialPath={['nanocoder', 'providers']}
+					onBack={onBack}
+					onCancel={onBack}
+				/>
+			);
+		case 'mcp-config':
+			return (
+				<SettingsJsonConfigPanel
+					configFileName=".mcp.json"
+					title="MCP Servers (.mcp.json)"
+					onBack={onBack}
+					onCancel={onBack}
+				/>
+			);
 	}
 }
 
