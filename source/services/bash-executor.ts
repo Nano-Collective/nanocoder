@@ -72,7 +72,9 @@ export class BashExecutor extends EventEmitter {
 		const spawnCommand =
 			cwdCaptureFile === undefined
 				? command
-				: `${command}\n__nc_ec=$?\ncommand pwd -P > '${cwdCaptureFile}' 2>/dev/null\nexit $__nc_ec`;
+				: // Blank line before the epilogue: a command ending in a trailing
+					// backslash would otherwise line-continue into `__nc_ec=$?`.
+					`${command}\n\n__nc_ec=$?\ncommand pwd -P > '${cwdCaptureFile}' 2>/dev/null\nexit $__nc_ec`;
 
 		const proc = isWindows
 			? spawn('cmd', ['/c', command], {cwd})
@@ -88,6 +90,8 @@ export class BashExecutor extends EventEmitter {
 			try {
 				if (existsSync(cwdCaptureFile)) {
 					const captured = readFileSync(cwdCaptureFile, 'utf8').trim();
+					// Concurrent bash runs race here; last close wins, which is fine
+					// since the session cwd is a single shared value either way.
 					if (captured) setSessionCwd(captured);
 				}
 			} catch {
