@@ -16,6 +16,7 @@ import {SuccessMessage} from '@/components/message-box';
 import SecurityDisclaimer from '@/components/security-disclaimer';
 import StreamingMessage from '@/components/streaming-message';
 import StreamingReasoning from '@/components/streaming-reasoning';
+import {SubagentView} from '@/components/subagent-view';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {
 	shouldPromptExtensionInstall,
@@ -41,6 +42,7 @@ import {TitleShapeContext, updateTitleShape} from '@/hooks/useTitleShape';
 import {UIStateProvider} from '@/hooks/useUIState';
 import {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import {useVSCodeServer} from '@/hooks/useVSCodeServer';
+import {getAllSubagentProgress} from '@/services/subagent-events';
 import {generateKey} from '@/session/key-generator';
 import type {ImageAttachment} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
@@ -133,6 +135,31 @@ export default function App({
 	useInput((input, key) => {
 		if (key.ctrl && input === 'c') {
 			handleExit();
+		}
+		if (key.ctrl && input === 's') {
+			const progresses = Array.from(getAllSubagentProgress().entries());
+			const runningAgents = progresses
+				.filter(([_, p]) => p.status !== 'complete' && p.status !== 'error')
+				.map(([id]) => id);
+
+			appState.setAttachedAgentId(currentAttachedAgentId => {
+				if (runningAgents.length === 0) {
+					return null;
+				}
+
+				if (!currentAttachedAgentId) {
+					return runningAgents[0];
+				}
+
+				const currentIndex = runningAgents.indexOf(currentAttachedAgentId);
+				if (currentIndex !== -1 && runningAgents.length > 1) {
+					return runningAgents[(currentIndex + 1) % runningAgents.length];
+				} else if (currentIndex === -1) {
+					return runningAgents[0];
+				}
+
+				return currentAttachedAgentId;
+			});
 		}
 	});
 
@@ -712,25 +739,34 @@ export default function App({
 						privacySessionMapRef: appState.privacySessionMapRef,
 					}}
 				>
-					<InteractiveApp
-						altScreenActive={altScreenActive}
-						appState={appState}
-						chatHandler={chatHandler}
-						modeHandlers={modeHandlers}
-						appHandlers={appHandlers}
-						vscodeServer={vscodeServer}
-						staticComponents={staticComponents}
-						clearKey={conversationId}
-						liveComponent={liveComponent}
-						pendingSubagentApproval={pendingSubagentApproval}
-						handleSubagentToolApproval={handleSubagentToolApproval}
-						pendingToolConfirmation={pendingToolConfirmation}
-						handleToolConfirmation={handleToolConfirmation}
-						handleQuestionAnswer={handleQuestionAnswer}
-						handleUserSubmit={handleUserSubmit}
-						userMessageQueue={userMessageQueue}
-						handleIdeSelect={handleIdeSelect}
-					/>
+					{appState.attachedAgentId ? (
+						<SubagentView
+							agentId={appState.attachedAgentId}
+							onDetach={() => appState.setAttachedAgentId(null)}
+							reasoningExpanded={appState.reasoningExpanded}
+							altScreenActive={altScreenActive}
+						/>
+					) : (
+						<InteractiveApp
+							altScreenActive={altScreenActive}
+							appState={appState}
+							chatHandler={chatHandler}
+							modeHandlers={modeHandlers}
+							appHandlers={appHandlers}
+							vscodeServer={vscodeServer}
+							staticComponents={staticComponents}
+							clearKey={conversationId}
+							liveComponent={liveComponent}
+							pendingSubagentApproval={pendingSubagentApproval}
+							handleSubagentToolApproval={handleSubagentToolApproval}
+							pendingToolConfirmation={pendingToolConfirmation}
+							handleToolConfirmation={handleToolConfirmation}
+							handleQuestionAnswer={handleQuestionAnswer}
+							handleUserSubmit={handleUserSubmit}
+							userMessageQueue={userMessageQueue}
+							handleIdeSelect={handleIdeSelect}
+						/>
+					)}
 				</PrivacyContext.Provider>
 			</TitleShapeContext.Provider>
 		</ThemeContext.Provider>
