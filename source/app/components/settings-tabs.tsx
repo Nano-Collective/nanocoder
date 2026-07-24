@@ -159,7 +159,7 @@ function buildRowsForTab(
 					kind: 'managed',
 					id: 'json-config',
 					label: 'Config (JSON)',
-					value: 'view',
+					value: 'edit',
 					panel: 'json-config',
 				},
 			];
