@@ -45,7 +45,9 @@ export type ManagedSettingsPanel =
 	| 'display-settings'
 	| 'privacy'
 	| 'json-config'
-	| 'web-search';
+	| 'web-search'
+	| 'providers-config'
+	| 'mcp-config';
 
 export interface SettingsSelectorProps {
 	onCancel: () => void;
