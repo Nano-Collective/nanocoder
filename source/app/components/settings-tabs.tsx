@@ -89,15 +89,30 @@ type SettingRow =
 			label: string;
 			value: string;
 			panel: ManagedSettingsPanel;
+	  }
+	| {
+			// Launches an app-level flow (e.g. the tune / IDE wizards) rather than
+			// opening an in-settings panel.
+			kind: 'action';
+			id: string;
+			label: string;
+			value: string;
+			onAction: () => void;
 	  };
 
 const MAX_VISIBLE_ROWS = 4;
 const SEARCH_PLACEHOLDER = 'Search settings…';
 
+interface RowActions {
+	onLaunchTune?: () => void;
+	onLaunchIde?: () => void;
+}
+
 function buildRowsForTab(
 	tabId: SettingsTabId,
 	currentTheme: string,
 	currentTitleShape: string,
+	actions: RowActions = {},
 ): SettingRow[] {
 	switch (tabId) {
 		case 'appearance': {
@@ -225,8 +240,8 @@ function buildRowsForTab(
 					panel: 'tool-approval',
 				},
 			];
-		case 'advanced':
-			return [
+		case 'advanced': {
+			const rows: SettingRow[] = [
 				{
 					kind: 'managed',
 					id: 'privacy',
@@ -249,6 +264,26 @@ function buildRowsForTab(
 					panel: 'environment',
 				},
 			];
+			if (actions.onLaunchTune) {
+				rows.push({
+					kind: 'action',
+					id: 'tune',
+					label: 'Tune Model',
+					value: 'model params',
+					onAction: actions.onLaunchTune,
+				});
+			}
+			if (actions.onLaunchIde) {
+				rows.push({
+					kind: 'action',
+					id: 'connect-ide',
+					label: 'Connect IDE',
+					value: 'wizard',
+					onAction: actions.onLaunchIde,
+				});
+			}
+			return rows;
+		}
 	}
 }
 
@@ -285,13 +320,23 @@ function filterRows(rows: SettingRow[], query: string): SettingRow[] {
  * hook can't otherwise observe (a managed sub-panel writes preferences.json
  * directly, outside this component's React state).
  */
-function useTabRows(tabId: SettingsTabId, version: number): SettingRow[] {
+function useTabRows(
+	tabId: SettingsTabId,
+	version: number,
+	actions: RowActions,
+): SettingRow[] {
 	const {currentTheme} = useTheme();
 	const {currentTitleShape} = useTitleShape();
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: version deliberately drives a full recompute — see doc comment above.
 	return useMemo(
-		() => buildRowsForTab(tabId, currentTheme, currentTitleShape ?? 'pill'),
+		() =>
+			buildRowsForTab(
+				tabId,
+				currentTheme,
+				currentTitleShape ?? 'pill',
+				actions,
+			),
 		[version, tabId, currentTheme, currentTitleShape],
 	);
 }
@@ -434,7 +479,11 @@ function TabBar({
 	);
 }
 
-export function SettingsSelector({onCancel}: SettingsSelectorProps) {
+export function SettingsSelector({
+	onCancel,
+	onLaunchTune,
+	onLaunchIde,
+}: SettingsSelectorProps) {
 	const {colors} = useTheme();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
 
@@ -494,7 +543,7 @@ export function SettingsSelector({onCancel}: SettingsSelectorProps) {
 		updateFocus('header');
 	}, [activeTab]);
 
-	const allRows = useTabRows(activeTab, version);
+	const allRows = useTabRows(activeTab, version, {onLaunchTune, onLaunchIde});
 	const filteredRows = useMemo(
 		() => filterRows(allRows, query),
 		[allRows, query],
@@ -531,6 +580,10 @@ export function SettingsSelector({onCancel}: SettingsSelectorProps) {
 		if (row.kind === 'boolean') {
 			row.onToggle();
 			setVersion(v => v + 1);
+			return;
+		}
+		if (row.kind === 'action') {
+			row.onAction();
 			return;
 		}
 		setOpenPanel(row.panel);

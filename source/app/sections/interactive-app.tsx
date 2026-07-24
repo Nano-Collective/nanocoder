@@ -328,6 +328,14 @@ export function InteractiveApp({
 							onMcpWizardComplete={modeHandlers.handleMcpWizardComplete}
 							onMcpWizardCancel={modeHandlers.handleMcpWizardCancel}
 							onSettingsCancel={modeHandlers.handleSettingsCancel}
+							onLaunchTune={() => {
+								modeHandlers.handleSettingsCancel();
+								modeHandlers.enterTune();
+							}}
+							onLaunchIde={() => {
+								modeHandlers.handleSettingsCancel();
+								modeHandlers.enterIdeSelectionMode();
+							}}
 							tuneConfig={appState.tune}
 							onTuneSelect={modeHandlers.handleTuneSelect}
 							onTuneCancel={modeHandlers.handleTuneCancel}

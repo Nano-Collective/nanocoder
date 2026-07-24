@@ -57,6 +57,10 @@ export type ManagedSettingsPanel =
 
 export interface SettingsSelectorProps {
 	onCancel: () => void;
+	/** Close settings and launch the tune wizard (app-level mode switch). */
+	onLaunchTune?: () => void;
+	/** Close settings and launch the IDE-connection wizard. */
+	onLaunchIde?: () => void;
 }
 
 function ThemePreviewMessage({

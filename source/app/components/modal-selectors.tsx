@@ -11,6 +11,8 @@ import {SettingsSelector} from './settings-tabs';
 import {TuneSelector} from './tune-selector';
 
 export interface ModalSelectorsProps {
+	onLaunchTune?: () => void;
+	onLaunchIde?: () => void;
 	activeMode: ActiveMode;
 	isSettingsMode: boolean;
 	showAllSessions: boolean;
@@ -78,6 +80,8 @@ export function ModalSelectors({
 	onSessionSelect,
 	onSessionCancel,
 	onSettingsCancel,
+	onLaunchTune,
+	onLaunchIde,
 	tuneConfig,
 	onTuneSelect,
 	onTuneCancel,
@@ -104,7 +108,13 @@ export function ModalSelectors({
 	}
 
 	if (isSettingsMode) {
-		return <SettingsSelector onCancel={onSettingsCancel} />;
+		return (
+			<SettingsSelector
+				onCancel={onSettingsCancel}
+				onLaunchTune={onLaunchTune}
+				onLaunchIde={onLaunchIde}
+			/>
+		);
 	}
 
 	if (activeMode === 'modelDatabase') {
