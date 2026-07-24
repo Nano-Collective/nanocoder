@@ -1,10 +1,14 @@
-import {useCallback} from 'react';
+import {readFileSync} from 'node:fs';
+import {useCallback, useState} from 'react';
+import {writeConfigFileAtomic} from '@/config/config-writer';
+import {getClosestConfigFile} from '@/config/index';
 import {JsonViewer} from '@/components/json-viewer';
-import {getAppConfig} from '@/config/index';
 
 /**
- * Read-only tree view of the effective agents.config.json. First slice of the
- * in-TUI JSON editor; write-back (atomic) lands in a follow-up.
+ * In-TUI editor for agents.config.json. The tree editor can only produce valid
+ * JSON, and `w` writes it back atomically. Unsaved edits live only in the
+ * viewer's state, so exiting without saving leaves the file untouched (real
+ * rollback — no keep/discard prompt).
  */
 export function SettingsJsonConfigPanel({
 	onBack,
@@ -12,13 +16,27 @@ export function SettingsJsonConfigPanel({
 	onBack: () => void;
 	onCancel: () => void;
 }) {
-	const config = getAppConfig();
+	const [filePath] = useState(() => getClosestConfigFile('agents.config.json'));
+	const [data] = useState<unknown>(() => {
+		try {
+			return JSON.parse(readFileSync(filePath, 'utf-8'));
+		} catch {
+			return {};
+		}
+	});
+
+	const handleSave = useCallback(
+		(next: unknown) => writeConfigFileAtomic(filePath, next),
+		[filePath],
+	);
 	const handleCancel = useCallback(() => onBack(), [onBack]);
+
 	return (
 		<JsonViewer
-			data={config}
-			title="agents.config.json (effective)"
-			readOnly
+			data={data}
+			title="agents.config.json"
+			filePath={filePath}
+			onSave={handleSave}
 			onCancel={handleCancel}
 		/>
 	);
