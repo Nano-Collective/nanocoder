@@ -22,6 +22,7 @@ import {McpWizard} from '@/wizards/mcp-wizard';
 import {ProviderWizard} from '@/wizards/provider-wizard';
 import {SettingsAutoCompactPanel} from './settings-auto-compact';
 import {SettingsDefaultModePanel} from './settings-default-mode';
+import {SettingsEnvironmentPanel} from './settings-environment';
 import {SettingsJsonConfigPanel} from './settings-json-config';
 import {SettingsReasoningTracesPanel} from './settings-reasoning-traces';
 import type {
@@ -203,6 +204,13 @@ function buildRowsForTab(
 				},
 				{
 					kind: 'managed',
+					id: 'environment',
+					label: 'Environment',
+					value: 'view',
+					panel: 'environment',
+				},
+				{
+					kind: 'managed',
 					id: 'web-search',
 					label: 'Web Search',
 					value: getAppConfig().nanocoderTools?.webSearch?.apiKey
@@ -343,6 +351,8 @@ function renderManagedPanel(
 			return <SettingsSessionsPanel onBack={onBack} onCancel={onBack} />;
 		case 'tool-approval':
 			return <SettingsToolApprovalPanel onBack={onBack} onCancel={onBack} />;
+		case 'environment':
+			return <SettingsEnvironmentPanel onBack={onBack} onCancel={onBack} />;
 		case 'providers-config':
 			return (
 				<ProviderWizard
