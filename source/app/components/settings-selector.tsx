@@ -49,7 +49,10 @@ export type ManagedSettingsPanel =
 	| 'providers-config'
 	| 'mcp-config'
 	| 'default-mode'
-	| 'reasoning-traces';
+	| 'reasoning-traces'
+	| 'auto-compact'
+	| 'sessions'
+	| 'tool-approval';
 
 export interface SettingsSelectorProps {
 	onCancel: () => void;

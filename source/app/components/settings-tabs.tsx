@@ -20,6 +20,7 @@ import {fuzzyScore} from '@/utils/fuzzy-matching';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 import {McpWizard} from '@/wizards/mcp-wizard';
 import {ProviderWizard} from '@/wizards/provider-wizard';
+import {SettingsAutoCompactPanel} from './settings-auto-compact';
 import {SettingsDefaultModePanel} from './settings-default-mode';
 import {SettingsJsonConfigPanel} from './settings-json-config';
 import {SettingsReasoningTracesPanel} from './settings-reasoning-traces';
@@ -36,6 +37,8 @@ import {
 	SettingsThemePanel,
 	SettingsTitleShapePanel,
 } from './settings-selector';
+import {SettingsSessionsPanel} from './settings-sessions';
+import {SettingsToolApprovalPanel} from './settings-tool-approval';
 import {SettingsWebSearchPanel} from './settings-web-search';
 
 /**
@@ -178,6 +181,28 @@ function buildRowsForTab(
 				},
 				{
 					kind: 'managed',
+					id: 'auto-compact',
+					label: 'Auto-Compact',
+					value: getAppConfig().autoCompact?.enabled === false ? 'off' : 'on',
+					panel: 'auto-compact',
+				},
+				{
+					kind: 'managed',
+					id: 'sessions',
+					label: 'Sessions',
+					value:
+						getAppConfig().sessions?.autoSave === false ? 'manual' : 'auto',
+					panel: 'sessions',
+				},
+				{
+					kind: 'managed',
+					id: 'tool-approval',
+					label: 'Tool Auto-Approval',
+					value: `${getAppConfig().alwaysAllow?.length ?? 0} tools`,
+					panel: 'tool-approval',
+				},
+				{
+					kind: 'managed',
 					id: 'web-search',
 					label: 'Web Search',
 					value: getAppConfig().nanocoderTools?.webSearch?.apiKey
@@ -312,6 +337,12 @@ function renderManagedPanel(
 			return <SettingsDefaultModePanel onBack={onBack} onCancel={onBack} />;
 		case 'reasoning-traces':
 			return <SettingsReasoningTracesPanel onBack={onBack} onCancel={onBack} />;
+		case 'auto-compact':
+			return <SettingsAutoCompactPanel onBack={onBack} onCancel={onBack} />;
+		case 'sessions':
+			return <SettingsSessionsPanel onBack={onBack} onCancel={onBack} />;
+		case 'tool-approval':
+			return <SettingsToolApprovalPanel onBack={onBack} onCancel={onBack} />;
 		case 'providers-config':
 			return (
 				<ProviderWizard
