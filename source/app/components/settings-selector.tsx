@@ -52,7 +52,8 @@ export type ManagedSettingsPanel =
 	| 'reasoning-traces'
 	| 'auto-compact'
 	| 'sessions'
-	| 'tool-approval';
+	| 'tool-approval'
+	| 'environment';
 
 export interface SettingsSelectorProps {
 	onCancel: () => void;
