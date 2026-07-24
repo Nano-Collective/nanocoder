@@ -48,7 +48,12 @@ import {SettingsWebSearchPanel} from './settings-web-search';
  * Every existing preference must be reachable from exactly one of these
  * four tabs.
  */
-export type SettingsTabId = 'appearance' | 'input' | 'display' | 'advanced';
+export type SettingsTabId =
+	| 'appearance'
+	| 'input'
+	| 'behavior'
+	| 'providers'
+	| 'advanced';
 
 interface TabDefinition {
 	id: SettingsTabId;
@@ -58,7 +63,8 @@ interface TabDefinition {
 const TABS: TabDefinition[] = [
 	{id: 'appearance', label: 'Appearance'},
 	{id: 'input', label: 'Input'},
-	{id: 'display', label: 'Display'},
+	{id: 'behavior', label: 'Behavior'},
+	{id: 'providers', label: 'Providers'},
 	{id: 'advanced', label: 'Advanced'},
 ];
 
@@ -147,7 +153,7 @@ function buildRowsForTab(
 				},
 			];
 		}
-		case 'display':
+		case 'behavior':
 			return [
 				{
 					kind: 'managed',
@@ -162,16 +168,6 @@ function buildRowsForTab(
 					label: 'Reasoning Traces',
 					value: getReasoningExpanded() ? 'expanded' : 'collapsed',
 					panel: 'reasoning-traces',
-				},
-			];
-		case 'advanced':
-			return [
-				{
-					kind: 'managed',
-					id: 'privacy',
-					label: 'Privacy',
-					value: getPrivacyPreference() ? 'on' : 'off',
-					panel: 'privacy',
 				},
 				{
 					kind: 'managed',
@@ -195,29 +191,9 @@ function buildRowsForTab(
 						getAppConfig().sessions?.autoSave === false ? 'manual' : 'auto',
 					panel: 'sessions',
 				},
-				{
-					kind: 'managed',
-					id: 'tool-approval',
-					label: 'Tool Auto-Approval',
-					value: `${getAppConfig().alwaysAllow?.length ?? 0} tools`,
-					panel: 'tool-approval',
-				},
-				{
-					kind: 'managed',
-					id: 'environment',
-					label: 'Environment',
-					value: 'view',
-					panel: 'environment',
-				},
-				{
-					kind: 'managed',
-					id: 'web-search',
-					label: 'Web Search',
-					value: getAppConfig().nanocoderTools?.webSearch?.apiKey
-						? 'configured'
-						: 'not set',
-					panel: 'web-search',
-				},
+			];
+		case 'providers':
+			return [
 				{
 					kind: 'managed',
 					id: 'providers-config',
@@ -234,10 +210,43 @@ function buildRowsForTab(
 				},
 				{
 					kind: 'managed',
+					id: 'web-search',
+					label: 'Web Search',
+					value: getAppConfig().nanocoderTools?.webSearch?.apiKey
+						? 'configured'
+						: 'not set',
+					panel: 'web-search',
+				},
+				{
+					kind: 'managed',
+					id: 'tool-approval',
+					label: 'Tool Auto-Approval',
+					value: `${getAppConfig().alwaysAllow?.length ?? 0} tools`,
+					panel: 'tool-approval',
+				},
+			];
+		case 'advanced':
+			return [
+				{
+					kind: 'managed',
+					id: 'privacy',
+					label: 'Privacy',
+					value: getPrivacyPreference() ? 'on' : 'off',
+					panel: 'privacy',
+				},
+				{
+					kind: 'managed',
 					id: 'json-config',
 					label: 'Edit Config Files',
 					value: 'agents.config.json',
 					panel: 'json-config',
+				},
+				{
+					kind: 'managed',
+					id: 'environment',
+					label: 'Environment',
+					value: 'view',
+					panel: 'environment',
 				},
 			];
 	}
