@@ -85,6 +85,19 @@ test('flattenTree: simple object', t => {
 	t.is(rows[3].value, '}');
 });
 
+test('flattenTree: sibling comma sits on the close bracket, not the open', t => {
+	const tree = parseJsonToTree({a: {x: 1}, b: 2});
+	const rows = flattenTree(tree);
+	const openOfA = rows.find(r => r.key === 'a' && r.value === '{');
+	t.truthy(openOfA);
+	t.is(openOfA?.trailing, '', 'open bracket must not carry a trailing comma');
+	const closeOfA = rows.find(
+		(r, i) => r.value === '}' && rows[i + 1]?.key === 'b',
+	);
+	t.truthy(closeOfA);
+	t.is(closeOfA?.trailing, ',', 'close bracket carries the sibling comma');
+});
+
 test('flattenTree: collapsed object shows summary', t => {
 	const tree = parseJsonToTree({a: {b: 1, c: 2}});
 	tree.children[0].collapsed = true;
