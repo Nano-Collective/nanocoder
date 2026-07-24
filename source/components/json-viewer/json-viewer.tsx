@@ -1,5 +1,5 @@
 import {Box, Text, useInput} from 'ink';
-import TextInput from 'ink-text-input';
+import TextInput from '@/components/text-input';
 import {type ReactNode, useCallback, useEffect, useMemo, useState} from 'react';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
