@@ -3,12 +3,14 @@ import {Box, Text, useInput} from 'ink';
 import type {ReactElement} from 'react';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {StyledTitle} from '@/components/ui/styled-title';
+import {getAppConfig, loadDefaultMode} from '@/config/index';
 import {
 	getAlternateScreen,
 	getNanocoderShape,
 	getNotificationsPreference,
 	getPasteThreshold,
 	getPrivacyPreference,
+	getReasoningExpanded,
 	updateAlternateScreen,
 } from '@/config/preferences';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -16,6 +18,13 @@ import {useTheme} from '@/hooks/useTheme';
 import {useTitleShape} from '@/hooks/useTitleShape';
 import {fuzzyScore} from '@/utils/fuzzy-matching';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
+import {SettingsAutoCompactPanel} from './settings-auto-compact';
+import {SettingsDefaultModePanel} from './settings-default-mode';
+import {SettingsEnvironmentPanel} from './settings-environment';
+import {SettingsJsonConfigPanel} from './settings-json-config';
+import {SettingsMcpListPanel} from './settings-mcp-list';
+import {SettingsProvidersListPanel} from './settings-providers-list';
+import {SettingsReasoningTracesPanel} from './settings-reasoning-traces';
 import type {
 	ManagedSettingsPanel,
 	SettingsSelectorProps,
@@ -29,6 +38,9 @@ import {
 	SettingsThemePanel,
 	SettingsTitleShapePanel,
 } from './settings-selector';
+import {SettingsSessionsPanel} from './settings-sessions';
+import {SettingsToolApprovalPanel} from './settings-tool-approval';
+import {SettingsWebSearchPanel} from './settings-web-search';
 
 /**
  * Tab categories are our own settings, grouped for browsability — not the
@@ -36,7 +48,12 @@ import {
  * Every existing preference must be reachable from exactly one of these
  * four tabs.
  */
-export type SettingsTabId = 'appearance' | 'input' | 'display' | 'advanced';
+export type SettingsTabId =
+	| 'appearance'
+	| 'input'
+	| 'behavior'
+	| 'providers'
+	| 'advanced';
 
 interface TabDefinition {
 	id: SettingsTabId;
@@ -46,7 +63,8 @@ interface TabDefinition {
 const TABS: TabDefinition[] = [
 	{id: 'appearance', label: 'Appearance'},
 	{id: 'input', label: 'Input'},
-	{id: 'display', label: 'Display'},
+	{id: 'behavior', label: 'Behavior'},
+	{id: 'providers', label: 'Providers'},
 	{id: 'advanced', label: 'Advanced'},
 ];
 
@@ -71,15 +89,30 @@ type SettingRow =
 			label: string;
 			value: string;
 			panel: ManagedSettingsPanel;
+	  }
+	| {
+			// Launches an app-level flow (e.g. the tune / IDE wizards) rather than
+			// opening an in-settings panel.
+			kind: 'action';
+			id: string;
+			label: string;
+			value: string;
+			onAction: () => void;
 	  };
 
 const MAX_VISIBLE_ROWS = 4;
 const SEARCH_PLACEHOLDER = 'Search settings…';
 
+interface RowActions {
+	onLaunchTune?: () => void;
+	onLaunchIde?: () => void;
+}
+
 function buildRowsForTab(
 	tabId: SettingsTabId,
 	currentTheme: string,
 	currentTitleShape: string,
+	actions: RowActions = {},
 ): SettingRow[] {
 	switch (tabId) {
 		case 'appearance': {
@@ -135,7 +168,7 @@ function buildRowsForTab(
 				},
 			];
 		}
-		case 'display':
+		case 'behavior':
 			return [
 				{
 					kind: 'managed',
@@ -144,9 +177,71 @@ function buildRowsForTab(
 					value: 'configure',
 					panel: 'display-settings',
 				},
+				{
+					kind: 'managed',
+					id: 'reasoning-traces',
+					label: 'Reasoning Traces',
+					value: getReasoningExpanded() ? 'expanded' : 'collapsed',
+					panel: 'reasoning-traces',
+				},
+				{
+					kind: 'managed',
+					id: 'default-mode',
+					label: 'Default Mode',
+					value: loadDefaultMode() ?? 'normal',
+					panel: 'default-mode',
+				},
+				{
+					kind: 'managed',
+					id: 'auto-compact',
+					label: 'Auto-Compact',
+					value: getAppConfig().autoCompact?.enabled === false ? 'off' : 'on',
+					panel: 'auto-compact',
+				},
+				{
+					kind: 'managed',
+					id: 'sessions',
+					label: 'Sessions',
+					value:
+						getAppConfig().sessions?.autoSave === false ? 'manual' : 'auto',
+					panel: 'sessions',
+				},
 			];
-		case 'advanced':
+		case 'providers':
 			return [
+				{
+					kind: 'managed',
+					id: 'providers-config',
+					label: 'Configure Providers',
+					value: `${getAppConfig().providers?.length ?? 0} configured`,
+					panel: 'providers-config',
+				},
+				{
+					kind: 'managed',
+					id: 'mcp-config',
+					label: 'Configure MCP Servers',
+					value: `${getAppConfig().mcpServers?.length ?? 0} configured`,
+					panel: 'mcp-config',
+				},
+				{
+					kind: 'managed',
+					id: 'web-search',
+					label: 'Web Search',
+					value: getAppConfig().nanocoderTools?.webSearch?.apiKey
+						? 'configured'
+						: 'not set',
+					panel: 'web-search',
+				},
+				{
+					kind: 'managed',
+					id: 'tool-approval',
+					label: 'Tool Auto-Approval',
+					value: `${getAppConfig().alwaysAllow?.length ?? 0} tools`,
+					panel: 'tool-approval',
+				},
+			];
+		case 'advanced': {
+			const rows: SettingRow[] = [
 				{
 					kind: 'managed',
 					id: 'privacy',
@@ -154,7 +249,41 @@ function buildRowsForTab(
 					value: getPrivacyPreference() ? 'on' : 'off',
 					panel: 'privacy',
 				},
+				{
+					kind: 'managed',
+					id: 'json-config',
+					label: 'Edit Config Files',
+					value: 'agents.config.json',
+					panel: 'json-config',
+				},
+				{
+					kind: 'managed',
+					id: 'environment',
+					label: 'Environment',
+					value: 'view',
+					panel: 'environment',
+				},
 			];
+			if (actions.onLaunchTune) {
+				rows.push({
+					kind: 'action',
+					id: 'tune',
+					label: 'Tune Model',
+					value: 'model params',
+					onAction: actions.onLaunchTune,
+				});
+			}
+			if (actions.onLaunchIde) {
+				rows.push({
+					kind: 'action',
+					id: 'connect-ide',
+					label: 'Connect IDE',
+					value: 'wizard',
+					onAction: actions.onLaunchIde,
+				});
+			}
+			return rows;
+		}
 	}
 }
 
@@ -191,13 +320,23 @@ function filterRows(rows: SettingRow[], query: string): SettingRow[] {
  * hook can't otherwise observe (a managed sub-panel writes preferences.json
  * directly, outside this component's React state).
  */
-function useTabRows(tabId: SettingsTabId, version: number): SettingRow[] {
+function useTabRows(
+	tabId: SettingsTabId,
+	version: number,
+	actions: RowActions,
+): SettingRow[] {
 	const {currentTheme} = useTheme();
 	const {currentTitleShape} = useTitleShape();
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: version deliberately drives a full recompute — see doc comment above.
 	return useMemo(
-		() => buildRowsForTab(tabId, currentTheme, currentTitleShape ?? 'pill'),
+		() =>
+			buildRowsForTab(
+				tabId,
+				currentTheme,
+				currentTitleShape ?? 'pill',
+				actions,
+			),
 		[version, tabId, currentTheme, currentTitleShape],
 	);
 }
@@ -252,6 +391,26 @@ function renderManagedPanel(
 			return <SettingsDisplayPanel onBack={onBack} onCancel={onBack} />;
 		case 'privacy':
 			return <SettingsPrivacyPanel onBack={onBack} onCancel={onBack} />;
+		case 'json-config':
+			return <SettingsJsonConfigPanel onBack={onBack} onCancel={onBack} />;
+		case 'web-search':
+			return <SettingsWebSearchPanel onBack={onBack} onCancel={onBack} />;
+		case 'default-mode':
+			return <SettingsDefaultModePanel onBack={onBack} onCancel={onBack} />;
+		case 'reasoning-traces':
+			return <SettingsReasoningTracesPanel onBack={onBack} onCancel={onBack} />;
+		case 'auto-compact':
+			return <SettingsAutoCompactPanel onBack={onBack} onCancel={onBack} />;
+		case 'sessions':
+			return <SettingsSessionsPanel onBack={onBack} onCancel={onBack} />;
+		case 'tool-approval':
+			return <SettingsToolApprovalPanel onBack={onBack} onCancel={onBack} />;
+		case 'environment':
+			return <SettingsEnvironmentPanel onBack={onBack} onCancel={onBack} />;
+		case 'providers-config':
+			return <SettingsProvidersListPanel onBack={onBack} onCancel={onBack} />;
+		case 'mcp-config':
+			return <SettingsMcpListPanel onBack={onBack} onCancel={onBack} />;
 	}
 }
 
@@ -308,7 +467,11 @@ function TabBar({
 	);
 }
 
-export function SettingsSelector({onCancel}: SettingsSelectorProps) {
+export function SettingsSelector({
+	onCancel,
+	onLaunchTune,
+	onLaunchIde,
+}: SettingsSelectorProps) {
 	const {colors} = useTheme();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
 
@@ -368,7 +531,7 @@ export function SettingsSelector({onCancel}: SettingsSelectorProps) {
 		updateFocus('header');
 	}, [activeTab]);
 
-	const allRows = useTabRows(activeTab, version);
+	const allRows = useTabRows(activeTab, version, {onLaunchTune, onLaunchIde});
 	const filteredRows = useMemo(
 		() => filterRows(allRows, query),
 		[allRows, query],
@@ -405,6 +568,10 @@ export function SettingsSelector({onCancel}: SettingsSelectorProps) {
 		if (row.kind === 'boolean') {
 			row.onToggle();
 			setVersion(v => v + 1);
+			return;
+		}
+		if (row.kind === 'action') {
+			row.onAction();
 			return;
 		}
 		setOpenPanel(row.panel);
