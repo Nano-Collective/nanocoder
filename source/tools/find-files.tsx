@@ -3,7 +3,7 @@ import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {DEFAULT_FIND_FILES_RESULTS, MAX_FIND_FILES_RESULTS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
-import {getSessionCwd} from '@/services/session-cwd';
+import {getContainedSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -27,7 +27,9 @@ interface FindFilesArgs {
 }
 
 const executeFindFiles = async (args: FindFilesArgs): Promise<string> => {
-	const cwd = getSessionCwd();
+	// Clamp to the project root: a bash `cd` outside the project must not turn a
+	// pathless find into a glob over the whole filesystem.
+	const cwd = getContainedSessionCwd();
 	const maxResults = Math.min(
 		args.maxResults || DEFAULT_FIND_FILES_RESULTS,
 		MAX_FIND_FILES_RESULTS,

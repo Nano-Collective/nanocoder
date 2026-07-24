@@ -1,5 +1,5 @@
 import {existsSync, statSync} from 'node:fs';
-import {resolve} from 'node:path';
+import {resolve, sep} from 'node:path';
 
 // Shared "where am I" for bash and every file tool. Without it, a `cd` in one
 // bash subshell never reaches the next command or the file tools — so a
@@ -37,6 +37,16 @@ export function setSessionCwd(dir: string): void {
 	if (!trimmed) return;
 	// Absolute so downstream `resolve(base, rel)` is stable.
 	sessionCwd = resolve(trimmed);
+}
+
+// The session cwd clamped to the project root. A bash `cd /etc` moves the
+// session cwd outside the project; the pathless search tools use this as their
+// default root so they never glob/grep outside the project. Relative paths still
+// resolve against the true session cwd — only the default search root is clamped.
+export function getContainedSessionCwd(): string {
+	const cwd = getSafeSessionCwd();
+	const root = getProjectRoot();
+	return cwd === root || cwd.startsWith(root + sep) ? cwd : root;
 }
 
 // Guards against a `cd`-ed-into dir being deleted mid-session (torn-down

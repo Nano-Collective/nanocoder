@@ -1,11 +1,13 @@
-import {mkdtempSync, rmSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import test from 'ava';
 import {
+	getContainedSessionCwd,
 	getSafeSessionCwd,
 	getSessionCwd,
 	resetSessionCwd,
+	setProjectRoot,
 	setSessionCwd,
 } from './session-cwd.js';
 
@@ -29,6 +31,32 @@ test.serial('setSessionCwd stores an absolute path; blank input is ignored', t =
 		rmSync(dir, {recursive: true, force: true});
 	}
 });
+
+test.serial(
+	'getContainedSessionCwd clamps a session cwd outside the project to the root',
+	t => {
+		resetSessionCwd();
+		const root = mkdtempSync(join(tmpdir(), 'nc-root-'));
+		const inside = join(root, 'sub');
+		mkdirSync(inside);
+		const outside = mkdtempSync(join(tmpdir(), 'nc-out-'));
+		try {
+			setProjectRoot(root);
+			setSessionCwd(inside);
+			t.is(getContainedSessionCwd(), resolve(inside), 'a cwd inside is kept');
+			setSessionCwd(outside);
+			t.is(
+				getContainedSessionCwd(),
+				resolve(root),
+				'a cwd outside falls back to the project root',
+			);
+		} finally {
+			resetSessionCwd();
+			rmSync(root, {recursive: true, force: true});
+			rmSync(outside, {recursive: true, force: true});
+		}
+	},
+);
 
 test.serial('getSafeSessionCwd recovers when the stored dir was removed', t => {
 	resetSessionCwd();

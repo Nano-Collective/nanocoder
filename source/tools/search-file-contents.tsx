@@ -4,7 +4,11 @@ import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
-import {getProjectRoot, getSessionCwd} from '@/services/session-cwd';
+import {
+	getContainedSessionCwd,
+	getProjectRoot,
+	getSessionCwd,
+} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -55,10 +59,14 @@ const executeSearchFileContents = async (
 		}
 	}
 
+	// Default search root when no path is given: clamp to the project so a `cd`
+	// outside it (e.g. `cd /etc`) can't grep the whole filesystem.
+	const searchRoot = getContainedSessionCwd();
+
 	try {
 		const {matches, truncated} = await searchProjectContents(
 			args.query,
-			cwd,
+			searchRoot,
 			maxResults,
 			caseSensitive,
 			args.include,
