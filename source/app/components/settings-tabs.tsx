@@ -18,12 +18,12 @@ import {useTheme} from '@/hooks/useTheme';
 import {useTitleShape} from '@/hooks/useTitleShape';
 import {fuzzyScore} from '@/utils/fuzzy-matching';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
-import {McpWizard} from '@/wizards/mcp-wizard';
-import {ProviderWizard} from '@/wizards/provider-wizard';
 import {SettingsAutoCompactPanel} from './settings-auto-compact';
 import {SettingsDefaultModePanel} from './settings-default-mode';
 import {SettingsEnvironmentPanel} from './settings-environment';
 import {SettingsJsonConfigPanel} from './settings-json-config';
+import {SettingsMcpListPanel} from './settings-mcp-list';
+import {SettingsProvidersListPanel} from './settings-providers-list';
 import {SettingsReasoningTracesPanel} from './settings-reasoning-traces';
 import type {
 	ManagedSettingsPanel,
@@ -408,21 +408,9 @@ function renderManagedPanel(
 		case 'environment':
 			return <SettingsEnvironmentPanel onBack={onBack} onCancel={onBack} />;
 		case 'providers-config':
-			return (
-				<ProviderWizard
-					projectDir={process.cwd()}
-					onComplete={onBack}
-					onCancel={onBack}
-				/>
-			);
+			return <SettingsProvidersListPanel onBack={onBack} onCancel={onBack} />;
 		case 'mcp-config':
-			return (
-				<McpWizard
-					projectDir={process.cwd()}
-					onComplete={onBack}
-					onCancel={onBack}
-				/>
-			);
+			return <SettingsMcpListPanel onBack={onBack} onCancel={onBack} />;
 	}
 }
 
