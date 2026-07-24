@@ -3,6 +3,7 @@ import {Box, Text, useInput} from 'ink';
 import type {ReactElement} from 'react';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {StyledTitle} from '@/components/ui/styled-title';
+import {getAppConfig} from '@/config/index';
 import {
 	getAlternateScreen,
 	getNanocoderShape,
@@ -16,6 +17,7 @@ import {useTheme} from '@/hooks/useTheme';
 import {useTitleShape} from '@/hooks/useTitleShape';
 import {fuzzyScore} from '@/utils/fuzzy-matching';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
+import {SettingsJsonConfigPanel} from './settings-json-config';
 import type {
 	ManagedSettingsPanel,
 	SettingsSelectorProps,
@@ -29,7 +31,7 @@ import {
 	SettingsThemePanel,
 	SettingsTitleShapePanel,
 } from './settings-selector';
-import {SettingsJsonConfigPanel} from './settings-json-config';
+import {SettingsWebSearchPanel} from './settings-web-search';
 
 /**
  * Tab categories are our own settings, grouped for browsability — not the
@@ -157,6 +159,15 @@ function buildRowsForTab(
 				},
 				{
 					kind: 'managed',
+					id: 'web-search',
+					label: 'Web Search',
+					value: getAppConfig().nanocoderTools?.webSearch?.apiKey
+						? 'configured'
+						: 'not set',
+					panel: 'web-search',
+				},
+				{
+					kind: 'managed',
 					id: 'json-config',
 					label: 'Config (JSON)',
 					value: 'edit',
@@ -262,6 +273,8 @@ function renderManagedPanel(
 			return <SettingsPrivacyPanel onBack={onBack} onCancel={onBack} />;
 		case 'json-config':
 			return <SettingsJsonConfigPanel onBack={onBack} onCancel={onBack} />;
+		case 'web-search':
+			return <SettingsWebSearchPanel onBack={onBack} onCancel={onBack} />;
 	}
 }
 
