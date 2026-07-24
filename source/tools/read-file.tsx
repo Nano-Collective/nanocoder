@@ -12,7 +12,7 @@ import {
 	MAX_LINE_LENGTH_CHARS,
 } from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
-import {getProjectRoot, getSessionCwd} from '@/services/session-cwd';
+import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -28,7 +28,7 @@ const executeReadFile = async (args: {
 	end_line?: number;
 	metadata_only?: boolean;
 }): Promise<string> => {
-	const absPath = resolve(getSessionCwd(), args.path);
+	const absPath = resolve(getSafeSessionCwd(), args.path);
 
 	try {
 		// Handle explicit metadata_only request
@@ -341,7 +341,7 @@ const readFileFormatter = async (
 	try {
 		const path = args.path || args.file_path;
 		if (path && typeof path === 'string') {
-			const absPath = resolve(getSessionCwd(), path);
+			const absPath = resolve(getSafeSessionCwd(), path);
 			const cached = await getCachedFileContent(absPath);
 			const content = cached.content;
 			const lines = cached.lines;
@@ -392,7 +392,7 @@ const readFileValidator = async (args: {
 	metadata_only?: boolean;
 }): Promise<{valid: true} | {valid: false; error: string}> => {
 	// Validate path boundary first to prevent directory traversal
-	const cwd = getSessionCwd();
+	const cwd = getSafeSessionCwd();
 	const root = getProjectRoot();
 	if (!isValidFilePath(args.path, root)) {
 		return {
@@ -412,7 +412,7 @@ const readFileValidator = async (args: {
 		};
 	}
 
-	const absPath = resolve(getSessionCwd(), args.path);
+	const absPath = resolve(getSafeSessionCwd(), args.path);
 
 	try {
 		await access(absPath, constants.F_OK);
