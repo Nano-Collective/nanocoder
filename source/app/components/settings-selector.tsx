@@ -43,7 +43,8 @@ export type ManagedSettingsPanel =
 	| 'paste-threshold'
 	| 'notifications'
 	| 'display-settings'
-	| 'privacy';
+	| 'privacy'
+	| 'json-config';
 
 export interface SettingsSelectorProps {
 	onCancel: () => void;
