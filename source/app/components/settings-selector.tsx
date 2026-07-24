@@ -47,7 +47,9 @@ export type ManagedSettingsPanel =
 	| 'json-config'
 	| 'web-search'
 	| 'providers-config'
-	| 'mcp-config';
+	| 'mcp-config'
+	| 'default-mode'
+	| 'reasoning-traces';
 
 export interface SettingsSelectorProps {
 	onCancel: () => void;
