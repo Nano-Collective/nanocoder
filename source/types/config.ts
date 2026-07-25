@@ -401,6 +401,14 @@ export const TUNE_DEFAULTS: TuneConfig = {
 	aggressiveCompact: false,
 };
 
+export interface VoiceConfig {
+	enabled: boolean;
+	activationMode: 'push-to-talk' | 'hands-free';
+	voiceName?: string;
+	sttBackend: 'local' | 'cloud';
+	ttsBackend: 'local' | 'cloud';
+}
+
 export interface UserPreferences {
 	lastProvider?: string;
 	lastModel?: string;
@@ -427,4 +435,5 @@ export interface UserPreferences {
 	 * content. Also switchable per-run with the --no-alt-screen flag.
 	 */
 	alternateScreen?: boolean;
+	voice?: VoiceConfig;
 }
