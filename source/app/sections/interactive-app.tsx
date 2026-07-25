@@ -6,11 +6,14 @@ import {ModalSelectors} from '@/app/components/modal-selectors';
 import {FileExplorer} from '@/components/file-explorer';
 import {IdeSelector} from '@/components/ide-selector';
 import PlanReviewPrompt from '@/components/plan-review-prompt';
+import {VoiceStatusBar} from '@/components/voice-status-bar';
+import {getVoicePreference} from '@/config/preferences';
 import type {useChatHandler} from '@/hooks/chat-handler';
 import type {AppHandlers} from '@/hooks/useAppHandlers';
 import type {useAppState} from '@/hooks/useAppState';
 import type {useModeHandlers} from '@/hooks/useModeHandlers';
 import {useTerminalRows} from '@/hooks/useTerminalWidth';
+import {useTheme} from '@/hooks/useTheme';
 import {UIStateProvider} from '@/hooks/useUIState';
 import type {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import type {useVSCodeServer} from '@/hooks/useVSCodeServer';
@@ -247,12 +250,41 @@ export function InteractiveApp({
 		{isActive: cancellable},
 	);
 
+	const isVoiceInputAppropriate =
+		!appState.activeMode &&
+		!appState.isToolConfirmationMode &&
+		!appState.isQuestionMode &&
+		pendingSubagentApproval === null &&
+		pendingToolConfirmation === null;
+
+	// Push-to-talk keybinding stub (Ctrl+T)
+	// This PR (PR1) only scaffolds the handler. Audio capture is not yet wired.
+	useInput(
+		(input, key) => {
+			if (key.ctrl && input === 't') {
+				// Stub: Log or no-op until audio pipeline is wired in later PRs
+				// console.debug('Push-to-talk triggered');
+			}
+		},
+		{isActive: isVoiceInputAppropriate},
+	);
+
 	// Fullscreen layout if and only if cli.tsx put us on the alternate
 	// screen. Inline mode (--no-alt-screen / alternateScreen:false pref),
 	// test renderers, and piped stdout all use the classic flow layout
 	// with Static + native scrollback.
 	const fullscreen = altScreenActive;
 	const terminalRows = useTerminalRows();
+	const {currentTheme} = useTheme();
+
+	// Load voice preferences once on mount and when messages change (e.g. after /voice command)
+	const [voicePref, setVoicePref] = React.useState(() => getVoicePreference());
+
+	// TEMPORARY: proxy-triggers voice pref re-read via chatComponents length. Will be replaced by real event-driven state updates once PR4 (hands-free VAD) introduces actual audio state events. Do not build further on this mechanism.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: Trigger preference re-read when commands execute
+	React.useEffect(() => {
+		setVoicePref(getVoicePreference());
+	}, [appState.chatComponents.length]);
 
 	return (
 		// Fullscreen layout on the alternate screen buffer: the root Box is
@@ -386,6 +418,14 @@ export function InteractiveApp({
 								fullscreen={fullscreen}
 							/>
 						</UIStateProvider>
+					)}
+
+				{appState.startChat &&
+					appState.activeMode === null &&
+					!appState.isSettingsMode &&
+					!appState.planReviewState?.show &&
+					voicePref.enabled && (
+						<VoiceStatusBar state="idle" theme={currentTheme} />
 					)}
 			</Box>
 		</Box>
