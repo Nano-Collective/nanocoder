@@ -39,7 +39,10 @@ export function getCommandLoader(): CustomCommandLoader | null {
 	return commandLoaderGetter ? commandLoaderGetter() : null;
 }
 
-export async function processToolUse(toolCall: ToolCall): Promise<ToolResult> {
+export async function processToolUse(
+	toolCall: ToolCall,
+	options?: {abortSignal?: AbortSignal},
+): Promise<ToolResult> {
 	// Handle XML validation errors by throwing (will be caught and returned as error ToolResult)
 	if (toolCall.function.name === '__xml_validation_error__') {
 		const args = toolCall.function.arguments as {error: string};
@@ -63,7 +66,7 @@ export async function processToolUse(toolCall: ToolCall): Promise<ToolResult> {
 			toolCall.function.arguments,
 			{strict: true},
 		);
-		const result = await handler(parsedArgs);
+		const result = await handler(parsedArgs, options);
 		// Handlers may return a plain string or structured output. Only an
 		// object carrying `llmContent` is treated as structured; anything else
 		// (string, or a legacy undefined) passes through as the content.

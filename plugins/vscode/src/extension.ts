@@ -9,12 +9,19 @@ import {
 	DiagnosticInfo,
 	OpenFileMessage,
 } from './protocol';
+import {AcpStateManager, ACPStatus} from './acp-state';
+import {NanocoderAcpClient} from './acp-client';
+import {AcpProcessManager} from './acp-process-manager';
+import {ChatWebviewProvider} from './chat-webview-provider';
 
 const DEFAULT_PORT = 51820;
 const ACTIVE_EDITOR_DEBOUNCE_MS = 150;
 
 let wsClient: WebSocketClient;
 let diffManager: DiffManager;
+let acpStateManager: AcpStateManager;
+let acpClient: NanocoderAcpClient;
+let acpProcessManager: AcpProcessManager;
 let statusBarItem: vscode.StatusBarItem;
 let outputChannel: vscode.OutputChannel;
 let activeEditorDebounce: NodeJS.Timeout | null = null;
@@ -28,6 +35,14 @@ export function activate(context: vscode.ExtensionContext) {
 	wsClient = new WebSocketClient(outputChannel);
 	diffManager = new DiffManager(context);
 
+	// Initialize ACP components
+	acpStateManager = new AcpStateManager();
+	acpClient = new NanocoderAcpClient(outputChannel, acpStateManager);
+	acpProcessManager = new AcpProcessManager(outputChannel, acpStateManager, acpClient);
+
+	// Start the ACP process side-by-side with the companion mode
+	acpProcessManager.start();
+
 	// Create status bar item
 	statusBarItem = vscode.window.createStatusBarItem(
 		vscode.StatusBarAlignment.Right,
@@ -37,14 +52,56 @@ export function activate(context: vscode.ExtensionContext) {
 	updateStatusBar(false);
 	statusBarItem.show();
 
+	// Register Webview Provider
+	const chatProvider = new ChatWebviewProvider(context.extensionUri, outputChannel, acpClient, diffManager);
+	context.subscriptions.push(
+		vscode.window.registerWebviewViewProvider(ChatWebviewProvider.viewType, chatProvider, {
+			// Preserve DOM when user switches to Explorer/SCM/etc. and back.
+			// Without this VS Code destroys the webview on hide, wiping the transcript.
+			webviewOptions: {retainContextWhenHidden: true},
+		})
+	);
+
+	// Register Title Bar Action
+	context.subscriptions.push(
+		vscode.commands.registerCommand('nanocoder.toggleHistory', () => {
+			chatProvider.toggleHistory();
+		})
+	);
+
 	// Handle messages from CLI
-	wsClient.onMessage(message => handleServerMessage(message));
+	wsClient.onMessage((message: ServerMessage) => handleServerMessage(message));
 
 	// Register commands
 	context.subscriptions.push(
 		vscode.commands.registerCommand('nanocoder.connect', connect),
 		vscode.commands.registerCommand('nanocoder.disconnect', disconnect),
 		vscode.commands.registerCommand('nanocoder.startCli', startCli),
+		vscode.commands.registerCommand('nanocoder.restartAcp', () => {
+			outputChannel.appendLine('Manually restarting ACP process...');
+			acpProcessManager.dispose();
+			
+			// DO NOT recreate acpStateManager or acpClient, as the ChatWebviewProvider
+			// is permanently bound to the original instances.
+			acpProcessManager = new AcpProcessManager(outputChannel, acpStateManager, acpClient);
+			acpProcessManager.start();
+		}),
+		vscode.commands.registerCommand('nanocoder.openConfig', async () => {
+			const config = vscode.workspace.getConfiguration('nanocoder');
+			const cwdSetting = config.get<string>('cwd') || (vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd());
+			const configPath = path.join(cwdSetting, 'agents.config.json');
+			try {
+				const doc = await vscode.workspace.openTextDocument(configPath);
+				await vscode.window.showTextDocument(doc);
+			} catch (err) {
+				vscode.window.showErrorMessage(`Could not open configuration at ${configPath}. Ensure the file exists.`);
+			}
+		}),
+		vscode.commands.registerCommand('nanocoder.newChat', () => {
+			acpClient.newChat();
+			chatProvider.postMessage({type: 'clear'});
+			outputChannel.appendLine('[Extension] New chat started — session cleared.');
+		}),
 	);
 
 	// Push active editor state to the CLI so the input box can show an
@@ -69,6 +126,7 @@ export function activate(context: vscode.ExtensionContext) {
 		outputChannel,
 		{dispose: () => wsClient.disconnect()},
 		{dispose: () => diffManager.dispose()},
+		{dispose: () => acpProcessManager.dispose()},
 	);
 
 	outputChannel.appendLine('Nanocoder extension activated');
@@ -295,11 +353,19 @@ function scheduleActiveEditorSend(): void {
 // Push the current active editor + selection to the CLI. When no editor is
 // active or the document isn't a file on disk, clear the CLI-side state.
 function sendActiveEditor(): void {
+	const editor = vscode.window.activeTextEditor;
+	
+	// 1. Notify the local ACP GUI backend
+	if (acpClient) {
+		acpClient.notifyActiveEditorChanged(editor);
+	}
+
+	// 2. Notify the legacy CLI WebSocket backend
+	// The WebSocket Companion handles editor synchronization for the interactive CLI 'nanocoder'
 	if (!wsClient.isConnected()) {
 		return;
 	}
 
-	const editor = vscode.window.activeTextEditor;
 	const doc = editor?.document;
 	const isFile = doc?.uri.scheme === 'file';
 

@@ -24,6 +24,7 @@ export async function requestToolPermission(
 	toolCall: ToolCall,
 	conn: AgentSideConnection,
 	meta?: AcpToolCallMeta,
+	abortSignal?: AbortSignal,
 ): Promise<'approved' | 'denied' | 'cancelled'> {
 	const toolCallUpdate: ToolCallUpdate = {
 		toolCallId: toolCall.id,
@@ -35,11 +36,29 @@ export async function requestToolPermission(
 		locations: meta && meta.locations.length > 0 ? meta.locations : undefined,
 	};
 
-	const response = await conn.requestPermission({
+	const requestPromise = conn.requestPermission({
 		sessionId: session.sessionId,
 		options: [ALLOW_OPTION, DENY_OPTION],
 		toolCall: toolCallUpdate,
 	});
+
+	let response;
+	if (abortSignal) {
+		response = await Promise.race([
+			requestPromise,
+			new Promise<any>(resolve => {
+				if (abortSignal.aborted) {
+					resolve({outcome: {outcome: 'cancelled'}});
+				} else {
+					abortSignal.addEventListener('abort', () => {
+						resolve({outcome: {outcome: 'cancelled'}});
+					});
+				}
+			}),
+		]);
+	} else {
+		response = await requestPromise;
+	}
 
 	if (response.outcome.outcome === 'cancelled') {
 		return 'cancelled';

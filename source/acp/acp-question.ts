@@ -27,6 +27,7 @@ export async function requestUserChoice(
 	toolCallId: string,
 	question: string,
 	options: string[],
+	abortSignal?: AbortSignal,
 ): Promise<string> {
 	const permissionOptions: PermissionOption[] = options.map(
 		(option, index) => ({
@@ -37,18 +38,41 @@ export async function requestUserChoice(
 	);
 
 	try {
-		const response = await conn.requestPermission({
+		const requestPromise = conn.requestPermission({
 			sessionId,
 			options: permissionOptions,
 			toolCall: {toolCallId, title: question, status: 'pending'},
 		});
 
+		let response;
+		if (abortSignal) {
+			response = await Promise.race([
+				requestPromise,
+				new Promise<any>(resolve => {
+					if (abortSignal.aborted) {
+						resolve({outcome: {outcome: 'aborted'}});
+					} else {
+						abortSignal.addEventListener('abort', () => {
+							resolve({outcome: {outcome: 'aborted'}});
+						});
+					}
+				}),
+			]);
+		} else {
+			response = await requestPromise;
+		}
+
+		if (response.outcome.outcome === 'aborted') {
+			return 'Error: AbortError: The operation was aborted';
+		}
+
 		if (response.outcome.outcome === 'selected') {
-			const index = Number(
-				response.outcome.optionId.slice(OPTION_PREFIX.length),
-			);
-			if (Number.isInteger(index) && index >= 0 && index < options.length) {
-				return options[index];
+			const optionId = response.outcome.optionId;
+			if (optionId.startsWith(OPTION_PREFIX)) {
+				const index = Number(optionId.slice(OPTION_PREFIX.length));
+				if (Number.isInteger(index) && index >= 0 && index < options.length) {
+					return options[index];
+				}
 			}
 		}
 

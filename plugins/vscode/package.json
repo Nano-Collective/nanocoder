@@ -30,6 +30,25 @@
 	"main": "./dist/extension.js",
 	"icon": "media/icon.png",
 	"contributes": {
+		"viewsContainers": {
+			"activitybar": [
+				{
+					"id": "nanocoder-sidebar",
+					"title": "Nanocoder",
+					"icon": "media/icon.svg"
+				}
+			]
+		},
+		"views": {
+			"nanocoder-sidebar": [
+				{
+					"type": "webview",
+					"id": "nanocoder.chatView",
+					"name": "Chat",
+					"icon": "media/icon.svg"
+				}
+			]
+		},
 		"commands": [
 			{
 				"command": "nanocoder.connect",
@@ -45,8 +64,39 @@
 				"command": "nanocoder.startCli",
 				"title": "Start Nanocoder CLI",
 				"category": "Nanocoder"
+			},
+			{
+				"command": "nanocoder.toggleHistory",
+				"title": "View Session History",
+				"category": "Nanocoder",
+				"icon": "$(history)"
+			},
+			{
+				"command": "nanocoder.openConfig",
+				"title": "Open Configuration",
+				"category": "Nanocoder"
+			},
+			{
+				"command": "nanocoder.newChat",
+				"title": "New Chat",
+				"category": "Nanocoder",
+				"icon": "$(add)"
 			}
 		],
+		"menus": {
+			"view/title": [
+				{
+					"command": "nanocoder.newChat",
+					"when": "view == nanocoder.chatView",
+					"group": "navigation@1"
+				},
+				{
+					"command": "nanocoder.toggleHistory",
+					"when": "view == nanocoder.chatView",
+					"group": "navigation@2"
+				}
+			]
+		},
 		"configuration": {
 			"title": "Nanocoder",
 			"properties": {
@@ -57,8 +107,8 @@
 				},
 				"nanocoder.autoConnect": {
 					"type": "boolean",
-					"default": true,
-					"description": "Automatically connect to Nanocoder CLI on startup"
+					"default": false,
+					"description": "Automatically connect to Nanocoder CLI on startup (legacy WebSocket companion)"
 				},
 				"nanocoder.autoStartCli": {
 					"type": "boolean",
@@ -69,14 +119,39 @@
 					"type": "boolean",
 					"default": true,
 					"description": "Show diff preview before applying file changes"
+				},
+				"nanocoder.mode": {
+					"type": "string",
+					"default": "auto-accept",
+					"scope": "resource",
+					"description": "The current operating mode for the Nanocoder assistant (e.g. chat, auto-accept)"
+				},
+				"nanocoder.model": {
+					"type": "string",
+					"scope": "machine",
+					"description": "The AI model to use for Nanocoder sessions"
+				},
+				"nanocoder.cliPath": {
+					"type": "string",
+					"scope": "machine",
+					"description": "Absolute path to the nanocoder CLI executable. If empty, uses the globally installed nanocoder."
+				},
+				"nanocoder.cwd": {
+					"type": "string",
+					"scope": "resource",
+					"description": "Working directory for the Nanocoder CLI. Defaults to the current VS Code workspace root."
 				}
 			}
 		}
 	},
 	"scripts": {
 		"vscode:prepublish": "pnpm run build",
-		"build": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify",
-		"watch": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
+		"build": "concurrently \"pnpm run build:ext\" \"pnpm run build:css\"",
+		"watch": "concurrently \"pnpm run watch:ext\" \"pnpm run watch:css\"",
+		"build:ext": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify",
+		"watch:ext": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
+		"build:css": "tailwindcss -i ./src/styles.css -o ./media/chat-panel.css --minify",
+		"watch:css": "tailwindcss -i ./src/styles.css -o ./media/chat-panel.css --watch",
 		"lint": "eslint src --ext ts"
 	},
 	"devDependencies": {
@@ -84,11 +159,16 @@
 		"@types/vscode": "^1.125.0",
 		"@types/ws": "^8.5.10",
 		"@vscode/vsce": "^3.9.1",
+		"autoprefixer": "^10.4.19",
+		"concurrently": "^8.2.2",
 		"esbuild": "^0.28.1",
 		"eslint": "^10.1.0",
+		"postcss": "^8.4.38",
+		"tailwindcss": "^3.4.4",
 		"typescript": "^5.3.0"
 	},
 	"dependencies": {
+		"@agentclientprotocol/sdk": "^0.25.0",
 		"ws": "^8.16.0"
 	}
 }

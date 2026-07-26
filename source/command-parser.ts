@@ -25,6 +25,12 @@ export function parseInput(input: string): ParsedCommand {
 
 	const parts = commandText.split(/\s+/);
 	const command = parts[0];
+
+	// If the command part contains a slash, it's likely a file path, not a slash command!
+	if (command.includes('/')) {
+		return {isCommand: false};
+	}
+
 	const args = parts.slice(1);
 
 	return {

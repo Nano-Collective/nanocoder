@@ -135,7 +135,7 @@ test('AcpAgent.newSession - exposes available models and current model', async t
 	const {agent} = createAgent();
 	const result = await agent.newSession({cwd: '/tmp'});
 	const modelOption = result.configOptions?.find(
-		(o: any) => o.category === 'model',
+		(o: any) => o.id === 'model',
 	) as any;
 	t.is(modelOption?.currentValue, 'test-model');
 	const ids = modelOption?.options.map((o: any) => o.value);
@@ -246,12 +246,12 @@ test('AcpAgent.setSessionConfigOption - switches the client model', async t => {
 		value: 'other-model',
 	});
 	const modelOption = result.configOptions.find(
-		(o: any) => o.category === 'model',
+		(o: any) => o.id === 'model',
 	) as any;
 	t.is(modelOption?.currentValue, 'other-model');
 	const after = await agent.newSession({cwd: '/tmp'});
 	const afterOption = after.configOptions?.find(
-		(o: any) => o.category === 'model',
+		(o: any) => o.id === 'model',
 	) as any;
 	t.is(afterOption?.currentValue, 'other-model');
 });
@@ -266,6 +266,30 @@ test('AcpAgent.prompt - throws on unknown session', async t => {
 		agent.prompt({sessionId: 'nonexistent', prompt: [{type: 'text', text: 'hello'}]}),
 		{message: 'Session not found: nonexistent'},
 	);
+});
+
+
+test('AcpAgent.prompt - propagates API errors cleanly', async t => {
+	const {agent} = createAgent();
+	
+	// Mock the client to throw an API error
+	agent['initContext'].client.chat = async () => {
+		throw new Error('RequestError: Internal error (500)');
+	};
+	
+	const session = agent.registerSession('session-1', {
+		conn: agent['conn'],
+		sessionId: 'session-1',
+		canReadTextFile: false,
+	});
+	
+	const error = await t.throwsAsync(
+		() => agent.prompt({sessionId: 'session-1', prompt: [{type: 'text', text: 'crash please'}]}),
+		{message: /RequestError/}
+	);
+	
+	// Ensure turnActive is reset even on error
+	t.false(session.turnActive);
 });
 
 test('AcpAgent.prompt - returns response for valid session', async t => {

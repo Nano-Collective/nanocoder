@@ -9,6 +9,10 @@ import type {AcpSession} from '@/acp/acp-session';
 import {type AcpToolCallMeta, buildToolCallMeta} from '@/acp/acp-tool-call';
 import {DEFAULT_HEADLESS_MAX_TURNS, getAppConfig} from '@/config/index';
 import {processToolUse} from '@/message-handler';
+import {
+	getAllSubagentProgress,
+	type SubagentEvent,
+} from '@/services/subagent-events';
 import {parseToolCalls} from '@/tool-calling/index';
 import {resolveToolApproval} from '@/tools/approval-policy';
 import type {ToolManager} from '@/tools/tool-manager';
@@ -53,6 +57,7 @@ export async function runAcpConversation(
 
 	for (let turn = 0; turn < maxTurns; turn++) {
 		if (abortController.signal.aborted) {
+			session.messages = messages;
 			return {stopReason: 'cancelled'};
 		}
 
@@ -180,6 +185,19 @@ export async function runAcpConversation(
 		// Process tool calls
 		const toolResults: ToolResult[] = [];
 		for (const toolCall of validToolCalls) {
+			// Stop was pressed: don't start any remaining queued tools. Record a
+			// cancelled result for each so the assistant's tool_calls keep matched
+			// results in history; the turn ends below instead of re-prompting.
+			if (abortController.signal.aborted) {
+				toolResults.push({
+					tool_call_id: toolCall.id,
+					role: 'tool',
+					name: toolCall.function.name,
+					content: 'Error: cancelled by user',
+				});
+				continue;
+			}
+
 			// Enrich the call with ACP metadata (kind, file locations, and a diff
 			// for edits) so the client can render rich tool cards and previews.
 			const meta = await buildToolCallMeta(toolCall);
@@ -192,7 +210,12 @@ export async function runAcpConversation(
 			// the tool result. We reuse this call's id (just announced) so the
 			// permission request targets a known tool call.
 			if (toolCall.function.name === 'ask_user') {
-				const answer = await handleAskUser(session, conn, toolCall);
+				const answer = await handleAskUser(
+					session,
+					conn,
+					toolCall,
+					abortController.signal,
+				);
 				toolResults.push(answer);
 				continue;
 			}
@@ -213,6 +236,7 @@ export async function runAcpConversation(
 					toolCall,
 					conn,
 					meta,
+					abortController.signal,
 				);
 
 				if (permission === 'cancelled') {
@@ -247,7 +271,59 @@ export async function runAcpConversation(
 
 			// Execute tool
 			await emitToolCallUpdate(session, conn, toolCall, 'in_progress');
-			const toolResult = await processToolUse(toolCall);
+
+			let pollInterval: ReturnType<typeof setInterval> | null = null;
+			let isPolling = true;
+			if (toolCall.function.name === 'agent') {
+				// Progress entries are never removed from the map, so snapshot the
+				// keys that exist before this call starts and ignore them while
+				// polling - otherwise a finished agent from an earlier turn wins the
+				// max-token scan and the card shows stale numbers.
+				const preexisting = new Set(getAllSubagentProgress().keys());
+				pollInterval = setInterval(async () => {
+					if (!isPolling) return;
+					// agentId is a randomUUID() internal to the executor — not in args.
+					// Poll agents started by this call and pick the most active one.
+					let best: SubagentEvent | null = null;
+					for (const [id, prog] of getAllSubagentProgress()) {
+						if (preexisting.has(id)) continue;
+						if (!best || prog.tokenCount > best.tokenCount) {
+							best = prog;
+						}
+					}
+
+					if (best) {
+						const tokens = Math.floor(best.tokenCount / 1000);
+						const lastTool =
+							best.toolHistory.length > 0
+								? best.toolHistory[best.toolHistory.length - 1]
+								: '';
+
+						let title = `${best.subagentName || 'agent'} • ${tokens}k tokens`;
+						if (best.toolCallCount > 0) {
+							title += ` • ${best.toolCallCount} tools${lastTool ? ` (${lastTool})` : ''}`;
+						} else {
+							title += ` • thinking...`;
+						}
+
+						if (!isPolling) return;
+						await emitToolCallUpdate(
+							session,
+							conn,
+							toolCall,
+							'in_progress',
+							undefined,
+							title,
+						);
+					}
+				}, 1500);
+			}
+
+			const toolResult = await processToolUse(toolCall, {
+				abortSignal: abortController.signal,
+			});
+			isPolling = false;
+			if (pollInterval) clearInterval(pollInterval);
 
 			const status: ToolCallStatus = toolResult.content.startsWith('Error')
 				? 'failed'
@@ -260,13 +336,62 @@ export async function runAcpConversation(
 				toolResult.content,
 			);
 			toolResults.push(toolResult);
+
+			// write_tasks replaces the whole task list; mirror it to the client
+			// as an ACP plan update so GUIs can render a live checklist.
+			if (toolCall.function.name === 'write_tasks' && status === 'completed') {
+				await emitPlanUpdate(session, conn, toolCall);
+			}
 		}
 
 		messages = [...messages, ...toolResults];
+
+		// End the turn here when cancelled - without this the loop would issue
+		// another LLM request before the top-of-turn abort check runs.
+		if (abortController.signal.aborted) {
+			session.messages = messages;
+			return {stopReason: 'cancelled'};
+		}
 	}
 
 	session.messages = messages;
 	return {stopReason: 'max_turn_requests'};
+}
+
+/**
+ * Mirror a successful `write_tasks` call to the client as an ACP `plan`
+ * session update. The tool's args carry the complete replacement task list
+ * (TodoWrite-style), which maps 1:1 onto ACP plan entries; tasks have no
+ * priority concept, so entries are reported as `medium`.
+ */
+async function emitPlanUpdate(
+	session: AcpSession,
+	conn: AgentSideConnection,
+	toolCall: ToolCall,
+): Promise<void> {
+	const args = toolCall.function.arguments as {
+		tasks?: Array<{title?: unknown; status?: unknown}>;
+	};
+	const tasks = Array.isArray(args?.tasks) ? args.tasks : [];
+	const validStatuses = ['pending', 'in_progress', 'completed'] as const;
+
+	await conn.sessionUpdate({
+		sessionId: session.sessionId,
+		update: {
+			sessionUpdate: 'plan',
+			entries: tasks
+				.filter(t => typeof t?.title === 'string')
+				.map(t => ({
+					content: t.title as string,
+					priority: 'medium' as const,
+					status: validStatuses.includes(
+						t.status as (typeof validStatuses)[number],
+					)
+						? (t.status as (typeof validStatuses)[number])
+						: 'pending',
+				})),
+		},
+	});
 }
 
 async function emitToolCall(
@@ -297,6 +422,7 @@ async function emitToolCallUpdate(
 	toolCall: ToolCall,
 	status: ToolCallStatus,
 	rawOutput?: unknown,
+	title?: string,
 ): Promise<void> {
 	await conn.sessionUpdate({
 		sessionId: session.sessionId,
@@ -305,6 +431,7 @@ async function emitToolCallUpdate(
 			toolCallId: toolCall.id,
 			status,
 			rawOutput,
+			title,
 		},
 	});
 }
@@ -313,6 +440,7 @@ async function handleAskUser(
 	session: AcpSession,
 	conn: AgentSideConnection,
 	toolCall: ToolCall,
+	abortSignal?: AbortSignal,
 ): Promise<ToolResult> {
 	const args = toolCall.function.arguments ?? {};
 	const question = typeof args.question === 'string' ? args.question : '';
@@ -330,6 +458,7 @@ async function handleAskUser(
 			toolCall.id,
 			question,
 			options,
+			abortSignal,
 		);
 		const status: ToolCallStatus = content.startsWith('Error')
 			? 'failed'
