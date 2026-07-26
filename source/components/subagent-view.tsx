@@ -121,6 +121,11 @@ export function SubagentView({
 				<ChatQueue
 					staticComponents={[]}
 					queuedComponents={chatComponents}
+					// Key the underlying <Static> by agent so cycling to another
+					// session remounts it — a reused <Static> only ever appends
+					// past its item index, so the new agent's transcript would
+					// otherwise never print.
+					clearKey={agentId}
 					disableStatic={altScreenActive}
 					renderLastQueuedComponentLive={false}
 				/>

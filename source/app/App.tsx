@@ -130,6 +130,28 @@ export default function App({
 		void getShutdownManager().gracefulShutdown(0);
 	};
 
+	// Mirror of attachedAgentId that updates synchronously, so rapid Ctrl+S
+	// presses cycle correctly even before React commits the previous change.
+	const attachedAgentIdRef = React.useRef(appState.attachedAgentId);
+	React.useEffect(() => {
+		attachedAgentIdRef.current = appState.attachedAgentId;
+	}, [appState.attachedAgentId]);
+
+	// Attach/cycle/detach the subagent inspector. The transcript renders
+	// through <Static> (append-only, permanent scrollback), so switching
+	// views needs the same treatment as /clear: wipe the real terminal, then
+	// let the remounted <Static> (keyed by agentId / conversationId) reprint.
+	const changeAttachedAgent = (nextAgentId: string | null) => {
+		if (attachedAgentIdRef.current === nextAgentId) {
+			return;
+		}
+		attachedAgentIdRef.current = nextAgentId;
+		if (!altScreenActive && process.stdout.isTTY) {
+			process.stdout.write('\x1B[2J\x1B[3J\x1B[H');
+		}
+		appState.setAttachedAgentId(nextAgentId);
+	};
+
 	// Ink's built-in exitOnCtrlC is disabled (cli.tsx) so Ctrl+C can run
 	// the same graceful path as /exit instead of abandoning the last frame.
 	useInput((input, key) => {
@@ -142,24 +164,19 @@ export default function App({
 				.filter(([_, p]) => p.status !== 'complete' && p.status !== 'error')
 				.map(([id]) => id);
 
-			appState.setAttachedAgentId(currentAttachedAgentId => {
-				if (runningAgents.length === 0) {
-					return null;
-				}
-
-				if (!currentAttachedAgentId) {
-					return runningAgents[0];
-				}
-
-				const currentIndex = runningAgents.indexOf(currentAttachedAgentId);
-				if (currentIndex !== -1 && runningAgents.length > 1) {
-					return runningAgents[(currentIndex + 1) % runningAgents.length];
-				} else if (currentIndex === -1) {
-					return runningAgents[0];
-				}
-
-				return currentAttachedAgentId;
-			});
+			const current = attachedAgentIdRef.current;
+			if (runningAgents.length === 0) {
+				changeAttachedAgent(null);
+			} else if (!current) {
+				changeAttachedAgent(runningAgents[0]);
+			} else {
+				const currentIndex = runningAgents.indexOf(current);
+				changeAttachedAgent(
+					currentIndex === -1
+						? runningAgents[0]
+						: runningAgents[(currentIndex + 1) % runningAgents.length],
+				);
+			}
 		}
 	});
 
@@ -742,7 +759,7 @@ export default function App({
 					{appState.attachedAgentId ? (
 						<SubagentView
 							agentId={appState.attachedAgentId}
-							onDetach={() => appState.setAttachedAgentId(null)}
+							onDetach={() => changeAttachedAgent(null)}
 							reasoningExpanded={appState.reasoningExpanded}
 							altScreenActive={altScreenActive}
 						/>
