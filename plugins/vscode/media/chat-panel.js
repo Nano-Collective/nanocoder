@@ -425,16 +425,33 @@
 		if (modelDropdown) modelDropdown.setOptions(message.availableModels, message.model);
 	}
 
+	// Close the current streamed-text block: flush any pending throttled
+	// render, then reset so the next agent_message_chunk starts a fresh
+	// markdown block. Called whenever another element (tool card, thought
+	// box, user message) is inserted - without this, text streamed after a
+	// tool call is appended to the block ABOVE the card, fusing pre-tool
+	// and post-tool output into one paragraph.
+	function endCurrentTextBlock() {
+		if (renderTimeout) {
+			clearTimeout(renderTimeout);
+			renderTimeout = null;
+			if (currentTextEl && typeof marked !== 'undefined') {
+				currentTextEl.innerHTML = marked.parse(currentTurnText);
+			}
+		}
+		currentTurnEl = null;
+		currentTextEl = null;
+		currentTurnText = '';
+	}
+
 	function handleAcpUpdate(payload) {
 		if (!payload) return;
 		const update = payload.update ? payload.update : payload;
 
 		if (update.sessionUpdate === 'user_message_chunk') {
 			if (update.content && update.content.text) {
+				endCurrentTextBlock();
 				appendMessage(update.content.text, 'user');
-				currentTurnEl = null;
-				currentTextEl = null;
-				currentTurnText = '';
 			}
 		} else if (update.sessionUpdate === 'agent_message_chunk') {
 			if (currentThoughtBox) {
@@ -446,6 +463,7 @@
 			}
 		} else if (update.sessionUpdate === 'agent_thought_chunk') {
 			if (!currentThoughtBox) {
+				endCurrentTextBlock();
 				currentThoughtBox = new ThoughtAggregator();
 			}
 			if (update.content && update.content.text) {
@@ -668,6 +686,13 @@
 	function handleToolCallUpdate(update) {
 		const toolCallId = update.toolCallId || (update.toolCall && update.toolCall.toolCallId);
 		if (!toolCallId) return;
+
+		// A new card is about to be inserted below the current text block -
+		// close the block so any text streamed after the tool starts fresh
+		// below the card instead of appending to the paragraph above it.
+		if (!document.getElementById(`tool-card-${toolCallId}`)) {
+			endCurrentTextBlock();
+		}
 
 		const toolName = update.name || (update.toolCall && update.toolCall.name) || '';
 		const isMutating = ['replace_file_content', 'multi_replace_file_content', 'write_to_file', 'write_file'].includes(toolName);
