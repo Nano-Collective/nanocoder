@@ -11,6 +11,7 @@ The extension provides a native sidebar chat powered by the Agent Client Protoco
 - **Sessions**: New Chat, session history with resume and delete, persisted to disk across restarts
 - **Slash Commands**: `/help`, `/clear`, and custom commands from `.nanocoder/commands`
 - **Live Subagent Progress**: Delegated agent runs show live token and tool activity on their card
+- **Task Checklist**: The AI's task list renders as a live checklist card with per-task status and progress
 - **Cancellation**: Stop ends the whole turn - the current tool aborts and queued tools are skipped
 - **Diff Previews**: Click a file-edit card to open the change in VS Code's diff viewer
 - **Legacy Companion Mode** (opt-in): Pairs with a terminal CLI session over WebSocket for diff previews and editor context

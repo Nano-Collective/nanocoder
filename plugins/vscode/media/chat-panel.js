@@ -132,7 +132,9 @@
 		error: `<svg class="text-[#f14c4c]" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`,
 		cancelled: `<svg class="text-[#cccccc] opacity-80" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line></svg>`,
 		clipboard: `<svg class="mr-1.5" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>`,
-		chevron: `<svg class="transition-transform duration-200" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`
+		chevron: `<svg class="transition-transform duration-200" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`,
+		circle: `<svg class="opacity-50" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle></svg>`,
+		arrowRight: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>`
 	};
 
 	// --- Send / Stop toggle logic ---
@@ -475,6 +477,8 @@
 				currentThoughtBox = null;
 			}
 			handleToolCallUpdate(update);
+		} else if (update.sessionUpdate === 'plan') {
+			handlePlanUpdate(update);
 		} else if (update.sessionUpdate === 'prompt_response' || update.sessionUpdate === 'done') {
 			if (currentThoughtBox) {
 				currentThoughtBox.finish();
@@ -681,6 +685,79 @@
 
 			scrollToBottom();
 		}
+	}
+
+	// Render the agent's task list (ACP `plan` updates, emitted by the server
+	// when the write_tasks tool runs) as a live checklist card. Each update
+	// carries the complete replacement list, so the card is rebuilt in place.
+	function handlePlanUpdate(update) {
+		const entries = Array.isArray(update.entries) ? update.entries : [];
+		let card = document.getElementById('plan-card');
+
+		if (entries.length === 0) {
+			if (card) card.remove();
+			return;
+		}
+
+		if (!card) {
+			endCurrentTextBlock();
+			card = document.createElement('div');
+			card.id = 'plan-card';
+			card.className = 'my-3 border border-vscode-widget-border rounded bg-vscode-widget-bg overflow-hidden shrink-0';
+
+			const header = document.createElement('div');
+			header.className = 'px-3 py-2 flex items-center bg-vscode-widget-header border-b border-vscode-widget-border gap-2';
+
+			const title = document.createElement('span');
+			title.className = 'font-vscode text-[0.9em] opacity-80';
+			title.textContent = 'Tasks';
+
+			const progress = document.createElement('span');
+			progress.id = 'plan-progress';
+			progress.className = 'ml-auto font-vscode text-[0.8em] opacity-60';
+
+			header.appendChild(title);
+			header.appendChild(progress);
+			card.appendChild(header);
+
+			const body = document.createElement('div');
+			body.id = 'plan-body';
+			body.className = 'flex flex-col';
+			card.appendChild(body);
+
+			messagesContainer.appendChild(card);
+			scrollToBottom();
+		}
+
+		const body = card.querySelector('#plan-body');
+		body.innerHTML = '';
+
+		let done = 0;
+		for (const entry of entries) {
+			if (entry.status === 'completed') done++;
+
+			const row = document.createElement('div');
+			row.className = 'px-3 py-1.5 border-t border-vscode-widget-border first:border-t-0 flex items-start gap-2 text-[0.85em] font-vscode';
+
+			const icon = document.createElement('span');
+			icon.className = 'mt-0.5 shrink-0 flex items-center justify-center';
+			if (entry.status === 'completed') icon.innerHTML = ICONS.success;
+			else if (entry.status === 'in_progress') icon.innerHTML = ICONS.arrowRight;
+			else icon.innerHTML = ICONS.circle;
+
+			const label = document.createElement('span');
+			label.className = 'flex-1 break-words leading-relaxed' +
+				(entry.status === 'completed' ? ' line-through opacity-60' : '') +
+				(entry.status === 'in_progress' ? ' font-semibold' : '');
+			label.textContent = entry.content || '';
+
+			row.appendChild(icon);
+			row.appendChild(label);
+			body.appendChild(row);
+		}
+
+		const progressEl = card.querySelector('#plan-progress');
+		if (progressEl) progressEl.textContent = `${done}/${entries.length}`;
 	}
 
 	function handleToolCallUpdate(update) {

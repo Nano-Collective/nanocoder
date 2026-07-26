@@ -336,6 +336,12 @@ export async function runAcpConversation(
 				toolResult.content,
 			);
 			toolResults.push(toolResult);
+
+			// write_tasks replaces the whole task list; mirror it to the client
+			// as an ACP plan update so GUIs can render a live checklist.
+			if (toolCall.function.name === 'write_tasks' && status === 'completed') {
+				await emitPlanUpdate(session, conn, toolCall);
+			}
 		}
 
 		messages = [...messages, ...toolResults];
@@ -350,6 +356,42 @@ export async function runAcpConversation(
 
 	session.messages = messages;
 	return {stopReason: 'max_turn_requests'};
+}
+
+/**
+ * Mirror a successful `write_tasks` call to the client as an ACP `plan`
+ * session update. The tool's args carry the complete replacement task list
+ * (TodoWrite-style), which maps 1:1 onto ACP plan entries; tasks have no
+ * priority concept, so entries are reported as `medium`.
+ */
+async function emitPlanUpdate(
+	session: AcpSession,
+	conn: AgentSideConnection,
+	toolCall: ToolCall,
+): Promise<void> {
+	const args = toolCall.function.arguments as {
+		tasks?: Array<{title?: unknown; status?: unknown}>;
+	};
+	const tasks = Array.isArray(args?.tasks) ? args.tasks : [];
+	const validStatuses = ['pending', 'in_progress', 'completed'] as const;
+
+	await conn.sessionUpdate({
+		sessionId: session.sessionId,
+		update: {
+			sessionUpdate: 'plan',
+			entries: tasks
+				.filter(t => typeof t?.title === 'string')
+				.map(t => ({
+					content: t.title as string,
+					priority: 'medium' as const,
+					status: validStatuses.includes(
+						t.status as (typeof validStatuses)[number],
+					)
+						? (t.status as (typeof validStatuses)[number])
+						: 'pending',
+				})),
+		},
+	});
 }
 
 async function emitToolCall(

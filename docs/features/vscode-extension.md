@@ -15,6 +15,7 @@ The Nanocoder VS Code extension provides a native sidebar chat powered by the Ag
 - **Sessions**: Start a new chat, browse previous sessions, and resume or delete them - conversations persist to disk across restarts.
 - **Slash Commands**: `/help`, `/clear`, and your custom commands from `.nanocoder/commands` work directly in the chat.
 - **Live Subagent Progress**: Delegated agent runs show live token usage and tool activity on their card while they work.
+- **Task Checklist**: When the AI plans work with the task tool, a live checklist card shows each task's status and overall progress.
 - **Cancellation**: The Stop button ends the whole turn - the current tool is aborted and any queued tools are skipped.
 - **Configuration Management**: The `Nanocoder: Open Configuration` command opens your `agents.config.json`.
 - **Legacy Companion Mode**: The original WebSocket companion for terminal CLI sessions is still available, now opt-in.
@@ -85,6 +86,10 @@ The three dropdowns in the chat header switch the session's provider, model, and
 ### Subagent Progress
 
 When the AI delegates to a subagent, the agent's tool card updates live with the subagent's name, token usage, tool count, and the last tool it used.
+
+### Task Checklist
+
+When the AI organizes work with the task tool (`write_tasks`), a Tasks card appears in the chat showing each task with its status - open circle for pending, arrow for in progress, check for completed - plus a progress count in the header. The card updates in place as the AI works through the list.
 
 ## Configuration
 

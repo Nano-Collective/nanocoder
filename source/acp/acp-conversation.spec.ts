@@ -423,6 +423,76 @@ test('runAcpConversation - executes tool and emits status updates', async t => {
 });
 
 // ============================================================================
+// write_tasks mirrors to an ACP plan update
+// ============================================================================
+
+test('runAcpConversation - write_tasks emits a plan session update', async t => {
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+
+	setToolRegistryGetter(() => ({
+		write_tasks: async () => 'Tasks updated',
+	}));
+
+	let callCount = 0;
+	const client = {
+		chat: async () => {
+			callCount++;
+			if (callCount === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [
+									createMockToolCall(
+										'write_tasks',
+										{
+											tasks: [
+												{title: 'First task', status: 'completed'},
+												{title: 'Second task', status: 'in_progress'},
+												{title: 'Third task'},
+											],
+										},
+										'call-1',
+									),
+								],
+							},
+						},
+					],
+				};
+			}
+			return {choices: [{message: {content: 'Done'}}]};
+		},
+	} as unknown as LLMClient;
+
+	const result = await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(result.stopReason, 'end_turn');
+
+	const planUpdate = updates.find(
+		(u: any) => u.update.sessionUpdate === 'plan',
+	) as any;
+	t.truthy(planUpdate, 'a plan session update must be emitted');
+	t.deepEqual(planUpdate.update.entries, [
+		{content: 'First task', priority: 'medium', status: 'completed'},
+		{content: 'Second task', priority: 'medium', status: 'in_progress'},
+		{content: 'Third task', priority: 'medium', status: 'pending'},
+	]);
+});
+
+// ============================================================================
 // Cancellation mid-turn with queued tools
 // ============================================================================
 
