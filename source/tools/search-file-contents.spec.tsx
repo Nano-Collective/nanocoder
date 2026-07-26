@@ -1,10 +1,16 @@
-import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
+import {
+	resetSessionCwd,
+	setProjectRoot,
+	setSessionCwd,
+} from '../services/session-cwd';
 import {searchFileContentsTool} from './search-file-contents';
 
 // ============================================================================
@@ -1834,6 +1840,33 @@ test.serial(
 // ============================================================================
 // Tests for Formatter with New Parameters
 // ============================================================================
+
+test.serial(
+	'search_file_contents clamps to the project root when the session cwd escaped it',
+	async t => {
+		const root = mkdtempSync(join(tmpdir(), 'nc-proj-'));
+		const outside = mkdtempSync(join(tmpdir(), 'nc-outside-'));
+		try {
+			writeFileSync(join(root, 'inproject.txt'), 'needle_marker here');
+			writeFileSync(join(outside, 'secret.txt'), 'needle_marker here');
+			setProjectRoot(root);
+			setSessionCwd(outside); // like a bash `cd /etc`
+			const result = await searchFileContentsTool.tool.execute!(
+				{query: 'needle_marker', maxResults: 30},
+				{toolCallId: 'test', messages: []},
+			);
+			t.true(result.includes('inproject.txt'), 'searches the project root');
+			t.false(
+				result.includes('secret.txt'),
+				'does not escape to the session cwd',
+			);
+		} finally {
+			resetSessionCwd();
+			rmSync(root, {recursive: true, force: true});
+			rmSync(outside, {recursive: true, force: true});
+		}
+	},
+);
 
 test('SearchFileContentsFormatter shows wholeWord indicator', t => {
 	const formatter = searchFileContentsTool.formatter;

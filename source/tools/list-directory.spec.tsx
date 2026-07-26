@@ -1,10 +1,16 @@
-import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
+import {
+	resetSessionCwd,
+	setProjectRoot,
+	setSessionCwd,
+} from '../services/session-cwd';
 import {listDirectoryTool} from './list-directory';
 
 // ============================================================================
@@ -601,6 +607,30 @@ test('list_directory tool does not require confirmation', t => {
 	t.true(listDirectoryTool.readOnly);
 	t.is(listDirectoryTool.approval, undefined);
 });
+
+test.serial(
+	'list_directory applies the project-root .gitignore after a cd into a subdir',
+	async t => {
+		const root = mkdtempSync(join(tmpdir(), 'nc-lsroot-'));
+		try {
+			writeFileSync(join(root, '.gitignore'), '*.log\n');
+			writeFileSync(join(root, 'keep.txt'), '');
+			writeFileSync(join(root, 'skip.log'), '');
+			mkdirSync(join(root, 'sub'));
+			setProjectRoot(root);
+			setSessionCwd(join(root, 'sub')); // shell has cd-ed into a subdir
+			const result = await listDirectoryTool.tool.execute!(
+				{path: root},
+				{toolCallId: 'test', messages: []},
+			);
+			t.true(result.includes('keep.txt'), 'lists non-ignored files');
+			t.false(result.includes('skip.log'), 'root .gitignore still applies');
+		} finally {
+			resetSessionCwd();
+			rmSync(root, {recursive: true, force: true});
+		}
+	},
+);
 
 test('list_directory tool has handler function', t => {
 	t.is(typeof listDirectoryTool.tool.execute, 'function');

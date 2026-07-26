@@ -7,6 +7,7 @@ import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
+import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {truncateAnsi} from '@/utils/ansi-truncate';
@@ -29,7 +30,7 @@ const executeWriteFile = async (args: {
 	path: string;
 	content: unknown; // Note: change type to unknown to accept non-string
 }): Promise<string> => {
-	const absPath = resolve(args.path);
+	const absPath = resolve(getSafeSessionCwd(), args.path);
 	const fileExists = existsSync(absPath);
 
 	// Type guard: ensure content is string for write operation
@@ -183,7 +184,7 @@ const writeFileFormatter = async (
 	result?: string,
 ): Promise<React.ReactElement> => {
 	const path = args.path || args.file_path || '';
-	const absPath = resolve(path);
+	const absPath = resolve(getSafeSessionCwd(), path);
 
 	// Send diff to VS Code during preview phase (before execution)
 	if (result === undefined && isVSCodeConnected()) {
@@ -232,7 +233,7 @@ const writeFileValidator = async (args: {
 	const pathResult = validatePath(args.path);
 	if (!pathResult.valid) return pathResult;
 
-	const absPath = resolve(args.path);
+	const absPath = resolve(getSafeSessionCwd(), args.path);
 
 	// Check if parent directory exists
 	const parentDir = dirname(absPath);

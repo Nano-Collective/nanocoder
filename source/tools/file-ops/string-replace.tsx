@@ -3,6 +3,7 @@ import {access, writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import React from 'react';
 import {getColors} from '@/config/index';
+import {getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -35,7 +36,7 @@ const executeStringReplace = async (
 		);
 	}
 
-	const absPath = resolve(path);
+	const absPath = resolve(getSafeSessionCwd(), path);
 	const cached = await getCachedFileContent(absPath);
 	const fileContent = cached.content;
 
@@ -136,7 +137,7 @@ const stringReplaceFormatter = async (
 ): Promise<React.ReactElement> => {
 	const colors = getColors();
 	const {path, old_str, new_str} = args;
-	const absPath = resolve(path);
+	const absPath = resolve(getSafeSessionCwd(), path);
 
 	if (result === undefined && isVSCodeConnected()) {
 		try {
@@ -180,7 +181,7 @@ const stringReplaceValidator = async (
 	const pathResult = validatePath(path);
 	if (!pathResult.valid) return pathResult;
 
-	const absPath = resolve(path);
+	const absPath = resolve(getSafeSessionCwd(), path);
 	try {
 		await access(absPath, constants.F_OK);
 	} catch (error) {

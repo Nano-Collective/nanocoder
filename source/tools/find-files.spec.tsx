@@ -1,10 +1,16 @@
-import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
+import {
+	resetSessionCwd,
+	setProjectRoot,
+	setSessionCwd,
+} from '../services/session-cwd';
 import {findFilesTool} from './find-files';
 
 // ============================================================================
@@ -527,6 +533,33 @@ test('find_files tool does not require confirmation', t => {
 	t.true(findFilesTool.readOnly);
 	t.is(findFilesTool.approval, undefined);
 });
+
+test.serial(
+	'find_files clamps to the project root when the session cwd escaped it',
+	async t => {
+		const root = mkdtempSync(join(tmpdir(), 'nc-proj-'));
+		const outside = mkdtempSync(join(tmpdir(), 'nc-outside-'));
+		try {
+			writeFileSync(join(root, 'inproject.marker'), '');
+			writeFileSync(join(outside, 'secret.marker'), '');
+			setProjectRoot(root);
+			setSessionCwd(outside); // like a bash `cd /etc`
+			const result = await findFilesTool.tool.execute!(
+				{pattern: '*.marker', maxResults: 50},
+				{toolCallId: 'test', messages: []},
+			);
+			t.true(result.includes('inproject.marker'), 'searches the project root');
+			t.false(
+				result.includes('secret.marker'),
+				'does not escape to the session cwd',
+			);
+		} finally {
+			resetSessionCwd();
+			rmSync(root, {recursive: true, force: true});
+			rmSync(outside, {recursive: true, force: true});
+		}
+	},
+);
 
 test('find_files tool has handler function', t => {
 	t.is(typeof findFilesTool.tool.execute, 'function');
