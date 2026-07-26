@@ -210,3 +210,29 @@ export function updateAlternateScreen(value: boolean): void {
 	preferences.alternateScreen = value;
 	savePreferences(preferences);
 }
+
+/**
+ * Get the voice configuration from preferences
+ */
+export function getVoicePreference(): import('@/types/config').VoiceConfig {
+	const preferences = loadPreferences();
+	return (
+		preferences.voice ?? {
+			enabled: false,
+			activationMode: 'push-to-talk',
+			sttBackend: 'local',
+			ttsBackend: 'local',
+		}
+	);
+}
+
+/**
+ * Save the voice configuration to preferences
+ */
+export function updateVoicePreference(
+	config: import('@/types/config').VoiceConfig,
+): void {
+	const preferences = loadPreferences();
+	preferences.voice = config;
+	savePreferences(preferences);
+}
