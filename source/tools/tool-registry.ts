@@ -229,8 +229,8 @@ export class ToolRegistry {
 		const registry = new ToolRegistry();
 
 		for (const t of toolExports) {
-			// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
 			const rawHandler = async (
+				// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
 				args: any,
 				options?: {abortSignal?: AbortSignal},
 			) =>

@@ -304,7 +304,12 @@
 		messagesContainer.scrollTop = messagesContainer.scrollHeight;
 	}
 
-	// Handle messages from extension
+	// Handle messages from extension.
+	// No origin check: this is a VS Code webview, not a browser page. The
+	// extension host is the only sender, and chat-panel.html sets
+	// `default-src 'none'` - frame-src inherits it, so the webview cannot embed
+	// a frame that would have a handle to postMessage into this window.
+	// nosemgrep: javascript.browser.security.insufficient-postmessage-origin-validation.insufficient-postmessage-origin-validation
 	window.addEventListener('message', event => {
 		const message = event.data;
 

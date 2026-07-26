@@ -1,6 +1,7 @@
 import type {
 	AgentSideConnection,
 	PermissionOption,
+	RequestPermissionResponse,
 	ToolCallUpdate,
 } from '@agentclientprotocol/sdk';
 import type {AcpSession} from '@/acp/acp-session';
@@ -42,11 +43,11 @@ export async function requestToolPermission(
 		toolCall: toolCallUpdate,
 	});
 
-	let response;
+	let response: RequestPermissionResponse;
 	if (abortSignal) {
 		response = await Promise.race([
 			requestPromise,
-			new Promise<any>(resolve => {
+			new Promise<RequestPermissionResponse>(resolve => {
 				if (abortSignal.aborted) {
 					resolve({outcome: {outcome: 'cancelled'}});
 				} else {

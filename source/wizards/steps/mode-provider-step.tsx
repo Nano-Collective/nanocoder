@@ -99,7 +99,7 @@ export function ModeProviderStep({
 		);
 	}
 
-	if (mode === 'select-provider') {
+	if (mode === 'select-provider' && selectedDevMode !== null) {
 		const items = providers.map(p => ({
 			label: p.name,
 			value: p.name as SelectProviderValue,
@@ -117,7 +117,7 @@ export function ModeProviderStep({
 						if (item.value === 'clear') {
 							setModeProviders(prev => {
 								const next = {...prev};
-								delete next[selectedDevMode!];
+								delete next[selectedDevMode];
 								return next;
 							});
 							setMode('select-mode');
@@ -131,7 +131,7 @@ export function ModeProviderStep({
 									// Provider allows any model - use 'default' as placeholder
 									setModeProviders(prev => ({
 										...prev,
-										[selectedDevMode!]: {
+										[selectedDevMode]: {
 											provider: provider.name,
 											model: 'default',
 										},
@@ -146,8 +146,8 @@ export function ModeProviderStep({
 		);
 	}
 
-	if (mode === 'select-model') {
-		const items = selectedProvider?.models.map(m => ({
+	if (mode === 'select-model' && selectedDevMode !== null && selectedProvider) {
+		const items = selectedProvider.models.map(m => ({
 			label: m,
 			value: m,
 		}));
@@ -155,7 +155,7 @@ export function ModeProviderStep({
 		return (
 			<Box flexDirection="column" gap={1}>
 				<Text color={colors.primary}>
-					Select Model for {selectedDevMode} ({selectedProvider?.name})
+					Select Model for {selectedDevMode} ({selectedProvider.name})
 				</Text>
 				<Text color={colors.secondary}>(Esc to go back)</Text>
 				<SelectInput
@@ -163,8 +163,8 @@ export function ModeProviderStep({
 					onSelect={item => {
 						setModeProviders(prev => ({
 							...prev,
-							[selectedDevMode!]: {
-								provider: selectedProvider?.name,
+							[selectedDevMode]: {
+								provider: selectedProvider.name,
 								model: item.value,
 							},
 						}));

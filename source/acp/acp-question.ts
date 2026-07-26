@@ -1,12 +1,19 @@
 import type {
 	AgentSideConnection,
 	PermissionOption,
+	RequestPermissionResponse,
 } from '@agentclientprotocol/sdk';
 import {getLogger} from '@/utils/logging';
 
 const logger = getLogger();
 
 const OPTION_PREFIX = 'answer-';
+
+/**
+ * Sentinel resolved by the abort race - `aborted` is not a protocol outcome, so
+ * it cannot be modelled as a `RequestPermissionResponse`.
+ */
+const ABORTED = Symbol('aborted');
 
 /**
  * Present an `ask_user` question to the ACP client and return the chosen answer.
@@ -44,16 +51,16 @@ export async function requestUserChoice(
 			toolCall: {toolCallId, title: question, status: 'pending'},
 		});
 
-		let response;
+		let response: RequestPermissionResponse | typeof ABORTED;
 		if (abortSignal) {
 			response = await Promise.race([
 				requestPromise,
-				new Promise<any>(resolve => {
+				new Promise<typeof ABORTED>(resolve => {
 					if (abortSignal.aborted) {
-						resolve({outcome: {outcome: 'aborted'}});
+						resolve(ABORTED);
 					} else {
 						abortSignal.addEventListener('abort', () => {
-							resolve({outcome: {outcome: 'aborted'}});
+							resolve(ABORTED);
 						});
 					}
 				}),
@@ -62,7 +69,7 @@ export async function requestUserChoice(
 			response = await requestPromise;
 		}
 
-		if (response.outcome.outcome === 'aborted') {
+		if (response === ABORTED) {
 			return 'Error: AbortError: The operation was aborted';
 		}
 

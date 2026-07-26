@@ -1,14 +1,18 @@
 import {mkdtempSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {render} from 'ink-testing-library';
 import test from 'ava';
 import React from 'react';
-// CRITICAL: force chalk/ink to emit real ANSI escapes (inverse-video cursor
-// etc.) even though this process has no TTY — must be set BEFORE anything
-// transitively imports chalk (chalk resolves its color level at import
-// time), so this has to be the very first statement in the file.
-process.env.FORCE_COLOR = '1';
+// CRITICAL: force chalk/ink to emit real ANSI escapes (inverse-video cursor,
+// border colors) even though the AVA worker has no TTY. Setting FORCE_COLOR
+// from here cannot work: chalk pins its level at import time and AVA's worker
+// bootstrap has already imported it, so the env var is read long before this
+// file runs. Re-level the shared chalk singleton instead — settings-tabs.tsx
+// imports that same instance — before ink or the component are loaded.
+const {default: chalk} = await import('chalk');
+chalk.level = 1;
+
+const {render} = await import('ink-testing-library');
 // CRITICAL: redirect preference reads to a temp dir BEFORE settings-tabs (and
 // its @/config/preferences import chain) loads.
 process.env.NANOCODER_CONFIG_DIR = mkdtempSync(

@@ -113,7 +113,7 @@ export class AcpAgent implements Agent {
 			update: {
 				sessionUpdate: 'available_commands_update',
 				availableCommands,
-			} as any,
+			},
 		});
 
 		return {
