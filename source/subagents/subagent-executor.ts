@@ -14,6 +14,12 @@ import {
 	updateSubagentProgress,
 	updateSubagentProgressById,
 } from '@/services/subagent-events';
+import {
+	cleanupSubagentSession,
+	initSubagentSession,
+	updateSubagentSessionMessages,
+	updateSubagentSessionStreaming,
+} from '@/services/subagent-session-store';
 import {resolveToolApproval} from '@/tools/approval-policy';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
@@ -175,6 +181,9 @@ export class SubagentExecutor {
 					executionTimeMs: Date.now() - startTime,
 				};
 			} finally {
+				if (agentId) {
+					cleanupSubagentSession(agentId);
+				}
 				restoreParent();
 			}
 		} catch (error) {
@@ -374,6 +383,13 @@ export class SubagentExecutor {
 		let totalToolCalls = 0;
 		let totalTokens = 0;
 
+		let streamingText = '';
+		let streamingReasoning = '';
+
+		if (agentId) {
+			initSubagentSession(agentId, config.name, messages);
+		}
+
 		// Rough token estimate: ~4 chars per token
 		const estimateTokens = (text: string) => Math.ceil(text.length / 4);
 
@@ -420,10 +436,38 @@ export class SubagentExecutor {
 				messages,
 				tools,
 				{
-					onToken: () => {
+					onToken: token => {
 						totalTokens++;
+						if (agentId) {
+							streamingText += token;
+							updateSubagentSessionStreaming(
+								agentId,
+								streamingText,
+								streamingReasoning,
+							);
+						}
 						// Update the live token count directly on the mutable
 						// progress object so the UI polls the latest value.
+						if (agentId) {
+							const progress = progressRef;
+							if (progress) {
+								progress.tokenCount = totalTokens;
+							}
+						} else {
+							subagentProgress.tokenCount = totalTokens;
+						}
+					},
+					onReasoningToken: token => {
+						totalTokens++;
+						if (agentId) {
+							streamingReasoning += token;
+							updateSubagentSessionStreaming(
+								agentId,
+								streamingText,
+								streamingReasoning,
+							);
+						}
+						// Update the live token count directly on the mutable
 						if (agentId) {
 							const progress = progressRef;
 							if (progress) {
@@ -459,6 +503,16 @@ export class SubagentExecutor {
 				content: responseContent,
 				tool_calls: toolCalls,
 			});
+			if (agentId) {
+				streamingText = '';
+				streamingReasoning = '';
+				updateSubagentSessionStreaming(
+					agentId,
+					streamingText,
+					streamingReasoning,
+				);
+				updateSubagentSessionMessages(agentId, messages);
+			}
 
 			// Execute each tool call — yield between each so Ink can render
 			for (const toolCall of toolCalls) {
@@ -491,6 +545,9 @@ export class SubagentExecutor {
 					tool_call_id: toolCall.id,
 					name: toolName,
 				});
+				if (agentId) {
+					updateSubagentSessionMessages(agentId, messages);
+				}
 
 				emitProgress('running', toolName);
 				await new Promise(resolve => setTimeout(resolve, 50));
