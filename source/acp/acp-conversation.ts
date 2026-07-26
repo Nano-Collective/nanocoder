@@ -9,7 +9,10 @@ import type {AcpSession} from '@/acp/acp-session';
 import {type AcpToolCallMeta, buildToolCallMeta} from '@/acp/acp-tool-call';
 import {DEFAULT_HEADLESS_MAX_TURNS, getAppConfig} from '@/config/index';
 import {processToolUse} from '@/message-handler';
-import {getAllSubagentProgress} from '@/services/subagent-events';
+import {
+	getAllSubagentProgress,
+	type SubagentEvent,
+} from '@/services/subagent-events';
 import {parseToolCalls} from '@/tool-calling/index';
 import {resolveToolApproval} from '@/tools/approval-policy';
 import type {ToolManager} from '@/tools/tool-manager';
@@ -54,6 +57,7 @@ export async function runAcpConversation(
 
 	for (let turn = 0; turn < maxTurns; turn++) {
 		if (abortController.signal.aborted) {
+			session.messages = messages;
 			return {stopReason: 'cancelled'};
 		}
 
@@ -181,6 +185,19 @@ export async function runAcpConversation(
 		// Process tool calls
 		const toolResults: ToolResult[] = [];
 		for (const toolCall of validToolCalls) {
+			// Stop was pressed: don't start any remaining queued tools. Record a
+			// cancelled result for each so the assistant's tool_calls keep matched
+			// results in history; the turn ends below instead of re-prompting.
+			if (abortController.signal.aborted) {
+				toolResults.push({
+					tool_call_id: toolCall.id,
+					role: 'tool',
+					name: toolCall.function.name,
+					content: 'Error: cancelled by user',
+				});
+				continue;
+			}
+
 			// Enrich the call with ACP metadata (kind, file locations, and a diff
 			// for edits) so the client can render rich tool cards and previews.
 			const meta = await buildToolCallMeta(toolCall);
@@ -258,13 +275,18 @@ export async function runAcpConversation(
 			let pollInterval: ReturnType<typeof setInterval> | null = null;
 			let isPolling = true;
 			if (toolCall.function.name === 'agent') {
+				// Progress entries are never removed from the map, so snapshot the
+				// keys that exist before this call starts and ignore them while
+				// polling - otherwise a finished agent from an earlier turn wins the
+				// max-token scan and the card shows stale numbers.
+				const preexisting = new Set(getAllSubagentProgress().keys());
 				pollInterval = setInterval(async () => {
 					if (!isPolling) return;
 					// agentId is a randomUUID() internal to the executor — not in args.
-					// Poll all active agents and pick the most active running one.
-					const allProgress = getAllSubagentProgress();
-					let best: any = null;
-					for (const prog of allProgress.values()) {
+					// Poll agents started by this call and pick the most active one.
+					let best: SubagentEvent | null = null;
+					for (const [id, prog] of getAllSubagentProgress()) {
+						if (preexisting.has(id)) continue;
 						if (!best || prog.tokenCount > best.tokenCount) {
 							best = prog;
 						}
@@ -317,6 +339,13 @@ export async function runAcpConversation(
 		}
 
 		messages = [...messages, ...toolResults];
+
+		// End the turn here when cancelled - without this the loop would issue
+		// another LLM request before the top-of-turn abort check runs.
+		if (abortController.signal.aborted) {
+			session.messages = messages;
+			return {stopReason: 'cancelled'};
+		}
 	}
 
 	session.messages = messages;

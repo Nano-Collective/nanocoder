@@ -423,6 +423,75 @@ test('runAcpConversation - executes tool and emits status updates', async t => {
 });
 
 // ============================================================================
+// Cancellation mid-turn with queued tools
+// ============================================================================
+
+test('runAcpConversation - cancel during a tool skips remaining queued tools and ends the turn', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+
+	// The first tool simulates the user pressing Stop while it runs; the
+	// second must never execute.
+	const executed: string[] = [];
+	setToolRegistryGetter(() => ({
+		slow_tool: async () => {
+			executed.push('slow_tool');
+			session.cancel();
+			return 'partial output';
+		},
+		queued_tool: async () => {
+			executed.push('queued_tool');
+			return 'should never run';
+		},
+	}));
+
+	let callCount = 0;
+	const client = {
+		chat: async () => {
+			callCount++;
+			return {
+				choices: [
+					{
+						message: {
+							content: 'Working...',
+							tool_calls: [
+								createMockToolCall('slow_tool', {}, 'call-1'),
+								createMockToolCall('queued_tool', {}, 'call-2'),
+							],
+						},
+					},
+				],
+			};
+		},
+	} as unknown as LLMClient;
+
+	const result = await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(result.stopReason, 'cancelled');
+	t.is(callCount, 1, 'no follow-up LLM request after cancel');
+	t.deepEqual(executed, ['slow_tool'], 'queued tool must not execute');
+
+	// History stays consistent: both tool calls have matching tool results.
+	const toolResults = session.messages.filter((m: any) => m.role === 'tool');
+	t.is(toolResults.length, 2);
+	const queuedResult = toolResults.find(
+		(m: any) => m.tool_call_id === 'call-2',
+	) as any;
+	t.true(queuedResult.content.includes('cancelled'));
+});
+
+// ============================================================================
 // Tool execution error
 // ============================================================================
 

@@ -199,7 +199,12 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				return;
 			}
 
-
+			// /clear resets the server-side conversation; wipe the visible
+			// transcript too so the UI matches (the server's confirmation
+			// message then streams into the fresh view).
+			if (text.trim() === '/clear') {
+				this.postMessage({type: 'clear'});
+			}
 
 			// Make sure we have a session
 			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];

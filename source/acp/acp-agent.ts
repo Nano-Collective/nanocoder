@@ -255,6 +255,11 @@ export class AcpAgent implements Agent {
 						return sendBuiltinReply(msg);
 					}
 
+					if (['model', 'provider'].includes(commandName)) {
+						const msg = `Use the ${commandName} selector in the chat header to switch ${commandName}s.`;
+						return sendBuiltinReply(msg);
+					}
+
 					if (
 						[
 							'init',
@@ -262,7 +267,6 @@ export class AcpAgent implements Agent {
 							'compact',
 							'context-max',
 							'usage',
-							'model',
 							'settings',
 						].includes(commandName)
 					) {
