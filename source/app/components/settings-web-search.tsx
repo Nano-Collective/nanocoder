@@ -27,7 +27,7 @@ export function SettingsWebSearchPanel({
 	);
 	const [editMode, setEditMode] = useState(false);
 	const [inputValue, setInputValue] = useState('');
-	const [saved, setSaved] = useState(false);
+	const [justSaved, setJustSaved] = useState(false);
 
 	useInput((_, key) => {
 		if (key.escape) {
@@ -43,7 +43,8 @@ export function SettingsWebSearchPanel({
 			onBack();
 			return;
 		}
-		if (key.return && !editMode && !saved) {
+		if (key.return && !editMode) {
+			setJustSaved(false);
 			setEditMode(true);
 		}
 	});
@@ -57,11 +58,12 @@ export function SettingsWebSearchPanel({
 				apiKey: trimmed,
 			});
 			setHasApiKey(true);
-			setSaved(true);
-		} else {
-			setEditMode(false);
-			setInputValue('');
+			setJustSaved(true);
 		}
+		// Either way, drop back to the summary — staying in a terminal "saved"
+		// state made the key unchangeable without leaving and re-entering.
+		setEditMode(false);
+		setInputValue('');
 	};
 
 	const width = isNarrow ? '100%' : boxWidth;
@@ -77,9 +79,7 @@ export function SettingsWebSearchPanel({
 			flexDirection="column"
 			marginBottom={1}
 		>
-			{saved ? (
-				<Text color={colors.success}>✓ API key saved. Esc to exit.</Text>
-			) : editMode ? (
+			{editMode ? (
 				<Box flexDirection="column">
 					<Text color={colors.secondary}>
 						Enter your Brave Search API key. Leave empty to cancel.
@@ -101,15 +101,17 @@ export function SettingsWebSearchPanel({
 					</Text>
 					<Box marginTop={1}>
 						<Text color={hasApiKey ? colors.success : colors.text}>
-							{hasApiKey
-								? '✓ API key is configured'
-								: 'No API key configured — web search is unavailable'}
+							{justSaved
+								? '✓ API key saved'
+								: hasApiKey
+									? '✓ API key is configured'
+									: 'No API key configured — web search is unavailable'}
 						</Text>
 					</Box>
 					<Box marginTop={1}>
 						<Text color={colors.secondary}>
 							Enter to {hasApiKey ? 'change' : 'add'} · Shift+Tab back · Esc
-							exit
+							back
 						</Text>
 					</Box>
 				</Box>
