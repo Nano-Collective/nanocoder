@@ -43,10 +43,29 @@ export type ManagedSettingsPanel =
 	| 'paste-threshold'
 	| 'notifications'
 	| 'display-settings'
-	| 'privacy';
+	| 'privacy'
+	| 'json-config'
+	| 'web-search'
+	| 'providers-config'
+	| 'mcp-config'
+	| 'default-mode'
+	| 'reasoning-traces'
+	| 'auto-compact'
+	| 'sessions'
+	| 'tool-approval'
+	| 'environment';
 
 export interface SettingsSelectorProps {
 	onCancel: () => void;
+	/** Close settings and launch the tune wizard (app-level mode switch). */
+	onLaunchTune?: () => void;
+	/** Close settings and launch the IDE-connection wizard. */
+	onLaunchIde?: () => void;
+	/**
+	 * Rebuild the live MCP connections after the MCP panel edits config. Without
+	 * this, servers added here only take effect on the next launch.
+	 */
+	onMcpChanged?: () => void | Promise<void>;
 }
 
 function ThemePreviewMessage({
@@ -228,7 +247,7 @@ export function SettingsThemePanel({
 				<ThemeMiniPreview colors={previewColors} compact />
 				<Box marginBottom={1}></Box>
 				<Text color={previewColors.secondary}>
-					↑↓ navigate · Enter select · Esc exit
+					↑↓ navigate · Enter select · Esc back
 				</Text>
 			</TitledBoxWithPreferences>
 		);
@@ -250,7 +269,7 @@ export function SettingsThemePanel({
 			</Text>
 			<Box marginBottom={1}>
 				<Text color={previewColors.secondary}>
-					↑↓ navigate · Enter apply · Shift+Tab back · Esc exit
+					↑↓ navigate · Enter apply · Shift+Tab back · Esc back
 				</Text>
 			</Box>
 
@@ -417,7 +436,7 @@ export function SettingsTitleShapePanel({
 		>
 			<Box marginBottom={1}>
 				<Text color={colors.secondary}>
-					Enter to apply, Shift+Tab to go back, Esc to exit
+					Enter to apply, Shift+Tab to go back, Esc to go back
 				</Text>
 			</Box>
 
@@ -541,7 +560,7 @@ export function SettingsNanocoderShapePanel({
 			>
 				<Box marginBottom={1}>
 					<Text color={colors.secondary}>
-						Enter to apply, Shift+Tab to go back, Esc to exit
+						Enter to apply, Shift+Tab to go back, Esc to go back
 					</Text>
 				</Box>
 
@@ -647,7 +666,7 @@ export function SettingsPasteThresholdPanel({
 				<Text color={colors.secondary}>
 					{isNarrow
 						? 'Enter/Shift+Tab/Esc'
-						: 'Enter to apply, Shift+Tab to go back, Esc to exit'}
+						: 'Enter to apply, Shift+Tab to go back, Esc to go back'}
 				</Text>
 			</Box>
 		</TitledBoxWithPreferences>
@@ -749,7 +768,7 @@ export function SettingsNotificationsPanel({
 			{!isNarrow && (
 				<Box marginBottom={1}>
 					<Text color={colors.secondary}>
-						Toggle settings with Enter. Shift+Tab to go back, Esc to exit
+						Toggle settings with Enter. Shift+Tab to go back, Esc to go back
 					</Text>
 				</Box>
 			)}
@@ -828,7 +847,7 @@ export function SettingsDisplayPanel({
 			{!isNarrow && (
 				<Box marginBottom={1}>
 					<Text color={colors.secondary}>
-						Toggle settings with Enter. Shift+Tab to go back, Esc to exit
+						Toggle settings with Enter. Shift+Tab to go back, Esc to go back
 					</Text>
 				</Box>
 			)}
@@ -894,7 +913,7 @@ export function SettingsPrivacyPanel({
 			{!isNarrow && (
 				<Box marginBottom={1}>
 					<Text color={colors.secondary}>
-						Toggle settings with Enter. Shift+Tab to go back, Esc to exit
+						Toggle settings with Enter. Shift+Tab to go back, Esc to go back
 					</Text>
 				</Box>
 			)}

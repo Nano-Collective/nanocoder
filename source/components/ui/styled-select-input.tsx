@@ -1,4 +1,4 @@
-import {Text} from 'ink';
+import {Box, Text} from 'ink';
 import SelectInput from 'ink-select-input';
 
 import {useTheme} from '@/hooks/useTheme';
@@ -34,13 +34,24 @@ export function StyledSelectInput<V>(props: StyledSelectInputProps<V>) {
 	return (
 		<SelectInput
 			{...props}
+			// Fixed-width indicator: Ink trims a trailing space only on rows that
+			// overflow, which left truncated rows a column left of short ones.
 			indicatorComponent={({isSelected}) => (
-				<Text color={isSelected ? colors.primary : colors.text}>
-					{isSelected ? '> ' : '  '}
-				</Text>
+				<Box minWidth={2}>
+					<Text color={isSelected ? colors.primary : colors.text}>
+						{isSelected ? '>' : ' '}
+					</Text>
+				</Box>
 			)}
+			// Truncate rather than wrap: a long label (a path, a URL) reflowed with
+			// no hanging indent and the list read as a jumble on narrow terminals.
 			itemComponent={({isSelected, label}) => (
-				<Text color={isSelected ? colors.primary : colors.text}>{label}</Text>
+				<Text
+					color={isSelected ? colors.primary : colors.text}
+					wrap="truncate-end"
+				>
+					{label}
+				</Text>
 			)}
 		/>
 	);

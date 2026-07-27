@@ -75,6 +75,19 @@ export function InteractiveApp({
 	altScreenActive = false,
 }: InteractiveAppProps): React.ReactElement {
 	const nextRestoredDraftIdRef = React.useRef(1);
+	// Tune / IDE are launched by closing settings first, so their exit has no way
+	// to know it should land back in settings rather than in chat.
+	const launchedFromSettingsRef = React.useRef(false);
+	const returnFromLaunchedWizard = React.useCallback(
+		(exit: () => void) => () => {
+			exit();
+			if (launchedFromSettingsRef.current) {
+				launchedFromSettingsRef.current = false;
+				modeHandlers.enterSettingsMode();
+			}
+		},
+		[modeHandlers],
+	);
 	const [submittedDraft, setSubmittedDraft] =
 		React.useState<SubmittedInputDraft | null>(null);
 	const [restoredDraft, setRestoredDraft] =
@@ -305,8 +318,14 @@ export function InteractiveApp({
 				{appState.isIdeSelectionMode && (
 					<Box marginLeft={-1} flexDirection="column">
 						<IdeSelector
-							onSelect={handleIdeSelect}
-							onCancel={modeHandlers.handleIdeSelectionCancel}
+							onSelect={ide => {
+								// Completing lands in chat so the result is visible.
+								launchedFromSettingsRef.current = false;
+								handleIdeSelect(ide);
+							}}
+							onCancel={returnFromLaunchedWizard(
+								modeHandlers.handleIdeSelectionCancel,
+							)}
 						/>
 					</Box>
 				)}
@@ -328,9 +347,27 @@ export function InteractiveApp({
 							onMcpWizardComplete={modeHandlers.handleMcpWizardComplete}
 							onMcpWizardCancel={modeHandlers.handleMcpWizardCancel}
 							onSettingsCancel={modeHandlers.handleSettingsCancel}
+							onMcpChanged={modeHandlers.reloadMcpServers}
+							onLaunchTune={() => {
+								launchedFromSettingsRef.current = true;
+								modeHandlers.handleSettingsCancel();
+								modeHandlers.enterTune();
+							}}
+							onLaunchIde={() => {
+								launchedFromSettingsRef.current = true;
+								modeHandlers.handleSettingsCancel();
+								modeHandlers.enterIdeSelectionMode();
+							}}
 							tuneConfig={appState.tune}
-							onTuneSelect={modeHandlers.handleTuneSelect}
-							onTuneCancel={modeHandlers.handleTuneCancel}
+							onTuneSelect={config => {
+								// Tune clears the conversation and prints a summary — land in
+								// chat so that output isn't hidden behind the settings panel.
+								launchedFromSettingsRef.current = false;
+								return modeHandlers.handleTuneSelect(config);
+							}}
+							onTuneCancel={returnFromLaunchedWizard(
+								modeHandlers.handleTuneCancel,
+							)}
 							onCheckpointSelect={appHandlers.handleCheckpointSelect}
 							onCheckpointCancel={appHandlers.handleCheckpointCancel}
 							onSessionSelect={sessionId =>
