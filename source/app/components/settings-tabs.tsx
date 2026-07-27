@@ -3,7 +3,7 @@ import {Box, Text, useInput} from 'ink';
 import type {ReactElement} from 'react';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {StyledTitle} from '@/components/ui/styled-title';
-import {getAppConfig, loadDefaultMode} from '@/config/index';
+import {getAppConfig, loadDefaultMode, reloadAppConfig} from '@/config/index';
 import {
 	getAlternateScreen,
 	getNanocoderShape,
@@ -46,7 +46,7 @@ import {SettingsWebSearchPanel} from './settings-web-search';
  * Tab categories are our own settings, grouped for browsability — not the
  * Status/Config/Usage read-only surfaces (those live at /status and /usage).
  * Every existing preference must be reachable from exactly one of these
- * four tabs.
+ * its tabs.
  */
 export type SettingsTabId =
 	| 'appearance'
@@ -375,6 +375,7 @@ function SettingRowLine({
 function renderManagedPanel(
 	panel: ManagedSettingsPanel,
 	onBack: () => void,
+	onMcpChanged?: () => void | Promise<void>,
 ): ReactElement {
 	switch (panel) {
 		case 'theme':
@@ -410,7 +411,13 @@ function renderManagedPanel(
 		case 'providers-config':
 			return <SettingsProvidersListPanel onBack={onBack} onCancel={onBack} />;
 		case 'mcp-config':
-			return <SettingsMcpListPanel onBack={onBack} onCancel={onBack} />;
+			return (
+				<SettingsMcpListPanel
+					onBack={onBack}
+					onCancel={onBack}
+					onMcpChanged={onMcpChanged}
+				/>
+			);
 	}
 }
 
@@ -436,18 +443,25 @@ function TabBar({
 }) {
 	const {colors} = useTheme();
 	const {currentTitleShape} = useTitleShape();
+	const {isNarrow} = useResponsiveTerminal();
 	const shape = currentTitleShape ?? 'pill';
 
 	return (
+		// wrap: the strip overflowed the panel border on narrow terminals, spilling
+		// the active pill's cap glyph outside the frame. The "Settings" prefix is
+		// redundant with the panel title, so it's the first thing to go.
 		<Box
 			key={`${activeTab}-${headerFocused}`}
 			flexDirection="row"
+			flexWrap="wrap"
 			gap={1}
 			marginBottom={1}
 		>
-			<Text bold color={colors.primary}>
-				Settings
-			</Text>
+			{!isNarrow && (
+				<Text bold color={colors.primary}>
+					Settings
+				</Text>
+			)}
 			{TABS.map(tab => {
 				const isActive = tab.id === activeTab;
 				if (isActive) {
@@ -471,6 +485,7 @@ export function SettingsSelector({
 	onCancel,
 	onLaunchTune,
 	onLaunchIde,
+	onMcpChanged,
 }: SettingsSelectorProps) {
 	const {colors} = useTheme();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
@@ -709,10 +724,14 @@ export function SettingsSelector({
 
 	if (openPanel) {
 		const onBack = () => {
+			// getAppConfig() is module-cached, so a panel (or a wizard it launched)
+			// that wrote to disk leaves the cache stale and the row values below
+			// would recompute from pre-edit data.
+			reloadAppConfig();
 			setVersion(v => v + 1);
 			setOpenPanel(null);
 		};
-		return renderManagedPanel(openPanel, onBack);
+		return renderManagedPanel(openPanel, onBack, onMcpChanged);
 	}
 
 	const width = isNarrow ? '100%' : boxWidth;

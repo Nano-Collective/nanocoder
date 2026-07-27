@@ -13,9 +13,11 @@ import {McpWizard} from '@/wizards/mcp-wizard';
  */
 export function SettingsMcpListPanel({
 	onBack,
+	onMcpChanged,
 }: {
 	onBack: () => void;
 	onCancel: () => void;
+	onMcpChanged?: () => void | Promise<void>;
 }) {
 	const {colors} = useTheme();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
@@ -33,7 +35,12 @@ export function SettingsMcpListPanel({
 		return (
 			<McpWizard
 				projectDir={process.cwd()}
-				onComplete={onBack}
+				onComplete={() => {
+					// Rebuild the running session's MCP connections; otherwise a server
+					// added here stays inert until the next launch.
+					void onMcpChanged?.();
+					onBack();
+				}}
 				onCancel={() => setEditing(false)}
 			/>
 		);
@@ -47,7 +54,7 @@ export function SettingsMcpListPanel({
 				value: String(i),
 			};
 		}),
-		{label: '＋ Add or edit MCP servers…', value: 'edit'},
+		{label: '+ Add or edit MCP servers…', value: 'edit'},
 	];
 
 	return (
@@ -70,16 +77,23 @@ export function SettingsMcpListPanel({
 				items={items}
 				onSelect={() => setEditing(true)}
 				indicatorComponent={({isSelected}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>
-						{isSelected ? '> ' : '  '}
-					</Text>
+					<Box minWidth={2}>
+						<Text color={isSelected ? colors.primary : colors.text}>
+							{isSelected ? '>' : ' '}
+						</Text>
+					</Box>
 				)}
 				itemComponent={({isSelected, label}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>{label}</Text>
+					<Text
+						color={isSelected ? colors.primary : colors.text}
+						wrap="truncate-end"
+					>
+						{label}
+					</Text>
 				)}
 			/>
 			<Box marginTop={1}>
-				<Text color={colors.secondary}>Shift+Tab back · Esc exit</Text>
+				<Text color={colors.secondary}>Shift+Tab back · Esc back</Text>
 			</Box>
 		</TitledBoxWithPreferences>
 	);

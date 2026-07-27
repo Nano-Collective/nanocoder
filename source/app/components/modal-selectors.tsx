@@ -13,6 +13,7 @@ import {TuneSelector} from './tune-selector';
 export interface ModalSelectorsProps {
 	onLaunchTune?: () => void;
 	onLaunchIde?: () => void;
+	onMcpChanged?: () => void | Promise<void>;
 	activeMode: ActiveMode;
 	isSettingsMode: boolean;
 	showAllSessions: boolean;
@@ -82,6 +83,7 @@ export function ModalSelectors({
 	onSettingsCancel,
 	onLaunchTune,
 	onLaunchIde,
+	onMcpChanged,
 	tuneConfig,
 	onTuneSelect,
 	onTuneCancel,
@@ -113,6 +115,7 @@ export function ModalSelectors({
 				onCancel={onSettingsCancel}
 				onLaunchTune={onLaunchTune}
 				onLaunchIde={onLaunchIde}
+				onMcpChanged={onMcpChanged}
 			/>
 		);
 	}

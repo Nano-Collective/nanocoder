@@ -277,6 +277,36 @@ export function useModeHandlers({
 		}
 	};
 
+	/**
+	 * Pick up MCP config written to disk: drop the module-level config cache and
+	 * rebuild the live server connections. Split out of the wizard handler so the
+	 * settings panel can reuse it without also exiting the current mode.
+	 */
+	const reloadMcpServers = async () => {
+		reloadAppConfig();
+
+		const toolManager = getToolManager();
+		if (!toolManager) return;
+		try {
+			await reinitializeMCPServers(toolManager);
+			addToChatQueue(
+				<SuccessMessage
+					key={generateKey('mcp-reinit')}
+					message="MCP servers reinitialized with new configuration."
+					hideBox={true}
+				/>,
+			);
+		} catch (mcpError) {
+			addToChatQueue(
+				<ErrorMessage
+					key={generateKey('mcp-reinit-error')}
+					message={`Failed to reinitialize MCP servers: ${String(mcpError)}`}
+					hideBox={true}
+				/>,
+			);
+		}
+	};
+
 	// Handle MCP wizard complete - reinitializes MCP servers
 	const handleMcpWizardComplete = async (configPath?: string) => {
 		exitMode();
@@ -289,29 +319,7 @@ export function useModeHandlers({
 				/>,
 			);
 
-			reloadAppConfig();
-
-			const toolManager = getToolManager();
-			if (toolManager) {
-				try {
-					await reinitializeMCPServers(toolManager);
-					addToChatQueue(
-						<SuccessMessage
-							key={generateKey('mcp-reinit')}
-							message="MCP servers reinitialized with new configuration."
-							hideBox={true}
-						/>,
-					);
-				} catch (mcpError) {
-					addToChatQueue(
-						<ErrorMessage
-							key={generateKey('mcp-reinit-error')}
-							message={`Failed to reinitialize MCP servers: ${String(mcpError)}`}
-							hideBox={true}
-						/>,
-					);
-				}
-			}
+			await reloadMcpServers();
 		}
 	};
 
@@ -378,6 +386,7 @@ export function useModeHandlers({
 		handleConfigWizardCancel: exitMode,
 		handleMcpWizardComplete,
 		handleMcpWizardCancel: exitMode,
+		reloadMcpServers,
 		handleSettingsCancel: () => setIsSettingsMode(false),
 		handleExplorerCancel: exitMode,
 		handleIdeSelectionCancel: exitMode,
