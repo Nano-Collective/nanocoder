@@ -35,7 +35,8 @@ const CATEGORY_RULES: Array<{category: string; pattern: RegExp}> = [
 	},
 	{
 		category: 'codingStyle',
-		pattern: /\b(style|convention|format|formatting|naming|camel case|lint)\b/i,
+		pattern:
+			/\b(style|convention|format|formatting|naming|camel ?case|lint)\b/i,
 	},
 ];
 

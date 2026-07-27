@@ -70,6 +70,10 @@ test('inferMemoryCategory maps durable facts to stable categories', t => {
 		inferMemoryCategory('Use camel case for new command variables.'),
 		'codingStyle',
 	);
+	t.is(
+		inferMemoryCategory('Use camelCase for all variable names.'),
+		'codingStyle',
+	);
 	t.is(inferMemoryCategory('This fixes the queued input regression.'), 'bugFix');
 	t.is(inferMemoryCategory('Refactor the old storage path later.'), 'refactor');
 	t.is(inferMemoryCategory('TODO delete obsolete project memory.'), 'todo');
