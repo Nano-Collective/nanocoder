@@ -19,7 +19,7 @@ const DEFAULT_CONFIG: AutoCompactConfig = {
 	enabled: true,
 	threshold: 60,
 	mode: 'conservative',
-	strategy: 'mechanical',
+	strategy: 'llm',
 	notifyUser: true,
 };
 
@@ -129,19 +129,24 @@ export function SettingsAutoCompactPanel({
 				<Box flexDirection="column">
 					<Box marginBottom={1}>
 						<Text color={colors.secondary}>
-							Enter toggles/cycles a setting · Shift+Tab back · Esc exit
+							Enter toggles/cycles a setting · Shift+Tab back · Esc back
 						</Text>
 					</Box>
 					<SelectInput
 						items={items}
 						onSelect={handleSelect}
 						indicatorComponent={({isSelected}) => (
-							<Text color={isSelected ? colors.primary : colors.text}>
-								{isSelected ? '> ' : '  '}
-							</Text>
+							<Box minWidth={2}>
+								<Text color={isSelected ? colors.primary : colors.text}>
+									{isSelected ? '>' : ' '}
+								</Text>
+							</Box>
 						)}
 						itemComponent={({isSelected, label}) => (
-							<Text color={isSelected ? colors.primary : colors.text}>
+							<Text
+								color={isSelected ? colors.primary : colors.text}
+								wrap="truncate-end"
+							>
 								{label}
 							</Text>
 						)}

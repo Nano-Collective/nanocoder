@@ -10,7 +10,8 @@ import {useTheme} from '@/hooks/useTheme';
 
 const MODE_DESCRIPTIONS: Record<string, string> = {
 	normal: 'Standard — all tool calls require approval',
-	'auto-accept': 'Semi-auto — read-only tools auto-run; writes prompt',
+	'auto-accept':
+		'Semi-auto — most tools auto-run; bash and destructive git prompt',
 	yolo: 'Fully automatic — no confirmations at all',
 	plan: 'Read-only exploration — only read/search/list tools',
 };
@@ -42,9 +43,7 @@ export function SettingsDefaultModePanel({
 	const items = useMemo(
 		() =>
 			(VALID_MODES as readonly string[]).map(mode => ({
-				label: `${mode}${selectedMode === mode ? ' *' : ''} — ${
-					MODE_DESCRIPTIONS[mode] ?? ''
-				}`,
+				label: `${mode}${selectedMode === mode ? ' *' : ''}`,
 				value: mode,
 			})),
 		[selectedMode],
@@ -80,14 +79,39 @@ export function SettingsDefaultModePanel({
 					{currentMode ?? '(not set — defaults to normal)'}
 				</Text>
 			</Box>
+			{/* Label and description are separate rows: as one long string they
+			    wrapped with no hanging indent, so continuation lines ran flush
+			    left and the list read as a jumble on narrow terminals. */}
 			<SelectInput
 				items={items}
 				initialIndex={initialIndex}
 				onSelect={handleSelect}
+				itemComponent={({isSelected, label}) => {
+					const mode = label.replace(' *', '');
+					const description = MODE_DESCRIPTIONS[mode] ?? '';
+					const color = isSelected ? colors.primary : colors.text;
+					if (isNarrow) {
+						return (
+							<Box flexDirection="column">
+								<Text color={color}>{label}</Text>
+								<Text color={colors.secondary} wrap="truncate-end">
+									{'  '}
+									{description}
+								</Text>
+							</Box>
+						);
+					}
+					return (
+						<Text wrap="truncate-end">
+							<Text color={color}>{label}</Text>
+							<Text color={colors.secondary}> — {description}</Text>
+						</Text>
+					);
+				}}
 			/>
 			<Box marginTop={1}>
 				<Text color={colors.secondary}>
-					Enter to apply · Shift+Tab back · Esc exit
+					Enter to apply · Shift+Tab back · Esc back
 				</Text>
 			</Box>
 		</TitledBoxWithPreferences>

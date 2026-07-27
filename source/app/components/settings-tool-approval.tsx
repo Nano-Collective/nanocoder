@@ -7,8 +7,8 @@ import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 
 /**
- * Read-only view of the tools that run without confirmation (agents.config.json
- * alwaysAllow + nanocoderTools.alwaysAllow). Editing is done in the config file.
+ * Read-only view of the tools that run without confirmation (the top-level
+ * agents.config.json alwaysAllow). Editing is done in the config file.
  */
 export function SettingsToolApprovalPanel({
 	onBack,
@@ -59,16 +59,23 @@ export function SettingsToolApprovalPanel({
 				items={items}
 				onSelect={() => {}}
 				indicatorComponent={({isSelected}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>
-						{isSelected ? '> ' : '  '}
-					</Text>
+					<Box minWidth={2}>
+						<Text color={isSelected ? colors.primary : colors.text}>
+							{isSelected ? '>' : ' '}
+						</Text>
+					</Box>
 				)}
 				itemComponent={({isSelected, label}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>{label}</Text>
+					<Text
+						color={isSelected ? colors.primary : colors.text}
+						wrap="truncate-end"
+					>
+						{label}
+					</Text>
 				)}
 			/>
 			<Box marginTop={1}>
-				<Text color={colors.secondary}>Shift+Tab back · Esc exit</Text>
+				<Text color={colors.secondary}>Shift+Tab back · Esc back</Text>
 			</Box>
 		</TitledBoxWithPreferences>
 	);

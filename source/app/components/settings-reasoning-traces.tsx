@@ -61,19 +61,26 @@ export function SettingsReasoningTracesPanel({
 		>
 			<Box marginBottom={1}>
 				<Text color={colors.secondary}>
-					Press Enter to toggle · Shift+Tab back · Esc exit
+					Press Enter to toggle · Shift+Tab back · Esc back
 				</Text>
 			</Box>
 			<SelectInput
 				items={items}
 				onSelect={handleSelect}
 				indicatorComponent={({isSelected}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>
-						{isSelected ? '> ' : '  '}
-					</Text>
+					<Box minWidth={2}>
+						<Text color={isSelected ? colors.primary : colors.text}>
+							{isSelected ? '>' : ' '}
+						</Text>
+					</Box>
 				)}
 				itemComponent={({isSelected, label}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>{label}</Text>
+					<Text
+						color={isSelected ? colors.primary : colors.text}
+						wrap="truncate-end"
+					>
+						{label}
+					</Text>
 				)}
 			/>
 		</TitledBoxWithPreferences>

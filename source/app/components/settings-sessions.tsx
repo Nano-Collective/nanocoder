@@ -141,19 +141,24 @@ export function SettingsSessionsPanel({
 				<Box flexDirection="column">
 					<Box marginBottom={1}>
 						<Text color={colors.secondary}>
-							Enter edits/toggles a field · Shift+Tab back · Esc exit
+							Enter edits/toggles a field · Shift+Tab back · Esc back
 						</Text>
 					</Box>
 					<SelectInput
 						items={items}
 						onSelect={handleSelect}
 						indicatorComponent={({isSelected}) => (
-							<Text color={isSelected ? colors.primary : colors.text}>
-								{isSelected ? '> ' : '  '}
-							</Text>
+							<Box minWidth={2}>
+								<Text color={isSelected ? colors.primary : colors.text}>
+									{isSelected ? '>' : ' '}
+								</Text>
+							</Box>
 						)}
 						itemComponent={({isSelected, label}) => (
-							<Text color={isSelected ? colors.primary : colors.text}>
+							<Text
+								color={isSelected ? colors.primary : colors.text}
+								wrap="truncate-end"
+							>
 								{label}
 							</Text>
 						)}

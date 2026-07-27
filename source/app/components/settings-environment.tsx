@@ -4,6 +4,15 @@ import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 
+const SECRET_NAME = /(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH)/;
+
+/** Credentials are readable over a shoulder or a screen share — show only a stub. */
+function maskValue(name: string, value: string): string {
+	if (!SECRET_NAME.test(name)) return value;
+	if (value.length <= 4) return '*'.repeat(value.length);
+	return `${value.slice(0, 4)}${'*'.repeat(Math.min(12, value.length - 4))}`;
+}
+
 /**
  * Read-only view of the active NANOCODER_* environment variables. These are set
  * externally and override config; shown here so they're discoverable.
@@ -50,14 +59,14 @@ export function SettingsEnvironmentPanel({
 				<Text color={colors.text}>(none set)</Text>
 			) : (
 				vars.map(([k, v]) => (
-					<Text key={k} color={colors.text}>
+					<Text key={k} color={colors.text} wrap="truncate-end">
 						<Text color={colors.primary}>{k}</Text>
-						<Text color={colors.secondary}>={v}</Text>
+						<Text color={colors.secondary}>={maskValue(k, v ?? '')}</Text>
 					</Text>
 				))
 			)}
 			<Box marginTop={1}>
-				<Text color={colors.secondary}>Shift+Tab back · Esc exit</Text>
+				<Text color={colors.secondary}>Shift+Tab back · Esc back</Text>
 			</Box>
 		</TitledBoxWithPreferences>
 	);

@@ -48,7 +48,7 @@ export function SettingsProvidersListPanel({
 				: 'no models';
 			return {label: `${p.name}  ·  ${where}  ·  ${models}`, value: String(i)};
 		}),
-		{label: '＋ Add or edit providers…', value: 'edit'},
+		{label: '+ Add or edit providers…', value: 'edit'},
 	];
 
 	return (
@@ -71,16 +71,23 @@ export function SettingsProvidersListPanel({
 				items={items}
 				onSelect={() => setEditing(true)}
 				indicatorComponent={({isSelected}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>
-						{isSelected ? '> ' : '  '}
-					</Text>
+					<Box minWidth={2}>
+						<Text color={isSelected ? colors.primary : colors.text}>
+							{isSelected ? '>' : ' '}
+						</Text>
+					</Box>
 				)}
 				itemComponent={({isSelected, label}) => (
-					<Text color={isSelected ? colors.primary : colors.text}>{label}</Text>
+					<Text
+						color={isSelected ? colors.primary : colors.text}
+						wrap="truncate-end"
+					>
+						{label}
+					</Text>
 				)}
 			/>
 			<Box marginTop={1}>
-				<Text color={colors.secondary}>Shift+Tab back · Esc exit</Text>
+				<Text color={colors.secondary}>Shift+Tab back · Esc back</Text>
 			</Box>
 		</TitledBoxWithPreferences>
 	);
