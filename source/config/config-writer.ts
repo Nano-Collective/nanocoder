@@ -7,12 +7,12 @@ import {
 	unlinkSync,
 	writeFileSync,
 } from 'node:fs';
-import {dirname, join} from 'node:path';
-import {getConfigPath} from '@/config/paths';
+import {dirname} from 'node:path';
+import {getClosestConfigFile} from '@/config/index';
 import {logError} from '@/utils/message-queue';
 
 /**
- * Reads the global agents.config.json, merges the given partial update into the
+ * Reads the active agents.config.json, merges the given partial update into the
  * `nanocoder` key, and writes it back atomically. Creates the file if missing.
  * The write counterpart to the various `load*` functions in config/index.ts.
  */
@@ -20,7 +20,7 @@ export function updateConfigValue<K extends string, V>(
 	nanocoderKey: K,
 	value: V,
 ): void {
-	const configPath = getGlobalConfigPath();
+	const configPath = getActiveConfigPath();
 	const config = readConfigObject(configPath);
 	if (!config) return;
 
@@ -39,7 +39,7 @@ export function updateConfigNestedValue<K extends string, V>(
 	childKey: string,
 	value: V,
 ): void {
-	const configPath = getGlobalConfigPath();
+	const configPath = getActiveConfigPath();
 	const config = readConfigObject(configPath);
 	if (!config) return;
 
@@ -105,6 +105,11 @@ function atomicWriteFileSync(filePath: string, data: string): void {
 	}
 }
 
-function getGlobalConfigPath(): string {
-	return join(getConfigPath(), 'agents.config.json');
+/**
+ * Same resolution the loaders use (project agents.config.json shadows the user
+ * one). Writing to the global file unconditionally meant a project config
+ * silently shadowed every settings change on the next launch.
+ */
+function getActiveConfigPath(): string {
+	return getClosestConfigFile('agents.config.json');
 }
