@@ -105,6 +105,9 @@
 		"xdg-basedir": "^5.1.0",
 		"yaml": "^2.8.3"
 	},
+	"optionalDependencies": {
+		"@nanocollective/nanocoder-voice": "workspace:*"
+	},
 	"devDependencies": {
 		"@ava/typescript": "^7.0.0",
 		"@biomejs/biome": "^2.5.0",
@@ -140,6 +143,7 @@
 		"files": [
 			"source/**/*.spec.ts",
 			"source/**/*.spec.tsx",
+			"plugins/voice/src/**/*.spec.ts",
 			"!source/**/*-helpers.ts",
 			"!source/**/test-helpers.ts"
 		],
