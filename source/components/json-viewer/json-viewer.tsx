@@ -1,5 +1,12 @@
 import {Box, Text, useInput} from 'ink';
-import {type ReactNode, useCallback, useEffect, useMemo, useState} from 'react';
+import {
+	type ReactNode,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from 'react';
 import TextInput from '@/components/text-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -7,6 +14,7 @@ import {useTheme} from '@/hooks/useTheme';
 import type {Colors} from '@/types/ui';
 import {
 	addSibling,
+	buildPath,
 	collapseBeyondDepth,
 	deleteAtPath,
 	extractTreeValue,
@@ -42,7 +50,7 @@ export interface JsonViewerProps {
 	readOnly?: boolean;
 }
 
-type EditMode = 'browse' | 'edit' | 'add-key' | 'add-value';
+type EditMode = 'browse' | 'edit' | 'add-key';
 
 // ─── Color Helpers ───────────────────────────────────────────────────────────
 
@@ -93,12 +101,26 @@ export function JsonViewer({
 	// Cursor position (index into flattened rows)
 	const [cursorIndex, setCursorIndex] = useState(0);
 
-	// Edit mode
-	const [editMode, setEditMode] = useState<EditMode>('browse');
+	// Edit mode. Ink dispatches every keypress parsed from one stdin chunk in the
+	// same call stack with no re-render between, so the key handler must branch on
+	// a ref — reading the state would still say 'browse' for the rest of a pasted
+	// "e"+value burst and let those characters run as bare shortcuts.
+	const [editMode, setEditModeState] = useState<EditMode>('browse');
+	const editModeRef = useRef<EditMode>('browse');
+	const setEditMode = useCallback((next: EditMode) => {
+		editModeRef.current = next;
+		setEditModeState(next);
+	}, []);
 	const [editValue, setEditValue] = useState('');
+	const [editError, setEditError] = useState<string | null>(null);
 
-	// Help modal
-	const [showHelp, setShowHelp] = useState(false);
+	// Help modal (same stale-within-a-chunk caveat as editMode above)
+	const [showHelp, setShowHelpState] = useState(false);
+	const showHelpRef = useRef(false);
+	const setShowHelp = useCallback((next: boolean) => {
+		showHelpRef.current = next;
+		setShowHelpState(next);
+	}, []);
 
 	// Dirty tracking
 	const originalData = JSON.stringify(data);
@@ -135,10 +157,9 @@ export function JsonViewer({
 	// Navigate to initial path
 	useEffect(() => {
 		if (!initialPath || initialPath.length === 0 || rows.length === 0) return;
-		const targetPath = initialPath.join('');
+		const targetPath = buildPath(initialPath);
 		const foundIdx = rows.findIndex(
-			r =>
-				r.pathSegments.join('') === targetPath || r.path.endsWith(targetPath),
+			r => r.path === targetPath || r.path.endsWith(`.${targetPath}`),
 		);
 		if (foundIdx >= 0) {
 			setCursorIndex(foundIdx);
@@ -173,29 +194,30 @@ export function JsonViewer({
 
 	const startEdit = useCallback(() => {
 		if (readOnly || !currentRow) return;
-		// Can edit primitives or collapsed nodes (expand first)
-		if (currentRow.hasChildren && !currentRow.isCollapsed) return;
-		if (
-			currentRow.value === '{' ||
-			currentRow.value === '}' ||
-			currentRow.value === '[' ||
-			currentRow.value === ']'
-		)
-			return;
+		// Containers hold no scalar to edit — l/→ expands them instead. Editing a
+		// collapsed one used to replace the whole subtree with the string "{ ... }".
+		if (currentRow.kind === 'object' || currentRow.kind === 'array') return;
 
 		setEditMode('edit');
 		setEditValue(currentRow.value.replace(/^"|"$/g, ''));
-	}, [readOnly, currentRow]);
+		setEditError(null);
+	}, [readOnly, currentRow, setEditMode]);
 
 	const commitEdit = useCallback(() => {
 		if (!currentRow) return;
 		const segments = currentRow.pathSegments;
 		let newValue: unknown = editValue;
 
-		// Type coercion
+		// Type coercion. A bad number keeps the editor open — the old fallback wrote
+		// currentRow.value, the FORMATTED display string, silently retyping 42 as "42".
 		if (currentRow.kind === 'number') {
-			const num = Number(editValue);
-			newValue = Number.isNaN(num) ? currentRow.value : num;
+			const trimmed = editValue.trim();
+			const num = Number(trimmed);
+			if (trimmed === '' || Number.isNaN(num)) {
+				setEditError('not a number');
+				return;
+			}
+			newValue = num;
 		} else if (currentRow.kind === 'boolean') {
 			newValue = editValue.toLowerCase() === 'true';
 		} else if (currentRow.kind === 'null') {
@@ -205,18 +227,20 @@ export function JsonViewer({
 		setTree(prev => setValueAtPath(prev, segments, newValue));
 		setEditMode('browse');
 		setEditValue('');
-	}, [currentRow, editValue]);
+		setEditError(null);
+	}, [currentRow, editValue, setEditMode]);
 
 	const cancelEdit = useCallback(() => {
 		setEditMode('browse');
 		setEditValue('');
-	}, []);
+		setEditError(null);
+	}, [setEditMode]);
 
 	const startAdd = useCallback(() => {
 		if (readOnly || !currentRow) return;
 		setEditMode('add-key');
 		setEditValue('');
-	}, [readOnly, currentRow]);
+	}, [readOnly, currentRow, setEditMode]);
 
 	const commitAdd = useCallback(() => {
 		if (!currentRow) return;
@@ -225,7 +249,7 @@ export function JsonViewer({
 		setTree(prev => addSibling(prev, segments, parsed));
 		setEditMode('browse');
 		setEditValue('');
-	}, [currentRow, editValue]);
+	}, [currentRow, editValue, setEditMode]);
 
 	const deleteItem = useCallback(() => {
 		if (readOnly || !currentRow) return;
@@ -233,12 +257,9 @@ export function JsonViewer({
 		if (currentRow.pathSegments.length === 0) return;
 		// Can't delete closing brackets
 		if (currentRow.value === '}' || currentRow.value === ']') return;
-		// Can't delete opening brackets — delete the whole node
-		const segments =
-			currentRow.hasChildren && !currentRow.isCollapsed
-				? currentRow.pathSegments
-				: currentRow.pathSegments;
-		setTree(prev => deleteAtPath(prev, segments));
+		// An opening bracket row shares the container's path, so this removes the
+		// whole node rather than just the bracket line.
+		setTree(prev => deleteAtPath(prev, currentRow.pathSegments));
 	}, [readOnly, currentRow]);
 
 	const saveChanges = useCallback(() => {
@@ -253,19 +274,13 @@ export function JsonViewer({
 	// ─── Key Handling ──────────────────────────────────────────────────────
 
 	useInput((input, key) => {
-		// Help toggle (always available)
-		if (input === '?' && !key.ctrl && !key.shift) {
-			setShowHelp(prev => !prev);
-			return;
-		}
-
 		// Escape handling
 		if (key.escape) {
-			if (showHelp) {
+			if (showHelpRef.current) {
 				setShowHelp(false);
 				return;
 			}
-			if (editMode !== 'browse') {
+			if (editModeRef.current !== 'browse') {
 				cancelEdit();
 				return;
 			}
@@ -275,21 +290,7 @@ export function JsonViewer({
 
 		// Shift+Tab = exit
 		if (key.shift && key.tab) {
-			if (editMode !== 'browse') {
-				cancelEdit();
-				return;
-			}
-			handleExit();
-			return;
-		}
-
-		// Save/exit shortcuts (always available, like ?)
-		if (input === 'w' && !key.ctrl && !key.shift) {
-			saveChanges();
-			return;
-		}
-		if (input === 'q' && !key.ctrl && !key.shift) {
-			if (editMode !== 'browse') {
+			if (editModeRef.current !== 'browse') {
 				cancelEdit();
 				return;
 			}
@@ -298,7 +299,7 @@ export function JsonViewer({
 		}
 
 		// Boolean editing: pick the value with arrow keys / space instead of typing.
-		if (editMode === 'edit' && currentRow?.kind === 'boolean') {
+		if (editModeRef.current === 'edit' && currentRow?.kind === 'boolean') {
 			if (
 				key.leftArrow ||
 				key.rightArrow ||
@@ -316,11 +317,29 @@ export function JsonViewer({
 			return;
 		}
 
-		// If in edit mode, let TextInput handle input
-		if (editMode !== 'browse') return;
+		// If in edit mode, let TextInput handle input. Everything below this line is
+		// a bare-letter shortcut, so it MUST stay here: TextInput runs its own
+		// useInput and both hooks see every keystroke, so typing a value containing
+		// w/q/? used to save, cancel or pop the help overlay mid-edit.
+		if (editModeRef.current !== 'browse') return;
+
+		// Help toggle
+		if (input === '?' && !key.ctrl && !key.shift) {
+			setShowHelp(!showHelpRef.current);
+			return;
+		}
 
 		// If help is showing, only allow escape and ?
-		if (showHelp) return;
+		if (showHelpRef.current) return;
+
+		if (input === 'w' && !key.ctrl && !key.shift) {
+			saveChanges();
+			return;
+		}
+		if (input === 'q' && !key.ctrl && !key.shift) {
+			handleExit();
+			return;
+		}
 
 		// Navigation
 		if (input === 'k' || key.upArrow) {
@@ -348,7 +367,7 @@ export function JsonViewer({
 		return (
 			<TitledBoxWithPreferences
 				title="Keybindings"
-				width={boxWidth}
+				width={isNarrow ? '100%' : boxWidth}
 				borderColor={colors.primary}
 				paddingX={2}
 				paddingY={1}
@@ -389,7 +408,7 @@ export function JsonViewer({
 	return (
 		<TitledBoxWithPreferences
 			title={title || 'JSON Viewer'}
-			width={boxWidth}
+			width={isNarrow ? '100%' : boxWidth}
 			borderColor={colors.primary}
 			paddingX={isNarrow ? 1 : 2}
 			paddingY={0}
@@ -445,11 +464,16 @@ export function JsonViewer({
 										color={colors.base}
 										backgroundColor={colors.primary}
 										bold
+										wrap="truncate-end"
 									>
 										{renderRowContent(row, indentStr, colors, true)}
 									</Text>
 								) : (
-									<Text>{renderRowContent(row, indentStr, colors, false)}</Text>
+									/* truncate, don't wrap: a long value (an API key) used to
+									   reflow onto the next line and swallow its gutter number */
+									<Text wrap="truncate-end">
+										{renderRowContent(row, indentStr, colors, false)}
+									</Text>
 								)}
 
 								{/* Add-key overlay: entering a new "key": value pair. */}
@@ -472,20 +496,22 @@ export function JsonViewer({
 			</Box>
 
 			{/* Status Bar */}
-			<Box marginTop={1} flexDirection="row">
-				<Box>
-					<Text color={colors.secondary}>
-						{currentRow ? `${currentRow.path}  ` : ''}
-						Line {currentRow?.lineNumber ?? 0}/{rows.length}
-					</Text>
+			<Box marginTop={1} flexDirection={isNarrow ? 'column' : 'row'}>
+				<Box flexGrow={1}>
+					{editError ? (
+						<Text color={colors.error}>
+							{editError} — Esc to cancel, or fix the value
+						</Text>
+					) : (
+						<Text color={colors.secondary}>
+							{currentRow ? `${currentRow.path}  ` : ''}
+							Line {currentRow?.lineNumber ?? 0}/{rows.length}
+						</Text>
+					)}
 				</Box>
-				<Box
-					width={isNarrow ? undefined : '50%'}
-					flexDirection="row"
-					justifyContent="flex-end"
-				>
+				<Box flexDirection="row" justifyContent="flex-end">
 					<Text color={colors.secondary}>
-						{!readOnly && 'e:edit  a:add  d:del  w:write  '}' '?:help ' 'q:exit'
+						{`${readOnly ? '' : 'e:edit  a:add  d:del  w:write  '}?:help  q:exit`}
 					</Text>
 				</Box>
 			</Box>
@@ -570,31 +596,35 @@ function renderRowContent(
 	row: JsonFlatRow,
 	indentStr: string,
 	colors: Colors,
-	_isHighlighted: boolean,
+	isHighlighted: boolean,
 ): ReactNode {
 	const indent = indentStr.repeat(row.indent);
+	// The cursor row is drawn on a colors.primary background. Syntax colors are
+	// picked for the normal background, and the key's own colors.primary rendered
+	// it invisible against it, so let the row inherit the inverse pair instead.
+	const tint = (color: string) => (isHighlighted ? undefined : color);
 
 	return (
 		<>
-			<Text color={colors.text}>{indent}</Text>
+			<Text color={tint(colors.text)}>{indent}</Text>
 			{row.key !== undefined && (
 				<>
-					<Text color={colors.primary} bold>
+					<Text color={tint(colors.primary)} bold>
 						"{row.key}"
 					</Text>
-					<Text color={colors.secondary}>: </Text>
+					<Text color={tint(colors.secondary)}>: </Text>
 				</>
 			)}
 			{row.kind === 'object' || row.kind === 'array' ? (
-				<Text color={getBracketColor(row.kind, colors)} bold>
+				<Text color={tint(getBracketColor(row.kind, colors))} bold>
 					{row.value}
 				</Text>
 			) : (
-				<Text color={getValueColor(row.kind, colors)}>{row.value}</Text>
+				<Text color={tint(getValueColor(row.kind, colors))}>{row.value}</Text>
 			)}
-			<Text color={colors.secondary}>{row.trailing}</Text>
+			<Text color={tint(colors.secondary)}>{row.trailing}</Text>
 			{row.isCollapsed && row.hiddenCount > 0 && (
-				<Text color={colors.secondary}> ({row.hiddenCount} hidden)</Text>
+				<Text color={tint(colors.secondary)}> ({row.hiddenCount} hidden)</Text>
 			)}
 		</>
 	);

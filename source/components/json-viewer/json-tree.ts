@@ -262,18 +262,18 @@ function flattenNode(
 	}
 }
 
-function buildPath(segments: string[]): string {
+/**
+ * Dot-separated JSONPath: ["providers","[1]","baseUrl"] → "providers[1].baseUrl".
+ * Array indices attach to the preceding segment without a dot. Exported so the
+ * viewer's initialPath lookup uses the SAME encoding — a separator-less join
+ * made ["a","bc"] and ["ab","c"] collide.
+ */
+export function buildPath(segments: string[]): string {
 	if (segments.length === 0) return '$';
-	return segments
-		.map(seg => {
-			// Array indices: $.items[0]
-			if (/^\[\d+\]$/.test(seg)) {
-				return seg;
-			}
-			// Object keys with dots: $.key.name
-			return seg;
-		})
-		.join('');
+	return segments.reduce((acc, seg) => {
+		if (/^\[\d+\]$/.test(seg)) return acc + seg;
+		return acc === '' ? seg : `${acc}.${seg}`;
+	}, '');
 }
 
 function formatValue(value: unknown, kind: JsonKind): string {
@@ -419,9 +419,8 @@ function lenifyJson(input: string): string {
 	const result: string[] = [];
 	let i = 0;
 	let inString = false;
-	let expectColon = false;
-	let afterColon = true;
-	let _depth = 0;
+	// One flag: ':' opens a value position, '{'/'['/',' returns to a key position.
+	let inValuePosition = true;
 
 	while (i < input.length) {
 		const ch = input[i];
@@ -447,24 +446,20 @@ function lenifyJson(input: string): string {
 		}
 
 		if (ch === '{' || ch === '[') {
-			_depth++;
 			result.push(ch);
-			expectColon = false;
-			afterColon = false;
+			inValuePosition = false;
 			i++;
 			continue;
 		}
 
 		if (ch === '}' || ch === ']') {
-			_depth--;
 			result.push(ch);
 			i++;
 			continue;
 		}
 
 		if (ch === ':') {
-			expectColon = true;
-			afterColon = true;
+			inValuePosition = true;
 			result.push(ch);
 			i++;
 			continue;
@@ -472,8 +467,7 @@ function lenifyJson(input: string): string {
 
 		if (ch === ',') {
 			result.push(ch);
-			expectColon = false;
-			afterColon = false;
+			inValuePosition = false;
 			i++;
 			continue;
 		}
@@ -502,7 +496,7 @@ function lenifyJson(input: string): string {
 		}
 
 		// Determine if this token needs quoting
-		if (expectColon || afterColon) {
+		if (inValuePosition) {
 			// This is a value position
 			const parsed = tryParseLiteral(token);
 			if (parsed !== null) {
@@ -512,18 +506,10 @@ function lenifyJson(input: string): string {
 				// It's an unquoted string value
 				result.push(`"${escapeJsonString(token)}"`);
 			}
-			expectColon = false;
-			afterColon = false;
+			inValuePosition = false;
 		} else {
-			// This is a key position (inside an object)
-			const parsed = tryParseLiteral(token);
-			if (parsed !== null) {
-				// It's a literal used as a key — quote it
-				result.push(`"${escapeJsonString(token)}"`);
-			} else {
-				// Bare identifier key
-				result.push(`"${escapeJsonString(token)}"`);
-			}
+			// Key position: bare or literal-looking, it always ends up quoted.
+			result.push(`"${escapeJsonString(token)}"`);
 		}
 	}
 
@@ -559,7 +545,7 @@ function escapeJsonString(s: string): string {
  */
 export function toggleCollapse(root: JsonNode, segments: string[]): JsonNode {
 	if (segments.length === 0) {
-		return cloneNode({...root, collapsed: !root.collapsed});
+		return {...root, collapsed: !root.collapsed};
 	}
 
 	const [first, ...rest] = segments;
@@ -570,7 +556,7 @@ export function toggleCollapse(root: JsonNode, segments: string[]): JsonNode {
 		const idx = parseInt(match[1], 10);
 		const newChildren = [...root.children];
 		newChildren[idx] = toggleCollapse(newChildren[idx], rest);
-		return cloneNode({...root, children: newChildren});
+		return {...root, children: newChildren};
 	}
 
 	if (root.kind === 'object') {
@@ -580,7 +566,7 @@ export function toggleCollapse(root: JsonNode, segments: string[]): JsonNode {
 			}
 			return child;
 		});
-		return cloneNode({...root, children: newChildren});
+		return {...root, children: newChildren};
 	}
 
 	return root;
@@ -593,7 +579,7 @@ export function collapseBeyondDepth(
 	root: JsonNode,
 	maxDepth: number,
 ): JsonNode {
-	return cloneNode(collapseNodeAtDepth(root, 0, maxDepth));
+	return collapseNodeAtDepth(root, 0, maxDepth);
 }
 
 function collapseNodeAtDepth(
@@ -611,11 +597,11 @@ function collapseNodeAtDepth(
 		collapseNodeAtDepth(child, currentDepth + 1, maxDepth),
 	);
 
-	return cloneNode({
+	return {
 		...node,
 		collapsed: shouldCollapse || node.collapsed,
 		children: newChildren,
-	});
+	};
 }
 
 /**
@@ -649,12 +635,12 @@ export function setValueAtPath(
 		} else {
 			newChildren[idx] = setValueAtPath(newChildren[idx], rest, newValue);
 		}
-		return cloneNode({
+		return {
 			...root,
 			children: newChildren,
 			value: newChildren,
 			size: newChildren.length,
-		});
+		};
 	}
 
 	if (root.kind === 'object') {
@@ -668,12 +654,12 @@ export function setValueAtPath(
 			return child;
 		});
 		const newValueObj = objectFromChildren(newChildren);
-		return cloneNode({
+		return {
 			...root,
 			children: newChildren,
 			value: newValueObj,
 			size: newChildren.length,
-		});
+		};
 	}
 
 	return root;
@@ -716,23 +702,23 @@ export function addSibling(
 			);
 			newChildren.splice(idx + 1, 0, newNode);
 			// Re-index
-			const reindexed = newChildren.map((c, i) => cloneNode({...c, index: i}));
-			return cloneNode({
+			const reindexed = newChildren.map((c, i) => ({...c, index: i}));
+			return {
 				...root,
 				children: reindexed,
 				value: reindexed,
 				size: reindexed.length,
-			});
+			};
 		}
 
 		newChildren[idx] = addSibling(newChildren[idx], rest, parsedEntry);
 		const newValueArr = arrayFromChildren(newChildren);
-		return cloneNode({
+		return {
 			...root,
 			children: newChildren,
 			value: newValueArr,
 			size: newChildren.length,
-		});
+		};
 	}
 
 	if (root.kind === 'object') {
@@ -752,12 +738,12 @@ export function addSibling(
 				}
 			}
 			const newValueObj = objectFromChildren(newChildren);
-			return cloneNode({
+			return {
 				...root,
 				children: newChildren,
 				value: newValueObj,
 				size: newChildren.length,
-			});
+			};
 		}
 
 		// Descend into the matched child
@@ -768,12 +754,12 @@ export function addSibling(
 			return child;
 		});
 		const newValueObj = objectFromChildren(newChildren);
-		return cloneNode({
+		return {
 			...root,
 			children: newChildren,
 			value: newValueObj,
 			size: newChildren.length,
-		});
+		};
 	}
 
 	return root;
@@ -796,36 +782,36 @@ export function deleteAtPath(root: JsonNode, segments: string[]): JsonNode {
 
 		if (rest.length === 0) {
 			const newChildren = root.children.filter((_, i) => i !== idx);
-			const reindexed = newChildren.map((c, i) => cloneNode({...c, index: i}));
-			return cloneNode({
+			const reindexed = newChildren.map((c, i) => ({...c, index: i}));
+			return {
 				...root,
 				children: reindexed,
 				value: reindexed,
 				size: reindexed.length,
-			});
+			};
 		}
 
 		const newChildren = [...root.children];
 		newChildren[idx] = deleteAtPath(newChildren[idx], rest);
 		const newValueArr = arrayFromChildren(newChildren);
-		return cloneNode({
+		return {
 			...root,
 			children: newChildren,
 			value: newValueArr,
 			size: newChildren.length,
-		});
+		};
 	}
 
 	if (root.kind === 'object') {
 		if (rest.length === 0) {
 			const newChildren = root.children.filter(c => c.key !== first);
 			const newValueObj = objectFromChildren(newChildren);
-			return cloneNode({
+			return {
 				...root,
 				children: newChildren,
 				value: newValueObj,
 				size: newChildren.length,
-			});
+			};
 		}
 
 		const newChildren = root.children.map(child => {
@@ -835,12 +821,12 @@ export function deleteAtPath(root: JsonNode, segments: string[]): JsonNode {
 			return child;
 		});
 		const newValueObj = objectFromChildren(newChildren);
-		return cloneNode({
+		return {
 			...root,
 			children: newChildren,
 			value: newValueObj,
 			size: newChildren.length,
-		});
+		};
 	}
 
 	return root;
@@ -861,12 +847,12 @@ function addToRoot(
 		);
 		const newChildren = [...root.children, newNode];
 		const newValueObj = objectFromChildren(newChildren);
-		return cloneNode({
+		return {
 			...root,
 			children: newChildren,
 			value: newValueObj,
 			size: newChildren.length,
-		});
+		};
 	}
 	if (root.kind === 'array') {
 		const newNode = parseJsonToTree(
@@ -876,27 +862,14 @@ function addToRoot(
 			root.children.length,
 		);
 		const newChildren = [...root.children, newNode];
-		return cloneNode({
+		return {
 			...root,
 			children: newChildren,
 			value: newChildren,
 			size: newChildren.length,
-		});
+		};
 	}
 	return root;
-}
-
-function cloneNode(node: JsonNode): JsonNode {
-	return {
-		kind: node.kind,
-		key: node.key,
-		value: node.value,
-		children: node.children,
-		depth: node.depth,
-		collapsed: node.collapsed,
-		size: node.size,
-		index: node.index,
-	};
 }
 
 function objectFromChildren(children: JsonNode[]): Record<string, unknown> {

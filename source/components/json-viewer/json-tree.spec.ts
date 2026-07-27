@@ -1,4 +1,4 @@
-import anyTest, {type ExecutionContext} from 'ava';
+import anyTest, {type TestFn} from 'ava';
 import {
 	collapseBeyondDepth,
 	deleteAtPath,
@@ -13,7 +13,7 @@ import {
 	getValueAtPath,
 } from './json-tree';
 
-const test = anyTest as any;
+const test = anyTest as TestFn;
 
 // ─── Parsing ─────────────────────────────────────────────────────────────────
 
@@ -83,6 +83,27 @@ test('flattenTree: simple object', t => {
 	t.is(rows[2].value, '"two"');
 	t.is(rows[2].trailing, '');
 	t.is(rows[3].value, '}');
+});
+
+test('flattenTree: row paths are dot-separated, with array indices attached', t => {
+	const rows = flattenTree(
+		parseJsonToTree({providers: [{baseUrl: 'http://x'}]}),
+	);
+	const paths = rows.map(r => r.path);
+
+	// These used to join with '', rendering "providersollamaurl" in the status bar.
+	t.true(paths.includes('providers'));
+	t.true(paths.includes('providers[0]'));
+	t.true(paths.includes('providers[0].baseUrl'));
+});
+
+test('flattenTree: distinct segment splits do not collide into one path', t => {
+	const a = flattenTree(parseJsonToTree({a: {bc: 1}})).map(r => r.path);
+	const b = flattenTree(parseJsonToTree({ab: {c: 1}})).map(r => r.path);
+
+	t.true(a.includes('a.bc'));
+	t.true(b.includes('ab.c'));
+	t.false(a.includes('ab.c'));
 });
 
 test('flattenTree: sibling comma sits on the close bracket, not the open', t => {
