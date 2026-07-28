@@ -101,6 +101,22 @@ test('appendRelevantProjectContextWithCount reports injected memory count', asyn
 	t.true(result.systemPrompt.includes('## Project Context'));
 });
 
+test('appendRelevantProjectContextWithCount skips memory lookup when disabled', async t => {
+	const result = await appendRelevantProjectContextWithCount(
+		'base prompt',
+		'auth',
+		{
+			findRelevantMemories: async () => {
+				throw new Error('should not look up memories when disabled');
+			},
+		},
+		{semanticMemoryEnabled: false},
+	);
+
+	t.is(result.memoryCount, 0);
+	t.is(result.systemPrompt, 'base prompt');
+});
+
 test('appendRelevantProjectContext passes configured memory limit', async t => {
 	const prompt = await appendRelevantProjectContext(
 		'base prompt',

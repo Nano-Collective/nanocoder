@@ -49,3 +49,13 @@ test('SettingsSelector main menu shows Display Settings option', t => {
 	t.truthy(output!.includes('Tool Results and Thinking'));
 	unmount();
 });
+
+test('SettingsSelector main menu shows Advanced option', t => {
+	const {lastFrame, unmount} = renderWithTheme(
+		<SettingsSelector onCancel={() => {}} />,
+	);
+	const output = lastFrame();
+	t.truthy(output);
+	t.truthy(output!.includes('Advanced'));
+	unmount();
+});

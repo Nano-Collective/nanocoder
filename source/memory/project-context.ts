@@ -6,6 +6,7 @@ export type MemoryFinder = Pick<SemanticMemoryManager, 'findRelevantMemories'>;
 export interface ProjectContextOptions {
 	memoryLimit?: number;
 	tokenBudget?: number;
+	semanticMemoryEnabled?: boolean;
 }
 
 export interface ProjectContextResult {
@@ -90,6 +91,10 @@ export async function appendRelevantProjectContextWithCount(
 	memoryFinder: MemoryFinder = new SemanticMemoryManager(),
 	options: ProjectContextOptions = {},
 ): Promise<ProjectContextResult> {
+	if (options.semanticMemoryEnabled === false) {
+		return {systemPrompt, memoryCount: 0};
+	}
+
 	try {
 		const projectContext = formatProjectContextWithCount(
 			await memoryFinder.findRelevantMemories(

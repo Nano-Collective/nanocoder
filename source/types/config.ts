@@ -407,4 +407,6 @@ export interface UserPreferences {
 	reasoningExpanded?: boolean;
 	compactToolDisplay?: boolean;
 	enablePromptScrubbing?: boolean;
+	/** Whether semantic memory is active. Default true to preserve existing behavior. */
+	semanticMemoryEnabled?: boolean;
 }
