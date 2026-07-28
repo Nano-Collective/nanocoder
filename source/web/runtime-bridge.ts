@@ -5,13 +5,44 @@ export interface WebRuntimeHandlers {
 	cancel: () => void;
 }
 
+export interface WebApprovalRequest {
+	toolName: string;
+	arguments: Record<string, unknown>;
+	context?: string;
+}
+
+export interface WebQuestionRequest {
+	question: string;
+	options: string[];
+	allowFreeform: boolean;
+}
+
 export interface WebRuntimeBridge {
 	handleClientEvent: (event: WebClientEvent) => Promise<void>;
 	bindRuntimeHandlers: (handlers: WebRuntimeHandlers) => () => void;
 	publishAssistantContent: (content: string) => void;
+	publishToolStarted: (id: string, name: string) => void;
+	publishToolFinished: (id: string, name: string, ok: boolean) => void;
+	hasActiveBrowserTurn: () => boolean;
+	requestApproval: (request: WebApprovalRequest) => Promise<boolean>;
+	requestQuestion: (request: WebQuestionRequest) => Promise<string>;
 	completeTurn: () => void;
 	failTurn: (error: unknown) => void;
+	handleDisconnect: () => void;
 }
+
+type PendingInteraction =
+	| {
+			id: string;
+			kind: 'approval';
+			resolve: (approved: boolean) => void;
+	  }
+	| {
+			id: string;
+			kind: 'question';
+			resolve: (answer: string) => void;
+			reject: (error: Error) => void;
+	  };
 
 export function createWebRuntimeBridge(
 	broadcastEvent: (event: WebServerEvent) => void,
@@ -19,10 +50,41 @@ export function createWebRuntimeBridge(
 	let runtimeHandlers: WebRuntimeHandlers | null = null;
 	let activeTurnId: string | null = null;
 	let previousAssistantContent = '';
+	let pendingInteraction: PendingInteraction | null = null;
+	let interactionCounter = 0;
 
 	const clearActiveTurn = () => {
 		activeTurnId = null;
 		previousAssistantContent = '';
+	};
+
+	const settlePendingInteraction = (options: {
+		denyApprovals: boolean;
+		rejectQuestions: boolean;
+		questionMessage?: string;
+	}) => {
+		const pending = pendingInteraction;
+		pendingInteraction = null;
+		if (!pending) {
+			return;
+		}
+
+		if (pending.kind === 'approval') {
+			pending.resolve(false);
+			return;
+		}
+
+		if (options.rejectQuestions) {
+			pending.reject(
+				new Error(
+					options.questionMessage ??
+						'The browser question was cancelled before an answer arrived.',
+				),
+			);
+			return;
+		}
+
+		pending.resolve('');
 	};
 
 	const completeActiveTurn = (expectedTurnId?: string) => {
@@ -30,6 +92,12 @@ export function createWebRuntimeBridge(
 			return;
 		}
 
+		settlePendingInteraction({
+			denyApprovals: true,
+			rejectQuestions: true,
+			questionMessage:
+				'The browser turn completed before the question was answered.',
+		});
 		broadcastEvent({type: 'turn_completed', id: activeTurnId});
 		clearActiveTurn();
 	};
@@ -39,6 +107,12 @@ export function createWebRuntimeBridge(
 			return;
 		}
 
+		settlePendingInteraction({
+			denyApprovals: true,
+			rejectQuestions: true,
+			questionMessage:
+				'The browser turn failed before the question was answered.',
+		});
 		broadcastEvent({
 			type: 'error',
 			message:
@@ -47,6 +121,11 @@ export function createWebRuntimeBridge(
 					: 'Nanocoder could not complete this turn.',
 		});
 		clearActiveTurn();
+	};
+
+	const nextInteractionId = (kind: 'approval' | 'question') => {
+		interactionCounter += 1;
+		return `browser-${kind}-${interactionCounter}`;
 	};
 
 	return {
@@ -59,11 +138,59 @@ export function createWebRuntimeBridge(
 				throw new Error('Nanocoder runtime is still starting.');
 			}
 
+			if (event.type === 'approval_response') {
+				if (!activeTurnId) {
+					throw new Error('No browser turn is waiting for approval.');
+				}
+
+				if (
+					!pendingInteraction ||
+					pendingInteraction.kind !== 'approval' ||
+					pendingInteraction.id !== event.id
+				) {
+					throw new Error(
+						'This approval response does not match a pending request.',
+					);
+				}
+
+				const pending = pendingInteraction;
+				pendingInteraction = null;
+				pending.resolve(event.approved);
+				return;
+			}
+
+			if (event.type === 'question_response') {
+				if (!activeTurnId) {
+					throw new Error('No browser turn is waiting for a question answer.');
+				}
+
+				if (
+					!pendingInteraction ||
+					pendingInteraction.kind !== 'question' ||
+					pendingInteraction.id !== event.id
+				) {
+					throw new Error(
+						'This question response does not match a pending request.',
+					);
+				}
+
+				const pending = pendingInteraction;
+				pendingInteraction = null;
+				pending.resolve(event.answer);
+				return;
+			}
+
 			if (event.type === 'cancel') {
 				if (!activeTurnId || event.id !== activeTurnId) {
 					throw new Error('This browser turn is no longer active.');
 				}
 
+				settlePendingInteraction({
+					denyApprovals: true,
+					rejectQuestions: true,
+					questionMessage:
+						'The browser turn was cancelled before the question was answered.',
+				});
 				runtimeHandlers.cancel();
 				return;
 			}
@@ -92,6 +219,12 @@ export function createWebRuntimeBridge(
 
 			return () => {
 				if (runtimeHandlers === handlers) {
+					settlePendingInteraction({
+						denyApprovals: true,
+						rejectQuestions: true,
+						questionMessage:
+							'The browser runtime was unbound before the question was answered.',
+					});
 					runtimeHandlers = null;
 				}
 			};
@@ -121,6 +254,83 @@ export function createWebRuntimeBridge(
 			}
 		},
 
+		publishToolStarted(id, name) {
+			if (!activeTurnId) {
+				return;
+			}
+
+			broadcastEvent({type: 'tool_started', id, name});
+		},
+
+		publishToolFinished(id, name, ok) {
+			if (!activeTurnId) {
+				return;
+			}
+
+			broadcastEvent({type: 'tool_finished', id, name, ok});
+		},
+
+		hasActiveBrowserTurn() {
+			return activeTurnId !== null;
+		},
+
+		requestApproval(request) {
+			if (!activeTurnId) {
+				return Promise.resolve(false);
+			}
+
+			if (pendingInteraction) {
+				return Promise.resolve(false);
+			}
+
+			const id = nextInteractionId('approval');
+			return new Promise<boolean>(resolve => {
+				pendingInteraction = {
+					id,
+					kind: 'approval',
+					resolve,
+				};
+				broadcastEvent({
+					type: 'approval_required',
+					id,
+					toolName: request.toolName,
+					arguments: sanitizeJsonRecord(request.arguments),
+					...(request.context ? {context: request.context} : {}),
+				});
+			});
+		},
+
+		requestQuestion(request) {
+			if (!activeTurnId) {
+				return Promise.reject(
+					new Error('No browser turn is active for this question.'),
+				);
+			}
+
+			if (pendingInteraction) {
+				return Promise.reject(
+					new Error('Another browser interaction is already pending.'),
+				);
+			}
+
+			const id = nextInteractionId('question');
+			return new Promise<string>((resolve, reject) => {
+				pendingInteraction = {
+					id,
+					kind: 'question',
+					resolve,
+					reject,
+				};
+				broadcastEvent({
+					type: 'question_required',
+					id,
+					question: request.question,
+					options: [...request.options],
+					allowFreeform: request.allowFreeform,
+				});
+			});
+		},
+
 		completeTurn() {
 			completeActiveTurn();
 		},
@@ -128,5 +338,24 @@ export function createWebRuntimeBridge(
 		failTurn(error) {
 			failActiveTurn(error);
 		},
+
+		handleDisconnect() {
+			settlePendingInteraction({
+				denyApprovals: true,
+				rejectQuestions: true,
+				questionMessage:
+					'The browser disconnected before the question was answered.',
+			});
+		},
 	};
+}
+
+function sanitizeJsonRecord(
+	value: Record<string, unknown>,
+): Record<string, unknown> {
+	try {
+		return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+	} catch {
+		return {};
+	}
 }

@@ -350,6 +350,73 @@ export function renderWebModePage(): string {
 			background: rgba(8, 9, 11, 0.26);
 			color: #beb7c7;
 		}
+		.message.interaction {
+			align-self: stretch;
+			width: min(760px, 100%);
+			border-color: rgba(125, 207, 255, 0.28);
+			background: rgba(36, 40, 59, 0.92);
+		}
+		.interaction-card {
+			display: grid;
+			gap: 12px;
+		}
+		.interaction-card pre {
+			margin: 0;
+			overflow-x: auto;
+			border: 1px solid var(--tn-border);
+			border-radius: 8px;
+			background: #12131c;
+			padding: 12px 14px;
+			font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+			font-size: 13px;
+			white-space: pre-wrap;
+		}
+		.interaction-actions,
+		.question-options {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 10px;
+		}
+		.interaction-actions button,
+		.question-options button {
+			min-height: 36px;
+			padding: 0 14px;
+			border: 1px solid rgba(125, 207, 255, 0.28);
+			border-radius: 8px;
+			background: rgba(125, 207, 255, 0.12);
+			color: #f5f2eb;
+			cursor: pointer;
+			font-size: 14px;
+			font-weight: 650;
+		}
+		.interaction-actions button[data-approved="false"] {
+			border-color: rgba(247, 118, 142, 0.35);
+			background: rgba(247, 118, 142, 0.12);
+		}
+		.interaction-actions button:disabled,
+		.question-options button:disabled,
+		.question-freeform button:disabled {
+			opacity: 0.55;
+			cursor: default;
+		}
+		.question-freeform {
+			display: grid;
+			gap: 8px;
+			grid-template-columns: minmax(0, 1fr) auto;
+		}
+		.question-freeform input {
+			min-height: 36px;
+			padding: 0 12px;
+			border: 1px solid var(--tn-border);
+			border-radius: 8px;
+			background: rgba(8, 9, 11, 0.35);
+			color: #f5f2eb;
+		}
+		.message.tool-status {
+			align-self: center;
+			width: min(760px, 100%);
+			border-style: dashed;
+		}
 		.empty-state {
 			position: absolute;
 			z-index: 2;
@@ -1150,6 +1217,150 @@ export function renderWebModePage(): string {
 			return true;
 		}
 
+			function formatToolArguments(args) {
+				try {
+					return JSON.stringify(args ?? {}, null, 2);
+				} catch {
+					return '{}';
+				}
+			}
+
+			function disableInteractionCard(card) {
+				for (const control of card.querySelectorAll('button, input')) {
+					control.disabled = true;
+				}
+			}
+
+			function renderApprovalCard(message) {
+				hideEmptyState();
+				const messageElement = document.createElement('div');
+				messageElement.className = 'message system interaction';
+				const card = document.createElement('div');
+				card.className = 'interaction-card';
+
+				const title = document.createElement('strong');
+				title.textContent = 'Approve tool: ' + message.toolName;
+				card.append(title);
+
+				if (message.context) {
+					const context = document.createElement('div');
+					context.className = 'meta';
+					context.textContent = message.context;
+					card.append(context);
+				}
+
+				const args = document.createElement('pre');
+				args.textContent = formatToolArguments(message.arguments);
+				card.append(args);
+
+				const actions = document.createElement('div');
+				actions.className = 'interaction-actions';
+				const approveButton = document.createElement('button');
+				approveButton.type = 'button';
+				approveButton.dataset.approved = 'true';
+				approveButton.textContent = 'Approve';
+				const denyButton = document.createElement('button');
+				denyButton.type = 'button';
+				denyButton.dataset.approved = 'false';
+				denyButton.textContent = 'Deny';
+				actions.append(approveButton, denyButton);
+				card.append(actions);
+				messageElement.append(card);
+				messageList.append(messageElement);
+				messageList.scrollTop = messageList.scrollHeight;
+
+				const respond = (approved) => {
+					disableInteractionCard(card);
+					const meta = document.createElement('div');
+					meta.className = 'meta';
+					meta.textContent = approved ? 'Approved' : 'Denied';
+					messageElement.append(meta);
+					sendClientEvent({
+						type: 'approval_response',
+						id: message.id,
+						approved,
+					});
+				};
+
+				approveButton.addEventListener('click', () => respond(true));
+				denyButton.addEventListener('click', () => respond(false));
+			}
+
+			function renderQuestionCard(message) {
+				hideEmptyState();
+				const messageElement = document.createElement('div');
+				messageElement.className = 'message system interaction';
+				const card = document.createElement('div');
+				card.className = 'interaction-card';
+
+				const title = document.createElement('strong');
+				title.textContent = message.question;
+				card.append(title);
+
+				const options = document.createElement('div');
+				options.className = 'question-options';
+				for (const option of message.options || []) {
+					const optionButton = document.createElement('button');
+					optionButton.type = 'button';
+					optionButton.textContent = option;
+					optionButton.addEventListener('click', () => {
+						disableInteractionCard(card);
+						const meta = document.createElement('div');
+						meta.className = 'meta';
+						meta.textContent = 'Answered';
+						messageElement.append(meta);
+						sendClientEvent({
+							type: 'question_response',
+							id: message.id,
+							answer: option,
+						});
+					});
+					options.append(optionButton);
+				}
+				card.append(options);
+
+				if (message.allowFreeform) {
+					const freeform = document.createElement('div');
+					freeform.className = 'question-freeform';
+					const input = document.createElement('input');
+					input.type = 'text';
+					input.placeholder = 'Type a custom answer';
+					input.autocomplete = 'off';
+					const answerButton = document.createElement('button');
+					answerButton.type = 'button';
+					answerButton.textContent = 'Send answer';
+					const submitFreeform = () => {
+						const answer = input.value.trim();
+						if (!answer) {
+							return;
+						}
+						disableInteractionCard(card);
+						const meta = document.createElement('div');
+						meta.className = 'meta';
+						meta.textContent = 'Answered';
+						messageElement.append(meta);
+						sendClientEvent({
+							type: 'question_response',
+							id: message.id,
+							answer,
+						});
+					};
+					answerButton.addEventListener('click', submitFreeform);
+					input.addEventListener('keydown', event => {
+						if (event.key === 'Enter') {
+							event.preventDefault();
+							submitFreeform();
+						}
+					});
+					freeform.append(input, answerButton);
+					card.append(freeform);
+				}
+
+				messageElement.append(card);
+				messageList.append(messageElement);
+				messageList.scrollTop = messageList.scrollHeight;
+			}
+
 		function handleServerEvent(message) {
 			if (message.type === 'ready') {
 				setStatus('Connected', 'connected');
@@ -1176,22 +1387,26 @@ export function renderWebModePage(): string {
 			}
 
 			if (message.type === 'tool_started') {
-				appendMessage('system', 'Tool started: ' + message.name);
+				appendMessage('system tool-status', 'Running tool: ' + message.name, 'In progress');
 				return;
 			}
 
 			if (message.type === 'tool_finished') {
-				appendMessage('system', 'Tool finished: ' + message.name, message.ok ? 'Completed' : 'Failed');
+				appendMessage(
+					'system tool-status',
+					'Tool finished: ' + message.name,
+					message.ok ? 'Completed' : 'Failed',
+				);
 				return;
 			}
 
 			if (message.type === 'approval_required') {
-				appendMessage('system', message.reason, 'Approval required');
+				renderApprovalCard(message);
 				return;
 			}
 
 			if (message.type === 'question_required') {
-				appendMessage('system', message.question, 'Question required');
+				renderQuestionCard(message);
 				return;
 			}
 
@@ -1317,7 +1532,10 @@ export function renderWebModePage(): string {
 			});
 
 			settingsButton.addEventListener('click', () => {
-				addSystemNotice('Provider, model, tools, and approvals are still owned by the terminal runtime in this phase.', 'Session settings');
+				addSystemNotice(
+					'Provider and model stay in the terminal runtime. During a browser turn, approvals and questions are answered here.',
+					'Session settings',
+				);
 			});
 
 			threadSearchInput.addEventListener('input', () => {

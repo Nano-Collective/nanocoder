@@ -603,6 +603,9 @@ async function main(): Promise<void> {
 			});
 			const webServer = await startLocalWebServer({
 				onClientEvent: webRuntimeBridge.handleClientEvent,
+				onAllClientsDisconnected: () => {
+					webRuntimeBridge?.handleDisconnect();
+				},
 			});
 			broadcastEvent = webServer.broadcastEvent;
 

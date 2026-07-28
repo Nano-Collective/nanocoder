@@ -18,6 +18,7 @@ export interface LocalWebServerOptions {
 	token?: string;
 	openBrowser?: boolean;
 	onClientEvent?: (event: WebClientEvent) => void | Promise<void>;
+	onAllClientsDisconnected?: () => void;
 }
 
 export interface LocalWebServer {
@@ -111,6 +112,9 @@ export async function startLocalWebServer(
 
 		clientSocket.on('close', () => {
 			connectedClients.delete(clientSocket);
+			if (connectedClients.size === 0) {
+				options.onAllClientsDisconnected?.();
+			}
 		});
 	});
 

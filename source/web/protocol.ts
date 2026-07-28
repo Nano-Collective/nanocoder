@@ -3,7 +3,9 @@ export const WEB_PROTOCOL_VERSION = 1;
 export type WebClientEvent =
 	| {type: 'hello'; protocolVersion: typeof WEB_PROTOCOL_VERSION}
 	| {type: 'user_message'; id: string; text: string}
-	| {type: 'cancel'; id: string};
+	| {type: 'cancel'; id: string}
+	| {type: 'approval_response'; id: string; approved: boolean}
+	| {type: 'question_response'; id: string; answer: string};
 
 export type WebServerEvent =
 	| {type: 'ready'; protocolVersion: typeof WEB_PROTOCOL_VERSION}
@@ -11,8 +13,20 @@ export type WebServerEvent =
 	| {type: 'assistant_delta'; id: string; text: string}
 	| {type: 'tool_started'; id: string; name: string}
 	| {type: 'tool_finished'; id: string; name: string; ok: boolean}
-	| {type: 'approval_required'; id: string; reason: string}
-	| {type: 'question_required'; id: string; question: string}
+	| {
+			type: 'approval_required';
+			id: string;
+			toolName: string;
+			arguments: Record<string, unknown>;
+			context?: string;
+	  }
+	| {
+			type: 'question_required';
+			id: string;
+			question: string;
+			options: string[];
+			allowFreeform: boolean;
+	  }
 	| {type: 'turn_completed'; id: string}
 	| {type: 'error'; message: string};
 
@@ -60,6 +74,34 @@ export function parseWebClientEvent(rawMessage: string): WebClientEvent {
 			return {
 				type: 'cancel',
 				id: parsed.id,
+			};
+		case 'approval_response':
+			if (typeof parsed.id !== 'string' || parsed.id.length === 0) {
+				throw new Error('Approval response id is required.');
+			}
+
+			if (typeof parsed.approved !== 'boolean') {
+				throw new Error('Approval response approved flag is required.');
+			}
+
+			return {
+				type: 'approval_response',
+				id: parsed.id,
+				approved: parsed.approved,
+			};
+		case 'question_response':
+			if (typeof parsed.id !== 'string' || parsed.id.length === 0) {
+				throw new Error('Question response id is required.');
+			}
+
+			if (typeof parsed.answer !== 'string') {
+				throw new Error('Question response answer is required.');
+			}
+
+			return {
+				type: 'question_response',
+				id: parsed.id,
+				answer: parsed.answer,
 			};
 		default:
 			throw new Error(`Unsupported web event type: ${parsed.type}.`);

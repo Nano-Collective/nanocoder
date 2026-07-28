@@ -11,10 +11,12 @@ import {
 	type PendingToolConfirmation,
 	setGlobalToolConfirmHandler,
 } from '@/utils/tool-confirm-queue';
+import type {WebRuntimeBridge} from '@/web/runtime-bridge';
 
 interface UseGlobalHandlerQueuesProps {
 	setPendingQuestion: (question: PendingQuestion | null) => void;
 	setIsQuestionMode: (mode: boolean) => void;
+	webRuntimeBridge?: WebRuntimeBridge;
 }
 
 interface GlobalHandlerQueues {
@@ -30,6 +32,9 @@ interface GlobalHandlerQueues {
  *  - question-queue (ask_question tool) drives the question prompt UI
  *  - tool-approval-queue (subagent tool calls) drives a parallel approval flow
  *
+ * During an active browser-owned turn, requests route through the web runtime
+ * bridge instead of the terminal Ink prompts so the browser can resolve them.
+ *
  * The tool-approval queue uses a dedicated state slot so it doesn't conflict
  * with the main agent's tool confirmation flow — a subagent's tool can need
  * approval while the parent agent is mid-conversation.
@@ -37,11 +42,23 @@ interface GlobalHandlerQueues {
 export function useGlobalHandlerQueues({
 	setPendingQuestion,
 	setIsQuestionMode,
+	webRuntimeBridge,
 }: UseGlobalHandlerQueuesProps): GlobalHandlerQueues {
 	const questionResolverRef = useRef<((answer: string) => void) | null>(null);
+	const webRuntimeBridgeRef = useRef(webRuntimeBridge);
+	webRuntimeBridgeRef.current = webRuntimeBridge;
 
 	useEffect(() => {
 		setGlobalQuestionHandler((question: PendingQuestion) => {
+			const bridge = webRuntimeBridgeRef.current;
+			if (bridge?.hasActiveBrowserTurn()) {
+				return bridge.requestQuestion({
+					question: question.question,
+					options: question.options,
+					allowFreeform: question.allowFreeform,
+				});
+			}
+
 			return new Promise<string>(resolve => {
 				questionResolverRef.current = resolve;
 				setPendingQuestion(question);
@@ -70,6 +87,15 @@ export function useGlobalHandlerQueues({
 
 	useEffect(() => {
 		setGlobalToolApprovalHandler((approval: PendingToolApproval) => {
+			const bridge = webRuntimeBridgeRef.current;
+			if (bridge?.hasActiveBrowserTurn()) {
+				return bridge.requestApproval({
+					toolName: approval.toolCall.function.name,
+					arguments: approval.toolCall.function.arguments,
+					context: `Subagent: ${approval.subagentName}`,
+				});
+			}
+
 			return new Promise<boolean>(resolve => {
 				toolApprovalResolverRef.current = resolve;
 				setPendingSubagentApproval(approval);
@@ -97,6 +123,14 @@ export function useGlobalHandlerQueues({
 
 	useEffect(() => {
 		setGlobalToolConfirmHandler((confirmation: PendingToolConfirmation) => {
+			const bridge = webRuntimeBridgeRef.current;
+			if (bridge?.hasActiveBrowserTurn()) {
+				return bridge.requestApproval({
+					toolName: confirmation.toolCall.function.name,
+					arguments: confirmation.toolCall.function.arguments,
+				});
+			}
+
 			return new Promise<boolean>(resolve => {
 				toolConfirmResolverRef.current = resolve;
 				setPendingToolConfirmation(confirmation);

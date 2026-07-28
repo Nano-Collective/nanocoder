@@ -145,3 +145,132 @@ test('web runtime bridge cleanup does not remove a newer handler binding', async
 
 	t.deepEqual(submittedMessages, ['second:hello']);
 });
+
+test('web runtime bridge resolves matching approval responses during a browser turn', async t => {
+	const events: WebServerEvent[] = [];
+	const bridge = createWebRuntimeBridge(event => {
+		events.push(event);
+	});
+	bridge.bindRuntimeHandlers({
+		submitMessage: () => new Promise<void>(() => {}),
+		cancel: () => {},
+	});
+
+	await bridge.handleClientEvent(userMessage('turn-1'));
+	const approvalPromise = bridge.requestApproval({
+		toolName: 'write_file',
+		arguments: {path: 'README.md'},
+		context: 'Subagent: researcher',
+	});
+
+	t.like(events.at(-1), {
+		type: 'approval_required',
+		toolName: 'write_file',
+		arguments: {path: 'README.md'},
+		context: 'Subagent: researcher',
+	});
+
+	const approvalEvent = events.at(-1);
+	if (!approvalEvent || approvalEvent.type !== 'approval_required') {
+		t.fail('expected approval_required event');
+		return;
+	}
+
+	await bridge.handleClientEvent({
+		type: 'approval_response',
+		id: approvalEvent.id,
+		approved: true,
+	});
+
+	t.true(await approvalPromise);
+	await t.throwsAsync(
+		bridge.handleClientEvent({
+			type: 'approval_response',
+			id: approvalEvent.id,
+			approved: false,
+		}),
+		{message: 'This approval response does not match a pending request.'},
+	);
+});
+
+test('web runtime bridge rejects stale question responses and clears on cancel', async t => {
+	const events: WebServerEvent[] = [];
+	let cancelCount = 0;
+	const bridge = createWebRuntimeBridge(event => {
+		events.push(event);
+	});
+	bridge.bindRuntimeHandlers({
+		submitMessage: () => new Promise<void>(() => {}),
+		cancel: () => {
+			cancelCount++;
+		},
+	});
+
+	await bridge.handleClientEvent(userMessage('turn-1'));
+	const questionPromise = bridge.requestQuestion({
+		question: 'Which approach?',
+		options: ['A', 'B'],
+		allowFreeform: true,
+	});
+
+	const questionEvent = events.at(-1);
+	if (!questionEvent || questionEvent.type !== 'question_required') {
+		t.fail('expected question_required event');
+		return;
+	}
+
+	await t.throwsAsync(
+		bridge.handleClientEvent({
+			type: 'question_response',
+			id: 'stale-id',
+			answer: 'A',
+		}),
+		{message: 'This question response does not match a pending request.'},
+	);
+
+	await bridge.handleClientEvent({type: 'cancel', id: 'turn-1'});
+	await t.throwsAsync(questionPromise, {
+		message: 'The browser turn was cancelled before the question was answered.',
+	});
+	t.is(cancelCount, 1);
+});
+
+test('web runtime bridge publishes tool lifecycle only during an active browser turn', async t => {
+	const events: WebServerEvent[] = [];
+	const bridge = createWebRuntimeBridge(event => {
+		events.push(event);
+	});
+	bridge.bindRuntimeHandlers({
+		submitMessage: () => new Promise<void>(() => {}),
+		cancel: () => {},
+	});
+
+	bridge.publishToolStarted('tool-1', 'read_file');
+	t.deepEqual(events, []);
+
+	await bridge.handleClientEvent(userMessage('turn-1'));
+	bridge.publishToolStarted('tool-1', 'read_file');
+	bridge.publishToolFinished('tool-1', 'read_file', true);
+
+	t.deepEqual(events, [
+		{type: 'tool_started', id: 'tool-1', name: 'read_file'},
+		{type: 'tool_finished', id: 'tool-1', name: 'read_file', ok: true},
+	]);
+});
+
+test('web runtime bridge denies pending approval on disconnect', async t => {
+	const bridge = createWebRuntimeBridge(() => {});
+	bridge.bindRuntimeHandlers({
+		submitMessage: () => new Promise<void>(() => {}),
+		cancel: () => {},
+	});
+
+	await bridge.handleClientEvent(userMessage('turn-1'));
+	const approvalPromise = bridge.requestApproval({
+		toolName: 'execute_bash',
+		arguments: {command: 'ls'},
+	});
+	bridge.handleDisconnect();
+
+	t.false(await approvalPromise);
+});
