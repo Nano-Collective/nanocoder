@@ -175,6 +175,12 @@ importers:
       typescript:
         specifier: ^5.0.3
         version: 5.9.3
+    optionalDependencies:
+      '@nanocollective/nanocoder-voice':
+        specifier: workspace:*
+        version: link:plugins/voice
+
+  plugins/voice: {}
 
   plugins/vscode:
     dependencies:
@@ -4926,7 +4932,7 @@ snapshots:
     dependencies:
       '@types/estree': 1.0.9
       estree-walker: 2.0.2
-      picomatch: 4.0.4
+      picomatch: 4.0.5
 
   '@sec-ant/readable-stream@0.4.1': {}
 

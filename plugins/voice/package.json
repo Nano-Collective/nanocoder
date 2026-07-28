@@ -1,0 +1,14 @@
+{
+	"name": "@nanocollective/nanocoder-voice",
+	"version": "0.1.0",
+	"description": "Local audio I/O and ML (STT/TTS) bindings for Nanocoder",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"scripts": {
+		"build": "tsc",
+		"test:ava": "ava",
+		"lint": "biome lint .",
+		"format": "biome check --write ."
+	}
+}
