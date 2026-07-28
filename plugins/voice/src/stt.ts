@@ -11,16 +11,18 @@ const MAX_OUTPUT_BYTES = 1024 * 1024; // 1MB limit for safety
  * @param timeoutMs Maximum time to wait in milliseconds (defaults to 60000)
  * @returns The transcribed text
  */
-export async function transcribeAudio(filePath: string, timeoutMs = 60000): Promise<string> {
+export async function transcribeAudio(filePath: string, timeoutMs = 60000, signal?: AbortSignal): Promise<string> {
 	return new Promise((resolve, reject) => {
+		if (signal?.aborted) {
+			return reject(new Error('AbortError: Transcription aborted'));
+		}
+
 		const command = process.env.WHISPER_CMD || 'whisper-cli';
 		const modelPath = process.env.WHISPER_MODEL || 'ggml-base.en.bin';
 		
 		const args = ['-m', modelPath, '-f', filePath, '-nt']; // -nt disables timestamps
 
-		const isWindows = platform === 'win32';
 		const proc = cp.spawn(command, args, { 
-			detached: !isWindows,
 			stdio: ['ignore', 'pipe', 'ignore'] 
 		});
 
@@ -28,7 +30,17 @@ export async function transcribeAudio(filePath: string, timeoutMs = 60000): Prom
 		if (timeoutMs > 0) {
 			timeoutId = setTimeout(() => {
 				proc.kill('SIGTERM');
+				reject(new Error(`Transcription timed out after ${timeoutMs}ms`));
 			}, timeoutMs);
+		}
+
+		const abortHandler = () => {
+			proc.kill('SIGTERM');
+			reject(new Error('AbortError: Transcription aborted'));
+		};
+
+		if (signal) {
+			signal.addEventListener('abort', abortHandler);
 		}
 
 		let output = '';
@@ -51,6 +63,7 @@ export async function transcribeAudio(filePath: string, timeoutMs = 60000): Prom
 
 		proc.on('close', (code) => {
 			if (timeoutId) clearTimeout(timeoutId);
+			if (signal) signal.removeEventListener('abort', abortHandler);
 			if (code === 0 || code === null) {
 				resolve(output.trim());
 			} else {
@@ -60,6 +73,7 @@ export async function transcribeAudio(filePath: string, timeoutMs = 60000): Prom
 
 		proc.on('error', (err) => {
 			if (timeoutId) clearTimeout(timeoutId);
+			if (signal) signal.removeEventListener('abort', abortHandler);
 			reject(new Error(`Failed to start Whisper STT (${command}): ${err.message}`));
 		});
 	});

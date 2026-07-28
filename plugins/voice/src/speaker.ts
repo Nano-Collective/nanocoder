@@ -7,8 +7,12 @@ import { platform } from 'node:process';
  * 
  * @param filePath The path to the audio file to play.
  */
-export async function playAudio(filePath: string): Promise<void> {
+export async function playAudio(filePath: string, timeoutMs?: number, signal?: AbortSignal): Promise<void> {
 	return new Promise((resolve, reject) => {
+		if (signal?.aborted) {
+			return reject(new Error('AbortError: Playback aborted'));
+		}
+
 		let command = process.env.PLAY_CMD || 'play'; // default to sox
 		const args = [filePath];
 
@@ -29,7 +33,26 @@ export async function playAudio(filePath: string): Promise<void> {
 
 		const proc = cp.spawn(command, args, { stdio: 'ignore' });
 
+		let timeoutId: NodeJS.Timeout | undefined;
+		if (timeoutMs && timeoutMs > 0) {
+			timeoutId = setTimeout(() => {
+				proc.kill('SIGTERM');
+				reject(new Error(`Playback timed out after ${timeoutMs}ms`));
+			}, timeoutMs);
+		}
+
+		const abortHandler = () => {
+			proc.kill('SIGTERM');
+			reject(new Error('AbortError: Playback aborted'));
+		};
+
+		if (signal) {
+			signal.addEventListener('abort', abortHandler);
+		}
+
 		proc.on('close', (code) => {
+			if (timeoutId) clearTimeout(timeoutId);
+			if (signal) signal.removeEventListener('abort', abortHandler);
 			if (code === 0 || code === null) {
 				resolve();
 			} else {
@@ -38,6 +61,8 @@ export async function playAudio(filePath: string): Promise<void> {
 		});
 
 		proc.on('error', (err) => {
+			if (timeoutId) clearTimeout(timeoutId);
+			if (signal) signal.removeEventListener('abort', abortHandler);
 			reject(new Error(`Failed to start audio playback process (${command}): ${err.message}`));
 		});
 	});
