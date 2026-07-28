@@ -57,6 +57,12 @@ export class AcpProcessManager {
 		// Run in the workspace folder: the extension host's own cwd is `/`,
 		// which is unwritable and crashes the CLI's startup (.nanocoder dir).
 		const env = await resolveSpawnEnv();
+		if (cliPath && cliPath.includes(require('path').sep)) {
+			// Ensure the directory of the CLI is at the front of PATH, so 'node' can be found
+			// if it's installed alongside it (e.g. in NVM or Volta bin directories)
+			const cliDir = require('path').dirname(cliPath);
+			env.PATH = env.PATH ? `${cliDir}${require('path').delimiter}${env.PATH}` : cliDir;
+		}
 		
 		// Fallbacks: configured cwd -> workspace folder -> user homedir -> process cwd
 		const cwdSetting = config.get<string>('cwd') || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir() || process.cwd();
