@@ -11,7 +11,7 @@ import {
 	transcribeAudio,
 	synthesizeSpeech,
 	playPhrase,
-} from './index.ts';
+} from './index.js';
 
 const isWin = platform === 'win32';
 const ext = isWin ? '.bat' : '.sh';
