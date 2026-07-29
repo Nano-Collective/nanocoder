@@ -7,6 +7,7 @@ import {ClientSideConnection, ndJsonStream} from '@agentclientprotocol/sdk';
 import {AcpStateManager, ACPStatus} from './acp-state';
 import {NanocoderAcpClient} from './acp-client';
 import {findCliPath, nodeExistsAlongside, promptInstallCli, resolveSpawnEnv} from './cli-discovery';
+import {planCliSpawn} from './cli-path-discovery';
 
 export class AcpProcessManager {
 	private childProcess: cp.ChildProcess | null = null;
@@ -26,6 +27,23 @@ export class AcpProcessManager {
 	}
 
 	async start(): Promise<void> {
+		// Nothing awaits start(), so an exception here would surface as an
+		// unhandled rejection: no log line, no status change, and a UI stuck on
+		// "Connecting". cp.spawn throws synchronously for an unspawnable path
+		// (a .cmd without a shell on Windows), which is exactly that case.
+		try {
+			await this.launch();
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this.outputChannel.appendLine(`Failed to start ACP process: ${message}`);
+			this.stateManager.setStatus(ACPStatus.Disconnected);
+			vscode.window.showErrorMessage(
+				`Could not start the Nanocoder CLI: ${message}. See the Nanocoder output channel for details.`
+			);
+		}
+	}
+
+	private async launch(): Promise<void> {
 		this.stateManager.setStatus(ACPStatus.Connecting);
 
 		const config = vscode.workspace.getConfiguration('nanocoder');
@@ -70,14 +88,16 @@ export class AcpProcessManager {
 		
 		// Fallbacks: configured cwd -> workspace folder -> user homedir -> process cwd
 		const cwdSetting = config.get<string>('cwd') || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir() || process.cwd();
-		const spawnOptions: cp.SpawnOptions = { shell: false, env, cwd: cwdSetting };
-
-		if (cliPath.startsWith('node ')) {
-			const scriptPath = cliPath.substring(5);
-			this.childProcess = cp.spawn('node', [scriptPath, '--acp'], spawnOptions);
-		} else {
-			this.childProcess = cp.spawn(cliPath, ['--acp'], spawnOptions);
+		// On Windows the discovered path is usually an npm/pnpm shim, which
+		// cannot be spawned directly - see planCliSpawn.
+		const plan = planCliSpawn(cliPath, ['--acp']);
+		if (plan.command !== cliPath) {
+			this.outputChannel.appendLine(
+				`Resolved launch command: ${plan.command} ${plan.args.join(' ')}${plan.shell ? ' (via shell)' : ''}`
+			);
 		}
+		const spawnOptions: cp.SpawnOptions = { shell: plan.shell, env, cwd: cwdSetting };
+		this.childProcess = cp.spawn(plan.command, plan.args, spawnOptions);
 
 		if (!this.childProcess.stdout || !this.childProcess.stdin) {
 			this.outputChannel.appendLine('Failed to attach to child process stdio.');

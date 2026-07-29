@@ -9,7 +9,27 @@ import {
 	discoverCliPath,
 	findFirstExisting,
 	nodeExistsAlongside,
+	pickWindowsExecutable,
+	planCliSpawn,
+	resolveShimScript,
 } from './cli-path-discovery';
+
+/** Run `fn` with `process.platform` stubbed, restoring it afterwards. */
+function withPlatform<T>(platform: NodeJS.Platform, fn: () => T): T {
+	const original = process.platform;
+	Object.defineProperty(process, 'platform', {
+		value: platform,
+		configurable: true,
+	});
+	try {
+		return fn();
+	} finally {
+		Object.defineProperty(process, 'platform', {
+			value: original,
+			configurable: true,
+		});
+	}
+}
 
 // ---------------------------------------------------------------------------
 // buildFallbackCandidates
@@ -217,5 +237,257 @@ test('buildFallbackCandidates includes nanocoder.cmd entries on win32', (t) => {
 		);
 	} finally {
 		Object.defineProperty(process, 'platform', { value: origPlatform, configurable: true });
+	}
+});
+
+// ---------------------------------------------------------------------------
+// pickWindowsExecutable
+// ---------------------------------------------------------------------------
+
+test('pickWindowsExecutable prefers the .cmd over the extensionless shim', (t) => {
+	// This is the order `where.exe nanocoder` actually reports for an npm
+	// global install: the unexecutable POSIX shim comes first.
+	const picked = pickWindowsExecutable([
+		'C:\\Users\\test\\AppData\\Roaming\\npm\\nanocoder',
+		'C:\\Users\\test\\AppData\\Roaming\\npm\\nanocoder.cmd',
+		'C:\\Users\\test\\AppData\\Roaming\\npm\\nanocoder.ps1',
+	]);
+	t.is(picked, 'C:\\Users\\test\\AppData\\Roaming\\npm\\nanocoder.cmd');
+});
+
+test('pickWindowsExecutable prefers .exe over .cmd', (t) => {
+	const picked = pickWindowsExecutable([
+		'C:\\bin\\nanocoder.cmd',
+		'C:\\bin\\nanocoder.exe',
+	]);
+	t.is(picked, 'C:\\bin\\nanocoder.exe');
+});
+
+test('pickWindowsExecutable falls back to an extensionless match', (t) => {
+	t.is(pickWindowsExecutable(['C:\\bin\\nanocoder']), 'C:\\bin\\nanocoder');
+});
+
+test('pickWindowsExecutable strips the CR from where.exe output', (t) => {
+	const picked = pickWindowsExecutable([
+		'C:\\bin\\nanocoder\r',
+		'C:\\bin\\nanocoder.cmd\r',
+	]);
+	t.is(picked, 'C:\\bin\\nanocoder.cmd');
+});
+
+test('pickWindowsExecutable returns null for no usable lines', (t) => {
+	t.is(pickWindowsExecutable([]), null);
+	t.is(pickWindowsExecutable(['', '   ']), null);
+});
+
+// ---------------------------------------------------------------------------
+// resolveShimScript
+// ---------------------------------------------------------------------------
+
+/** Build a temp dir holding a shim plus the entrypoint it points at. */
+function makeShimFixture(
+	shimName: string,
+	shimBody: (relativeScript: string) => string,
+	options: {createScript?: boolean} = {},
+) {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocoder-shim-'));
+	const scriptDir = path.join(
+		dir,
+		'node_modules',
+		'@nanocollective',
+		'nanocoder',
+		'dist',
+	);
+	const script = path.join(scriptDir, 'cli.js');
+	if (options.createScript !== false) {
+		fs.mkdirSync(scriptDir, {recursive: true});
+		fs.writeFileSync(script, '#!/usr/bin/env node\n');
+	}
+	const shim = path.join(dir, shimName);
+	fs.writeFileSync(
+		shim,
+		shimBody('node_modules\\@nanocollective\\nanocoder\\dist\\cli.js'),
+	);
+	return {dir, shim, script};
+}
+
+test('resolveShimScript resolves the entrypoint from an npm .cmd shim', (t) => {
+	const {dir, shim, script} = makeShimFixture(
+		'nanocoder.cmd',
+		(rel) => [
+			'@ECHO off',
+			'GOTO start',
+			':find_dp0',
+			'SET dp0=%~dp0',
+			'EXIT /b',
+			':start',
+			'SETLOCAL',
+			'CALL :find_dp0',
+			'IF EXIST "%dp0%\\node.exe" (',
+			'  SET "_prog=%dp0%\\node.exe"',
+			') ELSE (',
+			'  SET "_prog=node"',
+			'  SET PATHEXT=%PATHEXT:;.JS;=;%',
+			')',
+			`endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\${rel}" %*`,
+		].join('\r\n'),
+	);
+	try {
+		t.is(resolveShimScript(shim), script);
+	} finally {
+		fs.rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test('resolveShimScript resolves the entrypoint from a POSIX shim', (t) => {
+	const {dir, shim, script} = makeShimFixture('nanocoder', (rel) => {
+		const posix = rel.split('\\').join('/');
+		return [
+			'#!/bin/sh',
+			'basedir=$(dirname "$(echo "$0" | sed -e \'s,\\\\,/,g\')")',
+			'if [ -x "$basedir/node" ]; then',
+			`  exec "$basedir/node"  "$basedir/${posix}" "$@"`,
+			'else',
+			`  exec node  "$basedir/${posix}" "$@"`,
+			'fi',
+		].join('\n');
+	});
+	try {
+		t.is(resolveShimScript(shim), script);
+	} finally {
+		fs.rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test('resolveShimScript returns null when the entrypoint is missing', (t) => {
+	const {dir, shim} = makeShimFixture(
+		'nanocoder.cmd',
+		(rel) => `"%_prog%"  "%dp0%\\${rel}" %*`,
+		{createScript: false},
+	);
+	try {
+		t.is(resolveShimScript(shim), null);
+	} finally {
+		fs.rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test('resolveShimScript returns null for a real script, not a shim', (t) => {
+	// This is what npm leaves on unix: a symlink straight to dist/cli.js, whose
+	// contents carry no shim marker, so direct spawn stays the right call.
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocoder-noshim-'));
+	const binary = path.join(dir, 'nanocoder');
+	fs.writeFileSync(binary, '#!/usr/bin/env node\nconsole.log("hi");\n');
+	try {
+		t.is(resolveShimScript(binary), null);
+	} finally {
+		fs.rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test('resolveShimScript passes through an existing .js path', (t) => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocoder-js-'));
+	const script = path.join(dir, 'cli.js');
+	fs.writeFileSync(script, '');
+	try {
+		t.is(resolveShimScript(script), script);
+		t.is(resolveShimScript(path.join(dir, 'missing.js')), null);
+	} finally {
+		fs.rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test('resolveShimScript returns null for a nonexistent path', (t) => {
+	t.is(resolveShimScript('/unlikely/path/nanocoder.cmd'), null);
+});
+
+// ---------------------------------------------------------------------------
+// planCliSpawn
+// ---------------------------------------------------------------------------
+
+test('planCliSpawn handles the local-development node <script> form', (t) => {
+	t.deepEqual(planCliSpawn('node /repo/dist/cli.js', ['--acp']), {
+		command: 'node',
+		args: ['/repo/dist/cli.js', '--acp'],
+		shell: false,
+	});
+});
+
+test('planCliSpawn spawns a unix binary directly', (t) => {
+	const plan = withPlatform('darwin', () =>
+		planCliSpawn('/usr/local/bin/nanocoder', ['--acp']),
+	);
+	t.deepEqual(plan, {
+		command: '/usr/local/bin/nanocoder',
+		args: ['--acp'],
+		shell: false,
+	});
+});
+
+test('planCliSpawn runs a resolvable Windows shim through node', (t) => {
+	const {dir, shim, script} = makeShimFixture(
+		'nanocoder.cmd',
+		(rel) => `"%_prog%"  "%dp0%\\${rel}" %*`,
+	);
+	try {
+		const plan = withPlatform('win32', () => planCliSpawn(shim, ['--acp']));
+		t.deepEqual(plan, {
+			command: 'node',
+			args: [script, '--acp'],
+			shell: false,
+		});
+	} finally {
+		fs.rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test('planCliSpawn shells out for an unresolvable .cmd, quoting the path', (t) => {
+	const plan = withPlatform('win32', () =>
+		planCliSpawn('C:\\Users\\First Last\\npm\\nanocoder.cmd', ['--acp']),
+	);
+	t.deepEqual(plan, {
+		command: '"C:\\Users\\First Last\\npm\\nanocoder.cmd"',
+		args: ['--acp'],
+		shell: true,
+	});
+});
+
+test('planCliSpawn refuses to shell-spawn a path containing a quote', (t) => {
+	t.throws(
+		() =>
+			withPlatform('win32', () =>
+				planCliSpawn('C:\\evil"&calc&".cmd', ['--acp']),
+			),
+		{message: /double quote/},
+	);
+});
+
+test('planCliSpawn leaves a unix pnpm shim alone', (t) => {
+	// The shim would resolve, but unix has always spawned it directly and its
+	// shebang works, so nothing should change there.
+	const {dir, shim} = makeShimFixture('nanocoder', (rel) => {
+		const posix = rel.split('\\').join('/');
+		return `#!/bin/sh\nexec node  "$basedir/${posix}" "$@"\n`;
+	});
+	try {
+		const plan = withPlatform('linux', () => planCliSpawn(shim, ['--acp']));
+		t.deepEqual(plan, {command: shim, args: ['--acp'], shell: false});
+	} finally {
+		fs.rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test('resolveShimScript refuses a target outside the shim directory', (t) => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocoder-escape-'));
+	const outside = path.join(dir, 'outside.js');
+	const binDir = path.join(dir, 'bin');
+	fs.mkdirSync(binDir);
+	fs.writeFileSync(outside, '');
+	const shim = path.join(binDir, 'nanocoder.cmd');
+	fs.writeFileSync(shim, '"%_prog%"  "%dp0%\\..\\outside.js" %*');
+	try {
+		t.is(resolveShimScript(shim), null);
+	} finally {
+		fs.rmSync(dir, {recursive: true, force: true});
 	}
 });
