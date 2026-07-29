@@ -7,6 +7,7 @@ import {
 	parseCustomCommandArgs,
 } from './app-util.js';
 import {lazyCommands} from '@/commands/lazy-registry';
+import BashProgress from '@/components/bash-progress';
 import type {MessageSubmissionOptions} from '@/types/index';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
@@ -328,6 +329,30 @@ function createResumeTestOptions(overrides: {
 		onCommandComplete: overrides.onCommandComplete,
 	};
 }
+
+// --- Direct !command handling ---
+
+test.serial('bash command - queues a completed BashProgress with showOutput', async t => {
+	let queued: React.ReactNode = null;
+	const options = createResumeTestOptions({
+		onAddToChatQueue: component => {
+			queued = component;
+		},
+	});
+
+	await handleMessageSubmission('!printf DIRECT_BASH_OUTPUT', options);
+
+	t.true(React.isValidElement(queued));
+	const element = queued as React.ReactElement<{
+		showOutput?: boolean;
+		completedState?: {fullOutput: string};
+	}>;
+	t.is(element.type, BashProgress);
+	// User-typed !commands must render their captured output in the transcript;
+	// model-invoked execute_bash renders stay compact (no showOutput)
+	t.true(element.props.showOutput);
+	t.is(element.props.completedState?.fullOutput.trim(), 'DIRECT_BASH_OUTPUT');
+});
 
 test.serial('chat message - forwards displayValue to onHandleChatMessage so the bubble keeps [@file] placeholders', async t => {
 	// Regression: an @-mentioned file used to dump its full contents into the
