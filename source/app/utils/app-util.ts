@@ -166,6 +166,7 @@ async function handleBashCommand(
 				executionId,
 				command: bashCommand,
 				completedState: result,
+				showOutput: true,
 			}),
 		);
 

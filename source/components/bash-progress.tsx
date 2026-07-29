@@ -2,7 +2,7 @@ import {Box, Text} from 'ink';
 import {useEffect, useState} from 'react';
 
 import ToolMessage from '@/components/tool-message';
-import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
+import {BASH_OUTPUT_DISPLAY_LINES, TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {useTheme} from '@/hooks/useTheme';
 import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
 import {calculateTokens} from '@/utils/token-calculator';
@@ -14,6 +14,9 @@ interface BashProgressProps {
 	completedState?: BashExecutionState;
 	/** If true, renders with reduced margins for live display */
 	isLive?: boolean;
+	/** If true, renders the captured output once the command completes.
+	 * Used for user-typed !commands; model tool calls stay compact. */
+	showOutput?: boolean;
 }
 
 export default function BashProgress({
@@ -21,6 +24,7 @@ export default function BashProgress({
 	command,
 	completedState,
 	isLive = false,
+	showOutput = false,
 }: BashProgressProps) {
 	const {colors} = useTheme();
 
@@ -86,6 +90,25 @@ export default function BashProgress({
 			: totalOutput;
 	const estimatedTokens = calculateTokens(truncatedOutput);
 
+	// Completed output for user-typed !commands. Mirrors the error/stderr-first
+	// ordering of formatBashResultForLLM, tail-capped so a verbose command
+	// can't flood the static transcript (the model still receives the full,
+	// separately-truncated output).
+	let displayedOutput = '';
+	let hiddenLineCount = 0;
+	if (showOutput && state.isComplete) {
+		const sections = [
+			state.error ? `Error: ${state.error}` : '',
+			state.stderr ? `Stderr:\n${state.stderr.trimEnd()}` : '',
+			state.fullOutput
+				? `${state.stderr ? 'Stdout:\n' : ''}${state.fullOutput.trimEnd()}`
+				: '',
+		].filter(Boolean);
+		const lines = sections.join('\n').split('\n');
+		hiddenLineCount = Math.max(0, lines.length - BASH_OUTPUT_DISPLAY_LINES);
+		displayedOutput = lines.slice(-BASH_OUTPUT_DISPLAY_LINES).join('\n');
+	}
+
 	const messageContent = (
 		<Box flexDirection="column">
 			<Text color={colors.tool}>⚒ execute_bash</Text>
@@ -107,6 +130,19 @@ export default function BashProgress({
 				<Box flexDirection="column">
 					<Text color={colors.secondary}>Output: </Text>
 					<Text color={colors.text}>{state.outputPreview}</Text>
+				</Box>
+			)}
+
+			{state.isComplete && displayedOutput && (
+				<Box flexDirection="column">
+					{hiddenLineCount > 0 && (
+						<Text color={colors.secondary}>
+							… (+{hiddenLineCount} earlier lines)
+						</Text>
+					)}
+					<Text wrap="wrap" color={colors.text}>
+						{displayedOutput}
+					</Text>
 				</Box>
 			)}
 
