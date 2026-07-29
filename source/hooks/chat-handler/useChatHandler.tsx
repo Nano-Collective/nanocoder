@@ -3,6 +3,7 @@ import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt
 import {ConversationStateManager} from '@/app/utils/conversation-state';
 import UserMessage from '@/components/user-message';
 import {getAppConfig} from '@/config/index';
+import {getSemanticMemoryEnabled} from '@/config/preferences';
 import {CommandIntegration} from '@/custom-commands/command-integration';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
@@ -371,7 +372,10 @@ export function useChatHandler({
 				systemPrompt,
 				message,
 				projectMemoryFinder,
-				projectContextOptions,
+				{
+					...projectContextOptions,
+					semanticMemoryEnabled: getSemanticMemoryEnabled(),
+				},
 			);
 			systemPrompt = projectContext.systemPrompt;
 			setLastBuiltPrompt(systemPrompt);

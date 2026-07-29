@@ -192,3 +192,20 @@ export function updatePrivacyPreference(value: boolean): void {
 	preferences.enablePromptScrubbing = value;
 	savePreferences(preferences);
 }
+
+/**
+ * Get the semantic memory preference from preferences
+ */
+export function getSemanticMemoryEnabled(): boolean {
+	const preferences = loadPreferences();
+	return preferences.semanticMemoryEnabled ?? true;
+}
+
+/**
+ * Save the semantic memory preference
+ */
+export function updateSemanticMemoryEnabled(value: boolean): void {
+	const preferences = loadPreferences();
+	preferences.semanticMemoryEnabled = value;
+	savePreferences(preferences);
+}

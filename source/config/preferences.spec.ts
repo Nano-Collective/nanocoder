@@ -9,6 +9,7 @@ import {
 	getNotificationsPreference,
 	getPasteThreshold,
 	getReasoningExpanded,
+	getSemanticMemoryEnabled,
 	loadPreferences,
 	resetPreferencesCache,
 	savePreferences,
@@ -18,6 +19,7 @@ import {
 	updateNotificationsPreference,
 	updatePasteThreshold,
 	updateReasoningExpanded,
+	updateSemanticMemoryEnabled,
 	getPrivacyPreference,
 	updatePrivacyPreference,
 } from './preferences';
@@ -1556,6 +1558,57 @@ test.serial('full workflow: update and retrieve privacy preference', t => {
 		updatePrivacyPreference(false);
 		const retrieved2 = getPrivacyPreference();
 		t.is(retrieved2, false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getSemanticMemoryEnabled returns true when not set', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const preferences: UserPreferences = {};
+	writeFileSync(preferencesPath, JSON.stringify(preferences), 'utf-8');
+
+	try {
+		const result = getSemanticMemoryEnabled();
+		t.is(result, true);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getSemanticMemoryEnabled returns false when disabled', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const preferences: UserPreferences = {semanticMemoryEnabled: false};
+	writeFileSync(preferencesPath, JSON.stringify(preferences), 'utf-8');
+
+	try {
+		const result = getSemanticMemoryEnabled();
+		t.is(result, false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateSemanticMemoryEnabled saves the preference correctly', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateSemanticMemoryEnabled(false);
+
+		t.true(existsSync(preferencesPath));
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as UserPreferences;
+
+		t.is(parsed.semanticMemoryEnabled, false);
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});

@@ -30,6 +30,7 @@ Preferences follow the same location hierarchy as configuration files:
 | `nanocoderShape` | The nanocoder ASCII art shape |
 | `trustedDirectories` | Directories you've approved through the first-run security disclaimer |
 | `lastUpdateCheck` | Timestamp of the last update check (used to avoid checking too frequently) |
+| `semanticMemoryEnabled` | Enables semantic memory across sessions. Set to `false` or use `/settings` → **Advanced** → **Semantic Memory** to keep agents stateless. |
 
 ### Paste Configuration
 

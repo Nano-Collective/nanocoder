@@ -13,6 +13,7 @@ import {
 	getPasteThreshold,
 	getPrivacyPreference,
 	getReasoningExpanded,
+	getSemanticMemoryEnabled,
 	updateCompactToolDisplay,
 	updateNanocoderShape,
 	updateNotificationsPreference,
@@ -20,6 +21,7 @@ import {
 	updatePrivacyPreference,
 	updateReasoningExpanded,
 	updateSelectedTheme,
+	updateSemanticMemoryEnabled,
 } from '@/config/preferences';
 import {getThemeColors, themes} from '@/config/themes';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -39,6 +41,7 @@ type SettingsStep =
 	| 'notifications'
 	| 'display-settings'
 	| 'privacy'
+	| 'advanced'
 	| 'done';
 
 interface SettingsSelectorProps {
@@ -97,6 +100,11 @@ function SettingsMainMenu({
 			label: 'Privacy',
 			value: 'privacy',
 			description: 'Manage prompt scrubbing and sensitive data',
+		},
+		{
+			label: 'Advanced',
+			value: 'advanced',
+			description: 'Memory and advanced behavior',
 		},
 		{
 			label: 'Done',
@@ -1027,7 +1035,89 @@ export function SettingsSelector({onCancel}: SettingsSelectorProps) {
 					onCancel={onCancel}
 				/>
 			);
+		case 'advanced':
+			return (
+				<SettingsAdvancedPanel
+					onBack={() => setStep('main')}
+					onCancel={onCancel}
+				/>
+			);
 	}
+}
+
+// Advanced settings panel
+function SettingsAdvancedPanel({
+	onBack,
+	onCancel,
+}: {
+	onBack: () => void;
+	onCancel: () => void;
+}) {
+	const {boxWidth, isNarrow} = useResponsiveTerminal();
+	const {colors} = useTheme();
+
+	const [semanticMemoryEnabled, setSemanticMemoryEnabled] = useState(
+		getSemanticMemoryEnabled(),
+	);
+
+	useInput((_, key) => {
+		if (key.escape) {
+			onCancel();
+		}
+		if (key.shift && key.tab) {
+			onBack();
+		}
+	});
+
+	const items = useMemo(() => {
+		return [
+			{
+				label: `Semantic Memory: ${semanticMemoryEnabled ? 'ON' : 'OFF'}`,
+				value: 'semantic-memory',
+			},
+		];
+	}, [semanticMemoryEnabled]);
+
+	const handleSelect = () => {
+		const next = !semanticMemoryEnabled;
+		setSemanticMemoryEnabled(next);
+		updateSemanticMemoryEnabled(next);
+	};
+
+	const title = isNarrow ? 'Advanced' : 'Advanced Settings';
+
+	return (
+		<TitledBoxWithPreferences
+			title={title}
+			width={isNarrow ? '100%' : boxWidth}
+			borderColor={colors.primary}
+			paddingX={2}
+			paddingY={1}
+			flexDirection="column"
+			marginBottom={1}
+		>
+			{!isNarrow && (
+				<Box marginBottom={1}>
+					<Text color={colors.secondary}>
+						Toggle settings with Enter. Shift+Tab to go back, Esc to exit
+					</Text>
+				</Box>
+			)}
+
+			<Box marginBottom={1}>
+				<Text color={colors.warning}>
+					Semantic Memory recalls saved project context and injects it into
+					future prompts. Turn it off for stateless agent behavior.
+				</Text>
+			</Box>
+
+			<StyledSelectInput items={items} onSelect={handleSelect} />
+
+			<Box marginTop={1}>
+				<Text color={colors.secondary}>Enter/Esc</Text>
+			</Box>
+		</TitledBoxWithPreferences>
+	);
 }
 
 // Privacy settings panel
