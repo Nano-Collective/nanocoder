@@ -1,8 +1,11 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
-
 import * as fs from 'fs';
 import * as path from 'path';
+
+import { discoverCliPath, nodeExistsAlongside } from './cli-path-discovery';
+
+export { nodeExistsAlongside };
 
 let cachedShellPath: string | null | undefined;
 
@@ -56,21 +59,10 @@ export async function findCliPath(): Promise<string | null> {
 		}
 	}
 
-	// 3. Fallback to global PATH (resolved from the login shell, since the
-	// extension host's own PATH may be launchd's minimal one)
+	// 3 & 4. Try which/where with the login-shell PATH; fall back to common
+	// global installation directories (nvm, volta, fnm, pnpm, bun…).
 	const env = await resolveSpawnEnv();
-	return new Promise((resolve) => {
-		const command = process.platform === 'win32' ? 'where.exe nanocoder' : 'which nanocoder';
-
-		cp.exec(command, {env}, (error, stdout) => {
-			if (error || !stdout.trim()) {
-				resolve(null);
-			} else {
-				const lines = stdout.trim().split('\n');
-				resolve(lines[0].trim());
-			}
-		});
-	});
+	return discoverCliPath(env);
 }
 
 export async function promptInstallCli(): Promise<void> {
