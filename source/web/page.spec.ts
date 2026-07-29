@@ -62,3 +62,29 @@ test('web mode renders streamed assistant output as safe markdown', t => {
 	t.true(page.includes('textElement.dataset.rawText = nextText'));
 	t.false(page.includes("appendMessage('assistant', '', 'Assistant output')"));
 });
+
+test('web mode renders actionable approval and question cards', t => {
+	const page = renderWebModePage();
+
+	t.true(page.includes('function renderApprovalCard(message)'));
+	t.true(page.includes('function renderQuestionCard(message)'));
+	t.true(page.includes("type: 'approval_response'"));
+	t.true(page.includes("type: 'question_response'"));
+	t.true(page.includes("approveButton.textContent = 'Approve'"));
+	t.true(page.includes("denyButton.textContent = 'Deny'"));
+	t.true(page.includes("message.allowFreeform"));
+	t.false(page.includes("appendMessage('system', message.reason, 'Approval required')"));
+	t.false(page.includes("appendMessage('system', message.question, 'Question required')"));
+});
+
+test('web mode shows live tool running and completed status', t => {
+	const page = renderWebModePage();
+
+	t.true(page.includes("'system tool-status', 'Running tool: ' + message.name"));
+	t.true(page.includes("'Tool finished: ' + message.name"));
+	t.true(
+		page.includes(
+			"'Provider and model stay in the terminal runtime. During a browser turn, approvals and questions are answered here.'",
+		),
+	);
+});

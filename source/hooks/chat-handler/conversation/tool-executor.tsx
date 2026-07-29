@@ -38,10 +38,20 @@ const executeOne = async (
 	toolCall: ToolCall;
 	result: ToolResult;
 }> => {
+	const {publishWebToolFinished, publishWebToolStarted} = await import(
+		'@/web/tool-lifecycle'
+	);
+	publishWebToolStarted(toolCall.id, toolCall.function.name);
 	try {
 		const result = await processToolUse(toolCall);
+		publishWebToolFinished(
+			toolCall.id,
+			toolCall.function.name,
+			!result.content.startsWith('Error: '),
+		);
 		return {toolCall, result};
 	} catch (error) {
+		publishWebToolFinished(toolCall.id, toolCall.function.name, false);
 		return {
 			toolCall,
 			result: {
@@ -90,7 +100,7 @@ export interface ToolDisplayOptions {
  * the validated registry handler. The single per-tool execution primitive
  * shared by the auto-execute batch and the (post-approval) confirmation path.
  */
-export const executeApprovedTool = (
+export const executeApprovedTool = async (
 	toolCall: ToolCall,
 	toolManager: ToolManager | null,
 	processToolUse: (toolCall: ToolCall) => Promise<ToolResult>,
@@ -98,12 +108,28 @@ export const executeApprovedTool = (
 	signal?: AbortSignal,
 ): Promise<StreamingBashRun | {toolCall: ToolCall; result: ToolResult}> => {
 	if (toolCall.function.name === 'execute_bash' && setLiveComponent) {
-		return executeBashStreaming(
-			toolCall,
-			toolManager,
-			setLiveComponent,
-			signal,
+		const {publishWebToolFinished, publishWebToolStarted} = await import(
+			'@/web/tool-lifecycle'
 		);
+		publishWebToolStarted(toolCall.id, toolCall.function.name);
+		try {
+			const execution = await executeBashStreaming(
+				toolCall,
+				toolManager,
+				setLiveComponent,
+				signal,
+			);
+			publishWebToolFinished(
+				toolCall.id,
+				toolCall.function.name,
+				!execution.result.content.startsWith('Error: ') &&
+					!execution.result.content.startsWith('⚒ Validation failed'),
+			);
+			return execution;
+		} catch (error) {
+			publishWebToolFinished(toolCall.id, toolCall.function.name, false);
+			throw error;
+		}
 	}
 	return executeOne(toolCall, processToolUse);
 };

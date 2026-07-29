@@ -49,6 +49,7 @@ import {setGlobalMessageQueue} from '@/utils/message-queue';
 import {setNotificationsConfig} from '@/utils/notifications';
 import {getShutdownManager} from '@/utils/shutdown';
 import {isExtensionInstalled} from '@/vscode/extension-installer';
+import {setWebToolLifecyclePublisher} from '@/web/tool-lifecycle';
 
 export default function App({
 	vscodeMode = false,
@@ -196,6 +197,7 @@ export default function App({
 	} = useGlobalHandlerQueues({
 		setPendingQuestion: appState.setPendingQuestion,
 		setIsQuestionMode: appState.setIsQuestionMode,
+		webRuntimeBridge,
 	});
 
 	// Initialize notifications config from app config (once)
@@ -535,6 +537,22 @@ export default function App({
 	React.useEffect(() => {
 		webRuntimeBridge?.publishAssistantContent(chatHandler.streamingContent);
 	}, [webRuntimeBridge, chatHandler.streamingContent]);
+
+	React.useEffect(() => {
+		if (!webRuntimeBridge) {
+			return;
+		}
+
+		setWebToolLifecyclePublisher({
+			started: (id, name) => webRuntimeBridge.publishToolStarted(id, name),
+			finished: (id, name, ok) =>
+				webRuntimeBridge.publishToolFinished(id, name, ok),
+		});
+
+		return () => {
+			setWebToolLifecyclePublisher(null);
+		};
+	}, [webRuntimeBridge]);
 
 	// Apply a session resolved by cli.tsx from --continue/--resume <id> (or open
 	// the picker for a bare --resume), once on mount. Reuses the exact same
