@@ -468,6 +468,13 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		baseUrl: 'https://api.mistral.ai/v1',
 	}),
 	apiKeyTemplate({
+		id: 'groq',
+		name: 'Groq',
+		baseUrl: 'https://api.groq.com/openai/v1',
+		apiKeyPrompt: 'API Key (from https://console.groq.com/keys)',
+		modelDefault: 'openai/gpt-oss-120b',
+	}),
+	apiKeyTemplate({
 		id: 'z-ai',
 		name: 'Z.ai',
 		baseUrl: 'https://api.z.ai/api/paas/v4/',
