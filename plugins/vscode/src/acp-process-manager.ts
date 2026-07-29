@@ -1,11 +1,12 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import * as os from 'os';
+import * as path from 'path';
 import {existsSync} from 'node:fs';
 import {ClientSideConnection, ndJsonStream} from '@agentclientprotocol/sdk';
 import {AcpStateManager, ACPStatus} from './acp-state';
 import {NanocoderAcpClient} from './acp-client';
-import {findCliPath, promptInstallCli, resolveSpawnEnv} from './cli-discovery';
+import {findCliPath, nodeExistsAlongside, promptInstallCli, resolveSpawnEnv} from './cli-discovery';
 
 export class AcpProcessManager {
 	private childProcess: cp.ChildProcess | null = null;
@@ -57,11 +58,14 @@ export class AcpProcessManager {
 		// Run in the workspace folder: the extension host's own cwd is `/`,
 		// which is unwritable and crashes the CLI's startup (.nanocoder dir).
 		const env = await resolveSpawnEnv();
-		if (cliPath && cliPath.includes(require('path').sep)) {
-			// Ensure the directory of the CLI is at the front of PATH, so 'node' can be found
-			// if it's installed alongside it (e.g. in NVM or Volta bin directories)
-			const cliDir = require('path').dirname(cliPath);
-			env.PATH = env.PATH ? `${cliDir}${require('path').delimiter}${env.PATH}` : cliDir;
+		// When the CLI was found via the filesystem fallback (not the login-shell
+		// PATH and not the `node <script>` dev form), prepend its directory to PATH
+		// only if `node` actually lives there. This lets the shebang find the right
+		// Node binary without shadowing a user's nvm/volta node when the CLI is in
+		// a plain system prefix like /usr/local/bin that has no co-located node.
+		if (!cliPath.startsWith('node ') && nodeExistsAlongside(cliPath)) {
+			const cliDir = path.dirname(cliPath);
+			env.PATH = env.PATH ? `${cliDir}${path.delimiter}${env.PATH}` : cliDir;
 		}
 		
 		// Fallbacks: configured cwd -> workspace folder -> user homedir -> process cwd

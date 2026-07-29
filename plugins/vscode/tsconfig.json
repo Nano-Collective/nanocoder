@@ -2,9 +2,10 @@
 	"compilerOptions": {
 		"module": "ESNext",
 		"target": "ES2022",
-		"lib": ["ES2022"],
+		"lib": [
+			"ES2022"
+		],
 		"sourceMap": true,
-		"rootDir": "src",
 		"outDir": "dist",
 		"strict": true,
 		"esModuleInterop": true,
@@ -13,6 +14,12 @@
 		"moduleResolution": "Bundler",
 		"resolveJsonModule": true
 	},
-	"include": ["src/**/*"],
-	"exclude": ["node_modules", "dist"]
+	"include": [
+		"src/**/*",
+		"../../source/vscode/cli-path-discovery.ts"
+	],
+	"exclude": [
+		"node_modules",
+		"dist"
+	]
 }

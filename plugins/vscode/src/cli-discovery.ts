@@ -1,9 +1,11 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
-
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
+
+import { discoverCliPath, nodeExistsAlongside } from './cli-path-discovery';
+
+export { nodeExistsAlongside };
 
 let cachedShellPath: string | null | undefined;
 
@@ -57,66 +59,10 @@ export async function findCliPath(): Promise<string | null> {
 		}
 	}
 
-	// 3. Fallback to global PATH (resolved from the login shell, since the
-	// extension host's own PATH may be launchd's minimal one)
+	// 3 & 4. Try which/where with the login-shell PATH; fall back to common
+	// global installation directories (nvm, volta, fnm, pnpm, bun…).
 	const env = await resolveSpawnEnv();
-	const fromPath = await new Promise<string | null>((resolve) => {
-		const command = process.platform === 'win32' ? 'where.exe nanocoder' : 'which nanocoder';
-
-		cp.exec(command, {env}, (error, stdout) => {
-			if (error || !stdout.trim()) {
-				resolve(null);
-			} else {
-				const lines = stdout.trim().split('\n');
-				resolve(lines[0].trim());
-			}
-		});
-	});
-
-	if (fromPath) {
-		return fromPath;
-	}
-
-	// 4. Fallback to common global installation directories (nvm, volta, fnm, etc)
-	const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
-	if (home) {
-		const commonPaths = [
-			path.join(home, '.npm-global', 'bin', 'nanocoder'),
-			path.join(home, '.volta', 'bin', 'nanocoder'),
-			path.join(home, '.n', 'bin', 'nanocoder'),
-			'/opt/homebrew/bin/nanocoder',
-			'/usr/local/bin/nanocoder',
-			'/opt/local/bin/nanocoder'
-		];
-		
-		// Add NVM paths
-		const nvmDir = process.env.NVM_DIR || path.join(home, '.nvm');
-		const nvmNodeDir = path.join(nvmDir, 'versions', 'node');
-		if (fs.existsSync(nvmNodeDir)) {
-			try {
-				const versions = fs.readdirSync(nvmNodeDir);
-				// Sort to try newest versions first
-				versions.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
-				for (const version of versions) {
-					commonPaths.push(path.join(nvmNodeDir, version, 'bin', 'nanocoder'));
-				}
-			} catch (e) {
-				// ignore
-			}
-		}
-
-		// Add FNM paths
-		const fnmDir = process.env.FNM_DIR || path.join(home, '.local', 'share', 'fnm');
-		commonPaths.push(path.join(fnmDir, 'aliases', 'default', 'bin', 'nanocoder'));
-
-		for (const p of commonPaths) {
-			if (fs.existsSync(p)) {
-				return p;
-			}
-		}
-	}
-
-	return null;
+	return discoverCliPath(env);
 }
 
 export async function promptInstallCli(): Promise<void> {
