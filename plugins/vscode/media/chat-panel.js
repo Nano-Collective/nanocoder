@@ -4,6 +4,11 @@
 
 	const messagesContainer = document.getElementById('messages-container');
 	const chatInput = document.getElementById('chat-input');
+	const addImageBtn = document.getElementById('add-image-btn');
+	const imageUpload = document.getElementById('image-upload');
+	const imagePreviewContainer = document.getElementById('image-preview-container');
+	
+	let pendingImages = [];
 
 	let modelDropdown, modeDropdown, providerDropdown;
 
@@ -172,6 +177,106 @@
 		});
 	}
 
+	// Image upload logic
+	if (addImageBtn && imageUpload) {
+		addImageBtn.addEventListener('click', () => {
+			imageUpload.click();
+		});
+		
+		imageUpload.addEventListener('change', (e) => {
+			if (e.target.files) {
+				processImageFiles(Array.from(e.target.files));
+				e.target.value = '';
+			}
+		});
+	}
+
+	chatInput.addEventListener('paste', (e) => {
+		if (e.clipboardData && e.clipboardData.items) {
+			const files = Array.from(e.clipboardData.items)
+				.filter(item => item.type.startsWith('image/'))
+				.map(item => item.getAsFile())
+				.filter(file => file !== null);
+			if (files.length > 0) {
+				processImageFiles(files);
+				e.preventDefault(); // Only prevent default if we're actually pasting images, allow text
+			}
+		}
+	});
+
+	function processImageFiles(files) {
+		for (const file of files) {
+			if (!file.type.startsWith('image/')) continue;
+			
+			const reader = new FileReader();
+			reader.onload = (e) => {
+				const result = e.target.result;
+				if (typeof result === 'string') {
+					// result is like "data:image/png;base64,iVBOR..."
+					const commaIdx = result.indexOf(',');
+					if (commaIdx !== -1) {
+						const data = result.substring(commaIdx + 1);
+						pendingImages.push({ data, mimeType: file.type });
+						renderImagePreviews();
+					}
+				}
+			};
+			reader.readAsDataURL(file);
+		}
+	}
+
+	function renderImagePreviews() {
+		if (!imagePreviewContainer) return;
+		imagePreviewContainer.innerHTML = '';
+		pendingImages.forEach((img, idx) => {
+			const wrapper = document.createElement('div');
+			wrapper.className = 'relative w-12 h-12 rounded overflow-hidden border border-vscode-input-border shrink-0 group';
+			
+			const imageEl = document.createElement('img');
+			imageEl.src = `data:${img.mimeType};base64,${img.data}`;
+			imageEl.className = 'w-full h-full object-cover cursor-pointer hover:opacity-80 transition-opacity';
+			imageEl.onclick = () => openImageModal(imageEl.src);
+			
+			const removeBtn = document.createElement('button');
+			removeBtn.className = 'absolute top-0 right-0 bg-black/50 hover:bg-black/80 text-white w-5 h-5 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-bl cursor-pointer border-none outline-none';
+			removeBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+			removeBtn.onclick = (e) => {
+				e.stopPropagation();
+				pendingImages.splice(idx, 1);
+				renderImagePreviews();
+			};
+			
+			wrapper.appendChild(imageEl);
+			wrapper.appendChild(removeBtn);
+			imagePreviewContainer.appendChild(wrapper);
+		});
+	}
+
+	const imageModal = document.getElementById('image-modal');
+	const modalImage = document.getElementById('modal-image');
+	const closeModalBtn = document.getElementById('close-modal-btn');
+	
+	function openImageModal(src) {
+		if (imageModal && modalImage) {
+			modalImage.src = src;
+			imageModal.classList.remove('hidden');
+		}
+	}
+	
+	if (closeModalBtn) {
+		closeModalBtn.addEventListener('click', () => {
+			imageModal.classList.add('hidden');
+		});
+	}
+	if (imageModal) {
+		imageModal.addEventListener('click', (e) => {
+			if (e.target === imageModal) {
+				imageModal.classList.add('hidden');
+			}
+		});
+	}
+
+
 	// Auto-resize textarea
 	chatInput.addEventListener('input', function () {
 		this.style.height = 'auto';
@@ -188,20 +293,25 @@
 
 	function submitMessage() {
 		const text = chatInput.value.trim();
-		if (!text) return;
+		if (!text && pendingImages.length === 0) return;
+
+		const imagesToSubmit = pendingImages.length > 0 ? [...pendingImages] : undefined;
 
 		// Send message to extension host
 		vscode.postMessage({
 			type: 'submitMessage',
-			text: text
+			text: text,
+			images: imagesToSubmit
 		});
 
 		// Clear input
 		chatInput.value = '';
 		chatInput.style.height = 'auto';
+		pendingImages = [];
+		renderImagePreviews();
 
 		// Optimistically append user message 
-		appendMessage(text, 'user');
+		appendMessage(text, 'user', imagesToSubmit);
 
 		if (!isProcessing) {
 			// Switch to processing state
@@ -213,7 +323,7 @@
 		}
 	}
 
-	function appendMessage(content, role) {
+	function appendMessage(content, role, images = undefined) {
 		// Remove welcome message and loader if present
 		const welcome = document.querySelector('.welcome-message');
 		if (welcome) welcome.remove();
@@ -221,22 +331,37 @@
 		if (loader) loader.remove();
 
 		const msgEl = document.createElement('div');
-		msgEl.className = 'leading-snug break-words shrink-0 min-w-0 ' +
+		msgEl.className = 'leading-snug break-words shrink-0 min-w-0 flex flex-col ' +
 			(role === 'user'
 				? 'self-end bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-border px-3 py-2 rounded-lg max-w-[85%]'
 				: 'self-start max-w-full');
 
-		const textContainer = document.createElement('div');
-		textContainer.className = 'markdown-body';
+		if (images && images.length > 0) {
+			const imagesContainer = document.createElement('div');
+			imagesContainer.className = 'flex flex-wrap gap-2 mb-2';
+			images.forEach(img => {
+				const imgEl = document.createElement('img');
+				imgEl.src = `data:${img.mimeType};base64,${img.data}`;
+				imgEl.className = 'w-24 h-24 object-cover rounded cursor-pointer border border-vscode-border hover:opacity-90';
+				imgEl.onclick = () => openImageModal(imgEl.src);
+				imagesContainer.appendChild(imgEl);
+			});
+			msgEl.appendChild(imagesContainer);
+		}
 
-		// If it's the user, we just render it directly (or we could use marked for them too)
-		// Usually users prefer raw text, but let's render markdown for both just in case.
-		if (typeof marked !== 'undefined') {
-			textContainer.innerHTML = marked.parse(content);
-		} else {
-			textContainer.textContent = content;
-		} // Phase 3: plain text for now, but incrementally updateable
-		msgEl.appendChild(textContainer);
+		if (content) {
+			const textContainer = document.createElement('div');
+			textContainer.className = 'markdown-body';
+	
+			// If it's the user, we just render it directly (or we could use marked for them too)
+			// Usually users prefer raw text, but let's render markdown for both just in case.
+			if (typeof marked !== 'undefined') {
+				textContainer.innerHTML = marked.parse(content);
+			} else {
+				textContainer.textContent = content;
+			}
+			msgEl.appendChild(textContainer);
+		}
 
 		messagesContainer.appendChild(msgEl);
 		scrollToBottom();
@@ -456,9 +581,13 @@
 		const update = payload.update ? payload.update : payload;
 
 		if (update.sessionUpdate === 'user_message_chunk') {
-			if (update.content && update.content.text) {
+			if (update.content) {
 				endCurrentTextBlock();
-				appendMessage(update.content.text, 'user');
+				if (update.content.type === 'image' && update.content.data) {
+					appendMessage(null, 'user', [{ data: update.content.data, mimeType: update.content.mimeType || 'image/png' }]);
+				} else if (update.content.text) {
+					appendMessage(update.content.text, 'user');
+				}
 			}
 		} else if (update.sessionUpdate === 'agent_message_chunk') {
 			if (currentThoughtBox) {

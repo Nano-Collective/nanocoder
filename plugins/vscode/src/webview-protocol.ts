@@ -107,6 +107,7 @@ export interface WebviewMessageReady {
 export interface WebviewMessageSubmitMessage {
 	type: 'submitMessage';
 	text: string;
+	images?: { data: string; mimeType: string }[];
 }
 
 export interface WebviewMessageCancel {

@@ -547,6 +547,30 @@ export class AcpAgent implements Agent {
 							content: {type: 'text', text: message.content},
 						},
 					});
+				} else if (Array.isArray(message.content)) {
+					for (const part of message.content) {
+						if (part.type === 'text' && part.text) {
+							await this.conn.sessionUpdate({
+								sessionId: session.sessionId,
+								update: {
+									sessionUpdate: 'user_message_chunk',
+									content: {type: 'text', text: part.text},
+								},
+							});
+						} else if (part.type === 'image' && part.data) {
+							await this.conn.sessionUpdate({
+								sessionId: session.sessionId,
+								update: {
+									sessionUpdate: 'user_message_chunk',
+									content: {
+										type: 'image',
+										data: part.data,
+										mimeType: part.mimeType,
+									},
+								},
+							});
+						}
+					}
 				}
 			} else if (message.role === 'assistant') {
 				if (message.reasoning && message.reasoning.length > 0) {
