@@ -144,6 +144,12 @@ test('memory command proposes durable memories from current messages', async t =
 			{
 				content: 'Auth uses Clerk.',
 				category: 'architecture',
+				sourceType: 'explicit-user',
+				evidence: {
+					userMessages: ['Refactor auth.'],
+					assistantMessages: [],
+				},
+				warnings: [],
 			},
 		]),
 	});
