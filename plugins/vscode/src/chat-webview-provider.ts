@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { WebviewToExtensionMessage, ExtensionToWebviewMessage } from './webview-protocol';
 
@@ -237,9 +239,6 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 	}
 
 	private _getHtmlForWebview(webview: vscode.Webview) {
-		const fs = require('fs');
-		const path = require('path');
-		
 		const htmlPath = path.join(this._extensionUri.fsPath, 'media', 'chat-panel.html');
 		let html = fs.readFileSync(htmlPath, 'utf8');
 
