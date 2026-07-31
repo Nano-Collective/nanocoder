@@ -158,6 +158,52 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 							this._broadcastSessions();
 						});
 						break;
+					case 'requestPathInfo': {
+						const fs = require('fs');
+						const path = require('path');
+						try {
+							const stat = fs.statSync(message.path);
+							const kind = stat.isDirectory() ? 'folder' : 'file';
+							const name = path.basename(message.path);
+							this.postMessage({ type: 'pathInfoResolved', path: message.path, name, kind });
+						} catch {
+							// path doesn't exist or access denied — silently ignore
+						}
+						break;
+					}
+					case 'requestOpenDialog': {
+						vscode.window.showOpenDialog({
+							canSelectFiles: true,
+							canSelectFolders: true,
+							canSelectMany: true,
+							openLabel: 'Attach'
+						}).then(uris => {
+							if (uris && uris.length > 0) {
+								uris.forEach(uri => {
+									const fs = require('fs');
+									const path = require('path');
+									try {
+										const stat = fs.statSync(uri.fsPath);
+										const kind = stat.isDirectory() ? 'folder' : 'file';
+										const name = path.basename(uri.fsPath);
+										this.postMessage({ type: 'pathInfoResolved', path: uri.fsPath, name, kind });
+									} catch {}
+								});
+							}
+						});
+						break;
+					}
+					case 'openPath': {
+						const uri = vscode.Uri.file(message.path);
+						if (message.kind === 'folder') {
+							// Reveal and focus folder in Explorer sidebar
+							vscode.commands.executeCommand('revealInExplorer', uri);
+						} else {
+							// Open file in editor
+							vscode.window.showTextDocument(uri, { preview: false, preserveFocus: false });
+						}
+						break;
+					}
 				}
 			}
 		);
@@ -243,8 +289,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		const htmlPath = path.join(this._extensionUri.fsPath, 'media', 'chat-panel.html');
 		let html = fs.readFileSync(htmlPath, 'utf8');
 
-		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.js'));
-		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.css'));
+		const timestamp = new Date().getTime();
+		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.js')).with({ query: `t=${timestamp}` });
+		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.css')).with({ query: `t=${timestamp}` });
 		const markedUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'marked.min.js'));
 		const nonce = getNonce();
 

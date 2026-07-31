@@ -4,6 +4,11 @@
 
 	const messagesContainer = document.getElementById('messages-container');
 	const chatInput = document.getElementById('chat-input');
+	const composerBox = document.getElementById('composer-box');
+	const contextChipsContainer = document.getElementById('context-chips');
+	const attachBtn = document.getElementById('attach-btn');
+
+	let attachedPaths = []; // [{path, name, kind: 'file'|'folder'}]
 
 	let modelDropdown, modeDropdown, providerDropdown;
 
@@ -14,59 +19,74 @@
 				this.dropdown = document.getElementById(dropdownId);
 				this.label = document.getElementById(labelId);
 				this.onChange = onChange;
-				this.value = '';
+				
+				if (!this.trigger || !this.dropdown) return;
 
 				this.trigger.addEventListener('click', (e) => {
 					e.stopPropagation();
-					this.toggle();
+					const isHidden = this.dropdown.classList.contains('hidden');
+					// Close all dropdowns
+					document.getElementById('provider-dropdown').classList.add('hidden');
+					document.getElementById('model-dropdown').classList.add('hidden');
+					document.getElementById('mode-dropdown').classList.add('hidden');
+					
+					if (isHidden) {
+						this.dropdown.classList.remove('hidden');
+					}
 				});
-			}
-
-			toggle() {
-				const isHidden = this.dropdown.classList.contains('hidden');
-				// Close all dropdowns
-				document.getElementById('provider-dropdown').classList.add('hidden');
-				document.getElementById('model-dropdown').classList.add('hidden');
-				document.getElementById('mode-dropdown').classList.add('hidden');
-
-				if (isHidden) {
-					this.dropdown.classList.remove('hidden');
-				}
 			}
 
 			setOptions(options, selectedValue) {
 				this.dropdown.innerHTML = '';
-				this.trigger.disabled = options.length === 0;
+				
+				if (!options || options.length === 0) {
+					this.label.textContent = 'None available';
+					this.trigger.disabled = true;
+					this.trigger.classList.add('opacity-50');
+					return;
+				}
+
+				this.trigger.disabled = false;
+				this.trigger.classList.remove('opacity-50');
+
+				let hasSelected = false;
 
 				options.forEach(opt => {
+					// We receive arrays of strings, not objects
 					const item = document.createElement('div');
-					item.className = 'px-3 py-1.5 cursor-pointer hover:bg-vscode-list-hover text-[0.9em] transition-colors';
+					item.className = 'px-3 py-2 cursor-pointer hover:bg-vscode-list-hover transition-colors text-[0.9em] truncate';
+					item.textContent = opt;
+					
 					if (opt === selectedValue) {
-						item.classList.add('bg-vscode-list-active', 'text-vscode-list-activeFg');
+						item.classList.add('bg-vscode-list-active');
+						item.classList.add('text-vscode-list-activeFg');
+						
+						let displayValue = opt;
+						if (displayValue.includes('/')) {
+							displayValue = displayValue.split('/').pop();
+						}
+						this.label.textContent = displayValue || 'Loading...';
+						
+						hasSelected = true;
 					} else {
 						item.classList.add('text-vscode-dropdown-foreground');
 					}
-					item.textContent = opt;
-					item.addEventListener('click', (e) => {
-						e.stopPropagation();
-						this.setValue(opt);
-						this.dropdown.classList.add('hidden');
+
+					item.addEventListener('click', () => {
 						this.onChange(opt);
+						this.dropdown.classList.add('hidden');
 					});
+
 					this.dropdown.appendChild(item);
 				});
 
-				this.setValue(selectedValue || (options.length > 0 ? options[0] : ''));
-			}
-
-			setValue(value) {
-				this.value = value;
-				// Clean up the label for better display
-				let displayValue = value;
-				if (displayValue.includes('/')) {
-					displayValue = displayValue.split('/').pop();
+				if (!hasSelected && options.length > 0) {
+					let displayValue = options[0];
+					if (displayValue.includes('/')) {
+						displayValue = displayValue.split('/').pop();
+					}
+					this.label.textContent = displayValue || 'Loading...';
 				}
-				this.label.textContent = displayValue || 'Loading...';
 			}
 		}
 
@@ -90,6 +110,9 @@
 	}
 
 	initDropdowns();
+
+
+
 	function toggleHistoryView() {
 		isHistoryView = !isHistoryView;
 		if (isHistoryView) {
@@ -172,6 +195,12 @@
 		});
 	}
 
+	if (attachBtn) {
+		attachBtn.addEventListener('click', () => {
+			vscode.postMessage({ type: 'requestOpenDialog' });
+		});
+	}
+
 	// Auto-resize textarea
 	chatInput.addEventListener('input', function () {
 		this.style.height = 'auto';
@@ -187,8 +216,16 @@
 	});
 
 	function submitMessage() {
-		const text = chatInput.value.trim();
-		if (!text) return;
+		let text = chatInput.value.trim();
+		if (!text && attachedPaths.length === 0) return;
+
+		// Append attached paths as context lines
+		if (attachedPaths.length > 0) {
+			const contextText = attachedPaths
+				.map(a => `@${a.kind === 'folder' ? '[folder]' : '[file]'} ${a.path}`)
+				.join('\n');
+			text = text ? `${text}\n\n${contextText}` : contextText;
+		}
 
 		// Send message to extension host
 		vscode.postMessage({
@@ -199,6 +236,10 @@
 		// Clear input
 		chatInput.value = '';
 		chatInput.style.height = 'auto';
+
+		// Clear chips after sending
+		attachedPaths = [];
+		renderChips();
 
 		// Optimistically append user message 
 		appendMessage(text, 'user');
@@ -211,6 +252,83 @@
 			currentTurnEl = null;
 			currentTextEl = null;
 		}
+	}
+
+	function renderChips() {
+		contextChipsContainer.innerHTML = '';
+		if (attachedPaths.length === 0) {
+			contextChipsContainer.classList.add('hidden');
+			return;
+		}
+		contextChipsContainer.classList.remove('hidden');
+		for (const item of attachedPaths) {
+			const chip = document.createElement('span');
+			chip.className = 'context-chip';
+			chip.style.background = item.kind === 'folder'
+				? 'rgba(255,180,80,0.15)' : 'rgba(80,150,255,0.15)';
+			chip.style.color = item.kind === 'folder'
+				? 'var(--vscode-symbolIcon-folderForeground)'
+				: 'var(--vscode-symbolIcon-fileForeground)';
+			
+			chip.innerHTML = `
+				<span>${item.kind === 'folder' ? '📁' : '📄'}</span>
+				<span class="chip-name" title="${item.path}">${item.name}</span>
+				<span class="chip-remove" title="Remove">×</span>`;
+			
+			chip.addEventListener('click', e => {
+				if (e.target.classList.contains('chip-remove')) {
+					attachedPaths = attachedPaths.filter(a => a.path !== item.path);
+					renderChips();
+					return;
+				}
+				vscode.postMessage({ type: 'openPath', path: item.path, kind: item.kind });
+			});
+			contextChipsContainer.appendChild(chip);
+		}
+	}
+
+	if (composerBox) {
+		const handleDrag = (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+		};
+		
+		// Prevent default on window to stop VS Code's native drop handler
+		window.addEventListener('dragover', (e) => e.preventDefault(), true);
+		window.addEventListener('drop', (e) => e.preventDefault(), true);
+
+		// Prevent native text drop on the textarea
+		chatInput.addEventListener('dragenter', handleDrag, true);
+		chatInput.addEventListener('dragover', handleDrag, true);
+		chatInput.addEventListener('drop', handleDrag, true);
+
+		composerBox.addEventListener('dragenter', (e) => {
+			handleDrag(e);
+			composerBox.classList.add('drag-over');
+		}, true);
+		
+		composerBox.addEventListener('dragover', (e) => {
+			handleDrag(e);
+			composerBox.classList.add('drag-over');
+		}, true);
+		
+		composerBox.addEventListener('dragleave', (e) => {
+			handleDrag(e);
+			composerBox.classList.remove('drag-over');
+		}, true);
+		
+		composerBox.addEventListener('drop', e => {
+			handleDrag(e);
+			composerBox.classList.remove('drag-over');
+			const uris = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+			if (!uris) return;
+			
+			const paths = uris.split('\n')
+				.map(u => decodeURIComponent(u.replace(/^file:\/\//, '').trim()))
+				.filter(Boolean);
+			
+			paths.forEach(p => vscode.postMessage({ type: 'requestPathInfo', path: p }));
+		}, true);
 	}
 
 	function appendMessage(content, role) {
@@ -317,6 +435,14 @@
 			case 'toggleHistory':
 				toggleHistoryView();
 				break;
+			case 'pathInfoResolved': {
+				const { path, name, kind } = message;
+				if (!attachedPaths.some(a => a.path === path)) {
+					attachedPaths.push({ path, name, kind });
+					renderChips();
+				}
+				break;
+			}
 			case 'appendMessage':
 				appendMessage(message.content, 'agent');
 				break;
