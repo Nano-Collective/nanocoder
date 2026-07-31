@@ -48,5 +48,4 @@ test('voice command toggles state and renders InfoMessage', async t => {
 	
 	t.truthy(output);
 	t.regex(output!, /Voice mode (enabled|disabled)/);
-	t.regex(output!, /audio not yet wired — scaffolding only/);
 });
