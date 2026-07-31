@@ -42,7 +42,7 @@ export const VoiceStatusBar = memo(function VoiceStatusBar({
 				return '♪ Speaking...';
 			case 'idle':
 			default:
-				return '○ Idle (Hold Ctrl+T to talk)';
+				return '○ Idle (Press Ctrl+T to talk)';
 		}
 	};
 
