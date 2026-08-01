@@ -42,6 +42,11 @@ export interface UseVoiceProps {
 	) => Promise<void>;
 	messages: Message[];
 	addToChatQueue: (component: React.ReactNode) => void;
+	/**
+	 * Injectable plugin loader; defaults to the real dynamic import.
+	 * Override in tests to supply a mock without touching the module registry.
+	 */
+	loadPlugin?: () => Promise<VoicePlugin>;
 }
 
 export interface UseVoiceReturn {
@@ -53,6 +58,8 @@ export function useVoice({
 	handleUserSubmit,
 	messages,
 	addToChatQueue,
+	loadPlugin = async () =>
+		(await import('@nanocollective/nanocoder-voice')) as unknown as VoicePlugin,
 }: UseVoiceProps): UseVoiceReturn {
 	const [state, setState] = React.useState<VoiceState>('idle');
 
@@ -60,21 +67,87 @@ export function useVoice({
 	const recordingAudioPromiseRef = React.useRef<Promise<void> | null>(null);
 	const activeFileRef = React.useRef<string | null>(null);
 
-	const messagesRef = React.useRef(messages);
-	React.useEffect(() => {
-		messagesRef.current = messages;
-	}, [messages]);
+	// Deferred TTS state: armed just before handleUserSubmit is awaited so the
+	// messages-watching useEffect below can drive the TTS step on the next render.
+	//
+	// Why not read messages immediately after `await handleUserSubmit`?
+	//
+	// handleUserSubmit (→ handleChatMessage → processAssistantResponse) fully
+	// awaits the entire LLM response and calls React's setMessages() before its
+	// promise resolves. However setMessages() only *schedules* a React state
+	// update — the updated messages array is NOT reflected in this hook's
+	// `messages` prop (or any ref driven by useEffect) until after the next
+	// render cycle. Arming these refs and letting a useEffect drive the speaking
+	// → idle transition is the correct, race-free pattern here.
+	const pluginRef = React.useRef<VoicePlugin | null>(null);
+	const pendingTTSRef = React.useRef(false);
 
 	const cleanupActiveFile = React.useCallback(() => {
 		if (activeFileRef.current && existsSync(activeFileRef.current)) {
 			try {
 				unlinkSync(activeFileRef.current);
 			} catch {
-				// Best effort
+				// Best effort — temp file cleanup should never fail the pipeline
 			}
+
 			activeFileRef.current = null;
 		}
 	}, []);
+
+	// Abort and clean up temp files on unmount to avoid stale operations
+	React.useEffect(() => {
+		return () => {
+			if (abortControllerRef.current) {
+				abortControllerRef.current.abort();
+				abortControllerRef.current = null;
+			}
+
+			pendingTTSRef.current = false;
+			pluginRef.current = null;
+			cleanupActiveFile();
+		};
+	}, [cleanupActiveFile]);
+
+	// Deferred TTS: fires after React commits the updated messages prop.
+	// pendingTTSRef is armed in startStopRecording before handleUserSubmit is
+	// awaited, so this effect is guaranteed to run with the assistant reply in
+	// `messages` regardless of how React schedules the re-render.
+	React.useEffect(() => {
+		if (!pendingTTSRef.current || !pluginRef.current) return;
+
+		const lastMsg = messages[messages.length - 1];
+		if (!lastMsg || lastMsg.role !== 'assistant') return;
+
+		const plugin = pluginRef.current;
+		const formattedText = formatForSpeech(lastMsg.content);
+		pendingTTSRef.current = false;
+		pluginRef.current = null;
+
+		if (formattedText.trim() === '') {
+			setState('idle');
+			return;
+		}
+
+		setState('speaking');
+		const ttsFile = join(tmpdir(), `nanocoder-tts-${randomUUID()}.wav`);
+		activeFileRef.current = ttsFile;
+
+		plugin
+			.synthesizeSpeech(formattedText, ttsFile)
+			.then(async () => plugin.playAudio(ttsFile))
+			.catch(() => {
+				addToChatQueue(
+					React.createElement(ErrorMessage, {
+						key: generateKey('voice-audio-error'),
+						message: 'Failed to synthesize or play speech response.',
+					}),
+				);
+			})
+			.finally(() => {
+				cleanupActiveFile();
+				setState('idle');
+			});
+	}, [messages, addToChatQueue, cleanupActiveFile]);
 
 	const startStopRecording = React.useCallback(async () => {
 		if (state === 'listening') {
@@ -82,6 +155,7 @@ export function useVoice({
 				abortControllerRef.current.abort();
 				abortControllerRef.current = null;
 			}
+
 			return;
 		}
 
@@ -91,7 +165,7 @@ export function useVoice({
 
 		let plugin: VoicePlugin;
 		try {
-			plugin = (await import('@nanocollective/nanocoder-voice')) as VoicePlugin;
+			plugin = await loadPlugin();
 		} catch (_error) {
 			addToChatQueue(
 				React.createElement(ErrorMessage, {
@@ -124,17 +198,20 @@ export function useVoice({
 			try {
 				await audioPromise;
 			} catch (err) {
-				// Aborting the recording is expected behavior for a toggle, it rejects with AbortError
+				// Aborting the recording is expected for toggle-to-stop. A proper
+				// AbortError (name === 'AbortError') propagates to the outer catch
+				// where it is handled gracefully. Only rethrow non-abort errors.
 				if (!(err instanceof Error) || !err.message?.includes('AbortError')) {
 					throw err;
 				}
 			}
+
 			recordingAudioPromiseRef.current = null;
 
 			setState('processing');
 			const transcribedText = await plugin.transcribeAudio(
 				recordingFile,
-				60000,
+				60_000,
 			);
 
 			cleanupActiveFile();
@@ -150,36 +227,20 @@ export function useVoice({
 				return;
 			}
 
+			// Arm deferred TTS BEFORE awaiting handleUserSubmit. By the time the
+			// promise resolves the LLM reply is in the pipeline, but React hasn't
+			// re-rendered yet. The messages useEffect above drives the
+			// processing → speaking → idle transition once the messages prop updates.
+			pendingTTSRef.current = true;
+			pluginRef.current = plugin;
+
 			await handleUserSubmit(transcribedText, transcribedText);
-
-			const currentMessages = messagesRef.current;
-			const lastMessage = currentMessages[currentMessages.length - 1];
-
-			if (lastMessage && lastMessage.role === 'assistant') {
-				setState('speaking');
-				const formattedText = formatForSpeech(lastMessage.content);
-
-				if (formattedText.trim() !== '') {
-					const ttsFile = join(tmpdir(), `nanocoder-tts-${randomUUID()}.wav`);
-					activeFileRef.current = ttsFile;
-					try {
-						await plugin.synthesizeSpeech(formattedText, ttsFile);
-						await plugin.playAudio(ttsFile);
-					} catch (_audioErr) {
-						addToChatQueue(
-							React.createElement(ErrorMessage, {
-								key: generateKey('voice-audio-error'),
-								message: 'Failed to synthesize or play speech response.',
-							}),
-						);
-					} finally {
-						cleanupActiveFile();
-					}
-				}
-			}
-
-			setState('idle');
+			// Intentionally no setState here — the deferred TTS useEffect owns the
+			// remaining state transitions.
 		} catch (error) {
+			// Reset deferred TTS in case it was armed before the error occurred
+			pendingTTSRef.current = false;
+			pluginRef.current = null;
 			setState('idle');
 			recordingAudioPromiseRef.current = null;
 			abortControllerRef.current = null;
@@ -196,7 +257,7 @@ export function useVoice({
 				}),
 			);
 		}
-	}, [state, handleUserSubmit, addToChatQueue, cleanupActiveFile]);
+	}, [state, handleUserSubmit, addToChatQueue, cleanupActiveFile, loadPlugin]);
 
 	return {
 		state,

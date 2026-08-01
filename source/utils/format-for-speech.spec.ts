@@ -32,11 +32,11 @@ test('strips markdown headings, bold, italic, links, blockquotes, and lists', (t
 });
 
 test('abbreviates long absolute file paths', (t) => {
-	const inputPosix = 'File is at /users/ronak/projects/nanocoder/src/index.ts';
+	const inputPosix = 'File is at /users/username/projects/nanocoder/src/index.ts';
 	const resultPosix = formatForSpeech(inputPosix);
 	t.is(resultPosix, 'File is at /users/.../index.ts');
 
-	const inputWindows = 'File is at C:\\Users\\ronak\\projects\\nanocoder\\src\\index.ts';
+	const inputWindows = 'File is at C:\\Users\\username\\projects\\nanocoder\\src\\index.ts';
 	const resultWindows = formatForSpeech(inputWindows);
 	t.is(resultWindows, 'File is at C:\\Users\\...\\index.ts');
 });
