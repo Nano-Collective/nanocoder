@@ -81,6 +81,14 @@ export function useVoice({
 	// → idle transition is the correct, race-free pattern here.
 	const pluginRef = React.useRef<VoicePlugin | null>(null);
 	const pendingTTSRef = React.useRef(false);
+	// Safety net: if handleUserSubmit resolves but no assistant message ever
+	// lands (e.g. the conversation loop gives up after empty turns and returns
+	// without writing a role==='assistant' entry), pendingTTSRef would stay true
+	// and state would be stuck on 'processing' forever. This timeout resets both
+	// unconditionally after 90 s so the UI always recovers.
+	const ttsTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(
+		null,
+	);
 
 	const cleanupActiveFile = React.useCallback(() => {
 		if (activeFileRef.current && existsSync(activeFileRef.current)) {
@@ -102,6 +110,11 @@ export function useVoice({
 				abortControllerRef.current = null;
 			}
 
+			if (ttsTimeoutRef.current) {
+				clearTimeout(ttsTimeoutRef.current);
+				ttsTimeoutRef.current = null;
+			}
+
 			pendingTTSRef.current = false;
 			pluginRef.current = null;
 			cleanupActiveFile();
@@ -117,6 +130,12 @@ export function useVoice({
 
 		const lastMsg = messages[messages.length - 1];
 		if (!lastMsg || lastMsg.role !== 'assistant') return;
+
+		// Assistant reply arrived — cancel the safety timeout
+		if (ttsTimeoutRef.current) {
+			clearTimeout(ttsTimeoutRef.current);
+			ttsTimeoutRef.current = null;
+		}
 
 		const plugin = pluginRef.current;
 		const formattedText = formatForSpeech(lastMsg.content);
@@ -234,11 +253,32 @@ export function useVoice({
 			pendingTTSRef.current = true;
 			pluginRef.current = plugin;
 
+			// Safety timeout: some conversation-loop exit paths (empty-turn give-up,
+			// malformed-tool give-up, etc.) call `return` without ever appending an
+			// assistant message. handleUserSubmit resolves successfully in those cases
+			// but no assistant message ever lands, so the messages useEffect never
+			// clears pendingTTSRef and state stays stuck on 'processing' forever.
+			// This timeout guarantees recovery within 90 s regardless of how the
+			// conversation loop exits.
+			ttsTimeoutRef.current = setTimeout(() => {
+				if (pendingTTSRef.current) {
+					pendingTTSRef.current = false;
+					pluginRef.current = null;
+					ttsTimeoutRef.current = null;
+					setState('idle');
+				}
+			}, 90_000);
+
 			await handleUserSubmit(transcribedText, transcribedText);
 			// Intentionally no setState here — the deferred TTS useEffect owns the
 			// remaining state transitions.
 		} catch (error) {
 			// Reset deferred TTS in case it was armed before the error occurred
+			if (ttsTimeoutRef.current) {
+				clearTimeout(ttsTimeoutRef.current);
+				ttsTimeoutRef.current = null;
+			}
+
 			pendingTTSRef.current = false;
 			pluginRef.current = null;
 			setState('idle');
