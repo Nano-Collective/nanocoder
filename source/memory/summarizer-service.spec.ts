@@ -114,16 +114,32 @@ test('SummarizerService proposes durable memories from messages', t => {
 			{
 				content: 'Use the existing provider abstraction for model changes.',
 				category: 'architecture',
+				sourceType: 'explicit-user',
+				evidence: {
+					userMessages: [
+						'Use the existing provider abstraction for model changes.',
+					],
+					assistantMessages: [],
+				},
+				warnings: [],
 			},
 			{
 				content: 'Fixed the queued input regression by restoring drafts.',
 				category: 'bugFix',
+				sourceType: 'conversation-inferred',
+				evidence: {
+					userMessages: [],
+					assistantMessages: [
+						'Fixed the queued input regression by restoring drafts.',
+					],
+				},
+				warnings: ['Inferred from conversation, no explicit user statement.'],
 			},
 		] satisfies MemoryProposal[],
 	);
 });
 
-test('SummarizerService dedupes proposed memories', t => {
+test('SummarizerService dedupes proposed memories and user takes precedence', t => {
 	const service = new SummarizerService();
 
 	t.deepEqual(
@@ -141,6 +157,85 @@ test('SummarizerService dedupes proposed memories', t => {
 			{
 				content: 'Refactor the storage path later.',
 				category: 'refactor',
+				sourceType: 'explicit-user',
+				evidence: {
+					userMessages: ['Refactor the storage path later.'],
+					assistantMessages: ['Refactor the storage path later.'],
+				},
+				warnings: [],
+			},
+		],
+	);
+});
+
+test('SummarizerService detects assistant position reversal', t => {
+	const service = new SummarizerService();
+
+	t.deepEqual(
+		service.proposeMemoriesFromMessages([
+			{
+				role: 'user',
+				content: "Actually, generic exceptions look cleaner, you'd agree right?",
+			},
+			{
+				role: 'assistant',
+				content: "You're right. I will use generic exceptions formatting.",
+			},
+		]),
+		[
+			{
+				content: "You're right. I will use generic exceptions formatting.",
+				category: 'codingStyle',
+				sourceType: 'conversation-inferred',
+				evidence: {
+					userMessages: [],
+					assistantMessages: ["You're right. I will use generic exceptions formatting."],
+				},
+				warnings: [
+					'Possible assistant position reversal.',
+					'Inferred from conversation, no explicit user statement.',
+				],
+			},
+		],
+	);
+});
+
+test('SummarizerService guards false positive on reversal when user provides path/code/error', t => {
+	const service = new SummarizerService();
+
+	t.deepEqual(
+		service.proposeMemoriesFromMessages([
+			{
+				role: 'user',
+				content: 'That path is wrong, it should be /src/auth/style.ts',
+			},
+			{
+				role: 'assistant',
+				content: "You're right. The style convention is updated.",
+			},
+		]),
+		[
+			{
+				content: 'That path is wrong, it should be /src/auth/style.ts',
+				category: 'codingStyle',
+				sourceType: 'explicit-user',
+				evidence: {
+					userMessages: ['That path is wrong, it should be /src/auth/style.ts'],
+					assistantMessages: [],
+				},
+				warnings: [],
+			},
+			{
+				content: "You're right. The style convention is updated.",
+				category: 'codingStyle',
+				sourceType: 'conversation-inferred',
+				evidence: {
+					userMessages: [],
+					assistantMessages: ["You're right. The style convention is updated."],
+				},
+				warnings: [
+					'Inferred from conversation, no explicit user statement.',
+				],
 			},
 		],
 	);
@@ -164,6 +259,12 @@ test('SummarizerService proposals do not save memories automatically', async t =
 		{
 			content: 'TODO delete obsolete project memory later.',
 			category: 'todo',
+			sourceType: 'explicit-user',
+			evidence: {
+				userMessages: ['TODO delete obsolete project memory later.'],
+				assistantMessages: [],
+			},
+			warnings: [],
 		},
 	]);
 	t.deepEqual(await manager.listMemories(), []);

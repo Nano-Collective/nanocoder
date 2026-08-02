@@ -72,12 +72,49 @@ export function createMemoryCommand(
 						);
 					}
 
-					return infoMsg(
-						proposals
-							.map(proposal => `[${proposal.category}] ${proposal.content}`)
-							.join('\n'),
-						'memory-propose',
+					proposals.sort((a, b) => {
+						const aWarns = a.warnings.length;
+						const bWarns = b.warnings.length;
+						if (aWarns === 0 && bWarns > 0) return -1;
+						if (aWarns > 0 && bWarns === 0) return 1;
+						return 0;
+					});
+
+					const lines: string[] = [];
+					for (let i = 0; i < proposals.length; i++) {
+						const proposal = proposals[i]!;
+						const hasWarnings = proposal.warnings.length > 0;
+						const header = `─────────────────────────────────\nProposal ${i + 1} of ${proposals.length}${hasWarnings ? '  ⚠ Review carefully' : ''}\n─────────────────────────────────`;
+						lines.push(header);
+						lines.push(`[${proposal.category}] ${proposal.content}\n`);
+						lines.push(`Source:   ${proposal.sourceType}`);
+
+						const evidenceLines: string[] = [];
+						for (const m of proposal.evidence.userMessages) {
+							evidenceLines.push(`User: "${m}"`);
+						}
+						for (const m of proposal.evidence.assistantMessages) {
+							evidenceLines.push(`Assistant: "${m}"`);
+						}
+
+						if (evidenceLines.length > 0) {
+							lines.push(`Evidence: ${evidenceLines[0]}`);
+							for (let j = 1; j < evidenceLines.length; j++) {
+								lines.push(`          ${evidenceLines[j]}`);
+							}
+						}
+
+						for (const w of proposal.warnings) {
+							lines.push(`⚠ ${w}`);
+						}
+						lines.push('');
+					}
+
+					lines.push(
+						'─────────────────────────────────\nRun /remember <content> to save any of the above.',
 					);
+
+					return infoMsg(lines.join('\n'), 'memory-propose');
 				}
 
 				return errorMsg(USAGE, 'memory-error');
