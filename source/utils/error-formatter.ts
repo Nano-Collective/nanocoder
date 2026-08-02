@@ -140,13 +140,15 @@ export function createErrorInfo(
  * Check if error is a network-related error
  */
 function isNetworkError(error: Error): boolean {
+	const errorCode = (error as NodeJS.ErrnoException).code;
+
 	return (
 		error.name === 'NetworkError' ||
 		error.name === 'FetchError' ||
-		error.name === 'ECONNREFUSED' ||
-		error.name === 'ENOTFOUND' ||
-		error.name === 'ECONNRESET' ||
-		error.name === 'ETIMEDOUT' ||
+		errorCode === 'ECONNREFUSED' ||
+		errorCode === 'ENOTFOUND' ||
+		errorCode === 'ECONNRESET' ||
+		errorCode === 'ETIMEDOUT' ||
 		error.message.includes('network') ||
 		error.message.includes('fetch') ||
 		error.message.includes('connection')
@@ -157,9 +159,11 @@ function isNetworkError(error: Error): boolean {
  * Check if error is a timeout error
  */
 function isTimeoutError(error: Error): boolean {
+	const errorCode = (error as NodeJS.ErrnoException).code;
+
 	return (
 		error.name === 'TimeoutError' ||
-		error.name === 'ETIMEDOUT' ||
+		errorCode === 'ETIMEDOUT' ||
 		error.message.includes('timeout') ||
 		error.message.includes('timed out')
 	);

@@ -90,7 +90,21 @@ export class BoundedMap<K, V> {
 	 * Check if key exists and is not expired
 	 */
 	has(key: K): boolean {
-		return this.get(key) !== undefined;
+		const entry = this.map.get(key);
+		if (!entry) {
+			return false;
+		}
+
+		// Check TTL if configured
+		if (this.ttl !== undefined && this.ttl > 0) {
+			const age = Date.now() - entry.timestamp;
+			if (age > this.ttl) {
+				this.map.delete(key);
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	/**
