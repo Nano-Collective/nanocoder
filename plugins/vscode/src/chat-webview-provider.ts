@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import { WebviewToExtensionMessage, ExtensionToWebviewMessage } from './webview-protocol';
+import * as fs from 'fs';
+import * as path from 'path';
 
 import { NanocoderAcpClient } from './acp-client';
 import { DiffManager } from './diff-manager';
@@ -236,10 +238,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
-	private _getHtmlForWebview(webview: vscode.Webview) {
-		const fs = require('fs');
-		const path = require('path');
-		
+	private _getHtmlForWebview(webview: vscode.Webview) { 
 		const htmlPath = path.join(this._extensionUri.fsPath, 'media', 'chat-panel.html');
 		let html = fs.readFileSync(htmlPath, 'utf8');
 
