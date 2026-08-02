@@ -16,6 +16,7 @@ import {useTerminalRows} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {UIStateProvider} from '@/hooks/useUIState';
 import type {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
+import {useVoice} from '@/hooks/useVoice';
 import type {useVSCodeServer} from '@/hooks/useVSCodeServer';
 import type {ImageAttachment} from '@/types/core';
 import type {RestoredInputDraft, SubmittedInputDraft} from '@/types/hooks';
@@ -82,6 +83,12 @@ export function InteractiveApp({
 		React.useState<SubmittedInputDraft | null>(null);
 	const [restoredDraft, setRestoredDraft] =
 		React.useState<RestoredInputDraft | null>(null);
+
+	const {state: voiceState, startStopRecording} = useVoice({
+		handleUserSubmit,
+		messages: appState.messages,
+		addToChatQueue: appState.addToChatQueue,
+	});
 
 	const handleToggleCompactDisplay = () => {
 		const expanding = appState.compactToolDisplay;
@@ -257,13 +264,14 @@ export function InteractiveApp({
 		pendingSubagentApproval === null &&
 		pendingToolConfirmation === null;
 
-	// Push-to-talk keybinding stub (Ctrl+T)
-	// This PR (PR1) only scaffolds the handler. Audio capture is not yet wired.
+	// Push-to-talk keybinding (Ctrl+T)
+	// IMPORTANT: Push-to-talk in this PR is an INTERNAL VALIDATION MECHANISM ONLY.
+	// The actual v1 goal is hands-free (VAD-driven) voice, landing in PR4.
+	// This exists here purely to prove the STT → pipeline → TTS loop works end-to-end.
 	useInput(
 		(input, key) => {
 			if (key.ctrl && input === 't') {
-				// Stub: Log or no-op until audio pipeline is wired in later PRs
-				// console.debug('Push-to-talk triggered');
+				void startStopRecording();
 			}
 		},
 		{isActive: isVoiceInputAppropriate},
@@ -425,7 +433,7 @@ export function InteractiveApp({
 					!appState.isSettingsMode &&
 					!appState.planReviewState?.show &&
 					voicePref.enabled && (
-						<VoiceStatusBar state="idle" theme={currentTheme} />
+						<VoiceStatusBar state={voiceState} theme={currentTheme} />
 					)}
 			</Box>
 		</Box>
