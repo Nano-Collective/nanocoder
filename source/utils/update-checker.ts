@@ -123,7 +123,9 @@ export async function checkForUpdates(): Promise<UpdateInfo> {
 
 	try {
 		const latestVersion = await fetchLatestVersion();
-		updateLastCheckTime();
+		if (latestVersion !== null) {
+			updateLastCheckTime();
+		}
 
 		if (!latestVersion) {
 			return {

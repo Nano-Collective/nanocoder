@@ -1,7 +1,15 @@
-import {readFileSync} from 'fs';
+import {
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from 'fs';
 import {dirname, join} from 'path';
 import {fileURLToPath} from 'url';
+import {tmpdir} from 'os';
 import test from 'ava';
+import {resetPreferencesCache} from '@/config/preferences';
 import {checkForUpdates} from './update-checker';
 
 console.log(`\nupdate-checker.spec.ts`);
@@ -12,6 +20,11 @@ const __dirname = dirname(__filename);
 const packageJsonPath = join(__dirname, '../../package.json');
 const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
 const CURRENT_VERSION = packageJson.version as string;
+
+const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+const testConfigDir = mkdtempSync(join(tmpdir(), 'nanocoder-update-checker-'));
+process.env.NANOCODER_CONFIG_DIR = testConfigDir;
+resetPreferencesCache();
 
 // Mock fetch globally for testing
 const originalFetch = globalThis.fetch;
@@ -47,6 +60,19 @@ test.afterEach(() => {
 	// Restore original fetch and env after each test
 	globalThis.fetch = originalFetch;
 	delete process.env.NANOCODER_INSTALL_METHOD;
+});
+
+test.after.always(() => {
+	if (existsSync(testConfigDir)) {
+		rmSync(testConfigDir, {recursive: true, force: true});
+	}
+
+	if (originalConfigDir === undefined) {
+		delete process.env.NANOCODER_CONFIG_DIR;
+	} else {
+		process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+	}
+	resetPreferencesCache();
 });
 
 // Version Comparison Tests
@@ -205,6 +231,27 @@ test('checkForUpdates: handles HTTP 500 error', async t => {
 
 	t.false(result.hasUpdate);
 	t.truthy(result.currentVersion);
+});
+
+test('checkForUpdates: preserves timestamp when version fetch fails', async t => {
+	const preferencesPath = join(testConfigDir, 'nanocoder-preferences.json');
+	const previousTimestamp = 1234567890;
+	writeFileSync(
+		preferencesPath,
+		JSON.stringify({lastUpdateCheck: previousTimestamp}),
+	);
+
+	globalThis.fetch = createMockFetch(503, {
+		error: 'Service unavailable',
+	});
+
+	const result = await checkForUpdates();
+	const preferences = JSON.parse(readFileSync(preferencesPath, 'utf-8')) as {
+		lastUpdateCheck?: number;
+	};
+
+	t.false(result.hasUpdate);
+	t.is(preferences.lastUpdateCheck, previousTimestamp);
 });
 
 test('checkForUpdates: handles timeout (via AbortSignal)', async t => {
