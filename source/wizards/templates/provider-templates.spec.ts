@@ -643,3 +643,35 @@ test('thesean template: sets sdkProvider to anthropic with thesean baseUrl', t =
 		'ship-like/claude-sonnet-5',
 	]);
 });
+
+test('major providers have correct default models', t => {
+	const expectedDefaults: Record<string, string> = {
+		'ollama': 'llama4',
+		'gemini': 'gemini-3.6-flash',
+		'openrouter': 'anthropic/claude-sonnet-5',
+		'openai': 'gpt-5.6-sol',
+		'anthropic': 'claude-sonnet-5',
+		'mistral': 'mistral-large-latest',
+		'z-ai': 'glm-5.2',
+		'z-ai-coding': 'glm-5.2',
+		'github-models': 'openai/gpt-5.6-sol',
+		'chatgpt-codex': 'gpt-5.3-codex',
+		'github-copilot': 'gpt-5.6-sol',
+		'poe': 'gpt-5.6-sol',
+		'atlas-cloud': 'gpt-5.6-sol',
+		'together': 'deepseek-ai/DeepSeek-V4-Pro',
+	};
+
+	for (const [providerId, expectedModel] of Object.entries(expectedDefaults)) {
+		const template = PROVIDER_TEMPLATES.find(t => t.id === providerId);
+		t.truthy(template, `Template ${providerId} should exist`);
+		const modelField = template!.fields.find(f => f.name === 'model');
+		t.truthy(modelField, `Template ${providerId} should have a model field`);
+		t.is(
+			modelField!.default,
+			expectedModel,
+			`Template ${providerId} default model should be ${expectedModel}`
+		);
+	}
+});
+
