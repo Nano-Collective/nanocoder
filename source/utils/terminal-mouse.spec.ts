@@ -1,5 +1,19 @@
 import test from 'ava';
-import {stripMouseSequences} from './terminal-mouse.js';
+import {
+	createUtf8InputDecoder,
+	stripMouseSequences,
+} from './terminal-mouse.js';
+
+test('preserves multibyte text split across stdin chunks', t => {
+	const decode = createUtf8InputDecoder();
+	const input = Buffer.from('너는 누구니?', 'utf8');
+
+	// Split inside the first Korean character (너), as a terminal data event
+	// can do when an IME emits bytes faster than stdin is drained.
+	t.is(decode(input.subarray(0, 1)), '');
+	t.is(decode(input.subarray(1, 3)), '너');
+	t.is(decode(input.subarray(3)), '는 누구니?');
+});
 
 test('passes plain text through untouched', t => {
 	const r = stripMouseSequences('hello world');
