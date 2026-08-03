@@ -137,6 +137,37 @@
 		arrowRight: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>`
 	};
 
+	// Small hover toolbar with a copy-to-clipboard button, appended below a
+	// message bubble. `getText` is called at click time so streamed agent
+	// messages always copy the latest text rather than a stale snapshot.
+	function createCopyToolbar(getText, align) {
+		const toolbar = document.createElement('div');
+		toolbar.className = 'flex h-5 items-center opacity-0 group-hover:opacity-100 transition-opacity ' +
+			(align === 'end' ? 'justify-end' : 'justify-start');
+
+		const btn = document.createElement('button');
+		btn.className = 'flex items-center justify-center bg-transparent border-none cursor-pointer text-vscode-fg opacity-60 hover:opacity-100 p-1 rounded hover:bg-vscode-toolbarHover [&_svg]:mr-0';
+		btn.title = 'Copy';
+		btn.innerHTML = ICONS.clipboard;
+
+		btn.addEventListener('click', () => {
+			const text = getText();
+			if (!text) return;
+			navigator.clipboard.writeText(text).then(() => {
+				btn.innerHTML = ICONS.success;
+				btn.title = 'Copied!';
+				clearTimeout(btn._resetTimer);
+				btn._resetTimer = setTimeout(() => {
+					btn.innerHTML = ICONS.clipboard;
+					btn.title = 'Copy';
+				}, 1500);
+			});
+		});
+
+		toolbar.appendChild(btn);
+		return toolbar;
+	}
+
 	// --- Send / Stop toggle logic ---
 	function setProcessing(active) {
 		isProcessing = active;
@@ -220,11 +251,15 @@
 		const loader = document.getElementById('session-loader');
 		if (loader) loader.remove();
 
+		const wrapper = document.createElement('div');
+		wrapper.className = 'group flex flex-col min-w-0 shrink-0 ' +
+			(role === 'user' ? 'self-end items-end max-w-[85%]' : 'self-start items-start max-w-full');
+
 		const msgEl = document.createElement('div');
-		msgEl.className = 'leading-snug break-words shrink-0 min-w-0 ' +
+		msgEl.className = 'leading-snug break-words min-w-0 w-full ' +
 			(role === 'user'
-				? 'self-end bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-border px-3 py-2 rounded-lg max-w-[85%]'
-				: 'self-start max-w-full');
+				? 'bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-border px-3 py-2 rounded-lg'
+				: '');
 
 		const textContainer = document.createElement('div');
 		textContainer.className = 'markdown-body';
@@ -238,7 +273,10 @@
 		} // Phase 3: plain text for now, but incrementally updateable
 		msgEl.appendChild(textContainer);
 
-		messagesContainer.appendChild(msgEl);
+		wrapper.appendChild(msgEl);
+		wrapper.appendChild(createCopyToolbar(() => content, role === 'user' ? 'end' : 'start'));
+
+		messagesContainer.appendChild(wrapper);
 		scrollToBottom();
 
 		if (role === 'agent') {
@@ -256,8 +294,11 @@
 
 		if (!currentTurnEl || !currentTextEl) {
 			// First chunk for this turn
+			const wrapper = document.createElement('div');
+			wrapper.className = 'group flex flex-col min-w-0 self-start items-start max-w-full';
+
 			const msgEl = document.createElement('div');
-			msgEl.className = 'message agent min-w-0';
+			msgEl.className = 'message agent min-w-0 w-full';
 
 			const textContainer = document.createElement('div');
 			textContainer.className = 'markdown-body leading-snug break-words';
@@ -270,7 +311,10 @@
 			}
 
 			msgEl.appendChild(textContainer);
-			messagesContainer.appendChild(msgEl);
+			wrapper.appendChild(msgEl);
+			wrapper.appendChild(createCopyToolbar(() => wrapper.dataset.rawText || '', 'start'));
+			wrapper.dataset.rawText = currentTurnText;
+			messagesContainer.appendChild(wrapper);
 
 			currentTurnEl = msgEl;
 			currentTextEl = textContainer;
@@ -278,6 +322,9 @@
 		} else {
 			// Append to existing turn
 			currentTurnText += textChunk;
+			if (currentTurnEl.parentElement) {
+				currentTurnEl.parentElement.dataset.rawText = currentTurnText;
+			}
 
 			if (typeof marked !== 'undefined') {
 				if (!renderTimeout) {
