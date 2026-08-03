@@ -6,6 +6,7 @@ import {
 	PROTOCOL_VERSION,
 	DEFAULT_PORT,
 } from './protocol';
+import {TIMEOUT_PROVIDER_CONNECTION_MS} from '../../../source/constants';
 
 export type MessageHandler = (message: ServerMessage) => void;
 
@@ -75,7 +76,7 @@ export class WebSocketClient {
 						this.ws?.close();
 						resolve(false);
 					}
-				}, 5000);
+				}, TIMEOUT_PROVIDER_CONNECTION_MS);
 			} catch (error) {
 				this.isConnecting = false;
 				this.outputChannel.appendLine(`Connection failed: ${error}`);
