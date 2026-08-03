@@ -50,7 +50,7 @@ const executeReadFile = async (args: {
 			output += `${'='.repeat(50)}\n\n`;
 
 			output += `Type: ${type}\n`;
-			output += `Size: ${size.toLocaleString()} bytes\n`;
+			output += `Size: ${size} bytes\n`;
 			output += `Last Modified: ${lastModified}\n`;
 
 			// For regular files, try to get additional info
@@ -63,8 +63,8 @@ const executeReadFile = async (args: {
 					const lines = cached.lines;
 					const content = cached.content;
 
-					output += `Lines: ${lines.length.toLocaleString()}\n`;
-					output += `Estimated Tokens: ~${calculateTokens(content).toLocaleString()}\n`;
+					output += `Lines: ${lines.length}\n`;
+					output += `Estimated Tokens: ~${calculateTokens(content)}\n`;
 
 					// Detect file type from extension
 					const fileType = getFileType(absPath);
@@ -130,9 +130,9 @@ const executeReadFile = async (args: {
 
 			let output = `File: ${args.path}\n`;
 			output += `Type: ${fileType}\n`;
-			output += `Total lines: ${totalLines.toLocaleString()}\n`;
-			output += `Size: ${fileSize.toLocaleString()} bytes\n`;
-			output += `Estimated tokens: ~${estimatedTokens.toLocaleString()}\n\n`;
+			output += `Total lines: ${totalLines}\n`;
+			output += `Size: ${fileSize} bytes\n`;
+			output += `Estimated tokens: ~${estimatedTokens}\n\n`;
 
 			if (totalLines <= FILE_READ_CHUNKING_HINT_THRESHOLD_LINES) {
 				output += `[Medium file - To read specific sections, call read_file with start_line and end_line]\n`;
@@ -460,7 +460,7 @@ const readFileValidator = async (args: {
 				if (line && line.length > MAX_LINE_LENGTH_CHARS) {
 					return {
 						valid: false,
-						error: `File "${args.path}" contains minified or binary content (line ${i + 1} has ${line.length.toLocaleString()} characters). This file cannot be read as it would consume excessive tokens without providing useful information.`,
+						error: `File "${args.path}" contains minified or binary content (line ${i + 1} has ${line.length} characters). This file cannot be read as it would consume excessive tokens without providing useful information.`,
 					};
 				}
 			}
