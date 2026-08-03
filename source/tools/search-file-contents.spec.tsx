@@ -763,10 +763,13 @@ test.serial(
 				// Count x's in result - should be 300 - 12 (searchTarget) = 288
 				const contentLine = result.split('\n').find(l => l.includes('searchTarget'));
 				t.truthy(contentLine, 'Should have content line');
-				// The trimmed content should be max 300 chars + ellipsis
-				const trimmedContent = contentLine!.trim();
+				// Content follows the `file:line:` prefix in grep-style output;
+				// strip it before checking the truncated length.
+				const contentMatch = contentLine!.match(/^.+?:\d+:(.*)$/);
+				t.truthy(contentMatch, 'Content line should be in file:line:content format');
+				const trimmedContent = contentMatch![1];
 				t.true(
-					trimmedContent.length <= 302, // 300 + ellipsis (1 char) + possible whitespace
+					trimmedContent.length <= 301, // 300 + ellipsis (1 char)
 					`Content should be truncated, got ${trimmedContent.length} chars`,
 				);
 			} finally {
