@@ -142,7 +142,7 @@
 	// messages always copy the latest text rather than a stale snapshot.
 	function createCopyToolbar(getText, align) {
 		const toolbar = document.createElement('div');
-		toolbar.className = 'flex h-5 items-center opacity-0 group-hover:opacity-100 transition-opacity ' +
+		toolbar.className = 'flex h-5 items-center opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity ' +
 			(align === 'end' ? 'justify-end' : 'justify-start');
 
 		const btn = document.createElement('button');
@@ -150,14 +150,19 @@
 		btn.title = 'Copy';
 		btn.innerHTML = ICONS.clipboard;
 
+		let resetTimer = null;
 		btn.addEventListener('click', () => {
 			const text = getText();
 			if (!text) return;
 			navigator.clipboard.writeText(text).then(() => {
 				btn.innerHTML = ICONS.success;
 				btn.title = 'Copied!';
-				clearTimeout(btn._resetTimer);
-				btn._resetTimer = setTimeout(() => {
+			}).catch(() => {
+				btn.innerHTML = ICONS.error;
+				btn.title = 'Copy failed';
+			}).finally(() => {
+				clearTimeout(resetTimer);
+				resetTimer = setTimeout(() => {
 					btn.innerHTML = ICONS.clipboard;
 					btn.title = 'Copy';
 				}, 1500);
