@@ -40,6 +40,43 @@ Create a `.mcp.json` file in your project root:
 
 Use `/mcp` to view connected servers and their tools. Use `/setup-mcp` for interactive setup.
 
+## Optional: Local-First Cross-Session Memory
+
+Nanocoder does not persist conversation context between separate runs. If you
+want durable notes about a project, you can opt into a local-first memory MCP
+server without changing Nanocoder itself.
+
+The following example uses [Vestige](https://github.com/samvallad33/vestige),
+but the same configuration shape works with any memory server that provides an
+MCP `stdio` interface:
+
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "vestige-mcp-server"],
+      "description": "Optional local-first cross-session memory"
+    }
+  }
+}
+```
+
+Add the entry to your project or global `.mcp.json`, then use `/mcp` to check
+that the server connected. The available tool names and memory workflow depend
+on the server you choose; Nanocoder only starts the MCP process and exposes
+its tools to the model.
+
+Before enabling a memory server, review its documentation and configuration:
+
+- Confirm where it stores data and whether it makes any network requests.
+- Treat stored prompts, code, and decisions as sensitive project data.
+- Do not add memory-writing tools to `alwaysAllow` unless you explicitly want
+  them to run without confirmation.
+- A third-party example in this section is optional and is not an official
+  Nanocoder integration or endorsement.
+
 > **Tool visibility note:** Connected MCP servers may be hidden from the model by the current `/tune` tool profile. MCP tools are available to the model only when the resolved profile is `full`; the default `auto` profile switches small local models to `minimal` or `nano`, which intentionally filters MCP tools to keep the prompt small. If `/mcp` shows a server but the model cannot call its tools, run `/tune` and set **Tool Profile** to **full** (or switch to a larger/cloud model so `auto` resolves to `full`).
 
 ## Config File Locations
