@@ -166,6 +166,11 @@ export interface WebviewMessageDeleteSession {
 	sessionId: string;
 }
 
+export interface WebviewMessageShowError {
+	type: 'showError';
+	message: string;
+}
+
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
 	| WebviewMessageSubmitMessage
@@ -179,4 +184,5 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageSetProvider
 	| WebviewMessageListSessions
 	| WebviewMessageResumeSession
-	| WebviewMessageDeleteSession;
+	| WebviewMessageDeleteSession
+	| WebviewMessageShowError;

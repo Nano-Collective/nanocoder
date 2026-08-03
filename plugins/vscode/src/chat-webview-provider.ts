@@ -158,6 +158,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 							this._broadcastSessions();
 						});
 						break;
+					case 'showError':
+						this._outputChannel.appendLine(`[Webview] Error: ${message.message}`);
+						vscode.window.showErrorMessage(message.message);
+						break;
 				}
 			}
 		);

@@ -180,6 +180,9 @@
 	// Image upload logic
 	if (addImageBtn && imageUpload) {
 		addImageBtn.addEventListener('click', () => {
+			if (isHistoryView) {
+				showChatView();
+			}
 			imageUpload.click();
 		});
 		
@@ -204,21 +207,60 @@
 		}
 	});
 
+	const MAX_ATTACHMENTS = 10;
+	const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+	const SUPPORTED_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+
 	function processImageFiles(files) {
+		let validFiles = [];
 		for (const file of files) {
-			if (!file.type.startsWith('image/')) continue;
-			
+			if (!SUPPORTED_TYPES.includes(file.type)) {
+				vscode.postMessage({ type: 'showError', message: `Unsupported image format: ${file.name}` });
+				continue;
+			}
+			if (file.size > MAX_FILE_SIZE) {
+				vscode.postMessage({ type: 'showError', message: `Image exceeds 10 MB: ${file.name}` });
+				continue;
+			}
+			validFiles.push(file);
+		}
+
+		if (pendingImages.length + validFiles.length > MAX_ATTACHMENTS) {
+			vscode.postMessage({ type: 'showError', message: `Maximum attachment count reached (${MAX_ATTACHMENTS})` });
+			validFiles = validFiles.slice(0, MAX_ATTACHMENTS - pendingImages.length);
+		}
+
+		if (validFiles.length === 0) return;
+
+		let pendingReads = validFiles.length;
+		if (addImageBtn) {
+			addImageBtn.disabled = true;
+			addImageBtn.classList.add('opacity-50', 'cursor-not-allowed');
+		}
+
+		for (const file of validFiles) {
 			const reader = new FileReader();
 			reader.onload = (e) => {
 				const result = e.target.result;
 				if (typeof result === 'string') {
-					// result is like "data:image/png;base64,iVBOR..."
 					const commaIdx = result.indexOf(',');
 					if (commaIdx !== -1) {
 						const data = result.substring(commaIdx + 1);
 						pendingImages.push({ data, mimeType: file.type });
 						renderImagePreviews();
 					}
+				}
+				pendingReads--;
+				if (pendingReads === 0 && addImageBtn) {
+					addImageBtn.disabled = false;
+					addImageBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+				}
+			};
+			reader.onerror = () => {
+				pendingReads--;
+				if (pendingReads === 0 && addImageBtn) {
+					addImageBtn.disabled = false;
+					addImageBtn.classList.remove('opacity-50', 'cursor-not-allowed');
 				}
 			};
 			reader.readAsDataURL(file);
@@ -233,6 +275,7 @@
 			wrapper.className = 'relative w-12 h-12 rounded overflow-hidden border border-vscode-input-border shrink-0 group';
 			
 			const imageEl = document.createElement('img');
+			// codeql[js/xss] False positive: mimeType is strictly validated and data is base64 encoded
 			imageEl.src = `data:${img.mimeType};base64,${img.data}`;
 			imageEl.className = 'w-full h-full object-cover cursor-pointer hover:opacity-80 transition-opacity';
 			imageEl.onclick = () => openImageModal(imageEl.src);
@@ -258,8 +301,11 @@
 	
 	function openImageModal(src) {
 		if (imageModal && modalImage) {
-			modalImage.src = src;
-			imageModal.classList.remove('hidden');
+			// Validate src to prevent untrusted URL redirection (CodeQL)
+			if (src.startsWith('data:image/')) {
+				modalImage.src = src;
+				imageModal.classList.remove('hidden');
+			}
 		}
 	}
 	
@@ -310,7 +356,7 @@
 		pendingImages = [];
 		renderImagePreviews();
 
-		// Optimistically append user message 
+		// Optimistically append user message
 		appendMessage(text, 'user', imagesToSubmit);
 
 		if (!isProcessing) {
@@ -341,6 +387,7 @@
 			imagesContainer.className = 'flex flex-wrap gap-2 mb-2';
 			images.forEach(img => {
 				const imgEl = document.createElement('img');
+				// codeql[js/xss] False positive: mimeType is strictly validated and data is base64 encoded
 				imgEl.src = `data:${img.mimeType};base64,${img.data}`;
 				imgEl.className = 'w-24 h-24 object-cover rounded cursor-pointer border border-vscode-border hover:opacity-90';
 				imgEl.onclick = () => openImageModal(imgEl.src);
@@ -446,6 +493,7 @@
 				appendMessage(message.content, 'agent');
 				break;
 			case 'clear':
+				if (isHistoryView) showChatView();
 				if (renderTimeout) { clearTimeout(renderTimeout); renderTimeout = null; }
 				if (message.isLoading) {
 					messagesContainer.innerHTML = `<div id="session-loader" class="flex flex-col items-center justify-center h-full opacity-50 mt-10">${ICONS.pending}<div class="mt-2 text-xs">Loading session...</div></div>`;
@@ -583,9 +631,7 @@
 		if (update.sessionUpdate === 'user_message_chunk') {
 			if (update.content) {
 				endCurrentTextBlock();
-				if (update.content.type === 'image' && update.content.data) {
-					appendMessage(null, 'user', [{ data: update.content.data, mimeType: update.content.mimeType || 'image/png' }]);
-				} else if (update.content.text) {
+				if (update.content.text) {
 					appendMessage(update.content.text, 'user');
 				}
 			}

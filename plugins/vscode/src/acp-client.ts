@@ -278,7 +278,7 @@ export class NanocoderAcpClient {
 	async prompt(text: string, images?: { data: string, mimeType: string }[]): Promise<void> {
 		if (!this.connection || !this._sessionId) return;
 		try {
-			const promptData: any[] = [{ type: 'text', text }];
+			const promptData: import('@agentclientprotocol/sdk').ContentBlock[] = [{ type: 'text', text }];
 			if (images && images.length > 0) {
 				for (const img of images) {
 					promptData.push({ type: 'image', data: img.data, mimeType: img.mimeType });
