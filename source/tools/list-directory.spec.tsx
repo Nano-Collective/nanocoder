@@ -102,6 +102,25 @@ test('ListDirectoryFormatter shows tree format indicator', t => {
 	t.regex(output!, /tree/);
 });
 
+test('ListDirectoryFormatter shows sizes info', t => {
+	const formatter = listDirectoryTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter(
+		{path: '.', showSizes: true},
+		'Directory contents for ".":\n\nfile.ts (1000 bytes)',
+	);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Sizes:/);
+	t.regex(output!, /shown/);
+});
+
 test('ListDirectoryFormatter handles error results gracefully', t => {
 	const formatter = listDirectoryTool.formatter;
 	if (!formatter) {
@@ -209,7 +228,31 @@ test.serial('list_directory shows files and directories', async t => {
 	}
 });
 
-test.serial('list_directory shows file sizes', async t => {
+test.serial('list_directory does not show file sizes by default', async t => {
+	t.timeout(10000);
+	const originalCwd = process.cwd();
+
+	try {
+		const testDir = join(process.cwd(), 'test-listdir-sizes-default-temp');
+		mkdirSync(testDir, {recursive: true});
+		writeFileSync(join(testDir, 'largefile.txt'), 'x'.repeat(1000));
+
+		process.chdir(testDir);
+
+		const result = await listDirectoryTool.tool.execute!(
+			{},
+			{toolCallId: 'test', messages: []},
+		);
+
+		t.true(result.includes('largefile.txt'));
+		t.false(result.includes('bytes'));
+	} finally {
+		process.chdir(originalCwd);
+		rmSync(join(originalCwd, 'test-listdir-sizes-default-temp'), {recursive: true, force: true});
+	}
+});
+
+test.serial('list_directory shows file sizes when showSizes=true', async t => {
 	t.timeout(10000);
 	const originalCwd = process.cwd();
 
@@ -221,12 +264,13 @@ test.serial('list_directory shows file sizes', async t => {
 		process.chdir(testDir);
 
 		const result = await listDirectoryTool.tool.execute!(
-			{},
+			{showSizes: true},
 			{toolCallId: 'test', messages: []},
 		);
 
-		// Should show file size in bytes
-		t.true(result.includes('bytes') || result.includes('1,000'));
+		// Should show file size as a plain number (no thousands separators)
+		t.true(result.includes('(1000 bytes)'));
+		t.false(result.includes('1,000'));
 	} finally {
 		process.chdir(originalCwd);
 		rmSync(join(originalCwd, 'test-listdir-sizes-temp'), {recursive: true, force: true});

@@ -17,6 +17,7 @@ interface ListDirectoryArgs {
 	recursive?: boolean;
 	maxDepth?: number;
 	tree?: boolean;
+	showSizes?: boolean;
 	showHiddenFiles?: boolean;
 }
 
@@ -34,6 +35,7 @@ const executeListDirectory = async (
 	const recursive = args.recursive ?? false;
 	const maxDepth = args.maxDepth ?? 3;
 	const tree = args.tree ?? false;
+	const showSizes = args.showSizes ?? false;
 	const showHiddenFiles = args.showHiddenFiles ?? false;
 
 	// Validate path
@@ -90,9 +92,9 @@ const executeListDirectory = async (
 
 					const relativePath = join(relativeTo, item.name);
 
-					// Only get stats for files (to get size)
+					// Only get stats for files (to get size) when explicitly requested
 					let size: number | undefined;
-					if (type === 'file') {
+					if (showSizes && type === 'file') {
 						try {
 							const stats = await lstat(fullPath);
 							size = stats.size;
@@ -158,9 +160,7 @@ const executeListDirectory = async (
 							? '@'
 							: '';
 				const displayPath = recursive ? entry.relativePath : entry.name;
-				const sizeStr = entry.size
-					? ` (${entry.size.toLocaleString()} bytes)`
-					: '';
+				const sizeStr = showSizes && entry.size ? ` (${entry.size} bytes)` : '';
 				output += `${displayPath}${suffix}${sizeStr}\n`;
 			}
 		}
@@ -185,7 +185,7 @@ const executeListDirectory = async (
 
 const listDirectoryCoreTool = tool({
 	description:
-		'List directory contents with file sizes. Use this INSTEAD OF bash ls/ls -la/ls -R commands. Use recursive=true with maxDepth for nested exploration. Use tree=true for flat paths (easier to parse). Best for: exploring unknown directories, seeing file sizes, understanding project structure. For finding specific files by pattern, use find_files instead.',
+		'List directory contents. Use this INSTEAD OF bash ls/ls -la/ls -R commands. Use recursive=true with maxDepth for nested exploration. Use tree=true for flat paths (easier to parse). Use showSizes=true to include per-entry byte sizes. Best for: exploring unknown directories, seeing file sizes, understanding project structure. For finding specific files by pattern, use find_files instead.',
 	inputSchema: jsonSchema<ListDirectoryArgs>({
 		type: 'object',
 		properties: {
@@ -208,6 +208,11 @@ const listDirectoryCoreTool = tool({
 				type: 'boolean',
 				description:
 					'If true, show flat paths output (one per line) instead of formatted tree. Great for LLM to see project structure.',
+			},
+			showSizes: {
+				type: 'boolean',
+				description:
+					'If true, include per-entry byte sizes (default: false). Requires an extra stat call per file and costs tokens; use only when file size is relevant.',
 			},
 			showHiddenFiles: {
 				type: 'boolean',
@@ -288,6 +293,13 @@ const ListDirectoryFormatter = React.memo(
 					<Box>
 						<Text color={colors.secondary}>Format: </Text>
 						<Text color={colors.text}>tree</Text>
+					</Box>
+				)}
+
+				{args.showSizes && (
+					<Box>
+						<Text color={colors.secondary}>Sizes: </Text>
+						<Text color={colors.text}>shown</Text>
 					</Box>
 				)}
 
