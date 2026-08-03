@@ -5,14 +5,25 @@ import {join} from 'node:path';
 import React from 'react';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import type {VoiceState} from '@/components/voice-status-bar';
+import {getVoicePreference} from '@/config/preferences';
 import {generateKey} from '@/session/key-generator';
-import type {ImageAttachment, Message} from '@/types/core';
+import type {Message} from '@/types/index';
 import {formatForSpeech} from '@/utils/format-for-speech';
+import {
+	hasDeclinedVoiceInstallForSession,
+	setDeclinedVoiceInstallForSession,
+	signalVoiceInstallPrompt,
+} from '@/utils/voice-install-queue';
 
 export interface VoicePlugin {
 	recordAudio: (
 		filePath: string,
 		durationMs?: number,
+		signal?: AbortSignal,
+	) => Promise<void>;
+	playAudio: (
+		filePath: string,
+		timeoutMs?: number,
 		signal?: AbortSignal,
 	) => Promise<void>;
 	transcribeAudio: (
@@ -26,26 +37,21 @@ export interface VoicePlugin {
 		timeoutMs?: number,
 		signal?: AbortSignal,
 	) => Promise<void>;
-	playAudio: (
-		filePath: string,
-		timeoutMs?: number,
-		signal?: AbortSignal,
-	) => Promise<void>;
-	playPhrase: (phrase: string) => Promise<void>;
+	playPhrase: (text: string) => Promise<void>;
+	checkDependenciesInstalled?: (
+		customCheck?: unknown,
+	) => Promise<{installed: boolean; missing: ('sox' | 'whisper' | 'piper')[]}>;
+	installDependencies?: (options?: unknown) => Promise<void>;
+	createVadEngine?: (options?: unknown) => unknown;
 }
 
 export interface UseVoiceProps {
 	handleUserSubmit: (
-		message: string,
-		displayValue: string,
-		images?: ImageAttachment[],
+		submittedText: string,
+		displayText: string,
 	) => Promise<void>;
 	messages: Message[];
 	addToChatQueue: (component: React.ReactNode) => void;
-	/**
-	 * Injectable plugin loader; defaults to the real dynamic import.
-	 * Override in tests to supply a mock without touching the module registry.
-	 */
 	loadPlugin?: () => Promise<VoicePlugin>;
 }
 
@@ -67,42 +73,82 @@ export function useVoice({
 	const recordingAudioPromiseRef = React.useRef<Promise<void> | null>(null);
 	const activeFileRef = React.useRef<string | null>(null);
 
-	// Deferred TTS state: armed just before handleUserSubmit is awaited so the
-	// messages-watching useEffect below can drive the TTS step on the next render.
-	//
-	// Why not read messages immediately after `await handleUserSubmit`?
-	//
-	// handleUserSubmit (→ handleChatMessage → processAssistantResponse) fully
-	// awaits the entire LLM response and calls React's setMessages() before its
-	// promise resolves. However setMessages() only *schedules* a React state
-	// update — the updated messages array is NOT reflected in this hook's
-	// `messages` prop (or any ref driven by useEffect) until after the next
-	// render cycle. Arming these refs and letting a useEffect drive the speaking
-	// → idle transition is the correct, race-free pattern here.
 	const pluginRef = React.useRef<VoicePlugin | null>(null);
 	const pendingTTSRef = React.useRef(false);
-	// Safety net: if handleUserSubmit resolves but no assistant message ever
-	// lands (e.g. the conversation loop gives up after empty turns and returns
-	// without writing a role==='assistant' entry), pendingTTSRef would stay true
-	// and state would be stuck on 'processing' forever. This timeout resets both
-	// unconditionally after 90 s so the UI always recovers.
 	const ttsTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(
 		null,
 	);
+	const vadEngineRef = React.useRef<unknown>(null);
 
 	const cleanupActiveFile = React.useCallback(() => {
 		if (activeFileRef.current && existsSync(activeFileRef.current)) {
 			try {
 				unlinkSync(activeFileRef.current);
 			} catch {
-				// Best effort — temp file cleanup should never fail the pipeline
+				// Best effort
 			}
 
 			activeFileRef.current = null;
 		}
 	}, []);
 
-	// Abort and clean up temp files on unmount to avoid stale operations
+	const ensureDependencies = React.useCallback(
+		async (plugin: VoicePlugin): Promise<boolean> => {
+			if (!plugin.checkDependenciesInstalled) {
+				return true;
+			}
+
+			try {
+				const check = await plugin.checkDependenciesInstalled();
+				if (check.installed) {
+					return true;
+				}
+
+				if (hasDeclinedVoiceInstallForSession()) {
+					addToChatQueue(
+						React.createElement(InfoMessage, {
+							key: generateKey('voice-dep-declined'),
+							message:
+								'Voice mode dependencies missing. Installation declined for this session.',
+						}),
+					);
+					return false;
+				}
+
+				const approved = await signalVoiceInstallPrompt({
+					missing: check.missing,
+					installDependencies: async onProgress => {
+						if (plugin.installDependencies) {
+							await plugin.installDependencies({onProgress});
+						}
+					},
+				});
+
+				if (!approved) {
+					setDeclinedVoiceInstallForSession(true);
+					addToChatQueue(
+						React.createElement(InfoMessage, {
+							key: generateKey('voice-dep-declined'),
+							message: 'Voice dependency installation cancelled.',
+						}),
+					);
+					return false;
+				}
+
+				return true;
+			} catch (err) {
+				addToChatQueue(
+					React.createElement(ErrorMessage, {
+						key: generateKey('voice-dep-error'),
+						message: `Voice dependency setup failed: ${err instanceof Error ? err.message : String(err)}`,
+					}),
+				);
+				return false;
+			}
+		},
+		[addToChatQueue],
+	);
+
 	React.useEffect(() => {
 		return () => {
 			if (abortControllerRef.current) {
@@ -115,23 +161,150 @@ export function useVoice({
 				ttsTimeoutRef.current = null;
 			}
 
+			if (vadEngineRef.current) {
+				const engine = vadEngineRef.current as {stop?: () => void};
+				if (typeof engine.stop === 'function') {
+					engine.stop();
+				}
+				vadEngineRef.current = null;
+			}
+
 			pendingTTSRef.current = false;
 			pluginRef.current = null;
 			cleanupActiveFile();
 		};
 	}, [cleanupActiveFile]);
 
-	// Deferred TTS: fires after React commits the updated messages prop.
-	// pendingTTSRef is armed in startStopRecording before handleUserSubmit is
-	// awaited, so this effect is guaranteed to run with the assistant reply in
-	// `messages` regardless of how React schedules the re-render.
+	// Hands-free VAD effect
+	React.useEffect(() => {
+		const pref = getVoicePreference();
+		if (!pref.enabled || pref.activationMode !== 'hands-free') {
+			if (vadEngineRef.current) {
+				const engine = vadEngineRef.current as {stop?: () => void};
+				if (typeof engine.stop === 'function') {
+					engine.stop();
+				}
+				vadEngineRef.current = null;
+			}
+			return;
+		}
+
+		if (state !== 'idle' || vadEngineRef.current) {
+			return;
+		}
+
+		let isCancelled = false;
+
+		const initVad = async () => {
+			let plugin: VoicePlugin;
+			try {
+				plugin = await loadPlugin();
+			} catch {
+				return;
+			}
+
+			const depsOk = await ensureDependencies(plugin);
+			if (!depsOk || isCancelled) return;
+
+			if (!plugin.createVadEngine) return;
+
+			const engine = plugin.createVadEngine() as {
+				start: () => void;
+				stop: () => void;
+				// biome-ignore lint/suspicious/noExplicitAny: event handler callback
+				on: (event: string, cb: (...args: any[]) => void) => void;
+			};
+
+			engine.on('speech_start', () => {
+				setState('listening');
+			});
+
+			engine.on('speech_final', async (evt: {filePath: string}) => {
+				setState('processing');
+				activeFileRef.current = evt.filePath;
+				try {
+					const transcribed = await plugin.transcribeAudio(
+						evt.filePath,
+						60_000,
+					);
+					cleanupActiveFile();
+
+					if (!transcribed || transcribed.trim() === '') {
+						addToChatQueue(
+							React.createElement(InfoMessage, {
+								key: generateKey('voice-vad-no-speech'),
+								message: 'No speech detected.',
+							}),
+						);
+						setState('idle');
+						return;
+					}
+
+					pendingTTSRef.current = true;
+					pluginRef.current = plugin;
+
+					ttsTimeoutRef.current = setTimeout(() => {
+						if (pendingTTSRef.current) {
+							pendingTTSRef.current = false;
+							pluginRef.current = null;
+							ttsTimeoutRef.current = null;
+							setState('idle');
+						}
+					}, 90_000);
+
+					await handleUserSubmit(transcribed, transcribed);
+				} catch (err) {
+					cleanupActiveFile();
+					setState('idle');
+					addToChatQueue(
+						React.createElement(ErrorMessage, {
+							key: generateKey('voice-vad-error'),
+							message: `VAD pipeline error: ${err instanceof Error ? err.message : String(err)}`,
+						}),
+					);
+				}
+			});
+
+			engine.on('error', (err: Error) => {
+				addToChatQueue(
+					React.createElement(ErrorMessage, {
+						key: generateKey('voice-vad-engine-error'),
+						message: `VAD engine error: ${err.message}`,
+					}),
+				);
+			});
+
+			engine.start();
+			vadEngineRef.current = engine;
+		};
+
+		void initVad();
+
+		return () => {
+			isCancelled = true;
+			if (vadEngineRef.current) {
+				const engine = vadEngineRef.current as {stop?: () => void};
+				if (typeof engine.stop === 'function') {
+					engine.stop();
+				}
+				vadEngineRef.current = null;
+			}
+		};
+	}, [
+		state,
+		loadPlugin,
+		ensureDependencies,
+		handleUserSubmit,
+		addToChatQueue,
+		cleanupActiveFile,
+	]);
+
 	React.useEffect(() => {
 		if (!pendingTTSRef.current || !pluginRef.current) return;
 
 		const lastMsg = messages[messages.length - 1];
 		if (!lastMsg || lastMsg.role !== 'assistant') return;
 
-		// Assistant reply arrived — cancel the safety timeout
 		if (ttsTimeoutRef.current) {
 			clearTimeout(ttsTimeoutRef.current);
 			ttsTimeoutRef.current = null;
@@ -196,6 +369,11 @@ export function useVoice({
 			return;
 		}
 
+		const depsOk = await ensureDependencies(plugin);
+		if (!depsOk) {
+			return;
+		}
+
 		setState('listening');
 		const abortController = new AbortController();
 		abortControllerRef.current = abortController;
@@ -217,9 +395,6 @@ export function useVoice({
 			try {
 				await audioPromise;
 			} catch (err) {
-				// Aborting the recording is expected for toggle-to-stop. A proper
-				// AbortError (name === 'AbortError') propagates to the outer catch
-				// where it is handled gracefully. Only rethrow non-abort errors.
 				if (!(err instanceof Error) || !err.message?.includes('AbortError')) {
 					throw err;
 				}
@@ -246,20 +421,9 @@ export function useVoice({
 				return;
 			}
 
-			// Arm deferred TTS BEFORE awaiting handleUserSubmit. By the time the
-			// promise resolves the LLM reply is in the pipeline, but React hasn't
-			// re-rendered yet. The messages useEffect above drives the
-			// processing → speaking → idle transition once the messages prop updates.
 			pendingTTSRef.current = true;
 			pluginRef.current = plugin;
 
-			// Safety timeout: some conversation-loop exit paths (empty-turn give-up,
-			// malformed-tool give-up, etc.) call `return` without ever appending an
-			// assistant message. handleUserSubmit resolves successfully in those cases
-			// but no assistant message ever lands, so the messages useEffect never
-			// clears pendingTTSRef and state stays stuck on 'processing' forever.
-			// This timeout guarantees recovery within 90 s regardless of how the
-			// conversation loop exits.
 			ttsTimeoutRef.current = setTimeout(() => {
 				if (pendingTTSRef.current) {
 					pendingTTSRef.current = false;
@@ -270,10 +434,7 @@ export function useVoice({
 			}, 90_000);
 
 			await handleUserSubmit(transcribedText, transcribedText);
-			// Intentionally no setState here — the deferred TTS useEffect owns the
-			// remaining state transitions.
 		} catch (error) {
-			// Reset deferred TTS in case it was armed before the error occurred
 			if (ttsTimeoutRef.current) {
 				clearTimeout(ttsTimeoutRef.current);
 				ttsTimeoutRef.current = null;
@@ -297,7 +458,14 @@ export function useVoice({
 				}),
 			);
 		}
-	}, [state, handleUserSubmit, addToChatQueue, cleanupActiveFile, loadPlugin]);
+	}, [
+		state,
+		handleUserSubmit,
+		addToChatQueue,
+		cleanupActiveFile,
+		loadPlugin,
+		ensureDependencies,
+	]);
 
 	return {
 		state,
