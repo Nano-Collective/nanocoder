@@ -106,28 +106,36 @@ select option {
 .context-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  max-width: 180px;
-  padding: 2px 6px 2px 5px;
-  border-radius: 4px;
-  font-size: 0.8em;
+  gap: 6px;
+  max-width: 200px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--vscode-dropdown-border, rgba(150, 150, 150, 0.2));
+  background-color: var(--vscode-editorWidget-background);
+  font-size: 0.85em;
   font-weight: 500;
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
-  transition: opacity 120ms;
+  transition: all 150ms ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
-.context-chip:hover { opacity: 0.8; }
+.context-chip:hover {
+  border-color: var(--vscode-focusBorder);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  opacity: 0.95;
+}
 .context-chip .chip-name {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .context-chip .chip-remove {
   margin-left: 2px;
-  opacity: 0.6;
+  opacity: 0.5;
   font-size: 1.1em;
   line-height: 1;
   cursor: pointer;
+  transition: opacity 150ms ease;
 }
 .context-chip .chip-remove:hover { opacity: 1; }
 

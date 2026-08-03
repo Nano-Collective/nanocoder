@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import { WebviewToExtensionMessage, ExtensionToWebviewMessage } from './webview-protocol';
 
 import { NanocoderAcpClient } from './acp-client';
@@ -159,8 +161,6 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 						});
 						break;
 					case 'requestPathInfo': {
-						const fs = require('fs');
-						const path = require('path');
 						try {
 							const stat = fs.statSync(message.path);
 							const kind = stat.isDirectory() ? 'folder' : 'file';
@@ -180,8 +180,6 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 						}).then(uris => {
 							if (uris && uris.length > 0) {
 								uris.forEach(uri => {
-									const fs = require('fs');
-									const path = require('path');
 									try {
 										const stat = fs.statSync(uri.fsPath);
 										const kind = stat.isDirectory() ? 'folder' : 'file';
@@ -238,6 +236,41 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		this.postMessage({type: 'updateSessions', sessions});
 	}
 
+	/**
+	 * Expand @[file] and @[folder] references injected by the webview into
+	 * file/directory contents. This resolves attached context inline so the LLM
+	 * receives the content directly in the prompt, removing the need for a
+	 * read_file / list_directory tool call. Without this, providers like Atlas
+	 * Cloud that return HTTP 400 on tool-result messages would break every
+	 * time the user attached a file or folder.
+	 */
+	private _expandContextAttachments(text: string): string {
+		return text.replace(
+			/@\[(file|folder)\] ([^\n]+)/g,
+			(_match, kind: string, rawPath: string) => {
+				const filePath = rawPath.trim();
+				try {
+					if (kind === 'folder') {
+						// Emit a compact directory listing (names only, one per line)
+						const entries = fs.readdirSync(filePath, { withFileTypes: true });
+						const listing = entries
+							.map(e => (e.isDirectory() ? `${e.name}/` : e.name))
+							.join('\n');
+						return `<context path="${filePath}" type="directory">\n${listing}\n</context>`;
+					} else {
+						const content = fs.readFileSync(filePath, 'utf8');
+						return `<context path="${filePath}">\n${content}\n</context>`;
+					}
+				} catch (err) {
+					// If we can't read the path, leave it as a plain mention so the
+					// LLM still knows what the user was referring to.
+					this._outputChannel.appendLine(`[Context] Could not read ${filePath}: ${err}`);
+					return `<!-- could not read ${filePath}: ${err} -->`;
+				}
+			},
+		);
+	}
+
 	private async _handlePrompt(text: string) {
 		try {
 			if (this._acpClient.hasPendingPermissions()) {
@@ -251,6 +284,12 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 			if (text.trim() === '/clear') {
 				this.postMessage({type: 'clear'});
 			}
+
+			// Expand any @[file] / @[folder] attachments into their contents
+			// before handing the prompt to the ACP client. This prevents
+			// providers that reject tool-result messages (e.g. Atlas Cloud)
+			// from returning 400 errors on every file-attached message.
+			const expandedText = this._expandContextAttachments(text);
 
 			// Make sure we have a session
 			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -271,7 +310,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				}
 			});
 
-			await this._acpClient.prompt(text);
+			await this._acpClient.prompt(expandedText);
 			// Signal turn completion so the Webview can flip back to the send button
 			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}});
 		} catch (error) {
@@ -283,15 +322,12 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 	}
 
 	private _getHtmlForWebview(webview: vscode.Webview) {
-		const fs = require('fs');
-		const path = require('path');
-		
 		const htmlPath = path.join(this._extensionUri.fsPath, 'media', 'chat-panel.html');
 		let html = fs.readFileSync(htmlPath, 'utf8');
 
-		const timestamp = new Date().getTime();
-		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.js')).with({ query: `t=${timestamp}` });
-		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.css')).with({ query: `t=${timestamp}` });
+		const extVersion = vscode.extensions.getExtension('nanocollective.nanocoder')?.packageJSON.version || Date.now().toString();
+		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.js')).with({ query: `v=${extVersion}` });
+		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.css')).with({ query: `v=${extVersion}` });
 		const markedUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'marked.min.js'));
 		const nonce = getNonce();
 

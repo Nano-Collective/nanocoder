@@ -111,8 +111,6 @@
 
 	initDropdowns();
 
-
-
 	function toggleHistoryView() {
 		isHistoryView = !isHistoryView;
 		if (isHistoryView) {
@@ -264,16 +262,29 @@
 		for (const item of attachedPaths) {
 			const chip = document.createElement('span');
 			chip.className = 'context-chip';
-			chip.style.background = item.kind === 'folder'
-				? 'rgba(255,180,80,0.15)' : 'rgba(80,150,255,0.15)';
-			chip.style.color = item.kind === 'folder'
-				? 'var(--vscode-symbolIcon-folderForeground)'
-				: 'var(--vscode-symbolIcon-fileForeground)';
 			
-			chip.innerHTML = `
-				<span>${item.kind === 'folder' ? '📁' : '📄'}</span>
-				<span class="chip-name" title="${item.path}">${item.name}</span>
-				<span class="chip-remove" title="Remove">×</span>`;
+			const iconSpan = document.createElement('span');
+			iconSpan.className = 'chip-icon';
+			const folderSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
+			const fileSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>';
+			iconSpan.innerHTML = item.kind === 'folder' ? folderSvg : fileSvg;
+			iconSpan.style.marginRight = '4px';
+			iconSpan.style.display = 'flex';
+			iconSpan.style.alignItems = 'center';
+
+			const nameSpan = document.createElement('span');
+			nameSpan.className = 'chip-name';
+			nameSpan.setAttribute('title', item.path);
+			nameSpan.textContent = item.name;
+
+			const removeSpan = document.createElement('span');
+			removeSpan.className = 'chip-remove';
+			removeSpan.setAttribute('title', 'Remove');
+			removeSpan.textContent = '×';
+
+			chip.appendChild(iconSpan);
+			chip.appendChild(nameSpan);
+			chip.appendChild(removeSpan);
 			
 			chip.addEventListener('click', e => {
 				if (e.target.classList.contains('chip-remove')) {
@@ -323,9 +334,38 @@
 			const uris = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
 			if (!uris) return;
 			
+			const isWindows = navigator.userAgentData?.platform?.toLowerCase().includes('win') || navigator.platform.toLowerCase().includes('win');
 			const paths = uris.split('\n')
-				.map(u => decodeURIComponent(u.replace(/^file:\/\//, '').trim()))
-				.filter(Boolean);
+				.map(u => u.trim())
+				.filter(u => u && !u.startsWith('#'))
+				.map(u => {
+					if (u.startsWith('file://')) {
+						let p = decodeURIComponent(u.replace(/^file:\/\/\/?/, ''));
+						if (isWindows && p.match(/^[a-zA-Z]:/)) {
+							// Already dropped leading slash via the regex above if it had exactly three slashes. 
+							// But if it had two slashes e.g. file://C:/ it would become C:/
+							// If it had three e.g. file:///C:/ the regex stripped up to 3 slashes so it also becomes C:/
+							// Wait, what if it was file:///C:/... ? `u.replace(/^file:\/\/\/?/, '')` removes `file:///`.
+							// What about UNC paths? `file://server/share` -> regex removes `file://`, leaving `server/share`. 
+							// Wait, `u.replace(/^file:\/\/\/?/, '')` removes `file:///` or `file://`.
+							// For UNC `file://server/share`, `replace` makes it `server/share`. 
+							// So we need to put `//` back for UNC on Windows? 
+							// Let's implement Will's explicit advice:
+							// "strip with /^file:\/\/\/?/ and on Windows drop the leading slash before a drive letter."
+						}
+						// Let's strictly follow Will's suggestion:
+						let p2 = decodeURIComponent(u.replace(/^file:\/\/\/?/, ''));
+						if (isWindows && p2.match(/^\/[a-zA-Z]:/)) {
+							p2 = p2.substring(1);
+						}
+						// wait, for UNC path `file://server/share`, replacing `/^file:\/\/\/?/` removes `file://`. 
+						// So it becomes `server/share`. On Windows UNC paths need `\\server\share`. 
+						// Actually vscode drop UNC path comes as `file:////server/share` or `file://server/share`.
+						// If we don't mess with it too much, let's just do exactly what Will said.
+						return p2;
+					}
+					return u;
+				});
 			
 			paths.forEach(p => vscode.postMessage({ type: 'requestPathInfo', path: p }));
 		}, true);
@@ -347,13 +387,61 @@
 		const textContainer = document.createElement('div');
 		textContainer.className = 'markdown-body';
 
-		// If it's the user, we just render it directly (or we could use marked for them too)
-		// Usually users prefer raw text, but let's render markdown for both just in case.
+		let parsedContent = content;
+		let chipsHtml = '';
+
+		if (role === 'user') {
+			const folderSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
+			const fileSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>';
+
+			// Handle pre-injected format (before sending)
+			parsedContent = content.replace(/@\[(file|folder)\]\s+([^\n]+)/g, (match, kind, path) => {
+				const icon = kind === 'folder' ? folderSvg : fileSvg;
+				const name = path.trim().split(/[/\\]/).pop();
+				chipsHtml += `<span class="context-chip" data-path="${path}" data-kind="${kind}" style="padding-right: 8px;"><span style="margin-right:4px; display:flex; align-items:center;">${icon}</span><span class="chip-name" title="${path.trim()}">${name}</span></span>`;
+				return ''; // Remove from text
+			});
+
+			// Handle post-injected format (from history sync)
+			parsedContent = parsedContent.replace(/<context path="([^"]+)"(?: type="([^"]+)")?>[\s\S]*?<\/context>/g, (match, path, type) => {
+				const kind = type === 'directory' ? 'folder' : 'file';
+				const icon = kind === 'folder' ? folderSvg : fileSvg;
+				const name = path.trim().split(/[/\\]/).pop();
+				chipsHtml += `<span class="context-chip" data-path="${path}" data-kind="${kind}" style="padding-right: 8px;"><span style="margin-right:4px; display:flex; align-items:center;">${icon}</span><span class="chip-name" title="${path.trim()}">${name}</span></span>`;
+				return ''; // Remove from text
+			});
+
+			parsedContent = parsedContent.trim();
+		}
+
 		if (typeof marked !== 'undefined') {
-			textContainer.innerHTML = marked.parse(content);
+			textContainer.innerHTML = marked.parse(parsedContent);
 		} else {
-			textContainer.textContent = content;
-		} // Phase 3: plain text for now, but incrementally updateable
+			textContainer.textContent = parsedContent;
+		}
+
+		if (chipsHtml && role === 'user') {
+			const chipsContainer = document.createElement('div');
+			chipsContainer.style.display = 'flex';
+			chipsContainer.style.flexWrap = 'wrap';
+			chipsContainer.style.gap = '6px';
+			chipsContainer.style.marginTop = parsedContent ? '8px' : '0';
+			chipsContainer.innerHTML = chipsHtml;
+
+			chipsContainer.addEventListener('click', (e) => {
+				const chip = e.target.closest('.context-chip');
+				if (chip) {
+					const path = chip.getAttribute('data-path');
+					const kind = chip.getAttribute('data-kind');
+					if (path) {
+						vscode.postMessage({ type: 'openPath', path, kind });
+					}
+				}
+			});
+
+			textContainer.appendChild(chipsContainer);
+		}
+
 		msgEl.appendChild(textContainer);
 
 		messagesContainer.appendChild(msgEl);
