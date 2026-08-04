@@ -137,13 +137,6 @@
 		arrowRight: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>`
 	};
 
-	// Footer row under a message bubble: local send/receive time plus a
-	// copy-to-clipboard button, ordered timestamp-then-icon for the user's
-	// own (right-aligned) messages and icon-then-timestamp for the agent's,
-	// so the icon always sits nearest the bubble on both sides. `getText` is
-	// called at click time so streamed agent messages always copy the latest
-	// text rather than a stale snapshot. `sentAt` is a plain in-memory Date,
-	// not persisted — it reflects this render, not history saved to disk.
 	function createMessageFooter(getText, role, sentAt) {
 		const footer = document.createElement('div');
 		footer.className = 'flex h-5 items-center gap-1.5 mt-1 text-xs text-vscode-fg opacity-60 ' +
@@ -151,7 +144,7 @@
 
 		const btn = document.createElement('button');
 		btn.type = 'button';
-		btn.className = 'flex items-center justify-center bg-transparent border-none cursor-pointer text-vscode-fg opacity-60 hover:opacity-100 p-1 rounded hover:bg-vscode-toolbarHover [&_svg]:mr-0';
+		btn.className = 'flex items-center justify-center bg-transparent border-none cursor-pointer text-vscode-fg opacity-60 hover:opacity-100 p-1 rounded hover:bg-vscode-toolbarHover [&_svg]:mr-0 mb-1';
 		btn.title = 'Copy';
 		btn.setAttribute('aria-label', 'Copy message');
 		btn.innerHTML = ICONS.clipboard;
@@ -160,9 +153,6 @@
 		btn.addEventListener('click', () => {
 			const text = getText();
 			if (!text) return;
-			// navigator.clipboard can be undefined in some webview contexts, and
-			// writeText() would then throw synchronously — wrap in an async IIFE
-			// so that throw becomes a rejection the .catch() below can still handle.
 			(async () => {
 				if (!navigator.clipboard?.writeText) {
 					throw new Error('Clipboard API unavailable');
@@ -184,6 +174,7 @@
 		});
 
 		const timeEl = document.createElement('span');
+		timeEl.className = 'leading-none';
 		timeEl.textContent = sentAt.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
 
 		if (role === 'user') {
