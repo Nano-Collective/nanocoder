@@ -214,7 +214,7 @@ const stringReplaceValidator = async (
 	if (!hasSeenFile(absPath)) {
 		return {
 			valid: false,
-			error: `You must read "${path}" before editing it. Call read_file on it first, then retry string_replace with old_str copied exactly from the file.`,
+			error: `You must read "${path}" before editing it. Call read_file on it first — if the file is over 300 lines, specify start_line and end_line to read its actual content, not just metadata — then retry string_replace with old_str copied exactly from the file.`,
 		};
 	}
 
