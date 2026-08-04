@@ -80,13 +80,7 @@ const executeStringReplace = async (
 	const endLine = startLine + oldStrLines.length - 1;
 	const newEndLine = startLine + newStrLines.length - 1;
 
-	const newLines = newContent.split('\n');
-	let fileContext = '\n\nUpdated file contents:\n';
-	for (let i = 0; i < newLines.length; i++) {
-		const lineNumStr = String(i + 1).padStart(4, ' ');
-		const line = newLines[i] || '';
-		fileContext += `${lineNumStr}: ${line}\n`;
-	}
+	const fileContext = `\n\nUpdated file contents:\n${newContent}`;
 
 	const rangeDesc =
 		startLine === endLine
