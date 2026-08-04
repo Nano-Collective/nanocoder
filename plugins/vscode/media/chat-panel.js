@@ -137,13 +137,17 @@
 		arrowRight: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>`
 	};
 
-	// Small hover toolbar with a copy-to-clipboard button, appended below a
-	// message bubble. `getText` is called at click time so streamed agent
-	// messages always copy the latest text rather than a stale snapshot.
-	function createCopyToolbar(getText, align) {
-		const toolbar = document.createElement('div');
-		toolbar.className = 'flex h-5 items-center opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity ' +
-			(align === 'end' ? 'justify-end' : 'justify-start');
+	// Footer row under a message bubble: local send/receive time plus a
+	// copy-to-clipboard button, ordered timestamp-then-icon for the user's
+	// own (right-aligned) messages and icon-then-timestamp for the agent's,
+	// so the icon always sits nearest the bubble on both sides. `getText` is
+	// called at click time so streamed agent messages always copy the latest
+	// text rather than a stale snapshot. `sentAt` is a plain in-memory Date,
+	// not persisted — it reflects this render, not history saved to disk.
+	function createMessageFooter(getText, role, sentAt) {
+		const footer = document.createElement('div');
+		footer.className = 'flex h-5 items-center gap-1.5 mt-1 text-xs text-vscode-fg opacity-60 ' +
+			(role === 'user' ? 'self-end' : 'self-start');
 
 		const btn = document.createElement('button');
 		btn.type = 'button';
@@ -179,8 +183,18 @@
 			});
 		});
 
-		toolbar.appendChild(btn);
-		return toolbar;
+		const timeEl = document.createElement('span');
+		timeEl.textContent = sentAt.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+
+		if (role === 'user') {
+			footer.appendChild(timeEl);
+			footer.appendChild(btn);
+		} else {
+			footer.appendChild(btn);
+			footer.appendChild(timeEl);
+		}
+
+		return footer;
 	}
 
 	// --- Send / Stop toggle logic ---
@@ -289,7 +303,7 @@
 		msgEl.appendChild(textContainer);
 
 		wrapper.appendChild(msgEl);
-		wrapper.appendChild(createCopyToolbar(() => content, role === 'user' ? 'end' : 'start'));
+		wrapper.appendChild(createMessageFooter(() => content, role, new Date()));
 
 		messagesContainer.appendChild(wrapper);
 		scrollToBottom();
@@ -327,7 +341,7 @@
 
 			msgEl.appendChild(textContainer);
 			wrapper.appendChild(msgEl);
-			wrapper.appendChild(createCopyToolbar(() => wrapper.dataset.rawText || '', 'start'));
+			wrapper.appendChild(createMessageFooter(() => wrapper.dataset.rawText || '', 'agent', new Date()));
 			wrapper.dataset.rawText = currentTurnText;
 			messagesContainer.appendChild(wrapper);
 
