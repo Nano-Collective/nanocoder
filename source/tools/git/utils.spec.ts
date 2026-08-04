@@ -14,6 +14,7 @@ import {
 	getCurrentBranchSync,
 	getDefaultBranchSync,
 	getGitStatusSummarySync,
+	truncateDiff,
 } from './utils';
 
 // ============================================================================
@@ -159,6 +160,36 @@ test('parseGitStatus ignores empty lines', t => {
 	const result = parseGitStatus(statusOutput);
 	t.is(result.staged.length, 1);
 	t.is(result.unstaged.length, 1);
+});
+
+// ============================================================================
+// truncateDiff Tests
+// ============================================================================
+
+test('truncateDiff leaves output unchanged below the limit', t => {
+	const diff = 'line 1\nline 2\nline 3';
+	const result = truncateDiff(diff, 3);
+
+	t.false(result.truncated);
+	t.is(result.totalLines, 3);
+	t.is(result.content, diff);
+});
+
+test('truncateDiff preserves the beginning and end of a large diff', t => {
+	const diff = Array.from({length: 10}, (_, index) => `line ${index + 1}`).join(
+		'\n',
+	);
+	const result = truncateDiff(diff, 4);
+
+	t.true(result.truncated);
+	t.is(result.totalLines, 10);
+	t.true(result.content.startsWith('line 1\nline 2'));
+	t.true(result.content.endsWith('line 9\nline 10'));
+	t.regex(
+		result.content,
+		/\[Diff truncated: showing first 2 and last 2 of 10 lines; 6 lines omitted\]/,
+	);
+	t.false(result.content.includes('line 3'));
 });
 
 // ============================================================================
