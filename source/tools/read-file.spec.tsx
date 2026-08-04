@@ -14,6 +14,10 @@ import {readFileTool} from './read-file';
 
 console.log(`\nread-file.spec.tsx – ${React.version}`);
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping terminal styling before text-only assertions.
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+const stripAnsi = (value: string) => value.replace(ANSI_RE, '');
+
 // Create a mock theme provider for tests
 function TestThemeProvider({children}: {children: React.ReactNode}) {
 	const themeContextValue = {
@@ -91,7 +95,7 @@ test('ReadFileFormatter shows truncated preview range', async t => {
 		const output = lastFrame();
 		t.truthy(output);
 		t.notRegex(output!, /metadata\s+only/);
-		t.regex(output!, /Lines:\s+1 - 250 of 1600/);
+		t.regex(stripAnsi(output!), /Lines:\s+1 - 250 of 1600/);
 	} finally {
 		rmSync(testDir, {recursive: true, force: true});
 	}
