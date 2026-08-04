@@ -2,6 +2,10 @@
  * Git Diff Tool Tests
  */
 
+import {execSync} from 'node:child_process';
+import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import React from 'react';
 import test from 'ava';
 import {render} from 'ink-testing-library';
@@ -45,6 +49,42 @@ test('git_diff tool has AI SDK tool with execute', t => {
 
 test('git_diff tool has formatter function', t => {
 	t.is(typeof gitDiffTool.formatter, 'function');
+});
+
+test.serial('git_diff summarizes oversized diffs', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-git-diff-test-'));
+	const originalCwd = process.cwd();
+
+	try {
+		execSync('git init -q -b main', {cwd: dir});
+		execSync('git config user.email test@example.com', {cwd: dir});
+		execSync('git config user.name Test', {cwd: dir});
+
+		const file = join(dir, 'large.txt');
+		writeFileSync(file, 'baseline\n');
+		execSync('git add large.txt', {cwd: dir});
+		execSync('git commit -q -m baseline', {cwd: dir});
+		writeFileSync(
+			file,
+			`${Array.from({length: 600}, (_, index) => `line ${index + 1}`).join('\n')}\n`,
+		);
+
+		process.chdir(dir);
+		// biome-ignore lint/suspicious/noExplicitAny: Test accesses the AI SDK execute function.
+		const execute = (gitDiffTool.tool as any).execute as (
+			args: {stat?: boolean},
+		) => Promise<string>;
+		const result = await execute({});
+
+		t.regex(result, /large\.txt/);
+		t.regex(result, /files? changed/);
+		t.regex(result, /Diff is too large to return in full/);
+		t.regex(result, /file parameter/);
+		t.false(result.includes('diff --git'));
+	} finally {
+		process.chdir(originalCwd);
+		rmSync(dir, {recursive: true, force: true});
+	}
 });
 
 // ============================================================================

@@ -24,35 +24,40 @@ interface GitDiffInput {
 	stat?: boolean;
 }
 
+const MAX_DIFF_LINES = 500;
+
+function buildGitDiffArgs(
+	args: GitDiffInput,
+	includeStat = Boolean(args.stat),
+): string[] {
+	const gitArgs: string[] = ['diff'];
+
+	if (args.staged) {
+		gitArgs.push('--cached');
+	}
+
+	if (includeStat) {
+		gitArgs.push('--stat');
+	}
+
+	if (args.base) {
+		gitArgs.push(args.base);
+	}
+
+	if (args.file) {
+		gitArgs.push('--', args.file);
+	}
+
+	return gitArgs;
+}
+
 // ============================================================================
 // Execution
 // ============================================================================
 
 const executeGitDiff = async (args: GitDiffInput): Promise<string> => {
 	try {
-		const gitArgs: string[] = ['diff'];
-
-		// Add --cached for staged changes
-		if (args.staged) {
-			gitArgs.push('--cached');
-		}
-
-		// Add base reference (branch or commit)
-		if (args.base) {
-			gitArgs.push(args.base);
-		}
-
-		// Show stat only
-		if (args.stat) {
-			gitArgs.push('--stat');
-		}
-
-		// Specific file
-		if (args.file) {
-			gitArgs.push('--', args.file);
-		}
-
-		const output = await execGit(gitArgs);
+		const output = await execGit(buildGitDiffArgs(args));
 
 		if (!output.trim()) {
 			if (args.staged) {
@@ -64,11 +69,24 @@ const executeGitDiff = async (args: GitDiffInput): Promise<string> => {
 			return 'No unstaged changes.';
 		}
 
-		// Truncate if too long (unless stat mode which is already compact)
+		// Summarize oversized full diffs to avoid sending large patches to the model.
 		if (!args.stat) {
-			const {content, truncated, totalLines} = truncateDiff(output, 500);
+			const {content, truncated, totalLines} = truncateDiff(
+				output,
+				MAX_DIFF_LINES,
+			);
 			if (truncated) {
-				return `${content}\n\n[Total: ${totalLines} lines]`;
+				try {
+					const statOutput = await execGit(buildGitDiffArgs(args, true));
+					return (
+						`${statOutput}\n\n` +
+						`Diff is too large to return in full (${totalLines} lines). ` +
+						'Use the file parameter to request a specific path for detailed output.'
+					);
+				} catch {
+					// Keep the result bounded even if the summary command fails.
+					return content;
+				}
 			}
 		}
 
