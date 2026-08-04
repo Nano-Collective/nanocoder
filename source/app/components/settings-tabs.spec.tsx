@@ -97,7 +97,7 @@ test.beforeEach(() => {
 	resetPreferencesCache();
 });
 
-test('renders all four category tabs with Appearance selected first', async t => {
+test('renders all five category tabs with Appearance selected first', async t => {
 	const {lastFrame, unmount} = renderWithTheme(
 		<SettingsSelector onCancel={() => {}} />,
 	);
@@ -106,7 +106,8 @@ test('renders all four category tabs with Appearance selected first', async t =>
 	t.truthy(output);
 	t.truthy(output!.includes('Appearance'));
 	t.truthy(output!.includes('Input'));
-	t.truthy(output!.includes('Display'));
+	t.truthy(output!.includes('Behavior'));
+	t.truthy(output!.includes('Providers'));
 	t.truthy(output!.includes('Advanced'));
 	// The selected tab is marked by the user's TitleShape system, not a
 	// literal bracket string (ANSI escapes also contain '[', so compare
