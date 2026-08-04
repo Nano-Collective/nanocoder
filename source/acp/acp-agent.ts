@@ -308,6 +308,24 @@ export class AcpAgent implements Agent {
 			});
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : String(error);
+
+			// A user-initiated cancellation isn't a failure: surface it inline in
+			// the chat and resolve cleanly instead of rejecting the ACP `prompt`
+			// call, otherwise the VS Code client's catch handler shows a
+			// "RequestError: Internal error" toast on top of the cancel notice.
+			if (errorMsg === 'Operation was cancelled') {
+				const cancelNotice = '\n\n_Cancelled by user._\n';
+				this.conn.sessionUpdate({
+					sessionId: params.sessionId,
+					update: {
+						sessionUpdate: 'agent_message_chunk',
+						content: {type: 'text', text: cancelNotice},
+					},
+				});
+				session.messages.push({role: 'assistant', content: cancelNotice});
+				return {stopReason: 'cancelled'};
+			}
+
 			logger.error(`Error during ACP prompt: ${errorMsg}`);
 
 			// Relay the error to the chat UI so the user sees it inline

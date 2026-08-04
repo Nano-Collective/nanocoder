@@ -32,6 +32,15 @@ export class NanocoderAcpClient {
 	public availableProviders: string[] = [];
 
 	private pendingPermissions = new Map<string, (response: unknown) => void>();
+	/**
+	 * Set while a cancel is in flight for the current turn. A cancelled prompt()
+	 * rejects (the agent throws to abort its stream), but that's the user's own
+	 * request succeeding, not a failure — so we swallow the toast for it here.
+	 * This is a client-side backstop: older/unrelinked CLI builds may not yet
+	 * resolve cancellation cleanly on their end, so we can't rely solely on the
+	 * agent reporting it as a non-error.
+	 */
+	private cancelRequested = false;
 
 	constructor(outputChannel: vscode.OutputChannel, stateManager: AcpStateManager) {
 		this.outputChannel = outputChannel;
@@ -277,6 +286,7 @@ export class NanocoderAcpClient {
 
 	async prompt(text: string): Promise<void> {
 		if (!this.connection || !this._sessionId) return;
+		this.cancelRequested = false;
 		try {
 			await this.connection.prompt({
 				sessionId: this._sessionId,
@@ -284,12 +294,17 @@ export class NanocoderAcpClient {
 			});
 		} catch (error) {
 			this.outputChannel.appendLine(`Prompt failed: ${error}`);
-			vscode.window.showErrorMessage(`Nanocoder prompt failed: ${error}`);
+			if (!this.cancelRequested) {
+				vscode.window.showErrorMessage(`Nanocoder prompt failed: ${error}`);
+			}
+		} finally {
+			this.cancelRequested = false;
 		}
 	}
 
 	async cancel(): Promise<void> {
 		if (!this.connection || !this._sessionId) return;
+		this.cancelRequested = true;
 		try {
 			await this.connection.cancel({
 				sessionId: this._sessionId

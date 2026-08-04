@@ -186,6 +186,20 @@
 		}
 	});
 
+	// Escape instantly cancels the in-flight LLM request, mirroring the Stop
+	// button. Registered on `document` (not just the textarea) so it fires even
+	// when the chat input has lost focus to a tool card, button, dropdown or the
+	// streaming response area. Guarded by isProcessing so an idle Escape does
+	// nothing.
+	document.addEventListener('keydown', (e) => {
+		if (e.key === 'Escape' && isProcessing) {
+			e.preventDefault();
+			e.stopPropagation();
+			vscode.postMessage({ type: 'cancel' });
+			setProcessing(false);
+		}
+	});
+
 	function submitMessage() {
 		const text = chatInput.value.trim();
 		if (!text) return;
