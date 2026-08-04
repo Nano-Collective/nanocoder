@@ -146,15 +146,25 @@
 			(align === 'end' ? 'justify-end' : 'justify-start');
 
 		const btn = document.createElement('button');
+		btn.type = 'button';
 		btn.className = 'flex items-center justify-center bg-transparent border-none cursor-pointer text-vscode-fg opacity-60 hover:opacity-100 p-1 rounded hover:bg-vscode-toolbarHover [&_svg]:mr-0';
 		btn.title = 'Copy';
+		btn.setAttribute('aria-label', 'Copy message');
 		btn.innerHTML = ICONS.clipboard;
 
 		let resetTimer = null;
 		btn.addEventListener('click', () => {
 			const text = getText();
 			if (!text) return;
-			navigator.clipboard.writeText(text).then(() => {
+			// navigator.clipboard can be undefined in some webview contexts, and
+			// writeText() would then throw synchronously — wrap in an async IIFE
+			// so that throw becomes a rejection the .catch() below can still handle.
+			(async () => {
+				if (!navigator.clipboard?.writeText) {
+					throw new Error('Clipboard API unavailable');
+				}
+				await navigator.clipboard.writeText(text);
+			})().then(() => {
 				btn.innerHTML = ICONS.success;
 				btn.title = 'Copied!';
 			}).catch(() => {
