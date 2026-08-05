@@ -35,10 +35,24 @@ class FakeMemoryManager {
 }
 
 class FakeSummarizerService {
+	accepted: Array<Pick<MemoryProposal, 'content' | 'category'>> = [];
+
 	constructor(private readonly proposals: MemoryProposal[]) {}
 
 	proposeMemoriesFromMessages(messages: Message[]): MemoryProposal[] {
 		return messages.length === 0 ? [] : this.proposals;
+	}
+
+	async acceptProposal(
+		proposal: Pick<MemoryProposal, 'content' | 'category'>,
+	): Promise<SemanticMemory> {
+		this.accepted.push({content: proposal.content, category: proposal.category});
+		return {
+			id: `accepted-${this.accepted.length}`,
+			content: proposal.content,
+			category: proposal.category,
+			timestamp: '2026-08-05T00:00:00.000Z',
+		};
 	}
 }
 
@@ -182,6 +196,65 @@ test('memory command reports when no proposals are found', async t => {
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 
 	t.true((lastFrame() ?? '').includes('No durable memory proposals found.'));
+});
+
+test('memory command accepts a proposal by index after propose', async t => {
+	const manager = new FakeMemoryManager();
+	const summarizerService = new FakeSummarizerService([
+		{
+			content: 'Auth uses Clerk.',
+			category: 'architecture',
+			sourceType: 'explicit-user',
+			evidence: {userMessages: ['Refactor auth.'], assistantMessages: []},
+			warnings: [],
+		},
+	]);
+	const command = createMemoryCommand({memoryManager: manager, summarizerService});
+
+	await command.handler(['propose'], [{role: 'user', content: 'Refactor auth.'}], testMetadata);
+	const result = await command.handler(['accept', '1'], [], testMetadata);
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+
+	t.true((lastFrame() ?? '').includes('Saved architecture memory: Auth uses Clerk.'));
+	t.deepEqual(summarizerService.accepted, [
+		{content: 'Auth uses Clerk.', category: 'architecture'},
+	]);
+});
+
+test('memory command rejects accept with no prior proposals', async t => {
+	const manager = new FakeMemoryManager();
+	const command = createMemoryCommand({
+		memoryManager: manager,
+		summarizerService: new FakeSummarizerService([]),
+	});
+
+	const result = await command.handler(['accept', '1'], [], testMetadata);
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+
+	t.true(
+		(lastFrame() ?? '').includes('No proposals to accept. Run /memory propose first.'),
+	);
+});
+
+test('memory command rejects accept with an out-of-range index', async t => {
+	const manager = new FakeMemoryManager();
+	const summarizerService = new FakeSummarizerService([
+		{
+			content: 'Auth uses Clerk.',
+			category: 'architecture',
+			sourceType: 'explicit-user',
+			evidence: {userMessages: ['Refactor auth.'], assistantMessages: []},
+			warnings: [],
+		},
+	]);
+	const command = createMemoryCommand({memoryManager: manager, summarizerService});
+
+	await command.handler(['propose'], [{role: 'user', content: 'Refactor auth.'}], testMetadata);
+	const result = await command.handler(['accept', '5'], [], testMetadata);
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+
+	t.true((lastFrame() ?? '').includes('Usage: /memory accept <1-1>'));
+	t.deepEqual(summarizerService.accepted, []);
 });
 
 test('lazy registry exposes /memory', t => {

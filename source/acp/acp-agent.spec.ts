@@ -7,6 +7,7 @@ import {
 	setToolRegistryGetter,
 	setToolManagerGetter,
 } from '@/message-handler';
+import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 
 console.log('\nacp-agent.spec.ts');
 
@@ -276,6 +277,38 @@ test('AcpAgent.prompt - returns response for valid session', async t => {
 		prompt: [{type: 'text', text: 'Hello!'}],
 	});
 	t.truthy(result.stopReason);
+});
+
+test('AcpAgent.prompt - recalls relevant project memories scoped to the session cwd, without accumulating across turns', async t => {
+	await new SemanticMemoryManager({cwd: '/tmp'}).addMemory({
+		content: 'Auth uses Clerk and avoids middleware.',
+	});
+
+	const capturedSystemPrompts: string[] = [];
+	const conn = createMockConn();
+	const initContext = createMockInitContext();
+	initContext.client = {
+		...initContext.client,
+		chat: async (messages: Array<{content: string}>) => {
+			capturedSystemPrompts.push(messages[0]?.content ?? '');
+			return {choices: [{message: {content: 'Test response'}}]};
+		},
+	} as any;
+	const agent = new AcpAgent(initContext, conn);
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'refactor auth middleware handling'}],
+	});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'unrelated question about docs'}],
+	});
+
+	t.true(capturedSystemPrompts[0]?.includes('## Project Context'));
+	t.true(capturedSystemPrompts[0]?.includes('Auth uses Clerk'));
+	t.false(capturedSystemPrompts[1]?.includes('## Project Context'));
 });
 
 // ============================================================================

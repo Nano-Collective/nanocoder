@@ -19,7 +19,7 @@ test('SummarizerService stores a manual memory', async t => {
 	const cwd = path.join(dir, 'repo');
 	await fs.mkdir(cwd);
 	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
-	const service = new SummarizerService(manager);
+	const service = new SummarizerService(manager, () => true);
 
 	const memory = await service.remember({
 		content: '  Use the existing provider abstraction for model changes.  ',
@@ -38,6 +38,7 @@ test('SummarizerService rejects empty manual memory content', async t => {
 	await fs.mkdir(cwd);
 	const service = new SummarizerService(
 		new SemanticMemoryManager({memoryDir: dir, cwd}),
+		() => true,
 	);
 
 	await t.throwsAsync(service.remember({content: '   '}), {
@@ -51,6 +52,7 @@ test('SummarizerService uses explicit camelCase category', async t => {
 	await fs.mkdir(cwd);
 	const service = new SummarizerService(
 		new SemanticMemoryManager({memoryDir: dir, cwd}),
+		() => true,
 	);
 
 	const memory = await service.remember({
@@ -200,6 +202,32 @@ test('SummarizerService detects assistant position reversal', t => {
 	);
 });
 
+test('SummarizerService clears the reversal warning once the user later explicitly restates the same line', t => {
+	const service = new SummarizerService();
+
+	const proposals = service.proposeMemoriesFromMessages([
+		{
+			role: 'user',
+			content: 'Actually, generic exceptions look cleaner, do not you think.',
+		},
+		{
+			role: 'assistant',
+			content: "You're right. I will use generic exceptions formatting.",
+		},
+		{
+			role: 'user',
+			content: "You're right. I will use generic exceptions formatting.",
+		},
+	]);
+
+	const restated = proposals.find(
+		p => p.content === "You're right. I will use generic exceptions formatting.",
+	);
+	t.truthy(restated);
+	t.is(restated?.sourceType, 'explicit-user');
+	t.deepEqual(restated?.warnings, []);
+});
+
 test('SummarizerService guards false positive on reversal when user provides path/code/error', t => {
 	const service = new SummarizerService();
 
@@ -241,6 +269,59 @@ test('SummarizerService guards false positive on reversal when user provides pat
 	);
 });
 
+test('SummarizerService drops uncategorized assistant chatter but keeps uncategorized user statements', t => {
+	const service = new SummarizerService();
+
+	t.deepEqual(
+		service.proposeMemoriesFromMessages([
+			{
+				role: 'assistant',
+				content: 'The project name shows up in the welcome banner.',
+			},
+			{
+				role: 'user',
+				content: 'The project name is Nanocoder, not nano-coder.',
+			},
+		]),
+		[
+			{
+				content: 'The project name is Nanocoder, not nano-coder.',
+				category: 'project',
+				sourceType: 'explicit-user',
+				evidence: {
+					userMessages: ['The project name is Nanocoder, not nano-coder.'],
+					assistantMessages: [],
+				},
+				warnings: [],
+			},
+		],
+	);
+});
+
+test('SummarizerService caps candidates per message and truncates evidence snippets', t => {
+	const service = new SummarizerService();
+	const longSuffix = 'x'.repeat(200);
+	const longMessage = [
+		`Fix the provider retry storage schema bug one. ${longSuffix}`,
+		'Fix the provider retry storage schema bug two.',
+		'Fix the provider retry storage schema bug three.',
+		'Fix the provider retry storage schema bug four.',
+		'Fix the provider retry storage schema bug five.',
+	].join('\n');
+
+	const proposals = service.proposeMemoriesFromMessages([
+		{role: 'assistant', content: longMessage},
+	]);
+
+	t.is(proposals.length, 3);
+	for (const proposal of proposals) {
+		for (const evidence of proposal.evidence.assistantMessages) {
+			t.true(evidence.length <= 161);
+		}
+	}
+	t.true(proposals[0]!.evidence.assistantMessages[0]!.endsWith('…'));
+});
+
 test('SummarizerService proposals do not save memories automatically', async t => {
 	const dir = await createTempDir();
 	const cwd = path.join(dir, 'repo');
@@ -268,4 +349,40 @@ test('SummarizerService proposals do not save memories automatically', async t =
 		},
 	]);
 	t.deepEqual(await manager.listMemories(), []);
+});
+
+test('SummarizerService blocks writes when semantic memory is disabled', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+	const service = new SummarizerService(manager, () => false);
+
+	await t.throwsAsync(service.remember({content: 'Use tabs not spaces.'}), {
+		message: 'Semantic memory is turned off. Enable it in /settings to save memories.',
+	});
+	await t.throwsAsync(
+		service.acceptProposal({content: 'Use tabs not spaces.', category: 'codingStyle'}),
+		{
+			message: 'Semantic memory is turned off. Enable it in /settings to save memories.',
+		},
+	);
+	t.deepEqual(await manager.listMemories(), []);
+});
+
+test('SummarizerService acceptProposal saves a proposal without re-deriving its category', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+	const service = new SummarizerService(manager, () => true);
+
+	const memory = await service.acceptProposal(
+		{content: 'Fixed the queued input regression by restoring drafts.', category: 'bugFix'},
+		'session-1',
+	);
+
+	t.is(memory.category, 'bugFix');
+	t.is(memory.sourceSessionId, 'session-1');
+	t.deepEqual(await manager.listMemories(), [memory]);
 });
