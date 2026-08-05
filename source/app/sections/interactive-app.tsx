@@ -35,6 +35,10 @@ interface InteractiveAppProps {
 	pendingSubagentApproval: PendingToolApproval | null;
 	handleSubagentToolApproval: (confirmed: boolean) => void;
 	pendingToolConfirmation: PendingToolConfirmation | null;
+	pendingVoiceInstall?:
+		| import('@/utils/voice-install-queue').PendingVoiceInstall
+		| null;
+	onVoiceInstallConfirm?: (confirmed: boolean) => void;
 	handleToolConfirmation: (confirmed: boolean) => void;
 	handleQuestionAnswer: (answer: string) => void;
 	handleUserSubmit: (
@@ -70,6 +74,8 @@ export function InteractiveApp({
 	pendingSubagentApproval,
 	handleSubagentToolApproval,
 	pendingToolConfirmation,
+	pendingVoiceInstall,
+	onVoiceInstallConfirm,
 	handleToolConfirmation,
 	handleQuestionAnswer,
 	handleUserSubmit,
@@ -415,6 +421,8 @@ export function InteractiveApp({
 								pendingSubagentApproval={pendingSubagentApproval}
 								onSubagentToolApproval={handleSubagentToolApproval}
 								pendingToolConfirmation={pendingToolConfirmation}
+								pendingVoiceInstall={pendingVoiceInstall}
+								onVoiceInstallConfirm={onVoiceInstallConfirm}
 								onToolConfirmation={handleToolConfirmation}
 								onSubmit={handleUserSubmit}
 								activeEditor={vscodeServer.activeEditor}
