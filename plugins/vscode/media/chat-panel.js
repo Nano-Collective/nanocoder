@@ -19,7 +19,7 @@
 				this.dropdown = document.getElementById(dropdownId);
 				this.label = document.getElementById(labelId);
 				this.onChange = onChange;
-				
+
 				if (!this.trigger || !this.dropdown) return;
 
 				this.trigger.addEventListener('click', (e) => {
@@ -334,7 +334,7 @@
 			const uris = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
 			if (!uris) return;
 			
-			const isWindows = navigator.userAgentData?.platform?.toLowerCase().includes('win') || navigator.platform.toLowerCase().includes('win');
+			const isWindows = navigator.userAgentData?.platform?.toLowerCase().includes('win') || navigator.userAgent.includes('Windows');
 			const paths = uris.split('\n')
 				.map(u => u.trim())
 				.filter(u => u && !u.startsWith('#'))
@@ -388,26 +388,21 @@
 		textContainer.className = 'markdown-body';
 
 		let parsedContent = content;
-		let chipsHtml = '';
+		let extractedChips = [];
 
 		if (role === 'user') {
-			const folderSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
-			const fileSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>';
-
 			// Handle pre-injected format (before sending)
 			parsedContent = content.replace(/@\[(file|folder)\]\s+([^\n]+)/g, (match, kind, path) => {
-				const icon = kind === 'folder' ? folderSvg : fileSvg;
 				const name = path.trim().split(/[/\\]/).pop();
-				chipsHtml += `<span class="context-chip" data-path="${path}" data-kind="${kind}" style="padding-right: 8px;"><span style="margin-right:4px; display:flex; align-items:center;">${icon}</span><span class="chip-name" title="${path.trim()}">${name}</span></span>`;
+				extractedChips.push({ kind, path: path.trim(), name });
 				return ''; // Remove from text
 			});
 
 			// Handle post-injected format (from history sync)
 			parsedContent = parsedContent.replace(/<context path="([^"]+)"(?: type="([^"]+)")?>[\s\S]*?<\/context>/g, (match, path, type) => {
 				const kind = type === 'directory' ? 'folder' : 'file';
-				const icon = kind === 'folder' ? folderSvg : fileSvg;
 				const name = path.trim().split(/[/\\]/).pop();
-				chipsHtml += `<span class="context-chip" data-path="${path}" data-kind="${kind}" style="padding-right: 8px;"><span style="margin-right:4px; display:flex; align-items:center;">${icon}</span><span class="chip-name" title="${path.trim()}">${name}</span></span>`;
+				extractedChips.push({ kind, path: path.trim(), name });
 				return ''; // Remove from text
 			});
 
@@ -420,13 +415,38 @@
 			textContainer.textContent = parsedContent;
 		}
 
-		if (chipsHtml && role === 'user') {
+		if (extractedChips.length > 0 && role === 'user') {
+			const folderSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
+			const fileSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>';
+
 			const chipsContainer = document.createElement('div');
 			chipsContainer.style.display = 'flex';
 			chipsContainer.style.flexWrap = 'wrap';
 			chipsContainer.style.gap = '6px';
 			chipsContainer.style.marginTop = parsedContent ? '8px' : '0';
-			chipsContainer.innerHTML = chipsHtml;
+
+			extractedChips.forEach(chipData => {
+				const chip = document.createElement('span');
+				chip.className = 'context-chip';
+				chip.setAttribute('data-path', chipData.path);
+				chip.setAttribute('data-kind', chipData.kind);
+				chip.style.paddingRight = '8px';
+				
+				const iconSpan = document.createElement('span');
+				iconSpan.style.marginRight = '4px';
+				iconSpan.style.display = 'flex';
+				iconSpan.style.alignItems = 'center';
+				iconSpan.innerHTML = chipData.kind === 'folder' ? folderSvg : fileSvg;
+				
+				const nameSpan = document.createElement('span');
+				nameSpan.className = 'chip-name';
+				nameSpan.setAttribute('title', chipData.path);
+				nameSpan.textContent = chipData.name;
+				
+				chip.appendChild(iconSpan);
+				chip.appendChild(nameSpan);
+				chipsContainer.appendChild(chip);
+			});
 
 			chipsContainer.addEventListener('click', (e) => {
 				const chip = e.target.closest('.context-chip');

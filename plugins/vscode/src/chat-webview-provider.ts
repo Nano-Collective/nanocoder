@@ -1,6 +1,4 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
-import * as path from 'path';
 import { WebviewToExtensionMessage, ExtensionToWebviewMessage } from './webview-protocol';
 import * as fs from 'fs';
 import * as path from 'path';
