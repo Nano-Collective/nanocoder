@@ -9,6 +9,7 @@
 	const imagePreviewContainer = document.getElementById('image-preview-container');
 	
 	let pendingImages = [];
+	let pendingUserMessageText = null;
 
 	let modelDropdown, modeDropdown, providerDropdown;
 
@@ -141,6 +142,57 @@
 		circle: `<svg class="opacity-50" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle></svg>`,
 		arrowRight: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>`
 	};
+
+	function createMessageFooter(getText, role, sentAt) {
+		const footer = document.createElement('div');
+		footer.className = 'flex h-5 items-center gap-1.5 mt-1 text-xs text-vscode-fg opacity-60 ' +
+			(role === 'user' ? 'self-end' : 'self-start');
+
+		const btn = document.createElement('button');
+		btn.type = 'button';
+		btn.className = 'flex items-center justify-center bg-transparent border-none cursor-pointer text-vscode-fg opacity-60 hover:opacity-100 p-1 rounded hover:bg-vscode-toolbarHover [&_svg]:mr-0 mb-1';
+		btn.title = 'Copy';
+		btn.setAttribute('aria-label', 'Copy message');
+		btn.innerHTML = ICONS.clipboard;
+
+		let resetTimer = null;
+		btn.addEventListener('click', () => {
+			const text = getText();
+			if (!text) return;
+			(async () => {
+				if (!navigator.clipboard?.writeText) {
+					throw new Error('Clipboard API unavailable');
+				}
+				await navigator.clipboard.writeText(text);
+			})().then(() => {
+				btn.innerHTML = ICONS.success;
+				btn.title = 'Copied!';
+			}).catch(() => {
+				btn.innerHTML = ICONS.error;
+				btn.title = 'Copy failed';
+			}).finally(() => {
+				clearTimeout(resetTimer);
+				resetTimer = setTimeout(() => {
+					btn.innerHTML = ICONS.clipboard;
+					btn.title = 'Copy';
+				}, 1500);
+			});
+		});
+
+		const timeEl = document.createElement('span');
+		timeEl.className = 'leading-none';
+		timeEl.textContent = sentAt.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+
+		if (role === 'user') {
+			footer.appendChild(timeEl);
+			footer.appendChild(btn);
+		} else {
+			footer.appendChild(btn);
+			footer.appendChild(timeEl);
+		}
+
+		return footer;
+	}
 
 	// --- Send / Stop toggle logic ---
 	function setProcessing(active) {
@@ -276,7 +328,10 @@
 			
 			const imageEl = document.createElement('img');
 			// codeql[js/xss] False positive: mimeType is strictly validated and data is base64 encoded
-			imageEl.src = `data:${img.mimeType};base64,${img.data}`;
+			const src = `data:${img.mimeType};base64,${img.data}`;
+			if (src.startsWith('data:image/')) {
+				imageEl.src = src;
+			}
 			imageEl.className = 'w-full h-full object-cover cursor-pointer hover:opacity-80 transition-opacity';
 			imageEl.onclick = () => openImageModal(imageEl.src);
 			
@@ -358,6 +413,7 @@
 
 		// Optimistically append user message
 		appendMessage(text, 'user', imagesToSubmit);
+		pendingUserMessageText = text;
 
 		if (!isProcessing) {
 			// Switch to processing state
@@ -376,6 +432,10 @@
 		const loader = document.getElementById('session-loader');
 		if (loader) loader.remove();
 
+		const wrapper = document.createElement('div');
+		wrapper.className = 'group flex flex-col min-w-0 shrink-0 ' +
+			(role === 'user' ? 'self-end items-end max-w-[85%]' : 'self-start items-start max-w-full');
+
 		const msgEl = document.createElement('div');
 		msgEl.className = 'leading-snug break-words shrink-0 min-w-0 flex flex-col ' +
 			(role === 'user'
@@ -388,7 +448,10 @@
 			images.forEach(img => {
 				const imgEl = document.createElement('img');
 				// codeql[js/xss] False positive: mimeType is strictly validated and data is base64 encoded
-				imgEl.src = `data:${img.mimeType};base64,${img.data}`;
+				const src = `data:${img.mimeType};base64,${img.data}`;
+				if (src.startsWith('data:image/')) {
+					imgEl.src = src;
+				}
 				imgEl.className = 'w-24 h-24 object-cover rounded cursor-pointer border border-vscode-border hover:opacity-90';
 				imgEl.onclick = () => openImageModal(imgEl.src);
 				imagesContainer.appendChild(imgEl);
@@ -410,7 +473,10 @@
 			msgEl.appendChild(textContainer);
 		}
 
-		messagesContainer.appendChild(msgEl);
+		wrapper.appendChild(msgEl);
+		wrapper.appendChild(createMessageFooter(() => content, role, new Date()));
+
+		messagesContainer.appendChild(wrapper);
 		scrollToBottom();
 
 		if (role === 'agent') {
@@ -428,8 +494,11 @@
 
 		if (!currentTurnEl || !currentTextEl) {
 			// First chunk for this turn
+			const wrapper = document.createElement('div');
+			wrapper.className = 'group flex flex-col min-w-0 self-start items-start max-w-full';
+
 			const msgEl = document.createElement('div');
-			msgEl.className = 'message agent min-w-0';
+			msgEl.className = 'message agent min-w-0 w-full';
 
 			const textContainer = document.createElement('div');
 			textContainer.className = 'markdown-body leading-snug break-words';
@@ -442,7 +511,10 @@
 			}
 
 			msgEl.appendChild(textContainer);
-			messagesContainer.appendChild(msgEl);
+			wrapper.appendChild(msgEl);
+			wrapper.appendChild(createMessageFooter(() => wrapper.dataset.rawText || '', 'agent', new Date()));
+			wrapper.dataset.rawText = currentTurnText;
+			messagesContainer.appendChild(wrapper);
 
 			currentTurnEl = msgEl;
 			currentTextEl = textContainer;
@@ -450,6 +522,9 @@
 		} else {
 			// Append to existing turn
 			currentTurnText += textChunk;
+			if (currentTurnEl.parentElement) {
+				currentTurnEl.parentElement.dataset.rawText = currentTurnText;
+			}
 
 			if (typeof marked !== 'undefined') {
 				if (!renderTimeout) {
@@ -632,7 +707,11 @@
 			if (update.content) {
 				endCurrentTextBlock();
 				if (update.content.text) {
-					appendMessage(update.content.text, 'user');
+					if (pendingUserMessageText === update.content.text) {
+						pendingUserMessageText = null;
+					} else {
+						appendMessage(update.content.text, 'user');
+					}
 				}
 			}
 		} else if (update.sessionUpdate === 'agent_message_chunk') {

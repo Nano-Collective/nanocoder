@@ -585,7 +585,7 @@ test.serial(
 			t.false(result.valid);
 			if (!result.valid) {
 				t.regex(result.error, /minified or binary content/);
-				t.regex(result.error, /15,000 characters/);
+				t.regex(result.error, /15000 characters/);
 			}
 		} finally {
 			process.chdir(originalCwd);
