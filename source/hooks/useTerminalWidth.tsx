@@ -1,11 +1,11 @@
 import {useEffect, useState} from 'react';
-import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
+import {DEFAULT_TERMINAL_COLUMNS, DEFAULT_TERMINAL_WIDTH} from '@/constants';
 
 type TerminalSize = 'narrow' | 'normal' | 'wide';
 
 // Calculate box width (leave some padding and ensure minimum width)
 const calculateBoxWidth = (columns: number) =>
-	Math.max(Math.min(columns - 4, 120), 40);
+	Math.max(Math.min(columns - 4, DEFAULT_TERMINAL_WIDTH), 40);
 
 const computeWidth = () =>
 	calculateBoxWidth(process.stdout.columns || DEFAULT_TERMINAL_COLUMNS);

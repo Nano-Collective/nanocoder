@@ -158,9 +158,7 @@ const executeListDirectory = async (
 							? '@'
 							: '';
 				const displayPath = recursive ? entry.relativePath : entry.name;
-				const sizeStr = entry.size
-					? ` (${entry.size.toLocaleString()} bytes)`
-					: '';
+				const sizeStr = entry.size ? ` (${entry.size} bytes)` : '';
 				output += `${displayPath}${suffix}${sizeStr}\n`;
 			}
 		}

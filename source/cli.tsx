@@ -544,13 +544,13 @@ async function main(): Promise<void> {
 			// filtered proxy stream: mouse reports are stripped, wheel ticks
 			// are re-emitted on the wheelEvents bus for the chat viewport.
 			const {PassThrough} = await import('node:stream');
-			const {stripMouseSequences, wheelEvents} = await import(
-				'@/utils/terminal-mouse'
-			);
+			const {createUtf8InputDecoder, stripMouseSequences, wheelEvents} =
+				await import('@/utils/terminal-mouse');
 			const filtered = new PassThrough();
+			const decodeInput = createUtf8InputDecoder();
 			let carry = '';
 			const forwardInput = (chunk: Buffer | string) => {
-				const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+				const text = decodeInput(chunk);
 				const result = stripMouseSequences(text, carry);
 				carry = result.carry;
 				for (const direction of result.wheel) {
