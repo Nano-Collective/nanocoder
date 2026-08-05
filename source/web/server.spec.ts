@@ -84,6 +84,50 @@ test('local web server serves Nanocoder icon asset', async t => {
 	t.true(body.includes('aria-label="Nanocoder"'));
 });
 
+test('local web server redirects /favicon.ico to the Nanocoder icon asset', async t => {
+	const webServer = await startLocalWebServer({openBrowser: false});
+	t.teardown(() => {
+		return webServer.close();
+	});
+
+	const response = await fetch(
+		`http://127.0.0.1:${webServer.port}/favicon.ico`,
+		{redirect: 'manual'},
+	);
+
+	t.is(response.status, 302);
+	t.is(response.headers.get('location'), '/assets/nanocoder-icon.svg');
+});
+
+test('local web server sets security headers, including a CSP scoped to the page nonce', async t => {
+	const webServer = await startLocalWebServer({
+		openBrowser: false,
+		token: 'test-token',
+	});
+	t.teardown(() => {
+		return webServer.close();
+	});
+
+	const response = await fetch(`${webServer.url}`);
+	const body = await response.text();
+
+	t.is(response.headers.get('x-content-type-options'), 'nosniff');
+	t.is(response.headers.get('x-frame-options'), 'DENY');
+
+	const csp = response.headers.get('content-security-policy');
+	t.truthy(csp);
+	t.regex(csp ?? '', /script-src 'self' 'nonce-[^']+'/);
+	t.regex(csp ?? '', /style-src 'self' 'nonce-[^']+'/);
+	t.true(
+		(csp ?? '').includes(`connect-src 'self' ws://127.0.0.1:${webServer.port}`),
+	);
+
+	const [, scriptNonce] = /<script nonce="([^"]+)">/.exec(body) ?? [];
+	const [, cspNonce] = /'nonce-([^']+)'/.exec(csp ?? '') ?? [];
+	t.truthy(scriptNonce);
+	t.is(scriptNonce, cspNonce);
+});
+
 test('local web server rejects placeholder page without valid token', async t => {
 	const webServer = await startLocalWebServer({
 		openBrowser: false,
@@ -274,6 +318,7 @@ test('local web server reports client event handler failures without acknowledgi
 
 	t.deepEqual(event, {
 		type: 'error',
+		id: 'message-1',
 		message: 'Browser event handler failed.',
 	});
 });
