@@ -29,6 +29,7 @@ import type {
 	SetSessionModeRequest,
 	SetSessionModeResponse,
 } from '@agentclientprotocol/sdk';
+import clipboard from 'clipboardy';
 import {
 	acpModeToDevelopmentMode,
 	developmentModeToAcpMode,
@@ -42,6 +43,7 @@ import {AcpSession} from '@/acp/acp-session';
 import type {AcpInitContext} from '@/acp/acp-types';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
 import {createLLMClient} from '@/client-factory';
+import {findLastAssistantContent, findLastCodeBlock} from '@/commands/copy';
 import {getAppConfig} from '@/config/index';
 import {loadPreferences, updateLastUsed} from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
@@ -227,6 +229,43 @@ export class AcpAgent implements Agent {
 						return {stopReason: 'end_turn'};
 					}
 
+					if (commandName === 'copy') {
+						// Mirror the terminal /copy: copy the last assistant response,
+						// or just its last fenced code block with `/copy code`.
+						// Deliberately not sendBuiltinReply - this is a UI action, so
+						// the exchange must stay out of session.messages (appending it
+						// would pollute LLM context and make a repeated /copy pick up
+						// its own confirmation message as the "last response").
+						const codeOnly =
+							trimmedUserText.split(/\s+/)[1]?.toLowerCase() === 'code';
+						const lastResponse = findLastAssistantContent(session.messages);
+						const content = codeOnly
+							? lastResponse && findLastCodeBlock(lastResponse)
+							: lastResponse;
+						const subject = codeOnly ? 'code block' : 'assistant response';
+						let msg: string;
+						if (!content) {
+							msg = `No ${subject} to copy yet.`;
+						} else {
+							try {
+								await clipboard.write(content);
+								msg = `Copied last ${subject} to clipboard (${content.length.toLocaleString()} characters).`;
+							} catch (error) {
+								const detail =
+									error instanceof Error ? error.message : String(error);
+								msg = `Failed to copy to clipboard: ${detail}`;
+							}
+						}
+						this.conn.sessionUpdate({
+							sessionId: params.sessionId,
+							update: {
+								sessionUpdate: 'agent_message_chunk',
+								content: {type: 'text', text: msg},
+							},
+						});
+						return {stopReason: 'end_turn'};
+					}
+
 					if (commandName === 'help') {
 						const customCmds =
 							this.initContext.customCommandLoader?.getAllCommands() ?? [];
@@ -243,6 +282,7 @@ export class AcpAgent implements Agent {
 							'**Available slash commands in VS Code GUI:**',
 							'',
 							'- `/clear` — Clear the current conversation',
+							'- `/copy` — Copy the last assistant response to the clipboard (`/copy code` for just its last code block)',
 							'- `/help` — Show this help message',
 							'',
 							'**Not available in VS Code GUI** (CLI-only):',

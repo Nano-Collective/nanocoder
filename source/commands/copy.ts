@@ -7,7 +7,9 @@ import type {Command} from '@/types/commands';
 import type {Message} from '@/types/core';
 import {errorMsg, successMsg, warningMsg} from '@/utils/message-factory';
 
-function findLastAssistantContent(messages: Message[]): string | undefined {
+export function findLastAssistantContent(
+	messages: Message[],
+): string | undefined {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const message = messages[i];
 		if (message?.role === 'assistant' && message.content) {
@@ -15,6 +17,30 @@ function findLastAssistantContent(messages: Message[]): string | undefined {
 		}
 	}
 	return undefined;
+}
+
+/**
+ * Extracts the raw source of the last fenced code block in a markdown string.
+ * Fences must sit at the start of a line (same convention as the markdown
+ * parser); leading indent on the opening fence is stripped from each line.
+ */
+export function findLastCodeBlock(markdown: string): string | undefined {
+	const matches = [
+		...markdown.matchAll(/^([ \t]*)```[^\n]*\n([\s\S]*?)^\1```/gm),
+	];
+	const last = matches[matches.length - 1];
+	if (!last) return undefined;
+	const indent = last[1] ?? '';
+	const code = last[2] ?? '';
+	const dedented = indent
+		? code
+				.split('\n')
+				.map(line =>
+					line.startsWith(indent) ? line.slice(indent.length) : line,
+				)
+				.join('\n')
+		: code;
+	return dedented.replace(/\n$/, '') || undefined;
 }
 
 export const copyCommand: Command = {

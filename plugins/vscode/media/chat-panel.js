@@ -151,6 +151,10 @@
 	let isProcessing = false;
 	let currentAggregator = null;
 	let currentThoughtBox = null;
+	let toastTimeout = null;
+	// Raw markdown of the most recent agent message, kept for the /copy
+	// input command (rendered DOM textContent would lose fences and bullets).
+	let lastAgentRawText = '';
 
 	// Premium SVG Icons (Feather Icons)
 	const ICONS = {
@@ -418,6 +422,21 @@
 		}
 	});
 
+	// Capture Ctrl/Cmd+Alt+Shift+C inside the webview. When focus is in the
+	// textarea (or elsewhere in this document), the host keybinding service
+	// may not see the chord, so handle it here directly. Uses e.code because
+	// Alt changes e.key on some layouts (e.g. macOS alt+c gives "ç").
+	// Ctrl+Shift+C and Ctrl+Alt+C are avoided: VS Code (external terminal)
+	// and Cursor (confetti) claim them at app level before the webview.
+	document.addEventListener('keydown', (e) => {
+		const isCopyChord =
+			(e.ctrlKey || e.metaKey) && e.altKey && e.shiftKey && e.code === 'KeyC';
+		if (!isCopyChord) return;
+		e.preventDefault();
+		e.stopPropagation();
+		copyLastCodeBlock();
+	});
+
 	function submitMessage() {
 		let text = chatInput.value.trim();
 		if (!text && attachedPaths.length === 0 && pendingImages.length === 0) return;
@@ -431,6 +450,21 @@
 		}
 
 		const imagesToSubmit = pendingImages.length > 0 ? [...pendingImages] : undefined;
+
+		// /copy is handled locally, mirroring the terminal slash command:
+		// copy the previous agent output instead of prompting the agent.
+		// `/copy code` copies just the last fenced code block.
+		const lower = text.toLowerCase();
+		if (lower === '/copy' || lower === '/copy code') {
+			chatInput.value = '';
+			chatInput.style.height = 'auto';
+			if (lower === '/copy code') {
+				copyLastCodeBlock();
+			} else {
+				copyLastResponse();
+			}
+			return;
+		}
 
 		// Send message to extension host
 		vscode.postMessage({
@@ -651,6 +685,7 @@
 
 		let parsedContent = content;
 		let extractedChips = [];
+		let textContainer = null;
 
 		if (role === 'user' && content) {
 			// Handle pre-injected format (before sending)
@@ -672,8 +707,10 @@
 		}
 
 		if (parsedContent || extractedChips.length > 0) {
-			const textContainer = document.createElement('div');
-			textContainer.className = 'markdown-body';
+			textContainer = document.createElement('div');
+			// `agent-markdown` marks assistant prose so copyLastCodeBlock() can skip
+			// user echoes and thought boxes, which also render as `.markdown-body`.
+			textContainer.className = 'markdown-body' + (role === 'agent' ? ' agent-markdown' : '');
 
 			if (typeof marked !== 'undefined') {
 				textContainer.innerHTML = marked.parse(parsedContent);
@@ -737,6 +774,7 @@
 		if (role === 'agent') {
 			currentTurnEl = msgEl;
 			currentTextEl = textContainer;
+			lastAgentRawText = content;
 		}
 	}
 
@@ -756,8 +794,9 @@
 			msgEl.className = 'message agent min-w-0 w-full';
 
 			const textContainer = document.createElement('div');
-			textContainer.className = 'markdown-body leading-snug break-words';
+			textContainer.className = 'markdown-body agent-markdown leading-snug break-words';
 			currentTurnText = textChunk;
+			lastAgentRawText = currentTurnText;
 
 			if (typeof marked !== 'undefined') {
 				textContainer.innerHTML = marked.parse(currentTurnText);
@@ -777,6 +816,7 @@
 		} else {
 			// Append to existing turn
 			currentTurnText += textChunk;
+			lastAgentRawText = currentTurnText;
 			if (currentTurnEl.parentElement) {
 				currentTurnEl.parentElement.dataset.rawText = currentTurnText;
 			}
@@ -804,6 +844,66 @@
 
 	function scrollToBottom() {
 		messagesContainer.scrollTop = messagesContainer.scrollHeight;
+	}
+
+	// --- Copy last code block ---
+
+	function showToast(text) {
+		let toast = document.getElementById('copy-toast');
+		if (!toast) {
+			toast = document.createElement('div');
+			toast.id = 'copy-toast';
+			toast.className = 'fixed bottom-24 left-1/2 -translate-x-1/2 z-50 flex items-center px-3 py-1.5 rounded-md border border-vscode-border bg-vscode-dropdown-bg text-vscode-dropdown-fg font-vscode text-[0.85em] shadow-lg pointer-events-none transition-opacity duration-200';
+			document.body.appendChild(toast);
+		}
+
+		toast.innerHTML = ICONS.clipboard;
+		const label = document.createElement('span');
+		label.textContent = text;
+		toast.appendChild(label);
+		toast.classList.remove('opacity-0');
+
+		if (toastTimeout) clearTimeout(toastTimeout);
+		toastTimeout = setTimeout(() => {
+			toast.classList.add('opacity-0');
+			toastTimeout = null;
+		}, 1500);
+	}
+
+	// Streaming batches marked.parse() behind a 50ms timer, so a copy issued
+	// mid-turn would otherwise read the previous frame's DOM.
+	function flushPendingRender() {
+		if (!renderTimeout) return;
+		clearTimeout(renderTimeout);
+		renderTimeout = null;
+		if (currentTextEl && typeof marked !== 'undefined') {
+			currentTextEl.innerHTML = marked.parse(currentTurnText);
+		}
+	}
+
+	function copyLastCodeBlock() {
+		flushPendingRender();
+
+		const blocks = messagesContainer.querySelectorAll('.agent-markdown pre code');
+		const lastBlock = blocks[blocks.length - 1];
+		const text = lastBlock ? lastBlock.textContent.replace(/\n$/, '') : '';
+
+		if (!text) {
+			showToast('No code block to copy yet');
+			return;
+		}
+
+		vscode.postMessage({ type: 'copyToClipboard', text: text });
+	}
+
+	// Webview twin of the terminal /copy command: copies the whole previous
+	// agent response as raw markdown.
+	function copyLastResponse() {
+		if (!lastAgentRawText.trim()) {
+			showToast('No response to copy yet');
+			return;
+		}
+		vscode.postMessage({ type: 'copyToClipboard', text: lastAgentRawText });
 	}
 
 	// Handle messages from extension.
@@ -841,6 +941,7 @@
 				currentTurnEl = null;
 				currentTextEl = null;
 				currentTurnText = '';
+				lastAgentRawText = '';
 				if (currentThoughtBox) {
 					clearInterval(currentThoughtBox.timer);
 					currentThoughtBox = null;
@@ -865,6 +966,16 @@
 			case 'updateSessions':
 				sessionsData = message.sessions || [];
 				renderSessions(); // Always update so list is ready when history opens
+				break;
+			case 'copyLastCodeBlock':
+				copyLastCodeBlock();
+				break;
+			case 'copyResult':
+				showToast(
+					message.ok
+						? `Copied ${message.chars} characters`
+						: 'Could not copy to clipboard'
+				);
 				break;
 		}
 	});
