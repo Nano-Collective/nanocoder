@@ -24,7 +24,7 @@ test('formatProjectContext formats memories as project context', t => {
 			memory('Auth uses Clerk.'),
 			memory('Avoid middleware.\nUse adapters.'),
 		]),
-		'## Project Context\n\n- Auth uses Clerk.\n- Avoid middleware. Use adapters.',
+		'## Project Context\n\n```\n- Auth uses Clerk.\n- Avoid middleware. Use adapters.\n```',
 	);
 });
 
@@ -37,9 +37,9 @@ test('formatProjectContext respects token budget', t => {
 					'This second memory is intentionally long enough to exceed the tiny test budget.',
 				),
 			],
-			{tokenBudget: 12},
+			{tokenBudget: 14},
 		),
-		'## Project Context\n\n- Use existing hooks.',
+		'## Project Context\n\n```\n- Use existing hooks.\n```',
 	);
 });
 
@@ -47,7 +47,7 @@ test('formatProjectContext returns empty string when budget is too small', t => 
 	t.is(formatProjectContext([memory('Use existing hooks.')], {tokenBudget: 1}), '');
 });
 
-test('formatProjectContext skips oversized memories within budget', t => {
+test('formatProjectContext stops at the first memory that would exceed the remaining budget, in relevance order', t => {
 	t.is(
 		formatProjectContext(
 			[
@@ -58,7 +58,7 @@ test('formatProjectContext skips oversized memories within budget', t => {
 			],
 			{tokenBudget: 10},
 		),
-		'## Project Context\n\n- Use adapters.',
+		'',
 	);
 });
 
@@ -69,7 +69,7 @@ test('appendProjectContext returns original prompt without memories', t => {
 test('appendProjectContext appends formatted memories', t => {
 	t.is(
 		appendProjectContext('base prompt', [memory('Use existing provider.')]),
-		'base prompt\n\n## Project Context\n\n- Use existing provider.',
+		'base prompt\n\n## Project Context\n\n```\n- Use existing provider.\n```',
 	);
 });
 
@@ -82,7 +82,7 @@ test('appendRelevantProjectContext appends relevant memories', async t => {
 		},
 	});
 
-	t.is(prompt, 'base prompt\n\n## Project Context\n\n- Auth uses Clerk.');
+	t.is(prompt, 'base prompt\n\n## Project Context\n\n```\n- Auth uses Clerk.\n```');
 });
 
 test('appendRelevantProjectContextWithCount reports injected memory count', async t => {

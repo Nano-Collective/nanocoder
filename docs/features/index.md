@@ -235,6 +235,7 @@ Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) serv
 | [Checkpointing](checkpointing.md) | Saving and restoring conversation snapshots |
 | [Session Management](session-management.md) | Automatic session saving and resumption |
 | [Task Management](task-management.md) | Tracking multi-step work |
+| [Semantic Memory](semantic-memory.md) | Save durable project facts and recall them automatically across sessions |
 | [File Explorer](file-explorer.md) | Interactive file browser for context selection |
 | [Image Attachments](image-attachments.md) | Send screenshots and images to vision-capable models |
 | [VS Code Extension](vscode-extension.md) | Editor integration with live diff previews |

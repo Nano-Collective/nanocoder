@@ -1,3 +1,4 @@
+import {getSemanticMemoryEnabled} from '@/config/preferences';
 import type {Message} from '@/types/core';
 import {
 	type SemanticMemory,
@@ -10,10 +11,7 @@ export interface RememberMemoryInput {
 	sourceSessionId?: string;
 }
 
-export type MemorySourceType =
-	| 'explicit-remember'
-	| 'explicit-user'
-	| 'conversation-inferred';
+export type MemorySourceType = 'explicit-user' | 'conversation-inferred';
 
 export interface MemoryProposal {
 	content: string;
@@ -24,6 +22,15 @@ export interface MemoryProposal {
 		assistantMessages: string[];
 	};
 	warnings: string[];
+}
+
+const MAX_CANDIDATES_PER_MESSAGE = 3;
+const MAX_EVIDENCE_LENGTH = 160;
+
+function truncateEvidence(content: string): string {
+	const collapsed = content.replaceAll(/\s+/gu, ' ').trim();
+	if (collapsed.length <= MAX_EVIDENCE_LENGTH) return collapsed;
+	return `${collapsed.slice(0, MAX_EVIDENCE_LENGTH)}…`;
 }
 
 const CATEGORY_RULES: Array<{category: string; pattern: RegExp}> = [
@@ -52,9 +59,14 @@ const CATEGORY_RULES: Array<{category: string; pattern: RegExp}> = [
 ];
 
 export class SummarizerService {
-	constructor(private readonly memoryManager = new SemanticMemoryManager()) {}
+	constructor(
+		private readonly memoryManager = new SemanticMemoryManager(),
+		private readonly isMemoryEnabled: () => boolean = getSemanticMemoryEnabled,
+	) {}
 
 	async remember(input: RememberMemoryInput): Promise<SemanticMemory> {
+		this.assertMemoryWritesEnabled();
+
 		const content = input.content.trim();
 		if (!content) {
 			throw new Error('Memory content cannot be empty');
@@ -67,6 +79,27 @@ export class SummarizerService {
 				: inferMemoryCategory(content),
 			sourceSessionId: input.sourceSessionId,
 		});
+	}
+
+	async acceptProposal(
+		proposal: Pick<MemoryProposal, 'content' | 'category'>,
+		sourceSessionId?: string,
+	): Promise<SemanticMemory> {
+		this.assertMemoryWritesEnabled();
+
+		return this.memoryManager.addMemory({
+			content: proposal.content,
+			category: proposal.category,
+			sourceSessionId,
+		});
+	}
+
+	private assertMemoryWritesEnabled(): void {
+		if (!this.isMemoryEnabled()) {
+			throw new Error(
+				'Semantic memory is turned off. Enable it in /settings to save memories.',
+			);
+		}
 	}
 
 	proposeMemoriesFromMessages(messages: Message[]): MemoryProposal[] {
@@ -87,9 +120,14 @@ export class SummarizerService {
 			if (!message || (message.role !== 'user' && message.role !== 'assistant'))
 				continue;
 
-			for (const candidate of splitMemoryCandidates(message.content)) {
+			const candidates = splitMemoryCandidates(message.content).slice(
+				0,
+				MAX_CANDIDATES_PER_MESSAGE,
+			);
+
+			for (const candidate of candidates) {
 				const category = inferMemoryCategory(candidate);
-				if (category === 'project') continue;
+				if (category === 'project' && message.role === 'assistant') continue;
 
 				const key = candidate.toLowerCase();
 				if (!proposals.has(key)) {
@@ -104,11 +142,15 @@ export class SummarizerService {
 				}
 
 				const entry = proposals.get(key)!;
+				const snippet = truncateEvidence(message.content);
 				if (message.role === 'user') {
-					entry.userTurns.push(message.content);
+					entry.userTurns.push(snippet);
 					entry.sourceRole = 'user';
+					entry.warnings = entry.warnings.filter(
+						warning => warning !== 'Possible assistant position reversal.',
+					);
 				} else {
-					entry.assistantTurns.push(message.content);
+					entry.assistantTurns.push(snippet);
 				}
 
 				if (message.role === 'assistant' && entry.sourceRole !== 'user') {
@@ -222,5 +264,7 @@ function splitMemoryCandidates(content: string): string[] {
 	return content
 		.split(/\n+/u)
 		.map(part => part.trim())
-		.filter(part => part.length >= 12 && part.length <= 300);
+		.filter(
+			part => part.length >= 12 && part.length <= 300 && !part.endsWith('?'),
+		);
 }

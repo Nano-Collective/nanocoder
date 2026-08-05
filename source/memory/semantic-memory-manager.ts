@@ -61,12 +61,135 @@ function hashScope(scope: string): string {
 	return crypto.createHash('sha256').update(scope).digest('hex').slice(0, 32);
 }
 
+const STOPWORDS = new Set([
+	'a',
+	'about',
+	'after',
+	'again',
+	'all',
+	'am',
+	'an',
+	'and',
+	'any',
+	'are',
+	'as',
+	'at',
+	'be',
+	'been',
+	'being',
+	'but',
+	'by',
+	'can',
+	'could',
+	'did',
+	'do',
+	'does',
+	'doing',
+	'down',
+	'during',
+	'each',
+	'few',
+	'for',
+	'from',
+	'further',
+	'had',
+	'has',
+	'have',
+	'having',
+	'he',
+	'her',
+	'here',
+	'hers',
+	'herself',
+	'him',
+	'himself',
+	'his',
+	'how',
+	'if',
+	'in',
+	'into',
+	'is',
+	'it',
+	'its',
+	'itself',
+	'just',
+	'me',
+	'more',
+	'most',
+	'my',
+	'myself',
+	'no',
+	'nor',
+	'not',
+	'now',
+	'of',
+	'off',
+	'on',
+	'once',
+	'only',
+	'or',
+	'other',
+	'our',
+	'ours',
+	'ourselves',
+	'out',
+	'over',
+	'own',
+	'same',
+	'she',
+	'should',
+	'so',
+	'some',
+	'such',
+	'than',
+	'that',
+	'the',
+	'their',
+	'theirs',
+	'them',
+	'themselves',
+	'then',
+	'there',
+	'these',
+	'they',
+	'this',
+	'those',
+	'through',
+	'to',
+	'too',
+	'under',
+	'until',
+	'up',
+	'very',
+	'was',
+	'we',
+	'were',
+	'what',
+	'when',
+	'where',
+	'which',
+	'while',
+	'who',
+	'whom',
+	'why',
+	'will',
+	'with',
+	'would',
+	'you',
+	'your',
+	'yours',
+	'yourself',
+	'yourselves',
+]);
+
+const MIN_RELEVANCE_RATIO = 0.1;
+
 function tokenize(value: string): Set<string> {
 	return new Set(
 		value
 			.toLowerCase()
 			.split(/[^a-z0-9]+/u)
-			.filter(part => part.length > 1),
+			.filter(part => part.length > 1 && !STOPWORDS.has(part)),
 	);
 }
 
@@ -74,10 +197,20 @@ export class SemanticMemoryManager {
 	private readonly memoryDir: string;
 	private readonly cwd: string;
 	private memoryFilePath?: string;
+	private writeQueue: Promise<unknown> = Promise.resolve();
 
 	constructor(options: SemanticMemoryManagerOptions = {}) {
 		this.memoryDir = options.memoryDir ?? path.join(getAppDataPath(), 'memory');
 		this.cwd = options.cwd ?? process.cwd();
+	}
+
+	private mutate<T>(operation: () => Promise<T>): Promise<T> {
+		const result = this.writeQueue.then(operation, operation);
+		this.writeQueue = result.then(
+			() => undefined,
+			() => undefined,
+		);
+		return result;
 	}
 
 	async addMemory(input: CreateMemoryInput): Promise<SemanticMemory> {
@@ -97,10 +230,12 @@ export class SemanticMemoryManager {
 				: {}),
 		};
 
-		const memories = await this.listMemories();
-		memories.push(memory);
-		await this.writeMemories(memories);
-		return memory;
+		return this.mutate(async () => {
+			const memories = await this.listMemories();
+			memories.push(memory);
+			await this.writeMemories(memories);
+			return memory;
+		});
 	}
 
 	async listMemories(): Promise<SemanticMemory[]> {
@@ -123,18 +258,20 @@ export class SemanticMemoryManager {
 	}
 
 	async deleteMemory(id: string): Promise<boolean> {
-		const memories = await this.listMemories();
-		const filtered = memories.filter(memory => memory.id !== id);
-		if (filtered.length === memories.length) {
-			return false;
-		}
+		return this.mutate(async () => {
+			const memories = await this.listMemories();
+			const filtered = memories.filter(memory => memory.id !== id);
+			if (filtered.length === memories.length) {
+				return false;
+			}
 
-		await this.writeMemories(filtered);
-		return true;
+			await this.writeMemories(filtered);
+			return true;
+		});
 	}
 
 	async clearMemories(): Promise<void> {
-		await this.writeMemories([]);
+		await this.mutate(() => this.writeMemories([]));
 	}
 
 	async findRelevantMemories(
@@ -153,9 +290,15 @@ export class SemanticMemoryManager {
 					if (memoryTerms.has(term)) score++;
 					if (categoryTerms.has(term)) score++;
 				}
-				return {memory, score};
+				const vocabularySize = memoryTerms.size + categoryTerms.size;
+				const relevanceRatio =
+					vocabularySize === 0 ? 0 : score / vocabularySize;
+				return {memory, score, relevanceRatio};
 			})
-			.filter(result => result.score > 0)
+			.filter(
+				result =>
+					result.score > 0 && result.relevanceRatio >= MIN_RELEVANCE_RATIO,
+			)
 			.sort((a, b) => {
 				if (a.score !== b.score) return b.score - a.score;
 				return b.memory.timestamp.localeCompare(a.memory.timestamp);

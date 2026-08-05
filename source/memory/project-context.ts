@@ -36,12 +36,13 @@ function formatProjectContextWithCount(
 
 	const tokenBudget = options.tokenBudget ?? DEFAULT_TOKEN_BUDGET;
 	const bullets: string[] = [];
-	let usedTokens = estimateTokens('## Project Context\n\n');
+	let usedTokens =
+		estimateTokens('## Project Context\n\n') + estimateTokens('```\n\n```');
 
 	for (const memory of memories) {
 		const bullet = `- ${memory.content.replaceAll(/\s+/gu, ' ').trim()}`;
 		const bulletTokens = estimateTokens(`${bullet}\n`);
-		if (usedTokens + bulletTokens > tokenBudget) continue;
+		if (usedTokens + bulletTokens > tokenBudget) break;
 
 		bullets.push(bullet);
 		usedTokens += bulletTokens;
@@ -50,7 +51,7 @@ function formatProjectContextWithCount(
 	if (bullets.length === 0) return {content: '', memoryCount: 0};
 
 	return {
-		content: `## Project Context\n\n${bullets.join('\n')}`,
+		content: `## Project Context\n\n\`\`\`\n${bullets.join('\n')}\n\`\`\``,
 		memoryCount: bullets.length,
 	};
 }

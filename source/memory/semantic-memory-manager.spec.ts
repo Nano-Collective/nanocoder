@@ -113,6 +113,47 @@ test('SemanticMemoryManager includes category matches in relevance ranking', asy
 	]);
 });
 
+test('SemanticMemoryManager filters out stopword-only matches on an unrelated query', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+
+	await manager.addMemory({
+		content: 'The auth module uses Clerk and we avoid middleware in the edge runtime.',
+	});
+	await manager.addMemory({
+		content:
+			'The flaky test in the payments suite is a known failure and we should fix it later.',
+	});
+	const style = await manager.addMemory({
+		content: 'Use tabs not spaces in the settings form styling.',
+	});
+
+	const results = await manager.findRelevantMemories(
+		'can you add a new field to the user profile page in the settings form',
+		5,
+	);
+
+	t.deepEqual(results, [style]);
+});
+
+test('SemanticMemoryManager serializes concurrent writes so none are lost', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+
+	await Promise.all(
+		Array.from({length: 10}, (_, i) =>
+			manager.addMemory({content: `Memory number ${i}.`}),
+		),
+	);
+
+	const memories = await manager.listMemories();
+	t.is(memories.length, 10);
+});
+
 test('SemanticMemoryManager rejects empty memory content', async t => {
 	const dir = await createTempDir();
 	const cwd = path.join(dir, 'repo');
