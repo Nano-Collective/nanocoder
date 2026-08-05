@@ -3,6 +3,7 @@ import type {WebClientEvent, WebServerEvent} from './protocol.js';
 export interface WebRuntimeHandlers {
 	submitMessage: (text: string) => void | Promise<void>;
 	cancel: () => void;
+	resetSession: () => void | Promise<void>;
 }
 
 export interface WebApprovalRequest {
@@ -192,6 +193,17 @@ export function createWebRuntimeBridge(
 						'The browser turn was cancelled before the question was answered.',
 				});
 				runtimeHandlers.cancel();
+				return;
+			}
+
+			if (event.type === 'reset_session') {
+				if (activeTurnId) {
+					throw new Error(
+						'Cannot start a new chat while a browser turn is active.',
+					);
+				}
+
+				await runtimeHandlers.resetSession();
 				return;
 			}
 

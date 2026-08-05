@@ -500,11 +500,13 @@ export default function App({
 		isGenerating: chatHandler.isGenerating,
 		submitMessage: appHandlers.handleMessageSubmit,
 		cancel: appHandlers.handleCancel,
+		resetSession: appHandlers.clearMessages,
 	});
 	webRuntimeStateRef.current = {
 		isGenerating: chatHandler.isGenerating,
 		submitMessage: appHandlers.handleMessageSubmit,
 		cancel: appHandlers.handleCancel,
+		resetSession: appHandlers.clearMessages,
 	};
 
 	React.useEffect(() => {
@@ -526,6 +528,15 @@ export default function App({
 				return webRuntimeStateRef.current.submitMessage(message);
 			},
 			cancel: () => webRuntimeStateRef.current.cancel(),
+			resetSession: () => {
+				if (webRuntimeStateRef.current.isGenerating) {
+					throw new Error(
+						'Cannot start a new chat while Nanocoder is processing a turn.',
+					);
+				}
+
+				return webRuntimeStateRef.current.resetSession();
+			},
 		});
 	}, [
 		webRuntimeBridge,

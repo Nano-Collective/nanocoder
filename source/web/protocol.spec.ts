@@ -52,6 +52,23 @@ test('parseWebClientEvent still accepts the phase 4 handshake events', t => {
 	);
 });
 
+test('parseWebClientEvent accepts a reset_session event', t => {
+	t.deepEqual(
+		parseWebClientEvent(
+			JSON.stringify({
+				type: 'reset_session',
+				id: 'browser-reset-1',
+			}),
+		),
+		{type: 'reset_session', id: 'browser-reset-1'},
+	);
+
+	t.throws(
+		() => parseWebClientEvent(JSON.stringify({type: 'reset_session'})),
+		{message: 'Reset session id is required.'},
+	);
+});
+
 test('parseWebClientEvent rejects malformed interaction responses', t => {
 	t.throws(
 		() =>
