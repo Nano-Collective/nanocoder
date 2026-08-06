@@ -8,62 +8,60 @@
 // ---------------------------------------------------------
 
 export interface ExtensionMessageAppendMessage {
-	type: 'appendMessage';
+	type: "appendMessage";
 	content: string;
 }
 
 export interface ExtensionMessageAppendThought {
-	type: 'appendThought';
+	type: "appendThought";
 	content: string;
 }
 
 export interface ExtensionMessageStateUpdate {
-	type: 'stateUpdate';
+	type: "stateUpdate";
 	status?: string;
 	model?: string;
 }
 
 export interface ExtensionMessageClear {
-	type: 'clear';
+	type: "clear";
 	isLoading?: boolean;
 }
 
 export interface ExtensionMessageSessionLoaded {
-	type: 'sessionLoaded';
+	type: "sessionLoaded";
 }
 
 export interface ExtensionMessageAcpUpdate {
-	type: 'acpUpdate';
+	type: "acpUpdate";
 	update: any; // schema.SessionNotification or custom internal payload
 }
 
 export interface ExtensionMessageToolStarted {
-	type: 'toolStarted';
+	type: "toolStarted";
 	toolCall: any;
 }
 
 export interface ExtensionMessageToolUpdated {
-	type: 'toolUpdated';
+	type: "toolUpdated";
 	update: any;
 }
 
 export interface ExtensionMessageToolCompleted {
-	type: 'toolCompleted';
+	type: "toolCompleted";
 	toolCallId: string;
 	result: any;
 }
 
 export interface ExtensionMessagePermissionRequested {
-	type: 'permissionRequested';
+	type: "permissionRequested";
 	toolCallId: string;
 	toolCall: any;
 	options?: any[];
 }
 
-
-
 export interface ExtensionMessageSyncState {
-	type: 'syncState';
+	type: "syncState";
 	mode: string;
 	availableModes: string[];
 	model: string;
@@ -73,7 +71,7 @@ export interface ExtensionMessageSyncState {
 }
 
 export interface ExtensionMessageUpdateSessions {
-	type: 'updateSessions';
+	type: "updateSessions";
 	sessions: Array<{
 		sessionId: string;
 		cwd: string;
@@ -95,73 +93,71 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageUpdateSessions
 	| ExtensionMessageSessionLoaded;
 
-
 // ---------------------------------------------------------
 // Messages: Webview -> Extension Host
 // ---------------------------------------------------------
 
 export interface WebviewMessageReady {
-	type: 'ready';
+	type: "ready";
 }
 
 export interface WebviewMessageSubmitMessage {
-	type: 'submitMessage';
+	type: "submitMessage";
 	text: string;
+	command?: string;
 }
 
 export interface WebviewMessageCancel {
-	type: 'cancel';
+	type: "cancel";
 }
 
 export interface WebviewMessageApproveTool {
-	type: 'approveTool';
+	type: "approveTool";
 	toolCallId: string;
 }
 
 export interface WebviewMessageDenyTool {
-	type: 'denyTool';
+	type: "denyTool";
 	toolCallId: string;
 }
 
 export interface WebviewMessageResolveTool {
-	type: 'resolveTool';
+	type: "resolveTool";
 	toolCallId: string;
 	optionId: string;
 }
 
 export interface WebviewMessageShowDiff {
-	type: 'showDiff';
+	type: "showDiff";
 	toolCallId: string;
 }
 
-
-
 export interface WebviewMessageSetMode {
-	type: 'setMode';
+	type: "setMode";
 	mode: string;
 }
 
 export interface WebviewMessageSetModel {
-	type: 'setModel';
+	type: "setModel";
 	model: string;
 }
 
 export interface WebviewMessageSetProvider {
-	type: 'setProvider';
+	type: "setProvider";
 	provider: string;
 }
 
 export interface WebviewMessageListSessions {
-	type: 'listSessions';
+	type: "listSessions";
 }
 
 export interface WebviewMessageResumeSession {
-	type: 'resumeSession';
+	type: "resumeSession";
 	sessionId: string;
 }
 
 export interface WebviewMessageDeleteSession {
-	type: 'deleteSession';
+	type: "deleteSession";
 	sessionId: string;
 }
 

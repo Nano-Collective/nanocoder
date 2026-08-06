@@ -29,6 +29,7 @@
 		<div class="p-4 pt-2 bg-vscode-bg shrink-0">
 			<div class="flex flex-col bg-vscode-input-bg border border-vscode-input-border rounded-2xl focus-within:border-vscode-input-focus transition-colors shadow-sm relative">
 				<textarea id="chat-input" rows="1" placeholder="Ask Nanocoder anything..." class="w-full min-h-[44px] max-h-[250px] p-3 px-4 pb-2 bg-transparent text-vscode-input-fg font-vscode text-[0.95em] resize-none outline-none border-none"></textarea>
+				<div id="slash-command-chip" class="hidden items-center gap-1 text-[0.78em] text-vscode-fg opacity-85 px-3 pb-1"></div>
 				
 				<div class="flex items-center justify-between px-3 pb-2 pt-1 relative">
 					<div class="flex gap-1 items-center flex-1 min-w-0">
@@ -69,6 +70,7 @@
 				<div id="provider-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
 				<div id="model-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
 				<div id="mode-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
+				<div id="slash-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
 			</div>
 		</div>
 	<script nonce="{{nonce}}" src="{{markedUri}}"></script>
