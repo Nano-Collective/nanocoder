@@ -1,6 +1,6 @@
 import cp from 'node:child_process';
 import { platform } from 'node:process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, createWriteStream, unlinkSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import http from 'node:http';
@@ -108,6 +108,55 @@ async function defaultExec(command: string, args: string[]): Promise<void> {
 	});
 }
 
+function downloadFile(url: string, destPath: string, maxRedirects = 5): Promise<void> {
+	return new Promise((resolve, reject) => {
+		if (maxRedirects <= 0) {
+			return reject(new Error(`Too many redirects downloading ${url}`));
+		}
+
+		const client = url.startsWith('https') ? https : http;
+		const request = client.get(
+			url,
+			{ headers: { 'User-Agent': 'nanocoder-voice-installer' } },
+			(response) => {
+				if (
+					response.statusCode === 301 ||
+					response.statusCode === 302 ||
+					response.statusCode === 307 ||
+					response.statusCode === 308
+				) {
+					const redirectUrl = response.headers.location;
+					if (!redirectUrl) {
+						return reject(new Error(`Redirect without location header downloading ${url}`));
+					}
+					return downloadFile(redirectUrl, destPath, maxRedirects - 1)
+						.then(resolve)
+						.catch(reject);
+				}
+
+				if (response.statusCode !== 200) {
+					return reject(new Error(`HTTP ${response.statusCode} downloading ${url}`));
+				}
+
+				const file = createWriteStream(destPath);
+				response.pipe(file);
+				file.on('finish', () => {
+					file.close(() => resolve());
+				});
+				file.on('error', (err) => {
+					try { unlinkSync(destPath); } catch {}
+					reject(err);
+				});
+			},
+		);
+
+		request.on('error', (err) => {
+			try { unlinkSync(destPath); } catch {}
+			reject(err);
+		});
+	});
+}
+
 /**
  * Installs missing voice dependencies based on the host OS.
  */
@@ -149,27 +198,66 @@ export async function installDependencies(
 					);
 				}
 			}
-			onProgress?.('sox installed successfully.', 50);
+			onProgress?.('sox installed successfully.', 45);
 		} catch (err) {
 			throw new Error('Linux installation failed for sox: ' + (err instanceof Error ? err.message : String(err)));
 		}
 
-		onProgress?.('Downloading whisper.cpp binary & base model...', 65);
+		onProgress?.('Fetching real whisper.cpp binary & ggml model...', 65);
 		const whisperBin = join(binDir, 'whisper-cli');
+		const whisperModel = join(binDir, 'ggml-base.en.bin');
+
 		if (installRunner) {
 			await run('download-whisper', ['linux']);
 		} else {
-			const whisperScript = '#!/bin/sh\nexec whisper "$@" 2>/dev/null || exec whisper-cli "$@" 2>/dev/null || exit 0\n';
-			writeFileSync(whisperBin, whisperScript, { mode: 0o755 });
+			try {
+				const whisperUrl = 'https://github.com/ggerganov/whisper.cpp/releases/download/v1.7.4/whisper-cli-linux-x64';
+				const modelUrl = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin';
+
+				if (!existsSync(whisperBin)) {
+					await downloadFile(whisperUrl, whisperBin);
+					chmodSync(whisperBin, 0o755);
+				}
+				if (!existsSync(whisperModel)) {
+					await downloadFile(modelUrl, whisperModel);
+				}
+			} catch (err) {
+				throw new Error(`Failed to download whisper.cpp binary or model: ${err instanceof Error ? err.message : String(err)}`);
+			}
 		}
 
-		onProgress?.('Downloading piper TTS binary & default model...', 85);
+		onProgress?.('Fetching real piper TTS binary & voice model...', 85);
 		const piperBin = join(binDir, 'piper');
+		const piperModel = join(binDir, 'en_US-lessac-medium.onnx');
+		const piperConfig = join(binDir, 'en_US-lessac-medium.onnx.json');
+
 		if (installRunner) {
 			await run('download-piper', ['linux']);
 		} else {
-			const piperScript = '#!/bin/sh\nexec piper "$@" 2>/dev/null || exit 0\n';
-			writeFileSync(piperBin, piperScript, { mode: 0o755 });
+			try {
+				const piperUrl = 'https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz';
+				const modelUrl = 'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx';
+				const configUrl = 'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json';
+
+				if (!existsSync(piperBin)) {
+					const tarPath = join(binDir, 'piper.tar.gz');
+					await downloadFile(piperUrl, tarPath);
+					await run('tar', ['-xzf', tarPath, '-C', binDir, '--strip-components=1']);
+					try { unlinkSync(tarPath); } catch {}
+					if (existsSync(piperBin)) {
+						chmodSync(piperBin, 0o755);
+					}
+				}
+
+				if (!existsSync(piperModel)) {
+					await downloadFile(modelUrl, piperModel);
+				}
+				if (!existsSync(piperConfig)) {
+					await downloadFile(configUrl, piperConfig);
+				}
+			} catch (err) {
+				throw new Error(`Failed to download piper binary or model: ${err instanceof Error ? err.message : String(err)}`);
+			}
 		}
 		onProgress?.('Linux voice setup complete.', 95);
 	} else if (platform === 'win32') {
@@ -180,7 +268,7 @@ export async function installDependencies(
 			wingetSuccess = true;
 			onProgress?.('sox installed via winget.', 50);
 		} catch {
-			onProgress?.('winget unavailable or failed. Setting up local sox binary...', 40);
+			onProgress?.('winget unavailable or failed. Setting up sox binary...', 40);
 		}
 
 		if (!wingetSuccess) {
@@ -188,23 +276,55 @@ export async function installDependencies(
 			if (installRunner) {
 				await run('download-sox', ['windows']);
 			} else {
-				const shim = '@echo off\r\nrec %* 2>nul || exit 0\r\n';
-				writeFileSync(soxBin, shim);
+				throw new Error('sox installation required on Windows. Please install sox via winget or add to PATH.');
 			}
 		}
 
-		onProgress?.('Setting up whisper.cpp and piper binaries...', 70);
+		onProgress?.('Fetching real whisper.cpp & piper Windows binaries...', 70);
 		const whisperBin = join(binDir, 'whisper-cli.exe');
+		const whisperModel = join(binDir, 'ggml-base.en.bin');
 		const piperBin = join(binDir, 'piper.exe');
+		const piperModel = join(binDir, 'en_US-lessac-medium.onnx');
+		const piperConfig = join(binDir, 'en_US-lessac-medium.onnx.json');
 
 		if (installRunner) {
 			await run('download-whisper', ['windows']);
 			await run('download-piper', ['windows']);
 		} else {
-			const whisperShim = '@echo off\r\nexit 0\r\n';
-			const piperShim = '@echo off\r\nexit 0\r\n';
-			writeFileSync(whisperBin, whisperShim);
-			writeFileSync(piperBin, piperShim);
+			try {
+				const modelUrl = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin';
+				const piperModelUrl = 'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx';
+				const piperConfigUrl = 'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json';
+
+				if (!existsSync(whisperModel)) {
+					await downloadFile(modelUrl, whisperModel);
+				}
+				if (!existsSync(piperModel)) {
+					await downloadFile(piperModelUrl, piperModel);
+				}
+				if (!existsSync(piperConfig)) {
+					await downloadFile(piperConfigUrl, piperConfig);
+				}
+
+				const whisperZipUrl = 'https://github.com/ggerganov/whisper.cpp/releases/download/v1.7.4/whisper-cli-win-x64.zip';
+				const piperZipUrl = 'https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip';
+
+				if (!existsSync(whisperBin)) {
+					const zipPath = join(binDir, 'whisper.zip');
+					await downloadFile(whisperZipUrl, zipPath);
+					await run('powershell', ['-Command', `Expand-Archive -Path "${zipPath}" -DestinationPath "${binDir}" -Force`]);
+					try { unlinkSync(zipPath); } catch {}
+				}
+
+				if (!existsSync(piperBin)) {
+					const zipPath = join(binDir, 'piper.zip');
+					await downloadFile(piperZipUrl, zipPath);
+					await run('powershell', ['-Command', `Expand-Archive -Path "${zipPath}" -DestinationPath "${binDir}" -Force`]);
+					try { unlinkSync(zipPath); } catch {}
+				}
+			} catch (err) {
+				throw new Error(`Windows binary/model download failed: ${err instanceof Error ? err.message : String(err)}`);
+			}
 		}
 		onProgress?.('Windows voice setup complete.', 95);
 	} else {

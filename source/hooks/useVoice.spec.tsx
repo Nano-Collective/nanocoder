@@ -305,3 +305,68 @@ test('manual abort mid-recording returns cleanly to idle', async t => {
 	t.is(states.at(-1), 'idle', 'should return to idle after abort');
 	t.is(queueRef.current.length, 0, 'no error messages should be queued');
 });
+
+test('hands-free VAD persists across multiple consecutive speech_start/speech_final cycles', async t => {
+	const eventListeners: Record<string, ((...args: any[]) => void)[]> = {};
+	let startCount = 0;
+	let stopCount = 0;
+
+	const mockVad = {
+		start: () => {
+			startCount++;
+		},
+		stop: () => {
+			stopCount++;
+		},
+		on: (event: string, cb: (...args: any[]) => void) => {
+			eventListeners[event] = eventListeners[event] || [];
+			eventListeners[event].push(cb);
+		},
+	};
+
+	const mockPlugin = makeMockPlugin({
+		createVadEngine: () => mockVad,
+		transcribeAudio: async () => 'hello from vad',
+	});
+
+	const { getVoicePreference, updateVoicePreference } = await import('@/config/preferences.js');
+	const originalPref = getVoicePreference();
+	updateVoicePreference({ ...originalPref, enabled: true, activationMode: 'hands-free' });
+
+	try {
+		const triggerRef = { current: null as (() => void) | null };
+		const queueRef = { current: [] as React.ReactNode[] };
+
+		render(
+			<VoiceHarness
+				loadPlugin={async () => mockPlugin}
+				triggerRef={triggerRef}
+				queueRef={queueRef}
+			/>,
+		);
+
+		await flush(5);
+
+		t.is(startCount, 1, 'VAD engine should start once upon mount');
+		t.is(stopCount, 0, 'VAD engine should not stop');
+
+		// Cycle 1: speech_start -> speech_final
+		eventListeners['speech_start']?.forEach(cb => cb());
+		await flush();
+		eventListeners['speech_final']?.forEach(cb => cb({ filePath: '/tmp/test1.wav' }));
+		await flush(5);
+
+		t.is(stopCount, 0, 'VAD engine must NOT stop after first utterance cycle');
+
+		// Cycle 2: speech_start -> speech_final
+		eventListeners['speech_start']?.forEach(cb => cb());
+		await flush();
+		eventListeners['speech_final']?.forEach(cb => cb({ filePath: '/tmp/test2.wav' }));
+		await flush(5);
+
+		t.is(stopCount, 0, 'VAD engine must NOT stop after second utterance cycle');
+		t.is(startCount, 1, 'VAD engine should remain continuously active without restarting');
+	} finally {
+		updateVoicePreference(originalPref);
+	}
+});

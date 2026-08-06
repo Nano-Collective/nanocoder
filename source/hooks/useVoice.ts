@@ -69,6 +69,22 @@ export function useVoice({
 }: UseVoiceProps): UseVoiceReturn {
 	const [state, setState] = React.useState<VoiceState>('idle');
 
+	// Keep refs tracking mutable props & state to decouple VAD lifecycle from re-renders
+	const stateRef = React.useRef(state);
+	React.useEffect(() => {
+		stateRef.current = state;
+	}, [state]);
+
+	const handleUserSubmitRef = React.useRef(handleUserSubmit);
+	React.useEffect(() => {
+		handleUserSubmitRef.current = handleUserSubmit;
+	}, [handleUserSubmit]);
+
+	const addToChatQueueRef = React.useRef(addToChatQueue);
+	React.useEffect(() => {
+		addToChatQueueRef.current = addToChatQueue;
+	}, [addToChatQueue]);
+
 	const abortControllerRef = React.useRef<AbortController | null>(null);
 	const recordingAudioPromiseRef = React.useRef<Promise<void> | null>(null);
 	const activeFileRef = React.useRef<string | null>(null);
@@ -105,7 +121,7 @@ export function useVoice({
 				}
 
 				if (hasDeclinedVoiceInstallForSession()) {
-					addToChatQueue(
+					addToChatQueueRef.current(
 						React.createElement(InfoMessage, {
 							key: generateKey('voice-dep-declined'),
 							message:
@@ -126,7 +142,7 @@ export function useVoice({
 
 				if (!approved) {
 					setDeclinedVoiceInstallForSession(true);
-					addToChatQueue(
+					addToChatQueueRef.current(
 						React.createElement(InfoMessage, {
 							key: generateKey('voice-dep-declined'),
 							message: 'Voice dependency installation cancelled.',
@@ -137,7 +153,7 @@ export function useVoice({
 
 				return true;
 			} catch (err) {
-				addToChatQueue(
+				addToChatQueueRef.current(
 					React.createElement(ErrorMessage, {
 						key: generateKey('voice-dep-error'),
 						message: `Voice dependency setup failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -146,7 +162,7 @@ export function useVoice({
 				return false;
 			}
 		},
-		[addToChatQueue],
+		[],
 	);
 
 	React.useEffect(() => {
@@ -175,7 +191,7 @@ export function useVoice({
 		};
 	}, [cleanupActiveFile]);
 
-	// Hands-free VAD effect
+	// Hands-free VAD effect - DECOUPLED FROM `state` and prop changes to persist continuously across utterances
 	React.useEffect(() => {
 		const pref = getVoicePreference();
 		if (!pref.enabled || pref.activationMode !== 'hands-free') {
@@ -189,7 +205,7 @@ export function useVoice({
 			return;
 		}
 
-		if (state !== 'idle' || vadEngineRef.current) {
+		if (vadEngineRef.current) {
 			return;
 		}
 
@@ -216,10 +232,14 @@ export function useVoice({
 			};
 
 			engine.on('speech_start', () => {
-				setState('listening');
+				if (stateRef.current === 'idle') {
+					setState('listening');
+				}
 			});
 
 			engine.on('speech_final', async (evt: {filePath: string}) => {
+				if (stateRef.current !== 'listening') return;
+
 				setState('processing');
 				activeFileRef.current = evt.filePath;
 				try {
@@ -230,7 +250,7 @@ export function useVoice({
 					cleanupActiveFile();
 
 					if (!transcribed || transcribed.trim() === '') {
-						addToChatQueue(
+						addToChatQueueRef.current(
 							React.createElement(InfoMessage, {
 								key: generateKey('voice-vad-no-speech'),
 								message: 'No speech detected.',
@@ -252,11 +272,11 @@ export function useVoice({
 						}
 					}, 90_000);
 
-					await handleUserSubmit(transcribed, transcribed);
+					await handleUserSubmitRef.current(transcribed, transcribed);
 				} catch (err) {
 					cleanupActiveFile();
 					setState('idle');
-					addToChatQueue(
+					addToChatQueueRef.current(
 						React.createElement(ErrorMessage, {
 							key: generateKey('voice-vad-error'),
 							message: `VAD pipeline error: ${err instanceof Error ? err.message : String(err)}`,
@@ -266,7 +286,7 @@ export function useVoice({
 			});
 
 			engine.on('error', (err: Error) => {
-				addToChatQueue(
+				addToChatQueueRef.current(
 					React.createElement(ErrorMessage, {
 						key: generateKey('voice-vad-engine-error'),
 						message: `VAD engine error: ${err.message}`,
@@ -290,14 +310,7 @@ export function useVoice({
 				vadEngineRef.current = null;
 			}
 		};
-	}, [
-		state,
-		loadPlugin,
-		ensureDependencies,
-		handleUserSubmit,
-		addToChatQueue,
-		cleanupActiveFile,
-	]);
+	}, [loadPlugin, ensureDependencies, cleanupActiveFile]);
 
 	React.useEffect(() => {
 		if (!pendingTTSRef.current || !pluginRef.current) return;
@@ -328,7 +341,7 @@ export function useVoice({
 			.synthesizeSpeech(formattedText, ttsFile)
 			.then(async () => plugin.playAudio(ttsFile))
 			.catch(() => {
-				addToChatQueue(
+				addToChatQueueRef.current(
 					React.createElement(ErrorMessage, {
 						key: generateKey('voice-audio-error'),
 						message: 'Failed to synthesize or play speech response.',
@@ -339,7 +352,7 @@ export function useVoice({
 				cleanupActiveFile();
 				setState('idle');
 			});
-	}, [messages, addToChatQueue, cleanupActiveFile]);
+	}, [messages, cleanupActiveFile]);
 
 	const startStopRecording = React.useCallback(async () => {
 		if (state === 'listening') {
@@ -359,7 +372,7 @@ export function useVoice({
 		try {
 			plugin = await loadPlugin();
 		} catch (_error) {
-			addToChatQueue(
+			addToChatQueueRef.current(
 				React.createElement(ErrorMessage, {
 					key: generateKey('voice-error'),
 					message:
@@ -411,7 +424,7 @@ export function useVoice({
 			cleanupActiveFile();
 
 			if (!transcribedText || transcribedText.trim() === '') {
-				addToChatQueue(
+				addToChatQueueRef.current(
 					React.createElement(InfoMessage, {
 						key: generateKey('voice-info'),
 						message: 'No speech detected.',
@@ -433,7 +446,7 @@ export function useVoice({
 				}
 			}, 90_000);
 
-			await handleUserSubmit(transcribedText, transcribedText);
+			await handleUserSubmitRef.current(transcribedText, transcribedText);
 		} catch (error) {
 			if (ttsTimeoutRef.current) {
 				clearTimeout(ttsTimeoutRef.current);
@@ -451,21 +464,14 @@ export function useVoice({
 				return;
 			}
 
-			addToChatQueue(
+			addToChatQueueRef.current(
 				React.createElement(ErrorMessage, {
 					key: generateKey('voice-error'),
 					message: `Voice pipeline error: ${error instanceof Error ? error.message : String(error)}`,
 				}),
 			);
 		}
-	}, [
-		state,
-		handleUserSubmit,
-		addToChatQueue,
-		cleanupActiveFile,
-		loadPlugin,
-		ensureDependencies,
-	]);
+	}, [state, loadPlugin, ensureDependencies, cleanupActiveFile]);
 
 	return {
 		state,
