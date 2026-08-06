@@ -72,6 +72,15 @@ export class MCPClient {
 		return server;
 	}
 
+	// Overridable seam so tests can supply a client with a failing listTools()
+	// without standing up a real transport.
+	protected createClient(): Client {
+		return new Client({
+			name: 'nanocoder-mcp-client',
+			version: '1.0.0',
+		});
+	}
+
 	async connectToServer(server: MCPServer): Promise<void> {
 		const correlationId = generateCorrelationId();
 		const metrics = startMetrics();
@@ -106,6 +115,7 @@ export class MCPClient {
 				);
 			}
 
+			let client: Client | undefined;
 			try {
 				// Create transport using the factory
 				const transport = TransportFactory.createTransport(normalizedServer);
@@ -116,10 +126,7 @@ export class MCPClient {
 				});
 
 				// Create and connect client
-				const client = new Client({
-					name: 'nanocoder-mcp-client',
-					version: '1.0.0',
-				});
+				client = this.createClient();
 
 				this.logger.debug('MCP client created, attempting connection', {
 					serverName: normalizedServer.name,
@@ -149,12 +156,9 @@ export class MCPClient {
 					transport: normalizedServer.transport,
 				});
 
-				// Store client, transport, and server config
-				this.clients.set(normalizedServer.name, client);
-				this.transports.set(normalizedServer.name, transport);
-				this.serverConfigs.set(normalizedServer.name, normalizedServer);
-
-				// List available tools from this server
+				// List available tools from this server. Do this before registering
+				// the server so a failed tools/list doesn't leave it visible as
+				// connected — the maps are populated only once discovery succeeds.
 				const toolsResult = await client.listTools();
 				const tools: MCPTool[] = toolsResult.tools.map(tool => ({
 					name: tool.name,
@@ -167,6 +171,11 @@ export class MCPClient {
 					serverName: normalizedServer.name,
 				}));
 
+				// Store client, transport, config, and tools together only after
+				// connection and tool discovery have both succeeded.
+				this.clients.set(normalizedServer.name, client);
+				this.transports.set(normalizedServer.name, transport);
+				this.serverConfigs.set(normalizedServer.name, normalizedServer);
 				this.serverTools.set(normalizedServer.name, tools);
 
 				const finalMetrics = endMetrics(metrics);
@@ -181,6 +190,20 @@ export class MCPClient {
 					correlationId,
 				});
 			} catch (error) {
+				// Best-effort cleanup: close the client so a partially-established
+				// connection (e.g. handshake ok but tools/list failed) doesn't leak
+				// its transport / child process. Nothing was registered yet.
+				if (client) {
+					try {
+						await client.close();
+					} catch (closeError) {
+						this.logger.debug('Error closing MCP client after failed connect', {
+							serverName: normalizedServer.name,
+							error: formatError(closeError),
+						});
+					}
+				}
+
 				const finalMetrics = endMetrics(metrics);
 				this.logger.error('Failed to connect to MCP server', {
 					serverName: normalizedServer.name,
