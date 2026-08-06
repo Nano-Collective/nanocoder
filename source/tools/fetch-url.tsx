@@ -153,6 +153,11 @@ const fetchUrlValidator = (
 			hostname === 'localhost' ||
 			hostname === '127.0.0.1' ||
 			hostname === '0.0.0.0' ||
+			// IPv6 loopback/unspecified. The URL parser normalizes every spelling
+			// (`[::1]`, expanded, IPv4-mapped `[::ffff:127.0.0.1]`) to these forms.
+			hostname === '[::1]' ||
+			hostname === '[::ffff:7f00:1]' ||
+			hostname === '[::]' ||
 			hostname.startsWith('192.168.') ||
 			hostname.startsWith('10.') ||
 			hostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\./)
