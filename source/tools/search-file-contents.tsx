@@ -63,6 +63,8 @@ const executeSearchFileContents = async (
 	// outside it (e.g. `cd /etc`) can't grep the whole filesystem.
 	const searchRoot = getContainedSessionCwd();
 
+	const contextLines = Math.min(args.contextLines ?? 0, MAX_CONTEXT_LINES);
+
 	try {
 		const {matches, truncated} = await searchProjectContents(
 			args.query,
@@ -72,27 +74,35 @@ const executeSearchFileContents = async (
 			args.include,
 			searchPath,
 			args.wholeWord,
-			Math.min(args.contextLines ?? 0, MAX_CONTEXT_LINES),
+			contextLines,
 		);
 
 		if (matches.length === 0) {
 			return `No matches found for "${args.query}"`;
 		}
 
-		// Format results grep-style: one line per match (`file:line:content`).
-		// Matches with context lines have multi-line content already prefixed
-		// per-line by the search itself, so those use `-` as the header
-		// separator (standard grep convention for context) and keep the block
-		// on its own lines instead of squeezing it onto one.
+		// Format results grep-style. Without context every match is a single
+		// line (`file:line:content`) and matches are newline-separated, with no
+		// blank line between them.
+		//
+		// With context, the search returns a multi-line block already prefixed
+		// per-line with its own line number, so the header uses `-` instead of
+		// `:` (grep's convention for context rather than an exact match) and
+		// blocks are blank-line separated so their boundaries stay legible.
+		//
+		// `contextLines` applies to the whole call, so it decides the layout for
+		// every match. Sniffing each match's content for a newline would get
+		// this wrong whenever a context block collapses to one line, which
+		// happens on single-line files and when truncation drops every newline.
 		let output = `Found ${matches.length} match${matches.length === 1 ? '' : 'es'}${truncated ? ` (showing first ${maxResults})` : ''}:\n\n`;
 
-		output += matches
-			.map(match =>
-				match.content.includes('\n')
-					? `${match.file}:${match.line}-\n${match.content}`
-					: `${match.file}:${match.line}:${match.content}`,
-			)
-			.join('\n\n');
+		output += contextLines
+			? matches
+					.map(match => `${match.file}:${match.line}-\n${match.content}`)
+					.join('\n\n')
+			: matches
+					.map(match => `${match.file}:${match.line}:${match.content}`)
+					.join('\n');
 
 		return output.trim();
 	} catch (error: unknown) {
