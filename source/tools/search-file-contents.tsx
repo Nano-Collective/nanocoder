@@ -79,13 +79,20 @@ const executeSearchFileContents = async (
 			return `No matches found for "${args.query}"`;
 		}
 
-		// Format results with clear file:line format
+		// Format results grep-style: one line per match (`file:line:content`).
+		// Matches with context lines have multi-line content already prefixed
+		// per-line by the search itself, so those use `-` as the header
+		// separator (standard grep convention for context) and keep the block
+		// on its own lines instead of squeezing it onto one.
 		let output = `Found ${matches.length} match${matches.length === 1 ? '' : 'es'}${truncated ? ` (showing first ${maxResults})` : ''}:\n\n`;
 
-		for (const match of matches) {
-			output += `${match.file}:${match.line}\n`;
-			output += `  ${match.content}\n\n`;
-		}
+		output += matches
+			.map(match =>
+				match.content.includes('\n')
+					? `${match.file}:${match.line}-\n${match.content}`
+					: `${match.file}:${match.line}:${match.content}`,
+			)
+			.join('\n\n');
 
 		return output.trim();
 	} catch (error: unknown) {
