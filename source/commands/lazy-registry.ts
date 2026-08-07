@@ -68,6 +68,11 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/copy').then(m => m.copyCommand),
 	},
 	{
+		name: 'commit',
+		description: 'Generate a conventional commit message from staged changes',
+		load: () => import('@/commands/commit').then(m => m.commitCommand),
+	},
+	{
 		name: 'doctor',
 		description: 'Show environment health report for bug reports',
 		load: () => import('@/commands/doctor').then(m => m.doctorCommand),
