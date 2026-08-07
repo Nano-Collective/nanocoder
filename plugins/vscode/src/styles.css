@@ -101,3 +101,56 @@ select option {
 .markdown-body h1 { font-size: 1.5em; }
 .markdown-body h2 { font-size: 1.3em; }
 .markdown-body h3 { font-size: 1.1em; }
+
+/* ── Context Chip ───────────────────────────────────── */
+.context-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 200px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--vscode-dropdown-border, rgba(150, 150, 150, 0.2));
+  background-color: var(--vscode-editorWidget-background);
+  font-size: 0.85em;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition: all 150ms ease;
+}
+.context-chip:hover {
+  border-color: var(--vscode-focusBorder);
+  opacity: 0.95;
+}
+.context-chip .chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.context-chip .chip-remove {
+  margin-left: 2px;
+  opacity: 0.5;
+  font-size: 1.1em;
+  line-height: 1;
+  cursor: pointer;
+  transition: opacity 150ms ease;
+}
+.context-chip .chip-remove:hover { opacity: 1; }
+
+/* ── Drop Overlay ───────────────────────────────────── */
+#composer-box.drag-over::after {
+  content: 'Drop files or folders';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--vscode-focusBorder);
+  border-radius: inherit;
+  background: var(--vscode-input-background);
+  opacity: 0.92;
+  font-size: 0.85em;
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 10;
+}
