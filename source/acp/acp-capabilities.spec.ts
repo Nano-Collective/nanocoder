@@ -2,6 +2,7 @@ import test from 'ava';
 import {
 	acpModeToDevelopmentMode,
 	developmentModeToAcpMode,
+	filterAcpToolNames,
 	getAgentCapabilities,
 	getAvailableModes,
 } from '@/acp/acp-capabilities';
@@ -72,4 +73,8 @@ test('developmentModeToAcpMode - passes through standard modes', t => {
 	t.is(developmentModeToAcpMode('auto-accept'), 'auto-accept');
 	t.is(developmentModeToAcpMode('yolo'), 'yolo');
 	t.is(developmentModeToAcpMode('plan'), 'plan');
+});
+
+test('filterAcpToolNames - keeps CLI-only plan artifacts out of ACP', t => {
+	t.deepEqual(filterAcpToolNames(['read_file', 'write_plan']), ['read_file']);
 });

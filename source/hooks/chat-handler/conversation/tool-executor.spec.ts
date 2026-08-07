@@ -201,6 +201,39 @@ test('executeToolsDirectly - executes tool successfully', async t => {
 	t.true(results[0].content.includes('Tool executed'));
 });
 
+test('executeToolsDirectly - forwards the active session context', async t => {
+	let receivedSessionId: string | undefined;
+	let receivedWorkingDirectory: string | undefined;
+	setToolRegistryGetter(() => ({
+		...mockToolHandler,
+		test_tool: async (_args, options) => {
+			receivedSessionId = options?.sessionId;
+			receivedWorkingDirectory = options?.workingDirectory;
+			return 'Tool executed';
+		},
+	}));
+
+	try {
+		await executeToolsDirectly(
+			[{id: 'call_1', function: {name: 'test_tool', arguments: '{}'}}],
+			createMockToolManager(),
+			createMockConversationStateManager() as any,
+			() => {},
+			{
+				executionContext: {
+					sessionId: '11111111-1111-4111-8111-111111111111',
+					workingDirectory: '/workspace',
+				},
+			},
+		);
+
+		t.is(receivedSessionId, '11111111-1111-4111-8111-111111111111');
+		t.is(receivedWorkingDirectory, '/workspace');
+	} finally {
+		setToolRegistryGetter(createMockToolRegistry);
+	}
+});
+
 test('executeToolsDirectly - executes multiple read-only tools in parallel', async t => {
 	const toolCalls: ToolCall[] = [
 		{
@@ -710,6 +743,41 @@ test('executeToolsDirectly - compact mode always expands task tools', async t =>
 	t.deepEqual(compactCounts, ['tool1']);
 	// The task tool should trigger a live task update instead of adding to chat queue
 	t.is(liveTaskUpdateCount, 1, 'Task tool should trigger a live task update');
+});
+
+test('executeToolsDirectly - sends structured tasks to the live list', async t => {
+	setToolRegistryGetter(() => ({
+		...mockToolHandler,
+		write_tasks: async () => ({
+			llmContent: 'Tasks updated',
+			structured: {
+				tasks: [
+					{
+						id: 'task-1',
+						title: 'Persist plan',
+						status: 'in_progress',
+						createdAt: '2026-08-07T00:00:00.000Z',
+						updatedAt: '2026-08-07T00:00:00.000Z',
+					},
+				],
+			},
+		}),
+	}));
+	let liveTasks: unknown;
+
+	try {
+		await executeToolsDirectly(
+			[{id: 'call_1', function: {name: 'write_tasks', arguments: '{}'}}],
+			createMockToolManager(),
+			createMockConversationStateManager() as any,
+			() => {},
+			{onLiveTaskUpdate: tasks => (liveTasks = tasks)},
+		);
+
+		t.is((liveTasks as Array<{title: string}>)[0].title, 'Persist plan');
+	} finally {
+		setToolRegistryGetter(createMockToolRegistry);
+	}
 });
 
 // ============================================================================

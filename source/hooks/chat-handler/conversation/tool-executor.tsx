@@ -13,8 +13,9 @@ import {generateKey} from '@/session/key-generator';
 import {MAX_CONCURRENT_AGENTS} from '@/subagents/subagent-executor';
 import type {AgentToolArgs} from '@/tools/agent-tool';
 import {startAgentExecution} from '@/tools/agent-tool';
+import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
-import type {ToolCall, ToolResult} from '@/types/core';
+import type {ToolCall, ToolExecutionContext, ToolResult} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {
 	runStreamingBashTool,
@@ -80,7 +81,7 @@ const executeBashStreaming = async (
 export interface ToolDisplayOptions {
 	compactDisplay?: boolean;
 	onCompactToolCount?: (toolName: string) => void;
-	onLiveTaskUpdate?: () => void;
+	onLiveTaskUpdate?: (tasks?: Task[]) => void;
 	nonInteractiveMode?: boolean;
 }
 
@@ -133,7 +134,13 @@ export const displayExecutedTool = async (
 		!result.content.startsWith('Error: ')
 	) {
 		// Task tools render in the live area (updating in-place)
-		options?.onLiveTaskUpdate?.();
+		const structured = result.structuredContent as
+			| {tasks?: unknown}
+			| undefined;
+		const tasks = Array.isArray(structured?.tasks)
+			? (structured.tasks as Task[])
+			: undefined;
+		options?.onLiveTaskUpdate?.(tasks);
 	} else if (
 		options?.compactDisplay &&
 		!ALWAYS_EXPANDED_TOOLS.has(result.name)
@@ -453,7 +460,7 @@ export const executeToolsDirectly = async (
 	options?: {
 		compactDisplay?: boolean;
 		onCompactToolCount?: (toolName: string) => void;
-		onLiveTaskUpdate?: () => void;
+		onLiveTaskUpdate?: (tasks?: Task[]) => void;
 		setLiveComponent?: (component: React.ReactNode) => void;
 		/**
 		 * When true, compact tool results push a one-liner directly to the
@@ -467,10 +474,16 @@ export const executeToolsDirectly = async (
 		 * cancel (escape) propagates into running subagents.
 		 */
 		signal?: AbortSignal;
+		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>;
 	},
 ): Promise<ToolResult[]> => {
 	// Import processToolUse here to avoid circular dependencies
 	const {processToolUse} = await import('@/message-handler');
+	const processToolWithContext = (toolCall: ToolCall) =>
+		processToolUse(toolCall, {
+			...options?.executionContext,
+			abortSignal: options?.signal,
+		});
 
 	// Group consecutive parallelizable tools
 	const groups = groupForParallelExecution(toolsToExecuteDirectly, toolManager);
@@ -513,7 +526,7 @@ export const executeToolsDirectly = async (
 		if (type === 'readOnly' && group.length > 1) {
 			// Parallel execution for consecutive read-only tools
 			executions = await Promise.all(
-				group.map(toolCall => executeOne(toolCall, processToolUse)),
+				group.map(toolCall => executeOne(toolCall, processToolWithContext)),
 			);
 		} else {
 			// Sequential execution for non-parallelizable tools (or single-item groups)
@@ -523,7 +536,7 @@ export const executeToolsDirectly = async (
 					await executeApprovedTool(
 						toolCall,
 						toolManager,
-						processToolUse,
+						processToolWithContext,
 						options?.setLiveComponent,
 						options?.signal,
 					),

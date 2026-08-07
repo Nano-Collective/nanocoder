@@ -3,6 +3,7 @@ import type {
 	PromptResponse,
 	ToolCallStatus,
 } from '@agentclientprotocol/sdk';
+import {filterAcpToolNames} from '@/acp/acp-capabilities';
 import {requestToolPermission} from '@/acp/acp-permission';
 import {requestUserChoice} from '@/acp/acp-question';
 import type {AcpSession} from '@/acp/acp-session';
@@ -65,9 +66,8 @@ export async function runAcpConversation(
 		// rather than stopping mid-task at the ceiling.
 		const finalTurn = turn === maxTurns - 1;
 
-		const availableNames = toolManager.getAvailableToolNames(
-			undefined,
-			developmentMode,
+		const availableNames = filterAcpToolNames(
+			toolManager.getAvailableToolNames(undefined, developmentMode),
 		);
 		const tools = finalTurn ? {} : toolManager.getFilteredTools(availableNames);
 

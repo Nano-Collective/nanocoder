@@ -94,10 +94,18 @@ test('buildSystemPrompt - auto-accept mode includes autonomous approach', t => {
 });
 
 test('buildSystemPrompt - plan mode includes planning approach', t => {
-	const result = buildSystemPrompt('plan', undefined, ALL_TOOLS);
+	const result = buildSystemPrompt('plan', undefined, [...ALL_TOOLS, 'write_plan']);
 	t.true(result.includes('PLANNING MODE'));
-	t.true(result.includes('Do NOT make changes'));
+	t.true(result.includes('Do NOT make project changes'));
 	t.true(result.includes('structured plan'));
+	t.true(result.includes('write_plan'));
+});
+
+test('buildSystemPrompt - plan mode omits artifact instructions when write_plan is unavailable', t => {
+	const result = buildSystemPrompt('plan', undefined, ALL_TOOLS);
+
+	t.true(result.includes('Do NOT make changes'));
+	t.false(result.includes('write_plan'));
 });
 
 test('buildSystemPrompt - scheduler mode includes scheduler approach', t => {

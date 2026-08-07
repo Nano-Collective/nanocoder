@@ -2,6 +2,8 @@ import {mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import {ArtifactManager} from '@/artifacts/artifact-manager';
+import {setCliSessionId} from '@/session/cli-session-context';
 import type {Task} from './types.js';
 
 // ============================================================================
@@ -97,6 +99,67 @@ test('loadTasks - returns empty array when no file exists', async t => {
 		t.deepEqual(tasks, []);
 	} finally {
 		env.restore();
+	}
+});
+
+test('session tasks persist as isolated JSON and Markdown artifacts', async t => {
+	const root = join(testDir, 'session-artifacts');
+	const artifacts = new ArtifactManager(root);
+	const firstSession = '11111111-1111-4111-8111-111111111111';
+	const secondSession = '22222222-2222-4222-8222-222222222222';
+	const {loadTasks, saveTasks} = await import('./storage.js');
+	const firstTasks: Task[] = [
+		{
+			id: 'task-1',
+			title: 'Inspect parser',
+			status: 'in_progress',
+			createdAt: '2026-08-07T00:00:00.000Z',
+			updatedAt: '2026-08-07T00:00:00.000Z',
+		},
+		{
+			id: 'task-2',
+			title: 'Add tests',
+			description: 'Cover resume behavior',
+			status: 'completed',
+			createdAt: '2026-08-07T00:00:00.000Z',
+			updatedAt: '2026-08-07T00:00:00.000Z',
+			completedAt: '2026-08-07T00:00:00.000Z',
+		},
+	];
+
+	await saveTasks(firstTasks, firstSession, artifacts);
+	await saveTasks([], secondSession, artifacts);
+
+	t.deepEqual(await loadTasks(firstSession, artifacts), firstTasks);
+	t.deepEqual(await loadTasks(secondSession, artifacts), []);
+	const markdown = await artifacts.readArtifact(firstSession, 'task');
+	t.true(markdown?.includes('- [ ] **In progress:** Inspect parser'));
+	t.true(markdown?.includes('- [x] Add tests'));
+	t.true(markdown?.includes('Cover resume behavior'));
+});
+
+test('task commands use the active CLI session when no ID is passed', async t => {
+	const root = join(testDir, 'active-session-artifacts');
+	const artifacts = new ArtifactManager(root);
+	const sessionId = '11111111-1111-4111-8111-111111111111';
+	const tasks: Task[] = [
+		{
+			id: 'task-1',
+			title: 'CLI task',
+			status: 'pending',
+			createdAt: '2026-08-07T00:00:00.000Z',
+			updatedAt: '2026-08-07T00:00:00.000Z',
+		},
+	];
+	const {loadTasks, saveTasks} = await import('./storage.js');
+
+	try {
+		setCliSessionId(sessionId);
+		await saveTasks(tasks, undefined, artifacts);
+		t.deepEqual(await loadTasks(undefined, artifacts), tasks);
+		t.truthy(await artifacts.readArtifact(sessionId, 'task'));
+	} finally {
+		setCliSessionId(null);
 	}
 });
 

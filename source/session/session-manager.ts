@@ -1,6 +1,10 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {
+	type ArtifactManager,
+	artifactManager,
+} from '@/artifacts/artifact-manager';
 import {getAppConfig} from '@/config/index';
 import {getAppDataPath} from '@/config/paths';
 import type {Message} from '@/types/core';
@@ -93,7 +97,10 @@ export class SessionManager {
 	/** Optional explicit directory override (used by tests). */
 	private readonly overrideDir?: string;
 
-	constructor(sessionsDir?: string) {
+	constructor(
+		sessionsDir?: string,
+		private readonly artifacts: ArtifactManager = artifactManager,
+	) {
 		this.overrideDir = sessionsDir;
 	}
 
@@ -159,9 +166,11 @@ export class SessionManager {
 	}
 
 	async createSession(
-		sessionData: Omit<Session, 'id' | 'createdAt' | 'lastAccessedAt'>,
+		sessionData: Omit<Session, 'id' | 'createdAt' | 'lastAccessedAt'> & {
+			id?: string;
+		},
 	): Promise<Session> {
-		const sessionId = crypto.randomUUID();
+		const sessionId = sessionData.id ?? crypto.randomUUID();
 		const timestamp = new Date().toISOString();
 
 		const session: Session = {
@@ -362,6 +371,8 @@ export class SessionManager {
 				0o600,
 			);
 		});
+
+		await this.artifacts.deleteSessionArtifacts(sessionId);
 	}
 
 	getSessionDirectory(): string {
@@ -424,6 +435,7 @@ export class SessionManager {
 						throw error;
 					}
 				}
+				await this.artifacts.deleteSessionArtifacts(session.id);
 			}
 		});
 	}
@@ -465,6 +477,7 @@ export class SessionManager {
 						throw error;
 					}
 				}
+				await this.artifacts.deleteSessionArtifacts(session.id);
 			}
 		});
 	}

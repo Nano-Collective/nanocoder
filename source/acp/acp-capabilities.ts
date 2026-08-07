@@ -15,6 +15,13 @@ const MODE_MAP: Record<SessionModeId, DevelopmentMode> = {
 	plan: 'plan',
 };
 
+const CLI_ONLY_TOOLS = new Set(['write_plan']);
+
+/** Keep CLI-only workflows hidden until their ACP UX is implemented. */
+export function filterAcpToolNames(names: string[]): string[] {
+	return names.filter(name => !CLI_ONLY_TOOLS.has(name));
+}
+
 export function getAgentCapabilities(): AgentCapabilities {
 	return {
 		loadSession: true,

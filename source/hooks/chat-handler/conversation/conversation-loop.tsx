@@ -96,7 +96,10 @@ interface ProcessAssistantResponseParams {
 	tune?: TuneConfig;
 	privacySessionMapRef?: React.MutableRefObject<Record<string, string>>;
 	privacyEnabled?: boolean;
+	sessionId?: string;
+	workingDirectory?: string;
 	onPrivacyEvent?: (scrubbedDelta: number) => void;
+	onToolExecuted?: (toolName: string) => void;
 	// Number of consecutive empty assistant turns that have already been
 	// nudged in this loop. The empty-response branch increments and
 	// recurses; every other recursion site resets to 0.
@@ -186,6 +189,9 @@ export const processAssistantResponse = async (
 		privacySessionMapRef,
 		privacyEnabled = false,
 		onPrivacyEvent,
+		onToolExecuted,
+		sessionId,
+		workingDirectory,
 	} = params;
 
 	const startTime = conversationStartTime ?? Date.now();
@@ -193,7 +199,7 @@ export const processAssistantResponse = async (
 	// Helper to flush live task list to the static chat queue
 	const flushLiveTaskList = async () => {
 		if (!onSetLiveTaskList) return;
-		const tasks = await loadTasks();
+		const tasks = await loadTasks(sessionId);
 		if (tasks.length > 0) {
 			const {TaskListDisplay} = await import('@/components/task-list-display');
 			addToChatQueue(
@@ -755,11 +761,15 @@ export const processAssistantResponse = async (
 					onSetCompactToolCounts?.({...counts});
 				}
 			},
-			onLiveTaskUpdate: () => {
+			onLiveTaskUpdate: (tasks?: Task[]) => {
 				hasLiveTaskUpdates = true;
-				loadTasks().then(tasks => {
+				if (tasks) {
 					onSetLiveTaskList?.(tasks);
-				});
+				} else {
+					loadTasks(sessionId).then(loaded => {
+						onSetLiveTaskList?.(loaded);
+					});
+				}
 			},
 			nonInteractiveMode,
 		};
@@ -774,9 +784,17 @@ export const processAssistantResponse = async (
 				toolManager,
 				conversationStateManager,
 				addToChatQueue,
-				{...displayOptions, setLiveComponent, signal: controller.signal},
+				{
+					...displayOptions,
+					setLiveComponent,
+					signal: controller.signal,
+					executionContext: {sessionId, workingDirectory},
+				},
 			);
 			turnResults.push(...directResults);
+			for (const result of directResults) {
+				if (!result.isError) onToolExecuted?.(result.name);
+			}
 		}
 
 		// 2) Non-interactive mode can't prompt, so exit when approval is needed.
@@ -808,6 +826,12 @@ export const processAssistantResponse = async (
 			await flushAll();
 			setIsGenerating(false);
 			const {processToolUse} = await import('@/message-handler');
+			const processToolWithContext = (toolCall: ToolCall) =>
+				processToolUse(toolCall, {
+					abortSignal: controller.signal,
+					sessionId,
+					workingDirectory,
+				});
 
 			for (let i = 0; i < confirmTools.length; i++) {
 				const toolCall = confirmTools[i];
@@ -841,11 +865,14 @@ export const processAssistantResponse = async (
 				const execution = await executeApprovedTool(
 					toolCall,
 					toolManager,
-					processToolUse,
+					processToolWithContext,
 					setLiveComponent,
 					controller.signal,
 				);
 				turnResults.push(execution.result);
+				if (!execution.result.isError) {
+					onToolExecuted?.(execution.result.name);
+				}
 				await displayExecutedTool(
 					execution,
 					toolManager,
