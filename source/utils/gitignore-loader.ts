@@ -80,7 +80,7 @@ export function loadGitignore(cwd: string): ReturnType<typeof ignore> {
 			// The gitignore + hardcoded ignores above will still apply
 		}
 	}
-	
+
 	return ig;
 }
 
