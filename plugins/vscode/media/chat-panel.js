@@ -2,6 +2,20 @@
 	// @ts-ignore - acquireVsCodeApi is injected by VS Code
 	const vscode = acquireVsCodeApi();
 
+	// Resolve icon.svg
+	const nanocoderIconUri = document.currentScript
+		? new URL('icon.svg', document.currentScript.src).href
+		: '';
+	let nanocoderIconSvg = '';
+	if (nanocoderIconUri) {
+		fetch(nanocoderIconUri)
+			.then((r) => (r.ok ? r.text() : ''))
+			.then((svg) => {
+				nanocoderIconSvg = svg;
+			})
+			.catch(() => {});
+	}
+
 	const messagesContainer = document.getElementById('messages-container');
 	const chatInput = document.getElementById('chat-input');
 
@@ -309,15 +323,20 @@
 
 	function startVisualLoader() {
 		const wrapper = document.createElement('div');
-		wrapper.className = "group flex flex-row gap-1 min-w-0 shrink-0 self-start items-start max-w-full";
-		const delays = [-0.3, -0.15, 0.0];
-		for (let i = 0; i < 3; i++) {
-			const dot = document.createElement('div');
-			dot.className = `h-1 w-1 rounded-full bg-white animate-bounce`;
-			dot.style.animationTimingFunction = 'ease-in-out';
-			dot.style.animationDelay = `${delays[i]*5}s`
-			wrapper.appendChild(dot);
+		wrapper.className = 'group flex flex-row gap-1.5 min-w-0 shrink-0 self-start items-center max-w-full';
+		const span = document.createElement('span');
+		span.className = 'flex items-center shrink-0 text-vscode-fg [&_svg]:w-6 [&_svg]:h-6 animate-pulse';
+		if (nanocoderIconSvg) {
+			span.innerHTML = nanocoderIconSvg
+		}else{
+			fetch(nanocoderIconUri)
+			.then((r) => (r.ok ? r.text() : ''))
+			.then((svg) => {
+				span.innerHTML = svg;
+			});
 		}
+		wrapper.appendChild(span);
+
 		visualLoader = wrapper;
 		messagesContainer.appendChild(wrapper);
 		scrollToBottom();
