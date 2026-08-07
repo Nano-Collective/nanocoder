@@ -240,6 +240,81 @@
 		}
 	}
 
+	function setPlanReviewActive(active) {
+		chatInput.disabled = active;
+		composerBox.classList.toggle('opacity-60', active);
+		composerBox.classList.toggle('pointer-events-none', active);
+	}
+
+	function removePlanReview() {
+		const existing = document.getElementById('plan-review-card');
+		if (existing) existing.remove();
+		setPlanReviewActive(false);
+	}
+
+	function renderPlanReview(artifactPath) {
+		removePlanReview();
+		endCurrentTextBlock();
+
+		const card = document.createElement('div');
+		card.id = 'plan-review-card';
+		card.className = 'my-3 border border-vscode-focusBorder rounded-lg bg-vscode-widget-bg overflow-hidden shrink-0';
+
+		const header = document.createElement('div');
+		header.className = 'px-3 py-2 bg-vscode-widget-header border-b border-vscode-widget-border';
+		const title = document.createElement('div');
+		title.className = 'font-vscode text-[0.95em] font-semibold';
+		title.textContent = 'Implementation plan ready';
+		const subtitle = document.createElement('div');
+		subtitle.className = 'font-vscode text-[0.82em] opacity-65 mt-0.5';
+		subtitle.textContent = 'Review the saved plan before implementation begins.';
+		header.appendChild(title);
+		header.appendChild(subtitle);
+
+		const body = document.createElement('div');
+		body.className = 'px-3 py-3 flex flex-col gap-2.5';
+		const openButton = document.createElement('button');
+		openButton.type = 'button';
+		openButton.className = 'w-full text-left bg-vscode-editor-bg border border-vscode-widget-border hover:border-vscode-focusBorder rounded px-3 py-2 cursor-pointer font-vscode text-[0.9em] transition-colors';
+		openButton.textContent = 'Open implementation_plan.md';
+		openButton.title = artifactPath;
+		openButton.onclick = () => {
+			vscode.postMessage({type: 'openPath', path: artifactPath, kind: 'file'});
+		};
+
+		const actions = document.createElement('div');
+		actions.className = 'flex flex-col gap-1.5';
+		const approveButton = document.createElement('button');
+		approveButton.type = 'button';
+		approveButton.className = 'w-full border-none rounded px-3 py-2 cursor-pointer font-vscode text-[0.9em] bg-vscode-button-bg text-vscode-button-fg hover:bg-vscode-button-hover';
+		approveButton.textContent = 'Yes, execute this plan';
+		approveButton.onclick = () => {
+			removePlanReview();
+			setProcessing(true);
+			vscode.postMessage({type: 'approvePlan'});
+		};
+
+		const reviseButton = document.createElement('button');
+		reviseButton.type = 'button';
+		reviseButton.className = 'w-full bg-transparent border border-vscode-button-secondary text-vscode-fg hover:bg-vscode-button-secondaryHover rounded px-3 py-2 cursor-pointer font-vscode text-[0.9em]';
+		reviseButton.textContent = 'No, tell Nanocoder what to change';
+		reviseButton.onclick = () => {
+			removePlanReview();
+			vscode.postMessage({type: 'revisePlan'});
+			chatInput.focus();
+		};
+
+		actions.appendChild(approveButton);
+		actions.appendChild(reviseButton);
+		body.appendChild(openButton);
+		body.appendChild(actions);
+		card.appendChild(header);
+		card.appendChild(body);
+		messagesContainer.appendChild(card);
+		setPlanReviewActive(true);
+		scrollToBottom();
+	}
+
 	if (sendStopBtn) {
 		sendStopBtn.addEventListener('click', () => {
 			if (isProcessing) {
@@ -841,6 +916,7 @@
 				currentTurnEl = null;
 				currentTextEl = null;
 				currentTurnText = '';
+				setPlanReviewActive(false);
 				if (currentThoughtBox) {
 					clearInterval(currentThoughtBox.timer);
 					currentThoughtBox = null;
@@ -857,6 +933,13 @@
 				break;
 			case 'permissionRequested':
 				handlePermissionRequested(message.toolCallId, message.toolCall, message.options);
+				break;
+			case 'planReviewRequested':
+				setProcessing(false);
+				renderPlanReview(message.artifactPath);
+				break;
+			case 'planReviewError':
+				setProcessing(false);
 				break;
 
 			case 'syncState':

@@ -75,6 +75,9 @@ test('developmentModeToAcpMode - passes through standard modes', t => {
 	t.is(developmentModeToAcpMode('plan'), 'plan');
 });
 
-test('filterAcpToolNames - keeps CLI-only plan artifacts out of ACP', t => {
-	t.deepEqual(filterAcpToolNames(['read_file', 'write_plan']), ['read_file']);
+test('filterAcpToolNames - exposes plan artifacts to ACP clients', t => {
+	t.deepEqual(filterAcpToolNames(['read_file', 'write_plan']), [
+		'read_file',
+		'write_plan',
+	]);
 });

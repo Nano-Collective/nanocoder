@@ -219,9 +219,8 @@ export function buildSystemPrompt(
 		sections.push(loadSection('core-principles'));
 	}
 
-	// Mode-specific task approach (nano variant when active). ACP currently
-	// filters the CLI-only write_plan tool, so retain the read-only plan prompt
-	// for surfaces where the artifact workflow is not yet connected.
+	// Mode-specific task approach (nano variant when active). Retain a read-only
+	// fallback for clients or tool profiles where write_plan is unavailable.
 	const planSuffix =
 		developmentMode === 'plan' && !toolSet.has('write_plan')
 			? '-plan-readonly'

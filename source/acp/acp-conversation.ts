@@ -8,6 +8,7 @@ import {requestToolPermission} from '@/acp/acp-permission';
 import {requestUserChoice} from '@/acp/acp-question';
 import type {AcpSession} from '@/acp/acp-session';
 import {type AcpToolCallMeta, buildToolCallMeta} from '@/acp/acp-tool-call';
+import {artifactManager} from '@/artifacts/artifact-manager';
 import {DEFAULT_HEADLESS_MAX_TURNS, getAppConfig} from '@/config/index';
 import {processToolUse} from '@/message-handler';
 import {
@@ -27,6 +28,7 @@ import type {
 	ToolResult,
 } from '@/types/core';
 import {capMessagesForModel} from '@/utils/message-capping';
+import {createCancellationResults} from '@/utils/tool-cancellation';
 import {toOptionString} from '@/utils/type-helpers';
 
 // On the last allowed turn we strip tools and inject this so the model
@@ -113,13 +115,22 @@ export async function runAcpConversation(
 			? [{role: 'user', content: FINAL_TURN_INSTRUCTION}]
 			: [];
 
-		const result = await client.chat(
-			[systemMessage, ...cappedMessages, ...finalTurnNotice],
-			tools,
-			callbacks,
-			abortController.signal,
-			modeOverrides,
-		);
+		let result: Awaited<ReturnType<LLMClient['chat']>>;
+		try {
+			result = await client.chat(
+				[systemMessage, ...cappedMessages, ...finalTurnNotice],
+				tools,
+				callbacks,
+				abortController.signal,
+				modeOverrides,
+			);
+		} catch (error) {
+			if (abortController.signal.aborted) {
+				session.messages = messages;
+				return {stopReason: 'cancelled'};
+			}
+			throw error;
+		}
 
 		if (!result || !result.choices || result.choices.length === 0) {
 			return {stopReason: 'end_turn'};
@@ -247,6 +258,11 @@ export async function runAcpConversation(
 						'failed',
 						'Cancelled by user',
 					);
+					toolResults.push(
+						...createCancellationResults(
+							validToolCalls.slice(validToolCalls.indexOf(toolCall)),
+						),
+					);
 					session.messages = [...messages, ...toolResults];
 					return {stopReason: 'cancelled'};
 				}
@@ -321,6 +337,8 @@ export async function runAcpConversation(
 
 			const toolResult = await processToolUse(toolCall, {
 				abortSignal: abortController.signal,
+				sessionId: session.sessionId,
+				workingDirectory: session.cwd,
 			});
 			isPolling = false;
 			if (pollInterval) clearInterval(pollInterval);
@@ -424,6 +442,14 @@ async function emitToolCallUpdate(
 	rawOutput?: unknown,
 	title?: string,
 ): Promise<void> {
+	const planArtifactPath =
+		toolCall.function.name === 'write_plan' && status === 'completed'
+			? artifactManager.getArtifactPath(
+					session.sessionId,
+					'implementation_plan',
+				)
+			: undefined;
+
 	await conn.sessionUpdate({
 		sessionId: session.sessionId,
 		update: {
@@ -431,7 +457,11 @@ async function emitToolCallUpdate(
 			toolCallId: toolCall.id,
 			status,
 			rawOutput,
-			title,
+			title: planArtifactPath ? 'Implementation plan ready' : title,
+			locations: planArtifactPath ? [{path: planArtifactPath}] : undefined,
+			_meta: planArtifactPath
+				? {'nanocoder/planArtifact': {path: planArtifactPath}}
+				: undefined,
 		},
 	});
 }

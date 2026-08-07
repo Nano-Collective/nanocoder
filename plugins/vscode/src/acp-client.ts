@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import {ClientSideConnection} from '@agentclientprotocol/sdk';
 import {AcpStateManager, ACPStatus} from './acp-state';
+import {PromptAttempt} from './prompt-attempt';
 
 // We expect at least the version of the CLI where ACP was introduced
 const MINIMUM_CLI_VERSION = '0.4.0';
@@ -32,6 +33,7 @@ export class NanocoderAcpClient {
 	public availableProviders: string[] = [];
 
 	private pendingPermissions = new Map<string, (response: unknown) => void>();
+	private activePrompt?: PromptAttempt;
 
 	constructor(outputChannel: vscode.OutputChannel, stateManager: AcpStateManager) {
 		this.outputChannel = outputChannel;
@@ -277,6 +279,8 @@ export class NanocoderAcpClient {
 
 	async prompt(text: string, images?: { data: string, mimeType: string }[]): Promise<void> {
 		if (!this.connection || !this._sessionId) return;
+		const attempt = new PromptAttempt();
+		this.activePrompt = attempt;
 		try {
 			const promptData: import('@agentclientprotocol/sdk').ContentBlock[] = [{ type: 'text', text }];
 			if (images && images.length > 0) {
@@ -289,13 +293,26 @@ export class NanocoderAcpClient {
 				prompt: promptData
 			});
 		} catch (error) {
-			this.outputChannel.appendLine(`Prompt failed: ${error}`);
-			vscode.window.showErrorMessage(`Nanocoder prompt failed: ${error}`);
+			if (attempt.cancelRequested) {
+				this.outputChannel.appendLine('Prompt cancelled by user.');
+			} else {
+				this.outputChannel.appendLine(`Prompt failed: ${error}`);
+				vscode.window.showErrorMessage(`Nanocoder prompt failed: ${error}`);
+			}
+		} finally {
+			if (this.activePrompt === attempt) {
+				this.activePrompt = undefined;
+			}
 		}
 	}
 
 	async cancel(): Promise<void> {
 		if (!this.connection || !this._sessionId) return;
+		this.activePrompt?.cancel();
+		for (const resolve of this.pendingPermissions.values()) {
+			resolve({outcome: {outcome: 'cancelled'}});
+		}
+		this.pendingPermissions.clear();
 		try {
 			await this.connection.cancel({
 				sessionId: this._sessionId

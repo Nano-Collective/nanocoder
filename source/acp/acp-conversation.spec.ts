@@ -45,6 +45,7 @@ const createMockConn = (): {
 const createMockSession = (
 	conn: AgentSideConnection,
 	opts: {
+		sessionId?: string;
 		devMode?: any;
 		messages?: any[];
 		systemMessage?: any;
@@ -52,7 +53,7 @@ const createMockSession = (
 	} = {},
 ): AcpSession => {
 	const session = new AcpSession({
-		sessionId: 'test-session',
+		sessionId: opts.sessionId ?? 'test-session',
 		cwd: '/tmp',
 		conn,
 		initialMode: opts.devMode ?? 'auto-accept',
@@ -137,6 +138,27 @@ test('runAcpConversation - returns cancelled when abort signal is already set', 
 	const result = await runAcpConversation({
 		session,
 		client: client,
+		toolManager: createMockToolManager() as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(result.stopReason, 'cancelled');
+});
+
+test('runAcpConversation - treats an aborted model request as cancellation', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	const client = {
+		chat: async () => {
+			session.cancel();
+			throw new Error('Operation was cancelled');
+		},
+	} as unknown as LLMClient;
+
+	const result = await runAcpConversation({
+		session,
+		client,
 		toolManager: createMockToolManager() as any,
 		conn,
 		nonInteractiveAlwaysAllow: [],
@@ -420,6 +442,113 @@ test('runAcpConversation - executes tool and emits status updates', async t => {
 		(u: any) => u.update.status === 'completed',
 	);
 	t.truthy(completedUpdate);
+});
+
+test('runAcpConversation - forwards the ACP session id to artifact tools', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {
+		devMode: 'plan',
+		sessionId: '00000000-0000-4000-8000-000000000001',
+	});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+
+	let receivedSessionId: string | undefined;
+	setToolRegistryGetter(() => ({
+		write_plan: async (_args: unknown, options) => {
+			receivedSessionId = options?.sessionId;
+			return 'Plan saved';
+		},
+	}));
+
+	const {client} = createMockClient([
+		{
+			choices: [
+				{
+					message: {
+						content: '',
+						tool_calls: [
+							createMockToolCall(
+								'write_plan',
+								{content: '# Plan'},
+								'call-plan',
+							),
+						],
+					},
+				},
+			],
+		},
+		{choices: [{message: {content: 'Plan ready', tool_calls: []}}]},
+	]);
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(receivedSessionId, session.sessionId);
+});
+
+test('runAcpConversation - completed write_plan exposes its artifact location', async t => {
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn, {
+		devMode: 'plan',
+		sessionId: '00000000-0000-4000-8000-000000000002',
+	});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+	setToolRegistryGetter(() => ({
+		write_plan: async () => 'Plan saved',
+	}));
+
+	const {client} = createMockClient([
+		{
+			choices: [
+				{
+					message: {
+						content: '',
+						tool_calls: [
+							createMockToolCall(
+								'write_plan',
+								{content: '# Plan'},
+								'call-plan',
+							),
+						],
+					},
+				},
+			],
+		},
+		{choices: [{message: {content: 'Plan ready', tool_calls: []}}]},
+	]);
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	const completed = updates.find(
+		(u: any) =>
+			u.update.sessionUpdate === 'tool_call_update' &&
+			u.update.toolCallId === 'call-plan' &&
+			u.update.status === 'completed',
+	)?.update;
+	t.truthy(completed);
+	const artifact = completed._meta?.['nanocoder/planArtifact'];
+	t.true(artifact.path.endsWith('/implementation_plan.md'));
+	t.deepEqual(completed.locations, [{path: artifact.path}]);
+	t.is(completed.title, 'Implementation plan ready');
 });
 
 // ============================================================================
@@ -713,7 +842,10 @@ test('runAcpConversation - cancelled permission returns cancelled stop reason', 
 				{
 					message: {
 						content: '',
-						tool_calls: [createMockToolCall('dangerous_tool', {}, 'call-1')],
+						tool_calls: [
+							createMockToolCall('dangerous_tool', {}, 'call-1'),
+							createMockToolCall('queued_tool', {}, 'call-2'),
+						],
 					},
 				},
 			],
@@ -729,6 +861,15 @@ test('runAcpConversation - cancelled permission returns cancelled stop reason', 
 	});
 
 	t.is(result.stopReason, 'cancelled');
+	const cancelledResults = session.messages.filter(
+		(message: any) => message.role === 'tool',
+	) as any[];
+	t.deepEqual(
+		cancelledResults.map(message => message.tool_call_id),
+		['call-1', 'call-2'],
+		'cancelled permission must balance every queued tool call in history',
+	);
+	t.true(cancelledResults.every(message => message.content.includes('cancelled')));
 });
 
 // ============================================================================
