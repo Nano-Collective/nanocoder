@@ -30,12 +30,14 @@ function VoiceHarness({
 	triggerRef,
 	queueRef,
 	simulateReply = true,
+	voicePreference,
 }: {
 	loadPlugin: UseVoiceProps['loadPlugin'];
 	onStateChange?: (state: VoiceState) => void;
 	triggerRef: React.MutableRefObject<(() => void) | null>;
 	queueRef: React.MutableRefObject<React.ReactNode[]>;
 	simulateReply?: boolean;
+	voicePreference?: import('@/types/config').VoiceConfig;
 }) {
 	const [messages, setMessages] = React.useState<Message[]>([]);
 
@@ -62,6 +64,7 @@ function VoiceHarness({
 			queueRef.current.push(comp);
 		},
 		loadPlugin,
+		voicePreference,
 	});
 
 	React.useEffect(() => {
@@ -329,44 +332,42 @@ test('hands-free VAD persists across multiple consecutive speech_start/speech_fi
 		transcribeAudio: async () => 'hello from vad',
 	});
 
-	const { getVoicePreference, updateVoicePreference } = await import('@/config/preferences.js');
-	const originalPref = getVoicePreference();
-	updateVoicePreference({ ...originalPref, enabled: true, activationMode: 'hands-free' });
+	const triggerRef = { current: null as (() => void) | null };
+	const queueRef = { current: [] as React.ReactNode[] };
 
-	try {
-		const triggerRef = { current: null as (() => void) | null };
-		const queueRef = { current: [] as React.ReactNode[] };
+	render(
+		<VoiceHarness
+			loadPlugin={async () => mockPlugin}
+			triggerRef={triggerRef}
+			queueRef={queueRef}
+			voicePreference={{
+				enabled: true,
+				activationMode: 'hands-free',
+				sttBackend: 'local',
+				ttsBackend: 'local',
+			}}
+		/>,
+	);
 
-		render(
-			<VoiceHarness
-				loadPlugin={async () => mockPlugin}
-				triggerRef={triggerRef}
-				queueRef={queueRef}
-			/>,
-		);
+	await flush(5);
 
-		await flush(5);
+	t.is(startCount, 1, 'VAD engine should start once upon mount');
+	t.is(stopCount, 0, 'VAD engine should not stop');
 
-		t.is(startCount, 1, 'VAD engine should start once upon mount');
-		t.is(stopCount, 0, 'VAD engine should not stop');
+	// Cycle 1: speech_start -> speech_final
+	eventListeners['speech_start']?.forEach(cb => cb());
+	await flush();
+	eventListeners['speech_final']?.forEach(cb => cb({ filePath: '/tmp/test1.wav' }));
+	await flush(5);
 
-		// Cycle 1: speech_start -> speech_final
-		eventListeners['speech_start']?.forEach(cb => cb());
-		await flush();
-		eventListeners['speech_final']?.forEach(cb => cb({ filePath: '/tmp/test1.wav' }));
-		await flush(5);
+	t.is(stopCount, 0, 'VAD engine must NOT stop after first utterance cycle');
 
-		t.is(stopCount, 0, 'VAD engine must NOT stop after first utterance cycle');
+	// Cycle 2: speech_start -> speech_final (on exact same VAD engine mock instance)
+	eventListeners['speech_start']?.forEach(cb => cb());
+	await flush();
+	eventListeners['speech_final']?.forEach(cb => cb({ filePath: '/tmp/test2.wav' }));
+	await flush(5);
 
-		// Cycle 2: speech_start -> speech_final
-		eventListeners['speech_start']?.forEach(cb => cb());
-		await flush();
-		eventListeners['speech_final']?.forEach(cb => cb({ filePath: '/tmp/test2.wav' }));
-		await flush(5);
-
-		t.is(stopCount, 0, 'VAD engine must NOT stop after second utterance cycle');
-		t.is(startCount, 1, 'VAD engine should remain continuously active without restarting');
-	} finally {
-		updateVoicePreference(originalPref);
-	}
+	t.is(stopCount, 0, 'VAD engine must NOT stop after second utterance cycle');
+	t.is(startCount, 1, 'VAD engine should remain continuously active without restarting');
 });

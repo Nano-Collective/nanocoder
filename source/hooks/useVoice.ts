@@ -7,6 +7,7 @@ import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import type {VoiceState} from '@/components/voice-status-bar';
 import {getVoicePreference} from '@/config/preferences';
 import {generateKey} from '@/session/key-generator';
+import type {VoiceConfig} from '@/types/config';
 import type {Message} from '@/types/index';
 import {formatForSpeech} from '@/utils/format-for-speech';
 import {
@@ -53,6 +54,7 @@ export interface UseVoiceProps {
 	messages: Message[];
 	addToChatQueue: (component: React.ReactNode) => void;
 	loadPlugin?: () => Promise<VoicePlugin>;
+	voicePreference?: VoiceConfig;
 }
 
 export interface UseVoiceReturn {
@@ -66,6 +68,7 @@ export function useVoice({
 	addToChatQueue,
 	loadPlugin = async () =>
 		(await import('@nanocollective/nanocoder-voice')) as unknown as VoicePlugin,
+	voicePreference,
 }: UseVoiceProps): UseVoiceReturn {
 	const [state, setState] = React.useState<VoiceState>('idle');
 
@@ -191,10 +194,14 @@ export function useVoice({
 		};
 	}, [cleanupActiveFile]);
 
-	// Hands-free VAD effect - DECOUPLED FROM `state` and prop changes to persist continuously across utterances
+	// Extract reactive primitive values from voicePreference prop or disk default
+	const currentPref = voicePreference ?? getVoicePreference();
+	const enabled = currentPref.enabled;
+	const activationMode = currentPref.activationMode;
+
+	// Hands-free VAD effect - REACTIVE to enabled and activationMode changes
 	React.useEffect(() => {
-		const pref = getVoicePreference();
-		if (!pref.enabled || pref.activationMode !== 'hands-free') {
+		if (!enabled || activationMode !== 'hands-free') {
 			if (vadEngineRef.current) {
 				const engine = vadEngineRef.current as {stop?: () => void};
 				if (typeof engine.stop === 'function') {
@@ -310,7 +317,13 @@ export function useVoice({
 				vadEngineRef.current = null;
 			}
 		};
-	}, [loadPlugin, ensureDependencies, cleanupActiveFile]);
+	}, [
+		enabled,
+		activationMode,
+		loadPlugin,
+		ensureDependencies,
+		cleanupActiveFile,
+	]);
 
 	React.useEffect(() => {
 		if (!pendingTTSRef.current || !pluginRef.current) return;
