@@ -78,6 +78,7 @@ export interface ExtensionMessageUpdateSessions {
 		sessionId: string;
 		cwd: string;
 		title?: string | null;
+		updatedAt?: string | null;
 	}>;
 }
 
@@ -165,6 +166,12 @@ export interface WebviewMessageDeleteSession {
 	sessionId: string;
 }
 
+export interface WebviewMessageRenameSession {
+	type: 'renameSession';
+	sessionId: string;
+	title: string;
+}
+
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
 	| WebviewMessageSubmitMessage
@@ -178,4 +185,5 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageSetProvider
 	| WebviewMessageListSessions
 	| WebviewMessageResumeSession
-	| WebviewMessageDeleteSession;
+	| WebviewMessageDeleteSession
+	| WebviewMessageRenameSession;
