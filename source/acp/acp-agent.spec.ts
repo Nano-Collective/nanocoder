@@ -302,6 +302,26 @@ test('AcpAgent.prompt - returns response for valid session', async t => {
 	t.truthy(result.stopReason);
 });
 
+test('AcpAgent.prompt - routes text and images through to the conversation', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [
+			{type: 'text', text: 'Analyze this image'},
+			{type: 'image', data: 'base64data', mimeType: 'image/png'} as any,
+		],
+	});
+	const internalSession = (agent as any)['sessions'].get(session.sessionId);
+	const userMessage = internalSession.messages.find((m: any) => m.role === 'user');
+	t.truthy(userMessage);
+	t.is(userMessage?.content, 'Analyze this image');
+	t.deepEqual(userMessage?.images, [
+		{data: 'base64data', mediaType: 'image/png', source: 'acp'},
+	]);
+	t.false(Array.isArray(userMessage?.content));
+});
+
 // ============================================================================
 // cancel()
 // ============================================================================

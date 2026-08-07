@@ -108,6 +108,7 @@ export interface WebviewMessageReady {
 export interface WebviewMessageSubmitMessage {
 	type: 'submitMessage';
 	text: string;
+	images?: { data: string; mimeType: string }[];
 }
 
 export interface WebviewMessageCancel {
@@ -171,6 +172,10 @@ export interface WebviewMessageRenameSession {
 	sessionId: string;
 	title: string;
 }
+export interface WebviewMessageShowError {
+	type: 'showError';
+	message: string;
+}
 
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
@@ -186,4 +191,5 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageListSessions
 	| WebviewMessageResumeSession
 	| WebviewMessageDeleteSession
-	| WebviewMessageRenameSession;
+	| WebviewMessageRenameSession
+	| WebviewMessageShowError;
