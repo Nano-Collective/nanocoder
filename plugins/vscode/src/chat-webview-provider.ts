@@ -105,7 +105,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 						break;
 					case 'submitMessage':
 						this._outputChannel.appendLine(`[Webview] User submitted: ${message.text}`);
-						this._handlePrompt(message.text);
+						this._handlePrompt(message.text, message.images);
 						break;
 					case 'cancel':
 						this._outputChannel.appendLine('[Webview] User cancelled operation.');
@@ -202,6 +202,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 						}
 						break;
 					}
+					case 'showError':
+						this._outputChannel.appendLine(`[Webview] Error: ${message.message}`);
+						vscode.window.showErrorMessage(message.message);
+						break;
 				}
 			}
 		);
@@ -271,7 +275,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		);
 	}
 
-	private async _handlePrompt(text: string) {
+	private async _handlePrompt(text: string, images?: { data: string, mimeType: string }[]) {
 		try {
 			if (this._acpClient.hasPendingPermissions()) {
 				vscode.window.showWarningMessage('Nanocoder: Please approve or deny the pending tool before sending a new message.');
@@ -310,7 +314,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				}
 			});
 
-			await this._acpClient.prompt(expandedText);
+			await this._acpClient.prompt(expandedText, images);
 			// Signal turn completion so the Webview can flip back to the send button
 			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}});
 		} catch (error) {

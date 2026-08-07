@@ -4,11 +4,20 @@
 
 	const messagesContainer = document.getElementById('messages-container');
 	const chatInput = document.getElementById('chat-input');
+<<<<<<< HEAD
 	const composerBox = document.getElementById('composer-box');
 	const contextChipsContainer = document.getElementById('context-chips');
 	const attachBtn = document.getElementById('attach-btn');
 
 	let attachedPaths = []; // [{path, name, kind: 'file'|'folder'}]
+=======
+	const addImageBtn = document.getElementById('add-image-btn');
+	const imageUpload = document.getElementById('image-upload');
+	const imagePreviewContainer = document.getElementById('image-preview-container');
+	
+	let pendingImages = [];
+	let pendingUserMessageText = null;
+>>>>>>> upstream/main
 
 	let modelDropdown, modeDropdown, providerDropdown;
 
@@ -244,12 +253,164 @@
 		});
 	}
 
+<<<<<<< HEAD
 	if (attachBtn) {
 		attachBtn.addEventListener('click', () => {
 			vscode.postMessage({ type: 'requestOpenDialog' });
 		});
 	}
 
+=======
+	// Image upload logic
+	if (addImageBtn && imageUpload) {
+		addImageBtn.addEventListener('click', () => {
+			if (isHistoryView) {
+				showChatView();
+			}
+			imageUpload.click();
+		});
+		
+		imageUpload.addEventListener('change', (e) => {
+			if (e.target.files) {
+				processImageFiles(Array.from(e.target.files));
+				e.target.value = '';
+			}
+		});
+	}
+
+	chatInput.addEventListener('paste', (e) => {
+		if (e.clipboardData && e.clipboardData.items) {
+			const files = Array.from(e.clipboardData.items)
+				.filter(item => item.type.startsWith('image/'))
+				.map(item => item.getAsFile())
+				.filter(file => file !== null);
+			if (files.length > 0) {
+				processImageFiles(files);
+				e.preventDefault(); // Only prevent default if we're actually pasting images, allow text
+			}
+		}
+	});
+
+	const MAX_ATTACHMENTS = 10;
+	const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+	const SUPPORTED_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+
+	function processImageFiles(files) {
+		let validFiles = [];
+		for (const file of files) {
+			if (!SUPPORTED_TYPES.includes(file.type)) {
+				vscode.postMessage({ type: 'showError', message: `Unsupported image format: ${file.name}` });
+				continue;
+			}
+			if (file.size > MAX_FILE_SIZE) {
+				vscode.postMessage({ type: 'showError', message: `Image exceeds 10 MB: ${file.name}` });
+				continue;
+			}
+			validFiles.push(file);
+		}
+
+		if (pendingImages.length + validFiles.length > MAX_ATTACHMENTS) {
+			vscode.postMessage({ type: 'showError', message: `Maximum attachment count reached (${MAX_ATTACHMENTS})` });
+			validFiles = validFiles.slice(0, MAX_ATTACHMENTS - pendingImages.length);
+		}
+
+		if (validFiles.length === 0) return;
+
+		let pendingReads = validFiles.length;
+		if (addImageBtn) {
+			addImageBtn.disabled = true;
+			addImageBtn.classList.add('opacity-50', 'cursor-not-allowed');
+		}
+
+		for (const file of validFiles) {
+			const reader = new FileReader();
+			reader.onload = (e) => {
+				const result = e.target.result;
+				if (typeof result === 'string') {
+					const commaIdx = result.indexOf(',');
+					if (commaIdx !== -1) {
+						const data = result.substring(commaIdx + 1);
+						pendingImages.push({ data, mimeType: file.type });
+						renderImagePreviews();
+					}
+				}
+				pendingReads--;
+				if (pendingReads === 0 && addImageBtn) {
+					addImageBtn.disabled = false;
+					addImageBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+				}
+			};
+			reader.onerror = () => {
+				pendingReads--;
+				if (pendingReads === 0 && addImageBtn) {
+					addImageBtn.disabled = false;
+					addImageBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+				}
+			};
+			reader.readAsDataURL(file);
+		}
+	}
+
+	function renderImagePreviews() {
+		if (!imagePreviewContainer) return;
+		imagePreviewContainer.innerHTML = '';
+		pendingImages.forEach((img, idx) => {
+			const wrapper = document.createElement('div');
+			wrapper.className = 'relative w-12 h-12 rounded overflow-hidden border border-vscode-input-border shrink-0 group';
+			
+			const imageEl = document.createElement('img');
+			// codeql[js/xss] False positive: mimeType is strictly validated and data is base64 encoded
+			const src = `data:${img.mimeType};base64,${img.data}`;
+			if (src.startsWith('data:image/')) {
+				imageEl.src = src;
+			}
+			imageEl.className = 'w-full h-full object-cover cursor-pointer hover:opacity-80 transition-opacity';
+			imageEl.onclick = () => openImageModal(imageEl.src);
+			
+			const removeBtn = document.createElement('button');
+			removeBtn.className = 'absolute top-0 right-0 bg-black/50 hover:bg-black/80 text-white w-5 h-5 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-bl cursor-pointer border-none outline-none';
+			removeBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+			removeBtn.onclick = (e) => {
+				e.stopPropagation();
+				pendingImages.splice(idx, 1);
+				renderImagePreviews();
+			};
+			
+			wrapper.appendChild(imageEl);
+			wrapper.appendChild(removeBtn);
+			imagePreviewContainer.appendChild(wrapper);
+		});
+	}
+
+	const imageModal = document.getElementById('image-modal');
+	const modalImage = document.getElementById('modal-image');
+	const closeModalBtn = document.getElementById('close-modal-btn');
+	
+	function openImageModal(src) {
+		if (imageModal && modalImage) {
+			// Validate src to prevent untrusted URL redirection (CodeQL)
+			if (src.startsWith('data:image/')) {
+				modalImage.src = src;
+				imageModal.classList.remove('hidden');
+			}
+		}
+	}
+	
+	if (closeModalBtn) {
+		closeModalBtn.addEventListener('click', () => {
+			imageModal.classList.add('hidden');
+		});
+	}
+	if (imageModal) {
+		imageModal.addEventListener('click', (e) => {
+			if (e.target === imageModal) {
+				imageModal.classList.add('hidden');
+			}
+		});
+	}
+
+
+>>>>>>> upstream/main
 	// Auto-resize textarea
 	chatInput.addEventListener('input', function () {
 		this.style.height = 'auto';
@@ -265,6 +426,7 @@
 	});
 
 	function submitMessage() {
+<<<<<<< HEAD
 		let text = chatInput.value.trim();
 		if (!text && attachedPaths.length === 0) return;
 
@@ -275,23 +437,38 @@
 				.join('\n');
 			text = text ? `${text}\n\n${contextText}` : contextText;
 		}
+=======
+		const text = chatInput.value.trim();
+		if (!text && pendingImages.length === 0) return;
+
+		const imagesToSubmit = pendingImages.length > 0 ? [...pendingImages] : undefined;
+>>>>>>> upstream/main
 
 		// Send message to extension host
 		vscode.postMessage({
 			type: 'submitMessage',
-			text: text
+			text: text,
+			images: imagesToSubmit
 		});
 
 		// Clear input
 		chatInput.value = '';
 		chatInput.style.height = 'auto';
+		pendingImages = [];
+		renderImagePreviews();
 
+<<<<<<< HEAD
 		// Clear chips after sending
 		attachedPaths = [];
 		renderChips();
 
 		// Optimistically append user message 
 		appendMessage(text, 'user');
+=======
+		// Optimistically append user message
+		appendMessage(text, 'user', imagesToSubmit);
+		pendingUserMessageText = text;
+>>>>>>> upstream/main
 
 		if (!isProcessing) {
 			// Switch to processing state
@@ -303,6 +480,7 @@
 		}
 	}
 
+<<<<<<< HEAD
 	function renderChips() {
 		contextChipsContainer.innerHTML = '';
 		if (attachedPaths.length === 0) {
@@ -415,14 +593,11 @@
 						// If we don't mess with it too much, let's just do exactly what Will said.
 						return p2;
 					}
-					return u;
-				});
-			
 			paths.forEach(p => vscode.postMessage({ type: 'requestPathInfo', path: p }));
 		}, true);
 	}
 
-	function appendMessage(content, role) {
+	function appendMessage(content, role, images = undefined) {
 		// Remove welcome message and loader if present
 		const welcome = document.querySelector('.welcome-message');
 		if (welcome) welcome.remove();
@@ -434,18 +609,32 @@
 			(role === 'user' ? 'self-end items-end max-w-[85%]' : 'self-start items-start max-w-full');
 
 		const msgEl = document.createElement('div');
-		msgEl.className = 'leading-snug break-words min-w-0 w-full ' +
+		msgEl.className = 'leading-snug break-words shrink-0 min-w-0 flex flex-col ' +
 			(role === 'user'
-				? 'bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-border px-3 py-2 rounded-lg'
-				: '');
+				? 'self-end bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-border px-3 py-2 rounded-lg max-w-[85%]'
+				: 'self-start max-w-full');
 
-		const textContainer = document.createElement('div');
-		textContainer.className = 'markdown-body';
+		if (images && images.length > 0) {
+			const imagesContainer = document.createElement('div');
+			imagesContainer.className = 'flex flex-wrap gap-2 mb-2';
+			images.forEach(img => {
+				const imgEl = document.createElement('img');
+				// codeql[js/xss] False positive: mimeType is strictly validated and data is base64 encoded
+				const src = `data:${img.mimeType};base64,${img.data}`;
+				if (src.startsWith('data:image/')) {
+					imgEl.src = src;
+				}
+				imgEl.className = 'w-24 h-24 object-cover rounded cursor-pointer border border-vscode-border hover:opacity-90';
+				imgEl.onclick = () => openImageModal(imgEl.src);
+				imagesContainer.appendChild(imgEl);
+			});
+			msgEl.appendChild(imagesContainer);
+		}
 
 		let parsedContent = content;
 		let extractedChips = [];
 
-		if (role === 'user') {
+		if (role === 'user' && content) {
 			// Handle pre-injected format (before sending)
 			parsedContent = content.replace(/@\[(file|folder)\]\s+([^\n]+)/g, (match, kind, path) => {
 				const name = path.trim().split(/[/\\]/).pop();
@@ -464,60 +653,65 @@
 			parsedContent = parsedContent.trim();
 		}
 
-		if (typeof marked !== 'undefined') {
-			textContainer.innerHTML = marked.parse(parsedContent);
-		} else {
-			textContainer.textContent = parsedContent;
-		}
+		if (parsedContent || extractedChips.length > 0) {
+			const textContainer = document.createElement('div');
+			textContainer.className = 'markdown-body';
 
-		if (extractedChips.length > 0 && role === 'user') {
-			const folderSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
-			const fileSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>';
+			if (typeof marked !== 'undefined') {
+				textContainer.innerHTML = marked.parse(parsedContent);
+			} else {
+				textContainer.textContent = parsedContent;
+			}
 
-			const chipsContainer = document.createElement('div');
-			chipsContainer.style.display = 'flex';
-			chipsContainer.style.flexWrap = 'wrap';
-			chipsContainer.style.gap = '6px';
-			chipsContainer.style.marginTop = parsedContent ? '8px' : '0';
+			if (extractedChips.length > 0 && role === 'user') {
+				const folderSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
+				const fileSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>';
 
-			extractedChips.forEach(chipData => {
-				const chip = document.createElement('span');
-				chip.className = 'context-chip';
-				chip.setAttribute('data-path', chipData.path);
-				chip.setAttribute('data-kind', chipData.kind);
-				chip.style.paddingRight = '8px';
-				
-				const iconSpan = document.createElement('span');
-				iconSpan.style.marginRight = '4px';
-				iconSpan.style.display = 'flex';
-				iconSpan.style.alignItems = 'center';
-				iconSpan.innerHTML = chipData.kind === 'folder' ? folderSvg : fileSvg;
-				
-				const nameSpan = document.createElement('span');
-				nameSpan.className = 'chip-name';
-				nameSpan.setAttribute('title', chipData.path);
-				nameSpan.textContent = chipData.name;
-				
-				chip.appendChild(iconSpan);
-				chip.appendChild(nameSpan);
-				chipsContainer.appendChild(chip);
-			});
+				const chipsContainer = document.createElement('div');
+				chipsContainer.style.display = 'flex';
+				chipsContainer.style.flexWrap = 'wrap';
+				chipsContainer.style.gap = '6px';
+				chipsContainer.style.marginTop = parsedContent ? '8px' : '0';
 
-			chipsContainer.addEventListener('click', (e) => {
-				const chip = e.target.closest('.context-chip');
-				if (chip) {
-					const path = chip.getAttribute('data-path');
-					const kind = chip.getAttribute('data-kind');
-					if (path) {
-						vscode.postMessage({ type: 'openPath', path, kind });
+				extractedChips.forEach(chipData => {
+					const chip = document.createElement('span');
+					chip.className = 'context-chip';
+					chip.setAttribute('data-path', chipData.path);
+					chip.setAttribute('data-kind', chipData.kind);
+					chip.style.paddingRight = '8px';
+					
+					const iconSpan = document.createElement('span');
+					iconSpan.style.marginRight = '4px';
+					iconSpan.style.display = 'flex';
+					iconSpan.style.alignItems = 'center';
+					iconSpan.innerHTML = chipData.kind === 'folder' ? folderSvg : fileSvg;
+					
+					const nameSpan = document.createElement('span');
+					nameSpan.className = 'chip-name';
+					nameSpan.setAttribute('title', chipData.path);
+					nameSpan.textContent = chipData.name;
+					
+					chip.appendChild(iconSpan);
+					chip.appendChild(nameSpan);
+					chipsContainer.appendChild(chip);
+				});
+
+				chipsContainer.addEventListener('click', (e) => {
+					const chip = e.target.closest('.context-chip');
+					if (chip) {
+						const path = chip.getAttribute('data-path');
+						const kind = chip.getAttribute('data-kind');
+						if (path) {
+							vscode.postMessage({ type: 'openPath', path, kind });
+						}
 					}
-				}
-			});
+				});
 
-			textContainer.appendChild(chipsContainer);
+				textContainer.appendChild(chipsContainer);
+			}
+
+			msgEl.appendChild(textContainer);
 		}
-
-		msgEl.appendChild(textContainer);
 
 		wrapper.appendChild(msgEl);
 		wrapper.appendChild(createMessageFooter(() => content, role, new Date()));
@@ -622,6 +816,7 @@
 				appendMessage(message.content, 'agent');
 				break;
 			case 'clear':
+				if (isHistoryView) showChatView();
 				if (renderTimeout) { clearTimeout(renderTimeout); renderTimeout = null; }
 				if (message.isLoading) {
 					messagesContainer.innerHTML = `<div id="session-loader" class="flex flex-col items-center justify-center h-full opacity-50 mt-10">${ICONS.pending}<div class="mt-2 text-xs">Loading session...</div></div>`;
@@ -757,9 +952,15 @@
 		const update = payload.update ? payload.update : payload;
 
 		if (update.sessionUpdate === 'user_message_chunk') {
-			if (update.content && update.content.text) {
+			if (update.content) {
 				endCurrentTextBlock();
-				appendMessage(update.content.text, 'user');
+				if (update.content.text) {
+					if (pendingUserMessageText === update.content.text) {
+						pendingUserMessageText = null;
+					} else {
+						appendMessage(update.content.text, 'user');
+					}
+				}
 			}
 		} else if (update.sessionUpdate === 'agent_message_chunk') {
 			if (currentThoughtBox) {

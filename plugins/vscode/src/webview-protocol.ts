@@ -115,6 +115,7 @@ export interface WebviewMessageReady {
 export interface WebviewMessageSubmitMessage {
 	type: 'submitMessage';
 	text: string;
+	images?: { data: string; mimeType: string }[];
 }
 
 export interface WebviewMessageCancel {
@@ -188,6 +189,11 @@ export interface WebviewMessageOpenPath {
 	kind: 'file' | 'folder';
 }
 
+export interface WebviewMessageShowError {
+	type: 'showError';
+	message: string;
+}
+
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
 	| WebviewMessageSubmitMessage
@@ -204,4 +210,5 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageDeleteSession
 	| WebviewMessageRequestPathInfo
 	| WebviewMessageRequestOpenDialog
-	| WebviewMessageOpenPath;
+	| WebviewMessageOpenPath
+	| WebviewMessageShowError;

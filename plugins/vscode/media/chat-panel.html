@@ -6,16 +6,26 @@
 		Use a content security policy to only allow loading styles from our extension directory,
 		and only allow scripts that have a specific nonce.
 	-->
-	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; script-src 'nonce-{{nonce}}';">
+	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: https: vscode-webview-resource:; style-src {{cspSource}} 'unsafe-inline'; script-src 'nonce-{{nonce}}';">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<link href="{{styleUri}}" rel="stylesheet">
 	<title>Nanocoder Chat</title>
 </head>
 <body>
 	<div class="flex flex-col h-full bg-vscode-bg text-vscode-fg">
-		<div id="chat-view" class="flex flex-col flex-1 overflow-hidden">
-			<div id="messages-container" class="flex-1 overflow-y-auto overflow-x-hidden p-4 flex flex-col gap-3">
+		<div id="chat-view" class="flex flex-col flex-1 overflow-hidden relative">
+			<div id="messages-container" class="flex-1 overflow-y-auto overflow-x-hidden p-4 flex flex-col gap-3 relative z-0">
 				<!-- Messages will be injected here -->
+			</div>
+			
+			<!-- Image Modal -->
+			<div id="image-modal" class="hidden absolute inset-0 z-50 backdrop-blur-md flex items-center justify-center p-4">
+				<div class="relative max-w-full max-h-full flex flex-col">
+					<button id="close-modal-btn" class="absolute -top-10 right-0 bg-vscode-dropdown-bg text-vscode-fg rounded-full w-8 h-8 flex items-center justify-center cursor-pointer border border-vscode-focusBorder hover:bg-vscode-toolbarHover z-10">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+					</button>
+					<img id="modal-image" src="" class="max-w-full max-h-[calc(100vh-100px)] object-contain rounded-lg shadow-2xl bg-vscode-editor-bg border border-vscode-widget-border">
+				</div>
 			</div>
 		</div>
 
@@ -28,13 +38,17 @@
 
 		<div class="p-4 pt-2 bg-vscode-bg shrink-0">
 			<div id="composer-box" class="flex flex-col bg-vscode-input-bg border border-vscode-input-border rounded-2xl focus-within:border-vscode-input-focus transition-colors shadow-sm relative">
+				<div id="image-preview-container" class="flex flex-wrap gap-2 px-3 pt-3 empty:hidden"></div>
 				<!-- NEW: Attached context chips row -->
 				<div id="context-chips" class="hidden flex flex-wrap gap-1.5 px-3 pt-2 pb-1"></div>
-
 				<textarea id="chat-input" rows="1" placeholder="Ask Nanocoder anything..." class="w-full min-h-[44px] max-h-[250px] p-3 px-4 pb-2 bg-transparent text-vscode-input-fg font-vscode text-[0.95em] resize-none outline-none border-none"></textarea>
 				
 				<div class="flex items-center justify-between px-3 pb-2 pt-1 relative">
 					<div class="flex gap-1 items-center flex-1 min-w-0">
+						<button id="add-image-btn" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[15%] shrink min-w-0" title="Add Image">
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+						</button>
+						<input type="file" id="image-upload" accept="image/png,image/jpeg,image/webp,image/gif" multiple class="hidden">
 
 						<!-- Custom Provider Dropdown Trigger -->
 						<button id="provider-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[30%] shrink min-w-0" disabled>
