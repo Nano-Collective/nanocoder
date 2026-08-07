@@ -4,20 +4,18 @@
 
 	const messagesContainer = document.getElementById('messages-container');
 	const chatInput = document.getElementById('chat-input');
-<<<<<<< HEAD
 	const composerBox = document.getElementById('composer-box');
 	const contextChipsContainer = document.getElementById('context-chips');
 	const attachBtn = document.getElementById('attach-btn');
 
 	let attachedPaths = []; // [{path, name, kind: 'file'|'folder'}]
-=======
+
 	const addImageBtn = document.getElementById('add-image-btn');
 	const imageUpload = document.getElementById('image-upload');
 	const imagePreviewContainer = document.getElementById('image-preview-container');
 	
 	let pendingImages = [];
 	let pendingUserMessageText = null;
->>>>>>> upstream/main
 
 	let modelDropdown, modeDropdown, providerDropdown;
 
@@ -253,14 +251,11 @@
 		});
 	}
 
-<<<<<<< HEAD
 	if (attachBtn) {
 		attachBtn.addEventListener('click', () => {
 			vscode.postMessage({ type: 'requestOpenDialog' });
 		});
 	}
-
-=======
 	// Image upload logic
 	if (addImageBtn && imageUpload) {
 		addImageBtn.addEventListener('click', () => {
@@ -409,8 +404,6 @@
 		});
 	}
 
-
->>>>>>> upstream/main
 	// Auto-resize textarea
 	chatInput.addEventListener('input', function () {
 		this.style.height = 'auto';
@@ -426,9 +419,8 @@
 	});
 
 	function submitMessage() {
-<<<<<<< HEAD
 		let text = chatInput.value.trim();
-		if (!text && attachedPaths.length === 0) return;
+		if (!text && attachedPaths.length === 0 && pendingImages.length === 0) return;
 
 		// Append attached paths as context lines
 		if (attachedPaths.length > 0) {
@@ -437,12 +429,8 @@
 				.join('\n');
 			text = text ? `${text}\n\n${contextText}` : contextText;
 		}
-=======
-		const text = chatInput.value.trim();
-		if (!text && pendingImages.length === 0) return;
 
 		const imagesToSubmit = pendingImages.length > 0 ? [...pendingImages] : undefined;
->>>>>>> upstream/main
 
 		// Send message to extension host
 		vscode.postMessage({
@@ -457,18 +445,13 @@
 		pendingImages = [];
 		renderImagePreviews();
 
-<<<<<<< HEAD
 		// Clear chips after sending
 		attachedPaths = [];
 		renderChips();
 
-		// Optimistically append user message 
-		appendMessage(text, 'user');
-=======
 		// Optimistically append user message
 		appendMessage(text, 'user', imagesToSubmit);
 		pendingUserMessageText = text;
->>>>>>> upstream/main
 
 		if (!isProcessing) {
 			// Switch to processing state
@@ -480,7 +463,6 @@
 		}
 	}
 
-<<<<<<< HEAD
 	function renderChips() {
 		contextChipsContainer.innerHTML = '';
 		if (attachedPaths.length === 0) {
