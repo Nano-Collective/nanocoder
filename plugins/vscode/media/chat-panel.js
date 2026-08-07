@@ -4,6 +4,12 @@
 
 	const messagesContainer = document.getElementById('messages-container');
 	const chatInput = document.getElementById('chat-input');
+	const addImageBtn = document.getElementById('add-image-btn');
+	const imageUpload = document.getElementById('image-upload');
+	const imagePreviewContainer = document.getElementById('image-preview-container');
+	
+	let pendingImages = [];
+	let pendingUserMessageText = null;
 
 	let modelDropdown, modeDropdown, providerDropdown;
 
@@ -223,6 +229,155 @@
 		});
 	}
 
+	// Image upload logic
+	if (addImageBtn && imageUpload) {
+		addImageBtn.addEventListener('click', () => {
+			if (isHistoryView) {
+				showChatView();
+			}
+			imageUpload.click();
+		});
+		
+		imageUpload.addEventListener('change', (e) => {
+			if (e.target.files) {
+				processImageFiles(Array.from(e.target.files));
+				e.target.value = '';
+			}
+		});
+	}
+
+	chatInput.addEventListener('paste', (e) => {
+		if (e.clipboardData && e.clipboardData.items) {
+			const files = Array.from(e.clipboardData.items)
+				.filter(item => item.type.startsWith('image/'))
+				.map(item => item.getAsFile())
+				.filter(file => file !== null);
+			if (files.length > 0) {
+				processImageFiles(files);
+				e.preventDefault(); // Only prevent default if we're actually pasting images, allow text
+			}
+		}
+	});
+
+	const MAX_ATTACHMENTS = 10;
+	const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+	const SUPPORTED_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+
+	function processImageFiles(files) {
+		let validFiles = [];
+		for (const file of files) {
+			if (!SUPPORTED_TYPES.includes(file.type)) {
+				vscode.postMessage({ type: 'showError', message: `Unsupported image format: ${file.name}` });
+				continue;
+			}
+			if (file.size > MAX_FILE_SIZE) {
+				vscode.postMessage({ type: 'showError', message: `Image exceeds 10 MB: ${file.name}` });
+				continue;
+			}
+			validFiles.push(file);
+		}
+
+		if (pendingImages.length + validFiles.length > MAX_ATTACHMENTS) {
+			vscode.postMessage({ type: 'showError', message: `Maximum attachment count reached (${MAX_ATTACHMENTS})` });
+			validFiles = validFiles.slice(0, MAX_ATTACHMENTS - pendingImages.length);
+		}
+
+		if (validFiles.length === 0) return;
+
+		let pendingReads = validFiles.length;
+		if (addImageBtn) {
+			addImageBtn.disabled = true;
+			addImageBtn.classList.add('opacity-50', 'cursor-not-allowed');
+		}
+
+		for (const file of validFiles) {
+			const reader = new FileReader();
+			reader.onload = (e) => {
+				const result = e.target.result;
+				if (typeof result === 'string') {
+					const commaIdx = result.indexOf(',');
+					if (commaIdx !== -1) {
+						const data = result.substring(commaIdx + 1);
+						pendingImages.push({ data, mimeType: file.type });
+						renderImagePreviews();
+					}
+				}
+				pendingReads--;
+				if (pendingReads === 0 && addImageBtn) {
+					addImageBtn.disabled = false;
+					addImageBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+				}
+			};
+			reader.onerror = () => {
+				pendingReads--;
+				if (pendingReads === 0 && addImageBtn) {
+					addImageBtn.disabled = false;
+					addImageBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+				}
+			};
+			reader.readAsDataURL(file);
+		}
+	}
+
+	function renderImagePreviews() {
+		if (!imagePreviewContainer) return;
+		imagePreviewContainer.innerHTML = '';
+		pendingImages.forEach((img, idx) => {
+			const wrapper = document.createElement('div');
+			wrapper.className = 'relative w-12 h-12 rounded overflow-hidden border border-vscode-input-border shrink-0 group';
+			
+			const imageEl = document.createElement('img');
+			// codeql[js/xss] False positive: mimeType is strictly validated and data is base64 encoded
+			const src = `data:${img.mimeType};base64,${img.data}`;
+			if (src.startsWith('data:image/')) {
+				imageEl.src = src;
+			}
+			imageEl.className = 'w-full h-full object-cover cursor-pointer hover:opacity-80 transition-opacity';
+			imageEl.onclick = () => openImageModal(imageEl.src);
+			
+			const removeBtn = document.createElement('button');
+			removeBtn.className = 'absolute top-0 right-0 bg-black/50 hover:bg-black/80 text-white w-5 h-5 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-bl cursor-pointer border-none outline-none';
+			removeBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+			removeBtn.onclick = (e) => {
+				e.stopPropagation();
+				pendingImages.splice(idx, 1);
+				renderImagePreviews();
+			};
+			
+			wrapper.appendChild(imageEl);
+			wrapper.appendChild(removeBtn);
+			imagePreviewContainer.appendChild(wrapper);
+		});
+	}
+
+	const imageModal = document.getElementById('image-modal');
+	const modalImage = document.getElementById('modal-image');
+	const closeModalBtn = document.getElementById('close-modal-btn');
+	
+	function openImageModal(src) {
+		if (imageModal && modalImage) {
+			// Validate src to prevent untrusted URL redirection (CodeQL)
+			if (src.startsWith('data:image/')) {
+				modalImage.src = src;
+				imageModal.classList.remove('hidden');
+			}
+		}
+	}
+	
+	if (closeModalBtn) {
+		closeModalBtn.addEventListener('click', () => {
+			imageModal.classList.add('hidden');
+		});
+	}
+	if (imageModal) {
+		imageModal.addEventListener('click', (e) => {
+			if (e.target === imageModal) {
+				imageModal.classList.add('hidden');
+			}
+		});
+	}
+
+
 	// Auto-resize textarea
 	chatInput.addEventListener('input', function () {
 		this.style.height = 'auto';
@@ -239,20 +394,26 @@
 
 	function submitMessage() {
 		const text = chatInput.value.trim();
-		if (!text) return;
+		if (!text && pendingImages.length === 0) return;
+
+		const imagesToSubmit = pendingImages.length > 0 ? [...pendingImages] : undefined;
 
 		// Send message to extension host
 		vscode.postMessage({
 			type: 'submitMessage',
-			text: text
+			text: text,
+			images: imagesToSubmit
 		});
 
 		// Clear input
 		chatInput.value = '';
 		chatInput.style.height = 'auto';
+		pendingImages = [];
+		renderImagePreviews();
 
-		// Optimistically append user message 
-		appendMessage(text, 'user');
+		// Optimistically append user message
+		appendMessage(text, 'user', imagesToSubmit);
+		pendingUserMessageText = text;
 
 		if (!isProcessing) {
 			// Switch to processing state
@@ -264,7 +425,7 @@
 		}
 	}
 
-	function appendMessage(content, role) {
+	function appendMessage(content, role, images = undefined) {
 		// Remove welcome message and loader if present
 		const welcome = document.querySelector('.welcome-message');
 		if (welcome) welcome.remove();
@@ -276,22 +437,41 @@
 			(role === 'user' ? 'self-end items-end max-w-[85%]' : 'self-start items-start max-w-full');
 
 		const msgEl = document.createElement('div');
-		msgEl.className = 'leading-snug break-words min-w-0 w-full ' +
+		msgEl.className = 'leading-snug break-words shrink-0 min-w-0 flex flex-col ' +
 			(role === 'user'
-				? 'bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-border px-3 py-2 rounded-lg'
-				: '');
+				? 'self-end bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-border px-3 py-2 rounded-lg max-w-[85%]'
+				: 'self-start max-w-full');
 
-		const textContainer = document.createElement('div');
-		textContainer.className = 'markdown-body';
+		if (images && images.length > 0) {
+			const imagesContainer = document.createElement('div');
+			imagesContainer.className = 'flex flex-wrap gap-2 mb-2';
+			images.forEach(img => {
+				const imgEl = document.createElement('img');
+				// codeql[js/xss] False positive: mimeType is strictly validated and data is base64 encoded
+				const src = `data:${img.mimeType};base64,${img.data}`;
+				if (src.startsWith('data:image/')) {
+					imgEl.src = src;
+				}
+				imgEl.className = 'w-24 h-24 object-cover rounded cursor-pointer border border-vscode-border hover:opacity-90';
+				imgEl.onclick = () => openImageModal(imgEl.src);
+				imagesContainer.appendChild(imgEl);
+			});
+			msgEl.appendChild(imagesContainer);
+		}
 
-		// If it's the user, we just render it directly (or we could use marked for them too)
-		// Usually users prefer raw text, but let's render markdown for both just in case.
-		if (typeof marked !== 'undefined') {
-			textContainer.innerHTML = marked.parse(content);
-		} else {
-			textContainer.textContent = content;
-		} // Phase 3: plain text for now, but incrementally updateable
-		msgEl.appendChild(textContainer);
+		if (content) {
+			const textContainer = document.createElement('div');
+			textContainer.className = 'markdown-body';
+	
+			// If it's the user, we just render it directly (or we could use marked for them too)
+			// Usually users prefer raw text, but let's render markdown for both just in case.
+			if (typeof marked !== 'undefined') {
+				textContainer.innerHTML = marked.parse(content);
+			} else {
+				textContainer.textContent = content;
+			}
+			msgEl.appendChild(textContainer);
+		}
 
 		wrapper.appendChild(msgEl);
 		wrapper.appendChild(createMessageFooter(() => content, role, new Date()));
@@ -388,6 +568,7 @@
 				appendMessage(message.content, 'agent');
 				break;
 			case 'clear':
+				if (isHistoryView) showChatView();
 				if (renderTimeout) { clearTimeout(renderTimeout); renderTimeout = null; }
 				if (message.isLoading) {
 					messagesContainer.innerHTML = `<div id="session-loader" class="flex flex-col items-center justify-center h-full opacity-50 mt-10">${ICONS.pending}<div class="mt-2 text-xs">Loading session...</div></div>`;
@@ -523,9 +704,15 @@
 		const update = payload.update ? payload.update : payload;
 
 		if (update.sessionUpdate === 'user_message_chunk') {
-			if (update.content && update.content.text) {
+			if (update.content) {
 				endCurrentTextBlock();
-				appendMessage(update.content.text, 'user');
+				if (update.content.text) {
+					if (pendingUserMessageText === update.content.text) {
+						pendingUserMessageText = null;
+					} else {
+						appendMessage(update.content.text, 'user');
+					}
+				}
 			}
 		} else if (update.sessionUpdate === 'agent_message_chunk') {
 			if (currentThoughtBox) {
