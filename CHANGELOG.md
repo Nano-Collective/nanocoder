@@ -1,5 +1,43 @@
 # @nanocollective/nanocoder
 
+# 1.30.0
+
+- Added first-class provider template for Groq to the setup wizard.
+
+- Added context attachment functionality with UI for file/folder chips and drag-and-drop support.
+
+- Moved the rest of nanocoder's configuration into the `/settings` menu, so you can set things up without editing `.json` files by hand. Settings are grouped into Appearance, Input, Behavior, Providers, and Advanced tabs. New menu items let you set the default mode, auto-compact, sessions, reasoning traces, tool auto-approval, and a Web Search API key; view your configured providers and MCP servers before opening the setup wizards; open the Tune Model and Connect IDE wizards; and see the active `NANOCODER_*` environment variables. Advanced also includes an in-app JSON editor for `agents.config.json`: edit strings with the cursor inside the quotes, flip booleans with the arrow keys, and save atomically (a crash can't leave a half-written file).
+
+- Added support for image uploads and pasting in the VS Code extension chat panel, allowing users to send multimodal messages (text + images) to the AI assistant.
+
+- Added a copy-to-clipboard button to the VS Code extension's chat panel: hovering over a user prompt or agent response bubble reveals a clipboard icon that copies the raw markdown text and briefly shows a checkmark to confirm. Streamed agent responses always copy the latest in-progress text. Closes #746.
+
+- Fixed multibyte terminal input being corrupted when an alternate-screen stdin chunk split a UTF-8 character, which could affect Korean and other IME input.
+
+- Fixed prompt history navigation returning an invalid value after reaching the end of the history. `getNextString()` now returns `null`, matching the behavior of the other history navigation methods.
+
+- Fixed update checks incorrectly recording a successful check after a registry fetch failure, corrected `BoundedMap.has()` for entries whose value is `undefined`, and restored network-error classification for Node.js errno codes. Closes #739, #738, and #737.
+
+- Fixed the VS Code extension's **Reject All** running rejection cleanups concurrently: `rejectAll()` fired the async `rejectChange()` without awaiting, so overlapping cleanups raced over shared editor state (stale tab snapshots in `closeEditors()`). Rejections now run sequentially, mirroring `applyAll()`. Thanks to @jmdlrg. Closes #725.
+
+- Fixed the VS Code extension being unable to start the CLI on Windows. `where.exe` lists npm's unexecutable extensionless shim before `nanocoder.cmd`, and the first line was taken blindly; spawning a `.cmd` also fails with EINVAL because Node refuses to run one without a shell (CVE-2024-27980). Discovery now ranks `where.exe` matches by extension, the CLI is launched via the JS entrypoint resolved from the shim, and a `.cmd` that cannot be resolved falls back to a quoted shell spawn. Spawn failures are also caught and reported in the Nanocoder output channel instead of being swallowed as an unhandled rejection that left the UI stuck on "Connecting".
+
+- Fixed an issue where the VS Code extension failed to locate the Nanocoder CLI for users using Node version managers (NVM, Volta, fnm, pnpm, bun). A fallback directory scan is now performed when `which`/`where` cannot resolve the binary under the extension host's minimal PATH. The child-process PATH is also enriched with the CLI's directory only when a co-located `node` binary is present, preventing shadowing of a user's version-manager Node. Thanks to @akramcodez.
+
+- `search_file_contents` no longer puts a blank line between context-free matches, and decides its layout from the `contextLines` argument rather than sniffing each match for a newline. A context block that collapsed to a single line (single-line files, or when truncation dropped every newline) previously rendered with the exact-match header and a doubled line number.
+
+- `search_file_contents` now formats results grep-style (`file:line:content`, one line per match) instead of spreading each match across three lines with a blank separator. Matches with `contextLines` still show the full multi-line context block, now with a `-` header separator matching grep's convention.
+
+- Fixed user-typed `!` bash commands showing no output in the transcript. Previously the completed card only displayed the command, a status dot, and a token count — the actual result was sent to the model but never shown to the person who typed the command. Completed `!` commands now render their stdout and stderr (tail-capped at 20 lines, with a note when earlier lines are hidden). Model-invoked `execute_bash` calls keep their compact display.
+
+- Dropped `toLocaleString()` thousands-separators from strings returned to the model (`read_file`'s metadata output and validator error, `list_directory`'s per-entry size, and `@file`-mention metadata). Comma separators cost extra tokens without adding meaning for the model. Left them in place in the terminal display components, where they're actually useful.
+
+- Fix notification titles showing stale project name after changing directories with /cd
+
+- Increased the bounded terminal content width from 120 to 200 columns so wide terminals use more available space while retaining a sane layout cap.
+
+If there are any problems, feedback or thoughts please drop an issue or message us through Discord! Thank you for using Nanocoder.
+
 # 1.29.0
 
 - Added the ability to attach to a running subagent session from the terminal UI for interactive debugging. This feature allows users to inspect exactly what a subagent is doing in real-time, including streaming text and reasoning. You can press `Ctrl+S` while a subagent is running to attach to it, cycle between multiple running subagents, and press `Esc` to detach.
