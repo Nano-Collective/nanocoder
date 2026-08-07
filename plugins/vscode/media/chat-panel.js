@@ -403,6 +403,9 @@
 				appendMessage(message.content, 'agent');
 				break;
 			case 'clear':
+				// Session reset (new chat or resume) should return to the active
+				// chat view, not leave the panel stuck on the history list.
+				showChatView();
 				if (renderTimeout) { clearTimeout(renderTimeout); renderTimeout = null; }
 				if (message.isLoading) {
 					messagesContainer.innerHTML = `<div id="session-loader" class="flex flex-col items-center justify-center h-full opacity-50 mt-10">${ICONS.pending}<div class="mt-2 text-xs">Loading session...</div></div>`;
