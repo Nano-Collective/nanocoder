@@ -37,8 +37,10 @@
 		</div>
 
 		<div class="p-4 pt-2 bg-vscode-bg shrink-0">
-			<div class="flex flex-col bg-vscode-input-bg border border-vscode-input-border rounded-2xl focus-within:border-vscode-input-focus transition-colors shadow-sm relative">
+			<div id="composer-box" class="flex flex-col bg-vscode-input-bg border border-vscode-input-border rounded-2xl focus-within:border-vscode-input-focus transition-colors shadow-sm relative">
 				<div id="image-preview-container" class="flex flex-wrap gap-2 px-3 pt-3 empty:hidden"></div>
+				<!-- NEW: Attached context chips row -->
+				<div id="context-chips" class="hidden flex flex-wrap gap-1.5 px-3 pt-2 pb-1"></div>
 				<textarea id="chat-input" rows="1" placeholder="Ask Nanocoder anything..." class="w-full min-h-[44px] max-h-[250px] p-3 px-4 pb-2 bg-transparent text-vscode-input-fg font-vscode text-[0.95em] resize-none outline-none border-none"></textarea>
 				
 				<div class="flex items-center justify-between px-3 pb-2 pt-1 relative">
@@ -67,7 +69,14 @@
 						</button>
 					</div>
 					
-					<button id="send-stop-btn" class="group bg-[#007acc] [&.is-processing]:bg-[#f14c4c] [&.is-processing]:hover:bg-[#d13a3a] text-white border-none rounded-full w-8 h-8 flex items-center justify-center cursor-pointer shrink-0 transition-all hover:bg-[#005a9e] hover:scale-105 ml-2" title="Send (Enter)">
+					<!-- Attach file/folder button -->
+					<button id="attach-btn" class="bg-transparent text-vscode-fg border-none rounded-full w-8 h-8 flex items-center justify-center cursor-pointer shrink-0 transition-all opacity-60 hover:opacity-100 hover:bg-vscode-toolbarHover ml-1" title="Attach file or folder">
+						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15">
+							<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+						</svg>
+					</button>
+
+					<button id="send-stop-btn" class="group bg-vscode-button-bg [&.is-processing]:bg-vscode-button-secondary [&.is-processing]:hover:bg-vscode-button-secondaryHover text-vscode-button-fg border-none rounded-full w-8 h-8 flex items-center justify-center cursor-pointer shrink-0 transition-all hover:bg-vscode-button-hover hover:scale-105 ml-1" title="Send (Enter)">
 						<!-- FiSend icon (react-icons/fi) — shown when idle -->
 						<svg id="icon-send" class="block group-[.is-processing]:hidden mr-[2px] mt-[1px]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
 							<line x1="22" y1="2" x2="11" y2="13"/>

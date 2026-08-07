@@ -4,6 +4,12 @@
 
 	const messagesContainer = document.getElementById('messages-container');
 	const chatInput = document.getElementById('chat-input');
+	const composerBox = document.getElementById('composer-box');
+	const contextChipsContainer = document.getElementById('context-chips');
+	const attachBtn = document.getElementById('attach-btn');
+
+	let attachedPaths = []; // [{path, name, kind: 'file'|'folder'}]
+
 	const addImageBtn = document.getElementById('add-image-btn');
 	const imageUpload = document.getElementById('image-upload');
 	const imagePreviewContainer = document.getElementById('image-preview-container');
@@ -20,59 +26,74 @@
 				this.dropdown = document.getElementById(dropdownId);
 				this.label = document.getElementById(labelId);
 				this.onChange = onChange;
-				this.value = '';
+
+				if (!this.trigger || !this.dropdown) return;
 
 				this.trigger.addEventListener('click', (e) => {
 					e.stopPropagation();
-					this.toggle();
+					const isHidden = this.dropdown.classList.contains('hidden');
+					// Close all dropdowns
+					document.getElementById('provider-dropdown').classList.add('hidden');
+					document.getElementById('model-dropdown').classList.add('hidden');
+					document.getElementById('mode-dropdown').classList.add('hidden');
+					
+					if (isHidden) {
+						this.dropdown.classList.remove('hidden');
+					}
 				});
-			}
-
-			toggle() {
-				const isHidden = this.dropdown.classList.contains('hidden');
-				// Close all dropdowns
-				document.getElementById('provider-dropdown').classList.add('hidden');
-				document.getElementById('model-dropdown').classList.add('hidden');
-				document.getElementById('mode-dropdown').classList.add('hidden');
-
-				if (isHidden) {
-					this.dropdown.classList.remove('hidden');
-				}
 			}
 
 			setOptions(options, selectedValue) {
 				this.dropdown.innerHTML = '';
-				this.trigger.disabled = options.length === 0;
+				
+				if (!options || options.length === 0) {
+					this.label.textContent = 'None available';
+					this.trigger.disabled = true;
+					this.trigger.classList.add('opacity-50');
+					return;
+				}
+
+				this.trigger.disabled = false;
+				this.trigger.classList.remove('opacity-50');
+
+				let hasSelected = false;
 
 				options.forEach(opt => {
+					// We receive arrays of strings, not objects
 					const item = document.createElement('div');
-					item.className = 'px-3 py-1.5 cursor-pointer hover:bg-vscode-list-hover text-[0.9em] transition-colors';
+					item.className = 'px-3 py-2 cursor-pointer hover:bg-vscode-list-hover transition-colors text-[0.9em] truncate';
+					item.textContent = opt;
+					
 					if (opt === selectedValue) {
-						item.classList.add('bg-vscode-list-active', 'text-vscode-list-activeFg');
+						item.classList.add('bg-vscode-list-active');
+						item.classList.add('text-vscode-list-activeFg');
+						
+						let displayValue = opt;
+						if (displayValue.includes('/')) {
+							displayValue = displayValue.split('/').pop();
+						}
+						this.label.textContent = displayValue || 'Loading...';
+						
+						hasSelected = true;
 					} else {
 						item.classList.add('text-vscode-dropdown-foreground');
 					}
-					item.textContent = opt;
-					item.addEventListener('click', (e) => {
-						e.stopPropagation();
-						this.setValue(opt);
-						this.dropdown.classList.add('hidden');
+
+					item.addEventListener('click', () => {
 						this.onChange(opt);
+						this.dropdown.classList.add('hidden');
 					});
+
 					this.dropdown.appendChild(item);
 				});
 
-				this.setValue(selectedValue || (options.length > 0 ? options[0] : ''));
-			}
-
-			setValue(value) {
-				this.value = value;
-				// Clean up the label for better display
-				let displayValue = value;
-				if (displayValue.includes('/')) {
-					displayValue = displayValue.split('/').pop();
+				if (!hasSelected && options.length > 0) {
+					let displayValue = options[0];
+					if (displayValue.includes('/')) {
+						displayValue = displayValue.split('/').pop();
+					}
+					this.label.textContent = displayValue || 'Loading...';
 				}
-				this.label.textContent = displayValue || 'Loading...';
 			}
 		}
 
@@ -96,6 +117,7 @@
 	}
 
 	initDropdowns();
+
 	function toggleHistoryView() {
 		isHistoryView = !isHistoryView;
 		if (isHistoryView) {
@@ -244,6 +266,11 @@
 		});
 	}
 
+	if (attachBtn) {
+		attachBtn.addEventListener('click', () => {
+			vscode.postMessage({ type: 'requestOpenDialog' });
+		});
+	}
 	// Image upload logic
 	if (addImageBtn && imageUpload) {
 		addImageBtn.addEventListener('click', () => {
@@ -392,7 +419,6 @@
 		});
 	}
 
-
 	// Auto-resize textarea
 	chatInput.addEventListener('input', function () {
 		this.style.height = 'auto';
@@ -408,8 +434,16 @@
 	});
 
 	function submitMessage() {
-		const text = chatInput.value.trim();
-		if (!text && pendingImages.length === 0) return;
+		let text = chatInput.value.trim();
+		if (!text && attachedPaths.length === 0 && pendingImages.length === 0) return;
+
+		// Append attached paths as context lines
+		if (attachedPaths.length > 0) {
+			const contextText = attachedPaths
+				.map(a => `@${a.kind === 'folder' ? '[folder]' : '[file]'} ${a.path}`)
+				.join('\n');
+			text = text ? `${text}\n\n${contextText}` : contextText;
+		}
 
 		const imagesToSubmit = pendingImages.length > 0 ? [...pendingImages] : undefined;
 
@@ -426,6 +460,10 @@
 		pendingImages = [];
 		renderImagePreviews();
 
+		// Clear chips after sending
+		attachedPaths = [];
+		renderChips();
+
 		// Optimistically append user message
 		appendMessage(text, 'user', imagesToSubmit);
 		pendingUserMessageText = text;
@@ -438,6 +476,155 @@
 			currentTurnEl = null;
 			currentTextEl = null;
 		}
+	}
+
+	function createFileIcon() {
+		const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+		svg.setAttribute('width', '14');
+		svg.setAttribute('height', '14');
+		svg.setAttribute('viewBox', '0 0 24 24');
+		svg.setAttribute('fill', 'none');
+		svg.setAttribute('stroke', 'currentColor');
+		svg.setAttribute('stroke-width', '2');
+		svg.setAttribute('stroke-linecap', 'round');
+		svg.setAttribute('stroke-linejoin', 'round');
+		const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+		path.setAttribute('d', 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z');
+		const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+		polyline.setAttribute('points', '14 2 14 8 20 8');
+		svg.appendChild(path);
+		svg.appendChild(polyline);
+		return svg;
+	}
+
+	function createFolderIcon() {
+		const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+		svg.setAttribute('width', '14');
+		svg.setAttribute('height', '14');
+		svg.setAttribute('viewBox', '0 0 24 24');
+		svg.setAttribute('fill', 'none');
+		svg.setAttribute('stroke', 'currentColor');
+		svg.setAttribute('stroke-width', '2');
+		svg.setAttribute('stroke-linecap', 'round');
+		svg.setAttribute('stroke-linejoin', 'round');
+		const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+		path.setAttribute('d', 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z');
+		svg.appendChild(path);
+		return svg;
+	}
+
+	function renderChips() {
+		contextChipsContainer.innerHTML = '';
+		if (attachedPaths.length === 0) {
+			contextChipsContainer.classList.add('hidden');
+			return;
+		}
+		contextChipsContainer.classList.remove('hidden');
+		for (const item of attachedPaths) {
+			const chip = document.createElement('span');
+			chip.className = 'context-chip';
+			
+			const iconSpan = document.createElement('span');
+			iconSpan.className = 'chip-icon';
+			iconSpan.appendChild(item.kind === 'folder' ? createFolderIcon() : createFileIcon());
+			iconSpan.style.marginRight = '4px';
+			iconSpan.style.display = 'flex';
+			iconSpan.style.alignItems = 'center';
+
+			const nameSpan = document.createElement('span');
+			nameSpan.className = 'chip-name';
+			nameSpan.setAttribute('title', item.path);
+			nameSpan.textContent = item.name;
+
+			const removeSpan = document.createElement('span');
+			removeSpan.className = 'chip-remove';
+			removeSpan.setAttribute('title', 'Remove');
+			removeSpan.textContent = '×';
+
+			chip.appendChild(iconSpan);
+			chip.appendChild(nameSpan);
+			chip.appendChild(removeSpan);
+			
+			chip.addEventListener('click', e => {
+				if (e.target.classList.contains('chip-remove')) {
+					attachedPaths = attachedPaths.filter(a => a.path !== item.path);
+					renderChips();
+					return;
+				}
+				vscode.postMessage({ type: 'openPath', path: item.path, kind: item.kind });
+			});
+			contextChipsContainer.appendChild(chip);
+		}
+	}
+
+	if (composerBox) {
+		const handleDrag = (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+		};
+		
+		// Prevent default on window to stop VS Code's native drop handler
+		window.addEventListener('dragover', (e) => e.preventDefault(), true);
+		window.addEventListener('drop', (e) => e.preventDefault(), true);
+
+		// Prevent native text drop on the textarea
+		chatInput.addEventListener('dragenter', handleDrag, true);
+		chatInput.addEventListener('dragover', handleDrag, true);
+		chatInput.addEventListener('drop', handleDrag, true);
+
+		composerBox.addEventListener('dragenter', (e) => {
+			handleDrag(e);
+			composerBox.classList.add('drag-over');
+		}, true);
+		
+		composerBox.addEventListener('dragover', (e) => {
+			handleDrag(e);
+			composerBox.classList.add('drag-over');
+		}, true);
+		
+		composerBox.addEventListener('dragleave', (e) => {
+			handleDrag(e);
+			composerBox.classList.remove('drag-over');
+		}, true);
+		
+		composerBox.addEventListener('drop', e => {
+			handleDrag(e);
+			composerBox.classList.remove('drag-over');
+			const uris = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+			if (!uris) return;
+			
+			const isWindows = navigator.userAgentData?.platform?.toLowerCase().includes('win') || navigator.userAgent.includes('Windows');
+			const paths = uris.split('\n')
+				.map(u => u.trim())
+				.filter(u => u && !u.startsWith('#'))
+				.map(u => {
+					if (u.startsWith('file://')) {
+						let p = decodeURIComponent(u.replace(/^file:\/\/\/?/, ''));
+						if (isWindows && p.match(/^[a-zA-Z]:/)) {
+							// Already dropped leading slash via the regex above if it had exactly three slashes. 
+							// But if it had two slashes e.g. file://C:/ it would become C:/
+							// If it had three e.g. file:///C:/ the regex stripped up to 3 slashes so it also becomes C:/
+							// Wait, what if it was file:///C:/... ? `u.replace(/^file:\/\/\/?/, '')` removes `file:///`.
+							// What about UNC paths? `file://server/share` -> regex removes `file://`, leaving `server/share`. 
+							// Wait, `u.replace(/^file:\/\/\/?/, '')` removes `file:///` or `file://`.
+							// For UNC `file://server/share`, `replace` makes it `server/share`. 
+							// So we need to put `//` back for UNC on Windows? 
+							// Let's implement Will's explicit advice:
+							// "strip with /^file:\/\/\/?/ and on Windows drop the leading slash before a drive letter."
+						}
+						// Let's strictly follow Will's suggestion:
+						let p2 = decodeURIComponent(u.replace(/^file:\/\/\/?/, ''));
+						if (isWindows && p2.match(/^\/[a-zA-Z]:/)) {
+							p2 = p2.substring(1);
+						}
+						// wait, for UNC path `file://server/share`, replacing `/^file:\/\/\/?/` removes `file://`. 
+						// So it becomes `server/share`. On Windows UNC paths need `\\server\share`. 
+						// Actually vscode drop UNC path comes as `file:////server/share` or `file://server/share`.
+						// If we don't mess with it too much, let's just do exactly what Will said.
+						return p2;
+					}
+			paths.forEach(p => vscode.postMessage({ type: 'requestPathInfo', path: p }));
+		}, true);
 	}
 
 	function appendMessage(content, role, images = undefined) {
@@ -474,17 +661,82 @@
 			msgEl.appendChild(imagesContainer);
 		}
 
-		if (content) {
+		let parsedContent = content;
+		let extractedChips = [];
+
+		if (role === 'user' && content) {
+			// Handle pre-injected format (before sending)
+			parsedContent = content.replace(/@\[(file|folder)\]\s+([^\n]+)/g, (match, kind, path) => {
+				const name = path.trim().split(/[/\\]/).pop();
+				extractedChips.push({ kind, path: path.trim(), name });
+				return ''; // Remove from text
+			});
+
+			// Handle post-injected format (from history sync)
+			parsedContent = parsedContent.replace(/<context path="([^"]+)"(?: type="([^"]+)")?>[\s\S]*?<\/context>/g, (match, path, type) => {
+				const kind = type === 'directory' ? 'folder' : 'file';
+				const name = path.trim().split(/[/\\]/).pop();
+				extractedChips.push({ kind, path: path.trim(), name });
+				return ''; // Remove from text
+			});
+
+			parsedContent = parsedContent.trim();
+		}
+
+		if (parsedContent || extractedChips.length > 0) {
 			const textContainer = document.createElement('div');
 			textContainer.className = 'markdown-body';
-	
-			// If it's the user, we just render it directly (or we could use marked for them too)
-			// Usually users prefer raw text, but let's render markdown for both just in case.
+
 			if (typeof marked !== 'undefined') {
-				textContainer.innerHTML = marked.parse(content);
+				textContainer.innerHTML = marked.parse(parsedContent);
 			} else {
-				textContainer.textContent = content;
+				textContainer.textContent = parsedContent;
 			}
+
+			if (extractedChips.length > 0 && role === 'user') {
+				const chipsContainer = document.createElement('div');
+				chipsContainer.style.display = 'flex';
+				chipsContainer.style.flexWrap = 'wrap';
+				chipsContainer.style.gap = '6px';
+				chipsContainer.style.marginTop = parsedContent ? '8px' : '0';
+
+				extractedChips.forEach(chipData => {
+					const chip = document.createElement('span');
+					chip.className = 'context-chip';
+					chip.setAttribute('data-path', chipData.path);
+					chip.setAttribute('data-kind', chipData.kind);
+					chip.style.paddingRight = '8px';
+					
+					const iconSpan = document.createElement('span');
+					iconSpan.style.marginRight = '4px';
+					iconSpan.style.display = 'flex';
+					iconSpan.style.alignItems = 'center';
+					iconSpan.appendChild(chipData.kind === 'folder' ? createFolderIcon() : createFileIcon());
+					
+					const nameSpan = document.createElement('span');
+					nameSpan.className = 'chip-name';
+					nameSpan.setAttribute('title', chipData.path);
+					nameSpan.textContent = chipData.name;
+					
+					chip.appendChild(iconSpan);
+					chip.appendChild(nameSpan);
+					chipsContainer.appendChild(chip);
+				});
+
+				chipsContainer.addEventListener('click', (e) => {
+					const chip = e.target.closest('.context-chip');
+					if (chip) {
+						const path = chip.getAttribute('data-path');
+						const kind = chip.getAttribute('data-kind');
+						if (path) {
+							vscode.postMessage({ type: 'openPath', path, kind });
+						}
+					}
+				});
+
+				textContainer.appendChild(chipsContainer);
+			}
+
 			msgEl.appendChild(textContainer);
 		}
 
@@ -579,6 +831,14 @@
 			case 'toggleHistory':
 				toggleHistoryView();
 				break;
+			case 'pathInfoResolved': {
+				const { path, name, kind } = message;
+				if (!attachedPaths.some(a => a.path === path)) {
+					attachedPaths.push({ path, name, kind });
+					renderChips();
+				}
+				break;
+			}
 			case 'appendMessage':
 				appendMessage(message.content, 'agent');
 				break;

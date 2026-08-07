@@ -82,6 +82,13 @@ export interface ExtensionMessageUpdateSessions {
 	}>;
 }
 
+export interface ExtensionMessagePathInfoResolved {
+	type: 'pathInfoResolved';
+	path: string;
+	name: string;
+	kind: 'file' | 'folder';
+}
+
 export type ExtensionToWebviewMessage =
 	| ExtensionMessageAppendMessage
 	| ExtensionMessageAppendThought
@@ -94,7 +101,8 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessagePermissionRequested
 	| ExtensionMessageSyncState
 	| ExtensionMessageUpdateSessions
-	| ExtensionMessageSessionLoaded;
+	| ExtensionMessageSessionLoaded
+	| ExtensionMessagePathInfoResolved;
 
 
 // ---------------------------------------------------------
@@ -172,6 +180,21 @@ export interface WebviewMessageRenameSession {
 	sessionId: string;
 	title: string;
 }
+export interface WebviewMessageRequestPathInfo {
+	type: 'requestPathInfo';
+	path: string;
+}
+
+export interface WebviewMessageRequestOpenDialog {
+	type: 'requestOpenDialog';
+}
+
+export interface WebviewMessageOpenPath {
+	type: 'openPath';
+	path: string;
+	kind: 'file' | 'folder';
+}
+
 export interface WebviewMessageShowError {
 	type: 'showError';
 	message: string;
@@ -192,4 +215,7 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageResumeSession
 	| WebviewMessageDeleteSession
 	| WebviewMessageRenameSession
+	| WebviewMessageRequestPathInfo
+	| WebviewMessageRequestOpenDialog
+	| WebviewMessageOpenPath
 	| WebviewMessageShowError;
