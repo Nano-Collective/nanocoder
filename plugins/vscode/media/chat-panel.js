@@ -463,6 +463,41 @@
 		}
 	}
 
+	function createFileIcon() {
+		const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+		svg.setAttribute('width', '14');
+		svg.setAttribute('height', '14');
+		svg.setAttribute('viewBox', '0 0 24 24');
+		svg.setAttribute('fill', 'none');
+		svg.setAttribute('stroke', 'currentColor');
+		svg.setAttribute('stroke-width', '2');
+		svg.setAttribute('stroke-linecap', 'round');
+		svg.setAttribute('stroke-linejoin', 'round');
+		const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+		path.setAttribute('d', 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z');
+		const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+		polyline.setAttribute('points', '14 2 14 8 20 8');
+		svg.appendChild(path);
+		svg.appendChild(polyline);
+		return svg;
+	}
+
+	function createFolderIcon() {
+		const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+		svg.setAttribute('width', '14');
+		svg.setAttribute('height', '14');
+		svg.setAttribute('viewBox', '0 0 24 24');
+		svg.setAttribute('fill', 'none');
+		svg.setAttribute('stroke', 'currentColor');
+		svg.setAttribute('stroke-width', '2');
+		svg.setAttribute('stroke-linecap', 'round');
+		svg.setAttribute('stroke-linejoin', 'round');
+		const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+		path.setAttribute('d', 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z');
+		svg.appendChild(path);
+		return svg;
+	}
+
 	function renderChips() {
 		contextChipsContainer.innerHTML = '';
 		if (attachedPaths.length === 0) {
@@ -476,9 +511,7 @@
 			
 			const iconSpan = document.createElement('span');
 			iconSpan.className = 'chip-icon';
-			const folderSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
-			const fileSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>';
-			iconSpan.innerHTML = item.kind === 'folder' ? folderSvg : fileSvg;
+			iconSpan.appendChild(item.kind === 'folder' ? createFolderIcon() : createFileIcon());
 			iconSpan.style.marginRight = '4px';
 			iconSpan.style.display = 'flex';
 			iconSpan.style.alignItems = 'center';
@@ -646,9 +679,6 @@
 			}
 
 			if (extractedChips.length > 0 && role === 'user') {
-				const folderSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
-				const fileSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>';
-
 				const chipsContainer = document.createElement('div');
 				chipsContainer.style.display = 'flex';
 				chipsContainer.style.flexWrap = 'wrap';
@@ -666,7 +696,7 @@
 					iconSpan.style.marginRight = '4px';
 					iconSpan.style.display = 'flex';
 					iconSpan.style.alignItems = 'center';
-					iconSpan.innerHTML = chipData.kind === 'folder' ? folderSvg : fileSvg;
+					iconSpan.appendChild(chipData.kind === 'folder' ? createFolderIcon() : createFileIcon());
 					
 					const nameSpan = document.createElement('span');
 					nameSpan.className = 'chip-name';
