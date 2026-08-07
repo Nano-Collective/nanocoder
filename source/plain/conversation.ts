@@ -35,12 +35,19 @@ export interface RunPlainConversationOptions {
 	outputFormat?: 'text' | 'json';
 }
 
+export interface PlainConversationUsage {
+	inputTokens: number;
+	outputTokens: number;
+	totalTokens: number;
+}
+
 export type PlainConversationOutcome =
 	| {
 			kind: 'success';
 			finalText: string;
 			reasoning: string | null;
 			toolCalls: ToolCallLog[];
+			usage?: PlainConversationUsage;
 	  }
 	| {
 			kind: 'tool-approval-required';
@@ -48,6 +55,7 @@ export type PlainConversationOutcome =
 			finalText: string;
 			reasoning: string | null;
 			toolCalls: ToolCallLog[];
+			usage?: PlainConversationUsage;
 	  }
 	| {
 			kind: 'error';
@@ -55,6 +63,7 @@ export type PlainConversationOutcome =
 			finalText: string;
 			reasoning: string | null;
 			toolCalls: ToolCallLog[];
+			usage?: PlainConversationUsage;
 	  };
 
 // On the last allowed turn we strip tools and inject this so the model
@@ -98,6 +107,20 @@ export async function runPlainConversation(
 	let accumulatedReasoning = '';
 	const toolCallsLog: ToolCallLog[] = [];
 
+	let hasReportedUsage = false;
+	let accumulatedInputTokens = 0;
+	let accumulatedOutputTokens = 0;
+	let accumulatedTotalTokens = 0;
+
+	const getUsage = (): PlainConversationUsage | undefined => {
+		if (!hasReportedUsage) return undefined;
+		return {
+			inputTokens: accumulatedInputTokens,
+			outputTokens: accumulatedOutputTokens,
+			totalTokens: accumulatedTotalTokens,
+		};
+	};
+
 	const maxTurns =
 		getAppConfig().headless?.maxTurns ?? DEFAULT_HEADLESS_MAX_TURNS;
 
@@ -109,6 +132,7 @@ export async function runPlainConversation(
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				usage: getUsage(),
 			};
 		}
 
@@ -173,6 +197,13 @@ export async function runPlainConversation(
 			modeOverrides,
 		);
 
+		if (result?.usage) {
+			hasReportedUsage = true;
+			accumulatedInputTokens += result.usage.inputTokens ?? 0;
+			accumulatedOutputTokens += result.usage.outputTokens ?? 0;
+			accumulatedTotalTokens += result.usage.totalTokens ?? 0;
+		}
+
 		if (!isJson && (reasoningPrinted || contentStarted)) {
 			writeLine();
 		}
@@ -184,6 +215,7 @@ export async function runPlainConversation(
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				usage: getUsage(),
 			};
 		}
 
@@ -210,6 +242,7 @@ export async function runPlainConversation(
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				usage: getUsage(),
 			};
 		}
 
@@ -268,6 +301,7 @@ export async function runPlainConversation(
 					finalText: accumulatedFinalText,
 					reasoning: accumulatedReasoning || null,
 					toolCalls: toolCallsLog,
+					usage: getUsage(),
 				};
 			}
 			return {
@@ -275,6 +309,7 @@ export async function runPlainConversation(
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				usage: getUsage(),
 			};
 		}
 
@@ -302,6 +337,7 @@ export async function runPlainConversation(
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				usage: getUsage(),
 			};
 		}
 
@@ -352,6 +388,7 @@ export async function runPlainConversation(
 		finalText: accumulatedFinalText,
 		reasoning: accumulatedReasoning || null,
 		toolCalls: toolCallsLog,
+		usage: getUsage(),
 	};
 }
 
