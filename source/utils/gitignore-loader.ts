@@ -38,15 +38,22 @@ const DEFAULT_IGNORE_DIRS = [
 ];
 
 /**
- * Load and parse .gitignore file, returns an ignore instance.
+ * Load and parse .gitignore and .nanocoderignore files, returns an ignore instance.
  * Always includes default ignore patterns for common directories.
  *
- * @param cwd - The current working directory to load .gitignore from
+ * .nanocoderignore is an additional, nanocoder-specific ignore file. It is useful
+ * for hiding files from the AI (to save tokens / avoid context bloat) even when
+ * those files are tracked in git and therefore not covered by .gitignore
+ * (e.g. package-lock.json, large fixtures, or sensitive files like .env that are
+ * intentionally committed).
+ *
+ * @param cwd - The current working directory to load .gitignore / .nanocoderignore from
  * @returns An ignore instance configured with patterns
  */
 export function loadGitignore(cwd: string): ReturnType<typeof ignore> {
 	const ig = ignore();
 	const gitignorePath = join(cwd, '.gitignore');
+	const nanocoderignorePath = join(cwd, '.nanocoderignore');
 
 	// Always ignore common directories
 	ig.add(DEFAULT_IGNORE_DIRS);
@@ -62,6 +69,18 @@ export function loadGitignore(cwd: string): ReturnType<typeof ignore> {
 		}
 	}
 
+	// Load .nanocoderignore if it exists. Patterns are additive on top of
+	// .gitignore and the default ignores, not a replacement for them.
+	if (existsSync(nanocoderignorePath)) {
+		try {
+			const nanocoderignoreContent = readFileSync(nanocoderignorePath, 'utf-8');
+			ig.add(nanocoderignoreContent);
+		} catch {
+			// Silently fail if we can't read .nanocoderignore
+			// The gitignore + hardcoded ignores above will still apply
+		}
+	}
+	
 	return ig;
 }
 
