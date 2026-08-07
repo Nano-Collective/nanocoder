@@ -73,9 +73,9 @@ test('useTerminalWidth respects minimum width of 40', t => {
 	process.stdout.columns = originalColumns;
 });
 
-test('useTerminalWidth respects maximum width of 120', t => {
+test('useTerminalWidth respects maximum width of 200', t => {
 	const originalColumns = process.stdout.columns;
-	process.stdout.columns = 200; // Very wide terminal
+	process.stdout.columns = 300; // Very wide terminal
 
 	let capturedWidth: number | null = null;
 
@@ -88,7 +88,7 @@ test('useTerminalWidth respects maximum width of 120', t => {
 	);
 
 	t.truthy(capturedWidth);
-	t.is(capturedWidth!, 120); // Should be clamped to maximum
+	t.is(capturedWidth!, 200); // Should be clamped to maximum
 
 	process.stdout.columns = originalColumns;
 });

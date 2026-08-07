@@ -171,6 +171,7 @@ function localServerTemplate(opts: {
 	defaultProviderName: string;
 	defaultBaseUrl: string;
 	configFallbackName?: string;
+	modelDefault?: string;
 }): ProviderTemplate {
 	const fallbackName = opts.configFallbackName ?? opts.defaultProviderName;
 	return {
@@ -192,7 +193,7 @@ function localServerTemplate(opts: {
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: '',
+				default: opts.modelDefault ?? '',
 				required: true,
 			},
 		],
@@ -269,6 +270,7 @@ function oauthProviderTemplate(opts: {
 	name: string;
 	baseUrl: string;
 	sdkProvider: ProviderConfig['sdkProvider'];
+	modelDefault?: string;
 }): ProviderTemplate {
 	return {
 		id: opts.id,
@@ -278,7 +280,7 @@ function oauthProviderTemplate(opts: {
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated).',
-				default: '',
+				default: opts.modelDefault ?? '',
 				required: true,
 			},
 		],
@@ -298,6 +300,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		defaultProviderName: 'Ollama',
 		defaultBaseUrl: 'http://localhost:11434/v1',
 		configFallbackName: 'ollama',
+		modelDefault: 'llama4',
 	}),
 	localServerTemplate({
 		id: 'llama-cpp',
@@ -323,6 +326,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
 		apiKeyPrompt: 'API Key (from https://aistudio.google.com/apikey)',
 		sdkProvider: 'google',
+		modelDefault: 'gemini-3.6-flash',
 	}),
 	{
 		id: 'openrouter',
@@ -342,7 +346,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: '',
+				default: 'anthropic/claude-sonnet-5',
 				required: true,
 			},
 			{
@@ -434,7 +438,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 			{
 				name: 'model',
 				prompt: 'Model name(s) (comma-separated)',
-				default: '',
+				default: 'gpt-5.6-sol',
 				required: true,
 			},
 			{
@@ -461,11 +465,13 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		name: 'Anthropic Claude',
 		baseUrl: 'https://api.anthropic.com/v1',
 		sdkProvider: 'anthropic',
+		modelDefault: 'claude-sonnet-5',
 	}),
 	apiKeyTemplate({
 		id: 'mistral',
 		name: 'Mistral AI',
 		baseUrl: 'https://api.mistral.ai/v1',
+		modelDefault: 'mistral-large-latest',
 	}),
 	apiKeyTemplate({
 		id: 'groq',
@@ -479,30 +485,35 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		name: 'Z.ai',
 		baseUrl: 'https://api.z.ai/api/paas/v4/',
 		providerNameRequired: true,
+		modelDefault: 'glm-5.2',
 	}),
 	apiKeyTemplate({
 		id: 'z-ai-coding',
 		name: 'Z.ai Coding Subscription',
 		baseUrl: 'https://api.z.ai/api/coding/paas/v4/',
 		providerNameRequired: true,
+		modelDefault: 'glm-5.2',
 	}),
 	apiKeyTemplate({
 		id: 'github-models',
 		name: 'GitHub Models',
 		baseUrl: 'https://models.github.ai/inference',
 		apiKeyPrompt: 'GitHub Token (PAT with models:read scope)',
+		modelDefault: 'openai/gpt-5.6-sol',
 	}),
 	oauthProviderTemplate({
 		id: 'chatgpt-codex',
 		name: 'ChatGPT / Codex',
 		baseUrl: 'https://chatgpt.com/backend-api/codex',
 		sdkProvider: 'chatgpt-codex',
+		modelDefault: 'gpt-5.3-codex',
 	}),
 	oauthProviderTemplate({
 		id: 'github-copilot',
 		name: 'GitHub Copilot',
 		baseUrl: 'https://api.githubcopilot.com',
 		sdkProvider: 'github-copilot',
+		modelDefault: 'gpt-5.6-sol',
 	}),
 	apiKeyTemplate({
 		id: 'kimi-code',
@@ -532,18 +543,21 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		name: 'Poe',
 		baseUrl: 'https://api.poe.com/v1',
 		apiKeyPrompt: 'API Key (from poe.com/api_key)',
+		modelDefault: 'gpt-5.6-sol',
 	}),
 	apiKeyTemplate({
 		id: 'atlas-cloud',
 		name: 'Atlas Cloud',
 		baseUrl: 'https://api.atlascloud.ai/v1',
 		apiKeyPrompt: 'API Key (from atlascloud.ai/developer)',
+		modelDefault: 'gpt-5.6-sol',
 	}),
 	apiKeyTemplate({
 		id: 'together',
 		name: 'Together AI',
 		baseUrl: 'https://api.together.ai/v1',
 		apiKeyPrompt: 'API Key (from api.together.ai/settings/api-keys)',
+		modelDefault: 'deepseek-ai/DeepSeek-V4-Pro',
 	}),
 	{
 		id: 'custom',

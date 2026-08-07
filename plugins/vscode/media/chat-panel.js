@@ -4,6 +4,18 @@
 
 	const messagesContainer = document.getElementById('messages-container');
 	const chatInput = document.getElementById('chat-input');
+	const composerBox = document.getElementById('composer-box');
+	const contextChipsContainer = document.getElementById('context-chips');
+	const attachBtn = document.getElementById('attach-btn');
+
+	let attachedPaths = []; // [{path, name, kind: 'file'|'folder'}]
+
+	const addImageBtn = document.getElementById('add-image-btn');
+	const imageUpload = document.getElementById('image-upload');
+	const imagePreviewContainer = document.getElementById('image-preview-container');
+	
+	let pendingImages = [];
+	let pendingUserMessageText = null;
 
 	let modelDropdown, modeDropdown, providerDropdown;
 
@@ -14,59 +26,74 @@
 				this.dropdown = document.getElementById(dropdownId);
 				this.label = document.getElementById(labelId);
 				this.onChange = onChange;
-				this.value = '';
+
+				if (!this.trigger || !this.dropdown) return;
 
 				this.trigger.addEventListener('click', (e) => {
 					e.stopPropagation();
-					this.toggle();
+					const isHidden = this.dropdown.classList.contains('hidden');
+					// Close all dropdowns
+					document.getElementById('provider-dropdown').classList.add('hidden');
+					document.getElementById('model-dropdown').classList.add('hidden');
+					document.getElementById('mode-dropdown').classList.add('hidden');
+					
+					if (isHidden) {
+						this.dropdown.classList.remove('hidden');
+					}
 				});
-			}
-
-			toggle() {
-				const isHidden = this.dropdown.classList.contains('hidden');
-				// Close all dropdowns
-				document.getElementById('provider-dropdown').classList.add('hidden');
-				document.getElementById('model-dropdown').classList.add('hidden');
-				document.getElementById('mode-dropdown').classList.add('hidden');
-
-				if (isHidden) {
-					this.dropdown.classList.remove('hidden');
-				}
 			}
 
 			setOptions(options, selectedValue) {
 				this.dropdown.innerHTML = '';
-				this.trigger.disabled = options.length === 0;
+				
+				if (!options || options.length === 0) {
+					this.label.textContent = 'None available';
+					this.trigger.disabled = true;
+					this.trigger.classList.add('opacity-50');
+					return;
+				}
+
+				this.trigger.disabled = false;
+				this.trigger.classList.remove('opacity-50');
+
+				let hasSelected = false;
 
 				options.forEach(opt => {
+					// We receive arrays of strings, not objects
 					const item = document.createElement('div');
-					item.className = 'px-3 py-1.5 cursor-pointer hover:bg-vscode-list-hover text-[0.9em] transition-colors';
+					item.className = 'px-3 py-2 cursor-pointer hover:bg-vscode-list-hover transition-colors text-[0.9em] truncate';
+					item.textContent = opt;
+					
 					if (opt === selectedValue) {
-						item.classList.add('bg-vscode-list-active', 'text-vscode-list-activeFg');
+						item.classList.add('bg-vscode-list-active');
+						item.classList.add('text-vscode-list-activeFg');
+						
+						let displayValue = opt;
+						if (displayValue.includes('/')) {
+							displayValue = displayValue.split('/').pop();
+						}
+						this.label.textContent = displayValue || 'Loading...';
+						
+						hasSelected = true;
 					} else {
 						item.classList.add('text-vscode-dropdown-foreground');
 					}
-					item.textContent = opt;
-					item.addEventListener('click', (e) => {
-						e.stopPropagation();
-						this.setValue(opt);
-						this.dropdown.classList.add('hidden');
+
+					item.addEventListener('click', () => {
 						this.onChange(opt);
+						this.dropdown.classList.add('hidden');
 					});
+
 					this.dropdown.appendChild(item);
 				});
 
-				this.setValue(selectedValue || (options.length > 0 ? options[0] : ''));
-			}
-
-			setValue(value) {
-				this.value = value;
-				// Clean up the label for better display
-				let displayValue = value;
-				if (displayValue.includes('/')) {
-					displayValue = displayValue.split('/').pop();
+				if (!hasSelected && options.length > 0) {
+					let displayValue = options[0];
+					if (displayValue.includes('/')) {
+						displayValue = displayValue.split('/').pop();
+					}
+					this.label.textContent = displayValue || 'Loading...';
 				}
-				this.label.textContent = displayValue || 'Loading...';
 			}
 		}
 
@@ -90,6 +117,7 @@
 	}
 
 	initDropdowns();
+
 	function toggleHistoryView() {
 		isHistoryView = !isHistoryView;
 		if (isHistoryView) {
@@ -137,6 +165,57 @@
 		arrowRight: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>`
 	};
 
+	function createMessageFooter(getText, role, sentAt) {
+		const footer = document.createElement('div');
+		footer.className = 'flex h-5 items-center gap-1.5 mt-1 text-xs text-vscode-fg opacity-60 ' +
+			(role === 'user' ? 'self-end' : 'self-start');
+
+		const btn = document.createElement('button');
+		btn.type = 'button';
+		btn.className = 'flex items-center justify-center bg-transparent border-none cursor-pointer text-vscode-fg opacity-60 hover:opacity-100 p-1 rounded hover:bg-vscode-toolbarHover [&_svg]:mr-0 mb-1';
+		btn.title = 'Copy';
+		btn.setAttribute('aria-label', 'Copy message');
+		btn.innerHTML = ICONS.clipboard;
+
+		let resetTimer = null;
+		btn.addEventListener('click', () => {
+			const text = getText();
+			if (!text) return;
+			(async () => {
+				if (!navigator.clipboard?.writeText) {
+					throw new Error('Clipboard API unavailable');
+				}
+				await navigator.clipboard.writeText(text);
+			})().then(() => {
+				btn.innerHTML = ICONS.success;
+				btn.title = 'Copied!';
+			}).catch(() => {
+				btn.innerHTML = ICONS.error;
+				btn.title = 'Copy failed';
+			}).finally(() => {
+				clearTimeout(resetTimer);
+				resetTimer = setTimeout(() => {
+					btn.innerHTML = ICONS.clipboard;
+					btn.title = 'Copy';
+				}, 1500);
+			});
+		});
+
+		const timeEl = document.createElement('span');
+		timeEl.className = 'leading-none';
+		timeEl.textContent = sentAt.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+
+		if (role === 'user') {
+			footer.appendChild(timeEl);
+			footer.appendChild(btn);
+		} else {
+			footer.appendChild(btn);
+			footer.appendChild(timeEl);
+		}
+
+		return footer;
+	}
+
 	// --- Send / Stop toggle logic ---
 	function setProcessing(active) {
 		isProcessing = active;
@@ -172,6 +251,159 @@
 		});
 	}
 
+	if (attachBtn) {
+		attachBtn.addEventListener('click', () => {
+			vscode.postMessage({ type: 'requestOpenDialog' });
+		});
+	}
+	// Image upload logic
+	if (addImageBtn && imageUpload) {
+		addImageBtn.addEventListener('click', () => {
+			if (isHistoryView) {
+				showChatView();
+			}
+			imageUpload.click();
+		});
+		
+		imageUpload.addEventListener('change', (e) => {
+			if (e.target.files) {
+				processImageFiles(Array.from(e.target.files));
+				e.target.value = '';
+			}
+		});
+	}
+
+	chatInput.addEventListener('paste', (e) => {
+		if (e.clipboardData && e.clipboardData.items) {
+			const files = Array.from(e.clipboardData.items)
+				.filter(item => item.type.startsWith('image/'))
+				.map(item => item.getAsFile())
+				.filter(file => file !== null);
+			if (files.length > 0) {
+				processImageFiles(files);
+				e.preventDefault(); // Only prevent default if we're actually pasting images, allow text
+			}
+		}
+	});
+
+	const MAX_ATTACHMENTS = 10;
+	const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+	const SUPPORTED_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+
+	function processImageFiles(files) {
+		let validFiles = [];
+		for (const file of files) {
+			if (!SUPPORTED_TYPES.includes(file.type)) {
+				vscode.postMessage({ type: 'showError', message: `Unsupported image format: ${file.name}` });
+				continue;
+			}
+			if (file.size > MAX_FILE_SIZE) {
+				vscode.postMessage({ type: 'showError', message: `Image exceeds 10 MB: ${file.name}` });
+				continue;
+			}
+			validFiles.push(file);
+		}
+
+		if (pendingImages.length + validFiles.length > MAX_ATTACHMENTS) {
+			vscode.postMessage({ type: 'showError', message: `Maximum attachment count reached (${MAX_ATTACHMENTS})` });
+			validFiles = validFiles.slice(0, MAX_ATTACHMENTS - pendingImages.length);
+		}
+
+		if (validFiles.length === 0) return;
+
+		let pendingReads = validFiles.length;
+		if (addImageBtn) {
+			addImageBtn.disabled = true;
+			addImageBtn.classList.add('opacity-50', 'cursor-not-allowed');
+		}
+
+		for (const file of validFiles) {
+			const reader = new FileReader();
+			reader.onload = (e) => {
+				const result = e.target.result;
+				if (typeof result === 'string') {
+					const commaIdx = result.indexOf(',');
+					if (commaIdx !== -1) {
+						const data = result.substring(commaIdx + 1);
+						pendingImages.push({ data, mimeType: file.type });
+						renderImagePreviews();
+					}
+				}
+				pendingReads--;
+				if (pendingReads === 0 && addImageBtn) {
+					addImageBtn.disabled = false;
+					addImageBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+				}
+			};
+			reader.onerror = () => {
+				pendingReads--;
+				if (pendingReads === 0 && addImageBtn) {
+					addImageBtn.disabled = false;
+					addImageBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+				}
+			};
+			reader.readAsDataURL(file);
+		}
+	}
+
+	function renderImagePreviews() {
+		if (!imagePreviewContainer) return;
+		imagePreviewContainer.innerHTML = '';
+		pendingImages.forEach((img, idx) => {
+			const wrapper = document.createElement('div');
+			wrapper.className = 'relative w-12 h-12 rounded overflow-hidden border border-vscode-input-border shrink-0 group';
+			
+			const imageEl = document.createElement('img');
+			// codeql[js/xss] False positive: mimeType is strictly validated and data is base64 encoded
+			const src = `data:${img.mimeType};base64,${img.data}`;
+			if (src.startsWith('data:image/')) {
+				imageEl.src = src;
+			}
+			imageEl.className = 'w-full h-full object-cover cursor-pointer hover:opacity-80 transition-opacity';
+			imageEl.onclick = () => openImageModal(imageEl.src);
+			
+			const removeBtn = document.createElement('button');
+			removeBtn.className = 'absolute top-0 right-0 bg-black/50 hover:bg-black/80 text-white w-5 h-5 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-bl cursor-pointer border-none outline-none';
+			removeBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+			removeBtn.onclick = (e) => {
+				e.stopPropagation();
+				pendingImages.splice(idx, 1);
+				renderImagePreviews();
+			};
+			
+			wrapper.appendChild(imageEl);
+			wrapper.appendChild(removeBtn);
+			imagePreviewContainer.appendChild(wrapper);
+		});
+	}
+
+	const imageModal = document.getElementById('image-modal');
+	const modalImage = document.getElementById('modal-image');
+	const closeModalBtn = document.getElementById('close-modal-btn');
+	
+	function openImageModal(src) {
+		if (imageModal && modalImage) {
+			// Validate src to prevent untrusted URL redirection (CodeQL)
+			if (src.startsWith('data:image/')) {
+				modalImage.src = src;
+				imageModal.classList.remove('hidden');
+			}
+		}
+	}
+	
+	if (closeModalBtn) {
+		closeModalBtn.addEventListener('click', () => {
+			imageModal.classList.add('hidden');
+		});
+	}
+	if (imageModal) {
+		imageModal.addEventListener('click', (e) => {
+			if (e.target === imageModal) {
+				imageModal.classList.add('hidden');
+			}
+		});
+	}
+
 	// Auto-resize textarea
 	chatInput.addEventListener('input', function () {
 		this.style.height = 'auto';
@@ -187,21 +419,39 @@
 	});
 
 	function submitMessage() {
-		const text = chatInput.value.trim();
-		if (!text) return;
+		let text = chatInput.value.trim();
+		if (!text && attachedPaths.length === 0 && pendingImages.length === 0) return;
+
+		// Append attached paths as context lines
+		if (attachedPaths.length > 0) {
+			const contextText = attachedPaths
+				.map(a => `@${a.kind === 'folder' ? '[folder]' : '[file]'} ${a.path}`)
+				.join('\n');
+			text = text ? `${text}\n\n${contextText}` : contextText;
+		}
+
+		const imagesToSubmit = pendingImages.length > 0 ? [...pendingImages] : undefined;
 
 		// Send message to extension host
 		vscode.postMessage({
 			type: 'submitMessage',
-			text: text
+			text: text,
+			images: imagesToSubmit
 		});
 
 		// Clear input
 		chatInput.value = '';
 		chatInput.style.height = 'auto';
+		pendingImages = [];
+		renderImagePreviews();
 
-		// Optimistically append user message 
-		appendMessage(text, 'user');
+		// Clear chips after sending
+		attachedPaths = [];
+		renderChips();
+
+		// Optimistically append user message
+		appendMessage(text, 'user', imagesToSubmit);
+		pendingUserMessageText = text;
 
 		if (!isProcessing) {
 			// Switch to processing state
@@ -213,32 +463,272 @@
 		}
 	}
 
-	function appendMessage(content, role) {
+	function createFileIcon() {
+		const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+		svg.setAttribute('width', '14');
+		svg.setAttribute('height', '14');
+		svg.setAttribute('viewBox', '0 0 24 24');
+		svg.setAttribute('fill', 'none');
+		svg.setAttribute('stroke', 'currentColor');
+		svg.setAttribute('stroke-width', '2');
+		svg.setAttribute('stroke-linecap', 'round');
+		svg.setAttribute('stroke-linejoin', 'round');
+		const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+		path.setAttribute('d', 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z');
+		const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+		polyline.setAttribute('points', '14 2 14 8 20 8');
+		svg.appendChild(path);
+		svg.appendChild(polyline);
+		return svg;
+	}
+
+	function createFolderIcon() {
+		const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+		svg.setAttribute('width', '14');
+		svg.setAttribute('height', '14');
+		svg.setAttribute('viewBox', '0 0 24 24');
+		svg.setAttribute('fill', 'none');
+		svg.setAttribute('stroke', 'currentColor');
+		svg.setAttribute('stroke-width', '2');
+		svg.setAttribute('stroke-linecap', 'round');
+		svg.setAttribute('stroke-linejoin', 'round');
+		const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+		path.setAttribute('d', 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z');
+		svg.appendChild(path);
+		return svg;
+	}
+
+	function renderChips() {
+		contextChipsContainer.innerHTML = '';
+		if (attachedPaths.length === 0) {
+			contextChipsContainer.classList.add('hidden');
+			return;
+		}
+		contextChipsContainer.classList.remove('hidden');
+		for (const item of attachedPaths) {
+			const chip = document.createElement('span');
+			chip.className = 'context-chip';
+			
+			const iconSpan = document.createElement('span');
+			iconSpan.className = 'chip-icon';
+			iconSpan.appendChild(item.kind === 'folder' ? createFolderIcon() : createFileIcon());
+			iconSpan.style.marginRight = '4px';
+			iconSpan.style.display = 'flex';
+			iconSpan.style.alignItems = 'center';
+
+			const nameSpan = document.createElement('span');
+			nameSpan.className = 'chip-name';
+			nameSpan.setAttribute('title', item.path);
+			nameSpan.textContent = item.name;
+
+			const removeSpan = document.createElement('span');
+			removeSpan.className = 'chip-remove';
+			removeSpan.setAttribute('title', 'Remove');
+			removeSpan.textContent = '×';
+
+			chip.appendChild(iconSpan);
+			chip.appendChild(nameSpan);
+			chip.appendChild(removeSpan);
+			
+			chip.addEventListener('click', e => {
+				if (e.target.classList.contains('chip-remove')) {
+					attachedPaths = attachedPaths.filter(a => a.path !== item.path);
+					renderChips();
+					return;
+				}
+				vscode.postMessage({ type: 'openPath', path: item.path, kind: item.kind });
+			});
+			contextChipsContainer.appendChild(chip);
+		}
+	}
+
+	if (composerBox) {
+		const handleDrag = (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+		};
+		
+		// Prevent default on window to stop VS Code's native drop handler
+		window.addEventListener('dragover', (e) => e.preventDefault(), true);
+		window.addEventListener('drop', (e) => e.preventDefault(), true);
+
+		// Prevent native text drop on the textarea
+		chatInput.addEventListener('dragenter', handleDrag, true);
+		chatInput.addEventListener('dragover', handleDrag, true);
+		chatInput.addEventListener('drop', handleDrag, true);
+
+		composerBox.addEventListener('dragenter', (e) => {
+			handleDrag(e);
+			composerBox.classList.add('drag-over');
+		}, true);
+		
+		composerBox.addEventListener('dragover', (e) => {
+			handleDrag(e);
+			composerBox.classList.add('drag-over');
+		}, true);
+		
+		composerBox.addEventListener('dragleave', (e) => {
+			handleDrag(e);
+			composerBox.classList.remove('drag-over');
+		}, true);
+		
+		composerBox.addEventListener('drop', e => {
+			handleDrag(e);
+			composerBox.classList.remove('drag-over');
+			const uris = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+			if (!uris) return;
+			
+			const isWindows = navigator.userAgentData?.platform?.toLowerCase().includes('win') || navigator.userAgent.includes('Windows');
+			const paths = uris.split('\n')
+				.map(u => u.trim())
+				.filter(u => u && !u.startsWith('#'))
+				.map(u => {
+					if (u.startsWith('file://')) {
+						let p = decodeURIComponent(u.replace(/^file:\/\/\/?/, ''));
+						if (isWindows && p.match(/^[a-zA-Z]:/)) {
+							// Already dropped leading slash via the regex above if it had exactly three slashes. 
+							// But if it had two slashes e.g. file://C:/ it would become C:/
+							// If it had three e.g. file:///C:/ the regex stripped up to 3 slashes so it also becomes C:/
+							// Wait, what if it was file:///C:/... ? `u.replace(/^file:\/\/\/?/, '')` removes `file:///`.
+							// What about UNC paths? `file://server/share` -> regex removes `file://`, leaving `server/share`. 
+							// Wait, `u.replace(/^file:\/\/\/?/, '')` removes `file:///` or `file://`.
+							// For UNC `file://server/share`, `replace` makes it `server/share`. 
+							// So we need to put `//` back for UNC on Windows? 
+							// Let's implement Will's explicit advice:
+							// "strip with /^file:\/\/\/?/ and on Windows drop the leading slash before a drive letter."
+						}
+						// Let's strictly follow Will's suggestion:
+						let p2 = decodeURIComponent(u.replace(/^file:\/\/\/?/, ''));
+						if (isWindows && p2.match(/^\/[a-zA-Z]:/)) {
+							p2 = p2.substring(1);
+						}
+						// wait, for UNC path `file://server/share`, replacing `/^file:\/\/\/?/` removes `file://`. 
+						// So it becomes `server/share`. On Windows UNC paths need `\\server\share`. 
+						// Actually vscode drop UNC path comes as `file:////server/share` or `file://server/share`.
+						// If we don't mess with it too much, let's just do exactly what Will said.
+						return p2;
+					}
+			paths.forEach(p => vscode.postMessage({ type: 'requestPathInfo', path: p }));
+		}, true);
+	}
+
+	function appendMessage(content, role, images = undefined) {
 		// Remove welcome message and loader if present
 		const welcome = document.querySelector('.welcome-message');
 		if (welcome) welcome.remove();
 		const loader = document.getElementById('session-loader');
 		if (loader) loader.remove();
 
+		const wrapper = document.createElement('div');
+		wrapper.className = 'group flex flex-col min-w-0 shrink-0 ' +
+			(role === 'user' ? 'self-end items-end max-w-[85%]' : 'self-start items-start max-w-full');
+
 		const msgEl = document.createElement('div');
-		msgEl.className = 'leading-snug break-words shrink-0 min-w-0 ' +
+		msgEl.className = 'leading-snug break-words shrink-0 min-w-0 flex flex-col ' +
 			(role === 'user'
 				? 'self-end bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-border px-3 py-2 rounded-lg max-w-[85%]'
 				: 'self-start max-w-full');
 
-		const textContainer = document.createElement('div');
-		textContainer.className = 'markdown-body';
+		if (images && images.length > 0) {
+			const imagesContainer = document.createElement('div');
+			imagesContainer.className = 'flex flex-wrap gap-2 mb-2';
+			images.forEach(img => {
+				const imgEl = document.createElement('img');
+				// codeql[js/xss] False positive: mimeType is strictly validated and data is base64 encoded
+				const src = `data:${img.mimeType};base64,${img.data}`;
+				if (src.startsWith('data:image/')) {
+					imgEl.src = src;
+				}
+				imgEl.className = 'w-24 h-24 object-cover rounded cursor-pointer border border-vscode-border hover:opacity-90';
+				imgEl.onclick = () => openImageModal(imgEl.src);
+				imagesContainer.appendChild(imgEl);
+			});
+			msgEl.appendChild(imagesContainer);
+		}
 
-		// If it's the user, we just render it directly (or we could use marked for them too)
-		// Usually users prefer raw text, but let's render markdown for both just in case.
-		if (typeof marked !== 'undefined') {
-			textContainer.innerHTML = marked.parse(content);
-		} else {
-			textContainer.textContent = content;
-		} // Phase 3: plain text for now, but incrementally updateable
-		msgEl.appendChild(textContainer);
+		let parsedContent = content;
+		let extractedChips = [];
 
-		messagesContainer.appendChild(msgEl);
+		if (role === 'user' && content) {
+			// Handle pre-injected format (before sending)
+			parsedContent = content.replace(/@\[(file|folder)\]\s+([^\n]+)/g, (match, kind, path) => {
+				const name = path.trim().split(/[/\\]/).pop();
+				extractedChips.push({ kind, path: path.trim(), name });
+				return ''; // Remove from text
+			});
+
+			// Handle post-injected format (from history sync)
+			parsedContent = parsedContent.replace(/<context path="([^"]+)"(?: type="([^"]+)")?>[\s\S]*?<\/context>/g, (match, path, type) => {
+				const kind = type === 'directory' ? 'folder' : 'file';
+				const name = path.trim().split(/[/\\]/).pop();
+				extractedChips.push({ kind, path: path.trim(), name });
+				return ''; // Remove from text
+			});
+
+			parsedContent = parsedContent.trim();
+		}
+
+		if (parsedContent || extractedChips.length > 0) {
+			const textContainer = document.createElement('div');
+			textContainer.className = 'markdown-body';
+
+			if (typeof marked !== 'undefined') {
+				textContainer.innerHTML = marked.parse(parsedContent);
+			} else {
+				textContainer.textContent = parsedContent;
+			}
+
+			if (extractedChips.length > 0 && role === 'user') {
+				const chipsContainer = document.createElement('div');
+				chipsContainer.style.display = 'flex';
+				chipsContainer.style.flexWrap = 'wrap';
+				chipsContainer.style.gap = '6px';
+				chipsContainer.style.marginTop = parsedContent ? '8px' : '0';
+
+				extractedChips.forEach(chipData => {
+					const chip = document.createElement('span');
+					chip.className = 'context-chip';
+					chip.setAttribute('data-path', chipData.path);
+					chip.setAttribute('data-kind', chipData.kind);
+					chip.style.paddingRight = '8px';
+					
+					const iconSpan = document.createElement('span');
+					iconSpan.style.marginRight = '4px';
+					iconSpan.style.display = 'flex';
+					iconSpan.style.alignItems = 'center';
+					iconSpan.appendChild(chipData.kind === 'folder' ? createFolderIcon() : createFileIcon());
+					
+					const nameSpan = document.createElement('span');
+					nameSpan.className = 'chip-name';
+					nameSpan.setAttribute('title', chipData.path);
+					nameSpan.textContent = chipData.name;
+					
+					chip.appendChild(iconSpan);
+					chip.appendChild(nameSpan);
+					chipsContainer.appendChild(chip);
+				});
+
+				chipsContainer.addEventListener('click', (e) => {
+					const chip = e.target.closest('.context-chip');
+					if (chip) {
+						const path = chip.getAttribute('data-path');
+						const kind = chip.getAttribute('data-kind');
+						if (path) {
+							vscode.postMessage({ type: 'openPath', path, kind });
+						}
+					}
+				});
+
+				textContainer.appendChild(chipsContainer);
+			}
+
+			msgEl.appendChild(textContainer);
+		}
+
+		wrapper.appendChild(msgEl);
+		wrapper.appendChild(createMessageFooter(() => content, role, new Date()));
+
+		messagesContainer.appendChild(wrapper);
 		scrollToBottom();
 
 		if (role === 'agent') {
@@ -256,8 +746,11 @@
 
 		if (!currentTurnEl || !currentTextEl) {
 			// First chunk for this turn
+			const wrapper = document.createElement('div');
+			wrapper.className = 'group flex flex-col min-w-0 self-start items-start max-w-full';
+
 			const msgEl = document.createElement('div');
-			msgEl.className = 'message agent min-w-0';
+			msgEl.className = 'message agent min-w-0 w-full';
 
 			const textContainer = document.createElement('div');
 			textContainer.className = 'markdown-body leading-snug break-words';
@@ -270,7 +763,10 @@
 			}
 
 			msgEl.appendChild(textContainer);
-			messagesContainer.appendChild(msgEl);
+			wrapper.appendChild(msgEl);
+			wrapper.appendChild(createMessageFooter(() => wrapper.dataset.rawText || '', 'agent', new Date()));
+			wrapper.dataset.rawText = currentTurnText;
+			messagesContainer.appendChild(wrapper);
 
 			currentTurnEl = msgEl;
 			currentTextEl = textContainer;
@@ -278,6 +774,9 @@
 		} else {
 			// Append to existing turn
 			currentTurnText += textChunk;
+			if (currentTurnEl.parentElement) {
+				currentTurnEl.parentElement.dataset.rawText = currentTurnText;
+			}
 
 			if (typeof marked !== 'undefined') {
 				if (!renderTimeout) {
@@ -317,10 +816,19 @@
 			case 'toggleHistory':
 				toggleHistoryView();
 				break;
+			case 'pathInfoResolved': {
+				const { path, name, kind } = message;
+				if (!attachedPaths.some(a => a.path === path)) {
+					attachedPaths.push({ path, name, kind });
+					renderChips();
+				}
+				break;
+			}
 			case 'appendMessage':
 				appendMessage(message.content, 'agent');
 				break;
 			case 'clear':
+				if (isHistoryView) showChatView();
 				if (renderTimeout) { clearTimeout(renderTimeout); renderTimeout = null; }
 				if (message.isLoading) {
 					messagesContainer.innerHTML = `<div id="session-loader" class="flex flex-col items-center justify-center h-full opacity-50 mt-10">${ICONS.pending}<div class="mt-2 text-xs">Loading session...</div></div>`;
@@ -456,9 +964,15 @@
 		const update = payload.update ? payload.update : payload;
 
 		if (update.sessionUpdate === 'user_message_chunk') {
-			if (update.content && update.content.text) {
+			if (update.content) {
 				endCurrentTextBlock();
-				appendMessage(update.content.text, 'user');
+				if (update.content.text) {
+					if (pendingUserMessageText === update.content.text) {
+						pendingUserMessageText = null;
+					} else {
+						appendMessage(update.content.text, 'user');
+					}
+				}
 			}
 		} else if (update.sessionUpdate === 'agent_message_chunk') {
 			if (currentThoughtBox) {

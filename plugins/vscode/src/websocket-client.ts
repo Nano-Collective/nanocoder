@@ -6,7 +6,7 @@ import {
 	PROTOCOL_VERSION,
 	DEFAULT_PORT,
 } from './protocol';
-import { TIMEOUT_PROVIDER_CONNECTION_MS } from '../../../source/constants';
+import {TIMEOUT_PROVIDER_CONNECTION_MS} from '../../../source/constants';
 
 export type MessageHandler = (message: ServerMessage) => void;
 
