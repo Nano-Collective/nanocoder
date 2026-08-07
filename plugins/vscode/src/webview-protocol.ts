@@ -106,6 +106,13 @@ export interface ExtensionMessageToggleSettings {
 	type: 'toggleSettings';
 }
 
+export interface ExtensionMessagePathInfoResolved {
+	type: 'pathInfoResolved';
+	path: string;
+	name: string;
+	kind: 'file' | 'folder';
+}
+
 export type ExtensionToWebviewMessage =
 	| ExtensionMessageAppendMessage
 	| ExtensionMessageAppendThought
@@ -121,7 +128,8 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageSessionLoaded
 	| ExtensionMessageSettingsData
 	| ExtensionMessageSettingsUpdated
-	| ExtensionMessageToggleSettings;
+	| ExtensionMessageToggleSettings
+	| ExtensionMessagePathInfoResolved;
 
 
 // ---------------------------------------------------------
@@ -135,6 +143,7 @@ export interface WebviewMessageReady {
 export interface WebviewMessageSubmitMessage {
 	type: 'submitMessage';
 	text: string;
+	images?: { data: string; mimeType: string }[];
 }
 
 export interface WebviewMessageCancel {
@@ -212,6 +221,26 @@ export interface WebviewMessageRestartAcp {
 	type: 'restartAcp';
 }
 
+export interface WebviewMessageRequestPathInfo {
+	type: 'requestPathInfo';
+	path: string;
+}
+
+export interface WebviewMessageRequestOpenDialog {
+	type: 'requestOpenDialog';
+}
+
+export interface WebviewMessageOpenPath {
+	type: 'openPath';
+	path: string;
+	kind: 'file' | 'folder';
+}
+
+export interface WebviewMessageShowError {
+	type: 'showError';
+	message: string;
+}
+
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
 	| WebviewMessageSubmitMessage
@@ -229,4 +258,8 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageRequestSettings
 	| WebviewMessageUpdateSetting
 	| WebviewMessageOpenConfigFile
-	| WebviewMessageRestartAcp;
+	| WebviewMessageRestartAcp
+	| WebviewMessageRequestPathInfo
+	| WebviewMessageRequestOpenDialog
+	| WebviewMessageOpenPath
+	| WebviewMessageShowError;
