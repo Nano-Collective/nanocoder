@@ -81,6 +81,31 @@ export interface ExtensionMessageUpdateSessions {
 	}>;
 }
 
+export interface ExtensionMessageSettingsData {
+	type: 'settingsData';
+	settings: {
+		providers: Array<{ name: string; baseUrl?: string; models: string[]; apiKeySet: boolean }>;
+		mcpServers: Array<{ name: string; transport: string; command?: string; url?: string }>;
+		alwaysAllow: string[];
+		defaultMode: string | null;
+		autoCompact: { enabled: boolean; threshold: number; mode: string };
+		reasoningTraces: boolean;
+		sessions: { autoSave: boolean };
+		webSearch: { configured: boolean };
+	};
+}
+
+export interface ExtensionMessageSettingsUpdated {
+	type: 'settingsUpdated';
+	key: string;
+	success: boolean;
+	error?: string;
+}
+
+export interface ExtensionMessageToggleSettings {
+	type: 'toggleSettings';
+}
+
 export type ExtensionToWebviewMessage =
 	| ExtensionMessageAppendMessage
 	| ExtensionMessageAppendThought
@@ -93,7 +118,10 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessagePermissionRequested
 	| ExtensionMessageSyncState
 	| ExtensionMessageUpdateSessions
-	| ExtensionMessageSessionLoaded;
+	| ExtensionMessageSessionLoaded
+	| ExtensionMessageSettingsData
+	| ExtensionMessageSettingsUpdated
+	| ExtensionMessageToggleSettings;
 
 
 // ---------------------------------------------------------
@@ -165,6 +193,25 @@ export interface WebviewMessageDeleteSession {
 	sessionId: string;
 }
 
+export interface WebviewMessageRequestSettings {
+	type: 'requestSettings';
+}
+
+export interface WebviewMessageUpdateSetting {
+	type: 'updateSetting';
+	key: string;
+	value: unknown;
+}
+
+export interface WebviewMessageOpenConfigFile {
+	type: 'openConfigFile';
+	file: 'agents.config.json' | 'nanocoder-preferences.json';
+}
+
+export interface WebviewMessageRestartAcp {
+	type: 'restartAcp';
+}
+
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
 	| WebviewMessageSubmitMessage
@@ -178,4 +225,8 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageSetProvider
 	| WebviewMessageListSessions
 	| WebviewMessageResumeSession
-	| WebviewMessageDeleteSession;
+	| WebviewMessageDeleteSession
+	| WebviewMessageRequestSettings
+	| WebviewMessageUpdateSetting
+	| WebviewMessageOpenConfigFile
+	| WebviewMessageRestartAcp;

@@ -5,6 +5,7 @@ import * as path from 'path';
 
 import { NanocoderAcpClient } from './acp-client';
 import { DiffManager } from './diff-manager';
+import { SettingsManager } from './settings-manager';
 
 export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'nanocoder.chatView';
@@ -12,12 +13,15 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 	private _view?: vscode.WebviewView;
 	private _isWebviewReady = false;
 
+	private readonly _settingsManager: SettingsManager;
+
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
 		private readonly _outputChannel: vscode.OutputChannel,
 		private readonly _acpClient: NanocoderAcpClient,
 		private readonly _diffManager: DiffManager
-	) { 
+	) {
+		this._settingsManager = new SettingsManager(_outputChannel); 
 		// Listen for session updates from ACP
 		this._acpClient.onSessionUpdate = (update: any) => {
 			this.handleDiffs(update);
@@ -71,6 +75,12 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 	public toggleHistory() {
 		if (this._view) {
 			this._view.webview.postMessage({ type: 'toggleHistory' });
+		}
+	}
+
+	public toggleSettings() {
+		if (this._view) {
+			this._view.webview.postMessage({ type: 'toggleSettings' });
 		}
 	}
 
@@ -160,6 +170,23 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 							this._broadcastSessions();
 						});
 						break;
+
+					case 'requestSettings':
+						this._outputChannel.appendLine('[Webview] Settings data requested.');
+						this._handleRequestSettings();
+						break;
+					case 'updateSetting':
+						this._outputChannel.appendLine(`[Webview] Update setting: ${message.key}`);
+						this._handleUpdateSetting(message.key, message.value);
+						break;
+					case 'openConfigFile':
+						this._outputChannel.appendLine(`[Webview] Open config file: ${message.file}`);
+						this._handleOpenConfigFile(message.file);
+						break;
+					case 'restartAcp':
+						this._outputChannel.appendLine('[Webview] Restart ACP requested.');
+						vscode.commands.executeCommand('nanocoder.restartAcp');
+						break;
 				}
 			}
 		);
@@ -192,6 +219,37 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 	private async _broadcastSessions() {
 		const sessions = await this._acpClient.listSessions();
 		this.postMessage({type: 'updateSessions', sessions});
+	}
+
+	private _handleRequestSettings() {
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		const settings = this._settingsManager.readSettings(cwd);
+		this.postMessage({ type: 'settingsData', settings });
+	}
+
+	private _handleUpdateSetting(key: string, value: unknown) {
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		const result = this._settingsManager.updateSetting(cwd, key, value);
+		this.postMessage({ type: 'settingsUpdated', key, success: result.success, error: result.error });
+
+		// If successful, send refreshed settings so the UI stays in sync
+		if (result.success) {
+			const settings = this._settingsManager.readSettings(cwd);
+			this.postMessage({ type: 'settingsData', settings });
+		}
+	}
+
+	private async _handleOpenConfigFile(file: string) {
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		const paths = this._settingsManager.getConfigPaths(cwd);
+		const filePath = file === 'agents.config.json' ? paths.agentsConfig : paths.preferences;
+
+		try {
+			const doc = await vscode.workspace.openTextDocument(filePath);
+			await vscode.window.showTextDocument(doc);
+		} catch (err) {
+			vscode.window.showErrorMessage(`Could not open ${file} at ${filePath}. Ensure the file exists.`);
+		}
 	}
 
 	private async _handlePrompt(text: string) {

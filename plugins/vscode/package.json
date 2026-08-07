@@ -81,6 +81,12 @@
 				"title": "New Chat",
 				"category": "Nanocoder",
 				"icon": "$(add)"
+			},
+			{
+				"command": "nanocoder.toggleSettings",
+				"title": "Settings",
+				"category": "Nanocoder",
+				"icon": "$(gear)"
 			}
 		],
 		"menus": {
@@ -94,6 +100,11 @@
 					"command": "nanocoder.toggleHistory",
 					"when": "view == nanocoder.chatView",
 					"group": "navigation@2"
+				},
+				{
+					"command": "nanocoder.toggleSettings",
+					"when": "view == nanocoder.chatView",
+					"group": "navigation@3"
 				}
 			]
 		},

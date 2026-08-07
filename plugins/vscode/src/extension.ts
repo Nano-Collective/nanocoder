@@ -62,10 +62,13 @@ export function activate(context: vscode.ExtensionContext) {
 		})
 	);
 
-	// Register Title Bar Action
+	// Register Title Bar Actions
 	context.subscriptions.push(
 		vscode.commands.registerCommand('nanocoder.toggleHistory', () => {
 			chatProvider.toggleHistory();
+		}),
+		vscode.commands.registerCommand('nanocoder.toggleSettings', () => {
+			chatProvider.toggleSettings();
 		})
 	);
 

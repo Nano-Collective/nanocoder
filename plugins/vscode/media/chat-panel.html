@@ -26,6 +26,160 @@
 			<div id="history-list" class="flex-1 overflow-y-auto py-1.5"></div>
 		</div>
 
+		<div id="settings-view" class="flex flex-col flex-1 overflow-hidden hidden">
+			<!-- Settings Header -->
+			<div class="flex items-center gap-2 pt-2.5 pb-1.5 px-4 border-b border-vscode-border shrink-0">
+				<button id="settings-back-btn" class="flex items-center justify-center bg-transparent border-none cursor-pointer text-vscode-fg opacity-70 hover:opacity-100 p-0.5 rounded hover:bg-vscode-toolbarHover" title="Back to chat">
+					<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+				</button>
+				<span class="font-semibold text-[0.9em] uppercase tracking-[0.04em] opacity-70">Settings</span>
+			</div>
+
+			<!-- Settings Tabs -->
+			<div class="flex gap-0 border-b border-vscode-border shrink-0 px-2">
+				<button class="settings-tab active" data-tab="providers">Providers</button>
+				<button class="settings-tab" data-tab="behavior">Behavior</button>
+				<button class="settings-tab" data-tab="advanced">Advanced</button>
+			</div>
+
+			<!-- Settings Content -->
+			<div id="settings-content" class="flex-1 overflow-y-auto py-3 px-4">
+				<!-- Providers Tab -->
+				<div id="settings-tab-providers" class="settings-tab-content flex flex-col gap-3">
+					<div class="settings-section">
+						<div class="settings-section-title">AI Providers</div>
+						<div id="settings-providers-list" class="settings-list"></div>
+						<button class="settings-action-btn mt-2" data-action="edit-providers">
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+							Edit in config file
+						</button>
+					</div>
+
+					<div class="settings-section">
+						<div class="settings-section-title">MCP Servers</div>
+						<div id="settings-mcp-list" class="settings-list"></div>
+						<button class="settings-action-btn mt-2" data-action="edit-mcp">
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+							Edit in config file
+						</button>
+					</div>
+
+					<div class="settings-section">
+						<div class="settings-section-title">Tool Auto-Approval</div>
+						<div id="settings-tools-list" class="settings-list"></div>
+						<button class="settings-action-btn mt-2" data-action="edit-tools">
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+							Edit in config file
+						</button>
+					</div>
+
+					<div class="settings-section">
+						<div class="settings-section-title">Web Search</div>
+						<div id="settings-websearch-status" class="settings-list"></div>
+					</div>
+				</div>
+
+				<!-- Behavior Tab -->
+				<div id="settings-tab-behavior" class="settings-tab-content hidden flex flex-col gap-3">
+					<div class="settings-section">
+						<div class="settings-row">
+							<div class="settings-row-info">
+								<span class="settings-row-label">Default Mode</span>
+								<span class="settings-row-desc">The operating mode for new sessions</span>
+							</div>
+							<select id="setting-defaultMode" class="settings-select">
+								<option value="normal">Normal</option>
+								<option value="auto-accept">Auto-Accept</option>
+								<option value="chat">Chat</option>
+							</select>
+						</div>
+					</div>
+
+					<div class="settings-section">
+						<div class="settings-section-title">Auto-Compact</div>
+						<div class="settings-row">
+							<div class="settings-row-info">
+								<span class="settings-row-label">Enabled</span>
+								<span class="settings-row-desc">Automatically compact conversation context</span>
+							</div>
+							<label class="settings-toggle">
+								<input type="checkbox" id="setting-autoCompact-enabled">
+								<span class="settings-toggle-slider"></span>
+							</label>
+						</div>
+						<div class="settings-row">
+							<div class="settings-row-info">
+								<span class="settings-row-label">Threshold</span>
+								<span class="settings-row-desc">Context usage % to trigger compaction (50–95)</span>
+							</div>
+							<input type="number" id="setting-autoCompact-threshold" class="settings-number-input" min="50" max="95" step="5">
+						</div>
+						<div class="settings-row">
+							<div class="settings-row-info">
+								<span class="settings-row-label">Mode</span>
+								<span class="settings-row-desc">Compaction aggressiveness</span>
+							</div>
+							<select id="setting-autoCompact-mode" class="settings-select">
+								<option value="conservative">Conservative</option>
+								<option value="default">Default</option>
+								<option value="aggressive">Aggressive</option>
+							</select>
+						</div>
+					</div>
+
+					<div class="settings-section">
+						<div class="settings-row">
+							<div class="settings-row-info">
+								<span class="settings-row-label">Reasoning Traces</span>
+								<span class="settings-row-desc">Expand model reasoning traces by default</span>
+							</div>
+							<label class="settings-toggle">
+								<input type="checkbox" id="setting-reasoningTraces">
+								<span class="settings-toggle-slider"></span>
+							</label>
+						</div>
+					</div>
+
+					<div class="settings-section">
+						<div class="settings-row">
+							<div class="settings-row-info">
+								<span class="settings-row-label">Session Auto-Save</span>
+								<span class="settings-row-desc">Automatically save session history</span>
+							</div>
+							<label class="settings-toggle">
+								<input type="checkbox" id="setting-sessions-autoSave">
+								<span class="settings-toggle-slider"></span>
+							</label>
+						</div>
+					</div>
+				</div>
+
+				<!-- Advanced Tab -->
+				<div id="settings-tab-advanced" class="settings-tab-content hidden flex flex-col gap-3">
+					<div class="settings-section">
+						<div class="settings-section-title">Configuration Files</div>
+						<button class="settings-action-btn w-full" data-action="open-agents-config">
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
+							Open agents.config.json
+						</button>
+						<button class="settings-action-btn w-full mt-1.5" data-action="open-preferences">
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
+							Open nanocoder-preferences.json
+						</button>
+					</div>
+
+					<div class="settings-section">
+						<div class="settings-section-title">Engine</div>
+						<button class="settings-action-btn w-full settings-action-btn-danger" data-action="restart-acp">
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+							Restart ACP Engine
+						</button>
+						<div class="text-xs opacity-50 mt-1">Applies config file changes to the running engine</div>
+					</div>
+				</div>
+			</div>
+		</div>
+
 		<div class="p-4 pt-2 bg-vscode-bg shrink-0">
 			<div class="flex flex-col bg-vscode-input-bg border border-vscode-input-border rounded-2xl focus-within:border-vscode-input-focus transition-colors shadow-sm relative">
 				<textarea id="chat-input" rows="1" placeholder="Ask Nanocoder anything..." class="w-full min-h-[44px] max-h-[250px] p-3 px-4 pb-2 bg-transparent text-vscode-input-fg font-vscode text-[0.95em] resize-none outline-none border-none"></textarea>
