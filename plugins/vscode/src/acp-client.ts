@@ -275,16 +275,22 @@ export class NanocoderAcpClient {
 		this._sessionId = undefined;
 	}
 
-	async prompt(text: string): Promise<void> {
-		if (!this.connection || !this._sessionId) return;
+	/**
+	 * Send a prompt and return the agent's PromptResponse (carries the
+	 * experimental per-turn `usage` field plus `_meta` extensions such as
+	 * the estimated cost). Returns undefined on failure.
+	 */
+	async prompt(text: string): Promise<unknown> {
+		if (!this.connection || !this._sessionId) return undefined;
 		try {
-			await this.connection.prompt({
+			return await this.connection.prompt({
 				sessionId: this._sessionId,
 				prompt: [{ type: 'text', text }]
 			});
 		} catch (error) {
 			this.outputChannel.appendLine(`Prompt failed: ${error}`);
 			vscode.window.showErrorMessage(`Nanocoder prompt failed: ${error}`);
+			return undefined;
 		}
 	}
 

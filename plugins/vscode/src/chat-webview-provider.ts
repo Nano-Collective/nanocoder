@@ -227,9 +227,20 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				}
 			});
 
-			await this._acpClient.prompt(text);
-			// Signal turn completion so the Webview can flip back to the send button
-			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}});
+			const response = (await this._acpClient.prompt(text)) as
+				| {usage?: unknown; _meta?: Record<string, any>}
+				| undefined;
+			// Signal turn completion so the Webview can flip back to the send
+			// button. Forward the per-turn token usage and estimated cost so
+			// the webview can render the usage indicator under the response.
+			this.postMessage({
+				type: 'acpUpdate',
+				update: {
+					sessionUpdate: 'prompt_response',
+					usage: response?.usage,
+					cost: response?._meta?.['nanocoder/usage']?.cost,
+				},
+			});
 		} catch (error) {
 			this._outputChannel.appendLine(`Prompt execution error: ${error}`);
 			vscode.window.showErrorMessage(`Nanocoder Prompt error: ${error}`);

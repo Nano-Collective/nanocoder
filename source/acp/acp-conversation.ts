@@ -17,6 +17,7 @@ import {parseToolCalls} from '@/tool-calling/index';
 import {resolveToolApproval} from '@/tools/approval-policy';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
+	ApiUsage,
 	DevelopmentMode,
 	LLMClient,
 	Message,
@@ -25,6 +26,7 @@ import type {
 	ToolCall,
 	ToolResult,
 } from '@/types/core';
+import {buildResponseUsage} from '@/usage/response-usage';
 import {capMessagesForModel} from '@/utils/message-capping';
 import {toOptionString} from '@/utils/type-helpers';
 
@@ -52,13 +54,56 @@ export async function runAcpConversation(
 
 	let messages = session.messages;
 
+	// Provider-reported usage accumulated across this prompt's model calls,
+	// returned on the PromptResponse (experimental ACP `usage` field) so
+	// clients like the VS Code extension can show a per-response indicator.
+	const turnUsage = {inputTokens: 0, outputTokens: 0, totalTokens: 0};
+	let usageReported = false;
+
+	const recordUsage = (usage: ApiUsage | undefined) => {
+		if (!usage) return;
+		const input = Number.isFinite(usage.inputTokens)
+			? (usage.inputTokens as number)
+			: 0;
+		const output = Number.isFinite(usage.outputTokens)
+			? (usage.outputTokens as number)
+			: 0;
+		const total = Number.isFinite(usage.totalTokens)
+			? (usage.totalTokens as number)
+			: input + output;
+		if (input === 0 && output === 0 && total === 0) return;
+		turnUsage.inputTokens += input;
+		turnUsage.outputTokens += output;
+		turnUsage.totalTokens += total;
+		usageReported = true;
+	};
+
+	// Attach accumulated usage (and best-effort estimated cost via _meta) to
+	// a turn-ending response. A no-op when no model call reported usage.
+	const withTurnUsage = async (
+		response: PromptResponse,
+	): Promise<PromptResponse> => {
+		if (!usageReported) return response;
+		const priced = await buildResponseUsage(
+			turnUsage,
+			client.getCurrentModel(),
+		);
+		return {
+			...response,
+			usage: {...turnUsage},
+			...(priced?.cost != null
+				? {_meta: {'nanocoder/usage': {cost: priced.cost}}}
+				: {}),
+		};
+	};
+
 	const maxTurns =
 		getAppConfig().headless?.maxTurns ?? DEFAULT_HEADLESS_MAX_TURNS;
 
 	for (let turn = 0; turn < maxTurns; turn++) {
 		if (abortController.signal.aborted) {
 			session.messages = messages;
-			return {stopReason: 'cancelled'};
+			return withTurnUsage({stopReason: 'cancelled'});
 		}
 
 		// On the final turn, force a tool-free wrap-up so we end with an answer
@@ -121,8 +166,10 @@ export async function runAcpConversation(
 			modeOverrides,
 		);
 
+		recordUsage(result?.usage);
+
 		if (!result || !result.choices || result.choices.length === 0) {
-			return {stopReason: 'end_turn'};
+			return withTurnUsage({stopReason: 'end_turn'});
 		}
 
 		const message = result.choices[0].message;
@@ -135,7 +182,7 @@ export async function runAcpConversation(
 				: {success: true as const, toolCalls: [], cleanedContent: fullContent};
 
 		if (!xmlParse.success) {
-			return {stopReason: 'end_turn'};
+			return withTurnUsage({stopReason: 'end_turn'});
 		}
 
 		const allToolCalls: ToolCall[] = [
@@ -179,7 +226,7 @@ export async function runAcpConversation(
 
 		if (validToolCalls.length === 0) {
 			session.messages = messages;
-			return {stopReason: 'end_turn'};
+			return withTurnUsage({stopReason: 'end_turn'});
 		}
 
 		// Process tool calls
@@ -248,7 +295,7 @@ export async function runAcpConversation(
 						'Cancelled by user',
 					);
 					session.messages = [...messages, ...toolResults];
-					return {stopReason: 'cancelled'};
+					return withTurnUsage({stopReason: 'cancelled'});
 				}
 
 				if (permission === 'denied') {
@@ -350,12 +397,12 @@ export async function runAcpConversation(
 		// another LLM request before the top-of-turn abort check runs.
 		if (abortController.signal.aborted) {
 			session.messages = messages;
-			return {stopReason: 'cancelled'};
+			return withTurnUsage({stopReason: 'cancelled'});
 		}
 	}
 
 	session.messages = messages;
-	return {stopReason: 'max_turn_requests'};
+	return withTurnUsage({stopReason: 'max_turn_requests'});
 }
 
 /**
