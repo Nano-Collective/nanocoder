@@ -47,18 +47,10 @@ const executeWriteFile = async (args: {
 
 	// Read back to verify and show actual content
 	const actualContent = await readFile(absPath, 'utf-8');
-	const lines = actualContent.split('\n');
-	const lineCount = lines.length;
+	const fileContext = `\n\nFile contents after write:\n${actualContent}`;
+	const lineCount = actualContent.split('\n').length;
 	const charCount = actualContent.length;
 	const estimatedTokens = calculateTokens(actualContent);
-
-	// Generate full file contents to show the model the current file state
-	let fileContext = '\n\nFile contents after write:\n';
-	for (let i = 0; i < lines.length; i++) {
-		const lineNumStr = String(i + 1).padStart(4, ' ');
-		const line = lines[i] || '';
-		fileContext += `${lineNumStr}: ${line}\n`;
-	}
 
 	const action = fileExists ? 'overwritten' : 'written';
 	return `File ${action} successfully (${lineCount} lines, ${charCount} characters, ~${estimatedTokens} tokens).${fileContext}`;
