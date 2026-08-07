@@ -168,54 +168,11 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 							this._broadcastSessions();
 						});
 						break;
-					case 'requestPathInfo': {
-						try {
-							const stat = fs.statSync(message.path);
-							const kind = stat.isDirectory() ? 'folder' : 'file';
-							const name = path.basename(message.path);
-							this.postMessage({ type: 'pathInfoResolved', path: message.path, name, kind });
-						} catch {
-							// path doesn't exist or access denied — silently ignore
-						}
-						break;
-					}
-					case 'requestOpenDialog': {
-						vscode.window.showOpenDialog({
-							canSelectFiles: true,
-							canSelectFolders: true,
-							canSelectMany: true,
-							openLabel: 'Attach'
-						}).then(uris => {
-							if (uris && uris.length > 0) {
-								uris.forEach(uri => {
-									try {
-										const stat = fs.statSync(uri.fsPath);
-										const kind = stat.isDirectory() ? 'folder' : 'file';
-										const name = path.basename(uri.fsPath);
-										this.postMessage({ type: 'pathInfoResolved', path: uri.fsPath, name, kind });
-									} catch {}
-								});
-							}
+					case 'renameSession':
+						this._outputChannel.appendLine(`[Webview] User renamed session: ${message.sessionId} -> ${message.title}`);
+						this._acpClient.renameSession(message.sessionId, message.title).then(() => {
+							this._broadcastSessions();
 						});
-						break;
-					}
-					case 'openPath': {
-						const uri = vscode.Uri.file(message.path);
-						if (message.kind === 'folder') {
-							// Reveal and focus folder in Explorer sidebar
-							vscode.commands.executeCommand('revealInExplorer', uri);
-						} else {
-							// Open file in editor
-							vscode.window.showTextDocument(uri, { preview: false, preserveFocus: false });
-						}
-						break;
-					}
-					case 'showError':
-						this._outputChannel.appendLine(`[Webview] Error: ${message.message}`);
-						vscode.window.showErrorMessage(message.message);
-						break;
-					case 'copyToClipboard':
-						this._copyToClipboard(message.text);
 						break;
 				}
 			}

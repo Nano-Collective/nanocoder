@@ -89,6 +89,7 @@ export interface ExtensionMessageUpdateSessions {
 		sessionId: string;
 		cwd: string;
 		title?: string | null;
+		updatedAt?: string | null;
 	}>;
 }
 
@@ -187,29 +188,10 @@ export interface WebviewMessageDeleteSession {
 	sessionId: string;
 }
 
-export interface WebviewMessageRequestPathInfo {
-	type: 'requestPathInfo';
-	path: string;
-}
-
-export interface WebviewMessageRequestOpenDialog {
-	type: 'requestOpenDialog';
-}
-
-export interface WebviewMessageOpenPath {
-	type: 'openPath';
-	path: string;
-	kind: 'file' | 'folder';
-}
-
-export interface WebviewMessageShowError {
-	type: 'showError';
-	message: string;
-}
-
-export interface WebviewMessageCopyToClipboard {
-	type: 'copyToClipboard';
-	text: string;
+export interface WebviewMessageRenameSession {
+	type: 'renameSession';
+	sessionId: string;
+	title: string;
 }
 
 export type WebviewToExtensionMessage =
@@ -226,8 +208,4 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageListSessions
 	| WebviewMessageResumeSession
 	| WebviewMessageDeleteSession
-	| WebviewMessageRequestPathInfo
-	| WebviewMessageRequestOpenDialog
-	| WebviewMessageOpenPath
-	| WebviewMessageShowError
-	| WebviewMessageCopyToClipboard;
+	| WebviewMessageRenameSession;

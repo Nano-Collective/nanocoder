@@ -150,7 +150,11 @@ export function useSessionAutosave({
 						// Write the full history — no truncation.
 						session.messages = capturedMessages;
 						session.messageCount = capturedMessages.length;
-						session.title = title;
+						// A manually-renamed title (VS Code extension or /rename in
+						// the CLI) sticks — don't let the auto-derived title clobber it.
+						if (!session.titleManuallySet) {
+							session.title = title;
+						}
 						session.provider = capturedProvider;
 						session.model = capturedModel;
 						// Don't set lastAccessedAt here — saveSession() handles
