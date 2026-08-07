@@ -123,6 +123,7 @@
 	let isProcessing = false;
 	let currentAggregator = null;
 	let currentThoughtBox = null;
+	let visualLoader = null;
 
 	// Premium SVG Icons (Feather Icons)
 	const ICONS = {
@@ -253,6 +254,7 @@
 
 		// Optimistically append user message 
 		appendMessage(text, 'user');
+		startVisualLoader();
 
 		if (!isProcessing) {
 			// Switch to processing state
@@ -305,12 +307,32 @@
 		}
 	}
 
+	function startVisualLoader() {
+		const wrapper = document.createElement('div');
+		wrapper.className = "group flex flex-row gap-1 min-w-0 shrink-0 self-start items-start max-w-full";
+		const delays = [-0.3, -0.15, 0.0];
+		for (let i = 0; i < 3; i++) {
+			const dot = document.createElement('div');
+			dot.className = `h-1 w-1 rounded-full bg-white animate-bounce`;
+			dot.style.animationTimingFunction = 'ease-in-out';
+			dot.style.animationDelay = `${delays[i]*5}s`
+			wrapper.appendChild(dot);
+		}
+		visualLoader = wrapper;
+		messagesContainer.appendChild(wrapper);
+		scrollToBottom();
+	}
+
 	function appendChunk(textChunk) {
 		// Remove welcome message and loader if present
 		const welcome = document.querySelector('.welcome-message');
 		if (welcome) welcome.remove();
 		const loader = document.getElementById('session-loader');
 		if (loader) loader.remove();
+		if (visualLoader) {
+			visualLoader.remove();
+			visualLoader = null;
+		}
 
 		if (!currentTurnEl || !currentTextEl) {
 			// First chunk for this turn
