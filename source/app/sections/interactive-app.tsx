@@ -90,10 +90,19 @@ export function InteractiveApp({
 	const [restoredDraft, setRestoredDraft] =
 		React.useState<RestoredInputDraft | null>(null);
 
+	// Load voice preferences reactively for useVoice
+	const [voicePref, setVoicePref] = React.useState(() => getVoicePreference());
+
+	// biome-ignore lint/correctness/useExhaustiveDependencies: Trigger preference re-read when commands execute
+	React.useEffect(() => {
+		setVoicePref(getVoicePreference());
+	}, [appState.chatComponents.length]);
+
 	const {state: voiceState, startStopRecording} = useVoice({
 		handleUserSubmit,
 		messages: appState.messages,
 		addToChatQueue: appState.addToChatQueue,
+		voicePreference: voicePref,
 	});
 
 	const handleToggleCompactDisplay = () => {
@@ -290,15 +299,6 @@ export function InteractiveApp({
 	const fullscreen = altScreenActive;
 	const terminalRows = useTerminalRows();
 	const {currentTheme} = useTheme();
-
-	// Load voice preferences once on mount and when messages change (e.g. after /voice command)
-	const [voicePref, setVoicePref] = React.useState(() => getVoicePreference());
-
-	// TEMPORARY: proxy-triggers voice pref re-read via chatComponents length. Will be replaced by real event-driven state updates once PR4 (hands-free VAD) introduces actual audio state events. Do not build further on this mechanism.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: Trigger preference re-read when commands execute
-	React.useEffect(() => {
-		setVoicePref(getVoicePreference());
-	}, [appState.chatComponents.length]);
 
 	return (
 		// Fullscreen layout on the alternate screen buffer: the root Box is
