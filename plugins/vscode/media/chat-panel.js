@@ -608,6 +608,9 @@
 						// If we don't mess with it too much, let's just do exactly what Will said.
 						return p2;
 					}
+					return u;
+				});
+
 			paths.forEach(p => vscode.postMessage({ type: 'requestPathInfo', path: p }));
 		}, true);
 	}
