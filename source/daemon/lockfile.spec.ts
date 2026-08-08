@@ -135,6 +135,23 @@ test('getSocketPath returns a project-local .sock file on non-Windows', t => {
 	t.is(sock, join(root, '.nanocoder', 'daemon.sock'));
 });
 
+test('getSocketPath on macOS uses project dir for short paths and temp dir for long paths', t => {
+	if (process.platform !== 'darwin') {
+		t.pass('skipped: macOS-only assertion');
+		return;
+	}
+	// Short path should use project-local socket
+	const shortRoot = '/tmp/short';
+	const shortSock = getSocketPath(shortRoot);
+	t.is(shortSock, join(shortRoot, '.nanocoder', 'daemon.sock'));
+	// Long path (>104 bytes) should use temp directory with hash
+	const longRoot = '/tmp/' + 'a'.repeat(200);
+	const longSock = getSocketPath(longRoot);
+	t.true(longSock.startsWith(tmpdir()));
+	t.regex(longSock, /nanocoder-daemon-[a-f0-9]{10}\.sock$/);
+	t.not(longSock, join(longRoot, '.nanocoder', 'daemon.sock'));
+});
+
 test('getSocketPath returns a named pipe path on Windows', t => {
 	if (process.platform !== 'win32') {
 		t.pass('skipped: Windows-only assertion');
