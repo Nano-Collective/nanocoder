@@ -2,17 +2,19 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { WebviewToExtensionMessage, ExtensionToWebviewMessage } from './webview-protocol';
-import * as fs from 'fs';
-import * as path from 'path';
 
 import { NanocoderAcpClient } from './acp-client';
 import { DiffManager } from './diff-manager';
+import {ArtifactController} from './artifact-controller';
+import {PlanReviewController} from './plan-review-controller';
 
 export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'nanocoder.chatView';
 
 	private _view?: vscode.WebviewView;
 	private _isWebviewReady = false;
+	private readonly _planReview = new PlanReviewController();
+	private readonly _artifacts = new ArtifactController();
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
@@ -22,11 +24,19 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 	) { 
 		// Listen for session updates from ACP
 		this._acpClient.onSessionUpdate = (update: any) => {
+			this._planReview.observeSessionUpdate(update);
+			this._artifacts.observeSessionUpdate(update);
+			this.postArtifacts();
 			this.handleDiffs(update);
 			this.postMessage({
 				type: 'acpUpdate',
 				update
 			});
+		};
+
+		this._acpClient.onSessionArtifacts = (meta: unknown) => {
+			this._artifacts.replaceFromMeta(meta);
+			this.postArtifacts();
 		};
 
 		this._acpClient.onPermissionRequested = (toolCallId: string, toolCall: any, options?: any[]) => {
@@ -74,6 +84,23 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		if (this._view) {
 			this._view.webview.postMessage({ type: 'toggleHistory' });
 		}
+	}
+
+	public resetPlanReview(): void {
+		this._planReview.reset();
+	}
+
+	public resetSessionState(): void {
+		this._planReview.reset();
+		this._artifacts.reset();
+		this.postArtifacts();
+	}
+
+	private postArtifacts(): void {
+		this.postMessage({
+			type: 'artifactsUpdated',
+			artifacts: this._artifacts.artifacts,
+		});
 	}
 
 	public resolveWebviewView(
@@ -132,7 +159,18 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 
 					case 'setMode':
 						this._outputChannel.appendLine(`[Webview] User selected mode: ${message.mode}`);
+						if (message.mode !== 'plan') {
+							this._planReview.revise();
+						}
 						this._acpClient.setSessionMode(message.mode);
+						break;
+					case 'approvePlan':
+						this._outputChannel.appendLine('[Webview] User approved the implementation plan.');
+						this._approvePlan();
+						break;
+					case 'revisePlan':
+						this._outputChannel.appendLine('[Webview] User requested plan revisions.');
+						this._planReview.revise();
 						break;
 					case 'setProvider':
 						this._outputChannel.appendLine(`[Webview] User selected provider: ${message.provider}`);
@@ -151,6 +189,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 						break;
 					case 'resumeSession':
 						this._outputChannel.appendLine(`[Webview] User resumed session: ${message.sessionId}`);
+						this._planReview.reset();
+						this._artifacts.reset();
+						this.postArtifacts();
 						this.postMessage({type: 'clear', isLoading: true});
 						this._acpClient.resumeSession(message.sessionId).finally(() => {
 							this.postMessage({type: 'sessionLoaded'});
@@ -288,6 +329,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 			// transcript too so the UI matches (the server's confirmation
 			// message then streams into the fresh view).
 			if (text.trim() === '/clear') {
+				this._planReview.reset();
 				this.postMessage({type: 'clear'});
 			}
 
@@ -317,6 +359,13 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 			});
 
 			await this._acpClient.prompt(expandedText, images);
+			const review = this._planReview.completeTurn(this._acpClient.currentMode);
+			if (review) {
+				this.postMessage({
+					type: 'planReviewRequested',
+					artifactPath: review.artifactPath
+				});
+			}
 			// Signal turn completion so the Webview can flip back to the send button
 			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}});
 		} catch (error) {
@@ -324,6 +373,36 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 			vscode.window.showErrorMessage(`Nanocoder Prompt error: ${error}`);
 			// Always reset the button even on error
 			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}});
+		}
+	}
+
+	private async _approvePlan(): Promise<void> {
+		try {
+			await this._planReview.approve({
+				readFile: async artifactPath => fs.promises.readFile(artifactPath, 'utf8'),
+				setMode: async mode => {
+					await this._acpClient.setSessionMode(mode);
+					if (this._acpClient.currentMode !== mode) {
+						throw new Error('Unable to exit Plan Mode');
+					}
+				},
+				prompt: async message => {
+					await this._acpClient.prompt(message);
+				},
+			});
+			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}});
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this._outputChannel.appendLine(`Plan approval failed: ${message}`);
+			const review = this._planReview.pendingReview;
+			if (review) {
+				this.postMessage({
+					type: 'planReviewRequested',
+					artifactPath: review.artifactPath
+				});
+			}
+			this.postMessage({type: 'planReviewError', message});
+			vscode.window.showErrorMessage(`Nanocoder: Unable to approve plan: ${message}`);
 		}
 	}
 

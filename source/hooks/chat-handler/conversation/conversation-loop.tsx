@@ -1,5 +1,11 @@
 import React from 'react';
 import type {ConversationStateManager} from '@/app/utils/conversation-state';
+import {
+	createWalkthroughLifecycle,
+	observeSuccessfulLifecycleTool,
+	takeWalkthroughFallback,
+	type WalkthroughLifecycle,
+} from '@/artifacts/walkthrough-lifecycle';
 import AssistantMessage from '@/components/assistant-message';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
@@ -96,7 +102,10 @@ interface ProcessAssistantResponseParams {
 	tune?: TuneConfig;
 	privacySessionMapRef?: React.MutableRefObject<Record<string, string>>;
 	privacyEnabled?: boolean;
+	sessionId?: string;
+	workingDirectory?: string;
 	onPrivacyEvent?: (scrubbedDelta: number) => void;
+	onToolExecuted?: (toolName: string) => void;
 	// Number of consecutive empty assistant turns that have already been
 	// nudged in this loop. The empty-response branch increments and
 	// recurses; every other recursion site resets to 0.
@@ -115,6 +124,7 @@ interface ProcessAssistantResponseParams {
 	// How many consecutive turns have emitted the same tool-call signature.
 	// Reaching MAX_REPEATED_TOOL_CALLS stops the loop with an actionable error.
 	repeatedToolCallCount?: number;
+	walkthroughLifecycle?: WalkthroughLifecycle;
 }
 
 // Module-level flag: show XML fallback notice only once per process lifetime.
@@ -186,14 +196,19 @@ export const processAssistantResponse = async (
 		privacySessionMapRef,
 		privacyEnabled = false,
 		onPrivacyEvent,
+		onToolExecuted,
+		sessionId,
+		workingDirectory,
 	} = params;
+	const walkthroughLifecycle =
+		params.walkthroughLifecycle ?? createWalkthroughLifecycle(messages);
 
 	const startTime = conversationStartTime ?? Date.now();
 
 	// Helper to flush live task list to the static chat queue
 	const flushLiveTaskList = async () => {
 		if (!onSetLiveTaskList) return;
-		const tasks = await loadTasks();
+		const tasks = await loadTasks(sessionId);
 		if (tasks.length > 0) {
 			const {TaskListDisplay} = await import('@/components/task-list-display');
 			addToChatQueue(
@@ -755,11 +770,15 @@ export const processAssistantResponse = async (
 					onSetCompactToolCounts?.({...counts});
 				}
 			},
-			onLiveTaskUpdate: () => {
+			onLiveTaskUpdate: (tasks?: Task[]) => {
 				hasLiveTaskUpdates = true;
-				loadTasks().then(tasks => {
+				if (tasks) {
 					onSetLiveTaskList?.(tasks);
-				});
+				} else {
+					loadTasks(sessionId).then(loaded => {
+						onSetLiveTaskList?.(loaded);
+					});
+				}
 			},
 			nonInteractiveMode,
 		};
@@ -774,9 +793,23 @@ export const processAssistantResponse = async (
 				toolManager,
 				conversationStateManager,
 				addToChatQueue,
-				{...displayOptions, setLiveComponent, signal: controller.signal},
+				{
+					...displayOptions,
+					setLiveComponent,
+					signal: controller.signal,
+					executionContext: {sessionId, workingDirectory},
+				},
 			);
 			turnResults.push(...directResults);
+			for (const [index, result] of directResults.entries()) {
+				if (!result.isError) {
+					onToolExecuted?.(result.name);
+					const toolCall = autoTools[index];
+					if (toolCall) {
+						observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
+					}
+				}
+			}
 		}
 
 		// 2) Non-interactive mode can't prompt, so exit when approval is needed.
@@ -808,6 +841,12 @@ export const processAssistantResponse = async (
 			await flushAll();
 			setIsGenerating(false);
 			const {processToolUse} = await import('@/message-handler');
+			const processToolWithContext = (toolCall: ToolCall) =>
+				processToolUse(toolCall, {
+					abortSignal: controller.signal,
+					sessionId,
+					workingDirectory,
+				});
 
 			for (let i = 0; i < confirmTools.length; i++) {
 				const toolCall = confirmTools[i];
@@ -841,11 +880,15 @@ export const processAssistantResponse = async (
 				const execution = await executeApprovedTool(
 					toolCall,
 					toolManager,
-					processToolUse,
+					processToolWithContext,
 					setLiveComponent,
 					controller.signal,
 				);
 				turnResults.push(execution.result);
+				if (!execution.result.isError) {
+					onToolExecuted?.(execution.result.name);
+					observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
+				}
 				await displayExecutedTool(
 					execution,
 					toolManager,
@@ -1045,6 +1088,27 @@ export const processAssistantResponse = async (
 	}
 
 	if (validToolCalls.length === 0 && cleanedContent.trim()) {
+		const walkthroughFallback = takeWalkthroughFallback(
+			walkthroughLifecycle,
+			availableNames.includes('write_walkthrough'),
+		);
+		if (walkthroughFallback) {
+			const messagesWithFallback = [...updatedMessages, walkthroughFallback];
+			setMessages(messagesWithFallback);
+			await processAssistantResponse({
+				...params,
+				abortController: controller,
+				messages: messagesWithFallback,
+				conversationStartTime: startTime,
+				emptyTurnCount: 0,
+				malformedRetryCount: 0,
+				lastToolSignature: undefined,
+				repeatedToolCallCount: 0,
+				walkthroughLifecycle,
+			});
+			return;
+		}
+
 		// Flush any residual compact counts and task updates from turns that
 		// didn't emit reasoning so they persist in scrollback at conversation end.
 		await flushAll();

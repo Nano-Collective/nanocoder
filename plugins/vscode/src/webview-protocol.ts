@@ -88,6 +88,24 @@ export interface ExtensionMessagePathInfoResolved {
 	kind: 'file' | 'folder';
 }
 
+export interface ExtensionMessagePlanReviewRequested {
+	type: 'planReviewRequested';
+	artifactPath: string;
+}
+
+export interface ExtensionMessagePlanReviewError {
+	type: 'planReviewError';
+	message: string;
+}
+
+export interface ExtensionMessageArtifactsUpdated {
+	type: 'artifactsUpdated';
+	artifacts: Array<{
+		kind: 'implementation_plan' | 'task' | 'walkthrough';
+		path: string;
+	}>;
+}
+
 export type ExtensionToWebviewMessage =
 	| ExtensionMessageAppendMessage
 	| ExtensionMessageAppendThought
@@ -101,7 +119,10 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageSyncState
 	| ExtensionMessageUpdateSessions
 	| ExtensionMessageSessionLoaded
-	| ExtensionMessagePathInfoResolved;
+	| ExtensionMessagePathInfoResolved
+	| ExtensionMessagePlanReviewRequested
+	| ExtensionMessagePlanReviewError
+	| ExtensionMessageArtifactsUpdated;
 
 
 // ---------------------------------------------------------
@@ -194,6 +215,14 @@ export interface WebviewMessageShowError {
 	message: string;
 }
 
+export interface WebviewMessageApprovePlan {
+	type: 'approvePlan';
+}
+
+export interface WebviewMessageRevisePlan {
+	type: 'revisePlan';
+}
+
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
 	| WebviewMessageSubmitMessage
@@ -211,4 +240,6 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageRequestPathInfo
 	| WebviewMessageRequestOpenDialog
 	| WebviewMessageOpenPath
-	| WebviewMessageShowError;
+	| WebviewMessageShowError
+	| WebviewMessageApprovePlan
+	| WebviewMessageRevisePlan;

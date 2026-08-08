@@ -36,9 +36,9 @@ export interface ToolVisibilityOptions {
 
 // Tools to exclude per development mode
 const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
-	normal: [],
-	'auto-accept': [],
-	yolo: [],
+	normal: ['write_plan'],
+	'auto-accept': ['write_plan'],
+	yolo: ['write_plan'],
 	plan: [
 		// No mutation tools — plan mode is read-only exploration
 		'write_file',
@@ -48,12 +48,13 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 		'execute_bash',
 		// No task tool — plan mode produces the plan itself
 		'write_tasks',
+		'write_walkthrough',
 		// No git mutation tools — keep read-only git tools
 		'git_add',
 		'git_commit',
 		'git_pr', // can create PRs — excluded like other git mutators
 	],
-	headless: ['ask_user', 'agent'],
+	headless: ['ask_user', 'agent', 'write_plan'],
 };
 
 /**
@@ -179,6 +180,16 @@ export class ToolManager {
 					names = profileTools;
 				}
 			}
+		}
+
+		// The plan artifact is a mode capability, not a general-purpose tool.
+		// Keep it available even when a slim profile filters the normal tool set.
+		if (
+			developmentMode === 'plan' &&
+			this.registry.hasTool('write_plan') &&
+			!names.includes('write_plan')
+		) {
+			names.push('write_plan');
 		}
 
 		// Apply mode-based exclusions

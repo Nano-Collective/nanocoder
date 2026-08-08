@@ -97,6 +97,40 @@ function baseDeps(
 	};
 }
 
+test.serial("plain shell creates a session for artifact tools", async (t) => {
+	const shutdown: CapturedShutdown = {code: null};
+	const stdout = capturingStdout();
+	let sessionId: string | undefined;
+	let workingDirectory: string | undefined;
+	try {
+		await runPlainShell({
+			prompt: "do the thing",
+			developmentMode: "yolo",
+			trustDirectory: true,
+			outputFormat: "json",
+			deps: baseDeps({
+				initializePlain: makeFakeInitializePlain(),
+				runPlainConversation: async options => {
+					sessionId = options.sessionId;
+					workingDirectory = options.workingDirectory;
+					return {
+						kind: "success",
+						finalText: "done",
+						reasoning: null,
+						toolCalls: [],
+					};
+				},
+				getShutdownManager: makeFakeShutdownManager(shutdown),
+			}),
+		});
+	} finally {
+		stdout.restore();
+	}
+
+	t.regex(sessionId ?? "", /^[0-9a-f-]{36}$/);
+	t.is(workingDirectory, process.cwd());
+});
+
 test.serial(
 	"--json success outcome emits a well-formed report with exit code 0",
 	async (t) => {

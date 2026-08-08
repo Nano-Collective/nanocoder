@@ -91,6 +91,7 @@ export function useChatHandler({
 	subagentsReady,
 	privacySessionMapRef,
 	privacyEnabled,
+	ensureCurrentSessionId,
 }: UseChatHandlerProps): ChatHandlerReturn {
 	// Conversation state manager for enhanced context
 	const conversationStateManager = React.useRef(new ConversationStateManager());
@@ -214,7 +215,12 @@ export function useChatHandler({
 
 	// Wrapper for processAssistantResponse that includes error handling
 	const processAssistantResponseWithErrorHandling = React.useCallback(
-		async (systemMessage: Message, msgs: Message[]) => {
+		async (
+			systemMessage: Message,
+			msgs: Message[],
+			sessionId?: string,
+			onToolExecuted?: (toolName: string) => void,
+		) => {
 			if (!client) return;
 
 			try {
@@ -250,6 +256,9 @@ export function useChatHandler({
 					tune,
 					privacySessionMapRef,
 					privacyEnabled,
+					sessionId,
+					workingDirectory: process.cwd(),
+					onToolExecuted,
 					onPrivacyEvent: (count: number) => {
 						// `count` is the number of NEW identifiers scrubbed on this turn
 						// (the per-turn delta), not a session running total.
@@ -305,6 +314,8 @@ export function useChatHandler({
 		images?: ImageAttachment[],
 	) => {
 		if (!client || !toolManager) return;
+		const sessionId = ensureCurrentSessionId?.();
+		let wrotePlan = false;
 
 		// Record conversation start time for elapsed time display
 		conversationStartTimeRef.current = Date.now();
@@ -369,6 +380,10 @@ export function useChatHandler({
 			await processAssistantResponseWithErrorHandling(
 				systemMessage,
 				updatedMessages,
+				sessionId,
+				toolName => {
+					if (toolName === 'write_plan') wrotePlan = true;
+				},
 			);
 
 			// If this turn STARTED in plan mode (closure value, captured at submit
@@ -377,7 +392,11 @@ export function useChatHandler({
 			// the start mode and the abort signal both in hand, avoids the race
 			// where toggling modes mid-generation makes an unrelated completing turn
 			// look like a finished plan.
-			if (developmentMode === 'plan' && !controller.signal.aborted) {
+			if (
+				developmentMode === 'plan' &&
+				wrotePlan &&
+				!controller.signal.aborted
+			) {
 				onPlanTurnComplete?.();
 			}
 		} catch (error) {

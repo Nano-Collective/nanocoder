@@ -515,6 +515,39 @@ test('retry command - lazy registry exposes /retry', t => {
 	);
 });
 
+test.serial('/plan is rejected and cannot bypass the Shift+Tab mode cycle', async t => {
+	const modeChanges: string[] = [];
+	let queued: React.ReactNode = null;
+	const options = createResumeTestOptions({
+		onAddToChatQueue: component => {
+			queued = component;
+		},
+	});
+	options.developmentMode = 'normal';
+	Object.assign(options, {
+		onSetDevelopmentMode: (mode: string) => {
+			modeChanges.push(mode);
+		},
+	});
+
+	await handleMessageSubmission('/plan', options);
+	await Promise.resolve();
+
+	t.deepEqual(modeChanges, []);
+	t.true(
+		React.isValidElement(queued) &&
+			String((queued.props as {message?: string}).message).includes(
+				'Unknown command: plan',
+			),
+	);
+});
+
+test('/plan is not discoverable because Shift+Tab is the only mode switch', t => {
+	const plan = lazyCommands.find(command => command.name === 'plan');
+
+	t.is(plan, undefined);
+});
+
 test.serial('resume command - /resume with no args enters session selector mode', async t => {
 	let selectorCalled = false;
 	const origInit = sessionManager.initialize.bind(sessionManager);

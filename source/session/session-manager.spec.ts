@@ -9,6 +9,7 @@ import {
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import {ArtifactManager} from '@/artifacts/artifact-manager';
 import {SessionManager} from './session-manager.js';
 
 let testDir: string;
@@ -84,6 +85,22 @@ test.serial('createSession writes session file to disk', async t => {
 	const parsed = JSON.parse(data);
 	t.is(parsed.id, session.id);
 	t.is(parsed.title, 'Disk test');
+});
+
+test.serial('createSession can persist a preallocated session ID', async t => {
+	const id = '11111111-1111-4111-8111-111111111111';
+	const session = await manager.createSession({
+		id,
+		title: 'Preallocated session',
+		messageCount: 1,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hello'}],
+	});
+
+	t.is(session.id, id);
+	t.is((await manager.readSession(id))?.title, 'Preallocated session');
 });
 
 test.serial('createSession adds metadata to the index', async t => {
@@ -257,6 +274,25 @@ test.serial(
 		await t.notThrowsAsync(() => manager.deleteSession(session.id));
 	},
 );
+
+test.serial('deleteSession removes the session artifacts', async t => {
+	const artifacts = new ArtifactManager(join(testDir, 'artifacts'));
+	const coupledManager = new SessionManager(sessionsDir, artifacts);
+	await coupledManager.initialize();
+	const session = await coupledManager.createSession({
+		title: 'Delete artifacts',
+		messageCount: 0,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [],
+	});
+	await artifacts.writeArtifact(session.id, 'implementation_plan', '# Plan\n');
+
+	await coupledManager.deleteSession(session.id);
+
+	t.is(await artifacts.readArtifact(session.id, 'implementation_plan'), null);
+});
 
 test.serial('deleteSession rejects invalid ID', async t => {
 	await t.throwsAsync(() => manager.deleteSession('bad-id'), {
@@ -662,9 +698,15 @@ test.serial(
 		oldDate.setDate(oldDate.getDate() - 60);
 		index[0].lastAccessedAt = oldDate.toISOString();
 		await writeFile(indexPath, JSON.stringify(index), 'utf-8');
+		const artifacts = new ArtifactManager(join(testDir, 'artifacts'));
+		await artifacts.writeArtifact(
+			session.id,
+			'implementation_plan',
+			'# Old plan\n',
+		);
 
 		// Re-initialize to trigger cleanup (default retention is 30 days)
-		const mgr2 = new SessionManager(sessionsDir);
+		const mgr2 = new SessionManager(sessionsDir, artifacts);
 		await mgr2.initialize();
 
 		const sessions = await mgr2.listSessions();
@@ -673,6 +715,7 @@ test.serial(
 		// File should also be deleted
 		const result = await mgr2.readSession(session.id);
 		t.is(result, null);
+		t.is(await artifacts.readArtifact(session.id, 'implementation_plan'), null);
 	},
 );
 

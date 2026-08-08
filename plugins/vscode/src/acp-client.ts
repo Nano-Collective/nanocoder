@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import {ClientSideConnection} from '@agentclientprotocol/sdk';
 import {AcpStateManager, ACPStatus} from './acp-state';
+import {PromptAttempt} from './prompt-attempt';
 
 // We expect at least the version of the CLI where ACP was introduced
 const MINIMUM_CLI_VERSION = '0.4.0';
@@ -22,6 +23,7 @@ export class NanocoderAcpClient {
 	public onSessionUpdate?: (update: unknown) => void;
 	public onPermissionRequested?: (toolCallId: string, toolCall: unknown, options?: any[]) => void;
 	public onStateSync?: (state: StateSyncPayload) => void;
+	public onSessionArtifacts?: (meta: unknown) => void;
 	public onConnectionReady?: () => void;
 
 	public currentMode?: string;
@@ -32,6 +34,7 @@ export class NanocoderAcpClient {
 	public availableProviders: string[] = [];
 
 	private pendingPermissions = new Map<string, (response: unknown) => void>();
+	private activePrompt?: PromptAttempt;
 
 	constructor(outputChannel: vscode.OutputChannel, stateManager: AcpStateManager) {
 		this.outputChannel = outputChannel;
@@ -163,6 +166,7 @@ export class NanocoderAcpClient {
 
 			const result = await this.connection.newSession({ cwd, mcpServers: [] });
 			this._sessionId = result.sessionId;
+			this.onSessionArtifacts?.(result._meta);
 			
 			// Parse modes and configOptions
 			if (result.modes) {
@@ -273,10 +277,13 @@ export class NanocoderAcpClient {
 	/** Start a new conversation by clearing the cached session ID. */
 	newChat(): void {
 		this._sessionId = undefined;
+		this.onSessionArtifacts?.(undefined);
 	}
 
 	async prompt(text: string, images?: { data: string, mimeType: string }[]): Promise<void> {
 		if (!this.connection || !this._sessionId) return;
+		const attempt = new PromptAttempt();
+		this.activePrompt = attempt;
 		try {
 			const promptData: import('@agentclientprotocol/sdk').ContentBlock[] = [{ type: 'text', text }];
 			if (images && images.length > 0) {
@@ -289,13 +296,26 @@ export class NanocoderAcpClient {
 				prompt: promptData
 			});
 		} catch (error) {
-			this.outputChannel.appendLine(`Prompt failed: ${error}`);
-			vscode.window.showErrorMessage(`Nanocoder prompt failed: ${error}`);
+			if (attempt.cancelRequested) {
+				this.outputChannel.appendLine('Prompt cancelled by user.');
+			} else {
+				this.outputChannel.appendLine(`Prompt failed: ${error}`);
+				vscode.window.showErrorMessage(`Nanocoder prompt failed: ${error}`);
+			}
+		} finally {
+			if (this.activePrompt === attempt) {
+				this.activePrompt = undefined;
+			}
 		}
 	}
 
 	async cancel(): Promise<void> {
 		if (!this.connection || !this._sessionId) return;
+		this.activePrompt?.cancel();
+		for (const resolve of this.pendingPermissions.values()) {
+			resolve({outcome: {outcome: 'cancelled'}});
+		}
+		this.pendingPermissions.clear();
 		try {
 			await this.connection.cancel({
 				sessionId: this._sessionId
@@ -373,7 +393,16 @@ export class NanocoderAcpClient {
 			this._sessionId = sessionId;
 			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
 			const cwd = workspaceFolder?.uri.fsPath || process.cwd();
-			await this.connection.resumeSession({sessionId, cwd});
+			const result = await this.connection.resumeSession({sessionId, cwd});
+			if (result.modes) {
+				this.currentMode = result.modes.currentModeId;
+				this.availableModes = result.modes.availableModes.map((mode: any) => mode.id);
+			}
+			if (result.configOptions) {
+				this._parseConfigOptions(result.configOptions);
+			}
+			this.onSessionArtifacts?.(result._meta);
+			this.notifyStateSync();
 		} catch (error) {
 			this.outputChannel.appendLine(`resumeSession failed: ${error}`);
 			vscode.window.showErrorMessage(`Failed to resume session: ${error}`);

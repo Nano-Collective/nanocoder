@@ -15,6 +15,11 @@ const MODE_MAP: Record<SessionModeId, DevelopmentMode> = {
 	plan: 'plan',
 };
 
+/** Return the tools available to ACP clients. */
+export function filterAcpToolNames(names: string[]): string[] {
+	return names;
+}
+
 export function getAgentCapabilities(): AgentCapabilities {
 	return {
 		loadSession: true,

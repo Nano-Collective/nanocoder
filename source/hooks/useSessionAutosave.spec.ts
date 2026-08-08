@@ -25,6 +25,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {SessionManager} from '../session/session-manager.js';
+import {shouldResetSessionId} from './useSessionAutosave.js';
 import {
 	getKeyGeneratorSessionId,
 	resetKeyGeneratorForTests,
@@ -41,6 +42,14 @@ function makeMessages(count: number) {
 		content: `msg ${i + 1}`,
 	}));
 }
+
+test('slash-only sessions keep their preallocated ID while messages stay empty', t => {
+	t.false(shouldResetSessionId(0, 0));
+});
+
+test('clearing a non-empty conversation resets its session ID', t => {
+	t.true(shouldResetSessionId(1, 0));
+});
 
 // ---------------------------------------------------------------------------
 // Bug A — Duplicate-session race
