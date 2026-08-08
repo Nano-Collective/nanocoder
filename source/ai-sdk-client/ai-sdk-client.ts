@@ -17,6 +17,7 @@ import type {
 import {getLogger} from '@/utils/logging';
 import {isLocalURL} from '@/utils/url-utils';
 import {handleChat} from './chat/chat-handler.js';
+import {normalizeModelIdForRequest} from './model-id.js';
 import {
 	createProvider,
 	type TaggedProvider,
@@ -160,18 +161,25 @@ export class AISDKClient implements LLMClient {
 		// Get the language model instance from the tagged provider.
 		// GitHub Copilot requires routing: GPT-5+ → Responses API, others → Chat Completions.
 		// ChatGPT/Codex always uses the Responses API.
+		const requestModel =
+			this.provider.kind === 'openai-compatible'
+				? normalizeModelIdForRequest(
+						this.providerConfig.config.baseURL,
+						this.currentModel,
+					)
+				: this.currentModel;
 		const model: LanguageModel = (() => {
 			switch (this.provider.kind) {
 				case 'chatgpt-codex':
-					return this.provider.provider.responses(this.currentModel);
+					return this.provider.provider.responses(requestModel);
 				case 'github-copilot':
 					return this.currentModel.includes('gpt-5')
-						? this.provider.provider.responses(this.currentModel)
-						: this.provider.provider.chat(this.currentModel);
+						? this.provider.provider.responses(requestModel)
+						: this.provider.provider.chat(requestModel);
 				case 'openai-compatible':
 				case 'anthropic':
 				case 'google':
-					return this.provider.provider(this.currentModel) as LanguageModel;
+					return this.provider.provider(requestModel) as LanguageModel;
 			}
 		})();
 
