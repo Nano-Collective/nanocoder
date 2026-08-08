@@ -2,6 +2,20 @@
 	// @ts-ignore - acquireVsCodeApi is injected by VS Code
 	const vscode = acquireVsCodeApi();
 
+	// Resolve icon.svg
+	const nanocoderIconUri = document.currentScript
+		? new URL('icon.svg', document.currentScript.src).href
+		: '';
+	let nanocoderIconSvg = '';
+	if (nanocoderIconUri) {
+		fetch(nanocoderIconUri)
+			.then((r) => (r.ok ? r.text() : ''))
+			.then((svg) => {
+				nanocoderIconSvg = svg;
+			})
+			.catch(() => {});
+	}
+
 	const messagesContainer = document.getElementById('messages-container');
 	const chatInput = document.getElementById('chat-input');
 	const composerBox = document.getElementById('composer-box');
@@ -151,6 +165,7 @@
 	let isProcessing = false;
 	let currentAggregator = null;
 	let currentThoughtBox = null;
+	let visualLoader = null;
 
 	// Premium SVG Icons (Feather Icons)
 	const ICONS = {
@@ -452,6 +467,7 @@
 		// Optimistically append user message
 		appendMessage(text, 'user', imagesToSubmit);
 		pendingUserMessageText = text;
+    startVisualLoader();
 
 		if (!isProcessing) {
 			// Switch to processing state
@@ -740,12 +756,37 @@
 		}
 	}
 
+	function startVisualLoader() {
+		const wrapper = document.createElement('div');
+		wrapper.className = 'group flex flex-row gap-1.5 min-w-0 shrink-0 self-start items-center max-w-full';
+		const span = document.createElement('span');
+		span.className = 'flex items-center shrink-0 text-vscode-fg [&_svg]:w-6 [&_svg]:h-6 animate-pulse';
+		if (nanocoderIconSvg) {
+			span.innerHTML = nanocoderIconSvg
+		}else{
+			fetch(nanocoderIconUri)
+			.then((r) => (r.ok ? r.text() : ''))
+			.then((svg) => {
+				span.innerHTML = svg;
+			});
+		}
+		wrapper.appendChild(span);
+
+		visualLoader = wrapper;
+		messagesContainer.appendChild(wrapper);
+		scrollToBottom();
+	}
+
 	function appendChunk(textChunk) {
 		// Remove welcome message and loader if present
 		const welcome = document.querySelector('.welcome-message');
 		if (welcome) welcome.remove();
 		const loader = document.getElementById('session-loader');
 		if (loader) loader.remove();
+		if (visualLoader) {
+			visualLoader.remove();
+			visualLoader = null;
+		}
 
 		if (!currentTurnEl || !currentTextEl) {
 			// First chunk for this turn
