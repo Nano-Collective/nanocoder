@@ -7,7 +7,9 @@ import type {Command} from '@/types/commands';
 import type {Message} from '@/types/core';
 import {errorMsg, successMsg, warningMsg} from '@/utils/message-factory';
 
-function findLastAssistantContent(messages: Message[]): string | undefined {
+export function findLastAssistantContent(
+	messages: Message[],
+): string | undefined {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const message = messages[i];
 		if (message?.role === 'assistant' && message.content) {
