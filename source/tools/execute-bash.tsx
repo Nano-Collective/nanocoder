@@ -3,12 +3,12 @@ import React from 'react';
 
 import BashProgress from '@/components/bash-progress';
 import {isNanocoderToolAlwaysAllowed} from '@/config/nanocoder-tools-config';
-import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {truncateOutputForLLM} from '@/utils/truncate-output';
 
 /**
  * Execute a bash command using the bash executor service.
@@ -47,13 +47,7 @@ export function formatBashResultForLLM(result: BashExecutionState): string {
 	}
 
 	// Limit the context for LLM to prevent overwhelming the model
-	const llmContext =
-		fullOutput.length > TRUNCATION_OUTPUT_LIMIT
-			? fullOutput.substring(0, TRUNCATION_OUTPUT_LIMIT) +
-				'\n... [Output truncated. Use more specific commands to see full output]'
-			: fullOutput;
-
-	return llmContext;
+	return truncateOutputForLLM(fullOutput);
 }
 
 /**

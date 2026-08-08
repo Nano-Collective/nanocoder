@@ -3,6 +3,7 @@ import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
+import {truncateOutputForLLM} from '../utils/truncate-output';
 import {executeBashTool} from './execute-bash';
 
 // ============================================================================
@@ -265,6 +266,33 @@ test('execute_bash does not truncate short output', async t => {
 	t.truthy(result);
 	t.false(result.includes('[Output truncated'));
 	t.true(result.includes('short output'));
+});
+
+test('truncateOutputForLLM returns text unchanged when within the limit', t => {
+	t.is(truncateOutputForLLM('short output', 100), 'short output');
+});
+
+test('truncateOutputForLLM keeps both the head and the tail when over the limit', t => {
+	const text = `START${'x'.repeat(500)}END`;
+	const result = truncateOutputForLLM(text, 100);
+
+	t.true(result.startsWith('START'));
+	t.true(result.endsWith('END'));
+});
+
+test('truncateOutputForLLM gives the tail the larger share of the budget', t => {
+	const text = 'a'.repeat(400) + 'b'.repeat(400);
+	const result = truncateOutputForLLM(text, 100);
+	const [head, tail] = result.split('\n... [');
+
+	t.is(head!.length, 40);
+	t.is(tail!.split('] ...\n')[1]!.length, 60);
+});
+
+test('truncateOutputForLLM reports how many characters were elided', t => {
+	const result = truncateOutputForLLM('x'.repeat(150), 100);
+
+	t.true(result.includes('[Output truncated: 50 characters elided]'));
 });
 
 test('execute_bash returns plain string not JSON', async t => {

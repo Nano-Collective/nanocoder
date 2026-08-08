@@ -1,10 +1,10 @@
 import {spawn} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {isAbsolute, resolve} from 'node:path';
-import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {renderBody} from '@/custom-tools/template';
 import type {CustomToolMetadata} from '@/types/custom-tools';
 import type {ToolHandler} from '@/types/index';
+import {truncateOutputForLLM} from '@/utils/truncate-output';
 
 /**
  * Build a `ToolHandler` that renders the script body and runs it under the
@@ -91,14 +91,11 @@ export function runScript(
 				);
 				return;
 			}
-			resolvePromise(truncate(formatScriptOutput(code, stdout, stderr)));
+			resolvePromise(
+				truncateOutputForLLM(formatScriptOutput(code, stdout, stderr)),
+			);
 		});
 	});
-}
-
-function truncate(text: string): string {
-	if (text.length <= TRUNCATION_OUTPUT_LIMIT) return text;
-	return text.slice(0, TRUNCATION_OUTPUT_LIMIT) + '\n... [Output truncated]';
 }
 
 /**
