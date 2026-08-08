@@ -10,9 +10,22 @@ const ARTIFACT_FILES = {
 	implementation_plan: 'implementation_plan.md',
 	task: 'task.md',
 	tasks: 'tasks.json',
+	walkthrough: 'walkthrough.md',
 } as const;
 
 export type ArtifactKind = keyof typeof ARTIFACT_FILES;
+export type UserArtifactKind = Exclude<ArtifactKind, 'tasks'>;
+
+export interface ArtifactDescriptor {
+	kind: UserArtifactKind;
+	path: string;
+}
+
+const USER_ARTIFACT_KINDS: UserArtifactKind[] = [
+	'implementation_plan',
+	'task',
+	'walkthrough',
+];
 
 export class ArtifactManager {
 	constructor(
@@ -66,6 +79,26 @@ export class ArtifactManager {
 			}
 			throw error;
 		}
+	}
+
+	async listArtifacts(sessionId: string): Promise<ArtifactDescriptor[]> {
+		const artifacts: ArtifactDescriptor[] = [];
+		for (const kind of USER_ARTIFACT_KINDS) {
+			const artifactPath = this.getArtifactPath(sessionId, kind);
+			try {
+				await fs.access(artifactPath);
+				artifacts.push({kind, path: artifactPath});
+			} catch (error) {
+				if (
+					!(error instanceof Error) ||
+					!('code' in error) ||
+					error.code !== 'ENOENT'
+				) {
+					throw error;
+				}
+			}
+		}
+		return artifacts;
 	}
 
 	async deleteSessionArtifacts(sessionId: string): Promise<void> {

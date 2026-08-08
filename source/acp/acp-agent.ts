@@ -42,6 +42,8 @@ import {runAcpConversation} from '@/acp/acp-conversation';
 import {AcpSession} from '@/acp/acp-session';
 import type {AcpInitContext} from '@/acp/acp-types';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
+import {artifactManager} from '@/artifacts/artifact-manager';
+import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
 import {loadPreferences, updateLastUsed} from '@/config/preferences';
@@ -55,6 +57,20 @@ const logger = getLogger();
 
 // Stable id for the model selector config option (category `model`).
 const MODEL_CONFIG_ID = 'model';
+
+async function listSessionArtifacts(sessionId: string) {
+	try {
+		return await artifactManager.listArtifacts(sessionId);
+	} catch (error) {
+		if (
+			error instanceof Error &&
+			error.message.startsWith('Invalid session ID:')
+		) {
+			return [];
+		}
+		throw error;
+	}
+}
 
 export class AcpAgent implements Agent {
 	private sessions = new Map<string, AcpSession>();
@@ -146,6 +162,9 @@ export class AcpAgent implements Agent {
 		await this.replaySessionHistory(session);
 
 		return {
+			_meta: {
+				'nanocoder/artifacts': await listSessionArtifacts(params.sessionId),
+			},
 			modes: this.buildModeState(session),
 			configOptions: await this.buildConfigOptions(),
 		};
@@ -483,6 +502,9 @@ export class AcpAgent implements Agent {
 		await this.replaySessionHistory(session);
 
 		return {
+			_meta: {
+				'nanocoder/artifacts': await listSessionArtifacts(params.sessionId),
+			},
 			modes: this.buildModeState(session),
 			configOptions: await this.buildConfigOptions(),
 		};
@@ -539,6 +561,7 @@ export class AcpAgent implements Agent {
 
 	private async replaySessionHistory(session: AcpSession): Promise<void> {
 		for (const message of session.messages) {
+			if (isInternalWalkthroughMessage(message)) continue;
 			if (message.role === 'user') {
 				if (typeof message.content === 'string' && message.content.length > 0) {
 					await this.conn.sessionUpdate({

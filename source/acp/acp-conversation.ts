@@ -8,7 +8,16 @@ import {requestToolPermission} from '@/acp/acp-permission';
 import {requestUserChoice} from '@/acp/acp-question';
 import type {AcpSession} from '@/acp/acp-session';
 import {type AcpToolCallMeta, buildToolCallMeta} from '@/acp/acp-tool-call';
+import type {
+	ArtifactDescriptor,
+	UserArtifactKind,
+} from '@/artifacts/artifact-manager';
 import {artifactManager} from '@/artifacts/artifact-manager';
+import {
+	createWalkthroughLifecycle,
+	observeSuccessfulLifecycleTool,
+	takeWalkthroughFallback,
+} from '@/artifacts/walkthrough-lifecycle';
 import {DEFAULT_HEADLESS_MAX_TURNS, getAppConfig} from '@/config/index';
 import {processToolUse} from '@/message-handler';
 import {
@@ -38,6 +47,18 @@ const FINAL_TURN_INSTRUCTION =
 	'Do not call any more tools. Produce your final answer now using only the ' +
 	'information you already have.';
 
+const ARTIFACT_TOOL_KINDS: Record<string, UserArtifactKind> = {
+	write_plan: 'implementation_plan',
+	write_tasks: 'task',
+	write_walkthrough: 'walkthrough',
+};
+
+const ARTIFACT_TITLES: Record<UserArtifactKind, string> = {
+	implementation_plan: 'Implementation plan ready',
+	task: 'Tasks updated',
+	walkthrough: 'Walkthrough ready',
+};
+
 export interface RunAcpConversationOptions {
 	session: AcpSession;
 	client: LLMClient;
@@ -54,6 +75,7 @@ export async function runAcpConversation(
 	const {developmentMode, abortController} = session;
 
 	let messages = session.messages;
+	const walkthroughLifecycle = createWalkthroughLifecycle(messages);
 
 	const maxTurns =
 		getAppConfig().headless?.maxTurns ?? DEFAULT_HEADLESS_MAX_TURNS;
@@ -189,6 +211,16 @@ export async function runAcpConversation(
 		}
 
 		if (validToolCalls.length === 0) {
+			const fallback = finalTurn
+				? null
+				: takeWalkthroughFallback(
+						walkthroughLifecycle,
+						availableNames.includes('write_walkthrough'),
+					);
+			if (fallback) {
+				messages = [...messages, fallback];
+				continue;
+			}
 			session.messages = messages;
 			return {stopReason: 'end_turn'};
 		}
@@ -354,6 +386,9 @@ export async function runAcpConversation(
 				toolResult.content,
 			);
 			toolResults.push(toolResult);
+			if (status === 'completed') {
+				observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
+			}
 
 			// write_tasks replaces the whole task list; mirror it to the client
 			// as an ACP plan update so GUIs can render a live checklist.
@@ -392,11 +427,16 @@ async function emitPlanUpdate(
 	};
 	const tasks = Array.isArray(args?.tasks) ? args.tasks : [];
 	const validStatuses = ['pending', 'in_progress', 'completed'] as const;
+	const taskArtifact: ArtifactDescriptor = {
+		kind: 'task',
+		path: artifactManager.getArtifactPath(session.sessionId, 'task'),
+	};
 
 	await conn.sessionUpdate({
 		sessionId: session.sessionId,
 		update: {
 			sessionUpdate: 'plan',
+			_meta: {'nanocoder/artifact': taskArtifact},
 			entries: tasks
 				.filter(t => typeof t?.title === 'string')
 				.map(t => ({
@@ -442,13 +482,25 @@ async function emitToolCallUpdate(
 	rawOutput?: unknown,
 	title?: string,
 ): Promise<void> {
-	const planArtifactPath =
-		toolCall.function.name === 'write_plan' && status === 'completed'
-			? artifactManager.getArtifactPath(
-					session.sessionId,
-					'implementation_plan',
-				)
+	const artifactKind = ARTIFACT_TOOL_KINDS[toolCall.function.name];
+	const artifact: ArtifactDescriptor | undefined =
+		status === 'completed' && artifactKind
+			? {
+					kind: artifactKind,
+					path: artifactManager.getArtifactPath(
+						session.sessionId,
+						artifactKind,
+					),
+				}
 			: undefined;
+	const meta = artifact
+		? {
+				'nanocoder/artifact': artifact,
+				...(artifact.kind === 'implementation_plan'
+					? {'nanocoder/planArtifact': {path: artifact.path}}
+					: {}),
+			}
+		: undefined;
 
 	await conn.sessionUpdate({
 		sessionId: session.sessionId,
@@ -457,11 +509,9 @@ async function emitToolCallUpdate(
 			toolCallId: toolCall.id,
 			status,
 			rawOutput,
-			title: planArtifactPath ? 'Implementation plan ready' : title,
-			locations: planArtifactPath ? [{path: planArtifactPath}] : undefined,
-			_meta: planArtifactPath
-				? {'nanocoder/planArtifact': {path: planArtifactPath}}
-				: undefined,
+			title: artifact ? ARTIFACT_TITLES[artifact.kind] : title,
+			locations: artifact ? [{path: artifact.path}] : undefined,
+			_meta: meta,
 		},
 	});
 }

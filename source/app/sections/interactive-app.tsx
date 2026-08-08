@@ -4,6 +4,7 @@ import {ChatHistory} from '@/app/components/chat-history';
 import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
 import {artifactManager} from '@/artifacts/artifact-manager';
+import {SessionArtifactLinks} from '@/components/artifact-links-display';
 import {FileExplorer} from '@/components/file-explorer';
 import {IdeSelector} from '@/components/ide-selector';
 import PlanReviewPrompt from '@/components/plan-review-prompt';
@@ -266,6 +267,9 @@ export function InteractiveApp({
 	// with Static + native scrollback.
 	const fullscreen = altScreenActive;
 	const terminalRows = useTerminalRows();
+	const artifactRefreshKey = `${appState.isConversationComplete}:${
+		appState.planReviewState?.show ?? false
+	}:${appState.liveTaskList?.map(task => `${task.id}:${task.status}`).join(',') ?? ''}`;
 
 	return (
 		// Fullscreen layout on the alternate screen buffer: the root Box is
@@ -300,6 +304,10 @@ export function InteractiveApp({
 			    absorbs ALL vertical shrink — without it Yoga crushes the
 			    input box when the transcript is tall. */}
 			<Box flexDirection="column" flexShrink={0}>
+				<SessionArtifactLinks
+					sessionId={appState.currentSessionId}
+					refreshKey={artifactRefreshKey}
+				/>
 				{appState.planReviewState?.show && (
 					<PlanReviewPrompt
 						artifactPath={

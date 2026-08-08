@@ -5,6 +5,7 @@ import { WebviewToExtensionMessage, ExtensionToWebviewMessage } from './webview-
 
 import { NanocoderAcpClient } from './acp-client';
 import { DiffManager } from './diff-manager';
+import {ArtifactController} from './artifact-controller';
 import {PlanReviewController} from './plan-review-controller';
 
 export class ChatWebviewProvider implements vscode.WebviewViewProvider {
@@ -13,6 +14,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 	private _view?: vscode.WebviewView;
 	private _isWebviewReady = false;
 	private readonly _planReview = new PlanReviewController();
+	private readonly _artifacts = new ArtifactController();
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
@@ -23,11 +25,18 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		// Listen for session updates from ACP
 		this._acpClient.onSessionUpdate = (update: any) => {
 			this._planReview.observeSessionUpdate(update);
+			this._artifacts.observeSessionUpdate(update);
+			this.postArtifacts();
 			this.handleDiffs(update);
 			this.postMessage({
 				type: 'acpUpdate',
 				update
 			});
+		};
+
+		this._acpClient.onSessionArtifacts = (meta: unknown) => {
+			this._artifacts.replaceFromMeta(meta);
+			this.postArtifacts();
 		};
 
 		this._acpClient.onPermissionRequested = (toolCallId: string, toolCall: any, options?: any[]) => {
@@ -79,6 +88,19 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 
 	public resetPlanReview(): void {
 		this._planReview.reset();
+	}
+
+	public resetSessionState(): void {
+		this._planReview.reset();
+		this._artifacts.reset();
+		this.postArtifacts();
+	}
+
+	private postArtifacts(): void {
+		this.postMessage({
+			type: 'artifactsUpdated',
+			artifacts: this._artifacts.artifacts,
+		});
 	}
 
 	public resolveWebviewView(
@@ -168,6 +190,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 					case 'resumeSession':
 						this._outputChannel.appendLine(`[Webview] User resumed session: ${message.sessionId}`);
 						this._planReview.reset();
+						this._artifacts.reset();
+						this.postArtifacts();
 						this.postMessage({type: 'clear', isLoading: true});
 						this._acpClient.resumeSession(message.sessionId).finally(() => {
 							this.postMessage({type: 'sessionLoaded'});

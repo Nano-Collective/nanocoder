@@ -5,6 +5,8 @@
 	const messagesContainer = document.getElementById('messages-container');
 	const chatInput = document.getElementById('chat-input');
 	const composerBox = document.getElementById('composer-box');
+	const artifactBar = document.getElementById('artifact-bar');
+	const artifactLinks = document.getElementById('artifact-links');
 	const contextChipsContainer = document.getElementById('context-chips');
 	const attachBtn = document.getElementById('attach-btn');
 
@@ -250,6 +252,31 @@
 		const existing = document.getElementById('plan-review-card');
 		if (existing) existing.remove();
 		setPlanReviewActive(false);
+	}
+
+	function renderArtifacts(artifacts) {
+		if (!artifactBar || !artifactLinks) return;
+		artifactLinks.innerHTML = '';
+		const labels = {
+			implementation_plan: 'Plan',
+			task: 'Tasks',
+			walkthrough: 'Walkthrough',
+		};
+		for (const artifact of Array.isArray(artifacts) ? artifacts : []) {
+			if (!artifact || !labels[artifact.kind] || typeof artifact.path !== 'string') continue;
+			const button = document.createElement('button');
+			button.type = 'button';
+			button.className = 'bg-vscode-editor-bg border border-vscode-widget-border hover:border-vscode-focusBorder rounded px-2 py-1 cursor-pointer font-vscode text-[0.78em] text-vscode-fg';
+			button.textContent = labels[artifact.kind];
+			button.title = artifact.path;
+			button.onclick = () => {
+				vscode.postMessage({type: 'openPath', path: artifact.path, kind: 'file'});
+			};
+			artifactLinks.appendChild(button);
+		}
+		const hasArtifacts = artifactLinks.childElementCount > 0;
+		artifactBar.classList.toggle('hidden', !hasArtifacts);
+		artifactBar.classList.toggle('flex', hasArtifacts);
 	}
 
 	function renderPlanReview(artifactPath) {
@@ -940,6 +967,9 @@
 				break;
 			case 'planReviewError':
 				setProcessing(false);
+				break;
+			case 'artifactsUpdated':
+				renderArtifacts(message.artifacts);
 				break;
 
 			case 'syncState':

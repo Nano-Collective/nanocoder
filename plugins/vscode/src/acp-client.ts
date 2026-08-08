@@ -23,6 +23,7 @@ export class NanocoderAcpClient {
 	public onSessionUpdate?: (update: unknown) => void;
 	public onPermissionRequested?: (toolCallId: string, toolCall: unknown, options?: any[]) => void;
 	public onStateSync?: (state: StateSyncPayload) => void;
+	public onSessionArtifacts?: (meta: unknown) => void;
 	public onConnectionReady?: () => void;
 
 	public currentMode?: string;
@@ -165,6 +166,7 @@ export class NanocoderAcpClient {
 
 			const result = await this.connection.newSession({ cwd, mcpServers: [] });
 			this._sessionId = result.sessionId;
+			this.onSessionArtifacts?.(result._meta);
 			
 			// Parse modes and configOptions
 			if (result.modes) {
@@ -275,6 +277,7 @@ export class NanocoderAcpClient {
 	/** Start a new conversation by clearing the cached session ID. */
 	newChat(): void {
 		this._sessionId = undefined;
+		this.onSessionArtifacts?.(undefined);
 	}
 
 	async prompt(text: string, images?: { data: string, mimeType: string }[]): Promise<void> {
@@ -390,7 +393,16 @@ export class NanocoderAcpClient {
 			this._sessionId = sessionId;
 			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
 			const cwd = workspaceFolder?.uri.fsPath || process.cwd();
-			await this.connection.resumeSession({sessionId, cwd});
+			const result = await this.connection.resumeSession({sessionId, cwd});
+			if (result.modes) {
+				this.currentMode = result.modes.currentModeId;
+				this.availableModes = result.modes.availableModes.map((mode: any) => mode.id);
+			}
+			if (result.configOptions) {
+				this._parseConfigOptions(result.configOptions);
+			}
+			this.onSessionArtifacts?.(result._meta);
+			this.notifyStateSync();
 		} catch (error) {
 			this.outputChannel.appendLine(`resumeSession failed: ${error}`);
 			vscode.window.showErrorMessage(`Failed to resume session: ${error}`);

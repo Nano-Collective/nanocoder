@@ -9,7 +9,12 @@ test('PlanReviewController - offers the completed plan after a plan-mode turn', 
 		sessionUpdate: 'tool_call_update',
 		toolCallId: 'call-plan',
 		status: 'completed',
-		_meta: {'nanocoder/planArtifact': {path: artifactPath}},
+		_meta: {
+			'nanocoder/artifact': {
+				kind: 'implementation_plan',
+				path: artifactPath,
+			},
+		},
 	});
 
 	t.deepEqual(controller.completeTurn('plan'), {artifactPath});

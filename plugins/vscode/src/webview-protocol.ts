@@ -98,6 +98,14 @@ export interface ExtensionMessagePlanReviewError {
 	message: string;
 }
 
+export interface ExtensionMessageArtifactsUpdated {
+	type: 'artifactsUpdated';
+	artifacts: Array<{
+		kind: 'implementation_plan' | 'task' | 'walkthrough';
+		path: string;
+	}>;
+}
+
 export type ExtensionToWebviewMessage =
 	| ExtensionMessageAppendMessage
 	| ExtensionMessageAppendThought
@@ -113,7 +121,8 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageSessionLoaded
 	| ExtensionMessagePathInfoResolved
 	| ExtensionMessagePlanReviewRequested
-	| ExtensionMessagePlanReviewError;
+	| ExtensionMessagePlanReviewError
+	| ExtensionMessageArtifactsUpdated;
 
 
 // ---------------------------------------------------------

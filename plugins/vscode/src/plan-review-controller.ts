@@ -32,9 +32,16 @@ export class PlanReviewController {
 
 		const meta = update._meta;
 		if (!meta || typeof meta !== 'object') return;
-		const artifact = (meta as Record<string, unknown>)[
-			'nanocoder/planArtifact'
-		];
+		const metadata = meta as Record<string, unknown>;
+		const genericArtifact = metadata['nanocoder/artifact'];
+		const genericPlan =
+			genericArtifact &&
+			typeof genericArtifact === 'object' &&
+			(genericArtifact as Record<string, unknown>).kind ===
+				'implementation_plan'
+				? genericArtifact
+				: undefined;
+		const artifact = genericPlan ?? metadata['nanocoder/planArtifact'];
 		if (!artifact || typeof artifact !== 'object') return;
 		const artifactPath = (artifact as Record<string, unknown>).path;
 		if (typeof artifactPath === 'string' && artifactPath.length > 0) {

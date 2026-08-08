@@ -267,6 +267,10 @@ export function buildSystemPrompt(
 		sections.push(loadSection('task-management'));
 	}
 
+	if (toolSet.has('write_walkthrough') && developmentMode !== 'plan') {
+		sections.push(loadSection('walkthrough'));
+	}
+
 	// Web tools — only if web_search or fetch_url are available
 	if (toolSet.has('web_search') || toolSet.has('fetch_url')) {
 		sections.push(loadSection('web-tools'));

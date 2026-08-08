@@ -1,3 +1,4 @@
+import {randomUUID} from 'node:crypto';
 import path from 'node:path';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
 import {getAppConfig} from '@/config/index';
@@ -184,6 +185,8 @@ export async function runPlainShell(
 		tune,
 		model,
 		outputFormat,
+		sessionId: randomUUID(),
+		workingDirectory: process.cwd(),
 	});
 	process.off('SIGINT', sigint);
 

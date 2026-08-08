@@ -1,5 +1,11 @@
 import React from 'react';
 import type {ConversationStateManager} from '@/app/utils/conversation-state';
+import {
+	createWalkthroughLifecycle,
+	observeSuccessfulLifecycleTool,
+	takeWalkthroughFallback,
+	type WalkthroughLifecycle,
+} from '@/artifacts/walkthrough-lifecycle';
 import AssistantMessage from '@/components/assistant-message';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
@@ -118,6 +124,7 @@ interface ProcessAssistantResponseParams {
 	// How many consecutive turns have emitted the same tool-call signature.
 	// Reaching MAX_REPEATED_TOOL_CALLS stops the loop with an actionable error.
 	repeatedToolCallCount?: number;
+	walkthroughLifecycle?: WalkthroughLifecycle;
 }
 
 // Module-level flag: show XML fallback notice only once per process lifetime.
@@ -193,6 +200,8 @@ export const processAssistantResponse = async (
 		sessionId,
 		workingDirectory,
 	} = params;
+	const walkthroughLifecycle =
+		params.walkthroughLifecycle ?? createWalkthroughLifecycle(messages);
 
 	const startTime = conversationStartTime ?? Date.now();
 
@@ -792,8 +801,14 @@ export const processAssistantResponse = async (
 				},
 			);
 			turnResults.push(...directResults);
-			for (const result of directResults) {
-				if (!result.isError) onToolExecuted?.(result.name);
+			for (const [index, result] of directResults.entries()) {
+				if (!result.isError) {
+					onToolExecuted?.(result.name);
+					const toolCall = autoTools[index];
+					if (toolCall) {
+						observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
+					}
+				}
 			}
 		}
 
@@ -872,6 +887,7 @@ export const processAssistantResponse = async (
 				turnResults.push(execution.result);
 				if (!execution.result.isError) {
 					onToolExecuted?.(execution.result.name);
+					observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
 				}
 				await displayExecutedTool(
 					execution,
@@ -1072,6 +1088,27 @@ export const processAssistantResponse = async (
 	}
 
 	if (validToolCalls.length === 0 && cleanedContent.trim()) {
+		const walkthroughFallback = takeWalkthroughFallback(
+			walkthroughLifecycle,
+			availableNames.includes('write_walkthrough'),
+		);
+		if (walkthroughFallback) {
+			const messagesWithFallback = [...updatedMessages, walkthroughFallback];
+			setMessages(messagesWithFallback);
+			await processAssistantResponse({
+				...params,
+				abortController: controller,
+				messages: messagesWithFallback,
+				conversationStartTime: startTime,
+				emptyTurnCount: 0,
+				malformedRetryCount: 0,
+				lastToolSignature: undefined,
+				repeatedToolCallCount: 0,
+				walkthroughLifecycle,
+			});
+			return;
+		}
+
 		// Flush any residual compact counts and task updates from turns that
 		// didn't emit reasoning so they persist in scrollback at conversation end.
 		await flushAll();

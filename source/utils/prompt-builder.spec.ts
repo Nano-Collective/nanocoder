@@ -142,6 +142,16 @@ test('buildSystemPrompt - includes task management when write_tasks available', 
 	t.true(result.includes('TASK MANAGEMENT'));
 });
 
+test('buildSystemPrompt - requires a truthful walkthrough when the tool is available', t => {
+	const result = buildSystemPrompt('normal', undefined, [
+		'write_tasks',
+		'write_walkthrough',
+	]);
+
+	t.true(result.includes('write_walkthrough'));
+	t.true(result.includes('Only report tests you actually ran'));
+});
+
 test('buildSystemPrompt - excludes task management in plan mode', t => {
 	const result = buildSystemPrompt('plan', undefined, ['write_tasks', 'read_file']);
 	t.false(result.includes('TASK MANAGEMENT'));

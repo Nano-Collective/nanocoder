@@ -48,6 +48,7 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 		'execute_bash',
 		// No task tool — plan mode produces the plan itself
 		'write_tasks',
+		'write_walkthrough',
 		// No git mutation tools — keep read-only git tools
 		'git_add',
 		'git_commit',

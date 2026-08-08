@@ -57,3 +57,34 @@ test('artifact paths reject non-UUID session identifiers', t => {
 		message: /Invalid session ID/,
 	});
 });
+
+test('lists only user-facing lifecycle artifacts in order', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'nanocoder-artifacts-'));
+	const manager = new ArtifactManager(root);
+	const sessionId = '11111111-1111-4111-8111-111111111111';
+
+	try {
+		await manager.writeArtifact(sessionId, 'tasks', '[]');
+		await manager.writeArtifact(sessionId, 'task', '# Tasks\n');
+		await manager.writeArtifact(
+			sessionId,
+			'implementation_plan',
+			'# Plan\n',
+		);
+		await manager.writeArtifact(sessionId, 'walkthrough', '# Walkthrough\n');
+
+		t.deepEqual(await manager.listArtifacts(sessionId), [
+			{
+				kind: 'implementation_plan',
+				path: manager.getArtifactPath(sessionId, 'implementation_plan'),
+			},
+			{kind: 'task', path: manager.getArtifactPath(sessionId, 'task')},
+			{
+				kind: 'walkthrough',
+				path: manager.getArtifactPath(sessionId, 'walkthrough'),
+			},
+		]);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
