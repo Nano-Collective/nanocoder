@@ -19,30 +19,6 @@ export function findLastAssistantContent(
 	return undefined;
 }
 
-/**
- * Extracts the raw source of the last fenced code block in a markdown string.
- * Fences must sit at the start of a line (same convention as the markdown
- * parser); leading indent on the opening fence is stripped from each line.
- */
-export function findLastCodeBlock(markdown: string): string | undefined {
-	const matches = [
-		...markdown.matchAll(/^([ \t]*)```[^\n]*\n([\s\S]*?)^\1```/gm),
-	];
-	const last = matches[matches.length - 1];
-	if (!last) return undefined;
-	const indent = last[1] ?? '';
-	const code = last[2] ?? '';
-	const dedented = indent
-		? code
-				.split('\n')
-				.map(line =>
-					line.startsWith(indent) ? line.slice(indent.length) : line,
-				)
-				.join('\n')
-		: code;
-	return dedented.replace(/\n$/, '') || undefined;
-}
-
 export const copyCommand: Command = {
 	name: 'copy',
 	description: 'Copy the last assistant response to the clipboard',
