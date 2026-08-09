@@ -264,7 +264,7 @@ const writeFileValidator = async (args: {
 	if (existsSync(absPath) && !hasSeenFile(absPath)) {
 		return {
 			valid: false,
-			error: `"${args.path}" already exists and you have not read it this session. Call read_file on it first (so you don't discard existing content), then retry. For small changes, prefer string_replace over a full overwrite.`,
+			error: `"${args.path}" already exists and you have not read it this session. Call read_file on it first — if the file is over 300 lines, specify start_line and end_line to read its actual content, not just metadata — so you don't discard existing content, then retry. For small changes, prefer string_replace over a full overwrite.`,
 		};
 	}
 

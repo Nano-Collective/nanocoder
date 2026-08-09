@@ -339,7 +339,7 @@ const diffEditValidator = async (
 	if (!hasSeenFile(absPath)) {
 		return {
 			valid: false,
-			error: `You must read "${args.path}" before editing it. Call read_file on it first, then retry diff_edit with SEARCH blocks copied from the file.`,
+			error: `You must read "${args.path}" before editing it. Call read_file on it first — if the file is over 300 lines, specify start_line and end_line to read its actual content, not just metadata — then retry diff_edit with SEARCH blocks copied from the file.`,
 		};
 	}
 
