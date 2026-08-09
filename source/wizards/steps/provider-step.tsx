@@ -1,7 +1,7 @@
 import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
 import Spinner from 'ink-spinner';
 import {useEffect, useRef, useState} from 'react';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {getColors} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import type {ProviderConfig} from '../../types/config';
@@ -591,7 +591,7 @@ export function ProviderStep({
 						</Text>
 					</Box>
 				)}
-				<SelectInput
+				<StyledSelectInput
 					items={initialOptions}
 					onSelect={(item: {value: string}) => handleInitialSelect(item)}
 				/>
@@ -614,7 +614,7 @@ export function ProviderStep({
 						</Text>
 					</Box>
 				)}
-				<SelectInput
+				<StyledSelectInput
 					items={getTemplateOptions()}
 					limit={listLimit}
 					onSelect={(item: TemplateOption) => handleTemplateSelect(item)}
@@ -636,7 +636,7 @@ export function ProviderStep({
 						Select a provider to edit:
 					</Text>
 				</Box>
-				<SelectInput
+				<StyledSelectInput
 					items={editOptions}
 					limit={listLimit}
 					onSelect={(item: TemplateOption) => handleEditSelect(item)}
@@ -659,7 +659,7 @@ export function ProviderStep({
 						{provider?.name} - What would you like to do?
 					</Text>
 				</Box>
-				<SelectInput
+				<StyledSelectInput
 					items={editOrDeleteOptions}
 					onSelect={(item: {value: string}) => handleEditOrDeleteChoice(item)}
 				/>

@@ -1,6 +1,6 @@
 import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
 import {useMemo} from 'react';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {getAppConfig} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -55,25 +55,7 @@ export function SettingsToolApprovalPanel({
 					change.
 				</Text>
 			</Box>
-			<SelectInput
-				items={items}
-				onSelect={() => {}}
-				indicatorComponent={({isSelected}) => (
-					<Box minWidth={2}>
-						<Text color={isSelected ? colors.primary : colors.text}>
-							{isSelected ? '>' : ' '}
-						</Text>
-					</Box>
-				)}
-				itemComponent={({isSelected, label}) => (
-					<Text
-						color={isSelected ? colors.primary : colors.text}
-						wrap="truncate-end"
-					>
-						{label}
-					</Text>
-				)}
-			/>
+			<StyledSelectInput items={items} onSelect={() => {}} />
 			<Box marginTop={1}>
 				<Text color={colors.secondary}>Shift+Tab back · Esc back</Text>
 			</Box>

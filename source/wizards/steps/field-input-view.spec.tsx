@@ -1,5 +1,5 @@
 import test from 'ava';
-import {render} from 'ink-testing-library';
+import {renderWithTheme as render} from '@/test-utils/render-with-theme';
 import React from 'react';
 import stripAnsi from 'strip-ansi';
 import type {TemplateField} from '../templates/provider-templates';
@@ -66,12 +66,12 @@ test('boolean field defaults highlight to Skip when value is empty', t => {
 
 	// ink-select-input renders the highlighted item with the indicator character.
 	// Check that the indicator is on the Skip line — i.e. the Skip line is
-	// the rightmost "❯" line in the frame.
+	// the rightmost indicator line in the frame.
 	const output = lastFrame() || '';
 	const lines = output.split('\n');
 	const skipLineIndex = lines.findIndex(l => l.includes('Skip'));
 	t.true(skipLineIndex >= 0, 'Skip option should be rendered');
-	t.regex(lines[skipLineIndex] ?? '', /❯/);
+	t.regex(lines[skipLineIndex] ?? '', />/);
 	unmount();
 });
 
@@ -91,7 +91,7 @@ test('boolean field highlights Yes when currentValue is "true"', t => {
 		l => l.includes('Yes') && !l.includes('No'),
 	);
 	t.true(yesLineIndex >= 0, 'Yes option should be rendered');
-	t.regex(lines[yesLineIndex] ?? '', /❯/);
+	t.regex(lines[yesLineIndex] ?? '', />/);
 	unmount();
 });
 
@@ -113,7 +113,7 @@ test('boolean field highlights No when currentValue is "false"', t => {
 		l => /\bNo\b/.test(l) && !l.includes('Yes'),
 	);
 	t.true(noLineIndex >= 0, 'No option should be rendered');
-	t.regex(lines[noLineIndex] ?? '', /❯/);
+	t.regex(lines[noLineIndex] ?? '', />/);
 	unmount();
 });
 

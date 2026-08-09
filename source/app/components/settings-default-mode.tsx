@@ -1,7 +1,7 @@
 import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
 import {useMemo, useState} from 'react';
 import {type CliMode, VALID_MODES} from '@/app/types';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {updateConfigValue} from '@/config/config-writer';
 import {loadDefaultMode} from '@/config/index';
@@ -82,7 +82,7 @@ export function SettingsDefaultModePanel({
 			{/* Label and description are separate rows: as one long string they
 			    wrapped with no hanging indent, so continuation lines ran flush
 			    left and the list read as a jumble on narrow terminals. */}
-			<SelectInput
+			<StyledSelectInput
 				items={items}
 				initialIndex={initialIndex}
 				onSelect={handleSelect}

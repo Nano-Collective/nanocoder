@@ -1,7 +1,7 @@
 import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
 import React from 'react';
 import {RenderErrorBoundary} from '@/components/render-error-boundary';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getToolManager} from '@/message-handler';
@@ -196,7 +196,7 @@ export default function ToolConfirmation({
 							</Text>
 						</Box>
 
-						<SelectInput items={options} onSelect={handleSelect} />
+						<StyledSelectInput items={options} onSelect={handleSelect} />
 
 						<Box marginTop={1}>
 							<Text color={colors.secondary}>Press Escape to cancel</Text>

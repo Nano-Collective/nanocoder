@@ -1,8 +1,8 @@
 import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
 import {Tab, Tabs} from 'ink-tab';
 import {useEffect, useState} from 'react';
 import TextInput from '@/components/text-input';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {getColors} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {
@@ -425,7 +425,7 @@ export function McpStep({
 						))}
 					</Box>
 				)}
-				<SelectInput
+				<StyledSelectInput
 					items={initialOptions}
 					onSelect={(item: {value: string}) => handleInitialSelect(item)}
 				/>
@@ -473,7 +473,7 @@ export function McpStep({
 							: 'Select a remote MCP server to add:'}
 					</Text>
 				</Box>
-				<SelectInput
+				<StyledSelectInput
 					items={templateOptions}
 					limit={tabsListLimit}
 					onSelect={handleTemplateSelect}
@@ -495,7 +495,7 @@ export function McpStep({
 						Select an MCP server to edit:
 					</Text>
 				</Box>
-				<SelectInput
+				<StyledSelectInput
 					items={editOptions}
 					limit={editListLimit}
 					onSelect={(item: TemplateOption) => handleEditSelect(item)}
@@ -519,7 +519,7 @@ export function McpStep({
 						{server?.name} - What would you like to do?
 					</Text>
 				</Box>
-				<SelectInput
+				<StyledSelectInput
 					items={editOrDeleteOptions}
 					onSelect={(item: {value: string}) => handleEditOrDeleteChoice(item)}
 				/>
