@@ -1,6 +1,7 @@
 import test from 'ava';
 import type {AIProviderConfig} from '@/types/index';
 import {AISDKClient} from './ai-sdk-client.js';
+import type {TaggedProvider} from './providers/provider-factory.js';
 
 test('AISDKClient constructor initializes with config', t => {
 	const config: AIProviderConfig = {
@@ -114,4 +115,33 @@ test('AISDKClient handles config without models', t => {
 
 	const client = new AISDKClient(config);
 	t.is(client.getCurrentModel(), '');
+});
+
+test('AISDKClient sends the normalized Atlas model to its provider', async t => {
+	const config: AIProviderConfig = {
+		name: 'Atlas Cloud',
+		type: 'openai',
+		models: ['gpt-5.6-sol'],
+		config: {
+			baseURL: 'https://api.atlascloud.ai/v1',
+			apiKey: 'test-key',
+		},
+	};
+	const client = new AISDKClient(config);
+	let receivedModel: string | undefined;
+	const provider = ((model: string): never => {
+		receivedModel = model;
+		throw new Error('model captured');
+	}) as unknown as Extract<
+		TaggedProvider,
+		{kind: 'openai-compatible'}
+	>['provider'];
+	(client as unknown as {provider: TaggedProvider}).provider = {
+		kind: 'openai-compatible',
+		provider,
+	};
+
+	await t.throwsAsync(client.chat([], {}, {}), {message: 'model captured'});
+
+	t.is(receivedModel, 'openai/gpt-5.6-sol');
 });
