@@ -3,6 +3,7 @@ import {join} from 'node:path';
 import test from 'ava';
 import {AcpAgent} from '@/acp/acp-agent';
 import type {AcpInitContext} from '@/acp/acp-types';
+import {clearAppConfig} from '@/config';
 import {
 	setToolRegistryGetter,
 	setToolManagerGetter,
@@ -101,6 +102,38 @@ test('AcpAgent.initialize - returns empty auth methods', async t => {
 	const {agent} = createAgent();
 	const result = await agent.initialize({protocolVersion: 1});
 	t.deepEqual(result.authMethods, []);
+});
+
+test.serial('AcpAgent.unstable_listProviders - returns ACP provider identifiers', async t => {
+	const previousProviders = process.env.NANOCODER_PROVIDERS;
+	process.env.NANOCODER_PROVIDERS = JSON.stringify([
+		{
+			name: 'Atlas Cloud',
+			baseUrl: 'https://api.atlascloud.ai/v1',
+			models: ['openai/gpt-5.6-sol'],
+		},
+	]);
+	clearAppConfig();
+	try {
+		const {agent} = createAgent();
+		const result = await agent.unstable_listProviders({});
+
+		t.deepEqual(result.providers, [
+			{
+				id: 'Atlas Cloud',
+				providerId: 'Atlas Cloud',
+				required: false,
+				supported: ['openai'],
+			},
+		]);
+	} finally {
+		if (previousProviders === undefined) {
+			delete process.env.NANOCODER_PROVIDERS;
+		} else {
+			process.env.NANOCODER_PROVIDERS = previousProviders;
+		}
+		clearAppConfig();
+	}
 });
 
 // ============================================================================
