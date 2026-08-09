@@ -197,11 +197,29 @@ export async function runPlainConversation(
 			modeOverrides,
 		);
 
-		if (result?.usage) {
+		// The client always returns a `usage` object, but every field inside it is
+		// optional — providers that report nothing leave all three undefined, and
+		// OpenAI-compatible local servers commonly report input/output without a
+		// total. Only count a turn as reporting usage when at least one field is a
+		// real number, so the block stays absent (rather than an all-zero block
+		// indistinguishable from a genuine zero) for providers with no telemetry.
+		const turnUsage = result?.usage;
+		const inputTokens =
+			typeof turnUsage?.inputTokens === 'number' ? turnUsage.inputTokens : null;
+		const outputTokens =
+			typeof turnUsage?.outputTokens === 'number'
+				? turnUsage.outputTokens
+				: null;
+		const totalTokens =
+			typeof turnUsage?.totalTokens === 'number' ? turnUsage.totalTokens : null;
+
+		if (inputTokens !== null || outputTokens !== null || totalTokens !== null) {
 			hasReportedUsage = true;
-			accumulatedInputTokens += result.usage.inputTokens ?? 0;
-			accumulatedOutputTokens += result.usage.outputTokens ?? 0;
-			accumulatedTotalTokens += result.usage.totalTokens ?? 0;
+			accumulatedInputTokens += inputTokens ?? 0;
+			accumulatedOutputTokens += outputTokens ?? 0;
+			// Fall back to input+output so a missing total never reads as zero spend.
+			accumulatedTotalTokens +=
+				totalTokens ?? (inputTokens ?? 0) + (outputTokens ?? 0);
 		}
 
 		if (!isJson && (reasoningPrinted || contentStarted)) {
