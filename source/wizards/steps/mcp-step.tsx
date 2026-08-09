@@ -10,7 +10,15 @@ import {
 	type McpServerConfig,
 	type McpTemplate,
 } from '../templates/mcp-templates';
+import {useListLimit} from './use-list-limit';
 import {useWizardForm} from './use-wizard-form';
+
+/**
+ * The tabs step carries more furniture than a plain list step — the tab bar
+ * and its "Select a … server to add:" prompt sit between the heading and the
+ * list, and a navigation hint sits under it.
+ */
+const TABS_CHROME_ROWS = 18;
 
 interface McpStepProps {
 	onComplete: (mcpServers: Record<string, McpServerConfig>) => void;
@@ -42,6 +50,8 @@ export function McpStep({
 }: McpStepProps) {
 	const colors = getColors();
 	const {isNarrow} = useResponsiveTerminal();
+	const tabsListLimit = useListLimit(TABS_CHROME_ROWS);
+	const editListLimit = useListLimit();
 	const [servers, setServers] =
 		useState<Record<string, McpServerConfig>>(existingServers);
 
@@ -463,10 +473,14 @@ export function McpStep({
 							: 'Select a remote MCP server to add:'}
 					</Text>
 				</Box>
-				<SelectInput items={templateOptions} onSelect={handleTemplateSelect} />
+				<SelectInput
+					items={templateOptions}
+					limit={tabsListLimit}
+					onSelect={handleTemplateSelect}
+				/>
 				<Box marginTop={1}>
 					<Text color={colors.secondary}>
-						Arrow keys: Navigate | Tab: Switch tabs
+						Arrow keys: Navigate (list scrolls) | Tab: Switch tabs
 					</Text>
 				</Box>
 			</Box>
@@ -483,6 +497,7 @@ export function McpStep({
 				</Box>
 				<SelectInput
 					items={editOptions}
+					limit={editListLimit}
 					onSelect={(item: TemplateOption) => handleEditSelect(item)}
 				/>
 			</Box>

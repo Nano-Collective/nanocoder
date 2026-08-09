@@ -930,3 +930,37 @@ test('McpStep handles server with empty env object', t => {
 	const output = lastFrame();
 	t.regex(output!, /test/);
 });
+
+// ============================================================================
+// Regression: an unbounded list overflows the wizard box on a normal-height
+// terminal, hiding the trailing "Done & Save" entry (same class as #829).
+// ============================================================================
+
+const waitTick = async (ms = 50) =>
+	new Promise(resolve => setTimeout(resolve, ms));
+
+test.serial(
+	'McpStep scrolls the template list instead of overflowing the terminal',
+	async t => {
+		const {lastFrame, stdin, unmount} = render(
+			<McpStep onComplete={() => {}} />,
+		);
+
+		await waitTick();
+		stdin.write('\r');
+		await waitTick();
+
+		const output = lastFrame() || '';
+		t.regex(output, /Add MCP Servers:/);
+		t.regex(output, /list scrolls/);
+
+		// Only a window of the local templates fits at the default 24 rows: the
+		// first entries render, later ones and the trailing "Done & Save" stay
+		// off the list until the user scrolls to them.
+		t.regex(output, /Filesystem/);
+		t.notRegex(output, /Playwright/);
+		t.notRegex(output, /Done & Save/);
+
+		unmount();
+	},
+);
