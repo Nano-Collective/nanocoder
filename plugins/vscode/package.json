@@ -81,6 +81,19 @@
 				"title": "New Chat",
 				"category": "Nanocoder",
 				"icon": "$(add)"
+			},
+			{
+				"command": "nanocoder.copyLastCodeBlock",
+				"title": "Copy Last Code Block",
+				"category": "Nanocoder"
+			}
+		],
+		"keybindings": [
+			{
+				"command": "nanocoder.copyLastCodeBlock",
+				"key": "ctrl+alt+shift+c",
+				"mac": "cmd+alt+shift+c",
+				"when": "focusedView == nanocoder.chatView"
 			}
 		],
 		"menus": {

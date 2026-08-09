@@ -243,6 +243,8 @@ export class AcpAgent implements Agent {
 							'**Available slash commands in VS Code GUI:**',
 							'',
 							'- `/clear` — Clear the current conversation',
+							'- `/copy` — Copy the last assistant response',
+							'- `/copy code` — Copy the last code block from the last response',
 							'- `/help` — Show this help message',
 							'',
 							'**Not available in VS Code GUI** (CLI-only):',

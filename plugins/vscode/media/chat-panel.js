@@ -151,6 +151,10 @@
 	let isProcessing = false;
 	let currentAggregator = null;
 	let currentThoughtBox = null;
+	let toastTimeout = null;
+	// Raw markdown of the most recent agent message, kept for the /copy
+	// input command (rendered DOM textContent would lose fences and bullets).
+	let lastAgentRawText = '';
 
 	// Premium SVG Icons (Feather Icons)
 	const ICONS = {
@@ -418,9 +422,39 @@
 		}
 	});
 
+	// Ctrl/Cmd+Alt+Shift+C is owned by the host keybinding
+	// (`nanocoder.copyLastCodeBlock` in package.json). VS Code forwards
+	// webview keydowns to the host for resolution even after preventDefault,
+	// so a document listener here would double-fire (two clipboard writes /
+	// two toasts). The host posts `{type:'copyLastCodeBlock'}` back into
+	// this page. Ctrl+Shift+C and Ctrl+Alt+C are avoided: VS Code (external
+	// terminal) and Cursor (confetti) claim them at app level.
+
 	function submitMessage() {
 		let text = chatInput.value.trim();
 		if (!text && attachedPaths.length === 0 && pendingImages.length === 0) return;
+
+		// /copy is handled locally, mirroring the terminal slash command:
+		// copy the previous agent output instead of prompting the agent.
+		// Match on raw input before context chips are folded in, otherwise
+		// `/copy` with an attachment becomes `/copy\n\n@[file] …` and falls
+		// through to the agent as an unrecognized slash command.
+		// `/copy code` copies just the last fenced code block.
+		const lower = text.toLowerCase();
+		if (lower === '/copy' || lower === '/copy code') {
+			chatInput.value = '';
+			chatInput.style.height = 'auto';
+			attachedPaths = [];
+			renderChips();
+			pendingImages = [];
+			renderImagePreviews();
+			if (lower === '/copy code') {
+				copyLastCodeBlock();
+			} else {
+				copyLastResponse();
+			}
+			return;
+		}
 
 		// Append attached paths as context lines
 		if (attachedPaths.length > 0) {
@@ -651,6 +685,7 @@
 
 		let parsedContent = content;
 		let extractedChips = [];
+		let textContainer = null;
 
 		if (role === 'user' && content) {
 			// Handle pre-injected format (before sending)
@@ -672,8 +707,10 @@
 		}
 
 		if (parsedContent || extractedChips.length > 0) {
-			const textContainer = document.createElement('div');
-			textContainer.className = 'markdown-body';
+			textContainer = document.createElement('div');
+			// `agent-markdown` marks assistant prose so copyLastCodeBlock() can skip
+			// user echoes and thought boxes, which also render as `.markdown-body`.
+			textContainer.className = 'markdown-body' + (role === 'agent' ? ' agent-markdown' : '');
 
 			if (typeof marked !== 'undefined') {
 				textContainer.innerHTML = marked.parse(parsedContent);
@@ -737,6 +774,7 @@
 		if (role === 'agent') {
 			currentTurnEl = msgEl;
 			currentTextEl = textContainer;
+			lastAgentRawText = content;
 		}
 	}
 
@@ -756,8 +794,9 @@
 			msgEl.className = 'message agent min-w-0 w-full';
 
 			const textContainer = document.createElement('div');
-			textContainer.className = 'markdown-body leading-snug break-words';
+			textContainer.className = 'markdown-body agent-markdown leading-snug break-words';
 			currentTurnText = textChunk;
+			lastAgentRawText = currentTurnText;
 
 			if (typeof marked !== 'undefined') {
 				textContainer.innerHTML = marked.parse(currentTurnText);
@@ -777,6 +816,7 @@
 		} else {
 			// Append to existing turn
 			currentTurnText += textChunk;
+			lastAgentRawText = currentTurnText;
 			if (currentTurnEl.parentElement) {
 				currentTurnEl.parentElement.dataset.rawText = currentTurnText;
 			}
@@ -804,6 +844,75 @@
 
 	function scrollToBottom() {
 		messagesContainer.scrollTop = messagesContainer.scrollHeight;
+	}
+
+	// --- Copy last code block ---
+
+	function showToast(text) {
+		let toast = document.getElementById('copy-toast');
+		if (!toast) {
+			toast = document.createElement('div');
+			toast.id = 'copy-toast';
+			toast.setAttribute('role', 'status');
+			toast.className = 'fixed bottom-24 left-1/2 -translate-x-1/2 z-50 flex items-center px-3 py-1.5 rounded-md border border-vscode-border bg-vscode-dropdown-bg text-vscode-dropdown-fg font-vscode text-[0.85em] shadow-lg pointer-events-none transition-opacity duration-200';
+			document.body.appendChild(toast);
+		}
+
+		toast.innerHTML = ICONS.clipboard;
+		const label = document.createElement('span');
+		label.textContent = text;
+		toast.appendChild(label);
+		toast.classList.remove('opacity-0');
+
+		if (toastTimeout) clearTimeout(toastTimeout);
+		toastTimeout = setTimeout(() => {
+			toast.classList.add('opacity-0');
+			toastTimeout = null;
+		}, 1500);
+	}
+
+	// Streaming batches marked.parse() behind a 50ms timer. Flush so a copy
+	// mid-turn (or a turn boundary) reads the current markdown, not the
+	// previous throttled frame. Shared by copyLastCodeBlock and endCurrentTextBlock.
+	function flushPendingRender() {
+		if (!renderTimeout) return;
+		clearTimeout(renderTimeout);
+		renderTimeout = null;
+		if (currentTextEl && typeof marked !== 'undefined') {
+			currentTextEl.innerHTML = marked.parse(currentTurnText);
+		}
+	}
+
+	function copyLastCodeBlock() {
+		flushPendingRender();
+
+		const agentMarkdowns = messagesContainer.querySelectorAll('.agent-markdown');
+		const lastAgent = agentMarkdowns[agentMarkdowns.length - 1];
+		if (!lastAgent) {
+			showToast('No code block in the last response');
+			return;
+		}
+
+		const blocks = lastAgent.querySelectorAll('pre code');
+		const lastBlock = blocks[blocks.length - 1];
+		const text = lastBlock ? lastBlock.textContent.replace(/\n$/, '') : '';
+
+		if (!text) {
+			showToast('No code block in the last response');
+			return;
+		}
+
+		vscode.postMessage({ type: 'copyToClipboard', text: text });
+	}
+
+	// Webview twin of the terminal /copy command: copies the whole previous
+	// agent response as raw markdown.
+	function copyLastResponse() {
+		if (!lastAgentRawText.trim()) {
+			showToast('No response to copy yet');
+			return;
+		}
+		vscode.postMessage({ type: 'copyToClipboard', text: lastAgentRawText });
 	}
 
 	// Handle messages from extension.
@@ -841,6 +950,7 @@
 				currentTurnEl = null;
 				currentTextEl = null;
 				currentTurnText = '';
+				lastAgentRawText = '';
 				if (currentThoughtBox) {
 					clearInterval(currentThoughtBox.timer);
 					currentThoughtBox = null;
@@ -865,6 +975,16 @@
 			case 'updateSessions':
 				sessionsData = message.sessions || [];
 				renderSessions(); // Always update so list is ready when history opens
+				break;
+			case 'copyLastCodeBlock':
+				copyLastCodeBlock();
+				break;
+			case 'copyResult':
+				showToast(
+					message.ok
+						? `Copied ${message.chars} characters`
+						: 'Could not copy to clipboard'
+				);
 				break;
 		}
 	});
@@ -950,13 +1070,7 @@
 	// tool call is appended to the block ABOVE the card, fusing pre-tool
 	// and post-tool output into one paragraph.
 	function endCurrentTextBlock() {
-		if (renderTimeout) {
-			clearTimeout(renderTimeout);
-			renderTimeout = null;
-			if (currentTextEl && typeof marked !== 'undefined') {
-				currentTextEl.innerHTML = marked.parse(currentTurnText);
-			}
-		}
+		flushPendingRender();
 		currentTurnEl = null;
 		currentTextEl = null;
 		currentTurnText = '';
