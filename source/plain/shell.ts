@@ -3,6 +3,8 @@ import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt
 import {getAppConfig} from '@/config/index';
 import {loadPreferences, savePreferences} from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
+import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
+import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {runPlainConversation} from '@/plain/conversation';
 import {initializePlain} from '@/plain/initialize';
 import {
@@ -42,6 +44,7 @@ export interface RunPlainShellDeps {
 	getShutdownManager: typeof getShutdownManager;
 	loadPreferences: typeof loadPreferences;
 	savePreferences: typeof savePreferences;
+	appendRelevantProjectContextWithCount: typeof appendRelevantProjectContextWithCount;
 }
 
 const defaultDeps: RunPlainShellDeps = {
@@ -50,6 +53,7 @@ const defaultDeps: RunPlainShellDeps = {
 	getShutdownManager,
 	loadPreferences,
 	savePreferences,
+	appendRelevantProjectContextWithCount,
 };
 
 /**
@@ -152,12 +156,28 @@ export async function runPlainShell(
 	const toolsForPrompt = toolsDisabled
 		? toolManager.getFilteredTools(availableNames)
 		: {};
-	const systemContent = appendToolDefinitionsToPrompt(
+	const toolPrompt = appendToolDefinitionsToPrompt(
 		basePrompt,
 		toolsDisabled,
 		fallbackToolFormat,
 		toolsForPrompt,
 	);
+
+	const projectContext = await deps.appendRelevantProjectContextWithCount(
+		toolPrompt,
+		prompt,
+		new SemanticMemoryManager(),
+		{
+			semanticMemoryEnabled:
+				deps.loadPreferences().semanticMemoryEnabled ?? true,
+		},
+	);
+	const systemContent = projectContext.systemPrompt;
+	if (projectContext.memoryCount > 0) {
+		writeStatus(
+			`Recalling ${projectContext.memoryCount} project memor${projectContext.memoryCount === 1 ? 'y' : 'ies'}...`,
+		);
+	}
 	setLastBuiltPrompt(systemContent);
 
 	const systemMessage: Message = {role: 'system', content: systemContent};

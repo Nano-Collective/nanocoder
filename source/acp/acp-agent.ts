@@ -33,8 +33,14 @@ import {AcpSession} from '@/acp/acp-session';
 import type {AcpInitContext} from '@/acp/acp-types';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
 import {getAppConfig} from '@/config/index';
-import {loadPreferences, updateLastUsed} from '@/config/preferences';
+import {
+	getSemanticMemoryEnabled,
+	loadPreferences,
+	updateLastUsed,
+} from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
+import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
+import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {getTuneToolMode} from '@/types/config';
 import {getLogger} from '@/utils/logging';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
@@ -148,6 +154,25 @@ export class AcpAgent implements Agent {
 				...(images.length > 0 ? {images} : {}),
 			},
 		];
+
+		if (session.baseSystemMessage) {
+			const projectContext = await appendRelevantProjectContextWithCount(
+				session.baseSystemMessage.content,
+				userText,
+				new SemanticMemoryManager({cwd: session.cwd}),
+				{semanticMemoryEnabled: getSemanticMemoryEnabled()},
+			);
+			session.systemMessage = {
+				role: 'system',
+				content: projectContext.systemPrompt,
+			};
+			setLastBuiltPrompt(projectContext.systemPrompt);
+			if (projectContext.memoryCount > 0) {
+				logger.info(
+					`ACP recall: session=${params.sessionId} count=${projectContext.memoryCount}`,
+				);
+			}
+		}
 
 		const config = getAppConfig();
 		const nonInteractiveAlwaysAllow = config.alwaysAllow ?? [];
@@ -344,7 +369,8 @@ export class AcpAgent implements Agent {
 		);
 		setLastBuiltPrompt(systemContent);
 
-		session.systemMessage = {role: 'system', content: systemContent};
+		session.baseSystemMessage = {role: 'system', content: systemContent};
+		session.systemMessage = session.baseSystemMessage;
 	}
 }
 

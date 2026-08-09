@@ -12,6 +12,7 @@ export class AcpSession {
 
 	messages: Message[] = [];
 	systemMessage?: Message;
+	baseSystemMessage?: Message;
 	abortController = new AbortController();
 	developmentMode: DevelopmentMode;
 	/** True while a prompt turn is being processed, to reject overlapping prompts. */

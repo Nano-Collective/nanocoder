@@ -1,4 +1,5 @@
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
+import type {MemoryProposal} from '@/memory/summarizer-service';
 import {SummarizerService} from '@/memory/summarizer-service';
 import type {Command} from '@/types/commands';
 import {formatError} from '@/utils/error-formatter';
@@ -9,11 +10,14 @@ interface MemoryCommandOptions {
 		SemanticMemoryManager,
 		'listMemories' | 'deleteMemory' | 'clearMemories'
 	>;
-	summarizerService?: Pick<SummarizerService, 'proposeMemoriesFromMessages'>;
+	summarizerService?: Pick<
+		SummarizerService,
+		'proposeMemoriesFromMessages' | 'acceptProposal'
+	>;
 }
 
 const USAGE =
-	'Usage: /memory list | /memory delete <id> | /memory clear | /memory propose';
+	'Usage: /memory list | /memory delete <id> | /memory clear | /memory propose | /memory accept <n>';
 
 export function createMemoryCommand(
 	options: MemoryCommandOptions = {},
@@ -21,6 +25,7 @@ export function createMemoryCommand(
 	const memoryManager = options.memoryManager ?? new SemanticMemoryManager();
 	const summarizerService =
 		options.summarizerService ?? new SummarizerService();
+	let lastProposals: MemoryProposal[] = [];
 
 	return {
 		name: 'memory',
@@ -66,6 +71,7 @@ export function createMemoryCommand(
 					const proposals =
 						summarizerService.proposeMemoriesFromMessages(messages);
 					if (proposals.length === 0) {
+						lastProposals = [];
 						return infoMsg(
 							'No durable memory proposals found.',
 							'memory-propose',
@@ -79,6 +85,7 @@ export function createMemoryCommand(
 						if (aWarns > 0 && bWarns === 0) return 1;
 						return 0;
 					});
+					lastProposals = proposals;
 
 					const lines: string[] = [];
 					for (let i = 0; i < proposals.length; i++) {
@@ -111,10 +118,38 @@ export function createMemoryCommand(
 					}
 
 					lines.push(
-						'─────────────────────────────────\nRun /remember <content> to save any of the above.',
+						`─────────────────────────────────\nRun /memory accept <1-${proposals.length}> to save one of the above.`,
 					);
 
 					return infoMsg(lines.join('\n'), 'memory-propose');
+				}
+
+				if (subcommand === 'accept') {
+					if (lastProposals.length === 0) {
+						return errorMsg(
+							'No proposals to accept. Run /memory propose first.',
+							'memory-error',
+						);
+					}
+
+					const index = Number.parseInt(args[1] ?? '', 10);
+					const proposal = Number.isInteger(index)
+						? lastProposals[index - 1]
+						: undefined;
+					if (!proposal) {
+						return errorMsg(
+							`Usage: /memory accept <1-${lastProposals.length}>`,
+							'memory-error',
+						);
+					}
+
+					const memory = await summarizerService.acceptProposal(proposal);
+					lastProposals = lastProposals.filter((_, i) => i !== index - 1);
+
+					return successMsg(
+						`Saved ${memory.category} memory: ${memory.content}`,
+						'memory-accept',
+					);
 				}
 
 				return errorMsg(USAGE, 'memory-error');
