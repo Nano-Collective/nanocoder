@@ -79,6 +79,10 @@ export const TOKEN_THRESHOLD_CRITICAL_PERCENT = 95;
 
 // === OUTPUT TRUNCATION ===
 export const TRUNCATION_OUTPUT_LIMIT = 2000;
+// Keep one unusually large tool response from dominating the model context.
+// The cap is intentionally higher than the Bash preview limit so normal file
+// reads and search results remain useful while unbounded tools stay bounded.
+export const MAX_TOOL_RESULT_CHARS = 20_000;
 export const TRUNCATION_DESCRIPTION_LENGTH = 100;
 
 // === DELAYS ===

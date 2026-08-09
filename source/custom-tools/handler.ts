@@ -5,7 +5,7 @@ import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {renderBody} from '@/custom-tools/template';
 import type {CustomToolMetadata} from '@/types/custom-tools';
 import type {ToolHandler} from '@/types/index';
-import {truncateHeadAndTail} from '@/utils/truncate-output';
+import {truncateToolResult} from '@/utils/truncate-tool-result';
 
 /**
  * Build a `ToolHandler` that renders the script body and runs it under the
@@ -92,13 +92,14 @@ export function runScript(
 				);
 				return;
 			}
-			resolvePromise(truncate(formatScriptOutput(code, stdout, stderr)));
+			resolvePromise(
+				truncateToolResult(
+					formatScriptOutput(code, stdout, stderr),
+					TRUNCATION_OUTPUT_LIMIT,
+				),
+			);
 		});
 	});
-}
-
-function truncate(text: string): string {
-	return truncateHeadAndTail(text, TRUNCATION_OUTPUT_LIMIT);
 }
 
 /**

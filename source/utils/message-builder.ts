@@ -1,4 +1,5 @@
 import type {ImageAttachment, Message, ToolResult} from '@/types/core';
+import {truncateToolResult} from './truncate-tool-result.js';
 
 /**
  * Builder pattern for constructing message arrays.
@@ -31,7 +32,7 @@ export class MessageBuilder {
 	addToolResults(results: ToolResult[]): this {
 		const toolMessages: Message[] = results.map(result => ({
 			role: 'tool' as const,
-			content: result.content || '',
+			content: truncateToolResult(result.content || ''),
 			tool_call_id: result.tool_call_id,
 			name: result.name,
 			structuredContent: result.structuredContent,
