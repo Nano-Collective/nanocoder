@@ -1065,3 +1065,79 @@ test('callTool sanitizes object arguments to strings when schema expects a strin
 		t.is(typeof capturedArgs.path, 'string', 'Path should remain a string');
 	}
 });
+
+// ============================================================================
+// Regression Tests for connectToServer lifecycle (failed tool discovery)
+// ============================================================================
+
+// Subclass exposing the createClient() seam so we can drive the connect path
+// with a fake client and no real transport/network.
+class SeamMCPClient extends MCPClient {
+	constructor(private readonly injected: any) {
+		super();
+	}
+	protected createClient(): any {
+		return this.injected;
+	}
+}
+
+const httpServer = {
+	name: 'seam-server',
+	transport: 'http' as const,
+	url: 'http://localhost:1/mcp',
+};
+
+test('MCPClient.connectToServer: does not leave the server registered when listTools fails', async t => {
+	let closed = false;
+	const failingClient = {
+		async connect() {},
+		async listTools() {
+			throw new Error('tools/list failed');
+		},
+		async close() {
+			closed = true;
+		},
+	};
+
+	const client = new SeamMCPClient(failingClient);
+
+	await t.throwsAsync(async () => await client.connectToServer(httpServer), {
+		message: /tools\/list failed/,
+	});
+
+	// The failed server must not linger as connected for the rest of the session.
+	t.false(client.isServerConnected('seam-server'));
+	t.is(client.getServerInfo('seam-server'), undefined);
+	t.is(client.getConnectedServers().length, 0);
+	t.is(client.getServerTools('seam-server').length, 0);
+
+	// The partially-established client must be closed so its transport/child
+	// process doesn't leak.
+	t.true(closed, 'client.close() should be called after a failed connect');
+});
+
+test('MCPClient.connectToServer: registers the server once tool discovery succeeds', async t => {
+	const okClient = {
+		async connect() {},
+		async listTools() {
+			return {
+				tools: [
+					{
+						name: 'ok_tool',
+						description: 'A working tool',
+						inputSchema: {type: 'object', properties: {}},
+					},
+				],
+			};
+		},
+		async close() {},
+	};
+
+	const client = new SeamMCPClient(okClient);
+
+	await t.notThrowsAsync(async () => await client.connectToServer(httpServer));
+
+	t.true(client.isServerConnected('seam-server'));
+	t.is(client.getServerTools('seam-server').length, 1);
+	t.is(client.getServerInfo('seam-server')?.connected, true);
+});
