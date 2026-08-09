@@ -209,7 +209,7 @@ test.serial('list_directory shows files and directories', async t => {
 	}
 });
 
-test.serial('list_directory shows file sizes', async t => {
+test.serial('list_directory hides file sizes by default', async t => {
 	t.timeout(10000);
 	const originalCwd = process.cwd();
 
@@ -225,11 +225,35 @@ test.serial('list_directory shows file sizes', async t => {
 			{toolCallId: 'test', messages: []},
 		);
 
-		// Should show file size in bytes
-		t.true(result.includes('bytes') || result.includes('1,000'));
+		t.true(result.includes('largefile.txt'));
+		t.false(result.includes('bytes'));
 	} finally {
 		process.chdir(originalCwd);
 		rmSync(join(originalCwd, 'test-listdir-sizes-temp'), {recursive: true, force: true});
+	}
+});
+
+test.serial('list_directory shows file sizes when showSizes=true', async t => {
+	t.timeout(10000);
+	const originalCwd = process.cwd();
+
+	try {
+		const testDir = join(process.cwd(), 'test-listdir-sizes-opt-in-temp');
+		mkdirSync(testDir, {recursive: true});
+		writeFileSync(join(testDir, 'largefile.txt'), 'x'.repeat(1000));
+
+		process.chdir(testDir);
+
+		const result = await listDirectoryTool.tool.execute!(
+			{showSizes: true},
+			{toolCallId: 'test', messages: []},
+		);
+
+		// Should show file size in bytes
+		t.true(result.includes('bytes') || result.includes('1000') || result.includes('1,000'));
+	} finally {
+		process.chdir(originalCwd);
+		rmSync(join(originalCwd, 'test-listdir-sizes-opt-in-temp'), {recursive: true, force: true});
 	}
 });
 
