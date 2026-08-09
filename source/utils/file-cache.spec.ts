@@ -346,3 +346,33 @@ test('getCachedFileContent - throws descriptive error for corrupt DOCX', async t
 		await cleanupTempDir(tempDir);
 	}
 });
+
+test('getCachedFileContent - reads extensionless file as utf-8 text', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = join(tempDir, 'LICENSE');
+		await writeFile(filePath, 'plain text\nno extension', 'utf-8');
+
+		const result = await getCachedFileContent(filePath);
+
+		t.is(result.content, 'plain text\nno extension');
+		t.deepEqual(result.lines, ['plain text', 'no extension']);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test('getCachedFileContent - document extension check is case-insensitive', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = join(tempDir, 'test.PDF');
+		await writeFile(filePath, '%PDF-1.4\n%Fake PDF content');
+
+		await t.throwsAsync(
+			async () => getCachedFileContent(filePath),
+			{message: /Failed to extract text from document/}
+		);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
