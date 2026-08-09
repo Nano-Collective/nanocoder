@@ -3,7 +3,7 @@ import {randomBytes} from 'node:crypto';
 import {createServer, type Server} from 'node:http';
 import type {Duplex} from 'node:stream';
 import {WebSocket, WebSocketServer} from 'ws';
-import {nanocoderLogoSvg, renderWebModePage} from './page.js';
+import {createPageNonce, nanocoderLogoSvg, renderWebModePage} from './page.js';
 import {
 	parseWebClientEvent,
 	serializeWebServerEvent,
@@ -45,6 +45,9 @@ export async function startLocalWebServer(
 	const token = options.token ?? createLocalWebToken();
 
 	const server = createServer((request, response) => {
+		response.setHeader('x-content-type-options', 'nosniff');
+		response.setHeader('x-frame-options', 'DENY');
+
 		const requestUrl = new URL(request.url ?? '/', `http://${host}`);
 
 		if (requestUrl.pathname === '/health') {
@@ -62,6 +65,12 @@ export async function startLocalWebServer(
 			return;
 		}
 
+		if (requestUrl.pathname === '/favicon.ico') {
+			response.writeHead(302, {location: '/assets/nanocoder-icon.svg'});
+			response.end();
+			return;
+		}
+
 		if (requestUrl.pathname !== '/' && requestUrl.pathname !== '/index.html') {
 			response.writeHead(404, {'content-type': 'text/plain; charset=utf-8'});
 			response.end('Not found');
@@ -74,8 +83,12 @@ export async function startLocalWebServer(
 			return;
 		}
 
-		response.writeHead(200, {'content-type': 'text/html; charset=utf-8'});
-		response.end(renderWebModePage());
+		const nonce = createPageNonce();
+		response.writeHead(200, {
+			'content-type': 'text/html; charset=utf-8',
+			'content-security-policy': buildContentSecurityPolicy(host, port, nonce),
+		});
+		response.end(renderWebModePage(nonce));
 	});
 	const webSocketServer = new WebSocketServer({noServer: true});
 	const connectedClients = new Set<WebSocket>();
@@ -188,6 +201,7 @@ async function handleClientMessage(
 	} catch (error) {
 		sendServerEvent(clientSocket, {
 			type: 'error',
+			id: event.id,
 			message:
 				error instanceof Error
 					? error.message
@@ -208,6 +222,23 @@ function sendServerEvent(clientSocket: WebSocket, event: WebServerEvent): void {
 	}
 
 	clientSocket.send(serializeWebServerEvent(event));
+}
+
+function buildContentSecurityPolicy(
+	host: string,
+	port: number,
+	nonce: string,
+): string {
+	return [
+		"default-src 'self'",
+		`script-src 'self' 'nonce-${nonce}'`,
+		`style-src 'self' 'nonce-${nonce}'`,
+		"img-src 'self' data:",
+		`connect-src 'self' ws://${host}:${port}`,
+		"base-uri 'none'",
+		"form-action 'none'",
+		"frame-ancestors 'none'",
+	].join('; ');
 }
 
 function rejectWebSocketUpgrade(socket: Duplex): void {

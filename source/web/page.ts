@@ -1,3 +1,5 @@
+import {randomBytes} from 'node:crypto';
+
 export const nanocoderLogoSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Nanocoder">
 <rect width="64" height="64" rx="12" fill="#02191d"/>
 <path fill="#bb9af7" d="M8 17h7v30H8zM26 17h7v30h-7zM15 22h6v8h-6zM20 28h7v8h-7zM24 35h6v8h-6z"/>
@@ -6,14 +8,19 @@ export const nanocoderLogoSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox
 <rect x="46" y="40" width="11" height="7" fill="#7dcfff"/>
 </svg>`;
 
-export function renderWebModePage(): string {
+export function createPageNonce(): string {
+	return randomBytes(16).toString('base64');
+}
+
+export function renderWebModePage(nonce: string = createPageNonce()): string {
 	return `<!doctype html>
 <html lang="en">
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Nanocoder Web Mode</title>
-	<style>
+	<link rel="icon" type="image/svg+xml" href="/assets/nanocoder-icon.svg">
+	<style nonce="${nonce}">
 		:root {
 			color-scheme: light dark;
 			font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -90,8 +97,10 @@ export function renderWebModePage(): string {
 			color: #d8d0df;
 			transition: background 140ms ease, transform 140ms ease;
 		}
-		.icon-button:hover {
+		.icon-button:hover,
+		.icon-button:focus-visible {
 			background: rgba(245, 242, 235, 0.11);
+			outline: 0;
 			transform: translateY(-1px);
 		}
 		.new-chat {
@@ -136,6 +145,18 @@ export function renderWebModePage(): string {
 			min-height: 0;
 			overflow-y: auto;
 			padding-top: 2px;
+			scrollbar-width: thin;
+			scrollbar-color: rgba(245, 242, 235, 0.18) transparent;
+		}
+		.thread-list::-webkit-scrollbar {
+			width: 8px;
+		}
+		.thread-list::-webkit-scrollbar-thumb {
+			background: rgba(245, 242, 235, 0.18);
+			border-radius: 8px;
+		}
+		.thread-list::-webkit-scrollbar-thumb:hover {
+			background: rgba(245, 242, 235, 0.3);
 		}
 		.thread-item {
 			display: flex;
@@ -155,9 +176,11 @@ export function renderWebModePage(): string {
 			background: rgba(245, 242, 235, 0.08);
 			color: #f5f2eb;
 		}
-		.thread-item:hover {
+		.thread-item:hover,
+		.thread-item:focus-visible {
 			background: rgba(245, 242, 235, 0.055);
 			color: #f5f2eb;
+			outline: 0;
 		}
 		.sidebar-footer {
 			display: flex;
@@ -257,6 +280,18 @@ export function renderWebModePage(): string {
 			pointer-events: none;
 			padding: 28px clamp(18px, 10vw, 160px) 160px;
 			scroll-behavior: smooth;
+			scrollbar-width: thin;
+			scrollbar-color: rgba(245, 242, 235, 0.18) transparent;
+		}
+		.messages::-webkit-scrollbar {
+			width: 10px;
+		}
+		.messages::-webkit-scrollbar-thumb {
+			background: rgba(245, 242, 235, 0.18);
+			border-radius: 8px;
+		}
+		.messages::-webkit-scrollbar-thumb:hover {
+			background: rgba(245, 242, 235, 0.3);
 		}
 		.message {
 			display: grid;
@@ -584,15 +619,18 @@ export function renderWebModePage(): string {
 			color: #0d1114;
 			transition: transform 120ms ease, opacity 120ms ease;
 		}
-		.send-button:not(:disabled):hover {
+		.send-button:not(:disabled):hover,
+		.send-button:not(:disabled):focus-visible {
 			transform: translateY(-1px);
 			background: #6ee7a1;
+			outline: 0;
 		}
 		.send-button.is-cancel {
 			background: #ff7675;
 			color: #08090b;
 		}
-		.send-button.is-cancel:not(:disabled):hover {
+		.send-button.is-cancel:not(:disabled):hover,
+		.send-button.is-cancel:not(:disabled):focus-visible {
 			background: #ff9493;
 		}
 		.send-button:disabled,
@@ -710,7 +748,8 @@ export function renderWebModePage(): string {
 			background: rgba(192, 202, 245, 0.08);
 			color: var(--tn-text);
 		}
-		.icon-button:hover {
+		.icon-button:hover,
+		.icon-button:focus-visible {
 			background: rgba(125, 207, 255, 0.14);
 		}
 		.new-chat {
@@ -743,6 +782,7 @@ export function renderWebModePage(): string {
 		}
 		.thread-item.active,
 		.thread-item:hover,
+		.thread-item:focus-visible,
 		.mode-pill,
 		.prompt-button:hover {
 			background: rgba(125, 207, 255, 0.1);
@@ -823,7 +863,8 @@ export function renderWebModePage(): string {
 			background: var(--tn-tool);
 			color: var(--tn-base);
 		}
-		.send-button:not(:disabled):hover {
+		.send-button:not(:disabled):hover,
+		.send-button:not(:disabled):focus-visible {
 			background: #9de1ff;
 		}
 	</style>
@@ -878,13 +919,13 @@ export function renderWebModePage(): string {
 			</form>
 		</main>
 	</div>
-	<script>
-		const statusElement = document.querySelector('#connectionStatus');
-		const messageList = document.querySelector('#messageList');
+	<script nonce="${nonce}">
+			const statusElement = document.querySelector('#connectionStatus');
+			const messageList = document.querySelector('#messageList');
 			const emptyState = document.querySelector('#emptyState');
-				const messageForm = document.querySelector('#messageForm');
-				const composerElement = document.querySelector('.composer');
-				const messageInput = document.querySelector('#messageInput');
+			const messageForm = document.querySelector('#messageForm');
+			const composerElement = document.querySelector('.composer');
+			const messageInput = document.querySelector('#messageInput');
 			const sendButton = document.querySelector('#sendButton');
 			const newChatButton = document.querySelector('#newChatButton');
 			const sessionMenuButton = document.querySelector('#sessionMenuButton');
@@ -916,11 +957,15 @@ export function renderWebModePage(): string {
 			let storedMessages = [];
 			let activeTurnId = null;
 			let isConnected = false;
+			let socket = null;
+			let reconnectTimer = null;
+			let reconnectDelayMs = 1000;
+			const maxReconnectDelayMs = 15000;
 
-		function setStatus(text, state) {
-			statusElement.textContent = text;
-			statusElement.className = 'status' + (state ? ' ' + state : '');
-		}
+			function setStatus(text, state) {
+				statusElement.textContent = text;
+				statusElement.className = 'status' + (state ? ' ' + state : '');
+			}
 
 			function setComposerEnabled(isEnabled) {
 				isConnected = isEnabled;
@@ -972,147 +1017,147 @@ export function renderWebModePage(): string {
 				window.localStorage.setItem(storageKey, JSON.stringify(storedMessages));
 			}
 
-		function setEmptyState(title, detail, includePrompts = false) {
-			emptyState.innerHTML = '';
-			const titleElement = document.createElement('strong');
-			titleElement.textContent = title;
-			emptyState.append(titleElement);
+			function setEmptyState(title, detail, includePrompts = false) {
+				emptyState.innerHTML = '';
+				const titleElement = document.createElement('strong');
+				titleElement.textContent = title;
+				emptyState.append(titleElement);
 
-			if (includePrompts) {
-				const modePills = document.createElement('div');
-				modePills.className = 'mode-pills';
-				for (const [label, prompt] of modePrompts) {
-					const pill = document.createElement('button');
-					pill.className = 'mode-pill';
-					pill.type = 'button';
-					pill.textContent = label;
-					pill.dataset.action = 'fill';
-					pill.dataset.prompt = prompt;
-					modePills.append(pill);
-				}
-				emptyState.append(modePills);
+				if (includePrompts) {
+					const modePills = document.createElement('div');
+					modePills.className = 'mode-pills';
+					for (const [label, prompt] of modePrompts) {
+						const pill = document.createElement('button');
+						pill.className = 'mode-pill';
+						pill.type = 'button';
+						pill.textContent = label;
+						pill.dataset.action = 'fill';
+						pill.dataset.prompt = prompt;
+						modePills.append(pill);
+					}
+					emptyState.append(modePills);
 
-				const promptList = document.createElement('div');
-				promptList.className = 'prompt-list';
-				for (const prompt of promptSuggestions) {
-					const promptButton = document.createElement('button');
-					promptButton.className = 'prompt-button';
-					promptButton.type = 'button';
-					promptButton.textContent = prompt;
-					promptButton.dataset.action = 'submit';
-					promptButton.dataset.prompt = prompt;
-					promptList.append(promptButton);
+					const promptList = document.createElement('div');
+					promptList.className = 'prompt-list';
+					for (const prompt of promptSuggestions) {
+						const promptButton = document.createElement('button');
+						promptButton.className = 'prompt-button';
+						promptButton.type = 'button';
+						promptButton.textContent = prompt;
+						promptButton.dataset.action = 'submit';
+						promptButton.dataset.prompt = prompt;
+						promptList.append(promptButton);
+					}
+					emptyState.append(promptList);
+					emptyState.hidden = false;
+					return;
 				}
-				emptyState.append(promptList);
+
+				const detailElement = document.createElement('span');
+				detailElement.textContent = detail;
+				emptyState.append(detailElement);
 				emptyState.hidden = false;
-				return;
 			}
 
-			const detailElement = document.createElement('span');
-			detailElement.textContent = detail;
-			emptyState.append(detailElement);
-			emptyState.hidden = false;
-		}
-
-		function hideEmptyState() {
-			emptyState.hidden = true;
-		}
-
-		function appendInlineMarkdown(element, text) {
-			const inlineCodeMarker = String.fromCharCode(96);
-			let remainingText = text;
-
-			while (remainingText) {
-				const strongIndex = remainingText.indexOf('**');
-				const codeIndex = remainingText.indexOf(inlineCodeMarker);
-				const markerIndexes = [strongIndex, codeIndex].filter(index => index >= 0);
-
-				if (markerIndexes.length === 0) {
-					element.append(document.createTextNode(remainingText));
-					return;
-				}
-
-				const markerIndex = Math.min(...markerIndexes);
-				if (markerIndex > 0) {
-					element.append(document.createTextNode(remainingText.slice(0, markerIndex)));
-					remainingText = remainingText.slice(markerIndex);
-				}
-
-				const marker = remainingText.startsWith('**') ? '**' : inlineCodeMarker;
-				const closingIndex = remainingText.indexOf(marker, marker.length);
-				if (closingIndex < 0) {
-					element.append(document.createTextNode(remainingText));
-					return;
-				}
-
-				const inlineElement = document.createElement(marker === '**' ? 'strong' : 'code');
-				inlineElement.textContent = remainingText.slice(marker.length, closingIndex);
-				element.append(inlineElement);
-				remainingText = remainingText.slice(closingIndex + marker.length);
+			function hideEmptyState() {
+				emptyState.hidden = true;
 			}
-		}
 
-		function renderAssistantText(element, text) {
-			element.replaceChildren();
-			const codeFence = String.fromCharCode(96).repeat(3);
-			let codeElement = null;
-			let listElement = null;
+			function appendInlineMarkdown(element, text) {
+				const inlineCodeMarker = String.fromCharCode(96);
+				let remainingText = text;
 
-			for (const line of text.split('\\n')) {
-				if (line.trim().startsWith(codeFence)) {
+				while (remainingText) {
+					const strongIndex = remainingText.indexOf('**');
+					const codeIndex = remainingText.indexOf(inlineCodeMarker);
+					const markerIndexes = [strongIndex, codeIndex].filter(index => index >= 0);
+
+					if (markerIndexes.length === 0) {
+						element.append(document.createTextNode(remainingText));
+						return;
+					}
+
+					const markerIndex = Math.min(...markerIndexes);
+					if (markerIndex > 0) {
+						element.append(document.createTextNode(remainingText.slice(0, markerIndex)));
+						remainingText = remainingText.slice(markerIndex);
+					}
+
+					const marker = remainingText.startsWith('**') ? '**' : inlineCodeMarker;
+					const closingIndex = remainingText.indexOf(marker, marker.length);
+					if (closingIndex < 0) {
+						element.append(document.createTextNode(remainingText));
+						return;
+					}
+
+					const inlineElement = document.createElement(marker === '**' ? 'strong' : 'code');
+					inlineElement.textContent = remainingText.slice(marker.length, closingIndex);
+					element.append(inlineElement);
+					remainingText = remainingText.slice(closingIndex + marker.length);
+				}
+			}
+
+			function renderAssistantText(element, text) {
+				element.replaceChildren();
+				const codeFence = String.fromCharCode(96).repeat(3);
+				let codeElement = null;
+				let listElement = null;
+
+				for (const line of text.split('\\n')) {
+					if (line.trim().startsWith(codeFence)) {
+						if (codeElement) {
+							codeElement = null;
+						} else {
+							const preElement = document.createElement('pre');
+							codeElement = document.createElement('code');
+							preElement.append(codeElement);
+							element.append(preElement);
+						}
+						listElement = null;
+						continue;
+					}
+
 					if (codeElement) {
-						codeElement = null;
-					} else {
-						const preElement = document.createElement('pre');
-						codeElement = document.createElement('code');
-						preElement.append(codeElement);
-						element.append(preElement);
+						codeElement.textContent += (codeElement.textContent ? '\\n' : '') + line;
+						continue;
 					}
-					listElement = null;
-					continue;
-				}
 
-				if (codeElement) {
-					codeElement.textContent += (codeElement.textContent ? '\\n' : '') + line;
-					continue;
-				}
-
-				if (!line.trim()) {
-					listElement = null;
-					continue;
-				}
-
-				const headingMatch = /^(#{1,3})\\s+(.*)$/.exec(line);
-				const unorderedMatch = /^[-*]\\s+(.*)$/.exec(line);
-				const orderedMatch = /^\\d+\\.\\s+(.*)$/.exec(line);
-
-				if (headingMatch) {
-					const headingElement = document.createElement('h' + headingMatch[1].length);
-					appendInlineMarkdown(headingElement, headingMatch[2]);
-					element.append(headingElement);
-					listElement = null;
-					continue;
-				}
-
-				const listMatch = unorderedMatch ?? orderedMatch;
-				if (listMatch) {
-					const listTag = unorderedMatch ? 'UL' : 'OL';
-					if (!listElement || listElement.tagName !== listTag) {
-						listElement = document.createElement(listTag.toLowerCase());
-						element.append(listElement);
+					if (!line.trim()) {
+						listElement = null;
+						continue;
 					}
-					const itemElement = document.createElement('li');
-					appendInlineMarkdown(itemElement, listMatch[1]);
-					listElement.append(itemElement);
-					continue;
-				}
 
-				const paragraphElement = document.createElement('p');
-				appendInlineMarkdown(paragraphElement, line);
-				element.append(paragraphElement);
-				listElement = null;
+					const headingMatch = /^(#{1,3})\\s+(.*)$/.exec(line);
+					const unorderedMatch = /^[-*]\\s+(.*)$/.exec(line);
+					const orderedMatch = /^\\d+\\.\\s+(.*)$/.exec(line);
+
+					if (headingMatch) {
+						const headingElement = document.createElement('h' + headingMatch[1].length);
+						appendInlineMarkdown(headingElement, headingMatch[2]);
+						element.append(headingElement);
+						listElement = null;
+						continue;
+					}
+
+					const listMatch = unorderedMatch ?? orderedMatch;
+					if (listMatch) {
+						const listTag = unorderedMatch ? 'UL' : 'OL';
+						if (!listElement || listElement.tagName !== listTag) {
+							listElement = document.createElement(listTag.toLowerCase());
+							element.append(listElement);
+						}
+						const itemElement = document.createElement('li');
+						appendInlineMarkdown(itemElement, listMatch[1]);
+						listElement.append(itemElement);
+						continue;
+					}
+
+					const paragraphElement = document.createElement('p');
+					appendInlineMarkdown(paragraphElement, line);
+					element.append(paragraphElement);
+					listElement = null;
+				}
 			}
-		}
 
 			function appendMessage(role, text, metaText, shouldStore = true) {
 				hideEmptyState();
@@ -1129,12 +1174,12 @@ export function renderWebModePage(): string {
 				}
 				messageElement.append(textElement);
 
-			if (metaText) {
-				const metaElement = document.createElement('div');
-				metaElement.className = 'meta';
-				metaElement.textContent = metaText;
-				messageElement.append(metaElement);
-			}
+				if (metaText) {
+					const metaElement = document.createElement('div');
+					metaElement.className = 'meta';
+					metaElement.textContent = metaText;
+					messageElement.append(metaElement);
+				}
 
 				messageList.append(messageElement);
 				messageList.scrollTop = messageList.scrollHeight;
@@ -1147,15 +1192,15 @@ export function renderWebModePage(): string {
 				return messageElement;
 			}
 
-		function updateMessageMeta(messageElement, metaText) {
-			let metaElement = messageElement.querySelector('.meta');
-			if (!metaElement) {
-				metaElement = document.createElement('div');
-				metaElement.className = 'meta';
-				messageElement.append(metaElement);
-			}
-				metaElement.textContent = metaText;
-			}
+			function updateMessageMeta(messageElement, metaText) {
+				let metaElement = messageElement.querySelector('.meta');
+				if (!metaElement) {
+					metaElement = document.createElement('div');
+					metaElement.className = 'meta';
+					messageElement.append(metaElement);
+				}
+					metaElement.textContent = metaText;
+				}
 
 			function restoreStoredMessages() {
 				storedMessages = readStoredMessages();
@@ -1179,33 +1224,33 @@ export function renderWebModePage(): string {
 				messageInput.focus();
 			}
 
-				function setPromptText(text) {
-					messageInput.value = text;
-					composerElement.classList.add('is-attention');
-					window.setTimeout(() => {
-						composerElement.classList.remove('is-attention');
-					}, 900);
-					messageForm.scrollIntoView({block: 'center', behavior: 'smooth'});
-					messageInput.focus();
-				}
+			function setPromptText(text) {
+				messageInput.value = text;
+				composerElement.classList.add('is-attention');
+				window.setTimeout(() => {
+					composerElement.classList.remove('is-attention');
+				}, 900);
+				messageForm.scrollIntoView({block: 'center', behavior: 'smooth'});
+				messageInput.focus();
+			}
 
 			function addSystemNotice(text, metaText = 'Local UI') {
 				appendMessage('system', text, metaText);
 			}
 
-		function appendAssistantDelta(id, text) {
-			let messageElement = assistantMessages.get(id);
-			if (!messageElement) {
-				messageElement = appendMessage('assistant', '');
-				assistantMessages.set(id, messageElement);
-			}
+			function appendAssistantDelta(id, text) {
+				let messageElement = assistantMessages.get(id);
+				if (!messageElement) {
+					messageElement = appendMessage('assistant', '');
+					assistantMessages.set(id, messageElement);
+				}
 
-			const textElement = messageElement.firstElementChild;
-			const nextText = (textElement.dataset.rawText ?? '') + text;
-			textElement.dataset.rawText = nextText;
-			renderAssistantText(textElement, nextText);
-			messageList.scrollTop = messageList.scrollHeight;
-		}
+				const textElement = messageElement.firstElementChild;
+				const nextText = (textElement.dataset.rawText ?? '') + text;
+				textElement.dataset.rawText = nextText;
+				renderAssistantText(textElement, nextText);
+				messageList.scrollTop = messageList.scrollHeight;
+			}
 
 			function sendClientEvent(event) {
 				if (socket.readyState !== WebSocket.OPEN) {
@@ -1213,9 +1258,9 @@ export function renderWebModePage(): string {
 					return false;
 				}
 
-			socket.send(JSON.stringify(event));
-			return true;
-		}
+				socket.send(JSON.stringify(event));
+				return true;
+			}
 
 			function formatToolArguments(args) {
 				try {
@@ -1361,68 +1406,79 @@ export function renderWebModePage(): string {
 				messageList.scrollTop = messageList.scrollHeight;
 			}
 
-		function handleServerEvent(message) {
-			if (message.type === 'ready') {
-				setStatus('Connected', 'connected');
-				setComposerEnabled(true);
-				if (storedMessages.length === 0) {
-					setEmptyState('How can I help you?', '', true);
-				}
-				messageInput.focus();
-				return;
-			}
-
-			if (message.type === 'ack') {
-				const messageElement = pendingMessages.get(message.id);
-				if (messageElement) {
-					updateMessageMeta(messageElement, 'Delivered to local session');
-					pendingMessages.delete(message.id);
-				}
-				return;
-			}
-
-			if (message.type === 'assistant_delta') {
-				appendAssistantDelta(message.id, message.text);
-				return;
-			}
-
-			if (message.type === 'tool_started') {
-				appendMessage('system tool-status', 'Running tool: ' + message.name, 'In progress');
-				return;
-			}
-
-			if (message.type === 'tool_finished') {
-				appendMessage(
-					'system tool-status',
-					'Tool finished: ' + message.name,
-					message.ok ? 'Completed' : 'Failed',
-				);
-				return;
-			}
-
-			if (message.type === 'approval_required') {
-				renderApprovalCard(message);
-				return;
-			}
-
-			if (message.type === 'question_required') {
-				renderQuestionCard(message);
-				return;
-			}
-
-			if (message.type === 'turn_completed') {
-				if (message.id === activeTurnId) {
-					setActiveTurn(null);
+			function handleServerEvent(message) {
+				if (message.type === 'ready') {
+					setStatus('Connected', 'connected');
+					setComposerEnabled(true);
+					if (storedMessages.length === 0) {
+						setEmptyState('How can I help you?', '', true);
+					}
 					messageInput.focus();
+					return;
 				}
-				return;
-			}
 
-			if (message.type === 'error') {
-				setActiveTurn(null);
-				appendMessage('system error', message.message);
-				return;
-			}
+				if (message.type === 'ack') {
+					const messageElement = pendingMessages.get(message.id);
+					if (messageElement) {
+						updateMessageMeta(messageElement, 'Delivered to local session');
+						pendingMessages.delete(message.id);
+					}
+					return;
+				}
+
+				if (message.type === 'assistant_delta') {
+					appendAssistantDelta(message.id, message.text);
+					return;
+				}
+
+				if (message.type === 'tool_started') {
+					appendMessage('system tool-status', 'Running tool: ' + message.name, 'In progress');
+					return;
+				}
+
+				if (message.type === 'tool_finished') {
+					appendMessage(
+						'system tool-status',
+						'Tool finished: ' + message.name,
+						message.ok ? 'Completed' : 'Failed',
+					);
+					return;
+				}
+
+				if (message.type === 'approval_required') {
+					renderApprovalCard(message);
+					return;
+				}
+
+				if (message.type === 'question_required') {
+					renderQuestionCard(message);
+					return;
+				}
+
+				if (message.type === 'turn_completed') {
+					if (message.id === activeTurnId) {
+						setActiveTurn(null);
+						messageInput.focus();
+					}
+					return;
+				}
+
+				if (message.type === 'error') {
+					setActiveTurn(null);
+					const pendingMessageElement = message.id
+						? pendingMessages.get(message.id)
+						: undefined;
+					if (pendingMessageElement) {
+						const failedText =
+							pendingMessageElement.querySelector('.message-content').textContent;
+						updateMessageMeta(pendingMessageElement, 'Not sent — ' + message.message);
+						pendingMessages.delete(message.id);
+						setPromptText(failedText);
+					} else {
+						appendMessage('system error', message.message);
+					}
+					return;
+				}
 
 				appendMessage('system', 'Received an unsupported local session event.');
 			}
@@ -1465,33 +1521,52 @@ export function renderWebModePage(): string {
 				setPromptText(prompt);
 			});
 
-			const socket = new WebSocket(eventsUrl);
+			function connectSocket() {
+				socket = new WebSocket(eventsUrl);
+
+				socket.addEventListener('open', () => {
+					reconnectDelayMs = 1000;
+					setStatus('Connecting', '');
+					sendClientEvent({type: 'hello', protocolVersion: 1});
+				});
+				socket.addEventListener('message', event => {
+					try {
+						const message = JSON.parse(event.data);
+						handleServerEvent(message);
+					} catch {
+						appendMessage('system error', 'Received an invalid local session event.');
+					}
+				});
+				socket.addEventListener('close', () => {
+					setActiveTurn(null);
+					setComposerEnabled(false);
+					setStatus('Reconnecting…', '');
+					setEmptyState(
+						'Reconnecting…',
+						'Trying to reach the local Nanocoder server again.',
+					);
+					scheduleReconnect();
+				});
+				socket.addEventListener('error', () => {
+					setActiveTurn(null);
+					setComposerEnabled(false);
+				});
+			}
+
+			function scheduleReconnect() {
+				if (reconnectTimer !== null) {
+					return;
+				}
+				reconnectTimer = window.setTimeout(() => {
+					reconnectTimer = null;
+					connectSocket();
+				}, reconnectDelayMs);
+				reconnectDelayMs = Math.min(reconnectDelayMs * 2, maxReconnectDelayMs);
+			}
+
 			setEmptyState('How can I help you?', '', true);
 			restoreStoredMessages();
-			socket.addEventListener('open', () => {
-				setStatus('Connecting', '');
-				sendClientEvent({type: 'hello', protocolVersion: 1});
-		});
-		socket.addEventListener('message', event => {
-			try {
-				const message = JSON.parse(event.data);
-				handleServerEvent(message);
-			} catch {
-				appendMessage('system error', 'Received an invalid local session event.');
-			}
-		});
-		socket.addEventListener('close', () => {
-			setActiveTurn(null);
-			setStatus('Disconnected', 'disconnected');
-			setComposerEnabled(false);
-			setEmptyState('Disconnected', 'Restart nanocoder --web to open a fresh local session.');
-		});
-		socket.addEventListener('error', () => {
-			setActiveTurn(null);
-			setStatus('Connection failed', 'failed');
-			setComposerEnabled(false);
-			setEmptyState('Connection failed', 'The browser could not reach the local Nanocoder server.');
-		});
+			connectSocket();
 
 			messageForm.addEventListener('submit', event => {
 				event.preventDefault();
@@ -1513,12 +1588,16 @@ export function renderWebModePage(): string {
 			});
 
 			newChatButton.addEventListener('click', () => {
+				sendClientEvent({type: 'reset_session', id: 'browser-reset-' + Date.now()});
 				clearLocalSession();
 				addSystemNotice('Started a fresh local browser session.', 'Stored only in this browser');
 			});
 
 			sessionMenuButton.addEventListener('click', () => {
-				addSystemNotice('This session is served from localhost and protected by the private URL token.', 'Session menu');
+				addSystemNotice(
+					'This session is served from localhost and protected by the private URL token. The live connection uses ws:// rather than wss:// because it never leaves your machine.',
+					'Session menu',
+				);
 			});
 
 			historyButton.addEventListener('click', () => {

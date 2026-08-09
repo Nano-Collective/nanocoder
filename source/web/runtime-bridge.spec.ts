@@ -29,6 +29,7 @@ test('web runtime bridge accepts one browser turn without waiting for completion
 			return submission;
 		},
 		cancel: () => {},
+		resetSession: () => {},
 	});
 
 	await bridge.handleClientEvent(userMessage('turn-1', 'from browser'));
@@ -54,6 +55,7 @@ test('web runtime bridge publishes assistant deltas and completion for the activ
 	bridge.bindRuntimeHandlers({
 		submitMessage: () => submission,
 		cancel: () => {},
+		resetSession: () => {},
 	});
 
 	await bridge.handleClientEvent(userMessage('turn-1'));
@@ -83,6 +85,7 @@ test('web runtime bridge cancels only the matching active browser turn', async t
 		cancel: () => {
 			cancelCount++;
 		},
+		resetSession: () => {},
 	});
 
 	await bridge.handleClientEvent(userMessage('turn-1'));
@@ -109,6 +112,7 @@ test('web runtime bridge reports asynchronous submission failures and clears the
 			}
 		},
 		cancel: () => {},
+		resetSession: () => {},
 	});
 
 	await bridge.handleClientEvent(userMessage('turn-1', 'fail'));
@@ -131,12 +135,14 @@ test('web runtime bridge cleanup does not remove a newer handler binding', async
 			submittedMessages.push(`first:${text}`);
 		},
 		cancel: () => {},
+		resetSession: () => {},
 	});
 	bridge.bindRuntimeHandlers({
 		submitMessage: text => {
 			submittedMessages.push(`second:${text}`);
 		},
 		cancel: () => {},
+		resetSession: () => {},
 	});
 
 	releaseFirstBinding();
@@ -154,6 +160,7 @@ test('web runtime bridge resolves matching approval responses during a browser t
 	bridge.bindRuntimeHandlers({
 		submitMessage: () => new Promise<void>(() => {}),
 		cancel: () => {},
+		resetSession: () => {},
 	});
 
 	await bridge.handleClientEvent(userMessage('turn-1'));
@@ -204,6 +211,7 @@ test('web runtime bridge rejects stale question responses and clears on cancel',
 		cancel: () => {
 			cancelCount++;
 		},
+		resetSession: () => {},
 	});
 
 	await bridge.handleClientEvent(userMessage('turn-1'));
@@ -243,6 +251,7 @@ test('web runtime bridge publishes tool lifecycle only during an active browser 
 	bridge.bindRuntimeHandlers({
 		submitMessage: () => new Promise<void>(() => {}),
 		cancel: () => {},
+		resetSession: () => {},
 	});
 
 	bridge.publishToolStarted('tool-1', 'read_file');
@@ -258,11 +267,48 @@ test('web runtime bridge publishes tool lifecycle only during an active browser 
 	]);
 });
 
+test('web runtime bridge resets the session when no browser turn is active', async t => {
+	let resetCount = 0;
+	const bridge = createWebRuntimeBridge(() => {});
+	bridge.bindRuntimeHandlers({
+		submitMessage: () => new Promise<void>(() => {}),
+		cancel: () => {},
+		resetSession: () => {
+			resetCount++;
+		},
+	});
+
+	await bridge.handleClientEvent({type: 'reset_session', id: 'reset-1'});
+
+	t.is(resetCount, 1);
+});
+
+test('web runtime bridge refuses to reset the session while a browser turn is active', async t => {
+	let resetCount = 0;
+	const bridge = createWebRuntimeBridge(() => {});
+	bridge.bindRuntimeHandlers({
+		submitMessage: () => new Promise<void>(() => {}),
+		cancel: () => {},
+		resetSession: () => {
+			resetCount++;
+		},
+	});
+
+	await bridge.handleClientEvent(userMessage('turn-1'));
+	await t.throwsAsync(
+		bridge.handleClientEvent({type: 'reset_session', id: 'reset-1'}),
+		{message: 'Cannot start a new chat while a browser turn is active.'},
+	);
+
+	t.is(resetCount, 0);
+});
+
 test('web runtime bridge denies pending approval on disconnect', async t => {
 	const bridge = createWebRuntimeBridge(() => {});
 	bridge.bindRuntimeHandlers({
 		submitMessage: () => new Promise<void>(() => {}),
 		cancel: () => {},
+		resetSession: () => {},
 	});
 
 	await bridge.handleClientEvent(userMessage('turn-1'));

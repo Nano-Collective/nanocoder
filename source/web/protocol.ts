@@ -5,7 +5,8 @@ export type WebClientEvent =
 	| {type: 'user_message'; id: string; text: string}
 	| {type: 'cancel'; id: string}
 	| {type: 'approval_response'; id: string; approved: boolean}
-	| {type: 'question_response'; id: string; answer: string};
+	| {type: 'question_response'; id: string; answer: string}
+	| {type: 'reset_session'; id: string};
 
 export type WebServerEvent =
 	| {type: 'ready'; protocolVersion: typeof WEB_PROTOCOL_VERSION}
@@ -28,7 +29,7 @@ export type WebServerEvent =
 			allowFreeform: boolean;
 	  }
 	| {type: 'turn_completed'; id: string}
-	| {type: 'error'; message: string};
+	| {type: 'error'; message: string; id?: string};
 
 export function parseWebClientEvent(rawMessage: string): WebClientEvent {
 	let parsed: unknown;
@@ -102,6 +103,15 @@ export function parseWebClientEvent(rawMessage: string): WebClientEvent {
 				type: 'question_response',
 				id: parsed.id,
 				answer: parsed.answer,
+			};
+		case 'reset_session':
+			if (typeof parsed.id !== 'string' || parsed.id.length === 0) {
+				throw new Error('Reset session id is required.');
+			}
+
+			return {
+				type: 'reset_session',
+				id: parsed.id,
 			};
 		default:
 			throw new Error(`Unsupported web event type: ${parsed.type}.`);

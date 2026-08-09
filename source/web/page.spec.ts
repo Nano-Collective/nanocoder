@@ -1,10 +1,77 @@
 import test from 'ava';
-import {nanocoderLogoSvg, renderWebModePage} from './page.js';
+import {createPageNonce, nanocoderLogoSvg, renderWebModePage} from './page.js';
 
 test('web mode page renders the Nanocoder logo asset markup', t => {
 	t.true(nanocoderLogoSvg.includes('aria-label="Nanocoder"'));
 	t.true(nanocoderLogoSvg.includes('viewBox="0 0 64 64"'));
 	t.true(nanocoderLogoSvg.includes('#7dcfff'));
+});
+
+test('web mode page gives icon, thread, and send buttons a visible keyboard focus state', t => {
+	const page = renderWebModePage();
+
+	t.true(page.includes('.icon-button:hover,\n\t\t.icon-button:focus-visible {'));
+	t.true(page.includes('.thread-item:hover,\n\t\t.thread-item:focus-visible {'));
+	t.true(
+		page.includes(
+			'.send-button:not(:disabled):hover,\n\t\t.send-button:not(:disabled):focus-visible {',
+		),
+	);
+});
+
+test('web mode page styles the sidebar and message scrollbars instead of using the browser default', t => {
+	const page = renderWebModePage();
+
+	t.true(page.includes('.thread-list::-webkit-scrollbar {'));
+	t.true(page.includes('.messages::-webkit-scrollbar {'));
+	t.true(page.includes('scrollbar-width: thin;'));
+});
+
+test('web mode page tells the backend to reset the session when starting a new chat', t => {
+	const page = renderWebModePage();
+
+	t.true(
+		page.includes(
+			"sendClientEvent({type: 'reset_session', id: 'browser-reset-' + Date.now()});",
+		),
+	);
+	const newChatHandlerIndex = page.indexOf("newChatButton.addEventListener('click'");
+	const resetEventIndex = page.indexOf("type: 'reset_session'");
+	t.true(newChatHandlerIndex >= 0 && resetEventIndex > newChatHandlerIndex);
+});
+
+test('web mode page restores a rejected message into the composer instead of losing it', t => {
+	const page = renderWebModePage();
+
+	t.true(page.includes('const pendingMessageElement = message.id'));
+	t.true(page.includes("pendingMessageElement.querySelector('.message-content').textContent"));
+	t.true(page.includes("updateMessageMeta(pendingMessageElement, 'Not sent — ' + message.message)"));
+	t.true(page.includes('pendingMessages.delete(message.id)'));
+	t.true(page.includes('setPromptText(failedText)'));
+});
+
+test('web mode page reconnects the WebSocket with backoff instead of requiring a manual refresh', t => {
+	const page = renderWebModePage();
+
+	t.true(page.includes('function connectSocket() {'));
+	t.true(page.includes('function scheduleReconnect() {'));
+	t.true(page.includes('scheduleReconnect();'));
+	t.true(page.includes('reconnectDelayMs = Math.min(reconnectDelayMs * 2, maxReconnectDelayMs);'));
+	t.true(page.includes("setStatus('Reconnecting…', '');"));
+	t.false(page.includes("setStatus('Disconnected', 'disconnected');"));
+});
+
+test('web mode page links the favicon and scopes inline style/script to the given nonce', t => {
+	const nonce = createPageNonce();
+	const page = renderWebModePage(nonce);
+
+	t.true(
+		page.includes(
+			'<link rel="icon" type="image/svg+xml" href="/assets/nanocoder-icon.svg">',
+		),
+	);
+	t.true(page.includes(`<style nonce="${nonce}">`));
+	t.true(page.includes(`<script nonce="${nonce}">`));
 });
 
 test('web mode page renders prompt controls as real buttons', t => {
