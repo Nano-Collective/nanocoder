@@ -115,7 +115,6 @@ test('write_file: create new file', async t => {
 	const content = await readFile(filePath, 'utf-8');
 	t.is(content, 'Hello World\n');
 	t.true(result.includes('File written successfully'));
-	t.true(result.includes('File contents after write:'));
 });
 
 test('write_file: overwrite existing file', async t => {
@@ -129,7 +128,6 @@ test('write_file: overwrite existing file', async t => {
 	const content = await readFile(filePath, 'utf-8');
 	t.is(content, 'New content\n');
 	t.true(result.includes('File overwritten successfully'));
-	t.true(result.includes('File contents after write:'));
 });
 
 test('write_file: write empty file', async t => {
@@ -192,7 +190,7 @@ test('write_file: preserves exact content including whitespace', async t => {
 // Read-After-Write Verification Tests
 // ============================================================================
 
-test('write_file: returns file contents after write', async t => {
+test('write_file: reports accurate stats without echoing content back', async t => {
 	const filePath = join(testDir, 'verify.txt');
 
 	const result = await executeWriteFile({
@@ -200,11 +198,12 @@ test('write_file: returns file contents after write', async t => {
 		content: 'Test content\nLine 2',
 	});
 
-	// Check that result includes the actual file contents
-	t.true(result.includes('File contents after write:'));
-	t.true(result.includes('Test content'));
-	t.true(result.includes('Line 2'));
+	// The read-back verifies the write succeeded and produces accurate stats,
+	// but the model already has this content (it just sent it as the tool
+	// call arguments), so it should not be echoed back in the result.
 	t.true(result.includes('2 lines'));
+	t.false(result.includes('Test content'));
+	t.false(result.includes('File contents after write:'));
 });
 
 test('write_file: detects token count', async t => {
