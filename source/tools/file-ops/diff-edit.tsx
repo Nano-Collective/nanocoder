@@ -32,6 +32,19 @@ export interface DiffEditBlock {
 const SEARCH_MARKER = '<<<<<<< SEARCH';
 const SEPARATOR_MARKER = '=======';
 const REPLACE_MARKER = '>>>>>>> REPLACE';
+const DIFF_EDIT_CONTEXT_LINES = 3;
+const MAX_DIFF_EDIT_RESULT_CHARS = 4000;
+
+function capDiffEditResult(content: string): string {
+	if (content.length <= MAX_DIFF_EDIT_RESULT_CHARS) return content;
+
+	const marker = `\n... [Preview truncated: ${content.length} characters; use read_file with a narrow range to inspect omitted content] ...\n`;
+	const remainingLength = MAX_DIFF_EDIT_RESULT_CHARS - marker.length;
+	const headLength = Math.floor(remainingLength / 2);
+	const tailLength = remainingLength - headLength;
+
+	return `${content.slice(0, headLength)}${marker}${content.slice(-tailLength)}`;
+}
 
 function stripSingleBoundaryNewline(value: string): string {
 	if (value.startsWith('\r\n')) return value.slice(2);
@@ -155,17 +168,83 @@ function applyBlocks(fileContent: string, blocks: DiffEditBlock[]): string {
 	return newContent;
 }
 
-function formatUpdatedFileContext(content: string): string {
-	const lines = content.split('\n');
-	let fileContext = '\n\nUpdated file contents:\n';
+function formatUpdatedFileContext(
+	originalContent: string,
+	updatedContent: string,
+	blocks: DiffEditBlock[],
+): string {
+	const lines = updatedContent.split('\n');
+	let cumulativeOffset = 0;
+	const changedRanges = blocks
+		.map(block => ({
+			block,
+			originalIndex: originalContent.indexOf(block.search),
+		}))
+		.sort((a, b) => a.originalIndex - b.originalIndex)
+		.map(({block, originalIndex}) => {
+			const updatedIndex = originalIndex + cumulativeOffset;
+			const changedStart = updatedContent
+				.slice(0, updatedIndex)
+				.split('\n').length;
+			const replacementLineCount = Math.max(
+				1,
+				block.replace.split('\n').length,
+			);
+			const changedEnd = Math.min(
+				lines.length,
+				changedStart + replacementLineCount - 1,
+			);
 
-	for (let i = 0; i < lines.length; i++) {
-		const lineNumStr = String(i + 1).padStart(4, ' ');
-		const line = lines[i] || '';
-		fileContext += `${lineNumStr}: ${line}\n`;
-	}
+			cumulativeOffset += block.replace.length - block.search.length;
+			return {
+				changedStart,
+				changedEnd,
+				start: Math.max(1, changedStart - DIFF_EDIT_CONTEXT_LINES),
+				end: Math.min(lines.length, changedEnd + DIFF_EDIT_CONTEXT_LINES),
+			};
+		});
+	const changedRegionSummary = changedRanges
+		.map(({changedStart, changedEnd}) =>
+			changedStart === changedEnd
+				? String(changedStart)
+				: `${changedStart}-${changedEnd}`,
+		)
+		.join(', ');
 
-	return fileContext;
+	const contextWindows = changedRanges.reduce<
+		Array<{start: number; end: number}>
+	>((windows, range) => {
+		const previous = windows.at(-1);
+		if (previous && range.start <= previous.end + 1) {
+			previous.end = Math.max(previous.end, range.end);
+		} else {
+			windows.push({...range});
+		}
+		return windows;
+	}, []);
+
+	return (
+		`\n\nChanged regions: lines ${changedRegionSummary}.` +
+		contextWindows
+			.map(({start, end}, index) => {
+				let context = `\n\nUpdated file context (lines ${start}-${end} of ${lines.length}):\n`;
+				const previousEnd = contextWindows[index - 1]?.end ?? 0;
+				if (start > previousEnd + 1) {
+					context += `[... lines ${previousEnd + 1}-${start - 1} omitted ...]\n`;
+				}
+
+				for (let lineNumber = start; lineNumber <= end; lineNumber++) {
+					const lineNumStr = String(lineNumber).padStart(4, ' ');
+					context += `${lineNumStr}: ${lines[lineNumber - 1] || ''}\n`;
+				}
+
+				if (index === contextWindows.length - 1 && end < lines.length) {
+					context += `[... lines ${end + 1}-${lines.length} omitted ...]\n`;
+				}
+				return context;
+			})
+			.join('')
+	);
 }
 
 const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
@@ -183,12 +262,14 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	markFileSeen(absPath);
 
 	const blockLabel = blocks.length === 1 ? 'block' : 'blocks';
-	return `Successfully applied ${blocks.length} diff ${blockLabel}.${formatUpdatedFileContext(newContent)}`;
+	return capDiffEditResult(
+		`Successfully applied ${blocks.length} diff ${blockLabel}.${formatUpdatedFileContext(fileContent, newContent, blocks)}`,
+	);
 };
 
 const diffEditCoreTool = tool({
 	description:
-		'Apply one or more SEARCH/REPLACE edit blocks to a file. Use this for weak local models when exact string_replace arguments are hard to produce. Every SEARCH block must match the file exactly once. Format: <<<<<<< SEARCH, old content, =======, new content, >>>>>>> REPLACE. Do not wrap the diff in a markdown code fence.',
+		'Apply one or more SEARCH/REPLACE edit blocks to a file. Use this for weak local models when exact string_replace arguments are hard to produce. Every SEARCH block must match the file exactly once. Format: <<<<<<< SEARCH, old content, =======, new content, >>>>>>> REPLACE. Do not wrap the diff in a markdown code fence. Successful edits return bounded context around changed regions instead of the entire file.',
 	inputSchema: jsonSchema<DiffEditArgs>({
 		type: 'object',
 		properties: {
