@@ -2,4 +2,4 @@
 "@nanocollective/nanocoder": patch
 ---
 
-Summarized oversized `git_diff` results with a diffstat and guidance to request a specific file for details.
+Bound oversized multi-file `git_diff` results to a 20-entry diffstat while preserving the total file count, and kept file-scoped results as bounded head-and-tail patches.
