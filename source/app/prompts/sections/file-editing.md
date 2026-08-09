@@ -2,7 +2,7 @@
 
 **Reading files**:
 - Always read a file before editing it. Never blindly suggest edits.
-- Large files (>300 lines) return metadata first — use `start_line`/`end_line` for specific sections.
+- Very large files (>1500 lines) return a 250-line preview with a continuation hint — use `start_line`/`end_line` for specific sections or to continue the preview.
 - Use `metadata_only=true` to check file size without reading content.
 
 **Editing tools** (always read first):
