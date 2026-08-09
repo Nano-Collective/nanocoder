@@ -493,6 +493,7 @@ export class AcpAgent implements Agent {
 		const config = getAppConfig();
 		const providers = (config.providers ?? []).map(p => ({
 			id: p.name,
+			providerId: p.name,
 			required: false,
 			supported: ['openai' as const],
 		}));
