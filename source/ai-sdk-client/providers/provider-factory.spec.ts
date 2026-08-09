@@ -4,7 +4,11 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type {AIProviderConfig} from '@/types/index';
 import {Agent, MockAgent} from 'undici';
-import {createProvider, createUndiciFetch} from './provider-factory.js';
+import {
+	createProvider,
+	createReasoningItemNormalizer,
+	createUndiciFetch,
+} from './provider-factory.js';
 
 test('createProvider creates provider with basic config', async t => {
 	const config: AIProviderConfig = {
@@ -477,4 +481,138 @@ test('createUndiciFetch does not corrupt multi-byte characters split across chun
 	const text = await response.text();
 	server.close();
 	t.is(text, 'data: 👋\n\ndata: [DONE]');
+});
+
+function sseEvent(value: unknown): string {
+	return `data: ${JSON.stringify(value)}\n\n`;
+}
+
+async function runNormalizer(chunks: string[]): Promise<string> {
+	const encoder = new TextEncoder();
+	const source = new ReadableStream<Uint8Array>({
+		start(controller) {
+			for (const chunk of chunks) {
+				controller.enqueue(encoder.encode(chunk));
+			}
+			controller.close();
+		},
+	});
+
+	const reader = source
+		.pipeThrough(createReasoningItemNormalizer())
+		.getReader();
+	const decoder = new TextDecoder();
+	let output = '';
+	for (;;) {
+		const {done, value} = await reader.read();
+		if (done) {
+			break;
+		}
+		output += decoder.decode(value, {stream: true});
+	}
+	return output + decoder.decode();
+}
+
+function eventSummary(sse: string): string[] {
+	return sse
+		.split('\n\n')
+		.filter(block => block.startsWith('data: '))
+		.map(block => block.slice(6))
+		.filter(payload => payload !== '[DONE]')
+		.map(payload => {
+			const value = JSON.parse(payload);
+			return `${value.type}:${value.item?.id ?? value.item_id}`;
+		});
+}
+
+test('createReasoningItemNormalizer announces reasoning items with a rotated item_id', async t => {
+	const output = await runNormalizer([
+		sseEvent({
+			type: 'response.output_item.added',
+			output_index: 0,
+			item: {id: 'rs_A', type: 'reasoning', encrypted_content: null},
+		}),
+		sseEvent({
+			type: 'response.reasoning_summary_part.added',
+			item_id: 'rs_B',
+			output_index: 0,
+			summary_index: 1,
+		}),
+	]);
+
+	t.deepEqual(eventSummary(output), [
+		'response.output_item.added:rs_A',
+		'response.output_item.added:rs_B',
+		'response.reasoning_summary_part.added:rs_B',
+	]);
+});
+
+test('createReasoningItemNormalizer announces reasoning items that were never added', async t => {
+	const output = await runNormalizer([
+		sseEvent({
+			type: 'response.reasoning_summary_part.done',
+			item_id: 'rs_1',
+			output_index: 0,
+			summary_index: 0,
+			part: {type: 'summary_text', text: 'thinking'},
+		}),
+		sseEvent({
+			type: 'response.output_item.done',
+			output_index: 1,
+			item: {id: 'rs_2', type: 'reasoning', encrypted_content: null},
+		}),
+	]);
+
+	t.deepEqual(eventSummary(output), [
+		'response.output_item.added:rs_1',
+		'response.reasoning_summary_part.done:rs_1',
+		'response.output_item.added:rs_2',
+		'response.output_item.done:rs_2',
+	]);
+});
+
+test('createReasoningItemNormalizer leaves well-formed streams unchanged', async t => {
+	const stream = [
+		sseEvent({
+			type: 'response.output_item.added',
+			output_index: 0,
+			item: {id: 'rs_1', type: 'reasoning', encrypted_content: null},
+		}),
+		sseEvent({
+			type: 'response.reasoning_summary_part.added',
+			item_id: 'rs_1',
+			output_index: 0,
+			summary_index: 1,
+		}),
+		sseEvent({
+			type: 'response.output_item.done',
+			output_index: 0,
+			item: {id: 'rs_1', type: 'reasoning', encrypted_content: null},
+		}),
+		'data: [DONE]\n\n',
+	];
+
+	const output = await runNormalizer(stream);
+
+	t.is(output, stream.join(''));
+});
+
+test('createReasoningItemNormalizer normalizes events split across chunks', async t => {
+	const event = sseEvent({
+		type: 'response.reasoning_summary_part.added',
+		item_id: 'rs_1',
+		output_index: 0,
+		summary_index: 1,
+	});
+	const chunks: string[] = [];
+	for (let i = 0; i < event.length; i += 7) {
+		chunks.push(event.slice(i, i + 7));
+	}
+
+	const output = await runNormalizer(chunks);
+
+	t.deepEqual(eventSummary(output), [
+		'response.output_item.added:rs_1',
+		'response.reasoning_summary_part.added:rs_1',
+	]);
 });

@@ -105,6 +105,101 @@ export function createUndiciFetch(undiciAgent: Agent) {
 	};
 }
 
+type ResponsesStreamEvent = {
+	type?: unknown;
+	item_id?: unknown;
+	output_index?: unknown;
+	item?: {id?: unknown; type?: unknown};
+};
+
+export function createReasoningItemNormalizer(): TransformStream<
+	Uint8Array,
+	Uint8Array
+> {
+	const decoder = new TextDecoder('utf-8');
+	const encoder = new TextEncoder();
+	const announced = new Set<string>();
+	let buffer = '';
+	const separator = '\n\n';
+
+	const synthesize = (id: string, outputIndex: unknown): string =>
+		`data: ${JSON.stringify({
+			type: 'response.output_item.added',
+			output_index: typeof outputIndex === 'number' ? outputIndex : 0,
+			item: {id, type: 'reasoning', encrypted_content: null, summary: []},
+		})}${separator}`;
+
+	const rewrite = (event: string): string => {
+		const trimmed = event.trimStart();
+		if (!trimmed.startsWith('data:')) {
+			return event;
+		}
+
+		const payload = trimmed.slice(5).trim();
+		if (!payload || payload === '[DONE]') {
+			return event;
+		}
+
+		let value: ResponsesStreamEvent;
+		try {
+			value = JSON.parse(payload) as ResponsesStreamEvent;
+		} catch {
+			return event;
+		}
+
+		if (value.item?.type === 'reasoning' && typeof value.item.id === 'string') {
+			const itemId = value.item.id;
+			if (value.type === 'response.output_item.added') {
+				announced.add(itemId);
+				return event;
+			}
+			if (announced.has(itemId)) {
+				return event;
+			}
+			announced.add(itemId);
+			return synthesize(itemId, value.output_index) + event;
+		}
+
+		if (
+			typeof value.type === 'string' &&
+			value.type.startsWith('response.reasoning_summary') &&
+			typeof value.item_id === 'string' &&
+			!announced.has(value.item_id)
+		) {
+			announced.add(value.item_id);
+			return synthesize(value.item_id, value.output_index) + event;
+		}
+
+		return event;
+	};
+
+	const drain = (
+		controller: TransformStreamDefaultController<Uint8Array>,
+	): void => {
+		let index = buffer.indexOf(separator);
+		while (index !== -1) {
+			const event = buffer.slice(0, index + separator.length);
+			buffer = buffer.slice(index + separator.length);
+			controller.enqueue(encoder.encode(rewrite(event)));
+			index = buffer.indexOf(separator);
+		}
+	};
+
+	return new TransformStream({
+		transform(chunk, controller) {
+			buffer += decoder.decode(chunk, {stream: true});
+			drain(controller);
+		},
+		flush(controller) {
+			buffer += decoder.decode();
+			drain(controller);
+			if (buffer.length > 0) {
+				controller.enqueue(encoder.encode(buffer));
+			}
+		},
+	});
+}
+
 /**
  * Creates an AI SDK provider based on the sdkProvider configuration.
  * Defaults to 'openai-compatible' if not specified.
@@ -206,13 +301,27 @@ export async function createProvider(
 				headers[k] = v;
 			});
 
-			return undiciFetch(input as string | URL, {
+			const response = (await undiciFetch(input as string | URL, {
 				method: init?.method,
 				body: init?.body as UndiciRequestInit['body'],
 				signal: init?.signal,
 				headers,
 				dispatcher: undiciAgent,
-			}) as Promise<Response>;
+			})) as unknown as Response;
+
+			const contentType = response.headers.get('content-type') || '';
+			if (response.body && contentType.includes('text/event-stream')) {
+				return new Response(
+					response.body.pipeThrough(createReasoningItemNormalizer()),
+					{
+						status: response.status,
+						statusText: response.statusText,
+						headers: response.headers,
+					},
+				) as unknown as Response;
+			}
+
+			return response;
 		};
 
 		const {createOpenAI} = await import('@ai-sdk/openai');
