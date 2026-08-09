@@ -422,20 +422,13 @@
 		}
 	});
 
-	// Capture Ctrl/Cmd+Alt+Shift+C inside the webview. When focus is in the
-	// textarea (or elsewhere in this document), the host keybinding service
-	// may not see the chord, so handle it here directly. Uses e.code because
-	// Alt changes e.key on some layouts (e.g. macOS alt+c gives "ç").
-	// Ctrl+Shift+C and Ctrl+Alt+C are avoided: VS Code (external terminal)
-	// and Cursor (confetti) claim them at app level before the webview.
-	document.addEventListener('keydown', (e) => {
-		const isCopyChord =
-			(e.ctrlKey || e.metaKey) && e.altKey && e.shiftKey && e.code === 'KeyC';
-		if (!isCopyChord) return;
-		e.preventDefault();
-		e.stopPropagation();
-		copyLastCodeBlock();
-	});
+	// Ctrl/Cmd+Alt+Shift+C is owned by the host keybinding
+	// (`nanocoder.copyLastCodeBlock` in package.json). VS Code forwards
+	// webview keydowns to the host for resolution even after preventDefault,
+	// so a document listener here would double-fire (two clipboard writes /
+	// two toasts). The host posts `{type:'copyLastCodeBlock'}` back into
+	// this page. Ctrl+Shift+C and Ctrl+Alt+C are avoided: VS Code (external
+	// terminal) and Cursor (confetti) claim them at app level.
 
 	function submitMessage() {
 		let text = chatInput.value.trim();
@@ -853,6 +846,7 @@
 		if (!toast) {
 			toast = document.createElement('div');
 			toast.id = 'copy-toast';
+			toast.setAttribute('role', 'status');
 			toast.className = 'fixed bottom-24 left-1/2 -translate-x-1/2 z-50 flex items-center px-3 py-1.5 rounded-md border border-vscode-border bg-vscode-dropdown-bg text-vscode-dropdown-fg font-vscode text-[0.85em] shadow-lg pointer-events-none transition-opacity duration-200';
 			document.body.appendChild(toast);
 		}
@@ -870,8 +864,9 @@
 		}, 1500);
 	}
 
-	// Streaming batches marked.parse() behind a 50ms timer, so a copy issued
-	// mid-turn would otherwise read the previous frame's DOM.
+	// Streaming batches marked.parse() behind a 50ms timer. Flush so a copy
+	// mid-turn (or a turn boundary) reads the current markdown, not the
+	// previous throttled frame. Shared by copyLastCodeBlock and endCurrentTextBlock.
 	function flushPendingRender() {
 		if (!renderTimeout) return;
 		clearTimeout(renderTimeout);
@@ -1061,13 +1056,7 @@
 	// tool call is appended to the block ABOVE the card, fusing pre-tool
 	// and post-tool output into one paragraph.
 	function endCurrentTextBlock() {
-		if (renderTimeout) {
-			clearTimeout(renderTimeout);
-			renderTimeout = null;
-			if (currentTextEl && typeof marked !== 'undefined') {
-				currentTextEl.innerHTML = marked.parse(currentTurnText);
-			}
-		}
+		flushPendingRender();
 		currentTurnEl = null;
 		currentTextEl = null;
 		currentTurnText = '';

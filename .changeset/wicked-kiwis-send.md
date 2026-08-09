@@ -2,4 +2,4 @@
 "@nanocollective/nanocoder": minor
 ---
 
-Added a /copy code and ctrl + alt + shift + c key binding to copy code elements from previous response of the assistant
+VS Code extension: Added `/copy code` and a Ctrl+Alt+Shift+C (Cmd+Alt+Shift+C on macOS) keybinding to copy the last code block from the previous assistant response.
