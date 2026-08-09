@@ -356,6 +356,49 @@ test('AcpAgent.prompt - routes text and images through to the conversation', asy
 });
 
 // ============================================================================
+// prompt() - built-in slash commands
+// ============================================================================
+
+const promptForBuiltinReply = async (text: string): Promise<string> => {
+	const conn = createMockConn();
+	const replies: string[] = [];
+	conn.sessionUpdate = async (u: any) => {
+		if (u.update?.sessionUpdate === 'agent_message_chunk') {
+			replies.push(u.update.content.text);
+		}
+	};
+	const agent = new AcpAgent(createMockInitContext(), conn);
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text}],
+	});
+	return replies.join('\n');
+};
+
+test('AcpAgent.prompt - /help advertises the copy commands', async t => {
+	const reply = await promptForBuiltinReply('/help');
+	t.true(reply.includes('`/copy`'));
+	t.true(reply.includes('`/copy code`'));
+});
+
+test('AcpAgent.prompt - /copy points at the chat view instead of erroring', async t => {
+	const reply = await promptForBuiltinReply('/copy');
+	t.true(reply.includes('handled by the chat view'));
+	t.false(reply.includes('Unrecognized slash command'));
+});
+
+test('AcpAgent.prompt - /copy code is not treated as unrecognized', async t => {
+	const reply = await promptForBuiltinReply('/copy code');
+	t.false(reply.includes('Unrecognized slash command'));
+});
+
+test('AcpAgent.prompt - a genuinely unknown command still reports unrecognized', async t => {
+	const reply = await promptForBuiltinReply('/definitelynotacommand');
+	t.true(reply.includes('Unrecognized slash command'));
+});
+
+// ============================================================================
 // cancel()
 // ============================================================================
 

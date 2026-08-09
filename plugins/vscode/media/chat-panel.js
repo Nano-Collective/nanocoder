@@ -152,8 +152,20 @@
 	let currentAggregator = null;
 	let currentThoughtBox = null;
 	let toastTimeout = null;
-	// Raw markdown of the most recent agent message, kept for the /copy
-	// input command (rendered DOM textContent would lose fences and bullets).
+	// One agent response is split into several `.agent-markdown` containers -
+	// endCurrentTextBlock() closes the current one whenever a tool card, thought
+	// box or plan card is inserted. `agentTurnId` stamps every container of the
+	// same response with the same id (bumped on each user message) so /copy and
+	// /copy code can address the whole response instead of its last fragment.
+	let agentTurnId = 0;
+	// Raw markdown of the last agent response, kept for the /copy input command
+	// (rendered DOM textContent would lose fences and bullets).
+	// `lastAgentSegments` holds the segments already closed, `lastAgentRawText`
+	// is those plus the one still streaming, and `lastAgentRawTurnId` records
+	// which response they describe - so a finished response stays copyable after
+	// the user sends again, until the next one actually produces text.
+	let lastAgentRawTurnId = -1;
+	let lastAgentSegments = '';
 	let lastAgentRawText = '';
 
 	// Premium SVG Icons (Feather Icons)
@@ -439,8 +451,9 @@
 		// Match on raw input before context chips are folded in, otherwise
 		// `/copy` with an attachment becomes `/copy\n\n@[file] …` and falls
 		// through to the agent as an unrecognized slash command.
-		// `/copy code` copies just the last fenced code block.
-		const lower = text.toLowerCase();
+		// `/copy code` copies just the last fenced code block. Inner whitespace
+		// is collapsed so `/copy  code` doesn't fall through to the agent.
+		const lower = text.toLowerCase().replace(/\s+/g, ' ');
 		if (lower === '/copy' || lower === '/copy code') {
 			chatInput.value = '';
 			chatInput.style.height = 'auto';
@@ -649,12 +662,49 @@
 		}, true);
 	}
 
+	// True while the accumulator describes the response currently streaming.
+	// Goes false as soon as the user sends again, freezing the previous
+	// response until beginAgentSegment() hands the accumulator to the new one.
+	function isAccumulatingCurrentTurn() {
+		return lastAgentRawTurnId === agentTurnId;
+	}
+
+	function beginAgentSegment() {
+		if (isAccumulatingCurrentTurn()) return;
+		lastAgentRawTurnId = agentTurnId;
+		lastAgentSegments = '';
+		lastAgentRawText = '';
+	}
+
+	// Fold the segment being closed into the response-level accumulator so
+	// /copy still yields the whole response after a tool card splits it.
+	function closeAgentSegment() {
+		if (isAccumulatingCurrentTurn() && currentTurnText) {
+			lastAgentSegments = [lastAgentSegments, currentTurnText]
+				.filter(Boolean)
+				.join('\n\n');
+		}
+		currentTurnText = '';
+	}
+
+	function syncLastAgentRawText() {
+		if (!isAccumulatingCurrentTurn()) return;
+		lastAgentRawText = [lastAgentSegments, currentTurnText]
+			.filter(Boolean)
+			.join('\n\n');
+	}
+
 	function appendMessage(content, role, images = undefined) {
 		// Remove welcome message and loader if present
 		const welcome = document.querySelector('.welcome-message');
 		if (welcome) welcome.remove();
 		const loader = document.getElementById('session-loader');
 		if (loader) loader.remove();
+
+		// A user message opens a new turn, so the agent segments that follow get
+		// a fresh id. The raw-text accumulator is handed over lazily, once the
+		// new response produces text.
+		if (role === 'user') agentTurnId++;
 
 		const wrapper = document.createElement('div');
 		wrapper.className = 'group flex flex-col min-w-0 shrink-0 ' +
@@ -711,6 +761,7 @@
 			// `agent-markdown` marks assistant prose so copyLastCodeBlock() can skip
 			// user echoes and thought boxes, which also render as `.markdown-body`.
 			textContainer.className = 'markdown-body' + (role === 'agent' ? ' agent-markdown' : '');
+			if (role === 'agent') textContainer.dataset.turnId = String(agentTurnId);
 
 			if (typeof marked !== 'undefined') {
 				textContainer.innerHTML = marked.parse(parsedContent);
@@ -772,9 +823,13 @@
 		scrollToBottom();
 
 		if (role === 'agent') {
+			// This opens a fresh container, so whatever block was open is done.
+			closeAgentSegment();
+			beginAgentSegment();
 			currentTurnEl = msgEl;
 			currentTextEl = textContainer;
-			lastAgentRawText = content;
+			currentTurnText = content;
+			syncLastAgentRawText();
 		}
 	}
 
@@ -795,8 +850,10 @@
 
 			const textContainer = document.createElement('div');
 			textContainer.className = 'markdown-body agent-markdown leading-snug break-words';
+			textContainer.dataset.turnId = String(agentTurnId);
+			beginAgentSegment();
 			currentTurnText = textChunk;
-			lastAgentRawText = currentTurnText;
+			syncLastAgentRawText();
 
 			if (typeof marked !== 'undefined') {
 				textContainer.innerHTML = marked.parse(currentTurnText);
@@ -816,7 +873,7 @@
 		} else {
 			// Append to existing turn
 			currentTurnText += textChunk;
-			lastAgentRawText = currentTurnText;
+			syncLastAgentRawText();
 			if (currentTurnEl.parentElement) {
 				currentTurnEl.parentElement.dataset.rawText = currentTurnText;
 			}
@@ -886,16 +943,26 @@
 	function copyLastCodeBlock() {
 		flushPendingRender();
 
-		const agentMarkdowns = messagesContainer.querySelectorAll('.agent-markdown');
-		const lastAgent = agentMarkdowns[agentMarkdowns.length - 1];
-		if (!lastAgent) {
-			showToast('No code block in the last response');
+		const segments = messagesContainer.querySelectorAll('.agent-markdown');
+		if (segments.length === 0) {
+			showToast('No response to copy yet');
 			return;
 		}
 
-		const blocks = lastAgent.querySelectorAll('pre code');
-		const lastBlock = blocks[blocks.length - 1];
-		const text = lastBlock ? lastBlock.textContent.replace(/\n$/, '') : '';
+		// Walk the segments of the last response back to front. Scanning the
+		// whole response rather than only its final segment matters because a
+		// tool call between the code block and the closing prose would
+		// otherwise hide the block.
+		const lastTurnId = segments[segments.length - 1].dataset.turnId;
+		let text = '';
+		for (let i = segments.length - 1; i >= 0; i--) {
+			if (segments[i].dataset.turnId !== lastTurnId) break;
+			const blocks = segments[i].querySelectorAll('pre code');
+			if (blocks.length > 0) {
+				text = blocks[blocks.length - 1].textContent.replace(/\n$/, '');
+				break;
+			}
+		}
 
 		if (!text) {
 			showToast('No code block in the last response');
@@ -950,6 +1017,9 @@
 				currentTurnEl = null;
 				currentTextEl = null;
 				currentTurnText = '';
+				agentTurnId = 0;
+				lastAgentRawTurnId = -1;
+				lastAgentSegments = '';
 				lastAgentRawText = '';
 				if (currentThoughtBox) {
 					clearInterval(currentThoughtBox.timer);
@@ -1071,9 +1141,10 @@
 	// and post-tool output into one paragraph.
 	function endCurrentTextBlock() {
 		flushPendingRender();
+		closeAgentSegment();
 		currentTurnEl = null;
 		currentTextEl = null;
-		currentTurnText = '';
+		syncLastAgentRawText();
 	}
 
 	function handleAcpUpdate(payload) {

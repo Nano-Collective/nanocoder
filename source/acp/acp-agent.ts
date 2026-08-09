@@ -257,6 +257,15 @@ export class AcpAgent implements Agent {
 						return sendBuiltinReply(msg);
 					}
 
+					// `/copy` is normally intercepted by the webview before it
+					// reaches us, but `/help` advertises it, so a client without
+					// that interception must not get "unrecognized command".
+					if (commandName === 'copy') {
+						const msg =
+							'`/copy` is handled by the chat view. Type it in the Nanocoder chat input (or press Ctrl+Alt+Shift+C / Cmd+Alt+Shift+C for the last code block).';
+						return sendBuiltinReply(msg);
+					}
+
 					if (['model', 'provider'].includes(commandName)) {
 						const msg = `Use the ${commandName} selector in the chat header to switch ${commandName}s.`;
 						return sendBuiltinReply(msg);
