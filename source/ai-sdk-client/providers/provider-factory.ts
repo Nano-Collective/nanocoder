@@ -47,6 +47,115 @@ export type TaggedProvider =
 	| {kind: 'anthropic'; provider: AnthropicProvider}
 	| {kind: 'google'; provider: GoogleGenerativeAIProvider};
 
+type CopilotSseEvent = {
+	type?: string;
+	output_index?: number;
+	item_id?: string;
+	item?: {id?: string; [key: string]: unknown};
+	[key: string]: unknown;
+};
+
+/**
+ * GitHub Copilot can rotate the opaque item id between Responses API events
+ * while keeping output_index stable. AI SDK 6's OpenAI provider keys active
+ * reasoning and text state by item id, so normalize later events back to the
+ * id announced by response.output_item.added.
+ */
+export function normalizeCopilotSseResponse(response: Response): Response {
+	const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
+	if (!response.body || !contentType.includes('text/event-stream')) {
+		return response;
+	}
+
+	const decoder = new TextDecoder();
+	const encoder = new TextEncoder();
+	const itemIdsByOutputIndex = new Map<number, string>();
+	let buffer = '';
+
+	const normalizeBlock = (block: string): string => {
+		const lines = block.split(/\r\n|\r|\n/);
+		const dataLineIndex = lines.findIndex(line => line.startsWith('data:'));
+		if (dataLineIndex === -1) {
+			return block;
+		}
+
+		const data = lines
+			.filter(line => line.startsWith('data:'))
+			.map(line => line.slice(5).trimStart())
+			.join('\n');
+		if (data === '[DONE]') {
+			return block;
+		}
+
+		try {
+			const event = JSON.parse(data) as CopilotSseEvent;
+			const outputIndex = event.output_index;
+			if (typeof outputIndex !== 'number') {
+				return block;
+			}
+
+			if (
+				event.type === 'response.output_item.added' &&
+				typeof event.item?.id === 'string'
+			) {
+				itemIdsByOutputIndex.set(outputIndex, event.item.id);
+			} else {
+				const canonicalId = itemIdsByOutputIndex.get(outputIndex);
+				if (canonicalId) {
+					if (typeof event.item_id === 'string') {
+						event.item_id = canonicalId;
+					}
+					if (
+						event.type === 'response.output_item.done' &&
+						typeof event.item?.id === 'string'
+					) {
+						event.item.id = canonicalId;
+					}
+				}
+
+				if (event.type === 'response.output_item.done') {
+					itemIdsByOutputIndex.delete(outputIndex);
+				}
+			}
+
+			const normalizedLines = lines.filter(
+				(line, index) => index === dataLineIndex || !line.startsWith('data:'),
+			);
+			normalizedLines[dataLineIndex] = `data: ${JSON.stringify(event)}`;
+			return normalizedLines.join('\n');
+		} catch {
+			return block;
+		}
+	};
+
+	const transform = new TransformStream<Uint8Array, Uint8Array>({
+		transform(chunk, controller) {
+			buffer += decoder.decode(chunk, {stream: true});
+			let delimiter = /(?:\r\n|\r|\n){2}/.exec(buffer);
+			while (delimiter?.index !== undefined) {
+				const block = buffer.slice(0, delimiter.index);
+				buffer = buffer.slice(delimiter.index + delimiter[0].length);
+				controller.enqueue(
+					encoder.encode(`${normalizeBlock(block)}${delimiter[0]}`),
+				);
+				delimiter = /(?:\r\n|\r|\n){2}/.exec(buffer);
+			}
+		},
+		flush(controller) {
+			buffer += decoder.decode();
+			if (buffer) {
+				controller.enqueue(encoder.encode(normalizeBlock(buffer)));
+			}
+		},
+	});
+
+	return new Response(response.body.pipeThrough(transform), {
+		status: response.status,
+		statusText: response.statusText,
+		headers: response.headers,
+	});
+}
+
 /**
  * Wraps undici's fetch so requests flow through the shared Agent. The Agent
  * carries TLS connect options (e.g. caCertPath), so any SDK provider given
@@ -206,13 +315,15 @@ export async function createProvider(
 				headers[k] = v;
 			});
 
-			return undiciFetch(input as string | URL, {
+			const response = await undiciFetch(input as string | URL, {
 				method: init?.method,
 				body: init?.body as UndiciRequestInit['body'],
 				signal: init?.signal,
 				headers,
 				dispatcher: undiciAgent,
-			}) as Promise<Response>;
+			});
+
+			return normalizeCopilotSseResponse(response as unknown as Response);
 		};
 
 		const {createOpenAI} = await import('@ai-sdk/openai');

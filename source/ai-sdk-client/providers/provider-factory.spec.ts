@@ -4,7 +4,154 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type {AIProviderConfig} from '@/types/index';
 import {Agent, MockAgent} from 'undici';
-import {createProvider, createUndiciFetch} from './provider-factory.js';
+import {
+	createProvider,
+	createUndiciFetch,
+	normalizeCopilotSseResponse,
+} from './provider-factory.js';
+
+test('normalizeCopilotSseResponse correlates rotated item ids by output index', async t => {
+	const events = [
+		{
+			type: 'response.output_item.added',
+			output_index: 0,
+			item: {id: 'reasoning-canonical', type: 'reasoning'},
+		},
+		{
+			type: 'response.reasoning_summary_part.added',
+			output_index: 0,
+			item_id: 'reasoning-rotated',
+			summary_index: 0,
+		},
+		{
+			type: 'response.output_item.done',
+			output_index: 0,
+			item: {id: 'reasoning-done-rotated', type: 'reasoning'},
+		},
+		{
+			type: 'response.output_item.added',
+			output_index: 1,
+			item: {id: 'message-canonical', type: 'message'},
+		},
+		{
+			type: 'response.output_text.delta',
+			output_index: 1,
+			item_id: 'message-rotated',
+			delta: 'ok',
+		},
+		{
+			type: 'response.output_item.done',
+			output_index: 1,
+			item: {id: 'message-done-rotated', type: 'message'},
+		},
+		{
+			type: 'response.output_text.delta',
+			output_index: 1,
+			item_id: 'after-done-untracked',
+			delta: 'ignored',
+		},
+		{
+			type: 'response.output_item.added',
+			output_index: 1,
+			item: {id: 'message-reused-index', type: 'message'},
+		},
+		{
+			type: 'response.output_text.delta',
+			output_index: 1,
+			item_id: 'message-reused-rotated',
+			delta: 'again',
+		},
+	];
+	const sse = events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('');
+	const splitAt = sse.indexOf('reasoning-rotated') + 9;
+	const encoder = new TextEncoder();
+	const body = new ReadableStream<Uint8Array>({
+		start(controller) {
+			controller.enqueue(encoder.encode(sse.slice(0, splitAt)));
+			controller.enqueue(encoder.encode(sse.slice(splitAt)));
+			controller.close();
+		},
+	});
+	const response = new Response(body, {
+		headers: {'content-type': 'text/event-stream'},
+	});
+
+	const normalized = await normalizeCopilotSseResponse(response).text();
+	const normalizedEvents = normalized
+		.split('\n\n')
+		.filter(Boolean)
+		.map(block => JSON.parse(block.replace(/^data:\s*/, '')) as {
+			item_id?: string;
+			item?: {id: string};
+		});
+
+	t.is(normalizedEvents[1]?.item_id, 'reasoning-canonical');
+	t.is(normalizedEvents[2]?.item?.id, 'reasoning-canonical');
+	t.is(normalizedEvents[4]?.item_id, 'message-canonical');
+	t.is(normalizedEvents[5]?.item?.id, 'message-canonical');
+	t.is(normalizedEvents[6]?.item_id, 'after-done-untracked');
+	t.is(normalizedEvents[8]?.item_id, 'message-reused-index');
+});
+
+test('normalizeCopilotSseResponse supports CR-only event framing', async t => {
+	const added = {
+		type: 'response.output_item.added',
+		output_index: 0,
+		item: {id: 'canonical', type: 'reasoning'},
+	};
+	const delta = {
+		type: 'response.reasoning_summary_text.delta',
+		output_index: 0,
+		item_id: 'rotated',
+		summary_index: 0,
+		delta: 'thinking',
+	};
+	const body = `data: ${JSON.stringify(added)}\r\rdata: ${JSON.stringify(delta)}\r\r`;
+	const response = new Response(body, {
+		headers: {'content-type': 'text/event-stream'},
+	});
+
+	const normalized = await normalizeCopilotSseResponse(response).text();
+	t.true(normalized.includes('"item_id":"canonical"'));
+});
+
+test('normalizeCopilotSseResponse matches event-stream media types case-insensitively', async t => {
+	const added = {
+		type: 'response.output_item.added',
+		output_index: 0,
+		item: {id: 'canonical', type: 'message'},
+	};
+	const delta = {
+		type: 'response.output_text.delta',
+		output_index: 0,
+		item_id: 'rotated',
+		delta: 'ok',
+	};
+	const body = `data: ${JSON.stringify(added)}\n\ndata: ${JSON.stringify(delta)}\n\n`;
+	const response = new Response(body, {
+		headers: {'content-type': 'Text/Event-Stream; Charset=UTF-8'},
+	});
+
+	const normalized = await normalizeCopilotSseResponse(response).text();
+	t.true(normalized.includes('"item_id":"canonical"'));
+});
+
+test('normalizeCopilotSseResponse preserves non-SSE responses', async t => {
+	const response = new Response('{"ok":true}', {
+		headers: {'content-type': 'application/json'},
+	});
+
+	t.is(normalizeCopilotSseResponse(response), response);
+});
+
+test('normalizeCopilotSseResponse preserves control and malformed events', async t => {
+	const body = ': keepalive\n\ndata: not-json\n\ndata: [DONE]\n\n';
+	const response = new Response(body, {
+		headers: {'content-type': 'text/event-stream'},
+	});
+
+	t.is(await normalizeCopilotSseResponse(response).text(), body);
+});
 
 test('createProvider creates provider with basic config', async t => {
 	const config: AIProviderConfig = {
