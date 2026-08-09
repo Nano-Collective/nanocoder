@@ -434,6 +434,28 @@
 		let text = chatInput.value.trim();
 		if (!text && attachedPaths.length === 0 && pendingImages.length === 0) return;
 
+		// /copy is handled locally, mirroring the terminal slash command:
+		// copy the previous agent output instead of prompting the agent.
+		// Match on raw input before context chips are folded in, otherwise
+		// `/copy` with an attachment becomes `/copy\n\n@[file] …` and falls
+		// through to the agent as an unrecognized slash command.
+		// `/copy code` copies just the last fenced code block.
+		const lower = text.toLowerCase();
+		if (lower === '/copy' || lower === '/copy code') {
+			chatInput.value = '';
+			chatInput.style.height = 'auto';
+			attachedPaths = [];
+			renderChips();
+			pendingImages = [];
+			renderImagePreviews();
+			if (lower === '/copy code') {
+				copyLastCodeBlock();
+			} else {
+				copyLastResponse();
+			}
+			return;
+		}
+
 		// Append attached paths as context lines
 		if (attachedPaths.length > 0) {
 			const contextText = attachedPaths
@@ -443,21 +465,6 @@
 		}
 
 		const imagesToSubmit = pendingImages.length > 0 ? [...pendingImages] : undefined;
-
-		// /copy is handled locally, mirroring the terminal slash command:
-		// copy the previous agent output instead of prompting the agent.
-		// `/copy code` copies just the last fenced code block.
-		const lower = text.toLowerCase();
-		if (lower === '/copy' || lower === '/copy code') {
-			chatInput.value = '';
-			chatInput.style.height = 'auto';
-			if (lower === '/copy code') {
-				copyLastCodeBlock();
-			} else {
-				copyLastResponse();
-			}
-			return;
-		}
 
 		// Send message to extension host
 		vscode.postMessage({
@@ -879,12 +886,19 @@
 	function copyLastCodeBlock() {
 		flushPendingRender();
 
-		const blocks = messagesContainer.querySelectorAll('.agent-markdown pre code');
+		const agentMarkdowns = messagesContainer.querySelectorAll('.agent-markdown');
+		const lastAgent = agentMarkdowns[agentMarkdowns.length - 1];
+		if (!lastAgent) {
+			showToast('No code block in the last response');
+			return;
+		}
+
+		const blocks = lastAgent.querySelectorAll('pre code');
 		const lastBlock = blocks[blocks.length - 1];
 		const text = lastBlock ? lastBlock.textContent.replace(/\n$/, '') : '';
 
 		if (!text) {
-			showToast('No code block to copy yet');
+			showToast('No code block in the last response');
 			return;
 		}
 

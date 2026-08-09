@@ -130,3 +130,29 @@ test('copyCommand ignores trailing non-assistant messages', async t => {
 	await copyCommand.handler([], messages, testMetadata);
 	t.is(lastWritten, 'To get to the other side.');
 });
+
+test('copyCommand code is rejected in the terminal', async t => {
+	const messages: Message[] = [
+		{role: 'assistant', content: '```js\nconst x = 1;\n```'},
+	];
+
+	const result = await copyCommand.handler(['code'], messages, testMetadata);
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = lastFrame() || '';
+
+	t.true(output.includes("This functionality isn't supported in the terminal."));
+	t.is(lastWritten, null);
+});
+
+test('copyCommand CODE is rejected case-insensitively', async t => {
+	const result = await copyCommand.handler(
+		['CODE'],
+		baseMessages,
+		testMetadata,
+	);
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = lastFrame() || '';
+
+	t.true(output.includes("This functionality isn't supported in the terminal."));
+	t.is(lastWritten, null);
+});
