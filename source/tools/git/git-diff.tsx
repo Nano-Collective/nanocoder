@@ -37,7 +37,7 @@ function buildGitDiffArgs(
 	}
 
 	if (includeStat) {
-		gitArgs.push('--stat');
+		gitArgs.push('--stat-count=20', '--stat');
 	}
 
 	if (args.base) {
@@ -76,6 +76,11 @@ const executeGitDiff = async (args: GitDiffInput): Promise<string> => {
 				MAX_DIFF_LINES,
 			);
 			if (truncated) {
+				const filesChanged = output.match(/^diff --git /gm)?.length ?? 0;
+				if (filesChanged <= 1) {
+					return content;
+				}
+
 				try {
 					const statOutput = await execGit(buildGitDiffArgs(args, true));
 					return (
