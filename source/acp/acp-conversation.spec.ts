@@ -1093,6 +1093,65 @@ test('runAcpConversation - accumulates provider-reported usage across the turn o
 	});
 });
 
+test('runAcpConversation - a total-only provider still reports usage on the PromptResponse', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	const client = {
+		getCurrentModel: () => 'test-model',
+		chat: async () => ({
+			choices: [{message: {content: 'Hello'}}],
+			usage: {totalTokens: 1500},
+		}),
+	} as unknown as LLMClient;
+
+	const result = await runAcpConversation({
+		session,
+		client,
+		toolManager: createMockToolManager() as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(result.stopReason, 'end_turn');
+	// Wire format zero-fills unreported fields (the ACP Usage type requires
+	// them), but the total carries the real figure. Internally the sparse
+	// {totalTokens} shape is what prices the turn — zero-filled input/output
+	// would take the wrong buildResponseUsage branch and cost out at $0
+	// (covered by the lump-sum test in response-usage.spec.ts).
+	t.deepEqual(result.usage, {
+		inputTokens: 0,
+		outputTokens: 0,
+		totalTokens: 1500,
+	});
+});
+
+test('runAcpConversation - an input-only provider does not fabricate output tokens', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	const client = {
+		getCurrentModel: () => 'test-model',
+		chat: async () => ({
+			choices: [{message: {content: 'Hello'}}],
+			usage: {inputTokens: 800},
+		}),
+	} as unknown as LLMClient;
+
+	const result = await runAcpConversation({
+		session,
+		client,
+		toolManager: createMockToolManager() as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(result.stopReason, 'end_turn');
+	t.deepEqual(result.usage, {
+		inputTokens: 800,
+		outputTokens: 0,
+		totalTokens: 800,
+	});
+});
+
 test('runAcpConversation - omits usage from the PromptResponse when the provider reports none', async t => {
 	const {conn} = createMockConn();
 	const session = createMockSession(conn);

@@ -19,6 +19,10 @@ export const TIMEOUT_UPDATE_CHECK_MS = 10_000;
 export const TIMEOUT_SOCKET_DEFAULT_MS = 120_000;
 export const TIMEOUT_SOCKET_LOCAL_DEFAULT_MS = 600_000; // 10 minutes for local models (Ollama, etc.)
 export const TIMEOUT_LSP_DIAGNOSTICS_MS = 5000;
+// Ceiling on the pricing lookup for the per-response usage footer: past
+// this the message renders with token counts only rather than holding the
+// streaming-to-static swap hostage to a cold models.dev fetch.
+export const TIMEOUT_COST_LOOKUP_MS = 250;
 
 // === PASTE DETECTION ===
 export const PASTE_CHUNK_BASE_WINDOW_MS = 500;

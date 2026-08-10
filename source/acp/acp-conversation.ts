@@ -57,25 +57,33 @@ export async function runAcpConversation(
 	// Provider-reported usage accumulated across this prompt's model calls,
 	// returned on the PromptResponse (experimental ACP `usage` field) so
 	// clients like the VS Code extension can show a per-response indicator.
-	const turnUsage = {inputTokens: 0, outputTokens: 0, totalTokens: 0};
-	let usageReported = false;
+	// Fields stay undefined until a finite value arrives: zero-filling
+	// unreported input/output would route a total-only report into the
+	// input/output cost branch of buildResponseUsage and price it at $0.
+	const turnUsage: ApiUsage = {};
 
 	const recordUsage = (usage: ApiUsage | undefined) => {
 		if (!usage) return;
-		const input = Number.isFinite(usage.inputTokens)
-			? (usage.inputTokens as number)
-			: 0;
-		const output = Number.isFinite(usage.outputTokens)
-			? (usage.outputTokens as number)
-			: 0;
+		if (Number.isFinite(usage.inputTokens)) {
+			turnUsage.inputTokens =
+				(turnUsage.inputTokens ?? 0) + (usage.inputTokens as number);
+		}
+		if (Number.isFinite(usage.outputTokens)) {
+			turnUsage.outputTokens =
+				(turnUsage.outputTokens ?? 0) + (usage.outputTokens as number);
+		}
+		// Keep the running total consistent when a call reports only
+		// input/output: add their sum so mixed-report turns don't understate.
 		const total = Number.isFinite(usage.totalTokens)
 			? (usage.totalTokens as number)
-			: input + output;
-		if (input === 0 && output === 0 && total === 0) return;
-		turnUsage.inputTokens += input;
-		turnUsage.outputTokens += output;
-		turnUsage.totalTokens += total;
-		usageReported = true;
+			: Number.isFinite(usage.inputTokens) ||
+					Number.isFinite(usage.outputTokens)
+				? ((usage.inputTokens as number) || 0) +
+					((usage.outputTokens as number) || 0)
+				: undefined;
+		if (total !== undefined) {
+			turnUsage.totalTokens = (turnUsage.totalTokens ?? 0) + total;
+		}
 	};
 
 	// Attach accumulated usage (and best-effort estimated cost via _meta) to
@@ -83,14 +91,28 @@ export async function runAcpConversation(
 	const withTurnUsage = async (
 		response: PromptResponse,
 	): Promise<PromptResponse> => {
+		const usageReported =
+			turnUsage.inputTokens !== undefined ||
+			turnUsage.outputTokens !== undefined ||
+			turnUsage.totalTokens !== undefined;
 		if (!usageReported) return response;
+		// Cost is computed from the sparse accumulators so a total-only turn
+		// takes the lump-sum averaging branch instead of pricing 0+0 tokens.
 		const priced = await buildResponseUsage(
 			turnUsage,
 			client.getCurrentModel(),
 		);
+		const input = turnUsage.inputTokens ?? 0;
+		const output = turnUsage.outputTokens ?? 0;
 		return {
 			...response,
-			usage: {...turnUsage},
+			// The ACP Usage type requires all three fields, so unreported ones
+			// are zero-filled here — on the wire only, after cost is computed.
+			usage: {
+				inputTokens: input,
+				outputTokens: output,
+				totalTokens: turnUsage.totalTokens ?? input + output,
+			},
 			...(priced?.cost != null
 				? {_meta: {'nanocoder/usage': {cost: priced.cost}}}
 				: {}),
@@ -147,7 +169,7 @@ export async function runAcpConversation(
 
 		const systemMessage = session.systemMessage;
 		if (!systemMessage) {
-			return {stopReason: 'end_turn'};
+			return withTurnUsage({stopReason: 'end_turn'});
 		}
 
 		const sessionConfig = getAppConfig().sessions;
