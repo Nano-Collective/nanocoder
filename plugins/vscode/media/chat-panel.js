@@ -2,20 +2,6 @@
 	// @ts-ignore - acquireVsCodeApi is injected by VS Code
 	const vscode = acquireVsCodeApi();
 
-	// Resolve icon.svg
-	const nanocoderIconUri = document.currentScript
-		? new URL('icon.svg', document.currentScript.src).href
-		: '';
-	let nanocoderIconSvg = '';
-	if (nanocoderIconUri) {
-		fetch(nanocoderIconUri)
-			.then((r) => (r.ok ? r.text() : ''))
-			.then((svg) => {
-				nanocoderIconSvg = svg;
-			})
-			.catch(() => {});
-	}
-
 	const messagesContainer = document.getElementById('messages-container');
 	const chatInput = document.getElementById('chat-input');
 	const composerBox = document.getElementById('composer-box');
@@ -169,6 +155,7 @@
 
 	// Premium SVG Icons (Feather Icons)
 	const ICONS = {
+		nanocoder: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M 2 5 H 5 V 8 H 7 V 12 H 9 V 5 H 12 V 19 H 9 V 16 H 7 V 12 H 5 V 19 H 2 Z" /><path d="M 14 5 H 22 V 8 H 17 V 16 H 22 V 19 H 14 Z" /></svg>`,
 		trash: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>`,
 		pending: `<svg class="animate-spin" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line></svg>`,
 		success: `<svg class="text-[#89d185]" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`,
@@ -243,6 +230,7 @@
 					statusEl.innerHTML = ICONS.cancelled;
 				}
 			});
+			stopVisualLoader();
 
 			if (currentAggregator) {
 				currentAggregator.close();
@@ -467,11 +455,12 @@
 		// Optimistically append user message
 		appendMessage(text, 'user', imagesToSubmit);
 		pendingUserMessageText = text;
-    startVisualLoader();
 
 		if (!isProcessing) {
 			// Switch to processing state
 			setProcessing(true);
+
+			startVisualLoader();
 
 			// Reset turn elements so agent starts a fresh block
 			currentTurnEl = null;
@@ -761,15 +750,8 @@
 		wrapper.className = 'group flex flex-row gap-1.5 min-w-0 shrink-0 self-start items-center max-w-full';
 		const span = document.createElement('span');
 		span.className = 'flex items-center shrink-0 text-vscode-fg [&_svg]:w-6 [&_svg]:h-6 animate-pulse';
-		if (nanocoderIconSvg) {
-			span.innerHTML = nanocoderIconSvg
-		}else{
-			fetch(nanocoderIconUri)
-			.then((r) => (r.ok ? r.text() : ''))
-			.then((svg) => {
-				span.innerHTML = svg;
-			});
-		}
+
+		span.innerHTML = ICONS.nanocoder;
 		wrapper.appendChild(span);
 
 		visualLoader = wrapper;
@@ -777,16 +759,18 @@
 		scrollToBottom();
 	}
 
-	function appendChunk(textChunk) {
-		// Remove welcome message and loader if present
-		const welcome = document.querySelector('.welcome-message');
-		if (welcome) welcome.remove();
-		const loader = document.getElementById('session-loader');
-		if (loader) loader.remove();
+	function stopVisualLoader() {
 		if (visualLoader) {
 			visualLoader.remove();
 			visualLoader = null;
 		}
+	}
+
+	function appendChunk(textChunk) {
+		// Remove welcome message and loader if present
+		const welcome = document.querySelector('.welcome-message');
+		if (welcome) welcome.remove();
+		stopVisualLoader();
 
 		if (!currentTurnEl || !currentTextEl) {
 			// First chunk for this turn
@@ -869,6 +853,7 @@
 				break;
 			}
 			case 'appendMessage':
+				stopVisualLoader();
 				appendMessage(message.content, 'agent');
 				break;
 			case 'clear':
@@ -1006,6 +991,10 @@
 	function handleAcpUpdate(payload) {
 		if (!payload) return;
 		const update = payload.update ? payload.update : payload;
+
+		if (update.sessionUpdate && update.sessionUpdate !== 'user_message_chunk') {
+			stopVisualLoader();
+		}
 
 		if (update.sessionUpdate === 'user_message_chunk') {
 			if (update.content) {

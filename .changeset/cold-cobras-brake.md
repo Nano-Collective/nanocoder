@@ -1,5 +1,5 @@
 ---
-"@nanocollective/nanocoder": minor
+"@nanocollective/nanocoder": patch
 ---
 
-Added a nancoder svg pulse effect as a visual loading indicator in vscode extension. It uses the provided svg and css to create a pulsing animation that indicates when the agent is processing a request.
+Added a nanocoder svg pulse effect as a visual loading indicator in vscode extension. It uses the provided svg and css to create a pulsing animation that indicates when the agent is processing a request.
