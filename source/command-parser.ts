@@ -5,7 +5,7 @@ export function parseInput(input: string): ParsedCommand {
 
 	// Check for bash command (prefixed with !)
 	if (trimmed.startsWith('!')) {
-		const bashCommand = trimmed.slice(1);
+		const bashCommand = trimmed.slice(1).trim();
 		return {
 			isCommand: false, // Not a regular command
 			isBashCommand: true,

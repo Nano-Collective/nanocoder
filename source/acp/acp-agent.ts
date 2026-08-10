@@ -243,6 +243,8 @@ export class AcpAgent implements Agent {
 							'**Available slash commands in VS Code GUI:**',
 							'',
 							'- `/clear` — Clear the current conversation',
+							'- `/copy` — Copy the last assistant response',
+							'- `/copy code` — Copy the last code block from the last response',
 							'- `/help` — Show this help message',
 							'',
 							'**Not available in VS Code GUI** (CLI-only):',
@@ -252,6 +254,15 @@ export class AcpAgent implements Agent {
 						]
 							.filter(Boolean)
 							.join('\n');
+						return sendBuiltinReply(msg);
+					}
+
+					// `/copy` is normally intercepted by the webview before it
+					// reaches us, but `/help` advertises it, so a client without
+					// that interception must not get "unrecognized command".
+					if (commandName === 'copy') {
+						const msg =
+							'`/copy` is handled by the chat view. Type it in the Nanocoder chat input (or press Ctrl+Alt+Shift+C / Cmd+Alt+Shift+C for the last code block).';
 						return sendBuiltinReply(msg);
 					}
 
@@ -524,6 +535,7 @@ export class AcpAgent implements Agent {
 		const config = getAppConfig();
 		const providers = (config.providers ?? []).map(p => ({
 			id: p.name,
+			providerId: p.name,
 			required: false,
 			supported: ['openai' as const],
 		}));

@@ -763,10 +763,13 @@ test.serial(
 				// Count x's in result - should be 300 - 12 (searchTarget) = 288
 				const contentLine = result.split('\n').find(l => l.includes('searchTarget'));
 				t.truthy(contentLine, 'Should have content line');
-				// The trimmed content should be max 300 chars + ellipsis
-				const trimmedContent = contentLine!.trim();
+				// Content follows the `file:line:` prefix in grep-style output;
+				// strip it before checking the truncated length.
+				const contentMatch = contentLine!.match(/^.+?:\d+:(.*)$/);
+				t.truthy(contentMatch, 'Content line should be in file:line:content format');
+				const trimmedContent = contentMatch![1];
 				t.true(
-					trimmedContent.length <= 302, // 300 + ellipsis (1 char) + possible whitespace
+					trimmedContent.length <= 301, // 300 + ellipsis (1 char)
 					`Content should be truncated, got ${trimmedContent.length} chars`,
 				);
 			} finally {
@@ -1721,6 +1724,91 @@ test.serial(
 				t.true(
 					result.includes('line5') || result.includes('line6'),
 					'Should include context after',
+				);
+			} finally {
+				process.chdir(originalCwd);
+			}
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'search_file_contents separates context-free matches with a single newline',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-search-compact-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(
+				join(testDir, 'test.ts'),
+				'TARGET_MATCH one\nfiller\nTARGET_MATCH two\nfiller\nTARGET_MATCH three',
+			);
+
+			const originalCwd = process.cwd();
+
+			try {
+				process.chdir(testDir);
+
+				const result = await searchFileContentsTool.tool.execute!(
+					{query: 'TARGET_MATCH', maxResults: 30},
+					{toolCallId: 'test', messages: []},
+				);
+
+				// Only the header/body split should produce a blank line; the
+				// match list itself must not contain any.
+				const sections = result.split('\n\n');
+				t.is(sections.length, 2, `Expected one blank line, got: ${result}`);
+				t.true(
+					sections[0].startsWith('Found 3 matches'),
+					'Header should report three matches',
+				);
+
+				const lines = sections[1].split('\n');
+				t.is(lines.length, 3, 'Each match should occupy exactly one line');
+				for (const line of lines) {
+					t.regex(line, /^test\.ts:\d+:TARGET_MATCH/, 'Expected file:line:content');
+				}
+			} finally {
+				process.chdir(originalCwd);
+			}
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'search_file_contents keeps the context header separator when a context block is one line',
+	async t => {
+		t.timeout(10000);
+		const testDir = join(process.cwd(), 'test-search-single-line-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			// A single-line file collapses the context block to one line, so
+			// content-sniffing would misread it as an exact match.
+			writeFileSync(join(testDir, 'test.ts'), 'const TARGET_MATCH = 1;');
+
+			const originalCwd = process.cwd();
+
+			try {
+				process.chdir(testDir);
+
+				const result = await searchFileContentsTool.tool.execute!(
+					{query: 'TARGET_MATCH', contextLines: 3, maxResults: 30},
+					{toolCallId: 'test', messages: []},
+				);
+
+				t.true(
+					result.includes('test.ts:1-\n'),
+					`Context block should use the "-" header, got: ${result}`,
+				);
+				t.false(
+					result.includes('test.ts:1:1:'),
+					'Should not emit the exact-match header with a doubled line number',
 				);
 			} finally {
 				process.chdir(originalCwd);

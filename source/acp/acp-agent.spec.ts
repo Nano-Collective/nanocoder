@@ -3,6 +3,7 @@ import {join} from 'node:path';
 import test from 'ava';
 import {AcpAgent} from '@/acp/acp-agent';
 import type {AcpInitContext} from '@/acp/acp-types';
+import {clearAppConfig} from '@/config';
 import {
 	setToolRegistryGetter,
 	setToolManagerGetter,
@@ -101,6 +102,38 @@ test('AcpAgent.initialize - returns empty auth methods', async t => {
 	const {agent} = createAgent();
 	const result = await agent.initialize({protocolVersion: 1});
 	t.deepEqual(result.authMethods, []);
+});
+
+test.serial('AcpAgent.unstable_listProviders - returns ACP provider identifiers', async t => {
+	const previousProviders = process.env.NANOCODER_PROVIDERS;
+	process.env.NANOCODER_PROVIDERS = JSON.stringify([
+		{
+			name: 'Atlas Cloud',
+			baseUrl: 'https://api.atlascloud.ai/v1',
+			models: ['openai/gpt-5.6-sol'],
+		},
+	]);
+	clearAppConfig();
+	try {
+		const {agent} = createAgent();
+		const result = await agent.unstable_listProviders({});
+
+		t.deepEqual(result.providers, [
+			{
+				id: 'Atlas Cloud',
+				providerId: 'Atlas Cloud',
+				required: false,
+				supported: ['openai'],
+			},
+		]);
+	} finally {
+		if (previousProviders === undefined) {
+			delete process.env.NANOCODER_PROVIDERS;
+		} else {
+			process.env.NANOCODER_PROVIDERS = previousProviders;
+		}
+		clearAppConfig();
+	}
 });
 
 // ============================================================================
@@ -320,6 +353,49 @@ test('AcpAgent.prompt - routes text and images through to the conversation', asy
 		{data: 'base64data', mediaType: 'image/png', source: 'acp'},
 	]);
 	t.false(Array.isArray(userMessage?.content));
+});
+
+// ============================================================================
+// prompt() - built-in slash commands
+// ============================================================================
+
+const promptForBuiltinReply = async (text: string): Promise<string> => {
+	const conn = createMockConn();
+	const replies: string[] = [];
+	conn.sessionUpdate = async (u: any) => {
+		if (u.update?.sessionUpdate === 'agent_message_chunk') {
+			replies.push(u.update.content.text);
+		}
+	};
+	const agent = new AcpAgent(createMockInitContext(), conn);
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text}],
+	});
+	return replies.join('\n');
+};
+
+test('AcpAgent.prompt - /help advertises the copy commands', async t => {
+	const reply = await promptForBuiltinReply('/help');
+	t.true(reply.includes('`/copy`'));
+	t.true(reply.includes('`/copy code`'));
+});
+
+test('AcpAgent.prompt - /copy points at the chat view instead of erroring', async t => {
+	const reply = await promptForBuiltinReply('/copy');
+	t.true(reply.includes('handled by the chat view'));
+	t.false(reply.includes('Unrecognized slash command'));
+});
+
+test('AcpAgent.prompt - /copy code is not treated as unrecognized', async t => {
+	const reply = await promptForBuiltinReply('/copy code');
+	t.false(reply.includes('Unrecognized slash command'));
+});
+
+test('AcpAgent.prompt - a genuinely unknown command still reports unrecognized', async t => {
+	const reply = await promptForBuiltinReply('/definitelynotacommand');
+	t.true(reply.includes('Unrecognized slash command'));
 });
 
 // ============================================================================

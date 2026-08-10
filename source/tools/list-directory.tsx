@@ -18,6 +18,7 @@ interface ListDirectoryArgs {
 	maxDepth?: number;
 	tree?: boolean;
 	showHiddenFiles?: boolean;
+	showSizes?: boolean;
 }
 
 interface DirectoryEntry {
@@ -35,6 +36,7 @@ const executeListDirectory = async (
 	const maxDepth = args.maxDepth ?? 3;
 	const tree = args.tree ?? false;
 	const showHiddenFiles = args.showHiddenFiles ?? false;
+	const showSizes = args.showSizes ?? false;
 
 	// Validate path
 	const cwd = getSafeSessionCwd();
@@ -90,9 +92,11 @@ const executeListDirectory = async (
 
 					const relativePath = join(relativeTo, item.name);
 
-					// Only get stats for files (to get size)
+					// Only get stats for files (to get size), and only when sizes
+					// were requested — lstat is a syscall per file, not worth
+					// paying for on every listing.
 					let size: number | undefined;
-					if (type === 'file') {
+					if (type === 'file' && showSizes) {
 						try {
 							const stats = await lstat(fullPath);
 							size = stats.size;
@@ -183,7 +187,7 @@ const executeListDirectory = async (
 
 const listDirectoryCoreTool = tool({
 	description:
-		'List directory contents with file sizes. Use this INSTEAD OF bash ls/ls -la/ls -R commands. Use recursive=true with maxDepth for nested exploration. Use tree=true for flat paths (easier to parse). Best for: exploring unknown directories, seeing file sizes, understanding project structure. For finding specific files by pattern, use find_files instead.',
+		"List directory contents. Use this INSTEAD OF bash ls/ls -la/ls -R commands. Use recursive=true with maxDepth for nested exploration. Use tree=true for flat paths (easier to parse). Use showSizes=true to include file sizes (off by default; use read_file with metadata_only=true for a single file's size instead). Best for: exploring unknown directories, understanding project structure. For finding specific files by pattern, use find_files instead.",
 	inputSchema: jsonSchema<ListDirectoryArgs>({
 		type: 'object',
 		properties: {
@@ -211,6 +215,11 @@ const listDirectoryCoreTool = tool({
 				type: 'boolean',
 				description:
 					'If true, include hidden files and directories (default: false). Use with caution to avoid exposing sensitive files like .env.',
+			},
+			showSizes: {
+				type: 'boolean',
+				description:
+					"If true, include each file's size in bytes (default: false). Rarely needed just to orient in a directory; costs an extra stat call per file plus output tokens.",
 			},
 		},
 		required: [],

@@ -206,7 +206,7 @@
 		"colors": {
 			"text": "#5a5a5a",
 			"base": "#fef7f0",
-			"primary": "#ffb6c1",
+			"primary": "#c2185b",
 			"tool": "#20b2aa",
 			"success": "#3cb371",
 			"error": "#cd5c5c",
@@ -266,7 +266,7 @@
 		"colors": {
 			"text": "#dcdcdc",
 			"base": "#2f2f2f",
-			"primary": "#dc143c",
+			"primary": "#ff6b81",
 			"tool": "#ff4500",
 			"success": "#32cd32",
 			"error": "#ff0000",
@@ -468,7 +468,7 @@
 		"displayName": "Solarized Light",
 		"themeType": "light",
 		"colors": {
-			"text": "#657b83",
+			"text": "#586e75",
 			"base": "#fdf6e3",
 			"primary": "#268bd2",
 			"tool": "#2aa198",
@@ -670,7 +670,7 @@
 		"colors": {
 			"text": "#5c6166",
 			"base": "#fafafa",
-			"primary": "#ff9940",
+			"primary": "#ba5700",
 			"tool": "#399ee6",
 			"secondary": "#8a9199",
 			"success": "#86b300",
@@ -854,7 +854,7 @@
 		"colors": {
 			"text": "#5c6a72",
 			"base": "#fdf6e3",
-			"primary": "#8da101",
+			"primary": "#697801",
 			"tool": "#35a77c",
 			"success": "#8da101",
 			"error": "#f85552",

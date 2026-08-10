@@ -1,6 +1,6 @@
 import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
 import {useMemo, useState} from 'react';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {
 	getReasoningExpanded,
@@ -64,25 +64,7 @@ export function SettingsReasoningTracesPanel({
 					Press Enter to toggle · Shift+Tab back · Esc back
 				</Text>
 			</Box>
-			<SelectInput
-				items={items}
-				onSelect={handleSelect}
-				indicatorComponent={({isSelected}) => (
-					<Box minWidth={2}>
-						<Text color={isSelected ? colors.primary : colors.text}>
-							{isSelected ? '>' : ' '}
-						</Text>
-					</Box>
-				)}
-				itemComponent={({isSelected, label}) => (
-					<Text
-						color={isSelected ? colors.primary : colors.text}
-						wrap="truncate-end"
-					>
-						{label}
-					</Text>
-				)}
-			/>
+			<StyledSelectInput items={items} onSelect={handleSelect} />
 		</TitledBoxWithPreferences>
 	);
 }

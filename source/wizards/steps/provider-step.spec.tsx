@@ -1,5 +1,5 @@
 import test from 'ava';
-import {render} from 'ink-testing-library';
+import {renderWithTheme as render} from '@/test-utils/render-with-theme';
 import React from 'react';
 import {findTemplateForProvider, ProviderStep} from './provider-step.js';
 
@@ -832,3 +832,84 @@ test.serial('ProviderStep surfaces fetchModels errors', async t => {
 		globalThis.fetch = originalFetch;
 	}
 });
+
+// ============================================================================
+// Regression: finishing a provider must land somewhere "Done & Save" is
+// visible (issue #829). Landing on the raw template list buried it under 23
+// templates, off screen on a normal terminal — the wizard looked hung.
+// ============================================================================
+
+test.serial(
+	'ProviderStep returns to the root menu after model selection completes',
+	async t => {
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = async () =>
+			({
+				ok: true,
+				status: 200,
+				statusText: 'OK',
+				json: async () => ({models: [{name: 'llama4'}, {name: 'qwen3'}]}),
+			}) as unknown as Response;
+
+		try {
+			const {lastFrame, stdin, unmount} = render(
+				<ProviderStep onComplete={() => {}} />,
+			);
+
+			await wait(50);
+			stdin.write('\r');
+			await waitForText(lastFrame, /Choose a provider template/);
+
+			// Ollama is the first template; accept its defaults through
+			// provider name and base URL, which auto-fetches the model list.
+			await wait(50);
+			stdin.write('\r');
+			await waitForText(lastFrame, /Provider name/i);
+
+			await wait(50);
+			stdin.write('\r');
+			await waitForText(lastFrame, /Base URL/i);
+
+			await wait(50);
+			stdin.write('\r');
+			await waitForText(lastFrame, /Press a to select all models/);
+
+			// Select the highlighted model, then finish with "d".
+			await wait(50);
+			stdin.write('\r');
+			await waitForText(lastFrame, /1 selected/);
+
+			await wait(50);
+			stdin.write('d');
+
+			const output = await waitForText(lastFrame, /Done & Save/);
+			t.regex(output, /1 provider\(s\) already added/);
+			t.notRegex(output, /Choose a provider template/);
+
+			unmount();
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	},
+);
+
+test.serial(
+	'ProviderStep scrolls the template list instead of overflowing the terminal',
+	async t => {
+		const {lastFrame, stdin, unmount} = render(
+			<ProviderStep onComplete={() => {}} />,
+		);
+
+		await wait(50);
+		stdin.write('\r');
+		const output = await waitForText(lastFrame, /Choose a provider template/);
+
+		// The full list is 20+ templates. At the default 24-row terminal only a
+		// window of them may render, so the last entries stay off the list.
+		t.regex(output, /Ollama/);
+		t.notRegex(output, /Custom Provider/);
+		t.regex(output, /list scrolls/);
+
+		unmount();
+	},
+);

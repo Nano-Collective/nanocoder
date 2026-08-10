@@ -550,7 +550,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		name: 'Atlas Cloud',
 		baseUrl: 'https://api.atlascloud.ai/v1',
 		apiKeyPrompt: 'API Key (from atlascloud.ai/developer)',
-		modelDefault: 'gpt-5.6-sol',
+		modelDefault: 'openai/gpt-5.6-sol',
 	}),
 	apiKeyTemplate({
 		id: 'together',
