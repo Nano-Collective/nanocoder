@@ -119,15 +119,24 @@ export function createReasoningItemNormalizer(): TransformStream<
 	const decoder = new TextDecoder('utf-8');
 	const encoder = new TextEncoder();
 	const announced = new Set<string>();
+	const announcedByIndex = new Map<number, string>();
 	let buffer = '';
 	const separator = '\n\n';
 
-	const synthesize = (id: string, outputIndex: unknown): string =>
-		`data: ${JSON.stringify({
-			type: 'response.output_item.added',
-			output_index: typeof outputIndex === 'number' ? outputIndex : 0,
-			item: {id, type: 'reasoning', encrypted_content: null, summary: []},
-		})}${separator}`;
+	const encode = (value: unknown): string =>
+		`data: ${JSON.stringify(value)}${separator}`;
+
+	const announce = (id: string, outputIndex: unknown): void => {
+		announced.add(id);
+		if (typeof outputIndex === 'number') {
+			announcedByIndex.set(outputIndex, id);
+		}
+	};
+
+	const trackedAt = (outputIndex: unknown): string | undefined =>
+		typeof outputIndex === 'number'
+			? announcedByIndex.get(outputIndex)
+			: undefined;
 
 	const rewrite = (event: string): string => {
 		const trimmed = event.trimStart();
@@ -150,14 +159,24 @@ export function createReasoningItemNormalizer(): TransformStream<
 		if (value.item?.type === 'reasoning' && typeof value.item.id === 'string') {
 			const itemId = value.item.id;
 			if (value.type === 'response.output_item.added') {
-				announced.add(itemId);
+				announce(itemId, value.output_index);
 				return event;
 			}
 			if (announced.has(itemId)) {
 				return event;
 			}
-			announced.add(itemId);
-			return synthesize(itemId, value.output_index) + event;
+			const tracked = trackedAt(value.output_index);
+			if (tracked !== undefined) {
+				return encode({...value, item: {...value.item, id: tracked}});
+			}
+			announce(itemId, value.output_index);
+			return (
+				encode({
+					type: 'response.output_item.added',
+					output_index: value.output_index,
+					item: {id: itemId, type: 'reasoning', encrypted_content: null},
+				}) + event
+			);
 		}
 
 		if (
@@ -166,8 +185,18 @@ export function createReasoningItemNormalizer(): TransformStream<
 			typeof value.item_id === 'string' &&
 			!announced.has(value.item_id)
 		) {
-			announced.add(value.item_id);
-			return synthesize(value.item_id, value.output_index) + event;
+			const tracked = trackedAt(value.output_index);
+			if (tracked !== undefined) {
+				return encode({...value, item_id: tracked});
+			}
+			announce(value.item_id, value.output_index);
+			return (
+				encode({
+					type: 'response.output_item.added',
+					output_index: value.output_index,
+					item: {id: value.item_id, type: 'reasoning', encrypted_content: null},
+				}) + event
+			);
 		}
 
 		return event;

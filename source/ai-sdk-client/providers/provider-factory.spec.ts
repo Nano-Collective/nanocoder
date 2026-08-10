@@ -525,7 +525,7 @@ function eventSummary(sse: string): string[] {
 		});
 }
 
-test('createReasoningItemNormalizer announces reasoning items with a rotated item_id', async t => {
+test('createReasoningItemNormalizer maps a rotated item_id back to the item at that output_index', async t => {
 	const output = await runNormalizer([
 		sseEvent({
 			type: 'response.output_item.added',
@@ -536,6 +536,38 @@ test('createReasoningItemNormalizer announces reasoning items with a rotated ite
 			type: 'response.reasoning_summary_part.added',
 			item_id: 'rs_B',
 			output_index: 0,
+			summary_index: 1,
+		}),
+		sseEvent({
+			type: 'response.output_item.done',
+			output_index: 0,
+			item: {id: 'rs_C', type: 'reasoning', encrypted_content: null},
+		}),
+	]);
+
+	t.deepEqual(eventSummary(output), [
+		'response.output_item.added:rs_A',
+		'response.reasoning_summary_part.added:rs_A',
+		'response.output_item.done:rs_A',
+	]);
+});
+
+test('createReasoningItemNormalizer keeps rotated ids on separate output_index values apart', async t => {
+	const output = await runNormalizer([
+		sseEvent({
+			type: 'response.output_item.added',
+			output_index: 0,
+			item: {id: 'rs_A', type: 'reasoning', encrypted_content: null},
+		}),
+		sseEvent({
+			type: 'response.output_item.added',
+			output_index: 1,
+			item: {id: 'rs_B', type: 'reasoning', encrypted_content: null},
+		}),
+		sseEvent({
+			type: 'response.reasoning_summary_part.added',
+			item_id: 'rs_rotated',
+			output_index: 1,
 			summary_index: 1,
 		}),
 	]);
