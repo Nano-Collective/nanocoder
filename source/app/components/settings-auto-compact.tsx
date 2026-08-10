@@ -1,7 +1,7 @@
 import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
 import {useMemo, useState} from 'react';
 import TextInput from '@/components/text-input';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {updateConfigNestedValue} from '@/config/config-writer';
 import {getAppConfig} from '@/config/index';
@@ -132,25 +132,7 @@ export function SettingsAutoCompactPanel({
 							Enter toggles/cycles a setting · Shift+Tab back · Esc back
 						</Text>
 					</Box>
-					<SelectInput
-						items={items}
-						onSelect={handleSelect}
-						indicatorComponent={({isSelected}) => (
-							<Box minWidth={2}>
-								<Text color={isSelected ? colors.primary : colors.text}>
-									{isSelected ? '>' : ' '}
-								</Text>
-							</Box>
-						)}
-						itemComponent={({isSelected, label}) => (
-							<Text
-								color={isSelected ? colors.primary : colors.text}
-								wrap="truncate-end"
-							>
-								{label}
-							</Text>
-						)}
-					/>
+					<StyledSelectInput items={items} onSelect={handleSelect} />
 				</Box>
 			)}
 		</TitledBoxWithPreferences>

@@ -93,6 +93,7 @@ function baseDeps(
 	return {
 		loadPreferences: () => ({ trustedDirectories: [] }) as never,
 		savePreferences: () => undefined,
+		getShutdownManager: makeFakeShutdownManager({ code: null }),
 		...overrides,
 	};
 }
@@ -129,6 +130,50 @@ test.serial(
 		t.is(report.finalText, "all done");
 		t.deepEqual(report.toolCalls, []);
 		t.deepEqual(report.filesChanged, []);
+		t.is(report.usage, undefined);
+		t.is(shutdown.code, 0);
+	},
+);
+
+test.serial(
+	"--json success outcome includes usage block when present in conversation outcome",
+	async (t) => {
+		const shutdown: CapturedShutdown = { code: null };
+		const stdout = capturingStdout();
+		try {
+			await runPlainShell({
+				prompt: "do the thing",
+				developmentMode: "auto-accept",
+				trustDirectory: true,
+				outputFormat: "json",
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: makeFakeRunPlainConversation({
+						kind: "success",
+						finalText: "all done",
+						reasoning: null,
+						toolCalls: [],
+						usage: {
+							inputTokens: 500,
+							outputTokens: 100,
+							totalTokens: 600,
+						},
+					}),
+					getShutdownManager: makeFakeShutdownManager(shutdown),
+				}),
+			});
+		} finally {
+			stdout.restore();
+		}
+
+		const report = JSON.parse(stdout.get());
+		t.is(report.kind, "success");
+		t.is(report.exitCode, 0);
+		t.deepEqual(report.usage, {
+			inputTokens: 500,
+			outputTokens: 100,
+			totalTokens: 600,
+		});
 		t.is(shutdown.code, 0);
 	},
 );

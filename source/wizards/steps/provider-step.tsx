@@ -1,7 +1,7 @@
 import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
 import Spinner from 'ink-spinner';
 import {useEffect, useRef, useState} from 'react';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {getColors} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import type {ProviderConfig} from '../../types/config';
@@ -16,6 +16,7 @@ import {
 } from '../utils/fetch-models';
 import {FieldInputView} from './field-input-view';
 import {ModelSelectionList} from './model-selection-list';
+import {useListLimit} from './use-list-limit';
 import {useWizardForm} from './use-wizard-form';
 
 interface ProviderStepProps {
@@ -84,6 +85,7 @@ export function ProviderStep({
 }: ProviderStepProps) {
 	const colors = getColors();
 	const {isNarrow} = useResponsiveTerminal();
+	const listLimit = useListLimit();
 	const [providers, setProviders] = useState<ProviderConfig[]>(
 		existingProviders || [],
 	);
@@ -326,13 +328,12 @@ export function ProviderStep({
 					setProviders([...providers, providerConfig]);
 				}
 
-				// Reset and go back to appropriate screen
-				const wasEditing = editingIndex !== null;
+				// Land on the root menu, not the template list: it carries
+				// "Done & Save" as its third entry, whereas the template list
+				// buries it under every template. See the model-selection path.
 				resetForm();
 				setEditingIndex(null);
-				setMode(
-					wasEditing ? 'select-template-or-custom' : 'template-selection',
-				);
+				setMode('select-template-or-custom');
 			} catch (err) {
 				setError(
 					err instanceof Error ? err.message : 'Failed to build configuration',
@@ -484,15 +485,16 @@ export function ProviderStep({
 					setProviders([...providers, providerConfig]);
 				}
 
-				// Reset and go back to appropriate screen
-				const wasEditing = editingIndex !== null;
+				// Pressing "d" in the model list used to drop the user on the
+				// raw template list, where the only way to finish was scrolling
+				// past every template to a trailing "Done & Save" — off screen on
+				// a normal terminal, so the wizard looked hung. Land on the root
+				// menu instead, which offers Done & Save up front.
 				resetForm();
 				setEditingIndex(null);
 				setFetchedModels([]);
 				setSelectedModelIds(new Set());
-				setMode(
-					wasEditing ? 'select-template-or-custom' : 'template-selection',
-				);
+				setMode('select-template-or-custom');
 			} catch (err) {
 				setError(
 					err instanceof Error ? err.message : 'Failed to build configuration',
@@ -589,7 +591,7 @@ export function ProviderStep({
 						</Text>
 					</Box>
 				)}
-				<SelectInput
+				<StyledSelectInput
 					items={initialOptions}
 					onSelect={(item: {value: string}) => handleInitialSelect(item)}
 				/>
@@ -612,10 +614,16 @@ export function ProviderStep({
 						</Text>
 					</Box>
 				)}
-				<SelectInput
+				<StyledSelectInput
 					items={getTemplateOptions()}
+					limit={listLimit}
 					onSelect={(item: TemplateOption) => handleTemplateSelect(item)}
 				/>
+				<Box marginTop={1}>
+					<Text color={colors.secondary}>
+						Up/Down: navigate (list scrolls) | Enter: select
+					</Text>
+				</Box>
 			</Box>
 		);
 	}
@@ -628,8 +636,9 @@ export function ProviderStep({
 						Select a provider to edit:
 					</Text>
 				</Box>
-				<SelectInput
+				<StyledSelectInput
 					items={editOptions}
+					limit={listLimit}
 					onSelect={(item: TemplateOption) => handleEditSelect(item)}
 				/>
 			</Box>
@@ -650,7 +659,7 @@ export function ProviderStep({
 						{provider?.name} - What would you like to do?
 					</Text>
 				</Box>
-				<SelectInput
+				<StyledSelectInput
 					items={editOrDeleteOptions}
 					onSelect={(item: {value: string}) => handleEditOrDeleteChoice(item)}
 				/>

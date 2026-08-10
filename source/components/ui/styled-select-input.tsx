@@ -1,5 +1,6 @@
 import {Box, Text} from 'ink';
 import SelectInput from 'ink-select-input';
+import type {ReactElement} from 'react';
 
 import {useTheme} from '@/hooks/useTheme';
 
@@ -16,8 +17,13 @@ interface Item<V> {
  * `indicatorComponent` / `itemComponent` pair by hand; this wraps that once.
  *
  * All other SelectInput props (`onSelect`, `onHighlight`, `initialIndex`,
- * `isFocused`, `limit`) forward through unchanged. SelectInputs that rely on
- * the library's default indicator should keep using `SelectInput` directly.
+ * `isFocused`, `limit`) forward through unchanged. Rows that need more than a
+ * plain label (a description column, say) can pass their own `itemComponent`
+ * and still get the themed indicator.
+ *
+ * Prefer this over `SelectInput` everywhere: the library's default indicator
+ * and selected-label colour are a hardcoded `blue` that all but disappears
+ * against a dark terminal background.
  */
 interface StyledSelectInputProps<V> {
 	items?: Array<Item<V>>;
@@ -26,6 +32,10 @@ interface StyledSelectInputProps<V> {
 	limit?: number;
 	onSelect?: (item: Item<V>) => void;
 	onHighlight?: (item: Item<V>) => void;
+	itemComponent?: (props: {
+		isSelected?: boolean;
+		label: string;
+	}) => ReactElement;
 }
 
 export function StyledSelectInput<V>(props: StyledSelectInputProps<V>) {
@@ -45,14 +55,17 @@ export function StyledSelectInput<V>(props: StyledSelectInputProps<V>) {
 			)}
 			// Truncate rather than wrap: a long label (a path, a URL) reflowed with
 			// no hanging indent and the list read as a jumble on narrow terminals.
-			itemComponent={({isSelected, label}) => (
-				<Text
-					color={isSelected ? colors.primary : colors.text}
-					wrap="truncate-end"
-				>
-					{label}
-				</Text>
-			)}
+			itemComponent={
+				props.itemComponent ??
+				(({isSelected, label}) => (
+					<Text
+						color={isSelected ? colors.primary : colors.text}
+						wrap="truncate-end"
+					>
+						{label}
+					</Text>
+				))
+			}
 		/>
 	);
 }

@@ -22,7 +22,15 @@ test('parseInput - handles bash command with spaces', t => {
 
 	t.false(result.isCommand);
 	t.true(result.isBashCommand);
-	t.is(result.bashCommand, '   echo "hello world"');
+	t.is(result.bashCommand, 'echo "hello world"');
+});
+
+test('parseInput - trims whitespace after ! prefix', t => {
+	const result = parseInput('! git status');
+
+	t.false(result.isCommand);
+	t.true(result.isBashCommand);
+	t.is(result.bashCommand, 'git status');
 });
 
 test('parseInput - returns non-command for text without prefix', t => {

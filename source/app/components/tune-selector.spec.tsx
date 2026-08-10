@@ -1,4 +1,4 @@
-import {render} from 'ink-testing-library';
+import {renderWithTheme as render} from '@/test-utils/render-with-theme';
 import test from 'ava';
 import React from 'react';
 import {defaultTheme, themes} from '@/config/themes';
