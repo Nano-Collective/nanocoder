@@ -121,6 +121,8 @@
 	function toggleHistoryView() {
 		isHistoryView = !isHistoryView;
 		if (isHistoryView) {
+			isSettingsView = false;
+			document.getElementById('settings-view').classList.add('hidden');
 			document.getElementById('chat-view').classList.add('hidden');
 			document.getElementById('history-view').classList.remove('hidden');
 			// Fetch sessions from extension host and render immediately
@@ -131,10 +133,25 @@
 		}
 	}
 
+	function toggleSettingsView() {
+		isSettingsView = !isSettingsView;
+		if (isSettingsView) {
+			isHistoryView = false;
+			document.getElementById('history-view').classList.add('hidden');
+			document.getElementById('chat-view').classList.add('hidden');
+			document.getElementById('settings-view').classList.remove('hidden');
+			vscode.postMessage({ type: 'loadSettings' });
+		} else {
+			showChatView();
+		}
+	}
+
 	function showChatView() {
 		isHistoryView = false;
+		isSettingsView = false;
 		document.getElementById('chat-view').classList.remove('hidden');
 		document.getElementById('history-view').classList.add('hidden');
+		document.getElementById('settings-view').classList.add('hidden');
 	}
 
 	const sendStopBtn = document.getElementById('send-stop-btn');
@@ -148,6 +165,7 @@
 	let renderTimeout = null;
 	let sessionsData = [];
 	let isHistoryView = false;
+	let isSettingsView = false;
 	let isProcessing = false;
 	let currentAggregator = null;
 	let currentThoughtBox = null;
@@ -1056,7 +1074,88 @@
 						: 'Could not copy to clipboard'
 				);
 				break;
+			case 'toggleSettings':
+				toggleSettingsView();
+				break;
+			case 'settingsLoaded':
+				renderSettings(message);
+				break;
+			case 'settingsSaved':
+				showToast(message.ok ? 'Settings saved' : `Could not save settings: ${message.error}`);
+				break;
 		}
+	});
+
+	const SETTINGS_MODES = ['normal', 'auto-accept', 'yolo', 'plan'];
+
+	function renderSettings(payload) {
+		const errorBox = document.getElementById('settings-error');
+		if (payload.error) {
+			errorBox.textContent = `Could not read ${payload.configPath}: ${payload.error}`;
+			errorBox.classList.remove('hidden');
+		} else {
+			errorBox.classList.add('hidden');
+		}
+
+		const general = payload.settings.general;
+
+		const modeSelect = document.getElementById('settings-default-mode');
+		modeSelect.innerHTML = '';
+		SETTINGS_MODES.forEach(mode => {
+			const option = document.createElement('option');
+			option.value = mode;
+			option.textContent = mode;
+			modeSelect.appendChild(option);
+		});
+		modeSelect.value = general.defaultMode;
+
+		document.getElementById('settings-auto-compact').checked = general.autoCompactEnabled;
+		document.getElementById('settings-threshold').value = general.autoCompactThreshold;
+		document.getElementById('settings-threshold-value').textContent = general.autoCompactThreshold;
+
+		renderSettingsList('settings-providers', payload.settings.providers.map(
+			provider => `${provider.name} — ${provider.models} model${provider.models === 1 ? '' : 's'}`
+		), 'No providers configured.');
+
+		renderSettingsList('settings-mcp', payload.settings.mcpServers.map(
+			server => server.name
+		), 'No MCP servers configured.');
+	}
+
+	function renderSettingsList(containerId, entries, emptyText) {
+		const container = document.getElementById(containerId);
+		container.innerHTML = '';
+		if (entries.length === 0) {
+			const empty = document.createElement('div');
+			empty.className = 'opacity-60';
+			empty.textContent = emptyText;
+			container.appendChild(empty);
+			return;
+		}
+		entries.forEach(entry => {
+			const row = document.createElement('div');
+			row.textContent = entry;
+			container.appendChild(row);
+		});
+	}
+
+	document.getElementById('settings-threshold').addEventListener('input', event => {
+		document.getElementById('settings-threshold-value').textContent = event.target.value;
+	});
+
+	document.getElementById('settings-save').addEventListener('click', () => {
+		vscode.postMessage({
+			type: 'saveSettings',
+			settings: {
+				defaultMode: document.getElementById('settings-default-mode').value,
+				autoCompactEnabled: document.getElementById('settings-auto-compact').checked,
+				autoCompactThreshold: Number(document.getElementById('settings-threshold').value)
+			}
+		});
+	});
+
+	document.getElementById('settings-open-config').addEventListener('click', () => {
+		vscode.postMessage({ type: 'openConfigFile' });
 	});
 
 

@@ -3,6 +3,8 @@
  * and the Sidebar Webview UI.
  */
 
+import type { GeneralSettings, SettingsSnapshot } from './settings-config';
+
 // ---------------------------------------------------------
 // Messages: Extension Host -> Webview
 // ---------------------------------------------------------
@@ -99,6 +101,23 @@ export interface ExtensionMessagePathInfoResolved {
 	kind: 'file' | 'folder';
 }
 
+export interface ExtensionMessageToggleSettings {
+	type: 'toggleSettings';
+}
+
+export interface ExtensionMessageSettingsLoaded {
+	type: 'settingsLoaded';
+	settings: SettingsSnapshot;
+	configPath: string;
+	error?: string;
+}
+
+export interface ExtensionMessageSettingsSaved {
+	type: 'settingsSaved';
+	ok: boolean;
+	error?: string;
+}
+
 export type ExtensionToWebviewMessage =
 	| ExtensionMessageAppendMessage
 	| ExtensionMessageAppendThought
@@ -114,7 +133,10 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageSessionLoaded
 	| ExtensionMessagePathInfoResolved
 	| ExtensionMessageCopyLastCodeBlock
-	| ExtensionMessageCopyResult;
+	| ExtensionMessageCopyResult
+	| ExtensionMessageToggleSettings
+	| ExtensionMessageSettingsLoaded
+	| ExtensionMessageSettingsSaved;
 
 
 // ---------------------------------------------------------
@@ -212,6 +234,19 @@ export interface WebviewMessageCopyToClipboard {
 	text: string;
 }
 
+export interface WebviewMessageLoadSettings {
+	type: 'loadSettings';
+}
+
+export interface WebviewMessageSaveSettings {
+	type: 'saveSettings';
+	settings: GeneralSettings;
+}
+
+export interface WebviewMessageOpenConfigFile {
+	type: 'openConfigFile';
+}
+
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
 	| WebviewMessageSubmitMessage
@@ -230,4 +265,7 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageRequestOpenDialog
 	| WebviewMessageOpenPath
 	| WebviewMessageShowError
-	| WebviewMessageCopyToClipboard;
+	| WebviewMessageCopyToClipboard
+	| WebviewMessageLoadSettings
+	| WebviewMessageSaveSettings
+	| WebviewMessageOpenConfigFile;

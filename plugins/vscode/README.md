@@ -98,6 +98,13 @@ Or from the repo root: `pnpm run build:vscode` builds and packages to `assets/na
 - **History**: the clock icon - resume a previous session (the full thread replays) or delete it
 - Switching to another sidebar view and back keeps the transcript
 
+### Settings
+
+The gear icon in the view title bar opens a settings panel. It edits the default
+mode and auto-compact behaviour, lists the configured providers and MCP servers,
+and links to the raw config file for anything it does not cover. Saves are merged
+into `agents.config.json` under the `nanocoder` key.
+
 ### Slash Commands
 
 `/help` lists what's available. `/clear` resets the conversation. Custom commands from `.nanocoder/commands` run as in the CLI. Interactive CLI-only commands (`/init`, `/theme`, `/compact`, ...) explain that they need the terminal CLI. Messages starting with a file path are treated as text, not commands.
@@ -110,6 +117,7 @@ Access via Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
 | -------------------------------------- | --------------------------------------------------------- |
 | `Nanocoder: New Chat`                  | Start a fresh conversation (also the `+` view title icon) |
 | `Nanocoder: View Session History`      | Toggle the session history list (also the clock icon)     |
+| `Nanocoder: Open Settings`             | Toggle the settings panel (also the gear icon)            |
 | `Nanocoder: Open Configuration`        | Open the active `agents.config.json`                      |
 | `Nanocoder: Connect to Nanocoder`      | Connect the legacy companion to a running terminal CLI    |
 | `Nanocoder: Disconnect from Nanocoder` | Disconnect the legacy companion                           |

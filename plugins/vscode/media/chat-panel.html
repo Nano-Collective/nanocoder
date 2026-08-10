@@ -36,6 +36,49 @@
 			<div id="history-list" class="flex-1 overflow-y-auto py-1.5"></div>
 		</div>
 
+		<div id="settings-view" class="flex flex-col flex-1 overflow-hidden hidden">
+			<div class="pt-2.5 pb-1.5 px-4 border-b border-vscode-border shrink-0">
+				<span class="font-semibold text-[0.9em] uppercase tracking-[0.04em] opacity-70">Settings</span>
+			</div>
+			<div class="flex-1 overflow-y-auto p-4 flex flex-col gap-5">
+				<div id="settings-error" class="hidden text-[0.85em] text-[#f14c4c] border border-[#f14c4c] rounded p-2"></div>
+
+				<div class="flex flex-col gap-3">
+					<span class="font-semibold text-[0.8em] uppercase tracking-[0.04em] opacity-60">General</span>
+
+					<label class="flex flex-col gap-1">
+						<span class="text-[0.9em]">Default mode</span>
+						<select id="settings-default-mode" class="bg-vscode-dropdown-bg text-vscode-fg border border-vscode-input-border rounded px-2 py-1 text-[0.9em] outline-none focus:border-vscode-input-focus"></select>
+					</label>
+
+					<label class="flex items-center gap-2 cursor-pointer">
+						<input type="checkbox" id="settings-auto-compact" class="cursor-pointer">
+						<span class="text-[0.9em]">Auto-compact context</span>
+					</label>
+
+					<label class="flex flex-col gap-1">
+						<span class="text-[0.9em]">Auto-compact threshold (<span id="settings-threshold-value">60</span>%)</span>
+						<input type="range" id="settings-threshold" min="50" max="95" step="1" class="cursor-pointer">
+					</label>
+				</div>
+
+				<div class="flex flex-col gap-2">
+					<span class="font-semibold text-[0.8em] uppercase tracking-[0.04em] opacity-60">Providers</span>
+					<div id="settings-providers" class="flex flex-col gap-1 text-[0.85em] opacity-80"></div>
+				</div>
+
+				<div class="flex flex-col gap-2">
+					<span class="font-semibold text-[0.8em] uppercase tracking-[0.04em] opacity-60">MCP Servers</span>
+					<div id="settings-mcp" class="flex flex-col gap-1 text-[0.85em] opacity-80"></div>
+				</div>
+
+				<div class="flex items-center gap-2 pt-1">
+					<button id="settings-save" class="bg-vscode-button-bg text-vscode-button-fg border-none rounded px-3 py-1.5 text-[0.85em] cursor-pointer hover:bg-vscode-button-hover">Save</button>
+					<button id="settings-open-config" class="bg-transparent text-vscode-fg border border-vscode-input-border rounded px-3 py-1.5 text-[0.85em] cursor-pointer hover:bg-vscode-toolbarHover">Edit agents.config.json</button>
+				</div>
+			</div>
+		</div>
+
 		<div class="p-4 pt-2 bg-vscode-bg shrink-0">
 			<div id="composer-box" class="flex flex-col bg-vscode-input-bg border border-vscode-input-border rounded-2xl focus-within:border-vscode-input-focus transition-colors shadow-sm relative">
 				<div id="image-preview-container" class="flex flex-wrap gap-2 px-3 pt-3 empty:hidden"></div>

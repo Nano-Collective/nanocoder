@@ -83,6 +83,12 @@
 				"icon": "$(add)"
 			},
 			{
+				"command": "nanocoder.openSettings",
+				"title": "Open Settings",
+				"category": "Nanocoder",
+				"icon": "$(gear)"
+			},
+			{
 				"command": "nanocoder.copyLastCodeBlock",
 				"title": "Copy Last Code Block",
 				"category": "Nanocoder"
@@ -107,6 +113,11 @@
 					"command": "nanocoder.toggleHistory",
 					"when": "view == nanocoder.chatView",
 					"group": "navigation@2"
+				},
+				{
+					"command": "nanocoder.openSettings",
+					"when": "view == nanocoder.chatView",
+					"group": "navigation@3"
 				}
 			]
 		},

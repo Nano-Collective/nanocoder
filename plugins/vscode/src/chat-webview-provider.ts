@@ -5,6 +5,13 @@ import { WebviewToExtensionMessage, ExtensionToWebviewMessage } from './webview-
 
 import { NanocoderAcpClient } from './acp-client';
 import { DiffManager } from './diff-manager';
+import {
+	applyGeneralSettings,
+	parseConfig,
+	readSettings,
+	serialiseConfig,
+	DEFAULT_GENERAL_SETTINGS
+} from './settings-config';
 
 export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'nanocoder.chatView';
@@ -79,6 +86,58 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 	public toggleHistory() {
 		if (this._view) {
 			this._view.webview.postMessage({ type: 'toggleHistory' });
+		}
+	}
+
+	public toggleSettings() {
+		if (this._view) {
+			this.postMessage({ type: 'toggleSettings' });
+		}
+	}
+
+	private _configPath(): string {
+		const config = vscode.workspace.getConfiguration('nanocoder');
+		const cwd = config.get<string>('cwd') || (vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd());
+		return path.join(cwd, 'agents.config.json');
+	}
+
+	private _readConfigFile(): { config: Record<string, unknown>; error?: string } {
+		const configPath = this._configPath();
+		if (!fs.existsSync(configPath)) {
+			return { config: {} };
+		}
+		try {
+			return { config: parseConfig(fs.readFileSync(configPath, 'utf8')) };
+		} catch (error) {
+			return { config: {}, error: String(error) };
+		}
+	}
+
+	private _sendSettings() {
+		const { config, error } = this._readConfigFile();
+		this.postMessage({
+			type: 'settingsLoaded',
+			settings: error
+				? { general: DEFAULT_GENERAL_SETTINGS, providers: [], mcpServers: [] }
+				: readSettings(config),
+			configPath: this._configPath(),
+			error
+		});
+	}
+
+	private _saveSettings(settings: unknown) {
+		const { config, error } = this._readConfigFile();
+		if (error) {
+			this.postMessage({ type: 'settingsSaved', ok: false, error });
+			return;
+		}
+		try {
+			fs.writeFileSync(this._configPath(), serialiseConfig(applyGeneralSettings(config, settings)), 'utf8');
+			this.postMessage({ type: 'settingsSaved', ok: true });
+			this._sendSettings();
+		} catch (writeError) {
+			this._outputChannel.appendLine(`Failed to save settings: ${writeError}`);
+			this.postMessage({ type: 'settingsSaved', ok: false, error: String(writeError) });
 		}
 	}
 
@@ -216,6 +275,16 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 						break;
 					case 'copyToClipboard':
 						this._copyToClipboard(message.text);
+						break;
+					case 'loadSettings':
+						this._sendSettings();
+						break;
+					case 'saveSettings':
+						this._outputChannel.appendLine('[Webview] User saved settings.');
+						this._saveSettings(message.settings);
+						break;
+					case 'openConfigFile':
+						vscode.commands.executeCommand('nanocoder.openConfig');
 						break;
 				}
 			}

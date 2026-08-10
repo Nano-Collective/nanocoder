@@ -86,6 +86,9 @@ export function activate(context: vscode.ExtensionContext) {
 			acpProcessManager = new AcpProcessManager(outputChannel, acpStateManager, acpClient);
 			acpProcessManager.start();
 		}),
+		vscode.commands.registerCommand('nanocoder.openSettings', () => {
+			chatProvider.toggleSettings();
+		}),
 		vscode.commands.registerCommand('nanocoder.openConfig', async () => {
 			const config = vscode.workspace.getConfiguration('nanocoder');
 			const cwdSetting = config.get<string>('cwd') || (vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd());
