@@ -6,11 +6,11 @@
 	const chatInput = document.getElementById('chat-input');
 	const composerBox = document.getElementById('composer-box');
 	const contextChipsContainer = document.getElementById('context-chips');
-	const attachBtn = document.getElementById('attach-btn');
+	const addMenuBtn = document.getElementById('add-menu-btn');
+	const addMenuDropdown = document.getElementById('add-menu-dropdown');
 
 	let attachedPaths = []; // [{path, name, kind: 'file'|'folder'}]
 
-	const addImageBtn = document.getElementById('add-image-btn');
 	const imageUpload = document.getElementById('image-upload');
 	const imagePreviewContainer = document.getElementById('image-preview-container');
 	
@@ -36,6 +36,7 @@
 					document.getElementById('provider-dropdown').classList.add('hidden');
 					document.getElementById('model-dropdown').classList.add('hidden');
 					document.getElementById('mode-dropdown').classList.add('hidden');
+					if (addMenuDropdown) addMenuDropdown.classList.add('hidden');
 					
 					if (isHidden) {
 						this.dropdown.classList.remove('hidden');
@@ -113,6 +114,7 @@
 			document.getElementById('provider-dropdown').classList.add('hidden');
 			document.getElementById('model-dropdown').classList.add('hidden');
 			document.getElementById('mode-dropdown').classList.add('hidden');
+			if (addMenuDropdown) addMenuDropdown.classList.add('hidden');
 		});
 	}
 
@@ -282,20 +284,31 @@
 		});
 	}
 
-	if (attachBtn) {
-		attachBtn.addEventListener('click', () => {
-			vscode.postMessage({ type: 'requestOpenDialog' });
+	if (addMenuBtn && addMenuDropdown) {
+		addMenuBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			document.getElementById('provider-dropdown').classList.add('hidden');
+			document.getElementById('model-dropdown').classList.add('hidden');
+			document.getElementById('mode-dropdown').classList.add('hidden');
+			addMenuDropdown.classList.toggle('hidden');
 		});
-	}
-	// Image upload logic
-	if (addImageBtn && imageUpload) {
-		addImageBtn.addEventListener('click', () => {
+
+		document.getElementById('menu-upload-image').addEventListener('click', () => {
+			addMenuDropdown.classList.add('hidden');
 			if (isHistoryView) {
 				showChatView();
 			}
 			imageUpload.click();
 		});
-		
+
+		document.getElementById('menu-attach-file').addEventListener('click', () => {
+			addMenuDropdown.classList.add('hidden');
+			vscode.postMessage({ type: 'requestOpenDialog' });
+		});
+	}
+
+	// Image upload logic
+	if (imageUpload) {
 		imageUpload.addEventListener('change', (e) => {
 			if (e.target.files) {
 				processImageFiles(Array.from(e.target.files));
@@ -343,9 +356,9 @@
 		if (validFiles.length === 0) return;
 
 		let pendingReads = validFiles.length;
-		if (addImageBtn) {
-			addImageBtn.disabled = true;
-			addImageBtn.classList.add('opacity-50', 'cursor-not-allowed');
+		if (addMenuBtn) {
+			addMenuBtn.disabled = true;
+			addMenuBtn.classList.add('opacity-50', 'cursor-not-allowed');
 		}
 
 		for (const file of validFiles) {
@@ -361,16 +374,16 @@
 					}
 				}
 				pendingReads--;
-				if (pendingReads === 0 && addImageBtn) {
-					addImageBtn.disabled = false;
-					addImageBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+				if (pendingReads === 0 && addMenuBtn) {
+					addMenuBtn.disabled = false;
+					addMenuBtn.classList.remove('opacity-50', 'cursor-not-allowed');
 				}
 			};
 			reader.onerror = () => {
 				pendingReads--;
-				if (pendingReads === 0 && addImageBtn) {
-					addImageBtn.disabled = false;
-					addImageBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+				if (pendingReads === 0 && addMenuBtn) {
+					addMenuBtn.disabled = false;
+					addMenuBtn.classList.remove('opacity-50', 'cursor-not-allowed');
 				}
 			};
 			reader.readAsDataURL(file);
