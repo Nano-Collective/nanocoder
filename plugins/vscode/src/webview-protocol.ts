@@ -3,6 +3,8 @@
  * and the Sidebar Webview UI.
  */
 
+import type { MentionItem } from './mention-search';
+
 // ---------------------------------------------------------
 // Messages: Extension Host -> Webview
 // ---------------------------------------------------------
@@ -99,6 +101,20 @@ export interface ExtensionMessagePathInfoResolved {
 	kind: 'file' | 'folder';
 }
 
+/**
+ * Ranked `@` autocomplete suggestions.
+ *
+ * `requestId` echoes the webview's request. postMessage delivery is async, so
+ * a fast typist can have several searches in flight at once and they can land
+ * out of order — the webview drops any response whose id is not the newest,
+ * otherwise the dropdown flickers back to results for an older query.
+ */
+export interface ExtensionMessageMentionCompletions {
+	type: 'mentionCompletions';
+	requestId: number;
+	items: MentionItem[];
+}
+
 export type ExtensionToWebviewMessage =
 	| ExtensionMessageAppendMessage
 	| ExtensionMessageAppendThought
@@ -114,7 +130,8 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageSessionLoaded
 	| ExtensionMessagePathInfoResolved
 	| ExtensionMessageCopyLastCodeBlock
-	| ExtensionMessageCopyResult;
+	| ExtensionMessageCopyResult
+	| ExtensionMessageMentionCompletions;
 
 
 // ---------------------------------------------------------
@@ -212,6 +229,18 @@ export interface WebviewMessageCopyToClipboard {
 	text: string;
 }
 
+/**
+ * Ask the host to resolve an `@` query. Searching lives on the host because
+ * `vscode.workspace.findFiles` already honours `files.exclude` / `search.exclude`
+ * and shipping a whole workspace file list into the webview would be megabytes
+ * on a large repo.
+ */
+export interface WebviewMessageRequestMentionCompletions {
+	type: 'requestMentionCompletions';
+	query: string;
+	requestId: number;
+}
+
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
 	| WebviewMessageSubmitMessage
@@ -230,4 +259,5 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageRequestOpenDialog
 	| WebviewMessageOpenPath
 	| WebviewMessageShowError
-	| WebviewMessageCopyToClipboard;
+	| WebviewMessageCopyToClipboard
+	| WebviewMessageRequestMentionCompletions;

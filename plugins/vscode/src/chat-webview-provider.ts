@@ -5,6 +5,11 @@ import { WebviewToExtensionMessage, ExtensionToWebviewMessage } from './webview-
 
 import { NanocoderAcpClient } from './acp-client';
 import { DiffManager } from './diff-manager';
+import { searchMentions, MentionSearchDeps } from './mention-search';
+import { readCappedFile, readCappedDirectory } from './context-attachment';
+
+/** Excluded from `@` search regardless of user settings — never useful context. */
+const MENTION_EXCLUDE = '**/{node_modules,.git,dist,out,build,.next,coverage}/**';
 
 export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'nanocoder.chatView';
@@ -179,6 +184,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 						}
 						break;
 					}
+					case 'requestMentionCompletions': {
+						this._handleMentionCompletions(message.query, message.requestId);
+						break;
+					}
 					case 'requestOpenDialog': {
 						vscode.window.showOpenDialog({
 							canSelectFiles: true,
@@ -264,6 +273,58 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 	}
 
 	/**
+	 * Bind the workspace-search primitives that `searchMentions` needs. Kept
+	 * separate from the search itself so the ranking and matching logic stays
+	 * unit-testable without an extension host.
+	 */
+	private _mentionSearchDeps(): MentionSearchDeps {
+		const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+		const workspaceRoot = workspaceFolder?.uri.fsPath || process.cwd();
+
+		return {
+			workspaceRoot,
+			openEditors: () => {
+				const paths: string[] = [];
+				for (const group of vscode.window.tabGroups.all) {
+					for (const tab of group.tabs) {
+						const input = tab.input;
+						if (input instanceof vscode.TabInputText) {
+							if (input.uri.scheme === 'file') {
+								paths.push(input.uri.fsPath);
+							}
+						}
+					}
+				}
+				return paths;
+			},
+			findFiles: async (glob, limit) => {
+				const pattern = workspaceFolder
+					? new vscode.RelativePattern(workspaceFolder, glob)
+					: glob;
+				const uris = await vscode.workspace.findFiles(
+					pattern,
+					MENTION_EXCLUDE,
+					limit,
+				);
+				return uris.map(uri => uri.fsPath);
+			},
+		};
+	}
+
+	private async _handleMentionCompletions(query: string, requestId: number) {
+		try {
+			const items = await searchMentions(query, this._mentionSearchDeps());
+			this.postMessage({ type: 'mentionCompletions', requestId, items });
+		} catch (error) {
+			this._outputChannel.appendLine(`[Mention] Search failed for "${query}": ${error}`);
+			// Still answer, so the webview clears its in-flight state and the
+			// dropdown closes instead of hanging on a stale result set.
+			this.postMessage({ type: 'mentionCompletions', requestId, items: [] });
+		}
+	}
+
+
+	/**
 	 * Expand @[file] and @[folder] references injected by the webview into
 	 * file/directory contents. This resolves attached context inline so the LLM
 	 * receives the content directly in the prompt, removing the need for a
@@ -279,15 +340,16 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				try {
 					if (kind === 'folder') {
 						// Emit a compact directory listing (names only, one per line)
-						const entries = fs.readdirSync(filePath, { withFileTypes: true });
-						const listing = entries
-							.map(e => (e.isDirectory() ? `${e.name}/` : e.name))
-							.join('\n');
+						const listing = readCappedDirectory(filePath);
 						return `<context path="${filePath}" type="directory">\n${listing}\n</context>`;
-					} else {
-						const content = fs.readFileSync(filePath, 'utf8');
-						return `<context path="${filePath}">\n${content}\n</context>`;
 					}
+
+					const content = readCappedFile(filePath);
+					if (content === null) {
+						this._outputChannel.appendLine(`[Context] Skipped ${filePath}: unreadable or binary`);
+						return `<!-- skipped ${filePath}: unreadable or binary -->`;
+					}
+					return `<context path="${filePath}">\n${content}\n</context>`;
 				} catch (err) {
 					// If we can't read the path, leave it as a plain mention so the
 					// LLM still knows what the user was referring to.
@@ -356,6 +418,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.js')).with({ query: `v=${extVersion}` });
 		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.css')).with({ query: `v=${extVersion}` });
 		const markedUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'marked.min.js'));
+		const mentionUtilsUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'mention-utils.js')).with({ query: `v=${extVersion}` });
 		const nonce = getNonce();
 
 		html = html.replace(/\{\{cspSource\}\}/g, webview.cspSource);
@@ -363,6 +426,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		html = html.replace(/\{\{styleUri\}\}/g, styleUri.toString());
 		html = html.replace(/\{\{scriptUri\}\}/g, scriptUri.toString());
 		html = html.replace(/\{\{markedUri\}\}/g, markedUri.toString());
+		html = html.replace(/\{\{mentionUtilsUri\}\}/g, mentionUtilsUri.toString());
 
 		return html;
 	}
