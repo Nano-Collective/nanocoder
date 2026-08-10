@@ -133,11 +133,6 @@ export function createReasoningItemNormalizer(): TransformStream<
 		}
 	};
 
-	const trackedAt = (outputIndex: unknown): string | undefined =>
-		typeof outputIndex === 'number'
-			? announcedByIndex.get(outputIndex)
-			: undefined;
-
 	const rewrite = (event: string): string => {
 		const trimmed = event.trimStart();
 		if (!trimmed.startsWith('data:')) {
@@ -156,50 +151,55 @@ export function createReasoningItemNormalizer(): TransformStream<
 			return event;
 		}
 
-		if (value.item?.type === 'reasoning' && typeof value.item.id === 'string') {
-			const itemId = value.item.id;
-			if (value.type === 'response.output_item.added') {
-				announce(itemId, value.output_index);
-				return event;
-			}
-			if (announced.has(itemId)) {
-				return event;
-			}
-			const tracked = trackedAt(value.output_index);
-			if (tracked !== undefined) {
-				return encode({...value, item: {...value.item, id: tracked}});
-			}
-			announce(itemId, value.output_index);
-			return (
-				encode({
-					type: 'response.output_item.added',
-					output_index: value.output_index,
-					item: {id: itemId, type: 'reasoning', encrypted_content: null},
-				}) + event
-			);
+		const item = value.item;
+		const reasoningItemId =
+			item?.type === 'reasoning' && typeof item.id === 'string'
+				? item.id
+				: undefined;
+		const summaryItemId =
+			typeof value.type === 'string' &&
+			value.type.startsWith('response.reasoning_summary') &&
+			typeof value.item_id === 'string'
+				? value.item_id
+				: undefined;
+
+		const itemId = reasoningItemId ?? summaryItemId;
+		if (itemId === undefined) {
+			return event;
 		}
 
 		if (
-			typeof value.type === 'string' &&
-			value.type.startsWith('response.reasoning_summary') &&
-			typeof value.item_id === 'string' &&
-			!announced.has(value.item_id)
+			reasoningItemId !== undefined &&
+			value.type === 'response.output_item.added'
 		) {
-			const tracked = trackedAt(value.output_index);
-			if (tracked !== undefined) {
-				return encode({...value, item_id: tracked});
-			}
-			announce(value.item_id, value.output_index);
-			return (
-				encode({
-					type: 'response.output_item.added',
-					output_index: value.output_index,
-					item: {id: value.item_id, type: 'reasoning', encrypted_content: null},
-				}) + event
+			announce(itemId, value.output_index);
+			return event;
+		}
+
+		if (announced.has(itemId)) {
+			return event;
+		}
+
+		const tracked =
+			typeof value.output_index === 'number'
+				? announcedByIndex.get(value.output_index)
+				: undefined;
+		if (tracked !== undefined) {
+			return encode(
+				reasoningItemId !== undefined
+					? {...value, item: {...item, id: tracked}}
+					: {...value, item_id: tracked},
 			);
 		}
 
-		return event;
+		announce(itemId, value.output_index);
+		return (
+			encode({
+				type: 'response.output_item.added',
+				output_index: value.output_index,
+				item: {id: itemId, type: 'reasoning', encrypted_content: null},
+			}) + event
+		);
 	};
 
 	const drain = (
