@@ -885,6 +885,55 @@ test('AssistantMessage displays approximate token count', t => {
 	t.regex(output!, /~\d+ tokens/);
 });
 
+test('AssistantMessage displays provider-reported usage with cost', t => {
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<AssistantMessage
+				message="Hello world"
+				model="test-model"
+				usage={{inputTokens: 4100, outputTokens: 100, cost: 0.012}}
+			/>
+		</MockThemeProvider>,
+	);
+
+	const output = stripAnsi(lastFrame() ?? '');
+	t.true(output.includes('Tokens: 4.2k | ~$0.01'));
+	// Real usage replaces the client-side estimate
+	t.notRegex(output, /~\d+ tokens/);
+});
+
+test('AssistantMessage displays usage without cost when pricing is unknown', t => {
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<AssistantMessage
+				message="Hello world"
+				model="test-model"
+				usage={{totalTokens: 900}}
+			/>
+		</MockThemeProvider>,
+	);
+
+	const output = stripAnsi(lastFrame() ?? '');
+	t.true(output.includes('Tokens: 900'));
+	t.false(output.includes('$'));
+});
+
+test('AssistantMessage falls back to estimate when usage has no token counts', t => {
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<AssistantMessage
+				message="Hello world"
+				model="test-model"
+				usage={{}}
+			/>
+		</MockThemeProvider>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /~\d+ tokens/);
+});
+
 test('AssistantMessage drops model header and token count under NonInteractiveRenderContext', async t => {
 	const {NonInteractiveRenderContext} = await import(
 		'../hooks/useNonInteractiveRender'
