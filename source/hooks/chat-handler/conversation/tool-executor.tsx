@@ -266,6 +266,7 @@ const executeAgentBatch = async (
 	onCompactToolCount?: (toolName: string) => void,
 	nonInteractiveMode?: boolean,
 	signal?: AbortSignal,
+	executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 ): Promise<
 	Array<{
 		toolCall: ToolCall;
@@ -305,7 +306,7 @@ const executeAgentBatch = async (
 
 		const {agentId, promise} = startAgentExecution(
 			parsedArgs as unknown as AgentToolArgs,
-			signal,
+			{...executionContext, abortSignal: signal},
 		);
 		resetSubagentProgressById(agentId);
 
@@ -510,6 +511,7 @@ export const executeToolsDirectly = async (
 				options?.onCompactToolCount,
 				options?.nonInteractiveMode,
 				options?.signal,
+				options?.executionContext,
 			);
 
 			// Agent results are already displayed by executeAgentBatch

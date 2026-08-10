@@ -105,6 +105,7 @@ export async function runPlainConversation(
 	let messages = initialMessages;
 	const walkthroughLifecycle = createWalkthroughLifecycle(initialMessages);
 	let accumulatedFinalText = '';
+	let finalTextBeforeWalkthroughNudge: string | undefined;
 	let accumulatedReasoning = '';
 	const toolCallsLog: ToolCallLog[] = [];
 
@@ -287,12 +288,13 @@ export async function runPlainConversation(
 						availableNames.includes('write_walkthrough'),
 					);
 			if (walkthroughFallback) {
+				finalTextBeforeWalkthroughNudge ??= accumulatedFinalText;
 				messages = [...messages, walkthroughFallback];
 				continue;
 			}
 			return {
 				kind: 'success',
-				finalText: accumulatedFinalText,
+				finalText: finalTextBeforeWalkthroughNudge ?? accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
 			};

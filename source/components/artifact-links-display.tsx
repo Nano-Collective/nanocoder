@@ -1,4 +1,3 @@
-import {pathToFileURL} from 'node:url';
 import {Box, Text} from 'ink';
 import {useEffect, useState} from 'react';
 import {
@@ -6,9 +5,7 @@ import {
 	artifactManager,
 } from '@/artifacts/artifact-manager';
 import {useTheme} from '@/hooks/useTheme';
-
-const OSC_8 = '\u001B]8;;';
-const OSC_TERMINATOR = '\u0007';
+import {createTerminalFileLink} from '@/utils/terminal-file-link';
 
 const ARTIFACT_LABELS: Record<ArtifactDescriptor['kind'], string> = {
 	implementation_plan: 'Plan',
@@ -20,7 +17,7 @@ export function createTerminalArtifactLink(
 	artifact: ArtifactDescriptor,
 	label = ARTIFACT_LABELS[artifact.kind],
 ): string {
-	return `${OSC_8}${pathToFileURL(artifact.path).href}${OSC_TERMINATOR}${label}${OSC_8}${OSC_TERMINATOR}`;
+	return createTerminalFileLink(artifact.path, label);
 }
 
 export function ArtifactLinksDisplay({

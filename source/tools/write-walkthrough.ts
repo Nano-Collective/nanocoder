@@ -116,8 +116,49 @@ export function createWriteWalkthroughTool(
 			},
 		}),
 		validator: async args => {
+			if (typeof args?.summary !== 'string') {
+				return {valid: false, error: 'Walkthrough summary is required'};
+			}
+			if (!Array.isArray(args.filesChanged)) {
+				return {valid: false, error: 'Files changed must be provided'};
+			}
+			if (!Array.isArray(args.tests)) {
+				return {valid: false, error: 'Test results must be provided'};
+			}
+			if (!Array.isArray(args.verificationSteps)) {
+				return {valid: false, error: 'Verification steps must be provided'};
+			}
 			if (!args.summary.trim()) {
 				return {valid: false, error: 'Walkthrough summary cannot be empty'};
+			}
+			if (
+				args.filesChanged.some(
+					(file: unknown) =>
+						!file ||
+						typeof file !== 'object' ||
+						typeof (file as Record<string, unknown>).path !== 'string' ||
+						typeof (file as Record<string, unknown>).description !== 'string',
+				)
+			) {
+				return {
+					valid: false,
+					error: 'Each changed file must include a path and description',
+				};
+			}
+			if (
+				args.tests.some((testResult: unknown) => {
+					if (!testResult || typeof testResult !== 'object') return true;
+					const candidate = testResult as Record<string, unknown>;
+					return (
+						typeof candidate.command !== 'string' ||
+						(candidate.status !== 'passed' && candidate.status !== 'failed')
+					);
+				})
+			) {
+				return {
+					valid: false,
+					error: 'Each test result must include a command and valid status',
+				};
 			}
 			if (
 				args.verificationSteps.length === 0 ||

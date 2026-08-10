@@ -1,10 +1,9 @@
 import crypto from 'node:crypto';
+import type {Dirent} from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {getAppDataPath} from '@/config/paths';
-
-const SESSION_ID_PATTERN =
-	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+import {isValidSessionId} from '@/session/session-id';
 
 const ARTIFACT_FILES = {
 	implementation_plan: 'implementation_plan.md',
@@ -13,12 +12,25 @@ const ARTIFACT_FILES = {
 	walkthrough: 'walkthrough.md',
 } as const;
 
+const EPHEMERAL_MARKER = '.ephemeral.json';
+
 export type ArtifactKind = keyof typeof ARTIFACT_FILES;
 export type UserArtifactKind = Exclude<ArtifactKind, 'tasks'>;
 
 export interface ArtifactDescriptor {
 	kind: UserArtifactKind;
 	path: string;
+}
+
+function isProcessAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		return (
+			!(error instanceof Error) || !('code' in error) || error.code !== 'ESRCH'
+		);
+	}
 }
 
 const USER_ARTIFACT_KINDS: UserArtifactKind[] = [
@@ -34,6 +46,14 @@ export class ArtifactManager {
 
 	getArtifactPath(sessionId: string, kind: ArtifactKind): string {
 		this.validateSessionId(sessionId);
+		return path.join(this.rootDir, sessionId, ARTIFACT_FILES[kind]);
+	}
+
+	tryGetArtifactPath(
+		sessionId: string,
+		kind: ArtifactKind,
+	): string | undefined {
+		if (!isValidSessionId(sessionId)) return undefined;
 		return path.join(this.rootDir, sessionId, ARTIFACT_FILES[kind]);
 	}
 
@@ -102,15 +122,72 @@ export class ArtifactManager {
 	}
 
 	async deleteSessionArtifacts(sessionId: string): Promise<void> {
-		this.validateSessionId(sessionId);
+		if (!isValidSessionId(sessionId)) return;
 		await fs.rm(path.join(this.rootDir, sessionId), {
 			recursive: true,
 			force: true,
 		});
 	}
 
+	async markEphemeralSession(
+		sessionId: string,
+		pid = process.pid,
+	): Promise<void> {
+		this.validateSessionId(sessionId);
+		const sessionDir = path.join(this.rootDir, sessionId);
+		await fs.mkdir(sessionDir, {recursive: true, mode: 0o700});
+		await fs.chmod(sessionDir, 0o700);
+		await fs.writeFile(
+			path.join(sessionDir, EPHEMERAL_MARKER),
+			JSON.stringify({pid, createdAt: new Date().toISOString()}),
+			{encoding: 'utf8', mode: 0o600},
+		);
+	}
+
+	async cleanupStaleEphemeralSessions(
+		processAlive: (pid: number) => boolean = isProcessAlive,
+	): Promise<void> {
+		let entries: Dirent<string>[];
+		try {
+			entries = await fs.readdir(this.rootDir, {withFileTypes: true});
+		} catch (error) {
+			if (
+				error instanceof Error &&
+				'code' in error &&
+				error.code === 'ENOENT'
+			) {
+				return;
+			}
+			throw error;
+		}
+
+		for (const entry of entries) {
+			if (!entry.isDirectory() || !isValidSessionId(entry.name)) continue;
+			const markerPath = path.join(this.rootDir, entry.name, EPHEMERAL_MARKER);
+			let marker: unknown;
+			try {
+				marker = JSON.parse(await fs.readFile(markerPath, 'utf8'));
+			} catch {
+				continue;
+			}
+			const pid =
+				marker && typeof marker === 'object'
+					? (marker as Record<string, unknown>).pid
+					: undefined;
+			if (
+				typeof pid !== 'number' ||
+				!Number.isInteger(pid) ||
+				pid <= 0 ||
+				processAlive(pid)
+			) {
+				continue;
+			}
+			await this.deleteSessionArtifacts(entry.name);
+		}
+	}
+
 	private validateSessionId(sessionId: string): void {
-		if (!SESSION_ID_PATTERN.test(sessionId)) {
+		if (!isValidSessionId(sessionId)) {
 			throw new Error(`Invalid session ID: ${sessionId}`);
 		}
 	}

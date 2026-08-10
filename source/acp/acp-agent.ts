@@ -32,7 +32,6 @@ import type {
 import {
 	acpModeToDevelopmentMode,
 	developmentModeToAcpMode,
-	filterAcpToolNames,
 	getAgentCapabilities,
 	getAvailableModes,
 	negotiateProtocolVersion,
@@ -669,13 +668,11 @@ export class AcpAgent implements Agent {
 		const fallbackToolFormat: 'xml' | 'json' =
 			tuneToolMode === 'json' ? 'json' : 'xml';
 
-		const availableNames = filterAcpToolNames(
-			toolManager.getAvailableToolNames(
-				tune,
-				session.developmentMode,
-				undefined,
-				model,
-			),
+		const availableNames = toolManager.getAvailableToolNames(
+			tune,
+			session.developmentMode,
+			undefined,
+			model,
 		);
 		const basePrompt = buildSystemPrompt(
 			session.developmentMode,

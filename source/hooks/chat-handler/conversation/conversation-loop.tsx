@@ -106,6 +106,7 @@ interface ProcessAssistantResponseParams {
 	workingDirectory?: string;
 	onPrivacyEvent?: (scrubbedDelta: number) => void;
 	onToolExecuted?: (toolName: string) => void;
+	onFinalAssistantText?: (content: string) => void;
 	// Number of consecutive empty assistant turns that have already been
 	// nudged in this loop. The empty-response branch increments and
 	// recurses; every other recursion site resets to 0.
@@ -1111,6 +1112,7 @@ export const processAssistantResponse = async (
 
 		// Flush any residual compact counts and task updates from turns that
 		// didn't emit reasoning so they persist in scrollback at conversation end.
+		params.onFinalAssistantText?.(cleanedContent);
 		await flushAll();
 
 		setIsGenerating(false);

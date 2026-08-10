@@ -9,6 +9,7 @@
 import {randomUUID} from 'node:crypto';
 import type {SubagentExecutor} from '@/subagents/subagent-executor.js';
 import {getSubagentLoader} from '@/subagents/subagent-loader.js';
+import type {ToolExecutionContext} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import type {NanocoderToolExport} from '@/types/index';
 
@@ -58,7 +59,7 @@ export function setAvailableAgentNames(
  */
 export function startAgentExecution(
 	args: AgentToolArgs,
-	signal?: AbortSignal,
+	options?: ToolExecutionContext,
 ): {
 	agentId: string;
 	promise: Promise<{content: string; success: boolean; error?: string}>;
@@ -74,6 +75,10 @@ export function startAgentExecution(
 
 	const {subagent_type, description, prompt, context} = args;
 	const executor = executorInstance;
+	const executionContext = {
+		sessionId: options?.sessionId,
+		workingDirectory: options?.workingDirectory,
+	};
 
 	// Wrap in setTimeout(0) to fully detach from the current call stack.
 	// This ensures the caller can set up the live component and Ink can
@@ -91,9 +96,10 @@ export function startAgentExecution(
 					prompt,
 					context,
 				},
-				signal,
+				options?.abortSignal,
 				0,
 				agentId,
+				executionContext,
 			);
 			resolve({
 				content: result.output,
@@ -108,7 +114,7 @@ export function startAgentExecution(
 
 async function executeAgent(
 	args: AgentToolArgs,
-	signal?: AbortSignal,
+	options?: ToolExecutionContext,
 ): Promise<string> {
 	if (!executorInstance) {
 		throw new Error('Subagent executor not initialized');
@@ -136,9 +142,13 @@ async function executeAgent(
 			prompt,
 			context,
 		},
-		signal,
+		options?.abortSignal,
 		0,
 		agentId,
+		{
+			sessionId: options?.sessionId,
+			workingDirectory: options?.workingDirectory,
+		},
 	);
 
 	if (!result.success) {
@@ -177,8 +187,8 @@ const agentCoreTool = tool({
 		},
 		required: ['subagent_type', 'description'],
 	}),
-	execute: async (args, {abortSignal}) => {
-		return await executeAgent(args, abortSignal);
+	execute: async (args, options) => {
+		return await executeAgent(args, options as ToolExecutionContext);
 	},
 });
 

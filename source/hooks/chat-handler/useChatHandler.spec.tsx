@@ -526,6 +526,81 @@ test('useChatHandler - offers review after write_plan succeeds', async t => {
 	}
 });
 
+test('useChatHandler - persists a prose plan when write_plan was omitted', async t => {
+	let planComplete = 0;
+	let persistedContent = '';
+	let persistedSessionId: string | undefined;
+	let hookResult: ChatHandlerReturn | null = null;
+	const client: LLMClient = {
+		...createMockClient(),
+		chat: async (_messages, _tools, callbacks) => {
+			callbacks.onFinish?.();
+			return {
+				choices: [
+					{
+						message: {
+							role: 'assistant' as const,
+							content: '# Plan\n\n1. Build it.',
+						},
+					},
+				],
+			};
+		},
+	};
+	const toolManager = {
+		...createMockToolManager(),
+		getAvailableToolNames: () => ['write_plan'],
+		getToolNames: () => ['write_plan'],
+		hasTool: (name: string) => name === 'write_plan',
+		getToolEntry: () => ({
+			name: 'write_plan',
+			approval: false,
+			readOnly: false,
+		}),
+		isReadOnly: () => false,
+		getToolFormatter: () => undefined,
+	} as unknown as NonNullable<UseChatHandlerProps['toolManager']>;
+	const customCommandLoader = {
+		findRelevantCommands: () => [],
+	} as unknown as NonNullable<UseChatHandlerProps['customCommandLoader']>;
+	setToolRegistryGetter(() => ({
+		write_plan: async (args, options) => {
+			persistedContent = args.content;
+			persistedSessionId = options?.sessionId;
+			return 'Plan saved';
+		},
+	}));
+
+	try {
+		render(
+			<TestHookComponent
+				{...createMockProps({
+					client,
+					toolManager,
+					customCommandLoader,
+					developmentMode: 'plan',
+					ensureCurrentSessionId: () =>
+						'11111111-1111-4111-8111-111111111111',
+					onPlanTurnComplete: () => {
+						planComplete++;
+					},
+				})}
+				onResult={result => {
+					hookResult = result;
+				}}
+			/>,
+		);
+
+		await waitForCondition(() => hookResult !== null);
+		await hookResult!.handleChatMessage('make a plan');
+		t.is(persistedContent, '# Plan\n\n1. Build it.');
+		t.is(persistedSessionId, '11111111-1111-4111-8111-111111111111');
+		t.is(planComplete, 1);
+	} finally {
+		setToolRegistryGetter(() => ({}));
+	}
+});
+
 test('useChatHandler - allocates a session before starting a turn', async t => {
 	let ensureCalls = 0;
 	let hookResult: ChatHandlerReturn | null = null;

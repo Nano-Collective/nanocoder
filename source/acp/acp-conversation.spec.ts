@@ -555,6 +555,72 @@ test('runAcpConversation - completed write_plan exposes its artifact location', 
 	t.is(completed.title, 'Implementation plan ready');
 });
 
+test('runAcpConversation - persists a prose plan when write_plan was omitted', async t => {
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn, {
+		devMode: 'plan',
+		sessionId: '00000000-0000-4000-8000-000000000003',
+	});
+	const toolManager = {
+		...createMockToolManager(),
+		getAvailableToolNames: () => ['read_file', 'write_plan'],
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+
+	let persistedContent: unknown;
+	let receivedSessionId: string | undefined;
+	setToolRegistryGetter(() => ({
+		write_plan: async (args: unknown, options) => {
+			persistedContent = (args as {content?: unknown}).content;
+			receivedSessionId = options?.sessionId;
+			return 'Plan saved';
+		},
+	}));
+
+	const {client} = createMockClient([
+		{
+			choices: [
+				{
+					message: {
+						content: '# Plan\n\n1. Build it.',
+						tool_calls: [],
+					},
+				},
+			],
+		},
+	]);
+
+	const result = await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(result.stopReason, 'end_turn');
+	t.is(persistedContent, '# Plan\n\n1. Build it.');
+	t.is(receivedSessionId, session.sessionId);
+	const fallbackCall = updates.find(
+		(u: any) =>
+			u.update.sessionUpdate === 'tool_call' &&
+			u.update.title === 'write_plan',
+	)?.update;
+	t.truthy(fallbackCall);
+	const completed = updates.find(
+		(u: any) =>
+			u.update.sessionUpdate === 'tool_call_update' &&
+			u.update.toolCallId === fallbackCall.toolCallId &&
+			u.update.status === 'completed',
+	)?.update;
+	t.true(completed.locations[0].path.endsWith('/implementation_plan.md'));
+	t.is(
+		completed._meta['nanocoder/artifact'].kind,
+		'implementation_plan',
+	);
+});
+
 // ============================================================================
 // write_tasks mirrors to an ACP plan update
 // ============================================================================
@@ -628,7 +694,63 @@ test('runAcpConversation - write_tasks emits a plan session update', async t => 
 	t.true(taskArtifact.path.endsWith('/task.md'));
 });
 
-test('runAcpConversation - nudges once when complex work ends without a walkthrough', async t => {
+test('runAcpConversation - invalid client session IDs omit artifact metadata', async t => {
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn, {
+		devMode: 'yolo',
+		sessionId: 'external-session',
+	});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+	setToolRegistryGetter(() => ({write_tasks: async () => 'Tasks updated'}));
+
+	let callCount = 0;
+	const client = {
+		chat: async () => {
+			callCount++;
+			return callCount === 1
+				? {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [
+									createMockToolCall(
+										'write_tasks',
+										{tasks: [{title: 'Safe update'}]},
+										'call-invalid-session',
+									),
+								],
+							},
+						},
+					],
+				}
+				: {choices: [{message: {content: 'Done'}}]};
+		},
+	} as unknown as LLMClient;
+
+	const result = await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(result.stopReason, 'end_turn');
+	const planUpdate = updates.find(
+		(update: any) => update.update.sessionUpdate === 'plan',
+	)?.update;
+	t.deepEqual(planUpdate.entries, [
+		{content: 'Safe update', priority: 'medium', status: 'pending'},
+	]);
+	t.is(planUpdate._meta, undefined);
+});
+
+test('runAcpConversation - does not nudge task-only work for a walkthrough', async t => {
 	const {conn} = createMockConn();
 	const session = createMockSession(conn, {devMode: 'yolo'});
 	const toolManager = {
@@ -701,7 +823,71 @@ test('runAcpConversation - nudges once when complex work ends without a walkthro
 	});
 
 	t.is(result.stopReason, 'end_turn');
-	t.is(callCount, 4);
+	t.is(callCount, 2);
+	t.false(nudge.includes('write_walkthrough'));
+});
+
+test('runAcpConversation - nudges an approved plan for a walkthrough', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {
+		devMode: 'yolo',
+		messages: [
+			{role: 'user', content: '<approved_plan>Implement it.</approved_plan>'},
+		],
+	});
+	const toolManager = {
+		...createMockToolManager(),
+		getAvailableToolNames: () => ['write_walkthrough'],
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+	setToolRegistryGetter(() => ({
+		write_walkthrough: async () => 'Walkthrough saved',
+	}));
+
+	let callCount = 0;
+	let nudge = '';
+	const client = {
+		chat: async (messages: any[]) => {
+			callCount++;
+			if (callCount === 1) {
+				return {choices: [{message: {content: 'Implementation complete.'}}]};
+			}
+			if (callCount === 2) {
+				nudge = messages.at(-1)?.content ?? '';
+				return {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [
+									createMockToolCall('write_walkthrough', {
+										summary: 'Implemented the plan.',
+										filesChanged: [],
+										tests: [],
+										untestedReason: 'Covered by this test.',
+										verificationSteps: ['Inspect the artifact.'],
+									}),
+								],
+							},
+						},
+					],
+				};
+			}
+			return {choices: [{message: {content: 'Walkthrough saved.'}}]};
+		},
+	} as unknown as LLMClient;
+
+	const result = await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(result.stopReason, 'end_turn');
+	t.is(callCount, 3);
 	t.true(nudge.includes('write_walkthrough'));
 });
 

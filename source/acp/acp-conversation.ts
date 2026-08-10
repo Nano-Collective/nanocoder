@@ -3,7 +3,6 @@ import type {
 	PromptResponse,
 	ToolCallStatus,
 } from '@agentclientprotocol/sdk';
-import {filterAcpToolNames} from '@/acp/acp-capabilities';
 import {requestToolPermission} from '@/acp/acp-permission';
 import {requestUserChoice} from '@/acp/acp-question';
 import type {AcpSession} from '@/acp/acp-session';
@@ -76,6 +75,7 @@ export async function runAcpConversation(
 
 	let messages = session.messages;
 	const walkthroughLifecycle = createWalkthroughLifecycle(messages);
+	let wrotePlan = false;
 
 	const maxTurns =
 		getAppConfig().headless?.maxTurns ?? DEFAULT_HEADLESS_MAX_TURNS;
@@ -90,8 +90,9 @@ export async function runAcpConversation(
 		// rather than stopping mid-task at the ceiling.
 		const finalTurn = turn === maxTurns - 1;
 
-		const availableNames = filterAcpToolNames(
-			toolManager.getAvailableToolNames(undefined, developmentMode),
+		const availableNames = toolManager.getAvailableToolNames(
+			undefined,
+			developmentMode,
 		);
 		const tools = finalTurn ? {} : toolManager.getFilteredTools(availableNames);
 
@@ -211,6 +212,35 @@ export async function runAcpConversation(
 		}
 
 		if (validToolCalls.length === 0) {
+			if (
+				developmentMode === 'plan' &&
+				!wrotePlan &&
+				availableNames.includes('write_plan') &&
+				cleanedContent.trim().length > 0
+			) {
+				const fallbackCall: ToolCall = {
+					id: `write-plan-fallback-${session.sessionId}-${turn}`,
+					function: {
+						name: 'write_plan',
+						arguments: {content: cleanedContent},
+					},
+				};
+				const fallbackResult = await executePlanFallback(
+					session,
+					conn,
+					fallbackCall,
+				);
+				messages = [
+					...messages.slice(0, -1),
+					{
+						...messages[messages.length - 1],
+						tool_calls: [fallbackCall],
+					},
+					fallbackResult,
+				];
+				wrotePlan = !fallbackResult.isError;
+			}
+
 			const fallback = finalTurn
 				? null
 				: takeWalkthroughFallback(
@@ -388,6 +418,9 @@ export async function runAcpConversation(
 			toolResults.push(toolResult);
 			if (status === 'completed') {
 				observeSuccessfulLifecycleTool(walkthroughLifecycle, toolCall);
+				if (toolCall.function.name === 'write_plan') {
+					wrotePlan = true;
+				}
 			}
 
 			// write_tasks replaces the whole task list; mirror it to the client
@@ -411,6 +444,29 @@ export async function runAcpConversation(
 	return {stopReason: 'max_turn_requests'};
 }
 
+async function executePlanFallback(
+	session: AcpSession,
+	conn: AgentSideConnection,
+	toolCall: ToolCall,
+): Promise<ToolResult> {
+	const meta = await buildToolCallMeta(toolCall);
+	await emitToolCall(session, conn, toolCall, 'pending', meta);
+	await emitToolCallUpdate(session, conn, toolCall, 'in_progress');
+	const result = await processToolUse(toolCall, {
+		abortSignal: session.abortController.signal,
+		sessionId: session.sessionId,
+		workingDirectory: session.cwd,
+	});
+	await emitToolCallUpdate(
+		session,
+		conn,
+		toolCall,
+		result.isError ? 'failed' : 'completed',
+		result.content,
+	);
+	return result;
+}
+
 /**
  * Mirror a successful `write_tasks` call to the client as an ACP `plan`
  * session update. The tool's args carry the complete replacement task list
@@ -427,16 +483,19 @@ async function emitPlanUpdate(
 	};
 	const tasks = Array.isArray(args?.tasks) ? args.tasks : [];
 	const validStatuses = ['pending', 'in_progress', 'completed'] as const;
-	const taskArtifact: ArtifactDescriptor = {
-		kind: 'task',
-		path: artifactManager.getArtifactPath(session.sessionId, 'task'),
-	};
+	const taskArtifactPath = artifactManager.tryGetArtifactPath(
+		session.sessionId,
+		'task',
+	);
+	const taskArtifact: ArtifactDescriptor | undefined = taskArtifactPath
+		? {kind: 'task', path: taskArtifactPath}
+		: undefined;
 
 	await conn.sessionUpdate({
 		sessionId: session.sessionId,
 		update: {
 			sessionUpdate: 'plan',
-			_meta: {'nanocoder/artifact': taskArtifact},
+			_meta: taskArtifact ? {'nanocoder/artifact': taskArtifact} : undefined,
 			entries: tasks
 				.filter(t => typeof t?.title === 'string')
 				.map(t => ({
@@ -483,14 +542,14 @@ async function emitToolCallUpdate(
 	title?: string,
 ): Promise<void> {
 	const artifactKind = ARTIFACT_TOOL_KINDS[toolCall.function.name];
+	const artifactPath = artifactKind
+		? artifactManager.tryGetArtifactPath(session.sessionId, artifactKind)
+		: undefined;
 	const artifact: ArtifactDescriptor | undefined =
-		status === 'completed' && artifactKind
+		status === 'completed' && artifactKind && artifactPath
 			? {
 					kind: artifactKind,
-					path: artifactManager.getArtifactPath(
-						session.sessionId,
-						artifactKind,
-					),
+					path: artifactPath,
 				}
 			: undefined;
 	const meta = artifact

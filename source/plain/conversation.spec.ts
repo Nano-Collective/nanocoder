@@ -366,7 +366,7 @@ test("forwards the plain session context to artifact tools", async (t) => {
 	t.is(receivedWorkingDirectory, "/tmp/plain-artifacts");
 });
 
-test("nudges once when plain complex work ends without a walkthrough", async (t) => {
+test("does not nudge task-only plain work for a walkthrough", async (t) => {
 	let callCount = 0;
 	let nudge = "";
 	const client = {
@@ -448,8 +448,75 @@ test("nudges once when plain complex work ends without a walkthrough", async (t)
 	});
 
 	t.is(outcome.kind, "success");
-	t.is(callCount, 4);
-	t.true(nudge.includes("write_walkthrough"));
+	t.is(callCount, 2);
+	t.false(nudge.includes("write_walkthrough"));
+});
+
+test("keeps the pre-nudge answer as plain JSON finalText", async (t) => {
+	let callCount = 0;
+	const client = {
+		...makeFakeClient({responses: []}),
+		chat: async (_messages: Message[], _tools: unknown, callbacks: any) => {
+			callCount++;
+			if (callCount === 1) {
+				callbacks.onToken?.("Implementation complete.");
+				return {
+					choices: [
+						{message: {role: "assistant", content: "Implementation complete."}},
+					],
+				};
+			}
+			if (callCount === 2) {
+				return {
+					choices: [
+						{
+							message: {
+								role: "assistant",
+								content: "",
+								tool_calls: [
+									{
+										id: "walkthrough",
+										function: {
+											name: "write_walkthrough",
+											arguments: {},
+										},
+									},
+								],
+							},
+						},
+					],
+				};
+			}
+			callbacks.onToken?.("Confirmed.");
+			return {
+				choices: [{message: {role: "assistant", content: "Confirmed."}}],
+			};
+		},
+	} as LLMClient;
+	const toolManager = makeFakeToolManager({
+		knownTools: new Set(["write_walkthrough"]),
+	});
+	setToolRegistryGetter(() => ({
+		write_walkthrough: (async () => "Walkthrough saved") as ToolHandler,
+	}));
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [
+			{role: "user", content: "<approved_plan>Implement it.</approved_plan>"},
+		],
+		developmentMode: "yolo",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+		outputFormat: "json",
+		sessionId: "11111111-1111-4111-8111-111111111111",
+	});
+
+	t.is(outcome.kind, "success");
+	t.is(outcome.finalText, "Implementation complete.");
+	t.is(callCount, 3);
 });
 
 test("unknown tool produces an error result that is fed back to the model", async (t) => {

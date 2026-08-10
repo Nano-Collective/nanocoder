@@ -32,15 +32,6 @@ export function observeSuccessfulLifecycleTool(
 ): void {
 	if (toolCall.function.name === 'write_walkthrough') {
 		lifecycle.written = true;
-		return;
-	}
-
-	if (
-		toolCall.function.name === 'write_tasks' &&
-		Array.isArray(toolCall.function.arguments.tasks) &&
-		toolCall.function.arguments.tasks.length > 0
-	) {
-		lifecycle.required = true;
 	}
 }
 

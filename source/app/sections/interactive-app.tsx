@@ -312,7 +312,7 @@ export function InteractiveApp({
 					<PlanReviewPrompt
 						artifactPath={
 							appState.currentSessionId
-								? artifactManager.getArtifactPath(
+								? artifactManager.tryGetArtifactPath(
 										appState.currentSessionId,
 										'implementation_plan',
 									)

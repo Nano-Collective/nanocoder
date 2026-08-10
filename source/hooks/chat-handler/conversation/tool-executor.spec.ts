@@ -791,9 +791,19 @@ test.serial(
 		const {setAgentToolExecutor} = await import('@/tools/agent-tool');
 
 		let received: AbortSignal | undefined;
+		let receivedContext:
+			| {sessionId?: string; workingDirectory?: string}
+			| undefined;
 		setAgentToolExecutor({
-			execute: async (_task: unknown, signal?: AbortSignal) => {
+			execute: async (
+				_task: unknown,
+				signal?: AbortSignal,
+				_depth?: number,
+				_agentId?: string,
+				context?: {sessionId?: string; workingDirectory?: string},
+			) => {
 				received = signal;
+				receivedContext = context;
 				return {
 					subagentName: 'fake',
 					output: 'ok',
@@ -822,10 +832,21 @@ test.serial(
 			createMockToolManager() as any,
 			createMockConversationStateManager() as any,
 			() => {},
-			{compactDisplay: true, signal: controller.signal},
+			{
+				compactDisplay: true,
+				signal: controller.signal,
+				executionContext: {
+					sessionId: '11111111-1111-4111-8111-111111111111',
+					workingDirectory: '/workspace',
+				},
+			},
 		);
 
 		t.is(received, controller.signal);
+		t.deepEqual(receivedContext, {
+			sessionId: '11111111-1111-4111-8111-111111111111',
+			workingDirectory: '/workspace',
+		});
 	},
 );
 

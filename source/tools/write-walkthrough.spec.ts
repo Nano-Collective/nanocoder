@@ -83,6 +83,17 @@ test('write_walkthrough rejects an empty summary', async t => {
 	);
 });
 
+test('write_walkthrough reports missing required fields without throwing', async t => {
+	const writeWalkthrough = createWriteWalkthroughTool(
+		new ArtifactManager('/tmp/unused'),
+	);
+
+	t.deepEqual(await writeWalkthrough.validator?.({}), {
+		valid: false,
+		error: 'Walkthrough summary is required',
+	});
+});
+
 test('write_walkthrough requires a verification step', async t => {
 	const writeWalkthrough = createWriteWalkthroughTool(
 		new ArtifactManager('/tmp/unused'),

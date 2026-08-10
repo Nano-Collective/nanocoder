@@ -11,19 +11,16 @@
  *   No    — stay in plan mode and let the user request changes
  *   [Esc] — same as No; never exits Plan Mode implicitly
  */
-import {pathToFileURL} from 'node:url';
+import {basename} from 'node:path';
 import {Box, Text, useInput} from 'ink';
 import SelectInput from 'ink-select-input';
 import {useState} from 'react';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-
-const OSC_8 = '\u001B]8;;';
-const OSC_TERMINATOR = '\u0007';
+import {createTerminalFileLink as createFileLink} from '@/utils/terminal-file-link';
 
 export function createTerminalFileLink(filePath: string): string {
-	const fileUrl = pathToFileURL(filePath).href;
-	return `${OSC_8}${fileUrl}${OSC_TERMINATOR}Open implementation_plan.md${OSC_8}${OSC_TERMINATOR}`;
+	return createFileLink(filePath, `Open ${basename(filePath)}`);
 }
 
 export interface PlanReviewPromptProps {

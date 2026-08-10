@@ -7,11 +7,8 @@ import {
 } from '@/artifacts/artifact-manager';
 import {getAppConfig} from '@/config/index';
 import {getAppDataPath} from '@/config/paths';
+import {isValidSessionId} from '@/session/session-id';
 import type {Message} from '@/types/core';
-
-/** UUID v4 pattern for session ID validation (prevents path traversal) */
-const SESSION_ID_PATTERN =
-	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export interface Session {
 	id: string;
@@ -34,10 +31,6 @@ export interface SessionMetadata {
 	provider: string;
 	model: string;
 	workingDirectory: string;
-}
-
-function isValidSessionId(id: string): boolean {
-	return SESSION_ID_PATTERN.test(id);
 }
 
 function isRecord(obj: unknown): obj is Record<string, unknown> {

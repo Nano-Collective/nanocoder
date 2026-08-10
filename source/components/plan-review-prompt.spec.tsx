@@ -67,7 +67,7 @@ test('creates an OSC 8 file hyperlink with a short non-wrapping label', t => {
 			'\u001B]8;;file:///tmp/implementation%20plan.md\u0007',
 		),
 	);
-	t.true(link.includes('Open implementation_plan.md'));
+	t.true(link.includes('Open implementation plan.md'));
 	t.true(link.endsWith('\u001B]8;;\u0007'));
 });
 

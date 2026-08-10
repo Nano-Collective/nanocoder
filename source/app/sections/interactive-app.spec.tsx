@@ -538,6 +538,20 @@ test('plan review bar receives the current session artifact path', t => {
 	t.regex(lastFrame()!, /implementation_plan\.md/);
 });
 
+test('plan review bar tolerates an invalid external session ID', t => {
+	const {lastFrame} = renderWithTheme(
+		<InteractiveApp
+			{...makeProps({
+				currentSessionId: '../outside',
+				planReviewState: {show: true, originalMessage: 'make a plan'},
+			})}
+		/>,
+	);
+
+	t.regex(lastFrame()!, /Plan ready/);
+	t.notRegex(lastFrame()!, /implementation_plan\.md/);
+});
+
 test('plan review bar shows when the planTurnCompleted signal fires', async t => {
 	let shown: {show: boolean; originalMessage: string} | null = null;
 	let resetToFalse = false;
