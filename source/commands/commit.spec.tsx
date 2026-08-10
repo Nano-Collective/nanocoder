@@ -1,31 +1,12 @@
 import test from 'ava';
 import React from 'react';
-import clipboard from 'clipboardy';
 import {renderWithTheme} from '@/test-utils/render-with-theme';
 import type {Message} from '@/types/core';
-import {commitCommand} from '@/commands/commit';
-// In a CI/Linux sandbox clipboardy.write may not have a backing binary
-// installed (it shells out to xclip/xsel/pbcopy/clip.exe). For tests we
-// stub the write method directly on the default export object — this is
-// the same monkey-patching approach export.spec.tsx uses for fs.writeFile.
-const originalWrite = clipboard.write;
-let lastWritten: string | null = null;
-let writeImpl: (text: string) => Promise<void> = async text => {
-	lastWritten = text;
-};
+import {createCommitCommand} from './commit';
 
-test.beforeEach(() => {
-	lastWritten = null;
-	writeImpl = async text => {
-		lastWritten = text;
-	};
-	(clipboard as {write: (text: string) => Promise<void>}).write = text =>
-		writeImpl(text);
-});
-
-test.afterEach(() => {
-	(clipboard as {write: (text: string) => Promise<void>}).write = originalWrite;
-});
+const baseMessages: Message[] = [
+	{role: 'user', content: 'Generate a commit message'},
+];
 
 const testMetadata = {
 	provider: 'test-provider',
@@ -34,98 +15,162 @@ const testMetadata = {
 	getMessageTokens: (m: Message) => m.content.length,
 };
 
-const baseMessages: Message[] = [
-	{role: 'user', content: 'Tell me a joke'},
-	{role: 'assistant', content: 'Why did the chicken cross the road?'},
-	{role: 'user', content: 'I don\'t know, why?'},
-	{role: 'assistant', content: 'To get to the other side.'},
-];
+function createClient(response: string) {
+	return {
+		chat: async () => ({
+			choices: [
+				{
+					message: {
+						content: response,
+					},
+				},
+			],
+		}),
+	};
+}
 
-test('copyCommand has correct name and description', t => {
-	t.is(copyCommand.name, 'copy');
+test('commitCommand has correct name and description', t => {
+	const command = createCommitCommand({
+		hasStagedChanges: async () => false,
+		execGit: async () => '',
+	});
+
+	t.is(command.name, 'commit');
 	t.is(
-		copyCommand.description,
-		'Copy the last assistant response to the clipboard',
+		command.description,
+		'Generate a conventional commit message from staged changes',
 	);
 });
 
-test('copyCommand writes the last assistant content to the clipboard', async t => {
-	await commitCommand.handler([], baseMessages, testMetadata);
+test('commit warns when no staged changes exist', async t => {
+	const command = createCommitCommand({
+		hasStagedChanges: async () => false,
+		execGit: async () => {
+			throw new Error('execGit should not be called');
+		},
+	});
 
-	t.is(lastWritten, 'To get to the other side.');
-});
+	const result = await command.handler([], baseMessages, testMetadata);
 
-test('copyCommand returns a React success message on success', async t => {
-	const result = await copyCommand.handler(
-		[],
-		baseMessages,
-		testMetadata,
-	);
 	t.truthy(React.isValidElement(result));
 
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 	const output = lastFrame() || '';
 
-	t.true(output.includes('Copied last response to clipboard'));
-	// The success message should NOT include the copied content itself
-	// (the user just ran /copy — they already know what they copied).
-	t.false(output.includes('To get to the other side'));
+	t.true(output.includes('No staged changes to commit'));
 });
 
-test('copyCommand warns when no assistant response exists', async t => {
-	const messages: Message[] = [
-		{role: 'user', content: 'Hello?'},
-		{role: 'system', content: 'You are a helpful assistant'},
-	];
+test('commit returns an error when no client is available', async t => {
+	const command = createCommitCommand({
+		hasStagedChanges: async () => true,
+		execGit: async () => 'diff --git a/file.ts b/file.ts',
+	});
 
-	const result = await copyCommand.handler([], messages, testMetadata);
+	const result = await command.handler([], baseMessages, {
+		...testMetadata,
+		client: undefined,
+	});
+
 	t.truthy(React.isValidElement(result));
 
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 	const output = lastFrame() || '';
 
-	t.true(output.includes('No assistant response to copy yet'));
-	t.is(lastWritten, null);
+	t.true(output.includes('No active LLM client available'));
 });
 
-test('copyCommand warns when last assistant message has empty content', async t => {
-	const messages: Message[] = [
-		{role: 'user', content: 'Hello?'},
-		{role: 'assistant', content: ''},
-	];
+test('commit generates a message from the staged diff', async t => {
+	let receivedMessages: Message[] = [];
 
-	const result = await copyCommand.handler([], messages, testMetadata);
-	const {lastFrame} = renderWithTheme(result as React.ReactElement);
-	const output = lastFrame() || '';
+	const command = createCommitCommand({
+		hasStagedChanges: async () => true,
+		execGit: async args => {
+			t.deepEqual(args, [
+				'diff',
+				'--cached',
+				'--no-ext-diff',
+				'--no-color',
+			]);
 
-	t.true(output.includes('No assistant response to copy yet'));
-	t.is(lastWritten, null);
-});
+			return 'diff --git a/file.ts b/file.ts\n+const value = 1;';
+		},
+	});
 
-test('copyCommand returns an error message when clipboard write fails', async t => {
-	writeImpl = async () => {
-		throw new Error('no clipboard tool available');
+	const client = {
+		chat: async (messages: Message[]) => {
+			receivedMessages = messages;
+
+			return {
+				choices: [
+					{
+						message: {
+							content: 'feat: add value constant',
+						},
+					},
+				],
+			};
+		},
 	};
 
-	const result = await copyCommand.handler([], baseMessages, testMetadata);
+	const result = await command.handler([], baseMessages, {
+		...testMetadata,
+		client,
+	});
+
 	t.truthy(React.isValidElement(result));
 
 	const {lastFrame} = renderWithTheme(result as React.ReactElement);
 	const output = lastFrame() || '';
 
-	t.true(output.includes('Failed to copy to clipboard'));
-	t.true(output.includes('no clipboard tool available'));
+	t.true(output.includes('feat: add value constant'));
+	t.is(receivedMessages[0]?.role, 'system');
+	t.is(receivedMessages[1]?.role, 'user');
+	t.is(
+	receivedMessages[1]?.content,
+	'diff --git a/file.ts b/file.ts\n+const value = 1;',
+);
 });
 
-test('copyCommand ignores trailing non-assistant messages', async t => {
-	// Even if there are tool/system messages after the assistant, the
-	// last assistant content should still be the one copied.
-	const messages: Message[] = [
-		...baseMessages,
-		{role: 'tool', name: 'echo', content: 'noise'},
-		{role: 'system', content: 'system note'},
-	];
+test('commit warns when the model returns an empty response', async t => {
+	const command = createCommitCommand({
+		hasStagedChanges: async () => true,
+		execGit: async () => 'staged diff',
+	});
 
-	await copyCommand.handler([], messages, testMetadata);
-	t.is(lastWritten, 'To get to the other side.');
+	const result = await command.handler([], baseMessages, {
+		...testMetadata,
+		client: createClient(''),
+	});
+
+	t.truthy(React.isValidElement(result));
+
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = lastFrame() || '';
+
+	t.true(output.includes('Model returned an empty commit message'));
+});
+
+test('commit returns an error when the LLM request fails', async t => {
+	const command = createCommitCommand({
+		hasStagedChanges: async () => true,
+		execGit: async () => 'staged diff',
+	});
+
+	const client = {
+		chat: async () => {
+			throw new Error('LLM request failed');
+		},
+	};
+
+	const result = await command.handler([], baseMessages, {
+		...testMetadata,
+		client,
+	});
+
+	t.truthy(React.isValidElement(result));
+
+	const {lastFrame} = renderWithTheme(result as React.ReactElement);
+	const output = lastFrame() || '';
+
+	t.true(output.includes('LLM request failed'));
 });
