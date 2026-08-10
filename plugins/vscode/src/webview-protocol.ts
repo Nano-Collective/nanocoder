@@ -3,8 +3,6 @@
  * and the Sidebar Webview UI.
  */
 
-import type { MentionItem } from './mention-search';
-
 // ---------------------------------------------------------
 // Messages: Extension Host -> Webview
 // ---------------------------------------------------------
@@ -99,6 +97,19 @@ export interface ExtensionMessagePathInfoResolved {
 	path: string;
 	name: string;
 	kind: 'file' | 'folder';
+}
+
+/** One `@` autocomplete suggestion. */
+export interface MentionItem {
+	/** Absolute path — what the composer stores in `attachedPaths`. */
+	path: string;
+	/** Basename: the chip label and the dropdown's primary line. */
+	name: string;
+	/** Workspace-relative, forward slashes — the dropdown's secondary line. */
+	relPath: string;
+	kind: 'file' | 'folder';
+	/** Currently open in an editor tab, which both ranks it up and labels it. */
+	isEditor: boolean;
 }
 
 /**

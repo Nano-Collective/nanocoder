@@ -12,10 +12,12 @@
 
 	// ── @ mention autocomplete state ────────────────────────
 	const mentionDropdown = document.getElementById('mention-dropdown');
-	const mentionUtils = globalThis.NanocoderMentionUtils;
 
 	/** Only the file search is debounced; a bare `@` answers immediately. */
 	const MENTION_DEBOUNCE_MS = 120;
+
+	/** Longest `@token` treated as a mention; past it the user is pasting. */
+	const MENTION_MAX_TOKEN = 120;
 
 	let mentionOpen = false;
 	let mentionItems = [];
@@ -142,6 +144,36 @@
 	// `@[file] <path>` serialization in submitMessage, and host-side expansion
 	// — is therefore untouched by this feature.
 
+	/**
+	 * Find the `@` mention token the caret currently sits inside, as
+	 * `{start, query}`, or null when the caret is not in one.
+	 *
+	 * The `@` only counts at the start of the input or directly after
+	 * whitespace. That single rule is what keeps `user@example.com`, a
+	 * mid-word `@decorator` and npm scopes from popping the dropdown while
+	 * the user is typing prose.
+	 */
+	function findMentionQuery(text, cursor) {
+		const lowerBound = Math.max(0, cursor - MENTION_MAX_TOKEN);
+
+		for (let i = cursor - 1; i >= lowerBound; i--) {
+			const ch = text.charAt(i);
+
+			if (ch === '@') {
+				// An `@` glued to a preceding word is an email or a decorator.
+				const prev = i > 0 ? text.charAt(i - 1) : '';
+				return i === 0 || /\s/.test(prev)
+					? { start: i, query: text.slice(i + 1, cursor) }
+					: null;
+			}
+
+			// Mentions never span whitespace, so a space ends the search.
+			if (/\s/.test(ch)) return null;
+		}
+
+		return null;
+	}
+
 	function closeMention() {
 		mentionOpen = false;
 		mentionItems = [];
@@ -183,7 +215,7 @@
 
 	/** Re-evaluate whether the caret sits in a mention, and refresh results. */
 	function syncMentionState() {
-		if (!mentionUtils || !mentionDropdown) return;
+		if (!mentionDropdown) return;
 
 		// A range selection is not a caret position; treat it as "not mentioning".
 		if (chatInput.selectionStart !== chatInput.selectionEnd) {
@@ -191,7 +223,7 @@
 			return;
 		}
 
-		const token = mentionUtils.findMentionQuery(chatInput.value, chatInput.selectionStart);
+		const token = findMentionQuery(chatInput.value, chatInput.selectionStart);
 		if (!token) {
 			closeMention();
 			return;
@@ -258,7 +290,7 @@
 
 			const pathSpan = document.createElement('span');
 			pathSpan.className = 'truncate opacity-50 text-[0.85em]';
-			pathSpan.textContent = item.source === 'editor'
+			pathSpan.textContent = item.isEditor
 				? 'open · ' + item.relPath
 				: item.relPath;
 
@@ -290,15 +322,17 @@
 
 	function acceptMention(index) {
 		const item = mentionItems[index];
-		if (!item || !mentionToken || !mentionUtils) return;
+		if (!item || !mentionToken) return;
 
-		const result = mentionUtils.removeMentionToken(
-			chatInput.value,
-			mentionToken.start,
-			chatInput.selectionStart
-		);
-		chatInput.value = result.text;
-		chatInput.setSelectionRange(result.cursor, result.cursor);
+		// Drop the `@query` text: the chosen path becomes a chip instead, so
+		// nothing is substituted back into the textarea. The token end is read
+		// from the live caret rather than mentionToken, which lags by one
+		// debounce interval while the user is still typing; clamped so a caret
+		// that somehow sits before the `@` cannot duplicate text.
+		const start = mentionToken.start;
+		const end = Math.max(start, chatInput.selectionStart);
+		chatInput.value = chatInput.value.slice(0, start) + chatInput.value.slice(end);
+		chatInput.setSelectionRange(start, start);
 		// The textarea was sized around the token we just removed.
 		chatInput.style.height = 'auto';
 		chatInput.style.height = chatInput.scrollHeight + 'px';
@@ -312,7 +346,7 @@
 		chatInput.focus();
 	}
 
-	if (mentionUtils && mentionDropdown) {
+	if (mentionDropdown) {
 		chatInput.addEventListener('input', syncMentionState);
 		chatInput.addEventListener('blur', closeMention);
 		// Catches caret moves that fire no input event — arrow keys, clicking

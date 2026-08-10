@@ -1,15 +1,22 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { WebviewToExtensionMessage, ExtensionToWebviewMessage } from './webview-protocol';
+import { WebviewToExtensionMessage, ExtensionToWebviewMessage, MentionItem } from './webview-protocol';
 
 import { NanocoderAcpClient } from './acp-client';
 import { DiffManager } from './diff-manager';
-import { searchMentions, MentionSearchDeps } from './mention-search';
-import { readCappedFile, readCappedDirectory } from './context-attachment';
 
 /** Excluded from `@` search regardless of user settings — never useful context. */
 const MENTION_EXCLUDE = '**/{node_modules,.git,dist,out,build,.next,coverage}/**';
+
+/** Raw matches pulled from VS Code before ranking and truncation. */
+const MENTION_SEARCH_LIMIT = 200;
+
+/** Suggestions handed back to the webview. */
+const MENTION_RESULT_LIMIT = 30;
+
+/** Longest query we search for — past this the user is pasting, not mentioning. */
+const MENTION_MAX_QUERY = 120;
 
 export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'nanocoder.chatView';
@@ -273,56 +280,140 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 	}
 
 	/**
-	 * Bind the workspace-search primitives that `searchMentions` needs. Kept
-	 * separate from the search itself so the ranking and matching logic stays
-	 * unit-testable without an extension host.
+	 * Resolve an `@` query into ranked file/folder suggestions for the composer.
+	 *
+	 * Open editor tabs are matched with no I/O at all, so a bare `@` answers
+	 * instantly — that responsiveness is most of what makes the dropdown feel
+	 * native. Folders come from the ancestors of files found *under* a matching
+	 * directory: findFiles only ever returns files, so a filename glob never
+	 * matches a directory like `src/components/` itself.
 	 */
-	private _mentionSearchDeps(): MentionSearchDeps {
-		const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-		const workspaceRoot = workspaceFolder?.uri.fsPath || process.cwd();
+	private async _searchMentions(query: string): Promise<MentionItem[]> {
+		if (query.length > MENTION_MAX_QUERY) {
+			return [];
+		}
 
-		return {
-			workspaceRoot,
-			openEditors: () => {
-				const paths: string[] = [];
-				for (const group of vscode.window.tabGroups.all) {
-					for (const tab of group.tabs) {
-						const input = tab.input;
-						if (input instanceof vscode.TabInputText) {
-							if (input.uri.scheme === 'file') {
-								paths.push(input.uri.fsPath);
-							}
-						}
-					}
-				}
-				return paths;
-			},
-			findFiles: async (glob, limit) => {
-				const pattern = workspaceFolder
-					? new vscode.RelativePattern(workspaceFolder, glob)
-					: glob;
-				const uris = await vscode.workspace.findFiles(
-					pattern,
-					MENTION_EXCLUDE,
-					limit,
-				);
-				return uris.map(uri => uri.fsPath);
-			},
+		const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+		const root = workspaceFolder?.uri.fsPath || process.cwd();
+		const needle = query.replace(/\\/g, '/').toLowerCase();
+
+		// Keyed by lowercased path so the first source to claim a path wins,
+		// which is what keeps the "open" flag on a file that is also on disk.
+		const byPath = new Map<string, MentionItem>();
+		const add = (absPath: string, kind: 'file' | 'folder', isEditor: boolean) => {
+			const key = absPath.toLowerCase();
+			if (byPath.has(key)) {
+				return;
+			}
+			const name = path.basename(absPath);
+			// Falls back to the bare name for anything outside the workspace —
+			// an open editor tab can point anywhere on disk.
+			const relPath = path.relative(root, absPath).replace(/\\/g, '/') || name;
+			// A query containing `/` is a path fragment and has to match the
+			// relative path; a bare query only has to match the name. Without
+			// the split, typing `src/` would match every file whose *name*
+			// happened to contain "src".
+			const haystack = needle.includes('/') ? relPath : name;
+			if (needle && !haystack.toLowerCase().includes(needle)) {
+				return;
+			}
+			byPath.set(key, { path: absPath, name, relPath, kind, isEditor });
 		};
+
+		// Editors first: the dedupe above has to keep their isEditor flag.
+		for (const group of vscode.window.tabGroups.all) {
+			for (const tab of group.tabs) {
+				const input = tab.input;
+				if (input instanceof vscode.TabInputText && input.uri.scheme === 'file') {
+					add(input.uri.fsPath, 'file', true);
+				}
+			}
+		}
+
+		if (needle) {
+			// Only the trailing segment can be matched by a filename glob.
+			const segment = needle.slice(needle.lastIndexOf('/') + 1);
+			// Glob metacharacters the user typed would either explode the search
+			// or fail to parse, so widen each to `*`. The filter inside `add`
+			// then narrows the results back down using the raw query.
+			const fragment = segment.replace(/[*?[\]{}()!+@]/g, '*').replace(/\*+/g, '*');
+			const find = (glob: string) =>
+				vscode.workspace.findFiles(
+					workspaceFolder ? new vscode.RelativePattern(workspaceFolder, glob) : glob,
+					MENTION_EXCLUDE,
+					MENTION_SEARCH_LIMIT,
+				);
+
+			const [files, nested] = await Promise.all([
+				find(`**/*${fragment}*`),
+				find(`**/*${fragment}*/**`),
+			]);
+
+			for (const uri of files) {
+				add(uri.fsPath, 'file', false);
+			}
+
+			for (const uri of nested) {
+				// path.relative empties out at the root and starts with '..'
+				// past it, so this walk always terminates inside the workspace.
+				let dir = path.dirname(uri.fsPath);
+				let rel = path.relative(root, dir);
+				while (rel && !rel.startsWith('..')) {
+					if (path.basename(dir).toLowerCase().includes(segment)) {
+						add(dir, 'folder', false);
+					}
+					dir = path.dirname(dir);
+					rel = path.relative(root, dir);
+				}
+			}
+		}
+
+		const score = (item: MentionItem): number => {
+			const name = item.name.toLowerCase();
+			let value = 0;
+			if (!needle) {
+				value = 0;
+			} else if (name === needle) {
+				value = 100;
+			} else if (name.startsWith(needle)) {
+				value = 80;
+			} else if (name.includes(needle)) {
+				value = 60;
+			} else if (item.relPath.toLowerCase().includes(needle)) {
+				value = 40;
+			}
+			// Open editors are what the user is most likely to mean.
+			if (item.isEditor) {
+				value += 25;
+			} else if (item.kind === 'folder') {
+				value += 5;
+			}
+			return value;
+		};
+
+		// Score, then shallower paths, then alphabetical — the last two keys
+		// keep the order stable rather than dependent on discovery order.
+		return [...byPath.values()]
+			.sort(
+				(a, b) =>
+					score(b) - score(a) ||
+					a.relPath.length - b.relPath.length ||
+					a.relPath.localeCompare(b.relPath),
+			)
+			.slice(0, MENTION_RESULT_LIMIT);
 	}
 
 	private async _handleMentionCompletions(query: string, requestId: number) {
+		let items: MentionItem[] = [];
 		try {
-			const items = await searchMentions(query, this._mentionSearchDeps());
-			this.postMessage({ type: 'mentionCompletions', requestId, items });
+			items = await this._searchMentions(query);
 		} catch (error) {
 			this._outputChannel.appendLine(`[Mention] Search failed for "${query}": ${error}`);
-			// Still answer, so the webview clears its in-flight state and the
-			// dropdown closes instead of hanging on a stale result set.
-			this.postMessage({ type: 'mentionCompletions', requestId, items: [] });
 		}
+		// Answer even on failure, so the webview clears its in-flight state and
+		// the dropdown closes instead of hanging on a stale result set.
+		this.postMessage({ type: 'mentionCompletions', requestId, items });
 	}
-
 
 	/**
 	 * Expand @[file] and @[folder] references injected by the webview into
@@ -340,16 +431,15 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				try {
 					if (kind === 'folder') {
 						// Emit a compact directory listing (names only, one per line)
-						const listing = readCappedDirectory(filePath);
+						const entries = fs.readdirSync(filePath, { withFileTypes: true });
+						const listing = entries
+							.map(e => (e.isDirectory() ? `${e.name}/` : e.name))
+							.join('\n');
 						return `<context path="${filePath}" type="directory">\n${listing}\n</context>`;
+					} else {
+						const content = fs.readFileSync(filePath, 'utf8');
+						return `<context path="${filePath}">\n${content}\n</context>`;
 					}
-
-					const content = readCappedFile(filePath);
-					if (content === null) {
-						this._outputChannel.appendLine(`[Context] Skipped ${filePath}: unreadable or binary`);
-						return `<!-- skipped ${filePath}: unreadable or binary -->`;
-					}
-					return `<context path="${filePath}">\n${content}\n</context>`;
 				} catch (err) {
 					// If we can't read the path, leave it as a plain mention so the
 					// LLM still knows what the user was referring to.
@@ -418,7 +508,6 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.js')).with({ query: `v=${extVersion}` });
 		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.css')).with({ query: `v=${extVersion}` });
 		const markedUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'marked.min.js'));
-		const mentionUtilsUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'mention-utils.js')).with({ query: `v=${extVersion}` });
 		const nonce = getNonce();
 
 		html = html.replace(/\{\{cspSource\}\}/g, webview.cspSource);
@@ -426,7 +515,6 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		html = html.replace(/\{\{styleUri\}\}/g, styleUri.toString());
 		html = html.replace(/\{\{scriptUri\}\}/g, scriptUri.toString());
 		html = html.replace(/\{\{markedUri\}\}/g, markedUri.toString());
-		html = html.replace(/\{\{mentionUtilsUri\}\}/g, mentionUtilsUri.toString());
 
 		return html;
 	}

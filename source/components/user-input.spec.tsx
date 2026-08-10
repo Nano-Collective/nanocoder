@@ -63,46 +63,6 @@ const waitForFrame = async (
 	);
 };
 
-// Resolves once the rendered frame has stopped changing, i.e. React has
-// finished flushing and Ink's effects have re-run.
-const waitForStableFrame = async (
-	lastFrame: () => string | undefined,
-	stableForMs = 100,
-	timeoutMs = 3000,
-) => {
-	const startedAt = Date.now();
-	let previous = lastFrame();
-	let stableSince = Date.now();
-
-	while (Date.now() - startedAt < timeoutMs) {
-		await wait(25);
-
-		const current = lastFrame();
-		if (current !== previous) {
-			previous = current;
-			stableSince = Date.now();
-			continue;
-		}
-
-		if (Date.now() - stableSince >= stableForMs) return;
-	}
-};
-
-// Ink's useInput unsubscribes from stdin and resubscribes across a re-render,
-// so an Enter written while React is still flushing the typed characters is
-// swallowed outright - handleSubmit never runs and the poll for the submitted
-// value times out with zero submit calls. Letting the frame settle first keeps
-// the keystroke out of that window. Resending Enter is not an option:
-// handleSubmit has no empty-input guard, so a duplicate would submit '' and
-// clobber the captured value.
-const pressEnter = async (
-	stdin: {write: (data: string) => void},
-	lastFrame: () => string | undefined,
-) => {
-	await waitForStableFrame(lastFrame);
-	stdin.write('\r');
-};
-
 // ============================================================================
 // Component Rendering Tests
 // ============================================================================
@@ -266,7 +226,7 @@ test('UserInput reports and restores submitted drafts with attachments', async t
 
 	stdin.write('original');
 	await waitForFrame(lastFrame, /original/);
-	await pressEnter(stdin, lastFrame);
+	stdin.write('\r');
 	await waitForCondition(() => submittedMessage === 'original');
 
 	t.is(submittedDraft?.inputState.displayValue, 'original');
@@ -313,7 +273,7 @@ test('UserInput queues submitted messages while busy', async t => {
 
 	stdin.write('queued while busy');
 	await waitForFrame(lastFrame, /queued while busy/);
-	await pressEnter(stdin, lastFrame);
+	stdin.write('\r');
 	await waitForCondition(() => queuedMessage === 'queued while busy');
 
 	t.is(submittedMessage, '');
@@ -343,7 +303,7 @@ test('UserInput submits slash commands immediately while busy', async t => {
 
 	stdin.write('/help');
 	await waitForFrame(lastFrame, /\/help/);
-	await pressEnter(stdin, lastFrame);
+	stdin.write('\r');
 	await waitForCondition(() => submittedMessage === '/help');
 
 	t.is(submittedMessage, '/help');
@@ -474,7 +434,7 @@ test('UserInput loads selected queued message for editing', async t => {
 	await wait(50);
 	stdin.write('\u001B[B');
 	await wait(50);
-	await pressEnter(stdin, lastFrame);
+	stdin.write('\r');
 	await wait(50);
 
 	t.is(removedId, 'queued-2');
@@ -720,7 +680,7 @@ test('UserInput does not treat carriage return as a multiline shortcut', async t
 
 	stdin.write('a');
 	await new Promise(resolve => setTimeout(resolve, 20));
-	await pressEnter(stdin, lastFrame);
+	stdin.write('\r');
 	await new Promise(resolve => setTimeout(resolve, 20));
 	stdin.write('b');
 	await new Promise(resolve => setTimeout(resolve, 20));
@@ -828,7 +788,7 @@ test('Enter selects the highlighted completion and populates the input', async t
 
 	t.regex(lastFrame()!, /Available commands:/);
 
-	await pressEnter(stdin, lastFrame);
+	stdin.write('\r');
 	await wait();
 
 	const afterEnter = lastFrame()!;
@@ -877,7 +837,7 @@ test('completion menu dismissal/reset after selection or escape', async t => {
 
 	t.regex(lastFrame()!, /Available commands:/);
 
-	await pressEnter(stdin, lastFrame);
+	stdin.write('\r');
 	await wait();
 
 	t.notRegex(lastFrame()!, /Available commands:/);
