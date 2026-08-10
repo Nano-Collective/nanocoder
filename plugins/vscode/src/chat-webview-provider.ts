@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { WebviewToExtensionMessage, ExtensionToWebviewMessage } from './webview-protocol';
 
 
+
 import { NanocoderAcpClient } from './acp-client';
 import { DiffManager } from './diff-manager';
 import { SettingsManager } from './settings-manager';
@@ -71,6 +72,14 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				}
 			}
 		}
+	}
+
+	public requestCopyLastCodeBlock() {
+		if (!this._view) {
+			vscode.window.showInformationMessage('Nanocoder: open the Nanocoder chat view first.');
+			return;
+		}
+		this.postMessage({type: 'copyLastCodeBlock'});
 	}
 
 	public toggleHistory() {
@@ -233,6 +242,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 						this._outputChannel.appendLine(`[Webview] Error: ${message.message}`);
 						vscode.window.showErrorMessage(message.message);
 						break;
+					case 'copyToClipboard':
+						this._copyToClipboard(message.text);
+						break;
 				}
 			}
 		);
@@ -259,6 +271,18 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 			}
 		} catch (error) {
 			this._outputChannel.appendLine(`Failed to initialize session on ready: ${error}`);
+		}
+	}
+
+	// The webview extracts the text; the host owns the write because a
+	// palette-triggered copy has no user gesture for navigator.clipboard.
+	private async _copyToClipboard(text: string) {
+		try {
+			await vscode.env.clipboard.writeText(text);
+			this.postMessage({type: 'copyResult', ok: true, chars: text.length});
+		} catch (error) {
+			this._outputChannel.appendLine(`Failed to write to clipboard: ${error}`);
+			this.postMessage({type: 'copyResult', ok: false, error: String(error)});
 		}
 	}
 

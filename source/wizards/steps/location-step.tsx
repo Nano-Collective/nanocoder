@@ -1,8 +1,8 @@
 import {existsSync} from 'node:fs';
 import {join} from 'node:path';
 import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
 import {useState} from 'react';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {getColors} from '@/config';
 import {getConfigPath} from '@/config/paths';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -104,7 +104,7 @@ export function LocationStep({
 						{isNarrow ? truncatePath(existingPath, 40) : existingPath}
 					</Text>
 				</Box>
-				<SelectInput
+				<StyledSelectInput
 					items={existingConfigOptions}
 					onSelect={(item: {value: string}) => handleExistingConfigSelect(item)}
 				/>
@@ -131,7 +131,7 @@ export function LocationStep({
 					{!isNarrow && <Text color={colors.secondary}>{globalPath}</Text>}
 				</Box>
 			)}
-			<SelectInput
+			<StyledSelectInput
 				items={locationOptions}
 				onSelect={(item: LocationOption) => handleLocationSelect(item)}
 			/>

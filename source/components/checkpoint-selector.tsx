@@ -1,6 +1,6 @@
 import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
 import {useState} from 'react';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -161,7 +161,7 @@ export default function CheckpointSelector({
 			marginBottom={1}
 		>
 			<Box flexDirection="column">
-				<SelectInput items={options} onSelect={handleCheckpointSelect} />
+				<StyledSelectInput items={options} onSelect={handleCheckpointSelect} />
 				<Box marginTop={1}>
 					<Text color={colors.secondary}>
 						Use ↑↓ arrows to select, Enter to confirm, Escape to cancel

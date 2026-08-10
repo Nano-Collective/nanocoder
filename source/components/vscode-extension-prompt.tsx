@@ -1,6 +1,6 @@
 import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
 import React, {useEffect, useState} from 'react';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {defaultTheme, getThemeColors} from '@/config/themes';
 import {TIMEOUT_VSCODE_EXTENSION_SKIP_MS} from '@/constants';
 import {
@@ -196,7 +196,7 @@ export function VSCodeExtensionPrompt({
 						Select Editors
 					</Text>
 					<Box marginTop={1}>
-						<SelectInput
+						<StyledSelectInput
 							items={[
 								...selectionItems,
 								{label: '--- Confirm ---', value: 'confirm'},
@@ -250,7 +250,7 @@ export function VSCodeExtensionPrompt({
 					<Text color={colors.text}>Install the extension now?</Text>
 				</Box>
 				<Box marginTop={1}>
-					<SelectInput items={items} onSelect={handleSelect} />
+					<StyledSelectInput items={items} onSelect={handleSelect} />
 				</Box>
 			</Box>
 		);

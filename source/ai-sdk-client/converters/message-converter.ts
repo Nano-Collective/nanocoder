@@ -7,6 +7,7 @@ import type {
 	UserContent,
 } from 'ai';
 import type {Message} from '@/types/index';
+import {truncateToolResult} from '@/utils/truncate-tool-result';
 import type {TestableMessage} from '../types.js';
 
 /**
@@ -77,10 +78,24 @@ export function convertToModelMessages(messages: Message[]): ModelMessage[] {
 			// where output is { type: 'text', value: string } or { type: 'json', value: JSONValue }.
 			// Structured tool results travel as JSON so the model can reason over
 			// the typed shape; everything else falls back to the text content.
-			const output =
-				msg.structuredContent !== undefined
-					? ({type: 'json', value: msg.structuredContent} as const)
-					: ({type: 'text', value: msg.content} as const);
+			let output;
+			if (msg.structuredContent === undefined) {
+				output = {
+					type: 'text',
+					value: truncateToolResult(msg.content),
+				} as const;
+			} else {
+				const serializedStructuredContent = JSON.stringify(
+					msg.structuredContent,
+				);
+				const boundedStructuredContent = truncateToolResult(
+					serializedStructuredContent,
+				);
+				output =
+					boundedStructuredContent === serializedStructuredContent
+						? ({type: 'json', value: msg.structuredContent} as const)
+						: ({type: 'text', value: boundedStructuredContent} as const);
+			}
 			return {
 				role: 'tool',
 				content: [

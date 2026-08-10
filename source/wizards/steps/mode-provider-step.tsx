@@ -1,7 +1,7 @@
 import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
 import {useState} from 'react';
 import {VALID_MODES} from '@/app/types';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {getColors} from '@/config/index';
 import type {ModeProviderConfig, ProviderConfig} from '../../types/config';
 import type {DevelopmentMode} from '../../types/core';
@@ -57,7 +57,7 @@ export function ModeProviderStep({
 					Please configure at least one provider before setting up mode-specific
 					providers.
 				</Text>
-				<SelectInput
+				<StyledSelectInput
 					items={[{label: 'Go back', value: 'back'}]}
 					onSelect={() => onBack()}
 				/>
@@ -78,7 +78,7 @@ export function ModeProviderStep({
 			<Box flexDirection="column" gap={1}>
 				<Text color={colors.primary}>Configure Mode-Specific Providers</Text>
 				<Text>Select a mode to configure (Esc to go back):</Text>
-				<SelectInput<SelectModeValue>
+				<StyledSelectInput<SelectModeValue>
 					items={[
 						...items,
 						{label: 'Clear All Mode Providers', value: 'clear'},
@@ -111,7 +111,7 @@ export function ModeProviderStep({
 					Select Provider for {selectedDevMode}
 				</Text>
 				<Text color={colors.secondary}>(Esc to go back)</Text>
-				<SelectInput<SelectProviderValue>
+				<StyledSelectInput<SelectProviderValue>
 					items={[...items, {label: 'Clear mode override', value: 'clear'}]}
 					onSelect={item => {
 						if (item.value === 'clear') {
@@ -158,7 +158,7 @@ export function ModeProviderStep({
 					Select Model for {selectedDevMode} ({selectedProvider.name})
 				</Text>
 				<Text color={colors.secondary}>(Esc to go back)</Text>
-				<SelectInput
+				<StyledSelectInput
 					items={items}
 					onSelect={item => {
 						setModeProviders(prev => ({
