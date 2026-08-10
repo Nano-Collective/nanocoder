@@ -121,6 +121,8 @@
 	function toggleHistoryView() {
 		isHistoryView = !isHistoryView;
 		if (isHistoryView) {
+			isSettingsView = false;
+			document.getElementById('settings-view').classList.add('hidden');
 			document.getElementById('chat-view').classList.add('hidden');
 			document.getElementById('history-view').classList.remove('hidden');
 			// Fetch sessions from extension host and render immediately
@@ -133,8 +135,10 @@
 
 	function showChatView() {
 		isHistoryView = false;
-		document.getElementById('chat-view').classList.remove('hidden');
+		isSettingsView = false;
 		document.getElementById('history-view').classList.add('hidden');
+		document.getElementById('settings-view').classList.add('hidden');
+		document.getElementById('chat-view').classList.remove('hidden');
 	}
 
 	const sendStopBtn = document.getElementById('send-stop-btn');
@@ -1008,6 +1012,7 @@
 				break;
 			case 'clear':
 				if (isHistoryView) showChatView();
+				if (isSettingsView) hideSettingsView();
 				if (renderTimeout) { clearTimeout(renderTimeout); renderTimeout = null; }
 				if (message.isLoading) {
 					messagesContainer.innerHTML = `<div id="session-loader" class="flex flex-col items-center justify-center h-full opacity-50 mt-10">${ICONS.pending}<div class="mt-2 text-xs">Loading session...</div></div>`;

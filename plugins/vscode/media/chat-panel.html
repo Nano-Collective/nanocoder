@@ -1,30 +1,41 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
 	<meta charset="UTF-8">
 	<!--
 		Use a content security policy to only allow loading styles from our extension directory,
 		and only allow scripts that have a specific nonce.
 	-->
-	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: https: vscode-webview-resource:; style-src {{cspSource}} 'unsafe-inline'; script-src 'nonce-{{nonce}}';">
+	<meta http-equiv="Content-Security-Policy"
+		content="default-src 'none'; img-src 'self' data: https: vscode-webview-resource:; style-src {{cspSource}} 'unsafe-inline'; script-src 'nonce-{{nonce}}';">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<link href="{{styleUri}}" rel="stylesheet">
 	<title>Nanocoder Chat</title>
 </head>
+
 <body>
 	<div class="flex flex-col h-full bg-vscode-bg text-vscode-fg">
 		<div id="chat-view" class="flex flex-col flex-1 overflow-hidden relative">
-			<div id="messages-container" class="flex-1 overflow-y-auto overflow-x-hidden p-4 flex flex-col gap-3 relative z-0">
+			<div id="messages-container"
+				class="flex-1 overflow-y-auto overflow-x-hidden p-4 flex flex-col gap-3 relative z-0">
 				<!-- Messages will be injected here -->
 			</div>
-			
+
 			<!-- Image Modal -->
-			<div id="image-modal" class="hidden absolute inset-0 z-50 backdrop-blur-md flex items-center justify-center p-4">
+			<div id="image-modal"
+				class="hidden absolute inset-0 z-50 backdrop-blur-md flex items-center justify-center p-4">
 				<div class="relative max-w-full max-h-full flex flex-col">
-					<button id="close-modal-btn" class="absolute -top-10 right-0 bg-vscode-dropdown-bg text-vscode-fg rounded-full w-8 h-8 flex items-center justify-center cursor-pointer border border-vscode-focusBorder hover:bg-vscode-toolbarHover z-10">
-						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+					<button id="close-modal-btn"
+						class="absolute -top-10 right-0 bg-vscode-dropdown-bg text-vscode-fg rounded-full w-8 h-8 flex items-center justify-center cursor-pointer border border-vscode-focusBorder hover:bg-vscode-toolbarHover z-10">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+							stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<line x1="18" y1="6" x2="6" y2="18"></line>
+							<line x1="6" y1="6" x2="18" y2="18"></line>
+						</svg>
 					</button>
-					<img id="modal-image" src="" class="max-w-full max-h-[calc(100vh-100px)] object-contain rounded-lg shadow-2xl bg-vscode-editor-bg border border-vscode-widget-border">
+					<img id="modal-image" src=""
+						class="max-w-full max-h-[calc(100vh-100px)] object-contain rounded-lg shadow-2xl bg-vscode-editor-bg border border-vscode-widget-border">
 				</div>
 			</div>
 		</div>
@@ -37,19 +48,12 @@
 		</div>
 
 		<div id="settings-view" class="flex flex-col flex-1 overflow-hidden hidden">
-			<!-- Settings Header -->
-			<div class="flex items-center gap-2 pt-2.5 pb-1.5 px-4 border-b border-vscode-border shrink-0">
-				<button id="settings-back-btn" class="flex items-center justify-center bg-transparent border-none cursor-pointer text-vscode-fg opacity-70 hover:opacity-100 p-0.5 rounded hover:bg-vscode-toolbarHover" title="Back to chat">
-					<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-				</button>
-				<span class="font-semibold text-[0.9em] uppercase tracking-[0.04em] opacity-70">Settings</span>
-			</div>
 
 			<!-- Settings Tabs -->
-			<div class="flex gap-0 border-b border-vscode-border shrink-0 px-2">
-				<button class="settings-tab active" data-tab="providers">Providers</button>
-				<button class="settings-tab" data-tab="behavior">Behavior</button>
-				<button class="settings-tab" data-tab="advanced">Advanced</button>
+			<div class="flex w-full border-b border-vscode-border shrink-0">
+				<button class="settings-tab flex-1 active" data-tab="providers">Providers</button>
+				<button class="settings-tab flex-1" data-tab="behavior">Behavior</button>
+				<button class="settings-tab flex-1" data-tab="advanced">Advanced</button>
 			</div>
 
 			<!-- Settings Content -->
@@ -60,7 +64,12 @@
 						<div class="settings-section-title">AI Providers</div>
 						<div id="settings-providers-list" class="settings-list"></div>
 						<button class="settings-action-btn mt-2" data-action="edit-providers">
-							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+								fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+								stroke-linejoin="round">
+								<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+								<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+							</svg>
 							Edit in config file
 						</button>
 					</div>
@@ -69,7 +78,12 @@
 						<div class="settings-section-title">MCP Servers</div>
 						<div id="settings-mcp-list" class="settings-list"></div>
 						<button class="settings-action-btn mt-2" data-action="edit-mcp">
-							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+								fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+								stroke-linejoin="round">
+								<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+								<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+							</svg>
 							Edit in config file
 						</button>
 					</div>
@@ -78,7 +92,12 @@
 						<div class="settings-section-title">Tool Auto-Approval</div>
 						<div id="settings-tools-list" class="settings-list"></div>
 						<button class="settings-action-btn mt-2" data-action="edit-tools">
-							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+								fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+								stroke-linejoin="round">
+								<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+								<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+							</svg>
 							Edit in config file
 						</button>
 					</div>
@@ -122,7 +141,8 @@
 								<span class="settings-row-label">Threshold</span>
 								<span class="settings-row-desc">Context usage % to trigger compaction (50–95)</span>
 							</div>
-							<input type="number" id="setting-autoCompact-threshold" class="settings-number-input" min="50" max="95" step="5">
+							<input type="number" id="setting-autoCompact-threshold" class="settings-number-input"
+								min="50" max="95" step="5">
 						</div>
 						<div class="settings-row">
 							<div class="settings-row-info">
@@ -169,11 +189,21 @@
 					<div class="settings-section">
 						<div class="settings-section-title">Configuration Files</div>
 						<button class="settings-action-btn w-full" data-action="open-agents-config">
-							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+								fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+								stroke-linejoin="round">
+								<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+								<polyline points="13 2 13 9 20 9"></polyline>
+							</svg>
 							Open agents.config.json
 						</button>
 						<button class="settings-action-btn w-full mt-1.5" data-action="open-preferences">
-							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+								fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+								stroke-linejoin="round">
+								<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+								<polyline points="13 2 13 9 20 9"></polyline>
+							</svg>
 							Open nanocoder-preferences.json
 						</button>
 					</div>
@@ -181,7 +211,13 @@
 					<div class="settings-section">
 						<div class="settings-section-title">Engine</div>
 						<button class="settings-action-btn w-full settings-action-btn-danger" data-action="restart-acp">
-							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+								fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+								stroke-linejoin="round">
+								<polyline points="23 4 23 10 17 10"></polyline>
+								<polyline points="1 20 1 14 7 14"></polyline>
+								<path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+							</svg>
 							Restart ACP Engine
 						</button>
 						<div class="text-xs opacity-50 mt-1">Applies config file changes to the running engine</div>
@@ -191,65 +227,106 @@
 		</div>
 
 		<div class="p-4 pt-2 bg-vscode-bg shrink-0">
-			<div id="composer-box" class="flex flex-col bg-vscode-input-bg border border-vscode-input-border rounded-2xl focus-within:border-vscode-input-focus transition-colors shadow-sm relative">
+			<div id="composer-box"
+				class="flex flex-col bg-vscode-input-bg border border-vscode-input-border rounded-2xl focus-within:border-vscode-input-focus transition-colors shadow-sm relative">
 				<div id="image-preview-container" class="flex flex-wrap gap-2 px-3 pt-3 empty:hidden"></div>
 				<!-- NEW: Attached context chips row -->
 				<div id="context-chips" class="hidden flex flex-wrap gap-1.5 px-3 pt-2 pb-1"></div>
-				<textarea id="chat-input" rows="1" placeholder="Ask Nanocoder anything..." class="w-full min-h-[44px] max-h-[250px] p-3 px-4 pb-2 bg-transparent text-vscode-input-fg font-vscode text-[0.95em] resize-none outline-none border-none"></textarea>
-				
+				<textarea id="chat-input" rows="1" placeholder="Ask Nanocoder anything..."
+					class="w-full min-h-[44px] max-h-[250px] p-3 px-4 pb-2 bg-transparent text-vscode-input-fg font-vscode text-[0.95em] resize-none outline-none border-none"></textarea>
+
 				<div class="flex items-center justify-between px-3 pb-2 pt-1 relative">
 					<div class="flex gap-1 items-center flex-1 min-w-0">
-						<button id="add-image-btn" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[15%] shrink min-w-0" title="Add Image">
-							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+						<button id="add-image-btn"
+							class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[15%] shrink min-w-0"
+							title="Add Image">
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+								stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<line x1="12" y1="5" x2="12" y2="19"></line>
+								<line x1="5" y1="12" x2="19" y2="12"></line>
+							</svg>
 						</button>
-						<input type="file" id="image-upload" accept="image/png,image/jpeg,image/webp,image/gif" multiple class="hidden">
+						<input type="file" id="image-upload" accept="image/png,image/jpeg,image/webp,image/gif" multiple
+							class="hidden">
 
 						<!-- Custom Provider Dropdown Trigger -->
-						<button id="provider-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[30%] shrink min-w-0" disabled>
+						<button id="provider-trigger"
+							class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[30%] shrink min-w-0"
+							disabled>
 							<span id="provider-trigger-label" class="truncate">Provider...</span>
-							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="6 9 12 15 18 9"></polyline></svg>
+							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+								stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0">
+								<polyline points="6 9 12 15 18 9"></polyline>
+							</svg>
 						</button>
 
 						<!-- Custom Model Dropdown Trigger -->
-						<button id="model-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[40%] shrink min-w-0" disabled>
+						<button id="model-trigger"
+							class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[40%] shrink min-w-0"
+							disabled>
 							<span id="model-trigger-label" class="truncate">Loading models...</span>
-							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="6 9 12 15 18 9"></polyline></svg>
+							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+								stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0">
+								<polyline points="6 9 12 15 18 9"></polyline>
+							</svg>
 						</button>
 
 						<!-- Custom Mode Dropdown Trigger -->
-						<button id="mode-trigger" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[30%] shrink min-w-0" disabled>
+						<button id="mode-trigger"
+							class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[30%] shrink min-w-0"
+							disabled>
 							<span id="mode-trigger-label" class="truncate">Loading modes...</span>
-							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="6 9 12 15 18 9"></polyline></svg>
+							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+								stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0">
+								<polyline points="6 9 12 15 18 9"></polyline>
+							</svg>
 						</button>
 					</div>
-					
+
 					<!-- Attach file/folder button -->
-					<button id="attach-btn" class="bg-transparent text-vscode-fg border-none rounded-full w-8 h-8 flex items-center justify-center cursor-pointer shrink-0 transition-all opacity-60 hover:opacity-100 hover:bg-vscode-toolbarHover ml-1" title="Attach file or folder">
-						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15">
-							<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+					<button id="attach-btn"
+						class="bg-transparent text-vscode-fg border-none rounded-full w-8 h-8 flex items-center justify-center cursor-pointer shrink-0 transition-all opacity-60 hover:opacity-100 hover:bg-vscode-toolbarHover ml-1"
+						title="Attach file or folder">
+						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+							stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15">
+							<path
+								d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
 						</svg>
 					</button>
 
-					<button id="send-stop-btn" class="group bg-vscode-button-bg [&.is-processing]:bg-vscode-button-secondary [&.is-processing]:hover:bg-vscode-button-secondaryHover text-vscode-button-fg border-none rounded-full w-8 h-8 flex items-center justify-center cursor-pointer shrink-0 transition-all hover:bg-vscode-button-hover hover:scale-105 ml-1" title="Send (Enter)">
+					<button id="send-stop-btn"
+						class="group bg-vscode-button-bg [&.is-processing]:bg-vscode-button-secondary [&.is-processing]:hover:bg-vscode-button-secondaryHover text-vscode-button-fg border-none rounded-full w-8 h-8 flex items-center justify-center cursor-pointer shrink-0 transition-all hover:bg-vscode-button-hover hover:scale-105 ml-1"
+						title="Send (Enter)">
 						<!-- FiSend icon (react-icons/fi) — shown when idle -->
-						<svg id="icon-send" class="block group-[.is-processing]:hidden mr-[2px] mt-[1px]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
-							<line x1="22" y1="2" x2="11" y2="13"/>
-							<polygon points="22 2 15 22 11 13 2 9 22 2"/>
+						<svg id="icon-send" class="block group-[.is-processing]:hidden mr-[2px] mt-[1px]"
+							xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+							stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
+							<line x1="22" y1="2" x2="11" y2="13" />
+							<polygon points="22 2 15 22 11 13 2 9 22 2" />
 						</svg>
 						<!-- FiStopCircle icon (react-icons/fi) — shown while processing -->
-						<svg id="icon-stop" class="hidden group-[.is-processing]:block" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
-							<rect x="7" y="7" width="10" height="10" fill="currentColor"/>
+						<svg id="icon-stop" class="hidden group-[.is-processing]:block"
+							xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+							stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
+							<rect x="7" y="7" width="10" height="10" fill="currentColor" />
 						</svg>
 					</button>
 				</div>
-				
+
 				<!-- Dropdown Menus (Full Width) -->
-				<div id="provider-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
-				<div id="model-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
-				<div id="mode-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
+				<div id="provider-dropdown"
+					class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1">
+				</div>
+				<div id="model-dropdown"
+					class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1">
+				</div>
+				<div id="mode-dropdown"
+					class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1">
+				</div>
 			</div>
 		</div>
-	<script nonce="{{nonce}}" src="{{markedUri}}"></script>
-	<script nonce="{{nonce}}" src="{{scriptUri}}"></script>
+		<script nonce="{{nonce}}" src="{{markedUri}}"></script>
+		<script nonce="{{nonce}}" src="{{scriptUri}}"></script>
 </body>
+
 </html>
