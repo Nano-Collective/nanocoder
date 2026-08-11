@@ -178,8 +178,23 @@
 		clipboard: `<svg class="mr-1.5" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>`,
 		chevron: `<svg class="transition-transform duration-200" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`,
 		circle: `<svg class="opacity-50" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle></svg>`,
-		arrowRight: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>`
+		arrowRight: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>`,
+		edit: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>`
 	};
+
+	function formatRelativeTime(iso) {
+		if (!iso) return '';
+		const date = new Date(iso);
+		if (isNaN(date.getTime())) return '';
+		const diffMin = Math.floor((Date.now() - date.getTime()) / 60000);
+		if (diffMin < 1) return 'Just now';
+		if (diffMin < 60) return `${diffMin}m ago`;
+		const diffHr = Math.floor(diffMin / 60);
+		if (diffHr < 24) return `${diffHr}h ago`;
+		const diffDay = Math.floor(diffHr / 24);
+		if (diffDay < 7) return `${diffDay}d ago`;
+		return date.toLocaleDateString();
+	}
 
 	function createMessageFooter(getText, role, sentAt) {
 		const footer = document.createElement('div');
@@ -1043,7 +1058,9 @@
 				appendMessage(message.content, 'agent');
 				break;
 			case 'clear':
-				if (isHistoryView) showChatView();
+				// Session reset (new chat or resume) should return to the active
+				// chat view, not leave the panel stuck on the history list.
+				showChatView();
 				if (renderTimeout) { clearTimeout(renderTimeout); renderTimeout = null; }
 				if (message.isLoading) {
 					messagesContainer.innerHTML = `<div id="session-loader" class="flex flex-col items-center justify-center h-full opacity-50 mt-10">${ICONS.pending}<div class="mt-2 text-xs">Loading session...</div></div>`;
@@ -1109,14 +1126,35 @@
 			return;
 		}
 
-		// Group sessions by date
+		// Group sessions by last-used date
 		const now = new Date();
+		const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+		const startOfYesterday = new Date(startOfToday.getTime() - 86400000);
+		const sevenDaysAgo = new Date(startOfToday.getTime() - 7 * 86400000);
 		const groups = { 'Today': [], 'Yesterday': [], 'Last 7 Days': [], 'Older': [] };
 
 		sessionsData.slice().reverse().forEach(session => {
 			const label = session.title || session.cwd || session.sessionId.slice(0, 8);
 			const item = { ...session, label };
-			groups['Older'].push(item); // Simplified: metadata doesn't include createdAt yet
+			const updated = session.updatedAt ? new Date(session.updatedAt) : null;
+
+			if (!updated || isNaN(updated.getTime())) {
+				groups['Older'].push(item);
+			} else if (updated >= startOfToday) {
+				groups['Today'].push(item);
+			} else if (updated >= startOfYesterday) {
+				groups['Yesterday'].push(item);
+			} else if (updated >= sevenDaysAgo) {
+				groups['Last 7 Days'].push(item);
+			} else {
+				groups['Older'].push(item);
+			}
+		});
+
+		// Within each date bucket, show most-recently-used first. Sessions
+		// without an updatedAt (shouldn't normally happen) sort to the end.
+		Object.values(groups).forEach(sessions => {
+			sessions.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
 		});
 
 		Object.entries(groups).forEach(([groupName, sessions]) => {
@@ -1134,28 +1172,95 @@
 
 			sessions.forEach(session => {
 				const itemEl = document.createElement('div');
-				itemEl.className = 'flex items-center px-4 py-1.5 cursor-pointer gap-2 rounded mx-1 transition-colors hover:bg-vscode-list-hover group';
-
-				const labelEl = document.createElement('span');
-				labelEl.className = 'flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[0.9em]';
-				labelEl.textContent = session.label;
-				labelEl.title = session.cwd;
-				labelEl.onclick = () => {
+				itemEl.className = 'flex flex-col px-4 py-1.5 cursor-pointer gap-0.5 rounded mx-1 transition-colors hover:bg-vscode-list-hover group';
+				itemEl.onclick = () => {
 					showChatView();
 					vscode.postMessage({ type: 'resumeSession', sessionId: session.sessionId });
 				};
 
+				const topRow = document.createElement('div');
+				topRow.className = 'flex items-center gap-2';
+
+				const labelWrap = document.createElement('div');
+				labelWrap.className = 'flex-1 min-w-0';
+
+				const labelEl = document.createElement('span');
+				labelEl.className = 'block overflow-hidden text-ellipsis whitespace-nowrap text-[0.9em]';
+				labelEl.textContent = session.label;
+				labelEl.title = session.cwd;
+				labelWrap.appendChild(labelEl);
+
+				const actions = document.createElement('div');
+				actions.className = 'flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0';
+
+				const editBtn = document.createElement('button');
+				editBtn.type = 'button';
+				editBtn.className = 'bg-transparent border-none cursor-pointer text-vscode-fg p-1 flex items-center justify-center hover:bg-vscode-toolbarHover rounded';
+				editBtn.title = 'Rename Session';
+				editBtn.setAttribute('aria-label', 'Rename session');
+				editBtn.innerHTML = ICONS.edit;
+				editBtn.onclick = (e) => {
+					e.stopPropagation();
+
+					const input = document.createElement('input');
+					input.type = 'text';
+					input.value = session.label;
+					// Matches MAX_SESSION_NAME_LENGTH in source/constants.ts - fail
+					// locally instead of round-tripping to a backend error toast.
+					input.maxLength = 100;
+					input.className = 'block w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-focus rounded px-1 py-0.5 text-[0.9em]';
+
+					const finish = (commit) => {
+						if (input.parentElement !== labelWrap) return; // already finished
+						labelWrap.replaceChild(labelEl, input);
+						if (commit) {
+							const newTitle = input.value.trim();
+							if (newTitle && newTitle !== session.label) {
+								session.label = newTitle;
+								labelEl.textContent = newTitle;
+								vscode.postMessage({ type: 'renameSession', sessionId: session.sessionId, title: newTitle });
+							}
+						}
+					};
+
+					input.onclick = (ev) => ev.stopPropagation();
+					input.onkeydown = (ev) => {
+						ev.stopPropagation();
+						if (ev.key === 'Enter') finish(true);
+						else if (ev.key === 'Escape') finish(false);
+					};
+					input.onblur = () => finish(true);
+
+					labelWrap.replaceChild(input, labelEl);
+					input.focus();
+					input.select();
+				};
+
 				const deleteBtn = document.createElement('button');
-				deleteBtn.className = 'bg-transparent border-none cursor-pointer text-vscode-fg opacity-0 group-hover:opacity-100 transition-opacity p-1 flex items-center justify-center hover:bg-vscode-toolbarHover rounded';
+				deleteBtn.type = 'button';
+				deleteBtn.className = 'bg-transparent border-none cursor-pointer text-vscode-fg p-1 flex items-center justify-center hover:bg-vscode-toolbarHover rounded';
 				deleteBtn.title = 'Delete Session';
+				deleteBtn.setAttribute('aria-label', 'Delete session');
 				deleteBtn.innerHTML = ICONS.trash;
 				deleteBtn.onclick = (e) => {
 					e.stopPropagation();
 					vscode.postMessage({ type: 'deleteSession', sessionId: session.sessionId });
 				};
 
-				itemEl.appendChild(labelEl);
-				itemEl.appendChild(deleteBtn);
+				actions.appendChild(editBtn);
+				actions.appendChild(deleteBtn);
+				topRow.appendChild(labelWrap);
+				topRow.appendChild(actions);
+				itemEl.appendChild(topRow);
+
+				const relativeTime = formatRelativeTime(session.updatedAt);
+				if (relativeTime) {
+					const lastUsedEl = document.createElement('span');
+					lastUsedEl.className = 'text-[0.75em] opacity-50';
+					lastUsedEl.textContent = relativeTime;
+					itemEl.appendChild(lastUsedEl);
+				}
+
 				groupEl.appendChild(itemEl);
 			});
 

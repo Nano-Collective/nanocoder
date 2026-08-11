@@ -348,7 +348,7 @@ export class NanocoderAcpClient {
 		return false; 
 	}
 
-	async listSessions(): Promise<Array<{sessionId: string; cwd: string; title?: string | null}>> {
+	async listSessions(): Promise<Array<{sessionId: string; cwd: string; title?: string | null; updatedAt?: string | null}>> {
 		if (!this.connection) return [];
 		try {
 			const result = await this.connection.listSessions({});
@@ -356,10 +356,21 @@ export class NanocoderAcpClient {
 				sessionId: s.sessionId,
 				cwd: s.cwd,
 				title: s.title,
+				updatedAt: s.updatedAt,
 			}));
 		} catch (error) {
 			this.outputChannel.appendLine(`listSessions failed: ${error}`);
 			return [];
+		}
+	}
+
+	async renameSession(sessionId: string, title: string): Promise<void> {
+		if (!this.connection) return;
+		try {
+			await this.connection.extMethod('renameSession', {sessionId, title});
+		} catch (error) {
+			this.outputChannel.appendLine(`renameSession failed: ${error}`);
+			vscode.window.showErrorMessage(`Failed to rename session: ${error}`);
 		}
 	}
 

@@ -168,6 +168,12 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 							this._broadcastSessions();
 						});
 						break;
+					case 'renameSession':
+						this._outputChannel.appendLine(`[Webview] User renamed session: ${message.sessionId} -> ${message.title}`);
+						this._acpClient.renameSession(message.sessionId, message.title).then(() => {
+							this._broadcastSessions();
+						});
+						break;
 					case 'requestPathInfo': {
 						try {
 							const stat = fs.statSync(message.path);
