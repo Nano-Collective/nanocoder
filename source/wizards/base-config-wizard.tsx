@@ -8,9 +8,9 @@ import {
 } from 'node:fs';
 import {dirname, join} from 'node:path';
 import {Box, Text, useFocus, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
 import Spinner from 'ink-spinner';
 import React, {useCallback, useEffect, useState} from 'react';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {getColors} from '@/config/index';
 import {getConfigPath} from '@/config/paths';
@@ -342,7 +342,7 @@ export function BaseConfigWizard<T>({
 						<Box marginBottom={1}>
 							<Text>This action cannot be undone.</Text>
 						</Box>
-						<SelectInput
+						<StyledSelectInput
 							items={deleteOptions}
 							onSelect={(item: {value: string}) => {
 								if (item.value === 'yes') {

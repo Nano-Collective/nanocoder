@@ -1,5 +1,5 @@
 import test from 'ava';
-import {render} from 'ink-testing-library';
+import {renderWithTheme as render} from '@/test-utils/render-with-theme';
 import React from 'react';
 import {LocationStep} from './location-step.js';
 

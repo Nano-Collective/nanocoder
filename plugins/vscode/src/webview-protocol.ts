@@ -72,6 +72,17 @@ export interface ExtensionMessageSyncState {
 	availableProviders: string[];
 }
 
+export interface ExtensionMessageCopyLastCodeBlock {
+	type: 'copyLastCodeBlock';
+}
+
+export interface ExtensionMessageCopyResult {
+	type: 'copyResult';
+	ok: boolean;
+	chars?: number;
+	error?: string;
+}
+
 export interface ExtensionMessageUpdateSessions {
 	type: 'updateSessions';
 	sessions: Array<{
@@ -122,7 +133,9 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessagePathInfoResolved
 	| ExtensionMessagePlanReviewRequested
 	| ExtensionMessagePlanReviewError
-	| ExtensionMessageArtifactsUpdated;
+	| ExtensionMessageArtifactsUpdated
+	| ExtensionMessageCopyLastCodeBlock
+	| ExtensionMessageCopyResult;
 
 
 // ---------------------------------------------------------
@@ -223,6 +236,11 @@ export interface WebviewMessageRevisePlan {
 	type: 'revisePlan';
 }
 
+export interface WebviewMessageCopyToClipboard {
+	type: 'copyToClipboard';
+	text: string;
+}
+
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
 	| WebviewMessageSubmitMessage
@@ -242,4 +260,5 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageOpenPath
 	| WebviewMessageShowError
 	| WebviewMessageApprovePlan
-	| WebviewMessageRevisePlan;
+	| WebviewMessageRevisePlan
+	| WebviewMessageCopyToClipboard;

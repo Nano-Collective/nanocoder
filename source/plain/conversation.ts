@@ -42,12 +42,19 @@ export interface RunPlainConversationOptions {
 	workingDirectory?: string;
 }
 
+export interface PlainConversationUsage {
+	inputTokens: number;
+	outputTokens: number;
+	totalTokens: number;
+}
+
 export type PlainConversationOutcome =
 	| {
 			kind: 'success';
 			finalText: string;
 			reasoning: string | null;
 			toolCalls: ToolCallLog[];
+			usage?: PlainConversationUsage;
 	  }
 	| {
 			kind: 'tool-approval-required';
@@ -55,6 +62,7 @@ export type PlainConversationOutcome =
 			finalText: string;
 			reasoning: string | null;
 			toolCalls: ToolCallLog[];
+			usage?: PlainConversationUsage;
 	  }
 	| {
 			kind: 'error';
@@ -62,6 +70,7 @@ export type PlainConversationOutcome =
 			finalText: string;
 			reasoning: string | null;
 			toolCalls: ToolCallLog[];
+			usage?: PlainConversationUsage;
 	  };
 
 // On the last allowed turn we strip tools and inject this so the model
@@ -109,6 +118,20 @@ export async function runPlainConversation(
 	let accumulatedReasoning = '';
 	const toolCallsLog: ToolCallLog[] = [];
 
+	let hasReportedUsage = false;
+	let accumulatedInputTokens = 0;
+	let accumulatedOutputTokens = 0;
+	let accumulatedTotalTokens = 0;
+
+	const getUsage = (): PlainConversationUsage | undefined => {
+		if (!hasReportedUsage) return undefined;
+		return {
+			inputTokens: accumulatedInputTokens,
+			outputTokens: accumulatedOutputTokens,
+			totalTokens: accumulatedTotalTokens,
+		};
+	};
+
 	const maxTurns =
 		getAppConfig().headless?.maxTurns ?? DEFAULT_HEADLESS_MAX_TURNS;
 
@@ -120,6 +143,7 @@ export async function runPlainConversation(
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				usage: getUsage(),
 			};
 		}
 
@@ -184,6 +208,31 @@ export async function runPlainConversation(
 			modeOverrides,
 		);
 
+		// The client always returns a `usage` object, but every field inside it is
+		// optional — providers that report nothing leave all three undefined, and
+		// OpenAI-compatible local servers commonly report input/output without a
+		// total. Only count a turn as reporting usage when at least one field is a
+		// real number, so the block stays absent (rather than an all-zero block
+		// indistinguishable from a genuine zero) for providers with no telemetry.
+		const turnUsage = result?.usage;
+		const inputTokens =
+			typeof turnUsage?.inputTokens === 'number' ? turnUsage.inputTokens : null;
+		const outputTokens =
+			typeof turnUsage?.outputTokens === 'number'
+				? turnUsage.outputTokens
+				: null;
+		const totalTokens =
+			typeof turnUsage?.totalTokens === 'number' ? turnUsage.totalTokens : null;
+
+		if (inputTokens !== null || outputTokens !== null || totalTokens !== null) {
+			hasReportedUsage = true;
+			accumulatedInputTokens += inputTokens ?? 0;
+			accumulatedOutputTokens += outputTokens ?? 0;
+			// Fall back to input+output so a missing total never reads as zero spend.
+			accumulatedTotalTokens +=
+				totalTokens ?? (inputTokens ?? 0) + (outputTokens ?? 0);
+		}
+
 		if (!isJson && (reasoningPrinted || contentStarted)) {
 			writeLine();
 		}
@@ -195,6 +244,7 @@ export async function runPlainConversation(
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				usage: getUsage(),
 			};
 		}
 
@@ -221,6 +271,7 @@ export async function runPlainConversation(
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				usage: getUsage(),
 			};
 		}
 
@@ -279,6 +330,7 @@ export async function runPlainConversation(
 					finalText: accumulatedFinalText,
 					reasoning: accumulatedReasoning || null,
 					toolCalls: toolCallsLog,
+					usage: getUsage(),
 				};
 			}
 			const walkthroughFallback = finalTurn
@@ -297,6 +349,7 @@ export async function runPlainConversation(
 				finalText: finalTextBeforeWalkthroughNudge ?? accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				usage: getUsage(),
 			};
 		}
 
@@ -324,6 +377,7 @@ export async function runPlainConversation(
 				finalText: accumulatedFinalText,
 				reasoning: accumulatedReasoning || null,
 				toolCalls: toolCallsLog,
+				usage: getUsage(),
 			};
 		}
 
@@ -381,6 +435,7 @@ export async function runPlainConversation(
 		finalText: accumulatedFinalText,
 		reasoning: accumulatedReasoning || null,
 		toolCalls: toolCallsLog,
+		usage: getUsage(),
 	};
 }
 

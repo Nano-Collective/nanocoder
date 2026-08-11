@@ -13,8 +13,8 @@
  */
 import {basename} from 'node:path';
 import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
 import {useState} from 'react';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {createTerminalFileLink as createFileLink} from '@/utils/terminal-file-link';
@@ -112,7 +112,7 @@ export default function PlanReviewPrompt({
 				</Box>
 			)}
 
-			<SelectInput
+			<StyledSelectInput
 				items={OPTIONS}
 				onSelect={handleSelect}
 				onHighlight={item => setHighlighted(item.value)}

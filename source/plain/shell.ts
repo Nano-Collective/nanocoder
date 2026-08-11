@@ -268,6 +268,9 @@ export async function runPlainShell(
 			reasoning: outcome.reasoning ? sanitizeOutput(outcome.reasoning) : null,
 			toolCalls: formattedToolCalls,
 			filesChanged: Array.from(filesChangedSet),
+			...(outcome.usage && {
+				usage: outcome.usage,
+			}),
 			...(outcome.kind === 'error' && {
 				message: sanitizeOutput(outcome.message),
 			}),

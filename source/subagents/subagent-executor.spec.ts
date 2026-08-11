@@ -6,8 +6,10 @@ import type {ToolManager} from '@/tools/tool-manager';
 import type {
 	LLMClient,
 	LLMChatResponse,
+	Message,
 	ToolExecutionContext,
 } from '@/types/core';
+import {MAX_TOOL_RESULT_CHARS} from '@/constants';
 import {setGlobalToolApprovalHandler} from '@/utils/tool-approval-queue';
 
 console.log('\nsubagent-executor.spec.ts');
@@ -52,12 +54,14 @@ function createMockToolManager(
 // Helper to create a mock LLM client
 function createMockClient(
 	responses: Array<{content: string; tool_calls?: Array<{id: string; function: {name: string; arguments: string}}>}>,
+	onChat?: (messages: Message[]) => void,
 ): LLMClient {
 	let callIndex = 0;
 	let currentModel = 'test-model-sonnet-v1';
 
 	return {
-		chat: async (): Promise<LLMChatResponse> => {
+		chat: async (messages): Promise<LLMChatResponse> => {
+			onChat?.(messages);
 			const response = responses[callIndex] || {content: 'fallback'};
 			callIndex++;
 			return {
@@ -209,6 +213,49 @@ test.serial('forwards the parent execution context to subagent tools', async t =
 	t.true(result.success);
 	t.is(receivedContext?.sessionId, '11111111-1111-4111-8111-111111111111');
 	t.is(receivedContext?.workingDirectory, '/workspace');
+});
+
+test.serial('caps tool output before the next subagent model turn', async t => {
+	const largeOutput = `HEAD\n${'middle\n'.repeat(MAX_TOOL_RESULT_CHARS)}TAIL`;
+	const toolManager = createMockToolManager({
+		read_file: {handler: async () => largeOutput, readOnly: true},
+	});
+	let toolMessages: Message[] = [];
+
+	const client = createMockClient(
+		[
+			{
+				content: '',
+				tool_calls: [
+					{
+						id: 'tc-large',
+						function: {
+							name: 'read_file',
+							arguments: '{"path":"large.txt"}',
+						},
+					},
+				],
+			},
+			{content: 'The file was read.'},
+		],
+		messages => {
+			const result = messages.find(message => message.role === 'tool');
+			if (result) toolMessages = messages;
+		},
+	);
+
+	const executor = new SubagentExecutor(toolManager, client);
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Read large.txt',
+	});
+
+	t.true(result.success);
+	const toolResult = toolMessages.find(message => message.role === 'tool');
+	t.truthy(toolResult);
+	t.is(toolResult?.content.length, MAX_TOOL_RESULT_CHARS);
+	t.true(toolResult?.content.startsWith('HEAD\n') ?? false);
+	t.true(toolResult?.content.endsWith('TAIL') ?? false);
 });
 
 test.serial('tools needing approval are surfaced via signalToolApproval', async t => {

@@ -1,6 +1,6 @@
 import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
 import {FilterableSelectList} from '@/components/filterable-select-list';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -118,7 +118,7 @@ export function ItemSelector<TValue extends string = string>({
 						onCancel={onCancel}
 					/>
 				) : (
-					<SelectInput
+					<StyledSelectInput
 						items={items}
 						onSelect={item => onSelect(item.value as TValue)}
 					/>
