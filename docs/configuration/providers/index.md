@@ -10,7 +10,7 @@ Nanocoder supports multiple AI providers including any OpenAI-compatible API, na
 
 ## Configuration Methods
 
-1. **Interactive Setup (Recommended for new users)**: Run `/setup-providers` inside Nanocoder for a guided wizard with provider templates. The wizard allows you to:
+1. **Interactive Setup (Recommended for new users)**: Run `/settings providers` inside Nanocoder for a guided wizard with provider templates. The wizard allows you to:
    - Choose between project-level or global configuration
    - Select from common provider templates
    - Add custom OpenAI-compatible providers manually
@@ -18,7 +18,7 @@ Nanocoder supports multiple AI providers including any OpenAI-compatible API, na
    - Fetch available models automatically from your provider
 2. **Manual Configuration**: Create an `agents.config.json` file (see [Configuration](../index.md) for file locations)
 
-> **Note**: The `/setup-providers` wizard requires at least one provider to be configured before saving. You cannot exit without adding a provider.
+> **Note**: The `/settings providers` wizard requires at least one provider to be configured before saving. You cannot exit without adding a provider.
 
 ## Local Providers
 

@@ -24,9 +24,9 @@ export interface MessageSubmissionOptions {
 	commandArgs?: string[];
 	onEnterModelSelectionMode: () => void;
 	onEnterModelDatabaseMode: () => void;
-	onEnterConfigWizardMode: () => void;
-	onEnterSettingsMode: () => void;
-	onEnterMcpWizardMode: () => void;
+	onEnterSettingsMode: (
+		tab?: import('@/app/components/settings-tabs').SettingsTabId,
+	) => void;
 	onEnterExplorerMode: () => void;
 	onEnterIdeSelectionMode: () => void;
 	onEnterTune: () => void;

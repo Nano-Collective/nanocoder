@@ -65,6 +65,13 @@ export interface SettingsSelectorProps {
 	 * this, servers added here only take effect on the next launch.
 	 */
 	onMcpChanged?: () => void | Promise<void>;
+	/**
+	 * Re-create the LLM client after the providers panel edits config. Same
+	 * reasoning as `onMcpChanged`: without it a provider added here only takes
+	 * effect on the next launch.
+	 */
+	onProvidersChanged?: (configPath: string) => void | Promise<void>;
+	initialTab?: import('./settings-tabs').SettingsTabId;
 }
 
 function ThemePreviewMessage({

@@ -143,19 +143,6 @@ test('checkpoint load detection - other checkpoint subcommand', t => {
 	t.false(isCheckpointLoad);
 });
 
-// Test setup-mcp command parsing
-test('setup-mcp command parsing - extracts command name correctly', t => {
-	const message = '/setup-mcp';
-	const commandName = message.slice(1).split(/\s+/)[0];
-	t.is(commandName, 'setup-mcp');
-});
-
-test('setup-mcp command parsing - handles command with extra whitespace', t => {
-	const message = '/setup-mcp   ';
-	const commandName = message.slice(1).split(/\s+/)[0];
-	t.is(commandName, 'setup-mcp');
-});
-
 // Test /commands create detection
 test('commands create detection - matches commands create', t => {
 	const message = '/commands create my-tool';
@@ -274,8 +261,6 @@ test('ide command parsing - recognized as special command', t => {
 		CLEAR: 'clear',
 		MODEL: 'model',
 		MODEL_DATABASE: 'model-database',
-		SETUP_PROVIDERS: 'setup-providers',
-		SETUP_MCP: 'setup-mcp',
 		SETTINGS: 'settings',
 		STATUS: 'status',
 		CHECKPOINT: 'checkpoint',
@@ -306,9 +291,7 @@ function createResumeTestOptions(overrides: {
 		onClearMessages: async () => {},
 		onEnterModelSelectionMode: () => {},
 		onEnterModelDatabaseMode: () => {},
-		onEnterConfigWizardMode: () => {},
 		onEnterSettingsMode: () => {},
-		onEnterMcpWizardMode: () => {},
 		onEnterExplorerMode: () => {},
 		onEnterIdeSelectionMode: () => {},
 		onEnterCheckpointLoadMode: () => {},
@@ -744,9 +727,7 @@ function createRenameTestOptions(overrides: {
 		commandArgs: overrides.commandArgs,
 		onEnterModelSelectionMode: () => {},
 		onEnterModelDatabaseMode: () => {},
-		onEnterConfigWizardMode: () => {},
 		onEnterSettingsMode: () => {},
-		onEnterMcpWizardMode: () => {},
 		onEnterExplorerMode: () => {},
 		onEnterIdeSelectionMode: () => {},
 		onEnterCheckpointLoadMode: () => {},
@@ -886,4 +867,126 @@ test('createClearMessagesHandler - calls client.clearContext when client exists'
 test('createClearMessagesHandler - does not throw when client is null', async t => {
 	const handler = createClearMessagesHandler(() => {}, null);
 	await t.notThrowsAsync(() => handler());
+});
+
+// --- /settings tabs and retired /setup-* commands ---
+
+function createSettingsTestOptions(overrides: {
+	onEnterSettingsMode?: (tab?: string) => void;
+	onAddToChatQueue?: (component: React.ReactNode) => void;
+	commandArgs?: string[];
+}): MessageSubmissionOptions {
+	return {
+		customCommandCache: new Map(),
+		customCommandLoader: null,
+		customCommandExecutor: null,
+		onClearMessages: async () => {},
+		onRenameSession: () => {},
+		commandArgs: overrides.commandArgs,
+		onEnterModelSelectionMode: () => {},
+		onEnterModelDatabaseMode: () => {},
+		onEnterSettingsMode: overrides.onEnterSettingsMode ?? (() => {}),
+		onEnterExplorerMode: () => {},
+		onEnterIdeSelectionMode: () => {},
+		onEnterTune: () => {},
+		onEnterCheckpointLoadMode: () => {},
+		onShowStatus: () => {},
+		onHandleChatMessage: async () => {},
+		onAddToChatQueue: overrides.onAddToChatQueue ?? (() => {}),
+		setLiveComponent: () => {},
+		setIsToolExecuting: () => {},
+		setMessages: () => {},
+		messages: [],
+		provider: 'test',
+		model: 'test',
+		theme: 'dark',
+		updateInfo: null,
+		getMessageTokens: () => 0,
+	} as unknown as MessageSubmissionOptions;
+}
+
+test('settings command - no argument leaves the tab unset', async t => {
+	let captured: string | undefined | symbol = Symbol('uncalled');
+	const options = createSettingsTestOptions({
+		onEnterSettingsMode: tab => {
+			captured = tab;
+		},
+	});
+	await handleMessageSubmission('/settings', options);
+	t.is(captured, undefined);
+});
+
+test('settings command - known tab argument opens that tab', async t => {
+	let captured: string | undefined;
+	const options = createSettingsTestOptions({
+		onEnterSettingsMode: tab => {
+			captured = tab;
+		},
+		commandArgs: ['mcp'],
+	});
+	await handleMessageSubmission('/settings mcp', options);
+	t.is(captured, 'mcp');
+});
+
+test('settings command - tab argument is case-insensitive', async t => {
+	let captured: string | undefined;
+	const options = createSettingsTestOptions({
+		onEnterSettingsMode: tab => {
+			captured = tab;
+		},
+		commandArgs: ['Providers'],
+	});
+	await handleMessageSubmission('/settings Providers', options);
+	t.is(captured, 'providers');
+});
+
+test('settings command - unknown tab still opens the default tab', async t => {
+	let called = false;
+	let captured: string | undefined = 'unset';
+	const options = createSettingsTestOptions({
+		onEnterSettingsMode: tab => {
+			called = true;
+			captured = tab;
+		},
+		commandArgs: ['bogus'],
+	});
+	await handleMessageSubmission('/settings bogus', options);
+	t.true(called, 'settings should still open rather than erroring');
+	t.is(captured, undefined, 'unknown tab falls back to the default tab');
+});
+
+test('retired setup-providers - forwards to the settings providers tab', async t => {
+	let captured: string | undefined;
+	const queue: React.ReactNode[] = [];
+	const options = createSettingsTestOptions({
+		onEnterSettingsMode: tab => {
+			captured = tab;
+		},
+		onAddToChatQueue: c => queue.push(c),
+	});
+	await handleMessageSubmission('/setup-providers', options);
+	t.is(captured, 'providers');
+	t.true(findMessageInQueue(queue, m => m.includes('/settings providers')));
+});
+
+test('retired setup-mcp - forwards to the settings mcp tab', async t => {
+	let captured: string | undefined;
+	const queue: React.ReactNode[] = [];
+	const options = createSettingsTestOptions({
+		onEnterSettingsMode: tab => {
+			captured = tab;
+		},
+		onAddToChatQueue: c => queue.push(c),
+	});
+	await handleMessageSubmission('/setup-mcp', options);
+	t.is(captured, 'mcp');
+	t.true(findMessageInQueue(queue, m => m.includes('/settings mcp')));
+});
+
+test('retired setup commands - no longer registered in the slash menu', t => {
+	const names = lazyCommands.map(c => c.name);
+	t.false(names.includes('setup-providers'));
+	t.false(names.includes('setup-mcp'));
+	t.true(names.includes('settings'));
+	t.true(names.includes('setup-config'), 'unrelated /setup-config stays');
 });

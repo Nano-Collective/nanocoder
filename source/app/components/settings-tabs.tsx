@@ -53,6 +53,7 @@ export type SettingsTabId =
 	| 'input'
 	| 'behavior'
 	| 'providers'
+	| 'mcp'
 	| 'advanced';
 
 interface TabDefinition {
@@ -65,8 +66,11 @@ const TABS: TabDefinition[] = [
 	{id: 'input', label: 'Input'},
 	{id: 'behavior', label: 'Behavior'},
 	{id: 'providers', label: 'Providers'},
+	{id: 'mcp', label: 'MCP'},
 	{id: 'advanced', label: 'Advanced'},
 ];
+
+export const SETTINGS_TAB_IDS: SettingsTabId[] = TABS.map(tab => tab.id);
 
 type SettingRow =
 	| {
@@ -218,13 +222,6 @@ function buildRowsForTab(
 				},
 				{
 					kind: 'managed',
-					id: 'mcp-config',
-					label: 'Configure MCP Servers',
-					value: `${getAppConfig().mcpServers?.length ?? 0} configured`,
-					panel: 'mcp-config',
-				},
-				{
-					kind: 'managed',
 					id: 'web-search',
 					label: 'Web Search',
 					value: getAppConfig().nanocoderTools?.webSearch?.apiKey
@@ -238,6 +235,16 @@ function buildRowsForTab(
 					label: 'Tool Auto-Approval',
 					value: `${getAppConfig().alwaysAllow?.length ?? 0} tools`,
 					panel: 'tool-approval',
+				},
+			];
+		case 'mcp':
+			return [
+				{
+					kind: 'managed',
+					id: 'mcp-config',
+					label: 'Configure MCP Servers',
+					value: `${getAppConfig().mcpServers?.length ?? 0} configured`,
+					panel: 'mcp-config',
 				},
 			];
 		case 'advanced': {
@@ -376,6 +383,7 @@ function renderManagedPanel(
 	panel: ManagedSettingsPanel,
 	onBack: () => void,
 	onMcpChanged?: () => void | Promise<void>,
+	onProvidersChanged?: (configPath: string) => void | Promise<void>,
 ): ReactElement {
 	switch (panel) {
 		case 'theme':
@@ -409,7 +417,13 @@ function renderManagedPanel(
 		case 'environment':
 			return <SettingsEnvironmentPanel onBack={onBack} onCancel={onBack} />;
 		case 'providers-config':
-			return <SettingsProvidersListPanel onBack={onBack} onCancel={onBack} />;
+			return (
+				<SettingsProvidersListPanel
+					onBack={onBack}
+					onCancel={onBack}
+					onProvidersChanged={onProvidersChanged}
+				/>
+			);
 		case 'mcp-config':
 			return (
 				<SettingsMcpListPanel
@@ -486,11 +500,15 @@ export function SettingsSelector({
 	onLaunchTune,
 	onLaunchIde,
 	onMcpChanged,
+	onProvidersChanged,
+	initialTab,
 }: SettingsSelectorProps) {
 	const {colors} = useTheme();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
 
-	const [activeTab, setActiveTab] = useState<SettingsTabId>('appearance');
+	const [activeTab, setActiveTab] = useState<SettingsTabId>(
+		initialTab ?? 'appearance',
+	);
 	const [focus, setFocus] = useState<TabFocus>('header');
 	const [openPanel, setOpenPanel] = useState<ManagedSettingsPanel | null>(null);
 
@@ -731,7 +749,12 @@ export function SettingsSelector({
 			setVersion(v => v + 1);
 			setOpenPanel(null);
 		};
-		return renderManagedPanel(openPanel, onBack, onMcpChanged);
+		return renderManagedPanel(
+			openPanel,
+			onBack,
+			onMcpChanged,
+			onProvidersChanged,
+		);
 	}
 
 	const width = isNarrow ? '100%' : boxWidth;

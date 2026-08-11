@@ -38,7 +38,7 @@ Create a `.mcp.json` file in your project root:
 }
 ```
 
-Use `/mcp` to view connected servers and their tools. Use `/setup-mcp` for interactive setup.
+Use `/mcp` to view connected servers and their tools. Use `/settings mcp` for interactive setup.
 
 ## Optional: Local-First Cross-Session Memory
 
@@ -241,7 +241,7 @@ Supported syntax: `$VAR`, `${VAR}`, `${VAR:-default}`
 
 ## Setup Wizard
 
-Run `/setup-mcp` for interactive configuration with:
+Run `/settings mcp` for interactive configuration with:
 
 - Pre-configured templates for popular servers (Filesystem, GitHub, Brave Search, Context7, DeepWiki, Playwright, etc.)
 - Custom server setup for stdio, HTTP, and WebSocket

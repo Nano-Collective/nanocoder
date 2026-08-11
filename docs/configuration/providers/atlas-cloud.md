@@ -29,4 +29,4 @@ sidebar_order: 17
 
 ## Fetching Available Models
 
-The `/setup-providers` wizard can automatically fetch available models from your Atlas Cloud account.
+The `/settings providers` wizard can automatically fetch available models from your Atlas Cloud account.

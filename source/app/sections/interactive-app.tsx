@@ -344,10 +344,13 @@ export function InteractiveApp({
 							onModelDatabaseCancel={modeHandlers.handleModelDatabaseCancel}
 							onConfigWizardComplete={modeHandlers.handleConfigWizardComplete}
 							onConfigWizardCancel={modeHandlers.handleConfigWizardCancel}
-							onMcpWizardComplete={modeHandlers.handleMcpWizardComplete}
-							onMcpWizardCancel={modeHandlers.handleMcpWizardCancel}
 							onSettingsCancel={modeHandlers.handleSettingsCancel}
+							settingsTab={appState.settingsTab}
 							onMcpChanged={modeHandlers.reloadMcpServers}
+							onProvidersChanged={async configPath => {
+								modeHandlers.handleSettingsCancel();
+								await modeHandlers.handleConfigWizardComplete(configPath);
+							}}
 							onLaunchTune={() => {
 								launchedFromSettingsRef.current = true;
 								modeHandlers.handleSettingsCancel();

@@ -14,9 +14,11 @@ import {ProviderWizard} from '@/wizards/provider-wizard';
  */
 export function SettingsProvidersListPanel({
 	onBack,
+	onProvidersChanged,
 }: {
 	onBack: () => void;
 	onCancel: () => void;
+	onProvidersChanged?: (configPath: string) => void | Promise<void>;
 }) {
 	const {colors} = useTheme();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
@@ -34,7 +36,10 @@ export function SettingsProvidersListPanel({
 		return (
 			<ProviderWizard
 				projectDir={process.cwd()}
-				onComplete={onBack}
+				onComplete={configPath => {
+					void onProvidersChanged?.(configPath);
+					onBack();
+				}}
 				onCancel={() => setEditing(false)}
 			/>
 		);

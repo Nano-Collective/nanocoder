@@ -75,8 +75,8 @@ export function MCP({toolManager}: MCPProps) {
 					</Box>
 
 					<Text color={colors.secondary}>
-						Use <Text color={colors.primary}>/setup-providers</Text> to
-						configure servers interactively.
+						Use <Text color={colors.primary}>/settings mcp</Text> to configure
+						servers interactively.
 					</Text>
 				</>
 			) : (

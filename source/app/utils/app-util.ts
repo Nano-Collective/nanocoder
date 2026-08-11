@@ -1,4 +1,8 @@
 import React from 'react';
+import {
+	SETTINGS_TAB_IDS,
+	type SettingsTabId,
+} from '@/app/components/settings-tabs';
 import {parseInput} from '@/command-parser';
 import {commandRegistry} from '@/commands';
 import {CodexLogin} from '@/commands/codex-login';
@@ -43,8 +47,6 @@ const SPECIAL_COMMANDS = {
 	CLEAR: 'clear',
 	MODEL: 'model',
 	MODEL_DATABASE: 'model-database',
-	SETUP_PROVIDERS: 'setup-providers',
-	SETUP_MCP: 'setup-mcp',
 	SETTINGS: 'settings',
 	STATUS: 'status',
 	CHECKPOINT: 'checkpoint',
@@ -53,6 +55,12 @@ const SPECIAL_COMMANDS = {
 	TUNE: 'tune',
 	RENAME: 'rename',
 } as const;
+
+/** Retired in favour of `/settings`; forwarded so they don't error out. */
+const RETIRED_SETUP_COMMANDS: Record<string, SettingsTabId> = {
+	'setup-providers': 'providers',
+	'setup-mcp': 'mcp',
+};
 
 /** Checkpoint subcommands */
 const CHECKPOINT_SUBCOMMANDS = {
@@ -228,6 +236,15 @@ async function handleCustomCommand(
 	return true;
 }
 
+function resolveSettingsTab(
+	arg: string | undefined,
+): SettingsTabId | undefined {
+	const tab = arg?.toLowerCase();
+	return (SETTINGS_TAB_IDS as string[]).includes(tab ?? '')
+		? (tab as SettingsTabId)
+		: undefined;
+}
+
 /**
  * Handles special commands that need app state access (/clear, /model, etc.)
  * Returns true if a special command was handled.
@@ -241,9 +258,7 @@ async function handleSpecialCommand(
 		onRenameSession,
 		onEnterModelSelectionMode,
 		onEnterModelDatabaseMode,
-		onEnterConfigWizardMode,
 		onEnterSettingsMode,
-		onEnterMcpWizardMode,
 		onEnterExplorerMode,
 		onShowStatus,
 		onCommandComplete,
@@ -256,9 +271,8 @@ async function handleSpecialCommand(
 	const enterModeCommands: Record<string, () => void> = {
 		[SPECIAL_COMMANDS.MODEL]: onEnterModelSelectionMode,
 		[SPECIAL_COMMANDS.MODEL_DATABASE]: onEnterModelDatabaseMode,
-		[SPECIAL_COMMANDS.SETUP_PROVIDERS]: onEnterConfigWizardMode,
-		[SPECIAL_COMMANDS.SETUP_MCP]: onEnterMcpWizardMode,
-		[SPECIAL_COMMANDS.SETTINGS]: onEnterSettingsMode,
+		[SPECIAL_COMMANDS.SETTINGS]: () =>
+			onEnterSettingsMode(resolveSettingsTab(commandArgs?.[0])),
 		[SPECIAL_COMMANDS.EXPLORER]: onEnterExplorerMode,
 		[SPECIAL_COMMANDS.IDE]: options.onEnterIdeSelectionMode,
 		[SPECIAL_COMMANDS.TUNE]: options.onEnterTune,
@@ -267,6 +281,19 @@ async function handleSpecialCommand(
 	const enterMode = enterModeCommands[commandName];
 	if (enterMode) {
 		enterMode();
+		onCommandComplete?.();
+		return true;
+	}
+
+	const retiredTab = RETIRED_SETUP_COMMANDS[commandName];
+	if (retiredTab) {
+		onAddToChatQueue(
+			infoMsg(
+				`/${commandName} has moved to /settings — opening the ${retiredTab} tab. Use /settings ${retiredTab} next time.`,
+				`${commandName}-retired`,
+			),
+		);
+		onEnterSettingsMode(retiredTab);
 		onCommandComplete?.();
 		return true;
 	}
