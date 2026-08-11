@@ -1766,20 +1766,21 @@
 		fetch_url: 'Fetching',
 		web_search: 'Searching the web',
 		lsp_get_diagnostics: 'Checking diagnostics in',
-		write_tasks: 'Updating the task list',
 	};
 
 	function humanizeToolTitle(title) {
 		if (!title) return 'Tool Call';
 		const sep = title.indexOf(': ');
-		const verb = TOOL_VERBS[sep === -1 ? title : title.slice(0, sep)];
-		if (!verb) return title;
-		return sep === -1 ? verb : `${verb} ${title.slice(sep + 2)}`;
+		if (sep === -1) return title;
+		const name = title.slice(0, sep);
+		if (!Object.hasOwn(TOOL_VERBS, name)) return title;
+		return `${TOOL_VERBS[name]} ${title.slice(sep + 2)}`;
 	}
 
 	function extractFileName(title) {
 		if (!title) return 'File';
-		const parts = title.split('/');
+		const sep = title.indexOf(': ');
+		const parts = (sep === -1 ? title : title.slice(sep + 2)).split('/');
 		let last = parts[parts.length - 1];
 		last = last.split('\\').pop();
 		return last.replace(/['"]+$/g, '').trim();

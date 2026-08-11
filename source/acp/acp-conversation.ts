@@ -251,7 +251,9 @@ export async function runAcpConversation(
 			return withTurnUsage({stopReason: 'end_turn'});
 		}
 
-		if (validToolCalls.length > 1) {
+		const announcedBatch =
+			validToolCalls.length > 1 && !abortController.signal.aborted;
+		if (announcedBatch) {
 			for (const toolCall of validToolCalls) {
 				const queuedMeta = await buildToolCallMeta(toolCall);
 				await emitToolCall(session, conn, toolCall, 'pending', {
@@ -268,6 +270,15 @@ export async function runAcpConversation(
 			// cancelled result for each so the assistant's tool_calls keep matched
 			// results in history; the turn ends below instead of re-prompting.
 			if (abortController.signal.aborted) {
+				if (announcedBatch) {
+					await emitToolCallUpdate(
+						session,
+						conn,
+						toolCall,
+						'failed',
+						'Cancelled by user',
+					);
+				}
 				toolResults.push({
 					tool_call_id: toolCall.id,
 					role: 'tool',
