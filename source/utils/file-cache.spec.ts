@@ -1,5 +1,6 @@
 import test from 'ava';
-import {mkdtemp, rm, writeFile} from 'node:fs/promises';
+import fs, {mkdtemp, rm, writeFile} from 'node:fs/promises';
+import {mock} from 'node:test';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {
@@ -281,6 +282,59 @@ test('getCachedFileContent - concurrent reads with mtime change get consistent r
 		// All should be the same object (deduplication worked)
 		t.is(result1, result2);
 		t.is(result2, result3);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test('getCachedFileContent - a late finally does not delete a newer pending read for the same path', async t => {
+	t.timeout(5000);
+	const tempDir = await createTempDir();
+	try {
+		const filePath = join(tempDir, 'pending-read-race.txt');
+		await writeFile(filePath, 'original', 'utf-8');
+		await getCachedFileContent(filePath);
+
+		let statCalls = 0;
+		let readCount = 0;
+		let releaseSecondRead: ((buf: Buffer) => void) | undefined;
+		let second: ReturnType<typeof getCachedFileContent> | undefined;
+
+		mock.method(fs, 'stat', async (path: string) => {
+			if (path !== filePath) return fs.stat(path);
+			statCalls++;
+			if (statCalls === 2) {
+				clearCache();
+				second = getCachedFileContent(filePath);
+			}
+			return {mtimeMs: 2};
+		});
+
+		mock.method(fs, 'readFile', async (path: string) => {
+			if (path !== filePath) return fs.readFile(path);
+			readCount++;
+			if (readCount === 1) {
+				return Buffer.from('first-content');
+			}
+			return new Promise<Buffer>(resolve => {
+				releaseSecondRead = resolve;
+			});
+		});
+
+		const first = getCachedFileContent(filePath);
+		await first;
+
+		invalidateCache(filePath);
+		const third = getCachedFileContent(filePath);
+		await new Promise(resolve => setImmediate(resolve));
+
+		releaseSecondRead?.(Buffer.from('second-content'));
+		const [secondResult, thirdResult] = await Promise.all([second, third]);
+
+		mock.restoreAll();
+
+		t.is(readCount, 2, 'third caller should dedupe against the second read, not start its own');
+		t.is(secondResult, thirdResult);
 	} finally {
 		await cleanupTempDir(tempDir);
 	}
