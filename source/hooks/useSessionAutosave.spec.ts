@@ -25,7 +25,10 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {SessionManager} from '../session/session-manager.js';
-import {shouldResetSessionId} from './useSessionAutosave.js';
+import {
+	deriveSessionTitle,
+	shouldResetSessionId,
+} from './useSessionAutosave.js';
 import {
 	getKeyGeneratorSessionId,
 	resetKeyGeneratorForTests,
@@ -49,6 +52,58 @@ test('slash-only sessions keep their preallocated ID while messages stay empty',
 
 test('clearing a non-empty conversation resets its session ID', t => {
 	t.true(shouldResetSessionId(1, 0));
+});
+
+test('internal walkthrough fallback does not replace the user-derived title', t => {
+	const title = deriveSessionTitle([
+		{role: 'user', content: 'Implement the greeting helper'},
+		{role: 'assistant', content: 'Implementation complete.'},
+		{
+			role: 'user',
+			content:
+				'<nanocoder-internal-walkthrough>Call write_walkthrough before ending.</nanocoder-internal-walkthrough>',
+		},
+	]);
+
+	t.is(title, 'Implement the greeting helper');
+});
+
+test('approved plan injection does not replace the user-derived title', t => {
+	const title = deriveSessionTitle([
+		{role: 'user', content: 'Implement the greeting helper'},
+		{role: 'assistant', content: 'The plan is ready for approval.'},
+		{
+			role: 'user',
+			content:
+				'The implementation plan below is approved. Proceed with implementing it now.\n\n<approved_plan>\nImplement the helper.\n</approved_plan>',
+		},
+		{role: 'assistant', content: 'Implementation complete.'},
+		{
+			role: 'user',
+			content:
+				'<nanocoder-internal-walkthrough>Call write_walkthrough before ending.</nanocoder-internal-walkthrough>',
+		},
+	]);
+
+	t.is(title, 'Implement the greeting helper');
+});
+
+test('session titles keep the existing 50-character truncation', t => {
+	const content = 'a'.repeat(51);
+
+	t.is(deriveSessionTitle([{role: 'user', content}]), `${'a'.repeat(50)}...`);
+});
+
+test('an internal walkthrough without a real user message uses the fallback title', t => {
+	const title = deriveSessionTitle([
+		{
+			role: 'user',
+			content:
+				'<nanocoder-internal-walkthrough>Call write_walkthrough before ending.</nanocoder-internal-walkthrough>',
+		},
+	]);
+
+	t.is(title, `Session ${new Date().toLocaleDateString()}`);
 });
 
 // ---------------------------------------------------------------------------

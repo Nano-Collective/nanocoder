@@ -3,7 +3,10 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {ArtifactManager} from './artifact-manager';
-import {createApprovedPlanMessage} from './approved-plan';
+import {
+	createApprovedPlanMessage,
+	isApprovedPlanMessage,
+} from './approved-plan';
 
 test('approved execution message is built from the persisted plan', async t => {
 	const root = await mkdtemp(join(tmpdir(), 'nanocoder-approved-plan-'));
@@ -25,4 +28,20 @@ test('approved execution message is built from the persisted plan', async t => {
 	} finally {
 		await rm(root, {recursive: true, force: true});
 	}
+});
+
+test('approved execution messages are identified as synthetic user messages', t => {
+	t.true(
+		isApprovedPlanMessage({
+			role: 'user',
+			content:
+				'The implementation plan below is approved.\n\n<approved_plan>Implement it.</approved_plan>',
+		}),
+	);
+	t.false(
+		isApprovedPlanMessage({
+			role: 'assistant',
+			content: '<approved_plan>Implement it.</approved_plan>',
+		}),
+	);
 });

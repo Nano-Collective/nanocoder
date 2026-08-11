@@ -1,4 +1,6 @@
 import {useCallback, useEffect, useRef} from 'react';
+import {isApprovedPlanMessage} from '@/artifacts/approved-plan';
+import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {getAppConfig} from '@/config/index';
 import {sessionManager} from '@/session/session-manager';
 import type {Message} from '@/types/core';
@@ -21,6 +23,24 @@ export function shouldResetSessionId(
 	currentMessageCount: number,
 ): boolean {
 	return previousMessageCount > 0 && currentMessageCount === 0;
+}
+
+export function deriveSessionTitle(messages: Message[]): string {
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const message = messages[index];
+		if (
+			message?.role === 'user' &&
+			!isApprovedPlanMessage(message) &&
+			!isInternalWalkthroughMessage(message)
+		) {
+			return (
+				message.content.substring(0, 50) +
+				(message.content.length > 50 ? '...' : '')
+			);
+		}
+	}
+
+	return `Session ${new Date().toLocaleDateString()}`;
 }
 
 /**
@@ -150,14 +170,7 @@ export function useSessionAutosave({
 				// Derive a human-readable title from the most recent user message.
 				// The full message array is always written - maxMessages bounds only
 				// what is sent to the model (sliced in the conversation loop).
-				const userMessages = capturedMessages.filter(
-					msg => msg.role === 'user',
-				);
-				const lastUserMessage = userMessages[userMessages.length - 1];
-				const title = lastUserMessage
-					? lastUserMessage.content.substring(0, 50) +
-						(lastUserMessage.content.length > 50 ? '...' : '')
-					: `Session ${new Date().toLocaleDateString()}`;
+				const title = deriveSessionTitle(capturedMessages);
 
 				if (liveSessionId) {
 					const session = await sessionManager.readSession(liveSessionId);
