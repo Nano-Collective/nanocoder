@@ -45,6 +45,10 @@ const createMockInitContext = (): AcpInitContext => ({
 		setModel: (model: string) => {
 			mockCurrentModel = model;
 		},
+		// saveAcpSessionToDisk() reads this, and its failures are swallowed by a
+		// bare catch — without it every persist silently no-ops and the on-disk
+		// half of the ACP path goes untested.
+		getProviderConfig: () => ({name: 'test-provider'}),
 	} as any,
 	toolManager: {
 		getAvailableToolNames: () => [],
@@ -524,6 +528,43 @@ test.serial(
 				title: 'Renamed',
 			}),
 			{message: /Session not found on disk/},
+		);
+	},
+);
+
+test.serial(
+	'AcpAgent - a renamed session keeps titleManuallySet across later prompts',
+	async t => {
+		// saveAcpSessionToDisk() rebuilds the Session field-by-field, so anything
+		// it forgets to carry over is silently dropped from disk. Losing the flag
+		// here doesn't show up in the ACP client — its own guard keeps the title —
+		// but the CLI's autosave then sees an unflagged session and overwrites the
+		// user's rename with an auto-derived one the next time they resume it.
+		const {agent} = createAgent();
+		await sessionManager.initialize();
+
+		const session = await agent.newSession({cwd: '/tmp'});
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'Hello!'}],
+		});
+
+		await agent.extMethod('renameSession', {
+			sessionId: session.sessionId,
+			title: 'Kept title',
+		});
+
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'Follow-up message'}],
+		});
+
+		const persisted = await sessionManager.readSession(session.sessionId);
+		t.is(persisted!.title, 'Kept title');
+		t.is(
+			persisted!.titleManuallySet,
+			true,
+			'the flag must survive, not just the title',
 		);
 	},
 );
