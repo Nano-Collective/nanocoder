@@ -9,28 +9,10 @@ import {
 import {generateKey} from '@/session/key-generator';
 import type {MessageSubmissionOptions} from '@/types/index';
 import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
+import {parseContextLimit} from '@/utils/parse-context-limit';
 
-/**
- * Parses a context limit value string, supporting k/K suffix.
- * e.g. "8192" -> 8192, "128k" -> 128000, "128K" -> 128000
- */
-export function parseContextLimit(value: string): number | null {
-	const trimmed = value.trim().toLowerCase();
-	let multiplier = 1;
-	let numStr = trimmed;
-
-	if (trimmed.endsWith('k')) {
-		multiplier = 1000;
-		numStr = trimmed.slice(0, -1);
-	}
-
-	const parsed = Number.parseFloat(numStr);
-	if (Number.isNaN(parsed) || parsed <= 0) {
-		return null;
-	}
-
-	return Math.round(parsed * multiplier);
-}
+// Re-export so existing imports from this module keep working.
+export {parseContextLimit};
 
 /**
  * Handles /context-max command. Returns true if handled.

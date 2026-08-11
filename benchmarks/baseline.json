@@ -24,64 +24,74 @@
 		},
 		"interactive_module_count": {
 			"kind": "numeric",
-			"value": 567,
+			"value": 595,
 			"warnOnDecrease": false
 		},
 		"interactive_boot_ms_approx": {
 			"kind": "numeric",
-			"value": 606,
+			"value": 2119,
+			"warnOnDecrease": false
+		},
+		"acp_module_count": {
+			"kind": "numeric",
+			"value": 429,
+			"warnOnDecrease": false
+		},
+		"acp_boot_ms_approx": {
+			"kind": "numeric",
+			"value": 906,
 			"warnOnDecrease": false
 		},
 		"first_render_ms_approx": {
 			"kind": "numeric",
-			"value": 549,
+			"value": 1409,
 			"warnOnDecrease": false
 		},
 		"dist_size_bytes": {
 			"kind": "numeric",
-			"value": 4703103
+			"value": 4925828
 		},
 		"dist_file_count": {
 			"kind": "numeric",
-			"value": 1793,
+			"value": 1773,
 			"warnOnDecrease": false
 		}
 	},
 	"stability": {
 		"cli_flag_count": {
 			"kind": "numeric",
-			"value": 15,
+			"value": 25,
 			"warnOnDecrease": true
 		},
 		"tool_count": {
 			"kind": "numeric",
-			"value": 21,
+			"value": 22,
 			"warnOnDecrease": true
 		},
 		"command_count": {
 			"kind": "numeric",
-			"value": 35,
+			"value": 38,
 			"warnOnDecrease": true
 		},
 		"help_hash": {
 			"kind": "hash",
-			"value": "606a3816f6c9"
+			"value": "d327b65d079f"
 		}
 	},
 	"health": {
 		"test_file_count": {
 			"kind": "numeric",
-			"value": 315,
+			"value": 340,
 			"warnOnDecrease": true
 		},
 		"test_case_count": {
 			"kind": "numeric",
-			"value": 5857,
+			"value": 6353,
 			"warnOnDecrease": true
 		},
 		"audit_high_vulns": {
 			"kind": "numeric",
-			"value": 2
+			"value": 17
 		}
 	}
 }

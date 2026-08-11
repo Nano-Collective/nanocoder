@@ -27,7 +27,7 @@ import {handleRetryCommand} from './handlers/retry-handler';
 import {handleResumeCommand} from './handlers/session-handler';
 
 // Re-export for consumers that import parseContextLimit from here
-export {parseContextLimit} from './handlers/context-max-handler';
+export {parseContextLimit} from '@/utils/parse-context-limit';
 
 /**
  * "Special commands" need access to app-level state (setting modes, mutating
