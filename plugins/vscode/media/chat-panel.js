@@ -982,6 +982,42 @@
 		vscode.postMessage({ type: 'copyToClipboard', text: lastAgentRawText });
 	}
 
+	// Compact token formatting: 812, 4.2k, 12k, 1.3M. Mirrors the CLI's
+	// per-response indicator formatting (source/usage/format.ts).
+	function formatCompactTokens(tokens) {
+		if (!Number.isFinite(tokens) || tokens <= 0) return '0';
+		if (tokens < 1000) return String(Math.round(tokens));
+		const scaled = tokens < 1000000 ? tokens / 1000 : tokens / 1000000;
+		const suffix = tokens < 1000000 ? 'k' : 'M';
+		const num = scaled >= 100
+			? String(Math.round(scaled))
+			: scaled.toFixed(1).replace(/\.0$/, '');
+		return num + suffix;
+	}
+
+	// Render a small grayed-out usage line (e.g. "Tokens: 4.2k | ~$0.01")
+	// under the finished response. Cost is omitted when unknown (local models).
+	function appendUsageIndicator(usage, cost) {
+		if (!usage) return;
+		const total = Number.isFinite(usage.totalTokens)
+			? usage.totalTokens
+			: (Number.isFinite(usage.inputTokens) ? usage.inputTokens : 0) +
+				(Number.isFinite(usage.outputTokens) ? usage.outputTokens : 0);
+		if (!total) return;
+
+		let text = 'Tokens: ' + formatCompactTokens(total);
+		if (Number.isFinite(cost) && cost > 0) {
+			text += cost < 0.01 ? ' | <$0.01' : ' | ~$' + cost.toFixed(2);
+		}
+
+		endCurrentTextBlock();
+		const el = document.createElement('div');
+		el.className = 'self-start text-[0.8em] opacity-50 shrink-0 mb-1';
+		el.textContent = text;
+		messagesContainer.appendChild(el);
+		scrollToBottom();
+	}
+
 	// Handle messages from extension.
 	// No origin check: this is a VS Code webview, not a browser page. The
 	// extension host is the only sender, and chat-panel.html sets
@@ -1191,6 +1227,8 @@
 				currentThoughtBox.finish();
 				currentThoughtBox = null;
 			}
+			// Show token usage (and estimated cost) for the finished turn
+			appendUsageIndicator(update.usage, update.cost);
 			// Turn is complete — restore the send button
 			setProcessing(false);
 		}
