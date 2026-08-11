@@ -152,6 +152,7 @@
 	let currentAggregator = null;
 	let currentThoughtBox = null;
 	let visualLoader = null;
+	const toolKinds = new Map();
 	let toastTimeout = null;
 	// One agent response is split into several `.agent-markdown` containers -
 	// endCurrentTextBlock() closes the current one whenever a tool card, thought
@@ -271,7 +272,8 @@
 			// in case multiple aggregators were created in the same session
 			const allSpinners = document.querySelectorAll('.tool-status');
 			allSpinners.forEach(statusEl => {
-				if (statusEl.innerHTML.includes('animate-spin')) {
+				const status = statusEl.dataset.status;
+				if (status === 'pending' || status === 'in_progress') {
 					statusEl.innerHTML = ICONS.cancelled;
 				}
 			});
@@ -1135,6 +1137,7 @@
 				currentTurnEl = null;
 				currentTextEl = null;
 				currentTurnText = '';
+				toolKinds.clear();
 				agentTurnId = 0;
 				lastAgentRawTurnId = -1;
 				lastAgentSegments = '';
@@ -1610,7 +1613,7 @@
 
 				const label = document.createElement('span');
 				label.className = 'tool-label flex-1 break-words leading-relaxed';
-				label.textContent = update.title || update.name || 'Tool Call';
+				label.textContent = humanizeToolTitle(update.title);
 
 				headerRow.appendChild(status);
 				headerRow.appendChild(label);
@@ -1622,12 +1625,13 @@
 			} else {
 				if (update.title) {
 					const labelEl = item.querySelector('.tool-label');
-					if (labelEl) labelEl.textContent = update.title;
+					if (labelEl) labelEl.textContent = humanizeToolTitle(update.title);
 				}
 			}
 
 			const statusEl = item.querySelector('.tool-status');
 			if (statusEl) {
+				statusEl.dataset.status = update.status || 'pending';
 				if (update.status === 'success' || update.status === 'completed') {
 					statusEl.innerHTML = ICONS.success;
 				} else if (
@@ -1640,6 +1644,8 @@
 					statusEl.innerHTML = ICONS.cancelled;
 				} else if (update.status === 'error' || update.status === 'failed') {
 					statusEl.innerHTML = ICONS.error;
+				} else if (update.status === 'pending') {
+					statusEl.innerHTML = ICONS.circle;
 				} else {
 					statusEl.innerHTML = ICONS.pending;
 				}
@@ -1654,7 +1660,7 @@
 	// carries the complete replacement list, so the card is rebuilt in place.
 	function handlePlanUpdate(update) {
 		const entries = Array.isArray(update.entries) ? update.entries : [];
-		let card = document.getElementById('plan-card');
+		let card = document.getElementById(`plan-card-${agentTurnId}`);
 
 		if (entries.length === 0) {
 			if (card) card.remove();
@@ -1664,7 +1670,7 @@
 		if (!card) {
 			endCurrentTextBlock();
 			card = document.createElement('div');
-			card.id = 'plan-card';
+			card.id = `plan-card-${agentTurnId}`;
 			card.className = 'my-3 border border-vscode-widget-border rounded bg-vscode-widget-bg overflow-hidden shrink-0';
 
 			const header = document.createElement('div');
@@ -1675,23 +1681,21 @@
 			title.textContent = 'Tasks';
 
 			const progress = document.createElement('span');
-			progress.id = 'plan-progress';
-			progress.className = 'ml-auto font-vscode text-[0.8em] opacity-60';
+			progress.className = 'plan-progress ml-auto font-vscode text-[0.8em] opacity-60';
 
 			header.appendChild(title);
 			header.appendChild(progress);
 			card.appendChild(header);
 
 			const body = document.createElement('div');
-			body.id = 'plan-body';
-			body.className = 'flex flex-col';
+			body.className = 'plan-body flex flex-col';
 			card.appendChild(body);
 
 			messagesContainer.appendChild(card);
 			scrollToBottom();
 		}
 
-		const body = card.querySelector('#plan-body');
+		const body = card.querySelector('.plan-body');
 		body.innerHTML = '';
 
 		let done = 0;
@@ -1718,7 +1722,7 @@
 			body.appendChild(row);
 		}
 
-		const progressEl = card.querySelector('#plan-progress');
+		const progressEl = card.querySelector('.plan-progress');
 		if (progressEl) progressEl.textContent = `${done}/${entries.length}`;
 	}
 
@@ -1733,24 +1737,44 @@
 			endCurrentTextBlock();
 		}
 
-		const toolName = update.name || (update.toolCall && update.toolCall.name) || '';
-		const isMutating = ['replace_file_content', 'multi_replace_file_content', 'write_to_file', 'write_file'].includes(toolName);
+		if (update.kind) toolKinds.set(toolCallId, update.kind);
 
-		if (isMutating) {
+		if (toolKinds.get(toolCallId) === 'edit') {
 			let card = document.getElementById(`tool-card-${toolCallId}`);
 			if (!card) {
 				card = createEditCard(toolCallId, update);
 				messagesContainer.appendChild(card);
 				scrollToBottom();
-			} else {
-				updateEditCard(card, update);
 			}
+			updateEditCard(card, update);
 		} else {
 			if (!currentAggregator) {
 				currentAggregator = new ToolAggregator();
 			}
 			currentAggregator.addOrUpdateTool(toolCallId, update);
 		}
+	}
+
+	const TOOL_VERBS = {
+		read_file: 'Reading',
+		list_directory: 'Listing',
+		find_files: 'Finding files in',
+		search_file_contents: 'Searching',
+		string_replace: 'Editing',
+		write_file: 'Writing',
+		execute_bash: 'Running',
+		fetch_url: 'Fetching',
+		web_search: 'Searching the web',
+		lsp_get_diagnostics: 'Checking diagnostics in',
+		write_tasks: 'Updating the task list',
+	};
+
+	function humanizeToolTitle(title) {
+		if (!title) return 'Tool Call';
+		const sep = title.indexOf(': ');
+		const verb = TOOL_VERBS[sep === -1 ? title : title.slice(0, sep)];
+		if (!verb) return title;
+		return sep === -1 ? verb : `${verb} ${title.slice(sep + 2)}`;
 	}
 
 	function extractFileName(title) {
@@ -1773,21 +1797,23 @@
 
 	function createEditCard(toolCallId, update) {
 		const card = document.createElement('div');
-		card.className = 'my-2 flex items-center justify-between px-3 py-2 border border-vscode-widget-border rounded bg-vscode-editor-bg cursor-pointer hover:bg-vscode-list-hover group tool-card';
+		card.className = 'my-2 border border-vscode-widget-border rounded bg-vscode-editor-bg overflow-hidden group tool-card';
 		card.id = `tool-card-${toolCallId}`;
-		card.onclick = () => vscode.postMessage({ type: 'showDiff', toolCallId });
+
+		const row = document.createElement('div');
+		row.className = 'flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-vscode-list-hover';
+		row.onclick = () => vscode.postMessage({ type: 'showDiff', toolCallId });
 
 		const left = document.createElement('div');
 		left.className = 'flex items-center gap-2 font-vscode text-[0.9em]';
 
 		const status = document.createElement('span');
-		status.className = 'ml-auto flex items-center justify-center';
-		status.innerHTML = ICONS.pending;
+		status.className = 'tool-status ml-auto flex items-center justify-center';
 
 		const label = document.createElement('span');
 		label.className = 'flex items-center gap-1.5';
 
-		const filename = extractFileName(update.title || update.name);
+		const filename = extractFileName(update.title);
 		const fileColor = getFileColor(filename);
 
 		const actionText = document.createElement('span');
@@ -1803,7 +1829,7 @@
 
 		left.appendChild(status);
 		left.appendChild(label);
-		card.appendChild(left);
+		row.appendChild(left);
 
 		const right = document.createElement('div');
 		right.className = 'flex items-center gap-2';
@@ -1813,19 +1839,23 @@
 		hoverBtn.textContent = 'Open Diff';
 
 		right.appendChild(hoverBtn);
-		card.appendChild(right);
+		row.appendChild(right);
+		card.appendChild(row);
 
 		return card;
 	}
 
 	function updateEditCard(el, update) {
-		const statusEl = el.querySelector('.ml-auto');
+		const statusEl = el.querySelector('.tool-status');
 		if (statusEl) {
+			statusEl.dataset.status = update.status || 'pending';
 			if (update.status === 'success' || update.status === 'completed') statusEl.innerHTML = ICONS.success;
-			else if (update.status === 'error') statusEl.innerHTML = ICONS.error;
 			else if (update.status === 'cancelled' || update.status === 'denied') statusEl.innerHTML = ICONS.cancelled;
+			else if (update.status === 'error' || update.status === 'failed') statusEl.innerHTML = ICONS.error;
+			else if (update.status === 'pending') statusEl.innerHTML = ICONS.circle;
+			else statusEl.innerHTML = ICONS.pending;
 		}
-		if (update.status === 'success' || update.status === 'completed' || update.status === 'error' || update.status === 'cancelled' || update.status === 'denied') {
+		if (update.status === 'success' || update.status === 'completed' || update.status === 'error' || update.status === 'failed' || update.status === 'cancelled' || update.status === 'denied') {
 			const actions = el.querySelector('.tool-actions');
 			if (actions) actions.remove();
 		}

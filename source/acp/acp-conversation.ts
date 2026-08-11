@@ -251,6 +251,16 @@ export async function runAcpConversation(
 			return withTurnUsage({stopReason: 'end_turn'});
 		}
 
+		if (validToolCalls.length > 1) {
+			for (const toolCall of validToolCalls) {
+				const queuedMeta = await buildToolCallMeta(toolCall);
+				await emitToolCall(session, conn, toolCall, 'pending', {
+					...queuedMeta,
+					content: [],
+				});
+			}
+		}
+
 		// Process tool calls
 		const toolResults: ToolResult[] = [];
 		for (const toolCall of validToolCalls) {
