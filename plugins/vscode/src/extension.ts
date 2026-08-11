@@ -107,6 +107,24 @@ export function activate(context: vscode.ExtensionContext) {
 		}),
 	);
 
+	// Inline "Explain Code" / "Generate Tests" links above every function and
+	// class, so a symbol can be handed to the agent without leaving the editor.
+	const codeLensProvider = new NanocoderCodeLensProvider();
+	context.subscriptions.push(
+		vscode.languages.registerCodeLensProvider({scheme: 'file'}, codeLensProvider),
+		vscode.workspace.onDidChangeConfiguration(event => {
+			if (event.affectsConfiguration('nanocoder.codeLens')) {
+				codeLensProvider.refresh();
+			}
+		}),
+		vscode.commands.registerCommand('nanocoder.explainCode', (uri: vscode.Uri, range: vscode.Range) =>
+			sendCodeLensPrompt(chatProvider, 'Explain what this code does.', uri, range),
+		),
+		vscode.commands.registerCommand('nanocoder.generateTests', (uri: vscode.Uri, range: vscode.Range) =>
+			sendCodeLensPrompt(chatProvider, 'Write unit tests for this code.', uri, range),
+		),
+	);
+
 	// Push active editor state to the CLI so the input box can show an
 	// "In <file>" pill and auto-attach a selection as context on submit.
 	context.subscriptions.push(
@@ -396,4 +414,93 @@ function sendActiveEditor(): void {
 	lastActiveEditorPayload = serialized;
 
 	wsClient.send(payload);
+}
+
+// Symbols worth a lens. Anything finer-grained (properties, variables) would
+// bury the editor in links.
+const LENS_SYMBOL_KINDS = new Set([
+	vscode.SymbolKind.Function,
+	vscode.SymbolKind.Method,
+	vscode.SymbolKind.Class,
+]);
+
+class NanocoderCodeLensProvider implements vscode.CodeLensProvider {
+	private readonly _onDidChangeCodeLenses = new vscode.EventEmitter<void>();
+	public readonly onDidChangeCodeLenses = this._onDidChangeCodeLenses.event;
+
+	public refresh(): void {
+		this._onDidChangeCodeLenses.fire();
+	}
+
+	public async provideCodeLenses(
+		document: vscode.TextDocument,
+		token: vscode.CancellationToken,
+	): Promise<vscode.CodeLens[]> {
+		const config = vscode.workspace.getConfiguration('nanocoder');
+		if (!config.get<boolean>('codeLens', true)) {
+			return [];
+		}
+
+		// The language server already knows where the functions are, so nothing
+		// here has to parse a single line of source.
+		const symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+			'vscode.executeDocumentSymbolProvider',
+			document.uri,
+		);
+		if (token.isCancellationRequested || !Array.isArray(symbols)) {
+			return [];
+		}
+
+		const lenses: vscode.CodeLens[] = [];
+		const walk = (nodes: vscode.DocumentSymbol[]) => {
+			for (const symbol of nodes) {
+				// selectionRange is absent on the legacy SymbolInformation shape
+				// some providers still return; skip those rather than throw.
+				if (LENS_SYMBOL_KINDS.has(symbol.kind) && symbol.selectionRange) {
+					// Anchored on the name so the lens sits on the declaration
+					// line instead of above a preceding doc comment, while the
+					// command still receives the symbol's whole body.
+					const args = [document.uri, symbol.range];
+					lenses.push(
+						new vscode.CodeLens(symbol.selectionRange, {
+							title: 'Explain Code',
+							command: 'nanocoder.explainCode',
+							arguments: args,
+						}),
+						new vscode.CodeLens(symbol.selectionRange, {
+							title: 'Generate Tests',
+							command: 'nanocoder.generateTests',
+							arguments: args,
+						}),
+					);
+				}
+				walk(symbol.children ?? []);
+			}
+		};
+		walk(symbols);
+
+		return lenses;
+	}
+}
+
+// The symbol source is inlined rather than attached as a file: the agent should
+// see the one function the user clicked, not everything around it.
+async function sendCodeLensPrompt(
+	chatProvider: ChatWebviewProvider,
+	instruction: string,
+	uri: vscode.Uri,
+	range: vscode.Range,
+): Promise<void> {
+	const document = await vscode.workspace.openTextDocument(uri);
+	const location = `${vscode.workspace.asRelativePath(uri)}:${range.start.line + 1}-${range.end.line + 1}`;
+	await chatProvider.sendPrompt(
+		[
+			instruction,
+			'',
+			location,
+			'```' + document.languageId,
+			document.getText(range),
+			'```',
+		].join('\n'),
+	);
 }

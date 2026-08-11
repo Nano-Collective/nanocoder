@@ -11,6 +11,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 
 	private _view?: vscode.WebviewView;
 	private _isWebviewReady = false;
+	/** Code lens prompt waiting on the webview shell and the ACP session. */
+	private _pendingPrompt: string | null = null;
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
@@ -66,6 +68,17 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				}
 			}
 		}
+	}
+
+	/**
+	 * Reveal the chat view and run `text` as a prompt. An editor code lens can
+	 * fire long before the sidebar has ever been opened, so the prompt is held
+	 * until the shell reports ready and a session exists.
+	 */
+	public async sendPrompt(text: string) {
+		this._pendingPrompt = text;
+		await vscode.commands.executeCommand(`${ChatWebviewProvider.viewType}.focus`);
+		await this._initializeSessionIfReady();
 	}
 
 	public requestCopyLastCodeBlock() {
@@ -240,6 +253,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				this._outputChannel.appendLine(`[Extension] Session initialized automatically: ${sessionId}`);
 				// Broadcast session list to populate History tab
 				await this._broadcastSessions();
+				if (this._pendingPrompt) {
+					this.postMessage({type: 'runPrompt', text: this._pendingPrompt});
+					this._pendingPrompt = null;
+				}
 			}
 		} catch (error) {
 			this._outputChannel.appendLine(`Failed to initialize session on ready: ${error}`);

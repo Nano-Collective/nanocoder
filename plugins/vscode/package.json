@@ -86,6 +86,16 @@
 				"command": "nanocoder.copyLastCodeBlock",
 				"title": "Copy Last Code Block",
 				"category": "Nanocoder"
+			},
+			{
+				"command": "nanocoder.explainCode",
+				"title": "Explain Code",
+				"category": "Nanocoder"
+			},
+			{
+				"command": "nanocoder.generateTests",
+				"title": "Generate Tests",
+				"category": "Nanocoder"
 			}
 		],
 		"keybindings": [
@@ -107,6 +117,16 @@
 					"command": "nanocoder.toggleHistory",
 					"when": "view == nanocoder.chatView",
 					"group": "navigation@2"
+				}
+			],
+			"commandPalette": [
+				{
+					"command": "nanocoder.explainCode",
+					"when": "false"
+				},
+				{
+					"command": "nanocoder.generateTests",
+					"when": "false"
 				}
 			]
 		},
@@ -153,6 +173,11 @@
 					"type": "string",
 					"scope": "resource",
 					"description": "Working directory for the Nanocoder CLI. Defaults to the current VS Code workspace root."
+				},
+				"nanocoder.codeLens": {
+					"type": "boolean",
+					"default": true,
+					"description": "Show Explain Code / Generate Tests actions above functions and classes in the editor."
 				}
 			}
 		}

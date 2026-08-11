@@ -1046,6 +1046,12 @@
 				sessionsData = message.sessions || [];
 				renderSessions(); // Always update so list is ready when history opens
 				break;
+			case 'runPrompt':
+				if (isHistoryView) showChatView();
+				chatInput.value = message.text;
+				submitMessage();
+				chatInput.focus();
+				break;
 			case 'copyLastCodeBlock':
 				copyLastCodeBlock();
 				break;

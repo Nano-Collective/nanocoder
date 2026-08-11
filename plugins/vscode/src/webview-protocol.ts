@@ -76,6 +76,12 @@ export interface ExtensionMessageCopyLastCodeBlock {
 	type: 'copyLastCodeBlock';
 }
 
+/** Prompt built by an editor code lens; the composer submits it verbatim. */
+export interface ExtensionMessageRunPrompt {
+	type: 'runPrompt';
+	text: string;
+}
+
 export interface ExtensionMessageCopyResult {
 	type: 'copyResult';
 	ok: boolean;
@@ -114,7 +120,8 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageSessionLoaded
 	| ExtensionMessagePathInfoResolved
 	| ExtensionMessageCopyLastCodeBlock
-	| ExtensionMessageCopyResult;
+	| ExtensionMessageCopyResult
+	| ExtensionMessageRunPrompt;
 
 
 // ---------------------------------------------------------
