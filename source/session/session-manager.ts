@@ -191,14 +191,6 @@ export class SessionManager {
 			throw new Error(`Invalid session ID: ${session.id}`);
 		}
 
-		// Every save is activity on the session (a new message, a rename,
-		// etc.), so this is where "last used" should actually be tracked.
-		// loadSession() also bumps it on resume, which is fine - both count.
-		const sessionToWrite: Session = {
-			...session,
-			lastAccessedAt: new Date().toISOString(),
-		};
-
 		// File write and index update happen together under the lock
 		// to prevent orphaned files if the process dies between them.
 		await this.withIndexLock(async () => {
@@ -207,7 +199,7 @@ export class SessionManager {
 			// Write session file atomically
 			await atomicWriteFile(
 				sessionFilePath,
-				JSON.stringify(sessionToWrite, null, 2),
+				JSON.stringify(session, null, 2),
 				0o600,
 			);
 
@@ -216,15 +208,15 @@ export class SessionManager {
 			const existingSessionIndex = sessions.findIndex(s => s.id === session.id);
 
 			const sessionMetadata: SessionMetadata = {
-				id: sessionToWrite.id,
-				title: sessionToWrite.title,
-				createdAt: sessionToWrite.createdAt,
-				lastAccessedAt: sessionToWrite.lastAccessedAt,
-				messageCount: sessionToWrite.messageCount,
-				provider: sessionToWrite.provider,
-				model: sessionToWrite.model,
-				workingDirectory: sessionToWrite.workingDirectory,
-				titleManuallySet: sessionToWrite.titleManuallySet,
+				id: session.id,
+				title: session.title,
+				createdAt: session.createdAt,
+				lastAccessedAt: session.lastAccessedAt,
+				messageCount: session.messageCount,
+				provider: session.provider,
+				model: session.model,
+				workingDirectory: session.workingDirectory,
+				titleManuallySet: session.titleManuallySet,
 			};
 
 			if (existingSessionIndex >= 0) {
@@ -373,6 +365,7 @@ export class SessionManager {
 			...session,
 			title: trimmed,
 			titleManuallySet: true,
+			lastAccessedAt: new Date().toISOString(),
 		};
 
 		await this.saveSession(updatedSession);

@@ -159,8 +159,9 @@ export function useSessionAutosave({
 						}
 						session.provider = capturedProvider;
 						session.model = capturedModel;
-						// Don't set lastAccessedAt here — saveSession() handles
-						// the timestamp in both the file and index consistently.
+						// Every autosave is real activity — bump it so "last used"
+						// reflects actual use, not just create/resume time.
+						session.lastAccessedAt = new Date().toISOString();
 						await sessionManager.saveSession(session);
 					} else {
 						// The stored session was deleted externally; create a fresh one.

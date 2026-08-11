@@ -855,30 +855,31 @@ test.serial(
 
 // --- saveSession (lastAccessedAt) ---
 
-test.serial('saveSession bumps lastAccessedAt on every save', async t => {
-	const session = await manager.createSession({
-		title: 'Bump test',
-		messageCount: 1,
-		provider: 'test',
-		model: 'test',
-		workingDirectory: '/tmp',
-		messages: [{role: 'user', content: 'hi'}],
-	});
+test.serial(
+	'saveSession trusts the caller-supplied lastAccessedAt (does not force "now")',
+	async t => {
+		// Callers (autosave, renameSession, and test helpers that simulate
+		// time passing) rely on being able to set an explicit lastAccessedAt
+		// via saveSession(). It must not silently override that value.
+		const session = await manager.createSession({
+			title: 'Explicit timestamp test',
+			messageCount: 1,
+			provider: 'test',
+			model: 'test',
+			workingDirectory: '/tmp',
+			messages: [{role: 'user', content: 'hi'}],
+		});
 
-	const originalLastAccessed = session.lastAccessedAt;
+		const explicitPast = new Date(Date.now() - 60_000).toISOString();
+		await manager.saveSession({...session, lastAccessedAt: explicitPast});
 
-	// Small delay to ensure timestamp difference
-	await new Promise(r => setTimeout(r, 10));
+		const loaded = await manager.readSession(session.id);
+		t.is(loaded!.lastAccessedAt, explicitPast);
 
-	session.messages.push({role: 'assistant', content: 'hello'});
-	await manager.saveSession(session);
-
-	const loaded = await manager.readSession(session.id);
-	t.not(loaded!.lastAccessedAt, originalLastAccessed);
-
-	const [indexed] = await manager.listSessions();
-	t.is(indexed.lastAccessedAt, loaded!.lastAccessedAt);
-});
+		const [indexed] = await manager.listSessions();
+		t.is(indexed.lastAccessedAt, explicitPast);
+	},
+);
 
 // --- renameSession ---
 
@@ -892,10 +893,14 @@ test.serial('renameSession persists the new title and sets the flag', async t =>
 		messages: [],
 	});
 
+	const originalLastAccessed = session.lastAccessedAt;
+	await new Promise(r => setTimeout(r, 10));
+
 	const renamed = await manager.renameSession(session.id, 'New title');
 	t.truthy(renamed);
 	t.is(renamed!.title, 'New title');
 	t.is(renamed!.titleManuallySet, true);
+	t.not(renamed!.lastAccessedAt, originalLastAccessed);
 
 	const loaded = await manager.readSession(session.id);
 	t.is(loaded!.title, 'New title');

@@ -1,3 +1,4 @@
+import {mkdirSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -13,10 +14,12 @@ import {sessionManager} from '@/session/session-manager';
 console.log('\nacp-agent.spec.ts');
 
 // Isolate preferences writes (setSessionConfigOption persists last-used model).
-process.env.NANOCODER_CONFIG_DIR = join(
-	tmpdir(),
-	`nanocoder-acp-test-${Date.now()}`,
-);
+const testConfigDir = join(tmpdir(), `nanocoder-acp-test-${Date.now()}`);
+process.env.NANOCODER_CONFIG_DIR = testConfigDir;
+
+// Provider config is read from cwd, so chdir to keep a local agents.config.json from leaking in.
+mkdirSync(testConfigDir, {recursive: true});
+process.chdir(testConfigDir);
 
 // extMethod's renameSession touches the sessionManager singleton, which
 // otherwise defaults to the real app-data directory (~/.local/share/nanocoder
