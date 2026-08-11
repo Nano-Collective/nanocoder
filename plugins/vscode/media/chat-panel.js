@@ -1115,6 +1115,12 @@
 			}
 		});
 
+		// Within each date bucket, show most-recently-used first. Sessions
+		// without an updatedAt (shouldn't normally happen) sort to the end.
+		Object.values(groups).forEach(sessions => {
+			sessions.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+		});
+
 		Object.entries(groups).forEach(([groupName, sessions]) => {
 			if (sessions.length === 0) return;
 
@@ -1163,6 +1169,9 @@
 					const input = document.createElement('input');
 					input.type = 'text';
 					input.value = session.label;
+					// Matches MAX_SESSION_NAME_LENGTH in source/constants.ts - fail
+					// locally instead of round-tripping to a backend error toast.
+					input.maxLength = 100;
 					input.className = 'block w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-focus rounded px-1 py-0.5 text-[0.9em]';
 
 					const finish = (commit) => {

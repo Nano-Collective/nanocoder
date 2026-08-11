@@ -150,8 +150,10 @@ export function useSessionAutosave({
 						// Write the full history — no truncation.
 						session.messages = capturedMessages;
 						session.messageCount = capturedMessages.length;
-						// A manually-renamed title (VS Code extension or /rename in
-						// the CLI) sticks — don't let the auto-derived title clobber it.
+						// A manually-renamed title sticks — don't let the auto-derived
+						// title clobber it. Currently only the VS Code extension's
+						// rename sets this flag; the CLI's /rename command only
+						// updates in-memory display state and never reaches disk.
 						if (!session.titleManuallySet) {
 							session.title = title;
 						}

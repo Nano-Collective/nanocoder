@@ -8,6 +8,7 @@ import {
 	setToolRegistryGetter,
 	setToolManagerGetter,
 } from '@/message-handler';
+import {sessionManager} from '@/session/session-manager';
 
 console.log('\nacp-agent.spec.ts');
 
@@ -15,6 +16,14 @@ console.log('\nacp-agent.spec.ts');
 process.env.NANOCODER_CONFIG_DIR = join(
 	tmpdir(),
 	`nanocoder-acp-test-${Date.now()}`,
+);
+
+// extMethod's renameSession touches the sessionManager singleton, which
+// otherwise defaults to the real app-data directory (~/.local/share/nanocoder
+// or platform equivalent) — isolate it the same way NANOCODER_CONFIG_DIR is above.
+process.env.NANOCODER_DATA_DIR = join(
+	tmpdir(),
+	`nanocoder-acp-test-data-${Date.now()}`,
 );
 
 // ============================================================================
@@ -452,3 +461,66 @@ test('AcpAgent.authenticate - returns empty response', async t => {
 	const result = await agent.authenticate({} as any);
 	t.deepEqual(result, {});
 });
+
+// ============================================================================
+// extMethod()
+// ============================================================================
+
+test.serial(
+	'AcpAgent.extMethod - renameSession renames an existing session',
+	async t => {
+		const {agent} = createAgent();
+		await sessionManager.initialize();
+		const session = await sessionManager.createSession({
+			title: 'Original title',
+			messageCount: 0,
+			provider: 'test',
+			model: 'test',
+			workingDirectory: '/tmp',
+			messages: [],
+		});
+
+		const result = await agent.extMethod('renameSession', {
+			sessionId: session.id,
+			title: 'Renamed',
+		});
+		t.deepEqual(result, {title: 'Renamed'});
+
+		const loaded = await sessionManager.readSession(session.id);
+		t.is(loaded!.title, 'Renamed');
+		t.is(loaded!.titleManuallySet, true);
+	},
+);
+
+test('AcpAgent.extMethod - throws for an unknown method', async t => {
+	const {agent} = createAgent();
+	await t.throwsAsync(agent.extMethod('bogus', {}), {
+		message: 'Unknown extension method: bogus',
+	});
+});
+
+test('AcpAgent.extMethod - renameSession throws on non-string sessionId/title', async t => {
+	const {agent} = createAgent();
+	await t.throwsAsync(
+		agent.extMethod('renameSession', {sessionId: 123, title: 'ok'}),
+		{message: /requires string sessionId and title/},
+	);
+	await t.throwsAsync(
+		agent.extMethod('renameSession', {sessionId: 'ok', title: undefined}),
+		{message: /requires string sessionId and title/},
+	);
+});
+
+test.serial(
+	'AcpAgent.extMethod - renameSession throws for a session that does not exist on disk',
+	async t => {
+		const {agent} = createAgent();
+		await t.throwsAsync(
+			agent.extMethod('renameSession', {
+				sessionId: '00000000-0000-0000-0000-000000000000',
+				title: 'Renamed',
+			}),
+			{message: /Session not found on disk/},
+		);
+	},
+);
