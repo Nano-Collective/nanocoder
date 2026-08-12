@@ -306,11 +306,11 @@ export class NanocoderAcpClient {
 		this._clearPendingPermissions();
 		this._sessionId = undefined;
 	}
-/**
-* Send a prompt and return the agent's PromptResponse (carries the
-* experimental per-turn `usage` field plus `_meta` extensions such as
-* the estimated cost). Returns undefined on failure.
-*/
+	/**
+	 * Send a prompt and return the agent's PromptResponse (carries the
+	 * experimental per-turn `usage` field plus `_meta` extensions such as
+	 * the estimated cost). Returns undefined on failure.
+	 */
 	async prompt(text: string, images?: { data: string, mimeType: string }[]): Promise<import('@agentclientprotocol/sdk').PromptResponse | undefined> {
 		if (!this.connection || !this._sessionId) return undefined;
 		this.cancelRequested = false;
@@ -330,7 +330,7 @@ export class NanocoderAcpClient {
 			if (!this.cancelRequested) {
 				vscode.window.showErrorMessage(`Nanocoder prompt failed: ${error}`);
 			}
-      return undefined;
+			return undefined;
 		} finally {
 			this.cancelRequested = false;
 		}

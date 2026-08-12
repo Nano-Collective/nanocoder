@@ -86,6 +86,8 @@
 				"command": "nanocoder.cancel",
 				"title": "Cancel Current Response",
 				"category": "Nanocoder"
+			},
+			{
 				"command": "nanocoder.copyLastCodeBlock",
 				"title": "Copy Last Code Block",
 				"category": "Nanocoder"
