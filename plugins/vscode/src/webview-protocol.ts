@@ -192,7 +192,6 @@ export interface WebviewMessageRenameSession {
 	type: 'renameSession';
 	sessionId: string;
 	title: string;
-
 }
 export interface WebviewMessageRequestPathInfo {
 	type: 'requestPathInfo';

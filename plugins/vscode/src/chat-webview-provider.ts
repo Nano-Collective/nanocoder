@@ -174,6 +174,37 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 							this._broadcastSessions();
 						});
 						break;
+					case 'requestPathInfo': {
+						try {
+							const stat = fs.statSync(message.path);
+							const kind = stat.isDirectory() ? 'folder' : 'file';
+							const name = path.basename(message.path);
+							this.postMessage({ type: 'pathInfoResolved', path: message.path, name, kind });
+						} catch {
+							// path doesn't exist or access denied — silently ignore
+						}
+						break;
+					}
+					case 'requestOpenDialog': {
+						vscode.window.showOpenDialog({
+							canSelectFiles: true,
+							canSelectFolders: true,
+							canSelectMany: true,
+							openLabel: 'Attach'
+						}).then(uris => {
+							if (uris && uris.length > 0) {
+								uris.forEach(uri => {
+									try {
+										const stat = fs.statSync(uri.fsPath);
+										const kind = stat.isDirectory() ? 'folder' : 'file';
+										const name = path.basename(uri.fsPath);
+										this.postMessage({ type: 'pathInfoResolved', path: uri.fsPath, name, kind });
+									} catch {}
+								});
+							}
+						});
+						break;
+					}
 				}
 			}
 		);
