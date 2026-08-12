@@ -280,3 +280,53 @@ test.serial(
 		);
 	},
 );
+
+// ---------------------------------------------------------------------------
+// Bug D — lastAccessedAt never bumped by autosave
+// ---------------------------------------------------------------------------
+//
+// autosave's update path (read session, mutate fields, saveSession) never
+// touched lastAccessedAt, so a session that's actively being chatted in kept
+// showing its create/resume time as "last used" until closed and reopened.
+// The fix sets lastAccessedAt = now() in the update path itself, right
+// before saveSession - saveSession() trusts whatever it's given, it doesn't
+// bump anything on its own (other callers, e.g. resolve-session.spec.ts's
+// test helpers, rely on being able to set an explicit lastAccessedAt).
+
+test.serial(
+	'D: autosave update path bumps lastAccessedAt on every save',
+	async t => {
+		const dir = await mkdtemp(join(tmpdir(), 'nc-lastaccessed-'));
+		t.teardown(() => rm(dir, {recursive: true, force: true}));
+
+		const manager = new SessionManager(dir);
+		await manager.initialize();
+
+		const created = await manager.createSession({
+			title: 'Original',
+			messageCount: 1,
+			provider: 'test',
+			model: 'test',
+			workingDirectory: dir,
+			messages: makeMessages(1),
+		});
+		const originalLastAccessed = created.lastAccessedAt;
+
+		await new Promise(r => setTimeout(r, 10));
+
+		// Mirrors the hook's update path (source/hooks/useSessionAutosave.ts).
+		const session = await manager.readSession(created.id);
+		if (!session) throw new Error('session missing');
+		session.messages = makeMessages(3);
+		session.messageCount = 3;
+		session.lastAccessedAt = new Date().toISOString();
+		await manager.saveSession(session);
+
+		const loaded = await manager.readSession(created.id);
+		t.not(
+			loaded!.lastAccessedAt,
+			originalLastAccessed,
+			'autosave must bump lastAccessedAt so "last used" reflects real activity',
+		);
+	},
+);

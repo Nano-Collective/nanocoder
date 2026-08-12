@@ -231,6 +231,12 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 							this._broadcastSessions();
 						});
 						break;
+					case 'renameSession':
+						this._outputChannel.appendLine(`[Webview] User renamed session: ${message.sessionId} -> ${message.title}`);
+						this._acpClient.renameSession(message.sessionId, message.title).then(() => {
+							this._broadcastSessions();
+						});
+						break;
 					case 'requestPathInfo': {
 						try {
 							const stat = fs.statSync(message.path);
@@ -401,9 +407,18 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				}
 			});
 
-			await this._acpClient.prompt(expandedText, images);
-			// Signal turn completion so the Webview can flip back to the send button
-			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}});
+			const response = await this._acpClient.prompt(expandedText, images);
+			// Signal turn completion so the Webview can flip back to the send
+			// button. Forward the per-turn token usage and estimated cost so
+			// the webview can render the usage indicator under the response.
+			this.postMessage({
+				type: 'acpUpdate',
+				update: {
+					sessionUpdate: 'prompt_response',
+					usage: response?.usage,
+					cost: (response?._meta as Record<string, any> | undefined)?.['nanocoder/usage']?.cost,
+				},
+			});
 		} catch (error) {
 			this._outputChannel.appendLine(`Prompt execution error: ${error}`);
 			vscode.window.showErrorMessage(`Nanocoder Prompt error: ${error}`);
