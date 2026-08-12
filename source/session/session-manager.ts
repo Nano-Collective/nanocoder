@@ -7,6 +7,7 @@ import {
 } from '@/artifacts/artifact-manager';
 import {getAppConfig} from '@/config/index';
 import {getAppDataPath} from '@/config/paths';
+import {MAX_SESSION_NAME_LENGTH} from '@/constants';
 import {isValidSessionId} from '@/session/session-id';
 import type {Message} from '@/types/core';
 
@@ -20,6 +21,9 @@ export interface Session {
 	model: string;
 	workingDirectory: string;
 	messages: Message[];
+	/** True once a user has explicitly renamed this session, so autosave's
+	 * auto-derived title (from the latest message) stops overwriting it. */
+	titleManuallySet?: boolean;
 }
 
 export interface SessionMetadata {
@@ -31,6 +35,7 @@ export interface SessionMetadata {
 	provider: string;
 	model: string;
 	workingDirectory: string;
+	titleManuallySet?: boolean;
 }
 
 function isRecord(obj: unknown): obj is Record<string, unknown> {
@@ -213,6 +218,7 @@ export class SessionManager {
 				provider: session.provider,
 				model: session.model,
 				workingDirectory: session.workingDirectory,
+				titleManuallySet: session.titleManuallySet,
 			};
 
 			if (existingSessionIndex >= 0) {
@@ -274,6 +280,7 @@ export class SessionManager {
 							provider: parsed.provider,
 							model: parsed.model,
 							workingDirectory: parsed.workingDirectory,
+							titleManuallySet: parsed.titleManuallySet,
 						});
 					}
 				} catch (_fileError) {
@@ -331,6 +338,35 @@ export class SessionManager {
 		// Update last accessed time
 		const updatedSession = {
 			...session,
+			lastAccessedAt: new Date().toISOString(),
+		};
+
+		await this.saveSession(updatedSession);
+		return updatedSession;
+	}
+
+	/** Persist a user-chosen title, marking it so autosave stops overwriting it. */
+	async renameSession(
+		sessionId: string,
+		title: string,
+	): Promise<Session | null> {
+		const trimmed = title.trim();
+		if (!trimmed) {
+			throw new Error('Session name cannot be empty.');
+		}
+		if (trimmed.length > MAX_SESSION_NAME_LENGTH) {
+			throw new Error(
+				`Session name must be ${MAX_SESSION_NAME_LENGTH} characters or less.`,
+			);
+		}
+
+		const session = await this.readSession(sessionId);
+		if (!session) return null;
+
+		const updatedSession: Session = {
+			...session,
+			title: trimmed,
+			titleManuallySet: true,
 			lastAccessedAt: new Date().toISOString(),
 		};
 

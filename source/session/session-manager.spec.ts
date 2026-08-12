@@ -895,3 +895,138 @@ test.serial(
 		t.is(jsonFiles.length, sessions.length);
 	},
 );
+
+// --- saveSession (lastAccessedAt) ---
+
+test.serial(
+	'saveSession trusts the caller-supplied lastAccessedAt (does not force "now")',
+	async t => {
+		// Callers (autosave, renameSession, and test helpers that simulate
+		// time passing) rely on being able to set an explicit lastAccessedAt
+		// via saveSession(). It must not silently override that value.
+		const session = await manager.createSession({
+			title: 'Explicit timestamp test',
+			messageCount: 1,
+			provider: 'test',
+			model: 'test',
+			workingDirectory: '/tmp',
+			messages: [{role: 'user', content: 'hi'}],
+		});
+
+		const explicitPast = new Date(Date.now() - 60_000).toISOString();
+		await manager.saveSession({...session, lastAccessedAt: explicitPast});
+
+		const loaded = await manager.readSession(session.id);
+		t.is(loaded!.lastAccessedAt, explicitPast);
+
+		const [indexed] = await manager.listSessions();
+		t.is(indexed.lastAccessedAt, explicitPast);
+	},
+);
+
+// --- renameSession ---
+
+test.serial('renameSession persists the new title and sets the flag', async t => {
+	const session = await manager.createSession({
+		title: 'Original title',
+		messageCount: 0,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [],
+	});
+
+	const originalLastAccessed = session.lastAccessedAt;
+	await new Promise(r => setTimeout(r, 10));
+
+	const renamed = await manager.renameSession(session.id, 'New title');
+	t.truthy(renamed);
+	t.is(renamed!.title, 'New title');
+	t.is(renamed!.titleManuallySet, true);
+	t.not(renamed!.lastAccessedAt, originalLastAccessed);
+
+	const loaded = await manager.readSession(session.id);
+	t.is(loaded!.title, 'New title');
+	t.is(loaded!.titleManuallySet, true);
+});
+
+test.serial('renameSession trims surrounding whitespace', async t => {
+	const session = await manager.createSession({
+		title: 'Original',
+		messageCount: 0,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [],
+	});
+
+	const renamed = await manager.renameSession(session.id, '  Trimmed  ');
+	t.is(renamed!.title, 'Trimmed');
+});
+
+test.serial('renameSession rejects an empty title', async t => {
+	const session = await manager.createSession({
+		title: 'Original',
+		messageCount: 0,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [],
+	});
+
+	await t.throwsAsync(() => manager.renameSession(session.id, '   '), {
+		message: /cannot be empty/,
+	});
+});
+
+test.serial('renameSession rejects an over-length title', async t => {
+	const session = await manager.createSession({
+		title: 'Original',
+		messageCount: 0,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [],
+	});
+
+	await t.throwsAsync(
+		() => manager.renameSession(session.id, 'x'.repeat(101)),
+		{message: /100 characters or less/},
+	);
+});
+
+test.serial('renameSession returns null for a non-existent session', async t => {
+	const result = await manager.renameSession(
+		'00000000-0000-0000-0000-000000000000',
+		'New title',
+	);
+	t.is(result, null);
+});
+
+test.serial(
+	'renameSession-set title survives a later autosave-style save',
+	async t => {
+		const session = await manager.createSession({
+			title: 'Original',
+			messageCount: 0,
+			provider: 'test',
+			model: 'test',
+			workingDirectory: '/tmp',
+			messages: [],
+		});
+
+		const renamed = await manager.renameSession(session.id, 'Kept title');
+		t.truthy(renamed);
+
+		// Simulate autosave deriving a new title from the latest message,
+		// but respecting titleManuallySet (same guard as useSessionAutosave.ts).
+		const reread = await manager.readSession(session.id);
+		if (!reread!.titleManuallySet) {
+			reread!.title = 'Auto-derived title';
+		}
+		await manager.saveSession(reread!);
+
+		const loaded = await manager.readSession(session.id);
+		t.is(loaded!.title, 'Kept title');
+	},
+);

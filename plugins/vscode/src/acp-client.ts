@@ -280,8 +280,13 @@ export class NanocoderAcpClient {
 		this.onSessionArtifacts?.(undefined);
 	}
 
-	async prompt(text: string, images?: { data: string, mimeType: string }[]): Promise<void> {
-		if (!this.connection || !this._sessionId) return;
+	/**
+	 * Send a prompt and return the agent's PromptResponse (carries the
+	 * experimental per-turn `usage` field plus `_meta` extensions such as
+	 * the estimated cost). Returns undefined on failure.
+	 */
+	async prompt(text: string, images?: { data: string, mimeType: string }[]): Promise<import('@agentclientprotocol/sdk').PromptResponse | undefined> {
+		if (!this.connection || !this._sessionId) return undefined;
 		const attempt = new PromptAttempt();
 		this.activePrompt = attempt;
 		try {
@@ -291,7 +296,7 @@ export class NanocoderAcpClient {
 					promptData.push({ type: 'image', data: img.data, mimeType: img.mimeType });
 				}
 			}
-			await this.connection.prompt({
+			return await this.connection.prompt({
 				sessionId: this._sessionId,
 				prompt: promptData
 			});
@@ -302,6 +307,7 @@ export class NanocoderAcpClient {
 				this.outputChannel.appendLine(`Prompt failed: ${error}`);
 				vscode.window.showErrorMessage(`Nanocoder prompt failed: ${error}`);
 			}
+			return undefined;
 		} finally {
 			if (this.activePrompt === attempt) {
 				this.activePrompt = undefined;
@@ -362,7 +368,7 @@ export class NanocoderAcpClient {
 		return false; 
 	}
 
-	async listSessions(): Promise<Array<{sessionId: string; cwd: string; title?: string | null}>> {
+	async listSessions(): Promise<Array<{sessionId: string; cwd: string; title?: string | null; updatedAt?: string | null}>> {
 		if (!this.connection) return [];
 		try {
 			const result = await this.connection.listSessions({});
@@ -370,10 +376,21 @@ export class NanocoderAcpClient {
 				sessionId: s.sessionId,
 				cwd: s.cwd,
 				title: s.title,
+				updatedAt: s.updatedAt,
 			}));
 		} catch (error) {
 			this.outputChannel.appendLine(`listSessions failed: ${error}`);
 			return [];
+		}
+	}
+
+	async renameSession(sessionId: string, title: string): Promise<void> {
+		if (!this.connection) return;
+		try {
+			await this.connection.extMethod('renameSession', {sessionId, title});
+		} catch (error) {
+			this.outputChannel.appendLine(`renameSession failed: ${error}`);
+			vscode.window.showErrorMessage(`Failed to rename session: ${error}`);
 		}
 	}
 

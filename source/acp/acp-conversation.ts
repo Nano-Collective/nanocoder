@@ -27,6 +27,7 @@ import {parseToolCalls} from '@/tool-calling/index';
 import {resolveToolApproval} from '@/tools/approval-policy';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
+	ApiUsage,
 	DevelopmentMode,
 	LLMClient,
 	Message,
@@ -35,6 +36,7 @@ import type {
 	ToolCall,
 	ToolResult,
 } from '@/types/core';
+import {buildResponseUsage} from '@/usage/response-usage';
 import {capMessagesForModel} from '@/utils/message-capping';
 import {createCancellationResults} from '@/utils/tool-cancellation';
 import {toOptionString} from '@/utils/type-helpers';
@@ -77,13 +79,78 @@ export async function runAcpConversation(
 	const walkthroughLifecycle = createWalkthroughLifecycle(messages);
 	let wrotePlan = false;
 
+	// Provider-reported usage accumulated across this prompt's model calls,
+	// returned on the PromptResponse (experimental ACP `usage` field) so
+	// clients like the VS Code extension can show a per-response indicator.
+	// Fields stay undefined until a finite value arrives: zero-filling
+	// unreported input/output would route a total-only report into the
+	// input/output cost branch of buildResponseUsage and price it at $0.
+	const turnUsage: ApiUsage = {};
+
+	const recordUsage = (usage: ApiUsage | undefined) => {
+		if (!usage) return;
+		if (Number.isFinite(usage.inputTokens)) {
+			turnUsage.inputTokens =
+				(turnUsage.inputTokens ?? 0) + (usage.inputTokens as number);
+		}
+		if (Number.isFinite(usage.outputTokens)) {
+			turnUsage.outputTokens =
+				(turnUsage.outputTokens ?? 0) + (usage.outputTokens as number);
+		}
+		// Keep the running total consistent when a call reports only
+		// input/output: add their sum so mixed-report turns don't understate.
+		const total = Number.isFinite(usage.totalTokens)
+			? (usage.totalTokens as number)
+			: Number.isFinite(usage.inputTokens) ||
+					Number.isFinite(usage.outputTokens)
+				? ((usage.inputTokens as number) || 0) +
+					((usage.outputTokens as number) || 0)
+				: undefined;
+		if (total !== undefined) {
+			turnUsage.totalTokens = (turnUsage.totalTokens ?? 0) + total;
+		}
+	};
+
+	// Attach accumulated usage (and best-effort estimated cost via _meta) to
+	// a turn-ending response. A no-op when no model call reported usage.
+	const withTurnUsage = async (
+		response: PromptResponse,
+	): Promise<PromptResponse> => {
+		const usageReported =
+			turnUsage.inputTokens !== undefined ||
+			turnUsage.outputTokens !== undefined ||
+			turnUsage.totalTokens !== undefined;
+		if (!usageReported) return response;
+		// Cost is computed from the sparse accumulators so a total-only turn
+		// takes the lump-sum averaging branch instead of pricing 0+0 tokens.
+		const priced = await buildResponseUsage(
+			turnUsage,
+			client.getCurrentModel(),
+		);
+		const input = turnUsage.inputTokens ?? 0;
+		const output = turnUsage.outputTokens ?? 0;
+		return {
+			...response,
+			// The ACP Usage type requires all three fields, so unreported ones
+			// are zero-filled here — on the wire only, after cost is computed.
+			usage: {
+				inputTokens: input,
+				outputTokens: output,
+				totalTokens: turnUsage.totalTokens ?? input + output,
+			},
+			...(priced?.cost != null
+				? {_meta: {'nanocoder/usage': {cost: priced.cost}}}
+				: {}),
+		};
+	};
+
 	const maxTurns =
 		getAppConfig().headless?.maxTurns ?? DEFAULT_HEADLESS_MAX_TURNS;
 
 	for (let turn = 0; turn < maxTurns; turn++) {
 		if (abortController.signal.aborted) {
 			session.messages = messages;
-			return {stopReason: 'cancelled'};
+			return withTurnUsage({stopReason: 'cancelled'});
 		}
 
 		// On the final turn, force a tool-free wrap-up so we end with an answer
@@ -127,7 +194,7 @@ export async function runAcpConversation(
 
 		const systemMessage = session.systemMessage;
 		if (!systemMessage) {
-			return {stopReason: 'end_turn'};
+			return withTurnUsage({stopReason: 'end_turn'});
 		}
 
 		const sessionConfig = getAppConfig().sessions;
@@ -155,8 +222,10 @@ export async function runAcpConversation(
 			throw error;
 		}
 
+		recordUsage(result?.usage);
+
 		if (!result || !result.choices || result.choices.length === 0) {
-			return {stopReason: 'end_turn'};
+			return withTurnUsage({stopReason: 'end_turn'});
 		}
 
 		const message = result.choices[0].message;
@@ -169,7 +238,7 @@ export async function runAcpConversation(
 				: {success: true as const, toolCalls: [], cleanedContent: fullContent};
 
 		if (!xmlParse.success) {
-			return {stopReason: 'end_turn'};
+			return withTurnUsage({stopReason: 'end_turn'});
 		}
 
 		const allToolCalls: ToolCall[] = [
@@ -252,7 +321,7 @@ export async function runAcpConversation(
 				continue;
 			}
 			session.messages = messages;
-			return {stopReason: 'end_turn'};
+			return withTurnUsage({stopReason: 'end_turn'});
 		}
 
 		// Process tool calls
@@ -326,7 +395,7 @@ export async function runAcpConversation(
 						),
 					);
 					session.messages = [...messages, ...toolResults];
-					return {stopReason: 'cancelled'};
+					return withTurnUsage({stopReason: 'cancelled'});
 				}
 
 				if (permission === 'denied') {
@@ -436,12 +505,12 @@ export async function runAcpConversation(
 		// another LLM request before the top-of-turn abort check runs.
 		if (abortController.signal.aborted) {
 			session.messages = messages;
-			return {stopReason: 'cancelled'};
+			return withTurnUsage({stopReason: 'cancelled'});
 		}
 	}
 
 	session.messages = messages;
-	return {stopReason: 'max_turn_requests'};
+	return withTurnUsage({stopReason: 'max_turn_requests'});
 }
 
 async function executePlanFallback(
