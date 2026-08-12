@@ -177,6 +177,7 @@
 				"nanocoder.codeLens": {
 					"type": "boolean",
 					"default": true,
+					"scope": "resource",
 					"description": "Show Explain Code / Generate Tests actions above functions and classes in the editor."
 				}
 			}

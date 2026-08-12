@@ -111,16 +111,17 @@ export function activate(context: vscode.ExtensionContext) {
 	// class, so a symbol can be handed to the agent without leaving the editor.
 	const codeLensProvider = new NanocoderCodeLensProvider();
 	context.subscriptions.push(
+		codeLensProvider,
 		vscode.languages.registerCodeLensProvider({scheme: 'file'}, codeLensProvider),
 		vscode.workspace.onDidChangeConfiguration(event => {
 			if (event.affectsConfiguration('nanocoder.codeLens')) {
 				codeLensProvider.refresh();
 			}
 		}),
-		vscode.commands.registerCommand('nanocoder.explainCode', (uri: vscode.Uri, range: vscode.Range) =>
+		vscode.commands.registerCommand('nanocoder.explainCode', (uri?: vscode.Uri, range?: vscode.Range) =>
 			sendCodeLensPrompt(chatProvider, 'Explain what this code does.', uri, range),
 		),
-		vscode.commands.registerCommand('nanocoder.generateTests', (uri: vscode.Uri, range: vscode.Range) =>
+		vscode.commands.registerCommand('nanocoder.generateTests', (uri?: vscode.Uri, range?: vscode.Range) =>
 			sendCodeLensPrompt(chatProvider, 'Write unit tests for this code.', uri, range),
 		),
 	);
@@ -424,7 +425,7 @@ const LENS_SYMBOL_KINDS = new Set([
 	vscode.SymbolKind.Class,
 ]);
 
-class NanocoderCodeLensProvider implements vscode.CodeLensProvider {
+class NanocoderCodeLensProvider implements vscode.CodeLensProvider, vscode.Disposable {
 	private readonly _onDidChangeCodeLenses = new vscode.EventEmitter<void>();
 	public readonly onDidChangeCodeLenses = this._onDidChangeCodeLenses.event;
 
@@ -432,11 +433,17 @@ class NanocoderCodeLensProvider implements vscode.CodeLensProvider {
 		this._onDidChangeCodeLenses.fire();
 	}
 
+	public dispose(): void {
+		this._onDidChangeCodeLenses.dispose();
+	}
+
 	public async provideCodeLenses(
 		document: vscode.TextDocument,
 		token: vscode.CancellationToken,
 	): Promise<vscode.CodeLens[]> {
-		const config = vscode.workspace.getConfiguration('nanocoder');
+		// Scoped to the document so a folder-level override wins in a
+		// multi-root workspace.
+		const config = vscode.workspace.getConfiguration('nanocoder', document.uri);
 		if (!config.get<boolean>('codeLens', true)) {
 			return [];
 		}
@@ -488,9 +495,18 @@ class NanocoderCodeLensProvider implements vscode.CodeLensProvider {
 async function sendCodeLensPrompt(
 	chatProvider: ChatWebviewProvider,
 	instruction: string,
-	uri: vscode.Uri,
-	range: vscode.Range,
+	uri?: vscode.Uri,
+	range?: vscode.Range,
 ): Promise<void> {
+	// The commands are hidden from the palette, but a keybinding or another
+	// extension can still invoke them with no lens arguments.
+	if (!uri || !range) {
+		vscode.window.showInformationMessage(
+			'Nanocoder: use the Explain Code / Generate Tests links above a function to run this.',
+		);
+		return;
+	}
+
 	const document = await vscode.workspace.openTextDocument(uri);
 	const location = `${vscode.workspace.asRelativePath(uri)}:${range.start.line + 1}-${range.end.line + 1}`;
 	await chatProvider.sendPrompt(
