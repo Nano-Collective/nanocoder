@@ -3,6 +3,7 @@ import {Text} from 'ink';
 import {readdirSync, readFileSync, statSync} from 'node:fs';
 import {join} from 'node:path';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {renderWithTheme} from '@/test-utils/render-with-theme';
 
@@ -16,7 +17,7 @@ test('StyledSelectInput marks the highlighted row with the "> " indicator', t =>
 		<StyledSelectInput items={items} onSelect={() => {}} />,
 	);
 
-	const lines = (lastFrame() ?? '').split('\n');
+	const lines = stripAnsi(lastFrame() ?? '').split('\n');
 	t.regex(lines[0] ?? '', /^>\s+First option/);
 	t.regex(lines[1] ?? '', /^\s+Second option/);
 	unmount();
@@ -27,7 +28,7 @@ test('StyledSelectInput forwards initialIndex to the highlighted row', t => {
 		<StyledSelectInput items={items} initialIndex={1} onSelect={() => {}} />,
 	);
 
-	const lines = (lastFrame() ?? '').split('\n');
+	const lines = stripAnsi(lastFrame() ?? '').split('\n');
 	t.regex(lines[1] ?? '', /^>\s+Second option/);
 	unmount();
 });
@@ -41,7 +42,7 @@ test('StyledSelectInput keeps the themed indicator for a custom itemComponent', 
 		/>,
 	);
 
-	const lines = (lastFrame() ?? '').split('\n');
+	const lines = stripAnsi(lastFrame() ?? '').split('\n');
 	t.regex(lines[0] ?? '', /^>\s+FIRST OPTION/);
 	unmount();
 });
