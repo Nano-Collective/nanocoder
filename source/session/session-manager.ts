@@ -365,6 +365,7 @@ export class SessionManager {
 			...session,
 			title: trimmed,
 			titleManuallySet: true,
+			lastAccessedAt: new Date().toISOString(),
 		};
 
 		await this.saveSession(updatedSession);

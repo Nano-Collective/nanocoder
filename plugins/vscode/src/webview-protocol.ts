@@ -192,6 +192,31 @@ export interface WebviewMessageRenameSession {
 	type: 'renameSession';
 	sessionId: string;
 	title: string;
+
+}
+export interface WebviewMessageRequestPathInfo {
+	type: 'requestPathInfo';
+	path: string;
+}
+
+export interface WebviewMessageRequestOpenDialog {
+	type: 'requestOpenDialog';
+}
+
+export interface WebviewMessageOpenPath {
+	type: 'openPath';
+	path: string;
+	kind: 'file' | 'folder';
+}
+
+export interface WebviewMessageShowError {
+	type: 'showError';
+	message: string;
+}
+
+export interface WebviewMessageCopyToClipboard {
+	type: 'copyToClipboard';
+	text: string;
 }
 
 export type WebviewToExtensionMessage =
@@ -208,4 +233,9 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageListSessions
 	| WebviewMessageResumeSession
 	| WebviewMessageDeleteSession
-	| WebviewMessageRenameSession;
+	| WebviewMessageRenameSession
+	| WebviewMessageRequestPathInfo
+	| WebviewMessageRequestOpenDialog
+	| WebviewMessageOpenPath
+	| WebviewMessageShowError
+	| WebviewMessageCopyToClipboard;

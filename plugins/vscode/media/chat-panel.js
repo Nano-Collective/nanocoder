@@ -197,6 +197,23 @@
 		if (diffDay < 7) return `${diffDay}d ago`;
 		return date.toLocaleDateString();
 	}
+		arrowRight: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>`,
+		edit: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>`
+	};
+
+	function formatRelativeTime(iso) {
+		if (!iso) return '';
+		const date = new Date(iso);
+		if (isNaN(date.getTime())) return '';
+		const diffMin = Math.floor((Date.now() - date.getTime()) / 60000);
+		if (diffMin < 1) return 'Just now';
+		if (diffMin < 60) return `${diffMin}m ago`;
+		const diffHr = Math.floor(diffMin / 60);
+		if (diffHr < 24) return `${diffHr}h ago`;
+		const diffDay = Math.floor(diffHr / 24);
+		if (diffDay < 7) return `${diffDay}d ago`;
+		return date.toLocaleDateString();
+	}
 
 	function createMessageFooter(getText, role, sentAt) {
 		const footer = document.createElement('div');
@@ -1028,6 +1045,42 @@
 		vscode.postMessage({ type: 'copyToClipboard', text: lastAgentRawText });
 	}
 
+	// Compact token formatting: 812, 4.2k, 12k, 1.3M. Mirrors the CLI's
+	// per-response indicator formatting (source/usage/format.ts).
+	function formatCompactTokens(tokens) {
+		if (!Number.isFinite(tokens) || tokens <= 0) return '0';
+		if (tokens < 1000) return String(Math.round(tokens));
+		const scaled = tokens < 1000000 ? tokens / 1000 : tokens / 1000000;
+		const suffix = tokens < 1000000 ? 'k' : 'M';
+		const num = scaled >= 100
+			? String(Math.round(scaled))
+			: scaled.toFixed(1).replace(/\.0$/, '');
+		return num + suffix;
+	}
+
+	// Render a small grayed-out usage line (e.g. "Tokens: 4.2k | ~$0.01")
+	// under the finished response. Cost is omitted when unknown (local models).
+	function appendUsageIndicator(usage, cost) {
+		if (!usage) return;
+		const total = Number.isFinite(usage.totalTokens)
+			? usage.totalTokens
+			: (Number.isFinite(usage.inputTokens) ? usage.inputTokens : 0) +
+				(Number.isFinite(usage.outputTokens) ? usage.outputTokens : 0);
+		if (!total) return;
+
+		let text = 'Tokens: ' + formatCompactTokens(total);
+		if (Number.isFinite(cost) && cost > 0) {
+			text += cost < 0.01 ? ' | <$0.01' : ' | ~$' + cost.toFixed(2);
+		}
+
+		endCurrentTextBlock();
+		const el = document.createElement('div');
+		el.className = 'self-start text-[0.8em] opacity-50 shrink-0 mb-1';
+		el.textContent = text;
+		messagesContainer.appendChild(el);
+		scrollToBottom();
+	}
+
 	// Handle messages from extension.
 	// No origin check: this is a VS Code webview, not a browser page. The
 	// extension host is the only sender, and chat-panel.html sets
@@ -1053,7 +1106,9 @@
 				appendMessage(message.content, 'agent');
 				break;
 			case 'clear':
-				if (isHistoryView) showChatView();
+				// Session reset (new chat or resume) should return to the active
+				// chat view, not leave the panel stuck on the history list.
+				showChatView();
 				if (renderTimeout) { clearTimeout(renderTimeout); renderTimeout = null; }
 				if (message.isLoading) {
 					messagesContainer.innerHTML = `<div id="session-loader" class="flex flex-col items-center justify-center h-full opacity-50 mt-10">${ICONS.pending}<div class="mt-2 text-xs">Loading session...</div></div>`;
@@ -1144,6 +1199,12 @@
 			}
 		});
 
+		// Within each date bucket, show most-recently-used first. Sessions
+		// without an updatedAt (shouldn't normally happen) sort to the end.
+		Object.values(groups).forEach(sessions => {
+			sessions.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+		});
+
 		Object.entries(groups).forEach(([groupName, sessions]) => {
 			if (sessions.length === 0) return;
 
@@ -1192,6 +1253,9 @@
 					const input = document.createElement('input');
 					input.type = 'text';
 					input.value = session.label;
+					// Matches MAX_SESSION_NAME_LENGTH in source/constants.ts - fail
+					// locally instead of round-tripping to a backend error toast.
+					input.maxLength = 100;
 					input.className = 'block w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-focus rounded px-1 py-0.5 text-[0.9em]';
 
 					const finish = (commit) => {
@@ -1317,6 +1381,8 @@
 				currentThoughtBox.finish();
 				currentThoughtBox = null;
 			}
+			// Show token usage (and estimated cost) for the finished turn
+			appendUsageIndicator(update.usage, update.cost);
 			// Turn is complete — restore the send button
 			setProcessing(false);
 		}

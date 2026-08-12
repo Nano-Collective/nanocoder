@@ -737,7 +737,9 @@ export class AcpAgent implements Agent {
 				return;
 			}
 
-			// Simple title generation if it's new
+			// Simple title generation if it's new. A user-renamed title is never
+			// auto-derived over — the flag below is what tells the CLI's autosave
+			// the same thing, so it has to be carried forward on every save.
 			let title = existingSession?.title;
 			if (!title || title === 'New Session') {
 				const firstUserMessage = saveableMessages.find(m => m.role === 'user');
@@ -751,6 +753,7 @@ export class AcpAgent implements Agent {
 			await sessionManager.saveSession({
 				id: session.sessionId,
 				title,
+				titleManuallySet: existingSession?.titleManuallySet,
 				createdAt: existingSession?.createdAt || timestamp,
 				lastAccessedAt: timestamp,
 				messageCount: saveableMessages.length,
