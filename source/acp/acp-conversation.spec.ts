@@ -291,6 +291,42 @@ test('runAcpConversation - onReasoningToken sends agent_thought_chunk updates', 
 	t.is(thoughtUpdates[0].update.content.text, 'thinking...');
 });
 
+test('runAcpConversation - skips agent_thought_chunk for leading whitespace-only reasoning', async t => {
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn);
+	let capturedCallbacks: any = null;
+	const client = {
+		chat: async (_msgs: any, _tools: any, callbacks: any) => {
+			capturedCallbacks = callbacks;
+			return {
+				choices: [{message: {content: 'done'}}],
+			};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: createMockToolManager() as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.truthy(capturedCallbacks);
+	capturedCallbacks.onReasoningToken('\n\n');
+	capturedCallbacks.onReasoningToken('Analyzing the request');
+	capturedCallbacks.onReasoningToken('\n\n');
+	capturedCallbacks.onReasoningToken('then answering');
+
+	const thoughtUpdates = updates.filter(
+		(u: any) => u.update.sessionUpdate === 'agent_thought_chunk',
+	);
+	t.deepEqual(
+		thoughtUpdates.map((u: any) => u.update.content.text),
+		['Analyzing the request', '\n\n', 'then answering'],
+	);
+});
+
 // ============================================================================
 // Unknown tool
 // ============================================================================

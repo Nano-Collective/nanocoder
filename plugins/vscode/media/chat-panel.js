@@ -1719,12 +1719,13 @@
 				appendChunk(update.content.text);
 			}
 		} else if (update.sessionUpdate === 'agent_thought_chunk') {
-			if (!currentThoughtBox) {
-				endCurrentTextBlock();
-				currentThoughtBox = new ThoughtAggregator();
-			}
-			if (update.content && update.content.text) {
-				currentThoughtBox.append(update.content.text);
+			const thoughtText = update.content && update.content.text;
+			if (thoughtText && (currentThoughtBox || thoughtText.trim())) {
+				if (!currentThoughtBox) {
+					endCurrentTextBlock();
+					currentThoughtBox = new ThoughtAggregator();
+				}
+				currentThoughtBox.append(thoughtText);
 			}
 		} else if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
 			if (currentThoughtBox) {

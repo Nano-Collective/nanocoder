@@ -147,7 +147,11 @@ export async function runAcpConversation(
 
 		const callbacks: StreamCallbacks = {
 			onReasoningToken: (token: string) => {
+				const leadingWhitespace = !streamedReasoning.trim() && !token.trim();
 				streamedReasoning += token;
+				if (leadingWhitespace) {
+					return;
+				}
 				conn.sessionUpdate({
 					sessionId: session.sessionId,
 					update: {

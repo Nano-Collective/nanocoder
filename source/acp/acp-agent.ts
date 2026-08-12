@@ -612,7 +612,7 @@ export class AcpAgent implements Agent {
 					});
 				}
 			} else if (message.role === 'assistant') {
-				if (message.reasoning && message.reasoning.length > 0) {
+				if (message.reasoning && message.reasoning.trim().length > 0) {
 					await this.conn.sessionUpdate({
 						sessionId: session.sessionId,
 						update: {

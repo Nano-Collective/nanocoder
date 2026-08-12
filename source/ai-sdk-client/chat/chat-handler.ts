@@ -283,6 +283,13 @@ export async function handleChat(
 				flushTimer = null;
 			};
 
+			const flushPending = () => {
+				if (flushTimer) {
+					clearTimeout(flushTimer);
+				}
+				flushBuffer();
+			};
+
 			let lastYield = Date.now();
 			for await (const chunk of result.fullStream) {
 				switch (chunk.type) {
@@ -303,19 +310,18 @@ export async function handleChat(
 
 					// Determine which stream to write tokens to
 					case 'reasoning-start':
+						flushPending();
 						isReasoning = true;
 						break;
 					case 'text-start':
+						flushPending();
 						isReasoning = false;
 						break;
 
 					// Flush remaining tokens in given stream
 					case 'text-end':
 					case 'reasoning-end':
-						if (flushTimer) {
-							clearTimeout(flushTimer);
-						}
-						flushBuffer();
+						flushPending();
 						isReasoning = false;
 						break;
 				}
@@ -330,10 +336,7 @@ export async function handleChat(
 
 			// Safety net: flush any tokens still buffered if the stream ended
 			// without emitting a matching text-end / reasoning-end event.
-			if (flushTimer) {
-				clearTimeout(flushTimer);
-			}
-			flushBuffer();
+			flushPending();
 
 			// After streaming completes, collect final results.
 			// `result.usage` is the FINAL step's usage (not `totalUsage`, which

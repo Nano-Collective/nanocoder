@@ -361,3 +361,120 @@ test('privacy: scrubs outgoing prompts and rehydrates the response at the histor
 	t.is(content, 'Saved real@example.com');
 	t.false(content.includes('«'));
 });
+
+function streamingModel(parts: Record<string, unknown>[]): LanguageModel {
+	return {
+		specificationVersion: 'v3',
+		provider: 'test-provider',
+		modelId: 'test-model',
+		doStream: async () => ({
+			stream: new ReadableStream({
+				start(controller) {
+					for (const part of parts) {
+						controller.enqueue(part);
+					}
+					controller.enqueue({
+						type: 'finish',
+						finishReason: 'stop',
+						usage: {inputTokens: 1, outputTokens: 1, totalTokens: 2},
+					});
+					controller.close();
+				},
+			}),
+		}),
+	} as unknown as LanguageModel;
+}
+
+async function streamRouting(parts: Record<string, unknown>[]): Promise<{
+	text: string[];
+	reasoning: string[];
+	content: string;
+	finalReasoning: string | undefined;
+}> {
+	const text: string[] = [];
+	const reasoning: string[] = [];
+	const result = await handleChat({
+		model: streamingModel(parts),
+		currentModel: 'test-model',
+		providerConfig: {
+			name: 'TestProvider',
+			type: 'openai',
+			models: ['test-model'],
+			config: {baseURL: 'https://api.test.com'},
+		},
+		messages: [{role: 'user', content: 'test'}],
+		tools: {},
+		callbacks: {
+			onToken: token => text.push(token),
+			onReasoningToken: token => reasoning.push(token),
+		},
+		maxRetries: 0,
+	});
+	return {
+		text,
+		reasoning,
+		content: result.choices[0]?.message.content ?? '',
+		finalReasoning: result.choices[0]?.message.reasoning,
+	};
+}
+
+test('streams reasoning and text to their own callbacks', async t => {
+	const routed = await streamRouting([
+		{type: 'reasoning-start', id: 'r0'},
+		{type: 'reasoning-delta', id: 'r0', delta: 'Checking the file'},
+		{type: 'reasoning-end', id: 'r0'},
+		{type: 'text-start', id: '0'},
+		{type: 'text-delta', id: '0', delta: 'Hello'},
+		{type: 'text-end', id: '0'},
+	]);
+
+	t.deepEqual(routed.reasoning, ['Checking the file']);
+	t.deepEqual(routed.text, ['Hello']);
+	t.is(routed.content, 'Hello');
+	t.is(routed.finalReasoning, 'Checking the file');
+});
+
+test('buffered reasoning reaches onReasoningToken when text starts without reasoning-end', async t => {
+	const routed = await streamRouting([
+		{type: 'reasoning-start', id: 'r0'},
+		{type: 'reasoning-delta', id: 'r0', delta: 'Thinking about it'},
+		{type: 'text-start', id: '0'},
+		{type: 'text-delta', id: '0', delta: 'Hello'},
+		{type: 'text-end', id: '0'},
+	]);
+
+	t.deepEqual(routed.reasoning, ['Thinking about it']);
+	t.deepEqual(routed.text, ['Hello']);
+	t.is(routed.content, 'Hello');
+});
+
+test('buffered text reaches onToken when reasoning restarts without text-end', async t => {
+	const routed = await streamRouting([
+		{type: 'text-start', id: '0'},
+		{type: 'text-delta', id: '0', delta: 'Let me check'},
+		{type: 'reasoning-start', id: 'r0'},
+		{type: 'reasoning-delta', id: 'r0', delta: 'internal thought'},
+		{type: 'reasoning-end', id: 'r0'},
+		{type: 'text-delta', id: '0', delta: ' done'},
+		{type: 'text-end', id: '0'},
+	]);
+
+	t.deepEqual(routed.text, ['Let me check', ' done']);
+	t.deepEqual(routed.reasoning, ['internal thought']);
+	t.is(routed.content, 'Let me check done');
+});
+
+test('consecutive reasoning parts stay on the reasoning callback', async t => {
+	const routed = await streamRouting([
+		{type: 'reasoning-start', id: 'r0:0'},
+		{type: 'reasoning-delta', id: 'r0:0', delta: 'Part one'},
+		{type: 'reasoning-start', id: 'r0:1'},
+		{type: 'reasoning-delta', id: 'r0:1', delta: 'Part two'},
+		{type: 'text-start', id: '0'},
+		{type: 'text-delta', id: '0', delta: 'Answer'},
+		{type: 'text-end', id: '0'},
+	]);
+
+	t.deepEqual(routed.reasoning, ['Part one', 'Part two']);
+	t.deepEqual(routed.text, ['Answer']);
+});
