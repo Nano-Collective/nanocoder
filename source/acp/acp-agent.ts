@@ -454,6 +454,7 @@ export class AcpAgent implements Agent {
 				sessionId: s.id,
 				cwd: s.workingDirectory,
 				title: s.title,
+				updatedAt: s.lastAccessedAt,
 			})),
 		};
 	}
@@ -496,6 +497,36 @@ export class AcpAgent implements Agent {
 			modes: this.buildModeState(session),
 			configOptions: await this.buildConfigOptions(),
 		};
+	}
+
+	/**
+	 * ACP's core methods don't include a way for the client to rename a
+	 * session (title is otherwise agent-driven, from the latest message).
+	 * `extMethod` is the protocol's sanctioned escape hatch for exactly this.
+	 */
+	async extMethod(
+		method: string,
+		params: Record<string, unknown>,
+	): Promise<Record<string, unknown>> {
+		if (method === 'renameSession') {
+			const sessionId = params.sessionId;
+			const title = params.title;
+			if (typeof sessionId !== 'string' || typeof title !== 'string') {
+				throw new Error(
+					'renameSession requires string sessionId and title params',
+				);
+			}
+
+			await sessionManager.initialize();
+			const updated = await sessionManager.renameSession(sessionId, title);
+			if (!updated) {
+				throw new Error(`Session not found on disk: ${sessionId}`);
+			}
+			logger.info(`ACP extMethod renameSession: ${sessionId} -> "${title}"`);
+			return {title: updated.title};
+		}
+
+		throw new Error(`Unknown extension method: ${method}`);
 	}
 
 	async unstable_listProviders(
@@ -706,7 +737,9 @@ export class AcpAgent implements Agent {
 				return;
 			}
 
-			// Simple title generation if it's new
+			// Simple title generation if it's new. A user-renamed title is never
+			// auto-derived over — the flag below is what tells the CLI's autosave
+			// the same thing, so it has to be carried forward on every save.
 			let title = existingSession?.title;
 			if (!title || title === 'New Session') {
 				const firstUserMessage = saveableMessages.find(m => m.role === 'user');
@@ -720,6 +753,7 @@ export class AcpAgent implements Agent {
 			await sessionManager.saveSession({
 				id: session.sessionId,
 				title,
+				titleManuallySet: existingSession?.titleManuallySet,
 				createdAt: existingSession?.createdAt || timestamp,
 				lastAccessedAt: timestamp,
 				messageCount: saveableMessages.length,
