@@ -1,5 +1,5 @@
 import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {getThemeColors} from '@/config/themes';
 import {useTheme} from '@/hooks/useTheme';
 
@@ -31,7 +31,10 @@ export function IdeSelector({onSelect, onCancel}: IdeSelectorProps) {
 				</Text>
 			</Box>
 			<Box marginTop={1}>
-				<SelectInput items={items} onSelect={item => onSelect(item.value)} />
+				<StyledSelectInput
+					items={items}
+					onSelect={item => onSelect(item.value)}
+				/>
 			</Box>
 			<Box marginTop={1}>
 				<Text color={colors.secondary}>Press Escape to cancel</Text>

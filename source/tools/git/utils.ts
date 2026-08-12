@@ -649,7 +649,10 @@ export async function getStashCount(): Promise<number> {
 // ============================================================================
 
 /**
- * Truncate diff output if too long
+ * Truncate diff output if too long while preserving both ends of the diff.
+ * The beginning usually contains the file headers and the end often contains
+ * the final hunks, so keeping both gives the caller useful context without
+ * returning the entire result.
  */
 export function truncateDiff(
 	diff: string,
@@ -666,11 +669,17 @@ export function truncateDiff(
 		return {content: diff, truncated: false, totalLines};
 	}
 
-	const truncatedContent = lines.slice(0, maxLines).join('\n');
+	const headLines = Math.ceil(maxLines / 2);
+	const tailLines = Math.floor(maxLines / 2);
+	const omittedLines = totalLines - headLines - tailLines;
+	const head = lines.slice(0, headLines).join('\n');
+	const tail = tailLines > 0 ? lines.slice(-tailLines).join('\n') : '';
+	const marker =
+		`... [Diff truncated: showing first ${headLines} and last ${tailLines} ` +
+		`of ${totalLines} lines; ${omittedLines} lines omitted]`;
+
 	return {
-		content:
-			truncatedContent +
-			`\n\n... [Diff truncated: showing ${maxLines} of ${totalLines} lines]`,
+		content: tail ? `${head}\n\n${marker}\n\n${tail}` : `${head}\n\n${marker}`,
 		truncated: true,
 		totalLines,
 	};

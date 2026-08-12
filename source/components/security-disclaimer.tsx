@@ -1,5 +1,5 @@
 import {Box, Text} from 'ink';
-import SelectInput from 'ink-select-input';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {defaultTheme, getThemeColors} from '@/config/themes';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
@@ -66,7 +66,7 @@ export default function SecurityDisclaimer({
 						trusted sources.
 					</Text>
 				</Box>
-				<SelectInput items={items} onSelect={handleSelect} />
+				<StyledSelectInput items={items} onSelect={handleSelect} />
 			</TitledBoxWithPreferences>
 		</Box>
 	);

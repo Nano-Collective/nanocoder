@@ -1,19 +1,32 @@
+import {mkdirSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {AcpAgent} from '@/acp/acp-agent';
 import type {AcpInitContext} from '@/acp/acp-types';
+import {clearAppConfig} from '@/config';
 import {
 	setToolRegistryGetter,
 	setToolManagerGetter,
 } from '@/message-handler';
+import {sessionManager} from '@/session/session-manager';
 
 console.log('\nacp-agent.spec.ts');
 
 // Isolate preferences writes (setSessionConfigOption persists last-used model).
-process.env.NANOCODER_CONFIG_DIR = join(
+const testConfigDir = join(tmpdir(), `nanocoder-acp-test-${Date.now()}`);
+process.env.NANOCODER_CONFIG_DIR = testConfigDir;
+
+// Provider config is read from cwd, so chdir to keep a local agents.config.json from leaking in.
+mkdirSync(testConfigDir, {recursive: true});
+process.chdir(testConfigDir);
+
+// extMethod's renameSession touches the sessionManager singleton, which
+// otherwise defaults to the real app-data directory (~/.local/share/nanocoder
+// or platform equivalent) — isolate it the same way NANOCODER_CONFIG_DIR is above.
+process.env.NANOCODER_DATA_DIR = join(
 	tmpdir(),
-	`nanocoder-acp-test-${Date.now()}`,
+	`nanocoder-acp-test-data-${Date.now()}`,
 );
 
 // ============================================================================
@@ -32,6 +45,10 @@ const createMockInitContext = (): AcpInitContext => ({
 		setModel: (model: string) => {
 			mockCurrentModel = model;
 		},
+		// saveAcpSessionToDisk() reads this, and its failures are swallowed by a
+		// bare catch — without it every persist silently no-ops and the on-disk
+		// half of the ACP path goes untested.
+		getProviderConfig: () => ({name: 'test-provider'}),
 	} as any,
 	toolManager: {
 		getAvailableToolNames: () => [],
@@ -101,6 +118,38 @@ test('AcpAgent.initialize - returns empty auth methods', async t => {
 	const {agent} = createAgent();
 	const result = await agent.initialize({protocolVersion: 1});
 	t.deepEqual(result.authMethods, []);
+});
+
+test.serial('AcpAgent.unstable_listProviders - returns ACP provider identifiers', async t => {
+	const previousProviders = process.env.NANOCODER_PROVIDERS;
+	process.env.NANOCODER_PROVIDERS = JSON.stringify([
+		{
+			name: 'Atlas Cloud',
+			baseUrl: 'https://api.atlascloud.ai/v1',
+			models: ['openai/gpt-5.6-sol'],
+		},
+	]);
+	clearAppConfig();
+	try {
+		const {agent} = createAgent();
+		const result = await agent.unstable_listProviders({});
+
+		t.deepEqual(result.providers, [
+			{
+				id: 'Atlas Cloud',
+				providerId: 'Atlas Cloud',
+				required: false,
+				supported: ['openai'],
+			},
+		]);
+	} finally {
+		if (previousProviders === undefined) {
+			delete process.env.NANOCODER_PROVIDERS;
+		} else {
+			process.env.NANOCODER_PROVIDERS = previousProviders;
+		}
+		clearAppConfig();
+	}
 });
 
 // ============================================================================
@@ -334,6 +383,69 @@ test('AcpAgent.prompt - returns response for valid session', async t => {
 	t.truthy(result.stopReason);
 });
 
+test('AcpAgent.prompt - routes text and images through to the conversation', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [
+			{type: 'text', text: 'Analyze this image'},
+			{type: 'image', data: 'base64data', mimeType: 'image/png'} as any,
+		],
+	});
+	const internalSession = (agent as any)['sessions'].get(session.sessionId);
+	const userMessage = internalSession.messages.find((m: any) => m.role === 'user');
+	t.truthy(userMessage);
+	t.is(userMessage?.content, 'Analyze this image');
+	t.deepEqual(userMessage?.images, [
+		{data: 'base64data', mediaType: 'image/png', source: 'acp'},
+	]);
+	t.false(Array.isArray(userMessage?.content));
+});
+
+// ============================================================================
+// prompt() - built-in slash commands
+// ============================================================================
+
+const promptForBuiltinReply = async (text: string): Promise<string> => {
+	const conn = createMockConn();
+	const replies: string[] = [];
+	conn.sessionUpdate = async (u: any) => {
+		if (u.update?.sessionUpdate === 'agent_message_chunk') {
+			replies.push(u.update.content.text);
+		}
+	};
+	const agent = new AcpAgent(createMockInitContext(), conn);
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text}],
+	});
+	return replies.join('\n');
+};
+
+test('AcpAgent.prompt - /help advertises the copy commands', async t => {
+	const reply = await promptForBuiltinReply('/help');
+	t.true(reply.includes('`/copy`'));
+	t.true(reply.includes('`/copy code`'));
+});
+
+test('AcpAgent.prompt - /copy points at the chat view instead of erroring', async t => {
+	const reply = await promptForBuiltinReply('/copy');
+	t.true(reply.includes('handled by the chat view'));
+	t.false(reply.includes('Unrecognized slash command'));
+});
+
+test('AcpAgent.prompt - /copy code is not treated as unrecognized', async t => {
+	const reply = await promptForBuiltinReply('/copy code');
+	t.false(reply.includes('Unrecognized slash command'));
+});
+
+test('AcpAgent.prompt - a genuinely unknown command still reports unrecognized', async t => {
+	const reply = await promptForBuiltinReply('/definitelynotacommand');
+	t.true(reply.includes('Unrecognized slash command'));
+});
+
 // ============================================================================
 // cancel()
 // ============================================================================
@@ -388,3 +500,103 @@ test('AcpAgent.authenticate - returns empty response', async t => {
 	const result = await agent.authenticate({} as any);
 	t.deepEqual(result, {});
 });
+
+// ============================================================================
+// extMethod()
+// ============================================================================
+
+test.serial(
+	'AcpAgent.extMethod - renameSession renames an existing session',
+	async t => {
+		const {agent} = createAgent();
+		await sessionManager.initialize();
+		const session = await sessionManager.createSession({
+			title: 'Original title',
+			messageCount: 0,
+			provider: 'test',
+			model: 'test',
+			workingDirectory: '/tmp',
+			messages: [],
+		});
+
+		const result = await agent.extMethod('renameSession', {
+			sessionId: session.id,
+			title: 'Renamed',
+		});
+		t.deepEqual(result, {title: 'Renamed'});
+
+		const loaded = await sessionManager.readSession(session.id);
+		t.is(loaded!.title, 'Renamed');
+		t.is(loaded!.titleManuallySet, true);
+	},
+);
+
+test('AcpAgent.extMethod - throws for an unknown method', async t => {
+	const {agent} = createAgent();
+	await t.throwsAsync(agent.extMethod('bogus', {}), {
+		message: 'Unknown extension method: bogus',
+	});
+});
+
+test('AcpAgent.extMethod - renameSession throws on non-string sessionId/title', async t => {
+	const {agent} = createAgent();
+	await t.throwsAsync(
+		agent.extMethod('renameSession', {sessionId: 123, title: 'ok'}),
+		{message: /requires string sessionId and title/},
+	);
+	await t.throwsAsync(
+		agent.extMethod('renameSession', {sessionId: 'ok', title: undefined}),
+		{message: /requires string sessionId and title/},
+	);
+});
+
+test.serial(
+	'AcpAgent.extMethod - renameSession throws for a session that does not exist on disk',
+	async t => {
+		const {agent} = createAgent();
+		await t.throwsAsync(
+			agent.extMethod('renameSession', {
+				sessionId: '00000000-0000-0000-0000-000000000000',
+				title: 'Renamed',
+			}),
+			{message: /Session not found on disk/},
+		);
+	},
+);
+
+test.serial(
+	'AcpAgent - a renamed session keeps titleManuallySet across later prompts',
+	async t => {
+		// saveAcpSessionToDisk() rebuilds the Session field-by-field, so anything
+		// it forgets to carry over is silently dropped from disk. Losing the flag
+		// here doesn't show up in the ACP client — its own guard keeps the title —
+		// but the CLI's autosave then sees an unflagged session and overwrites the
+		// user's rename with an auto-derived one the next time they resume it.
+		const {agent} = createAgent();
+		await sessionManager.initialize();
+
+		const session = await agent.newSession({cwd: '/tmp'});
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'Hello!'}],
+		});
+
+		await agent.extMethod('renameSession', {
+			sessionId: session.sessionId,
+			title: 'Kept title',
+		});
+
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'Follow-up message'}],
+		});
+
+		const persisted = await sessionManager.readSession(session.sessionId);
+		t.is(persisted!.title, 'Kept title');
+		t.is(
+			persisted!.titleManuallySet,
+			true,
+			'the flag must survive, not just the title',
+		);
+	},
+);

@@ -1,4 +1,5 @@
 import {readFile, stat} from 'node:fs/promises';
+import {extname} from 'node:path';
 import {CACHE_FILE_TTL_MS, MAX_FILE_READ_RETRIES} from '@/constants';
 
 /**
@@ -100,8 +101,6 @@ export async function getCachedFileContent(
 		pendingReads.delete(absPath);
 	}
 }
-
-import {extname} from 'node:path';
 
 /**
  * Read file from disk and cache it.

@@ -19,6 +19,10 @@ export const TIMEOUT_UPDATE_CHECK_MS = 10_000;
 export const TIMEOUT_SOCKET_DEFAULT_MS = 120_000;
 export const TIMEOUT_SOCKET_LOCAL_DEFAULT_MS = 600_000; // 10 minutes for local models (Ollama, etc.)
 export const TIMEOUT_LSP_DIAGNOSTICS_MS = 5000;
+// Ceiling on the pricing lookup for the per-response usage footer: past
+// this the message renders with token counts only rather than holding the
+// streaming-to-static swap hostage to a cold models.dev fetch.
+export const TIMEOUT_COST_LOOKUP_MS = 250;
 
 // === PASTE DETECTION ===
 export const PASTE_CHUNK_BASE_WINDOW_MS = 500;
@@ -47,13 +51,14 @@ export const MAX_WEB_SEARCH_QUERY_LENGTH = 500;
 export const DEFAULT_FIND_FILES_RESULTS = 50;
 export const DEFAULT_SEARCH_RESULTS = 30;
 export const DEFAULT_WEB_SEARCH_RESULTS = 10;
-export const DEFAULT_TERMINAL_WIDTH = 120;
+export const DEFAULT_TERMINAL_WIDTH = 200;
 export const DEFAULT_TERMINAL_COLUMNS = 80;
 
 // === FILE READING ===
-export const FILE_READ_METADATA_THRESHOLD_LINES = 300;
-export const FILE_READ_CHUNKING_HINT_THRESHOLD_LINES = 500;
-export const FILE_READ_CHUNK_SIZE_LINES = 250;
+// Files at or below this size are returned in full. Larger files get a bounded
+// preview so the first read still gives the model useful context.
+export const FILE_READ_PREVIEW_THRESHOLD_LINES = 1500;
+export const FILE_READ_PREVIEW_LINES = 250;
 
 // === @-FILE MENTION INLINING (prompt-processor) ===
 // Files at or under this many lines are inlined in full when @-mentioned.
@@ -78,6 +83,10 @@ export const TOKEN_THRESHOLD_CRITICAL_PERCENT = 95;
 
 // === OUTPUT TRUNCATION ===
 export const TRUNCATION_OUTPUT_LIMIT = 2000;
+// Keep one unusually large tool response from dominating the model context.
+// The cap is intentionally higher than the Bash preview limit so normal file
+// reads and search results remain useful while unbounded tools stay bounded.
+export const MAX_TOOL_RESULT_CHARS = 20_000;
 export const TRUNCATION_DESCRIPTION_LENGTH = 100;
 
 // === DELAYS ===

@@ -4,6 +4,18 @@
 
 	const messagesContainer = document.getElementById('messages-container');
 	const chatInput = document.getElementById('chat-input');
+	const composerBox = document.getElementById('composer-box');
+	const contextChipsContainer = document.getElementById('context-chips');
+	const attachBtn = document.getElementById('attach-btn');
+
+	let attachedPaths = []; // [{path, name, kind: 'file'|'folder'}]
+
+	const addImageBtn = document.getElementById('add-image-btn');
+	const imageUpload = document.getElementById('image-upload');
+	const imagePreviewContainer = document.getElementById('image-preview-container');
+	
+	let pendingImages = [];
+	let pendingUserMessageText = null;
 
 	let modelDropdown, modeDropdown, providerDropdown;
 
@@ -14,59 +26,74 @@
 				this.dropdown = document.getElementById(dropdownId);
 				this.label = document.getElementById(labelId);
 				this.onChange = onChange;
-				this.value = '';
+
+				if (!this.trigger || !this.dropdown) return;
 
 				this.trigger.addEventListener('click', (e) => {
 					e.stopPropagation();
-					this.toggle();
+					const isHidden = this.dropdown.classList.contains('hidden');
+					// Close all dropdowns
+					document.getElementById('provider-dropdown').classList.add('hidden');
+					document.getElementById('model-dropdown').classList.add('hidden');
+					document.getElementById('mode-dropdown').classList.add('hidden');
+					
+					if (isHidden) {
+						this.dropdown.classList.remove('hidden');
+					}
 				});
-			}
-
-			toggle() {
-				const isHidden = this.dropdown.classList.contains('hidden');
-				// Close all dropdowns
-				document.getElementById('provider-dropdown').classList.add('hidden');
-				document.getElementById('model-dropdown').classList.add('hidden');
-				document.getElementById('mode-dropdown').classList.add('hidden');
-
-				if (isHidden) {
-					this.dropdown.classList.remove('hidden');
-				}
 			}
 
 			setOptions(options, selectedValue) {
 				this.dropdown.innerHTML = '';
-				this.trigger.disabled = options.length === 0;
+				
+				if (!options || options.length === 0) {
+					this.label.textContent = 'None available';
+					this.trigger.disabled = true;
+					this.trigger.classList.add('opacity-50');
+					return;
+				}
+
+				this.trigger.disabled = false;
+				this.trigger.classList.remove('opacity-50');
+
+				let hasSelected = false;
 
 				options.forEach(opt => {
+					// We receive arrays of strings, not objects
 					const item = document.createElement('div');
-					item.className = 'px-3 py-1.5 cursor-pointer hover:bg-vscode-list-hover text-[0.9em] transition-colors';
+					item.className = 'px-3 py-2 cursor-pointer hover:bg-vscode-list-hover transition-colors text-[0.9em] truncate';
+					item.textContent = opt;
+					
 					if (opt === selectedValue) {
-						item.classList.add('bg-vscode-list-active', 'text-vscode-list-activeFg');
+						item.classList.add('bg-vscode-list-active');
+						item.classList.add('text-vscode-list-activeFg');
+						
+						let displayValue = opt;
+						if (displayValue.includes('/')) {
+							displayValue = displayValue.split('/').pop();
+						}
+						this.label.textContent = displayValue || 'Loading...';
+						
+						hasSelected = true;
 					} else {
 						item.classList.add('text-vscode-dropdown-foreground');
 					}
-					item.textContent = opt;
-					item.addEventListener('click', (e) => {
-						e.stopPropagation();
-						this.setValue(opt);
-						this.dropdown.classList.add('hidden');
+
+					item.addEventListener('click', () => {
 						this.onChange(opt);
+						this.dropdown.classList.add('hidden');
 					});
+
 					this.dropdown.appendChild(item);
 				});
 
-				this.setValue(selectedValue || (options.length > 0 ? options[0] : ''));
-			}
-
-			setValue(value) {
-				this.value = value;
-				// Clean up the label for better display
-				let displayValue = value;
-				if (displayValue.includes('/')) {
-					displayValue = displayValue.split('/').pop();
+				if (!hasSelected && options.length > 0) {
+					let displayValue = options[0];
+					if (displayValue.includes('/')) {
+						displayValue = displayValue.split('/').pop();
+					}
+					this.label.textContent = displayValue || 'Loading...';
 				}
-				this.label.textContent = displayValue || 'Loading...';
 			}
 		}
 
@@ -90,6 +117,7 @@
 	}
 
 	initDropdowns();
+
 	function toggleHistoryView() {
 		isHistoryView = !isHistoryView;
 		if (isHistoryView) {
@@ -123,6 +151,22 @@
 	let isProcessing = false;
 	let currentAggregator = null;
 	let currentThoughtBox = null;
+	let toastTimeout = null;
+	// One agent response is split into several `.agent-markdown` containers -
+	// endCurrentTextBlock() closes the current one whenever a tool card, thought
+	// box or plan card is inserted. `agentTurnId` stamps every container of the
+	// same response with the same id (bumped on each user message) so /copy and
+	// /copy code can address the whole response instead of its last fragment.
+	let agentTurnId = 0;
+	// Raw markdown of the last agent response, kept for the /copy input command
+	// (rendered DOM textContent would lose fences and bullets).
+	// `lastAgentSegments` holds the segments already closed, `lastAgentRawText`
+	// is those plus the one still streaming, and `lastAgentRawTurnId` records
+	// which response they describe - so a finished response stays copyable after
+	// the user sends again, until the next one actually produces text.
+	let lastAgentRawTurnId = -1;
+	let lastAgentSegments = '';
+	let lastAgentRawText = '';
 
 	// Premium SVG Icons (Feather Icons)
 	const ICONS = {
@@ -134,8 +178,74 @@
 		clipboard: `<svg class="mr-1.5" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>`,
 		chevron: `<svg class="transition-transform duration-200" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`,
 		circle: `<svg class="opacity-50" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle></svg>`,
-		arrowRight: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>`
+		arrowRight: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>`,
+		edit: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>`
 	};
+
+	function formatRelativeTime(iso) {
+		if (!iso) return '';
+		const date = new Date(iso);
+		if (isNaN(date.getTime())) return '';
+		const diffMin = Math.floor((Date.now() - date.getTime()) / 60000);
+		if (diffMin < 1) return 'Just now';
+		if (diffMin < 60) return `${diffMin}m ago`;
+		const diffHr = Math.floor(diffMin / 60);
+		if (diffHr < 24) return `${diffHr}h ago`;
+		const diffDay = Math.floor(diffHr / 24);
+		if (diffDay < 7) return `${diffDay}d ago`;
+		return date.toLocaleDateString();
+	}
+
+	function createMessageFooter(getText, role, sentAt) {
+		const footer = document.createElement('div');
+		footer.className = 'flex h-5 items-center gap-1.5 mt-1 text-xs text-vscode-fg opacity-60 ' +
+			(role === 'user' ? 'self-end' : 'self-start');
+
+		const btn = document.createElement('button');
+		btn.type = 'button';
+		btn.className = 'flex items-center justify-center bg-transparent border-none cursor-pointer text-vscode-fg opacity-60 hover:opacity-100 p-1 rounded hover:bg-vscode-toolbarHover [&_svg]:mr-0 mb-1';
+		btn.title = 'Copy';
+		btn.setAttribute('aria-label', 'Copy message');
+		btn.innerHTML = ICONS.clipboard;
+
+		let resetTimer = null;
+		btn.addEventListener('click', () => {
+			const text = getText();
+			if (!text) return;
+			(async () => {
+				if (!navigator.clipboard?.writeText) {
+					throw new Error('Clipboard API unavailable');
+				}
+				await navigator.clipboard.writeText(text);
+			})().then(() => {
+				btn.innerHTML = ICONS.success;
+				btn.title = 'Copied!';
+			}).catch(() => {
+				btn.innerHTML = ICONS.error;
+				btn.title = 'Copy failed';
+			}).finally(() => {
+				clearTimeout(resetTimer);
+				resetTimer = setTimeout(() => {
+					btn.innerHTML = ICONS.clipboard;
+					btn.title = 'Copy';
+				}, 1500);
+			});
+		});
+
+		const timeEl = document.createElement('span');
+		timeEl.className = 'leading-none';
+		timeEl.textContent = sentAt.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+
+		if (role === 'user') {
+			footer.appendChild(timeEl);
+			footer.appendChild(btn);
+		} else {
+			footer.appendChild(btn);
+			footer.appendChild(timeEl);
+		}
+
+		return footer;
+	}
 
 	// --- Send / Stop toggle logic ---
 	function setProcessing(active) {
@@ -177,6 +287,159 @@
 		});
 	}
 
+	if (attachBtn) {
+		attachBtn.addEventListener('click', () => {
+			vscode.postMessage({ type: 'requestOpenDialog' });
+		});
+	}
+	// Image upload logic
+	if (addImageBtn && imageUpload) {
+		addImageBtn.addEventListener('click', () => {
+			if (isHistoryView) {
+				showChatView();
+			}
+			imageUpload.click();
+		});
+		
+		imageUpload.addEventListener('change', (e) => {
+			if (e.target.files) {
+				processImageFiles(Array.from(e.target.files));
+				e.target.value = '';
+			}
+		});
+	}
+
+	chatInput.addEventListener('paste', (e) => {
+		if (e.clipboardData && e.clipboardData.items) {
+			const files = Array.from(e.clipboardData.items)
+				.filter(item => item.type.startsWith('image/'))
+				.map(item => item.getAsFile())
+				.filter(file => file !== null);
+			if (files.length > 0) {
+				processImageFiles(files);
+				e.preventDefault(); // Only prevent default if we're actually pasting images, allow text
+			}
+		}
+	});
+
+	const MAX_ATTACHMENTS = 10;
+	const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+	const SUPPORTED_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+
+	function processImageFiles(files) {
+		let validFiles = [];
+		for (const file of files) {
+			if (!SUPPORTED_TYPES.includes(file.type)) {
+				vscode.postMessage({ type: 'showError', message: `Unsupported image format: ${file.name}` });
+				continue;
+			}
+			if (file.size > MAX_FILE_SIZE) {
+				vscode.postMessage({ type: 'showError', message: `Image exceeds 10 MB: ${file.name}` });
+				continue;
+			}
+			validFiles.push(file);
+		}
+
+		if (pendingImages.length + validFiles.length > MAX_ATTACHMENTS) {
+			vscode.postMessage({ type: 'showError', message: `Maximum attachment count reached (${MAX_ATTACHMENTS})` });
+			validFiles = validFiles.slice(0, MAX_ATTACHMENTS - pendingImages.length);
+		}
+
+		if (validFiles.length === 0) return;
+
+		let pendingReads = validFiles.length;
+		if (addImageBtn) {
+			addImageBtn.disabled = true;
+			addImageBtn.classList.add('opacity-50', 'cursor-not-allowed');
+		}
+
+		for (const file of validFiles) {
+			const reader = new FileReader();
+			reader.onload = (e) => {
+				const result = e.target.result;
+				if (typeof result === 'string') {
+					const commaIdx = result.indexOf(',');
+					if (commaIdx !== -1) {
+						const data = result.substring(commaIdx + 1);
+						pendingImages.push({ data, mimeType: file.type });
+						renderImagePreviews();
+					}
+				}
+				pendingReads--;
+				if (pendingReads === 0 && addImageBtn) {
+					addImageBtn.disabled = false;
+					addImageBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+				}
+			};
+			reader.onerror = () => {
+				pendingReads--;
+				if (pendingReads === 0 && addImageBtn) {
+					addImageBtn.disabled = false;
+					addImageBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+				}
+			};
+			reader.readAsDataURL(file);
+		}
+	}
+
+	function renderImagePreviews() {
+		if (!imagePreviewContainer) return;
+		imagePreviewContainer.innerHTML = '';
+		pendingImages.forEach((img, idx) => {
+			const wrapper = document.createElement('div');
+			wrapper.className = 'relative w-12 h-12 rounded overflow-hidden border border-vscode-input-border shrink-0 group';
+			
+			const imageEl = document.createElement('img');
+			// codeql[js/xss] False positive: mimeType is strictly validated and data is base64 encoded
+			const src = `data:${img.mimeType};base64,${img.data}`;
+			if (src.startsWith('data:image/')) {
+				imageEl.src = src;
+			}
+			imageEl.className = 'w-full h-full object-cover cursor-pointer hover:opacity-80 transition-opacity';
+			imageEl.onclick = () => openImageModal(imageEl.src);
+			
+			const removeBtn = document.createElement('button');
+			removeBtn.className = 'absolute top-0 right-0 bg-black/50 hover:bg-black/80 text-white w-5 h-5 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-bl cursor-pointer border-none outline-none';
+			removeBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+			removeBtn.onclick = (e) => {
+				e.stopPropagation();
+				pendingImages.splice(idx, 1);
+				renderImagePreviews();
+			};
+			
+			wrapper.appendChild(imageEl);
+			wrapper.appendChild(removeBtn);
+			imagePreviewContainer.appendChild(wrapper);
+		});
+	}
+
+	const imageModal = document.getElementById('image-modal');
+	const modalImage = document.getElementById('modal-image');
+	const closeModalBtn = document.getElementById('close-modal-btn');
+	
+	function openImageModal(src) {
+		if (imageModal && modalImage) {
+			// Validate src to prevent untrusted URL redirection (CodeQL)
+			if (src.startsWith('data:image/')) {
+				modalImage.src = src;
+				imageModal.classList.remove('hidden');
+			}
+		}
+	}
+	
+	if (closeModalBtn) {
+		closeModalBtn.addEventListener('click', () => {
+			imageModal.classList.add('hidden');
+		});
+	}
+	if (imageModal) {
+		imageModal.addEventListener('click', (e) => {
+			if (e.target === imageModal) {
+				imageModal.classList.add('hidden');
+			}
+		});
+	}
+
 	// Auto-resize textarea
 	chatInput.addEventListener('input', function () {
 		this.style.height = 'auto';
@@ -203,23 +466,71 @@
 			requestCancel();
 		}
 	});
+	// Ctrl/Cmd+Alt+Shift+C is owned by the host keybinding
+	// (`nanocoder.copyLastCodeBlock` in package.json). VS Code forwards
+	// webview keydowns to the host for resolution even after preventDefault,
+	// so a document listener here would double-fire (two clipboard writes /
+	// two toasts). The host posts `{type:'copyLastCodeBlock'}` back into
+	// this page. Ctrl+Shift+C and Ctrl+Alt+C are avoided: VS Code (external
+	// terminal) and Cursor (confetti) claim them at app level.
 
 	function submitMessage() {
-		const text = chatInput.value.trim();
-		if (!text) return;
+		let text = chatInput.value.trim();
+		if (!text && attachedPaths.length === 0 && pendingImages.length === 0) return;
+
+		// /copy is handled locally, mirroring the terminal slash command:
+		// copy the previous agent output instead of prompting the agent.
+		// Match on raw input before context chips are folded in, otherwise
+		// `/copy` with an attachment becomes `/copy\n\n@[file] …` and falls
+		// through to the agent as an unrecognized slash command.
+		// `/copy code` copies just the last fenced code block. Inner whitespace
+		// is collapsed so `/copy  code` doesn't fall through to the agent.
+		const lower = text.toLowerCase().replace(/\s+/g, ' ');
+		if (lower === '/copy' || lower === '/copy code') {
+			chatInput.value = '';
+			chatInput.style.height = 'auto';
+			attachedPaths = [];
+			renderChips();
+			pendingImages = [];
+			renderImagePreviews();
+			if (lower === '/copy code') {
+				copyLastCodeBlock();
+			} else {
+				copyLastResponse();
+			}
+			return;
+		}
+
+		// Append attached paths as context lines
+		if (attachedPaths.length > 0) {
+			const contextText = attachedPaths
+				.map(a => `@${a.kind === 'folder' ? '[folder]' : '[file]'} ${a.path}`)
+				.join('\n');
+			text = text ? `${text}\n\n${contextText}` : contextText;
+		}
+
+		const imagesToSubmit = pendingImages.length > 0 ? [...pendingImages] : undefined;
 
 		// Send message to extension host
 		vscode.postMessage({
 			type: 'submitMessage',
-			text: text
+			text: text,
+			images: imagesToSubmit
 		});
 
 		// Clear input
 		chatInput.value = '';
 		chatInput.style.height = 'auto';
+		pendingImages = [];
+		renderImagePreviews();
 
-		// Optimistically append user message 
-		appendMessage(text, 'user');
+		// Clear chips after sending
+		attachedPaths = [];
+		renderChips();
+
+		// Optimistically append user message
+		appendMessage(text, 'user', imagesToSubmit);
+		pendingUserMessageText = text;
 
 		if (!isProcessing) {
 			// Switch to processing state
@@ -231,37 +542,326 @@
 		}
 	}
 
-	function appendMessage(content, role) {
+	function createFileIcon() {
+		const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+		svg.setAttribute('width', '14');
+		svg.setAttribute('height', '14');
+		svg.setAttribute('viewBox', '0 0 24 24');
+		svg.setAttribute('fill', 'none');
+		svg.setAttribute('stroke', 'currentColor');
+		svg.setAttribute('stroke-width', '2');
+		svg.setAttribute('stroke-linecap', 'round');
+		svg.setAttribute('stroke-linejoin', 'round');
+		const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+		path.setAttribute('d', 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z');
+		const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+		polyline.setAttribute('points', '14 2 14 8 20 8');
+		svg.appendChild(path);
+		svg.appendChild(polyline);
+		return svg;
+	}
+
+	function createFolderIcon() {
+		const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+		svg.setAttribute('width', '14');
+		svg.setAttribute('height', '14');
+		svg.setAttribute('viewBox', '0 0 24 24');
+		svg.setAttribute('fill', 'none');
+		svg.setAttribute('stroke', 'currentColor');
+		svg.setAttribute('stroke-width', '2');
+		svg.setAttribute('stroke-linecap', 'round');
+		svg.setAttribute('stroke-linejoin', 'round');
+		const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+		path.setAttribute('d', 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z');
+		svg.appendChild(path);
+		return svg;
+	}
+
+	function renderChips() {
+		contextChipsContainer.innerHTML = '';
+		if (attachedPaths.length === 0) {
+			contextChipsContainer.classList.add('hidden');
+			return;
+		}
+		contextChipsContainer.classList.remove('hidden');
+		for (const item of attachedPaths) {
+			const chip = document.createElement('span');
+			chip.className = 'context-chip';
+			
+			const iconSpan = document.createElement('span');
+			iconSpan.className = 'chip-icon';
+			iconSpan.appendChild(item.kind === 'folder' ? createFolderIcon() : createFileIcon());
+			iconSpan.style.marginRight = '4px';
+			iconSpan.style.display = 'flex';
+			iconSpan.style.alignItems = 'center';
+
+			const nameSpan = document.createElement('span');
+			nameSpan.className = 'chip-name';
+			nameSpan.setAttribute('title', item.path);
+			nameSpan.textContent = item.name;
+
+			const removeSpan = document.createElement('span');
+			removeSpan.className = 'chip-remove';
+			removeSpan.setAttribute('title', 'Remove');
+			removeSpan.textContent = '×';
+
+			chip.appendChild(iconSpan);
+			chip.appendChild(nameSpan);
+			chip.appendChild(removeSpan);
+			
+			chip.addEventListener('click', e => {
+				if (e.target.classList.contains('chip-remove')) {
+					attachedPaths = attachedPaths.filter(a => a.path !== item.path);
+					renderChips();
+					return;
+				}
+				vscode.postMessage({ type: 'openPath', path: item.path, kind: item.kind });
+			});
+			contextChipsContainer.appendChild(chip);
+		}
+	}
+
+	if (composerBox) {
+		const handleDrag = (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+		};
+		
+		// Prevent default on window to stop VS Code's native drop handler
+		window.addEventListener('dragover', (e) => e.preventDefault(), true);
+		window.addEventListener('drop', (e) => e.preventDefault(), true);
+
+		// Prevent native text drop on the textarea
+		chatInput.addEventListener('dragenter', handleDrag, true);
+		chatInput.addEventListener('dragover', handleDrag, true);
+		chatInput.addEventListener('drop', handleDrag, true);
+
+		composerBox.addEventListener('dragenter', (e) => {
+			handleDrag(e);
+			composerBox.classList.add('drag-over');
+		}, true);
+		
+		composerBox.addEventListener('dragover', (e) => {
+			handleDrag(e);
+			composerBox.classList.add('drag-over');
+		}, true);
+		
+		composerBox.addEventListener('dragleave', (e) => {
+			handleDrag(e);
+			composerBox.classList.remove('drag-over');
+		}, true);
+		
+		composerBox.addEventListener('drop', e => {
+			handleDrag(e);
+			composerBox.classList.remove('drag-over');
+			const uris = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+			if (!uris) return;
+			
+			const isWindows = navigator.userAgentData?.platform?.toLowerCase().includes('win') || navigator.userAgent.includes('Windows');
+			const paths = uris.split('\n')
+				.map(u => u.trim())
+				.filter(u => u && !u.startsWith('#'))
+				.map(u => {
+					if (u.startsWith('file://')) {
+						let p = decodeURIComponent(u.replace(/^file:\/\/\/?/, ''));
+						if (isWindows && p.match(/^[a-zA-Z]:/)) {
+							// Already dropped leading slash via the regex above if it had exactly three slashes. 
+							// But if it had two slashes e.g. file://C:/ it would become C:/
+							// If it had three e.g. file:///C:/ the regex stripped up to 3 slashes so it also becomes C:/
+							// Wait, what if it was file:///C:/... ? `u.replace(/^file:\/\/\/?/, '')` removes `file:///`.
+							// What about UNC paths? `file://server/share` -> regex removes `file://`, leaving `server/share`. 
+							// Wait, `u.replace(/^file:\/\/\/?/, '')` removes `file:///` or `file://`.
+							// For UNC `file://server/share`, `replace` makes it `server/share`. 
+							// So we need to put `//` back for UNC on Windows? 
+							// Let's implement Will's explicit advice:
+							// "strip with /^file:\/\/\/?/ and on Windows drop the leading slash before a drive letter."
+						}
+						// Let's strictly follow Will's suggestion:
+						let p2 = decodeURIComponent(u.replace(/^file:\/\/\/?/, ''));
+						if (isWindows && p2.match(/^\/[a-zA-Z]:/)) {
+							p2 = p2.substring(1);
+						}
+						// wait, for UNC path `file://server/share`, replacing `/^file:\/\/\/?/` removes `file://`. 
+						// So it becomes `server/share`. On Windows UNC paths need `\\server\share`. 
+						// Actually vscode drop UNC path comes as `file:////server/share` or `file://server/share`.
+						// If we don't mess with it too much, let's just do exactly what Will said.
+						return p2;
+					}
+					return u;
+				});
+
+			paths.forEach(p => vscode.postMessage({ type: 'requestPathInfo', path: p }));
+		}, true);
+	}
+
+	// True while the accumulator describes the response currently streaming.
+	// Goes false as soon as the user sends again, freezing the previous
+	// response until beginAgentSegment() hands the accumulator to the new one.
+	function isAccumulatingCurrentTurn() {
+		return lastAgentRawTurnId === agentTurnId;
+	}
+
+	function beginAgentSegment() {
+		if (isAccumulatingCurrentTurn()) return;
+		lastAgentRawTurnId = agentTurnId;
+		lastAgentSegments = '';
+		lastAgentRawText = '';
+	}
+
+	// Fold the segment being closed into the response-level accumulator so
+	// /copy still yields the whole response after a tool card splits it.
+	function closeAgentSegment() {
+		if (isAccumulatingCurrentTurn() && currentTurnText) {
+			lastAgentSegments = [lastAgentSegments, currentTurnText]
+				.filter(Boolean)
+				.join('\n\n');
+		}
+		currentTurnText = '';
+	}
+
+	function syncLastAgentRawText() {
+		if (!isAccumulatingCurrentTurn()) return;
+		lastAgentRawText = [lastAgentSegments, currentTurnText]
+			.filter(Boolean)
+			.join('\n\n');
+	}
+
+	function appendMessage(content, role, images = undefined) {
 		// Remove welcome message and loader if present
 		const welcome = document.querySelector('.welcome-message');
 		if (welcome) welcome.remove();
 		const loader = document.getElementById('session-loader');
 		if (loader) loader.remove();
 
+		// A user message opens a new turn, so the agent segments that follow get
+		// a fresh id. The raw-text accumulator is handed over lazily, once the
+		// new response produces text.
+		if (role === 'user') agentTurnId++;
+
+		const wrapper = document.createElement('div');
+		wrapper.className = 'group flex flex-col min-w-0 shrink-0 ' +
+			(role === 'user' ? 'self-end items-end max-w-[85%]' : 'self-start items-start max-w-full');
+
 		const msgEl = document.createElement('div');
-		msgEl.className = 'leading-snug break-words shrink-0 min-w-0 ' +
+		msgEl.className = 'leading-snug break-words shrink-0 min-w-0 flex flex-col ' +
 			(role === 'user'
 				? 'self-end bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-border px-3 py-2 rounded-lg max-w-[85%]'
 				: 'self-start max-w-full');
 
-		const textContainer = document.createElement('div');
-		textContainer.className = 'markdown-body';
+		if (images && images.length > 0) {
+			const imagesContainer = document.createElement('div');
+			imagesContainer.className = 'flex flex-wrap gap-2 mb-2';
+			images.forEach(img => {
+				const imgEl = document.createElement('img');
+				// codeql[js/xss] False positive: mimeType is strictly validated and data is base64 encoded
+				const src = `data:${img.mimeType};base64,${img.data}`;
+				if (src.startsWith('data:image/')) {
+					imgEl.src = src;
+				}
+				imgEl.className = 'w-24 h-24 object-cover rounded cursor-pointer border border-vscode-border hover:opacity-90';
+				imgEl.onclick = () => openImageModal(imgEl.src);
+				imagesContainer.appendChild(imgEl);
+			});
+			msgEl.appendChild(imagesContainer);
+		}
 
-		// If it's the user, we just render it directly (or we could use marked for them too)
-		// Usually users prefer raw text, but let's render markdown for both just in case.
-		if (typeof marked !== 'undefined') {
-			textContainer.innerHTML = marked.parse(content);
-		} else {
-			textContainer.textContent = content;
-		} // Phase 3: plain text for now, but incrementally updateable
-		msgEl.appendChild(textContainer);
+		let parsedContent = content;
+		let extractedChips = [];
+		let textContainer = null;
 
-		messagesContainer.appendChild(msgEl);
+		if (role === 'user' && content) {
+			// Handle pre-injected format (before sending)
+			parsedContent = content.replace(/@\[(file|folder)\]\s+([^\n]+)/g, (match, kind, path) => {
+				const name = path.trim().split(/[/\\]/).pop();
+				extractedChips.push({ kind, path: path.trim(), name });
+				return ''; // Remove from text
+			});
+
+			// Handle post-injected format (from history sync)
+			parsedContent = parsedContent.replace(/<context path="([^"]+)"(?: type="([^"]+)")?>[\s\S]*?<\/context>/g, (match, path, type) => {
+				const kind = type === 'directory' ? 'folder' : 'file';
+				const name = path.trim().split(/[/\\]/).pop();
+				extractedChips.push({ kind, path: path.trim(), name });
+				return ''; // Remove from text
+			});
+
+			parsedContent = parsedContent.trim();
+		}
+
+		if (parsedContent || extractedChips.length > 0) {
+			textContainer = document.createElement('div');
+			// `agent-markdown` marks assistant prose so copyLastCodeBlock() can skip
+			// user echoes and thought boxes, which also render as `.markdown-body`.
+			textContainer.className = 'markdown-body' + (role === 'agent' ? ' agent-markdown' : '');
+			if (role === 'agent') textContainer.dataset.turnId = String(agentTurnId);
+
+			if (typeof marked !== 'undefined') {
+				textContainer.innerHTML = marked.parse(parsedContent);
+			} else {
+				textContainer.textContent = parsedContent;
+			}
+
+			if (extractedChips.length > 0 && role === 'user') {
+				const chipsContainer = document.createElement('div');
+				chipsContainer.style.display = 'flex';
+				chipsContainer.style.flexWrap = 'wrap';
+				chipsContainer.style.gap = '6px';
+				chipsContainer.style.marginTop = parsedContent ? '8px' : '0';
+
+				extractedChips.forEach(chipData => {
+					const chip = document.createElement('span');
+					chip.className = 'context-chip';
+					chip.setAttribute('data-path', chipData.path);
+					chip.setAttribute('data-kind', chipData.kind);
+					chip.style.paddingRight = '8px';
+					
+					const iconSpan = document.createElement('span');
+					iconSpan.style.marginRight = '4px';
+					iconSpan.style.display = 'flex';
+					iconSpan.style.alignItems = 'center';
+					iconSpan.appendChild(chipData.kind === 'folder' ? createFolderIcon() : createFileIcon());
+					
+					const nameSpan = document.createElement('span');
+					nameSpan.className = 'chip-name';
+					nameSpan.setAttribute('title', chipData.path);
+					nameSpan.textContent = chipData.name;
+					
+					chip.appendChild(iconSpan);
+					chip.appendChild(nameSpan);
+					chipsContainer.appendChild(chip);
+				});
+
+				chipsContainer.addEventListener('click', (e) => {
+					const chip = e.target.closest('.context-chip');
+					if (chip) {
+						const path = chip.getAttribute('data-path');
+						const kind = chip.getAttribute('data-kind');
+						if (path) {
+							vscode.postMessage({ type: 'openPath', path, kind });
+						}
+					}
+				});
+
+				textContainer.appendChild(chipsContainer);
+			}
+
+			msgEl.appendChild(textContainer);
+		}
+
+		wrapper.appendChild(msgEl);
+		wrapper.appendChild(createMessageFooter(() => content, role, new Date()));
+
+		messagesContainer.appendChild(wrapper);
 		scrollToBottom();
 
 		if (role === 'agent') {
+			// This opens a fresh container, so whatever block was open is done.
+			closeAgentSegment();
+			beginAgentSegment();
 			currentTurnEl = msgEl;
 			currentTextEl = textContainer;
+			currentTurnText = content;
+			syncLastAgentRawText();
 		}
 	}
 
@@ -274,12 +874,18 @@
 
 		if (!currentTurnEl || !currentTextEl) {
 			// First chunk for this turn
+			const wrapper = document.createElement('div');
+			wrapper.className = 'group flex flex-col min-w-0 self-start items-start max-w-full';
+
 			const msgEl = document.createElement('div');
-			msgEl.className = 'message agent min-w-0';
+			msgEl.className = 'message agent min-w-0 w-full';
 
 			const textContainer = document.createElement('div');
-			textContainer.className = 'markdown-body leading-snug break-words';
+			textContainer.className = 'markdown-body agent-markdown leading-snug break-words';
+			textContainer.dataset.turnId = String(agentTurnId);
+			beginAgentSegment();
 			currentTurnText = textChunk;
+			syncLastAgentRawText();
 
 			if (typeof marked !== 'undefined') {
 				textContainer.innerHTML = marked.parse(currentTurnText);
@@ -288,7 +894,10 @@
 			}
 
 			msgEl.appendChild(textContainer);
-			messagesContainer.appendChild(msgEl);
+			wrapper.appendChild(msgEl);
+			wrapper.appendChild(createMessageFooter(() => wrapper.dataset.rawText || '', 'agent', new Date()));
+			wrapper.dataset.rawText = currentTurnText;
+			messagesContainer.appendChild(wrapper);
 
 			currentTurnEl = msgEl;
 			currentTextEl = textContainer;
@@ -296,6 +905,10 @@
 		} else {
 			// Append to existing turn
 			currentTurnText += textChunk;
+			syncLastAgentRawText();
+			if (currentTurnEl.parentElement) {
+				currentTurnEl.parentElement.dataset.rawText = currentTurnText;
+			}
 
 			if (typeof marked !== 'undefined') {
 				if (!renderTimeout) {
@@ -322,6 +935,121 @@
 		messagesContainer.scrollTop = messagesContainer.scrollHeight;
 	}
 
+	// --- Copy last code block ---
+
+	function showToast(text) {
+		let toast = document.getElementById('copy-toast');
+		if (!toast) {
+			toast = document.createElement('div');
+			toast.id = 'copy-toast';
+			toast.setAttribute('role', 'status');
+			toast.className = 'fixed bottom-24 left-1/2 -translate-x-1/2 z-50 flex items-center px-3 py-1.5 rounded-md border border-vscode-border bg-vscode-dropdown-bg text-vscode-dropdown-fg font-vscode text-[0.85em] shadow-lg pointer-events-none transition-opacity duration-200';
+			document.body.appendChild(toast);
+		}
+
+		toast.innerHTML = ICONS.clipboard;
+		const label = document.createElement('span');
+		label.textContent = text;
+		toast.appendChild(label);
+		toast.classList.remove('opacity-0');
+
+		if (toastTimeout) clearTimeout(toastTimeout);
+		toastTimeout = setTimeout(() => {
+			toast.classList.add('opacity-0');
+			toastTimeout = null;
+		}, 1500);
+	}
+
+	// Streaming batches marked.parse() behind a 50ms timer. Flush so a copy
+	// mid-turn (or a turn boundary) reads the current markdown, not the
+	// previous throttled frame. Shared by copyLastCodeBlock and endCurrentTextBlock.
+	function flushPendingRender() {
+		if (!renderTimeout) return;
+		clearTimeout(renderTimeout);
+		renderTimeout = null;
+		if (currentTextEl && typeof marked !== 'undefined') {
+			currentTextEl.innerHTML = marked.parse(currentTurnText);
+		}
+	}
+
+	function copyLastCodeBlock() {
+		flushPendingRender();
+
+		const segments = messagesContainer.querySelectorAll('.agent-markdown');
+		if (segments.length === 0) {
+			showToast('No response to copy yet');
+			return;
+		}
+
+		// Walk the segments of the last response back to front. Scanning the
+		// whole response rather than only its final segment matters because a
+		// tool call between the code block and the closing prose would
+		// otherwise hide the block.
+		const lastTurnId = segments[segments.length - 1].dataset.turnId;
+		let text = '';
+		for (let i = segments.length - 1; i >= 0; i--) {
+			if (segments[i].dataset.turnId !== lastTurnId) break;
+			const blocks = segments[i].querySelectorAll('pre code');
+			if (blocks.length > 0) {
+				text = blocks[blocks.length - 1].textContent.replace(/\n$/, '');
+				break;
+			}
+		}
+
+		if (!text) {
+			showToast('No code block in the last response');
+			return;
+		}
+
+		vscode.postMessage({ type: 'copyToClipboard', text: text });
+	}
+
+	// Webview twin of the terminal /copy command: copies the whole previous
+	// agent response as raw markdown.
+	function copyLastResponse() {
+		if (!lastAgentRawText.trim()) {
+			showToast('No response to copy yet');
+			return;
+		}
+		vscode.postMessage({ type: 'copyToClipboard', text: lastAgentRawText });
+	}
+
+	// Compact token formatting: 812, 4.2k, 12k, 1.3M. Mirrors the CLI's
+	// per-response indicator formatting (source/usage/format.ts).
+	function formatCompactTokens(tokens) {
+		if (!Number.isFinite(tokens) || tokens <= 0) return '0';
+		if (tokens < 1000) return String(Math.round(tokens));
+		const scaled = tokens < 1000000 ? tokens / 1000 : tokens / 1000000;
+		const suffix = tokens < 1000000 ? 'k' : 'M';
+		const num = scaled >= 100
+			? String(Math.round(scaled))
+			: scaled.toFixed(1).replace(/\.0$/, '');
+		return num + suffix;
+	}
+
+	// Render a small grayed-out usage line (e.g. "Tokens: 4.2k | ~$0.01")
+	// under the finished response. Cost is omitted when unknown (local models).
+	function appendUsageIndicator(usage, cost) {
+		if (!usage) return;
+		const total = Number.isFinite(usage.totalTokens)
+			? usage.totalTokens
+			: (Number.isFinite(usage.inputTokens) ? usage.inputTokens : 0) +
+				(Number.isFinite(usage.outputTokens) ? usage.outputTokens : 0);
+		if (!total) return;
+
+		let text = 'Tokens: ' + formatCompactTokens(total);
+		if (Number.isFinite(cost) && cost > 0) {
+			text += cost < 0.01 ? ' | <$0.01' : ' | ~$' + cost.toFixed(2);
+		}
+
+		endCurrentTextBlock();
+		const el = document.createElement('div');
+		el.className = 'self-start text-[0.8em] opacity-50 shrink-0 mb-1';
+		el.textContent = text;
+		messagesContainer.appendChild(el);
+		scrollToBottom();
+	}
+
 	// Handle messages from extension.
 	// No origin check: this is a VS Code webview, not a browser page. The
 	// extension host is the only sender, and chat-panel.html sets
@@ -335,10 +1063,21 @@
 			case 'toggleHistory':
 				toggleHistoryView();
 				break;
+			case 'pathInfoResolved': {
+				const { path, name, kind } = message;
+				if (!attachedPaths.some(a => a.path === path)) {
+					attachedPaths.push({ path, name, kind });
+					renderChips();
+				}
+				break;
+			}
 			case 'appendMessage':
 				appendMessage(message.content, 'agent');
 				break;
 			case 'clear':
+				// Session reset (new chat or resume) should return to the active
+				// chat view, not leave the panel stuck on the history list.
+				showChatView();
 				if (renderTimeout) { clearTimeout(renderTimeout); renderTimeout = null; }
 				if (message.isLoading) {
 					messagesContainer.innerHTML = `<div id="session-loader" class="flex flex-col items-center justify-center h-full opacity-50 mt-10">${ICONS.pending}<div class="mt-2 text-xs">Loading session...</div></div>`;
@@ -348,6 +1087,10 @@
 				currentTurnEl = null;
 				currentTextEl = null;
 				currentTurnText = '';
+				agentTurnId = 0;
+				lastAgentRawTurnId = -1;
+				lastAgentSegments = '';
+				lastAgentRawText = '';
 				if (currentThoughtBox) {
 					clearInterval(currentThoughtBox.timer);
 					currentThoughtBox = null;
@@ -376,6 +1119,16 @@
 				sessionsData = message.sessions || [];
 				renderSessions(); // Always update so list is ready when history opens
 				break;
+			case 'copyLastCodeBlock':
+				copyLastCodeBlock();
+				break;
+			case 'copyResult':
+				showToast(
+					message.ok
+						? `Copied ${message.chars} characters`
+						: 'Could not copy to clipboard'
+				);
+				break;
 		}
 	});
 
@@ -393,14 +1146,35 @@
 			return;
 		}
 
-		// Group sessions by date
+		// Group sessions by last-used date
 		const now = new Date();
+		const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+		const startOfYesterday = new Date(startOfToday.getTime() - 86400000);
+		const sevenDaysAgo = new Date(startOfToday.getTime() - 7 * 86400000);
 		const groups = { 'Today': [], 'Yesterday': [], 'Last 7 Days': [], 'Older': [] };
 
 		sessionsData.slice().reverse().forEach(session => {
 			const label = session.title || session.cwd || session.sessionId.slice(0, 8);
 			const item = { ...session, label };
-			groups['Older'].push(item); // Simplified: metadata doesn't include createdAt yet
+			const updated = session.updatedAt ? new Date(session.updatedAt) : null;
+
+			if (!updated || isNaN(updated.getTime())) {
+				groups['Older'].push(item);
+			} else if (updated >= startOfToday) {
+				groups['Today'].push(item);
+			} else if (updated >= startOfYesterday) {
+				groups['Yesterday'].push(item);
+			} else if (updated >= sevenDaysAgo) {
+				groups['Last 7 Days'].push(item);
+			} else {
+				groups['Older'].push(item);
+			}
+		});
+
+		// Within each date bucket, show most-recently-used first. Sessions
+		// without an updatedAt (shouldn't normally happen) sort to the end.
+		Object.values(groups).forEach(sessions => {
+			sessions.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
 		});
 
 		Object.entries(groups).forEach(([groupName, sessions]) => {
@@ -418,28 +1192,95 @@
 
 			sessions.forEach(session => {
 				const itemEl = document.createElement('div');
-				itemEl.className = 'flex items-center px-4 py-1.5 cursor-pointer gap-2 rounded mx-1 transition-colors hover:bg-vscode-list-hover group';
-
-				const labelEl = document.createElement('span');
-				labelEl.className = 'flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[0.9em]';
-				labelEl.textContent = session.label;
-				labelEl.title = session.cwd;
-				labelEl.onclick = () => {
+				itemEl.className = 'flex flex-col px-4 py-1.5 cursor-pointer gap-0.5 rounded mx-1 transition-colors hover:bg-vscode-list-hover group';
+				itemEl.onclick = () => {
 					showChatView();
 					vscode.postMessage({ type: 'resumeSession', sessionId: session.sessionId });
 				};
 
+				const topRow = document.createElement('div');
+				topRow.className = 'flex items-center gap-2';
+
+				const labelWrap = document.createElement('div');
+				labelWrap.className = 'flex-1 min-w-0';
+
+				const labelEl = document.createElement('span');
+				labelEl.className = 'block overflow-hidden text-ellipsis whitespace-nowrap text-[0.9em]';
+				labelEl.textContent = session.label;
+				labelEl.title = session.cwd;
+				labelWrap.appendChild(labelEl);
+
+				const actions = document.createElement('div');
+				actions.className = 'flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0';
+
+				const editBtn = document.createElement('button');
+				editBtn.type = 'button';
+				editBtn.className = 'bg-transparent border-none cursor-pointer text-vscode-fg p-1 flex items-center justify-center hover:bg-vscode-toolbarHover rounded';
+				editBtn.title = 'Rename Session';
+				editBtn.setAttribute('aria-label', 'Rename session');
+				editBtn.innerHTML = ICONS.edit;
+				editBtn.onclick = (e) => {
+					e.stopPropagation();
+
+					const input = document.createElement('input');
+					input.type = 'text';
+					input.value = session.label;
+					// Matches MAX_SESSION_NAME_LENGTH in source/constants.ts - fail
+					// locally instead of round-tripping to a backend error toast.
+					input.maxLength = 100;
+					input.className = 'block w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-focus rounded px-1 py-0.5 text-[0.9em]';
+
+					const finish = (commit) => {
+						if (input.parentElement !== labelWrap) return; // already finished
+						labelWrap.replaceChild(labelEl, input);
+						if (commit) {
+							const newTitle = input.value.trim();
+							if (newTitle && newTitle !== session.label) {
+								session.label = newTitle;
+								labelEl.textContent = newTitle;
+								vscode.postMessage({ type: 'renameSession', sessionId: session.sessionId, title: newTitle });
+							}
+						}
+					};
+
+					input.onclick = (ev) => ev.stopPropagation();
+					input.onkeydown = (ev) => {
+						ev.stopPropagation();
+						if (ev.key === 'Enter') finish(true);
+						else if (ev.key === 'Escape') finish(false);
+					};
+					input.onblur = () => finish(true);
+
+					labelWrap.replaceChild(input, labelEl);
+					input.focus();
+					input.select();
+				};
+
 				const deleteBtn = document.createElement('button');
-				deleteBtn.className = 'bg-transparent border-none cursor-pointer text-vscode-fg opacity-0 group-hover:opacity-100 transition-opacity p-1 flex items-center justify-center hover:bg-vscode-toolbarHover rounded';
+				deleteBtn.type = 'button';
+				deleteBtn.className = 'bg-transparent border-none cursor-pointer text-vscode-fg p-1 flex items-center justify-center hover:bg-vscode-toolbarHover rounded';
 				deleteBtn.title = 'Delete Session';
+				deleteBtn.setAttribute('aria-label', 'Delete session');
 				deleteBtn.innerHTML = ICONS.trash;
 				deleteBtn.onclick = (e) => {
 					e.stopPropagation();
 					vscode.postMessage({ type: 'deleteSession', sessionId: session.sessionId });
 				};
 
-				itemEl.appendChild(labelEl);
-				itemEl.appendChild(deleteBtn);
+				actions.appendChild(editBtn);
+				actions.appendChild(deleteBtn);
+				topRow.appendChild(labelWrap);
+				topRow.appendChild(actions);
+				itemEl.appendChild(topRow);
+
+				const relativeTime = formatRelativeTime(session.updatedAt);
+				if (relativeTime) {
+					const lastUsedEl = document.createElement('span');
+					lastUsedEl.className = 'text-[0.75em] opacity-50';
+					lastUsedEl.textContent = relativeTime;
+					itemEl.appendChild(lastUsedEl);
+				}
+
 				groupEl.appendChild(itemEl);
 			});
 
@@ -460,16 +1301,11 @@
 	// tool call is appended to the block ABOVE the card, fusing pre-tool
 	// and post-tool output into one paragraph.
 	function endCurrentTextBlock() {
-		if (renderTimeout) {
-			clearTimeout(renderTimeout);
-			renderTimeout = null;
-			if (currentTextEl && typeof marked !== 'undefined') {
-				currentTextEl.innerHTML = marked.parse(currentTurnText);
-			}
-		}
+		flushPendingRender();
+		closeAgentSegment();
 		currentTurnEl = null;
 		currentTextEl = null;
-		currentTurnText = '';
+		syncLastAgentRawText();
 	}
 
 	function handleAcpUpdate(payload) {
@@ -477,9 +1313,15 @@
 		const update = payload.update ? payload.update : payload;
 
 		if (update.sessionUpdate === 'user_message_chunk') {
-			if (update.content && update.content.text) {
+			if (update.content) {
 				endCurrentTextBlock();
-				appendMessage(update.content.text, 'user');
+				if (update.content.text) {
+					if (pendingUserMessageText === update.content.text) {
+						pendingUserMessageText = null;
+					} else {
+						appendMessage(update.content.text, 'user');
+					}
+				}
 			}
 		} else if (update.sessionUpdate === 'agent_message_chunk') {
 			if (currentThoughtBox) {
@@ -510,6 +1352,8 @@
 				currentThoughtBox.finish();
 				currentThoughtBox = null;
 			}
+			// Show token usage (and estimated cost) for the finished turn
+			appendUsageIndicator(update.usage, update.cost);
 			// Turn is complete — restore the send button
 			setProcessing(false);
 		}

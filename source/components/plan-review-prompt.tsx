@@ -13,8 +13,8 @@
  *   [Esc]    — dismiss the prompt, do nothing
  */
 import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
 import {useState} from 'react';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 
@@ -106,7 +106,7 @@ export default function PlanReviewPrompt({
 				<Text color={colors.secondary}>What would you like to do?</Text>
 			</Box>
 
-			<SelectInput
+			<StyledSelectInput
 				items={OPTIONS}
 				onSelect={handleSelect}
 				onHighlight={item => setHighlighted(item.value)}

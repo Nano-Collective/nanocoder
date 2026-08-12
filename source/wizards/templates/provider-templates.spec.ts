@@ -658,7 +658,7 @@ test('major providers have correct default models', t => {
 		'chatgpt-codex': 'gpt-5.3-codex',
 		'github-copilot': 'gpt-5.6-sol',
 		'poe': 'gpt-5.6-sol',
-		'atlas-cloud': 'gpt-5.6-sol',
+		'atlas-cloud': 'openai/gpt-5.6-sol',
 		'together': 'deepseek-ai/DeepSeek-V4-Pro',
 	};
 
@@ -674,4 +674,3 @@ test('major providers have correct default models', t => {
 		);
 	}
 });
-

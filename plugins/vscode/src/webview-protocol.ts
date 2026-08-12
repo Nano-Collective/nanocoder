@@ -78,13 +78,32 @@ export interface ExtensionMessageSyncState {
 	availableProviders: string[];
 }
 
+export interface ExtensionMessageCopyLastCodeBlock {
+	type: 'copyLastCodeBlock';
+}
+
+export interface ExtensionMessageCopyResult {
+	type: 'copyResult';
+	ok: boolean;
+	chars?: number;
+	error?: string;
+}
+
 export interface ExtensionMessageUpdateSessions {
 	type: 'updateSessions';
 	sessions: Array<{
 		sessionId: string;
 		cwd: string;
 		title?: string | null;
+		updatedAt?: string | null;
 	}>;
+}
+
+export interface ExtensionMessagePathInfoResolved {
+	type: 'pathInfoResolved';
+	path: string;
+	name: string;
+	kind: 'file' | 'folder';
 }
 
 export type ExtensionToWebviewMessage =
@@ -100,7 +119,10 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessagePermissionsCancelled
 	| ExtensionMessageSyncState
 	| ExtensionMessageUpdateSessions
-	| ExtensionMessageSessionLoaded;
+	| ExtensionMessageSessionLoaded
+	| ExtensionMessagePathInfoResolved
+	| ExtensionMessageCopyLastCodeBlock
+	| ExtensionMessageCopyResult;
 
 
 // ---------------------------------------------------------
@@ -114,6 +136,7 @@ export interface WebviewMessageReady {
 export interface WebviewMessageSubmitMessage {
 	type: 'submitMessage';
 	text: string;
+	images?: { data: string; mimeType: string }[];
 }
 
 export interface WebviewMessageCancel {
@@ -172,6 +195,36 @@ export interface WebviewMessageDeleteSession {
 	sessionId: string;
 }
 
+export interface WebviewMessageRenameSession {
+	type: 'renameSession';
+	sessionId: string;
+	title: string;
+}
+export interface WebviewMessageRequestPathInfo {
+	type: 'requestPathInfo';
+	path: string;
+}
+
+export interface WebviewMessageRequestOpenDialog {
+	type: 'requestOpenDialog';
+}
+
+export interface WebviewMessageOpenPath {
+	type: 'openPath';
+	path: string;
+	kind: 'file' | 'folder';
+}
+
+export interface WebviewMessageShowError {
+	type: 'showError';
+	message: string;
+}
+
+export interface WebviewMessageCopyToClipboard {
+	type: 'copyToClipboard';
+	text: string;
+}
+
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
 	| WebviewMessageSubmitMessage
@@ -185,4 +238,10 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageSetProvider
 	| WebviewMessageListSessions
 	| WebviewMessageResumeSession
-	| WebviewMessageDeleteSession;
+	| WebviewMessageDeleteSession
+	| WebviewMessageRenameSession
+	| WebviewMessageRequestPathInfo
+	| WebviewMessageRequestOpenDialog
+	| WebviewMessageOpenPath
+	| WebviewMessageShowError
+	| WebviewMessageCopyToClipboard;

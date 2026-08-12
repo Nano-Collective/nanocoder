@@ -183,17 +183,32 @@ async function fetchModelsData(): Promise<ModelsDevDatabase | null> {
 }
 
 /**
+ * In-process memo of the parsed models.dev database. The payload is ~3.5MB,
+ * so re-reading and JSON.parsing it from disk on every lookup costs ~13ms a
+ * call — and the per-response usage indicator made that a per-message tax.
+ * The in-flight promise is shared so concurrent lookups don't stampede, and
+ * negative results (no cache, fetch failed) are memoized too: an offline
+ * session pays the fetch timeout once per process, not once per response.
+ */
+let modelsDataMemo: Promise<ModelsDevDatabase | null> | null = null;
+
+/**
  * Get models data, preferring cache if valid
  */
-async function getModelsData(): Promise<ModelsDevDatabase | null> {
-	// Try cache first
-	const cached = await readCache();
-	if (cached) {
-		return cached.data;
-	}
+function getModelsData(): Promise<ModelsDevDatabase | null> {
+	if (!modelsDataMemo) {
+		modelsDataMemo = (async () => {
+			// Try cache first
+			const cached = await readCache();
+			if (cached) {
+				return cached.data;
+			}
 
-	// Fetch fresh data if cache is invalid
-	return fetchModelsData();
+			// Fetch fresh data if cache is invalid
+			return fetchModelsData();
+		})();
+	}
+	return modelsDataMemo;
 }
 
 /**
@@ -486,6 +501,13 @@ export async function getModelContextLimit(
 }
 
 /**
+ * Per-model pricing memo. Both lookups below scan the whole database (and a
+ * miss scans it twice), so the result — including the negative one for local
+ * models that will never be on models.dev — is cached for the process.
+ */
+const pricingMemo = new Map<string, ModelInfo['cost'] | null>();
+
+/**
  * Get pricing for a model in USD per 1M tokens.
  * Returns { input, output } from the cached models.dev database,
  * or null when the model isn't found (local model, no pricing data).
@@ -493,6 +515,10 @@ export async function getModelContextLimit(
 export async function getModelPricing(
 	modelId: string,
 ): Promise<ModelInfo['cost'] | null> {
+	const memoized = pricingMemo.get(modelId);
+	if (memoized !== undefined) {
+		return memoized;
+	}
 	try {
 		let modelInfo = await findModelById(modelId);
 
@@ -500,11 +526,9 @@ export async function getModelPricing(
 			modelInfo = await findModelByName(modelId);
 		}
 
-		if (modelInfo) {
-			return modelInfo.cost;
-		}
-
-		return null;
+		const pricing = modelInfo ? modelInfo.cost : null;
+		pricingMemo.set(modelId, pricing);
+		return pricing;
 	} catch {
 		return null;
 	}

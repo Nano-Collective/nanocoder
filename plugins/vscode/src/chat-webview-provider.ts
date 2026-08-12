@@ -1,7 +1,7 @@
-import * as vscode from 'vscode';
-import { WebviewToExtensionMessage, ExtensionToWebviewMessage } from './webview-protocol';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as vscode from 'vscode';
+import { WebviewToExtensionMessage, ExtensionToWebviewMessage } from './webview-protocol';
 
 import { NanocoderAcpClient } from './acp-client';
 import { DiffManager } from './diff-manager';
@@ -75,6 +75,14 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
+	public requestCopyLastCodeBlock() {
+		if (!this._view) {
+			vscode.window.showInformationMessage('Nanocoder: open the Nanocoder chat view first.');
+			return;
+		}
+		this.postMessage({type: 'copyLastCodeBlock'});
+	}
+
 	public toggleHistory() {
 		if (this._view) {
 			this._view.webview.postMessage({ type: 'toggleHistory' });
@@ -112,7 +120,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 						break;
 					case 'submitMessage':
 						this._outputChannel.appendLine(`[Webview] User submitted: ${message.text}`);
-						this._handlePrompt(message.text);
+						this._handlePrompt(message.text, message.images);
 						break;
 					case 'cancel':
 						this._outputChannel.appendLine('[Webview] User cancelled operation.');
@@ -167,6 +175,61 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 							this._broadcastSessions();
 						});
 						break;
+					case 'renameSession':
+						this._outputChannel.appendLine(`[Webview] User renamed session: ${message.sessionId} -> ${message.title}`);
+						this._acpClient.renameSession(message.sessionId, message.title).then(() => {
+							this._broadcastSessions();
+						});
+						break;
+					case 'requestPathInfo': {
+						try {
+							const stat = fs.statSync(message.path);
+							const kind = stat.isDirectory() ? 'folder' : 'file';
+							const name = path.basename(message.path);
+							this.postMessage({ type: 'pathInfoResolved', path: message.path, name, kind });
+						} catch {
+							// path doesn't exist or access denied — silently ignore
+						}
+						break;
+					}
+					case 'requestOpenDialog': {
+						vscode.window.showOpenDialog({
+							canSelectFiles: true,
+							canSelectFolders: true,
+							canSelectMany: true,
+							openLabel: 'Attach'
+						}).then(uris => {
+							if (uris && uris.length > 0) {
+								uris.forEach(uri => {
+									try {
+										const stat = fs.statSync(uri.fsPath);
+										const kind = stat.isDirectory() ? 'folder' : 'file';
+										const name = path.basename(uri.fsPath);
+										this.postMessage({ type: 'pathInfoResolved', path: uri.fsPath, name, kind });
+									} catch {}
+								});
+							}
+						});
+						break;
+					}
+					case 'openPath': {
+						const uri = vscode.Uri.file(message.path);
+						if (message.kind === 'folder') {
+							// Reveal and focus folder in Explorer sidebar
+							vscode.commands.executeCommand('revealInExplorer', uri);
+						} else {
+							// Open file in editor
+							vscode.window.showTextDocument(uri, { preview: false, preserveFocus: false });
+						}
+						break;
+					}
+					case 'showError':
+						this._outputChannel.appendLine(`[Webview] Error: ${message.message}`);
+						vscode.window.showErrorMessage(message.message);
+						break;
+					case 'copyToClipboard':
+						this._copyToClipboard(message.text);
+						break;
 				}
 			}
 		);
@@ -196,12 +259,59 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
+	// The webview extracts the text; the host owns the write because a
+	// palette-triggered copy has no user gesture for navigator.clipboard.
+	private async _copyToClipboard(text: string) {
+		try {
+			await vscode.env.clipboard.writeText(text);
+			this.postMessage({type: 'copyResult', ok: true, chars: text.length});
+		} catch (error) {
+			this._outputChannel.appendLine(`Failed to write to clipboard: ${error}`);
+			this.postMessage({type: 'copyResult', ok: false, error: String(error)});
+		}
+	}
+
 	private async _broadcastSessions() {
 		const sessions = await this._acpClient.listSessions();
 		this.postMessage({type: 'updateSessions', sessions});
 	}
 
-	private async _handlePrompt(text: string) {
+	/**
+	 * Expand @[file] and @[folder] references injected by the webview into
+	 * file/directory contents. This resolves attached context inline so the LLM
+	 * receives the content directly in the prompt, removing the need for a
+	 * read_file / list_directory tool call. Without this, providers like Atlas
+	 * Cloud that return HTTP 400 on tool-result messages would break every
+	 * time the user attached a file or folder.
+	 */
+	private _expandContextAttachments(text: string): string {
+		return text.replace(
+			/@\[(file|folder)\] ([^\n]+)/g,
+			(_match, kind: string, rawPath: string) => {
+				const filePath = rawPath.trim();
+				try {
+					if (kind === 'folder') {
+						// Emit a compact directory listing (names only, one per line)
+						const entries = fs.readdirSync(filePath, { withFileTypes: true });
+						const listing = entries
+							.map(e => (e.isDirectory() ? `${e.name}/` : e.name))
+							.join('\n');
+						return `<context path="${filePath}" type="directory">\n${listing}\n</context>`;
+					} else {
+						const content = fs.readFileSync(filePath, 'utf8');
+						return `<context path="${filePath}">\n${content}\n</context>`;
+					}
+				} catch (err) {
+					// If we can't read the path, leave it as a plain mention so the
+					// LLM still knows what the user was referring to.
+					this._outputChannel.appendLine(`[Context] Could not read ${filePath}: ${err}`);
+					return `<!-- could not read ${filePath}: ${err} -->`;
+				}
+			},
+		);
+	}
+
+	private async _handlePrompt(text: string, images?: { data: string, mimeType: string }[]) {
 		try {
 			if (this._acpClient.hasPendingPermissions()) {
 				vscode.window.showWarningMessage('Nanocoder: Please approve or deny the pending tool before sending a new message.');
@@ -214,6 +324,12 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 			if (text.trim() === '/clear') {
 				this.postMessage({type: 'clear'});
 			}
+
+			// Expand any @[file] / @[folder] attachments into their contents
+			// before handing the prompt to the ACP client. This prevents
+			// providers that reject tool-result messages (e.g. Atlas Cloud)
+			// from returning 400 errors on every file-attached message.
+			const expandedText = this._expandContextAttachments(text);
 
 			// Make sure we have a session
 			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -234,9 +350,18 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				}
 			});
 
-			await this._acpClient.prompt(text);
-			// Signal turn completion so the Webview can flip back to the send button
-			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}});
+			const response = await this._acpClient.prompt(expandedText, images);
+			// Signal turn completion so the Webview can flip back to the send
+			// button. Forward the per-turn token usage and estimated cost so
+			// the webview can render the usage indicator under the response.
+			this.postMessage({
+				type: 'acpUpdate',
+				update: {
+					sessionUpdate: 'prompt_response',
+					usage: response?.usage,
+					cost: (response?._meta as Record<string, any> | undefined)?.['nanocoder/usage']?.cost,
+				},
+			});
 		} catch (error) {
 			this._outputChannel.appendLine(`Prompt execution error: ${error}`);
 			vscode.window.showErrorMessage(`Nanocoder Prompt error: ${error}`);
@@ -245,12 +370,13 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
-	private _getHtmlForWebview(webview: vscode.Webview) { 
+	private _getHtmlForWebview(webview: vscode.Webview) {
 		const htmlPath = path.join(this._extensionUri.fsPath, 'media', 'chat-panel.html');
 		let html = fs.readFileSync(htmlPath, 'utf8');
 
-		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.js'));
-		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.css'));
+		const extVersion = vscode.extensions.getExtension('nanocollective.nanocoder')?.packageJSON.version || Date.now().toString();
+		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.js')).with({ query: `v=${extVersion}` });
+		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.css')).with({ query: `v=${extVersion}` });
 		const markedUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'marked.min.js'));
 		const nonce = getNonce();
 

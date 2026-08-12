@@ -31,6 +31,7 @@ import type {
 	ToolCall,
 	ToolResult,
 } from '@/types/core';
+import {buildResponseUsageBounded} from '@/usage/response-usage';
 import {performAutoCompact} from '@/utils/auto-compact';
 import {formatElapsedTime, getRandomAdjective} from '@/utils/completion-note';
 import {MessageBuilder} from '@/utils/message-builder';
@@ -489,11 +490,21 @@ export const processAssistantResponse = async (
 		lastTurnHadReasoning = true;
 	}
 	if (cleanedContent.trim()) {
+		// Provider-reported tokens + estimated cost for this API call, shown
+		// as the footer of the message. The lookup is bounded: token counts
+		// are known synchronously and always render; the cost segment joins
+		// only if (memoized) pricing resolves within the ceiling, so a cold
+		// or offline models.dev fetch can never hold up the message swap.
+		const responseUsage = await buildResponseUsageBounded(
+			result.usage,
+			currentModel,
+		);
 		addToChatQueue(
 			<AssistantMessage
 				key={generateKey('assistant')}
 				message={cleanedContent}
 				model={currentModel}
+				usage={responseUsage}
 			/>,
 		);
 	}
