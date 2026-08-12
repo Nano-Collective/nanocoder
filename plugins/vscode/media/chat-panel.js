@@ -867,6 +867,13 @@
 		scrollToBottom();
 	}
 
+	function keepVisualLoaderAtBottom() {
+		if (visualLoader && visualLoader.parentElement) {
+			messagesContainer.appendChild(visualLoader);
+		}
+		scrollToBottom();
+	}
+
 	function stopVisualLoader() {
 		if (visualLoader) {
 			visualLoader.remove();
@@ -878,7 +885,6 @@
 		// Remove welcome message and loader if present
 		const welcome = document.querySelector('.welcome-message');
 		if (welcome) welcome.remove();
-		stopVisualLoader();
 
 		if (!currentTurnEl || !currentTextEl) {
 			// First chunk for this turn
@@ -1044,7 +1050,6 @@
 				break;
 			}
 			case 'appendMessage':
-				stopVisualLoader();
 				appendMessage(message.content, 'agent');
 				break;
 			case 'clear':
@@ -1271,10 +1276,6 @@
 		if (!payload) return;
 		const update = payload.update ? payload.update : payload;
 
-		if (update.sessionUpdate && update.sessionUpdate !== 'user_message_chunk') {
-			stopVisualLoader();
-		}
-
 		if (update.sessionUpdate === 'user_message_chunk') {
 			if (update.content) {
 				endCurrentTextBlock();
@@ -1292,6 +1293,7 @@
 				currentThoughtBox = null;
 			}
 			if (update.content && update.content.text) {
+				stopVisualLoader();
 				appendChunk(update.content.text);
 			}
 		} else if (update.sessionUpdate === 'agent_thought_chunk') {
@@ -1318,6 +1320,7 @@
 			// Turn is complete — restore the send button
 			setProcessing(false);
 		}
+		keepVisualLoaderAtBottom();
 	}
 
 	class ThoughtAggregator {
