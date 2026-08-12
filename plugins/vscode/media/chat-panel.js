@@ -161,11 +161,16 @@
 		}
 	}
 
+	// Shared by the Stop button and Escape so the two can't drift apart.
+	function requestCancel() {
+		vscode.postMessage({ type: 'cancel' });
+		setProcessing(false);
+	}
+
 	if (sendStopBtn) {
 		sendStopBtn.addEventListener('click', () => {
 			if (isProcessing) {
-				vscode.postMessage({ type: 'cancel' });
-				setProcessing(false);
+				requestCancel();
 			} else {
 				submitMessage();
 			}
@@ -195,8 +200,7 @@
 		if (e.key === 'Escape' && isProcessing) {
 			e.preventDefault();
 			e.stopPropagation();
-			vscode.postMessage({ type: 'cancel' });
-			setProcessing(false);
+			requestCancel();
 		}
 	});
 
@@ -360,6 +364,9 @@
 				break;
 			case 'permissionRequested':
 				handlePermissionRequested(message.toolCallId, message.toolCall, message.options);
+				break;
+			case 'permissionsCancelled':
+				handlePermissionsCancelled(message.toolCallIds);
 				break;
 
 			case 'syncState':
@@ -692,7 +699,9 @@
 				} else if (
 					update.status === 'cancelled' ||
 					update.status === 'denied' ||
-					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && (update.rawOutput.includes('AbortError') || update.rawOutput.includes('cancelled')))
+					// ACP has no 'cancelled' status, so a cancel arrives as failed with
+					// 'Cancelled by user'. Case-insensitive, or the capital C misses.
+					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && /aborterror|cancelled/i.test(update.rawOutput))
 				) {
 					statusEl.innerHTML = ICONS.cancelled;
 				} else if (update.status === 'error' || update.status === 'failed') {
@@ -943,6 +952,21 @@
 
 		card.appendChild(actionsDiv);
 		scrollToBottom();
+	}
+
+	// Drop the approval buttons off cards whose permission request was cancelled.
+	function handlePermissionsCancelled(toolCallIds) {
+		for (const toolCallId of toolCallIds || []) {
+			const card = document.getElementById(`tool-card-${toolCallId}`);
+			if (!card) continue;
+
+			const actions = card.querySelector('.tool-actions');
+			if (actions) actions.remove();
+
+			// Tool cards keep their status in .tool-status, edit cards in .ml-auto.
+			const statusEl = card.querySelector('.tool-status, .ml-auto');
+			if (statusEl) statusEl.innerHTML = ICONS.cancelled;
+		}
 	}
 
 

@@ -37,6 +37,13 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 			});
 		};
 
+		this._acpClient.onPermissionsCancelled = (toolCallIds: string[]) => {
+			this.postMessage({
+				type: 'permissionsCancelled',
+				toolCallIds
+			});
+		};
+
 		this._acpClient.onStateSync = (state: any) => {
 			this.postMessage({
 				type: 'syncState',

@@ -313,6 +313,8 @@ test('AcpAgent.prompt - resolves cleanly on user cancellation instead of throwin
 	});
 
 	t.is(result.stopReason, 'cancelled');
+	// The early return still has to run the finally block, same as the throwing path.
+	t.false(agent['sessions'].get(session.sessionId)!.turnActive);
 	t.true(
 		updates.some(
 			u =>
