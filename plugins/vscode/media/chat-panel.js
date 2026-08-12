@@ -1635,7 +1635,7 @@
 					update.status === 'denied' ||
 					// ACP has no 'cancelled' status, so a cancel arrives as failed with
 					// 'Cancelled by user'. Case-insensitive, or the capital C misses.
-					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && /aborterror|cancelled/i.test(update.rawOutput))
+					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && /aborterror|cancelled|denied/i.test(update.rawOutput))
 				) {
 					statusEl.innerHTML = ICONS.cancelled;
 				} else if (update.status === 'error' || update.status === 'failed') {
@@ -1822,10 +1822,14 @@
 		const statusEl = el.querySelector('.ml-auto');
 		if (statusEl) {
 			if (update.status === 'success' || update.status === 'completed') statusEl.innerHTML = ICONS.success;
-			else if (update.status === 'error') statusEl.innerHTML = ICONS.error;
-			else if (update.status === 'cancelled' || update.status === 'denied') statusEl.innerHTML = ICONS.cancelled;
+			else if (
+				update.status === 'cancelled' ||
+				update.status === 'denied' ||
+				(update.status === 'failed' && typeof update.rawOutput === 'string' && /aborterror|cancelled|denied/i.test(update.rawOutput))
+			) statusEl.innerHTML = ICONS.cancelled;
+			else if (update.status === 'error' || update.status === 'failed') statusEl.innerHTML = ICONS.error;
 		}
-		if (update.status === 'success' || update.status === 'completed' || update.status === 'error' || update.status === 'cancelled' || update.status === 'denied') {
+		if (update.status === 'success' || update.status === 'completed' || update.status === 'error' || update.status === 'failed' || update.status === 'cancelled' || update.status === 'denied') {
 			const actions = el.querySelector('.tool-actions');
 			if (actions) actions.remove();
 		}
