@@ -479,13 +479,6 @@
 
 		const imagesToSubmit = pendingImages.length > 0 ? [...pendingImages] : undefined;
 
-		// Send message to extension host
-		vscode.postMessage({
-			type: 'submitMessage',
-			text: text,
-			images: imagesToSubmit
-		});
-
 		// Clear input
 		chatInput.value = '';
 		chatInput.style.height = 'auto';
@@ -496,8 +489,23 @@
 		attachedPaths = [];
 		renderChips();
 
+		dispatchPrompt(text, imagesToSubmit);
+	}
+
+	// Send `text` to the agent as a turn of its own. Split out of
+	// submitMessage so an editor-driven prompt can bypass the composer: going
+	// through it would overwrite a draft the user is typing and sweep up chips
+	// and images they staged for a different question.
+	function dispatchPrompt(text, images) {
+		// Send message to extension host
+		vscode.postMessage({
+			type: 'submitMessage',
+			text: text,
+			images: images
+		});
+
 		// Optimistically append user message
-		appendMessage(text, 'user', imagesToSubmit);
+		appendMessage(text, 'user', images);
 		pendingUserMessageText = text;
 
 		if (!isProcessing) {
@@ -1048,8 +1056,7 @@
 				break;
 			case 'runPrompt':
 				if (isHistoryView) showChatView();
-				chatInput.value = message.text;
-				submitMessage();
+				dispatchPrompt(message.text);
 				chatInput.focus();
 				break;
 			case 'copyLastCodeBlock':
