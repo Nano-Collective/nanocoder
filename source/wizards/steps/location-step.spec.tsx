@@ -37,6 +37,15 @@ test('LocationStep shows global config option', t => {
 	t.regex(output!, /Global user config/);
 });
 
+test('LocationStep shows the resolved project path next to the option', t => {
+	const {lastFrame} = render(
+		<LocationStep onComplete={() => {}} projectDir="/test/project" />,
+	);
+
+	const output = lastFrame();
+	t.regex(output!, /Current project directory.*project/);
+});
+
 test('LocationStep shows tip about config types', t => {
 	const {lastFrame} = render(
 		<LocationStep onComplete={() => {}} projectDir="/test/project" />,

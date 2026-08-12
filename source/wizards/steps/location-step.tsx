@@ -1,11 +1,24 @@
 import {existsSync} from 'node:fs';
-import {join} from 'node:path';
+import {homedir} from 'node:os';
+import {dirname, join, resolve} from 'node:path';
 import {Box, Text, useInput} from 'ink';
 import {useState} from 'react';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {getColors} from '@/config';
 import {getConfigPath} from '@/config/paths';
+import {
+	PATH_LENGTH_NARROW_TERMINAL,
+	PATH_LENGTH_NORMAL_TERMINAL,
+} from '@/constants';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
+
+function homeRelative(path: string): string {
+	const resolved = resolve(path);
+	const home = homedir();
+	return resolved.startsWith(home)
+		? `~${resolved.slice(home.length)}`
+		: resolved;
+}
 
 export type ConfigLocation = 'project' | 'global';
 
@@ -49,13 +62,16 @@ export function LocationStep({
 
 	const existingPath = projectExists ? projectPath : globalPath;
 
+	const pathMaxLength = isNarrow
+		? PATH_LENGTH_NARROW_TERMINAL
+		: PATH_LENGTH_NORMAL_TERMINAL;
 	const locationOptions: LocationOption[] = [
 		{
-			label: `Global user config`,
+			label: `Global user config  (${truncatePath(homeRelative(dirname(globalPath)), pathMaxLength)})`,
 			value: 'global',
 		},
 		{
-			label: `Current project directory`,
+			label: `Current project directory  (${truncatePath(homeRelative(dirname(projectPath)), pathMaxLength)})`,
 			value: 'project',
 		},
 	];
