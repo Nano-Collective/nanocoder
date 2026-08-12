@@ -205,6 +205,24 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 						});
 						break;
 					}
+					case 'openPath': {
+						const uri = vscode.Uri.file(message.path);
+						if (message.kind === 'folder') {
+							// Reveal and focus folder in Explorer sidebar
+							vscode.commands.executeCommand('revealInExplorer', uri);
+						} else {
+							// Open file in editor
+							vscode.window.showTextDocument(uri, { preview: false, preserveFocus: false });
+						}
+						break;
+					}
+					case 'showError':
+						this._outputChannel.appendLine(`[Webview] Error: ${message.message}`);
+						vscode.window.showErrorMessage(message.message);
+						break;
+					case 'copyToClipboard':
+						this._copyToClipboard(message.text);
+						break;
 				}
 			}
 		);
