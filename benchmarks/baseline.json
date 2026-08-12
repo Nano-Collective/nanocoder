@@ -29,7 +29,7 @@
 		},
 		"interactive_boot_ms_approx": {
 			"kind": "numeric",
-			"value": 2119,
+			"value": 1415,
 			"warnOnDecrease": false
 		},
 		"acp_module_count": {
@@ -39,12 +39,12 @@
 		},
 		"acp_boot_ms_approx": {
 			"kind": "numeric",
-			"value": 906,
+			"value": 604,
 			"warnOnDecrease": false
 		},
 		"first_render_ms_approx": {
 			"kind": "numeric",
-			"value": 1409,
+			"value": 1127,
 			"warnOnDecrease": false
 		},
 		"dist_size_bytes": {
@@ -81,12 +81,12 @@
 	"health": {
 		"test_file_count": {
 			"kind": "numeric",
-			"value": 340,
+			"value": 342,
 			"warnOnDecrease": true
 		},
 		"test_case_count": {
 			"kind": "numeric",
-			"value": 6353,
+			"value": 6403,
 			"warnOnDecrease": true
 		},
 		"audit_high_vulns": {
