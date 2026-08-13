@@ -600,3 +600,109 @@ test.serial(
 		);
 	},
 );
+
+// ============================================================================
+// background session titling
+// ============================================================================
+
+/** Poll the persisted session, since titling is deliberately fire and forget. */
+async function waitForSession(
+	sessionId: string,
+	predicate: (s: any) => boolean,
+	timeoutMs = 3000,
+): Promise<any | null> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		const s = await sessionManager.readSession(sessionId);
+		if (s && predicate(s)) return s;
+		await new Promise(r => setTimeout(r, 20));
+	}
+	return null;
+}
+
+test('AcpAgent.prompt - a completed turn with a weak title generates one, once', async t => {
+	const {agent} = createAgent();
+
+	let chatCalls = 0;
+	agent['initContext'].client.chat = async () => {
+		chatCalls++;
+		// First call is the conversation itself; any later one is the titler.
+		return chatCalls === 1
+			? {choices: [{message: {content: 'Done.'}}]}
+			: {choices: [{message: {content: 'Fix Login Redirect'}}]};
+	};
+
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'fix this'}],
+	});
+
+	const titled = await waitForSession(
+		session.sessionId,
+		s => s.titleGenerated === true,
+	);
+	t.truthy(titled, 'expected a generated title to be persisted');
+	t.is(titled.title, 'Fix Login Redirect');
+	// A generated title must never masquerade as a user rename.
+	t.not(titled.titleManuallySet, true);
+
+	// A second turn must not re-title: titleGenerated short-circuits it.
+	const callsAfterFirst = chatCalls;
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'and now this'}],
+	});
+	await new Promise(r => setTimeout(r, 200));
+
+	const after = await sessionManager.readSession(session.sessionId);
+	t.is(after!.title, 'Fix Login Redirect');
+	// Exactly one more chat call, the conversation turn, and no second titler.
+	t.is(chatCalls, callsAfterFirst + 1);
+});
+
+test('AcpAgent.prompt - a cancelled turn does not generate a title', async t => {
+	const {agent} = createAgent();
+
+	let chatCalls = 0;
+	agent['initContext'].client.chat = async () => {
+		chatCalls++;
+		throw new Error('Operation was cancelled');
+	};
+
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'fix this'}],
+	});
+	await new Promise(r => setTimeout(r, 200));
+
+	// The cancel path early-returns from inside catch, which still runs the
+	// finally. Reaching the finally must not be mistaken for a clean turn.
+	t.is(chatCalls, 1);
+	const stored = await sessionManager.readSession(session.sessionId);
+	t.not(stored?.titleGenerated, true);
+});
+
+test('AcpAgent.prompt - an errored turn does not generate a title', async t => {
+	const {agent} = createAgent();
+
+	let chatCalls = 0;
+	agent['initContext'].client.chat = async () => {
+		chatCalls++;
+		throw new Error('RequestError: Internal error (500)');
+	};
+
+	const session = await agent.newSession({cwd: '/tmp'});
+	await t.throwsAsync(
+		agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'fix this'}],
+		}),
+	);
+	await new Promise(r => setTimeout(r, 200));
+
+	t.is(chatCalls, 1);
+	const stored = await sessionManager.readSession(session.sessionId);
+	t.not(stored?.titleGenerated, true);
+});

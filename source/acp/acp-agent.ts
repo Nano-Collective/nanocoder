@@ -45,6 +45,7 @@ import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
 import {loadPreferences, updateLastUsed} from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
+import {maybeGenerateTitle} from '@/session/maybe-generate-title';
 import {sessionManager} from '@/session/session-manager';
 import {getTuneToolMode} from '@/types/config';
 import {getLogger} from '@/utils/logging';
@@ -309,14 +310,20 @@ export class AcpAgent implements Agent {
 		const nonInteractiveAlwaysAllow = config.alwaysAllow ?? [];
 
 		session.turnActive = true;
+		// Both the cancel early-return below and the rethrow after it still run
+		// the finally, so a clean turn has to be tracked explicitly rather than
+		// inferred from getting there.
+		let turnSucceeded = false;
 		try {
-			return await runAcpConversation({
+			const result = await runAcpConversation({
 				session,
 				client: this.initContext.client,
 				toolManager: this.initContext.toolManager,
 				conn: this.conn,
 				nonInteractiveAlwaysAllow,
 			});
+			turnSucceeded = true;
+			return result;
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : String(error);
 
@@ -361,6 +368,22 @@ export class AcpAgent implements Agent {
 			await this.saveAcpSessionToDisk(session).catch(err => {
 				logger.error(`Failed to save ACP session ${session.sessionId}: ${err}`);
 			});
+
+			// Fire and forget: the turn must return to idle immediately, and a
+			// cosmetic title landing a moment later is fine.
+			if (turnSucceeded) {
+				void maybeGenerateTitle({
+					sessionId: session.sessionId,
+					messages: session.messages,
+					client: this.initContext.client,
+					onTitle: title => {
+						void this.conn.extNotification('_nanocoder/sessionTitleChanged', {
+							sessionId: session.sessionId,
+							title,
+						});
+					},
+				});
+			}
 		}
 	}
 
@@ -772,6 +795,7 @@ export class AcpAgent implements Agent {
 				id: session.sessionId,
 				title,
 				titleManuallySet: existingSession?.titleManuallySet,
+				titleGenerated: existingSession?.titleGenerated,
 				createdAt: existingSession?.createdAt || timestamp,
 				lastAccessedAt: timestamp,
 				messageCount: saveableMessages.length,
