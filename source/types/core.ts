@@ -96,6 +96,7 @@ export interface ToolExecutionContext {
 	abortSignal?: AbortSignal;
 	sessionId?: string;
 	workingDirectory?: string;
+	context?: ToolContext;
 }
 
 export type ToolHandler = (
@@ -125,9 +126,14 @@ export type ToolValidationResult =
 	| {valid: true}
 	| {valid: false; error: string; details?: ValidationErrorDetail[]};
 
+export interface ToolContext {
+	restrictedScope?: string;
+}
+
 export type ToolValidator = (
 	// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required -- Tool arguments are dynamically typed
 	args: any,
+	context?: ToolContext,
 ) => Promise<ToolValidationResult>;
 
 export type StreamingFormatter = (

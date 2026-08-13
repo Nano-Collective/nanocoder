@@ -192,10 +192,13 @@ const stringReplaceFormatter = async (
 
 const stringReplaceValidator = async (
 	args: StringReplaceArgs,
+	context?: import('@/types/core').ToolContext,
 ): Promise<{valid: true} | {valid: false; error: string}> => {
 	const {path, old_str} = args;
 
-	const pathResult = validatePath(path);
+	const pathResult = validatePath(path, {
+		restrictedScope: context?.restrictedScope,
+	});
 	if (!pathResult.valid) return pathResult;
 
 	const absPath = resolve(getSafeSessionCwd(), path);

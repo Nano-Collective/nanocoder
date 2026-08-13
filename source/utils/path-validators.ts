@@ -1,13 +1,20 @@
 import {getProjectRoot, getSessionCwd} from '@/services/session-cwd';
 import {formatError} from '@/utils/error-formatter';
-import {isValidFilePath, resolveFilePath} from '@/utils/path-validation';
+import {
+	checkRestrictedScope,
+	isValidFilePath,
+	resolveFilePath,
+} from '@/utils/path-validation';
 
 type ValidationResult = {valid: true} | {valid: false; error: string};
 
 /**
  * Validates a single file path: checks format and project boundary.
  */
-export function validatePath(path: string): ValidationResult {
+export function validatePath(
+	path: string,
+	options?: {restrictedScope?: string},
+): ValidationResult {
 	const cwd = getSessionCwd();
 	const root = getProjectRoot();
 	if (!isValidFilePath(path, root)) {
@@ -18,7 +25,11 @@ export function validatePath(path: string): ValidationResult {
 	}
 
 	try {
-		resolveFilePath(path, cwd, root);
+		const absolutePath = resolveFilePath(path, cwd, root);
+		if (options?.restrictedScope) {
+			const absoluteScope = resolveFilePath(options.restrictedScope, cwd, root);
+			checkRestrictedScope(absolutePath, absoluteScope);
+		}
 	} catch (error) {
 		const errorMessage = formatError(error);
 		return {
@@ -36,6 +47,7 @@ export function validatePath(path: string): ValidationResult {
 export function validatePathPair(
 	source: string,
 	destination: string,
+	options?: {restrictedScope?: string},
 ): ValidationResult {
 	const cwd = getSessionCwd();
 	const root = getProjectRoot();
@@ -54,8 +66,14 @@ export function validatePathPair(
 	}
 
 	try {
-		resolveFilePath(source, cwd, root);
-		resolveFilePath(destination, cwd, root);
+		const absSource = resolveFilePath(source, cwd, root);
+		const absDest = resolveFilePath(destination, cwd, root);
+
+		if (options?.restrictedScope) {
+			const absoluteScope = resolveFilePath(options.restrictedScope, cwd, root);
+			checkRestrictedScope(absSource, absoluteScope);
+			checkRestrictedScope(absDest, absoluteScope);
+		}
 	} catch (error) {
 		const errorMessage = formatError(error);
 		return {
