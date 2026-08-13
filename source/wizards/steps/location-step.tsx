@@ -1,6 +1,5 @@
 import {existsSync} from 'node:fs';
-import {homedir} from 'node:os';
-import {dirname, join, resolve} from 'node:path';
+import {dirname, join} from 'node:path';
 import {Box, Text, useInput} from 'ink';
 import {useState} from 'react';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
@@ -11,14 +10,7 @@ import {
 	PATH_LENGTH_NORMAL_TERMINAL,
 } from '@/constants';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
-
-function homeRelative(path: string): string {
-	const resolved = resolve(path);
-	const home = homedir();
-	return resolved.startsWith(home)
-		? `~${resolved.slice(home.length)}`
-		: resolved;
-}
+import {homeRelative} from '@/utils/path';
 
 export type ConfigLocation = 'project' | 'global';
 
