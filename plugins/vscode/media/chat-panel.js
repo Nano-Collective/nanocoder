@@ -271,11 +271,16 @@
 		}
 	}
 
+	// Shared by the Stop button and Escape so the two can't drift apart.
+	function requestCancel() {
+		vscode.postMessage({ type: 'cancel' });
+		setProcessing(false);
+	}
+
 	if (sendStopBtn) {
 		sendStopBtn.addEventListener('click', () => {
 			if (isProcessing) {
-				vscode.postMessage({ type: 'cancel' });
-				setProcessing(false);
+				requestCancel();
 			} else {
 				submitMessage();
 			}
@@ -449,6 +454,18 @@
 		}
 	});
 
+	// Escape instantly cancels the in-flight LLM request, mirroring the Stop
+	// button. Registered on `document` (not just the textarea) so it fires even
+	// when the chat input has lost focus to a tool card, button, dropdown or the
+	// streaming response area. Guarded by isProcessing so an idle Escape does
+	// nothing.
+	document.addEventListener('keydown', (e) => {
+		if (e.key === 'Escape' && isProcessing) {
+			e.preventDefault();
+			e.stopPropagation();
+			requestCancel();
+		}
+	});
 	// Ctrl/Cmd+Alt+Shift+C is owned by the host keybinding
 	// (`nanocoder.copyLastCodeBlock` in package.json). VS Code forwards
 	// webview keydowns to the host for resolution even after preventDefault,
@@ -1091,6 +1108,9 @@
 			case 'permissionRequested':
 				handlePermissionRequested(message.toolCallId, message.toolCall, message.options);
 				break;
+			case 'permissionsCancelled':
+				handlePermissionsCancelled(message.toolCallIds);
+				break;
 
 			case 'syncState':
 				handleSyncState(message);
@@ -1523,7 +1543,9 @@
 				} else if (
 					update.status === 'cancelled' ||
 					update.status === 'denied' ||
-					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && (update.rawOutput.includes('AbortError') || update.rawOutput.includes('cancelled')))
+					// ACP has no 'cancelled' status, so a cancel arrives as failed with
+					// 'Cancelled by user'. Case-insensitive, or the capital C misses.
+					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && /aborterror|cancelled/i.test(update.rawOutput))
 				) {
 					statusEl.innerHTML = ICONS.cancelled;
 				} else if (update.status === 'error' || update.status === 'failed') {
@@ -1774,6 +1796,21 @@
 
 		card.appendChild(actionsDiv);
 		scrollToBottom();
+	}
+
+	// Drop the approval buttons off cards whose permission request was cancelled.
+	function handlePermissionsCancelled(toolCallIds) {
+		for (const toolCallId of toolCallIds || []) {
+			const card = document.getElementById(`tool-card-${toolCallId}`);
+			if (!card) continue;
+
+			const actions = card.querySelector('.tool-actions');
+			if (actions) actions.remove();
+
+			// Tool cards keep their status in .tool-status, edit cards in .ml-auto.
+			const statusEl = card.querySelector('.tool-status, .ml-auto');
+			if (statusEl) statusEl.innerHTML = ICONS.cancelled;
+		}
 	}
 
 

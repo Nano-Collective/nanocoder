@@ -60,6 +60,12 @@ export interface ExtensionMessagePermissionRequested {
 	options?: any[];
 }
 
+/** Sent when a cancel or a new chat drops permission prompts still on screen. */
+export interface ExtensionMessagePermissionsCancelled {
+	type: 'permissionsCancelled';
+	toolCallIds: string[];
+}
+
 
 
 export interface ExtensionMessageSyncState {
@@ -110,6 +116,7 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageToolUpdated
 	| ExtensionMessageToolCompleted
 	| ExtensionMessagePermissionRequested
+	| ExtensionMessagePermissionsCancelled
 	| ExtensionMessageSyncState
 	| ExtensionMessageUpdateSessions
 	| ExtensionMessageSessionLoaded
