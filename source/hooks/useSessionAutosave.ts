@@ -1,7 +1,8 @@
 import {useCallback, useEffect, useRef} from 'react';
 import {getAppConfig} from '@/config/index';
+import {maybeGenerateTitle} from '@/session/maybe-generate-title';
 import {sessionManager} from '@/session/session-manager';
-import type {Message} from '@/types/core';
+import type {LLMClient, Message} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {logWarning} from '@/utils/message-queue';
 import {getShutdownManager} from '@/utils/shutdown';
@@ -12,6 +13,10 @@ interface UseSessionAutosaveProps {
 	currentModel: string;
 	currentSessionId: string | null;
 	setCurrentSessionId: (id: string | null) => void;
+	/** Used for the background title call. Null before init completes. */
+	client: LLMClient | null;
+	/** Updates the live display when a generated title lands. */
+	setSessionName: (name: string) => void;
 }
 
 const SHUTDOWN_HANDLER_NAME = 'session-autosave-flush';
@@ -46,6 +51,8 @@ export function useSessionAutosave({
 	currentModel,
 	currentSessionId,
 	setCurrentSessionId,
+	client,
+	setSessionName,
 }: UseSessionAutosaveProps) {
 	const initPromiseRef = useRef<Promise<boolean> | null>(null);
 	const timeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -132,16 +139,16 @@ export function useSessionAutosave({
 				// the update path instead of calling createSession() again.
 				const liveSessionId = currentSessionIdRef.current;
 
-				// Derive a human-readable title from the most recent user message.
+				// Derive the title from the FIRST user message, matching the ACP
+				// path. Deriving it from the latest one made the title a rolling
+				// mirror of whatever was typed most recently, which is not a name.
 				// The full message array is always written - maxMessages bounds only
 				// what is sent to the model (sliced in the conversation loop).
-				const userMessages = capturedMessages.filter(
+				const firstUserMessage = capturedMessages.find(
 					msg => msg.role === 'user',
 				);
-				const lastUserMessage = userMessages[userMessages.length - 1];
-				const title = lastUserMessage
-					? lastUserMessage.content.substring(0, 50) +
-						(lastUserMessage.content.length > 50 ? '...' : '')
+				const title = firstUserMessage
+					? firstUserMessage.content.split('\n')[0].substring(0, 50)
 					: `Session ${new Date().toLocaleDateString()}`;
 
 				if (liveSessionId) {
@@ -150,9 +157,9 @@ export function useSessionAutosave({
 						// Write the full history — no truncation.
 						session.messages = capturedMessages;
 						session.messageCount = capturedMessages.length;
-						// A manually-renamed title sticks - don't let the auto-derived
-						// title clobber it.
-						if (!session.titleManuallySet) {
+						// A manually-renamed or generated title sticks - don't let the
+						// auto-derived title clobber either one.
+						if (!session.titleManuallySet && !session.titleGenerated) {
 							session.title = title;
 						}
 						session.provider = capturedProvider;
@@ -195,12 +202,25 @@ export function useSessionAutosave({
 					setCurrentSessionId(newSession.id);
 				}
 
+				// Fire and forget: a cosmetic title must never delay or fail a save.
+				// maybeGenerateTitle owns every precondition, including doing
+				// nothing at all when the heuristic title is already good enough.
+				const sessionIdForTitle = currentSessionIdRef.current;
+				if (sessionIdForTitle && client) {
+					void maybeGenerateTitle({
+						sessionId: sessionIdForTitle,
+						messages: capturedMessages,
+						client,
+						onTitle: setSessionName,
+					});
+				}
+
 				lastSaveRef.current = Date.now();
 			} catch (error) {
 				console.warn('Failed to auto-save session:', error);
 			}
 		},
-		[setCurrentSessionId],
+		[setCurrentSessionId, client, setSessionName],
 	);
 
 	// Auto-save when messages change (debounced by saveInterval)
