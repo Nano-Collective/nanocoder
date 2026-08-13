@@ -378,6 +378,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.js')).with({ query: `v=${extVersion}` });
 		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.css')).with({ query: `v=${extVersion}` });
 		const markedUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'marked.min.js'));
+		const toolCardUtilsUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'tool-card-utils.js')).with({ query: `v=${extVersion}` });
 		const nonce = getNonce();
 
 		html = html.replace(/\{\{cspSource\}\}/g, webview.cspSource);
@@ -385,6 +386,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		html = html.replace(/\{\{styleUri\}\}/g, styleUri.toString());
 		html = html.replace(/\{\{scriptUri\}\}/g, scriptUri.toString());
 		html = html.replace(/\{\{markedUri\}\}/g, markedUri.toString());
+		html = html.replace(/\{\{toolCardUtilsUri\}\}/g, toolCardUtilsUri.toString());
 
 		return html;
 	}

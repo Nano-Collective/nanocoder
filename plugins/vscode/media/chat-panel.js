@@ -1581,15 +1581,6 @@
 			this.toggle(false);
 		}
 
-		cancelPending() {
-			for (const [id, item] of this.toolItems.entries()) {
-				const statusEl = item.querySelector('.tool-status');
-				if (statusEl && statusEl.innerHTML.includes('animate-spin')) {
-					statusEl.innerHTML = ICONS.cancelled;
-				}
-			}
-		}
-
 		updateTitle() {
 			this.title.textContent = `Exploring ${this.toolCount} tools...`;
 		}
@@ -1755,36 +1746,13 @@
 		}
 	}
 
-	const TOOL_VERBS = {
-		read_file: 'Reading',
-		list_directory: 'Listing',
-		find_files: 'Finding files in',
-		search_file_contents: 'Searching',
-		string_replace: 'Editing',
-		write_file: 'Writing',
-		execute_bash: 'Running',
-		fetch_url: 'Fetching',
-		web_search: 'Searching the web',
-		lsp_get_diagnostics: 'Checking diagnostics in',
-	};
-
-	function humanizeToolTitle(title) {
-		if (!title) return 'Tool Call';
-		const sep = title.indexOf(': ');
-		if (sep === -1) return title;
-		const name = title.slice(0, sep);
-		if (!Object.hasOwn(TOOL_VERBS, name)) return title;
-		return `${TOOL_VERBS[name]} ${title.slice(sep + 2)}`;
-	}
-
-	function extractFileName(title) {
-		if (!title) return 'File';
-		const sep = title.indexOf(': ');
-		const parts = (sep === -1 ? title : title.slice(sep + 2)).split('/');
-		let last = parts[parts.length - 1];
-		last = last.split('\\').pop();
-		return last.replace(/['"]+$/g, '').trim();
-	}
+	const {
+		humanizeToolTitle,
+		extractFileName,
+		hasDiffContent,
+		resolveEditCardState,
+		isSettled,
+	} = globalThis.NanocoderToolCardUtils;
 
 	function getFileColor(filename) {
 		const ext = filename.split('.').pop().toLowerCase();
@@ -1802,8 +1770,15 @@
 		card.id = `tool-card-${toolCallId}`;
 
 		const row = document.createElement('div');
-		row.className = 'flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-vscode-list-hover';
-		row.onclick = () => vscode.postMessage({ type: 'showDiff', toolCallId });
+		row.className = 'tool-card-row flex items-center justify-between px-3 py-2';
+		// Guarded rather than unbound: the card is created from the queued
+		// announcement, which carries no content, so DiffManager has nothing
+		// registered under this id until the call is about to run. Clicking in
+		// that window - the whole approval wait - raised "Change <id> not found".
+		row.onclick = () => {
+			if (card.dataset.hasDiff !== 'true') return;
+			vscode.postMessage({ type: 'showDiff', toolCallId });
+		};
 
 		const left = document.createElement('div');
 		left.className = 'flex items-center gap-2 font-vscode text-[0.9em]';
@@ -1817,9 +1792,9 @@
 		const filename = extractFileName(update.title);
 		const fileColor = getFileColor(filename);
 
+		// Text is filled in by updateEditCard, which runs immediately after.
 		const actionText = document.createElement('span');
-		actionText.textContent = 'Edited';
-		actionText.className = 'opacity-80';
+		actionText.className = 'tool-card-action opacity-80';
 
 		const nameText = document.createElement('span');
 		nameText.className = `font-semibold ${fileColor}`;
@@ -1836,7 +1811,7 @@
 		right.className = 'flex items-center gap-2';
 
 		const hoverBtn = document.createElement('span');
-		hoverBtn.className = 'opacity-0 group-hover:opacity-100 transition-opacity bg-vscode-button-secondary text-vscode-fg px-2 py-0.5 rounded text-[0.85em]';
+		hoverBtn.className = 'tool-card-diff-btn hidden transition-opacity bg-vscode-button-secondary text-vscode-fg px-2 py-0.5 rounded text-[0.85em]';
 		hoverBtn.textContent = 'Open Diff';
 
 		right.appendChild(hoverBtn);
@@ -1846,17 +1821,38 @@
 		return card;
 	}
 
+	// Reveal the diff affordance once the extension host has a change
+	// registered for this card - see hasDiffContent.
+	function setEditCardDiffAvailable(el) {
+		if (el.dataset.hasDiff === 'true') return;
+		el.dataset.hasDiff = 'true';
+
+		const row = el.querySelector('.tool-card-row');
+		if (row) row.classList.add('cursor-pointer', 'hover:bg-vscode-list-hover');
+
+		const btn = el.querySelector('.tool-card-diff-btn');
+		if (btn) {
+			btn.classList.remove('hidden');
+			btn.classList.add('opacity-0', 'group-hover:opacity-100');
+		}
+	}
+
 	function updateEditCard(el, update) {
+		const state = resolveEditCardState(update);
+
 		const statusEl = el.querySelector('.tool-status');
 		if (statusEl) {
-			statusEl.dataset.status = update.status || 'pending';
-			if (update.status === 'success' || update.status === 'completed') statusEl.innerHTML = ICONS.success;
-			else if (update.status === 'cancelled' || update.status === 'denied') statusEl.innerHTML = ICONS.cancelled;
-			else if (update.status === 'error' || update.status === 'failed') statusEl.innerHTML = ICONS.error;
-			else if (update.status === 'pending') statusEl.innerHTML = ICONS.circle;
-			else statusEl.innerHTML = ICONS.pending;
+			statusEl.dataset.status = state.status;
+			statusEl.innerHTML = ICONS[state.tone];
 		}
-		if (update.status === 'success' || update.status === 'completed' || update.status === 'error' || update.status === 'failed' || update.status === 'cancelled' || update.status === 'denied') {
+
+		// "Edit foo.ts" while queued, "Edited foo.ts" once it has run.
+		const actionEl = el.querySelector('.tool-card-action');
+		if (actionEl) actionEl.textContent = state.action;
+
+		if (hasDiffContent(update)) setEditCardDiffAvailable(el);
+
+		if (isSettled(state.status)) {
 			const actions = el.querySelector('.tool-actions');
 			if (actions) actions.remove();
 		}
