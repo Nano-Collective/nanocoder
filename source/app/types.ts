@@ -16,6 +16,16 @@ export const VALID_MODES = ['normal', 'auto-accept', 'yolo', 'plan'] as const;
 export type CliMode = Extract<DevelopmentMode, (typeof VALID_MODES)[number]>;
 
 /**
+ * Configuration for the Swarm Mode mock Phase 1.
+ */
+export interface SwarmConfig {
+	prompt: string;
+	workers: number;
+	swarmMode: 'review' | 'apply' | 'yolo';
+	restrictedScope?: string;
+}
+
+/**
  * Props for the main App component
  */
 export interface AppProps {
@@ -54,6 +64,10 @@ export interface AppProps {
 	 * (activeMode `'sessionSelector'`) as soon as the app mounts.
 	 */
 	openSessionSelectorOnStart?: boolean;
+	/**
+	 * Configuration for the swarm mode execution.
+	 */
+	swarmConfig?: SwarmConfig;
 }
 
 /**
