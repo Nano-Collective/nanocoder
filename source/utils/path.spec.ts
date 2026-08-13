@@ -1,6 +1,6 @@
 import test from 'ava';
 import {resolve, sep} from 'node:path';
-import {homeRelative} from './path.js';
+import {homeRelative, truncateMiddle} from './path.js';
 
 const HOME = resolve('/Users/will');
 
@@ -28,4 +28,17 @@ test('homeRelative leaves paths untouched when home is the filesystem root', t =
 	const child = resolve('/foo');
 	t.is(homeRelative(child, root), child);
 	t.is(homeRelative(root, root), root);
+});
+
+test('truncateMiddle leaves short strings untouched', t => {
+	t.is(truncateMiddle('/short/path', 40), '/short/path');
+});
+
+test('truncateMiddle keeps both the root and the leaf segment', t => {
+	const long = '/Users/will/projects/some-really-long-monorepo-name/src/index.ts';
+	const result = truncateMiddle(long, 30);
+	t.is(result.length, 30);
+	t.true(result.startsWith('/Users/wi'));
+	t.true(result.endsWith('index.ts'));
+	t.true(result.includes('...'));
 });

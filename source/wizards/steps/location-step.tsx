@@ -1,16 +1,12 @@
 import {existsSync} from 'node:fs';
-import {dirname, join} from 'node:path';
+import {join} from 'node:path';
 import {Box, Text, useInput} from 'ink';
 import {useState} from 'react';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {getColors} from '@/config';
 import {getConfigPath} from '@/config/paths';
-import {
-	PATH_LENGTH_NARROW_TERMINAL,
-	PATH_LENGTH_NORMAL_TERMINAL,
-} from '@/constants';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
-import {homeRelative} from '@/utils/path';
+import {homeRelative, truncateMiddle} from '@/utils/path';
 
 export type ConfigLocation = 'project' | 'global';
 
@@ -26,6 +22,8 @@ interface LocationOption {
 	value: ConfigLocation;
 }
 
+const LABEL_PATH_SEPARATOR = '\u0000';
+
 export function LocationStep({
 	onComplete,
 	onBack,
@@ -33,7 +31,7 @@ export function LocationStep({
 	configFileName = 'agents.config.json',
 }: LocationStepProps) {
 	const colors = getColors();
-	const {isNarrow, truncatePath} = useResponsiveTerminal();
+	const {actualWidth, isNarrow} = useResponsiveTerminal();
 	const projectPath = join(projectDir, configFileName);
 	const globalPath = join(getConfigPath(), configFileName);
 
@@ -54,16 +52,13 @@ export function LocationStep({
 
 	const existingPath = projectExists ? projectPath : globalPath;
 
-	const pathMaxLength = isNarrow
-		? PATH_LENGTH_NARROW_TERMINAL
-		: PATH_LENGTH_NORMAL_TERMINAL;
 	const locationOptions: LocationOption[] = [
 		{
-			label: `Global user config  (${truncatePath(homeRelative(dirname(globalPath)), pathMaxLength)})`,
+			label: `Global user config${LABEL_PATH_SEPARATOR}${homeRelative(getConfigPath())}`,
 			value: 'global',
 		},
 		{
-			label: `Current project directory  (${truncatePath(homeRelative(dirname(projectPath)), pathMaxLength)})`,
+			label: `Current project directory${LABEL_PATH_SEPARATOR}${homeRelative(projectDir)}`,
 			value: 'project',
 		},
 	];
@@ -109,7 +104,7 @@ export function LocationStep({
 						Configuration found at:{' '}
 					</Text>
 					<Text color={colors.secondary}>
-						{isNarrow ? truncatePath(existingPath, 40) : existingPath}
+						{isNarrow ? truncateMiddle(existingPath, 40) : existingPath}
 					</Text>
 				</Box>
 				<StyledSelectInput
@@ -142,6 +137,22 @@ export function LocationStep({
 			<StyledSelectInput
 				items={locationOptions}
 				onSelect={(item: LocationOption) => handleLocationSelect(item)}
+				itemComponent={({isSelected, label}) => {
+					const [stem, path] = label.split(LABEL_PATH_SEPARATOR);
+					const color = isSelected ? colors.primary : colors.text;
+					const pathBudget = Math.max(10, Math.min(76, actualWidth - 4));
+					return (
+						<Box flexDirection="column">
+							<Text color={color} wrap="truncate-end">
+								{stem}
+							</Text>
+							<Text color={colors.secondary} wrap="truncate-end">
+								{'  '}
+								{truncateMiddle(path, pathBudget)}
+							</Text>
+						</Box>
+					);
+				}}
 			/>
 			{!isNarrow && (
 				<Box marginTop={1}>

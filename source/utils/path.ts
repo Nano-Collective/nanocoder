@@ -19,3 +19,19 @@ export function homeRelative(path: string, home: string = homedir()): string {
 
 	return resolved;
 }
+
+export function truncateMiddle(str: string, maxLength: number): string {
+	if (str.length <= maxLength) {
+		return str;
+	}
+
+	const ellipsis = '...';
+	if (maxLength <= ellipsis.length) {
+		return str.slice(0, Math.max(0, maxLength));
+	}
+
+	const keepStart = Math.ceil((maxLength - ellipsis.length) / 2);
+	const keepEnd = Math.floor((maxLength - ellipsis.length) / 2);
+
+	return str.slice(0, keepStart) + ellipsis + str.slice(str.length - keepEnd);
+}

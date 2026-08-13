@@ -1,6 +1,7 @@
 import test from 'ava';
 import {renderWithTheme as render} from '@/test-utils/render-with-theme';
 import React from 'react';
+import {homeRelative} from '@/utils/path';
 import {LocationStep} from './location-step.js';
 
 // ============================================================================
@@ -43,7 +44,13 @@ test('LocationStep shows the resolved project path next to the option', t => {
 	);
 
 	const output = lastFrame();
-	t.regex(output!, /Current project directory.*project/);
+	t.truthy(output);
+	const lines = output!.split('\n');
+	const stemIndex = lines.findIndex(line =>
+		line.includes('Current project directory'),
+	);
+	t.true(stemIndex !== -1, 'expected to find the project directory stem');
+	t.is(lines[stemIndex + 1]?.trim(), homeRelative('/test/project'));
 });
 
 test('LocationStep shows tip about config types', t => {
