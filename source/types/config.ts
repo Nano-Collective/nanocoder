@@ -217,6 +217,12 @@ export interface AppConfig {
 		maxMessages?: number;
 		retentionDays?: number;
 		directory?: string;
+		/** Generate a descriptive title once per session. Default true. */
+		smartTitles?: boolean;
+		/** Optional model for title generation. Defaults to the session's model. */
+		titleModel?: string;
+		/** Optional provider for title generation. Defaults to the session's provider. */
+		titleProvider?: string;
 	};
 
 	// Headless / non-interactive conversation limits (--plain and ACP loops)
