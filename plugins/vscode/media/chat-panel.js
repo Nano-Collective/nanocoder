@@ -885,8 +885,11 @@
 			if (currentTurnFooter) {
 				currentTurnFooter.remove();
 			} else {
-				currentTurnFooter = createMessageFooter(() => lastAgentRawText || '', 'agent', new Date());
+				// captures footer, not currentTurnFooter - avoids copying the next turn's text
+				const footer = createMessageFooter(() => footer.dataset.rawText || '', 'agent', new Date());
+				currentTurnFooter = footer;
 			}
+			currentTurnFooter.dataset.rawText = lastAgentRawText;
 			wrapper.appendChild(currentTurnFooter);
 			messagesContainer.appendChild(wrapper);
 
@@ -897,6 +900,9 @@
 			// Append to existing turn
 			currentTurnText += textChunk;
 			syncLastAgentRawText();
+			if (currentTurnFooter) {
+				currentTurnFooter.dataset.rawText = lastAgentRawText;
+			}
 
 			if (typeof marked !== 'undefined') {
 				if (!renderTimeout) {
