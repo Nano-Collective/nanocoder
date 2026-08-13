@@ -293,18 +293,26 @@
 			addMenuDropdown.classList.toggle('hidden');
 		});
 
-		document.getElementById('menu-upload-image').addEventListener('click', () => {
-			addMenuDropdown.classList.add('hidden');
-			if (isHistoryView) {
-				showChatView();
-			}
-			imageUpload.click();
-		});
+		const menuUploadImage = document.getElementById('menu-upload-image');
+		if (menuUploadImage) {
+			menuUploadImage.addEventListener('click', () => {
+				addMenuDropdown.classList.add('hidden');
+				if (isHistoryView) {
+					showChatView();
+				}
+				if (imageUpload) {
+					imageUpload.click();
+				}
+			});
+		}
 
-		document.getElementById('menu-attach-file').addEventListener('click', () => {
-			addMenuDropdown.classList.add('hidden');
-			vscode.postMessage({ type: 'requestOpenDialog' });
-		});
+		const menuAttachFile = document.getElementById('menu-attach-file');
+		if (menuAttachFile) {
+			menuAttachFile.addEventListener('click', () => {
+				addMenuDropdown.classList.add('hidden');
+				vscode.postMessage({ type: 'requestOpenDialog' });
+			});
+		}
 	}
 
 	// Image upload logic
