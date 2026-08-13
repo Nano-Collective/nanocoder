@@ -509,6 +509,7 @@ export default function App({
 		setActiveMode: appState.setActiveMode,
 		setCheckpointLoadData: appState.setCheckpointLoadData,
 		setShowAllSessions: appState.setShowAllSessions,
+		currentSessionId: appState.currentSessionId,
 		setCurrentSessionId: appState.setCurrentSessionId,
 		setSessionName: appState.setSessionName,
 		setCurrentProvider: appState.setCurrentProvider,
