@@ -2,7 +2,7 @@ import {mkdirSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
-import {clearAppConfig} from '@/config';
+import {clearAppConfig} from '@/config/index';
 import type {LLMClient} from '@/types/core';
 import {resetTitleClientCache, resolveTitleClient} from './title-client.js';
 
@@ -15,10 +15,13 @@ mkdirSync(testConfigDir, {recursive: true});
 process.env.NANOCODER_CONFIG_DIR = testConfigDir;
 process.chdir(testConfigDir);
 
-const configPath = join(testConfigDir, 'agents.config.json');
-
-function writeConfig(config: Record<string, unknown>): void {
-	writeFileSync(configPath, JSON.stringify(config));
+// Session config is read from nanocoder-preferences.json under a `nanocoder`
+// key, not from agents.config.json.
+function writeSessionConfig(sessions: Record<string, unknown>): void {
+	writeFileSync(
+		join(testConfigDir, 'nanocoder-preferences.json'),
+		JSON.stringify({nanocoder: {sessions}}),
+	);
 	clearAppConfig();
 }
 
@@ -39,7 +42,7 @@ function fakeClient(label: string): LLMClient {
 
 test.beforeEach(() => {
 	resetTitleClientCache();
-	writeConfig({});
+	writeSessionConfig({});
 });
 
 test('returns the session client when no override is configured', async t => {
@@ -49,7 +52,7 @@ test('returns the session client when no override is configured', async t => {
 });
 
 test('returns the session client when sessions block exists but names no model', async t => {
-	writeConfig({sessions: {autoSave: true}});
+	writeSessionConfig({autoSave: true});
 	const session = fakeClient('session-model');
 	t.is(await resolveTitleClient(session), session);
 });
@@ -57,8 +60,9 @@ test('returns the session client when sessions block exists but names no model',
 test('falls back to the session client when the override cannot be built', async t => {
 	// The realistic failure: a user names a provider or model they do not have.
 	// The feature must degrade to the session model, not go silently dead.
-	writeConfig({
-		sessions: {titleProvider: 'no-such-provider-exists', titleModel: 'nope'},
+	writeSessionConfig({
+		titleProvider: 'no-such-provider-exists',
+		titleModel: 'nope',
 	});
 	const session = fakeClient('session-model');
 	t.is(await resolveTitleClient(session), session);

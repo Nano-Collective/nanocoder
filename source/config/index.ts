@@ -237,6 +237,7 @@ function loadSessionConfig(): AppConfig['sessions'] {
 		maxMessages: 1000,
 		retentionDays: 30,
 		directory: '',
+		smartTitles: true,
 	};
 
 	const normalizeSessionNumber = (
@@ -280,6 +281,19 @@ function loadSessionConfig(): AppConfig['sessions'] {
 						defaults.retentionDays ?? 30,
 					),
 					directory: sessions.directory || defaults.directory,
+					smartTitles:
+						sessions.smartTitles !== undefined
+							? Boolean(sessions.smartTitles)
+							: defaults.smartTitles,
+					// No default model: unset means "use the session's own".
+					titleModel:
+						typeof sessions.titleModel === 'string'
+							? sessions.titleModel
+							: undefined,
+					titleProvider:
+						typeof sessions.titleProvider === 'string'
+							? sessions.titleProvider
+							: undefined,
 				};
 			}
 			return null;
