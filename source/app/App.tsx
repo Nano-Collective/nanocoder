@@ -17,6 +17,7 @@ import SecurityDisclaimer from '@/components/security-disclaimer';
 import StreamingMessage from '@/components/streaming-message';
 import StreamingReasoning from '@/components/streaming-reasoning';
 import {SubagentView} from '@/components/subagent-view';
+import {SwarmDashboard} from '@/components/swarm/swarm-dashboard';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {
 	shouldPromptExtensionInstall,
@@ -64,6 +65,7 @@ export default function App({
 	altScreenActive = false,
 	initialSession,
 	openSessionSelectorOnStart = false,
+	swarmConfig,
 }: AppProps) {
 	// Resolve the initial development mode with this precedence:
 	// 1. --mode CLI flag (highest priority)
@@ -725,6 +727,17 @@ export default function App({
 				)}
 			</>
 		) : null);
+
+	// Swarm mock dashboard render tree
+	if (swarmConfig) {
+		return (
+			<ThemeContext.Provider value={themeContextValue}>
+				<TitleShapeContext.Provider value={titleShapeContextValue}>
+					<SwarmDashboard config={swarmConfig} />
+				</TitleShapeContext.Provider>
+			</ThemeContext.Provider>
+		);
+	}
 
 	// Non-interactive render tree — minimal transcript + one status line,
 	// no interactive affordances.
