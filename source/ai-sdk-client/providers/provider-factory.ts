@@ -112,6 +112,9 @@ type ResponsesStreamEvent = {
 	item?: {id?: unknown; type?: unknown};
 };
 
+const SEPARATOR_PATTERN = /\r\n\r\n|\n\n|\r\r/;
+const LINE_PATTERN = /\r\n|\n|\r/;
+
 export function createReasoningItemNormalizer(): TransformStream<
 	Uint8Array,
 	Uint8Array
@@ -121,10 +124,6 @@ export function createReasoningItemNormalizer(): TransformStream<
 	const announced = new Set<string>();
 	const announcedByIndex = new Map<number, string>();
 	let buffer = '';
-	const separator = '\n\n';
-
-	const encode = (value: unknown): string =>
-		`data: ${JSON.stringify(value)}${separator}`;
 
 	const announce = (id: string, outputIndex: unknown): void => {
 		announced.add(id);
@@ -133,22 +132,59 @@ export function createReasoningItemNormalizer(): TransformStream<
 		}
 	};
 
-	const rewrite = (event: string): string => {
-		const trimmed = event.trimStart();
-		if (!trimmed.startsWith('data:')) {
-			return event;
+	/**
+	 * Line endings and framing are whatever the proxy chose to send. The parser
+	 * downstream of us accepts LF, CRLF and lone CR, and ignores any `event:`
+	 * line in front of the payload, so this has to be at least as permissive —
+	 * anything it accepts that we reject is an event we silently fail to fix.
+	 */
+	const eolOf = (block: string, separator: string): string => {
+		if (separator.length > 0) {
+			return separator.slice(0, separator.length / 2);
 		}
+		if (block.includes('\r\n')) {
+			return '\r\n';
+		}
+		return block.includes('\r') ? '\r' : '\n';
+	};
 
-		const payload = trimmed.slice(5).trim();
+	/** Multiple `data:` lines in one block join with a newline, per the spec. */
+	const readData = (block: string): string | undefined => {
+		const parts = block
+			.split(LINE_PATTERN)
+			.filter(line => line.startsWith('data:'))
+			.map(line => line.slice(5));
+		return parts.length > 0 ? parts.join('\n').trim() : undefined;
+	};
+
+	/** Swaps the payload while leaving `event:`/`id:` lines and framing intact. */
+	const replaceData = (block: string, eol: string, value: unknown): string => {
+		const lines: string[] = [];
+		let written = false;
+		for (const line of block.split(LINE_PATTERN)) {
+			if (!line.startsWith('data:')) {
+				lines.push(line);
+				continue;
+			}
+			if (!written) {
+				lines.push(`data: ${JSON.stringify(value)}`);
+				written = true;
+			}
+		}
+		return lines.join(eol);
+	};
+
+	const rewrite = (block: string, separator: string): string => {
+		const payload = readData(block);
 		if (!payload || payload === '[DONE]') {
-			return event;
+			return block + separator;
 		}
 
 		let value: ResponsesStreamEvent;
 		try {
 			value = JSON.parse(payload) as ResponsesStreamEvent;
 		} catch {
-			return event;
+			return block + separator;
 		}
 
 		const item = value.item;
@@ -165,7 +201,7 @@ export function createReasoningItemNormalizer(): TransformStream<
 
 		const itemId = reasoningItemId ?? summaryItemId;
 		if (itemId === undefined) {
-			return event;
+			return block + separator;
 		}
 
 		if (
@@ -173,44 +209,59 @@ export function createReasoningItemNormalizer(): TransformStream<
 			value.type === 'response.output_item.added'
 		) {
 			announce(itemId, value.output_index);
-			return event;
+			return block + separator;
 		}
 
 		if (announced.has(itemId)) {
-			return event;
+			return block + separator;
 		}
 
+		const outputIndex =
+			typeof value.output_index === 'number' ? value.output_index : undefined;
+		const eol = eolOf(block, separator);
+
 		const tracked =
-			typeof value.output_index === 'number'
-				? announcedByIndex.get(value.output_index)
-				: undefined;
+			outputIndex === undefined ? undefined : announcedByIndex.get(outputIndex);
 		if (tracked !== undefined) {
-			return encode(
-				reasoningItemId !== undefined
-					? {...value, item: {...item, id: tracked}}
-					: {...value, item_id: tracked},
+			return (
+				replaceData(
+					block,
+					eol,
+					reasoningItemId !== undefined
+						? {...value, item: {...item, id: tracked}}
+						: {...value, item_id: tracked},
+				) + separator
 			);
 		}
 
-		announce(itemId, value.output_index);
-		return (
-			encode({
-				type: 'response.output_item.added',
-				output_index: value.output_index,
-				item: {id: itemId, type: 'reasoning', encrypted_content: null},
-			}) + event
-		);
+		// `output_index` is required by the SDK's schema, and a chunk that fails
+		// validation sets finishReason to 'error' rather than being skipped — a
+		// synthetic announcement without one would trade the crash for a broken
+		// response. Leave the event alone instead; guessing an index risks
+		// colliding with a real item.
+		if (outputIndex === undefined) {
+			return block + separator;
+		}
+
+		announce(itemId, outputIndex);
+		const added = `data: ${JSON.stringify({
+			type: 'response.output_item.added',
+			output_index: outputIndex,
+			item: {id: itemId, type: 'reasoning', encrypted_content: null},
+		})}`;
+		return added + (separator || eol + eol) + block + separator;
 	};
 
 	const drain = (
 		controller: TransformStreamDefaultController<Uint8Array>,
 	): void => {
-		let index = buffer.indexOf(separator);
-		while (index !== -1) {
-			const event = buffer.slice(0, index + separator.length);
-			buffer = buffer.slice(index + separator.length);
-			controller.enqueue(encoder.encode(rewrite(event)));
-			index = buffer.indexOf(separator);
+		let match = SEPARATOR_PATTERN.exec(buffer);
+		while (match !== null) {
+			const block = buffer.slice(0, match.index);
+			const separator = match[0];
+			buffer = buffer.slice(match.index + separator.length);
+			controller.enqueue(encoder.encode(rewrite(block, separator)));
+			match = SEPARATOR_PATTERN.exec(buffer);
 		}
 	};
 
@@ -223,7 +274,9 @@ export function createReasoningItemNormalizer(): TransformStream<
 			buffer += decoder.decode();
 			drain(controller);
 			if (buffer.length > 0) {
-				controller.enqueue(encoder.encode(buffer));
+				const trailing = buffer;
+				buffer = '';
+				controller.enqueue(encoder.encode(rewrite(trailing, '')));
 			}
 		},
 	});
