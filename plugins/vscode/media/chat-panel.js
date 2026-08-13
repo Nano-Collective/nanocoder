@@ -764,7 +764,10 @@
 		const msgEl = document.createElement('div');
 		msgEl.className = 'leading-snug break-words shrink-0 min-w-0 flex flex-col ' +
 			(role === 'user'
-				? 'self-end bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-border px-3 py-2 rounded-lg max-w-[85%]'
+				// No max-w here: the wrapper already caps the turn at 85%. A second
+				// percentage would resolve against the wrapper's shrink-to-fit width,
+				// squeezing the bubble to 85% of its own content and wrapping mid-word.
+				? 'self-end bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-border px-3 py-2 rounded-lg max-w-full'
 				: 'self-start max-w-full');
 
 		if (images && images.length > 0) {
