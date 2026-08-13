@@ -1746,13 +1746,90 @@
 		}
 	}
 
-	const {
-		humanizeToolTitle,
-		extractFileName,
-		hasDiffContent,
-		resolveEditCardState,
-		isSettled,
-	} = globalThis.NanocoderToolCardUtils;
+	// Verb per tool for the aggregated tool list. An entry only fires when the
+	// tool's ACP title is "<name>: <target>", which humanizeToolTitle splits on.
+	// Two families are deliberately absent: fetch_url / web_search take a
+	// url/query rather than a path, so their title is the bare tool name; and
+	// string_replace / write_file report ACP kind 'edit', so they render as edit
+	// cards and never reach this list.
+	const TOOL_VERBS = {
+		read_file: 'Reading',
+		list_directory: 'Listing',
+		find_files: 'Finding files in',
+		search_file_contents: 'Searching',
+		execute_bash: 'Running',
+		lsp_get_diagnostics: 'Checking diagnostics in',
+	};
+
+	// Action label per resolved status, rendered as "<action> <filename>".
+	const EDIT_ACTIONS = {
+		pending: 'Edit',
+		in_progress: 'Editing',
+		completed: 'Edited',
+		failed: 'Failed to edit',
+		cancelled: 'Cancelled edit to',
+		denied: 'Denied edit to',
+	};
+
+	// Icon bucket per resolved status.
+	const EDIT_TONES = {
+		pending: 'circle',
+		in_progress: 'pending',
+		completed: 'success',
+		failed: 'error',
+		cancelled: 'cancelled',
+		denied: 'cancelled',
+	};
+
+	function humanizeToolTitle(title) {
+		if (!title) return 'Tool Call';
+		const sep = title.indexOf(': ');
+		if (sep === -1) return title;
+		const name = title.slice(0, sep);
+		if (!Object.hasOwn(TOOL_VERBS, name)) return title;
+		return `${TOOL_VERBS[name]} ${title.slice(sep + 2)}`;
+	}
+
+	function extractFileName(title) {
+		if (!title) return 'File';
+		const sep = title.indexOf(': ');
+		const parts = (sep === -1 ? title : title.slice(sep + 2)).split('/');
+		let last = parts[parts.length - 1];
+		last = last.split('\\').pop();
+		return last.replace(/['"]+$/g, '').trim();
+	}
+
+	// True when this update carries a diff the extension host would have handed
+	// to DiffManager. Mirrors handleDiffs in chat-webview-provider.ts so the
+	// panel only offers "Open Diff" once the change is actually registered.
+	function hasDiffContent(update) {
+		if (!update || !Array.isArray(update.content)) return false;
+		return update.content.some(block => !!block && block.type === 'diff' && !!block.path);
+	}
+
+	// Resolve an edit card's label and icon from an update. The agent reports a
+	// user cancel or deny as 'failed' with an explanatory rawOutput, so those are
+	// separated back out here rather than all reading as an error.
+	function resolveEditCardState(update) {
+		let status = (update && update.status) || 'pending';
+		if (status === 'success') status = 'completed';
+		if (status === 'error') status = 'failed';
+
+		if (status === 'failed') {
+			const raw = update && typeof update.rawOutput === 'string' ? update.rawOutput : '';
+			if (/denied/i.test(raw)) status = 'denied';
+			else if (/cancel|AbortError/i.test(raw)) status = 'cancelled';
+		}
+
+		if (!Object.hasOwn(EDIT_ACTIONS, status)) status = 'pending';
+		return {status, action: EDIT_ACTIONS[status], tone: EDIT_TONES[status]};
+	}
+
+	// True once a card has reached a terminal state and its approval buttons
+	// should come down.
+	function isSettled(status) {
+		return status !== 'pending' && status !== 'in_progress';
+	}
 
 	function getFileColor(filename) {
 		const ext = filename.split('.').pop().toLowerCase();
