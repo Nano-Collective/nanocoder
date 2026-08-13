@@ -16,9 +16,6 @@
 	/** Only the file search is debounced; a bare `@` answers immediately. */
 	const MENTION_DEBOUNCE_MS = 120;
 
-	/** Longest `@token` treated as a mention; past it the user is pasting. */
-	const MENTION_MAX_TOKEN = 120;
-
 	let mentionOpen = false;
 	let mentionItems = [];
 	let mentionRows = [];
@@ -144,35 +141,10 @@
 	// `@[file] <path>` serialization in submitMessage, and host-side expansion
 	// — is therefore untouched by this feature.
 
-	/**
-	 * Find the `@` mention token the caret currently sits inside, as
-	 * `{start, query}`, or null when the caret is not in one.
-	 *
-	 * The `@` only counts at the start of the input or directly after
-	 * whitespace. That single rule is what keeps `user@example.com`, a
-	 * mid-word `@decorator` and npm scopes from popping the dropdown while
-	 * the user is typing prose.
-	 */
-	function findMentionQuery(text, cursor) {
-		const lowerBound = Math.max(0, cursor - MENTION_MAX_TOKEN);
-
-		for (let i = cursor - 1; i >= lowerBound; i--) {
-			const ch = text.charAt(i);
-
-			if (ch === '@') {
-				// An `@` glued to a preceding word is an email or a decorator.
-				const prev = i > 0 ? text.charAt(i - 1) : '';
-				return i === 0 || /\s/.test(prev)
-					? { start: i, query: text.slice(i + 1, cursor) }
-					: null;
-			}
-
-			// Mentions never span whitespace, so a space ends the search.
-			if (/\s/.test(ch)) return null;
-		}
-
-		return null;
-	}
+	// The trigger rules and token arithmetic live in mention-utils.js so they
+	// can be unit tested in Node — this file is one DOM-bound IIFE and none of
+	// it is reachable from a test runner.
+	const { findMentionQuery, removeMentionToken } = globalThis.NanocoderMentionUtils;
 
 	function closeMention() {
 		mentionOpen = false;
@@ -188,6 +160,8 @@
 		// Invalidate anything still in flight so a late response cannot reopen
 		// the dropdown after the user has moved on.
 		mentionRequestId++;
+		chatInput.removeAttribute('aria-activedescendant');
+		chatInput.setAttribute('aria-expanded', 'false');
 		if (mentionDropdown) {
 			mentionDropdown.classList.add('hidden');
 			mentionDropdown.innerHTML = '';
@@ -201,10 +175,13 @@
 		// nothing is open yet, so an `mentionOpen` check would let the
 		// duplicate through. closeMention() clears this, so reopening the same
 		// mention still re-searches.
+		//
+		// Note this guards the *search* only. `mentionToken` is assigned by
+		// syncMentionState before we get here, because two mentions can share a
+		// query while sitting at different offsets.
 		if (mentionLastQuery === token.query) {
 			return;
 		}
-		mentionToken = token;
 		mentionLastQuery = token.query;
 		vscode.postMessage({
 			type: 'requestMentionCompletions',
@@ -228,6 +205,13 @@
 			closeMention();
 			return;
 		}
+
+		// Assigned here rather than in requestMentions, which the dedupe below
+		// can skip. `@foo @foo` shares one query across two offsets, so moving
+		// the caret from the second to the first short-circuits the search and
+		// would otherwise leave `start` pointing at the mention the user just
+		// left — accepting then adds the chip but strips the wrong `@foo`.
+		mentionToken = token;
 
 		if (mentionDebounceTimer) {
 			clearTimeout(mentionDebounceTimer);
@@ -255,6 +239,10 @@
 			row.classList.toggle('text-vscode-list-activeFg', isActive);
 			row.setAttribute('aria-selected', isActive ? 'true' : 'false');
 			if (isActive) {
+				// The listbox is a sibling of the textarea, so focus never moves
+				// into it. Without this pointer a screen reader announces the
+				// dropdown opening but never which row the arrow keys landed on.
+				chatInput.setAttribute('aria-activedescendant', row.id);
 				row.scrollIntoView({ block: 'nearest' });
 			}
 		});
@@ -275,6 +263,8 @@
 			const row = document.createElement('div');
 			row.className = 'flex items-center gap-2 px-3 py-1.5 cursor-pointer text-[0.9em] text-vscode-dropdown-fg hover:bg-vscode-list-hover transition-colors';
 			row.setAttribute('role', 'option');
+			// aria-activedescendant refers to a row by id, so every row needs one.
+			row.id = 'mention-option-' + index;
 
 			const iconSpan = document.createElement('span');
 			iconSpan.className = 'shrink-0 opacity-70 flex items-center';
@@ -317,6 +307,7 @@
 
 		mentionDropdown.classList.remove('hidden');
 		mentionOpen = true;
+		chatInput.setAttribute('aria-expanded', 'true');
 		highlightMention();
 	}
 
@@ -325,14 +316,12 @@
 		if (!item || !mentionToken) return;
 
 		// Drop the `@query` text: the chosen path becomes a chip instead, so
-		// nothing is substituted back into the textarea. The token end is read
-		// from the live caret rather than mentionToken, which lags by one
-		// debounce interval while the user is still typing; clamped so a caret
-		// that somehow sits before the `@` cannot duplicate text.
-		const start = mentionToken.start;
-		const end = Math.max(start, chatInput.selectionStart);
-		chatInput.value = chatInput.value.slice(0, start) + chatInput.value.slice(end);
-		chatInput.setSelectionRange(start, start);
+		// nothing is substituted back into the textarea. The whole token goes,
+		// not just up to the caret — accepting from the middle of `@src/foo`
+		// has to take the trailing `/foo` with it.
+		const removed = removeMentionToken(chatInput.value, mentionToken.start);
+		chatInput.value = removed.text;
+		chatInput.setSelectionRange(removed.cursor, removed.cursor);
 		// The textarea was sized around the token we just removed.
 		chatInput.style.height = 'auto';
 		chatInput.style.height = chatInput.scrollHeight + 'px';
@@ -692,6 +681,10 @@
 			}
 			if (e.key === 'Escape') {
 				e.preventDefault();
+				// Escape is a cancel key elsewhere in the panel. Dismissing the
+				// dropdown must not also read as "cancel the run" if a listener
+				// is ever added above this one.
+				e.stopPropagation();
 				closeMention();
 				return;
 			}

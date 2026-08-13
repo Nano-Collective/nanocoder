@@ -140,6 +140,11 @@
 		"files": [
 			"source/**/*.spec.ts",
 			"source/**/*.spec.tsx",
+			"plugins/**/*.spec.ts",
+			"plugins/**/*.spec.tsx",
+			"!plugins/**/node_modules/**",
+			"!plugins/vscode/src/acp-client.spec.ts",
+			"!plugins/vscode/src/acp-process-manager.spec.ts",
 			"!source/**/*-helpers.ts",
 			"!source/**/test-helpers.ts"
 		],
