@@ -105,6 +105,183 @@ export function createUndiciFetch(undiciAgent: Agent) {
 	};
 }
 
+type ResponsesStreamEvent = {
+	type?: unknown;
+	item_id?: unknown;
+	output_index?: unknown;
+	item?: {id?: unknown; type?: unknown};
+};
+
+const SEPARATOR_PATTERN = /\r\n\r\n|\n\n|\r\r/;
+const LINE_PATTERN = /\r\n|\n|\r/;
+
+export function createReasoningItemNormalizer(): TransformStream<
+	Uint8Array,
+	Uint8Array
+> {
+	const decoder = new TextDecoder('utf-8');
+	const encoder = new TextEncoder();
+	const announced = new Set<string>();
+	const announcedByIndex = new Map<number, string>();
+	let buffer = '';
+
+	const announce = (id: string, outputIndex: unknown): void => {
+		announced.add(id);
+		if (typeof outputIndex === 'number') {
+			announcedByIndex.set(outputIndex, id);
+		}
+	};
+
+	/**
+	 * Line endings and framing are whatever the proxy chose to send. The parser
+	 * downstream of us accepts LF, CRLF and lone CR, and ignores any `event:`
+	 * line in front of the payload, so this has to be at least as permissive —
+	 * anything it accepts that we reject is an event we silently fail to fix.
+	 */
+	const eolOf = (block: string, separator: string): string => {
+		if (separator.length > 0) {
+			return separator.slice(0, separator.length / 2);
+		}
+		if (block.includes('\r\n')) {
+			return '\r\n';
+		}
+		return block.includes('\r') ? '\r' : '\n';
+	};
+
+	/** Multiple `data:` lines in one block join with a newline, per the spec. */
+	const readData = (block: string): string | undefined => {
+		const parts = block
+			.split(LINE_PATTERN)
+			.filter(line => line.startsWith('data:'))
+			.map(line => line.slice(5));
+		return parts.length > 0 ? parts.join('\n').trim() : undefined;
+	};
+
+	/** Swaps the payload while leaving `event:`/`id:` lines and framing intact. */
+	const replaceData = (block: string, eol: string, value: unknown): string => {
+		const lines: string[] = [];
+		let written = false;
+		for (const line of block.split(LINE_PATTERN)) {
+			if (!line.startsWith('data:')) {
+				lines.push(line);
+				continue;
+			}
+			if (!written) {
+				lines.push(`data: ${JSON.stringify(value)}`);
+				written = true;
+			}
+		}
+		return lines.join(eol);
+	};
+
+	const rewrite = (block: string, separator: string): string => {
+		const payload = readData(block);
+		if (!payload || payload === '[DONE]') {
+			return block + separator;
+		}
+
+		let value: ResponsesStreamEvent;
+		try {
+			value = JSON.parse(payload) as ResponsesStreamEvent;
+		} catch {
+			return block + separator;
+		}
+
+		const item = value.item;
+		const reasoningItemId =
+			item?.type === 'reasoning' && typeof item.id === 'string'
+				? item.id
+				: undefined;
+		const summaryItemId =
+			typeof value.type === 'string' &&
+			value.type.startsWith('response.reasoning_summary') &&
+			typeof value.item_id === 'string'
+				? value.item_id
+				: undefined;
+
+		const itemId = reasoningItemId ?? summaryItemId;
+		if (itemId === undefined) {
+			return block + separator;
+		}
+
+		if (
+			reasoningItemId !== undefined &&
+			value.type === 'response.output_item.added'
+		) {
+			announce(itemId, value.output_index);
+			return block + separator;
+		}
+
+		if (announced.has(itemId)) {
+			return block + separator;
+		}
+
+		const outputIndex =
+			typeof value.output_index === 'number' ? value.output_index : undefined;
+		const eol = eolOf(block, separator);
+
+		const tracked =
+			outputIndex === undefined ? undefined : announcedByIndex.get(outputIndex);
+		if (tracked !== undefined) {
+			return (
+				replaceData(
+					block,
+					eol,
+					reasoningItemId !== undefined
+						? {...value, item: {...item, id: tracked}}
+						: {...value, item_id: tracked},
+				) + separator
+			);
+		}
+
+		// `output_index` is required by the SDK's schema, and a chunk that fails
+		// validation sets finishReason to 'error' rather than being skipped — a
+		// synthetic announcement without one would trade the crash for a broken
+		// response. Leave the event alone instead; guessing an index risks
+		// colliding with a real item.
+		if (outputIndex === undefined) {
+			return block + separator;
+		}
+
+		announce(itemId, outputIndex);
+		const added = `data: ${JSON.stringify({
+			type: 'response.output_item.added',
+			output_index: outputIndex,
+			item: {id: itemId, type: 'reasoning', encrypted_content: null},
+		})}`;
+		return added + (separator || eol + eol) + block + separator;
+	};
+
+	const drain = (
+		controller: TransformStreamDefaultController<Uint8Array>,
+	): void => {
+		let match = SEPARATOR_PATTERN.exec(buffer);
+		while (match !== null) {
+			const block = buffer.slice(0, match.index);
+			const separator = match[0];
+			buffer = buffer.slice(match.index + separator.length);
+			controller.enqueue(encoder.encode(rewrite(block, separator)));
+			match = SEPARATOR_PATTERN.exec(buffer);
+		}
+	};
+
+	return new TransformStream({
+		transform(chunk, controller) {
+			buffer += decoder.decode(chunk, {stream: true});
+			drain(controller);
+		},
+		flush(controller) {
+			buffer += decoder.decode();
+			drain(controller);
+			if (buffer.length > 0) {
+				const trailing = buffer;
+				buffer = '';
+				controller.enqueue(encoder.encode(rewrite(trailing, '')));
+			}
+		},
+	});
+}
+
 /**
  * Creates an AI SDK provider based on the sdkProvider configuration.
  * Defaults to 'openai-compatible' if not specified.
@@ -206,13 +383,27 @@ export async function createProvider(
 				headers[k] = v;
 			});
 
-			return undiciFetch(input as string | URL, {
+			const response = (await undiciFetch(input as string | URL, {
 				method: init?.method,
 				body: init?.body as UndiciRequestInit['body'],
 				signal: init?.signal,
 				headers,
 				dispatcher: undiciAgent,
-			}) as Promise<Response>;
+			})) as unknown as Response;
+
+			const contentType = response.headers.get('content-type') || '';
+			if (response.body && contentType.includes('text/event-stream')) {
+				return new Response(
+					response.body.pipeThrough(createReasoningItemNormalizer()),
+					{
+						status: response.status,
+						statusText: response.statusText,
+						headers: response.headers,
+					},
+				) as unknown as Response;
+			}
+
+			return response;
 		};
 
 		const {createOpenAI} = await import('@ai-sdk/openai');
