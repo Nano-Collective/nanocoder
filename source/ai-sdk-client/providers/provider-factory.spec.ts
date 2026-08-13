@@ -67,6 +67,24 @@ test('createProvider adds Requesty headers for requesty provider', async t => {
 	t.is(provider.kind, 'openai-compatible');
 });
 
+test('createProvider adds OrcaRouter headers for orcarouter provider', async t => {
+	const config: AIProviderConfig = {
+		name: 'OrcaRouter',
+		type: 'openai',
+		models: ['openai/gpt-5.5'],
+		config: {
+			baseURL: 'https://api.orcarouter.ai/v1',
+			apiKey: 'test-key',
+		},
+	};
+
+	const agent = new Agent();
+	const provider = await createProvider(config, agent);
+
+	t.truthy(provider);
+	t.is(provider.kind, 'openai-compatible');
+});
+
 test('createProvider handles provider with no API key', async t => {
 	const config: AIProviderConfig = {
 		name: 'TestProvider',
