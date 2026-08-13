@@ -603,3 +603,49 @@ test('all tools: consistently reject common attack vectors', async (t) => {
 		process.chdir(originalCwd);
 	}
 });
+
+// ============================================================================
+// Restricted Scope Tests
+// ============================================================================
+
+test('writeFile validator: restricts writes to explicit scope via context', async (t) => {
+	const validator = writeFileTool.validator;
+	if (!validator) {
+		t.fail('write_file validator not defined');
+		return;
+	}
+
+	const originalCwd = process.cwd();
+
+	try {
+		process.chdir(testDir);
+		const scopeDir = join(testDir, 'src');
+		await mkdir(scopeDir, {recursive: true});
+		
+		const context = {restrictedScope: scopeDir};
+
+		// 1. Path exactly equal to scope
+		// (wait, path must be a file, so it can't be exactly the scope dir if it writes to it, but it's nested)
+
+		// valid inside scope
+		const validResult = await validator({path: 'src/app.tsx', content: 'test'}, context);
+		t.true(validResult.valid);
+
+		// 2. sibling prefix attack
+		await mkdir(join(testDir, 'src2'), {recursive: true});
+		const siblingResult = await validator({path: 'src2/file.ts', content: 'test'}, context);
+		t.false(siblingResult.valid);
+		if (!siblingResult.valid) {
+			t.regex(siblingResult.error, /escapes restricted scope/);
+		}
+
+		// 3. absolute path outside scope
+		const absResult = await validator({path: resolve(testDir, 'package.json'), content: 'test'}, context);
+		t.false(absResult.valid);
+		if (!absResult.valid) {
+			t.regex(absResult.error, /escapes restricted scope/);
+		}
+	} finally {
+		process.chdir(originalCwd);
+	}
+});

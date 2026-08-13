@@ -78,7 +78,13 @@ export function withValidation(
 	schema?: Parameters<typeof validateArgsAgainstSchema>[1],
 ): ToolHandler {
 	if (!validator && !schema) return handler;
-	return async (args: unknown) => {
+	return async (
+		args: unknown,
+		options?: {
+			abortSignal?: AbortSignal;
+			context?: import('@/types/core').ToolContext;
+		},
+	) => {
 		if (schema) {
 			const typeErrors = validateArgsAgainstSchema(args, schema);
 			if (typeErrors.length > 0) {
@@ -89,11 +95,11 @@ export function withValidation(
 			}
 		}
 		if (validator) {
-			const result = await validator(args);
+			const result = await validator(args, options?.context);
 			if (!result.valid) {
 				throw new ToolValidationError(result.error, result.details);
 			}
 		}
-		return handler(args);
+		return handler(args, options);
 	};
 }

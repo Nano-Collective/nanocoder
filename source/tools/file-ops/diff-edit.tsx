@@ -388,8 +388,11 @@ const diffEditFormatter = async (
 
 const diffEditValidator = async (
 	args: DiffEditArgs,
+	context?: import('@/types/core').ToolContext,
 ): Promise<{valid: true} | {valid: false; error: string}> => {
-	const pathResult = validatePath(args.path);
+	const pathResult = validatePath(args.path, {
+		restrictedScope: context?.restrictedScope,
+	});
 	if (!pathResult.valid) return pathResult;
 
 	let blocks: DiffEditBlock[];
