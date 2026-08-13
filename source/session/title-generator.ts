@@ -1,5 +1,5 @@
 import {MAX_SESSION_NAME_LENGTH} from '@/constants';
-import type {Message} from '@/types/core';
+import type {LLMClient, Message} from '@/types/core';
 
 /** Below this many characters, a first message is too thin to be a title. */
 const WEAK_TITLE_THRESHOLD = 40;
@@ -116,4 +116,26 @@ export function buildTitleRequest(ctx: TitleContext): Message[] {
 		},
 		{role: 'user', content: parts.join('\n\n')},
 	];
+}
+
+/**
+ * The one impure export. Returns null on every failure path so a titling
+ * problem can never surface an error to the user or fail a turn.
+ *
+ * Tools are passed as {} so there is no tool-schema overhead on the request
+ * and no way for the call to turn into a tool loop.
+ */
+export async function generateSessionTitle(
+	client: LLMClient,
+	ctx: TitleContext,
+	signal?: AbortSignal,
+): Promise<string | null> {
+	try {
+		const response = await client.chat(buildTitleRequest(ctx), {}, {}, signal);
+		const content = response.choices[0]?.message?.content;
+		if (typeof content !== 'string') return null;
+		return sanitizeTitle(content);
+	} catch (_error) {
+		return null;
+	}
 }

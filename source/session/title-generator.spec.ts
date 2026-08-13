@@ -1,7 +1,9 @@
 import test from 'ava';
+import type {LLMClient} from '@/types/core';
 import {
 	buildTitleRequest,
 	extractToolSummaries,
+	generateSessionTitle,
 	isWeakTitle,
 	normalizeFirstMessage,
 	sanitizeTitle,
@@ -204,4 +206,90 @@ test('buildTitleRequest opens with a system message', t => {
 	});
 	t.is(messages[0].role, 'system');
 	t.is(messages.length, 2);
+});
+
+function fakeClientReturning(content: string): LLMClient {
+	return {
+		getCurrentModel: () => 'fake',
+		setModel: () => {},
+		getContextSize: () => 8192,
+		getAvailableModels: async () => ['fake'],
+		getProviderConfig: () => ({name: 'fake'}),
+		chat: async () => ({
+			choices: [{message: {role: 'assistant', content}}],
+		}),
+		clearContext: async () => {},
+		getTimeout: () => undefined,
+	} as unknown as LLMClient;
+}
+
+const ctx = {firstUserMessage: 'fix this', toolSummaries: ['read_file: a.ts']};
+
+test('generateSessionTitle returns a sanitized title', async t => {
+	const client = fakeClientReturning('"Fix Login Redirect Bug."');
+	t.is(await generateSessionTitle(client, ctx), 'Fix Login Redirect Bug');
+});
+
+test('generateSessionTitle returns null when the client throws', async t => {
+	const client = {
+		...fakeClientReturning(''),
+		chat: async () => {
+			throw new Error('connection refused');
+		},
+	} as unknown as LLMClient;
+	t.is(await generateSessionTitle(client, ctx), null);
+});
+
+test('generateSessionTitle returns null on an empty response', async t => {
+	t.is(await generateSessionTitle(fakeClientReturning(''), ctx), null);
+	t.is(await generateSessionTitle(fakeClientReturning('   \n '), ctx), null);
+});
+
+test('generateSessionTitle returns null when the model writes a paragraph', async t => {
+	const paragraph = 'Certainly! '.repeat(30);
+	t.is(await generateSessionTitle(fakeClientReturning(paragraph), ctx), null);
+});
+
+test('generateSessionTitle returns null when there are no choices', async t => {
+	const client = {
+		...fakeClientReturning(''),
+		chat: async () => ({choices: []}),
+	} as unknown as LLMClient;
+	t.is(await generateSessionTitle(client, ctx), null);
+});
+
+test('generateSessionTitle passes no tools to the client', async t => {
+	let seenTools: unknown;
+	const client = {
+		...fakeClientReturning('Fix Login Bug'),
+		chat: async (_messages: unknown, tools: unknown) => {
+			seenTools = tools;
+			return {
+				choices: [{message: {role: 'assistant', content: 'Fix Login Bug'}}],
+			};
+		},
+	} as unknown as LLMClient;
+	await generateSessionTitle(client, ctx);
+	t.deepEqual(seenTools, {});
+});
+
+test('generateSessionTitle forwards the abort signal', async t => {
+	let seenSignal: AbortSignal | undefined;
+	const client = {
+		...fakeClientReturning('Fix Login Bug'),
+		chat: async (
+			_messages: unknown,
+			_tools: unknown,
+			_callbacks: unknown,
+			signal?: AbortSignal,
+		) => {
+			seenSignal = signal;
+			return {
+				choices: [{message: {role: 'assistant', content: 'Fix Login Bug'}}],
+			};
+		},
+	} as unknown as LLMClient;
+	const controller = new AbortController();
+	await generateSessionTitle(client, ctx, controller.signal);
+	t.is(seenSignal, controller.signal);
 });
