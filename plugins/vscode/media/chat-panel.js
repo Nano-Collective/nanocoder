@@ -1146,6 +1146,10 @@
 				setProcessing(false);
 				break;
 			case 'sessionLoaded':
+				if (currentThoughtBox) {
+					currentThoughtBox.pause();
+					currentThoughtBox = null;
+				}
 				const loader = document.getElementById('session-loader');
 				if (loader) loader.remove();
 				scrollToBottom();
@@ -1361,6 +1365,10 @@
 		const update = payload.update ? payload.update : payload;
 
 		if (update.sessionUpdate === 'user_message_chunk') {
+			if (currentThoughtBox) {
+				currentThoughtBox.pause();
+				currentThoughtBox = null;
+			}
 			if (update.content) {
 				endCurrentTextBlock();
 				if (update.content.text) {
@@ -1373,8 +1381,7 @@
 			}
 		} else if (update.sessionUpdate === 'agent_message_chunk') {
 			if (currentThoughtBox) {
-				currentThoughtBox.finish();
-				currentThoughtBox = null;
+				currentThoughtBox.pause();
 			}
 			if (update.content && update.content.text) {
 				stopVisualLoader();
@@ -1390,15 +1397,14 @@
 			}
 		} else if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
 			if (currentThoughtBox) {
-				currentThoughtBox.finish();
-				currentThoughtBox = null;
+				currentThoughtBox.pause();
 			}
 			handleToolCallUpdate(update);
 		} else if (update.sessionUpdate === 'plan') {
 			handlePlanUpdate(update);
 		} else if (update.sessionUpdate === 'prompt_response' || update.sessionUpdate === 'done') {
 			if (currentThoughtBox) {
-				currentThoughtBox.finish();
+				currentThoughtBox.pause();
 				currentThoughtBox = null;
 			}
 			// Show token usage (and estimated cost) for the finished turn
@@ -1412,7 +1418,7 @@
 	class ThoughtAggregator {
 		constructor() {
 			this.el = document.createElement('div');
-			this.el.className = 'my-2 flex flex-col shrink-0';
+			this.el.className = 'my-2 flex flex-col shrink-0 thought-aggregator';
 
 			this.header = document.createElement('div');
 			this.header.className = 'flex items-center gap-1.5 cursor-pointer opacity-70 text-vscode-fg hover:opacity-100 transition-opacity select-none w-fit';
@@ -1436,9 +1442,11 @@
 			this.el.appendChild(this.body);
 
 			this.isOpen = true;
-			this.startTime = Date.now();
+			this.userToggled = false;
 			this.text = '';
 			this.renderTimeout = null;
+			this.thinkingMs = 0;
+			this.segmentStart = Date.now();
 
 			this.timer = setInterval(() => this.updateTimer(), 1000);
 
@@ -1446,12 +1454,19 @@
 			scrollToBottom();
 		}
 
+		elapsedSeconds() {
+			const active = this.segmentStart ? Date.now() - this.segmentStart : 0;
+			return Math.floor((this.thinkingMs + active) / 1000);
+		}
+
 		updateTimer() {
-			const seconds = Math.floor((Date.now() - this.startTime) / 1000);
-			this.title.textContent = `Thinking for ${seconds}s`;
+			this.title.textContent = `Thinking for ${this.elapsedSeconds()}s`;
 		}
 
 		toggle(force) {
+			if (force === undefined) {
+				this.userToggled = true;
+			}
 			this.isOpen = force !== undefined ? force : !this.isOpen;
 			this.body.style.display = this.isOpen ? 'block' : 'none';
 
@@ -1461,34 +1476,59 @@
 			}
 		}
 
+		render() {
+			if (typeof marked !== 'undefined') {
+				this.body.innerHTML = marked.parse(this.text);
+			} else {
+				this.body.textContent = this.text;
+			}
+		}
+
 		append(chunk) {
+			this.resume();
 			this.text += chunk;
 			if (typeof marked !== 'undefined') {
 				if (!this.renderTimeout) {
 					this.renderTimeout = setTimeout(() => {
-						this.body.innerHTML = marked.parse(this.text);
+						this.render();
 						this.renderTimeout = null;
 						scrollToBottom();
 					}, 50);
 				}
 			} else {
-				this.body.textContent = this.text;
+				this.render();
 				scrollToBottom();
 			}
 		}
 
-		finish() {
+		resume() {
+			if (this.segmentStart) return;
+			if (this.text && !this.text.endsWith('\n\n')) {
+				this.text += '\n\n';
+			}
+			this.segmentStart = Date.now();
+			this.timer = setInterval(() => this.updateTimer(), 1000);
+			this.updateTimer();
+			if (!this.userToggled) {
+				this.toggle(true);
+			}
+		}
+
+		pause() {
+			if (!this.segmentStart) return;
+			this.thinkingMs += Date.now() - this.segmentStart;
+			this.segmentStart = null;
 			clearInterval(this.timer);
+			this.timer = null;
 			if (this.renderTimeout) {
 				clearTimeout(this.renderTimeout);
 				this.renderTimeout = null;
 			}
-			if (typeof marked !== 'undefined') {
-				this.body.innerHTML = marked.parse(this.text);
+			this.render();
+			this.title.textContent = `Thought for ${this.elapsedSeconds()}s`;
+			if (!this.userToggled) {
+				this.toggle(false);
 			}
-			const seconds = Math.floor((Date.now() - this.startTime) / 1000);
-			this.title.textContent = `Thought for ${seconds}s`;
-			this.toggle(false); // Auto-shrink when done!
 		}
 	}
 
