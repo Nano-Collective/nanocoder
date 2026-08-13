@@ -1375,6 +1375,13 @@
 		return false;
 	}
 
+	function closeAggregatorIfIdle() {
+		if (currentAggregator && !aggregatorHasPendingTools(currentAggregator)) {
+			currentAggregator.close();
+			currentAggregator = null;
+		}
+	}
+
 	function handleAcpUpdate(payload) {
 		if (!payload) return;
 		const update = payload.update ? payload.update : payload;
@@ -1395,10 +1402,7 @@
 				currentThoughtBox.finish();
 				currentThoughtBox = null;
 			}
-			if (currentAggregator && !aggregatorHasPendingTools(currentAggregator)) {
-				currentAggregator.close();
-				currentAggregator = null;
-			}
+			closeAggregatorIfIdle();
 			if (update.content && update.content.text) {
 				stopVisualLoader();
 				appendChunk(update.content.text);
@@ -1407,10 +1411,7 @@
 			if (!currentThoughtBox) {
 				endCurrentTextBlock();
 				currentThoughtBox = new ThoughtAggregator();
-				if (currentAggregator && !aggregatorHasPendingTools(currentAggregator)) {
-					currentAggregator.close();
-					currentAggregator = null;
-				}
+				closeAggregatorIfIdle();
 			}
 			if (update.content && update.content.text) {
 				currentThoughtBox.append(update.content.text);
@@ -1551,8 +1552,8 @@
 			messagesContainer.appendChild(this.el);
 		}
 
-		toggle() {
-			this.isOpen = !this.isOpen;
+		toggle(force) {
+			this.isOpen = force !== undefined ? force : !this.isOpen;
 			this.body.style.display = this.isOpen ? '' : 'none';
 
 			const svg = this.chevron.querySelector('svg');
@@ -1654,6 +1655,7 @@
 
 		if (!card) {
 			endCurrentTextBlock();
+			closeAggregatorIfIdle();
 			card = document.createElement('div');
 			card.id = 'plan-card';
 			card.className = 'my-3 border border-vscode-widget-border rounded bg-vscode-widget-bg overflow-hidden shrink-0';
@@ -1730,6 +1732,7 @@
 		if (isMutating) {
 			let card = document.getElementById(`tool-card-${toolCallId}`);
 			if (!card) {
+				closeAggregatorIfIdle();
 				card = createEditCard(toolCallId, update);
 				messagesContainer.appendChild(card);
 				scrollToBottom();
