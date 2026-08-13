@@ -11,9 +11,6 @@ import type {MessageSubmissionOptions} from '@/types/index';
 import {errorMsg, infoMsg, successMsg} from '@/utils/message-factory';
 import {parseContextLimit} from '@/utils/parse-context-limit';
 
-// Re-export so existing imports from this module keep working.
-export {parseContextLimit};
-
 /**
  * Handles /context-max command. Returns true if handled.
  */

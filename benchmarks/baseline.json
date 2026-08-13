@@ -76,7 +76,7 @@
 		},
 		"test_case_count": {
 			"kind": "numeric",
-			"value": 5867,
+			"value": 5857,
 			"warnOnDecrease": true
 		},
 		"audit_high_vulns": {
