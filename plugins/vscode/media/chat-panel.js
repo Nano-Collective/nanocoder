@@ -151,6 +151,7 @@
 	let isProcessing = false;
 	let currentAggregator = null;
 	let currentThoughtBox = null;
+	let currentTurnFooter = null;
 	let toastTimeout = null;
 	// One agent response is split into several `.agent-markdown` containers -
 	// endCurrentTextBlock() closes the current one whenever a tool card, thought
@@ -719,7 +720,10 @@
 		// A user message opens a new turn, so the agent segments that follow get
 		// a fresh id. The raw-text accumulator is handed over lazily, once the
 		// new response produces text.
-		if (role === 'user') agentTurnId++;
+		if (role === 'user') {
+			agentTurnId++;
+			currentTurnFooter = null;
+		}
 
 		const wrapper = document.createElement('div');
 		wrapper.className = 'group flex flex-col min-w-0 shrink-0 ' +
@@ -878,8 +882,12 @@
 
 			msgEl.appendChild(textContainer);
 			wrapper.appendChild(msgEl);
-			wrapper.appendChild(createMessageFooter(() => wrapper.dataset.rawText || '', 'agent', new Date()));
-			wrapper.dataset.rawText = currentTurnText;
+			if (currentTurnFooter) {
+				currentTurnFooter.remove();
+			} else {
+				currentTurnFooter = createMessageFooter(() => lastAgentRawText || '', 'agent', new Date());
+			}
+			wrapper.appendChild(currentTurnFooter);
 			messagesContainer.appendChild(wrapper);
 
 			currentTurnEl = msgEl;
@@ -889,9 +897,6 @@
 			// Append to existing turn
 			currentTurnText += textChunk;
 			syncLastAgentRawText();
-			if (currentTurnEl.parentElement) {
-				currentTurnEl.parentElement.dataset.rawText = currentTurnText;
-			}
 
 			if (typeof marked !== 'undefined') {
 				if (!renderTimeout) {
@@ -1070,6 +1075,7 @@
 				currentTurnEl = null;
 				currentTextEl = null;
 				currentTurnText = '';
+				currentTurnFooter = null;
 				agentTurnId = 0;
 				lastAgentRawTurnId = -1;
 				lastAgentSegments = '';
