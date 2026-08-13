@@ -1308,6 +1308,10 @@
 				currentThoughtBox.finish();
 				currentThoughtBox = null;
 			}
+			if (currentAggregator) {
+				currentAggregator.close();
+				currentAggregator = null;
+			}
 			if (update.content && update.content.text) {
 				appendChunk(update.content.text);
 			}
@@ -1315,6 +1319,10 @@
 			if (!currentThoughtBox) {
 				endCurrentTextBlock();
 				currentThoughtBox = new ThoughtAggregator();
+				if (currentAggregator) {
+					currentAggregator.close();
+					currentAggregator = null;
+				}
 			}
 			if (update.content && update.content.text) {
 				currentThoughtBox.append(update.content.text);
