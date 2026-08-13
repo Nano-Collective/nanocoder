@@ -1300,6 +1300,13 @@
 		syncLastAgentRawText();
 	}
 
+	function aggregatorHasPendingTools(aggregator) {
+		for (const item of aggregator.toolItems.values()) {
+			if (item.dataset.pending === 'true') return true;
+		}
+		return false;
+	}
+
 	function handleAcpUpdate(payload) {
 		if (!payload) return;
 		const update = payload.update ? payload.update : payload;
@@ -1320,7 +1327,7 @@
 				currentThoughtBox.finish();
 				currentThoughtBox = null;
 			}
-			if (currentAggregator) {
+			if (currentAggregator && !aggregatorHasPendingTools(currentAggregator)) {
 				currentAggregator.close();
 				currentAggregator = null;
 			}
@@ -1331,7 +1338,7 @@
 			if (!currentThoughtBox) {
 				endCurrentTextBlock();
 				currentThoughtBox = new ThoughtAggregator();
-				if (currentAggregator) {
+				if (currentAggregator && !aggregatorHasPendingTools(currentAggregator)) {
 					currentAggregator.close();
 					currentAggregator = null;
 				}
@@ -1540,16 +1547,20 @@
 			if (statusEl) {
 				if (update.status === 'success' || update.status === 'completed') {
 					statusEl.innerHTML = ICONS.success;
+					item.dataset.pending = 'false';
 				} else if (
 					update.status === 'cancelled' ||
 					update.status === 'denied' ||
 					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && (update.rawOutput.includes('AbortError') || update.rawOutput.includes('cancelled')))
 				) {
 					statusEl.innerHTML = ICONS.cancelled;
+					item.dataset.pending = 'false';
 				} else if (update.status === 'error' || update.status === 'failed') {
 					statusEl.innerHTML = ICONS.error;
+					item.dataset.pending = 'false';
 				} else {
 					statusEl.innerHTML = ICONS.pending;
+					item.dataset.pending = 'true';
 				}
 			}
 
