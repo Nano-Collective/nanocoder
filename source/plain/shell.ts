@@ -1,7 +1,11 @@
 import path from 'node:path';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
 import {getAppConfig} from '@/config/index';
-import {loadPreferences, savePreferences} from '@/config/preferences';
+import {
+	loadPreferences,
+	resolveProjectContextPreferences,
+	savePreferences,
+} from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
 import {appendRelevantProjectContextWithCount} from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
@@ -167,10 +171,7 @@ export async function runPlainShell(
 		toolPrompt,
 		prompt,
 		new SemanticMemoryManager(),
-		{
-			semanticMemoryEnabled:
-				deps.loadPreferences().semanticMemoryEnabled ?? true,
-		},
+		resolveProjectContextPreferences(deps.loadPreferences()),
 	);
 	const systemContent = projectContext.systemPrompt;
 	if (projectContext.memoryCount > 0) {

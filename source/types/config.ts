@@ -409,4 +409,8 @@ export interface UserPreferences {
 	enablePromptScrubbing?: boolean;
 	/** Whether semantic memory is active. Default true to preserve existing behavior. */
 	semanticMemoryEnabled?: boolean;
+	/** Max memories recalled into one prompt. Defaults and bounds live in project-context.ts. */
+	semanticMemoryLimit?: number;
+	/** Approximate token ceiling for the injected Project Context block. */
+	semanticMemoryTokenBudget?: number;
 }

@@ -14,11 +14,30 @@ export interface ProjectContextResult {
 	memoryCount: number;
 }
 
-const DEFAULT_MEMORY_LIMIT = 8;
-const DEFAULT_TOKEN_BUDGET = 240;
+export const DEFAULT_MEMORY_LIMIT = 8;
+export const DEFAULT_TOKEN_BUDGET = 240;
+
+/** Bounds for the user-configurable values, applied when preferences are read. */
+export const MIN_MEMORY_LIMIT = 1;
+export const MAX_MEMORY_LIMIT = 50;
+export const MIN_TOKEN_BUDGET = 40;
+export const MAX_TOKEN_BUDGET = 4000;
 
 function estimateTokens(value: string): number {
 	return Math.ceil(value.length / 4);
+}
+
+/**
+ * Picks a fence longer than the longest backtick run in the body, the way
+ * Markdown itself does. Memory content is interpolated verbatim, so a fixed
+ * three-backtick fence could be escaped by a memory containing backticks.
+ */
+function fenceFor(body: string): string {
+	let longest = 0;
+	for (const match of body.matchAll(/`+/gu)) {
+		longest = Math.max(longest, match[0].length);
+	}
+	return '`'.repeat(Math.max(3, longest + 1));
 }
 
 export function formatProjectContext(
@@ -50,8 +69,11 @@ function formatProjectContextWithCount(
 
 	if (bullets.length === 0) return {content: '', memoryCount: 0};
 
+	const body = bullets.join('\n');
+	const fence = fenceFor(body);
+
 	return {
-		content: `## Project Context\n\n\`\`\`\n${bullets.join('\n')}\n\`\`\``,
+		content: `## Project Context\n\n${fence}\n${body}\n${fence}`,
 		memoryCount: bullets.length,
 	};
 }

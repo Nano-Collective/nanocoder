@@ -143,3 +143,24 @@ test('appendRelevantProjectContext returns original prompt when lookup fails', a
 
 	t.is(prompt, 'base prompt');
 });
+
+test('formatProjectContext widens the fence so memory content cannot escape it', t => {
+	const output = formatProjectContext([
+		memory('Use ``` fenced blocks ``` carefully.'),
+	]);
+
+	t.is(
+		output,
+		'## Project Context\n\n````\n- Use ``` fenced blocks ``` carefully.\n````',
+	);
+	// The payload stays strictly inside the fence.
+	const [, body] = output.split('````');
+	t.true(body?.includes('fenced blocks') ?? false);
+});
+
+test('formatProjectContext keeps the standard fence when content has no backticks', t => {
+	t.is(
+		formatProjectContext([memory('Auth uses Clerk.')]),
+		'## Project Context\n\n```\n- Auth uses Clerk.\n```',
+	);
+});

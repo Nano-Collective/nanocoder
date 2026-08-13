@@ -3,15 +3,25 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {
+	DEFAULT_MEMORY_LIMIT,
+	DEFAULT_TOKEN_BUDGET,
+	MAX_MEMORY_LIMIT,
+	MAX_TOKEN_BUDGET,
+	MIN_MEMORY_LIMIT,
+	MIN_TOKEN_BUDGET,
+} from '@/memory/project-context';
+import {
 	getCompactToolDisplay,
 	getLastUsedModel,
 	getNanocoderShape,
 	getNotificationsPreference,
 	getPasteThreshold,
+	getProjectContextPreferences,
 	getReasoningExpanded,
 	getSemanticMemoryEnabled,
 	loadPreferences,
 	resetPreferencesCache,
+	resolveProjectContextPreferences,
 	savePreferences,
 	updateCompactToolDisplay,
 	updateLastUsed,
@@ -20,6 +30,8 @@ import {
 	updatePasteThreshold,
 	updateReasoningExpanded,
 	updateSemanticMemoryEnabled,
+	updateSemanticMemoryLimit,
+	updateSemanticMemoryTokenBudget,
 	getPrivacyPreference,
 	updatePrivacyPreference,
 } from './preferences';
@@ -1609,6 +1621,129 @@ test.serial('updateSemanticMemoryEnabled saves the preference correctly', t => {
 		const parsed = JSON.parse(content) as UserPreferences;
 
 		t.is(parsed.semanticMemoryEnabled, false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// ============================================================================
+// Project Context Preferences Tests (token budget + memory limit, round-4 review)
+// ============================================================================
+
+test('resolveProjectContextPreferences falls back to the shipped defaults', t => {
+	t.deepEqual(resolveProjectContextPreferences({} as UserPreferences), {
+		semanticMemoryEnabled: true,
+		memoryLimit: DEFAULT_MEMORY_LIMIT,
+		tokenBudget: DEFAULT_TOKEN_BUDGET,
+	});
+});
+
+test('resolveProjectContextPreferences honours configured values', t => {
+	t.deepEqual(
+		resolveProjectContextPreferences({
+			semanticMemoryEnabled: false,
+			semanticMemoryLimit: 3,
+			semanticMemoryTokenBudget: 120,
+		} as UserPreferences),
+		{semanticMemoryEnabled: false, memoryLimit: 3, tokenBudget: 120},
+	);
+});
+
+test('resolveProjectContextPreferences clamps out-of-range values', t => {
+	const tooLow = resolveProjectContextPreferences({
+		semanticMemoryLimit: 0,
+		semanticMemoryTokenBudget: 1,
+	} as UserPreferences);
+	t.is(tooLow.memoryLimit, MIN_MEMORY_LIMIT);
+	t.is(tooLow.tokenBudget, MIN_TOKEN_BUDGET);
+
+	const tooHigh = resolveProjectContextPreferences({
+		semanticMemoryLimit: 10_000,
+		semanticMemoryTokenBudget: 10_000,
+	} as UserPreferences);
+	t.is(tooHigh.memoryLimit, MAX_MEMORY_LIMIT);
+	t.is(tooHigh.tokenBudget, MAX_TOKEN_BUDGET);
+});
+
+test.serial('getProjectContextPreferences reads token budget and memory limit from disk', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const data: UserPreferences = {
+		semanticMemoryEnabled: true,
+		semanticMemoryLimit: 12,
+		semanticMemoryTokenBudget: 480,
+	};
+	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
+
+	try {
+		t.deepEqual(getProjectContextPreferences(), {
+			semanticMemoryEnabled: true,
+			memoryLimit: 12,
+			tokenBudget: 480,
+		});
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateSemanticMemoryLimit saves a clamped value', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateSemanticMemoryLimit(500);
+
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as UserPreferences;
+
+		t.is(parsed.semanticMemoryLimit, MAX_MEMORY_LIMIT);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateSemanticMemoryTokenBudget saves a clamped value', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateSemanticMemoryTokenBudget(1);
+
+		const content = readFileSync(preferencesPath, 'utf-8');
+		const parsed = JSON.parse(content) as UserPreferences;
+
+		t.is(parsed.semanticMemoryTokenBudget, MIN_TOKEN_BUDGET);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('full workflow: update and retrieve project context preferences', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateSemanticMemoryLimit(5);
+		updateSemanticMemoryTokenBudget(960);
+
+		t.deepEqual(getProjectContextPreferences(), {
+			semanticMemoryEnabled: true,
+			memoryLimit: 5,
+			tokenBudget: 960,
+		});
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});
