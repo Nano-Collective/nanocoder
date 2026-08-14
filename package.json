@@ -109,7 +109,7 @@
 		"@ava/typescript": "^7.0.0",
 		"@biomejs/biome": "^2.5.0",
 		"@changesets/cli": "^2.31.0",
-		"@types/node": "^25.9.3",
+		"@types/node": "^26.1.2",
 		"@types/react": "^19.0.0",
 		"@types/ws": "^8.18.1",
 		"ava": "^7.0.0",
