@@ -42,7 +42,10 @@ export function getCommandLoader(): CustomCommandLoader | null {
 
 export async function processToolUse(
 	toolCall: ToolCall,
-	options?: {abortSignal?: AbortSignal},
+	options?: {
+		abortSignal?: AbortSignal;
+		context?: import('@/types/core').ToolContext;
+	},
 ): Promise<ToolResult> {
 	// Handle XML validation errors by throwing (will be caught and returned as error ToolResult)
 	if (toolCall.function.name === '__xml_validation_error__') {

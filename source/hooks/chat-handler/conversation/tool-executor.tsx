@@ -467,6 +467,7 @@ export const executeToolsDirectly = async (
 		 * cancel (escape) propagates into running subagents.
 		 */
 		signal?: AbortSignal;
+		context?: import('@/types/core').ToolContext;
 	},
 ): Promise<ToolResult[]> => {
 	// Import processToolUse here to avoid circular dependencies
@@ -513,7 +514,11 @@ export const executeToolsDirectly = async (
 		if (type === 'readOnly' && group.length > 1) {
 			// Parallel execution for consecutive read-only tools
 			executions = await Promise.all(
-				group.map(toolCall => executeOne(toolCall, processToolUse)),
+				group.map(toolCall =>
+					executeOne(toolCall, tc =>
+						processToolUse(tc, {context: options?.context}),
+					),
+				),
 			);
 		} else {
 			// Sequential execution for non-parallelizable tools (or single-item groups)
@@ -523,7 +528,7 @@ export const executeToolsDirectly = async (
 					await executeApprovedTool(
 						toolCall,
 						toolManager,
-						processToolUse,
+						tc => processToolUse(tc, {context: options?.context}),
 						options?.setLiveComponent,
 						options?.signal,
 					),

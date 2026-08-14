@@ -252,6 +252,7 @@ async function main(): Promise<void> {
 
 	// Check for non-interactive mode (run command)
 	let nonInteractivePrompt: string | undefined;
+	let runRestrictedScope: string[] | undefined;
 	const runCommandIndex = args.findIndex(arg => arg === 'run');
 	const afterRunArgs =
 		runCommandIndex !== -1 ? args.slice(runCommandIndex + 1) : [];
@@ -292,6 +293,20 @@ async function main(): Promise<void> {
 				continue; // skip this flag
 			} else if (arg === '--no-alt-screen' || arg === '--alt-screen') {
 				continue; // skip this flag
+			} else if (arg === '--restricted-scope' && afterRunArgs[i + 1]) {
+				runRestrictedScope = afterRunArgs[i + 1]
+					.split(',')
+					.map(s => s.trim())
+					.filter(Boolean);
+				i++; // skip flag value
+				continue;
+			} else if (arg.startsWith('--restricted-scope=')) {
+				runRestrictedScope = arg
+					.slice('--restricted-scope='.length)
+					.split(',')
+					.map(s => s.trim())
+					.filter(Boolean);
+				continue;
 			} else {
 				promptArgs.push(arg);
 			}
@@ -703,6 +718,7 @@ async function main(): Promise<void> {
 				initialSession={initialSession}
 				openSessionSelectorOnStart={openSessionSelectorOnStart}
 				swarmConfig={swarmConfig}
+				restrictedScope={runRestrictedScope}
 			/>,
 			{
 				// Ctrl+C is handled inside App (routed through the shutdown

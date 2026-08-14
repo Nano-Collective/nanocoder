@@ -151,6 +151,7 @@
 	let isProcessing = false;
 	let currentAggregator = null;
 	let currentThoughtBox = null;
+	let visualLoader = null;
 	let toastTimeout = null;
 	// One agent response is split into several `.agent-markdown` containers -
 	// endCurrentTextBlock() closes the current one whenever a tool card, thought
@@ -170,6 +171,7 @@
 
 	// Premium SVG Icons (Feather Icons)
 	const ICONS = {
+		nanocoder: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M 2 5 H 5 V 8 H 7 V 12 H 9 V 5 H 12 V 19 H 9 V 16 H 7 V 12 H 5 V 19 H 2 Z" /><path d="M 14 5 H 22 V 8 H 17 V 16 H 22 V 19 H 14 Z" /></svg>`,
 		trash: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>`,
 		pending: `<svg class="animate-spin" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line></svg>`,
 		success: `<svg class="text-[#89d185]" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`,
@@ -181,6 +183,20 @@
 		arrowRight: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>`,
 		edit: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>`
 	};
+
+	function formatRelativeTime(iso) {
+		if (!iso) return '';
+		const date = new Date(iso);
+		if (isNaN(date.getTime())) return '';
+		const diffMin = Math.floor((Date.now() - date.getTime()) / 60000);
+		if (diffMin < 1) return 'Just now';
+		if (diffMin < 60) return `${diffMin}m ago`;
+		const diffHr = Math.floor(diffMin / 60);
+		if (diffHr < 24) return `${diffHr}h ago`;
+		const diffDay = Math.floor(diffHr / 24);
+		if (diffDay < 7) return `${diffDay}d ago`;
+		return date.toLocaleDateString();
+	}
 
 	function formatRelativeTime(iso) {
 		if (!iso) return '';
@@ -259,6 +275,7 @@
 					statusEl.innerHTML = ICONS.cancelled;
 				}
 			});
+			stopVisualLoader();
 
 			if (currentAggregator) {
 				currentAggregator.close();
@@ -271,11 +288,16 @@
 		}
 	}
 
+	// Shared by the Stop button and Escape so the two can't drift apart.
+	function requestCancel() {
+		vscode.postMessage({ type: 'cancel' });
+		setProcessing(false);
+	}
+
 	if (sendStopBtn) {
 		sendStopBtn.addEventListener('click', () => {
 			if (isProcessing) {
-				vscode.postMessage({ type: 'cancel' });
-				setProcessing(false);
+				requestCancel();
 			} else {
 				submitMessage();
 			}
@@ -449,6 +471,18 @@
 		}
 	});
 
+	// Escape instantly cancels the in-flight LLM request, mirroring the Stop
+	// button. Registered on `document` (not just the textarea) so it fires even
+	// when the chat input has lost focus to a tool card, button, dropdown or the
+	// streaming response area. Guarded by isProcessing so an idle Escape does
+	// nothing.
+	document.addEventListener('keydown', (e) => {
+		if (e.key === 'Escape' && isProcessing) {
+			e.preventDefault();
+			e.stopPropagation();
+			requestCancel();
+		}
+	});
 	// Ctrl/Cmd+Alt+Shift+C is owned by the host keybinding
 	// (`nanocoder.copyLastCodeBlock` in package.json). VS Code forwards
 	// webview keydowns to the host for resolution even after preventDefault,
@@ -518,6 +552,8 @@
 		if (!isProcessing) {
 			// Switch to processing state
 			setProcessing(true);
+
+			startVisualLoader();
 
 			// Reset turn elements so agent starts a fresh block
 			currentTurnEl = null;
@@ -728,7 +764,10 @@
 		const msgEl = document.createElement('div');
 		msgEl.className = 'leading-snug break-words shrink-0 min-w-0 flex flex-col ' +
 			(role === 'user'
-				? 'self-end bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-border px-3 py-2 rounded-lg max-w-[85%]'
+				// No max-w here: the wrapper already caps the turn at 85%. A second
+				// percentage would resolve against the wrapper's shrink-to-fit width,
+				// squeezing the bubble to 85% of its own content and wrapping mid-word.
+				? 'self-end bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-border px-3 py-2 rounded-lg max-w-full'
 				: 'self-start max-w-full');
 
 		if (images && images.length > 0) {
@@ -848,12 +887,38 @@
 		}
 	}
 
+	function startVisualLoader() {
+		const wrapper = document.createElement('div');
+		wrapper.className = 'group flex flex-row gap-1.5 min-w-0 shrink-0 self-start items-center max-w-full';
+		const span = document.createElement('span');
+		span.className = 'flex items-center shrink-0 text-vscode-fg [&_svg]:w-6 [&_svg]:h-6 animate-pulse';
+
+		span.innerHTML = ICONS.nanocoder;
+		wrapper.appendChild(span);
+
+		visualLoader = wrapper;
+		messagesContainer.appendChild(wrapper);
+		scrollToBottom();
+	}
+
+	function keepVisualLoaderAtBottom() {
+		if (visualLoader && visualLoader.parentElement) {
+			messagesContainer.appendChild(visualLoader);
+		}
+		scrollToBottom();
+	}
+
+	function stopVisualLoader() {
+		if (visualLoader) {
+			visualLoader.remove();
+			visualLoader = null;
+		}
+	}
+
 	function appendChunk(textChunk) {
 		// Remove welcome message and loader if present
 		const welcome = document.querySelector('.welcome-message');
 		if (welcome) welcome.remove();
-		const loader = document.getElementById('session-loader');
-		if (loader) loader.remove();
 
 		if (!currentTurnEl || !currentTextEl) {
 			// First chunk for this turn
@@ -1081,6 +1146,10 @@
 				setProcessing(false);
 				break;
 			case 'sessionLoaded':
+				if (currentThoughtBox) {
+					currentThoughtBox.pause();
+					currentThoughtBox = null;
+				}
 				const loader = document.getElementById('session-loader');
 				if (loader) loader.remove();
 				scrollToBottom();
@@ -1090,6 +1159,9 @@
 				break;
 			case 'permissionRequested':
 				handlePermissionRequested(message.toolCallId, message.toolCall, message.options);
+				break;
+			case 'permissionsCancelled':
+				handlePermissionsCancelled(message.toolCallIds);
 				break;
 
 			case 'syncState':
@@ -1293,6 +1365,10 @@
 		const update = payload.update ? payload.update : payload;
 
 		if (update.sessionUpdate === 'user_message_chunk') {
+			if (currentThoughtBox) {
+				currentThoughtBox.pause();
+				currentThoughtBox = null;
+			}
 			if (update.content) {
 				endCurrentTextBlock();
 				if (update.content.text) {
@@ -1305,10 +1381,10 @@
 			}
 		} else if (update.sessionUpdate === 'agent_message_chunk') {
 			if (currentThoughtBox) {
-				currentThoughtBox.finish();
-				currentThoughtBox = null;
+				currentThoughtBox.pause();
 			}
 			if (update.content && update.content.text) {
+				stopVisualLoader();
 				appendChunk(update.content.text);
 			}
 		} else if (update.sessionUpdate === 'agent_thought_chunk') {
@@ -1321,15 +1397,14 @@
 			}
 		} else if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
 			if (currentThoughtBox) {
-				currentThoughtBox.finish();
-				currentThoughtBox = null;
+				currentThoughtBox.pause();
 			}
 			handleToolCallUpdate(update);
 		} else if (update.sessionUpdate === 'plan') {
 			handlePlanUpdate(update);
 		} else if (update.sessionUpdate === 'prompt_response' || update.sessionUpdate === 'done') {
 			if (currentThoughtBox) {
-				currentThoughtBox.finish();
+				currentThoughtBox.pause();
 				currentThoughtBox = null;
 			}
 			// Show token usage (and estimated cost) for the finished turn
@@ -1337,12 +1412,13 @@
 			// Turn is complete — restore the send button
 			setProcessing(false);
 		}
+		keepVisualLoaderAtBottom();
 	}
 
 	class ThoughtAggregator {
 		constructor() {
 			this.el = document.createElement('div');
-			this.el.className = 'my-2 flex flex-col shrink-0';
+			this.el.className = 'my-2 flex flex-col shrink-0 thought-aggregator';
 
 			this.header = document.createElement('div');
 			this.header.className = 'flex items-center gap-1.5 cursor-pointer opacity-70 text-vscode-fg hover:opacity-100 transition-opacity select-none w-fit';
@@ -1366,9 +1442,11 @@
 			this.el.appendChild(this.body);
 
 			this.isOpen = true;
-			this.startTime = Date.now();
+			this.userToggled = false;
 			this.text = '';
 			this.renderTimeout = null;
+			this.thinkingMs = 0;
+			this.segmentStart = Date.now();
 
 			this.timer = setInterval(() => this.updateTimer(), 1000);
 
@@ -1376,12 +1454,19 @@
 			scrollToBottom();
 		}
 
+		elapsedSeconds() {
+			const active = this.segmentStart ? Date.now() - this.segmentStart : 0;
+			return Math.floor((this.thinkingMs + active) / 1000);
+		}
+
 		updateTimer() {
-			const seconds = Math.floor((Date.now() - this.startTime) / 1000);
-			this.title.textContent = `Thinking for ${seconds}s`;
+			this.title.textContent = `Thinking for ${this.elapsedSeconds()}s`;
 		}
 
 		toggle(force) {
+			if (force === undefined) {
+				this.userToggled = true;
+			}
 			this.isOpen = force !== undefined ? force : !this.isOpen;
 			this.body.style.display = this.isOpen ? 'block' : 'none';
 
@@ -1391,34 +1476,59 @@
 			}
 		}
 
+		render() {
+			if (typeof marked !== 'undefined') {
+				this.body.innerHTML = marked.parse(this.text);
+			} else {
+				this.body.textContent = this.text;
+			}
+		}
+
 		append(chunk) {
+			this.resume();
 			this.text += chunk;
 			if (typeof marked !== 'undefined') {
 				if (!this.renderTimeout) {
 					this.renderTimeout = setTimeout(() => {
-						this.body.innerHTML = marked.parse(this.text);
+						this.render();
 						this.renderTimeout = null;
 						scrollToBottom();
 					}, 50);
 				}
 			} else {
-				this.body.textContent = this.text;
+				this.render();
 				scrollToBottom();
 			}
 		}
 
-		finish() {
+		resume() {
+			if (this.segmentStart) return;
+			if (this.text && !this.text.endsWith('\n\n')) {
+				this.text += '\n\n';
+			}
+			this.segmentStart = Date.now();
+			this.timer = setInterval(() => this.updateTimer(), 1000);
+			this.updateTimer();
+			if (!this.userToggled) {
+				this.toggle(true);
+			}
+		}
+
+		pause() {
+			if (!this.segmentStart) return;
+			this.thinkingMs += Date.now() - this.segmentStart;
+			this.segmentStart = null;
 			clearInterval(this.timer);
+			this.timer = null;
 			if (this.renderTimeout) {
 				clearTimeout(this.renderTimeout);
 				this.renderTimeout = null;
 			}
-			if (typeof marked !== 'undefined') {
-				this.body.innerHTML = marked.parse(this.text);
+			this.render();
+			this.title.textContent = `Thought for ${this.elapsedSeconds()}s`;
+			if (!this.userToggled) {
+				this.toggle(false);
 			}
-			const seconds = Math.floor((Date.now() - this.startTime) / 1000);
-			this.title.textContent = `Thought for ${seconds}s`;
-			this.toggle(false); // Auto-shrink when done!
 		}
 	}
 
@@ -1523,7 +1633,9 @@
 				} else if (
 					update.status === 'cancelled' ||
 					update.status === 'denied' ||
-					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && (update.rawOutput.includes('AbortError') || update.rawOutput.includes('cancelled')))
+					// ACP has no 'cancelled' status, so a cancel arrives as failed with
+					// 'Cancelled by user'. Case-insensitive, or the capital C misses.
+					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && /aborterror|cancelled/i.test(update.rawOutput))
 				) {
 					statusEl.innerHTML = ICONS.cancelled;
 				} else if (update.status === 'error' || update.status === 'failed') {
@@ -1774,6 +1886,21 @@
 
 		card.appendChild(actionsDiv);
 		scrollToBottom();
+	}
+
+	// Drop the approval buttons off cards whose permission request was cancelled.
+	function handlePermissionsCancelled(toolCallIds) {
+		for (const toolCallId of toolCallIds || []) {
+			const card = document.getElementById(`tool-card-${toolCallId}`);
+			if (!card) continue;
+
+			const actions = card.querySelector('.tool-actions');
+			if (actions) actions.remove();
+
+			// Tool cards keep their status in .tool-status, edit cards in .ml-auto.
+			const statusEl = card.querySelector('.tool-status, .ml-auto');
+			if (statusEl) statusEl.innerHTML = ICONS.cancelled;
+		}
 	}
 
 

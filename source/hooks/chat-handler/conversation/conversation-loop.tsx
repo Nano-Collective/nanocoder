@@ -98,6 +98,7 @@ interface ProcessAssistantResponseParams {
 	privacySessionMapRef?: React.MutableRefObject<Record<string, string>>;
 	privacyEnabled?: boolean;
 	onPrivacyEvent?: (scrubbedDelta: number) => void;
+	restrictedScope?: string | string[];
 	// Number of consecutive empty assistant turns that have already been
 	// nudged in this loop. The empty-response branch increments and
 	// recurses; every other recursion site resets to 0.
@@ -785,7 +786,12 @@ export const processAssistantResponse = async (
 				toolManager,
 				conversationStateManager,
 				addToChatQueue,
-				{...displayOptions, setLiveComponent, signal: controller.signal},
+				{
+					...displayOptions,
+					setLiveComponent,
+					signal: controller.signal,
+					context: {restrictedScope: params.restrictedScope},
+				},
 			);
 			turnResults.push(...directResults);
 		}
@@ -852,7 +858,10 @@ export const processAssistantResponse = async (
 				const execution = await executeApprovedTool(
 					toolCall,
 					toolManager,
-					processToolUse,
+					tc =>
+						processToolUse(tc, {
+							context: {restrictedScope: params.restrictedScope},
+						}),
 					setLiveComponent,
 					controller.signal,
 				);
@@ -880,7 +889,10 @@ export const processAssistantResponse = async (
 				autoDiagnosticsMessage = await buildAutoDiagnosticsMessage(
 					validToolCalls,
 					turnResults,
-					processToolUse,
+					tc =>
+						processToolUse(tc, {
+							context: {restrictedScope: params.restrictedScope},
+						}),
 				);
 			}
 			const builder = new MessageBuilder(updatedMessages);

@@ -57,6 +57,7 @@ interface UseAppHandlersProps {
 	developmentMode: DevelopmentMode;
 	tune: TuneConfig | undefined;
 	abortController: AbortController | null;
+	restrictedScope?: string | string[];
 	updateInfo: UpdateInfo | null;
 	mcpServersStatus: MCPConnectionStatus[] | undefined;
 	lspServersStatus: LSPConnectionStatus[];
