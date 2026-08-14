@@ -13,7 +13,6 @@ export function SwarmDashboard({
 	client: LLMClient | null;
 }) {
 	const {exit} = useApp();
-
 	// Handle graceful exit via Ctrl+C
 	useInput((input, key) => {
 		if (key.ctrl && input === 'c') {
@@ -39,7 +38,6 @@ export function SwarmDashboard({
 			return () => clearTimeout(timer);
 		}
 	}, [allComplete, exit, swarmStatus]);
-
 	return (
 		<Box
 			flexDirection="column"
