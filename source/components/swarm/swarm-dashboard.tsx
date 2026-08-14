@@ -1,22 +1,18 @@
 import {Box, Text, useApp, useInput} from 'ink';
 import Spinner from 'ink-spinner';
-import {useEffect, useState} from 'react';
+import {useEffect} from 'react';
 import type {SwarmConfig} from '@/app/types';
+import type {LLMClient} from '@/types/core';
+import {useSwarmCoordinator} from './use-swarm-coordinator';
 
-type WorkerStatus = 'starting' | 'running' | 'merging' | 'complete';
-
-interface WorkerState {
-	id: number;
-	status: WorkerStatus;
-	tokens: number;
-	currentTool?: string;
-}
-
-const TOOLS = ['read_file', 'grep_search', 'write_to_file', 'run_command'];
-
-export function SwarmDashboard({config}: {config: SwarmConfig}) {
+export function SwarmDashboard({
+	config,
+	client,
+}: {
+	config: SwarmConfig;
+	client: LLMClient | null;
+}) {
 	const {exit} = useApp();
-	const [ticks, setTicks] = useState(0);
 
 	// Handle graceful exit via Ctrl+C
 	useInput((input, key) => {
@@ -26,57 +22,23 @@ export function SwarmDashboard({config}: {config: SwarmConfig}) {
 		}
 	});
 
-	useEffect(() => {
-		const interval = setInterval(() => {
-			setTicks(t => t + 1);
-		}, 500); // tick every half second
-		return () => clearInterval(interval);
-	}, []);
+	const {
+		status: swarmStatus,
+		workers,
+		error,
+	} = useSwarmCoordinator(config, client ?? undefined);
 
-	// Deterministic state based on ticks
-	const workers: WorkerState[] = Array.from({length: config.workers}).map(
-		(_, i) => {
-			const offset = i * 2; // offset in ticks
-			const effectiveTicks = Math.max(0, ticks - offset);
-
-			let status: WorkerStatus = 'starting';
-			let tokens = 0;
-			let currentTool: string | undefined;
-
-			if (effectiveTicks < 4) {
-				status = 'starting';
-			} else if (effectiveTicks < 16) {
-				status = 'running';
-				tokens = (effectiveTicks - 4) * 150;
-				currentTool = TOOLS[effectiveTicks % TOOLS.length];
-			} else if (effectiveTicks < 20) {
-				status = 'merging';
-				tokens = 12 * 150;
-			} else {
-				status = 'complete';
-				tokens = 12 * 150;
-			}
-
-			return {
-				id: i + 1,
-				status,
-				tokens,
-				currentTool,
-			};
-		},
-	);
-
-	const allComplete = workers.every(w => w.status === 'complete');
+	const allComplete = swarmStatus === 'complete' || swarmStatus === 'failed';
 
 	useEffect(() => {
-		if (allComplete && ticks > 0) {
+		if (allComplete) {
 			const timer = setTimeout(() => {
 				exit();
-				process.exit(0);
-			}, 1500);
+				process.exit(swarmStatus === 'failed' ? 1 : 0);
+			}, 3000); // 3 seconds to review final state
 			return () => clearTimeout(timer);
 		}
-	}, [allComplete, exit, ticks]);
+	}, [allComplete, exit, swarmStatus]);
 
 	return (
 		<Box
@@ -87,14 +49,30 @@ export function SwarmDashboard({config}: {config: SwarmConfig}) {
 		>
 			<Box marginBottom={1} flexDirection="column">
 				<Text bold color="cyan">
-					🐝 Nanocoder Swarm (Phase 1 Mock)
+					🐝 Nanocoder Swarm (Orchestrator)
 				</Text>
 				<Text color="gray">
 					Mode: <Text color="white">{config.swarmMode}</Text>
 				</Text>
 				<Text color="gray">
-					Prompt: <Text color="white">{config.prompt}</Text>
+					Status:{' '}
+					<Text
+						color={
+							swarmStatus === 'complete'
+								? 'green'
+								: swarmStatus === 'failed'
+									? 'red'
+									: 'cyan'
+						}
+					>
+						{swarmStatus}
+					</Text>
 				</Text>
+				{error && (
+					<Text color="red">
+						Error: <Text color="white">{error}</Text>
+					</Text>
+				)}
 				{config.restrictedScope && (
 					<Text color="gray">
 						Scope: <Text color="yellow">{config.restrictedScope}</Text>
@@ -103,36 +81,34 @@ export function SwarmDashboard({config}: {config: SwarmConfig}) {
 			</Box>
 
 			<Box flexDirection="column" marginBottom={1}>
-				{workers.map(w => (
-					<Box key={w.id} marginBottom={1} flexDirection="row">
-						<Box width={15}>
-							<Text color="green">Worker {w.id}</Text>
-						</Box>
-						<Box width={15}>
-							<Text
-								color={
-									w.status === 'starting'
-										? 'yellow'
-										: w.status === 'running'
-											? 'blue'
-											: w.status === 'merging'
-												? 'magenta'
-												: 'green'
-								}
-							>
-								{w.status === 'complete' ? '✓ ' : <Spinner type="dots" />}
-								{w.status.toUpperCase()}
+				{workers.map(worker => (
+					<Box key={worker.id} flexDirection="row" gap={2}>
+						<Box width={20}>
+							{worker.status === 'complete' && <Text color="green">✓ </Text>}
+							{worker.status === 'failed' && <Text color="red">✗ </Text>}
+							{(worker.status === 'starting' ||
+								worker.status === 'running') && (
+								<Text color="cyan">
+									<Spinner type="dots" />{' '}
+								</Text>
+							)}
+							<Text bold color={worker.status === 'failed' ? 'red' : 'white'}>
+								Worker{' '}
+								{String(worker.id).length > 7
+									? String(worker.id).substring(0, 7)
+									: worker.id}
 							</Text>
 						</Box>
-						<Box width={20}>
-							<Text color="gray">{w.tokens.toLocaleString()} tkns</Text>
+						<Box width={15}>
+							<Text color={worker.status === 'failed' ? 'red' : 'gray'}>
+								{worker.status}
+							</Text>
 						</Box>
-						<Box flexGrow={1}>
-							{w.status === 'running' && w.currentTool ? (
-								<Text color="gray">
-									running <Text color="cyan">{w.currentTool}</Text>
-								</Text>
-							) : null}
+						<Box width={25}>
+							<Text color="yellow">{worker.currentTool || ''}</Text>
+						</Box>
+						<Box flexGrow={1} justifyContent="flex-end">
+							<Text color="gray">{worker.tokens} tokens</Text>
 						</Box>
 					</Box>
 				))}
