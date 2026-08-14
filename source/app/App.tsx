@@ -738,7 +738,7 @@ export default function App({
 		return (
 			<ThemeContext.Provider value={themeContextValue}>
 				<TitleShapeContext.Provider value={titleShapeContextValue}>
-					<SwarmDashboard config={swarmConfig} />
+					<SwarmDashboard config={swarmConfig} client={appState.client} />
 				</TitleShapeContext.Provider>
 			</ThemeContext.Provider>
 		);
