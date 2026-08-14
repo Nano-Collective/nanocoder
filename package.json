@@ -77,7 +77,7 @@
 		"@nanocollective/get-md": "^1.6.0",
 		"@nanocollective/prompt-scrub": "^1.0.1",
 		"ai": "6.0.193",
-		"chalk": "^5.2.0",
+		"chalk": "^6.0.0",
 		"chokidar": "^5.0.0",
 		"cli-highlight": "^2.1.11",
 		"cli-table3": "^0.6.5",
