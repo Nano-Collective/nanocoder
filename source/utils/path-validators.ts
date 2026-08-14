@@ -13,7 +13,7 @@ type ValidationResult = {valid: true} | {valid: false; error: string};
  */
 export function validatePath(
 	path: string,
-	options?: {restrictedScope?: string},
+	options?: {restrictedScope?: string | string[]},
 ): ValidationResult {
 	const cwd = getSessionCwd();
 	const root = getProjectRoot();
@@ -27,8 +27,11 @@ export function validatePath(
 	try {
 		const absolutePath = resolveFilePath(path, cwd, root);
 		if (options?.restrictedScope) {
-			const absoluteScope = resolveFilePath(options.restrictedScope, cwd, root);
-			checkRestrictedScope(absolutePath, absoluteScope);
+			const scopes = Array.isArray(options.restrictedScope)
+				? options.restrictedScope
+				: [options.restrictedScope];
+			const absoluteScopes = scopes.map(s => resolveFilePath(s, cwd, root));
+			checkRestrictedScope(absolutePath, absoluteScopes);
 		}
 	} catch (error) {
 		const errorMessage = formatError(error);
@@ -47,7 +50,7 @@ export function validatePath(
 export function validatePathPair(
 	source: string,
 	destination: string,
-	options?: {restrictedScope?: string},
+	options?: {restrictedScope?: string | string[]},
 ): ValidationResult {
 	const cwd = getSessionCwd();
 	const root = getProjectRoot();
@@ -70,9 +73,12 @@ export function validatePathPair(
 		const absDest = resolveFilePath(destination, cwd, root);
 
 		if (options?.restrictedScope) {
-			const absoluteScope = resolveFilePath(options.restrictedScope, cwd, root);
-			checkRestrictedScope(absSource, absoluteScope);
-			checkRestrictedScope(absDest, absoluteScope);
+			const scopes = Array.isArray(options.restrictedScope)
+				? options.restrictedScope
+				: [options.restrictedScope];
+			const absoluteScopes = scopes.map(s => resolveFilePath(s, cwd, root));
+			checkRestrictedScope(absSource, absoluteScopes);
+			checkRestrictedScope(absDest, absoluteScopes);
 		}
 	} catch (error) {
 		const errorMessage = formatError(error);

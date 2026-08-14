@@ -199,6 +199,50 @@ export class AISDKClient implements LLMClient {
 		});
 	}
 
+	/**
+	 * Generate a structured object conforming to a Zod schema
+	 */
+	async generateStructuredObject<T>(
+		prompt: string,
+		schema: any, // zod schema
+		system?: string,
+		signal?: AbortSignal,
+	): Promise<T> {
+		const {generateObject} = await import('ai');
+
+		const model: LanguageModel = (() => {
+			switch (this.provider.kind) {
+				case 'chatgpt-codex':
+					return this.provider.provider.responses(this.currentModel);
+				case 'github-copilot':
+					return this.currentModel.includes('gpt-5')
+						? this.provider.provider.responses(this.currentModel)
+						: this.provider.provider.chat(this.currentModel);
+				case 'openai-compatible':
+					return this.provider.provider(
+						normalizeModelIdForRequest(
+							this.providerConfig.config.baseURL,
+							this.currentModel,
+						),
+					) as LanguageModel;
+				case 'anthropic':
+				case 'google':
+					return this.provider.provider(this.currentModel) as LanguageModel;
+			}
+		})();
+
+		const result = await generateObject({
+			model,
+			schema,
+			prompt,
+			system,
+			abortSignal: signal,
+			maxRetries: this.maxRetries,
+		});
+
+		return result.object as T;
+	}
+
 	clearContext(): Promise<void> {
 		const logger = getLogger();
 

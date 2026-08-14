@@ -22,7 +22,7 @@ export interface SwarmConfig {
 	prompt: string;
 	workers: number;
 	swarmMode: 'review' | 'apply' | 'yolo';
-	restrictedScope?: string;
+	restrictedScope?: string | string[];
 }
 
 /**
@@ -59,6 +59,10 @@ export interface AppProps {
 	 * `/resume` (see App.tsx).
 	 */
 	initialSession?: Session;
+	/**
+	 * File paths to restrict tool execution to.
+	 */
+	restrictedScope?: string | string[];
 	/**
 	 * Set when `--resume` was passed with no id: opens the session picker
 	 * (activeMode `'sessionSelector'`) as soon as the app mounts.

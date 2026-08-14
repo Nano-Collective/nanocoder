@@ -107,7 +107,8 @@
 		"wrap-ansi": "^10.0.0",
 		"ws": "^8.18.0",
 		"xdg-basedir": "^5.1.0",
-		"yaml": "^2.8.3"
+		"yaml": "^2.8.3",
+		"zod": "^4.4.3"
 	},
 	"devDependencies": {
 		"@ava/typescript": "^7.0.0",

@@ -228,17 +228,25 @@ export function isRealPathInside(target: string, root: string): boolean {
  */
 export function checkRestrictedScope(
 	absoluteFilePath: string,
-	restrictedScopePath: string,
+	restrictedScopePath: string | string[],
 ): void {
-	const relative = path.relative(restrictedScopePath, absoluteFilePath);
-	const outside =
-		relative === '..' ||
-		relative.startsWith(`..${path.sep}`) ||
-		path.isAbsolute(relative);
+	const scopes = Array.isArray(restrictedScopePath)
+		? restrictedScopePath
+		: [restrictedScopePath];
 
-	if (outside) {
+	const isInsideAny = scopes.some(scope => {
+		const relative = path.relative(scope, absoluteFilePath);
+		const outside =
+			relative === '..' ||
+			relative.startsWith(`..${path.sep}`) ||
+			path.isAbsolute(relative);
+		return !outside;
+	});
+
+	if (!isInsideAny) {
+		const scopeStr = scopes.join(', ');
 		throw new Error(
-			`Path escapes restricted scope. Target: ${absoluteFilePath}, Scope: ${restrictedScopePath}`,
+			`Path escapes restricted scope. Target: ${absoluteFilePath}, Scope: ${scopeStr}`,
 		);
 	}
 }

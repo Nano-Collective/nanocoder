@@ -66,6 +66,7 @@ export default function App({
 	initialSession,
 	openSessionSelectorOnStart = false,
 	swarmConfig,
+	restrictedScope,
 }: AppProps) {
 	// Resolve the initial development mode with this precedence:
 	// 1. --mode CLI flag (highest priority)
@@ -315,6 +316,7 @@ export default function App({
 		onSetLiveTaskList: appState.setLiveTaskList,
 		setLiveComponent: appState.setLiveComponent,
 		setLastApiUsage: appState.setLastApiUsage,
+		restrictedScope: restrictedScope ?? swarmConfig?.restrictedScope,
 		onApiCallComplete: record =>
 			appState.setApiCallHistory(prev => [...prev, record]),
 		tune: appState.tune,
@@ -481,6 +483,7 @@ export default function App({
 		currentProviderConfig: appState.currentProviderConfig,
 		currentModel: appState.currentModel,
 		currentTheme: appState.currentTheme,
+		restrictedScope: restrictedScope ?? swarmConfig?.restrictedScope,
 		developmentMode: appState.developmentMode,
 		tune: appState.tune,
 		lastApiUsage: appState.lastApiUsage,

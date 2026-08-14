@@ -127,7 +127,7 @@ export type ToolValidationResult =
 	| {valid: false; error: string; details?: ValidationErrorDetail[]};
 
 export interface ToolContext {
-	restrictedScope?: string;
+	restrictedScope?: string | string[];
 }
 
 export type ToolValidator = (
@@ -250,6 +250,12 @@ export interface LLMClient {
 		signal?: AbortSignal,
 		modeOverrides?: ModeOverrides,
 	): Promise<LLMChatResponse>;
+	generateStructuredObject?<T>(
+		prompt: string,
+		schema: any, // zod schema
+		system?: string,
+		signal?: AbortSignal,
+	): Promise<T>;
 	clearContext(): Promise<void>;
 	getTimeout(): number | undefined;
 }
