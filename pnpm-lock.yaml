@@ -59,7 +59,7 @@ importers:
         version: 0.6.5
       clipboardy:
         specifier: ^5.3.1
-        version: 5.3.1
+        version: 5.3.2
       croner:
         specifier: ^10.0.1
         version: 10.0.1
@@ -1651,8 +1651,8 @@ packages:
     engines: {node: '>=20'}
     hasBin: true
 
-  clipboardy@5.3.1:
-    resolution: {integrity: sha512-fPWgBqpp9ctiOQCkE5yjYGzv11ZU55g6ahEgr3COiio6dXdt1mbchCPXQrSR2Y9sZqfi8L7QD3+UosgXVIuPdg==}
+  clipboardy@5.3.2:
+    resolution: {integrity: sha512-R35PENCHFCw6lsd5SjYPuAVV3Zawr74mKc7ogFNzoDPoQsmWDoJgUNNnWCk/czeqdZGZs8Y0M8zkOlVoySfHEQ==}
     engines: {node: '>=20'}
 
   cliui@7.0.4:
@@ -3415,6 +3415,11 @@ packages:
 
   semver@7.8.2:
     resolution: {integrity: sha512-c8jsqUZm3omBOI66G90z1Dyw5z622G8oLG+omfsHBJf3CWQTlOcwOjvOG6wtiNfW6anKm/eA39LMwMtMez2TiQ==}
+    engines: {node: '>=10'}
+    hasBin: true
+
+  semver@7.8.5:
+    resolution: {integrity: sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==}
     engines: {node: '>=10'}
     hasBin: true
 
@@ -5512,7 +5517,7 @@ snapshots:
     dependencies:
       run-jxa: 3.0.0
 
-  clipboardy@5.3.1:
+  clipboardy@5.3.2:
     dependencies:
       clipboard-image: 0.1.0
       execa: 9.6.1
@@ -6634,7 +6639,7 @@ snapshots:
 
   macos-version@6.0.0:
     dependencies:
-      semver: 7.8.2
+      semver: 7.8.5
 
   make-dir@4.0.0:
     dependencies:
@@ -7297,6 +7302,8 @@ snapshots:
   semver@5.7.2: {}
 
   semver@7.8.2: {}
+
+  semver@7.8.5: {}
 
   send@1.2.1:
     dependencies:
