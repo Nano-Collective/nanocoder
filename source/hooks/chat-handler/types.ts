@@ -55,6 +55,7 @@ export interface UseChatHandlerProps {
 	subagentsReady?: boolean;
 	privacySessionMapRef?: React.MutableRefObject<Record<string, string>>;
 	privacyEnabled?: boolean;
+	restrictedScope?: string | string[];
 }
 
 export interface ChatHandlerReturn {

@@ -91,6 +91,7 @@ export function useChatHandler({
 	subagentsReady,
 	privacySessionMapRef,
 	privacyEnabled,
+	restrictedScope,
 }: UseChatHandlerProps): ChatHandlerReturn {
 	// Conversation state manager for enhanced context
 	const conversationStateManager = React.useRef(new ConversationStateManager());
@@ -250,6 +251,7 @@ export function useChatHandler({
 					tune,
 					privacySessionMapRef,
 					privacyEnabled,
+					restrictedScope,
 					onPrivacyEvent: (count: number) => {
 						// `count` is the number of NEW identifiers scrubbed on this turn
 						// (the per-turn delta), not a session running total.
@@ -295,6 +297,7 @@ export function useChatHandler({
 			onApiCallComplete,
 			privacySessionMapRef,
 			privacyEnabled,
+			restrictedScope,
 		],
 	);
 
