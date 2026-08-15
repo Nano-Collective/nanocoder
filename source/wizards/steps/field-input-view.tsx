@@ -1,6 +1,6 @@
 import {Box, Text} from 'ink';
-import SelectInput from 'ink-select-input';
 import TextInput from '@/components/text-input';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import type {TemplateField} from '../templates/provider-templates';
 
 export interface FieldInputViewProps {
@@ -76,7 +76,7 @@ export function FieldInputView({
 
 			{isBoolean && (
 				<Box marginBottom={1}>
-					<SelectInput
+					<StyledSelectInput
 						items={[
 							{label: 'Yes', value: 'true'},
 							{label: 'No', value: 'false'},

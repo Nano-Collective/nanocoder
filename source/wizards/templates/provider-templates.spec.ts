@@ -530,6 +530,42 @@ test('requesty template: uses default provider name and model default', t => {
 	t.is(config.name, 'Requesty');
 });
 
+test('orcarouter template: sets baseUrl, default model, and parses models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'orcarouter');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'OrcaRouter',
+		apiKey: 'test-key',
+		model: 'openai/gpt-5.5, anthropic/claude-sonnet-5',
+	});
+
+	t.is(config.name, 'OrcaRouter');
+	t.is(config.baseUrl, 'https://api.orcarouter.ai/v1');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, [
+		'openai/gpt-5.5',
+		'anthropic/claude-sonnet-5',
+	]);
+});
+
+test('orcarouter template: uses default provider name and model default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'orcarouter');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'openai/gpt-5.5');
+
+	const config = template!.buildConfig({
+		providerName: '',
+		apiKey: 'test-key',
+		model: 'openai/gpt-5.5',
+	});
+
+	t.is(config.name, 'OrcaRouter');
+});
+
 // ============================================================================
 // Tests for template ID vs sdkProvider collision prevention
 // Providers that use sdkProvider: 'anthropic' (like MiniMax, Kimi) must not
@@ -658,7 +694,7 @@ test('major providers have correct default models', t => {
 		'chatgpt-codex': 'gpt-5.3-codex',
 		'github-copilot': 'gpt-5.6-sol',
 		'poe': 'gpt-5.6-sol',
-		'atlas-cloud': 'gpt-5.6-sol',
+		'atlas-cloud': 'openai/gpt-5.6-sol',
 		'together': 'deepseek-ai/DeepSeek-V4-Pro',
 	};
 
@@ -674,4 +710,3 @@ test('major providers have correct default models', t => {
 		);
 	}
 });
-

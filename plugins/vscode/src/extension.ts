@@ -102,6 +102,14 @@ export function activate(context: vscode.ExtensionContext) {
 			chatProvider.postMessage({type: 'clear'});
 			outputChannel.appendLine('[Extension] New chat started — session cleared.');
 		}),
+    
+		vscode.commands.registerCommand('nanocoder.cancel', () => {
+			outputChannel.appendLine('[Extension] Cancel requested.');
+			void acpClient.cancel();
+    }),
+		vscode.commands.registerCommand('nanocoder.copyLastCodeBlock', () => {
+			chatProvider.requestCopyLastCodeBlock();
+		}),
 	);
 
 	// Push active editor state to the CLI so the input box can show an

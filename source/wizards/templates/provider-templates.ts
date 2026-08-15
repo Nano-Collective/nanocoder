@@ -420,6 +420,13 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		apiKeyPrompt: 'API Key (from https://app.requesty.ai/api-keys)',
 		modelDefault: 'openai/gpt-4o-mini',
 	}),
+	apiKeyTemplate({
+		id: 'orcarouter',
+		name: 'OrcaRouter',
+		baseUrl: 'https://api.orcarouter.ai/v1',
+		apiKeyPrompt: 'API Key (from https://www.orcarouter.ai/console)',
+		modelDefault: 'openai/gpt-5.5',
+	}),
 	{
 		id: 'openai',
 		name: 'OpenAI',
@@ -550,7 +557,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		name: 'Atlas Cloud',
 		baseUrl: 'https://api.atlascloud.ai/v1',
 		apiKeyPrompt: 'API Key (from atlascloud.ai/developer)',
-		modelDefault: 'gpt-5.6-sol',
+		modelDefault: 'openai/gpt-5.6-sol',
 	}),
 	apiKeyTemplate({
 		id: 'together',

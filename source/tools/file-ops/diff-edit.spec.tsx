@@ -170,17 +170,96 @@ test('diff_edit rejects duplicate search blocks and leaves file unchanged', asyn
 	t.is(await readFile(filePath, 'utf-8'), 'alpha\n');
 });
 
-test('diff_edit returns updated file contents for the model', async t => {
-	const filePath = await createTestFile('test.ts', 'alpha\n');
+test('diff_edit returns bounded context around the changed region', async t => {
+	const filePath = await createTestFile(
+		'large-context.txt',
+		Array.from({length: 100}, (_, index) => `line ${index + 1}`).join('\n'),
+	);
 
 	const result = await executeDiffEdit({
 		path: filePath,
-		diff: diffBlock('alpha', 'beta'),
+		diff: diffBlock('line 50', 'changed line 50'),
 	});
 
 	t.regex(result, /Successfully applied 1 diff block/);
-	t.regex(result, /Updated file contents:/);
-	t.regex(result, /1: beta/);
+	t.regex(result, /Updated file context \(lines 47-53 of 100\)/);
+	t.true(result.includes('[... lines 1-46 omitted ...]'));
+	t.true(result.includes('  47: line 47'));
+	t.true(result.includes('  50: changed line 50'));
+	t.true(result.includes('  53: line 53'));
+	t.true(result.includes('[... lines 54-100 omitted ...]'));
+	t.false(result.includes('  46: line 46'));
+	t.false(result.includes('  54: line 54'));
+});
+
+test('diff_edit caps previews for unusually large changed lines', async t => {
+	const filePath = await createTestFile('long-line.txt', 'before\ntarget\nafter');
+	const replacement = `replacement-start-${'x'.repeat(8000)}-replacement-end`;
+
+	const result = await executeDiffEdit({
+		path: filePath,
+		diff: diffBlock('target', replacement),
+	});
+
+	t.true(result.length <= 4000);
+	t.true(result.includes('replacement-start-'));
+	t.true(result.includes('-replacement-end'));
+	t.regex(result, /preview truncated/i);
+});
+
+test('diff_edit includes each separated changed region without middle-file noise', async t => {
+	const filePath = await createTestFile(
+		'multiple-regions.txt',
+		Array.from(
+			{length: 100},
+			(_, index) => `line ${String(index + 1).padStart(3, '0')}`,
+		).join('\n'),
+	);
+
+	const result = await executeDiffEdit({
+		path: filePath,
+		diff: [
+			diffBlock('line 090', 'changed line 090'),
+			diffBlock('line 010', 'changed line 010'),
+		].join('\n\n'),
+	});
+
+	t.regex(result, /Updated file context \(lines 7-13 of 100\)/);
+	t.regex(result, /Updated file context \(lines 87-93 of 100\)/);
+	t.true(result.includes('Changed regions: lines 10, 90.'));
+	t.true(result.includes('[... lines 1-6 omitted ...]'));
+	t.true(result.includes('[... lines 14-86 omitted ...]'));
+	t.true(result.includes('[... lines 94-100 omitted ...]'));
+	t.false(result.includes('[... lines 14-100 omitted ...]'));
+	t.false(result.includes('[... lines 1-86 omitted ...]'));
+	t.true(result.includes('  10: changed line 010'));
+	t.true(result.includes('  90: changed line 090'));
+	t.false(result.includes('  50: line 050'));
+});
+
+test('diff_edit keeps a summary of every changed region when the preview is capped', async t => {
+	const filePath = await createTestFile(
+		'capped-multiple-regions.txt',
+		Array.from(
+			{length: 100},
+			(_, index) => `line ${String(index + 1).padStart(3, '0')}`,
+		).join('\n'),
+	);
+	const largeReplacement = (lineNumber: number) =>
+		`changed line ${lineNumber}-${'x'.repeat(3000)}`;
+
+	const result = await executeDiffEdit({
+		path: filePath,
+		diff: [
+			diffBlock('line 010', largeReplacement(10)),
+			diffBlock('line 050', largeReplacement(50)),
+			diffBlock('line 090', largeReplacement(90)),
+		].join('\n\n'),
+	});
+
+	t.true(result.length <= 4000);
+	t.true(result.includes('Changed regions: lines 10, 50, 90.'));
+	t.regex(result, /preview truncated/i);
 });
 
 test('diff_edit rejects missing search content and leaves file unchanged', async t => {

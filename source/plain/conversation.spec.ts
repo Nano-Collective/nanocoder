@@ -40,6 +40,7 @@ function makeFakeClient(options: FakeClientOptions): LLMClient {
 					{ message: { role: "assistant", content: "" } },
 				],
 				toolsDisabled: partial.toolsDisabled,
+				usage: partial.usage,
 			} as LLMChatResponse;
 		},
 	} as unknown as LLMClient;
@@ -636,6 +637,7 @@ function makeRecordingClient(
 					{ message: { role: "assistant", content: "" } },
 				],
 				toolsDisabled: partial.toolsDisabled,
+				usage: partial.usage,
 			} as LLMChatResponse;
 		},
 	} as unknown as LLMClient;
@@ -769,5 +771,222 @@ test.serial(
 		t.is(outcome.kind, "success");
 		t.is(handlerCalls, 0, "final-turn XML tool call must not execute");
 		t.is(calls.length, 1);
+	},
+);
+
+test.serial(
+	"accumulates token usage across multiple turns",
+	async (t) => {
+		const calls: RecordedCall[] = [];
+		const client = makeRecordingClient(
+			[
+				{
+					choices: [
+						{
+							message: {
+								role: "assistant",
+								content: "",
+								tool_calls: [
+									{
+										id: "call_1",
+										type: "function",
+										function: { name: "safe_tool", arguments: {} },
+									},
+								],
+							},
+						},
+					],
+					usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+				},
+				{
+					choices: [
+						{
+							message: {
+								role: "assistant",
+								content: "all done",
+							},
+						},
+					],
+					usage: { inputTokens: 150, outputTokens: 30, totalTokens: 180 },
+				},
+			],
+			calls,
+		);
+		const toolManager = makeFakeToolManager({
+			knownTools: new Set(["safe_tool"]),
+			needsApprovalByName: { safe_tool: false },
+		});
+		setToolRegistryGetter(() => ({
+			safe_tool: (async () => "tool-output") as ToolHandler,
+		}));
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
+		t.deepEqual(outcome.usage, {
+			inputTokens: 250,
+			outputTokens: 50,
+			totalTokens: 300,
+		});
+	},
+);
+
+test.serial(
+	"omits usage property when no turn reports usage",
+	async (t) => {
+		const client = makeFakeClient({
+			responses: [
+				{
+					choices: [
+						{
+							message: {
+								role: "assistant",
+								content: "no usage here",
+							},
+						},
+					],
+				},
+			],
+		});
+		const toolManager = makeFakeToolManager();
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
+		t.is(outcome.usage, undefined);
+	},
+);
+
+test.serial(
+	"omits usage property when the provider reports an empty usage object",
+	async (t) => {
+		// The real client always returns a `usage` object; providers with no
+		// telemetry leave every field undefined. That must stay indistinguishable
+		// from no usage at all, not surface as an all-zero block.
+		const client = makeFakeClient({
+			responses: [
+				{
+					choices: [
+						{
+							message: {
+								role: "assistant",
+								content: "no usage here",
+							},
+						},
+					],
+					usage: {},
+				},
+			],
+		});
+		const toolManager = makeFakeToolManager();
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
+		t.is(outcome.usage, undefined);
+	},
+);
+
+test.serial(
+	"derives totalTokens from input+output when the provider omits it",
+	async (t) => {
+		const client = makeFakeClient({
+			responses: [
+				{
+					choices: [
+						{
+							message: {
+								role: "assistant",
+								content: "all done",
+							},
+						},
+					],
+					usage: { inputTokens: 100, outputTokens: 20 },
+				},
+			],
+		});
+		const toolManager = makeFakeToolManager();
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
+		t.deepEqual(outcome.usage, {
+			inputTokens: 100,
+			outputTokens: 20,
+			totalTokens: 120,
+		});
+	},
+);
+
+test.serial(
+	"counts a partially reported turn without zeroing the other fields",
+	async (t) => {
+		// Only outputTokens reported: the turn still counts, and the derived total
+		// falls back to input+output rather than reading as zero spend.
+		const client = makeFakeClient({
+			responses: [
+				{
+					choices: [
+						{
+							message: {
+								role: "assistant",
+								content: "all done",
+							},
+						},
+					],
+					usage: { outputTokens: 42 },
+				},
+			],
+		});
+		const toolManager = makeFakeToolManager();
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
+		t.deepEqual(outcome.usage, {
+			inputTokens: 0,
+			outputTokens: 42,
+			totalTokens: 42,
+		});
 	},
 );

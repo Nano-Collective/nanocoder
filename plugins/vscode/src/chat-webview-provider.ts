@@ -2,8 +2,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { WebviewToExtensionMessage, ExtensionToWebviewMessage } from './webview-protocol';
-import * as fs from 'fs';
-import * as path from 'path';
 
 import { NanocoderAcpClient } from './acp-client';
 import { DiffManager } from './diff-manager';
@@ -39,6 +37,13 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 			});
 		};
 
+		this._acpClient.onPermissionsCancelled = (toolCallIds: string[]) => {
+			this.postMessage({
+				type: 'permissionsCancelled',
+				toolCallIds
+			});
+		};
+
 		this._acpClient.onStateSync = (state: any) => {
 			this.postMessage({
 				type: 'syncState',
@@ -68,6 +73,14 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				}
 			}
 		}
+	}
+
+	public requestCopyLastCodeBlock() {
+		if (!this._view) {
+			vscode.window.showInformationMessage('Nanocoder: open the Nanocoder chat view first.');
+			return;
+		}
+		this.postMessage({type: 'copyLastCodeBlock'});
 	}
 
 	public toggleHistory() {
@@ -162,6 +175,12 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 							this._broadcastSessions();
 						});
 						break;
+					case 'renameSession':
+						this._outputChannel.appendLine(`[Webview] User renamed session: ${message.sessionId} -> ${message.title}`);
+						this._acpClient.renameSession(message.sessionId, message.title).then(() => {
+							this._broadcastSessions();
+						});
+						break;
 					case 'requestPathInfo': {
 						try {
 							const stat = fs.statSync(message.path);
@@ -208,6 +227,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 						this._outputChannel.appendLine(`[Webview] Error: ${message.message}`);
 						vscode.window.showErrorMessage(message.message);
 						break;
+					case 'copyToClipboard':
+						this._copyToClipboard(message.text);
+						break;
 				}
 			}
 		);
@@ -234,6 +256,18 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 			}
 		} catch (error) {
 			this._outputChannel.appendLine(`Failed to initialize session on ready: ${error}`);
+		}
+	}
+
+	// The webview extracts the text; the host owns the write because a
+	// palette-triggered copy has no user gesture for navigator.clipboard.
+	private async _copyToClipboard(text: string) {
+		try {
+			await vscode.env.clipboard.writeText(text);
+			this.postMessage({type: 'copyResult', ok: true, chars: text.length});
+		} catch (error) {
+			this._outputChannel.appendLine(`Failed to write to clipboard: ${error}`);
+			this.postMessage({type: 'copyResult', ok: false, error: String(error)});
 		}
 	}
 
@@ -316,9 +350,18 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				}
 			});
 
-			await this._acpClient.prompt(expandedText, images);
-			// Signal turn completion so the Webview can flip back to the send button
-			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}});
+			const response = await this._acpClient.prompt(expandedText, images);
+			// Signal turn completion so the Webview can flip back to the send
+			// button. Forward the per-turn token usage and estimated cost so
+			// the webview can render the usage indicator under the response.
+			this.postMessage({
+				type: 'acpUpdate',
+				update: {
+					sessionUpdate: 'prompt_response',
+					usage: response?.usage,
+					cost: (response?._meta as Record<string, any> | undefined)?.['nanocoder/usage']?.cost,
+				},
+			});
 		} catch (error) {
 			this._outputChannel.appendLine(`Prompt execution error: ${error}`);
 			vscode.window.showErrorMessage(`Nanocoder Prompt error: ${error}`);

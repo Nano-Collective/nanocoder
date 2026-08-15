@@ -1,7 +1,6 @@
 import {Box, Text, useInput} from 'ink';
 import BigText from 'ink-big-text';
 import Gradient from 'ink-gradient';
-import SelectInput from 'ink-select-input';
 import {type ReactNode, useMemo, useState} from 'react';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import type {TitleShape} from '@/components/ui/styled-title';
@@ -412,7 +411,7 @@ export function SettingsTitleShapePanel({
 				flexDirection="column"
 				marginBottom={1}
 			>
-				<SelectInput
+				<StyledSelectInput
 					items={shapeOptions}
 					initialIndex={initialIndex}
 					onSelect={handleSelect}
@@ -440,7 +439,7 @@ export function SettingsTitleShapePanel({
 				</Text>
 			</Box>
 
-			<SelectInput
+			<StyledSelectInput
 				items={shapeOptions}
 				initialIndex={initialIndex}
 				onSelect={handleSelect}
@@ -528,7 +527,7 @@ export function SettingsNanocoderShapePanel({
 					flexDirection="column"
 					marginBottom={1}
 				>
-					<SelectInput
+					<StyledSelectInput
 						items={shapeOptions}
 						initialIndex={initialIndex}
 						onSelect={handleSelect}
@@ -564,7 +563,7 @@ export function SettingsNanocoderShapePanel({
 					</Text>
 				</Box>
 
-				<SelectInput
+				<StyledSelectInput
 					items={shapeOptions}
 					initialIndex={initialIndex}
 					onSelect={handleSelect}
@@ -649,7 +648,7 @@ export function SettingsPasteThresholdPanel({
 			{isNarrow && (
 				<Text color={colors.secondary}>Current: {currentThreshold}</Text>
 			)}
-			<SelectInput
+			<StyledSelectInput
 				items={thresholdOptions.map(opt => ({
 					label:
 						opt.value === currentThreshold

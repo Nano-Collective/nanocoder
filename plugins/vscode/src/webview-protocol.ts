@@ -60,6 +60,12 @@ export interface ExtensionMessagePermissionRequested {
 	options?: any[];
 }
 
+/** Sent when a cancel or a new chat drops permission prompts still on screen. */
+export interface ExtensionMessagePermissionsCancelled {
+	type: 'permissionsCancelled';
+	toolCallIds: string[];
+}
+
 
 
 export interface ExtensionMessageSyncState {
@@ -72,12 +78,24 @@ export interface ExtensionMessageSyncState {
 	availableProviders: string[];
 }
 
+export interface ExtensionMessageCopyLastCodeBlock {
+	type: 'copyLastCodeBlock';
+}
+
+export interface ExtensionMessageCopyResult {
+	type: 'copyResult';
+	ok: boolean;
+	chars?: number;
+	error?: string;
+}
+
 export interface ExtensionMessageUpdateSessions {
 	type: 'updateSessions';
 	sessions: Array<{
 		sessionId: string;
 		cwd: string;
 		title?: string | null;
+		updatedAt?: string | null;
 	}>;
 }
 
@@ -98,10 +116,13 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageToolUpdated
 	| ExtensionMessageToolCompleted
 	| ExtensionMessagePermissionRequested
+	| ExtensionMessagePermissionsCancelled
 	| ExtensionMessageSyncState
 	| ExtensionMessageUpdateSessions
 	| ExtensionMessageSessionLoaded
-	| ExtensionMessagePathInfoResolved;
+	| ExtensionMessagePathInfoResolved
+	| ExtensionMessageCopyLastCodeBlock
+	| ExtensionMessageCopyResult;
 
 
 // ---------------------------------------------------------
@@ -174,6 +195,11 @@ export interface WebviewMessageDeleteSession {
 	sessionId: string;
 }
 
+export interface WebviewMessageRenameSession {
+	type: 'renameSession';
+	sessionId: string;
+	title: string;
+}
 export interface WebviewMessageRequestPathInfo {
 	type: 'requestPathInfo';
 	path: string;
@@ -194,6 +220,11 @@ export interface WebviewMessageShowError {
 	message: string;
 }
 
+export interface WebviewMessageCopyToClipboard {
+	type: 'copyToClipboard';
+	text: string;
+}
+
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
 	| WebviewMessageSubmitMessage
@@ -208,7 +239,9 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageListSessions
 	| WebviewMessageResumeSession
 	| WebviewMessageDeleteSession
+	| WebviewMessageRenameSession
 	| WebviewMessageRequestPathInfo
 	| WebviewMessageRequestOpenDialog
 	| WebviewMessageOpenPath
-	| WebviewMessageShowError;
+	| WebviewMessageShowError
+	| WebviewMessageCopyToClipboard;

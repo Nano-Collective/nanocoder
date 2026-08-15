@@ -151,9 +151,27 @@
 	let isProcessing = false;
 	let currentAggregator = null;
 	let currentThoughtBox = null;
+	let visualLoader = null;
+	let toastTimeout = null;
+	// One agent response is split into several `.agent-markdown` containers -
+	// endCurrentTextBlock() closes the current one whenever a tool card, thought
+	// box or plan card is inserted. `agentTurnId` stamps every container of the
+	// same response with the same id (bumped on each user message) so /copy and
+	// /copy code can address the whole response instead of its last fragment.
+	let agentTurnId = 0;
+	// Raw markdown of the last agent response, kept for the /copy input command
+	// (rendered DOM textContent would lose fences and bullets).
+	// `lastAgentSegments` holds the segments already closed, `lastAgentRawText`
+	// is those plus the one still streaming, and `lastAgentRawTurnId` records
+	// which response they describe - so a finished response stays copyable after
+	// the user sends again, until the next one actually produces text.
+	let lastAgentRawTurnId = -1;
+	let lastAgentSegments = '';
+	let lastAgentRawText = '';
 
 	// Premium SVG Icons (Feather Icons)
 	const ICONS = {
+		nanocoder: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M 2 5 H 5 V 8 H 7 V 12 H 9 V 5 H 12 V 19 H 9 V 16 H 7 V 12 H 5 V 19 H 2 Z" /><path d="M 14 5 H 22 V 8 H 17 V 16 H 22 V 19 H 14 Z" /></svg>`,
 		trash: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>`,
 		pending: `<svg class="animate-spin" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line></svg>`,
 		success: `<svg class="text-[#89d185]" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`,
@@ -162,8 +180,37 @@
 		clipboard: `<svg class="mr-1.5" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>`,
 		chevron: `<svg class="transition-transform duration-200" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`,
 		circle: `<svg class="opacity-50" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle></svg>`,
-		arrowRight: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>`
+		arrowRight: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>`,
+		edit: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>`
 	};
+
+	function formatRelativeTime(iso) {
+		if (!iso) return '';
+		const date = new Date(iso);
+		if (isNaN(date.getTime())) return '';
+		const diffMin = Math.floor((Date.now() - date.getTime()) / 60000);
+		if (diffMin < 1) return 'Just now';
+		if (diffMin < 60) return `${diffMin}m ago`;
+		const diffHr = Math.floor(diffMin / 60);
+		if (diffHr < 24) return `${diffHr}h ago`;
+		const diffDay = Math.floor(diffHr / 24);
+		if (diffDay < 7) return `${diffDay}d ago`;
+		return date.toLocaleDateString();
+	}
+
+	function formatRelativeTime(iso) {
+		if (!iso) return '';
+		const date = new Date(iso);
+		if (isNaN(date.getTime())) return '';
+		const diffMin = Math.floor((Date.now() - date.getTime()) / 60000);
+		if (diffMin < 1) return 'Just now';
+		if (diffMin < 60) return `${diffMin}m ago`;
+		const diffHr = Math.floor(diffMin / 60);
+		if (diffHr < 24) return `${diffHr}h ago`;
+		const diffDay = Math.floor(diffHr / 24);
+		if (diffDay < 7) return `${diffDay}d ago`;
+		return date.toLocaleDateString();
+	}
 
 	function createMessageFooter(getText, role, sentAt) {
 		const footer = document.createElement('div');
@@ -228,6 +275,7 @@
 					statusEl.innerHTML = ICONS.cancelled;
 				}
 			});
+			stopVisualLoader();
 
 			if (currentAggregator) {
 				currentAggregator.close();
@@ -240,11 +288,16 @@
 		}
 	}
 
+	// Shared by the Stop button and Escape so the two can't drift apart.
+	function requestCancel() {
+		vscode.postMessage({ type: 'cancel' });
+		setProcessing(false);
+	}
+
 	if (sendStopBtn) {
 		sendStopBtn.addEventListener('click', () => {
 			if (isProcessing) {
-				vscode.postMessage({ type: 'cancel' });
-				setProcessing(false);
+				requestCancel();
 			} else {
 				submitMessage();
 			}
@@ -418,9 +471,52 @@
 		}
 	});
 
+	// Escape instantly cancels the in-flight LLM request, mirroring the Stop
+	// button. Registered on `document` (not just the textarea) so it fires even
+	// when the chat input has lost focus to a tool card, button, dropdown or the
+	// streaming response area. Guarded by isProcessing so an idle Escape does
+	// nothing.
+	document.addEventListener('keydown', (e) => {
+		if (e.key === 'Escape' && isProcessing) {
+			e.preventDefault();
+			e.stopPropagation();
+			requestCancel();
+		}
+	});
+	// Ctrl/Cmd+Alt+Shift+C is owned by the host keybinding
+	// (`nanocoder.copyLastCodeBlock` in package.json). VS Code forwards
+	// webview keydowns to the host for resolution even after preventDefault,
+	// so a document listener here would double-fire (two clipboard writes /
+	// two toasts). The host posts `{type:'copyLastCodeBlock'}` back into
+	// this page. Ctrl+Shift+C and Ctrl+Alt+C are avoided: VS Code (external
+	// terminal) and Cursor (confetti) claim them at app level.
+
 	function submitMessage() {
 		let text = chatInput.value.trim();
 		if (!text && attachedPaths.length === 0 && pendingImages.length === 0) return;
+
+		// /copy is handled locally, mirroring the terminal slash command:
+		// copy the previous agent output instead of prompting the agent.
+		// Match on raw input before context chips are folded in, otherwise
+		// `/copy` with an attachment becomes `/copy\n\n@[file] …` and falls
+		// through to the agent as an unrecognized slash command.
+		// `/copy code` copies just the last fenced code block. Inner whitespace
+		// is collapsed so `/copy  code` doesn't fall through to the agent.
+		const lower = text.toLowerCase().replace(/\s+/g, ' ');
+		if (lower === '/copy' || lower === '/copy code') {
+			chatInput.value = '';
+			chatInput.style.height = 'auto';
+			attachedPaths = [];
+			renderChips();
+			pendingImages = [];
+			renderImagePreviews();
+			if (lower === '/copy code') {
+				copyLastCodeBlock();
+			} else {
+				copyLastResponse();
+			}
+			return;
+		}
 
 		// Append attached paths as context lines
 		if (attachedPaths.length > 0) {
@@ -456,6 +552,8 @@
 		if (!isProcessing) {
 			// Switch to processing state
 			setProcessing(true);
+
+			startVisualLoader();
 
 			// Reset turn elements so agent starts a fresh block
 			currentTurnEl = null;
@@ -615,12 +713,49 @@
 		}, true);
 	}
 
+	// True while the accumulator describes the response currently streaming.
+	// Goes false as soon as the user sends again, freezing the previous
+	// response until beginAgentSegment() hands the accumulator to the new one.
+	function isAccumulatingCurrentTurn() {
+		return lastAgentRawTurnId === agentTurnId;
+	}
+
+	function beginAgentSegment() {
+		if (isAccumulatingCurrentTurn()) return;
+		lastAgentRawTurnId = agentTurnId;
+		lastAgentSegments = '';
+		lastAgentRawText = '';
+	}
+
+	// Fold the segment being closed into the response-level accumulator so
+	// /copy still yields the whole response after a tool card splits it.
+	function closeAgentSegment() {
+		if (isAccumulatingCurrentTurn() && currentTurnText) {
+			lastAgentSegments = [lastAgentSegments, currentTurnText]
+				.filter(Boolean)
+				.join('\n\n');
+		}
+		currentTurnText = '';
+	}
+
+	function syncLastAgentRawText() {
+		if (!isAccumulatingCurrentTurn()) return;
+		lastAgentRawText = [lastAgentSegments, currentTurnText]
+			.filter(Boolean)
+			.join('\n\n');
+	}
+
 	function appendMessage(content, role, images = undefined) {
 		// Remove welcome message and loader if present
 		const welcome = document.querySelector('.welcome-message');
 		if (welcome) welcome.remove();
 		const loader = document.getElementById('session-loader');
 		if (loader) loader.remove();
+
+		// A user message opens a new turn, so the agent segments that follow get
+		// a fresh id. The raw-text accumulator is handed over lazily, once the
+		// new response produces text.
+		if (role === 'user') agentTurnId++;
 
 		const wrapper = document.createElement('div');
 		wrapper.className = 'group flex flex-col min-w-0 shrink-0 ' +
@@ -629,7 +764,10 @@
 		const msgEl = document.createElement('div');
 		msgEl.className = 'leading-snug break-words shrink-0 min-w-0 flex flex-col ' +
 			(role === 'user'
-				? 'self-end bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-border px-3 py-2 rounded-lg max-w-[85%]'
+				// No max-w here: the wrapper already caps the turn at 85%. A second
+				// percentage would resolve against the wrapper's shrink-to-fit width,
+				// squeezing the bubble to 85% of its own content and wrapping mid-word.
+				? 'self-end bg-vscode-dropdown-bg text-vscode-dropdown-fg border border-vscode-border px-3 py-2 rounded-lg max-w-full'
 				: 'self-start max-w-full');
 
 		if (images && images.length > 0) {
@@ -651,6 +789,7 @@
 
 		let parsedContent = content;
 		let extractedChips = [];
+		let textContainer = null;
 
 		if (role === 'user' && content) {
 			// Handle pre-injected format (before sending)
@@ -672,8 +811,11 @@
 		}
 
 		if (parsedContent || extractedChips.length > 0) {
-			const textContainer = document.createElement('div');
-			textContainer.className = 'markdown-body';
+			textContainer = document.createElement('div');
+			// `agent-markdown` marks assistant prose so copyLastCodeBlock() can skip
+			// user echoes and thought boxes, which also render as `.markdown-body`.
+			textContainer.className = 'markdown-body' + (role === 'agent' ? ' agent-markdown' : '');
+			if (role === 'agent') textContainer.dataset.turnId = String(agentTurnId);
 
 			if (typeof marked !== 'undefined') {
 				textContainer.innerHTML = marked.parse(parsedContent);
@@ -735,8 +877,41 @@
 		scrollToBottom();
 
 		if (role === 'agent') {
+			// This opens a fresh container, so whatever block was open is done.
+			closeAgentSegment();
+			beginAgentSegment();
 			currentTurnEl = msgEl;
 			currentTextEl = textContainer;
+			currentTurnText = content;
+			syncLastAgentRawText();
+		}
+	}
+
+	function startVisualLoader() {
+		const wrapper = document.createElement('div');
+		wrapper.className = 'group flex flex-row gap-1.5 min-w-0 shrink-0 self-start items-center max-w-full';
+		const span = document.createElement('span');
+		span.className = 'flex items-center shrink-0 text-vscode-fg [&_svg]:w-6 [&_svg]:h-6 animate-pulse';
+
+		span.innerHTML = ICONS.nanocoder;
+		wrapper.appendChild(span);
+
+		visualLoader = wrapper;
+		messagesContainer.appendChild(wrapper);
+		scrollToBottom();
+	}
+
+	function keepVisualLoaderAtBottom() {
+		if (visualLoader && visualLoader.parentElement) {
+			messagesContainer.appendChild(visualLoader);
+		}
+		scrollToBottom();
+	}
+
+	function stopVisualLoader() {
+		if (visualLoader) {
+			visualLoader.remove();
+			visualLoader = null;
 		}
 	}
 
@@ -744,8 +919,6 @@
 		// Remove welcome message and loader if present
 		const welcome = document.querySelector('.welcome-message');
 		if (welcome) welcome.remove();
-		const loader = document.getElementById('session-loader');
-		if (loader) loader.remove();
 
 		if (!currentTurnEl || !currentTextEl) {
 			// First chunk for this turn
@@ -756,8 +929,11 @@
 			msgEl.className = 'message agent min-w-0 w-full';
 
 			const textContainer = document.createElement('div');
-			textContainer.className = 'markdown-body leading-snug break-words';
+			textContainer.className = 'markdown-body agent-markdown leading-snug break-words';
+			textContainer.dataset.turnId = String(agentTurnId);
+			beginAgentSegment();
 			currentTurnText = textChunk;
+			syncLastAgentRawText();
 
 			if (typeof marked !== 'undefined') {
 				textContainer.innerHTML = marked.parse(currentTurnText);
@@ -777,6 +953,7 @@
 		} else {
 			// Append to existing turn
 			currentTurnText += textChunk;
+			syncLastAgentRawText();
 			if (currentTurnEl.parentElement) {
 				currentTurnEl.parentElement.dataset.rawText = currentTurnText;
 			}
@@ -806,6 +983,121 @@
 		messagesContainer.scrollTop = messagesContainer.scrollHeight;
 	}
 
+	// --- Copy last code block ---
+
+	function showToast(text) {
+		let toast = document.getElementById('copy-toast');
+		if (!toast) {
+			toast = document.createElement('div');
+			toast.id = 'copy-toast';
+			toast.setAttribute('role', 'status');
+			toast.className = 'fixed bottom-24 left-1/2 -translate-x-1/2 z-50 flex items-center px-3 py-1.5 rounded-md border border-vscode-border bg-vscode-dropdown-bg text-vscode-dropdown-fg font-vscode text-[0.85em] shadow-lg pointer-events-none transition-opacity duration-200';
+			document.body.appendChild(toast);
+		}
+
+		toast.innerHTML = ICONS.clipboard;
+		const label = document.createElement('span');
+		label.textContent = text;
+		toast.appendChild(label);
+		toast.classList.remove('opacity-0');
+
+		if (toastTimeout) clearTimeout(toastTimeout);
+		toastTimeout = setTimeout(() => {
+			toast.classList.add('opacity-0');
+			toastTimeout = null;
+		}, 1500);
+	}
+
+	// Streaming batches marked.parse() behind a 50ms timer. Flush so a copy
+	// mid-turn (or a turn boundary) reads the current markdown, not the
+	// previous throttled frame. Shared by copyLastCodeBlock and endCurrentTextBlock.
+	function flushPendingRender() {
+		if (!renderTimeout) return;
+		clearTimeout(renderTimeout);
+		renderTimeout = null;
+		if (currentTextEl && typeof marked !== 'undefined') {
+			currentTextEl.innerHTML = marked.parse(currentTurnText);
+		}
+	}
+
+	function copyLastCodeBlock() {
+		flushPendingRender();
+
+		const segments = messagesContainer.querySelectorAll('.agent-markdown');
+		if (segments.length === 0) {
+			showToast('No response to copy yet');
+			return;
+		}
+
+		// Walk the segments of the last response back to front. Scanning the
+		// whole response rather than only its final segment matters because a
+		// tool call between the code block and the closing prose would
+		// otherwise hide the block.
+		const lastTurnId = segments[segments.length - 1].dataset.turnId;
+		let text = '';
+		for (let i = segments.length - 1; i >= 0; i--) {
+			if (segments[i].dataset.turnId !== lastTurnId) break;
+			const blocks = segments[i].querySelectorAll('pre code');
+			if (blocks.length > 0) {
+				text = blocks[blocks.length - 1].textContent.replace(/\n$/, '');
+				break;
+			}
+		}
+
+		if (!text) {
+			showToast('No code block in the last response');
+			return;
+		}
+
+		vscode.postMessage({ type: 'copyToClipboard', text: text });
+	}
+
+	// Webview twin of the terminal /copy command: copies the whole previous
+	// agent response as raw markdown.
+	function copyLastResponse() {
+		if (!lastAgentRawText.trim()) {
+			showToast('No response to copy yet');
+			return;
+		}
+		vscode.postMessage({ type: 'copyToClipboard', text: lastAgentRawText });
+	}
+
+	// Compact token formatting: 812, 4.2k, 12k, 1.3M. Mirrors the CLI's
+	// per-response indicator formatting (source/usage/format.ts).
+	function formatCompactTokens(tokens) {
+		if (!Number.isFinite(tokens) || tokens <= 0) return '0';
+		if (tokens < 1000) return String(Math.round(tokens));
+		const scaled = tokens < 1000000 ? tokens / 1000 : tokens / 1000000;
+		const suffix = tokens < 1000000 ? 'k' : 'M';
+		const num = scaled >= 100
+			? String(Math.round(scaled))
+			: scaled.toFixed(1).replace(/\.0$/, '');
+		return num + suffix;
+	}
+
+	// Render a small grayed-out usage line (e.g. "Tokens: 4.2k | ~$0.01")
+	// under the finished response. Cost is omitted when unknown (local models).
+	function appendUsageIndicator(usage, cost) {
+		if (!usage) return;
+		const total = Number.isFinite(usage.totalTokens)
+			? usage.totalTokens
+			: (Number.isFinite(usage.inputTokens) ? usage.inputTokens : 0) +
+				(Number.isFinite(usage.outputTokens) ? usage.outputTokens : 0);
+		if (!total) return;
+
+		let text = 'Tokens: ' + formatCompactTokens(total);
+		if (Number.isFinite(cost) && cost > 0) {
+			text += cost < 0.01 ? ' | <$0.01' : ' | ~$' + cost.toFixed(2);
+		}
+
+		endCurrentTextBlock();
+		const el = document.createElement('div');
+		el.className = 'self-start text-[0.8em] opacity-50 shrink-0 mb-1';
+		el.textContent = text;
+		messagesContainer.appendChild(el);
+		scrollToBottom();
+	}
+
 	// Handle messages from extension.
 	// No origin check: this is a VS Code webview, not a browser page. The
 	// extension host is the only sender, and chat-panel.html sets
@@ -831,7 +1123,9 @@
 				appendMessage(message.content, 'agent');
 				break;
 			case 'clear':
-				if (isHistoryView) showChatView();
+				// Session reset (new chat or resume) should return to the active
+				// chat view, not leave the panel stuck on the history list.
+				showChatView();
 				if (renderTimeout) { clearTimeout(renderTimeout); renderTimeout = null; }
 				if (message.isLoading) {
 					messagesContainer.innerHTML = `<div id="session-loader" class="flex flex-col items-center justify-center h-full opacity-50 mt-10">${ICONS.pending}<div class="mt-2 text-xs">Loading session...</div></div>`;
@@ -841,6 +1135,10 @@
 				currentTurnEl = null;
 				currentTextEl = null;
 				currentTurnText = '';
+				agentTurnId = 0;
+				lastAgentRawTurnId = -1;
+				lastAgentSegments = '';
+				lastAgentRawText = '';
 				if (currentThoughtBox) {
 					clearInterval(currentThoughtBox.timer);
 					currentThoughtBox = null;
@@ -848,6 +1146,10 @@
 				setProcessing(false);
 				break;
 			case 'sessionLoaded':
+				if (currentThoughtBox) {
+					currentThoughtBox.pause();
+					currentThoughtBox = null;
+				}
 				const loader = document.getElementById('session-loader');
 				if (loader) loader.remove();
 				scrollToBottom();
@@ -858,6 +1160,9 @@
 			case 'permissionRequested':
 				handlePermissionRequested(message.toolCallId, message.toolCall, message.options);
 				break;
+			case 'permissionsCancelled':
+				handlePermissionsCancelled(message.toolCallIds);
+				break;
 
 			case 'syncState':
 				handleSyncState(message);
@@ -865,6 +1170,16 @@
 			case 'updateSessions':
 				sessionsData = message.sessions || [];
 				renderSessions(); // Always update so list is ready when history opens
+				break;
+			case 'copyLastCodeBlock':
+				copyLastCodeBlock();
+				break;
+			case 'copyResult':
+				showToast(
+					message.ok
+						? `Copied ${message.chars} characters`
+						: 'Could not copy to clipboard'
+				);
 				break;
 		}
 	});
@@ -883,14 +1198,35 @@
 			return;
 		}
 
-		// Group sessions by date
+		// Group sessions by last-used date
 		const now = new Date();
+		const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+		const startOfYesterday = new Date(startOfToday.getTime() - 86400000);
+		const sevenDaysAgo = new Date(startOfToday.getTime() - 7 * 86400000);
 		const groups = { 'Today': [], 'Yesterday': [], 'Last 7 Days': [], 'Older': [] };
 
 		sessionsData.slice().reverse().forEach(session => {
 			const label = session.title || session.cwd || session.sessionId.slice(0, 8);
 			const item = { ...session, label };
-			groups['Older'].push(item); // Simplified: metadata doesn't include createdAt yet
+			const updated = session.updatedAt ? new Date(session.updatedAt) : null;
+
+			if (!updated || isNaN(updated.getTime())) {
+				groups['Older'].push(item);
+			} else if (updated >= startOfToday) {
+				groups['Today'].push(item);
+			} else if (updated >= startOfYesterday) {
+				groups['Yesterday'].push(item);
+			} else if (updated >= sevenDaysAgo) {
+				groups['Last 7 Days'].push(item);
+			} else {
+				groups['Older'].push(item);
+			}
+		});
+
+		// Within each date bucket, show most-recently-used first. Sessions
+		// without an updatedAt (shouldn't normally happen) sort to the end.
+		Object.values(groups).forEach(sessions => {
+			sessions.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
 		});
 
 		Object.entries(groups).forEach(([groupName, sessions]) => {
@@ -908,28 +1244,95 @@
 
 			sessions.forEach(session => {
 				const itemEl = document.createElement('div');
-				itemEl.className = 'flex items-center px-4 py-1.5 cursor-pointer gap-2 rounded mx-1 transition-colors hover:bg-vscode-list-hover group';
-
-				const labelEl = document.createElement('span');
-				labelEl.className = 'flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[0.9em]';
-				labelEl.textContent = session.label;
-				labelEl.title = session.cwd;
-				labelEl.onclick = () => {
+				itemEl.className = 'flex flex-col px-4 py-1.5 cursor-pointer gap-0.5 rounded mx-1 transition-colors hover:bg-vscode-list-hover group';
+				itemEl.onclick = () => {
 					showChatView();
 					vscode.postMessage({ type: 'resumeSession', sessionId: session.sessionId });
 				};
 
+				const topRow = document.createElement('div');
+				topRow.className = 'flex items-center gap-2';
+
+				const labelWrap = document.createElement('div');
+				labelWrap.className = 'flex-1 min-w-0';
+
+				const labelEl = document.createElement('span');
+				labelEl.className = 'block overflow-hidden text-ellipsis whitespace-nowrap text-[0.9em]';
+				labelEl.textContent = session.label;
+				labelEl.title = session.cwd;
+				labelWrap.appendChild(labelEl);
+
+				const actions = document.createElement('div');
+				actions.className = 'flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0';
+
+				const editBtn = document.createElement('button');
+				editBtn.type = 'button';
+				editBtn.className = 'bg-transparent border-none cursor-pointer text-vscode-fg p-1 flex items-center justify-center hover:bg-vscode-toolbarHover rounded';
+				editBtn.title = 'Rename Session';
+				editBtn.setAttribute('aria-label', 'Rename session');
+				editBtn.innerHTML = ICONS.edit;
+				editBtn.onclick = (e) => {
+					e.stopPropagation();
+
+					const input = document.createElement('input');
+					input.type = 'text';
+					input.value = session.label;
+					// Matches MAX_SESSION_NAME_LENGTH in source/constants.ts - fail
+					// locally instead of round-tripping to a backend error toast.
+					input.maxLength = 100;
+					input.className = 'block w-full bg-vscode-input-bg text-vscode-input-fg border border-vscode-input-focus rounded px-1 py-0.5 text-[0.9em]';
+
+					const finish = (commit) => {
+						if (input.parentElement !== labelWrap) return; // already finished
+						labelWrap.replaceChild(labelEl, input);
+						if (commit) {
+							const newTitle = input.value.trim();
+							if (newTitle && newTitle !== session.label) {
+								session.label = newTitle;
+								labelEl.textContent = newTitle;
+								vscode.postMessage({ type: 'renameSession', sessionId: session.sessionId, title: newTitle });
+							}
+						}
+					};
+
+					input.onclick = (ev) => ev.stopPropagation();
+					input.onkeydown = (ev) => {
+						ev.stopPropagation();
+						if (ev.key === 'Enter') finish(true);
+						else if (ev.key === 'Escape') finish(false);
+					};
+					input.onblur = () => finish(true);
+
+					labelWrap.replaceChild(input, labelEl);
+					input.focus();
+					input.select();
+				};
+
 				const deleteBtn = document.createElement('button');
-				deleteBtn.className = 'bg-transparent border-none cursor-pointer text-vscode-fg opacity-0 group-hover:opacity-100 transition-opacity p-1 flex items-center justify-center hover:bg-vscode-toolbarHover rounded';
+				deleteBtn.type = 'button';
+				deleteBtn.className = 'bg-transparent border-none cursor-pointer text-vscode-fg p-1 flex items-center justify-center hover:bg-vscode-toolbarHover rounded';
 				deleteBtn.title = 'Delete Session';
+				deleteBtn.setAttribute('aria-label', 'Delete session');
 				deleteBtn.innerHTML = ICONS.trash;
 				deleteBtn.onclick = (e) => {
 					e.stopPropagation();
 					vscode.postMessage({ type: 'deleteSession', sessionId: session.sessionId });
 				};
 
-				itemEl.appendChild(labelEl);
-				itemEl.appendChild(deleteBtn);
+				actions.appendChild(editBtn);
+				actions.appendChild(deleteBtn);
+				topRow.appendChild(labelWrap);
+				topRow.appendChild(actions);
+				itemEl.appendChild(topRow);
+
+				const relativeTime = formatRelativeTime(session.updatedAt);
+				if (relativeTime) {
+					const lastUsedEl = document.createElement('span');
+					lastUsedEl.className = 'text-[0.75em] opacity-50';
+					lastUsedEl.textContent = relativeTime;
+					itemEl.appendChild(lastUsedEl);
+				}
+
 				groupEl.appendChild(itemEl);
 			});
 
@@ -950,16 +1353,11 @@
 	// tool call is appended to the block ABOVE the card, fusing pre-tool
 	// and post-tool output into one paragraph.
 	function endCurrentTextBlock() {
-		if (renderTimeout) {
-			clearTimeout(renderTimeout);
-			renderTimeout = null;
-			if (currentTextEl && typeof marked !== 'undefined') {
-				currentTextEl.innerHTML = marked.parse(currentTurnText);
-			}
-		}
+		flushPendingRender();
+		closeAgentSegment();
 		currentTurnEl = null;
 		currentTextEl = null;
-		currentTurnText = '';
+		syncLastAgentRawText();
 	}
 
 	function handleAcpUpdate(payload) {
@@ -967,6 +1365,10 @@
 		const update = payload.update ? payload.update : payload;
 
 		if (update.sessionUpdate === 'user_message_chunk') {
+			if (currentThoughtBox) {
+				currentThoughtBox.pause();
+				currentThoughtBox = null;
+			}
 			if (update.content) {
 				endCurrentTextBlock();
 				if (update.content.text) {
@@ -979,10 +1381,10 @@
 			}
 		} else if (update.sessionUpdate === 'agent_message_chunk') {
 			if (currentThoughtBox) {
-				currentThoughtBox.finish();
-				currentThoughtBox = null;
+				currentThoughtBox.pause();
 			}
 			if (update.content && update.content.text) {
+				stopVisualLoader();
 				appendChunk(update.content.text);
 			}
 		} else if (update.sessionUpdate === 'agent_thought_chunk') {
@@ -995,26 +1397,28 @@
 			}
 		} else if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
 			if (currentThoughtBox) {
-				currentThoughtBox.finish();
-				currentThoughtBox = null;
+				currentThoughtBox.pause();
 			}
 			handleToolCallUpdate(update);
 		} else if (update.sessionUpdate === 'plan') {
 			handlePlanUpdate(update);
 		} else if (update.sessionUpdate === 'prompt_response' || update.sessionUpdate === 'done') {
 			if (currentThoughtBox) {
-				currentThoughtBox.finish();
+				currentThoughtBox.pause();
 				currentThoughtBox = null;
 			}
+			// Show token usage (and estimated cost) for the finished turn
+			appendUsageIndicator(update.usage, update.cost);
 			// Turn is complete — restore the send button
 			setProcessing(false);
 		}
+		keepVisualLoaderAtBottom();
 	}
 
 	class ThoughtAggregator {
 		constructor() {
 			this.el = document.createElement('div');
-			this.el.className = 'my-2 flex flex-col shrink-0';
+			this.el.className = 'my-2 flex flex-col shrink-0 thought-aggregator';
 
 			this.header = document.createElement('div');
 			this.header.className = 'flex items-center gap-1.5 cursor-pointer opacity-70 text-vscode-fg hover:opacity-100 transition-opacity select-none w-fit';
@@ -1038,9 +1442,11 @@
 			this.el.appendChild(this.body);
 
 			this.isOpen = true;
-			this.startTime = Date.now();
+			this.userToggled = false;
 			this.text = '';
 			this.renderTimeout = null;
+			this.thinkingMs = 0;
+			this.segmentStart = Date.now();
 
 			this.timer = setInterval(() => this.updateTimer(), 1000);
 
@@ -1048,12 +1454,19 @@
 			scrollToBottom();
 		}
 
+		elapsedSeconds() {
+			const active = this.segmentStart ? Date.now() - this.segmentStart : 0;
+			return Math.floor((this.thinkingMs + active) / 1000);
+		}
+
 		updateTimer() {
-			const seconds = Math.floor((Date.now() - this.startTime) / 1000);
-			this.title.textContent = `Thinking for ${seconds}s`;
+			this.title.textContent = `Thinking for ${this.elapsedSeconds()}s`;
 		}
 
 		toggle(force) {
+			if (force === undefined) {
+				this.userToggled = true;
+			}
 			this.isOpen = force !== undefined ? force : !this.isOpen;
 			this.body.style.display = this.isOpen ? 'block' : 'none';
 
@@ -1063,34 +1476,59 @@
 			}
 		}
 
+		render() {
+			if (typeof marked !== 'undefined') {
+				this.body.innerHTML = marked.parse(this.text);
+			} else {
+				this.body.textContent = this.text;
+			}
+		}
+
 		append(chunk) {
+			this.resume();
 			this.text += chunk;
 			if (typeof marked !== 'undefined') {
 				if (!this.renderTimeout) {
 					this.renderTimeout = setTimeout(() => {
-						this.body.innerHTML = marked.parse(this.text);
+						this.render();
 						this.renderTimeout = null;
 						scrollToBottom();
 					}, 50);
 				}
 			} else {
-				this.body.textContent = this.text;
+				this.render();
 				scrollToBottom();
 			}
 		}
 
-		finish() {
+		resume() {
+			if (this.segmentStart) return;
+			if (this.text && !this.text.endsWith('\n\n')) {
+				this.text += '\n\n';
+			}
+			this.segmentStart = Date.now();
+			this.timer = setInterval(() => this.updateTimer(), 1000);
+			this.updateTimer();
+			if (!this.userToggled) {
+				this.toggle(true);
+			}
+		}
+
+		pause() {
+			if (!this.segmentStart) return;
+			this.thinkingMs += Date.now() - this.segmentStart;
+			this.segmentStart = null;
 			clearInterval(this.timer);
+			this.timer = null;
 			if (this.renderTimeout) {
 				clearTimeout(this.renderTimeout);
 				this.renderTimeout = null;
 			}
-			if (typeof marked !== 'undefined') {
-				this.body.innerHTML = marked.parse(this.text);
+			this.render();
+			this.title.textContent = `Thought for ${this.elapsedSeconds()}s`;
+			if (!this.userToggled) {
+				this.toggle(false);
 			}
-			const seconds = Math.floor((Date.now() - this.startTime) / 1000);
-			this.title.textContent = `Thought for ${seconds}s`;
-			this.toggle(false); // Auto-shrink when done!
 		}
 	}
 
@@ -1195,7 +1633,9 @@
 				} else if (
 					update.status === 'cancelled' ||
 					update.status === 'denied' ||
-					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && (update.rawOutput.includes('AbortError') || update.rawOutput.includes('cancelled')))
+					// ACP has no 'cancelled' status, so a cancel arrives as failed with
+					// 'Cancelled by user'. Case-insensitive, or the capital C misses.
+					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && /aborterror|cancelled/i.test(update.rawOutput))
 				) {
 					statusEl.innerHTML = ICONS.cancelled;
 				} else if (update.status === 'error' || update.status === 'failed') {
@@ -1446,6 +1886,21 @@
 
 		card.appendChild(actionsDiv);
 		scrollToBottom();
+	}
+
+	// Drop the approval buttons off cards whose permission request was cancelled.
+	function handlePermissionsCancelled(toolCallIds) {
+		for (const toolCallId of toolCallIds || []) {
+			const card = document.getElementById(`tool-card-${toolCallId}`);
+			if (!card) continue;
+
+			const actions = card.querySelector('.tool-actions');
+			if (actions) actions.remove();
+
+			// Tool cards keep their status in .tool-status, edit cards in .ml-auto.
+			const statusEl = card.querySelector('.tool-status, .ml-auto');
+			if (statusEl) statusEl.innerHTML = ICONS.cancelled;
+		}
 	}
 
 

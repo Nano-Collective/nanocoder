@@ -31,6 +31,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/exit` | Exit the application |
 | `/export` | Export current session to markdown file |
 | `/copy` | Copy the last assistant response to the system clipboard |
+| `/commit` | Generate a Conventional Commit message from staged Git changes |
 | `/doctor` | Show environment health report for bug reports |
 | `/update` | Update Nanocoder to the latest version |
 | `/usage` | Get current model context usage visually |
@@ -120,7 +121,8 @@ The emitted object looks like:
 
 ```json
 {
-  "outcome": "success",
+  "kind": "success",
+  "exitCode": 0,
   "finalText": "...",
   "reasoning": "...",
   "toolCalls": [
@@ -131,14 +133,23 @@ The emitted object looks like:
       "error": null
     }
   ],
-  "modifiedFiles": ["src/api.ts"]
+  "filesChanged": ["src/api.ts"],
+  "usage": {
+    "inputTokens": 4520,
+    "outputTokens": 850,
+    "totalTokens": 5370
+  }
 }
 ```
 
-- `outcome` — `"success"`, `"tool-approval-required"`, or `"error"`, matching the underlying conversation result
+- `kind` — `"success"`, `"tool-approval-required"`, or `"error"`, matching the underlying conversation result
+- `exitCode` — `0` for success, `1` for error, `2` for tool-approval-required; mirrors the process exit code
 - `finalText` — the model's final response text
 - `reasoning` — accumulated reasoning/thinking content, or `null` if the model didn't emit any
 - `toolCalls` — every tool call made during the run, each with its arguments and either a `result` or an `error` (never both)
-- `modifiedFiles` — deduplicated list of file paths touched by file-mutating tools (`write_to_file`, `create_file`, `string_replace`, `edit_file`)
+- `filesChanged` — deduplicated list of file paths touched by file-mutating tools (`write_to_file`, `create_file`, `string_replace`, `edit_file`)
+- `usage` — provider-reported token counts summed across every turn of the run. Omitted entirely when the provider reports no token telemetry (common with local models), so an absent block means "unknown", never "zero". When a provider reports input and output counts but no total, `totalTokens` is derived as their sum.
 
-On error (e.g. an untrusted workspace directory, or the turn limit being hit without a final answer), `outcome` is `"error"` and the object still includes whatever `toolCalls` were captured before the failure, so partial progress isn't silently dropped.
+Two more fields appear conditionally: `message` (the error text, when `kind` is `"error"`) and `toolNames` (the tools awaiting approval, when `kind` is `"tool-approval-required"`).
+
+On error (e.g. an untrusted workspace directory, or the turn limit being hit without a final answer), `kind` is `"error"` and the object still includes whatever `toolCalls` were captured before the failure, so partial progress isn't silently dropped.
