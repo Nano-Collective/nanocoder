@@ -1,9 +1,21 @@
-import type {WebClientEvent, WebServerEvent} from './protocol.js';
+import type {
+	WebClientEvent,
+	WebServerEvent,
+	WebSessionMessage,
+	WebSessionSummary,
+} from './protocol.js';
+
+export interface WebSessionLoadResult {
+	session: WebSessionSummary;
+	messages: WebSessionMessage[];
+}
 
 export interface WebRuntimeHandlers {
 	submitMessage: (text: string) => void | Promise<void>;
 	cancel: () => void;
 	resetSession: () => void | Promise<void>;
+	listSessions: () => Promise<WebSessionSummary[]>;
+	loadSession: (sessionId: string) => Promise<WebSessionLoadResult | null>;
 }
 
 export interface WebApprovalRequest {
@@ -204,6 +216,33 @@ export function createWebRuntimeBridge(
 				}
 
 				await runtimeHandlers.resetSession();
+				return;
+			}
+
+			if (event.type === 'list_sessions') {
+				const sessions = await runtimeHandlers.listSessions();
+				broadcastEvent({type: 'sessions', id: event.id, sessions});
+				return;
+			}
+
+			if (event.type === 'load_session') {
+				if (activeTurnId) {
+					throw new Error(
+						'Cannot switch sessions while a browser turn is active.',
+					);
+				}
+
+				const result = await runtimeHandlers.loadSession(event.sessionId);
+				if (!result) {
+					throw new Error('Session not found.');
+				}
+
+				broadcastEvent({
+					type: 'session_loaded',
+					id: event.id,
+					session: result.session,
+					messages: result.messages,
+				});
 				return;
 			}
 

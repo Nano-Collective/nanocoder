@@ -52,6 +52,15 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			background:
 				linear-gradient(90deg, #090b0d 0, #0d1114 280px, #11161a 280px, #151a1f 100%);
 		}
+		.app-shell.sidebar-collapsed {
+			grid-template-columns: 0 minmax(0, 1fr);
+		}
+		.app-shell.sidebar-collapsed .sidebar {
+			padding: 0;
+			border-right: 0;
+			opacity: 0;
+			pointer-events: none;
+		}
 		.sidebar {
 			display: grid;
 			grid-template-rows: auto auto auto minmax(0, 1fr) auto;
@@ -61,6 +70,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			border-right: 1px solid rgba(245, 242, 235, 0.08);
 			background: rgba(9, 12, 14, 0.96);
 			overflow: hidden;
+			transition: opacity 150ms ease;
 		}
 		.brand-row {
 			display: flex;
@@ -189,6 +199,12 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			color: #9b92a4;
 			font-size: 13px;
 		}
+		.thread-list-empty {
+			margin: 0;
+			padding: 6px 10px;
+			color: #8e969d;
+			font-size: 13px;
+		}
 		.workspace {
 			position: relative;
 			display: grid;
@@ -279,7 +295,6 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			overflow-y: auto;
 			pointer-events: none;
 			padding: 28px clamp(18px, 10vw, 160px) 160px;
-			scroll-behavior: smooth;
 			scrollbar-width: thin;
 			scrollbar-color: rgba(245, 242, 235, 0.18) transparent;
 		}
@@ -378,6 +393,19 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		.markdown pre code {
 			background: transparent;
 			padding: 0;
+		}
+		.tok-keyword {
+			color: var(--tn-primary);
+		}
+		.tok-string {
+			color: var(--tn-success);
+		}
+		.tok-number {
+			color: var(--tn-warning);
+		}
+		.tok-comment {
+			color: var(--tn-secondary);
+			font-style: italic;
 		}
 		.message.system {
 			align-self: center;
@@ -561,8 +589,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			color: #ffc4c4;
 		}
 		.meta {
-			color: rgba(245, 242, 235, 0.58);
-			font-size: 12px;
+			color: rgba(245, 242, 235, 0.5);
+			font-size: 11px;
 		}
 		.message.user .meta {
 			color: rgba(17, 20, 24, 0.62);
@@ -773,6 +801,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		}
 		.search-box input::placeholder,
 		.thread-item,
+		.thread-list-empty,
 		.sidebar-footer,
 		.session-note,
 		p,
@@ -847,7 +876,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			border-color: rgba(247, 118, 142, 0.45);
 		}
 		.meta {
-			color: rgba(192, 202, 245, 0.62);
+			color: rgba(192, 202, 245, 0.52);
 		}
 		.message.user .meta {
 			color: rgba(26, 27, 38, 0.64);
@@ -867,6 +896,253 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		.send-button:not(:disabled):focus-visible {
 			background: #9de1ff;
 		}
+		/*
+		 * Light theme. Scoped with the [data-theme="light"] attribute selector
+		 * (set on <html> by the theme toggle below) rather than editing the dark
+		 * rules above, so light mode is purely additive: the attribute selector
+		 * always outranks the plain class selectors it targets, regardless of
+		 * source order, and the dark theme's appearance is provably unchanged.
+		 */
+		:root[data-theme="light"] {
+			color-scheme: light;
+		}
+		:root[data-theme="light"] body {
+			background: #f6f6fb;
+			color: #1c1d2b;
+		}
+		:root[data-theme="light"] .app-shell {
+			background:
+				linear-gradient(90deg, #ffffff 0, #ffffff 280px, #f6f6fb 280px, #f0f0f7 100%);
+		}
+		:root[data-theme="light"] .sidebar {
+			border-right-color: rgba(28, 29, 43, 0.1);
+			background: #ffffff;
+		}
+		:root[data-theme="light"] .brand,
+		:root[data-theme="light"] .thread-item.active,
+		:root[data-theme="light"] .thread-item:hover,
+		:root[data-theme="light"] .prompt-button:hover,
+		:root[data-theme="light"] .empty-state,
+		:root[data-theme="light"] .message,
+		:root[data-theme="light"] textarea,
+		:root[data-theme="light"] .model-pill {
+			color: #1c1d2b;
+		}
+		:root[data-theme="light"] .icon-button {
+			background: rgba(28, 29, 43, 0.06);
+			color: #1c1d2b;
+		}
+		:root[data-theme="light"] .icon-button:hover,
+		:root[data-theme="light"] .icon-button:focus-visible {
+			background: rgba(28, 29, 43, 0.1);
+		}
+		:root[data-theme="light"] .new-chat {
+			border-color: rgba(124, 92, 214, 0.4);
+			background: rgba(124, 92, 214, 0.1);
+			color: #5c3fb8;
+		}
+		:root[data-theme="light"] .new-chat:hover {
+			background: rgba(124, 92, 214, 0.18);
+		}
+		:root[data-theme="light"] .search-box {
+			border-color: rgba(28, 29, 43, 0.1);
+			color: #5b6178;
+		}
+		:root[data-theme="light"] .search-box:focus-within {
+			border-color: rgba(46, 134, 193, 0.4);
+			background: rgba(46, 134, 193, 0.06);
+		}
+		:root[data-theme="light"] .search-box input {
+			color: #1c1d2b;
+		}
+		:root[data-theme="light"] .search-box input::placeholder,
+		:root[data-theme="light"] .thread-item,
+		:root[data-theme="light"] .thread-list-empty,
+		:root[data-theme="light"] .sidebar-footer,
+		:root[data-theme="light"] .session-note,
+		:root[data-theme="light"] p,
+		:root[data-theme="light"] .empty-state span,
+		:root[data-theme="light"] .note {
+			color: #5b6178;
+		}
+		:root[data-theme="light"] .thread-list::-webkit-scrollbar-thumb,
+		:root[data-theme="light"] .messages::-webkit-scrollbar-thumb {
+			background: rgba(28, 29, 43, 0.16);
+		}
+		:root[data-theme="light"] .thread-list::-webkit-scrollbar-thumb:hover,
+		:root[data-theme="light"] .messages::-webkit-scrollbar-thumb:hover {
+			background: rgba(28, 29, 43, 0.28);
+		}
+		:root[data-theme="light"] .thread-list,
+		:root[data-theme="light"] .messages {
+			scrollbar-color: rgba(28, 29, 43, 0.16) transparent;
+		}
+		:root[data-theme="light"] .thread-item.active,
+		:root[data-theme="light"] .thread-item:hover,
+		:root[data-theme="light"] .thread-item:focus-visible,
+		:root[data-theme="light"] .mode-pill,
+		:root[data-theme="light"] .prompt-button:hover {
+			background: rgba(46, 134, 193, 0.1);
+		}
+		:root[data-theme="light"] .workspace {
+			background:
+				radial-gradient(circle at 50% 16%, rgba(124, 92, 214, 0.08), transparent 28rem),
+				linear-gradient(180deg, #f6f6fb 0%, #f2f2f8 52%, #ececf4 100%);
+		}
+		:root[data-theme="light"] .status {
+			border-color: rgba(28, 29, 43, 0.12);
+			background: rgba(255, 255, 255, 0.78);
+			color: #1c1d2b;
+		}
+		:root[data-theme="light"] .status::before {
+			background: #b3791f;
+			box-shadow: 0 0 0 5px rgba(179, 121, 31, 0.14);
+		}
+		:root[data-theme="light"] .status.connected {
+			color: #1a9e63;
+		}
+		:root[data-theme="light"] .status.connected::before {
+			background: #1a9e63;
+			box-shadow: 0 0 0 5px rgba(26, 158, 99, 0.14);
+		}
+		:root[data-theme="light"] .status.disconnected,
+		:root[data-theme="light"] .status.failed,
+		:root[data-theme="light"] .message.error {
+			color: #b8253f;
+		}
+		:root[data-theme="light"] .status.disconnected::before,
+		:root[data-theme="light"] .status.failed::before {
+			background: #d1435b;
+			box-shadow: 0 0 0 5px rgba(209, 67, 91, 0.14);
+		}
+		:root[data-theme="light"] .markdown h1,
+		:root[data-theme="light"] .markdown h2,
+		:root[data-theme="light"] .markdown h3 {
+			color: #1c1d2b;
+		}
+		:root[data-theme="light"] .markdown code {
+			background: rgba(46, 134, 193, 0.1);
+		}
+		:root[data-theme="light"] .markdown pre,
+		:root[data-theme="light"] .interaction-card pre {
+			border-color: rgba(28, 29, 43, 0.12);
+			background: #eef0f7;
+		}
+		:root[data-theme="light"] .tok-keyword {
+			color: #5c3fb8;
+		}
+		:root[data-theme="light"] .tok-string {
+			color: #1a9e63;
+		}
+		:root[data-theme="light"] .tok-number {
+			color: #b3791f;
+		}
+		:root[data-theme="light"] .tok-comment {
+			color: #5b6178;
+		}
+		:root[data-theme="light"] .message {
+			border-color: rgba(28, 29, 43, 0.1);
+			background: rgba(28, 29, 43, 0.035);
+			box-shadow: 0 12px 40px rgba(28, 29, 43, 0.06);
+		}
+		:root[data-theme="light"] .message.user {
+			background: #1c1d2b;
+			color: #fbfbfd;
+		}
+		:root[data-theme="light"] .message.user .meta {
+			color: rgba(251, 251, 253, 0.62);
+		}
+		:root[data-theme="light"] .message.assistant {
+			background: transparent;
+		}
+		:root[data-theme="light"] .message.system,
+		:root[data-theme="light"] .mode-pill {
+			background: rgba(28, 29, 43, 0.045);
+		}
+		:root[data-theme="light"] .message.system {
+			color: #1c1d2b;
+		}
+		:root[data-theme="light"] .message.interaction {
+			border-color: rgba(46, 134, 193, 0.3);
+			background: rgba(46, 134, 193, 0.06);
+		}
+		:root[data-theme="light"] .interaction-actions button,
+		:root[data-theme="light"] .question-options button {
+			border-color: rgba(46, 134, 193, 0.32);
+			background: rgba(46, 134, 193, 0.1);
+			color: #1c1d2b;
+		}
+		:root[data-theme="light"] .interaction-actions button[data-approved="false"] {
+			border-color: rgba(209, 67, 91, 0.35);
+			background: rgba(209, 67, 91, 0.1);
+		}
+		:root[data-theme="light"] .question-freeform input {
+			border-color: rgba(28, 29, 43, 0.14);
+			background: #ffffff;
+			color: #1c1d2b;
+		}
+		:root[data-theme="light"] .mode-pill {
+			border-color: rgba(28, 29, 43, 0.1);
+		}
+		:root[data-theme="light"] .mode-pill:hover,
+		:root[data-theme="light"] .mode-pill:focus-visible {
+			background: rgba(46, 134, 193, 0.12);
+			border-color: rgba(46, 134, 193, 0.36);
+			color: #1c1d2b;
+		}
+		:root[data-theme="light"] .prompt-button {
+			border-color: rgba(28, 29, 43, 0.1);
+			background: rgba(28, 29, 43, 0.025);
+			color: #33364a;
+		}
+		:root[data-theme="light"] .prompt-button::after {
+			color: rgba(46, 134, 193, 0.6);
+		}
+		:root[data-theme="light"] .prompt-button:hover,
+		:root[data-theme="light"] .prompt-button:focus-visible {
+			border-color: rgba(46, 134, 193, 0.32);
+			color: #1c1d2b;
+		}
+		:root[data-theme="light"] .prompt-button:hover::after,
+		:root[data-theme="light"] .prompt-button:focus-visible::after {
+			color: #2e86c1;
+		}
+		:root[data-theme="light"] .message.error {
+			border-color: rgba(209, 67, 91, 0.4);
+		}
+		:root[data-theme="light"] .meta {
+			color: rgba(28, 29, 43, 0.48);
+		}
+		:root[data-theme="light"] .composer {
+			border-color: rgba(28, 29, 43, 0.12);
+			background: #ffffff;
+			box-shadow: 0 24px 80px rgba(28, 29, 43, 0.1);
+		}
+		:root[data-theme="light"] .composer.is-attention {
+			border-color: rgba(46, 134, 193, 0.5);
+			box-shadow:
+				0 0 0 3px rgba(46, 134, 193, 0.14),
+				0 24px 80px rgba(28, 29, 43, 0.1);
+		}
+		:root[data-theme="light"] textarea::placeholder {
+			color: #7d8296;
+		}
+		:root[data-theme="light"] .send-button {
+			background: #2e86c1;
+			color: #ffffff;
+		}
+		:root[data-theme="light"] .send-button:not(:disabled):hover,
+		:root[data-theme="light"] .send-button:not(:disabled):focus-visible {
+			background: #3f99d6;
+		}
+		:root[data-theme="light"] .send-button.is-cancel {
+			background: #d1435b;
+			color: #ffffff;
+		}
+		:root[data-theme="light"] .send-button.is-cancel:not(:disabled):hover,
+		:root[data-theme="light"] .send-button.is-cancel:not(:disabled):focus-visible {
+			background: #dd5b71;
+		}
 	</style>
 </head>
 <body>
@@ -877,6 +1153,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					<img class="brand-mark" src="/assets/nanocoder-icon.svg" alt="Nanocoder logo">
 					<span>Nanocoder</span>
 				</div>
+				<button class="icon-button" id="themeToggleButton" type="button" aria-label="Switch to light theme" aria-pressed="false">◐</button>
 				<button class="icon-button" id="sessionMenuButton" type="button" aria-label="Session menu">⌘</button>
 			</div>
 			<button class="new-chat" id="newChatButton" type="button">New Chat</button>
@@ -884,10 +1161,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				<span>⌕</span>
 				<input id="threadSearchInput" type="search" placeholder="Search local threads..." autocomplete="off">
 			</label>
-			<div class="thread-list">
-				<button class="thread-item active" type="button" data-thread-label="Nanocoder web mode">● Nanocoder web mode</button>
-				<button class="thread-item" type="button" data-thread-label="Runtime bridge next">○ Runtime bridge next</button>
-				<button class="thread-item" type="button" data-thread-label="Tool approvals">○ Tool approvals</button>
+			<div class="thread-list" id="threadList" aria-live="polite">
+				<p class="thread-list-empty" id="threadListEmpty">Loading sessions...</p>
 			</div>
 			<div class="sidebar-footer">
 				<span>Local only</span>
@@ -899,6 +1174,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				<div class="status" id="connectionStatus">Starting</div>
 				<p class="session-note">Localhost only. Private URL token required.</p>
 				<div class="top-actions">
+					<button class="icon-button" id="sidebarToggleButton" type="button" aria-label="Collapse sidebar" aria-expanded="true">❮</button>
 					<button class="icon-button" id="historyButton" type="button" aria-label="Session history">◷</button>
 					<button class="icon-button" id="settingsButton" type="button" aria-label="Session settings">☷</button>
 				</div>
@@ -928,12 +1204,15 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			const messageInput = document.querySelector('#messageInput');
 			const sendButton = document.querySelector('#sendButton');
 			const newChatButton = document.querySelector('#newChatButton');
+			const themeToggleButton = document.querySelector('#themeToggleButton');
+			const sidebarToggleButton = document.querySelector('#sidebarToggleButton');
+			const appShell = document.querySelector('.app-shell');
 			const sessionMenuButton = document.querySelector('#sessionMenuButton');
 			const historyButton = document.querySelector('#historyButton');
 			const settingsButton = document.querySelector('#settingsButton');
 			const composerNote = document.querySelector('#composerNote');
 			const threadSearchInput = document.querySelector('#threadSearchInput');
-			const threadButtons = Array.from(document.querySelectorAll('.thread-item'));
+			const threadList = document.querySelector('#threadList');
 			const token = new URLSearchParams(window.location.search).get('token');
 			const eventsUrl = new URL('/events', window.location.href);
 			eventsUrl.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -961,6 +1240,42 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			let reconnectTimer = null;
 			let reconnectDelayMs = 1000;
 			const maxReconnectDelayMs = 15000;
+
+			const themeStorageKey = 'nanocoder.webMode.theme.v1';
+			const sidebarStorageKey = 'nanocoder.webMode.sidebarCollapsed.v1';
+
+			function applyTheme(theme) {
+				document.documentElement.dataset.theme = theme;
+				const isLight = theme === 'light';
+				themeToggleButton.textContent = isLight ? '◑' : '◐';
+				themeToggleButton.setAttribute('aria-pressed', String(isLight));
+				themeToggleButton.setAttribute(
+					'aria-label',
+					isLight ? 'Switch to dark theme' : 'Switch to light theme',
+				);
+				window.localStorage.setItem(themeStorageKey, theme);
+			}
+
+			function initialTheme() {
+				const stored = window.localStorage.getItem(themeStorageKey);
+				if (stored === 'light' || stored === 'dark') {
+					return stored;
+				}
+				return window.matchMedia('(prefers-color-scheme: light)').matches
+					? 'light'
+					: 'dark';
+			}
+
+			function applySidebarCollapsed(isCollapsed) {
+				appShell.classList.toggle('sidebar-collapsed', isCollapsed);
+				sidebarToggleButton.textContent = isCollapsed ? '❯' : '❮';
+				sidebarToggleButton.setAttribute('aria-expanded', String(!isCollapsed));
+				sidebarToggleButton.setAttribute(
+					'aria-label',
+					isCollapsed ? 'Expand sidebar' : 'Collapse sidebar',
+				);
+				window.localStorage.setItem(sidebarStorageKey, String(isCollapsed));
+			}
 
 			function setStatus(text, state) {
 				statusElement.textContent = text;
@@ -1063,53 +1378,110 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				emptyState.hidden = true;
 			}
 
+			const inlineCodeMarker = String.fromCharCode(96);
+
+			function findNextMarkerIndex(text) {
+				const boldIndex = text.indexOf('**');
+				const strikeIndex = text.indexOf('~~');
+				const codeIndex = text.indexOf(inlineCodeMarker);
+				const linkIndex = text.indexOf('[');
+				const italicIndex = text.indexOf('*');
+				const candidates = [boldIndex, strikeIndex, codeIndex, linkIndex, italicIndex].filter(
+					index => index >= 0,
+				);
+				return candidates.length === 0 ? -1 : Math.min(...candidates);
+			}
+
 			function appendInlineMarkdown(element, text) {
-				const inlineCodeMarker = String.fromCharCode(96);
 				let remainingText = text;
 
 				while (remainingText) {
-					const strongIndex = remainingText.indexOf('**');
-					const codeIndex = remainingText.indexOf(inlineCodeMarker);
-					const markerIndexes = [strongIndex, codeIndex].filter(index => index >= 0);
+					const linkMatch = /^\\[([^\\]]+)\\]\\(([^)\\s]+)\\)/.exec(remainingText);
+					if (linkMatch) {
+						const anchor = document.createElement('a');
+						anchor.href = linkMatch[2];
+						anchor.target = '_blank';
+						anchor.rel = 'noopener noreferrer';
+						appendInlineMarkdown(anchor, linkMatch[1]);
+						element.append(anchor);
+						remainingText = remainingText.slice(linkMatch[0].length);
+						continue;
+					}
 
-					if (markerIndexes.length === 0) {
+					const isBold = remainingText.startsWith('**');
+					const isStrike = !isBold && remainingText.startsWith('~~');
+					const isCode = !isBold && !isStrike && remainingText.startsWith(inlineCodeMarker);
+					const isItalic = !isBold && !isStrike && !isCode && remainingText.startsWith('*');
+
+					if (isBold || isStrike || isCode || isItalic) {
+						const marker = isBold ? '**' : isStrike ? '~~' : isCode ? inlineCodeMarker : '*';
+						const closingIndex = remainingText.indexOf(marker, marker.length);
+						if (closingIndex >= 0) {
+							const tagName = isBold ? 'strong' : isStrike ? 's' : isCode ? 'code' : 'em';
+							const innerText = remainingText.slice(marker.length, closingIndex);
+							const inlineElement = document.createElement(tagName);
+							if (tagName === 'code') {
+								inlineElement.textContent = innerText;
+							} else {
+								appendInlineMarkdown(inlineElement, innerText);
+							}
+							element.append(inlineElement);
+							remainingText = remainingText.slice(closingIndex + marker.length);
+							continue;
+						}
+					}
+
+					const nextIndex = findNextMarkerIndex(remainingText.slice(1));
+					if (nextIndex < 0) {
 						element.append(document.createTextNode(remainingText));
 						return;
 					}
+					element.append(document.createTextNode(remainingText.slice(0, nextIndex + 1)));
+					remainingText = remainingText.slice(nextIndex + 1);
+				}
+			}
 
-					const markerIndex = Math.min(...markerIndexes);
-					if (markerIndex > 0) {
-						element.append(document.createTextNode(remainingText.slice(0, markerIndex)));
-						remainingText = remainingText.slice(markerIndex);
+			const CODE_TOKEN_PATTERN = /(\\/\\*[\\s\\S]*?\\*\\/|\\/\\/[^\\n]*|#[^\\n]*)|("(?:[^"\\\\\\n]|\\\\.)*"|'(?:[^'\\\\\\n]|\\\\.)*')|(\\b\\d+(?:\\.\\d+)?\\b)|(\\b(?:function|return|const|let|var|if|else|for|while|class|import|export|from|async|await|new|try|catch|finally|throw|switch|case|break|continue|default|typeof|instanceof|extends|super|this|null|undefined|true|false|def|elif|except|as|with|lambda|yield|pass|None|True|False|self|fn|impl|struct|enum|match|pub|mut|use|type|interface|implements|public|private|protected|static|void|int|bool)\\b)/gu;
+
+			function highlightCode(codeElement, rawText, language) {
+				codeElement.replaceChildren();
+				codeElement.className = language ? 'language-' + language : '';
+				let lastIndex = 0;
+				for (const match of rawText.matchAll(CODE_TOKEN_PATTERN)) {
+					if (match.index > lastIndex) {
+						codeElement.append(document.createTextNode(rawText.slice(lastIndex, match.index)));
 					}
-
-					const marker = remainingText.startsWith('**') ? '**' : inlineCodeMarker;
-					const closingIndex = remainingText.indexOf(marker, marker.length);
-					if (closingIndex < 0) {
-						element.append(document.createTextNode(remainingText));
-						return;
-					}
-
-					const inlineElement = document.createElement(marker === '**' ? 'strong' : 'code');
-					inlineElement.textContent = remainingText.slice(marker.length, closingIndex);
-					element.append(inlineElement);
-					remainingText = remainingText.slice(closingIndex + marker.length);
+					const tokenType = match[1] ? 'comment' : match[2] ? 'string' : match[3] ? 'number' : 'keyword';
+					const span = document.createElement('span');
+					span.className = 'tok-' + tokenType;
+					span.textContent = match[0];
+					codeElement.append(span);
+					lastIndex = match.index + match[0].length;
+				}
+				if (lastIndex < rawText.length) {
+					codeElement.append(document.createTextNode(rawText.slice(lastIndex)));
 				}
 			}
 
 			function renderAssistantText(element, text) {
 				element.replaceChildren();
-				const codeFence = String.fromCharCode(96).repeat(3);
+				const codeFence = inlineCodeMarker.repeat(3);
 				let codeElement = null;
+				let codeRawText = '';
+				let codeLang = '';
 				let listElement = null;
 
 				for (const line of text.split('\\n')) {
 					if (line.trim().startsWith(codeFence)) {
 						if (codeElement) {
 							codeElement = null;
+							codeRawText = '';
+							codeLang = '';
 						} else {
 							const preElement = document.createElement('pre');
 							codeElement = document.createElement('code');
+							codeLang = line.trim().slice(codeFence.length).trim();
+							codeRawText = '';
 							preElement.append(codeElement);
 							element.append(preElement);
 						}
@@ -1118,7 +1490,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					}
 
 					if (codeElement) {
-						codeElement.textContent += (codeElement.textContent ? '\\n' : '') + line;
+						codeRawText += (codeRawText ? '\\n' : '') + line;
+						highlightCode(codeElement, codeRawText, codeLang);
 						continue;
 					}
 
@@ -1222,6 +1595,82 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				setEmptyState('How can I help you?', '', true);
 				messageInput.value = '';
 				messageInput.focus();
+				activeSessionId = null;
+				renderThreadList(currentSessions);
+			}
+
+			let activeSessionId = null;
+			let currentSessions = [];
+
+			function formatRelativeTime(isoString) {
+				const then = new Date(isoString).getTime();
+				if (Number.isNaN(then)) {
+					return '';
+				}
+				const diffMinutes = Math.floor((Date.now() - then) / 60000);
+				if (diffMinutes < 1) {
+					return 'just now';
+				}
+				if (diffMinutes < 60) {
+					return diffMinutes + 'm ago';
+				}
+				const diffHours = Math.floor(diffMinutes / 60);
+				if (diffHours < 24) {
+					return diffHours + 'h ago';
+				}
+				const diffDays = Math.floor(diffHours / 24);
+				if (diffDays < 30) {
+					return diffDays + 'd ago';
+				}
+				return new Date(isoString).toLocaleDateString();
+			}
+
+			function renderThreadList(sessions) {
+				currentSessions = sessions;
+				threadList.replaceChildren();
+
+				if (sessions.length === 0) {
+					const empty = document.createElement('p');
+					empty.className = 'thread-list-empty';
+					empty.textContent = 'No saved sessions yet.';
+					threadList.append(empty);
+					return;
+				}
+
+				for (const session of sessions) {
+					const button = document.createElement('button');
+					button.className =
+						'thread-item' + (session.id === activeSessionId ? ' active' : '');
+					button.type = 'button';
+					button.dataset.sessionId = session.id;
+					button.dataset.threadLabel = session.title;
+					const marker = session.id === activeSessionId ? '●' : '○';
+					const relative = formatRelativeTime(session.lastAccessedAt);
+					button.textContent =
+						marker + ' ' + session.title + (relative ? ' · ' + relative : '');
+					threadList.append(button);
+				}
+			}
+
+			function applyLoadedSession(sessionSummary, messages) {
+				activeSessionId = sessionSummary.id;
+				storedMessages = [];
+				pendingMessages.clear();
+				assistantMessages.clear();
+				messageList.replaceChildren();
+
+				if (messages.length === 0) {
+					setEmptyState('How can I help you?', '', true);
+				} else {
+					hideEmptyState();
+					for (const message of messages) {
+						appendMessage(message.role, message.content);
+					}
+				}
+
+				messageInput.value = '';
+				renderThreadList(currentSessions);
+				addSystemNotice('Resumed session: ' + sessionSummary.title, 'Session switch');
 			}
 
 			function setPromptText(text) {
@@ -1414,6 +1863,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 						setEmptyState('How can I help you?', '', true);
 					}
 					messageInput.focus();
+					sendClientEvent({type: 'list_sessions', id: 'browser-sessions-' + Date.now()});
 					return;
 				}
 
@@ -1477,6 +1927,16 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					} else {
 						appendMessage('system error', message.message);
 					}
+					return;
+				}
+
+				if (message.type === 'sessions') {
+					renderThreadList(message.sessions);
+					return;
+				}
+
+				if (message.type === 'session_loaded') {
+					applyLoadedSession(message.session, message.messages);
 					return;
 				}
 
@@ -1564,6 +2024,9 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				reconnectDelayMs = Math.min(reconnectDelayMs * 2, maxReconnectDelayMs);
 			}
 
+			applyTheme(initialTheme());
+			applySidebarCollapsed(window.localStorage.getItem(sidebarStorageKey) === 'true');
+
 			setEmptyState('How can I help you?', '', true);
 			restoreStoredMessages();
 			connectSocket();
@@ -1593,6 +2056,14 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				addSystemNotice('Started a fresh local browser session.', 'Stored only in this browser');
 			});
 
+			themeToggleButton.addEventListener('click', () => {
+				applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
+			});
+
+			sidebarToggleButton.addEventListener('click', () => {
+				applySidebarCollapsed(!appShell.classList.contains('sidebar-collapsed'));
+			});
+
 			sessionMenuButton.addEventListener('click', () => {
 				addSystemNotice(
 					'This session is served from localhost and protected by the private URL token. The live connection uses ws:// rather than wss:// because it never leaves your machine.',
@@ -1601,38 +2072,61 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			});
 
 			historyButton.addEventListener('click', () => {
-				const count = storedMessages.length;
-				addSystemNotice(
-					count === 1
-						? 'There is 1 stored local message in this browser.'
-						: 'There are ' + count + ' stored local messages in this browser.',
-					'Session history',
-				);
+				if (appShell.classList.contains('sidebar-collapsed')) {
+					applySidebarCollapsed(false);
+				}
+				sendClientEvent({
+					type: 'list_sessions',
+					id: 'browser-sessions-' + Date.now(),
+				});
+				threadSearchInput.focus();
 			});
 
 			settingsButton.addEventListener('click', () => {
+				const theme =
+					document.documentElement.dataset.theme === 'light' ? 'Light' : 'Dark';
+				const sidebarState = appShell.classList.contains('sidebar-collapsed')
+					? 'collapsed'
+					: 'expanded';
 				addSystemNotice(
-					'Provider and model stay in the terminal runtime. During a browser turn, approvals and questions are answered here.',
+					'Theme: ' +
+						theme +
+						'. Sidebar: ' +
+						sidebarState +
+						'. Provider and model stay in the terminal runtime; during a browser turn, approvals and questions are answered here.',
 					'Session settings',
 				);
 			});
 
 			threadSearchInput.addEventListener('input', () => {
 				const query = threadSearchInput.value.trim().toLowerCase();
-				for (const threadButton of threadButtons) {
-					const label = threadButton.dataset.threadLabel.toLowerCase();
+				for (const threadButton of threadList.querySelectorAll('.thread-item')) {
+					const label = (threadButton.dataset.threadLabel || '').toLowerCase();
 					threadButton.hidden = query.length > 0 && !label.includes(query);
 				}
 			});
 
-			for (const threadButton of threadButtons) {
-				threadButton.addEventListener('click', () => {
-					for (const button of threadButtons) {
-						button.classList.toggle('active', button === threadButton);
-					}
-					addSystemNotice(threadButton.dataset.threadLabel + ' selected.', 'Local thread');
+			threadList.addEventListener('click', event => {
+				const target = event.target.closest('.thread-item');
+				if (!target || !target.dataset.sessionId) {
+					return;
+				}
+				if (target.dataset.sessionId === activeSessionId) {
+					return;
+				}
+				if (activeTurnId) {
+					addSystemNotice(
+						'Finish or cancel the current turn before switching sessions.',
+						'Session switch',
+					);
+					return;
+				}
+				sendClientEvent({
+					type: 'load_session',
+					id: 'browser-load-' + Date.now(),
+					sessionId: target.dataset.sessionId,
 				});
-			}
+			});
 		</script>
 </body>
 </html>`;

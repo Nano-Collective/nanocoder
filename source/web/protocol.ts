@@ -1,12 +1,26 @@
 export const WEB_PROTOCOL_VERSION = 1;
 
+export interface WebSessionSummary {
+	id: string;
+	title: string;
+	lastAccessedAt: string;
+	messageCount: number;
+}
+
+export interface WebSessionMessage {
+	role: 'user' | 'assistant';
+	content: string;
+}
+
 export type WebClientEvent =
 	| {type: 'hello'; protocolVersion: typeof WEB_PROTOCOL_VERSION}
 	| {type: 'user_message'; id: string; text: string}
 	| {type: 'cancel'; id: string}
 	| {type: 'approval_response'; id: string; approved: boolean}
 	| {type: 'question_response'; id: string; answer: string}
-	| {type: 'reset_session'; id: string};
+	| {type: 'reset_session'; id: string}
+	| {type: 'list_sessions'; id: string}
+	| {type: 'load_session'; id: string; sessionId: string};
 
 export type WebServerEvent =
 	| {type: 'ready'; protocolVersion: typeof WEB_PROTOCOL_VERSION}
@@ -29,7 +43,14 @@ export type WebServerEvent =
 			allowFreeform: boolean;
 	  }
 	| {type: 'turn_completed'; id: string}
-	| {type: 'error'; message: string; id?: string};
+	| {type: 'error'; message: string; id?: string}
+	| {type: 'sessions'; id: string; sessions: WebSessionSummary[]}
+	| {
+			type: 'session_loaded';
+			id: string;
+			session: WebSessionSummary;
+			messages: WebSessionMessage[];
+	  };
 
 export function parseWebClientEvent(rawMessage: string): WebClientEvent {
 	let parsed: unknown;
@@ -112,6 +133,32 @@ export function parseWebClientEvent(rawMessage: string): WebClientEvent {
 			return {
 				type: 'reset_session',
 				id: parsed.id,
+			};
+		case 'list_sessions':
+			if (typeof parsed.id !== 'string' || parsed.id.length === 0) {
+				throw new Error('List sessions id is required.');
+			}
+
+			return {
+				type: 'list_sessions',
+				id: parsed.id,
+			};
+		case 'load_session':
+			if (typeof parsed.id !== 'string' || parsed.id.length === 0) {
+				throw new Error('Load session id is required.');
+			}
+
+			if (
+				typeof parsed.sessionId !== 'string' ||
+				parsed.sessionId.length === 0
+			) {
+				throw new Error('Load session sessionId is required.');
+			}
+
+			return {
+				type: 'load_session',
+				id: parsed.id,
+				sessionId: parsed.sessionId,
 			};
 		default:
 			throw new Error(`Unsupported web event type: ${parsed.type}.`);
