@@ -13,6 +13,10 @@ import {AcpStateManager, ACPStatus} from './acp-state';
 import {NanocoderAcpClient} from './acp-client';
 import {AcpProcessManager} from './acp-process-manager';
 import {ChatWebviewProvider} from './chat-webview-provider';
+import {
+	NanocoderCodeLensProvider,
+	sendCodeLensPrompt,
+} from './code-lens-provider';
 
 const DEFAULT_PORT = 51820;
 const ACTIVE_EDITOR_DEBOUNCE_MS = 150;
@@ -55,6 +59,7 @@ export function activate(context: vscode.ExtensionContext) {
 	// Register Webview Provider
 	const chatProvider = new ChatWebviewProvider(context.extensionUri, outputChannel, acpClient, diffManager);
 	context.subscriptions.push(
+		chatProvider,
 		vscode.window.registerWebviewViewProvider(ChatWebviewProvider.viewType, chatProvider, {
 			// Preserve DOM when user switches to Explorer/SCM/etc. and back.
 			// Without this VS Code destroys the webview on hide, wiping the transcript.
@@ -415,108 +420,4 @@ function sendActiveEditor(): void {
 	lastActiveEditorPayload = serialized;
 
 	wsClient.send(payload);
-}
-
-// Symbols worth a lens. Anything finer-grained (properties, variables) would
-// bury the editor in links.
-const LENS_SYMBOL_KINDS = new Set([
-	vscode.SymbolKind.Function,
-	vscode.SymbolKind.Method,
-	vscode.SymbolKind.Class,
-]);
-
-class NanocoderCodeLensProvider implements vscode.CodeLensProvider, vscode.Disposable {
-	private readonly _onDidChangeCodeLenses = new vscode.EventEmitter<void>();
-	public readonly onDidChangeCodeLenses = this._onDidChangeCodeLenses.event;
-
-	public refresh(): void {
-		this._onDidChangeCodeLenses.fire();
-	}
-
-	public dispose(): void {
-		this._onDidChangeCodeLenses.dispose();
-	}
-
-	public async provideCodeLenses(
-		document: vscode.TextDocument,
-		token: vscode.CancellationToken,
-	): Promise<vscode.CodeLens[]> {
-		// Scoped to the document so a folder-level override wins in a
-		// multi-root workspace.
-		const config = vscode.workspace.getConfiguration('nanocoder', document.uri);
-		if (!config.get<boolean>('codeLens', true)) {
-			return [];
-		}
-
-		// The language server already knows where the functions are, so nothing
-		// here has to parse a single line of source.
-		const symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
-			'vscode.executeDocumentSymbolProvider',
-			document.uri,
-		);
-		if (token.isCancellationRequested || !Array.isArray(symbols)) {
-			return [];
-		}
-
-		const lenses: vscode.CodeLens[] = [];
-		const walk = (nodes: vscode.DocumentSymbol[]) => {
-			for (const symbol of nodes) {
-				// selectionRange is absent on the legacy SymbolInformation shape
-				// some providers still return; skip those rather than throw.
-				if (LENS_SYMBOL_KINDS.has(symbol.kind) && symbol.selectionRange) {
-					// Anchored on the name so the lens sits on the declaration
-					// line instead of above a preceding doc comment, while the
-					// command still receives the symbol's whole body.
-					const args = [document.uri, symbol.range];
-					lenses.push(
-						new vscode.CodeLens(symbol.selectionRange, {
-							title: 'Explain Code',
-							command: 'nanocoder.explainCode',
-							arguments: args,
-						}),
-						new vscode.CodeLens(symbol.selectionRange, {
-							title: 'Generate Tests',
-							command: 'nanocoder.generateTests',
-							arguments: args,
-						}),
-					);
-				}
-				walk(symbol.children ?? []);
-			}
-		};
-		walk(symbols);
-
-		return lenses;
-	}
-}
-
-// The symbol source is inlined rather than attached as a file: the agent should
-// see the one function the user clicked, not everything around it.
-async function sendCodeLensPrompt(
-	chatProvider: ChatWebviewProvider,
-	instruction: string,
-	uri?: vscode.Uri,
-	range?: vscode.Range,
-): Promise<void> {
-	// The commands are hidden from the palette, but a keybinding or another
-	// extension can still invoke them with no lens arguments.
-	if (!uri || !range) {
-		vscode.window.showInformationMessage(
-			'Nanocoder: use the Explain Code / Generate Tests links above a function to run this.',
-		);
-		return;
-	}
-
-	const document = await vscode.workspace.openTextDocument(uri);
-	const location = `${vscode.workspace.asRelativePath(uri)}:${range.start.line + 1}-${range.end.line + 1}`;
-	await chatProvider.sendPrompt(
-		[
-			instruction,
-			'',
-			location,
-			'```' + document.languageId,
-			document.getText(range),
-			'```',
-		].join('\n'),
-	);
 }

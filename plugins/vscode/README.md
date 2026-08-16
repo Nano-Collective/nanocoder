@@ -14,7 +14,7 @@ The extension provides a native sidebar chat powered by the Agent Client Protoco
 - **Task Checklist**: The AI's task list renders as a live checklist card with per-task status and progress
 - **Cancellation**: Stop ends the whole turn - the current tool aborts and queued tools are skipped
 - **Diff Previews**: Click a file-edit card to open the change in VS Code's diff viewer
-- **Editor Code Lenses**: `Explain Code` and `Generate Tests` links above every function, method and class - clicking one opens the chat and sends that symbol as context
+- **Editor Code Lenses**: `Explain Code` and `Generate Tests` links above every function, method, constructor and class - clicking one opens the chat and sends that symbol as context
 - **Legacy Companion Mode** (opt-in): Pairs with a terminal CLI session over WebSocket for diff previews and editor context
 
 ## Installation

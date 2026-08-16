@@ -14,7 +14,8 @@ import { DiffManager } from './diff-manager';
  */
 const PENDING_PROMPT_TIMEOUT_MS = 30_000;
 
-export class ChatWebviewProvider implements vscode.WebviewViewProvider {
+export class ChatWebviewProvider
+	implements vscode.WebviewViewProvider, vscode.Disposable {
 	public static readonly viewType = 'nanocoder.chatView';
 
 	private _view?: vscode.WebviewView;
@@ -123,6 +124,14 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		this.postMessage({type: 'runPrompt', text});
 	}
 
+	/**
+	 * Registered with the extension's subscriptions so a deactivate cannot
+	 * leave the pending-prompt timer running against a disposed view.
+	 */
+	public dispose() {
+		this._clearPendingPrompt();
+	}
+
 	public requestCopyLastCodeBlock() {
 		if (!this._view) {
 			vscode.window.showInformationMessage('Nanocoder: open the Nanocoder chat view first.');
@@ -148,8 +157,17 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		// post into a webview with no message listener attached, dropping it.
 		this._isWebviewReady = false;
 		webviewView.onDidDispose(() => {
+			// A disposal can land after a newer view has already been resolved
+			// (VS Code tears the old one down late). Without this guard that
+			// stale event would null out the live view and drop its state.
+			if (this._view !== webviewView) {
+				return;
+			}
 			this._view = undefined;
 			this._isWebviewReady = false;
+			// A queued prompt is deliberately kept: a disposal is usually a
+			// re-reveal in progress, and the next resolve is what delivers it.
+			// The timeout is what bounds the wait if no view comes back.
 		});
 
 		webviewView.webview.options = {
@@ -372,6 +390,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		try {
 			if (this._acpClient.hasPendingPermissions()) {
 				vscode.window.showWarningMessage('Nanocoder: Please approve or deny the pending tool before sending a new message.');
+				// The webview has already drawn the user bubble and flipped to
+				// the loading state, and no turn is going to start - so end the
+				// turn here or the composer spins until the user hits Escape.
+				this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}});
 				return;
 			}
 
