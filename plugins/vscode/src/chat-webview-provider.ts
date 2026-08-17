@@ -1,10 +1,26 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { WebviewToExtensionMessage, ExtensionToWebviewMessage } from './webview-protocol';
+import { WebviewToExtensionMessage, ExtensionToWebviewMessage, MentionItem } from './webview-protocol';
 
 import { NanocoderAcpClient } from './acp-client';
 import { DiffManager } from './diff-manager';
+import { searchMentions, MentionSearchDeps } from './mention-search';
+import { readCappedFile, readCappedDirectory } from './context-attachment';
+
+/**
+ * Excluded from `@` search regardless of user settings — never useful context.
+ * Merged with the user's own excludes in `_mentionExcludeGlob`.
+ */
+const MENTION_ALWAYS_EXCLUDE = [
+	'**/node_modules/**',
+	'**/.git/**',
+	'**/dist/**',
+	'**/out/**',
+	'**/build/**',
+	'**/.next/**',
+	'**/coverage/**',
+];
 
 /**
  * How long an editor-driven prompt waits for the webview shell and the ACP
@@ -49,6 +65,13 @@ export class ChatWebviewProvider
 			});
 		};
 
+		this._acpClient.onPermissionsCancelled = (toolCallIds: string[]) => {
+			this.postMessage({
+				type: 'permissionsCancelled',
+				toolCallIds
+			});
+		};
+
 		this._acpClient.onStateSync = (state: any) => {
 			this.postMessage({
 				type: 'syncState',
@@ -68,7 +91,7 @@ export class ChatWebviewProvider
 				if (block.type === 'diff' && block.path) {
 					this._diffManager.addPendingChange({
 						type: 'file_change',
-						id: payload.toolCallId || block.path, // fallback id
+						id: update.toolCallId || payload.toolCallId || block.path, // fallback id
 						filePath: block.path,
 						originalContent: block.oldText || '',
 						newContent: block.newText || '',
@@ -266,6 +289,10 @@ export class ChatWebviewProvider
 						}
 						break;
 					}
+					case 'requestMentionCompletions': {
+						this._handleMentionCompletions(message.query, message.requestId);
+						break;
+					}
 					case 'requestOpenDialog': {
 						vscode.window.showOpenDialog({
 							canSelectFiles: true,
@@ -352,6 +379,90 @@ export class ChatWebviewProvider
 	}
 
 	/**
+	 * Exclude glob for `@` search.
+	 *
+	 * VS Code *replaces* its default excludes when `findFiles` is given an
+	 * explicit exclude rather than merging with them, so passing only the list
+	 * below would put `.env`, secrets and anything else the user hid via
+	 * `files.exclude` into the dropdown. Both settings are folded in by hand.
+	 * `search.exclude` is included too: it never applies to `findFiles`, but a
+	 * file picker honouring it is what users expect.
+	 */
+	private _mentionExcludeGlob(scope?: vscode.Uri): string {
+		const globs = new Set(MENTION_ALWAYS_EXCLUDE);
+
+		for (const section of ['files.exclude', 'search.exclude']) {
+			// Scoped to the folder being searched: both settings are
+			// folder-overridable, and reading them unscoped would miss that.
+			const patterns = vscode.workspace
+				.getConfiguration(undefined, scope)
+				.get<Record<string, boolean>>(section);
+			if (!patterns) {
+				continue;
+			}
+			for (const [glob, enabled] of Object.entries(patterns)) {
+				// A `when` clause resolves to a non-boolean; those are sibling
+				// conditions we cannot evaluate here, so we leave them alone.
+				if (enabled === true) {
+					globs.add(glob);
+				}
+			}
+		}
+
+		// A single-element brace list is invalid in some glob parsers, and the set
+		// can never be empty here, but the guard keeps that assumption local.
+		const list = [...globs];
+		return list.length === 1 ? list[0] : `{${list.join(',')}}`;
+	}
+
+	/**
+	 * Bind the workspace-search primitives that `searchMentions` needs. Kept
+	 * separate from the search itself so the ranking and matching logic stays
+	 * unit-testable without an extension host.
+	 */
+	private _mentionSearchDeps(): MentionSearchDeps {
+		const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+		const workspaceRoot = workspaceFolder?.uri.fsPath || process.cwd();
+		const exclude = this._mentionExcludeGlob(workspaceFolder?.uri);
+
+		return {
+			workspaceRoot,
+			openEditors: () => {
+				const paths: string[] = [];
+				for (const group of vscode.window.tabGroups.all) {
+					for (const tab of group.tabs) {
+						const input = tab.input;
+						if (input instanceof vscode.TabInputText && input.uri.scheme === 'file') {
+							paths.push(input.uri.fsPath);
+						}
+					}
+				}
+				return paths;
+			},
+			findFiles: async (glob, limit) => {
+				const uris = await vscode.workspace.findFiles(
+					workspaceFolder ? new vscode.RelativePattern(workspaceFolder, glob) : glob,
+					exclude,
+					limit,
+				);
+				return uris.map(uri => uri.fsPath);
+			},
+		};
+	}
+
+	private async _handleMentionCompletions(query: string, requestId: number) {
+		let items: MentionItem[] = [];
+		try {
+			items = await searchMentions(query, this._mentionSearchDeps());
+		} catch (error) {
+			this._outputChannel.appendLine(`[Mention] Search failed for "${query}": ${error}`);
+		}
+		// Answer even on failure, so the webview clears its in-flight state and
+		// the dropdown closes instead of hanging on a stale result set.
+		this.postMessage({ type: 'mentionCompletions', requestId, items });
+	}
+
+	/**
 	 * Expand @[file] and @[folder] references injected by the webview into
 	 * file/directory contents. This resolves attached context inline so the LLM
 	 * receives the content directly in the prompt, removing the need for a
@@ -367,13 +478,17 @@ export class ChatWebviewProvider
 				try {
 					if (kind === 'folder') {
 						// Emit a compact directory listing (names only, one per line)
-						const entries = fs.readdirSync(filePath, { withFileTypes: true });
-						const listing = entries
-							.map(e => (e.isDirectory() ? `${e.name}/` : e.name))
-							.join('\n');
+						const listing = readCappedDirectory(filePath);
 						return `<context path="${filePath}" type="directory">\n${listing}\n</context>`;
 					} else {
-						const content = fs.readFileSync(filePath, 'utf8');
+						// Capped rather than a bare readFileSync: `@` makes attaching
+						// a lockfile or a minified bundle one keystroke, and an
+						// uncapped read would silently eat the whole context window.
+						const content = readCappedFile(filePath);
+						if (content === null) {
+							this._outputChannel.appendLine(`[Context] Skipped unreadable or binary file ${filePath}`);
+							return `<!-- skipped ${filePath}: unreadable or binary -->`;
+						}
 						return `<context path="${filePath}">\n${content}\n</context>`;
 					}
 				} catch (err) {
@@ -457,6 +572,7 @@ export class ChatWebviewProvider
 		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.js')).with({ query: `v=${extVersion}` });
 		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.css')).with({ query: `v=${extVersion}` });
 		const markedUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'marked.min.js'));
+		const mentionUtilsUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'mention-utils.js')).with({ query: `v=${extVersion}` });
 		const nonce = getNonce();
 
 		html = html.replace(/\{\{cspSource\}\}/g, webview.cspSource);
@@ -464,6 +580,7 @@ export class ChatWebviewProvider
 		html = html.replace(/\{\{styleUri\}\}/g, styleUri.toString());
 		html = html.replace(/\{\{scriptUri\}\}/g, scriptUri.toString());
 		html = html.replace(/\{\{markedUri\}\}/g, markedUri.toString());
+		html = html.replace(/\{\{mentionUtilsUri\}\}/g, mentionUtilsUri.toString());
 
 		return html;
 	}
