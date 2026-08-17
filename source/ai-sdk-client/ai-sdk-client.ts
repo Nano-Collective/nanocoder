@@ -204,6 +204,7 @@ export class AISDKClient implements LLMClient {
 	 */
 	async generateStructuredObject<T>(
 		prompt: string,
+		// biome-ignore lint/suspicious/noExplicitAny: Zod schema typing varies
 		schema: any, // zod schema
 		system?: string,
 		signal?: AbortSignal,
@@ -231,16 +232,46 @@ export class AISDKClient implements LLMClient {
 			}
 		})();
 
-		const result = await generateObject({
-			model,
-			schema,
-			prompt,
-			system,
-			abortSignal: signal,
-			maxRetries: this.maxRetries,
-		});
+		try {
+			const result = await generateObject({
+				model,
+				schema,
+				prompt,
+				system,
+				abortSignal: signal,
+				maxRetries: this.maxRetries,
+			});
 
-		return result.object as T;
+			return result.object as T;
+		} catch (error) {
+			// Fallback: If the provider gateway strips JSON schema parameters and fails generateObject,
+			// try regular text generation and manually extract JSON from markdown blocks.
+			const {generateText} = await import('ai');
+
+			const fallbackPrompt = `${prompt}\n\nYou MUST respond ONLY with valid JSON. Do not include markdown formatting, backticks, or any conversational text.`;
+
+			const textResult = await generateText({
+				model,
+				prompt: fallbackPrompt,
+				system,
+				abortSignal: signal,
+				maxRetries: this.maxRetries,
+			});
+
+			const text = textResult.text;
+			// Extract JSON from markdown blocks if present (in case it ignores our instruction)
+			const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+			const jsonString = jsonMatch ? (jsonMatch[1] as string) : text;
+
+			try {
+				const parsed = JSON.parse(jsonString);
+				return schema.parse(parsed) as T;
+			} catch (_parseError) {
+				throw new Error(
+					`Failed to parse response: ${error instanceof Error ? error.message : String(error)}. Fallback extraction also failed: ${text.substring(0, 100)}...`,
+				);
+			}
+		}
 	}
 
 	clearContext(): Promise<void> {

@@ -23,6 +23,8 @@ export interface SwarmConfig {
 	workers: number;
 	swarmMode: 'review' | 'apply' | 'yolo';
 	restrictedScope?: string | string[];
+	provider?: string;
+	model?: string;
 }
 
 /**
