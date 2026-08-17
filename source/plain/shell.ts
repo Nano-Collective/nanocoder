@@ -142,7 +142,7 @@ export async function runPlainShell(
 	const availableNames = toolManager.getAvailableToolNames(
 		tune,
 		developmentMode,
-		undefined,
+		['ask_user', 'agent'], // Disable interactive tools in headless mode
 		model,
 	);
 	const basePrompt = buildSystemPrompt(

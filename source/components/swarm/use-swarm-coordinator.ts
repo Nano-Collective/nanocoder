@@ -1,4 +1,5 @@
-import {execFile, spawn} from 'node:child_process';
+import {execFile, execSync, spawn} from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import {promisify} from 'node:util';
 import {useEffect, useRef, useState} from 'react';
@@ -59,12 +60,14 @@ export function useSwarmCoordinator(config: SwarmConfig, client?: LLMClient) {
 
 	async function runSwarm() {
 		let tasks: TaskDefinition[] = [];
+		let localPreSwarmCommit: string | undefined;
 		try {
 			// 1. Capture preSwarmCommit
 			setStatus('starting');
 			const {stdout} = await execFileAsync('git', ['rev-parse', 'HEAD']);
 			const commit = stdout.trim();
 			setPreSwarmCommit(commit);
+			localPreSwarmCommit = commit;
 
 			// 2. Decomposition
 			setStatus('decomposing');
@@ -84,7 +87,17 @@ export function useSwarmCoordinator(config: SwarmConfig, client?: LLMClient) {
 						`Decompose the following goal into exactly ${config.workers} parallel subtasks.\nGoal: ${config.prompt}`,
 						TaskSchema,
 						`You are the Swarm Coordinator. Your job is to break down goals into strictly independent tasks.
-IMPORTANT: You MUST ensure that the fileScope arrays for different workers are MUTUALLY EXCLUSIVE. No two workers can be allowed to edit the same file or directory.`,
+IMPORTANT: You MUST ensure that the fileScope arrays for different workers are MUTUALLY EXCLUSIVE. No two workers can be allowed to edit the same file or directory.
+IMPORTANT: You MUST respond with a valid JSON object matching this exact shape:
+{
+  "tasks": [
+    {
+      "id": "worker-1",
+      "description": "Task description here",
+      "fileScope": ["path/to/file1.ts"]
+    }
+  ]
+}`,
 					);
 
 					tasks = result.tasks;
@@ -124,13 +137,35 @@ IMPORTANT: You MUST ensure that the fileScope arrays for different workers are M
 			// 3. Worker Spawning
 			setStatus('spawning');
 
-			// Resolve the path to the nanocoder CLI entry point
-			const cliPath = process.argv[1] || process.argv[0];
+			// Resolve the absolute path to the nanocoder CLI entry point from the current cwd
+			// (because the child runs in the worktree where dist/ might not be present)
+			const cliPath = path.resolve(
+				process.cwd(),
+				process.argv[1] || process.argv[0],
+			);
 
 			// Create worktrees and spawn processes
 			const workerPromises = tasks.map(async task => {
 				const branchName = `nanocoder-swarm-${task.id}`;
 				const targetPath = `.nanocoder/worktrees/${task.id}`;
+
+				// Cleanup old state just in case an old run crashed
+				try {
+					const resolvedTarget = path.resolve(process.cwd(), targetPath);
+					if (fs.existsSync(resolvedTarget)) {
+						execSync(`rm -rf "${resolvedTarget}"`);
+					}
+					execSync(`git worktree remove "${resolvedTarget}" --force`, {
+						stdio: 'ignore',
+					});
+				} catch (_e) {
+					// Ignore
+				}
+				try {
+					execSync(`git branch -D ${branchName}`, {stdio: 'ignore'});
+				} catch (_e) {
+					// Ignore
+				}
 
 				// Synchronous creation
 				createWorktree(branchName, targetPath);
@@ -149,6 +184,11 @@ IMPORTANT: You MUST ensure that the fileScope arrays for different workers are M
 							? ['--restricted-scope', task.fileScope.join(',')]
 							: [];
 
+					const providerArgs = config.provider
+						? ['--provider', config.provider]
+						: [];
+					const modelArgs = config.model ? ['--model', config.model] : [];
+
 					const child = spawn(
 						process.execPath,
 						[
@@ -158,6 +198,9 @@ IMPORTANT: You MUST ensure that the fileScope arrays for different workers are M
 							'yolo',
 							'--json',
 							'--telemetry',
+							'--trust-directory',
+							...providerArgs,
+							...modelArgs,
 							...scopeArgs,
 							task.description,
 						],
@@ -193,7 +236,10 @@ IMPORTANT: You MUST ensure that the fileScope arrays for different workers are M
 									// Heartbeat / turn update
 								}
 							} catch (_e) {
-								// Ignore non-JSON stderr lines
+								fs.appendFileSync(
+									`.nanocoder/worker-${task.id}-error.log`,
+									line + '\n',
+								);
 							}
 						}
 					});
@@ -202,9 +248,14 @@ IMPORTANT: You MUST ensure that the fileScope arrays for different workers are M
 						if (code === 0) {
 							// Parse the final output just in case there's summary usage in the final report
 							try {
-								const finalReport = JSON.parse(
-									jsonBuffer.trim().split('\n').pop() || '{}',
-								);
+								// Find the start of the JSON object (in case of preceding warnings)
+								const bufferStr = jsonBuffer.trim();
+								const jsonStart = bufferStr.indexOf('{');
+								if (jsonStart === -1) {
+									throw new Error('No JSON object found in output');
+								}
+								const finalReport = JSON.parse(bufferStr.substring(jsonStart));
+
 								if (finalReport.usage) {
 									setWorkers(prev =>
 										prev.map(w =>
@@ -238,15 +289,25 @@ IMPORTANT: You MUST ensure that the fileScope arrays for different workers are M
 								);
 							}
 						} else {
+							fs.writeFileSync(
+								`.nanocoder/worker-${task.id}-stdout.json`,
+								jsonBuffer,
+							);
 							setWorkers(prev =>
 								prev.map(w =>
 									w.id === task.id
-										? {...w, status: 'failed', error: `Exit code ${code}`}
+										? {
+												...w,
+												status: 'failed',
+												error: `Exit 1. See .nanocoder/worker-${task.id}-stdout.json`,
+											}
 										: w,
 								),
 							);
 							reject(
-								new Error(`Worker ${task.id} failed with exit code ${code}`),
+								new Error(
+									`Worker ${task.id} failed with exit code ${code}. Output saved.`,
+								),
 							);
 						}
 					});
@@ -271,20 +332,24 @@ IMPORTANT: You MUST ensure that the fileScope arrays for different workers are M
 
 			// Phase 3D: Merge
 			setStatus('merging');
-			if (!preSwarmCommit) {
+			if (!localPreSwarmCommit) {
 				throw new Error('Pre-swarm commit not found during merge');
 			}
-			await executeSwarmMerge(tasks, preSwarmCommit, process.cwd());
+			await executeSwarmMerge(tasks, localPreSwarmCommit, process.cwd());
 
 			setStatus('complete');
 		} catch (err) {
+			fs.writeFileSync(
+				'.nanocoder/swarm-error.log',
+				err instanceof Error ? err.stack || err.message : String(err),
+			);
 			setError(err instanceof Error ? err.message : String(err));
 			setStatus('rolling_back');
 
 			// Cleanup worktrees and rollback
-			if (preSwarmCommit) {
+			if (localPreSwarmCommit) {
 				try {
-					await executeSwarmRollback(tasks, preSwarmCommit, process.cwd());
+					await executeSwarmRollback(tasks, localPreSwarmCommit, process.cwd());
 				} catch (rollbackErr) {
 					setError(`Rollback failed: ${rollbackErr}`);
 				}
