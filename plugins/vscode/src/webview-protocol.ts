@@ -106,6 +106,33 @@ export interface ExtensionMessagePathInfoResolved {
 	kind: 'file' | 'folder';
 }
 
+/** One `@` autocomplete suggestion. */
+export interface MentionItem {
+	/** Absolute path — what the composer stores in `attachedPaths`. */
+	path: string;
+	/** Basename: the chip label and the dropdown's primary line. */
+	name: string;
+	/** Workspace-relative, forward slashes — the dropdown's secondary line. */
+	relPath: string;
+	kind: 'file' | 'folder';
+	/** Currently open in an editor tab, which both ranks it up and labels it. */
+	isEditor: boolean;
+}
+
+/**
+ * Ranked `@` autocomplete suggestions.
+ *
+ * `requestId` echoes the webview's request. postMessage delivery is async, so
+ * a fast typist can have several searches in flight at once and they can land
+ * out of order — the webview drops any response whose id is not the newest,
+ * otherwise the dropdown flickers back to results for an older query.
+ */
+export interface ExtensionMessageMentionCompletions {
+	type: 'mentionCompletions';
+	requestId: number;
+	items: MentionItem[];
+}
+
 export type ExtensionToWebviewMessage =
 	| ExtensionMessageAppendMessage
 	| ExtensionMessageAppendThought
@@ -122,7 +149,8 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageSessionLoaded
 	| ExtensionMessagePathInfoResolved
 	| ExtensionMessageCopyLastCodeBlock
-	| ExtensionMessageCopyResult;
+	| ExtensionMessageCopyResult
+	| ExtensionMessageMentionCompletions;
 
 
 // ---------------------------------------------------------
@@ -225,6 +253,20 @@ export interface WebviewMessageCopyToClipboard {
 	text: string;
 }
 
+/**
+ * Ask the host to resolve an `@` query. Searching lives on the host because
+ * only the host can reach `vscode.workspace.findFiles` and the user's
+ * `files.exclude` / `search.exclude` settings, and because shipping a whole
+ * workspace file list into the webview would be megabytes on a large repo.
+ * Note `findFiles` does *not* honour those settings on its own once an explicit
+ * exclude is passed - see `_mentionExcludeGlob` in `chat-webview-provider.ts`.
+ */
+export interface WebviewMessageRequestMentionCompletions {
+	type: 'requestMentionCompletions';
+	query: string;
+	requestId: number;
+}
+
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
 	| WebviewMessageSubmitMessage
@@ -244,4 +286,5 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageRequestOpenDialog
 	| WebviewMessageOpenPath
 	| WebviewMessageShowError
-	| WebviewMessageCopyToClipboard;
+	| WebviewMessageCopyToClipboard
+	| WebviewMessageRequestMentionCompletions;

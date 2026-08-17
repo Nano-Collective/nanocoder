@@ -11,6 +11,23 @@
 
 	let attachedPaths = []; // [{path, name, kind: 'file'|'folder'}]
 
+	// ── @ mention autocomplete state ────────────────────────
+	const mentionDropdown = document.getElementById('mention-dropdown');
+
+	/** Only the file search is debounced; a bare `@` answers immediately. */
+	const MENTION_DEBOUNCE_MS = 120;
+
+	let mentionOpen = false;
+	let mentionItems = [];
+	let mentionRows = [];
+	let mentionActiveIndex = 0;
+	/** The {start, query} token the current results belong to. */
+	let mentionToken = null;
+	/** Newest request id. Responses that do not match it are stale — see below. */
+	let mentionRequestId = 0;
+	let mentionLastQuery = null;
+	let mentionDebounceTimer = null;
+
 	const imageUpload = document.getElementById('image-upload');
 	const imagePreviewContainer = document.getElementById('image-preview-container');
 	
@@ -119,6 +136,218 @@
 		document.getElementById('model-dropdown').classList.add('hidden');
 		document.getElementById('mode-dropdown').classList.add('hidden');
 		if (addMenuDropdown) addMenuDropdown.classList.add('hidden');
+	}
+
+	// ── @ mention autocomplete ──────────────────────────────
+	// Selecting a suggestion pushes into `attachedPaths`, exactly as the 📎
+	// attach button does. Everything downstream — chip rendering, the
+	// `@[file] <path>` serialization in submitMessage, and host-side expansion
+	// — is therefore untouched by this feature.
+
+	// The trigger rules and token arithmetic live in mention-utils.js so they
+	// can be unit tested in Node — this file is one DOM-bound IIFE and none of
+	// it is reachable from a test runner.
+	const { findMentionQuery, removeMentionToken } = globalThis.NanocoderMentionUtils;
+
+	function closeMention() {
+		mentionOpen = false;
+		mentionItems = [];
+		mentionRows = [];
+		mentionActiveIndex = 0;
+		mentionToken = null;
+		mentionLastQuery = null;
+		if (mentionDebounceTimer) {
+			clearTimeout(mentionDebounceTimer);
+			mentionDebounceTimer = null;
+		}
+		// Invalidate anything still in flight so a late response cannot reopen
+		// the dropdown after the user has moved on.
+		mentionRequestId++;
+		chatInput.removeAttribute('aria-activedescendant');
+		chatInput.setAttribute('aria-expanded', 'false');
+		if (mentionDropdown) {
+			mentionDropdown.classList.add('hidden');
+			mentionDropdown.innerHTML = '';
+		}
+	}
+
+	function requestMentions(token) {
+		// input and selectionchange both fire per keystroke, so the same query
+		// arrives here twice. Compared against the last *requested* query
+		// rather than the last rendered one — while a search is in flight
+		// nothing is open yet, so an `mentionOpen` check would let the
+		// duplicate through. closeMention() clears this, so reopening the same
+		// mention still re-searches.
+		//
+		// Note this guards the *search* only. `mentionToken` is assigned by
+		// syncMentionState before we get here, because two mentions can share a
+		// query while sitting at different offsets.
+		if (mentionLastQuery === token.query) {
+			return;
+		}
+		mentionLastQuery = token.query;
+		vscode.postMessage({
+			type: 'requestMentionCompletions',
+			query: token.query,
+			requestId: ++mentionRequestId
+		});
+	}
+
+	/** Re-evaluate whether the caret sits in a mention, and refresh results. */
+	function syncMentionState() {
+		if (!mentionDropdown) return;
+
+		// A range selection is not a caret position; treat it as "not mentioning".
+		if (chatInput.selectionStart !== chatInput.selectionEnd) {
+			closeMention();
+			return;
+		}
+
+		const token = findMentionQuery(chatInput.value, chatInput.selectionStart);
+		if (!token) {
+			closeMention();
+			return;
+		}
+
+		// Assigned here rather than in requestMentions, which the dedupe below
+		// can skip. `@foo @foo` shares one query across two offsets, so moving
+		// the caret from the second to the first short-circuits the search and
+		// would otherwise leave `start` pointing at the mention the user just
+		// left — accepting then adds the chip but strips the wrong `@foo`.
+		mentionToken = token;
+
+		if (mentionDebounceTimer) {
+			clearTimeout(mentionDebounceTimer);
+			mentionDebounceTimer = null;
+		}
+
+		// A bare `@` is answered from open editor tabs with no filesystem
+		// search, so there is nothing to debounce — waiting would just make the
+		// first keystroke feel laggy.
+		if (token.query === '') {
+			requestMentions(token);
+			return;
+		}
+
+		mentionDebounceTimer = setTimeout(() => {
+			mentionDebounceTimer = null;
+			requestMentions(token);
+		}, MENTION_DEBOUNCE_MS);
+	}
+
+	function highlightMention() {
+		mentionRows.forEach((row, index) => {
+			const isActive = index === mentionActiveIndex;
+			row.classList.toggle('bg-vscode-list-active', isActive);
+			row.classList.toggle('text-vscode-list-activeFg', isActive);
+			row.setAttribute('aria-selected', isActive ? 'true' : 'false');
+			if (isActive) {
+				// The listbox is a sibling of the textarea, so focus never moves
+				// into it. Without this pointer a screen reader announces the
+				// dropdown opening but never which row the arrow keys landed on.
+				chatInput.setAttribute('aria-activedescendant', row.id);
+				row.scrollIntoView({ block: 'nearest' });
+			}
+		});
+	}
+
+	function renderMentionDropdown() {
+		mentionDropdown.innerHTML = '';
+		mentionRows = [];
+
+		// Nothing matched — close rather than show an empty popup. This is also
+		// what makes a stray `@word` in prose harmless.
+		if (mentionItems.length === 0) {
+			closeMention();
+			return;
+		}
+
+		mentionItems.forEach((item, index) => {
+			const row = document.createElement('div');
+			row.className = 'flex items-center gap-2 px-3 py-1.5 cursor-pointer text-[0.9em] text-vscode-dropdown-fg hover:bg-vscode-list-hover transition-colors';
+			row.setAttribute('role', 'option');
+			// aria-activedescendant refers to a row by id, so every row needs one.
+			row.id = 'mention-option-' + index;
+
+			const iconSpan = document.createElement('span');
+			iconSpan.className = 'shrink-0 opacity-70 flex items-center';
+			iconSpan.appendChild(item.kind === 'folder' ? createFolderIcon() : createFileIcon());
+
+			const textSpan = document.createElement('span');
+			textSpan.className = 'flex flex-col min-w-0 flex-1';
+
+			// textContent, never innerHTML: file names are arbitrary user data.
+			const nameSpan = document.createElement('span');
+			nameSpan.className = 'truncate';
+			nameSpan.textContent = item.name;
+
+			const pathSpan = document.createElement('span');
+			pathSpan.className = 'truncate opacity-50 text-[0.85em]';
+			pathSpan.textContent = item.isEditor
+				? 'open · ' + item.relPath
+				: item.relPath;
+
+			textSpan.appendChild(nameSpan);
+			textSpan.appendChild(pathSpan);
+			row.appendChild(iconSpan);
+			row.appendChild(textSpan);
+
+			// mousedown rather than click: click would let the textarea blur
+			// first, and the blur handler closes the dropdown before the
+			// selection lands.
+			row.addEventListener('mousedown', e => {
+				e.preventDefault();
+				acceptMention(index);
+			});
+			row.addEventListener('mouseenter', () => {
+				mentionActiveIndex = index;
+				highlightMention();
+			});
+
+			mentionDropdown.appendChild(row);
+			mentionRows.push(row);
+		});
+
+		mentionDropdown.classList.remove('hidden');
+		mentionOpen = true;
+		chatInput.setAttribute('aria-expanded', 'true');
+		highlightMention();
+	}
+
+	function acceptMention(index) {
+		const item = mentionItems[index];
+		if (!item || !mentionToken) return;
+
+		// Drop the `@query` text: the chosen path becomes a chip instead, so
+		// nothing is substituted back into the textarea. The whole token goes,
+		// not just up to the caret — accepting from the middle of `@src/foo`
+		// has to take the trailing `/foo` with it.
+		const removed = removeMentionToken(chatInput.value, mentionToken.start);
+		chatInput.value = removed.text;
+		chatInput.setSelectionRange(removed.cursor, removed.cursor);
+		// The textarea was sized around the token we just removed.
+		chatInput.style.height = 'auto';
+		chatInput.style.height = chatInput.scrollHeight + 'px';
+
+		if (!attachedPaths.some(a => a.path === item.path)) {
+			attachedPaths.push({ path: item.path, name: item.name, kind: item.kind });
+			renderChips();
+		}
+
+		closeMention();
+		chatInput.focus();
+	}
+
+	if (mentionDropdown) {
+		chatInput.addEventListener('input', syncMentionState);
+		chatInput.addEventListener('blur', closeMention);
+		// Catches caret moves that fire no input event — arrow keys, clicking
+		// into the middle of an existing mention, undo.
+		document.addEventListener('selectionchange', () => {
+			if (document.activeElement === chatInput) {
+				syncMentionState();
+			}
+		});
 	}
 
 	function toggleHistoryView() {
@@ -489,6 +718,41 @@
 
 	// Handle Enter to submit (Shift+Enter for newline)
 	chatInput.addEventListener('keydown', (e) => {
+		// Mention navigation has to win over Enter-to-submit. Handled at the top
+		// of this same listener rather than in a second one, because two
+		// listeners on the same element would race and Enter could submit the
+		// message when the user meant to accept a completion.
+		if (mentionOpen) {
+			if (e.key === 'ArrowDown') {
+				e.preventDefault();
+				mentionActiveIndex = (mentionActiveIndex + 1) % mentionItems.length;
+				highlightMention();
+				return;
+			}
+			if (e.key === 'ArrowUp') {
+				e.preventDefault();
+				mentionActiveIndex = (mentionActiveIndex - 1 + mentionItems.length) % mentionItems.length;
+				highlightMention();
+				return;
+			}
+			if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+				e.preventDefault();
+				acceptMention(mentionActiveIndex);
+				return;
+			}
+			if (e.key === 'Escape') {
+				e.preventDefault();
+				// The document-level handler below cancels the in-flight request
+				// on Escape whenever isProcessing. Without stopPropagation,
+				// dismissing the dropdown mid-stream would also kill the run.
+				e.stopPropagation();
+				closeMention();
+				return;
+			}
+			// Shift+Enter falls through: the newline is inserted, and the
+			// resulting whitespace closes the mention via syncMentionState.
+		}
+
 		if (e.key === 'Enter' && !e.shiftKey) {
 			e.preventDefault();
 			submitMessage();
@@ -559,7 +823,9 @@
 			images: imagesToSubmit
 		});
 
-		// Clear input
+		// Clear input. Close the mention first — its token offsets point into
+		// text that is about to disappear.
+		closeMention();
 		chatInput.value = '';
 		chatInput.style.height = 'auto';
 		pendingImages = [];
@@ -1135,6 +1401,16 @@
 			case 'toggleHistory':
 				toggleHistoryView();
 				break;
+			case 'mentionCompletions': {
+				// postMessage delivery is async and can land out of order, so a
+				// fast typist gets responses for stale queries. Only the newest
+				// request may paint, otherwise the list flickers backwards.
+				if (message.requestId !== mentionRequestId) break;
+				mentionItems = Array.isArray(message.items) ? message.items : [];
+				mentionActiveIndex = 0;
+				renderMentionDropdown();
+				break;
+			}
 			case 'pathInfoResolved': {
 				const { path, name, kind } = message;
 				if (!attachedPaths.some(a => a.path === path)) {
