@@ -26,12 +26,11 @@ export class TimelineManager {
 	constructor(workspaceRoot: string, sessionId: string) {
 		this.assertSafeId(sessionId);
 		this.workspaceRoot = workspaceRoot;
-		// nosemgrep
 		this.timelineDir = path.join(
-			workspaceRoot,
+			workspaceRoot, // nosemgrep
 			'.nanocoder',
 			'timeline',
-			sessionId,
+			sessionId, // nosemgrep
 		);
 		this.fileSnapshotService = new FileSnapshotService(workspaceRoot);
 	}
