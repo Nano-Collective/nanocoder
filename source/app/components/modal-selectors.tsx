@@ -6,17 +6,19 @@ import SessionSelector from '@/components/session-selector';
 import type {ActiveMode} from '@/hooks/useAppState';
 import type {CheckpointListItem, TuneConfig} from '@/types';
 import {ProviderWizard} from '@/wizards/provider-wizard';
-import {SettingsSelector, type SettingsTabId} from './settings-tabs';
+import type {SettingsTabId} from './settings-constants';
+import {SettingsSelector} from './settings-tabs';
 import {TuneSelector} from './tune-selector';
 
 export interface ModalSelectorsProps {
 	onLaunchTune?: () => void;
 	onLaunchIde?: () => void;
 	onMcpChanged?: () => void | Promise<void>;
-	onProvidersChanged?: (configPath: string) => void | Promise<void>;
+	onProvidersChanged?: () => void | Promise<void>;
 	activeMode: ActiveMode;
 	isSettingsMode: boolean;
-	settingsTab?: SettingsTabId;
+	settingsInitialTab?: SettingsTabId;
+	onSettingsTabChange?: (tab: SettingsTabId) => void;
 	showAllSessions: boolean;
 
 	// Current values
@@ -62,6 +64,8 @@ export interface ModalSelectorsProps {
 export function ModalSelectors({
 	activeMode,
 	isSettingsMode,
+	settingsInitialTab,
+	onSettingsTabChange,
 	showAllSessions,
 	currentModel,
 	currentProvider,
@@ -80,7 +84,6 @@ export function ModalSelectors({
 	onLaunchIde,
 	onMcpChanged,
 	onProvidersChanged,
-	settingsTab,
 	tuneConfig,
 	onTuneSelect,
 	onTuneCancel,
@@ -114,7 +117,8 @@ export function ModalSelectors({
 				onLaunchIde={onLaunchIde}
 				onMcpChanged={onMcpChanged}
 				onProvidersChanged={onProvidersChanged}
-				initialTab={settingsTab}
+				initialTab={settingsInitialTab}
+				onTabChange={onSettingsTabChange}
 			/>
 		);
 	}

@@ -18,7 +18,7 @@ export function SettingsProvidersListPanel({
 }: {
 	onBack: () => void;
 	onCancel: () => void;
-	onProvidersChanged?: (configPath: string) => void | Promise<void>;
+	onProvidersChanged?: () => void | Promise<void>;
 }) {
 	const {colors} = useTheme();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
@@ -36,9 +36,11 @@ export function SettingsProvidersListPanel({
 		return (
 			<ProviderWizard
 				projectDir={process.cwd()}
-				onComplete={configPath => {
-					void onProvidersChanged?.(configPath);
-					onBack();
+				onComplete={async () => {
+					// Rebuild the client for current provider/model without clearing
+					// messages. The parent owns closing the editing state.
+					await onProvidersChanged?.();
+					setEditing(false);
 				}}
 				onCancel={() => setEditing(false)}
 			/>

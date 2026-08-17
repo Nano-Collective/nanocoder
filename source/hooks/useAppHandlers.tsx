@@ -1,5 +1,6 @@
 import {randomBytes} from 'node:crypto';
 import React from 'react';
+import type {SettingsTabId} from '@/app/components/settings-constants';
 import {
 	createClearMessagesHandler,
 	handleMessageSubmission,
@@ -105,9 +106,7 @@ interface UseAppHandlersProps {
 	// Mode handlers
 	enterModelSelectionMode: () => void;
 	enterModelDatabaseMode: () => void;
-	enterSettingsMode: (
-		tab?: import('@/app/components/settings-tabs').SettingsTabId,
-	) => void;
+	enterSettingsMode: (tab?: SettingsTabId) => void;
 	enterExplorerMode: () => void;
 	enterIdeSelectionMode: () => void;
 	enterTune: () => void;

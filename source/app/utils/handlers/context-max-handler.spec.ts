@@ -12,7 +12,6 @@ function createOptions(overrides: Partial<MessageSubmissionOptions> = {}): Messa
 		onEnterModelSelectionMode: () => {},
 		onEnterProviderSelectionMode: () => {},
 		onEnterModelDatabaseMode: () => {},
-		onEnterConfigWizardMode: () => {},
 		onEnterSettingsMode: () => {},
 		onEnterExplorerMode: () => {},
 		onEnterIdeSelectionMode: () => {},

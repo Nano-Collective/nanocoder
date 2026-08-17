@@ -3,6 +3,7 @@ import React from 'react';
 import {ChatHistory} from '@/app/components/chat-history';
 import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
+import type {SettingsTabId} from '@/app/components/settings-constants';
 import {FileExplorer} from '@/components/file-explorer';
 import {IdeSelector} from '@/components/ide-selector';
 import PlanReviewPrompt from '@/components/plan-review-prompt';
@@ -78,12 +79,16 @@ export function InteractiveApp({
 	// Tune / IDE are launched by closing settings first, so their exit has no way
 	// to know it should land back in settings rather than in chat.
 	const launchedFromSettingsRef = React.useRef(false);
+	// Track which tab was active when launching Tune/IDE so we can return to it.
+	const launchedFromTabRef = React.useRef<SettingsTabId | undefined>(undefined);
 	const returnFromLaunchedWizard = React.useCallback(
 		(exit: () => void) => () => {
 			exit();
 			if (launchedFromSettingsRef.current) {
 				launchedFromSettingsRef.current = false;
-				modeHandlers.enterSettingsMode();
+				// Return to the tab that was active when the wizard was launched.
+				modeHandlers.enterSettingsMode(launchedFromTabRef.current);
+				launchedFromTabRef.current = undefined;
 			}
 		},
 		[modeHandlers],
@@ -335,6 +340,8 @@ export function InteractiveApp({
 						<ModalSelectors
 							activeMode={appState.activeMode}
 							isSettingsMode={appState.isSettingsMode}
+							settingsInitialTab={appState.settingsActiveTab}
+							onSettingsTabChange={appState.setSettingsActiveTab}
 							showAllSessions={appState.showAllSessions}
 							currentModel={appState.currentModel}
 							currentProvider={appState.currentProvider}
@@ -345,18 +352,18 @@ export function InteractiveApp({
 							onConfigWizardComplete={modeHandlers.handleConfigWizardComplete}
 							onConfigWizardCancel={modeHandlers.handleConfigWizardCancel}
 							onSettingsCancel={modeHandlers.handleSettingsCancel}
-							settingsTab={appState.settingsTab}
+							onProvidersChanged={modeHandlers.reloadProviders}
 							onMcpChanged={modeHandlers.reloadMcpServers}
-							onProvidersChanged={async configPath => {
-								modeHandlers.handleSettingsCancel();
-								await modeHandlers.handleConfigWizardComplete(configPath);
-							}}
 							onLaunchTune={() => {
+								// Capture the current tab before closing settings.
+								launchedFromTabRef.current = appState.settingsActiveTab;
 								launchedFromSettingsRef.current = true;
 								modeHandlers.handleSettingsCancel();
 								modeHandlers.enterTune();
 							}}
 							onLaunchIde={() => {
+								// Capture the current tab before closing settings.
+								launchedFromTabRef.current = appState.settingsActiveTab;
 								launchedFromSettingsRef.current = true;
 								modeHandlers.handleSettingsCancel();
 								modeHandlers.enterIdeSelectionMode();

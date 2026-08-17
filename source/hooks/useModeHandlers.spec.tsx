@@ -13,7 +13,7 @@ process.env.NANOCODER_CONFIG_DIR = mkdtempSync(
 const {resetPreferencesCache} = await import('@/config/preferences');
 resetPreferencesCache();
 
-import type {SettingsTabId} from '@/app/components/settings-tabs';
+import type {SettingsTabId} from '@/app/components/settings-constants';
 import type {ActiveMode} from '@/hooks/useAppState';
 import type {LLMClient, Message} from '@/types/core';
 import type {AIProviderConfig, TuneConfig} from '@/types/config';
@@ -73,7 +73,7 @@ function setup(probe: ProbeProps = {}) {
 	const setMessages = spy<[Message[]]>();
 	const setActiveMode = spy<[ActiveMode]>();
 	const setIsSettingsMode = spy<[boolean]>();
-	const setSettingsTab = spy<[SettingsTabId | undefined]>();
+	const setSettingsActiveTab = spy<[SettingsTabId | undefined]>();
 	const addToChatQueue = spy<[React.ReactNode]>();
 	const reinitializeMCPServers = spy<[unknown]>();
 	const setTune = spy<[TuneConfig]>();
@@ -91,7 +91,7 @@ function setup(probe: ProbeProps = {}) {
 		getMessageTokens: () => 0,
 		setActiveMode,
 		setIsSettingsMode,
-		setSettingsTab,
+		setSettingsActiveTab,
 		addToChatQueue,
 		reinitializeMCPServers: async () => {
 			reinitializeMCPServers(undefined);
@@ -108,7 +108,7 @@ function setup(probe: ProbeProps = {}) {
 		setMessages,
 		setActiveMode,
 		setIsSettingsMode,
-		setSettingsTab,
+		setSettingsActiveTab,
 		addToChatQueue,
 		setTune,
 	};
@@ -285,11 +285,33 @@ test('handleConfigWizardComplete with no path only exits mode', async t => {
 	t.is(addToChatQueue.calls.length, 0);
 });
 
+test('reloadProviders leaves the conversation and settings panel intact', async t => {
+	const {
+		handlers,
+		setMessages,
+		setActiveMode,
+		setIsSettingsMode,
+		addToChatQueue,
+	} = setup({client: createMockClient()});
+
+	await handlers.reloadProviders();
+
+	// This is why reloadProviders exists rather than reusing
+	// handleConfigWizardComplete: editing a provider mid-session must not wipe
+	// the model's history or tear down the settings panel around the user.
+	// These hold whether the rebuild succeeds or fails - handleConfigWizardComplete
+	// would have called exitMode() before it ever reached the client swap.
+	t.is(setMessages.calls.length, 0, 'conversation history is left alone');
+	t.is(setActiveMode.calls.length, 0, 'does not exit the current mode');
+	t.is(setIsSettingsMode.calls.length, 0, 'leaves the settings panel open');
+	t.is(addToChatQueue.calls.length, 1, 'reports the outcome exactly once');
+});
+
 test('enterSettingsMode forwards the requested tab', t => {
-	const {handlers, setSettingsTab} = setup();
+	const {handlers, setSettingsActiveTab} = setup();
 
 	handlers.enterSettingsMode('mcp');
 	handlers.enterSettingsMode();
 
-	t.deepEqual(setSettingsTab.calls, [['mcp'], [undefined]]);
+	t.deepEqual(setSettingsActiveTab.calls, [['mcp'], [undefined]]);
 });

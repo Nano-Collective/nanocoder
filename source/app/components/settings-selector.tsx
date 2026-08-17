@@ -28,6 +28,7 @@ import type {NotificationsConfig} from '@/types/config';
 import type {NanocoderShape, ThemePreset} from '@/types/ui';
 import {setNotificationsConfig} from '@/utils/notifications';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
+import type {SettingsTabId} from './settings-constants';
 
 /**
  * The set of "managed" settings panels: preserved full-featured sub-UIs that
@@ -66,12 +67,19 @@ export interface SettingsSelectorProps {
 	 */
 	onMcpChanged?: () => void | Promise<void>;
 	/**
-	 * Re-create the LLM client after the providers panel edits config. Same
-	 * reasoning as `onMcpChanged`: without it a provider added here only takes
-	 * effect on the next launch.
+	 * Rebuild the client for the current provider/model after the Providers panel
+	 * edits config, without clearing messages or resetting to default provider.
 	 */
-	onProvidersChanged?: (configPath: string) => void | Promise<void>;
-	initialTab?: import('./settings-tabs').SettingsTabId;
+	onProvidersChanged?: () => void | Promise<void>;
+	/**
+	 * The tab to open initially. Defaults to 'appearance' if not specified.
+	 */
+	initialTab?: SettingsTabId;
+	/**
+	 * Called when the active tab changes, so the parent can track it for
+	 * returning after launching wizards.
+	 */
+	onTabChange?: (tab: SettingsTabId) => void;
 }
 
 function ThemePreviewMessage({

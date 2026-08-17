@@ -6,6 +6,7 @@ import {
 	parseContextLimit,
 	parseCustomCommandArgs,
 } from './app-util.js';
+import {SETTINGS_TAB_IDS} from '@/app/components/settings-constants';
 import {lazyCommands} from '@/commands/lazy-registry';
 import BashProgress from '@/components/bash-progress';
 import type {MessageSubmissionOptions} from '@/types/index';
@@ -940,19 +941,37 @@ test('settings command - tab argument is case-insensitive', async t => {
 	t.is(captured, 'providers');
 });
 
-test('settings command - unknown tab still opens the default tab', async t => {
+test('settings command - unknown tab reports an error instead of opening', async t => {
 	let called = false;
-	let captured: string | undefined = 'unset';
+	const queue: React.ReactNode[] = [];
 	const options = createSettingsTestOptions({
-		onEnterSettingsMode: tab => {
+		onEnterSettingsMode: () => {
 			called = true;
-			captured = tab;
 		},
+		onAddToChatQueue: c => queue.push(c),
 		commandArgs: ['bogus'],
 	});
 	await handleMessageSubmission('/settings bogus', options);
-	t.true(called, 'settings should still open rather than erroring');
-	t.is(captured, undefined, 'unknown tab falls back to the default tab');
+	t.false(called, 'an unknown tab should not silently open the default tab');
+	t.true(
+		findMessageInQueue(queue, m => m.includes('Unknown settings tab: "bogus"')),
+		'the error names the offending argument',
+	);
+});
+
+test('settings command - unknown tab error lists the valid tabs', async t => {
+	const queue: React.ReactNode[] = [];
+	const options = createSettingsTestOptions({
+		onAddToChatQueue: c => queue.push(c),
+		commandArgs: ['providrs'],
+	});
+	await handleMessageSubmission('/settings providrs', options);
+	t.true(
+		findMessageInQueue(queue, m =>
+			SETTINGS_TAB_IDS.every(tab => m.includes(tab)),
+		),
+		'the error lists every valid tab so the typo is recoverable',
+	);
 });
 
 test('retired setup-providers - forwards to the settings providers tab', async t => {

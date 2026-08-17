@@ -415,7 +415,7 @@ export default function App({
 		getMessageTokens: appState.getMessageTokens,
 		setActiveMode: appState.setActiveMode,
 		setIsSettingsMode: appState.setIsSettingsMode,
-		setSettingsTab: appState.setSettingsTab,
+		setSettingsActiveTab: appState.setSettingsActiveTab,
 		addToChatQueue: appState.addToChatQueue,
 		reinitializeMCPServers: appInitialization.reinitializeMCPServers,
 		setTune: appState.setTune,

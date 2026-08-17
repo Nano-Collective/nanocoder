@@ -2,7 +2,7 @@ import React from 'react';
 import {
 	SETTINGS_TAB_IDS,
 	type SettingsTabId,
-} from '@/app/components/settings-tabs';
+} from '@/app/components/settings-constants';
 import {parseInput} from '@/command-parser';
 import {commandRegistry} from '@/commands';
 import {CodexLogin} from '@/commands/codex-login';
@@ -236,13 +236,8 @@ async function handleCustomCommand(
 	return true;
 }
 
-function resolveSettingsTab(
-	arg: string | undefined,
-): SettingsTabId | undefined {
-	const tab = arg?.toLowerCase();
-	return (SETTINGS_TAB_IDS as string[]).includes(tab ?? '')
-		? (tab as SettingsTabId)
-		: undefined;
+function isSettingsTabId(value: string): value is SettingsTabId {
+	return (SETTINGS_TAB_IDS as readonly string[]).includes(value);
 }
 
 /**
@@ -271,8 +266,6 @@ async function handleSpecialCommand(
 	const enterModeCommands: Record<string, () => void> = {
 		[SPECIAL_COMMANDS.MODEL]: onEnterModelSelectionMode,
 		[SPECIAL_COMMANDS.MODEL_DATABASE]: onEnterModelDatabaseMode,
-		[SPECIAL_COMMANDS.SETTINGS]: () =>
-			onEnterSettingsMode(resolveSettingsTab(commandArgs?.[0])),
 		[SPECIAL_COMMANDS.EXPLORER]: onEnterExplorerMode,
 		[SPECIAL_COMMANDS.IDE]: options.onEnterIdeSelectionMode,
 		[SPECIAL_COMMANDS.TUNE]: options.onEnterTune,
@@ -299,6 +292,27 @@ async function handleSpecialCommand(
 	}
 
 	switch (commandName) {
+		case SPECIAL_COMMANDS.SETTINGS: {
+			const rawTab = commandArgs?.[0];
+			const tabArg = rawTab?.toLowerCase();
+			let tab: SettingsTabId | undefined;
+			if (tabArg) {
+				if (!isSettingsTabId(tabArg)) {
+					onAddToChatQueue(
+						errorMsg(
+							`Unknown settings tab: "${rawTab}". Valid tabs: ${SETTINGS_TAB_IDS.join(', ')}`,
+							'settings-error',
+						),
+					);
+					setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
+					return true;
+				}
+				tab = tabArg;
+			}
+			onEnterSettingsMode(tab);
+			onCommandComplete?.();
+			return true;
+		}
 		case SPECIAL_COMMANDS.CLEAR:
 			await onClearMessages();
 			await clearAllTasks();

@@ -19,6 +19,7 @@ import {useTitleShape} from '@/hooks/useTitleShape';
 import {fuzzyScore} from '@/utils/fuzzy-matching';
 import {DEFAULT_SINGLE_LINE_PASTE_THRESHOLD} from '@/utils/paste-utils';
 import {SettingsAutoCompactPanel} from './settings-auto-compact';
+import {SETTINGS_TAB_IDS, type SettingsTabId} from './settings-constants';
 import {SettingsDefaultModePanel} from './settings-default-mode';
 import {SettingsEnvironmentPanel} from './settings-environment';
 import {SettingsJsonConfigPanel} from './settings-json-config';
@@ -48,29 +49,29 @@ import {SettingsWebSearchPanel} from './settings-web-search';
  * Every existing preference must be reachable from exactly one of these
  * its tabs.
  */
-export type SettingsTabId =
-	| 'appearance'
-	| 'input'
-	| 'behavior'
-	| 'providers'
-	| 'mcp'
-	| 'advanced';
 
 interface TabDefinition {
 	id: SettingsTabId;
 	label: string;
 }
 
-const TABS: TabDefinition[] = [
-	{id: 'appearance', label: 'Appearance'},
-	{id: 'input', label: 'Input'},
-	{id: 'behavior', label: 'Behavior'},
-	{id: 'providers', label: 'Providers'},
-	{id: 'mcp', label: 'MCP'},
-	{id: 'advanced', label: 'Advanced'},
-];
+/**
+ * Labels for each tab. Keyed by `SettingsTabId`, so adding an id to
+ * settings-constants.ts without a label here is a compile error.
+ */
+const TAB_LABELS: Record<SettingsTabId, string> = {
+	appearance: 'Appearance',
+	input: 'Input',
+	behavior: 'Behavior',
+	providers: 'Providers',
+	mcp: 'MCP',
+	advanced: 'Advanced',
+};
 
-export const SETTINGS_TAB_IDS: SettingsTabId[] = TABS.map(tab => tab.id);
+const TABS: TabDefinition[] = SETTINGS_TAB_IDS.map(id => ({
+	id,
+	label: TAB_LABELS[id],
+}));
 
 type SettingRow =
 	| {
@@ -383,7 +384,7 @@ function renderManagedPanel(
 	panel: ManagedSettingsPanel,
 	onBack: () => void,
 	onMcpChanged?: () => void | Promise<void>,
-	onProvidersChanged?: (configPath: string) => void | Promise<void>,
+	onProvidersChanged?: () => void | Promise<void>,
 ): ReactElement {
 	switch (panel) {
 		case 'theme':
@@ -502,13 +503,22 @@ export function SettingsSelector({
 	onMcpChanged,
 	onProvidersChanged,
 	initialTab,
+	onTabChange,
 }: SettingsSelectorProps) {
 	const {colors} = useTheme();
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
 
-	const [activeTab, setActiveTab] = useState<SettingsTabId>(
+	const [activeTab, setActiveTabState] = useState<SettingsTabId>(
 		initialTab ?? 'appearance',
 	);
+
+	// The only sanctioned way to change tabs: keeps the parent's tracked tab in
+	// step so returning from Tune/IDE lands back where the user was. Nothing
+	// should call setActiveTabState directly.
+	const updateActiveTab = (tab: SettingsTabId) => {
+		setActiveTabState(tab);
+		onTabChange?.(tab);
+	};
 	const [focus, setFocus] = useState<TabFocus>('header');
 	const [openPanel, setOpenPanel] = useState<ManagedSettingsPanel | null>(null);
 
@@ -594,7 +604,7 @@ export function SettingsSelector({
 	const goToTab = (direction: 1 | -1) => {
 		const idx = TABS.findIndex(t => t.id === activeTab);
 		const next = TABS[(idx + direction + TABS.length) % TABS.length];
-		if (next) setActiveTab(next.id);
+		if (next) updateActiveTab(next.id);
 	};
 
 	const activateRow = (row: SettingRow) => {
