@@ -14,6 +14,16 @@ const PANEL_SOURCE = readFileSync(
 	'utf8',
 );
 
+// chat-panel.html loads mention-utils.js ahead of chat-panel.js, which reads
+// its exports off globalThis at IIFE time. Boot it in the same order here or
+// the panel throws before any of it is reachable.
+const MENTION_UTILS_SOURCE = readFileSync(
+	fileURLToPath(
+		new URL('../../plugins/vscode/media/mention-utils.js', import.meta.url),
+	),
+	'utf8',
+);
+
 const SHELL_IDS = [
 	'add-image-btn',
 	'attach-btn',
@@ -237,6 +247,7 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	}
 
 	createContext(sandbox);
+	runInContext(MENTION_UTILS_SOURCE, sandbox);
 	runInContext(PANEL_SOURCE, sandbox);
 
 	const container = findById(root, 'messages-container') as StubElement;
