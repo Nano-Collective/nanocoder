@@ -1034,6 +1034,148 @@ test('runAcpConversation - parses XML tool calls when toolsDisabled', async t =>
 });
 
 // ============================================================================
+// Per-turn usage on the PromptResponse
+// ============================================================================
+
+test('runAcpConversation - accumulates provider-reported usage across the turn onto the PromptResponse', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+
+	setToolRegistryGetter(() => ({
+		read_file: async (args: any) => `Content of ${args.path}`,
+	}));
+
+	let callCount = 0;
+	const client = {
+		getCurrentModel: () => 'test-model',
+		chat: async () => {
+			callCount++;
+			if (callCount === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								content: 'Reading...',
+								tool_calls: [
+									createMockToolCall('read_file', {path: '/a.txt'}, 'call-1'),
+								],
+							},
+						},
+					],
+					usage: {inputTokens: 1000, outputTokens: 50, totalTokens: 1050},
+				};
+			}
+			return {
+				choices: [{message: {content: 'Done'}}],
+				usage: {inputTokens: 1200, outputTokens: 80, totalTokens: 1280},
+			};
+		},
+	} as unknown as LLMClient;
+
+	const result = await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(result.stopReason, 'end_turn');
+	t.deepEqual(result.usage, {
+		inputTokens: 2200,
+		outputTokens: 130,
+		totalTokens: 2330,
+	});
+});
+
+test('runAcpConversation - a total-only provider still reports usage on the PromptResponse', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	const client = {
+		getCurrentModel: () => 'test-model',
+		chat: async () => ({
+			choices: [{message: {content: 'Hello'}}],
+			usage: {totalTokens: 1500},
+		}),
+	} as unknown as LLMClient;
+
+	const result = await runAcpConversation({
+		session,
+		client,
+		toolManager: createMockToolManager() as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(result.stopReason, 'end_turn');
+	// Wire format zero-fills unreported fields (the ACP Usage type requires
+	// them), but the total carries the real figure. Internally the sparse
+	// {totalTokens} shape is what prices the turn — zero-filled input/output
+	// would take the wrong buildResponseUsage branch and cost out at $0
+	// (covered by the lump-sum test in response-usage.spec.ts).
+	t.deepEqual(result.usage, {
+		inputTokens: 0,
+		outputTokens: 0,
+		totalTokens: 1500,
+	});
+});
+
+test('runAcpConversation - an input-only provider does not fabricate output tokens', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	const client = {
+		getCurrentModel: () => 'test-model',
+		chat: async () => ({
+			choices: [{message: {content: 'Hello'}}],
+			usage: {inputTokens: 800},
+		}),
+	} as unknown as LLMClient;
+
+	const result = await runAcpConversation({
+		session,
+		client,
+		toolManager: createMockToolManager() as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(result.stopReason, 'end_turn');
+	t.deepEqual(result.usage, {
+		inputTokens: 800,
+		outputTokens: 0,
+		totalTokens: 800,
+	});
+});
+
+test('runAcpConversation - omits usage from the PromptResponse when the provider reports none', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	const client = {
+		getCurrentModel: () => 'test-model',
+		chat: async () => ({
+			choices: [{message: {content: 'Hello'}}],
+		}),
+	} as unknown as LLMClient;
+
+	const result = await runAcpConversation({
+		session,
+		client,
+		toolManager: createMockToolManager() as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.is(result.stopReason, 'end_turn');
+	t.is(result.usage, undefined);
+	t.is(result._meta, undefined);
+});
+
+// ============================================================================
 // ask_user (interactive)
 // ============================================================================
 

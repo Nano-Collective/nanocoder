@@ -319,6 +319,24 @@ export class AcpAgent implements Agent {
 			});
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : String(error);
+
+			// A user-initiated cancellation isn't a failure: surface it inline in
+			// the chat and resolve cleanly instead of rejecting the ACP `prompt`
+			// call, otherwise the VS Code client's catch handler shows a
+			// "RequestError: Internal error" toast on top of the cancel notice.
+			if (errorMsg === 'Operation was cancelled') {
+				const cancelNotice = '\n\n_Cancelled by user._\n';
+				this.conn.sessionUpdate({
+					sessionId: params.sessionId,
+					update: {
+						sessionUpdate: 'agent_message_chunk',
+						content: {type: 'text', text: cancelNotice},
+					},
+				});
+				session.messages.push({role: 'assistant', content: cancelNotice});
+				return {stopReason: 'cancelled'};
+			}
+
 			logger.error(`Error during ACP prompt: ${errorMsg}`);
 
 			// Relay the error to the chat UI so the user sees it inline
@@ -454,6 +472,7 @@ export class AcpAgent implements Agent {
 				sessionId: s.id,
 				cwd: s.workingDirectory,
 				title: s.title,
+				updatedAt: s.lastAccessedAt,
 			})),
 		};
 	}
@@ -496,6 +515,36 @@ export class AcpAgent implements Agent {
 			modes: this.buildModeState(session),
 			configOptions: await this.buildConfigOptions(),
 		};
+	}
+
+	/**
+	 * ACP's core methods don't include a way for the client to rename a
+	 * session (title is otherwise agent-driven, from the latest message).
+	 * `extMethod` is the protocol's sanctioned escape hatch for exactly this.
+	 */
+	async extMethod(
+		method: string,
+		params: Record<string, unknown>,
+	): Promise<Record<string, unknown>> {
+		if (method === 'renameSession') {
+			const sessionId = params.sessionId;
+			const title = params.title;
+			if (typeof sessionId !== 'string' || typeof title !== 'string') {
+				throw new Error(
+					'renameSession requires string sessionId and title params',
+				);
+			}
+
+			await sessionManager.initialize();
+			const updated = await sessionManager.renameSession(sessionId, title);
+			if (!updated) {
+				throw new Error(`Session not found on disk: ${sessionId}`);
+			}
+			logger.info(`ACP extMethod renameSession: ${sessionId} -> "${title}"`);
+			return {title: updated.title};
+		}
+
+		throw new Error(`Unknown extension method: ${method}`);
 	}
 
 	async unstable_listProviders(
@@ -706,7 +755,9 @@ export class AcpAgent implements Agent {
 				return;
 			}
 
-			// Simple title generation if it's new
+			// Simple title generation if it's new. A user-renamed title is never
+			// auto-derived over — the flag below is what tells the CLI's autosave
+			// the same thing, so it has to be carried forward on every save.
 			let title = existingSession?.title;
 			if (!title || title === 'New Session') {
 				const firstUserMessage = saveableMessages.find(m => m.role === 'user');
@@ -720,6 +771,7 @@ export class AcpAgent implements Agent {
 			await sessionManager.saveSession({
 				id: session.sessionId,
 				title,
+				titleManuallySet: existingSession?.titleManuallySet,
 				createdAt: existingSession?.createdAt || timestamp,
 				lastAccessedAt: timestamp,
 				messageCount: saveableMessages.length,

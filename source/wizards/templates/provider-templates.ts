@@ -420,6 +420,13 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		apiKeyPrompt: 'API Key (from https://app.requesty.ai/api-keys)',
 		modelDefault: 'openai/gpt-4o-mini',
 	}),
+	apiKeyTemplate({
+		id: 'orcarouter',
+		name: 'OrcaRouter',
+		baseUrl: 'https://api.orcarouter.ai/v1',
+		apiKeyPrompt: 'API Key (from https://www.orcarouter.ai/console)',
+		modelDefault: 'openai/gpt-5.5',
+	}),
 	{
 		id: 'openai',
 		name: 'OpenAI',

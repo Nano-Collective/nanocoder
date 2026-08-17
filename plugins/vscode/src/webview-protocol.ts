@@ -60,6 +60,12 @@ export interface ExtensionMessagePermissionRequested {
 	options?: any[];
 }
 
+/** Sent when a cancel or a new chat drops permission prompts still on screen. */
+export interface ExtensionMessagePermissionsCancelled {
+	type: 'permissionsCancelled';
+	toolCallIds: string[];
+}
+
 
 
 export interface ExtensionMessageSyncState {
@@ -89,6 +95,7 @@ export interface ExtensionMessageUpdateSessions {
 		sessionId: string;
 		cwd: string;
 		title?: string | null;
+		updatedAt?: string | null;
 	}>;
 }
 
@@ -136,6 +143,7 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageToolUpdated
 	| ExtensionMessageToolCompleted
 	| ExtensionMessagePermissionRequested
+	| ExtensionMessagePermissionsCancelled
 	| ExtensionMessageSyncState
 	| ExtensionMessageUpdateSessions
 	| ExtensionMessageSessionLoaded
@@ -215,6 +223,11 @@ export interface WebviewMessageDeleteSession {
 	sessionId: string;
 }
 
+export interface WebviewMessageRenameSession {
+	type: 'renameSession';
+	sessionId: string;
+	title: string;
+}
 export interface WebviewMessageRequestPathInfo {
 	type: 'requestPathInfo';
 	path: string;
@@ -242,9 +255,11 @@ export interface WebviewMessageCopyToClipboard {
 
 /**
  * Ask the host to resolve an `@` query. Searching lives on the host because
- * `vscode.workspace.findFiles` already honours `files.exclude` / `search.exclude`
- * and shipping a whole workspace file list into the webview would be megabytes
- * on a large repo.
+ * only the host can reach `vscode.workspace.findFiles` and the user's
+ * `files.exclude` / `search.exclude` settings, and because shipping a whole
+ * workspace file list into the webview would be megabytes on a large repo.
+ * Note `findFiles` does *not* honour those settings on its own once an explicit
+ * exclude is passed - see `_mentionExcludeGlob` in `chat-webview-provider.ts`.
  */
 export interface WebviewMessageRequestMentionCompletions {
 	type: 'requestMentionCompletions';
@@ -266,6 +281,7 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageListSessions
 	| WebviewMessageResumeSession
 	| WebviewMessageDeleteSession
+	| WebviewMessageRenameSession
 	| WebviewMessageRequestPathInfo
 	| WebviewMessageRequestOpenDialog
 	| WebviewMessageOpenPath
