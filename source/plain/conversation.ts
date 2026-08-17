@@ -33,6 +33,8 @@ export interface RunPlainConversationOptions {
 	tune?: TuneConfig;
 	model?: string;
 	outputFormat?: 'text' | 'json';
+	restrictedScope?: string | string[];
+	telemetry?: boolean;
 }
 
 export interface PlainConversationUsage {
@@ -98,6 +100,8 @@ export async function runPlainConversation(
 		tune,
 		model,
 		outputFormat = 'text',
+		restrictedScope,
+		telemetry = false,
 	} = options;
 
 	const isJson = outputFormat === 'json';
@@ -121,6 +125,12 @@ export async function runPlainConversation(
 		};
 	};
 
+	const emitTelemetry = (type: string, payload: Record<string, unknown>) => {
+		if (telemetry) {
+			process.stderr.write(JSON.stringify({type, ...payload}) + '\n');
+		}
+	};
+
 	const maxTurns =
 		getAppConfig().headless?.maxTurns ?? DEFAULT_HEADLESS_MAX_TURNS;
 
@@ -139,6 +149,8 @@ export async function runPlainConversation(
 		// On the final turn, force a tool-free wrap-up so we end with a usable
 		// answer rather than the post-loop error.
 		const finalTurn = turn === maxTurns - 1;
+
+		emitTelemetry('turn', {turn, maxTurns, status: 'running'});
 
 		const availableNames = toolManager.getAvailableToolNames(
 			tune,
@@ -364,8 +376,12 @@ export async function runPlainConversation(
 			if (!isJson) {
 				writeStatus(`tool: ${toolCall.function.name}`);
 			}
+			emitTelemetry('tool', {tool: toolCall.function.name});
 
-			const toolResult = await processToolUse(toolCall);
+			const toolResult = await processToolUse(toolCall, {
+				abortSignal,
+				context: restrictedScope ? {restrictedScope} : undefined,
+			});
 			toolResults.push(toolResult);
 
 			const contentStr = toolResult.content

@@ -291,6 +291,8 @@ async function main(): Promise<void> {
 				continue; // skip this flag
 			} else if (arg === '--plain' || arg === '--no-plain') {
 				continue; // skip this flag
+			} else if (arg === '--telemetry') {
+				continue; // skip this flag
 			} else if (arg === '--no-alt-screen' || arg === '--alt-screen') {
 				continue; // skip this flag
 			} else if (arg === '--restricted-scope' && afterRunArgs[i + 1]) {
@@ -333,6 +335,7 @@ async function main(): Promise<void> {
 				arg === '--trust-directory' ||
 				arg === '--plain' ||
 				arg === '--no-plain' ||
+				arg === '--telemetry' ||
 				arg === '--no-alt-screen' ||
 				arg === '--alt-screen' ||
 				arg.startsWith('--mode=') ||
@@ -474,6 +477,7 @@ async function main(): Promise<void> {
 	// unless --no-plain forces the Ink path.
 	const plainRequested = args.includes('--plain');
 	const noPlainRequested = args.includes('--no-plain');
+	const telemetryRequested = args.includes('--telemetry');
 	if (plainRequested && noPlainRequested) {
 		console.error('Cannot pass both --plain and --no-plain.');
 		process.exit(1);
@@ -584,6 +588,8 @@ async function main(): Promise<void> {
 			cliModel,
 			trustDirectory,
 			outputFormat,
+			restrictedScope: runRestrictedScope,
+			telemetry: telemetryRequested,
 		});
 	} else {
 		// Prevent Node's global performance entry buffer from growing without
