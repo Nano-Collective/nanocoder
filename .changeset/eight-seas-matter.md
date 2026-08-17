@@ -1,5 +1,5 @@
 ---
-"@nanocollective/nanocoder": minor
+'@nanocollective/nanocoder': patch
 ---
 
-Introduce a "Headless API Mode" for the core engine that completely bypasses Ink.js terminal rendering when the --acp flag is provided
+Defer ink and @/app loading in the CLI entry point until the interactive TUI branch, so --acp, --plain and auth paths no longer pay the Ink/App module-graph cost at startup.
