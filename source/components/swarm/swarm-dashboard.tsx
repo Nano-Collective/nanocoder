@@ -41,6 +41,34 @@ export function SwarmDashboard({
 	}, [allComplete, exit, swarmStatus]);
 
 	return (
+		<SwarmDashboardUI
+			config={config}
+			swarmStatus={swarmStatus}
+			workers={workers}
+			error={error}
+		/>
+	);
+}
+
+export function SwarmDashboardUI({
+	config,
+	swarmStatus,
+	workers,
+	error,
+}: {
+	config: SwarmConfig;
+	swarmStatus: string;
+	workers: Array<{
+		id: string;
+		status: string;
+		tokens: number;
+		currentTool?: string;
+		error?: string;
+	}>;
+	error?: string;
+}) {
+	const allComplete = swarmStatus === 'complete' || swarmStatus === 'failed';
+	return (
 		<Box
 			flexDirection="column"
 			padding={1}

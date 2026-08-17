@@ -5,7 +5,13 @@ import {useEffect, useRef, useState} from 'react';
 import {z} from 'zod';
 import type {SwarmConfig} from '@/app/types';
 import type {LLMClient} from '@/types/core';
-import {createWorktree, removeWorktree} from '@/utils/git-worktree';
+import {createWorktree} from '@/utils/git-worktree';
+import {
+	type TaskDefinition,
+	TaskSchema,
+	validateDisjointScopes,
+} from './coordinator-utils';
+import {executeSwarmMerge, executeSwarmRollback} from './merge-manager';
 
 const execFileAsync = promisify(execFile);
 
@@ -29,57 +35,15 @@ export interface SwarmWorkerState {
 	error?: string;
 }
 
-const TaskSchema = z.object({
-	tasks: z.array(
-		z.object({
-			id: z
-				.string()
-				.describe('A unique identifier for the worker (e.g. worker-1)'),
-			description: z.string().describe('The prompt for this worker'),
-			fileScope: z
-				.array(z.string())
-				.describe(
-					'The specific file paths or directories this worker is allowed to modify (e.g. ["src/auth", "package.json"]). Scopes between workers MUST be mutually exclusive.',
-				),
-		}),
-	),
-});
-
-type TaskDefinition = z.infer<typeof TaskSchema>['tasks'][0];
-
-/**
- * Validates that no two tasks have overlapping file scopes.
- * A scope overlaps if one path is a parent/child of another, or they are exactly the same.
- */
-function validateDisjointScopes(tasks: TaskDefinition[]): string | null {
-	for (let i = 0; i < tasks.length; i++) {
-		for (let j = i + 1; j < tasks.length; j++) {
-			const scopeA = tasks[i]?.fileScope || [];
-			const scopeB = tasks[j]?.fileScope || [];
-
-			for (const pathA of scopeA) {
-				for (const pathB of scopeB) {
-					// Normalize paths to prevent false mismatches
-					const normA = path.normalize(pathA);
-					const normB = path.normalize(pathB);
-
-					if (
-						normA === normB ||
-						normA.startsWith(normB + path.sep) ||
-						normB.startsWith(normA + path.sep)
-					) {
-						return `Overlap detected between worker ${tasks[i]?.id} ("${pathA}") and worker ${tasks[j]?.id} ("${pathB}")`;
-					}
-				}
-			}
-		}
-	}
-	return null;
-}
-
 export function useSwarmCoordinator(config: SwarmConfig, client?: LLMClient) {
 	const [status, setStatus] = useState<SwarmStatus>('starting');
-	const [workers, setWorkers] = useState<SwarmWorkerState[]>([]);
+	const [workers, setWorkers] = useState<SwarmWorkerState[]>(() =>
+		Array.from({length: config.workers}, (_, i) => ({
+			id: String(i + 1),
+			status: 'starting',
+			tokens: 0,
+		})),
+	);
 	const [error, setError] = useState<string>();
 	const [preSwarmCommit, setPreSwarmCommit] = useState<string>();
 
@@ -193,6 +157,7 @@ IMPORTANT: You MUST ensure that the fileScope arrays for different workers are M
 							'--mode',
 							'yolo',
 							'--json',
+							'--telemetry',
 							...scopeArgs,
 							task.description,
 						],
@@ -206,7 +171,31 @@ IMPORTANT: You MUST ensure that the fileScope arrays for different workers are M
 					let jsonBuffer = '';
 					child.stdout?.on('data', (chunk: Buffer) => {
 						jsonBuffer += chunk.toString();
-						// In the future: Parse streaming telemetry JSON lines here to update token counts/tools
+					});
+
+					let stderrBuffer = '';
+					child.stderr?.on('data', (chunk: Buffer) => {
+						stderrBuffer += chunk.toString();
+						const lines = stderrBuffer.split('\n');
+						stderrBuffer = lines.pop() || '';
+
+						for (const line of lines) {
+							if (!line.trim()) continue;
+							try {
+								const event = JSON.parse(line);
+								if (event.type === 'tool' && event.tool) {
+									setWorkers(prev =>
+										prev.map(w =>
+											w.id === task.id ? {...w, currentTool: event.tool} : w,
+										),
+									);
+								} else if (event.type === 'turn') {
+									// Heartbeat / turn update
+								}
+							} catch (_e) {
+								// Ignore non-JSON stderr lines
+							}
+						}
 					});
 
 					child.on('close', (code: number | null) => {
@@ -282,69 +271,10 @@ IMPORTANT: You MUST ensure that the fileScope arrays for different workers are M
 
 			// Phase 3D: Merge
 			setStatus('merging');
-
-			// For each task, perform diff and 3-way merge
-			for (const task of tasks) {
-				const branchName = `nanocoder-swarm-${task.id}`;
-				const targetPath = `.nanocoder/worktrees/${task.id}`;
-				const worktreeAbsPath = path.resolve(process.cwd(), targetPath);
-
-				try {
-					// Check for scope violations inside the worker's branch before applying
-					const {stdout: changedFilesRaw} = await execFileAsync(
-						'git',
-						['diff', '--name-only', commit],
-						{cwd: worktreeAbsPath},
-					);
-					const changedFiles = changedFilesRaw.split('\n').filter(Boolean);
-
-					// Validate every changed file is within the assigned scope
-					for (const changedFile of changedFiles) {
-						let allowed = false;
-						for (const allowedPath of task.fileScope) {
-							const normChanged = path.normalize(changedFile);
-							const normAllowed = path.normalize(allowedPath);
-							if (
-								normChanged === normAllowed ||
-								normChanged.startsWith(normAllowed + path.sep)
-							) {
-								allowed = true;
-								break;
-							}
-						}
-						if (!allowed && task.fileScope.length > 0) {
-							throw new Error(
-								`Scope violation: Worker ${task.id} modified ${changedFile} which is outside its scope`,
-							);
-						}
-					}
-
-					// Create a patch and apply it to the main repository
-					const {stdout: patchData} = await execFileAsync(
-						'git',
-						['diff', commit],
-						{cwd: worktreeAbsPath},
-					);
-					if (patchData.trim()) {
-						const patchPath = path.join(
-							process.cwd(),
-							'.nanocoder',
-							`${task.id}.patch`,
-						);
-						await require('node:fs').promises.writeFile(patchPath, patchData);
-						await execFileAsync('git', ['apply', '--3way', patchPath], {
-							cwd: process.cwd(),
-						});
-					}
-				} finally {
-					// Always remove the worktree when merging is done
-					try {
-						removeWorktree(targetPath, branchName);
-					} catch (e) {
-						console.error(e);
-					}
-				}
+			if (!preSwarmCommit) {
+				throw new Error('Pre-swarm commit not found during merge');
 			}
+			await executeSwarmMerge(tasks, preSwarmCommit, process.cwd());
 
 			setStatus('complete');
 		} catch (err) {
@@ -354,23 +284,7 @@ IMPORTANT: You MUST ensure that the fileScope arrays for different workers are M
 			// Cleanup worktrees and rollback
 			if (preSwarmCommit) {
 				try {
-					// Teardown worktrees if they exist
-					const fs = require('node:fs');
-					for (const task of tasks) {
-						const branchName = `nanocoder-swarm-${task.id}`;
-						const targetPath = `.nanocoder/worktrees/${task.id}`;
-						if (fs.existsSync(path.resolve(process.cwd(), targetPath))) {
-							try {
-								removeWorktree(targetPath, branchName);
-							} catch (e) {
-								console.error(e);
-							}
-						}
-					}
-
-					// Hard reset back to original state
-					await execFileAsync('git', ['reset', '--hard', preSwarmCommit]);
-					await execFileAsync('git', ['clean', '-fd']);
+					await executeSwarmRollback(tasks, preSwarmCommit, process.cwd());
 				} catch (rollbackErr) {
 					setError(`Rollback failed: ${rollbackErr}`);
 				}

@@ -13,6 +13,7 @@ import {
 	isRealPathInside,
 	isValidFilePath,
 	resolveFilePath,
+	checkRestrictedScope,
 } from './path-validation';
 
 // Test suite for isValidFilePath
@@ -297,10 +298,7 @@ test.serial('resolveFilePath: containmentRoot lets a deep session cwd still reac
 		t.throws(() => resolveFilePath('../outside', root, root));
 	} finally {
 		rmSync(root, {recursive: true, force: true});
-	}
-});
-
-// Test suite for isPathInside / isRealPathInside
+	}// Test suite for isPathInside / isRealPathInside
 test('isPathInside: accepts the root itself and paths beneath it', t => {
 	t.true(isPathInside('/proj', '/proj'));
 	t.true(isPathInside('/proj/src/app.ts', '/proj'));
@@ -365,4 +363,36 @@ test('isRealPathInside: fails closed when a path cannot be resolved', t => {
 	// path: callers use it as a boundary, so unresolvable means deny.
 	t.false(isRealPathInside(join(root, 'nope'), root));
 	t.false(isRealPathInside(root, join(root, 'nope')));
+});
+
+// Test suite for checkRestrictedScope
+
+test('checkRestrictedScope: allows path inside restricted scope', t => {
+	t.notThrows(() => checkRestrictedScope('/project/src/auth/file.ts', '/project/src/auth'));
+});
+
+test('checkRestrictedScope: allows path inside array of restricted scopes', t => {
+	t.notThrows(() => checkRestrictedScope('/project/src/auth/file.ts', ['/project/src/api', '/project/src/auth']));
+});
+
+test('checkRestrictedScope: rejects path outside restricted scope (traversal)', t => {
+	t.throws(() => checkRestrictedScope('/project/src/api/file.ts', '/project/src/auth'), {
+		message: /Path escapes restricted scope/
+	});
+	
+	t.throws(() => checkRestrictedScope('/project/src/auth/../api/file.ts', '/project/src/auth'), {
+		message: /Path escapes restricted scope/
+	});
+});
+
+test('checkRestrictedScope: rejects sibling-prefix attacks', t => {
+	// e.g., allowed scope is /project/src/auth, target is /project/src/auth2
+	t.throws(() => checkRestrictedScope('/project/src/auth2/file.ts', '/project/src/auth'), {
+		message: /Path escapes restricted scope/
+	});
+});
+
+test('checkRestrictedScope: normalizes paths to handle slashes and dots', t => {
+	t.notThrows(() => checkRestrictedScope('/project/src/auth/./file.ts', '/project/src/auth/'));
+	t.notThrows(() => checkRestrictedScope('/project/src/auth/file.ts', '/project/src/auth/./'));
 });

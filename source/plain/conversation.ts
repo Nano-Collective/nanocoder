@@ -57,6 +57,8 @@ export interface RunPlainConversationOptions {
 	 * would cost a model turn and then be deleted unread.
 	 */
 	enforceWalkthrough?: boolean;
+	restrictedScope?: string | string[];
+	telemetry?: boolean;
 }
 
 export interface PlainConversationUsage {
@@ -130,6 +132,8 @@ export async function runPlainConversation(
 		sessionId,
 		workingDirectory = process.cwd(),
 		enforceWalkthrough = false,
+		restrictedScope,
+		telemetry = false,
 	} = options;
 
 	const isJson = outputFormat === 'json';
@@ -153,6 +157,12 @@ export async function runPlainConversation(
 			outputTokens: accumulatedOutputTokens,
 			totalTokens: accumulatedTotalTokens,
 		};
+	};
+
+	const emitTelemetry = (type: string, payload: Record<string, unknown>) => {
+		if (telemetry) {
+			process.stderr.write(JSON.stringify({type, ...payload}) + '\n');
+		}
 	};
 
 	const maxTurns =
@@ -219,6 +229,8 @@ export async function runPlainConversation(
 		// On the final turn, force a tool-free wrap-up so we end with a usable
 		// answer rather than the post-loop error.
 		const finalTurn = turn === maxTurns - 1;
+
+		emitTelemetry('turn', {turn, maxTurns, status: 'running'});
 
 		const availableNames = toolManager.getAvailableToolNames(
 			tune,
@@ -566,11 +578,13 @@ export async function runPlainConversation(
 			if (!isJson) {
 				writeStatus(`tool: ${toolCall.function.name}`);
 			}
+			emitTelemetry('tool', {tool: toolCall.function.name});
 
 			const toolResult = await processToolUse(toolCall, {
 				abortSignal,
 				sessionId,
 				workingDirectory,
+				context: restrictedScope ? {restrictedScope} : undefined,
 			});
 			toolResults.push(toolResult);
 			if (!toolResult.isError) {
