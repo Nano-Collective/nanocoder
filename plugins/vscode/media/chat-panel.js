@@ -384,6 +384,7 @@
 	let currentAggregator = null;
 	let currentThoughtBox = null;
 	let visualLoader = null;
+	const toolKinds = new Map();
 	let toastTimeout = null;
 	// One agent response is split into several `.agent-markdown` containers -
 	// endCurrentTextBlock() closes the current one whenever a tool card, thought
@@ -503,7 +504,8 @@
 			// in case multiple aggregators were created in the same session
 			const allSpinners = document.querySelectorAll('.tool-status');
 			allSpinners.forEach(statusEl => {
-				if (statusEl.innerHTML.includes('animate-spin')) {
+				const status = statusEl.dataset.status;
+				if (status === 'pending' || status === 'in_progress') {
 					statusEl.innerHTML = ICONS.cancelled;
 				}
 			});
@@ -1435,6 +1437,7 @@
 				currentTurnEl = null;
 				currentTextEl = null;
 				currentTurnText = '';
+				toolKinds.clear();
 				agentTurnId = 0;
 				lastAgentRawTurnId = -1;
 				lastAgentSegments = '';
@@ -1878,15 +1881,6 @@
 			this.toggle(false);
 		}
 
-		cancelPending() {
-			for (const [id, item] of this.toolItems.entries()) {
-				const statusEl = item.querySelector('.tool-status');
-				if (statusEl && statusEl.innerHTML.includes('animate-spin')) {
-					statusEl.innerHTML = ICONS.cancelled;
-				}
-			}
-		}
-
 		updateTitle() {
 			this.title.textContent = `Exploring ${this.toolCount} tools...`;
 		}
@@ -1910,7 +1904,7 @@
 
 				const label = document.createElement('span');
 				label.className = 'tool-label flex-1 break-words leading-relaxed';
-				label.textContent = update.title || update.name || 'Tool Call';
+				label.textContent = humanizeToolTitle(update.title);
 
 				headerRow.appendChild(status);
 				headerRow.appendChild(label);
@@ -1922,12 +1916,13 @@
 			} else {
 				if (update.title) {
 					const labelEl = item.querySelector('.tool-label');
-					if (labelEl) labelEl.textContent = update.title;
+					if (labelEl) labelEl.textContent = humanizeToolTitle(update.title);
 				}
 			}
 
 			const statusEl = item.querySelector('.tool-status');
 			if (statusEl) {
+				statusEl.dataset.status = update.status || 'pending';
 				if (update.status === 'success' || update.status === 'completed') {
 					statusEl.innerHTML = ICONS.success;
 				} else if (
@@ -1940,6 +1935,8 @@
 					statusEl.innerHTML = ICONS.cancelled;
 				} else if (update.status === 'error' || update.status === 'failed') {
 					statusEl.innerHTML = ICONS.error;
+				} else if (update.status === 'pending') {
+					statusEl.innerHTML = ICONS.circle;
 				} else {
 					statusEl.innerHTML = ICONS.pending;
 				}
@@ -1954,7 +1951,7 @@
 	// carries the complete replacement list, so the card is rebuilt in place.
 	function handlePlanUpdate(update) {
 		const entries = Array.isArray(update.entries) ? update.entries : [];
-		let card = document.getElementById('plan-card');
+		let card = document.getElementById(`plan-card-${agentTurnId}`);
 
 		if (entries.length === 0) {
 			if (card) card.remove();
@@ -1964,7 +1961,7 @@
 		if (!card) {
 			endCurrentTextBlock();
 			card = document.createElement('div');
-			card.id = 'plan-card';
+			card.id = `plan-card-${agentTurnId}`;
 			card.className = 'my-3 border border-vscode-widget-border rounded bg-vscode-widget-bg overflow-hidden shrink-0';
 
 			const header = document.createElement('div');
@@ -1975,23 +1972,21 @@
 			title.textContent = 'Tasks';
 
 			const progress = document.createElement('span');
-			progress.id = 'plan-progress';
-			progress.className = 'ml-auto font-vscode text-[0.8em] opacity-60';
+			progress.className = 'plan-progress ml-auto font-vscode text-[0.8em] opacity-60';
 
 			header.appendChild(title);
 			header.appendChild(progress);
 			card.appendChild(header);
 
 			const body = document.createElement('div');
-			body.id = 'plan-body';
-			body.className = 'flex flex-col';
+			body.className = 'plan-body flex flex-col';
 			card.appendChild(body);
 
 			messagesContainer.appendChild(card);
 			scrollToBottom();
 		}
 
-		const body = card.querySelector('#plan-body');
+		const body = card.querySelector('.plan-body');
 		body.innerHTML = '';
 
 		let done = 0;
@@ -2018,7 +2013,7 @@
 			body.appendChild(row);
 		}
 
-		const progressEl = card.querySelector('#plan-progress');
+		const progressEl = card.querySelector('.plan-progress');
 		if (progressEl) progressEl.textContent = `${done}/${entries.length}`;
 	}
 
@@ -2033,18 +2028,16 @@
 			endCurrentTextBlock();
 		}
 
-		const toolName = update.name || (update.toolCall && update.toolCall.name) || '';
-		const isMutating = ['replace_file_content', 'multi_replace_file_content', 'write_to_file', 'write_file'].includes(toolName);
+		if (update.kind) toolKinds.set(toolCallId, update.kind);
 
-		if (isMutating) {
+		if (toolKinds.get(toolCallId) === 'edit') {
 			let card = document.getElementById(`tool-card-${toolCallId}`);
 			if (!card) {
 				card = createEditCard(toolCallId, update);
 				messagesContainer.appendChild(card);
 				scrollToBottom();
-			} else {
-				updateEditCard(card, update);
 			}
+			updateEditCard(card, update);
 		} else {
 			if (!currentAggregator) {
 				currentAggregator = new ToolAggregator();
@@ -2053,12 +2046,89 @@
 		}
 	}
 
+	// Verb per tool for the aggregated tool list. An entry only fires when the
+	// tool's ACP title is "<name>: <target>", which humanizeToolTitle splits on.
+	// Two families are deliberately absent: fetch_url / web_search take a
+	// url/query rather than a path, so their title is the bare tool name; and
+	// string_replace / write_file report ACP kind 'edit', so they render as edit
+	// cards and never reach this list.
+	const TOOL_VERBS = {
+		read_file: 'Reading',
+		list_directory: 'Listing',
+		find_files: 'Finding files in',
+		search_file_contents: 'Searching',
+		execute_bash: 'Running',
+		lsp_get_diagnostics: 'Checking diagnostics in',
+	};
+
+	// Action label per resolved status, rendered as "<action> <filename>".
+	const EDIT_ACTIONS = {
+		pending: 'Edit',
+		in_progress: 'Editing',
+		completed: 'Edited',
+		failed: 'Failed to edit',
+		cancelled: 'Cancelled edit to',
+		denied: 'Denied edit to',
+	};
+
+	// Icon bucket per resolved status.
+	const EDIT_TONES = {
+		pending: 'circle',
+		in_progress: 'pending',
+		completed: 'success',
+		failed: 'error',
+		cancelled: 'cancelled',
+		denied: 'cancelled',
+	};
+
+	function humanizeToolTitle(title) {
+		if (!title) return 'Tool Call';
+		const sep = title.indexOf(': ');
+		if (sep === -1) return title;
+		const name = title.slice(0, sep);
+		if (!Object.hasOwn(TOOL_VERBS, name)) return title;
+		return `${TOOL_VERBS[name]} ${title.slice(sep + 2)}`;
+	}
+
 	function extractFileName(title) {
 		if (!title) return 'File';
-		const parts = title.split('/');
+		const sep = title.indexOf(': ');
+		const parts = (sep === -1 ? title : title.slice(sep + 2)).split('/');
 		let last = parts[parts.length - 1];
 		last = last.split('\\').pop();
 		return last.replace(/['"]+$/g, '').trim();
+	}
+
+	// True when this update carries a diff the extension host would have handed
+	// to DiffManager. Mirrors handleDiffs in chat-webview-provider.ts so the
+	// panel only offers "Open Diff" once the change is actually registered.
+	function hasDiffContent(update) {
+		if (!update || !Array.isArray(update.content)) return false;
+		return update.content.some(block => !!block && block.type === 'diff' && !!block.path);
+	}
+
+	// Resolve an edit card's label and icon from an update. The agent reports a
+	// user cancel or deny as 'failed' with an explanatory rawOutput, so those are
+	// separated back out here rather than all reading as an error.
+	function resolveEditCardState(update) {
+		let status = (update && update.status) || 'pending';
+		if (status === 'success') status = 'completed';
+		if (status === 'error') status = 'failed';
+
+		if (status === 'failed') {
+			const raw = update && typeof update.rawOutput === 'string' ? update.rawOutput : '';
+			if (/denied/i.test(raw)) status = 'denied';
+			else if (/cancel|AbortError/i.test(raw)) status = 'cancelled';
+		}
+
+		if (!Object.hasOwn(EDIT_ACTIONS, status)) status = 'pending';
+		return {status, action: EDIT_ACTIONS[status], tone: EDIT_TONES[status]};
+	}
+
+	// True once a card has reached a terminal state and its approval buttons
+	// should come down.
+	function isSettled(status) {
+		return status !== 'pending' && status !== 'in_progress';
 	}
 
 	function getFileColor(filename) {
@@ -2073,26 +2143,35 @@
 
 	function createEditCard(toolCallId, update) {
 		const card = document.createElement('div');
-		card.className = 'my-2 flex items-center justify-between px-3 py-2 border border-vscode-widget-border rounded bg-vscode-editor-bg cursor-pointer hover:bg-vscode-list-hover group tool-card';
+		card.className = 'my-2 border border-vscode-widget-border rounded bg-vscode-editor-bg overflow-hidden group tool-card';
 		card.id = `tool-card-${toolCallId}`;
-		card.onclick = () => vscode.postMessage({ type: 'showDiff', toolCallId });
+
+		const row = document.createElement('div');
+		row.className = 'tool-card-row flex items-center justify-between px-3 py-2';
+		// Guarded rather than unbound: the card is created from the queued
+		// announcement, which carries no content, so DiffManager has nothing
+		// registered under this id until the call is about to run. Clicking in
+		// that window - the whole approval wait - raised "Change <id> not found".
+		row.onclick = () => {
+			if (card.dataset.hasDiff !== 'true') return;
+			vscode.postMessage({ type: 'showDiff', toolCallId });
+		};
 
 		const left = document.createElement('div');
 		left.className = 'flex items-center gap-2 font-vscode text-[0.9em]';
 
 		const status = document.createElement('span');
-		status.className = 'ml-auto flex items-center justify-center';
-		status.innerHTML = ICONS.pending;
+		status.className = 'tool-status ml-auto flex items-center justify-center';
 
 		const label = document.createElement('span');
 		label.className = 'flex items-center gap-1.5';
 
-		const filename = extractFileName(update.title || update.name);
+		const filename = extractFileName(update.title);
 		const fileColor = getFileColor(filename);
 
+		// Text is filled in by updateEditCard, which runs immediately after.
 		const actionText = document.createElement('span');
-		actionText.textContent = 'Edited';
-		actionText.className = 'opacity-80';
+		actionText.className = 'tool-card-action opacity-80';
 
 		const nameText = document.createElement('span');
 		nameText.className = `font-semibold ${fileColor}`;
@@ -2103,29 +2182,54 @@
 
 		left.appendChild(status);
 		left.appendChild(label);
-		card.appendChild(left);
+		row.appendChild(left);
 
 		const right = document.createElement('div');
 		right.className = 'flex items-center gap-2';
 
 		const hoverBtn = document.createElement('span');
-		hoverBtn.className = 'opacity-0 group-hover:opacity-100 transition-opacity bg-vscode-button-secondary text-vscode-fg px-2 py-0.5 rounded text-[0.85em]';
+		hoverBtn.className = 'tool-card-diff-btn hidden transition-opacity bg-vscode-button-secondary text-vscode-fg px-2 py-0.5 rounded text-[0.85em]';
 		hoverBtn.textContent = 'Open Diff';
 
 		right.appendChild(hoverBtn);
-		card.appendChild(right);
+		row.appendChild(right);
+		card.appendChild(row);
 
 		return card;
 	}
 
-	function updateEditCard(el, update) {
-		const statusEl = el.querySelector('.ml-auto');
-		if (statusEl) {
-			if (update.status === 'success' || update.status === 'completed') statusEl.innerHTML = ICONS.success;
-			else if (update.status === 'error') statusEl.innerHTML = ICONS.error;
-			else if (update.status === 'cancelled' || update.status === 'denied') statusEl.innerHTML = ICONS.cancelled;
+	// Reveal the diff affordance once the extension host has a change
+	// registered for this card - see hasDiffContent.
+	function setEditCardDiffAvailable(el) {
+		if (el.dataset.hasDiff === 'true') return;
+		el.dataset.hasDiff = 'true';
+
+		const row = el.querySelector('.tool-card-row');
+		if (row) row.classList.add('cursor-pointer', 'hover:bg-vscode-list-hover');
+
+		const btn = el.querySelector('.tool-card-diff-btn');
+		if (btn) {
+			btn.classList.remove('hidden');
+			btn.classList.add('opacity-0', 'group-hover:opacity-100');
 		}
-		if (update.status === 'success' || update.status === 'completed' || update.status === 'error' || update.status === 'cancelled' || update.status === 'denied') {
+	}
+
+	function updateEditCard(el, update) {
+		const state = resolveEditCardState(update);
+
+		const statusEl = el.querySelector('.tool-status');
+		if (statusEl) {
+			statusEl.dataset.status = state.status;
+			statusEl.innerHTML = ICONS[state.tone];
+		}
+
+		// "Edit foo.ts" while queued, "Edited foo.ts" once it has run.
+		const actionEl = el.querySelector('.tool-card-action');
+		if (actionEl) actionEl.textContent = state.action;
+
+		if (hasDiffContent(update)) setEditCardDiffAvailable(el);
+
+		if (isSettled(state.status)) {
 			const actions = el.querySelector('.tool-actions');
 			if (actions) actions.remove();
 		}

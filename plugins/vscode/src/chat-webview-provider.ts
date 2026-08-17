@@ -79,7 +79,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				if (block.type === 'diff' && block.path) {
 					this._diffManager.addPendingChange({
 						type: 'file_change',
-						id: payload.toolCallId || block.path, // fallback id
+						id: update.toolCallId || payload.toolCallId || block.path, // fallback id
 						filePath: block.path,
 						originalContent: block.oldText || '',
 						newContent: block.newText || '',
