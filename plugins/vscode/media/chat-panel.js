@@ -33,10 +33,7 @@
 					e.stopPropagation();
 					const isHidden = this.dropdown.classList.contains('hidden');
 					// Close all dropdowns
-					document.getElementById('provider-dropdown').classList.add('hidden');
-					document.getElementById('model-dropdown').classList.add('hidden');
-					document.getElementById('mode-dropdown').classList.add('hidden');
-					if (addMenuDropdown) addMenuDropdown.classList.add('hidden');
+					closeAllDropdowns();
 					
 					if (isHidden) {
 						this.dropdown.classList.remove('hidden');
@@ -111,14 +108,18 @@
 		});
 
 		document.addEventListener('click', () => {
-			document.getElementById('provider-dropdown').classList.add('hidden');
-			document.getElementById('model-dropdown').classList.add('hidden');
-			document.getElementById('mode-dropdown').classList.add('hidden');
-			if (addMenuDropdown) addMenuDropdown.classList.add('hidden');
+			closeAllDropdowns();
 		});
 	}
 
 	initDropdowns();
+
+	function closeAllDropdowns() {
+		document.getElementById('provider-dropdown').classList.add('hidden');
+		document.getElementById('model-dropdown').classList.add('hidden');
+		document.getElementById('mode-dropdown').classList.add('hidden');
+		if (addMenuDropdown) addMenuDropdown.classList.add('hidden');
+	}
 
 	function toggleHistoryView() {
 		isHistoryView = !isHistoryView;
@@ -287,10 +288,11 @@
 	if (addMenuBtn && addMenuDropdown) {
 		addMenuBtn.addEventListener('click', (e) => {
 			e.stopPropagation();
-			document.getElementById('provider-dropdown').classList.add('hidden');
-			document.getElementById('model-dropdown').classList.add('hidden');
-			document.getElementById('mode-dropdown').classList.add('hidden');
-			addMenuDropdown.classList.toggle('hidden');
+			const isHidden = addMenuDropdown.classList.contains('hidden');
+			closeAllDropdowns();
+			if (isHidden) {
+				addMenuDropdown.classList.remove('hidden');
+			}
 		});
 
 		const menuUploadImage = document.getElementById('menu-upload-image');
@@ -364,9 +366,10 @@
 		if (validFiles.length === 0) return;
 
 		let pendingReads = validFiles.length;
-		if (addMenuBtn) {
-			addMenuBtn.disabled = true;
-			addMenuBtn.classList.add('opacity-50', 'cursor-not-allowed');
+		const menuUploadImageBtn = document.getElementById('menu-upload-image');
+		if (menuUploadImageBtn) {
+			menuUploadImageBtn.disabled = true;
+			menuUploadImageBtn.classList.add('opacity-50', 'cursor-not-allowed');
 		}
 
 		for (const file of validFiles) {
@@ -382,16 +385,16 @@
 					}
 				}
 				pendingReads--;
-				if (pendingReads === 0 && addMenuBtn) {
-					addMenuBtn.disabled = false;
-					addMenuBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+				if (pendingReads === 0 && menuUploadImageBtn) {
+					menuUploadImageBtn.disabled = false;
+					menuUploadImageBtn.classList.remove('opacity-50', 'cursor-not-allowed');
 				}
 			};
 			reader.onerror = () => {
 				pendingReads--;
-				if (pendingReads === 0 && addMenuBtn) {
-					addMenuBtn.disabled = false;
-					addMenuBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+				if (pendingReads === 0 && menuUploadImageBtn) {
+					menuUploadImageBtn.disabled = false;
+					menuUploadImageBtn.classList.remove('opacity-50', 'cursor-not-allowed');
 				}
 			};
 			reader.readAsDataURL(file);
