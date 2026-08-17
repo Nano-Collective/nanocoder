@@ -8,7 +8,7 @@ import {
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
-import {isValidFilePath, resolveFilePath} from './path-validation';
+import {checkRestrictedScope, isValidFilePath, resolveFilePath} from './path-validation';
 
 // Test suite for isValidFilePath
 test('isValidFilePath: accepts simple relative paths', (t) => {
@@ -293,4 +293,36 @@ test.serial('resolveFilePath: containmentRoot lets a deep session cwd still reac
 	} finally {
 		rmSync(root, {recursive: true, force: true});
 	}
+});
+
+// Test suite for checkRestrictedScope
+
+test('checkRestrictedScope: allows path inside restricted scope', t => {
+	t.notThrows(() => checkRestrictedScope('/project/src/auth/file.ts', '/project/src/auth'));
+});
+
+test('checkRestrictedScope: allows path inside array of restricted scopes', t => {
+	t.notThrows(() => checkRestrictedScope('/project/src/auth/file.ts', ['/project/src/api', '/project/src/auth']));
+});
+
+test('checkRestrictedScope: rejects path outside restricted scope (traversal)', t => {
+	t.throws(() => checkRestrictedScope('/project/src/api/file.ts', '/project/src/auth'), {
+		message: /Path escapes restricted scope/
+	});
+	
+	t.throws(() => checkRestrictedScope('/project/src/auth/../api/file.ts', '/project/src/auth'), {
+		message: /Path escapes restricted scope/
+	});
+});
+
+test('checkRestrictedScope: rejects sibling-prefix attacks', t => {
+	// e.g., allowed scope is /project/src/auth, target is /project/src/auth2
+	t.throws(() => checkRestrictedScope('/project/src/auth2/file.ts', '/project/src/auth'), {
+		message: /Path escapes restricted scope/
+	});
+});
+
+test('checkRestrictedScope: normalizes paths to handle slashes and dots', t => {
+	t.notThrows(() => checkRestrictedScope('/project/src/auth/./file.ts', '/project/src/auth/'));
+	t.notThrows(() => checkRestrictedScope('/project/src/auth/file.ts', '/project/src/auth/./'));
 });

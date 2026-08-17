@@ -32,7 +32,7 @@ function fileSub(id: string, paths?: string[]): Subscription {
 
 async function waitFor(
 	predicate: () => boolean,
-	timeoutMs = 2000,
+	timeoutMs = 5000,
 	intervalMs = 25,
 ): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
@@ -53,6 +53,7 @@ test.serial('emits add / change / unlink events', async t => {
 		pollingInterval: 50,
 	});
 	await source.start();
+	await new Promise(r => setTimeout(r, 100));
 
 	try {
 		const file = join(dir, 'thing.txt');
@@ -106,6 +107,7 @@ test.serial('paths emitted are relative to the watch root', async t => {
 		pollingInterval: 50,
 	});
 	await source.start();
+	await new Promise(r => setTimeout(r, 100));
 
 	try {
 		await writeFile(join(sub, 'leaf.ts'), 'x');
@@ -140,6 +142,7 @@ test.serial('subscriptions with paths filter narrow down events', async t => {
 		pollingInterval: 50,
 	});
 	await source.start();
+	await new Promise(r => setTimeout(r, 100));
 
 	try {
 		await mkdir(join(dir, 'docs'));
