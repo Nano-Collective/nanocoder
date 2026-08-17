@@ -154,13 +154,13 @@ async function main(): Promise<void> {
 	let cliProvider: string | undefined;
 	const providerArgIndex = args.findIndex(arg => arg === '--provider');
 	if (providerArgIndex !== -1 && args[providerArgIndex + 1]) {
-		// Allow alphanumeric, hyphen, underscore only to prevent injection
+		// Allow alphanumeric, hyphen, underscore, and space only to prevent injection
 		const value = args[providerArgIndex + 1];
-		if (/^[a-zA-Z0-9_-]+$/.test(value)) {
+		if (/^[a-zA-Z0-9_ -]+$/.test(value)) {
 			cliProvider = value;
 		} else {
 			console.error(
-				`Invalid --provider value: "${value}". Provider name must contain only alphanumeric characters, hyphens, and underscores.`,
+				`Invalid --provider value: "${value}". Provider name must contain only alphanumeric characters, spaces, hyphens, and underscores.`,
 			);
 			process.exit(1);
 		}
@@ -421,6 +421,8 @@ async function main(): Promise<void> {
 			workers,
 			swarmMode,
 			restrictedScope,
+			provider: cliProvider,
+			model: cliModel,
 		};
 	}
 

@@ -66,7 +66,7 @@ export function SwarmDashboardUI({
 	}>;
 	error?: string;
 }) {
-	const allComplete = swarmStatus === 'complete' || swarmStatus === 'failed';
+	const _allComplete = swarmStatus === 'complete' || swarmStatus === 'failed';
 	return (
 		<Box
 			flexDirection="column"
@@ -141,7 +141,7 @@ export function SwarmDashboardUI({
 				))}
 			</Box>
 
-			{allComplete && (
+			{swarmStatus === 'complete' && (
 				<Box marginTop={1}>
 					<Text color="green" bold>
 						All workers completed successfully. Unified diff ready.
