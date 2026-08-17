@@ -2,7 +2,7 @@ import test from 'ava';
 import { unlink, writeFile, readFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import type { CachedModelsData } from './models-types.js';
 import {
 	readCache,
@@ -20,8 +20,8 @@ async function getCacheFilePath(): Promise<string> {
 
 	const DEFAULT_CACHE_DIR =
 		process.platform === 'darwin'
-			? path.join(process.env.HOME || '~', 'Library', 'Caches')
-			: path.join(process.env.HOME || '~', '.cache');
+			? path.join(homedir(), 'Library', 'Caches')
+			: path.join(homedir(), '.cache');
 
 	const cacheBase = xdgCache || DEFAULT_CACHE_DIR;
 	return path.join(cacheBase, 'nanocoder', 'models.json');
