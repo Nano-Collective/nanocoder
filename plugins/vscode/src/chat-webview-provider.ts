@@ -27,6 +27,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 
 	private _view?: vscode.WebviewView;
 	private _isWebviewReady = false;
+	private _timelineRefreshTimer?: ReturnType<typeof setTimeout>;
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
@@ -41,6 +42,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				type: 'acpUpdate',
 				update
 			});
+			const kind = update?.update?.sessionUpdate ?? update?.sessionUpdate;
+			if (kind === 'tool_call' || kind === 'tool_call_update') {
+				this.scheduleTimelineRefresh();
+			}
 		};
 
 		this._acpClient.onPermissionRequested = (toolCallId: string, toolCall: any, options?: any[]) => {
@@ -183,6 +188,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 						this.postMessage({type: 'clear', isLoading: true});
 						this._acpClient.resumeSession(message.sessionId).finally(() => {
 							this.postMessage({type: 'sessionLoaded'});
+							this._broadcastTimeline();
 						});
 						break;
 					case 'deleteSession':
@@ -250,6 +256,12 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 					case 'copyToClipboard':
 						this._copyToClipboard(message.text);
 						break;
+					case 'requestTimeline':
+						this._broadcastTimeline();
+						break;
+					case 'revertToCheckpoint':
+						this._handleRevert(message.checkpointId);
+						break;
 				}
 			}
 		);
@@ -273,6 +285,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				this._outputChannel.appendLine(`[Extension] Session initialized automatically: ${sessionId}`);
 				// Broadcast session list to populate History tab
 				await this._broadcastSessions();
+				await this._broadcastTimeline();
 			}
 		} catch (error) {
 			this._outputChannel.appendLine(`Failed to initialize session on ready: ${error}`);
@@ -294,6 +307,33 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 	private async _broadcastSessions() {
 		const sessions = await this._acpClient.listSessions();
 		this.postMessage({type: 'updateSessions', sessions});
+	}
+
+	private scheduleTimelineRefresh() {
+		if (this._timelineRefreshTimer) {
+			clearTimeout(this._timelineRefreshTimer);
+		}
+		this._timelineRefreshTimer = setTimeout(() => {
+			this._broadcastTimeline();
+		}, 150);
+	}
+
+	private async _broadcastTimeline() {
+		const entries = await this._acpClient.listTimeline();
+		this.postMessage({type: 'updateTimeline', entries});
+	}
+
+	private async _handleRevert(checkpointId: string) {
+		this._outputChannel.appendLine(`[Webview] User reverted timeline to ${checkpointId}`);
+		this.postMessage({type: 'clear', isLoading: true});
+		try {
+			await this._acpClient.revertTimeline(checkpointId);
+		} catch {
+			// Error toast is raised by the ACP client.
+		} finally {
+			this.postMessage({type: 'sessionLoaded'});
+			await this._broadcastTimeline();
+		}
 	}
 
 	/**
@@ -431,6 +471,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 			// message then streams into the fresh view).
 			if (text.trim() === '/clear') {
 				this.postMessage({type: 'clear'});
+				this.postMessage({type: 'updateTimeline', entries: []});
 			}
 
 			// Expand any @[file] / @[folder] attachments into their contents

@@ -45,6 +45,7 @@ import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
 import {loadPreferences, updateLastUsed} from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
+import {TimelineManager} from '@/services/timeline-manager';
 import {sessionManager} from '@/session/session-manager';
 import {getTuneToolMode} from '@/types/config';
 import {getLogger} from '@/utils/logging';
@@ -214,8 +215,9 @@ export class AcpAgent implements Agent {
 					};
 
 					if (commandName === 'clear') {
-						// Clear the conversation history
+						// Clear the conversation history and action timeline
 						session.messages = [];
+						await session.timeline.clear();
 						const msg = 'Conversation cleared.';
 						this.conn.sessionUpdate({
 							sessionId: params.sessionId,
@@ -481,6 +483,18 @@ export class AcpAgent implements Agent {
 		params: DeleteSessionRequest,
 	): Promise<DeleteSessionResponse> {
 		await sessionManager.initialize();
+		const existing = this.sessions.get(params.sessionId);
+		if (existing) {
+			await existing.timeline.clear();
+		} else {
+			const persisted = await sessionManager.loadSession(params.sessionId);
+			if (persisted) {
+				await new TimelineManager(
+					persisted.workingDirectory,
+					params.sessionId,
+				).clear();
+			}
+		}
 		await sessionManager.deleteSession(params.sessionId);
 		// Evict from in-memory map if present
 		this.sessions.delete(params.sessionId);
@@ -544,6 +558,50 @@ export class AcpAgent implements Agent {
 			return {title: updated.title};
 		}
 
+		if (method === 'timeline/list') {
+			const sessionId = params.sessionId;
+			if (typeof sessionId !== 'string') {
+				throw new Error('timeline/list requires a string sessionId');
+			}
+			const session = this.requireSession(sessionId);
+			return {entries: await session.timeline.list()};
+		}
+
+		if (method === 'timeline/revert') {
+			const sessionId = params.sessionId;
+			const checkpointId = params.checkpointId;
+			if (typeof sessionId !== 'string' || typeof checkpointId !== 'string') {
+				throw new Error(
+					'timeline/revert requires string sessionId and checkpointId',
+				);
+			}
+			const session = this.requireSession(sessionId);
+			if (session.turnActive) {
+				throw new Error(
+					'Cannot revert the timeline while a prompt is in progress',
+				);
+			}
+
+			const result = await session.timeline.revertTo(checkpointId);
+			session.messages = session.messages.slice(
+				0,
+				result.revertedTo.truncateToMessageIndex,
+			);
+			session.messages.push({
+				role: 'assistant',
+				content: `Reverted to before step ${result.revertedTo.seq} (${result.revertedTo.toolName}). How should we proceed instead?`,
+			});
+			await this.saveAcpSessionToDisk(session);
+			await this.replaySessionHistory(session);
+			logger.info(
+				`ACP extMethod timeline/revert: session=${sessionId} checkpoint=${checkpointId}`,
+			);
+			return {
+				revertedTo: result.revertedTo,
+				filesRestored: result.filesRestored,
+			};
+		}
+
 		throw new Error(`Unknown extension method: ${method}`);
 	}
 
@@ -575,6 +633,14 @@ export class AcpAgent implements Agent {
 		_params: AuthenticateRequest,
 	): Promise<AuthenticateResponse> {
 		return {};
+	}
+
+	private requireSession(sessionId: string): AcpSession {
+		const session = this.sessions.get(sessionId);
+		if (!session) {
+			throw new Error(`Session not found: ${sessionId}`);
+		}
+		return session;
 	}
 
 	private registerSession(sessionId: string, cwd: string): AcpSession {

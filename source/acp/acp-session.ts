@@ -2,6 +2,7 @@ import type {
 	AgentSideConnection,
 	ClientCapabilities,
 } from '@agentclientprotocol/sdk';
+import {TimelineManager} from '@/services/timeline-manager';
 import type {DevelopmentMode, Message} from '@/types/core';
 
 export class AcpSession {
@@ -9,6 +10,7 @@ export class AcpSession {
 	readonly cwd: string;
 	readonly conn: AgentSideConnection;
 	readonly clientCapabilities?: ClientCapabilities;
+	readonly timeline: TimelineManager;
 
 	messages: Message[] = [];
 	systemMessage?: Message;
@@ -31,6 +33,7 @@ export class AcpSession {
 		this.conn = options.conn;
 		this.clientCapabilities = options.clientCapabilities;
 		this.developmentMode = options.initialMode ?? 'auto-accept';
+		this.timeline = new TimelineManager(options.cwd, options.sessionId);
 	}
 
 	cancel(): void {

@@ -100,6 +100,7 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('nanocoder.newChat', () => {
 			acpClient.newChat();
 			chatProvider.postMessage({type: 'clear'});
+			chatProvider.postMessage({type: 'updateTimeline', entries: []});
 			outputChannel.appendLine('[Extension] New chat started — session cleared.');
 		}),
     

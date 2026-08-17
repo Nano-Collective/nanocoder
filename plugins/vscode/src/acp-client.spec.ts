@@ -111,3 +111,44 @@ test('NanocoderAcpClient - a cancelled prompt does not raise an error toast', as
 
 	t.regex(shownError ?? '', /RequestError/, 'A genuine failure must still surface');
 });
+
+test('NanocoderAcpClient - listTimeline returns entries from extMethod', async (t) => {
+	const client = makeClient({
+		extMethod: async (method: string, params: Record<string, unknown>) => {
+			t.is(method, 'timeline/list');
+			t.is(params.sessionId, 'session-1');
+			return {
+				entries: [
+					{
+						id: 'cp-1',
+						seq: 1,
+						toolCallId: 'call-1',
+						toolName: 'write_file',
+						title: 'write_file: a.ts',
+						timestamp: '2026-01-01T00:00:00.000Z',
+						filesChanged: ['a.ts'],
+					},
+				],
+			};
+		},
+	});
+
+	const entries = await client.listTimeline();
+	t.is(entries.length, 1);
+	t.is(entries[0].id, 'cp-1');
+});
+
+test('NanocoderAcpClient - revertTimeline calls timeline/revert', async (t) => {
+	let called: {method?: string; params?: Record<string, unknown>} = {};
+	const client = makeClient({
+		extMethod: async (method: string, params: Record<string, unknown>) => {
+			called = {method, params};
+			return {revertedTo: {id: 'cp-1'}, filesRestored: ['a.ts']};
+		},
+	});
+
+	await client.revertTimeline('cp-1');
+	t.is(called.method, 'timeline/revert');
+	t.deepEqual(called.params, {sessionId: 'session-1', checkpointId: 'cp-1'});
+});
+

@@ -1,0 +1,3 @@
+Manual testing is the process of manually checking software for defects. Testers execute test cases without the use of automation tools.
+
+Automated testing involves using software tools and scripts to automatically execute tests on software. It increases speed, coverage, and reliability compared to manual testing.

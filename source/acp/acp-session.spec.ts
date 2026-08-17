@@ -89,6 +89,15 @@ test('AcpSession - abortController starts non-aborted', t => {
 	t.false(session.abortController.signal.aborted);
 });
 
+test('AcpSession - constructs a timeline manager for the session', t => {
+	const session = new AcpSession({
+		sessionId: 'test-id',
+		cwd: '/tmp',
+		conn: createMockConn(),
+	});
+	t.truthy(session.timeline);
+});
+
 // ============================================================================
 // cancel()
 // ============================================================================
