@@ -72,7 +72,11 @@ export class SettingsManager {
 			: [];
 
 		// Parse defaultMode
-		const defaultMode: string | null = typeof nc.defaultMode === 'string' ? nc.defaultMode : null;
+		const validModes = ['normal', 'auto-accept', 'yolo', 'plan'];
+		let defaultMode: string | null = typeof nc.defaultMode === 'string' ? nc.defaultMode : null;
+		if (defaultMode && !validModes.includes(defaultMode)) {
+			defaultMode = 'normal';
+		}
 
 		// Parse autoCompact
 		const ac = nc.autoCompact ?? {};
@@ -147,9 +151,22 @@ export class SettingsManager {
 	// ----- Private helpers -----
 
 	private getGlobalConfigDir(): string {
-		const xdg = process.env['XDG_CONFIG_HOME'];
-		if (xdg) return path.join(xdg, 'nanocoder');
-		return path.join(os.homedir(), '.config', 'nanocoder');
+		if (process.env.NANOCODER_CONFIG_DIR) {
+			return process.env.NANOCODER_CONFIG_DIR;
+		}
+
+		let baseConfigPath: string;
+		switch (process.platform) {
+			case 'win32':
+				baseConfigPath = process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming');
+				break;
+			case 'darwin':
+				baseConfigPath = path.join(os.homedir(), 'Library', 'Preferences');
+				break;
+			default:
+				baseConfigPath = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config');
+		}
+		return path.join(baseConfigPath, 'nanocoder');
 	}
 
 	/**
@@ -169,14 +186,17 @@ export class SettingsManager {
 			if (fs.existsSync(filePath)) {
 				return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
 			}
+			return {};
 		} catch (error) {
 			this.outputChannel.appendLine(`[Settings] Failed to read ${filePath}: ${error}`);
+			return null;
 		}
-		return {};
 	}
 
 	private updateAgentsConfig(configPath: string, key: string, value: unknown): void {
-		const config = this.readJsonSafe(configPath) || {};
+		let config = this.readJsonSafe(configPath);
+		if (config === null) throw new Error(`Config file ${configPath} contains invalid JSON. Cannot update.`);
+		config = config || {};
 		if (!config.nanocoder || typeof config.nanocoder !== 'object') {
 			config.nanocoder = {};
 		}
@@ -185,7 +205,9 @@ export class SettingsManager {
 	}
 
 	private updateAgentsConfigNested(configPath: string, parentKey: string, childKey: string, value: unknown): void {
-		const config = this.readJsonSafe(configPath) || {};
+		let config = this.readJsonSafe(configPath);
+		if (config === null) throw new Error(`Config file ${configPath} contains invalid JSON. Cannot update.`);
+		config = config || {};
 		if (!config.nanocoder || typeof config.nanocoder !== 'object') {
 			config.nanocoder = {};
 		}
@@ -197,24 +219,28 @@ export class SettingsManager {
 	}
 
 	private updatePreferences(filePath: string, key: string, value: unknown): void {
-		const prefs = this.readJsonSafe(filePath) || {};
+		let prefs = this.readJsonSafe(filePath);
+		if (prefs === null) throw new Error(`Preferences file ${filePath} contains invalid JSON. Cannot update.`);
+		prefs = prefs || {};
 		prefs[key] = value;
 		this.atomicWrite(filePath, prefs);
 	}
 
 	private updatePreferencesNested(filePath: string, ...keys: (string | unknown)[]): void {
-		const prefs = this.readJsonSafe(filePath) || {};
+		let prefs = this.readJsonSafe(filePath);
+		if (prefs === null) throw new Error(`Preferences file ${filePath} contains invalid JSON. Cannot update.`);
+		prefs = prefs || {};
 		const value = keys[keys.length - 1];
-		const path = keys.slice(0, -1) as string[];
+		const pathArgs = keys.slice(0, -1) as string[];
 
 		let obj = prefs;
-		for (let i = 0; i < path.length - 1; i++) {
-			if (!obj[path[i]] || typeof obj[path[i]] !== 'object') {
-				obj[path[i]] = {};
+		for (let i = 0; i < pathArgs.length - 1; i++) {
+			if (!obj[pathArgs[i]] || typeof obj[pathArgs[i]] !== 'object') {
+				obj[pathArgs[i]] = {};
 			}
-			obj = obj[path[i]];
+			obj = obj[pathArgs[i]];
 		}
-		obj[path[path.length - 1]] = value;
+		obj[pathArgs[pathArgs.length - 1]] = value;
 		this.atomicWrite(filePath, prefs);
 	}
 

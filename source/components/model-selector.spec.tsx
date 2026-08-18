@@ -1,9 +1,17 @@
+import {mkdirSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import ModelSelector from './model-selector.js';
 import {renderWithTheme} from '../test-utils/render-with-theme.js';
 import test from 'ava';
 import React from 'react';
 
 console.log('\nmodel-selector.spec.tsx');
+
+// Provider config is read from cwd, so chdir to keep a local agents.config.json from leaking in.
+const testDir = join(tmpdir(), `nanocoder-model-selector-test-${Date.now()}`);
+mkdirSync(testDir, {recursive: true});
+process.chdir(testDir);
 
 interface ProviderFixture {
 	name: string;

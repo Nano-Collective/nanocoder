@@ -1,3 +1,4 @@
+import {mkdirSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -8,13 +9,24 @@ import {
 	setToolRegistryGetter,
 	setToolManagerGetter,
 } from '@/message-handler';
+import {sessionManager} from '@/session/session-manager';
 
 console.log('\nacp-agent.spec.ts');
 
 // Isolate preferences writes (setSessionConfigOption persists last-used model).
-process.env.NANOCODER_CONFIG_DIR = join(
+const testConfigDir = join(tmpdir(), `nanocoder-acp-test-${Date.now()}`);
+process.env.NANOCODER_CONFIG_DIR = testConfigDir;
+
+// Provider config is read from cwd, so chdir to keep a local agents.config.json from leaking in.
+mkdirSync(testConfigDir, {recursive: true});
+process.chdir(testConfigDir);
+
+// extMethod's renameSession touches the sessionManager singleton, which
+// otherwise defaults to the real app-data directory (~/.local/share/nanocoder
+// or platform equivalent) — isolate it the same way NANOCODER_CONFIG_DIR is above.
+process.env.NANOCODER_DATA_DIR = join(
 	tmpdir(),
-	`nanocoder-acp-test-${Date.now()}`,
+	`nanocoder-acp-test-data-${Date.now()}`,
 );
 
 // ============================================================================
@@ -33,6 +45,10 @@ const createMockInitContext = (): AcpInitContext => ({
 		setModel: (model: string) => {
 			mockCurrentModel = model;
 		},
+		// saveAcpSessionToDisk() reads this, and its failures are swallowed by a
+		// bare catch — without it every persist silently no-ops and the on-disk
+		// half of the ACP path goes untested.
+		getProviderConfig: () => ({name: 'test-provider'}),
 	} as any,
 	toolManager: {
 		getAvailableToolNames: () => [],
@@ -325,6 +341,38 @@ test('AcpAgent.prompt - propagates API errors cleanly', async t => {
 	t.false(session.turnActive);
 });
 
+test('AcpAgent.prompt - resolves cleanly on user cancellation instead of throwing', async t => {
+	const {agent, conn} = createAgent();
+
+	const updates: any[] = [];
+	conn.sessionUpdate = async (u: any) => {
+		updates.push(u);
+	};
+
+	// Mirrors what chat-handler.ts throws when the abort signal fires mid-stream
+	agent['initContext'].client.chat = async () => {
+		throw new Error('Operation was cancelled');
+	};
+
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	const result = await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'stop please'}],
+	});
+
+	t.is(result.stopReason, 'cancelled');
+	// The early return still has to run the finally block, same as the throwing path.
+	t.false(agent['sessions'].get(session.sessionId)!.turnActive);
+	t.true(
+		updates.some(
+			u =>
+				u.update?.sessionUpdate === 'agent_message_chunk' &&
+				u.update?.content?.text?.includes('Cancelled by user'),
+		),
+	);
+});
+
 test('AcpAgent.prompt - returns response for valid session', async t => {
 	const {agent} = createAgent();
 	const session = await agent.newSession({cwd: '/tmp'});
@@ -452,3 +500,103 @@ test('AcpAgent.authenticate - returns empty response', async t => {
 	const result = await agent.authenticate({} as any);
 	t.deepEqual(result, {});
 });
+
+// ============================================================================
+// extMethod()
+// ============================================================================
+
+test.serial(
+	'AcpAgent.extMethod - renameSession renames an existing session',
+	async t => {
+		const {agent} = createAgent();
+		await sessionManager.initialize();
+		const session = await sessionManager.createSession({
+			title: 'Original title',
+			messageCount: 0,
+			provider: 'test',
+			model: 'test',
+			workingDirectory: '/tmp',
+			messages: [],
+		});
+
+		const result = await agent.extMethod('renameSession', {
+			sessionId: session.id,
+			title: 'Renamed',
+		});
+		t.deepEqual(result, {title: 'Renamed'});
+
+		const loaded = await sessionManager.readSession(session.id);
+		t.is(loaded!.title, 'Renamed');
+		t.is(loaded!.titleManuallySet, true);
+	},
+);
+
+test('AcpAgent.extMethod - throws for an unknown method', async t => {
+	const {agent} = createAgent();
+	await t.throwsAsync(agent.extMethod('bogus', {}), {
+		message: 'Unknown extension method: bogus',
+	});
+});
+
+test('AcpAgent.extMethod - renameSession throws on non-string sessionId/title', async t => {
+	const {agent} = createAgent();
+	await t.throwsAsync(
+		agent.extMethod('renameSession', {sessionId: 123, title: 'ok'}),
+		{message: /requires string sessionId and title/},
+	);
+	await t.throwsAsync(
+		agent.extMethod('renameSession', {sessionId: 'ok', title: undefined}),
+		{message: /requires string sessionId and title/},
+	);
+});
+
+test.serial(
+	'AcpAgent.extMethod - renameSession throws for a session that does not exist on disk',
+	async t => {
+		const {agent} = createAgent();
+		await t.throwsAsync(
+			agent.extMethod('renameSession', {
+				sessionId: '00000000-0000-0000-0000-000000000000',
+				title: 'Renamed',
+			}),
+			{message: /Session not found on disk/},
+		);
+	},
+);
+
+test.serial(
+	'AcpAgent - a renamed session keeps titleManuallySet across later prompts',
+	async t => {
+		// saveAcpSessionToDisk() rebuilds the Session field-by-field, so anything
+		// it forgets to carry over is silently dropped from disk. Losing the flag
+		// here doesn't show up in the ACP client — its own guard keeps the title —
+		// but the CLI's autosave then sees an unflagged session and overwrites the
+		// user's rename with an auto-derived one the next time they resume it.
+		const {agent} = createAgent();
+		await sessionManager.initialize();
+
+		const session = await agent.newSession({cwd: '/tmp'});
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'Hello!'}],
+		});
+
+		await agent.extMethod('renameSession', {
+			sessionId: session.sessionId,
+			title: 'Kept title',
+		});
+
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'Follow-up message'}],
+		});
+
+		const persisted = await sessionManager.readSession(session.sessionId);
+		t.is(persisted!.title, 'Kept title');
+		t.is(
+			persisted!.titleManuallySet,
+			true,
+			'the flag must survive, not just the title',
+		);
+	},
+);

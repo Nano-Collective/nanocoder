@@ -21,6 +21,8 @@ export class NanocoderAcpClient {
 	private _sessionId?: string;
 	public onSessionUpdate?: (update: unknown) => void;
 	public onPermissionRequested?: (toolCallId: string, toolCall: unknown, options?: any[]) => void;
+	/** Fires with the tool call ids whose approval cards should be dismissed. */
+	public onPermissionsCancelled?: (toolCallIds: string[]) => void;
 	public onStateSync?: (state: StateSyncPayload) => void;
 	public onConnectionReady?: () => void;
 
@@ -32,6 +34,15 @@ export class NanocoderAcpClient {
 	public availableProviders: string[] = [];
 
 	private pendingPermissions = new Map<string, (response: unknown) => void>();
+	/**
+	 * Set while a cancel is in flight for the current turn. A cancelled prompt()
+	 * rejects (the agent throws to abort its stream), but that's the user's own
+	 * request succeeding, not a failure, so we swallow the toast for it here.
+	 * This is a client-side backstop: older/unrelinked CLI builds may not yet
+	 * resolve cancellation cleanly on their end, so we can't rely solely on the
+	 * agent reporting it as a non-error.
+	 */
+	private cancelRequested = false;
 
 	constructor(outputChannel: vscode.OutputChannel, stateManager: AcpStateManager) {
 		this.outputChannel = outputChannel;
@@ -93,6 +104,25 @@ export class NanocoderAcpClient {
 				this.onPermissionRequested(toolCallId, toolCall, params.options);
 			}
 		});
+	}
+
+	/**
+	 * Answer every outstanding permission request with `cancelled` and drop it.
+	 * A leftover resolver keeps hasPendingPermissions() true, which blocks every
+	 * later message until the window reloads.
+	 */
+	private _clearPendingPermissions(): void {
+		if (this.pendingPermissions.size === 0) return;
+
+		const toolCallIds = [...this.pendingPermissions.keys()];
+		for (const resolve of this.pendingPermissions.values()) {
+			resolve({outcome: {outcome: 'cancelled'}});
+		}
+		this.pendingPermissions.clear();
+
+		if (this.onPermissionsCancelled) {
+			this.onPermissionsCancelled(toolCallIds);
+		}
 	}
 
 	resolvePermission(toolCallId: string, allowOrOptionId: boolean | string) {
@@ -272,11 +302,18 @@ export class NanocoderAcpClient {
 
 	/** Start a new conversation by clearing the cached session ID. */
 	newChat(): void {
+		// Abandoning the conversation abandons its approval prompts too.
+		this._clearPendingPermissions();
 		this._sessionId = undefined;
 	}
-
-	async prompt(text: string, images?: { data: string, mimeType: string }[]): Promise<void> {
-		if (!this.connection || !this._sessionId) return;
+	/**
+	 * Send a prompt and return the agent's PromptResponse (carries the
+	 * experimental per-turn `usage` field plus `_meta` extensions such as
+	 * the estimated cost). Returns undefined on failure.
+	 */
+	async prompt(text: string, images?: { data: string, mimeType: string }[]): Promise<import('@agentclientprotocol/sdk').PromptResponse | undefined> {
+		if (!this.connection || !this._sessionId) return undefined;
+		this.cancelRequested = false;
 		try {
 			const promptData: import('@agentclientprotocol/sdk').ContentBlock[] = [{ type: 'text', text }];
 			if (images && images.length > 0) {
@@ -284,18 +321,26 @@ export class NanocoderAcpClient {
 					promptData.push({ type: 'image', data: img.data, mimeType: img.mimeType });
 				}
 			}
-			await this.connection.prompt({
+			return await this.connection.prompt({
 				sessionId: this._sessionId,
 				prompt: promptData
 			});
 		} catch (error) {
 			this.outputChannel.appendLine(`Prompt failed: ${error}`);
-			vscode.window.showErrorMessage(`Nanocoder prompt failed: ${error}`);
+			if (!this.cancelRequested) {
+				vscode.window.showErrorMessage(`Nanocoder prompt failed: ${error}`);
+			}
+			return undefined;
+		} finally {
+			this.cancelRequested = false;
 		}
 	}
 
 	async cancel(): Promise<void> {
 		if (!this.connection || !this._sessionId) return;
+		this.cancelRequested = true;
+		// Before the notification, so the map is emptied even if cancel() throws.
+		this._clearPendingPermissions();
 		try {
 			await this.connection.cancel({
 				sessionId: this._sessionId
@@ -342,7 +387,7 @@ export class NanocoderAcpClient {
 		return false; 
 	}
 
-	async listSessions(): Promise<Array<{sessionId: string; cwd: string; title?: string | null}>> {
+	async listSessions(): Promise<Array<{sessionId: string; cwd: string; title?: string | null; updatedAt?: string | null}>> {
 		if (!this.connection) return [];
 		try {
 			const result = await this.connection.listSessions({});
@@ -350,10 +395,21 @@ export class NanocoderAcpClient {
 				sessionId: s.sessionId,
 				cwd: s.cwd,
 				title: s.title,
+				updatedAt: s.updatedAt,
 			}));
 		} catch (error) {
 			this.outputChannel.appendLine(`listSessions failed: ${error}`);
 			return [];
+		}
+	}
+
+	async renameSession(sessionId: string, title: string): Promise<void> {
+		if (!this.connection) return;
+		try {
+			await this.connection.extMethod('renameSession', {sessionId, title});
+		} catch (error) {
+			this.outputChannel.appendLine(`renameSession failed: ${error}`);
+			vscode.window.showErrorMessage(`Failed to rename session: ${error}`);
 		}
 	}
 

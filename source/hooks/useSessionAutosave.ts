@@ -150,11 +150,18 @@ export function useSessionAutosave({
 						// Write the full history — no truncation.
 						session.messages = capturedMessages;
 						session.messageCount = capturedMessages.length;
-						session.title = title;
+						// A manually-renamed title sticks — don't let the auto-derived
+						// title clobber it. Currently only the VS Code extension's
+						// rename sets this flag; the CLI's /rename command only
+						// updates in-memory display state and never reaches disk.
+						if (!session.titleManuallySet) {
+							session.title = title;
+						}
 						session.provider = capturedProvider;
 						session.model = capturedModel;
-						// Don't set lastAccessedAt here — saveSession() handles
-						// the timestamp in both the file and index consistently.
+						// Every autosave is real activity — bump it so "last used"
+						// reflects actual use, not just create/resume time.
+						session.lastAccessedAt = new Date().toISOString();
 						await sessionManager.saveSession(session);
 					} else {
 						// The stored session was deleted externally; create a fresh one.

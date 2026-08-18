@@ -17,6 +17,7 @@ import {parseToolCalls} from '@/tool-calling/index';
 import {resolveToolApproval} from '@/tools/approval-policy';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {
+	ApiUsage,
 	DevelopmentMode,
 	LLMClient,
 	Message,
@@ -25,6 +26,7 @@ import type {
 	ToolCall,
 	ToolResult,
 } from '@/types/core';
+import {buildResponseUsage} from '@/usage/response-usage';
 import {capMessagesForModel} from '@/utils/message-capping';
 import {toOptionString} from '@/utils/type-helpers';
 
@@ -52,13 +54,78 @@ export async function runAcpConversation(
 
 	let messages = session.messages;
 
+	// Provider-reported usage accumulated across this prompt's model calls,
+	// returned on the PromptResponse (experimental ACP `usage` field) so
+	// clients like the VS Code extension can show a per-response indicator.
+	// Fields stay undefined until a finite value arrives: zero-filling
+	// unreported input/output would route a total-only report into the
+	// input/output cost branch of buildResponseUsage and price it at $0.
+	const turnUsage: ApiUsage = {};
+
+	const recordUsage = (usage: ApiUsage | undefined) => {
+		if (!usage) return;
+		if (Number.isFinite(usage.inputTokens)) {
+			turnUsage.inputTokens =
+				(turnUsage.inputTokens ?? 0) + (usage.inputTokens as number);
+		}
+		if (Number.isFinite(usage.outputTokens)) {
+			turnUsage.outputTokens =
+				(turnUsage.outputTokens ?? 0) + (usage.outputTokens as number);
+		}
+		// Keep the running total consistent when a call reports only
+		// input/output: add their sum so mixed-report turns don't understate.
+		const total = Number.isFinite(usage.totalTokens)
+			? (usage.totalTokens as number)
+			: Number.isFinite(usage.inputTokens) ||
+					Number.isFinite(usage.outputTokens)
+				? ((usage.inputTokens as number) || 0) +
+					((usage.outputTokens as number) || 0)
+				: undefined;
+		if (total !== undefined) {
+			turnUsage.totalTokens = (turnUsage.totalTokens ?? 0) + total;
+		}
+	};
+
+	// Attach accumulated usage (and best-effort estimated cost via _meta) to
+	// a turn-ending response. A no-op when no model call reported usage.
+	const withTurnUsage = async (
+		response: PromptResponse,
+	): Promise<PromptResponse> => {
+		const usageReported =
+			turnUsage.inputTokens !== undefined ||
+			turnUsage.outputTokens !== undefined ||
+			turnUsage.totalTokens !== undefined;
+		if (!usageReported) return response;
+		// Cost is computed from the sparse accumulators so a total-only turn
+		// takes the lump-sum averaging branch instead of pricing 0+0 tokens.
+		const priced = await buildResponseUsage(
+			turnUsage,
+			client.getCurrentModel(),
+		);
+		const input = turnUsage.inputTokens ?? 0;
+		const output = turnUsage.outputTokens ?? 0;
+		return {
+			...response,
+			// The ACP Usage type requires all three fields, so unreported ones
+			// are zero-filled here — on the wire only, after cost is computed.
+			usage: {
+				inputTokens: input,
+				outputTokens: output,
+				totalTokens: turnUsage.totalTokens ?? input + output,
+			},
+			...(priced?.cost != null
+				? {_meta: {'nanocoder/usage': {cost: priced.cost}}}
+				: {}),
+		};
+	};
+
 	const maxTurns =
 		getAppConfig().headless?.maxTurns ?? DEFAULT_HEADLESS_MAX_TURNS;
 
 	for (let turn = 0; turn < maxTurns; turn++) {
 		if (abortController.signal.aborted) {
 			session.messages = messages;
-			return {stopReason: 'cancelled'};
+			return withTurnUsage({stopReason: 'cancelled'});
 		}
 
 		// On the final turn, force a tool-free wrap-up so we end with an answer
@@ -102,7 +169,7 @@ export async function runAcpConversation(
 
 		const systemMessage = session.systemMessage;
 		if (!systemMessage) {
-			return {stopReason: 'end_turn'};
+			return withTurnUsage({stopReason: 'end_turn'});
 		}
 
 		const sessionConfig = getAppConfig().sessions;
@@ -121,8 +188,10 @@ export async function runAcpConversation(
 			modeOverrides,
 		);
 
+		recordUsage(result?.usage);
+
 		if (!result || !result.choices || result.choices.length === 0) {
-			return {stopReason: 'end_turn'};
+			return withTurnUsage({stopReason: 'end_turn'});
 		}
 
 		const message = result.choices[0].message;
@@ -135,7 +204,7 @@ export async function runAcpConversation(
 				: {success: true as const, toolCalls: [], cleanedContent: fullContent};
 
 		if (!xmlParse.success) {
-			return {stopReason: 'end_turn'};
+			return withTurnUsage({stopReason: 'end_turn'});
 		}
 
 		const allToolCalls: ToolCall[] = [
@@ -179,16 +248,45 @@ export async function runAcpConversation(
 
 		if (validToolCalls.length === 0) {
 			session.messages = messages;
-			return {stopReason: 'end_turn'};
+			return withTurnUsage({stopReason: 'end_turn'});
+		}
+
+		const announcedBatch =
+			validToolCalls.length > 1 && !abortController.signal.aborted;
+		if (announcedBatch) {
+			for (const toolCall of validToolCalls) {
+				// withDiff: false - the announcement drops content below, so
+				// there is no reason to read the file to build a diff first.
+				const queuedMeta = await buildToolCallMeta(toolCall, {
+					withDiff: false,
+				});
+				// Content is withheld until the call is about to run: the client
+				// enables its "open diff" affordance off this field, and a diff
+				// registered now would be stale by the time the tool executes.
+				await emitToolCall(session, conn, toolCall, 'pending', {
+					...queuedMeta,
+					content: [],
+				});
+			}
 		}
 
 		// Process tool calls
 		const toolResults: ToolResult[] = [];
-		for (const toolCall of validToolCalls) {
+		for (let index = 0; index < validToolCalls.length; index++) {
+			const toolCall = validToolCalls[index];
 			// Stop was pressed: don't start any remaining queued tools. Record a
 			// cancelled result for each so the assistant's tool_calls keep matched
 			// results in history; the turn ends below instead of re-prompting.
 			if (abortController.signal.aborted) {
+				if (announcedBatch) {
+					await emitToolCallUpdate(
+						session,
+						conn,
+						toolCall,
+						'failed',
+						'Cancelled by user',
+					);
+				}
 				toolResults.push({
 					tool_call_id: toolCall.id,
 					role: 'tool',
@@ -202,8 +300,17 @@ export async function runAcpConversation(
 			// for edits) so the client can render rich tool cards and previews.
 			const meta = await buildToolCallMeta(toolCall);
 
-			// Notify client about tool call
-			await emitToolCall(session, conn, toolCall, 'pending', meta);
+			// Notify client about tool call. Already-announced calls get an
+			// update rather than a second tool_call: clients that append on
+			// tool_call (instead of upserting by id) would double-render it.
+			await emitToolCall(
+				session,
+				conn,
+				toolCall,
+				'pending',
+				meta,
+				announcedBatch ? 'tool_call_update' : 'tool_call',
+			);
 
 			// ask_user is interactive: instead of executing it, surface the
 			// question's options through the client and feed the choice back as
@@ -247,8 +354,22 @@ export async function runAcpConversation(
 						'failed',
 						'Cancelled by user',
 					);
+					// This branch returns instead of falling through to the
+					// aborted check at the top of the loop, so the calls
+					// announced behind this one would stay pending forever.
+					if (announcedBatch) {
+						for (const queued of validToolCalls.slice(index + 1)) {
+							await emitToolCallUpdate(
+								session,
+								conn,
+								queued,
+								'failed',
+								'Cancelled by user',
+							);
+						}
+					}
 					session.messages = [...messages, ...toolResults];
-					return {stopReason: 'cancelled'};
+					return withTurnUsage({stopReason: 'cancelled'});
 				}
 
 				if (permission === 'denied') {
@@ -350,12 +471,12 @@ export async function runAcpConversation(
 		// another LLM request before the top-of-turn abort check runs.
 		if (abortController.signal.aborted) {
 			session.messages = messages;
-			return {stopReason: 'cancelled'};
+			return withTurnUsage({stopReason: 'cancelled'});
 		}
 	}
 
 	session.messages = messages;
-	return {stopReason: 'max_turn_requests'};
+	return withTurnUsage({stopReason: 'max_turn_requests'});
 }
 
 /**
@@ -400,19 +521,25 @@ async function emitToolCall(
 	toolCall: ToolCall,
 	status: ToolCallStatus,
 	meta: AcpToolCallMeta,
+	sessionUpdate: 'tool_call' | 'tool_call_update' = 'tool_call',
 ): Promise<void> {
+	// Spelled out per branch: the union of both literals does not narrow
+	// SessionUpdate's discriminant.
+	const payload = {
+		toolCallId: toolCall.id,
+		title: meta.title,
+		kind: meta.kind,
+		rawInput: toolCall.function.arguments,
+		status,
+		content: meta.content.length > 0 ? meta.content : undefined,
+		locations: meta.locations.length > 0 ? meta.locations : undefined,
+	};
 	await conn.sessionUpdate({
 		sessionId: session.sessionId,
-		update: {
-			sessionUpdate: 'tool_call',
-			toolCallId: toolCall.id,
-			title: meta.title,
-			kind: meta.kind,
-			rawInput: toolCall.function.arguments,
-			status,
-			content: meta.content.length > 0 ? meta.content : undefined,
-			locations: meta.locations.length > 0 ? meta.locations : undefined,
-		},
+		update:
+			sessionUpdate === 'tool_call'
+				? {...payload, sessionUpdate: 'tool_call'}
+				: {...payload, sessionUpdate: 'tool_call_update'},
 	});
 }
 

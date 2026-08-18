@@ -1,8 +1,15 @@
 import {ReactNode} from 'react';
+import type {ResponseUsage} from './usage';
 
 export interface AssistantMessageProps {
 	message: string;
 	model: string;
+	/**
+	 * Provider-reported usage (+ estimated cost) for the API call that
+	 * produced this message. When absent, the footer falls back to a
+	 * client-side token estimate of the message text.
+	 */
+	usage?: ResponseUsage;
 }
 
 export interface AssistantReasoningProps {

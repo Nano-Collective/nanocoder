@@ -2,6 +2,10 @@
  * Git Diff Tool Tests
  */
 
+import {execSync} from 'node:child_process';
+import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import React from 'react';
 import test from 'ava';
 import {render} from 'ink-testing-library';
@@ -46,6 +50,94 @@ test('git_diff tool has AI SDK tool with execute', t => {
 test('git_diff tool has formatter function', t => {
 	t.is(typeof gitDiffTool.formatter, 'function');
 });
+
+test.serial(
+	'git_diff preserves bounded patch output for an oversized file-scoped diff',
+	async t => {
+		const dir = mkdtempSync(join(tmpdir(), 'nanocoder-git-diff-test-'));
+		const originalCwd = process.cwd();
+
+		try {
+			execSync('git init -q -b main', {cwd: dir});
+			execSync('git config user.email test@example.com', {cwd: dir});
+			execSync('git config user.name Test', {cwd: dir});
+
+			const file = join(dir, 'large.txt');
+			writeFileSync(file, 'baseline\n');
+			execSync('git add large.txt', {cwd: dir});
+			execSync('git commit -q -m baseline', {cwd: dir});
+			writeFileSync(
+				file,
+				`${Array.from({length: 600}, (_, index) => `line ${index + 1}`).join('\n')}\n`,
+			);
+
+			process.chdir(dir);
+			// biome-ignore lint/suspicious/noExplicitAny: Test accesses the AI SDK execute function.
+			const execute = (gitDiffTool.tool as any).execute as (
+				args: {file?: string; stat?: boolean},
+			) => Promise<string>;
+			const result = await execute({file: 'large.txt'});
+
+			t.regex(result, /diff --git a\/large\.txt b\/large\.txt/);
+			t.regex(result, /^\+line 1$/m);
+			t.regex(result, /^\+line 600$/m);
+			t.regex(result, /Diff truncated: showing first 250 and last 250/);
+			t.false(result.includes('Use the file parameter'));
+		} finally {
+			process.chdir(originalCwd);
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'git_diff caps oversized multi-file stats while preserving the total file count',
+	async t => {
+		const dir = mkdtempSync(join(tmpdir(), 'nanocoder-git-diff-test-'));
+		const originalCwd = process.cwd();
+
+		try {
+			execSync('git init -q -b main', {cwd: dir});
+			execSync('git config user.email test@example.com', {cwd: dir});
+			execSync('git config user.name Test', {cwd: dir});
+
+			for (let index = 1; index <= 25; index++) {
+				writeFileSync(
+					join(dir, `file-${String(index).padStart(2, '0')}.txt`),
+					'baseline\n',
+				);
+			}
+			execSync('git add .', {cwd: dir});
+			execSync('git commit -q -m baseline', {cwd: dir});
+
+			for (let index = 1; index <= 25; index++) {
+				writeFileSync(
+					join(dir, `file-${String(index).padStart(2, '0')}.txt`),
+					`${Array.from(
+						{length: 25},
+						(_, lineIndex) => `file ${index} line ${lineIndex + 1}`,
+					).join('\n')}\n`,
+				);
+			}
+
+			process.chdir(dir);
+			// biome-ignore lint/suspicious/noExplicitAny: Test accesses the AI SDK execute function.
+			const execute = (gitDiffTool.tool as any).execute as (
+				args: {stat?: boolean},
+			) => Promise<string>;
+			const result = await execute({});
+
+			t.regex(result, /file-01\.txt/);
+			t.regex(result, /file-20\.txt/);
+			t.false(result.includes('file-21.txt'));
+			t.regex(result, /25 files changed/);
+			t.regex(result, /Diff is too large to return in full/);
+		} finally {
+			process.chdir(originalCwd);
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
 
 // ============================================================================
 // Formatter Tests

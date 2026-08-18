@@ -2,3 +2,4 @@ node_modules/
 dist/
 *.vsix
 .vscode-test/
+media/chat-panel.css
