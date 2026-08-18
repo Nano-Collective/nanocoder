@@ -2064,7 +2064,7 @@ test.serial('repeated-tool-call limit pauses and stops when the user declines', 
 
 	setGlobalQuestionHandler(async question => {
 		questionCount += 1;
-		t.regex(question.question, /repeated the same tool call/);
+		t.regex(question.question, /repeated the same tool call 3 times in a row/);
 		// First option is the safe default: stop.
 		return question.options[0];
 	});
@@ -2086,7 +2086,7 @@ test.serial('repeated-tool-call limit pauses and stops when the user declines', 
 	const stopMessage = queuedComponents.find(
 		(c: any) =>
 			typeof c.props?.message === 'string' &&
-			c.props.message.includes('repeated the same tool call'),
+			c.props.message.includes('repeated the same tool call 3 times in a row'),
 	);
 	t.truthy(stopMessage, 'Should queue the loop-detected ErrorMessage');
 });
@@ -2094,10 +2094,12 @@ test.serial('repeated-tool-call limit pauses and stops when the user declines', 
 test.serial('repeated-tool-call limit grants another window when the user continues', async t => {
 	let chatCallCount = 0;
 	let questionCount = 0;
+	const questionTexts: string[] = [];
 	const queuedComponents: any[] = [];
 
 	setGlobalQuestionHandler(async question => {
 		questionCount += 1;
+		questionTexts.push(question.question);
 		// Continue on the first prompt, stop on the second.
 		return questionCount === 1 ? question.options[1] : question.options[0];
 	});
@@ -2116,12 +2118,26 @@ test.serial('repeated-tool-call limit grants another window when the user contin
 	// identical turns to the second prompt, where the user stops.
 	t.is(chatCallCount, 6, 'Continue should grant a full new window of turns');
 	t.is(questionCount, 2, 'Should re-prompt after the granted window is spent');
+	// The per-window streak resets on continue, but the reported count is the
+	// true cumulative streak, so the second prompt says 6 rather than 3 again.
+	t.regex(questionTexts[0], /repeated the same tool call 3 times in a row/);
+	t.regex(questionTexts[1], /repeated the same tool call 6 times in a row/);
 	const continueNotice = queuedComponents.find(
 		(c: any) =>
 			typeof c.props?.message === 'string' &&
 			c.props.message.includes('Continuing'),
 	);
 	t.truthy(continueNotice, 'Should queue an InfoMessage when continuing');
+	const stopMessage = queuedComponents.find(
+		(c: any) =>
+			typeof c.props?.message === 'string' &&
+			c.props.message.includes('repeated the same tool call'),
+	);
+	t.regex(
+		stopMessage?.props?.message ?? '',
+		/repeated the same tool call 6 times in a row/,
+		'Stop message should report the cumulative streak, not the window count',
+	);
 });
 
 test.serial('repeated-tool-call limit does not fire one call under the limit', async t => {

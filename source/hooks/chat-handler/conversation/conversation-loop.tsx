@@ -114,10 +114,15 @@ interface ProcessAssistantResponseParams {
 	// Used to detect an identical-call loop. The tool-execution continuation
 	// threads it forward; every other recursion site resets it to undefined.
 	lastToolSignature?: string;
-	// How many consecutive turns have emitted the same tool-call signature.
-	// Reaching the configured repeated-call limit pauses to ask the user
-	// (interactive) or stops with an actionable error (non-interactive).
+	// How many consecutive turns have emitted the same tool-call signature
+	// within the current window. Reaching the configured repeated-call limit
+	// pauses to ask the user (interactive) or stops with an actionable error
+	// (non-interactive). Resets to 0 when the user grants another window.
 	repeatedToolCallCount?: number;
+	// How many consecutive turns have emitted the same tool-call signature in
+	// total, across every window the user granted. Never reset by a granted
+	// continuation, so user-facing counts report the true repetition streak.
+	repeatedToolCallTotal?: number;
 }
 
 // Module-level flag: show XML fallback notice only once per process lifetime.
@@ -186,6 +191,7 @@ export const processAssistantResponse = async (
 		compactRetryCount = 0,
 		lastToolSignature,
 		repeatedToolCallCount = 0,
+		repeatedToolCallTotal = 0,
 		privacySessionMapRef,
 		privacyEnabled = false,
 		onPrivacyEvent,
@@ -446,6 +452,7 @@ export const processAssistantResponse = async (
 			malformedRetryCount: malformedRetryCount + 1,
 			lastToolSignature: undefined,
 			repeatedToolCallCount: 0,
+			repeatedToolCallTotal: 0,
 		});
 		return;
 	}
@@ -691,6 +698,7 @@ export const processAssistantResponse = async (
 			malformedRetryCount: 0,
 			lastToolSignature: undefined,
 			repeatedToolCallCount: 0,
+			repeatedToolCallTotal: 0,
 		});
 		return;
 	}
@@ -708,8 +716,15 @@ export const processAssistantResponse = async (
 				? repeatedToolCallCount + 1
 				: 1;
 		// Streak carried into the recursive continuation below. Reset to 0 when
-		// the user grants another window at the limit prompt.
+		// the user grants another window at the limit prompt, so the re-prompt
+		// cadence stays one full window rather than firing every turn.
 		let repeatedCountForNextTurn = currentRepeatedCount;
+		// True consecutive-repeat streak, never reset by a granted window, so
+		// user-facing counts don't restart at the limit after each continue.
+		const currentRepeatedTotal =
+			currentToolSignature && currentToolSignature === lastToolSignature
+				? repeatedToolCallTotal + 1
+				: 1;
 
 		if (currentRepeatedCount >= maxRepeatedToolCalls) {
 			// Interactive sessions pause and ask instead of hard-stopping: the
@@ -724,7 +739,7 @@ export const processAssistantResponse = async (
 				const stopOption = 'Stop and return to prompt';
 				const continueOption = `Continue (allow ${maxRepeatedToolCalls} more)`;
 				const answer = await signalQuestion({
-					question: `The model has repeated the same tool call ${currentRepeatedCount} times in a row without making progress. It may be stuck in a loop that drains tokens. Continue anyway?`,
+					question: `The model has repeated the same tool call ${currentRepeatedTotal} times in a row without making progress. It may be stuck in a loop that drains tokens. Continue anyway?`,
 					options: [stopOption, continueOption],
 					allowFreeform: false,
 					questionType: 'confirmation',
@@ -742,7 +757,7 @@ export const processAssistantResponse = async (
 				addToChatQueue(
 					<ErrorMessage
 						key={generateKey('tool-loop-detected')}
-						message={`Model repeated the same tool call ${currentRepeatedCount} times in a row without making progress — stopping to avoid a loop. Try rephrasing the request, breaking it into smaller steps, or switching models.`}
+						message={`Model repeated the same tool call ${currentRepeatedTotal} times in a row without making progress — stopping to avoid a loop. Try rephrasing the request, breaking it into smaller steps, or switching models.`}
 						hideBox={true}
 					/>,
 				);
@@ -953,6 +968,7 @@ export const processAssistantResponse = async (
 				malformedRetryCount: 0,
 				lastToolSignature: currentToolSignature,
 				repeatedToolCallCount: repeatedCountForNextTurn,
+				repeatedToolCallTotal: currentRepeatedTotal,
 			});
 			return;
 		}
@@ -1015,6 +1031,7 @@ export const processAssistantResponse = async (
 						compactRetryCount: compactRetryCount + 1,
 						lastToolSignature: undefined,
 						repeatedToolCallCount: 0,
+						repeatedToolCallTotal: 0,
 					});
 					return;
 				} catch (_err) {
@@ -1100,6 +1117,7 @@ export const processAssistantResponse = async (
 			malformedRetryCount: 0,
 			lastToolSignature: undefined,
 			repeatedToolCallCount: 0,
+			repeatedToolCallTotal: 0,
 		});
 		return;
 	}
