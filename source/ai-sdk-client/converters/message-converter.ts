@@ -71,7 +71,8 @@ export function dropOrphanedToolResults(messages: Message[]): Message[] {
  * Orphaned tool results are dropped first (see dropOrphanedToolResults).
  */
 export function convertToModelMessages(messages: Message[]): ModelMessage[] {
-	return dropOrphanedToolResults(messages).map((msg): ModelMessage => {
+	const modelFacing = messages.filter(msg => !msg.displayOnly);
+	return dropOrphanedToolResults(modelFacing).map((msg): ModelMessage => {
 		if (msg.role === 'tool') {
 			// Convert to AI SDK tool-result format
 			// AI SDK expects: { role: 'tool', content: [{ type: 'tool-result', toolCallId, toolName, output }] }
