@@ -100,7 +100,7 @@ nanocoder --mode yolo run "update README and push"
 
 If a tool requires approval that the active mode won't grant, nanocoder prints `Tool approval required for: ...` and exits with status code `1`.
 
-Because there is nobody to answer a prompt in a `run`, the agent-loop [retry limits](../configuration/index.md#retry-limits) hard-stop instead of pausing: a model that repeats the same tool call, returns empty responses, or keeps emitting malformed tool calls past its configured cap ends the run with an error naming the setting. Under the `--plain` runtime (used automatically in CI and non-TTY environments) that exits with status code `1`.
+Because there is nobody to answer a prompt in a `run`, the agent-loop [retry limits](../configuration/index.md#retry-limits) hard-stop instead of pausing: a model that repeats the same tool call, returns empty responses, or keeps emitting malformed tool calls past its configured cap ends the run with an error. Under the `--plain` runtime (used automatically in CI and non-TTY environments) the error names the limit that fired and the run exits with status code `1`.
 
 > **Warning - CI polling patterns:** the repeated-call hard stop triggers on *legitimate* repetition too. If your workflow's model is expected to run the identical command repeatedly - polling a deploy, waiting on a slow job by re-running the same check - the run aborts once `maxRepeatedToolCalls` consecutive identical calls are emitted (default 3). Raise `nanocoder.retries.maxRepeatedToolCalls` in that project's `agents.config.json` before relying on such a pattern in CI.
 

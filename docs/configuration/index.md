@@ -197,6 +197,8 @@ Caps on how many times the conversation loop auto-retries a failing pattern with
 
 Choosing "Continue" at the repeated-tool-call prompt runs the paused call and re-checks after `maxRepeatedToolCalls` further identical calls, so a genuinely stuck model is re-prompted rather than left looping.
 
+Setting `maxEmptyTurns` or `maxMalformedRetries` to `0` disables the nudge entirely, so the first empty or malformed turn ends the run - the fail-fast behaviour `--plain` had before these limits existed, worth setting when a silent or malformed-output model should cost one model call rather than three. The interactive loop still runs its single compact-and-retry after an empty turn even at `0`.
+
 > **Warning - CI polling patterns:** in `--plain` runs (`nanocoder run "..."` in CI and non-TTY environments) there is no prompt to answer, so `maxRepeatedToolCalls` is a hard stop. A workflow whose model legitimately repeats the identical command - polling a deploy, re-running the same check while waiting on an external state change - aborts with exit code `1` once the cap is hit, by default on the third consecutive identical call. Raise `nanocoder.retries.maxRepeatedToolCalls` in that project's `agents.config.json` before relying on such a polling pattern.
 
 Unlike [Headless](#headless), these limits do not cover the ACP loop (`--acp`, used by editor clients), which is bounded by `maxTurns` alone. Delegated [subagent](../features/subagents.md) runs apply `maxRepeatedToolCalls` - a stuck subagent stops with an error naming the setting, since there is nobody to ask inside a delegated run - but not the other two limits: a subagent's loop ends on its own after an empty turn, and it does not use text-parsed tool calls.
