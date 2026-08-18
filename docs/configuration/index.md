@@ -197,6 +197,8 @@ Caps on how many times the conversation loop auto-retries a failing pattern with
 
 Choosing "Continue" at the repeated-tool-call prompt grants another window of the same size, so a genuinely stuck model is re-checked rather than left looping.
 
+Unlike [Headless](#headless), these limits do not cover the ACP loop (`--acp`, used by editor clients), which is bounded by `maxTurns` alone, nor delegated [subagent](../features/subagents.md) runs, which run their own loop.
+
 ### Paste Handling
 
 Configure how pasted text is handled in the input. By default, single-line pastes of 800 characters or fewer are inserted directly, while longer or multi-line pastes are collapsed into a `[Paste #N: X chars]` placeholder.

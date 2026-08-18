@@ -84,7 +84,7 @@ File editing uses a content-based approach:
 - `string_replace`: Primary edit tool — replaces exact content
 - `write_file`: Whole file overwrites
 
-Two execution paths exist: native tool calling (preferred, via AI SDK) and an XML fallback for models that don't support tools. `LLMChatResponse.toolsDisabled` signals which path produced the response; the conversation loop only runs `parseToolCalls()` (in `source/tool-calling/`) when `toolsDisabled` is true.
+Two execution paths exist: native tool calling (preferred, via AI SDK) and an XML fallback for models that don't support tools. `LLMChatResponse.toolsDisabled` signals which path produced the response. The conversation loop runs `parseToolCalls()` (in `source/tool-calling/`) whenever the response has no native tool calls — always on the fallback path, and on the native path too, since models marketed as native-tool-capable sometimes regress to emitting tool-call text. Malformed text there feeds the self-correction retry loop capped by `nanocoder.retries.maxMalformedRetries`.
 
 ### Command System
 
