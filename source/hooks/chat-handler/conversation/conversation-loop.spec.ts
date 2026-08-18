@@ -9,6 +9,7 @@ import type {
 	ToolCall,
 	ToolResult,
 } from '@/types/core';
+import type {RetryLimitsConfig} from '@/types/index';
 import {
 	resetAutoCompactSession,
 	setAutoCompactEnabled,
@@ -1431,6 +1432,15 @@ function setupAutoCompactTestEnv() {
 	setAutoCompactThreshold(50);
 	resetSessionContextLimit();
 	clearAppConfig();
+	// Pin the agent-loop retry limits to their shipped defaults. Many tests here
+	// count exact chat calls, and a `nanocoder.retries` block in the developer's
+	// project or personal config would otherwise change those counts.
+	const retries = getAppConfig().retries;
+	if (retries) {
+		retries.maxRepeatedToolCalls = 3;
+		retries.maxEmptyTurns = 2;
+		retries.maxMalformedRetries = 2;
+	}
 	resetFallbackNotice();
 	resetLastTurnHadReasoning();
 }
@@ -2026,6 +2036,27 @@ const createRepeatingToolClient = (onChat?: () => void) => ({
 const repeatingToolManager = () =>
 	createMockToolManager({tools: ['read_file'], needsApproval: false});
 
+// Pin the resolved retry limits for the duration of a test and restore them
+// afterwards. Without this the assertions read whatever `nanocoder.retries` the
+// developer happens to have in their project or personal config, since the
+// per-test clearAppConfig() re-resolves from disk.
+const withRetryLimits = async (
+	overrides: Partial<RetryLimitsConfig>,
+	run: () => Promise<void>,
+) => {
+	const retries = getAppConfig().retries;
+	if (!retries) {
+		throw new Error('Resolved config should always carry retry limits');
+	}
+	const originals = {...retries};
+	Object.assign(retries, overrides);
+	try {
+		await run();
+	} finally {
+		Object.assign(retries, originals);
+	}
+};
+
 test.serial('repeated-tool-call limit pauses and stops when the user declines', async t => {
 	let chatCallCount = 0;
 	let questionCount = 0;
@@ -2038,13 +2069,15 @@ test.serial('repeated-tool-call limit pauses and stops when the user declines', 
 		return question.options[0];
 	});
 
-	const params = createDefaultParams({
-		client: createRepeatingToolClient(() => chatCallCount++),
-		toolManager: repeatingToolManager(),
-		addToChatQueue: (component: any) => queuedComponents.push(component),
-	});
+	await withRetryLimits({maxRepeatedToolCalls: 3}, async () => {
+		const params = createDefaultParams({
+			client: createRepeatingToolClient(() => chatCallCount++),
+			toolManager: repeatingToolManager(),
+			addToChatQueue: (component: any) => queuedComponents.push(component),
+		});
 
-	await processAssistantResponse(params);
+		await processAssistantResponse(params);
+	});
 
 	// Default maxRepeatedToolCalls = 3: turns 1 and 2 execute, turn 3 trips
 	// the limit and prompts. Declining stops the loop.
@@ -2069,13 +2102,15 @@ test.serial('repeated-tool-call limit grants another window when the user contin
 		return questionCount === 1 ? question.options[1] : question.options[0];
 	});
 
-	const params = createDefaultParams({
-		client: createRepeatingToolClient(() => chatCallCount++),
-		toolManager: repeatingToolManager(),
-		addToChatQueue: (component: any) => queuedComponents.push(component),
-	});
+	await withRetryLimits({maxRepeatedToolCalls: 3}, async () => {
+		const params = createDefaultParams({
+			client: createRepeatingToolClient(() => chatCallCount++),
+			toolManager: repeatingToolManager(),
+			addToChatQueue: (component: any) => queuedComponents.push(component),
+		});
 
-	await processAssistantResponse(params);
+		await processAssistantResponse(params);
+	});
 
 	// Continuing resets the streak: 3 turns to the first prompt, then 3 more
 	// identical turns to the second prompt, where the user stops.
@@ -2132,23 +2167,20 @@ test.serial('repeated-tool-call limit does not fire one call under the limit', a
 		},
 	};
 
-	const params = createDefaultParams({
-		client,
-		toolManager: repeatingToolManager(),
-	});
+	await withRetryLimits({maxRepeatedToolCalls: 3}, async () => {
+		const params = createDefaultParams({
+			client,
+			toolManager: repeatingToolManager(),
+		});
 
-	await processAssistantResponse(params);
+		await processAssistantResponse(params);
+	});
 
 	t.is(chatCallCount, 3, 'All three turns should run to natural completion');
 	t.is(questionCount, 0, 'Must not prompt below the limit');
 });
 
 test.serial('repeated-tool-call limit honors a custom configured value', async t => {
-	const retries = getAppConfig().retries;
-	t.truthy(retries, 'Resolved config should always carry retry limits');
-	const originalLimit = retries!.maxRepeatedToolCalls;
-	retries!.maxRepeatedToolCalls = 2;
-
 	let chatCallCount = 0;
 	let questionCount = 0;
 
@@ -2157,19 +2189,17 @@ test.serial('repeated-tool-call limit honors a custom configured value', async t
 		return question.options[0];
 	});
 
-	try {
+	await withRetryLimits({maxRepeatedToolCalls: 2}, async () => {
 		const params = createDefaultParams({
 			client: createRepeatingToolClient(() => chatCallCount++),
 			toolManager: repeatingToolManager(),
 		});
 
 		await processAssistantResponse(params);
+	});
 
-		t.is(chatCallCount, 2, 'Loop should stop at the configured limit of 2');
-		t.is(questionCount, 1, 'Should pause and ask at the configured limit');
-	} finally {
-		retries!.maxRepeatedToolCalls = originalLimit;
-	}
+	t.is(chatCallCount, 2, 'Loop should stop at the configured limit of 2');
+	t.is(questionCount, 1, 'Should pause and ask at the configured limit');
 });
 
 test.serial('repeated-tool-call limit hard-stops without prompting in non-interactive mode', async t => {
@@ -2182,14 +2212,16 @@ test.serial('repeated-tool-call limit hard-stops without prompting in non-intera
 		return question.options[1];
 	});
 
-	const params = createDefaultParams({
-		client: createRepeatingToolClient(() => chatCallCount++),
-		toolManager: repeatingToolManager(),
-		nonInteractiveMode: true,
-		addToChatQueue: (component: any) => queuedComponents.push(component),
-	});
+	await withRetryLimits({maxRepeatedToolCalls: 3}, async () => {
+		const params = createDefaultParams({
+			client: createRepeatingToolClient(() => chatCallCount++),
+			toolManager: repeatingToolManager(),
+			nonInteractiveMode: true,
+			addToChatQueue: (component: any) => queuedComponents.push(component),
+		});
 
-	await processAssistantResponse(params);
+		await processAssistantResponse(params);
+	});
 
 	t.is(chatCallCount, 3, 'Loop should hard-stop at the limit');
 	t.is(questionCount, 0, 'Must not prompt when there is nobody to ask');
@@ -2202,10 +2234,6 @@ test.serial('repeated-tool-call limit hard-stops without prompting in non-intera
 });
 
 test.serial('malformed-retry limit honors a custom configured value', async t => {
-	const retries = getAppConfig().retries;
-	const originalLimit = retries!.maxMalformedRetries;
-	retries!.maxMalformedRetries = 0;
-
 	let chatCallCount = 0;
 	const queuedComponents: any[] = [];
 
@@ -2227,31 +2255,25 @@ test.serial('malformed-retry limit honors a custom configured value', async t =>
 		},
 	};
 
-	try {
+	await withRetryLimits({maxMalformedRetries: 0}, async () => {
 		const params = createDefaultParams({
 			client: alwaysMalformedClient,
 			addToChatQueue: (component: any) => queuedComponents.push(component),
 		});
 
 		await processAssistantResponse(params);
+	});
 
-		t.is(chatCallCount, 1, 'Limit 0 should give up after the first bad turn');
-		const giveUpMessage = queuedComponents.find(
-			(c: any) =>
-				typeof c.props?.message === 'string' &&
-				c.props.message.includes('malformed tool calls 1 times'),
-		);
-		t.truthy(giveUpMessage, 'Give-up message should reflect the custom limit');
-	} finally {
-		retries!.maxMalformedRetries = originalLimit;
-	}
+	t.is(chatCallCount, 1, 'Limit 0 should give up after the first bad turn');
+	const giveUpMessage = queuedComponents.find(
+		(c: any) =>
+			typeof c.props?.message === 'string' &&
+			c.props.message.includes('malformed tool calls 1 times'),
+	);
+	t.truthy(giveUpMessage, 'Give-up message should reflect the custom limit');
 });
 
 test.serial('empty-turn limit honors a custom configured value', async t => {
-	const retries = getAppConfig().retries;
-	const originalLimit = retries!.maxEmptyTurns;
-	retries!.maxEmptyTurns = 0;
-
 	let chatCallCount = 0;
 	const queuedComponents: any[] = [];
 
@@ -2267,28 +2289,26 @@ test.serial('empty-turn limit honors a custom configured value', async t => {
 		},
 	};
 
-	try {
+	await withRetryLimits({maxEmptyTurns: 0}, async () => {
 		const params = createDefaultParams({
 			client: alwaysEmptyClient,
 			addToChatQueue: (component: any) => queuedComponents.push(component),
 		});
 
 		await processAssistantResponse(params);
+	});
 
-		// Limit 0 skips all nudges: at most the initial turn plus one
-		// compact-and-retry cycle (MAX_COMPACT_RETRIES = 1). The default limit
-		// would make at least 3 calls before giving up.
-		t.true(
-			chatCallCount <= 2,
-			`Limit 0 should give up within 2 calls; got ${chatCallCount}`,
-		);
-		const giveUpMessage = queuedComponents.find(
-			(c: any) =>
-				typeof c.props?.message === 'string' &&
-				c.props.message.includes('produced no output'),
-		);
-		t.truthy(giveUpMessage, 'Should queue the give-up ErrorMessage');
-	} finally {
-		retries!.maxEmptyTurns = originalLimit;
-	}
+	// Limit 0 skips all nudges: at most the initial turn plus one
+	// compact-and-retry cycle (MAX_COMPACT_RETRIES = 1). The default limit
+	// would make at least 3 calls before giving up.
+	t.true(
+		chatCallCount <= 2,
+		`Limit 0 should give up within 2 calls; got ${chatCallCount}`,
+	);
+	const giveUpMessage = queuedComponents.find(
+		(c: any) =>
+			typeof c.props?.message === 'string' &&
+			c.props.message.includes('produced no output'),
+	);
+	t.truthy(giveUpMessage, 'Should queue the give-up ErrorMessage');
 });

@@ -193,7 +193,7 @@ Caps on how many times the interactive conversation loop auto-retries a failing 
 |--------|------|---------|-------------|
 | `maxRepeatedToolCalls` | number | `3` | Consecutive identical tool calls allowed before the loop pauses (minimum 2). In an interactive session you are asked whether to continue — useful when the repetition is legitimate, such as polling a long-running job — or stop. Non-interactive runs stop with an error. |
 | `maxEmptyTurns` | number | `2` | Consecutive empty assistant turns that are auto-nudged before the loop compacts the context, retries once, and gives up (minimum 0). |
-| `maxMalformedRetries` | number | `2` | Malformed tool-call self-correction retries allowed on the XML fallback path before the loop gives up (minimum 0). |
+| `maxMalformedRetries` | number | `2` | Malformed self-correction retries allowed for text-parsed tool calls before the loop gives up (minimum 0). Applies to the XML fallback path and to native-tool models that emit tool-call text instead of native tool calls. |
 
 Choosing "Continue" at the repeated-tool-call prompt grants another window of the same size, so a genuinely stuck model is re-checked rather than left looping.
 

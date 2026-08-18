@@ -382,8 +382,9 @@ export const processAssistantResponse = async (
 		);
 	}
 
-	// Check for malformed tool calls and send error back to model for self-correction
-	// (only happens on the XML fallback path)
+	// Check for malformed tool calls and send error back to model for
+	// self-correction. Reachable from any text-parsed path: the XML fallback,
+	// and native responses that emit tool-call text instead of native calls.
 	if (!parseResult.success) {
 		// Cap malformed-retry recursion. Without this, a model stuck producing
 		// bad XML loops forever, appending two messages per iteration, until
@@ -717,8 +718,8 @@ export const processAssistantResponse = async (
 			// runs have nobody to ask, so they keep the hard stop.
 			const liveMode = developmentModeRef?.current ?? developmentMode;
 			let continueAnyway = false;
+			await flushAll();
 			if (!nonInteractiveMode && liveMode !== 'headless') {
-				await flushAll();
 				setIsGenerating(false);
 				const stopOption = 'Stop and return to prompt';
 				const continueOption = `Continue (allow ${maxRepeatedToolCalls} more)`;
@@ -732,7 +733,6 @@ export const processAssistantResponse = async (
 			}
 
 			if (!continueAnyway) {
-				await flushAll();
 				// Keep the AI SDK's 1:1 tool-call/result mapping intact: the assistant
 				// message with these tool_calls is already in history, so pair each
 				// with a cancellation result before stopping.

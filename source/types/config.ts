@@ -108,8 +108,9 @@ export interface RetryLimitsConfig {
 	// Consecutive empty assistant turns auto-nudged before compact-and-retry
 	// kicks in and the loop gives up.
 	maxEmptyTurns: number;
-	// Malformed tool-call self-correction retries allowed on the XML fallback
-	// path before the loop gives up.
+	// Malformed self-correction retries allowed for text-parsed tool calls
+	// before the loop gives up. Covers the XML fallback path and native
+	// responses that emit tool-call text instead of native tool calls.
 	maxMalformedRetries: number;
 }
 
