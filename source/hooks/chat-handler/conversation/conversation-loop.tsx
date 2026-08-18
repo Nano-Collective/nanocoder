@@ -702,10 +702,13 @@ export const processAssistantResponse = async (
 		// Count consecutive identical signatures and stop once the cap is hit so
 		// we surface an actionable error instead of looping until abort.
 		const currentToolSignature = computeToolCallSignature(validToolCalls);
-		let currentRepeatedCount =
+		const currentRepeatedCount =
 			currentToolSignature && currentToolSignature === lastToolSignature
 				? repeatedToolCallCount + 1
 				: 1;
+		// Streak carried into the recursive continuation below. Reset to 0 when
+		// the user grants another window at the limit prompt.
+		let repeatedCountForNextTurn = currentRepeatedCount;
 
 		if (currentRepeatedCount >= maxRepeatedToolCalls) {
 			// Interactive sessions pause and ask instead of hard-stopping: the
@@ -753,7 +756,7 @@ export const processAssistantResponse = async (
 			// User granted another window: reset the streak so the next
 			// maxRepeatedToolCalls identical calls prompt again instead of
 			// stopping, then resume execution of this turn's tools.
-			currentRepeatedCount = 0;
+			repeatedCountForNextTurn = 0;
 			setIsGenerating(true);
 			addToChatQueue(
 				<InfoMessage
@@ -949,7 +952,7 @@ export const processAssistantResponse = async (
 				emptyTurnCount: 0,
 				malformedRetryCount: 0,
 				lastToolSignature: currentToolSignature,
-				repeatedToolCallCount: currentRepeatedCount,
+				repeatedToolCallCount: repeatedCountForNextTurn,
 			});
 			return;
 		}
