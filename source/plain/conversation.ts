@@ -1,9 +1,8 @@
-import {DEFAULT_HEADLESS_MAX_TURNS, getAppConfig} from '@/config/index';
 import {
-	MAX_EMPTY_TURNS,
-	MAX_MALFORMED_RETRIES,
-	MAX_REPEATED_TOOL_CALLS,
-} from '@/constants';
+	DEFAULT_HEADLESS_MAX_TURNS,
+	getAppConfig,
+	getRetryLimits,
+} from '@/config/index';
 import {computeToolCallSignature} from '@/hooks/chat-handler/utils/tool-signature';
 import {processToolUse} from '@/message-handler';
 import {color, write, writeError, writeLine, writeStatus} from '@/plain/writer';
@@ -138,12 +137,8 @@ export async function runPlainConversation(
 	// Agent-loop retry limits (`nanocoder.retries`): the same caps the
 	// interactive loop applies. There is nobody to ask in a plain run, so
 	// hitting any of them hard-stops with a clear error instead of pausing.
-	const retryLimits = getAppConfig().retries;
-	const maxRepeatedToolCalls =
-		retryLimits?.maxRepeatedToolCalls ?? MAX_REPEATED_TOOL_CALLS;
-	const maxEmptyTurns = retryLimits?.maxEmptyTurns ?? MAX_EMPTY_TURNS;
-	const maxMalformedRetries =
-		retryLimits?.maxMalformedRetries ?? MAX_MALFORMED_RETRIES;
+	const {maxRepeatedToolCalls, maxEmptyTurns, maxMalformedRetries} =
+		getRetryLimits();
 
 	// Consecutive-failure streaks. Each kind of failing turn increments its own
 	// counter and resets the others; any healthy turn resets all of them.
