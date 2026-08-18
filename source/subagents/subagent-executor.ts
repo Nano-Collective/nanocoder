@@ -50,6 +50,21 @@ const MAX_SUBAGENT_DEPTH = 2;
 export const MAX_CONCURRENT_AGENTS = 5;
 
 /**
+ * Thrown when the conversation loop stops itself (repeated-call cap). Carries
+ * the assistant text produced before the stop so the parent still receives the
+ * work the subagent did complete instead of an empty result.
+ */
+class SubagentLoopStopError extends Error {
+	readonly partialOutput: string;
+
+	constructor(message: string, partialOutput: string) {
+		super(message);
+		this.name = 'SubagentLoopStopError';
+		this.partialOutput = partialOutput;
+	}
+}
+
+/**
  * SubagentExecutor manages the execution of delegated tasks to subagents.
  * Each subagent runs in an isolated context with filtered tools.
  */
@@ -191,7 +206,11 @@ export class SubagentExecutor {
 		} catch (error) {
 			return {
 				subagentName: task.subagent_type,
-				output: '',
+				// A loop stop still returns whatever the subagent produced before
+				// it got stuck, so the parent can use the partial work instead of
+				// being handed an empty result.
+				output:
+					error instanceof SubagentLoopStopError ? error.partialOutput : '',
 				success: false,
 				error: formatError(error),
 				executionTimeMs: Date.now() - startTime,
@@ -394,9 +413,18 @@ export class SubagentExecutor {
 		// to ask inside a delegated run, so hitting the cap stops with an error.
 		// The signature covers every emitted call, so a subagent stuck on an
 		// unknown tool trips the cap too.
+		//
+		// Deliberately out of scope for #897: a hard turn ceiling (the plain and
+		// ACP `maxTurns` equivalent) and alternating-pattern detection, so a
+		// subagent cycling A, B, A, B... is still only bounded by the parent's
+		// abort signal. Revisit as its own change.
 		const {maxRepeatedToolCalls} = getRetryLimits();
 		let lastToolSignature = '';
 		let repeatedToolCallCount = 0;
+
+		// Assistant text from every turn so far. The repeated-call stop hands
+		// this to the parent instead of discarding the work already done.
+		const assistantTranscript: string[] = [];
 
 		if (agentId) {
 			initSubagentSession(agentId, config.name, messages);
@@ -494,6 +522,9 @@ export class SubagentExecutor {
 			);
 
 			const responseContent = response.choices[0]?.message.content || '';
+			if (responseContent.trim()) {
+				assistantTranscript.push(responseContent);
+			}
 
 			const toolCalls = response.choices[0]?.message.tool_calls;
 			if (!toolCalls || toolCalls.length === 0) {
@@ -508,8 +539,9 @@ export class SubagentExecutor {
 					: 1;
 			if (currentRepeatedCount >= maxRepeatedToolCalls) {
 				emitProgress('error');
-				throw new Error(
+				throw new SubagentLoopStopError(
 					`Subagent repeated the same tool call ${currentRepeatedCount} times in a row without making progress — stopping to avoid a loop (nanocoder.retries.maxRepeatedToolCalls = ${maxRepeatedToolCalls}).`,
+					assistantTranscript.join('\n\n'),
 				);
 			}
 			lastToolSignature = currentToolSignature;

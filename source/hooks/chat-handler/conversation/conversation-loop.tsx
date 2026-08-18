@@ -520,22 +520,29 @@ export const processAssistantResponse = async (
 		);
 	}
 
-	const {validToolCalls, errorResults} = filterValidToolCalls(
+	const {validToolCalls, unknownToolCalls, errorResults} = filterValidToolCalls(
 		allToolCalls,
 		toolManager,
 	);
+
+	// The assistant message carries every call the model emitted, unknown tools
+	// included. Their error results below only reach the model when a matching
+	// tool_call is in history (dropOrphanedToolResults strips results with no
+	// preceding call), and without that feedback the model re-emits the same
+	// ghost call until the repeated-call cap stops the turn.
+	const emittedToolCalls = [...validToolCalls, ...unknownToolCalls];
 
 	// Add assistant message to conversation history only if it has content or tool_calls
 	// Empty assistant messages cause API errors: "Assistant message must have either content or tool_calls"
 	const assistantMsg: Message = {
 		role: 'assistant',
 		content: cleanedContent,
-		tool_calls: validToolCalls.length > 0 ? validToolCalls : undefined,
+		tool_calls: emittedToolCalls.length > 0 ? emittedToolCalls : undefined,
 		reasoning: fullReasoning,
 	};
 
 	const hasValidAssistantMessage =
-		cleanedContent.trim() || validToolCalls.length > 0;
+		cleanedContent.trim() || emittedToolCalls.length > 0;
 
 	// Build updated messages array using MessageBuilder
 	const builder = new MessageBuilder(messages);

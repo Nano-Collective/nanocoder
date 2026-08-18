@@ -1,4 +1,5 @@
 import test from 'ava';
+import {dropOrphanedToolResults} from '@/ai-sdk-client/converters/message-converter.js';
 import {clearAppConfig, getAppConfig} from '@/config/index.js';
 import {resetShutdownManager} from '@/utils/shutdown/shutdown-manager.js';
 import {processAssistantResponse, resetFallbackNotice, resetLastTurnHadReasoning} from './conversation-loop.js';
@@ -2333,6 +2334,38 @@ test.serial('repeated unknown-tool calls grant another window when the user cont
 	t.is(questionCount, 2, 'Should re-prompt after the granted window is spent');
 	t.regex(questionTexts[0], /repeated the same tool call 3 times in a row/);
 	t.regex(questionTexts[1], /repeated the same tool call 6 times in a row/);
+});
+
+test.serial('unknown-tool feedback is paired with its call so it reaches the model', async t => {
+	// The error result only reaches the model when its tool_call is in the
+	// assistant message: dropOrphanedToolResults strips results whose call is
+	// missing, leaving the next turn's context unchanged and the model repeating
+	// the same ghost call until the cap trips.
+	const messageSnapshots: Message[][] = [];
+
+	setGlobalQuestionHandler(async question => question.options[0]);
+
+	await withRetryLimits({maxRepeatedToolCalls: 3}, async () => {
+		const params = createDefaultParams({
+			client: createUnknownToolClient(),
+			toolManager: repeatingToolManager(),
+			setMessages: (msgs: Message[]) => messageSnapshots.push(msgs),
+		});
+
+		await processAssistantResponse(params);
+	});
+
+	const latest = messageSnapshots[messageSnapshots.length - 1];
+	const assistant = latest.find(m => m.role === 'assistant');
+	t.true(
+		(assistant?.tool_calls ?? []).some(tc => tc.id === 'call_ghost'),
+		'the ghost call must be in the assistant message',
+	);
+	const delivered = dropOrphanedToolResults(latest);
+	t.true(
+		delivered.some(m => m.role === 'tool' && m.tool_call_id === 'call_ghost'),
+		'the unknown-tool error must survive orphan pruning',
+	);
 });
 
 test.serial('repeated unknown-tool calls hard-stop without prompting in non-interactive mode', async t => {

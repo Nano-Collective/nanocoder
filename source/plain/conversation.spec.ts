@@ -1,4 +1,5 @@
 import test from "ava";
+import { dropOrphanedToolResults } from "@/ai-sdk-client/converters/message-converter";
 import { getAppConfig, reloadAppConfig } from "@/config/index";
 import { setToolManagerGetter, setToolRegistryGetter } from "@/message-handler";
 import type { ToolManager } from "@/tools/tool-manager";
@@ -1412,5 +1413,169 @@ test.serial(
 		});
 
 		t.is(outcome.kind, "success");
+	},
+);
+
+test.serial(
+	"unknown-tool feedback reaches the model instead of being pruned as orphaned",
+	async (t) => {
+		// The error result is only delivered if its tool_call is in history:
+		// dropOrphanedToolResults strips any result whose call is missing, which
+		// would leave the next turn's context identical and the model repeating
+		// the same ghost call until the repeated-call cap trips.
+		const calls: RecordedCall[] = [];
+		const client = makeRecordingClient(
+			[
+				unknownToolResponse(),
+				{ choices: [{ message: { role: "assistant", content: "recovered" } }] },
+			],
+			calls,
+		);
+		const toolManager = makeFakeToolManager();
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
+		t.is(calls.length, 2);
+
+		const retryMessages = calls[1].messages;
+		const assistant = retryMessages.find((m) => m.role === "assistant");
+		t.true(
+			(assistant?.tool_calls ?? []).some((tc) => tc.id === "call-ghost"),
+			"the ghost call must be in the assistant message",
+		);
+		const delivered = dropOrphanedToolResults(retryMessages);
+		t.true(
+			delivered.some(
+				(m) => m.role === "tool" && m.tool_call_id === "call-ghost",
+			),
+			"the unknown-tool error must survive orphan pruning",
+		);
+	},
+);
+
+test.serial(
+	"a turn mixing a valid and an unknown call keeps every tool_call paired",
+	async (t) => {
+		const calls: RecordedCall[] = [];
+		const client = makeRecordingClient(
+			[
+				{
+					choices: [
+						{
+							message: {
+								role: "assistant",
+								content: "",
+								tool_calls: [
+									{
+										id: "call-good",
+										function: { name: "safe_tool", arguments: {} },
+									},
+									{
+										id: "call-ghost",
+										function: { name: "ghost_tool", arguments: {} },
+									},
+								],
+							},
+						},
+					],
+				},
+				{ choices: [{ message: { role: "assistant", content: "recovered" } }] },
+			],
+			calls,
+		);
+		const toolManager = makeFakeToolManager({
+			knownTools: new Set(["safe_tool"]),
+			needsApprovalByName: { safe_tool: false },
+		});
+		setToolRegistryGetter(() => ({
+			safe_tool: (async () => "tool-output") as ToolHandler,
+		}));
+
+		await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		const retryMessages = calls[1].messages;
+		const emitted = retryMessages.flatMap((m) => m.tool_calls ?? []);
+		t.is(emitted.length, 2);
+		const resultIds = new Set(
+			retryMessages
+				.filter((m) => m.role === "tool")
+				.map((m) => m.tool_call_id),
+		);
+		for (const toolCall of emitted) {
+			t.true(
+				resultIds.has(toolCall.id),
+				`tool call ${toolCall.id} must have a paired result`,
+			);
+		}
+	},
+);
+
+test.serial(
+	"a malformed turn's streamed text is rolled back out of finalText",
+	async (t) => {
+		// The rejected turn's tokens land in the accumulator before the parse
+		// error is known; a later successful run must not ship them.
+		const responses = [
+			{ content: "[tool_use: safe_tool]", toolsDisabled: true },
+			{ content: "the real answer", toolsDisabled: true },
+		];
+		let callIndex = 0;
+		const client = {
+			getCurrentModel: () => "fake-model",
+			setModel: () => undefined,
+			getContextSize: () => 100_000,
+			getAvailableModels: async () => ["fake-model"],
+			getProviderConfig: () => ({}) as never,
+			clearContext: async () => undefined,
+			getTimeout: () => undefined,
+			chat: async (
+				_messages: Message[],
+				_tools: Record<string, AISDKCoreTool>,
+				callbacks: { onToken?: (token: string) => void },
+			) => {
+				const response = responses[callIndex++];
+				callbacks.onToken?.(response.content);
+				return {
+					choices: [
+						{ message: { role: "assistant", content: response.content } },
+					],
+					toolsDisabled: response.toolsDisabled,
+				} as LLMChatResponse;
+			},
+		} as unknown as LLMClient;
+		const toolManager = makeFakeToolManager({
+			knownTools: new Set(["safe_tool"]),
+		});
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+			outputFormat: "json",
+		});
+
+		t.is(outcome.kind, "success");
+		t.is(outcome.finalText, "the real answer");
 	},
 );

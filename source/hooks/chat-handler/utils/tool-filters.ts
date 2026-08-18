@@ -8,12 +8,23 @@ import type {ToolCall, ToolResult} from '@/types/core';
  * Handles:
  * - Empty tool calls (missing id or function name)
  * - Tools that don't exist in the tool manager
+ *
+ * `unknownToolCalls` holds the calls that produced `errorResults`, paired 1:1
+ * and in the same order. Callers must put them in the assistant message's
+ * tool_calls: a tool result whose call is absent from history is orphaned and
+ * dropped before it reaches the model, so the self-correction hint would never
+ * arrive and the model would just repeat the nonexistent call.
  */
 export const filterValidToolCalls = (
 	toolCalls: ToolCall[],
 	toolManager: ToolManager | null,
-): {validToolCalls: ToolCall[]; errorResults: ToolResult[]} => {
+): {
+	validToolCalls: ToolCall[];
+	unknownToolCalls: ToolCall[];
+	errorResults: ToolResult[];
+} => {
 	const validToolCalls: ToolCall[] = [];
+	const unknownToolCalls: ToolCall[] = [];
 	const errorResults: ToolResult[] = [];
 
 	for (const toolCall of toolCalls) {
@@ -36,6 +47,7 @@ export const filterValidToolCalls = (
 				available.length > 0
 					? ` Available tools are: ${available.join(', ')}.`
 					: '';
+			unknownToolCalls.push(toolCall);
 			errorResults.push({
 				tool_call_id: toolCall.id,
 				role: 'tool' as const,
@@ -48,5 +60,5 @@ export const filterValidToolCalls = (
 		validToolCalls.push(toolCall);
 	}
 
-	return {validToolCalls, errorResults};
+	return {validToolCalls, unknownToolCalls, errorResults};
 };

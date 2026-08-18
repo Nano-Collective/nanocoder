@@ -214,12 +214,14 @@ export async function runAcpConversation(
 		const cleanedContent = xmlParse.cleanedContent;
 
 		const validToolCalls: ToolCall[] = [];
+		const unknownToolCalls: ToolCall[] = [];
 		const errorResults: ToolResult[] = [];
 		for (const toolCall of allToolCalls) {
 			if (
 				toolCall.function.name === '__xml_validation_error__' ||
 				!toolManager.hasTool(toolCall.function.name)
 			) {
+				unknownToolCalls.push(toolCall);
 				errorResults.push({
 					tool_call_id: toolCall.id,
 					role: 'tool',
@@ -231,18 +233,34 @@ export async function runAcpConversation(
 			validToolCalls.push(toolCall);
 		}
 
+		// Unknown calls belong in the assistant message too: a tool result whose
+		// call is missing from history is orphaned and dropped before the next
+		// request, so the model would never see why its call failed and would
+		// keep re-emitting it.
+		const emittedToolCalls = [...validToolCalls, ...unknownToolCalls];
+
 		messages = [
 			...messages,
 			{
 				role: 'assistant',
 				content: cleanedContent,
-				tool_calls: validToolCalls.length > 0 ? validToolCalls : undefined,
+				tool_calls: emittedToolCalls.length > 0 ? emittedToolCalls : undefined,
 				reasoning: streamedReasoning || undefined,
 			},
 		];
 
 		if (errorResults.length > 0) {
-			messages = [...messages, ...errorResults];
+			// The turn is abandoned for self-correction, so the valid calls never
+			// run, so pair each with a cancellation result to keep every tool_call
+			// above matched.
+			const abortedResults: ToolResult[] = validToolCalls.map(toolCall => ({
+				tool_call_id: toolCall.id,
+				role: 'tool',
+				name: toolCall.function.name,
+				content:
+					'Execution aborted because another tool call in this request was invalid. Please fix the invalid tool call and try again.',
+			}));
+			messages = [...messages, ...errorResults, ...abortedResults];
 			continue;
 		}
 

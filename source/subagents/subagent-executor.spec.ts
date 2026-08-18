@@ -346,6 +346,27 @@ test.serial('repeated identical tool calls trip the retry cap', async t => {
 	t.regex(result.error || '', /maxRepeatedToolCalls/);
 });
 
+test.serial('a tripped retry cap still returns the work done before the stop', async t => {
+	const toolManager = createMockToolManager({
+		read_file: {handler: async () => 'same output', readOnly: true},
+	});
+	const client = createMockClient([
+		{...repeatedCallResponse(), content: 'found the config file'},
+		{...repeatedCallResponse(), content: 'it sets the timeout to 30s'},
+		repeatedCallResponse(),
+	]);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Loop after doing useful work',
+	});
+
+	t.false(result.success);
+	t.regex(result.output, /found the config file/);
+	t.regex(result.output, /it sets the timeout to 30s/);
+});
+
 test.serial('identical tool calls one under the retry cap complete normally', async t => {
 	const toolManager = createMockToolManager({
 		read_file: {handler: async () => 'same output', readOnly: true},

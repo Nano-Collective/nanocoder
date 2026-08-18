@@ -213,6 +213,14 @@ export async function runPlainConversation(
 		let reasoningPrinted = false;
 		let contentStarted = false;
 
+		// Streamed text lands in the accumulators as it arrives, before we know
+		// whether the turn is usable. A turn rejected as malformed is discarded
+		// and retried, so keep a pre-turn snapshot to roll back to. Otherwise
+		// the rejected tool-call blob stays glued to the front of the finalText
+		// a later successful turn returns (visible to --json consumers).
+		const finalTextBeforeTurn = accumulatedFinalText;
+		const reasoningBeforeTurn = accumulatedReasoning;
+
 		const sessionConfig = getAppConfig().sessions;
 		const maxMessages = sessionConfig?.maxMessages ?? 1000;
 		const cappedMessages = capMessagesForModel(messages, maxMessages);
@@ -328,6 +336,8 @@ export async function runPlainConversation(
 			emptyTurnCount = 0;
 			lastToolSignature = '';
 			repeatedToolCallCount = 0;
+			accumulatedFinalText = finalTextBeforeTurn;
+			accumulatedReasoning = reasoningBeforeTurn;
 			if (!isJson) {
 				writeError(
 					`Malformed tool call: ${xmlParse.error} — asking the model to retry (${malformedRetryCount}/${maxMalformedRetries}).`,
@@ -351,6 +361,7 @@ export async function runPlainConversation(
 		const cleanedContent = xmlParse.cleanedContent;
 
 		const validToolCalls: ToolCall[] = [];
+		const unknownToolCalls: ToolCall[] = [];
 		const errorResults: ToolResult[] = [];
 		for (const toolCall of allToolCalls) {
 			if (
@@ -358,6 +369,7 @@ export async function runPlainConversation(
 				!toolManager.hasTool(toolCall.function.name)
 			) {
 				const errorMsg = `Unknown tool: ${toolCall.function.name}`;
+				unknownToolCalls.push(toolCall);
 				errorResults.push({
 					tool_call_id: toolCall.id,
 					role: 'tool',
@@ -376,20 +388,26 @@ export async function runPlainConversation(
 			validToolCalls.push(toolCall);
 		}
 
+		// The assistant message carries every call the model emitted, unknown
+		// tools included. Their error results only reach the model if a matching
+		// tool_call sits in history (`dropOrphanedToolResults` strips any result
+		// with no preceding call), and without that feedback the model re-emits
+		// the same ghost call until the repeated-call cap stops the run.
+		const emittedToolCalls = [...validToolCalls, ...unknownToolCalls];
+
 		// Skip appending a fully-empty assistant message (no content, no tool
 		// calls): providers reject them, and the empty-turn nudge below re-asks
 		// without one — same rule the interactive loop applies.
 		const hasAssistantPayload =
-			cleanedContent.trim() ||
-			validToolCalls.length > 0 ||
-			errorResults.length > 0;
+			cleanedContent.trim() || emittedToolCalls.length > 0;
 		if (hasAssistantPayload) {
 			messages = [
 				...messages,
 				{
 					role: 'assistant',
 					content: cleanedContent,
-					tool_calls: validToolCalls.length > 0 ? validToolCalls : undefined,
+					tool_calls:
+						emittedToolCalls.length > 0 ? emittedToolCalls : undefined,
 					reasoning: streamedReasoning || undefined,
 				},
 			];
@@ -404,7 +422,17 @@ export async function runPlainConversation(
 			if (stopped) {
 				return stopped;
 			}
-			messages = [...messages, ...errorResults];
+			// The turn is abandoned for self-correction, so the valid calls never
+			// execute. Pair each with a cancellation result so every tool_call in
+			// the assistant message above still has a matching result.
+			const abortedResults: ToolResult[] = validToolCalls.map(toolCall => ({
+				tool_call_id: toolCall.id,
+				role: 'tool',
+				name: toolCall.function.name,
+				content:
+					'Execution aborted because another tool call in this request was invalid. Please fix the invalid tool call and try again.',
+			}));
+			messages = [...messages, ...errorResults, ...abortedResults];
 			continue;
 		}
 

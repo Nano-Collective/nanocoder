@@ -641,19 +641,22 @@ export function getAppConfig(): AppConfig {
 
 /**
  * Agent-loop retry limits, read live from the current app config so runtime
- * edits (and tests that mutate `getAppConfig().retries`) are picked up. The
- * hardcoded caps are the single fallback for configs loaded before `retries`
- * existed.
+ * edits (and tests that mutate `getAppConfig().retries`) are picked up.
+ *
+ * The fallback is applied per field, not to the object as a whole: a `retries`
+ * object missing one key would otherwise hand callers `undefined`, and every
+ * `count >= limit` guard reading it evaluates false, silently disabling the
+ * very cap this feature exists to enforce.
  * @public
  */
 export function getRetryLimits(): RetryLimitsConfig {
-	return (
-		getAppConfig().retries ?? {
-			maxRepeatedToolCalls: MAX_REPEATED_TOOL_CALLS,
-			maxEmptyTurns: MAX_EMPTY_TURNS,
-			maxMalformedRetries: MAX_MALFORMED_RETRIES,
-		}
-	);
+	const retries = getAppConfig().retries;
+	return {
+		maxRepeatedToolCalls:
+			retries?.maxRepeatedToolCalls ?? MAX_REPEATED_TOOL_CALLS,
+		maxEmptyTurns: retries?.maxEmptyTurns ?? MAX_EMPTY_TURNS,
+		maxMalformedRetries: retries?.maxMalformedRetries ?? MAX_MALFORMED_RETRIES,
+	};
 }
 
 // Function to reload the app configuration (useful after config file changes)

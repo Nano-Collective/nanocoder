@@ -142,7 +142,16 @@ async function executeAgent(
 	);
 
 	if (!result.success) {
-		throw new Error(result.error || 'Subagent execution failed');
+		const reason = result.error || 'Subagent execution failed';
+		// A failed run can still carry work (e.g. a subagent stopped by the
+		// repeated-call cap after several useful turns). Hand it to the caller
+		// alongside the reason rather than throwing it away.
+		if (result.output.trim()) {
+			throw new Error(
+				`${reason}\n\nPartial output produced before stopping:\n${result.output}`,
+			);
+		}
+		throw new Error(reason);
 	}
 
 	return result.output;

@@ -711,6 +711,29 @@ test.serial('retry limits ignore non-numeric values', async t => {
 	);
 });
 
+test.serial('getRetryLimits falls back per field, not per object', async t => {
+	// A retries object missing a key would otherwise hand callers `undefined`,
+	// and every `count >= limit` guard reading it evaluates false, silently
+	// disabling the cap.
+	const {
+		getAppConfig,
+		getRetryLimits,
+		reloadAppConfig: reload,
+	} = await import('./index.js');
+	const config = getAppConfig();
+	const original = config.retries;
+	config.retries = {maxEmptyTurns: 5} as unknown as typeof original;
+	try {
+		const limits = getRetryLimits();
+		t.is(limits.maxEmptyTurns, 5);
+		t.is(limits.maxRepeatedToolCalls, 3);
+		t.is(limits.maxMalformedRetries, 2);
+	} finally {
+		config.retries = original;
+		reload();
+	}
+});
+
 // Tests for modeProviders
 async function withModeProvidersConfig(
 	testName: string,
