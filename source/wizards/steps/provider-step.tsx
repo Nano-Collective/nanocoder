@@ -25,6 +25,23 @@ interface ProviderStepProps {
 	onDelete?: () => void;
 	existingProviders?: ProviderConfig[];
 	configExists?: boolean;
+	/**
+	 * Open straight into the edit/delete choice for this provider instead of the
+	 * template menu. Matched by name rather than index: the caller (the settings
+	 * panel) lists the resolved config, while this step lists whichever config
+	 * file the wizard loaded, so positions need not line up. An unknown name
+	 * falls back to the normal menu.
+	 */
+	initialEditName?: string;
+}
+
+function findProviderIndex(
+	providers: ProviderConfig[] | undefined,
+	name: string | undefined,
+): number | null {
+	if (!name || !providers) return null;
+	const index = providers.findIndex(provider => provider.name === name);
+	return index === -1 ? null : index;
 }
 
 type Mode =
@@ -82,6 +99,7 @@ export function ProviderStep({
 	onDelete,
 	existingProviders,
 	configExists = false,
+	initialEditName,
 }: ProviderStepProps) {
 	const colors = getColors();
 	const {isNarrow} = useResponsiveTerminal();
@@ -98,7 +116,11 @@ export function ProviderStep({
 		}
 	}, [existingProviders]);
 
-	const [mode, setMode] = useState<Mode>('select-template-or-custom');
+	const [mode, setMode] = useState<Mode>(() =>
+		findProviderIndex(existingProviders, initialEditName) === null
+			? 'select-template-or-custom'
+			: 'edit-or-delete',
+	);
 	const {
 		selectedTemplate,
 		currentFieldIndex,
@@ -115,7 +137,9 @@ export function ProviderStep({
 		bumpInputKey,
 	} = useWizardForm<ProviderTemplate>();
 	const [cameFromCustom, setCameFromCustom] = useState(false);
-	const [editingIndex, setEditingIndex] = useState<number | null>(null);
+	const [editingIndex, setEditingIndex] = useState<number | null>(() =>
+		findProviderIndex(existingProviders, initialEditName),
+	);
 	const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
 	const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(
 		new Set(),

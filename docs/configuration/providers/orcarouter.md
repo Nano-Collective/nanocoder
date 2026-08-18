@@ -29,6 +29,6 @@ Model names follow the `provider/model-name` format, e.g. `openai/gpt-5.5` or `a
 
 ## Fetching Available Models
 
-The `/setup-providers` wizard can automatically fetch available models from your OrcaRouter account.
+The `/settings providers` wizard can automatically fetch available models from your OrcaRouter account.
 
 See the [OrcaRouter docs](https://docs.orcarouter.ai) for the full model catalog and routing options.
