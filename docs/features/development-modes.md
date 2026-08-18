@@ -45,11 +45,12 @@ Automatically accepts and executes most tool calls without confirmation. Some hi
 
 Automatically accepts and executes **every** tool call without exception — including bash commands and destructive git operations.
 
-- No confirmation prompts at all — everything runs immediately
+- No tool confirmation prompts at all — everything runs immediately
 - Bash commands, hard resets, force deletes, stash drops — all auto-accepted
 - The status bar turns red to make it clear you're in yolo mode
+- One safeguard remains: if the model repeats the identical tool call too many times in a row, Nanocoder pauses and asks whether to continue, so a stuck loop cannot drain tokens unattended. See [Retry Limits](../configuration/index.md#retry-limits)
 
-**When to use:** When you fully trust the AI and want zero interruptions. Use with caution — there are no safety nets other than basic tool validators.
+**When to use:** When you fully trust the AI and want zero interruptions. Use with caution — there are no safety nets other than basic tool validators and the repeated-call pause above.
 
 ## Plan Mode
 
