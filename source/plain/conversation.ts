@@ -164,10 +164,10 @@ export async function runPlainConversation(
 				? repeatedToolCallCount + 1
 				: 1;
 		if (currentRepeatedCount >= maxRepeatedToolCalls) {
+			// No writeError here: the caller prints every `error` outcome's
+			// message once (source/plain/shell.ts), and --json reports it in the
+			// report instead.
 			const message = `Model repeated the same tool call ${currentRepeatedCount} times in a row without making progress — stopping to avoid a loop (nanocoder.retries.maxRepeatedToolCalls = ${maxRepeatedToolCalls}).`;
-			if (!isJson) {
-				writeError(message);
-			}
 			return {
 				kind: 'error',
 				message,
@@ -323,10 +323,8 @@ export async function runPlainConversation(
 			// parse error back to the model, capped so a model stuck producing
 			// bad tool calls cannot drain tokens unbounded.
 			if (malformedRetryCount >= maxMalformedRetries) {
+				// The caller prints the `error` outcome message; see above.
 				const message = `Model produced malformed tool calls ${maxMalformedRetries + 1} times in a row and cannot self-correct — stopping (nanocoder.retries.maxMalformedRetries = ${maxMalformedRetries}).`;
-				if (!isJson) {
-					writeError(message);
-				}
 				return {
 					kind: 'error',
 					message,
@@ -416,10 +414,8 @@ export async function runPlainConversation(
 				// the interactive loop, then stop so a silent model cannot spin.
 				if (emptyTurnCount >= maxEmptyTurns) {
 					const attempts = maxEmptyTurns + 1;
+					// The caller prints the `error` outcome message; see above.
 					const message = `Model produced no output after ${attempts} attempt${attempts === 1 ? '' : 's'} — stopping (nanocoder.retries.maxEmptyTurns = ${maxEmptyTurns}).`;
-					if (!isJson) {
-						writeError(message);
-					}
 					return {
 						kind: 'error',
 						message,

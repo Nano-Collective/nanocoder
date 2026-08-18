@@ -1099,6 +1099,57 @@ test.serial(
 );
 
 test.serial(
+	"a retry-limit stop does not print its message itself",
+	async (t) => {
+		// The message travels back on the `error` outcome and the caller
+		// (runPlainShell) prints it once. Printing it here too double-printed it.
+		const client = makeRecordingClient(
+			[
+				repeatingToolResponse(),
+				repeatingToolResponse(),
+				repeatingToolResponse(),
+			],
+			[],
+		);
+		const toolManager = makeFakeToolManager({
+			knownTools: new Set(["safe_tool"]),
+			needsApprovalByName: { safe_tool: false },
+		});
+		setToolRegistryGetter(() => ({
+			safe_tool: (async () => "tool-output") as ToolHandler,
+		}));
+
+		const stderrChunks: string[] = [];
+		const originalWrite = process.stderr.write.bind(process.stderr);
+		process.stderr.write = ((chunk: string | Uint8Array) => {
+			stderrChunks.push(chunk.toString());
+			return true;
+		}) as typeof process.stderr.write;
+
+		let outcome: Awaited<ReturnType<typeof runPlainConversation>>;
+		try {
+			outcome = await runPlainConversation({
+				client,
+				toolManager,
+				systemMessage: SYSTEM,
+				initialMessages: [USER],
+				developmentMode: "auto-accept",
+				nonInteractiveAlwaysAllow: [],
+				abortSignal: new AbortController().signal,
+			});
+		} finally {
+			process.stderr.write = originalWrite;
+		}
+
+		t.is(outcome.kind, "error");
+		t.false(
+			stderrChunks.join("").includes("maxRepeatedToolCalls"),
+			"the stop message must be printed by the caller only",
+		);
+	},
+);
+
+test.serial(
 	"identical tool calls one under the limit do not trip the cap",
 	async (t) => {
 		const calls: RecordedCall[] = [];
