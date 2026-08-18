@@ -3,6 +3,10 @@ import {
 	getAppConfig,
 	getRetryLimits,
 } from '@/config/index';
+import {
+	buildAbandonedTurnMessages,
+	partitionUnknownToolCalls,
+} from '@/hooks/chat-handler/utils/tool-filters';
 import {computeToolCallSignature} from '@/hooks/chat-handler/utils/tool-signature';
 import {processToolUse} from '@/message-handler';
 import {color, write, writeError, writeLine, writeStatus} from '@/plain/writer';
@@ -360,40 +364,20 @@ export async function runPlainConversation(
 		];
 		const cleanedContent = xmlParse.cleanedContent;
 
-		const validToolCalls: ToolCall[] = [];
-		const unknownToolCalls: ToolCall[] = [];
-		const errorResults: ToolResult[] = [];
-		for (const toolCall of allToolCalls) {
-			if (
-				toolCall.function.name === '__xml_validation_error__' ||
-				!toolManager.hasTool(toolCall.function.name)
-			) {
-				const errorMsg = `Unknown tool: ${toolCall.function.name}`;
-				unknownToolCalls.push(toolCall);
-				errorResults.push({
-					tool_call_id: toolCall.id,
-					role: 'tool',
-					name: toolCall.function.name,
-					content: errorMsg,
-					isError: true,
-				});
-				toolCallsLog.push({
-					name: toolCall.function.name,
-					arguments: toolCall.function.arguments || {},
-					result: null,
-					error: errorMsg,
-				});
-				continue;
-			}
-			validToolCalls.push(toolCall);
+		const partition = partitionUnknownToolCalls(allToolCalls, toolManager);
+		const {validToolCalls, unknownToolCalls, errorResults} = partition;
+		// errorResults is paired 1:1 with unknownToolCalls, in the same order.
+		for (const [index, toolCall] of unknownToolCalls.entries()) {
+			toolCallsLog.push({
+				name: toolCall.function.name,
+				arguments: toolCall.function.arguments || {},
+				result: null,
+				error: errorResults[index].content,
+			});
 		}
 
-		// The assistant message carries every call the model emitted, unknown
-		// tools included. Their error results only reach the model if a matching
-		// tool_call sits in history (`dropOrphanedToolResults` strips any result
-		// with no preceding call), and without that feedback the model re-emits
-		// the same ghost call until the repeated-call cap stops the run.
-		const emittedToolCalls = [...validToolCalls, ...unknownToolCalls];
+		const {emittedToolCalls, resultsForAbandonedTurn} =
+			buildAbandonedTurnMessages(partition);
 
 		// Skip appending a fully-empty assistant message (no content, no tool
 		// calls): providers reject them, and the empty-turn nudge below re-asks
@@ -422,17 +406,7 @@ export async function runPlainConversation(
 			if (stopped) {
 				return stopped;
 			}
-			// The turn is abandoned for self-correction, so the valid calls never
-			// execute. Pair each with a cancellation result so every tool_call in
-			// the assistant message above still has a matching result.
-			const abortedResults: ToolResult[] = validToolCalls.map(toolCall => ({
-				tool_call_id: toolCall.id,
-				role: 'tool',
-				name: toolCall.function.name,
-				content:
-					'Execution aborted because another tool call in this request was invalid. Please fix the invalid tool call and try again.',
-			}));
-			messages = [...messages, ...errorResults, ...abortedResults];
+			messages = [...messages, ...resultsForAbandonedTurn];
 			continue;
 		}
 
@@ -441,7 +415,8 @@ export async function runPlainConversation(
 				// Nudge through consecutive empty turns up to the cap, mirroring
 				// the interactive loop, then stop so a silent model cannot spin.
 				if (emptyTurnCount >= maxEmptyTurns) {
-					const message = `Model produced no output after ${maxEmptyTurns + 1} attempts — stopping (nanocoder.retries.maxEmptyTurns = ${maxEmptyTurns}).`;
+					const attempts = maxEmptyTurns + 1;
+					const message = `Model produced no output after ${attempts} attempt${attempts === 1 ? '' : 's'} — stopping (nanocoder.retries.maxEmptyTurns = ${maxEmptyTurns}).`;
 					if (!isJson) {
 						writeError(message);
 					}
@@ -459,8 +434,10 @@ export async function runPlainConversation(
 				lastToolSignature = '';
 				repeatedToolCallCount = 0;
 				if (!isJson) {
+					// Count attempts, not nudges, so the denominator matches the
+					// "no output after N attempts" stop message below.
 					writeStatus(
-						`empty response — retry ${emptyTurnCount}/${maxEmptyTurns}`,
+						`empty response — retry ${emptyTurnCount}/${maxEmptyTurns + 1}`,
 					);
 				}
 				messages = [

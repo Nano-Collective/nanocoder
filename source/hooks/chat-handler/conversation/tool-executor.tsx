@@ -247,6 +247,24 @@ const groupForParallelExecution = (
 };
 
 /**
+ * Renders a failed subagent run for the parent model.
+ *
+ * A failed run can still carry work — a subagent stopped by the repeated-call
+ * cap returns everything it produced before it got stuck. Hand that to the
+ * parent alongside the reason rather than throwing it away. The `Error: `
+ * prefix is load-bearing: callers detect a failed agent result by it.
+ */
+const buildFailedAgentContent = (agentResult: {
+	content: string;
+	error?: string;
+}): string => {
+	const reason = `Error: ${agentResult.error || 'Subagent execution failed'}`;
+	return agentResult.content.trim()
+		? `${reason}\n\nPartial output produced before stopping:\n${agentResult.content}`
+		: reason;
+};
+
+/**
  * Execute a batch of agent tool calls in parallel.
  * Returns tool results for all agents.
  */
@@ -370,7 +388,7 @@ const executeAgentBatch = async (
 			name: e.toolCall.function.name,
 			content: agentResult.success
 				? agentResult.content
-				: `Error: ${agentResult.error || 'Subagent execution failed'}`,
+				: buildFailedAgentContent(agentResult),
 		};
 
 		results.push({toolCall: e.toolCall, result});

@@ -40,7 +40,10 @@ import {createCancellationResults} from '@/utils/tool-cancellation';
 import {signalToolConfirm} from '@/utils/tool-confirm-queue';
 import {displayCompactCountsSummary} from '@/utils/tool-result-display';
 import {closeAllDiffsInVSCode} from '@/vscode/index';
-import {filterValidToolCalls} from '../utils/tool-filters';
+import {
+	buildAbandonedTurnMessages,
+	filterValidToolCalls,
+} from '../utils/tool-filters';
 import {computeToolCallSignature} from '../utils/tool-signature';
 import {buildAutoDiagnosticsMessage} from './auto-diagnostics';
 import {
@@ -520,17 +523,10 @@ export const processAssistantResponse = async (
 		);
 	}
 
-	const {validToolCalls, unknownToolCalls, errorResults} = filterValidToolCalls(
-		allToolCalls,
-		toolManager,
-	);
-
-	// The assistant message carries every call the model emitted, unknown tools
-	// included. Their error results below only reach the model when a matching
-	// tool_call is in history (dropOrphanedToolResults strips results with no
-	// preceding call), and without that feedback the model re-emits the same
-	// ghost call until the repeated-call cap stops the turn.
-	const emittedToolCalls = [...validToolCalls, ...unknownToolCalls];
+	const partition = filterValidToolCalls(allToolCalls, toolManager);
+	const {validToolCalls, errorResults} = partition;
+	const {emittedToolCalls, resultsForAbandonedTurn} =
+		buildAbandonedTurnMessages(partition);
 
 	// Add assistant message to conversation history only if it has content or tool_calls
 	// Empty assistant messages cause API errors: "Assistant message must have either content or tool_calls"
@@ -740,23 +736,9 @@ export const processAssistantResponse = async (
 			);
 		}
 
-		// FIX: Satisfy the AI SDK's strict 1:1 Tool Call/Result mapping.
-		// If we are aborting this turn to self-correct the bad tools,
-		// we MUST provide a cancellation result for the valid tools we are skipping.
-		const abortedResults: ToolResult[] = validToolCalls.map(tc => ({
-			tool_call_id: tc.id,
-			role: 'tool',
-			name: tc.function.name,
-			content:
-				'Execution aborted because another tool call in this request was invalid. Please fix the invalid tool call and try again.',
-		}));
-
-		// Combine the actual errors with the aborted placeholders
-		const allResultsForThisTurn = [...errorResults, ...abortedResults];
-
 		// Send error results back to model for self-correction
 		const errorBuilder = new MessageBuilder(updatedMessages);
-		errorBuilder.addToolResults(allResultsForThisTurn);
+		errorBuilder.addToolResults(resultsForAbandonedTurn);
 		const updatedMessagesWithError = errorBuilder.build();
 		setMessages(updatedMessagesWithError);
 

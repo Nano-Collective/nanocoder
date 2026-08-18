@@ -1330,7 +1330,7 @@ test.serial(
 
 			t.is(outcome.kind, "error");
 			if (outcome.kind === "error") {
-				t.regex(outcome.message, /produced no output after 1 attempts/i);
+				t.regex(outcome.message, /produced no output after 1 attempt\b/i);
 			}
 		});
 	},
