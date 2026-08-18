@@ -39,7 +39,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		private readonly _acpClient: NanocoderAcpClient,
 		private readonly _diffManager: DiffManager
 	) {
-		this._settingsManager = new SettingsManager(_outputChannel); 
+		this._settingsManager = new SettingsManager(this._outputChannel);
 		// Listen for session updates from ACP
 		this._acpClient.onSessionUpdate = (update: any) => {
 			this.handleDiffs(update);
@@ -350,10 +350,16 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		const filePath = file === 'agents.config.json' ? paths.agentsConfig : paths.preferences;
 
 		try {
+			if (!fs.existsSync(filePath)) {
+				fs.mkdirSync(path.dirname(filePath), { recursive: true });
+				fs.writeFileSync(filePath, '{}\n', 'utf-8');
+			}
 			const doc = await vscode.workspace.openTextDocument(filePath);
 			await vscode.window.showTextDocument(doc);
 		} catch (err) {
-			vscode.window.showErrorMessage(`Could not open ${file} at ${filePath}. Ensure the file exists.`);
+			vscode.window.showErrorMessage(
+				`Could not open ${file} at ${filePath}. Ensure the file exists.`,
+			);
 		}
 	}
 

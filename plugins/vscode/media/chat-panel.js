@@ -2313,7 +2313,7 @@
 		const parts = (sep === -1 ? title : title.slice(sep + 2)).split('/');
 		let last = parts[parts.length - 1];
 		last = last.split('\\').pop();
-		return last.replace(/['\"]+$/g, '').trim();
+		return last.replace(/['"]+$/g, '').trim();
 	}
 
 	// True when this update carries a diff the extension host would have handed

@@ -128,13 +128,50 @@ export class SettingsManager {
 			const paths = this.getConfigPaths(cwd);
 
 			if (key === 'defaultMode') {
-				this.updateAgentsConfig(paths.agentsConfig, 'defaultMode', value);
-			} else if (key.startsWith('autoCompact.')) {
-				const childKey = key.split('.')[1];
-				this.updateAgentsConfigNested(paths.agentsConfig, 'autoCompact', childKey, value);
+				if (value === null) {
+					this.updateAgentsConfig(paths.agentsConfig, 'defaultMode', null);
+				} else if (typeof value === 'string') {
+					const normalized = value.toLowerCase().trim();
+					const validModes = ['normal', 'auto-accept', 'yolo', 'plan'] as const;
+					if (!validModes.includes(normalized as (typeof validModes)[number])) {
+						return { success: false, error: `Invalid defaultMode: ${value}` };
+					}
+					this.updateAgentsConfig(paths.agentsConfig, 'defaultMode', normalized);
+				} else {
+					return {
+						success: false,
+						error: `Invalid defaultMode value type: ${typeof value}`,
+					};
+				}
+			} else if (key === 'autoCompact.enabled') {
+				if (typeof value !== 'boolean') {
+					return { success: false, error: 'autoCompact.enabled must be a boolean' };
+				}
+				this.updateAgentsConfigNested(paths.agentsConfig, 'autoCompact', 'enabled', value);
+			} else if (key === 'autoCompact.threshold') {
+				if (typeof value !== 'number' || !Number.isFinite(value)) {
+					return { success: false, error: 'autoCompact.threshold must be a number' };
+				}
+				const threshold = Math.max(50, Math.min(95, Math.round(value)));
+				this.updateAgentsConfigNested(paths.agentsConfig, 'autoCompact', 'threshold', threshold);
+			} else if (key === 'autoCompact.mode') {
+				if (typeof value !== 'string') {
+					return { success: false, error: 'autoCompact.mode must be a string' };
+				}
+				const validModes = ['conservative', 'default', 'aggressive'] as const;
+				if (!validModes.includes(value as (typeof validModes)[number])) {
+					return { success: false, error: `Invalid autoCompact.mode: ${value}` };
+				}
+				this.updateAgentsConfigNested(paths.agentsConfig, 'autoCompact', 'mode', value);
 			} else if (key === 'reasoningTraces') {
+				if (typeof value !== 'boolean') {
+					return { success: false, error: 'reasoningTraces must be a boolean' };
+				}
 				this.updatePreferences(paths.preferences, 'reasoningExpanded', value);
 			} else if (key === 'sessions.autoSave') {
+				if (typeof value !== 'boolean') {
+					return { success: false, error: 'sessions.autoSave must be a boolean' };
+				}
 				this.updatePreferencesNested(paths.preferences, 'nanocoder', 'sessions', 'autoSave', value);
 			} else {
 				return { success: false, error: `Unknown setting key: ${key}` };

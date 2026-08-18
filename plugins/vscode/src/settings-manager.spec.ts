@@ -98,3 +98,47 @@ test.serial('SettingsManager - prevents update when JSON is invalid', (t) => {
 
 	fs.rmSync(tempDir, { recursive: true, force: true });
 });
+
+test.serial('SettingsManager - validates defaultMode values', (t) => {
+	const manager = new SettingsManager(mockOutputChannel);
+	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocoder-test-'));
+	const anyManager = manager as any;
+	anyManager.getGlobalConfigDir = () => tempDir;
+
+	// Invalid value
+	const result = manager.updateSetting(tempDir, 'defaultMode', 'chat');
+	t.is(result.success, false);
+	t.regex(result.error || '', /Invalid defaultMode/);
+
+	// Invalid type
+	const result2 = manager.updateSetting(tempDir, 'defaultMode', 123);
+	t.is(result2.success, false);
+	t.regex(result2.error || '', /Invalid defaultMode value type/);
+
+	// Valid value
+	const result3 = manager.updateSetting(tempDir, 'defaultMode', 'yolo');
+	t.is(result3.success, true);
+
+	fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
+test.serial('SettingsManager - validates autoCompact.threshold values', (t) => {
+	const manager = new SettingsManager(mockOutputChannel);
+	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocoder-test-'));
+	const anyManager = manager as any;
+	anyManager.getGlobalConfigDir = () => tempDir;
+
+	// Invalid type
+	const result = manager.updateSetting(tempDir, 'autoCompact.threshold', 'high');
+	t.is(result.success, false);
+	t.regex(result.error || '', /must be a number/);
+
+	// Valid value is clamped
+	const result2 = manager.updateSetting(tempDir, 'autoCompact.threshold', 200);
+	t.is(result2.success, true);
+
+	const settings = manager.readSettings(tempDir);
+	t.is(settings.autoCompact.threshold, 95); // clamped to max 95
+
+	fs.rmSync(tempDir, { recursive: true, force: true });
+});
