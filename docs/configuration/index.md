@@ -173,6 +173,30 @@ When the cap is reached, the loop does **not** error out and discard work. On th
 
 One turn is a single LLM response plus its batch of tool executions. The default of 200 is high enough for long iterative jobs to finish while still bounding cost and wall-clock time for an unattended run that gets stuck.
 
+### Retry Limits
+
+Caps on how many times the interactive conversation loop auto-retries a failing pattern without user intervention, so a stuck model cannot silently drain tokens. These are agent-loop limits — the per-provider `maxRetries` setting is unrelated and governs network request retries (see [Providers](providers/index.md)).
+
+```json
+{
+  "nanocoder": {
+    "retries": {
+      "maxRepeatedToolCalls": 3,
+      "maxEmptyTurns": 2,
+      "maxMalformedRetries": 2
+    }
+  }
+}
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `maxRepeatedToolCalls` | number | `3` | Consecutive identical tool calls allowed before the loop pauses (minimum 2). In an interactive session you are asked whether to continue — useful when the repetition is legitimate, such as polling a long-running job — or stop. Non-interactive runs stop with an error. |
+| `maxEmptyTurns` | number | `2` | Consecutive empty assistant turns that are auto-nudged before the loop compacts the context, retries once, and gives up (minimum 0). |
+| `maxMalformedRetries` | number | `2` | Malformed tool-call self-correction retries allowed on the XML fallback path before the loop gives up (minimum 0). |
+
+Choosing "Continue" at the repeated-tool-call prompt grants another window of the same size, so a genuinely stuck model is re-checked rather than left looping.
+
 ### Paste Handling
 
 Configure how pasted text is handled in the input. By default, single-line pastes of 800 characters or fewer are inserted directly, while longer or multi-line pastes are collapsed into a `[Paste #N: X chars]` placeholder.

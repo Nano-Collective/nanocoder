@@ -39,6 +39,7 @@ import {capMessagesForModel} from '@/utils/message-capping';
 import {compressMessages} from '@/utils/message-compression';
 import {infoMsg} from '@/utils/message-factory';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
+import {signalQuestion} from '@/utils/question-queue';
 import {calculateTokens} from '@/utils/token-calculator';
 import {createCancellationResults} from '@/utils/tool-cancellation';
 import {signalToolConfirm} from '@/utils/tool-confirm-queue';
@@ -114,7 +115,8 @@ interface ProcessAssistantResponseParams {
 	// threads it forward; every other recursion site resets it to undefined.
 	lastToolSignature?: string;
 	// How many consecutive turns have emitted the same tool-call signature.
-	// Reaching MAX_REPEATED_TOOL_CALLS stops the loop with an actionable error.
+	// Reaching the configured repeated-call limit pauses to ask the user
+	// (interactive) or stops with an actionable error (non-interactive).
 	repeatedToolCallCount?: number;
 }
 
@@ -190,6 +192,15 @@ export const processAssistantResponse = async (
 	} = params;
 
 	const startTime = conversationStartTime ?? Date.now();
+
+	// Agent-loop retry limits: configurable via `nanocoder.retries` in
+	// agents.config.json, falling back to the historical hardcoded caps.
+	const retryLimits = getAppConfig().retries;
+	const maxRepeatedToolCalls =
+		retryLimits?.maxRepeatedToolCalls ?? MAX_REPEATED_TOOL_CALLS;
+	const maxEmptyTurns = retryLimits?.maxEmptyTurns ?? MAX_EMPTY_TURNS;
+	const maxMalformedRetries =
+		retryLimits?.maxMalformedRetries ?? MAX_MALFORMED_RETRIES;
 
 	// Helper to flush live task list to the static chat queue
 	const flushLiveTaskList = async () => {
@@ -377,12 +388,12 @@ export const processAssistantResponse = async (
 		// Cap malformed-retry recursion. Without this, a model stuck producing
 		// bad XML loops forever, appending two messages per iteration, until
 		// Node's heap exhausts.
-		if (malformedRetryCount >= MAX_MALFORMED_RETRIES) {
+		if (malformedRetryCount >= maxMalformedRetries) {
 			await flushAll();
 			addToChatQueue(
 				<ErrorMessage
 					key={generateKey('malformed-tool-giveup')}
-					message={`Model produced malformed tool calls ${MAX_MALFORMED_RETRIES + 1} times in a row and cannot self-correct. Try rephrasing the request or switching models.`}
+					message={`Model produced malformed tool calls ${maxMalformedRetries + 1} times in a row and cannot self-correct. Try rephrasing the request or switching models.`}
 					hideBox={true}
 				/>,
 			);
@@ -691,31 +702,66 @@ export const processAssistantResponse = async (
 		// Count consecutive identical signatures and stop once the cap is hit so
 		// we surface an actionable error instead of looping until abort.
 		const currentToolSignature = computeToolCallSignature(validToolCalls);
-		const currentRepeatedCount =
+		let currentRepeatedCount =
 			currentToolSignature && currentToolSignature === lastToolSignature
 				? repeatedToolCallCount + 1
 				: 1;
 
-		if (currentRepeatedCount >= MAX_REPEATED_TOOL_CALLS) {
-			await flushAll();
-			// Keep the AI SDK's 1:1 tool-call/result mapping intact: the assistant
-			// message with these tool_calls is already in history, so pair each
-			// with a cancellation result before stopping.
-			const loopBuilder = new MessageBuilder(updatedMessages);
-			loopBuilder.addToolResults(createCancellationResults(validToolCalls));
-			setMessages(loopBuilder.build());
+		if (currentRepeatedCount >= maxRepeatedToolCalls) {
+			// Interactive sessions pause and ask instead of hard-stopping: the
+			// repetition may be legitimate (e.g. polling a long-running job), and
+			// the user is the only one who can tell. Headless / non-interactive
+			// runs have nobody to ask, so they keep the hard stop.
+			const liveMode = developmentModeRef?.current ?? developmentMode;
+			let continueAnyway = false;
+			if (!nonInteractiveMode && liveMode !== 'headless') {
+				await flushAll();
+				setIsGenerating(false);
+				const stopOption = 'Stop and return to prompt';
+				const continueOption = `Continue (allow ${maxRepeatedToolCalls} more)`;
+				const answer = await signalQuestion({
+					question: `The model has repeated the same tool call ${currentRepeatedCount} times in a row without making progress. It may be stuck in a loop that drains tokens. Continue anyway?`,
+					options: [stopOption, continueOption],
+					allowFreeform: false,
+					questionType: 'confirmation',
+				});
+				continueAnyway = answer === continueOption;
+			}
+
+			if (!continueAnyway) {
+				await flushAll();
+				// Keep the AI SDK's 1:1 tool-call/result mapping intact: the assistant
+				// message with these tool_calls is already in history, so pair each
+				// with a cancellation result before stopping.
+				const loopBuilder = new MessageBuilder(updatedMessages);
+				loopBuilder.addToolResults(createCancellationResults(validToolCalls));
+				setMessages(loopBuilder.build());
+				addToChatQueue(
+					<ErrorMessage
+						key={generateKey('tool-loop-detected')}
+						message={`Model repeated the same tool call ${currentRepeatedCount} times in a row without making progress — stopping to avoid a loop. Try rephrasing the request, breaking it into smaller steps, or switching models.`}
+						hideBox={true}
+					/>,
+				);
+				setIsGenerating(false);
+				if (onConversationComplete) {
+					onConversationComplete();
+				}
+				return;
+			}
+
+			// User granted another window: reset the streak so the next
+			// maxRepeatedToolCalls identical calls prompt again instead of
+			// stopping, then resume execution of this turn's tools.
+			currentRepeatedCount = 0;
+			setIsGenerating(true);
 			addToChatQueue(
-				<ErrorMessage
-					key={generateKey('tool-loop-detected')}
-					message={`Model repeated the same tool call ${MAX_REPEATED_TOOL_CALLS} times in a row without making progress — stopping to avoid a loop. Try rephrasing the request, breaking it into smaller steps, or switching models.`}
+				<InfoMessage
+					key={generateKey('tool-loop-continue')}
+					message={`Continuing — will check again after ${maxRepeatedToolCalls} more repeated calls.`}
 					hideBox={true}
 				/>,
 			);
-			setIsGenerating(false);
-			if (onConversationComplete) {
-				onConversationComplete();
-			}
-			return;
 		}
 
 		// The SDK never auto-executes tools (execute is stripped). We evaluate
@@ -916,7 +962,7 @@ export const processAssistantResponse = async (
 		// Cap consecutive empty turns. Without this, a model that keeps
 		// returning nothing (common with GPT-5 reasoning that exhausts the
 		// token budget on thinking) would loop forever.
-		if (emptyTurnCount >= MAX_EMPTY_TURNS) {
+		if (emptyTurnCount >= maxEmptyTurns) {
 			setLiveComponent?.(null);
 			// If we still have compact-and-retry budget, mechanically compress
 			// the context and nudge the model to continue instead of giving up
@@ -978,7 +1024,7 @@ export const processAssistantResponse = async (
 			addToChatQueue(
 				<ErrorMessage
 					key={generateKey('empty-response-giveup')}
-					message={`Model produced no output after ${MAX_EMPTY_TURNS + 1 + compactRetryCount} attempts. The model may be exhausting its token budget on reasoning, or the request may have been refused. Try rephrasing, lowering reasoning effort, or switching models.`}
+					message={`Model produced no output after ${maxEmptyTurns + 1 + compactRetryCount} attempts. The model may be exhausting its token budget on reasoning, or the request may have been refused. Try rephrasing, lowering reasoning effort, or switching models.`}
 					hideBox={true}
 				/>,
 			);
@@ -1020,7 +1066,7 @@ export const processAssistantResponse = async (
 		// gets cleared at the top of processAssistantResponse so the
 		// streaming UI for the retry is unobstructed.
 		const attempt = emptyTurnCount + 1;
-		const total = MAX_EMPTY_TURNS + 1;
+		const total = maxEmptyTurns + 1;
 		setLiveComponent?.(
 			<InfoMessage
 				key="auto-continue-counter"

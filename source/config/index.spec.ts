@@ -578,6 +578,139 @@ test.serial('headless maxTurns ignores invalid env var', async t => {
 	);
 });
 
+// Tests for agent-loop retry limits (nanocoder.retries)
+async function withRetriesConfig(
+	subdir: string,
+	configBody: unknown,
+	assertion: (retries: {
+		maxRepeatedToolCalls: number;
+		maxEmptyTurns: number;
+		maxMalformedRetries: number;
+	}) => void,
+): Promise<void> {
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const testSubdir = join(headlessTestDir, subdir);
+	mkdirSync(testSubdir, {recursive: true});
+
+	try {
+		writeFileSync(
+			join(testSubdir, 'agents.config.json'),
+			JSON.stringify(configBody),
+			'utf-8',
+		);
+		process.chdir(testSubdir);
+		process.env.NANOCODER_CONFIG_DIR = join(testSubdir, 'nonexistent-global');
+
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+		reload();
+		const retries = getAppConfig().retries;
+		if (!retries) {
+			throw new Error('Resolved config should always carry retry limits');
+		}
+		assertion(retries);
+	} finally {
+		process.chdir(originalCwd);
+		if (originalConfigDir !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+}
+
+test.serial('retry limits default to the historical caps when not configured', async t => {
+	await withRetriesConfig('retries-default', {nanocoder: {}}, retries => {
+		t.is(retries.maxRepeatedToolCalls, 3);
+		t.is(retries.maxEmptyTurns, 2);
+		t.is(retries.maxMalformedRetries, 2);
+	});
+});
+
+test.serial('retry limits load custom values from config', async t => {
+	await withRetriesConfig(
+		'retries-config',
+		{
+			nanocoder: {
+				retries: {
+					maxRepeatedToolCalls: 10,
+					maxEmptyTurns: 5,
+					maxMalformedRetries: 4,
+				},
+			},
+		},
+		retries => {
+			t.is(retries.maxRepeatedToolCalls, 10);
+			t.is(retries.maxEmptyTurns, 5);
+			t.is(retries.maxMalformedRetries, 4);
+		},
+	);
+});
+
+test.serial('retry limits apply defaults for fields not configured', async t => {
+	await withRetriesConfig(
+		'retries-partial',
+		{nanocoder: {retries: {maxRepeatedToolCalls: 7}}},
+		retries => {
+			t.is(retries.maxRepeatedToolCalls, 7);
+			t.is(retries.maxEmptyTurns, 2);
+			t.is(retries.maxMalformedRetries, 2);
+		},
+	);
+});
+
+test.serial('retry limits clamp maxRepeatedToolCalls to at least 2', async t => {
+	await withRetriesConfig(
+		'retries-clamp-repeated',
+		{nanocoder: {retries: {maxRepeatedToolCalls: 1}}},
+		retries => {
+			// A fresh tool call already counts as 1 repeat, so anything below 2
+			// would pause on every single tool call.
+			t.is(retries.maxRepeatedToolCalls, 2);
+		},
+	);
+});
+
+test.serial('retry limits clamp negative values to their minimums', async t => {
+	await withRetriesConfig(
+		'retries-clamp-negative',
+		{
+			nanocoder: {
+				retries: {
+					maxRepeatedToolCalls: -5,
+					maxEmptyTurns: -1,
+					maxMalformedRetries: -1,
+				},
+			},
+		},
+		retries => {
+			t.is(retries.maxRepeatedToolCalls, 2);
+			t.is(retries.maxEmptyTurns, 0);
+			t.is(retries.maxMalformedRetries, 0);
+		},
+	);
+});
+
+test.serial('retry limits ignore non-numeric values', async t => {
+	await withRetriesConfig(
+		'retries-invalid-types',
+		{
+			nanocoder: {
+				retries: {
+					maxRepeatedToolCalls: 'lots',
+					maxEmptyTurns: null,
+					maxMalformedRetries: {nope: true},
+				},
+			},
+		},
+		retries => {
+			t.is(retries.maxRepeatedToolCalls, 3);
+			t.is(retries.maxEmptyTurns, 2);
+			t.is(retries.maxMalformedRetries, 2);
+		},
+	);
+});
+
 // Tests for modeProviders
 async function withModeProvidersConfig(
 	testName: string,
