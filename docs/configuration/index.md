@@ -191,13 +191,15 @@ Caps on how many times the conversation loop auto-retries a failing pattern with
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `maxRepeatedToolCalls` | number | `3` | Consecutive identical tool calls allowed before the loop pauses (minimum 2). In an interactive session you are asked whether to continue — useful when the repetition is legitimate, such as polling a long-running job — or stop. `--plain` and other non-interactive runs stop with a clear error. |
+| `maxRepeatedToolCalls` | number | `3` | Pause threshold for consecutive identical tool calls (minimum 2). The check fires when the same call (or set of calls) is emitted for the Nth consecutive turn, before that call runs - so the default of 3 executes the repeated call twice and pauses on the third emission. In an interactive session you are asked whether to continue - useful when the repetition is legitimate, such as polling a long-running job - or stop. `--plain` and other non-interactive runs stop with a clear error. Calls to unknown tools count toward the streak too, so a model stuck on a nonexistent tool hits the same cap. |
 | `maxEmptyTurns` | number | `2` | Consecutive empty assistant turns that are auto-nudged before giving up (minimum 0). The interactive loop additionally compacts the context and retries once before stopping; the `--plain` runtime stops directly after the nudges. |
 | `maxMalformedRetries` | number | `2` | Malformed self-correction retries allowed for text-parsed tool calls before the loop gives up (minimum 0). Applies to the XML fallback path and to native-tool models that emit tool-call text instead of native tool calls. |
 
-Choosing "Continue" at the repeated-tool-call prompt grants another window of the same size, so a genuinely stuck model is re-checked rather than left looping.
+Choosing "Continue" at the repeated-tool-call prompt runs the paused call and re-checks after `maxRepeatedToolCalls` further identical calls, so a genuinely stuck model is re-prompted rather than left looping.
 
-Unlike [Headless](#headless), these limits do not cover the ACP loop (`--acp`, used by editor clients), which is bounded by `maxTurns` alone, nor delegated [subagent](../features/subagents.md) runs, which run their own loop.
+> **Warning - CI polling patterns:** in `--plain` runs (`nanocoder run "..."` in CI and non-TTY environments) there is no prompt to answer, so `maxRepeatedToolCalls` is a hard stop. A workflow whose model legitimately repeats the identical command - polling a deploy, re-running the same check while waiting on an external state change - aborts with exit code `1` once the cap is hit, by default on the third consecutive identical call. Raise `nanocoder.retries.maxRepeatedToolCalls` in that project's `agents.config.json` before relying on such a polling pattern.
+
+Unlike [Headless](#headless), these limits do not cover the ACP loop (`--acp`, used by editor clients), which is bounded by `maxTurns` alone. Delegated [subagent](../features/subagents.md) runs apply `maxRepeatedToolCalls` - a stuck subagent stops with an error naming the setting, since there is nobody to ask inside a delegated run - but not the other two limits: a subagent's loop ends on its own after an empty turn, and it does not use text-parsed tool calls.
 
 ### Paste Handling
 

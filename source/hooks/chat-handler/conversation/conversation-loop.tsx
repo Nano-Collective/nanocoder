@@ -645,6 +645,79 @@ export const processAssistantResponse = async (
 	setStreamingContent('');
 	setStreamingReasoning('');
 
+	// This turn's repeated-call streak, computed over every call the model
+	// emitted — unknown tools included, so a model stuck calling a nonexistent
+	// tool trips the same cap as one re-running a real call.
+	const currentToolSignature = computeToolCallSignature(allToolCalls);
+	const currentRepeatedCount =
+		currentToolSignature && currentToolSignature === lastToolSignature
+			? repeatedToolCallCount + 1
+			: 1;
+	// Streak carried into the recursive continuation below. Reset to 0 when
+	// the user grants another window at the limit prompt, so the re-prompt
+	// cadence stays one full window rather than firing every turn.
+	let repeatedCountForNextTurn = currentRepeatedCount;
+	// True consecutive-repeat streak, never reset by a granted window, so
+	// user-facing counts don't restart at the limit after each continue.
+	const currentRepeatedTotal =
+		currentToolSignature && currentToolSignature === lastToolSignature
+			? repeatedToolCallTotal + 1
+			: 1;
+
+	// When the repeated-call streak hits the cap: pause and ask in an
+	// interactive session (the repetition may be legitimate, e.g. polling a
+	// long-running job, and the user is the only one who can tell). Headless
+	// and non-interactive runs have nobody to ask, so they never continue.
+	// Returns true when the user granted another window.
+	const promptContinueRepeatedCalls = async (): Promise<boolean> => {
+		const liveMode = developmentModeRef?.current ?? developmentMode;
+		await flushAll();
+		if (nonInteractiveMode || liveMode === 'headless') {
+			return false;
+		}
+		setIsGenerating(false);
+		const stopOption = 'Stop and return to prompt';
+		const continueOption = `Continue (check again after ${maxRepeatedToolCalls} more)`;
+		const answer = await signalQuestion({
+			question: `The model has repeated the same tool call ${currentRepeatedTotal} times in a row without making progress. It may be stuck in a loop that drains tokens. Continue anyway?`,
+			options: [stopOption, continueOption],
+			allowFreeform: false,
+			questionType: 'confirmation',
+		});
+		if (answer !== continueOption) {
+			return false;
+		}
+		// User granted another window: reset the streak so the next
+		// maxRepeatedToolCalls identical calls prompt again instead of
+		// stopping, then let the caller resume this turn.
+		repeatedCountForNextTurn = 0;
+		setIsGenerating(true);
+		addToChatQueue(
+			<InfoMessage
+				key={generateKey('tool-loop-continue')}
+				message={`Continuing — will check again after ${maxRepeatedToolCalls} more repeated calls.`}
+				hideBox={true}
+			/>,
+		);
+		return true;
+	};
+
+	// Surface the loop-detected stop. Callers must have paired this turn's
+	// tool calls with results in history before stopping.
+	const stopForRepeatedCalls = () => {
+		addToChatQueue(
+			<ErrorMessage
+				key={generateKey('tool-loop-detected')}
+				message={`Model repeated the same tool call ${currentRepeatedTotal} times in a row without making progress — stopping to avoid a loop. Try rephrasing the request, breaking it into smaller steps, or switching models.`}
+				hideBox={true}
+			/>,
+		);
+		setIsGenerating(false);
+		if (onConversationComplete) {
+			onConversationComplete();
+		}
+	};
+
 	// Handle error results for non-existent tools
 	if (errorResults.length > 0) {
 		// Show the user a concise notice. The full recovery hint (including the
@@ -680,6 +753,18 @@ export const processAssistantResponse = async (
 		const updatedMessagesWithError = errorBuilder.build();
 		setMessages(updatedMessagesWithError);
 
+		// Unknown-tool turns count toward the repeated-call streak, so a model
+		// stuck calling a nonexistent tool cannot recurse unbounded. The error
+		// and aborted results above are already paired in history, so a stop
+		// here keeps the 1:1 tool-call/result mapping intact.
+		if (currentRepeatedCount >= maxRepeatedToolCalls) {
+			const continueAnyway = await promptContinueRepeatedCalls();
+			if (!continueAnyway) {
+				stopForRepeatedCalls();
+				return;
+			}
+		}
+
 		// Continue the main conversation loop with error messages as context
 		await processAssistantResponse({
 			...params,
@@ -688,9 +773,9 @@ export const processAssistantResponse = async (
 			conversationStartTime: startTime,
 			emptyTurnCount: 0,
 			malformedRetryCount: 0,
-			lastToolSignature: undefined,
-			repeatedToolCallCount: 0,
-			repeatedToolCallTotal: 0,
+			lastToolSignature: currentToolSignature,
+			repeatedToolCallCount: repeatedCountForNextTurn,
+			repeatedToolCallTotal: currentRepeatedTotal,
 		});
 		return;
 	}
@@ -700,45 +785,11 @@ export const processAssistantResponse = async (
 		// Loop detection: if the model re-issues the exact same tool call(s) it
 		// made last turn, it is almost certainly stuck (a small model re-running
 		// an identical failing command, or repeatedly reading the same file).
-		// Count consecutive identical signatures and stop once the cap is hit so
-		// we surface an actionable error instead of looping until abort.
-		const currentToolSignature = computeToolCallSignature(validToolCalls);
-		const currentRepeatedCount =
-			currentToolSignature && currentToolSignature === lastToolSignature
-				? repeatedToolCallCount + 1
-				: 1;
-		// Streak carried into the recursive continuation below. Reset to 0 when
-		// the user grants another window at the limit prompt, so the re-prompt
-		// cadence stays one full window rather than firing every turn.
-		let repeatedCountForNextTurn = currentRepeatedCount;
-		// True consecutive-repeat streak, never reset by a granted window, so
-		// user-facing counts don't restart at the limit after each continue.
-		const currentRepeatedTotal =
-			currentToolSignature && currentToolSignature === lastToolSignature
-				? repeatedToolCallTotal + 1
-				: 1;
-
+		// The streak is computed above (shared with the unknown-tool branch);
+		// once the cap is hit, pause and ask — or stop with an actionable error
+		// when there is nobody to ask.
 		if (currentRepeatedCount >= maxRepeatedToolCalls) {
-			// Interactive sessions pause and ask instead of hard-stopping: the
-			// repetition may be legitimate (e.g. polling a long-running job), and
-			// the user is the only one who can tell. Headless / non-interactive
-			// runs have nobody to ask, so they keep the hard stop.
-			const liveMode = developmentModeRef?.current ?? developmentMode;
-			let continueAnyway = false;
-			await flushAll();
-			if (!nonInteractiveMode && liveMode !== 'headless') {
-				setIsGenerating(false);
-				const stopOption = 'Stop and return to prompt';
-				const continueOption = `Continue (allow ${maxRepeatedToolCalls} more)`;
-				const answer = await signalQuestion({
-					question: `The model has repeated the same tool call ${currentRepeatedTotal} times in a row without making progress. It may be stuck in a loop that drains tokens. Continue anyway?`,
-					options: [stopOption, continueOption],
-					allowFreeform: false,
-					questionType: 'confirmation',
-				});
-				continueAnyway = answer === continueOption;
-			}
-
+			const continueAnyway = await promptContinueRepeatedCalls();
 			if (!continueAnyway) {
 				// Keep the AI SDK's 1:1 tool-call/result mapping intact: the assistant
 				// message with these tool_calls is already in history, so pair each
@@ -746,32 +797,9 @@ export const processAssistantResponse = async (
 				const loopBuilder = new MessageBuilder(updatedMessages);
 				loopBuilder.addToolResults(createCancellationResults(validToolCalls));
 				setMessages(loopBuilder.build());
-				addToChatQueue(
-					<ErrorMessage
-						key={generateKey('tool-loop-detected')}
-						message={`Model repeated the same tool call ${currentRepeatedTotal} times in a row without making progress — stopping to avoid a loop. Try rephrasing the request, breaking it into smaller steps, or switching models.`}
-						hideBox={true}
-					/>,
-				);
-				setIsGenerating(false);
-				if (onConversationComplete) {
-					onConversationComplete();
-				}
+				stopForRepeatedCalls();
 				return;
 			}
-
-			// User granted another window: reset the streak so the next
-			// maxRepeatedToolCalls identical calls prompt again instead of
-			// stopping, then resume execution of this turn's tools.
-			repeatedCountForNextTurn = 0;
-			setIsGenerating(true);
-			addToChatQueue(
-				<InfoMessage
-					key={generateKey('tool-loop-continue')}
-					message={`Continuing — will check again after ${maxRepeatedToolCalls} more repeated calls.`}
-					hideBox={true}
-				/>,
-			);
 		}
 
 		// The SDK never auto-executes tools (execute is stripped). We evaluate

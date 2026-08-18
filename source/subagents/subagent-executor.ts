@@ -6,7 +6,8 @@
  */
 
 import {createLLMClient} from '@/client-factory';
-import {getAppConfig} from '@/config/index';
+import {getAppConfig, getRetryLimits} from '@/config/index';
+import {computeToolCallSignature} from '@/hooks/chat-handler/utils/tool-signature';
 import {
 	appendSubagentTool,
 	getSubagentProgress,
@@ -387,6 +388,16 @@ export class SubagentExecutor {
 		let streamingText = '';
 		let streamingReasoning = '';
 
+		// Repeated-call cap (`nanocoder.retries.maxRepeatedToolCalls`): the same
+		// agent-loop guard the main runtimes apply. A subagent re-issuing the
+		// identical tool call(s) on consecutive turns is stuck; there is no user
+		// to ask inside a delegated run, so hitting the cap stops with an error.
+		// The signature covers every emitted call, so a subagent stuck on an
+		// unknown tool trips the cap too.
+		const {maxRepeatedToolCalls} = getRetryLimits();
+		let lastToolSignature = '';
+		let repeatedToolCallCount = 0;
+
 		if (agentId) {
 			initSubagentSession(agentId, config.name, messages);
 		}
@@ -489,6 +500,20 @@ export class SubagentExecutor {
 				emitProgress('complete');
 				return responseContent;
 			}
+
+			const currentToolSignature = computeToolCallSignature(toolCalls);
+			const currentRepeatedCount =
+				currentToolSignature && currentToolSignature === lastToolSignature
+					? repeatedToolCallCount + 1
+					: 1;
+			if (currentRepeatedCount >= maxRepeatedToolCalls) {
+				emitProgress('error');
+				throw new Error(
+					`Subagent repeated the same tool call ${currentRepeatedCount} times in a row without making progress — stopping to avoid a loop (nanocoder.retries.maxRepeatedToolCalls = ${maxRepeatedToolCalls}).`,
+				);
+			}
+			lastToolSignature = currentToolSignature;
+			repeatedToolCallCount = currentRepeatedCount;
 
 			// Count tokens from tool call arguments
 			for (const tc of toolCalls) {

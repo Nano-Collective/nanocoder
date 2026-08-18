@@ -1186,6 +1186,90 @@ test.serial(
 	},
 );
 
+function unknownToolResponse(): Partial<LLMChatResponse> {
+	return {
+		choices: [
+			{
+				message: {
+					role: "assistant",
+					content: "",
+					tool_calls: [
+						{
+							id: "call-ghost",
+							function: { name: "ghost_tool", arguments: { x: 1 } },
+						},
+					],
+				},
+			},
+		],
+	};
+}
+
+test.serial(
+	"repeated unknown-tool calls count toward the repeated-call cap",
+	async (t) => {
+		// A model stuck calling a nonexistent tool must trip
+		// maxRepeatedToolCalls rather than draining tokens until maxTurns.
+		const calls: RecordedCall[] = [];
+		const client = makeRecordingClient(
+			[unknownToolResponse(), unknownToolResponse(), unknownToolResponse()],
+			calls,
+		);
+		const toolManager = makeFakeToolManager();
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "error");
+		if (outcome.kind === "error") {
+			t.regex(outcome.message, /repeated the same tool call 3 times/i);
+			t.regex(outcome.message, /maxRepeatedToolCalls/);
+		}
+		t.is(calls.length, 3, "third identical unknown-tool turn trips the cap");
+		t.is(
+			outcome.toolCalls.filter((c) => c.error?.includes("Unknown tool")).length,
+			3,
+			"every unknown-tool turn is logged as an error",
+		);
+	},
+);
+
+test.serial(
+	"unknown-tool calls one under the cap still let the model recover",
+	async (t) => {
+		const calls: RecordedCall[] = [];
+		const client = makeRecordingClient(
+			[
+				unknownToolResponse(),
+				unknownToolResponse(),
+				{ choices: [{ message: { role: "assistant", content: "all done" } }] },
+			],
+			calls,
+		);
+		const toolManager = makeFakeToolManager();
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
+		t.is(calls.length, 3, "the recovery turn runs to natural completion");
+	},
+);
+
 test.serial(
 	"repeated-tool-call cap honors a custom configured limit",
 	async (t) => {

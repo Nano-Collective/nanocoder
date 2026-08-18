@@ -147,6 +147,39 @@ export async function runPlainConversation(
 	let lastToolSignature = '';
 	let repeatedToolCallCount = 0;
 
+	// Count this turn's tool-call signature against the repeated-call streak.
+	// Returns the hard-stop outcome when the cap is hit, null otherwise. Called
+	// for unknown-tool turns too: a model stuck re-emitting the same
+	// nonexistent tool is looping just as surely as one re-running a real call.
+	const trackRepeatedToolCalls = (
+		turnToolCalls: ToolCall[],
+	): PlainConversationOutcome | null => {
+		const currentToolSignature = computeToolCallSignature(turnToolCalls);
+		const currentRepeatedCount =
+			currentToolSignature && currentToolSignature === lastToolSignature
+				? repeatedToolCallCount + 1
+				: 1;
+		if (currentRepeatedCount >= maxRepeatedToolCalls) {
+			const message = `Model repeated the same tool call ${currentRepeatedCount} times in a row without making progress — stopping to avoid a loop (nanocoder.retries.maxRepeatedToolCalls = ${maxRepeatedToolCalls}).`;
+			if (!isJson) {
+				writeError(message);
+			}
+			return {
+				kind: 'error',
+				message,
+				finalText: accumulatedFinalText,
+				reasoning: accumulatedReasoning || null,
+				toolCalls: toolCallsLog,
+				usage: getUsage(),
+			};
+		}
+		lastToolSignature = currentToolSignature;
+		repeatedToolCallCount = currentRepeatedCount;
+		emptyTurnCount = 0;
+		malformedRetryCount = 0;
+		return null;
+	};
+
 	for (let turn = 0; turn < maxTurns; turn++) {
 		if (abortSignal.aborted) {
 			return {
@@ -363,10 +396,14 @@ export async function runPlainConversation(
 		}
 
 		if (errorResults.length > 0) {
-			emptyTurnCount = 0;
-			malformedRetryCount = 0;
-			lastToolSignature = '';
-			repeatedToolCallCount = 0;
+			// Unknown-tool turns count toward the repeated-call streak, so a model
+			// stuck calling a nonexistent tool trips the same cap instead of
+			// draining tokens until maxTurns. The signature covers every call the
+			// model emitted this turn, valid and unknown alike.
+			const stopped = trackRepeatedToolCalls(allToolCalls);
+			if (stopped) {
+				return stopped;
+			}
 			messages = [...messages, ...errorResults];
 			continue;
 		}
@@ -417,29 +454,10 @@ export async function runPlainConversation(
 		// consecutive turns is almost certainly stuck. In the interactive
 		// runtime this pauses and asks; here it hard-stops before executing
 		// the repeat that hits the cap.
-		const currentToolSignature = computeToolCallSignature(validToolCalls);
-		const currentRepeatedCount =
-			currentToolSignature && currentToolSignature === lastToolSignature
-				? repeatedToolCallCount + 1
-				: 1;
-		if (currentRepeatedCount >= maxRepeatedToolCalls) {
-			const message = `Model repeated the same tool call ${currentRepeatedCount} times in a row without making progress — stopping to avoid a loop (nanocoder.retries.maxRepeatedToolCalls = ${maxRepeatedToolCalls}).`;
-			if (!isJson) {
-				writeError(message);
-			}
-			return {
-				kind: 'error',
-				message,
-				finalText: accumulatedFinalText,
-				reasoning: accumulatedReasoning || null,
-				toolCalls: toolCallsLog,
-				usage: getUsage(),
-			};
+		const stopped = trackRepeatedToolCalls(validToolCalls);
+		if (stopped) {
+			return stopped;
 		}
-		lastToolSignature = currentToolSignature;
-		repeatedToolCallCount = currentRepeatedCount;
-		emptyTurnCount = 0;
-		malformedRetryCount = 0;
 
 		const toolsNeedingApproval: string[] = [];
 		const toolsToExecute: ToolCall[] = [];
