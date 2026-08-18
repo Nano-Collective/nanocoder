@@ -103,9 +103,10 @@ interface ProcessAssistantResponseParams {
 	// nudged in this loop. The empty-response branch increments and
 	// recurses; every other recursion site resets to 0.
 	emptyTurnCount?: number;
-	// Number of consecutive malformed-XML self-correction recursions that
-	// have already happened. The malformed branch increments and recurses;
-	// every other recursion site resets to 0.
+	// Number of consecutive malformed tool-call self-correction recursions
+	// that have already happened, on any text-parsed path (XML fallback or a
+	// native response that emitted tool-call text). The malformed branch
+	// increments and recurses; every other recursion site resets to 0.
 	malformedRetryCount?: number;
 	// Number of compact-and-retry cycles attempted after exhausting empty-turn
 	// nudges. Once MAX_COMPACT_RETRIES is reached we surface the error.
