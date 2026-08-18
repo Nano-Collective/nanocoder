@@ -99,9 +99,10 @@ test('NanocoderAcpClient - a cancelled prompt does not raise an error toast', as
 	// Cancel mid-flight, then the agent tears the stream down and prompt rejects.
 	await client.cancel();
 	rejectPrompt(new Error('Operation was cancelled'));
-	await promptPromise;
+	const cancelledResult = await promptPromise;
 
 	t.is(shownError, undefined, 'Cancelling is not a failure the user needs to be told about');
+	t.is(cancelledResult?.stopReason, 'cancelled', 'The webview needs the cancelled terminal state');
 
 	// The flag must not leak into the next turn, or a real failure goes unreported.
 	rejectPrompt = () => {};

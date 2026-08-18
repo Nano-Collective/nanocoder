@@ -327,7 +327,9 @@ export class NanocoderAcpClient {
 			});
 		} catch (error) {
 			this.outputChannel.appendLine(`Prompt failed: ${error}`);
-			if (!this.cancelRequested) {
+			if (this.cancelRequested) {
+				return {stopReason: 'cancelled'};
+			} else {
 				vscode.window.showErrorMessage(`Nanocoder prompt failed: ${error}`);
 			}
 			return undefined;

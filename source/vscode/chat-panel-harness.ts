@@ -14,8 +14,17 @@ const PANEL_SOURCE = readFileSync(
 	'utf8',
 );
 
+const MENTION_UTILS_SOURCE = readFileSync(
+	fileURLToPath(
+		new URL('../../plugins/vscode/media/mention-utils.js', import.meta.url),
+	),
+	'utf8',
+);
+
 const SHELL_IDS = [
 	'add-image-btn',
+	'add-menu-btn',
+	'add-menu-dropdown',
 	'attach-btn',
 	'chat-input',
 	'chat-view',
@@ -30,6 +39,9 @@ const SHELL_IDS = [
 	'image-preview-container',
 	'image-upload',
 	'messages-container',
+	'menu-attach-file',
+	'menu-upload-image',
+	'mention-dropdown',
 	'modal-image',
 	'mode-dropdown',
 	'mode-trigger',
@@ -43,9 +55,9 @@ const SHELL_IDS = [
 	'send-stop-btn',
 ];
 
-// biome-ignore lint/suspicious/noExplicitAny: the panel assigns arbitrary
 // properties (onclick, oninput, ...) to the nodes it builds, so the stub has to
 // stay open-ended.
+// biome-ignore lint/suspicious/noExplicitAny: dynamic DOM fixture
 export type StubElement = any;
 
 /**
@@ -99,8 +111,11 @@ export function createElement(tagName: string): StubElement {
 			},
 		},
 		appendChild(child: StubElement) {
+			if (child.parentElement && child.parentElement !== element) {
+				child.parentElement.removeChild(child);
+			}
 			child.parentElement = element;
-			element.children.push(child);
+			if (!element.children.includes(child)) element.children.push(child);
 			return child;
 		},
 		removeChild(child: StubElement) {
@@ -140,6 +155,7 @@ export function createElement(tagName: string): StubElement {
 		get: () => html,
 		set: (value: string) => {
 			html = String(value);
+			for (const child of element.children) child.parentElement = null;
 			element.children = [];
 		},
 	});
@@ -237,6 +253,7 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	}
 
 	createContext(sandbox);
+	runInContext(MENTION_UTILS_SOURCE, sandbox);
 	runInContext(PANEL_SOURCE, sandbox);
 
 	const container = findById(root, 'messages-container') as StubElement;
@@ -270,8 +287,8 @@ export function createPanel(options: {marked?: boolean} = {}) {
 				status: 'pending',
 			});
 		},
-		finish() {
-			this.update({sessionUpdate: 'prompt_response'});
+		finish(outcome = 'completed') {
+			this.update({sessionUpdate: 'prompt_response', outcome});
 		},
 		userMessage(value: string) {
 			this.update({
@@ -288,10 +305,13 @@ export function createPanel(options: {marked?: boolean} = {}) {
 				timer.fn();
 			}
 		},
-		boxes(): StubElement[] {
+		summaries(): StubElement[] {
 			return container.children.filter((child: StubElement) =>
-				child.className.includes('thought-aggregator'),
+				child.className.includes('work-summary'),
 			);
+		},
+		thoughts(): StubElement[] {
+			return container.querySelectorAll('.work-summary-thought');
 		},
 	};
 }
