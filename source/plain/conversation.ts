@@ -1,4 +1,10 @@
 import {DEFAULT_HEADLESS_MAX_TURNS, getAppConfig} from '@/config/index';
+import {
+	MAX_EMPTY_TURNS,
+	MAX_MALFORMED_RETRIES,
+	MAX_REPEATED_TOOL_CALLS,
+} from '@/constants';
+import {computeToolCallSignature} from '@/hooks/chat-handler/utils/tool-signature';
 import {processToolUse} from '@/message-handler';
 import {color, write, writeError, writeLine, writeStatus} from '@/plain/writer';
 import {parseToolCalls} from '@/tool-calling/index';
@@ -83,6 +89,11 @@ const FINAL_TURN_INSTRUCTION =
  * The turn ceiling guards against a wedged model looping unbounded in an
  * unattended run. It defaults to DEFAULT_HEADLESS_MAX_TURNS and is overridable
  * via the NANOCODER_MAX_TURNS env var or `nanocoder.headless.maxTurns` config.
+ *
+ * Within that ceiling the `nanocoder.retries` limits also apply, mirroring the
+ * interactive loop: consecutive identical tool calls, consecutive empty turns,
+ * and malformed tool-call retries each hard-stop with a clear error once their
+ * cap is hit (there is no user to ask in a plain run).
  */
 export async function runPlainConversation(
 	options: RunPlainConversationOptions,
@@ -123,6 +134,23 @@ export async function runPlainConversation(
 
 	const maxTurns =
 		getAppConfig().headless?.maxTurns ?? DEFAULT_HEADLESS_MAX_TURNS;
+
+	// Agent-loop retry limits (`nanocoder.retries`): the same caps the
+	// interactive loop applies. There is nobody to ask in a plain run, so
+	// hitting any of them hard-stops with a clear error instead of pausing.
+	const retryLimits = getAppConfig().retries;
+	const maxRepeatedToolCalls =
+		retryLimits?.maxRepeatedToolCalls ?? MAX_REPEATED_TOOL_CALLS;
+	const maxEmptyTurns = retryLimits?.maxEmptyTurns ?? MAX_EMPTY_TURNS;
+	const maxMalformedRetries =
+		retryLimits?.maxMalformedRetries ?? MAX_MALFORMED_RETRIES;
+
+	// Consecutive-failure streaks. Each kind of failing turn increments its own
+	// counter and resets the others; any healthy turn resets all of them.
+	let emptyTurnCount = 0;
+	let malformedRetryCount = 0;
+	let lastToolSignature = '';
+	let repeatedToolCallCount = 0;
 
 	for (let turn = 0; turn < maxTurns; turn++) {
 		if (abortSignal.aborted) {
@@ -251,17 +279,41 @@ export async function runPlainConversation(
 					};
 
 		if (!xmlParse.success) {
-			if (!isJson) {
-				writeError(`Malformed tool call: ${xmlParse.error}`);
+			// Same self-correction loop the interactive runtime runs: feed the
+			// parse error back to the model, capped so a model stuck producing
+			// bad tool calls cannot drain tokens unbounded.
+			if (malformedRetryCount >= maxMalformedRetries) {
+				const message = `Model produced malformed tool calls ${maxMalformedRetries + 1} times in a row and cannot self-correct — stopping (nanocoder.retries.maxMalformedRetries = ${maxMalformedRetries}).`;
+				if (!isJson) {
+					writeError(message);
+				}
+				return {
+					kind: 'error',
+					message,
+					finalText: accumulatedFinalText,
+					reasoning: accumulatedReasoning || null,
+					toolCalls: toolCallsLog,
+					usage: getUsage(),
+				};
 			}
-			return {
-				kind: 'error',
-				message: xmlParse.error,
-				finalText: accumulatedFinalText,
-				reasoning: accumulatedReasoning || null,
-				toolCalls: toolCallsLog,
-				usage: getUsage(),
-			};
+			malformedRetryCount += 1;
+			emptyTurnCount = 0;
+			lastToolSignature = '';
+			repeatedToolCallCount = 0;
+			if (!isJson) {
+				writeError(
+					`Malformed tool call: ${xmlParse.error} — asking the model to retry (${malformedRetryCount}/${maxMalformedRetries}).`,
+				);
+			}
+			messages = [
+				...messages,
+				{role: 'assistant', content: fullContent},
+				{
+					role: 'user',
+					content: `Your previous response contained a malformed tool call. ${xmlParse.error}\n\n${xmlParse.examples}\n\nPlease try again using the correct format.`,
+				},
+			];
+			continue;
 		}
 
 		const allToolCalls: ToolCall[] = [
@@ -296,31 +348,66 @@ export async function runPlainConversation(
 			validToolCalls.push(toolCall);
 		}
 
-		messages = [
-			...messages,
-			{
-				role: 'assistant',
-				content: cleanedContent,
-				tool_calls: validToolCalls.length > 0 ? validToolCalls : undefined,
-				reasoning: streamedReasoning || undefined,
-			},
-		];
+		// Skip appending a fully-empty assistant message (no content, no tool
+		// calls): providers reject them, and the empty-turn nudge below re-asks
+		// without one — same rule the interactive loop applies.
+		const hasAssistantPayload =
+			cleanedContent.trim() ||
+			validToolCalls.length > 0 ||
+			errorResults.length > 0;
+		if (hasAssistantPayload) {
+			messages = [
+				...messages,
+				{
+					role: 'assistant',
+					content: cleanedContent,
+					tool_calls: validToolCalls.length > 0 ? validToolCalls : undefined,
+					reasoning: streamedReasoning || undefined,
+				},
+			];
+		}
 
 		if (errorResults.length > 0) {
+			emptyTurnCount = 0;
+			malformedRetryCount = 0;
+			lastToolSignature = '';
+			repeatedToolCallCount = 0;
 			messages = [...messages, ...errorResults];
 			continue;
 		}
 
 		if (validToolCalls.length === 0) {
 			if (!cleanedContent.trim()) {
-				return {
-					kind: 'error',
-					message: 'Model returned an empty response with no tool calls',
-					finalText: accumulatedFinalText,
-					reasoning: accumulatedReasoning || null,
-					toolCalls: toolCallsLog,
-					usage: getUsage(),
-				};
+				// Nudge through consecutive empty turns up to the cap, mirroring
+				// the interactive loop, then stop so a silent model cannot spin.
+				if (emptyTurnCount >= maxEmptyTurns) {
+					const message = `Model produced no output after ${maxEmptyTurns + 1} attempts — stopping (nanocoder.retries.maxEmptyTurns = ${maxEmptyTurns}).`;
+					if (!isJson) {
+						writeError(message);
+					}
+					return {
+						kind: 'error',
+						message,
+						finalText: accumulatedFinalText,
+						reasoning: accumulatedReasoning || null,
+						toolCalls: toolCallsLog,
+						usage: getUsage(),
+					};
+				}
+				emptyTurnCount += 1;
+				malformedRetryCount = 0;
+				lastToolSignature = '';
+				repeatedToolCallCount = 0;
+				if (!isJson) {
+					writeStatus(
+						`empty response — retry ${emptyTurnCount}/${maxEmptyTurns}`,
+					);
+				}
+				messages = [
+					...messages,
+					{role: 'user', content: 'Please continue with the task.'},
+				];
+				continue;
 			}
 			return {
 				kind: 'success',
@@ -330,6 +417,34 @@ export async function runPlainConversation(
 				usage: getUsage(),
 			};
 		}
+
+		// Loop detection: a model re-issuing the identical tool call(s) on
+		// consecutive turns is almost certainly stuck. In the interactive
+		// runtime this pauses and asks; here it hard-stops before executing
+		// the repeat that hits the cap.
+		const currentToolSignature = computeToolCallSignature(validToolCalls);
+		const currentRepeatedCount =
+			currentToolSignature && currentToolSignature === lastToolSignature
+				? repeatedToolCallCount + 1
+				: 1;
+		if (currentRepeatedCount >= maxRepeatedToolCalls) {
+			const message = `Model repeated the same tool call ${currentRepeatedCount} times in a row without making progress — stopping to avoid a loop (nanocoder.retries.maxRepeatedToolCalls = ${maxRepeatedToolCalls}).`;
+			if (!isJson) {
+				writeError(message);
+			}
+			return {
+				kind: 'error',
+				message,
+				finalText: accumulatedFinalText,
+				reasoning: accumulatedReasoning || null,
+				toolCalls: toolCallsLog,
+				usage: getUsage(),
+			};
+		}
+		lastToolSignature = currentToolSignature;
+		repeatedToolCallCount = currentRepeatedCount;
+		emptyTurnCount = 0;
+		malformedRetryCount = 0;
 
 		const toolsNeedingApproval: string[] = [];
 		const toolsToExecute: ToolCall[] = [];

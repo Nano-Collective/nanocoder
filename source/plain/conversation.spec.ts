@@ -1,5 +1,5 @@
 import test from "ava";
-import { reloadAppConfig } from "@/config/index";
+import { getAppConfig, reloadAppConfig } from "@/config/index";
 import { setToolManagerGetter, setToolRegistryGetter } from "@/message-handler";
 import type { ToolManager } from "@/tools/tool-manager";
 import type {
@@ -108,12 +108,13 @@ test("returns success when model emits content and no tool calls", async (t) => 
 	t.is(outcome.kind, "success");
 });
 
-test("returns error when model emits empty response with no tool calls", async (t) => {
+test("nudges through empty responses up to the cap, then returns error", async (t) => {
+	// Default maxEmptyTurns = 2: initial empty + 2 nudged retries = 3 calls.
 	const client = makeFakeClient({
 		responses: [
-			{
-				choices: [{ message: { role: "assistant", content: "" } }],
-			},
+			{ choices: [{ message: { role: "assistant", content: "" } }] },
+			{ choices: [{ message: { role: "assistant", content: "" } }] },
+			{ choices: [{ message: { role: "assistant", content: "" } }] },
 		],
 	});
 	const toolManager = makeFakeToolManager();
@@ -130,8 +131,32 @@ test("returns error when model emits empty response with no tool calls", async (
 
 	t.is(outcome.kind, "error");
 	if (outcome.kind === "error") {
-		t.regex(outcome.message, /empty response/i);
+		t.regex(outcome.message, /produced no output after 3 attempts/i);
 	}
+});
+
+test("recovers when a nudge after an empty response gets the model talking", async (t) => {
+	const client = makeFakeClient({
+		responses: [
+			{ choices: [{ message: { role: "assistant", content: "" } }] },
+			{ choices: [{ message: { role: "assistant", content: "recovered" } }] },
+		],
+	});
+	const toolManager = makeFakeToolManager();
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: "auto-accept",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+	});
+
+	// finalText stays empty here because the fake client never streams tokens;
+	// the success outcome (driven by the message content) is the behavior under test.
+	t.is(outcome.kind, "success");
 });
 
 test("executes a tool call that does not need approval and recurses to success", async (t) => {
@@ -988,5 +1013,320 @@ test.serial(
 			outputTokens: 42,
 			totalTokens: 42,
 		});
+	},
+);
+
+// --- Agent-loop retry limits (nanocoder.retries) — issue #897 ---
+
+function repeatingToolResponse(): Partial<LLMChatResponse> {
+	return {
+		choices: [
+			{
+				message: {
+					role: "assistant",
+					content: "",
+					tool_calls: [
+						{
+							id: "call-loop",
+							function: { name: "safe_tool", arguments: { path: "/tmp/x" } },
+						},
+					],
+				},
+			},
+		],
+	};
+}
+
+// Scope a retry-limit override to one test; afterEach.always reloads config,
+// but restore explicitly so a mid-test failure cannot leak into another test.
+async function withRetryLimit<K extends "maxRepeatedToolCalls" | "maxEmptyTurns" | "maxMalformedRetries">(
+	key: K,
+	value: number,
+	body: () => Promise<void>,
+): Promise<void> {
+	const retries = getAppConfig().retries;
+	if (!retries) throw new Error("resolved config must carry retry limits");
+	const original = retries[key];
+	retries[key] = value;
+	try {
+		await body();
+	} finally {
+		retries[key] = original;
+	}
+}
+
+test.serial(
+	"repeated identical tool calls hard-stop at the default limit",
+	async (t) => {
+		// Default maxRepeatedToolCalls = 3: the tool executes on turns 1 and 2;
+		// turn 3's identical call trips the cap before executing.
+		const calls: RecordedCall[] = [];
+		const client = makeRecordingClient(
+			[repeatingToolResponse(), repeatingToolResponse(), repeatingToolResponse()],
+			calls,
+		);
+		const toolManager = makeFakeToolManager({
+			knownTools: new Set(["safe_tool"]),
+			needsApprovalByName: { safe_tool: false },
+		});
+		let handlerCalls = 0;
+		setToolRegistryGetter(() => ({
+			safe_tool: (async () => {
+				handlerCalls++;
+				return "tool-output";
+			}) as ToolHandler,
+		}));
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "error");
+		if (outcome.kind === "error") {
+			t.regex(outcome.message, /repeated the same tool call 3 times/i);
+			t.regex(outcome.message, /maxRepeatedToolCalls/);
+		}
+		t.is(calls.length, 3, "third identical turn trips the cap");
+		t.is(handlerCalls, 2, "the capped turn must not execute the tool again");
+	},
+);
+
+test.serial(
+	"identical tool calls one under the limit do not trip the cap",
+	async (t) => {
+		const calls: RecordedCall[] = [];
+		const client = makeRecordingClient(
+			[
+				repeatingToolResponse(),
+				repeatingToolResponse(),
+				{ choices: [{ message: { role: "assistant", content: "all done" } }] },
+			],
+			calls,
+		);
+		const toolManager = makeFakeToolManager({
+			knownTools: new Set(["safe_tool"]),
+			needsApprovalByName: { safe_tool: false },
+		});
+		setToolRegistryGetter(() => ({
+			safe_tool: (async () => "tool-output") as ToolHandler,
+		}));
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
+		t.is(calls.length, 3);
+	},
+);
+
+test.serial(
+	"different tool calls between repeats reset the streak",
+	async (t) => {
+		const otherToolResponse: Partial<LLMChatResponse> = {
+			choices: [
+				{
+					message: {
+						role: "assistant",
+						content: "",
+						tool_calls: [
+							{
+								id: "call-other",
+								function: { name: "other_tool", arguments: {} },
+							},
+						],
+					},
+				},
+			],
+		};
+		const calls: RecordedCall[] = [];
+		const client = makeRecordingClient(
+			[
+				repeatingToolResponse(),
+				repeatingToolResponse(),
+				otherToolResponse,
+				repeatingToolResponse(),
+				{ choices: [{ message: { role: "assistant", content: "all done" } }] },
+			],
+			calls,
+		);
+		const toolManager = makeFakeToolManager({
+			knownTools: new Set(["safe_tool", "other_tool"]),
+			needsApprovalByName: { safe_tool: false, other_tool: false },
+		});
+		setToolRegistryGetter(() => ({
+			safe_tool: (async () => "tool-output") as ToolHandler,
+			other_tool: (async () => "other-output") as ToolHandler,
+		}));
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
+		t.is(calls.length, 5, "streak resets on a different signature");
+	},
+);
+
+test.serial(
+	"repeated-tool-call cap honors a custom configured limit",
+	async (t) => {
+		await withRetryLimit("maxRepeatedToolCalls", 2, async () => {
+			const calls: RecordedCall[] = [];
+			const client = makeRecordingClient(
+				[repeatingToolResponse(), repeatingToolResponse()],
+				calls,
+			);
+			const toolManager = makeFakeToolManager({
+				knownTools: new Set(["safe_tool"]),
+				needsApprovalByName: { safe_tool: false },
+			});
+			setToolRegistryGetter(() => ({
+				safe_tool: (async () => "tool-output") as ToolHandler,
+			}));
+
+			const outcome = await runPlainConversation({
+				client,
+				toolManager,
+				systemMessage: SYSTEM,
+				initialMessages: [USER],
+				developmentMode: "auto-accept",
+				nonInteractiveAlwaysAllow: [],
+				abortSignal: new AbortController().signal,
+			});
+
+			t.is(outcome.kind, "error");
+			if (outcome.kind === "error") {
+				t.regex(outcome.message, /repeated the same tool call 2 times/i);
+			}
+			t.is(calls.length, 2, "configured limit of 2 trips on the second turn");
+		});
+	},
+);
+
+test.serial(
+	"empty-turn cap honors a custom configured limit of zero",
+	async (t) => {
+		await withRetryLimit("maxEmptyTurns", 0, async () => {
+			const client = makeFakeClient({
+				responses: [
+					{ choices: [{ message: { role: "assistant", content: "" } }] },
+				],
+			});
+			const toolManager = makeFakeToolManager();
+
+			const outcome = await runPlainConversation({
+				client,
+				toolManager,
+				systemMessage: SYSTEM,
+				initialMessages: [USER],
+				developmentMode: "auto-accept",
+				nonInteractiveAlwaysAllow: [],
+				abortSignal: new AbortController().signal,
+			});
+
+			t.is(outcome.kind, "error");
+			if (outcome.kind === "error") {
+				t.regex(outcome.message, /produced no output after 1 attempts/i);
+			}
+		});
+	},
+);
+
+test.serial(
+	"malformed tool calls self-correct up to the cap, then hard-stop",
+	async (t) => {
+		// Default maxMalformedRetries = 2: initial + 2 retries = 3 calls.
+		// '[tool_use: name]' is a shape the XML parser rejects as malformed.
+		const malformed: Partial<LLMChatResponse> = {
+			choices: [
+				{ message: { role: "assistant", content: "[tool_use: safe_tool]" } },
+			],
+			toolsDisabled: true,
+		};
+		const calls: RecordedCall[] = [];
+		const client = makeRecordingClient([malformed, malformed, malformed], calls);
+		const toolManager = makeFakeToolManager({
+			knownTools: new Set(["safe_tool"]),
+		});
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "error");
+		if (outcome.kind === "error") {
+			t.regex(outcome.message, /malformed tool calls 3 times/i);
+			t.regex(outcome.message, /maxMalformedRetries/);
+		}
+		t.is(calls.length, 3);
+
+		// The self-correction feedback must reach the model on retry turns.
+		const retryTurnMessages = calls[1].messages;
+		const feedback = retryTurnMessages.find(
+			(m) =>
+				m.role === "user" &&
+				/contained a malformed tool call/i.test(String(m.content)),
+		);
+		t.truthy(feedback, "retry turn must carry the parse-error feedback");
+	},
+);
+
+test.serial(
+	"malformed tool call recovers when the model self-corrects",
+	async (t) => {
+		const client = makeFakeClient({
+			responses: [
+				{
+					choices: [
+						{ message: { role: "assistant", content: "[tool_use: safe_tool]" } },
+					],
+					toolsDisabled: true,
+				},
+				{
+					choices: [{ message: { role: "assistant", content: "recovered" } }],
+					toolsDisabled: true,
+				},
+			],
+		});
+		const toolManager = makeFakeToolManager({
+			knownTools: new Set(["safe_tool"]),
+		});
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
 	},
 );
