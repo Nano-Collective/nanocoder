@@ -3,13 +3,8 @@ import type {ConversationStateManager} from '@/app/utils/conversation-state';
 import AssistantMessage from '@/components/assistant-message';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
-import {getAppConfig} from '@/config/index';
-import {
-	MAX_COMPACT_RETRIES,
-	MAX_EMPTY_TURNS,
-	MAX_MALFORMED_RETRIES,
-	MAX_REPEATED_TOOL_CALLS,
-} from '@/constants';
+import {getAppConfig, getRetryLimits} from '@/config/index';
+import {MAX_COMPACT_RETRIES} from '@/constants';
 import {generateKey} from '@/session/key-generator';
 import {
 	parseToolCalls,
@@ -202,12 +197,8 @@ export const processAssistantResponse = async (
 
 	// Agent-loop retry limits: configurable via `nanocoder.retries` in
 	// agents.config.json, falling back to the historical hardcoded caps.
-	const retryLimits = getAppConfig().retries;
-	const maxRepeatedToolCalls =
-		retryLimits?.maxRepeatedToolCalls ?? MAX_REPEATED_TOOL_CALLS;
-	const maxEmptyTurns = retryLimits?.maxEmptyTurns ?? MAX_EMPTY_TURNS;
-	const maxMalformedRetries =
-		retryLimits?.maxMalformedRetries ?? MAX_MALFORMED_RETRIES;
+	const {maxRepeatedToolCalls, maxEmptyTurns, maxMalformedRetries} =
+		getRetryLimits();
 
 	// Helper to flush live task list to the static chat queue
 	const flushLiveTaskList = async () => {

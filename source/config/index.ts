@@ -639,6 +639,23 @@ export function getAppConfig(): AppConfig {
 	return _appConfig;
 }
 
+/**
+ * Agent-loop retry limits, read live from the current app config so runtime
+ * edits (and tests that mutate `getAppConfig().retries`) are picked up. The
+ * hardcoded caps are the single fallback for configs loaded before `retries`
+ * existed.
+ * @public
+ */
+export function getRetryLimits(): RetryLimitsConfig {
+	return (
+		getAppConfig().retries ?? {
+			maxRepeatedToolCalls: MAX_REPEATED_TOOL_CALLS,
+			maxEmptyTurns: MAX_EMPTY_TURNS,
+			maxMalformedRetries: MAX_MALFORMED_RETRIES,
+		}
+	);
+}
+
 // Function to reload the app configuration (useful after config file changes)
 export function reloadAppConfig(): void {
 	_appConfig = loadAppConfig();
