@@ -10,8 +10,10 @@ import {
 	getNotificationsPreference,
 	getPasteThreshold,
 	getPrivacyPreference,
+	getProfessionalTone,
 	getReasoningExpanded,
 	updateAlternateScreen,
+	updateProfessionalTone,
 } from '@/config/preferences';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -183,6 +185,13 @@ function buildRowsForTab(
 					label: 'Reasoning Traces',
 					value: getReasoningExpanded() ? 'expanded' : 'collapsed',
 					panel: 'reasoning-traces',
+				},
+				{
+					kind: 'boolean',
+					id: 'professional-tone',
+					label: 'Professional Tone',
+					value: getProfessionalTone(),
+					onToggle: () => updateProfessionalTone(!getProfessionalTone()),
 				},
 				{
 					kind: 'managed',
