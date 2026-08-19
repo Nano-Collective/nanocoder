@@ -876,7 +876,13 @@ export const processAssistantResponse = async (
 				/>,
 			);
 			const builder = new MessageBuilder(updatedMessages);
-			builder.addToolResults(turnResults);
+			// The assistant message already announces confirmTools' tool_calls;
+			// pair each with a cancellation result so the saved history keeps the
+			// provider-required 1:1 call/result mapping.
+			builder.addToolResults([
+				...turnResults,
+				...createCancellationResults(confirmTools),
+			]);
 			builder.addMessage({role: 'assistant', content: errorMsg});
 			setMessages(builder.build());
 			setIsGenerating(false);

@@ -2368,6 +2368,55 @@ test.serial('unknown-tool feedback is paired with its call so it reaches the mod
 	);
 });
 
+test.serial('non-interactive approval exit pairs unconfirmed tools with cancellation results', async t => {
+	const messageSnapshots: Message[][] = [];
+
+	const params = createDefaultParams({
+		client: {
+			chat: async (): Promise<LLMChatResponse> => ({
+				choices: [
+					{
+						message: {
+							role: 'assistant',
+							content: '',
+							tool_calls: [
+								{
+									id: 'call_guarded',
+									function: {name: 'guarded_tool', arguments: '{}'},
+								},
+							],
+						},
+					},
+				],
+				toolsDisabled: false,
+			}),
+		},
+		toolManager: createMockToolManager({
+			tools: ['guarded_tool'],
+			needsApproval: true,
+		}),
+		nonInteractiveMode: true,
+		setMessages: (msgs: Message[]) => messageSnapshots.push(msgs),
+	});
+
+	await processAssistantResponse(params);
+
+	// The exit is terminal, so the saved history must pair the announced call
+	// with a result - a later resume would otherwise replay an assistant
+	// tool_call that never received one, which strict providers reject.
+	const latest = messageSnapshots[messageSnapshots.length - 1];
+	const assistant = latest.find(m => m.role === 'assistant' && m.tool_calls);
+	t.true(
+		(assistant?.tool_calls ?? []).some(tc => tc.id === 'call_guarded'),
+		'the guarded call must be announced in the assistant message',
+	);
+	const result = latest.find(
+		m => m.role === 'tool' && m.tool_call_id === 'call_guarded',
+	);
+	t.truthy(result, 'the unconfirmed tool must get a cancellation result');
+	t.regex(String(result?.content), /cancelled/i);
+});
+
 test.serial('repeated unknown-tool calls hard-stop without prompting in non-interactive mode', async t => {
 	let chatCallCount = 0;
 	let questionCount = 0;
