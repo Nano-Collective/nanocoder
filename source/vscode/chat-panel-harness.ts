@@ -14,6 +14,15 @@ const PANEL_SOURCE = readFileSync(
 	'utf8',
 );
 
+// The real webview loads mention-utils.js before chat-panel.js (see
+// chat-panel.html); the panel reads globalThis.NanocoderMentionUtils at boot.
+const MENTION_UTILS_SOURCE = readFileSync(
+	fileURLToPath(
+		new URL('../../plugins/vscode/media/mention-utils.js', import.meta.url),
+	),
+	'utf8',
+);
+
 const SHELL_IDS = [
 	'add-image-btn',
 	'attach-btn',
@@ -237,6 +246,7 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	}
 
 	createContext(sandbox);
+	runInContext(MENTION_UTILS_SOURCE, sandbox);
 	runInContext(PANEL_SOURCE, sandbox);
 
 	const container = findById(root, 'messages-container') as StubElement;
