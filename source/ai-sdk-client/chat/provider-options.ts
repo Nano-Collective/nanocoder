@@ -14,6 +14,15 @@ import {isOpenRouterProvider} from '../providers/openrouter.js';
  */
 export type ProviderOptions = Record<string, Record<string, unknown>>;
 
+export function isPromptCachingEnabled(
+	providerConfig: AIProviderConfig,
+): boolean {
+	return (
+		providerConfig.sdkProvider === 'anthropic' &&
+		providerConfig.promptCaching !== false
+	);
+}
+
 /**
  * Build the `providerOptions` value for a streamText/generateText call.
  *

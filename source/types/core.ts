@@ -153,6 +153,8 @@ export interface ApiUsage {
 	inputTokens?: number;
 	outputTokens?: number;
 	totalTokens?: number;
+	cacheReadTokens?: number;
+	cacheWriteTokens?: number;
 }
 
 export interface ApiUsageSnapshot extends ApiUsage {
@@ -171,6 +173,8 @@ export interface ApiCallRecord {
 	inputTokens?: number;
 	outputTokens?: number;
 	totalTokens?: number;
+	cacheReadTokens?: number;
+	cacheWriteTokens?: number;
 	timestamp: number;
 }
 

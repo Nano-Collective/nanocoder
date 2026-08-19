@@ -8,9 +8,38 @@ import {getModelPricing} from '@/models/index';
 import type {ApiUsage} from '@/types/core';
 import type {ResponseUsage} from '@/types/usage';
 
-type PricingLookup = (
-	model: string,
-) => Promise<{input: number; output: number} | null>;
+export interface TokenPricing {
+	input: number;
+	output: number;
+	cache_read?: number;
+	cache_write?: number;
+}
+
+type PricingLookup = (model: string) => Promise<TokenPricing | null>;
+
+export function priceTokens(
+	pricing: TokenPricing,
+	usage: {
+		inputTokens?: number;
+		outputTokens?: number;
+		cacheReadTokens?: number;
+		cacheWriteTokens?: number;
+	},
+): number {
+	const cacheRead = usage.cacheReadTokens ?? 0;
+	const cacheWrite = usage.cacheWriteTokens ?? 0;
+	const uncachedInput = Math.max(
+		0,
+		(usage.inputTokens ?? 0) - cacheRead - cacheWrite,
+	);
+	return (
+		(pricing.input * uncachedInput +
+			(pricing.cache_read ?? pricing.input) * cacheRead +
+			(pricing.cache_write ?? pricing.input) * cacheWrite +
+			pricing.output * (usage.outputTokens ?? 0)) /
+		1_000_000
+	);
+}
 
 /**
  * Extract the provider-reported token counts, or undefined when the report
@@ -32,6 +61,8 @@ function toReportedUsage(
 		inputTokens: usage.inputTokens,
 		outputTokens: usage.outputTokens,
 		totalTokens: usage.totalTokens,
+		cacheReadTokens: usage.cacheReadTokens,
+		cacheWriteTokens: usage.cacheWriteTokens,
 	};
 }
 
@@ -65,10 +96,7 @@ export async function buildResponseUsage(
 					(usage.outputTokens as number) > 0 ||
 					!(usage.totalTokens && usage.totalTokens > 0));
 			if (hasUsableSplit) {
-				cost =
-					(pricing.input * (usage.inputTokens as number) +
-						pricing.output * (usage.outputTokens as number)) /
-					1_000_000;
+				cost = priceTokens(pricing, usage);
 			} else if (Number.isFinite(usage.totalTokens)) {
 				// Lump-sum reports can't be split into input/output, so average
 				// the two rates — same approximation the /usage command uses.

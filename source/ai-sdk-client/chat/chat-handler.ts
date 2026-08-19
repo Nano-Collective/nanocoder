@@ -28,12 +28,18 @@ import {
 	startMetrics,
 } from '@/utils/logging/performance.js';
 import {getSafeMemory} from '@/utils/logging/safe-process.js';
-import {convertToModelMessages} from '../converters/message-converter.js';
+import {
+	convertToModelMessages,
+	withCacheBreakpoints,
+} from '../converters/message-converter.js';
 import {convertAISDKToolCalls} from '../converters/tool-converter.js';
 import {extractRootError} from '../error-handling/error-extractor.js';
 import {parseAPIError} from '../error-handling/error-parser.js';
 import {isToolSupportError} from '../error-handling/tool-error-detector.js';
-import {buildProviderOptions} from './provider-options.js';
+import {
+	buildProviderOptions,
+	isPromptCachingEnabled,
+} from './provider-options.js';
 import {
 	createOnStepFinishHandler,
 	createPrepareStepHandler,
@@ -187,7 +193,11 @@ export async function handleChat(
 			}
 
 			// Convert messages to AI SDK v5 ModelMessage format
-			const modelMessages = convertToModelMessages(finalNonSystemMessages);
+			const promptCaching = isPromptCachingEnabled(providerConfig);
+			const convertedMessages = convertToModelMessages(finalNonSystemMessages);
+			const modelMessages = promptCaching
+				? withCacheBreakpoints(convertedMessages, finalSystemContent)
+				: convertedMessages;
 
 			logger.debug('AI SDK request prepared', {
 				messageCount: modelMessages.length,
@@ -213,7 +223,9 @@ export async function handleChat(
 
 			const result = streamText({
 				model,
-				...(finalSystemContent ? {system: finalSystemContent} : {}),
+				...(finalSystemContent && !promptCaching
+					? {system: finalSystemContent}
+					: {}),
 				messages: modelMessages,
 				tools: aiTools,
 				abortSignal: signal,
@@ -490,6 +502,8 @@ export async function handleChat(
 					inputTokens: usage.inputTokens,
 					outputTokens: usage.outputTokens,
 					totalTokens: usage.totalTokens,
+					cacheReadTokens: usage.inputTokenDetails?.cacheReadTokens,
+					cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens,
 				},
 			};
 		} catch (error) {
