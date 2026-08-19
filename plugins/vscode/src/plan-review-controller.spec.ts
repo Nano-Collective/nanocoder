@@ -77,9 +77,10 @@ test('PlanReviewController - failed approval keeps the plan available for retry'
 	t.deepEqual(controller.pendingReview, {artifactPath});
 });
 
-test('PlanReviewController - prompt failure keeps the plan available for retry', async t => {
+test('PlanReviewController - prompt failure restores plan mode and keeps the plan available for retry', async t => {
 	const controller = new PlanReviewController();
 	const artifactPath = '/tmp/session/implementation_plan.md';
+	const modes: string[] = [];
 	controller.observeSessionUpdate({
 		sessionUpdate: 'tool_call_update',
 		status: 'completed',
@@ -90,13 +91,16 @@ test('PlanReviewController - prompt failure keeps the plan available for retry',
 	await t.throwsAsync(
 		controller.approve({
 			readFile: async () => '# Persisted plan\n\n1. Build it.',
-			setMode: async () => {},
+			setMode: async mode => {
+				modes.push(mode);
+			},
 			prompt: async () => {
 				throw new Error('transport failed');
 			},
 		}),
 		{message: 'transport failed'},
 	);
+	t.deepEqual(modes, ['normal', 'plan']);
 	t.deepEqual(controller.pendingReview, {artifactPath});
 });
 

@@ -4,7 +4,7 @@ export interface PlanReviewRequest {
 
 export interface PlanApprovalActions {
 	readFile: (path: string) => Promise<string>;
-	setMode: (mode: 'normal') => Promise<void>;
+	setMode: (mode: 'normal' | 'plan') => Promise<void>;
 	prompt: (message: string) => Promise<void>;
 }
 
@@ -70,7 +70,19 @@ export class PlanReviewController {
 			'The implementation plan below is approved. Proceed with implementing it now.\n\n' +
 			`<approved_plan>\n${plan}\n</approved_plan>`;
 		await actions.setMode('normal');
-		await actions.prompt(approvedMessage);
+		try {
+			await actions.prompt(approvedMessage);
+		} catch (error) {
+			// Approval is transactional from the UI's perspective: if the
+			// implementation prompt never starts, put the session back in Plan
+			// Mode so the restored review card can be revised as well as retried.
+			try {
+				await actions.setMode('plan');
+			} catch {
+				// Preserve the original prompt failure; mode restoration is best-effort.
+			}
+			throw error;
+		}
 		this._pendingReview = undefined;
 	}
 
