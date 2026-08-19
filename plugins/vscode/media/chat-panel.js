@@ -353,6 +353,8 @@
 	function toggleHistoryView() {
 		isHistoryView = !isHistoryView;
 		if (isHistoryView) {
+			isSettingsView = false;
+			document.getElementById('settings-view').classList.add('hidden');
 			document.getElementById('chat-view').classList.add('hidden');
 			document.getElementById('history-view').classList.remove('hidden');
 			// Fetch sessions from extension host and render immediately
@@ -365,8 +367,10 @@
 
 	function showChatView() {
 		isHistoryView = false;
-		document.getElementById('chat-view').classList.remove('hidden');
+		isSettingsView = false;
 		document.getElementById('history-view').classList.add('hidden');
+		document.getElementById('settings-view').classList.add('hidden');
+		document.getElementById('chat-view').classList.remove('hidden');
 	}
 
 	const sendStopBtn = document.getElementById('send-stop-btn');
@@ -1427,7 +1431,8 @@
 			case 'clear':
 				// Session reset (new chat or resume) should return to the active
 				// chat view, not leave the panel stuck on the history list.
-				showChatView();
+				if (isHistoryView) showChatView();
+				if (isSettingsView) hideSettingsView();
 				if (renderTimeout) { clearTimeout(renderTimeout); renderTimeout = null; }
 				if (message.isLoading) {
 					messagesContainer.innerHTML = `<div id="session-loader" class="flex flex-col items-center justify-center h-full opacity-50 mt-10">${ICONS.pending}<div class="mt-2 text-xs">Loading session...</div></div>`;
@@ -1466,7 +1471,17 @@
 			case 'permissionsCancelled':
 				handlePermissionsCancelled(message.toolCallIds);
 				break;
-
+			case 'toggleSettings':
+				toggleSettingsView();
+				break;
+			case 'settingsData':
+				renderSettingsData(message.settings);
+				break;
+			case 'settingsUpdated':
+				if (!message.success) {
+					console.error('Failed to update setting:', message.error);
+				}
+				break;
 			case 'syncState':
 				handleSyncState(message);
 				break;
@@ -1717,6 +1732,208 @@
 		}
 		keepVisualLoaderAtBottom();
 	}
+
+	// ─── Settings Panel Logic ───────────────────────────────────────
+
+	let isSettingsView = false;
+
+	function showSettingsView() {
+		isSettingsView = true;
+		isHistoryView = false;
+		document.getElementById('chat-view').classList.add('hidden');
+		document.getElementById('history-view').classList.add('hidden');
+		document.getElementById('settings-view').classList.remove('hidden');
+		// Request fresh settings data from extension host
+		vscode.postMessage({ type: 'requestSettings' });
+	}
+
+	function hideSettingsView() {
+		isSettingsView = false;
+		document.getElementById('settings-view').classList.add('hidden');
+		showChatView();
+	}
+
+	function toggleSettingsView() {
+		if (isSettingsView) {
+			hideSettingsView();
+		} else {
+			showSettingsView();
+		}
+	}
+
+	// Settings tab switching
+	document.querySelectorAll('.settings-tab').forEach(tab => {
+		tab.addEventListener('click', () => {
+			document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+			tab.classList.add('active');
+			const tabId = tab.dataset.tab;
+			document.querySelectorAll('.settings-tab-content').forEach(c => c.classList.add('hidden'));
+			const content = document.getElementById('settings-tab-' + tabId);
+			if (content) content.classList.remove('hidden');
+		});
+	});
+
+	// Settings action buttons (edit config, restart, etc.)
+	document.querySelectorAll('.settings-action-btn').forEach(btn => {
+		btn.addEventListener('click', () => {
+			const action = btn.dataset.action;
+			if (action === 'edit-providers' || action === 'edit-mcp' || action === 'edit-tools' || action === 'open-agents-config') {
+				vscode.postMessage({ type: 'openConfigFile', file: 'agents.config.json' });
+			} else if (action === 'open-preferences') {
+				vscode.postMessage({ type: 'openConfigFile', file: 'nanocoder-preferences.json' });
+			} else if (action === 'restart-acp') {
+				vscode.postMessage({ type: 'restartAcp' });
+			}
+		});
+	});
+
+	// Behavior tab — interactive controls change handlers
+	function initSettingsControls() {
+		// Default mode
+		const modeSelect = document.getElementById('setting-defaultMode');
+		if (modeSelect) {
+			modeSelect.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'defaultMode', value: modeSelect.value || null });
+			});
+		}
+
+		// Auto-compact enabled
+		const acEnabled = document.getElementById('setting-autoCompact-enabled');
+		if (acEnabled) {
+			acEnabled.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'autoCompact.enabled', value: acEnabled.checked });
+			});
+		}
+
+		// Auto-compact threshold
+		const acThreshold = document.getElementById('setting-autoCompact-threshold');
+		if (acThreshold) {
+			acThreshold.addEventListener('change', () => {
+				const val = parseInt(acThreshold.value, 10);
+				if (!isNaN(val) && val >= 50 && val <= 95) {
+					vscode.postMessage({ type: 'updateSetting', key: 'autoCompact.threshold', value: val });
+				}
+			});
+		}
+
+		// Auto-compact mode
+		const acMode = document.getElementById('setting-autoCompact-mode');
+		if (acMode) {
+			acMode.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'autoCompact.mode', value: acMode.value });
+			});
+		}
+
+		// Reasoning traces
+		const rtToggle = document.getElementById('setting-reasoningTraces');
+		if (rtToggle) {
+			rtToggle.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'reasoningTraces', value: rtToggle.checked });
+			});
+		}
+
+		// Sessions auto-save
+		const saToggle = document.getElementById('setting-sessions-autoSave');
+		if (saToggle) {
+			saToggle.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'sessions.autoSave', value: saToggle.checked });
+			});
+		}
+	}
+	initSettingsControls();
+
+	/**
+	 * Populate the settings UI with data received from the extension host.
+	 */
+	function renderSettingsData(settings) {
+		// ── Providers list ──
+		const providersList = document.getElementById('settings-providers-list');
+		if (providersList) {
+			if (settings.providers.length === 0) {
+				providersList.innerHTML = '<div class="settings-list-empty">No providers configured</div>';
+			} else {
+				providersList.innerHTML = settings.providers.map(p => {
+					const detail = p.baseUrl || 'default endpoint';
+					const models = p.models.length > 0
+						? p.models[0] + (p.models.length > 1 ? ` +${p.models.length - 1}` : '')
+						: 'no models';
+					const keyBadge = p.apiKeySet
+						? '<span class="settings-badge settings-badge-ok">Key ✓</span>'
+						: '<span class="settings-badge settings-badge-off">No key</span>';
+					return `<div class="settings-list-item">
+						<span class="settings-list-item-name">${escapeHtml(p.name)}</span>
+						<span class="settings-list-item-detail">${escapeHtml(detail)} · ${escapeHtml(models)}</span>
+						${keyBadge}
+					</div>`;
+				}).join('');
+			}
+		}
+
+		// ── MCP Servers list ──
+		const mcpList = document.getElementById('settings-mcp-list');
+		if (mcpList) {
+			if (settings.mcpServers.length === 0) {
+				mcpList.innerHTML = '<div class="settings-list-empty">No MCP servers configured</div>';
+			} else {
+				mcpList.innerHTML = settings.mcpServers.map(s => {
+					const detail = s.command || s.url || '(no endpoint)';
+					return `<div class="settings-list-item">
+						<span class="settings-list-item-name">${escapeHtml(s.name)}</span>
+						<span class="settings-list-item-detail">${escapeHtml(s.transport)} · ${escapeHtml(detail)}</span>
+					</div>`;
+				}).join('');
+			}
+		}
+
+		// ── Tool auto-approval list ──
+		const toolsList = document.getElementById('settings-tools-list');
+		if (toolsList) {
+			if (settings.alwaysAllow.length === 0) {
+				toolsList.innerHTML = '<div class="settings-list-empty">No tools auto-approved</div>';
+			} else {
+				toolsList.innerHTML = settings.alwaysAllow.map(t =>
+					`<div class="settings-list-item">
+						<span class="settings-list-item-name">${escapeHtml(t)}</span>
+					</div>`
+				).join('');
+			}
+		}
+
+		// ── Web search status ──
+		const wsStatus = document.getElementById('settings-websearch-status');
+		if (wsStatus) {
+			wsStatus.innerHTML = settings.webSearch.configured
+				? '<div class="settings-list-item"><span class="settings-badge settings-badge-ok">API key configured ✓</span></div>'
+				: '<div class="settings-list-item"><span class="settings-badge settings-badge-off">Not configured</span></div>';
+		}
+
+		// ── Behavior controls ──
+		const modeSelect = document.getElementById('setting-defaultMode');
+		if (modeSelect) modeSelect.value = settings.defaultMode || 'normal';
+
+		const acEnabled = document.getElementById('setting-autoCompact-enabled');
+		if (acEnabled) acEnabled.checked = settings.autoCompact.enabled;
+
+		const acThreshold = document.getElementById('setting-autoCompact-threshold');
+		if (acThreshold) acThreshold.value = settings.autoCompact.threshold;
+
+		const acMode = document.getElementById('setting-autoCompact-mode');
+		if (acMode) acMode.value = settings.autoCompact.mode;
+
+		const rtToggle = document.getElementById('setting-reasoningTraces');
+		if (rtToggle) rtToggle.checked = settings.reasoningTraces;
+
+		const saToggle = document.getElementById('setting-sessions-autoSave');
+		if (saToggle) saToggle.checked = settings.sessions.autoSave;
+	}
+
+	function escapeHtml(str) {
+		const div = document.createElement('div');
+		div.textContent = str;
+		return div.innerHTML;
+	}
+
+	// ─── End Settings Panel Logic ───────────────────────────────────
 
 	class ThoughtAggregator {
 		constructor() {

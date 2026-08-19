@@ -83,6 +83,12 @@
 				"icon": "$(add)"
 			},
 			{
+				"command": "nanocoder.toggleSettings",
+				"title": "Settings",
+				"category": "Nanocoder",
+				"icon": "$(gear)"
+			},
+			{
 				"command": "nanocoder.cancel",
 				"title": "Cancel Current Response",
 				"category": "Nanocoder"
@@ -112,6 +118,11 @@
 					"command": "nanocoder.toggleHistory",
 					"when": "view == nanocoder.chatView",
 					"group": "navigation@2"
+				},
+				{
+					"command": "nanocoder.toggleSettings",
+					"when": "view == nanocoder.chatView",
+					"group": "navigation@3"
 				}
 			]
 		},
