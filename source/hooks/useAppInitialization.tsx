@@ -33,7 +33,6 @@ import {generateKey} from '@/session/key-generator';
 import {SubagentExecutor} from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import {setAgentToolExecutor, setAvailableAgentNames} from '@/tools/agent-tool';
-import {clearAllTasks} from '@/tools/tasks';
 import {ToolManager} from '@/tools/tool-manager';
 import type {CustomCommand} from '@/types/commands';
 import {
@@ -562,10 +561,6 @@ export function useAppInitialization({
 			setClient(null);
 			setCurrentModel('');
 			setCurrentProviderConfig(null);
-
-			// Clear task list — fire-and-forget, just deletes a JSON file;
-			// swallow failures so an unwritable cwd can't crash the process
-			clearAllTasks().catch(() => {});
 
 			const newToolManager = new ToolManager();
 			const newCustomCommandLoader = new CustomCommandLoader();

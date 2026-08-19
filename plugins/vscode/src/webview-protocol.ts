@@ -106,6 +106,24 @@ export interface ExtensionMessagePathInfoResolved {
 	kind: 'file' | 'folder';
 }
 
+export interface ExtensionMessagePlanReviewRequested {
+	type: 'planReviewRequested';
+	artifactPath: string;
+}
+
+export interface ExtensionMessagePlanReviewError {
+	type: 'planReviewError';
+	message: string;
+}
+
+export interface ExtensionMessageArtifactsUpdated {
+	type: 'artifactsUpdated';
+	artifacts: Array<{
+		kind: 'implementation_plan' | 'task' | 'walkthrough';
+		path: string;
+	}>;
+}
+
 /** One `@` autocomplete suggestion. */
 export interface MentionItem {
 	/** Absolute path — what the composer stores in `attachedPaths`. */
@@ -148,6 +166,9 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageUpdateSessions
 	| ExtensionMessageSessionLoaded
 	| ExtensionMessagePathInfoResolved
+	| ExtensionMessagePlanReviewRequested
+	| ExtensionMessagePlanReviewError
+	| ExtensionMessageArtifactsUpdated
 	| ExtensionMessageCopyLastCodeBlock
 	| ExtensionMessageCopyResult
 	| ExtensionMessageMentionCompletions;
@@ -248,6 +269,14 @@ export interface WebviewMessageShowError {
 	message: string;
 }
 
+export interface WebviewMessageApprovePlan {
+	type: 'approvePlan';
+}
+
+export interface WebviewMessageRevisePlan {
+	type: 'revisePlan';
+}
+
 export interface WebviewMessageCopyToClipboard {
 	type: 'copyToClipboard';
 	text: string;
@@ -286,5 +315,7 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageRequestOpenDialog
 	| WebviewMessageOpenPath
 	| WebviewMessageShowError
+	| WebviewMessageApprovePlan
+	| WebviewMessageRevisePlan
 	| WebviewMessageCopyToClipboard
 	| WebviewMessageRequestMentionCompletions;

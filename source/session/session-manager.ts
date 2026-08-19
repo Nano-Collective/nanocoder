@@ -1,14 +1,15 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {
+	type ArtifactManager,
+	artifactManager,
+} from '@/artifacts/artifact-manager';
 import {getAppConfig} from '@/config/index';
 import {getAppDataPath} from '@/config/paths';
 import {MAX_SESSION_NAME_LENGTH} from '@/constants';
+import {isValidSessionId} from '@/session/session-id';
 import type {Message} from '@/types/core';
-
-/** UUID v4 pattern for session ID validation (prevents path traversal) */
-const SESSION_ID_PATTERN =
-	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export interface Session {
 	id: string;
@@ -35,10 +36,6 @@ export interface SessionMetadata {
 	model: string;
 	workingDirectory: string;
 	titleManuallySet?: boolean;
-}
-
-function isValidSessionId(id: string): boolean {
-	return SESSION_ID_PATTERN.test(id);
 }
 
 function isRecord(obj: unknown): obj is Record<string, unknown> {
@@ -98,7 +95,10 @@ export class SessionManager {
 	/** Optional explicit directory override (used by tests). */
 	private readonly overrideDir?: string;
 
-	constructor(sessionsDir?: string) {
+	constructor(
+		sessionsDir?: string,
+		private readonly artifacts: ArtifactManager = artifactManager,
+	) {
 		this.overrideDir = sessionsDir;
 	}
 
@@ -164,9 +164,11 @@ export class SessionManager {
 	}
 
 	async createSession(
-		sessionData: Omit<Session, 'id' | 'createdAt' | 'lastAccessedAt'>,
+		sessionData: Omit<Session, 'id' | 'createdAt' | 'lastAccessedAt'> & {
+			id?: string;
+		},
 	): Promise<Session> {
-		const sessionId = crypto.randomUUID();
+		const sessionId = sessionData.id ?? crypto.randomUUID();
 		const timestamp = new Date().toISOString();
 
 		const session: Session = {
@@ -398,6 +400,8 @@ export class SessionManager {
 				0o600,
 			);
 		});
+
+		await this.artifacts.deleteSessionArtifacts(sessionId);
 	}
 
 	getSessionDirectory(): string {
@@ -460,6 +464,7 @@ export class SessionManager {
 						throw error;
 					}
 				}
+				await this.artifacts.deleteSessionArtifacts(session.id);
 			}
 		});
 	}
@@ -501,6 +506,7 @@ export class SessionManager {
 						throw error;
 					}
 				}
+				await this.artifacts.deleteSessionArtifacts(session.id);
 			}
 		});
 	}

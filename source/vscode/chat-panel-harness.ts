@@ -7,6 +7,13 @@ import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {createContext, runInContext} from 'node:vm';
 
+const MENTION_UTILS_SOURCE = readFileSync(
+	fileURLToPath(
+		new URL('../../plugins/vscode/media/mention-utils.js', import.meta.url),
+	),
+	'utf8',
+);
+
 const PANEL_SOURCE = readFileSync(
 	fileURLToPath(
 		new URL('../../plugins/vscode/media/chat-panel.js', import.meta.url),
@@ -43,9 +50,8 @@ const SHELL_IDS = [
 	'send-stop-btn',
 ];
 
-// biome-ignore lint/suspicious/noExplicitAny: the panel assigns arbitrary
-// properties (onclick, oninput, ...) to the nodes it builds, so the stub has to
-// stay open-ended.
+// The panel assigns arbitrary properties (onclick, oninput, ...) to the nodes it builds, so the stub has to stay open-ended.
+// biome-ignore lint/suspicious/noExplicitAny: open-ended DOM stub
 export type StubElement = any;
 
 /**
@@ -237,6 +243,7 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	}
 
 	createContext(sandbox);
+	runInContext(MENTION_UTILS_SOURCE, sandbox);
 	runInContext(PANEL_SOURCE, sandbox);
 
 	const container = findById(root, 'messages-container') as StubElement;

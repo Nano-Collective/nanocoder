@@ -2,6 +2,7 @@ import {mkdirSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import {artifactManager} from '@/artifacts/artifact-manager';
 import {AcpAgent} from '@/acp/acp-agent';
 import type {AcpInitContext} from '@/acp/acp-types';
 import {clearAppConfig} from '@/config';
@@ -42,6 +43,7 @@ const createMockInitContext = (): AcpInitContext => ({
 		}),
 		getAvailableModels: async () => ['test-model', 'other-model'],
 		getCurrentModel: () => mockCurrentModel,
+		getProviderConfig: () => ({name: 'test-provider'}),
 		setModel: (model: string) => {
 			mockCurrentModel = model;
 		},
@@ -242,6 +244,111 @@ test('AcpAgent.loadSession - replays in-memory history for a known session', asy
 		u => u.update?.sessionUpdate === 'user_message_chunk',
 	);
 	t.true(replayed.some(u => u.update.content.text === 'remember this'));
+});
+
+test('AcpAgent.loadSession - hides internal walkthrough fallback messages', async t => {
+	const conn = createMockConn();
+	const updates: any[] = [];
+	conn.sessionUpdate = async (update: any) => {
+		updates.push(update);
+	};
+	const initContext = createMockInitContext();
+	initContext.toolManager = {
+		getAvailableToolNames: () => ['write_walkthrough'],
+		getFilteredTools: () => ({}),
+		hasTool: () => false,
+		getToolEntry: () => undefined,
+	} as any;
+	const agent = new AcpAgent(initContext, conn);
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [
+			{
+				type: 'text',
+				text: '<approved_plan>Implement artifacts.</approved_plan>',
+			},
+		],
+	});
+
+	updates.length = 0;
+	await agent.loadSession({
+		sessionId: session.sessionId,
+		cwd: '/tmp',
+		mcpServers: [],
+	});
+	const replayedUserText = updates
+		.filter(update => update.update?.sessionUpdate === 'user_message_chunk')
+		.map(update => update.update.content.text);
+
+	t.true(replayedUserText.some(text => text.includes('<approved_plan>')));
+	t.false(
+		replayedUserText.some(text => text.includes('nanocoder-internal-walkthrough')),
+	);
+});
+
+test('AcpAgent.loadSession - returns the session artifact inventory', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	try {
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'Persist this session.'}],
+		});
+		await artifactManager.writeArtifact(
+			session.sessionId,
+			'implementation_plan',
+			'# Plan\n',
+		);
+		await artifactManager.writeArtifact(
+			session.sessionId,
+			'walkthrough',
+			'# Walkthrough\n',
+		);
+
+		const result = await agent.loadSession({
+			sessionId: session.sessionId,
+			cwd: '/tmp',
+			mcpServers: [],
+		});
+
+		const artifacts = result._meta?.['nanocoder/artifacts'];
+		t.true(Array.isArray(artifacts));
+		t.deepEqual(
+			(artifacts as Array<{kind: string}>).map(artifact => artifact.kind),
+			['implementation_plan', 'walkthrough'],
+		);
+	} finally {
+		await agent.deleteSession({sessionId: session.sessionId});
+	}
+});
+
+test('AcpAgent.resumeSession - returns the session artifact inventory', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	try {
+		await agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{type: 'text', text: 'Persist this session.'}],
+		});
+		await artifactManager.writeArtifact(
+			session.sessionId,
+			'task',
+			'# Tasks\n',
+		);
+		const result = await agent.resumeSession({
+			sessionId: session.sessionId,
+			cwd: '/tmp',
+		});
+		const artifacts = result._meta?.['nanocoder/artifacts'] as Array<{
+			kind: string;
+		}>;
+		t.deepEqual(artifacts.map(artifact => artifact.kind), ['task']);
+	} finally {
+		await agent.deleteSession({sessionId: session.sessionId});
+	}
 });
 
 // ============================================================================
