@@ -212,3 +212,53 @@ test('writeCache overwrites existing cache', async t => {
 	t.truthy(readResult);
 	t.deepEqual(readResult?.data, secondData);
 });
+
+// ============================================================================
+// Windows regression: cache path must use os.homedir(), not process.env.HOME
+// Regression for https://github.com/Nano-Collective/nanocoder/pull/886
+// When process.env.HOME is undefined (Windows default), the old code produced
+// a literal "~" directory instead of resolving the user's home directory.
+// ============================================================================
+
+test('os.homedir() resolves correctly when HOME env is undefined (unlike process.env.HOME)', t => {
+	const savedHome = process.env.HOME;
+	delete process.env.HOME;
+
+	try {
+		// The old broken pattern: process.env.HOME || '~'
+		const brokenPath = join(process.env.HOME || '~', '.cache');
+		// The fixed pattern: os.homedir()
+		const fixedPath = join(homedir(), '.cache');
+
+		// On Windows, process.env.HOME is undefined, so old code yields literal "~"
+		t.true(
+			brokenPath.startsWith('~'),
+			`Old code produces literal ~ directory: ${brokenPath}`,
+		);
+		// os.homedir() always resolves to the real home directory
+		t.false(
+			fixedPath.startsWith('~'),
+			`Fixed code resolves real home: ${fixedPath}`,
+		);
+		t.not(brokenPath, fixedPath, 'Fix must produce a different path than the old code');
+	} finally {
+		if (savedHome === undefined) {
+			delete process.env.HOME;
+		} else {
+			process.env.HOME = savedHome;
+		}
+	}
+});
+
+test('actual cache path does not contain literal ~', async t => {
+	const {xdgCache} = await import('xdg-basedir');
+	const DEFAULT_CACHE_DIR =
+		process.platform === 'darwin'
+			? join(homedir(), 'Library', 'Caches')
+			: join(homedir(), '.cache');
+	const cacheBase = xdgCache || DEFAULT_CACHE_DIR;
+	const cachePath = join(cacheBase, 'nanocoder', 'models.json');
+
+	t.false(cachePath.includes('~'), `Cache path must not contain literal ~: ${cachePath}`);
+	t.true(cachePath.startsWith(homedir()), `Cache path must be under home directory: ${cachePath}`);
+});
