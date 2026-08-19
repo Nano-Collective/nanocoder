@@ -448,6 +448,38 @@ test('AcpAgent.prompt - propagates API errors cleanly', async t => {
 	t.false(session.turnActive);
 });
 
+test('AcpAgent.prompt - resolves cleanly on user cancellation instead of throwing', async t => {
+	const {agent, conn} = createAgent();
+
+	const updates: any[] = [];
+	conn.sessionUpdate = async (u: any) => {
+		updates.push(u);
+	};
+
+	// Mirrors what chat-handler.ts throws when the abort signal fires mid-stream
+	agent['initContext'].client.chat = async () => {
+		throw new Error('Operation was cancelled');
+	};
+
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	const result = await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'stop please'}],
+	});
+
+	t.is(result.stopReason, 'cancelled');
+	// The early return still has to run the finally block, same as the throwing path.
+	t.false(agent['sessions'].get(session.sessionId)!.turnActive);
+	t.true(
+		updates.some(
+			u =>
+				u.update?.sessionUpdate === 'agent_message_chunk' &&
+				u.update?.content?.text?.includes('Cancelled by user'),
+		),
+	);
+});
+
 test('AcpAgent.prompt - returns response for valid session', async t => {
 	const {agent} = createAgent();
 	const session = await agent.newSession({cwd: '/tmp'});

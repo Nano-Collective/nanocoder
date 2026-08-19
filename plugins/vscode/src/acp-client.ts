@@ -22,6 +22,8 @@ export class NanocoderAcpClient {
 	private _sessionId?: string;
 	public onSessionUpdate?: (update: unknown) => void;
 	public onPermissionRequested?: (toolCallId: string, toolCall: unknown, options?: any[]) => void;
+	/** Fires with the tool call ids whose approval cards should be dismissed. */
+	public onPermissionsCancelled?: (toolCallIds: string[]) => void;
 	public onStateSync?: (state: StateSyncPayload) => void;
 	public onSessionArtifacts?: (meta: unknown) => void;
 	public onConnectionReady?: () => void;
@@ -96,6 +98,25 @@ export class NanocoderAcpClient {
 				this.onPermissionRequested(toolCallId, toolCall, params.options);
 			}
 		});
+	}
+
+	/**
+	 * Answer every outstanding permission request with `cancelled` and drop it.
+	 * A leftover resolver keeps hasPendingPermissions() true, which blocks every
+	 * later message until the window reloads.
+	 */
+	private _clearPendingPermissions(): void {
+		if (this.pendingPermissions.size === 0) return;
+
+		const toolCallIds = [...this.pendingPermissions.keys()];
+		for (const resolve of this.pendingPermissions.values()) {
+			resolve({outcome: {outcome: 'cancelled'}});
+		}
+		this.pendingPermissions.clear();
+
+		if (this.onPermissionsCancelled) {
+			this.onPermissionsCancelled(toolCallIds);
+		}
 	}
 
 	resolvePermission(toolCallId: string, allowOrOptionId: boolean | string) {
@@ -276,10 +297,11 @@ export class NanocoderAcpClient {
 
 	/** Start a new conversation by clearing the cached session ID. */
 	newChat(): void {
+		// Abandoning the conversation abandons its approval prompts too.
+		this._clearPendingPermissions();
 		this._sessionId = undefined;
 		this.onSessionArtifacts?.(undefined);
 	}
-
 	/**
 	 * Send a prompt and return the agent's PromptResponse (carries the
 	 * experimental per-turn `usage` field plus `_meta` extensions such as
@@ -318,10 +340,7 @@ export class NanocoderAcpClient {
 	async cancel(): Promise<void> {
 		if (!this.connection || !this._sessionId) return;
 		this.activePrompt?.cancel();
-		for (const resolve of this.pendingPermissions.values()) {
-			resolve({outcome: {outcome: 'cancelled'}});
-		}
-		this.pendingPermissions.clear();
+		this._clearPendingPermissions();
 		try {
 			await this.connection.cancel({
 				sessionId: this._sessionId

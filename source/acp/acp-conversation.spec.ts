@@ -924,6 +924,76 @@ test('runAcpConversation - does not reuse an approved plan from an earlier turn'
 	t.is(callCount, 1);
 });
 
+test('runAcpConversation - announces every queued tool call before running the batch', async t => {
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+
+	const announcedDuringFirstRun: string[] = [];
+	setToolRegistryGetter(() => ({
+		read_file: async () => {
+			if (announcedDuringFirstRun.length === 0) {
+				announcedDuringFirstRun.push(
+					...updates
+						.filter((u: any) => u.update.sessionUpdate === 'tool_call')
+						.map((u: any) => u.update.toolCallId),
+				);
+			}
+			return 'file contents';
+		},
+	}));
+
+	let callCount = 0;
+	const client = {
+		chat: async () => {
+			callCount++;
+			if (callCount === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [
+									createMockToolCall('read_file', {path: '/a.txt'}, 'call-1'),
+									createMockToolCall('read_file', {path: '/b.txt'}, 'call-2'),
+								],
+							},
+						},
+					],
+				};
+			}
+			return {choices: [{message: {content: 'Done'}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.deepEqual(
+		[...new Set(announcedDuringFirstRun)],
+		['call-1', 'call-2'],
+		'the whole batch must be visible while the first tool is still running',
+	);
+
+	const queued = updates.filter(
+		(u: any) =>
+			u.update.sessionUpdate === 'tool_call' && u.update.status === 'pending',
+	);
+	t.true(
+		queued.every((u: any) => u.update.title),
+		'queued announcements carry a title so the checklist is readable',
+	);
+});
+
 // ============================================================================
 // Cancellation mid-turn with queued tools
 // ============================================================================

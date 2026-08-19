@@ -45,11 +45,11 @@
 				<div id="image-preview-container" class="flex flex-wrap gap-2 px-3 pt-3 empty:hidden"></div>
 				<!-- NEW: Attached context chips row -->
 				<div id="context-chips" class="hidden flex flex-wrap gap-1.5 px-3 pt-2 pb-1"></div>
-				<textarea id="chat-input" rows="1" placeholder="Ask Nanocoder anything..." class="w-full min-h-[44px] max-h-[250px] p-3 px-4 pb-2 bg-transparent text-vscode-input-fg font-vscode text-[0.95em] resize-none outline-none border-none"></textarea>
+				<textarea id="chat-input" rows="1" placeholder="Ask Nanocoder anything..." class="w-full min-h-[44px] max-h-[250px] p-3 px-4 pb-2 bg-transparent text-vscode-input-fg font-vscode text-[0.95em] resize-none outline-none border-none" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="mention-dropdown"></textarea>
 				
 				<div class="flex items-center justify-between px-3 pb-2 pt-1 relative">
 					<div class="flex gap-1 items-center flex-1 min-w-0">
-						<button id="add-image-btn" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[15%] shrink min-w-0" title="Add Image">
+						<button id="add-menu-btn" class="flex items-center gap-1 bg-transparent text-vscode-fg border-none text-[0.85em] outline-none cursor-pointer opacity-70 hover:opacity-100 font-vscode rounded p-1 hover:bg-vscode-toolbarHover max-w-[15%] shrink min-w-0 disabled:opacity-50 disabled:pointer-events-none" title="Add attachment">
 							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 						</button>
 						<input type="file" id="image-upload" accept="image/png,image/jpeg,image/webp,image/gif" multiple class="hidden">
@@ -72,13 +72,6 @@
 							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="6 9 12 15 18 9"></polyline></svg>
 						</button>
 					</div>
-					
-					<!-- Attach file/folder button -->
-					<button id="attach-btn" class="bg-transparent text-vscode-fg border-none rounded-full w-8 h-8 flex items-center justify-center cursor-pointer shrink-0 transition-all opacity-60 hover:opacity-100 hover:bg-vscode-toolbarHover ml-1" title="Attach file or folder">
-						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15">
-							<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-						</svg>
-					</button>
 
 					<button id="send-stop-btn" class="group bg-vscode-button-bg [&.is-processing]:bg-vscode-button-secondary [&.is-processing]:hover:bg-vscode-button-secondaryHover text-vscode-button-fg border-none rounded-full w-8 h-8 flex items-center justify-center cursor-pointer shrink-0 transition-all hover:bg-vscode-button-hover hover:scale-105 ml-1" title="Send (Enter)">
 						<!-- FiSend icon (react-icons/fi) — shown when idle -->
@@ -93,13 +86,31 @@
 					</button>
 				</div>
 				
-				<!-- Dropdown Menus (Full Width) -->
+				<div id="add-menu-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1">
+					<button type="button" class="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-vscode-list-hover transition-colors text-[0.9em] truncate w-full text-left bg-transparent border-none" id="menu-upload-image">
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+						Upload Image
+					</button>
+					<button type="button" class="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-vscode-list-hover transition-colors text-[0.9em] truncate w-full text-left bg-transparent border-none" id="menu-attach-file">
+						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="shrink-0">
+							<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+						</svg>
+						Attach File / Folder
+					</button>
+				</div>
 				<div id="provider-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
 				<div id="model-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
 				<div id="mode-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1"></div>
+
+				<!-- @ mention autocomplete. Anchored to the composer rather than the
+				     caret: a textarea exposes no caret coordinates without a mirror
+				     element, and in a narrow sidebar full-width is more readable. -->
+				<div id="mention-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1" role="listbox" aria-label="Attach file or folder"></div>
 			</div>
 		</div>
 	<script nonce="{{nonce}}" src="{{markedUri}}"></script>
+	<!-- Pure @-mention helpers; must load before chat-panel.js reads them. -->
+	<script nonce="{{nonce}}" src="{{mentionUtilsUri}}"></script>
 	<script nonce="{{nonce}}" src="{{scriptUri}}"></script>
 </body>
 </html>
