@@ -36,7 +36,10 @@ import {infoMsg} from '@/utils/message-factory';
 import {getLastBuiltPrompt} from '@/utils/prompt-builder';
 import {signalQuestion} from '@/utils/question-queue';
 import {calculateTokens} from '@/utils/token-calculator';
-import {createCancellationResults} from '@/utils/tool-cancellation';
+import {
+	createApprovalUnavailableResults,
+	createCancellationResults,
+} from '@/utils/tool-cancellation';
 import {signalToolConfirm} from '@/utils/tool-confirm-queue';
 import {displayCompactCountsSummary} from '@/utils/tool-result-display';
 import {closeAllDiffsInVSCode} from '@/vscode/index';
@@ -877,11 +880,11 @@ export const processAssistantResponse = async (
 			);
 			const builder = new MessageBuilder(updatedMessages);
 			// The assistant message already announces confirmTools' tool_calls;
-			// pair each with a cancellation result so the saved history keeps the
+			// pair each with a result so the saved history keeps the
 			// provider-required 1:1 call/result mapping.
 			builder.addToolResults([
 				...turnResults,
-				...createCancellationResults(confirmTools),
+				...createApprovalUnavailableResults(confirmTools),
 			]);
 			builder.addMessage({role: 'assistant', content: errorMsg});
 			setMessages(builder.build());

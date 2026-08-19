@@ -2413,8 +2413,11 @@ test.serial('non-interactive approval exit pairs unconfirmed tools with cancella
 	const result = latest.find(
 		m => m.role === 'tool' && m.tool_call_id === 'call_guarded',
 	);
-	t.truthy(result, 'the unconfirmed tool must get a cancellation result');
-	t.regex(String(result?.content), /cancelled/i);
+	t.truthy(result, 'the unconfirmed tool must get a paired result');
+	// Not the user-cancellation wording: nobody declined this tool, and a
+	// resumed interactive session must not read the history as a refusal.
+	t.regex(String(result?.content), /approval unavailable in non-interactive/i);
+	t.notRegex(String(result?.content), /cancelled by the user/i);
 });
 
 test.serial('repeated unknown-tool calls hard-stop without prompting in non-interactive mode', async t => {

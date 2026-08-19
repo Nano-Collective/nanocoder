@@ -10,6 +10,7 @@ import {
 	resetSubagentProgressById,
 } from '@/services/subagent-events';
 import {generateKey} from '@/session/key-generator';
+import {buildSubagentFailureMessage} from '@/subagents/failure-message';
 import {MAX_CONCURRENT_AGENTS} from '@/subagents/subagent-executor';
 import type {AgentToolArgs} from '@/tools/agent-tool';
 import {startAgentExecution} from '@/tools/agent-tool';
@@ -249,20 +250,14 @@ const groupForParallelExecution = (
 /**
  * Renders a failed subagent run for the parent model.
  *
- * A failed run can still carry work — a subagent stopped by the repeated-call
- * cap returns everything it produced before it got stuck. Hand that to the
- * parent alongside the reason rather than throwing it away. The `Error: `
- * prefix is load-bearing: callers detect a failed agent result by it.
+ * The `Error: ` prefix is load-bearing: callers detect a failed agent result
+ * by it. The rest is shared with the native agent tool's failure path.
  */
 const buildFailedAgentContent = (agentResult: {
 	content: string;
 	error?: string;
-}): string => {
-	const reason = `Error: ${agentResult.error || 'Subagent execution failed'}`;
-	return agentResult.content.trim()
-		? `${reason}\n\nPartial output produced before stopping:\n${agentResult.content}`
-		: reason;
-};
+}): string =>
+	`Error: ${buildSubagentFailureMessage(agentResult.error, agentResult.content)}`;
 
 /**
  * Execute a batch of agent tool calls in parallel.

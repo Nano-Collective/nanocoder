@@ -7,6 +7,7 @@
  */
 
 import {randomUUID} from 'node:crypto';
+import {buildSubagentFailureMessage} from '@/subagents/failure-message.js';
 import type {SubagentExecutor} from '@/subagents/subagent-executor.js';
 import {getSubagentLoader} from '@/subagents/subagent-loader.js';
 import {jsonSchema, tool} from '@/types/core';
@@ -142,16 +143,7 @@ async function executeAgent(
 	);
 
 	if (!result.success) {
-		const reason = result.error || 'Subagent execution failed';
-		// A failed run can still carry work (e.g. a subagent stopped by the
-		// repeated-call cap after several useful turns). Hand it to the caller
-		// alongside the reason rather than throwing it away.
-		if (result.output.trim()) {
-			throw new Error(
-				`${reason}\n\nPartial output produced before stopping:\n${result.output}`,
-			);
-		}
-		throw new Error(reason);
+		throw new Error(buildSubagentFailureMessage(result.error, result.output));
 	}
 
 	return result.output;
