@@ -2,20 +2,26 @@
  * Boots `plugins/vscode/media/chat-panel.js` inside a VM against a stub DOM so
  * the panel's rendering can be driven and inspected from tests. Shared by the
  * chat-panel specs; extracted verbatim from chat-panel-thoughts.spec.ts.
+ *
+ * `mention-utils.js` must run first: the real webview loads it before
+ * `chat-panel.js`, which immediately reads `globalThis.NanocoderMentionUtils`.
  */
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {createContext, runInContext} from 'node:vm';
 
-const PANEL_SOURCE = readFileSync(
+const mediaUrl = (filename: string) =>
 	fileURLToPath(
-		new URL('../../plugins/vscode/media/chat-panel.js', import.meta.url),
-	),
-	'utf8',
-);
+		new URL(`../../plugins/vscode/media/${filename}`, import.meta.url),
+	);
+
+const MENTION_UTILS_SOURCE = readFileSync(mediaUrl('mention-utils.js'), 'utf8');
+const PANEL_SOURCE = readFileSync(mediaUrl('chat-panel.js'), 'utf8');
 
 const SHELL_IDS = [
 	'add-image-btn',
+	'add-menu-btn',
+	'add-menu-dropdown',
 	'attach-btn',
 	'chat-input',
 	'chat-view',
@@ -29,6 +35,9 @@ const SHELL_IDS = [
 	'image-modal',
 	'image-preview-container',
 	'image-upload',
+	'menu-attach-file',
+	'menu-upload-image',
+	'mention-dropdown',
 	'messages-container',
 	'modal-image',
 	'mode-dropdown',
@@ -236,7 +245,9 @@ export function createPanel(options: {marked?: boolean} = {}) {
 		sandbox.marked = {parse: (value: string) => `<md>${value}</md>`};
 	}
 
+	sandbox.globalThis = sandbox;
 	createContext(sandbox);
+	runInContext(MENTION_UTILS_SOURCE, sandbox);
 	runInContext(PANEL_SOURCE, sandbox);
 
 	const container = findById(root, 'messages-container') as StubElement;
