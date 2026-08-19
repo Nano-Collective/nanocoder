@@ -2420,6 +2420,84 @@ test.serial('non-interactive approval exit pairs unconfirmed tools with cancella
 	t.notRegex(String(result?.content), /cancelled by the user/i);
 });
 
+test.serial('escape mid-execution pairs the tools the confirm loop never reached', async t => {
+	const messageSnapshots: Message[][] = [];
+	const controller = new AbortController();
+
+	// Approve the first tool, then abort before it finishes so the loop breaks
+	// with the second tool still pending.
+	setGlobalToolConfirmHandler(async () => {
+		controller.abort();
+		return true;
+	});
+
+	let chatCallCount = 0;
+	const params = createDefaultParams({
+		client: {
+			chat: async (): Promise<LLMChatResponse> => {
+				chatCallCount += 1;
+				if (chatCallCount > 1) {
+					return {
+						choices: [{message: {role: 'assistant', content: 'Done.'}}],
+						toolsDisabled: false,
+					};
+				}
+				return {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: '',
+								tool_calls: [
+									{
+										id: 'call_first',
+										function: {name: 'guarded_tool', arguments: '{}'},
+									},
+									{
+										id: 'call_second',
+										function: {name: 'guarded_tool', arguments: '{}'},
+									},
+								],
+							},
+						},
+					],
+					toolsDisabled: false,
+				};
+			},
+		},
+		toolManager: createMockToolManager({
+			tools: ['guarded_tool'],
+			needsApproval: true,
+		}),
+		abortController: controller,
+		setMessages: (msgs: Message[]) => messageSnapshots.push(msgs),
+	});
+
+	await processAssistantResponse(params);
+
+	setGlobalToolConfirmHandler(async () => false);
+
+	// The assistant message announces both calls, so the saved history must
+	// carry a result for the tool the abort skipped too.
+	const latest = messageSnapshots[messageSnapshots.length - 1];
+	const assistant = latest.find(m => m.role === 'assistant' && m.tool_calls);
+	t.deepEqual(
+		(assistant?.tool_calls ?? []).map(tc => tc.id),
+		['call_first', 'call_second'],
+		'both calls must be announced in the assistant message',
+	);
+	for (const id of ['call_first', 'call_second']) {
+		t.truthy(
+			latest.find(m => m.role === 'tool' && m.tool_call_id === id),
+			`${id} must receive a paired tool result`,
+		);
+	}
+	const skipped = latest.find(
+		m => m.role === 'tool' && m.tool_call_id === 'call_second',
+	);
+	t.regex(String(skipped?.content), /cancelled by the user/i);
+});
+
 test.serial('repeated unknown-tool calls hard-stop without prompting in non-interactive mode', async t => {
 	let chatCallCount = 0;
 	let questionCount = 0;

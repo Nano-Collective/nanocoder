@@ -949,8 +949,15 @@ export const processAssistantResponse = async (
 
 				// Escape during execution: stop prompting further tools; the abort
 				// unwinds on the continuation's next LLM call (same as the auto
-				// path), surfacing as "Interrupted by user.".
-				if (controller.signal.aborted) break;
+				// path), surfacing as "Interrupted by user.". Cancel the tools we
+				// never reached so the saved history keeps the provider-required
+				// 1:1 tool_call/result pairing.
+				if (controller.signal.aborted) {
+					turnResults.push(
+						...createCancellationResults(confirmTools.slice(i + 1)),
+					);
+					break;
+				}
 			}
 		}
 
