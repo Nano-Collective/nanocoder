@@ -1,16 +1,19 @@
 /**
  * Git PR Tool
  *
- * Pull request management using gh CLI: create, view, list.
+ * Pull request management using gh CLI: create, view, list, diff, comment,
+ * review, checks, and CI run log reading.
  */
 
 import {Box, Text} from 'ink';
 import React from 'react';
+import {TIMEOUT_GH_LOG_MS} from '@/constants';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
+import {queryCiLog} from './log-utils';
 import {
 	type CommitInfo,
 	execGh,
@@ -18,6 +21,7 @@ import {
 	getCurrentBranch,
 	getDefaultBranch,
 	getUpstreamBranch,
+	truncateDiff,
 } from './utils';
 
 // ============================================================================
@@ -37,6 +41,28 @@ interface GitPrInput {
 		author?: string;
 		limit?: number;
 	};
+	diff?: number;
+	comment?: {
+		pr: number;
+		body: string;
+	};
+	review?: {
+		pr: number;
+		verdict: 'approve' | 'request-changes' | 'comment';
+		body?: string;
+	};
+	checks?: {
+		pr: number;
+	};
+	logs?: {
+		run?: number;
+		pr?: number;
+		branch?: string;
+		failedOnly?: boolean;
+		search?: string;
+		offset?: number;
+		limit?: number;
+	};
 }
 
 // ============================================================================
@@ -54,6 +80,54 @@ async function getCreatePreview(
 // ============================================================================
 // Execution
 // ============================================================================
+
+/**
+ * Resolve a GitHub Actions run ID for the `logs` action: an explicit `run`
+ * wins; otherwise resolve a branch (explicit `branch`, else the given PR's
+ * head branch, else the current branch) and take its most recent run.
+ */
+async function resolveRunId(
+	logs: NonNullable<GitPrInput['logs']>,
+): Promise<string> {
+	if (logs.run !== undefined) {
+		return logs.run.toString();
+	}
+
+	let branch = logs.branch;
+	if (!branch && logs.pr !== undefined) {
+		const output = await execGh(
+			['pr', 'view', logs.pr.toString(), '--json', 'headRefName'],
+			TIMEOUT_GH_LOG_MS,
+		);
+		branch = JSON.parse(output).headRefName;
+	}
+	if (!branch) {
+		branch = await getCurrentBranch();
+	}
+
+	// --status completed: an in-progress/queued run has no (or incomplete)
+	// failure logs, so only ever resolve to the latest finished run.
+	const output = await execGh(
+		[
+			'run',
+			'list',
+			'--branch',
+			branch,
+			'--status',
+			'completed',
+			'--limit',
+			'1',
+			'--json',
+			'databaseId',
+		],
+		TIMEOUT_GH_LOG_MS,
+	);
+	const runs = JSON.parse(output);
+	if (!runs.length) {
+		throw new Error(`No completed CI runs found for branch "${branch}".`);
+	}
+	return runs[0].databaseId.toString();
+}
 
 const executeGitPr = async (args: GitPrInput): Promise<string> => {
 	try {
@@ -147,8 +221,125 @@ const executeGitPr = async (args: GitPrInput): Promise<string> => {
 			return lines.join('\n');
 		}
 
+		// DIFF
+		if (args.diff !== undefined) {
+			const output = await execGh(['pr', 'diff', args.diff.toString()]);
+			const {content, truncated, totalLines} = truncateDiff(output);
+
+			const lines: string[] = [];
+			lines.push(`Diff for PR #${args.diff}:`);
+			lines.push('');
+			lines.push(content);
+			if (truncated) {
+				lines.push('');
+				lines.push(`(${totalLines} total lines)`);
+			}
+
+			return lines.join('\n');
+		}
+
+		// COMMENT
+		if (args.comment) {
+			await execGh([
+				'pr',
+				'comment',
+				args.comment.pr.toString(),
+				'--body',
+				args.comment.body,
+			]);
+			return `Comment posted on PR #${args.comment.pr}.`;
+		}
+
+		// REVIEW
+		if (args.review) {
+			const {pr, verdict, body} = args.review;
+			const ghArgs: string[] = ['pr', 'review', pr.toString()];
+
+			if (verdict === 'approve') {
+				ghArgs.push('--approve');
+			} else if (verdict === 'request-changes') {
+				ghArgs.push('--request-changes');
+			} else {
+				ghArgs.push('--comment');
+			}
+
+			if (body) {
+				ghArgs.push('--body', body);
+			}
+
+			await execGh(ghArgs);
+			return `Review (${verdict}) submitted on PR #${pr}.`;
+		}
+
+		// CHECKS
+		if (args.checks) {
+			const output = await execGh([
+				'pr',
+				'checks',
+				args.checks.pr.toString(),
+				'--json',
+				'name,bucket,state,workflow',
+			]);
+			const checks = JSON.parse(output);
+
+			if (!Array.isArray(checks) || checks.length === 0) {
+				return `No checks found for PR #${args.checks.pr}.`;
+			}
+
+			const lines: string[] = [];
+			lines.push(`Checks for PR #${args.checks.pr}:`);
+			lines.push('');
+			for (const c of checks) {
+				const icon =
+					c.bucket === 'pass' ? '✓' : c.bucket === 'fail' ? '✗' : '…';
+				lines.push(`${icon} ${c.name} (${c.state})`);
+			}
+
+			return lines.join('\n');
+		}
+
+		// LOGS
+		if (args.logs) {
+			const runId = await resolveRunId(args.logs);
+			const failedOnly = args.logs.failedOnly !== false;
+
+			const rawLog = await execGh(
+				['run', 'view', runId, failedOnly ? '--log-failed' : '--log'],
+				TIMEOUT_GH_LOG_MS,
+			);
+
+			const {content, totalLines, truncated, matchCount} = queryCiLog(rawLog, {
+				search: args.logs.search,
+				offset: args.logs.offset,
+				limit: args.logs.limit,
+			});
+
+			const lines: string[] = [];
+			lines.push(
+				`Log for run #${runId}${failedOnly ? ' (failed steps only)' : ''}:`,
+			);
+			lines.push(
+				`Total lines: ${totalLines}` +
+					(matchCount !== undefined ? `, matches: ${matchCount}` : '') +
+					(truncated ? ' (truncated)' : ''),
+			);
+			lines.push('');
+			lines.push(content || '(empty)');
+
+			return lines.join('\n');
+		}
+
 		// LIST
-		if (args.list || (!args.create && args.view === undefined)) {
+		if (
+			args.list ||
+			(!args.create &&
+				args.view === undefined &&
+				args.diff === undefined &&
+				!args.comment &&
+				!args.review &&
+				!args.checks &&
+				!args.logs)
+		) {
 			const state = args.list?.state || 'open';
 			const limit = args.list?.limit || 10;
 
@@ -188,7 +379,7 @@ const executeGitPr = async (args: GitPrInput): Promise<string> => {
 			return lines.join('\n');
 		}
 
-		return 'Error: No valid action specified. Use create, view, or list.';
+		return 'Error: No valid action specified. Use create, view, list, diff, comment, review, checks, or logs.';
 	} catch (error) {
 		const message = formatError(error);
 
@@ -215,7 +406,7 @@ const executeGitPr = async (args: GitPrInput): Promise<string> => {
 
 const gitPrCoreTool = tool({
 	description:
-		'Manage GitHub pull requests. Create new PR, view PR details, or list PRs. Requires gh CLI to be installed and authenticated.',
+		'Manage GitHub pull requests: create, view, list, diff, comment, review, check CI status, and read CI run logs. Requires gh CLI to be installed and authenticated.',
 	inputSchema: jsonSchema<GitPrInput>({
 		type: 'object',
 		properties: {
@@ -265,6 +456,83 @@ const gitPrCoreTool = tool({
 					},
 				},
 			},
+			diff: {
+				type: 'number',
+				description: 'Show the diff for a specific PR by number',
+			},
+			comment: {
+				type: 'object',
+				description: 'Post a comment on a PR',
+				properties: {
+					pr: {type: 'number', description: 'PR number'},
+					body: {type: 'string', description: 'Comment body'},
+				},
+				required: ['pr', 'body'],
+			},
+			review: {
+				type: 'object',
+				description: 'Submit a review on a PR',
+				properties: {
+					pr: {type: 'number', description: 'PR number'},
+					verdict: {
+						type: 'string',
+						enum: ['approve', 'request-changes', 'comment'],
+						description: 'Review verdict',
+					},
+					body: {
+						type: 'string',
+						description: 'Review body (required by gh for request-changes)',
+					},
+				},
+				required: ['pr', 'verdict'],
+			},
+			checks: {
+				type: 'object',
+				description: 'List CI check status for a PR',
+				properties: {
+					pr: {type: 'number', description: 'PR number'},
+				},
+				required: ['pr'],
+			},
+			logs: {
+				type: 'object',
+				description:
+					'Read a CI run log, with search/pagination to avoid returning huge logs. ' +
+					'Resolves the run from `run`, else the head branch of `pr`, else `branch`, else the current branch.',
+				properties: {
+					run: {
+						type: 'number',
+						description: 'Explicit GitHub Actions run ID',
+					},
+					pr: {
+						type: 'number',
+						description: "Resolve the latest run from this PR's head branch",
+					},
+					branch: {
+						type: 'string',
+						description: 'Resolve the latest run from this branch',
+					},
+					failedOnly: {
+						type: 'boolean',
+						description:
+							'Only fetch failed-step logs via --log-failed (default: true). Set false for --log (full log).',
+					},
+					search: {
+						type: 'string',
+						description:
+							'Case-insensitive substring filter; returns matching lines with context instead of the whole log',
+					},
+					offset: {
+						type: 'number',
+						description:
+							'Line offset for pagination, counted back from the end of the log (ignored when `search` is set)',
+					},
+					limit: {
+						type: 'number',
+						description: 'Max lines returned (default 300, hard cap 2000)',
+					},
+				},
+			},
 		},
 		required: [],
 	}),
@@ -297,7 +565,17 @@ function GitPrFormatter({
 		? 'create'
 		: args.view !== undefined
 			? 'view'
-			: 'list';
+			: args.diff !== undefined
+				? 'diff'
+				: args.comment
+					? 'comment'
+					: args.review
+						? 'review'
+						: args.checks
+							? 'checks'
+							: args.logs
+								? 'logs'
+								: 'list';
 
 	// Load preview for create before execution
 	React.useEffect(() => {
@@ -369,6 +647,91 @@ function GitPrFormatter({
 				</Box>
 			)}
 
+			{action === 'diff' && (
+				<Box>
+					<Text color={colors.secondary}>PR: </Text>
+					<Text color={colors.primary}>#{args.diff}</Text>
+				</Box>
+			)}
+
+			{action === 'comment' && args.comment && (
+				<>
+					<Box>
+						<Text color={colors.secondary}>PR: </Text>
+						<Text color={colors.primary}>#{args.comment.pr}</Text>
+					</Box>
+					<Box flexDirection="column">
+						<Text color={colors.secondary}>Body:</Text>
+						<Box marginLeft={2} flexDirection="column">
+							<Text color={colors.text}>{args.comment.body}</Text>
+						</Box>
+					</Box>
+				</>
+			)}
+
+			{action === 'review' && args.review && (
+				<>
+					<Box>
+						<Text color={colors.secondary}>PR: </Text>
+						<Text color={colors.primary}>#{args.review.pr}</Text>
+					</Box>
+					<Box>
+						<Text color={colors.secondary}>Verdict: </Text>
+						<Text
+							color={
+								args.review.verdict === 'request-changes'
+									? colors.warning
+									: colors.text
+							}
+						>
+							{args.review.verdict}
+						</Text>
+					</Box>
+					{args.review.body && (
+						<Box flexDirection="column">
+							<Text color={colors.secondary}>Body:</Text>
+							<Box marginLeft={2} flexDirection="column">
+								<Text color={colors.text}>{args.review.body}</Text>
+							</Box>
+						</Box>
+					)}
+				</>
+			)}
+
+			{action === 'checks' && args.checks && (
+				<Box>
+					<Text color={colors.secondary}>PR: </Text>
+					<Text color={colors.primary}>#{args.checks.pr}</Text>
+				</Box>
+			)}
+
+			{action === 'logs' && args.logs && (
+				<>
+					<Box>
+						<Text color={colors.secondary}>Run: </Text>
+						<Text color={colors.text}>
+							{args.logs.run !== undefined
+								? `#${args.logs.run}`
+								: args.logs.pr !== undefined
+									? `PR #${args.logs.pr}`
+									: args.logs.branch || 'current branch'}
+						</Text>
+					</Box>
+					{args.logs.search && (
+						<Box>
+							<Text color={colors.secondary}>Search: </Text>
+							<Text color={colors.text}>{args.logs.search}</Text>
+						</Box>
+					)}
+					{args.logs.offset !== undefined && (
+						<Box>
+							<Text color={colors.secondary}>Offset: </Text>
+							<Text color={colors.text}>{args.logs.offset}</Text>
+						</Box>
+					)}
+				</>
+			)}
+
 			{action === 'list' && (
 				<Box>
 					<Text color={colors.secondary}>State: </Text>
@@ -385,6 +748,13 @@ function GitPrFormatter({
 			{result?.includes('created successfully') && (
 				<Box marginTop={1}>
 					<Text color={colors.success}>✓ PR created successfully</Text>
+				</Box>
+			)}
+
+			{(result?.includes('Comment posted') ||
+				result?.includes('submitted on PR')) && (
+				<Box marginTop={1}>
+					<Text color={colors.success}>✓ {result}</Text>
 				</Box>
 			)}
 
@@ -409,7 +779,15 @@ export const gitPrTool: NanocoderToolExport = {
 	name: 'git_pr' as const,
 	tool: gitPrCoreTool,
 	formatter,
-	// Approval varies by action: create always prompts (user should see
-	// title/body); view/list auto-run.
-	approval: (args: GitPrInput) => Boolean(args.create),
+	// Safe for the parallel-execution batching in tool-executor.tsx: that
+	// grouping only ever runs on calls `resolveToolApproval` already routed
+	// to auto-execute (see the `approval` fn below), so mutating actions
+	// (create/comment/review) never reach it regardless of this flag — they
+	// go through the confirmation path one at a time either way.
+	readOnly: true,
+	// Approval varies by action: actions that write to GitHub (create,
+	// comment, review) always prompt; read-only inspection (view, list,
+	// diff, checks, logs) auto-runs.
+	approval: (args: GitPrInput) =>
+		Boolean(args.create || args.comment || args.review),
 };
