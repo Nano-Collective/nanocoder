@@ -41,8 +41,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		// Listen for session updates from ACP
 		this._acpClient.onSessionUpdate = (update: any) => {
 			this._planReview.observeSessionUpdate(update);
-			this._artifacts.observeSessionUpdate(update);
-			this.postArtifacts();
+			if (this._artifacts.observeSessionUpdate(update)) {
+				this.postArtifacts();
+			}
 			this.handleDiffs(update);
 			this.postMessage({
 				type: 'acpUpdate',
@@ -131,6 +132,19 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		this.postMessage({
 			type: 'artifactsUpdated',
 			artifacts: this._artifacts.artifacts,
+		});
+	}
+
+	private postPromptResponse(
+		response?: import('@agentclientprotocol/sdk').PromptResponse,
+	): void {
+		this.postMessage({
+			type: 'acpUpdate',
+			update: {
+				sessionUpdate: 'prompt_response',
+				usage: response?.usage,
+				cost: (response?._meta as Record<string, any> | undefined)?.['nanocoder/usage']?.cost,
+			},
 		});
 	}
 
@@ -510,27 +524,18 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 					artifactPath: review.artifactPath
 				});
 			}
-			// Signal turn completion so the Webview can flip back to the send
-			// button. Forward the per-turn token usage and estimated cost so
-			// the webview can render the usage indicator under the response.
-			this.postMessage({
-				type: 'acpUpdate',
-				update: {
-					sessionUpdate: 'prompt_response',
-					usage: response?.usage,
-					cost: (response?._meta as Record<string, any> | undefined)?.['nanocoder/usage']?.cost,
-				},
-			});
+			this.postPromptResponse(response);
 		} catch (error) {
 			this._outputChannel.appendLine(`Prompt execution error: ${error}`);
 			vscode.window.showErrorMessage(`Nanocoder Prompt error: ${error}`);
 			// Always reset the button even on error
-			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}});
+			this.postPromptResponse();
 		}
 	}
 
 	private async _approvePlan(): Promise<void> {
 		try {
+			let response: import('@agentclientprotocol/sdk').PromptResponse | undefined;
 			await this._planReview.approve({
 				readFile: async artifactPath => fs.promises.readFile(artifactPath, 'utf8'),
 				setMode: async mode => {
@@ -540,10 +545,13 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 					}
 				},
 				prompt: async message => {
-					await this._acpClient.prompt(message);
+					response = await this._acpClient.prompt(message);
+					if (!response) {
+						throw new Error('Failed to execute the approved plan');
+					}
 				},
 			});
-			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}});
+			this.postPromptResponse(response);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			this._outputChannel.appendLine(`Plan approval failed: ${message}`);

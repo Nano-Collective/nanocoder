@@ -914,6 +914,10 @@
 			return;
 		}
 
+		// Keep typed text queued in the composer while the current response is
+		// still running. The Stop button remains available for cancellation.
+		if (isProcessing) return;
+
 		// Append attached paths as context lines
 		if (attachedPaths.length > 0) {
 			const contextText = attachedPaths

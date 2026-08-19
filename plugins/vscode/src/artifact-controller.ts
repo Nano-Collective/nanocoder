@@ -21,19 +21,25 @@ export class ArtifactController {
 		});
 	}
 
-	observeSessionUpdate(payload: unknown): void {
-		if (!payload || typeof payload !== 'object') return;
+	observeSessionUpdate(payload: unknown): boolean {
+		if (!payload || typeof payload !== 'object') return false;
 		const envelope = payload as Record<string, unknown>;
 		const update =
 			envelope.update && typeof envelope.update === 'object'
 				? (envelope.update as Record<string, unknown>)
 				: envelope;
 		const meta = update._meta;
-		if (!meta || typeof meta !== 'object') return;
+		if (!meta || typeof meta !== 'object') return false;
 		const artifact = this.parseArtifact(
 			(meta as Record<string, unknown>)['nanocoder/artifact'],
 		);
-		if (artifact) this.byKind.set(artifact.kind, artifact);
+		if (!artifact) return false;
+
+		const previous = this.byKind.get(artifact.kind);
+		if (previous?.path === artifact.path) return false;
+
+		this.byKind.set(artifact.kind, artifact);
+		return true;
 	}
 
 	replaceFromMeta(meta: unknown): void {

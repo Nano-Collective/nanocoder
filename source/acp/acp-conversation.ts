@@ -217,7 +217,7 @@ export async function runAcpConversation(
 		} catch (error) {
 			if (abortController.signal.aborted) {
 				session.messages = messages;
-				return {stopReason: 'cancelled'};
+				return withTurnUsage({stopReason: 'cancelled'});
 			}
 			throw error;
 		}
