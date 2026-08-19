@@ -226,6 +226,7 @@ export async function handleChat(
 				...(finalSystemContent && !promptCaching
 					? {system: finalSystemContent}
 					: {}),
+				...(promptCaching ? {allowSystemInMessages: true} : {}),
 				messages: modelMessages,
 				tools: aiTools,
 				abortSignal: signal,
