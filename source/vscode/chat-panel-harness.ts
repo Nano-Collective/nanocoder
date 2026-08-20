@@ -18,6 +18,16 @@ const mediaUrl = (filename: string) =>
 const MENTION_UTILS_SOURCE = readFileSync(mediaUrl('mention-utils.js'), 'utf8');
 const PANEL_SOURCE = readFileSync(mediaUrl('chat-panel.js'), 'utf8');
 
+// chat-panel.html loads mention-utils.js ahead of chat-panel.js, which reads
+// its exports off globalThis at IIFE time. Boot it in the same order here or
+// the panel throws before any of it is reachable.
+const MENTION_UTILS_SOURCE = readFileSync(
+	fileURLToPath(
+		new URL('../../plugins/vscode/media/mention-utils.js', import.meta.url),
+	),
+	'utf8',
+);
+
 const SHELL_IDS = [
 	'add-image-btn',
 	'add-menu-btn',
