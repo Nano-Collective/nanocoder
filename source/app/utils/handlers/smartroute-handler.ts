@@ -16,15 +16,18 @@ const VALID_THRESHOLDS = new Set(['low', 'medium', 'high']);
  *   /smartroute simple <model> - Set the simple model (or "auto")
  *   /smartroute threshold <v>  - Set classifier sensitivity
  */
+import {SMART_ROUTING_DEFAULTS} from '@/types/config';
+
 export async function handleSmartRouteCommand(
 	commandParts: string[],
 	options: MessageSubmissionOptions & {
-		smartRouting: SmartRoutingState;
-		setSmartRouting: (state: SmartRoutingState) => void;
+		smartRouting?: SmartRoutingState;
+		setSmartRouting?: (state: SmartRoutingState) => void;
 	},
 ): Promise<boolean> {
-	const {onAddToChatQueue, onCommandComplete, smartRouting, setSmartRouting} =
-		options;
+	const {onAddToChatQueue, onCommandComplete} = options;
+	const smartRouting = options.smartRouting ?? SMART_ROUTING_DEFAULTS;
+	const setSmartRouting = options.setSmartRouting ?? (() => {});
 
 	if (commandParts[0] !== 'smartroute') {
 		return false;

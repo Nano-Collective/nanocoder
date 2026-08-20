@@ -1,5 +1,8 @@
 import React from 'react';
-import {classifyTurnComplexity} from '@/ai-sdk-client/smart-router';
+import {
+	autoSelectSimpleModel,
+	classifyTurnComplexity,
+} from '@/ai-sdk-client/smart-router';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
 import {ConversationStateManager} from '@/app/utils/conversation-state';
 import UserMessage from '@/components/user-message';
@@ -345,17 +348,20 @@ export function useChatHandler({
 
 		// Smart routing: temporarily swap to simple model for trivial turns
 		let originalModel: string | null = null;
-		if (
-			smartRouting?.enabled &&
-			smartRouting.simpleModel &&
-			smartRouting.simpleModel !== currentModel
-		) {
-			const tier = classifyTurnComplexity(message, {
-				threshold: smartRouting.threshold,
-			});
-			if (tier === 'simple') {
-				originalModel = client.getCurrentModel();
-				client.setModel(smartRouting.simpleModel);
+		if (smartRouting?.enabled) {
+			let simpleModelToUse = smartRouting.simpleModel;
+			if (!simpleModelToUse) {
+				const availableModels = await client.getAvailableModels();
+				simpleModelToUse = autoSelectSimpleModel(availableModels);
+			}
+			if (simpleModelToUse && simpleModelToUse !== currentModel) {
+				const tier = classifyTurnComplexity(message, {
+					threshold: smartRouting.threshold,
+				});
+				if (tier === 'simple') {
+					originalModel = client.getCurrentModel();
+					client.setModel(simpleModelToUse);
+				}
 			}
 		}
 

@@ -444,4 +444,5 @@ export interface UserPreferences {
 	 * content. Also switchable per-run with the --no-alt-screen flag.
 	 */
 	alternateScreen?: boolean;
+	smartRouting?: SmartRoutingState;
 }

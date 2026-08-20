@@ -59,4 +59,6 @@ export interface MessageSubmissionOptions {
 	developmentMode?: DevelopmentMode;
 	lastApiUsage?: ApiUsageSnapshot | null;
 	apiCallHistory?: ApiCallRecord[];
+	smartRouting?: import('./config').SmartRoutingState;
+	setSmartRouting?: (state: import('./config').SmartRoutingState) => void;
 }

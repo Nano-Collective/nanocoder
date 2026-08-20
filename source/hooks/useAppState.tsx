@@ -2,7 +2,11 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import type {SettingsTabId} from '@/app/components/settings-constants';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {getAppConfig} from '@/config/index';
-import {loadPreferences} from '@/config/preferences';
+import {
+	getSmartRoutingPreference,
+	loadPreferences,
+	updateSmartRoutingPreference,
+} from '@/config/preferences';
 import {defaultTheme} from '@/config/themes';
 import {resolveTune} from '@/config/tune';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
@@ -188,9 +192,13 @@ export function useAppState(
 	});
 
 	// Smart auto-routing state (Issue #891)
-	const [smartRouting, setSmartRouting] = useState<SmartRoutingState>(
-		SMART_ROUTING_DEFAULTS,
+	const [smartRouting, setSmartRoutingState] = useState<SmartRoutingState>(
+		() => getSmartRoutingPreference() ?? SMART_ROUTING_DEFAULTS,
 	);
+	const setSmartRouting = useCallback((state: SmartRoutingState) => {
+		setSmartRoutingState(state);
+		updateSmartRoutingPreference(state);
+	}, []);
 
 	// Context usage state
 	const [contextPercentUsed, setContextPercentUsed] = useState<number | null>(

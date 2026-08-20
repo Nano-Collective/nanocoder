@@ -26,6 +26,14 @@ export const DEFAULT_COMPLEX_KEYWORDS: readonly string[] = [
 ];
 
 export const DEFAULT_TRIVIAL_KEYWORDS: readonly string[] = [
+	'hi',
+	'hey',
+	'thanks',
+	'thank you',
+	'ok',
+	'okay',
+	'yes',
+	'no',
 	'view',
 	'show',
 	'list',

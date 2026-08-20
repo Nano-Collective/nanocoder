@@ -316,6 +316,7 @@ export default function App({
 		onApiCallComplete: record =>
 			appState.setApiCallHistory(prev => [...prev, record]),
 		tune: appState.tune,
+		smartRouting: appState.smartRouting,
 		subagentsReady: appState.subagentsReady,
 		privacySessionMapRef: appState.privacySessionMapRef,
 		privacyEnabled: getPrivacyPreference(),
@@ -480,6 +481,8 @@ export default function App({
 		currentTheme: appState.currentTheme,
 		developmentMode: appState.developmentMode,
 		tune: appState.tune,
+		smartRouting: appState.smartRouting,
+		setSmartRouting: appState.setSmartRouting,
 		lastApiUsage: appState.lastApiUsage,
 		apiCallHistory: appState.apiCallHistory,
 		abortController: appState.abortController,
