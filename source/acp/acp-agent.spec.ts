@@ -467,6 +467,44 @@ test('AcpAgent.cancel - aborts session for known session', async t => {
 	t.pass();
 });
 
+test('AcpAgent.cancel - stops a turn cancelled before the loop reads the signal', async t => {
+	const context = createMockInitContext();
+	let chatCalls = 0;
+	(context.client as any).chat = async () => {
+		chatCalls++;
+		return {choices: [{message: {content: 'Test response'}}]};
+	};
+	const agent = new AcpAgent(context, createMockConn());
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	const turn = agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'hi'}],
+	});
+	await agent.cancel({sessionId: session.sessionId});
+
+	t.is((await turn).stopReason, 'cancelled');
+	t.is(chatCalls, 0);
+});
+
+test('AcpAgent.prompt - a cancelled turn does not block the next prompt', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	const cancelled = agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'first'}],
+	});
+	await agent.cancel({sessionId: session.sessionId});
+	t.is((await cancelled).stopReason, 'cancelled');
+
+	const next = await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'second'}],
+	});
+	t.is(next.stopReason, 'end_turn');
+});
+
 // ============================================================================
 // setSessionMode()
 // ============================================================================

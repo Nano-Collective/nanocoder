@@ -2160,7 +2160,7 @@
 					update.status === 'denied' ||
 					// ACP has no 'cancelled' status, so a cancel arrives as failed with
 					// 'Cancelled by user'. Case-insensitive, or the capital C misses.
-					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && /aborterror|cancelled/i.test(update.rawOutput))
+					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && /aborterror|cancelled|denied/i.test(update.rawOutput))
 				) {
 					statusEl.innerHTML = ICONS.cancelled;
 				} else if (update.status === 'error' || update.status === 'failed') {
