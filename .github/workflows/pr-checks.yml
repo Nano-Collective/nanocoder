@@ -62,6 +62,11 @@ jobs:
       - name: Run TypeScript type checking
         run: pnpm test:types
 
+      # The root tsconfig only includes source/**, so the extension's own
+      # sources and specs are checked by their own project or not at all.
+      - name: Run TypeScript type checking (VS Code extension)
+        run: pnpm test:types:vscode
+
   test-format:
     name: Format Checks
     runs-on: ubuntu-latest
