@@ -1,4 +1,5 @@
 import React from 'react';
+import {classifyTurnComplexity} from '@/ai-sdk-client/smart-router';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
 import {ConversationStateManager} from '@/app/utils/conversation-state';
 import UserMessage from '@/components/user-message';
@@ -91,6 +92,7 @@ export function useChatHandler({
 	subagentsReady,
 	privacySessionMapRef,
 	privacyEnabled,
+	smartRouting,
 }: UseChatHandlerProps): ChatHandlerReturn {
 	// Conversation state manager for enhanced context
 	const conversationStateManager = React.useRef(new ConversationStateManager());
@@ -341,6 +343,22 @@ export function useChatHandler({
 		const controller = new AbortController();
 		setAbortController(controller);
 
+		// Smart routing: temporarily swap to simple model for trivial turns
+		let originalModel: string | null = null;
+		if (
+			smartRouting?.enabled &&
+			smartRouting.simpleModel &&
+			smartRouting.simpleModel !== currentModel
+		) {
+			const tier = classifyTurnComplexity(message, {
+				threshold: smartRouting.threshold,
+			});
+			if (tier === 'simple') {
+				originalModel = client.getCurrentModel();
+				client.setModel(smartRouting.simpleModel);
+			}
+		}
+
 		try {
 			let systemPrompt = getBaseSystemPrompt(
 				developmentMode,
@@ -384,6 +402,10 @@ export function useChatHandler({
 			displayError(error, 'chat-error');
 			onConversationComplete?.();
 		} finally {
+			// Restore original model if smart routing swapped it
+			if (originalModel) {
+				client.setModel(originalModel);
+			}
 			resetStreamingState();
 		}
 	};

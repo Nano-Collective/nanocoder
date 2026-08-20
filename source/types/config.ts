@@ -401,6 +401,23 @@ export const TUNE_DEFAULTS: TuneConfig = {
 	aggressiveCompact: false,
 };
 
+// Smart auto-routing state — controls whether trivial turns are routed
+// to a lightweight model instead of the user's primary ("strong") model.
+export interface SmartRoutingState {
+	enabled: boolean;
+	// The model ID to use for simple/trivial turns.
+	// When undefined and enabled, auto-selection picks one from the provider.
+	simpleModel?: string;
+	// Sensitivity threshold for the complexity classifier.
+	// 'low' = fewer turns routed to simple, 'high' = more turns routed to simple.
+	threshold: 'low' | 'medium' | 'high';
+}
+
+export const SMART_ROUTING_DEFAULTS: SmartRoutingState = {
+	enabled: false,
+	threshold: 'medium',
+};
+
 export interface UserPreferences {
 	lastProvider?: string;
 	lastModel?: string;

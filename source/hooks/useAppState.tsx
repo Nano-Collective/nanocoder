@@ -14,6 +14,7 @@ import {ToolManager} from '@/tools/tool-manager';
 import type {CheckpointListItem} from '@/types/checkpoint';
 import type {CustomCommand} from '@/types/commands';
 import type {AIProviderConfig, TuneConfig} from '@/types/config';
+import {SMART_ROUTING_DEFAULTS, type SmartRoutingState} from '@/types/config';
 import {
 	ApiCallRecord,
 	ApiUsageSnapshot,
@@ -185,6 +186,11 @@ export function useAppState(
 	const [tune, setTune] = useState<TuneConfig>(() => {
 		return resolveTune(getAppConfig(), undefined, preferences);
 	});
+
+	// Smart auto-routing state (Issue #891)
+	const [smartRouting, setSmartRouting] = useState<SmartRoutingState>(
+		SMART_ROUTING_DEFAULTS,
+	);
 
 	// Context usage state
 	const [contextPercentUsed, setContextPercentUsed] = useState<number | null>(
@@ -376,6 +382,7 @@ export function useAppState(
 		developmentMode,
 		developmentModeRef,
 		tune,
+		smartRouting,
 		contextPercentUsed,
 		contextLimit,
 		contextSource,
@@ -431,6 +438,7 @@ export function useAppState(
 		setPendingQuestion,
 		setDevelopmentMode,
 		setTune,
+		setSmartRouting,
 		setContextPercentUsed,
 		setContextLimit,
 		setContextSource,
