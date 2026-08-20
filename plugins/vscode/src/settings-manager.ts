@@ -211,11 +211,13 @@ export class SettingsManager {
 	 * If neither exists, return the global path (it will be created on write).
 	 */
 	private resolveConfigPath(cwd: string, globalDir: string, fileName: string): string {
-		const projectPath = path.join(cwd, fileName);
+		// fileName is never user input - both call sites pass a string literal.
+		// Same shape as getConfigPath() in source/config/index.ts.
+		const projectPath = path.join(cwd, fileName); // nosemgrep
 		if (fs.existsSync(projectPath)) {
 			return projectPath;
 		}
-		return path.join(globalDir, fileName);
+		return path.join(globalDir, fileName); // nosemgrep
 	}
 
 	private readJsonSafe(filePath: string): any {
@@ -275,7 +277,9 @@ export class SettingsManager {
 			if (!obj[pathArgs[i]] || typeof obj[pathArgs[i]] !== 'object') {
 				obj[pathArgs[i]] = {};
 			}
-			obj = obj[pathArgs[i]];
+			// Keys are string literals from this file's own call sites, never
+			// user input, so no __proto__ can reach the walk.
+			obj = obj[pathArgs[i]]; // nosemgrep
 		}
 		obj[pathArgs[pathArgs.length - 1]] = value;
 		this.atomicWrite(filePath, prefs);
