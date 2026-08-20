@@ -137,3 +137,88 @@ test('buildToolCallMeta - write_file diff captures existing content as oldText',
 		rmSync(dir, {recursive: true, force: true});
 	}
 });
+
+// ============================================================================
+// withDiff: false - the queued-batch announcement discards content, so it must
+// not pay to read the file off disk first.
+// ============================================================================
+
+test('buildToolCallMeta - withDiff false skips the string_replace diff', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'acp-nodiff-'));
+	try {
+		const file = join(dir, 'a.ts');
+		writeFileSync(file, 'const a = 1;\n');
+
+		const call = makeCall('string_replace', {
+			path: file,
+			old_str: 'const a = 1;',
+			new_str: 'const a = 2;',
+		});
+
+		const announced = await buildToolCallMeta(call, {withDiff: false});
+		t.is(announced.content.length, 0, 'no diff is built');
+
+		// Everything the checklist row needs still comes back.
+		t.is(announced.kind, 'edit');
+		t.is(announced.locations[0]?.path, resolve(file));
+		t.true(announced.title.includes('a.ts'));
+
+		// And the default still diffs.
+		const full = await buildToolCallMeta(call);
+		t.is(full.content.length, 1);
+		t.is(full.title, announced.title);
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test('buildToolCallMeta - withDiff false skips the write_file diff', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'acp-nodiff-'));
+	try {
+		const file = join(dir, 'b.ts');
+		writeFileSync(file, 'old body\n');
+
+		const call = makeCall('write_file', {path: file, content: 'new body'});
+
+		const announced = await buildToolCallMeta(call, {withDiff: false});
+		t.is(announced.content.length, 0, 'no diff is built');
+		t.is(announced.kind, 'edit');
+		t.is(announced.locations[0]?.path, resolve(file));
+
+		const full = await buildToolCallMeta(call);
+		t.is(full.content.length, 1);
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test('buildToolCallMeta - withDiff false does not read the file', async t => {
+	// A path that cannot be read would make the diff builders fall back rather
+	// than throw, so assert on the observable outcome: nothing is attached and
+	// the metadata is still complete.
+	const meta = await buildToolCallMeta(
+		makeCall('string_replace', {
+			path: '/definitely/missing/nowhere.ts',
+			old_str: 'a',
+			new_str: 'b',
+		}),
+		{withDiff: false},
+	);
+	t.is(meta.content.length, 0);
+	t.is(meta.kind, 'edit');
+});
+
+test('buildToolCallMeta - withDiff true is the default', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'acp-nodiff-'));
+	try {
+		const file = join(dir, 'c.ts');
+		writeFileSync(file, 'x\n');
+		const call = makeCall('write_file', {path: file, content: 'y'});
+
+		t.is((await buildToolCallMeta(call)).content.length, 1);
+		t.is((await buildToolCallMeta(call, {})).content.length, 1);
+		t.is((await buildToolCallMeta(call, {withDiff: true})).content.length, 1);
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});

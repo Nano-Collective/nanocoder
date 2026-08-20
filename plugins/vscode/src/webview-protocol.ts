@@ -82,6 +82,12 @@ export interface ExtensionMessageCopyLastCodeBlock {
 	type: 'copyLastCodeBlock';
 }
 
+/** Prompt built by an editor code lens; the composer submits it verbatim. */
+export interface ExtensionMessageRunPrompt {
+	type: 'runPrompt';
+	text: string;
+}
+
 export interface ExtensionMessageCopyResult {
 	type: 'copyResult';
 	ok: boolean;
@@ -99,11 +105,63 @@ export interface ExtensionMessageUpdateSessions {
 	}>;
 }
 
+export interface ExtensionMessageSettingsData {
+	type: 'settingsData';
+	settings: {
+		providers: Array<{ name: string; baseUrl?: string; models: string[]; apiKeySet: boolean }>;
+		mcpServers: Array<{ name: string; transport: string; command?: string; url?: string }>;
+		alwaysAllow: string[];
+		defaultMode: string | null;
+		autoCompact: { enabled: boolean; threshold: number; mode: string };
+		reasoningTraces: boolean;
+		sessions: { autoSave: boolean };
+		webSearch: { configured: boolean };
+	};
+}
+
+export interface ExtensionMessageSettingsUpdated {
+	type: 'settingsUpdated';
+	key: string;
+	success: boolean;
+	error?: string;
+}
+
+export interface ExtensionMessageToggleSettings {
+	type: 'toggleSettings';
+}
+
 export interface ExtensionMessagePathInfoResolved {
 	type: 'pathInfoResolved';
 	path: string;
 	name: string;
 	kind: 'file' | 'folder';
+}
+
+/** One `@` autocomplete suggestion. */
+export interface MentionItem {
+	/** Absolute path — what the composer stores in `attachedPaths`. */
+	path: string;
+	/** Basename: the chip label and the dropdown's primary line. */
+	name: string;
+	/** Workspace-relative, forward slashes — the dropdown's secondary line. */
+	relPath: string;
+	kind: 'file' | 'folder';
+	/** Currently open in an editor tab, which both ranks it up and labels it. */
+	isEditor: boolean;
+}
+
+/**
+ * Ranked `@` autocomplete suggestions.
+ *
+ * `requestId` echoes the webview's request. postMessage delivery is async, so
+ * a fast typist can have several searches in flight at once and they can land
+ * out of order — the webview drops any response whose id is not the newest,
+ * otherwise the dropdown flickers back to results for an older query.
+ */
+export interface ExtensionMessageMentionCompletions {
+	type: 'mentionCompletions';
+	requestId: number;
+	items: MentionItem[];
 }
 
 export type ExtensionToWebviewMessage =
@@ -120,9 +178,14 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessageSyncState
 	| ExtensionMessageUpdateSessions
 	| ExtensionMessageSessionLoaded
+	| ExtensionMessageSettingsData
+	| ExtensionMessageSettingsUpdated
+	| ExtensionMessageToggleSettings
 	| ExtensionMessagePathInfoResolved
 	| ExtensionMessageCopyLastCodeBlock
-	| ExtensionMessageCopyResult;
+	| ExtensionMessageCopyResult
+	| ExtensionMessageRunPrompt
+	| ExtensionMessageMentionCompletions;
 
 
 // ---------------------------------------------------------
@@ -195,6 +258,25 @@ export interface WebviewMessageDeleteSession {
 	sessionId: string;
 }
 
+export interface WebviewMessageRequestSettings {
+	type: 'requestSettings';
+}
+
+export interface WebviewMessageUpdateSetting {
+	type: 'updateSetting';
+	key: string;
+	value: unknown;
+}
+
+export interface WebviewMessageOpenConfigFile {
+	type: 'openConfigFile';
+	file: 'agents.config.json' | 'nanocoder-preferences.json';
+}
+
+export interface WebviewMessageRestartAcp {
+	type: 'restartAcp';
+}
+
 export interface WebviewMessageRenameSession {
 	type: 'renameSession';
 	sessionId: string;
@@ -225,6 +307,20 @@ export interface WebviewMessageCopyToClipboard {
 	text: string;
 }
 
+/**
+ * Ask the host to resolve an `@` query. Searching lives on the host because
+ * only the host can reach `vscode.workspace.findFiles` and the user's
+ * `files.exclude` / `search.exclude` settings, and because shipping a whole
+ * workspace file list into the webview would be megabytes on a large repo.
+ * Note `findFiles` does *not* honour those settings on its own once an explicit
+ * exclude is passed - see `_mentionExcludeGlob` in `chat-webview-provider.ts`.
+ */
+export interface WebviewMessageRequestMentionCompletions {
+	type: 'requestMentionCompletions';
+	query: string;
+	requestId: number;
+}
+
 export type WebviewToExtensionMessage =
 	| WebviewMessageReady
 	| WebviewMessageSubmitMessage
@@ -239,9 +335,14 @@ export type WebviewToExtensionMessage =
 	| WebviewMessageListSessions
 	| WebviewMessageResumeSession
 	| WebviewMessageDeleteSession
+	| WebviewMessageRequestSettings
+	| WebviewMessageUpdateSetting
+	| WebviewMessageOpenConfigFile
+	| WebviewMessageRestartAcp
 	| WebviewMessageRenameSession
 	| WebviewMessageRequestPathInfo
 	| WebviewMessageRequestOpenDialog
 	| WebviewMessageOpenPath
 	| WebviewMessageShowError
-	| WebviewMessageCopyToClipboard;
+	| WebviewMessageCopyToClipboard
+	| WebviewMessageRequestMentionCompletions;

@@ -220,7 +220,7 @@ nanocoder --acp
 Extend Nanocoder's capabilities by connecting [MCP (Model Context Protocol) servers](../configuration/mcp-configuration.md). MCP servers add new tools the AI can use — from database queries to API calls to custom integrations.
 
 ```bash
-/setup-mcp      # interactive setup wizard
+/settings mcp   # interactive setup wizard
 /mcp            # see connected servers and tools
 ```
 

@@ -913,3 +913,68 @@ test.serial(
 		unmount();
 	},
 );
+
+// ============================================================================
+// Deep-linking straight into one provider's edit/delete choice
+// ============================================================================
+
+const deepLinkProviders = [
+	{name: 'ollama', baseUrl: 'http://localhost:11434/v1', models: ['llama2']},
+	{name: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', models: ['x']},
+];
+
+test('ProviderStep with initialEditName opens that provider edit/delete choice', t => {
+	const {lastFrame} = render(
+		<ProviderStep
+			onComplete={() => {}}
+			existingProviders={deepLinkProviders}
+			initialEditName="openrouter"
+		/>,
+	);
+
+	const output = lastFrame()!;
+	t.regex(output, /Edit this provider/);
+	t.regex(output, /Delete this provider/);
+	t.notRegex(
+		output,
+		/Let's add AI providers/,
+		'should skip the template menu entirely',
+	);
+});
+
+test('ProviderStep initialEditName targets the named provider, not the first', t => {
+	const {lastFrame} = render(
+		<ProviderStep
+			onComplete={() => {}}
+			existingProviders={deepLinkProviders}
+			initialEditName="openrouter"
+		/>,
+	);
+
+	t.regex(lastFrame()!, /openrouter/);
+});
+
+test('ProviderStep falls back to the menu when initialEditName is unknown', t => {
+	const {lastFrame} = render(
+		<ProviderStep
+			onComplete={() => {}}
+			existingProviders={deepLinkProviders}
+			initialEditName="not-a-configured-provider"
+		/>,
+	);
+
+	// The settings panel lists the resolved config while the wizard loads a
+	// single file, so a name it cannot find must not strand the user.
+	t.regex(lastFrame()!, /Let's add AI providers/);
+});
+
+test('ProviderStep without initialEditName still opens the template menu', t => {
+	const {lastFrame} = render(
+		<ProviderStep
+			onComplete={() => {}}
+			existingProviders={deepLinkProviders}
+		/>,
+	);
+
+	t.regex(lastFrame()!, /Let's add AI providers/);
+});
