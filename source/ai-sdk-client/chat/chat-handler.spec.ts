@@ -478,3 +478,44 @@ test('consecutive reasoning parts stay on the reasoning callback', async t => {
 	t.deepEqual(routed.reasoning, ['Part one', 'Part two']);
 	t.deepEqual(routed.text, ['Answer']);
 });
+
+test('reasoning deltas route on the reasoning callback without a reasoning-start', async t => {
+	const routed = await streamRouting([
+		{type: 'reasoning-delta', id: 'r0', delta: 'Unannounced thought'},
+		{type: 'text-start', id: '0'},
+		{type: 'text-delta', id: '0', delta: 'Answer'},
+		{type: 'text-end', id: '0'},
+	]);
+
+	t.deepEqual(routed.reasoning, ['Unannounced thought']);
+	t.deepEqual(routed.text, ['Answer']);
+	t.is(routed.content, 'Answer');
+});
+
+test('reasoning deltas after reasoning-end stay on the reasoning callback', async t => {
+	const routed = await streamRouting([
+		{type: 'reasoning-start', id: 'r0'},
+		{type: 'reasoning-delta', id: 'r0', delta: 'First half'},
+		{type: 'reasoning-end', id: 'r0'},
+		{type: 'reasoning-delta', id: 'r0', delta: 'Second half'},
+		{type: 'text-start', id: '0'},
+		{type: 'text-delta', id: '0', delta: 'Answer'},
+		{type: 'text-end', id: '0'},
+	]);
+
+	t.deepEqual(routed.reasoning, ['First half', 'Second half']);
+	t.deepEqual(routed.text, ['Answer']);
+	t.is(routed.content, 'Answer');
+});
+
+test('alternating deltas with no start markers keep their own callbacks', async t => {
+	const routed = await streamRouting([
+		{type: 'reasoning-delta', id: 'r0', delta: 'Thinking'},
+		{type: 'text-delta', id: '0', delta: 'Answer'},
+		{type: 'reasoning-delta', id: 'r0', delta: 'More thinking'},
+		{type: 'text-delta', id: '0', delta: ' continues'},
+	]);
+
+	t.deepEqual(routed.reasoning, ['Thinking', 'More thinking']);
+	t.deepEqual(routed.text, ['Answer', ' continues']);
+});
