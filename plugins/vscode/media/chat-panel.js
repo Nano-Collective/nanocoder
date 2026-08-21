@@ -387,6 +387,7 @@
 	let isProcessing = false;
 	let currentAggregator = null;
 	let currentThoughtBox = null;
+	let currentTurnFooter = null;
 	let visualLoader = null;
 	const toolKinds = new Map();
 	let toastTimeout = null;
@@ -1059,7 +1060,10 @@
 		// A user message opens a new turn, so the agent segments that follow get
 		// a fresh id. The raw-text accumulator is handed over lazily, once the
 		// new response produces text.
-		if (role === 'user') agentTurnId++;
+		if (role === 'user') {
+			agentTurnId++;
+			currentTurnFooter = null;
+		}
 
 		const wrapper = document.createElement('div');
 		wrapper.className = 'group flex flex-col min-w-0 shrink-0 ' +
@@ -1247,8 +1251,15 @@
 
 			msgEl.appendChild(textContainer);
 			wrapper.appendChild(msgEl);
-			wrapper.appendChild(createMessageFooter(() => wrapper.dataset.rawText || '', 'agent', new Date()));
-			wrapper.dataset.rawText = currentTurnText;
+			if (currentTurnFooter) {
+				currentTurnFooter.remove();
+			} else {
+				// captures footer, not currentTurnFooter - avoids copying the next turn's text
+				const footer = createMessageFooter(() => footer.dataset.rawText || '', 'agent', new Date());
+				currentTurnFooter = footer;
+			}
+			currentTurnFooter.dataset.rawText = lastAgentRawText;
+			wrapper.appendChild(currentTurnFooter);
 			messagesContainer.appendChild(wrapper);
 
 			currentTurnEl = msgEl;
@@ -1258,8 +1269,8 @@
 			// Append to existing turn
 			currentTurnText += textChunk;
 			syncLastAgentRawText();
-			if (currentTurnEl.parentElement) {
-				currentTurnEl.parentElement.dataset.rawText = currentTurnText;
+			if (currentTurnFooter) {
+				currentTurnFooter.dataset.rawText = lastAgentRawText;
 			}
 
 			if (typeof marked !== 'undefined') {
@@ -1450,6 +1461,7 @@
 				currentTurnEl = null;
 				currentTextEl = null;
 				currentTurnText = '';
+				currentTurnFooter = null;
 				toolKinds.clear();
 				agentTurnId = 0;
 				lastAgentRawTurnId = -1;
@@ -1691,6 +1703,20 @@
 		syncLastAgentRawText();
 	}
 
+	function aggregatorHasPendingTools(aggregator) {
+		for (const item of aggregator.toolItems.values()) {
+			if (item.dataset.pending === 'true') return true;
+		}
+		return false;
+	}
+
+	function closeAggregatorIfIdle() {
+		if (currentAggregator && !aggregatorHasPendingTools(currentAggregator)) {
+			currentAggregator.close();
+			currentAggregator = null;
+		}
+	}
+
 	function handleAcpUpdate(payload) {
 		if (!payload) return;
 		const update = payload.update ? payload.update : payload;
@@ -1714,6 +1740,7 @@
 			if (currentThoughtBox) {
 				currentThoughtBox.pause();
 			}
+			closeAggregatorIfIdle();
 			if (update.content && update.content.text) {
 				stopVisualLoader();
 				appendChunk(update.content.text);
@@ -1722,6 +1749,7 @@
 			if (!currentThoughtBox) {
 				endCurrentTextBlock();
 				currentThoughtBox = new ThoughtAggregator();
+				closeAggregatorIfIdle();
 			}
 			if (update.content && update.content.text) {
 				currentThoughtBox.append(update.content.text);
@@ -2097,8 +2125,8 @@
 			messagesContainer.appendChild(this.el);
 		}
 
-		toggle() {
-			this.isOpen = !this.isOpen;
+		toggle(force) {
+			this.isOpen = force !== undefined ? force : !this.isOpen;
 			this.body.style.display = this.isOpen ? '' : 'none';
 
 			const svg = this.chevron.querySelector('svg');
@@ -2155,6 +2183,7 @@
 				statusEl.dataset.status = update.status || 'pending';
 				if (update.status === 'success' || update.status === 'completed') {
 					statusEl.innerHTML = ICONS.success;
+					item.dataset.pending = 'false';
 				} else if (
 					update.status === 'cancelled' ||
 					update.status === 'denied' ||
@@ -2163,12 +2192,18 @@
 					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && /aborterror|cancelled|denied/i.test(update.rawOutput))
 				) {
 					statusEl.innerHTML = ICONS.cancelled;
+					item.dataset.pending = 'false';
 				} else if (update.status === 'error' || update.status === 'failed') {
 					statusEl.innerHTML = ICONS.error;
+					item.dataset.pending = 'false';
 				} else if (update.status === 'pending') {
+					// Queued, not yet running - still unfinished, so the
+					// aggregator must stay open for it.
 					statusEl.innerHTML = ICONS.circle;
+					item.dataset.pending = 'true';
 				} else {
 					statusEl.innerHTML = ICONS.pending;
+					item.dataset.pending = 'true';
 				}
 			}
 
@@ -2190,6 +2225,7 @@
 
 		if (!card) {
 			endCurrentTextBlock();
+			closeAggregatorIfIdle();
 			card = document.createElement('div');
 			card.id = `plan-card-${agentTurnId}`;
 			card.className = 'my-3 border border-vscode-widget-border rounded bg-vscode-widget-bg overflow-hidden shrink-0';
@@ -2263,6 +2299,7 @@
 		if (toolKinds.get(toolCallId) === 'edit') {
 			let card = document.getElementById(`tool-card-${toolCallId}`);
 			if (!card) {
+				closeAggregatorIfIdle();
 				card = createEditCard(toolCallId, update);
 				messagesContainer.appendChild(card);
 				scrollToBottom();
