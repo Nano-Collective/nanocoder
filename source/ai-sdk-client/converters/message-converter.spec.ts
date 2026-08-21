@@ -398,3 +398,154 @@ test('dropOrphanedToolResults drops a tool result lacking a tool_call_id', t => 
 	t.is(result.length, 1);
 	t.is(result[0].role, 'user');
 });
+
+test('convertToModelMessages drops display-only assistant notices', t => {
+	const messages: Message[] = [
+		{role: 'user', content: 'do it'},
+		{
+			role: 'assistant',
+			content: '\n\n_Cancelled by user._\n',
+			displayOnly: true,
+		},
+		{role: 'assistant', content: 'Real reply'},
+	];
+
+	const result = convertToModelMessages(messages);
+	t.is(result.length, 2);
+	t.is(result[0].role, 'user');
+	const content = result[1].content as Array<{type: string; text?: string}>;
+	t.is(content[0].text, 'Real reply');
+});
+
+test('convertToModelMessages keeps messages with displayOnly false or absent', t => {
+	const messages: Message[] = [
+		{role: 'user', content: 'hi', displayOnly: false},
+		{role: 'assistant', content: 'hello'},
+	];
+
+	t.is(convertToModelMessages(messages).length, 2);
+});
+
+test('convertToModelMessages drops display-only messages of every role', t => {
+	const messages: Message[] = [
+		{role: 'system', content: 'sys', displayOnly: true},
+		{role: 'user', content: 'usr', displayOnly: true},
+		{
+			role: 'tool',
+			content: 'res',
+			tool_call_id: 'call_1',
+			name: 'edit',
+			displayOnly: true,
+		},
+	];
+
+	t.deepEqual(convertToModelMessages(messages), []);
+});
+
+test('convertToModelMessages keeps tool results paired across a display-only notice', t => {
+	const messages: Message[] = [
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [{id: 'call_1', function: {name: 'edit', arguments: {}}}],
+		},
+		{
+			role: 'assistant',
+			content: '\n\n**Error:** boom\n',
+			displayOnly: true,
+		},
+		{role: 'tool', content: 'edited', tool_call_id: 'call_1', name: 'edit'},
+	];
+
+	const result = convertToModelMessages(messages);
+	t.is(result.length, 2);
+	t.is(result[0].role, 'assistant');
+	t.is(result[1].role, 'tool');
+});
+
+test('convertToModelMessages orphans results whose tool call is display-only', t => {
+	const messages: Message[] = [
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [{id: 'call_1', function: {name: 'edit', arguments: {}}}],
+			displayOnly: true,
+		},
+		{role: 'tool', content: 'edited', tool_call_id: 'call_1', name: 'edit'},
+	];
+
+	t.deepEqual(convertToModelMessages(messages), []);
+});
+
+test('convertToModelMessages emits a tool-call round trip with no synthetic assistant text', t => {
+	const history: Message[] = [
+		{role: 'user', content: 'Read config.json'},
+		{
+			role: 'assistant',
+			content: 'Reading it now.',
+			tool_calls: [
+				{
+					id: 'call_1',
+					function: {name: 'read_file', arguments: {path: 'config.json'}},
+				},
+			],
+		},
+		{
+			role: 'tool',
+			content: '{"port":3000}',
+			tool_call_id: 'call_1',
+			name: 'read_file',
+		},
+		{role: 'assistant', content: '\n\n**Error:** boom\n', displayOnly: true},
+		{role: 'user', content: 'and the port?'},
+	];
+
+	const payload = convertToModelMessages(history);
+
+	t.deepEqual(
+		payload.map(m => m.role),
+		['user', 'assistant', 'tool', 'user'],
+	);
+
+	const assistantText = payload
+		.filter(m => m.role === 'assistant')
+		.flatMap(m => m.content as Array<{type: string; text?: string}>)
+		.filter(part => part.type === 'text')
+		.map(part => part.text);
+	t.deepEqual(assistantText, ['Reading it now.']);
+
+	t.deepEqual(payload[2].content, [
+		{
+			type: 'tool-result',
+			toolCallId: 'call_1',
+			toolName: 'read_file',
+			output: {type: 'text', value: '{"port":3000}'},
+		},
+	]);
+});
+
+test('convertToModelMessages never leaks a harness notice into the payload', t => {
+	const notices = [
+		'_Cancelled by user._',
+		'**Error:** stream closed',
+		'Tool approval required for: execute_bash. Exiting non-interactive mode',
+		'Unrecognized slash command: `/nope`. Type `/help` to see available commands.',
+		'Use the model selector in the chat header to switch models.',
+	];
+
+	const history: Message[] = [
+		{role: 'user', content: 'go'},
+		...notices.map(content => ({
+			role: 'assistant' as const,
+			content,
+			displayOnly: true,
+		})),
+		{role: 'assistant', content: 'Done.'},
+	];
+
+	const serialized = JSON.stringify(convertToModelMessages(history));
+	for (const notice of notices) {
+		t.false(serialized.includes(notice), `leaked into payload: ${notice}`);
+	}
+	t.true(serialized.includes('Done.'));
+});

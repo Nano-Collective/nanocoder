@@ -202,8 +202,12 @@ export class AcpAgent implements Agent {
 					const sendBuiltinReply = (msg: string) => {
 						session.messages = [
 							...session.messages,
-							{role: 'user', content: contextualUserText},
-							{role: 'assistant', content: msg},
+							{
+								role: 'user',
+								content: contextualUserText,
+								displayOnly: true,
+							},
+							{role: 'assistant', content: msg, displayOnly: true},
 						];
 						this.conn.sessionUpdate({
 							sessionId: params.sessionId,
@@ -335,7 +339,11 @@ export class AcpAgent implements Agent {
 						content: {type: 'text', text: cancelNotice},
 					},
 				});
-				session.messages.push({role: 'assistant', content: cancelNotice});
+				session.messages.push({
+					role: 'assistant',
+					content: cancelNotice,
+					displayOnly: true,
+				});
 				return {stopReason: 'cancelled'};
 			}
 
@@ -355,6 +363,7 @@ export class AcpAgent implements Agent {
 			session.messages.push({
 				role: 'assistant',
 				content: formattedError,
+				displayOnly: true,
 			});
 
 			throw error;

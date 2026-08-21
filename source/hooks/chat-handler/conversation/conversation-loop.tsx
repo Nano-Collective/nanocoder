@@ -804,7 +804,11 @@ export const processAssistantResponse = async (
 			);
 			const builder = new MessageBuilder(updatedMessages);
 			builder.addToolResults(turnResults);
-			builder.addMessage({role: 'assistant', content: errorMsg});
+			builder.addMessage({
+				role: 'assistant',
+				content: errorMsg,
+				displayOnly: true,
+			});
 			setMessages(builder.build());
 			setIsGenerating(false);
 			onConversationComplete?.();
