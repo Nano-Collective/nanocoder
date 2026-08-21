@@ -244,6 +244,36 @@ test('AcpAgent.loadSession - replays in-memory history for a known session', asy
 	t.true(replayed.some(u => u.update.content.text === 'remember this'));
 });
 
+test('AcpAgent.loadSession - replays reasoning but skips whitespace-only reasoning', async t => {
+	const conn = createMockConn();
+	const updates: any[] = [];
+	conn.sessionUpdate = async (u: any) => {
+		updates.push(u);
+	};
+	const agent = new AcpAgent(createMockInitContext(), conn);
+	const session = await agent.newSession({cwd: '/tmp'});
+	const loaded = (agent as any).sessions.get(session.sessionId);
+	loaded.messages = [
+		{role: 'assistant', content: 'first', reasoning: '\n\n'},
+		{role: 'assistant', content: 'second', reasoning: 'weighing options'},
+	];
+
+	updates.length = 0;
+	await agent.loadSession({
+		sessionId: session.sessionId,
+		cwd: '/tmp',
+		mcpServers: [],
+	});
+
+	const thoughts = updates.filter(
+		u => u.update?.sessionUpdate === 'agent_thought_chunk',
+	);
+	t.deepEqual(
+		thoughts.map(u => u.update.content.text),
+		['weighing options'],
+	);
+});
+
 // ============================================================================
 // setSessionConfigOption()
 // ============================================================================
