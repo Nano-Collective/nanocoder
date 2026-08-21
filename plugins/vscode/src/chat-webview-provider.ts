@@ -1,23 +1,57 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { WebviewToExtensionMessage, ExtensionToWebviewMessage } from './webview-protocol';
+import { WebviewToExtensionMessage, ExtensionToWebviewMessage, MentionItem } from './webview-protocol';
+
+
 
 import { NanocoderAcpClient } from './acp-client';
 import { DiffManager } from './diff-manager';
+import { SettingsManager } from './settings-manager';
+import { searchMentions, MentionSearchDeps } from './mention-search';
+import { readCappedFile, readCappedDirectory } from './context-attachment';
 
-export class ChatWebviewProvider implements vscode.WebviewViewProvider {
+/**
+ * Excluded from `@` search regardless of user settings — never useful context.
+ * Merged with the user's own excludes in `_mentionExcludeGlob`.
+ */
+const MENTION_ALWAYS_EXCLUDE = [
+	'**/node_modules/**',
+	'**/.git/**',
+	'**/dist/**',
+	'**/out/**',
+	'**/build/**',
+	'**/.next/**',
+	'**/coverage/**',
+];
+
+/**
+ * How long an editor-driven prompt waits for the webview shell and the ACP
+ * session before it is dropped. Without a bound, a prompt queued while the CLI
+ * is down would fire whenever the connection eventually came up - long after
+ * the user moved on from the code they clicked.
+ */
+const PENDING_PROMPT_TIMEOUT_MS = 30_000;
+
+export class ChatWebviewProvider
+	implements vscode.WebviewViewProvider, vscode.Disposable {
 	public static readonly viewType = 'nanocoder.chatView';
 
 	private _view?: vscode.WebviewView;
 	private _isWebviewReady = false;
+	/** Code lens prompt waiting on the webview shell and the ACP session. */
+	private _pendingPrompt: string | null = null;
+	private _pendingPromptTimer: ReturnType<typeof setTimeout> | null = null;
+
+	private readonly _settingsManager: SettingsManager;
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
 		private readonly _outputChannel: vscode.OutputChannel,
 		private readonly _acpClient: NanocoderAcpClient,
 		private readonly _diffManager: DiffManager
-	) { 
+	) {
+		this._settingsManager = new SettingsManager(this._outputChannel);
 		// Listen for session updates from ACP
 		this._acpClient.onSessionUpdate = (update: any) => {
 			this.handleDiffs(update);
@@ -63,7 +97,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				if (block.type === 'diff' && block.path) {
 					this._diffManager.addPendingChange({
 						type: 'file_change',
-						id: payload.toolCallId || block.path, // fallback id
+						id: update.toolCallId || payload.toolCallId || block.path, // fallback id
 						filePath: block.path,
 						originalContent: block.oldText || '',
 						newContent: block.newText || '',
@@ -73,6 +107,58 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				}
 			}
 		}
+	}
+
+	/**
+	 * Reveal the chat view and run `text` as a prompt. An editor code lens can
+	 * fire long before the sidebar has ever been opened, so the prompt is held
+	 * until the shell reports ready and a session exists.
+	 */
+	public async sendPrompt(text: string) {
+		this._queuePendingPrompt(text);
+		await vscode.commands.executeCommand(`${ChatWebviewProvider.viewType}.focus`);
+		await this._initializeSessionIfReady();
+	}
+
+	private _queuePendingPrompt(text: string) {
+		this._clearPendingPrompt();
+		this._pendingPrompt = text;
+		this._pendingPromptTimer = setTimeout(() => {
+			this._pendingPromptTimer = null;
+			this._pendingPrompt = null;
+			vscode.window.showWarningMessage(
+				'Nanocoder: the agent did not start in time, so your editor request was not sent. Try again once the chat view is connected.',
+			);
+		}, PENDING_PROMPT_TIMEOUT_MS);
+	}
+
+	private _clearPendingPrompt() {
+		if (this._pendingPromptTimer) {
+			clearTimeout(this._pendingPromptTimer);
+			this._pendingPromptTimer = null;
+		}
+		this._pendingPrompt = null;
+	}
+
+	/**
+	 * Hand a queued prompt to the webview. Cleared before posting so a failed
+	 * delivery can't be retried into a half-loaded shell.
+	 */
+	private _flushPendingPrompt() {
+		const text = this._pendingPrompt;
+		if (text === null) {
+			return;
+		}
+		this._clearPendingPrompt();
+		this.postMessage({type: 'runPrompt', text});
+	}
+
+	/**
+	 * Registered with the extension's subscriptions so a deactivate cannot
+	 * leave the pending-prompt timer running against a disposed view.
+	 */
+	public dispose() {
+		this._clearPendingPrompt();
 	}
 
 	public requestCopyLastCodeBlock() {
@@ -89,12 +175,35 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
+	public toggleSettings() {
+		if (this._view) {
+			this._view.webview.postMessage({ type: 'toggleSettings' });
+		}
+	}
+
 	public resolveWebviewView(
 		webviewView: vscode.WebviewView,
 		context: vscode.WebviewViewResolveContext,
 		_token: vscode.CancellationToken,
 	) {
 		this._view = webviewView;
+		// A re-resolve means a brand new shell that has not run its script yet.
+		// Leaving the flag set from the previous one would let a queued prompt
+		// post into a webview with no message listener attached, dropping it.
+		this._isWebviewReady = false;
+		webviewView.onDidDispose(() => {
+			// A disposal can land after a newer view has already been resolved
+			// (VS Code tears the old one down late). Without this guard that
+			// stale event would null out the live view and drop its state.
+			if (this._view !== webviewView) {
+				return;
+			}
+			this._view = undefined;
+			this._isWebviewReady = false;
+			// A queued prompt is deliberately kept: a disposal is usually a
+			// re-reveal in progress, and the next resolve is what delivers it.
+			// The timeout is what bounds the wait if no view comes back.
+		});
 
 		webviewView.webview.options = {
 			enableScripts: true,
@@ -181,6 +290,22 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 							this._broadcastSessions();
 						});
 						break;
+					case 'requestSettings':
+						this._outputChannel.appendLine('[Webview] Settings data requested.');
+						this._handleRequestSettings();
+						break;
+					case 'updateSetting':
+						this._outputChannel.appendLine(`[Webview] Update setting: ${message.key}`);
+						this._handleUpdateSetting(message.key, message.value);
+						break;
+					case 'openConfigFile':
+						this._outputChannel.appendLine(`[Webview] Open config file: ${message.file}`);
+						this._handleOpenConfigFile(message.file);
+						break;
+					case 'restartAcp':
+						this._outputChannel.appendLine('[Webview] Restart ACP requested.');
+						vscode.commands.executeCommand('nanocoder.restartAcp');
+						break;
 					case 'requestPathInfo': {
 						try {
 							const stat = fs.statSync(message.path);
@@ -190,6 +315,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 						} catch {
 							// path doesn't exist or access denied — silently ignore
 						}
+						break;
+					}
+					case 'requestMentionCompletions': {
+						this._handleMentionCompletions(message.query, message.requestId);
 						break;
 					}
 					case 'requestOpenDialog': {
@@ -253,6 +382,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				this._outputChannel.appendLine(`[Extension] Session initialized automatically: ${sessionId}`);
 				// Broadcast session list to populate History tab
 				await this._broadcastSessions();
+				this._flushPendingPrompt();
 			}
 		} catch (error) {
 			this._outputChannel.appendLine(`Failed to initialize session on ready: ${error}`);
@@ -276,6 +406,129 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		this.postMessage({type: 'updateSessions', sessions});
 	}
 
+	private _handleRequestSettings() {
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		const settings = this._settingsManager.readSettings(cwd);
+		this.postMessage({ type: 'settingsData', settings });
+	}
+
+	private _handleUpdateSetting(key: string, value: unknown) {
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		const result = this._settingsManager.updateSetting(cwd, key, value);
+		this.postMessage({ type: 'settingsUpdated', key, success: result.success, error: result.error });
+
+		// If successful, send refreshed settings so the UI stays in sync
+		if (result.success) {
+			const settings = this._settingsManager.readSettings(cwd);
+			this.postMessage({ type: 'settingsData', settings });
+		} else {
+			vscode.window.showErrorMessage(`Failed to save setting '${key}': ${result.error}`);
+		}
+	}
+
+	private async _handleOpenConfigFile(file: string) {
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		const paths = this._settingsManager.getConfigPaths(cwd);
+		const filePath = file === 'agents.config.json' ? paths.agentsConfig : paths.preferences;
+
+		try {
+			if (!fs.existsSync(filePath)) {
+				fs.mkdirSync(path.dirname(filePath), { recursive: true });
+				fs.writeFileSync(filePath, '{}\n', 'utf-8');
+			}
+			const doc = await vscode.workspace.openTextDocument(filePath);
+			await vscode.window.showTextDocument(doc);
+		} catch (err) {
+			vscode.window.showErrorMessage(
+				`Could not open ${file} at ${filePath}. Ensure the file exists.`,
+			);
+		}
+	}
+
+	/**
+	 * Exclude glob for `@` search.
+	 *
+	 * VS Code *replaces* its default excludes when `findFiles` is given an
+	 * explicit exclude rather than merging with them, so passing only the list
+	 * below would put `.env`, secrets and anything else the user hid via
+	 * `files.exclude` into the dropdown. Both settings are folded in by hand.
+	 * `search.exclude` is included too: it never applies to `findFiles`, but a
+	 * file picker honouring it is what users expect.
+	 */
+	private _mentionExcludeGlob(scope?: vscode.Uri): string {
+		const globs = new Set(MENTION_ALWAYS_EXCLUDE);
+
+		for (const section of ['files.exclude', 'search.exclude']) {
+			// Scoped to the folder being searched: both settings are
+			// folder-overridable, and reading them unscoped would miss that.
+			const patterns = vscode.workspace
+				.getConfiguration(undefined, scope)
+				.get<Record<string, boolean>>(section);
+			if (!patterns) {
+				continue;
+			}
+			for (const [glob, enabled] of Object.entries(patterns)) {
+				// A `when` clause resolves to a non-boolean; those are sibling
+				// conditions we cannot evaluate here, so we leave them alone.
+				if (enabled === true) {
+					globs.add(glob);
+				}
+			}
+		}
+
+		// A single-element brace list is invalid in some glob parsers, and the set
+		// can never be empty here, but the guard keeps that assumption local.
+		const list = [...globs];
+		return list.length === 1 ? list[0] : `{${list.join(',')}}`;
+	}
+
+	/**
+	 * Bind the workspace-search primitives that `searchMentions` needs. Kept
+	 * separate from the search itself so the ranking and matching logic stays
+	 * unit-testable without an extension host.
+	 */
+	private _mentionSearchDeps(): MentionSearchDeps {
+		const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+		const workspaceRoot = workspaceFolder?.uri.fsPath || process.cwd();
+		const exclude = this._mentionExcludeGlob(workspaceFolder?.uri);
+
+		return {
+			workspaceRoot,
+			openEditors: () => {
+				const paths: string[] = [];
+				for (const group of vscode.window.tabGroups.all) {
+					for (const tab of group.tabs) {
+						const input = tab.input;
+						if (input instanceof vscode.TabInputText && input.uri.scheme === 'file') {
+							paths.push(input.uri.fsPath);
+						}
+					}
+				}
+				return paths;
+			},
+			findFiles: async (glob, limit) => {
+				const uris = await vscode.workspace.findFiles(
+					workspaceFolder ? new vscode.RelativePattern(workspaceFolder, glob) : glob,
+					exclude,
+					limit,
+				);
+				return uris.map(uri => uri.fsPath);
+			},
+		};
+	}
+
+	private async _handleMentionCompletions(query: string, requestId: number) {
+		let items: MentionItem[] = [];
+		try {
+			items = await searchMentions(query, this._mentionSearchDeps());
+		} catch (error) {
+			this._outputChannel.appendLine(`[Mention] Search failed for "${query}": ${error}`);
+		}
+		// Answer even on failure, so the webview clears its in-flight state and
+		// the dropdown closes instead of hanging on a stale result set.
+		this.postMessage({ type: 'mentionCompletions', requestId, items });
+	}
+
 	/**
 	 * Expand @[file] and @[folder] references injected by the webview into
 	 * file/directory contents. This resolves attached context inline so the LLM
@@ -292,13 +545,17 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 				try {
 					if (kind === 'folder') {
 						// Emit a compact directory listing (names only, one per line)
-						const entries = fs.readdirSync(filePath, { withFileTypes: true });
-						const listing = entries
-							.map(e => (e.isDirectory() ? `${e.name}/` : e.name))
-							.join('\n');
+						const listing = readCappedDirectory(filePath);
 						return `<context path="${filePath}" type="directory">\n${listing}\n</context>`;
 					} else {
-						const content = fs.readFileSync(filePath, 'utf8');
+						// Capped rather than a bare readFileSync: `@` makes attaching
+						// a lockfile or a minified bundle one keystroke, and an
+						// uncapped read would silently eat the whole context window.
+						const content = readCappedFile(filePath);
+						if (content === null) {
+							this._outputChannel.appendLine(`[Context] Skipped unreadable or binary file ${filePath}`);
+							return `<!-- skipped ${filePath}: unreadable or binary -->`;
+						}
 						return `<context path="${filePath}">\n${content}\n</context>`;
 					}
 				} catch (err) {
@@ -315,6 +572,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		try {
 			if (this._acpClient.hasPendingPermissions()) {
 				vscode.window.showWarningMessage('Nanocoder: Please approve or deny the pending tool before sending a new message.');
+				// The webview has already drawn the user bubble and flipped to
+				// the loading state, and no turn is going to start - so end the
+				// turn here or the composer spins until the user hits Escape.
+				this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}});
 				return;
 			}
 
@@ -378,6 +639,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.js')).with({ query: `v=${extVersion}` });
 		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.css')).with({ query: `v=${extVersion}` });
 		const markedUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'marked.min.js'));
+		const mentionUtilsUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'mention-utils.js')).with({ query: `v=${extVersion}` });
 		const nonce = getNonce();
 
 		html = html.replace(/\{\{cspSource\}\}/g, webview.cspSource);
@@ -385,6 +647,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 		html = html.replace(/\{\{styleUri\}\}/g, styleUri.toString());
 		html = html.replace(/\{\{scriptUri\}\}/g, scriptUri.toString());
 		html = html.replace(/\{\{markedUri\}\}/g, markedUri.toString());
+		html = html.replace(/\{\{mentionUtilsUri\}\}/g, mentionUtilsUri.toString());
 
 		return html;
 	}

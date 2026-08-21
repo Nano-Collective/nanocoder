@@ -15,6 +15,8 @@ interface ProviderWizardProps {
 	projectDir: string;
 	onComplete: (configPath: string) => void;
 	onCancel?: () => void;
+	/** Open straight into the edit/delete choice for this provider. */
+	initialEditName?: string;
 }
 
 function parseProviderConfig(raw: unknown): ProviderWizardState {
@@ -127,12 +129,14 @@ function ProviderWizardSteps({
 	onBack,
 	onDelete,
 	configExists,
+	initialEditName,
 }: {
 	items: ProviderWizardState;
 	onComplete: (items: ProviderWizardState) => void;
 	onBack: () => void;
 	onDelete: () => void;
 	configExists: boolean;
+	initialEditName?: string;
 }) {
 	const [step, setStep] = useState<'providers' | 'modes'>('providers');
 	const [providers, setProviders] = useState(items.providers);
@@ -148,6 +152,7 @@ function ProviderWizardSteps({
 				onBack={onBack}
 				onDelete={onDelete}
 				configExists={configExists}
+				initialEditName={initialEditName}
 			/>
 		);
 	}
@@ -168,6 +173,7 @@ export function ProviderWizard({
 	projectDir,
 	onComplete,
 	onCancel,
+	initialEditName,
 }: ProviderWizardProps) {
 	return (
 		<BaseConfigWizard<ProviderWizardState>
@@ -178,7 +184,9 @@ export function ProviderWizard({
 			parseConfig={parseProviderConfig}
 			buildConfig={buildProviderConfigObject}
 			hasItems={items => items.providers.length > 0}
-			renderConfigureStep={args => <ProviderWizardSteps {...args} />}
+			renderConfigureStep={args => (
+				<ProviderWizardSteps {...args} initialEditName={initialEditName} />
+			)}
 			renderSummaryItems={items => <ProviderSummaryItems items={items} />}
 			renderCompleteExtras={items => <ProviderCompleteExtras items={items} />}
 			projectDir={projectDir}
