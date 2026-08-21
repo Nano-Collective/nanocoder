@@ -15,6 +15,7 @@
 import {createHash, randomBytes} from 'node:crypto';
 import {existsSync, mkdirSync} from 'node:fs';
 import {readFile, rename, unlink, writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
 import {dirname, join} from 'node:path';
 
 export interface DaemonLock {
@@ -44,6 +45,22 @@ export function getSocketPath(projectRoot: string): string {
 			.digest('hex')
 			.slice(0, 10);
 		return `\\\\.\\pipe\\nanocoder-daemon-${hash}`;
+	}
+
+	// On macOS, the socket path must be shorter than 104 bytes.
+	const DARWIN_SOCKET_PATH_CAPACITY = 104;
+	if (
+		process.platform === 'darwin' &&
+		Buffer.byteLength(projectRoot) > DARWIN_SOCKET_PATH_CAPACITY
+	) {
+		// Use a hash of the project root to keep and create a unique socket path in macOS temporary directory.
+		//
+		const hash = createHash('sha256')
+			.update(projectRoot)
+			.digest('hex')
+			.slice(0, 10)
+			.toLowerCase();
+		return join(tmpdir(), `nanocoder-daemon-${hash}.sock`);
 	}
 	return join(projectRoot, '.nanocoder', 'daemon.sock');
 }
