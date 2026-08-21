@@ -5,6 +5,7 @@ import {useState} from 'react';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {getColors} from '@/config';
 import {getConfigPath} from '@/config/paths';
+import {MIN_PATH_BUDGET_CHARS, WIZARD_ROW_CHROME_CHARS} from '@/constants';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {homeRelative, truncateMiddle} from '@/utils/path';
 
@@ -140,16 +141,20 @@ export function LocationStep({
 				onSelect={(item: LocationOption) => handleLocationSelect(item)}
 				itemComponent={({isSelected, label, path}) => {
 					const color = isSelected ? colors.primary : colors.text;
-					const pathBudget = Math.max(10, boxWidth - 10);
+					const pathBudget = Math.max(
+						MIN_PATH_BUDGET_CHARS,
+						boxWidth - WIZARD_ROW_CHROME_CHARS,
+					);
 					return (
 						<Box flexDirection="column">
 							<Text color={color} wrap="truncate-end">
 								{label}
 							</Text>
-							<Text color={colors.secondary} wrap="truncate-end">
-								{'  '}
-								{truncateMiddle(path, pathBudget)}
-							</Text>
+							<Box marginLeft={2}>
+								<Text color={colors.secondary} wrap="truncate-end">
+									{truncateMiddle(path, pathBudget)}
+								</Text>
+							</Box>
 						</Box>
 					);
 				}}
