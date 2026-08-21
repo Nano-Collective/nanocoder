@@ -385,8 +385,9 @@
 	let sessionsData = [];
 	let isHistoryView = false;
 	let isProcessing = false;
-	let currentAggregator = null;
-	let currentThoughtBox = null;
+	let currentWorkSummary = null;
+	const workSummaryByToolCallId = new Map();
+	const workSummaryByPlanId = new Map();
 	let visualLoader = null;
 	const toolKinds = new Map();
 	let toastTimeout = null;
@@ -501,24 +502,20 @@
 	}
 
 	// --- Send / Stop toggle logic ---
-	function setProcessing(active) {
+	function setProcessing(active, outcome = 'completed') {
 		isProcessing = active;
 		if (!active) {
-			// Globally cancel any stuck spinners across all tool cards, 
-			// in case multiple aggregators were created in the same session
+			// Globally settle any stuck spinners across all tool cards.
 			const allSpinners = document.querySelectorAll('.tool-status');
 			allSpinners.forEach(statusEl => {
 				const status = statusEl.dataset.status;
 				if (status === 'pending' || status === 'in_progress') {
 					statusEl.innerHTML = ICONS.cancelled;
+					statusEl.dataset.status = 'cancelled';
 				}
 			});
 			stopVisualLoader();
-
-			if (currentAggregator) {
-				currentAggregator.close();
-			}
-			currentAggregator = null;
+			finishCurrentWorkSummary(outcome);
 		}
 		if (sendStopBtn) {
 			sendStopBtn.title = active ? 'Stop (cancel)' : 'Send (Enter)';
@@ -529,7 +526,7 @@
 	// Shared by the Stop button and Escape so the two can't drift apart.
 	function requestCancel() {
 		vscode.postMessage({ type: 'cancel' });
-		setProcessing(false);
+		setProcessing(false, 'cancelled');
 	}
 
 	if (sendStopBtn) {
@@ -1059,7 +1056,10 @@
 		// A user message opens a new turn, so the agent segments that follow get
 		// a fresh id. The raw-text accumulator is handed over lazily, once the
 		// new response produces text.
-		if (role === 'user') agentTurnId++;
+		if (role === 'user') {
+			finishCurrentWorkSummary('completed');
+			agentTurnId++;
+		}
 
 		const wrapper = document.createElement('div');
 		wrapper.className = 'group flex flex-col min-w-0 shrink-0 ' +
@@ -1178,6 +1178,9 @@
 		wrapper.appendChild(createMessageFooter(() => content, role, new Date()));
 
 		messagesContainer.appendChild(wrapper);
+		if (role === 'user') {
+			currentWorkSummary = new WorkSummary(Date.now());
+		}
 		scrollToBottom();
 
 		if (role === 'agent') {
@@ -1439,8 +1442,10 @@
 			case 'clear':
 				// Session reset (new chat or resume) should return to the active
 				// chat view, not leave the panel stuck on the history list.
-				if (isHistoryView) showChatView();
-				if (isSettingsView) hideSettingsView();
+				if (isHistoryView || isSettingsView) showChatView();
+				discardCurrentWorkSummary();
+				workSummaryByToolCallId.clear();
+				workSummaryByPlanId.clear();
 				if (renderTimeout) { clearTimeout(renderTimeout); renderTimeout = null; }
 				if (message.isLoading) {
 					messagesContainer.innerHTML = `<div id="session-loader" class="flex flex-col items-center justify-center h-full opacity-50 mt-10">${ICONS.pending}<div class="mt-2 text-xs">Loading session...</div></div>`;
@@ -1455,17 +1460,10 @@
 				lastAgentRawTurnId = -1;
 				lastAgentSegments = '';
 				lastAgentRawText = '';
-				if (currentThoughtBox) {
-					clearInterval(currentThoughtBox.timer);
-					currentThoughtBox = null;
-				}
 				setProcessing(false);
 				break;
 			case 'sessionLoaded':
-				if (currentThoughtBox) {
-					currentThoughtBox.pause();
-					currentThoughtBox = null;
-				}
+				finishCurrentWorkSummary('completed');
 				const loader = document.getElementById('session-loader');
 				if (loader) loader.remove();
 				scrollToBottom();
@@ -1679,8 +1677,8 @@
 
 	// Close the current streamed-text block: flush any pending throttled
 	// render, then reset so the next agent_message_chunk starts a fresh
-	// markdown block. Called whenever another element (tool card, thought
-	// box, user message) is inserted - without this, text streamed after a
+	// markdown block. Called whenever another element (work activity or user
+	// message) is inserted - without this, text streamed after a
 	// tool call is appended to the block ABOVE the card, fusing pre-tool
 	// and post-tool output into one paragraph.
 	function endCurrentTextBlock() {
@@ -1696,10 +1694,6 @@
 		const update = payload.update ? payload.update : payload;
 
 		if (update.sessionUpdate === 'user_message_chunk') {
-			if (currentThoughtBox) {
-				currentThoughtBox.pause();
-				currentThoughtBox = null;
-			}
 			if (update.content) {
 				endCurrentTextBlock();
 				if (update.content.text) {
@@ -1711,42 +1705,30 @@
 				}
 			}
 		} else if (update.sessionUpdate === 'agent_message_chunk') {
-			if (currentThoughtBox) {
-				currentThoughtBox.pause();
-			}
+			currentWorkSummary?.endActivityGroup();
 			if (update.content && update.content.text) {
 				stopVisualLoader();
 				appendChunk(update.content.text);
 			}
 		} else if (update.sessionUpdate === 'agent_thought_chunk') {
-			if (!currentThoughtBox) {
-				endCurrentTextBlock();
-				currentThoughtBox = new ThoughtAggregator();
-			}
 			if (update.content && update.content.text) {
-				currentThoughtBox.append(update.content.text);
+				endCurrentTextBlock();
+				ensureCurrentWorkSummary().appendThought(update.content.text);
 			}
 		} else if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
-			if (currentThoughtBox) {
-				currentThoughtBox.pause();
-			}
 			handleToolCallUpdate(update);
 		} else if (update.sessionUpdate === 'plan') {
 			handlePlanUpdate(update);
 		} else if (update.sessionUpdate === 'prompt_response' || update.sessionUpdate === 'done') {
-			if (currentThoughtBox) {
-				currentThoughtBox.pause();
-				currentThoughtBox = null;
-			}
 			// Show token usage (and estimated cost) for the finished turn
 			appendUsageIndicator(update.usage, update.cost);
 			// Turn is complete — restore the send button
-			setProcessing(false);
+			setProcessing(false, update.outcome || 'completed');
 		}
 		keepVisualLoaderAtBottom();
 	}
 
-	// ─── Settings Panel Logic ───────────────────────────────────────
+	// --- Settings Panel Logic ---
 
 	let isSettingsView = false;
 
@@ -1800,9 +1782,8 @@
 		});
 	});
 
-	// Behavior tab — interactive controls change handlers
+	// Behavior tab - interactive controls change handlers
 	function initSettingsControls() {
-		// Default mode
 		const modeSelect = document.getElementById('setting-defaultMode');
 		if (modeSelect) {
 			modeSelect.addEventListener('change', () => {
@@ -1810,7 +1791,6 @@
 			});
 		}
 
-		// Auto-compact enabled
 		const acEnabled = document.getElementById('setting-autoCompact-enabled');
 		if (acEnabled) {
 			acEnabled.addEventListener('change', () => {
@@ -1818,7 +1798,6 @@
 			});
 		}
 
-		// Auto-compact threshold
 		const acThreshold = document.getElementById('setting-autoCompact-threshold');
 		if (acThreshold) {
 			acThreshold.addEventListener('change', () => {
@@ -1829,7 +1808,6 @@
 			});
 		}
 
-		// Auto-compact mode
 		const acMode = document.getElementById('setting-autoCompact-mode');
 		if (acMode) {
 			acMode.addEventListener('change', () => {
@@ -1837,7 +1815,6 @@
 			});
 		}
 
-		// Reasoning traces
 		const rtToggle = document.getElementById('setting-reasoningTraces');
 		if (rtToggle) {
 			rtToggle.addEventListener('change', () => {
@@ -1845,7 +1822,6 @@
 			});
 		}
 
-		// Sessions auto-save
 		const saToggle = document.getElementById('setting-sessions-autoSave');
 		if (saToggle) {
 			saToggle.addEventListener('change', () => {
@@ -1855,11 +1831,8 @@
 	}
 	initSettingsControls();
 
-	/**
-	 * Populate the settings UI with data received from the extension host.
-	 */
+	/** Populate the settings UI with data received from the extension host. */
 	function renderSettingsData(settings) {
-		// ── Providers list ──
 		const providersList = document.getElementById('settings-providers-list');
 		if (providersList) {
 			if (settings.providers.length === 0) {
@@ -1882,7 +1855,6 @@
 			}
 		}
 
-		// ── MCP Servers list ──
 		const mcpList = document.getElementById('settings-mcp-list');
 		if (mcpList) {
 			if (settings.mcpServers.length === 0) {
@@ -1898,21 +1870,17 @@
 			}
 		}
 
-		// ── Tool auto-approval list ──
 		const toolsList = document.getElementById('settings-tools-list');
 		if (toolsList) {
 			if (settings.alwaysAllow.length === 0) {
 				toolsList.innerHTML = '<div class="settings-list-empty">No tools auto-approved</div>';
 			} else {
 				toolsList.innerHTML = settings.alwaysAllow.map(t =>
-					`<div class="settings-list-item">
-						<span class="settings-list-item-name">${escapeHtml(t)}</span>
-					</div>`
+					`<div class="settings-list-item"><span class="settings-list-item-name">${escapeHtml(t)}</span></div>`
 				).join('');
 			}
 		}
 
-		// ── Web search status ──
 		const wsStatus = document.getElementById('settings-websearch-status');
 		if (wsStatus) {
 			wsStatus.innerHTML = settings.webSearch.configured
@@ -1920,22 +1888,16 @@
 				: '<div class="settings-list-item"><span class="settings-badge settings-badge-off">Not configured</span></div>';
 		}
 
-		// ── Behavior controls ──
 		const modeSelect = document.getElementById('setting-defaultMode');
 		if (modeSelect) modeSelect.value = settings.defaultMode || 'normal';
-
 		const acEnabled = document.getElementById('setting-autoCompact-enabled');
 		if (acEnabled) acEnabled.checked = settings.autoCompact.enabled;
-
 		const acThreshold = document.getElementById('setting-autoCompact-threshold');
 		if (acThreshold) acThreshold.value = settings.autoCompact.threshold;
-
 		const acMode = document.getElementById('setting-autoCompact-mode');
 		if (acMode) acMode.value = settings.autoCompact.mode;
-
 		const rtToggle = document.getElementById('setting-reasoningTraces');
 		if (rtToggle) rtToggle.checked = settings.reasoningTraces;
-
 		const saToggle = document.getElementById('setting-sessions-autoSave');
 		if (saToggle) saToggle.checked = settings.sessions.autoSave;
 	}
@@ -1946,67 +1908,218 @@
 		return div.innerHTML;
 	}
 
-	// ─── End Settings Panel Logic ───────────────────────────────────
+	// --- End Settings Panel Logic ---
 
-	class ThoughtAggregator {
-		constructor() {
+	function formatWorkDuration(elapsedMs) {
+		const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+		if (totalSeconds < 60) return `${totalSeconds}s`;
+
+		const totalMinutes = Math.floor(totalSeconds / 60);
+		const seconds = totalSeconds % 60;
+		if (totalMinutes < 60) {
+			return seconds ? `${totalMinutes}m ${seconds}s` : `${totalMinutes}m`;
+		}
+
+		const hours = Math.floor(totalMinutes / 60);
+		const minutes = totalMinutes % 60;
+		return minutes ? `${hours}h ${minutes}m` : `${hours}h`;
+	}
+
+	function ensureCurrentWorkSummary() {
+		if (!currentWorkSummary) {
+			currentWorkSummary = new WorkSummary(Date.now());
+		}
+		return currentWorkSummary;
+	}
+
+	function finishCurrentWorkSummary(outcome) {
+		if (!currentWorkSummary) return;
+		const summary = currentWorkSummary;
+		currentWorkSummary = null;
+		summary.finish(outcome);
+	}
+
+	function discardCurrentWorkSummary() {
+		if (!currentWorkSummary) return;
+		currentWorkSummary.dispose();
+		currentWorkSummary = null;
+	}
+
+	class WorkSummary {
+		constructor(startedAt) {
+			this.startedAt = startedAt;
+			this.activityCount = 0;
+			this.isOpen = true;
+			this.isFinished = false;
+			this.currentThought = null;
+			this.currentToolGroup = null;
+			this.toolGroups = new Map();
+
 			this.el = document.createElement('div');
-			this.el.className = 'my-2 flex flex-col shrink-0 thought-aggregator';
+			this.el.className = 'my-2 flex flex-col shrink-0 work-summary';
+			this.el.style.display = 'none';
 
-			this.header = document.createElement('div');
-			this.header.className = 'flex items-center gap-1.5 cursor-pointer opacity-70 text-vscode-fg hover:opacity-100 transition-opacity select-none w-fit';
+			this.header = document.createElement('button');
+			this.header.type = 'button';
+			this.header.className = 'flex items-center gap-1.5 cursor-pointer opacity-70 text-vscode-fg hover:opacity-100 transition-opacity select-none w-fit bg-transparent border-none p-0';
+			this.header.setAttribute('aria-expanded', 'true');
 			this.header.onclick = () => this.toggle();
 
 			this.title = document.createElement('span');
 			this.title.className = 'font-vscode text-[0.85em] font-medium';
-			this.title.textContent = 'Thinking...';
+			this.title.textContent = 'Working...';
 
 			this.chevron = document.createElement('span');
 			this.chevron.className = 'flex items-center justify-center opacity-70';
 			this.chevron.innerHTML = ICONS.chevron;
-			this.chevron.style.transform = 'rotate(0deg)'; // open by default
 
 			this.header.appendChild(this.title);
 			this.header.appendChild(this.chevron);
 			this.el.appendChild(this.header);
 
 			this.body = document.createElement('div');
-			this.body.className = 'mt-2 pl-3 border-l-[3px] border-vscode-border opacity-70 text-vscode-fg markdown-body text-[0.95em]';
+			this.body.className = 'mt-2 pl-3 border-l-[3px] border-vscode-border flex flex-col gap-2 min-w-0';
 			this.el.appendChild(this.body);
 
-			this.isOpen = true;
-			this.userToggled = false;
-			this.text = '';
-			this.renderTimeout = null;
-			this.thinkingMs = 0;
-			this.segmentStart = Date.now();
-
 			this.timer = setInterval(() => this.updateTimer(), 1000);
-
 			messagesContainer.appendChild(this.el);
-			scrollToBottom();
 		}
 
-		elapsedSeconds() {
-			const active = this.segmentStart ? Date.now() - this.segmentStart : 0;
-			return Math.floor((this.thinkingMs + active) / 1000);
+		elapsedMs() {
+			return Date.now() - this.startedAt;
 		}
 
 		updateTimer() {
-			this.title.textContent = `Thinking for ${this.elapsedSeconds()}s`;
+			if (this.isFinished || this.activityCount === 0) return;
+			this.title.textContent = `Working for ${formatWorkDuration(this.elapsedMs())}`;
+		}
+
+		reveal() {
+			if (this.activityCount > 0) return;
+			this.el.style.display = '';
+			this.updateTimer();
+		}
+
+		addActivity(element) {
+			this.reveal();
+			this.activityCount++;
+			this.body.appendChild(element);
+			scrollToBottom();
+		}
+
+		removeActivity(element) {
+			if (element.parentElement !== this.body) return;
+			element.remove();
+			this.activityCount = Math.max(0, this.activityCount - 1);
+			if (this.activityCount === 0) this.el.style.display = 'none';
+		}
+
+		appendThought(chunk) {
+			this.currentToolGroup = null;
+			if (!this.currentThought) {
+				this.currentThought = new WorkThought();
+				this.addActivity(this.currentThought.el);
+			}
+			this.currentThought.append(chunk);
+		}
+
+		endThought() {
+			if (!this.currentThought) return;
+			this.currentThought.finish();
+			this.currentThought = null;
+		}
+
+		endActivityGroup() {
+			this.endThought();
+			this.currentToolGroup = null;
+		}
+
+		addOrUpdateTool(toolCallId, update) {
+			this.endThought();
+			let group = this.toolGroups.get(toolCallId);
+			if (!group) {
+				if (!this.currentToolGroup) {
+					this.currentToolGroup = new ToolAggregator();
+					this.addActivity(this.currentToolGroup.el);
+				}
+				group = this.currentToolGroup;
+				this.toolGroups.set(toolCallId, group);
+			}
+			group.addOrUpdateTool(toolCallId, update);
+		}
+
+		addStandaloneActivity(element) {
+			this.endActivityGroup();
+			this.addActivity(element);
+		}
+
+		openForInteraction() {
+			if (this.activityCount > 0) this.toggle(true);
 		}
 
 		toggle(force) {
-			if (force === undefined) {
-				this.userToggled = true;
-			}
 			this.isOpen = force !== undefined ? force : !this.isOpen;
-			this.body.style.display = this.isOpen ? 'block' : 'none';
+			this.body.style.display = this.isOpen ? '' : 'none';
+			this.header.setAttribute('aria-expanded', String(this.isOpen));
 
 			const svg = this.chevron.querySelector('svg');
 			if (svg) {
 				svg.style.transform = this.isOpen ? 'rotate(0deg)' : 'rotate(-90deg)';
 			}
+		}
+
+		finish(outcome) {
+			if (this.isFinished) return;
+			this.isFinished = true;
+			this.endActivityGroup();
+			clearInterval(this.timer);
+			this.timer = null;
+
+			if (this.activityCount === 0) {
+				this.el.remove();
+				return;
+			}
+
+			const terminalOutcome = outcome === 'cancelled' || outcome === 'failed'
+				? outcome
+				: 'completed';
+			this.el.dataset.outcome = terminalOutcome;
+			const duration = formatWorkDuration(this.elapsedMs());
+			if (terminalOutcome === 'cancelled') {
+				this.title.textContent = `Stopped after ${duration}`;
+			} else if (terminalOutcome === 'failed') {
+				this.title.textContent = `Failed after ${duration}`;
+			} else {
+				this.title.textContent = `Worked for ${duration}`;
+			}
+			this.toggle(false);
+		}
+
+		dispose() {
+			this.currentThought?.dispose();
+			clearInterval(this.timer);
+			this.timer = null;
+			this.el.remove();
+		}
+	}
+
+	class WorkThought {
+		constructor() {
+			this.text = '';
+			this.renderTimeout = null;
+
+			this.el = document.createElement('div');
+			this.el.className = 'work-summary-thought py-1 min-w-0';
+
+			this.label = document.createElement('div');
+			this.label.className = 'font-vscode text-[0.78em] font-medium opacity-60 mb-1';
+			this.label.textContent = 'Thought';
+
+			this.body = document.createElement('div');
+			this.body.className = 'markdown-body text-[0.95em] opacity-70 text-vscode-fg min-w-0';
+
+			this.el.appendChild(this.label);
+			this.el.appendChild(this.body);
 		}
 
 		render() {
@@ -2018,7 +2131,6 @@
 		}
 
 		append(chunk) {
-			this.resume();
 			this.text += chunk;
 			if (typeof marked !== 'undefined') {
 				if (!this.renderTimeout) {
@@ -2034,85 +2146,45 @@
 			}
 		}
 
-		resume() {
-			if (this.segmentStart) return;
-			if (this.text && !this.text.endsWith('\n\n')) {
-				this.text += '\n\n';
-			}
-			this.segmentStart = Date.now();
-			this.timer = setInterval(() => this.updateTimer(), 1000);
-			this.updateTimer();
-			if (!this.userToggled) {
-				this.toggle(true);
-			}
-		}
-
-		pause() {
-			if (!this.segmentStart) return;
-			this.thinkingMs += Date.now() - this.segmentStart;
-			this.segmentStart = null;
-			clearInterval(this.timer);
-			this.timer = null;
+		finish() {
 			if (this.renderTimeout) {
 				clearTimeout(this.renderTimeout);
 				this.renderTimeout = null;
 			}
 			this.render();
-			this.title.textContent = `Thought for ${this.elapsedSeconds()}s`;
-			if (!this.userToggled) {
-				this.toggle(false);
-			}
+		}
+
+		dispose() {
+			if (this.renderTimeout) clearTimeout(this.renderTimeout);
+			this.renderTimeout = null;
 		}
 	}
 
 	class ToolAggregator {
 		constructor() {
 			this.el = document.createElement('div');
-			this.el.className = 'my-3 border border-vscode-widget-border rounded bg-vscode-widget-bg overflow-hidden shrink-0 tool-aggregator';
+			this.el.className = 'border border-vscode-widget-border rounded bg-vscode-widget-bg overflow-hidden shrink-0 tool-aggregator work-summary-tool-group';
 
 			this.header = document.createElement('div');
-			this.header.className = 'px-3 py-2 flex items-center bg-vscode-widget-header border-b border-vscode-widget-border gap-2 cursor-pointer select-none';
-			this.header.onclick = () => this.toggle();
+			this.header.className = 'px-3 py-2 flex items-center bg-vscode-widget-header border-b border-vscode-widget-border gap-2';
 
 			this.title = document.createElement('span');
 			this.title.className = 'font-vscode text-[0.9em] opacity-80';
-			this.title.textContent = 'Exploring...';
-
-			this.chevron = document.createElement('span');
-			this.chevron.className = 'ml-auto flex items-center justify-center';
-			this.chevron.innerHTML = ICONS.chevron;
+			this.title.textContent = 'Tools';
 
 			this.header.appendChild(this.title);
-			this.header.appendChild(this.chevron);
 			this.el.appendChild(this.header);
 
 			this.body = document.createElement('div');
 			this.body.className = 'flex flex-col';
 			this.el.appendChild(this.body);
 
-			this.isOpen = true;
 			this.toolCount = 0;
 			this.toolItems = new Map();
-
-			messagesContainer.appendChild(this.el);
-		}
-
-		toggle() {
-			this.isOpen = !this.isOpen;
-			this.body.style.display = this.isOpen ? '' : 'none';
-
-			const svg = this.chevron.querySelector('svg');
-			if (svg) {
-				svg.style.transform = this.isOpen ? 'rotate(0deg)' : 'rotate(-90deg)';
-			}
-		}
-
-		close() {
-			this.toggle(false);
 		}
 
 		updateTitle() {
-			this.title.textContent = `Exploring ${this.toolCount} tools...`;
+			this.title.textContent = `Tools (${this.toolCount})`;
 		}
 
 		addOrUpdateTool(toolCallId, update) {
@@ -2181,17 +2253,24 @@
 	// carries the complete replacement list, so the card is rebuilt in place.
 	function handlePlanUpdate(update) {
 		const entries = Array.isArray(update.entries) ? update.entries : [];
-		let card = document.getElementById(`plan-card-${agentTurnId}`);
+		const planId = `plan-card-${agentTurnId}`;
+		let card = document.getElementById(planId);
+		const owner = workSummaryByPlanId.get(planId);
 
 		if (entries.length === 0) {
-			if (card) card.remove();
+			if (card) {
+				if (owner) owner.removeActivity(card);
+				else card.remove();
+			}
+			workSummaryByPlanId.delete(planId);
 			return;
 		}
 
 		if (!card) {
 			endCurrentTextBlock();
+			const summary = ensureCurrentWorkSummary();
 			card = document.createElement('div');
-			card.id = `plan-card-${agentTurnId}`;
+			card.id = planId;
 			card.className = 'my-3 border border-vscode-widget-border rounded bg-vscode-widget-bg overflow-hidden shrink-0';
 
 			const header = document.createElement('div');
@@ -2212,8 +2291,8 @@
 			body.className = 'plan-body flex flex-col';
 			card.appendChild(body);
 
-			messagesContainer.appendChild(card);
-			scrollToBottom();
+			summary.addStandaloneActivity(card);
+			workSummaryByPlanId.set(planId, summary);
 		}
 
 		const body = card.querySelector('.plan-body');
@@ -2250,30 +2329,30 @@
 	function handleToolCallUpdate(update) {
 		const toolCallId = update.toolCallId || (update.toolCall && update.toolCall.toolCallId);
 		if (!toolCallId) return;
+		const existingCard = document.getElementById(`tool-card-${toolCallId}`);
+		const summary = workSummaryByToolCallId.get(toolCallId) || ensureCurrentWorkSummary();
+		summary.endThought();
 
 		// A new card is about to be inserted below the current text block -
 		// close the block so any text streamed after the tool starts fresh
 		// below the card instead of appending to the paragraph above it.
-		if (!document.getElementById(`tool-card-${toolCallId}`)) {
+		if (!existingCard) {
 			endCurrentTextBlock();
 		}
 
 		if (update.kind) toolKinds.set(toolCallId, update.kind);
 
 		if (toolKinds.get(toolCallId) === 'edit') {
-			let card = document.getElementById(`tool-card-${toolCallId}`);
+			let card = existingCard;
 			if (!card) {
 				card = createEditCard(toolCallId, update);
-				messagesContainer.appendChild(card);
-				scrollToBottom();
+				summary.addStandaloneActivity(card);
 			}
 			updateEditCard(card, update);
 		} else {
-			if (!currentAggregator) {
-				currentAggregator = new ToolAggregator();
-			}
-			currentAggregator.addOrUpdateTool(toolCallId, update);
+			summary.addOrUpdateTool(toolCallId, update);
 		}
+		workSummaryByToolCallId.set(toolCallId, summary);
 	}
 
 	// Verb per tool for the aggregated tool list. An entry only fires when the
@@ -2468,6 +2547,7 @@
 	function handlePermissionRequested(toolCallId, toolCall, options) {
 		const card = document.getElementById(`tool-card-${toolCallId}`);
 		if (!card) return;
+		workSummaryByToolCallId.get(toolCallId)?.openForInteraction();
 
 		// Check if actions already exist
 		if (card.querySelector('.tool-actions')) return;
@@ -2531,9 +2611,11 @@
 			const actions = card.querySelector('.tool-actions');
 			if (actions) actions.remove();
 
-			// Tool cards keep their status in .tool-status, edit cards in .ml-auto.
-			const statusEl = card.querySelector('.tool-status, .ml-auto');
-			if (statusEl) statusEl.innerHTML = ICONS.cancelled;
+			const statusEl = card.querySelector('.tool-status');
+			if (statusEl) {
+				statusEl.innerHTML = ICONS.cancelled;
+				statusEl.dataset.status = 'cancelled';
+			}
 		}
 	}
 

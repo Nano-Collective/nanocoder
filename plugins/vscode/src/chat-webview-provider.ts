@@ -599,6 +599,7 @@ export class ChatWebviewProvider
 			const sessionId = await this._acpClient.getOrCreateSession(cwd);
 			if (!sessionId) {
 				vscode.window.showErrorMessage('Nanocoder: Failed to create ACP session.');
+				this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response', outcome: 'failed'}});
 				return;
 			}
 			
@@ -612,6 +613,11 @@ export class ChatWebviewProvider
 			});
 
 			const response = await this._acpClient.prompt(expandedText, images);
+			const outcome = response?.stopReason === 'cancelled'
+				? 'cancelled'
+				: response
+					? 'completed'
+					: 'failed';
 			// Signal turn completion so the Webview can flip back to the send
 			// button. Forward the per-turn token usage and estimated cost so
 			// the webview can render the usage indicator under the response.
@@ -619,6 +625,7 @@ export class ChatWebviewProvider
 				type: 'acpUpdate',
 				update: {
 					sessionUpdate: 'prompt_response',
+					outcome,
 					usage: response?.usage,
 					cost: (response?._meta as Record<string, any> | undefined)?.['nanocoder/usage']?.cost,
 				},
@@ -627,7 +634,7 @@ export class ChatWebviewProvider
 			this._outputChannel.appendLine(`Prompt execution error: ${error}`);
 			vscode.window.showErrorMessage(`Nanocoder Prompt error: ${error}`);
 			// Always reset the button even on error
-			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response'}});
+			this.postMessage({type: 'acpUpdate', update: {sessionUpdate: 'prompt_response', outcome: 'failed'}});
 		}
 	}
 
