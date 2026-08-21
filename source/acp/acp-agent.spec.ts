@@ -341,6 +341,38 @@ test('AcpAgent.prompt - propagates API errors cleanly', async t => {
 	t.false(session.turnActive);
 });
 
+test('AcpAgent.prompt - resolves cleanly on user cancellation instead of throwing', async t => {
+	const {agent, conn} = createAgent();
+
+	const updates: any[] = [];
+	conn.sessionUpdate = async (u: any) => {
+		updates.push(u);
+	};
+
+	// Mirrors what chat-handler.ts throws when the abort signal fires mid-stream
+	agent['initContext'].client.chat = async () => {
+		throw new Error('Operation was cancelled');
+	};
+
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	const result = await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'stop please'}],
+	});
+
+	t.is(result.stopReason, 'cancelled');
+	// The early return still has to run the finally block, same as the throwing path.
+	t.false(agent['sessions'].get(session.sessionId)!.turnActive);
+	t.true(
+		updates.some(
+			u =>
+				u.update?.sessionUpdate === 'agent_message_chunk' &&
+				u.update?.content?.text?.includes('Cancelled by user'),
+		),
+	);
+});
+
 test('AcpAgent.prompt - returns response for valid session', async t => {
 	const {agent} = createAgent();
 	const session = await agent.newSession({cwd: '/tmp'});
@@ -433,6 +465,44 @@ test('AcpAgent.cancel - aborts session for known session', async t => {
 	// We can't directly check the session's abortController since it's internal,
 	// but we verify no error was thrown
 	t.pass();
+});
+
+test('AcpAgent.cancel - stops a turn cancelled before the loop reads the signal', async t => {
+	const context = createMockInitContext();
+	let chatCalls = 0;
+	(context.client as any).chat = async () => {
+		chatCalls++;
+		return {choices: [{message: {content: 'Test response'}}]};
+	};
+	const agent = new AcpAgent(context, createMockConn());
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	const turn = agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'hi'}],
+	});
+	await agent.cancel({sessionId: session.sessionId});
+
+	t.is((await turn).stopReason, 'cancelled');
+	t.is(chatCalls, 0);
+});
+
+test('AcpAgent.prompt - a cancelled turn does not block the next prompt', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	const cancelled = agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'first'}],
+	});
+	await agent.cancel({sessionId: session.sessionId});
+	t.is((await cancelled).stopReason, 'cancelled');
+
+	const next = await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'second'}],
+	});
+	t.is(next.stopReason, 'end_turn');
 });
 
 // ============================================================================

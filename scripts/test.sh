@@ -15,6 +15,7 @@ echo ""
 
 echo "🔍 Checking TypeScript types..."
 pnpm test:types
+pnpm test:types:vscode
 echo ""
 echo "✅ Type check passed"
 echo ""

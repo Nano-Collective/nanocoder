@@ -1,4 +1,4 @@
-import {readFile, stat} from 'node:fs/promises';
+import fs from 'node:fs/promises';
 import {extname} from 'node:path';
 import {CACHE_FILE_TTL_MS, MAX_FILE_READ_RETRIES} from '@/constants';
 
@@ -31,6 +31,15 @@ let accessCounter = 0;
 // Track pending reads to deduplicate concurrent requests for the same file
 const pendingReads = new Map<string, Promise<CachedFile>>();
 
+function cleanupPendingRead(
+	absPath: string,
+	pending: Promise<CachedFile>,
+): void {
+	if (pendingReads.get(absPath) === pending) {
+		pendingReads.delete(absPath);
+	}
+}
+
 /**
  * Get file content from cache or read from disk.
  * Automatically checks mtime to ensure freshness.
@@ -54,7 +63,7 @@ export async function getCachedFileContent(
 		} else {
 			// Check if file mtime has changed
 			try {
-				const fileStat = await stat(absPath);
+				const fileStat = await fs.stat(absPath);
 				const currentMtime = fileStat.mtimeMs;
 
 				if (currentMtime === data.mtime) {
@@ -67,16 +76,20 @@ export async function getCachedFileContent(
 
 				// Check for pending read before starting a new one (deduplication)
 				let pending = pendingReads.get(absPath);
+				let ownsPendingRead = false;
 				if (!pending) {
 					// Reuse the stat we just did to avoid double stat
 					pending = readAndCacheFile(absPath, now, fileStat.mtimeMs);
 					pendingReads.set(absPath, pending);
+					ownsPendingRead = true;
 				}
 
 				try {
 					return await pending;
 				} finally {
-					pendingReads.delete(absPath);
+					if (ownsPendingRead) {
+						cleanupPendingRead(absPath, pending);
+					}
 				}
 			} catch {
 				// File may have been deleted, invalidate cache
@@ -98,7 +111,7 @@ export async function getCachedFileContent(
 	try {
 		return await readPromise;
 	} finally {
-		pendingReads.delete(absPath);
+		cleanupPendingRead(absPath, readPromise);
 	}
 }
 
@@ -114,13 +127,13 @@ async function readAndCacheFile(
 	retryCount = 0,
 ): Promise<CachedFile> {
 	// Get mtime before reading (or use known mtime from caller)
-	const mtimeBefore = knownMtime ?? (await stat(absPath)).mtimeMs;
+	const mtimeBefore = knownMtime ?? (await fs.stat(absPath)).mtimeMs;
 
 	// Read as Buffer to support both text and binary formats
-	const buffer = await readFile(absPath);
+	const buffer = await fs.readFile(absPath);
 
 	// Verify mtime didn't change during read
-	const mtimeAfter = (await stat(absPath)).mtimeMs;
+	const mtimeAfter = (await fs.stat(absPath)).mtimeMs;
 	if (mtimeAfter !== mtimeBefore) {
 		if (retryCount >= MAX_FILE_READ_RETRIES) {
 			throw new Error(
