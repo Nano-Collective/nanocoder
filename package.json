@@ -113,7 +113,7 @@
 		"@types/node": "^26.1.2",
 		"@types/react": "^19.0.0",
 		"@types/ws": "^8.18.1",
-		"ava": "^7.0.0",
+		"ava": "^8.0.1",
 		"c8": "^11.0.0",
 		"husky": "^9.1.7",
 		"ink-testing-library": "^4.0.0",
