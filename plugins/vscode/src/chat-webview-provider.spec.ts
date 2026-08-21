@@ -1,84 +1,99 @@
+import {readFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import vm from 'node:vm';
 import test from 'ava';
 
-// ---------------------------------------------------------------------------
-// Slash command template mapping
-//
-// These tests assert the SLASH_COMMANDS definitions in chat-panel.js behave
-// as expected. We duplicate the array here so the spec has no browser/webview
-// dependency, and so a future refactor that changes a template will break the
-// test and prompt a review.
-// ---------------------------------------------------------------------------
+const slashCommandUtilsSource = readFileSync(
+	fileURLToPath(new URL('../media/slash-command-utils.js', import.meta.url)),
+	'utf8',
+);
+const chatPanelScript = readFileSync(
+	fileURLToPath(new URL('../media/chat-panel.js', import.meta.url)),
+	'utf8',
+);
+const chatWebviewProviderSource = readFileSync(
+	fileURLToPath(new URL('./chat-webview-provider.ts', import.meta.url)),
+	'utf8',
+);
 
-const SLASH_COMMANDS = [
-	{
-		name: '/test',
-		description: 'Write focused tests',
-		template: 'Write tests for the following:\n\n',
-	},
-	{
-		name: '/explain',
-		description: 'Explain code or errors',
-		template: 'Explain the following clearly:\n\n',
-	},
-	{
-		name: '/doc',
-		description: 'Draft documentation',
-		template: 'Write documentation for the following:\n\n',
-	},
-];
+const sandbox: Record<string, any> = {};
+vm.createContext(sandbox);
+vm.runInContext(slashCommandUtilsSource, sandbox);
 
-test('slash commands - /test template injects correct prefix into textarea', (t) => {
-	const cmd = SLASH_COMMANDS.find((c) => c.name === '/test');
-	t.truthy(cmd, '/test command must exist');
-	t.is(cmd!.template, 'Write tests for the following:\n\n');
-});
+const {
+	SLASH_COMMANDS,
+	findSlashCommandToken,
+	applySlashCommandTemplate,
+	isSlashCommandName,
+} = sandbox.NanocoderSlashCommandUtils;
 
-test('slash commands - /explain template injects correct prefix into textarea', (t) => {
-	const cmd = SLASH_COMMANDS.find((c) => c.name === '/explain');
-	t.truthy(cmd, '/explain command must exist');
-	t.is(cmd!.template, 'Explain the following clearly:\n\n');
-});
-
-test('slash commands - /doc template injects correct prefix into textarea', (t) => {
-	const cmd = SLASH_COMMANDS.find((c) => c.name === '/doc');
-	t.truthy(cmd, '/doc command must exist');
-	t.is(cmd!.template, 'Write documentation for the following:\n\n');
-});
-
-test('slash commands - all commands have non-empty name, description, and template', (t) => {
-	for (const cmd of SLASH_COMMANDS) {
-		t.true(cmd.name.startsWith('/'), `${cmd.name} must start with /`);
-		t.truthy(cmd.description, `${cmd.name} must have a description`);
-		t.truthy(cmd.template, `${cmd.name} must have a template`);
-	}
-});
-
-test('slash commands - selecting a command produces text the user can see and edit', (t) => {
-	// Simulate applySlashSelection: user typed "/test", it gets replaced with the template
-	const userInput = '/test';
-	const cmd = SLASH_COMMANDS.find((c) => c.name === '/test')!;
-	const result = cmd.template; // template replaces the /test trigger in the textarea
-
-	t.true(result.length > 0, 'result must be non-empty');
-	t.false(result.includes('/test'), 'raw slash command should not appear in final text');
-	t.true(
-		result.startsWith('Write tests'),
-		'textarea should start with the human-readable template text',
+test('slash commands - real command definitions expose user-visible templates', t => {
+	t.deepEqual(
+		SLASH_COMMANDS.map((command: {name: string; template: string}) => ({
+			name: command.name,
+			template: command.template,
+		})),
+		[
+			{name: '/test', template: 'Write tests for the following:\n\n'},
+			{name: '/explain', template: 'Explain the following clearly:\n\n'},
+			{name: '/doc', template: 'Write documentation for the following:\n\n'},
+		],
 	);
 });
 
-test('slash commands - what user sees is exactly what gets sent to AI (no hidden prefix)', (t) => {
-	// The PR reviewer required that the prompt sent to the AI must match what
-	// the user sees in the textarea. We verify that by confirming no server-side
-	// prefix manipulation exists — the template IS the full user contribution.
-	const userTyped = 'my function here';
-	const cmd = SLASH_COMMANDS.find((c) => c.name === '/test')!;
+test('slash commands - command token is only found as first text on a line', t => {
+	t.deepEqual(findSlashCommandToken('/ex', 3, 3), {
+		start: 0,
+		end: 3,
+		query: 'ex',
+	});
+	t.deepEqual(findSlashCommandToken('code\n  /te', 10, 10), {
+		start: 7,
+		end: 10,
+		query: 'te',
+	});
+	t.is(findSlashCommandToken('explain this /te', 16, 16), null);
+	t.is(findSlashCommandToken('https://', 8, 8), null);
+	t.is(findSlashCommandToken('open https://', 13, 13), null);
+	t.is(findSlashCommandToken('/tmp/', 5, 5), null);
+});
 
-	// After applySlashSelection the textarea contains: template + userTyped
-	const textareaContent = cmd.template + userTyped;
+test('slash commands - command token ignores selections and trailing text', t => {
+	t.is(findSlashCommandToken('/test', 1, 4), null);
+	t.is(findSlashCommandToken('/test code', 5, 5), null);
+});
 
-	// This is exactly what gets sent to the AI — no hidden concatenation
-	const sentToAi = textareaContent;
+test('slash commands - applying a command prepends visible template to existing text', t => {
+	const command = SLASH_COMMANDS.find((item: {name: string}) => item.name === '/explain');
+	const result = applySlashCommandTemplate('code\n/explain', 13, 13, command);
 
-	t.is(sentToAi, textareaContent, 'sent prompt must equal what the user sees in the textarea');
+	t.deepEqual(result, {
+		text: 'Explain the following clearly:\n\ncode',
+		cursor: 'Explain the following clearly:\n\n'.length,
+	});
+});
+
+test('slash commands - command names are not treated as attachment chips', t => {
+	t.true(isSlashCommandName('/explain'));
+	t.true(isSlashCommandName(' /explain '));
+	t.true(isSlashCommandName('/test'));
+	t.false(isSlashCommandName('/tmp'));
+	t.true(chatPanelScript.includes('if (isSlashCommandName(path) || isSlashCommandName(name)) break;'));
+	t.true(chatPanelScript.includes('!isSlashCommandName(item.path) && !isSlashCommandName(item.name)'));
+	t.true(chatPanelScript.includes('function removeSlashCommandChipsFromDom()'));
+	t.true(chatPanelScript.includes('removeSlashCommandChipsFromDom();'));
+});
+
+test('slash commands - no hidden prompt state remains in chat-panel runtime', t => {
+	t.true(chatPanelScript.includes('globalThis.NanocoderSlashCommandUtils ||'));
+	t.true(chatPanelScript.includes('applySlashCommandTemplate('));
+	t.false(chatPanelScript.includes('selectedSlashCommand'));
+	t.false(chatPanelScript.includes('command: selectedSlashCommand'));
+	t.false(chatPanelScript.includes('_buildPrompt'));
+});
+
+test('webview assets include file mtime in cache key for extension dev mode', t => {
+	t.true(chatWebviewProviderSource.includes('fs.statSync(assetPath).mtimeMs'));
+	t.true(chatWebviewProviderSource.includes("assetVersion('chat-panel.js')"));
+	t.true(chatWebviewProviderSource.includes("assetVersion('slash-command-utils.js')"));
 });
