@@ -7,6 +7,11 @@
 		],
 		"sourceMap": true,
 		"outDir": "dist",
+		// `include` reaches into source/ below, and TypeScript 7 infers a
+		// rootDir of plugins/vscode and rejects those files. The extension is
+		// bundled by esbuild (see build:ext) and tsc only type-checks this
+		// project, so widening rootDir to the repo root costs nothing.
+		"rootDir": "../..",
 		"strict": true,
 		"esModuleInterop": true,
 		"skipLibCheck": true,
