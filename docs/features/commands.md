@@ -97,6 +97,11 @@ nanocoder --mode yolo run "update README and push"
 ```
 
 If a tool requires approval that the active mode won't grant, nanocoder prints `Tool approval required for: ...` and exits with status code `1`.
+
+Because there is nobody to answer a prompt in a `run`, the agent-loop [retry limits](../configuration/index.md#retry-limits) hard-stop instead of pausing: a model that repeats the same tool call, returns empty responses, or keeps emitting malformed tool calls past its configured cap ends the run with an error. Under the `--plain` runtime (used automatically in CI and non-TTY environments) the error names the limit that fired and the run exits with status code `1`.
+
+> **Warning - CI polling patterns:** the repeated-call hard stop triggers on *legitimate* repetition too. If your workflow's model is expected to run the identical command repeatedly - polling a deploy, waiting on a slow job by re-running the same check - the run aborts once `maxRepeatedToolCalls` consecutive identical calls are emitted (default 3). Raise `nanocoder.retries.maxRepeatedToolCalls` in that project's `agents.config.json` before relying on such a pattern in CI.
+
 ### JSON Output
 
 For CI pipelines, scripting, and tool chaining, pass `--json` (alias `--output-format json`) alongside `run` to get a single structured JSON object on `stdout` instead of streamed markdown:
@@ -150,4 +155,4 @@ The emitted object looks like:
 
 Two more fields appear conditionally: `message` (the error text, when `kind` is `"error"`) and `toolNames` (the tools awaiting approval, when `kind` is `"tool-approval-required"`).
 
-On error (e.g. an untrusted workspace directory, or the turn limit being hit without a final answer), `kind` is `"error"` and the object still includes whatever `toolCalls` were captured before the failure, so partial progress isn't silently dropped.
+On error (e.g. an untrusted workspace directory, the turn limit being hit without a final answer, or an agent-loop [retry limit](../configuration/index.md#retry-limits) being hit), `kind` is `"error"` and the object still includes whatever `toolCalls` were captured before the failure, so partial progress isn't silently dropped.

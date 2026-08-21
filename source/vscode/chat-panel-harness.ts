@@ -18,6 +18,15 @@ const mediaUrl = (filename: string) =>
 const MENTION_UTILS_SOURCE = readFileSync(mediaUrl('mention-utils.js'), 'utf8');
 const PANEL_SOURCE = readFileSync(mediaUrl('chat-panel.js'), 'utf8');
 
+// The real webview loads mention-utils.js before chat-panel.js (see
+// chat-panel.html); the panel reads globalThis.NanocoderMentionUtils at boot.
+const MENTION_UTILS_SOURCE = readFileSync(
+	fileURLToPath(
+		new URL('../../plugins/vscode/media/mention-utils.js', import.meta.url),
+	),
+	'utf8',
+);
+
 const SHELL_IDS = [
 	'add-image-btn',
 	'add-menu-btn',
@@ -52,9 +61,9 @@ const SHELL_IDS = [
 	'send-stop-btn',
 ];
 
-// biome-ignore lint/suspicious/noExplicitAny: the panel assigns arbitrary
-// properties (onclick, oninput, ...) to the nodes it builds, so the stub has to
-// stay open-ended.
+// The panel assigns arbitrary properties (onclick, oninput, ...) to the nodes
+// it builds, so the stub has to stay open-ended.
+// biome-ignore lint/suspicious/noExplicitAny: see above
 export type StubElement = any;
 
 /**

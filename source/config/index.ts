@@ -13,6 +13,11 @@ import {
 	loadPreferences,
 } from '@/config/preferences';
 import {defaultTheme, getThemeColors} from '@/config/themes';
+import {
+	MAX_EMPTY_TURNS,
+	MAX_MALFORMED_RETRIES,
+	MAX_REPEATED_TOOL_CALLS,
+} from '@/constants';
 import type {
 	AppConfig,
 	AutoCompactConfig,
@@ -24,6 +29,7 @@ import type {
 	NotificationsConfig,
 	PasteConfig,
 	ProviderConfig,
+	RetryLimitsConfig,
 	SystemPromptConfig,
 	TuneConfig,
 } from '@/types/index';
@@ -323,6 +329,58 @@ function loadHeadlessConfig(): AppConfig['headless'] {
 	);
 }
 
+// Load agent-loop retry limits from `nanocoder.retries` in agents.config.json.
+// Defaults mirror the historical hardcoded caps in constants.ts, so behaviour
+// is unchanged unless the user opts in. Distinct from the per-provider
+// `maxRetries` setting, which caps network request retries.
+function loadRetryLimitsConfig(): RetryLimitsConfig {
+	const defaults: RetryLimitsConfig = {
+		maxRepeatedToolCalls: MAX_REPEATED_TOOL_CALLS,
+		maxEmptyTurns: MAX_EMPTY_TURNS,
+		maxMalformedRetries: MAX_MALFORMED_RETRIES,
+	};
+
+	// A fresh tool-call signature already counts as 1 repeat, so a cap below 2
+	// would pause on every single tool call. The nudge/self-correction caps may
+	// go to 0 (= give up on the first failing turn).
+	const normalizeLimit = (
+		value: unknown,
+		min: number,
+		fallback: number,
+	): number => {
+		if (typeof value === 'number' && Number.isFinite(value)) {
+			return Math.max(min, Math.round(value));
+		}
+		return fallback;
+	};
+
+	return (
+		loadHierarchicalConfig('agents.config.json', 'retries', config => {
+			const retries = config.nanocoder?.retries;
+			if (retries && typeof retries === 'object') {
+				return {
+					maxRepeatedToolCalls: normalizeLimit(
+						retries.maxRepeatedToolCalls,
+						2,
+						defaults.maxRepeatedToolCalls,
+					),
+					maxEmptyTurns: normalizeLimit(
+						retries.maxEmptyTurns,
+						0,
+						defaults.maxEmptyTurns,
+					),
+					maxMalformedRetries: normalizeLimit(
+						retries.maxMalformedRetries,
+						0,
+						defaults.maxMalformedRetries,
+					),
+				};
+			}
+			return null;
+		}) ?? defaults
+	);
+}
+
 // Load paste configuration and Returns default config if not specified
 function loadPasteConfig(): PasteConfig {
 	const defaults: PasteConfig = {
@@ -524,6 +582,9 @@ function loadAppConfig(): AppConfig {
 	// Load headless conversation limits
 	const headless = loadHeadlessConfig();
 
+	// Load agent-loop retry limits
+	const retries = loadRetryLimitsConfig();
+
 	// Load paste configuration
 	const paste = loadPasteConfig();
 
@@ -553,6 +614,7 @@ function loadAppConfig(): AppConfig {
 		autoCompact,
 		sessions,
 		headless,
+		retries,
 		paste,
 		nanocoderTools,
 		alwaysAllow,
@@ -575,6 +637,26 @@ export function getAppConfig(): AppConfig {
 		_appConfig = loadAppConfig();
 	}
 	return _appConfig;
+}
+
+/**
+ * Agent-loop retry limits, read live from the current app config so runtime
+ * edits (and tests that mutate `getAppConfig().retries`) are picked up.
+ *
+ * The fallback is applied per field, not to the object as a whole: a `retries`
+ * object missing one key would otherwise hand callers `undefined`, and every
+ * `count >= limit` guard reading it evaluates false, silently disabling the
+ * very cap this feature exists to enforce.
+ * @public
+ */
+export function getRetryLimits(): RetryLimitsConfig {
+	const retries = getAppConfig().retries;
+	return {
+		maxRepeatedToolCalls:
+			retries?.maxRepeatedToolCalls ?? MAX_REPEATED_TOOL_CALLS,
+		maxEmptyTurns: retries?.maxEmptyTurns ?? MAX_EMPTY_TURNS,
+		maxMalformedRetries: retries?.maxMalformedRetries ?? MAX_MALFORMED_RETRIES,
+	};
 }
 
 // Function to reload the app configuration (useful after config file changes)

@@ -1,5 +1,6 @@
 import test from 'ava';
 import {SubagentExecutor} from './subagent-executor.js';
+import {getAppConfig} from '@/config/index';
 import {getModelContextLimit} from '@/models';
 import {SubagentLoader, getSubagentLoader} from './subagent-loader.js';
 import type {ToolManager} from '@/tools/tool-manager';
@@ -310,6 +311,132 @@ test.serial('handles unknown tool calls', async t => {
 
 	t.true(result.success);
 	t.is(result.output, 'Handled missing tool');
+});
+
+// --- Agent-loop retry limits (nanocoder.retries) — issue #897 ---
+
+const repeatedCallResponse = (name = 'read_file') => ({
+	content: '',
+	tool_calls: [
+		{id: 'tc-loop', function: {name, arguments: '{"path": "x"}'}},
+	],
+});
+
+test.serial('repeated identical tool calls trip the retry cap', async t => {
+	const toolManager = createMockToolManager({
+		read_file: {handler: async () => 'same output', readOnly: true},
+	});
+	// Default maxRepeatedToolCalls = 3: the identical call executes on turns 1
+	// and 2; the third consecutive emission stops the run before executing.
+	const client = createMockClient([
+		repeatedCallResponse(),
+		repeatedCallResponse(),
+		repeatedCallResponse(),
+		{content: 'never reached'},
+	]);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Loop forever',
+	});
+
+	t.false(result.success);
+	t.regex(result.error || '', /repeated the same tool call 3 times/i);
+	t.regex(result.error || '', /maxRepeatedToolCalls/);
+});
+
+test.serial('a tripped retry cap still returns the work done before the stop', async t => {
+	const toolManager = createMockToolManager({
+		read_file: {handler: async () => 'same output', readOnly: true},
+	});
+	const client = createMockClient([
+		{...repeatedCallResponse(), content: 'found the config file'},
+		{...repeatedCallResponse(), content: 'it sets the timeout to 30s'},
+		repeatedCallResponse(),
+	]);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Loop after doing useful work',
+	});
+
+	t.false(result.success);
+	t.regex(result.output, /found the config file/);
+	t.regex(result.output, /it sets the timeout to 30s/);
+});
+
+test.serial('identical tool calls one under the retry cap complete normally', async t => {
+	const toolManager = createMockToolManager({
+		read_file: {handler: async () => 'same output', readOnly: true},
+	});
+	const client = createMockClient([
+		repeatedCallResponse(),
+		repeatedCallResponse(),
+		{content: 'done after two repeats'},
+	]);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Repeat twice then finish',
+	});
+
+	t.true(result.success);
+	t.is(result.output, 'done after two repeats');
+});
+
+test.serial('repeated unknown-tool calls trip the retry cap', async t => {
+	// A subagent stuck calling a nonexistent tool must trip the cap too — the
+	// signature covers every emitted call, not just executable ones.
+	const toolManager = createMockToolManager();
+	const client = createMockClient([
+		repeatedCallResponse('ghost_tool'),
+		repeatedCallResponse('ghost_tool'),
+		repeatedCallResponse('ghost_tool'),
+		{content: 'never reached'},
+	]);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Loop on a missing tool',
+	});
+
+	t.false(result.success);
+	t.regex(result.error || '', /repeated the same tool call 3 times/i);
+});
+
+test.serial('retry cap honors a custom configured maxRepeatedToolCalls', async t => {
+	const retries = getAppConfig().retries;
+	if (!retries) {
+		t.fail('resolved config must carry retry limits');
+		return;
+	}
+	const original = retries.maxRepeatedToolCalls;
+	retries.maxRepeatedToolCalls = 2;
+	try {
+		const toolManager = createMockToolManager({
+			read_file: {handler: async () => 'same output', readOnly: true},
+		});
+		const client = createMockClient([
+			repeatedCallResponse(),
+			repeatedCallResponse(),
+			{content: 'never reached'},
+		]);
+		const executor = new SubagentExecutor(toolManager, client);
+
+		const result = await executor.execute({
+			subagent_type: 'explore',
+			description: 'Loop with a tight cap',
+		});
+
+		t.false(result.success);
+		t.regex(result.error || '', /repeated the same tool call 2 times/i);
+	} finally {
+		retries.maxRepeatedToolCalls = original;
+	}
 });
 
 test.serial('respects abort signal', async t => {

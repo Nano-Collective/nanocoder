@@ -1,6 +1,9 @@
 import type {ToolCall} from '@/types/index';
 import test from 'ava';
-import {createCancellationResults} from './tool-cancellation';
+import {
+	createApprovalUnavailableResults,
+	createCancellationResults,
+} from './tool-cancellation';
 
 console.log(`\ntool-cancellation.spec.ts`);
 
@@ -227,4 +230,31 @@ test('createCancellationResults - realistic multi-tool cancellation', t => {
 	t.is(results[1].name, 'FindFiles');
 	t.is(results[2].name, 'ExecuteBash');
 	t.is(results[3].name, 'WriteFile');
+});
+
+test('createApprovalUnavailableResults - pairs each call with a non-cancellation reason', t => {
+	const toolCalls = [
+		createMockToolCall('call-1', 'ExecuteBash', {command: 'ls'}),
+		createMockToolCall('call-2', 'WriteFile', {path: '/tmp/a'}),
+	];
+	const results = createApprovalUnavailableResults(toolCalls);
+
+	t.is(results.length, 2);
+	results.forEach((result, index) => {
+		t.is(result.tool_call_id, toolCalls[index].id);
+		t.is(result.role, 'tool');
+		t.is(result.name, toolCalls[index].function.name);
+		t.is(
+			result.content,
+			'Tool was not executed: approval unavailable in non-interactive mode.',
+		);
+	});
+});
+
+test('createApprovalUnavailableResults - never claims the user cancelled', t => {
+	const results = createApprovalUnavailableResults([
+		createMockToolCall('call-1', 'ExecuteBash'),
+	]);
+
+	t.false(results[0].content.includes('cancelled by the user'));
 });

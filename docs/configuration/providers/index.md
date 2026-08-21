@@ -82,6 +82,7 @@ Use dedicated AI SDK packages for native API support, enabled via the `sdkProvid
 | `disableToolModels` | List of model names to disable tool calling for (optional) |
 | `requestTimeout` | Overall request timeout in milliseconds (default: 120,000). Set to `-1` to disable (optional) |
 | `socketTimeout` | Socket-level timeout in milliseconds, uses `requestTimeout` if not set. Set to `-1` to disable (optional) |
+| `maxRetries` | How many times a failed network request is retried (default: 2). Unrelated to the agent-loop [Retry Limits](../index.md#retry-limits), which cap how often the model may repeat itself (optional) |
 | `connectionPool` | Connection pool settings (optional, see [Timeouts & Connection Pooling](#timeouts--connection-pooling)) |
 
 ### Context Window Overrides

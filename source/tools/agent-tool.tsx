@@ -7,6 +7,7 @@
  */
 
 import {randomUUID} from 'node:crypto';
+import {buildSubagentFailureMessage} from '@/subagents/failure-message.js';
 import type {SubagentExecutor} from '@/subagents/subagent-executor.js';
 import {getSubagentLoader} from '@/subagents/subagent-loader.js';
 import {jsonSchema, tool} from '@/types/core';
@@ -142,7 +143,7 @@ async function executeAgent(
 	);
 
 	if (!result.success) {
-		throw new Error(result.error || 'Subagent execution failed');
+		throw new Error(buildSubagentFailureMessage(result.error, result.output));
 	}
 
 	return result.output;
