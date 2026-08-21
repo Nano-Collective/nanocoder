@@ -34,7 +34,7 @@ import type {AcpInitContext} from '@/acp/acp-types';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
 import {getAppConfig} from '@/config/index';
 import {
-	getSemanticMemoryEnabled,
+	getProjectContextPreferences,
 	loadPreferences,
 	updateLastUsed,
 } from '@/config/preferences';
@@ -160,7 +160,7 @@ export class AcpAgent implements Agent {
 				session.baseSystemMessage.content,
 				userText,
 				new SemanticMemoryManager({cwd: session.cwd}),
-				{semanticMemoryEnabled: getSemanticMemoryEnabled()},
+				getProjectContextPreferences(),
 			);
 			session.systemMessage = {
 				role: 'system',

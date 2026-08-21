@@ -2,10 +2,14 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'ava';
+import type {Message} from '@/types/core';
 import {SemanticMemoryManager} from './semantic-memory-manager.js';
 import {
 	inferMemoryCategory,
+	MAX_PROPOSALS,
+	MAX_SCANNED_MESSAGES,
 	type MemoryProposal,
+	REVERSAL_WARNING,
 	SummarizerService,
 	toCamelCaseCategory,
 } from './summarizer-service.js';
@@ -385,4 +389,154 @@ test('SummarizerService acceptProposal saves a proposal without re-deriving its 
 	t.is(memory.category, 'bugFix');
 	t.is(memory.sourceSessionId, 'session-1');
 	t.deepEqual(await manager.listMemories(), [memory]);
+});
+
+// --- Reversal detector: the four variants the round-3 review found defeated,
+// plus the contradiction case the original report actually asked for. ---
+
+const CONCESSION =
+	"You're right. The provider config should load lazily, not eagerly.";
+const USER_PREFERENCE_ONLY =
+	'Honestly, lazy provider config just feels cleaner to me.';
+
+function reversalWarnings(messages: Message[], content: string): string[] {
+	const proposal = new SummarizerService()
+		.proposeMemoriesFromMessages(messages)
+		.find(p => p.content === content);
+	if (!proposal) throw new Error(`no proposal produced for: ${content}`);
+	return proposal.warnings;
+}
+
+test('reversal is flagged on a clean two-turn concession', t => {
+	t.true(
+		reversalWarnings(
+			[
+				{role: 'user', content: USER_PREFERENCE_ONLY},
+				{role: 'assistant', content: CONCESSION},
+			],
+			CONCESSION,
+		).includes(REVERSAL_WARNING),
+	);
+});
+
+test('reversal is still flagged when the user message contains a bare slash', t => {
+	// "auth/login" is prose, not a file path; it must not count as evidence.
+	t.true(
+		reversalWarnings(
+			[
+				{
+					role: 'user',
+					content:
+						'Honestly, for auth/login lazy provider config just feels cleaner to me.',
+				},
+				{role: 'assistant', content: CONCESSION},
+			],
+			CONCESSION,
+		).includes(REVERSAL_WARNING),
+	);
+});
+
+test('reversal is still flagged across intervening tool-call turns', t => {
+	t.true(
+		reversalWarnings(
+			[
+				{role: 'user', content: USER_PREFERENCE_ONLY},
+				{
+					role: 'assistant',
+					content: '',
+					tool_calls: [
+						{id: 't1', function: {name: 'read_file', arguments: {}}},
+					],
+				},
+				{
+					role: 'tool',
+					content: 'file contents',
+					tool_call_id: 't1',
+					name: 'read_file',
+				},
+				{role: 'assistant', content: CONCESSION},
+			],
+			CONCESSION,
+		).includes(REVERSAL_WARNING),
+	);
+});
+
+test('reversal is flagged for agreement openers outside the original six phrases', t => {
+	const conceded =
+		'Agreed on reflection. The provider config should load lazily, not eagerly.';
+	t.true(
+		reversalWarnings(
+			[
+				{role: 'user', content: USER_PREFERENCE_ONLY},
+				{role: 'assistant', content: conceded},
+			],
+			conceded,
+		).includes(REVERSAL_WARNING),
+	);
+});
+
+test('reversal is flagged when a turn contradicts an earlier assistant turn without any opener', t => {
+	const reversed =
+		'The provider config should load lazily, not eagerly, for this project.';
+	t.true(
+		reversalWarnings(
+			[
+				{role: 'user', content: 'How should provider config load?'},
+				{
+					role: 'assistant',
+					content: 'The provider config should load eagerly, not lazily.',
+				},
+				{role: 'user', content: USER_PREFERENCE_ONLY},
+				{role: 'assistant', content: reversed},
+			],
+			reversed,
+		).includes(REVERSAL_WARNING),
+	);
+});
+
+test('reversal is not flagged when a substantive assistant reply sits in between', t => {
+	const conceded = "You're right. Use eager provider config.";
+	t.false(
+		reversalWarnings(
+			[
+				{role: 'user', content: 'Honestly lazy just feels cleaner.'},
+				{role: 'assistant', content: 'Here is a summary of the current setup.'},
+				{role: 'assistant', content: conceded},
+			],
+			conceded,
+		).includes(REVERSAL_WARNING),
+	);
+});
+
+test('reversal is not flagged for a routine factual assistant turn', t => {
+	const fact = 'The storage schema keeps one provider row per workspace.';
+	t.false(
+		reversalWarnings(
+			[
+				{role: 'user', content: 'How is the storage laid out here?'},
+				{role: 'assistant', content: fact},
+			],
+			fact,
+		).includes(REVERSAL_WARNING),
+	);
+});
+
+test('SummarizerService bounds the scan window and total proposal count', t => {
+	const service = new SummarizerService();
+	const messages: Message[] = [];
+	// Well past both limits, and old enough that the earliest fall outside the window.
+	const total = MAX_SCANNED_MESSAGES + 20;
+	for (let i = 0; i < total; i++) {
+		messages.push({
+			role: 'user',
+			content: `Fix the provider retry storage schema bug number ${i}.`,
+		});
+	}
+
+	const proposals = service.proposeMemoriesFromMessages(messages);
+
+	t.is(proposals.length, MAX_PROPOSALS);
+	// The window keeps the newest turns, so the oldest message is not proposed.
+	t.false(proposals.some(p => p.content.endsWith('number 0.')));
+	t.true(proposals.some(p => p.content.endsWith(`number ${total - 1}.`)));
 });

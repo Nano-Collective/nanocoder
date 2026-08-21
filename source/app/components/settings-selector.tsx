@@ -12,8 +12,8 @@ import {
 	getNotificationsPreference,
 	getPasteThreshold,
 	getPrivacyPreference,
+	getProjectContextPreferences,
 	getReasoningExpanded,
-	getSemanticMemoryEnabled,
 	updateCompactToolDisplay,
 	updateNanocoderShape,
 	updateNotificationsPreference,
@@ -22,6 +22,8 @@ import {
 	updateReasoningExpanded,
 	updateSelectedTheme,
 	updateSemanticMemoryEnabled,
+	updateSemanticMemoryLimit,
+	updateSemanticMemoryTokenBudget,
 } from '@/config/preferences';
 import {getThemeColors, themes} from '@/config/themes';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
@@ -1045,6 +1047,18 @@ export function SettingsSelector({onCancel}: SettingsSelectorProps) {
 	}
 }
 
+/** Presets cycled by the Advanced panel. Any value in range can still be set
+ * directly in nanocoder-preferences.json; these are just the common choices. */
+const TOKEN_BUDGET_PRESETS = [120, 240, 480, 960];
+const MEMORY_LIMIT_PRESETS = [3, 5, 8, 12];
+
+/** Next preset after `current`, wrapping. Falls to the first when `current`
+ * is a hand-edited value that isn't in the list. */
+function cyclePreset(presets: number[], current: number): number {
+	const index = presets.indexOf(current);
+	return presets[(index + 1) % presets.length] ?? presets[0] ?? current;
+}
+
 // Advanced settings panel
 function SettingsAdvancedPanel({
 	onBack,
@@ -1056,8 +1070,15 @@ function SettingsAdvancedPanel({
 	const {boxWidth, isNarrow} = useResponsiveTerminal();
 	const {colors} = useTheme();
 
+	const initialContextPreferences = getProjectContextPreferences();
 	const [semanticMemoryEnabled, setSemanticMemoryEnabled] = useState(
-		getSemanticMemoryEnabled(),
+		initialContextPreferences.semanticMemoryEnabled,
+	);
+	const [tokenBudget, setTokenBudget] = useState(
+		initialContextPreferences.tokenBudget,
+	);
+	const [memoryLimit, setMemoryLimit] = useState(
+		initialContextPreferences.memoryLimit,
 	);
 
 	useInput((_, key) => {
@@ -1075,13 +1096,38 @@ function SettingsAdvancedPanel({
 				label: `Semantic Memory: ${semanticMemoryEnabled ? 'ON' : 'OFF'}`,
 				value: 'semantic-memory',
 			},
+			{
+				label: `Memory Token Budget: ${tokenBudget}`,
+				value: 'semantic-memory-token-budget',
+			},
+			{
+				label: `Memories Per Prompt: ${memoryLimit}`,
+				value: 'semantic-memory-limit',
+			},
 		];
-	}, [semanticMemoryEnabled]);
+	}, [semanticMemoryEnabled, tokenBudget, memoryLimit]);
 
-	const handleSelect = () => {
-		const next = !semanticMemoryEnabled;
-		setSemanticMemoryEnabled(next);
-		updateSemanticMemoryEnabled(next);
+	const handleSelect = (item: {value: string}) => {
+		switch (item.value) {
+			case 'semantic-memory': {
+				const next = !semanticMemoryEnabled;
+				setSemanticMemoryEnabled(next);
+				updateSemanticMemoryEnabled(next);
+				break;
+			}
+			case 'semantic-memory-token-budget': {
+				const next = cyclePreset(TOKEN_BUDGET_PRESETS, tokenBudget);
+				setTokenBudget(next);
+				updateSemanticMemoryTokenBudget(next);
+				break;
+			}
+			case 'semantic-memory-limit': {
+				const next = cyclePreset(MEMORY_LIMIT_PRESETS, memoryLimit);
+				setMemoryLimit(next);
+				updateSemanticMemoryLimit(next);
+				break;
+			}
+		}
 	};
 
 	const title = isNarrow ? 'Advanced' : 'Advanced Settings';
@@ -1107,7 +1153,9 @@ function SettingsAdvancedPanel({
 			<Box marginBottom={1}>
 				<Text color={colors.warning}>
 					Semantic Memory recalls saved project context and injects it into
-					future prompts. Turn it off for stateless agent behavior.
+					future prompts. Turn it off for stateless agent behavior. The budget
+					and per-prompt count bound how much of the context window it may
+					consume - lower them on small local models.
 				</Text>
 			</Box>
 

@@ -5,6 +5,7 @@ import {CodexLogin} from '@/commands/codex-login';
 import {CopilotLogin} from '@/commands/copilot-login';
 import BashProgress from '@/components/bash-progress';
 import {DELAY_COMMAND_COMPLETE_MS, MAX_SESSION_NAME_LENGTH} from '@/constants';
+import {sharedProposalStore} from '@/memory/proposal-store';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {generateKey} from '@/session/key-generator';
 import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
@@ -274,6 +275,9 @@ async function handleSpecialCommand(
 		case SPECIAL_COMMANDS.CLEAR:
 			await onClearMessages();
 			await clearAllTasks();
+			// Proposals reference a conversation that no longer exists; accepting
+			// one after /clear would save evidence the user can no longer see.
+			sharedProposalStore.clear();
 			onAddToChatQueue(successMsg('Chat and tasks cleared.', 'clear-success'));
 			setTimeout(() => onCommandComplete?.(), DELAY_COMMAND_COMPLETE_MS);
 			return true;
