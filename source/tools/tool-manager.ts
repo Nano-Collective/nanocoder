@@ -51,7 +51,13 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 		// No git mutation tools — keep read-only git tools
 		'git_add',
 		'git_commit',
-		'git_pr', // can create PRs — excluded like other git mutators
+		// git_pr bundles both read-only actions (view/list/diff/checks/logs)
+		// and mutating ones (create/comment/review) behind one tool name, so
+		// it can't be split per-action here — excluded wholesale for now.
+		// source/verify/trust.ts is the action-granular allowlist meant to
+		// replace this blunt exclusion once the verify subcommand (issue
+		// #861) consumes it.
+		'git_pr',
 	],
 	headless: ['ask_user', 'agent'],
 };

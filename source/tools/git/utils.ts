@@ -262,16 +262,35 @@ export function formatGitStatusSummary(status: GitStatusSummary): {
  * Spawn a command, collect stdout, and resolve with the trimmed output.
  * Rejects with stderr (or an exit-code message) on non-zero exit. `label` is
  * the human-readable command name used in error messages (e.g. 'Git', 'gh').
+ * When `timeoutMs` is given, the process is killed and the promise rejects
+ * if it hasn't closed in time (unset by default, matching prior behavior).
  */
 function execProcess(
 	command: string,
 	args: string[],
 	label: string,
+	timeoutMs?: number,
 ): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const proc = spawn(command, args);
 		let stdout = '';
 		let stderr = '';
+		let timedOut = false;
+		let closed = false;
+
+		const timer =
+			timeoutMs && timeoutMs > 0
+				? setTimeout(() => {
+						timedOut = true;
+						proc.kill('SIGTERM');
+						// Force-kill if the process ignores SIGTERM within a grace window.
+						const forceKillTimer = setTimeout(() => {
+							if (!closed) proc.kill('SIGKILL');
+						}, 1_000);
+						forceKillTimer.unref();
+					}, timeoutMs)
+				: undefined;
+		timer?.unref();
 
 		proc.stdout.on('data', (data: Buffer) => {
 			stdout += data.toString();
@@ -282,7 +301,11 @@ function execProcess(
 		});
 
 		proc.on('close', (code: number | null) => {
-			if (code === 0) {
+			closed = true;
+			if (timer) clearTimeout(timer);
+			if (timedOut) {
+				reject(new Error(`${label} command timed out after ${timeoutMs}ms`));
+			} else if (code === 0) {
 				resolve(stdout.trimEnd());
 			} else {
 				const errorMessage =
@@ -292,6 +315,8 @@ function execProcess(
 		});
 
 		proc.on('error', error => {
+			closed = true;
+			if (timer) clearTimeout(timer);
 			reject(new Error(`Failed to execute ${command}: ${error.message}`));
 		});
 	});
@@ -305,10 +330,14 @@ export async function execGit(args: string[]): Promise<string> {
 }
 
 /**
- * Execute a gh CLI command and return the output
+ * Execute a gh CLI command and return the output. Pass `timeoutMs` for
+ * calls that can be slow/hang (e.g. fetching CI run logs).
  */
-export async function execGh(args: string[]): Promise<string> {
-	return execProcess('gh', args, 'gh');
+export async function execGh(
+	args: string[],
+	timeoutMs?: number,
+): Promise<string> {
+	return execProcess('gh', args, 'gh', timeoutMs);
 }
 
 // ============================================================================

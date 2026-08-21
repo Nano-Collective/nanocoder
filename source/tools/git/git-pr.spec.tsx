@@ -47,6 +47,14 @@ test('git_pr tool has formatter function', t => {
 	t.is(typeof gitPrTool.formatter, 'function');
 });
 
+test('git_pr tool is marked read-only for parallel-execution batching', t => {
+	// Safe despite bundling mutating actions (create/comment/review): the
+	// batching this flag feeds only ever runs on calls resolveToolApproval
+	// already routed to auto-execute, via the `approval` fn above — see the
+	// comment on the export in git-pr.tsx.
+	t.true(gitPrTool.readOnly);
+});
+
 // ============================================================================
 // Formatter Tests
 // ============================================================================
@@ -210,4 +218,157 @@ test('git_pr formatter shows PR body', t => {
 	t.truthy(output);
 	t.regex(output!, /Body/i);
 	t.regex(output!, /This is the PR description/);
+});
+
+// ============================================================================
+// New Action Formatter Tests (diff/comment/review/checks/logs)
+// ============================================================================
+
+test('git_pr formatter shows diff action', t => {
+	const formatter = gitPrTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter({diff: 42}, '');
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /diff/i);
+	t.regex(output!, /#42/);
+});
+
+test('git_pr formatter shows comment action with body', t => {
+	const formatter = gitPrTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter(
+		{comment: {pr: 7, body: 'Looks good to me'}},
+		'',
+	);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /comment/i);
+	t.regex(output!, /#7/);
+	t.regex(output!, /Looks good to me/);
+});
+
+test('git_pr formatter shows review action with verdict', t => {
+	const formatter = gitPrTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter(
+		{review: {pr: 9, verdict: 'request-changes', body: 'Needs a test'}},
+		'',
+	);
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /review/i);
+	t.regex(output!, /#9/);
+	t.regex(output!, /request-changes/);
+	t.regex(output!, /Needs a test/);
+});
+
+test('git_pr formatter shows checks action', t => {
+	const formatter = gitPrTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter({checks: {pr: 3}}, '');
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /checks/i);
+	t.regex(output!, /#3/);
+});
+
+test('git_pr formatter shows logs action resolved by PR', t => {
+	const formatter = gitPrTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter({logs: {pr: 5, search: 'Error'}}, '');
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /logs/i);
+	t.regex(output!, /#5/);
+	t.regex(output!, /Error/);
+});
+
+test('git_pr formatter shows logs action resolved by explicit run', t => {
+	const formatter = gitPrTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const element = formatter({logs: {run: 123456}}, '');
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /123456/);
+});
+
+// ============================================================================
+// Approval Policy Tests
+// ============================================================================
+
+test('git_pr approval requires confirmation for create', t => {
+	const approval = gitPrTool.approval;
+	t.is(typeof approval, 'function');
+	if (typeof approval !== 'function') return;
+	t.true(Boolean(approval({create: {title: 'x'}}, 'normal')));
+});
+
+test('git_pr approval requires confirmation for comment', t => {
+	const approval = gitPrTool.approval;
+	if (typeof approval !== 'function') {
+		t.fail('approval is not a function');
+		return;
+	}
+	t.true(Boolean(approval({comment: {pr: 1, body: 'x'}}, 'normal')));
+});
+
+test('git_pr approval requires confirmation for review', t => {
+	const approval = gitPrTool.approval;
+	if (typeof approval !== 'function') {
+		t.fail('approval is not a function');
+		return;
+	}
+	t.true(
+		Boolean(approval({review: {pr: 1, verdict: 'approve'}}, 'normal')),
+	);
+});
+
+test('git_pr approval auto-runs read-only actions', t => {
+	const approval = gitPrTool.approval;
+	if (typeof approval !== 'function') {
+		t.fail('approval is not a function');
+		return;
+	}
+	t.false(Boolean(approval({view: 1}, 'normal')));
+	t.false(Boolean(approval({list: {}}, 'normal')));
+	t.false(Boolean(approval({diff: 1}, 'normal')));
+	t.false(Boolean(approval({checks: {pr: 1}}, 'normal')));
+	t.false(Boolean(approval({logs: {pr: 1}}, 'normal')));
 });
