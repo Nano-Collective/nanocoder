@@ -4,6 +4,7 @@ import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {renderWithTheme as render} from '@/test-utils/render-with-theme';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import {LocationStep} from './location-step.js';
 
 // Mirrors base-config-wizard.tsx's real LocationStep box.
@@ -70,7 +71,9 @@ test('LocationStep shows the resolved project path next to the option', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	const lines = output!.split('\n');
+	// The path is rendered dimmed, so the frame carries ANSI escapes whenever
+	// colour is on - which it is under CI. Compare against the plain text.
+	const lines = stripAnsi(output!).split('\n');
 	const stemIndex = lines.findIndex(line =>
 		line.includes('Current project directory'),
 	);
