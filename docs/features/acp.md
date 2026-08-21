@@ -1,29 +1,29 @@
 ---
 title: "ACP (Editor Integration)"
-description: "Run Nanocoder as an Agent Client Protocol server for editors like Zed"
+description: "Run Nanocoder as an Agent Client Protocol server for editors like Zed and the VS Code sidebar"
 sidebar_order: 9
 ---
 
 # ACP (Agent Client Protocol)
 
-Nanocoder can run as an [Agent Client Protocol](https://agentclientprotocol.com) (ACP) server, letting ACP-compatible editors drive it as a native coding agent. Instead of the Ink terminal UI, Nanocoder speaks JSON-RPC over stdin/stdout, and the editor renders the conversation, tool calls, diffs, and permission prompts in its own UI.
+Nanocoder can run as an [Agent Client Protocol](https://agentclientprotocol.com) (ACP) server, letting ACP-compatible clients drive it as a native coding agent. Instead of the Ink terminal UI, Nanocoder speaks JSON-RPC over stdin/stdout, and the client renders the conversation, tool calls, diffs, and permission prompts in its own UI.
 
 ```bash
 nanocoder --acp
 ```
 
-You normally don't run this command yourself — the editor spawns it for you (see [Setup in Zed](#setup-in-zed) below).
+You normally don't run this command yourself — the editor or extension spawns it for you (see [Setup in Zed](#setup-in-zed) and the [VS Code extension](vscode-extension.md)).
 
-## ACP vs. the VS Code extension
+## ACP vs. the VS Code companion
 
-Both connect Nanocoder to an editor, but they are different mechanisms — pick the one your editor supports:
+ACP is the transport for both the **VS Code sidebar chat** and other ACP clients (Zed, etc.). The older `--vscode` WebSocket path is a separate, opt-in **legacy terminal companion** for Ink TUI sessions — not how the sidebar works.
 
-| | Transport | Flag | Editors |
+| | Transport | Flag | Clients |
 | --- | --- | --- | --- |
-| **ACP** | JSON-RPC over stdin/stdout | `--acp` | Zed and other ACP clients |
-| **[VS Code extension](vscode-extension.md)** | WebSocket | `--vscode` | VS Code |
+| **ACP** | JSON-RPC over stdin/stdout | `--acp` | VS Code sidebar, Zed, and other ACP clients |
+| **Legacy companion** | WebSocket | `--vscode` | VS Code (opt-in terminal companion) |
 
-With ACP the **editor is the UI**: the agent runs headless and everything (streaming text, tool cards, diffs, approvals) is rendered by the editor. With the VS Code extension, the Nanocoder terminal UI stays in charge and the editor adds diff previews and editor context on top.
+With ACP the **client is the UI**: the agent runs headless and everything (streaming text, tool cards, diffs, approvals) is rendered by the editor or sidebar. The legacy `--vscode` companion keeps the Nanocoder terminal TUI in charge and adds diff previews and editor context on top — see [Legacy Companion Mode](vscode-extension.md#legacy-companion-mode).
 
 ## What works over ACP
 

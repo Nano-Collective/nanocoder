@@ -164,6 +164,8 @@ export class AcpAgent implements Agent {
 			);
 		}
 
+		session.beginTurn();
+
 		const {text: userText, images} = await acpContentToUserMessage(
 			params.prompt,
 			{

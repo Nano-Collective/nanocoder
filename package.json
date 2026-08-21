@@ -42,6 +42,7 @@
 		"test:ava:coverage": "c8 ava",
 		"test:format": "biome check --no-errors-on-unmatched .",
 		"test:types": "tsc --noEmit",
+		"test:types:vscode": "tsc --noEmit -p plugins/vscode/tsconfig.json",
 		"test:lint": "biome lint .",
 		"test:lint:fix": "biome check --write --unsafe .",
 		"test:knip": "knip",
@@ -143,8 +144,6 @@
 			"plugins/**/*.spec.ts",
 			"plugins/**/*.spec.tsx",
 			"!plugins/**/node_modules/**",
-			"!plugins/vscode/src/acp-client.spec.ts",
-			"!plugins/vscode/src/acp-process-manager.spec.ts",
 			"!source/**/*-helpers.ts",
 			"!source/**/test-helpers.ts"
 		],

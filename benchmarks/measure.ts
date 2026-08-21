@@ -122,34 +122,30 @@ function measureModuleCount(args: string[]): number {
 }
 
 /**
- * Boots the CLI in interactive mode under the counting loader, waits until
- * the module-resolution count has been stable for `stableMs`, then kills the
- * process and returns the final count.
+ * Boots the CLI under the counting loader, waits until the module-resolution
+ * count has been stable for `stableMs`, then kills the process and returns
+ * the final count plus approximate wall-clock boot time.
  *
- * This measures the full app graph (Ink, hooks, tool manager, command
- * registry, MCP loader, etc.) rather than just the `--help` fast path.
+ * This measures the full resolved graph for the given args (interactive TUI,
+ * ACP server, etc.) rather than just a oneshot `--help` fast path.
  * Polling-until-stable keeps the result deterministic regardless of machine
  * speed: we wait for steady state, not a fixed wall-clock window.
- */
-/**
- * Same polling-until-stable pattern as `measureInteractiveModuleCount`, but
- * returns both the module count AND the wall-clock time (in ms) from process
- * spawn to the moment the module count reached its final value.
  *
  * The wall-clock number is labelled **approximate** because it's
  * machine-dependent and subject to I/O / scheduler noise. It's not a
  * deterministic metric like module count — it's a sanity check that
  * optimizations translate into real boot-time savings on the local machine.
  */
-async function measureInteractiveStartup(
+async function measureStartupUntilStable(
 	args: string[] = [],
+	label = 'interactive',
 ): Promise<{moduleCount: number; bootMs: number}> {
 	const loaderPath = path.join(__dirname, 'count-loader.mjs');
 	const loaderUrl = new URL(`file://${loaderPath}`).href;
 	const countFile = path.join(
 		repoRoot,
 		'benchmarks',
-		`.module-count-interactive-${process.pid}-${Date.now()}`,
+		`.module-count-${label}-${process.pid}-${Date.now()}`,
 	);
 
 	const child = spawn(
@@ -356,7 +352,7 @@ async function runWithUrlCapture(
 					CI: '1',
 					// Keep the user's global MCP config out of the graph
 					// so the explain breakdown only reflects nanocoder's own
-					// boot cost. Matches `measureInteractiveStartup`.
+					// boot cost. Matches `measureStartupUntilStable`.
 					NODE_ENV: 'test',
 				},
 			},
@@ -709,13 +705,23 @@ export async function measure(): Promise<Measurements> {
 	// clock boot number; the module count is deterministic so we only keep
 	// the first one.
 	const interactiveRuns = [
-		await measureInteractiveStartup(),
-		await measureInteractiveStartup(),
-		await measureInteractiveStartup(),
+		await measureStartupUntilStable([], 'interactive'),
+		await measureStartupUntilStable([], 'interactive'),
+		await measureStartupUntilStable([], 'interactive'),
 	];
 	const interactiveModuleCount = interactiveRuns[0].moduleCount;
 	const bootSamples = interactiveRuns.map(r => r.bootMs).sort((a, b) => a - b);
 	const interactiveBootMsMedian = bootSamples[1];
+	// ACP server is long-lived (JSON-RPC over stdin/stdout). Poll until the
+	// module graph is stable, then terminate — same pattern as interactive.
+	const acpRuns = [
+		await measureStartupUntilStable(['--acp'], 'acp'),
+		await measureStartupUntilStable(['--acp'], 'acp'),
+		await measureStartupUntilStable(['--acp'], 'acp'),
+	];
+	const acpModuleCount = acpRuns[0].moduleCount;
+	const acpBootSamples = acpRuns.map(r => r.bootMs).sort((a, b) => a - b);
+	const acpBootMsMedian = acpBootSamples[1];
 	// Time from spawn to first stdout byte — what the user actually perceives.
 	const firstRenderMs = await measureTimeToFirstRender();
 	const distStats = measureDir(path.join(repoRoot, 'dist'));
@@ -808,6 +814,18 @@ export async function measure(): Promise<Measurements> {
 			interactive_boot_ms_approx: {
 				kind: 'numeric',
 				value: interactiveBootMsMedian,
+				warnOnDecrease: false,
+			},
+			// ACP server steady-state module graph (no Ink / App). Deterministic
+			// proxy for editor-integration startup cost.
+			acp_module_count: {
+				kind: 'numeric',
+				value: acpModuleCount,
+				warnOnDecrease: false,
+			},
+			acp_boot_ms_approx: {
+				kind: 'numeric',
+				value: acpBootMsMedian,
 				warnOnDecrease: false,
 			},
 			// Time from spawn to first stdout byte — what the user sees.
