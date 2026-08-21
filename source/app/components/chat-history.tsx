@@ -25,6 +25,8 @@ export interface ChatHistoryProps {
 	 * the alt buffer has no scrollback for it to print into.
 	 */
 	fullscreen?: boolean;
+	/** Keep transcript components live for interactive inline controls. */
+	interactive?: boolean;
 	/**
 	 * Whether PageUp/PageDown scrolling is active. Off while a modal
 	 * (model selector, wizard, explorer) is open so those keys reach the
@@ -57,6 +59,7 @@ export const ChatHistory = React.memo(function ChatHistory({
 	renderLastQueuedComponentLive,
 	clearKey,
 	fullscreen = false,
+	interactive = false,
 	scrollActive = false,
 }: ChatHistoryProps): React.ReactElement {
 	const {colors} = useTheme();
@@ -139,7 +142,7 @@ export const ChatHistory = React.memo(function ChatHistory({
 			queuedComponents,
 			renderLastQueuedComponentLive,
 			clearKey,
-			disableStatic: fullscreen,
+			disableStatic: fullscreen || interactive,
 		}),
 		[
 			frozenComponents,
@@ -147,6 +150,7 @@ export const ChatHistory = React.memo(function ChatHistory({
 			renderLastQueuedComponentLive,
 			clearKey,
 			fullscreen,
+			interactive,
 		],
 	);
 
