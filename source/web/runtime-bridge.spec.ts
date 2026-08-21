@@ -303,6 +303,140 @@ test('web runtime bridge refuses to reset the session while a browser turn is ac
 	t.is(resetCount, 0);
 });
 
+test('web runtime bridge broadcasts the session list on list_sessions', async t => {
+	const events: WebServerEvent[] = [];
+	const bridge = createWebRuntimeBridge(event => events.push(event));
+	bridge.bindRuntimeHandlers({
+		submitMessage: () => new Promise<void>(() => {}),
+		cancel: () => {},
+		resetSession: () => {},
+		listSessions: async () => [
+			{
+				id: 'session-1',
+				title: 'Fix the flaky test',
+				lastAccessedAt: '2026-08-01T00:00:00.000Z',
+				messageCount: 4,
+			},
+		],
+		loadSession: async () => null,
+	});
+
+	await bridge.handleClientEvent({type: 'list_sessions', id: 'list-1'});
+
+	t.deepEqual(events, [
+		{
+			type: 'sessions',
+			id: 'list-1',
+			sessions: [
+				{
+					id: 'session-1',
+					title: 'Fix the flaky test',
+					lastAccessedAt: '2026-08-01T00:00:00.000Z',
+					messageCount: 4,
+				},
+			],
+		},
+	]);
+});
+
+test('web runtime bridge broadcasts the loaded session on load_session', async t => {
+	const events: WebServerEvent[] = [];
+	const loadedIds: string[] = [];
+	const bridge = createWebRuntimeBridge(event => events.push(event));
+	bridge.bindRuntimeHandlers({
+		submitMessage: () => new Promise<void>(() => {}),
+		cancel: () => {},
+		resetSession: () => {},
+		listSessions: async () => [],
+		loadSession: async sessionId => {
+			loadedIds.push(sessionId);
+			return {
+				session: {
+					id: sessionId,
+					title: 'Fix the flaky test',
+					lastAccessedAt: '2026-08-01T00:00:00.000Z',
+					messageCount: 2,
+				},
+				messages: [
+					{role: 'user', content: 'why is this test flaky?'},
+					{role: 'assistant', content: 'it races the file watcher'},
+				],
+			};
+		},
+	});
+
+	await bridge.handleClientEvent({
+		type: 'load_session',
+		id: 'load-1',
+		sessionId: 'session-1',
+	});
+
+	t.deepEqual(loadedIds, ['session-1']);
+	t.deepEqual(events, [
+		{
+			type: 'session_loaded',
+			id: 'load-1',
+			session: {
+				id: 'session-1',
+				title: 'Fix the flaky test',
+				lastAccessedAt: '2026-08-01T00:00:00.000Z',
+				messageCount: 2,
+			},
+			messages: [
+				{role: 'user', content: 'why is this test flaky?'},
+				{role: 'assistant', content: 'it races the file watcher'},
+			],
+		},
+	]);
+});
+
+test('web runtime bridge rejects load_session for an unknown session', async t => {
+	const bridge = createWebRuntimeBridge(() => {});
+	bridge.bindRuntimeHandlers({
+		submitMessage: () => new Promise<void>(() => {}),
+		cancel: () => {},
+		resetSession: () => {},
+		listSessions: async () => [],
+		loadSession: async () => null,
+	});
+
+	await t.throwsAsync(
+		bridge.handleClientEvent({
+			type: 'load_session',
+			id: 'load-1',
+			sessionId: 'missing',
+		}),
+		{message: 'Session not found.'},
+	);
+});
+
+test('web runtime bridge refuses to switch sessions while a browser turn is active', async t => {
+	const loadedIds: string[] = [];
+	const bridge = createWebRuntimeBridge(() => {});
+	bridge.bindRuntimeHandlers({
+		submitMessage: () => new Promise<void>(() => {}),
+		cancel: () => {},
+		resetSession: () => {},
+		listSessions: async () => [],
+		loadSession: async sessionId => {
+			loadedIds.push(sessionId);
+			return null;
+		},
+	});
+
+	await bridge.handleClientEvent(userMessage('turn-1'));
+	await t.throwsAsync(
+		bridge.handleClientEvent({
+			type: 'load_session',
+			id: 'load-1',
+			sessionId: 'session-1',
+		}),
+		{message: 'Cannot switch sessions while a browser turn is active.'},
+	);
+
+	t.deepEqual(loadedIds, []);
+});
+
 test('web runtime bridge denies pending approval on disconnect', async t => {
 	const bridge = createWebRuntimeBridge(() => {});
 	bridge.bindRuntimeHandlers({

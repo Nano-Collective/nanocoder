@@ -42,6 +42,7 @@ import {UIStateProvider} from '@/hooks/useUIState';
 import {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
 import {useVSCodeServer} from '@/hooks/useVSCodeServer';
 import {generateKey} from '@/session/key-generator';
+import {sessionManager} from '@/session/session-manager';
 import type {ImageAttachment} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
 import {createPinoLogger} from '@/utils/logging/pino-logger';
@@ -501,12 +502,14 @@ export default function App({
 		submitMessage: appHandlers.handleMessageSubmit,
 		cancel: appHandlers.handleCancel,
 		resetSession: appHandlers.clearMessages,
+		applySession: appHandlers.applySession,
 	});
 	webRuntimeStateRef.current = {
 		isGenerating: chatHandler.isGenerating,
 		submitMessage: appHandlers.handleMessageSubmit,
 		cancel: appHandlers.handleCancel,
 		resetSession: appHandlers.clearMessages,
+		applySession: appHandlers.applySession,
 	};
 
 	React.useEffect(() => {
@@ -536,6 +539,59 @@ export default function App({
 				}
 
 				return webRuntimeStateRef.current.resetSession();
+			},
+			listSessions: async () => {
+				await sessionManager.initialize();
+				const sessions = await sessionManager.listSessions({
+					workingDirectory: process.cwd(),
+				});
+
+				return [...sessions]
+					.sort(
+						(a, b) =>
+							new Date(b.lastAccessedAt).getTime() -
+							new Date(a.lastAccessedAt).getTime(),
+					)
+					.map(session => ({
+						id: session.id,
+						title: session.title,
+						lastAccessedAt: session.lastAccessedAt,
+						messageCount: session.messageCount,
+					}));
+			},
+			loadSession: async sessionId => {
+				if (webRuntimeStateRef.current.isGenerating) {
+					throw new Error(
+						'Cannot switch sessions while Nanocoder is processing a turn.',
+					);
+				}
+
+				await sessionManager.initialize();
+				const session = await sessionManager.loadSession(sessionId);
+				if (!session) {
+					return null;
+				}
+
+				webRuntimeStateRef.current.applySession(session);
+
+				return {
+					session: {
+						id: session.id,
+						title: session.title,
+						lastAccessedAt: session.lastAccessedAt,
+						messageCount: session.messageCount,
+					},
+					messages: session.messages
+						.filter(
+							message =>
+								(message.role === 'user' || message.role === 'assistant') &&
+								message.content.trim().length > 0,
+						)
+						.map(message => ({
+							role: message.role as 'user' | 'assistant',
+							content: message.content,
+						})),
+				};
 			},
 		});
 	}, [

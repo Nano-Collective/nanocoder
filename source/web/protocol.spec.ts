@@ -69,6 +69,43 @@ test('parseWebClientEvent accepts a reset_session event', t => {
 	);
 });
 
+test('parseWebClientEvent accepts list_sessions and load_session events', t => {
+	t.deepEqual(
+		parseWebClientEvent(
+			JSON.stringify({type: 'list_sessions', id: 'list-1'}),
+		),
+		{type: 'list_sessions', id: 'list-1'},
+	);
+
+	t.deepEqual(
+		parseWebClientEvent(
+			JSON.stringify({
+				type: 'load_session',
+				id: 'load-1',
+				sessionId: '18d51c0d-becb-4efc-8d0d-b8c1f3b61802',
+			}),
+		),
+		{
+			type: 'load_session',
+			id: 'load-1',
+			sessionId: '18d51c0d-becb-4efc-8d0d-b8c1f3b61802',
+		},
+	);
+
+	t.throws(
+		() => parseWebClientEvent(JSON.stringify({type: 'list_sessions'})),
+		{message: 'List sessions id is required.'},
+	);
+
+	t.throws(
+		() =>
+			parseWebClientEvent(
+				JSON.stringify({type: 'load_session', id: 'load-1'}),
+			),
+		{message: 'Load session sessionId is required.'},
+	);
+});
+
 test('parseWebClientEvent rejects malformed interaction responses', t => {
 	t.throws(
 		() =>

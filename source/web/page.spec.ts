@@ -27,6 +27,17 @@ test('web mode page styles the sidebar and message scrollbars instead of using t
 	t.true(page.includes('scrollbar-width: thin;'));
 });
 
+test('web mode page snaps the message list to the newest content instead of animating every scroll', t => {
+	const page = renderWebModePage();
+
+	// scrollTop is reassigned on every appendMessage()/appendAssistantDelta()
+	// call, i.e. once per streamed token. CSS scroll-behavior: smooth turns
+	// each of those into a queued animation; browsers throttle rAF work in a
+	// backgrounded tab, so the queue drains all at once, as a visible jump,
+	// the moment the tab regains focus.
+	t.false(page.includes('scroll-behavior: smooth'));
+});
+
 test('web mode page tells the backend to reset the session when starting a new chat', t => {
 	const page = renderWebModePage();
 
@@ -151,7 +162,160 @@ test('web mode shows live tool running and completed status', t => {
 	t.true(page.includes("'Tool finished: ' + message.name"));
 	t.true(
 		page.includes(
-			"'Provider and model stay in the terminal runtime. During a browser turn, approvals and questions are answered here.'",
+			'Provider and model stay in the terminal runtime; during a browser turn, approvals and questions are answered here.',
+		),
+	);
+});
+
+test('web mode page ships a light theme that cannot affect the dark default', t => {
+	const page = renderWebModePage();
+
+	t.true(page.includes(':root[data-theme="light"] {'));
+	t.true(page.includes(':root[data-theme="light"] body {'));
+	t.true(page.includes(':root[data-theme="light"] .message.user {'));
+	// Every light rule is scoped by the attribute selector, so it can only ever
+	// apply once <html data-theme="light"> is set; it never edits an existing
+	// dark rule.
+	const lightRuleCount = (page.match(/:root\[data-theme="light"\]/gu) ?? []).length;
+	t.true(lightRuleCount > 20);
+});
+
+test('web mode page toggles and persists the theme', t => {
+	const page = renderWebModePage();
+
+	t.true(page.includes("id=\"themeToggleButton\""));
+	t.true(page.includes('function applyTheme(theme)'));
+	t.true(page.includes("document.documentElement.dataset.theme = theme"));
+	t.true(page.includes("window.localStorage.setItem(themeStorageKey, theme)"));
+	t.true(
+		page.includes(
+			"window.matchMedia('(prefers-color-scheme: light)').matches",
+		),
+	);
+	t.true(
+		page.includes(
+			"applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light')",
+		),
+	);
+});
+
+test('web mode page collapses and persists the sidebar', t => {
+	const page = renderWebModePage();
+
+	t.true(page.includes('id="sidebarToggleButton"'));
+	t.true(page.includes('.app-shell.sidebar-collapsed {'));
+	t.true(page.includes('.app-shell.sidebar-collapsed .sidebar {'));
+	t.true(page.includes('function applySidebarCollapsed(isCollapsed)'));
+	t.true(page.includes("appShell.classList.toggle('sidebar-collapsed', isCollapsed)"));
+	t.true(
+		page.includes(
+			"applySidebarCollapsed(!appShell.classList.contains('sidebar-collapsed'))",
+		),
+	);
+	t.true(page.includes('window.localStorage.setItem(sidebarStorageKey'));
+});
+
+test('web mode page reduces metadata label weight so it does not compete with primary text', t => {
+	const page = renderWebModePage();
+
+	t.true(
+		page.includes('.meta {\n\t\t\tcolor: rgba(245, 242, 235, 0.5);\n\t\t\tfont-size: 11px;'),
+	);
+	t.false(page.includes('font-size: 12px;\n\t\t}\n\t\t.message.user .meta'));
+});
+
+test('web mode markdown renderer supports italics, strikethrough, and links', t => {
+	const page = renderWebModePage();
+
+	t.true(page.includes('function appendInlineMarkdown(element, text)'));
+	t.true(page.includes("const isBold = remainingText.startsWith('**')"));
+	t.true(page.includes("const isStrike = !isBold && remainingText.startsWith('~~')"));
+	t.true(
+		page.includes(
+			"const isItalic = !isBold && !isStrike && !isCode && remainingText.startsWith('*')",
+		),
+	);
+	t.true(page.includes("tagName = isBold ? 'strong' : isStrike ? 's' : isCode ? 'code' : 'em'"));
+	// Link handling: parsed with its own regex ahead of the marker scan, and
+	// recurses on the link text so `[**bold** link](url)` still bolds inside it.
+	t.true(page.includes("anchor.rel = 'noopener noreferrer'"));
+	t.true(page.includes('appendInlineMarkdown(anchor, linkMatch[1])'));
+});
+
+test('web mode code blocks get language-aware syntax highlighting', t => {
+	const page = renderWebModePage();
+
+	t.true(page.includes('function highlightCode(codeElement, rawText, language)'));
+	t.true(page.includes("codeElement.className = language ? 'language-' + language : ''"));
+	t.true(page.includes("span.className = 'tok-' + tokenType"));
+	t.true(page.includes('rawText.matchAll(CODE_TOKEN_PATTERN)'));
+	// Language tag is read from the opening fence line, e.g. ```js.
+	t.true(page.includes('codeLang = line.trim().slice(codeFence.length).trim()'));
+});
+
+test('web mode page requests real session history instead of showing hardcoded threads', t => {
+	const page = renderWebModePage();
+
+	// The three hardcoded thread buttons are gone; the sidebar starts empty
+	// and is populated once the backend replies.
+	t.false(page.includes('data-thread-label="Nanocoder web mode"'));
+	t.false(page.includes('Runtime bridge next'));
+	t.false(page.includes('Tool approvals'));
+	t.true(page.includes('id="threadListEmpty"'));
+	t.true(page.includes("sendClientEvent({type: 'list_sessions'"));
+	t.true(page.includes('function renderThreadList(sessions)'));
+	t.true(page.includes('function applyLoadedSession(sessionSummary, messages)'));
+});
+
+test('web mode page loads a session on click and guards against switching mid-turn', t => {
+	const page = renderWebModePage();
+
+	t.true(page.includes("threadList.addEventListener('click'"));
+	t.true(page.includes("event.target.closest('.thread-item')"));
+	t.true(
+		page.includes(
+			"sendClientEvent({\n\t\t\t\t\ttype: 'load_session',\n\t\t\t\t\tid: 'browser-load-' + Date.now(),\n\t\t\t\t\tsessionId: target.dataset.sessionId,\n\t\t\t\t});",
+		),
+	);
+	t.true(
+		page.includes(
+			"'Finish or cancel the current turn before switching sessions.'",
+		),
+	);
+});
+
+test('web mode page handles the sessions and session_loaded server events', t => {
+	const page = renderWebModePage();
+
+	t.true(page.includes("if (message.type === 'sessions') {"));
+	t.true(page.includes('renderThreadList(message.sessions)'));
+	t.true(page.includes("if (message.type === 'session_loaded') {"));
+	t.true(page.includes('applyLoadedSession(message.session, message.messages)'));
+});
+
+test('web mode history button reveals and refreshes the real session list', t => {
+	const page = renderWebModePage();
+
+	const historyHandlerIndex = page.indexOf("historyButton.addEventListener('click'");
+	const listSessionsIndex = page.indexOf(
+		"type: 'list_sessions'",
+		historyHandlerIndex,
+	);
+	t.true(historyHandlerIndex >= 0 && listSessionsIndex > historyHandlerIndex);
+	t.true(page.includes('applySidebarCollapsed(false)'));
+});
+
+test('web mode settings button shows real current state instead of a canned notice', t => {
+	const page = renderWebModePage();
+
+	t.true(
+		page.includes(
+			"document.documentElement.dataset.theme === 'light' ? 'Light' : 'Dark'",
+		),
+	);
+	t.true(
+		page.includes(
+			"appShell.classList.contains('sidebar-collapsed')\n\t\t\t\t\t? 'collapsed'\n\t\t\t\t\t: 'expanded'",
 		),
 	);
 });
