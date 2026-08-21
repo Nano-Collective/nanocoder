@@ -20,6 +20,7 @@ export function homeRelative(path: string, home: string = homedir()): string {
 	return resolved;
 }
 
+// Keeps root and leaf visible; truncatePath (useTerminalWidth.tsx) only keeps the tail.
 export function truncateMiddle(str: string, maxLength: number): string {
 	if (str.length <= maxLength) {
 		return str;

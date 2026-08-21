@@ -20,9 +20,8 @@ interface LocationStepProps {
 interface LocationOption {
 	label: string;
 	value: ConfigLocation;
+	path: string;
 }
-
-const LABEL_PATH_SEPARATOR = '\u0000';
 
 export function LocationStep({
 	onComplete,
@@ -31,7 +30,7 @@ export function LocationStep({
 	configFileName = 'agents.config.json',
 }: LocationStepProps) {
 	const colors = getColors();
-	const {actualWidth, isNarrow} = useResponsiveTerminal();
+	const {boxWidth, isNarrow} = useResponsiveTerminal();
 	const projectPath = join(projectDir, configFileName);
 	const globalPath = join(getConfigPath(), configFileName);
 
@@ -54,12 +53,14 @@ export function LocationStep({
 
 	const locationOptions: LocationOption[] = [
 		{
-			label: `Global user config${LABEL_PATH_SEPARATOR}${homeRelative(getConfigPath())}`,
+			label: 'Global user config',
 			value: 'global',
+			path: homeRelative(getConfigPath()),
 		},
 		{
-			label: `Current project directory${LABEL_PATH_SEPARATOR}${homeRelative(projectDir)}`,
+			label: 'Current project directory',
 			value: 'project',
+			path: homeRelative(projectDir),
 		},
 	];
 
@@ -137,14 +138,13 @@ export function LocationStep({
 			<StyledSelectInput
 				items={locationOptions}
 				onSelect={(item: LocationOption) => handleLocationSelect(item)}
-				itemComponent={({isSelected, label}) => {
-					const [stem, path] = label.split(LABEL_PATH_SEPARATOR);
+				itemComponent={({isSelected, label, path}) => {
 					const color = isSelected ? colors.primary : colors.text;
-					const pathBudget = Math.max(10, Math.min(76, actualWidth - 4));
+					const pathBudget = Math.max(10, boxWidth - 10);
 					return (
 						<Box flexDirection="column">
 							<Text color={color} wrap="truncate-end">
-								{stem}
+								{label}
 							</Text>
 							<Text color={colors.secondary} wrap="truncate-end">
 								{'  '}
