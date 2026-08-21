@@ -1,7 +1,33 @@
+import {resolve} from 'node:path';
 import test from 'ava';
+import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
+import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {renderWithTheme as render} from '@/test-utils/render-with-theme';
 import React from 'react';
 import {LocationStep} from './location-step.js';
+
+// Mirrors base-config-wizard.tsx's real LocationStep box.
+function WizardBox({
+	projectDir,
+	onComplete,
+}: {
+	projectDir: string;
+	onComplete: () => void;
+}) {
+	const {boxWidth} = useResponsiveTerminal();
+	return (
+		<TitledBoxWithPreferences
+			title="Setup"
+			width={boxWidth}
+			borderColor="blue"
+			paddingX={2}
+			paddingY={1}
+			flexDirection="column"
+		>
+			<LocationStep onComplete={onComplete} projectDir={projectDir} />
+		</TitledBoxWithPreferences>
+	);
+}
 
 // ============================================================================
 // Tests for LocationStep Component Rendering
@@ -35,6 +61,51 @@ test('LocationStep shows global config option', t => {
 
 	const output = lastFrame();
 	t.regex(output!, /Global user config/);
+});
+
+test('LocationStep shows the resolved project path next to the option', t => {
+	const {lastFrame} = render(
+		<LocationStep onComplete={() => {}} projectDir="/test/project" />,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	const lines = output!.split('\n');
+	const stemIndex = lines.findIndex(line =>
+		line.includes('Current project directory'),
+	);
+	t.true(stemIndex !== -1, 'expected to find the project directory stem');
+	t.is(lines[stemIndex + 1]?.trim(), resolve('/test/project'));
+});
+
+test('LocationStep does not clip the leaf directory inside the real wizard box', t => {
+	const originalColumns = process.stdout.columns;
+	try {
+		for (const columns of [60, 80, 120]) {
+			Object.defineProperty(process.stdout, 'columns', {
+				value: columns,
+				configurable: true,
+			});
+
+			const {lastFrame} = render(
+				<WizardBox
+					onComplete={() => {}}
+					projectDir="/Users/will/Documents/GitHub/some-org/some-really-long-monorepo-name/packages/leaf-dir"
+				/>,
+			);
+
+			const output = lastFrame();
+			t.true(
+				output!.includes('leaf-dir'),
+				`at ${columns} cols, expected leaf directory to stay visible, got: ${output}`,
+			);
+		}
+	} finally {
+		Object.defineProperty(process.stdout, 'columns', {
+			value: originalColumns,
+			configurable: true,
+		});
+	}
 });
 
 test('LocationStep shows tip about config types', t => {
