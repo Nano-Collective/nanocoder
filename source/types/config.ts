@@ -29,6 +29,8 @@ export interface AIProviderConfig {
 	disableToolModels?: string[]; // List of model names to disable tools for
 	// SDK provider package to use (default: 'openai-compatible')
 	sdkProvider?: SdkProvider;
+	// Opt out of Anthropic prompt caching (enabled by default on that SDK).
+	promptCaching?: boolean;
 	// Model mode defaults for this provider
 	tune?: Partial<TuneConfig>;
 	// OpenRouter-specific request body fields (provider routing, plugins,

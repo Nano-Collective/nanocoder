@@ -64,6 +64,52 @@ export function dropOrphanedToolResults(messages: Message[]): Message[] {
 	return result;
 }
 
+const CACHE_BREAKPOINT = {
+	anthropic: {cacheControl: {type: 'ephemeral'}},
+};
+
+const MIN_CACHEABLE_CHARS = 4096;
+
+function messageChars(message: ModelMessage): number {
+	if (typeof message.content === 'string') {
+		return message.content.length;
+	}
+	if (!Array.isArray(message.content)) {
+		return 0;
+	}
+	return message.content.reduce((sum, part) => {
+		if (part.type === 'text') {
+			return sum + part.text.length;
+		}
+		return sum + JSON.stringify(part).length;
+	}, 0);
+}
+
+function markCacheBreakpoint(message: ModelMessage): ModelMessage {
+	return {...message, providerOptions: CACHE_BREAKPOINT} as ModelMessage;
+}
+
+export function withCacheBreakpoints(
+	messages: ModelMessage[],
+	systemContent: string,
+): ModelMessage[] {
+	const system: ModelMessage[] = systemContent
+		? [{role: 'system', content: systemContent}]
+		: [];
+	const totalChars =
+		systemContent.length +
+		messages.reduce((sum, message) => sum + messageChars(message), 0);
+	if (totalChars < MIN_CACHEABLE_CHARS) {
+		return [...system, ...messages];
+	}
+	const marked = system.map(markCacheBreakpoint);
+	const lastIndex = messages.length - 1;
+	messages.forEach((message, index) => {
+		marked.push(index === lastIndex ? markCacheBreakpoint(message) : message);
+	});
+	return marked;
+}
+
 /**
  * Convert our Message format to AI SDK v6 ModelMessage format
  *
