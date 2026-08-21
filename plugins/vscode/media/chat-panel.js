@@ -452,7 +452,7 @@
 
 	function createMessageFooter(getText, role, sentAt) {
 		const footer = document.createElement('div');
-		footer.className = 'flex h-5 items-center gap-1.5 mt-1 text-xs text-vscode-fg opacity-60 ' +
+		footer.className = 'message-footer flex h-5 items-center gap-1.5 mt-1 text-xs text-vscode-fg opacity-60 ' +
 			(role === 'user' ? 'self-end' : 'self-start');
 
 		const btn = document.createElement('button');
