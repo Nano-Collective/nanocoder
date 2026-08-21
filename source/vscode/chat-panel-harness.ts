@@ -82,6 +82,9 @@ function queryAll(root: StubElement, selector: string): StubElement[] {
 export function createElement(tagName: string): StubElement {
 	const classes = new Set<string>();
 	const attributes = new Map<string, string>();
+	// Registered handlers, so a test can drive a real listener rather than only
+	// the `onclick` properties the panel assigns directly.
+	const listeners = new Map<string, ((event: StubElement) => void)[]>();
 	let html = '';
 	let text = '';
 
@@ -127,10 +130,21 @@ export function createElement(tagName: string): StubElement {
 		closest: () => null,
 		setAttribute: (name: string, value: string) => attributes.set(name, value),
 		getAttribute: (name: string) => attributes.get(name) ?? null,
-		addEventListener: () => {},
-		removeEventListener: () => {},
+		addEventListener: (type: string, fn: (event: StubElement) => void) => {
+			const registered = listeners.get(type);
+			if (registered) registered.push(fn);
+			else listeners.set(type, [fn]);
+		},
+		removeEventListener: (type: string, fn: (event: StubElement) => void) => {
+			listeners.set(
+				type,
+				(listeners.get(type) ?? []).filter(candidate => candidate !== fn),
+			);
+		},
 		focus: () => {},
-		click: () => {},
+		click: (event: StubElement = {}) => {
+			for (const fn of listeners.get('click') ?? []) fn(event);
+		},
 		scrollTop: 0,
 		scrollHeight: 0,
 	};
@@ -207,6 +221,8 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	const messageListeners: ((event: {data: unknown}) => void)[] = [];
 	// Everything the panel posts back to the extension host.
 	const sent: unknown[] = [];
+	// Everything a copy button has put on the clipboard, newest last.
+	const copied: string[] = [];
 	const sandbox: Record<string, unknown> = {
 		document: {
 			body,
@@ -226,7 +242,14 @@ export function createPanel(options: {marked?: boolean} = {}) {
 				if (type === 'message') messageListeners.push(fn);
 			},
 		},
-		navigator: {userAgent: '', clipboard: {writeText: async () => {}}},
+		navigator: {
+			userAgent: '',
+			clipboard: {
+				writeText: async (value: string) => {
+					copied.push(value);
+				},
+			},
+		},
 		acquireVsCodeApi: () => ({
 			postMessage: (message: unknown) => {
 				sent.push(message);
@@ -255,6 +278,7 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	return {
 		container,
 		sent,
+		copied,
 		post(message: unknown) {
 			for (const listener of messageListeners) listener({data: message});
 		},
@@ -303,6 +327,16 @@ export function createPanel(options: {marked?: boolean} = {}) {
 			return container.children.filter((child: StubElement) =>
 				child.className.includes('thought-aggregator'),
 			);
+		},
+		/** The tool-call cards, in the order they were inserted. */
+		aggregators(): StubElement[] {
+			return container.children.filter((child: StubElement) =>
+				child.className.includes('tool-aggregator'),
+			);
+		},
+		/** The copy/timestamp footers currently in the transcript. */
+		footers(): StubElement[] {
+			return container.querySelectorAll('.message-footer');
 		},
 	};
 }
