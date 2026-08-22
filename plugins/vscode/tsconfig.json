@@ -6,7 +6,7 @@
 			"ES2022"
 		],
 		"sourceMap": true,
-		"outDir": "dist",
+		"noEmit": true,
 		"strict": true,
 		"esModuleInterop": true,
 		"skipLibCheck": true,
