@@ -34,6 +34,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/update` | Update Nanocoder to the latest version |
 | `/usage` | Get current model context usage visually |
 | `/lsp` | List connected LSP servers |
+| `/repomap` | Show a PageRank-ordered map of the codebase - the most-referenced files and the symbols they define. Use `/repomap --tokens <n>` to widen the map beyond its default 1024-token budget |
 | `/schedule` | Read-only view of cron subscriptions declared by skills (see [Skills → Event subscriptions](skills.md#event-subscriptions)) |
 | `/skills` | List and inspect loaded skills; scaffold new bundle skills with AI assistance (see [Skills](skills.md)) |
 | `/resume` | Resume a previous chat session (aliases: `/sessions`, `/history`). Also available at launch via the `--resume`/`--continue` CLI flags. See [Session Management](session-management.md) |
