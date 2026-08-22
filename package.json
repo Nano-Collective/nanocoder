@@ -156,6 +156,10 @@
 		}
 	},
 	"c8": {
+		"extensions": [
+			".ts",
+			".js"
+		],
 		"exclude": [
 			"source/app/App.tsx",
 			"source/web/page.ts"
