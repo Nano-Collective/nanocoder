@@ -56,7 +56,9 @@ interface UseAppHandlersProps {
 	currentModel: string;
 	currentTheme: ThemePreset;
 	developmentMode: DevelopmentMode;
-	tune: TuneConfig | undefined;
+	tune?: TuneConfig;
+	smartRouting?: import('@/types/config').SmartRoutingState;
+	setSmartRouting?: (state: import('@/types/config').SmartRoutingState) => void;
 	abortController: AbortController | null;
 	updateInfo: UpdateInfo | null;
 	mcpServersStatus: MCPConnectionStatus[] | undefined;
@@ -692,6 +694,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					developmentMode: props.developmentMode,
 					lastApiUsage: props.lastApiUsage,
 					apiCallHistory: props.apiCallHistory,
+					smartRouting: props.smartRouting,
+					setSmartRouting: props.setSmartRouting,
 				},
 				displayValue,
 				images,

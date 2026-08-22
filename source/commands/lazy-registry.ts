@@ -222,4 +222,9 @@ export const lazyCommands: LazyCommand[] = [
 			'Inspect what the prompt scrubber will remove from your prompts',
 		load: () => import('@/commands/privacy').then(m => m.privacyCommand),
 	},
+	{
+		name: 'smartroute',
+		description: 'Toggle smart auto-routing between simple and strong models',
+		load: () => import('@/commands/smartroute').then(m => m.smartrouteCommand),
+	},
 ];

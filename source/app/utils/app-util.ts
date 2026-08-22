@@ -29,6 +29,7 @@ import {
 } from './handlers/create-handler';
 import {handleRetryCommand} from './handlers/retry-handler';
 import {handleResumeCommand} from './handlers/session-handler';
+import {handleSmartRouteCommand} from './handlers/smartroute-handler';
 
 /**
  * "Special commands" need access to app-level state (setting modes, mutating
@@ -588,6 +589,13 @@ async function handleSlashCommand(
 	const commandParts = message.slice(1).trim().split(/\s+/);
 
 	if (await handleCompactCommand(commandParts, options)) return;
+	if (
+		await handleSmartRouteCommand(
+			commandParts,
+			options as Parameters<typeof handleSmartRouteCommand>[1],
+		)
+	)
+		return;
 	if (await handleContextMaxCommand(commandParts, options)) return;
 	if (await handleCommandCreate(commandParts, options)) return;
 	if (await handleAgentCreate(commandParts, options)) return;
