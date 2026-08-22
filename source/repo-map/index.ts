@@ -374,9 +374,6 @@ function pageRank(
 		}
 		for (const [from, targets] of edges) {
 			const total = outWeight[from];
-			if (total === 0) {
-				continue;
-			}
 			for (const [to, weight] of targets) {
 				next[to] += (ranks[from] * weight) / total;
 			}
