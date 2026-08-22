@@ -79,10 +79,12 @@ export const DevelopmentModeIndicator = React.memo(
 		const todoLabel = (() => {
 			if (!todoInfo || todoInfo.totalCount <= 0) return '';
 			if (todoInfo.isHidden) {
+				const inFlight = todoInfo.inProgressCount > 0 ? '~' : '';
 				const unread = todoInfo.hasUnread ? '*' : '';
+				const progress = `${inFlight}${todoInfo.completedCount}/${todoInfo.totalCount}`;
 				return isNarrow
-					? `Todo (${todoInfo.totalCount}${unread})`
-					: `Todo (${todoInfo.totalCount}${unread} Ctrl-t)`;
+					? `Todo (${progress}${unread})`
+					: `Todo (${progress}${unread} Ctrl-t)`;
 			}
 			return isNarrow ? '' : 'Todo (hide Ctrl-t)';
 		})();

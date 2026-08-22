@@ -765,14 +765,20 @@ test('UserInput renders todo badge when todoInfo is provided', t => {
 		<TestWrapper>
 			<UserInput
 				onToggleTodoList={() => {}}
-				todoInfo={{totalCount: 4, isHidden: true, hasUnread: false}}
+				todoInfo={{
+					totalCount: 4,
+					completedCount: 2,
+					inProgressCount: 1,
+					isHidden: true,
+					hasUnread: false,
+				}}
 			/>
 		</TestWrapper>,
 	);
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Todo \(4 Ctrl-t\)/);
+	t.regex(output!, /Todo \(~2\/4 Ctrl-t\)/);
 	unmount();
 });
 
@@ -782,14 +788,20 @@ test('UserInput renders todo badge when disabled and todoInfo is provided', t =>
 			<UserInput
 				disabled={true}
 				onToggleTodoList={() => {}}
-				todoInfo={{totalCount: 3, isHidden: true, hasUnread: true}}
+				todoInfo={{
+					totalCount: 3,
+					completedCount: 1,
+					inProgressCount: 1,
+					isHidden: true,
+					hasUnread: true,
+				}}
 			/>
 		</TestWrapper>,
 	);
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Todo \(3\* Ctrl-t\)/);
+	t.regex(output!, /Todo \(~1\/3\* Ctrl-t\)/);
 	unmount();
 });
 

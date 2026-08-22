@@ -257,7 +257,7 @@ test('ChatInput hides live task list and shows hidden badge when showTodoList is
 	const output = lastFrame();
 	t.truthy(output);
 	t.notRegex(output!, /First task/);
-	t.regex(output!, /Todo \(2 Ctrl-t\)/);
+	t.regex(output!, /Todo \(~1\/2 Ctrl-t\)/);
 	unmount();
 });
 
@@ -275,7 +275,7 @@ test('ChatInput shows unread badge when showTodoList is false and todoHasUnread 
 	const output = lastFrame();
 	t.truthy(output);
 	t.notRegex(output!, /First task/);
-	t.regex(output!, /Todo \(2\* Ctrl-t\)/);
+	t.regex(output!, /Todo \(~1\/2\* Ctrl-t\)/);
 	unmount();
 });
 

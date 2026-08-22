@@ -417,28 +417,58 @@ test('DevelopmentModeIndicator handles custom colors', t => {
 // Todo indicator badge
 // ============================================================================
 
-test('DevelopmentModeIndicator shows Todo (6 Ctrl-t) when hidden and clean', t => {
+test('DevelopmentModeIndicator shows Todo (~2/5 Ctrl-t) when hidden with in-progress tasks', t => {
 	const {lastFrame} = render(
 		<DevelopmentModeIndicator
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
-			todoInfo={{totalCount: 6, isHidden: true, hasUnread: false}}
+			todoInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 1,
+				isHidden: true,
+				hasUnread: false,
+			}}
 		/>,
 	);
-	t.regex(lastFrame()!, /Todo \(6 Ctrl-t\)/);
+	t.regex(lastFrame()!, /Todo \(~2\/5 Ctrl-t\)/);
 });
 
-test('DevelopmentModeIndicator shows Todo (6* Ctrl-t) when hidden and has unread updates', t => {
+test('DevelopmentModeIndicator shows Todo (2/5 Ctrl-t) when hidden with no in-progress tasks', t => {
 	const {lastFrame} = render(
 		<DevelopmentModeIndicator
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
-			todoInfo={{totalCount: 6, isHidden: true, hasUnread: true}}
+			todoInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 0,
+				isHidden: true,
+				hasUnread: false,
+			}}
 		/>,
 	);
-	t.regex(lastFrame()!, /Todo \(6\* Ctrl-t\)/);
+	t.regex(lastFrame()!, /Todo \(2\/5 Ctrl-t\)/);
+});
+
+test('DevelopmentModeIndicator shows Todo (~2/5* Ctrl-t) when hidden with in-progress and unread updates', t => {
+	const {lastFrame} = render(
+		<DevelopmentModeIndicator
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			todoInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 1,
+				isHidden: true,
+				hasUnread: true,
+			}}
+		/>,
+	);
+	t.regex(lastFrame()!, /Todo \(~2\/5\* Ctrl-t\)/);
 });
 
 test('DevelopmentModeIndicator shows Todo (hide Ctrl-t) when visible on wide terminal', t => {
@@ -447,7 +477,13 @@ test('DevelopmentModeIndicator shows Todo (hide Ctrl-t) when visible on wide ter
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
-			todoInfo={{totalCount: 6, isHidden: false, hasUnread: false}}
+			todoInfo={{
+				totalCount: 5,
+				completedCount: 2,
+				inProgressCount: 1,
+				isHidden: false,
+				hasUnread: false,
+			}}
 		/>,
 	);
 	t.regex(lastFrame()!, /Todo \(hide Ctrl-t\)/);
@@ -459,7 +495,13 @@ test('DevelopmentModeIndicator does not show todo badge when totalCount is 0 or 
 			developmentMode="normal"
 			colors={mockColors}
 			contextPercentUsed={null}
-			todoInfo={{totalCount: 0, isHidden: true, hasUnread: false}}
+			todoInfo={{
+				totalCount: 0,
+				completedCount: 0,
+				inProgressCount: 0,
+				isHidden: true,
+				hasUnread: false,
+			}}
 		/>,
 	);
 	t.notRegex(frame1()!, /Todo/);

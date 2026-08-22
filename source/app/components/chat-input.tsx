@@ -167,6 +167,10 @@ export function ChatInput({
 		liveTaskList && liveTaskList.length > 0
 			? {
 					totalCount: liveTaskList.length,
+					completedCount: liveTaskList.filter(t => t.status === 'completed')
+						.length,
+					inProgressCount: liveTaskList.filter(t => t.status === 'in_progress')
+						.length,
 					isHidden: !showTodoList,
 					hasUnread: todoHasUnread,
 				}
