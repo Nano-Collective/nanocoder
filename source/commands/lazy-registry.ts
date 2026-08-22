@@ -217,6 +217,12 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/skills').then(m => m.skillsCommand),
 	},
 	{
+		name: 'repomap',
+		description:
+			'Show a ranked map of the codebase (files and their key symbols). Use --tokens <n> to widen it.',
+		load: () => import('@/commands/repomap').then(m => m.repomapCommand),
+	},
+	{
 		name: 'privacy',
 		description:
 			'Inspect what the prompt scrubber will remove from your prompts',
