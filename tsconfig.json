@@ -5,7 +5,7 @@
 		"module": "ESNext",
 		"moduleResolution": "bundler",
 		"outDir": "dist",
-		"rootDir": "source",
+		"rootDir": "../../",
 		"strict": true,
 		"esModuleInterop": true,
 		"allowSyntheticDefaultImports": true,
