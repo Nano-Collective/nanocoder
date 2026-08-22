@@ -130,10 +130,10 @@
 		]
 	},
 	"ava": {
-		"extensions": {
-			"ts": "module",
-			"tsx": "module"
-		},
+		"extensions": [
+			"ts",
+			"tsx"
+		],
 		"nodeArguments": [
 			"--import=tsx",
 			"--no-warnings"
