@@ -294,6 +294,7 @@ export function InteractiveApp({
 				renderLastQueuedComponentLive={recallableSubmittedDraft}
 				clearKey={clearKey}
 				fullscreen={fullscreen}
+				interactive={true}
 				scrollActive={
 					!showModalSelectors &&
 					!appState.isExplorerMode &&

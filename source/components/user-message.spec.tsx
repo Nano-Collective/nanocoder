@@ -5,8 +5,6 @@ import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
 import UserMessage from './user-message';
 
-console.log(`\nuser-message.spec.tsx – ${React.version}`);
-
 // Mock ThemeProvider for testing
 const MockThemeProvider = ({children}: {children: React.ReactNode}) => {
 	const mockTheme = {
@@ -16,7 +14,9 @@ const MockThemeProvider = ({children}: {children: React.ReactNode}) => {
 	};
 
 	return (
-		<ThemeContext.Provider value={mockTheme}>{children}</ThemeContext.Provider>
+		<ThemeContext.Provider value={mockTheme}>
+			{children}
+		</ThemeContext.Provider>
 	);
 };
 
@@ -32,6 +32,7 @@ test('UserMessage renders with basic message', t => {
 	);
 
 	const output = lastFrame();
+
 	t.truthy(output);
 	t.regex(output!, /You:/);
 	t.regex(output!, /Hello world/);
@@ -45,6 +46,7 @@ test('UserMessage renders without file placeholders', t => {
 	);
 
 	const output = lastFrame();
+
 	t.truthy(output);
 	t.regex(output!, /This is a normal message/);
 });
@@ -57,6 +59,7 @@ test('UserMessage renders with file placeholder', t => {
 	);
 
 	const output = lastFrame();
+
 	t.truthy(output);
 	t.regex(output!, /\[@src\/app\.tsx\]/);
 	t.regex(output!, /Check/);
@@ -71,6 +74,7 @@ test('UserMessage renders with file placeholder with line range', t => {
 	);
 
 	const output = lastFrame();
+
 	t.truthy(output);
 	t.regex(output!, /\[@file\.ts:10-20\]/);
 });
@@ -83,6 +87,7 @@ test('UserMessage renders with file placeholder with single line', t => {
 	);
 
 	const output = lastFrame();
+
 	t.truthy(output);
 	t.regex(output!, /\[@utils\.ts:42\]/);
 });
@@ -95,6 +100,7 @@ test('UserMessage renders with multiple file placeholders', t => {
 	);
 
 	const output = lastFrame();
+
 	t.truthy(output);
 	t.regex(output!, /\[@src\/app\.tsx\]/);
 	t.regex(output!, /\[@src\/index\.tsx\]/);
@@ -105,11 +111,12 @@ test('UserMessage renders with multiple file placeholders', t => {
 test('UserMessage renders multi-line message', t => {
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<UserMessage message="Line 1\nLine 2\nLine 3" />
+			<UserMessage message={'Line 1\nLine 2\nLine 3'} />
 		</MockThemeProvider>,
 	);
 
 	const output = lastFrame();
+
 	t.truthy(output);
 	t.regex(output!, /Line 1/);
 	t.regex(output!, /Line 2/);
@@ -119,11 +126,14 @@ test('UserMessage renders multi-line message', t => {
 test('UserMessage renders multi-line message with file placeholders', t => {
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<UserMessage message="Check these files:\n[@src/app.tsx]\n[@src/utils.ts]" />
+			<UserMessage
+				message={'Check these files:\n[@src/app.tsx]\n[@src/utils.ts]'}
+			/>
 		</MockThemeProvider>,
 	);
 
 	const output = lastFrame();
+
 	t.truthy(output);
 	t.regex(output!, /Check these files:/);
 	t.regex(output!, /\[@src\/app\.tsx\]/);
@@ -138,6 +148,7 @@ test('UserMessage renders file placeholder at start of message', t => {
 	);
 
 	const output = lastFrame();
+
 	t.truthy(output);
 	t.regex(output!, /\[@package\.json\]/);
 });
@@ -150,6 +161,7 @@ test('UserMessage renders file placeholder at end of message', t => {
 	);
 
 	const output = lastFrame();
+
 	t.truthy(output);
 	t.regex(output!, /\[@tsconfig\.json\]/);
 });
@@ -162,30 +174,37 @@ test('UserMessage renders with empty message', t => {
 	);
 
 	const output = lastFrame();
+
 	t.truthy(output);
 	t.regex(output!, /You:/);
 });
 
 test('UserMessage handles file placeholder with special characters in path', t => {
+	const message = 'Check [@src/my-file.spec.ts:100-200]';
+
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<UserMessage message="Check [@src/my-file.spec.ts:100-200]" />
+			<UserMessage message={message} />
 		</MockThemeProvider>,
 	);
 
 	const output = lastFrame();
+
 	t.truthy(output);
 	t.regex(output!, /\[@src\/my-file\.spec\.ts:100-200\]/);
 });
 
 test('UserMessage handles multiple placeholders on same line', t => {
+	const message = 'Compare [@a.ts] and [@b.ts] and [@c.ts]';
+
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<UserMessage message="Compare [@a.ts] and [@b.ts] and [@c.ts]" />
+			<UserMessage message={message} />
 		</MockThemeProvider>,
 	);
 
 	const output = lastFrame();
+
 	t.truthy(output);
 	t.regex(output!, /\[@a\.ts\]/);
 	t.regex(output!, /\[@b\.ts\]/);
@@ -193,26 +212,31 @@ test('UserMessage handles multiple placeholders on same line', t => {
 });
 
 test('UserMessage does not render @ symbols that are not placeholders', t => {
+	const message = 'Email me at user@example.com';
+
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<UserMessage message="Email me at user@example.com" />
+			<UserMessage message={message} />
 		</MockThemeProvider>,
 	);
 
 	const output = lastFrame();
+
 	t.truthy(output);
 	t.regex(output!, /user@example\.com/);
-	// Should NOT have placeholder styling since it's not in [@...] format
 });
 
 test('UserMessage renders paragraphs with spacing', t => {
+	const message = 'First paragraph\n\nSecond paragraph\n\nThird paragraph';
+
 	const {lastFrame} = render(
 		<MockThemeProvider>
-			<UserMessage message="First paragraph\n\nSecond paragraph\n\nThird paragraph" />
+			<UserMessage message={message} />
 		</MockThemeProvider>,
 	);
 
 	const output = lastFrame();
+
 	t.truthy(output);
 	t.regex(output!, /First paragraph/);
 	t.regex(output!, /Second paragraph/);
@@ -239,9 +263,10 @@ test('UserMessage strips VS Code context markers from display', t => {
 [@App.tsx (lines 149-155)]<!--vscode-context-->
 \`\`\`
 const vscodeServer = useVSCodeServer({
-    enabled: vscodeMode,
+	enabled: vscodeMode,
 });
-\`\`\`<!--/vscode-context-->`;
+\`\`\`
+<!--/vscode-context-->`;
 
 	const {lastFrame} = render(
 		<MockThemeProvider>
@@ -250,11 +275,10 @@ const vscodeServer = useVSCodeServer({
 	);
 
 	const output = lastFrame();
+
 	t.truthy(output);
-	// Should show the question and placeholder
 	t.regex(output!, /What does this do/);
 	t.regex(output!, /\[@App\.tsx \(lines 149-155\)\]/);
-	// Should NOT show the context markers or code block
 	t.false(output!.includes('<!--vscode-context-->'));
 	t.false(output!.includes('<!--/vscode-context-->'));
 	t.false(output!.includes('useVSCodeServer'));
@@ -266,7 +290,8 @@ test('UserMessage strips VS Code context but preserves placeholder tag', t => {
 [@utils.ts (lines 10-20)]<!--vscode-context-->
 \`\`\`
 function helper() {}
-\`\`\`<!--/vscode-context-->`;
+\`\`\`
+<!--/vscode-context-->`;
 
 	const {lastFrame} = render(
 		<MockThemeProvider>
@@ -275,6 +300,7 @@ function helper() {}
 	);
 
 	const output = lastFrame();
+
 	t.truthy(output);
 	t.regex(output!, /\[@utils\.ts \(lines 10-20\)\]/);
 	t.false(output!.includes('function helper'));
@@ -293,6 +319,7 @@ File: source/app/components/settings-selector.tsx<!--/vscode-context-->`;
 	);
 
 	const output = lastFrame();
+
 	t.truthy(output);
 	t.regex(output!, /\[@settings-selector\.tsx\]/);
 	t.false(output!.includes('<!--vscode-context-->'));
@@ -309,6 +336,7 @@ test('UserMessage handles message without VS Code context normally', t => {
 	);
 
 	const output = lastFrame();
+
 	t.truthy(output);
 	t.regex(output!, /Regular message without VS Code context/);
 });
@@ -321,6 +349,7 @@ test('UserMessage displays approximate token count', t => {
 	);
 
 	const output = lastFrame();
+
 	t.truthy(output);
 	t.regex(output!, /~\d+ tokens/);
 });
@@ -329,6 +358,7 @@ test('UserMessage renders nothing under NonInteractiveRenderContext', async t =>
 	const {NonInteractiveRenderContext} = await import(
 		'../hooks/useNonInteractiveRender'
 	);
+
 	const {lastFrame} = render(
 		<MockThemeProvider>
 			<NonInteractiveRenderContext.Provider value={true}>
@@ -338,7 +368,7 @@ test('UserMessage renders nothing under NonInteractiveRenderContext', async t =>
 	);
 
 	const output = lastFrame();
-	// Nothing visible — the user already knows what they typed.
+
 	t.is((output ?? '').trim(), '');
 });
 
@@ -348,12 +378,14 @@ test('UserMessage handles multiple VS Code context blocks', t => {
 [@file1.ts (lines 1-5)]<!--vscode-context-->
 \`\`\`
 code1
-\`\`\`<!--/vscode-context-->
+\`\`\`
+<!--/vscode-context-->
 
 [@file2.ts (lines 10-15)]<!--vscode-context-->
 \`\`\`
 code2
-\`\`\`<!--/vscode-context-->`;
+\`\`\`
+<!--/vscode-context-->`;
 
 	const {lastFrame} = render(
 		<MockThemeProvider>
@@ -362,9 +394,181 @@ code2
 	);
 
 	const output = lastFrame();
+
 	t.truthy(output);
 	t.regex(output!, /\[@file1\.ts \(lines 1-5\)\]/);
 	t.regex(output!, /\[@file2\.ts \(lines 10-15\)\]/);
 	t.false(output!.includes('code1'));
 	t.false(output!.includes('code2'));
+});
+
+// ============================================================================
+// Long Message Collapse Tests
+// ============================================================================
+
+test('UserMessage does not collapse messages at 40 words', t => {
+	const message = Array.from(
+		{length: 40},
+		(_, index) => `word${index + 1}`,
+	).join(' ');
+
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<UserMessage message={message} />
+		</MockThemeProvider>,
+	);
+
+	const output = lastFrame();
+
+	t.truthy(output);
+	t.true(output!.includes('word40'));
+	t.false(output!.includes('word41'));
+	t.false(output!.includes('...'));
+});
+
+test('UserMessage collapses messages over 40 words', t => {
+	const message = Array.from(
+		{length: 41},
+		(_, index) => `word${index + 1}`,
+	).join(' ');
+
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<UserMessage message={message} />
+		</MockThemeProvider>,
+	);
+
+	const output = lastFrame();
+
+	t.truthy(output);
+	t.true(output!.includes('word40'));
+	t.false(output!.includes('word41'));
+	t.true(output!.includes('...'));
+});
+
+// ============================================================================
+// Character-limit Collapse Tests
+// ============================================================================
+
+test('UserMessage does not collapse messages at 300 characters', t => {
+	const message = `hello ${'a'.repeat(294)}`;
+
+	t.is(message.length, 300);
+
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<UserMessage message={message} />
+		</MockThemeProvider>,
+	);
+
+	const output = lastFrame();
+
+	t.truthy(output);
+
+	// The message may be terminal-wrapped, so don't require the
+	// entire 300-character string to appear contiguously.
+	t.true(output!.includes('hello '));
+	t.true(output!.includes('aaa'));
+	t.false(output!.includes('...'));
+});
+
+test('UserMessage collapses messages over 300 characters', t => {
+	const message = `hello ${'a'.repeat(301)}`;
+
+	t.is(message.length, 307);
+
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<UserMessage message={message} />
+		</MockThemeProvider>,
+	);
+
+	const output = lastFrame();
+
+	t.truthy(output);
+	t.true(output!.includes('hello '));
+	t.true(output!.includes('...'));
+	t.false(output!.includes(message));
+});
+
+test('UserMessage collapses long unbroken strings', t => {
+	const longToken = 's'.repeat(500);
+	const message = `hello ${longToken}`;
+
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<UserMessage message={message} />
+		</MockThemeProvider>,
+	);
+
+	const output = lastFrame();
+
+	t.truthy(output);
+	t.true(output!.includes('hello '));
+	t.true(output!.includes('...'));
+	t.false(output!.includes(longToken));
+});
+
+test('UserMessage prefers word limit when both limits are exceeded', t => {
+	const message = `${'word '.repeat(50)}${'a'.repeat(100)}`;
+
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<UserMessage message={message} />
+		</MockThemeProvider>,
+	);
+
+	const output = lastFrame();
+
+	t.truthy(output);
+
+	const matches = output!.match(/word/g);
+
+	t.is(matches?.length, 40);
+	t.true(output!.includes('...'));
+});
+
+test('UserMessage strips VS Code context before collapse calculation', t => {
+	const contextBlock =
+		'<!--vscode-context-->huge block here<!--/vscode-context-->';
+
+	const message = `hello world ${contextBlock}`;
+
+	const {lastFrame} = render(
+		<MockThemeProvider>
+			<UserMessage message={message} />
+		</MockThemeProvider>,
+	);
+
+	const output = lastFrame();
+
+	t.truthy(output);
+	t.true(output!.includes('hello world'));
+	t.false(output!.includes('vscode-context'));
+	t.false(output!.includes('...'));
+});
+test('UserMessage expands and collapses a long prompt through its focused control', async t => {
+	const message = Array.from(
+		{length: 41},
+		(_, index) => `word${index + 1}`,
+	).join(' ');
+	const {lastFrame, stdin} = render(
+		<MockThemeProvider>
+			<UserMessage message={message} />
+		</MockThemeProvider>,
+	);
+
+	stdin.write('\t');
+	await new Promise(resolve => setTimeout(resolve, 25));
+	t.true(lastFrame()!.includes('▸ Show more ↓'));
+
+	stdin.write('\r');
+	await new Promise(resolve => setTimeout(resolve, 25));
+	t.true(lastFrame()!.includes('Show less ↑'));
+	t.true(lastFrame()!.includes('word41'));
+
+	stdin.write('\r');
+	await new Promise(resolve => setTimeout(resolve, 25));
+	t.true(lastFrame()!.includes('Show more ↓'));
+	t.false(lastFrame()!.includes('word41'));
 });

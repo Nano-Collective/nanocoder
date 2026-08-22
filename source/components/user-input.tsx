@@ -721,6 +721,12 @@ export default function UserInput({
 			return;
 		}
 
+		// Ink broadcasts input to every active handler. Once focus moves to a
+		// transcript control, leave ordinary input handling to that control.
+		if (!effectiveFocus) {
+			return;
+		}
+
 		// Ctrl+V: pull an image off the system clipboard as an attachment.
 		// Terminal paste of regular text arrives as a bracketed paste, not as
 		// Ctrl+V, so this binding is free to mean "paste image".
