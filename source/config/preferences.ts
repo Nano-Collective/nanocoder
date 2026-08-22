@@ -210,3 +210,21 @@ export function updateAlternateScreen(value: boolean): void {
 	preferences.alternateScreen = value;
 	savePreferences(preferences);
 }
+
+/**
+ * Get the professional ("boring") tone preference. When on, progress text is
+ * strictly functional and the model is instructed to keep responses terse.
+ */
+export function getProfessionalTone(): boolean {
+	const preferences = loadPreferences();
+	return preferences.professionalTone ?? false;
+}
+
+/**
+ * Save the professional tone preference
+ */
+export function updateProfessionalTone(value: boolean): void {
+	const preferences = loadPreferences();
+	preferences.professionalTone = value;
+	savePreferences(preferences);
+}

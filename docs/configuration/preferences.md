@@ -70,6 +70,24 @@ You can change this by editing the preferences file directly:
 
 Reasoning traces can also be toggled dynamically with the Ctrl+R keyboard shortcut.
 
+### Professional Tone
+
+Professional ("boring") tone is stored in the preferences file with the `professionalTone` field:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `professionalTone` | boolean | `false` | When true, progress text is strictly functional (`Completed in 12s.` instead of `Worked for a plucky 12s.`) and the system prompt gains a TONE section telling the model to be terse — no filler, no preamble, no celebratory wrap-ups. |
+
+You can change this via `/settings` → **Behavior** → **Professional Tone**, or by editing the preferences file directly:
+
+```json
+{
+  "professionalTone": true
+}
+```
+
+The progress text changes immediately. The system prompt section is picked up the next time the prompt is rebuilt — on a mode or model switch, or on restart.
+
 ### Notification Configuration
 
 Desktop notification preferences are stored under the `nanocoder.notifications` namespace:
