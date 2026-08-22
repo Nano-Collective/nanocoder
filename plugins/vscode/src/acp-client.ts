@@ -25,6 +25,15 @@ export class NanocoderAcpClient {
 	public onPermissionsCancelled?: (toolCallIds: string[]) => void;
 	public onStateSync?: (state: StateSyncPayload) => void;
 	public onConnectionReady?: () => void;
+	public onTimelineUpdated?: (entries: Array<{
+		id: string;
+		seq: number;
+		toolCallId: string;
+		toolName: string;
+		title: string;
+		timestamp: string;
+		filesChanged: string[];
+	}>) => void;
 
 	public currentMode?: string;
 	public availableModes: string[] = [];
@@ -434,6 +443,42 @@ export class NanocoderAcpClient {
 		} catch (error) {
 			this.outputChannel.appendLine(`resumeSession failed: ${error}`);
 			vscode.window.showErrorMessage(`Failed to resume session: ${error}`);
+		}
+	}
+
+	async listTimeline(): Promise<Array<{
+		id: string;
+		seq: number;
+		toolCallId: string;
+		toolName: string;
+		title: string;
+		timestamp: string;
+		filesChanged: string[];
+	}>> {
+		if (!this.connection || !this._sessionId) return [];
+		try {
+			const result = await this.connection.extMethod('timeline/list', {
+				sessionId: this._sessionId,
+			});
+			const entries = (result as {entries?: unknown}).entries;
+			return Array.isArray(entries) ? entries : [];
+		} catch (error) {
+			this.outputChannel.appendLine(`listTimeline failed: ${error}`);
+			return [];
+		}
+	}
+
+	async revertTimeline(checkpointId: string): Promise<void> {
+		if (!this.connection || !this._sessionId) return;
+		try {
+			await this.connection.extMethod('timeline/revert', {
+				sessionId: this._sessionId,
+				checkpointId,
+			});
+		} catch (error) {
+			this.outputChannel.appendLine(`revertTimeline failed: ${error}`);
+			vscode.window.showErrorMessage(`Failed to revert timeline: ${error}`);
+			throw error;
 		}
 	}
 

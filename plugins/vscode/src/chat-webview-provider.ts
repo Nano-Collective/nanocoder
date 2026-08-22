@@ -39,6 +39,7 @@ export class ChatWebviewProvider
 
 	private _view?: vscode.WebviewView;
 	private _isWebviewReady = false;
+	private _timelineRefreshTimer?: ReturnType<typeof setTimeout>;
 	/** Code lens prompt waiting on the webview shell and the ACP session. */
 	private _pendingPrompt: string | null = null;
 	private _pendingPromptTimer: ReturnType<typeof setTimeout> | null = null;
@@ -59,6 +60,10 @@ export class ChatWebviewProvider
 				type: 'acpUpdate',
 				update
 			});
+			const kind = update?.update?.sessionUpdate ?? update?.sessionUpdate;
+			if (kind === 'tool_call' || kind === 'tool_call_update') {
+				this.scheduleTimelineRefresh();
+			}
 		};
 
 		this._acpClient.onPermissionRequested = (toolCallId: string, toolCall: any, options?: any[]) => {
@@ -276,6 +281,7 @@ export class ChatWebviewProvider
 						this.postMessage({type: 'clear', isLoading: true});
 						this._acpClient.resumeSession(message.sessionId).finally(() => {
 							this.postMessage({type: 'sessionLoaded'});
+							this._broadcastTimeline();
 						});
 						break;
 					case 'deleteSession':
@@ -359,6 +365,12 @@ export class ChatWebviewProvider
 					case 'copyToClipboard':
 						this._copyToClipboard(message.text);
 						break;
+					case 'requestTimeline':
+						this._broadcastTimeline();
+						break;
+					case 'revertToCheckpoint':
+						this._handleRevert(message.checkpointId);
+						break;
 				}
 			}
 		);
@@ -382,6 +394,7 @@ export class ChatWebviewProvider
 				this._outputChannel.appendLine(`[Extension] Session initialized automatically: ${sessionId}`);
 				// Broadcast session list to populate History tab
 				await this._broadcastSessions();
+				await this._broadcastTimeline();
 				this._flushPendingPrompt();
 			}
 		} catch (error) {
@@ -406,21 +419,53 @@ export class ChatWebviewProvider
 		this.postMessage({type: 'updateSessions', sessions});
 	}
 
+	private scheduleTimelineRefresh() {
+		if (this._timelineRefreshTimer) {
+			clearTimeout(this._timelineRefreshTimer);
+		}
+		this._timelineRefreshTimer = setTimeout(() => {
+			this._broadcastTimeline();
+		}, 150);
+	}
+
+	private async _broadcastTimeline() {
+		const entries = await this._acpClient.listTimeline();
+		this.postMessage({type: 'updateTimeline', entries});
+	}
+
+	private async _handleRevert(checkpointId: string) {
+		this._outputChannel.appendLine(`[Webview] User reverted timeline to ${checkpointId}`);
+		this.postMessage({type: 'clear', isLoading: true});
+		try {
+			await this._acpClient.revertTimeline(checkpointId);
+		} catch {
+			// Error toast is raised by the ACP client.
+		} finally {
+			this.postMessage({type: 'sessionLoaded'});
+			await this._broadcastTimeline();
+		}
+	}
+
 	private _handleRequestSettings() {
 		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
 		const settings = this._settingsManager.readSettings(cwd);
-		this.postMessage({ type: 'settingsData', settings });
+		this.postMessage({type: 'settingsData', settings});
 	}
 
 	private _handleUpdateSetting(key: string, value: unknown) {
 		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
 		const result = this._settingsManager.updateSetting(cwd, key, value);
-		this.postMessage({ type: 'settingsUpdated', key, success: result.success, error: result.error });
+		this.postMessage({
+			type: 'settingsUpdated',
+			key,
+			success: result.success,
+			error: result.error,
+		});
 
 		// If successful, send refreshed settings so the UI stays in sync
 		if (result.success) {
 			const settings = this._settingsManager.readSettings(cwd);
-			this.postMessage({ type: 'settingsData', settings });
+			this.postMessage({type: 'settingsData', settings});
 		} else {
 			vscode.window.showErrorMessage(`Failed to save setting '${key}': ${result.error}`);
 		}
@@ -433,12 +478,12 @@ export class ChatWebviewProvider
 
 		try {
 			if (!fs.existsSync(filePath)) {
-				fs.mkdirSync(path.dirname(filePath), { recursive: true });
+				fs.mkdirSync(path.dirname(filePath), {recursive: true});
 				fs.writeFileSync(filePath, '{}\n', 'utf-8');
 			}
 			const doc = await vscode.workspace.openTextDocument(filePath);
 			await vscode.window.showTextDocument(doc);
-		} catch (err) {
+		} catch {
 			vscode.window.showErrorMessage(
 				`Could not open ${file} at ${filePath}. Ensure the file exists.`,
 			);
@@ -584,6 +629,7 @@ export class ChatWebviewProvider
 			// message then streams into the fresh view).
 			if (text.trim() === '/clear') {
 				this.postMessage({type: 'clear'});
+				this.postMessage({type: 'updateTimeline', entries: []});
 			}
 
 			// Expand any @[file] / @[folder] attachments into their contents

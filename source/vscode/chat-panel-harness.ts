@@ -1,10 +1,9 @@
 /**
- * Boots `plugins/vscode/media/chat-panel.js` inside a VM against a stub DOM so
- * the panel's rendering can be driven and inspected from tests. Shared by the
- * chat-panel specs; extracted verbatim from chat-panel-thoughts.spec.ts.
- *
- * `mention-utils.js` must run first: the real webview loads it before
- * `chat-panel.js`, which immediately reads `globalThis.NanocoderMentionUtils`.
+ * Boots the chat panel scripts inside a VM against a stub DOM so the panel's
+ * rendering can be driven and inspected from tests. Shared by the chat-panel
+ * specs. Mirrors production load order in chat-panel.html: mention-utils.js
+ * must run first because chat-panel.js reads `globalThis.NanocoderMentionUtils`
+ * at IIFE eval time.
  */
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';

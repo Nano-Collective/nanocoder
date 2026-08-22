@@ -40,6 +40,7 @@ export const MAX_SESSION_NAME_LENGTH = 100;
 
 // === LIMITS ===
 export const MAX_CHECKPOINT_FILES = 50;
+export const MAX_TIMELINE_ENTRIES = 50;
 export const MAX_FIND_FILES_RESULTS = 100;
 export const MAX_SEARCH_RESULTS = 100;
 export const MAX_PROMPT_HISTORY_SIZE = 100;

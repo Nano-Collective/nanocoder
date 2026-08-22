@@ -1,4 +1,4 @@
-import {execSync} from 'child_process';
+import {execFileSync, execSync} from 'child_process';
 import {existsSync} from 'fs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -121,6 +121,38 @@ export class FileSnapshotService {
 				},
 			});
 			return [];
+		}
+	}
+
+	/**
+	 * Return HEAD contents of a tracked file, or null if git is unavailable
+	 * or the path is not in HEAD (untracked / unknown).
+	 */
+	getHeadContent(relativePath: string): string | null {
+		try {
+			return execFileSync('git', ['show', `HEAD:${relativePath}`], {
+				cwd: this.workspaceRoot,
+				encoding: 'utf-8',
+				stdio: ['pipe', 'pipe', 'pipe'],
+			});
+		} catch {
+			return null;
+		}
+	}
+
+	/**
+	 * Delete a file inside the workspace. Refuses paths that escape the root.
+	 */
+	async deleteFile(relativePath: string): Promise<void> {
+		const absolutePath = path.resolve(this.workspaceRoot, relativePath); // nosemgrep
+		const relative = path.relative(this.workspaceRoot, absolutePath);
+		if (relative.startsWith('..') || path.isAbsolute(relative)) {
+			throw new Error(
+				`Refusing to delete path outside workspace: ${relativePath}`,
+			);
+		}
+		if (existsSync(absolutePath)) {
+			await fs.unlink(absolutePath);
 		}
 	}
 
