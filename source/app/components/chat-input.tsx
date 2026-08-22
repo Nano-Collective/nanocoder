@@ -74,6 +74,9 @@ export interface ChatInputProps {
 	onToggleCompactDisplay?: () => void;
 	compactToolDisplay?: boolean;
 	liveTaskList?: Task[] | null;
+	showTodoList?: boolean;
+	todoHasUnread?: boolean;
+	onToggleTodoList?: () => void;
 
 	// Handlers
 	onSubmit: (
@@ -140,6 +143,9 @@ export function ChatInput({
 	onToggleCompactDisplay,
 	compactToolDisplay,
 	liveTaskList,
+	showTodoList = true,
+	todoHasUnread = false,
+	onToggleTodoList,
 	onSubmit,
 	onToggleMode,
 	onToggleReasoningExpanded,
@@ -157,6 +163,15 @@ export function ChatInput({
 		activeToolCall.function.name !== 'execute_bash' &&
 		activeToolCall.function.name !== 'agent';
 
+	const todoInfo =
+		liveTaskList && liveTaskList.length > 0
+			? {
+					totalCount: liveTaskList.length,
+					isHidden: !showTodoList,
+					hasUnread: todoHasUnread,
+				}
+			: null;
+
 	return (
 		<Box flexDirection="column" marginLeft={fullscreen ? 0 : -1}>
 			{/* Live compact tool counts - running tally during auto-execution */}
@@ -165,7 +180,7 @@ export function ChatInput({
 			)}
 
 			{/* Live task list - updates in-place below tool counts, above spinner */}
-			{liveTaskList && liveTaskList.length > 0 && (
+			{showTodoList && liveTaskList && liveTaskList.length > 0 && (
 				<TaskListDisplay tasks={liveTaskList} title="Tasks" />
 			)}
 
@@ -216,6 +231,8 @@ export function ChatInput({
 					onToggleMode={onToggleMode}
 					onToggleReasoningExpanded={onToggleReasoningExpanded}
 					onToggleCompactDisplay={onToggleCompactDisplay}
+					onToggleTodoList={onToggleTodoList}
+					todoInfo={todoInfo}
 					compactToolDisplay={compactToolDisplay}
 					developmentMode={developmentMode}
 					contextPercentUsed={contextPercentUsed}

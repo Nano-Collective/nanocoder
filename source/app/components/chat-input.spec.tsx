@@ -243,3 +243,39 @@ test('ChatInput does not show task list when liveTaskList is null', t => {
 	t.notRegex(output!, /Tasks/);
 	unmount();
 });
+
+test('ChatInput hides live task list and shows hidden badge when showTodoList is false', t => {
+	const props = createDefaultProps({
+		liveTaskList: [
+			{id: '1', title: 'First task', status: 'completed', createdAt: '', updatedAt: ''},
+			{id: '2', title: 'Second task', status: 'in_progress', createdAt: '', updatedAt: ''},
+		],
+		showTodoList: false,
+	});
+
+	const {lastFrame, unmount} = renderWithTheme(<ChatInput {...props} />);
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /First task/);
+	t.regex(output!, /Todo \(2 Ctrl-t\)/);
+	unmount();
+});
+
+test('ChatInput shows unread badge when showTodoList is false and todoHasUnread is true', t => {
+	const props = createDefaultProps({
+		liveTaskList: [
+			{id: '1', title: 'First task', status: 'completed', createdAt: '', updatedAt: ''},
+			{id: '2', title: 'Second task', status: 'in_progress', createdAt: '', updatedAt: ''},
+		],
+		showTodoList: false,
+		todoHasUnread: true,
+	});
+
+	const {lastFrame, unmount} = renderWithTheme(<ChatInput {...props} />);
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /First task/);
+	t.regex(output!, /Todo \(2\* Ctrl-t\)/);
+	unmount();
+});
+

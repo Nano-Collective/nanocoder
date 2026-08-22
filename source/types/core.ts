@@ -263,3 +263,9 @@ export interface LSPConnectionStatus {
 	status: ConnectionStatus;
 	errorMessage?: string;
 }
+
+export interface TodoIndicatorInfo {
+	totalCount: number;
+	isHidden: boolean;
+	hasUnread?: boolean;
+}

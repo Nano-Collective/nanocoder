@@ -760,6 +760,40 @@ test('UserInput does not show ctrl-o hint when onToggleCompactDisplay is not pro
 	unmount();
 });
 
+test('UserInput renders todo badge when todoInfo is provided', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				onToggleTodoList={() => {}}
+				todoInfo={{totalCount: 4, isHidden: true, hasUnread: false}}
+			/>
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Todo \(4 Ctrl-t\)/);
+	unmount();
+});
+
+test('UserInput renders todo badge when disabled and todoInfo is provided', t => {
+	const {lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				disabled={true}
+				onToggleTodoList={() => {}}
+				todoInfo={{totalCount: 3, isHidden: true, hasUnread: true}}
+			/>
+		</TestWrapper>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Todo \(3\* Ctrl-t\)/);
+	unmount();
+});
+
+
 
 // ============================================================================
 // Command Completion Navigation Tests
