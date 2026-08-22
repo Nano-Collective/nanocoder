@@ -84,6 +84,65 @@ test.serial('loadGitignore works without .gitignore file', async t => {
 	}
 });
 
+test.serial('loadGitignore loads .nanocoderignore patterns', async t => {
+	const testDir = join(process.cwd(), 'test-nanocoderignore-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		writeFileSync(join(testDir, '.nanocoderignore'), '*.secret\ndata/\n');
+
+		const ig = loadGitignore(testDir);
+
+		t.true(ig.ignores('api.secret'), 'Should ignore .secret files');
+		t.true(ig.ignores('data/dump.csv'), 'Should ignore data/ directory');
+		t.false(ig.ignores('file.ts'), 'Should not ignore unrelated files');
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial(
+	'loadGitignore merges .gitignore and .nanocoderignore patterns',
+	async t => {
+		const testDir = join(process.cwd(), 'test-both-ignores-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, '.gitignore'), '*.log\n');
+			writeFileSync(join(testDir, '.nanocoderignore'), '.env\npackage-lock.json\n');
+
+			const ig = loadGitignore(testDir);
+
+			t.true(ig.ignores('file.log'), 'Should ignore .gitignore patterns');
+			t.true(ig.ignores('.env'), 'Should ignore .nanocoderignore patterns');
+			t.true(
+				ig.ignores('package-lock.json'),
+				'Should ignore committed files listed in .nanocoderignore',
+			);
+			t.false(ig.ignores('file.ts'), 'Should not ignore unrelated files');
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial('loadGitignore works without .nanocoderignore file', async t => {
+	const testDir = join(process.cwd(), 'test-no-nanocoderignore-temp');
+
+	try {
+		mkdirSync(testDir, {recursive: true});
+		// No .nanocoderignore file
+
+		const ig = loadGitignore(testDir);
+
+		// Should still have default ignores and not throw
+		t.true(ig.ignores('node_modules/file.js'));
+		t.false(ig.ignores('src/file.ts'));
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
 test('loadGitignore ignores all language-specific directories', t => {
 	const ig = loadGitignore(process.cwd());
 
