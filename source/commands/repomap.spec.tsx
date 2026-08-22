@@ -1,8 +1,9 @@
 import test from 'ava';
 import React from 'react';
 
-import {parseRepoMapArgs, repomapCommand, RepoMapView} from './repomap';
-import {DEFAULT_REPO_MAP_TOKENS} from '@/repo-map/index';
+import {DEFAULT_REPO_MAP_TOKENS, type RepoMap} from '@/repo-map/index';
+import {renderWithTheme} from '@/test-utils/render-with-theme';
+import {parseRepoMapArgs, RepoMapView, repomapCommand} from './repomap';
 
 console.log('\nrepomap.spec.tsx');
 
@@ -12,6 +13,13 @@ const metadata = {
 	tokens: 0,
 	getMessageTokens: () => 0,
 };
+
+function frameOf(map: RepoMap): string {
+	const {lastFrame, unmount} = renderWithTheme(<RepoMapView map={map} />);
+	const output = lastFrame() ?? '';
+	unmount();
+	return output;
+}
 
 test('repomapCommand exposes matching name and description', t => {
 	t.is(repomapCommand.name, 'repomap');
@@ -52,34 +60,64 @@ test('parseRepoMapArgs rejects unknown arguments', t => {
 	);
 });
 
-test('repomapCommand handler returns an element for the current directory', async t => {
+test('RepoMapView renders the ranked files, their symbols and the summary', t => {
+	const output = frameOf({
+		files: [
+			{path: 'source/core.ts', rank: 0.4, symbols: ['alpha', 'beta']},
+			{path: 'source/leaf.ts', rank: 0.1, symbols: ['gamma']},
+		],
+		scannedFiles: 12,
+		totalSymbols: 30,
+		truncated: false,
+	});
+
+	t.true(output.includes('source/core.ts'));
+	t.true(output.includes('alpha, beta'));
+	t.true(output.includes('source/leaf.ts'));
+	t.true(output.includes('gamma'));
+	t.true(output.includes('Top 2 of 12 files'));
+	t.true(output.includes('30 symbols'));
+	t.false(output.includes('truncated'));
+});
+
+test('RepoMapView flags a truncated map', t => {
+	const output = frameOf({
+		files: [{path: 'a.ts', rank: 1, symbols: ['only']}],
+		scannedFiles: 900,
+		totalSymbols: 900,
+		truncated: true,
+	});
+
+	t.true(output.includes('truncated'));
+});
+
+test('RepoMapView renders an empty state when nothing is indexable', t => {
+	const output = frameOf({
+		files: [],
+		scannedFiles: 0,
+		totalSymbols: 0,
+		truncated: false,
+	});
+
+	t.true(output.includes('No indexable source files found'));
+});
+
+test('repomapCommand handler renders a map for the current directory', async t => {
 	const result = await repomapCommand.handler([], [], metadata);
 	t.true(React.isValidElement(result));
+
+	const {lastFrame, unmount} = renderWithTheme(result as React.ReactElement);
+	const output = lastFrame() ?? '';
+	unmount();
+	t.true(output.includes('/repomap'));
+	t.true(output.includes('files'));
 });
 
-test('repomapCommand handler returns an error element for bad arguments', async t => {
+test('repomapCommand handler renders usage for a bad argument', async t => {
 	const result = await repomapCommand.handler(['--nope'], [], metadata);
-	t.true(React.isValidElement(result));
-});
-
-test('RepoMapView renders both the populated and empty states', t => {
-	t.true(
-		React.isValidElement(
-			React.createElement(RepoMapView, {
-				map: {
-					files: [{path: 'a.ts', rank: 0.5, symbols: ['alpha']}],
-					scannedFiles: 1,
-					totalSymbols: 1,
-					truncated: false,
-				},
-			}),
-		),
-	);
-	t.true(
-		React.isValidElement(
-			React.createElement(RepoMapView, {
-				map: {files: [], scannedFiles: 0, totalSymbols: 0, truncated: false},
-			}),
-		),
-	);
+	const {lastFrame, unmount} = renderWithTheme(result as React.ReactElement);
+	const output = lastFrame() ?? '';
+	unmount();
+	t.true(output.includes('Unknown argument: --nope'));
+	t.true(output.includes('Usage: /repomap [--tokens <n>]'));
 });
