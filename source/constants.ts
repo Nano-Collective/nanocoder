@@ -77,6 +77,8 @@ export const EMPTY_CONTENT_MARKER = '[file is empty]';
 export const PATH_LENGTH_NARROW_TERMINAL = 30;
 export const PATH_LENGTH_NORMAL_TERMINAL = 60;
 export const TABLE_COLUMN_MIN_WIDTH = 10;
+export const WIZARD_ROW_CHROME_CHARS = 10;
+export const MIN_PATH_BUDGET_CHARS = 10;
 
 // === TOKEN THRESHOLDS (percentages - useChatHandler) ===
 export const TOKEN_THRESHOLD_WARNING_PERCENT = 80;

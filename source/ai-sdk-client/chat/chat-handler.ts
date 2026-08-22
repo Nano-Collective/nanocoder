@@ -269,6 +269,12 @@ export async function handleChat(
 			const FLUSH_INTERVAL_MS = 150;
 			let tokenBuffer = '';
 			let flushTimer: ReturnType<typeof setTimeout> | null = null;
+			// Which callback the buffered run belongs to. Derived from the delta
+			// that filled the buffer, never from the start/end markers around it —
+			// providers disagree on those (the Responses API defers reasoning-end
+			// until the reasoning item completes, openai-compatible reopens
+			// reasoning without closing text, and some emit deltas with no start
+			// at all), so routing on them puts reasoning on the text callback.
 			let isReasoning = false;
 
 			const flushBuffer = () => {
@@ -283,10 +289,24 @@ export async function handleChat(
 				flushTimer = null;
 			};
 
+			const flushPending = () => {
+				if (flushTimer) {
+					clearTimeout(flushTimer);
+				}
+				flushBuffer();
+			};
+
 			let lastYield = Date.now();
 			for await (const chunk of result.fullStream) {
 				switch (chunk.type) {
+					// The delta type is the source of truth for routing: switching
+					// streams flushes what the previous one buffered before the flag
+					// moves, so a batch always leaves on the callback it was filled for.
 					case 'reasoning-delta':
+						if (!isReasoning) {
+							flushPending();
+							isReasoning = true;
+						}
 						accumulatedReasoning += chunk.text;
 						tokenBuffer += chunk.text;
 						if (!flushTimer) {
@@ -294,6 +314,10 @@ export async function handleChat(
 						}
 						break;
 					case 'text-delta':
+						if (isReasoning) {
+							flushPending();
+							isReasoning = false;
+						}
 						accumulatedText += chunk.text;
 						tokenBuffer += chunk.text;
 						if (!flushTimer) {
@@ -301,22 +325,13 @@ export async function handleChat(
 						}
 						break;
 
-					// Determine which stream to write tokens to
+					// Pure flush points: they end a batch so each part reaches the UI
+					// as its own chunk, but they never decide where the next one goes.
 					case 'reasoning-start':
-						isReasoning = true;
-						break;
 					case 'text-start':
-						isReasoning = false;
-						break;
-
-					// Flush remaining tokens in given stream
-					case 'text-end':
 					case 'reasoning-end':
-						if (flushTimer) {
-							clearTimeout(flushTimer);
-						}
-						flushBuffer();
-						isReasoning = false;
+					case 'text-end':
+						flushPending();
 						break;
 				}
 				// Periodically yield to the event loop so timers and Ink renders
@@ -330,10 +345,7 @@ export async function handleChat(
 
 			// Safety net: flush any tokens still buffered if the stream ended
 			// without emitting a matching text-end / reasoning-end event.
-			if (flushTimer) {
-				clearTimeout(flushTimer);
-			}
-			flushBuffer();
+			flushPending();
 
 			// After streaming completes, collect final results.
 			// `result.usage` is the FINAL step's usage (not `totalUsage`, which

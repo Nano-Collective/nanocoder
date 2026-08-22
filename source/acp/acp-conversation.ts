@@ -148,12 +148,22 @@ export async function runAcpConversation(
 
 		const callbacks: StreamCallbacks = {
 			onReasoningToken: (token: string) => {
-				streamedReasoning += token;
+				// Leading whitespace renders to nothing but still opens a thought
+				// section, leaving a bare "Thought for 0s" bubble, so drop it.
+				// Only what's emitted is accumulated: replaySessionHistory re-sends
+				// the stored reasoning verbatim, so anything skipped here has to
+				// stay out of the message or a reloaded session renders differently
+				// from the live one.
+				const text = streamedReasoning ? token : token.trimStart();
+				if (!text) {
+					return;
+				}
+				streamedReasoning += text;
 				conn.sessionUpdate({
 					sessionId: session.sessionId,
 					update: {
 						sessionUpdate: 'agent_thought_chunk',
-						content: {type: 'text', text: token},
+						content: {type: 'text', text},
 					},
 				});
 			},
@@ -238,7 +248,7 @@ export async function runAcpConversation(
 				role: 'assistant',
 				content: cleanedContent,
 				tool_calls: validToolCalls.length > 0 ? validToolCalls : undefined,
-				reasoning: streamedReasoning || undefined,
+				reasoning: streamedReasoning.trim() ? streamedReasoning : undefined,
 			},
 		];
 

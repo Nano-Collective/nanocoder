@@ -5,8 +5,8 @@ import ModelSelector from '@/components/model-selector';
 import SessionSelector from '@/components/session-selector';
 import type {ActiveMode} from '@/hooks/useAppState';
 import type {CheckpointListItem, TuneConfig} from '@/types';
-import {McpWizard} from '@/wizards/mcp-wizard';
 import {ProviderWizard} from '@/wizards/provider-wizard';
+import type {SettingsTabId} from './settings-constants';
 import {SettingsSelector} from './settings-tabs';
 import {TuneSelector} from './tune-selector';
 
@@ -14,8 +14,11 @@ export interface ModalSelectorsProps {
 	onLaunchTune?: () => void;
 	onLaunchIde?: () => void;
 	onMcpChanged?: () => void | Promise<void>;
+	onProvidersChanged?: () => void | Promise<void>;
 	activeMode: ActiveMode;
 	isSettingsMode: boolean;
+	settingsInitialTab?: SettingsTabId;
+	onSettingsTabChange?: (tab: SettingsTabId) => void;
 	showAllSessions: boolean;
 
 	// Current values
@@ -36,10 +39,6 @@ export interface ModalSelectorsProps {
 	// Handlers - Config Wizard
 	onConfigWizardComplete: (configPath: string) => Promise<void>;
 	onConfigWizardCancel: () => void;
-
-	// Handlers - MCP Wizard
-	onMcpWizardComplete: (configPath: string) => Promise<void>;
-	onMcpWizardCancel: () => void;
 
 	// Handlers - Checkpoint
 	onCheckpointSelect: (name: string, backup: boolean) => Promise<void>;
@@ -65,6 +64,8 @@ export interface ModalSelectorsProps {
 export function ModalSelectors({
 	activeMode,
 	isSettingsMode,
+	settingsInitialTab,
+	onSettingsTabChange,
 	showAllSessions,
 	currentModel,
 	currentProvider,
@@ -74,8 +75,6 @@ export function ModalSelectors({
 	onModelDatabaseCancel,
 	onConfigWizardComplete,
 	onConfigWizardCancel,
-	onMcpWizardComplete,
-	onMcpWizardCancel,
 	onCheckpointSelect,
 	onCheckpointCancel,
 	onSessionSelect,
@@ -84,6 +83,7 @@ export function ModalSelectors({
 	onLaunchTune,
 	onLaunchIde,
 	onMcpChanged,
+	onProvidersChanged,
 	tuneConfig,
 	onTuneSelect,
 	onTuneCancel,
@@ -116,6 +116,9 @@ export function ModalSelectors({
 				onLaunchTune={onLaunchTune}
 				onLaunchIde={onLaunchIde}
 				onMcpChanged={onMcpChanged}
+				onProvidersChanged={onProvidersChanged}
+				initialTab={settingsInitialTab}
+				onTabChange={onSettingsTabChange}
 			/>
 		);
 	}
@@ -130,16 +133,6 @@ export function ModalSelectors({
 				projectDir={process.cwd()}
 				onComplete={configPath => void onConfigWizardComplete(configPath)}
 				onCancel={onConfigWizardCancel}
-			/>
-		);
-	}
-
-	if (activeMode === 'mcpWizard') {
-		return (
-			<McpWizard
-				projectDir={process.cwd()}
-				onComplete={configPath => void onMcpWizardComplete(configPath)}
-				onCancel={onMcpWizardCancel}
 			/>
 		);
 	}

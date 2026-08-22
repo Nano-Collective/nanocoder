@@ -499,6 +499,8 @@
 	function toggleHistoryView() {
 		isHistoryView = !isHistoryView;
 		if (isHistoryView) {
+			isSettingsView = false;
+			document.getElementById('settings-view').classList.add('hidden');
 			document.getElementById('chat-view').classList.add('hidden');
 			document.getElementById('history-view').classList.remove('hidden');
 			// Fetch sessions from extension host and render immediately
@@ -511,8 +513,10 @@
 
 	function showChatView() {
 		isHistoryView = false;
-		document.getElementById('chat-view').classList.remove('hidden');
+		isSettingsView = false;
 		document.getElementById('history-view').classList.add('hidden');
+		document.getElementById('settings-view').classList.add('hidden');
+		document.getElementById('chat-view').classList.remove('hidden');
 	}
 
 	const sendStopBtn = document.getElementById('send-stop-btn');
@@ -529,6 +533,7 @@
 	let isProcessing = false;
 	let currentAggregator = null;
 	let currentThoughtBox = null;
+	let currentTurnFooter = null;
 	let visualLoader = null;
 	const toolKinds = new Map();
 	let toastTimeout = null;
@@ -593,7 +598,7 @@
 
 	function createMessageFooter(getText, role, sentAt) {
 		const footer = document.createElement('div');
-		footer.className = 'flex h-5 items-center gap-1.5 mt-1 text-xs text-vscode-fg opacity-60 ' +
+		footer.className = 'message-footer flex h-5 items-center gap-1.5 mt-1 text-xs text-vscode-fg opacity-60 ' +
 			(role === 'user' ? 'self-end' : 'self-start');
 
 		const btn = document.createElement('button');
@@ -965,13 +970,6 @@
 
 		const imagesToSubmit = pendingImages.length > 0 ? [...pendingImages] : undefined;
 
-		// Send message to extension host
-		vscode.postMessage({
-			type: 'submitMessage',
-			text: text,
-			images: imagesToSubmit
-		});
-
 		// Clear input. Close the mention first — its token offsets point into
 		// text that is about to disappear.
 		closeMention();
@@ -984,8 +982,23 @@
 		attachedPaths = [];
 		renderChips();
 
+		dispatchPrompt(text, imagesToSubmit);
+	}
+
+	// Send `text` to the agent as a turn of its own. Split out of
+	// submitMessage so an editor-driven prompt can bypass the composer: going
+	// through it would overwrite a draft the user is typing and sweep up chips
+	// and images they staged for a different question.
+	function dispatchPrompt(text, images) {
+		// Send message to extension host
+		vscode.postMessage({
+			type: 'submitMessage',
+			text: text,
+			images: images
+		});
+
 		// Optimistically append user message
-		appendMessage(text, 'user', imagesToSubmit);
+		appendMessage(text, 'user', images);
 		pendingUserMessageText = text;
 
 		if (!isProcessing) {
@@ -1194,7 +1207,10 @@
 		// A user message opens a new turn, so the agent segments that follow get
 		// a fresh id. The raw-text accumulator is handed over lazily, once the
 		// new response produces text.
-		if (role === 'user') agentTurnId++;
+		if (role === 'user') {
+			agentTurnId++;
+			currentTurnFooter = null;
+		}
 
 		const wrapper = document.createElement('div');
 		wrapper.className = 'group flex flex-col min-w-0 shrink-0 ' +
@@ -1382,8 +1398,15 @@
 
 			msgEl.appendChild(textContainer);
 			wrapper.appendChild(msgEl);
-			wrapper.appendChild(createMessageFooter(() => wrapper.dataset.rawText || '', 'agent', new Date()));
-			wrapper.dataset.rawText = currentTurnText;
+			if (currentTurnFooter) {
+				currentTurnFooter.remove();
+			} else {
+				// captures footer, not currentTurnFooter - avoids copying the next turn's text
+				const footer = createMessageFooter(() => footer.dataset.rawText || '', 'agent', new Date());
+				currentTurnFooter = footer;
+			}
+			currentTurnFooter.dataset.rawText = lastAgentRawText;
+			wrapper.appendChild(currentTurnFooter);
 			messagesContainer.appendChild(wrapper);
 
 			currentTurnEl = msgEl;
@@ -1393,8 +1416,8 @@
 			// Append to existing turn
 			currentTurnText += textChunk;
 			syncLastAgentRawText();
-			if (currentTurnEl.parentElement) {
-				currentTurnEl.parentElement.dataset.rawText = currentTurnText;
+			if (currentTurnFooter) {
+				currentTurnFooter.dataset.rawText = lastAgentRawText;
 			}
 
 			if (typeof marked !== 'undefined') {
@@ -1574,7 +1597,8 @@
 			case 'clear':
 				// Session reset (new chat or resume) should return to the active
 				// chat view, not leave the panel stuck on the history list.
-				showChatView();
+				if (isHistoryView) showChatView();
+				if (isSettingsView) hideSettingsView();
 				if (renderTimeout) { clearTimeout(renderTimeout); renderTimeout = null; }
 				if (message.isLoading) {
 					messagesContainer.innerHTML = `<div id="session-loader" class="flex flex-col items-center justify-center h-full opacity-50 mt-10">${ICONS.pending}<div class="mt-2 text-xs">Loading session...</div></div>`;
@@ -1584,6 +1608,7 @@
 				currentTurnEl = null;
 				currentTextEl = null;
 				currentTurnText = '';
+				currentTurnFooter = null;
 				toolKinds.clear();
 				agentTurnId = 0;
 				lastAgentRawTurnId = -1;
@@ -1616,7 +1641,17 @@
 			case 'permissionsCancelled':
 				handlePermissionsCancelled(message.toolCallIds);
 				break;
-
+			case 'toggleSettings':
+				toggleSettingsView();
+				break;
+			case 'settingsData':
+				renderSettingsData(message.settings);
+				break;
+			case 'settingsUpdated':
+				if (!message.success) {
+					console.error('Failed to update setting:', message.error);
+				}
+				break;
 			case 'syncState':
 				handleSyncState(message);
 				break;
@@ -1626,6 +1661,11 @@
 				break;
 			case 'updateTimeline':
 				timelineStrip.setEntries(message.entries || []);
+				break;
+			case 'runPrompt':
+				if (isHistoryView) showChatView();
+				dispatchPrompt(message.text);
+				chatInput.focus();
 				break;
 			case 'copyLastCodeBlock':
 				copyLastCodeBlock();
@@ -1816,6 +1856,20 @@
 		syncLastAgentRawText();
 	}
 
+	function aggregatorHasPendingTools(aggregator) {
+		for (const item of aggregator.toolItems.values()) {
+			if (item.dataset.pending === 'true') return true;
+		}
+		return false;
+	}
+
+	function closeAggregatorIfIdle() {
+		if (currentAggregator && !aggregatorHasPendingTools(currentAggregator)) {
+			currentAggregator.close();
+			currentAggregator = null;
+		}
+	}
+
 	function handleAcpUpdate(payload) {
 		if (!payload) return;
 		const update = payload.update ? payload.update : payload;
@@ -1839,17 +1893,20 @@
 			if (currentThoughtBox) {
 				currentThoughtBox.pause();
 			}
+			closeAggregatorIfIdle();
 			if (update.content && update.content.text) {
 				stopVisualLoader();
 				appendChunk(update.content.text);
 			}
 		} else if (update.sessionUpdate === 'agent_thought_chunk') {
-			if (!currentThoughtBox) {
-				endCurrentTextBlock();
-				currentThoughtBox = new ThoughtAggregator();
-			}
-			if (update.content && update.content.text) {
-				currentThoughtBox.append(update.content.text);
+			const thoughtText = update.content && update.content.text;
+			if (thoughtText && (currentThoughtBox || thoughtText.trim())) {
+				if (!currentThoughtBox) {
+					endCurrentTextBlock();
+					currentThoughtBox = new ThoughtAggregator();
+					closeAggregatorIfIdle();
+				}
+				currentThoughtBox.append(thoughtText);
 			}
 		} else if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
 			if (currentThoughtBox) {
@@ -1870,6 +1927,208 @@
 		}
 		keepVisualLoaderAtBottom();
 	}
+
+	// ─── Settings Panel Logic ───────────────────────────────────────
+
+	let isSettingsView = false;
+
+	function showSettingsView() {
+		isSettingsView = true;
+		isHistoryView = false;
+		document.getElementById('chat-view').classList.add('hidden');
+		document.getElementById('history-view').classList.add('hidden');
+		document.getElementById('settings-view').classList.remove('hidden');
+		// Request fresh settings data from extension host
+		vscode.postMessage({ type: 'requestSettings' });
+	}
+
+	function hideSettingsView() {
+		isSettingsView = false;
+		document.getElementById('settings-view').classList.add('hidden');
+		showChatView();
+	}
+
+	function toggleSettingsView() {
+		if (isSettingsView) {
+			hideSettingsView();
+		} else {
+			showSettingsView();
+		}
+	}
+
+	// Settings tab switching
+	document.querySelectorAll('.settings-tab').forEach(tab => {
+		tab.addEventListener('click', () => {
+			document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+			tab.classList.add('active');
+			const tabId = tab.dataset.tab;
+			document.querySelectorAll('.settings-tab-content').forEach(c => c.classList.add('hidden'));
+			const content = document.getElementById('settings-tab-' + tabId);
+			if (content) content.classList.remove('hidden');
+		});
+	});
+
+	// Settings action buttons (edit config, restart, etc.)
+	document.querySelectorAll('.settings-action-btn').forEach(btn => {
+		btn.addEventListener('click', () => {
+			const action = btn.dataset.action;
+			if (action === 'edit-providers' || action === 'edit-mcp' || action === 'edit-tools' || action === 'open-agents-config') {
+				vscode.postMessage({ type: 'openConfigFile', file: 'agents.config.json' });
+			} else if (action === 'open-preferences') {
+				vscode.postMessage({ type: 'openConfigFile', file: 'nanocoder-preferences.json' });
+			} else if (action === 'restart-acp') {
+				vscode.postMessage({ type: 'restartAcp' });
+			}
+		});
+	});
+
+	// Behavior tab — interactive controls change handlers
+	function initSettingsControls() {
+		// Default mode
+		const modeSelect = document.getElementById('setting-defaultMode');
+		if (modeSelect) {
+			modeSelect.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'defaultMode', value: modeSelect.value || null });
+			});
+		}
+
+		// Auto-compact enabled
+		const acEnabled = document.getElementById('setting-autoCompact-enabled');
+		if (acEnabled) {
+			acEnabled.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'autoCompact.enabled', value: acEnabled.checked });
+			});
+		}
+
+		// Auto-compact threshold
+		const acThreshold = document.getElementById('setting-autoCompact-threshold');
+		if (acThreshold) {
+			acThreshold.addEventListener('change', () => {
+				const val = parseInt(acThreshold.value, 10);
+				if (!isNaN(val) && val >= 50 && val <= 95) {
+					vscode.postMessage({ type: 'updateSetting', key: 'autoCompact.threshold', value: val });
+				}
+			});
+		}
+
+		// Auto-compact mode
+		const acMode = document.getElementById('setting-autoCompact-mode');
+		if (acMode) {
+			acMode.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'autoCompact.mode', value: acMode.value });
+			});
+		}
+
+		// Reasoning traces
+		const rtToggle = document.getElementById('setting-reasoningTraces');
+		if (rtToggle) {
+			rtToggle.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'reasoningTraces', value: rtToggle.checked });
+			});
+		}
+
+		// Sessions auto-save
+		const saToggle = document.getElementById('setting-sessions-autoSave');
+		if (saToggle) {
+			saToggle.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'sessions.autoSave', value: saToggle.checked });
+			});
+		}
+	}
+	initSettingsControls();
+
+	/**
+	 * Populate the settings UI with data received from the extension host.
+	 */
+	function renderSettingsData(settings) {
+		// ── Providers list ──
+		const providersList = document.getElementById('settings-providers-list');
+		if (providersList) {
+			if (settings.providers.length === 0) {
+				providersList.innerHTML = '<div class="settings-list-empty">No providers configured</div>';
+			} else {
+				providersList.innerHTML = settings.providers.map(p => {
+					const detail = p.baseUrl || 'default endpoint';
+					const models = p.models.length > 0
+						? p.models[0] + (p.models.length > 1 ? ` +${p.models.length - 1}` : '')
+						: 'no models';
+					const keyBadge = p.apiKeySet
+						? '<span class="settings-badge settings-badge-ok">Key ✓</span>'
+						: '<span class="settings-badge settings-badge-off">No key</span>';
+					return `<div class="settings-list-item">
+						<span class="settings-list-item-name">${escapeHtml(p.name)}</span>
+						<span class="settings-list-item-detail">${escapeHtml(detail)} · ${escapeHtml(models)}</span>
+						${keyBadge}
+					</div>`;
+				}).join('');
+			}
+		}
+
+		// ── MCP Servers list ──
+		const mcpList = document.getElementById('settings-mcp-list');
+		if (mcpList) {
+			if (settings.mcpServers.length === 0) {
+				mcpList.innerHTML = '<div class="settings-list-empty">No MCP servers configured</div>';
+			} else {
+				mcpList.innerHTML = settings.mcpServers.map(s => {
+					const detail = s.command || s.url || '(no endpoint)';
+					return `<div class="settings-list-item">
+						<span class="settings-list-item-name">${escapeHtml(s.name)}</span>
+						<span class="settings-list-item-detail">${escapeHtml(s.transport)} · ${escapeHtml(detail)}</span>
+					</div>`;
+				}).join('');
+			}
+		}
+
+		// ── Tool auto-approval list ──
+		const toolsList = document.getElementById('settings-tools-list');
+		if (toolsList) {
+			if (settings.alwaysAllow.length === 0) {
+				toolsList.innerHTML = '<div class="settings-list-empty">No tools auto-approved</div>';
+			} else {
+				toolsList.innerHTML = settings.alwaysAllow.map(t =>
+					`<div class="settings-list-item">
+						<span class="settings-list-item-name">${escapeHtml(t)}</span>
+					</div>`
+				).join('');
+			}
+		}
+
+		// ── Web search status ──
+		const wsStatus = document.getElementById('settings-websearch-status');
+		if (wsStatus) {
+			wsStatus.innerHTML = settings.webSearch.configured
+				? '<div class="settings-list-item"><span class="settings-badge settings-badge-ok">API key configured ✓</span></div>'
+				: '<div class="settings-list-item"><span class="settings-badge settings-badge-off">Not configured</span></div>';
+		}
+
+		// ── Behavior controls ──
+		const modeSelect = document.getElementById('setting-defaultMode');
+		if (modeSelect) modeSelect.value = settings.defaultMode || 'normal';
+
+		const acEnabled = document.getElementById('setting-autoCompact-enabled');
+		if (acEnabled) acEnabled.checked = settings.autoCompact.enabled;
+
+		const acThreshold = document.getElementById('setting-autoCompact-threshold');
+		if (acThreshold) acThreshold.value = settings.autoCompact.threshold;
+
+		const acMode = document.getElementById('setting-autoCompact-mode');
+		if (acMode) acMode.value = settings.autoCompact.mode;
+
+		const rtToggle = document.getElementById('setting-reasoningTraces');
+		if (rtToggle) rtToggle.checked = settings.reasoningTraces;
+
+		const saToggle = document.getElementById('setting-sessions-autoSave');
+		if (saToggle) saToggle.checked = settings.sessions.autoSave;
+	}
+
+	function escapeHtml(str) {
+		const div = document.createElement('div');
+		div.textContent = str;
+		return div.innerHTML;
+	}
+
+	// ─── End Settings Panel Logic ───────────────────────────────────
 
 	class ThoughtAggregator {
 		constructor() {
@@ -2020,8 +2279,8 @@
 			messagesContainer.appendChild(this.el);
 		}
 
-		toggle() {
-			this.isOpen = !this.isOpen;
+		toggle(force) {
+			this.isOpen = force !== undefined ? force : !this.isOpen;
 			this.body.style.display = this.isOpen ? '' : 'none';
 
 			const svg = this.chevron.querySelector('svg');
@@ -2078,20 +2337,27 @@
 				statusEl.dataset.status = update.status || 'pending';
 				if (update.status === 'success' || update.status === 'completed') {
 					statusEl.innerHTML = ICONS.success;
+					item.dataset.pending = 'false';
 				} else if (
 					update.status === 'cancelled' ||
 					update.status === 'denied' ||
 					// ACP has no 'cancelled' status, so a cancel arrives as failed with
 					// 'Cancelled by user'. Case-insensitive, or the capital C misses.
-					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && /aborterror|cancelled/i.test(update.rawOutput))
+					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && /aborterror|cancelled|denied/i.test(update.rawOutput))
 				) {
 					statusEl.innerHTML = ICONS.cancelled;
+					item.dataset.pending = 'false';
 				} else if (update.status === 'error' || update.status === 'failed') {
 					statusEl.innerHTML = ICONS.error;
+					item.dataset.pending = 'false';
 				} else if (update.status === 'pending') {
+					// Queued, not yet running - still unfinished, so the
+					// aggregator must stay open for it.
 					statusEl.innerHTML = ICONS.circle;
+					item.dataset.pending = 'true';
 				} else {
 					statusEl.innerHTML = ICONS.pending;
+					item.dataset.pending = 'true';
 				}
 			}
 
@@ -2113,6 +2379,7 @@
 
 		if (!card) {
 			endCurrentTextBlock();
+			closeAggregatorIfIdle();
 			card = document.createElement('div');
 			card.id = `plan-card-${agentTurnId}`;
 			card.className = 'my-3 border border-vscode-widget-border rounded bg-vscode-widget-bg overflow-hidden shrink-0';
@@ -2186,6 +2453,7 @@
 		if (toolKinds.get(toolCallId) === 'edit') {
 			let card = document.getElementById(`tool-card-${toolCallId}`);
 			if (!card) {
+				closeAggregatorIfIdle();
 				card = createEditCard(toolCallId, update);
 				messagesContainer.appendChild(card);
 				scrollToBottom();
