@@ -239,6 +239,54 @@ Supported syntax: `$VAR`, `${VAR}`, `${VAR:-default}`
 
 > **Security:** Project-level `.mcp.json` files are typically version controlled. Always use environment variable references for sensitive values.
 
+## Phone pairing (Build Remote Agent)
+
+Nanocoder can attach **Build Remote Agent** as a pairing device: the
+iOS/Android app spectates (and can inject into) this desktop session through
+the free MIT `gbr-agent`. Phone and PC never open ports to each other.
+
+Website: https://grokbuildremote.com/ · Agent:
+https://github.com/LinespottingOrg/GrokBuildRemote-Agents (MIT) · Protocol
+`gbr/1` (agent **v0.6.0+**). Independent product. Not affiliated with xAI or
+SpaceX.
+
+This is not ACP and not the VS Code companion. Pairing stays `gbr-agent pair`
++ `gbr-agent run`. Attach is only `http://127.0.0.1:8788` or `gbr-mcp` stdio.
+Phone is spectator + veto.
+
+```bash
+curl -fsSL https://grokbuildremote.com/install.sh | bash
+gbr-agent version          # must print v0.6.0 or newer
+gbr-agent pair && gbr-agent run
+git clone https://github.com/LinespottingOrg/GrokBuildRemote-Agents.git
+cd GrokBuildRemote-Agents/mcp/gbr-mcp && npm install
+```
+
+Add to project or global `.mcp.json` (see also `.mcp.example.json`):
+
+```json
+{
+  "mcpServers": {
+    "gbr": {
+      "transport": "stdio",
+      "command": "node",
+      "args": [
+        "GrokBuildRemote-Agents/mcp/gbr-mcp/bin/gbr-mcp.js"
+      ],
+      "description": "Build Remote Agent Bot API (loopback). Requires gbr-agent run. Never put mailbox keys here."
+    }
+  }
+}
+```
+
+Point `args` at the absolute path to `bin/gbr-mcp.js`. Then `/mcp` to confirm
+the server. Do not commit mailbox keys.
+
+```bash
+curl -sS http://127.0.0.1:8788/health
+curl -sS http://127.0.0.1:8788/v1/sessions
+```
+
 ## Setup Wizard
 
 Run `/settings mcp` for interactive configuration with:
