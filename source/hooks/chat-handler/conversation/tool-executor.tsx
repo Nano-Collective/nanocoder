@@ -33,13 +33,17 @@ import {
  */
 const executeOne = async (
 	toolCall: ToolCall,
-	processToolUse: (toolCall: ToolCall) => Promise<ToolResult>,
+	processToolUse: (
+		toolCall: ToolCall,
+		options?: {signal?: AbortSignal},
+	) => Promise<ToolResult>,
+	signal?: AbortSignal,
 ): Promise<{
 	toolCall: ToolCall;
 	result: ToolResult;
 }> => {
 	try {
-		const result = await processToolUse(toolCall);
+		const result = await processToolUse(toolCall, {signal});
 		return {toolCall, result};
 	} catch (error) {
 		return {
@@ -93,7 +97,10 @@ export interface ToolDisplayOptions {
 export const executeApprovedTool = (
 	toolCall: ToolCall,
 	toolManager: ToolManager | null,
-	processToolUse: (toolCall: ToolCall) => Promise<ToolResult>,
+	processToolUse: (
+		toolCall: ToolCall,
+		options?: {signal?: AbortSignal},
+	) => Promise<ToolResult>,
 	setLiveComponent?: (component: React.ReactNode) => void,
 	signal?: AbortSignal,
 ): Promise<StreamingBashRun | {toolCall: ToolCall; result: ToolResult}> => {
@@ -105,7 +112,7 @@ export const executeApprovedTool = (
 			signal,
 		);
 	}
-	return executeOne(toolCall, processToolUse);
+	return executeOne(toolCall, processToolUse, signal);
 };
 
 /**
@@ -513,7 +520,9 @@ export const executeToolsDirectly = async (
 		if (type === 'readOnly' && group.length > 1) {
 			// Parallel execution for consecutive read-only tools
 			executions = await Promise.all(
-				group.map(toolCall => executeOne(toolCall, processToolUse)),
+				group.map(toolCall =>
+					executeOne(toolCall, processToolUse, options?.signal),
+				),
 			);
 		} else {
 			// Sequential execution for non-parallelizable tools (or single-item groups)
