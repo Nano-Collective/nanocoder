@@ -4,6 +4,7 @@ import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {renderWithTheme as render} from '@/test-utils/render-with-theme';
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import {LocationStep} from './location-step.js';
 
 // Mirrors base-config-wizard.tsx's real LocationStep box.
@@ -75,7 +76,7 @@ test('LocationStep shows the resolved project path next to the option', t => {
 		line.includes('Current project directory'),
 	);
 	t.true(stemIndex !== -1, 'expected to find the project directory stem');
-	t.is(lines[stemIndex + 1]?.trim(), resolve('/test/project'));
+	t.is(stripAnsi(lines[stemIndex + 1] ?? '').trim(), resolve('/test/project'));
 });
 
 test('LocationStep does not clip the leaf directory inside the real wizard box', t => {
