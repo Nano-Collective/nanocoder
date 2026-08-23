@@ -483,3 +483,23 @@ test('cancel() on a detached process kills a spawned child (process-group assert
 		process.kill(childPid, 0);
 	}, undefined, 'process.kill(pid, 0) should throw because the child was killed by the process-group signal');
 });
+
+test('cancel - rapid repeated cancellation with SIGKILL fallback for processes ignoring SIGTERM', async t => {
+	const executor = createExecutor();
+
+	for (let i = 0; i < 3; i++) {
+		// Spawn a node process that traps/ignores SIGTERM
+		const { executionId, promise } = executor.execute(
+			`node -e "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"`,
+		);
+
+		await new Promise(resolve => setTimeout(resolve, 100));
+
+		const cancelled = executor.cancel(executionId);
+		t.true(cancelled, 'cancel() should return true for active execution');
+
+		const result = await promise;
+		t.true(result.isComplete, 'Execution should be marked complete');
+		t.is(result.error, 'Cancelled by user');
+	}
+});
