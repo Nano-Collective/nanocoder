@@ -12,8 +12,7 @@ import {resolveRipgrepPath} from '@/utils/ripgrep-path';
 const MAX_CONTEXT_CONTENT_LENGTH = 1500;
 const MAX_MATCH_CONTENT_LENGTH = 300;
 const DEFAULT_SEARCH_TIMEOUT_MS = 30_000;
-// Sanity cap on pattern size, not a backtracking defense - matchTokens below
-// has none to protect against.
+// Sanity cap on pattern length, not a backtracking defense (matchTokens has none).
 const MAX_GLOB_PATTERN_LENGTH = 1000;
 
 export class SearchTimeoutError extends Error {
@@ -43,8 +42,7 @@ function normalizePathForMatch(filePath: string): string {
 	return filePath.replace(/\\/g, '/');
 }
 
-// Braces aren't nesting-aware - `{a,{b,c}}` expands wrong (VS Code's glob.ts
-// has the same gap). Not worth fixing; real patterns don't nest braces.
+// Braces aren't nesting-aware; `{a,{b,c}}` expands wrong.
 function expandBraces(pattern: string): string[] {
 	const match = pattern.match(/\{([^{}]+)\}/);
 	if (!match || match.index === undefined) {
@@ -105,7 +103,6 @@ function tokenizeGlob(pattern: string): GlobToken[] {
 }
 
 // DP table, not a compiled regex - no backtracking, so no ReDoS.
-// star = not '/'. globstar = anything. globstarSlash ('X/**/Y') can vanish entirely.
 function matchTokens(text: string, tokens: GlobToken[]): boolean {
 	const textLength = text.length;
 	const tokenCount = tokens.length;
@@ -121,8 +118,7 @@ function matchTokens(text: string, tokens: GlobToken[]): boolean {
 			previousRow[tokenIndex - 1];
 	}
 
-	// True once any row hits this column - globstarSlash can start its match
-	// from any earlier position, not just the row above.
+	// True once any row hits this column - globstarSlash can start from any earlier row.
 	const columnEverTrue = [...previousRow];
 
 	for (let textIndex = 1; textIndex <= textLength; textIndex++) {
@@ -169,8 +165,7 @@ function matchTokens(text: string, tokens: GlobToken[]): boolean {
 	return previousRow[tokenCount];
 }
 
-// Same pattern gets checked per candidate path during a walk - cache the
-// tokenized form instead of re-parsing it every time.
+// Same pattern is checked per candidate path during a walk - cache the tokenized form.
 const GLOB_TOKEN_CACHE_LIMIT = 500;
 const globTokenCache = new Map<string, GlobToken[][]>();
 
@@ -216,8 +211,7 @@ export function matchesGlob(
 	);
 }
 
-// `-g '!name'` always wins over .gitignore content, so a project's own
-// .gitignore negating one of these (e.g. `!dist`) can't re-include it.
+// `-g '!name'` always wins over .gitignore, so a project can't re-include these via `!dist`.
 function defaultIgnoreGlobs(): string[] {
 	const globs: string[] = [];
 	for (const dir of DEFAULT_IGNORE_DIRS) {
@@ -234,8 +228,7 @@ function binaryExcludeGlobs(): string[] {
 	return globs;
 }
 
-// Same message-matching approach as VS Code's ripgrep wrapper - real rg
-// error strings, not guesses.
+// Real rg error strings, not guesses.
 const FATAL_RIPGREP_ERROR_PATTERNS = [
 	/regex parse error/,
 	/error parsing glob/,
@@ -261,15 +254,19 @@ async function runRipgrep(
 	const rgPath = await resolveRipgrepPath();
 
 	return new Promise((resolve, reject) => {
-		// No `signal` in spawn options: Node's own abort integration fires
-		// 'error' before 'close' and drops signal.reason. Kill manually instead.
-		const child = spawn(rgPath, args, {cwd, timeout: timeoutMs});
+		// No `signal`/`timeout` in spawn options - Node's own handling leaks state. Own both.
+		const child = spawn(rgPath, args, {cwd});
 		let stdout = '';
 		let stderr = '';
 		let killedForMatchLimit = false;
+		let timedOut = false;
 		let matchCount = 0;
-		// Buffers a chunk boundary that lands mid-line, same shape as VS
-		// Code's RipgrepParser.handleDecodedData.
+
+		const timer = setTimeout(() => {
+			timedOut = true;
+			child.kill();
+		}, timeoutMs);
+		// Buffers a chunk boundary that splits mid-line.
 		let lineRemainder = '';
 
 		child.stdout.setEncoding('utf8');
@@ -292,7 +289,7 @@ async function runRipgrep(
 							matchCount++;
 						}
 					} catch {
-						// Malformed/partial line - ignore, same as parseRgJsonLines.
+						// ignore malformed/partial line
 					}
 				}
 
@@ -317,11 +314,13 @@ async function runRipgrep(
 		signal?.addEventListener('abort', onAbort);
 
 		child.on('error', err => {
+			clearTimeout(timer);
 			signal?.removeEventListener('abort', onAbort);
 			reject(err);
 		});
 
 		child.on('close', (code, closeSignal) => {
+			clearTimeout(timer);
 			signal?.removeEventListener('abort', onAbort);
 
 			if (signal?.aborted) {
@@ -332,18 +331,16 @@ async function runRipgrep(
 				resolve(stdout);
 				return;
 			}
-			if (child.killed) {
+			if (timedOut) {
 				reject(new SearchTimeoutError(timeoutMs));
 				return;
 			}
-			// code is null when rg was terminated by a signal we didn't send
-			// (e.g. the OS OOM killer) rather than exiting normally.
+			// code is null when rg was killed by a signal we didn't send (e.g. OOM killer).
 			if (closeSignal) {
 				reject(new Error(`ripgrep terminated by signal ${closeSignal}`));
 				return;
 			}
-			// Exit 1 = no matches, not an error. Exit 2 can be a recoverable
-			// mid-scan warning, so only fail if nothing was found at all.
+			// Exit 1 = no matches. Exit 2 can be a recoverable mid-scan warning; only fail if empty.
 			if (
 				code !== null &&
 				code > 1 &&
@@ -358,12 +355,10 @@ async function runRipgrep(
 	});
 }
 
-// rg --files never lists empty directories - walk them separately. Never
-// follows symlinks, which could otherwise escape the project directory.
+// rg --files skips empty directories; walked separately below, without following symlinks.
 const MAX_WALK_DEPTH = 200;
 
-// Unanchored `foo` matches any depth under dirPrefix (dirPrefix/**/foo);
-// anchored/multi-segment patterns are scoped to it (dirPrefix/foo).
+// Unanchored `foo` matches any depth (dirPrefix/**/foo); anchored patterns stay scoped (dirPrefix/foo).
 function prefixGitignoreLine(
 	line: string,
 	dirPrefix: string,
@@ -486,8 +481,7 @@ export async function walkProjectEntries(
 	const args = [
 		'--files',
 		'--hidden',
-		// No --follow (symlinks could escape cwd). --no-ignore-parent scopes
-		// native .gitignore discovery inside cwd; --no-require-git works without a git repo.
+		// No --follow (symlinks could escape cwd); --no-require-git works without a repo.
 		'--no-ignore-parent',
 		'--no-require-git',
 		'--sort',
@@ -512,8 +506,6 @@ export async function walkProjectEntries(
 		const relativeFile = normalizePathForMatch(path.relative(cwd, file));
 		const parts = relativeFile.split('/');
 
-		// Build each ancestor path by extending the previous one instead of
-		// re-slicing and re-joining `parts` from the root on every segment.
 		let dirRelative = '';
 		for (let index = 0; index < parts.length - 1; index++) {
 			dirRelative = index === 0 ? parts[0] : `${dirRelative}/${parts[index]}`;
@@ -585,8 +577,7 @@ interface RgJsonMatch {
 	data: {
 		path?: {text?: string};
 		line_number?: number;
-		// rg sends `text` for valid UTF-8, `bytes` (base64) otherwise - absent
-		// `text` is our binary-content signal.
+		// rg sends `text` for valid UTF-8, `bytes` otherwise - absent `text` signals binary content.
 		lines?: {text?: string};
 	};
 }
@@ -639,8 +630,7 @@ function toRelativeFile(cwd: string, file: string): string {
 	return normalizePathForMatch(path.relative(cwd, absolutePath));
 }
 
-// rg already hands us the matched line's text - no file access needed, and
-// no race against the file changing between rg's scan and ours.
+// rg already hands us the matched line's text - no file re-read, no race with concurrent edits.
 function buildMatchesWithoutContext(
 	rgLines: RgLine[],
 	cwd: string,
@@ -651,8 +641,7 @@ function buildMatchesWithoutContext(
 
 	for (const {file, lineNumber, text} of rgLines) {
 		if (text === undefined) {
-			// No `lines.text` means rg sent `lines.bytes` instead - the line
-			// isn't valid UTF-8, same case the old NUL-byte check filtered out.
+			// No `lines.text` means rg sent `lines.bytes` instead - not valid UTF-8.
 			continue;
 		}
 
@@ -674,8 +663,7 @@ function buildMatchesWithoutContext(
 	return {matches, truncated};
 }
 
-// With `--context`, rg streams the surrounding lines itself (deduped when
-// matches' windows overlap) - blocks assemble from that, no file re-read.
+// rg streams the surrounding context lines itself, deduped across overlapping matches.
 function buildMatchesWithContext(
 	rgLines: RgLine[],
 	cwd: string,
@@ -714,8 +702,7 @@ function buildMatchesWithContext(
 
 		for (const lineNumber of matchLines) {
 			if (byLine?.get(lineNumber) === undefined) {
-				// The match line itself isn't valid UTF-8 (rg sent `bytes`, not
-				// `text`) - same case the old NUL-byte check filtered out.
+				// The match line isn't valid UTF-8 (rg sent `bytes`, not `text`).
 				continue;
 			}
 
@@ -763,7 +750,6 @@ export async function searchProjectContents(
 	signal?: AbortSignal,
 ): Promise<{matches: SearchMatch[]; truncated: boolean}> {
 	if (maxResults <= 0) {
-		// Same push-then-check shape as findMatchingPaths.
 		return {matches: [], truncated: false};
 	}
 	if (!query.trim()) {
@@ -771,15 +757,12 @@ export async function searchProjectContents(
 		throw new Error('Search query cannot be empty');
 	}
 
-	// No --max-count - it overshoots with --context. The real cutoff is
-	// runRipgrep's own streamed match count, passed as `rgMaxCount` below.
+	// No --max-count - it overshoots with --context. runRipgrep's own streamed count is the real cutoff.
 	const rgMaxCount = Math.max(0, maxResults);
 
 	const args = [
 		'--json',
 		'--hidden',
-		// No --follow, no --no-ignore/--ignore-file - see walkProjectEntries'
-		// args for why (same reasoning applies to content search).
 		'--no-ignore-parent',
 		'--no-require-git',
 		'--sort',
@@ -789,8 +772,7 @@ export async function searchProjectContents(
 	if (wholeWord) {
 		args.push('--word-regexp');
 	}
-	// Must come before the exclude globs below: rg's `-g` is last-wins, so a
-	// broad include pushed after an exclude would silently re-include it.
+	// Must precede the exclude globs: rg's `-g` is last-wins, so an include after would re-include them.
 	if (include) {
 		args.push('-g', include);
 	}

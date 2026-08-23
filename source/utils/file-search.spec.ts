@@ -33,31 +33,24 @@ test('matchesGlob handles glob edge cases found during the regex-to-DP rewrite',
 	// Leading '**/' can vanish entirely (zero directories).
 	t.true(matchesGlob('index.ts', '**/*.ts'));
 	t.true(matchesGlob('a/b/c/index.ts', '**/*.ts'));
-	// Embedded '**/' (mid-pattern) can also vanish entirely.
+	// Embedded '**/' can also vanish entirely.
 	t.true(matchesGlob('a/index.ts', 'a/**/index.ts'));
 	t.true(matchesGlob('a/b/c/index.ts', 'a/**/index.ts'));
-	// Trailing '/**' requires the literal '/' to actually be present - it
-	// does NOT match the bare directory name with nothing after it.
+	// Trailing '/**' requires a literal '/' to be present.
 	t.false(matchesGlob('a', 'a/**'));
 	t.true(matchesGlob('a/', 'a/**'));
 	t.true(matchesGlob('a/b', 'a/**'));
-	// A '**' with no adjacent '/' anywhere (embedded inside what looks like
-	// one path segment) still has slash-crossing power, same as the old
-	// regex engine's '.*' construct.
+	// '**' with no adjacent '/' still has slash-crossing power.
 	t.true(matchesGlob('x/xx/xxx', '*x**x'));
 	t.false(matchesGlob('a', '*a**a')); // needs two 'a's, only has one
 	t.true(matchesGlob('a/a', '*a**a'));
-	// Single '*' never crosses '/', even directly adjacent to '**'.
+	// Single '*' never crosses '/', even adjacent to '**'.
 	t.false(matchesGlob('a', 'a*/**'));
 	t.true(matchesGlob('ab/', 'a*/**'));
 });
 
 test('matchesGlob stays fast on a pattern shape that hangs a naive regex engine', t => {
-	// Many alternating wildcard/literal segments cause catastrophic regex
-	// backtracking on a non-matching input if compiled into a regex naively
-	// (confirmed separately: this exact shape hung for 20+ seconds against
-	// the old regex-based implementation). The DP-table matcher has no
-	// backtracking to exploit, so this must complete near-instantly.
+	// This shape hung for 20+ seconds against the old regex-based implementation.
 	const pathologicalPattern = `${'*a'.repeat(25)}b`;
 	const start = Date.now();
 	const result = matchesGlob('a'.repeat(2000), pathologicalPattern);
@@ -141,10 +134,7 @@ test.serial(
 	},
 );
 
-// Symlinks are deliberately never followed - a symlink checked into a
-// project can point anywhere on disk, and this tool must stay scoped to the
-// project directory. These tests lock in the safe (non-following) behavior;
-// the one after them proves the actual escape it prevents.
+// Symlinks are deliberately never followed - one could point anywhere outside the project.
 
 test.serial(
 	'findMatchingPaths does not descend into a symlinked directory',
@@ -312,9 +302,7 @@ test.serial(
 
 		try {
 			mkdirSync(testDir, {recursive: true});
-			// One file with far more matches than maxResults - the child rg
-			// process should be killed once enough matches have streamed in,
-			// not left to finish producing output that gets thrown away.
+			// rg should be killed once enough matches have streamed in, not left running.
 			const lines = Array.from({length: 500}, (_, i) => `searchTarget line ${i}`);
 			writeFileSync(join(testDir, 'big.ts'), lines.join('\n'));
 
@@ -334,10 +322,7 @@ test.serial(
 
 		try {
 			mkdirSync(testDir, {recursive: true});
-			// Every line matches, so with --context every "context" line for a
-			// match is itself also a match - the documented rg behavior
-			// (BurntSushi/ripgrep#2843 et al) that makes rg's own --max-count
-			// overshoot. The JS-side stream count must still bound this.
+			// Every line matches, so rg's own --max-count overshoots with --context (ripgrep#2843).
 			const lines = Array.from({length: 5000}, (_, i) => `searchTarget line ${i}`);
 			writeFileSync(join(testDir, 'dense.ts'), lines.join('\n'));
 
@@ -431,8 +416,7 @@ test.serial(
 			t.is(result.matches.length, 2);
 			t.is(result.matches[0]?.line, 5);
 			t.is(result.matches[1]?.line, 7);
-			// Both blocks share lines 5-7, which rg streams only once - each
-			// match must still get its own independent block built from it.
+			// Both blocks share lines 5-7, which rg streams only once - each still gets its own block.
 			t.true(result.matches[0]?.content.includes('5: TARGET one'));
 			t.true(result.matches[0]?.content.includes('7: TARGET two'));
 			t.true(result.matches[1]?.content.includes('5: TARGET one'));
@@ -547,13 +531,27 @@ test.serial(
 	},
 );
 
+test.serial(
+	'findMatchingPaths rejects quickly on a spawn failure instead of waiting out the timeout',
+	async t => {
+		// A nonexistent cwd makes spawn fail (ENOENT); this must not wait out the 30s timeout.
+		const bogusDir = join(
+			createTempDir('nonexistent-cwd'),
+			'definitely',
+			'does-not-exist',
+		);
+		const start = Date.now();
+		await t.throwsAsync(() => findMatchingPaths('a.ts', bogusDir, 50));
+		t.true(Date.now() - start < 5000);
+	},
+);
+
 test.serial('searchProjectContents throws SearchTimeoutError when timeout elapses', async t => {
 	const testDir = createTempDir('test-file-search-timeout-temp');
 
 	try {
 		mkdirSync(testDir, {recursive: true});
-		// Many files with a query that never matches — walker keeps going,
-		// giving the abort timer a chance to fire between async I/O yields.
+		// Many files, query never matches - gives the timeout a chance to fire mid-walk.
 		for (let i = 0; i < 500; i++) {
 			writeFileSync(join(testDir, `file${i}.ts`), 'line a\nline b\nline c\n');
 		}
@@ -626,8 +624,7 @@ test.serial(
 			mkdirSync(testDir, {recursive: true});
 			writeFileSync(join(testDir, 'f.ts'), 'content');
 
-			// rg exits 2 for this too, same as a recoverable --follow symlink
-			// loop warning - must still reject, not silently return no matches.
+			// rg exits 2 for an invalid regex too; must still reject, not return no matches.
 			await t.throwsAsync(() =>
 				searchProjectContents('[invalid(regex', testDir, 10, false),
 			);
