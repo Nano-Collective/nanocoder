@@ -7,8 +7,7 @@ import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import type {VoiceState} from '@/components/voice-status-bar';
 import {getVoicePreference} from '@/config/preferences';
 import {generateKey} from '@/session/key-generator';
-import type {VoiceConfig} from '@/types/config';
-import type {Message} from '@/types/index';
+import type {ImageAttachment, Message} from '@/types/core';
 import {formatForSpeech} from '@/utils/format-for-speech';
 import {
 	hasDeclinedVoiceInstallForSession,
@@ -42,7 +41,9 @@ export interface VoicePlugin {
 	checkDependenciesInstalled?: (
 		customCheck?: unknown,
 	) => Promise<{installed: boolean; missing: ('sox' | 'whisper' | 'piper')[]}>;
-	installDependencies?: (options?: unknown) => Promise<void>;
+	installDependencies?: (options?: {
+		onProgress?: (progress: {stage: string; percent: number}) => void;
+	}) => Promise<void>;
 	createVadEngine?: (options?: unknown) => unknown;
 }
 
@@ -50,11 +51,13 @@ export interface UseVoiceProps {
 	handleUserSubmit: (
 		submittedText: string,
 		displayText: string,
+		images?: ImageAttachment[],
 	) => Promise<void>;
 	messages: Message[];
 	addToChatQueue: (component: React.ReactNode) => void;
 	loadPlugin?: () => Promise<VoicePlugin>;
-	voicePreference?: VoiceConfig;
+	voicePreference?: {enabled: boolean; activationMode: string};
+	handleCancel?: () => void;
 }
 
 export interface UseVoiceReturn {
@@ -69,14 +72,19 @@ export function useVoice({
 	loadPlugin = async () =>
 		(await import('@nanocollective/nanocoder-voice')) as unknown as VoicePlugin,
 	voicePreference,
+	handleCancel,
 }: UseVoiceProps): UseVoiceReturn {
 	const [state, setState] = React.useState<VoiceState>('idle');
 
-	// Keep refs tracking mutable props & state to decouple VAD lifecycle from re-renders
 	const stateRef = React.useRef(state);
 	React.useEffect(() => {
 		stateRef.current = state;
 	}, [state]);
+
+	const handleCancelRef = React.useRef(handleCancel);
+	React.useEffect(() => {
+		handleCancelRef.current = handleCancel;
+	}, [handleCancel]);
 
 	const handleUserSubmitRef = React.useRef(handleUserSubmit);
 	React.useEffect(() => {
@@ -89,6 +97,7 @@ export function useVoice({
 	}, [addToChatQueue]);
 
 	const abortControllerRef = React.useRef<AbortController | null>(null);
+	const ttsAbortControllerRef = React.useRef<AbortController | null>(null);
 	const recordingAudioPromiseRef = React.useRef<Promise<void> | null>(null);
 	const activeFileRef = React.useRef<string | null>(null);
 
@@ -111,6 +120,33 @@ export function useVoice({
 		}
 	}, []);
 
+	// Central interrupt helper — idempotent across mid-generation, mid-tool, mid-synthesis, mid-playback
+	const interrupt = React.useCallback(() => {
+		stateRef.current = 'listening';
+		setState('listening');
+
+		if (ttsAbortControllerRef.current) {
+			ttsAbortControllerRef.current.abort();
+			ttsAbortControllerRef.current = null;
+		}
+
+		if (ttsTimeoutRef.current) {
+			clearTimeout(ttsTimeoutRef.current);
+			ttsTimeoutRef.current = null;
+		}
+		pendingTTSRef.current = false;
+		pluginRef.current = null;
+
+		if (abortControllerRef.current) {
+			abortControllerRef.current.abort();
+			abortControllerRef.current = null;
+		}
+
+		cleanupActiveFile();
+
+		handleCancelRef.current?.();
+	}, [cleanupActiveFile]);
+
 	const ensureDependencies = React.useCallback(
 		async (plugin: VoicePlugin): Promise<boolean> => {
 			if (!plugin.checkDependenciesInstalled) {
@@ -119,7 +155,7 @@ export function useVoice({
 
 			try {
 				const check = await plugin.checkDependenciesInstalled();
-				if (check.installed) {
+				if (check.installed || check.missing.length === 0) {
 					return true;
 				}
 
@@ -173,6 +209,11 @@ export function useVoice({
 			if (abortControllerRef.current) {
 				abortControllerRef.current.abort();
 				abortControllerRef.current = null;
+			}
+
+			if (ttsAbortControllerRef.current) {
+				ttsAbortControllerRef.current.abort();
+				ttsAbortControllerRef.current = null;
 			}
 
 			if (ttsTimeoutRef.current) {
@@ -239,7 +280,10 @@ export function useVoice({
 			};
 
 			engine.on('speech_start', () => {
-				if (stateRef.current === 'idle') {
+				const currState = stateRef.current;
+				if (currState === 'processing' || currState === 'speaking') {
+					interrupt();
+				} else if (currState === 'idle') {
 					setState('listening');
 				}
 			});
@@ -323,8 +367,10 @@ export function useVoice({
 		loadPlugin,
 		ensureDependencies,
 		cleanupActiveFile,
+		interrupt,
 	]);
 
+	// TTS response playback effect
 	React.useEffect(() => {
 		if (!pendingTTSRef.current || !pluginRef.current) return;
 
@@ -350,10 +396,27 @@ export function useVoice({
 		const ttsFile = join(tmpdir(), `nanocoder-tts-${randomUUID()}.wav`);
 		activeFileRef.current = ttsFile;
 
+		const ttsAbortController = new AbortController();
+		ttsAbortControllerRef.current = ttsAbortController;
+
 		plugin
-			.synthesizeSpeech(formattedText, ttsFile)
-			.then(async () => plugin.playAudio(ttsFile))
-			.catch(() => {
+			.synthesizeSpeech(
+				formattedText,
+				ttsFile,
+				60_000,
+				ttsAbortController.signal,
+			)
+			.then(async () => {
+				if (ttsAbortController.signal.aborted) return;
+				return plugin.playAudio(ttsFile, 60_000, ttsAbortController.signal);
+			})
+			.catch(audioErr => {
+				if (
+					audioErr instanceof Error &&
+					audioErr.message?.includes('AbortError')
+				) {
+					return;
+				}
 				addToChatQueueRef.current(
 					React.createElement(ErrorMessage, {
 						key: generateKey('voice-audio-error'),
@@ -362,13 +425,20 @@ export function useVoice({
 				);
 			})
 			.finally(() => {
+				if (ttsAbortControllerRef.current === ttsAbortController) {
+					ttsAbortControllerRef.current = null;
+				}
 				cleanupActiveFile();
-				setState('idle');
+				if (stateRef.current === 'speaking') {
+					setState('idle');
+				}
 			});
 	}, [messages, cleanupActiveFile]);
 
+	// Push-to-talk recording trigger callback
 	const startStopRecording = React.useCallback(async () => {
-		if (state === 'listening') {
+		const currState = stateRef.current;
+		if (currState === 'listening') {
 			if (abortControllerRef.current) {
 				abortControllerRef.current.abort();
 				abortControllerRef.current = null;
@@ -377,7 +447,11 @@ export function useVoice({
 			return;
 		}
 
-		if (state !== 'idle') {
+		if (currState === 'processing' || currState === 'speaking') {
+			// Interrupt active generation / tool execution / speech synthesis / speech playback
+			interrupt();
+			// Fall through to start a new recording cycle immediately!
+		} else if (currState !== 'idle') {
 			return;
 		}
 
@@ -427,6 +501,12 @@ export function useVoice({
 			}
 
 			recordingAudioPromiseRef.current = null;
+
+			// If state was changed away from listening (e.g. interrupted), cancel submission
+			if (stateRef.current !== 'listening') {
+				cleanupActiveFile();
+				return;
+			}
 
 			setState('processing');
 			const transcribedText = await plugin.transcribeAudio(
@@ -484,7 +564,7 @@ export function useVoice({
 				}),
 			);
 		}
-	}, [state, loadPlugin, ensureDependencies, cleanupActiveFile]);
+	}, [loadPlugin, ensureDependencies, cleanupActiveFile, interrupt]);
 
 	return {
 		state,
