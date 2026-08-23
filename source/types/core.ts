@@ -263,3 +263,12 @@ export interface LSPConnectionStatus {
 	status: ConnectionStatus;
 	errorMessage?: string;
 }
+
+export interface TodoIndicatorInfo {
+	totalCount: number;
+	completedCount: number;
+	/** When > 0 the badge prefix '~' is shown (work in flight). */
+	inProgressCount: number;
+	isHidden: boolean;
+	hasUnread?: boolean;
+}

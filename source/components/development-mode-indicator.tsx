@@ -8,7 +8,11 @@ import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import type {useTheme} from '@/hooks/useTheme';
 import {resolveToolProfile} from '@/tools/tool-profiles';
 import type {TuneConfig} from '@/types/config';
-import type {ContextSource, DevelopmentMode} from '@/types/core';
+import type {
+	ContextSource,
+	DevelopmentMode,
+	TodoIndicatorInfo,
+} from '@/types/core';
 import {
 	DEVELOPMENT_MODE_LABELS,
 	DEVELOPMENT_MODE_LABELS_NARROW,
@@ -26,6 +30,7 @@ interface DevelopmentModeIndicatorProps {
 	tune?: TuneConfig;
 	currentModel?: string;
 	activeEditor?: ActiveEditorState | null;
+	todoInfo?: TodoIndicatorInfo | null;
 }
 
 function getContextColor(
@@ -52,6 +57,7 @@ export const DevelopmentModeIndicator = React.memo(
 		tune,
 		currentModel,
 		activeEditor,
+		todoInfo,
 	}: DevelopmentModeIndicatorProps) => {
 		const {isNarrow, actualWidth, truncate} = useResponsiveTerminal();
 		const modeLabel = isNarrow
@@ -68,6 +74,19 @@ export const DevelopmentModeIndicator = React.memo(
 			return tune.toolProfile === 'auto'
 				? `tune: ${resolved} (auto)`
 				: `tune: ${resolved}`;
+		})();
+
+		const todoLabel = (() => {
+			if (!todoInfo || todoInfo.totalCount <= 0) return '';
+			if (todoInfo.isHidden) {
+				const inFlight = todoInfo.inProgressCount > 0 ? '~' : '';
+				const unread = todoInfo.hasUnread ? '*' : '';
+				const progress = `${inFlight}${todoInfo.completedCount}/${todoInfo.totalCount}`;
+				return isNarrow
+					? `Todo (${progress}${unread})`
+					: `Todo (${progress}${unread} Ctrl-t)`;
+			}
+			return isNarrow ? '' : 'Todo (hide Ctrl-t)';
 		})();
 
 		// Figures with any client-side estimation ('estimate', or 'api+estimate'
@@ -106,6 +125,7 @@ export const DevelopmentModeIndicator = React.memo(
 					? ' (Shift+Tab to cycle)'
 					: '';
 			const tuneSegment = tuneLabel ? ` · ${tuneLabel}` : '';
+			const todoSegment = todoLabel ? ` · ${todoLabel}` : '';
 			const ctxSegment =
 				contextPercentUsed !== null
 					? ` · ctx: ${ctxPrefix}${contextPercentUsed}%`
@@ -121,6 +141,7 @@ export const DevelopmentModeIndicator = React.memo(
 			const requiredWidth =
 				modeLabel.length +
 				tuneSegment.length +
+				todoSegment.length +
 				ctxSegment.length +
 				sessionSeparator.length +
 				editorSeparator.length +
@@ -146,6 +167,7 @@ export const DevelopmentModeIndicator = React.memo(
 				modeLabel.length +
 				shiftHint.length +
 				tuneSegment.length +
+				todoSegment.length +
 				ctxSegment.length +
 				sessionSeparator.length +
 				editorSeparator.length +
@@ -225,6 +247,16 @@ export const DevelopmentModeIndicator = React.memo(
 					<>
 						<Text color={colors.secondary}> · </Text>
 						<Text color={colors.info}>{tuneLabel}</Text>
+					</>
+				)}
+				{todoLabel && (
+					<>
+						<Text color={colors.secondary}> · </Text>
+						<Text
+							color={todoInfo?.hasUnread ? colors.warning : colors.secondary}
+						>
+							{todoLabel}
+						</Text>
 					</>
 				)}
 				{contextPercentUsed !== null && (

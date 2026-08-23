@@ -418,6 +418,9 @@ export function InteractiveApp({
 								compactToolCounts={appState.compactToolCounts}
 								compactToolDisplay={appState.compactToolDisplay}
 								liveTaskList={appState.liveTaskList}
+								showTodoList={appState.showTodoList}
+								todoHasUnread={appState.todoHasUnread}
+								onToggleTodoList={appState.toggleTodoList}
 								onToggleCompactDisplay={handleToggleCompactDisplay}
 								pendingSubagentApproval={pendingSubagentApproval}
 								onSubagentToolApproval={handleSubagentToolApproval}
