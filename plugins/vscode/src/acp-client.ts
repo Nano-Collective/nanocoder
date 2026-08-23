@@ -86,6 +86,7 @@ export class NanocoderAcpClient {
 	setConnection(connection: ClientSideConnection): void {
 		this.connection = connection;
 		this._sessionId = undefined; // Clear any stale session to force re-creation
+		this._clearPendingPermissions();
 	}
 
 	async handlePermissionRequest(params: any): Promise<unknown> {
@@ -338,9 +339,10 @@ export class NanocoderAcpClient {
 	}
 
 	async cancel(): Promise<void> {
-		if (!this.connection || !this._sessionId) return;
 		this.activePrompt?.cancel();
+		// Before the notification, so the map is emptied even if cancel() throws.
 		this._clearPendingPermissions();
+		if (!this.connection || !this._sessionId) return;
 		try {
 			await this.connection.cancel({
 				sessionId: this._sessionId

@@ -1,5 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import type {SettingsTabId} from '@/app/components/settings-constants';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {getAppConfig} from '@/config/index';
 import {loadPreferences} from '@/config/preferences';
@@ -36,7 +37,6 @@ export type ActiveMode =
 	| 'model'
 	| 'modelDatabase'
 	| 'configWizard'
-	| 'mcpWizard'
 	| 'explorer'
 	| 'ideSelection'
 	| 'checkpointLoad'
@@ -99,6 +99,9 @@ export function useAppState(
 	const [isConversationComplete, setIsConversationComplete] =
 		useState<boolean>(false);
 	const [isSettingsMode, setIsSettingsMode] = useState<boolean>(false);
+	const [settingsActiveTab, setSettingsActiveTab] = useState<
+		SettingsTabId | undefined
+	>(undefined);
 
 	// Plan review state (post-plan-generation action bar)
 	const [planReviewState, setPlanReviewState] = useState<{
@@ -361,6 +364,7 @@ export function useAppState(
 		isCancelling,
 		isConversationComplete,
 		isSettingsMode,
+		settingsActiveTab,
 		planReviewState,
 		planTurnCompleted,
 		pendingPlanProceed,
@@ -428,6 +432,7 @@ export function useAppState(
 		setIsCancelling,
 		setIsConversationComplete,
 		setIsSettingsMode,
+		setSettingsActiveTab,
 		setPlanReviewState,
 		setPlanTurnCompleted,
 		setPendingPlanProceed,

@@ -42,6 +42,7 @@
 		"test:ava:coverage": "c8 ava",
 		"test:format": "biome check --no-errors-on-unmatched .",
 		"test:types": "tsc --noEmit",
+		"test:types:vscode": "tsc --noEmit -p plugins/vscode/tsconfig.json",
 		"test:lint": "biome lint .",
 		"test:lint:fix": "biome check --write --unsafe .",
 		"test:knip": "knip",
@@ -108,11 +109,11 @@
 	"devDependencies": {
 		"@ava/typescript": "^7.0.0",
 		"@biomejs/biome": "^2.5.0",
-		"@changesets/cli": "^2.31.0",
+		"@changesets/cli": "^3.0.0",
 		"@types/node": "^26.1.2",
 		"@types/react": "^19.0.0",
 		"@types/ws": "^8.18.1",
-		"ava": "^7.0.0",
+		"ava": "^8.0.1",
 		"c8": "^11.0.0",
 		"husky": "^9.1.7",
 		"ink-testing-library": "^4.0.0",
@@ -121,7 +122,7 @@
 		"strip-ansi": "^7.1.2",
 		"tsc-alias": "^1.8.16",
 		"tsx": "^4.20.6",
-		"typescript": "^5.0.3"
+		"typescript": "^7.0.2"
 	},
 	"lint-staged": {
 		"*.{js,ts,jsx,tsx,json,md}": [
@@ -129,10 +130,10 @@
 		]
 	},
 	"ava": {
-		"extensions": {
-			"ts": "module",
-			"tsx": "module"
-		},
+		"extensions": [
+			"ts",
+			"tsx"
+		],
 		"nodeArguments": [
 			"--import=tsx",
 			"--no-warnings"
@@ -143,8 +144,6 @@
 			"plugins/**/*.spec.ts",
 			"plugins/**/*.spec.tsx",
 			"!plugins/**/node_modules/**",
-			"!plugins/vscode/src/acp-client.spec.ts",
-			"!plugins/vscode/src/acp-process-manager.spec.ts",
 			"!source/**/*-helpers.ts",
 			"!source/**/test-helpers.ts"
 		],

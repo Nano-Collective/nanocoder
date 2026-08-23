@@ -183,6 +183,8 @@ export class AcpAgent implements Agent {
 			);
 		}
 
+		session.beginTurn();
+
 		const {text: userText, images} = await acpContentToUserMessage(
 			params.prompt,
 			{
@@ -633,7 +635,10 @@ export class AcpAgent implements Agent {
 					});
 				}
 			} else if (message.role === 'assistant') {
-				if (message.reasoning && message.reasoning.length > 0) {
+				// runAcpConversation no longer stores whitespace-only reasoning, so
+				// this guard is for sessions written before that — replaying one
+				// would otherwise open a thought section that renders to nothing.
+				if (message.reasoning && message.reasoning.trim().length > 0) {
 					await this.conn.sessionUpdate({
 						sessionId: session.sessionId,
 						update: {

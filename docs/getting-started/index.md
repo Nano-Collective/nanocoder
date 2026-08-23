@@ -22,7 +22,7 @@ Welcome to Nanocoder! This section covers everything you need to install, config
    nanocoder
    ```
 
-3. **Configure** a provider when prompted, or run `/setup-providers` for the interactive wizard.
+3. **Configure** a provider when prompted, or run `/settings providers` for the interactive wizard.
 
 ## CLI Options
 
