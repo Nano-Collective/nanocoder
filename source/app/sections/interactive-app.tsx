@@ -103,6 +103,7 @@ export function InteractiveApp({
 		messages: appState.messages,
 		addToChatQueue: appState.addToChatQueue,
 		voicePreference: voicePref,
+		handleCancel: appHandlers.handleCancel,
 	});
 
 	const handleToggleCompactDisplay = () => {
