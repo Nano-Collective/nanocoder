@@ -144,6 +144,22 @@ test('getSocketPath on macOS uses project dir for short paths and temp dir for l
 	const shortRoot = '/tmp/short';
 	const shortSock = getSocketPath(shortRoot);
 	t.is(shortSock, join(shortRoot, '.nanocoder', 'daemon.sock'));
+
+	// The final socket path includes /.nanocoder/daemon.sock, so a root
+	// that is safe by itself can still exceed macOS' 104-byte limit.
+	const borderlineRoot = '/tmp/' + 'a'.repeat(85);
+	const borderlineProjectSock = join(
+		borderlineRoot,
+		'.nanocoder',
+		'daemon.sock',
+	);
+	const borderlineSock = getSocketPath(borderlineRoot);
+	t.is(Buffer.byteLength(borderlineRoot), 90);
+	t.true(Buffer.byteLength(borderlineProjectSock) >= 104);
+	t.true(borderlineSock.startsWith(tmpdir()));
+	t.regex(borderlineSock, /nanocoder-daemon-[a-f0-9]{10}\.sock$/);
+	t.not(borderlineSock, borderlineProjectSock);
+
 	// Long path (>104 bytes) should use temp directory with hash
 	const longRoot = '/tmp/' + 'a'.repeat(200);
 	const longSock = getSocketPath(longRoot);

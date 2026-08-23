@@ -47,22 +47,28 @@ export function getSocketPath(projectRoot: string): string {
 		return `\\\\.\\pipe\\nanocoder-daemon-${hash}`;
 	}
 
-	// On macOS, the socket path must be shorter than 104 bytes.
-	const DARWIN_SOCKET_PATH_CAPACITY = 104;
+	const projectSock = join(projectRoot, '.nanocoder', 'daemon.sock');
+
+	const DARWIN_SOCKET_PATH_CAPACITY = 104; // sockaddr_un.sun_path on macOS
 	if (
 		process.platform === 'darwin' &&
-		Buffer.byteLength(projectRoot) > DARWIN_SOCKET_PATH_CAPACITY
+		Buffer.byteLength(projectSock) >= DARWIN_SOCKET_PATH_CAPACITY
 	) {
-		// Use a hash of the project root to keep and create a unique socket path in macOS temporary directory.
-		//
+		// Fall back to os.tmpdir() after the project-local path exceeds the
+		// macOS socket limit. This is not relying on a documented max length
+		// for /var/folders; the important part is that we stop carrying the
+		// unbounded projectRoot into the socket path. macOS temp dirs normally
+		// look like /var/folders/.../T, and with the fixed-length hash filename
+		// the resulting path stays below sockaddr_un.sun_path's 104-byte limit
+		// in normal environments. The hash keeps the fallback stable and
+		// distinct for each project.
 		const hash = createHash('sha256')
 			.update(projectRoot)
 			.digest('hex')
-			.slice(0, 10)
-			.toLowerCase();
+			.slice(0, 10);
 		return join(tmpdir(), `nanocoder-daemon-${hash}.sock`);
 	}
-	return join(projectRoot, '.nanocoder', 'daemon.sock');
+	return projectSock;
 }
 
 export async function readLockfile(
