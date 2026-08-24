@@ -70,6 +70,24 @@ You can change this by editing the preferences file directly:
 
 Reasoning traces can also be toggled dynamically with the Ctrl+R keyboard shortcut.
 
+### Bash Output
+
+Which bash executions keep their captured output on the completed `execute_bash` card is controlled by the `bashOutputMode` field:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `bashOutputMode` | string | `user` | Which bash executions show captured output on the completed card. One of: `user` (only user-typed `!commands`), `tool` (only agent `execute_bash` calls), `both` (user and tool), `none` (neither) |
+
+You can change this by editing the preferences file directly:
+
+```json
+{
+  "bashOutputMode": "both"
+}
+```
+
+The default (`user`) matches the original behavior: user-typed `!commands` show their output, while agent `execute_bash` calls stay compact.
+
 ### Notification Configuration
 
 Desktop notification preferences are stored under the `nanocoder.notifications` namespace:

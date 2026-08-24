@@ -3,6 +3,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {
+	getBashOutputMode,
 	getCompactToolDisplay,
 	getLastUsedModel,
 	getNanocoderShape,
@@ -12,6 +13,7 @@ import {
 	loadPreferences,
 	resetPreferencesCache,
 	savePreferences,
+	updateBashOutputMode,
 	updateCompactToolDisplay,
 	updateLastUsed,
 	updateNanocoderShape,
@@ -1556,6 +1558,70 @@ test.serial('full workflow: update and retrieve privacy preference', t => {
 		updatePrivacyPreference(false);
 		const retrieved2 = getPrivacyPreference();
 		t.is(retrieved2, false);
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+// ============================================================================
+// Bash Output Mode Tests
+// ============================================================================
+
+test.serial('getBashOutputMode returns user when not set', t => {
+	const preferencesPath = getTestPreferencesPath();
+	writeFileSync(preferencesPath, JSON.stringify({lastProvider: 'test'}, null, 2), 'utf-8');
+
+	try {
+		const result = getBashOutputMode();
+		t.is(result, 'user');
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('getBashOutputMode returns user when file does not exist', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	const result = getBashOutputMode();
+	t.is(result, 'user');
+});
+
+test.serial('getBashOutputMode returns the stored mode', t => {
+	const preferencesPath = getTestPreferencesPath();
+	const data: UserPreferences = {
+		bashOutputMode: 'both',
+	};
+	writeFileSync(preferencesPath, JSON.stringify(data, null, 2), 'utf-8');
+
+	try {
+		const result = getBashOutputMode();
+		t.is(result, 'both');
+	} finally {
+		if (existsSync(preferencesPath)) {
+			rmSync(preferencesPath, {force: true});
+		}
+	}
+});
+
+test.serial('updateBashOutputMode saves and retrieves the mode', t => {
+	const preferencesPath = getTestPreferencesPath();
+	if (existsSync(preferencesPath)) {
+		rmSync(preferencesPath, {force: true});
+	}
+
+	try {
+		updateBashOutputMode('none');
+		t.is(getBashOutputMode(), 'none');
+
+		updateBashOutputMode('tool');
+		t.is(getBashOutputMode(), 'tool');
 	} finally {
 		if (existsSync(preferencesPath)) {
 			rmSync(preferencesPath, {force: true});
