@@ -143,6 +143,27 @@ test.serial('loadGitignore works without .nanocoderignore file', async t => {
 	}
 });
 
+test.serial(
+	'loadGitignore silently ignores unreadable .nanocoderignore (read error)',
+	async t => {
+		const testDir = join(process.cwd(), 'test-unreadable-nanocoderignore-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			// Make .nanocoderignore a directory so readFileSync throws EISDIR
+			mkdirSync(join(testDir, '.nanocoderignore'));
+
+			const ig = loadGitignore(testDir);
+
+			// Should not throw, and default ignores should still apply
+			t.true(ig.ignores('node_modules/file.js'));
+			t.false(ig.ignores('src/file.ts'));
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
 test('loadGitignore ignores all language-specific directories', t => {
 	const ig = loadGitignore(process.cwd());
 
