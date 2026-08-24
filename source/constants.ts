@@ -79,6 +79,23 @@ export const TABLE_COLUMN_MIN_WIDTH = 10;
 export const WIZARD_ROW_CHROME_CHARS = 10;
 export const MIN_PATH_BUDGET_CHARS = 10;
 
+// Short, discoverable hints shown on the welcome screen and by `/tip`.
+// Keep these aligned with the documented command and keyboard behaviour.
+export const TIPS = [
+	'Press Ctrl+J to add a new line without sending your prompt.',
+	'Press Shift+Tab to cycle between development modes.',
+	'Press Ctrl+O to toggle compact tool output.',
+	'Press Ctrl+R to toggle expanded reasoning traces.',
+	'Use @ followed by a file path to add that file to context.',
+	'Use /explorer to browse project files and add them to context.',
+	'Run /checkpoint create before a risky refactor so you can restore it later.',
+	'Run /compact --preview to inspect a context compression before applying it.',
+	'Run /copy to copy the last assistant response to your clipboard.',
+	'Run /usage to see how much of the current model context is in use.',
+	'Run /model to switch providers or models without restarting your session.',
+	'Paste an image with Ctrl+V when your selected model supports vision.',
+] as const;
+
 // === TOKEN THRESHOLDS (percentages - useChatHandler) ===
 export const TOKEN_THRESHOLD_WARNING_PERCENT = 80;
 export const TOKEN_THRESHOLD_CRITICAL_PERCENT = 95;

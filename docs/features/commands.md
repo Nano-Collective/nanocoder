@@ -33,6 +33,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/doctor` | Show environment health report for bug reports |
 | `/update` | Update Nanocoder to the latest version |
 | `/usage` | Get current model context usage visually |
+| `/tip` | Show a random usage tip, shortcut, or slash command |
 | `/lsp` | List connected LSP servers |
 | `/schedule` | Read-only view of cron subscriptions declared by skills (see [Skills → Event subscriptions](skills.md#event-subscriptions)) |
 | `/skills` | List and inspect loaded skills; scaffold new bundle skills with AI assistance (see [Skills](skills.md)) |

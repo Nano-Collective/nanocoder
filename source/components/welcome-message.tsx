@@ -3,13 +3,14 @@ import {Box, Text} from 'ink';
 import BigText from 'ink-big-text';
 import Gradient from 'ink-gradient';
 import path from 'path';
-import {memo} from 'react';
+import {memo, useState} from 'react';
 import {fileURLToPath} from 'url';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {getNanocoderShape} from '@/config/preferences';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderShape} from '@/types/ui';
+import {getRandomTip} from '@/utils/tips';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -24,6 +25,7 @@ const DEFAULT_SHAPE: NanocoderShape = 'tiny';
 export default memo(function WelcomeMessage() {
 	const {boxWidth, isNarrow, isNormal} = useResponsiveTerminal();
 	const {colors} = useTheme();
+	const [tip] = useState(getRandomTip);
 
 	// Get the user's preferred nanocoder shape or use default
 	const nanocoderShape = getNanocoderShape() ?? DEFAULT_SHAPE;
@@ -97,6 +99,11 @@ export default memo(function WelcomeMessage() {
 					</TitledBoxWithPreferences>
 				</>
 			)}
+			<Box paddingX={isNarrow ? 1 : 2} marginBottom={1}>
+				<Text color={colors.secondary} dimColor>
+					Tip: {tip}
+				</Text>
+			</Box>
 		</>
 	);
 });
