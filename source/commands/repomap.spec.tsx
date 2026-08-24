@@ -1,3 +1,6 @@
+import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import React from 'react';
 
@@ -103,14 +106,37 @@ test('RepoMapView renders an empty state when nothing is indexable', t => {
 });
 
 test('repomapCommand handler renders a map for the current directory', async t => {
-	const result = await repomapCommand.handler([], [], metadata);
-	t.true(React.isValidElement(result));
+	const root = join(
+		tmpdir(),
+		`nanocoder-repomap-command-${process.pid}-${Date.now()}`,
+	);
+	mkdirSync(root, {recursive: true});
+	writeFileSync(
+		join(root, 'core.ts'),
+		'export function sharedHelper() {\n\treturn 1;\n}\n',
+	);
+	writeFileSync(
+		join(root, 'user.ts'),
+		'import {sharedHelper} from "./core";\nsharedHelper();\n',
+	);
 
-	const {lastFrame, unmount} = renderWithTheme(result as React.ReactElement);
-	const output = lastFrame() ?? '';
-	unmount();
-	t.true(output.includes('/repomap'));
-	t.true(output.includes('files'));
+	const previousCwd = process.cwd();
+	process.chdir(root);
+
+	try {
+		const result = await repomapCommand.handler([], [], metadata);
+		t.true(React.isValidElement(result));
+
+		const {lastFrame, unmount} = renderWithTheme(result as React.ReactElement);
+		const output = lastFrame() ?? '';
+		unmount();
+		t.true(output.includes('/repomap'));
+		t.true(output.includes('files'));
+		t.true(output.includes('core.ts'));
+	} finally {
+		process.chdir(previousCwd);
+		rmSync(root, {recursive: true, force: true});
+	}
 });
 
 test('repomapCommand handler renders usage for a bad argument', async t => {
