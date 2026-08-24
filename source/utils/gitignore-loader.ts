@@ -50,7 +50,9 @@ const DEFAULT_IGNORE_DIRS = [
  * @param workspaceRoot - The workspace root to load .gitignore / .nanocoderignore from
  * @returns An ignore instance configured with patterns
  */
-export function loadGitignore(workspaceRoot: string): ReturnType<typeof ignore> {
+export function loadGitignore(
+	workspaceRoot: string,
+): ReturnType<typeof ignore> {
 	const ig = ignore();
 	const gitignorePath = join(workspaceRoot, '.gitignore');
 	const nanocoderignorePath = join(workspaceRoot, '.nanocoderignore');
