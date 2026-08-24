@@ -149,8 +149,10 @@ export function useAppState(
 	const reasoningExpandedRef = useRef(false);
 	reasoningExpandedRef.current = reasoningExpanded;
 
-	// Compact tool display state
-	const [compactToolDisplay, setCompactToolDisplay] = useState<boolean>(true);
+	// Set to preference on launch, but can be toggled freely during runtime
+	const [compactToolDisplay, setCompactToolDisplay] = useState<boolean>(
+		preferences.compactToolDisplay ?? true,
+	);
 	// Ref keeps current value accessible to long-running async loops
 	const compactToolDisplayRef = useRef(true);
 	compactToolDisplayRef.current = compactToolDisplay;
