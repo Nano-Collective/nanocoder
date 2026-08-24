@@ -9,7 +9,9 @@
 	const addMenuBtn = document.getElementById('add-menu-btn');
 	const addMenuDropdown = document.getElementById('add-menu-dropdown');
 
-	let attachedPaths = []; // [{path, name, kind: 'file'|'folder'}]
+	// [{path, name, kind: 'file'|'folder', agentEdited?: boolean}]. Entries the
+	// agent contributed are flagged so submitMessage can leave them out.
+	let attachedPaths = [];
 
 	// ── @ mention autocomplete state ────────────────────────
 	const mentionDropdown = document.getElementById('mention-dropdown');
@@ -329,10 +331,7 @@
 		chatInput.style.height = 'auto';
 		chatInput.style.height = chatInput.scrollHeight + 'px';
 
-		if (!attachedPaths.some(a => a.path === item.path)) {
-			attachedPaths.push({ path: item.path, name: item.name, kind: item.kind });
-			renderChips();
-		}
+		attachPath(item);
 
 		closeMention();
 		chatInput.focus();
@@ -788,7 +787,10 @@
 
 	function submitMessage() {
 		let text = chatInput.value.trim();
-		if (!text && attachedPaths.length === 0 && pendingImages.length === 0) return;
+		// Files the agent wrote share the chip row but are a review affordance,
+		// not an attachment - only what the user picked is part of the prompt.
+		const attachments = attachedPaths.filter(a => !a.agentEdited);
+		if (!text && attachments.length === 0 && pendingImages.length === 0) return;
 
 		// /copy is handled locally, mirroring the terminal slash command:
 		// copy the previous agent output instead of prompting the agent.
@@ -801,7 +803,7 @@
 		if (lower === '/copy' || lower === '/copy code') {
 			chatInput.value = '';
 			chatInput.style.height = 'auto';
-			attachedPaths = [];
+			attachedPaths = attachedPaths.filter(a => a.agentEdited);
 			renderChips();
 			pendingImages = [];
 			renderImagePreviews();
@@ -814,8 +816,8 @@
 		}
 
 		// Append attached paths as context lines
-		if (attachedPaths.length > 0) {
-			const contextText = attachedPaths
+		if (attachments.length > 0) {
+			const contextText = attachments
 				.map(a => `@${a.kind === 'folder' ? '[folder]' : '[file]'} ${a.path}`)
 				.join('\n');
 			text = text ? `${text}\n\n${contextText}` : contextText;
@@ -831,8 +833,9 @@
 		pendingImages = [];
 		renderImagePreviews();
 
-		// Clear chips after sending
-		attachedPaths = [];
+		// Clear the user's chips after sending. The agent's stay: they are a
+		// running list of what it changed, not an outbox.
+		attachedPaths = attachedPaths.filter(a => a.agentEdited);
 		renderChips();
 
 		dispatchPrompt(text, imagesToSubmit);
@@ -901,6 +904,43 @@
 		return svg;
 	}
 
+	/** Last segment of a path, for either separator. */
+	function basename(filePath) {
+		return String(filePath).trim().split(/[/\\]/).pop();
+	}
+
+	/**
+	 * Attach a path the user picked. A file the agent already put in the row is
+	 * promoted rather than ignored, so attaching it deliberately still sends it
+	 * with the next message.
+	 */
+	function attachPath(item) {
+		const existing = attachedPaths.find(a => a.path === item.path);
+		if (existing) {
+			existing.agentEdited = false;
+		} else {
+			attachedPaths.push({ path: item.path, name: item.name, kind: item.kind });
+		}
+		renderChips();
+	}
+
+	/**
+	 * Surface a file the agent created or edited in the context row, so it can
+	 * be opened and reviewed without hunting for it in the explorer. Flagged
+	 * `agentEdited` so it is left out of the next prompt: the agent just wrote
+	 * the file, and re-inlining it would spend context to say nothing new.
+	 */
+	function addChangedFileChip(filePath) {
+		if (attachedPaths.some(a => a.path === filePath)) return;
+		attachedPaths.push({
+			path: filePath,
+			name: basename(filePath),
+			kind: 'file',
+			agentEdited: true,
+		});
+		renderChips();
+	}
+
 	function renderChips() {
 		contextChipsContainer.innerHTML = '';
 		if (attachedPaths.length === 0) {
@@ -910,8 +950,10 @@
 		contextChipsContainer.classList.remove('hidden');
 		for (const item of attachedPaths) {
 			const chip = document.createElement('span');
-			chip.className = 'context-chip';
-			
+			chip.className = item.agentEdited
+				? 'context-chip context-chip-edited'
+				: 'context-chip';
+
 			const iconSpan = document.createElement('span');
 			iconSpan.className = 'chip-icon';
 			iconSpan.appendChild(item.kind === 'folder' ? createFolderIcon() : createFileIcon());
@@ -921,7 +963,12 @@
 
 			const nameSpan = document.createElement('span');
 			nameSpan.className = 'chip-name';
-			nameSpan.setAttribute('title', item.path);
+			nameSpan.setAttribute(
+				'title',
+				item.agentEdited
+					? `${item.path}\nChanged by Nanocoder - click to open`
+					: item.path,
+			);
 			nameSpan.textContent = item.name;
 
 			const removeSpan = document.createElement('span');
@@ -1102,7 +1149,7 @@
 		if (role === 'user' && content) {
 			// Handle pre-injected format (before sending)
 			parsedContent = content.replace(/@\[(file|folder)\]\s+([^\n]+)/g, (match, kind, path) => {
-				const name = path.trim().split(/[/\\]/).pop();
+				const name = basename(path);
 				extractedChips.push({ kind, path: path.trim(), name });
 				return ''; // Remove from text
 			});
@@ -1110,7 +1157,7 @@
 			// Handle post-injected format (from history sync)
 			parsedContent = parsedContent.replace(/<context path="([^"]+)"(?: type="([^"]+)")?>[\s\S]*?<\/context>/g, (match, path, type) => {
 				const kind = type === 'directory' ? 'folder' : 'file';
-				const name = path.trim().split(/[/\\]/).pop();
+				const name = basename(path);
 				extractedChips.push({ kind, path: path.trim(), name });
 				return ''; // Remove from text
 			});
@@ -1438,10 +1485,7 @@
 			}
 			case 'pathInfoResolved': {
 				const { path, name, kind } = message;
-				if (!attachedPaths.some(a => a.path === path)) {
-					attachedPaths.push({ path, name, kind });
-					renderChips();
-				}
+				attachPath({ path, name, kind });
 				break;
 			}
 			case 'appendMessage':
@@ -1463,6 +1507,10 @@
 				currentTurnText = '';
 				currentTurnFooter = null;
 				toolKinds.clear();
+				// A new or resumed conversation has no relationship to the files
+				// the previous one touched.
+				attachedPaths = attachedPaths.filter(a => !a.agentEdited);
+				renderChips();
 				agentTurnId = 0;
 				lastAgentRawTurnId = -1;
 				lastAgentSegments = '';
@@ -2367,12 +2415,30 @@
 		return last.replace(/['"]+$/g, '').trim();
 	}
 
-	// True when this update carries a diff the extension host would have handed
-	// to DiffManager. Mirrors handleDiffs in chat-webview-provider.ts so the
-	// panel only offers "Open Diff" once the change is actually registered.
+	// Path of the diff the extension host would have handed to DiffManager, or
+	// null when this update carries none. Mirrors handleDiffs in
+	// chat-webview-provider.ts so the panel only offers "Open Diff" once the
+	// change is actually registered.
+	function diffPath(update) {
+		if (!update || !Array.isArray(update.content)) return null;
+		const diff = update.content.find(block => !!block && block.type === 'diff' && !!block.path);
+		return diff ? diff.path : null;
+	}
+
 	function hasDiffContent(update) {
-		if (!update || !Array.isArray(update.content)) return false;
-		return update.content.some(block => !!block && block.type === 'diff' && !!block.path);
+		return diffPath(update) !== null;
+	}
+
+	// Absolute path an edit touches, or null when the update does not name one.
+	// `locations` is the ACP field for it, and the only source on a queued
+	// announcement - that one withholds content until the call is about to run.
+	function editFilePath(update) {
+		const location =
+			update && Array.isArray(update.locations) ? update.locations[0] : null;
+		if (location && typeof location.path === 'string' && location.path) {
+			return location.path;
+		}
+		return diffPath(update);
 	}
 
 	// Resolve an edit card's label and icon from an update. The agent reports a
@@ -2496,6 +2562,14 @@
 		if (actionEl) actionEl.textContent = state.action;
 
 		if (hasDiffContent(update)) setEditCardDiffAvailable(el);
+
+		// Stashed on the card because the completion update carries a status and
+		// nothing else - by then the path is no longer on the wire.
+		const filePath = editFilePath(update);
+		if (filePath) el.dataset.filePath = filePath;
+		if (state.status === 'completed' && el.dataset.filePath) {
+			addChangedFileChip(el.dataset.filePath);
+		}
 
 		if (isSettled(state.status)) {
 			const actions = el.querySelector('.tool-actions');

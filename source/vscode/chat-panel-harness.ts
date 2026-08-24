@@ -130,6 +130,9 @@ export function createElement(tagName: string): StubElement {
 		closest: () => null,
 		setAttribute: (name: string, value: string) => attributes.set(name, value),
 		getAttribute: (name: string) => attributes.get(name) ?? null,
+		removeAttribute: (name: string) => {
+			attributes.delete(name);
+		},
 		addEventListener: (type: string, fn: (event: StubElement) => void) => {
 			const registered = listeners.get(type);
 			if (registered) registered.push(fn);
@@ -279,6 +282,10 @@ export function createPanel(options: {marked?: boolean} = {}) {
 		container,
 		sent,
 		copied,
+		/** Any node in the stub shell, by id. */
+		byId(id: string): StubElement | null {
+			return findById(root, id);
+		},
 		post(message: unknown) {
 			for (const listener of messageListeners) listener({data: message});
 		},
