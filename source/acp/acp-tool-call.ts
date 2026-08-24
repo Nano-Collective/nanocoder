@@ -26,6 +26,7 @@ const TOOL_KINDS: Record<string, ToolKind> = {
 	find_files: 'search',
 	string_replace: 'edit',
 	write_file: 'edit',
+	diff_edit: 'edit',
 	execute_bash: 'execute',
 	fetch_url: 'fetch',
 	web_search: 'fetch',
@@ -68,6 +69,8 @@ export async function buildToolCallMeta(
 			};
 		case 'agent':
 			return buildAgentMeta(args, kind);
+		case 'file_op':
+			return buildFileOpMeta(args);
 		case 'execute_bash': {
 			const command = asString(args.command);
 			return {
@@ -101,6 +104,47 @@ export async function buildToolCallMeta(
 	}
 
 	return {title, kind, locations, content};
+}
+
+/**
+ * file_op is four tools behind one name, and the operation - not the name - is
+ * what tells a client whether a path is appearing, moving or going away.
+ *
+ * `locations` keeps the rule the rest of this file follows: the file the call
+ * leaves behind comes last. A move therefore reports [source, destination], so
+ * a client can follow the file to its new path instead of holding a reference
+ * to one that no longer exists.
+ */
+function buildFileOpMeta(args: Record<string, unknown>): AcpToolCallMeta {
+	const operation = asString(args.operation);
+	const path = extractPath(args);
+	const destination = asString(args.destination);
+
+	// mkdir stays 'other': it creates a directory, which is nothing to open.
+	const kind: ToolKind =
+		operation === 'delete'
+			? 'delete'
+			: operation === 'move'
+				? 'move'
+				: operation === 'copy'
+					? 'edit'
+					: 'other';
+
+	const locations: ToolCallLocation[] = [];
+	// A copy leaves its source untouched, so only the new file is reported.
+	if (path && operation !== 'copy') {
+		locations.push({path: resolve(path)});
+	}
+	if (destination && (operation === 'move' || operation === 'copy')) {
+		locations.push({path: resolve(destination)});
+	}
+
+	const target = [path, destination].filter(Boolean).join(' → ');
+	const title = target
+		? `file_op: ${operation ?? 'run'} ${target}`
+		: `file_op: ${operation ?? 'run'}`;
+
+	return {title, kind, locations, content: []};
 }
 
 function buildAgentMeta(

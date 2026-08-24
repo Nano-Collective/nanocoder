@@ -14,7 +14,7 @@ The Nanocoder VS Code extension provides a native sidebar chat powered by the Ag
 - **Provider, Model & Mode Switching**: Change your LLM provider, model, or operating mode on the fly from the dropdowns in the chat header. Switching provider refreshes the model list automatically.
 - **Sessions**: Start a new chat, browse previous sessions, and resume or delete them - conversations persist to disk across restarts.
 - **Slash Commands**: `/help`, `/clear`, and your custom commands from `.nanocoder/commands` work directly in the chat.
-- **Changed Files in Context**: Files the agent creates or edits appear as chips above the composer as soon as each edit lands - click one to open the current version in the editor.
+- **Changed Files in Context**: Files the agent creates or edits appear as chips above the composer as soon as each edit lands - click one to open the current version in the editor. A file it deletes drops off the row, and a rename follows the file to its new path.
 - **Live Subagent Progress**: Delegated agent runs show live token usage and tool activity on their card while they work.
 - **Task Checklist**: When the AI plans work with the task tool, a live checklist card shows each task's status and overall progress.
 - **Cancellation**: The Stop button ends the whole turn - the current tool is aborted and any queued tools are skipped.
@@ -62,6 +62,8 @@ nanocoder --vscode
 3. **Tool activity**: Read-only tools group into an activity card; file edits get their own card - click it to open the change in VS Code's diff viewer.
 
    Each file the agent finishes writing is also added to the context row above the composer, so the work of a turn is one click away from review. Those chips are dashed to set them apart from the files you attached yourself: clicking one opens the file as it stands now, the x dismisses it, and - unlike your own attachments - they are not sent along with your next message and are not cleared when you send it. Starting or resuming a conversation clears them.
+
+   The row follows the rest of the file lifecycle too: deleting a file takes its chip away (including one you attached yourself, which would otherwise expand to nothing on your next message), and renaming one moves its chip to the new path. Only calls that actually completed count - a delete you denied leaves the row exactly as it was.
 
 4. **Approvals**: In modes that require confirmation, tool cards show Approve / Deny buttons inline. When the AI asks you a question (the `ask_user` tool), the full question is shown with one button per answer.
 

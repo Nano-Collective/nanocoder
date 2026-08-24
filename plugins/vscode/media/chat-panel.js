@@ -389,6 +389,10 @@
 	let currentTurnFooter = null;
 	let visualLoader = null;
 	const toolKinds = new Map();
+	// Absolute paths each tool call touches, kept until the call lands: the
+	// completion update carries a status and nothing else. Same lifetime as
+	// toolKinds, and cleared with it.
+	const toolLocations = new Map();
 	let toastTimeout = null;
 	// One agent response is split into several `.agent-markdown` containers -
 	// endCurrentTextBlock() closes the current one whenever a tool card, thought
@@ -938,6 +942,18 @@
 			kind: 'file',
 			agentEdited: true,
 		});
+		renderChips();
+	}
+
+	/**
+	 * Drop a path from the context row because the file behind it is gone. This
+	 * takes the user's own attachments too: a deleted path would otherwise ride
+	 * along on the next prompt and expand to nothing.
+	 */
+	function dropChip(filePath) {
+		const remaining = attachedPaths.filter(a => a.path !== filePath);
+		if (remaining.length === attachedPaths.length) return;
+		attachedPaths = remaining;
 		renderChips();
 	}
 
@@ -1507,6 +1523,7 @@
 				currentTurnText = '';
 				currentTurnFooter = null;
 				toolKinds.clear();
+				toolLocations.clear();
 				// A new or resumed conversation has no relationship to the files
 				// the previous one touched.
 				attachedPaths = attachedPaths.filter(a => !a.agentEdited);
@@ -2344,8 +2361,10 @@
 		}
 
 		if (update.kind) toolKinds.set(toolCallId, update.kind);
+		const kind = toolKinds.get(toolCallId);
+		trackFileChanges(toolCallId, kind, update);
 
-		if (toolKinds.get(toolCallId) === 'edit') {
+		if (kind === 'edit') {
 			let card = document.getElementById(`tool-card-${toolCallId}`);
 			if (!card) {
 				closeAggregatorIfIdle();
@@ -2365,9 +2384,9 @@
 	// Verb per tool for the aggregated tool list. An entry only fires when the
 	// tool's ACP title is "<name>: <target>", which humanizeToolTitle splits on.
 	// Two families are deliberately absent: fetch_url / web_search take a
-	// url/query rather than a path, so their title is the bare tool name; and
-	// string_replace / write_file report ACP kind 'edit', so they render as edit
-	// cards and never reach this list.
+	// url/query rather than a path, so their title is the bare tool name; and the
+	// file editors (string_replace, write_file, diff_edit) report ACP kind
+	// 'edit', so they render as edit cards and never reach this list.
 	const TOOL_VERBS = {
 		read_file: 'Reading',
 		list_directory: 'Listing',
@@ -2429,16 +2448,52 @@
 		return diffPath(update) !== null;
 	}
 
-	// Absolute path an edit touches, or null when the update does not name one.
-	// `locations` is the ACP field for it, and the only source on a queued
-	// announcement - that one withholds content until the call is about to run.
-	function editFilePath(update) {
-		const location =
-			update && Array.isArray(update.locations) ? update.locations[0] : null;
-		if (location && typeof location.path === 'string' && location.path) {
-			return location.path;
+	// Absolute paths an update names, in the order the agent reported them - for
+	// a move that is [source, destination]. `locations` is the ACP field for
+	// them, and the only source on a queued announcement, which withholds its
+	// content until the call is about to run.
+	function updateLocations(update) {
+		const reported =
+			update && Array.isArray(update.locations) ? update.locations : [];
+		const paths = reported
+			.map(location => location && location.path)
+			.filter(path => typeof path === 'string' && !!path);
+		if (paths.length > 0) return paths;
+
+		const fromDiff = diffPath(update);
+		return fromDiff ? [fromDiff] : [];
+	}
+
+	/**
+	 * Keep the context row in step with what a finished call did to the
+	 * filesystem: `edit` created or changed a file, `delete` removed one, and
+	 * `move` did both at once, so the chip follows the file to its new path
+	 * rather than being left pointing at one that is no longer there.
+	 *
+	 * Nothing happens until the call completes, so an edit or a delete that was
+	 * denied, cancelled or failed leaves the row exactly as it was. The paths
+	 * are remembered from the announcement because the completion update carries
+	 * a status and nothing else.
+	 */
+	function trackFileChanges(toolCallId, kind, update) {
+		const reported = updateLocations(update);
+		if (reported.length > 0) toolLocations.set(toolCallId, reported);
+
+		if (resolveEditCardState(update).status !== 'completed') return;
+
+		const paths = toolLocations.get(toolCallId);
+		if (!paths || paths.length === 0) return;
+
+		if (kind === 'edit') {
+			addChangedFileChip(paths[0]);
+		} else if (kind === 'delete') {
+			dropChip(paths[0]);
+		} else if (kind === 'move') {
+			dropChip(paths[0]);
+			// The destination is the half worth keeping. Without one there is
+			// nothing to point at, so the move only takes the old chip away.
+			if (paths.length > 1) addChangedFileChip(paths[paths.length - 1]);
 		}
-		return diffPath(update);
 	}
 
 	// Resolve an edit card's label and icon from an update. The agent reports a
@@ -2562,14 +2617,6 @@
 		if (actionEl) actionEl.textContent = state.action;
 
 		if (hasDiffContent(update)) setEditCardDiffAvailable(el);
-
-		// Stashed on the card because the completion update carries a status and
-		// nothing else - by then the path is no longer on the wire.
-		const filePath = editFilePath(update);
-		if (filePath) el.dataset.filePath = filePath;
-		if (state.status === 'completed' && el.dataset.filePath) {
-			addChangedFileChip(el.dataset.filePath);
-		}
 
 		if (isSettled(state.status)) {
 			const actions = el.querySelector('.tool-actions');

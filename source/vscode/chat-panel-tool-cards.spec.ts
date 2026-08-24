@@ -501,3 +501,121 @@ test('attaching a changed file yourself promotes it into the prompt', t => {
 	);
 	t.deepEqual(chipNames(panel), [], 'and it is consumed like any attachment');
 });
+
+// ============================================================================
+// Deletes and moves take the file back out of the panel
+// ============================================================================
+
+/** A file_op announcement: `locations` is [source] or [source, destination]. */
+const announceFileOp = (
+	panel: any,
+	kind: 'delete' | 'move',
+	paths: string[],
+	toolCallId = 'op-1',
+) =>
+	panel.update({
+		sessionUpdate: 'tool_call',
+		toolCallId,
+		title: `file_op: ${kind} ${paths.join(' -> ')}`,
+		kind,
+		status: 'pending',
+		locations: paths.map(path => ({path})),
+	});
+
+test('a deleted file drops out of the context panel', t => {
+	const panel = createPanel();
+	announceEdit(panel);
+	completeEdit(panel);
+	t.deepEqual(chipNames(panel), ['a.ts']);
+
+	announceFileOp(panel, 'delete', ['/repo/src/a.ts']);
+	completeEdit(panel, 'op-1');
+
+	t.deepEqual(chipNames(panel), []);
+	t.true(chipsRow(panel).classList.contains('hidden'));
+});
+
+test('a delete that did not run leaves the chip alone', t => {
+	const panel = createPanel();
+	announceEdit(panel);
+	completeEdit(panel);
+
+	announceFileOp(panel, 'delete', ['/repo/src/a.ts']);
+	panel.update({
+		sessionUpdate: 'tool_call_update',
+		toolCallId: 'op-1',
+		status: 'failed',
+		rawOutput: 'Denied by user',
+	});
+
+	t.deepEqual(chipNames(panel), ['a.ts'], 'the file is still there');
+});
+
+test('a file the user attached is dropped when the agent deletes it', t => {
+	const panel = createPanel();
+	panel.post({
+		type: 'pathInfoResolved',
+		path: '/repo/src/b.ts',
+		name: 'b.ts',
+		kind: 'file',
+	});
+
+	announceFileOp(panel, 'delete', ['/repo/src/b.ts']);
+	completeEdit(panel, 'op-1');
+
+	// Left in place it would ride along on the next prompt and expand to
+	// nothing, since there is no longer a file behind it.
+	t.deepEqual(chipNames(panel), []);
+});
+
+test('a moved file follows the agent to its new path', t => {
+	const panel = createPanel();
+	announceEdit(panel);
+	completeEdit(panel);
+
+	announceFileOp(panel, 'move', ['/repo/src/a.ts', '/repo/src/moved.ts']);
+	completeEdit(panel, 'op-1');
+
+	t.deepEqual(chipNames(panel), ['moved.ts']);
+	clickChip(chips(panel)[0]);
+	t.deepEqual(sentOfType(panel, 'openPath').slice(-1), [
+		{type: 'openPath', path: '/repo/src/moved.ts', kind: 'file'},
+	]);
+});
+
+test('a move surfaces its destination even if the source was never chipped', t => {
+	const panel = createPanel();
+	announceFileOp(panel, 'move', ['/repo/src/a.ts', '/repo/src/moved.ts']);
+	completeEdit(panel, 'op-1');
+
+	t.deepEqual(chipNames(panel), ['moved.ts']);
+});
+
+test('a move with no destination only takes the old chip away', t => {
+	const panel = createPanel();
+	announceEdit(panel);
+	completeEdit(panel);
+
+	announceFileOp(panel, 'move', ['/repo/src/a.ts']);
+	completeEdit(panel, 'op-1');
+
+	// Re-chipping the source would leave a chip on a path that moved away.
+	t.deepEqual(chipNames(panel), []);
+});
+
+test('a delete that names no file leaves the panel untouched', t => {
+	const panel = createPanel();
+	announceEdit(panel);
+	completeEdit(panel);
+
+	panel.update({
+		sessionUpdate: 'tool_call',
+		toolCallId: 'op-2',
+		title: 'file_op: delete',
+		kind: 'delete',
+		status: 'pending',
+	});
+	completeEdit(panel, 'op-2');
+
+	t.deepEqual(chipNames(panel), ['a.ts']);
+});
