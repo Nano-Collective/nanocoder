@@ -80,6 +80,24 @@ test('ExecuteBashFormatter renders without result', t => {
 	t.regex(output!, /ls/);
 });
 
+test('ExecuteBashFormatter splits compound commands onto separate lines', t => {
+	const formatter = executeBashTool.formatter;
+	if (!formatter) {
+		t.fail('Formatter is not defined');
+		return;
+	}
+
+	const command = 'dolt version; echo "==="; ls -la /usr/local/bin/dolt';
+	const element = formatter({command});
+	const {lastFrame} = render(<TestThemeProvider>{element}</TestThemeProvider>);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /dolt version/);
+	t.regex(output!, /echo "==="/);
+	t.regex(output!, /ls -la \/usr\/local\/bin\/dolt/);
+});
+
 test('ExecuteBashFormatter handles complex commands', t => {
 	const formatter = executeBashTool.formatter;
 	if (!formatter) {

@@ -115,9 +115,13 @@ export default function BashProgress({
 
 			<Box flexDirection="column">
 				<Text color={colors.secondary}>Command:</Text>
-				<Text wrap="wrap" color={colors.primary}>
-					{command}
-				</Text>
+				{/* Display-only: split compound commands (cmd1; cmd2) onto separate
+				    lines for readability. The executed command is never modified. */}
+				{command.split(/[;\n]+/).map((segment, i) => (
+					<Text key={i} wrap="wrap" color={colors.primary}>
+						{segment.trim()}
+					</Text>
+				))}
 			</Box>
 			{state.isComplete && (
 				<Box>
