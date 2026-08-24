@@ -177,6 +177,26 @@ export function updateCompactToolDisplay(value: boolean): void {
 }
 
 /**
+ * Which bash executions keep their captured output on the completed card:
+ * 'user' (default) | 'tool' | 'both' | 'none'
+ */
+export function getBashOutputMode(): 'both' | 'tool' | 'user' | 'none' {
+	const preferences = loadPreferences();
+	return preferences.bashOutputMode ?? 'user';
+}
+
+/**
+ * Save the bash output mode preference
+ */
+export function updateBashOutputMode(
+	mode: 'both' | 'tool' | 'user' | 'none',
+): void {
+	const preferences = loadPreferences();
+	preferences.bashOutputMode = mode;
+	savePreferences(preferences);
+}
+
+/**
  * Get the privacy scrubbing preference from preferences
  */
 export function getPrivacyPreference(): boolean {

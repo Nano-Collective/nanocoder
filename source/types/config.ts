@@ -417,6 +417,14 @@ export interface UserPreferences {
 	paste?: PasteConfig;
 	reasoningExpanded?: boolean;
 	compactToolDisplay?: boolean;
+	/**
+	 * Which bash executions show captured output on the completed card:
+	 * - 'user': user-typed !commands (default)
+	 * - 'tool': agent execute_bash calls
+	 * - 'both': user and tool
+	 * - 'none': neither
+	 */
+	bashOutputMode?: 'both' | 'tool' | 'user' | 'none';
 	enablePromptScrubbing?: boolean;
 	/**
 	 * Interactive TUI screen mode. true (default): fullscreen on the

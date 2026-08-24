@@ -8,6 +8,7 @@ import {commandRegistry} from '@/commands';
 import {CodexLogin} from '@/commands/codex-login';
 import {CopilotLogin} from '@/commands/copilot-login';
 import BashProgress from '@/components/bash-progress';
+import {getBashOutputMode} from '@/config/preferences';
 import {DELAY_COMMAND_COMPLETE_MS, MAX_SESSION_NAME_LENGTH} from '@/constants';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {generateKey} from '@/session/key-generator';
@@ -165,13 +166,14 @@ async function handleBashCommand(
 		const result = await promise;
 
 		setLiveComponent(null);
+		const bashOutputMode = getBashOutputMode();
 		onAddToChatQueue(
 			React.createElement(BashProgress, {
 				key: generateKey('bash-progress-complete'),
 				executionId,
 				command: bashCommand,
 				completedState: result,
-				showOutput: true,
+				showOutput: bashOutputMode === 'both' || bashOutputMode === 'user',
 			}),
 		);
 

@@ -3,6 +3,7 @@ import type {ConversationStateManager} from '@/app/utils/conversation-state';
 import AgentProgress, {MultiAgentProgress} from '@/components/agent-progress';
 import BashProgress from '@/components/bash-progress';
 import {ErrorMessage} from '@/components/message-box';
+import {getBashOutputMode} from '@/config/preferences';
 import type {BashExecutionState} from '@/services/bash-executor';
 import {
 	clearAllSubagentProgress,
@@ -176,12 +177,14 @@ export const displayExecutedTool = async (
 	} else if (result.name === 'execute_bash' && bashState) {
 		// Expanded mode: render the completed BashProgress (command +
 		// status + tokens), matching the confirmation path's completed view.
+		const bashOutputMode = getBashOutputMode();
 		addToChatQueue(
 			<BashProgress
 				key={generateKey(`direct-bash-complete-${toolCall.id}`)}
 				executionId={bashState.executionId}
 				command={bashState.command}
 				completedState={bashState}
+				showOutput={bashOutputMode === 'both' || bashOutputMode === 'tool'}
 			/>,
 		);
 	} else {
