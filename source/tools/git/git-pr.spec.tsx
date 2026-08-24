@@ -47,12 +47,16 @@ test('git_pr tool has formatter function', t => {
 	t.is(typeof gitPrTool.formatter, 'function');
 });
 
-test('git_pr tool is marked read-only for parallel-execution batching', t => {
-	// Safe despite bundling mutating actions (create/comment/review): the
-	// batching this flag feeds only ever runs on calls resolveToolApproval
-	// already routed to auto-execute, via the `approval` fn above — see the
-	// comment on the export in git-pr.tsx.
-	t.true(gitPrTool.readOnly);
+test('git_pr tool is NOT marked read-only, even though it bundles read-only actions', t => {
+	// In yolo mode, resolveToolApproval bypasses the `approval` fn entirely
+	// (mode === 'yolo' short-circuits to "no approval needed" for every
+	// tool), so a mutating action (create/comment/review) can reach the same
+	// auto-executed path as view/list/diff/checks/logs. If this tool were
+	// readOnly: true, tool-executor.tsx's classifyTool() would then be free
+	// to batch consecutive git_pr calls into a parallel Promise.all group —
+	// including mutating ones — instead of running them one at a time. See
+	// the comment on the export in git-pr.tsx.
+	t.falsy(gitPrTool.readOnly);
 });
 
 // ============================================================================

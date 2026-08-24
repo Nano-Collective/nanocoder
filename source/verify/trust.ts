@@ -92,21 +92,22 @@ const MUTATION_TOOLS: readonly ToolAllowance[] = [
  * - full-commit: everything auto-fix has; the same tool surface, gated
  *   instead by explicit user opt-in and warnings at the CLI layer (Phase 4).
  */
+const AUTO_FIX_TOOLS: readonly ToolAllowance[] = [
+	...INVESTIGATION_TOOLS,
+	...MUTATION_TOOLS,
+	{tool: 'git_pr', actions: GIT_PR_ALL_ACTIONS},
+];
+
 const TRUST_POLICIES: Record<TrustLevel, readonly ToolAllowance[]> = {
 	'comment-only': [
 		...INVESTIGATION_TOOLS,
 		{tool: 'git_pr', actions: GIT_PR_READ_AND_REVIEW_ACTIONS},
 	],
-	'auto-fix': [
-		...INVESTIGATION_TOOLS,
-		...MUTATION_TOOLS,
-		{tool: 'git_pr', actions: GIT_PR_ALL_ACTIONS},
-	],
-	'full-commit': [
-		...INVESTIGATION_TOOLS,
-		...MUTATION_TOOLS,
-		{tool: 'git_pr', actions: GIT_PR_ALL_ACTIONS},
-	],
+	// full-commit has the same tool surface as auto-fix by design (see the
+	// doc comment above) — shares the same array so the two levels can't
+	// silently drift apart.
+	'auto-fix': AUTO_FIX_TOOLS,
+	'full-commit': AUTO_FIX_TOOLS,
 };
 
 function findAllowance(
