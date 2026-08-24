@@ -47,13 +47,13 @@ const DEFAULT_IGNORE_DIRS = [
  * (e.g. package-lock.json, large fixtures, or sensitive files like .env that are
  * intentionally committed).
  *
- * @param cwd - The current working directory to load .gitignore / .nanocoderignore from
+ * @param workspaceRoot - The workspace root to load .gitignore / .nanocoderignore from
  * @returns An ignore instance configured with patterns
  */
-export function loadGitignore(cwd: string): ReturnType<typeof ignore> {
+export function loadGitignore(workspaceRoot: string): ReturnType<typeof ignore> {
 	const ig = ignore();
-	const gitignorePath = join(cwd, '.gitignore');
-	const nanocoderignorePath = join(cwd, '.nanocoderignore');
+	const gitignorePath = join(workspaceRoot, '.gitignore');
+	const nanocoderignorePath = join(workspaceRoot, '.nanocoderignore');
 
 	// Always ignore common directories
 	ig.add(DEFAULT_IGNORE_DIRS);
