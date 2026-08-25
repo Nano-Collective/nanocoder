@@ -1,3 +1,6 @@
+import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import chalk from 'chalk';
 import {DEFAULT_THEME, highlight} from 'cli-highlight';
@@ -6,6 +9,31 @@ import {getSyntaxTheme, themes} from '@/config/themes';
 // AVA runs each spec in its own non-TTY process, where chalk disables colour and
 // every formatter becomes a no-op. Force truecolor so the escapes are assertable.
 chalk.level = 3;
+
+// getSyntaxTheme reads the `syntaxTheme` preference, so point every test at a
+// config directory of its own — a contributor who sets that preference must not
+// change what this spec sees.
+const configRoot = join(tmpdir(), `nanocoder-themes-spec-${process.pid}`);
+
+/** Point the config lookup at a directory holding exactly `preferences`. */
+function useConfigDir(name: string, preferences: Record<string, unknown>): void {
+	const dir = join(configRoot, name);
+	mkdirSync(dir, {recursive: true});
+	writeFileSync(
+		join(dir, 'nanocoder-preferences.json'),
+		JSON.stringify(preferences),
+	);
+	process.env.NANOCODER_CONFIG_DIR = dir;
+}
+
+test.before(() => {
+	useConfigDir('no-preference', {});
+});
+
+test.after.always(() => {
+	rmSync(configRoot, {recursive: true, force: true});
+	delete process.env.NANOCODER_CONFIG_DIR;
+});
 
 /** Relative luminance per WCAG 2.1. */
 function luminance(hex: string): number {
@@ -143,4 +171,51 @@ test('getSyntaxTheme reuses the theme built for a palette', t => {
 	const colors = themes['gruvbox-dark'].colors;
 	t.is(getSyntaxTheme(colors), getSyntaxTheme(colors));
 	t.not(getSyntaxTheme(colors), getSyntaxTheme(themes['one-light'].colors));
+});
+
+// These run last: each repoints NANOCODER_CONFIG_DIR, which is what re-resolves
+// the cached `syntaxTheme` lookup.
+test('syntaxTheme gives code its own palette without moving the UI theme', t => {
+	useConfigDir('dracula-code', {
+		selectedTheme: 'tokyo-night',
+		syntaxTheme: 'dracula',
+	});
+
+	const ui = themes['tokyo-night'].colors;
+	const code = themes['dracula'].colors;
+	const output = highlight(snippet, {
+		language: 'typescript',
+		theme: getSyntaxTheme(ui),
+	});
+
+	t.true(output.includes(ansiFor(code.primary)), 'keyword uses dracula primary');
+	t.true(output.includes(ansiFor(code.warning)), 'number uses dracula warning');
+	t.false(
+		output.includes(ansiFor(ui.primary)),
+		'the UI theme must not colour code once syntaxTheme is set',
+	);
+});
+
+test('an unknown syntaxTheme falls back to the UI palette', t => {
+	useConfigDir('misspelt', {syntaxTheme: 'draclua'});
+
+	const ui = themes['nord-frost'].colors;
+	const output = highlight(snippet, {
+		language: 'typescript',
+		theme: getSyntaxTheme(ui),
+	});
+
+	t.true(output.includes(ansiFor(ui.primary)));
+});
+
+test('code follows the UI palette when syntaxTheme is unset', t => {
+	useConfigDir('ui-only', {selectedTheme: 'gruvbox-light'});
+
+	const ui = themes['gruvbox-light'].colors;
+	const output = highlight(snippet, {
+		language: 'typescript',
+		theme: getSyntaxTheme(ui),
+	});
+
+	t.true(output.includes(ansiFor(ui.primary)));
 });

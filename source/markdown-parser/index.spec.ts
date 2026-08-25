@@ -1,3 +1,6 @@
+import {mkdirSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import chalk from 'chalk';
 import stripAnsi from 'strip-ansi';
@@ -5,6 +8,21 @@ import type {Colors} from '../types/markdown-parser.js';
 import {parseMarkdown} from './index.js';
 
 console.log(`\nindex.spec.ts`);
+
+// Highlighting consults the `syntaxTheme` preference, so run against an empty
+// config directory — a contributor who sets that preference must not change
+// which colours these assertions see.
+const testConfigDir = join(tmpdir(), `nanocoder-md-spec-${process.pid}`);
+
+test.before(() => {
+	mkdirSync(testConfigDir, {recursive: true});
+	process.env.NANOCODER_CONFIG_DIR = testConfigDir;
+});
+
+test.after.always(() => {
+	rmSync(testConfigDir, {recursive: true, force: true});
+	delete process.env.NANOCODER_CONFIG_DIR;
+});
 
 const mockColors: Colors = {
 	primary: '#3b82f6',

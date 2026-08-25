@@ -26,6 +26,7 @@ Preferences follow the same location hierarchy as configuration files:
 | `lastModel` | The model you last used |
 | `providerModels` | Your preferred model for each provider (remembered per-provider) |
 | `selectedTheme` | The theme you last selected via `/settings`. Also colours syntax highlighting in code blocks, diffs, and file previews |
+| `syntaxTheme` | Optional. Name of the theme whose palette colours syntax highlighting, when you want code to keep a palette of its own (e.g. `"dracula"`) instead of following `selectedTheme`. Any theme name from `/settings` → **Theme** works; an unknown name falls back to `selectedTheme` |
 | `titleShape` | The title shape style (e.g., box, rounded) |
 | `nanocoderShape` | The nanocoder ASCII art shape |
 | `trustedDirectories` | Directories you've approved through the first-run security disclaimer |
