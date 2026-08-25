@@ -4,6 +4,7 @@ import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {getColors} from '@/config/index';
+import {getSyntaxTheme} from '@/config/themes';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
 import type {Colors} from '@/types/index';
 import {truncateAnsi} from '@/utils/ansi-truncate';
@@ -174,7 +175,7 @@ export async function formatStringReplacePreview(
 			let displayLine: string;
 			try {
 				displayLine = truncateAnsi(
-					highlight(line, {language, theme: 'default'}),
+					highlight(line, {language, theme: getSyntaxTheme(themeColors)}),
 					availableWidth,
 				);
 			} catch {
@@ -338,7 +339,7 @@ export async function formatStringReplacePreview(
 			let displayLine: string;
 			try {
 				displayLine = truncateAnsi(
-					highlight(line, {language, theme: 'default'}),
+					highlight(line, {language, theme: getSyntaxTheme(themeColors)}),
 					availableWidth,
 				);
 			} catch {

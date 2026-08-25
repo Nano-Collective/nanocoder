@@ -25,7 +25,7 @@ Preferences follow the same location hierarchy as configuration files:
 | `lastProvider` | The AI provider you last selected |
 | `lastModel` | The model you last used |
 | `providerModels` | Your preferred model for each provider (remembered per-provider) |
-| `selectedTheme` | The theme you last selected via `/settings` |
+| `selectedTheme` | The theme you last selected via `/settings`. Also colours syntax highlighting in code blocks, diffs, and file previews |
 | `titleShape` | The title shape style (e.g., box, rounded) |
 | `nanocoderShape` | The nanocoder ASCII art shape |
 | `trustedDirectories` | Directories you've approved through the first-run security disclaimer |

@@ -3,6 +3,7 @@ import {highlight} from 'cli-highlight';
 import {Box, Text, useFocus, useInput} from 'ink';
 import {useEffect, useMemo, useState} from 'react';
 import {StyledTitle} from '@/components/ui/styled-title';
+import {getSyntaxTheme} from '@/config/themes';
 import {
 	CHARS_PER_TOKEN_ESTIMATE,
 	FILE_EXPLORER_TOKEN_WARNING_THRESHOLD,
@@ -141,7 +142,7 @@ export function FileExplorer({onClose}: FileExplorerProps) {
 			try {
 				highlighted = highlight(compressedContent, {
 					language: lang,
-					theme: 'default',
+					theme: getSyntaxTheme(colors),
 				});
 			} catch {
 				// Fallback to plain text if highlighting fails

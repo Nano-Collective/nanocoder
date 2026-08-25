@@ -1,5 +1,11 @@
 import test from 'ava';
-import {themes} from '@/config/themes';
+import chalk from 'chalk';
+import {DEFAULT_THEME, highlight} from 'cli-highlight';
+import {getSyntaxTheme, themes} from '@/config/themes';
+
+// AVA runs each spec in its own non-TTY process, where chalk disables colour and
+// every formatter becomes a no-op. Force truecolor so the escapes are assertable.
+chalk.level = 3;
 
 /** Relative luminance per WCAG 2.1. */
 function luminance(hex: string): number {
@@ -65,4 +71,76 @@ test('themeType matches whether base is actually light or dark', t => {
 			`${name} base ${theme.colors.base} is mislabelled`,
 		);
 	}
+});
+
+/** The opening escape chalk emits for a hex colour. */
+function ansiFor(hex: string): string {
+	return chalk.hex(hex)('x').split('x')[0] ?? '';
+}
+
+const snippet = `// greet
+const greeting = 'hi';
+const answer = 42;`;
+
+// Every call site used to pass `theme: 'default'`, a string where cli-highlight
+// expects a token -> formatter map, so the option was dropped and code always
+// rendered in the library's palette. Any token left unmapped reintroduces that
+// clash for the constructs it covers.
+test('getSyntaxTheme maps every token cli-highlight styles by default', t => {
+	for (const [name, theme] of entries) {
+		const syntax = getSyntaxTheme(theme.colors);
+		const unmapped = Object.keys(DEFAULT_THEME).filter(
+			token => !(token in syntax),
+		);
+		t.deepEqual(unmapped, [], `${name} leaves tokens on the library default`);
+	}
+});
+
+test('getSyntaxTheme colours tokens with the palette it was given', t => {
+	const colors = themes['tokyo-night'].colors;
+	const output = highlight(snippet, {
+		language: 'typescript',
+		theme: getSyntaxTheme(colors),
+	});
+
+	t.true(output.includes(ansiFor(colors.primary)), 'keyword uses primary');
+	t.true(output.includes(ansiFor(colors.success)), 'string uses success');
+	t.true(output.includes(ansiFor(colors.warning)), 'number uses warning');
+	t.true(output.includes(ansiFor(colors.secondary)), 'comment uses secondary');
+	t.true(output.includes(ansiFor(colors.text)), 'unmatched code uses text');
+});
+
+test('getSyntaxTheme renders the same code differently per theme', t => {
+	const rendered = new Set(
+		entries.map(([, theme]) =>
+			highlight(snippet, {
+				language: 'typescript',
+				theme: getSyntaxTheme(theme.colors),
+			}),
+		),
+	);
+
+	// The snippet exercises exactly these five roles, so two themes may only
+	// share a rendering when they share all five. Collapsing further is what the
+	// ignored `theme: 'default'` option did — every theme rendered identically.
+	const palettes = new Set(
+		entries.map(([, theme]) =>
+			[
+				theme.colors.primary,
+				theme.colors.success,
+				theme.colors.warning,
+				theme.colors.secondary,
+				theme.colors.text,
+			].join('/'),
+		),
+	);
+
+	t.is(rendered.size, palettes.size);
+	t.true(palettes.size > 1);
+});
+
+test('getSyntaxTheme reuses the theme built for a palette', t => {
+	const colors = themes['gruvbox-dark'].colors;
+	t.is(getSyntaxTheme(colors), getSyntaxTheme(colors));
+	t.not(getSyntaxTheme(colors), getSyntaxTheme(themes['one-light'].colors));
 });

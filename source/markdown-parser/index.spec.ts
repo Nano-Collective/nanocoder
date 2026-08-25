@@ -1,4 +1,5 @@
 import test from 'ava';
+import chalk from 'chalk';
 import stripAnsi from 'strip-ansi';
 import type {Colors} from '../types/markdown-parser.js';
 import {parseMarkdown} from './index.js';
@@ -163,6 +164,23 @@ test('parseMarkdown handles code blocks without language', t => {
 	const text = '```\nPlain code\n```';
 	const result = parseMarkdown(text, mockColors);
 	t.true(result.includes('Plain code'));
+});
+
+// Code blocks used to render in cli-highlight's own palette: the parser passed
+// `theme: 'default'`, a string where the library expects a token -> formatter
+// map, so the option was dropped. Colour must come from the caller's palette.
+test('parseMarkdown highlights code blocks with the supplied colors', t => {
+	const previousLevel = chalk.level;
+	chalk.level = 3;
+	try {
+		// A distinct palette object, so the memoised syntax theme for it is built
+		// while colour is forced on.
+		const colors: Colors = {...mockColors, primary: '#ff0000'};
+		const result = parseMarkdown('```javascript\nconst x = 5;\n```', colors);
+		t.true(result.includes(chalk.hex(colors.primary)('const')));
+	} finally {
+		chalk.level = previousLevel;
+	}
 });
 
 // Edge case tests
