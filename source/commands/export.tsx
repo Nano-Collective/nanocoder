@@ -4,6 +4,11 @@ import React from 'react';
 import {SuccessMessage} from '@/components/message-box';
 import {generateKey} from '@/session/key-generator';
 import {Command, Message} from '@/types/index';
+import {
+	generateExportFilename,
+	isUnsafeFilename,
+	uniqueFilename,
+} from '@/utils/generate-export-filename';
 
 const formatMessageContent = (message: Message) => {
 	let content = '';
@@ -54,10 +59,18 @@ export const exportCommand: Command = {
 		messages: Message[],
 		{provider, model, tokens},
 	) => {
-		const filename =
-			args[0] ||
-			`nanocoder-chat-${new Date().toISOString().replace(/:/g, '-')}.md`;
-		const filepath = path.resolve(process.cwd(), filename); // nosemgrep
+		const requestedFilename = args[0] || generateExportFilename(messages);
+
+		if (isUnsafeFilename(requestedFilename)) {
+			return React.createElement(Export, {
+				key: generateKey('export'),
+				filename: 'Error: invalid filename',
+			});
+		}
+
+		const filepath = path.resolve(process.cwd(), requestedFilename); // nosemgrep
+		const safeFilepath = await uniqueFilename(filepath);
+		const filename = path.basename(safeFilepath);
 
 		const frontmatter = `---
 session_date: ${new Date().toISOString()}
@@ -72,7 +85,7 @@ total_tokens: ${tokens}
 
 		const markdownContent = messages.map(formatMessageContent).join('');
 
-		await fs.writeFile(filepath, frontmatter + markdownContent);
+		await fs.writeFile(safeFilepath, frontmatter + markdownContent);
 
 		return React.createElement(Export, {
 			key: generateKey('export'),

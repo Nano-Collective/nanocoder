@@ -9,6 +9,7 @@ import {ThemeContext} from '../hooks/useTheme';
 
 // Mock fs module
 const originalWriteFile = fs.writeFile;
+const originalAccess = fs.access;
 let mockWriteFileCalls: Array<{path: string; content: string}> = [];
 
 test.beforeEach(() => {
@@ -17,10 +18,14 @@ test.beforeEach(() => {
 		mockWriteFileCalls.push({path: filepath, content});
 		return Promise.resolve(void 0);
 	};
+	fs.access = async () => {
+		throw new Error('ENOENT');
+	};
 });
 
 test.afterEach(() => {
 	fs.writeFile = originalWriteFile;
+	fs.access = originalAccess;
 });
 
 // Mock ThemeProvider for testing
@@ -66,8 +71,19 @@ test('exportCommand uses provided filename', async t => {
 	t.true(mockWriteFileCalls[0].path.includes('custom-export.md'));
 });
 
-test('exportCommand generates default filename when none provided', async t => {
+test('exportCommand generates default filename from first user message', async t => {
 	await exportCommand.handler([], testMessages, testMetadata);
+
+	t.is(mockWriteFileCalls.length, 1);
+	t.true(mockWriteFileCalls[0].path.includes('hello-'));
+	t.true(mockWriteFileCalls[0].path.endsWith('.md'));
+});
+
+test('exportCommand falls back to nanocoder-chat when no user messages', async t => {
+	const noUserMessages: Message[] = [
+		{role: 'assistant', content: 'Hi there', tool_calls: undefined},
+	];
+	await exportCommand.handler([], noUserMessages, testMetadata);
 
 	t.is(mockWriteFileCalls.length, 1);
 	t.true(mockWriteFileCalls[0].path.includes('nanocoder-chat-'));
@@ -184,4 +200,15 @@ test('exportCommand renders Export component with correct filename', async t => 
 		t.truthy(output);
 		t.regex(output!, /my-export\.md/);
 	}
+});
+
+test('exportCommand rejects path traversal in filename', async t => {
+	const result = await exportCommand.handler(
+		['../../../etc/passwd'],
+		testMessages,
+		testMetadata,
+	);
+
+	t.is(mockWriteFileCalls.length, 0);
+	t.truthy(React.isValidElement(result));
 });
