@@ -4,6 +4,7 @@ import AssistantMessage from '@/components/assistant-message';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {InfoMessage} from '@/components/message-box';
 import UserMessage from '@/components/user-message';
+import {getShowUsageFooter} from '@/config/preferences';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {generateKey} from '@/session/key-generator';
@@ -129,6 +130,10 @@ export function buildSessionHistoryComponents(
 	model: string,
 ): React.ReactNode[] {
 	const components: React.ReactNode[] = [];
+	// Replayed messages carry no provider usage, so their footer would be the
+	// client-side estimate. Honour the same preference the live footer uses so
+	// a resumed session looks like the session it resumes.
+	const showUsageFooter = getShowUsageFooter();
 
 	// Map every tool result by its tool_call_id across the FULL history, so an
 	// in-window assistant tool call can still find its result even if windowing
@@ -187,6 +192,7 @@ export function buildSessionHistoryComponents(
 							key={generateKey('resume-assistant')}
 							message={message.content}
 							model={model}
+							showUsageFooter={showUsageFooter}
 						/>,
 					);
 				}

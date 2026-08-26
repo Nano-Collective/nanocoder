@@ -85,6 +85,24 @@ You can change this via `/settings` → **Behavior** → **Reasoning Traces**, o
 
 Reasoning traces can also be toggled dynamically with the Ctrl+R keyboard shortcut.
 
+### Usage and Cost Footer
+
+Each assistant message ends with a gray footer showing provider-reported token counts and the estimated cost of that response. Turn it off with the `showUsageFooter` field:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `showUsageFooter` | boolean | `true` | When false, assistant messages render with no footer line at all - neither the provider-reported tokens and cost, nor the client-side token estimate |
+
+You can change this via `/settings` → **Behavior** → **Tool Results and Thinking**, or by editing the preferences file directly:
+
+```json
+{
+  "showUsageFooter": false
+}
+```
+
+The setting is read per message, so toggling it applies from the next response onwards - no restart needed. It also applies to replayed history when you resume a session and to subagent transcripts.
+
 ### Notification Configuration
 
 Desktop notification preferences are stored under the `nanocoder.notifications` namespace:
