@@ -31,7 +31,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/exit` | Exit the application (alias: `/quit`) |
 | `/export` | Export current session to markdown file |
 | `/copy` | Copy the last assistant response to the system clipboard |
-| `/commit` | Generate a Conventional Commit message from staged Git changes |
+| `/commit` | Generate a Conventional Commit message from staged Git changes. Add `--copy` (or `-c`) to also copy the message to the system clipboard. A spinner shows while the model is working |
 | `/doctor` | Show environment health report for bug reports |
 | `/update` | Update Nanocoder to the latest version |
 | `/usage` | Get current model context usage visually |
