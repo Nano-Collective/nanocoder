@@ -45,7 +45,7 @@ test.serial('FileSnapshotService captures single file', async t => {
 		const snapshots = await service.captureFiles(['test.txt']);
 
 		t.is(snapshots.size, 1);
-		t.is(snapshots.get('test.txt'), 'Hello, World!');
+		t.is(snapshots.get('test.txt')?.toString('utf-8'), 'Hello, World!');
 	} finally {
 		await cleanupTempDir(tempDir);
 	}
@@ -66,9 +66,9 @@ test.serial('FileSnapshotService captures multiple files', async t => {
 		]);
 
 		t.is(snapshots.size, 3);
-		t.is(snapshots.get('file1.txt'), 'Content 1');
-		t.is(snapshots.get('file2.txt'), 'Content 2');
-		t.is(snapshots.get('file3.txt'), 'Content 3');
+		t.is(snapshots.get('file1.txt')?.toString('utf-8'), 'Content 1');
+		t.is(snapshots.get('file2.txt')?.toString('utf-8'), 'Content 2');
+		t.is(snapshots.get('file3.txt')?.toString('utf-8'), 'Content 3');
 	} finally {
 		await cleanupTempDir(tempDir);
 	}
@@ -91,8 +91,11 @@ test.serial('FileSnapshotService captures files in subdirectories', async t => {
 		]);
 
 		t.is(snapshots.size, 2);
-		t.is(snapshots.get('src/index.ts'), 'export {};');
-		t.is(snapshots.get('src/utils/helper.ts'), 'export function help() {}');
+		t.is(snapshots.get('src/index.ts')?.toString('utf-8'), 'export {};');
+		t.is(
+			snapshots.get('src/utils/helper.ts')?.toString('utf-8'),
+			'export function help() {}',
+		);
 	} finally {
 		await cleanupTempDir(tempDir);
 	}
@@ -113,7 +116,7 @@ test.serial(
 
 			// Should only capture the existing file
 			t.is(snapshots.size, 1);
-			t.is(snapshots.get('exists.txt'), 'I exist');
+			t.is(snapshots.get('exists.txt')?.toString('utf-8'), 'I exist');
 		} finally {
 			await cleanupTempDir(tempDir);
 		}
@@ -124,8 +127,8 @@ test.serial('FileSnapshotService restores files', async t => {
 	const tempDir = await createTempDir();
 	try {
 		const service = new FileSnapshotService(tempDir);
-		const snapshots = new Map<string, string>();
-		snapshots.set('restored.txt', 'Restored content');
+		const snapshots = new Map<string, Buffer>();
+		snapshots.set('restored.txt', Buffer.from('Restored content'));
 
 		await service.restoreFiles(snapshots);
 
@@ -142,8 +145,8 @@ test.serial('FileSnapshotService restores files in subdirectories', async t => {
 	const tempDir = await createTempDir();
 	try {
 		const service = new FileSnapshotService(tempDir);
-		const snapshots = new Map<string, string>();
-		snapshots.set('deep/nested/file.txt', 'Nested content');
+		const snapshots = new Map<string, Buffer>();
+		snapshots.set('deep/nested/file.txt', Buffer.from('Nested content'));
 
 		await service.restoreFiles(snapshots);
 
@@ -160,10 +163,10 @@ test.serial('FileSnapshotService restores multiple files', async t => {
 	const tempDir = await createTempDir();
 	try {
 		const service = new FileSnapshotService(tempDir);
-		const snapshots = new Map<string, string>();
-		snapshots.set('file1.txt', 'Content 1');
-		snapshots.set('file2.txt', 'Content 2');
-		snapshots.set('subdir/file3.txt', 'Content 3');
+		const snapshots = new Map<string, Buffer>();
+		snapshots.set('file1.txt', Buffer.from('Content 1'));
+		snapshots.set('file2.txt', Buffer.from('Content 2'));
+		snapshots.set('subdir/file3.txt', Buffer.from('Content 3'));
 
 		await service.restoreFiles(snapshots);
 
@@ -183,8 +186,8 @@ test.serial(
 			await createTestFile(tempDir, 'existing.txt', 'Old content');
 
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = new Map<string, string>();
-			snapshots.set('existing.txt', 'New content');
+			const snapshots = new Map<string, Buffer>();
+			snapshots.set('existing.txt', Buffer.from('New content'));
 
 			await service.restoreFiles(snapshots);
 
@@ -203,9 +206,9 @@ test.serial(
 	'FileSnapshotService getSnapshotSize calculates correct size',
 	async t => {
 		const service = new FileSnapshotService(process.cwd());
-		const snapshots = new Map<string, string>();
-		snapshots.set('file1.txt', 'Hello'); // 5 bytes
-		snapshots.set('file2.txt', 'World!'); // 6 bytes
+		const snapshots = new Map<string, Buffer>();
+		snapshots.set('file1.txt', Buffer.from('Hello')); // 5 bytes
+		snapshots.set('file2.txt', Buffer.from('World!')); // 6 bytes
 
 		const size = service.getSnapshotSize(snapshots);
 
@@ -217,7 +220,7 @@ test.serial(
 	'FileSnapshotService getSnapshotSize handles empty snapshots',
 	async t => {
 		const service = new FileSnapshotService(process.cwd());
-		const snapshots = new Map<string, string>();
+		const snapshots = new Map<string, Buffer>();
 
 		const size = service.getSnapshotSize(snapshots);
 
@@ -229,8 +232,8 @@ test.serial(
 	'FileSnapshotService getSnapshotSize handles unicode content',
 	async t => {
 		const service = new FileSnapshotService(process.cwd());
-		const snapshots = new Map<string, string>();
-		snapshots.set('unicode.txt', '日本語'); // 9 bytes in UTF-8
+		const snapshots = new Map<string, Buffer>();
+		snapshots.set('unicode.txt', Buffer.from('日本語')); // 9 bytes in UTF-8
 
 		const size = service.getSnapshotSize(snapshots);
 
@@ -244,8 +247,8 @@ test.serial(
 		const tempDir = await createTempDir();
 		try {
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = new Map<string, string>();
-			snapshots.set('new-file.txt', 'Content');
+			const snapshots = new Map<string, Buffer>();
+			snapshots.set('new-file.txt', Buffer.from('Content'));
 
 			const result = await service.validateRestorePath(snapshots);
 
@@ -265,8 +268,8 @@ test.serial(
 			await createTestFile(tempDir, 'writable.txt', 'Original');
 
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = new Map<string, string>();
-			snapshots.set('writable.txt', 'New content');
+			const snapshots = new Map<string, Buffer>();
+			snapshots.set('writable.txt', Buffer.from('New content'));
 
 			const result = await service.validateRestorePath(snapshots);
 
@@ -284,9 +287,9 @@ test.serial(
 		const tempDir = await createTempDir();
 		try {
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = new Map<string, string>();
+			const snapshots = new Map<string, Buffer>();
 			// Directory doesn't exist yet - should be created during validation
-			snapshots.set('nested/deep/path/file.txt', 'Content');
+			snapshots.set('nested/deep/path/file.txt', Buffer.from('Content'));
 
 			const result = await service.validateRestorePath(snapshots);
 
@@ -312,8 +315,8 @@ test.serial(
 			chmodSync(readOnlyDir, 0o444); // Read-only
 
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = new Map<string, string>();
-			snapshots.set('readonly-dir/file.txt', 'Content');
+			const snapshots = new Map<string, Buffer>();
+			snapshots.set('readonly-dir/file.txt', Buffer.from('Content'));
 
 			const result = await service.validateRestorePath(snapshots);
 
@@ -349,8 +352,8 @@ test.serial(
 			chmodSync(readOnlyFile, 0o444); // Read-only
 
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = new Map<string, string>();
-			snapshots.set('readonly.txt', 'New content');
+			const snapshots = new Map<string, Buffer>();
+			snapshots.set('readonly.txt', Buffer.from('New content'));
 
 			const result = await service.validateRestorePath(snapshots);
 
@@ -384,9 +387,9 @@ test.serial(
 			chmodSync(parentDir, 0o444); // Read-only
 
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = new Map<string, string>();
+			const snapshots = new Map<string, Buffer>();
 			// Try to create a file in a subdirectory of the read-only parent
-			snapshots.set('parent/child/file.txt', 'Content');
+			snapshots.set('parent/child/file.txt', Buffer.from('Content'));
 
 			const result = await service.validateRestorePath(snapshots);
 
@@ -423,11 +426,11 @@ test.serial(
 			chmodSync(readOnlyFile, 0o444);
 
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = new Map<string, string>();
-			snapshots.set('writable.txt', 'New content');
-			snapshots.set('readonly.txt', 'New content');
-			snapshots.set('new-file.txt', 'Content');
-			snapshots.set('nested/new-file.txt', 'Content');
+			const snapshots = new Map<string, Buffer>();
+			snapshots.set('writable.txt', Buffer.from('New content'));
+			snapshots.set('readonly.txt', Buffer.from('New content'));
+			snapshots.set('new-file.txt', Buffer.from('Content'));
+			snapshots.set('nested/new-file.txt', Buffer.from('Content'));
 
 			const result = await service.validateRestorePath(snapshots);
 
@@ -458,10 +461,10 @@ test.serial(
 		const tempDir = await createTempDir();
 		try {
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = new Map<string, string>();
+			const snapshots = new Map<string, Buffer>();
 			snapshots.set(
 				'level1/level2/level3/level4/file.txt',
-				'Deeply nested content',
+				Buffer.from('Deeply nested content'),
 			);
 
 			const result = await service.validateRestorePath(snapshots);
@@ -505,7 +508,7 @@ test.serial('FileSnapshotService captures empty files', async t => {
 		const snapshots = await service.captureFiles(['empty.txt']);
 
 		t.is(snapshots.size, 1);
-		t.is(snapshots.get('empty.txt'), '');
+		t.is(snapshots.get('empty.txt')?.toString('utf-8'), '');
 	} finally {
 		await cleanupTempDir(tempDir);
 	}
@@ -522,7 +525,7 @@ test.serial(
 			const service = new FileSnapshotService(tempDir);
 			const snapshots = await service.captureFiles(['special.txt']);
 
-			t.is(snapshots.get('special.txt'), specialContent);
+			t.is(snapshots.get('special.txt')?.toString('utf-8'), specialContent);
 		} finally {
 			await cleanupTempDir(tempDir);
 		}
@@ -590,7 +593,7 @@ test.serial('FileSnapshotService validateRestorePath handles access errors', asy
 	const tempDir = await createTempDir();
 	try {
 		const service = new FileSnapshotService(tempDir);
-		const snapshots = new Map<string, string>();
+		const snapshots = new Map<string, Buffer>();
 
 		// Create a file in temp dir to simulate a file that exists
 		const testFile = path.join(tempDir, 'test.txt');
@@ -600,7 +603,7 @@ test.serial('FileSnapshotService validateRestorePath handles access errors', asy
 		await fs.chmod(testFile, 0o444);
 
 		// Add the file to snapshots (relative path)
-		snapshots.set('test.txt', 'new content');
+		snapshots.set('test.txt', Buffer.from('new content'));
 
 		const result = await service.validateRestorePath(snapshots);
 
@@ -612,3 +615,39 @@ test.serial('FileSnapshotService validateRestorePath handles access errors', asy
 		await cleanupTempDir(tempDir);
 	}
 });
+
+// Snapshots cover whatever git reports as modified, and that includes images,
+// .vsix bundles and every other binary a repository tracks. Reading or writing
+// those as UTF-8 replaces each invalid byte with U+FFFD, so this pins the
+// round-trip at the byte level rather than the string level.
+const BINARY_FIXTURE = Buffer.from([
+	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG signature
+	0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, // IHDR length + type
+	0xff, 0xfe, 0xc0, 0x80, // lone/overlong bytes: never valid UTF-8
+]);
+
+test.serial(
+	'FileSnapshotService captures and restores binary files byte-for-byte',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const target = path.join(tempDir, 'assets/logo.png');
+			await fs.mkdir(path.dirname(target), {recursive: true});
+			await fs.writeFile(target, BINARY_FIXTURE);
+
+			const service = new FileSnapshotService(tempDir);
+			const snapshots = await service.captureFiles(['assets/logo.png']);
+
+			// Capture must not decode: the bytes are lost here first.
+			t.deepEqual(snapshots.get('assets/logo.png'), BINARY_FIXTURE);
+
+			await fs.writeFile(target, Buffer.from('clobbered'));
+			await service.restoreFiles(snapshots);
+
+			// Restore must not encode.
+			t.deepEqual(await fs.readFile(target), BINARY_FIXTURE);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);

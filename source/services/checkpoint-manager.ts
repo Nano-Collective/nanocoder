@@ -163,7 +163,8 @@ export class CheckpointManager {
 		);
 
 		// nosemgrep
-		// Save file snapshots
+		// Save file snapshots. No encoding argument: Node writes a Buffer verbatim,
+		// which is what keeps binary files intact at rest inside the checkpoint.
 		if (fileSnapshots.size > 0) {
 			const filesDir = path.join(checkpointDir, 'files'); // nosemgrep
 			await fs.mkdir(filesDir, {recursive: true});
@@ -172,7 +173,7 @@ export class CheckpointManager {
 				const filePath = path.join(filesDir, relativePath); // nosemgrep
 				const fileDir = path.dirname(filePath);
 				await fs.mkdir(fileDir, {recursive: true});
-				await fs.writeFile(filePath, content, 'utf-8');
+				await fs.writeFile(filePath, content);
 			}
 		}
 
@@ -218,14 +219,14 @@ export class CheckpointManager {
 
 		// nosemgrep
 		// Load file snapshots
-		const fileSnapshots = new Map<string, string>();
+		const fileSnapshots = new Map<string, Buffer>();
 		const filesDir = path.join(checkpointDir, 'files'); // nosemgrep
 
 		if (existsSync(filesDir)) {
 			for (const relativePath of metadata.filesChanged) {
 				try {
 					const filePath = path.join(filesDir, relativePath); // nosemgrep
-					const content = await fs.readFile(filePath, 'utf-8');
+					const content = await fs.readFile(filePath);
 					fileSnapshots.set(relativePath, content);
 				} catch (error) {
 					logWarning('Could not load file snapshot', true, {

@@ -18,15 +18,21 @@ export class FileSnapshotService {
 	}
 
 	/**
-	 * Capture the contents of specified files
+	 * Capture the contents of specified files.
+	 *
+	 * Read as bytes, never as text. Snapshots cover whatever git reports as
+	 * modified, which includes images, .vsix bundles and any other binary a
+	 * repository tracks. Decoding those as UTF-8 replaces every invalid byte
+	 * with U+FFFD, and since the checkpoint copy is written from this map the
+	 * original bytes would be gone at save time with nothing left to recover.
 	 */
-	async captureFiles(filePaths: string[]): Promise<Map<string, string>> {
-		const snapshots = new Map<string, string>();
+	async captureFiles(filePaths: string[]): Promise<Map<string, Buffer>> {
+		const snapshots = new Map<string, Buffer>();
 
 		for (const filePath of filePaths) {
 			try {
 				const absolutePath = path.resolve(this.workspaceRoot, filePath); // nosemgrep
-				const content = await fs.readFile(absolutePath, 'utf-8');
+				const content = await fs.readFile(absolutePath);
 				const relativePath = path.relative(this.workspaceRoot, absolutePath);
 				const normalizedPath = relativePath.split(path.sep).join('/');
 				snapshots.set(normalizedPath, content);
@@ -46,7 +52,7 @@ export class FileSnapshotService {
 	/**
 	 * Restore files from snapshots
 	 */
-	async restoreFiles(snapshots: Map<string, string>): Promise<void> {
+	async restoreFiles(snapshots: Map<string, Buffer>): Promise<void> {
 		const errors: string[] = [];
 
 		for (const [relativePath, content] of snapshots) {
@@ -55,7 +61,7 @@ export class FileSnapshotService {
 				const directory = path.dirname(absolutePath);
 
 				await fs.mkdir(directory, {recursive: true});
-				await fs.writeFile(absolutePath, content, 'utf-8');
+				await fs.writeFile(absolutePath, content);
 			} catch (error) {
 				errors.push(`Failed to restore ${relativePath}: ${formatError(error)}`);
 			}
@@ -127,10 +133,10 @@ export class FileSnapshotService {
 	/**
 	 * Get the size of a file snapshot
 	 */
-	getSnapshotSize(snapshots: Map<string, string>): number {
+	getSnapshotSize(snapshots: Map<string, Buffer>): number {
 		let totalSize = 0;
 		for (const content of snapshots.values()) {
-			totalSize += Buffer.byteLength(content, 'utf-8');
+			totalSize += content.byteLength;
 		}
 		return totalSize;
 	}
@@ -139,7 +145,7 @@ export class FileSnapshotService {
 	 * Validate that all files in the snapshot can be written to their locations
 	 */
 	async validateRestorePath(
-		snapshots: Map<string, string>,
+		snapshots: Map<string, Buffer>,
 	): Promise<{valid: boolean; errors: string[]}> {
 		const errors: string[] = [];
 

@@ -581,3 +581,60 @@ test.serial('CheckpointManager list includes size information', async t => {
 		await cleanupTempDir(tempDir);
 	}
 });
+
+// The copy written under files/ is where the bytes were previously destroyed:
+// once it is corrupt at rest, the original cannot be recovered from the
+// checkpoint at all, whatever restore later does. This pins that copy as well
+// as the read back out of it.
+const BINARY_FIXTURE = Buffer.from([
+	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG signature
+	0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, // IHDR length + type
+	0xff, 0xfe, 0xc0, 0x80, // lone/overlong bytes: never valid UTF-8
+]);
+
+test.serial(
+	'CheckpointManager round-trips a binary file byte-for-byte',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const relativePath = 'assets/logo.png';
+			const target = path.join(tempDir, relativePath);
+			await fs.mkdir(path.dirname(target), {recursive: true});
+			await fs.writeFile(target, BINARY_FIXTURE);
+
+			const manager = new CheckpointManager(tempDir);
+			await manager.saveCheckpoint(
+				'binary-checkpoint',
+				createMockMessages(2),
+				'TestProvider',
+				'test-model',
+				[relativePath],
+			);
+
+			const stored = path.join(
+				tempDir,
+				'.nanocoder',
+				'checkpoints',
+				'binary-checkpoint',
+				'files',
+				relativePath,
+			);
+			t.deepEqual(await fs.readFile(stored), BINARY_FIXTURE);
+
+			await fs.writeFile(target, Buffer.from('clobbered'));
+
+			const checkpointData = await manager.loadCheckpoint(
+				'binary-checkpoint',
+			);
+			t.deepEqual(
+				checkpointData.fileSnapshots.get(relativePath),
+				BINARY_FIXTURE,
+			);
+
+			await manager.restoreFiles(checkpointData);
+			t.deepEqual(await fs.readFile(target), BINARY_FIXTURE);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);

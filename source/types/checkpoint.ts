@@ -26,7 +26,9 @@ export interface CheckpointConversation {
 export interface CheckpointData {
 	metadata: CheckpointMetadata;
 	conversation: CheckpointConversation;
-	fileSnapshots: Map<string, string>;
+	// Raw bytes, so a checkpoint round-trip preserves binaries as faithfully as
+	// text. Nothing downstream reads a snapshot as a string.
+	fileSnapshots: Map<string, Buffer>;
 }
 
 export interface CheckpointListItem {

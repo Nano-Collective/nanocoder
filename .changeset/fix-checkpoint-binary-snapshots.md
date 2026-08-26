@@ -1,0 +1,5 @@
+---
+"@nanocollective/nanocoder": patch
+---
+
+Fixed checkpoints irrecoverably corrupting binary files. Every layer of the pipeline read and wrote file contents as UTF-8 text, so each byte of an image, `.vsix` bundle, sqlite database or any other non-text file was replaced with U+FFFD — silently, with no error and nothing in the UI to indicate it. The damage was done at save time, not restore: the copy written under `.nanocoder/checkpoints/<name>/files/` was already corrupt at rest, so the original bytes could not be recovered from the checkpoint either. Nothing filtered binaries out of the path — `getModifiedFiles` returns everything `git diff --name-only HEAD` reports — and all three trigger paths were affected, including the safety backup taken before every restore, so restoring twice overwrote the last clean copy with a doubly-corrupted one. File snapshots are now carried as `Buffer` and written with no encoding argument at all four chokepoints, which Node writes verbatim; text still round-trips byte-identically. Old checkpoints still load, though binary entries captured before this fix stay corrupt — that data was already gone. Closes #962.
