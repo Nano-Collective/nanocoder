@@ -139,7 +139,7 @@ export function StatsDisplay({
 
 	return (
 		<TitledBoxWithPreferences
-			title="Lifetime stats"
+			title="Stats"
 			width={boxWidth}
 			borderColor={colors.info}
 			paddingX={2}

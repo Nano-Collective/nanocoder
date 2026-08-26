@@ -79,7 +79,8 @@ test('StatsDisplay renders range tabs, chart, and top providers', t => {
 	);
 
 	const frame = stripAnsi(lastFrame() ?? '');
-	t.regex(frame, /Lifetime stats/i);
+	t.regex(frame, /^|\bStats\b/);
+	t.regex(frame, /Stats/);
 	t.regex(frame, /\[all-time\]/);
 	t.regex(frame, /Cumulative tokens \(all-time\)/);
 	t.regex(frame, /Top providers/);
