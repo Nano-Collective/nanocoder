@@ -7,6 +7,7 @@ import {parseInput} from '@/command-parser';
 import {commandRegistry} from '@/commands';
 import {CodexLogin} from '@/commands/codex-login';
 import {CopilotLogin} from '@/commands/copilot-login';
+import {createStatsDisplayElement} from '@/commands/stats';
 import BashProgress from '@/components/bash-progress';
 import {DELAY_COMMAND_COMPLETE_MS, MAX_SESSION_NAME_LENGTH} from '@/constants';
 import {CheckpointManager} from '@/services/checkpoint-manager';
@@ -461,6 +462,54 @@ function handleCopilotLogin(
 }
 
 /**
+ * Handles /stats as a live component so `r` can cycle ranges without the
+ * chat composer swallowing the key.
+ * Returns true if handled.
+ */
+function handleStatsCommand(
+	commandParts: string[],
+	options: MessageSubmissionOptions,
+): boolean {
+	if (commandParts[0] !== 'stats') {
+		return false;
+	}
+
+	const {
+		setLiveComponent,
+		setIsToolExecuting,
+		onAddToChatQueue,
+		onCommandComplete,
+	} = options;
+
+	const args = commandParts.slice(1);
+
+	setIsToolExecuting(true);
+
+	const close = () => {
+		// Leave a static snapshot in the transcript, then release focus.
+		onAddToChatQueue(
+			createStatsDisplayElement({
+				args,
+				interactive: false,
+			}),
+		);
+		setLiveComponent(null);
+		setIsToolExecuting(false);
+		onCommandComplete?.();
+	};
+
+	setLiveComponent(
+		createStatsDisplayElement({
+			args,
+			interactive: true,
+			onClose: close,
+		}),
+	);
+
+	return true;
+}
+
+/**
  * Handles /codex-login as a live component.
  * Returns true if handled.
  */
@@ -610,6 +659,7 @@ async function handleSlashCommand(
 		return;
 	if (handleCopilotLogin(commandParts, options)) return;
 	if (handleCodexLogin(commandParts, options)) return;
+	if (handleStatsCommand(commandParts, options)) return;
 
 	await handleBuiltInCommand(message, options);
 }

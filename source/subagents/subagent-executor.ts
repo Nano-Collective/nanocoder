@@ -174,6 +174,29 @@ export class SubagentExecutor {
 					? getSubagentProgress(agentId).tokenCount
 					: subagentProgress.tokenCount;
 
+				// Lifetime /stats: count subagent runs (prompt + priced tokens).
+				try {
+					const {recordUserPrompt, recordApiCallForStats} = await import(
+						'@/stats/record'
+					);
+					const parentProvider = this.parentClient.getProviderConfig();
+					const provider = config.provider ?? parentProvider.name ?? 'unknown';
+					const model =
+						config.model && config.model !== 'inherit'
+							? config.model
+							: client.getCurrentModel() || 'unknown';
+					recordUserPrompt(provider, model);
+					if (finalTokenCount > 0) {
+						await recordApiCallForStats({
+							provider,
+							model,
+							totalTokens: finalTokenCount,
+						});
+					}
+				} catch {
+					// Stats must never fail the subagent.
+				}
+
 				return {
 					subagentName: config.name,
 					output,

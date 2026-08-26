@@ -313,8 +313,15 @@ export default function App({
 		onSetLiveTaskList: appState.setLiveTaskList,
 		setLiveComponent: appState.setLiveComponent,
 		setLastApiUsage: appState.setLastApiUsage,
-		onApiCallComplete: record =>
-			appState.setApiCallHistory(prev => [...prev, record]),
+		onApiCallComplete: record => {
+			appState.setApiCallHistory(prev => [...prev, record]);
+			// Lifetime /stats: tokens + estimated cost (never blocks UI).
+			void import('@/stats/record')
+				.then(({recordApiCallForStats}) => recordApiCallForStats(record))
+				.catch(() => {
+					/* ignore */
+				});
+		},
 		tune: appState.tune,
 		subagentsReady: appState.subagentsReady,
 		privacySessionMapRef: appState.privacySessionMapRef,

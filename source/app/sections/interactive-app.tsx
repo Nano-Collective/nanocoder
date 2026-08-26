@@ -391,7 +391,15 @@ export function InteractiveApp({
 				{appState.startChat &&
 					appState.activeMode === null &&
 					!appState.isSettingsMode &&
-					!appState.planReviewState?.show && (
+					!appState.planReviewState?.show &&
+					// Hide the composer while a focus-stealing live card is up
+					// (/stats, login flows). Keep it during tool/bash live views
+					// so messages can still be queued.
+					!(
+						liveComponent &&
+						appState.isToolExecuting &&
+						appState.pendingToolCalls.length === 0
+					) && (
 						<UIStateProvider>
 							<ChatInput
 								isCancelling={appState.isCancelling}

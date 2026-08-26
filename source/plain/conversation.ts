@@ -87,16 +87,49 @@ const FINAL_TURN_INSTRUCTION =
 export async function runPlainConversation(
 	options: RunPlainConversationOptions,
 ): Promise<PlainConversationOutcome> {
+	const {client, initialMessages, model} = options;
+
+	// Lifetime /stats: count each initial user prompt in this headless run.
+	try {
+		const {recordUserPrompt} = await import('@/stats/record');
+		const provider = client.getProviderConfig().name;
+		const modelName = model ?? client.getCurrentModel();
+		for (const msg of initialMessages) {
+			if (msg.role === 'user') {
+				recordUserPrompt(provider, modelName);
+			}
+		}
+	} catch {
+		// Stats must never fail the plain loop.
+	}
+
+	try {
+		return await runPlainConversationBody(options, initialMessages, model);
+	} finally {
+		// Debounced stats writes use an unref'd timer — flush before exit so
+		// --plain / headless runs don't lose the ledger.
+		try {
+			const {finalizeStatsForExit} = await import('@/stats/record');
+			finalizeStatsForExit();
+		} catch {
+			// Stats must never fail the plain loop.
+		}
+	}
+}
+
+async function runPlainConversationBody(
+	options: RunPlainConversationOptions,
+	initialMessages: Message[],
+	model: string | undefined,
+): Promise<PlainConversationOutcome> {
 	const {
 		client,
 		toolManager,
 		systemMessage,
-		initialMessages,
 		developmentMode,
 		nonInteractiveAlwaysAllow,
 		abortSignal,
 		tune,
-		model,
 		outputFormat = 'text',
 	} = options;
 
@@ -218,8 +251,21 @@ export async function runPlainConversation(
 			accumulatedInputTokens += inputTokens ?? 0;
 			accumulatedOutputTokens += outputTokens ?? 0;
 			// Fall back to input+output so a missing total never reads as zero spend.
-			accumulatedTotalTokens +=
-				totalTokens ?? (inputTokens ?? 0) + (outputTokens ?? 0);
+			const turnTotal = totalTokens ?? (inputTokens ?? 0) + (outputTokens ?? 0);
+			accumulatedTotalTokens += turnTotal;
+			// Lifetime /stats (headless / --plain paths) with estimated cost.
+			try {
+				const {recordApiCallForStats} = await import('@/stats/record');
+				await recordApiCallForStats({
+					provider: client.getProviderConfig().name,
+					model: options.model ?? client.getCurrentModel(),
+					inputTokens: inputTokens ?? undefined,
+					outputTokens: outputTokens ?? undefined,
+					totalTokens: turnTotal,
+				});
+			} catch {
+				// Stats must never fail the plain loop.
+			}
 		}
 
 		if (!isJson && (reasoningPrinted || contentStarted)) {

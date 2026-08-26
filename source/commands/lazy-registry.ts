@@ -148,6 +148,12 @@ export const lazyCommands: LazyCommand[] = [
 		load: () => import('@/commands/usage').then(m => m.usageCommand),
 	},
 	{
+		name: 'stats',
+		description:
+			'Show lifetime usage stats (sessions, prompts, tokens). Ranges: 7d, 3m, all-time; press r to cycle',
+		load: () => import('@/commands/stats').then(m => m.statsCommand),
+	},
+	{
 		name: 'checkpoint',
 		description:
 			'Manage conversation checkpoints - save and restore session snapshots',
