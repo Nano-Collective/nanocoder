@@ -64,7 +64,7 @@
 					</div>
 
 					<div class="settings-section">
-						<div class="settings-section-title">MCP Servers</div>
+						<div class="settings-section-title">MCP Servers <span style="text-transform: none; letter-spacing: 0; font-weight: 400;">(.mcp.json)</span></div>
 						<div id="settings-mcp-list" class="settings-list"></div>
 						<button class="settings-action-btn mt-2" data-action="edit-mcp">
 							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
@@ -288,6 +288,8 @@
 	<script nonce="{{nonce}}" src="{{markedUri}}"></script>
 	<!-- Pure @-mention helpers; must load before chat-panel.js reads them. -->
 	<script nonce="{{nonce}}" src="{{mentionUtilsUri}}"></script>
+	<!-- Pure drop-payload helpers; same ordering requirement. -->
+	<script nonce="{{nonce}}" src="{{uriUtilsUri}}"></script>
 	<script nonce="{{nonce}}" src="{{scriptUri}}"></script>
 </body>
 </html>

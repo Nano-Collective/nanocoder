@@ -385,6 +385,13 @@
 	let sessionsData = [];
 	let isHistoryView = false;
 	let isProcessing = false;
+	// True from the moment Stop/Escape is pressed until the next prompt starts.
+	// Cancellation is a round trip: the agent keeps emitting updates for the
+	// turn it was told to stop (a tool already in flight, the queued calls it
+	// then marks cancelled), and those land after the UI has already closed the
+	// turn. Without this flag they rebuild a second tool card group that looks
+	// like the cancelled work restarting.
+	let turnCancelled = false;
 	let currentAggregator = null;
 	let currentThoughtBox = null;
 	let currentTurnFooter = null;
@@ -530,6 +537,7 @@
 	// Shared by the Stop button and Escape so the two can't drift apart.
 	function requestCancel() {
 		vscode.postMessage({ type: 'cancel' });
+		turnCancelled = true;
 		setProcessing(false);
 	}
 
@@ -843,6 +851,10 @@
 	// through it would overwrite a draft the user is typing and sweep up chips
 	// and images they staged for a different question.
 	function dispatchPrompt(text, images) {
+		// A new turn re-opens the door to tool updates that the previous
+		// cancel closed.
+		turnCancelled = false;
+
 		// Send message to extension host
 		vscode.postMessage({
 			type: 'submitMessage',
@@ -950,6 +962,19 @@
 			e.preventDefault();
 			e.stopPropagation();
 		};
+
+		// Editor tab drags carry a JSON array of URI strings under
+		// `ResourceURLs` instead of a uri-list. Flatten it to the same
+		// newline-separated shape so there is one parser downstream.
+		const resourceUrlsToUriList = (raw) => {
+			if (!raw) return '';
+			try {
+				const parsed = JSON.parse(raw);
+				return Array.isArray(parsed) ? parsed.filter(u => typeof u === 'string').join('\n') : '';
+			} catch {
+				return '';
+			}
+		};
 		
 		// Prevent default on window to stop VS Code's native drop handler
 		window.addEventListener('dragover', (e) => e.preventDefault(), true);
@@ -978,41 +1003,19 @@
 		composerBox.addEventListener('drop', e => {
 			handleDrag(e);
 			composerBox.classList.remove('drag-over');
-			const uris = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+
+			// VS Code's explorer publishes text/uri-list; some sources only set
+			// text/plain. resource-urls is what the editor uses for tab drags.
+			const uris =
+				e.dataTransfer.getData('text/uri-list') ||
+				e.dataTransfer.getData('text/plain') ||
+				resourceUrlsToUriList(e.dataTransfer.getData('resourceurls'));
 			if (!uris) return;
-			
-			const isWindows = navigator.userAgentData?.platform?.toLowerCase().includes('win') || navigator.userAgent.includes('Windows');
-			const paths = uris.split('\n')
-				.map(u => u.trim())
-				.filter(u => u && !u.startsWith('#'))
-				.map(u => {
-					if (u.startsWith('file://')) {
-						let p = decodeURIComponent(u.replace(/^file:\/\/\/?/, ''));
-						if (isWindows && p.match(/^[a-zA-Z]:/)) {
-							// Already dropped leading slash via the regex above if it had exactly three slashes. 
-							// But if it had two slashes e.g. file://C:/ it would become C:/
-							// If it had three e.g. file:///C:/ the regex stripped up to 3 slashes so it also becomes C:/
-							// Wait, what if it was file:///C:/... ? `u.replace(/^file:\/\/\/?/, '')` removes `file:///`.
-							// What about UNC paths? `file://server/share` -> regex removes `file://`, leaving `server/share`. 
-							// Wait, `u.replace(/^file:\/\/\/?/, '')` removes `file:///` or `file://`.
-							// For UNC `file://server/share`, `replace` makes it `server/share`. 
-							// So we need to put `//` back for UNC on Windows? 
-							// Let's implement Will's explicit advice:
-							// "strip with /^file:\/\/\/?/ and on Windows drop the leading slash before a drive letter."
-						}
-						// Let's strictly follow Will's suggestion:
-						let p2 = decodeURIComponent(u.replace(/^file:\/\/\/?/, ''));
-						if (isWindows && p2.match(/^\/[a-zA-Z]:/)) {
-							p2 = p2.substring(1);
-						}
-						// wait, for UNC path `file://server/share`, replacing `/^file:\/\/\/?/` removes `file://`. 
-						// So it becomes `server/share`. On Windows UNC paths need `\\server\share`. 
-						// Actually vscode drop UNC path comes as `file:////server/share` or `file://server/share`.
-						// If we don't mess with it too much, let's just do exactly what Will said.
-						return p2;
-					}
-					return u;
-				});
+
+			const isWindows =
+				navigator.userAgentData?.platform?.toLowerCase().includes('win') ||
+				navigator.userAgent.includes('Windows');
+			const paths = NanocoderUriUtils.parseDropPayload(uris, isWindows);
 
 			paths.forEach(p => vscode.postMessage({ type: 'requestPathInfo', path: p }));
 		}, true);
@@ -1463,6 +1466,7 @@
 				currentTurnText = '';
 				currentTurnFooter = null;
 				toolKinds.clear();
+				turnCancelled = false;
 				agentTurnId = 0;
 				lastAgentRawTurnId = -1;
 				lastAgentSegments = '';
@@ -1819,7 +1823,10 @@
 	document.querySelectorAll('.settings-action-btn').forEach(btn => {
 		btn.addEventListener('click', () => {
 			const action = btn.dataset.action;
-			if (action === 'edit-providers' || action === 'edit-mcp' || action === 'edit-tools' || action === 'open-agents-config') {
+			if (action === 'edit-mcp') {
+				// MCP servers live in .mcp.json, not agents.config.json.
+				vscode.postMessage({ type: 'openConfigFile', file: '.mcp.json' });
+			} else if (action === 'edit-providers' || action === 'edit-tools' || action === 'open-agents-config') {
 				vscode.postMessage({ type: 'openConfigFile', file: 'agents.config.json' });
 			} else if (action === 'open-preferences') {
 				vscode.postMessage({ type: 'openConfigFile', file: 'nanocoder-preferences.json' });
@@ -2287,6 +2294,13 @@
 	function handleToolCallUpdate(update) {
 		const toolCallId = update.toolCallId || (update.toolCall && update.toolCall.toolCallId);
 		if (!toolCallId) return;
+
+		// Post-cancel trailing updates: a tool that was mid-flight when Stop was
+		// pressed still reports its outcome, and the calls queued behind it
+		// report as cancelled. setProcessing(false) already marked every
+		// unfinished card cancelled, so rendering these would either revive a
+		// spinner or open a fresh group for work the user just stopped.
+		if (turnCancelled) return;
 
 		// A new card is about to be inserted below the current text block -
 		// close the block so any text streamed after the tool starts fresh
