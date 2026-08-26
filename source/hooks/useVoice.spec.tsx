@@ -67,15 +67,18 @@ function makeMockPlugin(overrides: Partial<VoicePlugin> = {}): VoicePlugin {
 	};
 }
 
-test('gracefully handles missing voice plugin', async t => {
+test.serial('gracefully handles missing voice plugin', async t => {
 	const triggerRef = { current: null as (() => void) | null };
 	const queue: React.ReactNode[] = [];
 
-	render(
+	const { unmount } = render(
 		<VoiceHarness
 			handleUserSubmit={async () => {}}
 			messages={[]}
 			addToChatQueue={comp => queue.push(comp)}
+			loadPlugin={async () => {
+				throw new Error('Plugin not installed');
+			}}
 			triggerRef={triggerRef}
 		/>,
 	);
@@ -85,6 +88,7 @@ test('gracefully handles missing voice plugin', async t => {
 	}
 
 	t.true(queue.length > 0);
+	unmount();
 	t.pass();
 });
 

@@ -3,7 +3,7 @@ import { platform } from 'node:process';
 
 /**
  * Plays an audio file through the default system speakers.
- * Uses native OS tools where available (afplay, aplay) and falls back to sox's play.
+ * Uses native OS tools where available (afplay on macOS, sox's play on Linux/WSL, sox on Windows).
  * 
  * @param filePath The path to the audio file to play.
  */
@@ -13,22 +13,18 @@ export async function playAudio(filePath: string, timeoutMs?: number, signal?: A
 			return reject(new Error('AbortError: Playback aborted'));
 		}
 
-		let command = process.env.PLAY_CMD || 'play'; // default to sox
-		const args = [filePath];
+		let command = process.env.PLAY_CMD || 'play'; // default to sox play
+		const args = ['-q', filePath];
 
 		if (process.env.PLAY_CMD) {
 			// Testing override
+			args.shift();
 		} else if (platform === 'darwin') {
 			command = 'afplay';
-		} else if (platform === 'linux') {
-			command = 'aplay';
-			args.unshift('-q'); // quiet mode
+			args.shift(); // remove -q
 		} else if (platform === 'win32') {
 			command = 'sox';
-			args.unshift('-q');
 			args.push('-d'); // route to default device
-		} else {
-			args.unshift('-q');
 		}
 
 		const proc = cp.spawn(command, args, { stdio: 'ignore' });

@@ -144,6 +144,7 @@ export function useVoice({
 	);
 	const vadEngineRef = React.useRef<unknown>(null);
 	const hasCheckedHandsFreeDepsRef = React.useRef(false);
+	const lastVadErrorRef = React.useRef({message: '', timestamp: 0});
 	const activeRealtimeSessionRef = React.useRef<RealtimeSession | null>(null);
 
 	const hasRealtime = React.useMemo(() => isRealtimeCapable(client), [client]);
@@ -405,22 +406,38 @@ export function useVoice({
 				} catch (err) {
 					cleanupActiveFile();
 					setState('idle');
-					addToChatQueueRef.current(
-						React.createElement(ErrorMessage, {
-							key: generateKey('voice-vad-error'),
-							message: `VAD pipeline error: ${err instanceof Error ? err.message : String(err)}`,
-						}),
-					);
+					const errorMsg = `VAD pipeline error: ${err instanceof Error ? err.message : String(err)}`;
+					const now = Date.now();
+					if (
+						lastVadErrorRef.current.message !== errorMsg ||
+						now - lastVadErrorRef.current.timestamp > 10_000
+					) {
+						lastVadErrorRef.current = {message: errorMsg, timestamp: now};
+						addToChatQueueRef.current(
+							React.createElement(ErrorMessage, {
+								key: generateKey('voice-vad-error'),
+								message: errorMsg,
+							}),
+						);
+					}
 				}
 			});
 
 			engine.on('error', (err: Error) => {
-				addToChatQueueRef.current(
-					React.createElement(ErrorMessage, {
-						key: generateKey('voice-vad-engine-error'),
-						message: `VAD engine error: ${err.message}`,
-					}),
-				);
+				const errorMsg = `VAD engine error: ${err.message}`;
+				const now = Date.now();
+				if (
+					lastVadErrorRef.current.message !== errorMsg ||
+					now - lastVadErrorRef.current.timestamp > 10_000
+				) {
+					lastVadErrorRef.current = {message: errorMsg, timestamp: now};
+					addToChatQueueRef.current(
+						React.createElement(ErrorMessage, {
+							key: generateKey('voice-vad-engine-error'),
+							message: errorMsg,
+						}),
+					);
+				}
 			});
 
 			engine.start();
