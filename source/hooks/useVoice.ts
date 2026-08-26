@@ -6,8 +6,13 @@ import React from 'react';
 import {ErrorMessage, InfoMessage} from '@/components/message-box';
 import type {VoiceState} from '@/components/voice-status-bar';
 import {getVoicePreference} from '@/config/preferences';
+import {
+	synthesizeCloudSpeech,
+	transcribeCloudAudio,
+} from '@/services/cloud-audio';
 import {generateKey} from '@/session/key-generator';
-import type {ImageAttachment, Message} from '@/types/core';
+import type {ImageAttachment, LLMClient, Message} from '@/types/core';
+import {isRealtimeCapable, type RealtimeSession} from '@/types/realtime';
 import {formatForSpeech} from '@/utils/format-for-speech';
 import {
 	hasDeclinedVoiceInstallForSession,
@@ -56,13 +61,23 @@ export interface UseVoiceProps {
 	messages: Message[];
 	addToChatQueue: (component: React.ReactNode) => void;
 	loadPlugin?: () => Promise<VoicePlugin>;
-	voicePreference?: {enabled: boolean; activationMode: string};
+	voicePreference?: {
+		enabled: boolean;
+		activationMode: string;
+		sttBackend?: 'local' | 'cloud';
+		ttsBackend?: 'local' | 'cloud';
+	};
 	handleCancel?: () => void;
+	client?: LLMClient | null;
+	currentProvider?: string;
+	currentModel?: string;
 }
 
 export interface UseVoiceReturn {
 	state: VoiceState;
 	startStopRecording: () => void;
+	isRealtimeCapable: boolean;
+	activeRealtimeSession: RealtimeSession | null;
 }
 
 export function useVoice({
@@ -73,6 +88,9 @@ export function useVoice({
 		(await import('@nanocollective/nanocoder-voice')) as unknown as VoicePlugin,
 	voicePreference,
 	handleCancel,
+	client,
+	currentProvider,
+	currentModel,
 }: UseVoiceProps): UseVoiceReturn {
 	const [state, setState] = React.useState<VoiceState>('idle');
 
@@ -96,6 +114,16 @@ export function useVoice({
 		addToChatQueueRef.current = addToChatQueue;
 	}, [addToChatQueue]);
 
+	const clientRef = React.useRef(client);
+	React.useEffect(() => {
+		clientRef.current = client;
+	}, [client]);
+
+	const voicePreferenceRef = React.useRef(voicePreference);
+	React.useEffect(() => {
+		voicePreferenceRef.current = voicePreference;
+	}, [voicePreference]);
+
 	const abortControllerRef = React.useRef<AbortController | null>(null);
 	const ttsAbortControllerRef = React.useRef<AbortController | null>(null);
 	const recordingAudioPromiseRef = React.useRef<Promise<void> | null>(null);
@@ -107,6 +135,18 @@ export function useVoice({
 		null,
 	);
 	const vadEngineRef = React.useRef<unknown>(null);
+	const activeRealtimeSessionRef = React.useRef<RealtimeSession | null>(null);
+
+	const hasRealtime = React.useMemo(() => isRealtimeCapable(client), [client]);
+
+	// Provider/model switch teardown gap fix: explicitly tear down any open realtime session on switch
+	// biome-ignore lint/correctness/useExhaustiveDependencies: Teardown on provider/model/client switch
+	React.useEffect(() => {
+		if (activeRealtimeSessionRef.current) {
+			void activeRealtimeSessionRef.current.close().catch(() => {});
+			activeRealtimeSessionRef.current = null;
+		}
+	}, [currentProvider, currentModel, client]);
 
 	const cleanupActiveFile = React.useCallback(() => {
 		if (activeFileRef.current && existsSync(activeFileRef.current)) {
@@ -142,6 +182,10 @@ export function useVoice({
 			abortControllerRef.current = null;
 		}
 
+		if (activeRealtimeSessionRef.current) {
+			void activeRealtimeSessionRef.current.interrupt().catch(() => {});
+		}
+
 		cleanupActiveFile();
 
 		handleCancelRef.current?.();
@@ -174,7 +218,9 @@ export function useVoice({
 					missing: check.missing,
 					installDependencies: async onProgress => {
 						if (plugin.installDependencies) {
-							await plugin.installDependencies({onProgress});
+							await plugin.installDependencies({
+								onProgress: p => onProgress(p.stage, p.percent),
+							});
 						}
 					},
 				});
@@ -227,6 +273,11 @@ export function useVoice({
 					engine.stop();
 				}
 				vadEngineRef.current = null;
+			}
+
+			if (activeRealtimeSessionRef.current) {
+				void activeRealtimeSessionRef.current.close().catch(() => {});
+				activeRealtimeSessionRef.current = null;
 			}
 
 			pendingTTSRef.current = false;
@@ -294,10 +345,28 @@ export function useVoice({
 				setState('processing');
 				activeFileRef.current = evt.filePath;
 				try {
-					const transcribed = await plugin.transcribeAudio(
-						evt.filePath,
-						60_000,
-					);
+					const pref = voicePreferenceRef.current ?? getVoicePreference();
+					let transcribed = '';
+
+					if (pref.sttBackend === 'cloud') {
+						try {
+							transcribed = await transcribeCloudAudio(evt.filePath, {
+								providerConfig: clientRef.current?.getProviderConfig(),
+								timeoutMs: 60_000,
+							});
+						} catch (cloudErr) {
+							addToChatQueueRef.current(
+								React.createElement(InfoMessage, {
+									key: generateKey('voice-cloud-stt-fallback'),
+									message: `Cloud STT fallback to local (${cloudErr instanceof Error ? cloudErr.message : String(cloudErr)})`,
+								}),
+							);
+							transcribed = await plugin.transcribeAudio(evt.filePath, 60_000);
+						}
+					} else {
+						transcribed = await plugin.transcribeAudio(evt.filePath, 60_000);
+					}
+
 					cleanupActiveFile();
 
 					if (!transcribed || transcribed.trim() === '') {
@@ -399,13 +468,42 @@ export function useVoice({
 		const ttsAbortController = new AbortController();
 		ttsAbortControllerRef.current = ttsAbortController;
 
-		plugin
-			.synthesizeSpeech(
-				formattedText,
-				ttsFile,
-				60_000,
-				ttsAbortController.signal,
-			)
+		const synthesize = async () => {
+			const pref = voicePreferenceRef.current ?? getVoicePreference();
+			if (pref.ttsBackend === 'cloud') {
+				try {
+					await synthesizeCloudSpeech(formattedText, ttsFile, {
+						providerConfig: clientRef.current?.getProviderConfig(),
+						timeoutMs: 60_000,
+						signal: ttsAbortController.signal,
+					});
+					return;
+				} catch (cloudErr) {
+					if (ttsAbortController.signal.aborted) throw cloudErr;
+					addToChatQueueRef.current(
+						React.createElement(InfoMessage, {
+							key: generateKey('voice-cloud-tts-fallback'),
+							message: `Cloud TTS fallback to local (${cloudErr instanceof Error ? cloudErr.message : String(cloudErr)})`,
+						}),
+					);
+					await plugin.synthesizeSpeech(
+						formattedText,
+						ttsFile,
+						60_000,
+						ttsAbortController.signal,
+					);
+				}
+			} else {
+				await plugin.synthesizeSpeech(
+					formattedText,
+					ttsFile,
+					60_000,
+					ttsAbortController.signal,
+				);
+			}
+		};
+
+		synthesize()
 			.then(async () => {
 				if (ttsAbortController.signal.aborted) return;
 				return plugin.playAudio(ttsFile, 60_000, ttsAbortController.signal);
@@ -509,10 +607,28 @@ export function useVoice({
 			}
 
 			setState('processing');
-			const transcribedText = await plugin.transcribeAudio(
-				recordingFile,
-				60_000,
-			);
+
+			const pref = voicePreferenceRef.current ?? getVoicePreference();
+			let transcribedText = '';
+
+			if (pref.sttBackend === 'cloud') {
+				try {
+					transcribedText = await transcribeCloudAudio(recordingFile, {
+						providerConfig: clientRef.current?.getProviderConfig(),
+						timeoutMs: 60_000,
+					});
+				} catch (cloudErr) {
+					addToChatQueueRef.current(
+						React.createElement(InfoMessage, {
+							key: generateKey('voice-cloud-stt-fallback'),
+							message: `Cloud STT fallback to local (${cloudErr instanceof Error ? cloudErr.message : String(cloudErr)})`,
+						}),
+					);
+					transcribedText = await plugin.transcribeAudio(recordingFile, 60_000);
+				}
+			} else {
+				transcribedText = await plugin.transcribeAudio(recordingFile, 60_000);
+			}
 
 			cleanupActiveFile();
 
@@ -569,5 +685,7 @@ export function useVoice({
 	return {
 		state,
 		startStopRecording,
+		isRealtimeCapable: hasRealtime,
+		activeRealtimeSession: activeRealtimeSessionRef.current,
 	};
 }

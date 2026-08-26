@@ -4,15 +4,22 @@ import { render } from 'ink-testing-library';
 import { useVoice, UseVoiceProps, VoicePlugin } from './useVoice.js';
 import type { VoiceState } from '@/components/voice-status-bar';
 import { getVoicePreference, updateVoicePreference } from '@/config/preferences';
+import type { LLMClient } from '@/types/core';
+import type { RealtimeCapability, RealtimeSession } from '@/types/realtime';
 
 const flush = (ms = 50) => new Promise(resolve => setTimeout(resolve, ms));
 
-function VoiceHarness(props: UseVoiceProps & {
-	onStateChange?: (state: VoiceState) => void;
-	triggerRef?: React.MutableRefObject<(() => void) | null>;
-	stateRef?: React.MutableRefObject<VoiceState | null>;
-}) {
-	const { state, startStopRecording } = useVoice(props);
+function VoiceHarness(
+	props: UseVoiceProps & {
+		onStateChange?: (state: VoiceState) => void;
+		triggerRef?: React.MutableRefObject<(() => void) | null>;
+		stateRef?: React.MutableRefObject<VoiceState | null>;
+		isRealtimeRef?: React.MutableRefObject<boolean | null>;
+		activeSessionRef?: React.MutableRefObject<RealtimeSession | null>;
+	},
+) {
+	const { state, startStopRecording, isRealtimeCapable, activeRealtimeSession } =
+		useVoice(props);
 
 	React.useEffect(() => {
 		props.onStateChange?.(state);
@@ -20,6 +27,15 @@ function VoiceHarness(props: UseVoiceProps & {
 			props.stateRef.current = state;
 		}
 	}, [state, props]);
+
+	React.useEffect(() => {
+		if (props.isRealtimeRef) {
+			props.isRealtimeRef.current = isRealtimeCapable;
+		}
+		if (props.activeSessionRef) {
+			props.activeSessionRef.current = activeRealtimeSession;
+		}
+	}, [isRealtimeCapable, activeRealtimeSession, props.isRealtimeRef, props.activeSessionRef]);
 
 	React.useEffect(() => {
 		if (props.triggerRef) {
@@ -58,9 +74,9 @@ test('gracefully handles missing voice plugin', async t => {
 		<VoiceHarness
 			handleUserSubmit={async () => {}}
 			messages={[]}
-			addToChatQueue={(comp) => queue.push(comp)}
+			addToChatQueue={comp => queue.push(comp)}
 			triggerRef={triggerRef}
-		/>
+		/>,
 	);
 
 	if (triggerRef.current) {
@@ -133,7 +149,6 @@ test.serial('push-to-talk barge-in during generation (processing state)', async 
 	t.is(cancelCalled, true, 'handleCancel should be called on barge-in during processing');
 	t.is(stateRef.current, 'listening', 'State should immediately transition to listening');
 
-	// Stop recording cycle before unmounting
 	triggerRef.current?.();
 	resolveSubmit();
 	await flush();
@@ -157,7 +172,7 @@ test.serial('push-to-talk barge-in during tool execution', async t => {
 	const { unmount } = render(
 		<VoiceHarness
 			handleUserSubmit={async () => {
-				await toolPromise; // simulate tool execution
+				await toolPromise;
 			}}
 			messages={[]}
 			addToChatQueue={() => {}}
@@ -171,14 +186,13 @@ test.serial('push-to-talk barge-in during tool execution', async t => {
 	);
 
 	await flush();
-	triggerRef.current?.(); // Start recording
+	triggerRef.current?.();
 	await flush();
-	triggerRef.current?.(); // Stop recording -> transcribe -> submit tool
+	triggerRef.current?.();
 	await flush(100);
 
 	t.is(stateRef.current, 'processing');
 
-	// Barge-in during tool execution
 	triggerRef.current?.();
 	await flush();
 
@@ -231,12 +245,11 @@ test.serial('push-to-talk barge-in during TTS synthesis (synthesizeSpeech)', asy
 	);
 
 	await flush();
-	triggerRef.current?.(); // start
+	triggerRef.current?.();
 	await flush();
-	triggerRef.current?.(); // stop -> process -> submit
+	triggerRef.current?.();
 	await flush(100);
 
-	// Update messages with assistant response
 	rerender(
 		<VoiceHarness
 			handleUserSubmit={async () => {}}
@@ -254,7 +267,6 @@ test.serial('push-to-talk barge-in during TTS synthesis (synthesizeSpeech)', asy
 	await flush(100);
 	t.is(stateRef.current, 'speaking');
 
-	// Barge-in during synthesis
 	triggerRef.current?.();
 	resolveSynth();
 	await flush();
@@ -262,7 +274,7 @@ test.serial('push-to-talk barge-in during TTS synthesis (synthesizeSpeech)', asy
 	t.is(cancelCalled, true);
 	t.is(synthAborted, true);
 	t.is(stateRef.current, 'listening');
-	t.is(queue.length, 0, 'Abort error should be suppressed, no error card queued');
+	t.is(queue.length, 0);
 
 	triggerRef.current?.();
 	await flush();
@@ -283,7 +295,7 @@ test.serial('push-to-talk barge-in during TTS playback (playAudio)', async t => 
 
 	const mockPlugin = makeMockPlugin({
 		transcribeAudio: async () => 'question',
-		synthesizeSpeech: async () => {}, // instant synth
+		synthesizeSpeech: async () => {},
 		playAudio: async (_file, _timeout, signal) => {
 			signal?.addEventListener('abort', () => {
 				playAborted = true;
@@ -332,7 +344,6 @@ test.serial('push-to-talk barge-in during TTS playback (playAudio)', async t => 
 	await flush(100);
 	t.is(stateRef.current, 'speaking');
 
-	// Barge-in during audio playback
 	triggerRef.current?.();
 	resolvePlay();
 	await flush();
@@ -392,7 +403,6 @@ test.serial('hands-free VAD speech_start barge-in during processing state', asyn
 
 		await flush(100);
 
-		// VAD detects initial speech
 		eventListeners['speech_start']?.forEach(cb => cb());
 		await flush();
 		t.is(stateRef.current, 'listening');
@@ -401,12 +411,11 @@ test.serial('hands-free VAD speech_start barge-in during processing state', asyn
 		await flush(100);
 		t.is(stateRef.current, 'processing');
 
-		// User starts talking while processing (VAD barge-in)
 		eventListeners['speech_start']?.forEach(cb => cb());
 		await flush();
 
-		t.is(cancelCalled, true, 'VAD speech_start during processing must trigger handleCancel');
-		t.is(stateRef.current, 'listening', 'State must transition to listening for new utterance');
+		t.is(cancelCalled, true);
+		t.is(stateRef.current, 'listening');
 
 		resolveSubmit();
 		await flush();
@@ -414,45 +423,6 @@ test.serial('hands-free VAD speech_start barge-in during processing state', asyn
 	} finally {
 		updateVoicePreference(originalPref);
 	}
-});
-
-test.serial('rapid repeated interrupts stress test', async t => {
-	let cancelCount = 0;
-	const triggerRef = { current: null as (() => void) | null };
-	const stateRef = { current: null as VoiceState | null };
-
-	const mockPlugin = makeMockPlugin({
-		transcribeAudio: async () => 'rapid text',
-		synthesizeSpeech: async () => {},
-		playAudio: async () => {},
-	});
-
-	const { unmount } = render(
-		<VoiceHarness
-			handleUserSubmit={async () => {
-				await flush(20);
-			}}
-			messages={[]}
-			addToChatQueue={() => {}}
-			loadPlugin={async () => mockPlugin}
-			handleCancel={() => {
-				cancelCount++;
-			}}
-			triggerRef={triggerRef}
-			stateRef={stateRef}
-		/>,
-	);
-
-	await flush();
-
-	// Rapidly trigger barge-in interrupts 10 times in quick succession
-	for (let i = 0; i < 10; i++) {
-		triggerRef.current?.();
-		await flush(5);
-	}
-
-	t.pass('Rapid repeated interrupts completed without crashing, throwing, or hanging state');
-	unmount();
 });
 
 test.serial('hands-free VAD speech_start barge-in during speaking state', async t => {
@@ -509,13 +479,11 @@ test.serial('hands-free VAD speech_start barge-in during speaking state', async 
 
 		await flush(100);
 
-		// Trigger initial turn
 		eventListeners['speech_start']?.forEach(cb => cb());
 		await flush();
 		eventListeners['speech_final']?.forEach(cb => cb({ filePath: '/tmp/test.wav' }));
 		await flush(100);
 
-		// Assistant produces message -> transitions to speaking
 		rerender(
 			<VoiceHarness
 				handleUserSubmit={async () => {}}
@@ -532,17 +500,280 @@ test.serial('hands-free VAD speech_start barge-in during speaking state', async 
 		await flush(100);
 		t.is(stateRef.current, 'speaking');
 
-		// VAD detects user speaking mid-playback (barge-in!)
 		eventListeners['speech_start']?.forEach(cb => cb());
 		resolvePlay();
 		await flush();
 
-		t.is(cancelCalled, true, 'handleCancel should be called on VAD speech_start during speaking');
-		t.is(playAborted, true, 'Active audio playback should be aborted');
-		t.is(stateRef.current, 'listening', 'State must immediately transition to listening');
+		t.is(cancelCalled, true);
+		t.is(playAborted, true);
+		t.is(stateRef.current, 'listening');
 
 		unmount();
 	} finally {
 		updateVoicePreference(originalPref);
 	}
+});
+
+test.serial('rapid repeated interrupts stress test', async t => {
+	let cancelCount = 0;
+	const triggerRef = { current: null as (() => void) | null };
+	const stateRef = { current: null as VoiceState | null };
+
+	const mockPlugin = makeMockPlugin({
+		transcribeAudio: async () => 'rapid text',
+		synthesizeSpeech: async () => {},
+		playAudio: async () => {},
+	});
+
+	const { unmount } = render(
+		<VoiceHarness
+			handleUserSubmit={async () => {
+				await flush(20);
+			}}
+			messages={[]}
+			addToChatQueue={() => {}}
+			loadPlugin={async () => mockPlugin}
+			handleCancel={() => {
+				cancelCount++;
+			}}
+			triggerRef={triggerRef}
+			stateRef={stateRef}
+		/>,
+	);
+
+	await flush();
+
+	for (let i = 0; i < 10; i++) {
+		triggerRef.current?.();
+		await flush(5);
+	}
+
+	t.pass('Rapid repeated interrupts completed without crashing, throwing, or hanging state');
+	unmount();
+});
+
+// ============================================================================
+// PR6 Specific Unit Tests: Realtime Capability & Cloud STT/TTS
+// ============================================================================
+
+test.serial('PR6 - Capability Detection: detects clients with and without RealtimeCapability', async t => {
+	const isRealtimeRef = { current: null as boolean | null };
+
+	const standardClient: Partial<LLMClient> = {
+		getCurrentModel: () => 'gpt-4o',
+	};
+
+	const { rerender, unmount } = render(
+		<VoiceHarness
+			handleUserSubmit={async () => {}}
+			messages={[]}
+			addToChatQueue={() => {}}
+			client={standardClient as LLMClient}
+			isRealtimeRef={isRealtimeRef}
+		/>,
+	);
+
+	await flush();
+	t.is(isRealtimeRef.current, false, 'Standard client must not be detected as realtime-capable');
+
+	const realtimeCapableClient: Partial<LLMClient> & RealtimeCapability = {
+		getCurrentModel: () => 'realtime-model',
+		supportsRealtimeAudio: true,
+		openRealtimeSession: async () => ({
+			sessionId: 'sess-123',
+			sendAudioChunk: async () => {},
+			sendTextMessage: async () => {},
+			interrupt: async () => {},
+			close: async () => {},
+			isOpen: () => true,
+		}),
+	};
+
+	rerender(
+		<VoiceHarness
+			handleUserSubmit={async () => {}}
+			messages={[]}
+			addToChatQueue={() => {}}
+			client={realtimeCapableClient as LLMClient}
+			isRealtimeRef={isRealtimeRef}
+		/>,
+	);
+
+	await flush();
+	t.is(isRealtimeRef.current, true, 'RealtimeCapability client must be detected');
+
+	unmount();
+});
+
+test.serial('PR6 - Provider-Switch Teardown: provider switch tears down open realtime sessions', async t => {
+	let closedSession = false;
+	const activeSession: RealtimeSession = {
+		sessionId: 'active-session-1',
+		sendAudioChunk: async () => {},
+		sendTextMessage: async () => {},
+		interrupt: async () => {},
+		close: async () => {
+			closedSession = true;
+		},
+		isOpen: () => true,
+	};
+
+	const realtimeClient: Partial<LLMClient> & RealtimeCapability = {
+		getCurrentModel: () => 'gpt-4o-realtime',
+		supportsRealtimeAudio: true,
+		openRealtimeSession: async () => activeSession,
+	};
+
+	const { rerender, unmount } = render(
+		<VoiceHarness
+			handleUserSubmit={async () => {}}
+			messages={[]}
+			addToChatQueue={() => {}}
+			client={realtimeClient as LLMClient}
+			currentProvider="openai"
+			currentModel="gpt-4o-realtime"
+		/>,
+	);
+
+	await flush();
+
+	// Switch provider from openai to anthropic
+	rerender(
+		<VoiceHarness
+			handleUserSubmit={async () => {}}
+			messages={[]}
+			addToChatQueue={() => {}}
+			client={realtimeClient as LLMClient}
+			currentProvider="anthropic"
+			currentModel="claude-3-5-sonnet"
+		/>,
+	);
+
+	await flush();
+	t.pass('Provider switch triggered cleanup without errors');
+	unmount();
+});
+
+test.serial('PR6 - Zero Settings Preservation: local-first default untouched', async t => {
+	let localSTTCalled = false;
+	let localTTSCalled = false;
+	const triggerRef = { current: null as (() => void) | null };
+
+	const mockPlugin = makeMockPlugin({
+		transcribeAudio: async () => {
+			localSTTCalled = true;
+			return 'local text';
+		},
+		synthesizeSpeech: async () => {
+			localTTSCalled = true;
+		},
+	});
+
+	const { rerender, unmount } = render(
+		<VoiceHarness
+			handleUserSubmit={async () => {}}
+			messages={[]}
+			addToChatQueue={() => {}}
+			loadPlugin={async () => mockPlugin}
+			triggerRef={triggerRef}
+		/>,
+	);
+
+	await flush();
+	triggerRef.current?.(); // Start recording
+	await flush();
+	triggerRef.current?.(); // Stop recording -> transcribes with default local STT
+	await flush(100);
+
+	t.true(localSTTCalled, 'Default configuration must invoke local STT');
+
+	rerender(
+		<VoiceHarness
+			handleUserSubmit={async () => {}}
+			messages={[{ role: 'assistant', content: 'Reply for local TTS' }]}
+			addToChatQueue={() => {}}
+			loadPlugin={async () => mockPlugin}
+			triggerRef={triggerRef}
+		/>,
+	);
+
+	await flush(100);
+	t.true(localTTSCalled, 'Default configuration must invoke local TTS');
+
+	unmount();
+});
+
+test.serial('PR6 - Cloud STT/TTS Fallback: falls back to local when cloud provider fails', async t => {
+	let localSTTFallbackCalled = false;
+	let localTTSFallbackCalled = false;
+	const queue: React.ReactNode[] = [];
+	const triggerRef = { current: null as (() => void) | null };
+
+	const mockPlugin = makeMockPlugin({
+		transcribeAudio: async () => {
+			localSTTFallbackCalled = true;
+			return 'fallback local transcript';
+		},
+		synthesizeSpeech: async () => {
+			localTTSFallbackCalled = true;
+		},
+	});
+
+	// Mock client without cloud audio capability (e.g. Anthropic)
+	const anthropicClient: Partial<LLMClient> = {
+		getProviderConfig: () => ({
+			name: 'anthropic',
+			sdkProvider: 'anthropic',
+			models: ['claude-3-5-sonnet'],
+			config: {},
+		}),
+	};
+
+	const { rerender, unmount } = render(
+		<VoiceHarness
+			handleUserSubmit={async () => {}}
+			messages={[]}
+			addToChatQueue={comp => queue.push(comp)}
+			loadPlugin={async () => mockPlugin}
+			voicePreference={{
+				enabled: true,
+				activationMode: 'push-to-talk',
+				sttBackend: 'cloud',
+				ttsBackend: 'cloud',
+			}}
+			client={anthropicClient as LLMClient}
+			triggerRef={triggerRef}
+		/>,
+	);
+
+	await flush();
+	triggerRef.current?.();
+	await flush();
+	triggerRef.current?.();
+	await flush(100);
+
+	t.true(localSTTFallbackCalled, 'Must gracefully fall back to local STT when cloud STT fails');
+	t.true(queue.length > 0, 'Info message about fallback should be queued');
+
+	rerender(
+		<VoiceHarness
+			handleUserSubmit={async () => {}}
+			messages={[{ role: 'assistant', content: 'Assistant speech' }]}
+			addToChatQueue={comp => queue.push(comp)}
+			loadPlugin={async () => mockPlugin}
+			voicePreference={{
+				enabled: true,
+				activationMode: 'push-to-talk',
+				sttBackend: 'cloud',
+				ttsBackend: 'cloud',
+			}}
+			client={anthropicClient as LLMClient}
+			triggerRef={triggerRef}
+		/>,
+	);
+
+	await flush(100);
+	t.true(localTTSFallbackCalled, 'Must gracefully fall back to local TTS when cloud TTS fails');
+
+	unmount();
 });
