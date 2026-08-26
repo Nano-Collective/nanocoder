@@ -1,12 +1,13 @@
 import test from 'ava';
-import {render} from 'ink-testing-library';
+import { render } from 'ink-testing-library';
 import React from 'react';
-import {themes} from '../config/themes';
-import {ThemeContext} from '../hooks/useTheme';
-import {TitleShapeContext} from '../hooks/useTitleShape';
-import {voiceCommand} from './voice';
+import { getVoicePreference, updateVoicePreference } from '@/config/preferences';
+import { themes } from '../config/themes';
+import { ThemeContext } from '../hooks/useTheme';
+import { TitleShapeContext } from '../hooks/useTitleShape';
+import { voiceCommand } from './voice';
 
-const MockProviders = ({children}: {children: React.ReactNode}) => {
+const MockProviders = ({ children }: { children: React.ReactNode }) => {
 	const mockTheme = {
 		currentTheme: 'tokyo-night' as const,
 		colors: themes['tokyo-night'].colors,
@@ -37,15 +38,70 @@ test('voice command has a handler function', t => {
 });
 
 test('voice command toggles state and renders InfoMessage', async t => {
-	const result = await voiceCommand.handler([], [], {} as any);
-	if (!React.isValidElement(result)) {
-		t.fail('Expected React element');
-		return;
-	}
+	const initialPref = getVoicePreference();
+	try {
+		const result = await voiceCommand.handler([], [], {} as any);
+		t.true(React.isValidElement(result));
 
-	const {lastFrame} = render(<MockProviders>{result}</MockProviders>);
-	const output = lastFrame();
-	
-	t.truthy(output);
-	t.regex(output!, /Voice mode (enabled|disabled)/);
+		const { lastFrame } = render(<MockProviders>{result}</MockProviders>);
+		const output = lastFrame();
+
+		t.truthy(output);
+		t.regex(output!, /Voice mode (enabled|disabled)/);
+	} finally {
+		updateVoicePreference(initialPref);
+	}
+});
+
+test('voice command handles stt subcommand', async t => {
+	const initialPref = getVoicePreference();
+	try {
+		const result = await voiceCommand.handler(['stt', 'cloud'], [], {} as any);
+		t.true(React.isValidElement(result));
+
+		const { lastFrame } = render(<MockProviders>{result}</MockProviders>);
+		const output = lastFrame();
+		t.truthy(output);
+		t.regex(output!, /Voice STT backend set to: cloud/);
+
+		const updatedPref = getVoicePreference();
+		t.is(updatedPref.sttBackend, 'cloud');
+	} finally {
+		updateVoicePreference(initialPref);
+	}
+});
+
+test('voice command handles tts subcommand', async t => {
+	const initialPref = getVoicePreference();
+	try {
+		const result = await voiceCommand.handler(['tts', 'cloud'], [], {} as any);
+		t.true(React.isValidElement(result));
+
+		const { lastFrame } = render(<MockProviders>{result}</MockProviders>);
+		const output = lastFrame();
+		t.truthy(output);
+		t.regex(output!, /Voice TTS backend set to: cloud/);
+
+		const updatedPref = getVoicePreference();
+		t.is(updatedPref.ttsBackend, 'cloud');
+	} finally {
+		updateVoicePreference(initialPref);
+	}
+});
+
+test('voice command handles status subcommand', async t => {
+	const initialPref = getVoicePreference();
+	try {
+		const result = await voiceCommand.handler(['status'], [], {} as any);
+		t.true(React.isValidElement(result));
+
+		const { lastFrame } = render(<MockProviders>{result}</MockProviders>);
+		const output = lastFrame();
+		t.truthy(output);
+		t.regex(output!, /Voice Mode:/);
+		t.regex(output!, /STT Backend:/);
+		t.regex(output!, /TTS Backend:/);
+	} finally {
+		updateVoicePreference(initialPref);
+	}
 });
