@@ -1,10 +1,10 @@
 /**
  * /stats command — lifetime usage metrics (distinct from /usage context view).
  *
- * Interactive UI (range cycling with `r`) is mounted as a live component from
- * `app-util.ts` so keyboard focus is not stolen by the chat composer. This
- * module exports the stub for the lazy registry plus helpers used by that
- * live-mount path and by tests.
+ * Interactive UI (←/→ range switching, matching Settings tabs) is mounted as a
+ * live component from `app-util.ts` so keyboard focus is not stolen by the chat
+ * composer. This module exports the stub for the lazy registry plus helpers
+ * used by that live-mount path and by tests.
  */
 
 import React from 'react';
@@ -20,7 +20,7 @@ import {
 
 export const statsCommand = createStubCommand(
 	'stats',
-	'Show lifetime usage stats (sessions, prompts, tokens). Ranges: 7d, 3m, all-time; press r to cycle',
+	'Show lifetime usage stats (sessions, prompts, tokens). Ranges: 7d, 3m, all-time; ←/→ to switch',
 );
 
 export function parseStatsRangeArg(args: string[]): StatsRange {

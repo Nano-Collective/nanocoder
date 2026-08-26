@@ -103,7 +103,15 @@ export function StatsDisplay({
 				onClose?.();
 				return;
 			}
-			if (input === 'r' || input === 'R' || key.tab) {
+			// Match Settings tabs: left/right only (no letter shortcut).
+			if (key.leftArrow) {
+				const idx = STATS_RANGES.indexOf(range);
+				const prev =
+					STATS_RANGES[(idx - 1 + STATS_RANGES.length) % STATS_RANGES.length];
+				if (prev) setRange(prev);
+				return;
+			}
+			if (key.rightArrow) {
 				const idx = STATS_RANGES.indexOf(range);
 				const next = STATS_RANGES[(idx + 1) % STATS_RANGES.length];
 				if (next) setRange(next);
@@ -242,8 +250,8 @@ export function StatsDisplay({
 			<Box marginTop={1}>
 				<Text color={colors.secondary}>
 					{interactive
-						? 'r cycle range · Esc/Enter close · /usage for this chat'
-						: 'r cycle range · /usage for this chat'}
+						? '←/→ switch range · Esc/Enter close · /usage for this chat'
+						: '←/→ switch range · /usage for this chat'}
 				</Text>
 			</Box>
 		</TitledBoxWithPreferences>

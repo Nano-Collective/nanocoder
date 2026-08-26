@@ -462,8 +462,8 @@ function handleCopilotLogin(
 }
 
 /**
- * Handles /stats as a live component so `r` can cycle ranges without the
- * chat composer swallowing the key.
+ * Handles /stats as a live component so ←/→ can switch ranges without the
+ * chat composer swallowing the keys.
  * Returns true if handled.
  */
 function handleStatsCommand(
