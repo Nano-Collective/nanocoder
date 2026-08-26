@@ -208,8 +208,10 @@ export class SettingsManager {
 		};
 
 		add(this.parseMcpServers(this.readEnvMcpConfig()));
-		add(this.parseMcpServers(this.readJsonSafe(path.join(cwd, '.mcp.json'))));
-		add(this.parseMcpServers(this.readJsonSafe(path.join(globalDir, '.mcp.json'))));
+		// cwd is the workspace folder, and the joined segment is a string literal,
+		// so there is no attacker-controlled component to traverse with.
+		add(this.parseMcpServers(this.readJsonSafe(path.join(cwd, '.mcp.json')))); // nosemgrep
+		add(this.parseMcpServers(this.readJsonSafe(path.join(globalDir, '.mcp.json')))); // nosemgrep
 
 		return Array.from(byName.values());
 	}
