@@ -1,5 +1,29 @@
 import cp from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { platform } from 'node:process';
+
+function getVoiceBinDir(): string {
+	return join(homedir(), '.nanocoder', 'voice-bin');
+}
+
+function resolvePiperCommand(): string {
+	if (process.env.PIPER_CMD) return process.env.PIPER_CMD;
+	const localBin = join(
+		getVoiceBinDir(),
+		platform === 'win32' ? 'piper.exe' : 'piper',
+	);
+	if (existsSync(localBin)) return localBin;
+	return 'piper';
+}
+
+function resolvePiperModel(): string {
+	if (process.env.PIPER_MODEL) return process.env.PIPER_MODEL;
+	const localModel = join(getVoiceBinDir(), 'en_US-lessac-medium.onnx');
+	if (existsSync(localModel)) return localModel;
+	return 'en_US-lessac-medium.onnx';
+}
 
 /**
  * Synthesizes speech from text using local piper TTS.
@@ -14,13 +38,13 @@ export async function synthesizeSpeech(text: string, outputPath: string, timeout
 			return reject(new Error('AbortError: Synthesis aborted'));
 		}
 
-		const command = process.env.PIPER_CMD || 'piper';
-		const modelPath = process.env.PIPER_MODEL || 'en_US-lessac-medium.onnx';
+		const command = resolvePiperCommand();
+		const modelPath = resolvePiperModel();
 
 		const args = ['--model', modelPath, '--output_file', outputPath];
 		
 		const proc = cp.spawn(command, args, { 
-			stdio: ['pipe', 'ignore', 'ignore']
+			stdio: ['pipe', 'ignore', 'ignore'] 
 		});
 
 		let timeoutId: NodeJS.Timeout | undefined;
