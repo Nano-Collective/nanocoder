@@ -1,8 +1,13 @@
+import {execFile} from 'child_process';
 import {chmodSync, existsSync} from 'fs';
 import * as path from 'path';
+import {promisify} from 'util';
 import test from 'ava';
 import * as fs from 'fs/promises';
+import {MAX_CHECKPOINT_FILES} from '@/constants';
 import {FileSnapshotService} from './file-snapshot';
+
+const execFileAsync = promisify(execFile);
 
 // Helper to create a temporary directory for tests
 async function createTempDir(): Promise<string> {
@@ -42,7 +47,7 @@ test.serial('FileSnapshotService captures single file', async t => {
 		await createTestFile(tempDir, 'test.txt', 'Hello, World!');
 
 		const service = new FileSnapshotService(tempDir);
-		const snapshots = await service.captureFiles(['test.txt']);
+		const {snapshots} = await service.captureFiles(['test.txt']);
 
 		t.is(snapshots.size, 1);
 		t.is(snapshots.get('test.txt')?.toString('utf-8'), 'Hello, World!');
@@ -59,7 +64,7 @@ test.serial('FileSnapshotService captures multiple files', async t => {
 		await createTestFile(tempDir, 'file3.txt', 'Content 3');
 
 		const service = new FileSnapshotService(tempDir);
-		const snapshots = await service.captureFiles([
+		const {snapshots} = await service.captureFiles([
 			'file1.txt',
 			'file2.txt',
 			'file3.txt',
@@ -85,7 +90,7 @@ test.serial('FileSnapshotService captures files in subdirectories', async t => {
 		);
 
 		const service = new FileSnapshotService(tempDir);
-		const snapshots = await service.captureFiles([
+		const {snapshots} = await service.captureFiles([
 			'src/index.ts',
 			'src/utils/helper.ts',
 		]);
@@ -109,7 +114,7 @@ test.serial(
 			await createTestFile(tempDir, 'exists.txt', 'I exist');
 
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = await service.captureFiles([
+			const {snapshots} = await service.captureFiles([
 				'exists.txt',
 				'does-not-exist.txt',
 			]);
@@ -489,7 +494,7 @@ test.serial('FileSnapshotService getModifiedFiles returns array', async t => {
 	const tempDir = await createTempDir();
 	try {
 		const service = new FileSnapshotService(tempDir);
-		const files = service.getModifiedFiles();
+		const {files} = service.getModifiedFiles();
 
 		t.true(Array.isArray(files));
 		// Files should all be strings
@@ -505,7 +510,7 @@ test.serial('FileSnapshotService captures empty files', async t => {
 		await createTestFile(tempDir, 'empty.txt', '');
 
 		const service = new FileSnapshotService(tempDir);
-		const snapshots = await service.captureFiles(['empty.txt']);
+		const {snapshots} = await service.captureFiles(['empty.txt']);
 
 		t.is(snapshots.size, 1);
 		t.is(snapshots.get('empty.txt')?.toString('utf-8'), '');
@@ -523,7 +528,7 @@ test.serial(
 			await createTestFile(tempDir, 'special.txt', specialContent);
 
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = await service.captureFiles(['special.txt']);
+			const {snapshots} = await service.captureFiles(['special.txt']);
 
 			t.is(snapshots.get('special.txt')?.toString('utf-8'), specialContent);
 		} finally {
@@ -538,7 +543,7 @@ test.serial('FileSnapshotService uses relative paths in snapshots', async t => {
 		await createTestFile(tempDir, 'src/file.ts', 'content');
 
 		const service = new FileSnapshotService(tempDir);
-		const snapshots = await service.captureFiles(['src/file.ts']);
+		const {snapshots} = await service.captureFiles(['src/file.ts']);
 
 		// Should use relative path, not absolute
 		const keys = Array.from(snapshots.keys());
@@ -557,7 +562,7 @@ test.serial('FileSnapshotService handles large files', async t => {
 		await createTestFile(tempDir, 'large.txt', largeContent);
 
 		const service = new FileSnapshotService(tempDir);
-		const snapshots = await service.captureFiles(['large.txt']);
+		const {snapshots} = await service.captureFiles(['large.txt']);
 
 		t.is(snapshots.get('large.txt')?.length, 100000);
 	} finally {
@@ -579,7 +584,7 @@ test.serial('FileSnapshotService getModifiedFiles handles git not available', as
 		await fs.mkdir(nonGitDir, {recursive: true});
 
 		const service = new FileSnapshotService(nonGitDir);
-		const files = service.getModifiedFiles();
+		const {files} = service.getModifiedFiles();
 
 		// Should return empty array or array when git is not available
 		// (may return files from parent git repo in some environments)
@@ -636,7 +641,7 @@ test.serial(
 			await fs.writeFile(target, BINARY_FIXTURE);
 
 			const service = new FileSnapshotService(tempDir);
-			const snapshots = await service.captureFiles(['assets/logo.png']);
+			const {snapshots} = await service.captureFiles(['assets/logo.png']);
 
 			// Capture must not decode: the bytes are lost here first.
 			t.deepEqual(snapshots.get('assets/logo.png'), BINARY_FIXTURE);
@@ -646,6 +651,92 @@ test.serial(
 
 			// Restore must not encode.
 			t.deepEqual(await fs.readFile(target), BINARY_FIXTURE);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+// Gap 1: a file git reported but that could not be read used to vanish with only
+// a log line, so a later restore silently put back less than the user thought.
+test.serial(
+	'FileSnapshotService reports files it could not capture',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			await createTestFile(tempDir, 'readable.txt', 'kept');
+
+			const service = new FileSnapshotService(tempDir);
+			const {snapshots, skipped} = await service.captureFiles([
+				'readable.txt',
+				'missing.txt',
+			]);
+
+			t.is(snapshots.size, 1);
+			t.is(skipped.length, 1);
+			t.is(skipped[0]?.path, 'missing.txt');
+			// The reason travels with it, so a restore can say why.
+			t.true((skipped[0]?.reason.length ?? 0) > 0);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial(
+	'FileSnapshotService reports nothing skipped when every file is readable',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			await createTestFile(tempDir, 'a.txt', 'a');
+
+			const service = new FileSnapshotService(tempDir);
+			const {skipped} = await service.captureFiles(['a.txt']);
+
+			t.deepEqual(skipped, []);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+// Gap 2: the cap warned at capture time and was invisible afterwards, so a
+// restore never mentioned the files it was never given.
+test.serial(
+	'FileSnapshotService reports how many files the cap dropped',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			// getModifiedFiles asks git for `diff --name-only HEAD`, so the repo
+			// needs a commit to diff against - a bare `git init` has no HEAD and
+			// the whole lookup falls into its empty-result branch.
+			await execFileAsync('git', ['init'], {cwd: tempDir});
+			await createTestFile(tempDir, 'committed.txt', 'base');
+			await execFileAsync('git', ['add', '-A'], {cwd: tempDir});
+			await execFileAsync(
+				'git',
+				[
+					'-c',
+					'user.email=test@example.com',
+					'-c',
+					'user.name=test',
+					'commit',
+					'-m',
+					'base',
+					'--no-gpg-sign',
+				],
+				{cwd: tempDir},
+			);
+
+			for (let i = 0; i < MAX_CHECKPOINT_FILES + 3; i++) {
+				await createTestFile(tempDir, `file-${i}.txt`, `content ${i}`);
+			}
+
+			const service = new FileSnapshotService(tempDir);
+			const {files, truncatedCount} = service.getModifiedFiles();
+
+			t.is(files.length, MAX_CHECKPOINT_FILES);
+			t.is(truncatedCount, 3);
 		} finally {
 			await cleanupTempDir(tempDir);
 		}

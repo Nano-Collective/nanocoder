@@ -1,5 +1,23 @@
 import type {Message} from '@/types/core';
 
+/** A file git reported as modified that the checkpoint could not capture. */
+export interface SkippedFile {
+	path: string;
+	reason: string;
+}
+
+/** What captureFiles took, and what it had to leave behind. */
+export interface CaptureResult {
+	snapshots: Map<string, Buffer>;
+	skipped: SkippedFile[];
+}
+
+/** Modified files to snapshot, and how many the cap dropped. */
+export interface ModifiedFiles {
+	files: string[];
+	truncatedCount: number;
+}
+
 export interface CheckpointMetadata {
 	name: string;
 	timestamp: string; // ISO 8601 format
@@ -11,6 +29,13 @@ export interface CheckpointMetadata {
 	};
 	description?: string; // Optional: first message or custom
 	gitCommitHash?: string; // Optional: for future git integration
+	// A checkpoint can come out incomplete two ways: a file was unreadable at
+	// capture (an editor or antivirus holding a lock, permissions), or the
+	// MAX_CHECKPOINT_FILES cap dropped files before capture began. Both are
+	// recorded so restore can say so - a partial restore that reports success is
+	// the failure this exists to prevent. Optional, so older checkpoints load.
+	skippedFiles?: SkippedFile[];
+	truncatedFileCount?: number;
 }
 
 export interface CheckpointConversation {

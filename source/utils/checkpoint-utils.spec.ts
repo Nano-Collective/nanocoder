@@ -1,5 +1,10 @@
 import test from 'ava';
-import {formatRelativeTime, validateCheckpointName} from './checkpoint-utils';
+import type {CheckpointMetadata} from '@/types/checkpoint';
+import {
+	describeCheckpointGaps,
+	formatRelativeTime,
+	validateCheckpointName,
+} from './checkpoint-utils';
 
 // formatRelativeTime tests
 test('formatRelativeTime returns "Just now" for timestamps less than a minute ago', t => {
@@ -219,4 +224,72 @@ test('validateCheckpointName rejects name ending with space', t => {
 test('validateCheckpointName accepts name with dot in middle', t => {
 	const result = validateCheckpointName('checkpoint.v1');
 	t.true(result.valid);
+});
+
+/** describeCheckpointGaps takes a whole checkpoint; most cases only vary metadata. */
+function gapsFor(
+	metadata: Partial<CheckpointMetadata>,
+	fileSnapshots: Map<string, Buffer> = new Map(),
+): string[] {
+	return describeCheckpointGaps({
+		metadata: {filesChanged: [], ...metadata} as CheckpointMetadata,
+		fileSnapshots,
+	});
+}
+
+// The wording is the whole point of the feature: a restore that says only
+// "restored successfully" over an incomplete checkpoint is the bug.
+test('describeCheckpointGaps returns nothing for a complete checkpoint', t => {
+	t.deepEqual(gapsFor({}), []);
+});
+
+test('describeCheckpointGaps names each file that could not be captured', t => {
+	const gaps = gapsFor({
+		skippedFiles: [{path: 'assets/logo.png', reason: 'EBUSY: resource busy'}],
+	});
+
+	t.is(gaps.length, 1);
+	t.regex(gaps[0]!, /assets\/logo\.png/);
+	t.regex(gaps[0]!, /EBUSY: resource busy/);
+	t.regex(gaps[0]!, /NOT been restored/);
+});
+
+test('describeCheckpointGaps reports files dropped by the cap', t => {
+	const gaps = gapsFor({truncatedFileCount: 7});
+
+	t.is(gaps.length, 1);
+	t.regex(gaps[0]!, /7 further modified file/);
+	t.regex(gaps[0]!, /NOT been restored/);
+});
+
+test('describeCheckpointGaps reports both gaps together', t => {
+	const gaps = gapsFor({
+		skippedFiles: [{path: 'a.bin', reason: 'EPERM'}],
+		truncatedFileCount: 2,
+	});
+
+	t.is(gaps.length, 2);
+});
+
+test('describeCheckpointGaps reports files it could not read back out', t => {
+	// loadCheckpoint logs and carries on when a stored snapshot is gone, so the
+	// shortfall is only visible by comparing against filesChanged.
+	const gaps = gapsFor(
+		{filesChanged: ['kept.txt', 'lost.bin']},
+		new Map([['kept.txt', Buffer.from('kept')]]),
+	);
+
+	t.is(gaps.length, 1);
+	t.regex(gaps[0]!, /lost\.bin/);
+	t.regex(gaps[0]!, /could not be read back out/);
+	t.notRegex(gaps[0]!, /kept\.txt/);
+});
+
+test('describeCheckpointGaps stays quiet when every recorded file loaded', t => {
+	const gaps = gapsFor(
+		{filesChanged: ['kept.txt']},
+		new Map([['kept.txt', Buffer.from('kept')]]),
+	);
+
+	t.deepEqual(gaps, []);
 });

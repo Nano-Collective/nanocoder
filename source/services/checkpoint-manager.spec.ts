@@ -3,6 +3,7 @@ import * as path from 'path';
 import type {Message} from '@/types/core';
 import test from 'ava';
 import * as fs from 'fs/promises';
+import {describeCheckpointGaps} from '@/utils/checkpoint-utils';
 import {CheckpointManager} from './checkpoint-manager';
 
 // Helper to create a temporary directory for tests
@@ -633,6 +634,104 @@ test.serial(
 
 			await manager.restoreFiles(checkpointData);
 			t.deepEqual(await fs.readFile(target), BINARY_FIXTURE);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+// An incomplete capture has to outlive the process that made it: the warning at
+// save time is gone by the time anyone restores, so the gap goes in metadata.
+test.serial(
+	'CheckpointManager records files it could not capture',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			const kept = path.join(tempDir, 'kept.txt');
+			await fs.writeFile(kept, 'kept');
+
+			const manager = new CheckpointManager(tempDir);
+			const metadata = await manager.saveCheckpoint(
+				'partial',
+				createMockMessages(2),
+				'TestProvider',
+				'test-model',
+				['kept.txt', 'locked.txt'],
+			);
+
+			t.deepEqual(metadata.filesChanged, ['kept.txt']);
+			t.is(metadata.skippedFiles?.length, 1);
+			t.is(metadata.skippedFiles?.[0]?.path, 'locked.txt');
+
+			// It has to survive the round-trip to disk, not just the return value.
+			const reloaded = await manager.getCheckpointMetadata('partial');
+			t.is(reloaded.skippedFiles?.[0]?.path, 'locked.txt');
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+test.serial(
+	'CheckpointManager leaves the gap fields off a complete checkpoint',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			await fs.writeFile(path.join(tempDir, 'kept.txt'), 'kept');
+
+			const manager = new CheckpointManager(tempDir);
+			const metadata = await manager.saveCheckpoint(
+				'complete',
+				createMockMessages(2),
+				'TestProvider',
+				'test-model',
+				['kept.txt'],
+			);
+
+			t.is(metadata.skippedFiles, undefined);
+			t.is(metadata.truncatedFileCount, undefined);
+		} finally {
+			await cleanupTempDir(tempDir);
+		}
+	},
+);
+
+// The third way a restore comes up short: the file was captured fine, but the
+// stored copy is gone by the time anyone loads it. loadCheckpoint logs and
+// carries on, so the shortfall is only visible against metadata.filesChanged.
+test.serial(
+	'CheckpointManager load reports snapshots it could not read back',
+	async t => {
+		const tempDir = await createTempDir();
+		try {
+			await fs.writeFile(path.join(tempDir, 'kept.txt'), 'kept');
+			await fs.writeFile(path.join(tempDir, 'lost.txt'), 'lost');
+
+			const manager = new CheckpointManager(tempDir);
+			await manager.saveCheckpoint(
+				'lossy',
+				createMockMessages(2),
+				'TestProvider',
+				'test-model',
+				['kept.txt', 'lost.txt'],
+			);
+
+			// Something removed the stored copy after the fact.
+			await fs.rm(
+				path.join(tempDir, '.nanocoder', 'checkpoints', 'lossy', 'files', 'lost.txt'),
+			);
+
+			const checkpointData = await manager.loadCheckpoint('lossy');
+
+			t.deepEqual(checkpointData.metadata.filesChanged, [
+				'kept.txt',
+				'lost.txt',
+			]);
+			t.is(checkpointData.fileSnapshots.size, 1);
+
+			const gaps = describeCheckpointGaps(checkpointData);
+			t.is(gaps.length, 1);
+			t.regex(gaps[0]!, /lost\.txt/);
 		} finally {
 			await cleanupTempDir(tempDir);
 		}

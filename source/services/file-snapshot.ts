@@ -3,6 +3,11 @@ import {existsSync} from 'fs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import {MAX_CHECKPOINT_FILES} from '@/constants';
+import type {
+	CaptureResult,
+	ModifiedFiles,
+	SkippedFile,
+} from '@/types/checkpoint';
 import {formatError} from '@/utils/error-formatter';
 import {loadGitignore} from '@/utils/gitignore-loader';
 import {logWarning} from '@/utils/message-queue';
@@ -25,9 +30,14 @@ export class FileSnapshotService {
 	 * repository tracks. Decoding those as UTF-8 replaces every invalid byte
 	 * with U+FFFD, and since the checkpoint copy is written from this map the
 	 * original bytes would be gone at save time with nothing left to recover.
+	 *
+	 * Files that cannot be read are reported alongside the ones that could, not
+	 * just logged: the caller records them so a later restore can say what it
+	 * did not put back.
 	 */
-	async captureFiles(filePaths: string[]): Promise<Map<string, Buffer>> {
+	async captureFiles(filePaths: string[]): Promise<CaptureResult> {
 		const snapshots = new Map<string, Buffer>();
+		const skipped: SkippedFile[] = [];
 
 		for (const filePath of filePaths) {
 			try {
@@ -37,16 +47,18 @@ export class FileSnapshotService {
 				const normalizedPath = relativePath.split(path.sep).join('/');
 				snapshots.set(normalizedPath, content);
 			} catch (error) {
+				const reason = formatError(error);
+				skipped.push({path: filePath, reason});
 				logWarning('Could not capture file', true, {
 					context: {
 						filePath,
-						error: formatError(error),
+						error: reason,
 					},
 				});
 			}
 		}
 
-		return snapshots;
+		return {snapshots, skipped};
 	}
 
 	/**
@@ -75,8 +87,11 @@ export class FileSnapshotService {
 	/**
 	 * Get list of modified files in the workspace
 	 * Uses git to detect modified files if available, otherwise returns empty array
+	 *
+	 * Reports how many the cap dropped rather than only warning about it, so the
+	 * count reaches the checkpoint's metadata and, from there, a later restore.
 	 */
-	getModifiedFiles(): string[] {
+	getModifiedFiles(): ModifiedFiles {
 		try {
 			const modifiedOutput = execSync('git diff --name-only HEAD', {
 				cwd: this.workspaceRoot,
@@ -116,17 +131,20 @@ export class FileSnapshotService {
 						},
 					},
 				);
-				return filtered.slice(0, MAX_CHECKPOINT_FILES);
+				return {
+					files: filtered.slice(0, MAX_CHECKPOINT_FILES),
+					truncatedCount: filtered.length - MAX_CHECKPOINT_FILES,
+				};
 			}
 
-			return filtered;
+			return {files: filtered, truncatedCount: 0};
 		} catch {
 			logWarning('Git not available for file tracking', true, {
 				context: {
 					workspaceRoot: this.workspaceRoot,
 				},
 			});
-			return [];
+			return {files: [], truncatedCount: 0};
 		}
 	}
 

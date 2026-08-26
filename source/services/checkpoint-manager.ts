@@ -120,12 +120,14 @@ export class CheckpointManager {
 			throw new Error(`Checkpoint '${checkpointName}' already exists`);
 		}
 
-		// Get modified files if not provided
-		const filesToSnapshot =
-			modifiedFiles || this.fileSnapshotService.getModifiedFiles();
+		// Get modified files if not provided. An explicit list is taken as given, so
+		// nothing was dropped by the cap in that case.
+		const {files: filesToSnapshot, truncatedCount} = modifiedFiles
+			? {files: modifiedFiles, truncatedCount: 0}
+			: this.fileSnapshotService.getModifiedFiles();
 
 		// Capture file snapshots
-		const fileSnapshots =
+		const {snapshots: fileSnapshots, skipped} =
 			await this.fileSnapshotService.captureFiles(filesToSnapshot);
 
 		// Create metadata
@@ -136,6 +138,10 @@ export class CheckpointManager {
 			filesChanged: Array.from(fileSnapshots.keys()),
 			provider: {name: provider, model},
 			description: this.generateDescription(messages),
+			// Only recorded when the checkpoint really is incomplete, so a clean
+			// capture writes the same metadata it always did.
+			...(skipped.length > 0 && {skippedFiles: skipped}),
+			...(truncatedCount > 0 && {truncatedFileCount: truncatedCount}),
 		};
 
 		// Create conversation data

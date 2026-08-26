@@ -1,9 +1,17 @@
 import React from 'react';
 import {CheckpointListDisplay} from '@/components/checkpoint-display';
-import {InfoMessage, SuccessMessage} from '@/components/message-box';
+import {
+	InfoMessage,
+	SuccessMessage,
+	WarningMessage,
+} from '@/components/message-box';
 import {CheckpointManager} from '@/services/checkpoint-manager';
 import {generateKey} from '@/session/key-generator';
 import {Command, Message} from '@/types/index';
+import {
+	describeCheckpointGaps,
+	describeGapsMessage,
+} from '@/utils/checkpoint-utils';
 import {formatError} from '@/utils/error-formatter';
 import {
 	errorMsg,
@@ -153,6 +161,8 @@ async function loadCheckpoint(
 
 			await manager.restoreFiles(checkpointData);
 
+			const gaps = describeCheckpointGaps(checkpointData);
+
 			return React.createElement(
 				React.Fragment,
 				{key: generateKey('load-success')},
@@ -171,6 +181,13 @@ async function loadCheckpoint(
   • Created: ${new Date(checkpointData.metadata.timestamp).toLocaleString()}`,
 					hideBox: true,
 				}),
+				gaps.length > 0
+					? React.createElement(WarningMessage, {
+							key: 'gaps',
+							message: describeGapsMessage(gaps),
+							hideBox: true,
+						})
+					: null,
 			);
 		}
 
@@ -234,6 +251,13 @@ async function loadCheckpoint(
 								'restore-success',
 							),
 						);
+
+						const gaps = describeCheckpointGaps(checkpointData);
+						if (gaps.length > 0) {
+							addToMessageQueue(
+								warningMsg(describeGapsMessage(gaps), 'restore-gaps'),
+							);
+						}
 					} catch (error) {
 						handleError(
 							error instanceof Error ? error : new Error('Unknown error'),
