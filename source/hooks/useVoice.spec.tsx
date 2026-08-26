@@ -6,6 +6,7 @@ import type { VoiceState } from '@/components/voice-status-bar';
 import { getVoicePreference, updateVoicePreference } from '@/config/preferences';
 import type { LLMClient } from '@/types/core';
 import type { RealtimeCapability, RealtimeSession } from '@/types/realtime';
+import { setDeclinedVoiceInstallForSession } from '@/utils/voice-install-queue';
 
 const flush = (ms = 50) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -510,6 +511,57 @@ test.serial('hands-free VAD speech_start barge-in during speaking state', async 
 
 		unmount();
 	} finally {
+		updateVoicePreference(originalPref);
+	}
+});
+
+test.serial('hands-free mode: declining installation shows message exactly once and does not loop', async t => {
+	let queueCount = 0;
+	setDeclinedVoiceInstallForSession(true);
+
+	const mockPlugin = makeMockPlugin({
+		checkDependenciesInstalled: async () => ({
+			installed: false,
+			missing: ['sox'],
+		}),
+	});
+
+	const originalPref = getVoicePreference();
+	updateVoicePreference({ ...originalPref, enabled: true, activationMode: 'hands-free' });
+
+	try {
+		const { rerender, unmount } = render(
+			<VoiceHarness
+				handleUserSubmit={async () => {}}
+				messages={[]}
+				addToChatQueue={() => {
+					queueCount++;
+				}}
+				loadPlugin={async () => mockPlugin}
+			/>,
+		);
+
+		await flush(100);
+
+		// Trigger multiple re-renders to simulate parent state updates
+		for (let i = 0; i < 5; i++) {
+			rerender(
+				<VoiceHarness
+					handleUserSubmit={async () => {}}
+					messages={[]}
+					addToChatQueue={() => {
+						queueCount++;
+					}}
+					loadPlugin={async () => mockPlugin}
+				/>,
+			);
+			await flush(50);
+		}
+
+		t.is(queueCount, 1, 'Declined notice must be queued exactly once, never in an infinite loop');
+		unmount();
+	} finally {
+		setDeclinedVoiceInstallForSession(false);
 		updateVoicePreference(originalPref);
 	}
 });

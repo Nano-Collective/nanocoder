@@ -47,7 +47,8 @@ export interface VoicePlugin {
 		customCheck?: unknown,
 	) => Promise<{installed: boolean; missing: ('sox' | 'whisper' | 'piper')[]}>;
 	installDependencies?: (options?: {
-		onProgress?: (progress: {stage: string; percent: number}) => void;
+		onProgress?: (step: string, percent: number) => void;
+		installRunner?: (command: string, args: string[]) => Promise<void>;
 	}) => Promise<void>;
 	createVadEngine?: (options?: unknown) => unknown;
 }
@@ -80,12 +81,14 @@ export interface UseVoiceReturn {
 	activeRealtimeSession: RealtimeSession | null;
 }
 
+const defaultLoadPlugin = async (): Promise<VoicePlugin> =>
+	(await import('@nanocollective/nanocoder-voice')) as unknown as VoicePlugin;
+
 export function useVoice({
 	handleUserSubmit,
 	messages,
 	addToChatQueue,
-	loadPlugin = async () =>
-		(await import('@nanocollective/nanocoder-voice')) as unknown as VoicePlugin,
+	loadPlugin = defaultLoadPlugin,
 	voicePreference,
 	handleCancel,
 	client,
@@ -114,6 +117,11 @@ export function useVoice({
 		addToChatQueueRef.current = addToChatQueue;
 	}, [addToChatQueue]);
 
+	const loadPluginRef = React.useRef(loadPlugin);
+	React.useEffect(() => {
+		loadPluginRef.current = loadPlugin;
+	}, [loadPlugin]);
+
 	const clientRef = React.useRef(client);
 	React.useEffect(() => {
 		clientRef.current = client;
@@ -135,6 +143,7 @@ export function useVoice({
 		null,
 	);
 	const vadEngineRef = React.useRef<unknown>(null);
+	const hasCheckedHandsFreeDepsRef = React.useRef(false);
 	const activeRealtimeSessionRef = React.useRef<RealtimeSession | null>(null);
 
 	const hasRealtime = React.useMemo(() => isRealtimeCapable(client), [client]);
@@ -218,9 +227,7 @@ export function useVoice({
 					missing: check.missing,
 					installDependencies: async onProgress => {
 						if (plugin.installDependencies) {
-							await plugin.installDependencies({
-								onProgress: p => onProgress(p.stage, p.percent),
-							});
+							await plugin.installDependencies({onProgress});
 						}
 					},
 				});
@@ -294,6 +301,7 @@ export function useVoice({
 	// Hands-free VAD effect - REACTIVE to enabled and activationMode changes
 	React.useEffect(() => {
 		if (!enabled || activationMode !== 'hands-free') {
+			hasCheckedHandsFreeDepsRef.current = false;
 			if (vadEngineRef.current) {
 				const engine = vadEngineRef.current as {stop?: () => void};
 				if (typeof engine.stop === 'function') {
@@ -304,16 +312,17 @@ export function useVoice({
 			return;
 		}
 
-		if (vadEngineRef.current) {
+		if (vadEngineRef.current || hasCheckedHandsFreeDepsRef.current) {
 			return;
 		}
 
+		hasCheckedHandsFreeDepsRef.current = true;
 		let isCancelled = false;
 
 		const initVad = async () => {
 			let plugin: VoicePlugin;
 			try {
-				plugin = await loadPlugin();
+				plugin = await (loadPluginRef.current || defaultLoadPlugin)();
 			} catch {
 				return;
 			}
@@ -433,7 +442,6 @@ export function useVoice({
 	}, [
 		enabled,
 		activationMode,
-		loadPlugin,
 		ensureDependencies,
 		cleanupActiveFile,
 		interrupt,
@@ -555,7 +563,7 @@ export function useVoice({
 
 		let plugin: VoicePlugin;
 		try {
-			plugin = await loadPlugin();
+			plugin = await (loadPluginRef.current || defaultLoadPlugin)();
 		} catch (_error) {
 			addToChatQueueRef.current(
 				React.createElement(ErrorMessage, {
@@ -680,7 +688,7 @@ export function useVoice({
 				}),
 			);
 		}
-	}, [loadPlugin, ensureDependencies, cleanupActiveFile, interrupt]);
+	}, [ensureDependencies, cleanupActiveFile, interrupt]);
 
 	return {
 		state,
