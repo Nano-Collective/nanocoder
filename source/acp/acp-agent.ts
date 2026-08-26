@@ -273,15 +273,16 @@ export class AcpAgent implements Agent {
 						return sendBuiltinReply(msg);
 					}
 
+					if (commandName === 'settings') {
+						const msg =
+							'Use the Settings tab in the Nanocoder sidebar (the gear icon in the view title bar, or `Nanocoder: Settings` in the Command Palette).';
+						return sendBuiltinReply(msg);
+					}
+
 					if (
-						[
-							'init',
-							'theme',
-							'compact',
-							'context-max',
-							'usage',
-							'settings',
-						].includes(commandName)
+						['init', 'theme', 'compact', 'context-max', 'usage'].includes(
+							commandName,
+						)
 					) {
 						const msg = `The \`/${commandName}\` command is only available in the interactive CLI (\`nanocoder\` in a terminal). It is not supported in the VS Code GUI.`;
 						return sendBuiltinReply(msg);

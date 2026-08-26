@@ -267,20 +267,21 @@ test.serial(
 						reasoning: null,
 						toolCalls: [
 							{
-								name: "write_to_file",
+								name: "write_file",
 								arguments: { path: "/repo/a.ts" },
 								result: "ok",
 								error: null,
 							},
 							{
 								// Same path written twice — should be deduped.
-								name: "edit_file",
+								name: "diff_edit",
 								arguments: { path: "/repo/a.ts" },
 								result: "ok",
 								error: null,
 							},
 							{
-								name: "create_file",
+								// write_file accepts file_path as a legacy alias.
+								name: "write_file",
 								arguments: { file_path: "/repo/b.ts" },
 								result: "ok",
 								error: null,
