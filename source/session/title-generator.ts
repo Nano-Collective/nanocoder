@@ -4,7 +4,10 @@ import type {LLMClient, Message} from '@/types/core';
 /** Below this many characters, a first message is too thin to be a title. */
 const WEAK_TITLE_THRESHOLD = 40;
 
-const MAX_FIRST_MESSAGE_CHARS = 500;
+const MAX_USER_MESSAGE_CHARS = 500;
+
+/** How many opening user turns shape the title. */
+const MAX_USER_MESSAGES = 3;
 const MAX_TOOL_SUMMARIES = 10;
 const MAX_TOOL_SUMMARY_CHARS = 100;
 const MAX_ASSISTANT_REPLY_CHARS = 300;
@@ -13,7 +16,8 @@ const MAX_ASSISTANT_REPLY_CHARS = 300;
 const PATH_ARG_KEYS = ['path', 'file_path', 'filePath', 'pattern', 'command'];
 
 export interface TitleContext {
-	firstUserMessage: string;
+	/** The opening user turns, in order. The first one anchors the title. */
+	userMessages: string[];
 	/** e.g. ["read_file: source/auth/login.ts"] */
 	toolSummaries: string[];
 	/** Used only when toolSummaries is empty. */
@@ -40,6 +44,26 @@ export function normalizeFirstMessage(content: string): string {
  */
 export function isWeakTitle(firstUserMessage: string): boolean {
 	return normalizeFirstMessage(firstUserMessage).length < WEAK_TITLE_THRESHOLD;
+}
+
+/**
+ * The opening user turns, in order, blanks dropped. Titling waits for a second
+ * turn or a tool call, so those later turns are usually where the actual task
+ * is stated - taking only the first would discard the context we waited for.
+ */
+export function extractUserMessages(messages: Message[]): string[] {
+	const turns: string[] = [];
+
+	for (const message of messages) {
+		if (turns.length >= MAX_USER_MESSAGES) break;
+		if (message.role !== 'user') continue;
+		if (typeof message.content !== 'string') continue;
+
+		const trimmed = message.content.trim();
+		if (trimmed) turns.push(trimmed);
+	}
+
+	return turns;
 }
 
 /** Tool names plus what they acted on. This is what turns "fix this" into a title. */
@@ -91,8 +115,14 @@ export function sanitizeTitle(raw: string): string | null {
 
 /** All truncation happens here, before anything reaches a provider. */
 export function buildTitleRequest(ctx: TitleContext): Message[] {
+	const turns = ctx.userMessages
+		.slice(0, MAX_USER_MESSAGES)
+		.map(turn => turn.slice(0, MAX_USER_MESSAGE_CHARS));
+
 	const parts = [
-		`First message: ${ctx.firstUserMessage.slice(0, MAX_FIRST_MESSAGE_CHARS)}`,
+		turns.length > 1
+			? `Conversation so far:\n${turns.map((t, i) => `${i + 1}. ${t}`).join('\n')}`
+			: `User request: ${turns[0] ?? ''}`,
 	];
 
 	if (ctx.toolSummaries.length > 0) {
@@ -110,9 +140,10 @@ export function buildTitleRequest(ctx: TitleContext): Message[] {
 		{
 			role: 'system',
 			content:
-				'You name coding sessions. Reply with ONLY a title of 3 to 6 words ' +
-				'describing the task worked on. No quotes, no trailing punctuation, ' +
-				'no explanation, no preamble.',
+				'You name coding sessions. Summarise the whole exchange into ONLY a ' +
+				'title of 3 to 6 words describing the task worked on. The first ' +
+				'request is what the session is about; later ones add detail. ' +
+				'No quotes, no trailing punctuation, no explanation, no preamble.',
 		},
 		{role: 'user', content: parts.join('\n\n')},
 	];

@@ -5,6 +5,7 @@ import {type SessionManager, sessionManager} from './session-manager';
 import {resolveTitleClient} from './title-client';
 import {
 	extractToolSummaries,
+	extractUserMessages,
 	generateSessionTitle,
 	isWeakTitle,
 } from './title-generator';
@@ -63,8 +64,8 @@ async function runTitleGeneration(
 	if (!isWeakTitle(firstUser.content)) return;
 
 	const toolSummaries = extractToolSummaries(messages);
-	const userMessageCount = messages.filter(m => m.role === 'user').length;
-	if (userMessageCount < 2 && toolSummaries.length === 0) return;
+	const userMessages = extractUserMessages(messages);
+	if (userMessages.length < 2 && toolSummaries.length === 0) return;
 
 	const session = await manager.readSession(sessionId);
 	if (!session) return;
@@ -84,7 +85,7 @@ async function runTitleGeneration(
 		const titleClient = await resolveTitleClient(client);
 		const title = await generateSessionTitle(
 			titleClient,
-			{firstUserMessage: firstUser.content, toolSummaries, assistantReply},
+			{userMessages, toolSummaries, assistantReply},
 			timeout.signal,
 		);
 		if (!title) return;

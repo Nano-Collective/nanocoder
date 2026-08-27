@@ -2,6 +2,7 @@ import test from 'ava';
 import type {LLMClient} from '@/types/core';
 import {
 	buildTitleRequest,
+	extractUserMessages,
 	extractToolSummaries,
 	generateSessionTitle,
 	isWeakTitle,
@@ -146,19 +147,9 @@ test('sanitizeTitle returns null for empty or whitespace input', t => {
 	t.is(sanitizeTitle('""'), null);
 });
 
-test('buildTitleRequest truncates the first user message to 500 chars', t => {
-	const messages = buildTitleRequest({
-		firstUserMessage: 'x'.repeat(900),
-		toolSummaries: [],
-	});
-	const userContent = messages[messages.length - 1].content;
-	t.false(userContent.includes('x'.repeat(501)));
-	t.true(userContent.includes('x'.repeat(500)));
-});
-
 test('buildTitleRequest truncates each tool summary to 100 chars', t => {
 	const messages = buildTitleRequest({
-		firstUserMessage: 'fix this',
+		userMessages: ['fix this'],
 		toolSummaries: [`read_file: ${'y'.repeat(300)}`],
 	});
 	const userContent = messages[messages.length - 1].content;
@@ -167,7 +158,7 @@ test('buildTitleRequest truncates each tool summary to 100 chars', t => {
 
 test('buildTitleRequest uses the assistant reply only when no tools ran', t => {
 	const withTools = buildTitleRequest({
-		firstUserMessage: 'fix this',
+		userMessages: ['fix this'],
 		toolSummaries: ['read_file: a.ts'],
 		assistantReply: 'I looked at the parser.',
 	});
@@ -178,7 +169,7 @@ test('buildTitleRequest uses the assistant reply only when no tools ran', t => {
 	);
 
 	const withoutTools = buildTitleRequest({
-		firstUserMessage: 'fix this',
+		userMessages: ['fix this'],
 		toolSummaries: [],
 		assistantReply: 'I looked at the parser.',
 	});
@@ -191,7 +182,7 @@ test('buildTitleRequest uses the assistant reply only when no tools ran', t => {
 
 test('buildTitleRequest truncates the assistant reply to 300 chars', t => {
 	const messages = buildTitleRequest({
-		firstUserMessage: 'fix this',
+		userMessages: ['fix this'],
 		toolSummaries: [],
 		assistantReply: 'z'.repeat(800),
 	});
@@ -201,7 +192,7 @@ test('buildTitleRequest truncates the assistant reply to 300 chars', t => {
 
 test('buildTitleRequest opens with a system message', t => {
 	const messages = buildTitleRequest({
-		firstUserMessage: 'fix this',
+		userMessages: ['fix this'],
 		toolSummaries: [],
 	});
 	t.is(messages[0].role, 'system');
@@ -223,7 +214,7 @@ function fakeClientReturning(content: string): LLMClient {
 	} as unknown as LLMClient;
 }
 
-const ctx = {firstUserMessage: 'fix this', toolSummaries: ['read_file: a.ts']};
+const ctx = {userMessages: ['fix this'], toolSummaries: ['read_file: a.ts']};
 
 test('generateSessionTitle returns a sanitized title', async t => {
 	const client = fakeClientReturning('"Fix Login Redirect Bug."');
@@ -292,4 +283,50 @@ test('generateSessionTitle forwards the abort signal', async t => {
 	const controller = new AbortController();
 	await generateSessionTitle(client, ctx, controller.signal);
 	t.is(seenSignal, controller.signal);
+});
+
+test('buildTitleRequest includes the follow-up user turns, not just the first', t => {
+	const messages = buildTitleRequest({
+		userMessages: ['fix this', 'now also update the tests'],
+		toolSummaries: [],
+	});
+	const userContent = messages[messages.length - 1].content;
+	t.true(userContent.includes('fix this'));
+	t.true(userContent.includes('now also update the tests'));
+});
+
+test('buildTitleRequest caps the conversation at the first 3 user turns', t => {
+	const messages = buildTitleRequest({
+		userMessages: ['one', 'two', 'three', 'four'],
+		toolSummaries: [],
+	});
+	const userContent = messages[messages.length - 1].content;
+	t.true(userContent.includes('three'));
+	t.false(userContent.includes('four'));
+});
+
+test('buildTitleRequest truncates every user turn to 500 chars', t => {
+	const messages = buildTitleRequest({
+		userMessages: ['a'.repeat(900), 'b'.repeat(900)],
+		toolSummaries: [],
+	});
+	const userContent = messages[messages.length - 1].content;
+	t.true(userContent.includes('a'.repeat(500)));
+	t.false(userContent.includes('a'.repeat(501)));
+	t.true(userContent.includes('b'.repeat(500)));
+	t.false(userContent.includes('b'.repeat(501)));
+});
+
+test('extractUserMessages takes the first turns in order, skipping empties', t => {
+	t.deepEqual(
+		extractUserMessages([
+			{role: 'user', content: 'fix this'},
+			{role: 'assistant', content: 'ok'},
+			{role: 'user', content: '   '},
+			{role: 'user', content: 'now the tests'},
+			{role: 'user', content: 'and the docs'},
+			{role: 'user', content: 'and the changelog'},
+		]),
+		['fix this', 'now the tests', 'and the docs'],
+	);
 });

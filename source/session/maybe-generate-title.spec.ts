@@ -352,3 +352,39 @@ test('never rejects, even when the session store throws', async t => {
 		}),
 	);
 });
+
+test('the follow-up user turn reaches the model, not just the first', async t => {
+	const session = await manager.createSession({
+		title: 'hi',
+		messageCount: 4,
+		provider: 'fake',
+		model: 'fake',
+		workingDirectory: '/tmp',
+		messages: greetingTurn,
+	});
+
+	let prompt = '';
+	const capturingClient = {
+		...client('README Overview'),
+		chat: async (messages: Message[]) => {
+			prompt = messages.map(m => m.content).join('\n');
+			return {choices: [{message: {role: 'assistant', content: 'README Overview'}}]};
+		},
+	} as unknown as LLMClient;
+
+	await maybeGenerateTitle({
+		sessionId: session.id,
+		messages: [
+			...greetingTurn,
+			{role: 'user', content: 'summarize the README'},
+			{role: 'assistant', content: 'The README describes the project.'},
+		],
+		client: capturingClient,
+		manager,
+	});
+
+	// Titling waits for this turn, so dropping it would throw away the only
+	// message that says what the session is actually about.
+	t.true(prompt.includes('summarize the README'));
+	t.true(prompt.includes('hi'));
+});
