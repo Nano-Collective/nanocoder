@@ -73,7 +73,10 @@ async function runTitleGeneration(
 
 	try {
 		const assistantReply = messages.find(
-			m => m.role === 'assistant' && m.content.trim().length > 0,
+			m =>
+				m.role === 'assistant' &&
+				typeof m.content === 'string' &&
+				m.content.trim().length > 0,
 		)?.content;
 
 		const titleClient = await resolveTitleClient(client);

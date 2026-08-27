@@ -388,3 +388,31 @@ test('the follow-up user turn reaches the model, not just the first', async t =>
 	t.true(prompt.includes('summarize the README'));
 	t.true(prompt.includes('hi'));
 });
+
+test('an assistant message without string content does not abort titling', async t => {
+	const session = await manager.createSession({
+		title: 'hi',
+		messageCount: 4,
+		provider: 'fake',
+		model: 'fake',
+		workingDirectory: '/tmp',
+		messages: greetingTurn,
+	});
+
+	// A resumed session can carry an assistant entry with no string content.
+	// Reading .trim() off it threw, and the catch turned that into a debug line.
+	await maybeGenerateTitle({
+		sessionId: session.id,
+		messages: [
+			{role: 'assistant', content: undefined as unknown as string},
+			{role: 'user', content: 'hi'},
+			{role: 'user', content: 'summarize the README'},
+		],
+		client: client('README Overview'),
+		manager,
+	});
+
+	const saved = await manager.readSession(session.id);
+	t.is(saved?.title, 'README Overview');
+	t.true(saved?.titleGenerated);
+});

@@ -47,6 +47,7 @@ import {loadPreferences, updateLastUsed} from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
 import {maybeGenerateTitle} from '@/session/maybe-generate-title';
 import {sessionManager} from '@/session/session-manager';
+import {deriveTitleFromFirstMessage} from '@/session/title-generator';
 import {getTuneToolMode} from '@/types/config';
 import {getLogger} from '@/utils/logging';
 import {buildSystemPrompt, setLastBuiltPrompt} from '@/utils/prompt-builder';
@@ -382,10 +383,14 @@ export class AcpAgent implements Agent {
 					onTitle: title => {
 						// notify(), not the deprecated extNotification() alias.
 						// The client receives it as extNotification(method, params).
-						void this.conn.notify('_nanocoder/sessionTitleChanged', {
-							sessionId: session.sessionId,
-							title,
-						});
+						// Lands after the turn went idle, so the client may already be
+						// gone; an unhandled rejection here would kill the agent.
+						void this.conn
+							.notify('_nanocoder/sessionTitleChanged', {
+								sessionId: session.sessionId,
+								title,
+							})
+							.catch(() => {});
 					},
 				});
 			}
@@ -792,11 +797,10 @@ export class AcpAgent implements Agent {
 			let title = existingSession?.title;
 			if (!title || title === 'New Session') {
 				const firstUserMessage = saveableMessages.find(m => m.role === 'user');
-				if (firstUserMessage && typeof firstUserMessage.content === 'string') {
-					title = firstUserMessage.content.split('\n')[0].substring(0, 50);
-				} else {
-					title = 'New Session';
-				}
+				title =
+					(typeof firstUserMessage?.content === 'string'
+						? deriveTitleFromFirstMessage(firstUserMessage.content)
+						: null) ?? 'New Session';
 			}
 
 			await sessionManager.saveSession({

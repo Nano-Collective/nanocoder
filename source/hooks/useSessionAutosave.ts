@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useRef} from 'react';
 import {getAppConfig} from '@/config/index';
 import {sessionManager} from '@/session/session-manager';
+import {deriveTitleFromFirstMessage} from '@/session/title-generator';
 import type {Message} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {logWarning} from '@/utils/message-queue';
@@ -132,17 +133,18 @@ export function useSessionAutosave({
 				// the update path instead of calling createSession() again.
 				const liveSessionId = currentSessionIdRef.current;
 
-				// Derive the title from the FIRST user message, matching the ACP
-				// path. Deriving it from the latest one made the title a rolling
-				// mirror of whatever was typed most recently, which is not a name.
+				// Derive from the FIRST user message, through the same helper the
+				// ACP path uses. Deriving it from the latest one made the title a
+				// rolling mirror of whatever was typed most recently.
 				// The full message array is always written - maxMessages bounds only
 				// what is sent to the model (sliced in the conversation loop).
 				const firstUserMessage = capturedMessages.find(
 					msg => msg.role === 'user',
 				);
-				const title = firstUserMessage
-					? firstUserMessage.content.split('\n')[0].substring(0, 50)
-					: `Session ${new Date().toLocaleDateString()}`;
+				const title =
+					(firstUserMessage
+						? deriveTitleFromFirstMessage(firstUserMessage.content)
+						: null) ?? `Session ${new Date().toLocaleDateString()}`;
 
 				if (liveSessionId) {
 					const session = await sessionManager.readSession(liveSessionId);

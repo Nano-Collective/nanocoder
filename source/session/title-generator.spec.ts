@@ -2,6 +2,7 @@ import test from 'ava';
 import type {LLMClient} from '@/types/core';
 import {
 	buildTitleRequest,
+	deriveTitleFromFirstMessage,
 	extractUserMessages,
 	extractToolSummaries,
 	generateSessionTitle,
@@ -329,4 +330,42 @@ test('extractUserMessages takes the first turns in order, skipping empties', t =
 		]),
 		['fix this', 'now the tests', 'and the docs'],
 	);
+});
+
+test('extractUserMessages strips the active-file prefix VS Code injects', t => {
+	t.deepEqual(
+		extractUserMessages([
+			{role: 'user', content: '[Active file: source/app/App.tsx]\n\nfix the crash'},
+		]),
+		['fix the crash'],
+	);
+});
+
+test('extractUserMessages keeps the whole body, not just the first line', t => {
+	t.deepEqual(
+		extractUserMessages([
+			{role: 'user', content: 'add retries\n\nthe provider times out'},
+		]),
+		['add retries\n\nthe provider times out'],
+	);
+});
+
+test('deriveTitleFromFirstMessage strips the prefix and keeps the first line', t => {
+	t.is(
+		deriveTitleFromFirstMessage(
+			'[Active file: source/app/App.tsx]\n\nfix the crash\nmore detail',
+		),
+		'fix the crash',
+	);
+});
+
+test('deriveTitleFromFirstMessage returns null when nothing usable is left', t => {
+	t.is(deriveTitleFromFirstMessage('\n\nreal content on line three'), null);
+	t.is(deriveTitleFromFirstMessage('   '), null);
+	t.is(deriveTitleFromFirstMessage('[Active file: a.ts]\n\n'), null);
+});
+
+test('deriveTitleFromFirstMessage caps the title length', t => {
+	const title = deriveTitleFromFirstMessage('x'.repeat(200));
+	t.is(title?.length, 50);
 });

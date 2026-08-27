@@ -12,6 +12,11 @@ const MAX_TOOL_SUMMARIES = 10;
 const MAX_TOOL_SUMMARY_CHARS = 100;
 const MAX_ASSISTANT_REPLY_CHARS = 300;
 
+const MAX_HEURISTIC_TITLE_CHARS = 50;
+
+/** Prepended by the VS Code UI, so it is plumbing rather than the request. */
+const ACTIVE_FILE_PREFIX = /^\[Active file: [^\]]+\]\n\n/;
+
 /** Argument names that usually carry the thing a tool acted on, best first. */
 const PATH_ARG_KEYS = ['path', 'file_path', 'filePath', 'pattern', 'command'];
 
@@ -31,10 +36,24 @@ export interface TitleContext {
  */
 export function normalizeFirstMessage(content: string): string {
 	return content
-		.replace(/^\[Active file: [^\]]+\]\n\n/, '')
+		.replace(ACTIVE_FILE_PREFIX, '')
 		.split('\n')[0]
 		.replace(/\s+/g, ' ')
 		.trim();
+}
+
+/**
+ * The plain title used until a generated one lands. Shared by the ACP save
+ * path and the CLI autosave, which write to the same store. Null, never '',
+ * so a message opening with a newline cannot persist a nameless session.
+ */
+export function deriveTitleFromFirstMessage(content: string): string | null {
+	const firstLine = content
+		.replace(ACTIVE_FILE_PREFIX, '')
+		.split('\n')[0]
+		.trim();
+	if (!firstLine) return null;
+	return firstLine.slice(0, MAX_HEURISTIC_TITLE_CHARS);
 }
 
 /**
@@ -59,7 +78,7 @@ export function extractUserMessages(messages: Message[]): string[] {
 		if (message.role !== 'user') continue;
 		if (typeof message.content !== 'string') continue;
 
-		const trimmed = message.content.trim();
+		const trimmed = message.content.replace(ACTIVE_FILE_PREFIX, '').trim();
 		if (trimmed) turns.push(trimmed);
 	}
 
