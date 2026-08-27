@@ -1015,6 +1015,118 @@ test('MCPClient: non-whitelisted tools still require approval', async t => {
 });
 
 // ============================================================================
+// Regression: MCP tools must obey the central development-mode policy
+// ----------------------------------------------------------------------------
+// MCP used to hand-roll `isAutoApproved ? false : mode !== 'auto-accept'`,
+// which failed in both directions: an alwaysAllow-ed tool executed in plan
+// mode with no prompt, and an ordinary tool was auto-denied in headless (where
+// the approval slot defaults to "denied" because no user is present).
+// ============================================================================
+
+/** Build a one-tool MCP client with the given alwaysAllow list / annotation. */
+function mcpEntryFor(
+	toolName: string,
+	opts: {alwaysAllow?: string[]; readOnly?: boolean} = {},
+) {
+	const client = new MCPClient();
+	const serverName = 'policy-server';
+
+	(client as any).serverTools.set(serverName, [
+		{
+			name: toolName,
+			description: 'Policy fixture',
+			inputSchema: {type: 'object'},
+			serverName,
+			readOnly: opts.readOnly,
+		},
+	]);
+	(client as any).serverConfigs.set(serverName, {
+		name: serverName,
+		transport: 'stdio',
+		alwaysAllow: opts.alwaysAllow ?? [],
+	});
+
+	const entry = client.getToolEntries().find(e => e.name === toolName);
+	if (!entry) throw new Error(`fixture tool ${toolName} not registered`);
+	return entry;
+}
+
+test('MCPClient: plan mode requires approval for an alwaysAllow-ed tool', async t => {
+	const entry = mcpEntryFor('create_issue', {alwaysAllow: ['create_issue']});
+
+	t.false(
+		await resolveToolApproval('create_issue', entry, {}, {mode: 'normal'}),
+		'alwaysAllow still skips the prompt in normal mode',
+	);
+	t.true(
+		await resolveToolApproval('create_issue', entry, {}, {mode: 'plan'}),
+		'a server alwaysAllow entry must not let plan mode execute a mutation',
+	);
+});
+
+test('MCPClient: headless does not require approval for an ordinary tool', async t => {
+	const entry = mcpEntryFor('create_issue');
+
+	t.false(
+		await resolveToolApproval('create_issue', entry, {}, {mode: 'headless'}),
+		'headless is daemon-driven — no foreground prompt exists to answer',
+	);
+	t.true(
+		await resolveToolApproval('create_issue', entry, {}, {mode: 'normal'}),
+		'normal mode still prompts',
+	);
+});
+
+test('MCPClient: auto-accept and yolo still run tools unattended', async t => {
+	const entry = mcpEntryFor('create_issue');
+
+	t.false(
+		await resolveToolApproval('create_issue', entry, {}, {mode: 'auto-accept'}),
+	);
+	t.false(await resolveToolApproval('create_issue', entry, {}, {mode: 'yolo'}));
+});
+
+test('MCPClient: readOnlyHint annotation makes a tool approval-free', async t => {
+	const readOnly = mcpEntryFor('list_issues', {readOnly: true});
+	const unannotated = mcpEntryFor('list_issues');
+
+	t.true(readOnly.readOnly);
+	t.false(
+		unannotated.readOnly,
+		'an absent readOnlyHint must fail safe to "may mutate"',
+	);
+
+	for (const mode of ['normal', 'plan', 'headless', 'auto-accept'] as const) {
+		t.false(
+			await resolveToolApproval('list_issues', readOnly, {}, {mode}),
+			`read-only MCP tool should not prompt in ${mode} mode`,
+		);
+	}
+});
+
+test('MCPClient: readOnlyHint is read from server annotations', t => {
+	const client = new MCPClient();
+	const mapped = [
+		{name: 'reader', annotations: {readOnlyHint: true}},
+		{name: 'writer', annotations: {readOnlyHint: false}},
+		{name: 'unannotated'},
+	].map(tool => ({
+		name: tool.name,
+		serverName: 'annotation-server',
+		readOnly: (tool as any).annotations?.readOnlyHint === true,
+	}));
+
+	(client as any).serverTools.set('annotation-server', mapped);
+
+	const byName = new Map(
+		client.getToolEntries().map(e => [e.name, e.readOnly]),
+	);
+	t.true(byName.get('reader'));
+	t.false(byName.get('writer'));
+	t.false(byName.get('unannotated'));
+});
+
+// ============================================================================
 // Regression Tests for Smart Schema Sanitization
 // ============================================================================
 

@@ -13,6 +13,12 @@ export interface MCPTool {
 	description?: string;
 	inputSchema?: MCPToolInputSchema;
 	serverName: string;
+	/**
+	 * The server's `annotations.readOnlyHint`, when it declares one. Only an
+	 * explicit `true` counts — an absent hint is treated as "may mutate" so
+	 * mode policy fails safe.
+	 */
+	readOnly?: boolean;
 }
 
 export interface MCPInitResult {

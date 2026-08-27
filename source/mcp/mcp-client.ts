@@ -169,6 +169,7 @@ export class MCPClient {
 						? (tool.inputSchema as MCPToolInputSchema)
 						: undefined,
 					serverName: normalizedServer.name,
+					readOnly: tool.annotations?.readOnlyHint === true,
 				}));
 
 				// Store client, transport, config, and tools together only after
@@ -413,12 +414,14 @@ export class MCPClient {
 		tool: AISDKCoreTool;
 		handler: (args: Record<string, unknown>) => Promise<string>;
 		approval: ToolApprovalPolicy;
+		readOnly: boolean;
 	}> {
 		const entries: Array<{
 			name: string;
 			tool: AISDKCoreTool;
 			handler: (args: Record<string, unknown>) => Promise<string>;
 			approval: ToolApprovalPolicy;
+			readOnly: boolean;
 		}> = [];
 
 		// Get native tools once to avoid redundant calls
@@ -437,19 +440,30 @@ export class MCPClient {
 						return this.callTool(toolName, args);
 					};
 
-					// Medium risk: MCP tools require approval unless the server's
-					// alwaysAllow list covers them or the mode is auto-accept. (Yolo
-					// is bypassed centrally by resolveToolApproval.)
+					// MCP tools take the same mode posture as built-in tools:
+					//   - read-only (server-annotated) has nothing to confirm;
+					//   - plan inspects without side effects, so a server's
+					//     alwaysAllow entry must not short-circuit it;
+					//   - auto-accept and headless both run unattended — headless is
+					//     daemon-driven, so there is no foreground prompt to answer
+					//     (mirrors createFileToolApproval in @/utils/tool-approval);
+					//   - normal prompts unless alwaysAllow covers the tool.
+					// (Yolo is bypassed centrally by resolveToolApproval.)
+					const readOnly = mcpTool.readOnly === true;
 					const isAutoApproved = this.isToolAutoApproved(toolName, serverName);
-					const approval: ToolApprovalPolicy = isAutoApproved
-						? false
-						: (_args, mode) => mode !== 'auto-accept';
+					const approval: ToolApprovalPolicy = (_args, mode) => {
+						if (readOnly) return false;
+						if (mode === 'plan') return true;
+						if (mode === 'auto-accept' || mode === 'headless') return false;
+						return !isAutoApproved;
+					};
 
 					entries.push({
 						name: toolName,
 						tool: coreTool,
 						handler,
 						approval,
+						readOnly,
 					});
 				}
 			}
