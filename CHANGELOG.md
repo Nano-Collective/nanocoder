@@ -1,5 +1,184 @@
 # @nanocollective/nanocoder
 
+# 1.30.0
+
+- Added first-class provider template for Groq to the setup wizard.
+- Added first-class provider template for OrcaRouter to the setup wizard.
+- Added a /commit slash command that generates Conventional Commit messages from staged Git diffs using the active LLM client. Thanks to @DeepamJha. Closes #757.
+- Consolidated upload actions under a single '+' menu in the VS Code webview to reduce UI clutter and improve scalability for future attachment types.
+- Added context attachment functionality with UI for file/folder chips and drag-and-drop support.
+- Added Settings Tab to the VS Code extension webview for configuring providers and behavior directly from the UI.
+- `list_directory` no longer includes file sizes by default — they cost an `lstat` syscall per file plus output tokens for information that's rarely needed just to orient in a directory. Pass `showSizes=true` to opt back in, or use `read_file` with `metadata_only=true` for a single file's size.
+- Added a per-response token usage and estimated cost indicator. Every assistant message in the CLI now ends with a subtle gray footer showing the provider-reported token count and estimated cost (e.g. `Tokens: 4.2k | ~$0.01`), computed from models.dev pricing; the cost segment is omitted for local/free models and the footer falls back to the previous client-side estimate when the provider reports no usage. The VS Code extension shows the same indicator under each finished response, fed by the per-turn usage now returned on the ACP prompt response. Note: the estimate prices all input tokens at the standard rate — cache read/write discounts are not factored in, so costs can be overstated for providers with prompt caching. Closes #756.
+- Moved the rest of nanocoder's configuration into the `/settings` menu, so you can set things up without editing `.json` files by hand. Settings are grouped into Appearance, Input, Behavior, Providers, MCP, and Advanced tabs. New menu items let you set the default mode, auto-compact, sessions, reasoning traces, tool auto-approval, and a Web Search API key; view your configured providers and MCP servers before opening the setup wizards; open the Tune Model and Connect IDE wizards; and see the active `NANOCODER_*` environment variables. Advanced also includes an in-app JSON editor for `agents.config.json`: edit strings with the cursor inside the quotes, flip booleans with the arrow keys, and save atomically (a crash can't leave a half-written file).
+- Sunset `/setup-providers` and `/setup-mcp` in favour of `/settings`. Both retired names still work for now — they open the matching `/settings` tab with a notice instead of erroring. `/settings` now takes a tab argument (`/settings providers`, `/settings mcp`), MCP has its own settings tab, and provider edits made from settings apply to the running session instead of waiting for the next launch. Selecting a provider or MCP server in settings now opens that entry's edit/delete choice directly, with a separate row for adding a new one.
+- Added editor code lenses to the VS Code extension: every function, method, constructor and class now carries `Explain Code` and `Generate Tests` links, and clicking one reveals the chat view and sends that symbol - instruction, `file:startLine-endLine` and the source, fenced with the document language - as a prompt. Symbols come from the language server, so no per-language parsing is involved, and the lenses can be turned off with `nanocoder.codeLens`. Long symbols are capped before being inlined, so a lens click on a large class cannot spend a whole context window on one turn. Also fixes a pre-existing hang where sending a message while a tool approval was still pending left the composer spinning forever. Closes #750.
+- Added `@` mention autocomplete to the VS Code extension's chat composer: typing `@` opens a floating dropdown of workspace files, folders and open editors, and selecting one attaches it as a context chip. Search runs on the extension host, which merges your `files.exclude` and `search.exclude` settings into the exclude list so hidden files stay out of the dropdown, and a bare `@` lists open editor tabs with no disk I/O. Attached files are now read with a 100 KB cap and binaries are skipped, so a mis-picked lockfile can no longer swallow the context window. Closes #747.
+- Added support for image uploads and pasting in the VS Code extension chat panel, allowing users to send multimodal messages (text + images) to the AI assistant.
+- VS Code extension: Added `/copy code` and a Ctrl+Alt+Shift+C (Cmd+Alt+Shift+C on macOS) keybinding to copy the last code block from the previous assistant response.
+
+- Added a copy-to-clipboard button to the VS Code extension's chat panel: hovering over a user prompt or agent response bubble reveals a clipboard icon that copies the raw markdown text and briefly shows a checkmark to confirm. Streamed agent responses always copy the latest in-progress text. Closes #746.
+- `execute_bash` and custom tools now truncate long output by keeping both the head and the tail (tail-weighted) instead of only the head, so the actionable part of compiler/test-runner output (error list, failure summary, exit status) — which usually lands at the end — isn't discarded.
+- Bound `string_replace` results to a context window around the edited range.
+- Fixed the Atlas Cloud wizard to store provider-qualified GPT-5.6 model IDs, while preserving compatibility with existing shorthand configurations. Thanks to @RealBhupesh. Closes #803.
+- Bound oversized tool results before they re-enter model context while preserving both the beginning and the actionable tail.
+- Fixed `diff_edit` returning the entire modified file by limiting results to changed-region previews. Thanks to @RealBhupesh. Closes #795.
+- Added a nanocoder svg pulse effect as a visual loading indicator in vscode extension. It uses the provided svg and css to create a pulsing animation that indicates when the agent is processing a request.
+- Added `/commit --copy` (short form `-c`), which copies the generated Conventional Commit message to the system clipboard. If the clipboard is unavailable the message is still shown with a note, rather than being lost, and an unrecognised option now reports a usage line instead of being silently ignored. `/commit` also shows a spinner while the model generates the message, so the round-trip is no longer a silent pause - commands opt into this by declaring `progressLabel`.
+- Defer ink and @/app loading in the CLI entry point until the interactive TUI branch, so --acp, --plain and auth paths no longer pay the Ink/App module-graph cost at startup.
+- Fixed bash commands entered with `!` keeping the whitespace that followed the prefix, so `! git status` now runs `git status` instead of ` git status`.
+- Fixed the VS Code extension's stop button leaving a request running. Two holes: `AcpSession.cancel()` aborted the current controller and immediately replaced it with a fresh one, so a cancel that landed before the turn read the signal — the window while the agent is still resolving the prompt's file references — handed the turn an unaborted controller and the stop was lost. The controller is now rotated when a turn begins instead. Separately, the extension never answered the agent's pending permission request when you hit stop: the tool card kept its spinner and Allow/Deny buttons, and because the request stayed on the pending list every later message was refused with "Please approve or deny the pending tool before sending a new message" until the window was reloaded. Stopping (or reconnecting after the agent process restarts) now resolves those requests as cancelled. Thanks to @akramcodez. Closes #864.
+- Fixed `Cannot read properties of undefined (reading 'summaryParts')` when streaming from GitHub Copilot with reasoning models such as `gpt-5.3-codex`. Copilot's Responses API proxy rotates the opaque reasoning item id mid-stream while `output_index` stays stable, so the OpenAI Responses parser looked up state that was never registered and the stream died. Copilot's response stream is now normalized before it reaches the parser: a rotated id is mapped back to the reasoning item already tracked at that `output_index`, and a reasoning item that was never announced is announced first. Closes #719.
+- Fixed the VS Code extension's thought dropdown expanding to nothing. Streamed tokens are batched behind a 150ms timer, and the reasoning/text routing flag was driven by the `reasoning-start` / `text-start` markers around a batch rather than by the deltas that filled it — so any provider whose ordering differs (the OpenAI Responses API defers `reasoning-end` until the reasoning item completes; openai-compatible providers reopen reasoning without closing text; some emit deltas with no start marker at all) delivered reasoning as assistant text and left the thought view empty. Routing now follows the delta type and flushes the pending batch before switching streams, so a batch always leaves on the callback it was filled for. Whitespace-only reasoning no longer emits an ACP thought chunk, is no longer stored on the message, and no longer opens a thought section, so the empty "Thought for 0s" bubbles are gone. Thanks to @akramcodez. Closes #853.
+- Block IPv6 loopback in the `fetch_url` SSRF guard. The validator rejected `127.0.0.1` but let `http://[::1]:8080` through, so the loopback protection could be bypassed over IPv6. It now also rejects `[::1]` (and its expanded/IPv4-mapped spellings) and the `[::]` unspecified address. Closes #734.
+- Fixed `filesChanged` being empty or incomplete in the `--plain --json` run report. The mutating-tool list matched `write_to_file`, `create_file` and `edit_file`, none of which are real tool names, so only `string_replace` edits were ever recorded - runs where the model used `write_file` or `diff_edit` reported no changed files at all. The list now matches the registered names in `source/tools/file-ops/`. The same phantom names were also driving two unreachable branches in the conversation-state summariser, which now recognises `string_replace` and `diff_edit`.
+- Fixed the `usage` block in the `--plain --json` run report being emitted as all zeros for providers that report no token telemetry, and reading as zero total spend for providers that report input/output counts without a total. The block is now omitted entirely unless at least one token count is actually reported, and `totalTokens` falls back to input+output when the provider omits it, so downstream harnesses can distinguish "no telemetry available" from a genuine zero.
+- Fixed multibyte terminal input being corrupted when an alternate-screen stdin chunk split a UTF-8 character, which could affect Korean and other IME input.
+- Fixed an MCP server staying visible as connected when its initial `tools/list` call failed. `connectToServer()` now registers the client, transport, and config only after tool discovery succeeds, and closes the partially-established client on failure so its transport/child process doesn't leak.
+- Fixed info, success, warning and error messages rendering their continuation lines one column to the right. Ink wraps text with `trim: false`, so when a word-boundary space fell exactly on the wrap column it became the first character of the next line - visible on `/commit` output at certain terminal widths. Messages are now pre-wrapped, and indentation the caller wrote itself is preserved.
+- Fixed prompt history navigation returning an invalid value after reaching the end of the history. `getNextString()` now returns `null`, matching the behavior of the other history navigation methods.
+- Fixed update checks incorrectly recording a successful check after a registry fetch failure, corrected `BoundedMap.has()` for entries whose value is `undefined`, and restored network-error classification for Node.js errno codes. Closes #739, #738, and #737.
+- Fixed the VS Code extension's **Reject All** running rejection cleanups concurrently: `rejectAll()` fired the async `rejectChange()` without awaiting, so overlapping cleanups raced over shared editor state (stale tab snapshots in `closeEditors()`). Rejections now run sequentially, mirroring `applyAll()`. Thanks to @jmdlrg. Closes #725.
+- Fixed short user messages wrapping mid-word in the VS Code extension chat. The message bubble carried `max-w-[85%]` on top of the turn wrapper's own `max-w-[85%]`, so the inner percentage resolved against the wrapper's shrink-to-fit width and squeezed each bubble to 85% of its own content - combined with `break-words`, "hey" rendered as "he" / "y". The bubble now uses `max-w-full` and the cap lives only on the wrapper.
+- Fixed new tool calls landing back in an earlier card instead of a fresh one when a thought, reply, edit card, or plan update came in between. Closes #856.
+
+Fixed a manually collapsed tool card re-expanding on its next update.
+
+Reused one footer per agent turn instead of creating one per text segment.
+
+Fixed a turn's copy button sometimes copying a newer turn's text instead of its own.
+- Fixed the VS Code extension being unable to start the CLI on Windows. `where.exe` lists npm's unexecutable extensionless shim before `nanocoder.cmd`, and the first line was taken blindly; spawning a `.cmd` also fails with EINVAL because Node refuses to run one without a shell (CVE-2024-27980). Discovery now ranks `where.exe` matches by extension, the CLI is launched via the JS entrypoint resolved from the shim, and a `.cmd` that cannot be resolved falls back to a quoted shell spawn. Spawn failures are also caught and reported in the Nanocoder output channel instead of being swallowed as an unhandled rejection that left the UI stuck on "Connecting".
+- Fixed the provider wizard appearing to hang after picking models. Finishing model selection with `d` returned to the raw provider template list, where the only way to proceed was scrolling past every template to a trailing "Done & Save" — a ~34-row screen that overflows a normal terminal, so the entry was off screen and the wizard looked stuck. Adding a provider now lands on the wizard's root menu, which offers "Done & Save" up front, and the template, edit, and MCP server lists scroll within the terminal height instead of overflowing it.
+- Grouped the VS Code extension's streamed thoughts into a single expandable section per response instead of one dropdown per thought block. Thoughts interrupted by answer text or tool calls now resume in the same section, separated by a blank line, and the header reports the total time spent reasoning ("Thought for 12s") rather than one short duration per fragment. The section still auto-expands while thoughts stream and collapses when they stop, but stops doing so once the user toggles it by hand. Closes #854.
+- Fixed an issue where the VS Code extension failed to locate the Nanocoder CLI for users using Node version managers (NVM, Volta, fnm, pnpm, bun). A fallback directory scan is now performed when `which`/`where` cannot resolve the binary under the extension host's minimal PATH. The child-process PATH is also enriched with the CLI's directory only when a co-located `node` binary is present, preventing shadowing of a user's version-manager Node. Thanks to @akramcodez.
+- Setup wizard's config location picker now shows the resolved path next to each option instead of a bare label.
+- Fixed a renamed session losing its manual title when reopened in the CLI. The ACP agent rebuilds the session record field-by-field on every save and wasn't carrying `titleManuallySet` through, so the flag was dropped from disk after the next message. The title survived inside the VS Code extension via its own guard, but the CLI's autosave then saw an unflagged session and overwrote the user's name with an auto-derived one.
+- Bound oversized multi-file `git_diff` results to a 20-entry diffstat while preserving the total file count, and kept file-scoped results as bounded head-and-tail patches.
+- Prevent concurrent file-cache reads from clearing a newer pending read.
+- Fixed ACP provider discovery after the SDK 1.3 update by including the required provider identifier.
+- VS Code extension: `/copy` and `/copy code` now address the whole last assistant response rather than its final text fragment, so a tool call between the code block and the closing prose no longer hides the block. Also collapses inner whitespace in the `/copy  code` intercept, reports "No response to copy yet" on an empty transcript, and replies with a pointer instead of "Unrecognized slash command" if `/copy` reaches the ACP agent.
+- `search_file_contents` no longer puts a blank line between context-free matches, and decides its layout from the `contextLines` argument rather than sniffing each match for a newline. A context block that collapsed to a single line (single-line files, or when truncation dropped every newline) previously rendered with the exact-match header and a doubled line number.
+- `search_file_contents` now formats results grep-style (`file:line:content`, one line per match) instead of spreading each match across three lines with a blank separator. Matches with `contextLines` still show the full multi-line context block, now with a `-` header separator matching grep's convention.
+- Fixed user-typed `!` bash commands showing no output in the transcript. Previously the completed card only displayed the command, a status dot, and a token count — the actual result was sent to the model but never shown to the person who typed the command. Completed `!` commands now render their stdout and stderr (tail-capped at 20 lines, with a note when earlier lines are hidden). Model-invoked `execute_bash` calls keep their compact display.
+- Add token usage block to the --plain --json run report. Downstream tooling consuming headless JSON output can now read input/output/total token counts per run, when the provider reports them. Closes #821.
+- Fixed the unreadable selection highlight in the setup wizards and other list selectors. `ink-select-input`'s built-in indicator and selected-label renderer hardcode a dark `blue` that ignores the active theme and all but vanishes against a dark terminal; every selector now routes through `StyledSelectInput` and highlights with the theme's `primary` colour instead. Also raised five themes whose highlight or body text fell below WCAG AA contrast against their own background (cherry-blossom, ayu-light, everforest-light, volcanic-ash, solarized-light). Closes #827.
+- Dropped `toLocaleString()` thousands-separators from strings returned to the model (`read_file`'s metadata output and validator error, `list_directory`'s per-entry size, and `@file`-mention metadata). Comma separators cost extra tokens without adding meaning for the model. Left them in place in the terminal display components, where they're actually useful.
+- Return a useful preview before requiring ranged reads for very large files
+- Fix notification titles showing stale project name after changing directories with /cd
+- Made the per-response usage and cost footer optional. The gray footer under each assistant message is still on by default, but can now be turned off via `/settings` → Behavior → Tool Results and Thinking → **Usage & Cost Footer**, or by setting `showUsageFooter` to `false` in the preferences file. Turning it off removes the footer line entirely - both the provider-reported tokens and cost and the client-side token estimate - and applies to replayed session history and subagent transcripts as well as live responses. The preference is read per message, so toggling it takes effect from the next response without a restart, and the models.dev pricing lookup is skipped altogether when the footer is off.
+- The VS Code chat panel now shows the agent's queued work, not just what it has already done. Every tool call in a turn is announced before the batch runs, so the checklist reads queued → running → done, and rows are labelled in plain English ("Reading source/x.ts", "Running pnpm test") instead of raw tool names. Queued edits read "Edit x.ts" until they actually run, and their Open Diff action only becomes clickable once the diff exists — previously the card claimed the edit was already done and clicking through raised "Change not found". File edits render as their own card with an Open Diff action again — the panel had been matching tool names the agent never sends, which made that card unreachable and left failed edits spinning forever. Cancelling a turn now settles every queued row rather than leaving the ones behind the cancelled tool spinning, which also fixes the same stall in other ACP clients such as Zed. The task checklist is now scoped to the turn that produced it instead of one card reused for the whole session.
+- Pressing Escape in the VS Code extension's chat panel now instantly cancels an in-flight LLM request, mirroring the Stop button.
+The listener is registered on the webview's `document` (not just the chat input) so it fires even when focus has moved to a tool card, button, or the streaming response area.
+Also added a `nanocoder.cancel` command for the Command Palette.
+The backend already tears down the in-flight request via `AbortController` when a cancel is received, so this stops token generation immediately rather than just hiding output, and cancelling now shows a clean "Cancelled by user" note inline in the chat instead of an error toast.
+
+Cancelling while a tool is waiting for approval no longer wedges the chat.
+Previously the pending permission resolver was left in place, so the extension kept reporting an outstanding prompt and rejected every later message with "Please approve or deny the pending tool" until the window was reloaded.
+Cancelling (or starting a new chat) now answers any outstanding permission requests with a cancelled outcome and dismisses their approval cards.
+
+Fixed cancelled tool cards rendering with the error icon.
+ACP has no `cancelled` tool status, so a cancel arrives as `failed` with `Cancelled by user` in the raw output, but the webview matched that string case-sensitively against `cancelled` and never hit it.
+- Improved session management in the VS Code extension:
+
+- **Session renaming**: Sessions can now be renamed directly from the History view. A `renameSession` ACP extension method (`extMethod`) is implemented on the CLI's ACP agent and backed by the existing session manager, so a session's title can be updated in place without a full resume.
+- **History view navigation**: Creating a new chat or resuming a session from the History list now returns to the active chat view instead of leaving the panel stuck on the session list.
+- Typing `/settings` in the VS Code chat no longer claims the command is unsupported in the GUI. The extension gained a Settings tab, so `/settings` now points at it the same way `/model` and `/provider` point at the header dropdowns.
+- Clarify read-before-edit refusal messages to specify that files over 300 lines need a ranged read
+- Increased the bounded terminal content width from 120 to 200 columns so wide terminals use more available space while retaining a sane layout cap.
+- Fixed **Done & Save** in the provider wizard not saving. It routed to the Configure Mode-Specific Providers screen, which a first run has nothing to say to: a user who had just entered one API key was shown four modes marked `(Unconfigured)` and had to find the `Done` row before reaching the summary. Mode-specific providers are now an opt-in `Configure mode-specific providers` entry in the provider menu that returns you to that menu when you're finished, and **Done & Save** goes straight to the summary. Mode providers already in the config are carried through a save that skips the step.
+- `write_file` no longer echoes the full file contents back after writing. The model already authored that content as the tool call arguments, so returning it again was pure duplication that scaled with file size and got re-sent on every later step of the agent loop. The confirmation message (line/char/token counts) is unchanged.
+
+If there are any problems, feedback or thoughts please drop an issue or message us through Discord! Thank you for using Nanocoder.
+
+# 1.29.0
+
+- Added the ability to attach to a running subagent session from the terminal UI for interactive debugging. This feature allows users to inspect exactly what a subagent is doing in real-time, including streaming text and reasoning. You can press `Ctrl+S` while a subagent is running to attach to it, cycle between multiple running subagents, and press `Esc` to detach.
+
+- Added **privacy-aware prompt scrubbing**. A new `PrivacyContext` scrubs sensitive content from prompts before they leave your machine, with tool-argument rehydration and privacy session support, a `/privacy` command to inspect what is being scrubbed, and automated scrubbing telemetry notifications. Thanks to @akramcodez.
+
+- Added an **interactive questions system for plan mode**, so the agent can ask structured questions while planning instead of guessing. Thanks to @akramcodez. Closes #96.
+
+- Added **mode-specific provider and model configuration**, so each development mode can use its own provider and model. Thanks to @akramcodez. Closes #277.
+
+- Added **dual TUI screen modes**, with a more reliable `/clear` and graceful exit handling. Thanks to @llupRisinglll.
+
+- Added **multiline cursor navigation and word-jump** in the input box. Thanks to @llupRisinglll.
+
+- Added **`--resume` / `--continue` CLI session flags**. `--continue` (`-c`) resumes the most recent session for the current directory, and `--resume [id]` (`-r`) resumes a session by id, list index, or `last`, with a bare `--resume` opening the session picker at startup. Thanks to @llupRisinglll.
+
+- Added a **fuzzy search filter to the `/model` picker**, with a capped, centered scrolling window so large model catalogs no longer overflow the terminal and the current model is preselected. Thanks to @rakshith1928. Closes #683.
+
+- Added **PDF and DOCX support to `read_file`** via get-md, so those documents can be read directly. Thanks to @akramcodez.
+
+- Added a **`doctor` diagnostic command** that checks your setup and reports common configuration problems. Thanks to @Dhirenderchoudhary. Closes #609.
+
+- Added a **`retry` command** to re-run the last user turn. Thanks to @Dhirenderchoudhary. Closes #608.
+
+- Added **message queueing while the agent is busy** so you can type ahead. Queued messages can be recalled before streaming, are truncated properly on narrow terminals, and no longer double-dispatch. Thanks to @Dhirenderchoudhary. Closes #597, #598.
+
+- Added **estimated dollar cost tracking to `/usage`**, with a per-provider cost breakdown and a cumulative per-call cost history. Thanks to @rakshith1928. Closes #602.
+
+- Added a **`--json` output flag** to the non-interactive plain run path. Thanks to @OMEE-Y.
+
+- Added a **`diff_edit` tool for nano-profile models**. Thanks to @Dhirenderchoudhary. Closes #604.
+
+- Added **automatic diagnostics after file edits**, surfacing errors introduced by an edit right away. Thanks to @2409324124. Closes #538.
+
+- Added the **foundation for semantic memory** (storage layer and initial wiring), groundwork for upcoming memory features. Thanks to @Dhirenderchoudhary.
+
+- Reworked the client to a **stateless API with history-boundary rehydration**, improving conversation reliability. Thanks to @akramcodez.
+
+- Added a **Together AI provider template and docs**, and **MiniMax Coding now defaults to MiniMax-M3**. Thanks to @octo-patch. Added **Atomic Chat local provider configuration docs**. Thanks to @yanalialiuk.
+
+- Fix: **`nanocoder.tune` loading and configuration precedence** from `agents.config.json` now resolve correctly. Thanks to @rakshith1928. Closes #648.
+
+- Fix: **patch malformed SSE termination strings from providers**, preventing stream parsing errors. Thanks to @akramcodez. Closes #614.
+
+- Fix: **bound slash command completions** so the menu no longer overflows. Thanks to @2409324124. Closes #624.
+
+- Fix: **decouple console log verbosity from `NODE_ENV`** and quiet noisy LSP discovery logs. Thanks to @A-S-Manoj. Closes #606.
+
+- Fix: **removed the `strip-ansi` runtime dependency**. Thanks to @2409324124. Closes #643.
+
+- Docs: added a **Simplified Chinese README** and **Traditional Chinese** translations, with fixes to the Simplified Chinese copy, plus a star-history chart. Thanks to @2409324124, @jason1015-coder, and @zerone0x.
+
+- Updated dependencies: `@ai-sdk/google`, `@ai-sdk/openai-compatible`, `undici`, `diff`, and `knip`.
+
+- The **VS Code extension** saw major work this cycle (ACP process manager and handshake, a chat sidebar webview with tool-permission and diff UI, session persistence, and Tailwind styling). It is versioned separately from the CLI. Thanks to @akramcodez and @Dhirenderchoudhary.
+
+- File tools now resolve relative paths against the shell's current working directory, and `cd` in bash persists across commands — so relative reads and edits work after moving into a subdirectory or worktree. File tools also accept absolute paths that point inside the project, and can still reach the project root or a sibling worktree after `cd`-ing into a subdirectory.
+
+- Added a tabbed `/settings` dialog with searchable categories, so settings are easier to scan and filter from the TUI. Thanks to @llupRisinglll. Closes #471.
+
+- **Added a native VS Code GUI**. The VS Code extension now ships a sidebar chat powered by the Agent Client Protocol (ACP): the extension spawns and manages `nanocoder --acp` itself - nothing to run in a terminal. Responses stream with collapsible thinking sections, tool activity renders as live cards, and file edits open in VS Code's diff viewer. Thanks to @akramcodez.
+- **Sessions in the GUI**: conversations persist to disk, with a New Chat action, a session history view with resume and delete, and full thread replay (including thinking and completed tool cards) on resume.
+- **Provider, model, and mode switching** from dropdowns in the chat header, with the model list refreshing on provider switch.
+- **Slash commands in the GUI**: `/help`, `/clear`, and custom commands from `.nanocoder/commands`; CLI-only commands explain themselves, and messages starting with file paths are not mistaken for commands.
+- **Interactive tools in the GUI**: `ask_user` questions render with one button per answer; tool approvals show Approve/Deny inline.
+- **Live progress**: subagent runs stream token/tool counts onto their card, and the task tool (`write_tasks`) renders as a live checklist via ACP `plan` updates - which also lights up in other ACP clients like Zed.
+- **Cancellation**: Stop ends the whole turn - the current tool aborts, queued tools are skipped, and no follow-up model request is issued.
+- **Robust CLI spawning**: the extension resolves the login shell's PATH (nvm-friendly when VS Code launches from the Dock), runs the CLI in the workspace folder, validates `nanocoder.cliPath`, and surfaces the last stderr line in the crash dialog. Fixed a silent `--acp` startup crash when the working directory was unwritable.
+- **Legacy WebSocket companion mode is now opt-in** (`nanocoder.autoConnect` defaults to off); extension docs rewritten around the GUI.
+
+- Fixed static vs. live content misalignment in `--alt-screen` (fullscreen) mode. The chat transcript and the input/tools footer now share the same left column, so assistant messages, tool results, and the input line up cleanly. The fix moves the footer out to the transcript's padded column rather than pushing the transcript into the scroll viewport's clip window (which was clipping the first character of each line).
+
+- **Removed emoji badges from the `ask_user` tool**. Questions no longer render a question-type emoji next to the prompt, and the tool schema no longer advertises them to the model.
+- **`ask_user` now always shows the answer**. The tool result renders the full Question/Answer block even in compact tool display mode, instead of folding into the tool tally and hiding what was answered.
+
+- Command suggestions now appear as soon as you type `/`, and Tab selects the highlighted suggestion. Previously the menu was Tab-triggered and often failed to render, especially in alternate-screen mode. Recalling a `/command` from history with the arrow keys no longer opens the menu, so ↑/↓ keep navigating history freely — the menu returns as soon as you type.
+
+- **Image attachments now leave an `[Image #N]` placeholder in the message**. Dragged or typed image paths are no longer silently stripped from the user message - each becomes a numbered `[Image #N]` placeholder (mirroring the `[Paste #N]` convention), numbered after any images already attached via Ctrl+V, and highlighted in the chat history like `[@file]` mentions.
+
+- Fixed provider configuration loading so existing providers are preserved and startup falls back to a working provider instead of freezing. Thanks to @llupRisinglll.
+
+- Fixed Ctrl+S not cycling between multiple parallel subagent sessions. The attached-session transcript renders through Ink's append-only `<Static>`, so switching agents never printed the new agent's messages; the view is now remounted per agent with a terminal wipe (same treatment as /clear), and rapid Ctrl+S presses cycle reliably.
+
+- -adding **typing svg in README.md showing "Meet Nanocoder" and "your private, local first ai coding assistant"** Thanks to @jason1015-coder.
+
+- Added **Thesean AI as a provider template**. The `/setup-providers` wizard now includes Thesean's Ship endpoint with Anthropic-compatible Claude models (`ship-like/claude-opus-4-8`, `ship-like/claude-sonnet-5`, `ship-like/claude-haiku-4-5`), plus a new docs page covering configuration and available models.
+
+If there are any problems, feedback or thoughts please drop an issue or message us through Discord! Thank you for using Nanocoder.
+
 # 1.28.1
 
 - Added **image attachments on user messages**. Paste an image from the clipboard with **Ctrl+V** (via `osascript` on macOS, `wl-paste`/`xclip` on Linux, PowerShell on Windows), drag an image file into the terminal, or type a path - quoted, unquoted, and macOS backslash-escaped paths are all recognised, and `http(s)` URLs are left untouched. Attachments (PNG/JPEG/GIF/WebP, up to 10 MB) show above the input box and **Ctrl+X** removes the last one; references are stripped from the text and sent as image parts to vision-capable models. A missing clipboard tool now logs a debug breadcrumb instead of silently no-op'ing. Thanks to @ragini-pandey. Closes #572.

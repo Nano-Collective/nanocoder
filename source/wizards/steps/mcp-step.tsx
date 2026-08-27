@@ -1,8 +1,8 @@
 import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
 import {Tab, Tabs} from 'ink-tab';
 import {useEffect, useState} from 'react';
 import TextInput from '@/components/text-input';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {getColors} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {
@@ -10,7 +10,15 @@ import {
 	type McpServerConfig,
 	type McpTemplate,
 } from '../templates/mcp-templates';
+import {useListLimit} from './use-list-limit';
 import {useWizardForm} from './use-wizard-form';
+
+/**
+ * The tabs step carries more furniture than a plain list step — the tab bar
+ * and its "Select a … server to add:" prompt sit between the heading and the
+ * list, and a navigation hint sits under it.
+ */
+const TABS_CHROME_ROWS = 18;
 
 interface McpStepProps {
 	onComplete: (mcpServers: Record<string, McpServerConfig>) => void;
@@ -18,6 +26,21 @@ interface McpStepProps {
 	onDelete?: () => void;
 	existingServers?: Record<string, McpServerConfig>;
 	configExists?: boolean;
+	/**
+	 * Open straight into the edit/delete choice for this server instead of the
+	 * initial menu. An unknown name falls back to the normal menu, since the
+	 * caller lists the resolved config while this step lists whichever config
+	 * file the wizard loaded.
+	 */
+	initialEditName?: string;
+}
+
+function findServerName(
+	servers: Record<string, McpServerConfig>,
+	name: string | undefined,
+): string | null {
+	if (!name) return null;
+	return Object.hasOwn(servers, name) ? name : null;
 }
 
 type Mode =
@@ -39,9 +62,12 @@ export function McpStep({
 	onDelete,
 	existingServers = {},
 	configExists = false,
+	initialEditName,
 }: McpStepProps) {
 	const colors = getColors();
 	const {isNarrow} = useResponsiveTerminal();
+	const tabsListLimit = useListLimit(TABS_CHROME_ROWS);
+	const editListLimit = useListLimit();
 	const [servers, setServers] =
 		useState<Record<string, McpServerConfig>>(existingServers);
 
@@ -50,7 +76,11 @@ export function McpStep({
 		setServers(existingServers);
 	}, [existingServers]);
 
-	const [mode, setMode] = useState<Mode>('initial-menu');
+	const [mode, setMode] = useState<Mode>(() =>
+		findServerName(existingServers, initialEditName) === null
+			? 'initial-menu'
+			: 'edit-or-delete',
+	);
 	const {
 		selectedTemplate,
 		currentFieldIndex,
@@ -68,7 +98,7 @@ export function McpStep({
 	} = useWizardForm<McpTemplate>();
 	const [multilineBuffer, setMultilineBuffer] = useState('');
 	const [editingServerName, setEditingServerName] = useState<string | null>(
-		null,
+		() => findServerName(existingServers, initialEditName),
 	);
 	const [activeTab, setActiveTab] = useState<'local' | 'remote'>('local');
 
@@ -415,7 +445,7 @@ export function McpStep({
 						))}
 					</Box>
 				)}
-				<SelectInput
+				<StyledSelectInput
 					items={initialOptions}
 					onSelect={(item: {value: string}) => handleInitialSelect(item)}
 				/>
@@ -463,10 +493,14 @@ export function McpStep({
 							: 'Select a remote MCP server to add:'}
 					</Text>
 				</Box>
-				<SelectInput items={templateOptions} onSelect={handleTemplateSelect} />
+				<StyledSelectInput
+					items={templateOptions}
+					limit={tabsListLimit}
+					onSelect={handleTemplateSelect}
+				/>
 				<Box marginTop={1}>
 					<Text color={colors.secondary}>
-						Arrow keys: Navigate | Tab: Switch tabs
+						Arrow keys: Navigate (list scrolls) | Tab: Switch tabs
 					</Text>
 				</Box>
 			</Box>
@@ -481,8 +515,9 @@ export function McpStep({
 						Select an MCP server to edit:
 					</Text>
 				</Box>
-				<SelectInput
+				<StyledSelectInput
 					items={editOptions}
+					limit={editListLimit}
 					onSelect={(item: TemplateOption) => handleEditSelect(item)}
 				/>
 			</Box>
@@ -504,7 +539,7 @@ export function McpStep({
 						{server?.name} - What would you like to do?
 					</Text>
 				</Box>
-				<SelectInput
+				<StyledSelectInput
 					items={editOrDeleteOptions}
 					onSelect={(item: {value: string}) => handleEditOrDeleteChoice(item)}
 				/>

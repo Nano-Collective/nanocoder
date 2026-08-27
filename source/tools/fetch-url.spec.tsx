@@ -141,6 +141,36 @@ test('validator rejects 127.0.0.1 URLs', async t => {
 	}
 });
 
+test('validator rejects IPv6 loopback [::1] URLs', async t => {
+	if (!fetchUrlTool) {
+		t.pass('Skipping test - fetch-url module not available');
+		return;
+	}
+	const result = await fetchUrlTool.validator!({
+		url: 'http://[::1]:8080',
+	});
+
+	t.false(result.valid);
+	if (!result.valid) {
+		t.true(result.error.includes('internal/private network'));
+	}
+});
+
+test('validator rejects expanded and IPv4-mapped IPv6 loopback URLs', async t => {
+	if (!fetchUrlTool) {
+		t.pass('Skipping test - fetch-url module not available');
+		return;
+	}
+	for (const url of [
+		'http://[0:0:0:0:0:0:0:1]',
+		'http://[::ffff:127.0.0.1]',
+		'http://[::]',
+	]) {
+		const result = await fetchUrlTool.validator!({url});
+		t.false(result.valid, `expected ${url} to be rejected`);
+	}
+});
+
 test('validator rejects 192.168.x.x URLs', async t => {
 	if (!fetchUrlTool) {
 		t.pass('Skipping test - fetch-url module not available');

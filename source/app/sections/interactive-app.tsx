@@ -3,6 +3,7 @@ import React from 'react';
 import {ChatHistory} from '@/app/components/chat-history';
 import {ChatInput} from '@/app/components/chat-input';
 import {ModalSelectors} from '@/app/components/modal-selectors';
+import type {SettingsTabId} from '@/app/components/settings-constants';
 import {FileExplorer} from '@/components/file-explorer';
 import {IdeSelector} from '@/components/ide-selector';
 import PlanReviewPrompt from '@/components/plan-review-prompt';
@@ -75,6 +76,23 @@ export function InteractiveApp({
 	altScreenActive = false,
 }: InteractiveAppProps): React.ReactElement {
 	const nextRestoredDraftIdRef = React.useRef(1);
+	// Tune / IDE are launched by closing settings first, so their exit has no way
+	// to know it should land back in settings rather than in chat.
+	const launchedFromSettingsRef = React.useRef(false);
+	// Track which tab was active when launching Tune/IDE so we can return to it.
+	const launchedFromTabRef = React.useRef<SettingsTabId | undefined>(undefined);
+	const returnFromLaunchedWizard = React.useCallback(
+		(exit: () => void) => () => {
+			exit();
+			if (launchedFromSettingsRef.current) {
+				launchedFromSettingsRef.current = false;
+				// Return to the tab that was active when the wizard was launched.
+				modeHandlers.enterSettingsMode(launchedFromTabRef.current);
+				launchedFromTabRef.current = undefined;
+			}
+		},
+		[modeHandlers],
+	);
 	const [submittedDraft, setSubmittedDraft] =
 		React.useState<SubmittedInputDraft | null>(null);
 	const [restoredDraft, setRestoredDraft] =
@@ -305,8 +323,14 @@ export function InteractiveApp({
 				{appState.isIdeSelectionMode && (
 					<Box marginLeft={-1} flexDirection="column">
 						<IdeSelector
-							onSelect={handleIdeSelect}
-							onCancel={modeHandlers.handleIdeSelectionCancel}
+							onSelect={ide => {
+								// Completing lands in chat so the result is visible.
+								launchedFromSettingsRef.current = false;
+								handleIdeSelect(ide);
+							}}
+							onCancel={returnFromLaunchedWizard(
+								modeHandlers.handleIdeSelectionCancel,
+							)}
 						/>
 					</Box>
 				)}
@@ -316,6 +340,8 @@ export function InteractiveApp({
 						<ModalSelectors
 							activeMode={appState.activeMode}
 							isSettingsMode={appState.isSettingsMode}
+							settingsInitialTab={appState.settingsActiveTab}
+							onSettingsTabChange={appState.setSettingsActiveTab}
 							showAllSessions={appState.showAllSessions}
 							currentModel={appState.currentModel}
 							currentProvider={appState.currentProvider}
@@ -325,12 +351,33 @@ export function InteractiveApp({
 							onModelDatabaseCancel={modeHandlers.handleModelDatabaseCancel}
 							onConfigWizardComplete={modeHandlers.handleConfigWizardComplete}
 							onConfigWizardCancel={modeHandlers.handleConfigWizardCancel}
-							onMcpWizardComplete={modeHandlers.handleMcpWizardComplete}
-							onMcpWizardCancel={modeHandlers.handleMcpWizardCancel}
 							onSettingsCancel={modeHandlers.handleSettingsCancel}
+							onProvidersChanged={modeHandlers.reloadProviders}
+							onMcpChanged={modeHandlers.reloadMcpServers}
+							onLaunchTune={() => {
+								// Capture the current tab before closing settings.
+								launchedFromTabRef.current = appState.settingsActiveTab;
+								launchedFromSettingsRef.current = true;
+								modeHandlers.handleSettingsCancel();
+								modeHandlers.enterTune();
+							}}
+							onLaunchIde={() => {
+								// Capture the current tab before closing settings.
+								launchedFromTabRef.current = appState.settingsActiveTab;
+								launchedFromSettingsRef.current = true;
+								modeHandlers.handleSettingsCancel();
+								modeHandlers.enterIdeSelectionMode();
+							}}
 							tuneConfig={appState.tune}
-							onTuneSelect={modeHandlers.handleTuneSelect}
-							onTuneCancel={modeHandlers.handleTuneCancel}
+							onTuneSelect={config => {
+								// Tune clears the conversation and prints a summary — land in
+								// chat so that output isn't hidden behind the settings panel.
+								launchedFromSettingsRef.current = false;
+								return modeHandlers.handleTuneSelect(config);
+							}}
+							onTuneCancel={returnFromLaunchedWizard(
+								modeHandlers.handleTuneCancel,
+							)}
 							onCheckpointSelect={appHandlers.handleCheckpointSelect}
 							onCheckpointCancel={appHandlers.handleCheckpointCancel}
 							onSessionSelect={sessionId =>
@@ -383,6 +430,7 @@ export function InteractiveApp({
 								onToggleReasoningExpanded={handleToggleReasoningExpanded}
 								tune={appState.tune}
 								currentModel={appState.currentModel}
+								fullscreen={fullscreen}
 							/>
 						</UIStateProvider>
 					)}

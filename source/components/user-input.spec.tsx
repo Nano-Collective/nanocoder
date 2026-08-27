@@ -68,17 +68,18 @@ const waitForFrame = async (
 // ============================================================================
 
 test('UserInput renders without crashing', t => {
-	const {lastFrame} = render(
+	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput />
 		</TestWrapper>,
 	);
 
 	t.truthy(lastFrame());
+	unmount();
 });
 
 test('UserInput renders with placeholder text', t => {
-	const {lastFrame} = render(
+	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput placeholder="Custom placeholder" />
 		</TestWrapper>,
@@ -87,10 +88,11 @@ test('UserInput renders with placeholder text', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	// Placeholder text should be visible
+	unmount();
 });
 
 test('UserInput renders prompt symbol', t => {
-	const {lastFrame} = render(
+	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput />
 		</TestWrapper>,
@@ -99,6 +101,7 @@ test('UserInput renders prompt symbol', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, />/); // Prompt symbol
+	unmount();
 });
 
 test('UserInput renders with disabled state', t => {
@@ -116,7 +119,7 @@ test('UserInput renders with disabled state', t => {
 });
 
 test('UserInput renders development mode indicator', t => {
-	const {lastFrame} = render(
+	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput developmentMode="normal" />
 		</TestWrapper>,
@@ -125,10 +128,11 @@ test('UserInput renders development mode indicator', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /normal mode on/); // Development mode indicator
+	unmount();
 });
 
 test('UserInput renders auto-accept mode indicator', t => {
-	const {lastFrame} = render(
+	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput developmentMode="auto-accept" />
 		</TestWrapper>,
@@ -137,10 +141,11 @@ test('UserInput renders auto-accept mode indicator', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /auto-accept mode/); // Auto-accept mode indicator
+	unmount();
 });
 
 test('UserInput renders plan mode indicator', t => {
-	const {lastFrame} = render(
+	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput developmentMode="plan" />
 		</TestWrapper>,
@@ -149,11 +154,12 @@ test('UserInput renders plan mode indicator', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /plan mode/); // Plan mode indicator
+	unmount();
 });
 
 test('UserInput renders with custom commands', t => {
 	const customCommands = ['custom-command', 'another-command'];
-	const {lastFrame} = render(
+	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput customCommands={customCommands} />
 		</TestWrapper>,
@@ -161,6 +167,7 @@ test('UserInput renders with custom commands', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
+	unmount();
 });
 
 test('UserInput calls onSubmit when message is submitted', t => {
@@ -169,7 +176,7 @@ test('UserInput calls onSubmit when message is submitted', t => {
 		submittedMessage = message;
 	};
 
-	const {lastFrame, stdin} = render(
+	const {lastFrame, stdin, unmount} = render(
 		<TestWrapper>
 			<UserInput onSubmit={handleSubmit} />
 		</TestWrapper>,
@@ -178,6 +185,7 @@ test('UserInput calls onSubmit when message is submitted', t => {
 	t.truthy(lastFrame());
 	// Note: Testing actual user interaction with stdin is complex
 	// This test verifies the component renders with onSubmit callback
+	unmount();
 });
 
 test('UserInput renders while busy (Escape deferred to global handler)', t => {
@@ -516,7 +524,7 @@ test('UserInput calls onToggleMode when provided', t => {
 		toggleCalled = true;
 	};
 
-	const {lastFrame} = render(
+	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput onToggleMode={handleToggle} />
 		</TestWrapper>,
@@ -524,22 +532,24 @@ test('UserInput calls onToggleMode when provided', t => {
 
 	t.truthy(lastFrame());
 	// Note: Actual toggle invocation requires Shift+Tab simulation
+	unmount();
 });
 
 test('UserInput renders bash mode indicator when input starts with !', t => {
 	// This test verifies the component can handle bash mode
 	// Actual input testing requires stdin manipulation
-	const {lastFrame} = render(
+	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput />
 		</TestWrapper>,
 	);
 
 	t.truthy(lastFrame());
+	unmount();
 });
 
 test('UserInput renders help text when not disabled', t => {
-	const {lastFrame} = render(
+	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput />
 		</TestWrapper>,
@@ -548,6 +558,7 @@ test('UserInput renders help text when not disabled', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /What would you like me to help with\?/);
+	unmount();
 });
 
 test('UserInput hides help text when disabled', t => {
@@ -564,7 +575,7 @@ test('UserInput hides help text when disabled', t => {
 });
 
 test('UserInput renders with all props provided', t => {
-	const {lastFrame} = render(
+	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput
 				onSubmit={() => {}}
@@ -578,6 +589,7 @@ test('UserInput renders with all props provided', t => {
 	);
 
 	t.truthy(lastFrame());
+	unmount();
 });
 
 // ============================================================================
@@ -587,7 +599,7 @@ test('UserInput renders with all props provided', t => {
 test('UserInput renders file autocomplete suggestions header', t => {
 	// Note: Testing file autocomplete requires state manipulation
 	// This test verifies the component structure supports it
-	const {lastFrame} = render(
+	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput />
 		</TestWrapper>,
@@ -596,12 +608,13 @@ test('UserInput renders file autocomplete suggestions header', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	// File suggestions would appear when @ is typed and files are found
+	unmount();
 });
 
 test('UserInput responsive placeholder for narrow terminals', t => {
 	// Test that placeholder adapts to terminal width
 	// The actual implementation uses useResponsiveTerminal hook
-	const {lastFrame} = render(
+	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput />
 		</TestWrapper>,
@@ -610,6 +623,7 @@ test('UserInput responsive placeholder for narrow terminals', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	// Placeholder text should be present (either long or short version)
+	unmount();
 });
 
 // ============================================================================
@@ -617,7 +631,7 @@ test('UserInput responsive placeholder for narrow terminals', t => {
 // ============================================================================
 
 test('UserInput maintains state across renders', t => {
-	const {lastFrame, rerender} = render(
+	const {lastFrame, rerender, unmount} = render(
 		<TestWrapper>
 			<UserInput />
 		</TestWrapper>,
@@ -634,10 +648,11 @@ test('UserInput maintains state across renders', t => {
 
 	const secondRender = lastFrame();
 	t.truthy(secondRender);
+	unmount();
 });
 
 test('UserInput renders with default development mode', t => {
-	const {lastFrame} = render(
+	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput />
 		</TestWrapper>,
@@ -647,20 +662,22 @@ test('UserInput renders with default development mode', t => {
 	t.truthy(output);
 	// Default mode is 'normal'
 	t.regex(output!, /normal mode/);
+	unmount();
 });
 
 test('UserInput handles empty custom commands array', t => {
-	const {lastFrame} = render(
+	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput customCommands={[]} />
 		</TestWrapper>,
 	);
 
 	t.truthy(lastFrame());
+	unmount();
 });
 
 test('UserInput component structure is valid', t => {
-	const {lastFrame} = render(
+	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput />
 		</TestWrapper>,
@@ -669,6 +686,7 @@ test('UserInput component structure is valid', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.true(output!.length > 0);
+	unmount();
 });
 
 test('UserInput does not treat carriage return as a multiline shortcut', async t => {
@@ -759,6 +777,7 @@ test('arrow key navigation updates the selected completion', async t => {
 
 	stdin.write('/');
 	await wait();
+	await wait();
 
 	const beforeNav = lastFrame()!;
 	t.regex(beforeNav, /Available commands:/);
@@ -783,6 +802,7 @@ test('Enter selects the highlighted completion and populates the input', async t
 
 	stdin.write('/');
 	await wait();
+	await wait();
 
 	t.regex(lastFrame()!, /Available commands:/);
 
@@ -803,20 +823,21 @@ test('typing a space after a command hides completions so args submit', async t 
 		</TestWrapper>,
 	);
 
-	stdin.write('/test-help');
+	stdin.write('/test');
+	await wait();
 	await wait();
 
 	// While still typing the command name, completions are visible
 	t.regex(lastFrame()!, /Available commands:/);
 
 	// Once a space is typed, the user is entering arguments - completions hide
-	// so Enter submits the full `/test-help arg` instead of selecting `/test-help`
+	// so Enter submits the full `/test arg` instead of selecting `/test`
 	stdin.write(' arg');
 	await wait();
 
 	const afterArg = lastFrame()!;
 	t.notRegex(afterArg, /Available commands:/);
-	t.regex(afterArg, /\/test-help arg/);
+	t.regex(afterArg, /\/test arg/);
 
 	unmount();
 });
@@ -829,6 +850,7 @@ test('completion menu dismissal/reset after selection or escape', async t => {
 	);
 
 	stdin.write('/');
+	await wait();
 	await wait();
 
 	t.regex(lastFrame()!, /Available commands:/);
@@ -845,6 +867,7 @@ test('completion menu dismissal/reset after selection or escape', async t => {
 	await wait();
 
 	stdin.write('/');
+	await wait();
 	await wait();
 
 	t.regex(lastFrame()!, /Available commands:/);
@@ -870,6 +893,7 @@ test('UserInput renders completions text when typing /', async t => {
 	await new Promise(resolve => setTimeout(resolve, 50));
 	stdin.write('/');
 	await new Promise(resolve => setTimeout(resolve, 150));
+	await wait();
 
 	const output = lastFrame()!;
 	t.truthy(output);
@@ -889,6 +913,7 @@ test('UserInput windows long slash completion lists', async t => {
 	);
 
 	stdin.write('/zz');
+	await wait();
 	await wait();
 
 	const firstFrame = lastFrame()!;
@@ -925,6 +950,7 @@ test('UserInput renders completions BEFORE the mode indicator (inside the input 
 	await new Promise(resolve => setTimeout(resolve, 50));
 	stdin.write('/');
 	await new Promise(resolve => setTimeout(resolve, 150));
+	await wait();
 
 	const output = lastFrame()!;
 	t.truthy(output);
@@ -950,6 +976,7 @@ test('UserInput completions appear on a line above the mode indicator', async t 
 	await new Promise(resolve => setTimeout(resolve, 50));
 	stdin.write('/');
 	await new Promise(resolve => setTimeout(resolve, 150));
+	await wait();
 
 	const output = lastFrame()!;
 	const lines = output.split('\n');

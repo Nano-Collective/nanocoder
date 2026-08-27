@@ -29,4 +29,4 @@ The `sdkProvider: "anthropic"` field enables the native Anthropic SDK instead of
 
 ## Fetching Available Models
 
-The `/setup-providers` wizard can automatically fetch available models from your Anthropic account.
+The `/settings providers` wizard can automatically fetch available models from your Anthropic account.

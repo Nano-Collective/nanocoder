@@ -30,6 +30,12 @@ First, tap the repository:
 brew tap nano-collective/nanocoder https://github.com/Nano-Collective/nanocoder
 ```
 
+For Homebrew 6.x+ (and other setups that require a trusted third-party tap), trust the tap before installing:
+
+```bash
+brew trust nano-collective/nanocoder
+```
+
 Then install:
 
 ```bash

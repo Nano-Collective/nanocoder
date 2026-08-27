@@ -1,4 +1,5 @@
 import test from 'ava';
+import {MAX_TOOL_RESULT_CHARS} from '@/constants';
 import type {Message} from '@/types/index';
 import {
 	convertToModelMessages,
@@ -285,6 +286,43 @@ test('convertToModelMessages emits a json output for structured tool results', t
 	t.deepEqual(content[0].output?.value, {
 		diagnostics: [{file: 'x.ts', severity: 'error'}],
 	});
+});
+
+test('convertToModelMessages caps oversized structured tool results', t => {
+	const messages: Message[] = [
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{id: 'call_oversized', function: {name: 'large_tool', arguments: {}}},
+			],
+		},
+		{
+			role: 'tool',
+			content: 'bounded fallback',
+			tool_call_id: 'call_oversized',
+			name: 'large_tool',
+			structuredContent: {
+				head: 'HEAD',
+				middle: 'x'.repeat(MAX_TOOL_RESULT_CHARS),
+				tail: 'TAIL',
+			},
+		},
+	];
+
+	const result = convertToModelMessages(messages);
+	const content = result[1].content as Array<{
+		output?: {type: string; value: unknown};
+	}>;
+	const output = content[0].output;
+
+	t.is(output?.type, 'text');
+	t.is(typeof output?.value, 'string');
+	const value = output?.value as string;
+	t.is(value.length, MAX_TOOL_RESULT_CHARS);
+	t.true(value.startsWith('{"head":"HEAD"'));
+	t.true(value.endsWith('"tail":"TAIL"}'));
+	t.true(value.includes('Output truncated'));
 });
 
 test('convertToModelMessages handles multiple messages', t => {

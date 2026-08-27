@@ -1,7 +1,7 @@
 import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
 import Spinner from 'ink-spinner';
 import {useEffect, useRef, useState} from 'react';
+import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {getColors} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import type {ProviderConfig} from '../../types/config';
@@ -16,14 +16,38 @@ import {
 } from '../utils/fetch-models';
 import {FieldInputView} from './field-input-view';
 import {ModelSelectionList} from './model-selection-list';
+import {useListLimit} from './use-list-limit';
 import {useWizardForm} from './use-wizard-form';
 
 interface ProviderStepProps {
 	onComplete: (providers: ProviderConfig[]) => void;
 	onBack?: () => void;
 	onDelete?: () => void;
+	/**
+	 * Opens the mode-specific provider step. When omitted, that entry is left
+	 * out of the menu entirely — it is an advanced option, so callers that
+	 * don't support it (or don't want it) simply don't pass a handler.
+	 */
+	onConfigureModes?: (providers: ProviderConfig[]) => void;
 	existingProviders?: ProviderConfig[];
 	configExists?: boolean;
+	/**
+	 * Open straight into the edit/delete choice for this provider instead of the
+	 * template menu. Matched by name rather than index: the caller (the settings
+	 * panel) lists the resolved config, while this step lists whichever config
+	 * file the wizard loaded, so positions need not line up. An unknown name
+	 * falls back to the normal menu.
+	 */
+	initialEditName?: string;
+}
+
+function findProviderIndex(
+	providers: ProviderConfig[] | undefined,
+	name: string | undefined,
+): number | null {
+	if (!name || !providers) return null;
+	const index = providers.findIndex(provider => provider.name === name);
+	return index === -1 ? null : index;
 }
 
 type Mode =
@@ -79,11 +103,14 @@ export function ProviderStep({
 	onComplete,
 	onBack,
 	onDelete,
+	onConfigureModes,
 	existingProviders,
 	configExists = false,
+	initialEditName,
 }: ProviderStepProps) {
 	const colors = getColors();
 	const {isNarrow} = useResponsiveTerminal();
+	const listLimit = useListLimit();
 	const [providers, setProviders] = useState<ProviderConfig[]>(
 		existingProviders || [],
 	);
@@ -96,7 +123,11 @@ export function ProviderStep({
 		}
 	}, [existingProviders]);
 
-	const [mode, setMode] = useState<Mode>('select-template-or-custom');
+	const [mode, setMode] = useState<Mode>(() =>
+		findProviderIndex(existingProviders, initialEditName) === null
+			? 'select-template-or-custom'
+			: 'edit-or-delete',
+	);
 	const {
 		selectedTemplate,
 		currentFieldIndex,
@@ -113,7 +144,9 @@ export function ProviderStep({
 		bumpInputKey,
 	} = useWizardForm<ProviderTemplate>();
 	const [cameFromCustom, setCameFromCustom] = useState(false);
-	const [editingIndex, setEditingIndex] = useState<number | null>(null);
+	const [editingIndex, setEditingIndex] = useState<number | null>(() =>
+		findProviderIndex(existingProviders, initialEditName),
+	);
 	const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
 	const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(
 		new Set(),
@@ -145,6 +178,14 @@ export function ProviderStep({
 			? [
 					{label: 'Add another provider', value: 'templates'},
 					{label: 'Edit existing providers', value: 'edit'},
+					...(onConfigureModes
+						? [
+								{
+									label: 'Configure mode-specific providers',
+									value: 'modes',
+								},
+							]
+						: []),
 					{label: 'Done & Save', value: 'done'},
 					...(configExists && onDelete
 						? [{label: 'Delete config file', value: 'delete'}]
@@ -182,6 +223,8 @@ export function ProviderStep({
 			}
 		} else if (item.value === 'edit') {
 			setMode('edit-selection');
+		} else if (item.value === 'modes' && onConfigureModes) {
+			onConfigureModes(providers);
 		} else if (item.value === 'done') {
 			onComplete(providers);
 		} else if (item.value === 'delete' && onDelete) {
@@ -326,13 +369,12 @@ export function ProviderStep({
 					setProviders([...providers, providerConfig]);
 				}
 
-				// Reset and go back to appropriate screen
-				const wasEditing = editingIndex !== null;
+				// Land on the root menu, not the template list: it carries
+				// "Done & Save" as its third entry, whereas the template list
+				// buries it under every template. See the model-selection path.
 				resetForm();
 				setEditingIndex(null);
-				setMode(
-					wasEditing ? 'select-template-or-custom' : 'template-selection',
-				);
+				setMode('select-template-or-custom');
 			} catch (err) {
 				setError(
 					err instanceof Error ? err.message : 'Failed to build configuration',
@@ -484,15 +526,16 @@ export function ProviderStep({
 					setProviders([...providers, providerConfig]);
 				}
 
-				// Reset and go back to appropriate screen
-				const wasEditing = editingIndex !== null;
+				// Pressing "d" in the model list used to drop the user on the
+				// raw template list, where the only way to finish was scrolling
+				// past every template to a trailing "Done & Save" — off screen on
+				// a normal terminal, so the wizard looked hung. Land on the root
+				// menu instead, which offers Done & Save up front.
 				resetForm();
 				setEditingIndex(null);
 				setFetchedModels([]);
 				setSelectedModelIds(new Set());
-				setMode(
-					wasEditing ? 'select-template-or-custom' : 'template-selection',
-				);
+				setMode('select-template-or-custom');
 			} catch (err) {
 				setError(
 					err instanceof Error ? err.message : 'Failed to build configuration',
@@ -589,7 +632,7 @@ export function ProviderStep({
 						</Text>
 					</Box>
 				)}
-				<SelectInput
+				<StyledSelectInput
 					items={initialOptions}
 					onSelect={(item: {value: string}) => handleInitialSelect(item)}
 				/>
@@ -612,10 +655,16 @@ export function ProviderStep({
 						</Text>
 					</Box>
 				)}
-				<SelectInput
+				<StyledSelectInput
 					items={getTemplateOptions()}
+					limit={listLimit}
 					onSelect={(item: TemplateOption) => handleTemplateSelect(item)}
 				/>
+				<Box marginTop={1}>
+					<Text color={colors.secondary}>
+						Up/Down: navigate (list scrolls) | Enter: select
+					</Text>
+				</Box>
 			</Box>
 		);
 	}
@@ -628,8 +677,9 @@ export function ProviderStep({
 						Select a provider to edit:
 					</Text>
 				</Box>
-				<SelectInput
+				<StyledSelectInput
 					items={editOptions}
+					limit={listLimit}
 					onSelect={(item: TemplateOption) => handleEditSelect(item)}
 				/>
 			</Box>
@@ -650,7 +700,7 @@ export function ProviderStep({
 						{provider?.name} - What would you like to do?
 					</Text>
 				</Box>
-				<SelectInput
+				<StyledSelectInput
 					items={editOrDeleteOptions}
 					onSelect={(item: {value: string}) => handleEditOrDeleteChoice(item)}
 				/>

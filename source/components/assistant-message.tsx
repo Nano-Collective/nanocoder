@@ -5,6 +5,7 @@ import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {parseMarkdownParts} from '@/markdown-parser/index';
 import type {AssistantMessageProps} from '@/types/index';
+import {formatUsageIndicator} from '@/usage/format';
 import {wrapWithTrimmedContinuations} from '@/utils/text-wrapping';
 import {calculateTokens} from '@/utils/token-calculator';
 
@@ -41,11 +42,17 @@ export function AssistantMessageBox({
 export default memo(function AssistantMessage({
 	message,
 	model,
+	usage,
+	showUsageFooter = true,
 }: AssistantMessageProps) {
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
 	const nonInteractive = useNonInteractiveRender();
 	const tokens = calculateTokens(message);
+	// Prefer the provider-reported usage (real token counts + cost); fall
+	// back to the client-side estimate of the message text when the
+	// provider reported nothing.
+	const usageIndicator = usage ? formatUsageIndicator(usage) : null;
 
 	// Inner text width: outer width minus left border (1) and padding (1 each side)
 	const textWidth = nonInteractive ? boxWidth : boxWidth - 3;
@@ -117,9 +124,17 @@ export default memo(function AssistantMessage({
 					</Box>
 				),
 			)}
-			<Box marginBottom={2}>
-				<Text color={colors.secondary}>~{tokens.toLocaleString()} tokens</Text>
-			</Box>
+			{showUsageFooter ? (
+				<Box marginBottom={2}>
+					<Text color={colors.secondary}>
+						{usageIndicator ?? `~${tokens.toLocaleString()} tokens`}
+					</Text>
+				</Box>
+			) : (
+				// Keep the trailing gap the footer used to provide, so turning
+				// the footer off doesn't visually cram messages together.
+				<Box marginBottom={1} />
+			)}
 		</>
 	);
 });

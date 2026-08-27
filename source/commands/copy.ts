@@ -1,6 +1,7 @@
 /**
  * /copy command
  * Copies the last assistant response to the system clipboard.
+ * `/copy code` is webview-only; the terminal rejects that argument.
  */
 import clipboard from 'clipboardy';
 import type {Command} from '@/types/commands';
@@ -20,7 +21,14 @@ function findLastAssistantContent(messages: Message[]): string | undefined {
 export const copyCommand: Command = {
 	name: 'copy',
 	description: 'Copy the last assistant response to the clipboard',
-	handler: async (_args, messages) => {
+	handler: async (args, messages) => {
+		if (args[0]?.toLowerCase() === 'code') {
+			return warningMsg(
+				"This functionality isn't supported in the terminal.",
+				'copy',
+			);
+		}
+
 		const content = findLastAssistantContent(messages);
 
 		if (!content) {

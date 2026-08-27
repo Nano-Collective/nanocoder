@@ -151,7 +151,7 @@ export class PromptHistory {
 
 	getNextString(): string | null {
 		const result = this.getNext();
-		return result?.displayValue ?? '';
+		return result?.displayValue ?? null;
 	}
 
 	resetIndex(): void {

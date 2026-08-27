@@ -1,5 +1,5 @@
 import test from 'ava';
-import {formatError} from './error-formatter';
+import {createErrorInfo, formatError} from './error-formatter';
 
 console.log(`\nerror-formatter.spec.ts`);
 
@@ -173,4 +173,25 @@ test('formatError - handles validation error object', t => {
 	};
 	const result = formatError(error);
 	t.is(result, 'email: Invalid email format');
+});
+
+test('createErrorInfo - recognizes Node network error codes', t => {
+	for (const code of ['ECONNREFUSED', 'ENOTFOUND', 'ECONNRESET']) {
+		const error = Object.assign(new Error('request failed'), {code});
+		const result = createErrorInfo(error);
+
+		t.true(result.isNetworkError);
+		t.is(result.code, code);
+	}
+});
+
+test('createErrorInfo - recognizes ETIMEDOUT as a network and timeout error', t => {
+	const error = Object.assign(new Error('request failed'), {
+		code: 'ETIMEDOUT',
+	});
+	const result = createErrorInfo(error);
+
+	t.true(result.isNetworkError);
+	t.true(result.isTimeoutError);
+	t.is(result.code, 'ETIMEDOUT');
 });

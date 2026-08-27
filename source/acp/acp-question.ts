@@ -1,12 +1,19 @@
 import type {
 	AgentSideConnection,
 	PermissionOption,
+	RequestPermissionResponse,
 } from '@agentclientprotocol/sdk';
 import {getLogger} from '@/utils/logging';
 
 const logger = getLogger();
 
 const OPTION_PREFIX = 'answer-';
+
+/**
+ * Sentinel resolved by the abort race - `aborted` is not a protocol outcome, so
+ * it cannot be modelled as a `RequestPermissionResponse`.
+ */
+const ABORTED = Symbol('aborted');
 
 /**
  * Present an `ask_user` question to the ACP client and return the chosen answer.
@@ -27,6 +34,7 @@ export async function requestUserChoice(
 	toolCallId: string,
 	question: string,
 	options: string[],
+	abortSignal?: AbortSignal,
 ): Promise<string> {
 	const permissionOptions: PermissionOption[] = options.map(
 		(option, index) => ({
@@ -37,18 +45,41 @@ export async function requestUserChoice(
 	);
 
 	try {
-		const response = await conn.requestPermission({
+		const requestPromise = conn.requestPermission({
 			sessionId,
 			options: permissionOptions,
 			toolCall: {toolCallId, title: question, status: 'pending'},
 		});
 
+		let response: RequestPermissionResponse | typeof ABORTED;
+		if (abortSignal) {
+			response = await Promise.race([
+				requestPromise,
+				new Promise<typeof ABORTED>(resolve => {
+					if (abortSignal.aborted) {
+						resolve(ABORTED);
+					} else {
+						abortSignal.addEventListener('abort', () => {
+							resolve(ABORTED);
+						});
+					}
+				}),
+			]);
+		} else {
+			response = await requestPromise;
+		}
+
+		if (response === ABORTED) {
+			return 'Error: AbortError: The operation was aborted';
+		}
+
 		if (response.outcome.outcome === 'selected') {
-			const index = Number(
-				response.outcome.optionId.slice(OPTION_PREFIX.length),
-			);
-			if (Number.isInteger(index) && index >= 0 && index < options.length) {
-				return options[index];
+			const optionId = response.outcome.optionId;
+			if (optionId.startsWith(OPTION_PREFIX)) {
+				const index = Number(optionId.slice(OPTION_PREFIX.length));
+				if (Number.isInteger(index) && index >= 0 && index < options.length) {
+					return options[index];
+				}
 			}
 		}
 

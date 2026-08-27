@@ -1,18 +1,29 @@
 {
 	"compilerOptions": {
-		"module": "Node16",
+		"module": "ESNext",
 		"target": "ES2022",
-		"lib": ["ES2022"],
+		"lib": [
+			"ES2022"
+		],
 		"sourceMap": true,
-		"rootDir": "src",
 		"outDir": "dist",
+		// Typecheck-only knob: the extension is bundled by esbuild (see build:ext),
+		// never emitted by tsc. The program pulls in shared files from ../../source,
+		// so the root has to cover the repo, not just plugins/vscode.
+		"rootDir": "../..",
 		"strict": true,
 		"esModuleInterop": true,
 		"skipLibCheck": true,
 		"forceConsistentCasingInFileNames": true,
-		"moduleResolution": "Node16",
+		"moduleResolution": "Bundler",
 		"resolveJsonModule": true
 	},
-	"include": ["src/**/*"],
-	"exclude": ["node_modules", "dist"]
+	"include": [
+		"src/**/*",
+		"../../source/vscode/cli-path-discovery.ts"
+	],
+	"exclude": [
+		"node_modules",
+		"dist"
+	]
 }

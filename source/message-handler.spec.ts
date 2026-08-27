@@ -7,6 +7,7 @@ import {
 	setToolManagerGetter,
 	setToolRegistryGetter,
 } from './message-handler';
+import {MAX_TOOL_RESULT_CHARS} from '@/constants';
 
 console.log(`\nmessage-handler.spec.ts`);
 
@@ -174,6 +175,27 @@ test('processToolUse - carries structured handler output onto the result', async
 	t.deepEqual(result.structuredContent, {
 		diagnostics: [{file: 'x.ts', severity: 'error'}],
 	});
+});
+
+test('processToolUse - caps oversized LLM content but keeps structured output', async t => {
+	const content = `HEAD\n${'middle\n'.repeat(MAX_TOOL_RESULT_CHARS)}TAIL`;
+
+	setToolRegistryGetter(
+		createMockToolRegistry({
+			large_tool: async () => ({
+				llmContent: content,
+				structured: {available: true},
+			}),
+		}),
+	);
+
+	const result = await processToolUse(createMockToolCall('large_tool', {}));
+
+	t.is(result.content.length, MAX_TOOL_RESULT_CHARS);
+	t.true(result.content.startsWith('HEAD\n'));
+	t.true(result.content.endsWith('TAIL'));
+	t.true(result.content.includes('Output truncated'));
+	t.deepEqual(result.structuredContent, {available: true});
 });
 
 test('processToolUse - executes tool successfully with string arguments (JSON parsing)', async t => {

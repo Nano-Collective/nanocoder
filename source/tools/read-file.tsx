@@ -6,12 +6,12 @@ import React from 'react';
 import ToolMessage from '@/components/tool-message';
 import {
 	EMPTY_CONTENT_MARKER,
-	FILE_READ_CHUNK_SIZE_LINES,
-	FILE_READ_CHUNKING_HINT_THRESHOLD_LINES,
-	FILE_READ_METADATA_THRESHOLD_LINES,
+	FILE_READ_PREVIEW_LINES,
+	FILE_READ_PREVIEW_THRESHOLD_LINES,
 	MAX_LINE_LENGTH_CHARS,
 } from '@/constants';
 import {ThemeContext} from '@/hooks/useTheme';
+import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -27,7 +27,7 @@ const executeReadFile = async (args: {
 	end_line?: number;
 	metadata_only?: boolean;
 }): Promise<string> => {
-	const absPath = resolve(args.path);
+	const absPath = resolve(getSafeSessionCwd(), args.path);
 
 	try {
 		// Handle explicit metadata_only request
@@ -49,7 +49,7 @@ const executeReadFile = async (args: {
 			output += `${'='.repeat(50)}\n\n`;
 
 			output += `Type: ${type}\n`;
-			output += `Size: ${size.toLocaleString()} bytes\n`;
+			output += `Size: ${size} bytes\n`;
 			output += `Last Modified: ${lastModified}\n`;
 
 			// For regular files, try to get additional info
@@ -62,8 +62,8 @@ const executeReadFile = async (args: {
 					const lines = cached.lines;
 					const content = cached.content;
 
-					output += `Lines: ${lines.length.toLocaleString()}\n`;
-					output += `Estimated Tokens: ~${calculateTokens(content).toLocaleString()}\n`;
+					output += `Lines: ${lines.length}\n`;
+					output += `Estimated Tokens: ~${calculateTokens(content)}\n`;
 
 					// Detect file type from extension
 					const fileType = getFileType(absPath);
@@ -113,49 +113,24 @@ const executeReadFile = async (args: {
 
 		const lines = cached.lines;
 		const totalLines = lines.length;
-		const fileSize = content.length;
-		const estimatedTokens = calculateTokens(content);
 
-		// Progressive disclosure: metadata first for files >300 lines
-		// Small files can be read directly without ranges
+		// Return a bounded preview only for very large files. Most files can be
+		// understood and edited after a single read; truly large files still have
+		// an explicit, recoverable path to the remaining content.
 		if (
 			args.start_line === undefined &&
 			args.end_line === undefined &&
-			totalLines > FILE_READ_METADATA_THRESHOLD_LINES
+			totalLines > FILE_READ_PREVIEW_THRESHOLD_LINES
 		) {
-			// Return metadata only for medium/large files
-			// Detect file type from extension
-			const fileType = getFileType(absPath);
+			const previewEndLine = Math.min(FILE_READ_PREVIEW_LINES, totalLines);
+			const preview = lines.slice(0, previewEndLine).join('\n');
 
-			let output = `File: ${args.path}\n`;
-			output += `Type: ${fileType}\n`;
-			output += `Total lines: ${totalLines.toLocaleString()}\n`;
-			output += `Size: ${fileSize.toLocaleString()} bytes\n`;
-			output += `Estimated tokens: ~${estimatedTokens.toLocaleString()}\n\n`;
+			// The model has received real content, even though the rest is omitted.
+			// Marking it seen keeps the read-before-edit guard aligned with the
+			// content that was actually returned, just like a ranged read.
+			markFileSeen(absPath);
 
-			if (totalLines <= FILE_READ_CHUNKING_HINT_THRESHOLD_LINES) {
-				output += `[Medium file - To read specific sections, call read_file with start_line and end_line]\n`;
-				output += `[To read entire file progressively, make multiple calls:]\n`;
-				output += `  - read_file({path: "${args.path}", start_line: 1, end_line: ${FILE_READ_CHUNK_SIZE_LINES}})\n`;
-				output += `  - read_file({path: "${args.path}", start_line: ${FILE_READ_CHUNK_SIZE_LINES + 1}, end_line: ${totalLines}})\n`;
-			} else {
-				output += `[Large file - Choose one approach:]\n`;
-				output += `[1. Targeted read: Use search_files to find code, then read specific ranges]\n`;
-				output += `[2. Progressive read: Read file in chunks (recommended chunk size: 200-300 lines)]\n`;
-				output += `   Example chunks for ${totalLines} lines:\n`;
-				const chunkSize = FILE_READ_CHUNK_SIZE_LINES;
-				const numChunks = Math.ceil(totalLines / chunkSize);
-				for (let i = 0; i < Math.min(numChunks, 3); i++) {
-					const start = i * chunkSize + 1;
-					const end = Math.min((i + 1) * chunkSize, totalLines);
-					output += `   - read_file({path: "${args.path}", start_line: ${start}, end_line: ${end}})\n`;
-				}
-				if (numChunks > 3) {
-					output += `   ... and ${numChunks - 3} more chunks to complete the file\n`;
-				}
-			}
-
-			return output;
+			return `${preview}\n\n[Truncated at line ${previewEndLine} of ${totalLines}. Use read_file with start_line: ${previewEndLine + 1} and end_line to continue.]`;
 		}
 
 		// Line ranges specified - read and return content
@@ -190,7 +165,7 @@ const executeReadFile = async (args: {
 
 const readFileCoreTool = tool({
 	description:
-		'Read file contents. Use this INSTEAD OF bash cat/head/tail/less commands. PROGRESSIVE DISCLOSURE: Files ≤300 lines return content directly. Files >300 lines return metadata first - then call again with start_line/end_line to read specific sections. Use metadata_only=true for file info (size, lines, type) without reading content.',
+		'Read file contents. Use this INSTEAD OF bash cat/head/tail/less commands. PROGRESSIVE DISCLOSURE: Files ≤1500 lines return content directly. Larger files return a 250-line preview with a continuation hint - use start_line/end_line to read additional sections. Use metadata_only=true for file info (size, lines, type) without reading content.',
 	inputSchema: jsonSchema<{
 		path: string;
 		start_line?: number;
@@ -206,12 +181,12 @@ const readFileCoreTool = tool({
 			start_line: {
 				type: 'number',
 				description:
-					'Optional: Line number to start reading from (1-indexed). Required for files >300 lines. Use with end_line to read specific range.',
+					'Optional: Line number to start reading from (1-indexed). Use with end_line to read a specific range or continue a large-file preview.',
 			},
 			end_line: {
 				type: 'number',
 				description:
-					'Optional: Line number to stop reading at (inclusive). Required for files >300 lines. Use with start_line to read specific range.',
+					'Optional: Line number to stop reading at (inclusive). Use with start_line to read a specific range or continue a large-file preview.',
 			},
 			metadata_only: {
 				type: 'boolean',
@@ -249,9 +224,11 @@ const ReadFileFormatter = React.memo(
 		fileInfo: {
 			totalLines: number;
 			readLines: number;
+			readEndLine: number;
 			tokens: number;
 			isPartialRead: boolean;
 			isMetadataOnly: boolean;
+			isTruncated: boolean;
 		};
 	}) => {
 		const themeContext = React.useContext(ThemeContext);
@@ -294,7 +271,8 @@ const ReadFileFormatter = React.memo(
 						<Box>
 							<Text color={colors.secondary}>Lines: </Text>
 							<Text color={colors.text}>
-								{args.start_line || 1} - {args.end_line || fileInfo.totalLines}
+								{args.start_line || 1} - {args.end_line || fileInfo.readEndLine}
+								{fileInfo.isTruncated ? ` of ${fileInfo.totalLines}` : ''}
 							</Text>
 						</Box>
 					</>
@@ -332,15 +310,17 @@ const readFileFormatter = async (
 	let fileInfo = {
 		totalLines: 0,
 		readLines: 0,
+		readEndLine: 0,
 		tokens: 0,
 		isPartialRead: false,
 		isMetadataOnly: false,
+		isTruncated: false,
 	};
 
 	try {
 		const path = args.path || args.file_path;
 		if (path && typeof path === 'string') {
-			const absPath = resolve(path);
+			const absPath = resolve(getSafeSessionCwd(), path);
 			const cached = await getCachedFileContent(absPath);
 			const content = cached.content;
 			const lines = cached.lines;
@@ -351,13 +331,16 @@ const readFileFormatter = async (
 				(result?.startsWith('File:') ?? false) &&
 				!args.start_line &&
 				!args.end_line &&
-				totalLines > FILE_READ_METADATA_THRESHOLD_LINES;
+				totalLines > FILE_READ_PREVIEW_THRESHOLD_LINES;
+			const isTruncated = result?.includes('[Truncated at line ') ?? false;
 
 			// Calculate what was actually read
 			const startLine = args.start_line || 1;
-			const endLine = args.end_line || totalLines;
-			const readLines = endLine - startLine + 1;
-			const isPartialRead = startLine > 1 || endLine < totalLines;
+			const readEndLine = isTruncated
+				? Math.min(FILE_READ_PREVIEW_LINES, totalLines)
+				: args.end_line || totalLines;
+			const readLines = readEndLine - startLine + 1;
+			const isPartialRead = startLine > 1 || readEndLine < totalLines;
 
 			// Calculate tokens
 			let tokens: number;
@@ -372,9 +355,11 @@ const readFileFormatter = async (
 			fileInfo = {
 				totalLines,
 				readLines,
+				readEndLine,
 				tokens,
 				isPartialRead,
 				isMetadataOnly,
+				isTruncated,
 			};
 		}
 	} catch {
@@ -391,17 +376,18 @@ const readFileValidator = async (args: {
 	metadata_only?: boolean;
 }): Promise<{valid: true} | {valid: false; error: string}> => {
 	// Validate path boundary first to prevent directory traversal
-	if (!isValidFilePath(args.path)) {
+	const cwd = getSafeSessionCwd();
+	const root = getProjectRoot();
+	if (!isValidFilePath(args.path, root)) {
 		return {
 			valid: false,
-			error: `Invalid file path: "${args.path}". Path must be relative and within the project directory.`,
+			error: `Invalid file path: "${args.path}". Path must be within the project directory.`,
 		};
 	}
 
 	// Verify the resolved path stays within project boundaries
 	try {
-		const cwd = process.cwd();
-		resolveFilePath(args.path, cwd);
+		resolveFilePath(args.path, cwd, root);
 	} catch (error) {
 		const errorMessage = formatError(error);
 		return {
@@ -410,7 +396,7 @@ const readFileValidator = async (args: {
 		};
 	}
 
-	const absPath = resolve(args.path);
+	const absPath = resolve(getSafeSessionCwd(), args.path);
 
 	try {
 		await access(absPath, constants.F_OK);
@@ -458,7 +444,7 @@ const readFileValidator = async (args: {
 				if (line && line.length > MAX_LINE_LENGTH_CHARS) {
 					return {
 						valid: false,
-						error: `File "${args.path}" contains minified or binary content (line ${i + 1} has ${line.length.toLocaleString()} characters). This file cannot be read as it would consume excessive tokens without providing useful information.`,
+						error: `File "${args.path}" contains minified or binary content (line ${i + 1} has ${line.length} characters). This file cannot be read as it would consume excessive tokens without providing useful information.`,
 					};
 				}
 			}

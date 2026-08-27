@@ -530,6 +530,42 @@ test('requesty template: uses default provider name and model default', t => {
 	t.is(config.name, 'Requesty');
 });
 
+test('orcarouter template: sets baseUrl, default model, and parses models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'orcarouter');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'OrcaRouter',
+		apiKey: 'test-key',
+		model: 'openai/gpt-5.5, anthropic/claude-sonnet-5',
+	});
+
+	t.is(config.name, 'OrcaRouter');
+	t.is(config.baseUrl, 'https://api.orcarouter.ai/v1');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, [
+		'openai/gpt-5.5',
+		'anthropic/claude-sonnet-5',
+	]);
+});
+
+test('orcarouter template: uses default provider name and model default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'orcarouter');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'openai/gpt-5.5');
+
+	const config = template!.buildConfig({
+		providerName: '',
+		apiKey: 'test-key',
+		model: 'openai/gpt-5.5',
+	});
+
+	t.is(config.name, 'OrcaRouter');
+});
+
 // ============================================================================
 // Tests for template ID vs sdkProvider collision prevention
 // Providers that use sdkProvider: 'anthropic' (like MiniMax, Kimi) must not
@@ -620,4 +656,57 @@ test('anthropic, minimax, and kimi templates set expected sdkProvider values', t
 		}).sdkProvider,
 		'anthropic',
 	);
+});
+
+test('thesean template: sets sdkProvider to anthropic with thesean baseUrl', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'thesean');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'ship-like/claude-opus-4-8');
+
+	const config = template!.buildConfig({
+		apiKey: 'test-key',
+		model: 'ship-like/claude-opus-4-8,ship-like/claude-sonnet-5',
+		providerName: '',
+	});
+
+	t.is(config.sdkProvider, 'anthropic');
+	t.is(config.baseUrl, 'https://api.thesean.ai');
+	t.is(config.name, 'Thesean AI');
+	t.deepEqual(config.models, [
+		'ship-like/claude-opus-4-8',
+		'ship-like/claude-sonnet-5',
+	]);
+});
+
+test('major providers have correct default models', t => {
+	const expectedDefaults: Record<string, string> = {
+		'ollama': 'llama4',
+		'gemini': 'gemini-3.6-flash',
+		'openrouter': 'anthropic/claude-sonnet-5',
+		'openai': 'gpt-5.6-sol',
+		'anthropic': 'claude-sonnet-5',
+		'mistral': 'mistral-large-latest',
+		'z-ai': 'glm-5.2',
+		'z-ai-coding': 'glm-5.2',
+		'github-models': 'openai/gpt-5.6-sol',
+		'chatgpt-codex': 'gpt-5.3-codex',
+		'github-copilot': 'gpt-5.6-sol',
+		'poe': 'gpt-5.6-sol',
+		'atlas-cloud': 'openai/gpt-5.6-sol',
+		'together': 'deepseek-ai/DeepSeek-V4-Pro',
+	};
+
+	for (const [providerId, expectedModel] of Object.entries(expectedDefaults)) {
+		const template = PROVIDER_TEMPLATES.find(t => t.id === providerId);
+		t.truthy(template, `Template ${providerId} should exist`);
+		const modelField = template!.fields.find(f => f.name === 'model');
+		t.truthy(modelField, `Template ${providerId} should have a model field`);
+		t.is(
+			modelField!.default,
+			expectedModel,
+			`Template ${providerId} default model should be ${expectedModel}`
+		);
+	}
 });

@@ -1,10 +1,16 @@
-import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
+import {
+	resetSessionCwd,
+	setProjectRoot,
+	setSessionCwd,
+} from '../services/session-cwd';
 import {listDirectoryTool} from './list-directory';
 
 // ============================================================================
@@ -203,7 +209,7 @@ test.serial('list_directory shows files and directories', async t => {
 	}
 });
 
-test.serial('list_directory shows file sizes', async t => {
+test.serial('list_directory hides file sizes by default', async t => {
 	t.timeout(10000);
 	const originalCwd = process.cwd();
 
@@ -219,11 +225,35 @@ test.serial('list_directory shows file sizes', async t => {
 			{toolCallId: 'test', messages: []},
 		);
 
-		// Should show file size in bytes
-		t.true(result.includes('bytes') || result.includes('1,000'));
+		t.true(result.includes('largefile.txt'));
+		t.false(result.includes('bytes'));
 	} finally {
 		process.chdir(originalCwd);
 		rmSync(join(originalCwd, 'test-listdir-sizes-temp'), {recursive: true, force: true});
+	}
+});
+
+test.serial('list_directory shows file sizes when showSizes=true', async t => {
+	t.timeout(10000);
+	const originalCwd = process.cwd();
+
+	try {
+		const testDir = join(process.cwd(), 'test-listdir-sizes-opt-in-temp');
+		mkdirSync(testDir, {recursive: true});
+		writeFileSync(join(testDir, 'largefile.txt'), 'x'.repeat(1000));
+
+		process.chdir(testDir);
+
+		const result = await listDirectoryTool.tool.execute!(
+			{showSizes: true},
+			{toolCallId: 'test', messages: []},
+		);
+
+		// Should show file size in bytes
+		t.true(result.includes('bytes') || result.includes('1000') || result.includes('1,000'));
+	} finally {
+		process.chdir(originalCwd);
+		rmSync(join(originalCwd, 'test-listdir-sizes-opt-in-temp'), {recursive: true, force: true});
 	}
 });
 
@@ -601,6 +631,30 @@ test('list_directory tool does not require confirmation', t => {
 	t.true(listDirectoryTool.readOnly);
 	t.is(listDirectoryTool.approval, undefined);
 });
+
+test.serial(
+	'list_directory applies the project-root .gitignore after a cd into a subdir',
+	async t => {
+		const root = mkdtempSync(join(tmpdir(), 'nc-lsroot-'));
+		try {
+			writeFileSync(join(root, '.gitignore'), '*.log\n');
+			writeFileSync(join(root, 'keep.txt'), '');
+			writeFileSync(join(root, 'skip.log'), '');
+			mkdirSync(join(root, 'sub'));
+			setProjectRoot(root);
+			setSessionCwd(join(root, 'sub')); // shell has cd-ed into a subdir
+			const result = await listDirectoryTool.tool.execute!(
+				{path: root},
+				{toolCallId: 'test', messages: []},
+			);
+			t.true(result.includes('keep.txt'), 'lists non-ignored files');
+			t.false(result.includes('skip.log'), 'root .gitignore still applies');
+		} finally {
+			resetSessionCwd();
+			rmSync(root, {recursive: true, force: true});
+		}
+	},
+);
 
 test('list_directory tool has handler function', t => {
 	t.is(typeof listDirectoryTool.tool.execute, 'function');

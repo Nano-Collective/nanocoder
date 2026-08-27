@@ -7,6 +7,8 @@ An open coding agent for your terminal, built by a community collective rather t
 
 Built by the [Nano Collective](https://nanocollective.org), a community collective building AI tooling not for profit, but for the community. Nanocoder runs agentic coding on the model of your choice: local models via Ollama, or any OpenAI-compatible API such as OpenRouter, Anthropic, and Google. You decide which provider runs your code and where your data goes. No closed-source features and no paid tiers gating the useful parts: **privacy-respecting**, **local-first**, and **open for all**.
 
+[![Typing SVG](https://readme-typing-svg.herokuapp.com?font=&size=33&letterSpacing=large&pause=1000&color=8373F7&center=true&vCenter=true&width=1000&lines=Nanocoder;your+private+%2C+local+first+AI+coding+assistant)](https://git.io/typing-svg)
+
 ![Example](./.github/assets/example-preview.gif)
 
 ---
@@ -18,14 +20,6 @@ Built by the [Nano Collective](https://nanocollective.org), a community collecti
 ![Repo Size](https://github.com/Nano-Collective/nanocoder/raw/main/badges/repo-size.svg)
 ![Stars](https://github.com/Nano-Collective/nanocoder/raw/main/badges/stars.svg)
 ![Forks](https://github.com/Nano-Collective/nanocoder/raw/main/badges/forks.svg)
-
-<a href="https://www.star-history.com/#Nano-Collective/nanocoder&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Nano-Collective/nanocoder&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Nano-Collective/nanocoder&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Nano-Collective/nanocoder&type=Date" />
- </picture>
-</a>
 
 ## Quick Start
 

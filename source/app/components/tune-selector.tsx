@@ -1,5 +1,4 @@
 import {Box, Text, useInput} from 'ink';
-import SelectInput from 'ink-select-input';
 import {useMemo, useState} from 'react';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
@@ -257,7 +256,7 @@ function ToolProfilePanel({
 				flexDirection="column"
 				marginBottom={1}
 			>
-				<SelectInput
+				<StyledSelectInput
 					items={items}
 					initialIndex={initialIndex}
 					onSelect={item => onSelect(item.value as ToolProfile)}
@@ -351,7 +350,7 @@ function PresetPanel({
 				flexDirection="column"
 				marginBottom={1}
 			>
-				<SelectInput
+				<StyledSelectInput
 					items={items}
 					onSelect={item => onSelect(TUNE_PRESETS[Number(item.value)]?.config)}
 					onHighlight={item => setHighlighted(Number(item.value))}
@@ -573,7 +572,7 @@ function ParametersPanel({
 				flexDirection="column"
 				marginBottom={1}
 			>
-				<SelectInput
+				<StyledSelectInput
 					items={items}
 					onSelect={handleSelect}
 					onHighlight={item => setHighlighted(item.value)}

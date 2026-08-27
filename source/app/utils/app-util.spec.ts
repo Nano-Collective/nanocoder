@@ -3,10 +3,13 @@ import React from 'react';
 import {
 	createClearMessagesHandler,
 	handleMessageSubmission,
-	parseContextLimit,
 	parseCustomCommandArgs,
 } from './app-util.js';
+import {SETTINGS_TAB_IDS} from '@/app/components/settings-constants';
+import {commandRegistry} from '@/commands';
 import {lazyCommands} from '@/commands/lazy-registry';
+import BashProgress from '@/components/bash-progress';
+import CommandProgress from '@/components/command-progress';
 import type {MessageSubmissionOptions} from '@/types/index';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
@@ -142,19 +145,6 @@ test('checkpoint load detection - other checkpoint subcommand', t => {
 	t.false(isCheckpointLoad);
 });
 
-// Test setup-mcp command parsing
-test('setup-mcp command parsing - extracts command name correctly', t => {
-	const message = '/setup-mcp';
-	const commandName = message.slice(1).split(/\s+/)[0];
-	t.is(commandName, 'setup-mcp');
-});
-
-test('setup-mcp command parsing - handles command with extra whitespace', t => {
-	const message = '/setup-mcp   ';
-	const commandName = message.slice(1).split(/\s+/)[0];
-	t.is(commandName, 'setup-mcp');
-});
-
 // Test /commands create detection
 test('commands create detection - matches commands create', t => {
 	const message = '/commands create my-tool';
@@ -216,51 +206,6 @@ test('commands create - preserves .md extension when present', t => {
 	t.is(safeName, 'my-tool.md');
 });
 
-// Test parseContextLimit
-test('parseContextLimit - plain number', t => {
-	t.is(parseContextLimit('8192'), 8192);
-});
-
-test('parseContextLimit - k suffix lowercase', t => {
-	t.is(parseContextLimit('128k'), 128000);
-});
-
-test('parseContextLimit - K suffix uppercase', t => {
-	t.is(parseContextLimit('128K'), 128000);
-});
-
-test('parseContextLimit - fractional k value', t => {
-	t.is(parseContextLimit('4.5k'), 4500);
-});
-
-test('parseContextLimit - zero returns null', t => {
-	t.is(parseContextLimit('0'), null);
-});
-
-test('parseContextLimit - negative returns null', t => {
-	t.is(parseContextLimit('-5'), null);
-});
-
-test('parseContextLimit - non-numeric returns null', t => {
-	t.is(parseContextLimit('abc'), null);
-});
-
-test('parseContextLimit - just k returns null', t => {
-	t.is(parseContextLimit('k'), null);
-});
-
-test('parseContextLimit - whitespace is trimmed', t => {
-	t.is(parseContextLimit('  8192  '), 8192);
-});
-
-test('parseContextLimit - large value with k suffix', t => {
-	t.is(parseContextLimit('256k'), 256000);
-});
-
-test('parseContextLimit - decimal without k suffix', t => {
-	t.is(parseContextLimit('1024.5'), 1025);
-});
-
 // Test /ide command parsing
 test('ide command parsing - extracts command name correctly', t => {
 	const message = '/ide';
@@ -273,8 +218,6 @@ test('ide command parsing - recognized as special command', t => {
 		CLEAR: 'clear',
 		MODEL: 'model',
 		MODEL_DATABASE: 'model-database',
-		SETUP_PROVIDERS: 'setup-providers',
-		SETUP_MCP: 'setup-mcp',
 		SETTINGS: 'settings',
 		STATUS: 'status',
 		CHECKPOINT: 'checkpoint',
@@ -305,9 +248,7 @@ function createResumeTestOptions(overrides: {
 		onClearMessages: async () => {},
 		onEnterModelSelectionMode: () => {},
 		onEnterModelDatabaseMode: () => {},
-		onEnterConfigWizardMode: () => {},
 		onEnterSettingsMode: () => {},
-		onEnterMcpWizardMode: () => {},
 		onEnterExplorerMode: () => {},
 		onEnterIdeSelectionMode: () => {},
 		onEnterCheckpointLoadMode: () => {},
@@ -328,6 +269,30 @@ function createResumeTestOptions(overrides: {
 		onCommandComplete: overrides.onCommandComplete,
 	};
 }
+
+// --- Direct !command handling ---
+
+test.serial('bash command - queues a completed BashProgress with showOutput', async t => {
+	let queued: React.ReactNode = null;
+	const options = createResumeTestOptions({
+		onAddToChatQueue: component => {
+			queued = component;
+		},
+	});
+
+	await handleMessageSubmission('!printf DIRECT_BASH_OUTPUT', options);
+
+	t.true(React.isValidElement(queued));
+	const element = queued as React.ReactElement<{
+		showOutput?: boolean;
+		completedState?: {fullOutput: string};
+	}>;
+	t.is(element.type, BashProgress);
+	// User-typed !commands must render their captured output in the transcript;
+	// model-invoked execute_bash renders stay compact (no showOutput)
+	t.true(element.props.showOutput);
+	t.is(element.props.completedState?.fullOutput.trim(), 'DIRECT_BASH_OUTPUT');
+});
 
 test.serial('chat message - forwards displayValue to onHandleChatMessage so the bubble keeps [@file] placeholders', async t => {
 	// Regression: an @-mentioned file used to dump its full contents into the
@@ -719,9 +684,7 @@ function createRenameTestOptions(overrides: {
 		commandArgs: overrides.commandArgs,
 		onEnterModelSelectionMode: () => {},
 		onEnterModelDatabaseMode: () => {},
-		onEnterConfigWizardMode: () => {},
 		onEnterSettingsMode: () => {},
-		onEnterMcpWizardMode: () => {},
 		onEnterExplorerMode: () => {},
 		onEnterIdeSelectionMode: () => {},
 		onEnterCheckpointLoadMode: () => {},
@@ -861,4 +824,230 @@ test('createClearMessagesHandler - calls client.clearContext when client exists'
 test('createClearMessagesHandler - does not throw when client is null', async t => {
 	const handler = createClearMessagesHandler(() => {}, null);
 	await t.notThrowsAsync(() => handler());
+});
+
+// --- /settings tabs and retired /setup-* commands ---
+
+function createSettingsTestOptions(overrides: {
+	onEnterSettingsMode?: (tab?: string) => void;
+	onAddToChatQueue?: (component: React.ReactNode) => void;
+	commandArgs?: string[];
+}): MessageSubmissionOptions {
+	return {
+		customCommandCache: new Map(),
+		customCommandLoader: null,
+		customCommandExecutor: null,
+		onClearMessages: async () => {},
+		onRenameSession: () => {},
+		commandArgs: overrides.commandArgs,
+		onEnterModelSelectionMode: () => {},
+		onEnterModelDatabaseMode: () => {},
+		onEnterSettingsMode: overrides.onEnterSettingsMode ?? (() => {}),
+		onEnterExplorerMode: () => {},
+		onEnterIdeSelectionMode: () => {},
+		onEnterTune: () => {},
+		onEnterCheckpointLoadMode: () => {},
+		onShowStatus: () => {},
+		onHandleChatMessage: async () => {},
+		onAddToChatQueue: overrides.onAddToChatQueue ?? (() => {}),
+		setLiveComponent: () => {},
+		setIsToolExecuting: () => {},
+		setMessages: () => {},
+		messages: [],
+		provider: 'test',
+		model: 'test',
+		theme: 'dark',
+		updateInfo: null,
+		getMessageTokens: () => 0,
+	} as unknown as MessageSubmissionOptions;
+}
+
+test('settings command - no argument leaves the tab unset', async t => {
+	let captured: string | undefined | symbol = Symbol('uncalled');
+	const options = createSettingsTestOptions({
+		onEnterSettingsMode: tab => {
+			captured = tab;
+		},
+	});
+	await handleMessageSubmission('/settings', options);
+	t.is(captured, undefined);
+});
+
+test('settings command - known tab argument opens that tab', async t => {
+	let captured: string | undefined;
+	const options = createSettingsTestOptions({
+		onEnterSettingsMode: tab => {
+			captured = tab;
+		},
+		commandArgs: ['mcp'],
+	});
+	await handleMessageSubmission('/settings mcp', options);
+	t.is(captured, 'mcp');
+});
+
+test('settings command - tab argument is case-insensitive', async t => {
+	let captured: string | undefined;
+	const options = createSettingsTestOptions({
+		onEnterSettingsMode: tab => {
+			captured = tab;
+		},
+		commandArgs: ['Providers'],
+	});
+	await handleMessageSubmission('/settings Providers', options);
+	t.is(captured, 'providers');
+});
+
+test('settings command - unknown tab reports an error instead of opening', async t => {
+	let called = false;
+	const queue: React.ReactNode[] = [];
+	const options = createSettingsTestOptions({
+		onEnterSettingsMode: () => {
+			called = true;
+		},
+		onAddToChatQueue: c => queue.push(c),
+		commandArgs: ['bogus'],
+	});
+	await handleMessageSubmission('/settings bogus', options);
+	t.false(called, 'an unknown tab should not silently open the default tab');
+	t.true(
+		findMessageInQueue(queue, m => m.includes('Unknown settings tab: "bogus"')),
+		'the error names the offending argument',
+	);
+});
+
+test('settings command - unknown tab error lists the valid tabs', async t => {
+	const queue: React.ReactNode[] = [];
+	const options = createSettingsTestOptions({
+		onAddToChatQueue: c => queue.push(c),
+		commandArgs: ['providrs'],
+	});
+	await handleMessageSubmission('/settings providrs', options);
+	t.true(
+		findMessageInQueue(queue, m =>
+			SETTINGS_TAB_IDS.every(tab => m.includes(tab)),
+		),
+		'the error lists every valid tab so the typo is recoverable',
+	);
+});
+
+test('retired setup-providers - forwards to the settings providers tab', async t => {
+	let captured: string | undefined;
+	const queue: React.ReactNode[] = [];
+	const options = createSettingsTestOptions({
+		onEnterSettingsMode: tab => {
+			captured = tab;
+		},
+		onAddToChatQueue: c => queue.push(c),
+	});
+	await handleMessageSubmission('/setup-providers', options);
+	t.is(captured, 'providers');
+	t.true(findMessageInQueue(queue, m => m.includes('/settings providers')));
+});
+
+test('retired setup-mcp - forwards to the settings mcp tab', async t => {
+	let captured: string | undefined;
+	const queue: React.ReactNode[] = [];
+	const options = createSettingsTestOptions({
+		onEnterSettingsMode: tab => {
+			captured = tab;
+		},
+		onAddToChatQueue: c => queue.push(c),
+	});
+	await handleMessageSubmission('/setup-mcp', options);
+	t.is(captured, 'mcp');
+	t.true(findMessageInQueue(queue, m => m.includes('/settings mcp')));
+});
+
+test('retired setup commands - no longer registered in the slash menu', t => {
+	const names = lazyCommands.map(c => c.name);
+	t.false(names.includes('setup-providers'));
+	t.false(names.includes('setup-mcp'));
+	t.true(names.includes('settings'));
+	t.true(names.includes('setup-config'), 'unrelated /setup-config stays');
+});
+
+// --- Command progress spinner (Command.progressLabel) ---
+
+// The registry is populated at app init, not at module load, so the spec has
+// to register the lazy entries itself before driving a built-in command.
+commandRegistry.registerLazy(lazyCommands);
+
+function createProgressTestOptions(overrides: {
+	setLiveComponent?: (component: React.ReactNode) => void;
+	onAddToChatQueue?: (component: React.ReactNode) => void;
+}): MessageSubmissionOptions {
+	return {
+		...createResumeTestOptions({
+			onAddToChatQueue: overrides.onAddToChatQueue,
+		}),
+		setLiveComponent: overrides.setLiveComponent ?? (() => {}),
+	};
+}
+
+test.serial(
+	'progress spinner - /commit mounts CommandProgress then clears it',
+	async t => {
+		const live: React.ReactNode[] = [];
+		const options = createProgressTestOptions({
+			setLiveComponent: component => live.push(component),
+		});
+
+		await handleMessageSubmission('/commit', options);
+
+		t.is(live.length, 2, 'spinner is mounted once and cleared once');
+
+		const spinner = live[0] as React.ReactElement<{label?: string}>;
+		t.true(React.isValidElement(spinner));
+		t.is(spinner.type, CommandProgress);
+		t.is(spinner.props.label, 'Generating commit message');
+
+		t.is(live[1], null, 'live slot is released after the handler settles');
+	},
+);
+
+test.serial(
+	'progress spinner - cleared even when the command handler throws',
+	async t => {
+		const live: React.ReactNode[] = [];
+		const options = createProgressTestOptions({
+			setLiveComponent: component => live.push(component),
+		});
+
+		// getMessageTokens runs after the spinner is mounted, so throwing there
+		// aborts the command with a spinner already on screen.
+		const boom = {
+			...options,
+			messages: [{role: 'user' as const, content: 'x'}],
+			getMessageTokens: () => {
+				throw new Error('boom');
+			},
+		};
+
+		await t.throwsAsync(() => handleMessageSubmission('/commit', boom));
+
+		t.is(live.length, 2);
+		t.is(live[1], null, 'a throwing handler must not strand the spinner');
+	},
+);
+
+test.serial(
+	'progress spinner - commands without progressLabel leave the live slot alone',
+	async t => {
+		const live: React.ReactNode[] = [];
+		const options = createProgressTestOptions({
+			setLiveComponent: component => live.push(component),
+		});
+
+		await handleMessageSubmission('/help', options);
+
+		t.deepEqual(live, [], '/help is instant and declares no progressLabel');
+	},
+);
+
+test('progress spinner - only slow commands opt in', t => {
+	const commit = lazyCommands.find(c => c.name === 'commit');
+	t.is(commit?.progressLabel, 'Generating commit message');
+
+	const help = lazyCommands.find(c => c.name === 'help');
+	t.is(help?.progressLabel, undefined);
 });
