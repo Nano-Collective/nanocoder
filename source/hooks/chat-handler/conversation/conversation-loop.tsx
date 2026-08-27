@@ -592,7 +592,6 @@ export const processAssistantResponse = async (
 				// Replace the local array so subsequent tool-result builders
 				// and recursive calls see the compressed messages instead of
 				// the pre-compression copy.
-				updatedMessages = compressed;
 				compactionOccurred = true;
 			}
 		}
