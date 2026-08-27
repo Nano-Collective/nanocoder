@@ -36,92 +36,18 @@
 
 	// ── Slash command autocomplete state ────────────────────
 	const slashDropdown = document.getElementById('slash-dropdown');
-	const slashCommandUtils = globalThis.NanocoderSlashCommandUtils || (() => {
-		const commands = [
-			{
-				name: '/test',
-				description: 'Write focused tests',
-				template: 'Write tests for the following:\n\n',
-			},
-			{
-				name: '/explain',
-				description: 'Explain code or errors',
-				template: 'Explain the following clearly:\n\n',
-			},
-			{
-				name: '/doc',
-				description: 'Draft documentation',
-				template: 'Write documentation for the following:\n\n',
-			},
-		];
-
-		function findToken(text, cursor, selectionEnd) {
-			if (typeof text !== 'string' || typeof cursor !== 'number') return null;
-			if (selectionEnd !== undefined && cursor !== selectionEnd) return null;
-			if (cursor < 0 || cursor > text.length) return null;
-
-			const lineStart = text.lastIndexOf('\n', cursor - 1) + 1;
-			const beforeCursorOnLine = text.slice(lineStart, cursor);
-			const afterCursorOnLine = text.slice(cursor).split('\n', 1)[0];
-			const match = beforeCursorOnLine.match(/^(\s*)\/([a-z-]*)$/i);
-			if (!match || /\S/.test(afterCursorOnLine)) return null;
-
-			return {
-				start: lineStart + match[1].length,
-				end: cursor,
-				query: match[2].toLowerCase(),
-			};
-		}
-
-		function applyTemplate(text, cursor, selectionEnd, command) {
-			const token = findToken(text, cursor, selectionEnd);
-			if (!token || !command || typeof command.template !== 'string') return null;
-
-			const existingText = (text.slice(0, token.start) + text.slice(token.end)).trim();
-			return {
-				text: command.template + existingText,
-				cursor: command.template.length,
-			};
-		}
-
-		function isCommandName(value) {
-			if (typeof value !== 'string') return false;
-			const normalized = value.trim().toLowerCase();
-			return commands.some(command => command.name === normalized);
-		}
-
-		return {
-			SLASH_COMMANDS: commands,
-			findSlashCommandToken: findToken,
-			applySlashCommandTemplate: applyTemplate,
-			isSlashCommandName: isCommandName,
-		};
-	})();
-	const {
-		SLASH_COMMANDS,
-		findSlashCommandToken,
-		applySlashCommandTemplate,
-		isSlashCommandName,
-	} = slashCommandUtils;
+	const { SLASH_COMMANDS, findSlashCommandToken, applySlashCommand } = globalThis.NanocoderSlashCommandUtils;
 
 	let slashSuggestions = [];
 	let slashSelectedIndex = 0;
+	/**
+	 * Set after a selection lands and after Escape, so the caret move we just
+	 * made doesn't immediately reopen the menu on the name we just completed.
+	 * Cleared by the next real keystroke.
+	 */
+	let slashSuppressed = false;
 
 	let modelDropdown, modeDropdown, providerDropdown;
-
-	function removeSlashCommandChipsFromDom() {
-		if (!contextChipsContainer) return;
-		for (const chip of Array.from(contextChipsContainer.querySelectorAll('.context-chip'))) {
-			if (isSlashCommandName(chip.textContent.replace(/×$/, ''))) {
-				chip.remove();
-			}
-		}
-		if (!contextChipsContainer.querySelector('.context-chip')) {
-			contextChipsContainer.classList.add('hidden');
-		}
-	}
-
-	removeSlashCommandChipsFromDom();
 
 	function initDropdowns() {
 		class CustomDropdown {
@@ -816,31 +742,45 @@
 
 	function hideSlashDropdown() {
 		if (!slashDropdown) return;
+		const wasOpen = !slashDropdown.classList.contains('hidden');
 		slashDropdown.classList.add('hidden');
 		slashDropdown.innerHTML = '';
 		slashSuggestions = [];
 		slashSelectedIndex = 0;
-		chatInput.removeAttribute('aria-activedescendant');
-		chatInput.setAttribute('aria-expanded', 'false');
+		// The textarea is a single combobox shared with the @-mention listbox,
+		// so only reset its aria state when this dropdown is what set it.
+		// Otherwise every keystroke typed into an open mention list would
+		// announce the list as collapsed.
+		if (wasOpen && !mentionOpen) {
+			chatInput.removeAttribute('aria-activedescendant');
+			chatInput.setAttribute('aria-expanded', 'false');
+		}
 	}
 
+	/** @returns {boolean} whether the command was actually applied. */
 	function applySlashSelection(command) {
-		const result = applySlashCommandTemplate(
+		const result = applySlashCommand(
 			chatInput.value,
 			chatInput.selectionStart,
 			chatInput.selectionEnd,
 			command,
 		);
-		if (!result) {
-			hideSlashDropdown();
-			return;
-		}
-		chatInput.value = result.text;
-		chatInput.selectionStart = result.cursor;
-		chatInput.selectionEnd = result.cursor;
 		hideSlashDropdown();
-		chatInput.dispatchEvent(new Event('input'));
+		if (!result) return false;
+
+		// Set before the caret moves, because that move fires selectionchange.
+		// A command with no template completes to its own name, which is itself
+		// a valid token, so without this the menu would reopen on top of it and
+		// swallow the Enter that runs it.
+		slashSuppressed = true;
+		chatInput.value = result.text;
+		chatInput.setSelectionRange(result.cursor, result.cursor);
+		// Resized here rather than by dispatching a synthetic input event: that
+		// would clear the suppression flag and re-run the mention search.
+		chatInput.style.height = 'auto';
+		chatInput.style.height = chatInput.scrollHeight + 'px';
 		chatInput.focus();
+		return true;
 	}
 
 	function renderSlashDropdown(commands) {
@@ -868,7 +808,11 @@
 			right.textContent = command.description;
 			item.appendChild(left);
 			item.appendChild(right);
-			item.addEventListener('click', (e) => {
+			// mousedown rather than click, matching the mention rows: click
+			// would let the textarea blur first, and the blur handler closes
+			// the dropdown before the selection lands.
+			item.addEventListener('mousedown', (e) => {
+				e.preventDefault();
 				e.stopPropagation();
 				applySlashSelection(command);
 			});
@@ -879,7 +823,7 @@
 	}
 
 	function updateSlashAutocomplete() {
-		if (!slashDropdown) {
+		if (!slashDropdown || slashSuppressed) {
 			hideSlashDropdown();
 			return;
 		}
@@ -907,8 +851,21 @@
 	chatInput.addEventListener('input', function () {
 		this.style.height = 'auto';
 		this.style.height = (this.scrollHeight) + 'px';
+		// Typing is what lifts a dismissal, so this runs before the update.
+		slashSuppressed = false;
 		updateSlashAutocomplete();
 	});
+
+	if (slashDropdown) {
+		chatInput.addEventListener('blur', hideSlashDropdown);
+		// Catches caret moves that fire no input event, which would otherwise
+		// leave the menu open over a token that is no longer under the caret.
+		document.addEventListener('selectionchange', () => {
+			if (document.activeElement === chatInput) {
+				updateSlashAutocomplete();
+			}
+		});
+	}
 
 	// Handle Enter to submit (Shift+Enter for newline)
 	chatInput.addEventListener('keydown', (e) => {
@@ -927,12 +884,23 @@
 				return;
 			}
 			if (e.key === 'Enter' && !e.shiftKey) {
+				// Only claim the key if the completion actually landed. If the
+				// caret has moved off the token the menu was opened for, this
+				// falls through to submit instead of silently eating the Enter.
+				if (applySlashSelection(slashSuggestions[slashSelectedIndex])) {
+					e.preventDefault();
+					return;
+				}
+			} else if (e.key === 'Escape') {
 				e.preventDefault();
-				applySlashSelection(slashSuggestions[slashSelectedIndex]);
-				return;
-			}
-			if (e.key === 'Escape') {
-				e.preventDefault();
+				// Same reason as the mention dropdown below: the document-level
+				// handler cancels the in-flight request on Escape whenever
+				// isProcessing, so without this, dismissing the menu mid-stream
+				// would also kill the run.
+				e.stopPropagation();
+				// Stays dismissed until the next keystroke; without this the
+				// caret move from Escape would reopen it via selectionchange.
+				slashSuppressed = true;
 				hideSlashDropdown();
 				return;
 			}
@@ -1120,9 +1088,6 @@
 
 	function renderChips() {
 		contextChipsContainer.innerHTML = '';
-		attachedPaths = attachedPaths.filter(
-			item => !isSlashCommandName(item.path) && !isSlashCommandName(item.name),
-		);
 		if (attachedPaths.length === 0) {
 			contextChipsContainer.classList.add('hidden');
 			return;
@@ -1649,7 +1614,6 @@
 			}
 			case 'pathInfoResolved': {
 				const { path, name, kind } = message;
-				if (isSlashCommandName(path) || isSlashCommandName(name)) break;
 				if (!attachedPaths.some(a => a.path === path)) {
 					attachedPaths.push({ path, name, kind });
 					renderChips();

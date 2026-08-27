@@ -648,9 +648,18 @@ export class ChatWebviewProvider
 		let html = fs.readFileSync(htmlPath, 'utf8');
 
 		const extVersion = vscode.extensions.getExtension('nanocollective.nanocoder')?.packageJSON.version || Date.now().toString();
+		// Bust the webview cache per asset rather than per extension version, so
+		// editing a media file in the dev host shows up on reload. Never let a
+		// missing asset take the whole panel down with it: chat-panel.css is a
+		// build output, and before this existed an unbuilt one merely rendered
+		// the panel unstyled instead of throwing out of getHtml.
 		const assetVersion = (fileName: string) => {
-			const assetPath = path.join(this._extensionUri.fsPath, 'media', fileName);
-			return `${extVersion}-${fs.statSync(assetPath).mtimeMs}`;
+			try {
+				const assetPath = path.join(this._extensionUri.fsPath, 'media', fileName);
+				return `${extVersion}-${fs.statSync(assetPath).mtimeMs}`;
+			} catch {
+				return extVersion;
+			}
 		};
 		const scriptUri = webview
 			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.js'))

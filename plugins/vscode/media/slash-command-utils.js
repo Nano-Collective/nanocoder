@@ -7,6 +7,17 @@
 (function (root) {
 	'use strict';
 
+	/**
+	 * Commands come in two shapes.
+	 *
+	 * A `template` command is a prompt shortcut: selecting it drops visible,
+	 * editable text into the composer so the user sees exactly what will be
+	 * sent. Nothing hidden is attached to the message.
+	 *
+	 * A command with no `template` is one the app itself interprets (`/clear`
+	 * server-side, `/copy` in the webview). For those the menu only completes
+	 * the name; pressing Enter afterwards runs it through the existing path.
+	 */
 	var SLASH_COMMANDS = [
 		{
 			name: '/test',
@@ -22,6 +33,14 @@
 			name: '/doc',
 			description: 'Draft documentation',
 			template: 'Write documentation for the following:\n\n',
+		},
+		{
+			name: '/clear',
+			description: 'Clear the conversation',
+		},
+		{
+			name: '/copy',
+			description: 'Copy the last response',
 		},
 	];
 
@@ -64,43 +83,39 @@
 	}
 
 	/**
-	 * Replace the slash command token with visible template text.
+	 * Swap the slash-command token for the text it stands in for.
 	 *
-	 * The returned text is exactly what the webview sends to the backend.
+	 * The token is replaced in place, so anything the user already typed above
+	 * or below the command line keeps its position and its line breaks. The
+	 * returned text is exactly what the webview sends to the backend.
 	 *
 	 * @param {string} text Full textarea value.
 	 * @param {number} cursor Caret offset.
 	 * @param {number} selectionEnd Selection end offset.
-	 * @param {{template: string}} command Selected slash command.
+	 * @param {{name: string, template?: string}} command Selected slash command.
 	 * @returns {{text: string, cursor: number} | null}
 	 */
-	function applySlashCommandTemplate(text, cursor, selectionEnd, command) {
+	function applySlashCommand(text, cursor, selectionEnd, command) {
 		var token = findSlashCommandToken(text, cursor, selectionEnd);
-		if (!token || !command || typeof command.template !== 'string') {
+		if (!token || !command) {
 			return null;
 		}
 
-		var existingText = (text.slice(0, token.start) + text.slice(token.end)).trim();
-		return {
-			text: command.template + existingText,
-			cursor: command.template.length,
-		};
-	}
-
-	function isSlashCommandName(value) {
-		if (typeof value !== 'string') {
-			return false;
+		var insert =
+			typeof command.template === 'string' ? command.template : command.name;
+		if (typeof insert !== 'string') {
+			return null;
 		}
-		var normalized = value.trim().toLowerCase();
-		return SLASH_COMMANDS.some(function (command) {
-			return command.name === normalized;
-		});
+
+		return {
+			text: text.slice(0, token.start) + insert + text.slice(token.end),
+			cursor: token.start + insert.length,
+		};
 	}
 
 	root.NanocoderSlashCommandUtils = {
 		SLASH_COMMANDS: SLASH_COMMANDS,
 		findSlashCommandToken: findSlashCommandToken,
-		applySlashCommandTemplate: applySlashCommandTemplate,
-		isSlashCommandName: isSlashCommandName,
+		applySlashCommand: applySlashCommand,
 	};
 })(typeof globalThis !== 'undefined' ? globalThis : this);
