@@ -3,7 +3,8 @@ import {SubagentExecutor} from './subagent-executor.js';
 import {getModelContextLimit} from '@/models';
 import {SubagentLoader, getSubagentLoader} from './subagent-loader.js';
 import type {ToolManager} from '@/tools/tool-manager';
-import type {LLMClient, LLMChatResponse} from '@/types/core';
+import type {MemoryFinder} from '@/memory/project-context';
+import type {LLMClient, LLMChatResponse, Message} from '@/types/core';
 import {setGlobalToolApprovalHandler} from '@/utils/tool-approval-queue';
 
 console.log('\nsubagent-executor.spec.ts');
@@ -786,4 +787,80 @@ test('without a resolver, approval falls back to the static parentMode', async t
 	}).needsApprovalForTool('execute_bash', {});
 
 	t.false(await needsApproval);
+});
+
+test.serial('injects relevant project memories into the subagent system prompt', async t => {
+	const toolManager = createMockToolManager();
+	const client = createMockClient([{content: 'Here are the results'}]);
+	let systemPrompt = '';
+	const originalChat = client.chat.bind(client);
+	client.chat = async (messages: Message[], tools, callbacks, signal, modeOverrides) => {
+		systemPrompt = String(messages[0]?.content ?? '');
+		return originalChat(messages, tools, callbacks, signal, modeOverrides);
+	};
+
+	const memoryFinder: MemoryFinder = {
+		findRelevantMemories: async () => [
+			{
+				id: 'mem-1',
+				content: 'Auth flow uses Clerk and avoids middleware.',
+				category: 'architecture',
+				timestamp: '2026-01-01T00:00:00.000Z',
+			},
+		],
+	};
+
+	const executor = new SubagentExecutor(toolManager, client, process.cwd(), 'normal', {
+		memoryFinder,
+		projectContextOptions: {semanticMemoryEnabled: true},
+	});
+
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Refactor Clerk auth',
+	});
+
+	t.true(result.success);
+	t.true(systemPrompt.includes('## Project Context'));
+	t.true(systemPrompt.includes('Auth flow uses Clerk and avoids middleware.'));
+});
+
+test.serial('skips subagent memory recall when semantic memory is disabled', async t => {
+	const toolManager = createMockToolManager();
+	const client = createMockClient([{content: 'Here are the results'}]);
+	let systemPrompt = '';
+	const originalChat = client.chat.bind(client);
+	client.chat = async (messages: Message[], tools, callbacks, signal, modeOverrides) => {
+		systemPrompt = String(messages[0]?.content ?? '');
+		return originalChat(messages, tools, callbacks, signal, modeOverrides);
+	};
+
+	let finderCalls = 0;
+	const memoryFinder: MemoryFinder = {
+		findRelevantMemories: async () => {
+			finderCalls++;
+			return [
+				{
+					id: 'mem-1',
+					content: 'Auth flow uses Clerk and avoids middleware.',
+					category: 'architecture',
+					timestamp: '2026-01-01T00:00:00.000Z',
+				},
+			];
+		},
+	};
+
+	const executor = new SubagentExecutor(toolManager, client, process.cwd(), 'normal', {
+		memoryFinder,
+		projectContextOptions: {semanticMemoryEnabled: false},
+	});
+
+	const result = await executor.execute({
+		subagent_type: 'explore',
+		description: 'Refactor Clerk auth',
+	});
+
+	t.true(result.success);
+	t.is(finderCalls, 0);
+	t.false(systemPrompt.includes('## Project Context'));
 });

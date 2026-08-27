@@ -47,9 +47,15 @@ Retrieval is keyword-based, not a true embeddings/vector search. The "semantic" 
 
 ### Where recall is active
 
-Recall runs on the interactive TUI, on `nanocoder run` / `--plain`, and on `--acp`. Each of those shows a `Recalling N project memories...` notice when memories are injected.
+Recall runs on:
 
-Recall does **not** currently run for subagent runs or for daemon-triggered skill runs. This is a deliberate limitation rather than an oversight: those runs are non-interactive, so nobody is present to notice a bad memory steering the run, and the failure mode is silent. Wiring recall into them is tracked as follow-up work, not shipped behaviour.
+- the interactive TUI
+- `nanocoder run` / `--plain`
+- `--acp`
+- subagent runs (the `agent` tool)
+- daemon-triggered skill runs (they use the same subagent executor)
+
+The TUI, plain shell, and ACP print `Recalling N project memories...` when memories are injected. Subagent and daemon runs inject the same block silently, since there is no chat UI to attach that notice to.
 
 ### Tuning the budget
 
@@ -100,5 +106,7 @@ The filename is a hash of the repository's `git remote origin.url`, or of its ab
 - All branches, worktrees, and local clones that share the same `origin` remote share one memory pool.
 - Forks with a different `origin` get their own, separate pool.
 - This scope isn't currently configurable. If you work across branches with genuinely divergent conventions in the same repository, they'll share memories.
+
+Each repository file is capped at 500 memories. Saving past that drops the oldest entries (by timestamp) so the file cannot grow without bound. Writes to the same file are serialized across manager instances in one process, and locked across processes (TUI and daemon).
 
 Files are written atomically (temp file + rename) with restrictive permissions (`0600` on the file, `0700` on the directory), and nothing ever leaves your machine. Memory content is fenced when injected into the system prompt, with the fence widened as needed so content containing backticks cannot break out of it.

@@ -24,6 +24,64 @@ export interface CreateMemoryInput {
 export interface SemanticMemoryManagerOptions {
 	memoryDir?: string;
 	cwd?: string;
+	maxStoredMemories?: number;
+}
+
+const DEFAULT_MAX_STORED_MEMORIES = 500;
+
+const writeQueues = new Map<string, Promise<unknown>>();
+
+function enqueueByKey<T>(key: string, operation: () => Promise<T>): Promise<T> {
+	const previous = writeQueues.get(key) ?? Promise.resolve();
+	const result = previous.then(operation, operation);
+	writeQueues.set(
+		key,
+		result.then(
+			() => undefined,
+			() => undefined,
+		),
+	);
+	return result;
+}
+
+const LOCK_STALE_MS = 10_000;
+const LOCK_WAIT_MS = 15_000;
+
+async function withExclusiveLock<T>(
+	lockPath: string,
+	operation: () => Promise<T>,
+): Promise<T> {
+	const deadline = Date.now() + LOCK_WAIT_MS;
+	while (true) {
+		try {
+			const handle = await fs.open(lockPath, 'wx', 0o600);
+			try {
+				return await operation();
+			} finally {
+				await handle.close();
+				await fs.unlink(lockPath).catch(() => undefined);
+			}
+		} catch (error) {
+			const code =
+				error instanceof Error && 'code' in error
+					? (error as NodeJS.ErrnoException).code
+					: undefined;
+			if (code !== 'EEXIST') throw error;
+			if (Date.now() >= deadline) {
+				throw new Error(`Timed out waiting for memory file lock: ${lockPath}`);
+			}
+			try {
+				const stat = await fs.stat(lockPath);
+				if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
+					await fs.unlink(lockPath);
+					continue;
+				}
+			} catch {
+				// Lock gone; retry create.
+			}
+			await new Promise(resolve => setTimeout(resolve, 20));
+		}
+	}
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -196,21 +254,24 @@ function tokenize(value: string): Set<string> {
 export class SemanticMemoryManager {
 	private readonly memoryDir: string;
 	private readonly cwd: string;
+	private readonly maxStoredMemories: number;
 	private memoryFilePath?: string;
-	private writeQueue: Promise<unknown> = Promise.resolve();
 
 	constructor(options: SemanticMemoryManagerOptions = {}) {
 		this.memoryDir = options.memoryDir ?? path.join(getAppDataPath(), 'memory');
 		this.cwd = options.cwd ?? process.cwd();
+		this.maxStoredMemories = Math.max(
+			1,
+			options.maxStoredMemories ?? DEFAULT_MAX_STORED_MEMORIES,
+		);
 	}
 
 	private mutate<T>(operation: () => Promise<T>): Promise<T> {
-		const result = this.writeQueue.then(operation, operation);
-		this.writeQueue = result.then(
-			() => undefined,
-			() => undefined,
+		return this.getMemoryFilePath().then(filePath =>
+			enqueueByKey(filePath, () =>
+				withExclusiveLock(`${filePath}.lock`, operation),
+			),
 		);
-		return result;
 	}
 
 	async addMemory(input: CreateMemoryInput): Promise<SemanticMemory> {
@@ -332,8 +393,27 @@ export class SemanticMemoryManager {
 		return path.resolve(this.cwd);
 	}
 
+	private capMemories(memories: SemanticMemory[]): SemanticMemory[] {
+		if (memories.length <= this.maxStoredMemories) return memories;
+
+		const keep = new Set(
+			[...memories]
+				.sort((a, b) => {
+					const byTime = b.timestamp.localeCompare(a.timestamp);
+					return byTime !== 0 ? byTime : a.id.localeCompare(b.id);
+				})
+				.slice(0, this.maxStoredMemories)
+				.map(memory => memory.id),
+		);
+
+		return memories.filter(memory => keep.has(memory.id));
+	}
+
 	private async writeMemories(memories: SemanticMemory[]): Promise<void> {
 		const filePath = await this.getMemoryFilePath();
-		await atomicWriteFile(filePath, JSON.stringify(memories, null, 2));
+		await atomicWriteFile(
+			filePath,
+			JSON.stringify(this.capMemories(memories), null, 2),
+		);
 	}
 }
