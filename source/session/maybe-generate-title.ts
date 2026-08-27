@@ -32,12 +32,6 @@ export interface MaybeGenerateTitleOptions {
  * Give a session a real name, at most once, and only when the cheap heuristic
  * title is too thin to be useful. Every failure path is silent: the heuristic
  * title stands and the turn is unaffected.
- *
- * Both call sites invoke this as a bare `void`, so it must never reject. An
- * unhandled rejection would end a turn, or the process, for the sake of a
- * cosmetic title. The preconditions below read config and the session store,
- * either of which can throw, so the whole body is wrapped rather than just the
- * model call.
  */
 export async function maybeGenerateTitle(
 	options: MaybeGenerateTitleOptions,
@@ -100,8 +94,6 @@ async function runTitleGeneration(
 		await manager.saveSession({...fresh, title, titleGenerated: true});
 		onTitle?.(title);
 	} finally {
-		// Runs on the throw path too, so a failure cannot wedge the session
-		// out of ever being titled again.
 		clearTimeout(timer);
 		inFlight.delete(sessionId);
 	}
