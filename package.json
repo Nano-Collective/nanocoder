@@ -42,6 +42,7 @@
 		"test:ava:coverage": "c8 ava",
 		"test:format": "biome check --no-errors-on-unmatched .",
 		"test:types": "tsc --noEmit",
+		"test:types:vscode": "tsc --noEmit -p plugins/vscode/tsconfig.json",
 		"test:lint": "biome lint .",
 		"test:lint:fix": "biome check --write --unsafe .",
 		"test:knip": "knip",
