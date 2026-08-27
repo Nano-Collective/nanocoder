@@ -41,7 +41,10 @@ import path from 'node:path';
  * isValidFilePath('file\0.txt')         // false - null byte injection
  * ```
  */
-export function isValidFilePath(filePath: string): boolean {
+export function isValidFilePath(
+	filePath: string,
+	containmentRoot?: string,
+): boolean {
 	// Reject empty paths
 	if (!filePath || filePath.trim().length === 0) {
 		return false;
@@ -51,16 +54,6 @@ export function isValidFilePath(filePath: string): boolean {
 	// Check for '..' as a path segment, not substring (e.g. [[...slug]] is valid)
 	const segments = filePath.split(/[/\\]/);
 	if (segments.some(seg => seg === '..')) {
-		return false;
-	}
-
-	// Reject absolute paths (outside project)
-	if (path.isAbsolute(filePath)) {
-		return false;
-	}
-
-	// Reject Windows absolute paths (C:\, D:\, etc.) even on Unix systems
-	if (/^[A-Za-z]:[/\\]/.test(filePath)) {
 		return false;
 	}
 
@@ -74,7 +67,27 @@ export function isValidFilePath(filePath: string): boolean {
 		return false;
 	}
 
-	// Reject paths that start with special characters that could be problematic
+	// Windows-drive paths (`C:\`, `D:\`) are absolute only on Windows. On POSIX
+	// `path.resolve` would fold them into the cwd and they'd masquerade as an
+	// in-project relative path — reject them unless this platform actually treats
+	// them as absolute (Windows, where the containment check below still applies).
+	if (/^[A-Za-z]:[/\\]/.test(filePath) && !path.isAbsolute(filePath)) {
+		return false;
+	}
+
+	// Absolute paths are accepted only when a containment root is known and they
+	// resolve inside it — weak models routinely pass absolute paths.
+	// resolveFilePath still runs the authoritative symlink check.
+	if (path.isAbsolute(filePath)) {
+		if (!containmentRoot) {
+			return false;
+		}
+		const root = path.resolve(containmentRoot);
+		const abs = path.resolve(filePath);
+		return abs === root || abs.startsWith(root + path.sep);
+	}
+
+	// A relative path must not start with a separator
 	if (filePath.startsWith('/') || filePath.startsWith('\\')) {
 		return false;
 	}
@@ -112,20 +125,28 @@ export function isValidFilePath(filePath: string): boolean {
  * // Throws: File path escapes project directory via symlink
  * ```
  */
-export function resolveFilePath(filePath: string, cwd: string): string {
-	// Validate first
-	if (!isValidFilePath(filePath)) {
+export function resolveFilePath(
+	filePath: string,
+	cwd: string,
+	containmentRoot: string = cwd,
+): string {
+	// Relative paths resolve against `cwd` (the session cwd, which follows `cd`);
+	// containment is checked against `containmentRoot` (the project root, which
+	// does NOT shrink as `cd` descends). Defaulting the root to `cwd` keeps the
+	// single-arg contract for callers that don't separate the two.
+	if (!isValidFilePath(filePath, containmentRoot)) {
 		throw new Error(`Invalid file path: ${filePath}`);
 	}
 
 	const normalizedCwd = path.resolve(cwd);
+	const normalizedRoot = path.resolve(containmentRoot);
 	const absolutePath = path.resolve(normalizedCwd, filePath);
 
 	// Lexical containment. The trailing separator stops a sibling directory
 	// with a shared prefix (e.g. `/proj-evil` for project `/proj`) from passing.
 	if (
-		absolutePath !== normalizedCwd &&
-		!absolutePath.startsWith(normalizedCwd + path.sep)
+		absolutePath !== normalizedRoot &&
+		!absolutePath.startsWith(normalizedRoot + path.sep)
 	) {
 		throw new Error(
 			`File path escapes project directory: ${filePath} -> ${absolutePath}`,
@@ -137,9 +158,9 @@ export function resolveFilePath(filePath: string, cwd: string): string {
 	// in-project symlink pointing elsewhere. Resolve real paths (both sides,
 	// since the project root itself may sit under a symlink such as
 	// /tmp -> /private/tmp on macOS) and re-check.
-	const realCwd = realResolvedPrefix(normalizedCwd);
+	const realRoot = realResolvedPrefix(normalizedRoot);
 	const realTarget = realResolvedPrefix(absolutePath);
-	if (realTarget !== realCwd && !realTarget.startsWith(realCwd + path.sep)) {
+	if (realTarget !== realRoot && !realTarget.startsWith(realRoot + path.sep)) {
 		throw new Error(
 			`File path escapes project directory via symlink: ${filePath} -> ${realTarget}`,
 		);

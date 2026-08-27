@@ -59,6 +59,11 @@ export default memo(function ChatQueue({
 	}, [disableStatic, allStaticComponents]);
 
 	if (disableStatic) {
+		// Fullscreen (alt-screen): this transcript renders inside the scroll
+		// viewport, which clips with overflow="hidden". It must NOT use a
+		// negative margin — that would push content one column left of the
+		// viewport's clip window and Ink would slice off the first character of
+		// every line. Keep it in normal flow at the padded column.
 		return (
 			<Box flexDirection="column">
 				{flowComponents.map((component, index) => (
@@ -83,7 +88,10 @@ export default memo(function ChatQueue({
 
 	return (
 		<Box flexDirection="column">
-			{/* Static content renders at top and persists */}
+			{/* Static content renders at top and persists. <Static> positions its
+			    output absolutely (position:absolute in Ink), so it ignores any
+			    surrounding margin and anchors to the layout origin — a wrapper
+			    marginLeft would not move it horizontally. Leave it unwrapped. */}
 			{allStaticComponents.length > 0 && (
 				<Static key={clearKey} items={allStaticComponents}>
 					{(component, index) => (

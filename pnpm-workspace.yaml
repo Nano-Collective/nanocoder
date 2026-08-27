@@ -15,10 +15,17 @@ allowBuilds:
   keytar: true
   node-llama-cpp: false
 
-auditConfig: { ignoreGhsas: null }
+auditConfig: {}
 
 ignoredBuiltDependencies:
   - protobufjs
+
+# semver@5.7.2 (via @vscode/vsce -> parse-semver) is the 2023 ReDoS-fix
+# release of the v5 line; it predates npm provenance while later-published
+# 7.x releases have it, so the no-downgrade trust check flags it on fresh
+# resolution. Already present in the committed lockfile - exact version only.
+trustPolicyExclude:
+  - semver@5.7.2
 
 minimumReleaseAgeExclude:
   - brace-expansion@1.1.14

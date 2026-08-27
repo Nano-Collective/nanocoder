@@ -16,6 +16,8 @@ export class AcpSession {
 	developmentMode: DevelopmentMode;
 	/** True while a prompt turn is being processed, to reject overlapping prompts. */
 	turnActive = false;
+	/** URI of the file currently focused in the editor client (e.g. VS Code). */
+	activeFile?: string;
 
 	constructor(options: {
 		sessionId: string;
@@ -33,7 +35,9 @@ export class AcpSession {
 
 	cancel(): void {
 		this.abortController.abort();
-		// Create a fresh controller for potential subsequent prompts
+	}
+
+	beginTurn(): void {
 		this.abortController = new AbortController();
 	}
 }

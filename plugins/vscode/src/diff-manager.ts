@@ -321,10 +321,10 @@ export class DiffManager {
 	/**
 	 * Reject all pending changes
 	 */
-	rejectAll(): void {
+	async rejectAll(): Promise<void> {
 		const ids = Array.from(this.pendingChanges.keys());
 		for (const id of ids) {
-			this.rejectChange(id);
+			await this.rejectChange(id);
 		}
 	}
 

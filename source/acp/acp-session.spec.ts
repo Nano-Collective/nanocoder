@@ -104,7 +104,7 @@ test('AcpSession - cancel aborts the old controller', t => {
 	t.true(oldController.signal.aborted);
 });
 
-test('AcpSession - cancel creates fresh abort controller', t => {
+test('AcpSession - cancel leaves the session signal aborted', t => {
 	const session = new AcpSession({
 		sessionId: 'test-id',
 		cwd: '/tmp',
@@ -112,8 +112,33 @@ test('AcpSession - cancel creates fresh abort controller', t => {
 	});
 	const original = session.abortController;
 	session.cancel();
-	t.not(session.abortController, original);
+	t.is(session.abortController, original);
+	t.true(session.abortController.signal.aborted);
+});
+
+test('AcpSession - beginTurn creates fresh abort controller', t => {
+	const session = new AcpSession({
+		sessionId: 'test-id',
+		cwd: '/tmp',
+		conn: createMockConn(),
+	});
+	session.cancel();
+	const cancelled = session.abortController;
+	session.beginTurn();
+	t.not(session.abortController, cancelled);
 	t.false(session.abortController.signal.aborted);
+});
+
+test('AcpSession - cancel after beginTurn aborts the turn controller', t => {
+	const session = new AcpSession({
+		sessionId: 'test-id',
+		cwd: '/tmp',
+		conn: createMockConn(),
+	});
+	session.beginTurn();
+	const turnController = session.abortController;
+	session.cancel();
+	t.true(turnController.signal.aborted);
 });
 
 test('AcpSession - cancel can be called multiple times safely', t => {
@@ -125,7 +150,7 @@ test('AcpSession - cancel can be called multiple times safely', t => {
 	session.cancel();
 	session.cancel();
 	session.cancel();
-	t.false(session.abortController.signal.aborted);
+	t.true(session.abortController.signal.aborted);
 });
 
 // ============================================================================

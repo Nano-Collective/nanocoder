@@ -280,6 +280,7 @@ test('local web server forwards valid browser events to the client event handler
 		type: 'user_message',
 		id: 'message-1',
 		text: 'hello from browser',
+		images: undefined,
 	});
 	t.deepEqual(acknowledgementEvent, {
 		type: 'ack',

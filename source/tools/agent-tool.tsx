@@ -106,7 +106,10 @@ export function startAgentExecution(
 	return {agentId, promise};
 }
 
-async function executeAgent(args: AgentToolArgs): Promise<string> {
+async function executeAgent(
+	args: AgentToolArgs,
+	signal?: AbortSignal,
+): Promise<string> {
 	if (!executorInstance) {
 		throw new Error('Subagent executor not initialized');
 	}
@@ -125,12 +128,18 @@ async function executeAgent(args: AgentToolArgs): Promise<string> {
 		);
 	}
 
-	const result = await executorInstance.execute({
-		subagent_type,
-		description,
-		prompt,
-		context,
-	});
+	const agentId = randomUUID();
+	const result = await executorInstance.execute(
+		{
+			subagent_type,
+			description,
+			prompt,
+			context,
+		},
+		signal,
+		0,
+		agentId,
+	);
 
 	if (!result.success) {
 		throw new Error(result.error || 'Subagent execution failed');
@@ -168,8 +177,8 @@ const agentCoreTool = tool({
 		},
 		required: ['subagent_type', 'description'],
 	}),
-	execute: async args => {
-		return await executeAgent(args);
+	execute: async (args, {abortSignal}) => {
+		return await executeAgent(args, abortSignal);
 	},
 });
 

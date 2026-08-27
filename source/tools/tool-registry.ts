@@ -229,12 +229,16 @@ export class ToolRegistry {
 		const registry = new ToolRegistry();
 
 		for (const t of toolExports) {
-			// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
-			const rawHandler = async (args: any) =>
+			const rawHandler = async (
+				// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
+				args: any,
+				options?: {abortSignal?: AbortSignal},
+			) =>
 				// biome-ignore lint/suspicious/noExplicitAny: Dynamic typing required
 				await (t.tool as any).execute(args, {
 					toolCallId: 'manual',
 					messages: [],
+					abortSignal: options?.abortSignal,
 				});
 			registry.register({
 				name: t.name,

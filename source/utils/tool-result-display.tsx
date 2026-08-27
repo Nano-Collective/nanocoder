@@ -12,7 +12,7 @@ import {parseToolArguments} from '@/utils/tool-args-parser';
  * Tools that should always show expanded (full formatter) output,
  * even when compact display mode is enabled.
  */
-export const ALWAYS_EXPANDED_TOOLS = new Set(['write_tasks']);
+export const ALWAYS_EXPANDED_TOOLS = new Set(['write_tasks', 'ask_user']);
 
 /**
  * Task tools that should render in the live area (updating in-place)
@@ -84,7 +84,7 @@ function getGroupedCompactDescription(toolName: string, count: number): string {
 			return `Ran ${count} git command${s}`;
 		case 'lsp_get_diagnostics':
 			return `Got diagnostics ${count} time${s}`;
-		case 'ask_question':
+		case 'ask_user':
 			return `Asked ${count} question${s}`;
 		case 'agent':
 			return `Delegated ${count} task${s} to subagent${s}`;

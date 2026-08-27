@@ -17,12 +17,6 @@ interface OptionItem {
 	meta?: QuestionOptionMeta;
 }
 
-const TYPE_BADGE: Record<string, string> = {
-	ambiguity: '❓',
-	decision: '🔧',
-	confirmation: '✋',
-};
-
 const FREEFORM_VALUE = '__freeform__';
 
 export default function QuestionPrompt({
@@ -140,11 +134,6 @@ export default function QuestionPrompt({
 				borderBottom={false}
 				borderLeftColor={colors.secondary}
 			>
-				{question.questionType && (
-					<Text color={colors.secondary}>
-						{TYPE_BADGE[question.questionType]}{' '}
-					</Text>
-				)}
 				<Text color={colors.text}>{ensureString(question.question)}</Text>
 			</Box>
 

@@ -9,6 +9,7 @@ import {useTheme} from '@/hooks/useTheme';
 import {type BashExecutionState, bashExecutor} from '@/services/bash-executor';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
+import {truncateToolResult} from '@/utils/truncate-tool-result';
 
 /**
  * Execute a bash command using the bash executor service.
@@ -46,14 +47,10 @@ export function formatBashResultForLLM(result: BashExecutionState): string {
 		fullOutput = `Error: ${result.error}\n${fullOutput}`;
 	}
 
-	// Limit the context for LLM to prevent overwhelming the model
-	const llmContext =
-		fullOutput.length > TRUNCATION_OUTPUT_LIMIT
-			? fullOutput.substring(0, TRUNCATION_OUTPUT_LIMIT) +
-				'\n... [Output truncated. Use more specific commands to see full output]'
-			: fullOutput;
-
-	return llmContext;
+	// Limit the context for LLM to prevent overwhelming the model. Keeps both
+	// head and tail, since build/test tooling puts the actionable part (error
+	// list, failure summary, exit status) at the end.
+	return truncateToolResult(fullOutput, TRUNCATION_OUTPUT_LIMIT);
 }
 
 /**

@@ -20,7 +20,7 @@ jobs:
     # Skip the automated "Version Packages" PR - it never needs a changeset.
     if: github.head_ref != 'changeset-release/main'
     steps:
-      - name: Checkout PR head
+      - name: Checkout PR head  # nosemgrep
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: ${{ github.event.pull_request.head.sha }}

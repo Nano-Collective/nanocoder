@@ -4,7 +4,7 @@ import test from 'ava';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes';
-import {EMPTY_CONTENT_MARKER} from '../constants';
+import {EMPTY_CONTENT_MARKER, FILE_READ_PREVIEW_LINES} from '../constants';
 import {ThemeContext} from '../hooks/useTheme';
 import {readFileTool} from './read-file';
 
@@ -13,6 +13,10 @@ import {readFileTool} from './read-file';
 // ============================================================================
 
 console.log(`\nread-file.spec.tsx – ${React.version}`);
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping terminal styling before text-only assertions.
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+const stripAnsi = (value: string) => value.replace(ANSI_RE, '');
 
 // Create a mock theme provider for tests
 function TestThemeProvider({children}: {children: React.ReactNode}) {
@@ -64,12 +68,14 @@ test('ReadFileFormatter renders with path', async t => {
 	}
 });
 
-test('ReadFileFormatter shows metadata only indicator', async t => {
-	const testDir = join(process.cwd(), 'test-read-metadata-temp');
+test('ReadFileFormatter shows truncated preview range', async t => {
+	const testDir = join(process.cwd(), 'test-read-preview-temp');
 
 	try {
 		mkdirSync(testDir, {recursive: true});
-		const content = 'line\n'.repeat(400); // Over 300 lines
+		const content = Array.from({length: 1600}, (_, index) =>
+			`line-${index + 1}`,
+		).join('\n');
 		writeFileSync(join(testDir, 'large.ts'), content);
 
 		const formatter = readFileTool.formatter;
@@ -80,7 +86,7 @@ test('ReadFileFormatter shows metadata only indicator', async t => {
 
 		const element = await formatter(
 			{path: join(testDir, 'large.ts')},
-			'File: large.ts\nType: TypeScript\nTotal lines: 400',
+			`line-1\nline-${FILE_READ_PREVIEW_LINES}\n[Truncated at line ${FILE_READ_PREVIEW_LINES} of 1600. Use read_file with start_line: ${FILE_READ_PREVIEW_LINES + 1} and end_line to continue.]`,
 		);
 		const {lastFrame} = render(
 			<TestThemeProvider>{element}</TestThemeProvider>,
@@ -88,7 +94,8 @@ test('ReadFileFormatter shows metadata only indicator', async t => {
 
 		const output = lastFrame();
 		t.truthy(output);
-		t.regex(output!, /metadata\s+only/);
+		t.notRegex(output!, /metadata\s+only/);
+		t.regex(stripAnsi(output!), /Lines:\s+1 - 250 of 1600/);
 	} finally {
 		rmSync(testDir, {recursive: true, force: true});
 	}
@@ -149,7 +156,7 @@ test('ReadFileFormatter displays line range for partial reads', async t => {
 // ============================================================================
 
 test.serial(
-	'read_file returns content directly for small files (<300 lines)',
+	'read_file returns content directly for files below the preview threshold',
 	async t => {
 		t.timeout(10000);
 		const testDir = join(process.cwd(), 'test-read-small-temp');
@@ -178,28 +185,29 @@ test.serial(
 );
 
 test.serial(
-	'read_file returns metadata for files >300 lines without ranges',
+	'read_file returns content for files below the preview threshold',
 	async t => {
 		t.timeout(10000);
-		const testDir = join(process.cwd(), 'test-read-metadata-only-temp');
+		const testDir = join(process.cwd(), 'test-read-below-preview-temp');
 
 		try {
 			mkdirSync(testDir, {recursive: true});
-			const content = 'line\n'.repeat(400);
-			writeFileSync(join(testDir, 'large.ts'), content);
+			const content = Array.from({length: 400}, (_, index) =>
+				`line-${index + 1}`,
+			).join('\n');
+			writeFileSync(join(testDir, 'medium.ts'), content);
 
 			const result = await readFileTool.tool.execute!(
 				{
-					path: join(testDir, 'large.ts'),
+					path: join(testDir, 'medium.ts'),
 				},
 				{toolCallId: 'test', messages: []},
 			);
 
-			// Should return metadata, not content
-			t.regex(result, /File:/);
-			t.regex(result, /Type: TypeScript/);
-			t.regex(result, /Total lines: \d+/); // Don't check exact number
-			t.regex(result, /Estimated tokens:/);
+			// Files below the preview threshold should be returned in full.
+			t.true(result.includes('line-1'));
+			t.true(result.includes('line-400'));
+			t.false(result.includes('[Truncated'));
 		} finally {
 			rmSync(testDir, {recursive: true, force: true});
 		}
@@ -237,41 +245,15 @@ test.serial(
 	},
 );
 
-test.serial(
-	'read_file provides progressive read suggestions for medium files',
-	async t => {
-		t.timeout(10000);
-		const testDir = join(process.cwd(), 'test-read-medium-temp');
-
-		try {
-			mkdirSync(testDir, {recursive: true});
-			const content = 'line\n'.repeat(350);
-			writeFileSync(join(testDir, 'medium.ts'), content);
-
-			const result = await readFileTool.tool.execute!(
-				{
-					path: join(testDir, 'medium.ts'),
-				},
-				{toolCallId: 'test', messages: []},
-			);
-
-			// Should suggest progressive reading
-			t.regex(result, /Medium file/);
-			t.regex(result, /start_line: 1, end_line: 250/);
-			t.regex(result, /start_line: 251/);
-		} finally {
-			rmSync(testDir, {recursive: true, force: true});
-		}
-	},
-);
-
-test.serial('read_file provides chunk suggestions for large files', async t => {
+test.serial('read_file returns a preview for very large files', async t => {
 	t.timeout(10000);
-	const testDir = join(process.cwd(), 'test-read-chunks-temp');
+	const testDir = join(process.cwd(), 'test-read-preview-content-temp');
 
 	try {
 		mkdirSync(testDir, {recursive: true});
-		const content = 'line\n'.repeat(1000);
+		const content = Array.from({length: 1600}, (_, index) =>
+			`line-${index + 1}`,
+		).join('\n');
 		writeFileSync(join(testDir, 'large.ts'), content);
 
 		const result = await readFileTool.tool.execute!(
@@ -281,11 +263,18 @@ test.serial('read_file provides chunk suggestions for large files', async t => {
 			{toolCallId: 'test', messages: []},
 		);
 
-		// Should suggest chunked reading
-		t.regex(result, /Large file/);
-		t.regex(result, /Targeted read/);
-		t.regex(result, /Progressive read/);
-		t.regex(result, /Example chunks/);
+		// The first read should contain usable content and a concise continuation
+		// hint instead of generated chunk calls.
+		t.true(result.startsWith('line-1\n'));
+		t.true(result.includes(`line-${FILE_READ_PREVIEW_LINES}`));
+		t.false(result.includes('line-251'));
+		t.regex(
+			result,
+			new RegExp(
+				`\\[Truncated at line ${FILE_READ_PREVIEW_LINES} of 1600\\. Use read_file with start_line: ${FILE_READ_PREVIEW_LINES + 1}`,
+			),
+		);
+		t.false(result.includes('Example chunks'));
 	} finally {
 		rmSync(testDir, {recursive: true, force: true});
 	}
@@ -437,6 +426,7 @@ test.serial('read_file detects common file types', async t => {
 			const result = await readFileTool.tool.execute!(
 				{
 					path: join(testDir, filename),
+					metadata_only: true,
 				},
 				{toolCallId: 'test', messages: []},
 			);
@@ -585,7 +575,7 @@ test.serial(
 			t.false(result.valid);
 			if (!result.valid) {
 				t.regex(result.error, /minified or binary content/);
-				t.regex(result.error, /15,000 characters/);
+				t.regex(result.error, /15000 characters/);
 			}
 		} finally {
 			process.chdir(originalCwd);
@@ -892,9 +882,10 @@ test.serial('read_file handles files without extension', async t => {
 			{toolCallId: 'test', messages: []},
 		);
 
-		// Should still provide metadata
-		t.regex(result, /File: .*Makefile/);
-		t.regex(result, /Total lines: \d+/); // Don't check exact number
+		// Files below the preview threshold return their content regardless of
+		// whether they have a recognized extension.
+		t.true(result.includes('line'));
+		t.false(result.includes('[Truncated'));
 	} finally {
 		rmSync(testDir, {recursive: true, force: true});
 	}

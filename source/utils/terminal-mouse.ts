@@ -1,4 +1,5 @@
 import {EventEmitter} from 'node:events';
+import {StringDecoder} from 'node:string_decoder';
 
 /**
  * SGR mouse reporting (DECSET 1000 + 1006) support for the fullscreen TUI.
@@ -15,6 +16,21 @@ export type WheelDirection = 'up' | 'down';
 
 /** Singleton bus: cli.tsx publishes wheel ticks, ChatHistory subscribes. */
 export const wheelEvents = new EventEmitter();
+
+/**
+ * Decode stdin bytes without losing a multibyte character split across
+ * separate data events. TTY input is usually delivered as Buffers, and the
+ * default Buffer#toString('utf8') replaces an incomplete trailing sequence
+ * immediately instead of waiting for the next chunk.
+ */
+export function createUtf8InputDecoder(): (chunk: Buffer | string) => string {
+	const decoder = new StringDecoder('utf8');
+
+	return chunk =>
+		decoder.write(
+			typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk,
+		);
+}
 
 // ESC [ < button ; column ; row, terminated by M (press) or m (release).
 const SGR_MOUSE_RE = /\x1b\[<(\d+);\d+;\d+[Mm]/g;

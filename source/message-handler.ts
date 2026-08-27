@@ -3,6 +3,7 @@ import type {ToolManager} from '@/tools/tool-manager';
 import type {ToolCall, ToolHandler, ToolResult} from '@/types/index';
 import {parseToolArguments} from '@/utils/tool-args-parser';
 import {toolErrorToContent} from '@/utils/tool-validation';
+import {truncateToolResult} from '@/utils/truncate-tool-result';
 
 // This will be set by the ChatSession
 let toolRegistryGetter: (() => Record<string, ToolHandler>) | null = null;
@@ -39,7 +40,10 @@ export function getCommandLoader(): CustomCommandLoader | null {
 	return commandLoaderGetter ? commandLoaderGetter() : null;
 }
 
-export async function processToolUse(toolCall: ToolCall): Promise<ToolResult> {
+export async function processToolUse(
+	toolCall: ToolCall,
+	options?: {abortSignal?: AbortSignal},
+): Promise<ToolResult> {
 	// Handle XML validation errors by throwing (will be caught and returned as error ToolResult)
 	if (toolCall.function.name === '__xml_validation_error__') {
 		const args = toolCall.function.arguments as {error: string};
@@ -63,7 +67,7 @@ export async function processToolUse(toolCall: ToolCall): Promise<ToolResult> {
 			toolCall.function.arguments,
 			{strict: true},
 		);
-		const result = await handler(parsedArgs);
+		const result = await handler(parsedArgs, options);
 		// Handlers may return a plain string or structured output. Only an
 		// object carrying `llmContent` is treated as structured; anything else
 		// (string, or a legacy undefined) passes through as the content.
@@ -72,7 +76,10 @@ export async function processToolUse(toolCall: ToolCall): Promise<ToolResult> {
 				tool_call_id: toolCall.id,
 				role: 'tool',
 				name: toolCall.function.name,
-				content: result.llmContent,
+				content:
+					typeof result.llmContent === 'string'
+						? truncateToolResult(result.llmContent)
+						: result.llmContent,
 				structuredContent: result.structured,
 			};
 		}
@@ -80,7 +87,10 @@ export async function processToolUse(toolCall: ToolCall): Promise<ToolResult> {
 			tool_call_id: toolCall.id,
 			role: 'tool',
 			name: toolCall.function.name,
-			content: result as string,
+			content:
+				typeof result === 'string'
+					? truncateToolResult(result)
+					: (result as string),
 		};
 	} catch (error) {
 		// Convert exceptions (including validation failures thrown by the
@@ -92,7 +102,7 @@ export async function processToolUse(toolCall: ToolCall): Promise<ToolResult> {
 			tool_call_id: toolCall.id,
 			role: 'tool',
 			name: toolCall.function.name,
-			content: toolErrorToContent(error),
+			content: truncateToolResult(toolErrorToContent(error)),
 			isError: true,
 		};
 	}

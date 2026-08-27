@@ -229,17 +229,123 @@ test('BashProgress does not show output preview when complete', t => {
 			completedState={createCompletedState({
 				isComplete: true,
 				outputPreview: 'this should not show',
-				fullOutput: 'done',
+				fullOutput: 'completed stdout text',
 			})}
 		/>,
 	);
 
 	const output = lastFrame();
 	t.truthy(output);
-	// Output preview section should not be shown when complete
-	// Status and Tokens should be shown instead
+	// Without showOutput, the completed card stays compact: no preview, no
+	// captured output — just Status and Tokens
+	t.notRegex(output!, /this should not show/);
+	t.notRegex(output!, /completed stdout text/);
 	t.regex(output!, /Status:/);
 	t.regex(output!, /Tokens:/);
+});
+
+// ============================================================================
+// Completed Output Tests (showOutput, used by user-typed !commands)
+// ============================================================================
+
+test('BashProgress shows stdout when complete with showOutput', t => {
+	const {lastFrame} = renderWithTheme(
+		<BashProgress
+			executionId="test-id"
+			command="git status"
+			showOutput={true}
+			completedState={createCompletedState({
+				fullOutput: 'On branch main\nnothing to commit',
+			})}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /On branch main/);
+	t.regex(output!, /nothing to commit/);
+	t.regex(output!, /Status:/);
+	t.regex(output!, /Tokens:/);
+});
+
+test('BashProgress labels stderr and stdout when both present with showOutput', t => {
+	const {lastFrame} = renderWithTheme(
+		<BashProgress
+			executionId="test-id"
+			command="failing-command"
+			showOutput={true}
+			completedState={createCompletedState({
+				exitCode: 1,
+				fullOutput: 'stdout details',
+				stderr: 'failure details',
+			})}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Stderr:/);
+	t.regex(output!, /failure details/);
+	t.regex(output!, /Stdout:/);
+	t.regex(output!, /stdout details/);
+});
+
+test('BashProgress shows error when complete with showOutput', t => {
+	const {lastFrame} = renderWithTheme(
+		<BashProgress
+			executionId="test-id"
+			command="bad-command"
+			showOutput={true}
+			completedState={createCompletedState({
+				exitCode: null,
+				error: 'Command not found',
+			})}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Error: Command not found/);
+});
+
+test('BashProgress tail-truncates long completed output with showOutput', t => {
+	const lines = Array.from({length: 30}, (_, i) => `line-${i + 1}`);
+	const {lastFrame} = renderWithTheme(
+		<BashProgress
+			executionId="test-id"
+			command="verbose-command"
+			showOutput={true}
+			completedState={createCompletedState({
+				fullOutput: lines.join('\n'),
+			})}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	// 30 lines, 20-line cap: first 10 hidden, tail kept
+	t.regex(output!, /\+10 earlier lines/);
+	t.notRegex(output!, /line-10\b/);
+	t.regex(output!, /line-11\b/);
+	t.regex(output!, /line-30\b/);
+});
+
+test('BashProgress does not show output preview when complete with showOutput', t => {
+	const {lastFrame} = renderWithTheme(
+		<BashProgress
+			executionId="test-id"
+			command="echo hi"
+			showOutput={true}
+			completedState={createCompletedState({
+				outputPreview: 'stale preview tail',
+				fullOutput: 'hi',
+			})}
+		/>,
+	);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.notRegex(output!, /stale preview tail/);
 });
 
 test('BashProgress does not show status when not complete', t => {

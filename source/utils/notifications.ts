@@ -31,26 +31,24 @@ export function getNotificationsConfig(): NotificationsConfig {
 	return _config;
 }
 
-const projectName = basename(process.cwd());
-
 const EVENT_MESSAGES: Record<
 	NotificationEvent,
-	{title: string; message: string}
+	{title: (projectName: string) => string; message: string}
 > = {
 	toolConfirmation: {
-		title: `Tool Confirmation Required in ${projectName}`,
+		title: projectName => `Tool Confirmation Required in ${projectName}`,
 		message: 'Nanocoder is waiting for you to approve a tool call.',
 	},
 	questionPrompt: {
-		title: `Question From Agent in ${projectName}`,
+		title: projectName => `Question From Agent in ${projectName}`,
 		message: 'Nanocoder has a question and is waiting for your response.',
 	},
 	generationComplete: {
-		title: `Response Ready in ${projectName}`,
+		title: projectName => `Response Ready in ${projectName}`,
 		message: 'Nanocoder has finished generating a response.',
 	},
 	triggeredRunComplete: {
-		title: `Triggered Run Completed in ${projectName}`,
+		title: projectName => `Triggered Run Completed in ${projectName}`,
 		message: 'A skill subscription fired and its target finished running.',
 	},
 };
@@ -176,8 +174,10 @@ export function sendNotification(event: NotificationEvent): void {
 		return;
 	}
 
-	const {title, message} =
-		_config.customMessages?.[event] ?? EVENT_MESSAGES[event];
+	const custom = _config.customMessages?.[event];
+	const projectName = basename(process.cwd());
+	const title = custom?.title ?? EVENT_MESSAGES[event].title(projectName);
+	const message = custom?.message ?? EVENT_MESSAGES[event].message;
 
 	// Daemon-side observability: the daemon redirects stdout to its log,
 	// so this lets `nanocoder daemon logs` confirm whether a notification

@@ -52,6 +52,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          # Full history so scripts/generate-credits.sh sees every contributor
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -121,6 +124,28 @@ jobs:
             echo "CHANGELOG=No changelog available for this version." >> $GITHUB_OUTPUT
           fi
 
+      - name: Build Contributors Section
+        id: contributors
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          # Credits every PR author in the range, not just the ones a changeset
+          # happened to thank by hand. Never fails the release: the script exits 0
+          # and prints nothing if the list can't be built.
+          CONTRIBUTORS=$(node scripts/generate-contributors.js \
+            --tag "v${{ needs.check-version.outputs.package-version }}" \
+            --previous-tag "v${{ needs.check-version.outputs.npm-version }}" \
+            --target "${{ github.sha }}")
+          if [ -n "$CONTRIBUTORS" ]; then
+            echo "✅ Contributors section built"
+          else
+            echo "ℹ️ No contributors section for this release"
+          fi
+          echo "CONTRIBUTORS<<EOF" >> $GITHUB_OUTPUT
+          echo "$CONTRIBUTORS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Publish to NPM
         run: npm publish --access public
         env:
@@ -137,6 +162,8 @@ jobs:
             ## What's Changed
 
             ${{ steps.changelog.outputs.CHANGELOG }}
+
+            ${{ steps.contributors.outputs.CONTRIBUTORS }}
 
             ### Installation
             ```bash

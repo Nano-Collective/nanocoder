@@ -12,6 +12,18 @@ export function createPageNonce(): string {
 	return randomBytes(16).toString('base64');
 }
 
+export const IconSidebar = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="9" x2="9" y1="3" y2="21"/></svg>`;
+export const IconHistory = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+export const IconSettings = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
+export const IconSend = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" x2="11" y1="2" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>`;
+export const IconUpload = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`;
+export const IconClose = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`;
+export const IconTheme = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>`;
+export const IconCreate = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M19 17v4"/><path d="M3 5h4"/><path d="M17 19h4"/></svg>`;
+export const IconExplore = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>`;
+export const IconCode = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`;
+export const IconLearn = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>`;
+
 export function renderWebModePage(nonce: string = createPageNonce()): string {
 	return `<!doctype html>
 <html lang="en">
@@ -33,8 +45,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		body {
 			margin: 0;
 			min-height: 100vh;
-			background: #08090b;
-			color: #f5f2eb;
+			background: #09090b;
+			color: #fafafa;
 			overflow: hidden;
 		}
 		button,
@@ -49,8 +61,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			display: grid;
 			grid-template-columns: 280px minmax(0, 1fr);
 			min-height: 100vh;
-			background:
-				linear-gradient(90deg, #090b0d 0, #0d1114 280px, #11161a 280px, #151a1f 100%);
+			background: #09090b;
 		}
 		.app-shell.sidebar-collapsed {
 			grid-template-columns: 0 minmax(0, 1fr);
@@ -67,8 +78,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			gap: 14px;
 			min-height: 100vh;
 			padding: 16px 14px 18px;
-			border-right: 1px solid rgba(245, 242, 235, 0.08);
-			background: rgba(9, 12, 14, 0.96);
+			border-right: 1px solid #27272a;
+			background: #09090b;
 			overflow: hidden;
 			transition: opacity 150ms ease;
 		}
@@ -115,15 +126,15 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		}
 		.new-chat {
 			height: 40px;
-			border: 1px solid rgba(85, 217, 141, 0.28);
+			border: 1px solid #0000ee;
 			border-radius: 8px;
-			background: rgba(50, 91, 70, 0.46);
-			color: #d8f7e6;
+			background: #0000ee;
+			color: #ffffff;
 			font-weight: 730;
 			transition: background 140ms ease, transform 140ms ease;
 		}
 		.new-chat:hover {
-			background: rgba(61, 111, 85, 0.62);
+			background: #0000cc;
 			transform: translateY(-1px);
 		}
 		.search-box {
@@ -211,9 +222,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			grid-template-rows: auto minmax(0, 1fr) auto;
 			min-width: 0;
 			min-height: 100vh;
-			background:
-				radial-gradient(circle at 50% 18%, rgba(85, 217, 141, 0.055), transparent 30rem),
-				linear-gradient(180deg, #171b20 0%, #14191d 46%, #101417 100%);
+			background: #09090b;
 		}
 		.topbar {
 			display: flex;
@@ -314,10 +323,10 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			pointer-events: auto;
 			width: min(760px, 100%);
 			padding: 14px 16px;
-			border: 1px solid rgba(245, 242, 235, 0.08);
+			border: 1px solid #27272a;
 			border-radius: 8px;
-			background: rgba(245, 242, 235, 0.055);
-			color: #f5f2eb;
+			background: #18181b;
+			color: #fafafa;
 			line-height: 1.5;
 			overflow-wrap: anywhere;
 			box-shadow: 0 12px 40px rgba(0, 0, 0, 0.14);
@@ -410,14 +419,14 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		.message.system {
 			align-self: center;
 			width: min(760px, 100%);
-			background: rgba(8, 9, 11, 0.26);
-			color: #beb7c7;
+			background: #121214;
+			color: #a1a1aa;
 		}
 		.message.interaction {
 			align-self: stretch;
 			width: min(760px, 100%);
-			border-color: rgba(125, 207, 255, 0.28);
-			background: rgba(36, 40, 59, 0.92);
+			border-color: #0000ee;
+			background: #18181b;
 		}
 		.interaction-card {
 			display: grid;
@@ -515,10 +524,10 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			gap: 8px;
 			min-height: 38px;
 			padding: 0 18px;
-			border: 1px solid rgba(245, 242, 235, 0.08);
+			border: 1px solid #27272a;
 			border-radius: 999px;
-			background: rgba(245, 242, 235, 0.045);
-			color: #cfc7d8;
+			background: #18181b;
+			color: #fafafa;
 			cursor: pointer;
 			font-size: 14px;
 			font-weight: 720;
@@ -530,9 +539,9 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		}
 		.mode-pill:hover,
 		.mode-pill:focus-visible {
-			background: rgba(125, 207, 255, 0.12);
-			border-color: rgba(125, 207, 255, 0.32);
-			color: #f5f2eb;
+			background: rgba(0, 0, 238, 0.1);
+			border-color: #0000ee;
+			color: #fafafa;
 			outline: 0;
 			transform: translateY(-1px);
 		}
@@ -552,10 +561,10 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			width: 100%;
 			min-height: 54px;
 			padding: 0 16px;
-			border: 1px solid rgba(245, 242, 235, 0.075);
+			border: 1px solid #27272a;
 			border-radius: 8px;
-			background: rgba(245, 242, 235, 0.028);
-			color: #c7bfce;
+			background: #18181b;
+			color: #fafafa;
 			cursor: pointer;
 			text-align: left;
 			font-size: 15px;
@@ -573,9 +582,9 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		}
 		.prompt-button:hover,
 		.prompt-button:focus-visible {
-			background: rgba(245, 242, 235, 0.06);
-			border-color: rgba(125, 207, 255, 0.28);
-			color: #f5f2eb;
+			background: rgba(0, 0, 238, 0.05);
+			border-color: #0000ee;
+			color: #fafafa;
 			outline: 0;
 			transform: translateY(-1px);
 		}
@@ -607,16 +616,16 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			gap: 12px;
 			align-items: end;
 			min-height: 104px;
-			border: 1px solid rgba(245, 242, 235, 0.09);
+			border: 1px solid #27272a;
 			border-radius: 8px;
-			background: rgba(29, 35, 40, 0.94);
+			background: #18181b;
 			padding: 14px;
 			box-shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
 		}
 		.composer.is-attention {
-			border-color: rgba(125, 207, 255, 0.56);
+			border-color: #0000ee;
 			box-shadow:
-				0 0 0 3px rgba(125, 207, 255, 0.12),
+				0 0 0 3px rgba(0, 0, 238, 0.2),
 				0 24px 80px rgba(0, 0, 0, 0.32);
 		}
 		textarea {
@@ -626,7 +635,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			resize: none;
 			border: 0;
 			background: transparent;
-			color: #f5f2eb;
+			color: #fafafa;
 			font: inherit;
 			line-height: 1.5;
 			padding: 6px 2px;
@@ -635,7 +644,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			outline: 0;
 		}
 		textarea::placeholder {
-			color: #928899;
+			color: #a1a1aa;
 		}
 		.send-button {
 			display: grid;
@@ -643,14 +652,14 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			width: 42px;
 			height: 42px;
 			border-radius: 8px;
-			background: #55d98d;
-			color: #0d1114;
+			background: #0000ee;
+			color: #ffffff;
 			transition: transform 120ms ease, opacity 120ms ease;
 		}
 		.send-button:not(:disabled):hover,
 		.send-button:not(:disabled):focus-visible {
 			transform: translateY(-1px);
-			background: #6ee7a1;
+			background: #0000cc;
 			outline: 0;
 		}
 		.send-button.is-cancel {
@@ -727,196 +736,36 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				min-height: 48px;
 			}
 		}
-		/* Match Nanocoder's default Tokyo Night terminal theme. */
+		/* Syntax highlighting variables (formerly Tokyo Night, now mapped to org theme) */
 		:root {
-			--tn-text: #c0caf5;
-			--tn-base: #1a1b26;
-			--tn-primary: #bb9af7;
-			--tn-tool: #7dcfff;
-			--tn-success: #7AF778;
-			--tn-error: #f7768e;
-			--tn-secondary: #565f89;
-			--tn-info: #2ac3de;
-			--tn-warning: #e0af68;
-			--tn-panel: #16161f;
-			--tn-surface: #24283b;
-			--tn-border: rgba(192, 202, 245, 0.14);
-		}
-		body {
-			background: var(--tn-base);
-			color: var(--tn-text);
-		}
-		.app-shell {
-			background:
-				linear-gradient(90deg, #12131c 0, #12131c 280px, var(--tn-base) 280px, var(--tn-base) 100%);
-		}
-		.sidebar {
-			border-right-color: var(--tn-border);
-			background: #12131c;
-		}
-		.brand,
-		.thread-item.active,
-		.thread-item:hover,
-		.prompt-button:hover,
-		.empty-state,
-		.message,
-		textarea,
-		.model-pill {
-			color: var(--tn-text);
-		}
-		.brand-mark,
-		.message.user {
-			background: var(--tn-text);
-			color: var(--tn-base);
-		}
-		.brand-mark {
-			background: #16161f;
-		}
-		.icon-button {
-			background: rgba(192, 202, 245, 0.08);
-			color: var(--tn-text);
-		}
-		.icon-button:hover,
-		.icon-button:focus-visible {
-			background: rgba(125, 207, 255, 0.14);
-		}
-		.new-chat {
-			border-color: rgba(187, 154, 247, 0.42);
-			background: rgba(187, 154, 247, 0.14);
-			color: var(--tn-primary);
-		}
-		.new-chat:hover {
-			background: rgba(187, 154, 247, 0.24);
-		}
-		.search-box {
-			border-color: rgba(192, 202, 245, 0.08);
-			color: var(--tn-secondary);
-		}
-		.search-box:focus-within {
-			border-color: rgba(125, 207, 255, 0.28);
-			background: rgba(36, 40, 59, 0.45);
-		}
-		.search-box input {
-			color: var(--tn-text);
-		}
-		.search-box input::placeholder,
-		.thread-item,
-		.thread-list-empty,
-		.sidebar-footer,
-		.session-note,
-		p,
-		.empty-state span,
-		.note {
-			color: var(--tn-secondary);
-		}
-		.thread-item.active,
-		.thread-item:hover,
-		.thread-item:focus-visible,
-		.mode-pill,
-		.prompt-button:hover {
-			background: rgba(125, 207, 255, 0.1);
-		}
-		.workspace {
-			background:
-				radial-gradient(circle at 50% 16%, rgba(187, 154, 247, 0.13), transparent 28rem),
-				linear-gradient(180deg, #1a1b26 0%, #171823 52%, #12131c 100%);
-		}
-		.status {
-			border-color: var(--tn-border);
-			background: rgba(22, 22, 31, 0.78);
-			color: var(--tn-text);
-		}
-		.status::before {
-			background: var(--tn-warning);
-			box-shadow: 0 0 0 5px rgba(224, 175, 104, 0.12);
-		}
-		.status.connected {
-			color: var(--tn-success);
-		}
-		.status.connected::before {
-			background: var(--tn-success);
-			box-shadow: 0 0 0 5px rgba(122, 247, 120, 0.14);
-		}
-		.status.disconnected,
-		.status.failed,
-		.message.error {
-			color: var(--tn-error);
-		}
-		.status.disconnected::before,
-		.status.failed::before {
-			background: var(--tn-error);
-			box-shadow: 0 0 0 5px rgba(247, 118, 142, 0.14);
-		}
-		.message {
-			border-color: var(--tn-border);
-			background: rgba(36, 40, 59, 0.82);
-		}
-		.message.system,
-		.mode-pill {
-			background: rgba(36, 40, 59, 0.72);
-		}
-		.message.assistant {
-			background: transparent;
-		}
-		.message.system {
-			color: var(--tn-text);
-		}
-		.mode-pill {
-			border-color: var(--tn-border);
-		}
-		.prompt-button {
-			border-color: rgba(192, 202, 245, 0.12);
-			background: rgba(36, 40, 59, 0.5);
-			color: var(--tn-text);
-		}
-		.prompt-button::after {
-			color: rgba(125, 207, 255, 0.54);
-		}
-		.message.error {
-			border-color: rgba(247, 118, 142, 0.45);
-		}
-		.meta {
-			color: rgba(192, 202, 245, 0.52);
-		}
-		.message.user .meta {
-			color: rgba(26, 27, 38, 0.64);
-		}
-		.composer {
-			border-color: rgba(125, 207, 255, 0.24);
-			background: rgba(36, 40, 59, 0.98);
-		}
-		textarea::placeholder {
-			color: var(--tn-secondary);
-		}
-		.send-button {
-			background: var(--tn-tool);
-			color: var(--tn-base);
-		}
-		.send-button:not(:disabled):hover,
-		.send-button:not(:disabled):focus-visible {
-			background: #9de1ff;
+			--tn-text: #fafafa;
+			--tn-base: #09090b;
+			--tn-primary: #0000ee;
+			--tn-tool: #0000ee;
+			--tn-success: #22c55e;
+			--tn-error: #ef4444;
+			--tn-secondary: #005a9c;
+			--tn-panel: #18181b;
+			--tn-surface: #18181b;
+			--tn-border: #27272a;
 		}
 		/*
 		 * Light theme. Scoped with the [data-theme="light"] attribute selector
-		 * (set on <html> by the theme toggle below) rather than editing the dark
-		 * rules above, so light mode is purely additive: the attribute selector
-		 * always outranks the plain class selectors it targets, regardless of
-		 * source order, and the dark theme's appearance is provably unchanged.
+		 * Matches the organisation high-contrast white/blue theme.
 		 */
 		:root[data-theme="light"] {
 			color-scheme: light;
 		}
 		:root[data-theme="light"] body {
-			background: #f6f6fb;
-			color: #1c1d2b;
+			background: #ffffff;
+			color: #000000;
 		}
 		:root[data-theme="light"] .app-shell {
-			background:
-				linear-gradient(90deg, #ffffff 0, #ffffff 280px, #f6f6fb 280px, #f0f0f7 100%);
+			background: #ffffff;
 		}
 		:root[data-theme="light"] .sidebar {
-			border-right-color: rgba(28, 29, 43, 0.1);
-			background: #ffffff;
+			border-right: 1px solid #e5e7eb;
+			background: #f9fafb;
 		}
 		:root[data-theme="light"] .brand,
 		:root[data-theme="light"] .thread-item.active,
@@ -926,34 +775,35 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		:root[data-theme="light"] .message,
 		:root[data-theme="light"] textarea,
 		:root[data-theme="light"] .model-pill {
-			color: #1c1d2b;
+			color: #000000;
 		}
 		:root[data-theme="light"] .icon-button {
-			background: rgba(28, 29, 43, 0.06);
-			color: #1c1d2b;
+			background: rgba(0, 0, 0, 0.05);
+			color: #000000;
 		}
 		:root[data-theme="light"] .icon-button:hover,
 		:root[data-theme="light"] .icon-button:focus-visible {
-			background: rgba(28, 29, 43, 0.1);
+			background: rgba(0, 0, 0, 0.1);
 		}
 		:root[data-theme="light"] .new-chat {
-			border-color: rgba(124, 92, 214, 0.4);
-			background: rgba(124, 92, 214, 0.1);
-			color: #5c3fb8;
+			border-color: #0000ee;
+			background: #0000ee;
+			color: #ffffff;
 		}
 		:root[data-theme="light"] .new-chat:hover {
-			background: rgba(124, 92, 214, 0.18);
+			background: #0000cc;
 		}
 		:root[data-theme="light"] .search-box {
-			border-color: rgba(28, 29, 43, 0.1);
-			color: #5b6178;
+			border-color: #e5e7eb;
+			color: #6b7280;
+			background: #ffffff;
 		}
 		:root[data-theme="light"] .search-box:focus-within {
-			border-color: rgba(46, 134, 193, 0.4);
-			background: rgba(46, 134, 193, 0.06);
+			border-color: #0000ee;
+			background: #ffffff;
 		}
 		:root[data-theme="light"] .search-box input {
-			color: #1c1d2b;
+			color: #000000;
 		}
 		:root[data-theme="light"] .search-box input::placeholder,
 		:root[data-theme="light"] .thread-item,
@@ -963,30 +813,30 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		:root[data-theme="light"] p,
 		:root[data-theme="light"] .empty-state span,
 		:root[data-theme="light"] .note {
-			color: #5b6178;
+			color: #6b7280;
 		}
 		:root[data-theme="light"] .thread-list::-webkit-scrollbar-thumb,
 		:root[data-theme="light"] .messages::-webkit-scrollbar-thumb {
-			background: rgba(28, 29, 43, 0.16);
+			background: rgba(0, 0, 0, 0.15);
 		}
 		:root[data-theme="light"] .thread-list::-webkit-scrollbar-thumb:hover,
 		:root[data-theme="light"] .messages::-webkit-scrollbar-thumb:hover {
-			background: rgba(28, 29, 43, 0.28);
+			background: rgba(0, 0, 0, 0.25);
 		}
 		:root[data-theme="light"] .thread-list,
 		:root[data-theme="light"] .messages {
-			scrollbar-color: rgba(28, 29, 43, 0.16) transparent;
+			scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 		}
 		:root[data-theme="light"] .thread-item.active,
 		:root[data-theme="light"] .thread-item:hover,
 		:root[data-theme="light"] .thread-item:focus-visible,
 		:root[data-theme="light"] .mode-pill,
 		:root[data-theme="light"] .prompt-button:hover {
-			background: rgba(46, 134, 193, 0.1);
+			background: rgba(0, 0, 238, 0.08);
+			color: #0000ee;
 		}
 		:root[data-theme="light"] .workspace {
-			background:
-				radial-gradient(circle at 50% 16%, rgba(124, 92, 214, 0.08), transparent 28rem),
+			background: #ffffff;
 				linear-gradient(180deg, #f6f6fb 0%, #f2f2f8 52%, #ececf4 100%);
 		}
 		:root[data-theme="light"] .status {
@@ -1143,6 +993,92 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		:root[data-theme="light"] .send-button.is-cancel:not(:disabled):focus-visible {
 			background: #dd5b71;
 		}
+		/* Modal Styles */
+		.modal-overlay {
+			position: fixed;
+			top: 0; left: 0; right: 0; bottom: 0;
+			background: rgba(0, 0, 0, 0.6);
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			z-index: 1000;
+		}
+		.modal-overlay.hidden {
+			display: none;
+		}
+		.modal-content {
+			background: var(--bg-surface);
+			border: 1px solid var(--border);
+			border-radius: 8px;
+			width: 100%;
+			max-width: 500px;
+			box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+			display: flex;
+			flex-direction: column;
+		}
+		.modal-header {
+			padding: 16px 20px;
+			border-bottom: 1px solid var(--border);
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+		}
+		.modal-header h2 {
+			margin: 0;
+			font-size: 1.1rem;
+			font-weight: 600;
+			color: var(--text);
+		}
+		.close-button {
+			background: transparent;
+			color: var(--text-muted);
+			font-size: 1.5rem;
+			padding: 0 4px;
+			line-height: 1;
+		}
+		.close-button:hover {
+			color: var(--text);
+		}
+		.modal-body {
+			padding: 20px;
+			color: var(--text-muted);
+			font-size: 0.95rem;
+		}
+		
+		/* Image Upload Preview */
+		.composer-preview {
+			display: flex;
+			gap: 8px;
+			padding: 8px 12px 0;
+			flex-wrap: wrap;
+		}
+		.composer-preview img {
+			height: 48px;
+			border-radius: 4px;
+			border: 1px solid var(--border);
+			object-fit: contain;
+		}
+		.message-image {
+			max-width: 100%;
+			max-height: 300px;
+			border-radius: 6px;
+			margin-bottom: 8px;
+			display: block;
+			border: 1px solid var(--border);
+		}
+		.composer-inputs {
+			display: flex;
+			gap: 8px;
+			align-items: center;
+			flex: 1;
+		}
+		.upload-button {
+			padding: 4px 8px;
+			color: var(--text-muted);
+		}
+		.upload-button:hover {
+			color: var(--text);
+		}
 	</style>
 </head>
 <body>
@@ -1153,7 +1089,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					<img class="brand-mark" src="/assets/nanocoder-icon.svg" alt="Nanocoder logo">
 					<span>Nanocoder</span>
 				</div>
-				<button class="icon-button" id="themeToggleButton" type="button" aria-label="Switch to light theme" aria-pressed="false">◐</button>
+				<button class="icon-button" id="themeToggleButton" type="button" aria-label="Switch to light theme" aria-pressed="false">${IconTheme}</button>
 				<button class="icon-button" id="sessionMenuButton" type="button" aria-label="Session menu">⌘</button>
 			</div>
 			<button class="new-chat" id="newChatButton" type="button">New Chat</button>
@@ -1174,9 +1110,9 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				<div class="status" id="connectionStatus">Starting</div>
 				<p class="session-note">Localhost only. Private URL token required.</p>
 				<div class="top-actions">
-					<button class="icon-button" id="sidebarToggleButton" type="button" aria-label="Collapse sidebar" aria-expanded="true">❮</button>
-					<button class="icon-button" id="historyButton" type="button" aria-label="Session history">◷</button>
-					<button class="icon-button" id="settingsButton" type="button" aria-label="Session settings">☷</button>
+					<button class="icon-button" id="sidebarToggleButton" type="button" aria-label="Collapse sidebar" aria-expanded="true">${IconSidebar}</button>
+					<button class="icon-button" id="historyButton" type="button" aria-label="Session history">${IconHistory}</button>
+					<button class="icon-button" id="settingsButton" type="button" aria-label="Session settings">${IconSettings}</button>
 				</div>
 			</header>
 			<section class="chat-stage" aria-label="Nanocoder browser chat">
@@ -1184,9 +1120,14 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				<div class="messages" id="messageList" aria-live="polite"></div>
 			</section>
 			<form class="composer-wrap" id="messageForm">
+				<div class="composer-preview" id="imagePreviewContainer" hidden></div>
 				<div class="composer">
-					<textarea id="messageInput" name="message" placeholder="Type your message here..." disabled></textarea>
-					<button class="send-button" id="sendButton" type="submit" disabled aria-label="Send message">↑</button>
+					<div class="composer-inputs">
+						<input type="file" id="imageUploadInput" accept="image/*" multiple hidden>
+						<button class="icon-button upload-button" id="uploadImageButton" type="button" aria-label="Upload image">${IconUpload}</button>
+						<textarea id="messageInput" name="message" placeholder="Type your message here..." disabled></textarea>
+					</div>
+					<button class="send-button" id="sendButton" type="submit" disabled aria-label="Send message">${IconSend}</button>
 				</div>
 				<div class="composer-meta">
 					<div class="model-pill">Nanocoder local session</div>
@@ -1195,6 +1136,22 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			</form>
 		</main>
 	</div>
+
+	<!-- Settings Modal -->
+	<div id="settingsModal" class="modal-overlay hidden" aria-hidden="true">
+		<div class="modal-content" role="dialog" aria-labelledby="modalTitle" aria-modal="true">
+			<div class="modal-header">
+				<h2 id="modalTitle">Settings</h2>
+				<button type="button" class="close-button" id="closeSettingsButton" aria-label="Close settings">${IconClose}</button>
+			</div>
+			<div class="modal-body">
+				<div class="setting-group">
+					<p>Settings configuration is not yet available in the Web Mode interface. Check back later!</p>
+				</div>
+			</div>
+		</div>
+	</div>
+
 	<script nonce="${nonce}">
 			const statusElement = document.querySelector('#connectionStatus');
 			const messageList = document.querySelector('#messageList');
@@ -1213,6 +1170,13 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			const composerNote = document.querySelector('#composerNote');
 			const threadSearchInput = document.querySelector('#threadSearchInput');
 			const threadList = document.querySelector('#threadList');
+			
+			const settingsModal = document.querySelector('#settingsModal');
+			const closeSettingsButton = document.querySelector('#closeSettingsButton');
+			const imageUploadInput = document.querySelector('#imageUploadInput');
+			const uploadImageButton = document.querySelector('#uploadImageButton');
+			const imagePreviewContainer = document.querySelector('#imagePreviewContainer');
+			let pendingImages = [];
 			const token = new URLSearchParams(window.location.search).get('token');
 			const eventsUrl = new URL('/events', window.location.href);
 			eventsUrl.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -1221,10 +1185,10 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			const pendingMessages = new Map();
 			const assistantMessages = new Map();
 			const modePrompts = [
-				['✦ Create', 'Draft a clean implementation plan for the next Nanocoder web mode step'],
-				['▣ Explore', 'Explore this repository and summarize the web mode architecture'],
-				['</> Code', 'Help me implement the next small, tested web mode change'],
-				['◇ Learn', 'Teach me how this browser session connects to the local CLI runtime'],
+				['${IconCreate} Create', 'Draft a clean implementation plan for the next Nanocoder web mode step'],
+				['${IconExplore} Explore', 'Explore this repository and summarize the web mode architecture'],
+				['${IconCode} Code', 'Help me implement the next small, tested web mode change'],
+				['${IconLearn} Learn', 'Teach me how this browser session connects to the local CLI runtime'],
 			];
 			const promptSuggestions = [
 				'Summarize this repository and suggest the next clean change',
@@ -1261,9 +1225,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				if (stored === 'light' || stored === 'dark') {
 					return stored;
 				}
-				return window.matchMedia('(prefers-color-scheme: light)').matches
-					? 'light'
-					: 'dark';
+				return 'light'; // Default to light mode (Organisation theme)
 			}
 
 			function applySidebarCollapsed(isCollapsed) {
@@ -1345,7 +1307,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 						const pill = document.createElement('button');
 						pill.className = 'mode-pill';
 						pill.type = 'button';
-						pill.textContent = label;
+						pill.innerHTML = label;
 						pill.dataset.action = 'fill';
 						pill.dataset.prompt = prompt;
 						modePills.append(pill);
@@ -1532,10 +1494,23 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				}
 			}
 
-			function appendMessage(role, text, metaText, shouldStore = true) {
+			function appendMessage(role, text, metaText, shouldStore = true, images = []) {
 				hideEmptyState();
 				const messageElement = document.createElement('div');
 				messageElement.className = 'message ' + role;
+
+				if (images && images.length > 0) {
+					const imageContainer = document.createElement('div');
+					imageContainer.className = 'message-images';
+					for (const img of images) {
+						const imgEl = document.createElement('img');
+						imgEl.className = 'message-image';
+						imgEl.src = img.data;
+						imageContainer.append(imgEl);
+					}
+					messageElement.append(imageContainer);
+				}
+
 				const textElement = document.createElement('div');
 				textElement.className = 'message-content';
 				if (role === 'assistant') {
@@ -1949,20 +1924,54 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				}
 
 				const trimmedText = text.trim();
-				if (!trimmedText) {
+				if (!trimmedText && pendingImages.length === 0) {
 					return;
 				}
 
 				const id = 'browser-message-' + Date.now() + '-' + messageCounter++;
-				const messageElement = appendMessage('user', trimmedText, 'Sending...');
+				const messageElement = appendMessage('user', trimmedText, 'Sending...', true, pendingImages);
 				pendingMessages.set(id, messageElement);
 				messageInput.value = '';
 				setActiveTurn(id);
 
-				if (!sendClientEvent({type: 'user_message', id, text: trimmedText})) {
+				if (!sendClientEvent({
+					type: 'user_message', 
+					id, 
+					text: trimmedText, 
+					images: pendingImages.length > 0 ? pendingImages : undefined
+				})) {
 					updateMessageMeta(messageElement, 'Not sent');
 					pendingMessages.delete(id);
 					setActiveTurn(null);
+				}
+				
+				pendingImages = [];
+				renderImagePreviews();
+			}
+
+			function renderImagePreviews() {
+				imagePreviewContainer.innerHTML = '';
+				if (pendingImages.length > 0) {
+					imagePreviewContainer.hidden = false;
+					for (const img of pendingImages) {
+						const imgEl = document.createElement('img');
+						imgEl.src = img.data;
+						imagePreviewContainer.append(imgEl);
+					}
+				} else {
+					imagePreviewContainer.hidden = true;
+				}
+			}
+
+			function handleFiles(files) {
+				for (const file of files) {
+					if (!file.type.startsWith('image/')) continue;
+					const reader = new FileReader();
+					reader.onload = e => {
+						pendingImages.push({ data: e.target.result, mediaType: file.type });
+						renderImagePreviews();
+					};
+					reader.readAsDataURL(file);
 				}
 			}
 
@@ -2049,6 +2058,29 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					messageForm.requestSubmit();
 				}
 			});
+			
+			uploadImageButton.addEventListener('click', () => imageUploadInput.click());
+			imageUploadInput.addEventListener('change', event => handleFiles(event.target.files));
+			
+			messageInput.addEventListener('paste', event => {
+				if (event.clipboardData && event.clipboardData.files.length > 0) {
+					handleFiles(event.clipboardData.files);
+				}
+			});
+
+			document.addEventListener('dragover', event => event.preventDefault());
+			document.addEventListener('drop', event => {
+				event.preventDefault();
+				if (event.dataTransfer && event.dataTransfer.files) {
+					handleFiles(event.dataTransfer.files);
+				}
+			});
+
+			document.addEventListener('visibilitychange', () => {
+				if (document.visibilityState === 'visible') {
+					messageList.scrollTop = messageList.scrollHeight;
+				}
+			});
 
 			newChatButton.addEventListener('click', () => {
 				sendClientEvent({type: 'reset_session', id: 'browser-reset-' + Date.now()});
@@ -2083,19 +2115,15 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			});
 
 			settingsButton.addEventListener('click', () => {
-				const theme =
-					document.documentElement.dataset.theme === 'light' ? 'Light' : 'Dark';
-				const sidebarState = appShell.classList.contains('sidebar-collapsed')
-					? 'collapsed'
-					: 'expanded';
-				addSystemNotice(
-					'Theme: ' +
-						theme +
-						'. Sidebar: ' +
-						sidebarState +
-						'. Provider and model stay in the terminal runtime; during a browser turn, approvals and questions are answered here.',
-					'Session settings',
-				);
+				settingsModal.classList.remove('hidden');
+			});
+			closeSettingsButton.addEventListener('click', () => {
+				settingsModal.classList.add('hidden');
+			});
+			settingsModal.addEventListener('click', event => {
+				if (event.target === settingsModal) {
+					settingsModal.classList.add('hidden');
+				}
 			});
 
 			threadSearchInput.addEventListener('input', () => {

@@ -1,9 +1,21 @@
-import {existsSync, mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {Box, Text} from 'ink';
 import React from 'react';
+// CRITICAL: redirect config reads to a temp dir BEFORE any @/config import.
+// BaseConfigWizard calls getColors() -> loadPreferences() directly (not
+// through ThemeContext), which otherwise reads this machine's real global
+// preferences file. A fork-only `selectedTheme` value there (not present in
+// upstream's themes.json) makes getThemeColors() throw, crashing every test
+// in this file before it can render anything.
+process.env.NANOCODER_CONFIG_DIR = mkdtempSync(
+	join(tmpdir(), 'nanocoder-wizard-spec-'),
+);
+const {resetPreferencesCache} = await import('@/config/preferences');
+resetPreferencesCache();
+
 import {renderWithTheme} from '../test-utils/render-with-theme.js';
 import {BaseConfigWizard} from './base-config-wizard.js';
 
@@ -273,5 +285,91 @@ test.serial('deleting corrupted config clears corruption state', async t => {
 	t.false(existsSync(configPath));
 	t.is(completedPath, configPath);
 });
+
+test.serial(
+	'configure step receives pre-existing config entries synchronously on entering configure (regression: deferred load lost entries)',
+	async t => {
+		const testDir = join(
+			tmpdir(),
+			`nanocoder-wizard-test-preload-${Date.now()}`,
+		);
+		mkdirSync(testDir, {recursive: true});
+		t.teardown(() => rmSync(testDir, {recursive: true, force: true}));
+
+		const configFileName = 'agents.config.json';
+		const configPath = join(testDir, configFileName);
+		writeFileSync(
+			configPath,
+			JSON.stringify({
+				providers: [{name: 'openai'}, {name: 'anthropic'}],
+			}),
+			'utf-8',
+		);
+
+		// Records the `items` the configure step actually received the moment
+		// it first renders. Before the fix (deferred useEffect load, firing
+		// after `setStep('configure')` had already committed), this step's
+		// own useState initializer would capture the wizard's still-empty
+		// `initialItems` — a real config-file with entries would render here
+		// as if it were empty, silently discarding the user's existing
+		// providers on next save.
+		const receivedOnFirstRender: string[][] = [];
+
+		// A real component (not a function called inline by BaseConfigWizard's
+		// switch statement) so its `useState` initializer runs as ITS OWN
+		// hook, exactly matching how the real configure steps this bug
+		// affected are structured — a plain function reference invoked
+		// directly would attach the hook to BaseConfigWizard itself instead.
+		function ConfigureCapture({items}: {items: FakeItems}) {
+			const [captured] = React.useState(items.entries);
+			receivedOnFirstRender.push(captured);
+			return (
+				<Box flexDirection="column">
+					<Text>configure step</Text>
+					<Text>entries: {captured.join(',')}</Text>
+				</Box>
+			);
+		}
+
+		const {lastFrame, stdin} = renderWithTheme(
+			<BaseConfigWizard<FakeItems>
+				title="Title"
+				focusId="preload-wizard"
+				configFileName={configFileName}
+				initialItems={{entries: []}}
+				parseConfig={raw => ({
+					entries: (raw as {providers: {name: string}[]}).providers.map(
+						p => p.name,
+					),
+				})}
+				buildConfig={items => ({
+					providers: items.entries.map(name => ({name})),
+				})}
+				hasItems={items => items.entries.length > 0}
+				renderConfigureStep={({items}) => <ConfigureCapture items={items} />}
+				renderSummaryItems={noopRenderSummary}
+				projectDir={testDir}
+				onComplete={() => {}}
+			/>,
+		);
+
+		// Project config exists, so the location step opens in
+		// "existing-config" mode; the first (default-selected) option is
+		// "Edit this configuration" — select it with Enter.
+		stdin.write('\r');
+		await new Promise(r => setTimeout(r, 100));
+
+		t.true(receivedOnFirstRender.length >= 1);
+		// The captured value comes from a useState initializer, so every
+		// render (even re-renders after the initial mount) must report the
+		// same first-mount snapshot. Before the fix, this would be `[]`.
+		for (const captured of receivedOnFirstRender) {
+			t.deepEqual(captured, ['openai', 'anthropic']);
+		}
+
+		const output = lastFrame()!;
+		t.regex(output, /entries: openai,anthropic/);
+	},
+);
 
 

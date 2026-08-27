@@ -89,6 +89,14 @@ export interface ChatInputProps {
 	// VS Code active editor pushed from the extension (filename + optional selection)
 	activeEditor?: ActiveEditorState | null;
 	onDismissActiveEditor?: () => void;
+
+	/**
+	 * Fullscreen (alternate-screen) mode. Controls the footer's left margin:
+	 * inline pulls back -1 to sit under the absolutely-positioned <Static>,
+	 * while fullscreen stays at the padded column so it lines up with the
+	 * transcript and isn't clipped by the scroll viewport's overflow="hidden".
+	 */
+	fullscreen?: boolean;
 }
 
 /**
@@ -139,6 +147,7 @@ export function ChatInput({
 	currentModel,
 	activeEditor,
 	onDismissActiveEditor,
+	fullscreen = false,
 }: ChatInputProps): React.ReactElement {
 	const {colors} = useTheme();
 	const activeToolCall = pendingToolCalls[currentToolIndex];
@@ -149,7 +158,7 @@ export function ChatInput({
 		activeToolCall.function.name !== 'agent';
 
 	return (
-		<Box flexDirection="column" marginLeft={-1}>
+		<Box flexDirection="column" marginLeft={fullscreen ? 0 : -1}>
 			{/* Live compact tool counts - running tally during auto-execution */}
 			{compactToolCounts && Object.keys(compactToolCounts).length > 0 && (
 				<LiveCompactCounts counts={compactToolCounts} />
