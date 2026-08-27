@@ -83,10 +83,6 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 			if (!loading) {
 				onCancel();
 			}
-			return;
-		}
-		if (!loading && sessions.length === 0) {
-			onCancel();
 		}
 	});
 
@@ -109,7 +105,7 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
 				) : (
 					<Text>No saved sessions found.</Text>
 				)}
-				<Text>Press any key to continue...</Text>
+				<Text>Press ESC to continue...</Text>
 			</Box>
 		);
 	}
