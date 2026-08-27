@@ -256,20 +256,121 @@ test('runAcpConversation - onToken sends agent_message_chunk updates', async t =
 	t.is(messageUpdates[0].update.content.text, 'Hello ');
 });
 
+// Streams the reasoning tokens from inside chat(), the way the real client
+// does, so the assertions run against a live turn rather than a closure that
+// happens to outlive it.
+const createReasoningClient = (tokens: string[]): LLMClient =>
+	({
+		chat: async (_msgs: any, _tools: any, callbacks: any) => {
+			for (const token of tokens) {
+				callbacks.onReasoningToken(token);
+			}
+			return {choices: [{message: {content: 'done'}}]};
+		},
+	}) as unknown as LLMClient;
+
+const thoughtTexts = (updates: any[]): string[] =>
+	updates
+		.filter((u: any) => u.update.sessionUpdate === 'agent_thought_chunk')
+		.map((u: any) => u.update.content.text);
+
 test('runAcpConversation - onReasoningToken sends agent_thought_chunk updates', async t => {
 	const {conn, updates} = createMockConn();
 	const session = createMockSession(conn);
-	let capturedCallbacks: any = null;
+
+	await runAcpConversation({
+		session,
+		client: createReasoningClient(['thinking...']),
+		toolManager: createMockToolManager() as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.deepEqual(thoughtTexts(updates), ['thinking...']);
+});
+
+test('runAcpConversation - skips agent_thought_chunk for leading whitespace-only reasoning', async t => {
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn);
+
+	await runAcpConversation({
+		session,
+		client: createReasoningClient([
+			'\n\n',
+			'Analyzing the request',
+			'\n\n',
+			'then answering',
+		]),
+		toolManager: createMockToolManager() as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.deepEqual(thoughtTexts(updates), [
+		'Analyzing the request',
+		'\n\n',
+		'then answering',
+	]);
+});
+
+test('runAcpConversation - stores exactly the reasoning it streamed', async t => {
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn);
+
+	await runAcpConversation({
+		session,
+		client: createReasoningClient(['\n\n', '  Weighing', ' options']),
+		toolManager: createMockToolManager() as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	// replaySessionHistory re-sends the stored reasoning verbatim, so it has to
+	// be exactly what the live stream showed - no leading whitespace the thought
+	// chunks never carried.
+	const assistant = session.messages.find((m: any) => m.role === 'assistant');
+	t.is(assistant?.reasoning, thoughtTexts(updates).join(''));
+	t.is(assistant?.reasoning, 'Weighing options');
+});
+
+test('runAcpConversation - stores no reasoning when it was all whitespace', async t => {
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn);
+
+	await runAcpConversation({
+		session,
+		client: createReasoningClient(['\n\n', '   ', '\t']),
+		toolManager: createMockToolManager() as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.deepEqual(thoughtTexts(updates), []);
+	const assistant = session.messages.find((m: any) => m.role === 'assistant');
+	t.is(assistant?.reasoning, undefined);
+});
+
+test('runAcpConversation - resets streamed reasoning between turns', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn);
+	let turn = 0;
 	const client = {
-		chat: async (
-			_msgs: any,
-			_tools: any,
-			callbacks: any,
-		) => {
-			capturedCallbacks = callbacks;
-			return {
-				choices: [{message: {content: 'done'}}],
-			};
+		chat: async (_msgs: any, _tools: any, callbacks: any) => {
+			turn++;
+			callbacks.onReasoningToken(`turn ${turn} thought`);
+			if (turn === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [createMockToolCall('read_file', {}, 'call-1')],
+							},
+						},
+					],
+				};
+			}
+			return {choices: [{message: {content: 'done'}}]};
 		},
 	} as unknown as LLMClient;
 
@@ -281,14 +382,10 @@ test('runAcpConversation - onReasoningToken sends agent_thought_chunk updates', 
 		nonInteractiveAlwaysAllow: [],
 	});
 
-	t.truthy(capturedCallbacks);
-	capturedCallbacks.onReasoningToken('thinking...');
-
-	const thoughtUpdates = updates.filter(
-		(u: any) => u.update.sessionUpdate === 'agent_thought_chunk',
-	);
-	t.is(thoughtUpdates.length, 1);
-	t.is(thoughtUpdates[0].update.content.text, 'thinking...');
+	const reasonings = session.messages
+		.filter((m: any) => m.role === 'assistant')
+		.map((m: any) => m.reasoning);
+	t.deepEqual(reasonings, ['turn 1 thought', 'turn 2 thought']);
 });
 
 // ============================================================================
@@ -490,6 +587,76 @@ test('runAcpConversation - write_tasks emits a plan session update', async t => 
 		{content: 'Second task', priority: 'medium', status: 'in_progress'},
 		{content: 'Third task', priority: 'medium', status: 'pending'},
 	]);
+});
+
+test('runAcpConversation - announces every queued tool call before running the batch', async t => {
+	const {conn, updates} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		getToolEntry: () => ({approval: false}),
+	};
+
+	const announcedDuringFirstRun: string[] = [];
+	setToolRegistryGetter(() => ({
+		read_file: async () => {
+			if (announcedDuringFirstRun.length === 0) {
+				announcedDuringFirstRun.push(
+					...updates
+						.filter((u: any) => u.update.sessionUpdate === 'tool_call')
+						.map((u: any) => u.update.toolCallId),
+				);
+			}
+			return 'file contents';
+		},
+	}));
+
+	let callCount = 0;
+	const client = {
+		chat: async () => {
+			callCount++;
+			if (callCount === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [
+									createMockToolCall('read_file', {path: '/a.txt'}, 'call-1'),
+									createMockToolCall('read_file', {path: '/b.txt'}, 'call-2'),
+								],
+							},
+						},
+					],
+				};
+			}
+			return {choices: [{message: {content: 'Done'}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.deepEqual(
+		[...new Set(announcedDuringFirstRun)],
+		['call-1', 'call-2'],
+		'the whole batch must be visible while the first tool is still running',
+	);
+
+	const queued = updates.filter(
+		(u: any) =>
+			u.update.sessionUpdate === 'tool_call' && u.update.status === 'pending',
+	);
+	t.true(
+		queued.every((u: any) => u.update.title),
+		'queued announcements carry a title so the checklist is readable',
+	);
 });
 
 // ============================================================================

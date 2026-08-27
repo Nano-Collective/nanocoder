@@ -26,4 +26,4 @@ sidebar_order: 13
 
 ## Fetching Available Models
 
-The `/setup-providers` wizard can automatically fetch available models from GitHub Models.
+The `/settings providers` wizard can automatically fetch available models from GitHub Models.

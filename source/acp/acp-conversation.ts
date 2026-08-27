@@ -147,12 +147,22 @@ export async function runAcpConversation(
 
 		const callbacks: StreamCallbacks = {
 			onReasoningToken: (token: string) => {
-				streamedReasoning += token;
+				// Leading whitespace renders to nothing but still opens a thought
+				// section, leaving a bare "Thought for 0s" bubble, so drop it.
+				// Only what's emitted is accumulated: replaySessionHistory re-sends
+				// the stored reasoning verbatim, so anything skipped here has to
+				// stay out of the message or a reloaded session renders differently
+				// from the live one.
+				const text = streamedReasoning ? token : token.trimStart();
+				if (!text) {
+					return;
+				}
+				streamedReasoning += text;
 				conn.sessionUpdate({
 					sessionId: session.sessionId,
 					update: {
 						sessionUpdate: 'agent_thought_chunk',
-						content: {type: 'text', text: token},
+						content: {type: 'text', text},
 					},
 				});
 			},
@@ -237,7 +247,7 @@ export async function runAcpConversation(
 				role: 'assistant',
 				content: cleanedContent,
 				tool_calls: validToolCalls.length > 0 ? validToolCalls : undefined,
-				reasoning: streamedReasoning || undefined,
+				reasoning: streamedReasoning.trim() ? streamedReasoning : undefined,
 			},
 		];
 
@@ -251,13 +261,42 @@ export async function runAcpConversation(
 			return withTurnUsage({stopReason: 'end_turn'});
 		}
 
+		const announcedBatch =
+			validToolCalls.length > 1 && !abortController.signal.aborted;
+		if (announcedBatch) {
+			for (const toolCall of validToolCalls) {
+				// withDiff: false - the announcement drops content below, so
+				// there is no reason to read the file to build a diff first.
+				const queuedMeta = await buildToolCallMeta(toolCall, {
+					withDiff: false,
+				});
+				// Content is withheld until the call is about to run: the client
+				// enables its "open diff" affordance off this field, and a diff
+				// registered now would be stale by the time the tool executes.
+				await emitToolCall(session, conn, toolCall, 'pending', {
+					...queuedMeta,
+					content: [],
+				});
+			}
+		}
+
 		// Process tool calls
 		const toolResults: ToolResult[] = [];
-		for (const toolCall of validToolCalls) {
+		for (let index = 0; index < validToolCalls.length; index++) {
+			const toolCall = validToolCalls[index];
 			// Stop was pressed: don't start any remaining queued tools. Record a
 			// cancelled result for each so the assistant's tool_calls keep matched
 			// results in history; the turn ends below instead of re-prompting.
 			if (abortController.signal.aborted) {
+				if (announcedBatch) {
+					await emitToolCallUpdate(
+						session,
+						conn,
+						toolCall,
+						'failed',
+						'Cancelled by user',
+					);
+				}
 				toolResults.push({
 					tool_call_id: toolCall.id,
 					role: 'tool',
@@ -271,8 +310,17 @@ export async function runAcpConversation(
 			// for edits) so the client can render rich tool cards and previews.
 			const meta = await buildToolCallMeta(toolCall);
 
-			// Notify client about tool call
-			await emitToolCall(session, conn, toolCall, 'pending', meta);
+			// Notify client about tool call. Already-announced calls get an
+			// update rather than a second tool_call: clients that append on
+			// tool_call (instead of upserting by id) would double-render it.
+			await emitToolCall(
+				session,
+				conn,
+				toolCall,
+				'pending',
+				meta,
+				announcedBatch ? 'tool_call_update' : 'tool_call',
+			);
 
 			// ask_user is interactive: instead of executing it, surface the
 			// question's options through the client and feed the choice back as
@@ -316,6 +364,20 @@ export async function runAcpConversation(
 						'failed',
 						'Cancelled by user',
 					);
+					// This branch returns instead of falling through to the
+					// aborted check at the top of the loop, so the calls
+					// announced behind this one would stay pending forever.
+					if (announcedBatch) {
+						for (const queued of validToolCalls.slice(index + 1)) {
+							await emitToolCallUpdate(
+								session,
+								conn,
+								queued,
+								'failed',
+								'Cancelled by user',
+							);
+						}
+					}
 					session.messages = [...messages, ...toolResults];
 					return withTurnUsage({stopReason: 'cancelled'});
 				}
@@ -469,19 +531,25 @@ async function emitToolCall(
 	toolCall: ToolCall,
 	status: ToolCallStatus,
 	meta: AcpToolCallMeta,
+	sessionUpdate: 'tool_call' | 'tool_call_update' = 'tool_call',
 ): Promise<void> {
+	// Spelled out per branch: the union of both literals does not narrow
+	// SessionUpdate's discriminant.
+	const payload = {
+		toolCallId: toolCall.id,
+		title: meta.title,
+		kind: meta.kind,
+		rawInput: toolCall.function.arguments,
+		status,
+		content: meta.content.length > 0 ? meta.content : undefined,
+		locations: meta.locations.length > 0 ? meta.locations : undefined,
+	};
 	await conn.sessionUpdate({
 		sessionId: session.sessionId,
-		update: {
-			sessionUpdate: 'tool_call',
-			toolCallId: toolCall.id,
-			title: meta.title,
-			kind: meta.kind,
-			rawInput: toolCall.function.arguments,
-			status,
-			content: meta.content.length > 0 ? meta.content : undefined,
-			locations: meta.locations.length > 0 ? meta.locations : undefined,
-		},
+		update:
+			sessionUpdate === 'tool_call'
+				? {...payload, sessionUpdate: 'tool_call'}
+				: {...payload, sessionUpdate: 'tool_call_update'},
 	});
 }
 

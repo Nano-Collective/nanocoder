@@ -6,11 +6,28 @@
 	const chatInput = document.getElementById('chat-input');
 	const composerBox = document.getElementById('composer-box');
 	const contextChipsContainer = document.getElementById('context-chips');
-	const attachBtn = document.getElementById('attach-btn');
+	const addMenuBtn = document.getElementById('add-menu-btn');
+	const addMenuDropdown = document.getElementById('add-menu-dropdown');
 
 	let attachedPaths = []; // [{path, name, kind: 'file'|'folder'}]
 
-	const addImageBtn = document.getElementById('add-image-btn');
+	// ── @ mention autocomplete state ────────────────────────
+	const mentionDropdown = document.getElementById('mention-dropdown');
+
+	/** Only the file search is debounced; a bare `@` answers immediately. */
+	const MENTION_DEBOUNCE_MS = 120;
+
+	let mentionOpen = false;
+	let mentionItems = [];
+	let mentionRows = [];
+	let mentionActiveIndex = 0;
+	/** The {start, query} token the current results belong to. */
+	let mentionToken = null;
+	/** Newest request id. Responses that do not match it are stale — see below. */
+	let mentionRequestId = 0;
+	let mentionLastQuery = null;
+	let mentionDebounceTimer = null;
+
 	const imageUpload = document.getElementById('image-upload');
 	const imagePreviewContainer = document.getElementById('image-preview-container');
 	
@@ -33,9 +50,7 @@
 					e.stopPropagation();
 					const isHidden = this.dropdown.classList.contains('hidden');
 					// Close all dropdowns
-					document.getElementById('provider-dropdown').classList.add('hidden');
-					document.getElementById('model-dropdown').classList.add('hidden');
-					document.getElementById('mode-dropdown').classList.add('hidden');
+					closeAllDropdowns();
 					
 					if (isHidden) {
 						this.dropdown.classList.remove('hidden');
@@ -110,17 +125,236 @@
 		});
 
 		document.addEventListener('click', () => {
-			document.getElementById('provider-dropdown').classList.add('hidden');
-			document.getElementById('model-dropdown').classList.add('hidden');
-			document.getElementById('mode-dropdown').classList.add('hidden');
+			closeAllDropdowns();
 		});
 	}
 
 	initDropdowns();
 
+	function closeAllDropdowns() {
+		document.getElementById('provider-dropdown').classList.add('hidden');
+		document.getElementById('model-dropdown').classList.add('hidden');
+		document.getElementById('mode-dropdown').classList.add('hidden');
+		if (addMenuDropdown) addMenuDropdown.classList.add('hidden');
+	}
+
+	// ── @ mention autocomplete ──────────────────────────────
+	// Selecting a suggestion pushes into `attachedPaths`, exactly as the 📎
+	// attach button does. Everything downstream — chip rendering, the
+	// `@[file] <path>` serialization in submitMessage, and host-side expansion
+	// — is therefore untouched by this feature.
+
+	// The trigger rules and token arithmetic live in mention-utils.js so they
+	// can be unit tested in Node — this file is one DOM-bound IIFE and none of
+	// it is reachable from a test runner.
+	const { findMentionQuery, removeMentionToken } = globalThis.NanocoderMentionUtils;
+
+	function closeMention() {
+		mentionOpen = false;
+		mentionItems = [];
+		mentionRows = [];
+		mentionActiveIndex = 0;
+		mentionToken = null;
+		mentionLastQuery = null;
+		if (mentionDebounceTimer) {
+			clearTimeout(mentionDebounceTimer);
+			mentionDebounceTimer = null;
+		}
+		// Invalidate anything still in flight so a late response cannot reopen
+		// the dropdown after the user has moved on.
+		mentionRequestId++;
+		chatInput.removeAttribute('aria-activedescendant');
+		chatInput.setAttribute('aria-expanded', 'false');
+		if (mentionDropdown) {
+			mentionDropdown.classList.add('hidden');
+			mentionDropdown.innerHTML = '';
+		}
+	}
+
+	function requestMentions(token) {
+		// input and selectionchange both fire per keystroke, so the same query
+		// arrives here twice. Compared against the last *requested* query
+		// rather than the last rendered one — while a search is in flight
+		// nothing is open yet, so an `mentionOpen` check would let the
+		// duplicate through. closeMention() clears this, so reopening the same
+		// mention still re-searches.
+		//
+		// Note this guards the *search* only. `mentionToken` is assigned by
+		// syncMentionState before we get here, because two mentions can share a
+		// query while sitting at different offsets.
+		if (mentionLastQuery === token.query) {
+			return;
+		}
+		mentionLastQuery = token.query;
+		vscode.postMessage({
+			type: 'requestMentionCompletions',
+			query: token.query,
+			requestId: ++mentionRequestId
+		});
+	}
+
+	/** Re-evaluate whether the caret sits in a mention, and refresh results. */
+	function syncMentionState() {
+		if (!mentionDropdown) return;
+
+		// A range selection is not a caret position; treat it as "not mentioning".
+		if (chatInput.selectionStart !== chatInput.selectionEnd) {
+			closeMention();
+			return;
+		}
+
+		const token = findMentionQuery(chatInput.value, chatInput.selectionStart);
+		if (!token) {
+			closeMention();
+			return;
+		}
+
+		// Assigned here rather than in requestMentions, which the dedupe below
+		// can skip. `@foo @foo` shares one query across two offsets, so moving
+		// the caret from the second to the first short-circuits the search and
+		// would otherwise leave `start` pointing at the mention the user just
+		// left — accepting then adds the chip but strips the wrong `@foo`.
+		mentionToken = token;
+
+		if (mentionDebounceTimer) {
+			clearTimeout(mentionDebounceTimer);
+			mentionDebounceTimer = null;
+		}
+
+		// A bare `@` is answered from open editor tabs with no filesystem
+		// search, so there is nothing to debounce — waiting would just make the
+		// first keystroke feel laggy.
+		if (token.query === '') {
+			requestMentions(token);
+			return;
+		}
+
+		mentionDebounceTimer = setTimeout(() => {
+			mentionDebounceTimer = null;
+			requestMentions(token);
+		}, MENTION_DEBOUNCE_MS);
+	}
+
+	function highlightMention() {
+		mentionRows.forEach((row, index) => {
+			const isActive = index === mentionActiveIndex;
+			row.classList.toggle('bg-vscode-list-active', isActive);
+			row.classList.toggle('text-vscode-list-activeFg', isActive);
+			row.setAttribute('aria-selected', isActive ? 'true' : 'false');
+			if (isActive) {
+				// The listbox is a sibling of the textarea, so focus never moves
+				// into it. Without this pointer a screen reader announces the
+				// dropdown opening but never which row the arrow keys landed on.
+				chatInput.setAttribute('aria-activedescendant', row.id);
+				row.scrollIntoView({ block: 'nearest' });
+			}
+		});
+	}
+
+	function renderMentionDropdown() {
+		mentionDropdown.innerHTML = '';
+		mentionRows = [];
+
+		// Nothing matched — close rather than show an empty popup. This is also
+		// what makes a stray `@word` in prose harmless.
+		if (mentionItems.length === 0) {
+			closeMention();
+			return;
+		}
+
+		mentionItems.forEach((item, index) => {
+			const row = document.createElement('div');
+			row.className = 'flex items-center gap-2 px-3 py-1.5 cursor-pointer text-[0.9em] text-vscode-dropdown-fg hover:bg-vscode-list-hover transition-colors';
+			row.setAttribute('role', 'option');
+			// aria-activedescendant refers to a row by id, so every row needs one.
+			row.id = 'mention-option-' + index;
+
+			const iconSpan = document.createElement('span');
+			iconSpan.className = 'shrink-0 opacity-70 flex items-center';
+			iconSpan.appendChild(item.kind === 'folder' ? createFolderIcon() : createFileIcon());
+
+			const textSpan = document.createElement('span');
+			textSpan.className = 'flex flex-col min-w-0 flex-1';
+
+			// textContent, never innerHTML: file names are arbitrary user data.
+			const nameSpan = document.createElement('span');
+			nameSpan.className = 'truncate';
+			nameSpan.textContent = item.name;
+
+			const pathSpan = document.createElement('span');
+			pathSpan.className = 'truncate opacity-50 text-[0.85em]';
+			pathSpan.textContent = item.isEditor
+				? 'open · ' + item.relPath
+				: item.relPath;
+
+			textSpan.appendChild(nameSpan);
+			textSpan.appendChild(pathSpan);
+			row.appendChild(iconSpan);
+			row.appendChild(textSpan);
+
+			// mousedown rather than click: click would let the textarea blur
+			// first, and the blur handler closes the dropdown before the
+			// selection lands.
+			row.addEventListener('mousedown', e => {
+				e.preventDefault();
+				acceptMention(index);
+			});
+			row.addEventListener('mouseenter', () => {
+				mentionActiveIndex = index;
+				highlightMention();
+			});
+
+			mentionDropdown.appendChild(row);
+			mentionRows.push(row);
+		});
+
+		mentionDropdown.classList.remove('hidden');
+		mentionOpen = true;
+		chatInput.setAttribute('aria-expanded', 'true');
+		highlightMention();
+	}
+
+	function acceptMention(index) {
+		const item = mentionItems[index];
+		if (!item || !mentionToken) return;
+
+		// Drop the `@query` text: the chosen path becomes a chip instead, so
+		// nothing is substituted back into the textarea. The whole token goes,
+		// not just up to the caret — accepting from the middle of `@src/foo`
+		// has to take the trailing `/foo` with it.
+		const removed = removeMentionToken(chatInput.value, mentionToken.start);
+		chatInput.value = removed.text;
+		chatInput.setSelectionRange(removed.cursor, removed.cursor);
+		// The textarea was sized around the token we just removed.
+		chatInput.style.height = 'auto';
+		chatInput.style.height = chatInput.scrollHeight + 'px';
+
+		if (!attachedPaths.some(a => a.path === item.path)) {
+			attachedPaths.push({ path: item.path, name: item.name, kind: item.kind });
+			renderChips();
+		}
+
+		closeMention();
+		chatInput.focus();
+	}
+
+	if (mentionDropdown) {
+		chatInput.addEventListener('input', syncMentionState);
+		chatInput.addEventListener('blur', closeMention);
+		// Catches caret moves that fire no input event — arrow keys, clicking
+		// into the middle of an existing mention, undo.
+		document.addEventListener('selectionchange', () => {
+			if (document.activeElement === chatInput) {
+				syncMentionState();
+			}
+		});
+	}
+
 	function toggleHistoryView() {
 		isHistoryView = !isHistoryView;
 		if (isHistoryView) {
+			isSettingsView = false;
+			document.getElementById('settings-view').classList.add('hidden');
 			document.getElementById('chat-view').classList.add('hidden');
 			document.getElementById('history-view').classList.remove('hidden');
 			// Fetch sessions from extension host and render immediately
@@ -133,8 +367,10 @@
 
 	function showChatView() {
 		isHistoryView = false;
-		document.getElementById('chat-view').classList.remove('hidden');
+		isSettingsView = false;
 		document.getElementById('history-view').classList.add('hidden');
+		document.getElementById('settings-view').classList.add('hidden');
+		document.getElementById('chat-view').classList.remove('hidden');
 	}
 
 	const sendStopBtn = document.getElementById('send-stop-btn');
@@ -149,9 +385,18 @@
 	let sessionsData = [];
 	let isHistoryView = false;
 	let isProcessing = false;
+	// True from the moment Stop/Escape is pressed until the next prompt starts.
+	// Cancellation is a round trip: the agent keeps emitting updates for the
+	// turn it was told to stop (a tool already in flight, the queued calls it
+	// then marks cancelled), and those land after the UI has already closed the
+	// turn. Without this flag they rebuild a second tool card group that looks
+	// like the cancelled work restarting.
+	let turnCancelled = false;
 	let currentAggregator = null;
 	let currentThoughtBox = null;
+	let currentTurnFooter = null;
 	let visualLoader = null;
+	const toolKinds = new Map();
 	let toastTimeout = null;
 	// One agent response is split into several `.agent-markdown` containers -
 	// endCurrentTextBlock() closes the current one whenever a tool card, thought
@@ -214,7 +459,7 @@
 
 	function createMessageFooter(getText, role, sentAt) {
 		const footer = document.createElement('div');
-		footer.className = 'flex h-5 items-center gap-1.5 mt-1 text-xs text-vscode-fg opacity-60 ' +
+		footer.className = 'message-footer flex h-5 items-center gap-1.5 mt-1 text-xs text-vscode-fg opacity-60 ' +
 			(role === 'user' ? 'self-end' : 'self-start');
 
 		const btn = document.createElement('button');
@@ -271,7 +516,8 @@
 			// in case multiple aggregators were created in the same session
 			const allSpinners = document.querySelectorAll('.tool-status');
 			allSpinners.forEach(statusEl => {
-				if (statusEl.innerHTML.includes('animate-spin')) {
+				const status = statusEl.dataset.status;
+				if (status === 'pending' || status === 'in_progress') {
 					statusEl.innerHTML = ICONS.cancelled;
 				}
 			});
@@ -291,6 +537,7 @@
 	// Shared by the Stop button and Escape so the two can't drift apart.
 	function requestCancel() {
 		vscode.postMessage({ type: 'cancel' });
+		turnCancelled = true;
 		setProcessing(false);
 	}
 
@@ -304,20 +551,40 @@
 		});
 	}
 
-	if (attachBtn) {
-		attachBtn.addEventListener('click', () => {
-			vscode.postMessage({ type: 'requestOpenDialog' });
-		});
-	}
-	// Image upload logic
-	if (addImageBtn && imageUpload) {
-		addImageBtn.addEventListener('click', () => {
-			if (isHistoryView) {
-				showChatView();
+	if (addMenuBtn && addMenuDropdown) {
+		addMenuBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			const isHidden = addMenuDropdown.classList.contains('hidden');
+			closeAllDropdowns();
+			if (isHidden) {
+				addMenuDropdown.classList.remove('hidden');
 			}
-			imageUpload.click();
 		});
-		
+
+		const menuUploadImage = document.getElementById('menu-upload-image');
+		if (menuUploadImage) {
+			menuUploadImage.addEventListener('click', () => {
+				addMenuDropdown.classList.add('hidden');
+				if (isHistoryView) {
+					showChatView();
+				}
+				if (imageUpload) {
+					imageUpload.click();
+				}
+			});
+		}
+
+		const menuAttachFile = document.getElementById('menu-attach-file');
+		if (menuAttachFile) {
+			menuAttachFile.addEventListener('click', () => {
+				addMenuDropdown.classList.add('hidden');
+				vscode.postMessage({ type: 'requestOpenDialog' });
+			});
+		}
+	}
+
+	// Image upload logic
+	if (imageUpload) {
 		imageUpload.addEventListener('change', (e) => {
 			if (e.target.files) {
 				processImageFiles(Array.from(e.target.files));
@@ -365,9 +632,10 @@
 		if (validFiles.length === 0) return;
 
 		let pendingReads = validFiles.length;
-		if (addImageBtn) {
-			addImageBtn.disabled = true;
-			addImageBtn.classList.add('opacity-50', 'cursor-not-allowed');
+		const menuUploadImageBtn = document.getElementById('menu-upload-image');
+		if (menuUploadImageBtn) {
+			menuUploadImageBtn.disabled = true;
+			menuUploadImageBtn.classList.add('opacity-50', 'cursor-not-allowed');
 		}
 
 		for (const file of validFiles) {
@@ -383,16 +651,16 @@
 					}
 				}
 				pendingReads--;
-				if (pendingReads === 0 && addImageBtn) {
-					addImageBtn.disabled = false;
-					addImageBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+				if (pendingReads === 0 && menuUploadImageBtn) {
+					menuUploadImageBtn.disabled = false;
+					menuUploadImageBtn.classList.remove('opacity-50', 'cursor-not-allowed');
 				}
 			};
 			reader.onerror = () => {
 				pendingReads--;
-				if (pendingReads === 0 && addImageBtn) {
-					addImageBtn.disabled = false;
-					addImageBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+				if (pendingReads === 0 && menuUploadImageBtn) {
+					menuUploadImageBtn.disabled = false;
+					menuUploadImageBtn.classList.remove('opacity-50', 'cursor-not-allowed');
 				}
 			};
 			reader.readAsDataURL(file);
@@ -465,6 +733,41 @@
 
 	// Handle Enter to submit (Shift+Enter for newline)
 	chatInput.addEventListener('keydown', (e) => {
+		// Mention navigation has to win over Enter-to-submit. Handled at the top
+		// of this same listener rather than in a second one, because two
+		// listeners on the same element would race and Enter could submit the
+		// message when the user meant to accept a completion.
+		if (mentionOpen) {
+			if (e.key === 'ArrowDown') {
+				e.preventDefault();
+				mentionActiveIndex = (mentionActiveIndex + 1) % mentionItems.length;
+				highlightMention();
+				return;
+			}
+			if (e.key === 'ArrowUp') {
+				e.preventDefault();
+				mentionActiveIndex = (mentionActiveIndex - 1 + mentionItems.length) % mentionItems.length;
+				highlightMention();
+				return;
+			}
+			if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+				e.preventDefault();
+				acceptMention(mentionActiveIndex);
+				return;
+			}
+			if (e.key === 'Escape') {
+				e.preventDefault();
+				// The document-level handler below cancels the in-flight request
+				// on Escape whenever isProcessing. Without stopPropagation,
+				// dismissing the dropdown mid-stream would also kill the run.
+				e.stopPropagation();
+				closeMention();
+				return;
+			}
+			// Shift+Enter falls through: the newline is inserted, and the
+			// resulting whitespace closes the mention via syncMentionState.
+		}
+
 		if (e.key === 'Enter' && !e.shiftKey) {
 			e.preventDefault();
 			submitMessage();
@@ -528,14 +831,9 @@
 
 		const imagesToSubmit = pendingImages.length > 0 ? [...pendingImages] : undefined;
 
-		// Send message to extension host
-		vscode.postMessage({
-			type: 'submitMessage',
-			text: text,
-			images: imagesToSubmit
-		});
-
-		// Clear input
+		// Clear input. Close the mention first — its token offsets point into
+		// text that is about to disappear.
+		closeMention();
 		chatInput.value = '';
 		chatInput.style.height = 'auto';
 		pendingImages = [];
@@ -545,8 +843,27 @@
 		attachedPaths = [];
 		renderChips();
 
+		dispatchPrompt(text, imagesToSubmit);
+	}
+
+	// Send `text` to the agent as a turn of its own. Split out of
+	// submitMessage so an editor-driven prompt can bypass the composer: going
+	// through it would overwrite a draft the user is typing and sweep up chips
+	// and images they staged for a different question.
+	function dispatchPrompt(text, images) {
+		// A new turn re-opens the door to tool updates that the previous
+		// cancel closed.
+		turnCancelled = false;
+
+		// Send message to extension host
+		vscode.postMessage({
+			type: 'submitMessage',
+			text: text,
+			images: images
+		});
+
 		// Optimistically append user message
-		appendMessage(text, 'user', imagesToSubmit);
+		appendMessage(text, 'user', images);
 		pendingUserMessageText = text;
 
 		if (!isProcessing) {
@@ -645,6 +962,19 @@
 			e.preventDefault();
 			e.stopPropagation();
 		};
+
+		// Editor tab drags carry a JSON array of URI strings under
+		// `ResourceURLs` instead of a uri-list. Flatten it to the same
+		// newline-separated shape so there is one parser downstream.
+		const resourceUrlsToUriList = (raw) => {
+			if (!raw) return '';
+			try {
+				const parsed = JSON.parse(raw);
+				return Array.isArray(parsed) ? parsed.filter(u => typeof u === 'string').join('\n') : '';
+			} catch {
+				return '';
+			}
+		};
 		
 		// Prevent default on window to stop VS Code's native drop handler
 		window.addEventListener('dragover', (e) => e.preventDefault(), true);
@@ -673,41 +1003,19 @@
 		composerBox.addEventListener('drop', e => {
 			handleDrag(e);
 			composerBox.classList.remove('drag-over');
-			const uris = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+
+			// VS Code's explorer publishes text/uri-list; some sources only set
+			// text/plain. resource-urls is what the editor uses for tab drags.
+			const uris =
+				e.dataTransfer.getData('text/uri-list') ||
+				e.dataTransfer.getData('text/plain') ||
+				resourceUrlsToUriList(e.dataTransfer.getData('resourceurls'));
 			if (!uris) return;
-			
-			const isWindows = navigator.userAgentData?.platform?.toLowerCase().includes('win') || navigator.userAgent.includes('Windows');
-			const paths = uris.split('\n')
-				.map(u => u.trim())
-				.filter(u => u && !u.startsWith('#'))
-				.map(u => {
-					if (u.startsWith('file://')) {
-						let p = decodeURIComponent(u.replace(/^file:\/\/\/?/, ''));
-						if (isWindows && p.match(/^[a-zA-Z]:/)) {
-							// Already dropped leading slash via the regex above if it had exactly three slashes. 
-							// But if it had two slashes e.g. file://C:/ it would become C:/
-							// If it had three e.g. file:///C:/ the regex stripped up to 3 slashes so it also becomes C:/
-							// Wait, what if it was file:///C:/... ? `u.replace(/^file:\/\/\/?/, '')` removes `file:///`.
-							// What about UNC paths? `file://server/share` -> regex removes `file://`, leaving `server/share`. 
-							// Wait, `u.replace(/^file:\/\/\/?/, '')` removes `file:///` or `file://`.
-							// For UNC `file://server/share`, `replace` makes it `server/share`. 
-							// So we need to put `//` back for UNC on Windows? 
-							// Let's implement Will's explicit advice:
-							// "strip with /^file:\/\/\/?/ and on Windows drop the leading slash before a drive letter."
-						}
-						// Let's strictly follow Will's suggestion:
-						let p2 = decodeURIComponent(u.replace(/^file:\/\/\/?/, ''));
-						if (isWindows && p2.match(/^\/[a-zA-Z]:/)) {
-							p2 = p2.substring(1);
-						}
-						// wait, for UNC path `file://server/share`, replacing `/^file:\/\/\/?/` removes `file://`. 
-						// So it becomes `server/share`. On Windows UNC paths need `\\server\share`. 
-						// Actually vscode drop UNC path comes as `file:////server/share` or `file://server/share`.
-						// If we don't mess with it too much, let's just do exactly what Will said.
-						return p2;
-					}
-					return u;
-				});
+
+			const isWindows =
+				navigator.userAgentData?.platform?.toLowerCase().includes('win') ||
+				navigator.userAgent.includes('Windows');
+			const paths = NanocoderUriUtils.parseDropPayload(uris, isWindows);
 
 			paths.forEach(p => vscode.postMessage({ type: 'requestPathInfo', path: p }));
 		}, true);
@@ -755,7 +1063,10 @@
 		// A user message opens a new turn, so the agent segments that follow get
 		// a fresh id. The raw-text accumulator is handed over lazily, once the
 		// new response produces text.
-		if (role === 'user') agentTurnId++;
+		if (role === 'user') {
+			agentTurnId++;
+			currentTurnFooter = null;
+		}
 
 		const wrapper = document.createElement('div');
 		wrapper.className = 'group flex flex-col min-w-0 shrink-0 ' +
@@ -943,8 +1254,15 @@
 
 			msgEl.appendChild(textContainer);
 			wrapper.appendChild(msgEl);
-			wrapper.appendChild(createMessageFooter(() => wrapper.dataset.rawText || '', 'agent', new Date()));
-			wrapper.dataset.rawText = currentTurnText;
+			if (currentTurnFooter) {
+				currentTurnFooter.remove();
+			} else {
+				// captures footer, not currentTurnFooter - avoids copying the next turn's text
+				const footer = createMessageFooter(() => footer.dataset.rawText || '', 'agent', new Date());
+				currentTurnFooter = footer;
+			}
+			currentTurnFooter.dataset.rawText = lastAgentRawText;
+			wrapper.appendChild(currentTurnFooter);
 			messagesContainer.appendChild(wrapper);
 
 			currentTurnEl = msgEl;
@@ -954,8 +1272,8 @@
 			// Append to existing turn
 			currentTurnText += textChunk;
 			syncLastAgentRawText();
-			if (currentTurnEl.parentElement) {
-				currentTurnEl.parentElement.dataset.rawText = currentTurnText;
+			if (currentTurnFooter) {
+				currentTurnFooter.dataset.rawText = lastAgentRawText;
 			}
 
 			if (typeof marked !== 'undefined') {
@@ -1111,6 +1429,16 @@
 			case 'toggleHistory':
 				toggleHistoryView();
 				break;
+			case 'mentionCompletions': {
+				// postMessage delivery is async and can land out of order, so a
+				// fast typist gets responses for stale queries. Only the newest
+				// request may paint, otherwise the list flickers backwards.
+				if (message.requestId !== mentionRequestId) break;
+				mentionItems = Array.isArray(message.items) ? message.items : [];
+				mentionActiveIndex = 0;
+				renderMentionDropdown();
+				break;
+			}
 			case 'pathInfoResolved': {
 				const { path, name, kind } = message;
 				if (!attachedPaths.some(a => a.path === path)) {
@@ -1125,7 +1453,8 @@
 			case 'clear':
 				// Session reset (new chat or resume) should return to the active
 				// chat view, not leave the panel stuck on the history list.
-				showChatView();
+				if (isHistoryView) showChatView();
+				if (isSettingsView) hideSettingsView();
 				if (renderTimeout) { clearTimeout(renderTimeout); renderTimeout = null; }
 				if (message.isLoading) {
 					messagesContainer.innerHTML = `<div id="session-loader" class="flex flex-col items-center justify-center h-full opacity-50 mt-10">${ICONS.pending}<div class="mt-2 text-xs">Loading session...</div></div>`;
@@ -1135,6 +1464,9 @@
 				currentTurnEl = null;
 				currentTextEl = null;
 				currentTurnText = '';
+				currentTurnFooter = null;
+				toolKinds.clear();
+				turnCancelled = false;
 				agentTurnId = 0;
 				lastAgentRawTurnId = -1;
 				lastAgentSegments = '';
@@ -1146,6 +1478,10 @@
 				setProcessing(false);
 				break;
 			case 'sessionLoaded':
+				if (currentThoughtBox) {
+					currentThoughtBox.pause();
+					currentThoughtBox = null;
+				}
 				const loader = document.getElementById('session-loader');
 				if (loader) loader.remove();
 				scrollToBottom();
@@ -1159,13 +1495,28 @@
 			case 'permissionsCancelled':
 				handlePermissionsCancelled(message.toolCallIds);
 				break;
-
+			case 'toggleSettings':
+				toggleSettingsView();
+				break;
+			case 'settingsData':
+				renderSettingsData(message.settings);
+				break;
+			case 'settingsUpdated':
+				if (!message.success) {
+					console.error('Failed to update setting:', message.error);
+				}
+				break;
 			case 'syncState':
 				handleSyncState(message);
 				break;
 			case 'updateSessions':
 				sessionsData = message.sessions || [];
 				renderSessions(); // Always update so list is ready when history opens
+				break;
+			case 'runPrompt':
+				if (isHistoryView) showChatView();
+				dispatchPrompt(message.text);
+				chatInput.focus();
 				break;
 			case 'copyLastCodeBlock':
 				copyLastCodeBlock();
@@ -1356,11 +1707,29 @@
 		syncLastAgentRawText();
 	}
 
+	function aggregatorHasPendingTools(aggregator) {
+		for (const item of aggregator.toolItems.values()) {
+			if (item.dataset.pending === 'true') return true;
+		}
+		return false;
+	}
+
+	function closeAggregatorIfIdle() {
+		if (currentAggregator && !aggregatorHasPendingTools(currentAggregator)) {
+			currentAggregator.close();
+			currentAggregator = null;
+		}
+	}
+
 	function handleAcpUpdate(payload) {
 		if (!payload) return;
 		const update = payload.update ? payload.update : payload;
 
 		if (update.sessionUpdate === 'user_message_chunk') {
+			if (currentThoughtBox) {
+				currentThoughtBox.pause();
+				currentThoughtBox = null;
+			}
 			if (update.content) {
 				endCurrentTextBlock();
 				if (update.content.text) {
@@ -1373,32 +1742,33 @@
 			}
 		} else if (update.sessionUpdate === 'agent_message_chunk') {
 			if (currentThoughtBox) {
-				currentThoughtBox.finish();
-				currentThoughtBox = null;
+				currentThoughtBox.pause();
 			}
+			closeAggregatorIfIdle();
 			if (update.content && update.content.text) {
 				stopVisualLoader();
 				appendChunk(update.content.text);
 			}
 		} else if (update.sessionUpdate === 'agent_thought_chunk') {
-			if (!currentThoughtBox) {
-				endCurrentTextBlock();
-				currentThoughtBox = new ThoughtAggregator();
-			}
-			if (update.content && update.content.text) {
-				currentThoughtBox.append(update.content.text);
+			const thoughtText = update.content && update.content.text;
+			if (thoughtText && (currentThoughtBox || thoughtText.trim())) {
+				if (!currentThoughtBox) {
+					endCurrentTextBlock();
+					currentThoughtBox = new ThoughtAggregator();
+					closeAggregatorIfIdle();
+				}
+				currentThoughtBox.append(thoughtText);
 			}
 		} else if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
 			if (currentThoughtBox) {
-				currentThoughtBox.finish();
-				currentThoughtBox = null;
+				currentThoughtBox.pause();
 			}
 			handleToolCallUpdate(update);
 		} else if (update.sessionUpdate === 'plan') {
 			handlePlanUpdate(update);
 		} else if (update.sessionUpdate === 'prompt_response' || update.sessionUpdate === 'done') {
 			if (currentThoughtBox) {
-				currentThoughtBox.finish();
+				currentThoughtBox.pause();
 				currentThoughtBox = null;
 			}
 			// Show token usage (and estimated cost) for the finished turn
@@ -1409,10 +1779,215 @@
 		keepVisualLoaderAtBottom();
 	}
 
+	// ─── Settings Panel Logic ───────────────────────────────────────
+
+	let isSettingsView = false;
+
+	function showSettingsView() {
+		isSettingsView = true;
+		isHistoryView = false;
+		document.getElementById('chat-view').classList.add('hidden');
+		document.getElementById('history-view').classList.add('hidden');
+		document.getElementById('settings-view').classList.remove('hidden');
+		// Request fresh settings data from extension host
+		vscode.postMessage({ type: 'requestSettings' });
+	}
+
+	function hideSettingsView() {
+		isSettingsView = false;
+		document.getElementById('settings-view').classList.add('hidden');
+		showChatView();
+	}
+
+	function toggleSettingsView() {
+		if (isSettingsView) {
+			hideSettingsView();
+		} else {
+			showSettingsView();
+		}
+	}
+
+	// Settings tab switching
+	document.querySelectorAll('.settings-tab').forEach(tab => {
+		tab.addEventListener('click', () => {
+			document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+			tab.classList.add('active');
+			const tabId = tab.dataset.tab;
+			document.querySelectorAll('.settings-tab-content').forEach(c => c.classList.add('hidden'));
+			const content = document.getElementById('settings-tab-' + tabId);
+			if (content) content.classList.remove('hidden');
+		});
+	});
+
+	// Settings action buttons (edit config, restart, etc.)
+	document.querySelectorAll('.settings-action-btn').forEach(btn => {
+		btn.addEventListener('click', () => {
+			const action = btn.dataset.action;
+			if (action === 'edit-mcp') {
+				// MCP servers live in .mcp.json, not agents.config.json.
+				vscode.postMessage({ type: 'openConfigFile', file: '.mcp.json' });
+			} else if (action === 'edit-providers' || action === 'edit-tools' || action === 'open-agents-config') {
+				vscode.postMessage({ type: 'openConfigFile', file: 'agents.config.json' });
+			} else if (action === 'open-preferences') {
+				vscode.postMessage({ type: 'openConfigFile', file: 'nanocoder-preferences.json' });
+			} else if (action === 'restart-acp') {
+				vscode.postMessage({ type: 'restartAcp' });
+			}
+		});
+	});
+
+	// Behavior tab — interactive controls change handlers
+	function initSettingsControls() {
+		// Default mode
+		const modeSelect = document.getElementById('setting-defaultMode');
+		if (modeSelect) {
+			modeSelect.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'defaultMode', value: modeSelect.value || null });
+			});
+		}
+
+		// Auto-compact enabled
+		const acEnabled = document.getElementById('setting-autoCompact-enabled');
+		if (acEnabled) {
+			acEnabled.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'autoCompact.enabled', value: acEnabled.checked });
+			});
+		}
+
+		// Auto-compact threshold
+		const acThreshold = document.getElementById('setting-autoCompact-threshold');
+		if (acThreshold) {
+			acThreshold.addEventListener('change', () => {
+				const val = parseInt(acThreshold.value, 10);
+				if (!isNaN(val) && val >= 50 && val <= 95) {
+					vscode.postMessage({ type: 'updateSetting', key: 'autoCompact.threshold', value: val });
+				}
+			});
+		}
+
+		// Auto-compact mode
+		const acMode = document.getElementById('setting-autoCompact-mode');
+		if (acMode) {
+			acMode.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'autoCompact.mode', value: acMode.value });
+			});
+		}
+
+		// Reasoning traces
+		const rtToggle = document.getElementById('setting-reasoningTraces');
+		if (rtToggle) {
+			rtToggle.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'reasoningTraces', value: rtToggle.checked });
+			});
+		}
+
+		// Sessions auto-save
+		const saToggle = document.getElementById('setting-sessions-autoSave');
+		if (saToggle) {
+			saToggle.addEventListener('change', () => {
+				vscode.postMessage({ type: 'updateSetting', key: 'sessions.autoSave', value: saToggle.checked });
+			});
+		}
+	}
+	initSettingsControls();
+
+	/**
+	 * Populate the settings UI with data received from the extension host.
+	 */
+	function renderSettingsData(settings) {
+		// ── Providers list ──
+		const providersList = document.getElementById('settings-providers-list');
+		if (providersList) {
+			if (settings.providers.length === 0) {
+				providersList.innerHTML = '<div class="settings-list-empty">No providers configured</div>';
+			} else {
+				providersList.innerHTML = settings.providers.map(p => {
+					const detail = p.baseUrl || 'default endpoint';
+					const models = p.models.length > 0
+						? p.models[0] + (p.models.length > 1 ? ` +${p.models.length - 1}` : '')
+						: 'no models';
+					const keyBadge = p.apiKeySet
+						? '<span class="settings-badge settings-badge-ok">Key ✓</span>'
+						: '<span class="settings-badge settings-badge-off">No key</span>';
+					return `<div class="settings-list-item">
+						<span class="settings-list-item-name">${escapeHtml(p.name)}</span>
+						<span class="settings-list-item-detail">${escapeHtml(detail)} · ${escapeHtml(models)}</span>
+						${keyBadge}
+					</div>`;
+				}).join('');
+			}
+		}
+
+		// ── MCP Servers list ──
+		const mcpList = document.getElementById('settings-mcp-list');
+		if (mcpList) {
+			if (settings.mcpServers.length === 0) {
+				mcpList.innerHTML = '<div class="settings-list-empty">No MCP servers configured</div>';
+			} else {
+				mcpList.innerHTML = settings.mcpServers.map(s => {
+					const detail = s.command || s.url || '(no endpoint)';
+					return `<div class="settings-list-item">
+						<span class="settings-list-item-name">${escapeHtml(s.name)}</span>
+						<span class="settings-list-item-detail">${escapeHtml(s.transport)} · ${escapeHtml(detail)}</span>
+					</div>`;
+				}).join('');
+			}
+		}
+
+		// ── Tool auto-approval list ──
+		const toolsList = document.getElementById('settings-tools-list');
+		if (toolsList) {
+			if (settings.alwaysAllow.length === 0) {
+				toolsList.innerHTML = '<div class="settings-list-empty">No tools auto-approved</div>';
+			} else {
+				toolsList.innerHTML = settings.alwaysAllow.map(t =>
+					`<div class="settings-list-item">
+						<span class="settings-list-item-name">${escapeHtml(t)}</span>
+					</div>`
+				).join('');
+			}
+		}
+
+		// ── Web search status ──
+		const wsStatus = document.getElementById('settings-websearch-status');
+		if (wsStatus) {
+			wsStatus.innerHTML = settings.webSearch.configured
+				? '<div class="settings-list-item"><span class="settings-badge settings-badge-ok">API key configured ✓</span></div>'
+				: '<div class="settings-list-item"><span class="settings-badge settings-badge-off">Not configured</span></div>';
+		}
+
+		// ── Behavior controls ──
+		const modeSelect = document.getElementById('setting-defaultMode');
+		if (modeSelect) modeSelect.value = settings.defaultMode || 'normal';
+
+		const acEnabled = document.getElementById('setting-autoCompact-enabled');
+		if (acEnabled) acEnabled.checked = settings.autoCompact.enabled;
+
+		const acThreshold = document.getElementById('setting-autoCompact-threshold');
+		if (acThreshold) acThreshold.value = settings.autoCompact.threshold;
+
+		const acMode = document.getElementById('setting-autoCompact-mode');
+		if (acMode) acMode.value = settings.autoCompact.mode;
+
+		const rtToggle = document.getElementById('setting-reasoningTraces');
+		if (rtToggle) rtToggle.checked = settings.reasoningTraces;
+
+		const saToggle = document.getElementById('setting-sessions-autoSave');
+		if (saToggle) saToggle.checked = settings.sessions.autoSave;
+	}
+
+	function escapeHtml(str) {
+		const div = document.createElement('div');
+		div.textContent = str;
+		return div.innerHTML;
+	}
+
+	// ─── End Settings Panel Logic ───────────────────────────────────
+
 	class ThoughtAggregator {
 		constructor() {
 			this.el = document.createElement('div');
-			this.el.className = 'my-2 flex flex-col shrink-0';
+			this.el.className = 'my-2 flex flex-col shrink-0 thought-aggregator';
 
 			this.header = document.createElement('div');
 			this.header.className = 'flex items-center gap-1.5 cursor-pointer opacity-70 text-vscode-fg hover:opacity-100 transition-opacity select-none w-fit';
@@ -1436,9 +2011,11 @@
 			this.el.appendChild(this.body);
 
 			this.isOpen = true;
-			this.startTime = Date.now();
+			this.userToggled = false;
 			this.text = '';
 			this.renderTimeout = null;
+			this.thinkingMs = 0;
+			this.segmentStart = Date.now();
 
 			this.timer = setInterval(() => this.updateTimer(), 1000);
 
@@ -1446,12 +2023,19 @@
 			scrollToBottom();
 		}
 
+		elapsedSeconds() {
+			const active = this.segmentStart ? Date.now() - this.segmentStart : 0;
+			return Math.floor((this.thinkingMs + active) / 1000);
+		}
+
 		updateTimer() {
-			const seconds = Math.floor((Date.now() - this.startTime) / 1000);
-			this.title.textContent = `Thinking for ${seconds}s`;
+			this.title.textContent = `Thinking for ${this.elapsedSeconds()}s`;
 		}
 
 		toggle(force) {
+			if (force === undefined) {
+				this.userToggled = true;
+			}
 			this.isOpen = force !== undefined ? force : !this.isOpen;
 			this.body.style.display = this.isOpen ? 'block' : 'none';
 
@@ -1461,34 +2045,59 @@
 			}
 		}
 
+		render() {
+			if (typeof marked !== 'undefined') {
+				this.body.innerHTML = marked.parse(this.text);
+			} else {
+				this.body.textContent = this.text;
+			}
+		}
+
 		append(chunk) {
+			this.resume();
 			this.text += chunk;
 			if (typeof marked !== 'undefined') {
 				if (!this.renderTimeout) {
 					this.renderTimeout = setTimeout(() => {
-						this.body.innerHTML = marked.parse(this.text);
+						this.render();
 						this.renderTimeout = null;
 						scrollToBottom();
 					}, 50);
 				}
 			} else {
-				this.body.textContent = this.text;
+				this.render();
 				scrollToBottom();
 			}
 		}
 
-		finish() {
+		resume() {
+			if (this.segmentStart) return;
+			if (this.text && !this.text.endsWith('\n\n')) {
+				this.text += '\n\n';
+			}
+			this.segmentStart = Date.now();
+			this.timer = setInterval(() => this.updateTimer(), 1000);
+			this.updateTimer();
+			if (!this.userToggled) {
+				this.toggle(true);
+			}
+		}
+
+		pause() {
+			if (!this.segmentStart) return;
+			this.thinkingMs += Date.now() - this.segmentStart;
+			this.segmentStart = null;
 			clearInterval(this.timer);
+			this.timer = null;
 			if (this.renderTimeout) {
 				clearTimeout(this.renderTimeout);
 				this.renderTimeout = null;
 			}
-			if (typeof marked !== 'undefined') {
-				this.body.innerHTML = marked.parse(this.text);
+			this.render();
+			this.title.textContent = `Thought for ${this.elapsedSeconds()}s`;
+			if (!this.userToggled) {
+				this.toggle(false);
 			}
-			const seconds = Math.floor((Date.now() - this.startTime) / 1000);
-			this.title.textContent = `Thought for ${seconds}s`;
-			this.toggle(false); // Auto-shrink when done!
 		}
 	}
 
@@ -1524,8 +2133,8 @@
 			messagesContainer.appendChild(this.el);
 		}
 
-		toggle() {
-			this.isOpen = !this.isOpen;
+		toggle(force) {
+			this.isOpen = force !== undefined ? force : !this.isOpen;
 			this.body.style.display = this.isOpen ? '' : 'none';
 
 			const svg = this.chevron.querySelector('svg');
@@ -1536,15 +2145,6 @@
 
 		close() {
 			this.toggle(false);
-		}
-
-		cancelPending() {
-			for (const [id, item] of this.toolItems.entries()) {
-				const statusEl = item.querySelector('.tool-status');
-				if (statusEl && statusEl.innerHTML.includes('animate-spin')) {
-					statusEl.innerHTML = ICONS.cancelled;
-				}
-			}
 		}
 
 		updateTitle() {
@@ -1570,7 +2170,7 @@
 
 				const label = document.createElement('span');
 				label.className = 'tool-label flex-1 break-words leading-relaxed';
-				label.textContent = update.title || update.name || 'Tool Call';
+				label.textContent = humanizeToolTitle(update.title);
 
 				headerRow.appendChild(status);
 				headerRow.appendChild(label);
@@ -1582,26 +2182,36 @@
 			} else {
 				if (update.title) {
 					const labelEl = item.querySelector('.tool-label');
-					if (labelEl) labelEl.textContent = update.title;
+					if (labelEl) labelEl.textContent = humanizeToolTitle(update.title);
 				}
 			}
 
 			const statusEl = item.querySelector('.tool-status');
 			if (statusEl) {
+				statusEl.dataset.status = update.status || 'pending';
 				if (update.status === 'success' || update.status === 'completed') {
 					statusEl.innerHTML = ICONS.success;
+					item.dataset.pending = 'false';
 				} else if (
 					update.status === 'cancelled' ||
 					update.status === 'denied' ||
 					// ACP has no 'cancelled' status, so a cancel arrives as failed with
 					// 'Cancelled by user'. Case-insensitive, or the capital C misses.
-					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && /aborterror|cancelled/i.test(update.rawOutput))
+					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && /aborterror|cancelled|denied/i.test(update.rawOutput))
 				) {
 					statusEl.innerHTML = ICONS.cancelled;
+					item.dataset.pending = 'false';
 				} else if (update.status === 'error' || update.status === 'failed') {
 					statusEl.innerHTML = ICONS.error;
+					item.dataset.pending = 'false';
+				} else if (update.status === 'pending') {
+					// Queued, not yet running - still unfinished, so the
+					// aggregator must stay open for it.
+					statusEl.innerHTML = ICONS.circle;
+					item.dataset.pending = 'true';
 				} else {
 					statusEl.innerHTML = ICONS.pending;
+					item.dataset.pending = 'true';
 				}
 			}
 
@@ -1614,7 +2224,7 @@
 	// carries the complete replacement list, so the card is rebuilt in place.
 	function handlePlanUpdate(update) {
 		const entries = Array.isArray(update.entries) ? update.entries : [];
-		let card = document.getElementById('plan-card');
+		let card = document.getElementById(`plan-card-${agentTurnId}`);
 
 		if (entries.length === 0) {
 			if (card) card.remove();
@@ -1623,8 +2233,9 @@
 
 		if (!card) {
 			endCurrentTextBlock();
+			closeAggregatorIfIdle();
 			card = document.createElement('div');
-			card.id = 'plan-card';
+			card.id = `plan-card-${agentTurnId}`;
 			card.className = 'my-3 border border-vscode-widget-border rounded bg-vscode-widget-bg overflow-hidden shrink-0';
 
 			const header = document.createElement('div');
@@ -1635,23 +2246,21 @@
 			title.textContent = 'Tasks';
 
 			const progress = document.createElement('span');
-			progress.id = 'plan-progress';
-			progress.className = 'ml-auto font-vscode text-[0.8em] opacity-60';
+			progress.className = 'plan-progress ml-auto font-vscode text-[0.8em] opacity-60';
 
 			header.appendChild(title);
 			header.appendChild(progress);
 			card.appendChild(header);
 
 			const body = document.createElement('div');
-			body.id = 'plan-body';
-			body.className = 'flex flex-col';
+			body.className = 'plan-body flex flex-col';
 			card.appendChild(body);
 
 			messagesContainer.appendChild(card);
 			scrollToBottom();
 		}
 
-		const body = card.querySelector('#plan-body');
+		const body = card.querySelector('.plan-body');
 		body.innerHTML = '';
 
 		let done = 0;
@@ -1678,13 +2287,20 @@
 			body.appendChild(row);
 		}
 
-		const progressEl = card.querySelector('#plan-progress');
+		const progressEl = card.querySelector('.plan-progress');
 		if (progressEl) progressEl.textContent = `${done}/${entries.length}`;
 	}
 
 	function handleToolCallUpdate(update) {
 		const toolCallId = update.toolCallId || (update.toolCall && update.toolCall.toolCallId);
 		if (!toolCallId) return;
+
+		// Post-cancel trailing updates: a tool that was mid-flight when Stop was
+		// pressed still reports its outcome, and the calls queued behind it
+		// report as cancelled. setProcessing(false) already marked every
+		// unfinished card cancelled, so rendering these would either revive a
+		// spinner or open a fresh group for work the user just stopped.
+		if (turnCancelled) return;
 
 		// A new card is about to be inserted below the current text block -
 		// close the block so any text streamed after the tool starts fresh
@@ -1693,18 +2309,17 @@
 			endCurrentTextBlock();
 		}
 
-		const toolName = update.name || (update.toolCall && update.toolCall.name) || '';
-		const isMutating = ['replace_file_content', 'multi_replace_file_content', 'write_to_file', 'write_file'].includes(toolName);
+		if (update.kind) toolKinds.set(toolCallId, update.kind);
 
-		if (isMutating) {
+		if (toolKinds.get(toolCallId) === 'edit') {
 			let card = document.getElementById(`tool-card-${toolCallId}`);
 			if (!card) {
+				closeAggregatorIfIdle();
 				card = createEditCard(toolCallId, update);
 				messagesContainer.appendChild(card);
 				scrollToBottom();
-			} else {
-				updateEditCard(card, update);
 			}
+			updateEditCard(card, update);
 		} else {
 			if (!currentAggregator) {
 				currentAggregator = new ToolAggregator();
@@ -1713,12 +2328,89 @@
 		}
 	}
 
+	// Verb per tool for the aggregated tool list. An entry only fires when the
+	// tool's ACP title is "<name>: <target>", which humanizeToolTitle splits on.
+	// Two families are deliberately absent: fetch_url / web_search take a
+	// url/query rather than a path, so their title is the bare tool name; and
+	// string_replace / write_file report ACP kind 'edit', so they render as edit
+	// cards and never reach this list.
+	const TOOL_VERBS = {
+		read_file: 'Reading',
+		list_directory: 'Listing',
+		find_files: 'Finding files in',
+		search_file_contents: 'Searching',
+		execute_bash: 'Running',
+		lsp_get_diagnostics: 'Checking diagnostics in',
+	};
+
+	// Action label per resolved status, rendered as "<action> <filename>".
+	const EDIT_ACTIONS = {
+		pending: 'Edit',
+		in_progress: 'Editing',
+		completed: 'Edited',
+		failed: 'Failed to edit',
+		cancelled: 'Cancelled edit to',
+		denied: 'Denied edit to',
+	};
+
+	// Icon bucket per resolved status.
+	const EDIT_TONES = {
+		pending: 'circle',
+		in_progress: 'pending',
+		completed: 'success',
+		failed: 'error',
+		cancelled: 'cancelled',
+		denied: 'cancelled',
+	};
+
+	function humanizeToolTitle(title) {
+		if (!title) return 'Tool Call';
+		const sep = title.indexOf(': ');
+		if (sep === -1) return title;
+		const name = title.slice(0, sep);
+		if (!Object.hasOwn(TOOL_VERBS, name)) return title;
+		return `${TOOL_VERBS[name]} ${title.slice(sep + 2)}`;
+	}
+
 	function extractFileName(title) {
 		if (!title) return 'File';
-		const parts = title.split('/');
+		const sep = title.indexOf(': ');
+		const parts = (sep === -1 ? title : title.slice(sep + 2)).split('/');
 		let last = parts[parts.length - 1];
 		last = last.split('\\').pop();
 		return last.replace(/['"]+$/g, '').trim();
+	}
+
+	// True when this update carries a diff the extension host would have handed
+	// to DiffManager. Mirrors handleDiffs in chat-webview-provider.ts so the
+	// panel only offers "Open Diff" once the change is actually registered.
+	function hasDiffContent(update) {
+		if (!update || !Array.isArray(update.content)) return false;
+		return update.content.some(block => !!block && block.type === 'diff' && !!block.path);
+	}
+
+	// Resolve an edit card's label and icon from an update. The agent reports a
+	// user cancel or deny as 'failed' with an explanatory rawOutput, so those are
+	// separated back out here rather than all reading as an error.
+	function resolveEditCardState(update) {
+		let status = (update && update.status) || 'pending';
+		if (status === 'success') status = 'completed';
+		if (status === 'error') status = 'failed';
+
+		if (status === 'failed') {
+			const raw = update && typeof update.rawOutput === 'string' ? update.rawOutput : '';
+			if (/denied/i.test(raw)) status = 'denied';
+			else if (/cancel|AbortError/i.test(raw)) status = 'cancelled';
+		}
+
+		if (!Object.hasOwn(EDIT_ACTIONS, status)) status = 'pending';
+		return {status, action: EDIT_ACTIONS[status], tone: EDIT_TONES[status]};
+	}
+
+	// True once a card has reached a terminal state and its approval buttons
+	// should come down.
+	function isSettled(status) {
+		return status !== 'pending' && status !== 'in_progress';
 	}
 
 	function getFileColor(filename) {
@@ -1733,26 +2425,35 @@
 
 	function createEditCard(toolCallId, update) {
 		const card = document.createElement('div');
-		card.className = 'my-2 flex items-center justify-between px-3 py-2 border border-vscode-widget-border rounded bg-vscode-editor-bg cursor-pointer hover:bg-vscode-list-hover group tool-card';
+		card.className = 'my-2 border border-vscode-widget-border rounded bg-vscode-editor-bg overflow-hidden group tool-card';
 		card.id = `tool-card-${toolCallId}`;
-		card.onclick = () => vscode.postMessage({ type: 'showDiff', toolCallId });
+
+		const row = document.createElement('div');
+		row.className = 'tool-card-row flex items-center justify-between px-3 py-2';
+		// Guarded rather than unbound: the card is created from the queued
+		// announcement, which carries no content, so DiffManager has nothing
+		// registered under this id until the call is about to run. Clicking in
+		// that window - the whole approval wait - raised "Change <id> not found".
+		row.onclick = () => {
+			if (card.dataset.hasDiff !== 'true') return;
+			vscode.postMessage({ type: 'showDiff', toolCallId });
+		};
 
 		const left = document.createElement('div');
 		left.className = 'flex items-center gap-2 font-vscode text-[0.9em]';
 
 		const status = document.createElement('span');
-		status.className = 'ml-auto flex items-center justify-center';
-		status.innerHTML = ICONS.pending;
+		status.className = 'tool-status ml-auto flex items-center justify-center';
 
 		const label = document.createElement('span');
 		label.className = 'flex items-center gap-1.5';
 
-		const filename = extractFileName(update.title || update.name);
+		const filename = extractFileName(update.title);
 		const fileColor = getFileColor(filename);
 
+		// Text is filled in by updateEditCard, which runs immediately after.
 		const actionText = document.createElement('span');
-		actionText.textContent = 'Edited';
-		actionText.className = 'opacity-80';
+		actionText.className = 'tool-card-action opacity-80';
 
 		const nameText = document.createElement('span');
 		nameText.className = `font-semibold ${fileColor}`;
@@ -1763,29 +2464,54 @@
 
 		left.appendChild(status);
 		left.appendChild(label);
-		card.appendChild(left);
+		row.appendChild(left);
 
 		const right = document.createElement('div');
 		right.className = 'flex items-center gap-2';
 
 		const hoverBtn = document.createElement('span');
-		hoverBtn.className = 'opacity-0 group-hover:opacity-100 transition-opacity bg-vscode-button-secondary text-vscode-fg px-2 py-0.5 rounded text-[0.85em]';
+		hoverBtn.className = 'tool-card-diff-btn hidden transition-opacity bg-vscode-button-secondary text-vscode-fg px-2 py-0.5 rounded text-[0.85em]';
 		hoverBtn.textContent = 'Open Diff';
 
 		right.appendChild(hoverBtn);
-		card.appendChild(right);
+		row.appendChild(right);
+		card.appendChild(row);
 
 		return card;
 	}
 
-	function updateEditCard(el, update) {
-		const statusEl = el.querySelector('.ml-auto');
-		if (statusEl) {
-			if (update.status === 'success' || update.status === 'completed') statusEl.innerHTML = ICONS.success;
-			else if (update.status === 'error') statusEl.innerHTML = ICONS.error;
-			else if (update.status === 'cancelled' || update.status === 'denied') statusEl.innerHTML = ICONS.cancelled;
+	// Reveal the diff affordance once the extension host has a change
+	// registered for this card - see hasDiffContent.
+	function setEditCardDiffAvailable(el) {
+		if (el.dataset.hasDiff === 'true') return;
+		el.dataset.hasDiff = 'true';
+
+		const row = el.querySelector('.tool-card-row');
+		if (row) row.classList.add('cursor-pointer', 'hover:bg-vscode-list-hover');
+
+		const btn = el.querySelector('.tool-card-diff-btn');
+		if (btn) {
+			btn.classList.remove('hidden');
+			btn.classList.add('opacity-0', 'group-hover:opacity-100');
 		}
-		if (update.status === 'success' || update.status === 'completed' || update.status === 'error' || update.status === 'cancelled' || update.status === 'denied') {
+	}
+
+	function updateEditCard(el, update) {
+		const state = resolveEditCardState(update);
+
+		const statusEl = el.querySelector('.tool-status');
+		if (statusEl) {
+			statusEl.dataset.status = state.status;
+			statusEl.innerHTML = ICONS[state.tone];
+		}
+
+		// "Edit foo.ts" while queued, "Edited foo.ts" once it has run.
+		const actionEl = el.querySelector('.tool-card-action');
+		if (actionEl) actionEl.textContent = state.action;
+
+		if (hasDiffContent(update)) setEditCardDiffAvailable(el);
+
+		if (isSettled(state.status)) {
 			const actions = el.querySelector('.tool-actions');
 			if (actions) actions.remove();
 		}

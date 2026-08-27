@@ -10,6 +10,12 @@ export interface AssistantMessageProps {
 	 * client-side token estimate of the message text.
 	 */
 	usage?: ResponseUsage;
+	/**
+	 * Whether to render the gray usage footer at all. Defaults to true;
+	 * set false by the `showUsageFooter` user preference, which drops the
+	 * footer line (both the provider-reported form and the estimate).
+	 */
+	showUsageFooter?: boolean;
 }
 
 export interface AssistantReasoningProps {

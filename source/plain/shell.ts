@@ -191,12 +191,10 @@ export async function runPlainShell(
 		const exitCode =
 			outcome.kind === 'success' ? 0 : outcome.kind === 'error' ? 1 : 2;
 
-		const mutatingTools = [
-			'write_to_file',
-			'create_file',
-			'string_replace',
-			'edit_file',
-		];
+		// Must match the registered names in source/tools/file-ops/. Any name
+		// listed here that isn't a real tool silently drops its edits from
+		// `filesChanged`.
+		const mutatingTools = ['write_file', 'string_replace', 'diff_edit'];
 		const filesChangedSet = new Set<string>();
 
 		const formattedToolCalls = (outcome.toolCalls || []).map(tc => {
