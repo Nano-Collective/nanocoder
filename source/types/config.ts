@@ -114,6 +114,10 @@ export interface SystemPromptConfig {
 export interface NotificationsConfig {
 	enabled: boolean;
 	sound?: boolean;
+	// Emit a terminal bell (BEL) alongside the desktop notification. Unlike the
+	// native notifiers it reaches the terminal itself, so it still lands over SSH
+	// or inside tmux.
+	bell?: boolean;
 	timeout?: number;
 	events?: {
 		toolConfirmation?: boolean;
