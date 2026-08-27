@@ -11,7 +11,10 @@ export interface WebSessionLoadResult {
 }
 
 export interface WebRuntimeHandlers {
-	submitMessage: (text: string) => void | Promise<void>;
+	submitMessage: (
+		text: string,
+		images?: {data: string; mediaType: string}[],
+	) => void | Promise<void>;
 	cancel: () => void;
 	resetSession: () => void | Promise<void>;
 	listSessions: () => Promise<WebSessionSummary[]>;
@@ -254,7 +257,10 @@ export function createWebRuntimeBridge(
 			previousAssistantContent = '';
 
 			try {
-				const submission = runtimeHandlers.submitMessage(event.text);
+				const submission = runtimeHandlers.submitMessage(
+					event.text,
+					event.images,
+				);
 				void Promise.resolve(submission).then(
 					() => completeActiveTurn(event.id),
 					error => failActiveTurn(error, event.id),

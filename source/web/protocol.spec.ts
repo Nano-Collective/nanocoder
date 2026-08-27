@@ -48,7 +48,7 @@ test('parseWebClientEvent still accepts the phase 4 handshake events', t => {
 				text: 'hello',
 			}),
 		),
-		{type: 'user_message', id: 'turn-1', text: 'hello'},
+		{id: 'turn-1', text: 'hello', type: 'user_message', images: undefined},
 	);
 });
 

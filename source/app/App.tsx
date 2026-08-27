@@ -523,12 +523,16 @@ export default function App({
 		}
 
 		return webRuntimeBridge.bindRuntimeHandlers({
-			submitMessage: message => {
+			submitMessage: (message, images) => {
 				if (webRuntimeStateRef.current.isGenerating) {
 					throw new Error('Nanocoder is already processing a turn.');
 				}
 
-				return webRuntimeStateRef.current.submitMessage(message);
+				return webRuntimeStateRef.current.submitMessage(
+					message,
+					undefined,
+					images,
+				);
 			},
 			cancel: () => webRuntimeStateRef.current.cancel(),
 			resetSession: () => {

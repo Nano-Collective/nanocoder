@@ -10,11 +10,17 @@ export interface WebSessionSummary {
 export interface WebSessionMessage {
 	role: 'user' | 'assistant';
 	content: string;
+	images?: {data: string; mediaType: string}[];
 }
 
 export type WebClientEvent =
 	| {type: 'hello'; protocolVersion: typeof WEB_PROTOCOL_VERSION}
-	| {type: 'user_message'; id: string; text: string}
+	| {
+			type: 'user_message';
+			id: string;
+			text: string;
+			images?: {data: string; mediaType: string}[];
+	  }
 	| {type: 'cancel'; id: string}
 	| {type: 'approval_response'; id: string; approved: boolean}
 	| {type: 'question_response'; id: string; answer: string}
@@ -83,10 +89,28 @@ export function parseWebClientEvent(rawMessage: string): WebClientEvent {
 				throw new Error('User message text is required.');
 			}
 
+			if (
+				parsed.images !== undefined &&
+				(!Array.isArray(parsed.images) ||
+					!parsed.images.every(
+						(img: unknown) =>
+							isRecord(img) &&
+							typeof img.data === 'string' &&
+							typeof img.mediaType === 'string',
+					))
+			) {
+				throw new Error(
+					'User message images must be an array of image objects.',
+				);
+			}
+
 			return {
 				type: 'user_message',
 				id: parsed.id,
 				text: parsed.text,
+				images: parsed.images as
+					| {data: string; mediaType: string}[]
+					| undefined,
 			};
 		case 'cancel':
 			if (typeof parsed.id !== 'string' || parsed.id.length === 0) {

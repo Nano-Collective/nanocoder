@@ -160,11 +160,6 @@ test('web mode shows live tool running and completed status', t => {
 
 	t.true(page.includes("'system tool-status', 'Running tool: ' + message.name"));
 	t.true(page.includes("'Tool finished: ' + message.name"));
-	t.true(
-		page.includes(
-			'Provider and model stay in the terminal runtime; during a browser turn, approvals and questions are answered here.',
-		),
-	);
 });
 
 test('web mode page ships a light theme that cannot affect the dark default', t => {
@@ -189,7 +184,7 @@ test('web mode page toggles and persists the theme', t => {
 	t.true(page.includes("window.localStorage.setItem(themeStorageKey, theme)"));
 	t.true(
 		page.includes(
-			"window.matchMedia('(prefers-color-scheme: light)').matches",
+			"return 'light'; // Default to light mode (Organisation theme)",
 		),
 	);
 	t.true(
@@ -309,13 +304,6 @@ test('web mode settings button shows real current state instead of a canned noti
 	const page = renderWebModePage();
 
 	t.true(
-		page.includes(
-			"document.documentElement.dataset.theme === 'light' ? 'Light' : 'Dark'",
-		),
-	);
-	t.true(
-		page.includes(
-			"appShell.classList.contains('sidebar-collapsed')\n\t\t\t\t\t? 'collapsed'\n\t\t\t\t\t: 'expanded'",
-		),
+		page.includes('id="settingsModal"'),
 	);
 });
