@@ -51,9 +51,6 @@ export class PasteDetector {
 		const currentLineCount = newText.split('\n').length;
 		const linesAdded = currentLineCount - previousLineCount;
 
-		// Get the added text (assuming it's at the end)
-		const addedText = newText.slice(this.lastInputLength);
-
 		// Update tracking
 		this.lastInputTime = currentTime;
 		this.lastInputLength = newText.length;
@@ -63,6 +60,19 @@ export class PasteDetector {
 			charsAdded,
 			linesAdded,
 		};
+
+		// Deletions and unchanged input do not contain added text to inspect.
+		if (charsAdded <= 0) {
+			return {
+				isPaste: false,
+				method: 'none',
+				addedText: '',
+				details,
+			};
+		}
+
+		// Get the added text (assuming it's at the end)
+		const addedText = newText.slice(this.lastInputLength - charsAdded);
 
 		// Method 1: Rate-based detection (fast input)
 		if (
