@@ -509,7 +509,6 @@ export default function App({
 		setActiveMode: appState.setActiveMode,
 		setCheckpointLoadData: appState.setCheckpointLoadData,
 		setShowAllSessions: appState.setShowAllSessions,
-		currentSessionId: appState.currentSessionId,
 		setCurrentSessionId: appState.setCurrentSessionId,
 		setSessionName: appState.setSessionName,
 		setCurrentProvider: appState.setCurrentProvider,
@@ -597,8 +596,6 @@ export default function App({
 		currentModel: appState.currentModel,
 		currentSessionId: appState.currentSessionId,
 		setCurrentSessionId: appState.setCurrentSessionId,
-		client: appState.client,
-		setSessionName: appState.setSessionName,
 	});
 
 	// Memoize static components. We pin the run-mode header to the

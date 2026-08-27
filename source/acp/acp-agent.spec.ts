@@ -620,14 +620,14 @@ async function waitForSession(
 	return null;
 }
 
-test('AcpAgent.prompt - a completed turn with a weak title generates one, once', async t => {
+test('AcpAgent.prompt - a weak title waits for meaningful context', async t => {
 	const {agent} = createAgent();
 
 	let chatCalls = 0;
 	agent['initContext'].client.chat = async () => {
 		chatCalls++;
-		// First call is the conversation itself; any later one is the titler.
-		return chatCalls === 1
+		// Calls 1 and 2 are conversation turns; call 3 is the titler.
+		return chatCalls < 3
 			? {choices: [{message: {content: 'Done.'}}]}
 			: {choices: [{message: {content: 'Fix Login Redirect'}}]};
 	};
@@ -636,6 +636,16 @@ test('AcpAgent.prompt - a completed turn with a weak title generates one, once',
 	await agent.prompt({
 		sessionId: session.sessionId,
 		prompt: [{type: 'text', text: 'fix this'}],
+	});
+
+	await new Promise(r => setTimeout(r, 200));
+	const beforeContext = await sessionManager.readSession(session.sessionId);
+	t.not(beforeContext?.titleGenerated, true);
+	t.is(chatCalls, 1);
+
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'summarize the README'}],
 	});
 
 	const titled = await waitForSession(
@@ -647,8 +657,7 @@ test('AcpAgent.prompt - a completed turn with a weak title generates one, once',
 	// A generated title must never masquerade as a user rename.
 	t.not(titled.titleManuallySet, true);
 
-	// A second turn must not re-title: titleGenerated short-circuits it.
-	const callsAfterFirst = chatCalls;
+	// A third turn must not re-title: titleGenerated short-circuits it.
 	await agent.prompt({
 		sessionId: session.sessionId,
 		prompt: [{type: 'text', text: 'and now this'}],
@@ -658,7 +667,7 @@ test('AcpAgent.prompt - a completed turn with a weak title generates one, once',
 	const after = await sessionManager.readSession(session.sessionId);
 	t.is(after!.title, 'Fix Login Redirect');
 	// Exactly one more chat call, the conversation turn, and no second titler.
-	t.is(chatCalls, callsAfterFirst + 1);
+	t.is(chatCalls, 4);
 });
 
 test('AcpAgent.prompt - a cancelled turn does not generate a title', async t => {

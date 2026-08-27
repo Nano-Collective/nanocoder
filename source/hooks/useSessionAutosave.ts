@@ -1,8 +1,7 @@
 import {useCallback, useEffect, useRef} from 'react';
 import {getAppConfig} from '@/config/index';
-import {maybeGenerateTitle} from '@/session/maybe-generate-title';
 import {sessionManager} from '@/session/session-manager';
-import type {LLMClient, Message} from '@/types/core';
+import type {Message} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {logWarning} from '@/utils/message-queue';
 import {getShutdownManager} from '@/utils/shutdown';
@@ -13,10 +12,6 @@ interface UseSessionAutosaveProps {
 	currentModel: string;
 	currentSessionId: string | null;
 	setCurrentSessionId: (id: string | null) => void;
-	/** Used for the background title call. Null before init completes. */
-	client: LLMClient | null;
-	/** Updates the live display when a generated title lands. */
-	setSessionName: (name: string) => void;
 }
 
 const SHUTDOWN_HANDLER_NAME = 'session-autosave-flush';
@@ -51,8 +46,6 @@ export function useSessionAutosave({
 	currentModel,
 	currentSessionId,
 	setCurrentSessionId,
-	client,
-	setSessionName,
 }: UseSessionAutosaveProps) {
 	const initPromiseRef = useRef<Promise<boolean> | null>(null);
 	const timeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -157,8 +150,9 @@ export function useSessionAutosave({
 						// Write the full history — no truncation.
 						session.messages = capturedMessages;
 						session.messageCount = capturedMessages.length;
-						// A manually-renamed or generated title sticks - don't let the
-						// auto-derived title clobber either one.
+						// A manually-renamed title, or one the ACP agent generated,
+						// sticks - don't let the auto-derived title clobber either.
+						// Both flags are written to the same store this hook saves to.
 						if (!session.titleManuallySet && !session.titleGenerated) {
 							session.title = title;
 						}
@@ -202,25 +196,12 @@ export function useSessionAutosave({
 					setCurrentSessionId(newSession.id);
 				}
 
-				// Fire and forget: a cosmetic title must never delay or fail a save.
-				// maybeGenerateTitle owns every precondition, including doing
-				// nothing at all when the heuristic title is already good enough.
-				const sessionIdForTitle = currentSessionIdRef.current;
-				if (sessionIdForTitle && client) {
-					void maybeGenerateTitle({
-						sessionId: sessionIdForTitle,
-						messages: capturedMessages,
-						client,
-						onTitle: setSessionName,
-					});
-				}
-
 				lastSaveRef.current = Date.now();
 			} catch (error) {
 				console.warn('Failed to auto-save session:', error);
 			}
 		},
-		[setCurrentSessionId, client, setSessionName],
+		[setCurrentSessionId],
 	);
 
 	// Auto-save when messages change (debounced by saveInterval)

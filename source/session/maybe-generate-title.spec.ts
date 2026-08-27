@@ -68,6 +68,11 @@ const turn: Message[] = [
 	},
 ];
 
+const greetingTurn: Message[] = [
+	{role: 'user', content: 'hi'},
+	{role: 'assistant', content: 'Hello! How can I help?'},
+];
+
 async function seed(title: string, extra: Record<string, unknown> = {}) {
 	const session = await manager.createSession({
 		title,
@@ -98,6 +103,57 @@ test('generates and persists a title for a weak session', async t => {
 	// Must not masquerade as a user rename, or the user's own rename becomes
 	// indistinguishable from an AI one.
 	t.not(reloaded?.titleManuallySet, true);
+});
+
+test('does not title a greeting until a second user turn adds context', async t => {
+	const session = await manager.createSession({
+		title: 'hi',
+		messageCount: 2,
+		provider: 'fake',
+		model: 'fake',
+		workingDirectory: '/tmp',
+		messages: greetingTurn,
+	});
+	let called = false;
+
+	await maybeGenerateTitle({
+		sessionId: session.id,
+		messages: greetingTurn,
+		client: client('Should Not Be Used', () => {
+			called = true;
+		}),
+		manager,
+	});
+
+	const stillGreeting = await manager.readSession(session.id);
+	t.is(stillGreeting?.title, 'hi');
+	t.not(stillGreeting?.titleGenerated, true);
+	t.false(called);
+
+	await manager.saveSession({
+		...stillGreeting!,
+		messages: [
+			...greetingTurn,
+			{role: 'user', content: 'summarize the README'},
+			{role: 'assistant', content: 'The README describes the project.'},
+		],
+		messageCount: 4,
+	});
+
+	await maybeGenerateTitle({
+		sessionId: session.id,
+		messages: [
+			...greetingTurn,
+			{role: 'user', content: 'summarize the README'},
+			{role: 'assistant', content: 'The README describes the project.'},
+		],
+		client: client('README Overview'),
+		manager,
+	});
+
+	const titled = await manager.readSession(session.id);
+	t.is(titled?.title, 'README Overview');
+	t.true(titled?.titleGenerated);
 });
 
 test('never overwrites a manually renamed title', async t => {
@@ -273,4 +329,26 @@ test('a rename that lands mid-flight still wins', async t => {
 	const reloaded = await manager.readSession(session.id);
 	t.is(reloaded?.title, 'Renamed Mid Flight');
 	t.not(reloaded?.titleGenerated, true);
+});
+
+test('never rejects, even when the session store throws', async t => {
+	// Both call sites invoke this as a bare `void` with no .catch(), so a
+	// rejection here becomes an unhandled rejection and takes the process down.
+	// An uninitialised SessionManager does exactly this: readSession builds a
+	// path from an undefined directory and throws TypeError.
+	const brokenManager = {
+		readSession: async () => {
+			throw new TypeError('paths[0] must be a string');
+		},
+		saveSession: async () => {},
+	} as unknown as SessionManager;
+
+	await t.notThrowsAsync(
+		maybeGenerateTitle({
+			sessionId: '00000000-0000-4000-8000-000000000000',
+			messages: turn,
+			client: client('Fix Login Redirect'),
+			manager: brokenManager,
+		}),
+	);
 });

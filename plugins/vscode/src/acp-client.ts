@@ -25,6 +25,8 @@ export class NanocoderAcpClient {
 	public onPermissionsCancelled?: (toolCallIds: string[]) => void;
 	public onStateSync?: (state: StateSyncPayload) => void;
 	public onConnectionReady?: () => void;
+	/** Fires when a background title update is received. */
+	public onSessionTitleChanged?: () => void;
 
 	public currentMode?: string;
 	public availableModes: string[] = [];
@@ -92,6 +94,13 @@ export class NanocoderAcpClient {
 	setConnection(connection: ClientSideConnection): void {
 		this.connection = connection;
 		this._sessionId = undefined; // Clear any stale session to force re-creation
+	}
+
+	/** Handle custom notifications from the agent. */
+	async handleExtNotification(method: string, _params: unknown): Promise<void> {
+		if (method === '_nanocoder/sessionTitleChanged') {
+			this.onSessionTitleChanged?.();
+		}
 	}
 
 	async handlePermissionRequest(params: any): Promise<unknown> {

@@ -31,8 +31,24 @@ export interface MaybeGenerateTitleOptions {
  * Give a session a real name, at most once, and only when the cheap heuristic
  * title is too thin to be useful. Every failure path is silent: the heuristic
  * title stands and the turn is unaffected.
+ *
+ * Both call sites invoke this as a bare `void`, so it must never reject. An
+ * unhandled rejection would end a turn, or the process, for the sake of a
+ * cosmetic title. The preconditions below read config and the session store,
+ * either of which can throw, so the whole body is wrapped rather than just the
+ * model call.
  */
 export async function maybeGenerateTitle(
+	options: MaybeGenerateTitleOptions,
+): Promise<void> {
+	try {
+		await runTitleGeneration(options);
+	} catch (error) {
+		getLogger().debug(`Session title generation failed: ${error}`);
+	}
+}
+
+async function runTitleGeneration(
 	options: MaybeGenerateTitleOptions,
 ): Promise<void> {
 	const {sessionId, messages, client, onTitle} = options;
@@ -46,6 +62,10 @@ export async function maybeGenerateTitle(
 	if (!messages.some(m => m.role === 'assistant')) return;
 	if (!isWeakTitle(firstUser.content)) return;
 
+	const toolSummaries = extractToolSummaries(messages);
+	const userMessageCount = messages.filter(m => m.role === 'user').length;
+	if (userMessageCount < 2 && toolSummaries.length === 0) return;
+
 	const session = await manager.readSession(sessionId);
 	if (!session) return;
 	if (session.titleManuallySet || session.titleGenerated) return;
@@ -57,7 +77,6 @@ export async function maybeGenerateTitle(
 	const timer = setTimeout(() => timeout.abort(), TITLE_TIMEOUT_MS);
 
 	try {
-		const toolSummaries = extractToolSummaries(messages);
 		const assistantReply = messages.find(
 			m => m.role === 'assistant' && m.content.trim().length > 0,
 		)?.content;
@@ -79,9 +98,9 @@ export async function maybeGenerateTitle(
 		// which would make an AI title indistinguishable from the user's own.
 		await manager.saveSession({...fresh, title, titleGenerated: true});
 		onTitle?.(title);
-	} catch (error) {
-		getLogger().debug(`Session title generation failed: ${error}`);
 	} finally {
+		// Runs on the throw path too, so a failure cannot wedge the session
+		// out of ever being titled again.
 		clearTimeout(timer);
 		inFlight.delete(sessionId);
 	}

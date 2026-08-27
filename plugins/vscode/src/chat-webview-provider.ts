@@ -51,6 +51,11 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 			});
 		};
 
+		// Refresh the history list after a background title update.
+		this._acpClient.onSessionTitleChanged = () => {
+			void this._broadcastSessions();
+		};
+
 		this._acpClient.onConnectionReady = () => {
 			this._initializeSessionIfReady();
 		};

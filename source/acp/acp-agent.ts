@@ -377,7 +377,9 @@ export class AcpAgent implements Agent {
 					messages: session.messages,
 					client: this.initContext.client,
 					onTitle: title => {
-						void this.conn.extNotification('_nanocoder/sessionTitleChanged', {
+						// notify(), not the deprecated extNotification() alias.
+						// The client receives it as extNotification(method, params).
+						void this.conn.notify('_nanocoder/sessionTitleChanged', {
 							sessionId: session.sessionId,
 							title,
 						});

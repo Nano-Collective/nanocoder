@@ -85,7 +85,6 @@ interface UseAppHandlersProps {
 		} | null,
 	) => void;
 	setShowAllSessions: (value: boolean) => void;
-	currentSessionId: string | null;
 	setCurrentSessionId: (value: string | null) => void;
 	setSessionName: (value: string) => void;
 	setCurrentProvider: (value: string) => void;
@@ -507,21 +506,6 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		props.setCheckpointLoadData(null);
 	}, [props.setActiveMode, props.setCheckpointLoadData, props]);
 
-	// A rename has to reach disk, not just React state. renameSession is what
-	// sets titleManuallySet, which is the flag that stops both the autosave
-	// heuristic and the background titler from overwriting the user's choice.
-	const handleRenameSession = React.useCallback(
-		(name: string) => {
-			props.setSessionName(name);
-			const sessionId = props.currentSessionId;
-			if (!sessionId) return;
-			void sessionManager.renameSession(sessionId, name).catch(error => {
-				logger.warn(`Failed to persist session rename: ${formatError(error)}`);
-			});
-		},
-		[props.setSessionName, props.currentSessionId, props, logger],
-	);
-
 	// Enter checkpoint load mode handler
 	const enterCheckpointLoadMode = React.useCallback(
 		(checkpoints: CheckpointListItem[], currentMessageCount: number) => {
@@ -678,7 +662,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					customCommandExecutor: props.customCommandExecutor,
 					onClearMessages: clearMessages,
 					onClearCounterIncrement: props.onClearCounterIncrement,
-					onRenameSession: handleRenameSession,
+					onRenameSession: props.setSessionName,
 					commandArgs,
 					onEnterModelSelectionMode: props.enterModelSelectionMode,
 					onEnterModelDatabaseMode: props.enterModelDatabaseMode,
@@ -750,7 +734,6 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			handleShowStatus,
 			applySession,
 			enterSessionSelectorMode,
-			handleRenameSession,
 			props,
 		],
 	);
