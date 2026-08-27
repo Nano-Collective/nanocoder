@@ -63,6 +63,7 @@ interface ChatProps {
 	contextSource?: ContextSource | null; // Whether ctx % is API-reported or estimated
 	sessionName?: string; // Optional session name for display
 	tune?: TuneConfig; // Model mode configuration
+	currentProvider?: string; // Active provider — grouped with model on the input footer
 	currentModel?: string; // Active model id — resolves the 'auto' tune profile for display
 	activeEditor?: ActiveEditorState | null; // VS Code active file + optional selection
 	onDismissActiveEditor?: () => void; // Dismiss the active editor pill on clear/escape
@@ -89,6 +90,7 @@ export default function UserInput({
 	contextSource,
 	sessionName,
 	tune,
+	currentProvider,
 	currentModel,
 	activeEditor,
 	onDismissActiveEditor,
@@ -955,6 +957,7 @@ export default function UserInput({
 					contextSource={contextSource ?? null}
 					sessionName={sessionName}
 					tune={tune}
+					currentProvider={currentProvider}
 					currentModel={currentModel}
 				/>
 			</Box>
@@ -1114,6 +1117,7 @@ export default function UserInput({
 				contextSource={contextSource ?? null}
 				sessionName={sessionName}
 				tune={tune}
+				currentProvider={currentProvider}
 				currentModel={currentModel}
 				activeEditor={activeEditor}
 			/>

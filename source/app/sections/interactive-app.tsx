@@ -419,6 +419,7 @@ export function InteractiveApp({
 								onToggleMode={appHandlers.handleToggleDevelopmentMode}
 								onToggleReasoningExpanded={handleToggleReasoningExpanded}
 								tune={appState.tune}
+								currentProvider={appState.currentProvider}
 								currentModel={appState.currentModel}
 								fullscreen={fullscreen}
 							/>

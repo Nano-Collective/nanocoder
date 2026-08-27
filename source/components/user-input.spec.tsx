@@ -127,7 +127,7 @@ test('UserInput renders development mode indicator', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /normal mode on/); // Development mode indicator
+	t.regex(output!, /▶ normal/); // Development mode indicator
 	unmount();
 });
 
@@ -140,7 +140,7 @@ test('UserInput renders auto-accept mode indicator', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /auto-accept mode/); // Auto-accept mode indicator
+	t.regex(output!, /⏵⏵ auto/); // Auto-accept mode indicator
 	unmount();
 });
 
@@ -153,7 +153,7 @@ test('UserInput renders plan mode indicator', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /plan mode/); // Plan mode indicator
+	t.regex(output!, /⏸ plan/); // Plan mode indicator
 	unmount();
 });
 
@@ -661,7 +661,7 @@ test('UserInput renders with default development mode', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	// Default mode is 'normal'
-	t.regex(output!, /normal mode/);
+	t.regex(output!, /▶ normal/);
 	unmount();
 });
 
@@ -956,7 +956,7 @@ test('UserInput renders completions BEFORE the mode indicator (inside the input 
 	t.truthy(output);
 
 	const completionsIdx = output.indexOf('Available commands:');
-	const modeIdx = output.indexOf('normal mode');
+	const modeIdx = output.indexOf('▶ normal');
 	t.true(completionsIdx > -1, 'Completions text should be present');
 	t.true(modeIdx > -1, 'Mode indicator should be present');
 	t.true(
@@ -985,7 +985,7 @@ test('UserInput completions appear on a line above the mode indicator', async t 
 	let modeLine = -1;
 	for (let i = 0; i < lines.length; i++) {
 		if (lines[i].includes('Available commands:')) completionLine = i;
-		if (lines[i].includes('normal mode')) modeLine = i;
+		if (lines[i].includes('▶ normal')) modeLine = i;
 	}
 
 	t.true(completionLine > -1, 'Should find completions line');

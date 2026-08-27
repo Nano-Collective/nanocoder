@@ -9,10 +9,7 @@ import type {useTheme} from '@/hooks/useTheme';
 import {resolveToolProfile} from '@/tools/tool-profiles';
 import type {TuneConfig} from '@/types/config';
 import type {ContextSource, DevelopmentMode} from '@/types/core';
-import {
-	DEVELOPMENT_MODE_LABELS,
-	DEVELOPMENT_MODE_LABELS_NARROW,
-} from '@/types/core';
+import {DEVELOPMENT_MODE_LABELS_NARROW} from '@/types/core';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 interface DevelopmentModeIndicatorProps {
@@ -24,6 +21,7 @@ interface DevelopmentModeIndicatorProps {
 	contextSource?: ContextSource | null;
 	sessionName?: string;
 	tune?: TuneConfig;
+	currentProvider?: string;
 	currentModel?: string;
 	activeEditor?: ActiveEditorState | null;
 }
@@ -50,13 +48,16 @@ export const DevelopmentModeIndicator = React.memo(
 		contextSource,
 		sessionName,
 		tune,
+		currentProvider,
 		currentModel,
 		activeEditor,
 	}: DevelopmentModeIndicatorProps) => {
 		const {isNarrow, actualWidth, truncate} = useResponsiveTerminal();
-		const modeLabel = isNarrow
-			? DEVELOPMENT_MODE_LABELS_NARROW[developmentMode]
-			: DEVELOPMENT_MODE_LABELS[developmentMode];
+		const modeLabel = DEVELOPMENT_MODE_LABELS_NARROW[developmentMode];
+		const modelChip =
+			currentProvider && currentModel
+				? `${currentProvider}/${currentModel}`
+				: currentModel || currentProvider || '';
 
 		// Show the resolved profile (not the literal 'auto'), so users can see
 		// what auto-profiling picked for the current model. Wide terminals also
@@ -105,6 +106,7 @@ export const DevelopmentModeIndicator = React.memo(
 				isNarrow && developmentMode !== 'headless'
 					? ' (Shift+Tab to cycle)'
 					: '';
+			const modelSegment = modelChip ? ` · ${modelChip}` : '';
 			const tuneSegment = tuneLabel ? ` · ${tuneLabel}` : '';
 			const ctxSegment =
 				contextPercentUsed !== null
@@ -120,6 +122,7 @@ export const DevelopmentModeIndicator = React.memo(
 			// Width consumed by parts that always render.
 			const requiredWidth =
 				modeLabel.length +
+				modelSegment.length +
 				tuneSegment.length +
 				ctxSegment.length +
 				sessionSeparator.length +
@@ -145,6 +148,7 @@ export const DevelopmentModeIndicator = React.memo(
 			const fixedWidth =
 				modeLabel.length +
 				shiftHint.length +
+				modelSegment.length +
 				tuneSegment.length +
 				ctxSegment.length +
 				sessionSeparator.length +
@@ -215,6 +219,12 @@ export const DevelopmentModeIndicator = React.memo(
 					<Text bold>{modeLabel}</Text>
 					{showShiftHint && <Text> (Shift+Tab to cycle)</Text>}
 				</Text>
+				{modelChip && (
+					<>
+						<Text color={colors.secondary}> · </Text>
+						<Text color={colors.primary}>{modelChip}</Text>
+					</>
+				)}
 				{sessionLabel && (
 					<>
 						<Text color={colors.secondary}> · </Text>
