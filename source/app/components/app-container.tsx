@@ -1,7 +1,6 @@
 import {Box, Text} from 'ink';
 import React from 'react';
 import WelcomeMessage from '@/components/welcome-message';
-import {getClosestConfigFile} from '@/config/index';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {
@@ -54,8 +53,7 @@ function BootSummary({
 }): React.ReactElement {
 	const {colors} = useTheme();
 	const {isNarrow} = useResponsiveTerminal();
-	const configPath = getClosestConfigFile('agents.config.json');
-	const shortConfig = homeRelative(configPath);
+	const shortConfig = homeRelative(process.cwd());
 	const modeLabel = mode ? DEVELOPMENT_MODE_LABELS[mode] : undefined;
 	const gitStatus = getGitStatusSummarySync();
 	const gitLabel = gitStatus ? formatBootSummaryGitLabel(gitStatus) : undefined;
