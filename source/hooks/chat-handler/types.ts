@@ -55,6 +55,8 @@ export interface UseChatHandlerProps {
 	subagentsReady?: boolean;
 	privacySessionMapRef?: React.MutableRefObject<Record<string, string>>;
 	privacyEnabled?: boolean;
+	// Smart auto-routing state (Issue #891)
+	smartRouting?: import('@/types/config').SmartRoutingState;
 }
 
 export interface ChatHandlerReturn {

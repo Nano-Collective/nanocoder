@@ -227,3 +227,24 @@ export function updateAlternateScreen(value: boolean): void {
 	preferences.alternateScreen = value;
 	savePreferences(preferences);
 }
+
+/**
+ * Get the smart routing preference from preferences
+ */
+export function getSmartRoutingPreference():
+	| import('@/types/config').SmartRoutingState
+	| undefined {
+	const preferences = loadPreferences();
+	return preferences.smartRouting;
+}
+
+/**
+ * Save the smart routing preference
+ */
+export function updateSmartRoutingPreference(
+	state: import('@/types/config').SmartRoutingState,
+): void {
+	const preferences = loadPreferences();
+	preferences.smartRouting = state;
+	savePreferences(preferences);
+}

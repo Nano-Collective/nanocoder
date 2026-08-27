@@ -2,7 +2,11 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import type {SettingsTabId} from '@/app/components/settings-constants';
 import type {TitleShape} from '@/components/ui/styled-title';
 import {getAppConfig} from '@/config/index';
-import {loadPreferences} from '@/config/preferences';
+import {
+	getSmartRoutingPreference,
+	loadPreferences,
+	updateSmartRoutingPreference,
+} from '@/config/preferences';
 import {defaultTheme} from '@/config/themes';
 import {resolveTune} from '@/config/tune';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
@@ -14,6 +18,7 @@ import {ToolManager} from '@/tools/tool-manager';
 import type {CheckpointListItem} from '@/types/checkpoint';
 import type {CustomCommand} from '@/types/commands';
 import type {AIProviderConfig, TuneConfig} from '@/types/config';
+import {SMART_ROUTING_DEFAULTS, type SmartRoutingState} from '@/types/config';
 import {
 	ApiCallRecord,
 	ApiUsageSnapshot,
@@ -185,6 +190,15 @@ export function useAppState(
 	const [tune, setTune] = useState<TuneConfig>(() => {
 		return resolveTune(getAppConfig(), undefined, preferences);
 	});
+
+	// Smart auto-routing state (Issue #891)
+	const [smartRouting, setSmartRoutingState] = useState<SmartRoutingState>(
+		() => getSmartRoutingPreference() ?? SMART_ROUTING_DEFAULTS,
+	);
+	const setSmartRouting = useCallback((state: SmartRoutingState) => {
+		setSmartRoutingState(state);
+		updateSmartRoutingPreference(state);
+	}, []);
 
 	// Context usage state
 	const [contextPercentUsed, setContextPercentUsed] = useState<number | null>(
@@ -376,6 +390,7 @@ export function useAppState(
 		developmentMode,
 		developmentModeRef,
 		tune,
+		smartRouting,
 		contextPercentUsed,
 		contextLimit,
 		contextSource,
@@ -431,6 +446,7 @@ export function useAppState(
 		setPendingQuestion,
 		setDevelopmentMode,
 		setTune,
+		setSmartRouting,
 		setContextPercentUsed,
 		setContextLimit,
 		setContextSource,
