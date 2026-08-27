@@ -326,12 +326,14 @@ const readFileFormatter = async (
 			const lines = cached.lines;
 			const totalLines = lines.length;
 
-			// Detect if this was a metadata-only response
-			const isMetadataOnly =
-				(result?.startsWith('File:') ?? false) &&
-				!args.start_line &&
-				!args.end_line &&
-				totalLines > FILE_READ_PREVIEW_THRESHOLD_LINES;
+			// Detect if this was a metadata-only response.
+			// The metadata branch returns `File Information for "..."`, never
+			// `File:`, so the old prefix test could not match. It also returns
+			// before any line range or size is considered, so gating on
+			// start_line/end_line/totalLines described the truncated-preview
+			// case below rather than this one. The request flag is what
+			// actually selects this response shape.
+			const isMetadataOnly = args.metadata_only === true;
 			const isTruncated = result?.includes('[Truncated at line ') ?? false;
 
 			// Calculate what was actually read
