@@ -250,7 +250,6 @@ export function formatGitStatusSummary(status: GitStatusSummary): {
 	marker: string | null;
 } {
 	if (status.detached) return {branch: status.branch, marker: 'detached'};
-	if (status.isDefault) return {branch: status.branch, marker: 'default'};
 	return {branch: status.branch, marker: null};
 }
 
