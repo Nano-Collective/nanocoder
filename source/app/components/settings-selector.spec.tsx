@@ -14,8 +14,12 @@ resetPreferencesCache();
 
 const {renderWithTheme} = await import('../../test-utils/render-with-theme');
 const {SettingsSelector} = await import('./settings-tabs');
-const {SettingsDisplayPanel} = await import('./settings-selector');
-const {updateShowUsageFooter} = await import('@/config/preferences');
+const {SettingsDisplayPanel, SettingsNotificationsPanel} = await import(
+	'./settings-selector'
+);
+const {updateShowUsageFooter, updateNotificationsPreference} = await import(
+	'@/config/preferences'
+);
 
 test('SettingsSelector renders without crashing', t => {
 	const {unmount} = renderWithTheme(<SettingsSelector onCancel={() => {}} />);
@@ -95,5 +99,33 @@ test('SettingsDisplayPanel reflects a disabled Usage & Cost Footer preference', 
 		unmount();
 	} finally {
 		updateShowUsageFooter(true);
+	}
+});
+
+test('SettingsNotificationsPanel offers a Terminal Bell toggle, OFF by default', t => {
+	const {lastFrame, unmount} = renderWithTheme(
+		<SettingsNotificationsPanel onBack={() => {}} onCancel={() => {}} />,
+	);
+	const output = lastFrame();
+	t.truthy(output);
+	// No preference saved in the temp config dir, so the bell starts off.
+	t.true(output!.includes('Terminal Bell: OFF'));
+	unmount();
+});
+
+test('SettingsNotificationsPanel reflects an enabled bell preference', t => {
+	updateNotificationsPreference({enabled: true, bell: true});
+	try {
+		const {lastFrame, unmount} = renderWithTheme(
+			<SettingsNotificationsPanel onBack={() => {}} onCancel={() => {}} />,
+		);
+		const output = lastFrame();
+		t.truthy(output);
+		t.true(output!.includes('Terminal Bell: ON'));
+		// The bell is an extra channel beside sound, not a replacement for it.
+		t.true(output!.includes('Sound: OFF'));
+		unmount();
+	} finally {
+		updateNotificationsPreference({enabled: false, bell: false});
 	}
 });
