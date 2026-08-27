@@ -648,11 +648,26 @@ export class ChatWebviewProvider
 		let html = fs.readFileSync(htmlPath, 'utf8');
 
 		const extVersion = vscode.extensions.getExtension('nanocollective.nanocoder')?.packageJSON.version || Date.now().toString();
-		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.js')).with({ query: `v=${extVersion}` });
-		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.css')).with({ query: `v=${extVersion}` });
+		const assetVersion = (fileName: string) => {
+			const assetPath = path.join(this._extensionUri.fsPath, 'media', fileName);
+			return `${extVersion}-${fs.statSync(assetPath).mtimeMs}`;
+		};
+		const scriptUri = webview
+			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.js'))
+			.with({query: `v=${assetVersion('chat-panel.js')}`});
+		const styleUri = webview
+			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'chat-panel.css'))
+			.with({query: `v=${assetVersion('chat-panel.css')}`});
 		const markedUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'marked.min.js'));
-		const mentionUtilsUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'mention-utils.js')).with({ query: `v=${extVersion}` });
-		const uriUtilsUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'uri-utils.js')).with({ query: `v=${extVersion}` });
+		const mentionUtilsUri = webview
+			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'mention-utils.js'))
+			.with({query: `v=${assetVersion('mention-utils.js')}`});
+		const uriUtilsUri = webview
+			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'uri-utils.js'))
+			.with({query: `v=${assetVersion('uri-utils.js')}`});
+		const slashCommandUtilsUri = webview
+			.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'slash-command-utils.js'))
+			.with({query: `v=${assetVersion('slash-command-utils.js')}`});
 		const nonce = getNonce();
 
 		html = html.replace(/\{\{cspSource\}\}/g, webview.cspSource);
@@ -662,6 +677,7 @@ export class ChatWebviewProvider
 		html = html.replace(/\{\{markedUri\}\}/g, markedUri.toString());
 		html = html.replace(/\{\{mentionUtilsUri\}\}/g, mentionUtilsUri.toString());
 		html = html.replace(/\{\{uriUtilsUri\}\}/g, uriUtilsUri.toString());
+		html = html.replace(/\{\{slashCommandUtilsUri\}\}/g, slashCommandUtilsUri.toString());
 
 		return html;
 	}

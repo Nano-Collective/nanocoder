@@ -34,7 +34,94 @@
 	let pendingImages = [];
 	let pendingUserMessageText = null;
 
+	// ── Slash command autocomplete state ────────────────────
+	const slashDropdown = document.getElementById('slash-dropdown');
+	const slashCommandUtils = globalThis.NanocoderSlashCommandUtils || (() => {
+		const commands = [
+			{
+				name: '/test',
+				description: 'Write focused tests',
+				template: 'Write tests for the following:\n\n',
+			},
+			{
+				name: '/explain',
+				description: 'Explain code or errors',
+				template: 'Explain the following clearly:\n\n',
+			},
+			{
+				name: '/doc',
+				description: 'Draft documentation',
+				template: 'Write documentation for the following:\n\n',
+			},
+		];
+
+		function findToken(text, cursor, selectionEnd) {
+			if (typeof text !== 'string' || typeof cursor !== 'number') return null;
+			if (selectionEnd !== undefined && cursor !== selectionEnd) return null;
+			if (cursor < 0 || cursor > text.length) return null;
+
+			const lineStart = text.lastIndexOf('\n', cursor - 1) + 1;
+			const beforeCursorOnLine = text.slice(lineStart, cursor);
+			const afterCursorOnLine = text.slice(cursor).split('\n', 1)[0];
+			const match = beforeCursorOnLine.match(/^(\s*)\/([a-z-]*)$/i);
+			if (!match || /\S/.test(afterCursorOnLine)) return null;
+
+			return {
+				start: lineStart + match[1].length,
+				end: cursor,
+				query: match[2].toLowerCase(),
+			};
+		}
+
+		function applyTemplate(text, cursor, selectionEnd, command) {
+			const token = findToken(text, cursor, selectionEnd);
+			if (!token || !command || typeof command.template !== 'string') return null;
+
+			const existingText = (text.slice(0, token.start) + text.slice(token.end)).trim();
+			return {
+				text: command.template + existingText,
+				cursor: command.template.length,
+			};
+		}
+
+		function isCommandName(value) {
+			if (typeof value !== 'string') return false;
+			const normalized = value.trim().toLowerCase();
+			return commands.some(command => command.name === normalized);
+		}
+
+		return {
+			SLASH_COMMANDS: commands,
+			findSlashCommandToken: findToken,
+			applySlashCommandTemplate: applyTemplate,
+			isSlashCommandName: isCommandName,
+		};
+	})();
+	const {
+		SLASH_COMMANDS,
+		findSlashCommandToken,
+		applySlashCommandTemplate,
+		isSlashCommandName,
+	} = slashCommandUtils;
+
+	let slashSuggestions = [];
+	let slashSelectedIndex = 0;
+
 	let modelDropdown, modeDropdown, providerDropdown;
+
+	function removeSlashCommandChipsFromDom() {
+		if (!contextChipsContainer) return;
+		for (const chip of Array.from(contextChipsContainer.querySelectorAll('.context-chip'))) {
+			if (isSlashCommandName(chip.textContent.replace(/×$/, ''))) {
+				chip.remove();
+			}
+		}
+		if (!contextChipsContainer.querySelector('.context-chip')) {
+			contextChipsContainer.classList.add('hidden');
+		}
+	}
+
+	removeSlashCommandChipsFromDom();
 
 	function initDropdowns() {
 		class CustomDropdown {
@@ -725,14 +812,132 @@
 		});
 	}
 
+	// ── Slash command functions ──────────────────────────────
+
+	function hideSlashDropdown() {
+		if (!slashDropdown) return;
+		slashDropdown.classList.add('hidden');
+		slashDropdown.innerHTML = '';
+		slashSuggestions = [];
+		slashSelectedIndex = 0;
+		chatInput.removeAttribute('aria-activedescendant');
+		chatInput.setAttribute('aria-expanded', 'false');
+	}
+
+	function applySlashSelection(command) {
+		const result = applySlashCommandTemplate(
+			chatInput.value,
+			chatInput.selectionStart,
+			chatInput.selectionEnd,
+			command,
+		);
+		if (!result) {
+			hideSlashDropdown();
+			return;
+		}
+		chatInput.value = result.text;
+		chatInput.selectionStart = result.cursor;
+		chatInput.selectionEnd = result.cursor;
+		hideSlashDropdown();
+		chatInput.dispatchEvent(new Event('input'));
+		chatInput.focus();
+	}
+
+	function renderSlashDropdown(commands) {
+		if (!slashDropdown) return;
+		slashDropdown.innerHTML = '';
+		slashSuggestions = commands;
+		commands.forEach((command, index) => {
+			const item = document.createElement('button');
+			item.type = 'button';
+			item.id = 'slash-option-' + index;
+			item.setAttribute('role', 'option');
+			item.setAttribute('aria-selected', index === slashSelectedIndex ? 'true' : 'false');
+			item.className = 'w-full text-left bg-transparent border-none px-3 py-2 cursor-pointer transition-colors flex items-start justify-between gap-3';
+			if (index === slashSelectedIndex) {
+				item.classList.add('bg-vscode-list-active', 'text-vscode-list-activeFg');
+				chatInput.setAttribute('aria-activedescendant', item.id);
+			} else {
+				item.classList.add('hover:bg-vscode-list-hover', 'text-vscode-dropdown-foreground');
+			}
+			const left = document.createElement('span');
+			left.className = 'font-semibold text-[0.9em]';
+			left.textContent = command.name;
+			const right = document.createElement('span');
+			right.className = 'text-[0.8em] opacity-70';
+			right.textContent = command.description;
+			item.appendChild(left);
+			item.appendChild(right);
+			item.addEventListener('click', (e) => {
+				e.stopPropagation();
+				applySlashSelection(command);
+			});
+			slashDropdown.appendChild(item);
+		});
+		slashDropdown.classList.remove('hidden');
+		chatInput.setAttribute('aria-expanded', 'true');
+	}
+
+	function updateSlashAutocomplete() {
+		if (!slashDropdown) {
+			hideSlashDropdown();
+			return;
+		}
+		const token = findSlashCommandToken(
+			chatInput.value,
+			chatInput.selectionStart,
+			chatInput.selectionEnd,
+		);
+		if (!token) {
+			hideSlashDropdown();
+			return;
+		}
+		const filtered = SLASH_COMMANDS.filter(command =>
+			command.name.slice(1).toLowerCase().startsWith(token.query)
+		);
+		if (filtered.length === 0) {
+			hideSlashDropdown();
+			return;
+		}
+		slashSelectedIndex = 0;
+		renderSlashDropdown(filtered);
+	}
+
 	// Auto-resize textarea
 	chatInput.addEventListener('input', function () {
 		this.style.height = 'auto';
 		this.style.height = (this.scrollHeight) + 'px';
+		updateSlashAutocomplete();
 	});
 
 	// Handle Enter to submit (Shift+Enter for newline)
 	chatInput.addEventListener('keydown', (e) => {
+		// Slash command navigation wins before mention navigation.
+		if (slashDropdown && !slashDropdown.classList.contains('hidden') && slashSuggestions.length > 0) {
+			if (e.key === 'ArrowDown') {
+				e.preventDefault();
+				slashSelectedIndex = (slashSelectedIndex + 1) % slashSuggestions.length;
+				renderSlashDropdown(slashSuggestions);
+				return;
+			}
+			if (e.key === 'ArrowUp') {
+				e.preventDefault();
+				slashSelectedIndex = (slashSelectedIndex - 1 + slashSuggestions.length) % slashSuggestions.length;
+				renderSlashDropdown(slashSuggestions);
+				return;
+			}
+			if (e.key === 'Enter' && !e.shiftKey) {
+				e.preventDefault();
+				applySlashSelection(slashSuggestions[slashSelectedIndex]);
+				return;
+			}
+			if (e.key === 'Escape') {
+				e.preventDefault();
+				hideSlashDropdown();
+				return;
+			}
+		}
+
 		// Mention navigation has to win over Enter-to-submit. Handled at the top
 		// of this same listener rather than in a second one, because two
 		// listeners on the same element would race and Enter could submit the
@@ -915,6 +1120,9 @@
 
 	function renderChips() {
 		contextChipsContainer.innerHTML = '';
+		attachedPaths = attachedPaths.filter(
+			item => !isSlashCommandName(item.path) && !isSlashCommandName(item.name),
+		);
 		if (attachedPaths.length === 0) {
 			contextChipsContainer.classList.add('hidden');
 			return;
@@ -1441,6 +1649,7 @@
 			}
 			case 'pathInfoResolved': {
 				const { path, name, kind } = message;
+				if (isSlashCommandName(path) || isSlashCommandName(name)) break;
 				if (!attachedPaths.some(a => a.path === path)) {
 					attachedPaths.push({ path, name, kind });
 					renderChips();
