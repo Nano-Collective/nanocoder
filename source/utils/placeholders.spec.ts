@@ -1,7 +1,7 @@
 import test from 'ava';
 import type {PlaceholderContent} from '../types/hooks';
 import {PlaceholderType} from '../types/hooks';
-import {findPlaceholderOccurrences} from './placeholders';
+import {allocatePlaceholderId, findPlaceholderOccurrences} from './placeholders';
 
 console.log('\nplaceholders.spec.ts');
 
@@ -17,6 +17,39 @@ const file = (displayText: string): PlaceholderContent => ({
 	displayText,
 	filePath: '/repo/a.ts',
 	content: 'body',
+});
+
+test('allocatePlaceholderId namespaces each type', t => {
+	t.is(allocatePlaceholderId({}, PlaceholderType.PASTE).id, 'paste_1');
+	t.is(allocatePlaceholderId({}, PlaceholderType.FILE).id, 'file_1');
+});
+
+test('allocatePlaceholderId counts only its own type', t => {
+	const existing = {
+		file_1: file('[@a.ts]'),
+		file_2: file('[@b.ts]'),
+	};
+
+	t.is(allocatePlaceholderId(existing, PlaceholderType.PASTE).id, 'paste_1');
+	t.is(allocatePlaceholderId(existing, PlaceholderType.FILE).id, 'file_3');
+});
+
+test('allocatePlaceholderId does not reuse an id after a deletion', t => {
+	// paste_1 was deleted; paste_2 is still in the input.
+	const existing = {paste_2: paste('[Paste #2: 4 chars]')};
+
+	const next = allocatePlaceholderId(existing, PlaceholderType.PASTE);
+
+	t.is(next.id, 'paste_3');
+	t.is(next.ordinal, 3);
+});
+
+test('allocatePlaceholderId respects legacy bare-numeric paste keys', t => {
+	const existing = {'7': paste('[Paste #7: 4 chars]')};
+
+	t.is(allocatePlaceholderId(existing, PlaceholderType.PASTE).id, 'paste_8');
+	// A bare number is never a file key, so files start fresh.
+	t.is(allocatePlaceholderId(existing, PlaceholderType.FILE).id, 'file_1');
 });
 
 test('findPlaceholderOccurrences reports positions in document order', t => {

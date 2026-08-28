@@ -8,7 +8,7 @@ import {
 import {InputState, PlaceholderType} from '../types/hooks';
 import {handleAtomicDeletion} from '../utils/atomic-deletion';
 import {PasteDetector} from '../utils/paste-detection';
-import {handlePaste} from '../utils/paste-utils';
+import {handlePaste, resizePasteDisplayText} from '../utils/paste-utils';
 import {findPlaceholderOccurrences} from '../utils/placeholders';
 
 // Scales the paste window size based on content length.
@@ -106,7 +106,10 @@ export function useInputState() {
 					// Merge the new chunk into the existing paste placeholder
 					const updatedContent = placeholder.content + addedChunk;
 					const oldPlaceholder = placeholder.displayText;
-					const newPlaceholder = `[Paste #${lastPasteIdRef.current}: ${updatedContent.length} chars]`;
+					const newPlaceholder = resizePasteDisplayText(
+						oldPlaceholder,
+						updatedContent.length,
+					);
 
 					const updatedPlaceholderContent = {
 						...currentState.placeholderContent,
@@ -170,7 +173,10 @@ export function useInputState() {
 					if (placeholder.type === PlaceholderType.PASTE) {
 						const updatedContent = placeholder.content + detection.addedText;
 						const oldPlaceholder = placeholder.displayText;
-						const newPlaceholder = `[Paste #${activePasteId}: ${updatedContent.length} chars]`;
+						const newPlaceholder = resizePasteDisplayText(
+							oldPlaceholder,
+							updatedContent.length,
+						);
 
 						const updatedPlaceholderContent = {
 							...currentState.placeholderContent,

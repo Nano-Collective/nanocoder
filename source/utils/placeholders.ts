@@ -1,4 +1,50 @@
 import type {PlaceholderContent} from '../types/hooks';
+import {PlaceholderType} from '../types/hooks';
+
+const ID_PREFIX: Record<PlaceholderType, string> = {
+	[PlaceholderType.PASTE]: 'paste',
+	[PlaceholderType.FILE]: 'file',
+};
+
+export interface AllocatedPlaceholderId {
+	/** Map key. Namespaced by type so two kinds can never collide. */
+	id: string;
+	/** Human-facing counter used in the placeholder's display text. */
+	ordinal: number;
+}
+
+/**
+ * Allocate the map key for a new placeholder of `type`.
+ *
+ * The ordinal comes from the highest ordinal already present, not from the
+ * number of live entries: deleting a placeholder must not free its id, or the
+ * next allocation would silently overwrite a placeholder still in the input.
+ */
+export function allocatePlaceholderId(
+	existing: Record<string, PlaceholderContent>,
+	type: PlaceholderType,
+): AllocatedPlaceholderId {
+	const prefix = ID_PREFIX[type];
+	const namespaced = new RegExp(`^${prefix}_(\\d+)$`);
+
+	let highest = 0;
+	for (const key of Object.keys(existing)) {
+		const match = key.match(namespaced);
+		if (match) {
+			highest = Math.max(highest, Number(match[1]));
+			continue;
+		}
+		// Prompt history persists InputState to disk, so bare-numeric paste keys
+		// written before pastes were namespaced can still arrive from an older
+		// session's history file.
+		if (type === PlaceholderType.PASTE && /^\d+$/.test(key)) {
+			highest = Math.max(highest, Number(key));
+		}
+	}
+
+	const ordinal = highest + 1;
+	return {id: `${prefix}_${ordinal}`, ordinal};
+}
 
 export interface PlaceholderOccurrence {
 	id: string;
