@@ -3,6 +3,7 @@
 // only users who actually invoke `fetch_url` pay the cost.
 import {Box, Text} from 'ink';
 import React from 'react';
+import {formatSize} from '@/components/file-explorer/utils';
 import {DEFAULT_TERMINAL_COLUMNS, MAX_URL_CONTENT_BYTES} from '@/constants';
 import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
@@ -113,7 +114,7 @@ function FetchUrlFormatterComponent({
 					{wasTruncated && (
 						<Box>
 							<Text color={colors.warning}>
-								⚠ Content was truncated to 100KB
+								⚠ Content was truncated to {formatSize(MAX_URL_CONTENT_BYTES)}
 							</Text>
 						</Box>
 					)}
