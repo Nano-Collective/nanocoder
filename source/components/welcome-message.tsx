@@ -15,9 +15,25 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Read package.json once at module load time to avoid repeated file reads
-const packageJson = JSON.parse(
-	fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8'),
-) as {version: string};
+export function getPackageVersion(
+	packageJsonPath = path.join(__dirname, '../../package.json'),
+): string {
+	try {
+		const packageJson = JSON.parse(
+			fs.readFileSync(packageJsonPath, 'utf8'),
+		) as {
+			version?: unknown;
+		};
+
+		return typeof packageJson.version === 'string'
+			? packageJson.version
+			: 'unknown';
+	} catch {
+		return 'unknown';
+	}
+}
+
+const packageVersion = getPackageVersion();
 
 const DEFAULT_SHAPE: NanocoderShape = 'tiny';
 
@@ -46,7 +62,7 @@ export default memo(function WelcomeMessage() {
 					>
 						<Box marginBottom={1}>
 							<Text color={colors.primary} bold>
-								✻ Version {packageJson.version} ✻
+								✻ Version {packageVersion} ✻
 							</Text>
 						</Box>
 
@@ -64,7 +80,7 @@ export default memo(function WelcomeMessage() {
 					</Gradient>
 
 					<TitledBoxWithPreferences
-						title={`✻ Welcome to Nanocoder ${packageJson.version} ✻`}
+						title={`✻ Welcome to Nanocoder ${packageVersion} ✻`}
 						width={boxWidth}
 						borderColor={colors.primary}
 						paddingX={2}

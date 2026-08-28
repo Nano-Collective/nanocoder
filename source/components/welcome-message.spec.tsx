@@ -1,20 +1,29 @@
-import fs from 'fs';
 import path from 'path';
 import {fileURLToPath} from 'url';
 import test from 'ava';
 import React from 'react';
 import {renderWithTheme} from '../test-utils/render-with-theme.js';
-import WelcomeMessage from './welcome-message';
+import WelcomeMessage, {getPackageVersion} from './welcome-message';
 
 console.log('\nwelcome-message.spec.tsx');
 
 // Read version from package.json dynamically to avoid hardcoding
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const packageJson = JSON.parse(
-	fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8'),
-) as {version: string};
-const VERSION = packageJson.version;
+const packageJsonPath = path.join(__dirname, '../../package.json');
+const VERSION = getPackageVersion(packageJsonPath);
+
+test('getPackageVersion returns package version', t => {
+	t.is(getPackageVersion(packageJsonPath), VERSION);
+});
+
+test('getPackageVersion falls back when package.json is missing', t => {
+	t.is(getPackageVersion(path.join(__dirname, 'missing-package.json')), 'unknown');
+});
+
+test('getPackageVersion falls back when package.json is invalid', t => {
+	t.is(getPackageVersion(fileURLToPath(import.meta.url)), 'unknown');
+});
 
 // ============================================================================
 // Narrow Terminal Tests (width < 80)
