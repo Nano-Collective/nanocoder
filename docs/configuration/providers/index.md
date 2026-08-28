@@ -10,7 +10,7 @@ Nanocoder supports multiple AI providers including any OpenAI-compatible API, na
 
 ## Configuration Methods
 
-1. **Interactive Setup (Recommended for new users)**: Run `/setup-providers` inside Nanocoder for a guided wizard with provider templates. The wizard allows you to:
+1. **Interactive Setup (Recommended for new users)**: Run `/settings providers` inside Nanocoder for a guided wizard with provider templates. The wizard allows you to:
    - Choose between project-level or global configuration
    - Select from common provider templates
    - Add custom OpenAI-compatible providers manually
@@ -18,7 +18,7 @@ Nanocoder supports multiple AI providers including any OpenAI-compatible API, na
    - Fetch available models automatically from your provider
 2. **Manual Configuration**: Create an `agents.config.json` file (see [Configuration](../index.md) for file locations)
 
-> **Note**: The `/setup-providers` wizard requires at least one provider to be configured before saving. You cannot exit without adding a provider.
+> **Note**: The `/settings providers` wizard requires at least one provider to be configured before saving. You cannot exit without adding a provider.
 
 ## Local Providers
 
@@ -41,6 +41,7 @@ Hosted services using the OpenAI-compatible API format.
 - [Requesty](requesty.md) - OpenAI-compatible LLM router for multiple AI providers
 - [OrcaRouter](orcarouter.md) - OpenAI-compatible LLM router for multiple AI providers
 - [Together AI](together.md) - Fast inference for open-source models with OpenAI-compatible API
+- [Groq](groq.md) - Very fast open-weight model inference on LPU hardware
 - [OpenAI](openai.md) - GPT models via OpenAI's API
 - [Mistral AI](mistral.md) - Mistral models
 - [GitHub Models](github-models.md) - AI models via GitHub's marketplace

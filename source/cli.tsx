@@ -121,18 +121,9 @@ function isValidOutputFormat(value: unknown): value is 'text' | 'json' {
 }
 
 async function main(): Promise<void> {
-	// Dynamic imports so the fast-path flag handlers above never pay for them.
-	const [
-		{render},
-		{default: App},
-		{parseContextLimit},
-		{setSessionContextLimit},
-	] = await Promise.all([
-		import('ink'),
-		import('@/app'),
-		import('@/app/utils/handlers/context-max-handler'),
-		import('@/models/index'),
-	]);
+	// Parse args and dispatch non-TUI branches BEFORE importing ink or @/app.
+	// Those packages pull ~thousand+ modules; --acp / --plain / auth must stay
+	// on the lightweight path. Ink + App load only in the final TUI branch.
 
 	const vscodeMode = args.includes('--vscode');
 
@@ -178,9 +169,13 @@ async function main(): Promise<void> {
 		}
 	}
 
-	// Extract --context-max if specified
+	// Extract --context-max if specified (framework-free parser — no React/Ink)
 	const contextMaxArgIndex = args.findIndex(arg => arg === '--context-max');
 	if (contextMaxArgIndex !== -1 && args[contextMaxArgIndex + 1]) {
+		const [{parseContextLimit}, {setSessionContextLimit}] = await Promise.all([
+			import('@/utils/parse-context-limit'),
+			import('@/models/index'),
+		]);
 		const limit = parseContextLimit(args[contextMaxArgIndex + 1]);
 		if (limit !== null) {
 			setSessionContextLimit(limit);
@@ -193,6 +188,7 @@ async function main(): Promise<void> {
 	}
 
 	// Extract --mode if specified. Accept `--mode value` and `--mode=value`.
+	// `@/app/types` is a tiny const module (no React/Ink) — safe before TUI.
 	const {VALID_MODES} = await import('@/app/types');
 	type CliMode = (typeof VALID_MODES)[number];
 	let cliMode: CliMode | undefined;
@@ -460,11 +456,16 @@ async function main(): Promise<void> {
 			outputFormat,
 		});
 	} else {
+		// Interactive TUI — load Ink + App only now.
+		const [{render}, {default: App}] = await Promise.all([
+			import('ink'),
+			import('@/app'),
+		]);
+
 		// Prevent Node's global performance entry buffer from growing without
 		// bound during long Ink sessions. See issue #521.
 		const {installPerfBufferGuard} = await import('@/utils/perf-buffer');
 		installPerfBufferGuard();
-
 		// Resolve --continue/--resume <id> into a Session BEFORE rendering, so
 		// the app can apply it on first mount (see App's initialSession prop).
 		// A bare --resume (no id) instead opens the picker at startup — no

@@ -1,5 +1,6 @@
 import {randomBytes} from 'node:crypto';
 import React from 'react';
+import type {SettingsTabId} from '@/app/components/settings-constants';
 import {
 	createClearMessagesHandler,
 	handleMessageSubmission,
@@ -105,9 +106,7 @@ interface UseAppHandlersProps {
 	// Mode handlers
 	enterModelSelectionMode: () => void;
 	enterModelDatabaseMode: () => void;
-	enterConfigWizardMode: () => void;
-	enterSettingsMode: () => void;
-	enterMcpWizardMode: () => void;
+	enterSettingsMode: (tab?: SettingsTabId) => void;
 	enterExplorerMode: () => void;
 	enterIdeSelectionMode: () => void;
 	enterTune: () => void;
@@ -666,9 +665,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					commandArgs,
 					onEnterModelSelectionMode: props.enterModelSelectionMode,
 					onEnterModelDatabaseMode: props.enterModelDatabaseMode,
-					onEnterConfigWizardMode: props.enterConfigWizardMode,
 					onEnterSettingsMode: props.enterSettingsMode,
-					onEnterMcpWizardMode: props.enterMcpWizardMode,
 					onEnterExplorerMode: props.enterExplorerMode,
 					onEnterIdeSelectionMode: props.enterIdeSelectionMode,
 					onEnterTune: props.enterTune,
@@ -707,9 +704,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.customCommandExecutor,
 			props.enterModelSelectionMode,
 			props.enterModelDatabaseMode,
-			props.enterConfigWizardMode,
 			props.enterSettingsMode,
-			props.enterMcpWizardMode,
 			props.enterExplorerMode,
 			props.enterIdeSelectionMode,
 			props.enterTune,

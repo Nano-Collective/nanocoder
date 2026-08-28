@@ -34,6 +34,19 @@
 	let pendingImages = [];
 	let pendingUserMessageText = null;
 
+	// ── Slash command autocomplete state ────────────────────
+	const slashDropdown = document.getElementById('slash-dropdown');
+	const { SLASH_COMMANDS, findSlashCommandToken, applySlashCommand } = globalThis.NanocoderSlashCommandUtils;
+
+	let slashSuggestions = [];
+	let slashSelectedIndex = 0;
+	/**
+	 * Set after a selection lands and after Escape, so the caret move we just
+	 * made doesn't immediately reopen the menu on the name we just completed.
+	 * Cleared by the next real keystroke.
+	 */
+	let slashSuppressed = false;
+
 	let modelDropdown, modeDropdown, providerDropdown;
 
 	function initDropdowns() {
@@ -385,8 +398,16 @@
 	let sessionsData = [];
 	let isHistoryView = false;
 	let isProcessing = false;
+	// True from the moment Stop/Escape is pressed until the next prompt starts.
+	// Cancellation is a round trip: the agent keeps emitting updates for the
+	// turn it was told to stop (a tool already in flight, the queued calls it
+	// then marks cancelled), and those land after the UI has already closed the
+	// turn. Without this flag they rebuild a second tool card group that looks
+	// like the cancelled work restarting.
+	let turnCancelled = false;
 	let currentAggregator = null;
 	let currentThoughtBox = null;
+	let currentTurnFooter = null;
 	let visualLoader = null;
 	const toolKinds = new Map();
 	let toastTimeout = null;
@@ -451,7 +472,7 @@
 
 	function createMessageFooter(getText, role, sentAt) {
 		const footer = document.createElement('div');
-		footer.className = 'flex h-5 items-center gap-1.5 mt-1 text-xs text-vscode-fg opacity-60 ' +
+		footer.className = 'message-footer flex h-5 items-center gap-1.5 mt-1 text-xs text-vscode-fg opacity-60 ' +
 			(role === 'user' ? 'self-end' : 'self-start');
 
 		const btn = document.createElement('button');
@@ -529,6 +550,7 @@
 	// Shared by the Stop button and Escape so the two can't drift apart.
 	function requestCancel() {
 		vscode.postMessage({ type: 'cancel' });
+		turnCancelled = true;
 		setProcessing(false);
 	}
 
@@ -716,14 +738,174 @@
 		});
 	}
 
+	// ── Slash command functions ──────────────────────────────
+
+	function hideSlashDropdown() {
+		if (!slashDropdown) return;
+		const wasOpen = !slashDropdown.classList.contains('hidden');
+		slashDropdown.classList.add('hidden');
+		slashDropdown.innerHTML = '';
+		slashSuggestions = [];
+		slashSelectedIndex = 0;
+		// The textarea is a single combobox shared with the @-mention listbox,
+		// so only reset its aria state when this dropdown is what set it.
+		// Otherwise every keystroke typed into an open mention list would
+		// announce the list as collapsed.
+		if (wasOpen && !mentionOpen) {
+			chatInput.removeAttribute('aria-activedescendant');
+			chatInput.setAttribute('aria-expanded', 'false');
+		}
+	}
+
+	/** @returns {boolean} whether the command was actually applied. */
+	function applySlashSelection(command) {
+		const result = applySlashCommand(
+			chatInput.value,
+			chatInput.selectionStart,
+			chatInput.selectionEnd,
+			command,
+		);
+		hideSlashDropdown();
+		if (!result) return false;
+
+		// Set before the caret moves, because that move fires selectionchange.
+		// A command with no template completes to its own name, which is itself
+		// a valid token, so without this the menu would reopen on top of it and
+		// swallow the Enter that runs it.
+		slashSuppressed = true;
+		chatInput.value = result.text;
+		chatInput.setSelectionRange(result.cursor, result.cursor);
+		// Resized here rather than by dispatching a synthetic input event: that
+		// would clear the suppression flag and re-run the mention search.
+		chatInput.style.height = 'auto';
+		chatInput.style.height = chatInput.scrollHeight + 'px';
+		chatInput.focus();
+		return true;
+	}
+
+	function renderSlashDropdown(commands) {
+		if (!slashDropdown) return;
+		slashDropdown.innerHTML = '';
+		slashSuggestions = commands;
+		commands.forEach((command, index) => {
+			const item = document.createElement('button');
+			item.type = 'button';
+			item.id = 'slash-option-' + index;
+			item.setAttribute('role', 'option');
+			item.setAttribute('aria-selected', index === slashSelectedIndex ? 'true' : 'false');
+			item.className = 'w-full text-left bg-transparent border-none px-3 py-2 cursor-pointer transition-colors flex items-start justify-between gap-3';
+			if (index === slashSelectedIndex) {
+				item.classList.add('bg-vscode-list-active', 'text-vscode-list-activeFg');
+				chatInput.setAttribute('aria-activedescendant', item.id);
+			} else {
+				item.classList.add('hover:bg-vscode-list-hover', 'text-vscode-dropdown-foreground');
+			}
+			const left = document.createElement('span');
+			left.className = 'font-semibold text-[0.9em]';
+			left.textContent = command.name;
+			const right = document.createElement('span');
+			right.className = 'text-[0.8em] opacity-70';
+			right.textContent = command.description;
+			item.appendChild(left);
+			item.appendChild(right);
+			// mousedown rather than click, matching the mention rows: click
+			// would let the textarea blur first, and the blur handler closes
+			// the dropdown before the selection lands.
+			item.addEventListener('mousedown', (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				applySlashSelection(command);
+			});
+			slashDropdown.appendChild(item);
+		});
+		slashDropdown.classList.remove('hidden');
+		chatInput.setAttribute('aria-expanded', 'true');
+	}
+
+	function updateSlashAutocomplete() {
+		if (!slashDropdown || slashSuppressed) {
+			hideSlashDropdown();
+			return;
+		}
+		const token = findSlashCommandToken(
+			chatInput.value,
+			chatInput.selectionStart,
+			chatInput.selectionEnd,
+		);
+		if (!token) {
+			hideSlashDropdown();
+			return;
+		}
+		const filtered = SLASH_COMMANDS.filter(command =>
+			command.name.slice(1).toLowerCase().startsWith(token.query)
+		);
+		if (filtered.length === 0) {
+			hideSlashDropdown();
+			return;
+		}
+		slashSelectedIndex = 0;
+		renderSlashDropdown(filtered);
+	}
+
 	// Auto-resize textarea
 	chatInput.addEventListener('input', function () {
 		this.style.height = 'auto';
 		this.style.height = (this.scrollHeight) + 'px';
+		// Typing is what lifts a dismissal, so this runs before the update.
+		slashSuppressed = false;
+		updateSlashAutocomplete();
 	});
+
+	if (slashDropdown) {
+		chatInput.addEventListener('blur', hideSlashDropdown);
+		// Catches caret moves that fire no input event, which would otherwise
+		// leave the menu open over a token that is no longer under the caret.
+		document.addEventListener('selectionchange', () => {
+			if (document.activeElement === chatInput) {
+				updateSlashAutocomplete();
+			}
+		});
+	}
 
 	// Handle Enter to submit (Shift+Enter for newline)
 	chatInput.addEventListener('keydown', (e) => {
+		// Slash command navigation wins before mention navigation.
+		if (slashDropdown && !slashDropdown.classList.contains('hidden') && slashSuggestions.length > 0) {
+			if (e.key === 'ArrowDown') {
+				e.preventDefault();
+				slashSelectedIndex = (slashSelectedIndex + 1) % slashSuggestions.length;
+				renderSlashDropdown(slashSuggestions);
+				return;
+			}
+			if (e.key === 'ArrowUp') {
+				e.preventDefault();
+				slashSelectedIndex = (slashSelectedIndex - 1 + slashSuggestions.length) % slashSuggestions.length;
+				renderSlashDropdown(slashSuggestions);
+				return;
+			}
+			if (e.key === 'Enter' && !e.shiftKey) {
+				// Only claim the key if the completion actually landed. If the
+				// caret has moved off the token the menu was opened for, this
+				// falls through to submit instead of silently eating the Enter.
+				if (applySlashSelection(slashSuggestions[slashSelectedIndex])) {
+					e.preventDefault();
+					return;
+				}
+			} else if (e.key === 'Escape') {
+				e.preventDefault();
+				// Same reason as the mention dropdown below: the document-level
+				// handler cancels the in-flight request on Escape whenever
+				// isProcessing, so without this, dismissing the menu mid-stream
+				// would also kill the run.
+				e.stopPropagation();
+				// Stays dismissed until the next keystroke; without this the
+				// caret move from Escape would reopen it via selectionchange.
+				slashSuppressed = true;
+				hideSlashDropdown();
+				return;
+			}
+		}
+
 		// Mention navigation has to win over Enter-to-submit. Handled at the top
 		// of this same listener rather than in a second one, because two
 		// listeners on the same element would race and Enter could submit the
@@ -822,13 +1004,6 @@
 
 		const imagesToSubmit = pendingImages.length > 0 ? [...pendingImages] : undefined;
 
-		// Send message to extension host
-		vscode.postMessage({
-			type: 'submitMessage',
-			text: text,
-			images: imagesToSubmit
-		});
-
 		// Clear input. Close the mention first — its token offsets point into
 		// text that is about to disappear.
 		closeMention();
@@ -841,8 +1016,27 @@
 		attachedPaths = [];
 		renderChips();
 
+		dispatchPrompt(text, imagesToSubmit);
+	}
+
+	// Send `text` to the agent as a turn of its own. Split out of
+	// submitMessage so an editor-driven prompt can bypass the composer: going
+	// through it would overwrite a draft the user is typing and sweep up chips
+	// and images they staged for a different question.
+	function dispatchPrompt(text, images) {
+		// A new turn re-opens the door to tool updates that the previous
+		// cancel closed.
+		turnCancelled = false;
+
+		// Send message to extension host
+		vscode.postMessage({
+			type: 'submitMessage',
+			text: text,
+			images: images
+		});
+
 		// Optimistically append user message
-		appendMessage(text, 'user', imagesToSubmit);
+		appendMessage(text, 'user', images);
 		pendingUserMessageText = text;
 
 		if (!isProcessing) {
@@ -941,6 +1135,19 @@
 			e.preventDefault();
 			e.stopPropagation();
 		};
+
+		// Editor tab drags carry a JSON array of URI strings under
+		// `ResourceURLs` instead of a uri-list. Flatten it to the same
+		// newline-separated shape so there is one parser downstream.
+		const resourceUrlsToUriList = (raw) => {
+			if (!raw) return '';
+			try {
+				const parsed = JSON.parse(raw);
+				return Array.isArray(parsed) ? parsed.filter(u => typeof u === 'string').join('\n') : '';
+			} catch {
+				return '';
+			}
+		};
 		
 		// Prevent default on window to stop VS Code's native drop handler
 		window.addEventListener('dragover', (e) => e.preventDefault(), true);
@@ -969,41 +1176,19 @@
 		composerBox.addEventListener('drop', e => {
 			handleDrag(e);
 			composerBox.classList.remove('drag-over');
-			const uris = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+
+			// VS Code's explorer publishes text/uri-list; some sources only set
+			// text/plain. resource-urls is what the editor uses for tab drags.
+			const uris =
+				e.dataTransfer.getData('text/uri-list') ||
+				e.dataTransfer.getData('text/plain') ||
+				resourceUrlsToUriList(e.dataTransfer.getData('resourceurls'));
 			if (!uris) return;
-			
-			const isWindows = navigator.userAgentData?.platform?.toLowerCase().includes('win') || navigator.userAgent.includes('Windows');
-			const paths = uris.split('\n')
-				.map(u => u.trim())
-				.filter(u => u && !u.startsWith('#'))
-				.map(u => {
-					if (u.startsWith('file://')) {
-						let p = decodeURIComponent(u.replace(/^file:\/\/\/?/, ''));
-						if (isWindows && p.match(/^[a-zA-Z]:/)) {
-							// Already dropped leading slash via the regex above if it had exactly three slashes. 
-							// But if it had two slashes e.g. file://C:/ it would become C:/
-							// If it had three e.g. file:///C:/ the regex stripped up to 3 slashes so it also becomes C:/
-							// Wait, what if it was file:///C:/... ? `u.replace(/^file:\/\/\/?/, '')` removes `file:///`.
-							// What about UNC paths? `file://server/share` -> regex removes `file://`, leaving `server/share`. 
-							// Wait, `u.replace(/^file:\/\/\/?/, '')` removes `file:///` or `file://`.
-							// For UNC `file://server/share`, `replace` makes it `server/share`. 
-							// So we need to put `//` back for UNC on Windows? 
-							// Let's implement Will's explicit advice:
-							// "strip with /^file:\/\/\/?/ and on Windows drop the leading slash before a drive letter."
-						}
-						// Let's strictly follow Will's suggestion:
-						let p2 = decodeURIComponent(u.replace(/^file:\/\/\/?/, ''));
-						if (isWindows && p2.match(/^\/[a-zA-Z]:/)) {
-							p2 = p2.substring(1);
-						}
-						// wait, for UNC path `file://server/share`, replacing `/^file:\/\/\/?/` removes `file://`. 
-						// So it becomes `server/share`. On Windows UNC paths need `\\server\share`. 
-						// Actually vscode drop UNC path comes as `file:////server/share` or `file://server/share`.
-						// If we don't mess with it too much, let's just do exactly what Will said.
-						return p2;
-					}
-					return u;
-				});
+
+			const isWindows =
+				navigator.userAgentData?.platform?.toLowerCase().includes('win') ||
+				navigator.userAgent.includes('Windows');
+			const paths = NanocoderUriUtils.parseDropPayload(uris, isWindows);
 
 			paths.forEach(p => vscode.postMessage({ type: 'requestPathInfo', path: p }));
 		}, true);
@@ -1051,7 +1236,10 @@
 		// A user message opens a new turn, so the agent segments that follow get
 		// a fresh id. The raw-text accumulator is handed over lazily, once the
 		// new response produces text.
-		if (role === 'user') agentTurnId++;
+		if (role === 'user') {
+			agentTurnId++;
+			currentTurnFooter = null;
+		}
 
 		const wrapper = document.createElement('div');
 		wrapper.className = 'group flex flex-col min-w-0 shrink-0 ' +
@@ -1239,8 +1427,15 @@
 
 			msgEl.appendChild(textContainer);
 			wrapper.appendChild(msgEl);
-			wrapper.appendChild(createMessageFooter(() => wrapper.dataset.rawText || '', 'agent', new Date()));
-			wrapper.dataset.rawText = currentTurnText;
+			if (currentTurnFooter) {
+				currentTurnFooter.remove();
+			} else {
+				// captures footer, not currentTurnFooter - avoids copying the next turn's text
+				const footer = createMessageFooter(() => footer.dataset.rawText || '', 'agent', new Date());
+				currentTurnFooter = footer;
+			}
+			currentTurnFooter.dataset.rawText = lastAgentRawText;
+			wrapper.appendChild(currentTurnFooter);
 			messagesContainer.appendChild(wrapper);
 
 			currentTurnEl = msgEl;
@@ -1250,8 +1445,8 @@
 			// Append to existing turn
 			currentTurnText += textChunk;
 			syncLastAgentRawText();
-			if (currentTurnEl.parentElement) {
-				currentTurnEl.parentElement.dataset.rawText = currentTurnText;
+			if (currentTurnFooter) {
+				currentTurnFooter.dataset.rawText = lastAgentRawText;
 			}
 
 			if (typeof marked !== 'undefined') {
@@ -1442,7 +1637,9 @@
 				currentTurnEl = null;
 				currentTextEl = null;
 				currentTurnText = '';
+				currentTurnFooter = null;
 				toolKinds.clear();
+				turnCancelled = false;
 				agentTurnId = 0;
 				lastAgentRawTurnId = -1;
 				lastAgentSegments = '';
@@ -1488,6 +1685,11 @@
 			case 'updateSessions':
 				sessionsData = message.sessions || [];
 				renderSessions(); // Always update so list is ready when history opens
+				break;
+			case 'runPrompt':
+				if (isHistoryView) showChatView();
+				dispatchPrompt(message.text);
+				chatInput.focus();
 				break;
 			case 'copyLastCodeBlock':
 				copyLastCodeBlock();
@@ -1678,6 +1880,20 @@
 		syncLastAgentRawText();
 	}
 
+	function aggregatorHasPendingTools(aggregator) {
+		for (const item of aggregator.toolItems.values()) {
+			if (item.dataset.pending === 'true') return true;
+		}
+		return false;
+	}
+
+	function closeAggregatorIfIdle() {
+		if (currentAggregator && !aggregatorHasPendingTools(currentAggregator)) {
+			currentAggregator.close();
+			currentAggregator = null;
+		}
+	}
+
 	function handleAcpUpdate(payload) {
 		if (!payload) return;
 		const update = payload.update ? payload.update : payload;
@@ -1701,17 +1917,20 @@
 			if (currentThoughtBox) {
 				currentThoughtBox.pause();
 			}
+			closeAggregatorIfIdle();
 			if (update.content && update.content.text) {
 				stopVisualLoader();
 				appendChunk(update.content.text);
 			}
 		} else if (update.sessionUpdate === 'agent_thought_chunk') {
-			if (!currentThoughtBox) {
-				endCurrentTextBlock();
-				currentThoughtBox = new ThoughtAggregator();
-			}
-			if (update.content && update.content.text) {
-				currentThoughtBox.append(update.content.text);
+			const thoughtText = update.content && update.content.text;
+			if (thoughtText && (currentThoughtBox || thoughtText.trim())) {
+				if (!currentThoughtBox) {
+					endCurrentTextBlock();
+					currentThoughtBox = new ThoughtAggregator();
+					closeAggregatorIfIdle();
+				}
+				currentThoughtBox.append(thoughtText);
 			}
 		} else if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
 			if (currentThoughtBox) {
@@ -1777,7 +1996,10 @@
 	document.querySelectorAll('.settings-action-btn').forEach(btn => {
 		btn.addEventListener('click', () => {
 			const action = btn.dataset.action;
-			if (action === 'edit-providers' || action === 'edit-mcp' || action === 'edit-tools' || action === 'open-agents-config') {
+			if (action === 'edit-mcp') {
+				// MCP servers live in .mcp.json, not agents.config.json.
+				vscode.postMessage({ type: 'openConfigFile', file: '.mcp.json' });
+			} else if (action === 'edit-providers' || action === 'edit-tools' || action === 'open-agents-config') {
 				vscode.postMessage({ type: 'openConfigFile', file: 'agents.config.json' });
 			} else if (action === 'open-preferences') {
 				vscode.postMessage({ type: 'openConfigFile', file: 'nanocoder-preferences.json' });
@@ -2084,8 +2306,8 @@
 			messagesContainer.appendChild(this.el);
 		}
 
-		toggle() {
-			this.isOpen = !this.isOpen;
+		toggle(force) {
+			this.isOpen = force !== undefined ? force : !this.isOpen;
 			this.body.style.display = this.isOpen ? '' : 'none';
 
 			const svg = this.chevron.querySelector('svg');
@@ -2142,20 +2364,27 @@
 				statusEl.dataset.status = update.status || 'pending';
 				if (update.status === 'success' || update.status === 'completed') {
 					statusEl.innerHTML = ICONS.success;
+					item.dataset.pending = 'false';
 				} else if (
 					update.status === 'cancelled' ||
 					update.status === 'denied' ||
 					// ACP has no 'cancelled' status, so a cancel arrives as failed with
 					// 'Cancelled by user'. Case-insensitive, or the capital C misses.
-					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && /aborterror|cancelled/i.test(update.rawOutput))
+					(update.status === 'failed' && update.rawOutput && typeof update.rawOutput === 'string' && /aborterror|cancelled|denied/i.test(update.rawOutput))
 				) {
 					statusEl.innerHTML = ICONS.cancelled;
+					item.dataset.pending = 'false';
 				} else if (update.status === 'error' || update.status === 'failed') {
 					statusEl.innerHTML = ICONS.error;
+					item.dataset.pending = 'false';
 				} else if (update.status === 'pending') {
+					// Queued, not yet running - still unfinished, so the
+					// aggregator must stay open for it.
 					statusEl.innerHTML = ICONS.circle;
+					item.dataset.pending = 'true';
 				} else {
 					statusEl.innerHTML = ICONS.pending;
+					item.dataset.pending = 'true';
 				}
 			}
 
@@ -2177,6 +2406,7 @@
 
 		if (!card) {
 			endCurrentTextBlock();
+			closeAggregatorIfIdle();
 			card = document.createElement('div');
 			card.id = `plan-card-${agentTurnId}`;
 			card.className = 'my-3 border border-vscode-widget-border rounded bg-vscode-widget-bg overflow-hidden shrink-0';
@@ -2238,6 +2468,13 @@
 		const toolCallId = update.toolCallId || (update.toolCall && update.toolCall.toolCallId);
 		if (!toolCallId) return;
 
+		// Post-cancel trailing updates: a tool that was mid-flight when Stop was
+		// pressed still reports its outcome, and the calls queued behind it
+		// report as cancelled. setProcessing(false) already marked every
+		// unfinished card cancelled, so rendering these would either revive a
+		// spinner or open a fresh group for work the user just stopped.
+		if (turnCancelled) return;
+
 		// A new card is about to be inserted below the current text block -
 		// close the block so any text streamed after the tool starts fresh
 		// below the card instead of appending to the paragraph above it.
@@ -2250,6 +2487,7 @@
 		if (toolKinds.get(toolCallId) === 'edit') {
 			let card = document.getElementById(`tool-card-${toolCallId}`);
 			if (!card) {
+				closeAggregatorIfIdle();
 				card = createEditCard(toolCallId, update);
 				messagesContainer.appendChild(card);
 				scrollToBottom();

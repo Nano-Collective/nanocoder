@@ -8,6 +8,21 @@ sidebar_order: 4
 
 Nanocoder automatically saves your preferences to remember your choices across sessions.
 
+## Editing Preferences with `/settings`
+
+You should rarely need to edit these files by hand. `/settings` opens an in-TUI editor covering everything on this page, grouped into six tabs:
+
+- **Appearance** - theme, title shape, nanocoder ASCII shape, alternate screen mode
+- **Input** - paste threshold, desktop notifications
+- **Behavior** - tool results and thinking display, reasoning traces, default mode, auto-compact, session autosave
+- **Providers** - configure providers, web search, tool auto-approval
+- **MCP** - configure MCP servers
+- **Advanced** - privacy, direct config file editing, environment, model tuning, IDE connection
+
+Jump straight to a tab with `/settings <tab>`, e.g. `/settings providers`.
+
+The rest of this page documents the underlying file format, for scripted setups and for anything you'd rather edit directly.
+
 ## Preferences File Locations
 
 Preferences follow the same location hierarchy as configuration files:
@@ -40,7 +55,7 @@ The paste threshold is also stored in the preferences file under the `nanocoder.
 |--------|------|---------|-------------|
 | `nanocoder.paste.singleLineThreshold` | number | `800` | Maximum characters for a single-line paste to be inserted directly. Longer or multi-line pastes become `[Paste #N: X chars]` placeholders. |
 
-You can change this via `/settings` → **Paste Threshold**, or by editing the file directly:
+You can change this via `/settings` → **Input** → **Paste Threshold**, or by editing the file directly:
 
 ```json
 {
@@ -60,7 +75,7 @@ Expanding reasoning traces can also be configured in the preferences file with t
 |--------|------|---------|-------------|
 | `reasoningExpanded` | boolean | `false` | When set to true, displays the full reasoning traces of models which support thinking |
 
-You can change this by editing the preferences file directly:
+You can change this via `/settings` → **Behavior** → **Reasoning Traces**, or by editing the preferences file directly:
 
 ```json
 {
@@ -69,6 +84,24 @@ You can change this by editing the preferences file directly:
 ```
 
 Reasoning traces can also be toggled dynamically with the Ctrl+R keyboard shortcut.
+
+### Usage and Cost Footer
+
+Each assistant message ends with a gray footer showing provider-reported token counts and the estimated cost of that response. Turn it off with the `showUsageFooter` field:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `showUsageFooter` | boolean | `true` | When false, assistant messages render with no footer line at all - neither the provider-reported tokens and cost, nor the client-side token estimate |
+
+You can change this via `/settings` → **Behavior** → **Tool Results and Thinking**, or by editing the preferences file directly:
+
+```json
+{
+  "showUsageFooter": false
+}
+```
+
+The setting is read per message, so toggling it applies from the next response onwards - no restart needed. It also applies to replayed history when you resume a session and to subagent transcripts.
 
 ### Professional Tone
 
@@ -100,7 +133,7 @@ Desktop notification preferences are stored under the `nanocoder.notifications` 
 | `nanocoder.notifications.events.questionPrompt` | boolean | `true` | Notify when the AI asks a question |
 | `nanocoder.notifications.events.generationComplete` | boolean | `true` | Notify when a response is ready |
 
-You can change these via `/settings` → **Notifications**. See [Desktop Notifications](../features/notifications.md) for full details including platform-specific setup.
+You can change these via `/settings` → **Input** → **Notifications**. See [Desktop Notifications](../features/notifications.md) for full details including platform-specific setup.
 
 When you restart Nanocoder, it automatically restores your last provider, model, theme, shape, paste threshold, and notification preferences.
 

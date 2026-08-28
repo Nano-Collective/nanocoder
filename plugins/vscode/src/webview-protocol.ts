@@ -82,6 +82,12 @@ export interface ExtensionMessageCopyLastCodeBlock {
 	type: 'copyLastCodeBlock';
 }
 
+/** Prompt built by an editor code lens; the composer submits it verbatim. */
+export interface ExtensionMessageRunPrompt {
+	type: 'runPrompt';
+	text: string;
+}
+
 export interface ExtensionMessageCopyResult {
 	type: 'copyResult';
 	ok: boolean;
@@ -178,6 +184,7 @@ export type ExtensionToWebviewMessage =
 	| ExtensionMessagePathInfoResolved
 	| ExtensionMessageCopyLastCodeBlock
 	| ExtensionMessageCopyResult
+	| ExtensionMessageRunPrompt
 	| ExtensionMessageMentionCompletions;
 
 
@@ -263,7 +270,7 @@ export interface WebviewMessageUpdateSetting {
 
 export interface WebviewMessageOpenConfigFile {
 	type: 'openConfigFile';
-	file: 'agents.config.json' | 'nanocoder-preferences.json';
+	file: 'agents.config.json' | 'nanocoder-preferences.json' | '.mcp.json';
 }
 
 export interface WebviewMessageRestartAcp {

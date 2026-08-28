@@ -14,6 +14,8 @@ resetPreferencesCache();
 
 const {renderWithTheme} = await import('../../test-utils/render-with-theme');
 const {SettingsSelector} = await import('./settings-tabs');
+const {SettingsDisplayPanel} = await import('./settings-selector');
+const {updateShowUsageFooter} = await import('@/config/preferences');
 
 test('SettingsSelector renders without crashing', t => {
 	const {unmount} = renderWithTheme(<SettingsSelector onCancel={() => {}} />);
@@ -67,4 +69,31 @@ test('SettingsSelector shows Tool Results and Thinking option on the Display tab
 	t.truthy(output);
 	t.truthy(output!.includes('Tool Results and Thinking'));
 	unmount();
+});
+
+test('SettingsDisplayPanel offers a Usage & Cost Footer toggle, ON by default', t => {
+	const {lastFrame, unmount} = renderWithTheme(
+		<SettingsDisplayPanel onBack={() => {}} onCancel={() => {}} />,
+	);
+	const output = lastFrame();
+	t.truthy(output);
+	t.true(output!.includes('Usage & Cost Footer'));
+	// Preference is unset in the temp config dir, so it defaults to on.
+	t.true(output!.includes('Usage & Cost Footer: ON'));
+	unmount();
+});
+
+test('SettingsDisplayPanel reflects a disabled Usage & Cost Footer preference', t => {
+	updateShowUsageFooter(false);
+	try {
+		const {lastFrame, unmount} = renderWithTheme(
+			<SettingsDisplayPanel onBack={() => {}} onCancel={() => {}} />,
+		);
+		const output = lastFrame();
+		t.truthy(output);
+		t.true(output!.includes('Usage & Cost Footer: OFF'));
+		unmount();
+	} finally {
+		updateShowUsageFooter(true);
+	}
 });

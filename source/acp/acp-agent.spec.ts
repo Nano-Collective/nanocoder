@@ -244,6 +244,36 @@ test('AcpAgent.loadSession - replays in-memory history for a known session', asy
 	t.true(replayed.some(u => u.update.content.text === 'remember this'));
 });
 
+test('AcpAgent.loadSession - replays reasoning but skips whitespace-only reasoning', async t => {
+	const conn = createMockConn();
+	const updates: any[] = [];
+	conn.sessionUpdate = async (u: any) => {
+		updates.push(u);
+	};
+	const agent = new AcpAgent(createMockInitContext(), conn);
+	const session = await agent.newSession({cwd: '/tmp'});
+	const loaded = (agent as any).sessions.get(session.sessionId);
+	loaded.messages = [
+		{role: 'assistant', content: 'first', reasoning: '\n\n'},
+		{role: 'assistant', content: 'second', reasoning: 'weighing options'},
+	];
+
+	updates.length = 0;
+	await agent.loadSession({
+		sessionId: session.sessionId,
+		cwd: '/tmp',
+		mcpServers: [],
+	});
+
+	const thoughts = updates.filter(
+		u => u.update?.sessionUpdate === 'agent_thought_chunk',
+	);
+	t.deepEqual(
+		thoughts.map(u => u.update.content.text),
+		['weighing options'],
+	);
+});
+
 // ============================================================================
 // setSessionConfigOption()
 // ============================================================================
@@ -465,6 +495,44 @@ test('AcpAgent.cancel - aborts session for known session', async t => {
 	// We can't directly check the session's abortController since it's internal,
 	// but we verify no error was thrown
 	t.pass();
+});
+
+test('AcpAgent.cancel - stops a turn cancelled before the loop reads the signal', async t => {
+	const context = createMockInitContext();
+	let chatCalls = 0;
+	(context.client as any).chat = async () => {
+		chatCalls++;
+		return {choices: [{message: {content: 'Test response'}}]};
+	};
+	const agent = new AcpAgent(context, createMockConn());
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	const turn = agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'hi'}],
+	});
+	await agent.cancel({sessionId: session.sessionId});
+
+	t.is((await turn).stopReason, 'cancelled');
+	t.is(chatCalls, 0);
+});
+
+test('AcpAgent.prompt - a cancelled turn does not block the next prompt', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+
+	const cancelled = agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'first'}],
+	});
+	await agent.cancel({sessionId: session.sessionId});
+	t.is((await cancelled).stopReason, 'cancelled');
+
+	const next = await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: 'second'}],
+	});
+	t.is(next.stopReason, 'end_turn');
 });
 
 // ============================================================================

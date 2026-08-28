@@ -177,6 +177,23 @@ export function updateCompactToolDisplay(value: boolean): void {
 }
 
 /**
+ * Get the per-response usage footer preference. On by default.
+ */
+export function getShowUsageFooter(): boolean {
+	const preferences = loadPreferences();
+	return preferences.showUsageFooter ?? true;
+}
+
+/**
+ * Save the per-response usage footer preference
+ */
+export function updateShowUsageFooter(value: boolean): void {
+	const preferences = loadPreferences();
+	preferences.showUsageFooter = value;
+	savePreferences(preferences);
+}
+
+/**
  * Get the privacy scrubbing preference from preferences
  */
 export function getPrivacyPreference(): boolean {

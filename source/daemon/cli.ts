@@ -19,7 +19,6 @@ import {fileURLToPath} from 'node:url';
 import {formatError} from '@/utils/error-formatter';
 import {
 	getLockfilePath,
-	getSocketPath,
 	readLiveLockfile,
 	readLockfile,
 	removeLockfile,
@@ -267,8 +266,11 @@ async function waitForLockfile(
 	const path = getLockfilePath(projectRoot);
 	while (Date.now() < deadline) {
 		if (existsSync(path)) {
+			// Report the path the daemon actually bound, not a recomputed one:
+			// the socket location can depend on TMPDIR, which need not match
+			// between a launchd/systemd-started daemon and this process.
 			const live = await readLiveLockfile(projectRoot);
-			if (live) return {pid: live.pid, socketPath: getSocketPath(projectRoot)};
+			if (live) return {pid: live.pid, socketPath: live.socketPath};
 		}
 		await new Promise(r => setTimeout(r, 50));
 	}
