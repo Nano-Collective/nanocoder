@@ -34,8 +34,9 @@
 	},
 	"scripts": {
 		"build": "tsc && tsc-alias && cp source/commands/contributors.json dist/commands/contributors.json && chmod +x dist/cli.js",
+		"web": "node dist/cli.js --web",
 		"build:credits": "./scripts/generate-credits.sh",
-		"dev": "tsc --watch",
+		"dev": "tsc --watch & tsc-alias --watch",
 		"start": "node dist/cli.js",
 		"test:all": "./scripts/test.sh",
 		"test:ava": "ava",

@@ -1,12 +1,9 @@
 import {randomBytes} from 'node:crypto';
 
-export const nanocoderLogoSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Nanocoder">
-<rect width="64" height="64" rx="12" fill="#02191d"/>
-<path fill="#bb9af7" d="M8 17h7v30H8zM26 17h7v30h-7zM15 22h6v8h-6zM20 28h7v8h-7zM24 35h6v8h-6z"/>
-<rect x="39" y="17" width="7" height="30" fill="#7dcfff"/>
-<rect x="46" y="17" width="11" height="7" fill="#7dcfff"/>
-<rect x="46" y="40" width="11" height="7" fill="#7dcfff"/>
-</svg>`;
+export const nanocoderLogoPngBuffer = Buffer.from(
+	'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',
+	'base64',
+);
 
 export function createPageNonce(): string {
 	return randomBytes(16).toString('base64');
@@ -18,7 +15,10 @@ export const IconSettings = `<svg xmlns="http://www.w3.org/2000/svg" width="16" 
 export const IconSend = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" x2="11" y1="2" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>`;
 export const IconUpload = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`;
 export const IconClose = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`;
-export const IconTheme = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>`;
+export const IconNewChat = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14 3V5H4V18.3851L5.76282 17H20V10H22V18C22 18.5523 21.5523 19 21 19H6.45455L2 22.5V4C2 3.44772 2.44772 3 3 3H14ZM19 3V0H21V3H24V5H21V8H19V5H16V3H19Z"/></svg>`;
+export const IconSun = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>`;
+export const IconMoon = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></svg>`;
+export const IconTheme = IconSun;
 export const IconCreate = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M19 17v4"/><path d="M3 5h4"/><path d="M17 19h4"/></svg>`;
 export const IconExplore = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>`;
 export const IconCode = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`;
@@ -31,22 +31,23 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Nanocoder Web Mode</title>
-	<link rel="icon" type="image/svg+xml" href="/assets/nanocoder-icon.svg">
+	<link rel="icon" type="image/png" href="/assets/nanocoder-icon.png">
 	<style nonce="${nonce}">
 		:root {
 			color-scheme: light dark;
 			font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-			background: #08090b;
-			color: #f5f2eb;
+			background: var(--background);
+			color: var(--foreground);
 		}
 		* {
 			box-sizing: border-box;
+			transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 		}
 		body {
 			margin: 0;
 			min-height: 100vh;
-			background: #09090b;
-			color: #fafafa;
+			background: var(--background);
+			color: var(--foreground);
 			overflow: hidden;
 		}
 		button,
@@ -61,25 +62,83 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			display: grid;
 			grid-template-columns: 280px minmax(0, 1fr);
 			min-height: 100vh;
-			background: #09090b;
+			background: var(--background);
+			transition: grid-template-columns 200ms cubic-bezier(0.4, 0, 0.2, 1);
 		}
 		.app-shell.sidebar-collapsed {
-			grid-template-columns: 0 minmax(0, 1fr);
+			grid-template-columns: 60px minmax(0, 1fr);
 		}
 		.app-shell.sidebar-collapsed .sidebar {
+			padding: 16px 8px 18px;
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			gap: 14px;
+			border-right: 1px solid var(--border);
+		}
+		.app-shell.sidebar-collapsed .brand span,
+		.app-shell.sidebar-collapsed #sessionMenuButton,
+		.app-shell.sidebar-collapsed .thread-list,
+		.app-shell.sidebar-collapsed .sidebar-footer {
+			display: none;
+		}
+		.app-shell.sidebar-collapsed .brand-row {
+			justify-content: center;
+			width: 100%;
+		}
+		.app-shell.sidebar-collapsed .brand {
+			display: none;
+		}
+		.app-shell.sidebar-collapsed #sidebarToggleButton {
+			width: 36px;
+			height: 36px;
+			border-radius: 8px;
+			background: transparent;
+			border: 0;
+			color: var(--muted-foreground);
+			display: flex;
+			align-items: center;
+			justify-content: center;
+		}
+		.app-shell.sidebar-collapsed #sidebarToggleButton:hover {
+			background: rgba(128, 128, 128, 0.08);
+			color: var(--primary);
+		}
+		.app-shell.sidebar-collapsed .new-chat {
+			width: 36px;
+			height: 36px;
+			min-width: 36px;
 			padding: 0;
-			border-right: 0;
-			opacity: 0;
-			pointer-events: none;
+			border-radius: 8px;
+			background: transparent;
+			border: 0;
+			color: var(--muted-foreground);
+			display: flex;
+			align-items: center;
+			justify-content: center;
+		}
+		.app-shell.sidebar-collapsed .new-chat span {
+			display: none;
+		}
+		.app-shell.sidebar-collapsed .new-chat svg {
+			width: 18px;
+			height: 18px;
+		}
+		.app-shell.sidebar-collapsed .new-chat:hover {
+			background: rgba(128, 128, 128, 0.08);
+			border-color: transparent;
+			color: var(--primary);
+			transform: none;
 		}
 		.sidebar {
-			display: grid;
-			grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+			display: flex;
+			flex-direction: column;
 			gap: 14px;
 			min-height: 100vh;
+			height: 100vh;
 			padding: 16px 14px 18px;
-			border-right: 1px solid #27272a;
-			background: #09090b;
+			border-right: 1px solid var(--border);
+			background: var(--background);
 			overflow: hidden;
 			transition: opacity 150ms ease;
 		}
@@ -89,13 +148,18 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			justify-content: space-between;
 			gap: 12px;
 		}
+		.brand-actions {
+			display: flex;
+			align-items: center;
+			gap: 6px;
+		}
 		.brand {
 			display: flex;
 			align-items: center;
 			gap: 10px;
-			color: #f5f2eb;
+			color: var(--foreground);
 			font-size: 16px;
-			font-weight: 760;
+			font-weight: 700;
 			letter-spacing: 0;
 		}
 		.brand-mark {
@@ -114,27 +178,58 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			width: 32px;
 			height: 32px;
 			border-radius: 8px;
-			background: rgba(245, 242, 235, 0.06);
-			color: #d8d0df;
-			transition: background 140ms ease, transform 140ms ease;
+			background: transparent;
+			color: var(--muted-foreground);
+			cursor: pointer;
+			transition: background 140ms ease, color 140ms ease, transform 140ms ease;
 		}
 		.icon-button:hover,
 		.icon-button:focus-visible {
-			background: rgba(245, 242, 235, 0.11);
+			background: rgba(128, 128, 128, 0.08);
+			color: var(--primary);
 			outline: 0;
-			transform: translateY(-1px);
+		}
+		.theme-toggle-btn {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			width: 36px;
+			height: 36px;
+			border-radius: 8px;
+			background: transparent;
+			border: 0;
+			color: var(--muted-foreground);
+			cursor: pointer;
+			padding: 8px;
+			transition: color 200ms ease, background 200ms ease, transform 200ms ease;
+		}
+		.theme-toggle-btn:hover,
+		.theme-toggle-btn:focus-visible {
+			color: var(--foreground);
+			background: rgba(128, 128, 128, 0.08);
+			transform: scale(1.05);
+			outline: 0;
 		}
 		.new-chat {
-			height: 40px;
-			border: 1px solid #0000ee;
+			display: flex;
+			align-items: center;
+			gap: 10px;
+			height: 38px;
+			padding: 0 12px;
+			border: 1px solid var(--border);
 			border-radius: 8px;
-			background: #0000ee;
-			color: #ffffff;
-			font-weight: 730;
-			transition: background 140ms ease, transform 140ms ease;
+			background: var(--card);
+			color: var(--foreground);
+			font-size: 14px;
+			font-weight: 500;
+			cursor: pointer;
+			transition: background 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease;
 		}
-		.new-chat:hover {
-			background: #0000cc;
+		.new-chat:hover,
+		.new-chat:focus-visible {
+			background: rgba(128, 128, 128, 0.08);
+			border-color: var(--primary);
+			color: var(--primary);
 			transform: translateY(-1px);
 		}
 		.search-box {
@@ -145,39 +240,32 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			padding: 0 10px;
 			border: 1px solid transparent;
 			border-radius: 8px;
-			color: #9b92a4;
+			color: var(--muted-foreground);
 			font-size: 13px;
 		}
 		.search-box input {
 			width: 100%;
 			border: 0;
 			background: transparent;
-			color: #d9dee2;
+			color: var(--foreground);
 			font: inherit;
 			outline: 0;
 		}
 		.search-box input::placeholder {
-			color: #8e969d;
+			color: var(--muted-foreground);
 		}
 		.thread-list {
-			display: grid;
-			align-content: start;
-			gap: 6px;
+			display: flex;
+			flex-direction: column;
+			flex: 1;
+			gap: 4px;
 			min-height: 0;
 			overflow-y: auto;
 			padding-top: 2px;
-			scrollbar-width: thin;
-			scrollbar-color: rgba(245, 242, 235, 0.18) transparent;
+			scrollbar-width: none;
 		}
 		.thread-list::-webkit-scrollbar {
-			width: 8px;
-		}
-		.thread-list::-webkit-scrollbar-thumb {
-			background: rgba(245, 242, 235, 0.18);
-			border-radius: 8px;
-		}
-		.thread-list::-webkit-scrollbar-thumb:hover {
-			background: rgba(245, 242, 235, 0.3);
+			display: none;
 		}
 		.thread-item {
 			display: flex;
@@ -185,35 +273,41 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			gap: 10px;
 			min-height: 36px;
 			width: 100%;
-			padding: 0 10px;
+			padding: 8px 12px;
 			border: 0;
 			border-radius: 8px;
 			background: transparent;
-			color: #afa8b8;
+			color: var(--muted-foreground);
 			font-size: 13px;
 			text-align: left;
+			cursor: pointer;
+			transition: all 150ms ease;
 		}
 		.thread-item.active {
-			background: rgba(245, 242, 235, 0.08);
-			color: #f5f2eb;
+			background: rgba(128, 128, 128, 0.12);
+			color: var(--foreground);
+			font-weight: 500;
 		}
 		.thread-item:hover,
 		.thread-item:focus-visible {
-			background: rgba(245, 242, 235, 0.055);
-			color: #f5f2eb;
+			background: rgba(128, 128, 128, 0.08);
+			color: var(--primary);
 			outline: 0;
 		}
 		.sidebar-footer {
+			margin-top: auto;
+			padding-top: 12px;
+			border-top: 1px solid var(--border);
 			display: flex;
 			align-items: center;
 			justify-content: space-between;
-			color: #9b92a4;
-			font-size: 13px;
+			color: var(--muted-foreground);
+			font-size: 12px;
 		}
 		.thread-list-empty {
 			margin: 0;
 			padding: 6px 10px;
-			color: #8e969d;
+			color: var(--muted-foreground);
 			font-size: 13px;
 		}
 		.workspace {
@@ -222,9 +316,10 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			grid-template-rows: auto minmax(0, 1fr) auto;
 			min-width: 0;
 			min-height: 100vh;
-			background: #09090b;
+			background: var(--background);
 		}
 		.topbar {
+			position: relative;
 			display: flex;
 			align-items: center;
 			justify-content: space-between;
@@ -232,7 +327,11 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			padding: 0 22px;
 		}
 		.session-note {
-			color: #8f8797;
+			position: absolute;
+			left: 50%;
+			transform: translateX(-50%);
+			margin: 0;
+			color: var(--muted-foreground);
 			font-size: 13px;
 			font-weight: 650;
 		}
@@ -244,15 +343,15 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		.status {
 			display: inline-flex;
 			align-items: center;
-			gap: 8px;
-			min-height: 32px;
-			padding: 0 11px;
-			border: 1px solid rgba(245, 242, 235, 0.1);
-			border-radius: 8px;
-			background: rgba(8, 9, 11, 0.42);
-			color: #beb7c7;
-			font-size: 13px;
-			font-weight: 700;
+			gap: 6px;
+			min-height: 24px;
+			padding: 0 8px;
+			border: 1px solid var(--border);
+			border-radius: 12px;
+			background: var(--card);
+			color: var(--muted-foreground);
+			font-size: 11px;
+			font-weight: 600;
 		}
 		.status::before {
 			content: "";
@@ -285,7 +384,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			margin: 0;
 		}
 		p {
-			color: #b7afc1;
+			color: var(--muted-foreground);
 			font-size: 14px;
 			line-height: 1.5;
 			margin: 0;
@@ -302,49 +401,46 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			flex-direction: column;
 			gap: 16px;
 			overflow-y: auto;
-			pointer-events: none;
-			padding: 28px clamp(18px, 10vw, 160px) 160px;
-			scrollbar-width: thin;
-			scrollbar-color: rgba(245, 242, 235, 0.18) transparent;
+			padding: 28px 0 160px;
+			scrollbar-width: none;
 		}
 		.messages::-webkit-scrollbar {
-			width: 10px;
+			display: none;
 		}
-		.messages::-webkit-scrollbar-thumb {
-			background: rgba(245, 242, 235, 0.18);
-			border-radius: 8px;
-		}
-		.messages::-webkit-scrollbar-thumb:hover {
-			background: rgba(245, 242, 235, 0.3);
-		}
+
 		.message {
 			display: grid;
 			gap: 6px;
 			pointer-events: auto;
-			width: min(760px, 100%);
+			width: auto;
+			margin-left: max(16px, calc(50% - 340px));
+			margin-right: max(16px, calc(50% - 340px));
 			padding: 14px 16px;
-			border: 1px solid #27272a;
+			border: 1px solid var(--border);
 			border-radius: 8px;
-			background: #18181b;
-			color: #fafafa;
+			background: var(--card);
+			color: var(--foreground);
 			line-height: 1.5;
 			overflow-wrap: anywhere;
-			box-shadow: 0 12px 40px rgba(0, 0, 0, 0.14);
+			box-shadow: none;
 		}
 		.message:not(.assistant) .message-content {
 			white-space: pre-wrap;
 		}
 		.message.user {
 			align-self: flex-end;
+			margin-left: auto;
+			margin-right: max(16px, calc(50% - 340px));
 			width: auto;
-			max-width: min(680px, 85%);
-			border-radius: 16px 16px 4px 16px;
-			background: #f5f2eb;
-			color: #17151d;
+			max-width: min(600px, 85%);
+			border-radius: 20px;
+			padding: 10px 18px;
+			background: rgba(128, 128, 128, 0.08);
+			border: 1px solid var(--border);
+			color: var(--foreground);
+			box-shadow: none;
 		}
 		.message.assistant {
-			align-self: flex-start;
-			width: min(820px, 100%);
 			padding: 4px 0 18px;
 			border: 0;
 			background: transparent;
@@ -417,16 +513,12 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			font-style: italic;
 		}
 		.message.system {
-			align-self: center;
-			width: min(760px, 100%);
-			background: #121214;
-			color: #a1a1aa;
+			background: var(--muted);
+			color: var(--muted-foreground);
 		}
 		.message.interaction {
-			align-self: stretch;
-			width: min(760px, 100%);
-			border-color: #0000ee;
-			background: #18181b;
+			border-color: var(--primary);
+			background: var(--card);
 		}
 		.interaction-card {
 			display: grid;
@@ -456,7 +548,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			border: 1px solid rgba(125, 207, 255, 0.28);
 			border-radius: 8px;
 			background: rgba(125, 207, 255, 0.12);
-			color: #f5f2eb;
+			color: var(--foreground);
 			cursor: pointer;
 			font-size: 14px;
 			font-weight: 650;
@@ -482,11 +574,9 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			border: 1px solid var(--tn-border);
 			border-radius: 8px;
 			background: rgba(8, 9, 11, 0.35);
-			color: #f5f2eb;
+			color: var(--foreground);
 		}
 		.message.tool-status {
-			align-self: center;
-			width: min(760px, 100%);
 			border-style: dashed;
 		}
 		.empty-state {
@@ -497,7 +587,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			transform: translate(-50%, -50%);
 			width: min(760px, calc(100vw - 40px));
 			text-align: center;
-			color: #f5f2eb;
+			color: var(--foreground);
 		}
 		.empty-state strong {
 			display: block;
@@ -507,7 +597,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			line-height: 1.05;
 		}
 		.empty-state span {
-			color: #beb7c7;
+			color: var(--muted-foreground);
 			font-size: 15px;
 			line-height: 1.6;
 		}
@@ -524,10 +614,10 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			gap: 8px;
 			min-height: 38px;
 			padding: 0 18px;
-			border: 1px solid #27272a;
+			border: 1px solid var(--border);
 			border-radius: 999px;
-			background: #18181b;
-			color: #fafafa;
+			background: var(--card);
+			color: var(--foreground);
 			cursor: pointer;
 			font-size: 14px;
 			font-weight: 720;
@@ -540,8 +630,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		.mode-pill:hover,
 		.mode-pill:focus-visible {
 			background: rgba(0, 0, 238, 0.1);
-			border-color: #0000ee;
-			color: #fafafa;
+			border-color: var(--primary);
+			color: var(--foreground);
 			outline: 0;
 			transform: translateY(-1px);
 		}
@@ -561,10 +651,10 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			width: 100%;
 			min-height: 54px;
 			padding: 0 16px;
-			border: 1px solid #27272a;
+			border: 1px solid var(--border);
 			border-radius: 8px;
-			background: #18181b;
-			color: #fafafa;
+			background: var(--card);
+			color: var(--foreground);
 			cursor: pointer;
 			text-align: left;
 			font-size: 15px;
@@ -583,8 +673,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		.prompt-button:hover,
 		.prompt-button:focus-visible {
 			background: rgba(0, 0, 238, 0.05);
-			border-color: #0000ee;
-			color: #fafafa;
+			border-color: var(--primary);
+			color: var(--foreground);
 			outline: 0;
 			transform: translateY(-1px);
 		}
@@ -607,35 +697,31 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		.composer-wrap {
 			position: relative;
 			z-index: 2;
-			width: min(820px, calc(100vw - 340px));
+			width: min(680px, calc(100vw - 32px));
 			margin: 0 auto 24px;
 		}
 		.composer {
 			display: grid;
-			grid-template-columns: 1fr 46px;
+			grid-template-columns: 1fr 36px;
 			gap: 12px;
 			align-items: end;
-			min-height: 104px;
-			border: 1px solid #27272a;
-			border-radius: 8px;
-			background: #18181b;
-			padding: 14px;
-			box-shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
+			min-height: 44px;
+			border: 1px solid var(--border);
+			border-radius: 22px;
+			background: var(--card);
+			padding: 4px 8px 4px 16px;
 		}
 		.composer.is-attention {
-			border-color: #0000ee;
-			box-shadow:
-				0 0 0 3px rgba(0, 0, 238, 0.2),
-				0 24px 80px rgba(0, 0, 0, 0.32);
+			border-color: var(--primary);
 		}
 		textarea {
 			width: 100%;
-			min-height: 70px;
+			min-height: 24px;
 			max-height: 180px;
 			resize: none;
 			border: 0;
 			background: transparent;
-			color: #fafafa;
+			color: var(--foreground);
 			font: inherit;
 			line-height: 1.5;
 			padding: 6px 2px;
@@ -644,22 +730,26 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			outline: 0;
 		}
 		textarea::placeholder {
-			color: #a1a1aa;
+			color: var(--muted-foreground);
 		}
 		.send-button {
-			display: grid;
-			place-items: center;
-			width: 42px;
-			height: 42px;
-			border-radius: 8px;
-			background: #0000ee;
-			color: #ffffff;
-			transition: transform 120ms ease, opacity 120ms ease;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			height: 36px;
+			width: 36px;
+			border-radius: 50%;
+			border: 0;
+			background: transparent;
+			color: var(--primary);
+			cursor: pointer;
+			transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 		}
 		.send-button:not(:disabled):hover,
 		.send-button:not(:disabled):focus-visible {
 			transform: translateY(-1px);
-			background: #0000cc;
+			background: var(--primary);
+			color: var(--primary-foreground);
 			outline: 0;
 		}
 		.send-button.is-cancel {
@@ -687,12 +777,12 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			display: inline-flex;
 			align-items: center;
 			gap: 8px;
-			color: #bdb4c7;
+			color: var(--muted-foreground);
 			font-size: 12px;
 			font-weight: 700;
 		}
 		.note {
-			color: #8f96a3;
+			color: var(--muted-foreground);
 			font-size: 12px;
 		}
 		@media (max-width: 900px) {
@@ -729,25 +819,69 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				width: 100%;
 			}
 			.empty-state {
-				top: 40%;
-				width: calc(100vw - 28px);
+				display: none;
 			}
 			.prompt-button {
 				min-height: 48px;
 			}
 		}
-		/* Syntax highlighting variables (formerly Tokyo Night, now mapped to org theme) */
-		:root {
-			--tn-text: #fafafa;
-			--tn-base: #09090b;
-			--tn-primary: #0000ee;
-			--tn-tool: #0000ee;
+				:root {
+			color-scheme: light dark;
+			font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+			
+			/* High Contrast Dark Theme */
+			--background: var(--background);
+			--foreground: #fafafa;
+			--card: #18181b;
+			--card-foreground: #fafafa;
+			--primary: #fafafa;
+			--primary-foreground: #18181b;
+			--secondary: #005a9c;
+			--secondary-foreground: #ffffff;
+			--muted: #121214;
+			--muted-foreground: #a1a1aa;
+			--destructive: #7f1d1d;
+			--destructive-foreground: #fafafa;
+			--border: #27272a;
+			
+			/* Terminal Theme */
+			--terminal-bg: #0b0f17;
+			--terminal-border: #27272a;
+			--terminal-text: #ffffff;
+			--terminal-muted: #a1a1aa;
+
+			/* Syntax highlighting */
+			--tn-text: var(--foreground);
+			--tn-primary: var(--primary);
+			--tn-tool: var(--primary);
 			--tn-success: #22c55e;
 			--tn-error: #ef4444;
-			--tn-secondary: #005a9c;
-			--tn-panel: #18181b;
-			--tn-surface: #18181b;
-			--tn-border: #27272a;
+			--tn-secondary: var(--secondary);
+			--tn-border: var(--border);
+		}
+
+		:root[data-theme="light"] {
+			color-scheme: light;
+			/* High Contrast Light Theme */
+			--background: #ffffff;
+			--foreground: #000000;
+			--card: #ffffff;
+			--card-foreground: #000000;
+			--primary: #0000ee;
+			--primary-foreground: #ffffff;
+			--secondary: #005a9c;
+			--secondary-foreground: #ffffff;
+			--muted: #f9fafb;
+			--muted-foreground: #6b7280;
+			--destructive: #ef4444;
+			--destructive-foreground: #ffffff;
+			--border: #e5e7eb;
+			
+			/* Terminal Theme stays dark in light mode */
+			--terminal-bg: #0b0f17;
+			--terminal-border: #27272a;
+			--terminal-text: #ffffff;
+			--terminal-muted: #a1a1aa;
 		}
 		/*
 		 * Light theme. Scoped with the [data-theme="light"] attribute selector
@@ -756,243 +890,57 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		:root[data-theme="light"] {
 			color-scheme: light;
 		}
-		:root[data-theme="light"] body {
-			background: #ffffff;
-			color: #000000;
-		}
-		:root[data-theme="light"] .app-shell {
-			background: #ffffff;
-		}
-		:root[data-theme="light"] .sidebar {
-			border-right: 1px solid #e5e7eb;
-			background: #f9fafb;
-		}
-		:root[data-theme="light"] .brand,
-		:root[data-theme="light"] .thread-item.active,
-		:root[data-theme="light"] .thread-item:hover,
-		:root[data-theme="light"] .prompt-button:hover,
-		:root[data-theme="light"] .empty-state,
-		:root[data-theme="light"] .message,
-		:root[data-theme="light"] textarea,
-		:root[data-theme="light"] .model-pill {
-			color: #000000;
-		}
-		:root[data-theme="light"] .icon-button {
-			background: rgba(0, 0, 0, 0.05);
-			color: #000000;
-		}
-		:root[data-theme="light"] .icon-button:hover,
-		:root[data-theme="light"] .icon-button:focus-visible {
-			background: rgba(0, 0, 0, 0.1);
-		}
-		:root[data-theme="light"] .new-chat {
-			border-color: #0000ee;
-			background: #0000ee;
-			color: #ffffff;
-		}
-		:root[data-theme="light"] .new-chat:hover {
-			background: #0000cc;
-		}
-		:root[data-theme="light"] .search-box {
-			border-color: #e5e7eb;
-			color: #6b7280;
-			background: #ffffff;
-		}
-		:root[data-theme="light"] .search-box:focus-within {
-			border-color: #0000ee;
-			background: #ffffff;
-		}
-		:root[data-theme="light"] .search-box input {
-			color: #000000;
-		}
-		:root[data-theme="light"] .search-box input::placeholder,
-		:root[data-theme="light"] .thread-item,
-		:root[data-theme="light"] .thread-list-empty,
-		:root[data-theme="light"] .sidebar-footer,
-		:root[data-theme="light"] .session-note,
-		:root[data-theme="light"] p,
-		:root[data-theme="light"] .empty-state span,
-		:root[data-theme="light"] .note {
-			color: #6b7280;
-		}
-		:root[data-theme="light"] .thread-list::-webkit-scrollbar-thumb,
-		:root[data-theme="light"] .messages::-webkit-scrollbar-thumb {
-			background: rgba(0, 0, 0, 0.15);
-		}
-		:root[data-theme="light"] .thread-list::-webkit-scrollbar-thumb:hover,
-		:root[data-theme="light"] .messages::-webkit-scrollbar-thumb:hover {
-			background: rgba(0, 0, 0, 0.25);
-		}
-		:root[data-theme="light"] .thread-list,
-		:root[data-theme="light"] .messages {
-			scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
-		}
-		:root[data-theme="light"] .thread-item.active,
-		:root[data-theme="light"] .thread-item:hover,
-		:root[data-theme="light"] .thread-item:focus-visible,
-		:root[data-theme="light"] .mode-pill,
-		:root[data-theme="light"] .prompt-button:hover {
-			background: rgba(0, 0, 238, 0.08);
-			color: #0000ee;
-		}
-		:root[data-theme="light"] .workspace {
-			background: #ffffff;
-				linear-gradient(180deg, #f6f6fb 0%, #f2f2f8 52%, #ececf4 100%);
-		}
-		:root[data-theme="light"] .status {
-			border-color: rgba(28, 29, 43, 0.12);
-			background: rgba(255, 255, 255, 0.78);
-			color: #1c1d2b;
-		}
-		:root[data-theme="light"] .status::before {
-			background: #b3791f;
-			box-shadow: 0 0 0 5px rgba(179, 121, 31, 0.14);
-		}
-		:root[data-theme="light"] .status.connected {
-			color: #1a9e63;
-		}
-		:root[data-theme="light"] .status.connected::before {
-			background: #1a9e63;
-			box-shadow: 0 0 0 5px rgba(26, 158, 99, 0.14);
-		}
-		:root[data-theme="light"] .status.disconnected,
-		:root[data-theme="light"] .status.failed,
-		:root[data-theme="light"] .message.error {
-			color: #b8253f;
-		}
-		:root[data-theme="light"] .status.disconnected::before,
-		:root[data-theme="light"] .status.failed::before {
-			background: #d1435b;
-			box-shadow: 0 0 0 5px rgba(209, 67, 91, 0.14);
-		}
-		:root[data-theme="light"] .markdown h1,
-		:root[data-theme="light"] .markdown h2,
-		:root[data-theme="light"] .markdown h3 {
-			color: #1c1d2b;
-		}
-		:root[data-theme="light"] .markdown code {
-			background: rgba(46, 134, 193, 0.1);
-		}
-		:root[data-theme="light"] .markdown pre,
-		:root[data-theme="light"] .interaction-card pre {
-			border-color: rgba(28, 29, 43, 0.12);
-			background: #eef0f7;
-		}
-		:root[data-theme="light"] .tok-keyword {
-			color: #5c3fb8;
-		}
-		:root[data-theme="light"] .tok-string {
-			color: #1a9e63;
-		}
-		:root[data-theme="light"] .tok-number {
-			color: #b3791f;
-		}
-		:root[data-theme="light"] .tok-comment {
-			color: #5b6178;
-		}
-		:root[data-theme="light"] .message {
-			border-color: rgba(28, 29, 43, 0.1);
-			background: rgba(28, 29, 43, 0.035);
-			box-shadow: 0 12px 40px rgba(28, 29, 43, 0.06);
-		}
-		:root[data-theme="light"] .message.user {
-			background: #1c1d2b;
-			color: #fbfbfd;
-		}
-		:root[data-theme="light"] .message.user .meta {
-			color: rgba(251, 251, 253, 0.62);
-		}
-		:root[data-theme="light"] .message.assistant {
-			background: transparent;
-		}
-		:root[data-theme="light"] .message.system,
-		:root[data-theme="light"] .mode-pill {
-			background: rgba(28, 29, 43, 0.045);
-		}
-		:root[data-theme="light"] .message.system {
-			color: #1c1d2b;
-		}
-		:root[data-theme="light"] .message.interaction {
-			border-color: rgba(46, 134, 193, 0.3);
-			background: rgba(46, 134, 193, 0.06);
-		}
-		:root[data-theme="light"] .interaction-actions button,
-		:root[data-theme="light"] .question-options button {
-			border-color: rgba(46, 134, 193, 0.32);
-			background: rgba(46, 134, 193, 0.1);
-			color: #1c1d2b;
-		}
-		:root[data-theme="light"] .interaction-actions button[data-approved="false"] {
-			border-color: rgba(209, 67, 91, 0.35);
-			background: rgba(209, 67, 91, 0.1);
-		}
-		:root[data-theme="light"] .question-freeform input {
-			border-color: rgba(28, 29, 43, 0.14);
-			background: #ffffff;
-			color: #1c1d2b;
-		}
-		:root[data-theme="light"] .mode-pill {
-			border-color: rgba(28, 29, 43, 0.1);
-		}
-		:root[data-theme="light"] .mode-pill:hover,
-		:root[data-theme="light"] .mode-pill:focus-visible {
-			background: rgba(46, 134, 193, 0.12);
-			border-color: rgba(46, 134, 193, 0.36);
-			color: #1c1d2b;
-		}
-		:root[data-theme="light"] .prompt-button {
-			border-color: rgba(28, 29, 43, 0.1);
-			background: rgba(28, 29, 43, 0.025);
-			color: #33364a;
-		}
-		:root[data-theme="light"] .prompt-button::after {
-			color: rgba(46, 134, 193, 0.6);
-		}
-		:root[data-theme="light"] .prompt-button:hover,
-		:root[data-theme="light"] .prompt-button:focus-visible {
-			border-color: rgba(46, 134, 193, 0.32);
-			color: #1c1d2b;
-		}
-		:root[data-theme="light"] .prompt-button:hover::after,
-		:root[data-theme="light"] .prompt-button:focus-visible::after {
-			color: #2e86c1;
-		}
-		:root[data-theme="light"] .message.error {
-			border-color: rgba(209, 67, 91, 0.4);
-		}
-		:root[data-theme="light"] .meta {
-			color: rgba(28, 29, 43, 0.48);
-		}
-		:root[data-theme="light"] .composer {
-			border-color: rgba(28, 29, 43, 0.12);
-			background: #ffffff;
-			box-shadow: 0 24px 80px rgba(28, 29, 43, 0.1);
-		}
-		:root[data-theme="light"] .composer.is-attention {
-			border-color: rgba(46, 134, 193, 0.5);
-			box-shadow:
-				0 0 0 3px rgba(46, 134, 193, 0.14),
-				0 24px 80px rgba(28, 29, 43, 0.1);
-		}
-		:root[data-theme="light"] textarea::placeholder {
-			color: #7d8296;
-		}
-		:root[data-theme="light"] .send-button {
-			background: #2e86c1;
-			color: #ffffff;
-		}
-		:root[data-theme="light"] .send-button:not(:disabled):hover,
-		:root[data-theme="light"] .send-button:not(:disabled):focus-visible {
-			background: #3f99d6;
-		}
-		:root[data-theme="light"] .send-button.is-cancel {
-			background: #d1435b;
-			color: #ffffff;
-		}
-		:root[data-theme="light"] .send-button.is-cancel:not(:disabled):hover,
-		:root[data-theme="light"] .send-button.is-cancel:not(:disabled):focus-visible {
-			background: #dd5b71;
-		}
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
 		/* Modal Styles */
 		.modal-overlay {
 			position: fixed;
@@ -1069,34 +1017,36 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 		.composer-inputs {
 			display: flex;
 			gap: 8px;
-			align-items: center;
+			align-items: flex-end;
 			flex: 1;
 		}
 		.upload-button {
-			padding: 4px 8px;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			height: 36px;
+			padding: 0 4px;
 			color: var(--text-muted);
 		}
 		.upload-button:hover {
 			color: var(--text);
 		}
 	</style>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js" nonce="${nonce}"></script>
 </head>
 <body>
 	<div class="app-shell">
 		<aside class="sidebar" aria-label="Nanocoder sessions">
 			<div class="brand-row">
 				<div class="brand">
-					<img class="brand-mark" src="/assets/nanocoder-icon.svg" alt="Nanocoder logo">
 					<span>Nanocoder</span>
 				</div>
-				<button class="icon-button" id="themeToggleButton" type="button" aria-label="Switch to light theme" aria-pressed="false">${IconTheme}</button>
-				<button class="icon-button" id="sessionMenuButton" type="button" aria-label="Session menu">⌘</button>
+				<div class="brand-actions">
+					<button class="icon-button" id="sessionMenuButton" type="button" aria-label="Session menu">⌘</button>
+					<button class="icon-button" id="sidebarToggleButton" type="button" aria-label="Collapse sidebar" aria-expanded="true">${IconSidebar}</button>
+				</div>
 			</div>
-			<button class="new-chat" id="newChatButton" type="button">New Chat</button>
-			<label class="search-box">
-				<span>⌕</span>
-				<input id="threadSearchInput" type="search" placeholder="Search local threads..." autocomplete="off">
-			</label>
+			<button class="new-chat" id="newChatButton" type="button">${IconNewChat}<span>New chat</span></button>
 			<div class="thread-list" id="threadList" aria-live="polite">
 				<p class="thread-list-empty" id="threadListEmpty">Loading sessions...</p>
 			</div>
@@ -1109,11 +1059,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			<header class="topbar">
 				<div class="status" id="connectionStatus">Starting</div>
 				<p class="session-note">Localhost only. Private URL token required.</p>
-				<div class="top-actions">
-					<button class="icon-button" id="sidebarToggleButton" type="button" aria-label="Collapse sidebar" aria-expanded="true">${IconSidebar}</button>
-					<button class="icon-button" id="historyButton" type="button" aria-label="Session history">${IconHistory}</button>
-					<button class="icon-button" id="settingsButton" type="button" aria-label="Session settings">${IconSettings}</button>
-				</div>
+				<button class="theme-toggle-btn" id="themeToggleButton" type="button" aria-label="Switch theme">${IconMoon}</button>
 			</header>
 			<section class="chat-stage" aria-label="Nanocoder browser chat">
 				<div class="empty-state" id="emptyState"></div>
@@ -1125,7 +1071,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					<div class="composer-inputs">
 						<input type="file" id="imageUploadInput" accept="image/*" multiple hidden>
 						<button class="icon-button upload-button" id="uploadImageButton" type="button" aria-label="Upload image">${IconUpload}</button>
-						<textarea id="messageInput" name="message" placeholder="Type your message here..." disabled></textarea>
+						<textarea id="messageInput" name="message" placeholder="Type your message here..." rows="1" disabled></textarea>
 					</div>
 					<button class="send-button" id="sendButton" type="submit" disabled aria-label="Send message">${IconSend}</button>
 				</div>
@@ -1205,18 +1151,32 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 			let reconnectDelayMs = 1000;
 			const maxReconnectDelayMs = 15000;
 
+			// Initial load animation
+			gsap.from('.sidebar', { opacity: 0, x: -20, duration: 0.6, ease: 'power2.out' });
+			gsap.from('.topbar', { opacity: 0, y: -10, duration: 0.5, ease: 'power2.out', delay: 0.1 });
+			gsap.from('.composer-wrap', { opacity: 0, y: 20, duration: 0.6, ease: 'power2.out', delay: 0.2 });
+			gsap.from('.empty-state', { opacity: 0, y: 10, duration: 0.5, ease: 'power2.out', delay: 0.3 });
+
+			// Custom helper to animate elements in
+			function animateIn(element) {
+				gsap.fromTo(element, { opacity: 0, y: 15 }, { opacity: 1, y: 0, duration: 0.4, ease: 'power2.out' });
+			}
+
+
 			const themeStorageKey = 'nanocoder.webMode.theme.v1';
 			const sidebarStorageKey = 'nanocoder.webMode.sidebarCollapsed.v1';
 
 			function applyTheme(theme) {
 				document.documentElement.dataset.theme = theme;
 				const isLight = theme === 'light';
-				themeToggleButton.textContent = isLight ? '◑' : '◐';
-				themeToggleButton.setAttribute('aria-pressed', String(isLight));
-				themeToggleButton.setAttribute(
-					'aria-label',
-					isLight ? 'Switch to dark theme' : 'Switch to light theme',
-				);
+				if (themeToggleButton) {
+					themeToggleButton.innerHTML = isLight ? '${IconMoon}' : '${IconSun}';
+					themeToggleButton.setAttribute('aria-pressed', String(isLight));
+					themeToggleButton.setAttribute(
+						'aria-label',
+						isLight ? 'Switch to dark theme' : 'Switch to light theme',
+					);
+				}
 				window.localStorage.setItem(themeStorageKey, theme);
 			}
 
@@ -1230,9 +1190,9 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 
 			function applySidebarCollapsed(isCollapsed) {
 				appShell.classList.toggle('sidebar-collapsed', isCollapsed);
-				sidebarToggleButton.textContent = isCollapsed ? '❯' : '❮';
-				sidebarToggleButton.setAttribute('aria-expanded', String(!isCollapsed));
-				sidebarToggleButton.setAttribute(
+				
+				if (sidebarToggleButton) sidebarToggleButton.setAttribute('aria-expanded', String(!isCollapsed));
+				if (sidebarToggleButton) sidebarToggleButton.setAttribute(
 					'aria-label',
 					isCollapsed ? 'Expand sidebar' : 'Collapse sidebar',
 				);
@@ -1532,6 +1492,8 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				messageList.append(messageElement);
 				messageList.scrollTop = messageList.scrollHeight;
 
+				animateIn(messageElement);
+
 				if (shouldStore) {
 					storedMessages.push({role, text, metaText: metaText ?? ''});
 					writeStoredMessages();
@@ -1619,10 +1581,10 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					button.type = 'button';
 					button.dataset.sessionId = session.id;
 					button.dataset.threadLabel = session.title;
-					const marker = session.id === activeSessionId ? '●' : '○';
+					
 					const relative = formatRelativeTime(session.lastAccessedAt);
 					button.textContent =
-						marker + ' ' + session.title + (relative ? ' · ' + relative : '');
+						session.title + (relative ? ' · ' + relative : '');
 					threadList.append(button);
 				}
 			}
@@ -2092,7 +2054,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
 			});
 
-			sidebarToggleButton.addEventListener('click', () => {
+			if (sidebarToggleButton) sidebarToggleButton.addEventListener('click', () => {
 				applySidebarCollapsed(!appShell.classList.contains('sidebar-collapsed'));
 			});
 
@@ -2103,7 +2065,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				);
 			});
 
-			historyButton.addEventListener('click', () => {
+			if (historyButton) historyButton.addEventListener('click', () => {
 				if (appShell.classList.contains('sidebar-collapsed')) {
 					applySidebarCollapsed(false);
 				}
@@ -2111,10 +2073,10 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 					type: 'list_sessions',
 					id: 'browser-sessions-' + Date.now(),
 				});
-				threadSearchInput.focus();
+				if (threadSearchInput) threadSearchInput.focus();
 			});
 
-			settingsButton.addEventListener('click', () => {
+			if (settingsButton) settingsButton.addEventListener('click', () => {
 				settingsModal.classList.remove('hidden');
 			});
 			closeSettingsButton.addEventListener('click', () => {
@@ -2126,7 +2088,7 @@ export function renderWebModePage(nonce: string = createPageNonce()): string {
 				}
 			});
 
-			threadSearchInput.addEventListener('input', () => {
+			if (threadSearchInput) threadSearchInput.addEventListener('input', () => {
 				const query = threadSearchInput.value.trim().toLowerCase();
 				for (const threadButton of threadList.querySelectorAll('.thread-item')) {
 					const label = (threadButton.dataset.threadLabel || '').toLowerCase();

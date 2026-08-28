@@ -3,7 +3,11 @@ import {randomBytes} from 'node:crypto';
 import {createServer, type Server} from 'node:http';
 import type {Duplex} from 'node:stream';
 import {WebSocket, WebSocketServer} from 'ws';
-import {createPageNonce, nanocoderLogoSvg, renderWebModePage} from './page.js';
+import {
+	createPageNonce,
+	nanocoderLogoPngBuffer,
+	renderWebModePage,
+} from './page.js';
 import {
 	parseWebClientEvent,
 	serializeWebServerEvent,
@@ -56,17 +60,17 @@ export async function startLocalWebServer(
 			return;
 		}
 
-		if (requestUrl.pathname === '/assets/nanocoder-icon.svg') {
+		if (requestUrl.pathname === '/assets/nanocoder-icon.png') {
 			response.writeHead(200, {
 				'cache-control': 'public, max-age=3600',
-				'content-type': 'image/svg+xml; charset=utf-8',
+				'content-type': 'image/png',
 			});
-			response.end(nanocoderLogoSvg);
+			response.end(nanocoderLogoPngBuffer);
 			return;
 		}
 
 		if (requestUrl.pathname === '/favicon.ico') {
-			response.writeHead(302, {location: '/assets/nanocoder-icon.svg'});
+			response.writeHead(302, {location: '/assets/nanocoder-icon.png'});
 			response.end();
 			return;
 		}

@@ -62,7 +62,7 @@ test('local web server binds to localhost and serves token-protected browser cha
 	t.true(response.body.includes('id="newChatButton"'));
 	t.true(response.body.includes('id="threadSearchInput"'));
 	t.true(response.body.includes('window.localStorage'));
-	t.true(response.body.includes('/assets/nanocoder-icon.svg'));
+	t.true(response.body.includes('/assets/nanocoder-icon.png'));
 	t.true(response.body.includes("type: 'user_message'"));
 	t.true(response.body.includes('submitUserMessage(prompt)'));
 	t.true(response.body.includes('pointer-events: none;'));
@@ -75,13 +75,12 @@ test('local web server serves Nanocoder icon asset', async t => {
 	});
 
 	const response = await fetch(
-		`http://127.0.0.1:${webServer.port}/assets/nanocoder-icon.svg`,
+		`http://127.0.0.1:${webServer.port}/assets/nanocoder-icon.png`,
 	);
 	const body = await response.text();
 
 	t.is(response.status, 200);
-	t.is(response.headers.get('content-type'), 'image/svg+xml; charset=utf-8');
-	t.true(body.includes('aria-label="Nanocoder"'));
+	t.is(response.headers.get('content-type'), 'image/png');
 });
 
 test('local web server redirects /favicon.ico to the Nanocoder icon asset', async t => {
@@ -96,7 +95,7 @@ test('local web server redirects /favicon.ico to the Nanocoder icon asset', asyn
 	);
 
 	t.is(response.status, 302);
-	t.is(response.headers.get('location'), '/assets/nanocoder-icon.svg');
+	t.is(response.headers.get('location'), '/assets/nanocoder-icon.png');
 });
 
 test('local web server sets security headers, including a CSP scoped to the page nonce', async t => {
