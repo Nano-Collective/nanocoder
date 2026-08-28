@@ -164,6 +164,60 @@ test.serial(
 	},
 );
 
+test.serial(
+	'loadGitignore applies .nanocoderignore after .gitignore and the defaults',
+	t => {
+		const testDir = join(process.cwd(), 'test-nanocoderignore-negation-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, '.gitignore'), '*.log\n');
+			// A `!` negation is the only way to opt back into a .gitignore rule or a
+			// DEFAULT_IGNORE_DIRS entry, so it has to be applied last.
+			writeFileSync(join(testDir, '.nanocoderignore'), '!dist\n!keep.log\n');
+
+			const ig = loadGitignore(testDir);
+
+			t.false(ig.ignores('dist/bundle.js'), 'Should un-ignore a default dir');
+			t.false(ig.ignores('keep.log'), 'Should un-ignore a .gitignore pattern');
+			t.true(ig.ignores('other.log'), 'Should still ignore unnegated patterns');
+			t.true(
+				ig.ignores('node_modules/file.js'),
+				'Should leave other defaults alone',
+			);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'loadGitignore skips .nanocoderignore when nanocoderIgnore is false',
+	t => {
+		const testDir = join(process.cwd(), 'test-nanocoderignore-optout-temp');
+
+		try {
+			mkdirSync(testDir, {recursive: true});
+			writeFileSync(join(testDir, '.gitignore'), '*.log\n');
+			writeFileSync(join(testDir, '.nanocoderignore'), 'package-lock.json\n');
+
+			const ig = loadGitignore(testDir, {nanocoderIgnore: false});
+
+			t.false(
+				ig.ignores('package-lock.json'),
+				'Should not apply .nanocoderignore patterns',
+			);
+			t.true(ig.ignores('file.log'), 'Should still apply .gitignore patterns');
+			t.true(
+				ig.ignores('node_modules/file.js'),
+				'Should still apply default ignores',
+			);
+		} finally {
+			rmSync(testDir, {recursive: true, force: true});
+		}
+	},
+);
+
 test('loadGitignore ignores all language-specific directories', t => {
 	const ig = loadGitignore(process.cwd());
 

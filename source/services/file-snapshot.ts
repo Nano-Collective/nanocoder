@@ -96,7 +96,10 @@ export class FileSnapshotService {
 
 			const allFiles = [...new Set([...modifiedFiles, ...untrackedFiles])];
 
-			const ig = loadGitignore(this.workspaceRoot);
+			// .nanocoderignore only hides files from the model's view; a file the
+			// user hid from listings must still be snapshotted, or restoring a
+			// checkpoint would silently leave its changes in place.
+			const ig = loadGitignore(this.workspaceRoot, {nanocoderIgnore: false});
 			const filtered = allFiles.filter(file => !ig.ignores(file));
 
 			if (filtered.length > MAX_CHECKPOINT_FILES) {

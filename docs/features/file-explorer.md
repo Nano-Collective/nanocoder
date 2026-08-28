@@ -79,4 +79,4 @@ Sometimes you want to browse your project and pick files visually rather than ty
 
 The explorer respects your `.gitignore`, so you won't see `node_modules`, `dist`, or other ignored directories.
 
-It also respects an optional `.nanocoderignore`. Use this for files that are tracked in git (and so aren't covered by `.gitignore`) but that you don't want the AI to read (large lockfiles like `package-lock.json`, generated fixtures, or sensitive files like `.env`). Patterns in `.nanocoderignore` use the same syntax as `.gitignore`.
+It also respects an optional `.nanocoderignore`, which uses the same pattern syntax and is for files that are tracked in git (and so aren't covered by `.gitignore`) but still aren't worth the context, like `package-lock.json` or generated fixtures. See [Ignoring Files](../configuration/index.md#ignoring-files).
