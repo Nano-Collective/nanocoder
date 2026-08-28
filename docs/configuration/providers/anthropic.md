@@ -22,6 +22,33 @@ Use Anthropic's Claude models with native API support via `@ai-sdk/anthropic`.
 
 The `sdkProvider: "anthropic"` field enables the native Anthropic SDK instead of the OpenAI-compatible layer.
 
+## Prompt caching
+
+Prompt caching is enabled by default on this provider. Nanocoder marks the
+stable prefix of each request — tool schemas and the system prompt — with an
+Anthropic cache breakpoint, plus one on the final message of the turn, so the
+next turn reads that prefix back out of cache instead of resending it at full
+price. Prompts below Anthropic's minimum cacheable length are sent unmarked.
+
+`/usage` and the per-response indicator are cache-aware: cache reads and writes
+are priced at their own rates rather than the full input rate, and the cached
+token count is shown alongside the total.
+
+Opt out per provider:
+
+```json
+{
+	"name": "Anthropic",
+	"sdkProvider": "anthropic",
+	"apiKey": "your-anthropic-api-key",
+	"models": ["your-model-name"],
+	"promptCaching": false
+}
+```
+
+Other providers are unaffected: OpenAI and OpenRouter cache prefixes
+automatically, and local models have no cache to address.
+
 ## Setup
 
 1. Create an account at [console.anthropic.com](https://console.anthropic.com)
