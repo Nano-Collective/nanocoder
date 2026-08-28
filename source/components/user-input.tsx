@@ -41,6 +41,10 @@ import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 const MAX_COMMAND_COMPLETION_ROWS = 10;
 
+// Prompt box width bounds: scales with the terminal between these caps.
+const PROMPT_WIDTH_MIN = 40;
+const PROMPT_WIDTH_MAX = 96;
+
 interface ChatProps {
 	onSubmit?: (
 		message: string,
@@ -102,9 +106,18 @@ export default function UserInput({
 	const inputState = useInputState();
 	const uiState = useUIStateContext();
 	const {boxWidth, isNarrow, actualWidth, truncate} = useResponsiveTerminal();
+	// Prompt is centered with intentional whitespace. It scales with the
+	// terminal (60% of width, 40-96 cols) but always leaves a 4-col margin —
+	// a box wider than the terminal is what shatters its border rounding.
+	const promptWidth = Math.min(
+		PROMPT_WIDTH_MAX,
+		Math.max(PROMPT_WIDTH_MIN, Math.round(actualWidth * 0.6)),
+		boxWidth,
+		actualWidth - 4,
+	);
 	// Must match the wrapWidth passed to TextInput below — both sides use it to
 	// decide whether Up/Down means line navigation or history.
-	const inputWrapWidth = boxWidth - 3;
+	const inputWrapWidth = promptWidth - 4;
 	const [textInputKey, setTextInputKey] = useState(0);
 	const completionJustSelectedRef = useRef(false);
 	// Input value for which the user dismissed the completion menu with Escape,
@@ -963,137 +976,129 @@ export default function UserInput({
 
 	return (
 		<>
-			{!isBashMode ? (
-				<Box marginTop={1}>
-					<Text color={colors.primary} bold>
-						What would you like me to help with?
-					</Text>
-				</Box>
-			) : (
+			{isBashMode && (
 				<Text color={colors.tool} bold>
 					Bash mode
 				</Text>
 			)}
 
-			<Box
-				flexDirection="column"
-				marginTop={1}
-				backgroundColor={colors.base}
-				width={boxWidth}
-				padding={1}
-				borderStyle="bold"
-				borderLeft={true}
-				borderRight={false}
-				borderTop={false}
-				borderBottom={false}
-				borderLeftColor={isBashMode ? colors.tool : colors.primary}
-			>
-				{/* Input row */}
-				<Box>
-					{input.length === 0 && (
-						<Text color={isBashMode ? colors.tool : textColor}>{'>'} </Text>
-					)}
-					<TextInput
-						key={textInputKey}
-						value={input}
-						onChange={handleInputChange}
-						onEdgeArrow={handleHistoryNavigation}
-						onSubmit={handleSubmit}
-						onEnter={handleSubmit}
-						placeholder="/ commands, ! bash, ↑/↓ history"
-						focus={effectiveFocus}
-						wrapWidth={inputWrapWidth}
-						handleEnter={false}
-					/>
-				</Box>
-
-				{showClearMessage && (
-					<Text color={colors.secondary}>Press escape again to clear</Text>
-				)}
-
-				{showCompletions && completions.length > 0 && (
-					<Box flexDirection="column" marginTop={1}>
-						<Text color={colors.secondary}>Available commands:</Text>
-						{commandCompletionWindow.items.map((completion, index) => {
-							const completionIndex = commandCompletionWindow.start + index;
-							const isSelected = completionIndex === selectedCompletionIndex;
-							return (
-								<Text
-									key={`${completion.isCustom ? 'custom' : 'built-in'}-${completion.name}`}
-									color={
-										isSelected
-											? colors.info
-											: completion.isCustom
-												? colors.info
-												: colors.primary
-									}
-									bold={isSelected}
-								>
-									{isSelected ? '▸ ' : '  '}/{completion.name}
-								</Text>
-							);
-						})}
-						{completions.length > MAX_COMMAND_COMPLETION_ROWS && (
-							<Text color={colors.secondary}>
-								Showing {commandCompletionWindow.start + 1}-
-								{commandCompletionWindow.end} of {completions.length}
-							</Text>
+			<Box width={actualWidth} alignItems="center" flexDirection="column">
+				<Box
+					flexDirection="column"
+					marginTop={1}
+					width={promptWidth}
+					paddingX={1}
+					paddingY={0}
+					borderStyle="round"
+					borderColor={isBashMode ? colors.tool : colors.primary}
+				>
+					{/* Input row */}
+					<Box>
+						{input.length === 0 && (
+							<Text color={isBashMode ? colors.tool : textColor}>{'>'} </Text>
 						)}
+						<TextInput
+							key={textInputKey}
+							value={input}
+							onChange={handleInputChange}
+							onEdgeArrow={handleHistoryNavigation}
+							onSubmit={handleSubmit}
+							onEnter={handleSubmit}
+							placeholder="Ask anything..."
+							focus={effectiveFocus}
+							wrapWidth={inputWrapWidth}
+							handleEnter={false}
+						/>
 					</Box>
-				)}
-				{isFileAutocompleteMode && fileCompletions.length > 0 && (
-					<Box flexDirection="column" marginTop={1}>
-						<Text color={colors.secondary}>
-							File suggestions (↑/↓ to navigate, Tab to select):
-						</Text>
-						{fileCompletions.slice(0, 5).map((file, index) => (
-							<Text
-								key={index}
-								color={
-									index === selectedFileIndex ? colors.info : colors.primary
-								}
-								bold={index === selectedFileIndex}
-							>
-								{index === selectedFileIndex ? '▸ ' : '  '}
-								{file.path}
-							</Text>
-						))}
-					</Box>
-				)}
-				{queuedMessages.length > 0 && (
-					<Box flexDirection="column" marginTop={1}>
-						<Text color={colors.secondary}>
-							Queued messages (↑/↓ select, Enter edit, Del remove):
-						</Text>
-						{queuedMessages.map((message, index) => {
-							const isSelected = index === selectedQueuedIndex;
-							return (
-								<Text
-									key={message.id}
-									color={isSelected ? colors.info : colors.primary}
-									bold={isSelected}
-								>
-									{isSelected ? '▸ ' : '  '}
-									{formatQueuedMessage(message)}
-								</Text>
-							);
-						})}
-					</Box>
-				)}
-				{isBusy && (
-					<Box marginTop={1}>
-						<Text color={colors.secondary}>
-							<Spinner type="dots" /> Press Esc to cancel
-							{onToggleCompactDisplay && (
-								<Text>
-									{' '}
-									· ctrl-o {compactToolDisplay ? 'expand' : 'compact'}{' '}
-									{isNarrow ? '' : 'tool results'}
+
+					{showClearMessage && (
+						<Text color={colors.secondary}>Press escape again to clear</Text>
+					)}
+
+					{showCompletions && completions.length > 0 && (
+						<Box flexDirection="column" marginTop={1}>
+							<Text color={colors.secondary}>Available commands:</Text>
+							{commandCompletionWindow.items.map((completion, index) => {
+								const completionIndex = commandCompletionWindow.start + index;
+								const isSelected = completionIndex === selectedCompletionIndex;
+								return (
+									<Text
+										key={`${completion.isCustom ? 'custom' : 'built-in'}-${completion.name}`}
+										color={
+											isSelected
+												? colors.info
+												: completion.isCustom
+													? colors.info
+													: colors.primary
+										}
+										bold={isSelected}
+									>
+										{isSelected ? '▸ ' : '  '}/{completion.name}
+									</Text>
+								);
+							})}
+							{completions.length > MAX_COMMAND_COMPLETION_ROWS && (
+								<Text color={colors.secondary}>
+									Showing {commandCompletionWindow.start + 1}-
+									{commandCompletionWindow.end} of {completions.length}
 								</Text>
 							)}
-						</Text>
-					</Box>
-				)}
+						</Box>
+					)}
+					{isFileAutocompleteMode && fileCompletions.length > 0 && (
+						<Box flexDirection="column" marginTop={1}>
+							<Text color={colors.secondary}>
+								File suggestions (↑/↓ to navigate, Tab to select):
+							</Text>
+							{fileCompletions.slice(0, 5).map((file, index) => (
+								<Text
+									key={index}
+									color={
+										index === selectedFileIndex ? colors.info : colors.primary
+									}
+									bold={index === selectedFileIndex}
+								>
+									{index === selectedFileIndex ? '▸ ' : '  '}
+									{file.path}
+								</Text>
+							))}
+						</Box>
+					)}
+					{queuedMessages.length > 0 && (
+						<Box flexDirection="column" marginTop={1}>
+							<Text color={colors.secondary}>
+								Queued messages (↑/↓ select, Enter edit, Del remove):
+							</Text>
+							{queuedMessages.map((message, index) => {
+								const isSelected = index === selectedQueuedIndex;
+								return (
+									<Text
+										key={message.id}
+										color={isSelected ? colors.info : colors.primary}
+										bold={isSelected}
+									>
+										{isSelected ? '▸ ' : '  '}
+										{formatQueuedMessage(message)}
+									</Text>
+								);
+							})}
+						</Box>
+					)}
+					{isBusy && (
+						<Box marginTop={1}>
+							<Text color={colors.secondary}>
+								<Spinner type="dots" /> Press Esc to cancel
+								{onToggleCompactDisplay && (
+									<Text>
+										{' '}
+										· ctrl-o {compactToolDisplay ? 'expand' : 'compact'}{' '}
+										{isNarrow ? '' : 'tool results'}
+									</Text>
+								)}
+							</Text>
+						</Box>
+					)}
+				</Box>
 			</Box>
 
 			{attachments.length > 0 && (

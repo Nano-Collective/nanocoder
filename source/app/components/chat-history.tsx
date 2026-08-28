@@ -120,18 +120,25 @@ export const ChatHistory = React.memo(function ChatHistory({
 		};
 	}, [fullscreen, scrollActive, scrollBy]);
 
-	// Fullscreen: the banner renders in regular flow as the first row of the
-	// scrolling content (it clips away with old history, like OpenClaude).
-	// Inline: the banner stays INSIDE Static so it prints exactly once into
-	// the terminal's native scrollback — rendering it in the live region was
-	// the original "banner disappears" bug: Ink erases and rewrites the
-	// whole non-Static region on every keystroke, and clips its top first
-	// once it outgrows the terminal.
-	const banner = fullscreen ? staticComponents[0] : undefined;
-	const frozenComponents = React.useMemo(
-		() => (fullscreen ? staticComponents.slice(1) : staticComponents),
-		[fullscreen, staticComponents],
+	// Fresh welcome should be live-responsive (Image4 break) — Static is frozen.
+	// When no messages yet, render welcome outside Static so resize re-centers.
+	// Only for the real welcome banner (key="welcome") — keep test fixtures
+	// like static-marker inside Static so existing tests stay stable.
+	const hasWelcome = staticComponents.some(
+		c =>
+			c != null &&
+			typeof c === 'object' &&
+			'key' in c &&
+			(c as {key: unknown}).key === 'welcome',
 	);
+	const isFreshInline =
+		!fullscreen && queuedComponents.length === 0 && hasWelcome;
+	const banner = fullscreen ? staticComponents[0] : undefined;
+	const frozenComponents = React.useMemo(() => {
+		if (fullscreen) return staticComponents.slice(1);
+		if (isFreshInline) return [];
+		return staticComponents;
+	}, [fullscreen, staticComponents, isFreshInline]);
 
 	const chatQueueProps = React.useMemo(
 		() => ({
@@ -139,7 +146,7 @@ export const ChatHistory = React.memo(function ChatHistory({
 			queuedComponents,
 			renderLastQueuedComponentLive,
 			clearKey,
-			disableStatic: fullscreen,
+			disableStatic: fullscreen || isFreshInline,
 		}),
 		[
 			frozenComponents,
@@ -147,6 +154,7 @@ export const ChatHistory = React.memo(function ChatHistory({
 			renderLastQueuedComponentLive,
 			clearKey,
 			fullscreen,
+			isFreshInline,
 		],
 	);
 
@@ -154,6 +162,14 @@ export const ChatHistory = React.memo(function ChatHistory({
 		<>
 			{startChat && banner && (
 				<RenderErrorBoundary label="banner">{banner}</RenderErrorBoundary>
+			)}
+
+			{startChat && isFreshInline && (
+				<Box flexDirection="column">
+					{staticComponents.map((c, i) => (
+						<RenderErrorBoundary key={`fresh-${i}`}>{c}</RenderErrorBoundary>
+					))}
+				</Box>
 			)}
 
 			{startChat && <ChatQueue {...chatQueueProps} />}
