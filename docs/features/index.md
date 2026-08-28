@@ -168,7 +168,7 @@ The AI also has access to task tools and will proactively create and update task
 
 ### Project Setup with `/init`
 
-Run `/init` to analyze your project and generate an `AGENTS.md` file — a project-specific prompt that gives the AI context about your codebase, conventions, and tooling. Use `/init --force` to regenerate it.
+Run `/init` or `nanocoder init` to analyze your project and generate an `AGENTS.md` file — a project-specific prompt that gives the AI context about your codebase, conventions, and tooling. Use `--preset react`, `--preset nextjs`, or `--preset rust` to add bundled stack guidance, a `.nanocoderignore`, and a `/check` command skill. Use `/init --force` to regenerate `AGENTS.md`; existing preset files are preserved.
 
 The `AGENTS.md` file is automatically loaded every session, so the AI always knows how your project works.
 

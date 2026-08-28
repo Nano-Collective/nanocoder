@@ -60,6 +60,7 @@ nanocoder -h
 | `--no-alt-screen` | | Force inline mode (the default), even if `alternateScreen: true` is set in your preferences file. |
 | `--continue` | `-c` | Resume the most recent [saved session](../features/session-management.md) for the current directory; starts a fresh session if none exists. Interactive only — errors with `run`. Mutually exclusive with `--resume`. |
 | `--resume [id]` | `-r` | Resume a [saved session](../features/session-management.md) by session ID, 1-based list index, or `last`. With no ID, opens the session picker at startup. Errors if the session is not found. Interactive only — errors with `run`. |
+| `init [--preset <type>]` | | Initialize the current project. Bundled presets: `react`, `nextjs`, and `rust` |
 | `run` | | Run in non-interactive mode |
 
 **Provider/Model Flags:**
@@ -84,6 +85,32 @@ nanocoder --mode normal run "refactor db module"
 ```
 
 If `--mode` is omitted, interactive mode starts in `normal` and `run` mode starts in `auto-accept` (the previous defaults).
+
+## Project Initialization Presets
+
+Initialize a project from the terminal with automatic project analysis:
+
+```bash
+nanocoder init
+```
+
+Add `--preset` to seed stack-specific guidance, context ignore patterns, and a
+`/check` command skill:
+
+```bash
+nanocoder init --preset react
+nanocoder init --preset nextjs
+nanocoder init --preset rust
+```
+
+Every preset creates an analyzed `AGENTS.md`, a `.nanocoderignore`, and
+`.nanocoder/commands/check.md`. Detected project details take precedence over
+preset defaults. Existing files are never silently replaced: an already
+initialized project is refused unless `--force` is passed, `--force` only
+regenerates `AGENTS.md`, and existing preset files are preserved.
+
+The interactive `/init` command accepts the same options, including
+`/init --preset nextjs`, `/init --force`, and `/init --lean`.
 
 ## Interactive Mode
 

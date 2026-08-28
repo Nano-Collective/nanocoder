@@ -13,7 +13,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | Command | Description |
 |---------|-------------|
 | `/help` | Show available commands |
-| `/init` | Initialize project with intelligent analysis, create AGENTS.md and configuration files. Use `/init --force` to regenerate AGENTS.md if it already exists, or `/init --lean` to skip merging `CLAUDE.md` content into the generated AGENTS.md |
+| `/init` | Initialize the project with intelligent analysis and create `AGENTS.md`. Use `/init --preset <react\|nextjs\|rust>` for bundled stack guidance, ignore patterns, and a `/check` command skill; `/init --force` regenerates `AGENTS.md`, and `/init --lean` skips merging `CLAUDE.md` |
 | `/setup-config` | Open a configuration file in your `$EDITOR` (lists project and global config files) |
 | `/clear` | Clear chat history |
 | `/model` | Switch between available models from any configured provider |
