@@ -1,10 +1,9 @@
 /**
- * Boots `plugins/vscode/media/chat-panel.js` inside a VM against a stub DOM so
- * the panel's rendering can be driven and inspected from tests. Shared by the
- * chat-panel specs; extracted verbatim from chat-panel-thoughts.spec.ts.
- *
- * `mention-utils.js` must run first: the real webview loads it before
- * `chat-panel.js`, which immediately reads `globalThis.NanocoderMentionUtils`.
+ * Boots the chat panel scripts inside a VM against a stub DOM so the panel's
+ * rendering can be driven and inspected from tests. Shared by the chat-panel
+ * specs. Mirrors production load order in chat-panel.html: the helper scripts
+ * must run first because chat-panel.js reads `globalThis.NanocoderMentionUtils`
+ * and `globalThis.NanocoderSlashCommandUtils` at IIFE eval time.
  */
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
@@ -48,6 +47,7 @@ const SHELL_IDS = [
 	'menu-upload-image',
 	'mention-dropdown',
 	'messages-container',
+	'slash-dropdown',
 	'modal-image',
 	'mode-dropdown',
 	'mode-trigger',
@@ -59,6 +59,11 @@ const SHELL_IDS = [
 	'provider-trigger',
 	'provider-trigger-label',
 	'send-stop-btn',
+	'timeline-confirm',
+	'timeline-hint',
+	'timeline-nodes',
+	'timeline-strip',
+	'timeline-track',
 ];
 
 // The panel assigns arbitrary properties (onclick, oninput, ...) to the nodes it
@@ -157,8 +162,14 @@ export function createElement(tagName: string): StubElement {
 		click: (event: StubElement = {}) => {
 			for (const fn of listeners.get('click') ?? []) fn(event);
 		},
+		/** Drive any registered listener, not just click. */
+		dispatch: (type: string, event: StubElement = {}) => {
+			for (const fn of listeners.get(type) ?? []) fn(event);
+		},
 		scrollTop: 0,
 		scrollHeight: 0,
+		scrollLeft: 0,
+		scrollWidth: 0,
 	};
 
 	Object.defineProperty(element, 'className', {
@@ -293,7 +304,7 @@ export function createPanel(options: {marked?: boolean} = {}) {
 		container,
 		sent,
 		copied,
-		/** Any node in the stub shell, by id. */
+		/** Any shell element by id, for panels rendered outside the transcript. */
 		byId(id: string): StubElement | null {
 			return findById(root, id);
 		},

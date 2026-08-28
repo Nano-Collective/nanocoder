@@ -362,6 +362,166 @@
 		});
 	}
 
+	const EDIT_TOOLS = new Set(['write_file', 'string_replace', 'diff_edit', 'file_op']);
+	const EXECUTE_TOOLS = new Set(['execute_bash']);
+
+	function timelineKind(toolName) {
+		if (EDIT_TOOLS.has(toolName)) return 'edit';
+		if (EXECUTE_TOOLS.has(toolName)) return 'execute';
+		return 'other';
+	}
+
+	function timelineRelativeTime(timestamp) {
+		const diffMs = Date.now() - new Date(timestamp).getTime();
+		const minutes = Math.floor(diffMs / 60000);
+		if (minutes < 1) return 'just now';
+		if (minutes < 60) return `${minutes}m ago`;
+		const hours = Math.floor(minutes / 60);
+		if (hours < 24) return `${hours}h ago`;
+		return `${Math.floor(hours / 24)}d ago`;
+	}
+
+	const timelineStrip = (function createTimelineStrip() {
+		const root = document.getElementById('timeline-strip');
+		const nodesEl = document.getElementById('timeline-nodes');
+		const trackEl = document.getElementById('timeline-track');
+		const hintEl = document.getElementById('timeline-hint');
+		const confirmEl = document.getElementById('timeline-confirm');
+		if (!root || !nodesEl || !confirmEl) {
+			return {
+				setEntries() {},
+				setDisabled() {},
+				clear() {},
+			};
+		}
+
+		let entries = [];
+
+		function setHint(text) {
+			if (hintEl) hintEl.textContent = text || '';
+		}
+
+		function hideConfirm() {
+			confirmEl.classList.add('hidden');
+			confirmEl.innerHTML = '';
+		}
+
+		function showConfirm(entry) {
+			const files = (entry.filesChanged || []).slice(0, 3).join(', ');
+			const extra = (entry.filesChanged || []).length > 3 ? '…' : '';
+			confirmEl.innerHTML = '';
+
+			const text = document.createElement('div');
+			text.textContent =
+				`Revert workspace and conversation to before step ${entry.seq} (${entry.title || entry.toolName})? ` +
+				`This deletes later chat messages and undoes later file changes.` +
+				(files ? ` Files: ${files}${extra}` : '');
+			confirmEl.appendChild(text);
+
+			const actions = document.createElement('div');
+			actions.className = 'timeline-confirm-actions';
+
+			const revertBtn = document.createElement('button');
+			revertBtn.textContent = 'Revert';
+			revertBtn.style.background = 'var(--vscode-button-background)';
+			revertBtn.style.color = 'var(--vscode-button-foreground)';
+			revertBtn.addEventListener('click', () => {
+				vscode.postMessage({ type: 'revertToCheckpoint', checkpointId: entry.id });
+				hideConfirm();
+			});
+
+			const cancelBtn = document.createElement('button');
+			cancelBtn.textContent = 'Cancel';
+			cancelBtn.style.background = 'var(--vscode-button-secondaryBackground)';
+			cancelBtn.style.color = 'var(--vscode-button-secondaryForeground, inherit)';
+			cancelBtn.addEventListener('click', hideConfirm);
+
+			actions.appendChild(revertBtn);
+			actions.appendChild(cancelBtn);
+			confirmEl.appendChild(actions);
+			confirmEl.classList.remove('hidden');
+		}
+
+		// The label goes in a dedicated line under the strip rather than an
+		// absolutely-positioned bubble: the track has to clip horizontally to
+		// scroll, and a clipping box clips both axes, so a bubble above the dot
+		// would be cut off. A static line also reads on focus, not just hover.
+		function bindHint(el, text) {
+			el.addEventListener('mouseenter', () => setHint(text));
+			el.addEventListener('focus', () => setHint(text));
+			el.addEventListener('mouseleave', () => setHint(''));
+			el.addEventListener('blur', () => setHint(''));
+		}
+
+		function render() {
+			nodesEl.innerHTML = '';
+			setHint('');
+			if (entries.length === 0) {
+				root.classList.add('hidden');
+				hideConfirm();
+				return;
+			}
+			root.classList.remove('hidden');
+
+			const line = document.createElement('div');
+			line.className = 'timeline-line';
+			nodesEl.appendChild(line);
+
+			for (const entry of entries) {
+				const files = (entry.filesChanged || []).slice(0, 2).join(', ');
+				const label = `Step ${entry.seq} · ${entry.title || entry.toolName}` +
+					(files ? ` · ${files}` : '') +
+					` · ${timelineRelativeTime(entry.timestamp)}`;
+
+				const btn = document.createElement('button');
+				btn.type = 'button';
+				btn.className = 'timeline-node';
+				btn.dataset.kind = timelineKind(entry.toolName);
+				btn.dataset.id = entry.id;
+				btn.setAttribute('aria-label', label);
+				btn.title = label;
+
+				const dot = document.createElement('span');
+				dot.className = 'timeline-dot';
+				btn.appendChild(dot);
+
+				bindHint(btn, label);
+				btn.addEventListener('click', () => showConfirm(entry));
+				nodesEl.appendChild(btn);
+			}
+
+			const nowBtn = document.createElement('button');
+			nowBtn.type = 'button';
+			nowBtn.className = 'timeline-node is-selected';
+			nowBtn.dataset.kind = 'now';
+			nowBtn.setAttribute('aria-label', 'Current state');
+			nowBtn.title = 'Current state';
+			const nowDot = document.createElement('span');
+			nowDot.className = 'timeline-dot';
+			nowBtn.appendChild(nowDot);
+			bindHint(nowBtn, 'Now');
+			nowBtn.addEventListener('click', hideConfirm);
+			nodesEl.appendChild(nowBtn);
+
+			// The scroller is the track, not the flex row inside it.
+			if (trackEl) trackEl.scrollLeft = trackEl.scrollWidth;
+		}
+
+		return {
+			setEntries(next) {
+				entries = Array.isArray(next) ? next : [];
+				hideConfirm();
+				render();
+			},
+			setDisabled(disabled) {
+				root.classList.toggle('timeline-disabled', Boolean(disabled));
+			},
+			clear() {
+				this.setEntries([]);
+			},
+		};
+	})();
+
 	function toggleHistoryView() {
 		isHistoryView = !isHistoryView;
 		if (isHistoryView) {
@@ -527,6 +687,7 @@
 	// --- Send / Stop toggle logic ---
 	function setProcessing(active) {
 		isProcessing = active;
+		timelineStrip.setDisabled(active);
 		if (!active) {
 			// Globally cancel any stuck spinners across all tool cards, 
 			// in case multiple aggregators were created in the same session
@@ -1713,6 +1874,9 @@
 					clearInterval(currentThoughtBox.timer);
 					currentThoughtBox = null;
 				}
+				if (!message.isLoading) {
+					timelineStrip.clear();
+				}
 				setProcessing(false);
 				break;
 			case 'sessionLoaded':
@@ -1750,6 +1914,9 @@
 			case 'updateSessions':
 				sessionsData = message.sessions || [];
 				renderSessions(); // Always update so list is ready when history opens
+				break;
+			case 'updateTimeline':
+				timelineStrip.setEntries(message.entries || []);
 				break;
 			case 'runPrompt':
 				if (isHistoryView) showChatView();

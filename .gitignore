@@ -109,6 +109,9 @@ agents
 # These contain conversation snapshots and should not be committed
 **/checkpoints/
 
+# Action timeline before-images (per-session user data)
+.nanocoder/timeline/
+
 # Heap snapshots
 .heap-snapshots
 
