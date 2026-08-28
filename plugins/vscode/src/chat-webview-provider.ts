@@ -701,7 +701,10 @@ export class ChatWebviewProvider
 		// the panel unstyled instead of throwing out of getHtml.
 		const assetVersion = (fileName: string) => {
 			try {
-				const assetPath = path.join(this._extensionUri.fsPath, 'media', fileName);
+				// fileName is never user input — every call site passes a media/
+				// filename literal. Basename keeps the join inside media/.
+				const safeName = path.basename(fileName);
+				const assetPath = path.join(this._extensionUri.fsPath, 'media', safeName); // nosemgrep
 				return `${extVersion}-${fs.statSync(assetPath).mtimeMs}`;
 			} catch {
 				return extVersion;
