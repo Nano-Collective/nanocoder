@@ -480,6 +480,29 @@ test('executeWebSearch throws timeout error on timeout', async t => {
 	}
 });
 
+test('executeWebSearch treats TimeoutError as timeout', async t => {
+	if (!executeWebSearch) {
+		t.pass('Skipping test - web-search module not available');
+		return;
+	}
+
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = (() => {
+		const error = new Error('The operation was aborted due to timeout');
+		error.name = 'TimeoutError';
+		throw error;
+	}) as any;
+
+	try {
+		await t.throwsAsync(
+			async () => await executeWebSearch({query: 'test'}, 'test-key'),
+			{message: /timeout/i},
+		);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
 test('executeWebSearch throws on network error', async t => {
 	if (!executeWebSearch) {
 		t.pass('Skipping test - web-search module not available');
