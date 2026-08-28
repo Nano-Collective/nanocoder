@@ -22,14 +22,16 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/model-database` | Browse coding models from OpenRouter (searchable, filterable by open/proprietary) |
 | `/settings` | Interactive settings menu. Accepts a tab name to jump straight there: `/settings providers`, `/settings mcp`, `/settings appearance`, `/settings input`, `/settings behavior`, `/settings advanced` |
 | `/mcp` | Show connected MCP servers and their tools |
-| `/custom-commands` | List all custom commands |
+| `/commands` | List custom commands. Subcommands: `show <name>`, `create <name>` (see [Custom Commands](custom-commands.md)) |
+| `/tools` | List available tools grouped by source (built-in, MCP, custom). Subcommand: `create <name>` (see [Custom Tools](custom-tools.md)) |
+| `/agents` | List subagents. `/agents show <name>` for details, `/agents copy <name>` to customize (see [Subagents](subagents.md)) |
 | `/checkpoint` | Save and restore conversation snapshots (see [Checkpointing](checkpointing.md)) |
 | `/compact` | Compress message history to reduce context usage (see [Context Compression](context-compression.md)) |
 | `/context-max` | Set maximum context length for the current session, or inspect the resolved context source. Also available as `--context-max` CLI flag |
-| `/exit` | Exit the application |
+| `/exit` | Exit the application (alias: `/quit`) |
 | `/export` | Export current session to markdown file |
 | `/copy` | Copy the last assistant response to the system clipboard |
-| `/commit` | Generate a Conventional Commit message from staged Git changes |
+| `/commit` | Generate a Conventional Commit message from staged Git changes. Add `--copy` (or `-c`) to also copy the message to the system clipboard. A spinner shows while the model is working |
 | `/doctor` | Show environment health report for bug reports |
 | `/update` | Update Nanocoder to the latest version |
 | `/usage` | Get current model context usage visually |
@@ -42,6 +44,10 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/explorer` | Interactive file browser to navigate, preview, and select files for context |
 | `/tune` | Configure runtime model behaviour — tool profiles, compaction, native tools, model parameters (see [Tune](tune.md)) |
 | `/ide` | Connect to an IDE for live integration (e.g., VS Code diff previews) |
+| `/privacy` | Inspect what the prompt scrubber will remove from your prompts |
+| `/credits` | Show project contributors and dependencies |
+| `/copilot-login` | Log in to GitHub Copilot via device flow. Saves credentials for the "GitHub Copilot" provider |
+| `/codex-login` | Log in to ChatGPT/Codex via device flow. Saves credentials for the "ChatGPT" provider |
 
 ## Special Input Syntax
 
@@ -125,7 +131,7 @@ The emitted object looks like:
   "reasoning": "...",
   "toolCalls": [
     {
-      "name": "edit_file",
+      "name": "string_replace",
       "arguments": { "path": "src/api.ts" },
       "result": "...",
       "error": null
@@ -145,7 +151,7 @@ The emitted object looks like:
 - `finalText` — the model's final response text
 - `reasoning` — accumulated reasoning/thinking content, or `null` if the model didn't emit any
 - `toolCalls` — every tool call made during the run, each with its arguments and either a `result` or an `error` (never both)
-- `filesChanged` — deduplicated list of file paths touched by file-mutating tools (`write_to_file`, `create_file`, `string_replace`, `edit_file`)
+- `filesChanged` — deduplicated list of file paths touched by file-mutating tools (`write_file`, `string_replace`, `diff_edit`)
 - `usage` — provider-reported token counts summed across every turn of the run. Omitted entirely when the provider reports no token telemetry (common with local models), so an absent block means "unknown", never "zero". When a provider reports input and output counts but no total, `totalTokens` is derived as their sum.
 
 Two more fields appear conditionally: `message` (the error text, when `kind` is `"error"`) and `toolNames` (the tools awaiting approval, when `kind` is `"tool-approval-required"`).

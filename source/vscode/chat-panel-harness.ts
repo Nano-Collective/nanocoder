@@ -51,9 +51,9 @@ const SHELL_IDS = [
 	'send-stop-btn',
 ];
 
-// biome-ignore lint/suspicious/noExplicitAny: the panel assigns arbitrary
-// properties (onclick, oninput, ...) to the nodes it builds, so the stub has to
-// stay open-ended.
+// The panel assigns arbitrary properties (onclick, oninput, ...) to the nodes it
+// builds, so the stub has to stay open-ended.
+// biome-ignore lint/suspicious/noExplicitAny: stub nodes are intentionally open-ended
 export type StubElement = any;
 
 /**

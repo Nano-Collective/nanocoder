@@ -286,7 +286,7 @@ export interface WebviewMessageUpdateSetting {
 
 export interface WebviewMessageOpenConfigFile {
 	type: 'openConfigFile';
-	file: 'agents.config.json' | 'nanocoder-preferences.json';
+	file: 'agents.config.json' | 'nanocoder-preferences.json' | '.mcp.json';
 }
 
 export interface WebviewMessageRestartAcp {

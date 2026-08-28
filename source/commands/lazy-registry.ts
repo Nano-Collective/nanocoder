@@ -69,7 +69,9 @@ export const lazyCommands: LazyCommand[] = [
 	},
 	{
 		name: 'commit',
-		description: 'Generate a conventional commit message from staged changes',
+		description:
+			'Generate a conventional commit message from staged changes (--copy)',
+		progressLabel: 'Generating commit message',
 		load: () => import('@/commands/commit').then(m => m.commitCommand),
 	},
 	{

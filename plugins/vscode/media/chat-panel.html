@@ -73,7 +73,7 @@
 					</div>
 
 					<div class="settings-section">
-						<div class="settings-section-title">MCP Servers</div>
+						<div class="settings-section-title">MCP Servers <span style="text-transform: none; letter-spacing: 0; font-weight: 400;">(.mcp.json)</span></div>
 						<div id="settings-mcp-list" class="settings-list"></div>
 						<button class="settings-action-btn mt-2" data-action="edit-mcp">
 							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
@@ -231,7 +231,7 @@
 				<div id="image-preview-container" class="flex flex-wrap gap-2 px-3 pt-3 empty:hidden"></div>
 				<!-- NEW: Attached context chips row -->
 				<div id="context-chips" class="hidden flex flex-wrap gap-1.5 px-3 pt-2 pb-1"></div>
-				<textarea id="chat-input" rows="1" placeholder="Ask Nanocoder anything..." class="w-full min-h-[44px] max-h-[250px] p-3 px-4 pb-2 bg-transparent text-vscode-input-fg font-vscode text-[0.95em] resize-none outline-none border-none" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="mention-dropdown"></textarea>
+				<textarea id="chat-input" rows="1" placeholder="Ask Nanocoder anything..." class="w-full min-h-[44px] max-h-[250px] p-3 px-4 pb-2 bg-transparent text-vscode-input-fg font-vscode text-[0.95em] resize-none outline-none border-none" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="mention-dropdown slash-dropdown"></textarea>
 				
 				<div class="flex items-center justify-between px-3 pb-2 pt-1 relative">
 					<div class="flex gap-1 items-center flex-1 min-w-0">
@@ -292,11 +292,16 @@
 				     caret: a textarea exposes no caret coordinates without a mirror
 				     element, and in a narrow sidebar full-width is more readable. -->
 				<div id="mention-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1" role="listbox" aria-label="Attach file or folder"></div>
+				<div id="slash-dropdown" class="hidden absolute bottom-[calc(100%+8px)] left-0 w-full max-h-64 overflow-y-auto bg-vscode-dropdown-bg border border-vscode-focusBorder rounded-lg shadow-xl z-50 flex-col font-vscode py-1" role="listbox" aria-label="Slash commands"></div>
 			</div>
 		</div>
 	<script nonce="{{nonce}}" src="{{markedUri}}"></script>
 	<!-- Pure @-mention helpers; must load before chat-panel.js reads them. -->
 	<script nonce="{{nonce}}" src="{{mentionUtilsUri}}"></script>
+	<!-- Pure drop-payload helpers; same ordering requirement. -->
+	<script nonce="{{nonce}}" src="{{uriUtilsUri}}"></script>
+	<!-- Pure slash-command helpers; same ordering requirement. -->
+	<script nonce="{{nonce}}" src="{{slashCommandUtilsUri}}"></script>
 	<script nonce="{{nonce}}" src="{{scriptUri}}"></script>
 </body>
 </html>

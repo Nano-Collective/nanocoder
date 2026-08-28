@@ -6,8 +6,10 @@ import {
 	parseCustomCommandArgs,
 } from './app-util.js';
 import {SETTINGS_TAB_IDS} from '@/app/components/settings-constants';
+import {commandRegistry} from '@/commands';
 import {lazyCommands} from '@/commands/lazy-registry';
 import BashProgress from '@/components/bash-progress';
+import CommandProgress from '@/components/command-progress';
 import type {MessageSubmissionOptions} from '@/types/index';
 import type {Session} from '@/session/session-manager';
 import {sessionManager} from '@/session/session-manager';
@@ -962,4 +964,90 @@ test('retired setup commands - no longer registered in the slash menu', t => {
 	t.false(names.includes('setup-mcp'));
 	t.true(names.includes('settings'));
 	t.true(names.includes('setup-config'), 'unrelated /setup-config stays');
+});
+
+// --- Command progress spinner (Command.progressLabel) ---
+
+// The registry is populated at app init, not at module load, so the spec has
+// to register the lazy entries itself before driving a built-in command.
+commandRegistry.registerLazy(lazyCommands);
+
+function createProgressTestOptions(overrides: {
+	setLiveComponent?: (component: React.ReactNode) => void;
+	onAddToChatQueue?: (component: React.ReactNode) => void;
+}): MessageSubmissionOptions {
+	return {
+		...createResumeTestOptions({
+			onAddToChatQueue: overrides.onAddToChatQueue,
+		}),
+		setLiveComponent: overrides.setLiveComponent ?? (() => {}),
+	};
+}
+
+test.serial(
+	'progress spinner - /commit mounts CommandProgress then clears it',
+	async t => {
+		const live: React.ReactNode[] = [];
+		const options = createProgressTestOptions({
+			setLiveComponent: component => live.push(component),
+		});
+
+		await handleMessageSubmission('/commit', options);
+
+		t.is(live.length, 2, 'spinner is mounted once and cleared once');
+
+		const spinner = live[0] as React.ReactElement<{label?: string}>;
+		t.true(React.isValidElement(spinner));
+		t.is(spinner.type, CommandProgress);
+		t.is(spinner.props.label, 'Generating commit message');
+
+		t.is(live[1], null, 'live slot is released after the handler settles');
+	},
+);
+
+test.serial(
+	'progress spinner - cleared even when the command handler throws',
+	async t => {
+		const live: React.ReactNode[] = [];
+		const options = createProgressTestOptions({
+			setLiveComponent: component => live.push(component),
+		});
+
+		// getMessageTokens runs after the spinner is mounted, so throwing there
+		// aborts the command with a spinner already on screen.
+		const boom = {
+			...options,
+			messages: [{role: 'user' as const, content: 'x'}],
+			getMessageTokens: () => {
+				throw new Error('boom');
+			},
+		};
+
+		await t.throwsAsync(() => handleMessageSubmission('/commit', boom));
+
+		t.is(live.length, 2);
+		t.is(live[1], null, 'a throwing handler must not strand the spinner');
+	},
+);
+
+test.serial(
+	'progress spinner - commands without progressLabel leave the live slot alone',
+	async t => {
+		const live: React.ReactNode[] = [];
+		const options = createProgressTestOptions({
+			setLiveComponent: component => live.push(component),
+		});
+
+		await handleMessageSubmission('/help', options);
+
+		t.deepEqual(live, [], '/help is instant and declares no progressLabel');
+	},
+);
+
+test('progress spinner - only slow commands opt in', t => {
+	const commit = lazyCommands.find(c => c.name === 'commit');
+	t.is(commit?.progressLabel, 'Generating commit message');
+
+	const help = lazyCommands.find(c => c.name === 'help');
+	t.is(help?.progressLabel, undefined);
 });

@@ -14,9 +14,11 @@ test.serial('SettingsManager - getConfigPaths resolves project paths correctly',
 	const manager = new SettingsManager(mockOutputChannel);
 	const cwd = process.cwd(); // mock cwd
 	const paths = manager.getConfigPaths(cwd);
-	
+
 	t.is(typeof paths.agentsConfig, 'string');
 	t.is(typeof paths.preferences, 'string');
+	t.is(typeof paths.mcpConfig, 'string');
+	t.is(path.basename(paths.mcpConfig), '.mcp.json');
 });
 
 test.serial('SettingsManager - returns fallback values for empty or missing config', (t) => {
@@ -28,7 +30,7 @@ test.serial('SettingsManager - returns fallback values for empty or missing conf
 	const anyManager = manager as any;
 	anyManager.getGlobalConfigDir = () => tempDir;
 
-	const settings = manager.readSettings(tempDir);
+	const settings = withoutMcpEnv(() => manager.readSettings(tempDir));
 	t.deepEqual(settings.providers, []);
 	t.deepEqual(settings.mcpServers, []);
 	t.deepEqual(settings.alwaysAllow, []);
@@ -41,6 +43,128 @@ test.serial('SettingsManager - returns fallback values for empty or missing conf
 	t.is(settings.webSearch.configured, false);
 	
 	fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
+// ── MCP servers ───────────────────────────────────────────
+// MCP config lives in .mcp.json, never agents.config.json. Reading the wrong
+// file is invisible in the UI — it just renders "No MCP servers configured".
+
+/** Run `fn` with the MCP env vars cleared, so the ambient shell can't leak in. */
+function withoutMcpEnv<T>(fn: () => T): T {
+	const saved = {
+		servers: process.env.NANOCODER_MCPSERVERS,
+		file: process.env.NANOCODER_MCPSERVERS_FILE,
+	};
+	delete process.env.NANOCODER_MCPSERVERS;
+	delete process.env.NANOCODER_MCPSERVERS_FILE;
+	try {
+		return fn();
+	} finally {
+		if (saved.servers !== undefined) process.env.NANOCODER_MCPSERVERS = saved.servers;
+		if (saved.file !== undefined) process.env.NANOCODER_MCPSERVERS_FILE = saved.file;
+	}
+}
+
+function makeManager(tempDir: string): SettingsManager {
+	const manager = new SettingsManager(mockOutputChannel);
+	(manager as any).getGlobalConfigDir = () => tempDir;
+	return manager;
+}
+
+test.serial('SettingsManager - reads MCP servers from .mcp.json', (t) => {
+	withoutMcpEnv(() => {
+		const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocoder-test-'));
+		const manager = makeManager(tempDir);
+
+		fs.writeFileSync(path.join(tempDir, '.mcp.json'), JSON.stringify({
+			mcpServers: {
+				filesystem: { transport: 'stdio', command: 'npx', args: ['-y', 'server'] },
+				remote: { transport: 'http', url: 'https://example.com/mcp' },
+			},
+		}));
+
+		const settings = manager.readSettings(tempDir);
+		t.deepEqual(settings.mcpServers, [
+			{ name: 'filesystem', transport: 'stdio', command: 'npx', url: undefined },
+			{ name: 'remote', transport: 'http', command: undefined, url: 'https://example.com/mcp' },
+		]);
+
+		fs.rmSync(tempDir, { recursive: true, force: true });
+	});
+});
+
+test.serial('SettingsManager - ignores mcpServers in agents.config.json', (t) => {
+	withoutMcpEnv(() => {
+		const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocoder-test-'));
+		const manager = makeManager(tempDir);
+
+		// The old (wrong) location. The CLI never reads this, so neither do we.
+		fs.writeFileSync(path.join(tempDir, 'agents.config.json'), JSON.stringify({
+			nanocoder: { mcpServers: [{ name: 'ghost', transport: 'stdio', command: 'x' }] },
+		}));
+
+		const settings = manager.readSettings(tempDir);
+		t.deepEqual(settings.mcpServers, []);
+
+		fs.rmSync(tempDir, { recursive: true, force: true });
+	});
+});
+
+test.serial('SettingsManager - infers transport when .mcp.json omits it', (t) => {
+	withoutMcpEnv(() => {
+		const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocoder-test-'));
+		const manager = makeManager(tempDir);
+
+		fs.writeFileSync(path.join(tempDir, '.mcp.json'), JSON.stringify({
+			mcpServers: {
+				local: { command: 'npx' },
+				hosted: { url: 'https://example.com/mcp' },
+			},
+		}));
+
+		const settings = manager.readSettings(tempDir);
+		t.is(settings.mcpServers[0].transport, 'stdio');
+		t.is(settings.mcpServers[1].transport, 'http');
+
+		fs.rmSync(tempDir, { recursive: true, force: true });
+	});
+});
+
+test.serial('SettingsManager - NANOCODER_MCPSERVERS takes precedence over .mcp.json', (t) => {
+	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocoder-test-'));
+	const manager = makeManager(tempDir);
+	const saved = process.env.NANOCODER_MCPSERVERS;
+
+	fs.writeFileSync(path.join(tempDir, '.mcp.json'), JSON.stringify({
+		mcpServers: { shared: { transport: 'stdio', command: 'from-file' } },
+	}));
+	process.env.NANOCODER_MCPSERVERS = JSON.stringify([
+		{ name: 'shared', transport: 'stdio', command: 'from-env' },
+	]);
+
+	try {
+		const settings = manager.readSettings(tempDir);
+		t.is(settings.mcpServers.length, 1);
+		t.is(settings.mcpServers[0].command, 'from-env');
+	} finally {
+		if (saved === undefined) delete process.env.NANOCODER_MCPSERVERS;
+		else process.env.NANOCODER_MCPSERVERS = saved;
+		fs.rmSync(tempDir, { recursive: true, force: true });
+	}
+});
+
+test.serial('SettingsManager - malformed .mcp.json yields no servers', (t) => {
+	withoutMcpEnv(() => {
+		const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocoder-test-'));
+		const manager = makeManager(tempDir);
+
+		fs.writeFileSync(path.join(tempDir, '.mcp.json'), '{ not json');
+
+		const settings = manager.readSettings(tempDir);
+		t.deepEqual(settings.mcpServers, []);
+
+		fs.rmSync(tempDir, { recursive: true, force: true });
+	});
 });
 
 test.serial('SettingsManager - updates setting correctly (atomic write)', (t) => {
