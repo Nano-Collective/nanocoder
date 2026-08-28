@@ -15,7 +15,16 @@ const mediaUrl = (filename: string) =>
 		new URL(`../../plugins/vscode/media/${filename}`, import.meta.url),
 	);
 
+// The panel reads its siblings off `globalThis` at load - the slash command
+// table is destructured at the top level, so a missing one throws before a
+// single element is built. chat-panel.html loads them ahead of the panel; this
+// list mirrors that order.
 const MENTION_UTILS_SOURCE = readFileSync(mediaUrl('mention-utils.js'), 'utf8');
+const URI_UTILS_SOURCE = readFileSync(mediaUrl('uri-utils.js'), 'utf8');
+const SLASH_COMMAND_UTILS_SOURCE = readFileSync(
+	mediaUrl('slash-command-utils.js'),
+	'utf8',
+);
 const PANEL_SOURCE = readFileSync(mediaUrl('chat-panel.js'), 'utf8');
 
 const SHELL_IDS = [
@@ -52,9 +61,9 @@ const SHELL_IDS = [
 	'send-stop-btn',
 ];
 
-// biome-ignore lint/suspicious/noExplicitAny: the panel assigns arbitrary
-// properties (onclick, oninput, ...) to the nodes it builds, so the stub has to
-// stay open-ended.
+// The panel assigns arbitrary properties (onclick, oninput, ...) to the nodes it
+// builds, so the stub has to stay open-ended.
+// biome-ignore lint/suspicious/noExplicitAny: stub nodes are intentionally open-ended
 export type StubElement = any;
 
 /**
@@ -274,6 +283,8 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	sandbox.globalThis = sandbox;
 	createContext(sandbox);
 	runInContext(MENTION_UTILS_SOURCE, sandbox);
+	runInContext(URI_UTILS_SOURCE, sandbox);
+	runInContext(SLASH_COMMAND_UTILS_SOURCE, sandbox);
 	runInContext(PANEL_SOURCE, sandbox);
 
 	const container = findById(root, 'messages-container') as StubElement;

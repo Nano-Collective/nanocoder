@@ -417,6 +417,12 @@ export interface UserPreferences {
 	paste?: PasteConfig;
 	reasoningExpanded?: boolean;
 	compactToolDisplay?: boolean;
+	/**
+	 * Show the per-response usage footer under each assistant message
+	 * (provider-reported tokens + estimated cost). Defaults to true. When
+	 * false the message ends after its content, with no footer line.
+	 */
+	showUsageFooter?: boolean;
 	enablePromptScrubbing?: boolean;
 	/**
 	 * Interactive TUI screen mode. true (default): fullscreen on the
