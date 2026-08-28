@@ -1,6 +1,8 @@
 import type {PlaceholderContent} from '../types/hooks';
 import {PlaceholderType} from '../types/hooks';
 
+const ORDINAL = /^\d+$/;
+
 const ID_PREFIX: Record<PlaceholderType, string> = {
 	[PlaceholderType.PASTE]: 'paste',
 	[PlaceholderType.FILE]: 'file',
@@ -24,26 +26,27 @@ export function allocatePlaceholderId(
 	existing: Record<string, PlaceholderContent>,
 	type: PlaceholderType,
 ): AllocatedPlaceholderId {
-	const prefix = ID_PREFIX[type];
-	const namespaced = new RegExp(`^${prefix}_(\\d+)$`);
+	const marker = `${ID_PREFIX[type]}_`;
 
 	let highest = 0;
 	for (const key of Object.keys(existing)) {
-		const match = key.match(namespaced);
-		if (match) {
-			highest = Math.max(highest, Number(match[1]));
+		if (key.startsWith(marker)) {
+			const ordinal = key.slice(marker.length);
+			if (ORDINAL.test(ordinal)) {
+				highest = Math.max(highest, Number(ordinal));
+			}
 			continue;
 		}
 		// Prompt history persists InputState to disk, so bare-numeric paste keys
 		// written before pastes were namespaced can still arrive from an older
 		// session's history file.
-		if (type === PlaceholderType.PASTE && /^\d+$/.test(key)) {
+		if (type === PlaceholderType.PASTE && ORDINAL.test(key)) {
 			highest = Math.max(highest, Number(key));
 		}
 	}
 
 	const ordinal = highest + 1;
-	return {id: `${prefix}_${ordinal}`, ordinal};
+	return {id: `${marker}${ordinal}`, ordinal};
 }
 
 export interface PlaceholderOccurrence {
