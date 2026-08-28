@@ -76,6 +76,18 @@ test('runScript: captures stdout', async t => {
 	t.is(result, 'EXIT_CODE: 0\nhello world');
 });
 
+const testOnWindows = process.platform === 'win32' ? test : test.skip;
+
+testOnWindows('runScript: invokes cmd with its Windows command switch', async t => {
+	const result = await runScript('echo hello from cmd', {
+		cwd: testDir,
+		env: process.env,
+		shell: process.env.ComSpec || 'cmd.exe',
+		timeoutMs: 5_000,
+	});
+	t.is(result, 'EXIT_CODE: 0\nhello from cmd');
+});
+
 test('runScript: non-zero exit returns output with EXIT_CODE prefix', async t => {
 	const result = await runScript(`echo oops >&2; exit 3`, {
 		cwd: testDir,

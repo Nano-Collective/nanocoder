@@ -53,7 +53,13 @@ export function runScript(
 	options: RunOptions,
 ): Promise<string> {
 	return new Promise((resolvePromise, rejectPromise) => {
-		const child = spawn(options.shell, ['-c', script], {
+		const shellName = options.shell.split(/[\\/]/).pop()?.toLowerCase();
+		const args =
+			process.platform === 'win32' &&
+			(shellName === 'cmd' || shellName === 'cmd.exe')
+				? ['/c', script]
+				: ['-c', script];
+		const child = spawn(options.shell, args, {
 			cwd: options.cwd,
 			env: options.env,
 			stdio: ['ignore', 'pipe', 'pipe'],
