@@ -106,6 +106,42 @@ test('handleAtomicDeletion returns null for normal deletions', t => {
 	t.is(result, null);
 });
 
+test('handleAtomicDeletion ignores deletion immediately before placeholder', t => {
+	const previousState: InputState = {
+		displayValue: 'x[Paste #123: 100 chars] more',
+		placeholderContent: {
+			'123': {
+				type: PlaceholderType.PASTE,
+				displayText: '[Paste #123: 100 chars]',
+				content: 'content',
+				originalSize: 100,
+			} as PastePlaceholderContent,
+		},
+	};
+
+	const result = handleAtomicDeletion(previousState, '[Paste #123: 100 chars] more');
+
+	t.is(result, null);
+});
+
+test('handleAtomicDeletion ignores deletion immediately after placeholder', t => {
+	const previousState: InputState = {
+		displayValue: '[Paste #123: 100 chars]x more',
+		placeholderContent: {
+			'123': {
+				type: PlaceholderType.PASTE,
+				displayText: '[Paste #123: 100 chars]',
+				content: 'content',
+				originalSize: 100,
+			} as PastePlaceholderContent,
+		},
+	};
+
+	const result = handleAtomicDeletion(previousState, '[Paste #123: 100 chars] more');
+
+	t.is(result, null);
+});
+
 test('handleAtomicDeletion returns null for additions', t => {
 	const previousState: InputState = {
 		displayValue: 'Short text',
@@ -143,6 +179,24 @@ test('findPlaceholderAtPosition finds placeholder ID', t => {
 	t.is(result3, null);
 });
 
+test('findPlaceholderAtPosition uses cursor boundaries', t => {
+	const text = 'Before [Paste #789: 300 chars] after';
+	const content = {
+		paste_789: {
+			type: PlaceholderType.PASTE,
+			displayText: '[Paste #789: 300 chars]',
+			content: 'code',
+			originalSize: 300,
+		} as PastePlaceholderContent,
+	};
+	const placeholderStart = text.indexOf('[Paste #789: 300 chars]');
+	const placeholderEnd = placeholderStart + '[Paste #789: 300 chars]'.length;
+
+	t.is(findPlaceholderAtPosition(text, placeholderStart, content), null);
+	t.is(findPlaceholderAtPosition(text, placeholderStart + 1, content), 'paste_789');
+	t.is(findPlaceholderAtPosition(text, placeholderEnd, content), 'paste_789');
+});
+
 test('wouldPartiallyDeletePlaceholder detects partial deletion', t => {
 	const text = 'Text [Paste #123: 100 chars] more';
 	const content = {
@@ -168,6 +222,26 @@ test('wouldPartiallyDeletePlaceholder detects partial deletion', t => {
 	// Deletion outside placeholder
 	const result3 = wouldPartiallyDeletePlaceholder(text, 0, 4, content); // Delete "Text"
 	t.false(result3);
+});
+
+test('wouldPartiallyDeletePlaceholder treats touching boundaries as non-overlap', t => {
+	const text = 'Text [Paste #123: 100 chars] more';
+	const content = {
+		paste_123: {
+			type: PlaceholderType.PASTE,
+			displayText: '[Paste #123: 100 chars]',
+			content: 'code',
+			originalSize: 100,
+		} as PastePlaceholderContent,
+	};
+	const placeholderStart = text.indexOf('[Paste #123: 100 chars]');
+	const placeholderEnd = placeholderStart + '[Paste #123: 100 chars]'.length;
+
+	t.false(
+		wouldPartiallyDeletePlaceholder(text, placeholderStart - 1, 1, content),
+	);
+	t.false(wouldPartiallyDeletePlaceholder(text, placeholderEnd, 1, content));
+	t.true(wouldPartiallyDeletePlaceholder(text, placeholderEnd - 1, 1, content));
 });
 
 // Integration test showing complete flow
