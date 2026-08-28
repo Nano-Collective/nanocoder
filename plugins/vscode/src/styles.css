@@ -155,6 +155,119 @@ select option {
   z-index: 10;
 }
 
+/* ── Action Timeline ────────────────────────────────── */
+#timeline-strip.timeline-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+#timeline-nodes {
+  position: relative;
+}
+
+.timeline-line {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 50%;
+  height: 2px;
+  background: var(--vscode-panel-border, rgba(128,128,128,0.35));
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.timeline-node {
+  position: relative;
+  z-index: 1;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.timeline-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--vscode-focusBorder);
+  background: var(--vscode-editor-background);
+  transition: transform 120ms ease, background 120ms ease;
+}
+
+.timeline-node[data-kind="edit"] .timeline-dot {
+  border-color: var(--vscode-focusBorder);
+}
+
+.timeline-node[data-kind="execute"] .timeline-dot {
+  border-color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+.timeline-node[data-kind="other"] .timeline-dot {
+  border-color: var(--vscode-descriptionForeground, rgba(128,128,128,0.8));
+}
+
+.timeline-node[data-kind="now"] .timeline-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--vscode-button-background);
+  border-color: var(--vscode-button-background);
+}
+
+.timeline-node.is-selected .timeline-dot,
+.timeline-node:hover .timeline-dot {
+  transform: scale(1.35);
+  background: var(--vscode-focusBorder);
+}
+
+.timeline-node[data-kind="now"].is-selected .timeline-dot,
+.timeline-node[data-kind="now"]:hover .timeline-dot {
+  background: var(--vscode-button-background);
+}
+
+.timeline-tooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-widget-border);
+  color: var(--vscode-editor-foreground);
+  font-size: 0.75em;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.timeline-node:hover .timeline-tooltip {
+  display: block;
+}
+
+.timeline-confirm-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.timeline-confirm-actions button {
+  border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 0.85em;
+  cursor: pointer;
+  font-family: var(--vscode-font-family);
+}
 /* ── Settings UI ────────────────────────────────────── */
 .settings-tab { background: transparent; border: none; border-bottom: 2px solid transparent; color: var(--vscode-editor-foreground); opacity: 0.6; padding: 0.5rem 0.75rem; font-family: var(--vscode-font-family); font-size: 0.85em; cursor: pointer; transition: opacity 0.15s, border-color 0.15s; }
 .settings-tab:hover { opacity: 0.9; }

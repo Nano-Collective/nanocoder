@@ -53,6 +53,7 @@ const createMockToolManager = () => ({
 	getFilteredTools: () => ({}),
 	hasTool: () => true,
 	getToolEntry: () => ({approval: false}),
+	isReadOnly: (name: string) => name !== 'write_file' && name !== 'execute_bash',
 });
 
 /** Every update carrying this tool call id, in emission order. */

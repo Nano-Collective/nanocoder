@@ -1,3 +1,6 @@
+import {mkdirSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import type {AgentSideConnection} from '@agentclientprotocol/sdk';
 import {AcpSession} from '@/acp/acp-session';
@@ -49,11 +52,15 @@ const createMockSession = (
 		messages?: any[];
 		systemMessage?: any;
 		aborted?: boolean;
+		sessionId?: string;
+		cwd?: string;
 	} = {},
 ): AcpSession => {
 	const session = new AcpSession({
-		sessionId: 'test-session',
-		cwd: '/tmp',
+		sessionId:
+			opts.sessionId ??
+			`test-session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+		cwd: opts.cwd ?? '/tmp',
 		conn,
 		initialMode: opts.devMode ?? 'auto-accept',
 	});
@@ -94,6 +101,7 @@ const createMockToolManager = () => ({
 	getFilteredTools: () => ({}),
 	hasTool: (_name: string) => false,
 	getToolEntry: () => ({approval: false}),
+	isReadOnly: (name: string) => name !== 'write_file' && name !== 'execute_bash',
 });
 
 // ============================================================================
@@ -1379,6 +1387,7 @@ test('runAcpConversation - ask_user coerces object options and returns the choic
 		getFilteredTools: () => ({}),
 		hasTool: (n: string) => n === 'ask_user',
 		getToolEntry: () => ({approval: false}),
+		isReadOnly: () => true,
 	};
 
 	const result = await runAcpConversation({
@@ -1419,6 +1428,7 @@ test('runAcpConversation - ask_user fails cleanly when no usable options', async
 		getFilteredTools: () => ({}),
 		hasTool: (n: string) => n === 'ask_user',
 		getToolEntry: () => ({approval: false}),
+		isReadOnly: () => true,
 	};
 
 	await runAcpConversation({
@@ -1434,3 +1444,112 @@ test('runAcpConversation - ask_user fails cleanly when no usable options', async
 	);
 	t.true(toolMsg?.content.startsWith('Error:'));
 });
+
+// ============================================================================
+// Action timeline capture
+// ============================================================================
+
+test('runAcpConversation - captures a timeline checkpoint for write_file', async t => {
+	const {conn} = createMockConn();
+	const cwd = join(tmpdir(), `nanocoder-timeline-conv-${Date.now()}`);
+	mkdirSync(cwd, {recursive: true});
+	writeFileSync(join(cwd, 'a.ts'), 'before');
+
+	const session = createMockSession(conn, {devMode: 'yolo', cwd});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		isReadOnly: (name: string) => name !== 'write_file',
+	};
+
+	setToolRegistryGetter(() => ({
+		write_file: async () => 'Wrote a.ts',
+	}));
+
+	let callCount = 0;
+	const client = {
+		chat: async () => {
+			callCount++;
+			if (callCount === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [
+									createMockToolCall(
+										'write_file',
+										{path: 'a.ts', content: 'after'},
+										'call-write',
+									),
+								],
+							},
+						},
+					],
+				};
+			}
+			return {choices: [{message: {content: 'done'}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	const entries = await session.timeline.list();
+	t.is(entries.length, 1);
+	t.is(entries[0].toolName, 'write_file');
+	t.is(entries[0].toolCallId, 'call-write');
+	t.is(entries[0].truncateToMessageIndex, 0);
+});
+
+test('runAcpConversation - does not capture a timeline checkpoint for read_file', async t => {
+	const {conn} = createMockConn();
+	const session = createMockSession(conn, {devMode: 'yolo'});
+	const toolManager = {
+		...createMockToolManager(),
+		hasTool: () => true,
+		isReadOnly: () => true,
+	};
+
+	setToolRegistryGetter(() => ({
+		read_file: async () => 'content',
+	}));
+
+	let callCount = 0;
+	const client = {
+		chat: async () => {
+			callCount++;
+			if (callCount === 1) {
+				return {
+					choices: [
+						{
+							message: {
+								content: '',
+								tool_calls: [
+									createMockToolCall('read_file', {path: 'a.ts'}, 'call-read'),
+								],
+							},
+						},
+					],
+				};
+			}
+			return {choices: [{message: {content: 'done'}}]};
+		},
+	} as unknown as LLMClient;
+
+	await runAcpConversation({
+		session,
+		client,
+		toolManager: toolManager as any,
+		conn,
+		nonInteractiveAlwaysAllow: [],
+	});
+
+	t.deepEqual(await session.timeline.list(), []);
+});
+

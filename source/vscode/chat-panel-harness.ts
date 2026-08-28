@@ -1,10 +1,9 @@
 /**
- * Boots `plugins/vscode/media/chat-panel.js` inside a VM against a stub DOM so
- * the panel's rendering can be driven and inspected from tests. Shared by the
- * chat-panel specs; extracted verbatim from chat-panel-thoughts.spec.ts.
- *
- * `mention-utils.js` must run first: the real webview loads it before
- * `chat-panel.js`, which immediately reads `globalThis.NanocoderMentionUtils`.
+ * Boots the chat panel scripts inside a VM against a stub DOM so the panel's
+ * rendering can be driven and inspected from tests. Shared by the chat-panel
+ * specs. Mirrors production load order in chat-panel.html: the helper scripts
+ * must run first because chat-panel.js reads `globalThis.NanocoderMentionUtils`
+ * and `globalThis.NanocoderSlashCommandUtils` at IIFE eval time.
  */
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
@@ -16,6 +15,11 @@ const mediaUrl = (filename: string) =>
 	);
 
 const MENTION_UTILS_SOURCE = readFileSync(mediaUrl('mention-utils.js'), 'utf8');
+const URI_UTILS_SOURCE = readFileSync(mediaUrl('uri-utils.js'), 'utf8');
+const SLASH_COMMAND_UTILS_SOURCE = readFileSync(
+	mediaUrl('slash-command-utils.js'),
+	'utf8',
+);
 const PANEL_SOURCE = readFileSync(mediaUrl('chat-panel.js'), 'utf8');
 
 const SHELL_IDS = [
@@ -39,6 +43,7 @@ const SHELL_IDS = [
 	'menu-upload-image',
 	'mention-dropdown',
 	'messages-container',
+	'slash-dropdown',
 	'modal-image',
 	'mode-dropdown',
 	'mode-trigger',
@@ -271,6 +276,8 @@ export function createPanel(options: {marked?: boolean} = {}) {
 	sandbox.globalThis = sandbox;
 	createContext(sandbox);
 	runInContext(MENTION_UTILS_SOURCE, sandbox);
+	runInContext(URI_UTILS_SOURCE, sandbox);
+	runInContext(SLASH_COMMAND_UTILS_SOURCE, sandbox);
 	runInContext(PANEL_SOURCE, sandbox);
 
 	const container = findById(root, 'messages-container') as StubElement;
