@@ -153,6 +153,25 @@ test('NanocoderAcpClient - revertTimeline calls timeline/revert', async (t) => {
 	t.deepEqual(called.params, {sessionId: 'session-1', checkpointId: 'cp-1'});
 });
 
+test('NanocoderAcpClient - revertTimeline throws when there is no session', async (t) => {
+	const outputChannel = {appendLine: () => {}} as any;
+	const client = new NanocoderAcpClient(outputChannel, new AcpStateManager());
+
+	// Returning quietly here would let the caller clear the chat view for a
+	// revert that never happened.
+	await t.throwsAsync(client.revertTimeline('cp-1'), {message: /Not connected/});
+});
+
+test('NanocoderAcpClient - revertTimeline rethrows a refused revert', async (t) => {
+	const client = makeClient({
+		extMethod: async () => {
+			throw new Error('Cannot revert the timeline while a prompt is in progress');
+		},
+	});
+
+	await t.throwsAsync(client.revertTimeline('cp-1'), {message: /in progress/});
+});
+
 test('NanocoderAcpClient - reconnecting clears permissions left by the dead process', async (t) => {
 	const outputChannel = {appendLine: () => {}} as any;
 	const stateManager = new AcpStateManager();

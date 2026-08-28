@@ -1,4 +1,4 @@
-import {mkdirSync, writeFileSync} from 'node:fs';
+import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -1451,8 +1451,12 @@ test('runAcpConversation - ask_user fails cleanly when no usable options', async
 
 test('runAcpConversation - captures a timeline checkpoint for write_file', async t => {
 	const {conn} = createMockConn();
-	const cwd = join(tmpdir(), `nanocoder-timeline-conv-${Date.now()}`);
+	const cwd = join(
+		tmpdir(),
+		`nanocoder-timeline-conv-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+	);
 	mkdirSync(cwd, {recursive: true});
+	t.teardown(() => rmSync(cwd, {recursive: true, force: true}));
 	writeFileSync(join(cwd, 'a.ts'), 'before');
 
 	const session = createMockSession(conn, {devMode: 'yolo', cwd});

@@ -40,6 +40,8 @@ export class ChatWebviewProvider
 	private _view?: vscode.WebviewView;
 	private _isWebviewReady = false;
 	private _timelineRefreshTimer?: ReturnType<typeof setTimeout>;
+	/** Non-null while a timeline revert is in flight. See `_handleRevert`. */
+	private _revertReplayBuffer: any[] | null = null;
 	/** Code lens prompt waiting on the webview shell and the ACP session. */
 	private _pendingPrompt: string | null = null;
 	private _pendingPromptTimer: ReturnType<typeof setTimeout> | null = null;
@@ -56,6 +58,15 @@ export class ChatWebviewProvider
 		// Listen for session updates from ACP
 		this._acpClient.onSessionUpdate = (update: any) => {
 			this.handleDiffs(update);
+			// A revert replays the whole truncated thread from inside the
+			// timeline/revert call, so those updates arrive before the call
+			// resolves. Hold them until we know the revert succeeded, then
+			// clear and flush; a refused revert drops them and leaves the
+			// existing thread on screen.
+			if (this._revertReplayBuffer) {
+				this._revertReplayBuffer.push(update);
+				return;
+			}
 			this.postMessage({
 				type: 'acpUpdate',
 				update
@@ -164,6 +175,10 @@ export class ChatWebviewProvider
 	 */
 	public dispose() {
 		this._clearPendingPrompt();
+		if (this._timelineRefreshTimer) {
+			clearTimeout(this._timelineRefreshTimer);
+			this._timelineRefreshTimer = undefined;
+		}
 	}
 
 	public requestCopyLastCodeBlock() {
@@ -438,17 +453,32 @@ export class ChatWebviewProvider
 		this.postMessage({type: 'updateTimeline', entries});
 	}
 
+	/**
+	 * Clearing the panel before the revert resolves would leave it blank with
+	 * nothing to replay into it whenever the revert is refused (an in-flight
+	 * turn, a dropped connection). So buffer the agent's replay instead, and
+	 * only clear once the revert has actually happened.
+	 */
 	private async _handleRevert(checkpointId: string) {
 		this._outputChannel.appendLine(`[Webview] User reverted timeline to ${checkpointId}`);
-		this.postMessage({type: 'clear', isLoading: true});
+		const buffer: any[] = [];
+		this._revertReplayBuffer = buffer;
 		try {
 			await this._acpClient.revertTimeline(checkpointId);
 		} catch {
-			// Error toast is raised by the ACP client.
+			// Error toast is raised by the ACP client. The thread is untouched,
+			// so drop whatever was buffered and leave the panel as it was.
+			return;
 		} finally {
-			this.postMessage({type: 'sessionLoaded'});
-			await this._broadcastTimeline();
+			this._revertReplayBuffer = null;
 		}
+
+		this.postMessage({type: 'clear', isLoading: true});
+		for (const update of buffer) {
+			this.postMessage({type: 'acpUpdate', update});
+		}
+		this.postMessage({type: 'sessionLoaded'});
+		await this._broadcastTimeline();
 	}
 
 	private _handleRequestSettings() {

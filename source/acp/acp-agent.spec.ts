@@ -1,4 +1,4 @@
-import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -667,60 +667,122 @@ test.serial(
 	},
 );
 
+/** Throwaway workspace for the timeline tests, removed by the caller. */
+const createTimelineWorkspace = (label: string): string => {
+	const cwd = join(
+		tmpdir(),
+		`nanocoder-timeline-${label}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+	);
+	mkdirSync(cwd, {recursive: true});
+	return cwd;
+};
+
 test('AcpAgent.extMethod - timeline/list returns captured entries', async t => {
 	const {agent} = createAgent();
-	const cwd = join(tmpdir(), `nanocoder-timeline-agent-${Date.now()}`);
-	mkdirSync(cwd, {recursive: true});
-	const created = await agent.newSession({cwd, mcpServers: []});
-	const session = (agent as any).sessions.get(created.sessionId);
-	await session.timeline.capture({
-		toolCallId: 'call-1',
-		toolName: 'write_file',
-		title: 'write_file: a.ts',
-		truncateToMessageIndex: 1,
-		files: new Map([['a.ts', 'before']]),
-	});
+	const cwd = createTimelineWorkspace('list');
+	try {
+		const created = await agent.newSession({cwd, mcpServers: []});
+		const session = (agent as any).sessions.get(created.sessionId);
+		await session.timeline.capture({
+			toolCallId: 'call-1',
+			toolName: 'write_file',
+			title: 'write_file: a.ts',
+			truncateToMessageIndex: 1,
+			files: new Map([['a.ts', 'before']]),
+		});
 
-	const result = await agent.extMethod('timeline/list', {
-		sessionId: created.sessionId,
-	});
-	t.is((result.entries as any[]).length, 1);
-	t.is((result.entries as any[])[0].toolName, 'write_file');
+		const result = await agent.extMethod('timeline/list', {
+			sessionId: created.sessionId,
+		});
+		t.is((result.entries as any[]).length, 1);
+		t.is((result.entries as any[])[0].toolName, 'write_file');
+	} finally {
+		rmSync(cwd, {recursive: true, force: true});
+	}
 });
 
 test('AcpAgent.extMethod - timeline/revert truncates messages and restores files', async t => {
 	const {agent} = createAgent();
-	const cwd = join(tmpdir(), `nanocoder-timeline-revert-${Date.now()}`);
-	mkdirSync(cwd, {recursive: true});
-	writeFileSync(join(cwd, 'a.ts'), 'before');
+	const cwd = createTimelineWorkspace('revert');
+	try {
+		writeFileSync(join(cwd, 'a.ts'), 'before');
 
-	const created = await agent.newSession({cwd, mcpServers: []});
-	const session = (agent as any).sessions.get(created.sessionId);
-	session.messages = [
-		{role: 'user', content: 'edit a.ts'},
-		{role: 'assistant', content: '', tool_calls: []},
-		{role: 'tool', content: 'wrote', name: 'write_file'},
-	];
-	const entry = await session.timeline.capture({
-		toolCallId: 'call-1',
-		toolName: 'write_file',
-		title: 'write_file: a.ts',
-		truncateToMessageIndex: 1,
-		files: new Map([['a.ts', 'before']]),
-	});
-	writeFileSync(join(cwd, 'a.ts'), 'after');
+		const created = await agent.newSession({cwd, mcpServers: []});
+		const session = (agent as any).sessions.get(created.sessionId);
+		session.messages = [
+			{role: 'user', content: 'edit a.ts'},
+			{
+				role: 'assistant',
+				content: '',
+				tool_calls: [{id: 'call-1', function: {name: 'write_file'}}],
+			},
+			{role: 'tool', content: 'wrote', name: 'write_file'},
+		];
+		const entry = await session.timeline.capture({
+			toolCallId: 'call-1',
+			toolName: 'write_file',
+			title: 'write_file: a.ts',
+			truncateToMessageIndex: 1,
+			files: new Map([['a.ts', 'before']]),
+		});
+		writeFileSync(join(cwd, 'a.ts'), 'after');
 
-	const result = await agent.extMethod('timeline/revert', {
-		sessionId: created.sessionId,
-		checkpointId: entry.id,
-	});
-	t.is((result.revertedTo as any).id, entry.id);
-	t.is(readFileSync(join(cwd, 'a.ts'), 'utf-8'), 'before');
-	t.is(session.messages.length, 2);
-	t.is(session.messages[0].role, 'user');
-	t.true(
-		String(session.messages[1].content).includes('Reverted to before step 1'),
-	);
+		const result = await agent.extMethod('timeline/revert', {
+			sessionId: created.sessionId,
+			checkpointId: entry.id,
+		});
+		t.is((result.revertedTo as any).id, entry.id);
+		t.is(readFileSync(join(cwd, 'a.ts'), 'utf-8'), 'before');
+		t.is(session.messages.length, 2);
+		t.is(session.messages[0].role, 'user');
+		t.true(
+			String(session.messages[1].content).includes('Reverted to before step 1'),
+		);
+	} finally {
+		rmSync(cwd, {recursive: true, force: true});
+	}
+});
+
+test('AcpAgent.extMethod - timeline/revert truncates by tool call, not a stale index', async t => {
+	const {agent} = createAgent();
+	const cwd = createTimelineWorkspace('reindex');
+	try {
+		writeFileSync(join(cwd, 'a.ts'), 'before');
+
+		const created = await agent.newSession({cwd, mcpServers: []});
+		const session = (agent as any).sessions.get(created.sessionId);
+		const entry = await session.timeline.capture({
+			toolCallId: 'call-1',
+			toolName: 'write_file',
+			title: 'write_file: a.ts',
+			truncateToMessageIndex: 5,
+			files: new Map([['a.ts', 'before']]),
+		});
+		writeFileSync(join(cwd, 'a.ts'), 'after');
+
+		// History shorter than the captured index, as compaction would leave it.
+		session.messages = [
+			{role: 'user', content: 'edit a.ts'},
+			{
+				role: 'assistant',
+				content: '',
+				tool_calls: [{id: 'call-1', function: {name: 'write_file'}}],
+			},
+			{role: 'tool', content: 'wrote', name: 'write_file'},
+		];
+
+		await agent.extMethod('timeline/revert', {
+			sessionId: created.sessionId,
+			checkpointId: entry.id,
+		});
+
+		// The stale index would have left the whole turn in history.
+		t.is(session.messages.length, 2);
+		t.is(session.messages[0].content, 'edit a.ts');
+		t.is(session.messages[1].role, 'assistant');
+	} finally {
+		rmSync(cwd, {recursive: true, force: true});
+	}
 });
 
 test('AcpAgent.extMethod - timeline/revert rejects an active turn', async t => {

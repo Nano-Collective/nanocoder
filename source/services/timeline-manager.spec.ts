@@ -269,3 +269,166 @@ test.serial('TimelineManager toRelativePath rejects paths outside the workspace'
 	t.is(manager.toRelativePath('/tmp/workspace/src/a.ts'), 'src/a.ts');
 	t.is(manager.toRelativePath('/etc/passwd'), null);
 });
+
+test.serial('TimelineManager excludes its own data from capture', t => {
+	const manager = new TimelineManager('/tmp/workspace', 'session-self');
+	// Otherwise each opaque capture would snapshot the previous one: user
+	// projects have no reason to gitignore .nanocoder/timeline.
+	t.is(manager.toRelativePath('.nanocoder/timeline/other/timeline.json'), null);
+	t.is(manager.toRelativePath('.nanocoder/checkpoints/foo/files/a.ts'), null);
+	// Everything else under .nanocoder stays capturable - skills and commands
+	// are ordinary project files the agent is expected to edit.
+	t.is(
+		manager.toRelativePath('.nanocoder/commands/review.md'),
+		'.nanocoder/commands/review.md',
+	);
+});
+
+test.serial('TimelineManager skips binary files when snapshotting', async t => {
+	const tempDir = await createTempDir();
+	try {
+		await writeFile(tempDir, 'text.ts', 'hello');
+		await fs.writeFile(
+			path.join(tempDir, 'image.bin'),
+			Buffer.from([0x89, 0x50, 0x00, 0x01, 0x02]),
+		);
+
+		const manager = new TimelineManager(tempDir, 'session-binary');
+		const snapshots = await manager.snapshotPaths(['text.ts', 'image.bin']);
+
+		// A UTF-8 round-trip would corrupt the binary, so no undo point is
+		// better than one that writes back mojibake.
+		t.true(snapshots.has('text.ts'));
+		t.false(snapshots.has('image.bin'));
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('TimelineManager revert covers every checkpoint in the same turn', async t => {
+	const tempDir = await createTempDir();
+	try {
+		await writeFile(tempDir, 'a.ts', 'a-before');
+		await writeFile(tempDir, 'b.ts', 'b-before');
+		const manager = new TimelineManager(tempDir, 'session-turn');
+
+		// One assistant turn, two tool calls, so both share a truncation point.
+		await manager.capture({
+			toolCallId: 'call-1',
+			toolName: 'write_file',
+			title: 'write a.ts',
+			truncateToMessageIndex: 4,
+			files: filesMap([['a.ts', 'a-before']]),
+		});
+		const second = await manager.capture({
+			toolCallId: 'call-2',
+			toolName: 'write_file',
+			title: 'write b.ts',
+			truncateToMessageIndex: 4,
+			files: filesMap([['b.ts', 'b-before']]),
+		});
+		await writeFile(tempDir, 'a.ts', 'a-after');
+		await writeFile(tempDir, 'b.ts', 'b-after');
+
+		const result = await manager.revertTo(second!.id);
+
+		// Reverting only the second call would erase the first from the
+		// conversation while leaving its edit on disk.
+		t.is(await fs.readFile(path.join(tempDir, 'a.ts'), 'utf-8'), 'a-before');
+		t.is(await fs.readFile(path.join(tempDir, 'b.ts'), 'utf-8'), 'b-before');
+		t.is(result.revertedTo.toolCallId, 'call-1');
+		t.deepEqual(await manager.list(), []);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('TimelineManager revert keeps checkpoints from earlier turns', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const manager = new TimelineManager(tempDir, 'session-turns');
+		await manager.capture({
+			toolCallId: 'call-1',
+			toolName: 'write_file',
+			title: 'turn one',
+			truncateToMessageIndex: 1,
+			files: filesMap([['a.ts', 'v1']]),
+		});
+		const second = await manager.capture({
+			toolCallId: 'call-2',
+			toolName: 'write_file',
+			title: 'turn two',
+			truncateToMessageIndex: 4,
+			files: filesMap([['b.ts', 'v1']]),
+		});
+
+		await manager.revertTo(second!.id);
+		const remaining = await manager.list();
+		t.is(remaining.length, 1);
+		t.is(remaining[0].toolCallId, 'call-1');
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('TimelineManager refuses index paths that escape the workspace', async t => {
+	const tempDir = await createTempDir();
+	try {
+		await writeFile(tempDir, 'a.ts', 'safe');
+		const manager = new TimelineManager(tempDir, 'session-tamper');
+		const entry = await manager.capture({
+			toolCallId: 'c1',
+			toolName: 'write_file',
+			title: 'step',
+			truncateToMessageIndex: 0,
+			files: filesMap([['a.ts', 'safe']]),
+		});
+
+		// Rewrite the on-disk index the way a corrupted or tampered file would.
+		const indexPath = path.join(
+			tempDir,
+			'.nanocoder',
+			'timeline',
+			'session-tamper',
+			'timeline.json',
+		);
+		const index = JSON.parse(await fs.readFile(indexPath, 'utf-8'));
+		index.entries[0].filesChanged = ['../escaped.ts'];
+		index.entries[0].createdFiles = ['../escaped.ts'];
+		await fs.writeFile(indexPath, JSON.stringify(index), 'utf-8');
+
+		const fresh = new TimelineManager(tempDir, 'session-tamper');
+		const result = await fresh.revertTo(entry!.id);
+
+		t.deepEqual(result.filesRestored, []);
+		t.false(existsSync(path.join(path.dirname(tempDir), 'escaped.ts')));
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
+test.serial('TimelineManager prunes timelines from abandoned sessions', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const timelineRoot = path.join(tempDir, '.nanocoder', 'timeline');
+		const stale = path.join(timelineRoot, 'old-session');
+		await fs.mkdir(stale, {recursive: true});
+		await fs.writeFile(path.join(stale, 'timeline.json'), '{}', 'utf-8');
+		const longAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+		await fs.utimes(stale, longAgo, longAgo);
+
+		const manager = new TimelineManager(tempDir, 'session-fresh');
+		await manager.capture({
+			toolCallId: 'c1',
+			toolName: 'write_file',
+			title: 'step',
+			truncateToMessageIndex: 0,
+			files: filesMap([['a.ts', 'x']]),
+		});
+
+		t.false(existsSync(stale), 'the abandoned session directory is removed');
+		t.true(existsSync(path.join(timelineRoot, 'session-fresh')));
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});

@@ -23,6 +23,15 @@ export interface TimelineCaptureInput {
 	files: Map<string, string | null>;
 }
 
+/** Result of scanning the workspace for dirty files ahead of an opaque capture. */
+export interface TimelineScanResult {
+	files: string[];
+	/** The scan hit its file cap, so it is not a complete picture. */
+	truncated: boolean;
+	/** False when git could not answer at all. */
+	available: boolean;
+}
+
 export interface TimelineRevertResult {
 	revertedTo: TimelineEntryMeta;
 	filesRestored: string[];

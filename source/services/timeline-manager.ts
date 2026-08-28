@@ -1,17 +1,41 @@
 import {existsSync} from 'fs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import {MAX_TIMELINE_ENTRIES} from '@/constants';
+import {
+	MAX_TIMELINE_ENTRIES,
+	MAX_TIMELINE_SESSION_AGE_MS,
+	MAX_TIMELINE_SESSIONS,
+} from '@/constants';
 import type {
 	TimelineCaptureInput,
 	TimelineEntryMeta,
 	TimelineIndex,
 	TimelineIndexEntry,
 	TimelineRevertResult,
+	TimelineScanResult,
 } from '@/types/timeline';
 import {formatError} from '@/utils/error-formatter';
 import {logWarning} from '@/utils/message-queue';
 import {FileSnapshotService} from './file-snapshot';
+
+/**
+ * Paths the timeline must never treat as workspace content. Snapshotting its
+ * own before-images would make each opaque capture include the previous one:
+ * the entries grow quadratically, crowd out real files under the scan cap, and
+ * a revert would rewrite the timeline's internals while walking them.
+ *
+ * This repo gitignores `.nanocoder/timeline/`, but user projects will not, so
+ * the exclusion has to live here rather than rely on `git ls-files` filtering.
+ */
+const EXCLUDED_PREFIXES = ['.nanocoder/timeline/', '.nanocoder/checkpoints/'];
+
+/**
+ * Snapshots round-trip through UTF-8, which silently corrupts binaries. A NUL
+ * byte is the same heuristic git uses to call a blob binary.
+ */
+function isProbablyBinary(content: string): boolean {
+	return content.includes('\u0000');
+}
 
 /**
  * Per-session log of before-images captured ahead of mutating tool calls.
@@ -19,19 +43,17 @@ import {FileSnapshotService} from './file-snapshot';
  */
 export class TimelineManager {
 	private readonly workspaceRoot: string;
+	private readonly timelineRoot: string;
 	private readonly timelineDir: string;
 	private readonly fileSnapshotService: FileSnapshotService;
 	private index: TimelineIndex | null = null;
+	private prunedStaleSessions = false;
 
 	constructor(workspaceRoot: string, sessionId: string) {
 		this.assertSafeId(sessionId);
 		this.workspaceRoot = workspaceRoot;
-		this.timelineDir = path.join(
-			workspaceRoot, // nosemgrep
-			'.nanocoder',
-			'timeline',
-			sessionId, // nosemgrep
-		);
+		this.timelineRoot = path.join(workspaceRoot, '.nanocoder', 'timeline'); // nosemgrep
+		this.timelineDir = path.join(this.timelineRoot, sessionId); // nosemgrep
 		this.fileSnapshotService = new FileSnapshotService(workspaceRoot);
 	}
 
@@ -41,15 +63,40 @@ export class TimelineManager {
 		if (relative.startsWith('..') || path.isAbsolute(relative)) {
 			return null;
 		}
-		return relative.split(path.sep).join('/');
+		const normalized = relative.split(path.sep).join('/');
+		if (EXCLUDED_PREFIXES.some(prefix => normalized.startsWith(prefix))) {
+			return null;
+		}
+		return normalized;
 	}
 
-	getModifiedFiles(): string[] {
-		return this.fileSnapshotService.getModifiedFiles();
+	/**
+	 * Dirty files in the workspace, plus whether the scan can be trusted as a
+	 * complete picture. See `FileSnapshotService.getModifiedFilesResult`.
+	 */
+	getModifiedFiles(): TimelineScanResult {
+		return this.fileSnapshotService.getModifiedFilesResult();
 	}
 
-	getHeadContent(relativePath: string): string | null {
-		return this.fileSnapshotService.getHeadContent(relativePath);
+	/**
+	 * The before-image for a file that was clean when the tool started.
+	 *
+	 * `absent` means the path is not in HEAD, so the tool created it and a
+	 * revert should delete it. `binary` is distinct from `absent` on purpose:
+	 * collapsing the two would make a revert delete a tracked binary the tool
+	 * merely edited.
+	 */
+	readHeadSnapshot(
+		relativePath: string,
+	): {kind: 'text'; content: string} | {kind: 'binary'} | {kind: 'absent'} {
+		const content = this.fileSnapshotService.getHeadContent(relativePath);
+		if (content === null) {
+			return {kind: 'absent'};
+		}
+		if (isProbablyBinary(content)) {
+			return {kind: 'binary'};
+		}
+		return {kind: 'text', content};
 	}
 
 	fileExists(relativePath: string): boolean {
@@ -58,7 +105,9 @@ export class TimelineManager {
 	}
 
 	/**
-	 * Snapshot the given paths. Missing files are recorded as `null`.
+	 * Snapshot the given paths. Missing files are recorded as `null` so a
+	 * revert deletes them. Binary files are dropped entirely: a corrupt
+	 * before-image is worse than no undo point.
 	 */
 	async snapshotPaths(
 		filePaths: string[],
@@ -81,6 +130,12 @@ export class TimelineManager {
 		if (existing.length > 0) {
 			const captured = await this.fileSnapshotService.captureFiles(existing);
 			for (const [relative, content] of captured) {
+				if (isProbablyBinary(content)) {
+					logWarning('Skipping binary file in action timeline', true, {
+						context: {relativePath: relative},
+					});
+					continue;
+				}
 				result.set(relative, content);
 			}
 		}
@@ -154,12 +209,18 @@ export class TimelineManager {
 
 	async revertTo(checkpointId: string): Promise<TimelineRevertResult> {
 		const index = await this.loadIndex();
-		const targetIndex = index.entries.findIndex(
-			entry => entry.id === checkpointId,
-		);
-		if (targetIndex === -1) {
+		const found = index.entries.findIndex(entry => entry.id === checkpointId);
+		if (found === -1) {
 			throw new Error(`Timeline checkpoint '${checkpointId}' does not exist`);
 		}
+
+		// One assistant turn can issue several tool calls, and the conversation
+		// can only be truncated to the whole turn. Reverting just the second
+		// call of a turn would erase the first call from history while leaving
+		// its edits on disk, so widen the range to the start of the turn. Every
+		// checkpoint from the same turn shares a truncation point, and message
+		// indexes only grow, so a match is always the same turn.
+		const targetIndex = this.expandToTurnStart(index, found);
 
 		const toRevert = index.entries.slice(targetIndex).reverse();
 		const filesRestored: string[] = [];
@@ -192,13 +253,40 @@ export class TimelineManager {
 		}
 	}
 
+	/**
+	 * Index of the first checkpoint belonging to the same assistant turn as
+	 * `entryIndex`.
+	 */
+	private expandToTurnStart(index: TimelineIndex, entryIndex: number): number {
+		const turn = index.entries[entryIndex].truncateToMessageIndex;
+		let start = entryIndex;
+		while (
+			start > 0 &&
+			index.entries[start - 1].truncateToMessageIndex === turn
+		) {
+			start -= 1;
+		}
+		return start;
+	}
+
 	private async restoreEntry(entry: TimelineIndexEntry): Promise<string[]> {
 		const restored: string[] = [];
 		const created = new Set(entry.createdFiles);
 		const snapshots = new Map<string, string>();
 		const filesDir = this.entryFilesDir(entry.id);
 
-		for (const relativePath of entry.filesChanged) {
+		for (const indexedPath of entry.filesChanged) {
+			// The index is user-writable JSON on disk. Re-validate every path
+			// before it reaches a write or an unlink, rather than trusting the
+			// normalisation that happened at capture time.
+			const relativePath = this.toRelativePath(indexedPath);
+			if (!relativePath || relativePath !== indexedPath) {
+				logWarning('Ignoring unsafe path in timeline index', true, {
+					context: {relativePath: indexedPath},
+				});
+				continue;
+			}
+
 			if (created.has(relativePath)) {
 				try {
 					await this.fileSnapshotService.deleteFile(relativePath);
@@ -270,8 +358,52 @@ export class TimelineManager {
 	}
 
 	private async ensureDir(): Promise<void> {
+		await this.pruneStaleSessions();
 		if (!existsSync(this.timelineDir)) {
 			await fs.mkdir(this.timelineDir, {recursive: true});
+		}
+	}
+
+	/**
+	 * Drop before-images left behind by sessions that were never cleared or
+	 * deleted. Without this the timeline root grows without bound inside the
+	 * user's workspace. Runs at most once per manager, and never removes the
+	 * session this manager owns.
+	 */
+	private async pruneStaleSessions(): Promise<void> {
+		if (this.prunedStaleSessions) {
+			return;
+		}
+		this.prunedStaleSessions = true;
+
+		try {
+			const names = await fs.readdir(this.timelineRoot);
+			const others: Array<{dir: string; mtimeMs: number}> = [];
+			for (const name of names) {
+				const dir = path.join(this.timelineRoot, name); // nosemgrep
+				if (dir === this.timelineDir) {
+					continue;
+				}
+				const stats = await fs.stat(dir);
+				if (stats.isDirectory()) {
+					others.push({dir, mtimeMs: stats.mtimeMs});
+				}
+			}
+
+			const cutoff = Date.now() - MAX_TIMELINE_SESSION_AGE_MS;
+			// Newest first, so the slice past the cap is the oldest sessions.
+			others.sort((a, b) => b.mtimeMs - a.mtimeMs);
+			const stale = others.filter(
+				(entry, position) =>
+					entry.mtimeMs < cutoff || position >= MAX_TIMELINE_SESSIONS,
+			);
+
+			for (const entry of stale) {
+				await fs.rm(entry.dir, {recursive: true, force: true});
+			}
+		} catch {
+			// The root may not exist yet, or may not be readable. Pruning is
+			// housekeeping; never let it block a capture.
 		}
 	}
 

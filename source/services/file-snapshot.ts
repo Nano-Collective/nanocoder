@@ -51,7 +51,16 @@ export class FileSnapshotService {
 
 		for (const [relativePath, content] of snapshots) {
 			try {
-				const absolutePath = path.resolve(this.workspaceRoot, relativePath);
+				const absolutePath = path.resolve(this.workspaceRoot, relativePath); // nosemgrep
+				// Snapshot keys are read back from user-writable metadata on disk
+				// (checkpoint / timeline index files), so a corrupted or tampered
+				// index must not be able to write outside the workspace.
+				const relative = path.relative(this.workspaceRoot, absolutePath);
+				if (relative.startsWith('..') || path.isAbsolute(relative)) {
+					throw new Error(
+						`Refusing to restore path outside workspace: ${relativePath}`,
+					);
+				}
 				const directory = path.dirname(absolutePath);
 
 				await fs.mkdir(directory, {recursive: true});
@@ -71,6 +80,23 @@ export class FileSnapshotService {
 	 * Uses git to detect modified files if available, otherwise returns empty array
 	 */
 	getModifiedFiles(): string[] {
+		return this.getModifiedFilesResult().files;
+	}
+
+	/**
+	 * Same scan as {@link getModifiedFiles}, but reports whether the result was
+	 * cut short. Callers that infer a file's *previous* content from the scan
+	 * (the action timeline) must not trust a truncated list: a dirty file that
+	 * fell outside the cap looks untouched, and its before-image would be taken
+	 * from HEAD, discarding the user's uncommitted work on restore.
+	 *
+	 * `available` is false when git could not answer at all.
+	 */
+	getModifiedFilesResult(): {
+		files: string[];
+		truncated: boolean;
+		available: boolean;
+	} {
 		try {
 			const modifiedOutput = execSync('git diff --name-only HEAD', {
 				cwd: this.workspaceRoot,
@@ -113,17 +139,21 @@ export class FileSnapshotService {
 						},
 					},
 				);
-				return filtered.slice(0, MAX_CHECKPOINT_FILES);
+				return {
+					files: filtered.slice(0, MAX_CHECKPOINT_FILES),
+					truncated: true,
+					available: true,
+				};
 			}
 
-			return filtered;
+			return {files: filtered, truncated: false, available: true};
 		} catch {
 			logWarning('Git not available for file tracking', true, {
 				context: {
 					workspaceRoot: this.workspaceRoot,
 				},
 			});
-			return [];
+			return {files: [], truncated: false, available: false};
 		}
 	}
 

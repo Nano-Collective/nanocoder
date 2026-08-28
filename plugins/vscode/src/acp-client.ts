@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import {ClientSideConnection} from '@agentclientprotocol/sdk';
 import {AcpStateManager, ACPStatus} from './acp-state';
+import type {TimelineCheckpoint} from './webview-protocol';
 
 // We expect at least the version of the CLI where ACP was introduced
 const MINIMUM_CLI_VERSION = '0.4.0';
@@ -25,15 +26,6 @@ export class NanocoderAcpClient {
 	public onPermissionsCancelled?: (toolCallIds: string[]) => void;
 	public onStateSync?: (state: StateSyncPayload) => void;
 	public onConnectionReady?: () => void;
-	public onTimelineUpdated?: (entries: Array<{
-		id: string;
-		seq: number;
-		toolCallId: string;
-		toolName: string;
-		title: string;
-		timestamp: string;
-		filesChanged: string[];
-	}>) => void;
 
 	public currentMode?: string;
 	public availableModes: string[] = [];
@@ -446,15 +438,7 @@ export class NanocoderAcpClient {
 		}
 	}
 
-	async listTimeline(): Promise<Array<{
-		id: string;
-		seq: number;
-		toolCallId: string;
-		toolName: string;
-		title: string;
-		timestamp: string;
-		filesChanged: string[];
-	}>> {
+	async listTimeline(): Promise<TimelineCheckpoint[]> {
 		if (!this.connection || !this._sessionId) return [];
 		try {
 			const result = await this.connection.extMethod('timeline/list', {
@@ -468,8 +452,17 @@ export class NanocoderAcpClient {
 		}
 	}
 
+	/**
+	 * Throws on every failure path, including "not connected": the caller
+	 * tears down and rebuilds the chat view on success, so it has to be able
+	 * to tell a real revert from a no-op.
+	 */
 	async revertTimeline(checkpointId: string): Promise<void> {
-		if (!this.connection || !this._sessionId) return;
+		if (!this.connection || !this._sessionId) {
+			const message = 'Not connected to a nanocoder session';
+			vscode.window.showErrorMessage(`Failed to revert timeline: ${message}`);
+			throw new Error(message);
+		}
 		try {
 			await this.connection.extMethod('timeline/revert', {
 				sessionId: this._sessionId,

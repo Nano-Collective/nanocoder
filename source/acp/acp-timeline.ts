@@ -12,15 +12,11 @@ const FILE_ARG_TOOLS = new Set([
 	'file_op',
 ]);
 
-const NON_WORKSPACE_TOOLS = new Set([
-	'ask_user',
-	'write_tasks',
-	'create_task',
-	'update_task',
-	'delete_task',
-	'list_tasks',
-	'switch_mode',
-]);
+/**
+ * Tools that are not read-only but touch no workspace file, so there is
+ * nothing for a checkpoint to restore.
+ */
+const NON_WORKSPACE_TOOLS = new Set(['ask_user', 'write_tasks']);
 
 export function isTimelineMutatingTool(
 	toolManager: ToolManager,
@@ -68,6 +64,30 @@ export function extractTimelineTargets(
 	}
 
 	return paths;
+}
+
+/**
+ * Where to cut history so a reverted turn leaves no trace.
+ *
+ * The stored index is an absolute position captured when the turn ran. It is
+ * correct today because nothing rewrites `session.messages`, but locating the
+ * assistant message that issued the tool call is self-correcting if anything
+ * ever does (compaction, trimming). The stored index is the fallback, clamped
+ * so an out-of-range value cannot silently leave the whole turn in history.
+ */
+export function resolveTruncationPoint(
+	messages: Message[],
+	entry: TimelineEntryMeta,
+): number {
+	const byToolCall = messages.findIndex(
+		message =>
+			message.role === 'assistant' &&
+			message.tool_calls?.some(call => call.id === entry.toolCallId),
+	);
+	if (byToolCall !== -1) {
+		return byToolCall;
+	}
+	return Math.min(entry.truncateToMessageIndex, messages.length);
 }
 
 export function assistantToolCallIndex(messages: Message[]): number {
@@ -127,8 +147,23 @@ export async function beginTimelineCapture(
 
 	try {
 		if (targets === 'opaque') {
-			const modified = session.timeline.getModifiedFiles();
-			const files = await session.timeline.snapshotPaths(modified);
+			const scan = session.timeline.getModifiedFiles();
+			// A truncated scan makes a dirty file look clean, and
+			// finishTimelineCapture would then take its before-image from HEAD
+			// and throw away the user's uncommitted work on revert. No
+			// checkpoint is safer than a wrong one.
+			if (scan.truncated) {
+				logWarning(
+					'Skipping action timeline checkpoint: too many modified files',
+					true,
+					{context: {toolName, fileCount: scan.files.length}},
+				);
+				return null;
+			}
+			if (!scan.available) {
+				return null;
+			}
+			const files = await session.timeline.snapshotPaths(scan.files);
 			return {
 				mode: 'opaque',
 				beforeKeys: new Set(files.keys()),
@@ -157,14 +192,23 @@ export async function finishTimelineCapture(
 	}
 
 	try {
-		const afterModified = session.timeline.getModifiedFiles();
-		for (const filePath of afterModified) {
+		const after = session.timeline.getModifiedFiles();
+		if (after.truncated || !after.available) {
+			return null;
+		}
+		for (const filePath of after.files) {
 			const relative = session.timeline.toRelativePath(filePath);
 			if (!relative || context.beforeKeys.has(relative)) {
 				continue;
 			}
-			const head = session.timeline.getHeadContent(relative);
-			context.files.set(relative, head);
+			// Clean before the call, dirty after it, so HEAD is the before-image.
+			const head = session.timeline.readHeadSnapshot(relative);
+			if (head.kind === 'binary') {
+				// Recording it as created would make revert delete a tracked
+				// file the tool only edited.
+				continue;
+			}
+			context.files.set(relative, head.kind === 'text' ? head.content : null);
 		}
 
 		return await session.timeline.capture({

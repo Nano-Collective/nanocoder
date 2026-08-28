@@ -39,6 +39,7 @@ import {
 import {acpContentToUserMessage} from '@/acp/acp-content';
 import {runAcpConversation} from '@/acp/acp-conversation';
 import {AcpSession} from '@/acp/acp-session';
+import {resolveTruncationPoint} from '@/acp/acp-timeline';
 import type {AcpInitContext} from '@/acp/acp-types';
 import {appendToolDefinitionsToPrompt} from '@/ai-sdk-client/tools/system-prompt-assembler';
 import {createLLMClient} from '@/client-factory';
@@ -588,7 +589,7 @@ export class AcpAgent implements Agent {
 			const result = await session.timeline.revertTo(checkpointId);
 			session.messages = session.messages.slice(
 				0,
-				result.revertedTo.truncateToMessageIndex,
+				resolveTruncationPoint(session.messages, result.revertedTo),
 			);
 			session.messages.push({
 				role: 'assistant',

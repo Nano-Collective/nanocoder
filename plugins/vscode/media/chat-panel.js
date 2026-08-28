@@ -385,6 +385,8 @@
 	const timelineStrip = (function createTimelineStrip() {
 		const root = document.getElementById('timeline-strip');
 		const nodesEl = document.getElementById('timeline-nodes');
+		const trackEl = document.getElementById('timeline-track');
+		const hintEl = document.getElementById('timeline-hint');
 		const confirmEl = document.getElementById('timeline-confirm');
 		if (!root || !nodesEl || !confirmEl) {
 			return {
@@ -395,16 +397,17 @@
 		}
 
 		let entries = [];
-		let pendingId = null;
+
+		function setHint(text) {
+			if (hintEl) hintEl.textContent = text || '';
+		}
 
 		function hideConfirm() {
-			pendingId = null;
 			confirmEl.classList.add('hidden');
 			confirmEl.innerHTML = '';
 		}
 
 		function showConfirm(entry) {
-			pendingId = entry.id;
 			const files = (entry.filesChanged || []).slice(0, 3).join(', ');
 			const extra = (entry.filesChanged || []).length > 3 ? '…' : '';
 			confirmEl.innerHTML = '';
@@ -440,8 +443,20 @@
 			confirmEl.classList.remove('hidden');
 		}
 
+		// The label goes in a dedicated line under the strip rather than an
+		// absolutely-positioned bubble: the track has to clip horizontally to
+		// scroll, and a clipping box clips both axes, so a bubble above the dot
+		// would be cut off. A static line also reads on focus, not just hover.
+		function bindHint(el, text) {
+			el.addEventListener('mouseenter', () => setHint(text));
+			el.addEventListener('focus', () => setHint(text));
+			el.addEventListener('mouseleave', () => setHint(''));
+			el.addEventListener('blur', () => setHint(''));
+		}
+
 		function render() {
 			nodesEl.innerHTML = '';
+			setHint('');
 			if (entries.length === 0) {
 				root.classList.add('hidden');
 				hideConfirm();
@@ -454,25 +469,24 @@
 			nodesEl.appendChild(line);
 
 			for (const entry of entries) {
+				const files = (entry.filesChanged || []).slice(0, 2).join(', ');
+				const label = `Step ${entry.seq} · ${entry.title || entry.toolName}` +
+					(files ? ` · ${files}` : '') +
+					` · ${timelineRelativeTime(entry.timestamp)}`;
+
 				const btn = document.createElement('button');
 				btn.type = 'button';
 				btn.className = 'timeline-node';
 				btn.dataset.kind = timelineKind(entry.toolName);
 				btn.dataset.id = entry.id;
-				btn.setAttribute('aria-label', `Step ${entry.seq}: ${entry.title || entry.toolName}`);
+				btn.setAttribute('aria-label', label);
+				btn.title = label;
 
 				const dot = document.createElement('span');
 				dot.className = 'timeline-dot';
 				btn.appendChild(dot);
 
-				const tip = document.createElement('span');
-				tip.className = 'timeline-tooltip';
-				const files = (entry.filesChanged || []).slice(0, 2).join(', ');
-				tip.textContent = `Step ${entry.seq} · ${entry.title || entry.toolName}` +
-					(files ? ` · ${files}` : '') +
-					` · ${timelineRelativeTime(entry.timestamp)}`;
-				btn.appendChild(tip);
-
+				bindHint(btn, label);
 				btn.addEventListener('click', () => showConfirm(entry));
 				nodesEl.appendChild(btn);
 			}
@@ -482,17 +496,16 @@
 			nowBtn.className = 'timeline-node is-selected';
 			nowBtn.dataset.kind = 'now';
 			nowBtn.setAttribute('aria-label', 'Current state');
+			nowBtn.title = 'Current state';
 			const nowDot = document.createElement('span');
 			nowDot.className = 'timeline-dot';
 			nowBtn.appendChild(nowDot);
-			const nowTip = document.createElement('span');
-			nowTip.className = 'timeline-tooltip';
-			nowTip.textContent = 'Now';
-			nowBtn.appendChild(nowTip);
+			bindHint(nowBtn, 'Now');
 			nowBtn.addEventListener('click', hideConfirm);
 			nodesEl.appendChild(nowBtn);
 
-			nodesEl.scrollLeft = nodesEl.scrollWidth;
+			// The scroller is the track, not the flex row inside it.
+			if (trackEl) trackEl.scrollLeft = trackEl.scrollWidth;
 		}
 
 		return {
@@ -509,6 +522,7 @@
 			},
 		};
 	})();
+
 	function toggleHistoryView() {
 		isHistoryView = !isHistoryView;
 		if (isHistoryView) {

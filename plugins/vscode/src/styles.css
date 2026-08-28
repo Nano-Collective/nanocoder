@@ -230,28 +230,13 @@ select option {
   background: var(--vscode-button-background);
 }
 
-.timeline-tooltip {
-  display: none;
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-  white-space: nowrap;
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 4px 8px;
-  border-radius: 4px;
-  background: var(--vscode-editorWidget-background);
-  border: 1px solid var(--vscode-widget-border);
-  color: var(--vscode-editor-foreground);
-  font-size: 0.75em;
-  z-index: 5;
-  pointer-events: none;
+.timeline-node:focus-visible .timeline-dot {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
 }
 
-.timeline-node:hover .timeline-tooltip {
-  display: block;
+#timeline-hint {
+  white-space: nowrap;
 }
 
 .timeline-confirm-actions {
@@ -268,6 +253,7 @@ select option {
   cursor: pointer;
   font-family: var(--vscode-font-family);
 }
+
 /* ── Settings UI ────────────────────────────────────── */
 .settings-tab { background: transparent; border: none; border-bottom: 2px solid transparent; color: var(--vscode-editor-foreground); opacity: 0.6; padding: 0.5rem 0.75rem; font-family: var(--vscode-font-family); font-size: 0.85em; cursor: pointer; transition: opacity 0.15s, border-color 0.15s; }
 .settings-tab:hover { opacity: 0.9; }

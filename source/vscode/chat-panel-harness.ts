@@ -55,6 +55,11 @@ const SHELL_IDS = [
 	'provider-trigger',
 	'provider-trigger-label',
 	'send-stop-btn',
+	'timeline-confirm',
+	'timeline-hint',
+	'timeline-nodes',
+	'timeline-strip',
+	'timeline-track',
 ];
 
 // The panel assigns arbitrary properties (onclick, oninput, ...) to the nodes it
@@ -150,8 +155,14 @@ export function createElement(tagName: string): StubElement {
 		click: (event: StubElement = {}) => {
 			for (const fn of listeners.get('click') ?? []) fn(event);
 		},
+		/** Drive any registered listener, not just click. */
+		dispatch: (type: string, event: StubElement = {}) => {
+			for (const fn of listeners.get(type) ?? []) fn(event);
+		},
 		scrollTop: 0,
 		scrollHeight: 0,
+		scrollLeft: 0,
+		scrollWidth: 0,
 	};
 
 	Object.defineProperty(element, 'className', {
@@ -286,6 +297,10 @@ export function createPanel(options: {marked?: boolean} = {}) {
 		container,
 		sent,
 		copied,
+		/** Any shell element by id, for panels rendered outside the transcript. */
+		byId(id: string): StubElement | null {
+			return findById(root, id);
+		},
 		post(message: unknown) {
 			for (const listener of messageListeners) listener({data: message});
 		},
