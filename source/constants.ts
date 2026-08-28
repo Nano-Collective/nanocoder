@@ -40,6 +40,9 @@ export const MAX_SESSION_NAME_LENGTH = 100;
 
 // === LIMITS ===
 export const MAX_CHECKPOINT_FILES = 50;
+export const MAX_TIMELINE_ENTRIES = 50;
+export const MAX_TIMELINE_SESSIONS = 20;
+export const MAX_TIMELINE_SESSION_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 export const MAX_FIND_FILES_RESULTS = 100;
 export const MAX_SEARCH_RESULTS = 100;
 export const MAX_PROMPT_HISTORY_SIZE = 100;
@@ -76,6 +79,8 @@ export const EMPTY_CONTENT_MARKER = '[file is empty]';
 export const PATH_LENGTH_NARROW_TERMINAL = 30;
 export const PATH_LENGTH_NORMAL_TERMINAL = 60;
 export const TABLE_COLUMN_MIN_WIDTH = 10;
+export const WIZARD_ROW_CHROME_CHARS = 10;
+export const MIN_PATH_BUDGET_CHARS = 10;
 
 // === TOKEN THRESHOLDS (percentages - useChatHandler) ===
 export const TOKEN_THRESHOLD_WARNING_PERCENT = 80;

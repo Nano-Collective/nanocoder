@@ -1,3 +1,6 @@
+import {mkdirSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import type {AgentSideConnection} from '@agentclientprotocol/sdk';
 import {AcpSession} from '@/acp/acp-session';
@@ -33,13 +36,32 @@ const createMockConn = (): {conn: AgentSideConnection; updates: any[]} => {
 	return {conn, updates};
 };
 
+// Mutating tools capture an action-timeline checkpoint under the session cwd,
+// so give every session a throwaway workspace instead of writing into /tmp.
+const createWorkspace = (): string => {
+	const dir = join(
+		tmpdir(),
+		`nanocoder-queued-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+	);
+	mkdirSync(dir, {recursive: true});
+	workspaces.push(dir);
+	return dir;
+};
+const workspaces: string[] = [];
+
+test.afterEach.always(() => {
+	while (workspaces.length > 0) {
+		rmSync(workspaces.pop() as string, {recursive: true, force: true});
+	}
+});
+
 const createMockSession = (
 	conn: AgentSideConnection,
 	devMode: any = 'auto-accept',
 ): AcpSession => {
 	const session = new AcpSession({
-		sessionId: 'test-session',
-		cwd: '/tmp',
+		sessionId: `test-session-${Math.random().toString(36).slice(2, 8)}`,
+		cwd: createWorkspace(),
 		conn,
 		initialMode: devMode,
 	});
@@ -53,6 +75,7 @@ const createMockToolManager = () => ({
 	getFilteredTools: () => ({}),
 	hasTool: () => true,
 	getToolEntry: () => ({approval: false}),
+	isReadOnly: (name: string) => name !== 'write_file' && name !== 'execute_bash',
 });
 
 /** Every update carrying this tool call id, in emission order. */

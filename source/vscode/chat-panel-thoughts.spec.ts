@@ -301,3 +301,55 @@ test('drops the active summary when the session is cleared', t => {
 	t.is(panel.summaries().length, 1);
 	t.is(thoughtText(panel.thoughts()[0]), 'fresh reasoning');
 });
+
+test('opens no section for whitespace-only reasoning', t => {
+	const panel = createPanel();
+
+	panel.thought('\n\n');
+	t.is(panel.boxes().length, 0);
+
+	panel.thought('   ');
+	t.is(panel.boxes().length, 0);
+
+	panel.text('answer');
+	panel.finish();
+	t.is(panel.boxes().length, 0);
+});
+
+test('opens the section on the first thought that has content', t => {
+	const panel = createPanel();
+
+	panel.thought('\n\n');
+	panel.thought('actual reasoning');
+	panel.finish();
+
+	const boxes = panel.boxes();
+	t.is(boxes.length, 1);
+	t.is(bodyOf(boxes[0]), 'actual reasoning');
+});
+
+test('keeps appending whitespace once the section is open', t => {
+	const panel = createPanel();
+
+	panel.thought('first line');
+	panel.thought('\n\n');
+	panel.thought('second line');
+	panel.finish();
+
+	t.is(bodyOf(panel.boxes()[0]), 'first line\n\nsecond line');
+});
+
+test('an empty thought chunk neither opens a section nor splits the answer', t => {
+	const panel = createPanel();
+
+	panel.text('answer ');
+	const blocks = panel.container.children.length;
+
+	panel.thought('');
+	panel.text('continues');
+
+	// Ending the text block would start a second agent bubble for 'continues',
+	// so the answer has to still be one child of the container.
+	t.is(panel.boxes().length, 0);
+	t.is(panel.container.children.length, blocks);
+});

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import {ClientSideConnection} from '@agentclientprotocol/sdk';
 import {AcpStateManager, ACPStatus} from './acp-state';
+import type {TimelineCheckpoint} from './webview-protocol';
 
 // We expect at least the version of the CLI where ACP was introduced
 const MINIMUM_CLI_VERSION = '0.4.0';
@@ -436,6 +437,43 @@ export class NanocoderAcpClient {
 		} catch (error) {
 			this.outputChannel.appendLine(`resumeSession failed: ${error}`);
 			vscode.window.showErrorMessage(`Failed to resume session: ${error}`);
+		}
+	}
+
+	async listTimeline(): Promise<TimelineCheckpoint[]> {
+		if (!this.connection || !this._sessionId) return [];
+		try {
+			const result = await this.connection.extMethod('timeline/list', {
+				sessionId: this._sessionId,
+			});
+			const entries = (result as {entries?: unknown}).entries;
+			return Array.isArray(entries) ? entries : [];
+		} catch (error) {
+			this.outputChannel.appendLine(`listTimeline failed: ${error}`);
+			return [];
+		}
+	}
+
+	/**
+	 * Throws on every failure path, including "not connected": the caller
+	 * tears down and rebuilds the chat view on success, so it has to be able
+	 * to tell a real revert from a no-op.
+	 */
+	async revertTimeline(checkpointId: string): Promise<void> {
+		if (!this.connection || !this._sessionId) {
+			const message = 'Not connected to a nanocoder session';
+			vscode.window.showErrorMessage(`Failed to revert timeline: ${message}`);
+			throw new Error(message);
+		}
+		try {
+			await this.connection.extMethod('timeline/revert', {
+				sessionId: this._sessionId,
+				checkpointId,
+			});
+		} catch (error) {
+			this.outputChannel.appendLine(`revertTimeline failed: ${error}`);
+			vscode.window.showErrorMessage(`Failed to revert timeline: ${error}`);
+			throw error;
 		}
 	}
 
