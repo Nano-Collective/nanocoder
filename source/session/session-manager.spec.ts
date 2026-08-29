@@ -215,6 +215,31 @@ test.serial('saveSession updates an existing session', async t => {
 	t.is(loaded!.messages.length, 2);
 });
 
+test.serial('saveSession round-trips the displayOnly flag', async t => {
+	// A resumed session must keep harness notices marked; losing the flag on
+	// disk would let them re-enter the provider payload on the next turn.
+	const session = await manager.createSession({
+		title: 'Notices',
+		messageCount: 2,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [
+			{role: 'user', content: 'go'},
+			{
+				role: 'assistant',
+				content: '_Cancelled by user._',
+				displayOnly: true,
+			},
+		],
+	});
+
+	const loaded = await manager.readSession(session.id);
+	t.is(loaded!.messages.length, 2);
+	t.is(loaded!.messages[0].displayOnly, undefined);
+	t.true(loaded!.messages[1].displayOnly);
+});
+
 test.serial('saveSession rejects invalid session ID', async t => {
 	await t.throwsAsync(
 		() =>

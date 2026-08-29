@@ -869,6 +869,14 @@ test('AcpAgent.extMethod - timeline/revert truncates messages and restores files
 		t.true(
 			String(session.messages[1].content).includes('Reverted to before step 1'),
 		);
+		t.true(
+			session.messages[1].displayOnly,
+			'the revert notice must never reach the model',
+		);
+		t.deepEqual(
+			convertToModelMessages(session.messages).map((m: {role: string}) => m.role),
+			['user'],
+		);
 	} finally {
 		rmSync(cwd, {recursive: true, force: true});
 	}

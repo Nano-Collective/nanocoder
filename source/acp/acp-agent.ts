@@ -622,9 +622,13 @@ export class AcpAgent implements Agent {
 				0,
 				resolveTruncationPoint(session.messages, result.revertedTo),
 			);
+			// Harness chrome, not model output: it tells the user what the revert
+			// did. The model learns about the revert from the truncated history
+			// itself, so this must never come back as its own past turn.
 			session.messages.push({
 				role: 'assistant',
 				content: `Reverted to before step ${result.revertedTo.seq} (${result.revertedTo.toolName}). How should we proceed instead?`,
+				displayOnly: true,
 			});
 			await this.saveAcpSessionToDisk(session);
 			await this.replaySessionHistory(session);

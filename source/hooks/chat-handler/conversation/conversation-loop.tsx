@@ -16,6 +16,7 @@ import {
 	MAX_EMPTY_TURNS,
 	MAX_MALFORMED_RETRIES,
 	MAX_REPEATED_TOOL_CALLS,
+	TOOL_APPROVAL_REQUIRED_PREFIX,
 } from '@/constants';
 import {generateKey} from '@/session/key-generator';
 import {
@@ -836,7 +837,7 @@ export const processAssistantResponse = async (
 		if (confirmTools.length > 0 && nonInteractiveMode) {
 			await flushAll();
 			const toolNames = confirmTools.map(tc => tc.function.name).join(', ');
-			const errorMsg = `Tool approval required for: ${toolNames}. Exiting non-interactive mode`;
+			const errorMsg = `${TOOL_APPROVAL_REQUIRED_PREFIX}${toolNames}. Exiting non-interactive mode`;
 			addToChatQueue(
 				<ErrorMessage
 					key={generateKey('tool-approval-required')}

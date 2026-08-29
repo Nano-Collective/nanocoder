@@ -8,6 +8,7 @@ import {
 import {getAppConfig} from '@/config/index';
 import {loadPreferences, savePreferences} from '@/config/preferences';
 import {resolveTune} from '@/config/tune';
+import {TOOL_APPROVAL_REQUIRED_PREFIX} from '@/constants';
 import {runPlainConversation} from '@/plain/conversation';
 import {initializePlain} from '@/plain/initialize';
 import {
@@ -289,7 +290,7 @@ export async function runPlainShell(
 			return;
 		case 'tool-approval-required':
 			writeError(
-				`Tool approval required for: ${outcome.toolNames.join(', ')}. ` +
+				`${TOOL_APPROVAL_REQUIRED_PREFIX}${outcome.toolNames.join(', ')}. ` +
 					`Re-run with --mode auto-accept or --mode yolo, or add the tools to ` +
 					`agents.config.json "alwaysAllow".`,
 			);
