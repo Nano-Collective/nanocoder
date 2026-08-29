@@ -1,411 +1,245 @@
-import {mkdir, readFile, rm, writeFile} from 'node:fs/promises';
+import {mkdtemp, readdir, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
 import {ArtifactManager} from '@/artifacts/artifact-manager';
 import {setCliSessionId} from '@/session/cli-session-context';
+import {
+	clearAllTasks,
+	generateTaskId,
+	getTasksPath,
+	loadTasks,
+	saveTasks,
+} from './storage.js';
 import type {Task} from './types.js';
 
 // ============================================================================
 // Task Storage Tests
 // ============================================================================
-// Tests for the task storage functions that handle persisting tasks to disk.
-// Uses a temporary directory to avoid polluting the actual project.
+// Task state is session-scoped and lives with the session's artifacts. There
+// is no `.nanocoder/tasks.json` in the working directory any more, so these
+// tests never touch (or need to fake) process.cwd().
 
-// Store original cwd and override process.cwd for isolated testing
-let testDir: string;
-let originalCwd: typeof process.cwd;
+const SESSION_A = '11111111-1111-4111-8111-111111111111';
+const SESSION_B = '22222222-2222-4222-8222-222222222222';
 
-test.before(async () => {
-	testDir = join(tmpdir(), `nanocoder-task-storage-test-${Date.now()}`);
-	await mkdir(testDir, {recursive: true});
-	originalCwd = process.cwd;
-});
-
-test.after.always(async () => {
-	process.cwd = originalCwd;
-	if (testDir) {
-		await rm(testDir, {recursive: true, force: true}).catch(() => {});
+async function withArtifacts(
+	run: (artifacts: ArtifactManager, root: string) => Promise<void>,
+): Promise<void> {
+	const root = await mkdtemp(join(tmpdir(), 'nanocoder-task-storage-'));
+	try {
+		await run(new ArtifactManager(root), root);
+	} finally {
+		await rm(root, {recursive: true, force: true});
 	}
-});
+}
 
-// Helper to create isolated test environment
-async function setupTestEnv(
-	subDir: string,
-): Promise<{dir: string; restore: () => void}> {
-	const dir = join(testDir, subDir);
-	await mkdir(dir, {recursive: true});
-	const savedCwd = process.cwd;
-	process.cwd = () => dir;
+function task(overrides: Partial<Task> = {}): Task {
+	const now = '2026-08-07T00:00:00.000Z';
 	return {
-		dir,
-		restore: () => {
-			process.cwd = savedCwd;
-		},
+		id: generateTaskId(),
+		title: 'Inspect parser',
+		status: 'pending',
+		createdAt: now,
+		updatedAt: now,
+		...overrides,
 	};
 }
 
 // ============================================================================
-// generateTaskId Tests
+// generateTaskId
 // ============================================================================
 
-test('generateTaskId - generates 8-character string', async t => {
-	const {generateTaskId} = await import('./storage.js');
-	const id = generateTaskId();
-	t.is(id.length, 8);
+test('generateTaskId - generates 8-character string', t => {
+	t.is(generateTaskId().length, 8);
 });
 
-test('generateTaskId - generates unique IDs', async t => {
-	const {generateTaskId} = await import('./storage.js');
+test('generateTaskId - generates unique IDs', t => {
 	const ids = new Set<string>();
-	for (let i = 0; i < 100; i++) {
-		ids.add(generateTaskId());
-	}
+	for (let i = 0; i < 100; i++) ids.add(generateTaskId());
 	t.is(ids.size, 100);
 });
 
-test('generateTaskId - generates valid UUID prefix format', async t => {
-	const {generateTaskId} = await import('./storage.js');
-	const id = generateTaskId();
-	// Should match hex characters (UUID format)
-	t.regex(id, /^[a-f0-9]{8}$/);
+test('generateTaskId - generates valid UUID prefix format', t => {
+	t.regex(generateTaskId(), /^[a-f0-9]{8}$/);
 });
 
 // ============================================================================
-// getTasksPath Tests
+// getTasksPath
 // ============================================================================
 
-test('getTasksPath - returns correct path structure', async t => {
-	const env = await setupTestEnv('path-test');
-	try {
-		const {getTasksPath} = await import('./storage.js');
-		const path = getTasksPath();
-		t.true(path.endsWith('.nanocoder/tasks.json'));
-		t.true(path.includes(env.dir));
-	} finally {
-		env.restore();
-	}
+test('getTasksPath - resolves inside the session artifact directory', async t => {
+	await withArtifacts(async (artifacts, root) => {
+		const path = getTasksPath(SESSION_A, artifacts);
+		t.is(path, join(root, SESSION_A, 'tasks.json'));
+	});
+});
+
+test('getTasksPath - returns null when no session can be resolved', async t => {
+	await withArtifacts(async artifacts => {
+		setCliSessionId(null);
+		t.is(getTasksPath(undefined, artifacts), null);
+	});
 });
 
 // ============================================================================
-// loadTasks Tests
+// Session scoping
 // ============================================================================
-
-test('loadTasks - returns empty array when no file exists', async t => {
-	const env = await setupTestEnv('load-no-file');
-	try {
-		const {loadTasks} = await import('./storage.js');
-		const tasks = await loadTasks();
-		t.deepEqual(tasks, []);
-	} finally {
-		env.restore();
-	}
-});
 
 test('session tasks persist as isolated JSON and Markdown artifacts', async t => {
-	const root = join(testDir, 'session-artifacts');
-	const artifacts = new ArtifactManager(root);
-	const firstSession = '11111111-1111-4111-8111-111111111111';
-	const secondSession = '22222222-2222-4222-8222-222222222222';
-	const {loadTasks, saveTasks} = await import('./storage.js');
-	const firstTasks: Task[] = [
-		{
-			id: 'task-1',
-			title: 'Inspect parser',
-			status: 'in_progress',
-			createdAt: '2026-08-07T00:00:00.000Z',
-			updatedAt: '2026-08-07T00:00:00.000Z',
-		},
-		{
-			id: 'task-2',
-			title: 'Add tests',
-			description: 'Cover resume behavior',
-			status: 'completed',
-			createdAt: '2026-08-07T00:00:00.000Z',
-			updatedAt: '2026-08-07T00:00:00.000Z',
-			completedAt: '2026-08-07T00:00:00.000Z',
-		},
-	];
+	await withArtifacts(async artifacts => {
+		const tasks: Task[] = [
+			task({title: 'Inspect parser', status: 'in_progress'}),
+			task({
+				title: 'Add tests',
+				description: 'Cover resume behavior',
+				status: 'completed',
+				completedAt: '2026-08-07T00:00:00.000Z',
+			}),
+		];
 
-	await saveTasks(firstTasks, firstSession, artifacts);
-	await saveTasks([], secondSession, artifacts);
+		await saveTasks(tasks, SESSION_A, artifacts);
+		await saveTasks([], SESSION_B, artifacts);
 
-	t.deepEqual(await loadTasks(firstSession, artifacts), firstTasks);
-	t.deepEqual(await loadTasks(secondSession, artifacts), []);
-	const markdown = await artifacts.readArtifact(firstSession, 'task');
-	t.true(markdown?.includes('- [ ] **In progress:** Inspect parser'));
-	t.true(markdown?.includes('- [x] Add tests'));
-	t.true(markdown?.includes('Cover resume behavior'));
+		t.deepEqual(await loadTasks(SESSION_A, artifacts), tasks);
+		t.deepEqual(await loadTasks(SESSION_B, artifacts), []);
+
+		const markdown = await artifacts.readArtifact(SESSION_A, 'task');
+		t.true(markdown?.includes('- [ ] **In progress:** Inspect parser'));
+		t.true(markdown?.includes('- [x] Add tests'));
+		t.true(markdown?.includes('Cover resume behavior'));
+	});
 });
 
 test('task commands use the active CLI session when no ID is passed', async t => {
-	const root = join(testDir, 'active-session-artifacts');
-	const artifacts = new ArtifactManager(root);
-	const sessionId = '11111111-1111-4111-8111-111111111111';
-	const tasks: Task[] = [
-		{
-			id: 'task-1',
-			title: 'CLI task',
-			status: 'pending',
-			createdAt: '2026-08-07T00:00:00.000Z',
-			updatedAt: '2026-08-07T00:00:00.000Z',
-		},
-	];
-	const {loadTasks, saveTasks} = await import('./storage.js');
-
-	try {
-		setCliSessionId(sessionId);
-		await saveTasks(tasks, undefined, artifacts);
-		t.deepEqual(await loadTasks(undefined, artifacts), tasks);
-		t.truthy(await artifacts.readArtifact(sessionId, 'task'));
-	} finally {
-		setCliSessionId(null);
-	}
+	await withArtifacts(async artifacts => {
+		const tasks = [task({title: 'CLI task'})];
+		try {
+			setCliSessionId(SESSION_A);
+			await saveTasks(tasks, undefined, artifacts);
+			t.deepEqual(await loadTasks(undefined, artifacts), tasks);
+			t.truthy(await artifacts.readArtifact(SESSION_A, 'task'));
+		} finally {
+			setCliSessionId(null);
+		}
+	});
 });
 
-test('loadTasks - loads existing tasks from file', async t => {
-	const env = await setupTestEnv('load-existing');
-	try {
-		const taskData: Task[] = [
-			{
-				id: 'test-id1',
-				title: 'Test Task 1',
-				status: 'pending',
-				createdAt: '2024-01-01T00:00:00.000Z',
-				updatedAt: '2024-01-01T00:00:00.000Z',
-			},
-			{
-				id: 'test-id2',
-				title: 'Test Task 2',
-				description: 'With description',
-				status: 'completed',
-				createdAt: '2024-01-01T00:00:00.000Z',
-				updatedAt: '2024-01-02T00:00:00.000Z',
-				completedAt: '2024-01-02T00:00:00.000Z',
-			},
-		];
+// ============================================================================
+// No working-directory fallback
+// ============================================================================
 
-		const dir = join(env.dir, '.nanocoder');
-		await mkdir(dir, {recursive: true});
-		await writeFile(join(dir, 'tasks.json'), JSON.stringify(taskData), 'utf-8');
+test('saveTasks writes nothing anywhere when there is no session', async t => {
+	await withArtifacts(async (artifacts, root) => {
+		setCliSessionId(null);
+		await saveTasks([task()], undefined, artifacts);
+		t.deepEqual(
+			await readdir(root),
+			[],
+			'a sessionless save must not create an artifact directory',
+		);
+	});
+});
 
-		const {loadTasks} = await import('./storage.js');
-		const tasks = await loadTasks();
-		t.deepEqual(tasks, taskData);
-	} finally {
-		env.restore();
-	}
+test('loadTasks returns empty when there is no session', async t => {
+	await withArtifacts(async artifacts => {
+		setCliSessionId(null);
+		t.deepEqual(await loadTasks(undefined, artifacts), []);
+	});
+});
+
+// ============================================================================
+// loadTasks
+// ============================================================================
+
+test('loadTasks - returns empty array when the session has no tasks yet', async t => {
+	await withArtifacts(async artifacts => {
+		t.deepEqual(await loadTasks(SESSION_A, artifacts), []);
+	});
+});
+
+test('loadTasks - loads previously saved tasks', async t => {
+	await withArtifacts(async artifacts => {
+		const tasks = [task({title: 'Persisted'})];
+		await saveTasks(tasks, SESSION_A, artifacts);
+		t.deepEqual(await loadTasks(SESSION_A, artifacts), tasks);
+	});
 });
 
 test('loadTasks - returns empty array on invalid JSON', async t => {
-	const env = await setupTestEnv('load-invalid-json');
-	try {
-		const dir = join(env.dir, '.nanocoder');
-		await mkdir(dir, {recursive: true});
-		await writeFile(join(dir, 'tasks.json'), 'not valid json', 'utf-8');
+	await withArtifacts(async artifacts => {
+		await artifacts.writeArtifact(SESSION_A, 'tasks', 'not json at all');
+		t.deepEqual(await loadTasks(SESSION_A, artifacts), []);
+	});
+});
 
-		const {loadTasks} = await import('./storage.js');
-		const tasks = await loadTasks();
-		t.deepEqual(tasks, []);
-	} finally {
-		env.restore();
-	}
+test('loadTasks - returns empty array when the payload is not an array', async t => {
+	await withArtifacts(async artifacts => {
+		await artifacts.writeArtifact(SESSION_A, 'tasks', '{"tasks": []}');
+		t.deepEqual(await loadTasks(SESSION_A, artifacts), []);
+	});
 });
 
 // ============================================================================
-// saveTasks Tests
+// saveTasks
 // ============================================================================
 
-test('saveTasks - creates directory and file if not exists', async t => {
-	const env = await setupTestEnv('save-create-dir');
-	try {
-		const {saveTasks, getTasksPath} = await import('./storage.js');
-		const tasks: Task[] = [
-			{
-				id: 'new-task',
-				title: 'New Task',
-				status: 'pending',
-				createdAt: '2024-01-01T00:00:00.000Z',
-				updatedAt: '2024-01-01T00:00:00.000Z',
-			},
-		];
+test('saveTasks - overwrites the previous list', async t => {
+	await withArtifacts(async artifacts => {
+		await saveTasks([task({title: 'First'})], SESSION_A, artifacts);
+		await saveTasks([task({title: 'Second'})], SESSION_A, artifacts);
 
-		await saveTasks(tasks);
-
-		const content = await readFile(getTasksPath(), 'utf-8');
-		const saved = JSON.parse(content);
-		t.deepEqual(saved, tasks);
-	} finally {
-		env.restore();
-	}
-});
-
-test('saveTasks - overwrites existing file', async t => {
-	const env = await setupTestEnv('save-overwrite');
-	try {
-		const {saveTasks, loadTasks} = await import('./storage.js');
-
-		const initialTasks: Task[] = [
-			{
-				id: 'task-1',
-				title: 'Task 1',
-				status: 'pending',
-				createdAt: '2024-01-01T00:00:00.000Z',
-				updatedAt: '2024-01-01T00:00:00.000Z',
-			},
-		];
-		await saveTasks(initialTasks);
-
-		const updatedTasks: Task[] = [
-			{
-				id: 'task-2',
-				title: 'Task 2',
-				status: 'completed',
-				createdAt: '2024-01-02T00:00:00.000Z',
-				updatedAt: '2024-01-02T00:00:00.000Z',
-				completedAt: '2024-01-02T00:00:00.000Z',
-			},
-		];
-		await saveTasks(updatedTasks);
-
-		const loaded = await loadTasks();
-		t.deepEqual(loaded, updatedTasks);
-	} finally {
-		env.restore();
-	}
+		const loaded = await loadTasks(SESSION_A, artifacts);
+		t.is(loaded.length, 1);
+		t.is(loaded[0]?.title, 'Second');
+	});
 });
 
 test('saveTasks - saves with pretty formatting', async t => {
-	const env = await setupTestEnv('save-pretty');
-	try {
-		const {saveTasks, getTasksPath} = await import('./storage.js');
-		const tasks: Task[] = [
-			{
-				id: 'task-1',
-				title: 'Task 1',
-				status: 'pending',
-				createdAt: '2024-01-01T00:00:00.000Z',
-				updatedAt: '2024-01-01T00:00:00.000Z',
-			},
-		];
-
-		await saveTasks(tasks);
-
-		const content = await readFile(getTasksPath(), 'utf-8');
-		// Pretty printed JSON has newlines
-		t.true(content.includes('\n'));
-		// And indentation
-		t.true(content.includes('  '));
-	} finally {
-		env.restore();
-	}
+	await withArtifacts(async artifacts => {
+		await saveTasks([task()], SESSION_A, artifacts);
+		const raw = await artifacts.readArtifact(SESSION_A, 'tasks');
+		t.true(raw?.includes('\n  '), 'JSON should be indented');
+	});
 });
 
 // ============================================================================
-// clearAllTasks Tests
+// clearAllTasks
 // ============================================================================
 
 test('clearAllTasks - clears existing tasks', async t => {
-	const env = await setupTestEnv('clear-tasks');
-	try {
-		const {saveTasks, loadTasks, clearAllTasks} = await import('./storage.js');
-
-		const tasks: Task[] = [
-			{
-				id: 'task-1',
-				title: 'Task 1',
-				status: 'pending',
-				createdAt: '2024-01-01T00:00:00.000Z',
-				updatedAt: '2024-01-01T00:00:00.000Z',
-			},
-			{
-				id: 'task-2',
-				title: 'Task 2',
-				status: 'in_progress',
-				createdAt: '2024-01-01T00:00:00.000Z',
-				updatedAt: '2024-01-01T00:00:00.000Z',
-			},
-		];
-		await saveTasks(tasks);
-
-		await clearAllTasks();
-
-		const loaded = await loadTasks();
-		t.deepEqual(loaded, []);
-	} finally {
-		env.restore();
-	}
+	await withArtifacts(async artifacts => {
+		await saveTasks([task(), task({title: 'Second'})], SESSION_A, artifacts);
+		await clearAllTasks(SESSION_A, artifacts);
+		t.deepEqual(await loadTasks(SESSION_A, artifacts), []);
+	});
 });
 
 test('clearAllTasks - works when no tasks exist', async t => {
-	const env = await setupTestEnv('clear-empty');
-	try {
-		const {loadTasks, clearAllTasks} = await import('./storage.js');
-
-		await clearAllTasks();
-
-		const loaded = await loadTasks();
-		t.deepEqual(loaded, []);
-	} finally {
-		env.restore();
-	}
+	await withArtifacts(async artifacts => {
+		await t.notThrowsAsync(clearAllTasks(SESSION_A, artifacts));
+		t.deepEqual(await loadTasks(SESSION_A, artifacts), []);
+	});
 });
 
 // ============================================================================
-// Integration Tests
+// Lifecycle
 // ============================================================================
 
 test('storage - full lifecycle: create, update, clear', async t => {
-	const env = await setupTestEnv('full-lifecycle');
-	try {
-		const {saveTasks, loadTasks, clearAllTasks, generateTaskId} = await import(
-			'./storage.js'
-		);
+	await withArtifacts(async artifacts => {
+		const first = task({title: 'Write the parser'});
+		await saveTasks([first], SESSION_A, artifacts);
+		t.is((await loadTasks(SESSION_A, artifacts)).length, 1);
 
-		// Create tasks
-		const task1: Task = {
-			id: generateTaskId(),
-			title: 'First Task',
-			status: 'pending',
-			createdAt: new Date().toISOString(),
-			updatedAt: new Date().toISOString(),
-		};
-		await saveTasks([task1]);
+		const updated: Task = {...first, status: 'completed'};
+		await saveTasks([updated], SESSION_A, artifacts);
+		t.is((await loadTasks(SESSION_A, artifacts))[0]?.status, 'completed');
 
-		let loaded = await loadTasks();
-		t.is(loaded.length, 1);
-		t.is(loaded[0]?.title, 'First Task');
+		const markdown = await artifacts.readArtifact(SESSION_A, 'task');
+		t.true(markdown?.includes('- [x] Write the parser'));
 
-		// Add another task
-		const task2: Task = {
-			id: generateTaskId(),
-			title: 'Second Task',
-			description: 'With description',
-			status: 'in_progress',
-			createdAt: new Date().toISOString(),
-			updatedAt: new Date().toISOString(),
-		};
-		await saveTasks([task1, task2]);
-
-		loaded = await loadTasks();
-		t.is(loaded.length, 2);
-
-		// Update task status
-		if (loaded[0]) {
-			loaded[0].status = 'completed';
-			loaded[0].completedAt = new Date().toISOString();
-		}
-		await saveTasks(loaded);
-
-		loaded = await loadTasks();
-		t.is(loaded[0]?.status, 'completed');
-		t.truthy(loaded[0]?.completedAt);
-
-		// Clear all
-		await clearAllTasks();
-		loaded = await loadTasks();
-		t.deepEqual(loaded, []);
-	} finally {
-		env.restore();
-	}
+		await clearAllTasks(SESSION_A, artifacts);
+		t.deepEqual(await loadTasks(SESSION_A, artifacts), []);
+	});
 });

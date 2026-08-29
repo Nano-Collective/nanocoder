@@ -1,6 +1,4 @@
 import {randomUUID} from 'node:crypto';
-import {mkdir, readFile, writeFile} from 'node:fs/promises';
-import {join} from 'node:path';
 import {
 	type ArtifactManager,
 	artifactManager,
@@ -8,18 +6,31 @@ import {
 import {getCliSessionId} from '@/session/cli-session-context';
 import type {Task} from './types';
 
-const TASKS_DIR = '.nanocoder';
-const TASKS_FILE = 'tasks.json';
+/**
+ * Task state is session-scoped and lives with the session's artifacts, never
+ * in the working directory. The legacy `.nanocoder/tasks.json` in cwd is gone:
+ * it leaked agent bookkeeping into the user's repo, was shared by every
+ * concurrent session, and could not be resumed alongside the conversation it
+ * belonged to.
+ *
+ * Every caller has a session id — the interactive CLI allocates one before it
+ * dispatches a message or a slash command, ACP and `--plain` pass theirs
+ * explicitly, and subagents are not allowed to touch tasks at all. When no
+ * session id can be resolved there is nowhere legitimate to persist to, so
+ * reads return empty and writes are a no-op rather than falling back to disk.
+ */
 
+/**
+ * Absolute path of the session's task JSON, or null when no session is
+ * resolvable.
+ */
 export function getTasksPath(
 	sessionId?: string,
 	artifacts: ArtifactManager = artifactManager,
-): string {
+): string | null {
 	const resolvedSessionId = sessionId ?? getCliSessionId();
-	if (resolvedSessionId) {
-		return artifacts.getArtifactPath(resolvedSessionId, 'tasks');
-	}
-	return join(process.cwd(), TASKS_DIR, TASKS_FILE);
+	if (!resolvedSessionId) return null;
+	return artifacts.getArtifactPath(resolvedSessionId, 'tasks');
 }
 
 export async function loadTasks(
@@ -27,12 +38,12 @@ export async function loadTasks(
 	artifacts: ArtifactManager = artifactManager,
 ): Promise<Task[]> {
 	const resolvedSessionId = sessionId ?? getCliSessionId();
+	if (!resolvedSessionId) return [];
 	try {
-		const content = resolvedSessionId
-			? await artifacts.readArtifact(resolvedSessionId, 'tasks')
-			: await readFile(getTasksPath(), 'utf-8');
+		const content = await artifacts.readArtifact(resolvedSessionId, 'tasks');
 		if (!content) return [];
-		return JSON.parse(content) as Task[];
+		const parsed = JSON.parse(content);
+		return Array.isArray(parsed) ? (parsed as Task[]) : [];
 	} catch {
 		return [];
 	}
@@ -44,24 +55,18 @@ export async function saveTasks(
 	artifacts: ArtifactManager = artifactManager,
 ): Promise<void> {
 	const resolvedSessionId = sessionId ?? getCliSessionId();
-	if (resolvedSessionId) {
-		await artifacts.writeArtifact(
-			resolvedSessionId,
-			'tasks',
-			JSON.stringify(tasks, null, 2),
-		);
-		await artifacts.writeArtifact(
-			resolvedSessionId,
-			'task',
-			tasksToMarkdown(tasks),
-		);
-		return;
-	}
+	if (!resolvedSessionId) return;
 
-	const dirPath = join(process.cwd(), TASKS_DIR);
-	await mkdir(dirPath, {recursive: true});
-	const path = getTasksPath();
-	await writeFile(path, JSON.stringify(tasks, null, 2), 'utf-8');
+	await artifacts.writeArtifact(
+		resolvedSessionId,
+		'tasks',
+		JSON.stringify(tasks, null, 2),
+	);
+	await artifacts.writeArtifact(
+		resolvedSessionId,
+		'task',
+		tasksToMarkdown(tasks),
+	);
 }
 
 function tasksToMarkdown(tasks: Task[]): string {

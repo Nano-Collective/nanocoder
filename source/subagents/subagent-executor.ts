@@ -600,13 +600,18 @@ export class SubagentExecutor {
 			return 'Error: Execution was cancelled';
 		}
 
-		// Hard-stop the session-artifact tools at the execution boundary, not
-		// just the offered-tools list. The registry resolves a handler for every
-		// registered tool regardless of filtering, so a subagent that names one
-		// anyway would otherwise overwrite the parent session's plan, task list,
-		// or walkthrough — it runs with the parent's session id.
-		if ((SESSION_ARTIFACT_TOOLS as readonly string[]).includes(toolName)) {
-			return `Error: Tool '${toolName}' is not available to subagents`;
+		// Enforce the allow-list at the execution boundary, not just when
+		// choosing which tools to offer. `getToolHandler` resolves a handler for
+		// every *registered* tool, so a subagent that names a filtered tool
+		// anyway — hallucinated, or coaxed there by its own prompt — would
+		// otherwise run it. That let a read-only agent like `explore` write
+		// files, and let any subagent overwrite the parent session's plan, task
+		// list, or walkthrough (subagents run with the parent's session id).
+		if (!this.getAvailableToolNames(config).includes(toolName)) {
+			return (
+				`Error: Tool '${toolName}' is not available to this subagent. ` +
+				'Use only the tools listed in your instructions.'
+			);
 		}
 
 		const toolHandler = this.toolManager.getToolHandler(toolName);
