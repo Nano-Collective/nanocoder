@@ -29,13 +29,9 @@ const LOGO_FULL = 'NANOCODER';
 const LOGO_SHORT = 'NC';
 const LOGO_FONT = 'block';
 
-type LogoKind = 'block';
-
-// Approximate rendered height per tier (glyph rows + cfonts blank padding),
+// Rendered height of the block wordmark (glyph rows + cfonts blank padding),
 // used only for the 1/3-top vertical centering estimate.
-const LOGO_ROW_HEIGHTS: Record<LogoKind, number> = {
-	block: 9,
-};
+const LOGO_ROWS = 9;
 
 const MENU_FULL: Array<[string, string]> = [
 	['Resume session', '/resume'],
@@ -71,8 +67,9 @@ export default memo(function WelcomeMessage() {
 		menu = rows < 24 ? MENU_MIN : MENU_FULL;
 	}
 
-	// Vertical centering: mimic mock's 1/3 top, 2/3 bottom when tall enough
-	const logoRows = logoText ? LOGO_ROW_HEIGHTS.block : 0;
+	// Vertical centering: roughly 1/3 of the empty space above the content
+	// and 2/3 below, when the terminal is tall enough
+	const logoRows = logoText ? LOGO_ROWS : 0;
 	const welcomeRows = 2; // Welcome + subtitle
 	const locationRows = 1;
 	const menuRows = menu.length;
@@ -93,11 +90,10 @@ export default memo(function WelcomeMessage() {
 			? Math.max(...menu.map(([l, k]) => l.length + k.length)) + 4
 			: 0;
 
-	// Full terminal width for every row — the mockup centers all content on one
-	// shared axis, so the wordmark and the text below it must share the same
-	// center. A capped box would sit left of the centered logo on wide screens.
+	// Full terminal width for every row so the wordmark and the text below it
+	// share one center axis — a capped box would sit left of the centered
+	// logo on wide screens.
 	const termW = actualWidth;
-	// Centered at every size — narrow looks like wide, per the mockup
 	const justify = 'center';
 
 	// Location line must fit even when stale (e.g., 44-char branch·dir in 50-col term).
