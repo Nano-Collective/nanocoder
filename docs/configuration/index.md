@@ -255,7 +255,7 @@ Run your own shell commands at fixed points in the agent loop — before/after a
       "post-tool-use": [
         {
           "matchTools": ["write_file", "string_replace"],
-          "command": "biome check --write $NANOCODER_FILE"
+          "command": "biome check --write \"$NANOCODER_FILE\""
         }
       ],
       "pre-tool-use": [

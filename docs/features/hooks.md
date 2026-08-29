@@ -44,7 +44,7 @@ Hooks live under `nanocoder.hooks` in `agents.config.json`, keyed by lifecycle p
       "post-tool-use": [
         {
           "matchTools": ["write_file", "string_replace"],
-          "command": "biome check --write $NANOCODER_FILE"
+          "command": "biome check --write \"$NANOCODER_FILE\""
         }
       ],
       "pre-tool-use": [
@@ -151,6 +151,8 @@ A hook that prints nothing injects nothing.
 ## Security
 
 Hooks are project-local shell commands, so `agents.config.json` in a repository is a code-execution surface — exactly like the `mcpServers` in the same file, and like `.nanocoder/tools/`. All of them are gated by the directory-trust prompt you accept the first time Nanocoder runs in a directory. Treat an untrusted repository's `agents.config.json` the way you would treat its `package.json` scripts, and use `/doctor` to see what a project has wired up.
+
+**Quote your variables.** Your `command` is the only thing Nanocoder puts on the shell command line; everything the model influenced arrives through the environment instead, so a model-chosen path can never inject into the command itself. But once your hook expands one of those variables, normal shell rules apply — and the model picked the value. Write `biome check --write "$NANOCODER_FILE"`, not `biome check --write $NANOCODER_FILE`, so a path with a space or a `;` in it stays one argument.
 
 ## Troubleshooting
 

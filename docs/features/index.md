@@ -200,7 +200,7 @@ Where skills bring an AI to something that changed, **[lifecycle hooks](hooks.md
 ```json
 {"nanocoder": {"hooks": {
   "post-tool-use": [
-    {"matchTools": ["write_file", "string_replace"], "command": "biome check --write $NANOCODER_FILE"}
+    {"matchTools": ["write_file", "string_replace"], "command": "biome check --write \"$NANOCODER_FILE\""}
   ]
 }}}
 ```

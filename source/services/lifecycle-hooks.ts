@@ -199,6 +199,20 @@ function runHookCommand(
 		// `shell: true` runs the command through `sh -c` / `cmd.exe /d /s /c`
 		// with the platform's own quoting rules, so a hook body with quotes in
 		// it survives on Windows as well as POSIX.
+		//
+		// Running a shell IS the feature: a hook is defined as a shell command,
+		// the same way an `mcpServers` entry is defined as a command to spawn,
+		// and both are read from the same project-local `agents.config.json`
+		// behind the same directory-trust prompt.
+		//
+		// The invariant that keeps this safe — DO NOT BREAK IT: `hook.command`
+		// is the ONLY value that reaches the shell. Everything the model
+		// influences (tool arguments, file paths, bash commands, tool results,
+		// prompts) is handed over through `env` in buildEnv() and is never
+		// interpolated into the command string, so a model-chosen path like
+		// `a.ts; rm -rf /` is inert here. Adding a template literal to this
+		// line would turn a config string into an injection sink.
+		// nosemgrep: javascript.lang.security.audit.spawn-shell-true.spawn-shell-true, javascript.lang.security.detect-child-process.detect-child-process
 		const proc = spawn(hook.command, {cwd, env, shell: true});
 
 		const timeoutMs = hook.timeout ?? DEFAULT_HOOK_TIMEOUT_MS;
