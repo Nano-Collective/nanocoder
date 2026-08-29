@@ -2,7 +2,14 @@ import {mkdirSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
-import {buildHandler, expandVars, mergeEnv, resolveCwd, runScript} from './handler';
+import {
+	buildHandler,
+	expandVars,
+	mergeEnv,
+	resolveCwd,
+	runScript,
+	shellArgs,
+} from './handler';
 import type {CustomToolMetadata} from '@/types/custom-tools';
 
 console.log('\ncustom-tools/handler.spec.ts');
@@ -52,6 +59,17 @@ test('expandVars replaces $VAR and ${VAR}', t => {
 	t.is(expandVars('${NCT_MISSING}'), '');
 	if (prev === undefined) delete process.env.NCT_FOO;
 	else process.env.NCT_FOO = prev;
+});
+
+test('shellArgs uses /c for cmd.exe and -c for posix shells', t => {
+	t.deepEqual(shellArgs('cmd.exe', 'echo hi'), ['/c', 'echo hi']);
+	t.deepEqual(shellArgs('cmd', 'echo hi'), ['/c', 'echo hi']);
+	t.deepEqual(shellArgs('C:\\Windows\\System32\\cmd.exe', 'echo hi'), [
+		'/c',
+		'echo hi',
+	]);
+	t.deepEqual(shellArgs('/bin/sh', 'echo hi'), ['-c', 'echo hi']);
+	t.deepEqual(shellArgs('/bin/bash', 'echo hi'), ['-c', 'echo hi']);
 });
 
 test('mergeEnv overlays configured vars onto process.env', t => {

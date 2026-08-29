@@ -53,7 +53,7 @@ export function runScript(
 	options: RunOptions,
 ): Promise<string> {
 	return new Promise((resolvePromise, rejectPromise) => {
-		const child = spawn(options.shell, ['-c', script], {
+		const child = spawn(options.shell, shellArgs(options.shell, script), {
 			cwd: options.cwd,
 			env: options.env,
 			stdio: ['ignore', 'pipe', 'pipe'],
@@ -178,4 +178,14 @@ function pickShell(configured: string | undefined): string {
 	if (process.platform === 'win32') return process.env.ComSpec || 'cmd.exe';
 	if (existsSync('/bin/bash')) return '/bin/bash';
 	return '/bin/sh';
+}
+
+/** cmd.exe takes `/c`; bash/sh take `-c`. Matches execute_bash. */
+export function shellArgs(shell: string, script: string): string[] {
+	return isWindowsCmd(shell) ? ['/c', script] : ['-c', script];
+}
+
+function isWindowsCmd(shell: string): boolean {
+	const name = shell.replaceAll('\\', '/').split('/').pop() ?? '';
+	return /^cmd(\.exe)?$/i.test(name);
 }
