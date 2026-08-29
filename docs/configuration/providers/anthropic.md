@@ -30,9 +30,10 @@ Anthropic cache breakpoint, plus one on the final message of the turn, so the
 next turn reads that prefix back out of cache instead of resending it at full
 price. Prompts below Anthropic's minimum cacheable length are sent unmarked.
 
-`/usage` and the per-response indicator are cache-aware: cache reads and writes
-are priced at their own rates rather than the full input rate, and the cached
-token count is shown alongside the total.
+Cost reporting is cache-aware: `/usage` and the per-response indicator price
+cache reads and writes at their own rates rather than the full input rate. The
+per-response indicator also shows the cached token count alongside the total,
+e.g. `Tokens: 12.4k | 9.8k cached | ~$0.02`.
 
 Opt out per provider:
 

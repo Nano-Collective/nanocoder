@@ -81,6 +81,7 @@ Use dedicated AI SDK packages for native API support, enabled via the `sdkProvid
 | `organizationId` | Organization ID for OpenAI (optional) |
 | `disableTools` | Disable tool calling for the entire provider (optional, boolean) |
 | `disableToolModels` | List of model names to disable tool calling for (optional) |
+| `promptCaching` | Set to `false` to opt out of prompt caching (optional, boolean). Only read when `sdkProvider` is `anthropic`, where it defaults to `true`; ignored on every other SDK provider. See [Anthropic](anthropic.md#prompt-caching) |
 | `requestTimeout` | Overall request timeout in milliseconds (default: 120,000). Set to `-1` to disable (optional) |
 | `socketTimeout` | Socket-level timeout in milliseconds, uses `requestTimeout` if not set. Set to `-1` to disable (optional) |
 | `connectionPool` | Connection pool settings (optional, see [Timeouts & Connection Pooling](#timeouts--connection-pooling)) |

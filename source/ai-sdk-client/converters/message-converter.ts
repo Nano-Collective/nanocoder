@@ -66,10 +66,17 @@ export function dropOrphanedToolResults(messages: Message[]): Message[] {
 	return result;
 }
 
-const CACHE_BREAKPOINT = {
-	anthropic: {cacheControl: {type: 'ephemeral'}},
-};
+const CACHE_BREAKPOINT = Object.freeze({
+	anthropic: Object.freeze({cacheControl: Object.freeze({type: 'ephemeral'})}),
+});
 
+// Heuristic stand-in for Anthropic's token-based minimum cacheable prompt
+// length (1024 tokens on Sonnet/Opus, 2048 on Haiku): ~4 chars a token, so
+// 4096 chars clears the Sonnet/Opus bar. Below the real minimum Anthropic
+// ignores the breakpoint rather than erroring, so a Haiku prompt between the
+// two thresholds is marked but simply not cached. Note the count below covers
+// system + messages but not tool schemas, which sit inside the prefix the
+// system breakpoint caches — so this errs conservative on tool-heavy turns.
 const MIN_CACHEABLE_CHARS = 4096;
 
 function messageChars(message: ModelMessage): number {
@@ -88,7 +95,12 @@ function messageChars(message: ModelMessage): number {
 }
 
 function markCacheBreakpoint(message: ModelMessage): ModelMessage {
-	return {...message, providerOptions: CACHE_BREAKPOINT} as ModelMessage;
+	// Merge rather than assign: nothing sets per-message providerOptions today,
+	// but clobbering them would silently drop whatever does next.
+	return {
+		...message,
+		providerOptions: {...message.providerOptions, ...CACHE_BREAKPOINT},
+	} as ModelMessage;
 }
 
 export function withCacheBreakpoints(

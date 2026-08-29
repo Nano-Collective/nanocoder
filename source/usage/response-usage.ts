@@ -17,6 +17,18 @@ export interface TokenPricing {
 
 type PricingLookup = (model: string) => Promise<TokenPricing | null>;
 
+/**
+ * Price a usage report, billing cache reads and writes at their own models.dev
+ * rates and the remainder at the full input rate.
+ *
+ * The subtraction below is only valid because `inputTokens` is *inclusive* of
+ * the cache counts: the AI SDK reports `inputTokens.total = noCache +
+ * cacheRead + cacheWrite` (see `convertAnthropicMessagesUsage`), and OpenAI's
+ * `prompt_tokens` likewise counts its cached tokens. Do not "fix" this into a
+ * plain addition without re-checking that invariant for the provider in hand.
+ * When models.dev publishes no cache rates the input rate is used for all
+ * three, which reproduces the pre-caching cost exactly.
+ */
 export function priceTokens(
 	pricing: TokenPricing,
 	usage: {

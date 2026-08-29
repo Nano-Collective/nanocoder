@@ -30,6 +30,9 @@ export interface AIProviderConfig {
 	// SDK provider package to use (default: 'openai-compatible')
 	sdkProvider?: SdkProvider;
 	// Opt out of Anthropic prompt caching (enabled by default on that SDK).
+	// Read only when sdkProvider is 'anthropic'; setting it on any other SDK
+	// provider has no effect, since those either prefix-cache automatically
+	// (OpenAI, OpenRouter) or have no cache to address (local models).
 	promptCaching?: boolean;
 	// Model mode defaults for this provider
 	tune?: Partial<TuneConfig>;

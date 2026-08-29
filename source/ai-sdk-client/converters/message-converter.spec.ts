@@ -644,6 +644,23 @@ test('withCacheBreakpoints counts array content toward the threshold', t => {
 	t.deepEqual(result[0]?.providerOptions, BREAKPOINT);
 });
 
+test('withCacheBreakpoints merges the breakpoint into existing providerOptions', t => {
+	const result = withCacheBreakpoints(
+		[
+			{
+				role: 'user',
+				content: BIG,
+				providerOptions: {openai: {reasoningEffort: 'high'}},
+			},
+		],
+		BIG,
+	);
+	t.deepEqual(result[1]?.providerOptions, {
+		openai: {reasoningEffort: 'high'},
+		...BREAKPOINT,
+	});
+});
+
 test('withCacheBreakpoints does not mutate its inputs', t => {
 	const messages: ModelMessage[] = [
 		{role: 'user', content: BIG},
