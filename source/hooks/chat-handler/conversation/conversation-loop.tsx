@@ -648,6 +648,8 @@ export const processAssistantResponse = async (
 				inputTokens: usage.inputTokens,
 				outputTokens: usage.outputTokens,
 				totalTokens: usage.totalTokens,
+				cacheReadTokens: usage.cacheReadTokens,
+				cacheWriteTokens: usage.cacheWriteTokens,
 				timestamp: Date.now(),
 			});
 		}

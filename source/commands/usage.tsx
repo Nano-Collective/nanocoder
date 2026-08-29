@@ -24,6 +24,7 @@ import {
 	calculateTokenBreakdown,
 	calculateToolDefinitionsTokensFromDefs,
 } from '@/usage/calculator';
+import {priceTokens} from '@/usage/response-usage';
 import {buildSystemPrompt, getLastBuiltPrompt} from '@/utils/prompt-builder';
 
 export const usageCommand: Command = {
@@ -199,10 +200,7 @@ export const usageCommand: Command = {
 					snapshot.inputTokens != null &&
 					snapshot.outputTokens != null
 				) {
-					currentContextCost =
-						(pricing.input * snapshot.inputTokens +
-							pricing.output * snapshot.outputTokens) /
-						1_000_000;
+					currentContextCost = priceTokens(pricing, snapshot);
 				} else {
 					currentContextCost = (pricing.input * breakdown.total) / 1_000_000;
 				}
@@ -228,23 +226,14 @@ export const usageCommand: Command = {
 						output: NaN,
 					};
 
-					const knownInputCost =
-						record.inputTokens != null
-							? (recordPricing.input * record.inputTokens) / 1_000_000
-							: 0;
-					const knownOutputCost =
-						record.outputTokens != null
-							? (recordPricing.output * record.outputTokens) / 1_000_000
-							: 0;
-
 					const callCost =
 						record.inputTokens != null && record.outputTokens != null
-							? knownInputCost + knownOutputCost
+							? priceTokens(recordPricing, record)
 							: record.totalTokens != null
 								? (((recordPricing.input + recordPricing.output) / 2) *
 										record.totalTokens) /
 									1_000_000
-								: knownInputCost + knownOutputCost;
+								: priceTokens(recordPricing, record);
 
 					cumulativeSession += callCost;
 					perProvider[record.provider] =

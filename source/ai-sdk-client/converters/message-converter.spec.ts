@@ -1,3 +1,4 @@
+import type {ModelMessage} from 'ai';
 import test from 'ava';
 import {MAX_TOOL_RESULT_CHARS} from '@/constants';
 import type {Message} from '@/types/index';
@@ -5,6 +6,7 @@ import {
 	convertToModelMessages,
 	dropOrphanedToolResults,
 	isEmptyAssistantMessage,
+	withCacheBreakpoints,
 } from './message-converter.js';
 import type {TestableMessage} from '../types.js';
 
@@ -548,4 +550,124 @@ test('convertToModelMessages never leaks a harness notice into the payload', t =
 		t.false(serialized.includes(notice), `leaked into payload: ${notice}`);
 	}
 	t.true(serialized.includes('Done.'));
+});
+
+const BIG = 'S'.repeat(5000);
+const BREAKPOINT = {anthropic: {cacheControl: {type: 'ephemeral'}}};
+
+test('withCacheBreakpoints folds the system prompt in as the first message', t => {
+	const result = withCacheBreakpoints(
+		[{role: 'user', content: 'hi'}],
+		'system text',
+	);
+	t.is(result.length, 2);
+	t.is(result[0]?.role, 'system');
+	t.is(result[0]?.content, 'system text');
+});
+
+test('withCacheBreakpoints marks the system prompt and the last message', t => {
+	const result = withCacheBreakpoints(
+		[
+			{role: 'user', content: BIG},
+			{role: 'assistant', content: 'a'},
+			{role: 'user', content: 'b'},
+		],
+		'system text',
+	);
+	t.deepEqual(result[0]?.providerOptions, BREAKPOINT);
+	t.is(result[1]?.providerOptions, undefined);
+	t.is(result[2]?.providerOptions, undefined);
+	t.deepEqual(result[3]?.providerOptions, BREAKPOINT);
+});
+
+test('withCacheBreakpoints emits at most two breakpoints', t => {
+	const messages = Array.from({length: 12}, (_, i) => ({
+		role: 'user' as const,
+		content: `${BIG}${i}`,
+	}));
+	const marked = withCacheBreakpoints(messages, BIG).filter(
+		m => m.providerOptions !== undefined,
+	);
+	t.is(marked.length, 2);
+});
+
+test('withCacheBreakpoints skips breakpoints below the cacheable minimum', t => {
+	const result = withCacheBreakpoints(
+		[{role: 'user', content: 'hi'}],
+		'short system',
+	);
+	t.is(result.length, 2);
+	t.is(result[0]?.providerOptions, undefined);
+	t.is(result[1]?.providerOptions, undefined);
+});
+
+test('withCacheBreakpoints marks only the last message when there is no system prompt', t => {
+	const result = withCacheBreakpoints(
+		[
+			{role: 'user', content: BIG},
+			{role: 'assistant', content: 'tail'},
+		],
+		'',
+	);
+	t.is(result.length, 2);
+	t.is(result[0]?.providerOptions, undefined);
+	t.deepEqual(result[1]?.providerOptions, BREAKPOINT);
+});
+
+test('withCacheBreakpoints marks only the system prompt when there are no messages', t => {
+	const result = withCacheBreakpoints([], BIG);
+	t.is(result.length, 1);
+	t.deepEqual(result[0]?.providerOptions, BREAKPOINT);
+});
+
+test('withCacheBreakpoints returns an empty array for empty input', t => {
+	t.deepEqual(withCacheBreakpoints([], ''), []);
+});
+
+test('withCacheBreakpoints counts array content toward the threshold', t => {
+	const result = withCacheBreakpoints(
+		[
+			{
+				role: 'tool',
+				content: [
+					{
+						type: 'tool-result',
+						toolCallId: '1',
+						toolName: 'read_file',
+						output: {type: 'text', value: BIG},
+					},
+				],
+			},
+		],
+		'',
+	);
+	t.deepEqual(result[0]?.providerOptions, BREAKPOINT);
+});
+
+test('withCacheBreakpoints merges the breakpoint into existing providerOptions', t => {
+	const result = withCacheBreakpoints(
+		[
+			{
+				role: 'user',
+				content: BIG,
+				providerOptions: {openai: {reasoningEffort: 'high'}},
+			},
+		],
+		BIG,
+	);
+	t.deepEqual(result[1]?.providerOptions, {
+		openai: {reasoningEffort: 'high'},
+		...BREAKPOINT,
+	});
+});
+
+test('withCacheBreakpoints does not mutate its inputs', t => {
+	const messages: ModelMessage[] = [
+		{role: 'user', content: BIG},
+		{role: 'assistant', content: 'tail'},
+	];
+	withCacheBreakpoints(messages, BIG);
+	t.is(messages.length, 2);
+	t.is(messages[0]?.providerOptions, undefined);
+	t.is(messages[1]?.providerOptions, undefined);
 });

@@ -66,6 +66,64 @@ export function dropOrphanedToolResults(messages: Message[]): Message[] {
 	return result;
 }
 
+const CACHE_BREAKPOINT = Object.freeze({
+	anthropic: Object.freeze({cacheControl: Object.freeze({type: 'ephemeral'})}),
+});
+
+// Heuristic stand-in for Anthropic's token-based minimum cacheable prompt
+// length (1024 tokens on Sonnet/Opus, 2048 on Haiku): ~4 chars a token, so
+// 4096 chars clears the Sonnet/Opus bar. Below the real minimum Anthropic
+// ignores the breakpoint rather than erroring, so a Haiku prompt between the
+// two thresholds is marked but simply not cached. Note the count below covers
+// system + messages but not tool schemas, which sit inside the prefix the
+// system breakpoint caches — so this errs conservative on tool-heavy turns.
+const MIN_CACHEABLE_CHARS = 4096;
+
+function messageChars(message: ModelMessage): number {
+	if (typeof message.content === 'string') {
+		return message.content.length;
+	}
+	if (!Array.isArray(message.content)) {
+		return 0;
+	}
+	return message.content.reduce((sum, part) => {
+		if (part.type === 'text') {
+			return sum + part.text.length;
+		}
+		return sum + JSON.stringify(part).length;
+	}, 0);
+}
+
+function markCacheBreakpoint(message: ModelMessage): ModelMessage {
+	// Merge rather than assign: nothing sets per-message providerOptions today,
+	// but clobbering them would silently drop whatever does next.
+	return {
+		...message,
+		providerOptions: {...message.providerOptions, ...CACHE_BREAKPOINT},
+	} as ModelMessage;
+}
+
+export function withCacheBreakpoints(
+	messages: ModelMessage[],
+	systemContent: string,
+): ModelMessage[] {
+	const system: ModelMessage[] = systemContent
+		? [{role: 'system', content: systemContent}]
+		: [];
+	const totalChars =
+		systemContent.length +
+		messages.reduce((sum, message) => sum + messageChars(message), 0);
+	if (totalChars < MIN_CACHEABLE_CHARS) {
+		return [...system, ...messages];
+	}
+	const marked = system.map(markCacheBreakpoint);
+	const lastIndex = messages.length - 1;
+	messages.forEach((message, index) => {
+		marked.push(index === lastIndex ? markCacheBreakpoint(message) : message);
+	});
+	return marked;
+}
+
 /**
  * Convert our Message format to AI SDK v6 ModelMessage format
  *
