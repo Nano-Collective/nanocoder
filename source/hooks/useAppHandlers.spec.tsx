@@ -308,6 +308,51 @@ test.serial('handleToggleDevelopmentMode uses fallback if modeProviders is not c
 	});
 });
 
+test.serial('handleToggleDevelopmentMode does not toast when landing on normal', async t => {
+	const config = {
+		nanocoder: {
+			providers: [{name: 'test-provider', models: ['model-1']}],
+			modeProviders: {
+				normal: {provider: 'test-provider', model: 'model-1'}
+			}
+		}
+	};
+
+	await withMockConfig(config, {}, async () => {
+		// plan → normal: normal has a model override, but restoring the user's
+		// own default model is not news — the status bar flip is the feedback.
+		const {handlers, spies} = setup({developmentMode: 'plan'});
+		handlers.handleToggleDevelopmentMode();
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		t.is(spies.addToChatQueue.calls.length, 0);
+		t.is(spies.handleModelSelect.calls.length, 1);
+	});
+});
+
+test.serial('handleToggleDevelopmentMode suppresses identical repeated model toasts', async t => {
+	const config = {
+		nanocoder: {
+			providers: [{name: 'test-provider', models: ['model-1']}],
+			modeProviders: {
+				'auto-accept': {provider: 'test-provider', model: 'model-1'}
+			}
+		}
+	};
+
+	await withMockConfig(config, {}, async () => {
+		const {handlers, spies} = setup({developmentMode: 'normal'});
+		// Rapid Shift+Tab presses all re-enter auto-accept before props update;
+		// the identical "[auto-accept mode → model-1]" toast must queue once.
+		for (let i = 0; i < 3; i++) {
+			handlers.handleToggleDevelopmentMode();
+			await new Promise(resolve => setTimeout(resolve, 0));
+		}
+
+		t.is(spies.addToChatQueue.calls.length, 1);
+	});
+});
+
 test('handleToggleDevelopmentMode preserves headless mode', t => {
 	// Headless is entered by the daemon for triggered runs, not by the user.
 	// Shift+Tab cycles only through user-facing modes; if `developmentMode`
