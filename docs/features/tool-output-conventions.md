@@ -1,6 +1,12 @@
+---
+title: "Tool Output Conventions"
+description: "How file-content tools represent file contents in the responses they hand back to the model"
+sidebar_order: 13
+---
+
 # Tool output conventions
 
-File-content tools use two different model-facing representations.
+File-content tools use different model-facing representations depending on what the model needs from the response.
 
 ## read_file
 
@@ -15,6 +21,10 @@ When an edit tool returns file content:
 - Include a header such as `Updated file context (lines X-Y of N)`.
 - Use absolute file line numbers, not window-relative offsets.
 - Keep omission markers aligned with absolute line numbers.
+
+## write_file
+
+`write_file` deliberately returns no file content at all. The model supplied the content in the call arguments, so echoing it back only spends tokens on something the model already has. The response is stats only: whether the file was created or overwritten, plus line, character, and estimated token counts.
 
 ## UI display
 
