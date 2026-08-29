@@ -12,8 +12,13 @@
  */
 
 import {type ChildProcess, spawn} from 'node:child_process';
-import {existsSync, mkdirSync, openSync, statSync} from 'node:fs';
-import {readFile} from 'node:fs/promises';
+import {
+	createReadStream,
+	existsSync,
+	mkdirSync,
+	openSync,
+	statSync,
+} from 'node:fs';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {formatError} from '@/utils/error-formatter';
@@ -242,15 +247,26 @@ async function status(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 	};
 }
 
+const LOG_TAIL_BYTES = 64 * 1024;
+
 async function logs(opts: DaemonCliOptions): Promise<DaemonCliResult> {
 	const logPath = getLogPath(opts.projectRoot);
 	if (!existsSync(logPath)) {
 		return {exitCode: 0, output: 'No daemon log yet.'};
 	}
 	const size = statSync(logPath).size;
-	const start = Math.max(0, size - 64 * 1024);
-	const buf = await readFile(logPath, 'utf-8');
-	return {exitCode: 0, output: buf.slice(start)};
+	const start = Math.max(0, size - LOG_TAIL_BYTES);
+	const chunks: Buffer[] = [];
+	for await (const chunk of createReadStream(logPath, {start})) {
+		chunks.push(chunk as Buffer);
+	}
+	const tail = Buffer.concat(chunks).toString('utf-8');
+	if (start === 0) {
+		return {exitCode: 0, output: tail};
+	}
+	// A byte offset can land inside a character or a line, so resume at the next line.
+	const newline = tail.indexOf('\n');
+	return {exitCode: 0, output: newline === -1 ? tail : tail.slice(newline + 1)};
 }
 
 function launchSelfHosted(projectRoot: string): ChildProcess {
