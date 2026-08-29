@@ -101,6 +101,26 @@ test('handlePaste replaces pasted text with placeholder in display value', t => 
 	t.false(result!.displayValue.includes('x'.repeat(10))); // Original text should be gone
 });
 
+test('handlePaste replaces every occurrence of repeated pasted text', t => {
+	const pastedText = 'x'.repeat(802);
+	const currentDisplayValue = `prefix ${pastedText} middle ${pastedText} suffix`;
+	const currentPlaceholderContent: Record<string, PlaceholderContent> = {};
+
+	const result = handlePaste(
+		pastedText,
+		currentDisplayValue,
+		currentPlaceholderContent,
+	);
+
+	t.truthy(result);
+	const placeholder = result!.placeholderContent['1'].displayText;
+	t.is(
+		result!.displayValue,
+		`prefix ${placeholder} middle ${placeholder} suffix`,
+	);
+	t.false(result!.displayValue.includes(pastedText));
+});
+
 test('handlePaste preserves existing pasted content', t => {
 	const existingPlaceholderContent: Record<string, PlaceholderContent> = {
 		'123': {
