@@ -41,10 +41,8 @@ import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 const MAX_COMMAND_COMPLETION_ROWS = 10;
 
-// Prompt box width bounds: scales with the terminal between these caps.
-// 40 keeps narrow terminals legible, 140 leaves a small margin on ultrawide.
+// Prompt box width floor: keeps narrow terminals legible.
 const PROMPT_WIDTH_MIN = 40;
-const PROMPT_WIDTH_MAX = 140;
 
 interface ChatProps {
 	onSubmit?: (
@@ -107,13 +105,10 @@ export default function UserInput({
 	const inputState = useInputState();
 	const uiState = useUIStateContext();
 	const {isNarrow, actualWidth, truncate} = useResponsiveTerminal();
-	// Prompt scales with the terminal — fills the row on wide screens and
-	// stays legible on narrow. Always leaves a 4-col margin so the rounded
-	// border never wraps and shatters (the bug behind the old 38-col layout).
-	const promptWidth = Math.min(
-		PROMPT_WIDTH_MAX,
-		Math.max(PROMPT_WIDTH_MIN, actualWidth - 4),
-	);
+	// Prompt spans the full terminal width at every size (minus a 4-col
+	// margin so the rounded border never wraps and shatters), floored at 40
+	// cols for legibility on tiny terminals.
+	const promptWidth = Math.max(PROMPT_WIDTH_MIN, actualWidth - 4);
 	// Must match the wrapWidth passed to TextInput below — both sides use it to
 	// decide whether Up/Down means line navigation or history.
 	const inputWrapWidth = promptWidth - 4;

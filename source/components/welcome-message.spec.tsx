@@ -87,7 +87,7 @@ test('WelcomeMessage has no hero box in narrow layout', t => {
 // Normal Terminal Tests (80 <= width < 90 still text logo per 90 threshold)
 // ============================================================================
 
-test('WelcomeMessage renders text logo for normal terminal (<90 cols)', t => {
+test('WelcomeMessage renders NC monogram at widths below 82', t => {
 	const originalColumns = process.stdout.columns;
 	process.stdout.columns = 80;
 
@@ -95,8 +95,8 @@ test('WelcomeMessage renders text logo for normal terminal (<90 cols)', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	// 80 < 90 → slick block-style logo (box-drawing glyphs), not spaced text
-	t.regex(output!, /[╭━]/);
+	// 80 < 82 → falls back to NC monogram in block font
+	t.regex(output!, /█/);
 
 	process.stdout.columns = originalColumns;
 });
@@ -239,8 +239,8 @@ test('WelcomeMessage handles boundary at width 80', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	// 80 → slick block-style logo
-	t.regex(output!, /[╭━]/);
+	// NC block monogram is identical at every width
+	t.regex(output!, /█/);
 
 	process.stdout.columns = originalColumns;
 });
@@ -253,7 +253,7 @@ test('WelcomeMessage handles boundary at width 90', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	// At 90 should switch to large art (simple)
+	// At 90 the full NANOCODER block wordmark renders (threshold is 90)
 	t.regex(output!, /[_█]/);
 
 	process.stdout.columns = originalColumns;

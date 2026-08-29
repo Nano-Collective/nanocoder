@@ -21,24 +21,21 @@ const packageJson = JSON.parse(
 	fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8'),
 ) as {version: string};
 
-// Block-style logo at every size: ASCII can't shrink, so each width tier gets
-// the largest block-family font that fits (widths measured for "NANOCODER").
-// min = glyph width + wrap margin (cfonts wraps against the real terminal width).
-const LOGO_TIERS = [
-	{min: 90, font: 'block'},
-	{min: 62, font: 'slick'},
-	{min: 50, font: 'shade'},
-] as const;
+// One block-style wordmark everywhere: the full "NANOCODER" renders in the
+// block font on terminals from 90 cols up; below that we fall back to "NC"
+// so the monogram never wraps. Same block font in both cases — just a
+// shorter glyph string on narrow screens.
+const BLOCK_NANOCODER_WIDTH = 90;
+const LOGO_FULL = 'NANOCODER';
+const LOGO_SHORT = 'NC';
+const LOGO_FONT = 'block';
 
-type LogoKind = (typeof LOGO_TIERS)[number]['font'] | 'text';
+type LogoKind = 'block';
 
 // Approximate rendered height per tier (glyph rows + cfonts blank padding),
 // used only for the 1/3-top vertical centering estimate.
 const LOGO_ROW_HEIGHTS: Record<LogoKind, number> = {
 	block: 9,
-	slick: 8,
-	shade: 9,
-	text: 1,
 };
 
 const MENU_FULL: Array<[string, string]> = [
@@ -63,11 +60,12 @@ export default memo(function WelcomeMessage() {
 	const cwd = homeRelative(process.cwd());
 	const gitStatus = getGitStatusSummarySync();
 
-	// Pick the largest block-style logo that fits; very short terminals skip it
-	// to protect the menu rows.
-	let logoKind: LogoKind | null = null;
+	// Block wordmark in every screen — full NANOCODER on wide terminals, NC
+	// monogram on narrow (same block font, just shorter string). Short
+	// terminals (rows < 16) skip it to protect the menu rows.
+	let logoText: string | null = null;
 	if (rows >= 16) {
-		logoKind = LOGO_TIERS.find(tier => actualWidth >= tier.min)?.font ?? 'text';
+		logoText = actualWidth >= BLOCK_NANOCODER_WIDTH ? LOGO_FULL : LOGO_SHORT;
 	}
 
 	let menu: Array<[string, string]> = [];
@@ -76,7 +74,7 @@ export default memo(function WelcomeMessage() {
 	}
 
 	// Vertical centering: mimic mock's 1/3 top, 2/3 bottom when tall enough
-	const logoRows = logoKind ? LOGO_ROW_HEIGHTS[logoKind] : 0;
+	const logoRows = logoText ? LOGO_ROW_HEIGHTS.block : 0;
 	const welcomeRows = 2; // Welcome + subtitle
 	const locationRows = 1;
 	const menuRows = menu.length;
@@ -128,21 +126,15 @@ export default memo(function WelcomeMessage() {
 					<Text key={`pad-${i}`}> </Text>
 				))}
 
-			{logoKind && (
+			{logoText && (
 				<Box justifyContent={justify} width={termW}>
-					{logoKind === 'text' ? (
-						<Gradient colors={[colors.primary, colors.tool]}>
-							<Text bold>N A N O C O D E R</Text>
-						</Gradient>
-					) : (
-						<Gradient colors={[colors.primary, colors.tool]}>
-							<BigText text="NANOCODER" font={logoKind} />
-						</Gradient>
-					)}
+					<Gradient colors={[colors.primary, colors.tool]}>
+						<BigText text={logoText} font={LOGO_FONT} />
+					</Gradient>
 				</Box>
 			)}
 
-			<Box justifyContent={justify} width={termW} marginTop={logoKind ? 1 : 0}>
+			<Box justifyContent={justify} width={termW} marginTop={logoText ? 1 : 0}>
 				<Text>
 					<Text color={colors.text} bold>
 						nanocoder
