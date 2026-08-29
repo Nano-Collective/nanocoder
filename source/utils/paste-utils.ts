@@ -75,9 +75,9 @@ export function handlePaste(
 	};
 
 	// For CLI paste detection, we need to replace the pasted text in the display value
-	// If the pasted text is at the end, replace it. Otherwise append the placeholder.
+	// Replace every exact occurrence, or append the placeholder if none is present.
 	const newDisplayValue = currentDisplayValue.includes(pastedText)
-		? currentDisplayValue.replace(pastedText, placeholder)
+		? currentDisplayValue.replaceAll(pastedText, placeholder)
 		: currentDisplayValue + placeholder;
 
 	return {
