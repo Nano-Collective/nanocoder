@@ -309,10 +309,6 @@ export function InteractiveApp({
 			    absorbs ALL vertical shrink — without it Yoga crushes the
 			    input box when the transcript is tall. */}
 			<Box flexDirection="column" flexShrink={0}>
-				<SessionArtifactLinks
-					sessionId={appState.currentSessionId}
-					refreshKey={artifactRefreshKey}
-				/>
 				{appState.planReviewState?.show && (
 					<PlanReviewPrompt
 						artifactPath={
@@ -449,6 +445,17 @@ export function InteractiveApp({
 							/>
 						</UIStateProvider>
 					)}
+
+				{/* Artifact shortcuts sit below the input alongside the mode
+				    indicator — everything ambient lives under the composer. The
+				    marginLeft mirrors ChatInput's own offset so the row lines up
+				    with the mode line rather than sitting one column in. */}
+				<Box marginLeft={fullscreen ? 0 : -1}>
+					<SessionArtifactLinks
+						sessionId={appState.currentSessionId}
+						refreshKey={artifactRefreshKey}
+					/>
+				</Box>
 			</Box>
 		</Box>
 	);

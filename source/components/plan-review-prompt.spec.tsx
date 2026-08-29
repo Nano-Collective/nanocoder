@@ -40,9 +40,11 @@ test('renders only the explicit execute-or-revise decisions', t => {
 	t.regex(output, /Plan ready/);
 	t.regex(output, /Yes, execute this plan/);
 	t.regex(output, /No, tell Nanocoder what to change/);
-	t.regex(output, /Executing exits Plan Mode/);
-	t.regex(output, /requesting changes keeps it active/);
-	t.notRegex(output, /Ask more/);
+	t.regex(output, /Ask me clarifying questions/);
+	// The highlighted option's own description carries the mode consequence,
+	// so there is no duplicated summary line above it.
+	t.regex(output, /Exit Plan Mode and begin implementation/);
+	t.notRegex(output, /Executing exits Plan Mode/);
 	unmount();
 });
 
@@ -54,8 +56,11 @@ test('shows the persisted plan path and terminal open hint', t => {
 	);
 	const output = lastFrame()!;
 
+	t.regex(output, /Saved plan/);
 	t.regex(output, /implementation_plan\.md/);
-	t.regex(output, /Cmd\/Ctrl\+Click to open/);
+	t.regex(output, /Cmd\/Ctrl\+click to open/);
+	// The raw path stays as the copy/paste and non-OSC-8 fallback.
+	t.regex(output, /\/tmp\/implementation_plan\.md/);
 	unmount();
 });
 

@@ -28,8 +28,10 @@ export function ArtifactLinksDisplay({
 	const {colors} = useTheme();
 	if (artifacts.length === 0) return null;
 
+	// Rendered under the composer next to the mode indicator, so the margin
+	// goes on top — it separates this row from the status line above it.
 	return (
-		<Box gap={1} marginBottom={1}>
+		<Box gap={1} marginTop={1}>
 			<Text color={colors.secondary}>Artifacts:</Text>
 			{artifacts.map(artifact => (
 				<Text key={artifact.kind} color={colors.primary} underline>

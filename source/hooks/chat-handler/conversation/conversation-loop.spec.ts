@@ -2038,3 +2038,91 @@ test.serial('processAssistantResponse - does not start request on orphaned tool 
 		getAppConfig().sessions!.maxMessages = originalMaxMessages;
 	}
 });
+
+test.serial('processAssistantResponse - a synthetic diagnostics prompt does not cancel the walkthrough', async t => {
+	// Reproduces the real approved-plan flow: the model edits files, the loop
+	// injects a synthetic user message (auto diagnostics, compaction, an
+	// empty-turn nudge), and only then does the model answer. The walkthrough
+	// requirement must survive that — it describes how the turn STARTED, so
+	// recreating it from the message tail would read the synthetic message as
+	// "the latest user message" and silently drop the requirement.
+	let chatCallCount = 0;
+	let nudge = '';
+	const client = {
+		chat: async (messages: Message[]): Promise<LLMChatResponse> => {
+			chatCallCount++;
+			if (chatCallCount === 1) {
+				// Model calls a tool, which drives the loop through its
+				// tool-execution recursion.
+				return {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: '',
+								tool_calls: [
+									{
+										id: 'edit-1',
+										function: {name: 'some_tool', arguments: {}},
+									},
+								],
+							},
+						},
+					],
+					toolsDisabled: false,
+				};
+			}
+			if (chatCallCount === 2) {
+				return {
+					choices: [
+						{
+							message: {role: 'assistant', content: 'Implementation complete.'},
+						},
+					],
+					toolsDisabled: false,
+				};
+			}
+			nudge = messages.at(-1)?.content ?? '';
+			return {
+				choices: [{message: {role: 'assistant', content: 'Walkthrough saved.'}}],
+				toolsDisabled: false,
+			};
+		},
+	};
+
+	// Mirrors the state the loop reaches after the model edits files: the
+	// post-edit diagnostics prompt is appended with role 'user', so a naive
+	// "what did the user last say" scan sees it instead of the approval.
+	const messages: Message[] = [
+		{
+			role: 'user',
+			content: '<approved_plan>Implement artifacts.</approved_plan>',
+		},
+		{
+			role: 'user',
+			content:
+				'Automatic diagnostics after the recent edits found issues. Please fix the diagnostics you introduced before finishing.\n\nPaths needing attention:\n- a.ts',
+		},
+	];
+
+	await processAssistantResponse(
+		createDefaultParams({
+			client,
+			messages,
+			// yolo so the tool auto-executes and the loop takes its
+			// tool-execution recursion, which is where the lifecycle used to be
+			// dropped.
+			developmentMode: 'yolo',
+			toolManager: createMockToolManager({
+				tools: ['some_tool', 'write_walkthrough'],
+				needsApproval: false,
+			}),
+		}),
+	);
+
+	t.is(chatCallCount, 3, 'tool turn, answer turn, then the nudged turn');
+	t.true(
+		nudge.includes('write_walkthrough'),
+		'the walkthrough nudge must still fire once the real work is done',
+	);
+});

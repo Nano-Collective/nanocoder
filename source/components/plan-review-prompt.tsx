@@ -105,7 +105,7 @@ export default function PlanReviewPrompt({
 			borderBottom={false}
 			borderLeftColor={colors.primary}
 		>
-			<Box marginBottom={1}>
+			<Box marginBottom={2}>
 				<Text color={colors.primary} bold>
 					📋 Plan ready.{' '}
 				</Text>
@@ -113,13 +113,24 @@ export default function PlanReviewPrompt({
 			</Box>
 
 			{artifactPath && (
-				<Box flexDirection="column" marginBottom={1}>
-					<Text color={colors.secondary}>Saved plan:</Text>
-					<Text wrap="wrap">{artifactPath}</Text>
-					<Text color={colors.primary} underline>
-						{createTerminalFileLink(artifactPath)}
-					</Text>
-					<Text color={colors.secondary}>Cmd/Ctrl+Click to open</Text>
+				<Box flexDirection="column" marginBottom={2}>
+					<Text color={colors.secondary}>Saved plan</Text>
+
+					{/* The link is the actionable thing, so it leads. The raw path
+					    sits below it, dimmed and separated — it is the fallback for
+					    terminals without OSC-8 hyperlinks, and for copy/paste. */}
+					<Box marginTop={1}>
+						<Text color={colors.primary} underline>
+							{createTerminalFileLink(artifactPath)}
+						</Text>
+						<Text color={colors.secondary}> · Cmd/Ctrl+click to open</Text>
+					</Box>
+
+					<Box marginTop={1}>
+						<Text color={colors.secondary} dimColor wrap="wrap">
+							{artifactPath}
+						</Text>
+					</Box>
 				</Box>
 			)}
 
@@ -129,20 +140,16 @@ export default function PlanReviewPrompt({
 				onHighlight={item => setHighlighted(item.value)}
 			/>
 
-			<Box marginTop={1}>
-				<Text color={colors.secondary}>
-					Executing exits Plan Mode; requesting changes keeps it active.
-				</Text>
-			</Box>
-
-			<Box marginTop={1}>
+			{/* The highlighted option's description already states whether the
+			    choice leaves Plan Mode, so there is no separate summary line. */}
+			<Box marginTop={1} marginBottom={1}>
 				<Text color={colors.secondary} italic wrap="wrap">
 					{activeDescription}
 				</Text>
 			</Box>
 
-			<Box marginTop={1}>
-				<Text color={colors.secondary}>
+			<Box>
+				<Text color={colors.secondary} dimColor>
 					↑/↓ to move · Enter to select · Esc to request changes
 				</Text>
 			</Box>

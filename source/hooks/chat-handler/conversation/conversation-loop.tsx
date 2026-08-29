@@ -451,6 +451,7 @@ export const processAssistantResponse = async (
 			malformedRetryCount: malformedRetryCount + 1,
 			lastToolSignature: undefined,
 			repeatedToolCallCount: 0,
+			walkthroughLifecycle,
 		});
 		return;
 	}
@@ -701,6 +702,7 @@ export const processAssistantResponse = async (
 			malformedRetryCount: 0,
 			lastToolSignature: undefined,
 			repeatedToolCallCount: 0,
+			walkthroughLifecycle,
 		});
 		return;
 	}
@@ -954,6 +956,7 @@ export const processAssistantResponse = async (
 				malformedRetryCount: 0,
 				lastToolSignature: currentToolSignature,
 				repeatedToolCallCount: currentRepeatedCount,
+				walkthroughLifecycle,
 			});
 			return;
 		}
@@ -1016,6 +1019,7 @@ export const processAssistantResponse = async (
 						compactRetryCount: compactRetryCount + 1,
 						lastToolSignature: undefined,
 						repeatedToolCallCount: 0,
+						walkthroughLifecycle,
 					});
 					return;
 				} catch (_err) {
@@ -1101,6 +1105,7 @@ export const processAssistantResponse = async (
 			malformedRetryCount: 0,
 			lastToolSignature: undefined,
 			repeatedToolCallCount: 0,
+			walkthroughLifecycle,
 		});
 		return;
 	}
