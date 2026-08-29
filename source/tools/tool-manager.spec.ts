@@ -4,6 +4,7 @@ import type {
 } from '@/types/index';
 import test from 'ava';
 import {ToolManager} from './tool-manager';
+import {getToolsForProfile} from './tool-profiles';
 
 console.log('\ntool-manager.spec.ts');
 
@@ -1044,4 +1045,45 @@ test('XML fallback - tool definitions include examples per tool', t => {
 	// Should include XML examples
 	t.true(defs.includes('**Example:**'));
 	t.true(defs.includes('```xml'));
+});
+
+// ============================================================================
+// Plan-mode write_plan injection
+// ============================================================================
+
+test('plan mode does not mutate the shared tool profile array', t => {
+	const manager = new ToolManager();
+	const before = [...getToolsForProfile('nano')];
+
+	manager.getAvailableToolNames(
+		{enabled: true, toolProfile: 'nano'} as never,
+		'plan',
+		[],
+	);
+
+	t.deepEqual(
+		getToolsForProfile('nano'),
+		before,
+		'entering plan mode must not append write_plan to the shared profile',
+	);
+	t.false(
+		manager
+			.getAvailableToolNames({enabled: true, toolProfile: 'nano'} as never)
+			.includes('write_plan'),
+		'a later profile lookup with no mode must not see write_plan',
+	);
+});
+
+test('plan mode still exposes write_plan under a slim profile', t => {
+	const manager = new ToolManager();
+
+	t.true(
+		manager
+			.getAvailableToolNames(
+				{enabled: true, toolProfile: 'nano'} as never,
+				'plan',
+				[],
+			)
+			.includes('write_plan'),
+	);
 });

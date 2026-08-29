@@ -1106,13 +1106,20 @@ export const processAssistantResponse = async (
 	}
 
 	if (validToolCalls.length === 0 && cleanedContent.trim()) {
-		const walkthroughFallback = takeWalkthroughFallback(
-			walkthroughLifecycle,
-			availableNames.includes('write_walkthrough'),
-		);
+		// Never spend an extra model turn on a walkthrough the user just
+		// cancelled out of.
+		const walkthroughFallback = controller.signal.aborted
+			? null
+			: takeWalkthroughFallback(
+					walkthroughLifecycle,
+					availableNames.includes('write_walkthrough'),
+				);
 		if (walkthroughFallback) {
 			const messagesWithFallback = [...updatedMessages, walkthroughFallback];
 			setMessages(messagesWithFallback);
+			// Lock the prior turn's live task panel into scrollback before the
+			// nudge turn starts, same as every other recursion site here.
+			await flushAll();
 			await processAssistantResponse({
 				...params,
 				abortController: controller,

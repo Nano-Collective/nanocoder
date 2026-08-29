@@ -513,6 +513,7 @@ test("keeps the pre-nudge answer as plain JSON finalText", async (t) => {
 		abortSignal: new AbortController().signal,
 		outputFormat: "json",
 		sessionId: "11111111-1111-4111-8111-111111111111",
+		enforceWalkthrough: true,
 	});
 
 	t.is(outcome.kind, "success");
@@ -1193,3 +1194,40 @@ test.serial(
 		});
 	},
 );
+
+test("plain runs do not force a walkthrough by default", async t => {
+	let callCount = 0;
+	const client = {
+		...makeFakeClient({responses: []}),
+		chat: async (): Promise<LLMChatResponse> => {
+			callCount++;
+			return {
+				choices: [
+					{message: {role: "assistant", content: "Implementation complete."}},
+				],
+			};
+		},
+	} as LLMClient;
+	const toolManager = makeFakeToolManager({
+		knownTools: new Set(["write_walkthrough"]),
+	});
+	setToolRegistryGetter(() => ({
+		write_walkthrough: (async () => "Walkthrough saved") as ToolHandler,
+	}));
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager,
+		systemMessage: SYSTEM,
+		initialMessages: [
+			{role: "user", content: "<approved_plan>Implement it.</approved_plan>"},
+		],
+		developmentMode: "yolo",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+		sessionId: "11111111-1111-4111-8111-111111111111",
+	});
+
+	t.is(outcome.kind, "success");
+	t.is(callCount, 1, "the ephemeral plain run must not spend a nudge turn");
+});

@@ -56,9 +56,10 @@ test('PlanReviewController - approval exits plan mode before executing the persi
 	t.is(controller.pendingReview, undefined);
 });
 
-test('PlanReviewController - failed approval keeps the plan available for retry', async t => {
+test('PlanReviewController - an empty plan artifact still approves against the transcript', async t => {
 	const controller = new PlanReviewController();
 	const artifactPath = '/tmp/session/implementation_plan.md';
+	const prompts: string[] = [];
 	controller.observeSessionUpdate({
 		sessionUpdate: 'tool_call_update',
 		status: 'completed',
@@ -66,15 +67,46 @@ test('PlanReviewController - failed approval keeps the plan available for retry'
 	});
 	controller.completeTurn('plan');
 
-	await t.throwsAsync(
-		controller.approve({
-			readFile: async () => '',
-			setMode: async () => {},
-			prompt: async () => {},
-		}),
-		{message: 'The approved plan artifact is missing or empty'},
-	);
-	t.deepEqual(controller.pendingReview, {artifactPath});
+	await controller.approve({
+		readFile: async () => '',
+		setMode: async () => {},
+		prompt: async message => {
+			prompts.push(message);
+		},
+	});
+
+	t.deepEqual(prompts, [
+		'The plan above is approved. Proceed with implementing it now.',
+	]);
+	t.is(controller.pendingReview, undefined);
+});
+
+test('PlanReviewController - an unreadable plan artifact still approves', async t => {
+	const controller = new PlanReviewController();
+	const prompts: string[] = [];
+	controller.observeSessionUpdate({
+		sessionUpdate: 'tool_call_update',
+		status: 'completed',
+		_meta: {
+			'nanocoder/planArtifact': {path: '/tmp/session/implementation_plan.md'},
+		},
+	});
+	controller.completeTurn('plan');
+
+	await controller.approve({
+		readFile: async () => {
+			throw new Error('ENOENT');
+		},
+		setMode: async () => {},
+		prompt: async message => {
+			prompts.push(message);
+		},
+	});
+
+	t.deepEqual(prompts, [
+		'The plan above is approved. Proceed with implementing it now.',
+	]);
+	t.is(controller.pendingReview, undefined);
 });
 
 test('PlanReviewController - prompt failure restores plan mode and keeps the plan available for retry', async t => {

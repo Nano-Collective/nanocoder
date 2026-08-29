@@ -324,6 +324,7 @@ export function InteractiveApp({
 								: undefined
 						}
 						onProceed={appHandlers.handlePlanProceed}
+						onAskMore={() => void appHandlers.handlePlanAskMore()}
 						onModify={appHandlers.handlePlanModify}
 					/>
 				)}

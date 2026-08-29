@@ -61,14 +61,20 @@ export class PlanReviewController {
 		const review = this._pendingReview;
 		if (!review) throw new Error('No implementation plan is awaiting review');
 
-		const plan = await actions.readFile(review.artifactPath);
-		if (!plan.trim()) {
-			throw new Error('The approved plan artifact is missing or empty');
+		// Mirrors source/artifacts/approved-plan.ts: an unreadable or empty
+		// artifact degrades to referring to the plan already in the transcript
+		// rather than stranding the user on an un-approvable review card.
+		let plan = '';
+		try {
+			plan = await actions.readFile(review.artifactPath);
+		} catch {
+			plan = '';
 		}
 
-		const approvedMessage =
-			'The implementation plan below is approved. Proceed with implementing it now.\n\n' +
-			`<approved_plan>\n${plan}\n</approved_plan>`;
+		const approvedMessage = plan.trim()
+			? 'The implementation plan below is approved. Proceed with implementing it now.\n\n' +
+				`<approved_plan>\n${plan}\n</approved_plan>`
+			: 'The plan above is approved. Proceed with implementing it now.';
 		await actions.setMode('normal');
 		try {
 			await actions.prompt(approvedMessage);

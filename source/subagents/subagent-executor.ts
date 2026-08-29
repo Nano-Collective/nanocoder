@@ -21,7 +21,7 @@ import {
 	updateSubagentSessionStreaming,
 } from '@/services/subagent-session-store';
 import {resolveToolApproval} from '@/tools/approval-policy';
-import type {ToolManager} from '@/tools/tool-manager';
+import {SESSION_ARTIFACT_TOOLS, type ToolManager} from '@/tools/tool-manager';
 import type {
 	AISDKCoreTool,
 	DevelopmentMode,
@@ -261,6 +261,13 @@ export class SubagentExecutor {
 
 		// Always exclude agent tool to prevent infinite recursion
 		available = available.filter(name => name !== 'agent');
+
+		// Always exclude the session-artifact tools. Subagents run with the
+		// parent's session id, so `getAllTools()` (which applies no development
+		// mode) would otherwise let a subagent overwrite the very plan, task
+		// list, or walkthrough the user is about to act on.
+		const artifactTools = new Set<string>(SESSION_ARTIFACT_TOOLS);
+		available = available.filter(name => !artifactTools.has(name));
 
 		return available;
 	}
@@ -591,6 +598,15 @@ export class SubagentExecutor {
 	): Promise<string> {
 		if (signal?.aborted) {
 			return 'Error: Execution was cancelled';
+		}
+
+		// Hard-stop the session-artifact tools at the execution boundary, not
+		// just the offered-tools list. The registry resolves a handler for every
+		// registered tool regardless of filtering, so a subagent that names one
+		// anyway would otherwise overwrite the parent session's plan, task list,
+		// or walkthrough — it runs with the parent's session id.
+		if ((SESSION_ARTIFACT_TOOLS as readonly string[]).includes(toolName)) {
+			return `Error: Tool '${toolName}' is not available to subagents`;
 		}
 
 		const toolHandler = this.toolManager.getToolHandler(toolName);

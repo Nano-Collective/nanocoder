@@ -45,3 +45,49 @@ test('approved execution messages are identified as synthetic user messages', t 
 		}),
 	);
 });
+
+const FALLBACK_MESSAGE =
+	'The plan above is approved. Proceed with implementing it now.';
+
+test('a missing plan artifact degrades instead of blocking approval', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'nanocoder-approved-plan-'));
+	const manager = new ArtifactManager(root);
+
+	try {
+		const message = await createApprovedPlanMessage(
+			'11111111-1111-4111-8111-111111111111',
+			manager,
+		);
+		t.is(message, FALLBACK_MESSAGE);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test('an empty plan artifact degrades instead of blocking approval', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'nanocoder-approved-plan-'));
+	const manager = new ArtifactManager(root);
+	const sessionId = '11111111-1111-4111-8111-111111111111';
+
+	try {
+		await manager.writeArtifact(sessionId, 'implementation_plan', '   \n');
+		t.is(await createApprovedPlanMessage(sessionId, manager), FALLBACK_MESSAGE);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test('an invalid session id degrades instead of throwing', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'nanocoder-approved-plan-'));
+	const manager = new ArtifactManager(root);
+
+	try {
+		t.is(await createApprovedPlanMessage('', manager), FALLBACK_MESSAGE);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test('the degraded approval message is still recognised as synthetic', t => {
+	t.true(isApprovedPlanMessage({role: 'user', content: FALLBACK_MESSAGE}));
+});

@@ -168,7 +168,13 @@ export class SessionManager {
 			id?: string;
 		},
 	): Promise<Session> {
-		const sessionId = sessionData.id ?? crypto.randomUUID();
+		// A caller-supplied id is used verbatim as a path segment, so validate it
+		// rather than trusting it. Anything unexpected falls back to a fresh id
+		// instead of reaching path.join().
+		const sessionId =
+			sessionData.id && isValidSessionId(sessionData.id)
+				? sessionData.id
+				: crypto.randomUUID();
 		const timestamp = new Date().toISOString();
 
 		const session: Session = {
@@ -300,6 +306,33 @@ export class SessionManager {
 			return metadata;
 		} catch (_error) {
 			return [];
+		}
+	}
+
+	/**
+	 * Delete artifact directories with no surviving session.
+	 *
+	 * Runs at startup regardless of the autosave setting. With autosave off no
+	 * session file is ever written, so nothing else would ever reclaim these
+	 * directories; with autosave on, every `/clear` retires a session id and
+	 * only the persisted ones are kept.
+	 *
+	 * Best-effort: a missing or unreadable session index means "keep nothing
+	 * known", and any failure is swallowed — reclaiming disk must never block
+	 * or crash startup.
+	 */
+	async cleanupOrphanedArtifacts(liveSessionId?: string): Promise<void> {
+		try {
+			let known: string[] = [];
+			try {
+				known = (await this.readIndex()).map(session => session.id);
+			} catch {
+				known = [];
+			}
+			if (liveSessionId) known.push(liveSessionId);
+			await this.artifacts.cleanupOrphanedSessions(known);
+		} catch {
+			// Never let artifact housekeeping break startup.
 		}
 	}
 

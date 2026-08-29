@@ -154,6 +154,7 @@ export interface AppHandlers {
 	) => Promise<void>;
 	// Plan review action bar
 	handlePlanProceed: () => Promise<void>;
+	handlePlanAskMore: () => Promise<void>;
 	handlePlanModify: () => void;
 }
 
@@ -602,35 +603,34 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 
 	// Plan review action bar handlers
 	const handlePlanProceed = React.useCallback(async () => {
-		try {
-			if (!props.currentSessionId) {
-				throw new Error('No active session for the plan artifact');
-			}
-			const approvedPlanMessage = await createApprovedPlanMessage(
-				props.currentSessionId,
-			);
-			// The effect in InteractiveApp waits for this mode change before it
-			// submits the persisted plan, preventing a stale plan-mode turn.
-			props.setPlanReviewState(null);
-			props.setDevelopmentMode('normal');
-			props.setPendingPlanProceed(approvedPlanMessage);
-		} catch (error) {
-			props.addToChatQueue(
-				<ErrorMessage
-					key={generateKey('plan-approval-error')}
-					message={`Unable to approve plan: ${formatError(error)}`}
-					hideBox={true}
-				/>,
-			);
-		}
+		// Approving must always be able to proceed. A missing session id or an
+		// unreadable plan artifact degrades to referring to the plan already in
+		// the conversation rather than leaving the user stuck on the review bar
+		// with "Yes" permanently broken.
+		const approvedPlanMessage = props.currentSessionId
+			? await createApprovedPlanMessage(props.currentSessionId)
+			: await createApprovedPlanMessage('');
+		// The effect in InteractiveApp waits for this mode change before it
+		// submits the persisted plan, preventing a stale plan-mode turn.
+		props.setPlanReviewState(null);
+		props.setDevelopmentMode('normal');
+		props.setPendingPlanProceed(approvedPlanMessage);
 	}, [
 		props.currentSessionId,
-		props.addToChatQueue,
 		props.setPlanReviewState,
 		props.setDevelopmentMode,
 		props.setPendingPlanProceed,
 		props,
 	]);
+
+	const handlePlanAskMore = React.useCallback(async () => {
+		// Hide the review bar and stay in plan mode; the model asks its questions
+		// and the user answers before a new plan is produced.
+		props.setPlanReviewState(null);
+		await props.handleChatMessage(
+			'please ask me any additional clarifying questions before proceeding',
+		);
+	}, [props.setPlanReviewState, props.handleChatMessage, props]);
 
 	const handlePlanModify = React.useCallback(() => {
 		// Return to input without changing mode so the user can request revisions.
@@ -765,6 +765,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		handleSessionCancel,
 		handleMessageSubmit,
 		handlePlanProceed,
+		handlePlanAskMore,
 		handlePlanModify,
 	};
 }

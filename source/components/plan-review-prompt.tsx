@@ -7,9 +7,10 @@
  * of hotkey labels. The highlighted action's description is shown below the
  * list; Escape takes the non-executing revision path.
  *
- *   Yes   — switch to normal mode and execute the persisted plan
- *   No    — stay in plan mode and let the user request changes
- *   [Esc] — same as No; never exits Plan Mode implicitly
+ *   Yes      — switch to normal mode and execute the persisted plan
+ *   No       — stay in plan mode and let the user request changes
+ *   Ask more — stay in plan mode and have the model ask clarifying questions
+ *   [Esc]    — same as No; never exits Plan Mode implicitly
  */
 import {basename} from 'node:path';
 import {Box, Text, useInput} from 'ink';
@@ -30,9 +31,11 @@ export interface PlanReviewPromptProps {
 	onProceed: () => void;
 	/** Stay in plan mode so the user can refine the prompt. */
 	onModify: () => void;
+	/** Stay in plan mode and ask additional clarifying questions. */
+	onAskMore: () => void;
 }
 
-type PlanAction = 'proceed' | 'modify';
+type PlanAction = 'proceed' | 'modify' | 'askMore';
 
 interface PlanOption {
 	label: string;
@@ -51,12 +54,18 @@ const OPTIONS: PlanOption[] = [
 		value: 'modify',
 		description: 'Stay in Plan Mode and revise the plan',
 	},
+	{
+		label: 'Ask me clarifying questions',
+		value: 'askMore',
+		description: 'Stay in Plan Mode and answer follow-up questions first',
+	},
 ];
 
 export default function PlanReviewPrompt({
 	artifactPath,
 	onProceed,
 	onModify,
+	onAskMore,
 }: PlanReviewPromptProps) {
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
@@ -72,6 +81,8 @@ export default function PlanReviewPrompt({
 	const handleSelect = (item: {value: PlanAction}) => {
 		if (item.value === 'proceed') {
 			onProceed();
+		} else if (item.value === 'askMore') {
+			onAskMore();
 		} else {
 			onModify();
 		}

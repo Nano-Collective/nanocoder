@@ -796,7 +796,15 @@
 		approveButton.textContent = 'Yes, execute this plan';
 		approveButton.onclick = () => {
 			removePlanReview();
+			// Show the approval as a real user turn. The extension host sends the
+			// approved-plan prompt straight through acpClient.prompt(), bypassing
+			// submitMessage(), so nothing else would put a bubble in the
+			// transcript and the turn would appear to start from nowhere.
+			appendMessage('Approved the implementation plan. Proceeding.', 'user');
+			currentTurnEl = null;
+			currentTextEl = null;
 			setProcessing(true);
+			startVisualLoader();
 			vscode.postMessage({type: 'approvePlan'});
 		};
 
@@ -1267,10 +1275,6 @@
 			}
 			return;
 		}
-
-		// Keep typed text queued in the composer while the current response is
-		// still running. The Stop button remains available for cancellation.
-		if (isProcessing) return;
 
 		// Append attached paths as context lines
 		if (attachedPaths.length > 0) {
@@ -1961,6 +1965,13 @@
 				break;
 			case 'planReviewError':
 				setProcessing(false);
+				// Surface it in the transcript too. A toast alone is easy to miss,
+				// and the approval bubble above it would otherwise sit there with
+				// no visible outcome.
+				appendMessage(
+					`Could not approve the plan: ${message.message}`,
+					'assistant',
+				);
 				break;
 			case 'artifactsUpdated':
 				renderArtifacts(message.artifacts);

@@ -129,6 +129,68 @@ export class ArtifactManager {
 		});
 	}
 
+	/**
+	 * Drop artifact directories that no live session refers to.
+	 *
+	 * Session deletion and session retention both call
+	 * `deleteSessionArtifacts`, but neither fires for a session that was never
+	 * written to disk — the common case when `sessions.autoSave` is off, and
+	 * for every `/clear`, which retires the current session id and mints a new
+	 * one. Without this sweep those directories accumulate in app data forever.
+	 *
+	 * `keep` is the set of session ids that still exist (plus the live one).
+	 * Directories younger than `minAgeMs` are spared so a session that is mid
+	 * first-autosave is never swept out from under itself.
+	 */
+	async cleanupOrphanedSessions(
+		keep: Iterable<string>,
+		minAgeMs = 24 * 60 * 60 * 1000,
+	): Promise<void> {
+		let entries: Dirent<string>[];
+		try {
+			entries = await fs.readdir(this.rootDir, {withFileTypes: true});
+		} catch (error) {
+			if (
+				error instanceof Error &&
+				'code' in error &&
+				error.code === 'ENOENT'
+			) {
+				return;
+			}
+			throw error;
+		}
+
+		const keepSet = new Set(keep);
+		const cutoff = Date.now() - minAgeMs;
+
+		for (const entry of entries) {
+			if (!entry.isDirectory() || !isValidSessionId(entry.name)) continue;
+			if (keepSet.has(entry.name)) continue;
+			const sessionDir = path.join(this.rootDir, entry.name);
+			try {
+				// An ephemeral marker means the plain-shell sweep owns this
+				// directory; leave it to `cleanupStaleEphemeralSessions`.
+				await fs.access(path.join(sessionDir, EPHEMERAL_MARKER));
+				continue;
+			} catch {
+				// No marker — this is a normal interactive session directory.
+			}
+			// minAgeMs <= 0 disables the grace period entirely. Comparing against
+			// a same-millisecond cutoff is unreliable — stat() reports sub-ms
+			// precision that Date.now() truncates — so make it an explicit case
+			// rather than a race.
+			if (minAgeMs > 0) {
+				try {
+					const stats = await fs.stat(sessionDir);
+					if (stats.mtimeMs > cutoff) continue;
+				} catch {
+					continue;
+				}
+			}
+			await this.deleteSessionArtifacts(entry.name);
+		}
+	}
+
 	async markEphemeralSession(
 		sessionId: string,
 		pid = process.pid,

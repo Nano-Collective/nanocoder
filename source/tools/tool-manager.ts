@@ -58,6 +58,19 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 };
 
 /**
+ * Session-artifact tools. These write to the *parent session's* artifact
+ * directory, so a subagent calling one would silently overwrite the plan,
+ * task list, or walkthrough the user is about to act on. Subagents converse
+ * in text and report back through their return value; they have no business
+ * owning the session's lifecycle artifacts.
+ */
+export const SESSION_ARTIFACT_TOOLS = [
+	'write_plan',
+	'write_tasks',
+	'write_walkthrough',
+] as const;
+
+/**
  * Manages built-in tools, MCP tools, and file-based custom tools.
  * Single authority for tool availability, filtering, and approval policy.
  */
@@ -184,12 +197,16 @@ export class ToolManager {
 
 		// The plan artifact is a mode capability, not a general-purpose tool.
 		// Keep it available even when a slim profile filters the normal tool set.
+		// Copy rather than push: `names` may still alias the shared, module-level
+		// profile array from getToolsForProfile(), and mutating that would leak
+		// write_plan into every later lookup of that profile for the life of the
+		// process.
 		if (
 			developmentMode === 'plan' &&
 			this.registry.hasTool('write_plan') &&
 			!names.includes('write_plan')
 		) {
-			names.push('write_plan');
+			names = [...names, 'write_plan'];
 		}
 
 		// Apply mode-based exclusions

@@ -139,3 +139,47 @@ test('lists only user-facing lifecycle artifacts in order', async t => {
 		await rm(root, {recursive: true, force: true});
 	}
 });
+
+test('cleanupOrphanedSessions reclaims directories with no surviving session', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'nanocoder-artifact-gc-'));
+	const manager = new ArtifactManager(root);
+	const kept = '11111111-1111-4111-8111-111111111111';
+	const orphan = '22222222-2222-4222-8222-222222222222';
+	const ephemeral = '33333333-3333-4333-8333-333333333333';
+
+	try {
+		await manager.writeArtifact(kept, 'implementation_plan', '# keep');
+		await manager.writeArtifact(orphan, 'implementation_plan', '# drop');
+		await manager.markEphemeralSession(ephemeral);
+		await manager.writeArtifact(ephemeral, 'implementation_plan', '# plain');
+
+		// minAgeMs 0 so the just-written directories are all eligible.
+		await manager.cleanupOrphanedSessions([kept], 0);
+
+		t.truthy(await manager.readArtifact(kept, 'implementation_plan'));
+		t.is(await manager.readArtifact(orphan, 'implementation_plan'), null);
+		t.truthy(
+			await manager.readArtifact(ephemeral, 'implementation_plan'),
+			'ephemeral plain-shell directories are left to their own sweep',
+		);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});
+
+test('cleanupOrphanedSessions spares recently touched directories', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'nanocoder-artifact-gc-'));
+	const manager = new ArtifactManager(root);
+	const recent = '44444444-4444-4444-8444-444444444444';
+
+	try {
+		await manager.writeArtifact(recent, 'implementation_plan', '# in flight');
+		await manager.cleanupOrphanedSessions([]);
+		t.truthy(
+			await manager.readArtifact(recent, 'implementation_plan'),
+			'a session mid first-autosave must not be swept',
+		);
+	} finally {
+		await rm(root, {recursive: true, force: true});
+	}
+});

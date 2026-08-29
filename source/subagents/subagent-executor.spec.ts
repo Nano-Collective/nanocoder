@@ -177,12 +177,12 @@ test.serial('executes tool calls and returns final response', async t => {
 test.serial('forwards the parent execution context to subagent tools', async t => {
 	let receivedContext: ToolExecutionContext | undefined;
 	const toolManager = createMockToolManager({
-		write_tasks: {
+		read_file: {
 			handler: async (_args, options) => {
 				receivedContext = options;
-				return 'Tasks updated';
+				return 'file contents';
 			},
-			readOnly: false,
+			readOnly: true,
 		},
 	});
 	const client = createMockClient([
@@ -190,8 +190,8 @@ test.serial('forwards the parent execution context to subagent tools', async t =
 			content: '',
 			tool_calls: [
 				{
-					id: 'tasks',
-					function: {name: 'write_tasks', arguments: '{"tasks":[]}'},
+					id: 'read',
+					function: {name: 'read_file', arguments: '{"path":"a.ts"}'},
 				},
 			],
 		},
@@ -888,4 +888,61 @@ test('without a resolver, approval falls back to the static parentMode', async t
 	}).needsApprovalForTool('execute_bash', {});
 
 	t.false(await needsApproval);
+});
+
+test.serial('subagents never receive the session-artifact tools', async t => {
+	const called: string[] = [];
+	const toolManager = createMockToolManager({
+		read_file: {
+			handler: async () => {
+				called.push('read_file');
+				return 'ok';
+			},
+			readOnly: true,
+		},
+		write_plan: {
+			handler: async () => {
+				called.push('write_plan');
+				return 'plan saved';
+			},
+			readOnly: false,
+		},
+		write_tasks: {
+			handler: async () => {
+				called.push('write_tasks');
+				return 'tasks saved';
+			},
+			readOnly: false,
+		},
+		write_walkthrough: {
+			handler: async () => {
+				called.push('write_walkthrough');
+				return 'walkthrough saved';
+			},
+			readOnly: false,
+		},
+	});
+	const client = createMockClient([
+		{
+			content: '',
+			tool_calls: [
+				{
+					id: 'plan',
+					function: {name: 'write_plan', arguments: '{"content":"clobber"}'},
+				},
+			],
+		},
+		{content: 'done'},
+	]);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	await executor.execute(
+		{subagent_type: 'explore', description: 'Try to clobber the plan'},
+		undefined,
+		0,
+		'artifact-agent',
+		{sessionId: '11111111-1111-4111-8111-111111111111'},
+	);
+
+	t.deepEqual(called, [], 'no session-artifact tool may run inside a subagent');
 });

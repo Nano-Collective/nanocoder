@@ -161,6 +161,15 @@ export function useSessionAutosave({
 				const initialized = await initPromiseRef.current;
 				if (!initialized || capturedMessages.length === 0) return;
 
+				// The walkthrough nudge is a transient in-loop protocol message. It
+				// has already done its job by the time we persist, so keep it out of
+				// the session file: a resumed session must not replay it to the user
+				// or re-send it to the model.
+				const persistedMessages = capturedMessages.filter(
+					message => !isInternalWalkthroughMessage(message),
+				);
+				if (persistedMessages.length === 0) return;
+
 				// Read the live session ID AFTER the await above. Any prior save
 				// in this chain has already called setCurrentSessionId (and updated
 				// currentSessionIdRef.current) by this point, so we correctly take
@@ -170,14 +179,14 @@ export function useSessionAutosave({
 				// Derive a human-readable title from the most recent user message.
 				// The full message array is always written - maxMessages bounds only
 				// what is sent to the model (sliced in the conversation loop).
-				const title = deriveSessionTitle(capturedMessages);
+				const title = deriveSessionTitle(persistedMessages);
 
 				if (liveSessionId) {
 					const session = await sessionManager.readSession(liveSessionId);
 					if (session) {
 						// Write the full history — no truncation.
-						session.messages = capturedMessages;
-						session.messageCount = capturedMessages.length;
+						session.messages = persistedMessages;
+						session.messageCount = persistedMessages.length;
 						// A manually-renamed title sticks — don't let the auto-derived
 						// title clobber it. Currently only the VS Code extension's
 						// rename sets this flag; the CLI's /rename command only
@@ -196,11 +205,11 @@ export function useSessionAutosave({
 						const newSession = await sessionManager.createSession({
 							id: liveSessionId,
 							title,
-							messageCount: capturedMessages.length,
+							messageCount: persistedMessages.length,
 							provider: capturedProvider,
 							model: capturedModel,
 							workingDirectory: process.cwd(),
-							messages: capturedMessages,
+							messages: persistedMessages,
 						});
 						// Update the ref immediately so any subsequent save in this
 						// chain takes the update path, not another createSession().
@@ -214,11 +223,11 @@ export function useSessionAutosave({
 					// conversation even if it's invoked several times in a row.
 					const newSession = await sessionManager.createSession({
 						title,
-						messageCount: capturedMessages.length,
+						messageCount: persistedMessages.length,
 						provider: capturedProvider,
 						model: capturedModel,
 						workingDirectory: process.cwd(),
-						messages: capturedMessages,
+						messages: persistedMessages,
 					});
 					// Update the ref immediately so any subsequent save in this
 					// chain takes the update path, not another createSession().

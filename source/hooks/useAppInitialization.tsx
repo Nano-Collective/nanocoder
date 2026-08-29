@@ -30,6 +30,7 @@ import {
 	setToolRegistryGetter,
 } from '@/message-handler';
 import {generateKey} from '@/session/key-generator';
+import {sessionManager} from '@/session/session-manager';
 import {SubagentExecutor} from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
 import {setAgentToolExecutor, setAvailableAgentNames} from '@/tools/agent-tool';
@@ -561,6 +562,12 @@ export function useAppInitialization({
 			setClient(null);
 			setCurrentModel('');
 			setCurrentProviderConfig(null);
+
+			// Reclaim artifact directories left behind by sessions that no longer
+			// exist — /clear retires a session id every time, and with autosave off
+			// no session file is ever written for the session-delete path to catch.
+			// Fire-and-forget: housekeeping must never delay or break startup.
+			void sessionManager.cleanupOrphanedArtifacts();
 
 			const newToolManager = new ToolManager();
 			const newCustomCommandLoader = new CustomCommandLoader();

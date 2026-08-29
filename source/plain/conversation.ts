@@ -40,6 +40,12 @@ export interface RunPlainConversationOptions {
 	outputFormat?: 'text' | 'json';
 	sessionId?: string;
 	workingDirectory?: string;
+	/**
+	 * Force a walkthrough after approved-plan work. Off by default: the plain
+	 * shell's artifact directory is ephemeral, so a forced walkthrough there
+	 * would cost a model turn and then be deleted unread.
+	 */
+	enforceWalkthrough?: boolean;
 }
 
 export interface PlainConversationUsage {
@@ -107,6 +113,7 @@ export async function runPlainConversation(
 		outputFormat = 'text',
 		sessionId,
 		workingDirectory = process.cwd(),
+		enforceWalkthrough = false,
 	} = options;
 
 	const isJson = outputFormat === 'json';
@@ -333,12 +340,17 @@ export async function runPlainConversation(
 					usage: getUsage(),
 				};
 			}
-			const walkthroughFallback = finalTurn
-				? null
-				: takeWalkthroughFallback(
-						walkthroughLifecycle,
-						availableNames.includes('write_walkthrough'),
-					);
+			// Only nudge when the walkthrough will actually outlive the run.
+			// `nanocoder --plain` deletes its ephemeral artifact directory on
+			// exit and reports nothing about the walkthrough, so forcing one
+			// there buys an extra model round trip for a file nobody ever reads.
+			const walkthroughFallback =
+				finalTurn || !enforceWalkthrough
+					? null
+					: takeWalkthroughFallback(
+							walkthroughLifecycle,
+							availableNames.includes('write_walkthrough'),
+						);
 			if (walkthroughFallback) {
 				finalTextBeforeWalkthroughNudge ??= accumulatedFinalText;
 				messages = [...messages, walkthroughFallback];

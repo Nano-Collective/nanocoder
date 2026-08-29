@@ -1,4 +1,5 @@
 import type {Message, ToolCall} from '@/types/core';
+import {isApprovedPlanMessage} from './approved-plan';
 
 const INTERNAL_WALKTHROUGH_PREFIX = '<nanocoder-internal-walkthrough>';
 
@@ -20,7 +21,9 @@ export function createWalkthroughLifecycle(
 		}
 	}
 	return {
-		required: latestUserMessage?.content.includes('<approved_plan>') ?? false,
+		required: latestUserMessage
+			? isApprovedPlanMessage(latestUserMessage)
+			: false,
 		written: false,
 		fallbackAttempted: false,
 	};
