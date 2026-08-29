@@ -39,6 +39,32 @@ test.serial('ping/pong round-trips through the socket', async t => {
 	}
 });
 
+test.serial('request rejects and releases the pending slot when write throws', async t => {
+	const path = await makeSocketPath();
+	const server = new DaemonIpcServer(path, {
+		listSubscriptions: () => [],
+	});
+	await server.start();
+	const client = new DaemonIpcClient(path);
+	await client.connect();
+	try {
+		const internals = client as unknown as {
+			socket: {write: (payload: string) => boolean};
+			pending: Map<number, unknown>;
+		};
+		internals.socket.write = () => {
+			throw new Error('socket already closed');
+		};
+
+		await t.throwsAsync(client.ping(), {message: 'socket already closed'});
+		t.is(internals.pending.size, 0);
+	} finally {
+		await client.disconnect();
+		await server.stop();
+		await rm(join(path, '..'), {recursive: true, force: true});
+	}
+});
+
 test.serial('listSubscriptions returns server-side list', async t => {
 	const path = await makeSocketPath();
 	const server = new DaemonIpcServer(path, {

@@ -245,9 +245,14 @@ export class DaemonIpcClient {
 		const id = this.nextId++;
 		return new Promise((resolve, reject) => {
 			this.pending.set(id, {resolve, reject});
-			this.socket?.write(
-				`${JSON.stringify({id, method, params} satisfies IpcRequest)}\n`,
-			);
+			try {
+				this.socket?.write(
+					`${JSON.stringify({id, method, params} satisfies IpcRequest)}\n`,
+				);
+			} catch (error) {
+				this.pending.delete(id);
+				reject(error instanceof Error ? error : new Error(String(error)));
+			}
 		});
 	}
 
