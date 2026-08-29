@@ -3,7 +3,12 @@ import {SubagentExecutor} from './subagent-executor.js';
 import {getModelContextLimit} from '@/models';
 import {SubagentLoader, getSubagentLoader} from './subagent-loader.js';
 import type {ToolManager} from '@/tools/tool-manager';
-import type {LLMClient, LLMChatResponse, Message} from '@/types/core';
+import type {
+	LLMClient,
+	LLMChatResponse,
+	Message,
+	ToolExecutionContext,
+} from '@/types/core';
 import {MAX_TOOL_RESULT_CHARS} from '@/constants';
 import {setGlobalToolApprovalHandler} from '@/utils/tool-approval-queue';
 
@@ -11,7 +16,17 @@ console.log('\nsubagent-executor.spec.ts');
 
 // Helper to create a mock tool manager
 function createMockToolManager(
-	tools: Record<string, {handler: (args: unknown) => Promise<string>; readOnly: boolean; needsApproval?: boolean}> = {},
+	tools: Record<
+		string,
+		{
+			handler: (
+				args: unknown,
+				options?: ToolExecutionContext,
+			) => Promise<string>;
+			readOnly: boolean;
+			needsApproval?: boolean;
+		}
+	> = {},
 ): ToolManager {
 	return {
 		getAllTools: () => {
@@ -157,6 +172,47 @@ test.serial('executes tool calls and returns final response', async t => {
 
 	t.true(result.success);
 	t.is(result.output, 'Found the file with 100 lines');
+});
+
+test.serial('forwards the parent execution context to subagent tools', async t => {
+	let receivedContext: ToolExecutionContext | undefined;
+	const toolManager = createMockToolManager({
+		write_tasks: {
+			handler: async (_args, options) => {
+				receivedContext = options;
+				return 'Tasks updated';
+			},
+			readOnly: false,
+		},
+	});
+	const client = createMockClient([
+		{
+			content: '',
+			tool_calls: [
+				{
+					id: 'tasks',
+					function: {name: 'write_tasks', arguments: '{"tasks":[]}'},
+				},
+			],
+		},
+		{content: 'done'},
+	]);
+	const executor = new SubagentExecutor(toolManager, client);
+
+	const result = await executor.execute(
+		{subagent_type: 'explore', description: 'Track the work'},
+		undefined,
+		0,
+		'context-agent',
+		{
+			sessionId: '11111111-1111-4111-8111-111111111111',
+			workingDirectory: '/workspace',
+		},
+	);
+
+	t.true(result.success);
+	t.is(receivedContext?.sessionId, '11111111-1111-4111-8111-111111111111');
+	t.is(receivedContext?.workingDirectory, '/workspace');
 });
 
 test.serial('caps tool output before the next subagent model turn', async t => {

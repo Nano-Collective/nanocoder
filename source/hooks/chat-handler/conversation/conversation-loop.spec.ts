@@ -1167,6 +1167,52 @@ test.serial('processAssistantResponse - compactRetryCount parameter is passed th
 // Conversation Complete Tests (lines 509-510)
 // ============================================================================
 
+test.serial('processAssistantResponse - nudges once for an approved plan without a walkthrough', async t => {
+	let chatCallCount = 0;
+	let nudge = '';
+	let completionCount = 0;
+	const client = {
+		chat: async (messages: Message[]): Promise<LLMChatResponse> => {
+			chatCallCount++;
+			if (chatCallCount === 2) {
+				nudge = messages.at(-1)?.content ?? '';
+			}
+			return {
+				choices: [
+					{
+						message: {
+							role: 'assistant',
+							content:
+								chatCallCount === 1 ? 'Implementation complete.' : 'Confirmed.',
+						},
+					},
+				],
+				toolsDisabled: false,
+			};
+		},
+	};
+
+	await processAssistantResponse(
+		createDefaultParams({
+			client,
+			messages: [
+				{
+					role: 'user',
+					content: '<approved_plan>Implement artifacts.</approved_plan>',
+				},
+			],
+			toolManager: createMockToolManager({tools: ['write_walkthrough']}),
+			onConversationComplete: () => {
+				completionCount++;
+			},
+		}),
+	);
+
+	t.is(chatCallCount, 2);
+	t.true(nudge.includes('write_walkthrough'));
+	t.is(completionCount, 1);
+});
+
 test.serial('processAssistantResponse - calls onConversationComplete when done', async t => {
 	let conversationCompleteCalled = false;
 

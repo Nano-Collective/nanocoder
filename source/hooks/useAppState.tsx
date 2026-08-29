@@ -1,3 +1,4 @@
+import {randomUUID} from 'node:crypto';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import type {SettingsTabId} from '@/app/components/settings-constants';
 import type {TitleShape} from '@/components/ui/styled-title';
@@ -7,6 +8,7 @@ import {defaultTheme} from '@/config/themes';
 import {resolveTune} from '@/config/tune';
 import {CustomCommandExecutor} from '@/custom-commands/executor';
 import {CustomCommandLoader} from '@/custom-commands/loader';
+import {setCliSessionId} from '@/session/cli-session-context';
 import {generateKey} from '@/session/key-generator';
 import {createTokenizer} from '@/tokenization/index.js';
 import type {Task} from '@/tools/tasks/types';
@@ -110,11 +112,13 @@ export function useAppState(
 	// plan mode completes uninterrupted. The interactive UI consumes it to show
 	// the plan review bar (reading the latest messages), then resets it.
 	const [planTurnCompleted, setPlanTurnCompleted] = useState<boolean>(false);
-	// One-shot signal: set true when the user hits Proceed on the plan review bar.
-	// The dispatch of the "implement the plan" message is deferred to an effect
+	// One-shot approved-plan message created when the user hits Proceed.
+	// Dispatch is deferred to an effect
 	// that waits for developmentMode to become 'normal', so the executing turn
 	// runs with normal-mode tools/prompt instead of the stale plan-mode closures.
-	const [pendingPlanProceed, setPendingPlanProceed] = useState<boolean>(false);
+	const [pendingPlanProceed, setPendingPlanProceed] = useState<string | null>(
+		null,
+	);
 
 	// Cancellation state
 	const [abortController, setAbortController] =
@@ -128,7 +132,23 @@ export function useAppState(
 		currentMessageCount: number;
 	} | null>(null);
 	const [showAllSessions, setShowAllSessions] = useState<boolean>(false);
-	const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+	const [currentSessionId, setCurrentSessionIdState] = useState<string | null>(
+		null,
+	);
+	const currentSessionIdRef = useRef<string | null>(null);
+	const setCurrentSessionId = useCallback((value: string | null) => {
+		currentSessionIdRef.current = value;
+		setCliSessionId(value);
+		setCurrentSessionIdState(value);
+	}, []);
+	const ensureCurrentSessionId = useCallback((): string => {
+		if (currentSessionIdRef.current) return currentSessionIdRef.current;
+		const id = randomUUID();
+		currentSessionIdRef.current = id;
+		setCliSessionId(id);
+		setCurrentSessionIdState(id);
+		return id;
+	}, []);
 	const [sessionName, setSessionName] = useState<string>('');
 	const [isToolConfirmationMode, setIsToolConfirmationMode] =
 		useState<boolean>(false);
@@ -362,6 +382,7 @@ export function useAppState(
 		checkpointLoadData,
 		showAllSessions,
 		currentSessionId,
+		ensureCurrentSessionId,
 		sessionName,
 		isToolConfirmationMode,
 		isToolExecuting,

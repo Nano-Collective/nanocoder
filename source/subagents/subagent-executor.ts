@@ -28,6 +28,7 @@ import type {
 	LLMClient,
 	Message,
 	ToolCall,
+	ToolExecutionContext,
 } from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
 import {signalToolApproval} from '@/utils/tool-approval-queue';
@@ -115,6 +116,7 @@ export class SubagentExecutor {
 		signal?: AbortSignal,
 		depth = 0,
 		agentId?: string,
+		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 	): Promise<SubagentResult> {
 		const startTime = Date.now();
 
@@ -167,6 +169,7 @@ export class SubagentExecutor {
 					config,
 					signal,
 					agentId,
+					executionContext,
 				);
 
 				// Read final token count from the correct progress source
@@ -379,6 +382,7 @@ export class SubagentExecutor {
 		config: SubagentConfigWithSource,
 		signal?: AbortSignal,
 		agentId?: string,
+		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 	): Promise<string> {
 		let iterations = 0;
 		let totalToolCalls = 0;
@@ -535,6 +539,7 @@ export class SubagentExecutor {
 					toolCall.id,
 					config,
 					signal,
+					executionContext,
 				);
 
 				// Count tokens from tool results
@@ -582,6 +587,7 @@ export class SubagentExecutor {
 		toolCallId: string,
 		config: SubagentConfigWithSource,
 		signal?: AbortSignal,
+		executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 	): Promise<string> {
 		if (signal?.aborted) {
 			return 'Error: Execution was cancelled';
@@ -619,7 +625,10 @@ export class SubagentExecutor {
 
 		try {
 			const parsedArgs = parseToolArguments(rawArguments);
-			const result = await toolHandler(parsedArgs);
+			const result = await toolHandler(parsedArgs, {
+				...executionContext,
+				abortSignal: signal,
+			});
 			// Subagents converse in text, so collapse structured output to its
 			// text representation.
 			const content = typeof result === 'string' ? result : result.llmContent;

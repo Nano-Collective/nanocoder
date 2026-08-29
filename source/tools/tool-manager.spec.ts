@@ -735,9 +735,9 @@ test('getAvailableToolNames - plan mode excludes mutation tools', t => {
 // in plan mode — so a newly-added mutating tool can't silently leak in. agent
 // and ask_user are the deliberate non-readOnly exceptions (delegation / asking
 // the user are themselves read-only-ish in plan).
-test('plan mode hides every mutating built-in tool (except agent/ask_user)', t => {
+test('plan mode hides every mutating built-in tool except its safe interaction and artifact tools', t => {
 	const manager = new ToolManager();
-	const allowedNonReadOnly = new Set(['agent', 'ask_user']);
+	const allowedNonReadOnly = new Set(['agent', 'ask_user', 'write_plan']);
 	const planTools = new Set(manager.getAvailableToolNames(undefined, 'plan'));
 
 	for (const name of manager.getToolNames()) {
@@ -755,7 +755,14 @@ test('getAvailableToolNames - plan + minimal excludes mutation tools from minima
 	const manager = new ToolManager();
 	const result = manager.getAvailableToolNames({enabled: true, toolProfile: 'minimal', aggressiveCompact: false}, 'plan');
 	// Plan mode excludes write_file, string_replace, execute_bash from minimal
-	t.deepEqual(result, ['read_file', 'find_files', 'search_file_contents', 'list_directory', 'agent']);
+	t.deepEqual(result, [
+		'read_file',
+		'find_files',
+		'search_file_contents',
+		'list_directory',
+		'agent',
+		'write_plan',
+	]);
 });
 
 // ============================================================================
@@ -821,7 +828,7 @@ test('getAvailableToolNames - disabledTools layered with plan mode exclusion', t
 test('getAvailableToolNames - empty disabledTools is a no-op', t => {
 	const manager = new ToolManager();
 	const baseline = manager.getAvailableToolNames(undefined, 'normal', []);
-	const expected = manager.getToolNames();
+	const expected = manager.getToolNames().filter(name => name !== 'write_plan');
 	t.deepEqual(baseline.sort(), [...expected].sort());
 });
 

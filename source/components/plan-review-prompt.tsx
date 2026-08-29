@@ -5,31 +5,34 @@
  * up/down/Enter SelectInput pattern as the rest of the app (tool confirmation,
  * selectors) so it stays readable on narrow terminals instead of wrapping a row
  * of hotkey labels. The highlighted action's description is shown below the
- * list; Escape dismisses.
+ * list; Escape takes the non-executing revision path.
  *
- *   Proceed  — switch to normal mode and execute the plan
- *   Modify   — stay in plan mode, let the user refine their request
- *   Ask more — ask additional clarifying questions
- *   [Esc]    — dismiss the prompt, do nothing
+ *   Yes   — switch to normal mode and execute the persisted plan
+ *   No    — stay in plan mode and let the user request changes
+ *   [Esc] — same as No; never exits Plan Mode implicitly
  */
+import {basename} from 'node:path';
 import {Box, Text, useInput} from 'ink';
 import {useState} from 'react';
 import {StyledSelectInput} from '@/components/ui/styled-select-input';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
+import {createTerminalFileLink as createFileLink} from '@/utils/terminal-file-link';
+
+export function createTerminalFileLink(filePath: string): string {
+	return createFileLink(filePath, `Open ${basename(filePath)}`);
+}
 
 export interface PlanReviewPromptProps {
+	/** Absolute path of the persisted implementation plan. */
+	artifactPath?: string;
 	/** Switch to normal mode and execute the plan. */
 	onProceed: () => void;
 	/** Stay in plan mode so the user can refine the prompt. */
 	onModify: () => void;
-	/** Ask additional clarifying questions. */
-	onAskMore: () => void;
-	/** Dismiss the prompt without any action. */
-	onDismiss: () => void;
 }
 
-type PlanAction = 'proceed' | 'modify' | 'askMore';
+type PlanAction = 'proceed' | 'modify';
 
 interface PlanOption {
 	label: string;
@@ -39,46 +42,38 @@ interface PlanOption {
 
 const OPTIONS: PlanOption[] = [
 	{
-		label: 'Proceed',
+		label: 'Yes, execute this plan',
 		value: 'proceed',
-		description: 'Switch to normal mode and execute the plan',
+		description: 'Exit Plan Mode and begin implementation',
 	},
 	{
-		label: 'Modify',
+		label: 'No, tell Nanocoder what to change',
 		value: 'modify',
-		description: 'Refine your request and re-plan',
-	},
-	{
-		label: 'Ask more',
-		value: 'askMore',
-		description: 'Answer additional clarifying questions',
+		description: 'Stay in Plan Mode and revise the plan',
 	},
 ];
 
 export default function PlanReviewPrompt({
+	artifactPath,
 	onProceed,
 	onModify,
-	onAskMore,
-	onDismiss,
 }: PlanReviewPromptProps) {
 	const {colors} = useTheme();
 	const boxWidth = useTerminalWidth();
 	const [highlighted, setHighlighted] = useState<PlanAction>('proceed');
 
-	// SelectInput owns up/down/Enter. We only handle Escape (dismiss).
+	// SelectInput owns up/down/Enter. Escape is the safe, non-executing path.
 	useInput((_input, key) => {
 		if (key.escape) {
-			onDismiss();
+			onModify();
 		}
 	});
 
 	const handleSelect = (item: {value: PlanAction}) => {
 		if (item.value === 'proceed') {
 			onProceed();
-		} else if (item.value === 'modify') {
-			onModify();
 		} else {
-			onAskMore();
+			onModify();
 		}
 	};
 
@@ -106,11 +101,28 @@ export default function PlanReviewPrompt({
 				<Text color={colors.secondary}>What would you like to do?</Text>
 			</Box>
 
+			{artifactPath && (
+				<Box flexDirection="column" marginBottom={1}>
+					<Text color={colors.secondary}>Saved plan:</Text>
+					<Text wrap="wrap">{artifactPath}</Text>
+					<Text color={colors.primary} underline>
+						{createTerminalFileLink(artifactPath)}
+					</Text>
+					<Text color={colors.secondary}>Cmd/Ctrl+Click to open</Text>
+				</Box>
+			)}
+
 			<StyledSelectInput
 				items={OPTIONS}
 				onSelect={handleSelect}
 				onHighlight={item => setHighlighted(item.value)}
 			/>
+
+			<Box marginTop={1}>
+				<Text color={colors.secondary}>
+					Executing exits Plan Mode; requesting changes keeps it active.
+				</Text>
+			</Box>
 
 			<Box marginTop={1}>
 				<Text color={colors.secondary} italic wrap="wrap">
@@ -120,7 +132,7 @@ export default function PlanReviewPrompt({
 
 			<Box marginTop={1}>
 				<Text color={colors.secondary}>
-					↑/↓ to move · Enter to select · Esc to dismiss
+					↑/↓ to move · Enter to select · Esc to request changes
 				</Text>
 			</Box>
 		</Box>

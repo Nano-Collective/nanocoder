@@ -5,6 +5,7 @@ import {
 	createClearMessagesHandler,
 	handleMessageSubmission,
 } from '@/app/utils/app-util';
+import {createApprovedPlanMessage} from '@/artifacts/approved-plan';
 import {
 	ErrorMessage,
 	SuccessMessage,
@@ -27,6 +28,7 @@ import {
 	type GitStatusSummary,
 	getGitStatusSummarySync,
 } from '@/tools/git/utils';
+import {loadTasks} from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
 import type {
 	CheckpointListItem,
@@ -66,6 +68,8 @@ interface UseAppHandlersProps {
 	customCommandCache: Map<string, CustomCommand>;
 	customCommandLoader: CustomCommandLoader | null;
 	customCommandExecutor: CustomCommandExecutor | null;
+	currentSessionId: string | null;
+	ensureCurrentSessionId: () => string;
 
 	// Callbacks
 	onClearCounterIncrement?: () => void;
@@ -94,7 +98,7 @@ interface UseAppHandlersProps {
 	setPlanReviewState: (
 		value: {show: boolean; originalMessage: string} | null,
 	) => void;
-	setPendingPlanProceed: (value: boolean) => void;
+	setPendingPlanProceed: (value: string | null) => void;
 
 	// Callbacks
 	addToChatQueue: (component: React.ReactNode) => void;
@@ -149,8 +153,7 @@ export interface AppHandlers {
 		images?: ImageAttachment[],
 	) => Promise<void>;
 	// Plan review action bar
-	handlePlanProceed: () => void;
-	handlePlanAskMore: () => Promise<void>;
+	handlePlanProceed: () => Promise<void>;
 	handlePlanModify: () => void;
 }
 
@@ -531,6 +534,9 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			props.setCurrentModel(session.model);
 			props.setCurrentSessionId(session.id);
 			setKeyGeneratorSessionId(session.id);
+			void loadTasks(session.id).then(tasks => {
+				props.setLiveTaskList(tasks.length > 0 ? tasks : null);
+			});
 			// Replay the persisted conversation into scrollback so the user can see
 			// what they resumed (prompts, assistant replies, tool activity) instead
 			// of an empty screen with only a success line.
@@ -595,37 +601,48 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	}, [props.setActiveMode, props]);
 
 	// Plan review action bar handlers
-	const handlePlanProceed = React.useCallback(() => {
-		// Hide the review bar and switch to normal mode. The actual "implement the
-		// plan" message is dispatched by an effect once developmentMode has settled
-		// to 'normal' (see InteractiveApp) — dispatching here would run the turn
-		// with the stale plan-mode system prompt and tools. We deliberately do NOT
-		// echo the user's last message: the plan is already in the conversation, and
-		// after a Modify/clarify round the last message is a follow-up question, not
-		// the original request.
-		props.setPlanReviewState(null);
-		props.setDevelopmentMode('normal');
-		props.setPendingPlanProceed(true);
+	const handlePlanProceed = React.useCallback(async () => {
+		try {
+			if (!props.currentSessionId) {
+				throw new Error('No active session for the plan artifact');
+			}
+			const approvedPlanMessage = await createApprovedPlanMessage(
+				props.currentSessionId,
+			);
+			// The effect in InteractiveApp waits for this mode change before it
+			// submits the persisted plan, preventing a stale plan-mode turn.
+			props.setPlanReviewState(null);
+			props.setDevelopmentMode('normal');
+			props.setPendingPlanProceed(approvedPlanMessage);
+		} catch (error) {
+			props.addToChatQueue(
+				<ErrorMessage
+					key={generateKey('plan-approval-error')}
+					message={`Unable to approve plan: ${formatError(error)}`}
+					hideBox={true}
+				/>,
+			);
+		}
 	}, [
+		props.currentSessionId,
+		props.addToChatQueue,
 		props.setPlanReviewState,
 		props.setDevelopmentMode,
 		props.setPendingPlanProceed,
 		props,
 	]);
 
-	const handlePlanAskMore = React.useCallback(async () => {
-		// Hide the review bar
-		props.setPlanReviewState(null);
-		// Stay in plan mode and ask the model to ask additional questions
-		await props.handleChatMessage(
-			'please ask me any additional clarifying questions before proceeding',
-		);
-	}, [props.setPlanReviewState, props.handleChatMessage, props]);
-
 	const handlePlanModify = React.useCallback(() => {
-		// Just dismiss the bar — the user will edit and re-submit
+		// Return to input without changing mode so the user can request revisions.
 		props.setPlanReviewState(null);
-	}, [props.setPlanReviewState, props]);
+		props.addToChatQueue(
+			<SuccessMessage
+				key={generateKey('plan-revision-request')}
+				message="Plan Mode remains active. Tell Nanocoder what to change."
+				hideBox={true}
+			/>,
+		);
+	}, [props.setPlanReviewState, props.addToChatQueue, props]);
 
 	// Message submit handler
 	const handleMessageSubmit = React.useCallback(
@@ -634,6 +651,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			displayValue?: string,
 			images?: ImageAttachment[],
 		) => {
+			props.ensureCurrentSessionId();
 			// Reset conversation completion flag when starting a new message
 			props.setIsConversationComplete(false);
 
@@ -747,7 +765,6 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		handleSessionCancel,
 		handleMessageSubmit,
 		handlePlanProceed,
-		handlePlanAskMore,
 		handlePlanModify,
 	};
 }
