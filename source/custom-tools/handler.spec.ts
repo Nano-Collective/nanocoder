@@ -1,6 +1,6 @@
-import {mkdirSync, rmSync} from 'node:fs';
+import {mkdirSync, rmSync, symlinkSync} from 'node:fs';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {join, resolve} from 'node:path';
 import test from 'ava';
 import {buildHandler, expandVars, mergeEnv, resolveCwd, runScript} from './handler';
 import type {CustomToolMetadata} from '@/types/custom-tools';
@@ -64,6 +64,54 @@ test('resolveCwd handles missing paths by falling back to projectRoot', t => {
 	const projectRoot = '/tmp';
 	t.is(resolveCwd('/definitely/not/a/path/abc123', projectRoot), projectRoot);
 	t.is(resolveCwd(undefined, projectRoot), projectRoot);
+});
+
+test('resolveCwd keeps an in-project relative directory', t => {
+	const root = join(tmpdir(), `nanocoder-custom-tools-cwd-in-${Date.now()}`);
+	mkdirSync(join(root, 'scripts'), {recursive: true});
+	t.teardown(() => rmSync(root, {recursive: true, force: true}));
+	t.is(resolveCwd('./scripts', root), resolve(root, 'scripts'));
+});
+
+test('resolveCwd falls back when cwd is a symlink out of the project', t => {
+	const root = join(tmpdir(), `nanocoder-custom-tools-cwd-link-${Date.now()}`);
+	const outside = join(tmpdir(), `nanocoder-custom-tools-cwd-out-${Date.now()}`);
+	mkdirSync(root);
+	mkdirSync(outside);
+	t.teardown(() => {
+		rmSync(root, {recursive: true, force: true});
+		rmSync(outside, {recursive: true, force: true});
+	});
+	symlinkSync(outside, join(root, 'scripts'));
+	t.is(resolveCwd('./scripts', root), root);
+});
+
+test('resolveCwd falls back for an absolute path outside the project', t => {
+	const root = join(tmpdir(), `nanocoder-custom-tools-cwd-root-${Date.now()}`);
+	const outside = join(tmpdir(), `nanocoder-custom-tools-cwd-abs-${Date.now()}`);
+	mkdirSync(root);
+	mkdirSync(outside);
+	t.teardown(() => {
+		rmSync(root, {recursive: true, force: true});
+		rmSync(outside, {recursive: true, force: true});
+	});
+	t.is(resolveCwd(outside, root), root);
+});
+
+test('resolveCwd falls back for ${HOME} outside the project', t => {
+	const root = join(tmpdir(), `nanocoder-custom-tools-cwd-home-root-${Date.now()}`);
+	const fakeHome = join(tmpdir(), `nanocoder-custom-tools-home-${Date.now()}`);
+	mkdirSync(root);
+	mkdirSync(fakeHome);
+	const prev = process.env.HOME;
+	t.teardown(() => {
+		rmSync(root, {recursive: true, force: true});
+		rmSync(fakeHome, {recursive: true, force: true});
+		if (prev === undefined) delete process.env.HOME;
+		else process.env.HOME = prev;
+	});
+	process.env.HOME = fakeHome;
+	t.is(resolveCwd('${HOME}', root), root);
 });
 
 test('runScript: captures stdout', async t => {
