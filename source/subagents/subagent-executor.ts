@@ -8,6 +8,10 @@
 import {createLLMClient} from '@/client-factory';
 import {getAppConfig} from '@/config/index';
 import {
+	appendPostToolUseOutput,
+	runLifecycleHooks,
+} from '@/services/lifecycle-hooks';
+import {
 	appendSubagentTool,
 	getSubagentProgress,
 	subagentProgress,
@@ -619,11 +623,28 @@ export class SubagentExecutor {
 
 		try {
 			const parsedArgs = parseToolArguments(rawArguments);
+
+			// Subagents run their own loop rather than going through
+			// processToolUse, so the lifecycle gate has to be applied here too —
+			// a policy hook must hold for delegated work as much as for the main
+			// conversation.
+			const gate = await runLifecycleHooks('pre-tool-use', {
+				toolName,
+				toolArgs: parsedArgs,
+			});
+			if (gate.blocked) {
+				return `Error: ${gate.reason}`;
+			}
+
 			const result = await toolHandler(parsedArgs);
 			// Subagents converse in text, so collapse structured output to its
 			// text representation.
 			const content = typeof result === 'string' ? result : result.llmContent;
-			return truncateToolResult(content);
+			return appendPostToolUseOutput(
+				toolName,
+				parsedArgs,
+				truncateToolResult(content),
+			);
 		} catch (error) {
 			// Handler validation failures surface here too (the handler is
 			// validated), formatted with any structured detail.

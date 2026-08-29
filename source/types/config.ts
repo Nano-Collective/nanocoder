@@ -129,6 +129,39 @@ export interface NotificationsConfig {
 	};
 }
 
+/**
+ * Points in the agent lifecycle a user-defined shell command can be attached
+ * to. `pre-tool-use` is the only vetoing point: a non-zero exit denies the
+ * tool call and its stdout is handed back to the model as the reason.
+ */
+export const HOOK_EVENTS = [
+	'session-start',
+	'session-end',
+	'user-prompt-submit',
+	'pre-tool-use',
+	'post-tool-use',
+	'pre-compact',
+] as const;
+
+export type HookEvent = (typeof HOOK_EVENTS)[number];
+
+// A single lifecycle hook: one shell command, optionally scoped to a set of
+// tools (tool events only) and with its own timeout.
+export interface HookDefinition {
+	// Shell command to run. Receives hook context via NANOCODER_* env vars.
+	command: string;
+	// Tool names this hook applies to. Omitted means "every tool".
+	// Ignored by non-tool events.
+	matchTools?: string[];
+	// Milliseconds before the hook is killed. Defaults to 30s.
+	// A timed-out hook never blocks — only a deliberate non-zero exit does.
+	timeout?: number;
+	// Optional label used in transcripts and /doctor instead of the command.
+	name?: string;
+}
+
+export type HooksConfig = Partial<Record<HookEvent, HookDefinition[]>>;
+
 // Note: temperature is intentionally excluded from this interface.
 // It cannot be applied during a mode switch without proper integration into
 // the tune/ModelParameters pipeline (tune.ts). Tracked as a follow-up.
@@ -189,6 +222,11 @@ export interface AppConfig {
 
 	// Custom system prompt — replaces or extends the built-in prompt
 	systemPrompt?: SystemPromptConfig;
+
+	// Lifecycle hooks — shell commands run at fixed points in the agent loop.
+	// Project-local config, so it carries the same code-execution weight as
+	// `mcpServers`, gated by the same directory-trust prompt.
+	hooks?: HooksConfig;
 
 	// Nanocoder-specific tool configurations
 	nanocoderTools?: {

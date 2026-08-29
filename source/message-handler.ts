@@ -1,4 +1,8 @@
 import type {CustomCommandLoader} from '@/custom-commands/loader';
+import {
+	appendPostToolUseOutput,
+	runLifecycleHooks,
+} from '@/services/lifecycle-hooks';
 import type {ToolManager} from '@/tools/tool-manager';
 import type {ToolCall, ToolHandler, ToolResult} from '@/types/index';
 import {parseToolArguments} from '@/utils/tool-args-parser';
@@ -67,30 +71,51 @@ export async function processToolUse(
 			toolCall.function.arguments,
 			{strict: true},
 		);
-		const result = await handler(parsedArgs, options);
-		// Handlers may return a plain string or structured output. Only an
-		// object carrying `llmContent` is treated as structured; anything else
-		// (string, or a legacy undefined) passes through as the content.
-		if (result && typeof result === 'object' && 'llmContent' in result) {
+
+		// Lifecycle gate: a pre-tool-use hook that exits non-zero denies the
+		// call outright, and its output goes back to the model as the reason so
+		// it can adapt instead of retrying blindly.
+		const gate = await runLifecycleHooks('pre-tool-use', {
+			toolName: toolCall.function.name,
+			toolArgs: parsedArgs,
+		});
+		if (gate.blocked) {
 			return {
 				tool_call_id: toolCall.id,
 				role: 'tool',
 				name: toolCall.function.name,
-				content:
-					typeof result.llmContent === 'string'
-						? truncateToolResult(result.llmContent)
-						: result.llmContent,
-				structuredContent: result.structured,
+				content: truncateToolResult(`Error: ${gate.reason}`),
+				isError: true,
 			};
 		}
+
+		const result = await handler(parsedArgs, options);
+		// Handlers may return a plain string or structured output. Only an
+		// object carrying `llmContent` is treated as structured; anything else
+		// (string, or a legacy undefined) passes through as the content.
+		const isStructured =
+			result && typeof result === 'object' && 'llmContent' in result;
+		const rawContent = isStructured ? result.llmContent : result;
+		const content =
+			typeof rawContent === 'string'
+				? truncateToolResult(rawContent)
+				: (rawContent as string);
+
 		return {
 			tool_call_id: toolCall.id,
 			role: 'tool',
 			name: toolCall.function.name,
+			// Only string content is extended; a structured payload passes
+			// through untouched.
 			content:
-				typeof result === 'string'
-					? truncateToolResult(result)
-					: (result as string),
+				typeof content === 'string'
+					? await appendPostToolUseOutput(
+							toolCall.function.name,
+							parsedArgs,
+							content,
+						)
+					: content,
+			...(isStructured ? {structuredContent: result.structured} : {}),
 		};
 	} catch (error) {
 		// Convert exceptions (including validation failures thrown by the

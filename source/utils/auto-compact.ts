@@ -1,4 +1,5 @@
 import {getModelContextLimit, getSessionContextLimit} from '@/models/index';
+import {runLifecycleHooks} from '@/services/lifecycle-hooks';
 import {createTokenizer} from '@/tokenization/index';
 import type {CompressionMode, CompressionStrategy} from '@/types/config';
 import type {AISDKCoreTool, LLMClient, Message} from '@/types/core';
@@ -152,6 +153,11 @@ export async function performAutoCompact(
 		if (usagePercentage < threshold) {
 			return null;
 		}
+
+		// Last chance for a hook to see the pre-compaction conversation (e.g.
+		// archive it). Observe-only: pre-compact cannot veto compaction, since
+		// refusing it would leave the context over the model's limit.
+		await runLifecycleHooks('pre-compact', {messageCount: messages.length});
 
 		compressionBackup.storeBackup(messages);
 

@@ -29,6 +29,10 @@ import {
 	setToolManagerGetter,
 	setToolRegistryGetter,
 } from '@/message-handler';
+import {
+	addPendingHookContext,
+	runLifecycleHooks,
+} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
 import {SubagentExecutor} from '@/subagents/subagent-executor';
 import {getSubagentLoader} from '@/subagents/subagent-loader';
@@ -45,6 +49,8 @@ import type {MCPInitResult, UpdateInfo, UserPreferences} from '@/types/index';
 import {setAvailableSubagents} from '@/utils/prompt-processor';
 import {getShutdownManager} from '@/utils/shutdown';
 import {checkForUpdates} from '@/utils/update-checker';
+
+const SESSION_END_HOOK_HANDLER = 'lifecycle-hooks:session-end';
 
 interface UseAppInitializationProps {
 	setClient: (client: LLMClient | null) => void;
@@ -592,6 +598,22 @@ export function useAppInitialization({
 			setCommandLoaderGetter(() => newCustomCommandLoader);
 
 			commandRegistry.registerLazy(lazyCommands);
+
+			// Lifecycle hooks: session-start output is buffered as context for the
+			// next prompt (so `git log -5` reaches the model without the user
+			// asking), and session-end runs through the shutdown manager at
+			// priority -5 — after the session autosave flush (-10), before the
+			// TUI teardown (0), while the process is still fully alive.
+			getShutdownManager().register({
+				name: SESSION_END_HOOK_HANDLER,
+				priority: -5,
+				handler: async () => {
+					await runLifecycleHooks('session-end');
+				},
+			});
+			void runLifecycleHooks('session-start').then(({output}) => {
+				if (output) addPendingHookContext(output);
+			});
 
 			// === CRITICAL PATH ===
 			// LLM client + subagents are independent — run in parallel.

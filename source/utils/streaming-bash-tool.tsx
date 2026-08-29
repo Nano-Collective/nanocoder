@@ -1,6 +1,10 @@
 import React from 'react';
 import BashProgress from '@/components/bash-progress';
 import type {BashExecutionState} from '@/services/bash-executor';
+import {
+	appendPostToolUseOutput,
+	runLifecycleHooks,
+} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
 import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
 import type {ToolManager} from '@/tools/tool-manager';
@@ -56,6 +60,27 @@ export async function runStreamingBashTool(
 		};
 	}
 
+	// This path bypasses processToolUse (and therefore its hook gate), so the
+	// lifecycle hooks have to run here too — otherwise a policy hook on
+	// execute_bash would be silently skipped for the interactive TUI, which is
+	// exactly where it matters most.
+	const gate = await runLifecycleHooks('pre-tool-use', {
+		toolName: toolCall.function.name,
+		toolArgs: parsedArgs,
+	});
+	if (gate.blocked) {
+		setLiveComponent(null);
+		return {
+			toolCall,
+			result: {
+				tool_call_id: toolCall.id,
+				role: 'tool' as const,
+				name: toolCall.function.name,
+				content: `Error: ${gate.reason}`,
+			},
+		};
+	}
+
 	const commandStr = parsedArgs.command as string;
 	const {executionId, promise} = executeBashCommand(commandStr, {signal});
 	setLiveComponent(
@@ -70,13 +95,19 @@ export async function runStreamingBashTool(
 	const bashState = await promise;
 	setLiveComponent(null);
 
+	const content = await appendPostToolUseOutput(
+		toolCall.function.name,
+		parsedArgs,
+		formatBashResultForLLM(bashState),
+	);
+
 	return {
 		toolCall,
 		result: {
 			tool_call_id: toolCall.id,
 			role: 'tool' as const,
 			name: toolCall.function.name,
-			content: formatBashResultForLLM(bashState),
+			content,
 		},
 		bashState,
 	};

@@ -26,6 +26,10 @@ function makeFakeShutdownManager(captured: CapturedShutdown) {
 		gracefulShutdown: async (code: number) => {
 			captured.code = code;
 		},
+		// runPlainShell registers its session-end lifecycle hook here; the fake
+		// only has to accept the registration, never run it.
+		register: () => undefined,
+		unregister: () => undefined,
 	});
 }
 

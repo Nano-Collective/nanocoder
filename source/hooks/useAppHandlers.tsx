@@ -18,6 +18,10 @@ import {CustomCommandLoader} from '@/custom-commands/loader';
 import {getModelContextLimit} from '@/models/index';
 import {bashExecutor} from '@/services/bash-executor';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {
+	runLifecycleHooks,
+	takePendingHookContext,
+} from '@/services/lifecycle-hooks';
 import {generateKey, setKeyGeneratorSessionId} from '@/session/key-generator';
 import {buildSessionHistoryComponents} from '@/session/session-history-renderer';
 import type {Session} from '@/session/session-manager';
@@ -641,7 +645,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			// The VS Code editor pill is appended at the end of the message
 			// (\n\n[@…]<!--vscode-context-->…<!--/vscode-context-->); strip it
 			// so it doesn't leak into the parsed args.
-			const commandArgs = message.startsWith('/')
+			const isSlashCommand = message.startsWith('/');
+			const commandArgs = isSlashCommand
 				? message
 						.replace(
 							/\n\n\[@[^\]]+\]<!--vscode-context-->[\s\S]*?<!--\/vscode-context-->\s*$/,
@@ -653,8 +658,38 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 						.slice(1)
 				: undefined;
 
+			// user-prompt-submit hooks gate chat prompts only. Slash commands are
+			// local UI actions, and prepending context to one would break its
+			// argument parsing.
+			let submittedMessage = message;
+			if (!isSlashCommand) {
+				const gate = await runLifecycleHooks('user-prompt-submit', {
+					prompt: message,
+				});
+				if (gate.blocked) {
+					props.addToChatQueue(
+						<ErrorMessage
+							key={generateKey('hook-blocked-prompt')}
+							message={gate.reason ?? 'Prompt blocked by a hook.'}
+							hideBox={true}
+						/>,
+					);
+					props.setIsConversationComplete(true);
+					return;
+				}
+
+				// Fold in whatever session-start left buffered plus this hook's own
+				// stdout. displayValue keeps the user's original text on screen.
+				const injected = [takePendingHookContext(), gate.output]
+					.filter(Boolean)
+					.join('\n\n');
+				if (injected) {
+					submittedMessage = `<hook-context>\n${injected}\n</hook-context>\n\n${message}`;
+				}
+			}
+
 			await handleMessageSubmission(
-				message,
+				submittedMessage,
 				{
 					customCommandCache: props.customCommandCache,
 					customCommandLoader: props.customCommandLoader,
@@ -693,7 +728,9 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					lastApiUsage: props.lastApiUsage,
 					apiCallHistory: props.apiCallHistory,
 				},
-				displayValue,
+				// Injected hook context must not reach the transcript — fall back to
+				// the raw message so the user still sees what they typed.
+				displayValue ?? message,
 				images,
 			);
 		},

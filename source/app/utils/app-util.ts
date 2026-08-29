@@ -11,6 +11,7 @@ import BashProgress from '@/components/bash-progress';
 import CommandProgress from '@/components/command-progress';
 import {DELAY_COMMAND_COMPLETE_MS, MAX_SESSION_NAME_LENGTH} from '@/constants';
 import {CheckpointManager} from '@/services/checkpoint-manager';
+import {clearPendingHookContext} from '@/services/lifecycle-hooks';
 import {generateKey} from '@/session/key-generator';
 import {executeBashCommand, formatBashResultForLLM} from '@/tools/execute-bash';
 import {clearAllTasks} from '@/tools/tasks/storage';
@@ -675,6 +676,9 @@ export function createClearMessagesHandler(
 		// Drop read-before-edit history so a stale "seen" from the prior
 		// conversation can't authorize a blind edit/overwrite after /clear.
 		clearReadTracker();
+		// Undelivered session-start hook context belongs to the cleared
+		// conversation — don't graft it onto the next one.
+		clearPendingHookContext();
 		if (client) {
 			await client.clearContext();
 		}
