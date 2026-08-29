@@ -10,6 +10,7 @@ import {
 	setToolRegistryGetter,
 	setToolManagerGetter,
 } from '@/message-handler';
+import {convertToModelMessages} from '@/ai-sdk-client/converters/message-converter';
 import {sessionManager} from '@/session/session-manager';
 
 console.log('\nacp-agent.spec.ts');
@@ -474,6 +475,10 @@ test('AcpAgent.prompt - propagates API errors cleanly', async t => {
 	
 	// Ensure turnActive is reset even on error
 	t.false(session.turnActive);
+
+	const notice = session.messages[session.messages.length - 1];
+	t.is(notice.role, 'assistant');
+	t.true(notice.displayOnly, 'the error notice must never reach the model');
 });
 
 test('AcpAgent.prompt - resolves cleanly on user cancellation instead of throwing', async t => {
@@ -506,6 +511,11 @@ test('AcpAgent.prompt - resolves cleanly on user cancellation instead of throwin
 				u.update?.content?.text?.includes('Cancelled by user'),
 		),
 	);
+
+	const persisted = agent['sessions'].get(session.sessionId)!.messages;
+	const notice = persisted[persisted.length - 1];
+	t.is(notice.role, 'assistant');
+	t.true(notice.displayOnly, 'the cancel notice must never reach the model');
 });
 
 test('AcpAgent.prompt - returns response for valid session', async t => {
@@ -574,6 +584,20 @@ test('AcpAgent.prompt - /copy points at the chat view instead of erroring', asyn
 test('AcpAgent.prompt - /copy code is not treated as unrecognized', async t => {
 	const reply = await promptForBuiltinReply('/copy code');
 	t.false(reply.includes('Unrecognized slash command'));
+});
+
+test('AcpAgent.prompt - a built-in command exchange stays out of model context', async t => {
+	const {agent} = createAgent();
+	const session = await agent.newSession({cwd: '/tmp'});
+	await agent.prompt({
+		sessionId: session.sessionId,
+		prompt: [{type: 'text', text: '/help'}],
+	});
+
+	const messages = agent['sessions'].get(session.sessionId)!.messages;
+	t.is(messages.length, 2);
+	t.true(messages.every(m => m.displayOnly));
+	t.deepEqual(convertToModelMessages(messages), []);
 });
 
 test('AcpAgent.prompt - a genuinely unknown command still reports unrecognized', async t => {

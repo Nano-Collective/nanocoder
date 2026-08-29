@@ -36,6 +36,7 @@ export interface Message {
 	reasoning?: string;
 	structuredContent?: JSONValue;
 	images?: ImageAttachment[];
+	displayOnly?: boolean;
 }
 
 export interface ToolCall {

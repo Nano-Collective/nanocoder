@@ -237,6 +237,30 @@ test.serial('processAssistantResponse - exits in non-interactive mode when appro
 	t.pass('Non-interactive exit requires proper mock setup');
 });
 
+test.serial('processAssistantResponse - marks the non-interactive approval notice display-only', async t => {
+	const captured: Message[][] = [];
+
+	const params = createDefaultParams({
+		client: createMockClient({
+			toolCalls: [{id: 'call_1', function: {name: 'some_tool', arguments: {}}}],
+		}),
+		toolManager: createMockToolManager({
+			tools: ['some_tool'],
+			needsApproval: true,
+		}),
+		nonInteractiveMode: true,
+		setMessages: (msgs: Message[]) => captured.push(msgs),
+	});
+
+	await processAssistantResponse(params);
+
+	const latest = captured[captured.length - 1];
+	const notice = latest[latest.length - 1];
+	t.is(notice.role, 'assistant');
+	t.regex(notice.content, /Tool approval required for: some_tool/);
+	t.true(notice.displayOnly, 'the approval notice must never reach the model');
+});
+
 // ============================================================================
 // Auto-Nudge Tests (lines 469-506)
 // ============================================================================
