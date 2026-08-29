@@ -22,14 +22,21 @@ console.log('\nuseAppState.spec.tsx');
 type AppStateHook = ReturnType<typeof useAppState>;
 
 let captured: AppStateHook | null = null;
+let renderCount = 0;
 
 function Probe({initialMode}: {initialMode?: DevelopmentMode}) {
+	renderCount++;
 	captured = useAppState(initialMode ?? 'normal');
 	return null;
 }
 
+function tokenCacheKey(message: Message, model = '') {
+	return (message.content || '') + message.role + model;
+}
+
 function setup(initialMode: DevelopmentMode = 'normal') {
 	captured = null;
+	renderCount = 0;
 	const instance = render(<Probe initialMode={initialMode} />);
 	if (!captured) throw new Error('useAppState did not initialize');
 	return {hook: captured as AppStateHook, instance};
@@ -252,14 +259,106 @@ test('tokenizer is rebuilt when provider or model changes', t => {
 	t.not(captured!.tokenizer, initial);
 });
 
-test('getMessageTokens returns a number and caches the result', t => {
-	const {hook} = setup();
+test('getMessageTokens returns a number and caches it in place', t => {
+	const {hook, instance} = setup();
+	const cache = hook.messageTokenCache;
 
 	const msg: Message = {role: 'user', content: 'hello world'} as Message;
 	const tokens = hook.getMessageTokens(msg);
 
 	t.is(typeof tokens, 'number');
 	t.true(tokens >= 0);
+	t.is(cache.size, 1);
+	t.is(cache.get(tokenCacheKey(msg)), tokens);
+
+	t.is(hook.getMessageTokens(msg), tokens);
+	t.is(cache.size, 1);
+
+	instance.rerender(<Probe />);
+
+	t.is(captured!.messageTokenCache, cache);
+	t.is(captured!.messageTokenCache.get(tokenCacheKey(msg)), tokens);
+});
+
+test('getMessageTokens returns a cached entry instead of recomputing', t => {
+	const {hook} = setup();
+
+	const msg: Message = {role: 'user', content: 'seeded'} as Message;
+	t.true(hook.getMessageTokens(msg) > 0);
+
+	hook.messageTokenCache.set(tokenCacheKey(msg), 0);
+
+	t.is(hook.getMessageTokens(msg), 0);
+	t.is(hook.messageTokenCache.size, 1);
+});
+
+test('a cache miss neither re-renders nor invalidates getMessageTokens', async t => {
+	const {hook, instance} = setup();
+	const rendersAfterMount = renderCount;
+	const {getMessageTokens} = hook;
+
+	getMessageTokens({role: 'user', content: 'uncached'} as Message);
+	await new Promise(resolve => setTimeout(resolve, 20));
+
+	t.is(renderCount, rendersAfterMount);
+
+	instance.rerender(<Probe />);
+
+	t.is(captured!.getMessageTokens, getMessageTokens);
+	t.is(captured!.messageTokenCache.size, 1);
+});
+
+test('token cache keys separate content, role and model', t => {
+	const {hook, instance} = setup();
+	const cache = hook.messageTokenCache;
+	const user: Message = {role: 'user', content: 'same text'} as Message;
+
+	const userTokens = hook.getMessageTokens(user);
+	hook.getMessageTokens({role: 'assistant', content: 'same text'} as Message);
+	hook.getMessageTokens({role: 'user', content: 'other text'} as Message);
+
+	t.is(cache.size, 3);
+
+	hook.setCurrentModel('gpt-4o');
+	instance.rerender(<Probe />);
+	const switchedTokens = captured!.getMessageTokens(user);
+
+	t.is(captured!.messageTokenCache, cache);
+	t.is(cache.size, 4);
+	t.is(cache.get(tokenCacheKey(user)), userTokens);
+	t.is(cache.get(tokenCacheKey(user, 'gpt-4o')), switchedTokens);
+});
+
+test('token cache stays bounded and evicts the oldest entry', t => {
+	const {hook} = setup();
+	const cache = hook.messageTokenCache;
+	const oldest: Message = {role: 'user', content: 'message 0'} as Message;
+	const newest: Message = {role: 'user', content: 'message 1000'} as Message;
+
+	for (let i = 0; i <= 1000; i++) {
+		hook.getMessageTokens({role: 'user', content: `message ${i}`} as Message);
+	}
+
+	t.is(cache.size, 1000);
+	t.is(cache.get(tokenCacheKey(oldest)), undefined);
+	t.true(cache.get(tokenCacheKey(newest))! > 0);
+
+	const recomputed = hook.getMessageTokens(oldest);
+
+	t.is(cache.size, 1000);
+	t.is(cache.get(tokenCacheKey(oldest)), recomputed);
+});
+
+test('getMessageTokens handles messages without content', t => {
+	const {hook} = setup();
+	const empty: Message = {role: 'user', content: ''} as Message;
+	const missing = {role: 'user'} as unknown as Message;
+
+	const emptyTokens = hook.getMessageTokens(empty);
+
+	t.is(typeof emptyTokens, 'number');
+	t.is(hook.getMessageTokens(missing), emptyTokens);
+	t.is(hook.messageTokenCache.size, 1);
 });
 
 test('exposes setters for every state slice', t => {

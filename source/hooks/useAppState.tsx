@@ -54,14 +54,14 @@ export function useAppState(
 
 	const [client, setClient] = useState<LLMClient | null>(null);
 	const [messages, setMessages] = useState<Message[]>([]);
-	const [messageTokenCache, setMessageTokenCache] = useState<
-		BoundedMap<string, number>
-	>(
-		new BoundedMap({
+	const messageTokenCacheRef = useRef<BoundedMap<string, number> | null>(null);
+	if (!messageTokenCacheRef.current) {
+		messageTokenCacheRef.current = new BoundedMap({
 			maxSize: 1000,
 			// No TTL - cache is session-based and cleared on app restart
-		}),
-	);
+		});
+	}
+	const messageTokenCache = messageTokenCacheRef.current;
 	const [currentModel, setCurrentModel] = useState<string>('');
 	const [currentProvider, setCurrentProvider] =
 		useState<string>('openai-compatible');
@@ -281,22 +281,7 @@ export function useAppState(
 			}
 
 			const tokens = tokenizer.countTokens(message);
-			// Defer cache update to avoid "Cannot update a component while rendering" error
-			// This can happen when components call getMessageTokens during their render
-			queueMicrotask(() => {
-				setMessageTokenCache(prev => {
-					const newCache = new BoundedMap<string, number>({
-						maxSize: 1000,
-					});
-					// Copy existing entries
-					for (const [k, v] of prev.entries()) {
-						newCache.set(k, v);
-					}
-					// Add new entry
-					newCache.set(cacheKey, tokens);
-					return newCache;
-				});
-			});
+			messageTokenCache.set(cacheKey, tokens);
 			return tokens;
 		},
 		[messageTokenCache, tokenizer, currentModel],
@@ -411,7 +396,6 @@ export function useAppState(
 		// Setters
 		setClient,
 		setMessages,
-		setMessageTokenCache,
 		setCurrentModel,
 		setCurrentProvider,
 		setCurrentProviderConfig,
