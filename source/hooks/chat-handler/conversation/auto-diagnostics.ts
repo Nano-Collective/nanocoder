@@ -124,6 +124,23 @@ function formatDiagnosticFinding({
 	return `${header}\n${result.content}`;
 }
 
+/**
+ * Opening text of the synthetic message the loop injects after edits. It is
+ * sent with `role: 'user'` so the model treats it as an instruction, which
+ * means anything scanning history for "what the user last asked" has to be
+ * able to recognise and skip it.
+ */
+export const AUTO_DIAGNOSTICS_PREFIX =
+	'Automatic diagnostics after the recent edits found issues.';
+
+/** True for the synthetic post-edit diagnostics message. */
+export function isAutoDiagnosticsMessage(message: Message): boolean {
+	return (
+		message.role === 'user' &&
+		message.content.startsWith(AUTO_DIAGNOSTICS_PREFIX)
+	);
+}
+
 export async function buildAutoDiagnosticsMessage(
 	toolCalls: ToolCall[],
 	results: ToolResult[],
@@ -169,7 +186,7 @@ export async function buildAutoDiagnosticsMessage(
 	return {
 		role: 'user',
 		content:
-			'Automatic diagnostics after the recent edits found issues. Please fix the diagnostics you introduced before finishing.\n\n' +
+			`${AUTO_DIAGNOSTICS_PREFIX} Please fix the diagnostics you introduced before finishing.\n\n` +
 			`Paths needing attention:\n${pathsNeedingAttentionText}\n\n` +
 			diagnosticsText,
 	};

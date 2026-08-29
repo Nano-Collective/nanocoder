@@ -86,6 +86,13 @@ export const MIN_PATH_BUDGET_CHARS = 10;
 export const TOKEN_THRESHOLD_WARNING_PERCENT = 80;
 export const TOKEN_THRESHOLD_CRITICAL_PERCENT = 95;
 
+// === NON-INTERACTIVE NOTICES ===
+// Non-interactive runs can't prompt, so a tool needing approval ends the run.
+// The notice is display-only chrome, but `isNonInteractiveModeComplete` detects
+// it by content to pick exit reason "tool-approval" — share the prefix so a
+// reword can't silently break that exit path.
+export const TOOL_APPROVAL_REQUIRED_PREFIX = 'Tool approval required for: ';
+
 // === OUTPUT TRUNCATION ===
 export const TRUNCATION_OUTPUT_LIMIT = 2000;
 // Keep one unusually large tool response from dominating the model context.

@@ -7,6 +7,8 @@ import type {
 	UserContent,
 } from 'ai';
 import type {Message} from '@/types/index';
+import {getLogger} from '@/utils/logging';
+import {filterModelFacing} from '@/utils/message-visibility';
 import {truncateToolResult} from '@/utils/truncate-tool-result';
 import type {TestableMessage} from '../types.js';
 
@@ -114,10 +116,31 @@ export function withCacheBreakpoints(
  * Convert our Message format to AI SDK v6 ModelMessage format
  *
  * Tool messages: Converted to AI SDK tool-result format with proper structure.
- * Orphaned tool results are dropped first (see dropOrphanedToolResults).
+ * Display-only messages are filtered first (harness chrome the model must not
+ * see as its own output), then orphaned tool results are dropped (see
+ * dropOrphanedToolResults).
+ *
+ * Order matters: filtering first means pairing is computed over exactly the
+ * set the provider receives. The corollary is that a display-only message
+ * carrying tool_calls would take its answering tool results down with it —
+ * that combination is a bug, so warn loudly rather than fail silently.
  */
 export function convertToModelMessages(messages: Message[]): ModelMessage[] {
-	return dropOrphanedToolResults(messages).map((msg): ModelMessage => {
+	const modelFacing = filterModelFacing(messages);
+	if (modelFacing.length !== messages.length) {
+		for (const msg of messages) {
+			if (msg.displayOnly && msg.tool_calls && msg.tool_calls.length > 0) {
+				getLogger().warn(
+					'Display-only message carries tool_calls; its tool results will be dropped from the payload',
+					{
+						role: msg.role,
+						toolCallIds: msg.tool_calls.map(tc => tc.id),
+					},
+				);
+			}
+		}
+	}
+	return dropOrphanedToolResults(modelFacing).map((msg): ModelMessage => {
 		if (msg.role === 'tool') {
 			// Convert to AI SDK tool-result format
 			// AI SDK expects: { role: 'tool', content: [{ type: 'tool-result', toolCallId, toolName, output }] }

@@ -1,4 +1,6 @@
 import {useCallback, useEffect, useRef} from 'react';
+import {isApprovedPlanMessage} from '@/artifacts/approved-plan';
+import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {getAppConfig} from '@/config/index';
 import {sessionManager} from '@/session/session-manager';
 import type {Message} from '@/types/core';
@@ -16,10 +18,35 @@ interface UseSessionAutosaveProps {
 
 const SHUTDOWN_HANDLER_NAME = 'session-autosave-flush';
 
+export function shouldResetSessionId(
+	previousMessageCount: number,
+	currentMessageCount: number,
+): boolean {
+	return previousMessageCount > 0 && currentMessageCount === 0;
+}
+
+export function deriveSessionTitle(messages: Message[]): string {
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const message = messages[index];
+		if (
+			message?.role === 'user' &&
+			!isApprovedPlanMessage(message) &&
+			!isInternalWalkthroughMessage(message)
+		) {
+			return (
+				message.content.substring(0, 50) +
+				(message.content.length > 50 ? '...' : '')
+			);
+		}
+	}
+
+	return `Session ${new Date().toLocaleDateString()}`;
+}
+
 /**
  * Hook to handle automatic session saving.
  * Updates the current session when currentSessionId is set; otherwise creates a new session.
- * Clears currentSessionId when messages are cleared.
+ * Clears currentSessionId when a non-empty conversation is cleared.
  *
  * Race safety: saves are serialised through a single chained promise stored in
  * saveChainRef. A new save does not start until the previous one resolves.
@@ -78,9 +105,17 @@ export function useSessionAutosave({
 		modelRef.current = currentModel;
 	}, [currentModel]);
 
-	// Clear current session when conversation is cleared
+	// Clear the current session only on a non-empty -> empty transition. A
+	// slash-only session can have artifacts before it has chat messages, and its
+	// preallocated ID must survive subsequent slash commands.
+	const previousMessageCountRef = useRef(messages.length);
 	useEffect(() => {
-		if (messages.length === 0 && currentSessionId !== null) {
+		const previousMessageCount = previousMessageCountRef.current;
+		previousMessageCountRef.current = messages.length;
+		if (
+			shouldResetSessionId(previousMessageCount, messages.length) &&
+			currentSessionId !== null
+		) {
 			setCurrentSessionId(null);
 		}
 	}, [messages.length, currentSessionId, setCurrentSessionId]);
@@ -126,6 +161,15 @@ export function useSessionAutosave({
 				const initialized = await initPromiseRef.current;
 				if (!initialized || capturedMessages.length === 0) return;
 
+				// The walkthrough nudge is a transient in-loop protocol message. It
+				// has already done its job by the time we persist, so keep it out of
+				// the session file: a resumed session must not replay it to the user
+				// or re-send it to the model.
+				const persistedMessages = capturedMessages.filter(
+					message => !isInternalWalkthroughMessage(message),
+				);
+				if (persistedMessages.length === 0) return;
+
 				// Read the live session ID AFTER the await above. Any prior save
 				// in this chain has already called setCurrentSessionId (and updated
 				// currentSessionIdRef.current) by this point, so we correctly take
@@ -135,21 +179,14 @@ export function useSessionAutosave({
 				// Derive a human-readable title from the most recent user message.
 				// The full message array is always written - maxMessages bounds only
 				// what is sent to the model (sliced in the conversation loop).
-				const userMessages = capturedMessages.filter(
-					msg => msg.role === 'user',
-				);
-				const lastUserMessage = userMessages[userMessages.length - 1];
-				const title = lastUserMessage
-					? lastUserMessage.content.substring(0, 50) +
-						(lastUserMessage.content.length > 50 ? '...' : '')
-					: `Session ${new Date().toLocaleDateString()}`;
+				const title = deriveSessionTitle(persistedMessages);
 
 				if (liveSessionId) {
 					const session = await sessionManager.readSession(liveSessionId);
 					if (session) {
 						// Write the full history — no truncation.
-						session.messages = capturedMessages;
-						session.messageCount = capturedMessages.length;
+						session.messages = persistedMessages;
+						session.messageCount = persistedMessages.length;
 						// A manually-renamed title sticks — don't let the auto-derived
 						// title clobber it. Currently only the VS Code extension's
 						// rename sets this flag; the CLI's /rename command only
@@ -166,12 +203,13 @@ export function useSessionAutosave({
 					} else {
 						// The stored session was deleted externally; create a fresh one.
 						const newSession = await sessionManager.createSession({
+							id: liveSessionId,
 							title,
-							messageCount: capturedMessages.length,
+							messageCount: persistedMessages.length,
 							provider: capturedProvider,
 							model: capturedModel,
 							workingDirectory: process.cwd(),
-							messages: capturedMessages,
+							messages: persistedMessages,
 						});
 						// Update the ref immediately so any subsequent save in this
 						// chain takes the update path, not another createSession().
@@ -185,11 +223,11 @@ export function useSessionAutosave({
 					// conversation even if it's invoked several times in a row.
 					const newSession = await sessionManager.createSession({
 						title,
-						messageCount: capturedMessages.length,
+						messageCount: persistedMessages.length,
 						provider: capturedProvider,
 						model: capturedModel,
 						workingDirectory: process.cwd(),
-						messages: capturedMessages,
+						messages: persistedMessages,
 					});
 					// Update the ref immediately so any subsequent save in this
 					// chain takes the update path, not another createSession().
