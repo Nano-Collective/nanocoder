@@ -120,8 +120,10 @@ export const ChatHistory = React.memo(function ChatHistory({
 		};
 	}, [fullscreen, scrollActive, scrollBy]);
 
-	// Fresh welcome should be live-responsive (Image4 break) — Static is frozen.
-	// When no messages yet, render welcome outside Static so resize re-centers.
+	// The welcome banner must react to terminal resizes (recentering on every
+	// row), but <Static> content is frozen after first paint. Until the first
+	// message arrives, render the welcome in the live region instead so it
+	// stays responsive; once history exists, it goes through Static as usual.
 	// Only for the real welcome banner (key="welcome") — keep test fixtures
 	// like static-marker inside Static so existing tests stay stable.
 	const hasWelcome = staticComponents.some(
